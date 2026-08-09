@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#FAF9F5">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+<div class="wrap">
+<header class="top">
+<h1>Dashboard</h1>
+<div class="date" id="today-date"></div>
+</header>
+
+<div class="tab-bar" id="tab-bar">
+<button class="tab-btn active" type="button" data-tab-btn="overview">Overview</button>
+<button class="tab-btn" type="button" data-tab-btn="jobhunt">Job Hunt</button>
+<button class="tab-btn" type="button" data-tab-btn="dating">Dating</button>
+<button class="tab-btn" type="button" data-tab-btn="finances">Finances</button>
+<button class="tab-btn" type="button" data-tab-btn="business">Business</button>
+<button class="tab-btn" type="button" data-tab-btn="settings">Settings</button>
+</div>
+
+<div class="board">
+<section class="panel wide" id="nudges-panel" data-tab="overview">
+<div class="panel-head">
+<h2><span class="dot rose"></span>Nudges</h2>
+<button class="log-btn" id="shuffle-nudge-btn" type="button">Shuffle</button>
+</div>
+<div id="nudges-list"></div>
+</section>
+
+<section class="panel" id="habits-panel" data-tab="overview">
+<div class="panel-head">
+<h2><span class="dot sage"></span>Habits</h2>
+<span class="count-badge" id="habits-count"></span>
+</div>
+<div id="habits-list"></div>
+</section>
+
+<section class="panel" id="goals-panel" data-tab="overview">
+<div class="panel-head">
+<h2><span class="dot slate"></span>Goals</h2>
+<span class="count-badge" id="goals-count"></span>
+</div>
+<div id="goals-list"></div>
+</section>
+
+<section class="panel" id="jobs-panel" data-tab="jobhunt">
+<div class="panel-head">
+<h2><span class="dot amber"></span>Job hunt</h2>
+<span class="count-badge" id="jobs-count"></span>
+</div>
+<div id="jobs-list"></div>
+<div class="add-form" id="job-form">
+<input type="text" id="job-co-input" placeholder="Company">
+<input type="text" id="job-role-input" placeholder="Role">
+<button class="add-btn" type="button">Add</button>
+</div>
+</section>
+
+<section class="panel wide" id="calendars-panel" data-tab="overview">
+<div class="panel-head">
+<h2><span class="dot teal"></span>Next Up</h2>
+<span class="count-badge" id="calendars-count"></span>
+</div>
+<div class="sync-row">
+<button class="sync-btn" id="sync-cal-btn" type="button">Sync calendars</button>
+<span class="sync-status" id="cal-sync-status"></span>
+</div>
+<div id="calendars-list"></div>
+</section>
+
+<section class="panel wide" id="vouchers-panel" data-tab="finances">
+<div class="panel-head">
+<h2><span class="dot plum"></span>Vouchers &amp; Credits</h2>
+<span class="count-badge" id="vouchers-count"></span>
+</div>
+<div id="vouchers-list"></div>
+<div class="add-form" id="voucher-form">
+<input type="text" id="voucher-name-input" placeholder="e.g. BA Companion Voucher">
+<select id="voucher-type-input">
+<option>Voucher</option>
+<option>Credit</option>
+<option>Cheque</option>
+<option>Refund</option>
+<option>Other</option>
+</select>
+<input type="text" id="voucher-value-input" placeholder="Value (optional)">
+<input type="date" id="voucher-expiry-input">
+<input type="text" id="voucher-notes-input" placeholder="Notes (optional)">
+<button class="add-btn" type="button">Add</button>
+</div>
+</section>
+
+<section class="panel wide" id="overview-panel" data-tab="dating">
+<div class="panel-head">
+<h2><span class="dot rose"></span>Connections Overview</h2>
+</div>
+<div id="overview-content"></div>
+</section>
+
+<section class="panel wide" id="connections-panel" data-tab="dating">
+<div class="panel-head">
+<h2><span class="dot rose"></span>Connections</h2>
+<span class="count-badge" id="connections-count"></span>
+</div>
+<div class="sort-row">
+<select id="conn-sort-primary" class="mini">
+<option value="default">Sort: Reach-out priority</option>
+<option value="priority">Sort: Overall rating</option>
+<option value="looks">Sort: Looks</option>
+<option value="intelligence">Sort: Intelligence</option>
+<option value="figure">Sort: Figure</option>
+<option value="humour">Sort: Humour</option>
+<option value="sex">Sort: Sex</option>
+<option value="practicality">Sort: Practicality</option>
+<option value="contact">Sort: Time since contact</option>
+<option value="stage">Sort: Stage (Met in person &rarr; Matched)</option>
+</select>
+<select id="conn-sort-secondary" class="mini">
+<option value="none">Then by: &mdash;</option>
+<option value="priority">Then by: Overall rating</option>
+<option value="looks">Then by: Looks</option>
+<option value="intelligence">Then by: Intelligence</option>
+<option value="figure">Then by: Figure</option>
+<option value="humour">Then by: Humour</option>
+<option value="sex">Then by: Sex</option>
+<option value="practicality">Then by: Practicality</option>
+<option value="contact">Then by: Time since contact</option>
+<option value="stage">Then by: Stage</option>
+</select>
+</div>
+<input type="text" class="conn-search" id="conn-search" placeholder="Search by name or tag (e.g. sporty, sober)...">
+<div id="connections-list"></div>
+<div class="import-box">
+<div class="import-row">
+<select id="import-app-input">
+<option>Bumble</option>
+<option>Tinder</option>
+<option>Hinge</option>
+<option>Other</option>
+</select>
+<label class="file-btn" for="import-file-input" id="import-file-label">Import matches list</label>
+<input type="file" id="import-file-input" accept="image/*" style="display:none;">
+<label class="file-btn" for="import-profile-input" id="import-profile-label">Import profile screenshot(s)</label>
+<input type="file" id="import-profile-input" accept="image/*" multiple style="display:none;">
+</div>
+<div class="import-status" id="import-status"></div>
+<div class="candidate-list" id="candidate-list"></div>
+</div>
+<div class="add-form" id="connection-form">
+<input type="text" id="conn-name-input" placeholder="Name or nickname">
+<select id="conn-app-input">
+<option>Bumble</option>
+<option>Tinder</option>
+<option>Hinge</option>
+<option>Other</option>
+</select>
+<button class="add-btn" type="button">Add match</button>
+</div>
+</section>
+
+<section class="panel wide" id="business-panel" data-tab="business">
+<div class="panel-head">
+<h2><span class="dot plum"></span>Business Ideas</h2>
+<span class="count-badge" id="ideas-count"></span>
+</div>
+<div id="ideas-list"></div>
+<div class="add-form" id="idea-form" style="flex-direction:column;align-items:stretch;">
+<input type="text" id="idea-title-input" placeholder="Idea title">
+<textarea id="idea-notes-input" placeholder="What's the idea?" rows="3" style="font-family:'Inter',sans-serif;font-size:13px;border:1px solid var(--line);border-radius:7px;padding:7px 9px;background:var(--paper);color:var(--ink);resize:vertical;"></textarea>
+<button class="add-btn" type="button" style="align-self:flex-start;">Add idea</button>
+</div>
+</section>
+
+<section class="panel wide" id="settings-panel" data-tab="settings">
+<div class="panel-head">
+<h2><span class="dot plum"></span>Settings</h2>
+</div>
+
+<div class="settings-block">
+<h3>AI features</h3>
+<label for="anthropic-key-input" style="font-size:13px;font-weight:500;display:block;margin-bottom:6px;">Anthropic API key (for photo/screenshot import)</label>
+<input type="password" id="anthropic-key-input" class="settings-input" placeholder="sk-ant-...">
+<div class="settings-note">
+Stored only in this browser's local storage on this device — never synced, never sent anywhere except directly to api.anthropic.com. You'll need to enter it again on each device. Calls are billed to your own account (typically a fraction of a cent per screenshot).
+<a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">Get a key &rarr;</a>
+</div>
+</div>
+
+<div class="settings-block">
+<h3>Google account (Drive sync + Calendar)</h3>
+<div id="sync-signed-out">
+<button class="log-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
+</div>
+<div id="sync-signed-in" style="display:none;">
+<div class="settings-note" id="sync-account" style="margin:0 0 8px;"></div>
+<div class="backup-row">
+<button class="log-btn" id="sync-push-btn" type="button">Push to Google Drive</button>
+<button class="log-btn" id="sync-pull-btn" type="button">Pull from Google Drive</button>
+<button class="file-btn" id="sync-signout-btn" type="button">Sign out</button>
+</div>
+</div>
+<div class="settings-note" id="sync-status"></div>
+</div>
+
+<div class="settings-block">
+<h3>Backup</h3>
+<div class="backup-row">
+<button class="log-btn" id="export-btn" type="button">Export backup</button>
+<label class="file-btn" for="import-backup-input">Import backup</label>
+<input type="file" id="import-backup-input" accept="application/json" style="display:none;">
+<span class="settings-note" id="backup-status" style="margin:0;"></span>
+</div>
+</div>
+
+<div class="settings-block">
+<h3>Track a new habit</h3>
+<div class="add-form" id="habit-form" style="margin-top:0;padding-top:0;border-top:none;">
+<input type="text" id="habit-input" placeholder="New habit, e.g. Stretch">
+<button class="add-btn" type="button">Add</button>
+</div>
+</div>
+
+<div class="settings-block">
+<h3>Track a new goal</h3>
+<div class="add-form" id="goal-form" style="margin-top:0;padding-top:0;border-top:none;">
+<input type="text" id="goal-input" placeholder="New goal">
+<button class="add-btn" type="button">Add</button>
+</div>
+</div>
+
+<div class="settings-block">
+<h3>Track a new calendar</h3>
+<div class="add-form" id="calendar-form" style="margin-top:0;padding-top:0;border-top:none;">
+<input type="text" id="cal-name-input" placeholder="Calendar name, as it appears in Google Calendar">
+<button class="add-btn" type="button">Track</button>
+</div>
+<div class="settings-note">Sign in to Google above, then use "Sync calendars" on the Overview tab to pull in each one's next upcoming event.</div>
+</div>
+</section>
+</div>
+
+<div class="save-note" id="save-note">Changes save automatically on this device</div>
+</div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
