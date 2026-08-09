@@ -4,7 +4,7 @@
 // track in Settings; this panel only shows what Sync last found.
 import { data, queueSave } from '../state.js';
 import { escapeHtml, bindForm, scrollAndFlash, daysUntil } from '../utils.js';
-import { isSignedIn } from '../sync/googleauth.js';
+import { canAttemptGoogleAction } from '../sync/googleauth.js';
 import { syncCalendars, listCalendars } from '../googlecalendar.js';
 
 function renderCalendars() {
@@ -77,7 +77,7 @@ setTimeout(() => scrollAndFlash(`[data-cal-row="${CSS.escape(name)}"]`), 50);
 async function loadCalendarOptions() {
 const select = document.getElementById('cal-name-input');
 const status = document.getElementById('cal-list-status');
-if (!isSignedIn()) {
+if (!(await canAttemptGoogleAction())) {
 status.textContent = 'Sign in to Google at the top of the page first.';
 return;
 }
@@ -109,7 +109,7 @@ if (data.calendars.length === 0) {
 status.textContent = 'Add a calendar to track in Settings first.';
 return;
 }
-if (!isSignedIn()) {
+if (!(await canAttemptGoogleAction())) {
 status.textContent = 'Sign in to Google in Settings first.';
 return;
 }

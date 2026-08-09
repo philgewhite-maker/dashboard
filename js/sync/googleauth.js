@@ -72,6 +72,19 @@ const settings = await getLocalSettings();
 return !!settings.googleConnected;
 }
 
+// isSignedIn() alone is too strict a gate for an action button: the ~hour-
+// long token can quietly expire between page load and a much later click,
+// without the header re-rendering to reflect that — so isSignedIn() can say
+// "no" while the rest of the page still visually shows "connected." But
+// that click is a trusted user gesture, the same kind a fresh sign-in
+// needs, so the actual API call below (via googleFetch → getAccessToken)
+// can often refresh the token silently right then. Gating on this instead
+// of isSignedIn() means: only show "sign in first" when there's truly
+// nothing to attempt a silent refresh from.
+async function canAttemptGoogleAction() {
+return isSignedIn() || (await wasConnectedBefore());
+}
+
 // Best-effort silent reconnect, meant to be called on page load. Must
 // NEVER surface an error or block the UI on failure — Google's "silent"
 // token renewal still opens (and usually auto-closes) a real popup window,
@@ -112,6 +125,6 @@ return fetch(url, { ...options, headers: { ...(options.headers || {}), Authoriza
 
 export {
 NotConfiguredError,
-isSignedIn, wasConnectedBefore, tryReconnectSilently, signIn, signOut,
+isSignedIn, wasConnectedBefore, canAttemptGoogleAction, tryReconnectSilently, signIn, signOut,
 googleFetch,
 };

@@ -1,6 +1,6 @@
 import { data, getLocalSettings, setLocalSetting, exportBackup, importBackup } from '../state.js';
 import { renderAll } from '../render-all.js';
-import { isSignedIn } from '../sync/googleauth.js';
+import { canAttemptGoogleAction } from '../sync/googleauth.js';
 import { getRemoteInfo, getRemoteCounts, countsOf, pushToGoogleDrive, pullFromGoogleDrive } from '../sync/googledrive.js';
 
 async function initSettings() {
@@ -53,16 +53,17 @@ return `${d.connections.length} connection${d.connections.length === 1 ? '' : 's
 }
 
 // Sign in/out lives in features/googleaccount.js (top of Overview) — this
-// just does the Drive-specific data actions, and checks isSignedIn() itself
-// so clicking Push/Pull while signed out fails with a clear message instead
-// of silently attempting (and likely failing) a background token request.
+// just does the Drive-specific data actions, checking canAttemptGoogleAction()
+// itself so clicking Push/Pull with no prior connection at all fails with a
+// clear message, while a merely-expired token still gets a real attempt
+// (see that function's comment for why).
 function initDriveBackup() {
 const statusEl = document.getElementById('drive-sync-status');
 const pushBtn = document.getElementById('sync-push-btn');
 const pullBtn = document.getElementById('sync-pull-btn');
 
 pushBtn.addEventListener('click', async () => {
-if (!isSignedIn()) { statusEl.textContent = 'Sign in to Google at the top of Overview first.'; return; }
+if (!(await canAttemptGoogleAction())) { statusEl.textContent = 'Sign in to Google at the top of Overview first.'; return; }
 statusEl.textContent = 'Checking what\'s already in Google Drive…';
 let remoteCounts;
 try {
@@ -97,7 +98,7 @@ pushBtn.disabled = false;
 });
 
 pullBtn.addEventListener('click', async () => {
-if (!isSignedIn()) { statusEl.textContent = 'Sign in to Google at the top of Overview first.'; return; }
+if (!(await canAttemptGoogleAction())) { statusEl.textContent = 'Sign in to Google at the top of Overview first.'; return; }
 statusEl.textContent = 'Checking what\'s in Google Drive…';
 let info;
 try {

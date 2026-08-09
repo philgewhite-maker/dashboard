@@ -1,5 +1,5 @@
 import { escapeHtml } from '../utils.js';
-import { isSignedIn } from '../sync/googleauth.js';
+import { canAttemptGoogleAction } from '../sync/googleauth.js';
 import { fetchMailSummary } from '../googlemail.js';
 
 // "Tamara White" <tamara.anna.white@gmail.com> -> "Tamara White"; falls
@@ -42,7 +42,7 @@ function initMail() {
 const btn = document.getElementById('sync-mail-btn');
 const status = document.getElementById('mail-sync-status');
 btn.addEventListener('click', async () => {
-if (!isSignedIn()) {
+if (!(await canAttemptGoogleAction())) {
 status.textContent = 'Sign in to Google at the top of Overview first.';
 return;
 }
