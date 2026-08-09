@@ -1,10 +1,17 @@
-import { data, reachOutThreshold, isDormantStage } from '../state.js';
+import { data, reachOutThreshold, isDormantStage, getLocalSettings, setLocalSetting } from '../state.js';
 import { escapeHtml, scrollAndFlash, daysSince, daysUntil } from '../utils.js';
 import { switchTab } from '../tabs.js';
+import { callTextJson, MissingKeyError } from '../ai.js';
 
 const TARGET_TABS = { connection: 'dating', search: 'dating', habit: 'overview', goal: 'overview', job: 'jobhunt', voucher: 'finances', calendar: 'overview', business: 'business' };
+const TOP_N = 4;
+// Cheap, fast model for a ranking task — no need for the vision model the
+// user may have set for screenshot import.
+const RANK_MODEL = 'claude-haiku-4-5-20251001';
 let currentPool = [];
-let currentShuffled = [];
+let currentShown = [];
+let renderGen = 0; // guards a slow AI response from clobbering a newer render
+let aiCache = { signature: '', order: null };
 
 function groupByLocation() {
 const groups = {};
@@ -23,14 +30,26 @@ data.connections.forEach((c) => {
 const since = daysSince(c.lastContact);
 const overdue = !isDormantStage(c.stage) && since >= reachOutThreshold(c.priority);
 if (overdue) {
-pool.push({ text: `Reach out to ${c.name} — it's been ${since} days since you last spoke.`, target: { type: 'connection', id: c.id } });
+pool.push({
+text: `Reach out to ${c.name} — it's been ${since} days since you last spoke.`,
+target: { type: 'connection', id: c.id },
+signals: { kind: 'overdue-contact', daysSince: since, priority: c.priority || 0 },
+});
 }
 (c.todos || []).filter((t) => !t.done).forEach((t) => {
-pool.push({ text: `What about that "${t.text}" with ${c.name}?`, target: { type: 'connection', id: c.id } });
+pool.push({
+text: `What about that "${t.text}" with ${c.name}?`,
+target: { type: 'connection', id: c.id },
+signals: { kind: 'todo', priority: c.priority || 0 },
+});
 });
 });
 Object.keys(groupByLocation()).forEach((loc) => {
-pool.push({ text: `What about visiting your connections in ${loc}?`, target: { type: 'search', term: loc } });
+pool.push({
+text: `What about visiting your connections in ${loc}?`,
+target: { type: 'search', term: loc },
+signals: { kind: 'suggestion' },
+});
 });
 
 data.habits.forEach((h) => {
@@ -39,22 +58,47 @@ for (let i = 0; i < 60; i++) {
 const d = new Date(); d.setDate(d.getDate() - i);
 if (h.completions[d.toISOString().slice(0, 10)]) streak++; else break;
 }
-if (streak === 0) pool.push({ text: `Keep your streak going — log "${h.name}" today.`, target: { type: 'habit', id: h.id } });
+if (streak === 0) {
+// How long the streak was before it broke — a lapsed 30-day streak is a
+// bigger deal than a habit that was never really going.
+let priorStreak = 0;
+for (let i = 1; i < 90; i++) {
+const d = new Date(); d.setDate(d.getDate() - i);
+if (h.completions[d.toISOString().slice(0, 10)]) priorStreak++; else break;
+}
+pool.push({
+text: `Keep your streak going — log "${h.name}" today.`,
+target: { type: 'habit', id: h.id },
+signals: { kind: 'habit-streak-broken', priorStreak },
+});
+}
 });
 
 data.goals.filter((g) => g.progress < 50).forEach((g) => {
-pool.push({ text: `Your goal "${g.title}" is at ${g.progress}% — worth a push?`, target: { type: 'goal', id: g.id } });
+pool.push({
+text: `Your goal "${g.title}" is at ${g.progress}% — worth a push?`,
+target: { type: 'goal', id: g.id },
+signals: { kind: 'goal', progress: g.progress },
+});
 });
 
 data.jobs.filter((j) => j.stage === 'Applied' || j.stage === 'Interview').forEach((j) => {
-pool.push({ text: `Follow up on your ${j.stage.toLowerCase()} application to ${j.company}?`, target: { type: 'job', id: j.id } });
+pool.push({
+text: `Follow up on your ${j.stage.toLowerCase()} application to ${j.company}?`,
+target: { type: 'job', id: j.id },
+signals: { kind: 'job-followup', stage: j.stage },
+});
 });
 
 data.vouchers.forEach((v) => {
 if (!v.expiry) return;
 const dn = daysUntil(v.expiry);
 if (dn >= 0 && dn <= 30) {
-pool.push({ text: `${v.name} expires in ${dn} day${dn === 1 ? '' : 's'} — use it soon.`, target: { type: 'voucher', id: v.id } });
+pool.push({
+text: `${v.name} expires in ${dn} day${dn === 1 ? '' : 's'} — use it soon.`,
+target: { type: 'voucher', id: v.id },
+signals: { kind: 'voucher-expiring', daysUntil: dn },
+});
 }
 });
 
@@ -63,14 +107,22 @@ const status = data.calendarStatus[name];
 if (!status || !status.found || !status.date) return;
 const dn = daysUntil(status.date);
 if (dn >= 0 && dn <= 7) {
-pool.push({ text: `${name}: "${status.title}" is in ${dn === 0 ? 'today' : dn + ' day' + (dn === 1 ? '' : 's')}.`, target: { type: 'calendar', name } });
+pool.push({
+text: `${name}: "${status.title}" is in ${dn === 0 ? 'today' : dn + ' day' + (dn === 1 ? '' : 's')}.`,
+target: { type: 'calendar', name },
+signals: { kind: 'upcoming-event', daysUntil: dn },
+});
 }
 });
 
 data.businessIdeas.filter((i) => i.status !== 'Shelved').forEach((idea) => {
 const days = daysSince(idea.date);
 if (days >= 1) {
-pool.push({ text: `Still thinking about "${idea.title}"? Logged ${days} days ago.`, target: { type: 'business', id: idea.id } });
+pool.push({
+text: `Still thinking about "${idea.title}"? Logged ${days} days ago.`,
+target: { type: 'business', id: idea.id },
+signals: { kind: 'stale-idea', daysSince: days },
+});
 }
 });
 
@@ -108,24 +160,115 @@ setTimeout(() => scrollAndFlash(`[data-idea-row="${target.id}"]`), 50);
 }
 }
 
-function renderNudges() {
+function itemKey(n) {
+return `${n.target.type}:${n.target.id || n.target.term || n.target.name}:${n.text}`;
+}
+
+// A stable fingerprint of the current pool. Changes whenever an item is
+// added/removed, or when any signal in its text changes (e.g. "3 days"
+// becomes "4 days" tomorrow) — so a stale AI ranking never gets reused past
+// the day it was computed for.
+function poolSignature(pool) {
+return pool.map(itemKey).sort().join('|');
+}
+
+function randomPick(pool, n) {
+return [...pool].sort(() => Math.random() - 0.5).slice(0, n);
+}
+
+function paintNudgeList(list) {
 const el = document.getElementById('nudges-list');
-currentPool = buildNudgePool();
-if (currentPool.length === 0) {
+currentShown = list;
+if (list.length === 0) {
 el.innerHTML = '<div class="nudge-empty">Nothing to nudge you about right now.</div>';
 return;
 }
-currentShuffled = [...currentPool].sort(() => Math.random() - 0.5).slice(0, 4);
-el.innerHTML = `<div class="nudge-list">${currentShuffled.map((n, i) => `<div class="nudge-item" data-nudge-idx="${i}">${escapeHtml(n.text)} &rarr;</div>`).join('')}</div>`;
+el.innerHTML = `<div class="nudge-list">${list.map((n, i) => `<div class="nudge-item" data-nudge-idx="${i}">${escapeHtml(n.text)} &rarr;</div>`).join('')}</div>`;
 el.querySelectorAll('[data-nudge-idx]').forEach((item) => {
 item.addEventListener('click', () => {
-goToTarget(currentShuffled[parseInt(item.dataset.nudgeIdx, 10)].target);
+goToTarget(currentShown[parseInt(item.dataset.nudgeIdx, 10)].target);
 });
 });
 }
 
+// Asks Claude to pick and order the TOP_N items worth surfacing right now,
+// balancing urgency (deadlines/expiries/events), importance (priority/
+// rating), and neglect (long overdue). Returns pool items, not rewritten
+// text — the model only chooses indices, so a bad response can never
+// hallucinate a click target that doesn't exist.
+async function rankWithAI(pool) {
+const items = pool.map((n, i) => ({ i, text: n.text, ...n.signals }));
+const prompt = `You're picking which reminders to surface on someone's personal dashboard home screen. Below is a JSON array of candidate reminders, each with an index "i", the reminder text, and signal fields explaining why it might matter: daysSince/daysUntil (age or time to a deadline), priority (1-5, how much they personally rated that person/goal), progress (% complete, lower means more room to matter), priorStreak (a habit streak that just broke — bigger is a bigger loss), stage/kind (category context). Choose the ${TOP_N} most worth showing RIGHT NOW. Balance genuine time pressure (something expiring or happening soon), importance (high priority/rating items), and neglect (things aged the longest) — don't just pick the single biggest number in one field. Avoid picking near-duplicate items about the same person or thing. Respond with ONLY a JSON array of the chosen "i" values, most important first, e.g. [3,0,7,1]. No other text.
+
+${JSON.stringify(items)}`;
+const { data: order } = await callTextJson(prompt, 300, RANK_MODEL);
+if (!Array.isArray(order)) throw new Error('Unexpected response shape from ranking call');
+const picked = order.filter((i) => Number.isInteger(i) && i >= 0 && i < pool.length).map((i) => pool[i]);
+return picked.slice(0, TOP_N);
+}
+
+async function renderNudges() {
+currentPool = buildNudgePool();
+const myGen = ++renderGen;
+const status = document.getElementById('nudges-ai-status');
+if (status) status.textContent = '';
+
+if (currentPool.length === 0) {
+paintNudgeList([]);
+return;
+}
+
+const settings = await getLocalSettings();
+if (myGen !== renderGen) return;
+if (!settings.smartNudges) {
+paintNudgeList(randomPick(currentPool, TOP_N));
+return;
+}
+
+const sig = poolSignature(currentPool);
+if (aiCache.signature === sig && aiCache.order) {
+paintNudgeList(aiCache.order);
+return;
+}
+
+// Smart mode, and nothing cached for this exact pool yet — show a random
+// pick instantly so the panel isn't empty, then swap in Claude's ranking
+// when it's ready.
+paintNudgeList(randomPick(currentPool, TOP_N));
+if (status) status.textContent = 'Thinking…';
+try {
+const ranked = await rankWithAI(currentPool);
+if (myGen !== renderGen) return;
+if (ranked.length > 0) {
+aiCache = { signature: sig, order: ranked };
+paintNudgeList(ranked);
+}
+if (status) status.textContent = '';
+} catch (err) {
+if (myGen !== renderGen) return;
+console.error('Smart nudges failed, showing a random pick instead:', err);
+if (status) status.textContent = err instanceof MissingKeyError
+? 'Add an Anthropic API key in Settings to enable smart nudges.'
+: "Couldn't rank smartly — showing a random pick instead.";
+}
+}
+
+async function shuffleNudges() {
+const settings = await getLocalSettings();
+if (settings.smartNudges) aiCache = { signature: '', order: null }; // force a fresh AI call
+await renderNudges();
+}
+
 function initNudges() {
-document.getElementById('shuffle-nudge-btn').addEventListener('click', renderNudges);
+document.getElementById('shuffle-nudge-btn').addEventListener('click', shuffleNudges);
+const toggle = document.getElementById('smart-nudges-toggle');
+if (toggle) {
+getLocalSettings().then((settings) => { toggle.checked = !!settings.smartNudges; });
+toggle.addEventListener('change', async () => {
+await setLocalSetting('smartNudges', toggle.checked);
+renderNudges();
+});
+}
 }
 
 export { renderNudges, initNudges };

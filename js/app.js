@@ -10,6 +10,8 @@ import { initVoucherForm } from './features/vouchers.js';
 import { initIdeaForm } from './features/ideas.js';
 import { initNudges } from './features/nudges.js';
 import { initSettings } from './features/settings.js';
+import { initGoogleAccount } from './features/googleaccount.js';
+import { initMail } from './features/mail.js';
 
 function initTabs() {
 document.querySelectorAll('[data-tab-btn]').forEach((btn) => {
@@ -59,6 +61,8 @@ await loadData();
 renderAll();
 
 initTabs();
+initGoogleAccount();
+initMail();
 initHabitForm();
 initGoalForm();
 initJobForm();

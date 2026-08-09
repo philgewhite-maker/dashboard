@@ -18,10 +18,13 @@ const CORE_ASSETS = [
 './js/features/overview.js',
 './js/features/nudges.js',
 './js/features/settings.js',
+'./js/features/googleaccount.js',
+'./js/features/mail.js',
 './js/sync/config.js',
 './js/sync/googleauth.js',
 './js/sync/googledrive.js',
 './js/googlecalendar.js',
+'./js/googlemail.js',
 './manifest.webmanifest',
 ];
 

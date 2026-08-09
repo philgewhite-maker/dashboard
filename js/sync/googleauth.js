@@ -12,6 +12,7 @@ import { getLocalSettings, setLocalSetting } from '../state.js';
 const SCOPES = [
 'https://www.googleapis.com/auth/drive.appdata',
 'https://www.googleapis.com/auth/calendar.readonly',
+'https://www.googleapis.com/auth/gmail.readonly',
 ].join(' ');
 
 class NotConfiguredError extends Error {

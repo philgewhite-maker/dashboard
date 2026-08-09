@@ -1,6 +1,6 @@
-import { data, getLocalSettings, setLocalSetting, exportBackup, importBackup, loadData } from '../state.js';
+import { data, getLocalSettings, setLocalSetting, exportBackup, importBackup } from '../state.js';
 import { renderAll } from '../render-all.js';
-import { NotConfiguredError, isSignedIn, wasConnectedBefore, tryReconnectSilently, signIn, signOut } from '../sync/googleauth.js';
+import { isSignedIn } from '../sync/googleauth.js';
 import { getRemoteInfo, getRemoteCounts, countsOf, pushToGoogleDrive, pullFromGoogleDrive } from '../sync/googledrive.js';
 
 async function initSettings() {
@@ -45,66 +45,24 @@ status.textContent = "Couldn't read that file — make sure it's a dashboard bac
 e.target.value = '';
 });
 
-await initSync();
+initDriveBackup();
 }
 
 function summarizeCounts(d) {
 return `${d.connections.length} connection${d.connections.length === 1 ? '' : 's'}, ${d.habits.length} habit${d.habits.length === 1 ? '' : 's'}, ${d.goals.length} goal${d.goals.length === 1 ? '' : 's'}, ${d.jobs.length} job${d.jobs.length === 1 ? '' : 's'}, ${d.vouchers.length} voucher${d.vouchers.length === 1 ? '' : 's'}, ${d.businessIdeas.length} idea${d.businessIdeas.length === 1 ? '' : 's'}`;
 }
 
-async function initSync() {
-const signedOutBox = document.getElementById('sync-signed-out');
-const signedInBox = document.getElementById('sync-signed-in');
-const accountEl = document.getElementById('sync-account');
-const statusEl = document.getElementById('sync-status');
-const signinBtn = document.getElementById('sync-signin-btn');
-const signoutBtn = document.getElementById('sync-signout-btn');
+// Sign in/out lives in features/googleaccount.js (top of Overview) — this
+// just does the Drive-specific data actions, and checks isSignedIn() itself
+// so clicking Push/Pull while signed out fails with a clear message instead
+// of silently attempting (and likely failing) a background token request.
+function initDriveBackup() {
+const statusEl = document.getElementById('drive-sync-status');
 const pushBtn = document.getElementById('sync-push-btn');
 const pullBtn = document.getElementById('sync-pull-btn');
 
-async function refresh() {
-const signedIn = isSignedIn(); // fast, local-only — never blocks or opens anything
-signedOutBox.style.display = signedIn ? 'none' : 'block';
-signedInBox.style.display = signedIn ? 'block' : 'none';
-if (signedIn) {
-const settings = await getLocalSettings();
-const parts = ['Connected to Google (Drive sync + Calendar)'];
-if (settings.lastPushedAt) parts.push(`last pushed ${new Date(settings.lastPushedAt).toLocaleString()}`);
-if (settings.lastPulledAt) parts.push(`last pulled ${new Date(settings.lastPulledAt).toLocaleString()}`);
-accountEl.textContent = parts.join(' — ');
-} else if (await wasConnectedBefore()) {
-signinBtn.textContent = 'Reconnect to Google';
-} else {
-signinBtn.textContent = 'Sign in to Google';
-}
-}
-
-signinBtn.addEventListener('click', async () => {
-statusEl.textContent = 'Opening Google sign-in…';
-try {
-await signIn();
-statusEl.textContent = 'Signed in.';
-await refresh();
-} catch (err) {
-statusEl.textContent = err instanceof NotConfiguredError
-? err.message
-: `Sign-in failed: ${err.message || err}`;
-console.error('Google sign-in failed:', err);
-}
-});
-
-signoutBtn.addEventListener('click', async () => {
-try {
-await signOut();
-statusEl.textContent = 'Signed out.';
-await refresh();
-} catch (err) {
-statusEl.textContent = `Sign-out failed: ${err.message || err}`;
-console.error('Google sign-out failed:', err);
-}
-});
-
 pushBtn.addEventListener('click', async () => {
+if (!isSignedIn()) { statusEl.textContent = 'Sign in to Google at the top of Overview first.'; return; }
 statusEl.textContent = 'Checking what\'s already in Google Drive…';
 let remoteCounts;
 try {
@@ -130,7 +88,6 @@ pushBtn.disabled = true;
 try {
 await pushToGoogleDrive((msg) => { statusEl.textContent = msg; });
 statusEl.textContent = 'Pushed to Google Drive.';
-await refresh();
 } catch (err) {
 statusEl.textContent = `Push failed: ${err.message || err}`;
 console.error('Google Drive push failed:', err);
@@ -140,6 +97,7 @@ pushBtn.disabled = false;
 });
 
 pullBtn.addEventListener('click', async () => {
+if (!isSignedIn()) { statusEl.textContent = 'Sign in to Google at the top of Overview first.'; return; }
 statusEl.textContent = 'Checking what\'s in Google Drive…';
 let info;
 try {
@@ -160,7 +118,6 @@ try {
 await pullFromGoogleDrive((msg) => { statusEl.textContent = msg; });
 renderAll();
 statusEl.textContent = 'Pulled from Google Drive.';
-await refresh();
 } catch (err) {
 statusEl.textContent = `Pull failed: ${err.message || err}`;
 console.error('Google Drive pull failed:', err);
@@ -168,16 +125,6 @@ console.error('Google Drive pull failed:', err);
 pullBtn.disabled = false;
 }
 });
-
-await refresh();
-
-// Opportunistic, silent, and entirely best-effort: try to reconnect
-// without asking, but never show an error or change the button state if
-// it doesn't work — it commonly won't, since browsers block popups that
-// aren't a direct result of a click, which this isn't. Success upgrades
-// the UI to "Connected"; failure just leaves the normal Sign In / Reconnect
-// button as the fallback, silently.
-tryReconnectSilently().then((reconnected) => { if (reconnected) refresh(); });
 }
 
 export { initSettings };

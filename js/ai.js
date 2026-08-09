@@ -72,11 +72,11 @@ if (salvaged) return { data: salvaged, truncated: true };
 throw new Error(`Response wasn't JSON: ${stripped.slice(0, 200)}`);
 }
 
-async function callVision(base64, mediaType, promptText, maxTokens) {
+async function callAnthropic(content, maxTokens, modelOverride) {
 const settings = await getLocalSettings();
 const apiKey = (settings.anthropicApiKey || '').trim();
 if (!apiKey) throw new MissingKeyError();
-const model = settings.anthropicModel || DEFAULT_MODEL;
+const model = modelOverride || settings.anthropicModel || DEFAULT_MODEL;
 
 let res;
 try {
@@ -91,13 +91,7 @@ headers: {
 body: JSON.stringify({
 model,
 max_tokens: maxTokens || 1500,
-messages: [{
-role: 'user',
-content: [
-{ type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
-{ type: 'text', text: promptText },
-],
-}],
+messages: [{ role: 'user', content }],
 }),
 });
 } catch (networkErr) {
@@ -127,6 +121,20 @@ return extractJson(textBlock.text);
 console.error('Could not parse JSON from Claude response:', textBlock.text);
 throw parseErr;
 }
+}
+
+async function callVision(base64, mediaType, promptText, maxTokens) {
+return callAnthropic([
+{ type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
+{ type: 'text', text: promptText },
+], maxTokens);
+}
+
+// Text-only Claude call, no image — used for reasoning-over-JSON tasks like
+// ranking nudges. modelOverride lets a cheap/fast task (like ranking) skip
+// past the user's chosen vision model without touching their Settings.
+async function callTextJson(promptText, maxTokens, modelOverride) {
+return callAnthropic([{ type: 'text', text: promptText }], maxTokens, modelOverride);
 }
 
 // maxTokens defaults are generous on purpose: output tokens are cheap
@@ -186,4 +194,4 @@ photoBlobs,
 };
 }
 
-export { MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot, DEFAULT_MODEL };
+export { MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot, callTextJson, DEFAULT_MODEL };

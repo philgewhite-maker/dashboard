@@ -15,6 +15,15 @@
 <div class="wrap">
 <header class="top">
 <h1>Dashboard</h1>
+<div class="google-bar" id="google-bar">
+<span id="google-signed-out">
+<button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
+</span>
+<span id="google-signed-in" style="display:none;">
+<span class="google-bar-dot"></span>
+<button class="google-bar-signout" id="sync-signout-btn" type="button">Sign out</button>
+</span>
+</div>
 <div class="date" id="today-date"></div>
 </header>
 
@@ -33,7 +42,32 @@
 <h2><span class="dot rose"></span>Nudges</h2>
 <button class="log-btn" id="shuffle-nudge-btn" type="button">Shuffle</button>
 </div>
+<span class="sync-status" id="nudges-ai-status"></span>
 <div id="nudges-list"></div>
+</section>
+
+<section class="panel wide" id="calendars-panel" data-tab="overview">
+<div class="panel-head">
+<h2><span class="dot teal"></span>Next Up</h2>
+<span class="count-badge" id="calendars-count"></span>
+</div>
+<div class="sync-row">
+<button class="sync-btn" id="sync-cal-btn" type="button">Sync calendars</button>
+<span class="sync-status" id="cal-sync-status"></span>
+</div>
+<div id="calendars-list"></div>
+</section>
+
+<section class="panel wide" id="mail-panel" data-tab="overview">
+<div class="panel-head">
+<h2><span class="dot rose"></span>Mail</h2>
+<span class="count-badge" id="mail-count"></span>
+</div>
+<div class="sync-row">
+<button class="sync-btn" id="sync-mail-btn" type="button">Refresh mail</button>
+<span class="sync-status" id="mail-sync-status"></span>
+</div>
+<div id="mail-list"></div>
 </section>
 
 <section class="panel" id="habits-panel" data-tab="overview">
@@ -63,18 +97,6 @@
 <input type="text" id="job-role-input" placeholder="Role">
 <button class="add-btn" type="button">Add</button>
 </div>
-</section>
-
-<section class="panel wide" id="calendars-panel" data-tab="overview">
-<div class="panel-head">
-<h2><span class="dot teal"></span>Next Up</h2>
-<span class="count-badge" id="calendars-count"></span>
-</div>
-<div class="sync-row">
-<button class="sync-btn" id="sync-cal-btn" type="button">Sync calendars</button>
-<span class="sync-status" id="cal-sync-status"></span>
-</div>
-<div id="calendars-list"></div>
 </section>
 
 <section class="panel wide" id="vouchers-panel" data-tab="finances">
@@ -193,22 +215,22 @@
 Stored only in this browser's local storage on this device — never synced, never sent anywhere except directly to api.anthropic.com. You'll need to enter it again on each device. Calls are billed to your own account (typically a fraction of a cent per screenshot).
 <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">Get a key &rarr;</a>
 </div>
+<label class="settings-note" style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:10px;">
+<input type="checkbox" id="smart-nudges-toggle">
+Smart nudges — let Claude pick what's most urgent, important, and overdue, instead of a random pick (uses the API key above)
+</label>
 </div>
 
 <div class="settings-block">
-<h3>Google account (Drive sync + Calendar)</h3>
-<div id="sync-signed-out">
-<button class="log-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
-</div>
-<div id="sync-signed-in" style="display:none;">
-<div class="settings-note" id="sync-account" style="margin:0 0 8px;"></div>
+<h3>Google account</h3>
+<div class="settings-note" style="margin:0 0 8px;">Sign in/out button lives in the header, since it's needed often.</div>
+<div class="settings-note" id="sync-account"></div>
+<div class="settings-note" id="sync-status"></div>
 <div class="backup-row">
 <button class="log-btn" id="sync-push-btn" type="button">Push to Google Drive</button>
 <button class="log-btn" id="sync-pull-btn" type="button">Pull from Google Drive</button>
-<button class="file-btn" id="sync-signout-btn" type="button">Sign out</button>
 </div>
-</div>
-<div class="settings-note" id="sync-status"></div>
+<div class="settings-note" id="drive-sync-status"></div>
 </div>
 
 <div class="settings-block">
