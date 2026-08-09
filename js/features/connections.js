@@ -373,18 +373,32 @@ statusEl.textContent = `Couldn't read that screenshot: ${err.message || err}`;
 }
 }
 
-function candidateRowHtml(idx, name, age, existing, extraDetail) {
-if (existing) {
+function existingMatchCaption(m) {
+const parts = [];
+if (m.app) parts.push(m.app);
+parts.push(m.lastContact ? `contacted ${daysSince(m.lastContact)}d ago` : 'never contacted');
+return parts.join(' · ');
+}
+
+function candidateRowHtml(idx, name, age, matches, extraDetail) {
+if (matches && matches.length > 0) {
+const existingHtml = matches.map((m) => `
+<div class="compare-existing">
+${avatarHtml(m.photoId, m.name, 'sm')}
+<span class="compare-caption">${escapeHtml(existingMatchCaption(m))}</span>
+</div>`).join('');
+const updateOptions = matches.map((m) => `<option value="update:${m.id}">Same person &mdash; update ${escapeHtml(m.name)} (${escapeHtml(existingMatchCaption(m))})</option>`).join('');
+const tag = matches.length > 1 ? `${matches.length} existing people share this name` : 'same name already tracked';
 return `<div class="candidate-row ambiguous" data-idx="${idx}">
 <div class="compare">
-${avatarHtml(existing.photoId, existing.name, 'sm')}
+${existingHtml}
 <span class="vs">existing vs new</span>
 <span class="avatar sm" data-candidate-photo="${idx}">${escapeHtml((name || '?').charAt(0).toUpperCase())}</span>
 </div>
-<div>${escapeHtml(name)}${age ? ', ' + escapeHtml(age) : ''} <span class="candidate-tag">same name already tracked</span></div>
+<div>${escapeHtml(name)}${age ? ', ' + escapeHtml(age) : ''} <span class="candidate-tag">${tag}</span></div>
 ${extraDetail ? `<div style="font-size:11px;color:var(--muted);">${escapeHtml(extraDetail)}</div>` : ''}
-<select class="decision-select" data-decision="${idx}" data-match-id="${existing.id}">
-<option value="update">Same person &mdash; update ${escapeHtml(existing.name)}</option>
+<select class="decision-select" data-decision="${idx}">
+${updateOptions}
 <option value="new">Different person &mdash; add as new</option>
 <option value="skip" selected>Skip for now</option>
 </select>
@@ -443,11 +457,11 @@ e.target.value = '';
 
 async function renderCandidateReview(candidateList, candidates, isProfile) {
 candidateList.innerHTML = candidates.map((cand, idx) => {
-const match = data.connections.find((c) => c.name.toLowerCase() === String(cand.name).toLowerCase());
+const matches = data.connections.filter((c) => c.name.toLowerCase() === String(cand.name).toLowerCase());
 const extra = isProfile
 ? [cand.age, cand.job, (cand.languages || []).join('/'), cand.bio].filter(Boolean).join(' · ')
 : (cand.stage ? `Detected stage: ${cand.stage}` : '');
-return candidateRowHtml(idx, cand.name, cand.age, match, extra);
+return candidateRowHtml(idx, cand.name, cand.age, matches, extra);
 }).join('') + '<button class="add-btn" id="confirm-import-btn" type="button" style="margin-top:6px;align-self:flex-start;">Add / update selected</button>';
 
 // hydrate candidate avatar previews from their in-memory blobs (not yet saved to IndexedDB)
@@ -461,6 +475,8 @@ el.textContent = '';
 el.appendChild(img);
 }
 });
+// hydrate existing-match avatars (already-saved photos, loaded from IndexedDB)
+await hydratePhotos(candidateList);
 
 document.getElementById('confirm-import-btn').addEventListener('click', async () => {
 const app = document.getElementById('import-app-input').value;
@@ -474,8 +490,8 @@ addedCount++;
 
 for (const sel of candidateList.querySelectorAll('select[data-decision]')) {
 const cand = candidates[parseInt(sel.dataset.decision, 10)];
-if (sel.value === 'update') {
-const existing = data.connections.find((c) => c.id === sel.dataset.matchId);
+if (sel.value.startsWith('update:')) {
+const existing = data.connections.find((c) => c.id === sel.value.slice(7));
 if (existing) {
 await applyCandidateUpdate(existing, cand, isProfile);
 updatedCount++;

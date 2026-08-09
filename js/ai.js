@@ -139,11 +139,12 @@ return callAnthropic([{ type: 'text', text: promptText }], maxTokens, modelOverr
 
 // maxTokens defaults are generous on purpose: output tokens are cheap
 // relative to the cost of a screenshot import silently failing because a
-// busy matches list didn't fit. 4000 tokens covers roughly 40-50 people at
-// this schema's size; if a screenshot still overflows that, the caller
-// gets back whichever prefix parsed and a `truncated: true` flag instead
-// of an error.
-const MATCHES_MAX_TOKENS = 4000;
+// busy matches list didn't fit. A long scrolling screenshot can cost far
+// more per person than a compact grid (more scroll positions, longer names/
+// bios in view), so this is sized well above the typical case rather than
+// the average one; if a screenshot still overflows it, the caller gets back
+// whichever prefix parsed and a `truncated: true` flag instead of an error.
+const MATCHES_MAX_TOKENS = 16000;
 const PROFILE_MAX_TOKENS = 2000;
 
 // Screenshot of a matches/chat list — many small avatars + names.
