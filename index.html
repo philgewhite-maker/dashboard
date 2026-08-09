@@ -121,6 +121,48 @@
 </div>
 </section>
 
+<section class="panel wide" id="subscriptions-panel" data-tab="finances">
+<div class="panel-head">
+<h2><span class="dot plum"></span>Subscriptions</h2>
+<span class="count-badge" id="subscriptions-count"></span>
+</div>
+<div id="subscriptions-list"></div>
+<div class="add-form" id="subscription-form">
+<input type="text" id="subscription-name-input" placeholder="e.g. Netflix">
+<select id="subscription-frequency-input">
+<option>Monthly</option>
+<option>Yearly</option>
+<option>Weekly</option>
+<option>Other</option>
+</select>
+<input type="text" id="subscription-cost-input" placeholder="Cost (optional)">
+<input type="date" id="subscription-renewal-input">
+<input type="text" id="subscription-notes-input" placeholder="Notes (optional)">
+<button class="add-btn" type="button">Add</button>
+</div>
+</section>
+
+<section class="panel wide" id="deals-panel" data-tab="finances">
+<div class="panel-head">
+<h2><span class="dot plum"></span>Deal Expiries</h2>
+<span class="count-badge" id="deals-count"></span>
+</div>
+<div id="deals-list"></div>
+<div class="add-form" id="deal-form">
+<input type="text" id="deal-name-input" placeholder="e.g. Halifax mortgage fixed rate">
+<select id="deal-type-input">
+<option>Mortgage</option>
+<option>Credit card</option>
+<option>Loan</option>
+<option>Insurance</option>
+<option>Other</option>
+</select>
+<input type="date" id="deal-expiry-input">
+<input type="text" id="deal-notes-input" placeholder="Notes (optional)">
+<button class="add-btn" type="button">Add</button>
+</div>
+</section>
+
 <section class="panel wide" id="overview-panel" data-tab="dating">
 <div class="panel-head">
 <h2><span class="dot rose"></span>Connections Overview</h2>
@@ -183,6 +225,7 @@
 <option>Bumble</option>
 <option>Tinder</option>
 <option>Hinge</option>
+<option>Real life</option>
 <option>Other</option>
 </select>
 <button class="add-btn" type="button">Add match</button>
@@ -266,6 +309,17 @@ Smart nudges — let Claude pick what's most urgent, important, and overdue, ins
 <button class="add-btn" type="button">Track</button>
 </div>
 <div class="settings-note">Sign in to Google above, then use "Sync calendars" on the Overview tab to pull in each one's next upcoming event.</div>
+</div>
+
+<div class="settings-block">
+<h3>Enhancement ideas <span class="count-badge" id="enhancements-count"></span></h3>
+<div class="settings-note" style="margin:0 0 8px;">Ideas for this dashboard itself, to come back to later.</div>
+<div id="enhancements-list"></div>
+<div class="add-form" id="enhancement-form" style="flex-direction:column;align-items:stretch;">
+<input type="text" id="enhancement-title-input" placeholder="Idea title">
+<textarea id="enhancement-notes-input" placeholder="What's the idea?" rows="2" style="font-family:'Inter',sans-serif;font-size:13px;border:1px solid var(--line);border-radius:7px;padding:7px 9px;background:var(--paper);color:var(--ink);resize:vertical;"></textarea>
+<button class="add-btn" type="button" style="align-self:flex-start;">Add idea</button>
+</div>
 </div>
 </section>
 </div>

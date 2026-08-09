@@ -28,11 +28,14 @@ calendars: [], // array of tracked calendar NAMES, as they appear in Google Cale
 calendarStatus: {}, // name -> {found, title, date, syncedAt} — filled in by Sync
 vouchers: [],
 businessIdeas: [],
+subscriptions: [],
+enhancementIdeas: [],
+dealExpiries: [],
 };
 }
 
 function blankData() {
-return { habits: [], goals: [], jobs: [], connections: [], calendars: [], calendarStatus: {}, vouchers: [], businessIdeas: [] };
+return { habits: [], goals: [], jobs: [], connections: [], calendars: [], calendarStatus: {}, vouchers: [], businessIdeas: [], subscriptions: [], enhancementIdeas: [], dealExpiries: [] };
 }
 
 let data = null;
@@ -80,6 +83,9 @@ data.calendars = [...new Set(data.calendars)];
 if (!data.calendarStatus || typeof data.calendarStatus !== 'object' || Array.isArray(data.calendarStatus)) data.calendarStatus = {};
 if (!Array.isArray(data.vouchers)) data.vouchers = [];
 if (!Array.isArray(data.businessIdeas)) data.businessIdeas = [];
+if (!Array.isArray(data.subscriptions)) data.subscriptions = [];
+if (!Array.isArray(data.enhancementIdeas)) data.enhancementIdeas = [];
+if (!Array.isArray(data.dealExpiries)) data.dealExpiries = [];
 data.connections.forEach((c) => {
 if (!Array.isArray(c.photoIds)) c.photoIds = c.photoId ? [c.photoId] : [];
 if (typeof c.photoId !== 'string') c.photoId = c.photoIds[0] || null;

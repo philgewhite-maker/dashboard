@@ -28,6 +28,18 @@ const pool = [];
 
 data.connections.forEach((c) => {
 const since = daysSince(c.lastContact);
+if (c.stage === 'Superswiped') {
+// Not matched yet, so "reach out — you last spoke" doesn't apply; this
+// is a fixed 7-day check rather than the priority-scaled one below,
+// since there's no relationship yet to weigh by priority.
+if (since >= 7) {
+pool.push({
+text: `Still no match with ${c.name} after ${since} days — worth a follow-up superswipe, or time to move on?`,
+target: { type: 'connection', id: c.id },
+signals: { kind: 'superswipe-follow-up', daysSince: since },
+});
+}
+} else {
 const overdue = !isDormantStage(c.stage) && since >= reachOutThreshold(c.priority);
 if (overdue) {
 pool.push({
@@ -35,6 +47,7 @@ text: `Reach out to ${c.name} — it's been ${since} days since you last spoke.`
 target: { type: 'connection', id: c.id },
 signals: { kind: 'overdue-contact', daysSince: since, priority: c.priority || 0 },
 });
+}
 }
 (c.todos || []).filter((t) => !t.done).forEach((t) => {
 pool.push({

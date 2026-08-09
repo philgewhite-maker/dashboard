@@ -6,8 +6,8 @@ resizeImageToBlob,
 } from '../utils.js';
 import { MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot } from '../ai.js';
 
-const CONN_STAGES = ['Matched', 'Chatting in app', 'Moved to WhatsApp', 'Moved to Telegram', 'Arranged to meet', 'Met in person', 'Faded', 'Archived'];
-const STAGE_RANK = { 'Met in person': 6, 'Arranged to meet': 5, 'Moved to Telegram': 4, 'Moved to WhatsApp': 3, 'Chatting in app': 2, Matched: 1, Faded: 0, Archived: 0 };
+const CONN_STAGES = ['Superswiped', 'Matched', 'Chatting in app', 'Moved to WhatsApp', 'Moved to Telegram', 'Arranged to meet', 'Met in person', 'Faded', 'Archived'];
+const STAGE_RANK = { 'Met in person': 7, 'Arranged to meet': 6, 'Moved to Telegram': 5, 'Moved to WhatsApp': 4, 'Chatting in app': 3, Matched: 2, Superswiped: 1, Faded: 0, Archived: 0 };
 const RATING_CATS = [['looks', 'Looks'], ['intelligence', 'Intelligence'], ['figure', 'Figure'], ['humour', 'Humour'], ['sex', 'Sex'], ['practicality', 'Practicality']];
 
 let connectionSearchTerm = '';

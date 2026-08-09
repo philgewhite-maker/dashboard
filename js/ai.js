@@ -147,19 +147,108 @@ return callAnthropic([{ type: 'text', text: promptText }], maxTokens, modelOverr
 const MATCHES_MAX_TOKENS = 16000;
 const PROFILE_MAX_TOKENS = 2000;
 
-// Screenshot of a matches/chat list — many small avatars + names.
+// A vision model estimating bounding-box coordinates has no pixel grid to
+// anchor against, so a raw absolute-position guess drifts the further down
+// a long image it's looking (observed: roughly half an avatar's diameter
+// off by ~26 rows into a long Tinder screenshot). The main fix is in the
+// prompt below — anchoring each avatar box to that row's name text instead
+// of guessing an absolute position. Banding is a secondary safety net, not
+// the primary fix, so the threshold is set high (most real screenshots
+// never hit it) rather than aggressively slicing every long list.
+const BAND_TARGET_HEIGHT = 4000;
+const BAND_OVERLAP = 220;
+
+function matchesPrompt(isBand) {
+return 'This is a screenshot of a dating app matches or chat list'
++ (isBand ? ', showing one vertical section of a longer scrolling screenshot' : '')
++ '. For each distinct person visible, return their display name, their age if shown next to the name, a tight bounding box around ONLY their small circular avatar photo (not the name, text, or row background) as fractions of THIS IMAGE (0 to 1, top-left origin, keys x,y,w,h), and their stage: "Matched" if they appear in a row of just avatars with no message preview (e.g. a "New Matches" strip) — meaning you haven\'t started chatting; "Chatting in app" if their row shows a message preview/snippet or timestamp of a conversation, meaning you\'re already messaging.'
++ ' Estimate each avatar box relative to that row\'s name text rather than guessing its absolute position on the page: first locate the name you just read, then place the box immediately next to it (usually to its left) with the box\'s vertical center matching the name text\'s vertical center — anchoring to the name you\'re already reading is far more reliable than an independent guess at where a row falls in a long, uniform list. The box should be a tight square around just the circle — err on the side of too small rather than too large, since a box that\'s too tall will bleed into the next row.'
++ (isBand ? ' If a row is cut off at the very top or very bottom edge of this image (less than half the avatar visible), SKIP it entirely — it is fully visible in an adjacent section and will be captured there instead.' : '')
++ ' Return ONLY a JSON array, no other text, no markdown fences. Example: [{"name":"Alex","age":"29","stage":"Chatting in app","bbox":{"x":0.05,"y":0.12,"w":0.09,"h":0.09}}]. Use null for age or bbox if not visible or unsure, and use "Matched" for stage if you can\'t tell. If no people are visible, return [].';
+}
+
+// [{ y0, h }, ...] in source-image pixels. A single band covering the whole
+// image when it's already short, so typical screenshots take the same one
+// unsliced path as before.
+function planBands(totalHeight) {
+if (totalHeight <= BAND_TARGET_HEIGHT * 1.3) return [{ y0: 0, h: totalHeight }];
+const bands = [];
+let y0 = 0;
+while (y0 < totalHeight) {
+const h = Math.min(BAND_TARGET_HEIGHT, totalHeight - y0);
+bands.push({ y0, h });
+if (y0 + h >= totalHeight) break;
+y0 += BAND_TARGET_HEIGHT - BAND_OVERLAP;
+}
+return bands;
+}
+
+function sliceToBase64(img, y0, h) {
+return new Promise((resolve, reject) => {
+const canvas = document.createElement('canvas');
+canvas.width = img.naturalWidth;
+canvas.height = h;
+canvas.getContext('2d').drawImage(img, 0, y0, img.naturalWidth, h, 0, 0, img.naturalWidth, h);
+canvas.toBlob(async (blob) => {
+if (!blob) { reject(new Error('Could not slice image band')); return; }
+resolve((await fileToBase64(blob)));
+}, 'image/png');
+});
+}
+
+// Two bands overlap on purpose (see BAND_OVERLAP above), so a row fully
+// inside the overlap zone can legitimately come back from both bands
+// intact. Same name + near-identical translated y position is treated as
+// the same person; the first occurrence (from the earlier band) wins.
+function dedupeByNameAndPosition(list) {
+const out = [];
+for (const r of list) {
+const dupe = out.some((o) => o.name && r.name
+&& o.name.trim().toLowerCase() === String(r.name).trim().toLowerCase()
+&& o.bbox && r.bbox && Math.abs(o.bbox.y - r.bbox.y) < 0.03);
+if (!dupe) out.push(r);
+}
+return out;
+}
+
+// Screenshot of a matches/chat list — many small avatars + names. Long
+// screenshots are sliced into overlapping bands (see planBands) so bounding
+// boxes stay accurate; each band is a separate, independent vision call.
 async function extractMatchesFromScreenshot(file) {
 const base64 = await fileToBase64(file);
 const mediaType = file.type || 'image/png';
 const dataUrl = `data:${mediaType};base64,${base64}`;
-const prompt = 'This is a screenshot of a dating app matches or chat list. For each distinct person visible, return their display name, their age if shown next to the name, a tight bounding box around ONLY their small circular avatar photo (not the name, text, or row background) as fractions of the full image (0 to 1, top-left origin, keys x,y,w,h), and their stage: "Matched" if they appear in a row of just avatars with no message preview (e.g. a "New Matches" strip) — meaning you haven\'t started chatting; "Chatting in app" if their row shows a message preview/snippet or timestamp of a conversation, meaning you\'re already messaging. The box should be a tight square around just the circle — err on the side of too small rather than too large, since a box that\'s too tall will bleed into the next row. Return ONLY a JSON array, no other text, no markdown fences. Example: [{"name":"Alex","age":"29","stage":"Chatting in app","bbox":{"x":0.05,"y":0.12,"w":0.09,"h":0.09}}]. Use null for age or bbox if not visible or unsure, and use "Matched" for stage if you can\'t tell. If no people are visible, return [].';
-const [{ data: raw, truncated }, img] = await Promise.all([
-callVision(base64, mediaType, prompt, MATCHES_MAX_TOKENS),
-loadImage(dataUrl),
-]);
-if (!Array.isArray(raw)) return { candidates: [], truncated: false };
+const img = await loadImage(dataUrl);
+const bands = planBands(img.naturalHeight);
+const isBanded = bands.length > 1;
+
+const settled = await Promise.allSettled(bands.map(async (band) => {
+const bandBase64 = isBanded ? await sliceToBase64(img, band.y0, band.h) : base64;
+const bandMediaType = isBanded ? 'image/png' : mediaType;
+const { data: raw, truncated } = await callVision(bandBase64, bandMediaType, matchesPrompt(isBanded), MATCHES_MAX_TOKENS);
+if (!Array.isArray(raw)) return { people: [], truncated: false };
+const people = raw.filter((r) => r.bbox).map((r) => ({
+...r,
+bbox: { x: r.bbox.x, y: (band.y0 + r.bbox.y * band.h) / img.naturalHeight, w: r.bbox.w, h: (r.bbox.h * band.h) / img.naturalHeight },
+})).concat(raw.filter((r) => !r.bbox));
+return { people, truncated };
+}));
+
+const people = [];
+let truncated = false;
+settled.forEach((result, i) => {
+if (result.status === 'fulfilled') {
+people.push(...result.value.people);
+truncated = truncated || result.value.truncated;
+} else {
+console.error(`Screenshot band ${i + 1}/${bands.length} failed:`, result.reason);
+}
+});
+if (settled.every((r) => r.status === 'rejected')) throw settled[0].reason;
+
+const merged = isBanded ? dedupeByNameAndPosition(people) : people;
 const candidates = [];
-for (const r of raw) {
+for (const r of merged) {
 const photoBlob = await cropThumbnailToBlob(img, r.bbox);
 candidates.push({ name: r.name, age: r.age || '', stage: r.stage === 'Chatting in app' ? 'Chatting in app' : 'Matched', photoBlob });
 }
