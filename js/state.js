@@ -145,15 +145,31 @@ clearTimeout(saveTimer);
 return persist();
 }
 
+let localSettingsCache = null;
+// Every setLocalSetting() call does a read-modify-write of the whole
+// record. Two calls for two different keys (e.g. typing the API key while
+// a background Google reconnect concurrently sets `googleConnected`) can
+// interleave: both read the same starting point, then whichever write
+// lands second overwrites the other's change with a value that never saw
+// it. Chaining every write through this one promise forces them to run one
+// at a time, so each read always reflects every write queued before it.
+let settingsQueue = Promise.resolve();
+
 async function getLocalSettings() {
+if (localSettingsCache) return localSettingsCache;
 const s = await kvGet(LOCAL_SETTINGS_KEY);
-return s || { anthropicApiKey: '' };
+localSettingsCache = s || { anthropicApiKey: '' };
+return localSettingsCache;
 }
 
-async function setLocalSetting(key, value) {
+function setLocalSetting(key, value) {
+settingsQueue = settingsQueue.then(async () => {
 const s = await getLocalSettings();
 s[key] = value;
+localSettingsCache = s;
 await kvSet(LOCAL_SETTINGS_KEY, s);
+});
+return settingsQueue;
 }
 
 function computeStreak(completions) {
