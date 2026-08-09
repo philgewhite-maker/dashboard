@@ -5,7 +5,7 @@
 import { data, queueSave } from '../state.js';
 import { escapeHtml, bindForm, scrollAndFlash, daysUntil } from '../utils.js';
 import { isSignedIn } from '../sync/googleauth.js';
-import { syncCalendars } from '../googlecalendar.js';
+import { syncCalendars, listCalendars } from '../googlecalendar.js';
 
 function renderCalendars() {
 const list = document.getElementById('calendars-list');
@@ -58,17 +58,47 @@ queueSave();
 
 function initCalendarForm() {
 bindForm('calendar-form', () => {
-const input = document.getElementById('cal-name-input');
-const name = input.value.trim();
+const select = document.getElementById('cal-name-input');
+const name = select.value.trim();
 if (!name) return;
 if (!data.calendars.some((c) => c.toLowerCase() === name.toLowerCase())) {
 data.calendars.push(name);
 }
-input.value = '';
 renderCalendars();
 queueSave();
 setTimeout(() => scrollAndFlash(`[data-cal-row="${CSS.escape(name)}"]`), 50);
 });
+}
+
+// Populates the "Track a new calendar" dropdown from the real Google
+// Calendar list, on demand rather than automatically — same explicit-click
+// pattern as Sync calendars / Refresh mail, rather than hitting the API on
+// every Settings visit for something that rarely changes.
+async function loadCalendarOptions() {
+const select = document.getElementById('cal-name-input');
+const status = document.getElementById('cal-list-status');
+if (!isSignedIn()) {
+status.textContent = 'Sign in to Google at the top of the page first.';
+return;
+}
+status.textContent = 'Loading…';
+try {
+const list = await listCalendars();
+if (list.length === 0) {
+select.innerHTML = '<option value="">No calendars found</option>';
+status.textContent = '';
+return;
+}
+select.innerHTML = list.map((c) => `<option value="${escapeHtml(c.summary || '')}">${escapeHtml(c.summary || '(untitled)')}</option>`).join('');
+status.textContent = `Loaded ${list.length} calendar${list.length === 1 ? '' : 's'}.`;
+} catch (err) {
+status.textContent = `Couldn't load calendars: ${err.message || err}`;
+console.error('Calendar list load failed:', err);
+}
+}
+
+function initCalendarListLoader() {
+document.getElementById('load-cal-list-btn').addEventListener('click', loadCalendarOptions);
 }
 
 function initCalendarSync() {
@@ -100,4 +130,4 @@ btn.disabled = false;
 });
 }
 
-export { renderCalendars, initCalendarForm, initCalendarSync };
+export { renderCalendars, initCalendarForm, initCalendarSync, initCalendarListLoader };

@@ -1,6 +1,8 @@
 import { data, queueSave } from '../state.js';
 import { uid, escapeHtml, bindForm, daysUntil } from '../utils.js';
 
+const DEAL_TYPES = ['Mortgage', 'Credit card', 'Loan', 'Insurance', 'Other'];
+
 function renderDealExpiries() {
 const list = document.getElementById('deals-list');
 document.getElementById('deals-count').textContent = data.dealExpiries.length + (data.dealExpiries.length === 1 ? ' deal' : ' deals');
@@ -16,10 +18,8 @@ return da - db;
 
 list.innerHTML = sorted.map((d) => {
 let badgeHtml = '';
-let dateHtml = '<span class="expiry-date">No date set</span>';
 if (d.expiry) {
 const dn = daysUntil(d.expiry);
-dateHtml = `<span class="expiry-date">${escapeHtml(d.expiry)}</span>`;
 if (dn < 0) {
 badgeHtml = `<span class="expiry-badge expired">Expired</span>`;
 } else if (dn <= 60) {
@@ -30,14 +30,16 @@ badgeHtml = `<span class="expiry-badge">${dn}d left</span>`;
 }
 return `<div class="voucher-row" data-deal-row="${d.id}">
 <div class="voucher-id">
-<div class="voucher-name">${escapeHtml(d.name)}</div>
+<input type="text" class="voucher-edit voucher-name-edit" data-field="name" data-deal-id="${d.id}" value="${escapeHtml(d.name)}">
 <div class="voucher-meta">
-<span class="voucher-type">${escapeHtml(d.type)}</span>
+<select class="voucher-edit voucher-type-edit" data-field="type" data-deal-id="${d.id}">
+${DEAL_TYPES.map((t) => `<option value="${t}" ${t === d.type ? 'selected' : ''}>${t}</option>`).join('')}
+</select>
 </div>
 </div>
-${d.notes ? `<span class="voucher-notes">${escapeHtml(d.notes)}</span>` : '<span class="voucher-notes"></span>'}
+<input type="text" class="voucher-edit voucher-notes-edit" data-field="notes" data-deal-id="${d.id}" value="${escapeHtml(d.notes || '')}" placeholder="Notes">
 <div class="voucher-expiry">
-${dateHtml}
+<input type="date" class="voucher-edit expiry-date-edit" data-field="expiry" data-deal-id="${d.id}" value="${escapeHtml(d.expiry || '')}">
 ${badgeHtml}
 </div>
 <div class="voucher-actions">
@@ -46,6 +48,15 @@ ${badgeHtml}
 </div>`;
 }).join('');
 
+list.querySelectorAll('[data-field][data-deal-id]').forEach((el) => {
+el.addEventListener('change', () => {
+const d = data.dealExpiries.find((x) => x.id === el.dataset.dealId);
+if (!d) return;
+d[el.dataset.field] = el.value.trim();
+renderDealExpiries();
+queueSave();
+});
+});
 list.querySelectorAll('[data-del-deal]').forEach((el) => {
 el.addEventListener('click', () => {
 data.dealExpiries = data.dealExpiries.filter((x) => x.id !== el.dataset.delDeal);

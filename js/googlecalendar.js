@@ -64,4 +64,4 @@ status[name] = { found: false, error: err.message, syncedAt: new Date().toISOStr
 return status;
 }
 
-export { syncCalendars };
+export { syncCalendars, listCalendars };

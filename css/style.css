@@ -882,6 +882,26 @@ color:var(--plum);
 }
 .expiry-badge.soon{background:var(--amber-bg);color:var(--amber);}
 .expiry-badge.expired{background:var(--red);color:#fff;}
+
+/* Inline-editable voucher/subscription/deal row fields — look like plain
+text until hovered or focused, so a row stays scannable but every field is
+editable in place rather than only at creation time. */
+.voucher-edit{
+font-family:inherit;
+border:1px solid transparent;
+border-radius:5px;
+padding:2px 4px;
+margin:-2px -4px;
+background:transparent;
+color:inherit;
+}
+.voucher-edit:hover{border-color:var(--line);}
+.voucher-edit:focus{border-color:var(--line);background:var(--card);outline:none;}
+.voucher-name-edit{font-size:14px;font-weight:600;width:100%;}
+.voucher-type-edit{font-family:'IBM Plex Mono',monospace;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);cursor:pointer;}
+.voucher-value-edit{font-size:12px;color:var(--plum);font-weight:500;width:74px;}
+.voucher-notes-edit{flex:2 1 200px;font-size:12px;color:var(--muted);width:100%;}
+.expiry-date-edit{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted);}
 @keyframes flashNew{
 0%{background:var(--sage-bg);}
 100%{background:transparent;}

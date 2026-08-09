@@ -304,11 +304,17 @@ Smart nudges — let Claude pick what's most urgent, important, and overdue, ins
 
 <div class="settings-block">
 <h3>Track a new calendar</h3>
-<div class="add-form" id="calendar-form" style="margin-top:0;padding-top:0;border-top:none;">
-<input type="text" id="cal-name-input" placeholder="Calendar name, as it appears in Google Calendar">
+<div class="sync-row" style="margin-top:0;">
+<button class="sync-btn" id="load-cal-list-btn" type="button">Load my calendars</button>
+<span class="sync-status" id="cal-list-status"></span>
+</div>
+<div class="add-form" id="calendar-form" style="margin-top:10px;padding-top:0;border-top:none;">
+<select id="cal-name-input">
+<option value="">Sign in, then click "Load my calendars"</option>
+</select>
 <button class="add-btn" type="button">Track</button>
 </div>
-<div class="settings-note">Sign in to Google above, then use "Sync calendars" on the Overview tab to pull in each one's next upcoming event.</div>
+<div class="settings-note">Then use "Sync calendars" on the Overview tab to pull in each one's next upcoming event.</div>
 </div>
 
 <div class="settings-block">

@@ -1,6 +1,8 @@
 import { data, queueSave } from '../state.js';
 import { uid, escapeHtml, bindForm, daysUntil } from '../utils.js';
 
+const FREQUENCIES = ['Monthly', 'Yearly', 'Weekly', 'Other'];
+
 function renderSubscriptions() {
 const list = document.getElementById('subscriptions-list');
 document.getElementById('subscriptions-count').textContent = data.subscriptions.length + (data.subscriptions.length === 1 ? ' subscription' : ' subscriptions');
@@ -16,10 +18,8 @@ return da - db;
 
 list.innerHTML = sorted.map((s) => {
 let badgeHtml = '';
-let dateHtml = '<span class="expiry-date">No renewal date set</span>';
 if (s.nextRenewal) {
 const dn = daysUntil(s.nextRenewal);
-dateHtml = `<span class="expiry-date">${escapeHtml(s.nextRenewal)}</span>`;
 if (dn < 0) {
 badgeHtml = `<span class="expiry-badge expired">Update due</span>`;
 } else if (dn <= 7) {
@@ -30,15 +30,17 @@ badgeHtml = `<span class="expiry-badge">${dn}d left</span>`;
 }
 return `<div class="voucher-row" data-subscription-row="${s.id}">
 <div class="voucher-id">
-<div class="voucher-name">${escapeHtml(s.name)}</div>
+<input type="text" class="voucher-edit voucher-name-edit" data-field="name" data-sub-id="${s.id}" value="${escapeHtml(s.name)}">
 <div class="voucher-meta">
-<span class="voucher-type">${escapeHtml(s.frequency)}</span>
-${s.cost ? `<span class="voucher-value">${escapeHtml(s.cost)}</span>` : ''}
+<select class="voucher-edit voucher-type-edit" data-field="frequency" data-sub-id="${s.id}">
+${FREQUENCIES.map((f) => `<option value="${f}" ${f === s.frequency ? 'selected' : ''}>${f}</option>`).join('')}
+</select>
+<input type="text" class="voucher-edit voucher-value-edit" data-field="cost" data-sub-id="${s.id}" value="${escapeHtml(s.cost || '')}" placeholder="Cost">
 </div>
 </div>
-${s.notes ? `<span class="voucher-notes">${escapeHtml(s.notes)}</span>` : '<span class="voucher-notes"></span>'}
+<input type="text" class="voucher-edit voucher-notes-edit" data-field="notes" data-sub-id="${s.id}" value="${escapeHtml(s.notes || '')}" placeholder="Notes">
 <div class="voucher-expiry">
-${dateHtml}
+<input type="date" class="voucher-edit expiry-date-edit" data-field="nextRenewal" data-sub-id="${s.id}" value="${escapeHtml(s.nextRenewal || '')}">
 ${badgeHtml}
 </div>
 <div class="voucher-actions">
@@ -47,6 +49,15 @@ ${badgeHtml}
 </div>`;
 }).join('');
 
+list.querySelectorAll('[data-field][data-sub-id]').forEach((el) => {
+el.addEventListener('change', () => {
+const s = data.subscriptions.find((x) => x.id === el.dataset.subId);
+if (!s) return;
+s[el.dataset.field] = el.value.trim();
+renderSubscriptions();
+queueSave();
+});
+});
 list.querySelectorAll('[data-del-subscription]').forEach((el) => {
 el.addEventListener('click', () => {
 data.subscriptions = data.subscriptions.filter((x) => x.id !== el.dataset.delSubscription);

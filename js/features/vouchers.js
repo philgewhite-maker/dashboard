@@ -1,6 +1,8 @@
 import { data, queueSave } from '../state.js';
 import { uid, escapeHtml, bindForm, daysUntil } from '../utils.js';
 
+const VOUCHER_TYPES = ['Voucher', 'Credit', 'Cheque', 'Refund', 'Other'];
+
 function renderVouchers() {
 const list = document.getElementById('vouchers-list');
 document.getElementById('vouchers-count').textContent = data.vouchers.length + (data.vouchers.length === 1 ? ' item' : ' items');
@@ -16,10 +18,8 @@ return da - db;
 
 list.innerHTML = sorted.map((v) => {
 let badgeHtml = '';
-let dateHtml = '<span class="expiry-date">No expiry set</span>';
 if (v.expiry) {
 const dn = daysUntil(v.expiry);
-dateHtml = `<span class="expiry-date">${escapeHtml(v.expiry)}</span>`;
 if (dn < 0) {
 badgeHtml = `<span class="expiry-badge expired">Expired</span>`;
 } else if (dn <= 30) {
@@ -30,15 +30,17 @@ badgeHtml = `<span class="expiry-badge">${dn}d left</span>`;
 }
 return `<div class="voucher-row" data-voucher-row="${v.id}">
 <div class="voucher-id">
-<div class="voucher-name">${escapeHtml(v.name)}</div>
+<input type="text" class="voucher-edit voucher-name-edit" data-field="name" data-voucher-id="${v.id}" value="${escapeHtml(v.name)}">
 <div class="voucher-meta">
-<span class="voucher-type">${escapeHtml(v.type)}</span>
-${v.value ? `<span class="voucher-value">${escapeHtml(v.value)}</span>` : ''}
+<select class="voucher-edit voucher-type-edit" data-field="type" data-voucher-id="${v.id}">
+${VOUCHER_TYPES.map((t) => `<option value="${t}" ${t === v.type ? 'selected' : ''}>${t}</option>`).join('')}
+</select>
+<input type="text" class="voucher-edit voucher-value-edit" data-field="value" data-voucher-id="${v.id}" value="${escapeHtml(v.value || '')}" placeholder="Value">
 </div>
 </div>
-${v.notes ? `<span class="voucher-notes">${escapeHtml(v.notes)}</span>` : '<span class="voucher-notes"></span>'}
+<input type="text" class="voucher-edit voucher-notes-edit" data-field="notes" data-voucher-id="${v.id}" value="${escapeHtml(v.notes || '')}" placeholder="Notes">
 <div class="voucher-expiry">
-${dateHtml}
+<input type="date" class="voucher-edit expiry-date-edit" data-field="expiry" data-voucher-id="${v.id}" value="${escapeHtml(v.expiry || '')}">
 ${badgeHtml}
 </div>
 <div class="voucher-actions">
@@ -47,6 +49,15 @@ ${badgeHtml}
 </div>`;
 }).join('');
 
+list.querySelectorAll('[data-field][data-voucher-id]').forEach((el) => {
+el.addEventListener('change', () => {
+const v = data.vouchers.find((x) => x.id === el.dataset.voucherId);
+if (!v) return;
+v[el.dataset.field] = el.value.trim();
+renderVouchers();
+queueSave();
+});
+});
 list.querySelectorAll('[data-del-voucher]').forEach((el) => {
 el.addEventListener('click', () => {
 data.vouchers = data.vouchers.filter((x) => x.id !== el.dataset.delVoucher);
