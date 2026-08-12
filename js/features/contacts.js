@@ -8,8 +8,12 @@
 import { data, queueSave, CONTACT_STATUS_LABELS, CONTACT_MATCH_MIN_STAGE } from '../state.js';
 import { escapeHtml } from '../utils.js';
 import { canAttemptGoogleAction, hasContactsWrite } from '../sync/googleauth.js';
-import { listContacts, indexContacts, updateContactBirthday, phoneKey, emailKey, nameKey } from '../googlecontacts.js';
-import { STAGE_RANK } from './connections.js';
+import { listContacts, indexContacts, updateContactBirthday, phoneKey, emailKey, nameKey, widerNameCandidates } from '../googlecontacts.js';
+import { STAGE_RANK, setContactPicker } from './connections.js';
+
+// Hand connections.js the inline picker renderer. Registering it rather than
+// having connections.js import this module keeps the dependency one-way.
+setContactPicker((connId) => candidatePickerHtml(connId), (root) => bindCandidatePickers(root));
 
 // Candidates awaiting confirmation, keyed by connection id. Deliberately not
 // persisted: they're derived from a contacts list that may be stale by the
@@ -86,16 +90,34 @@ linked++;
 return;
 }
 }
-if (candidates && candidates.length) {
+// Exact-name candidates first, then the looser pass appended. The wider
+// search runs even when an exact name DID match, because an exact match
+// is not necessarily the right one: "Katya" matching a contact saved as
+// "Katya PDN" shouldn't hide the "Kat" who is actually her. Offering both
+// and letting you choose beats silently picking the tidier-looking one.
+const suggestions = [];
+const seen = new Set();
+(candidates || []).forEach((c) => {
+if (seen.has(c.resourceName)) return;
+seen.add(c.resourceName);
+suggestions.push({ contact: c, why: 'same name' });
+});
+widerNameCandidates(conn.name, contacts).forEach(({ contact, why }) => {
+if (seen.has(contact.resourceName)) return;
+seen.add(contact.resourceName);
+suggestions.push({ contact, why });
+});
+
+if (suggestions.length) {
 conn.contactStatus = 'review';
-pendingMatches.set(conn.id, candidates);
+pendingMatches.set(conn.id, suggestions);
 review++;
-} else {
+return;
+}
 conn.contactStatus = 'missing';
 conn.contactResourceName = '';
 conn.contactEtag = '';
 missing++;
-}
 });
 
 lastSyncedAt = new Date().toISOString();
@@ -103,9 +125,14 @@ queueSave();
 return { total: contacts.length, linked, review, missing };
 }
 
+function pendingFor(connId) {
+return pendingMatches.get(connId) || [];
+}
+
 function confirmMatch(connId, resourceName) {
 const conn = data.connections.find((c) => c.id === connId);
-const candidate = (pendingMatches.get(connId) || []).find((c) => c.resourceName === resourceName);
+const entry = pendingFor(connId).find((e) => e.contact.resourceName === resourceName);
+const candidate = entry && entry.contact;
 if (!conn || !candidate) return;
 conn.contactStatus = 'linked';
 conn.contactResourceName = candidate.resourceName;
@@ -115,7 +142,9 @@ conn.contactMatchedBy = 'confirmed';
 // merge in this app: what you typed outranks what was imported.
 if (!conn.phone && candidate.phones.length) conn.phone = candidate.phones[0];
 if (!conn.email && candidate.emails.length) conn.email = candidate.emails[0];
-if (!conn.location && candidate.address) conn.location = candidate.address;
+// City, not the full address — Location is a grouping field in
+// Connections Overview, and a street address makes a group of one.
+if (!conn.location && candidate.city) conn.location = candidate.city;
 if (!conn.job && candidate.job) conn.job = candidate.job;
 pendingMatches.delete(connId);
 queueSave();
@@ -145,6 +174,35 @@ return [c.displayName || c.givenName, c.phones[0], c.emails[0], c.job]
 .filter(Boolean).join(' · ');
 }
 
+// Rendered inside the connection's own card, where the photo, age and stage
+// already are — deciding "is this the same person" needs that context, and a
+// separate panel had none of it.
+function candidatePickerHtml(connId) {
+const entries = pendingFor(connId);
+if (entries.length === 0) return '';
+return `<div class="contact-picker">
+<div class="contact-picker-head">Possible Google Contacts match</div>
+${entries.map(({ contact, why }) => `<div class="contact-candidate">
+<span class="contact-candidate-main">
+${escapeHtml(candidateSummary(contact))}
+<span class="contact-candidate-why">${escapeHtml(why)}${contact.sourceType === 'OTHER_CONTACT' ? ' · auto-collected, not saved' : ''}${contact.groups.length ? ' · ' + escapeHtml(contact.groups.join(', ')) : ''}${contact.updateTime ? ' · updated ' + escapeHtml(String(contact.updateTime).slice(0, 10)) : ''}</span>
+</span>
+<button class="sync-btn" type="button" data-confirm-match="${escapeHtml(connId)}" data-resource="${escapeHtml(contact.resourceName)}">That's them</button>
+</div>`).join('')}
+<button class="file-btn" type="button" data-reject-match="${escapeHtml(connId)}">None of these</button>
+</div>`;
+}
+
+// Wires the inline pickers after connections.js has drawn the cards.
+function bindCandidatePickers(root) {
+root.querySelectorAll('[data-confirm-match]').forEach((btn) => {
+btn.addEventListener('click', () => confirmMatch(btn.dataset.confirmMatch, btn.dataset.resource));
+});
+root.querySelectorAll('[data-reject-match]').forEach((btn) => {
+btn.addEventListener('click', () => rejectMatch(btn.dataset.rejectMatch));
+});
+}
+
 function renderContactReview() {
 const el = document.getElementById('contact-review');
 if (!el) return;
@@ -157,37 +215,23 @@ countEl.textContent = lastSyncedAt
 : `${eligibleConnections().length} eligible`;
 }
 
+// The panel is now just the action and a summary — the actual reviewing
+// happens on each connection's own card, next to their photo and details.
 if (pendingMatches.size === 0) {
 el.innerHTML = lastSyncedAt
 ? '<div class="empty">Nothing waiting on you.</div>'
-: '<div class="empty">Sync to match your post-app connections against Google Contacts. Only people at “Moved to WhatsApp” and beyond are checked.</div>';
+: '<div class="empty">Match your post-app connections against Google Contacts. Only people at “Moved to WhatsApp” and beyond are checked.</div>';
 return;
 }
-
-el.innerHTML = [...pendingMatches.entries()].map(([connId, candidates]) => {
-const conn = data.connections.find((c) => c.id === connId);
-if (!conn) return '';
-return `<div class="contact-review-row">
-<div class="contact-review-head">
-<strong>${escapeHtml(conn.name)}</strong>
-<span class="contact-review-meta">${escapeHtml([conn.age, conn.stage, conn.app].filter(Boolean).join(' · '))}</span>
-</div>
-<div class="contact-candidates">
-${candidates.map((c) => `<div class="contact-candidate">
-<span>${escapeHtml(candidateSummary(c))}</span>
-<button class="sync-btn" type="button" data-confirm-match="${escapeHtml(connId)}" data-resource="${escapeHtml(c.resourceName)}">That's them</button>
-</div>`).join('')}
-<button class="file-btn" type="button" data-reject-match="${escapeHtml(connId)}">None of these</button>
-</div>
-</div>`;
-}).join('');
-
-el.querySelectorAll('[data-confirm-match]').forEach((btn) => {
-btn.addEventListener('click', () => confirmMatch(btn.dataset.confirmMatch, btn.dataset.resource));
+el.innerHTML = `<div class="empty">${pendingMatches.size} to review — each one is on its own card below.
+<button class="filter-clear" type="button" id="show-review-only">Show just those</button></div>`;
+const btn = document.getElementById('show-review-only');
+if (btn) {
+btn.addEventListener('click', async () => {
+const conns = await import('./connections.js');
+conns.filterBySearch(CONTACT_STATUS_LABELS.review);
 });
-el.querySelectorAll('[data-reject-match]').forEach((btn) => {
-btn.addEventListener('click', () => rejectMatch(btn.dataset.rejectMatch));
-});
+}
 }
 
 function initContacts() {
@@ -224,5 +268,6 @@ renderContactReview();
 
 export {
 initContacts, renderContactReview, syncContacts, classifyAgainst, isPostAppStage,
+candidatePickerHtml, bindCandidatePickers,
 CONTACT_STATUS_LABELS, hasContactsWrite, updateContactBirthday,
 };

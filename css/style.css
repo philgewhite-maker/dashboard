@@ -860,6 +860,80 @@ white-space:nowrap;
 .contact-badge.linked{background:var(--teal-bg);color:var(--teal);}
 .contact-badge.review{background:var(--amber-bg);color:var(--amber);}
 .contact-badge.missing{background:transparent;border:1px dashed var(--line);color:var(--muted);}
+/* Drill-down mode: the toggle, and the pills showing what's currently
+   narrowing the view. */
+.overview-mode{
+font-size:12px;
+color:var(--muted);
+margin-bottom:10px;
+}
+.overview-mode label{display:flex;align-items:center;gap:7px;cursor:pointer;}
+.facet-bar{
+display:flex;
+align-items:center;
+gap:6px;
+flex-wrap:wrap;
+background:var(--teal-bg);
+border-radius:8px;
+padding:7px 10px;
+margin-bottom:12px;
+}
+.facet-label{
+font-family:'IBM Plex Mono',monospace;
+font-size:11px;
+color:var(--teal);
+margin-right:2px;
+}
+.facet-pill{
+font-family:'Inter',sans-serif;
+font-size:11px;
+background:var(--teal);
+color:#fff;
+border:none;
+border-radius:20px;
+padding:3px 10px;
+cursor:pointer;
+}
+
+.phone-row{display:flex;gap:6px;}
+.phone-row input{flex:1;min-width:0;}
+.dial-code{
+flex:0 0 auto;
+max-width:120px;
+font-family:'Inter',sans-serif;
+font-size:13px;
+border:1px solid var(--line);
+border-radius:6px;
+padding:6px 4px;
+background:var(--card);
+color:var(--ink);
+}
+
+/* Inline match picker, shown on the connection's own card so the photo, age
+   and stage are right there while you decide. */
+.contact-picker{
+background:var(--amber-bg);
+border-radius:8px;
+padding:9px 11px;
+margin-top:8px;
+display:flex;
+flex-direction:column;
+gap:6px;
+}
+.contact-picker-head{
+font-family:'IBM Plex Mono',monospace;
+font-size:10px;
+text-transform:uppercase;
+letter-spacing:.05em;
+color:var(--muted);
+}
+.contact-candidate-main{display:flex;flex-direction:column;gap:2px;min-width:0;}
+.contact-candidate-why{
+font-family:'IBM Plex Mono',monospace;
+font-size:10px;
+color:var(--muted);
+}
+
 .contact-review-row{
 border-top:1px solid var(--line);
 padding:10px 0;

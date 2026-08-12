@@ -243,8 +243,48 @@ Matching rules, in order: phone number, then email, then name. Phone and
 email identify a person, so those link automatically. **A name match never
 links on its own**, even when there's exactly one candidate — the failure
 being avoided is a confident-looking wrong link quietly attaching someone
-else's address book entry. Candidates are shown with phone, email and job so
-two people with the same first name are distinguishable.
+else's address book entry.
+
+Suggestions come from two passes, and **both** run even when the first
+succeeds: an exact-name pass, then a wider one catching shortenings in
+either direction ("Katya" ↔ "Kat"), substrings, and misspellings within two
+letters. An exact match isn't necessarily the right one — a "Katya" saved in
+Google as "Katya PDN" shouldn't hide the "Kat" who is actually her.
+
+Choosing is done on the connection's own card, next to their photo, age and
+stage, since that's the context the decision needs. Each candidate shows its
+phone, email and job, plus why it was suggested and three things from the
+People API metadata: whether it's a contact you **saved** or one Google
+**auto-collected** from your mail, its labels, and when it was last updated.
+There is no contact *creation* date — the API doesn't expose one.
+
+Names are compared with accents folded and Cyrillic romanised, so
+"Zoë"/"Zoe", "Chloé"/"Chloe" and "Катя"/"Katya" match rather than looking
+like different people. The transliteration is deliberately rough common
+usage rather than BGN/PCGN or ISO 9 — the schemes disagree with each other
+anyway, and the goal is only to get close enough to offer for confirmation.
+
+Location is filled from the contact's **city**, not its full address —
+"London" is a useful grouping in Connections Overview, "15 Cholmeley Park
+London N6 5ET" is a group of one. Google returns addresses in structured
+parts, so the city is simply read rather than parsed out.
+
+## Connections Overview modes
+
+The chips work two ways, toggled on the panel:
+
+- **Filter list** (default) — a chip filters the connections below, and
+  every chip always shows its total, so the panel stays a map of everything.
+- **Drill down** — chips become facets that combine. Pick several and you
+  narrow to people matching all of them, with every *other* dimension
+  recounting against that narrowed set. A faceted dimension still shows its
+  own alternatives, so picking "London" doesn't strand you unable to switch
+  to "Paris".
+
+Both answer different questions ("who is in London?" versus "which of my
+London people haven't I contacted?"), which is why it's a toggle rather than
+a decision. Single-value dimensions like Stage replace rather than add a
+second facet, since nobody is in two stages at once.
 
 Phone numbers are compared on their last 9 digits, so `+44 7700 900123`,
 `07700 900123` and `(0770) 090-0123` all match. Connections gained Phone and

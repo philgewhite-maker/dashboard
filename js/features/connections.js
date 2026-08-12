@@ -6,8 +6,8 @@ resizeImageToBlob,
 } from '../utils.js';
 import { MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot } from '../ai.js';
 
-const CONN_STAGES = ['Superswiped', 'Matched', 'Chatting in app', 'Moved to WhatsApp', 'Moved to Telegram', 'Arranged to meet', 'Met in person', 'Faded', 'Archived'];
-const STAGE_RANK = { 'Met in person': 7, 'Arranged to meet': 6, 'Moved to Telegram': 5, 'Moved to WhatsApp': 4, 'Chatting in app': 3, Matched: 2, Superswiped: 1, Faded: 0, Archived: 0 };
+const CONN_STAGES = ['Superswiped', 'Matched', 'Chatting in app', 'Moved to WhatsApp', 'Moved to Telegram', 'Arranged to meet', 'Met in person', 'Dating', 'Faded', 'Archived'];
+const STAGE_RANK = { Dating: 8, 'Met in person': 7, 'Arranged to meet': 6, 'Moved to Telegram': 5, 'Moved to WhatsApp': 4, 'Chatting in app': 3, Matched: 2, Superswiped: 1, Faded: 0, Archived: 0 };
 const RATING_CATS = [['looks', 'Looks'], ['intelligence', 'Intelligence'], ['figure', 'Figure'], ['humour', 'Humour'], ['sex', 'Sex'], ['practicality', 'Practicality']];
 // Where a connection came from. Rendered into every source dropdown from
 // here so the add form, the import picker, and the per-connection editor
@@ -31,6 +31,43 @@ const el = document.getElementById(id);
 if (el) el.innerHTML = appOptions(el.value);
 }
 
+// Dial codes for entering a phone in a form the Contacts match can use.
+// Only ISO code and dial code are stored — the flag is derived, since a flag
+// emoji is just the two letters as regional indicator symbols, so there's no
+// table of images to keep in step with anything.
+const DIAL_CODES = [
+['GB', '+44', 'United Kingdom'], ['IE', '+353', 'Ireland'], ['US', '+1', 'United States'],
+['CA', '+1', 'Canada'], ['FR', '+33', 'France'], ['DE', '+49', 'Germany'],
+['ES', '+34', 'Spain'], ['PT', '+351', 'Portugal'], ['IT', '+39', 'Italy'],
+['CH', '+41', 'Switzerland'], ['AT', '+43', 'Austria'], ['NL', '+31', 'Netherlands'],
+['BE', '+32', 'Belgium'], ['LU', '+352', 'Luxembourg'], ['DK', '+45', 'Denmark'],
+['SE', '+46', 'Sweden'], ['NO', '+47', 'Norway'], ['FI', '+358', 'Finland'],
+['IS', '+354', 'Iceland'], ['PL', '+48', 'Poland'], ['CZ', '+420', 'Czechia'],
+['SK', '+421', 'Slovakia'], ['HU', '+36', 'Hungary'], ['RO', '+40', 'Romania'],
+['BG', '+359', 'Bulgaria'], ['GR', '+30', 'Greece'], ['HR', '+385', 'Croatia'],
+['SI', '+386', 'Slovenia'], ['RS', '+381', 'Serbia'], ['UA', '+380', 'Ukraine'],
+['LT', '+370', 'Lithuania'], ['LV', '+371', 'Latvia'], ['EE', '+372', 'Estonia'],
+['TR', '+90', 'Türkiye'], ['RU', '+7', 'Russia'], ['IL', '+972', 'Israel'],
+['AE', '+971', 'United Arab Emirates'], ['ZA', '+27', 'South Africa'],
+['AU', '+61', 'Australia'], ['NZ', '+64', 'New Zealand'], ['SG', '+65', 'Singapore'],
+['HK', '+852', 'Hong Kong'], ['JP', '+81', 'Japan'], ['KR', '+82', 'South Korea'],
+['CN', '+86', 'China'], ['IN', '+91', 'India'], ['TH', '+66', 'Thailand'],
+['BR', '+55', 'Brazil'], ['AR', '+54', 'Argentina'], ['MX', '+52', 'Mexico'],
+];
+
+// Regional indicator symbols: 'GB' -> 🇬🇧. Renders as a flag anywhere the
+// platform has one, and degrades to two boxed letters where it doesn't,
+// which is still readable.
+function flagEmoji(iso) {
+return iso.toUpperCase().replace(/./g, (ch) => String.fromCodePoint(0x1F1E6 + ch.charCodeAt(0) - 65));
+}
+
+function dialCodeOptions() {
+return '<option value="">＋ code</option>' + DIAL_CODES
+.map(([iso, dial, name]) => `<option value="${dial}" title="${escapeHtml(name)}">${flagEmoji(iso)} ${iso} ${dial}</option>`)
+.join('');
+}
+
 let connectionSearchTerm = '';
 let connectionSortPrimary = 'default';
 let connectionSortSecondary = 'none';
@@ -46,6 +83,41 @@ function isFieldEmpty(c, field) {
 const value = c[field];
 if (Array.isArray(value)) return value.length === 0;
 return !String(value || '').trim();
+}
+
+// An explicit set of ids, used by Overview's drill-down mode — several
+// combined facets can't be written as a single search term.
+let idFilter = null; // { ids: Set, label }
+
+function filterByIds(ids, label) {
+emptyFieldFilter = null;
+connectionSearchTerm = '';
+const search = document.getElementById('conn-search');
+if (search) search.value = '';
+idFilter = { ids: new Set(ids), label };
+renderConnections();
+}
+
+function clearFilters() {
+idFilter = null;
+emptyFieldFilter = null;
+connectionSearchTerm = '';
+const search = document.getElementById('conn-search');
+if (search) search.value = '';
+renderConnections();
+}
+
+// Drives the search box from elsewhere (an Overview chip, the contacts
+// panel) so those places don't each have to know how filtering works.
+function filterBySearch(term) {
+emptyFieldFilter = null;
+idFilter = null;
+connectionSearchTerm = term;
+const search = document.getElementById('conn-search');
+if (search) search.value = term;
+renderConnections();
+const panel = document.getElementById('connections-panel');
+if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 // Called by the Overview "None (n)" chips.
@@ -145,6 +217,14 @@ function renderOverviewRef() {
 import('./overview.js').then((m) => m.renderOverview());
 }
 
+// contacts.js imports from here, so this holds the picker renderer once
+// contacts.js has loaded rather than importing it back and creating a cycle.
+// Before then it renders nothing, which is correct — there are no pending
+// matches until a sync has run anyway.
+let contactPicker = { html: () => '', bind: () => {} };
+function setContactPicker(html, bind) { contactPicker = { html, bind }; }
+function contactPickerHtml(connId) { return contactPicker.html(connId); }
+
 function renderConnections() {
 const list = document.getElementById('connections-list');
 document.getElementById('connections-count').textContent = data.connections.length + (data.connections.length === 1 ? ' connection' : ' connections');
@@ -174,10 +254,25 @@ refreshPhotoTargets();
 return;
 }
 
+if (idFilter) {
+const picked = data.connections.filter((c) => idFilter.ids.has(c.id));
+list.innerHTML = `<div class="filter-banner">${picked.length} matching ${escapeHtml(idFilter.label)} <button class="filter-clear" type="button" id="clear-id-filter">Clear</button></div>`
++ (picked.length === 0 ? '<div class="empty">Nobody matches all of those.</div>' : picked.map(connectionCardHtml).join(''))
++ tagDatalistsHtml();
+document.getElementById('clear-id-filter').addEventListener('click', () => { idFilter = null; renderConnections(); });
+hydratePhotos(list);
+bindConnectionEvents(list);
+refreshPhotoTargets();
+return;
+}
+
 const term = connectionSearchTerm.trim().toLowerCase();
 const filtered = term ? data.connections.filter((c) => {
 const haystack = [
 c.name, c.location, c.job, c.education, c.stage, ageDecade(c.age),
+// So the Connections Overview "Contact match" chips actually filter —
+// they search by their own label, which otherwise matches nothing.
+CONTACT_STATUS_LABELS[c.contactStatus],
 // Hidden sensitive fields stay out of the haystack too — otherwise
 // searching could surface a row *because* of a field you've chosen
 // not to display, with no visible reason why it matched.
@@ -232,6 +327,7 @@ ${overdue ? '<span class="reach-badge">Reach out</span>' : ''}
 <span class="del-x" style="opacity:1;" data-del-conn="${c.id}">&times;</span>
 </div>
 </div>
+${c.contactStatus === 'review' ? contactPickerHtml(c.id) : ''}
 <details class="match-details" data-conn-details="${c.id}" ${expandedConnections.has(c.id) ? 'open' : ''}>
 <summary>Details</summary>
 <div class="details-grid">
@@ -243,7 +339,10 @@ ${overdue ? '<span class="reach-badge">Reach out</span>' : ''}
 <label>Job<input type="text" data-field="job" data-conn-detail="${c.id}" value="${escapeHtml(c.job || '')}"></label>
 <label>Height<input type="text" data-field="height" data-conn-detail="${c.id}" value="${escapeHtml(c.height || '')}"></label>
 <label>Education<input type="text" data-field="education" data-conn-detail="${c.id}" value="${escapeHtml(c.education || '')}"></label>
-<label>Phone<input type="tel" placeholder="Used to match Google Contacts" data-field="phone" data-conn-detail="${c.id}" value="${escapeHtml(c.phone || '')}"></label>
+<label>Phone<span class="phone-row">
+<select class="dial-code" data-dial-for="${c.id}">${dialCodeOptions()}</select>
+<input type="tel" placeholder="Used to match Google Contacts" data-field="phone" data-conn-detail="${c.id}" value="${escapeHtml(c.phone || '')}">
+</span></label>
 <label>Email<input type="email" placeholder="Also used to match" data-field="email" data-conn-detail="${c.id}" value="${escapeHtml(c.email || '')}"></label>
 <label>What I like most<input type="text" data-field="likes" data-conn-detail="${c.id}" value="${escapeHtml(c.likes || '')}"></label>
 <label class="full">Notes<textarea rows="2" data-field="notes" data-conn-detail="${c.id}">${escapeHtml(c.notes || '')}</textarea></label>
@@ -268,6 +367,7 @@ ${data.connections.filter((o) => o.id !== c.id).map((o) => `<option value="${o.i
 }
 
 function bindConnectionEvents(list) {
+contactPicker.bind(list);
 list.querySelectorAll('.priority-star').forEach((star) => {
 star.addEventListener('click', () => {
 const conn = data.connections.find((x) => x.id === star.dataset.conn);
@@ -326,6 +426,21 @@ renderOverviewRef();
 queueSave();
 });
 });
+list.querySelectorAll('[data-dial-for]').forEach((sel) => {
+sel.addEventListener('change', () => {
+const conn = data.connections.find((x) => x.id === sel.dataset.dialFor);
+if (!conn || !sel.value) return;
+const input = list.querySelector(`input[data-field="phone"][data-conn-detail="${sel.dataset.dialFor}"]`);
+// Replace any existing prefix rather than stacking them up, and drop a
+// leading national 0 — "+44 07700…" is not a valid number.
+const rest = String(input.value || '').replace(/^\s*\+\d{1,4}\s*/, '').replace(/^0/, '').trim();
+conn.phone = `${sel.value} ${rest}`.trim();
+input.value = conn.phone;
+sel.value = '';
+queueSave();
+});
+});
+
 list.querySelectorAll('[data-merge-btn]').forEach((btn) => {
 btn.addEventListener('click', async () => {
 const target = data.connections.find((x) => x.id === btn.dataset.mergeBtn);
@@ -846,6 +961,7 @@ renderConnections();
 
 export {
 renderConnections, initConnectionForm, expandConnection, CONN_STAGES,
-initSensitiveFields, setShowSensitiveFields, visibleTagFields, filterByEmptyField,
-STAGE_RANK,
+initSensitiveFields, setShowSensitiveFields, visibleTagFields,
+filterByEmptyField, filterBySearch, filterByIds, clearFilters,
+STAGE_RANK, setContactPicker,
 };

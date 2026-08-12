@@ -8,9 +8,24 @@ import { visibleTagFields } from './connections.js';
 let collapsed = {};
 let openAssigner = null; // { field, key }
 
+// Two ways to use the chips:
+//
+//   Filter list (default) — clicking a chip filters the connections below.
+//     Every chip always shows its total, so it stays a map of everything.
+//   Drill down — chips become facets that combine. Clicking several narrows
+//     to people matching all of them, and every other dimension recounts
+//     against that narrowed set, so you can see what's actually left.
+//
+// Both are useful for different questions ("who is in London?" vs "which of
+// my London people have I not contacted?"), which is why there's a toggle
+// rather than a decision.
+let drillDown = false;
+let facets = []; // [{title, key}]
+
 async function initOverviewPrefs() {
 const settings = await getLocalSettings();
 collapsed = settings.overviewCollapsed || {};
+drillDown = !!settings.overviewDrillDown;
 }
 
 function ageDecade(age) {
@@ -19,13 +34,44 @@ if (isNaN(n)) return null;
 return `${Math.floor(n / 10) * 10}s`;
 }
 
-// Returns the populated groups plus everyone with nothing at all for this
-// dimension, which is what the "None" chip surfaces — the fastest way to
-// find records still missing a nationality, a location, a tag.
-function groupConnectionsBy(getKeys) {
+// One place defining what the chips group by, so faceting can re-apply the
+// same rule that produced a chip in order to filter by it.
+function dimensions() {
+return [
+{ title: 'Stage', getKeys: (c) => [c.stage], field: null, emptyField: 'stage' },
+{ title: 'Location', getKeys: (c) => [c.location], field: null, emptyField: 'location' },
+{ title: 'Age', getKeys: (c) => [ageDecade(c.age)], field: null, emptyField: 'age' },
+{ title: 'Job', getKeys: (c) => [c.job], field: null, emptyField: 'job' },
+{ title: 'Contact match', getKeys: (c) => [CONTACT_STATUS_LABELS[c.contactStatus]], field: null, emptyField: null },
+...visibleTagFields().map((f) => ({
+title: f.label, getKeys: (c) => c[f.field] || [], field: f.field, emptyField: f.field,
+})),
+];
+}
+
+function keysFor(dim, c) {
+return (dim.getKeys(c) || []).filter(Boolean);
+}
+
+function matchesFacet(c, facet, dims) {
+const dim = dims.find((d) => d.title === facet.title);
+return dim ? keysFor(dim, c).includes(facet.key) : true;
+}
+
+// Connections matching every active facet, optionally ignoring facets on one
+// dimension. Ignoring its own facets is what lets a faceted dimension still
+// show its siblings — otherwise picking "London" would leave Location
+// showing only London, and you could never switch to Paris.
+function connectionsMatching(dims, exceptTitle) {
+const active = facets.filter((f) => f.title !== exceptTitle);
+if (active.length === 0) return data.connections;
+return data.connections.filter((c) => active.every((f) => matchesFacet(c, f, dims)));
+}
+
+function groupConnectionsBy(list, getKeys) {
 const groups = {};
 const none = [];
-data.connections.forEach((c) => {
+list.forEach((c) => {
 const keys = (getKeys(c) || []).filter(Boolean);
 if (keys.length === 0) { none.push(c); return; }
 keys.forEach((k) => {
@@ -36,30 +82,33 @@ groups[k].push(c);
 return { groups, none };
 }
 
-// `field` is the connection array property behind these chips, or null for
-// derived groupings (stage, age decade) that aren't directly assignable.
-// `field` is the connection array property behind these chips, or null for
-// derived groupings (age decade) that aren't directly assignable.
-// `emptyField` is the property the "None" chip tests, which for single-value
-// dimensions like Location differs from `field`.
-function overviewDimension(title, { groups, none }, field, emptyField) {
+function isFaceted(title, key) {
+return facets.some((f) => f.title === title && f.key === key);
+}
+
+function overviewDimension(dim, { groups, none }) {
 const keys = Object.keys(groups).sort((a, b) => groups[b].length - groups[a].length);
-if (keys.length === 0 && none.length === 0) return '';
-const isCollapsed = !!collapsed[title];
+const activeHere = facets.filter((f) => f.title === dim.title);
+if (keys.length === 0 && none.length === 0 && activeHere.length === 0) return '';
+const isCollapsed = !!collapsed[dim.title];
+const field = dim.field;
+
 const chips = keys.map((k) => {
 const isOpen = openAssigner && openAssigner.field === field && openAssigner.key === k;
 const assigner = isOpen ? assignerHtml(field, k, groups[k]) : '';
+const on = isFaceted(dim.title, k);
 return `<span class="overview-chip-wrap">
-<button class="overview-chip${isOpen ? ' active' : ''}" data-overview-key="${escapeHtml(k)}" data-overview-field="${escapeHtml(field || '')}">${escapeHtml(k)} (${groups[k].length})</button>
+<button class="overview-chip${isOpen || on ? ' active' : ''}" data-overview-key="${escapeHtml(k)}" data-overview-title="${escapeHtml(dim.title)}" data-overview-field="${escapeHtml(field || '')}">${escapeHtml(k)} (${groups[k].length})</button>
 ${assigner}
 </span>`;
 }).join('')
-+ (none.length && emptyField
-? `<button class="overview-chip none" data-overview-none="${escapeHtml(emptyField)}" data-overview-none-label="${escapeHtml(title)}">None (${none.length})</button>`
++ (none.length && dim.emptyField
+? `<button class="overview-chip none" data-overview-none="${escapeHtml(dim.emptyField)}" data-overview-none-label="${escapeHtml(dim.title)}">None (${none.length})</button>`
 : '');
+
 return `<div class="overview-group">
-<button class="overview-head" type="button" data-collapse="${escapeHtml(title)}">
-<span class="overview-caret">${isCollapsed ? '▸' : '▾'}</span>${escapeHtml(title)}
+<button class="overview-head" type="button" data-collapse="${escapeHtml(dim.title)}">
+<span class="overview-caret">${isCollapsed ? '▸' : '▾'}</span>${escapeHtml(dim.title)}
 <span class="overview-head-count">${keys.length}</span>
 </button>
 <div class="overview-chips"${isCollapsed ? ' hidden' : ''}>${chips}</div>
@@ -75,12 +124,9 @@ const memberIds = new Set(members.map((c) => c.id));
 const options = data.connections
 .filter((c) => !memberIds.has(c.id))
 .sort((a, b) => a.name.localeCompare(b.name))
-// Same-name connections are common enough (and the whole reason the merge
-// flow exists) that age and source both earn their place here — without
-// them two rows read as identical and you can't tell which you're picking.
 .map((c) => `<option value="${c.id}">${escapeHtml(c.name)}${c.age ? ', ' + escapeHtml(c.age) : ''}${c.app ? ' — ' + escapeHtml(c.app) : ''}</option>`)
 .join('');
-if (!options) return `<span class="assigner"><span class="assigner-note">Everyone already has this.</span></span>`;
+if (!options) return '<span class="assigner"><span class="assigner-note">Everyone already has this.</span></span>';
 return `<span class="assigner">
 <select class="assigner-select" data-assign-field="${escapeHtml(field)}" data-assign-key="${escapeHtml(key)}">
 <option value="">Add someone&hellip;</option>
@@ -90,35 +136,57 @@ ${options}
 </span>`;
 }
 
+function activeFacetsHtml() {
+if (!drillDown || facets.length === 0) return '';
+const matching = connectionsMatching(dimensions()).length;
+return `<div class="facet-bar">
+<span class="facet-label">${matching} match${matching === 1 ? '' : 'es'}</span>
+${facets.map((f, i) => `<button class="facet-pill" type="button" data-drop-facet="${i}">${escapeHtml(f.title)}: ${escapeHtml(f.key)} ×</button>`).join('')}
+<button class="filter-clear" type="button" id="clear-facets">Clear all</button>
+</div>`;
+}
+
 function renderOverview() {
 const el = document.getElementById('overview-content');
 if (data.connections.length === 0) {
 el.innerHTML = '<div class="empty">Add some connections to see them grouped here.</div>';
 return;
 }
-const sections = [
-overviewDimension('Stage', groupConnectionsBy((c) => [c.stage]), null, 'stage'),
-overviewDimension('Location', groupConnectionsBy((c) => [c.location]), null, 'location'),
-overviewDimension('Age', groupConnectionsBy((c) => [ageDecade(c.age)]), null, 'age'),
-overviewDimension('Job', groupConnectionsBy((c) => [c.job]), null, 'job'),
-// Only the post-app people are ever matched, so an unset status here means
-// "not applicable", not "not found" — hence the filter rather than a None
-// chip, which would otherwise count every early-stage match as missing.
-overviewDimension('Contact match', groupConnectionsBy((c) => [CONTACT_STATUS_LABELS[c.contactStatus]]), null, null),
-...visibleTagFields().map((f) => overviewDimension(f.label, groupConnectionsBy((c) => c[f.field] || []), f.field, f.field)),
-];
+const dims = dimensions();
 
-el.innerHTML = sections.filter(Boolean).join('')
-|| '<div class="empty">Add locations, languages, nationality, ages, or tags to your connections to see them grouped here.</div>';
+const modeHtml = `<div class="overview-mode">
+<label><input type="checkbox" id="drilldown-toggle"${drillDown ? ' checked' : ''}> Drill down — chips combine and filter each other</label>
+</div>`;
 
-el.querySelectorAll('[data-collapse]').forEach((head) => {
-head.addEventListener('click', () => {
-const title = head.dataset.collapse;
-collapsed[title] = !collapsed[title];
-setLocalSetting('overviewCollapsed', collapsed);
+const sections = dims.map((dim) => {
+// Each dimension counts against everything EXCEPT its own facets, so its
+// alternatives stay visible and switchable.
+const scope = drillDown ? connectionsMatching(dims, dim.title) : data.connections;
+return overviewDimension(dim, groupConnectionsBy(scope, dim.getKeys));
+}).filter(Boolean).join('');
+
+el.innerHTML = modeHtml + activeFacetsHtml() + (sections
+|| '<div class="empty">Nothing matches those filters.</div>');
+
+document.getElementById('drilldown-toggle').addEventListener('change', (e) => {
+drillDown = e.target.checked;
+facets = [];
+setLocalSetting('overviewDrillDown', drillDown);
 renderOverview();
+applyToList();
+});
+
+el.querySelectorAll('[data-drop-facet]').forEach((pill) => {
+pill.addEventListener('click', () => {
+facets.splice(parseInt(pill.dataset.dropFacet, 10), 1);
+renderOverview();
+applyToList();
 });
 });
+const clearBtn = document.getElementById('clear-facets');
+if (clearBtn) {
+clearBtn.addEventListener('click', () => { facets = []; renderOverview(); applyToList(); });
+}
 
 el.querySelectorAll('[data-overview-none]').forEach((chip) => {
 chip.addEventListener('click', async () => {
@@ -132,18 +200,29 @@ renderOverview();
 el.querySelectorAll('.overview-chip:not(.none)').forEach((chip) => {
 chip.addEventListener('click', () => {
 const key = chip.dataset.overviewKey;
+const title = chip.dataset.overviewTitle;
 const field = chip.dataset.overviewField;
-// Filtering the list below is the primary action and always happens;
-// opening the assigner is the secondary one, and only for tag fields.
-const searchInput = document.getElementById('conn-search');
-searchInput.value = key;
-searchInput.dispatchEvent(new Event('input'));
+
+if (drillDown) {
+// Toggle this facet. Selecting a different value in a dimension that
+// already has one replaces it, since a connection can only be in one
+// stage or age band — two facets there would match nobody.
+const existingSame = facets.findIndex((f) => f.title === title && f.key === key);
+if (existingSame >= 0) facets.splice(existingSame, 1);
+else {
+if (!field) facets = facets.filter((f) => f.title !== title);
+facets.push({ title, key });
+}
+renderOverview();
+applyToList();
+return;
+}
+
+import('./connections.js').then((m) => m.filterBySearch(key));
 if (field) {
 const alreadyOpen = openAssigner && openAssigner.field === field && openAssigner.key === key;
 openAssigner = alreadyOpen ? null : { field, key };
 renderOverview();
-} else {
-searchInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 });
 });
@@ -162,6 +241,17 @@ queueSave();
 import('./connections.js').then((m) => m.renderConnections());
 renderOverview();
 });
+});
+}
+
+// Several facets can't be expressed in the single search box, so drill-down
+// hands the connections list an explicit set of ids instead.
+function applyToList() {
+import('./connections.js').then((m) => {
+if (!drillDown || facets.length === 0) { m.clearFilters(); return; }
+const dims = dimensions();
+const matching = connectionsMatching(dims);
+m.filterByIds(matching.map((c) => c.id), facets.map((f) => `${f.title}: ${f.key}`).join(' + '));
 });
 }
 
