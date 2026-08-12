@@ -1,0 +1,7 @@
+# Belt and braces. sync.php stores the document ABOVE public_html by default,
+# so it is already unreachable over the web. This only matters if you later
+# point $DATA_FILE somewhere inside public_html — without it, your entire
+# dashboard would be downloadable by anyone who guessed the filename.
+<FilesMatch "\.(json|lock|tmp)$">
+    Require all denied
+</FilesMatch>

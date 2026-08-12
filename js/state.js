@@ -34,6 +34,21 @@ dealExpiries: [],
 };
 }
 
+// The multi-value (array) fields on a connection that behave as tags: edited
+// as chips on the connection, grouped into chips in Connections Overview, and
+// bulk-assignable from there. Declared once here, next to the migrations that
+// guarantee they exist, so the editor and the overview can't drift apart.
+// `sensitive` fields stay hidden (and out of search and grouping) unless this
+// device opts in — the data still syncs, only the display is per-device.
+const TAG_FIELDS = [
+{ field: 'dateLocations', label: 'Date locations', sensitive: false },
+{ field: 'dateEvents', label: 'Date events', sensitive: false },
+{ field: 'languages', label: 'Language', sensitive: false },
+{ field: 'nationality', label: 'Nationality', sensitive: false },
+{ field: 'tags', label: 'Tags', sensitive: false },
+{ field: 'sexTags', label: 'Sex', sensitive: true },
+];
+
 function blankData() {
 return { habits: [], goals: [], jobs: [], connections: [], calendars: [], calendarStatus: {}, vouchers: [], businessIdeas: [], subscriptions: [], enhancementIdeas: [], dealExpiries: [] };
 }
@@ -47,6 +62,13 @@ let onExternalUpdate = () => {};
 // against the current on-disk revision on every save — see persist() for
 // why this exists.
 let knownRev = 0;
+
+// Fired after a local save that actually changed something, so the live-sync
+// layer knows there's something to upload. Deliberately NOT fired when the
+// save came from applying a remote document — that would bounce the same
+// data straight back to the server and, with two devices, never settle.
+let onLocalChange = () => {};
+function setLocalChangeHandler(fn) { onLocalChange = fn; }
 
 function setSaveStatusHandler(fn) { onSaveStatus = fn; }
 // Called when persist() finds newer data on disk than this session knew
@@ -93,7 +115,12 @@ if (!Array.isArray(c.languages)) c.languages = [];
 if (!Array.isArray(c.nationality)) c.nationality = [];
 if (!Array.isArray(c.todos)) c.todos = [];
 if (!Array.isArray(c.tags)) c.tags = [];
+if (!Array.isArray(c.dateLocations)) c.dateLocations = [];
+if (!Array.isArray(c.dateEvents)) c.dateEvents = [];
+if (!Array.isArray(c.sexTags)) c.sexTags = [];
 if (typeof c.job !== 'string') c.job = '';
+if (typeof c.height !== 'string') c.height = '';
+if (typeof c.education !== 'string') c.education = '';
 if (typeof c.driveLink !== 'string') c.driveLink = '';
 if (!c.ratings || typeof c.ratings !== 'object') c.ratings = {};
 });
@@ -114,7 +141,7 @@ if (typeof idea.status !== 'string') idea.status = 'Idea';
 // pull that in and re-render instead of clobbering it. This also happens
 // to be the same conflict check a future sync layer needs, so it's not
 // throwaway work.
-async function persist() {
+async function persist(opts = {}) {
 try {
 const onDiskRev = (await kvGet(REV_KEY)) || 0;
 if (onDiskRev > knownRev) {
@@ -131,6 +158,7 @@ knownRev = onDiskRev + 1;
 await kvSet(DATA_KEY, data);
 await kvSet(REV_KEY, knownRev);
 onSaveStatus('ok');
+if (opts.notify !== false) onLocalChange();
 } catch (e) {
 onSaveStatus('error');
 }
@@ -212,11 +240,11 @@ URL.revokeObjectURL(url);
 // Shared by "import a backup file" and "pull from OneDrive" — both are
 // "replace local data with this external document" operations that need
 // the same defaults-filling and persistence.
-async function replaceData(parsed) {
+async function replaceData(parsed, opts = {}) {
 const base = blankData();
 data = Object.assign({}, base, parsed);
 migrate();
-await persist();
+await persist({ notify: opts.fromRemote !== true });
 }
 
 async function importBackup(file) {
@@ -226,8 +254,8 @@ await replaceData(JSON.parse(text));
 
 export {
 data, sampleData, loadData, migrate, persist, queueSave, flushSave, setSaveStatusHandler,
-setExternalUpdateHandler, getLocalSettings, setLocalSetting, computeStreak, reachOutThreshold,
-isDormantStage, exportBackup, importBackup, replaceData, DATA_KEY,
+setExternalUpdateHandler, setLocalChangeHandler, getLocalSettings, setLocalSetting, computeStreak, reachOutThreshold,
+isDormantStage, exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS,
 };
 
 // `data` above is exported by binding, but ES module live-bindings only

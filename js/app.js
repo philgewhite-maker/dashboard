@@ -4,7 +4,8 @@ import { switchTab } from './tabs.js';
 import { initHabitForm } from './features/habits.js';
 import { initGoalForm } from './features/goals.js';
 import { initJobForm } from './features/jobs.js';
-import { initConnectionForm } from './features/connections.js';
+import { initConnectionForm, initSensitiveFields } from './features/connections.js';
+import { initOverviewPrefs } from './features/overview.js';
 import { initCalendarForm, initCalendarSync, initCalendarListLoader } from './features/calendars.js';
 import { initVoucherForm } from './features/vouchers.js';
 import { initSubscriptionForm } from './features/subscriptions.js';
@@ -15,6 +16,7 @@ import { initNudges } from './features/nudges.js';
 import { initSettings } from './features/settings.js';
 import { initGoogleAccount } from './features/googleaccount.js';
 import { initMail } from './features/mail.js';
+import { initAutoSync } from './sync/autosync.js';
 
 function initTabs() {
 document.querySelectorAll('[data-tab-btn]').forEach((btn) => {
@@ -61,6 +63,10 @@ document.getElementById('today-date').textContent = new Date().toLocaleDateStrin
 initSaveNote();
 initSaveFlush();
 await loadData();
+// Both read device-local display preferences that renderAll() depends on
+// (which tag fields are visible, which overview sections are folded), so
+// they have to land before the first paint or it renders once wrong.
+await Promise.all([initSensitiveFields(), initOverviewPrefs()]);
 renderAll();
 
 initTabs();
@@ -81,6 +87,9 @@ initEnhancementForm();
 initNudges();
 await initSettings();
 registerServiceWorker();
+// Last, and deliberately not awaited: it does network I/O, and nothing else
+// on the page should wait on a slow or unreachable server to become usable.
+initAutoSync();
 }
 
 main();

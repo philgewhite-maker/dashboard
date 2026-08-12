@@ -26,6 +26,8 @@ const CORE_ASSETS = [
 './js/sync/config.js',
 './js/sync/googleauth.js',
 './js/sync/googledrive.js',
+'./js/sync/selfhost.js',
+'./js/sync/autosync.js',
 './js/googlecalendar.js',
 './js/googlemail.js',
 './manifest.webmanifest',

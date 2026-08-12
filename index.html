@@ -23,6 +23,7 @@
 <span class="google-bar-dot"></span>
 <button class="google-bar-signout" id="sync-signout-btn" type="button">Sign out</button>
 </span>
+<span class="live-sync-status" id="live-sync-status"></span>
 </div>
 <div class="date" id="today-date"></div>
 </header>
@@ -262,6 +263,34 @@ Stored only in this browser's local storage on this device — never synced, nev
 <input type="checkbox" id="smart-nudges-toggle">
 Smart nudges — let Claude pick what's most urgent, important, and overdue, instead of a random pick (uses the API key above)
 </label>
+<div class="sync-row" style="margin-top:12px;">
+<span class="settings-note" style="margin:0;font-weight:500;">API usage this month</span>
+<button class="sync-btn" id="refresh-usage-btn" type="button">Refresh</button>
+</div>
+<div id="usage-summary"></div>
+</div>
+
+<div class="settings-block">
+<h3>Private fields</h3>
+<label class="settings-note" style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0;">
+<input type="checkbox" id="sensitive-fields-toggle">
+Show the "Sex" field on connections and in Connections Overview
+</label>
+<div class="settings-note">Off by default. This only controls what's shown on this device — anything already recorded stays saved and still syncs; it just isn't displayed, grouped, or searchable while hidden.</div>
+</div>
+
+<div class="settings-block">
+<h3>Live sync (your own server)</h3>
+<div class="settings-note" style="margin:0 0 8px;">Saves changes to your own hosting automatically, a couple of seconds after you stop typing, and picks up changes from your other devices. No sign-in, so nothing expires. Leave both boxes empty to stay on manual Google Drive push/pull below.</div>
+<label for="sync-url-input" style="font-size:13px;font-weight:500;display:block;margin-bottom:6px;">Sync URL</label>
+<input type="text" id="sync-url-input" class="settings-input" placeholder="https://georgewhiteeuropean.co.uk/sync.php">
+<label for="sync-secret-input" style="font-size:13px;font-weight:500;display:block;margin:10px 0 6px;">Sync secret</label>
+<input type="password" id="sync-secret-input" class="settings-input" placeholder="the same string as $SECRET in sync.php">
+<div class="sync-row" style="margin-top:10px;">
+<button class="sync-btn" id="sync-test-btn" type="button">Test &amp; start syncing</button>
+<span class="sync-status" id="sync-test-status"></span>
+</div>
+<div class="settings-note">Stored only on this device, never exported in a backup and never committed to the repo. Enter the same pair on each device you use.</div>
 </div>
 
 <div class="settings-block">

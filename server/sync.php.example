@@ -1,0 +1,152 @@
+<?php
+declare(strict_types=1);
+
+/**
+ * Dashboard sync endpoint.
+ *
+ * Two operations, both authenticated with a shared secret:
+ *   GET  -> {rev, updatedAt, data}          read the current document
+ *   POST -> {rev, data}                     write, but only if `rev` still
+ *                                           matches the server's — otherwise
+ *                                           409 with the newer document.
+ *
+ * That `rev` check is the whole point. Every save rewrites the entire
+ * document, so without it a phone save would silently erase a desktop save
+ * made seconds earlier. Refusing a stale write and handing back the newer
+ * copy means the client can notice and adopt it instead of clobbering it.
+ *
+ * Upload to your Krystal hosting (cPanel -> File Manager) and set the two
+ * values below. See README.md, "Live sync to your own server".
+ */
+
+// ---- Configuration ---------------------------------------------------
+
+// A long random string. The dashboard sends it on every request; anything
+// that knows it can read and overwrite all your data, so treat it like a
+// password. Generate one with: openssl rand -hex 32
+$SECRET = 'PUT-A-LONG-RANDOM-STRING-HERE';
+
+// Where the document lives. Defaults to one directory ABOVE this script,
+// which on cPanel means outside public_html — so the file itself is not
+// reachable over the web even if the .htaccess is ever lost. Only change
+// this if you know the new location is not web-served.
+$DATA_FILE = dirname(__DIR__) . '/dashboard-data.json';
+
+// A browser will only let the dashboard call this endpoint from an origin
+// listed here. Add wherever you actually load the app from. (If you serve
+// the dashboard from this same domain, cross-origin rules don't apply at
+// all and this list is irrelevant.)
+$ALLOWED_ORIGINS = [
+    'https://philgewhite-maker.github.io',
+    'http://localhost:8743',
+];
+
+// ---- End of configuration --------------------------------------------
+
+$origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+if ($origin !== '' && in_array($origin, $ALLOWED_ORIGINS, true)) {
+    header('Access-Control-Allow-Origin: ' . $origin);
+    // Responses differ per origin, so caches must not reuse one for another.
+    header('Vary: Origin');
+}
+header('Access-Control-Allow-Headers: Content-Type, X-Sync-Secret');
+header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+header('Access-Control-Max-Age: 86400');
+header('Content-Type: application/json');
+header('Cache-Control: no-store');
+
+// CORS preflight: must answer before the auth check, since the browser
+// sends it without the secret header.
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
+    http_response_code(204);
+    exit;
+}
+
+function fail(int $code, string $message): void {
+    http_response_code($code);
+    echo json_encode(['error' => $message]);
+    exit;
+}
+
+$provided = $_SERVER['HTTP_X_SYNC_SECRET'] ?? '';
+if ($SECRET === '' || $SECRET === 'PUT-A-LONG-RANDOM-STRING-HERE') {
+    fail(500, 'Server not configured: set $SECRET in sync.php');
+}
+// hash_equals compares in constant time, so a wrong secret can't be
+// recovered by timing how long the rejection takes.
+if (!is_string($provided) || !hash_equals($SECRET, $provided)) {
+    fail(401, 'Bad or missing sync secret');
+}
+
+function read_store(string $file): array {
+    $empty = ['rev' => 0, 'updatedAt' => null, 'data' => null];
+    if (!is_file($file)) return $empty;
+    $raw = file_get_contents($file);
+    if ($raw === false || $raw === '') return $empty;
+    $parsed = json_decode($raw, true);
+    if (!is_array($parsed) || !array_key_exists('rev', $parsed)) return $empty;
+    return [
+        'rev' => (int) $parsed['rev'],
+        'updatedAt' => $parsed['updatedAt'] ?? null,
+        'data' => $parsed['data'] ?? null,
+    ];
+}
+
+$method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+
+if ($method === 'GET') {
+    echo json_encode(read_store($DATA_FILE));
+    exit;
+}
+
+if ($method !== 'POST') {
+    fail(405, 'Use GET or POST');
+}
+
+$body = json_decode(file_get_contents('php://input') ?: '', true);
+if (!is_array($body) || !array_key_exists('data', $body) || !array_key_exists('rev', $body)) {
+    fail(400, 'Expected a JSON body of {rev, data}');
+}
+
+// Serialise writers. Without this, two devices posting at the same moment
+// could both read rev 7, both see their own rev as current, and both write
+// rev 8 — the exact race the rev check exists to prevent.
+$lock = fopen($DATA_FILE . '.lock', 'c');
+if ($lock === false) fail(500, 'Could not open lock file — check directory permissions');
+flock($lock, LOCK_EX);
+
+$current = read_store($DATA_FILE);
+if ((int) $body['rev'] !== $current['rev']) {
+    flock($lock, LOCK_UN);
+    fclose($lock);
+    http_response_code(409);
+    echo json_encode([
+        'error' => 'Out of date',
+        'rev' => $current['rev'],
+        'updatedAt' => $current['updatedAt'],
+        'data' => $current['data'],
+    ]);
+    exit;
+}
+
+$next = [
+    'rev' => $current['rev'] + 1,
+    'updatedAt' => gmdate('c'),
+    'data' => $body['data'],
+];
+
+// Write to a temp file and rename: rename is atomic, so a reader can never
+// catch a half-written document, and a crash mid-write leaves the previous
+// version intact rather than a truncated one.
+$tmp = $DATA_FILE . '.tmp';
+if (file_put_contents($tmp, json_encode($next)) === false) {
+    flock($lock, LOCK_UN);
+    fclose($lock);
+    fail(500, 'Could not write data file — check directory permissions');
+}
+rename($tmp, $DATA_FILE);
+
+flock($lock, LOCK_UN);
+fclose($lock);
+
+echo json_encode(['rev' => $next['rev'], 'updatedAt' => $next['updatedAt']]);

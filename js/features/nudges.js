@@ -214,7 +214,7 @@ const items = pool.map((n, i) => ({ i, text: n.text, ...n.signals }));
 const prompt = `You're picking which reminders to surface on someone's personal dashboard home screen. Below is a JSON array of candidate reminders, each with an index "i", the reminder text, and signal fields explaining why it might matter: daysSince/daysUntil (age or time to a deadline), priority (1-5, how much they personally rated that person/goal), progress (% complete, lower means more room to matter), priorStreak (a habit streak that just broke — bigger is a bigger loss), stage/kind (category context). Choose the ${TOP_N} most worth showing RIGHT NOW. Balance genuine time pressure (something expiring or happening soon), importance (high priority/rating items), and neglect (things aged the longest) — don't just pick the single biggest number in one field. Avoid picking near-duplicate items about the same person or thing. Respond with ONLY a JSON array of the chosen "i" values, most important first, e.g. [3,0,7,1]. No other text.
 
 ${JSON.stringify(items)}`;
-const { data: order } = await callTextJson(prompt, 300, RANK_MODEL);
+const { data: order } = await callTextJson(prompt, 300, RANK_MODEL, 'Smart nudges');
 if (!Array.isArray(order)) throw new Error('Unexpected response shape from ranking call');
 const picked = order.filter((i) => Number.isInteger(i) && i >= 0 && i < pool.length).map((i) => pool[i]);
 return picked.slice(0, TOP_N);

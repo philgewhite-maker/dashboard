@@ -1,0 +1,12 @@
+# This repo is PUBLIC (it's what GitHub Pages serves), so anything committed
+# here is world-readable. sync.php holds the shared secret once configured,
+# so the working copy is ignored and only sync.php.example — which carries
+# the placeholder — is tracked. Copy the example, fill in your secret, and
+# upload that; never rename it back.
+server/sync.php
+
+# The synced document and its lock/temp files, in case anyone ever points
+# $DATA_FILE inside the repo folder while testing.
+dashboard-data.json
+*.json.lock
+*.json.tmp

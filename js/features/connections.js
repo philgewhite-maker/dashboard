@@ -1,4 +1,4 @@
-import { data, queueSave, reachOutThreshold, isDormantStage } from '../state.js';
+import { data, queueSave, reachOutThreshold, isDormantStage, getLocalSettings, TAG_FIELDS } from '../state.js';
 import { photoPut, photoDelete, photoUrl } from '../db.js';
 import {
 uid, todayStr, daysSince, escapeHtml, avatarHtml, hydratePhotos, scrollAndFlash, bindForm,
@@ -9,11 +9,45 @@ import { MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreen
 const CONN_STAGES = ['Superswiped', 'Matched', 'Chatting in app', 'Moved to WhatsApp', 'Moved to Telegram', 'Arranged to meet', 'Met in person', 'Faded', 'Archived'];
 const STAGE_RANK = { 'Met in person': 7, 'Arranged to meet': 6, 'Moved to Telegram': 5, 'Moved to WhatsApp': 4, 'Chatting in app': 3, Matched: 2, Superswiped: 1, Faded: 0, Archived: 0 };
 const RATING_CATS = [['looks', 'Looks'], ['intelligence', 'Intelligence'], ['figure', 'Figure'], ['humour', 'Humour'], ['sex', 'Sex'], ['practicality', 'Practicality']];
+// Where a connection came from. Rendered into every source dropdown from
+// here so the add form, the import picker, and the per-connection editor
+// can't drift apart.
+const CONN_APPS = ['Bumble', 'Tinder', 'Hinge', 'WhatsApp', 'Telegram', 'Instagram', 'Real life', 'Other'];
+// Sources that are an actual app with a recognisable screenshot layout —
+// worth naming in the vision prompt. "Real life"/"Other" describe how you
+// met, not a UI, so they're deliberately left out of that hint.
+const SCREENSHOT_APPS = new Set(['Bumble', 'Tinder', 'Hinge', 'WhatsApp', 'Telegram', 'Instagram']);
+
+// Keeps an unrecognised existing value (older data, or a source since removed
+// from the list) as a selectable option instead of silently switching the
+// connection to whatever happens to be first.
+function appOptions(selected) {
+const list = !selected || CONN_APPS.includes(selected) ? CONN_APPS : [selected, ...CONN_APPS];
+return list.map((a) => `<option value="${escapeHtml(a)}"${a === selected ? ' selected' : ''}>${escapeHtml(a)}</option>`).join('');
+}
+
+function fillAppSelect(id) {
+const el = document.getElementById(id);
+if (el) el.innerHTML = appOptions(el.value);
+}
 
 let connectionSearchTerm = '';
 let connectionSortPrimary = 'default';
 let connectionSortSecondary = 'none';
 const expandedConnections = new Set();
+
+// Whether this device shows the `sensitive` tag fields (see TAG_FIELDS).
+// Device-local, not part of the synced document — the notes themselves sync
+// like everything else, this only controls whether they're on screen here.
+let showSensitiveFields = false;
+async function initSensitiveFields() {
+const settings = await getLocalSettings();
+showSensitiveFields = !!settings.showSensitiveFields;
+}
+function setShowSensitiveFields(v) { showSensitiveFields = !!v; }
+function visibleTagFields() {
+return TAG_FIELDS.filter((f) => showSensitiveFields || !f.sensitive);
+}
 
 const SORT_FIELDS = {
 default: { getValue: (c) => (isDormantStage(c.stage) ? -999 : daysSince(c.lastContact) - reachOutThreshold(c.priority)) },
@@ -74,8 +108,11 @@ return;
 const term = connectionSearchTerm.trim().toLowerCase();
 const filtered = term ? data.connections.filter((c) => {
 const haystack = [
-c.name, c.location, c.job, c.stage, ageDecade(c.age),
-...(c.tags || []), ...(c.languages || []), ...(c.nationality || []),
+c.name, c.location, c.job, c.education, c.stage, ageDecade(c.age),
+// Hidden sensitive fields stay out of the haystack too — otherwise
+// searching could surface a row *because* of a field you've chosen
+// not to display, with no visible reason why it matched.
+...visibleTagFields().flatMap((f) => c[f.field] || []),
 ].filter(Boolean).join(' ').toLowerCase();
 return haystack.includes(term);
 }) : data.connections;
@@ -97,11 +134,12 @@ list.innerHTML = sorted.map((c) => {
 const since = daysSince(c.lastContact);
 const overdue = !isDormantStage(c.stage) && since >= reachOutThreshold(c.priority);
 const stars = [1, 2, 3, 4, 5].map((n) => `<svg class="star priority-star ${n <= c.priority ? 'filled' : ''}" data-conn="${c.id}" data-star="${n}" viewBox="0 0 20 20" fill="currentColor"><path d="M10 1l2.6 5.9 6.4.6-4.8 4.3 1.4 6.2L10 14.9 4.4 18l1.4-6.2L1 7.5l6.4-.6z"/></svg>`).join('');
+const nameMeta = [c.age, c.location].map((s) => String(s || '').trim()).filter(Boolean).join(' · ');
 return `<div class="match-card" data-conn-row="${c.id}">
 <div class="match-row">
 ${avatarHtml(c.photoId, c.name)}
 <div class="match-id">
-<div class="match-name">${escapeHtml(c.name)}${c.age ? ', ' + escapeHtml(c.age) : ''}</div>
+<div class="match-name">${escapeHtml(c.name)}${nameMeta ? ` <span class="match-meta">${escapeHtml(nameMeta)}</span>` : ''}</div>
 <div class="app-tag">${escapeHtml(c.app)}</div>
 </div>
 <div class="stars">${stars}</div>
@@ -120,20 +158,31 @@ ${overdue ? '<span class="reach-badge">Reach out</span>' : ''}
 <details class="match-details" data-conn-details="${c.id}" ${expandedConnections.has(c.id) ? 'open' : ''}>
 <summary>Details</summary>
 <div class="details-grid">
+<label>Name<input type="text" data-field="name" data-conn-detail="${c.id}" value="${escapeHtml(c.name)}"></label>
+<label>Source<select data-field="app" data-conn-detail="${c.id}">${appOptions(c.app)}</select></label>
 <label>Age<input type="text" data-field="age" data-conn-detail="${c.id}" value="${escapeHtml(c.age || '')}"></label>
 <label>Location<input type="text" data-field="location" data-conn-detail="${c.id}" value="${escapeHtml(c.location || '')}"></label>
 <label>Kids<input type="text" data-field="kids" data-conn-detail="${c.id}" value="${escapeHtml(c.kids || '')}"></label>
 <label>Job<input type="text" data-field="job" data-conn-detail="${c.id}" value="${escapeHtml(c.job || '')}"></label>
+<label>Height<input type="text" data-field="height" data-conn-detail="${c.id}" value="${escapeHtml(c.height || '')}"></label>
+<label>Education<input type="text" data-field="education" data-conn-detail="${c.id}" value="${escapeHtml(c.education || '')}"></label>
 <label>What I like most<input type="text" data-field="likes" data-conn-detail="${c.id}" value="${escapeHtml(c.likes || '')}"></label>
 <label class="full">Notes<textarea rows="2" data-field="notes" data-conn-detail="${c.id}">${escapeHtml(c.notes || '')}</textarea></label>
-<label class="full">Languages<div class="tag-editor">${tagChips(c.languages, c.id, 'languages')}</div></label>
-<label class="full">Nationality<div class="tag-editor">${tagChips(c.nationality, c.id, 'nationality')}</div></label>
-<label class="full">Tags<div class="tag-editor">${tagChips(c.tags, c.id, 'tags')}</div></label>
+${visibleTagFields().map((f) => `<label class="full${f.sensitive ? ' sensitive-field' : ''}">${escapeHtml(f.label)}<div class="tag-editor">${tagChips(c[f.field], c.id, f.field)}</div></label>`).join('')}
 <label class="full">Ratings<div class="ratings-block">${RATING_CATS.map(([cat, lbl]) => ratingStars(lbl, cat, c.id, (c.ratings && c.ratings[cat]) || 0)).join('')}</div></label>
 <label class="full">Things to do<div>${todoListHtml(c)}</div></label>
 <label class="full">Photos${galleryHtml(c)}</label>
 <label class="full">Drive/OneDrive link (optional, for full-res photos filed elsewhere)<input type="text" placeholder="Paste a share link" data-field="driveLink" data-conn-detail="${c.id}" value="${escapeHtml(c.driveLink || '')}"></label>
 ${c.driveLink ? `<div class="full"><a href="${escapeHtml(c.driveLink)}" target="_blank" rel="noopener" style="font-size:12px;color:var(--rose);">Open full-res photos &#8599;</a></div>` : ''}
+<label class="full">Merge a duplicate into this one
+<div class="merge-row">
+<select data-merge-source="${c.id}">
+<option value="">Pick a duplicate&hellip;</option>
+${data.connections.filter((o) => o.id !== c.id).map((o) => `<option value="${o.id}">${escapeHtml(o.name)}${o.age ? ', ' + escapeHtml(o.age) : ''}${o.app ? ' — ' + escapeHtml(o.app) : ''}</option>`).join('')}
+</select>
+<button class="todo-add-btn" type="button" data-merge-btn="${c.id}">Merge in</button>
+</div>
+</label>
 </div>
 </details>
 </div>`;
@@ -193,10 +242,25 @@ list.querySelectorAll('[data-conn-detail]').forEach((el) => {
 el.addEventListener('change', () => {
 const conn = data.connections.find((x) => x.id === el.dataset.connDetail);
 conn[el.dataset.field] = el.value;
-if (el.dataset.field === 'age') {
-const nameEl = el.closest('.match-card').querySelector('.match-name');
-if (nameEl) nameEl.textContent = conn.name + (conn.age ? ', ' + conn.age : '');
-}
+// These are echoed elsewhere in the card (the name line, the source tag,
+// every merge dropdown), so a full re-render is the only way to keep
+// those honest. `change` fires on blur, not per keystroke, so this costs
+// one render per edit rather than one per character.
+if (['name', 'app', 'age', 'location'].includes(el.dataset.field)) renderConnections();
+renderOverviewRef();
+queueSave();
+});
+});
+list.querySelectorAll('[data-merge-btn]').forEach((btn) => {
+btn.addEventListener('click', async () => {
+const target = data.connections.find((x) => x.id === btn.dataset.mergeBtn);
+const select = list.querySelector(`[data-merge-source="${btn.dataset.mergeBtn}"]`);
+const source = data.connections.find((x) => x.id === select.value);
+if (!target || !source) return;
+if (!confirm(`Merge "${source.name}" into "${target.name}"?\n\nEverything from "${source.name}" — photos, notes, ratings, tags, to-dos — is folded in, keeping "${target.name}"'s values wherever both have one. "${source.name}" is then removed.\n\nThis can't be undone.`)) return;
+mergeConnectionInto(target, source);
+data.connections = data.connections.filter((x) => x.id !== source.id);
+renderConnections();
 renderOverviewRef();
 queueSave();
 });
@@ -324,6 +388,8 @@ document.body.appendChild(box);
 }
 
 function initConnectionForm() {
+fillAppSelect('conn-app-input');
+fillAppSelect('import-app-input');
 bindForm('connection-form', () => {
 const nameInput = document.getElementById('conn-name-input');
 const appInput = document.getElementById('conn-app-input');
@@ -332,8 +398,10 @@ if (!name) return;
 const newId = uid();
 data.connections.push({
 id: newId, name, app: appInput.value, priority: 3, stage: 'Matched', lastContact: todayStr(),
-photoId: null, photoIds: [], age: '', location: '', kids: '', job: '', likes: '', notes: '',
-languages: [], nationality: [], todos: [], tags: [], ratings: {}, driveLink: '',
+photoId: null, photoIds: [], age: '', location: '', kids: '', job: '', height: '', education: '',
+likes: '', notes: '',
+languages: [], nationality: [], todos: [], tags: [], dateLocations: [], dateEvents: [], sexTags: [],
+ratings: {}, driveLink: '',
 });
 nameInput.value = '';
 renderConnections();
@@ -387,7 +455,7 @@ const existingHtml = matches.map((m) => `
 ${avatarHtml(m.photoId, m.name, 'sm')}
 <span class="compare-caption">${escapeHtml(existingMatchCaption(m))}</span>
 </div>`).join('');
-const updateOptions = matches.map((m) => `<option value="update:${m.id}">Same person &mdash; update ${escapeHtml(m.name)} (${escapeHtml(existingMatchCaption(m))})</option>`).join('');
+const updateOptions = matches.map((m) => `<option value="update:${m.id}">Same person &mdash; merge into ${escapeHtml(m.name)} (${escapeHtml(existingMatchCaption(m))})</option>`).join('');
 const tag = matches.length > 1 ? `${matches.length} existing people share this name` : 'same name already tracked';
 return `<div class="candidate-row ambiguous" data-idx="${idx}">
 <div class="compare">
@@ -412,6 +480,13 @@ return `<label class="candidate-row" data-idx="${idx}">
 </label>`;
 }
 
+// The source picked next to the import buttons, but only when it names an
+// app whose layout the model can actually use as a hint.
+function screenshotAppHint() {
+const app = document.getElementById('import-app-input').value;
+return SCREENSHOT_APPS.has(app) ? app : null;
+}
+
 function initImport() {
 const status = document.getElementById('import-status');
 const candidateList = document.getElementById('candidate-list');
@@ -422,7 +497,7 @@ if (!file) return;
 candidateList.innerHTML = '';
 status.textContent = 'Reading screenshot…';
 await withImportStatus(status, async () => {
-const { candidates, truncated } = await extractMatchesFromScreenshot(file);
+const { candidates, truncated } = await extractMatchesFromScreenshot(file, screenshotAppHint());
 if (candidates.length === 0) { status.textContent = 'No people found in that screenshot.'; return; }
 const truncatedNote = truncated ? ' (the screenshot had more people than fit in one response — the rest were skipped; try cropping the screenshot shorter and importing the remainder separately)' : '';
 status.textContent = `Found ${candidates.length} ${candidates.length === 1 ? 'person' : 'people'}${truncatedNote} — review below:`;
@@ -437,7 +512,7 @@ if (files.length === 0) return;
 candidateList.innerHTML = '';
 status.textContent = `Reading ${files.length} profile screenshot${files.length === 1 ? '' : 's'}…`;
 await withImportStatus(status, async () => {
-const results = await Promise.allSettled(files.map((f) => extractProfileFromScreenshot(f)));
+const results = await Promise.allSettled(files.map((f) => extractProfileFromScreenshot(f, screenshotAppHint())));
 const profiles = results.filter((r) => r.status === 'fulfilled').map((r) => r.value);
 const failures = results.filter((r) => r.status === 'rejected').map((r) => r.reason);
 failures.forEach((err) => console.error('Profile screenshot import failed:', err));
@@ -459,7 +534,7 @@ async function renderCandidateReview(candidateList, candidates, isProfile) {
 candidateList.innerHTML = candidates.map((cand, idx) => {
 const matches = data.connections.filter((c) => c.name.toLowerCase() === String(cand.name).toLowerCase());
 const extra = isProfile
-? [cand.age, cand.job, (cand.languages || []).join('/'), cand.bio].filter(Boolean).join(' · ')
+? [cand.age, cand.height, cand.location, cand.job, cand.education, (cand.languages || []).join('/'), cand.bio].filter(Boolean).join(' · ')
 : (cand.stage ? `Detected stage: ${cand.stage}` : '');
 return candidateRowHtml(idx, cand.name, cand.age, matches, extra);
 }).join('') + '<button class="add-btn" id="confirm-import-btn" type="button" style="margin-top:6px;align-self:flex-start;">Add / update selected</button>';
@@ -523,10 +598,63 @@ if (!photoId) photoId = pid;
 }
 data.connections.push({
 id, name: cand.name, app, priority: 3, stage: cand.stage || 'Matched', lastContact: todayStr(),
-photoId, photoIds, age: cand.age || '', location: '', kids: cand.kids || '', job: cand.job || '',
+photoId, photoIds, age: cand.age || '', location: cand.location || '', kids: cand.kids || '', job: cand.job || '',
+height: cand.height || '', education: cand.education || '',
 likes: '', notes: cand.bio || '', languages: cand.languages || [], nationality: cand.nationality || [],
-todos: [], tags: [], ratings: {}, driveLink: '',
+todos: [], tags: [], dateLocations: [], dateEvents: [], sexTags: [], ratings: {}, driveLink: '',
 });
+}
+
+const SCALAR_MERGE_FIELDS = ['age', 'location', 'kids', 'job', 'height', 'education', 'likes', 'driveLink'];
+
+// Adds anything in `values` that isn't already there, case-insensitively, so
+// merging "English" into ["english"] doesn't produce a near-duplicate chip.
+function unionInto(targetArr, values) {
+const seen = new Set(targetArr.map((v) => String(v).trim().toLowerCase()));
+(values || []).forEach((v) => {
+const key = String(v).trim().toLowerCase();
+if (!key || seen.has(key)) return;
+seen.add(key);
+targetArr.push(v);
+});
+}
+
+// Folds `source` into `target` field by field, so a duplicate is never a
+// pick-one-and-lose-the-rest choice. Scalars only fill gaps — `target` is the
+// record being kept, so its values win wherever both sides have one — while
+// arrays, notes, photos, to-dos and ratings accumulate. Caller removes
+// `source` afterwards; note its photo blobs are deliberately NOT deleted,
+// since `target` now references them.
+function mergeConnectionInto(target, source) {
+SCALAR_MERGE_FIELDS.forEach((k) => {
+if (!String(target[k] || '').trim() && String(source[k] || '').trim()) target[k] = source[k];
+});
+TAG_FIELDS.forEach(({ field }) => {
+if (!Array.isArray(target[field])) target[field] = [];
+unionInto(target[field], source[field]);
+});
+const sourceNotes = String(source.notes || '').trim();
+const targetNotes = String(target.notes || '').trim();
+if (sourceNotes && sourceNotes !== targetNotes) {
+target.notes = targetNotes ? `${targetNotes}\n${sourceNotes}` : sourceNotes;
+}
+if (!Array.isArray(target.photoIds)) target.photoIds = [];
+(source.photoIds || []).forEach((pid) => { if (!target.photoIds.includes(pid)) target.photoIds.push(pid); });
+if (!target.photoId) target.photoId = target.photoIds[0] || null;
+if (!Array.isArray(target.todos)) target.todos = [];
+(source.todos || []).forEach((t) => {
+if (!target.todos.some((x) => x.text.trim().toLowerCase() === String(t.text).trim().toLowerCase())) target.todos.push(t);
+});
+if (!target.ratings) target.ratings = {};
+RATING_CATS.forEach(([cat]) => {
+if (!target.ratings[cat] && source.ratings && source.ratings[cat]) target.ratings[cat] = source.ratings[cat];
+});
+if (!target.priority && source.priority) target.priority = source.priority;
+if ((STAGE_RANK[source.stage] ?? 0) > (STAGE_RANK[target.stage] ?? 0)) target.stage = source.stage;
+// Keep whichever contact is more recent — merging two records shouldn't
+// make someone look staler than they actually are and trigger a false
+// "reach out" nudge.
+if (source.lastContact && (!target.lastContact || source.lastContact > target.lastContact)) target.lastContact = source.lastContact;
 }
 
 async function applyCandidateUpdate(existing, cand, isProfile) {
@@ -537,19 +665,27 @@ await photoPut(pid, blob);
 existing.photoIds.push(pid);
 if (!existing.photoId) existing.photoId = pid;
 }
-if (cand.age) existing.age = cand.age;
+// Same merge semantics as mergeConnectionInto: fill gaps, never overwrite.
+// What you typed yourself outranks what a model read off a screenshot.
+const incoming = {
+age: cand.age, location: cand.location, job: cand.job, kids: cand.kids,
+height: cand.height, education: cand.education,
+};
+SCALAR_MERGE_FIELDS.forEach((k) => {
+if (!String(existing[k] || '').trim() && String(incoming[k] || '').trim()) existing[k] = incoming[k];
+});
+if (isProfile) {
+const bio = String(cand.bio || '').trim();
+const notes = String(existing.notes || '').trim();
+if (bio && bio !== notes) existing.notes = notes ? `${notes}\n${bio}` : bio;
+unionInto(existing.languages, cand.languages);
+unionInto(existing.nationality, cand.nationality);
+}
 // Only move the stage forward, never back — a screenshot re-import
 // shouldn't undo progress you've logged manually since (e.g. re-scanning
 // an old "New Matches" screenshot after you've already met up).
 if (cand.stage && (STAGE_RANK[cand.stage] ?? 0) > (STAGE_RANK[existing.stage] ?? 0)) {
 existing.stage = cand.stage;
-}
-if (isProfile) {
-if (cand.job) existing.job = cand.job;
-if (cand.kids) existing.kids = cand.kids;
-if (cand.bio) existing.notes = existing.notes ? existing.notes + ' | ' + cand.bio : cand.bio;
-(cand.languages || []).forEach((l) => { if (!existing.languages.includes(l)) existing.languages.push(l); });
-(cand.nationality || []).forEach((n) => { if (!existing.nationality.includes(n)) existing.nationality.push(n); });
 }
 }
 
@@ -558,4 +694,7 @@ expandedConnections.add(id);
 renderConnections();
 }
 
-export { renderConnections, initConnectionForm, expandConnection, CONN_STAGES };
+export {
+renderConnections, initConnectionForm, expandConnection, CONN_STAGES,
+initSensitiveFields, setShowSensitiveFields, visibleTagFields,
+};

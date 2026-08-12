@@ -4,11 +4,63 @@
 // This only works because of the `anthropic-dangerous-direct-browser-access`
 // header — normal server-side calls don't need it, but a client-only app
 // with no backend does. See README for the tradeoffs.
-import { getLocalSettings } from './state.js';
+import { getLocalSettings, setLocalSetting } from './state.js';
 import { fileToBase64, loadImage, cropThumbnailToBlob } from './utils.js';
 
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const DEFAULT_MODEL = 'claude-opus-5';
+
+// Anthropic list prices in USD per million tokens. Only ever used for the
+// rough spend estimate shown in Settings — nothing functional depends on it,
+// so a stale entry costs you an inaccurate number, not a broken feature.
+// Update here if prices change; an unknown model shows tokens but no cost
+// rather than guessing.
+const PRICES_PER_MTOK = {
+'claude-opus-5': { input: 5, output: 25 },
+'claude-sonnet-5': { input: 3, output: 15 },
+'claude-haiku-4-5': { input: 1, output: 5 },
+'claude-haiku-4-5-20251001': { input: 1, output: 5 },
+};
+
+function currentMonthKey() { return new Date().toISOString().slice(0, 7); }
+
+// Usage is bucketed by month, then by purpose+model, so Settings can show
+// "photo import cost this much, nudges cost that much" and price each at the
+// right rate. Stored in device-local settings (never exported or synced) —
+// it describes this device's API spend, not your dashboard data.
+async function recordUsage(purpose, model, usage) {
+if (!usage) return;
+const month = currentMonthKey();
+const settings = await getLocalSettings();
+const all = { ...(settings.apiUsage || {}) };
+const monthEntry = { ...(all[month] || {}) };
+const key = `${purpose}|${model}`;
+const prev = monthEntry[key] || { calls: 0, input: 0, output: 0 };
+monthEntry[key] = {
+calls: prev.calls + 1,
+input: prev.input + (usage.input_tokens || 0),
+output: prev.output + (usage.output_tokens || 0),
+};
+all[month] = monthEntry;
+await setLocalSetting('apiUsage', all);
+}
+
+// Rolls the stored buckets for one month into display rows plus a total.
+// `cost` is null for a model missing from PRICES_PER_MTOK, which the caller
+// renders as "—" rather than as $0.
+function summarizeUsage(apiUsage, month) {
+const entry = (apiUsage || {})[month] || {};
+let totalCost = 0;
+let anyUnpriced = false;
+const rows = Object.entries(entry).map(([key, v]) => {
+const [purpose, model] = key.split('|');
+const price = PRICES_PER_MTOK[model];
+const cost = price ? (v.input / 1e6) * price.input + (v.output / 1e6) * price.output : null;
+if (cost === null) anyUnpriced = true; else totalCost += cost;
+return { purpose, model, calls: v.calls, input: v.input, output: v.output, cost };
+}).sort((a, b) => (b.cost || 0) - (a.cost || 0));
+return { rows, totalCost, anyUnpriced };
+}
 
 class MissingKeyError extends Error {
 constructor() { super('No Anthropic API key set. Add one in Settings.'); this.name = 'MissingKeyError'; }
@@ -72,7 +124,7 @@ if (salvaged) return { data: salvaged, truncated: true };
 throw new Error(`Response wasn't JSON: ${stripped.slice(0, 200)}`);
 }
 
-async function callAnthropic(content, maxTokens, modelOverride) {
+async function callAnthropic(content, maxTokens, modelOverride, purpose) {
 const settings = await getLocalSettings();
 const apiKey = (settings.anthropicApiKey || '').trim();
 if (!apiKey) throw new MissingKeyError();
@@ -110,6 +162,10 @@ try { detail = JSON.parse(body).error?.message || body; } catch (e) { /* not JSO
 throw new Error(`Anthropic API error ${res.status}: ${detail.slice(0, 300)}`);
 }
 const result = await res.json();
+// Record before parsing: the call was billed whether or not the JSON that
+// came back turns out to be usable, so a parse failure shouldn't quietly
+// under-report spend.
+await recordUsage(purpose || 'other', model, result.usage);
 if (result.stop_reason === 'max_tokens') {
 console.warn('Response was truncated at max_tokens — the JSON may be incomplete.', result);
 }
@@ -127,14 +183,14 @@ async function callVision(base64, mediaType, promptText, maxTokens) {
 return callAnthropic([
 { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
 { type: 'text', text: promptText },
-], maxTokens);
+], maxTokens, null, 'Photo import');
 }
 
 // Text-only Claude call, no image — used for reasoning-over-JSON tasks like
 // ranking nudges. modelOverride lets a cheap/fast task (like ranking) skip
 // past the user's chosen vision model without touching their Settings.
-async function callTextJson(promptText, maxTokens, modelOverride) {
-return callAnthropic([{ type: 'text', text: promptText }], maxTokens, modelOverride);
+async function callTextJson(promptText, maxTokens, modelOverride, purpose) {
+return callAnthropic([{ type: 'text', text: promptText }], maxTokens, modelOverride, purpose || 'other');
 }
 
 // maxTokens defaults are generous on purpose: output tokens are cheap
@@ -158,8 +214,8 @@ const PROFILE_MAX_TOKENS = 2000;
 const BAND_TARGET_HEIGHT = 4000;
 const BAND_OVERLAP = 220;
 
-function matchesPrompt(isBand) {
-return 'This is a screenshot of a dating app matches or chat list'
+function matchesPrompt(isBand, app) {
+return `This is a screenshot of ${app ? `the ${app} app's` : 'a dating app'} matches or chat list`
 + (isBand ? ', showing one vertical section of a longer scrolling screenshot' : '')
 + '. For each distinct person visible, return their display name, their age if shown next to the name, a tight bounding box around ONLY their small circular avatar photo (not the name, text, or row background) as fractions of THIS IMAGE (0 to 1, top-left origin, keys x,y,w,h), and their stage: "Matched" if they appear in a row of just avatars with no message preview (e.g. a "New Matches" strip) — meaning you haven\'t started chatting; "Chatting in app" if their row shows a message preview/snippet or timestamp of a conversation, meaning you\'re already messaging.'
 + ' Estimate each avatar box relative to that row\'s name text rather than guessing its absolute position on the page: first locate the name you just read, then place the box immediately next to it (usually to its left) with the box\'s vertical center matching the name text\'s vertical center — anchoring to the name you\'re already reading is far more reliable than an independent guess at where a row falls in a long, uniform list. The box should be a tight square around just the circle — err on the side of too small rather than too large, since a box that\'s too tall will bleed into the next row.'
@@ -214,7 +270,7 @@ return out;
 // Screenshot of a matches/chat list — many small avatars + names. Long
 // screenshots are sliced into overlapping bands (see planBands) so bounding
 // boxes stay accurate; each band is a separate, independent vision call.
-async function extractMatchesFromScreenshot(file) {
+async function extractMatchesFromScreenshot(file, app) {
 const base64 = await fileToBase64(file);
 const mediaType = file.type || 'image/png';
 const dataUrl = `data:${mediaType};base64,${base64}`;
@@ -225,7 +281,7 @@ const isBanded = bands.length > 1;
 const settled = await Promise.allSettled(bands.map(async (band) => {
 const bandBase64 = isBanded ? await sliceToBase64(img, band.y0, band.h) : base64;
 const bandMediaType = isBanded ? 'image/png' : mediaType;
-const { data: raw, truncated } = await callVision(bandBase64, bandMediaType, matchesPrompt(isBanded), MATCHES_MAX_TOKENS);
+const { data: raw, truncated } = await callVision(bandBase64, bandMediaType, matchesPrompt(isBanded, app), MATCHES_MAX_TOKENS);
 if (!Array.isArray(raw)) return { people: [], truncated: false };
 const people = raw.filter((r) => r.bbox).map((r) => ({
 ...r,
@@ -257,11 +313,12 @@ return { candidates, truncated };
 
 // Screenshot of ONE person's full profile page — richer fields, possibly
 // several photos.
-async function extractProfileFromScreenshot(file) {
+async function extractProfileFromScreenshot(file, app) {
 const base64 = await fileToBase64(file);
 const mediaType = file.type || 'image/png';
 const dataUrl = `data:${mediaType};base64,${base64}`;
-const prompt = 'This is a screenshot of ONE person\'s dating app profile page. Extract what\'s visible: name, age, a short list of languages they speak (array), a short list of nationalities (array, empty if not stated), whether they mention having kids (short phrase or empty), their job/occupation (empty if not shown), a one or two sentence bio/about-me summary, and rough bounding boxes (fractions 0 to 1 of the full image, keys x,y,w,h) around each distinct profile photo visible in the screenshot (there may be several). Return ONLY a JSON object, no other text, no markdown fences, in this exact shape: {"name":"Alex","age":"29","languages":["English"],"nationality":[],"kids":"","job":"","bio":"","photoBoxes":[{"x":0.1,"y":0.05,"w":0.8,"h":0.4}]}. Use empty string/array if something is not visible or unsure.';
+const prompt = `This is a screenshot of ONE person's ${app ? `${app} ` : 'dating app '}profile page.`
++ ' Extract what\'s visible: name, age, their height exactly as written (e.g. "5\'7\\"" or "170cm", empty if not shown), their education or university (empty if not shown), a short list of languages they speak (array), a short list of nationalities (array, empty if not stated), whether they mention having kids (short phrase or empty), their job/occupation (empty if not shown), their location or city (empty if not shown), a one or two sentence bio/about-me summary, and rough bounding boxes (fractions 0 to 1 of the full image, keys x,y,w,h) around each distinct profile photo visible in the screenshot (there may be several). Return ONLY a JSON object, no other text, no markdown fences, in this exact shape: {"name":"Alex","age":"29","height":"","education":"","languages":["English"],"nationality":[],"kids":"","job":"","location":"","bio":"","photoBoxes":[{"x":0.1,"y":0.05,"w":0.8,"h":0.4}]}. Use empty string/array if something is not visible or unsure — do not guess.';
 const [{ data: raw }, img] = await Promise.all([
 callVision(base64, mediaType, prompt, PROFILE_MAX_TOKENS),
 loadImage(dataUrl),
@@ -275,13 +332,19 @@ if (blob) photoBlobs.push(blob);
 return {
 name: raw.name || 'unidentified',
 age: raw.age || '',
+height: raw.height || '',
+education: raw.education || '',
 languages: Array.isArray(raw.languages) ? raw.languages : [],
 nationality: Array.isArray(raw.nationality) ? raw.nationality : [],
 kids: raw.kids || '',
 job: raw.job || '',
+location: raw.location || '',
 bio: raw.bio || '',
 photoBlobs,
 };
 }
 
-export { MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot, callTextJson, DEFAULT_MODEL };
+export {
+MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot, callTextJson,
+DEFAULT_MODEL, summarizeUsage, currentMonthKey,
+};

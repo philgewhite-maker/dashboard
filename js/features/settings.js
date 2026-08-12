@@ -1,7 +1,43 @@
 import { data, getLocalSettings, setLocalSetting, exportBackup, importBackup } from '../state.js';
 import { renderAll } from '../render-all.js';
+import { escapeHtml } from '../utils.js';
+import { summarizeUsage, currentMonthKey } from '../ai.js';
+import { setShowSensitiveFields } from './connections.js';
+import { pullRemote } from '../sync/selfhost.js';
+import { restartAutoSync } from '../sync/autosync.js';
 import { canAttemptGoogleAction } from '../sync/googleauth.js';
 import { getRemoteInfo, getRemoteCounts, countsOf, pushToGoogleDrive, pullFromGoogleDrive } from '../sync/googledrive.js';
+
+// Spend is only ever an estimate: it's computed from the token counts the
+// API reports multiplied by list prices baked into ai.js, so it ignores
+// discounts, batch pricing, and any price change since. Good enough to spot
+// "nudges are costing more than I thought", not an invoice.
+async function renderUsage() {
+const el = document.getElementById('usage-summary');
+if (!el) return;
+const settings = await getLocalSettings();
+const month = currentMonthKey();
+const { rows, totalCost, anyUnpriced } = summarizeUsage(settings.apiUsage, month);
+if (rows.length === 0) {
+el.innerHTML = '<div class="settings-note" style="margin:0;">No API calls yet this month.</div>';
+return;
+}
+const fmt = (n) => n.toLocaleString();
+el.innerHTML = `<table class="usage-table">
+<thead><tr><th>What</th><th>Calls</th><th>In</th><th>Out</th><th>Est. cost</th></tr></thead>
+<tbody>
+${rows.map((r) => `<tr>
+<td>${escapeHtml(r.purpose)}<span class="usage-model">${escapeHtml(r.model)}</span></td>
+<td>${fmt(r.calls)}</td>
+<td>${fmt(r.input)}</td>
+<td>${fmt(r.output)}</td>
+<td>${r.cost === null ? '&mdash;' : '$' + r.cost.toFixed(2)}</td>
+</tr>`).join('')}
+</tbody>
+<tfoot><tr><td>Total, ${escapeHtml(month)}</td><td></td><td></td><td></td><td>$${totalCost.toFixed(2)}${anyUnpriced ? '+' : ''}</td></tr></tfoot>
+</table>
+<div class="settings-note" style="margin:6px 0 0;">Estimated from reported token counts at list prices${anyUnpriced ? ', excluding models with no price on file' : ''}. Counted on this device only.</div>`;
+}
 
 async function initSettings() {
 const keyInput = document.getElementById('anthropic-key-input');
@@ -45,7 +81,73 @@ status.textContent = "Couldn't read that file — make sure it's a dashboard bac
 e.target.value = '';
 });
 
+initLiveSync(settings);
+
+const sensitiveToggle = document.getElementById('sensitive-fields-toggle');
+sensitiveToggle.checked = !!settings.showSensitiveFields;
+sensitiveToggle.addEventListener('change', async () => {
+await setLocalSetting('showSensitiveFields', sensitiveToggle.checked);
+setShowSensitiveFields(sensitiveToggle.checked);
+renderAll();
+});
+
+document.getElementById('refresh-usage-btn').addEventListener('click', renderUsage);
+await renderUsage();
+
 initDriveBackup();
+}
+
+// The URL/secret pair is saved as you type (debounced), but syncing only
+// (re)starts when you press Test — otherwise a half-typed URL would fire a
+// stream of failing requests on every keystroke.
+function initLiveSync(settings) {
+const urlInput = document.getElementById('sync-url-input');
+const secretInput = document.getElementById('sync-secret-input');
+const testBtn = document.getElementById('sync-test-btn');
+const status = document.getElementById('sync-test-status');
+urlInput.value = settings.syncUrl || '';
+secretInput.value = settings.syncSecret || '';
+
+let saveTimer = null;
+const queueFieldSave = () => {
+clearTimeout(saveTimer);
+saveTimer = setTimeout(() => {
+setLocalSetting('syncUrl', urlInput.value.trim());
+setLocalSetting('syncSecret', secretInput.value.trim());
+}, 400);
+};
+urlInput.addEventListener('input', queueFieldSave);
+secretInput.addEventListener('input', queueFieldSave);
+
+testBtn.addEventListener('click', async () => {
+clearTimeout(saveTimer);
+const url = urlInput.value.trim();
+const secret = secretInput.value.trim();
+await setLocalSetting('syncUrl', url);
+await setLocalSetting('syncSecret', secret);
+if (!url || !secret) {
+status.textContent = 'Live sync turned off — both boxes need a value.';
+return;
+}
+if (!url.startsWith('https://') && !url.startsWith('http://localhost')) {
+status.textContent = 'Use an https:// URL — browsers block insecure requests from the hosted app.';
+return;
+}
+testBtn.disabled = true;
+status.textContent = 'Testing…';
+try {
+const remote = await pullRemote();
+status.textContent = remote.data === null
+? 'Connected. Server is empty — this device\'s data will be uploaded now.'
+: `Connected. Server has revision ${remote.rev}, last saved ${remote.updatedAt ? new Date(remote.updatedAt).toLocaleString() : 'unknown'}.`;
+await restartAutoSync();
+} catch (err) {
+status.textContent = err.message || String(err);
+console.error('Live sync test failed:', err);
+} finally {
+testBtn.disabled = false;
+}
+});
 }
 
 function summarizeCounts(d) {

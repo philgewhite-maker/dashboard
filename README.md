@@ -125,6 +125,57 @@ anything from a couple of tracked senders (`TRACKED_SENDERS` in
 `js/googlemail.js`) in the last 2 days. A message that's both starred and
 from a tracked sender only appears once, under Starred.
 
+## Live sync to your own server
+
+Settings → "Live sync (your own server)". Saves to your own hosting a couple
+of seconds after you stop editing, and picks up other devices' changes on
+load, on returning to the tab, and on a 45-second poll while the tab is
+visible. No OAuth, so unlike the Google paths below there's no hourly token
+to re-request and nothing to be popup-blocked.
+
+**Setup**, once on the server and once per device:
+
+1. Copy `server/sync.php.example` to `server/sync.php`, and set `$SECRET` to
+   a long random string. Check `$ALLOWED_ORIGINS` lists wherever you load the
+   app from. Generate a secret with `openssl rand -hex 32`, or on Windows
+   PowerShell (where openssl usually isn't on PATH):
+   `$b=[byte[]]::new(32); [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); -join ($b|%{$_.ToString('x2')})`
+2. Upload `sync.php` to `public_html` on your host (cPanel → File Manager).
+   `server/.htaccess` is optional — with the default `$DATA_FILE` the document
+   already lives outside `public_html`. Only add it (appending to any
+   existing `.htaccess`, never replacing one) if you move the data file into
+   a web-served directory.
+
+`server/sync.php` is gitignored, because this repo is public and the
+configured file contains your secret. Only the `.example` is tracked — don't
+rename it back.
+3. In Settings, enter the URL (e.g. `https://yourdomain/sync.php`) and the
+   same secret, then press **Test & start syncing**.
+4. Repeat step 3 on every other device, same URL and secret.
+
+The URL and secret are stored per-device and are deliberately never
+committed (this repo is public) and never included in a backup export. The
+data file itself defaults to one directory *above* `public_html`, so it
+isn't reachable over the web even if the `.htaccess` is lost.
+
+**How conflicts are handled.** Every save rewrites the whole document, so
+without a guard a phone save would silently erase a desktop save made
+seconds earlier. Each write therefore carries the revision it was based on,
+and the server refuses it with a 409 if that revision has moved on, handing
+back the newer document. The client adopts the newer copy, re-renders, and
+downloads a backup of what this device had first — the same safety net
+"Pull from Google Drive" already provides.
+
+The remaining gap: conflicts resolve at whole-document granularity, so if
+two devices edit *different* records inside the same few seconds, one of
+those edits ends up only in the downloaded backup rather than merged. The
+frequent polling makes that window small, but closing it properly means
+per-record timestamps and merge, which isn't built yet.
+
+If you'd rather avoid cross-origin requests entirely, serve the whole app
+from the same host as `sync.php` instead of GitHub Pages — then
+`$ALLOWED_ORIGINS` stops mattering.
+
 ## Google Drive sync
 
 Settings → Sync (Google Drive). Explicit, not automatic: Push uploads your
@@ -159,7 +210,36 @@ You'll need to paste the key again on each device you use.
 
 The Dating tab's "Import matches list" / "Import profile screenshot(s)"
 buttons use this to pull names, ages, and cropped avatar photos out of
-dating-app screenshots.
+dating-app screenshots. A profile screenshot also yields height, education,
+location, job, kids, languages, nationality and a bio summary. The source
+picked next to the import buttons is passed into the prompt (layouts differ
+per app), except for "Real life"/"Other", which describe how you met rather
+than a screen.
+
+Imported people are matched against existing connections by name. A match
+is a **merge**, not a replace: empty fields fill in, arrays union, notes
+concatenate, photos and to-dos append, and stage only ever moves forward.
+Anything you typed yourself wins over anything read off a screenshot. Every
+existing person sharing that name is shown with their photo so you can tell
+two Sarahs apart. Duplicates spotted later can be merged from the connection
+itself, via "Merge a duplicate into this one".
+
+## API usage and cost
+
+Settings → AI features shows this month's calls, tokens and estimated spend,
+split by purpose (photo import vs smart nudges) and by model. It's an
+estimate: token counts come from the API, but prices are a table in
+`js/ai.js` you may need to update, and it counts only calls made on this
+device. Models missing from that table show tokens but no cost rather than
+a wrong one.
+
+## Private fields
+
+Connections have a "Sex" tag field that is hidden by default; Settings →
+Private fields turns it on. While hidden it isn't displayed, isn't grouped
+in Connections Overview, and isn't searchable — otherwise a row could match
+a search for a reason you can't see. The visibility choice is per-device;
+anything recorded still saves and syncs regardless.
 
 ## Smart nudges
 
