@@ -55,16 +55,20 @@ const DIAL_CODES = [
 ['BR', '+55', 'Brazil'], ['AR', '+54', 'Argentina'], ['MX', '+52', 'Mexico'],
 ];
 
-// Regional indicator symbols: 'GB' -> 🇬🇧. Renders as a flag anywhere the
-// platform has one, and degrades to two boxed letters where it doesn't,
-// which is still readable.
+// Regional indicator symbols: 'GB' -> 🇬🇧 on iOS and Android.
+//
+// Windows ships no flag glyphs, so Chrome and Edge there fall back to
+// rendering the two regional indicators as plain letters — "GB". That's why
+// the ISO code is NOT written out separately: on a phone you get "🇬🇧 +44",
+// on the desktop you get "GB +44", and never the "GB GB +44" that printing
+// both produced.
 function flagEmoji(iso) {
 return iso.toUpperCase().replace(/./g, (ch) => String.fromCodePoint(0x1F1E6 + ch.charCodeAt(0) - 65));
 }
 
 function dialCodeOptions() {
-return '<option value="">＋ code</option>' + DIAL_CODES
-.map(([iso, dial, name]) => `<option value="${dial}" title="${escapeHtml(name)}">${flagEmoji(iso)} ${iso} ${dial}</option>`)
+return '<option value="">Country code…</option>' + DIAL_CODES
+.map(([iso, dial, name]) => `<option value="${dial}">${flagEmoji(iso)} ${dial} — ${escapeHtml(name)}</option>`)
 .join('');
 }
 
@@ -327,11 +331,12 @@ ${overdue ? '<span class="reach-badge">Reach out</span>' : ''}
 <span class="del-x" style="opacity:1;" data-del-conn="${c.id}">&times;</span>
 </div>
 </div>
-${c.contactStatus === 'review' ? contactPickerHtml(c.id) : ''}
+${contactPickerHtml(c.id)}
 <details class="match-details" data-conn-details="${c.id}" ${expandedConnections.has(c.id) ? 'open' : ''}>
 <summary>Details</summary>
 <div class="details-grid">
 <label>Name<input type="text" data-field="name" data-conn-detail="${c.id}" value="${escapeHtml(c.name)}"></label>
+<label>Profile name<input type="text" placeholder="If different — keeps photos findable" data-field="profileName" data-conn-detail="${c.id}" value="${escapeHtml(c.profileName || '')}"></label>
 <label>Source<select data-field="app" data-conn-detail="${c.id}">${appOptions(c.app)}</select></label>
 <label>Age<input type="text" data-field="age" data-conn-detail="${c.id}" value="${escapeHtml(c.age || '')}"></label>
 <label>Location<input type="text" data-field="location" data-conn-detail="${c.id}" value="${escapeHtml(c.location || '')}"></label>
@@ -339,10 +344,13 @@ ${c.contactStatus === 'review' ? contactPickerHtml(c.id) : ''}
 <label>Job<input type="text" data-field="job" data-conn-detail="${c.id}" value="${escapeHtml(c.job || '')}"></label>
 <label>Height<input type="text" data-field="height" data-conn-detail="${c.id}" value="${escapeHtml(c.height || '')}"></label>
 <label>Education<input type="text" data-field="education" data-conn-detail="${c.id}" value="${escapeHtml(c.education || '')}"></label>
-<label>Phone<span class="phone-row">
+<div class="field-block">
+<span class="field-label">Phone</span>
+<span class="phone-row">
 <select class="dial-code" data-dial-for="${c.id}">${dialCodeOptions()}</select>
 <input type="tel" placeholder="Used to match Google Contacts" data-field="phone" data-conn-detail="${c.id}" value="${escapeHtml(c.phone || '')}">
-</span></label>
+</span>
+</div>
 <label>Email<input type="email" placeholder="Also used to match" data-field="email" data-conn-detail="${c.id}" value="${escapeHtml(c.email || '')}"></label>
 <label>What I like most<input type="text" data-field="likes" data-conn-detail="${c.id}" value="${escapeHtml(c.likes || '')}"></label>
 <label class="full">Notes<textarea rows="2" data-field="notes" data-conn-detail="${c.id}">${escapeHtml(c.notes || '')}</textarea></label>
@@ -862,7 +870,9 @@ photoIds.push(pid);
 if (!photoId) photoId = pid;
 }
 data.connections.push({
-id, name: cand.name, app, priority: 3, stage: cand.stage || 'Matched', lastContact: todayStr(),
+// profileName records what the app called them, so renaming the
+// connection to their real name later doesn't orphan the photos.
+id, name: cand.name, profileName: cand.name, app, priority: 3, stage: cand.stage || 'Matched', lastContact: todayStr(),
 photoId, photoIds, age: cand.age || '', location: cand.location || '', kids: cand.kids || '', job: cand.job || '',
 height: cand.height || '', education: cand.education || '',
 likes: '', notes: cand.bio || '', languages: cand.languages || [], nationality: cand.nationality || [],

@@ -895,11 +895,22 @@ padding:3px 10px;
 cursor:pointer;
 }
 
+/* A <select> nested inside a <label> is effectively unopenable in Chrome —
+   the label re-dispatches the click to its control and the dropdown closes
+   the instant it opens. So the phone field is a plain block that mimics the
+   grid's label styling rather than an actual <label>. */
+.field-block{display:flex;flex-direction:column;gap:3px;}
+.field-label{
+font-size:10px;
+text-transform:uppercase;
+letter-spacing:.03em;
+color:var(--muted);
+}
 .phone-row{display:flex;gap:6px;}
 .phone-row input{flex:1;min-width:0;}
 .dial-code{
 flex:0 0 auto;
-max-width:120px;
+max-width:150px;
 font-family:'Inter',sans-serif;
 font-size:13px;
 border:1px solid var(--line);
@@ -908,6 +919,51 @@ padding:6px 4px;
 background:var(--card);
 color:var(--ink);
 }
+
+/* Disagreements with a linked Google contact. Amber rather than red — this
+   is something to look at, not something broken. */
+.conflict-box{
+background:var(--amber-bg);
+border-radius:8px;
+padding:9px 11px;
+margin-top:8px;
+display:flex;
+flex-direction:column;
+gap:6px;
+}
+.conflict-head{
+font-family:'IBM Plex Mono',monospace;
+font-size:10px;
+text-transform:uppercase;
+letter-spacing:.05em;
+color:var(--amber);
+}
+.conflict-row{
+display:flex;
+align-items:center;
+gap:8px;
+flex-wrap:wrap;
+font-size:12px;
+}
+.conflict-field{
+font-family:'IBM Plex Mono',monospace;
+font-size:10px;
+text-transform:uppercase;
+color:var(--muted);
+min-width:64px;
+}
+.conflict-values{display:flex;gap:6px;flex-wrap:wrap;}
+.conflict-opt{
+font-family:'Inter',sans-serif;
+font-size:12px;
+border:1px solid var(--line);
+border-radius:20px;
+padding:3px 10px;
+background:var(--card);
+color:var(--ink);
+cursor:pointer;
+}
+.conflict-opt.theirs{border-color:var(--teal);color:var(--teal);}
 
 /* Inline match picker, shown on the connection's own card so the photo, age
    and stage are right there while you decide. */

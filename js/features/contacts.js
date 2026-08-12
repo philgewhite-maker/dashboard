@@ -13,7 +13,13 @@ import { STAGE_RANK, setContactPicker } from './connections.js';
 
 // Hand connections.js the inline picker renderer. Registering it rather than
 // having connections.js import this module keeps the dependency one-way.
-setContactPicker((connId) => candidatePickerHtml(connId), (root) => bindCandidatePickers(root));
+setContactPicker(
+(connId) => {
+const conn = data.connections.find((c) => c.id === connId);
+return (conn ? conflictsHtml(conn) : '') + candidatePickerHtml(connId);
+},
+(root) => bindCandidatePickers(root),
+);
 
 // Candidates awaiting confirmation, keyed by connection id. Deliberately not
 // persisted: they're derived from a contacts list that may be stale by the
@@ -37,16 +43,19 @@ if (byPhone && index.byPhone.has(byPhone)) return { matched: index.byPhone.get(b
 const byEmail = emailKey(conn.email);
 if (byEmail && index.byEmail.has(byEmail)) return { matched: index.byEmail.get(byEmail), how: 'email' };
 
-// Fall back to the name, gathering every contact that could be them. Both
-// the full name and the first word are tried, since a connection is often
-// recorded as just "Anna" against a contact of "Anna Schmidt".
+// Fall back to names, gathering every contact that could be them. Tries
+// the full name and its first word (a connection is often recorded as just
+// "Anna" against a contact of "Anna Schmidt"), plus every alias and the
+// dating-profile name — "Kat" only finds the contact if the record knows
+// she also goes by "Katya".
 const names = new Set();
-const full = nameKey(conn.name);
-if (full) {
+[conn.name, conn.profileName, ...(conn.aliases || [])].forEach((raw) => {
+const full = nameKey(raw);
+if (!full) return;
 names.add(full);
 const first = full.split(' ')[0];
 if (first) names.add(first);
-}
+});
 const candidates = [];
 names.forEach((n) => {
 (index.byName.get(n) || []).forEach((c) => { if (!candidates.includes(c)) candidates.push(c); });
@@ -77,6 +86,7 @@ conn.contactStatus = 'linked';
 conn.contactResourceName = matched.resourceName;
 conn.contactEtag = matched.etag;
 conn.contactMatchedBy = how;
+applyContactDiff(conn, matched);
 linked++;
 return;
 }
@@ -86,6 +96,7 @@ if (conn.contactStatus === 'linked' && conn.contactResourceName) {
 const still = contacts.find((c) => c.resourceName === conn.contactResourceName);
 if (still) {
 conn.contactEtag = still.etag;
+applyContactDiff(conn, still);
 linked++;
 return;
 }
@@ -129,6 +140,77 @@ function pendingFor(connId) {
 return pendingMatches.get(connId) || [];
 }
 
+// Fills gaps, records disagreements. Called on confirm and on every re-sync
+// of an already-linked contact, so a value that changes in Google later
+// still surfaces rather than being missed because the link already existed.
+function applyContactDiff(conn, contact) {
+const { filled, conflicts } = diffAgainstContact(conn, contact);
+filled.forEach(({ field, value }) => {
+if (field === 'aliases') {
+if (!Array.isArray(conn.aliases)) conn.aliases = [];
+if (!conn.aliases.some((a) => nameKey(a) === nameKey(value))) conn.aliases.push(value);
+} else {
+conn[field] = value;
+}
+});
+conn.contactConflicts = conflicts;
+return { filled, conflicts };
+}
+
+// Fields worth comparing between a connection and its matched contact.
+const COMPARABLE = [
+{ field: 'phone', label: 'Phone', from: (c) => c.phones[0] || '' },
+{ field: 'email', label: 'Email', from: (c) => c.emails[0] || '' },
+{ field: 'location', label: 'Location', from: (c) => c.city || '' },
+{ field: 'job', label: 'Job', from: (c) => c.job || '' },
+];
+
+// Contact group labels that name a dating app. A contact filed under
+// "tinder" while the connection says Bumble is exactly the kind of thing
+// worth surfacing — it usually means the app was recorded wrong, or you met
+// them twice.
+function appFromGroups(groups) {
+const known = ['bumble', 'tinder', 'hinge', 'whatsapp', 'telegram', 'instagram'];
+const hit = (groups || []).map((g) => String(g).trim().toLowerCase()).find((g) => known.includes(g));
+return hit ? hit.charAt(0).toUpperCase() + hit.slice(1) : '';
+}
+
+// Splits the difference between a connection and its contact into things
+// that FILL a gap and things that DISAGREE. Gaps get filled silently — the
+// contact is new information. Disagreements never get applied automatically;
+// they're recorded for you to resolve, because overwriting what you typed
+// with what Google happens to hold is exactly the wrong default.
+function diffAgainstContact(conn, contact) {
+const filled = [];
+const conflicts = [];
+COMPARABLE.forEach(({ field, label, from }) => {
+const theirs = String(from(contact) || '').trim();
+const mine = String(conn[field] || '').trim();
+if (!theirs) return;
+if (!mine) { filled.push({ field, label, value: theirs }); return; }
+// Phones only "disagree" if they're genuinely different numbers, not
+// merely written differently.
+const same = field === 'phone'
+? phoneKey(mine) === phoneKey(theirs)
+: mine.toLowerCase() === theirs.toLowerCase();
+if (!same) conflicts.push({ field, label, mine, theirs, source: 'contact' });
+});
+
+const groupApp = appFromGroups(contact.groups);
+if (groupApp && conn.app && groupApp.toLowerCase() !== String(conn.app).toLowerCase()) {
+conflicts.push({ field: 'app', label: 'Source', mine: conn.app, theirs: groupApp, source: 'contact label' });
+}
+
+// A name you don't already know them by is worth keeping as an alias
+// rather than a conflict — people genuinely go by several.
+const theirName = String(contact.displayName || contact.givenName || '').trim();
+const known = [conn.name, conn.profileName, ...(conn.aliases || [])].map((n) => nameKey(n)).filter(Boolean);
+if (theirName && !known.includes(nameKey(theirName))) {
+filled.push({ field: 'aliases', label: 'Also known as', value: theirName });
+}
+return { filled, conflicts };
+}
+
 function confirmMatch(connId, resourceName) {
 const conn = data.connections.find((c) => c.id === connId);
 const entry = pendingFor(connId).find((e) => e.contact.resourceName === resourceName);
@@ -138,14 +220,7 @@ conn.contactStatus = 'linked';
 conn.contactResourceName = candidate.resourceName;
 conn.contactEtag = candidate.etag;
 conn.contactMatchedBy = 'confirmed';
-// Fill gaps from the contact, never overwrite — same rule as every other
-// merge in this app: what you typed outranks what was imported.
-if (!conn.phone && candidate.phones.length) conn.phone = candidate.phones[0];
-if (!conn.email && candidate.emails.length) conn.email = candidate.emails[0];
-// City, not the full address — Location is a grouping field in
-// Connections Overview, and a street address makes a group of one.
-if (!conn.location && candidate.city) conn.location = candidate.city;
-if (!conn.job && candidate.job) conn.job = candidate.job;
+applyContactDiff(conn, candidate);
 pendingMatches.delete(connId);
 queueSave();
 renderContactReview();
@@ -193,6 +268,34 @@ ${escapeHtml(candidateSummary(contact))}
 </div>`;
 }
 
+// Disagreements between a connection and its linked contact, each resolvable
+// either way. Shown on the card because that's where you can see the rest of
+// the record and judge which side is right.
+function conflictsHtml(conn) {
+if (!conn.contactConflicts || conn.contactConflicts.length === 0) return '';
+return `<div class="conflict-box">
+<div class="conflict-head">Differs from Google Contacts</div>
+${conn.contactConflicts.map((k, i) => `<div class="conflict-row">
+<span class="conflict-field">${escapeHtml(k.label)}</span>
+<span class="conflict-values">
+<button class="conflict-opt" type="button" data-keep-mine="${escapeHtml(conn.id)}" data-conflict-idx="${i}">Keep “${escapeHtml(k.mine)}”</button>
+<button class="conflict-opt theirs" type="button" data-take-theirs="${escapeHtml(conn.id)}" data-conflict-idx="${i}">Use “${escapeHtml(k.theirs)}”${k.source === 'contact label' ? ' (their label)' : ''}</button>
+</span>
+</div>`).join('')}
+</div>`;
+}
+
+function resolveConflict(connId, idx, takeTheirs) {
+const conn = data.connections.find((c) => c.id === connId);
+if (!conn) return;
+const conflict = conn.contactConflicts[idx];
+if (!conflict) return;
+if (takeTheirs) conn[conflict.field] = conflict.theirs;
+conn.contactConflicts.splice(idx, 1);
+queueSave();
+refreshConnections();
+}
+
 // Wires the inline pickers after connections.js has drawn the cards.
 function bindCandidatePickers(root) {
 root.querySelectorAll('[data-confirm-match]').forEach((btn) => {
@@ -200,6 +303,12 @@ btn.addEventListener('click', () => confirmMatch(btn.dataset.confirmMatch, btn.d
 });
 root.querySelectorAll('[data-reject-match]').forEach((btn) => {
 btn.addEventListener('click', () => rejectMatch(btn.dataset.rejectMatch));
+});
+root.querySelectorAll('[data-keep-mine]').forEach((btn) => {
+btn.addEventListener('click', () => resolveConflict(btn.dataset.keepMine, parseInt(btn.dataset.conflictIdx, 10), false));
+});
+root.querySelectorAll('[data-take-theirs]').forEach((btn) => {
+btn.addEventListener('click', () => resolveConflict(btn.dataset.takeTheirs, parseInt(btn.dataset.conflictIdx, 10), true));
 });
 }
 

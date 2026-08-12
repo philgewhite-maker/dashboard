@@ -131,6 +131,10 @@ completedAt: '',
 }
 
 const TAG_FIELDS = [
+// Other names the same person goes by — "Kat" is also "Katya" and
+// "Katerina". Used when matching Google Contacts, so any one of them can
+// find the record.
+{ field: 'aliases', label: 'Also known as', sensitive: false },
 { field: 'dateLocations', label: 'Date locations', sensitive: false },
 { field: 'dateEvents', label: 'Date events', sensitive: false },
 { field: 'languages', label: 'Language', sensitive: false },
@@ -281,6 +285,7 @@ if (!Array.isArray(c.languages)) c.languages = [];
 if (!Array.isArray(c.nationality)) c.nationality = [];
 if (!Array.isArray(c.todos)) c.todos = [];
 if (!Array.isArray(c.tags)) c.tags = [];
+if (!Array.isArray(c.aliases)) c.aliases = [];
 if (!Array.isArray(c.dateLocations)) c.dateLocations = [];
 if (!Array.isArray(c.dateEvents)) c.dateEvents = [];
 if (!Array.isArray(c.sexTags)) c.sexTags = [];
@@ -292,6 +297,14 @@ if (typeof c.driveLink !== 'string') c.driveLink = '';
 // possible — a first name alone is far too weak a key.
 if (typeof c.phone !== 'string') c.phone = '';
 if (typeof c.email !== 'string') c.email = '';
+// The name on the dating profile, which is often not their real one. Kept
+// separate from `name` so you can rename a connection to what they're
+// actually called without losing the key that photos and screenshots were
+// filed under.
+if (typeof c.profileName !== 'string') c.profileName = '';
+// Field-by-field disagreements found against a matched Google contact:
+// [{field, mine, theirs, source}]
+if (!Array.isArray(c.contactConflicts)) c.contactConflicts = [];
 // '' (never checked) | 'linked' | 'review' | 'missing'
 if (typeof c.contactStatus !== 'string') c.contactStatus = '';
 if (typeof c.contactResourceName !== 'string') c.contactResourceName = '';

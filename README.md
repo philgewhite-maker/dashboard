@@ -258,6 +258,20 @@ People API metadata: whether it's a contact you **saved** or one Google
 **auto-collected** from your mail, its labels, and when it was last updated.
 There is no contact *creation* date — the API doesn't expose one.
 
+**Names.** A connection has three name fields, all used for matching:
+`name`, `profileName` (what the dating app called them, often not real —
+kept so renaming doesn't orphan the photos filed under it), and an **Also
+known as** list. "Kat" only finds her Google contact if the record knows she
+also goes by "Katya".
+
+**Conflicts and enrichment.** Confirming a match, and every later re-sync,
+compares the two records. Anything the contact has that the connection
+doesn't gets filled in. Anything they *disagree* on is never applied
+automatically — it's flagged on the card with both values and a choice,
+because overwriting what you typed with what Google happens to hold is the
+wrong default. Contact **group labels** are compared too, so a connection
+recorded as Bumble whose contact is filed under "tinder" gets caught.
+
 Names are compared with accents folded and Cyrillic romanised, so
 "Zoë"/"Zoe", "Chloé"/"Chloe" and "Катя"/"Katya" match rather than looking
 like different people. The transliteration is deliberately rough common
