@@ -9,11 +9,37 @@
 import { GOOGLE_CLIENT_ID } from './config.js';
 import { getLocalSettings, setLocalSetting } from '../state.js';
 
-const SCOPES = [
+const BASE_SCOPES = [
 'https://www.googleapis.com/auth/drive.appdata',
 'https://www.googleapis.com/auth/calendar.readonly',
 'https://www.googleapis.com/auth/gmail.readonly',
-].join(' ');
+'https://www.googleapis.com/auth/contacts.readonly',
+];
+
+// Writing to Contacts is a much heavier permission than reading it — it can
+// alter or clear fields in your real address book — so it is off unless you
+// turn it on, and it replaces the read-only scope rather than adding to it.
+// Changing this forces a fresh consent screen; Google won't widen an already
+// issued token.
+const CONTACTS_WRITE_SCOPE = 'https://www.googleapis.com/auth/contacts';
+
+let scopesForSession = BASE_SCOPES.join(' ');
+
+async function refreshScopes() {
+const settings = await getLocalSettings();
+const scopes = settings.contactsWriteEnabled
+? BASE_SCOPES.filter((s) => s !== 'https://www.googleapis.com/auth/contacts.readonly').concat(CONTACTS_WRITE_SCOPE)
+: BASE_SCOPES;
+const next = scopes.join(' ');
+if (next !== scopesForSession) {
+scopesForSession = next;
+// The token client bakes in its scope at construction, so it has to be
+// rebuilt, and any cached token is for the old scope set.
+tokenClient = null;
+cachedToken = null;
+}
+return scopesForSession;
+}
 
 class NotConfiguredError extends Error {
 constructor() { super('Google sign-in needs an OAuth client ID first — see README.md.'); this.name = 'NotConfiguredError'; }
@@ -34,14 +60,15 @@ ensureConfigured();
 if (!tokenClient) {
 tokenClient = window.google.accounts.oauth2.initTokenClient({
 client_id: GOOGLE_CLIENT_ID,
-scope: SCOPES,
+scope: scopesForSession,
 callback: () => {}, // replaced per-call in requestToken()
 });
 }
 return tokenClient;
 }
 
-function requestToken(prompt) {
+async function requestToken(prompt) {
+await refreshScopes();
 return new Promise((resolve, reject) => {
 const client = ensureTokenClient();
 client.callback = (resp) => {
@@ -123,8 +150,14 @@ const token = await getAccessToken(interactive);
 return fetch(url, { ...options, headers: { ...(options.headers || {}), Authorization: `Bearer ${token}` } });
 }
 
+// True when the current session was granted the Contacts write scope, so UI
+// that writes can hide itself rather than failing at the API with a 403.
+function hasContactsWrite() {
+return scopesForSession.includes(CONTACTS_WRITE_SCOPE);
+}
+
 export {
 NotConfiguredError,
 isSignedIn, wasConnectedBefore, canAttemptGoogleAction, tryReconnectSilently, signIn, signOut,
-googleFetch,
+googleFetch, refreshScopes, hasContactsWrite,
 };

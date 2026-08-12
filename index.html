@@ -229,6 +229,18 @@
 <div id="overview-content"></div>
 </section>
 
+<section class="panel wide" id="contacts-panel" data-tab="dating">
+<div class="panel-head">
+<h2><span class="dot teal"></span>Google Contacts match</h2>
+<span class="count-badge" id="contacts-count"></span>
+</div>
+<div class="sync-row">
+<button class="sync-btn" id="sync-contacts-btn" type="button">Match contacts</button>
+<span class="sync-status" id="contacts-sync-status"></span>
+</div>
+<div id="contact-review"></div>
+</section>
+
 <section class="panel wide" id="connections-panel" data-tab="dating">
 <div class="panel-head">
 <h2><span class="dot rose"></span>Connections</h2>
@@ -337,6 +349,16 @@ Smart nudges — let Claude pick what's most urgent, important, and overdue, ins
 <h3>Tidy up tags</h3>
 <div class="settings-note" style="margin:0 0 10px;">Every tag value in use, with how many connections have it. Values differing only by capitalisation or spacing are flagged for one-click merging; anything else can be renamed or merged by hand. Changes apply across all connections.</div>
 <div id="tag-cleanup"></div>
+</div>
+
+<div class="settings-block">
+<h3>Google Contacts</h3>
+<div class="settings-note" style="margin:0 0 8px;">Matching reads your contacts. Writing back is a separate, much broader permission — it can change and clear fields in your real address book — so it's off unless you turn it on here.</div>
+<label class="settings-note" style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0;">
+<input type="checkbox" id="contacts-write-toggle">
+Allow writing back to Google Contacts (e.g. saving a birthday)
+</label>
+<div class="settings-note" id="contacts-write-note"></div>
 </div>
 
 <div class="settings-block">

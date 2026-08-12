@@ -97,6 +97,20 @@ const TASK_BUCKETS = [
 
 const DEFAULT_TASK_CONTEXTS = ['Office', 'Home', 'DIY', 'Home PC', 'Outdoor errands'];
 
+// How a connection relates to your Google Contacts. Only meaningful for
+// people you've taken off the dating app — see CONTACT_MATCH_MIN_STAGE.
+const CONTACT_STATUS_LABELS = {
+linked: 'In contacts',
+review: 'Review contact match',
+missing: 'Missing in contacts',
+};
+
+// Matching is only attempted from "Moved to WhatsApp" upwards. Below that
+// you're still talking inside an app, almost certainly have no number for
+// them, and every result would be a weak name guess — which is worse than
+// no answer, because it invites you to confirm something you can't verify.
+const CONTACT_MATCH_MIN_STAGE = 4;
+
 function blankTask(fields = {}) {
 return {
 id: uid(),
@@ -274,6 +288,14 @@ if (typeof c.job !== 'string') c.job = '';
 if (typeof c.height !== 'string') c.height = '';
 if (typeof c.education !== 'string') c.education = '';
 if (typeof c.driveLink !== 'string') c.driveLink = '';
+// Phone and email are what make a reliable join to Google Contacts
+// possible — a first name alone is far too weak a key.
+if (typeof c.phone !== 'string') c.phone = '';
+if (typeof c.email !== 'string') c.email = '';
+// '' (never checked) | 'linked' | 'review' | 'missing'
+if (typeof c.contactStatus !== 'string') c.contactStatus = '';
+if (typeof c.contactResourceName !== 'string') c.contactResourceName = '';
+if (typeof c.contactEtag !== 'string') c.contactEtag = '';
 if (!c.ratings || typeof c.ratings !== 'object') c.ratings = {};
 });
 data.businessIdeas.forEach((idea) => {
@@ -410,6 +432,7 @@ setExternalUpdateHandler, setLocalChangeHandler, getLocalSettings, setLocalSetti
 isDormantStage, exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, DEFAULT_PREFS,
 MAIL_SEARCH_KINDS, mailSearchLabel,
 TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, blankTask,
+CONTACT_STATUS_LABELS, CONTACT_MATCH_MIN_STAGE,
 };
 
 // `data` above is exported by binding, but ES module live-bindings only

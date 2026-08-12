@@ -42,6 +42,7 @@ Then open `http://localhost:8080`. It won't work opened directly as a
 - `js/sync/googledrive.js`, `js/sync/config.js` — Google Drive sync (see below)
 - `js/googlecalendar.js` — Google Calendar reading (see below)
 - `js/googlemail.js` — Gmail reading (see below)
+- `js/googlecontacts.js` — Google Contacts via the People API (see below)
 
 ## Data safety
 
@@ -66,8 +67,10 @@ switching apps can't lose whatever's inside that debounce window.
 ## Google sign-in (shared by Drive sync, Calendar, and Mail)
 
 One sign-in covers all three features below — `js/sync/googleauth.js`
-requests all three scopes (`drive.appdata` + `calendar.readonly` +
-`gmail.readonly`) up front so you only get asked once. The sign-in
+requests all four scopes (`drive.appdata` + `calendar.readonly` +
+`gmail.readonly` + `contacts.readonly`) up front so you only get asked once.
+The Contacts scope becomes the read/write `contacts` instead if you turn on
+write-back in Settings. The sign-in
 button/status lives in the header, next to the date, since — with no refresh
 token in this client-side-only flow — reconnecting is common enough that it
 needed to be one click away rather than buried in a tab. The chattier
@@ -222,6 +225,43 @@ per-record timestamps and merge, which isn't built yet.
 If you'd rather avoid cross-origin requests entirely, serve the whole app
 from the same host as `sync.php` instead of GitHub Pages — then
 `$ALLOWED_ORIGINS` stops mattering.
+
+## Google Contacts match
+
+Dating tab → "Match contacts". Joins connections to your Google Contacts via
+the People API, but only for people at **"Moved to WhatsApp" and beyond** —
+below that you're still talking inside an app, almost certainly have no
+number for them, and every result would be a weak name guess.
+
+Each eligible connection ends up tagged:
+
+- **In contacts** — matched on phone or email, or a name match you confirmed
+- **Review contact match** — one or more contacts share the name; needs you
+- **Missing in contacts** — nothing plausible found
+
+Matching rules, in order: phone number, then email, then name. Phone and
+email identify a person, so those link automatically. **A name match never
+links on its own**, even when there's exactly one candidate — the failure
+being avoided is a confident-looking wrong link quietly attaching someone
+else's address book entry. Candidates are shown with phone, email and job so
+two people with the same first name are distinguishable.
+
+Phone numbers are compared on their last 9 digits, so `+44 7700 900123`,
+`07700 900123` and `(0770) 090-0123` all match. Connections gained Phone and
+Email fields to make this possible; confirming a match fills any of phone,
+email, location and job that were blank, and never overwrites what you typed.
+
+A link you confirmed survives a re-sync even if the contact is later renamed.
+
+**Writing back** (e.g. saving a birthday to a contact) needs a different,
+much broader scope — `contacts` rather than `contacts.readonly` — which can
+alter and clear fields in your real address book. It's off by default;
+Settings → Google Contacts turns it on, and you have to sign out and in
+again because Google won't widen an already-issued token. Two sharp edges in
+the People API are handled in `googlecontacts.js`: updates carry the
+contact's `etag` so a concurrent change elsewhere is rejected rather than
+overwritten, and `updatePersonFields` names only `birthdays`, because a
+field named there but not supplied is **cleared**.
 
 ## Google Drive sync
 

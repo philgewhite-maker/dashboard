@@ -1,4 +1,4 @@
-import { data, queueSave, reachOutThreshold, isDormantStage, getLocalSettings, TAG_FIELDS } from '../state.js';
+import { data, queueSave, reachOutThreshold, isDormantStage, getLocalSettings, TAG_FIELDS, CONTACT_STATUS_LABELS } from '../state.js';
 import { photoPut, photoDelete, photoUrl } from '../db.js';
 import {
 uid, todayStr, daysSince, escapeHtml, avatarHtml, hydratePhotos, scrollAndFlash, bindForm,
@@ -225,6 +225,7 @@ ${CONN_STAGES.map((s) => `<option value="${s}" ${s === c.stage ? 'selected' : ''
 </select>
 </div>
 <div class="match-actions">
+${c.contactStatus ? `<span class="contact-badge ${escapeHtml(c.contactStatus)}">${escapeHtml(CONTACT_STATUS_LABELS[c.contactStatus] || '')}</span>` : ''}
 <span class="match-contact">${since === 0 ? 'today' : since + 'd since contact'}</span>
 ${overdue ? '<span class="reach-badge">Reach out</span>' : ''}
 <button class="log-btn" data-log="${c.id}">Log contact</button>
@@ -242,6 +243,8 @@ ${overdue ? '<span class="reach-badge">Reach out</span>' : ''}
 <label>Job<input type="text" data-field="job" data-conn-detail="${c.id}" value="${escapeHtml(c.job || '')}"></label>
 <label>Height<input type="text" data-field="height" data-conn-detail="${c.id}" value="${escapeHtml(c.height || '')}"></label>
 <label>Education<input type="text" data-field="education" data-conn-detail="${c.id}" value="${escapeHtml(c.education || '')}"></label>
+<label>Phone<input type="tel" placeholder="Used to match Google Contacts" data-field="phone" data-conn-detail="${c.id}" value="${escapeHtml(c.phone || '')}"></label>
+<label>Email<input type="email" placeholder="Also used to match" data-field="email" data-conn-detail="${c.id}" value="${escapeHtml(c.email || '')}"></label>
 <label>What I like most<input type="text" data-field="likes" data-conn-detail="${c.id}" value="${escapeHtml(c.likes || '')}"></label>
 <label class="full">Notes<textarea rows="2" data-field="notes" data-conn-detail="${c.id}">${escapeHtml(c.notes || '')}</textarea></label>
 ${visibleTagFields().map((f) => `<label class="full${f.sensitive ? ' sensitive-field' : ''}">${escapeHtml(f.label)}<div class="tag-editor">${tagChips(c[f.field], c.id, f.field)}</div></label>`).join('')}
@@ -844,4 +847,5 @@ renderConnections();
 export {
 renderConnections, initConnectionForm, expandConnection, CONN_STAGES,
 initSensitiveFields, setShowSensitiveFields, visibleTagFields, filterByEmptyField,
+STAGE_RANK,
 };

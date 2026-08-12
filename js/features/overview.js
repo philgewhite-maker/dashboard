@@ -1,4 +1,4 @@
-import { data, queueSave, getLocalSettings, setLocalSetting } from '../state.js';
+import { data, queueSave, getLocalSettings, setLocalSetting, CONTACT_STATUS_LABELS } from '../state.js';
 import { escapeHtml } from '../utils.js';
 import { visibleTagFields } from './connections.js';
 
@@ -101,6 +101,10 @@ overviewDimension('Stage', groupConnectionsBy((c) => [c.stage]), null, 'stage'),
 overviewDimension('Location', groupConnectionsBy((c) => [c.location]), null, 'location'),
 overviewDimension('Age', groupConnectionsBy((c) => [ageDecade(c.age)]), null, 'age'),
 overviewDimension('Job', groupConnectionsBy((c) => [c.job]), null, 'job'),
+// Only the post-app people are ever matched, so an unset status here means
+// "not applicable", not "not found" — hence the filter rather than a None
+// chip, which would otherwise count every early-stage match as missing.
+overviewDimension('Contact match', groupConnectionsBy((c) => [CONTACT_STATUS_LABELS[c.contactStatus]]), null, null),
 ...visibleTagFields().map((f) => overviewDimension(f.label, groupConnectionsBy((c) => c[f.field] || []), f.field, f.field)),
 ];
 

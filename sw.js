@@ -36,6 +36,8 @@ const CORE_ASSETS = [
 './js/sync/selfhost.js',
 './js/sync/autosync.js',
 './js/googlecalendar.js',
+'./js/googlecontacts.js',
+'./js/features/contacts.js',
 './js/googlemail.js',
 './manifest.webmanifest',
 ];

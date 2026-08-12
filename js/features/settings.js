@@ -7,7 +7,7 @@ import { summarizeUsage, currentMonthKey } from '../ai.js';
 import { setShowSensitiveFields } from './connections.js';
 import { pullRemote } from '../sync/selfhost.js';
 import { restartAutoSync } from '../sync/autosync.js';
-import { canAttemptGoogleAction } from '../sync/googleauth.js';
+import { canAttemptGoogleAction, refreshScopes } from '../sync/googleauth.js';
 import { getRemoteInfo, getRemoteCounts, countsOf, pushToGoogleDrive, pullFromGoogleDrive } from '../sync/googledrive.js';
 
 // Spend is only ever an estimate: it's computed from the token counts the
@@ -86,6 +86,20 @@ e.target.value = '';
 initLiveSync(settings);
 initFetchPrefs();
 renderTagCleanup();
+
+// Changing the Contacts scope invalidates the current token, so this can't
+// take effect until you sign in again — say so rather than leaving you to
+// wonder why the write button still isn't there.
+const contactsWrite = document.getElementById('contacts-write-toggle');
+const contactsWriteNote = document.getElementById('contacts-write-note');
+contactsWrite.checked = !!settings.contactsWriteEnabled;
+contactsWrite.addEventListener('change', async () => {
+await setLocalSetting('contactsWriteEnabled', contactsWrite.checked);
+await refreshScopes();
+contactsWriteNote.textContent = contactsWrite.checked
+? 'Sign out and back in to grant the write permission — Google won\'t widen a token that\'s already been issued.'
+: 'Sign out and back in to drop the write permission.';
+});
 
 const sensitiveToggle = document.getElementById('sensitive-fields-toggle');
 sensitiveToggle.checked = !!settings.showSensitiveFields;
