@@ -258,6 +258,24 @@ People API metadata: whether it's a contact you **saved** or one Google
 **auto-collected** from your mail, its labels, and when it was last updated.
 There is no contact *creation* date — the API doesn't expose one.
 
+**Age.** An age typed in once is only true on the day you typed it, so `age`
+is stored with `ageAsOf` — the date it was correct — and the current age is
+derived from it. Someone recorded as 29 two years ago shows as **~31** and
+groups in the 30s, rather than staying frozen at 29 forever. A **date of
+birth** can be entered alongside and takes precedence, giving an exact age
+with no tilde. The tilde is the honest signal that an estimate could be a
+year out either way. Editing the age restamps `ageAsOf` to today.
+
+Existing ages had no recorded vintage, so the migration stamps them with
+today's date — the least-wrong assumption, since an age is far likelier to
+have been entered recently than years ago, and the alternative (leaving it
+blank) means it never ages at all.
+
+**Location.** `location` is the **city** and is what Connections Overview
+groups by; `address` holds the full postal address as detail only. Both are
+kept and both are searchable, but only the city becomes a chip — "15
+Cholmeley Park London N6 5ET" would be a group of one.
+
 **Names.** A connection has three name fields, all used for matching:
 `name`, `profileName` (what the dating app called them, often not real —
 kept so renaming doesn't orphan the photos filed under it), and an **Also

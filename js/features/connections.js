@@ -1,4 +1,4 @@
-import { data, queueSave, reachOutThreshold, isDormantStage, getLocalSettings, TAG_FIELDS, CONTACT_STATUS_LABELS } from '../state.js';
+import { data, queueSave, reachOutThreshold, isDormantStage, getLocalSettings, TAG_FIELDS, CONTACT_STATUS_LABELS, currentAge, displayAge } from '../state.js';
 import { photoPut, photoDelete, photoUrl } from '../db.js';
 import {
 uid, todayStr, daysSince, escapeHtml, avatarHtml, hydratePhotos, scrollAndFlash, bindForm,
@@ -192,10 +192,23 @@ contact: { getValue: (c) => daysSince(c.lastContact) },
 stage: { getValue: (c) => STAGE_RANK[c.stage] ?? 0 },
 };
 
-function ageDecade(age) {
-const n = parseInt(age, 10);
-if (isNaN(n)) return null;
-return `${Math.floor(n / 10) * 10}s`;
+// Says where the displayed age came from, so "~31" isn't mysterious: either
+// it's exact from a date of birth, or it's the number you entered carried
+// forward from the date you entered it.
+function ageNoteHtml(c) {
+const age = currentAge(c);
+if (!age) return '';
+if (age.exact) return ` <span class="age-note">= ${age.value} from DOB</span>`;
+if (age.drifted) return ` <span class="age-note">≈ ${age.value} now, from ${escapeHtml(c.ageAsOf)}</span>`;
+return '';
+}
+
+// Groups on the CURRENT age, so someone recorded at 29 two years ago falls
+// in the 30s where they belong.
+function ageDecade(conn) {
+const age = currentAge(conn);
+if (!age) return null;
+return `${Math.floor(age.value / 10) * 10}s`;
 }
 
 function ratingStars(label, cat, connId, value) {
@@ -304,7 +317,7 @@ return;
 const term = connectionSearchTerm.trim().toLowerCase();
 const filtered = term ? data.connections.filter((c) => {
 const haystack = [
-c.name, c.location, c.job, c.education, c.stage, ageDecade(c.age),
+c.name, c.profileName, ...(c.aliases || []), c.location, c.address, c.job, c.education, c.stage, ageDecade(c),
 // So the Connections Overview "Contact match" chips actually filter —
 // they search by their own label, which otherwise matches nothing.
 CONTACT_STATUS_LABELS[c.contactStatus],
@@ -340,7 +353,7 @@ function connectionCardHtml(c) {
 const since = daysSince(c.lastContact);
 const overdue = !isDormantStage(c.stage) && since >= reachOutThreshold(c.priority);
 const stars = [1, 2, 3, 4, 5].map((n) => `<svg class="star priority-star ${n <= c.priority ? 'filled' : ''}" data-conn="${c.id}" data-star="${n}" viewBox="0 0 20 20" fill="currentColor"><path d="M10 1l2.6 5.9 6.4.6-4.8 4.3 1.4 6.2L10 14.9 4.4 18l1.4-6.2L1 7.5l6.4-.6z"/></svg>`).join('');
-const nameMeta = [c.age, c.location].map((s) => String(s || '').trim()).filter(Boolean).join(' · ');
+const nameMeta = [displayAge(c), c.location].map((s) => String(s || '').trim()).filter(Boolean).join(' · ');
 return `<div class="match-card" data-conn-row="${c.id}">
 <div class="match-row">
 ${avatarHtml(c.photoId, c.name)}
@@ -369,8 +382,10 @@ ${contactPickerHtml(c.id)}
 <label>Name<input type="text" data-field="name" data-conn-detail="${c.id}" value="${escapeHtml(c.name)}"></label>
 <label>Profile name<input type="text" placeholder="If different — keeps photos findable" data-field="profileName" data-conn-detail="${c.id}" value="${escapeHtml(c.profileName || '')}"></label>
 <label>Source<select data-field="app" data-conn-detail="${c.id}">${appOptions(c.app)}</select></label>
-<label>Age<input type="text" data-field="age" data-conn-detail="${c.id}" value="${escapeHtml(c.age || '')}"></label>
-<label>Location<input type="text" data-field="location" data-conn-detail="${c.id}" value="${escapeHtml(c.location || '')}"></label>
+<label>Age when recorded${ageNoteHtml(c)}<input type="text" data-field="age" data-conn-detail="${c.id}" value="${escapeHtml(c.age || '')}"></label>
+<label>Date of birth<input type="date" data-field="dob" data-conn-detail="${c.id}" value="${escapeHtml(c.dob || '')}"></label>
+<label>City<input type="text" placeholder="Groups in Overview" data-field="location" data-conn-detail="${c.id}" value="${escapeHtml(c.location || '')}"></label>
+<label class="full">Full address<input type="text" placeholder="Not grouped — detail only" data-field="address" data-conn-detail="${c.id}" value="${escapeHtml(c.address || '')}"></label>
 <label>Kids<input type="text" data-field="kids" data-conn-detail="${c.id}" value="${escapeHtml(c.kids || '')}"></label>
 <label>Job<input type="text" data-field="job" data-conn-detail="${c.id}" value="${escapeHtml(c.job || '')}"></label>
 <label>Height<input type="text" data-field="height" data-conn-detail="${c.id}" value="${escapeHtml(c.height || '')}"></label>
@@ -395,7 +410,7 @@ ${c.driveLink ? `<div class="full"><a href="${escapeHtml(c.driveLink)}" target="
 <div class="merge-row">
 <select data-merge-source="${c.id}">
 <option value="">Pick a duplicate&hellip;</option>
-${data.connections.filter((o) => o.id !== c.id).map((o) => `<option value="${o.id}">${escapeHtml(o.name)}${o.age ? ', ' + escapeHtml(o.age) : ''}${o.app ? ' — ' + escapeHtml(o.app) : ''}</option>`).join('')}
+${data.connections.filter((o) => o.id !== c.id).map((o) => `<option value="${o.id}">${escapeHtml(o.name)}${displayAge(o) ? ', ' + escapeHtml(displayAge(o)) : ''}${o.app ? ' — ' + escapeHtml(o.app) : ''}</option>`).join('')}
 </select>
 <button class="todo-add-btn" type="button" data-merge-btn="${c.id}">Merge in</button>
 </div>
@@ -456,11 +471,14 @@ list.querySelectorAll('[data-conn-detail]').forEach((el) => {
 el.addEventListener('change', () => {
 const conn = data.connections.find((x) => x.id === el.dataset.connDetail);
 conn[el.dataset.field] = el.value;
+// Typing an age states what they are TODAY, so record today as the date
+// it was true — that's what lets it be carried forward later.
+if (el.dataset.field === 'age') conn.ageAsOf = el.value.trim() ? todayStr() : '';
 // These are echoed elsewhere in the card (the name line, the source tag,
 // every merge dropdown), so a full re-render is the only way to keep
 // those honest. `change` fires on blur, not per keystroke, so this costs
 // one render per edit rather than one per character.
-if (['name', 'app', 'age', 'location'].includes(el.dataset.field)) renderConnections();
+if (['name', 'app', 'age', 'dob', 'location'].includes(el.dataset.field)) renderConnections();
 renderOverviewRef();
 queueSave();
 });
@@ -731,7 +749,7 @@ const previous = select.value;
 select.innerHTML = '<option value="">Add photos to&hellip;</option>'
 + [...data.connections]
 .sort((a, b) => a.name.localeCompare(b.name))
-.map((c) => `<option value="${c.id}">${escapeHtml(c.name)}${c.age ? ', ' + escapeHtml(c.age) : ''}${c.app ? ' — ' + escapeHtml(c.app) : ''}</option>`)
+.map((c) => `<option value="${c.id}">${escapeHtml(c.name)}${displayAge(c) ? ', ' + escapeHtml(displayAge(c)) : ''}${c.app ? ' — ' + escapeHtml(c.app) : ''}</option>`)
 .join('');
 if ([...select.options].some((o) => o.value === previous)) select.value = previous;
 }

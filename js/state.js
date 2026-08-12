@@ -302,6 +302,16 @@ if (typeof c.email !== 'string') c.email = '';
 // actually called without losing the key that photos and screenshots were
 // filed under.
 if (typeof c.profileName !== 'string') c.profileName = '';
+if (typeof c.dob !== 'string') c.dob = '';
+// `location` is the city and is what Connections Overview groups by;
+// `address` holds the full postal address, which is detail rather than a
+// grouping — a street address makes a chip of one.
+if (typeof c.address !== 'string') c.address = '';
+// An age already on record has no known vintage. Stamping today is the
+// least-wrong assumption available: an age is far more likely to have been
+// entered recently than years ago, and the alternative — leaving it blank —
+// means it never ages at all, which is the bug being fixed.
+if (typeof c.ageAsOf !== 'string') c.ageAsOf = String(c.age || '').trim() ? todayStr() : '';
 // Field-by-field disagreements found against a matched Google contact:
 // [{field, mine, theirs, source}]
 if (!Array.isArray(c.contactConflicts)) c.contactConflicts = [];
@@ -403,6 +413,48 @@ else break;
 return streak;
 }
 
+// An age typed in once is only true on the day you typed it — a year later
+// the record quietly understates them. So `age` is stored with `ageAsOf`,
+// the date it was correct on, and the current age is derived. An exact `dob`
+// beats both when you know it.
+//
+// Returns null when there's nothing to work from, otherwise
+// {value, exact, drifted}: `exact` when computed from a real date of birth,
+// `drifted` when the stored number has been adjusted for elapsed years.
+function currentAge(conn) {
+const today = new Date();
+if (conn.dob) {
+const born = new Date(conn.dob);
+if (!isNaN(born)) {
+let years = today.getFullYear() - born.getFullYear();
+// Not had their birthday yet this year.
+const beforeBirthday = today.getMonth() < born.getMonth()
+|| (today.getMonth() === born.getMonth() && today.getDate() < born.getDate());
+if (beforeBirthday) years -= 1;
+if (years >= 0 && years < 130) return { value: years, exact: true, drifted: false };
+}
+}
+const base = parseInt(conn.age, 10);
+if (!Number.isFinite(base)) return null;
+if (!conn.ageAsOf) return { value: base, exact: false, drifted: false };
+const asOf = new Date(conn.ageAsOf);
+if (isNaN(asOf)) return { value: base, exact: false, drifted: false };
+let years = today.getFullYear() - asOf.getFullYear();
+const beforeAnniversary = today.getMonth() < asOf.getMonth()
+|| (today.getMonth() === asOf.getMonth() && today.getDate() < asOf.getDate());
+if (beforeAnniversary) years -= 1;
+years = Math.max(0, years);
+return { value: base + years, exact: false, drifted: years > 0 };
+}
+
+// "31" when it's from a date of birth, "~31" when it's an estimate carried
+// forward — the tilde is the honest signal that it could be a year out.
+function displayAge(conn) {
+const age = currentAge(conn);
+if (!age) return '';
+return age.exact ? String(age.value) : `~${age.value}`;
+}
+
 // Higher priority = less slack before a "reach out" nudge appears.
 function reachOutThreshold(priority) {
 return 12 - (priority || 0) * 2; // priority 5 -> 2 days, priority 1 -> 10 days
@@ -442,7 +494,7 @@ await replaceData(JSON.parse(text));
 export {
 data, sampleData, loadData, migrate, persist, queueSave, flushSave, setSaveStatusHandler,
 setExternalUpdateHandler, setLocalChangeHandler, getLocalSettings, setLocalSetting, computeStreak, reachOutThreshold,
-isDormantStage, exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, DEFAULT_PREFS,
+isDormantStage, currentAge, displayAge, exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, DEFAULT_PREFS,
 MAIL_SEARCH_KINDS, mailSearchLabel,
 TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, blankTask,
 CONTACT_STATUS_LABELS, CONTACT_MATCH_MIN_STAGE,

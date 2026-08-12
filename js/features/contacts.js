@@ -161,7 +161,10 @@ return { filled, conflicts };
 const COMPARABLE = [
 { field: 'phone', label: 'Phone', from: (c) => c.phones[0] || '' },
 { field: 'email', label: 'Email', from: (c) => c.emails[0] || '' },
-{ field: 'location', label: 'Location', from: (c) => c.city || '' },
+{ field: 'location', label: 'City', from: (c) => c.city || '' },
+// Kept alongside the city, not instead of it: the city is what groups in
+// Overview, the full address is detail worth having on the record.
+{ field: 'address', label: 'Address', from: (c) => c.address || '' },
 { field: 'job', label: 'Job', from: (c) => c.job || '' },
 ];
 

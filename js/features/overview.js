@@ -1,4 +1,4 @@
-import { data, queueSave, getLocalSettings, setLocalSetting, CONTACT_STATUS_LABELS } from '../state.js';
+import { data, queueSave, getLocalSettings, setLocalSetting, CONTACT_STATUS_LABELS, currentAge, displayAge } from '../state.js';
 import { escapeHtml } from '../utils.js';
 import { visibleTagFields } from './connections.js';
 
@@ -28,10 +28,12 @@ collapsed = settings.overviewCollapsed || {};
 drillDown = !!settings.overviewDrillDown;
 }
 
-function ageDecade(age) {
-const n = parseInt(age, 10);
-if (isNaN(n)) return null;
-return `${Math.floor(n / 10) * 10}s`;
+// Uses the derived current age, so someone recorded at 29 two years ago is
+// grouped in the 30s rather than staying frozen where they were entered.
+function ageDecade(conn) {
+const age = currentAge(conn);
+if (!age) return null;
+return `${Math.floor(age.value / 10) * 10}s`;
 }
 
 // One place defining what the chips group by, so faceting can re-apply the
@@ -40,7 +42,7 @@ function dimensions() {
 return [
 { title: 'Stage', getKeys: (c) => [c.stage], field: null, emptyField: 'stage' },
 { title: 'Location', getKeys: (c) => [c.location], field: null, emptyField: 'location' },
-{ title: 'Age', getKeys: (c) => [ageDecade(c.age)], field: null, emptyField: 'age' },
+{ title: 'Age', getKeys: (c) => [ageDecade(c)], field: null, emptyField: 'age' },
 { title: 'Job', getKeys: (c) => [c.job], field: null, emptyField: 'job' },
 { title: 'Contact match', getKeys: (c) => [CONTACT_STATUS_LABELS[c.contactStatus]], field: null, emptyField: null },
 ...visibleTagFields().map((f) => ({
@@ -124,7 +126,7 @@ const memberIds = new Set(members.map((c) => c.id));
 const options = data.connections
 .filter((c) => !memberIds.has(c.id))
 .sort((a, b) => a.name.localeCompare(b.name))
-.map((c) => `<option value="${c.id}">${escapeHtml(c.name)}${c.age ? ', ' + escapeHtml(c.age) : ''}${c.app ? ' — ' + escapeHtml(c.app) : ''}</option>`)
+.map((c) => `<option value="${c.id}">${escapeHtml(c.name)}${displayAge(c) ? ', ' + escapeHtml(displayAge(c)) : ''}${c.app ? ' — ' + escapeHtml(c.app) : ''}</option>`)
 .join('');
 if (!options) return '<span class="assigner"><span class="assigner-note">Everyone already has this.</span></span>';
 return `<span class="assigner">

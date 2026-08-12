@@ -987,6 +987,16 @@ color:var(--muted);
 /* The summary is one flex item, not several — otherwise the country-code
    tag becomes a row of its own and stretches full width. */
 .contact-candidate-summary{display:block;}
+/* Explains a "~31": either exact from a DOB, or carried forward from the
+   date the age was entered. */
+.age-note{
+font-family:'IBM Plex Mono',monospace;
+font-size:9px;
+text-transform:none;
+letter-spacing:normal;
+color:var(--teal);
+}
+
 /* The country code, pulled out of the number so a +44 candidate is
    distinguishable from a +41 one without reading digits. */
 .dial-tag{
