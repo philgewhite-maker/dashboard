@@ -5,8 +5,6 @@
 import { googleFetch } from './sync/googleauth.js';
 
 const GMAIL_API = 'https://gmail.googleapis.com/gmail/v1/users/me';
-const TRACKED_SENDERS = ['philip.g-white@db.com', 'tamara.anna.white@gmail.com'];
-const STARRED_LIMIT = 5;
 
 async function searchMessageIds(query, maxResults) {
 const params = new URLSearchParams({ q: query, maxResults: String(maxResults) });
@@ -39,11 +37,18 @@ link: `https://mail.google.com/mail/u/0/#all/${json.threadId || id}`,
 // newest first. A message that's both starred AND from a tracked sender
 // only appears in `starred` (dedup by id), so the two lists never repeat
 // the same email.
-async function fetchMailSummary() {
-const senderQuery = `(${TRACKED_SENDERS.map((e) => `from:${e}`).join(' OR ')}) newer_than:2d`;
+async function fetchMailSummary(prefs) {
+const senders = (prefs.trackedSenders || []).map((s) => String(s).trim()).filter(Boolean);
+const starredLimit = Math.max(0, Number(prefs.mailStarredLimit) || 0);
+// With no senders configured there's no meaningful query to run — Gmail
+// would treat `() newer_than:2d` as "everything from the last 2 days",
+// which is emphatically not what an empty list should mean.
+const senderQuery = senders.length
+? `(${senders.map((e) => `from:${e}`).join(' OR ')}) newer_than:${Math.max(1, Number(prefs.mailSenderDays) || 1)}d`
+: null;
 const [starredIds, senderIds] = await Promise.all([
-searchMessageIds('is:starred', STARRED_LIMIT),
-searchMessageIds(senderQuery, 20),
+starredLimit > 0 ? searchMessageIds('is:starred', starredLimit) : Promise.resolve([]),
+senderQuery ? searchMessageIds(senderQuery, Math.max(1, Number(prefs.mailSenderLimit) || 1)) : Promise.resolve([]),
 ]);
 
 const starredIdSet = new Set(starredIds);
@@ -61,4 +66,4 @@ const byNewest = (ids) => ids.map((id) => summaries[id]).filter(Boolean)
 return { starred: byNewest(starredIds), fromTracked: byNewest(uniqueSenderIds) };
 }
 
-export { fetchMailSummary, TRACKED_SENDERS };
+export { fetchMailSummary };

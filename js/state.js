@@ -31,6 +31,7 @@ businessIdeas: [],
 subscriptions: [],
 enhancementIdeas: [],
 dealExpiries: [],
+prefs: { ...DEFAULT_PREFS },
 };
 }
 
@@ -40,6 +41,19 @@ dealExpiries: [],
 // guarantee they exist, so the editor and the overview can't drift apart.
 // `sensitive` fields stay hidden (and out of search and grouping) unless this
 // device opts in — the data still syncs, only the display is per-device.
+// How much the Calendar and Mail panels fetch. Part of the synced document
+// rather than device-local settings: "show me 3 upcoming events" is a
+// preference about your dashboard, not about this particular browser, so it
+// should follow you to your phone.
+const DEFAULT_PREFS = {
+calendarEventCount: 1, // upcoming events shown per tracked calendar
+calendarDaysAhead: 0, // 0 = no limit, otherwise ignore events beyond N days
+mailStarredLimit: 5,
+mailSenderDays: 2,
+mailSenderLimit: 20,
+trackedSenders: ['philip.g-white@db.com', 'tamara.anna.white@gmail.com'],
+};
+
 const TAG_FIELDS = [
 { field: 'dateLocations', label: 'Date locations', sensitive: false },
 { field: 'dateEvents', label: 'Date events', sensitive: false },
@@ -50,7 +64,7 @@ const TAG_FIELDS = [
 ];
 
 function blankData() {
-return { habits: [], goals: [], jobs: [], connections: [], calendars: [], calendarStatus: {}, vouchers: [], businessIdeas: [], subscriptions: [], enhancementIdeas: [], dealExpiries: [] };
+return { habits: [], goals: [], jobs: [], connections: [], calendars: [], calendarStatus: {}, vouchers: [], businessIdeas: [], subscriptions: [], enhancementIdeas: [], dealExpiries: [], prefs: { ...DEFAULT_PREFS } };
 }
 
 let data = null;
@@ -108,6 +122,18 @@ if (!Array.isArray(data.businessIdeas)) data.businessIdeas = [];
 if (!Array.isArray(data.subscriptions)) data.subscriptions = [];
 if (!Array.isArray(data.enhancementIdeas)) data.enhancementIdeas = [];
 if (!Array.isArray(data.dealExpiries)) data.dealExpiries = [];
+// Fill in any pref added since this document was last written, without
+// discarding ones already customised.
+data.prefs = { ...DEFAULT_PREFS, ...(data.prefs || {}) };
+if (!Array.isArray(data.prefs.trackedSenders)) data.prefs.trackedSenders = [...DEFAULT_PREFS.trackedSenders];
+// Calendar status used to hold a single {title, date}. Reshape those into
+// the events array the multi-event view expects, so previously synced
+// calendars keep showing their event instead of going blank until re-synced.
+Object.values(data.calendarStatus).forEach((s) => {
+if (s && !Array.isArray(s.events)) {
+s.events = s.found && s.date ? [{ title: s.title, date: s.date }] : [];
+}
+});
 data.connections.forEach((c) => {
 if (!Array.isArray(c.photoIds)) c.photoIds = c.photoId ? [c.photoId] : [];
 if (typeof c.photoId !== 'string') c.photoId = c.photoIds[0] || null;
@@ -255,7 +281,7 @@ await replaceData(JSON.parse(text));
 export {
 data, sampleData, loadData, migrate, persist, queueSave, flushSave, setSaveStatusHandler,
 setExternalUpdateHandler, setLocalChangeHandler, getLocalSettings, setLocalSetting, computeStreak, reachOutThreshold,
-isDormantStage, exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS,
+isDormantStage, exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, DEFAULT_PREFS,
 };
 
 // `data` above is exported by binding, but ES module live-bindings only

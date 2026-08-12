@@ -34,7 +34,30 @@ if (el) el.innerHTML = appOptions(el.value);
 let connectionSearchTerm = '';
 let connectionSortPrimary = 'default';
 let connectionSortSecondary = 'none';
+// Set by the "None" chips in Connections Overview: {field, label}. Kept
+// separate from the text search because "has nothing in this field" isn't
+// something a substring match can express.
+let emptyFieldFilter = null;
 const expandedConnections = new Set();
+
+// Works for both the array tag fields and the plain text ones (location,
+// education), so one "None" chip implementation covers every dimension.
+function isFieldEmpty(c, field) {
+const value = c[field];
+if (Array.isArray(value)) return value.length === 0;
+return !String(value || '').trim();
+}
+
+// Called by the Overview "None (n)" chips.
+function filterByEmptyField(field, label) {
+emptyFieldFilter = { field, label };
+connectionSearchTerm = '';
+const search = document.getElementById('conn-search');
+if (search) search.value = '';
+renderConnections();
+const panel = document.getElementById('connections-panel');
+if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
 
 // Whether this device shows the `sensitive` tag fields (see TAG_FIELDS).
 // Device-local, not part of the synced document — the notes themselves sync
@@ -73,9 +96,33 @@ const stars = [1, 2, 3, 4, 5].map((n) => `<svg class="star rate-star ${n <= valu
 return `<div class="rating-row"><span class="rating-label">${escapeHtml(label)}</span><div class="stars">${stars}</div></div>`;
 }
 
+// Every distinct value already used for `field`, keyed lowercase so the
+// first spelling entered becomes the canonical one.
+function existingTagValues(field) {
+const byKey = new Map();
+data.connections.forEach((c) => {
+(c[field] || []).forEach((v) => {
+const key = String(v).trim().toLowerCase();
+if (key && !byKey.has(key)) byKey.set(key, String(v).trim());
+});
+});
+return [...byKey.values()].sort((a, b) => a.localeCompare(b));
+}
+
+// One <datalist> per field, shared by every card's add-input. Native
+// autocomplete, so it works on mobile keyboards too, and seeing "sporty"
+// offered is what stops "Sporty" and "sporty " becoming separate tags.
+function tagDatalistsHtml() {
+return TAG_FIELDS.map(({ field }) => {
+const values = existingTagValues(field);
+if (values.length === 0) return '';
+return `<datalist id="taglist-${field}">${values.map((v) => `<option value="${escapeHtml(v)}"></option>`).join('')}</datalist>`;
+}).join('');
+}
+
 function tagChips(items, connId, field) {
 return (items || []).map((t, i) => `<span class="tag-chip">${escapeHtml(t)}<span class="tag-x" data-tag-remove="${connId}" data-tag-field="${field}" data-tag-idx="${i}">&times;</span></span>`).join('')
-+ `<input type="text" class="tag-add-input" placeholder="+ add" data-tag-add="${connId}" data-tag-field="${field}">`
++ `<input type="text" class="tag-add-input" placeholder="+ add" list="taglist-${field}" data-tag-add="${connId}" data-tag-field="${field}">`
 + `<button type="button" class="todo-add-btn" data-tag-add-btn="${connId}" data-tag-add-btn-field="${field}" style="padding:3px 8px;">+</button>`;
 }
 
@@ -103,8 +150,30 @@ const list = document.getElementById('connections-list');
 document.getElementById('connections-count').textContent = data.connections.length + (data.connections.length === 1 ? ' connection' : ' connections');
 if (data.connections.length === 0) {
 list.innerHTML = '<div class="empty">No matches logged yet. Add one below.</div>';
+refreshPhotoTargets();
 return;
 }
+
+// "Show me everyone missing a nationality" can't be expressed as a text
+// search, so it's a separate filter mode rather than a magic search term.
+if (emptyFieldFilter) {
+const { field, label } = emptyFieldFilter;
+const missing = data.connections.filter((c) => isFieldEmpty(c, field));
+list.innerHTML = `<div class="filter-banner">Showing ${missing.length} with no ${escapeHtml(label)} <button class="filter-clear" type="button" id="clear-empty-filter">Clear</button></div>`
++ (missing.length === 0
+? '<div class="empty">Everyone has at least one.</div>'
+: missing.map(connectionCardHtml).join(''))
++ tagDatalistsHtml();
+document.getElementById('clear-empty-filter').addEventListener('click', () => {
+emptyFieldFilter = null;
+renderConnections();
+});
+hydratePhotos(list);
+bindConnectionEvents(list);
+refreshPhotoTargets();
+return;
+}
+
 const term = connectionSearchTerm.trim().toLowerCase();
 const filtered = term ? data.connections.filter((c) => {
 const haystack = [
@@ -130,7 +199,14 @@ if (diff !== 0 || !secondary) return diff;
 return secondary.getValue(b) - secondary.getValue(a);
 });
 
-list.innerHTML = sorted.map((c) => {
+list.innerHTML = sorted.map(connectionCardHtml).join('') + tagDatalistsHtml();
+
+hydratePhotos(list);
+bindConnectionEvents(list);
+refreshPhotoTargets();
+}
+
+function connectionCardHtml(c) {
 const since = daysSince(c.lastContact);
 const overdue = !isDormantStage(c.stage) && since >= reachOutThreshold(c.priority);
 const stars = [1, 2, 3, 4, 5].map((n) => `<svg class="star priority-star ${n <= c.priority ? 'filled' : ''}" data-conn="${c.id}" data-star="${n}" viewBox="0 0 20 20" fill="currentColor"><path d="M10 1l2.6 5.9 6.4.6-4.8 4.3 1.4 6.2L10 14.9 4.4 18l1.4-6.2L1 7.5l6.4-.6z"/></svg>`).join('');
@@ -186,10 +262,6 @@ ${data.connections.filter((o) => o.id !== c.id).map((o) => `<option value="${o.i
 </div>
 </details>
 </div>`;
-}).join('');
-
-hydratePhotos(list);
-bindConnectionEvents(list);
 }
 
 function bindConnectionEvents(list) {
@@ -275,11 +347,20 @@ queueSave();
 });
 });
 const commitTagAdd = (connId, field, inputEl) => {
-const val = inputEl.value.trim().replace(/,$/, '');
-if (!val) return;
+const raw = inputEl.value.trim().replace(/,$/, '').trim();
+if (!raw) return;
 const conn = data.connections.find((x) => x.id === connId);
 if (!conn[field]) conn[field] = [];
-conn[field].push(val);
+// Reuse the spelling already in use elsewhere, so typing "sporty" when
+// "Sporty" exists doesn't create a second tag that groups separately in
+// Overview. Whatever was entered first wins.
+const canonical = existingTagValues(field)
+.find((v) => v.toLowerCase() === raw.toLowerCase()) || raw;
+if (conn[field].some((v) => String(v).trim().toLowerCase() === canonical.toLowerCase())) {
+inputEl.value = '';
+return;
+}
+conn[field].push(canonical);
 renderConnections();
 renderOverviewRef();
 queueSave();
@@ -412,6 +493,9 @@ setTimeout(() => scrollAndFlash(`[data-conn-row="${newId}"]`), 50);
 
 document.getElementById('conn-search').addEventListener('input', (e) => {
 connectionSearchTerm = e.target.value;
+// Typing a search is an implicit "forget the None filter" — leaving both
+// active would show a filtered subset with no indication why.
+emptyFieldFilter = null;
 renderConnections();
 });
 document.getElementById('conn-sort-primary').addEventListener('change', (e) => {
@@ -480,6 +564,61 @@ return `<label class="candidate-row" data-idx="${idx}">
 </label>`;
 }
 
+// Keeps the "Add photos to…" picker in step with the connection list. The
+// import box sits outside #connections-list so it isn't rebuilt by
+// renderConnections' innerHTML assignment — it has to be refreshed here.
+function refreshPhotoTargets() {
+const select = document.getElementById('photo-target-input');
+if (!select) return;
+const previous = select.value;
+select.innerHTML = '<option value="">Add photos to&hellip;</option>'
++ [...data.connections]
+.sort((a, b) => a.name.localeCompare(b.name))
+.map((c) => `<option value="${c.id}">${escapeHtml(c.name)}${c.age ? ', ' + escapeHtml(c.age) : ''}${c.app ? ' — ' + escapeHtml(c.app) : ''}</option>`)
+.join('');
+if ([...select.options].some((o) => o.value === previous)) select.value = previous;
+}
+
+// Stores photos straight onto a connection with no API call. Most profile
+// photos are just more pictures of someone already recorded, so paying to
+// re-read fields you already have is pure waste — this is the same code path
+// the per-connection gallery "+" uses, just reachable in bulk.
+async function addPhotosWithoutParsing(files, status) {
+const conn = data.connections.find((c) => c.id === document.getElementById('photo-target-input').value);
+if (!conn) {
+status.textContent = 'Pick who these photos belong to first.';
+return;
+}
+if (!Array.isArray(conn.photoIds)) conn.photoIds = [];
+const room = 12 - conn.photoIds.length;
+if (room <= 0) {
+status.textContent = `${conn.name} already has the maximum of 12 photos.`;
+return;
+}
+status.textContent = `Adding ${Math.min(files.length, room)} photo${files.length === 1 ? '' : 's'} to ${conn.name}…`;
+let added = 0;
+let failed = 0;
+for (const file of files.slice(0, room)) {
+try {
+const blob = await resizeImageToBlob(file, 900, 0.85);
+const id = uid();
+await photoPut(id, blob);
+conn.photoIds.push(id);
+if (!conn.photoId) conn.photoId = id;
+added++;
+} catch (err) {
+failed++;
+console.error('Could not add photo:', err);
+}
+}
+const skipped = files.length - Math.min(files.length, room);
+status.textContent = `Added ${added} photo${added === 1 ? '' : 's'} to ${conn.name}, no AI used.`
++ (failed ? ` ${failed} couldn't be read.` : '')
++ (skipped ? ` ${skipped} skipped — 12 photo limit.` : '');
+renderConnections();
+queueSave();
+}
+
 // The source picked next to the import buttons, but only when it names an
 // app whose layout the model can actually use as a hint.
 function screenshotAppHint() {
@@ -490,6 +629,14 @@ return SCREENSHOT_APPS.has(app) ? app : null;
 function initImport() {
 const status = document.getElementById('import-status');
 const candidateList = document.getElementById('candidate-list');
+
+document.getElementById('photo-only-input').addEventListener('change', async (e) => {
+const files = Array.from(e.target.files);
+e.target.value = '';
+if (files.length === 0) return;
+candidateList.innerHTML = '';
+await addPhotosWithoutParsing(files, status);
+});
 
 document.getElementById('import-file-input').addEventListener('change', async (e) => {
 const file = e.target.files[0];
@@ -696,5 +843,5 @@ renderConnections();
 
 export {
 renderConnections, initConnectionForm, expandConnection, CONN_STAGES,
-initSensitiveFields, setShowSensitiveFields, visibleTagFields,
+initSensitiveFields, setShowSensitiveFields, visibleTagFields, filterByEmptyField,
 };

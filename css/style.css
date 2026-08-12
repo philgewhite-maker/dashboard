@@ -778,23 +778,18 @@ padding:6px 8px;
 }
 
 /* Calendars */
+/* A calendar can now show several upcoming events, so the row stacks:
+   name on top, its events listed beneath. */
 .cal-row{
-display:flex;
-align-items:center;
-gap:12px;
 padding:11px 0;
 border-top:1px solid var(--line);
-flex-wrap:wrap;
 }
 .cal-row:first-of-type{border-top:none;}
 .cal-name{
-flex:1 1 160px;
-min-width:140px;
 font-size:14px;
 font-weight:600;
 }
 .cal-event{
-flex:2 1 220px;
 font-size:13px;
 color:var(--ink);
 }
@@ -872,6 +867,69 @@ opacity:.7;
 }
 .overview-chip-wrap{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;}
 .overview-chip.active{background:var(--rose);color:#fff;border-color:var(--rose);}
+/* "None" is a gap to fill rather than a group to browse, so it reads as
+   muted and dashed instead of competing with the real values. */
+.overview-chip.none{
+border-style:dashed;
+color:var(--muted);
+background:transparent;
+}
+.pref-grid{
+display:grid;
+grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
+gap:10px;
+}
+.pref-grid label{
+display:flex;
+flex-direction:column;
+gap:4px;
+font-size:12px;
+color:var(--muted);
+}
+.pref-grid input{
+font-family:'IBM Plex Mono',monospace;
+font-size:13px;
+border:1px solid var(--line);
+border-radius:6px;
+padding:6px 8px;
+background:var(--paper);
+color:var(--ink);
+}
+.cal-head{display:flex;align-items:center;gap:10px;}
+.cal-head .cal-name{flex:1;min-width:0;}
+.cal-events{margin-top:4px;padding-left:2px;}
+.cal-event-row{
+display:flex;
+align-items:center;
+gap:10px;
+padding:3px 0;
+flex-wrap:wrap;
+}
+.cal-event-row .cal-event{flex:1;min-width:140px;}
+.cal-event-row .cal-badge{margin-left:auto;}
+
+.filter-banner{
+display:flex;
+align-items:center;
+gap:10px;
+flex-wrap:wrap;
+font-size:12px;
+color:var(--muted);
+background:var(--amber-bg);
+border-radius:7px;
+padding:7px 10px;
+margin-bottom:10px;
+}
+.filter-clear{
+font-family:'Inter',sans-serif;
+font-size:12px;
+background:transparent;
+border:1px solid var(--line);
+border-radius:20px;
+padding:2px 10px;
+cursor:pointer;
+color:var(--ink);
+}
 .assigner{display:inline-flex;align-items:center;gap:5px;}
 .assigner-select{
 font-family:'Inter',sans-serif;

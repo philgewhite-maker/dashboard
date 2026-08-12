@@ -214,8 +214,13 @@
 </select>
 <label class="file-btn" for="import-file-input" id="import-file-label">Import matches list</label>
 <input type="file" id="import-file-input" accept="image/*" style="display:none;">
-<label class="file-btn" for="import-profile-input" id="import-profile-label">Import profile screenshot(s)</label>
+<label class="file-btn" for="import-profile-input" id="import-profile-label">Import profile screenshot(s) + parse</label>
 <input type="file" id="import-profile-input" accept="image/*" multiple style="display:none;">
+</div>
+<div class="import-row">
+<select id="photo-target-input"><option value="">Add photos to&hellip;</option></select>
+<label class="file-btn" for="photo-only-input" id="photo-only-label">Add photos, no parsing (free)</label>
+<input type="file" id="photo-only-input" accept="image/*" multiple style="display:none;">
 </div>
 <div class="import-status" id="import-status"></div>
 <div class="candidate-list" id="candidate-list"></div>
@@ -344,6 +349,21 @@ Show the "Sex" field on connections and in Connections Overview
 <button class="add-btn" type="button">Track</button>
 </div>
 <div class="settings-note">Then use "Sync calendars" on the Overview tab to pull in each one's next upcoming event.</div>
+</div>
+
+<div class="settings-block">
+<h3>Calendar &amp; Mail limits</h3>
+<div class="settings-note" style="margin:0 0 10px;">How much each panel pulls in. Synced, so these follow you to your other devices.</div>
+<div class="pref-grid">
+<label>Upcoming events per calendar<input type="number" min="1" max="20" id="pref-cal-count"></label>
+<label>Only events within (days, 0 = no limit)<input type="number" min="0" max="365" id="pref-cal-days"></label>
+<label>Starred emails to show<input type="number" min="0" max="25" id="pref-mail-starred"></label>
+<label>Tracked-sender emails: days back<input type="number" min="1" max="60" id="pref-mail-days"></label>
+<label>Tracked-sender emails: max results<input type="number" min="1" max="50" id="pref-mail-limit"></label>
+</div>
+<label for="pref-mail-senders" style="font-size:13px;font-weight:500;display:block;margin:10px 0 6px;">Tracked senders (one email address per line)</label>
+<textarea id="pref-mail-senders" rows="3" class="settings-input" style="resize:vertical;font-family:'IBM Plex Mono',monospace;font-size:12px;"></textarea>
+<div class="settings-note">Leave empty to show starred mail only. Changes apply next time you press "Refresh mail" or "Sync calendars".</div>
 </div>
 
 <div class="settings-block">

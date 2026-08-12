@@ -1,3 +1,4 @@
+import { data } from '../state.js';
 import { escapeHtml } from '../utils.js';
 import { canAttemptGoogleAction } from '../sync/googleauth.js';
 import { fetchMailSummary } from '../googlemail.js';
@@ -31,11 +32,12 @@ return `<div class="overview-group"><h3>${escapeHtml(title)}</h3><div class="mai
 function renderMail(result) {
 const list = document.getElementById('mail-list');
 document.getElementById('mail-count').textContent = `${result.starred.length + result.fromTracked.length} shown`;
+const days = Math.max(1, Number(data.prefs.mailSenderDays) || 1);
 const html = [
 sectionHtml('Starred', result.starred),
-sectionHtml('From Phil / Tamara (last 2 days)', result.fromTracked),
+sectionHtml(`From tracked senders (last ${days} day${days === 1 ? '' : 's'})`, result.fromTracked),
 ].filter(Boolean).join('');
-list.innerHTML = html || '<div class="empty">Nothing to show — no starred mail, and nothing from your tracked senders in the last 2 days.</div>';
+list.innerHTML = html || `<div class="empty">Nothing to show — no starred mail, and nothing from your tracked senders in the last ${days} day${days === 1 ? '' : 's'}.</div>`;
 }
 
 function initMail() {
@@ -49,7 +51,7 @@ return;
 btn.disabled = true;
 status.textContent = 'Loading…';
 try {
-const result = await fetchMailSummary();
+const result = await fetchMailSummary(data.prefs);
 renderMail(result);
 status.textContent = `Updated ${new Date().toLocaleTimeString()}.`;
 } catch (err) {

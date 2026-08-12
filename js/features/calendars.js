@@ -14,34 +14,43 @@ if (data.calendars.length === 0) {
 list.innerHTML = '<div class="empty">Nothing tracked yet. Add one in Settings, then Sync.</div>';
 return;
 }
+// Sort by each calendar's soonest event so whatever is happening next
+// floats to the top, regardless of how many events each one shows.
 const withDate = (name) => {
 const s = data.calendarStatus[name];
-return s && s.found && s.date ? daysUntil(s.date) : Infinity;
+const first = s && s.events && s.events[0];
+return first && first.date ? daysUntil(first.date) : Infinity;
 };
 const sorted = [...data.calendars].sort((a, b) => withDate(a) - withDate(b));
 
+const eventRowHtml = (e) => {
+const dn = daysUntil(e.date);
+const badgeText = dn <= 0 ? 'Today' : dn === 1 ? 'Tomorrow' : `in ${dn} days`;
+return `<div class="cal-event-row">
+<span class="cal-event">${escapeHtml(e.title)}<span class="cal-date">${escapeHtml(String(e.date).slice(0, 10))}</span></span>
+<span class="cal-badge ${dn <= 0 ? 'today' : ''}">${badgeText}</span>
+</div>`;
+};
+
 list.innerHTML = sorted.map((name) => {
 const status = data.calendarStatus[name];
-let eventHtml, badgeHtml = '';
+const events = (status && status.events) || [];
+let body;
 if (!status) {
-eventHtml = '<span class="cal-event empty-state">Not synced yet</span>';
+body = '<div class="cal-event-row"><span class="cal-event empty-state">Not synced yet</span></div>';
 } else if (status.error) {
-eventHtml = `<span class="cal-event empty-state">Sync error: ${escapeHtml(status.error)}</span>`;
-} else if (!status.found) {
-eventHtml = '<span class="cal-event empty-state">No upcoming events found</span>';
+body = `<div class="cal-event-row"><span class="cal-event empty-state">Sync error: ${escapeHtml(status.error)}</span></div>`;
+} else if (events.length === 0) {
+body = '<div class="cal-event-row"><span class="cal-event empty-state">No upcoming events found</span></div>';
 } else {
-const dn = daysUntil(status.date);
-const badgeText = dn <= 0 ? 'Today' : dn === 1 ? 'Tomorrow' : `in ${dn} days`;
-badgeHtml = `<span class="cal-badge ${dn <= 0 ? 'today' : ''}">${badgeText}</span>`;
-eventHtml = `<span class="cal-event">${escapeHtml(status.title)}<span class="cal-date">${escapeHtml(String(status.date).slice(0, 10))}</span></span>`;
+body = events.map(eventRowHtml).join('');
 }
 return `<div class="cal-row" data-cal-row="${escapeHtml(name)}">
+<div class="cal-head">
 <span class="cal-name">${escapeHtml(name)}</span>
-${eventHtml}
-<div class="cal-actions">
-${badgeHtml}
 <span class="del-x" style="opacity:1;" data-del-cal="${escapeHtml(name)}">&times;</span>
 </div>
+<div class="cal-events">${body}</div>
 </div>`;
 }).join('');
 
@@ -116,7 +125,7 @@ return;
 btn.disabled = true;
 status.textContent = 'Syncing…';
 try {
-const results = await syncCalendars(data.calendars);
+const results = await syncCalendars(data.calendars, data.prefs);
 data.calendarStatus = { ...data.calendarStatus, ...results };
 renderCalendars();
 queueSave();

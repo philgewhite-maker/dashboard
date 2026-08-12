@@ -1,4 +1,4 @@
-import { data, getLocalSettings, setLocalSetting, exportBackup, importBackup } from '../state.js';
+import { data, queueSave, getLocalSettings, setLocalSetting, exportBackup, importBackup } from '../state.js';
 import { renderAll } from '../render-all.js';
 import { escapeHtml } from '../utils.js';
 import { summarizeUsage, currentMonthKey } from '../ai.js';
@@ -82,6 +82,7 @@ e.target.value = '';
 });
 
 initLiveSync(settings);
+initFetchPrefs();
 
 const sensitiveToggle = document.getElementById('sensitive-fields-toggle');
 sensitiveToggle.checked = !!settings.showSensitiveFields;
@@ -95,6 +96,43 @@ document.getElementById('refresh-usage-btn').addEventListener('click', renderUsa
 await renderUsage();
 
 initDriveBackup();
+}
+
+// These live in the synced document rather than device settings, so they go
+// through queueSave() like any other data edit.
+function initFetchPrefs() {
+const numeric = [
+['pref-cal-count', 'calendarEventCount', 1],
+['pref-cal-days', 'calendarDaysAhead', 0],
+['pref-mail-starred', 'mailStarredLimit', 0],
+['pref-mail-days', 'mailSenderDays', 1],
+['pref-mail-limit', 'mailSenderLimit', 1],
+];
+numeric.forEach(([id, key, min]) => {
+const el = document.getElementById(id);
+el.value = data.prefs[key];
+el.addEventListener('change', () => {
+// A blank or nonsense entry falls back to the minimum rather than
+// writing NaN into the document and breaking the next fetch.
+const parsed = parseInt(el.value, 10);
+const value = Number.isFinite(parsed) ? Math.max(min, parsed) : min;
+data.prefs[key] = value;
+el.value = value;
+queueSave();
+});
+});
+
+const senders = document.getElementById('pref-mail-senders');
+senders.value = (data.prefs.trackedSenders || []).join('\n');
+let senderTimer = null;
+senders.addEventListener('input', () => {
+clearTimeout(senderTimer);
+senderTimer = setTimeout(() => {
+data.prefs.trackedSenders = senders.value
+.split('\n').map((s) => s.trim()).filter(Boolean);
+queueSave();
+}, 500);
+});
 }
 
 // The URL/secret pair is saved as you type (debounced), but syncing only

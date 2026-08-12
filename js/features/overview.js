@@ -19,24 +19,32 @@ if (isNaN(n)) return null;
 return `${Math.floor(n / 10) * 10}s`;
 }
 
+// Returns the populated groups plus everyone with nothing at all for this
+// dimension, which is what the "None" chip surfaces — the fastest way to
+// find records still missing a nationality, a location, a tag.
 function groupConnectionsBy(getKeys) {
 const groups = {};
+const none = [];
 data.connections.forEach((c) => {
-const keys = getKeys(c);
+const keys = (getKeys(c) || []).filter(Boolean);
+if (keys.length === 0) { none.push(c); return; }
 keys.forEach((k) => {
-if (!k) return;
 if (!groups[k]) groups[k] = [];
 groups[k].push(c);
 });
 });
-return groups;
+return { groups, none };
 }
 
 // `field` is the connection array property behind these chips, or null for
 // derived groupings (stage, age decade) that aren't directly assignable.
-function overviewDimension(title, groups, field) {
+// `field` is the connection array property behind these chips, or null for
+// derived groupings (age decade) that aren't directly assignable.
+// `emptyField` is the property the "None" chip tests, which for single-value
+// dimensions like Location differs from `field`.
+function overviewDimension(title, { groups, none }, field, emptyField) {
 const keys = Object.keys(groups).sort((a, b) => groups[b].length - groups[a].length);
-if (keys.length === 0) return '';
+if (keys.length === 0 && none.length === 0) return '';
 const isCollapsed = !!collapsed[title];
 const chips = keys.map((k) => {
 const isOpen = openAssigner && openAssigner.field === field && openAssigner.key === k;
@@ -45,7 +53,10 @@ return `<span class="overview-chip-wrap">
 <button class="overview-chip${isOpen ? ' active' : ''}" data-overview-key="${escapeHtml(k)}" data-overview-field="${escapeHtml(field || '')}">${escapeHtml(k)} (${groups[k].length})</button>
 ${assigner}
 </span>`;
-}).join('');
+}).join('')
++ (none.length && emptyField
+? `<button class="overview-chip none" data-overview-none="${escapeHtml(emptyField)}" data-overview-none-label="${escapeHtml(title)}">None (${none.length})</button>`
+: '');
 return `<div class="overview-group">
 <button class="overview-head" type="button" data-collapse="${escapeHtml(title)}">
 <span class="overview-caret">${isCollapsed ? '▸' : '▾'}</span>${escapeHtml(title)}
@@ -86,10 +97,11 @@ el.innerHTML = '<div class="empty">Add some connections to see them grouped here
 return;
 }
 const sections = [
-overviewDimension('Stage', groupConnectionsBy((c) => [c.stage].filter(Boolean)), null),
-overviewDimension('Location', groupConnectionsBy((c) => [c.location].filter(Boolean)), null),
-overviewDimension('Age', groupConnectionsBy((c) => [ageDecade(c.age)].filter(Boolean)), null),
-...visibleTagFields().map((f) => overviewDimension(f.label, groupConnectionsBy((c) => c[f.field] || []), f.field)),
+overviewDimension('Stage', groupConnectionsBy((c) => [c.stage]), null, 'stage'),
+overviewDimension('Location', groupConnectionsBy((c) => [c.location]), null, 'location'),
+overviewDimension('Age', groupConnectionsBy((c) => [ageDecade(c.age)]), null, 'age'),
+overviewDimension('Job', groupConnectionsBy((c) => [c.job]), null, 'job'),
+...visibleTagFields().map((f) => overviewDimension(f.label, groupConnectionsBy((c) => c[f.field] || []), f.field, f.field)),
 ];
 
 el.innerHTML = sections.filter(Boolean).join('')
@@ -104,7 +116,16 @@ renderOverview();
 });
 });
 
-el.querySelectorAll('.overview-chip').forEach((chip) => {
+el.querySelectorAll('[data-overview-none]').forEach((chip) => {
+chip.addEventListener('click', async () => {
+const m = await import('./connections.js');
+m.filterByEmptyField(chip.dataset.overviewNone, chip.dataset.overviewNoneLabel);
+openAssigner = null;
+renderOverview();
+});
+});
+
+el.querySelectorAll('.overview-chip:not(.none)').forEach((chip) => {
 chip.addEventListener('click', () => {
 const key = chip.dataset.overviewKey;
 const field = chip.dataset.overviewField;
