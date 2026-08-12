@@ -28,6 +28,16 @@ statusEl.textContent = text;
 statusEl.className = `live-sync-status${kind ? ' ' + kind : ''}`;
 }
 
+// Does this device hold anything worth preserving? A brand-new install
+// carries the sample habits and goals, so this errs towards "yes" and an
+// occasional pointless backup file — much the better mistake to make than
+// skipping the backup on a device that did have real data.
+function hasLocalContent() {
+return ['connections', 'habits', 'goals', 'jobs', 'vouchers', 'businessIdeas',
+'subscriptions', 'dealExpiries', 'enhancementIdeas', 'calendars']
+.some((key) => Array.isArray(data[key]) && data[key].length > 0);
+}
+
 function describeError(err) {
 if (err instanceof NotConfiguredError) return '';
 return err.message || String(err);
@@ -55,9 +65,19 @@ await setKnownRev(remote.rev);
 await push({ force: true });
 return;
 }
-if (remote.rev !== (await getKnownRev())) {
-await adoptRemote(remote, { backupFirst: false });
-setStatus(`Updated from server ${new Date().toLocaleTimeString()}`, 'ok');
+const knownRev = await getKnownRev();
+if (remote.rev !== knownRev) {
+// A device that has never synced before, but already holds data of its
+// own, is about to have all of it replaced by the server's copy. That
+// one deserves the same safety net "Pull from Google Drive" gives.
+// Later pulls skip it: by then this device's own edits have been pushed
+// up, so there's nothing unique left to lose, and a download on every
+// remote change would be unbearable.
+const firstAdoption = knownRev === 0 && hasLocalContent();
+await adoptRemote(remote, { backupFirst: firstAdoption });
+setStatus(firstAdoption
+? 'Loaded from server — previous data on this device saved to Downloads'
+: `Updated from server ${new Date().toLocaleTimeString()}`, 'ok');
 } else if (announce) {
 setStatus('Up to date', 'ok');
 }
