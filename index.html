@@ -30,6 +30,7 @@
 
 <div class="tab-bar" id="tab-bar">
 <button class="tab-btn active" type="button" data-tab-btn="overview">Overview</button>
+<button class="tab-btn" type="button" data-tab-btn="tasks">Tasks</button>
 <button class="tab-btn" type="button" data-tab-btn="jobhunt">Job Hunt</button>
 <button class="tab-btn" type="button" data-tab-btn="dating">Dating</button>
 <button class="tab-btn" type="button" data-tab-btn="finances">Finances</button>
@@ -38,6 +39,22 @@
 </div>
 
 <div class="board">
+<section class="panel wide" id="questions-panel" data-tab="overview" style="display:none;">
+<div class="panel-head">
+<h2><span class="dot amber"></span>Questions from Claude</h2>
+<span class="count-badge" id="questions-count"></span>
+</div>
+<div class="sync-row">
+<button class="sync-btn" id="copy-answers-btn" type="button">Copy answers</button>
+<label class="settings-note" style="display:flex;align-items:center;gap:6px;margin:0;cursor:pointer;">
+<input type="checkbox" id="show-answered-toggle"> Show answered
+</label>
+<span class="sync-status" id="questions-status"></span>
+</div>
+<textarea id="answers-fallback" rows="6" style="display:none;width:100%;font-family:'IBM Plex Mono',monospace;font-size:11px;margin-bottom:10px;" readonly></textarea>
+<div id="questions-list"></div>
+</section>
+
 <section class="panel wide" id="nudges-panel" data-tab="overview">
 <div class="panel-head">
 <h2><span class="dot rose"></span>Nudges</h2>
@@ -85,6 +102,47 @@
 <span class="count-badge" id="goals-count"></span>
 </div>
 <div id="goals-list"></div>
+</section>
+
+<section class="panel wide" id="capture-panel" data-tab="tasks">
+<div class="panel-head">
+<h2><span class="dot amber"></span>Capture</h2>
+<span class="count-badge" id="capture-status"></span>
+</div>
+<div class="capture-row">
+<input type="text" id="capture-input" placeholder="What's on your mind? Enter to capture.">
+<button class="add-btn" id="capture-btn" type="button">Capture</button>
+<label class="file-btn" for="capture-photo-input">Photo / screenshot</label>
+<input type="file" id="capture-photo-input" accept="image/*" multiple style="display:none;">
+</div>
+<div class="settings-note" style="margin:8px 0 0;">Everything lands in the Inbox unfiled. Deciding where it belongs is the next step, not this one.</div>
+</section>
+
+<section class="panel wide" id="inbox-panel" data-tab="tasks">
+<div class="panel-head">
+<h2><span class="dot rose"></span>Inbox &mdash; file these</h2>
+<span class="count-badge" id="inbox-count"></span>
+</div>
+<div id="task-inbox"></div>
+</section>
+
+<section class="panel wide" id="tasks-panel" data-tab="tasks">
+<div class="panel-head">
+<h2><span class="dot sage"></span>Lists</h2>
+<label class="settings-note" style="display:flex;align-items:center;gap:6px;margin:0;cursor:pointer;">
+<input type="checkbox" id="show-done-toggle"> Show done
+</label>
+</div>
+<div class="overview-chips" id="task-filter" style="margin-bottom:12px;"></div>
+<div id="task-lists"></div>
+</section>
+
+<section class="panel wide" id="task-contexts-panel" data-tab="tasks">
+<div class="panel-head">
+<h2><span class="dot teal"></span>Contexts</h2>
+</div>
+<div class="tag-editor" id="task-contexts-list"></div>
+<div class="settings-note">Where or with what you can actually do things. Removing one clears it from every task.</div>
 </section>
 
 <section class="panel" id="jobs-panel" data-tab="jobhunt">

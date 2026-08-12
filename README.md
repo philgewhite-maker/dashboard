@@ -33,7 +33,8 @@ Then open `http://localhost:8080`. It won't work opened directly as a
   photo/screenshot import feature (see below)
 - `js/features/*.js` — one module per panel (habits, goals, jobs,
   connections, calendars, vouchers, ideas, overview, nudges, settings,
-  googleaccount, mail)
+  googleaccount, mail, tasks, questions)
+- `questions.json` — questions Claude is waiting on answers to; see below
 - `js/render-all.js`, `js/tabs.js`, `js/app.js` — bootstrapping and
   cross-panel wiring
 - `js/sync/googleauth.js` — shared Google sign-in (Drive, Calendar, and Mail
@@ -124,6 +125,52 @@ sends, labels, or deletes anything. Shows your top 5 starred messages, plus
 anything from a couple of tracked senders (`TRACKED_SENDERS` in
 `js/googlemail.js`) in the last 2 days. A message that's both starred and
 from a tracked sender only appears once, under Starred.
+
+## Tasks (GTD)
+
+The Tasks tab is built around capture being separate from deciding.
+
+**Capture** takes a line of text or a photo/screenshot and drops it in the
+Inbox unfiled — no bucket, no context, no thinking. Mail rows and calendar
+events also have a small "+ task" button that captures with a link back to
+the source.
+
+**Inbox** is the allocation workspace. Each item can be filed two ways: a
+"File to…" dropdown, or dragged onto a bucket. Both exist deliberately —
+HTML5 drag-and-drop is unreliable on touch and this gets used on a phone, so
+the dropdown is the real interface and dragging is an enhancement.
+
+**Lists** are the six GTD buckets (Inbox, Next actions, Projects, Waiting
+for, Someday/maybe, Done), filterable by context. Contexts default to
+Office / Home / DIY / Home PC / Outdoor errands and are editable in the tab.
+
+Per task: subtasks (any task can be "part of" another, with cycles
+rejected), a due date, a **bring-forward** date, a reference link for the
+detail behind a project, and attached photos. A task with a bring-forward
+date in the future is hidden from the working lists and parked under
+"Scheduled to surface" — that's the point of a tickler, and it nudges you
+when the date arrives.
+
+Nudges cover tasks too: an unfiled inbox (one nudge for the pile, not one
+per item), due and overdue tasks, bring-forwards that have arrived, and
+"waiting for" items nobody has chased in a fortnight.
+
+## Questions from Claude
+
+A channel for answering questions while away from the desk.
+
+Claude publishes questions by pushing `questions.json` to this repo; the
+dashboard fetches it same-origin, so there's no auth or CORS involved. You
+answer on any device — tap an option, or type your own — and answers are
+stored in the synced document, so they follow you around.
+
+**Copy answers** puts them on the clipboard as readable text to paste into a
+Claude session. The clipboard is deliberately the return path: it needs no
+credentials and nothing of yours has to be externally readable for it to
+work. If the browser blocks clipboard access, the text appears in a
+selectable box instead.
+
+The panel hides itself entirely when there are no questions.
 
 ## Live sync to your own server
 

@@ -6,6 +6,7 @@ import { data, queueSave } from '../state.js';
 import { escapeHtml, bindForm, scrollAndFlash, daysUntil } from '../utils.js';
 import { canAttemptGoogleAction } from '../sync/googleauth.js';
 import { syncCalendars, listCalendars } from '../googlecalendar.js';
+import { captureTask } from './tasks.js';
 
 function renderCalendars() {
 const list = document.getElementById('calendars-list');
@@ -23,11 +24,15 @@ return first && first.date ? daysUntil(first.date) : Infinity;
 };
 const sorted = [...data.calendars].sort((a, b) => withDate(a) - withDate(b));
 
-const eventRowHtml = (e) => {
+const eventRowHtml = (e, calName) => {
 const dn = daysUntil(e.date);
 const badgeText = dn <= 0 ? 'Today' : dn === 1 ? 'Tomorrow' : `in ${dn} days`;
 return `<div class="cal-event-row">
 <span class="cal-event">${escapeHtml(e.title)}<span class="cal-date">${escapeHtml(String(e.date).slice(0, 10))}</span></span>
+<button class="mini-task-btn" type="button" title="Capture as a task"
+data-event-task="1" data-event-title="${escapeHtml(e.title)}"
+data-event-date="${escapeHtml(String(e.date).slice(0, 10))}"
+data-event-cal="${escapeHtml(calName)}">+ task</button>
 <span class="cal-badge ${dn <= 0 ? 'today' : ''}">${badgeText}</span>
 </div>`;
 };
@@ -44,7 +49,7 @@ body = `<div class="cal-event-row"><span class="cal-event empty-state">Sync erro
 } else if (events.length === 0) {
 body = '<div class="cal-event-row"><span class="cal-event empty-state">No upcoming events found</span></div>';
 } else {
-body = events.map(eventRowHtml).join('');
+body = events.map((e) => eventRowHtml(e, name)).join('');
 }
 return `<div class="cal-row" data-cal-row="${escapeHtml(name)}">
 <div class="cal-head">
@@ -54,6 +59,18 @@ return `<div class="cal-row" data-cal-row="${escapeHtml(name)}">
 <div class="cal-events">${body}</div>
 </div>`;
 }).join('');
+
+list.querySelectorAll('[data-event-task]').forEach((btn) => {
+btn.addEventListener('click', () => {
+captureTask({
+title: `Prep: ${btn.dataset.eventTitle}`,
+notes: `${btn.dataset.eventCal} — ${btn.dataset.eventDate}`,
+source: { kind: 'calendar', label: `${btn.dataset.eventTitle} (${btn.dataset.eventDate})` },
+});
+btn.textContent = '✓';
+btn.disabled = true;
+});
+});
 
 list.querySelectorAll('[data-del-cal]').forEach((el) => {
 el.addEventListener('click', () => {

@@ -32,6 +32,9 @@ subscriptions: [],
 enhancementIdeas: [],
 dealExpiries: [],
 mailSearches: [],
+tasks: [],
+taskContexts: [...DEFAULT_TASK_CONTEXTS],
+claudeAnswers: {},
 prefs: { ...DEFAULT_PREFS },
 };
 }
@@ -80,6 +83,39 @@ default: return value || 'Gmail query';
 }
 }
 
+// GTD buckets. `inbox` is deliberately first and unfiled — capture is meant
+// to be thoughtless, and deciding where something belongs is a separate step
+// (that's the whole point of the allocation workspace).
+const TASK_BUCKETS = [
+{ bucket: 'inbox', label: 'Inbox', hint: 'Captured, not yet decided' },
+{ bucket: 'next', label: 'Next actions', hint: 'Doable now, in some context' },
+{ bucket: 'project', label: 'Projects', hint: 'Outcomes needing more than one action' },
+{ bucket: 'waiting', label: 'Waiting for', hint: 'Blocked on someone else' },
+{ bucket: 'someday', label: 'Someday / maybe', hint: 'Aspirational, not committed' },
+{ bucket: 'done', label: 'Done', hint: 'Finished' },
+];
+
+const DEFAULT_TASK_CONTEXTS = ['Office', 'Home', 'DIY', 'Home PC', 'Outdoor errands'];
+
+function blankTask(fields = {}) {
+return {
+id: uid(),
+title: '',
+notes: '',
+bucket: 'inbox',
+contexts: [],
+parentId: null, // set for subtasks; the parent is any other task
+bringForward: '', // ISO date — hidden from active lists until then
+due: '',
+link: '', // OneNote/Notion/etc. for the detail behind a project
+photoIds: [],
+source: null, // {kind:'mail'|'calendar'|'photo', label, url}
+createdAt: new Date().toISOString(),
+completedAt: '',
+...fields,
+};
+}
+
 const TAG_FIELDS = [
 { field: 'dateLocations', label: 'Date locations', sensitive: false },
 { field: 'dateEvents', label: 'Date events', sensitive: false },
@@ -90,7 +126,9 @@ const TAG_FIELDS = [
 ];
 
 function blankData() {
-return { habits: [], goals: [], jobs: [], connections: [], calendars: [], calendarStatus: {}, vouchers: [], businessIdeas: [], subscriptions: [], enhancementIdeas: [], dealExpiries: [], mailSearches: [], prefs: { ...DEFAULT_PREFS } };
+return { habits: [], goals: [], jobs: [], connections: [], calendars: [], calendarStatus: {}, vouchers: [], businessIdeas: [], subscriptions: [], enhancementIdeas: [], dealExpiries: [], mailSearches: [], tasks: [], taskContexts: [...DEFAULT_TASK_CONTEXTS],
+claudeAnswers: {},
+prefs: { ...DEFAULT_PREFS } };
 }
 
 let data = null;
@@ -164,6 +202,27 @@ if (!Array.isArray(data.businessIdeas)) data.businessIdeas = [];
 if (!Array.isArray(data.subscriptions)) data.subscriptions = [];
 if (!Array.isArray(data.enhancementIdeas)) data.enhancementIdeas = [];
 if (!Array.isArray(data.dealExpiries)) data.dealExpiries = [];
+// Answers to Claude's questions live in the synced document so they reach
+// whichever device you next sit down at, not just the one you typed on.
+if (!data.claudeAnswers || typeof data.claudeAnswers !== 'object' || Array.isArray(data.claudeAnswers)) {
+data.claudeAnswers = {};
+}
+if (!Array.isArray(data.taskContexts) || data.taskContexts.length === 0) {
+data.taskContexts = [...DEFAULT_TASK_CONTEXTS];
+}
+if (!Array.isArray(data.tasks)) data.tasks = [];
+const validBuckets = new Set(TASK_BUCKETS.map((b) => b.bucket));
+data.tasks = data.tasks.map((t) => ({ ...blankTask(), ...t, id: t.id || uid() }));
+data.tasks.forEach((t) => {
+if (!validBuckets.has(t.bucket)) t.bucket = 'inbox';
+if (!Array.isArray(t.contexts)) t.contexts = [];
+if (!Array.isArray(t.photoIds)) t.photoIds = [];
+});
+// A subtask whose parent has been deleted would otherwise vanish from every
+// list — it renders under its parent, and there's no parent to render.
+// Promote it rather than silently orphaning it.
+const taskIds = new Set(data.tasks.map((t) => t.id));
+data.tasks.forEach((t) => { if (t.parentId && !taskIds.has(t.parentId)) t.parentId = null; });
 // Seed the mail search rows from the old fixed shape the first time only.
 // Keyed on the array's absence rather than its emptiness, so deleting every
 // row stays deleted instead of being helpfully repopulated next reload.
@@ -350,6 +409,7 @@ data, sampleData, loadData, migrate, persist, queueSave, flushSave, setSaveStatu
 setExternalUpdateHandler, setLocalChangeHandler, getLocalSettings, setLocalSetting, computeStreak, reachOutThreshold,
 isDormantStage, exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, DEFAULT_PREFS,
 MAIL_SEARCH_KINDS, mailSearchLabel,
+TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, blankTask,
 };
 
 // `data` above is exported by binding, but ES module live-bindings only

@@ -9,6 +9,7 @@ import { renderDealExpiries } from './features/dealexpiries.js';
 import { renderBusinessIdeas } from './features/ideas.js';
 import { renderEnhancementIdeas } from './features/enhancements.js';
 import { renderOverview } from './features/overview.js';
+import { renderTasks } from './features/tasks.js';
 import { renderNudges } from './features/nudges.js';
 
 function renderAll() {
@@ -22,6 +23,7 @@ renderSubscriptions();
 renderDealExpiries();
 renderBusinessIdeas();
 renderEnhancementIdeas();
+renderTasks();
 renderOverview();
 renderNudges();
 }

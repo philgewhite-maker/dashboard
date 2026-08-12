@@ -2,6 +2,7 @@ import { data, mailSearchLabel } from '../state.js';
 import { escapeHtml } from '../utils.js';
 import { canAttemptGoogleAction } from '../sync/googleauth.js';
 import { fetchMailSearches } from '../googlemail.js';
+import { captureTask } from './tasks.js';
 
 // "Tamara White" <tamara.anna.white@gmail.com> -> "Tamara White"; falls
 // back to the raw email if there's no display name on the header.
@@ -17,11 +18,18 @@ return d.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digi
 }
 
 function messageRowHtml(m) {
-return `<a class="mail-row" href="${escapeHtml(m.link)}" target="_blank" rel="noopener">
+return `<div class="mail-row">
+<a class="mail-link" href="${escapeHtml(m.link)}" target="_blank" rel="noopener">
 <span class="mail-from">${escapeHtml(displayName(m.from))}</span>
 <span class="mail-subject">${escapeHtml(m.subject)}</span>
 <span class="mail-date">${escapeHtml(formatDate(m.date))}</span>
-</a>`;
+</a>
+<button class="mini-task-btn" type="button" title="Capture as a task"
+data-mail-task="${escapeHtml(m.id)}"
+data-mail-subject="${escapeHtml(m.subject)}"
+data-mail-from="${escapeHtml(displayName(m.from))}"
+data-mail-url="${escapeHtml(m.link)}">+ task</button>
+</div>`;
 }
 
 function sectionHtml(title, messages) {
@@ -46,6 +54,19 @@ const html = sections.map((s) => sectionHtml(sectionTitle(s.search), s.messages)
 list.innerHTML = html || (data.mailSearches.length === 0
 ? '<div class="empty">No mail searches set up — add some in Settings.</div>'
 : '<div class="empty">Nothing matched your mail searches.</div>');
+
+list.querySelectorAll('[data-mail-task]').forEach((btn) => {
+btn.addEventListener('click', (e) => {
+e.preventDefault();
+captureTask({
+title: `Reply: ${btn.dataset.mailSubject}`,
+notes: `From ${btn.dataset.mailFrom}`,
+source: { kind: 'mail', label: btn.dataset.mailSubject, url: btn.dataset.mailUrl },
+});
+btn.textContent = '✓ captured';
+btn.disabled = true;
+});
+});
 }
 
 function initMail() {

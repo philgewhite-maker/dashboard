@@ -3,7 +3,7 @@ import { escapeHtml, scrollAndFlash, daysSince, daysUntil } from '../utils.js';
 import { switchTab } from '../tabs.js';
 import { callTextJson, MissingKeyError } from '../ai.js';
 
-const TARGET_TABS = { connection: 'dating', search: 'dating', habit: 'overview', goal: 'overview', job: 'jobhunt', voucher: 'finances', calendar: 'overview', business: 'business' };
+const TARGET_TABS = { connection: 'dating', search: 'dating', habit: 'overview', goal: 'overview', job: 'jobhunt', voucher: 'finances', calendar: 'overview', business: 'business', task: 'tasks' };
 const TOP_N = 4;
 // Cheap, fast model for a ranking task — no need for the vision model the
 // user may have set for screenshot import.
@@ -132,6 +132,54 @@ signals: { kind: 'upcoming-event', daysUntil: dn },
 });
 });
 
+// Tasks. The inbox one is deliberately a single nudge about the pile
+// rather than one per item — an unprocessed inbox is one decision ("go
+// and file these"), not fifteen.
+const inbox = data.tasks.filter((t) => t.bucket === 'inbox');
+if (inbox.length > 0) {
+const oldest = Math.max(...inbox.map((t) => daysSince(String(t.createdAt).slice(0, 10))));
+pool.push({
+text: `${inbox.length} thing${inbox.length === 1 ? '' : 's'} sitting unfiled in your task inbox.`,
+target: { type: 'task', id: inbox[0].id },
+signals: { kind: 'inbox-unprocessed', count: inbox.length, daysSince: oldest },
+});
+}
+
+data.tasks.forEach((t) => {
+if (t.bucket === 'done') return;
+// A bring-forward date that has arrived is the whole reason you set one.
+if (t.bringForward && daysUntil(t.bringForward) <= 0 && t.bucket !== 'inbox') {
+pool.push({
+text: `"${t.title}" was scheduled to come back on ${t.bringForward}.`,
+target: { type: 'task', id: t.id },
+signals: { kind: 'task-resurfaced', daysSince: -daysUntil(t.bringForward) },
+});
+}
+if (t.due) {
+const dn = daysUntil(t.due);
+if (dn <= 3) {
+pool.push({
+text: dn < 0 ? `"${t.title}" is ${-dn} day${dn === -1 ? '' : 's'} overdue.` : `"${t.title}" is due ${dn === 0 ? 'today' : `in ${dn} day${dn === 1 ? '' : 's'}`}.`,
+target: { type: 'task', id: t.id },
+signals: { kind: 'task-due', daysUntil: dn },
+});
+}
+}
+});
+
+// A "waiting for" that nobody has chased in a fortnight has usually been
+// forgotten rather than genuinely still pending.
+data.tasks.filter((t) => t.bucket === 'waiting').forEach((t) => {
+const age = daysSince(String(t.createdAt).slice(0, 10));
+if (age >= 14) {
+pool.push({
+text: `Still waiting on "${t.title}" after ${age} days — worth a chase?`,
+target: { type: 'task', id: t.id },
+signals: { kind: 'waiting-stale', daysSince: age },
+});
+}
+});
+
 data.businessIdeas.filter((i) => i.status !== 'Shelved').forEach((idea) => {
 const days = daysSince(idea.date);
 if (days >= 1) {
@@ -174,6 +222,8 @@ setTimeout(() => scrollAndFlash(`[data-voucher-row="${target.id}"]`), 50);
 setTimeout(() => scrollAndFlash(`[data-cal-row="${CSS.escape(target.name)}"]`), 50);
 } else if (target.type === 'business') {
 setTimeout(() => scrollAndFlash(`[data-idea-row="${target.id}"]`), 50);
+} else if (target.type === 'task') {
+setTimeout(() => scrollAndFlash(`[data-task-row="${target.id}"], [data-alloc-card="${target.id}"]`), 50);
 }
 }
 

@@ -1,0 +1,54 @@
+{
+  "updated": "2026-08-12",
+  "note": "Claude publishes questions here by pushing to the repo. Answers are stored in your synced dashboard data, and 'Copy answers' puts them on the clipboard to paste back into a Claude session.",
+  "questions": [
+    {
+      "id": "q-gtd-buckets",
+      "asked": "2026-08-12",
+      "topic": "Tasks",
+      "question": "Are the six lists right — Inbox, Next actions, Projects, Waiting for, Someday/maybe, Done?",
+      "why": "I picked standard GTD. If you think in different lists (e.g. a 'Today' shortlist, or splitting work from personal), the buckets are one constant to change.",
+      "options": ["Six are right", "Add a Today list", "Split work vs personal", "Something else"]
+    },
+    {
+      "id": "q-gtd-contexts",
+      "asked": "2026-08-12",
+      "topic": "Tasks",
+      "question": "Contexts are seeded as Office, Home, DIY, Home PC, Outdoor errands. Any to add or drop?",
+      "why": "You can edit these in the app, but if there's an obvious missing one (Phone? Waiting-on-Tamara? Car?) I'd rather it were there from the start.",
+      "options": ["Those five are fine", "Add Phone/calls", "Add Errands-in-town", "Other — see notes"]
+    },
+    {
+      "id": "q-resurface",
+      "asked": "2026-08-12",
+      "topic": "Tasks",
+      "question": "When a bring-forward date arrives, should the task move itself into Next actions, or just nudge you?",
+      "why": "Right now it only nudges and stays in whichever list it was in. Auto-moving is more automatic but decides for you.",
+      "options": ["Just nudge (current)", "Auto-move to Next actions", "Auto-move back to Inbox to re-decide"]
+    },
+    {
+      "id": "q-done-archive",
+      "asked": "2026-08-12",
+      "topic": "Tasks",
+      "question": "Should completed tasks be cleared out automatically after a while?",
+      "why": "Done tasks are hidden behind a toggle but never deleted, so the document grows forever and syncs on every save.",
+      "options": ["Keep everything", "Auto-delete after 30 days", "Auto-delete after 90 days"]
+    },
+    {
+      "id": "q-next-priority",
+      "asked": "2026-08-12",
+      "topic": "Priorities",
+      "question": "Of the two things still outstanding, which do you want first?",
+      "why": "You picked both earlier: cleaning up duplicate tags that already exist, and a mobile layout pass.",
+      "options": ["Duplicate tag cleanup", "Mobile layout pass", "Neither — something else"]
+    },
+    {
+      "id": "q-project-links",
+      "asked": "2026-08-12",
+      "topic": "Tasks",
+      "question": "For project reference links — is OneNote the right assumption, and do your links share a common prefix?",
+      "why": "The link field takes any URL. If your notes live somewhere with a predictable URL shape I can make it one tap instead of a paste.",
+      "options": ["OneNote, no common prefix", "OneNote, and yes — see notes", "I use something else", "Plain URL field is fine"]
+    }
+  ]
+}
