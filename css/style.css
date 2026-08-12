@@ -984,6 +984,22 @@ letter-spacing:.05em;
 color:var(--muted);
 }
 .contact-candidate-main{display:flex;flex-direction:column;gap:2px;min-width:0;}
+/* The summary is one flex item, not several — otherwise the country-code
+   tag becomes a row of its own and stretches full width. */
+.contact-candidate-summary{display:block;}
+/* The country code, pulled out of the number so a +44 candidate is
+   distinguishable from a +41 one without reading digits. */
+.dial-tag{
+font-family:'IBM Plex Mono',monospace;
+font-size:11px;
+background:var(--teal-bg);
+color:var(--teal);
+border-radius:5px;
+padding:1px 5px;
+white-space:nowrap;
+}
+.conflict-opt .dial-tag{font-size:10px;}
+
 .contact-candidate-why{
 font-family:'IBM Plex Mono',monospace;
 font-size:10px;

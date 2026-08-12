@@ -66,6 +66,37 @@ function flagEmoji(iso) {
 return iso.toUpperCase().replace(/./g, (ch) => String.fromCodePoint(0x1F1E6 + ch.charCodeAt(0) - 65));
 }
 
+// Splits a written international number into its country code and the rest.
+// Longest dial code wins, so +353 isn't mistaken for +35 and +44 not for +4.
+// Several countries share a code (+1 is US and Canada), so the label names
+// all of them rather than picking one and being wrong half the time.
+function splitDialCode(phone) {
+const raw = String(phone || '').trim();
+if (!raw.startsWith('+')) return null;
+const digits = raw.replace(/[^\d+]/g, '');
+const hit = [...DIAL_CODES]
+.sort((a, b) => b[1].length - a[1].length)
+.find(([, dial]) => digits.startsWith(dial));
+if (!hit) return null;
+const [, dial] = hit;
+const sharing = DIAL_CODES.filter(([, d]) => d === dial);
+return {
+iso: hit[0],
+dial,
+name: sharing.map(([, , n]) => n).join(' / '),
+rest: raw.slice(raw.indexOf(dial) + dial.length).trim(),
+};
+}
+
+// The country code as a distinct tag so it reads at a glance — telling a
+// +44 candidate from a +41 one is often the whole decision. Falls back to
+// the plain number when there's no recognisable code (national format).
+function phoneWithFlagHtml(phone) {
+const parsed = splitDialCode(phone);
+if (!parsed) return escapeHtml(phone || '');
+return `<span class="dial-tag" title="${escapeHtml(parsed.name)}">${flagEmoji(parsed.iso)} ${escapeHtml(parsed.dial)}</span> ${escapeHtml(parsed.rest)}`;
+}
+
 function dialCodeOptions() {
 return '<option value="">Country code…</option>' + DIAL_CODES
 .map(([iso, dial, name]) => `<option value="${dial}">${flagEmoji(iso)} ${dial} — ${escapeHtml(name)}</option>`)
@@ -973,5 +1004,5 @@ export {
 renderConnections, initConnectionForm, expandConnection, CONN_STAGES,
 initSensitiveFields, setShowSensitiveFields, visibleTagFields,
 filterByEmptyField, filterBySearch, filterByIds, clearFilters,
-STAGE_RANK, setContactPicker,
+STAGE_RANK, setContactPicker, phoneWithFlagHtml,
 };

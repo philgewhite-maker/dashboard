@@ -9,7 +9,7 @@ import { data, queueSave, CONTACT_STATUS_LABELS, CONTACT_MATCH_MIN_STAGE } from 
 import { escapeHtml } from '../utils.js';
 import { canAttemptGoogleAction, hasContactsWrite } from '../sync/googleauth.js';
 import { listContacts, indexContacts, updateContactBirthday, phoneKey, emailKey, nameKey, widerNameCandidates } from '../googlecontacts.js';
-import { STAGE_RANK, setContactPicker } from './connections.js';
+import { STAGE_RANK, setContactPicker, phoneWithFlagHtml } from './connections.js';
 
 // Hand connections.js the inline picker renderer. Registering it rather than
 // having connections.js import this module keeps the dependency one-way.
@@ -244,9 +244,14 @@ Promise.all([import('./connections.js'), import('./overview.js')])
 .then(([conns, overview]) => { conns.renderConnections(); overview.renderOverview(); });
 }
 
-function candidateSummary(c) {
-return [c.displayName || c.givenName, c.phones[0], c.emails[0], c.job]
-.filter(Boolean).join(' · ');
+// Returns HTML, not text, because the phone's country code is rendered as
+// its own tag — everything else is escaped individually.
+function candidateSummaryHtml(c) {
+const parts = [escapeHtml(c.displayName || c.givenName)];
+if (c.phones[0]) parts.push(phoneWithFlagHtml(c.phones[0]));
+if (c.emails[0]) parts.push(escapeHtml(c.emails[0]));
+if (c.job) parts.push(escapeHtml(c.job));
+return parts.filter(Boolean).join(' · ');
 }
 
 // Rendered inside the connection's own card, where the photo, age and stage
@@ -259,7 +264,7 @@ return `<div class="contact-picker">
 <div class="contact-picker-head">Possible Google Contacts match</div>
 ${entries.map(({ contact, why }) => `<div class="contact-candidate">
 <span class="contact-candidate-main">
-${escapeHtml(candidateSummary(contact))}
+<span class="contact-candidate-summary">${candidateSummaryHtml(contact)}</span>
 <span class="contact-candidate-why">${escapeHtml(why)}${contact.sourceType === 'OTHER_CONTACT' ? ' · auto-collected, not saved' : ''}${contact.groups.length ? ' · ' + escapeHtml(contact.groups.join(', ')) : ''}${contact.updateTime ? ' · updated ' + escapeHtml(String(contact.updateTime).slice(0, 10)) : ''}</span>
 </span>
 <button class="sync-btn" type="button" data-confirm-match="${escapeHtml(connId)}" data-resource="${escapeHtml(contact.resourceName)}">That's them</button>
@@ -271,6 +276,13 @@ ${escapeHtml(candidateSummary(contact))}
 // Disagreements between a connection and its linked contact, each resolvable
 // either way. Shown on the card because that's where you can see the rest of
 // the record and judge which side is right.
+// Phone conflicts get the country-code tag too — "+44 vs +41" is usually
+// the entire point of the disagreement, and quote marks around a raw string
+// bury it.
+function conflictValueHtml(field, value) {
+return field === 'phone' ? phoneWithFlagHtml(value) : `“${escapeHtml(value)}”`;
+}
+
 function conflictsHtml(conn) {
 if (!conn.contactConflicts || conn.contactConflicts.length === 0) return '';
 return `<div class="conflict-box">
@@ -278,8 +290,8 @@ return `<div class="conflict-box">
 ${conn.contactConflicts.map((k, i) => `<div class="conflict-row">
 <span class="conflict-field">${escapeHtml(k.label)}</span>
 <span class="conflict-values">
-<button class="conflict-opt" type="button" data-keep-mine="${escapeHtml(conn.id)}" data-conflict-idx="${i}">Keep “${escapeHtml(k.mine)}”</button>
-<button class="conflict-opt theirs" type="button" data-take-theirs="${escapeHtml(conn.id)}" data-conflict-idx="${i}">Use “${escapeHtml(k.theirs)}”${k.source === 'contact label' ? ' (their label)' : ''}</button>
+<button class="conflict-opt" type="button" data-keep-mine="${escapeHtml(conn.id)}" data-conflict-idx="${i}">Keep ${conflictValueHtml(k.field, k.mine)}</button>
+<button class="conflict-opt theirs" type="button" data-take-theirs="${escapeHtml(conn.id)}" data-conflict-idx="${i}">Use ${conflictValueHtml(k.field, k.theirs)}${k.source === 'contact label' ? ' (their label)' : ''}</button>
 </span>
 </div>`).join('')}
 </div>`;
