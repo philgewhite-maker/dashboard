@@ -193,6 +193,11 @@ gap:24px;
 .board{grid-template-columns:1fr;}
 .wrap{padding:32px 20px 60px;}
 }
+/* A grid item's min-width defaults to auto, so it refuses to shrink below its
+   content's minimum — one wide panel then stretches the whole column and the
+   entire page scrolls sideways. Measured: the connection details grid forced
+   the board to 454px inside a 375px viewport. */
+.board > section{min-width:0;}
 section.panel{
 background:var(--card);
 border:1px solid var(--line);
@@ -1220,8 +1225,12 @@ max-width:100%;
 }
 .limits-table input:disabled{opacity:.4;}
 .limits-table input[type=text]{width:100%;min-width:120px;}
+/* These tables can't usefully shrink below their controls, so on a narrow
+   screen they scroll inside their own box rather than widening the page. Any
+   container holding one needs to be listed here — a .limits-table without a
+   scrolling parent pushes the whole page sideways. */
 @media (max-width:600px){
-#mail-searches, #calendar-limits{overflow-x:auto;}
+#mail-searches, #calendar-limits, #tag-cleanup, .cleanup-section{overflow-x:auto;}
 .limits-table{min-width:460px;}
 }
 
@@ -1353,6 +1362,40 @@ font-family:'IBM Plex Mono',monospace;
 font-size:10px;
 color:var(--muted);
 }
+
+/* ---- Phone layout ----
+   This dashboard is used on a phone constantly, and several panels were laid
+   out assuming a wide screen. Form controls are the usual culprit: an <input>
+   or <select> has an intrinsic minimum width and won't shrink past it unless
+   told to, which is what pushed the whole board sideways. */
+@media (max-width:600px){
+/* Two columns of inputs don't fit in 375px; one does. */
+.details-grid{grid-template-columns:1fr;}
+.task-detail-grid{grid-template-columns:1fr;}
+.pref-grid{grid-template-columns:1fr;}
+
+/* Sort/filter controls become full width rather than squeezing side by side. */
+.sort-row{flex-direction:column;align-items:stretch;}
+.sort-row .mini{width:100%;}
+
+/* Rating stars and the actions cluster wrap instead of forcing width. */
+.match-actions{width:100%;justify-content:flex-start;}
+.match-row .stars{order:5;}
+
+/* File pickers and their dropdowns stack. */
+.import-row{flex-direction:column;align-items:stretch;}
+.import-row select, .import-row .file-btn{width:100%;text-align:center;}
+
+/* Add-forms are a column of full-width fields on a phone. */
+.add-form{flex-direction:column;align-items:stretch;}
+.add-form input, .add-form select, .add-form textarea{width:100%;}
+}
+
+/* Belt and braces: no form control anywhere should be able to overflow its
+   container, whatever the viewport. */
+input, select, textarea{max-width:100%;}
+.details-grid input, .details-grid select, .details-grid textarea,
+.task-detail input, .task-detail select, .task-detail textarea{min-width:0;}
 
 /* Vouchers */
 .voucher-row{
