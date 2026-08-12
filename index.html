@@ -352,18 +352,19 @@ Show the "Sex" field on connections and in Connections Overview
 </div>
 
 <div class="settings-block">
-<h3>Calendar &amp; Mail limits</h3>
-<div class="settings-note" style="margin:0 0 10px;">How much each panel pulls in. Synced, so these follow you to your other devices.</div>
-<div class="pref-grid">
-<label>Upcoming events per calendar<input type="number" min="1" max="20" id="pref-cal-count"></label>
-<label>Only events within (days, 0 = no limit)<input type="number" min="0" max="365" id="pref-cal-days"></label>
-<label>Starred emails to show<input type="number" min="0" max="25" id="pref-mail-starred"></label>
-<label>Tracked-sender emails: days back<input type="number" min="1" max="60" id="pref-mail-days"></label>
-<label>Tracked-sender emails: max results<input type="number" min="1" max="50" id="pref-mail-limit"></label>
+<h3>Mail searches</h3>
+<div class="settings-note" style="margin:0 0 10px;">Each row becomes its own section in the Mail panel, with its own limits. Synced, so these follow you to your other devices.</div>
+<div id="mail-searches"></div>
+<button class="add-btn" id="add-mail-search-btn" type="button" style="margin-top:8px;">Add search</button>
 </div>
-<label for="pref-mail-senders" style="font-size:13px;font-weight:500;display:block;margin:10px 0 6px;">Tracked senders (one email address per line)</label>
-<textarea id="pref-mail-senders" rows="3" class="settings-input" style="resize:vertical;font-family:'IBM Plex Mono',monospace;font-size:12px;"></textarea>
-<div class="settings-note">Leave empty to show starred mail only. Changes apply next time you press "Refresh mail" or "Sync calendars".</div>
+
+<div class="settings-block">
+<h3>Calendar limits</h3>
+<div id="calendar-limits"></div>
+<div class="pref-grid" style="margin-top:10px;">
+<label>Default max events, when a calendar's is blank<input type="number" min="1" max="50" id="pref-cal-count"></label>
+<label>Default max results, when a mail search's is blank<input type="number" min="1" max="50" id="pref-mail-count"></label>
+</div>
 </div>
 
 <div class="settings-block">

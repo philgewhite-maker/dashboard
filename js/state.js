@@ -31,6 +31,7 @@ businessIdeas: [],
 subscriptions: [],
 enhancementIdeas: [],
 dealExpiries: [],
+mailSearches: [],
 prefs: { ...DEFAULT_PREFS },
 };
 }
@@ -45,14 +46,39 @@ prefs: { ...DEFAULT_PREFS },
 // rather than device-local settings: "show me 3 upcoming events" is a
 // preference about your dashboard, not about this particular browser, so it
 // should follow you to your phone.
+// Fallbacks for a row that doesn't set its own limit. Blank on a row means
+// "no limit" for days and "use this default" for count, so leaving the boxes
+// empty stays the simple case.
 const DEFAULT_PREFS = {
-calendarEventCount: 1, // upcoming events shown per tracked calendar
-calendarDaysAhead: 0, // 0 = no limit, otherwise ignore events beyond N days
-mailStarredLimit: 5,
-mailSenderDays: 2,
-mailSenderLimit: 20,
-trackedSenders: ['philip.g-white@db.com', 'tamara.anna.white@gmail.com'],
+calendarEventCount: 1,
+mailResultCount: 5,
 };
+
+// Each mail search is one row in Settings: a kind, its value, and its own
+// day/result caps. Replaces the old fixed "starred + hardcoded senders"
+// shape, which couldn't express "invoices from the last 2 days" at all.
+const MAIL_SEARCH_KINDS = [
+{ kind: 'starred', label: 'Starred', needsValue: false },
+{ kind: 'from', label: 'From', needsValue: true },
+{ kind: 'to', label: 'To', needsValue: true },
+{ kind: 'subject', label: 'Subject contains', needsValue: true },
+{ kind: 'contains', label: 'Contains', needsValue: true },
+{ kind: 'query', label: 'Gmail query', needsValue: true },
+];
+
+// What a row is called in the Mail panel, matching how you'd describe it:
+// "Starred", "From: a@gmail.com", 'Contains: "invoice"'.
+function mailSearchLabel(search) {
+const value = String(search.value || '').trim();
+switch (search.kind) {
+case 'starred': return 'Starred';
+case 'from': return `From: ${value}`;
+case 'to': return `To: ${value}`;
+case 'subject': return `Subject: ${value}`;
+case 'contains': return `Contains: “${value}”`;
+default: return value || 'Gmail query';
+}
+}
 
 const TAG_FIELDS = [
 { field: 'dateLocations', label: 'Date locations', sensitive: false },
@@ -64,7 +90,7 @@ const TAG_FIELDS = [
 ];
 
 function blankData() {
-return { habits: [], goals: [], jobs: [], connections: [], calendars: [], calendarStatus: {}, vouchers: [], businessIdeas: [], subscriptions: [], enhancementIdeas: [], dealExpiries: [], prefs: { ...DEFAULT_PREFS } };
+return { habits: [], goals: [], jobs: [], connections: [], calendars: [], calendarStatus: {}, vouchers: [], businessIdeas: [], subscriptions: [], enhancementIdeas: [], dealExpiries: [], mailSearches: [], prefs: { ...DEFAULT_PREFS } };
 }
 
 let data = null;
@@ -110,22 +136,63 @@ if (!Array.isArray(data.goals)) data.goals = [];
 if (!Array.isArray(data.jobs)) data.jobs = [];
 if (!Array.isArray(data.connections)) data.connections = [];
 if (!Array.isArray(data.calendars)) data.calendars = [];
-// Earlier version tracked {id, name, date} manual entries instead of
-// synced-by-name strings — collapse those down to just the name so
-// existing tracked calendars carry over and pick up real sync data next
-// time Sync runs, instead of being silently dropped.
-data.calendars = data.calendars.map((c) => (typeof c === 'string' ? c : c?.name)).filter(Boolean);
-data.calendars = [...new Set(data.calendars)];
+// Tracked calendars have been through three shapes: {id,name,date} manual
+// entries, then bare name strings, and now {name, maxDays, maxEvents} so
+// each calendar carries its own limits. Normalise all of them forward,
+// seeding the limits from whatever global prefs this document last had.
+const priorDays = Number(data.prefs?.calendarDaysAhead) || 0;
+const priorCount = Number(data.prefs?.calendarEventCount) || 1;
+const seenCalendars = new Set();
+data.calendars = data.calendars.map((c) => {
+const name = (typeof c === 'string' ? c : c?.name) || '';
+if (!name.trim()) return null;
+return {
+name: name.trim(),
+maxDays: typeof c === 'object' && c ? (Number(c.maxDays) || 0) : priorDays,
+maxEvents: typeof c === 'object' && c ? (Number(c.maxEvents) || 0) : priorCount,
+};
+}).filter((c) => {
+if (!c) return false;
+const key = c.name.toLowerCase();
+if (seenCalendars.has(key)) return false;
+seenCalendars.add(key);
+return true;
+});
 if (!data.calendarStatus || typeof data.calendarStatus !== 'object' || Array.isArray(data.calendarStatus)) data.calendarStatus = {};
 if (!Array.isArray(data.vouchers)) data.vouchers = [];
 if (!Array.isArray(data.businessIdeas)) data.businessIdeas = [];
 if (!Array.isArray(data.subscriptions)) data.subscriptions = [];
 if (!Array.isArray(data.enhancementIdeas)) data.enhancementIdeas = [];
 if (!Array.isArray(data.dealExpiries)) data.dealExpiries = [];
+// Seed the mail search rows from the old fixed shape the first time only.
+// Keyed on the array's absence rather than its emptiness, so deleting every
+// row stays deleted instead of being helpfully repopulated next reload.
+if (!Array.isArray(data.mailSearches)) {
+const old = data.prefs || {};
+data.mailSearches = [];
+if ((Number(old.mailStarredLimit) || 0) > 0) {
+data.mailSearches.push({ id: uid(), kind: 'starred', value: '', maxDays: 0, maxEvents: Number(old.mailStarredLimit) });
+}
+(Array.isArray(old.trackedSenders) ? old.trackedSenders : []).forEach((addr) => {
+data.mailSearches.push({
+id: uid(), kind: 'from', value: addr,
+maxDays: Number(old.mailSenderDays) || 0,
+maxEvents: Number(old.mailSenderLimit) || 0,
+});
+});
+}
+data.mailSearches = data.mailSearches.map((s) => ({
+id: s.id || uid(),
+kind: MAIL_SEARCH_KINDS.some((k) => k.kind === s.kind) ? s.kind : 'query',
+value: String(s.value || ''),
+maxDays: Math.max(0, Number(s.maxDays) || 0),
+maxEvents: Math.max(0, Number(s.maxEvents) || 0),
+}));
+
 // Fill in any pref added since this document was last written, without
-// discarding ones already customised.
+// discarding ones already customised. The pre-per-row keys are deliberately
+// left in place rather than deleted — they're what the seeding above reads.
 data.prefs = { ...DEFAULT_PREFS, ...(data.prefs || {}) };
-if (!Array.isArray(data.prefs.trackedSenders)) data.prefs.trackedSenders = [...DEFAULT_PREFS.trackedSenders];
 // Calendar status used to hold a single {title, date}. Reshape those into
 // the events array the multi-event view expects, so previously synced
 // calendars keep showing their event instead of going blank until re-synced.
@@ -282,6 +349,7 @@ export {
 data, sampleData, loadData, migrate, persist, queueSave, flushSave, setSaveStatusHandler,
 setExternalUpdateHandler, setLocalChangeHandler, getLocalSettings, setLocalSetting, computeStreak, reachOutThreshold,
 isDormantStage, exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, DEFAULT_PREFS,
+MAIL_SEARCH_KINDS, mailSearchLabel,
 };
 
 // `data` above is exported by binding, but ES module live-bindings only

@@ -1,7 +1,7 @@
-import { data } from '../state.js';
+import { data, mailSearchLabel } from '../state.js';
 import { escapeHtml } from '../utils.js';
 import { canAttemptGoogleAction } from '../sync/googleauth.js';
-import { fetchMailSummary } from '../googlemail.js';
+import { fetchMailSearches } from '../googlemail.js';
 
 // "Tamara White" <tamara.anna.white@gmail.com> -> "Tamara White"; falls
 // back to the raw email if there's no display name on the header.
@@ -29,15 +29,23 @@ if (messages.length === 0) return '';
 return `<div class="overview-group"><h3>${escapeHtml(title)}</h3><div class="mail-section">${messages.map(messageRowHtml).join('')}</div></div>`;
 }
 
-function renderMail(result) {
+// A section heading says what the row searched for and, when it's limited to
+// a window, how far back — otherwise "From: x (3)" is ambiguous about
+// whether that's all of them or just the recent ones.
+function sectionTitle(search) {
+const label = mailSearchLabel(search);
+const days = Math.max(0, Number(search.maxDays) || 0);
+return days > 0 ? `${label} — last ${days} day${days === 1 ? '' : 's'}` : label;
+}
+
+function renderMail(sections) {
 const list = document.getElementById('mail-list');
-document.getElementById('mail-count').textContent = `${result.starred.length + result.fromTracked.length} shown`;
-const days = Math.max(1, Number(data.prefs.mailSenderDays) || 1);
-const html = [
-sectionHtml('Starred', result.starred),
-sectionHtml(`From tracked senders (last ${days} day${days === 1 ? '' : 's'})`, result.fromTracked),
-].filter(Boolean).join('');
-list.innerHTML = html || `<div class="empty">Nothing to show — no starred mail, and nothing from your tracked senders in the last ${days} day${days === 1 ? '' : 's'}.</div>`;
+const total = sections.reduce((n, s) => n + s.messages.length, 0);
+document.getElementById('mail-count').textContent = `${total} shown`;
+const html = sections.map((s) => sectionHtml(sectionTitle(s.search), s.messages)).filter(Boolean).join('');
+list.innerHTML = html || (data.mailSearches.length === 0
+? '<div class="empty">No mail searches set up — add some in Settings.</div>'
+: '<div class="empty">Nothing matched your mail searches.</div>');
 }
 
 function initMail() {
@@ -51,8 +59,7 @@ return;
 btn.disabled = true;
 status.textContent = 'Loading…';
 try {
-const result = await fetchMailSummary(data.prefs);
-renderMail(result);
+renderMail(await fetchMailSearches(data.mailSearches, data.prefs.mailResultCount));
 status.textContent = `Updated ${new Date().toLocaleTimeString()}.`;
 } catch (err) {
 status.textContent = `Couldn't load mail: ${err.message || err}`;

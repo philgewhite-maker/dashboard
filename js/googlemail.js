@@ -33,37 +33,58 @@ link: `https://mail.google.com/mail/u/0/#all/${json.threadId || id}`,
 };
 }
 
-// Returns { starred, fromTracked } — each an array of message summaries,
-// newest first. A message that's both starred AND from a tracked sender
-// only appears in `starred` (dedup by id), so the two lists never repeat
-// the same email.
-async function fetchMailSummary(prefs) {
-const senders = (prefs.trackedSenders || []).map((s) => String(s).trim()).filter(Boolean);
-const starredLimit = Math.max(0, Number(prefs.mailStarredLimit) || 0);
-// With no senders configured there's no meaningful query to run — Gmail
-// would treat `() newer_than:2d` as "everything from the last 2 days",
-// which is emphatically not what an empty list should mean.
-const senderQuery = senders.length
-? `(${senders.map((e) => `from:${e}`).join(' OR ')}) newer_than:${Math.max(1, Number(prefs.mailSenderDays) || 1)}d`
-: null;
-const [starredIds, senderIds] = await Promise.all([
-starredLimit > 0 ? searchMessageIds('is:starred', starredLimit) : Promise.resolve([]),
-senderQuery ? searchMessageIds(senderQuery, Math.max(1, Number(prefs.mailSenderLimit) || 1)) : Promise.resolve([]),
-]);
+// Turns one configured row into a Gmail query string. Returns null when
+// there's nothing to search for, so an incomplete row is skipped rather
+// than sent as an empty query — Gmail would read that as "everything".
+function buildQuery(search) {
+const value = String(search.value || '').trim();
+let base;
+switch (search.kind) {
+case 'starred': base = 'is:starred'; break;
+case 'from': base = value && `from:${value}`; break;
+case 'to': base = value && `to:${value}`; break;
+case 'subject': base = value && `subject:(${value})`; break;
+case 'contains': base = value; break;
+default: base = value; // raw Gmail query
+}
+if (!base) return null;
+const days = Math.max(0, Number(search.maxDays) || 0);
+return days > 0 ? `${base} newer_than:${days}d` : base;
+}
 
-const starredIdSet = new Set(starredIds);
-const uniqueSenderIds = senderIds.filter((id) => !starredIdSet.has(id));
-const allIds = [...starredIds, ...uniqueSenderIds];
+// Runs each configured search and returns [{label, messages}] in the order
+// they're listed. A message matching several rows appears only under the
+// first — you control the order, so first-match-wins is predictable, and it
+// keeps the panel from repeating the same email under three headings.
+async function fetchMailSearches(searches, defaultCount) {
+const runnable = (searches || [])
+.map((s) => ({ search: s, query: buildQuery(s) }))
+.filter((r) => r.query);
 
+const results = await Promise.all(runnable.map(async ({ search, query }) => {
+const limit = Math.max(1, Number(search.maxEvents) || Number(defaultCount) || 5);
+return { search, ids: await searchMessageIds(query, limit) };
+}));
+
+const seen = new Set();
+const sections = [];
+for (const { search, ids } of results) {
+const unique = ids.filter((id) => !seen.has(id));
+unique.forEach((id) => seen.add(id));
+sections.push({ search, ids: unique });
+}
+
+const allIds = sections.flatMap((s) => s.ids);
 const summaries = {};
 await Promise.all(allIds.map(async (id) => {
 try { summaries[id] = await getMessageSummary(id); } catch (e) { /* skip unreadable message */ }
 }));
 
-const byNewest = (ids) => ids.map((id) => summaries[id]).filter(Boolean)
-.sort((a, b) => new Date(b.date) - new Date(a.date));
-
-return { starred: byNewest(starredIds), fromTracked: byNewest(uniqueSenderIds) };
+return sections.map(({ search, ids }) => ({
+search,
+messages: ids.map((id) => summaries[id]).filter(Boolean)
+.sort((a, b) => new Date(b.date) - new Date(a.date)),
+}));
 }
 
-export { fetchMailSummary };
+export { fetchMailSearches, buildQuery };

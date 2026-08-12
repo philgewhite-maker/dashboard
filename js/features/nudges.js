@@ -115,17 +115,21 @@ signals: { kind: 'voucher-expiring', daysUntil: dn },
 }
 });
 
-data.calendars.forEach((name) => {
-const status = data.calendarStatus[name];
-if (!status || !status.found || !status.date) return;
-const dn = daysUntil(status.date);
+data.calendars.forEach((cal) => {
+const status = data.calendarStatus[cal.name];
+// Nudge on every upcoming event within a week, not just the soonest —
+// a calendar showing 5 events shouldn't hide four of them from here.
+((status && status.events) || []).forEach((event) => {
+if (!event.date) return;
+const dn = daysUntil(event.date);
 if (dn >= 0 && dn <= 7) {
 pool.push({
-text: `${name}: "${status.title}" is in ${dn === 0 ? 'today' : dn + ' day' + (dn === 1 ? '' : 's')}.`,
-target: { type: 'calendar', name },
+text: `${cal.name}: "${event.title}" is in ${dn === 0 ? 'today' : dn + ' day' + (dn === 1 ? '' : 's')}.`,
+target: { type: 'calendar', name: cal.name },
 signals: { kind: 'upcoming-event', daysUntil: dn },
 });
 }
+});
 });
 
 data.businessIdeas.filter((i) => i.status !== 'Shelved').forEach((idea) => {

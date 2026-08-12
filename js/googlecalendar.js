@@ -51,12 +51,17 @@ date: event.start?.dateTime || event.start?.date,
 // Resolves and fetches in one pass for every tracked calendar name. Returns
 // a map keyed by the exact name string given, so callers can merge this
 // straight into data.calendarStatus.
-async function syncCalendars(names, prefs = {}) {
-const count = Math.max(1, Number(prefs.calendarEventCount) || 1);
-const daysAhead = Math.max(0, Number(prefs.calendarDaysAhead) || 0);
+// `calendars` is [{name, maxDays, maxEvents}] — each carries its own limits,
+// so "5 upcoming for Work, just the next one for Family" is expressible.
+// A blank/zero maxEvents falls back to defaultCount; blank maxDays means no
+// window at all.
+async function syncCalendars(calendars, defaultCount = 1) {
 const calendarList = await listCalendars();
 const status = {};
-for (const name of names) {
+for (const entry of calendars) {
+const name = entry.name;
+const count = Math.max(1, Number(entry.maxEvents) || Number(defaultCount) || 1);
+const daysAhead = Math.max(0, Number(entry.maxDays) || 0);
 const syncedAt = new Date().toISOString();
 const calendarId = resolveCalendarId(name, calendarList);
 if (!calendarId) {

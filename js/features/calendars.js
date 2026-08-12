@@ -16,8 +16,8 @@ return;
 }
 // Sort by each calendar's soonest event so whatever is happening next
 // floats to the top, regardless of how many events each one shows.
-const withDate = (name) => {
-const s = data.calendarStatus[name];
+const withDate = (cal) => {
+const s = data.calendarStatus[cal.name];
 const first = s && s.events && s.events[0];
 return first && first.date ? daysUntil(first.date) : Infinity;
 };
@@ -32,7 +32,8 @@ return `<div class="cal-event-row">
 </div>`;
 };
 
-list.innerHTML = sorted.map((name) => {
+list.innerHTML = sorted.map((cal) => {
+const name = cal.name;
 const status = data.calendarStatus[name];
 const events = (status && status.events) || [];
 let body;
@@ -57,9 +58,53 @@ return `<div class="cal-row" data-cal-row="${escapeHtml(name)}">
 list.querySelectorAll('[data-del-cal]').forEach((el) => {
 el.addEventListener('click', () => {
 const name = el.dataset.delCal;
-data.calendars = data.calendars.filter((c) => c !== name);
+data.calendars = data.calendars.filter((c) => c.name !== name);
 delete data.calendarStatus[name];
 renderCalendars();
+renderCalendarLimits();
+queueSave();
+});
+});
+}
+
+// The per-calendar Max days / Max events table in Settings. Lives here
+// rather than settings.js so it can re-render alongside the panel whenever
+// a calendar is added or removed.
+function renderCalendarLimits() {
+const el = document.getElementById('calendar-limits');
+if (!el) return;
+if (data.calendars.length === 0) {
+el.innerHTML = '<div class="settings-note" style="margin:0;">No calendars tracked yet.</div>';
+return;
+}
+el.innerHTML = `<table class="limits-table">
+<thead><tr><th>Calendar</th><th>Max days</th><th>Max events</th><th></th></tr></thead>
+<tbody>${data.calendars.map((c) => `<tr>
+<td>${escapeHtml(c.name)}</td>
+<td><input type="number" min="0" max="365" placeholder="any" value="${c.maxDays || ''}" data-cal-limit="${escapeHtml(c.name)}" data-limit-field="maxDays"></td>
+<td><input type="number" min="0" max="50" placeholder="${data.prefs.calendarEventCount}" value="${c.maxEvents || ''}" data-cal-limit="${escapeHtml(c.name)}" data-limit-field="maxEvents"></td>
+<td><span class="del-x" style="opacity:1;" data-del-cal-limit="${escapeHtml(c.name)}">&times;</span></td>
+</tr>`).join('')}</tbody>
+</table>
+<div class="settings-note" style="margin:6px 0 0;">Blank means no day limit, and the default count. Applies next time you press "Sync calendars".</div>`;
+
+el.querySelectorAll('[data-cal-limit]').forEach((input) => {
+input.addEventListener('change', () => {
+const cal = data.calendars.find((c) => c.name === input.dataset.calLimit);
+if (!cal) return;
+const parsed = parseInt(input.value, 10);
+cal[input.dataset.limitField] = Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+input.value = cal[input.dataset.limitField] || '';
+queueSave();
+});
+});
+el.querySelectorAll('[data-del-cal-limit]').forEach((x) => {
+x.addEventListener('click', () => {
+const name = x.dataset.delCalLimit;
+data.calendars = data.calendars.filter((c) => c.name !== name);
+delete data.calendarStatus[name];
+renderCalendars();
+renderCalendarLimits();
 queueSave();
 });
 });
@@ -70,10 +115,11 @@ bindForm('calendar-form', () => {
 const select = document.getElementById('cal-name-input');
 const name = select.value.trim();
 if (!name) return;
-if (!data.calendars.some((c) => c.toLowerCase() === name.toLowerCase())) {
-data.calendars.push(name);
+if (!data.calendars.some((c) => c.name.toLowerCase() === name.toLowerCase())) {
+data.calendars.push({ name, maxDays: 0, maxEvents: 0 });
 }
 renderCalendars();
+renderCalendarLimits();
 queueSave();
 setTimeout(() => scrollAndFlash(`[data-cal-row="${CSS.escape(name)}"]`), 50);
 });
@@ -125,7 +171,7 @@ return;
 btn.disabled = true;
 status.textContent = 'Syncing…';
 try {
-const results = await syncCalendars(data.calendars, data.prefs);
+const results = await syncCalendars(data.calendars, data.prefs.calendarEventCount);
 data.calendarStatus = { ...data.calendarStatus, ...results };
 renderCalendars();
 queueSave();
@@ -139,4 +185,4 @@ btn.disabled = false;
 });
 }
 
-export { renderCalendars, initCalendarForm, initCalendarSync, initCalendarListLoader };
+export { renderCalendars, renderCalendarLimits, initCalendarForm, initCalendarSync, initCalendarListLoader };

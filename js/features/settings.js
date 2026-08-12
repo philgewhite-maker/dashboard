@@ -1,6 +1,7 @@
-import { data, queueSave, getLocalSettings, setLocalSetting, exportBackup, importBackup } from '../state.js';
+import { data, queueSave, getLocalSettings, setLocalSetting, exportBackup, importBackup, MAIL_SEARCH_KINDS } from '../state.js';
 import { renderAll } from '../render-all.js';
-import { escapeHtml } from '../utils.js';
+import { escapeHtml, uid } from '../utils.js';
+import { renderCalendarLimits } from './calendars.js';
 import { summarizeUsage, currentMonthKey } from '../ai.js';
 import { setShowSensitiveFields } from './connections.js';
 import { pullRemote } from '../sync/selfhost.js';
@@ -101,37 +102,78 @@ initDriveBackup();
 // These live in the synced document rather than device settings, so they go
 // through queueSave() like any other data edit.
 function initFetchPrefs() {
-const numeric = [
-['pref-cal-count', 'calendarEventCount', 1],
-['pref-cal-days', 'calendarDaysAhead', 0],
-['pref-mail-starred', 'mailStarredLimit', 0],
-['pref-mail-days', 'mailSenderDays', 1],
-['pref-mail-limit', 'mailSenderLimit', 1],
-];
-numeric.forEach(([id, key, min]) => {
+[['pref-cal-count', 'calendarEventCount'], ['pref-mail-count', 'mailResultCount']].forEach(([id, key]) => {
 const el = document.getElementById(id);
 el.value = data.prefs[key];
 el.addEventListener('change', () => {
-// A blank or nonsense entry falls back to the minimum rather than
-// writing NaN into the document and breaking the next fetch.
+// A blank or nonsense entry falls back to 1 rather than writing NaN
+// into the document and breaking the next fetch.
 const parsed = parseInt(el.value, 10);
-const value = Number.isFinite(parsed) ? Math.max(min, parsed) : min;
+const value = Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
 data.prefs[key] = value;
 el.value = value;
+renderCalendarLimits(); // its placeholder shows the default
 queueSave();
 });
 });
 
-const senders = document.getElementById('pref-mail-senders');
-senders.value = (data.prefs.trackedSenders || []).join('\n');
-let senderTimer = null;
-senders.addEventListener('input', () => {
-clearTimeout(senderTimer);
-senderTimer = setTimeout(() => {
-data.prefs.trackedSenders = senders.value
-.split('\n').map((s) => s.trim()).filter(Boolean);
+renderCalendarLimits();
+renderMailSearches();
+document.getElementById('add-mail-search-btn').addEventListener('click', () => {
+data.mailSearches.push({ id: uid(), kind: 'from', value: '', maxDays: 0, maxEvents: 0 });
+renderMailSearches();
 queueSave();
-}, 500);
+});
+}
+
+// One editable row per mail search: what to look for, and its own caps.
+function renderMailSearches() {
+const el = document.getElementById('mail-searches');
+if (!el) return;
+if (data.mailSearches.length === 0) {
+el.innerHTML = '<div class="settings-note" style="margin:0;">No searches yet — the Mail panel will be empty until you add one.</div>';
+return;
+}
+el.innerHTML = `<table class="limits-table">
+<thead><tr><th>Search</th><th></th><th>Max days</th><th>Max results</th><th></th></tr></thead>
+<tbody>${data.mailSearches.map((s) => {
+const needsValue = MAIL_SEARCH_KINDS.find((k) => k.kind === s.kind)?.needsValue;
+return `<tr>
+<td><select data-search-field="kind" data-search-id="${s.id}">
+${MAIL_SEARCH_KINDS.map((k) => `<option value="${k.kind}"${k.kind === s.kind ? ' selected' : ''}>${escapeHtml(k.label)}</option>`).join('')}
+</select></td>
+<td><input type="text" data-search-field="value" data-search-id="${s.id}" value="${escapeHtml(s.value)}" placeholder="${needsValue ? 'e.g. a@gmail.com' : '—'}"${needsValue ? '' : ' disabled'}></td>
+<td><input type="number" min="0" max="365" data-search-field="maxDays" data-search-id="${s.id}" value="${s.maxDays || ''}" placeholder="any"></td>
+<td><input type="number" min="0" max="50" data-search-field="maxEvents" data-search-id="${s.id}" value="${s.maxEvents || ''}" placeholder="${data.prefs.mailResultCount}"></td>
+<td><span class="del-x" style="opacity:1;" data-del-search="${s.id}">&times;</span></td>
+</tr>`;
+}).join('')}</tbody>
+</table>
+<div class="settings-note" style="margin:6px 0 0;">Blank means no day limit, and the default result count. Applies next time you press "Refresh mail".</div>`;
+
+el.querySelectorAll('[data-search-field]').forEach((input) => {
+input.addEventListener('change', () => {
+const search = data.mailSearches.find((s) => s.id === input.dataset.searchId);
+if (!search) return;
+const field = input.dataset.searchField;
+if (field === 'maxDays' || field === 'maxEvents') {
+const parsed = parseInt(input.value, 10);
+search[field] = Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+input.value = search[field] || '';
+} else {
+search[field] = input.value;
+// Switching kind changes whether the value box applies at all.
+if (field === 'kind') renderMailSearches();
+}
+queueSave();
+});
+});
+el.querySelectorAll('[data-del-search]').forEach((x) => {
+x.addEventListener('click', () => {
+data.mailSearches = data.mailSearches.filter((s) => s.id !== x.dataset.delSearch);
+renderMailSearches();
+queueSave();
+});
 });
 }
 
