@@ -101,6 +101,23 @@ padding:0;
 margin-left:8px;
 }
 .google-bar-status{color:var(--muted);font-size:11px;}
+/* The sync test result gets its own full-width line rather than sitting as
+   small grey text beside the button — on a phone that position wrapped
+   awkwardly and was easy to miss entirely. Empty by default so it doesn't
+   reserve space until there's something to say. */
+.sync-result{
+font-size:13px;
+line-height:1.4;
+margin-top:8px;
+padding:9px 11px;
+border-radius:7px;
+background:var(--card);
+border:1px solid var(--line);
+}
+.sync-result:empty{display:none;}
+.sync-result.ok{background:var(--teal-bg);border-color:var(--teal);color:var(--teal);}
+.sync-result.error{background:var(--amber-bg);border-color:var(--amber);color:var(--amber);}
+
 .live-sync-status{
 font-family:'IBM Plex Mono',monospace;
 font-size:10px;

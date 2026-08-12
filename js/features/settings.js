@@ -119,6 +119,11 @@ setLocalSetting('syncSecret', secretInput.value.trim());
 urlInput.addEventListener('input', queueFieldSave);
 secretInput.addEventListener('input', queueFieldSave);
 
+const say = (text, kind) => {
+status.textContent = text;
+status.className = `sync-result${kind ? ' ' + kind : ''}`;
+};
+
 testBtn.addEventListener('click', async () => {
 clearTimeout(saveTimer);
 const url = urlInput.value.trim();
@@ -126,23 +131,23 @@ const secret = secretInput.value.trim();
 await setLocalSetting('syncUrl', url);
 await setLocalSetting('syncSecret', secret);
 if (!url || !secret) {
-status.textContent = 'Live sync turned off — both boxes need a value.';
+say('Live sync turned off — both boxes need a value.', 'error');
 return;
 }
 if (!url.startsWith('https://') && !url.startsWith('http://localhost')) {
-status.textContent = 'Use an https:// URL — browsers block insecure requests from the hosted app.';
+say('Use an https:// URL — browsers block insecure requests from the hosted app.', 'error');
 return;
 }
 testBtn.disabled = true;
-status.textContent = 'Testing…';
+say('Testing…');
 try {
 const remote = await pullRemote();
-status.textContent = remote.data === null
+say(remote.data === null
 ? 'Connected. Server is empty — this device\'s data will be uploaded now.'
-: `Connected. Server has revision ${remote.rev}, last saved ${remote.updatedAt ? new Date(remote.updatedAt).toLocaleString() : 'unknown'}.`;
+: `Connected. Server has revision ${remote.rev}, last saved ${remote.updatedAt ? new Date(remote.updatedAt).toLocaleString() : 'unknown'}.`, 'ok');
 await restartAutoSync();
 } catch (err) {
-status.textContent = err.message || String(err);
+say(err.message || String(err), 'error');
 console.error('Live sync test failed:', err);
 } finally {
 testBtn.disabled = false;

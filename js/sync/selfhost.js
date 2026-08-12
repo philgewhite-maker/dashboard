@@ -46,23 +46,38 @@ async function setKnownRev(rev) {
 await setLocalSetting('syncKnownRev', Number(rev) || 0);
 }
 
+// Without this a stalled connection (bad DNS, a host that accepts the TCP
+// connection then never replies, a captive portal) leaves the request
+// pending forever, and the UI sits on "Testing…" with no explanation. A
+// definite failure you can act on beats an indefinite wait.
+const REQUEST_TIMEOUT_MS = 15000;
+
 async function request(method, body) {
 const { url, secret, configured } = await getConfig();
 if (!configured) throw new NotConfiguredError();
 
+const controller = new AbortController();
+const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 let res;
 try {
 res = await fetch(url, {
 method,
 headers: { 'Content-Type': 'application/json', 'X-Sync-Secret': secret },
 body: body === undefined ? undefined : JSON.stringify(body),
+signal: controller.signal,
 });
 } catch (networkErr) {
+clearTimeout(timer);
+if (networkErr.name === 'AbortError') {
+throw new Error(`No reply from ${url} within ${REQUEST_TIMEOUT_MS / 1000}s — check the URL is right and the file is uploaded.`);
+}
 // fetch() rejects (rather than returning a non-ok response) for offline,
 // DNS failure, mixed content, and CORS rejection. Those are wildly
 // different problems from a 4xx, so they get their own message.
 throw new Error(`Couldn't reach the sync server — check the URL, that it's https, and that you're online. (${networkErr.message})`);
 }
+
+clearTimeout(timer);
 
 if (res.status === 409) {
 throw new ConflictError(await res.json());
