@@ -28,10 +28,22 @@ const now = new Date(todayStr());
 return Math.round((evt - now) / 86400000);
 }
 
+// Escapes for both text content AND attribute values, which is what nearly
+// every caller here needs — this codebase builds HTML strings and drops
+// values into `attr="..."` constantly.
+//
+// The obvious implementation (textContent in, innerHTML out) does NOT escape
+// quotes, because quotes need no escaping in text. In an attribute they very
+// much do: one `"` in a tag name or note ends the attribute early and
+// corrupts the rest of the tag. That bit for real — a JSON payload in a
+// data- attribute silently truncated at its first quote.
 function escapeHtml(str) {
-const d = document.createElement('div');
-d.textContent = str == null ? '' : String(str);
-return d.innerHTML;
+return String(str == null ? '' : str)
+.replace(/&/g, '&amp;')
+.replace(/</g, '&lt;')
+.replace(/>/g, '&gt;')
+.replace(/"/g, '&quot;')
+.replace(/'/g, '&#39;');
 }
 
 function initials(name) {

@@ -2,6 +2,7 @@ import { data, queueSave, getLocalSettings, setLocalSetting, exportBackup, impor
 import { renderAll } from '../render-all.js';
 import { escapeHtml, uid } from '../utils.js';
 import { renderCalendarLimits } from './calendars.js';
+import { renderTagCleanup } from './tagcleanup.js';
 import { summarizeUsage, currentMonthKey } from '../ai.js';
 import { setShowSensitiveFields } from './connections.js';
 import { pullRemote } from '../sync/selfhost.js';
@@ -84,6 +85,7 @@ e.target.value = '';
 
 initLiveSync(settings);
 initFetchPrefs();
+renderTagCleanup();
 
 const sensitiveToggle = document.getElementById('sensitive-fields-toggle');
 sensitiveToggle.checked = !!settings.showSensitiveFields;

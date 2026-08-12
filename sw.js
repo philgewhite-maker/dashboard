@@ -25,6 +25,7 @@ const CORE_ASSETS = [
 './js/features/overview.js',
 './js/features/tasks.js',
 './js/features/questions.js',
+'./js/features/tagcleanup.js',
 './js/features/nudges.js',
 './js/features/settings.js',
 './js/features/googleaccount.js',
