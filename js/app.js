@@ -13,9 +13,11 @@ import { initDealForm } from './features/dealexpiries.js';
 import { initIdeaForm } from './features/ideas.js';
 import { initEnhancementForm } from './features/enhancements.js';
 import { initTasks } from './features/tasks.js';
+import { initGoogleTasksFeed } from './features/googletasksfeed.js';
 import { initQuestions } from './features/questions.js';
 import { initContacts } from './features/contacts.js';
 import { initPhotoScan } from './features/photoscan.js';
+import { initPhotoLinks } from './features/photolinks.js';
 // Imported for its side effect: it registers the Notion controls with
 // tasks.js, which keeps that dependency pointing one way.
 import './features/notionplan.js';
@@ -92,9 +94,11 @@ initDealForm();
 initIdeaForm();
 initEnhancementForm();
 initTasks();
+initGoogleTasksFeed();
 initQuestions();
 initContacts();
 initPhotoScan();
+initPhotoLinks();
 initNudges();
 await initSettings();
 registerServiceWorker();

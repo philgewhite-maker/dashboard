@@ -396,14 +396,16 @@ const t = taskById(input.dataset.taskPhotoAdd);
 const files = Array.from(e.target.files);
 e.target.value = '';
 if (!t) return;
+const failures = [];
 for (const file of files.slice(0, 6 - (t.photoIds || []).length)) {
 try {
 const blob = await resizeImageToBlob(file, 1200, 0.85);
 const id = uid();
 await photoPut(id, blob);
 t.photoIds.push(id);
-} catch (err) { console.error('Could not attach task photo:', err); }
+} catch (err) { console.error('Could not attach task photo:', err); failures.push(err.message); }
 }
+if (failures.length) alert(failures.join('\n\n'));
 renderTasks();
 queueSave();
 });
@@ -425,8 +427,8 @@ queueSave();
 
 // Exported so Mail and Calendar rows can push straight into the Inbox,
 // carrying a link back to whatever prompted the task.
-function captureTask({ title, notes = '', source = null, photoIds = [] }) {
-const task = blankTask({ title, notes, source, photoIds });
+function captureTask({ title, notes = '', source = null, photoIds = [], due = '' }) {
+const task = blankTask({ title, notes, source, photoIds, due });
 data.tasks.push(task);
 renderTasks();
 queueSave();
@@ -456,15 +458,16 @@ e.target.value = '';
 if (files.length === 0) return;
 status.textContent = 'Saving…';
 const photoIds = [];
+let lastError = null;
 for (const file of files) {
 try {
 const blob = await resizeImageToBlob(file, 1200, 0.85);
 const id = uid();
 await photoPut(id, blob);
 photoIds.push(id);
-} catch (err) { console.error('Could not save captured photo:', err); }
+} catch (err) { console.error('Could not save captured photo:', err); lastError = err; }
 }
-if (photoIds.length === 0) { status.textContent = "Couldn't read those images."; return; }
+if (photoIds.length === 0) { status.textContent = (lastError && lastError.message) || "Couldn't read those images."; return; }
 captureTask({ title: input.value.trim() || `Screenshot ${todayStr()}`, photoIds, source: { kind: 'photo', label: 'Captured image' } });
 input.value = '';
 status.textContent = `Captured ${photoIds.length} image${photoIds.length === 1 ? '' : 's'} to Inbox.`;

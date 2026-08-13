@@ -119,6 +119,20 @@
 <div class="settings-note" style="margin:8px 0 0;">Everything lands in the Inbox unfiled. Deciding where it belongs is the next step, not this one.</div>
 </section>
 
+<section class="panel wide" id="gtasks-panel" data-tab="tasks">
+<div class="panel-head">
+<h2><span class="dot slate"></span>Pull from Google Tasks</h2>
+<span class="count-badge" id="gtasks-count"></span>
+</div>
+<div class="sync-row">
+<button class="sync-btn" id="gtasks-load-btn" type="button">Load</button>
+<button class="sync-btn" id="gtasks-capture-all-btn" type="button">Capture all shown</button>
+<span class="sync-status" id="gtasks-status"></span>
+</div>
+<div class="settings-note" style="margin:0 0 10px;">For anywhere Google Tasks is reachable but this dashboard isn't &mdash; a work web filter, a quick voice-add on a phone. One-way: pulling something in never changes it in Google Tasks, and re-loading won't offer the same item twice. Use &ldquo;Capture all shown&rdquo; once to migrate an existing list in; use &ldquo;Load&rdquo; day to day to catch what's new.</div>
+<div id="gtasks-list"></div>
+</section>
+
 <section class="panel wide" id="inbox-panel" data-tab="tasks">
 <div class="panel-head">
 <h2><span class="dot rose"></span>Inbox &mdash; file these</h2>
@@ -268,7 +282,7 @@
 <button class="sync-btn" id="scan-clear-btn" type="button">Clear</button>
 <span class="sync-status" id="scan-status"></span>
 </div>
-<div class="settings-note" style="margin:0 0 10px;">A cheap first pass reads just a name, age and whether the screenshot looks detailed — pennies for a whole album. Full parse only the ones worth it. Anything scanned before is free.</div>
+<div class="settings-note" style="margin:0 0 10px;">Pick files, <strong>drag them onto this panel</strong>, or copy an image anywhere (in Google Photos: right-click &rarr; Copy image) and press <strong>Ctrl+V</strong>. A cheap first pass reads just a name, age and whether the screenshot looks detailed &mdash; pennies for a whole album. Full parse only the ones worth it. Anything scanned before is free.</div>
 <div id="scan-results"></div>
 </section>
 
@@ -282,6 +296,57 @@
 <span class="sync-status" id="contacts-sync-status"></span>
 </div>
 <div id="contact-review"></div>
+</section>
+
+<section class="panel wide" id="photolinks-panel" data-tab="datingadmin">
+<div class="panel-head">
+<h2><span class="dot slate"></span>Google Photos people links</h2>
+<span class="count-badge" id="photolinks-count"></span>
+</div>
+<div class="settings-note" style="margin:0 0 10px;">
+Google Photos has no API for face groups, so this reads them the manual way: open
+<a href="https://photos.google.com/people" target="_blank" rel="noopener">photos.google.com/people</a>,
+open the browser console (F12 &rarr; Console tab), paste in the snippet below, press Enter, then paste its
+output here. It matches each name to a connection (checking aliases too) and fills in their photo link &mdash;
+review the guesses before saving.
+</div>
+<details style="margin:0 0 10px;">
+<summary style="cursor:pointer;color:var(--muted);font-size:13px;">Show the console snippet</summary>
+<pre id="photolinks-snippet" style="white-space:pre-wrap;font-size:12px;background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:10px;margin:8px 0;">(async () => {
+  const el = [...document.querySelectorAll('div')]
+    .filter(d => d.scrollHeight > d.clientHeight + 1000 && d.clientHeight > 200)
+    .sort((a,b) => b.scrollHeight - a.scrollHeight)[0];
+  if (!el) return console.log('Open photos.google.com/people first.');
+  const seen = new Map();
+  const harvest = () => document.querySelectorAll('a[href*="/search/"]').forEach(a => {
+    const label = (a.getAttribute('aria-label') || a.textContent || '').trim();
+    if (label) seen.set(a.href, label);
+  });
+  el.scrollTop = 0;
+  await new Promise(r => setTimeout(r, 400));
+  let stuck = 0;
+  for (let i = 0; i < 400 && stuck < 5; i++) {
+    harvest();
+    const before = el.scrollTop;
+    el.scrollTop = before + el.clientHeight * 0.7;
+    await new Promise(r => setTimeout(r, 300));
+    if (el.scrollTop <= before + 1) stuck++; else stuck = 0;
+  }
+  harvest();
+  const rows = [...seen].map(([href, label]) => ({ label, href })).filter(r => /QUYxUWlw/.test(r.href));
+  const json = JSON.stringify(rows, null, 1);
+  copy(json);
+  console.log(`Copied ${rows.length} people to your clipboard. Paste them into the dashboard.`);
+})();</pre>
+<button class="sync-btn" type="button" id="photolinks-copy-snippet">Copy snippet</button>
+</details>
+<textarea id="photolinks-input" rows="4" style="width:100%;font-family:monospace;font-size:12px;" placeholder="Paste the copied JSON here (or Name&#9;URL, one per line)"></textarea>
+<div class="sync-row" style="margin-top:8px;">
+<button class="sync-btn" id="photolinks-match-btn" type="button">Match to connections</button>
+<button class="sync-btn" id="photolinks-clear-btn" type="button">Clear</button>
+<span class="sync-status" id="photolinks-status"></span>
+</div>
+<div id="photolinks-results"></div>
 </section>
 
 <section class="panel wide" id="connections-panel" data-tab="dating">

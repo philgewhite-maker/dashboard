@@ -64,13 +64,15 @@ A separate safeguard: saves are debounced by 250ms for rapid interactions
 save on `visibilitychange`/`pagehide` — so closing the tab, refreshing, or
 switching apps can't lose whatever's inside that debounce window.
 
-## Google sign-in (shared by Drive sync, Calendar, and Mail)
+## Google sign-in (shared by Drive sync, Calendar, Mail, Contacts, and Tasks)
 
-One sign-in covers all three features below — `js/sync/googleauth.js`
-requests all four scopes (`drive.appdata` + `calendar.readonly` +
-`gmail.readonly` + `contacts.readonly`) up front so you only get asked once.
-The Contacts scope becomes the read/write `contacts` instead if you turn on
-write-back in Settings. The sign-in
+One sign-in covers all the features below — `js/sync/googleauth.js`
+requests all five scopes (`drive.appdata` + `calendar.readonly` +
+`gmail.readonly` + `contacts.readonly` + `tasks.readonly`) up front so you
+only get asked once. The Contacts scope becomes the read/write `contacts`
+instead if you turn on write-back in Settings; Tasks stays read-only always —
+pulling an item into the dashboard's Inbox never changes it in Google Tasks.
+The sign-in
 button/status lives in the header, next to the date, since — with no refresh
 token in this client-side-only flow — reconnecting is common enough that it
 needed to be one click away rather than buried in a tab. The chattier
@@ -92,9 +94,10 @@ one-click Sign In / Reconnect instead).
 
 **One-time setup**, per the Google Cloud Console steps (ask Claude Code to
 repeat them if you need them again — project → enable Drive API, Calendar
-API, *and* Gmail API → OAuth consent screen with `drive.appdata`,
-`calendar.readonly`, and `gmail.readonly` scopes, yourself as a test user →
-OAuth client ID), then paste the resulting **Client ID** (ends in
+API, Gmail API, People API, *and* Tasks API → OAuth consent screen with
+`drive.appdata`, `calendar.readonly`, `gmail.readonly`, `contacts.readonly`,
+and `tasks.readonly` scopes, yourself as a test user → OAuth client ID), then
+paste the resulting **Client ID** (ends in
 `.apps.googleusercontent.com`) into `js/sync/config.js` — it's not a secret,
 safe to commit. If you add a scope to an app that didn't request it before
 (e.g. adding Gmail to an app that only had Drive+Calendar), you'll need to

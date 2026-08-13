@@ -52,7 +52,7 @@ const el = document.getElementById('scan-results');
 if (!el) return;
 document.getElementById('scan-summary').textContent = summaryLine();
 if (scanned.length === 0) {
-el.innerHTML = '<div class="empty">Pick a batch of screenshots to scan. The cheap pass reads just a name and age, and flags which ones are worth a full parse.</div>';
+el.innerHTML = '<div class="empty">Drop screenshots here, paste one with Ctrl+V, or use the button above. The cheap pass reads just a name and age, and flags which ones are worth a full parse.</div>';
 return;
 }
 // Named and detailed first — those are the ones you can act on.
@@ -157,22 +157,27 @@ Promise.all([import('./connections.js'), import('./overview.js')])
 render();
 }
 
-function initPhotoScan() {
-const input = document.getElementById('scan-input');
-if (!input) return;
-
-input.addEventListener('change', async (e) => {
-const files = Array.from(e.target.files);
-e.target.value = '';
-if (files.length === 0) return;
+// Scans a batch, appending to whatever is already on screen. Appending
+// rather than replacing is what lets you build a batch up by pasting one
+// image at a time, which is how the Google Photos route works.
+let scanning = false;
+async function scanFiles(files, { replace = false } = {}) {
+const images = files.filter((f) => f && f.type.startsWith('image/'));
+if (images.length === 0) return;
+if (scanning) { statusEl().textContent = 'Still scanning the last batch — try again in a moment.'; return; }
+scanning = true;
 const app = document.getElementById('import-app-input').value;
+if (replace) {
+scanned.forEach((s) => { if (s.previewUrl) URL.revokeObjectURL(s.previewUrl); });
 scanned = [];
+}
 render();
 
 let done = 0;
 let billed = 0;
-for (const file of files) {
-statusEl().textContent = `Scanning ${++done} of ${files.length}…`;
+try {
+for (const file of images) {
+statusEl().textContent = `Scanning ${++done} of ${images.length}…`;
 try {
 const result = await quickScanScreenshot(file, app);
 if (!result.fromCache) billed++;
@@ -189,7 +194,63 @@ return;
 }
 render();
 }
-statusEl().textContent = `Scanned ${scanned.length}. ${billed} cost anything; ${scanned.length - billed} came from cache.`;
+statusEl().textContent = `Scanned ${images.length}. ${billed} cost anything; ${images.length - billed} came from cache.`;
+} finally {
+scanning = false;
+}
+}
+
+// Dragging an image out of a web page hands over a URL, not the bytes — and
+// Google's photo URLs refuse cross-origin reads, so fetching that URL would
+// fail. Saying so is more useful than silently dropping the event, because
+// the copy-image-then-paste route right below does work.
+function droppedWithoutFiles(dt) {
+const types = Array.from(dt.types || []);
+if (types.includes('text/uri-list') || types.includes('text/html')) {
+return 'That dragged an image *link*, not the picture itself — browsers don\'t hand over the bytes, and Google blocks reading them back. Right-click the photo → Copy image, then press Ctrl+V here instead.';
+}
+return 'Nothing to scan in that drop — drag image files, or copy an image and press Ctrl+V.';
+}
+
+function initPhotoScan() {
+const input = document.getElementById('scan-input');
+if (!input) return;
+
+input.addEventListener('change', async (e) => {
+const files = Array.from(e.target.files);
+e.target.value = '';
+await scanFiles(files, { replace: true });
+});
+
+// --- Drag files onto the panel ---
+const panel = document.getElementById('photoscan-panel');
+if (panel) {
+let depth = 0; // dragenter/leave fire for children too, so count them
+const over = (on) => panel.classList.toggle('drop-target', on);
+panel.addEventListener('dragenter', (e) => { e.preventDefault(); depth++; over(true); });
+panel.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
+panel.addEventListener('dragleave', () => { if (--depth <= 0) { depth = 0; over(false); } });
+panel.addEventListener('drop', async (e) => {
+e.preventDefault();
+depth = 0;
+over(false);
+const files = Array.from(e.dataTransfer.files || []);
+if (files.length === 0) { statusEl().textContent = droppedWithoutFiles(e.dataTransfer); return; }
+await scanFiles(files);
+});
+}
+
+// --- Paste images anywhere on the Dating admin tab ---
+document.addEventListener('paste', async (e) => {
+// Only when the panel is actually on screen, and never while the caret
+// is in a field — pasting a name into an input must stay a plain paste.
+if (!panel || panel.offsetParent === null) return;
+const tag = (document.activeElement || {}).tagName;
+if (tag === 'INPUT' || tag === 'TEXTAREA' || (document.activeElement || {}).isContentEditable) return;
+const files = Array.from(e.clipboardData ? e.clipboardData.files : []);
+if (files.length === 0) return;
+e.preventDefault();
+await scanFiles(files);
 });
 
 const clearBtn = document.getElementById('scan-clear-btn');

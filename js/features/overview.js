@@ -224,7 +224,13 @@ applyToList();
 return;
 }
 
-import('./connections.js').then((m) => m.filterBySearch(key));
+// Filter to exactly this dimension's key, not a free-text search — a
+// substring search across every field would also catch, say, a
+// Date-locations tag that happens to contain the same word as a
+// Location chip ("Mallorca" the city vs. "Mallorca" a date-location).
+const dim = dims.find((d) => d.title === title);
+const ids = dim ? data.connections.filter((c) => keysFor(dim, c).includes(key)).map((c) => c.id) : [];
+import('./connections.js').then((m) => m.filterByIds(ids, `${title}: ${key}`));
 if (field) {
 const alreadyOpen = openAssigner && openAssigner.field === field && openAssigner.key === key;
 openAssigner = alreadyOpen ? null : { field, key };

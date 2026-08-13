@@ -121,7 +121,20 @@ handler();
 });
 }
 
+// HEIC/HEIF — the default photo format on iPhone — has no built-in browser
+// decoder, so `new Image()` fails on it with a bare "decode failed" that
+// callers were swallowing into "couldn't read that image". Catching it by
+// type/extension up front means the actual fix reaches the user.
+function looksLikeHeic(file) {
+const type = (file.type || '').toLowerCase();
+const name = (file.name || '').toLowerCase();
+return type.includes('heic') || type.includes('heif') || /\.hei[cf]$/.test(name);
+}
+
 function resizeImageToBlob(file, maxDim, quality) {
+if (looksLikeHeic(file)) {
+return Promise.reject(new Error(`"${file.name || 'That photo'}" is HEIC/HEIF, which browsers can't read directly. On iPhone: Settings → Camera → Formats → Most Compatible, then re-share it — or open it in Photos and share as JPEG.`));
+}
 return new Promise((resolve, reject) => {
 const reader = new FileReader();
 reader.onload = () => {

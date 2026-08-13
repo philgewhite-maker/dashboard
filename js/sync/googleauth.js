@@ -14,6 +14,11 @@ const BASE_SCOPES = [
 'https://www.googleapis.com/auth/calendar.readonly',
 'https://www.googleapis.com/auth/gmail.readonly',
 'https://www.googleapis.com/auth/contacts.readonly',
+// Read-only pull-in of Google Tasks (a separate API from Calendar — no
+// scope overlap) into the dashboard's own GTD inbox. One-directional: this
+// dashboard is the real task system, Google Tasks is just where items land
+// from places with no other access (work web filters, quick phone capture).
+'https://www.googleapis.com/auth/tasks.readonly',
 ];
 
 // Writing to Contacts is a much heavier permission than reading it — it can

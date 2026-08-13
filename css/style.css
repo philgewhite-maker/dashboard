@@ -206,6 +206,13 @@ padding:22px 22px 24px;
 display:flex;
 flex-direction:column;
 }
+/* Drag feedback. Children must not swallow the drop, or dropping onto a
+   button inside the panel would land nowhere. */
+section.panel.drop-target{
+border-color:var(--rose);
+box-shadow:0 0 0 3px var(--rose-bg);
+}
+section.panel.drop-target *{pointer-events:none;}
 .panel-head{
 display:flex;
 align-items:center;
