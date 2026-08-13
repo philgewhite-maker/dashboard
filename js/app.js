@@ -17,7 +17,7 @@ import { initGoogleTasksFeed } from './features/googletasksfeed.js';
 import { initQuestions } from './features/questions.js';
 import { initContacts } from './features/contacts.js';
 import { initPhotoScan } from './features/photoscan.js';
-import { initPhotoLinks } from './features/photolinks.js';
+import { initPhotoAlbums } from './features/photoalbums.js';
 import { initPhotoSync } from './features/photosync.js';
 import { initShareTarget } from './features/sharetarget.js';
 // Photos whose bytes aren't on this device are fetched from your own host.
@@ -108,7 +108,7 @@ initGoogleTasksFeed();
 initQuestions();
 initContacts();
 initPhotoScan();
-initPhotoLinks();
+initPhotoAlbums();
 initPhotoSync();
 initNudges();
 await initSettings();

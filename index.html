@@ -298,55 +298,78 @@
 <div id="contact-review"></div>
 </section>
 
-<section class="panel wide" id="photolinks-panel" data-tab="datingadmin">
+<section class="panel wide" id="albums-panel" data-tab="datingadmin">
 <div class="panel-head">
-<h2><span class="dot slate"></span>Google Photos people links</h2>
-<span class="count-badge" id="photolinks-count"></span>
+<h2><span class="dot slate"></span>Google Photos albums</h2>
+<span class="count-badge" id="albums-count"></span>
 </div>
 <div class="settings-note" style="margin:0 0 10px;">
-Google Photos has no API for face groups, so this reads them the manual way: open
-<a href="https://photos.google.com/people" target="_blank" rel="noopener">photos.google.com/people</a>,
-open the browser console (F12 &rarr; Console tab), paste in the snippet below, press Enter, then paste its
-output here. It matches each name to a connection (checking aliases too) and fills in their photo link &mdash;
-review the guesses before saving.
+Name albums <strong>Name_</strong> for someone's default album, and <strong>Name_Label</strong> for extras
+&mdash; <code>Kat_Lisbon</code> for a trip, <code>Kat_x</code> for private ones. The trailing underscore keeps
+<code>Kat_</code> from matching <code>Katerina_</code>, and makes them searchable in Photos.
+<br><br>
+Google has no API for albums, so run the snippet below in the browser console
+(F12 &rarr; Console) on <a href="https://photos.google.com/albums" target="_blank" rel="noopener">photos.google.com/albums</a>,
+then paste the result here. Run it on <a href="https://photos.google.com/people" target="_blank" rel="noopener">/people</a>
+too and it also lists faces Google knows about that have no album yet.
+Album links are permanent, unlike the face-group links tried previously.
 </div>
 <details style="margin:0 0 10px;">
 <summary style="cursor:pointer;color:var(--muted);font-size:13px;">Show the console snippet</summary>
-<pre id="photolinks-snippet" style="white-space:pre-wrap;font-size:12px;background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:10px;margin:8px 0;">(async () => {
-  const el = [...document.querySelectorAll('div')]
-    .filter(d => d.scrollHeight > d.clientHeight + 1000 && d.clientHeight > 200)
-    .sort((a,b) => b.scrollHeight - a.scrollHeight)[0];
-  if (!el) return console.log('Open photos.google.com/people first.');
-  const seen = new Map();
-  const harvest = () => document.querySelectorAll('a[href*="/search/"]').forEach(a => {
-    const label = (a.getAttribute('aria-label') || a.textContent || '').trim();
-    if (label) seen.set(a.href, label);
-  });
-  el.scrollTop = 0;
-  await new Promise(r => setTimeout(r, 400));
-  let stuck = 0;
-  for (let i = 0; i < 400 && stuck < 5; i++) {
-    harvest();
-    const before = el.scrollTop;
-    el.scrollTop = before + el.clientHeight * 0.7;
-    await new Promise(r => setTimeout(r, 300));
-    if (el.scrollTop <= before + 1) stuck++; else stuck = 0;
+<pre id="albums-snippet" style="white-space:pre-wrap;font-size:12px;background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:10px;margin:8px 0;">(async () => {
+  // Accumulates across pages: run on /albums, then on /people, then paste.
+  window.__dash = window.__dash || { albums: new Map(), people: new Set() };
+  const onAlbums = location.pathname.includes('album');
+  const grab = () => {
+    document.querySelectorAll('a[href*="/album/"]').forEach(a =&gt; {
+      const label = (a.getAttribute('aria-label') || a.innerText || '').trim();
+      if (!label) return;
+      const title = label.split('\n')[0].replace(/,\s*\d+\s*items?$/i, '').trim();
+      const m = label.match(/(\d+)\s*items?/i);
+      const img = a.querySelector('img');
+      window.__dash.albums.set(a.href.split('?')[0], {
+        title, url: a.href.split('?')[0],
+        cover: img ? img.src : '', count: m ? +m[1] : 0,
+      });
+    });
+    document.querySelectorAll('a[href*="/search/"]').forEach(a =&gt; {
+      const t = (a.getAttribute('aria-label') || a.textContent || '').trim();
+      if (t &amp;&amp; /QUYxUWlw/.test(a.href) &amp;&amp; !/^Photo|\d{1,2}:\d{2}/.test(t)) window.__dash.people.add(t);
+    });
+  };
+  const box = [...document.querySelectorAll('div')]
+    .filter(d =&gt; d.scrollHeight &gt; d.clientHeight + 500 &amp;&amp; d.clientHeight &gt; 200)
+    .sort((a,b) =&gt; b.scrollHeight - a.scrollHeight)[0] || document.scrollingElement;
+  box.scrollTop = 0;
+  await new Promise(r =&gt; setTimeout(r, 400));
+  // Small fixed steps: big jumps skip rows this grid has already recycled.
+  for (let y = 0; y &lt; box.scrollHeight; y += 220) {
+    grab();
+    box.scrollTop = y;
+    await new Promise(r =&gt; setTimeout(r, 320));
   }
-  harvest();
-  const rows = [...seen].map(([href, label]) => ({ label, href })).filter(r => /QUYxUWlw/.test(r.href));
-  const json = JSON.stringify(rows, null, 1);
-  copy(json);
-  console.log(`Copied ${rows.length} people to your clipboard. Paste them into the dashboard.`);
+  grab();
+  const out = { albums: [...window.__dash.albums.values()], people: [...window.__dash.people] };
+  if (onAlbums &amp;&amp; out.albums.length === 0) {
+    // Google changes this markup from time to time. Rather than fail
+    // silently, show what IS on the page so the selector can be corrected.
+    const sample = [...document.querySelectorAll('a')].slice(0, 40)
+      .map(a =&gt; a.getAttribute('href')).filter(Boolean);
+    console.warn('No albums matched. Paste this back to Claude:', JSON.stringify(sample));
+  }
+  copy(JSON.stringify(out, null, 1));
+  console.log(`Copied ${out.albums.length} albums and ${out.people.length} faces.`
+    + (onAlbums ? ' Now run this again on /people to spot people with no album.' : ''));
 })();</pre>
-<button class="sync-btn" type="button" id="photolinks-copy-snippet">Copy snippet</button>
+<button class="sync-btn" type="button" id="albums-copy-snippet">Copy snippet</button>
 </details>
-<textarea id="photolinks-input" rows="4" style="width:100%;font-family:monospace;font-size:12px;" placeholder="Paste the copied JSON here (or Name&#9;URL, one per line)"></textarea>
+<textarea id="albums-input" rows="4" style="width:100%;font-family:monospace;font-size:12px;" placeholder="Paste the copied JSON here"></textarea>
 <div class="sync-row" style="margin-top:8px;">
-<button class="sync-btn" id="photolinks-match-btn" type="button">Match to connections</button>
-<button class="sync-btn" id="photolinks-clear-btn" type="button">Clear</button>
-<span class="sync-status" id="photolinks-status"></span>
+<button class="sync-btn" id="albums-match-btn" type="button">Match to connections</button>
+<button class="sync-btn" id="albums-clear-btn" type="button">Clear</button>
+<span class="sync-status" id="albums-status"></span>
 </div>
-<div id="photolinks-results"></div>
+<div id="albums-results"></div>
 </section>
 
 <section class="panel wide" id="connections-panel" data-tab="dating">

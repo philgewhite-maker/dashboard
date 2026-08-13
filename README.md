@@ -336,6 +336,39 @@ also inconsistent about which field carries what — some put the link in
 `url`, many put it in `text`, some send only a title — so the task is built
 from whatever actually arrived.
 
+## Google Photos albums
+
+Dating admin → "Google Photos albums". Links albums to connections using a
+title convention:
+
+- `Kat_` — their default album
+- `Kat_x` — private; blurred until hovered, and never promoted to a tag
+- `Kat_Lisbon` — a trip; the label also becomes a date-location
+
+The **trailing underscore matters**: without it, `Kat` would prefix-match
+`Katerina`. It also makes albums findable by typing `Kat_` into Google
+Photos' own search.
+
+Google has no albums API, so the list comes from a console snippet (in the
+panel) run on `photos.google.com/albums`. Run it again on `/people` and it
+also collects face-group *names* — not links — which feeds the third gap
+check below.
+
+**This replaced an earlier people-links import.** That matched face groups
+from the people page and stored their URLs, which turned out not to persist:
+a face group's `/search/` URL carries a token that stops resolving. An album
+is a real, permanent object, so its URL is safe to keep. Matching by name
+happens once, at import; what's stored is the URL — so renaming an album
+later doesn't break an already-linked person.
+
+Three gaps are reported after matching, the last being the one that's hard
+to spot by eye:
+
+- **Connections with no album** — nothing named `Name_` exists for them yet
+- **Albums with no connection** — the name differs, or they aren't tracked
+- **Faces in Photos with no album** — Google has grouped someone, but you
+  never made them an album
+
 ## Photo sync
 
 Photos — on connections and on tasks — predate attachments, and originally

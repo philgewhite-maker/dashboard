@@ -251,6 +251,23 @@ return (items || []).map((t, i) => `<span class="tag-chip">${escapeHtml(t)}<span
 + `<button type="button" class="todo-add-btn" data-tag-add-btn="${connId}" data-tag-add-btn-field="${field}" style="padding:3px 8px;">+</button>`;
 }
 
+// Albums linked from Google Photos, as thumbnails. Covers are rendered
+// straight from their Google URL — the bytes can't be copied cross-origin,
+// but displaying them is fine. A plain "Name_" album is captioned with the
+// person's name; anything else shows just its qualifier, since the name is
+// already the card you're looking at.
+function albumListHtml(c) {
+const albums = c.photoAlbums || [];
+if (!albums.length) return '<div class="album-empty">None linked — name an album "' + escapeHtml(c.name) + '_" in Google Photos, then import it on the Dating admin tab.</div>';
+return `<div class="album-strip">${albums.map((a, i) => `<div class="album-card sm">
+<a class="album-thumb" href="${escapeHtml(a.url)}" target="_blank" rel="noopener" title="${escapeHtml(a.title || a.url)}">
+${a.cover ? `<img src="${escapeHtml(a.cover)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : '<span class="album-nocover">open</span>'}
+</a>
+<div class="album-caption">${escapeHtml(a.label || c.name)}</div>
+<span class="tag-x" data-album-remove="${c.id}" data-album-idx="${i}" title="Unlink">&times;</span>
+</div>`).join('')}</div>`;
+}
+
 function galleryHtml(c) {
 const thumbs = (c.photoIds || []).map((id, i) => `<div class="gallery-thumb"><span class="thumb-img" data-photo-id="${escapeHtml(id)}" data-view-photo="${escapeHtml(id)}"></span><span class="tag-x" data-photo-remove="${c.id}" data-photo-idx="${i}">&times;</span></div>`).join('');
 return `<div class="photo-gallery">${thumbs}<label class="gallery-add" for="photo-add-${c.id}">+</label><input type="file" id="photo-add-${c.id}" accept="image/*" multiple style="display:none;" data-photo-add="${c.id}"></div>`;
@@ -412,11 +429,9 @@ ${visibleTagFields().map((f) => `<label class="full${f.sensitive ? ' sensitive-f
 <label class="full">Ratings<div class="ratings-block">${RATING_CATS.map(([cat, lbl]) => ratingStars(lbl, cat, c.id, (c.ratings && c.ratings[cat]) || 0)).join('')}</div></label>
 <label class="full">Things to do<div>${todoListHtml(c)}</div></label>
 <label class="full">Photos${galleryHtml(c)}</label>
-<label class="full">Google Photos album<input type="text" placeholder="Album of them — paste the share link" data-field="photosAlbumUrl" data-conn-detail="${c.id}" value="${escapeHtml(c.photosAlbumUrl || '')}"></label>
-<label class="full">Google Photos person / face<input type="text" placeholder="photos.google.com/person/… — the face group" data-field="photosPersonUrl" data-conn-detail="${c.id}" value="${escapeHtml(c.photosPersonUrl || '')}"></label>
+<label class="full">Google Photos albums${albumListHtml(c)}</label>
 <label class="full">Drive/OneDrive link (optional, for full-res photos filed elsewhere)<input type="text" placeholder="Paste a share link" data-field="driveLink" data-conn-detail="${c.id}" value="${escapeHtml(c.driveLink || '')}"></label>
-${[['photosAlbumUrl', 'Open album'], ['photosPersonUrl', 'Open face group'], ['driveLink', 'Open full-res photos']]
-.filter(([f]) => c[f]).map(([f, label]) => `<div class="full"><a href="${escapeHtml(c[f])}" target="_blank" rel="noopener" style="font-size:12px;color:var(--rose);">${label} &#8599;</a></div>`).join('')}
+${c.driveLink ? `<div class="full"><a href="${escapeHtml(c.driveLink)}" target="_blank" rel="noopener" style="font-size:12px;color:var(--rose);">Open full-res photos &#8599;</a></div>` : ''}
 <label class="full">Merge a duplicate into this one
 <div class="merge-row">
 <select data-merge-source="${c.id}">
@@ -493,7 +508,7 @@ if (el.dataset.field === 'age') conn.ageAsOf = el.value.trim() ? todayStr() : ''
 // for its "Open …" hyperlink to appear — without that the link only shows
 // up the next time something else happened to trigger a render, which looks
 // exactly like the paste not working.
-if (['name', 'app', 'age', 'dob', 'location', 'photosAlbumUrl', 'photosPersonUrl', 'driveLink'].includes(el.dataset.field)) renderConnections();
+if (['name', 'app', 'age', 'dob', 'location', 'driveLink'].includes(el.dataset.field)) renderConnections();
 renderOverviewRef();
 queueSave();
 });
@@ -614,6 +629,16 @@ const idx = parseInt(el.dataset.photoIdx, 10);
 const [removedId] = conn.photoIds.splice(idx, 1);
 if (conn.photoId === removedId) conn.photoId = conn.photoIds[0] || null;
 if (removedId) await photoDelete(removedId);
+renderConnections();
+queueSave();
+});
+});
+list.querySelectorAll('[data-album-remove]').forEach((el) => {
+el.addEventListener('click', () => {
+const conn = data.connections.find((x) => x.id === el.dataset.albumRemove);
+if (!conn) return;
+// Unlinks here only — the album itself stays in Google Photos.
+conn.photoAlbums.splice(parseInt(el.dataset.albumIdx, 10), 1);
 renderConnections();
 queueSave();
 });

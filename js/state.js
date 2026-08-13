@@ -309,6 +309,18 @@ if (typeof c.driveLink !== 'string') c.driveLink = '';
 // gaps to go and fix.
 if (typeof c.photosAlbumUrl !== 'string') c.photosAlbumUrl = '';
 if (typeof c.photosPersonUrl !== 'string') c.photosPersonUrl = '';
+// Albums, as [{label, url, cover, title}]. Replaces the single
+// photosAlbumUrl: one person legitimately has several albums (a trip, a
+// separate private one), and — unlike a face-group /search/ link, whose
+// token doesn't survive — an album URL is a stable, shareable object.
+// `label` is whatever follows the underscore in "Name_Label"; empty for a
+// plain "Name_".
+if (!Array.isArray(c.photoAlbums)) {
+c.photoAlbums = String(c.photosAlbumUrl || '').trim()
+? [{ label: '', url: c.photosAlbumUrl.trim(), cover: '', title: '' }]
+: [];
+}
+c.photoAlbums = c.photoAlbums.filter((a) => a && typeof a.url === 'string' && a.url.trim());
 // Phone and email are what make a reliable join to Google Contacts
 // possible — a first name alone is far too weak a key.
 if (typeof c.phone !== 'string') c.phone = '';
@@ -488,7 +500,7 @@ return '6+ photos';
 // all — which is usually the list you actually want to work through.
 function photoLinkLabels(conn) {
 const out = [];
-if (String(conn.photosAlbumUrl || '').trim()) out.push('Album link');
+if ((conn.photoAlbums || []).length) out.push('Album link');
 if (String(conn.photosPersonUrl || '').trim()) out.push('Person link');
 if (String(conn.driveLink || '').trim()) out.push('Drive link');
 return out;
