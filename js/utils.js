@@ -122,20 +122,56 @@ handler();
 }
 
 // HEIC/HEIF — the default photo format on iPhone — has no built-in browser
-// decoder, so `new Image()` fails on it with a bare "decode failed" that
-// callers were swallowing into "couldn't read that image". Catching it by
-// type/extension up front means the actual fix reaches the user.
+// decoder, so `new Image()` fails on it. On desktop that's a clean
+// `onerror`; on Android it was seen to just hang forever instead — nothing
+// attached, nothing reported, because there was nothing to catch.
+//
+// This check used to trust `file.type` and the filename extension, but
+// those come from whatever handed the file to the browser, and on Android
+// that's frequently wrong: a file picked via a chat app or Samsung's own
+// file picker can arrive as `application/octet-stream` or with no
+// extension at all even though the bytes are still HEIC. Reading the
+// file's own header is the only way that's actually reliable.
 function looksLikeHeic(file) {
 const type = (file.type || '').toLowerCase();
 const name = (file.name || '').toLowerCase();
 return type.includes('heic') || type.includes('heif') || /\.hei[cf]$/.test(name);
 }
 
-function resizeImageToBlob(file, maxDim, quality) {
-if (looksLikeHeic(file)) {
-return Promise.reject(new Error(`"${file.name || 'That photo'}" is HEIC/HEIF, which browsers can't read directly. On iPhone: Settings → Camera → Formats → Most Compatible, then re-share it — or open it in Photos and share as JPEG.`));
+// HEIC/HEIF/AVIF all use the ISO-BMFF container: a size word, then the
+// ASCII bytes "ftyp", then a 4-byte brand. Reading just the first 32 bytes
+// is enough to catch the major brand and the first couple of compatible
+// brands, which covers real-world photos without parsing the full box
+// structure.
+const HEIC_BRANDS = ['heic', 'heix', 'heim', 'heis', 'hevc', 'hevx', 'hevm', 'hevs', 'mif1', 'msf1'];
+async function sniffsAsHeic(file) {
+try {
+const head = new Uint8Array(await file.slice(0, 32).arrayBuffer());
+if (String.fromCharCode(...head.slice(4, 8)) !== 'ftyp') return false;
+const tail = String.fromCharCode(...head.slice(8, 32));
+return HEIC_BRANDS.some((b) => tail.includes(b));
+} catch (e) {
+return false;
+}
+}
+
+const HEIC_MESSAGE = (file) => `"${file.name || 'That photo'}" is HEIC/HEIF, which browsers can't read directly. On iPhone: Settings → Camera → Formats → Most Compatible, then re-share it — or open it in Photos and share as JPEG. On Android, opening it once in Gallery and re-saving/re-sharing usually converts it too.`;
+
+async function resizeImageToBlob(file, maxDim, quality) {
+if (looksLikeHeic(file) || await sniffsAsHeic(file)) {
+throw new Error(HEIC_MESSAGE(file));
 }
 return new Promise((resolve, reject) => {
+// A decode that never calls back — seen on Android for formats the
+// browser can't handle — would otherwise hang the whole capture
+// silently. Timing it out turns that into a normal, visible failure.
+// Only wired onto the actual resolve/reject calls below, not any
+// intermediate step, so it stays armed until the promise truly settles.
+const timer = setTimeout(() => reject(new Error(`"${file.name || 'That photo'}" didn't load — it may be a format this browser can't read. Try converting it to JPEG first.`)), 10000);
+const settle = (fn) => (...args) => { clearTimeout(timer); fn(...args); };
+const resolveOnce = settle(resolve);
+const rejectOnce = settle(reject);
+
 const reader = new FileReader();
 reader.onload = () => {
 const img = new Image();
@@ -146,12 +182,12 @@ w = Math.round(w * scale); h = Math.round(h * scale);
 const canvas = document.createElement('canvas');
 canvas.width = w; canvas.height = h;
 canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('toBlob failed')), 'image/jpeg', quality || 0.85);
+canvas.toBlob((blob) => blob ? resolveOnce(blob) : rejectOnce(new Error('toBlob failed')), 'image/jpeg', quality || 0.85);
 };
-img.onerror = () => reject(new Error('decode failed'));
+img.onerror = () => rejectOnce(new Error('decode failed'));
 img.src = reader.result;
 };
-reader.onerror = () => reject(new Error('read failed'));
+reader.onerror = () => rejectOnce(new Error('read failed'));
 reader.readAsDataURL(file);
 });
 }
