@@ -152,7 +152,10 @@ $type = (string) ($_SERVER['HTTP_X_FILE_TYPE'] ?? 'application/octet-stream');
 $name = trim(preg_replace('/[\x00-\x1F\x7F]/', '', $name) ?? '');
 if ($name === '') $name = 'attachment';
 if (strlen($name) > 200) $name = substr($name, 0, 200);
-if (!preg_match('#^[A-Za-z0-9!/#$&^_.+-]{1,120}$#', $type)) $type = 'application/octet-stream';
+// Delimiter is ~ rather than #, because # is itself a legal character here —
+// using it as the delimiter ended the pattern early and made every type fall
+// back to octet-stream.
+if (!preg_match('~^[A-Za-z0-9!/#$&^_.+-]{1,120}$~', $type)) $type = 'application/octet-stream';
 
 try {
     $id = bin2hex(random_bytes(16));
