@@ -531,8 +531,8 @@ console.error('Attachment delete failed on the server:', err);
 
 // Exported so Mail and Calendar rows can push straight into the Inbox,
 // carrying a link back to whatever prompted the task.
-function captureTask({ title, notes = '', source = null, photoIds = [], due = '' }) {
-const task = blankTask({ title, notes, source, photoIds, due });
+function captureTask({ title, notes = '', source = null, photoIds = [], due = '', link = '' }) {
+const task = blankTask({ title, notes, source, photoIds, due, link });
 data.tasks.push(task);
 renderTasks();
 queueSave();

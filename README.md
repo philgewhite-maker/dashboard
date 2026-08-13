@@ -308,6 +308,34 @@ bytes are fetched the first time you actually open it, then cached locally,
 so the device that uploaded a file never re-downloads it and an
 already-opened attachment still opens offline.
 
+## Share to the dashboard from Android
+
+Share a link, a note, or a file from any Android app straight into the GTD
+Inbox — Chrome, Gmail, Photos, anywhere with a share button.
+
+**Setup:** open the dashboard in Chrome on the phone, then ⋮ → **Add to Home
+screen**. "Dashboard" then appears in the Android share sheet. This only
+works from the *installed* PWA, and only on Android — iOS has no share
+target.
+
+Shared files are uploaded as task attachments, so live sync and `files.php`
+need to be set up first (above). Text and links work without them.
+
+**How it works.** The manifest declares a `share_target`, so Android POSTs
+the payload to `./share`. GitHub Pages can't handle a POST at all, so the
+*service worker* is the endpoint: it stashes the payload in a cache and
+redirects to the app, which picks it up on load and captures the task. That
+cache is deliberately exempt from the version eviction in the worker's
+`activate` handler — a share can land moments before a new worker activates,
+and clearing it would silently lose whatever was just shared.
+
+The payload is read on every load rather than only when `?shared=1` is
+present, because the query string is easily lost to a redirect or a restored
+session, and a stranded share would then never be captured. Android apps are
+also inconsistent about which field carries what — some put the link in
+`url`, many put it in `text`, some send only a title — so the task is built
+from whatever actually arrived.
+
 ## Photo sync
 
 Photos — on connections and on tasks — predate attachments, and originally

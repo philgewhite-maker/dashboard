@@ -19,6 +19,7 @@ import { initContacts } from './features/contacts.js';
 import { initPhotoScan } from './features/photoscan.js';
 import { initPhotoLinks } from './features/photolinks.js';
 import { initPhotoSync } from './features/photosync.js';
+import { initShareTarget } from './features/sharetarget.js';
 // Photos whose bytes aren't on this device are fetched from your own host.
 // Registered rather than imported: the implementation reaches state.js, and
 // state.js imports utils.js, so importing it back would be a cycle.
@@ -112,6 +113,9 @@ initPhotoSync();
 initNudges();
 await initSettings();
 registerServiceWorker();
+// After the panels are wired, so the captured task renders into a live UI.
+// Not awaited — an upload of a shared file shouldn't hold up the page.
+initShareTarget();
 // Last, and deliberately not awaited: it does network I/O, and nothing else
 // on the page should wait on a slow or unreachable server to become usable.
 initAutoSync();
