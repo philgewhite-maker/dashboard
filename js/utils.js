@@ -155,12 +155,47 @@ return false;
 }
 }
 
-const HEIC_MESSAGE = (file) => `"${file.name || 'That photo'}" is HEIC/HEIF, which browsers can't read directly. On iPhone: Settings → Camera → Formats → Most Compatible, then re-share it — or open it in Photos and share as JPEG. On Android, opening it once in Gallery and re-saving/re-sharing usually converts it too.`;
+// heic-to (https://github.com/hoppergee/heic-to) wraps libheif compiled to
+// WASM. Loaded from CDN rather than bundled, since this project has no
+// build step — everything else here is a plain ES module import too. The
+// `/csp` build is a single self-contained file with no `eval()`, so it
+// doesn't need a Content-Security-Policy exception. It's ~3MB; the browser's
+// own HTTP cache keeps that to a one-time cost per device, not per photo.
+// Cached as a promise (not just the resolved module) so two photos picked
+// at once share one fetch instead of racing two.
+const HEIC_TO_URL = 'https://cdn.jsdelivr.net/npm/heic-to@1.5.2/dist/csp/heic-to.js';
+let heicToModule = null;
+function loadHeicTo() {
+if (!heicToModule) heicToModule = import(/* webpackIgnore: true */ HEIC_TO_URL);
+return heicToModule;
+}
+
+// Converts a HEIC/HEIF file to a real JPEG File in the browser — nothing
+// leaves the device. Every image-consuming flow (photo capture, the AI
+// screenshot parsers) should run its input through this first, since a HEIC
+// file is equally unreadable to a `<canvas>` decode and to Claude's vision
+// API. Returns the file unchanged if it isn't HEIC.
+async function ensureBrowserReadableImage(file) {
+if (!(looksLikeHeic(file) || await sniffsAsHeic(file))) return file;
+let heicTo;
+try {
+({ heicTo } = await loadHeicTo());
+} catch (err) {
+heicToModule = null; // let the next attempt retry the fetch rather than replay this failure forever
+throw new Error(`Couldn't load the HEIC converter (needs an internet connection the first time) — ${err.message || err}`);
+}
+let jpegBlob;
+try {
+jpegBlob = await heicTo({ blob: file, type: 'image/jpeg', quality: 0.9 });
+} catch (err) {
+throw new Error(`"${file.name || 'That photo'}" looks like HEIC/HEIF but couldn't be converted (${err.message || err}). On iPhone: Settings → Camera → Formats → Most Compatible, then re-share it. On Android, opening it once in Gallery and re-saving/re-sharing usually converts it too.`);
+}
+const jpegName = (file.name || 'photo').replace(/\.[^.]+$/, '') + '.jpg';
+return new File([jpegBlob], jpegName, { type: 'image/jpeg', lastModified: file.lastModified });
+}
 
 async function resizeImageToBlob(file, maxDim, quality) {
-if (looksLikeHeic(file) || await sniffsAsHeic(file)) {
-throw new Error(HEIC_MESSAGE(file));
-}
+file = await ensureBrowserReadableImage(file);
 return new Promise((resolve, reject) => {
 // A decode that never calls back — seen on Android for formats the
 // browser can't handle — would otherwise hang the whole capture
@@ -355,4 +390,5 @@ todayStr, daysAgoStr, last7Dates, uid, daysSince, daysUntil,
 escapeHtml, initials, avatarHtml, hydratePhotos, scrollAndFlash, bindForm,
 resizeImageToBlob, fileToBase64, loadImage, cropThumbnailToBlob,
 hashFile, captureDateOf, betterCaptureDate, dateFromFilename,
+ensureBrowserReadableImage,
 };

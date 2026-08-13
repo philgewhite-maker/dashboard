@@ -5,7 +5,7 @@
 // header — normal server-side calls don't need it, but a client-only app
 // with no backend does. See README for the tradeoffs.
 import { getLocalSettings, setLocalSetting } from './state.js';
-import { fileToBase64, loadImage, cropThumbnailToBlob, hashFile, captureDateOf, betterCaptureDate } from './utils.js';
+import { fileToBase64, loadImage, cropThumbnailToBlob, hashFile, captureDateOf, betterCaptureDate, ensureBrowserReadableImage } from './utils.js';
 import { parseCacheGet, parseCachePut } from './db.js';
 
 const API_URL = 'https://api.anthropic.com/v1/messages';
@@ -272,6 +272,7 @@ return out;
 // screenshots are sliced into overlapping bands (see planBands) so bounding
 // boxes stay accurate; each band is a separate, independent vision call.
 async function extractMatchesFromScreenshot(file, app) {
+file = await ensureBrowserReadableImage(file);
 const base64 = await fileToBase64(file);
 const mediaType = file.type || 'image/png';
 const dataUrl = `data:${mediaType};base64,${base64}`;
@@ -323,6 +324,7 @@ const QUICK_SCAN_MODEL = 'claude-haiku-4-5-20251001';
 const QUICK_SCAN_MAX_TOKENS = 400;
 
 async function quickScanScreenshot(file, app) {
+file = await ensureBrowserReadableImage(file);
 const hash = await hashFile(file);
 const cached = await parseCacheGet(hash, 'quick');
 // Keep whichever showing of this image carried the better-evidenced date —
@@ -367,6 +369,7 @@ return { ...result, hash, captureDate: (captured || {}).date || '', fromCache: f
 // Screenshot of ONE person's full profile page — richer fields, possibly
 // several photos.
 async function extractProfileFromScreenshot(file, app) {
+file = await ensureBrowserReadableImage(file);
 const base64 = await fileToBase64(file);
 const mediaType = file.type || 'image/png';
 const dataUrl = `data:${mediaType};base64,${base64}`;
