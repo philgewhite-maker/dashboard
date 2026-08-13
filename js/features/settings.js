@@ -3,6 +3,7 @@ import { renderAll } from '../render-all.js';
 import { escapeHtml, uid } from '../utils.js';
 import { renderCalendarLimits } from './calendars.js';
 import { renderTagCleanup } from './tagcleanup.js';
+import { testConnection, resolveDataSourceId } from '../notion.js';
 import { summarizeUsage, currentMonthKey } from '../ai.js';
 import { setShowSensitiveFields } from './connections.js';
 import { pullRemote } from '../sync/selfhost.js';
@@ -84,6 +85,7 @@ e.target.value = '';
 });
 
 initLiveSync(settings);
+initNotion(settings);
 initFetchPrefs();
 renderTagCleanup();
 
@@ -113,6 +115,62 @@ document.getElementById('refresh-usage-btn').addEventListener('click', renderUsa
 await renderUsage();
 
 initDriveBackup();
+}
+
+// The Notion proxy URL and database id, and a test that proves all three
+// links in the chain — this device reaching your host, your host holding a
+// valid token, and the database actually being shared with the integration.
+function initNotion(settings) {
+const urlInput = document.getElementById('notion-url-input');
+const dbInput = document.getElementById('notion-db-input');
+const testBtn = document.getElementById('notion-test-btn');
+const status = document.getElementById('notion-test-status');
+urlInput.value = settings.notionProxyUrl || '';
+dbInput.value = settings.notionDatabaseId || '';
+
+const say = (text, kind) => {
+status.textContent = text;
+status.className = `sync-result${kind ? ' ' + kind : ''}`;
+};
+
+let timer = null;
+const queueFieldSave = () => {
+clearTimeout(timer);
+timer = setTimeout(async () => {
+await setLocalSetting('notionProxyUrl', urlInput.value.trim());
+const db = dbInput.value.trim();
+const prev = (await getLocalSettings()).notionDatabaseId || '';
+await setLocalSetting('notionDatabaseId', db);
+// The data source id is derived from the database, so a new database
+// invalidates it — otherwise pages would keep going to the old one.
+if (db !== prev) await setLocalSetting('notionDataSourceId', '');
+}, 400);
+};
+urlInput.addEventListener('input', queueFieldSave);
+dbInput.addEventListener('input', queueFieldSave);
+
+testBtn.addEventListener('click', async () => {
+clearTimeout(timer);
+await setLocalSetting('notionProxyUrl', urlInput.value.trim());
+await setLocalSetting('notionDatabaseId', dbInput.value.trim());
+await setLocalSetting('notionDataSourceId', '');
+testBtn.disabled = true;
+say('Testing…');
+try {
+const who = await testConnection();
+if (dbInput.value.trim()) {
+await resolveDataSourceId();
+say(`Connected as "${who}", and the database is reachable.`, 'ok');
+} else {
+say(`Connected as "${who}". Add a database ID to create pages.`, 'ok');
+}
+} catch (err) {
+say(err.message || String(err), 'error');
+console.error('Notion test failed:', err);
+} finally {
+testBtn.disabled = false;
+}
+});
 }
 
 // These live in the synced document rather than device settings, so they go

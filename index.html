@@ -453,6 +453,20 @@ Show the "Sex" field on connections and in Connections Overview
 </div>
 
 <div class="settings-block">
+<h3>Notion</h3>
+<div class="settings-note" style="margin:0 0 8px;">Notion blocks direct browser access, so calls go through <code>notion.php</code> on your own host — which also keeps your Notion token off this device entirely. See README, "Notion".</div>
+<label for="notion-url-input" style="font-size:13px;font-weight:500;display:block;margin-bottom:6px;">Proxy URL</label>
+<input type="text" id="notion-url-input" class="settings-input" placeholder="https://georgewhiteeuropean.co.uk/notion.php">
+<label for="notion-db-input" style="font-size:13px;font-weight:500;display:block;margin:10px 0 6px;">Projects database ID</label>
+<input type="text" id="notion-db-input" class="settings-input" placeholder="32 characters from the database URL">
+<div class="sync-row" style="margin-top:10px;">
+<button class="sync-btn" id="notion-test-btn" type="button">Test connection</button>
+</div>
+<div class="sync-result" id="notion-test-status"></div>
+<div class="settings-note">Uses the same secret as Live sync above.</div>
+</div>
+
+<div class="settings-block">
 <h3>Mail searches</h3>
 <div class="settings-note" style="margin:0 0 10px;">Each row becomes its own section in the Mail panel, with its own limits. Synced, so these follow you to your other devices.</div>
 <div id="mail-searches"></div>

@@ -121,7 +121,8 @@ contexts: [],
 parentId: null, // set for subtasks; the parent is any other task
 bringForward: '', // ISO date — hidden from active lists until then
 due: '',
-link: '', // OneNote/Notion/etc. for the detail behind a project
+link: '', // the page holding the detail behind a project
+notionPageId: '', // set once a Notion page backs this task
 photoIds: [],
 source: null, // {kind:'mail'|'calendar'|'photo', label, url}
 createdAt: new Date().toISOString(),

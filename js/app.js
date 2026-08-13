@@ -16,6 +16,9 @@ import { initTasks } from './features/tasks.js';
 import { initQuestions } from './features/questions.js';
 import { initContacts } from './features/contacts.js';
 import { initPhotoScan } from './features/photoscan.js';
+// Imported for its side effect: it registers the Notion controls with
+// tasks.js, which keeps that dependency pointing one way.
+import './features/notionplan.js';
 import { initNudges } from './features/nudges.js';
 import { initSettings } from './features/settings.js';
 import { initGoogleAccount } from './features/googleaccount.js';

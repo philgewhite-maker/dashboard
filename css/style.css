@@ -849,6 +849,17 @@ font-size:11px;
 color:var(--muted);
 }
 
+/* ---- Notion controls on a task ---- */
+.notion-row{
+display:flex;
+align-items:center;
+gap:8px;
+flex-wrap:wrap;
+padding-top:8px;
+border-top:1px dotted var(--line);
+}
+.notion-link{font-size:12px;color:var(--rose);white-space:nowrap;}
+
 /* ---- Screenshot batch scan ---- */
 .scan-row{
 display:flex;

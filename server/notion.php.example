@@ -1,0 +1,119 @@
+<?php
+declare(strict_types=1);
+
+/**
+ * Notion proxy.
+ *
+ * The Notion API sends no CORS headers, so a browser cannot call
+ * api.notion.com directly — the request is blocked before it leaves. Every
+ * browser-based Notion integration therefore needs a server in the middle,
+ * and since you already host sync.php, that server is this file.
+ *
+ * The forced detour is a security win rather than a nuisance: your Notion
+ * token lives here, on your own host, and is never sent to the browser. A
+ * token in browser storage would be readable by anything that got a script
+ * into the page, and a Notion token can read and write your whole workspace.
+ *
+ * Usage: POST {path, method, body} authenticated with the same shared secret
+ * as sync.php. The proxy adds the token and the API version, and forwards to
+ * api.notion.com.
+ *
+ * Copy to notion.php, fill in the two values, upload to public_html.
+ */
+
+// ---- Configuration ---------------------------------------------------
+
+// The same secret as sync.php — one string to configure, not two.
+$SECRET = 'PUT-THE-SAME-SECRET-AS-SYNC-PHP-HERE';
+
+// Your Notion internal integration token, from
+// notion.so/profile/integrations. Starts with "ntn_".
+$NOTION_TOKEN = 'PUT-YOUR-NOTION-INTEGRATION-TOKEN-HERE';
+
+// Pinned deliberately: Notion makes breaking changes between versions, and
+// an unpinned integration breaks without warning. Raise this only when
+// you've read that version's upgrade guide.
+$NOTION_VERSION = '2026-03-11';
+
+$ALLOWED_ORIGINS = [
+    'https://philgewhite-maker.github.io',
+    'http://localhost:8743',
+];
+
+// ---- End of configuration --------------------------------------------
+
+$origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+if ($origin !== '' && in_array($origin, $ALLOWED_ORIGINS, true)) {
+    header('Access-Control-Allow-Origin: ' . $origin);
+    header('Vary: Origin');
+}
+header('Access-Control-Allow-Headers: Content-Type, X-Sync-Secret');
+header('Access-Control-Allow-Methods: POST, OPTIONS');
+header('Content-Type: application/json');
+header('Cache-Control: no-store');
+
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
+    http_response_code(204);
+    exit;
+}
+
+function fail(int $code, string $message): void {
+    http_response_code($code);
+    echo json_encode(['error' => $message]);
+    exit;
+}
+
+if ($SECRET === '' || strpos($SECRET, 'PUT-') === 0) fail(500, 'Server not configured: set $SECRET in notion.php');
+if ($NOTION_TOKEN === '' || strpos($NOTION_TOKEN, 'PUT-') === 0) fail(500, 'Server not configured: set $NOTION_TOKEN in notion.php');
+
+$provided = $_SERVER['HTTP_X_SYNC_SECRET'] ?? '';
+if (!is_string($provided) || !hash_equals($SECRET, $provided)) fail(401, 'Bad or missing sync secret');
+
+if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') fail(405, 'Use POST');
+
+$req = json_decode(file_get_contents('php://input') ?: '', true);
+if (!is_array($req) || empty($req['path'])) fail(400, 'Expected {path, method, body}');
+
+// Only ever talk to Notion's own API, and only to paths under /v1/. Without
+// this the endpoint would be a general-purpose request forwarder for anyone
+// holding the secret — a much bigger thing than a Notion bridge.
+$path = ltrim((string) $req['path'], '/');
+if (strpos($path, 'v1/') !== 0 || strpos($path, '..') !== false) {
+    fail(400, 'Path must be a Notion v1 endpoint');
+}
+
+$method = strtoupper((string) ($req['method'] ?? 'GET'));
+if (!in_array($method, ['GET', 'POST', 'PATCH', 'DELETE'], true)) fail(400, 'Unsupported method');
+
+$url = 'https://api.notion.com/' . $path;
+$headers = [
+    'Authorization: Bearer ' . $NOTION_TOKEN,
+    'Notion-Version: ' . $NOTION_VERSION,
+    'Content-Type: application/json',
+];
+
+$ch = curl_init($url);
+curl_setopt_array($ch, [
+    CURLOPT_RETURNTRANSFER => true,
+    CURLOPT_CUSTOMREQUEST => $method,
+    CURLOPT_HTTPHEADER => $headers,
+    CURLOPT_TIMEOUT => 30,
+]);
+if (isset($req['body']) && $req['body'] !== null && $method !== 'GET') {
+    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($req['body']));
+}
+
+$response = curl_exec($ch);
+if ($response === false) {
+    $err = curl_error($ch);
+    curl_close($ch);
+    fail(502, 'Could not reach Notion: ' . $err);
+}
+$status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+curl_close($ch);
+
+// Pass Notion's own status through, so the client can tell a 404 (integration
+// not shared with that page) from a 401 (bad token) rather than seeing
+// everything as a generic failure.
+http_response_code($status);
+echo $response;

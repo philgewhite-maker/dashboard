@@ -108,8 +108,14 @@ ${t.source ? `<div class="task-source">From ${escapeHtml(t.source.kind)}: ${t.so
 <div class="task-photos">${photos}<label class="gallery-add" for="task-photo-${t.id}">+</label>
 <input type="file" id="task-photo-${t.id}" accept="image/*" multiple style="display:none;" data-task-photo-add="${t.id}"></div>
 <button class="todo-add-btn" type="button" data-task-addsub="${t.id}">+ Subtask</button>
+${notionPanel.html(t)}
 </div>`;
 }
+
+// notionplan.js imports from here, so it registers its renderer rather than
+// being imported back — same one-way pattern as the contacts picker.
+let notionPanel = { html: () => '', bind: () => {} };
+function setNotionPanel(html, bind) { notionPanel = { html, bind }; }
 
 // ---- the three panels ----
 
@@ -299,6 +305,7 @@ queueSave();
 
 function bindTaskRows(root) {
 bindContextControls(root);
+notionPanel.bind(root, renderTasks);
 
 root.querySelectorAll('[data-task-done]').forEach((cb) => {
 cb.addEventListener('change', () => {
@@ -470,4 +477,4 @@ renderLists();
 });
 }
 
-export { renderTasks, initTasks, captureTask, isDormant };
+export { renderTasks, initTasks, captureTask, isDormant, setNotionPanel };

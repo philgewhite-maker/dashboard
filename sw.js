@@ -39,6 +39,8 @@ const CORE_ASSETS = [
 './js/googlecontacts.js',
 './js/features/contacts.js',
 './js/features/photoscan.js',
+'./js/features/notionplan.js',
+'./js/notion.js',
 './js/googlemail.js',
 './manifest.webmanifest',
 ];

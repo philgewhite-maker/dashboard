@@ -4,6 +4,9 @@
 # the placeholder — is tracked. Copy the example, fill in your secret, and
 # upload that; never rename it back.
 server/sync.php
+# notion.php holds your Notion integration token, which can read and write
+# your entire workspace. Same rule: only the .example is tracked.
+server/notion.php
 
 # The synced document and its lock/temp files, in case anyone ever points
 # $DATA_FILE inside the repo folder while testing.

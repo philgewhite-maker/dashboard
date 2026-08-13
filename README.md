@@ -158,6 +158,60 @@ Nudges cover tasks too: an unfiled inbox (one nudge for the pile, not one
 per item), due and overdue tasks, bring-forwards that have arrived, and
 "waiting for" items nobody has chased in a fortnight.
 
+## Notion
+
+The dashboard holds the GTD skeleton — what exists, what's next, what
+context it needs. Notion holds the flesh: research, options, long-form
+thinking that would be miserable in a one-line task. "Draft a plan" is the
+join between them.
+
+**Why there's a proxy.** The Notion API sends no CORS headers, so a browser
+simply cannot call `api.notion.com` — the request is blocked before it
+leaves. Every browser-based Notion integration needs a server in the middle.
+Since `sync.php` already exists, `notion.php` sits beside it. The forced
+detour is a security win: your Notion token stays on your host and never
+reaches the browser, which matters because that token can read and write
+your entire workspace.
+
+**Setup**
+
+1. Create an integration at
+   [notion.so/profile/integrations](https://www.notion.so/profile/integrations).
+   Copy the token (starts with `ntn_`).
+2. Make a database in Notion for projects. Any title property name works —
+   the code reads the schema rather than assuming "Name".
+3. **Share the database with the integration**: open it, ⋯ menu →
+   Connections → add your integration. Skipping this is the single most
+   common failure, and produces a "not found" rather than a permission error.
+4. Copy `server/notion.php.example` to `notion.php`, set `$SECRET` to the
+   same secret as `sync.php` and `$NOTION_TOKEN` to your integration token.
+   Upload to `public_html`.
+5. Settings → Notion: the proxy URL and the database ID (the 32 characters
+   in the database URL), then **Test connection**.
+
+`server/notion.php` is gitignored for the same reason as `sync.php`.
+
+**The workflow**
+
+1. Capture anything, however vague, into the dashboard Inbox.
+2. File the big ones as **Projects**.
+3. On a project, **Create in Notion + draft a plan**. Claude expands the one
+   line into a summary, sections of real substance, open questions, and 3–8
+   concrete next actions.
+4. The *detail* is written into the Notion page. Only the *actions* come back
+   as dashboard subtasks, with contexts assigned from your own list.
+
+That asymmetry is deliberate — detail flows out to Notion, actionable items
+flow back. Duplicating the detail in both places is how two-system setups
+rot. Re-running on the same project appends more thinking and adds only
+actions that don't already exist, so it refines rather than duplicates.
+
+**Pinned API version.** `notion.php` pins `Notion-Version` because Notion
+makes breaking changes between versions — the 2025-09-03 release moved page
+creation from `database_id` to `data_source_id`, which the client handles by
+resolving the data source once and caching it. Raise the pin only after
+reading that version's upgrade guide.
+
 ## Questions from Claude
 
 A channel for answering questions while away from the desk.
