@@ -304,9 +304,12 @@
 <span class="count-badge" id="albums-count"></span>
 </div>
 <div class="settings-note" style="margin:0 0 10px;">
-Name albums <strong>Name_</strong> for someone's default album, and <strong>Name_Label</strong> for extras
-&mdash; <code>Kat_Lisbon</code> for a trip, <code>Kat_x</code> for private ones. The trailing underscore keeps
-<code>Kat_</code> from matching <code>Katerina_</code>, and makes them searchable in Photos.
+Name albums <strong>Name_Location_Date_Other</strong>, leaving any slot empty if it doesn't apply:
+<code>Kat_</code> (default album), <code>Kat_Lisbon</code>, <code>Kat_x</code> (private),
+<code>Alena__2026_Birthday</code> (no location &mdash; note the double underscore).
+Only the <em>second</em> slot ever becomes a location tag, so a date or a word like &ldquo;Birthday&rdquo;
+can't be filed as a place. The trailing underscore keeps <code>Kat_</code> from matching
+<code>Katerina_</code>, and makes them searchable in Photos.
 <br><br>
 Google has no API for albums, so run the snippet below in the browser console
 (F12 &rarr; Console) on <a href="https://photos.google.com/albums" target="_blank" rel="noopener">photos.google.com/albums</a>,

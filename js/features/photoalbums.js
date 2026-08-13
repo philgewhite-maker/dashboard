@@ -6,10 +6,18 @@
 // whose token doesn't survive, so the links stopped resolving. An album is a
 // real, permanent, shareable object, so its URL is safe to store.
 //
-// Titles carry the identity:
-//   "Kat_"        -> person "Kat",  label ""        (their default album)
-//   "Kat_x"       -> person "Kat",  label "x"       (kept private, see below)
-//   "Kat_Lisbon"  -> person "Kat",  label "Lisbon"
+// Titles are positional, underscore-separated:
+//
+//   <Name>_<Location or sensitive>_<Date>_<Other>
+//
+//   "Kat_"                  -> Kat, nothing else            (default album)
+//   "Kat_x"                 -> Kat, sensitive               (kept private)
+//   "Kat_Lisbon"            -> Kat, location Lisbon
+//   "Alena__2026_Birthday"  -> Alena, NO location, 2026, Birthday
+//
+// Position matters precisely so that only the *second* field can become a
+// location tag. An earlier version tagged everything after the underscore,
+// which turned "Birthday" into a place.
 //
 // The trailing underscore is what makes the prefix unambiguous — without it
 // "Kat" would also prefix-match "Katerina".
@@ -26,22 +34,37 @@ function parseAlbumTitle(title) {
 const raw = String(title || '').trim();
 const at = raw.indexOf('_');
 if (at <= 0) return null;
-return { person: raw.slice(0, at).trim(), label: raw.slice(at + 1).trim(), title: raw };
+const person = raw.slice(0, at).trim();
+// Split on the REST only, so a name can't be mistaken for a later field.
+// An empty slot ("Alena__2026") is meaningful — it says "no location" —
+// so empties are kept rather than filtered out.
+const parts = raw.slice(at + 1).split('_').map((s) => s.trim());
+return {
+person,
+location: parts[0] || '',
+date: parts[1] || '',
+// Anything past the fourth field is folded into "other" rather than
+// dropped, since a stray underscore shouldn't lose information.
+other: parts.slice(2).filter(Boolean).join(' '),
+title: raw,
+};
 }
 
-// What to show under a thumbnail: the person's name for a plain "Name_", the
-// qualifier for anything else — since these are grouped under the person
-// already, repeating the name would just be noise.
+// What to show under a thumbnail. These are already grouped under the
+// person, so repeating the name would be noise — show what distinguishes
+// this album instead, and fall back to the name for a plain "Name_".
 function captionFor(album) {
-return album.label || album.person;
+const bits = [album.location, album.date, album.other].filter(Boolean);
+return bits.length ? bits.join(' · ') : album.person;
 }
 
 // Albums whose label marks them sensitive follow the same device-local
 // visibility switch as the sensitive tag fields, so a shared screen doesn't
 // surface them. Deliberately a small, explicit list rather than a guess.
+// Shares the location slot: a marker there means "private", not a place.
 const SENSITIVE_LABELS = new Set(['x', 'xx', 'nsfw', 'private']);
 function isSensitive(album) {
-return SENSITIVE_LABELS.has(String(album.label || '').toLowerCase());
+return SENSITIVE_LABELS.has(String(album.location || '').toLowerCase());
 }
 
 function parseInput(text) {
@@ -205,16 +228,18 @@ if (!conn) return;
 if (!Array.isArray(conn.photoAlbums)) conn.photoAlbums = [];
 // Keyed on the URL, so re-importing after a title change updates the
 // label in place instead of adding a duplicate album.
+const fields = { location: row.location, date: row.date, other: row.other, cover: row.cover, title: row.title };
 const existing = conn.photoAlbums.find((a) => a.url === row.url);
-if (existing) Object.assign(existing, { label: row.label, cover: row.cover, title: row.title });
-else conn.photoAlbums.push({ label: row.label, url: row.url, cover: row.cover, title: row.title });
+if (existing) Object.assign(existing, fields);
+else conn.photoAlbums.push({ url: row.url, ...fields });
 
-// A trip album doubles as a date-location; "Kat_Lisbon" is exactly the
-// sort of thing that field exists for. Sensitive labels are never
-// promoted into a tag.
-if (row.label && !isSensitive(row) && TAG_FIELDS.some((f) => f.field === 'dateLocations')) {
+// ONLY the location slot becomes a tag. Date and other are stored and
+// shown but never promoted — that's the whole reason the title is
+// positional, so "Birthday" can't end up filed as a place. A sensitive
+// marker sits in the same slot and is never promoted either.
+if (row.location && !isSensitive(row) && TAG_FIELDS.some((f) => f.field === 'dateLocations')) {
 if (!Array.isArray(conn.dateLocations)) conn.dateLocations = [];
-if (!conn.dateLocations.some((v) => nameKey(v) === nameKey(row.label))) conn.dateLocations.push(row.label);
+if (!conn.dateLocations.some((v) => nameKey(v) === nameKey(row.location))) conn.dateLocations.push(row.location);
 }
 row.applied = true;
 n++;

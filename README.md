@@ -339,11 +339,26 @@ from whatever actually arrived.
 ## Google Photos albums
 
 Dating admin → "Google Photos albums". Links albums to connections using a
-title convention:
+positional title convention:
+
+```
+<Name>_<Location or sensitive>_<Date>_<Other>
+```
+
+Leave any slot empty if it doesn't apply:
 
 - `Kat_` — their default album
-- `Kat_x` — private; blurred until hovered, and never promoted to a tag
-- `Kat_Lisbon` — a trip; the label also becomes a date-location
+- `Kat_Lisbon` — location Lisbon
+- `Kat_x` — private; blurred until hovered, never promoted to a tag
+- `Alena__2026_Birthday` — **no** location (note the double underscore),
+  date 2026, other "Birthday"
+- `Kat_Lisbon_Mar 2026_Sintra day trip` — all four slots
+
+**Only the second slot ever becomes a location tag.** The date can take any
+form (`2026`, `Mar 2026`, `summer 25`) and is never parsed or tagged, and
+neither is "other" — that's the whole reason the title is positional. An
+earlier version tagged everything after the first underscore, which filed
+"Birthday" as a place.
 
 The **trailing underscore matters**: without it, `Kat` would prefix-match
 `Katerina`. It also makes albums findable by typing `Kat_` into Google

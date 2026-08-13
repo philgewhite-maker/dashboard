@@ -317,7 +317,7 @@ if (typeof c.photosPersonUrl !== 'string') c.photosPersonUrl = '';
 // plain "Name_".
 if (!Array.isArray(c.photoAlbums)) {
 c.photoAlbums = String(c.photosAlbumUrl || '').trim()
-? [{ label: '', url: c.photosAlbumUrl.trim(), cover: '', title: '' }]
+? [{ location: '', date: '', other: '', url: c.photosAlbumUrl.trim(), cover: '', title: '' }]
 : [];
 }
 c.photoAlbums = c.photoAlbums.filter((a) => a && typeof a.url === 'string' && a.url.trim());
