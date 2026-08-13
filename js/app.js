@@ -18,6 +18,12 @@ import { initQuestions } from './features/questions.js';
 import { initContacts } from './features/contacts.js';
 import { initPhotoScan } from './features/photoscan.js';
 import { initPhotoLinks } from './features/photolinks.js';
+import { initPhotoSync } from './features/photosync.js';
+// Photos whose bytes aren't on this device are fetched from your own host.
+// Registered rather than imported: the implementation reaches state.js, and
+// state.js imports utils.js, so importing it back would be a cycle.
+import { setPhotoFallback } from './utils.js';
+import { serverPhotoUrl } from './files.js';
 // Imported for its side effect: it registers the Notion controls with
 // tasks.js, which keeps that dependency pointing one way.
 import './features/notionplan.js';
@@ -71,6 +77,9 @@ document.getElementById('today-date').textContent = new Date().toLocaleDateStrin
 
 initSaveNote();
 initSaveFlush();
+// Must be set before the first renderAll(), or that paint marks every
+// server-held photo as missing.
+setPhotoFallback(serverPhotoUrl);
 await loadData();
 // Both read device-local display preferences that renderAll() depends on
 // (which tag fields are visible, which overview sections are folded), so
@@ -99,6 +108,7 @@ initQuestions();
 initContacts();
 initPhotoScan();
 initPhotoLinks();
+initPhotoSync();
 initNudges();
 await initSettings();
 registerServiceWorker();

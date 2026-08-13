@@ -65,19 +65,39 @@ return `<div class="${cls}">${escapeHtml(initials(name))}</div>`;
 // Finds every element carrying data-photo-id inside `root` and swaps in an
 // <img> once the blob is loaded. Safe to call repeatedly; a no-op for ids
 // that fail to resolve (leaves the initials fallback in place).
+// Resolver for photos whose bytes aren't on this device. Registered by
+// app.js rather than imported, because the implementation lives in files.js,
+// which reaches state.js — and state.js imports this module, so importing it
+// back would be a cycle.
+let photoFallback = null;
+function setPhotoFallback(fn) { photoFallback = fn; }
+
+// Fills in every [data-photo-id] placeholder. Photos are stored per-device,
+// so an id that synced from another device has no local blob; the fallback
+// fetches those from your own host. Anything still unresolved is marked
+// rather than left blank — an empty square looks identical to "no photo was
+// ever added", which is the wrong thing to conclude.
 async function hydratePhotos(root) {
-const nodes = root.querySelectorAll('[data-photo-id]');
-for (const el of nodes) {
+const nodes = [...root.querySelectorAll('[data-photo-id]')].filter((el) => !el.querySelector('img'));
+await Promise.all(nodes.map(async (el) => {
 const id = el.dataset.photoId;
-const url = await photoUrl(id);
-if (url && !el.querySelector('img')) {
+let url = await photoUrl(id);
+if (!url && photoFallback) {
+el.classList.add('photo-loading');
+try { url = await photoFallback(id); } catch (e) { /* leave it marked missing */ }
+el.classList.remove('photo-loading');
+}
+if (url) {
 const img = document.createElement('img');
 img.src = url;
 img.alt = '';
 el.textContent = '';
 el.appendChild(img);
+} else {
+el.classList.add('photo-missing');
+el.title = 'This photo is only on the device it was added on — see Settings → Photo sync.';
 }
-}
+}));
 }
 
 function scrollAndFlash(selector) {
@@ -390,5 +410,5 @@ todayStr, daysAgoStr, last7Dates, uid, daysSince, daysUntil,
 escapeHtml, initials, avatarHtml, hydratePhotos, scrollAndFlash, bindForm,
 resizeImageToBlob, fileToBase64, loadImage, cropThumbnailToBlob,
 hashFile, captureDateOf, betterCaptureDate, dateFromFilename,
-ensureBrowserReadableImage,
+ensureBrowserReadableImage, setPhotoFallback,
 };

@@ -308,10 +308,25 @@ bytes are fetched the first time you actually open it, then cached locally,
 so the device that uploaded a file never re-downloads it and an
 already-opened attachment still opens offline.
 
-This is also the difference from the older per-task **photos**, which are
-stored only in that device's IndexedDB and do *not* sync. Photos are still
-there and still work for quick screenshots; attachments are the ones that
-survive a device hand-off.
+## Photo sync
+
+Photos — on connections and on tasks — predate attachments, and originally
+lived only in the IndexedDB of the device that added them. Their *ids* were
+always part of the synced document, but the bytes weren't, so a connection
+imported on the desktop showed initials instead of a face on the phone,
+looking identical to "no photo was ever added".
+
+**Settings → Photo sync** fixes that: it counts what's on this device only
+and uploads it to the same server as attachments, rewriting every reference
+(including a connection's avatar `photoId` and any photo shared between
+records) to the new server id. It's safe to re-run and safe to stop partway
+— a failed or interrupted upload leaves the original photo untouched and
+still queued. Run it once on each device that holds photos.
+
+Anything still unresolved renders as a hatched "?" rather than a blank
+square, so a photo that lives on another device is visibly different from
+one that was never added. Once uploaded, photos load from the server on
+first view and are cached locally after that.
 
 Uploads are capped at 25MB in `files.php`, but your host's own
 `post_max_size` / `upload_max_filesize` also apply and are often lower —

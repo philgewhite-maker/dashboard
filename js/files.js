@@ -135,6 +135,34 @@ a.remove();
 setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
+// Server-issued ids are exactly 32 hex characters (files.php generates them
+// with random_bytes(16)); ids minted locally by uid() are 11 characters of
+// base36. So the id itself says where a photo lives, with no extra field to
+// keep in sync — and a legacy local-only id never triggers a pointless
+// network round-trip that could only 404.
+function isServerPhotoId(id) {
+return typeof id === 'string' && /^[a-f0-9]{32}$/.test(id);
+}
+
+// The fallback behind hydratePhotos: called only when a photo's bytes aren't
+// in this device's IndexedDB. Fetches from your host, caches, and returns an
+// object URL. Returns null for anything it can't resolve, which the caller
+// renders as an explicit "missing" marker.
+const photoUrlCache = new Map();
+async function serverPhotoUrl(id) {
+if (!isServerPhotoId(id)) return null;
+if (photoUrlCache.has(id)) return photoUrlCache.get(id);
+try {
+const blob = await fetchAttachment(id);
+const url = URL.createObjectURL(blob);
+photoUrlCache.set(id, url);
+return url;
+} catch (err) {
+console.error(`Couldn't load photo ${id} from the server:`, err);
+return null;
+}
+}
+
 function formatBytes(n) {
 const size = Number(n) || 0;
 if (size < 1024) return `${size} B`;
@@ -145,4 +173,5 @@ return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 export {
 FilesNotConfiguredError,
 uploadAttachment, fetchAttachment, deleteAttachment, openAttachment, formatBytes,
+isServerPhotoId, serverPhotoUrl,
 };

@@ -41,6 +41,7 @@ const CORE_ASSETS = [
 './js/files.js',
 './js/features/googletasksfeed.js',
 './js/features/photolinks.js',
+'./js/features/photosync.js',
 './js/features/contacts.js',
 './js/features/photoscan.js',
 './js/features/notionplan.js',

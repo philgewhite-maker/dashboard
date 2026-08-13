@@ -414,6 +414,17 @@ review the guesses before saving.
 </div>
 
 <div class="settings-block">
+<h3>Photo sync</h3>
+<div class="settings-note" style="margin:0 0 8px;">
+Photos added before task attachments existed live only on the device that added them &mdash; their ids sync, but the images don't, so a connection imported on the desktop shows initials instead of a face on the phone. This uploads them to your own server (the same one as live sync and attachments) so they appear everywhere. Safe to re-run, and safe to stop partway.
+</div>
+<div id="photosync-body"></div>
+<div class="sync-row" style="margin-top:8px;">
+<button class="sync-btn" id="photosync-refresh" type="button">Re-check</button>
+</div>
+</div>
+
+<div class="settings-block">
 <h3>AI features</h3>
 <label for="anthropic-key-input" style="font-size:13px;font-weight:500;display:block;margin-bottom:6px;">Anthropic API key (for photo/screenshot import)</label>
 <input type="password" id="anthropic-key-input" class="settings-input" placeholder="sk-ant-...">
