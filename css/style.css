@@ -1189,6 +1189,7 @@ flex-shrink:0;
 }
 .mini-task-btn:hover{border-color:var(--amber);color:var(--amber);}
 .mini-task-btn:disabled{opacity:.6;cursor:default;border-color:var(--line);color:var(--muted);}
+.mini-task-btn.done{border-color:var(--teal);color:var(--teal);}
 .mail-link{display:flex;gap:10px;align-items:baseline;flex:1;min-width:0;text-decoration:none;color:inherit;}
 
 /* ---- GTD tasks ---- */

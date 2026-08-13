@@ -33,6 +33,7 @@
 <button class="tab-btn" type="button" data-tab-btn="tasks">Tasks</button>
 <button class="tab-btn" type="button" data-tab-btn="jobhunt">Job Hunt</button>
 <button class="tab-btn" type="button" data-tab-btn="dating">Dating</button>
+<button class="tab-btn" type="button" data-tab-btn="datingadmin">Dating admin</button>
 <button class="tab-btn" type="button" data-tab-btn="finances">Finances</button>
 <button class="tab-btn" type="button" data-tab-btn="business">Business</button>
 <button class="tab-btn" type="button" data-tab-btn="settings">Settings</button>
@@ -229,7 +230,34 @@
 <div id="overview-content"></div>
 </section>
 
-<section class="panel wide" id="photoscan-panel" data-tab="dating">
+<section class="panel wide" id="import-panel" data-tab="datingadmin">
+<div class="panel-head">
+<h2><span class="dot rose"></span>Import &amp; add photos</h2>
+</div>
+<div class="import-box">
+<div class="import-row">
+<select id="import-app-input">
+<option>Bumble</option>
+<option>Tinder</option>
+<option>Hinge</option>
+<option>Other</option>
+</select>
+<label class="file-btn" for="import-file-input" id="import-file-label">Import matches list</label>
+<input type="file" id="import-file-input" accept="image/*" style="display:none;">
+<label class="file-btn" for="import-profile-input" id="import-profile-label">Import profile screenshot(s) + parse</label>
+<input type="file" id="import-profile-input" accept="image/*" multiple style="display:none;">
+</div>
+<div class="import-row">
+<select id="photo-target-input"><option value="">Add photos to&hellip;</option></select>
+<label class="file-btn" for="photo-only-input" id="photo-only-label">Add photos, no parsing (free)</label>
+<input type="file" id="photo-only-input" accept="image/*" multiple style="display:none;">
+</div>
+<div class="import-status" id="import-status"></div>
+<div class="candidate-list" id="candidate-list"></div>
+</div>
+</section>
+
+<section class="panel wide" id="photoscan-panel" data-tab="datingadmin">
 <div class="panel-head">
 <h2><span class="dot amber"></span>Scan a batch of screenshots</h2>
 <span class="count-badge" id="scan-summary"></span>
@@ -244,7 +272,7 @@
 <div id="scan-results"></div>
 </section>
 
-<section class="panel wide" id="contacts-panel" data-tab="dating">
+<section class="panel wide" id="contacts-panel" data-tab="datingadmin">
 <div class="panel-head">
 <h2><span class="dot teal"></span>Google Contacts match</h2>
 <span class="count-badge" id="contacts-count"></span>
@@ -289,27 +317,6 @@
 </div>
 <input type="text" class="conn-search" id="conn-search" placeholder="Search by name or tag (e.g. sporty, sober)...">
 <div id="connections-list"></div>
-<div class="import-box">
-<div class="import-row">
-<select id="import-app-input">
-<option>Bumble</option>
-<option>Tinder</option>
-<option>Hinge</option>
-<option>Other</option>
-</select>
-<label class="file-btn" for="import-file-input" id="import-file-label">Import matches list</label>
-<input type="file" id="import-file-input" accept="image/*" style="display:none;">
-<label class="file-btn" for="import-profile-input" id="import-profile-label">Import profile screenshot(s) + parse</label>
-<input type="file" id="import-profile-input" accept="image/*" multiple style="display:none;">
-</div>
-<div class="import-row">
-<select id="photo-target-input"><option value="">Add photos to&hellip;</option></select>
-<label class="file-btn" for="photo-only-input" id="photo-only-label">Add photos, no parsing (free)</label>
-<input type="file" id="photo-only-input" accept="image/*" multiple style="display:none;">
-</div>
-<div class="import-status" id="import-status"></div>
-<div class="candidate-list" id="candidate-list"></div>
-</div>
 <div class="add-form" id="connection-form">
 <input type="text" id="conn-name-input" placeholder="Name or nickname">
 <select id="conn-app-input">

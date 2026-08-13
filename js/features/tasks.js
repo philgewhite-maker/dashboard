@@ -477,4 +477,19 @@ renderLists();
 });
 }
 
-export { renderTasks, initTasks, captureTask, isDormant, setNotionPanel };
+// Opens a task's detail and scrolls to it — used when arriving from a mail
+// row that was already captured.
+function revealTask(id) {
+expandedTasks.add(id);
+renderTasks();
+setTimeout(() => {
+const el = document.querySelector(`[data-task-row="${id}"], [data-alloc-card="${id}"]`);
+if (el) {
+el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+el.classList.add('flash-new');
+setTimeout(() => el.classList.remove('flash-new'), 1800);
+}
+}, 60);
+}
+
+export { renderTasks, initTasks, captureTask, isDormant, setNotionPanel, revealTask };

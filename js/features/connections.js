@@ -489,7 +489,11 @@ if (el.dataset.field === 'age') conn.ageAsOf = el.value.trim() ? todayStr() : ''
 // every merge dropdown), so a full re-render is the only way to keep
 // those honest. `change` fires on blur, not per keystroke, so this costs
 // one render per edit rather than one per character.
-if (['name', 'app', 'age', 'dob', 'location'].includes(el.dataset.field)) renderConnections();
+// The link fields are in here because pasting a URL has to redraw the card
+// for its "Open …" hyperlink to appear — without that the link only shows
+// up the next time something else happened to trigger a render, which looks
+// exactly like the paste not working.
+if (['name', 'app', 'age', 'dob', 'location', 'photosAlbumUrl', 'photosPersonUrl', 'driveLink'].includes(el.dataset.field)) renderConnections();
 renderOverviewRef();
 queueSave();
 });
