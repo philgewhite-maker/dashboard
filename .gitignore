@@ -7,6 +7,8 @@ server/sync.php
 # notion.php holds your Notion integration token, which can read and write
 # your entire workspace. Same rule: only the .example is tracked.
 server/notion.php
+# files.php holds the same shared secret as sync.php. Same rule again.
+server/files.php
 
 # The synced document and its lock/temp files, in case anyone ever points
 # $DATA_FILE inside the repo folder while testing.

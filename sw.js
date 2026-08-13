@@ -2,7 +2,7 @@
 // deletes every cache that isn't the current name, so raising the version is
 // what actually evicts a stale copy from a device that has been running the
 // app for a while.
-const CACHE_NAME = 'dashboard-v3';
+const CACHE_NAME = 'dashboard-v4';
 const CORE_ASSETS = [
 './',
 './index.html',
@@ -37,6 +37,10 @@ const CORE_ASSETS = [
 './js/sync/autosync.js',
 './js/googlecalendar.js',
 './js/googlecontacts.js',
+'./js/googletasks.js',
+'./js/files.js',
+'./js/features/googletasksfeed.js',
+'./js/features/photolinks.js',
 './js/features/contacts.js',
 './js/features/photoscan.js',
 './js/features/notionplan.js',

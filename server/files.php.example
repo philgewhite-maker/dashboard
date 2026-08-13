@@ -1,0 +1,183 @@
+<?php
+declare(strict_types=1);
+
+/**
+ * Dashboard attachment endpoint.
+ *
+ * Task attachments can't live in the synced JSON document: every save
+ * rewrites that document whole, so a single 5MB PDF would make every sync
+ * push 5MB. Instead the *bytes* live here, one file each, and only small
+ * metadata (id, name, type, size) travels in the synced document. That
+ * metadata is what makes an attachment appear on your other devices; this
+ * endpoint is what lets them actually fetch it.
+ *
+ *   POST ?action=upload   raw body = file bytes    -> {id, name, type, size}
+ *   GET  ?id=<id>                                  -> the file bytes
+ *   POST ?action=delete&id=<id>                    -> {ok:true}
+ *
+ * Upload to your Krystal hosting next to sync.php (cPanel -> File Manager)
+ * and set $SECRET below to the SAME value as sync.php. See README.md,
+ * "Task attachments".
+ */
+
+// ---- Configuration ---------------------------------------------------
+
+// Must match sync.php exactly. Anything that knows it can read, upload and
+// delete your attachments, so treat it like a password.
+$SECRET = 'PUT-A-LONG-RANDOM-STRING-HERE';
+
+// Where the files live. Defaults to a directory ABOVE this script, which on
+// cPanel means outside public_html — so an uploaded file can never be
+// fetched directly over the web, or executed as a script, even if the
+// .htaccess protecting it is ever lost. Only change this if you are certain
+// the new location is not web-served.
+$FILE_DIR = dirname(__DIR__) . '/dashboard-files';
+
+// Refuse anything larger. Note your host's own `post_max_size` /
+// `upload_max_filesize` also apply and are often lower (Krystal defaults to
+// around 64M) — whichever is smallest wins.
+$MAX_BYTES = 25 * 1024 * 1024;
+
+$ALLOWED_ORIGINS = [
+    'https://philgewhite-maker.github.io',
+    'http://localhost:8743',
+    'http://localhost:5173',
+];
+
+// ---- End of configuration --------------------------------------------
+
+$origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+if ($origin !== '' && in_array($origin, $ALLOWED_ORIGINS, true)) {
+    header('Access-Control-Allow-Origin: ' . $origin);
+    header('Vary: Origin');
+}
+header('Access-Control-Allow-Headers: Content-Type, X-Sync-Secret, X-File-Name, X-File-Type');
+header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+header('Access-Control-Max-Age: 86400');
+header('Cache-Control: no-store');
+// Never let a browser guess a stored file's type: an uploaded .html or .svg
+// served as such from this domain would run as a page on it. Combined with
+// the forced download below, an attachment can only ever be saved, not
+// executed in the origin's context.
+header('X-Content-Type-Options: nosniff');
+
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
+    http_response_code(204);
+    exit;
+}
+
+function fail(int $code, string $message): void {
+    http_response_code($code);
+    header('Content-Type: application/json');
+    echo json_encode(['error' => $message]);
+    exit;
+}
+
+$provided = $_SERVER['HTTP_X_SYNC_SECRET'] ?? '';
+if ($SECRET === '' || $SECRET === 'PUT-A-LONG-RANDOM-STRING-HERE') {
+    fail(500, 'Server not configured: set $SECRET in files.php');
+}
+if (!is_string($provided) || !hash_equals($SECRET, $provided)) {
+    fail(401, 'Bad or missing sync secret');
+}
+
+if (!is_dir($FILE_DIR) && !mkdir($FILE_DIR, 0700, true) && !is_dir($FILE_DIR)) {
+    fail(500, 'Could not create the attachments directory — check permissions');
+}
+
+// Ids are generated here, never taken from the client, and validated on the
+// way back in. That is what stops a crafted id like "../../sync.php" from
+// reading or deleting something it shouldn't.
+function valid_id(?string $id): bool {
+    return is_string($id) && preg_match('/^[a-f0-9]{32}$/', $id) === 1;
+}
+
+$method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+$action = $_GET['action'] ?? '';
+
+if ($method === 'GET') {
+    $id = $_GET['id'] ?? null;
+    if (!valid_id($id)) fail(400, 'Bad file id');
+    $path = $FILE_DIR . '/' . $id . '.bin';
+    $metaPath = $FILE_DIR . '/' . $id . '.json';
+    if (!is_file($path)) fail(404, 'No such file');
+
+    $meta = is_file($metaPath) ? json_decode((string) file_get_contents($metaPath), true) : null;
+    $name = is_array($meta) && isset($meta['name']) ? (string) $meta['name'] : 'attachment';
+    // Strip anything that could break out of the quoted filename or inject a
+    // second header line.
+    $safeName = preg_replace('/[^A-Za-z0-9._ \-()]/', '_', $name);
+    if ($safeName === '' || $safeName === null) $safeName = 'attachment';
+
+    // Deliberately application/octet-stream + attachment rather than the
+    // stored MIME type: the client knows the real type from the synced
+    // metadata, and this guarantees the browser saves the file instead of
+    // rendering it on this origin.
+    header('Content-Type: application/octet-stream');
+    header('Content-Disposition: attachment; filename="' . $safeName . '"');
+    header('Content-Length: ' . (string) filesize($path));
+    readfile($path);
+    exit;
+}
+
+if ($method !== 'POST') {
+    fail(405, 'Use GET or POST');
+}
+
+if ($action === 'delete') {
+    $id = $_GET['id'] ?? null;
+    if (!valid_id($id)) fail(400, 'Bad file id');
+    @unlink($FILE_DIR . '/' . $id . '.bin');
+    @unlink($FILE_DIR . '/' . $id . '.json');
+    header('Content-Type: application/json');
+    echo json_encode(['ok' => true]);
+    exit;
+}
+
+// ---- Upload ----------------------------------------------------------
+
+$bytes = file_get_contents('php://input');
+if ($bytes === false || $bytes === '') {
+    fail(400, 'Empty upload — the file may be larger than the server allows (post_max_size)');
+}
+if (strlen($bytes) > $MAX_BYTES) {
+    fail(413, 'File too large (limit ' . round($MAX_BYTES / 1048576) . 'MB)');
+}
+
+// Sent URL-encoded so non-ASCII filenames survive being put in a header.
+$name = rawurldecode((string) ($_SERVER['HTTP_X_FILE_NAME'] ?? 'attachment'));
+$type = (string) ($_SERVER['HTTP_X_FILE_TYPE'] ?? 'application/octet-stream');
+// The name is only ever echoed back as data or used for a download prompt,
+// never as a path, but trimming control characters keeps it sane either way.
+$name = trim(preg_replace('/[\x00-\x1F\x7F]/', '', $name) ?? '');
+if ($name === '') $name = 'attachment';
+if (strlen($name) > 200) $name = substr($name, 0, 200);
+if (!preg_match('#^[A-Za-z0-9!/#$&^_.+-]{1,120}$#', $type)) $type = 'application/octet-stream';
+
+try {
+    $id = bin2hex(random_bytes(16));
+} catch (Exception $e) {
+    fail(500, 'Could not generate a file id');
+}
+
+// Write to a temp file and rename, so a reader can never see a half-written
+// upload — same reasoning as sync.php.
+$tmp = $FILE_DIR . '/' . $id . '.tmp';
+if (file_put_contents($tmp, $bytes) === false) {
+    fail(500, 'Could not write the file — check directory permissions');
+}
+rename($tmp, $FILE_DIR . '/' . $id . '.bin');
+file_put_contents($FILE_DIR . '/' . $id . '.json', json_encode([
+    'name' => $name,
+    'type' => $type,
+    'size' => strlen($bytes),
+    'uploadedAt' => gmdate('c'),
+]));
+
+header('Content-Type: application/json');
+echo json_encode([
+    'id' => $id,
+    'name' => $name,
+    'type' => $type,
+    'size' => strlen($bytes),
+]);

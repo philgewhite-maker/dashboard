@@ -123,7 +123,12 @@ bringForward: '', // ISO date — hidden from active lists until then
 due: '',
 link: '', // the page holding the detail behind a project
 notionPageId: '', // set once a Notion page backs this task
-photoIds: [],
+photoIds: [], // legacy: image blobs in this device's IndexedDB only
+// Files of any type held on your own host (server/files.php). Only the
+// metadata lives here — {id, name, type, size} — which is what makes an
+// attachment show up on your other devices; the bytes are fetched on
+// demand. Unlike photoIds, these genuinely sync.
+attachments: [],
 source: null, // {kind:'mail'|'calendar'|'photo', label, url}
 createdAt: new Date().toISOString(),
 completedAt: '',
@@ -236,6 +241,11 @@ data.tasks.forEach((t) => {
 if (!validBuckets.has(t.bucket)) t.bucket = 'inbox';
 if (!Array.isArray(t.contexts)) t.contexts = [];
 if (!Array.isArray(t.photoIds)) t.photoIds = [];
+// Drop anything without an id: an attachment row that can't be fetched
+// or deleted is just a dead entry on every device.
+t.attachments = Array.isArray(t.attachments)
+? t.attachments.filter((a) => a && typeof a.id === 'string' && a.id)
+: [];
 });
 // A subtask whose parent has been deleted would otherwise vanish from every
 // list — it renders under its parent, and there's no parent to render.

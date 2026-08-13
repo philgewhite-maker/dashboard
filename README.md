@@ -283,6 +283,44 @@ If you'd rather avoid cross-origin requests entirely, serve the whole app
 from the same host as `sync.php` instead of GitHub Pages — then
 `$ALLOWED_ORIGINS` stops mattering.
 
+## Task attachments
+
+Any task can carry files of any type — PDF, Word, spreadsheets, images,
+anything. Open a task in **Tasks → Lists** and use "+ Attach a file".
+
+Attachments need live sync (above) set up first, because they use the same
+host and the same secret. **Setup is one extra file:** copy
+`server/files.php.example` to `server/files.php`, set `$SECRET` to the *same*
+value as `sync.php`, and upload it to `public_html` next to `sync.php`. No
+per-device configuration — the app derives the attachments URL from your
+existing sync URL by swapping `sync.php` for `files.php`.
+
+`server/files.php` is gitignored for the same reason as `sync.php`: it holds
+the secret and this repo is public.
+
+**Why files aren't just put in the synced document.** That document is
+rewritten in full on every save, so a single 5MB PDF inside it would make
+every autosave push 5MB. Instead the bytes live in their own file on your
+host, and only `{id, name, type, size}` travels in the document — a task with
+two attachments syncs in well under a kilobyte no matter how large they are.
+That metadata is what makes an attachment appear on your other devices; the
+bytes are fetched the first time you actually open it, then cached locally,
+so the device that uploaded a file never re-downloads it and an
+already-opened attachment still opens offline.
+
+This is also the difference from the older per-task **photos**, which are
+stored only in that device's IndexedDB and do *not* sync. Photos are still
+there and still work for quick screenshots; attachments are the ones that
+survive a device hand-off.
+
+Uploads are capped at 25MB in `files.php`, but your host's own
+`post_max_size` / `upload_max_filesize` also apply and are often lower —
+whichever is smallest wins. Files are stored outside `public_html`, are only
+retrievable with the secret, and are always served as a forced download with
+`X-Content-Type-Options: nosniff`, so an uploaded HTML or SVG file can never
+execute as a page on your domain. Deleting an attachment, or deleting the
+task holding it, removes the file from the server for every device.
+
 ## Google Contacts match
 
 Dating tab → "Match contacts". Joins connections to your Google Contacts via

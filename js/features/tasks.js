@@ -16,6 +16,7 @@
 import { data, queueSave, TASK_BUCKETS, blankTask } from '../state.js';
 import { photoPut, photoDelete } from '../db.js';
 import { uid, todayStr, escapeHtml, hydratePhotos, resizeImageToBlob, daysUntil, daysSince } from '../utils.js';
+import { uploadAttachment, deleteAttachment, openAttachment, formatBytes } from '../files.js';
 
 const BUCKET_LABEL = Object.fromEntries(TASK_BUCKETS.map((b) => [b.bucket, b.label]));
 // Buckets shown as filing destinations. `done` is reached by ticking a task
@@ -86,6 +87,26 @@ ${kids.map((k) => taskRowHtml(k, depth + 1)).join('')}
 </div>`;
 }
 
+// One row per attachment. The name is a button rather than a link because
+// the bytes may not be local yet — it fetches (or reads the cache) and then
+// hands the browser a download.
+function attachmentsHtml(t) {
+const rows = (t.attachments || []).map((a) => `<div class="attach-row">
+<button class="attach-name" type="button" data-attach-open="${t.id}" data-attach-id="${escapeHtml(a.id)}" title="Download ${escapeHtml(a.name || 'attachment')}">${escapeHtml(a.name || 'attachment')}</button>
+<span class="attach-size">${escapeHtml(formatBytes(a.size))}</span>
+<span class="tag-x" data-attach-remove="${t.id}" data-attach-id="${escapeHtml(a.id)}" title="Remove">&times;</span>
+</div>`).join('');
+return `<div class="task-attachments">
+<div class="attach-head">Attachments <span class="attach-hint">any file — synced to your other devices</span></div>
+${rows}
+<div class="attach-actions">
+<label class="file-btn" for="task-attach-${t.id}">+ Attach a file</label>
+<input type="file" id="task-attach-${t.id}" multiple style="display:none;" data-task-attach-add="${t.id}">
+<span class="sync-status" data-attach-status="${t.id}"></span>
+</div>
+</div>`;
+}
+
 function taskDetailHtml(t) {
 const photos = (t.photoIds || []).map((id, i) => `<div class="gallery-thumb"><span class="thumb-img" data-photo-id="${escapeHtml(id)}"></span><span class="tag-x" data-task-photo-remove="${t.id}" data-photo-idx="${i}">&times;</span></div>`).join('');
 return `<div class="task-detail">
@@ -107,6 +128,7 @@ ${t.link ? `<a class="task-link" href="${escapeHtml(t.link)}" target="_blank" re
 ${t.source ? `<div class="task-source">From ${escapeHtml(t.source.kind)}: ${t.source.url ? `<a href="${escapeHtml(t.source.url)}" target="_blank" rel="noopener">${escapeHtml(t.source.label)}</a>` : escapeHtml(t.source.label)}</div>` : ''}
 <div class="task-photos">${photos}<label class="gallery-add" for="task-photo-${t.id}">+</label>
 <input type="file" id="task-photo-${t.id}" accept="image/*" multiple style="display:none;" data-task-photo-add="${t.id}"></div>
+${attachmentsHtml(t)}
 <button class="todo-add-btn" type="button" data-task-addsub="${t.id}">+ Subtask</button>
 ${notionPanel.html(t)}
 </div>`;
@@ -371,6 +393,17 @@ const doomed = [t.id, ...kids.map((k) => k.id)];
 for (const id of doomed) {
 const task = taskById(id);
 for (const pid of (task?.photoIds || [])) await photoDelete(pid);
+// Attachments live on the server, so deleting the task has to clean up
+// there too or the files are stranded with nothing left pointing at
+// them. Best-effort: a failure here must not block the delete.
+for (const a of (task?.attachments || [])) {
+try {
+await deleteAttachment(a.id);
+await photoDelete(a.id);
+} catch (err) {
+console.error(`Couldn't delete attachment "${a.name}" from the server:`, err);
+}
+}
 }
 data.tasks = data.tasks.filter((x2) => !doomed.includes(x2.id));
 renderTasks();
@@ -419,6 +452,77 @@ const [removed] = t.photoIds.splice(parseInt(x.dataset.photoIdx, 10), 1);
 if (removed) await photoDelete(removed);
 renderTasks();
 queueSave();
+});
+});
+
+root.querySelectorAll('[data-task-attach-add]').forEach((input) => {
+input.addEventListener('change', async (e) => {
+const t = taskById(input.dataset.taskAttachAdd);
+const files = Array.from(e.target.files);
+e.target.value = '';
+if (!t || files.length === 0) return;
+const status = root.querySelector(`[data-attach-status="${CSS.escape(t.id)}"]`);
+const say = (msg) => { if (status) status.textContent = msg; };
+let done = 0;
+for (const file of files) {
+say(`Uploading ${file.name} (${++done} of ${files.length})…`);
+try {
+const meta = await uploadAttachment(file);
+t.attachments.push(meta);
+// Save after each one: a five-file upload interrupted halfway
+// should keep the files that already made it.
+queueSave();
+} catch (err) {
+console.error('Attachment upload failed:', err);
+say('');
+alert(`Couldn't attach "${file.name}": ${err.message || err}`);
+break;
+}
+}
+say('');
+renderTasks();
+});
+});
+
+root.querySelectorAll('[data-attach-open]').forEach((btn) => {
+btn.addEventListener('click', async () => {
+const t = taskById(btn.dataset.attachOpen);
+const meta = t && (t.attachments || []).find((a) => a.id === btn.dataset.attachId);
+if (!meta) return;
+const original = btn.textContent;
+btn.disabled = true;
+btn.textContent = 'Fetching…';
+try {
+await openAttachment(meta);
+} catch (err) {
+console.error('Attachment download failed:', err);
+alert(`Couldn't open "${meta.name}": ${err.message || err}`);
+} finally {
+btn.disabled = false;
+btn.textContent = original;
+}
+});
+});
+
+root.querySelectorAll('[data-attach-remove]').forEach((x) => {
+x.addEventListener('click', async () => {
+const t = taskById(x.dataset.attachRemove);
+if (!t) return;
+const meta = (t.attachments || []).find((a) => a.id === x.dataset.attachId);
+if (!meta) return;
+if (!confirm(`Remove "${meta.name}"? This deletes it from the server for every device.`)) return;
+// Remove from the task first, then delete the bytes. If the server call
+// fails the row is still gone, which is what was asked for — an
+// orphaned file on disk is the lesser problem.
+t.attachments = t.attachments.filter((a) => a.id !== meta.id);
+renderTasks();
+queueSave();
+try {
+await deleteAttachment(meta.id);
+await photoDelete(meta.id);
+} catch (err) {
+console.error('Attachment delete failed on the server:', err);
+}
 });
 });
 }
