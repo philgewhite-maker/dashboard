@@ -293,6 +293,11 @@ if (typeof c.job !== 'string') c.job = '';
 if (typeof c.height !== 'string') c.height = '';
 if (typeof c.education !== 'string') c.education = '';
 if (typeof c.driveLink !== 'string') c.driveLink = '';
+// Google Photos links kept separate from driveLink so the Overview can
+// tell "has an album" from "has a face/person link" — they're different
+// gaps to go and fix.
+if (typeof c.photosAlbumUrl !== 'string') c.photosAlbumUrl = '';
+if (typeof c.photosPersonUrl !== 'string') c.photosPersonUrl = '';
 // Phone and email are what make a reliable join to Google Contacts
 // possible — a first name alone is far too weak a key.
 if (typeof c.phone !== 'string') c.phone = '';
@@ -455,6 +460,29 @@ if (!age) return '';
 return age.exact ? String(age.value) : `~${age.value}`;
 }
 
+// Photo coverage as a small set of buckets rather than a raw count — the
+// point is spotting what needs attention ("who has only the one thumbnail
+// from an import?"), and a chip per exact count would fragment that into
+// dozens of groups of one.
+function photoCoverage(conn) {
+const n = (conn.photoIds || []).length;
+if (n === 0) return 'No photos';
+if (n === 1) return 'One photo only';
+if (n <= 5) return '2–5 photos';
+return '6+ photos';
+}
+
+// Which external photo links a connection has. Multi-valued, so someone can
+// appear under several, and the "None" chip catches everyone with no link at
+// all — which is usually the list you actually want to work through.
+function photoLinkLabels(conn) {
+const out = [];
+if (String(conn.photosAlbumUrl || '').trim()) out.push('Album link');
+if (String(conn.photosPersonUrl || '').trim()) out.push('Person link');
+if (String(conn.driveLink || '').trim()) out.push('Drive link');
+return out;
+}
+
 // Higher priority = less slack before a "reach out" nudge appears.
 function reachOutThreshold(priority) {
 return 12 - (priority || 0) * 2; // priority 5 -> 2 days, priority 1 -> 10 days
@@ -494,7 +522,8 @@ await replaceData(JSON.parse(text));
 export {
 data, sampleData, loadData, migrate, persist, queueSave, flushSave, setSaveStatusHandler,
 setExternalUpdateHandler, setLocalChangeHandler, getLocalSettings, setLocalSetting, computeStreak, reachOutThreshold,
-isDormantStage, currentAge, displayAge, exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, DEFAULT_PREFS,
+isDormantStage, currentAge, displayAge, photoCoverage, photoLinkLabels,
+exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, DEFAULT_PREFS,
 MAIL_SEARCH_KINDS, mailSearchLabel,
 TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, blankTask,
 CONTACT_STATUS_LABELS, CONTACT_MATCH_MIN_STAGE,

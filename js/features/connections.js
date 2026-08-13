@@ -1,4 +1,4 @@
-import { data, queueSave, reachOutThreshold, isDormantStage, getLocalSettings, TAG_FIELDS, CONTACT_STATUS_LABELS, currentAge, displayAge } from '../state.js';
+import { data, queueSave, reachOutThreshold, isDormantStage, getLocalSettings, TAG_FIELDS, CONTACT_STATUS_LABELS, currentAge, displayAge, photoCoverage, photoLinkLabels } from '../state.js';
 import { photoPut, photoDelete, photoUrl } from '../db.js';
 import {
 uid, todayStr, daysSince, escapeHtml, avatarHtml, hydratePhotos, scrollAndFlash, bindForm,
@@ -112,9 +112,14 @@ let connectionSortSecondary = 'none';
 let emptyFieldFilter = null;
 const expandedConnections = new Set();
 
-// Works for both the array tag fields and the plain text ones (location,
+// Works for the array tag fields and the plain text ones (location,
 // education), so one "None" chip implementation covers every dimension.
+// Derived dimensions have no backing property, so they're named explicitly —
+// without this they'd test an undefined field, read as empty for everyone,
+// and the None chip would "filter" to the entire list.
 function isFieldEmpty(c, field) {
+if (field === 'photoLinks') return photoLinkLabels(c).length === 0;
+if (field === 'age') return currentAge(c) === null;
 const value = c[field];
 if (Array.isArray(value)) return value.length === 0;
 return !String(value || '').trim();
@@ -321,6 +326,9 @@ c.name, c.profileName, ...(c.aliases || []), c.location, c.address, c.job, c.edu
 // So the Connections Overview "Contact match" chips actually filter —
 // they search by their own label, which otherwise matches nothing.
 CONTACT_STATUS_LABELS[c.contactStatus],
+// Derived groupings are searched by their own label when a chip is
+// clicked, so they have to be findable here or the chip filters to nothing.
+photoCoverage(c), ...photoLinkLabels(c),
 // Hidden sensitive fields stay out of the haystack too — otherwise
 // searching could surface a row *because* of a field you've chosen
 // not to display, with no visible reason why it matched.
@@ -404,8 +412,11 @@ ${visibleTagFields().map((f) => `<label class="full${f.sensitive ? ' sensitive-f
 <label class="full">Ratings<div class="ratings-block">${RATING_CATS.map(([cat, lbl]) => ratingStars(lbl, cat, c.id, (c.ratings && c.ratings[cat]) || 0)).join('')}</div></label>
 <label class="full">Things to do<div>${todoListHtml(c)}</div></label>
 <label class="full">Photos${galleryHtml(c)}</label>
+<label class="full">Google Photos album<input type="text" placeholder="Album of them — paste the share link" data-field="photosAlbumUrl" data-conn-detail="${c.id}" value="${escapeHtml(c.photosAlbumUrl || '')}"></label>
+<label class="full">Google Photos person / face<input type="text" placeholder="photos.google.com/person/… — the face group" data-field="photosPersonUrl" data-conn-detail="${c.id}" value="${escapeHtml(c.photosPersonUrl || '')}"></label>
 <label class="full">Drive/OneDrive link (optional, for full-res photos filed elsewhere)<input type="text" placeholder="Paste a share link" data-field="driveLink" data-conn-detail="${c.id}" value="${escapeHtml(c.driveLink || '')}"></label>
-${c.driveLink ? `<div class="full"><a href="${escapeHtml(c.driveLink)}" target="_blank" rel="noopener" style="font-size:12px;color:var(--rose);">Open full-res photos &#8599;</a></div>` : ''}
+${[['photosAlbumUrl', 'Open album'], ['photosPersonUrl', 'Open face group'], ['driveLink', 'Open full-res photos']]
+.filter(([f]) => c[f]).map(([f, label]) => `<div class="full"><a href="${escapeHtml(c[f])}" target="_blank" rel="noopener" style="font-size:12px;color:var(--rose);">${label} &#8599;</a></div>`).join('')}
 <label class="full">Merge a duplicate into this one
 <div class="merge-row">
 <select data-merge-source="${c.id}">

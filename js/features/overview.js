@@ -1,4 +1,4 @@
-import { data, queueSave, getLocalSettings, setLocalSetting, CONTACT_STATUS_LABELS, currentAge, displayAge } from '../state.js';
+import { data, queueSave, getLocalSettings, setLocalSetting, CONTACT_STATUS_LABELS, currentAge, displayAge, photoCoverage, photoLinkLabels } from '../state.js';
 import { escapeHtml } from '../utils.js';
 import { visibleTagFields } from './connections.js';
 
@@ -45,6 +45,10 @@ return [
 { title: 'Age', getKeys: (c) => [ageDecade(c)], field: null, emptyField: 'age' },
 { title: 'Job', getKeys: (c) => [c.job], field: null, emptyField: 'job' },
 { title: 'Contact match', getKeys: (c) => [CONTACT_STATUS_LABELS[c.contactStatus]], field: null, emptyField: null },
+// Both derived, for finding what needs fixing: who is still on a single
+// import thumbnail, and who has no link out to their photos anywhere.
+{ title: 'Photos', getKeys: (c) => [photoCoverage(c)], field: null, emptyField: null },
+{ title: 'Photo links', getKeys: (c) => photoLinkLabels(c), field: null, emptyField: 'photoLinks' },
 ...visibleTagFields().map((f) => ({
 title: f.label, getKeys: (c) => c[f.field] || [], field: f.field, emptyField: f.field,
 })),

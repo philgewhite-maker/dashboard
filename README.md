@@ -301,6 +301,22 @@ Location is filled from the contact's **city**, not its full address —
 London N6 5ET" is a group of one. Google returns addresses in structured
 parts, so the city is simply read rather than parsed out.
 
+## Finding what needs fixing
+
+Two derived Overview dimensions exist to surface gaps rather than to browse:
+
+- **Photos** — No photos / One photo only / 2–5 / 6+. Bucketed rather than
+  an exact count, because a chip per count fragments into groups of one. The
+  useful question is "who is still on the single thumbnail an import gave
+  them?"
+- **Photo links** — Album link / Person link / Drive link, multi-valued, so
+  the **None** chip lists everyone with no link out to their photos at all.
+
+Connections hold a Google Photos **album** link and a **person/face** link
+separately from the Drive link, because those are different gaps to go and
+fix. Combine them with drill-down mode to ask things like "one photo AND no
+album link".
+
 ## Connections Overview modes
 
 The chips work two ways, toggled on the panel:
