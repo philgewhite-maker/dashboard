@@ -38,6 +38,7 @@ const CORE_ASSETS = [
 './js/googlecalendar.js',
 './js/googlecontacts.js',
 './js/features/contacts.js',
+'./js/features/photoscan.js',
 './js/googlemail.js',
 './manifest.webmanifest',
 ];

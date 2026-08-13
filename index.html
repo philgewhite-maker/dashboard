@@ -229,6 +229,21 @@
 <div id="overview-content"></div>
 </section>
 
+<section class="panel wide" id="photoscan-panel" data-tab="dating">
+<div class="panel-head">
+<h2><span class="dot amber"></span>Scan a batch of screenshots</h2>
+<span class="count-badge" id="scan-summary"></span>
+</div>
+<div class="sync-row">
+<label class="file-btn" for="scan-input">Pick screenshots to scan</label>
+<input type="file" id="scan-input" accept="image/*" multiple style="display:none;">
+<button class="sync-btn" id="scan-clear-btn" type="button">Clear</button>
+<span class="sync-status" id="scan-status"></span>
+</div>
+<div class="settings-note" style="margin:0 0 10px;">A cheap first pass reads just a name, age and whether the screenshot looks detailed — pennies for a whole album. Full parse only the ones worth it. Anything scanned before is free.</div>
+<div id="scan-results"></div>
+</section>
+
 <section class="panel wide" id="contacts-panel" data-tab="dating">
 <div class="panel-head">
 <h2><span class="dot teal"></span>Google Contacts match</h2>

@@ -143,6 +143,118 @@ reader.readAsDataURL(file);
 });
 }
 
+// SHA-256 of the raw bytes, so the same picture is recognised however it
+// reached the app — re-picked from an album, re-downloaded, or renamed.
+// Hashing the bytes rather than name+size means a rename doesn't defeat the
+// cache and two different photos of the same size don't collide.
+async function hashFile(file) {
+const buf = await file.arrayBuffer();
+const digest = await crypto.subtle.digest('SHA-256', buf);
+return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+// When the photo was actually taken, which is what an age read off it is
+// true as of. Three sources, best first:
+//
+//  1. EXIF DateTimeOriginal — right for camera photos, absent from most
+//     screenshots (PNGs carry no EXIF at all).
+//  2. The filename — phones name screenshots by date
+//     ("Screenshot_20240312-101500", "IMG_20240312_101500", "2024-03-12 ...").
+//  3. File.lastModified — the weakest, because downloading a photo rewrites
+//     it to the download date, which would make an old screenshot look new.
+//
+// Returns {date, source} where source ranks how much to trust it — see
+// CAPTURE_DATE_RANK. The rank matters because the same image can reach the
+// app twice with different evidence (once with its original filename, once
+// renamed), and the weaker showing must not overwrite the stronger one.
+const CAPTURE_DATE_RANK = { exif: 3, filename: 2, modified: 1, '': 0 };
+
+async function captureDateOf(file) {
+const fromExif = await exifDateTimeOriginal(file).catch(() => '');
+if (fromExif) return { date: fromExif, source: 'exif' };
+const fromName = dateFromFilename(file.name || '');
+if (fromName) return { date: fromName, source: 'filename' };
+if (file.lastModified) {
+const d = new Date(file.lastModified);
+if (!isNaN(d)) return { date: d.toISOString().slice(0, 10), source: 'modified' };
+}
+return { date: '', source: '' };
+}
+
+function betterCaptureDate(a, b) {
+return CAPTURE_DATE_RANK[(b || {}).source || ''] > CAPTURE_DATE_RANK[(a || {}).source || ''] ? b : a;
+}
+
+function dateFromFilename(name) {
+// 2024-03-12 / 2024_03_12 / 20240312, each with a plausible year.
+const m = name.match(/(20\d{2})[-_]?(0[1-9]|1[0-2])[-_]?(0[1-9]|[12]\d|3[01])/);
+if (!m) return '';
+return `${m[1]}-${m[2]}-${m[3]}`;
+}
+
+// Minimal EXIF reader: walks the JPEG segment list to APP1, then the TIFF
+// IFD looking for tag 0x9003 (DateTimeOriginal). Only reads the first 128KB,
+// since EXIF lives at the very start and reading a whole 5MB photo to find a
+// date would be wasteful.
+async function exifDateTimeOriginal(file) {
+if (!/jpe?g/i.test(file.type || '') && !/\.jpe?g$/i.test(file.name || '')) return '';
+const head = await file.slice(0, 131072).arrayBuffer();
+const view = new DataView(head);
+if (view.byteLength < 4 || view.getUint16(0) !== 0xFFD8) return ''; // not a JPEG
+let offset = 2;
+while (offset + 4 < view.byteLength) {
+if (view.getUint8(offset) !== 0xFF) break;
+const marker = view.getUint8(offset + 1);
+const size = view.getUint16(offset + 2);
+if (marker === 0xE1) { // APP1
+const start = offset + 4;
+if (view.getUint32(start) !== 0x45786966) return ''; // not "Exif"
+return readTiffDate(view, start + 6);
+}
+offset += 2 + size;
+}
+return '';
+}
+
+function readTiffDate(view, tiffStart) {
+if (tiffStart + 8 > view.byteLength) return '';
+const little = view.getUint16(tiffStart) === 0x4949;
+const ifdOffset = view.getUint32(tiffStart + 4, little);
+// Walk IFD0, then follow its ExifIFD pointer (tag 0x8769) where
+// DateTimeOriginal actually lives.
+for (const dirStart of [tiffStart + ifdOffset, null]) {
+if (dirStart === null) break;
+const found = scanIfd(view, tiffStart, dirStart, little);
+if (found) return found;
+}
+return '';
+}
+
+function scanIfd(view, tiffStart, dirStart, little, depth = 0) {
+if (depth > 2 || dirStart + 2 > view.byteLength) return '';
+const count = view.getUint16(dirStart, little);
+for (let i = 0; i < count; i++) {
+const entry = dirStart + 2 + i * 12;
+if (entry + 12 > view.byteLength) return '';
+const tag = view.getUint16(entry, little);
+if (tag === 0x9003 || tag === 0x9004) { // DateTimeOriginal / DateTimeDigitized
+const valueOffset = tiffStart + view.getUint32(entry + 8, little);
+if (valueOffset + 19 > view.byteLength) continue;
+let text = '';
+for (let j = 0; j < 19; j++) text += String.fromCharCode(view.getUint8(valueOffset + j));
+// EXIF writes "2024:03:12 10:15:00"
+const m = text.match(/^(\d{4}):(\d{2}):(\d{2})/);
+if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+}
+if (tag === 0x8769) { // ExifIFD pointer
+const sub = tiffStart + view.getUint32(entry + 8, little);
+const found = scanIfd(view, tiffStart, sub, little, depth + 1);
+if (found) return found;
+}
+}
+return '';
+}
+
 function fileToBase64(file) {
 return new Promise((resolve, reject) => {
 const reader = new FileReader();
@@ -193,4 +305,5 @@ export {
 todayStr, daysAgoStr, last7Dates, uid, daysSince, daysUntil,
 escapeHtml, initials, avatarHtml, hydratePhotos, scrollAndFlash, bindForm,
 resizeImageToBlob, fileToBase64, loadImage, cropThumbnailToBlob,
+hashFile, captureDateOf, betterCaptureDate, dateFromFilename,
 };

@@ -301,6 +301,33 @@ Location is filled from the contact's **city**, not its full address —
 London N6 5ET" is a group of one. Google returns addresses in structured
 parts, so the city is simply read rather than parsed out.
 
+## Scanning a batch of screenshots
+
+Dating tab → "Scan a batch of screenshots". Two tiers, because fully parsing
+every image in an album is the expensive way to do it:
+
+1. **Cheap pass** on everything — a small fast model reading only a name, an
+   age, what kind of screenshot it is, and whether it looks detailed enough
+   to be worth more. Fractions of a penny each.
+2. **Full parse** only on the ones you pick, giving bio, height, education,
+   job, languages and cropped photos.
+
+**Nothing is ever parsed twice.** Results are cached against a SHA-256 of the
+image bytes, so re-scanning an album as it grows costs nothing for what
+you've already seen — and because it hashes the *content*, a renamed or
+re-downloaded copy is still recognised. The summary line says how many of a
+batch actually cost anything.
+
+**Capture dates feed the age.** The date a screenshot was taken is when the
+age on it was true, so it becomes `ageAsOf`: a 2024 screenshot reading 29
+shows as ~31 today rather than a stale 29. The date comes from EXIF
+`DateTimeOriginal`, else the filename (`Screenshot_20240312-…`), else the
+file's modified time — and those are *ranked*, so a renamed copy falling
+back to its download date never overwrites a better date recorded earlier.
+
+The cache lives in IndexedDB alongside photos, not in the synced document —
+it's a local cost optimisation, not data worth syncing.
+
 ## Finding what needs fixing
 
 Two derived Overview dimensions exist to surface gaps rather than to browse:

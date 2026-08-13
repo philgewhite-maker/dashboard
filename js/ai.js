@@ -5,7 +5,8 @@
 // header — normal server-side calls don't need it, but a client-only app
 // with no backend does. See README for the tradeoffs.
 import { getLocalSettings, setLocalSetting } from './state.js';
-import { fileToBase64, loadImage, cropThumbnailToBlob } from './utils.js';
+import { fileToBase64, loadImage, cropThumbnailToBlob, hashFile, captureDateOf, betterCaptureDate } from './utils.js';
+import { parseCacheGet, parseCachePut } from './db.js';
 
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const DEFAULT_MODEL = 'claude-opus-5';
@@ -311,16 +312,80 @@ candidates.push({ name: r.name, age: r.age || '', stage: r.stage === 'Chatting i
 return { candidates, truncated };
 }
 
+// The cheap first pass. Reads only enough to decide who a screenshot is
+// about and whether it's worth a full parse — a small fast model and a tiny
+// token budget, so scanning a whole album costs a fraction of a penny rather
+// than a full profile extraction each.
+//
+// Cached by a hash of the image bytes, so re-reviewing the same album never
+// bills twice for the same photo.
+const QUICK_SCAN_MODEL = 'claude-haiku-4-5-20251001';
+const QUICK_SCAN_MAX_TOKENS = 400;
+
+async function quickScanScreenshot(file, app) {
+const hash = await hashFile(file);
+const cached = await parseCacheGet(hash, 'quick');
+// Keep whichever showing of this image carried the better-evidenced date —
+// a renamed copy falling back to its download date must not overwrite an
+// EXIF or filename date recorded earlier.
+const captured = betterCaptureDate(await captureDateOf(file), cached && cached.captured);
+if (cached) {
+if ((captured || {}).source !== (cached.captured || {}).source) {
+await parseCachePut(hash, 'quick', { ...cached, captured });
+}
+return { ...cached.result, hash, captureDate: (captured || {}).date || '', fromCache: true };
+}
+
+const base64 = await fileToBase64(file);
+const mediaType = file.type || 'image/png';
+const prompt = `This is a screenshot from ${app || 'a dating app'}. Identify ONLY the following, quickly and cheaply — do not describe anything else. Return ONLY a JSON object, no other text, no markdown fences:
+{"name":"", "age":"", "kind":"profile|matches|chat|other", "richness":"rich|thin"}
+- name: the person's display name if one is clearly visible, else "".
+- age: their age if shown as a number next to the name, else "".
+- kind: "profile" for a single person's profile page, "matches" for a list of several people, "chat" for a conversation, "other" for anything else.
+- richness: "rich" if the screenshot shows substantial profile detail worth extracting later (bio, job, height, education, prompts); "thin" if it is mostly just a photo, a name, or a chat.`;
+
+const { data: raw } = await callAnthropic(
+[
+{ type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
+{ type: 'text', text: prompt },
+],
+QUICK_SCAN_MAX_TOKENS,
+QUICK_SCAN_MODEL,
+'Photo quick scan',
+);
+const result = {
+name: raw.name || '',
+age: raw.age || '',
+kind: raw.kind || 'other',
+richness: raw.richness === 'rich' ? 'rich' : 'thin',
+};
+await parseCachePut(hash, 'quick', { result, model: QUICK_SCAN_MODEL, captured });
+return { ...result, hash, captureDate: (captured || {}).date || '', fromCache: false };
+}
+
 // Screenshot of ONE person's full profile page — richer fields, possibly
 // several photos.
 async function extractProfileFromScreenshot(file, app) {
 const base64 = await fileToBase64(file);
 const mediaType = file.type || 'image/png';
 const dataUrl = `data:${mediaType};base64,${base64}`;
+// The text half is cached; the cropped photos are not, because they're
+// blobs that would bloat the cache and are cheap to re-cut from the image.
+const hash = await hashFile(file);
+const cachedText = await parseCacheGet(hash, 'rich');
+const quickCached = await parseCacheGet(hash, 'quick');
+// Reuse a better-evidenced date recorded by an earlier scan of this same
+// image, whichever pass found it.
+const captured = betterCaptureDate(
+betterCaptureDate(await captureDateOf(file), cachedText && cachedText.captured),
+quickCached && quickCached.captured,
+);
+const captureDate = (captured || {}).date || '';
 const prompt = `This is a screenshot of ONE person's ${app ? `${app} ` : 'dating app '}profile page.`
 + ' Extract what\'s visible: name, age, their height exactly as written (e.g. "5\'7\\"" or "170cm", empty if not shown), their education or university (empty if not shown), a short list of languages they speak (array), a short list of nationalities (array, empty if not stated), whether they mention having kids (short phrase or empty), their job/occupation (empty if not shown), their location or city (empty if not shown), a one or two sentence bio/about-me summary, and rough bounding boxes (fractions 0 to 1 of the full image, keys x,y,w,h) around each distinct profile photo visible in the screenshot (there may be several). Return ONLY a JSON object, no other text, no markdown fences, in this exact shape: {"name":"Alex","age":"29","height":"","education":"","languages":["English"],"nationality":[],"kids":"","job":"","location":"","bio":"","photoBoxes":[{"x":0.1,"y":0.05,"w":0.8,"h":0.4}]}. Use empty string/array if something is not visible or unsure — do not guess.';
-const [{ data: raw }, img] = await Promise.all([
-callVision(base64, mediaType, prompt, PROFILE_MAX_TOKENS),
+const [raw, img] = await Promise.all([
+cachedText ? Promise.resolve(cachedText.result) : callVision(base64, mediaType, prompt, PROFILE_MAX_TOKENS).then((r) => r.data),
 loadImage(dataUrl),
 ]);
 const photoBoxes = Array.isArray(raw.photoBoxes) ? raw.photoBoxes : [];
@@ -329,9 +394,14 @@ for (const box of photoBoxes) {
 const blob = await cropThumbnailToBlob(img, box);
 if (blob) photoBlobs.push(blob);
 }
+if (!cachedText) await parseCachePut(hash, 'rich', { result: raw, captured });
 return {
 name: raw.name || 'unidentified',
 age: raw.age || '',
+// The date the screenshot was taken is when that age was true — it feeds
+// straight into ageAsOf, so a 2023 screenshot doesn't claim a 2023 age is
+// current.
+ageAsOf: captureDate,
 height: raw.height || '',
 education: raw.education || '',
 languages: Array.isArray(raw.languages) ? raw.languages : [],
@@ -341,10 +411,11 @@ job: raw.job || '',
 location: raw.location || '',
 bio: raw.bio || '',
 photoBlobs,
+fromCache: !!cachedText,
 };
 }
 
 export {
-MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot, callTextJson,
-DEFAULT_MODEL, summarizeUsage, currentMonthKey,
+MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot, quickScanScreenshot,
+callTextJson, DEFAULT_MODEL, summarizeUsage, currentMonthKey,
 };
