@@ -25,7 +25,7 @@
 // Matching by name happens ONCE, at import; what gets stored is the album
 // URL. So renaming an album later doesn't break an already-linked person.
 import { data, queueSave, TAG_FIELDS } from '../state.js';
-import { escapeHtml, uid, todayStr } from '../utils.js';
+import { escapeHtml, uid, todayStr, hydratePhotos } from '../utils.js';
 import { nameKey, editDistance } from '../googlecontacts.js';
 import { photoGet } from '../db.js';
 import { fetchGoogleImage } from '../files.js';
@@ -206,12 +206,15 @@ render();
 }
 
 function thumbHtml(row, i) {
-// The cover is rendered straight from its Google URL rather than copied.
-// Those URLs load fine in an <img> without credentials, and re-hosting
-// them isn't possible from the browser anyway — reading the bytes
-// cross-origin is blocked, even though displaying them isn't.
+// The cover is rendered straight from its Google URL rather than copied —
+// re-hosting it isn't possible from the browser anyway, since reading the
+// bytes cross-origin is blocked even though displaying them isn't. These
+// URLs are signed and DO expire (observed: still-valid the day of harvest,
+// 403 a day-plus later), so onerror swaps in a message that says what's
+// actually wrong instead of leaving a blank box that just looks broken —
+// the fix is re-running the snippet already in this panel to get fresh ones.
 const img = row.cover
-? `<img src="${escapeHtml(row.cover)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+? `<img src="${escapeHtml(row.cover)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.outerHTML='<span class=&quot;album-nocover&quot;>cover link expired &mdash; re-run the snippet above</span>'">`
 : '<span class="album-nocover">no cover</span>';
 return `<div class="album-card${row.applied ? ' chosen' : ''}${isSensitive(row) ? ' album-sensitive' : ''}">
 <span class="album-compare-row">
@@ -294,6 +297,7 @@ el.innerHTML = groups + loose
 <button class="add-btn" type="button" id="albums-apply"${ready ? '' : ' disabled'}>Save ${ready} link${ready === 1 ? '' : 's'}</button>
 </div>`
 + gapsHtml();
+hydratePhotos(el);
 
 el.querySelectorAll('[data-album-pick]').forEach((sel) => {
 sel.addEventListener('change', () => {
