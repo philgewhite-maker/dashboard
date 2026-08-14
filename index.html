@@ -395,6 +395,40 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
   // each an inline &lt;svg&gt; icon (not a descriptors/ png) followed by ONE
   // value div with no &lt;h3&gt; of its own, so the label has to come from the
   // shape of the text itself rather than a heading next to it.
+  // Distance is bucketed rather than kept as raw "2 miles away" text — the
+  // dashboard sorts connections by these bucket labels, and a bucket is what
+  // makes hundreds of matches rankable by proximity at a glance instead of
+  // comparing exact numbers. Both units are baked into the label (some
+  // profiles show miles, some km, depending on the person's own settings,
+  // not anything this snippet controls) so the bucket reads the same either
+  // way. &lt;= not &lt;: an app only ever shows whole-number distances, so a
+  // strict "&lt; 2" would never actually match a real "2 miles away" and that
+  // bucket would sit permanently empty. Keep this list's boundaries in sync
+  // with DISTANCE_BUCKET_ORDER in connections.js by hand — a console
+  // snippet can't import from it.
+  const DISTANCE_BUCKETS = [2, 5, 10, 20, 30, 50, 100, 1000, 2000];
+  function bucketDistance(mi) {
+    for (const b of DISTANCE_BUCKETS) if (mi &lt;= b) return `≤${b}mi/${Math.round(b * 1.60934)}km`;
+    const roundedMi = Math.round(mi);
+    return `${roundedMi}mi/${Math.round(mi * 1.60934)}km+`;
+  }
+
+  // Height likewise shows both units regardless of which one Tinder
+  // rendered for this profile, rather than being unreadable/uncomparable
+  // whenever two profiles happen to use different units.
+  function formatHeight(text) {
+    const cmMatch = text.match(/^(\d+)\s*cm$/);
+    const ftMatch = text.match(/^(\d+)'(\d+)"?$/);
+    let cm = null;
+    if (cmMatch) cm = parseInt(cmMatch[1], 10);
+    else if (ftMatch) cm = Math.round((parseInt(ftMatch[1], 10) * 12 + parseInt(ftMatch[2], 10)) * 2.54);
+    if (cm === null) return text;
+    const totalIn = cm / 2.54;
+    const ft = Math.floor(totalIn / 12);
+    const inch = Math.round(totalIn % 12);
+    return `${cm}cm / ${ft}'${inch}"`;
+  }
+
   const seenText = new Set();
   root.querySelectorAll('li').forEach((li) =&gt; {
     if (li.querySelector('img[src*="/descriptors/"]') || li.querySelector('h3') || !li.querySelector('svg')) return;
@@ -404,8 +438,14 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
     if (!text || seenText.has(text)) return;
     seenText.add(text);
     const livesIn = text.match(/^Lives in (.+)$/);
-    if (/^\d+\s*cm$/.test(text) || /^\d+'\d+"?$/.test(text)) fields.push({ label: 'Height', value: text });
+    const away = text.match(/^([\d.]+)\s*(miles?|km)\s*away$/i);
+    if (/^\d+\s*cm$/.test(text) || /^\d+'\d+"?$/.test(text)) fields.push({ label: 'Height', value: formatHeight(text) });
     else if (livesIn) fields.push({ label: 'City', value: livesIn[1] });
+    else if (away) {
+      const n = parseFloat(away[1]);
+      const miles = /km/i.test(away[2]) ? n * 0.621371 : n;
+      fields.push({ label: 'Distance', value: bucketDistance(miles) });
+    }
     else if (/^(She|He|They)\/(Her|Him|Them)$/i.test(text)) fields.push({ label: 'Pronouns', value: text });
     else if (/ at /.test(text)) fields.push({ label: 'Job', value: text });
     else fields.push({ label: 'Profile detail', value: text });

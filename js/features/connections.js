@@ -184,6 +184,19 @@ function visibleTagFields() {
 return TAG_FIELDS.filter((f) => showSensitiveFields || !f.sensitive);
 }
 
+// Bucket labels the Tinder importer's console snippet writes into
+// c.distance — kept in sync with DISTANCE_BUCKETS in that snippet (in
+// index.html) by hand, since a console snippet can't import from here. Both
+// units are baked into each label (source profiles can be miles or km) —
+// ≤10mi/16km etc, mile boundary rounded to the nearest km. Sorting is
+// descending (higher getValue first, see the `b - a` below), so the
+// closest bucket needs the HIGHEST rank, not the lowest.
+const DISTANCE_BUCKET_ORDER = ['≤2mi/3km', '≤5mi/8km', '≤10mi/16km', '≤20mi/32km', '≤30mi/48km', '≤50mi/80km', '≤100mi/161km', '≤1000mi/1609km', '≤2000mi/3219km'];
+function distanceRank(distance) {
+const i = DISTANCE_BUCKET_ORDER.indexOf(distance);
+return i === -1 ? 0 : DISTANCE_BUCKET_ORDER.length - i;
+}
+
 // Fixed sort options that always exist, regardless of what rating
 // categories Settings currently has configured.
 const FIXED_SORT_FIELDS = {
@@ -194,6 +207,7 @@ completeness: { label: 'Record completeness', getValue: (c) => completeness(c) }
 added: { label: 'Date added', getValue: (c) => (c.createdAt ? Date.parse(c.createdAt) : -1) || -1 },
 contact: { label: 'Time since contact', getValue: (c) => daysSince(c.lastContact) },
 stage: { label: 'Stage (Met in person → Matched)', getValue: (c) => STAGE_RANK[c.stage] ?? 0 },
+distance: { label: 'Distance (closest first)', getValue: (c) => distanceRank(c.distance) },
 };
 
 // One sort option per configured rating category (looks, IQ, whatever
@@ -325,7 +339,7 @@ const secondary = document.getElementById('conn-sort-secondary');
 if (!primary || !secondary) return;
 const fields = sortFields();
 const order = ['default', 'priority', 'average', 'completeness', 'added',
-...(data.ratingCategories || []).map(({ field }) => `rating:${field}`), 'contact', 'stage'];
+...(data.ratingCategories || []).map(({ field }) => `rating:${field}`), 'contact', 'stage', 'distance'];
 primary.innerHTML = order.map((key) => `<option value="${key}"${key === connectionSortPrimary ? ' selected' : ''}>Sort: ${escapeHtml(fields[key].label)}</option>`).join('');
 secondary.innerHTML = `<option value="none"${connectionSortSecondary === 'none' ? ' selected' : ''}>Then by: &mdash;</option>`
 + order.map((key) => `<option value="${key}"${key === connectionSortSecondary ? ' selected' : ''}>Then by: ${escapeHtml(fields[key].label)}</option>`).join('');
@@ -448,6 +462,7 @@ ${contactPickerHtml(c.id)}
 <label>Age when recorded${ageNoteHtml(c)}<input type="text" autocomplete="off" data-field="age" data-conn-detail="${c.id}" value="${escapeHtml(c.age || '')}"></label>
 <label>Date of birth<input type="date" data-field="dob" data-conn-detail="${c.id}" value="${escapeHtml(c.dob || '')}"></label>
 <label>City<input type="text" autocomplete="off" placeholder="Groups in Overview" data-field="location" data-conn-detail="${c.id}" value="${escapeHtml(c.location || '')}"></label>
+<label>Distance<input type="text" autocomplete="off" placeholder="e.g. &lt; 10 mi" data-field="distance" data-conn-detail="${c.id}" value="${escapeHtml(c.distance || '')}"></label>
 <label class="full">Full address<input type="text" autocomplete="off" placeholder="Not grouped — detail only" data-field="address" data-conn-detail="${c.id}" value="${escapeHtml(c.address || '')}"></label>
 <label>Kids<input type="text" autocomplete="off" data-field="kids" data-conn-detail="${c.id}" value="${escapeHtml(c.kids || '')}"></label>
 <label>Job<input type="text" autocomplete="off" data-field="job" data-conn-detail="${c.id}" value="${escapeHtml(c.job || '')}"></label>
