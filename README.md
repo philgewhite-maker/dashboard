@@ -545,6 +545,48 @@ retrievable with the secret, and are always served as a forced download with
 execute as a page on your domain. Deleting an attachment, or deleting the
 task holding it, removes the file from the server for every device.
 
+## Health data (Health Connect via a bridge app)
+
+There's no way for a browser page to read Android's Health Connect directly
+— it's a native-only API with no web equivalent, so this can't work the way
+Calendar/Contacts/Tasks do (those are real REST APIs any website can call
+with OAuth; Health Connect isn't). Health Connect is also where a Galaxy
+Watch's data actually lands: Samsung Health has synced into it since 2022,
+and most smart-scale apps (Renpho included, via its Samsung Health
+third-party-access setting) can be routed the same way, so it's the one
+place worth reading from even though getting there needs a workaround.
+
+**Settings → Health data**. A small Android bridge app (e.g. "HC Webhook" /
+"Health Connect Webhook" on Google Play) reads Health Connect on your phone
+and posts whatever data types you grant it to `server/health.php` on this
+same host — one shared secret, same as every other server file. Copy
+`server/health.php.example` to `server/health.php`, set `$SECRET` to match
+`sync.php`, upload it, then point the bridge app's webhook target at that
+URL. If the app has no way to set a custom header, append
+`?secret=<your secret>` to the URL instead — the endpoint accepts either.
+
+Unlike `sync.php`, this has no `{rev}` concurrency check — a webhook firing
+repeatedly through the day has no "current state" to race against, only a
+growing append-only log, so a file lock around each write is enough. Entries
+are never folded into the main synced document either, for the same reason
+photos and attachments aren't: that document is rewritten whole on every
+autosave, and an ever-growing time series inside it would make every save
+heavier over time.
+
+The panel is currently a raw viewer, not a finished chart — the real shape
+of what a bridge app posts wasn't known ahead of time, so rather than guess
+at field names, it just shows whatever arrived. Once a real payload's shape
+is confirmed, that becomes a proper Habits/Goals integration.
+
+**One known gap**: Samsung Health doesn't share HRV, breathing rate, or
+resting heart rate through Health Connect at all — a Samsung-side limitation
+that no bridge app on top of Health Connect can work around, confirmed
+against Samsung's own developer community. Steps, sleep, heart rate, and
+weight aren't affected. HRV specifically would need a different source
+(Welltory was the one explored, which has a CSV export covering raw
+RR-intervals — a possible future manual-import path, separate from this
+one).
+
 ## Connections: ratings and sorting
 
 The detailed star ratings (Looks, Figure, Voice, IQ, EQ, Humour, Sex,

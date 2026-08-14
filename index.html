@@ -668,6 +668,20 @@ Photos added before task attachments existed live only on the device that added 
 </div>
 
 <div class="settings-block">
+<h3>Health data (Health Connect)</h3>
+<div class="settings-note" style="margin:0 0 8px;">
+A browser page has no way to read Health Connect directly &mdash; it's a native Android API with no web equivalent. Instead, a bridge app on your phone (e.g. <strong>HC Webhook</strong> / "Health Connect Webhook" from Google Play) posts whatever data you grant it to <code>health.php</code> on this same server. This panel is a raw viewer for now, showing exactly what's arrived, rather than a finished chart &mdash; the actual display gets built once a real payload's shape is known.
+</div>
+<div class="settings-note" style="margin:0 0 8px;">
+<strong>Setup:</strong> copy <code>server/health.php.example</code> to <code>server/health.php</code>, set <code>$SECRET</code> to the <em>same</em> value as <code>sync.php</code>, upload next to it. In the bridge app, point its webhook target at that URL &mdash; append <code>?secret=&lt;your secret&gt;</code> to it if the app doesn't let you set a custom header.
+</div>
+<div id="health-sync-body"></div>
+<div class="sync-row" style="margin-top:8px;">
+<button class="sync-btn" id="health-sync-refresh" type="button">Check for data</button>
+</div>
+</div>
+
+<div class="settings-block">
 <h3>AI features</h3>
 <label for="anthropic-key-input" style="font-size:13px;font-weight:500;display:block;margin-bottom:6px;">Anthropic API key (for photo/screenshot import)</label>
 <input type="password" autocomplete="new-password" id="anthropic-key-input" class="settings-input" placeholder="sk-ant-...">

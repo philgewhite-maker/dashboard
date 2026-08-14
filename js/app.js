@@ -22,6 +22,7 @@ import { initPhotoScan } from './features/photoscan.js';
 import { initPhotoAlbums } from './features/photoalbums.js';
 import { initTinderImport } from './features/tinderimport.js';
 import { initPhotoSync } from './features/photosync.js';
+import { initHealthSync } from './features/health.js';
 import { initShareTarget } from './features/sharetarget.js';
 // Photos whose bytes aren't on this device are fetched from your own host.
 // Registered rather than imported: the implementation reaches state.js, and
@@ -117,6 +118,7 @@ initPhotoScan();
 initPhotoAlbums();
 initTinderImport();
 initPhotoSync();
+initHealthSync();
 initNudges();
 await initSettings();
 registerServiceWorker();

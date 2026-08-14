@@ -13,9 +13,13 @@ server/files.php
 server/image-proxy.php
 # recipe-fetch.php holds the same shared secret too.
 server/recipe-fetch.php
+# health.php holds the same shared secret too.
+server/health.php
 
 # The synced document and its lock/temp files, in case anyone ever points
 # $DATA_FILE inside the repo folder while testing.
 dashboard-data.json
 *.json.lock
 *.json.tmp
+health-data.jsonl
+*.jsonl.lock
