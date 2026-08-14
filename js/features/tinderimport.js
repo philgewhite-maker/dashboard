@@ -3,11 +3,16 @@
 // dating site's own page can't be read cross-origin any more than Google
 // Photos can) and review what it found before merging into a connection.
 //
-// Unlike the Google Photos album covers, Tinder's profile photos load from
-// a public CDN with no login required (verified: a photo URL pulled from a
-// real captured page loads anonymously, including CORS headers that permit
-// fetch() from another origin), so there's no byte-capture trick needed
-// here — a plain fetch() is enough.
+// Tinder's profile photos load from a public CDN with no login required —
+// unlike Google Photos, an anonymous request gets the bytes at all. But the
+// CORS header a direct fetch() needs to actually READ those bytes turned
+// out to be inconsistent: the exact same URL shape returned it on one
+// fetch and not on another, confirmed live ("Failed to fetch" with no
+// further detail is the browser's deliberately vague way of reporting
+// that). So photo fetches go through image-proxy.php when it's configured
+// — a server-to-server request has no concept of CORS at all — falling
+// back to a direct fetch() if it isn't, which still works for whichever
+// photos happen to get the header.
 //
 // A loose name match previously auto-selected the target connection with no
 // visual check at all — "Leila" (edit-distance 2 from "Lenka") got matched
@@ -20,9 +25,21 @@
 import { data, queueSave } from '../state.js';
 import { escapeHtml, uid, todayStr, hydratePhotos } from '../utils.js';
 import { nameKey, editDistance } from '../googlecontacts.js';
-import { storePhoto } from '../files.js';
+import { storePhoto, fetchProxiedImage } from '../files.js';
 import { photoGet } from '../db.js';
 import { MissingKeyError, compareFaces } from '../ai.js';
+
+// Prefers the proxy (works regardless of Tinder's CORS inconsistency) but
+// falls back to a direct fetch if sync isn't configured — still succeeds
+// for whichever photos happen to get the CORS header, rather than failing
+// every photo just because the more reliable path isn't set up.
+async function fetchTinderPhoto(url) {
+try {
+return await fetchProxiedImage(url);
+} catch (proxyErr) {
+return fetch(url).then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.blob(); });
+}
+}
 
 // Same two-pass approach as the other import paths (screenshot scan, album
 // linking): exact name match first, then a deliberately loose pass. Kept
@@ -134,7 +151,7 @@ const conn = data.connections.find((c) => c.id === pending.chosenId);
 const incoming = pending.photos[0];
 const [existing, incomingBlob] = await Promise.all([
 photoGet(conn.photoId),
-fetch(incoming.url).then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.blob(); }),
+fetchTinderPhoto(incoming.url),
 ]);
 if (!existing) throw new Error("This connection's existing photo isn't on this device — run Photo sync in Settings first.");
 pending.aiVerdict = await compareFaces(existing, incomingBlob);
@@ -289,7 +306,7 @@ for (let i = 0; i < toFetch.length; i++) {
 const ph = toFetch[i];
 if (status) status.textContent = `Saving… photo ${i + 1} of ${toFetch.length}`;
 try {
-const blob = await fetch(ph.url).then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.blob(); });
+const blob = await fetchTinderPhoto(ph.url);
 const id = await storePhoto(blob);
 if (!conn.photoIds.includes(id)) conn.photoIds.push(id);
 if (!conn.photoId) conn.photoId = id;

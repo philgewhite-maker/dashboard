@@ -311,10 +311,19 @@ URL fine, but the browser can't read those bytes back out — no CORS header
 on Google's side — which is exactly what sending the image to Claude
 requires. `image-proxy.php` fetches it server-side (PHP has no such
 restriction) and hands the bytes back. It is deliberately not a general
-proxy: it only ever fetches from `photos.fife.usercontent.google.com` and
-`lh3.googleusercontent.com`, checked before any request is made, because
-without that allowlist this would fetch any URL a caller supplied —
-including internal network addresses.
+proxy: it only ever fetches from an explicit allowlist (currently
+`photos.fife.usercontent.google.com`, `lh3.googleusercontent.com`, and
+`images-ssl.gotinder.com` for [Tinder photo saves](#tinder-web-profile-import)),
+checked before any request is made, because without that allowlist this
+would fetch any URL a caller supplied — including internal network
+addresses.
+
+The same proxy also covers saving Tinder photos onto a connection: unlike
+Google Photos, Tinder's CDN *usually* sends the CORS header a direct
+`fetch()` needs — but confirmed live, not always, for the exact same URL
+shape. Photo saves try the proxy first when it's configured and fall back to
+a direct fetch otherwise, so this endpoint being set up isn't required, just
+more reliable than depending on Tinder's CORS header showing up.
 
 ## Shopping tab
 

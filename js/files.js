@@ -141,15 +141,18 @@ try { await photoPut(id, blob); } catch (e) { /* cache is optional */ }
 return blob;
 }
 
-// Fetches a Google Photos URL's bytes via image-proxy.php — the browser
-// itself cannot read them (no CORS header on Google's side), only display
-// them, which is why an <img> tag works everywhere else in this app but a
-// vision comparison needs this instead. Cached in memory per session by
-// URL, not IndexedDB: unlike an attachment there's no stable id to key on,
-// and a cover only needs to survive one review session, not future ones.
-const googleImageCache = new Map();
-async function fetchGoogleImage(url) {
-if (googleImageCache.has(url)) return googleImageCache.get(url);
+// Fetches an image's bytes via image-proxy.php rather than directly — some
+// hosts (confirmed: Google Photos always, Tinder's photo CDN sometimes —
+// same URL, same request, no Access-Control-Allow-Origin header on one
+// attempt and present on another) don't reliably send the CORS header a
+// direct fetch() needs, even though an <img> tag displays the exact same
+// URL fine (CORS only gates JS reading bytes back, not display). Cached in
+// memory per session by URL, not IndexedDB: unlike an attachment there's no
+// stable id to key on, and a cover only needs to survive one review
+// session, not future ones.
+const proxiedImageCache = new Map();
+async function fetchProxiedImage(url) {
+if (proxiedImageCache.has(url)) return proxiedImageCache.get(url);
 const { endpoint, secret } = await imageProxyEndpoint();
 const res = await withTimeout(DOWNLOAD_TIMEOUT_MS, (signal) => fetch(`${endpoint}?url=${encodeURIComponent(url)}`, {
 headers: { 'X-Sync-Secret': secret },
@@ -160,7 +163,7 @@ if (res.status === 401) throw new Error('The image-proxy server rejected the sec
 throw new Error(await errorFrom(res, `Couldn't fetch that image (HTTP ${res.status}).`));
 }
 const blob = await res.blob();
-googleImageCache.set(url, blob);
+proxiedImageCache.set(url, blob);
 return blob;
 }
 
@@ -232,5 +235,5 @@ return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 export {
 FilesNotConfiguredError,
 uploadAttachment, storePhoto, fetchAttachment, deleteAttachment, openAttachment, formatBytes,
-isServerPhotoId, serverPhotoUrl, fetchGoogleImage,
+isServerPhotoId, serverPhotoUrl, fetchProxiedImage,
 };

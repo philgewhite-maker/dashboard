@@ -28,7 +28,7 @@ import { data, queueSave, TAG_FIELDS } from '../state.js';
 import { escapeHtml, uid, todayStr, hydratePhotos } from '../utils.js';
 import { nameKey, editDistance } from '../googlecontacts.js';
 import { photoGet } from '../db.js';
-import { fetchGoogleImage, storePhoto } from '../files.js';
+import { fetchProxiedImage, storePhoto } from '../files.js';
 import { MissingKeyError, compareFaces } from '../ai.js';
 
 // Album titles are the only thing carrying identity, so a title that doesn't
@@ -194,7 +194,7 @@ try {
 const conn = data.connections.find((c) => c.id === row.chosenId);
 const [existing, incoming] = await Promise.all([
 photoGet(conn.photoId),
-fetchGoogleImage(row.cover),
+fetchProxiedImage(row.cover),
 ]);
 if (!existing) throw new Error("This connection's existing photo isn't on this device — run Photo sync in Settings first.");
 row.aiVerdict = await compareFaces(existing, incoming);

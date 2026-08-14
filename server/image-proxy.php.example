@@ -2,16 +2,21 @@
 declare(strict_types=1);
 
 /**
- * Fetches a Google Photos image server-side and hands back the raw bytes.
+ * Fetches an image server-side and hands back the raw bytes.
  *
- * Why this exists: an <img> tag can display a photos.fife.usercontent.google.com
- * URL fine, but the browser cannot read those bytes back out (no CORS
- * header), which is what a client-side AI comparison needs — the image has
- * to travel to Claude as base64. PHP has no CORS restriction, so this
- * endpoint fetches the URL on the server and returns the bytes to the
- * browser, which is then free to use them however it likes.
+ * Why this exists: an <img> tag can display an image from these hosts fine,
+ * but the browser can't always read those bytes back out via fetch() — no
+ * Access-Control-Allow-Origin header — which an AI comparison or a saved
+ * photo attachment needs (the bytes have to travel somewhere as base64 or a
+ * blob, not just render on screen). Google Photos never sends that header;
+ * Tinder's photo CDN turned out to be inconsistent about it — the exact
+ * same URL shape 200'd with the header present on one fetch and absent on
+ * another, confirmed live. PHP has no CORS restriction at all (that's a
+ * browser concept), so this endpoint fetches the URL on the server and
+ * returns the bytes to the browser, which is then free to use them however
+ * it likes.
  *
- *   GET ?url=<google-hosted-image-url>   -> the image bytes
+ *   GET ?url=<allowed-hosted-image-url>   -> the image bytes
  *
  * This is deliberately NOT a general-purpose proxy. `$ALLOWED_HOSTS` is the
  * entire safety model: without it, this would fetch any URL a caller (or an
@@ -28,11 +33,14 @@ declare(strict_types=1);
 // Must match sync.php and files.php exactly.
 $SECRET = 'PUT-A-LONG-RANDOM-STRING-HERE';
 
-// Only these hosts can ever be fetched. Google Photos serves images from
-// both of these depending on context (album covers vs. direct photo links).
+// Only these hosts can ever be fetched.
 $ALLOWED_HOSTS = [
+    // Google Photos serves images from both of these depending on context
+    // (album covers vs. direct photo links).
     'photos.fife.usercontent.google.com',
     'lh3.googleusercontent.com',
+    // Tinder's profile photo CDN.
+    'images-ssl.gotinder.com',
 ];
 
 $MAX_BYTES = 8 * 1024 * 1024;
