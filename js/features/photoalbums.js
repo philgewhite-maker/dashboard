@@ -25,7 +25,7 @@
 // Matching by name happens ONCE, at import; what gets stored is the album
 // URL. So renaming an album later doesn't break an already-linked person.
 import { data, queueSave, TAG_FIELDS } from '../state.js';
-import { escapeHtml } from '../utils.js';
+import { escapeHtml, uid, todayStr } from '../utils.js';
 import { nameKey, editDistance } from '../googlecontacts.js';
 
 // Album titles are the only thing carrying identity, so a title that doesn't
@@ -112,6 +112,28 @@ if (score !== null && (!best || score > best.score)) best = { conn: c, why, scor
 return best;
 }
 
+// For the common case in an album import: a real album with no matching
+// name at all, not a near-miss worth fixing by hand. "Real life" fits
+// better than a dating-app name here, since these come from Photos, not a
+// swipe. Shape mirrors the other two connection-creation sites in
+// connections.js (the manual add form, and screenshot import) — this file
+// doesn't import from there to avoid a circular dependency, so it's kept in
+// step by hand rather than factored out.
+function createConnectionFor(name) {
+const conn = {
+id: uid(), name, profileName: '', app: 'Real life', priority: 3, stage: 'Matched', lastContact: todayStr(),
+photoId: null, photoIds: [], photoAlbums: [], age: '', dob: '', ageAsOf: '', location: '', address: '',
+kids: '', job: '', height: '', education: '', phone: '', email: '',
+contactStatus: '', contactResourceName: '', contactEtag: '', contactConflicts: [],
+likes: '', notes: '', languages: [], nationality: [],
+todos: [], tags: [], aliases: [], dateLocations: [], dateEvents: [], sexTags: [],
+ratings: {}, driveLink: '', photosAlbumUrl: '', photosPersonUrl: '',
+};
+data.connections.push(conn);
+queueSave();
+return conn;
+}
+
 let rows = [];        // one per album: {title, url, cover, person, label, chosenId, match}
 let unparsed = [];    // album titles with no underscore
 let peopleSeen = [];  // face-group names from the people page, for the gap check
@@ -135,6 +157,7 @@ return `<div class="album-card${row.applied ? ' chosen' : ''}${isSensitive(row) 
 <div class="album-caption">${escapeHtml(captionFor(row))}</div>
 <div class="album-meta">${escapeHtml(row.match ? row.match.why : 'no match')}${row.count ? ` · ${row.count}` : ''}</div>
 <select data-album-pick="${i}">${optionsFor(row.chosenId)}</select>
+${!row.chosenId ? `<button class="sync-btn sm" type="button" data-album-newconn="${i}">+ New connection</button>` : ''}
 </div>`;
 }
 
@@ -211,6 +234,15 @@ el.querySelectorAll('[data-album-pick]').forEach((sel) => {
 sel.addEventListener('change', () => {
 const row = rows[parseInt(sel.dataset.albumPick, 10)];
 row.chosenId = sel.value;
+row.applied = false;
+render();
+});
+});
+el.querySelectorAll('[data-album-newconn]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const row = rows[parseInt(btn.dataset.albumNewconn, 10)];
+if (!row) return;
+row.chosenId = createConnectionFor(row.person).id;
 row.applied = false;
 render();
 });

@@ -376,9 +376,22 @@ Album links are permanent, unlike the face-group links tried previously.
       .map(a =&gt; a.getAttribute('href')).filter(Boolean);
     console.warn('No albums matched. Paste this back to Claude:', JSON.stringify(sample));
   }
-  copy(JSON.stringify(out, null, 1));
-  console.log(`Copied ${out.albums.length} albums and ${out.people.length} faces.`
+  const json = JSON.stringify(out, null, 1);
+  // copy() is a DevTools convenience global, injected only into a console
+  // opened directly in that panel — it throws ReferenceError anywhere else
+  // (a docked/undocked console reattached differently, remote debugging,
+  // some extensions' console proxies). Clipboard API needs a secure context
+  // AND focus, neither guaranteed right after pasting into DevTools, so this
+  // tries three ways and always leaves the JSON visible either way.
+  let copied = false;
+  try { copy(json); copied = true; } catch (e) { /* not in a real DevTools console */ }
+  if (!copied) {
+    try { await navigator.clipboard.writeText(json); copied = true; } catch (e) { /* no clipboard permission/focus */ }
+  }
+  console.log(`${copied ? 'Copied' : 'Could not auto-copy — select the JSON below and copy it manually:'} `
+    + `${out.albums.length} albums and ${out.people.length} faces.`
     + (onAlbums ? ' Now run this again on /people to spot people with no album.' : ''));
+  if (!copied) console.log(json);
 })();</pre>
 <button class="sync-btn" type="button" id="albums-copy-snippet">Copy snippet</button>
 </details>

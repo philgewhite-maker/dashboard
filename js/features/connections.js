@@ -1051,6 +1051,12 @@ unionInto(existing.nationality, cand.nationality);
 if (cand.stage && (STAGE_RANK[cand.stage] ?? 0) > (STAGE_RANK[existing.stage] ?? 0)) {
 existing.stage = cand.stage;
 }
+// A screenshot of an open chat is direct evidence you were in contact —
+// re-importing one used to leave lastContact untouched, so re-scanning a
+// WhatsApp/chat screenshot never cleared a "reach out" nudge even though
+// the screenshot itself was proof you just had. Only "today" is known
+// here, not when the screenshot was actually taken.
+if (cand.stage === 'Chatting in app') existing.lastContact = todayStr();
 }
 
 function expandConnection(id) {
