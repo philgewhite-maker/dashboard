@@ -35,6 +35,7 @@
 <button class="tab-btn" type="button" data-tab-btn="dating">Dating</button>
 <button class="tab-btn" type="button" data-tab-btn="datingadmin">Dating admin</button>
 <button class="tab-btn" type="button" data-tab-btn="finances">Finances</button>
+<button class="tab-btn" type="button" data-tab-btn="shopping">Shopping</button>
 <button class="tab-btn" type="button" data-tab-btn="business">Business</button>
 <button class="tab-btn" type="button" data-tab-btn="settings">Settings</button>
 </div>
@@ -234,6 +235,33 @@
 <input type="date" id="deal-expiry-input">
 <input type="text" autocomplete="off" id="deal-notes-input" placeholder="Notes (optional)">
 <button class="add-btn" type="button">Add</button>
+</div>
+</section>
+
+<section class="panel wide" id="shopping-capture-panel" data-tab="shopping">
+<div class="panel-head">
+<h2><span class="dot amber"></span>Shopping capture</h2>
+</div>
+<div class="capture-row">
+<input type="text" autocomplete="off" id="shop-capture-input" placeholder="What do you need?">
+<select id="shop-context-input" class="mini"></select>
+<button class="add-btn" id="shop-capture-btn" type="button">Add</button>
+</div>
+<div class="settings-note" style="margin:8px 0 0;">
+This is the same task system as the Tasks tab &mdash; a shopping item can be part of a bigger project too (tag it both DIY and Supermarket for "buy paint"), and opening it from a list below takes you to the full task, where it can be broken into subtasks, dated, or given a photo.
+</div>
+</section>
+
+<section class="panel wide" id="shopping-lists-panel" data-tab="shopping">
+<div class="panel-head">
+<h2><span class="dot sage"></span>Lists</h2>
+<label class="settings-note" style="display:flex;align-items:center;gap:6px;margin:0;cursor:pointer;">
+<input type="checkbox" id="shop-show-done-toggle"> Show done
+</label>
+</div>
+<div id="shopping-lists"></div>
+<div class="settings-note" style="margin:12px 0 0;">
+Not built: comparing retailer prices or adding to a basket in two clicks. That would need either a retailer API (rarely available to a personal script) or driving a real browser session against each site &mdash; neither fits a page with no backend of its own.
 </div>
 </section>
 

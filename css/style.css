@@ -1496,6 +1496,16 @@ white-space:nowrap;
 .task-badge.soon{background:var(--amber-bg);color:var(--amber);}
 .task-badge.overdue{background:var(--red);color:#fff;}
 .task-badge.dormant{background:transparent;border:1px dashed var(--line);color:var(--muted);}
+
+/* Shopping — a filtered view over tasks, so its rows deliberately match
+   .task-row's look rather than inventing a second style. */
+.shop-list{margin-bottom:16px;}
+.shop-list h3{margin:0 0 6px;font-size:13px;}
+.shop-row{display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--line);flex-wrap:wrap;}
+.shop-row:first-of-type{border-top:none;}
+.shop-title{font-size:14px;cursor:pointer;flex:1 1 auto;min-width:120px;}
+.shop-row.done .shop-title{text-decoration:line-through;color:var(--muted);}
+.shop-also{font-size:11px;color:var(--muted);}
 .task-contexts{display:inline-flex;gap:4px;align-items:center;flex-wrap:wrap;}
 .task-context{
 display:inline-flex;

@@ -10,6 +10,7 @@ import { initCalendarForm, initCalendarSync, initCalendarListLoader } from './fe
 import { initVoucherForm } from './features/vouchers.js';
 import { initSubscriptionForm } from './features/subscriptions.js';
 import { initDealForm } from './features/dealexpiries.js';
+import { initShopping } from './features/shopping.js';
 import { initIdeaForm } from './features/ideas.js';
 import { initEnhancementForm } from './features/enhancements.js';
 import { initTasks } from './features/tasks.js';
@@ -102,6 +103,7 @@ initCalendarListLoader();
 initVoucherForm();
 initSubscriptionForm();
 initDealForm();
+initShopping();
 initIdeaForm();
 initEnhancementForm();
 initTasks();

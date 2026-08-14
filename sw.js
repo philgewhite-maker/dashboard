@@ -42,6 +42,7 @@ const CORE_ASSETS = [
 './js/features/googletasksfeed.js',
 './js/features/photoalbums.js',
 './js/features/photosync.js',
+'./js/features/shopping.js',
 './js/features/sharetarget.js',
 './js/features/contacts.js',
 './js/features/photoscan.js',

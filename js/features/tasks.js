@@ -243,6 +243,11 @@ renderCapture();
 renderContextFilter();
 renderInbox();
 renderLists();
+// Shopping is a filtered view over this same task data, rendered by a
+// separate module — dynamic import rather than a static one, since
+// shopping.js already imports captureTask/revealTask from here and a
+// static import back would be circular.
+import('./shopping.js').then((m) => m.refreshShopping());
 }
 
 function renderContextFilter() {
@@ -531,8 +536,13 @@ console.error('Attachment delete failed on the server:', err);
 
 // Exported so Mail and Calendar rows can push straight into the Inbox,
 // carrying a link back to whatever prompted the task.
-function captureTask({ title, notes = '', source = null, photoIds = [], due = '', link = '' }) {
-const task = blankTask({ title, notes, source, photoIds, due, link });
+// `bucket` defaults to blankTask's own 'inbox' when omitted — only passed
+// through when a caller (like Shopping's quick-capture) already knows where
+// something belongs and wants to skip the triage step.
+function captureTask({ title, notes = '', source = null, photoIds = [], due = '', link = '', contexts = [], bucket }) {
+const fields = { title, notes, source, photoIds, due, link, contexts };
+if (bucket) fields.bucket = bucket;
+const task = blankTask(fields);
 data.tasks.push(task);
 renderTasks();
 queueSave();
@@ -585,9 +595,17 @@ renderLists();
 }
 
 // Opens a task's detail and scrolls to it — used when arriving from a mail
-// row that was already captured.
+// row that was already captured, or a Shopping item that's already ticked
+// off. A done task is hidden by the "Show done" filter by default, which
+// would otherwise make this silently fail to find anything to scroll to.
 function revealTask(id) {
 expandedTasks.add(id);
+const t = taskById(id);
+if (t && t.bucket === 'done' && !showDone) {
+showDone = true;
+const toggle = document.getElementById('show-done-toggle');
+if (toggle) toggle.checked = true;
+}
 renderTasks();
 setTimeout(() => {
 const el = document.querySelector(`[data-task-row="${id}"], [data-alloc-card="${id}"]`);

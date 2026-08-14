@@ -316,6 +316,26 @@ proxy: it only ever fetches from `photos.fife.usercontent.google.com` and
 without that allowlist this would fetch any URL a caller supplied —
 including internal network addresses.
 
+## Shopping tab
+
+Not a separate system — a filtered view over ordinary GTD tasks, grouped by
+four new contexts (Supermarket, Pharmacy, Black Friday, Aspirational
+purchases) added to the same context list Tasks already uses. That's
+deliberate: it's what lets "buy paint" sit under a DIY project *and* show up
+here, and what lets any shopping item be broken into subtasks, dated, or
+given a photo just by opening it — that's the normal task detail screen,
+nothing shopping-specific duplicates it.
+
+The quick-capture box skips the Inbox triage step: picking a context there
+already answers the one question triage exists to ask, so the item goes
+straight to Next Actions.
+
+**Not built**: comparing retailer prices or a two-click add-to-basket. That
+would need either a retailer API (rarely available for personal scripts) or
+driving a real browser session against each site — neither fits a static
+page with no backend of its own. Flagged in the panel itself rather than
+silently dropped.
+
 ## Task attachments
 
 Any task can carry files of any type — PDF, Word, spreadsheets, images,

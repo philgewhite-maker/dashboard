@@ -97,6 +97,12 @@ const TASK_BUCKETS = [
 
 const DEFAULT_TASK_CONTEXTS = ['Office', 'Home', 'DIY', 'Home PC', 'Outdoor errands'];
 
+// Shopping is a view over ordinary tasks filtered to these contexts, not a
+// separate data model — a shopping item is a task like any other, so it can
+// be broken out into subtasks or sit alongside a project ("buy paint" tagged
+// both DIY and Supermarket) exactly the way the rest of GTD already works.
+const SHOPPING_CONTEXTS = ['Supermarket', 'Pharmacy', 'Black Friday', 'Aspirational purchases'];
+
 // Connections' detailed star ratings. `field` is the stable key stored in
 // c.ratings — kept separate from `label` so a label can be adjusted without
 // silently orphaning every rating already given under the old name.
@@ -264,6 +270,14 @@ data.claudeAnswers = {};
 if (!Array.isArray(data.taskContexts) || data.taskContexts.length === 0) {
 data.taskContexts = [...DEFAULT_TASK_CONTEXTS];
 }
+// Shopping reuses the task context mechanism rather than a separate system
+// — a context list already supports exactly what shopping needs (buy paint
+// tagged both DIY and Supermarket). Added once, case-insensitively, to an
+// existing document rather than only seeding a brand-new one, so this
+// actually reaches a document that already has contexts.
+SHOPPING_CONTEXTS.forEach((name) => {
+if (!data.taskContexts.some((c) => c.toLowerCase() === name.toLowerCase())) data.taskContexts.push(name);
+});
 if (!Array.isArray(data.tasks)) data.tasks = [];
 const validBuckets = new Set(TASK_BUCKETS.map((b) => b.bucket));
 data.tasks = data.tasks.map((t) => ({ ...blankTask(), ...t, id: t.id || uid() }));
@@ -636,7 +650,7 @@ setExternalUpdateHandler, setLocalChangeHandler, getLocalSettings, setLocalSetti
 isDormantStage, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness,
 exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, DEFAULT_PREFS,
 MAIL_SEARCH_KINDS, mailSearchLabel,
-TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, blankTask,
+TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask,
 CONTACT_STATUS_LABELS, CONTACT_MATCH_MIN_STAGE,
 DEFAULT_RATING_CATEGORIES, slugifyField,
 };
