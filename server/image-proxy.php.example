@@ -1,0 +1,125 @@
+<?php
+declare(strict_types=1);
+
+/**
+ * Fetches a Google Photos image server-side and hands back the raw bytes.
+ *
+ * Why this exists: an <img> tag can display a photos.fife.usercontent.google.com
+ * URL fine, but the browser cannot read those bytes back out (no CORS
+ * header), which is what a client-side AI comparison needs — the image has
+ * to travel to Claude as base64. PHP has no CORS restriction, so this
+ * endpoint fetches the URL on the server and returns the bytes to the
+ * browser, which is then free to use them however it likes.
+ *
+ *   GET ?url=<google-hosted-image-url>   -> the image bytes
+ *
+ * This is deliberately NOT a general-purpose proxy. `$ALLOWED_HOSTS` is the
+ * entire safety model: without it, this would fetch any URL a caller (or an
+ * attacker who obtained the secret) supplied, including internal network
+ * addresses — a classic SSRF hole. Every URL is checked against that list
+ * before any request is made.
+ *
+ * Upload next to sync.php and files.php (cPanel -> File Manager) and set
+ * $SECRET to the SAME value as those. See README.md, "Photo comparison".
+ */
+
+// ---- Configuration ---------------------------------------------------
+
+// Must match sync.php and files.php exactly.
+$SECRET = 'PUT-A-LONG-RANDOM-STRING-HERE';
+
+// Only these hosts can ever be fetched. Google Photos serves images from
+// both of these depending on context (album covers vs. direct photo links).
+$ALLOWED_HOSTS = [
+    'photos.fife.usercontent.google.com',
+    'lh3.googleusercontent.com',
+];
+
+$MAX_BYTES = 8 * 1024 * 1024;
+$TIMEOUT_SECONDS = 10;
+
+$ALLOWED_ORIGINS = [
+    'https://philgewhite-maker.github.io',
+    'http://localhost:8743',
+    'http://localhost:5173',
+];
+
+// ---- End of configuration --------------------------------------------
+
+$origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+if ($origin !== '' && in_array($origin, $ALLOWED_ORIGINS, true)) {
+    header('Access-Control-Allow-Origin: ' . $origin);
+    header('Vary: Origin');
+}
+header('Access-Control-Allow-Headers: X-Sync-Secret');
+header('Access-Control-Allow-Methods: GET, OPTIONS');
+header('Access-Control-Max-Age: 86400');
+header('Cache-Control: no-store');
+header('X-Content-Type-Options: nosniff');
+
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
+    http_response_code(204);
+    exit;
+}
+
+function fail(int $code, string $message): void {
+    http_response_code($code);
+    header('Content-Type: application/json');
+    echo json_encode(['error' => $message]);
+    exit;
+}
+
+$provided = $_SERVER['HTTP_X_SYNC_SECRET'] ?? '';
+if ($SECRET === '' || $SECRET === 'PUT-A-LONG-RANDOM-STRING-HERE') {
+    fail(500, 'Server not configured: set $SECRET in image-proxy.php');
+}
+if (!is_string($provided) || !hash_equals($SECRET, $provided)) {
+    fail(401, 'Bad or missing sync secret');
+}
+
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'GET') {
+    fail(405, 'Use GET');
+}
+
+$url = $_GET['url'] ?? '';
+$parts = is_string($url) ? parse_url($url) : false;
+if (
+    !is_array($parts)
+    || ($parts['scheme'] ?? '') !== 'https'
+    || !isset($parts['host'])
+    || !in_array($parts['host'], $ALLOWED_HOSTS, true)
+) {
+    fail(400, 'That URL is not on an allowed Google Photos host');
+}
+
+$ch = curl_init($url);
+curl_setopt_array($ch, [
+    CURLOPT_RETURNTRANSFER => true,
+    CURLOPT_FOLLOWLOCATION => false, // a redirect could point off the allowlist
+    CURLOPT_TIMEOUT => $TIMEOUT_SECONDS,
+    CURLOPT_MAXFILESIZE => $MAX_BYTES,
+    CURLOPT_PROTOCOLS => CURLPROTO_HTTPS,
+    CURLOPT_USERAGENT => 'dashboard-image-proxy/1.0',
+]);
+$bytes = curl_exec($ch);
+$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+$contentType = curl_getinfo($ch, CURLINFO_CONTENT_TYPE) ?: 'image/jpeg';
+$err = curl_error($ch);
+curl_close($ch);
+
+if ($bytes === false) {
+    fail(502, "Could not fetch the image: $err");
+}
+if ($httpCode < 200 || $httpCode >= 300) {
+    fail(502, "Google returned HTTP $httpCode for that image");
+}
+if (strlen($bytes) > $MAX_BYTES) {
+    fail(502, 'Image exceeded the size limit');
+}
+if (strpos($contentType, 'image/') !== 0) {
+    fail(502, 'That URL did not return an image');
+}
+
+header('Content-Type: ' . $contentType);
+header('Content-Length: ' . (string) strlen($bytes));
+echo $bytes;

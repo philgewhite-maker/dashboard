@@ -418,7 +418,29 @@ fromCache: !!cachedText,
 };
 }
 
+// Disambiguates a fuzzy name match against an incoming photo — "Alena" and
+// "Alena A" are a plausible fuzzy match on name alone, but obviously
+// different people once both faces are visible. Deliberately not run for
+// exact name matches (they don't need it) or wired to auto-apply anything;
+// it only ever informs a human decision already in progress, same as every
+// other AI-assisted match in this app.
+const FACE_COMPARE_MODEL = 'claude-haiku-4-5-20251001';
+const FACE_COMPARE_MAX_TOKENS = 200;
+async function compareFaces(blobA, blobB) {
+const [base64A, base64B] = await Promise.all([fileToBase64(blobA), fileToBase64(blobB)]);
+const prompt = 'Image 1 is a photo already saved for a tracked person. Image 2 is a photo from a Google Photos album being considered for the same person. Do these two images show the same person? Reply with ONLY a JSON object, no other text: {"same": true, "reason": "one short sentence"} — using true, false, or the string "unsure" for "same". Say "unsure" rather than guessing if the photos differ too much in angle, lighting or quality to tell, or if either image doesn\'t clearly show a face.';
+const { data } = await callAnthropic([
+{ type: 'image', source: { type: 'base64', media_type: blobA.type || 'image/jpeg', data: base64A } },
+{ type: 'image', source: { type: 'base64', media_type: blobB.type || 'image/jpeg', data: base64B } },
+{ type: 'text', text: prompt },
+], FACE_COMPARE_MAX_TOKENS, FACE_COMPARE_MODEL, 'Face comparison');
+return {
+same: data && data.same === true ? true : data && data.same === false ? false : null,
+reason: (data && data.reason) || '',
+};
+}
+
 export {
 MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot, quickScanScreenshot,
-callTextJson, DEFAULT_MODEL, summarizeUsage, currentMonthKey,
+callTextJson, DEFAULT_MODEL, summarizeUsage, currentMonthKey, compareFaces,
 };

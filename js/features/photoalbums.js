@@ -27,6 +27,9 @@
 import { data, queueSave, TAG_FIELDS } from '../state.js';
 import { escapeHtml, uid, todayStr } from '../utils.js';
 import { nameKey, editDistance } from '../googlecontacts.js';
+import { photoGet } from '../db.js';
+import { fetchGoogleImage } from '../files.js';
+import { MissingKeyError, compareFaces } from '../ai.js';
 
 // Album titles are the only thing carrying identity, so a title that doesn't
 // fit the convention can't be matched — it's reported rather than guessed at.
@@ -144,6 +147,64 @@ return `<option value=""${chosenId ? '' : ' selected'}>— skip —</option>`
 .map((c) => `<option value="${escapeHtml(c.id)}"${c.id === chosenId ? ' selected' : ''}>${escapeHtml(c.name)}</option>`).join('');
 }
 
+// A name match is only ever a guess until you've actually looked at both
+// faces — "Alena" and "Alena A" matched the same person by string comparison
+// alone right up until a human noticed they're different people. Showing the
+// connection's existing photo next to the incoming album cover turns that
+// from "read two names carefully" into "glance at two faces", right where
+// the decision is being made.
+function existingPhotoHtml(connId) {
+if (!connId) return '';
+const conn = data.connections.find((c) => c.id === connId);
+if (!conn || !conn.photoId) return '';
+return `<span class="album-compare" title="${escapeHtml(conn.name)}'s existing photo — compare before confirming">
+<span class="thumb-img sm" data-photo-id="${escapeHtml(conn.photoId)}"></span>
+<span class="compare-arrow">&harr;</span>
+</span>`;
+}
+
+// The "AI compare" button and its verdict. Only offered where it's actually
+// useful: a non-exact match (an exact name match doesn't need it), with both
+// a stored photo to compare against and a cover to compare it to. Never
+// offered for exact matches, and never wired to change row.chosenId itself
+// — it only ever informs the human decision already on screen, same rule as
+// every other AI-assisted match in this app.
+function aiCompareHtml(row, i) {
+if (!row.chosenId || !row.cover) return '';
+if (row.match && row.match.why === 'exact') return '';
+const conn = data.connections.find((c) => c.id === row.chosenId);
+if (!conn || !conn.photoId || !row.cover) return '';
+
+if (row.aiVerdict === 'loading') {
+return '<div class="album-ai-compare loading">Comparing…</div>';
+}
+if (row.aiVerdict) {
+const v = row.aiVerdict;
+const cls = v.same === true ? 'yes' : v.same === false ? 'no' : 'unsure';
+const label = v.same === true ? 'AI: looks like the same person' : v.same === false ? 'AI: these look like different people' : 'AI: unsure';
+return `<div class="album-ai-compare ${cls}">${escapeHtml(label)}${v.reason ? ` — ${escapeHtml(v.reason)}` : ''}</div>`;
+}
+return `<button class="sync-btn sm" type="button" data-album-ai-compare="${i}">AI compare faces</button>`;
+}
+
+async function runAiCompare(row, render) {
+row.aiVerdict = 'loading';
+render();
+try {
+const conn = data.connections.find((c) => c.id === row.chosenId);
+const [existing, incoming] = await Promise.all([
+photoGet(conn.photoId),
+fetchGoogleImage(row.cover),
+]);
+if (!existing) throw new Error("This connection's existing photo isn't on this device — run Photo sync in Settings first.");
+row.aiVerdict = await compareFaces(existing, incoming);
+} catch (err) {
+console.error('Face comparison failed:', err);
+row.aiVerdict = { same: null, reason: err instanceof MissingKeyError ? 'Add an Anthropic API key in Settings first.' : (err.message || String(err)) };
+}
+render();
+}
+
 function thumbHtml(row, i) {
 // The cover is rendered straight from its Google URL rather than copied.
 // Those URLs load fine in an <img> without credentials, and re-hosting
@@ -153,9 +214,13 @@ const img = row.cover
 ? `<img src="${escapeHtml(row.cover)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
 : '<span class="album-nocover">no cover</span>';
 return `<div class="album-card${row.applied ? ' chosen' : ''}${isSensitive(row) ? ' album-sensitive' : ''}">
+<span class="album-compare-row">
 <a class="album-thumb" href="${escapeHtml(row.url)}" target="_blank" rel="noopener" title="${escapeHtml(row.title)}">${img}</a>
+${existingPhotoHtml(row.chosenId)}
+</span>
 <div class="album-caption">${escapeHtml(captionFor(row))}</div>
 <div class="album-meta">${escapeHtml(row.match ? row.match.why : 'no match')}${row.count ? ` · ${row.count}` : ''}</div>
+${aiCompareHtml(row, i)}
 <select data-album-pick="${i}">${optionsFor(row.chosenId)}</select>
 ${!row.chosenId ? `<button class="sync-btn sm" type="button" data-album-newconn="${i}">+ New connection</button>` : ''}
 </div>`;
@@ -235,6 +300,7 @@ sel.addEventListener('change', () => {
 const row = rows[parseInt(sel.dataset.albumPick, 10)];
 row.chosenId = sel.value;
 row.applied = false;
+row.aiVerdict = null; // a verdict about the PREVIOUS pairing must not linger
 render();
 });
 });
@@ -244,7 +310,14 @@ const row = rows[parseInt(btn.dataset.albumNewconn, 10)];
 if (!row) return;
 row.chosenId = createConnectionFor(row.person).id;
 row.applied = false;
+row.aiVerdict = null;
 render();
+});
+});
+el.querySelectorAll('[data-album-ai-compare]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const row = rows[parseInt(btn.dataset.albumAiCompare, 10)];
+if (row) runAiCompare(row, render);
 });
 });
 const apply = document.getElementById('albums-apply');

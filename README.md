@@ -283,6 +283,39 @@ If you'd rather avoid cross-origin requests entirely, serve the whole app
 from the same host as `sync.php` instead of GitHub Pages — then
 `$ALLOWED_ORIGINS` stops mattering.
 
+## Photo comparison for album matches
+
+Matching an album to a connection is still ultimately a name comparison —
+"Alena" and "Alena A" matched each other by string alone right up until a
+human noticed they're different people. Dating admin → Google Photos albums
+now helps with that two ways, for any match that isn't an exact name match
+(those don't need it):
+
+1. **Always shown**: the connection's existing photo appears right next to
+   the incoming album cover, so it's a glance instead of re-reading two
+   names carefully.
+2. **"AI compare faces" button**: sends both images to Claude (haiku, cheap)
+   and reports same / different / unsure with a one-line reason. Never
+   applies anything automatically — same rule as every other AI-assisted
+   match in this app, it only ever informs the decision on screen.
+
+**Setup, once**: copy `server/image-proxy.php.example` to
+`server/image-proxy.php`, set `$SECRET` to the same value as `sync.php`, and
+upload it next to the others. **Needs PHP's `curl` extension enabled** —
+unlike `sync.php`/`files.php`, this one actually makes an outbound request.
+Most shared hosting has it on by default; if the endpoint fails immediately
+after uploading, that's the first thing to check.
+
+**Why a proxy is needed at all**: an `<img>` tag can display a Google Photos
+URL fine, but the browser can't read those bytes back out — no CORS header
+on Google's side — which is exactly what sending the image to Claude
+requires. `image-proxy.php` fetches it server-side (PHP has no such
+restriction) and hands the bytes back. It is deliberately not a general
+proxy: it only ever fetches from `photos.fife.usercontent.google.com` and
+`lh3.googleusercontent.com`, checked before any request is made, because
+without that allowlist this would fetch any URL a caller supplied —
+including internal network addresses.
+
 ## Task attachments
 
 Any task can carry files of any type — PDF, Word, spreadsheets, images,

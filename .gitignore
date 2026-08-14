@@ -9,6 +9,8 @@ server/sync.php
 server/notion.php
 # files.php holds the same shared secret as sync.php. Same rule again.
 server/files.php
+# image-proxy.php holds the same shared secret too.
+server/image-proxy.php
 
 # The synced document and its lock/temp files, in case anyone ever points
 # $DATA_FILE inside the repo folder while testing.

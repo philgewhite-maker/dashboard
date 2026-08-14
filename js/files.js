@@ -31,6 +31,17 @@ throw new Error(`Couldn't work out the attachments URL from "${url}" — it shou
 return { endpoint, secret };
 }
 
+// image-proxy.php sits next to sync.php too, same reasoning as filesEndpoint.
+async function imageProxyEndpoint() {
+const { url, secret, configured } = await getConfig();
+if (!configured) throw new FilesNotConfiguredError();
+const endpoint = url.replace(/sync\.php(?=$|\?)/, 'image-proxy.php');
+if (endpoint === url) {
+throw new Error(`Couldn't work out the image-proxy URL from "${url}" — it should end in sync.php.`);
+}
+return { endpoint, secret };
+}
+
 const UPLOAD_TIMEOUT_MS = 120000; // uploads are far slower than a JSON save
 const DOWNLOAD_TIMEOUT_MS = 120000;
 
@@ -105,6 +116,29 @@ try { await photoPut(id, blob); } catch (e) { /* cache is optional */ }
 return blob;
 }
 
+// Fetches a Google Photos URL's bytes via image-proxy.php — the browser
+// itself cannot read them (no CORS header on Google's side), only display
+// them, which is why an <img> tag works everywhere else in this app but a
+// vision comparison needs this instead. Cached in memory per session by
+// URL, not IndexedDB: unlike an attachment there's no stable id to key on,
+// and a cover only needs to survive one review session, not future ones.
+const googleImageCache = new Map();
+async function fetchGoogleImage(url) {
+if (googleImageCache.has(url)) return googleImageCache.get(url);
+const { endpoint, secret } = await imageProxyEndpoint();
+const res = await withTimeout(DOWNLOAD_TIMEOUT_MS, (signal) => fetch(`${endpoint}?url=${encodeURIComponent(url)}`, {
+headers: { 'X-Sync-Secret': secret },
+signal,
+}));
+if (!res.ok) {
+if (res.status === 401) throw new Error('The image-proxy server rejected the secret — check image-proxy.php uses the same one as sync.php.');
+throw new Error(await errorFrom(res, `Couldn't fetch that image (HTTP ${res.status}).`));
+}
+const blob = await res.blob();
+googleImageCache.set(url, blob);
+return blob;
+}
+
 // Deleting is best-effort on the server: if it fails, the attachment is
 // still removed from the task, because leaving a row the user just deleted
 // visible on screen is worse than leaving an orphaned file on disk.
@@ -173,5 +207,5 @@ return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 export {
 FilesNotConfiguredError,
 uploadAttachment, fetchAttachment, deleteAttachment, openAttachment, formatBytes,
-isServerPhotoId, serverPhotoUrl,
+isServerPhotoId, serverPhotoUrl, fetchGoogleImage,
 };

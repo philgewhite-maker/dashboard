@@ -333,6 +333,32 @@ overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 .album-card.sm .tag-x{position:absolute;top:2px;right:2px;background:var(--card);border-radius:50%;padding:0 4px;}
 .album-empty{font-size:12px;color:var(--muted);margin-top:4px;}
 .album-group h4{margin:14px 0 8px;font-size:13px;}
+
+/* The incoming album cover next to the connection's existing photo — a
+   direct visual check before confirming a fuzzy or manually-picked match. */
+.album-compare-row{display:flex;align-items:center;gap:4px;}
+.album-compare-row .album-thumb{flex:1 1 auto;min-width:0;}
+.album-compare{display:flex;align-items:center;gap:2px;flex:0 0 auto;}
+.album-compare .thumb-img{
+width:32px;height:32px;
+border-radius:50%;
+overflow:hidden;
+background:var(--paper);
+border:1px solid var(--line);
+flex:0 0 auto;
+}
+.album-compare .thumb-img img{width:100%;height:100%;object-fit:cover;display:block;}
+.compare-arrow{color:var(--muted);font-size:13px;}
+.album-ai-compare{
+font-size:11px;
+margin:4px 0;
+padding:3px 6px;
+border-radius:6px;
+}
+.album-ai-compare.loading{color:var(--muted);}
+.album-ai-compare.yes{background:var(--sage-bg);color:var(--sage);}
+.album-ai-compare.no{background:color-mix(in srgb, var(--red) 15%, var(--card));color:var(--red);}
+.album-ai-compare.unsure{background:var(--amber-bg);color:var(--amber);}
 .album-gap{margin-top:14px;padding-top:10px;border-top:1px solid var(--line);}
 .album-gap-hint{font-size:12px;color:var(--muted);margin:2px 0 6px;}
 .album-gap-items{display:flex;flex-wrap:wrap;gap:6px;}
