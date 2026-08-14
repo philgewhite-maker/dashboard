@@ -1051,6 +1051,7 @@ gap:10px;
 .sync-row{
 display:flex;
 align-items:center;
+flex-wrap:wrap;
 gap:10px;
 margin-bottom:10px;
 }
@@ -1842,7 +1843,16 @@ color:var(--muted);
    or <select> has an intrinsic minimum width and won't shrink past it unless
    told to, which is what pushed the whole board sideways. */
 @media (max-width:600px){
-/* Two columns of inputs don't fit in 375px; one does. */
+/* Two columns of inputs don't fit in 375px; one does. Collapsing to a
+   single 1fr track isn't enough on its own — a grid item still contributes
+   its own intrinsic min-content width toward that track's automatic
+   minimum size, so one wide item (the phone row's country-code select is
+   the usual offender) can blow the single column past the viewport even
+   though the grid itself is only 1 column wide. min-width:0 on the items
+   removes that floor; .details-grid input/select/textarea already had it,
+   but that only fixed each *field*, not the grid item (the label/row)
+   wrapping it. */
+.details-grid > label, .details-grid > .field-block{min-width:0;}
 .details-grid{grid-template-columns:1fr;}
 .task-detail-grid{grid-template-columns:1fr;}
 .pref-grid{grid-template-columns:1fr;}
@@ -1850,6 +1860,11 @@ color:var(--muted);
 /* Sort/filter controls become full width rather than squeezing side by side. */
 .sort-row{flex-direction:column;align-items:stretch;}
 .sort-row .mini{width:100%;}
+/* .sort-row select.mini's flex-basis:160px (set for the row layout, where
+   flex-basis controls width) becomes a HEIGHT once flex-direction flips to
+   column here — same main-axis, different axis. Reset it or the closed
+   dropdown renders 160px tall before you've even opened it. */
+.sort-row select.mini{flex-basis:auto;}
 
 /* Rating stars and the actions cluster wrap instead of forcing width. */
 .match-actions{width:100%;justify-content:flex-start;}
