@@ -649,8 +649,18 @@ const hits = COMPLETENESS_CHECKS.filter((check) => check(conn)).length;
 return hits / COMPLETENESS_CHECKS.length;
 }
 
+// A plan already made ("Planning to meet"/"Planning to call") is
+// time-sensitive on its own terms — whether you follow through matters
+// regardless of how highly you happen to have starred this person — so it
+// overrides the usual priority-scaled slack with a short fixed one instead
+// of just nudging it slightly. Feeds both the default connections sort and
+// the nudge pool from the same formula, so a bump here shows up in both
+// places without them drifting out of sync with each other.
+const URGENT_STAGES = new Set(['Planning to meet', 'Planning to call']);
+
 // Higher priority = less slack before a "reach out" nudge appears.
-function reachOutThreshold(priority) {
+function reachOutThreshold(priority, stage) {
+if (URGENT_STAGES.has(stage)) return 2;
 return 12 - (priority || 0) * 2; // priority 5 -> 2 days, priority 1 -> 10 days
 }
 

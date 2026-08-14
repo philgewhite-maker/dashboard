@@ -40,7 +40,7 @@ signals: { kind: 'superswipe-follow-up', daysSince: since },
 });
 }
 } else {
-const overdue = !isDormantStage(c.stage) && since >= reachOutThreshold(c.priority);
+const overdue = !isDormantStage(c.stage) && since >= reachOutThreshold(c.priority, c.stage);
 if (overdue) {
 pool.push({
 text: `Reach out to ${c.name} — it's been ${since} days since you last spoke.`,

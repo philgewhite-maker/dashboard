@@ -7,8 +7,8 @@ resizeImageToBlob,
 } from '../utils.js';
 import { MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot } from '../ai.js';
 
-const CONN_STAGES = ['Superswiped', 'Matched', 'Chatting in app', 'Moved to WhatsApp', 'Moved to Telegram', 'Arranged to meet', 'Met in person', 'Dating', 'Faded', 'Archived'];
-const STAGE_RANK = { Dating: 8, 'Met in person': 7, 'Arranged to meet': 6, 'Moved to Telegram': 5, 'Moved to WhatsApp': 4, 'Chatting in app': 3, Matched: 2, Superswiped: 1, Faded: 0, Archived: 0 };
+const CONN_STAGES = ['Superswiped', 'Matched', 'Chatting in app', 'Moved to WhatsApp', 'Moved to Telegram', 'Planning to call', 'Planning to meet', 'Arranged to meet', 'Met in person', 'Dating', 'Faded', 'Archived'];
+const STAGE_RANK = { Dating: 10, 'Met in person': 9, 'Arranged to meet': 8, 'Planning to meet': 7, 'Planning to call': 6, 'Moved to Telegram': 5, 'Moved to WhatsApp': 4, 'Chatting in app': 3, Matched: 2, Superswiped: 1, Faded: 0, Archived: 0 };
 // Where a connection came from. Rendered into every source dropdown from
 // here so the add form, the import picker, and the per-connection editor
 // can't drift apart.
@@ -187,7 +187,7 @@ return TAG_FIELDS.filter((f) => showSensitiveFields || !f.sensitive);
 // Fixed sort options that always exist, regardless of what rating
 // categories Settings currently has configured.
 const FIXED_SORT_FIELDS = {
-default: { label: 'Reach-out priority', getValue: (c) => (isDormantStage(c.stage) ? -999 : daysSince(c.lastContact) - reachOutThreshold(c.priority)) },
+default: { label: 'Reach-out priority', getValue: (c) => (isDormantStage(c.stage) ? -999 : daysSince(c.lastContact) - reachOutThreshold(c.priority, c.stage)) },
 priority: { label: 'Overall rating', getValue: (c) => c.priority || 0 },
 average: { label: 'Average detailed rating', getValue: (c) => (averageRating(c) || {}).value || 0 },
 completeness: { label: 'Record completeness', getValue: (c) => completeness(c) },
