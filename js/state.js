@@ -192,6 +192,12 @@ const TAG_FIELDS = [
 { field: 'nationality', label: 'Nationality', sensitive: false },
 { field: 'tags', label: 'Tags', sensitive: false },
 { field: 'sexTags', label: 'Sex', sensitive: true },
+{ field: 'interests', label: 'Interests', sensitive: false },
+// Orientation (Straight, Gay...) and relationship style (Monogamy...) share
+// one field rather than two — both answer "what kind of relationship",
+// just from different Tinder sections, and one "Relationship" chip list
+// reads more naturally than two near-empty ones.
+{ field: 'relationshipTags', label: 'Relationship', sensitive: false },
 ];
 
 function blankData() {
@@ -355,6 +361,9 @@ if (!Array.isArray(c.aliases)) c.aliases = [];
 if (!Array.isArray(c.dateLocations)) c.dateLocations = [];
 if (!Array.isArray(c.dateEvents)) c.dateEvents = [];
 if (!Array.isArray(c.sexTags)) c.sexTags = [];
+if (!Array.isArray(c.interests)) c.interests = [];
+if (!Array.isArray(c.relationshipTags)) c.relationshipTags = [];
+if (typeof c.distance !== 'string') c.distance = '';
 if (typeof c.job !== 'string') c.job = '';
 if (typeof c.height !== 'string') c.height = '';
 if (typeof c.education !== 'string') c.education = '';

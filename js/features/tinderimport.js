@@ -66,13 +66,28 @@ data.connections.push(conn);
 return conn;
 }
 
-// A handful of field labels map straight onto an existing connection field.
-// Everything else Tinder shows (communication style, zodiac, "Looking
-// for", prompt answers like "My biography would be called: ...") has no
+// A handful of field labels map straight onto an existing single-value
+// connection field. Everything else Tinder shows (communication style,
+// zodiac, prompt answers like "My biography would be called: ...") has no
 // dedicated field in this app, so it's kept as a readable line appended to
 // notes instead of being dropped — same fallback the screenshot importer
 // uses for a bio it can't otherwise place.
-const FIELD_MAP = { 'Family plans': 'kids', Education: 'education', Height: 'height', Work: 'job', 'Job title': 'job', Job: 'job', Distance: 'distance' };
+const FIELD_MAP = { 'Family plans': 'kids', Education: 'education', Height: 'height', Work: 'job', 'Job title': 'job', Job: 'job', Distance: 'distance', City: 'location' };
+
+// Fields that become chips in an existing multi-value tag list instead —
+// added to, never overwritten, so re-importing the same person twice just
+// re-confirms the same tags rather than duplicating or blocking anything.
+// `split: true` fields are genuinely comma-delimited lists from Tinder
+// (Languages, Interests); `split: false` ones are a single phrase that may
+// just happen to CONTAIN a comma ("Long-term, but short-term OK" is one
+// answer, not two) and would be mangled by splitting it.
+const ARRAY_FIELD_MAP = {
+Languages: { target: 'languages', split: true },
+Interests: { target: 'interests', split: true },
+Orientation: { target: 'relationshipTags', split: false },
+'Relationship type': { target: 'relationshipTags', split: false },
+'Looking for': { target: 'relationshipTags', split: false },
+};
 
 let pending = null; // { name, age, fields, photos, chosenId, match, matchConfirmed, aiVerdict }
 
@@ -138,12 +153,21 @@ render();
 function fieldPreviewHtml(f, i) {
 const conn = data.connections.find((c) => c.id === pending.chosenId);
 const target = FIELD_MAP[f.label];
+const arrayMap = ARRAY_FIELD_MAP[f.label];
 let note = 'will be added to notes';
 let blocked = false;
 if (conn && target) {
 const current = String(conn[target] || '').trim();
 if (current) { note = `already set to "${current}" — will be skipped`; blocked = true; }
 else note = `will set ${f.label}`;
+} else if (conn && arrayMap) {
+const existingTags = new Set((conn[arrayMap.target] || []).map((t) => t.toLowerCase()));
+const parts = arrayMap.split ? f.value.split(',').map((s) => s.trim()).filter(Boolean) : [f.value.trim()];
+const fresh = parts.filter((p) => !existingTags.has(p.toLowerCase()));
+note = fresh.length === 0 ? `already in ${arrayMap.target} — will be skipped`
+: fresh.length === parts.length ? `will add to ${arrayMap.target}`
+: `will add ${fresh.length} new to ${arrayMap.target}, rest already there`;
+if (fresh.length === 0) blocked = true;
 }
 return `<label class="tinder-field-row${blocked ? ' tinder-field-blocked' : ''}">
 <input type="checkbox" data-tinder-field="${i}"${f.apply && !blocked ? ' checked' : ''}${blocked ? ' disabled' : ''}>
@@ -194,7 +218,7 @@ ${p.photos.length ? `<div class="settings-note" style="margin:8px 0 4px;">${p.ph
 
 <div class="sync-row" style="margin-top:8px;">
 <button class="add-btn" type="button" id="tinder-save"${canSave ? '' : ' disabled'}>Save to connection</button>
-<span class="sync-status" id="tinder-save-status"></span>
+<span class="sync-status" id="tinder-save-status">${escapeHtml(p.saveMessage || '')}</span>
 </div>
 </div>`;
 
@@ -246,30 +270,62 @@ if (target) {
 if (!String(conn[target] || '').trim()) conn[target] = f.value;
 return;
 }
+const arrayMap = ARRAY_FIELD_MAP[f.label];
+if (arrayMap) {
+if (!Array.isArray(conn[arrayMap.target])) conn[arrayMap.target] = [];
+const parts = arrayMap.split ? f.value.split(',').map((s) => s.trim()).filter(Boolean) : [f.value.trim()];
+const existingLower = conn[arrayMap.target].map((t) => t.toLowerCase());
+parts.forEach((p) => { if (p && !existingLower.includes(p.toLowerCase())) conn[arrayMap.target].push(p); });
+return;
+}
 const line = `${f.label}: ${f.value}`;
 if (!String(conn.notes || '').includes(line)) conn.notes = conn.notes ? `${conn.notes}\n${line}` : line;
 });
 
 const toFetch = pending.photos.filter((ph) => ph.apply);
 let failed = 0;
-for (const ph of toFetch) {
+let firstError = '';
+for (let i = 0; i < toFetch.length; i++) {
+const ph = toFetch[i];
+if (status) status.textContent = `Saving… photo ${i + 1} of ${toFetch.length}`;
 try {
 const blob = await fetch(ph.url).then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.blob(); });
 const id = await storePhoto(blob);
 if (!conn.photoIds.includes(id)) conn.photoIds.push(id);
 if (!conn.photoId) conn.photoId = id;
+ph.apply = false; // saved — leave it out of a retry so it can't be re-added as a duplicate
 } catch (err) {
-console.error('Could not fetch Tinder photo:', err);
+console.error('Could not fetch Tinder photo:', ph.url, err);
+if (!firstError) firstError = err.message || String(err);
 failed++;
 }
 }
 
 queueSave();
-if (status) status.textContent = `Saved to ${conn.name}.${failed ? ` ${failed} of ${toFetch.length} photos failed — check the console for why.` : ''}`;
-pending = null;
-render();
 Promise.all([import('./connections.js'), import('./overview.js')])
 .then(([c, o]) => { c.renderConnections(); o.renderOverview(); hydratePhotos(document.getElementById('conn-list') || document.body); });
+
+// A photo silently not saving with no visible reason (beyond a
+// console.error nobody was watching for) was exactly what happened
+// before this — so on any failure, the review stays open with the
+// actual error shown, rather than resetting and taking the message with
+// it. Fields are already saved either way; clicking Save again only
+// retries the photos still marked to include, not a duplicate of
+// whatever already succeeded.
+// The message is threaded through pending.saveMessage rather than
+// written to the status span directly — render() rebuilds this card's
+// whole innerHTML, including a brand new (empty) status span, so a
+// direct write here would already be gone by the time anyone saw it.
+if (failed) {
+pending.saveMessage = `Saved fields to ${conn.name}. ${failed} of ${toFetch.length} photo${toFetch.length === 1 ? '' : 's'} failed: ${firstError} — click Save again to retry.`;
+render();
+} else {
+const savedName = conn.name;
+pending = null;
+render();
+const freshStatus = document.getElementById('tinder-status');
+if (freshStatus) freshStatus.textContent = `Saved to ${savedName}.`;
+}
 }
 
 function parseInput(text) {

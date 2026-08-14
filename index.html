@@ -344,7 +344,7 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
   // root keeps someone else's photo from ending up in this person's record.
   const root = document.getElementById('main-content') || document;
   const $$ = (sel, r) =&gt; [...(r || root).querySelectorAll(sel)];
-  const GROUP_HEADERS = new Set(['Essentials', 'Lifestyle', 'Interests', 'Messages', 'Photos']);
+  const GROUP_HEADERS = new Set(['Essentials', 'Lifestyle', 'Interests', 'Messages', 'Photos', 'More about me']);
 
   // Some sections (a photo carousel's other slides, apparently also fields
   // further down a long profile — verified: a second captured page had
@@ -429,6 +429,14 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
     return `${cm}cm / ${ft}'${inch}"`;
   }
 
+  // Orientation is a fixed dropdown in Tinder's own UI, not free text, so an
+  // enumerated list is actually reliable here (unlike names/interests,
+  // which are open-ended). Verified live: it renders in the SAME unlabeled
+  // basics strip as height/job/city, not the Essentials icon+&lt;h3&gt; pattern
+  // — so without this it fell into the generic "Profile detail" catch-all
+  // indistinguishably from the person's gender identity, school name, etc.
+  const ORIENTATIONS = new Set(['Straight', 'Gay', 'Lesbian', 'Bisexual', 'Pansexual', 'Asexual', 'Queer', 'Demisexual']);
+
   const seenText = new Set();
   root.querySelectorAll('li').forEach((li) =&gt; {
     if (li.querySelector('img[src*="/descriptors/"]') || li.querySelector('h3') || !li.querySelector('svg')) return;
@@ -448,6 +456,13 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
     }
     else if (/^(She|He|They)\/(Her|Him|Them)$/i.test(text)) fields.push({ label: 'Pronouns', value: text });
     else if (/ at /.test(text)) fields.push({ label: 'Job', value: text });
+    // A basics-strip item with a comma is, structurally, the only
+    // multi-value one Tinder shows this way — verified live, this is how
+    // Languages actually renders (NOT the Essentials icon+&lt;h3&gt; pattern
+    // this snippet originally assumed it would share with Zodiac/Education).
+    // No language-name list needed; the comma alone is the signal.
+    else if (text.includes(',')) fields.push({ label: 'Languages', value: text });
+    else if (ORIENTATIONS.has(text)) fields.push({ label: 'Orientation', value: text });
     else fields.push({ label: 'Profile detail', value: text });
   });
 
