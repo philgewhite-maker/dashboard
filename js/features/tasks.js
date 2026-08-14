@@ -110,7 +110,7 @@ ${rows}
 function taskDetailHtml(t) {
 const photos = (t.photoIds || []).map((id, i) => `<div class="gallery-thumb"><span class="thumb-img" data-photo-id="${escapeHtml(id)}"></span><span class="tag-x" data-task-photo-remove="${t.id}" data-photo-idx="${i}">&times;</span></div>`).join('');
 return `<div class="task-detail">
-<label class="full">Title<input type="text" data-task-field="title" data-task-id="${t.id}" value="${escapeHtml(t.title)}"></label>
+<label class="full">Title<input type="text" autocomplete="off" data-task-field="title" data-task-id="${t.id}" value="${escapeHtml(t.title)}"></label>
 <label class="full">Notes<textarea rows="2" data-task-field="notes" data-task-id="${t.id}">${escapeHtml(t.notes || '')}</textarea></label>
 <div class="task-detail-grid">
 <label>List<select data-task-field="bucket" data-task-id="${t.id}">
@@ -123,7 +123,7 @@ ${TASK_BUCKETS.map((b) => `<option value="${b.bucket}"${b.bucket === t.bucket ? 
 ${data.tasks.filter((o) => o.id !== t.id && o.parentId !== t.id).map((o) => `<option value="${o.id}"${o.id === t.parentId ? ' selected' : ''}>${escapeHtml(o.title || '(untitled)')}</option>`).join('')}
 </select></label>
 </div>
-<label class="full">Reference link (OneNote, doc, anything)<input type="text" placeholder="https://…" data-task-field="link" data-task-id="${t.id}" value="${escapeHtml(t.link || '')}"></label>
+<label class="full">Reference link (OneNote, doc, anything)<input type="text" autocomplete="off" placeholder="https://…" data-task-field="link" data-task-id="${t.id}" value="${escapeHtml(t.link || '')}"></label>
 ${t.link ? `<a class="task-link" href="${escapeHtml(t.link)}" target="_blank" rel="noopener">Open reference &#8599;</a>` : ''}
 ${t.source ? `<div class="task-source">From ${escapeHtml(t.source.kind)}: ${t.source.url ? `<a href="${escapeHtml(t.source.url)}" target="_blank" rel="noopener">${escapeHtml(t.source.label)}</a>` : escapeHtml(t.source.label)}</div>` : ''}
 <div class="task-photos">${photos}<label class="gallery-add" for="task-photo-${t.id}">+</label>
@@ -145,7 +145,7 @@ function renderCapture() {
 const el = document.getElementById('task-contexts-list');
 if (!el) return;
 el.innerHTML = data.taskContexts.map((c) => `<span class="tag-chip">${escapeHtml(c)}<span class="tag-x" data-delctx="${escapeHtml(c)}">&times;</span></span>`).join('')
-+ '<input type="text" class="tag-add-input" id="new-context-input" placeholder="+ add context">';
++ '<input type="text" autocomplete="off" class="tag-add-input" id="new-context-input" placeholder="+ add context">';
 el.querySelectorAll('[data-delctx]').forEach((x) => {
 x.addEventListener('click', () => {
 const name = x.dataset.delctx;

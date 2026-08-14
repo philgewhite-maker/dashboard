@@ -92,7 +92,7 @@ ${dupeHtml}
 <tbody>${values.map(([value, count]) => `<tr>
 <td>${escapeHtml(value)}</td>
 <td>${count}</td>
-<td><input type="text" data-rename-field="${escapeHtml(field)}" data-rename-from="${escapeHtml(value)}" placeholder="${escapeHtml(value)}"></td>
+<td><input type="text" autocomplete="off" data-rename-field="${escapeHtml(field)}" data-rename-from="${escapeHtml(value)}" placeholder="${escapeHtml(value)}"></td>
 <td><select data-mergeinto-field="${escapeHtml(field)}" data-mergeinto-from="${escapeHtml(value)}">
 <option value="">—</option>
 ${values.filter(([other]) => other !== value).map(([other]) => `<option value="${escapeHtml(other)}">${escapeHtml(other)}</option>`).join('')}

@@ -111,7 +111,7 @@
 <span class="count-badge" id="capture-status"></span>
 </div>
 <div class="capture-row">
-<input type="text" id="capture-input" placeholder="What's on your mind? Enter to capture.">
+<input type="text" autocomplete="off" id="capture-input" placeholder="What's on your mind? Enter to capture.">
 <button class="add-btn" id="capture-btn" type="button">Capture</button>
 <label class="file-btn" for="capture-photo-input">Photo / screenshot</label>
 <input type="file" id="capture-photo-input" accept="image/*" multiple style="display:none;">
@@ -167,8 +167,8 @@
 </div>
 <div id="jobs-list"></div>
 <div class="add-form" id="job-form">
-<input type="text" id="job-co-input" placeholder="Company">
-<input type="text" id="job-role-input" placeholder="Role">
+<input type="text" autocomplete="off" id="job-co-input" placeholder="Company">
+<input type="text" autocomplete="off" id="job-role-input" placeholder="Role">
 <button class="add-btn" type="button">Add</button>
 </div>
 </section>
@@ -180,7 +180,7 @@
 </div>
 <div id="vouchers-list"></div>
 <div class="add-form" id="voucher-form">
-<input type="text" id="voucher-name-input" placeholder="e.g. BA Companion Voucher">
+<input type="text" autocomplete="off" id="voucher-name-input" placeholder="e.g. BA Companion Voucher">
 <select id="voucher-type-input">
 <option>Voucher</option>
 <option>Credit</option>
@@ -188,9 +188,9 @@
 <option>Refund</option>
 <option>Other</option>
 </select>
-<input type="text" id="voucher-value-input" placeholder="Value (optional)">
+<input type="text" autocomplete="off" id="voucher-value-input" placeholder="Value (optional)">
 <input type="date" id="voucher-expiry-input">
-<input type="text" id="voucher-notes-input" placeholder="Notes (optional)">
+<input type="text" autocomplete="off" id="voucher-notes-input" placeholder="Notes (optional)">
 <button class="add-btn" type="button">Add</button>
 </div>
 </section>
@@ -202,16 +202,16 @@
 </div>
 <div id="subscriptions-list"></div>
 <div class="add-form" id="subscription-form">
-<input type="text" id="subscription-name-input" placeholder="e.g. Netflix">
+<input type="text" autocomplete="off" id="subscription-name-input" placeholder="e.g. Netflix">
 <select id="subscription-frequency-input">
 <option>Monthly</option>
 <option>Yearly</option>
 <option>Weekly</option>
 <option>Other</option>
 </select>
-<input type="text" id="subscription-cost-input" placeholder="Cost (optional)">
+<input type="text" autocomplete="off" id="subscription-cost-input" placeholder="Cost (optional)">
 <input type="date" id="subscription-renewal-input">
-<input type="text" id="subscription-notes-input" placeholder="Notes (optional)">
+<input type="text" autocomplete="off" id="subscription-notes-input" placeholder="Notes (optional)">
 <button class="add-btn" type="button">Add</button>
 </div>
 </section>
@@ -223,7 +223,7 @@
 </div>
 <div id="deals-list"></div>
 <div class="add-form" id="deal-form">
-<input type="text" id="deal-name-input" placeholder="e.g. Halifax mortgage fixed rate">
+<input type="text" autocomplete="off" id="deal-name-input" placeholder="e.g. Halifax mortgage fixed rate">
 <select id="deal-type-input">
 <option>Mortgage</option>
 <option>Credit card</option>
@@ -232,7 +232,7 @@
 <option>Other</option>
 </select>
 <input type="date" id="deal-expiry-input">
-<input type="text" id="deal-notes-input" placeholder="Notes (optional)">
+<input type="text" autocomplete="off" id="deal-notes-input" placeholder="Notes (optional)">
 <button class="add-btn" type="button">Add</button>
 </div>
 </section>
@@ -435,10 +435,10 @@ Album links are permanent, unlike the face-group links tried previously.
 <option value="stage">Then by: Stage</option>
 </select>
 </div>
-<input type="text" class="conn-search" id="conn-search" placeholder="Search by name or tag (e.g. sporty, sober)...">
+<input type="text" autocomplete="off" class="conn-search" id="conn-search" placeholder="Search by name or tag (e.g. sporty, sober)...">
 <div id="connections-list"></div>
 <div class="add-form" id="connection-form">
-<input type="text" id="conn-name-input" placeholder="Name or nickname">
+<input type="text" autocomplete="off" id="conn-name-input" placeholder="Name or nickname">
 <select id="conn-app-input">
 <option>Bumble</option>
 <option>Tinder</option>
@@ -457,7 +457,7 @@ Album links are permanent, unlike the face-group links tried previously.
 </div>
 <div id="ideas-list"></div>
 <div class="add-form" id="idea-form" style="flex-direction:column;align-items:stretch;">
-<input type="text" id="idea-title-input" placeholder="Idea title">
+<input type="text" autocomplete="off" id="idea-title-input" placeholder="Idea title">
 <textarea id="idea-notes-input" placeholder="What's the idea?" rows="3" style="font-family:'Inter',sans-serif;font-size:13px;border:1px solid var(--line);border-radius:7px;padding:7px 9px;background:var(--paper);color:var(--ink);resize:vertical;"></textarea>
 <button class="add-btn" type="button" style="align-self:flex-start;">Add idea</button>
 </div>
@@ -482,7 +482,7 @@ Photos added before task attachments existed live only on the device that added 
 <div class="settings-block">
 <h3>AI features</h3>
 <label for="anthropic-key-input" style="font-size:13px;font-weight:500;display:block;margin-bottom:6px;">Anthropic API key (for photo/screenshot import)</label>
-<input type="password" id="anthropic-key-input" class="settings-input" placeholder="sk-ant-...">
+<input type="password" autocomplete="new-password" id="anthropic-key-input" class="settings-input" placeholder="sk-ant-...">
 <div class="settings-note">
 Stored only in this browser's local storage on this device — never synced, never sent anywhere except directly to api.anthropic.com. You'll need to enter it again on each device. Calls are billed to your own account (typically a fraction of a cent per screenshot).
 <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">Get a key &rarr;</a>
@@ -527,9 +527,9 @@ Show the "Sex" field on connections and in Connections Overview
 <h3>Live sync (your own server)</h3>
 <div class="settings-note" style="margin:0 0 8px;">Saves changes to your own hosting automatically, a couple of seconds after you stop typing, and picks up changes from your other devices. No sign-in, so nothing expires. Leave both boxes empty to stay on manual Google Drive push/pull below.</div>
 <label for="sync-url-input" style="font-size:13px;font-weight:500;display:block;margin-bottom:6px;">Sync URL</label>
-<input type="text" id="sync-url-input" class="settings-input" placeholder="https://georgewhiteeuropean.co.uk/sync.php">
+<input type="text" autocomplete="off" id="sync-url-input" class="settings-input" placeholder="https://georgewhiteeuropean.co.uk/sync.php">
 <label for="sync-secret-input" style="font-size:13px;font-weight:500;display:block;margin:10px 0 6px;">Sync secret</label>
-<input type="password" id="sync-secret-input" class="settings-input" placeholder="the same string as $SECRET in sync.php">
+<input type="password" autocomplete="new-password" id="sync-secret-input" class="settings-input" placeholder="the same string as $SECRET in sync.php">
 <div class="sync-row" style="margin-top:10px;">
 <button class="sync-btn" id="sync-test-btn" type="button">Test &amp; start syncing</button>
 </div>
@@ -562,7 +562,7 @@ Show the "Sex" field on connections and in Connections Overview
 <div class="settings-block">
 <h3>Track a new habit</h3>
 <div class="add-form" id="habit-form" style="margin-top:0;padding-top:0;border-top:none;">
-<input type="text" id="habit-input" placeholder="New habit, e.g. Stretch">
+<input type="text" autocomplete="off" id="habit-input" placeholder="New habit, e.g. Stretch">
 <button class="add-btn" type="button">Add</button>
 </div>
 </div>
@@ -570,7 +570,7 @@ Show the "Sex" field on connections and in Connections Overview
 <div class="settings-block">
 <h3>Track a new goal</h3>
 <div class="add-form" id="goal-form" style="margin-top:0;padding-top:0;border-top:none;">
-<input type="text" id="goal-input" placeholder="New goal">
+<input type="text" autocomplete="off" id="goal-input" placeholder="New goal">
 <button class="add-btn" type="button">Add</button>
 </div>
 </div>
@@ -594,9 +594,9 @@ Show the "Sex" field on connections and in Connections Overview
 <h3>Notion</h3>
 <div class="settings-note" style="margin:0 0 8px;">Notion blocks direct browser access, so calls go through <code>notion.php</code> on your own host — which also keeps your Notion token off this device entirely. See README, "Notion".</div>
 <label for="notion-url-input" style="font-size:13px;font-weight:500;display:block;margin-bottom:6px;">Proxy URL</label>
-<input type="text" id="notion-url-input" class="settings-input" placeholder="https://georgewhiteeuropean.co.uk/notion.php">
+<input type="text" autocomplete="off" id="notion-url-input" class="settings-input" placeholder="https://georgewhiteeuropean.co.uk/notion.php">
 <label for="notion-db-input" style="font-size:13px;font-weight:500;display:block;margin:10px 0 6px;">Projects database ID</label>
-<input type="text" id="notion-db-input" class="settings-input" placeholder="32 characters from the database URL">
+<input type="text" autocomplete="off" id="notion-db-input" class="settings-input" placeholder="32 characters from the database URL">
 <div class="sync-row" style="margin-top:10px;">
 <button class="sync-btn" id="notion-test-btn" type="button">Test connection</button>
 </div>
@@ -625,7 +625,7 @@ Show the "Sex" field on connections and in Connections Overview
 <div class="settings-note" style="margin:0 0 8px;">Ideas for this dashboard itself, to come back to later.</div>
 <div id="enhancements-list"></div>
 <div class="add-form" id="enhancement-form" style="flex-direction:column;align-items:stretch;">
-<input type="text" id="enhancement-title-input" placeholder="Idea title">
+<input type="text" autocomplete="off" id="enhancement-title-input" placeholder="Idea title">
 <textarea id="enhancement-notes-input" placeholder="What's the idea?" rows="2" style="font-family:'Inter',sans-serif;font-size:13px;border:1px solid var(--line);border-radius:7px;padding:7px 9px;background:var(--paper);color:var(--ink);resize:vertical;"></textarea>
 <button class="add-btn" type="button" style="align-self:flex-start;">Add idea</button>
 </div>

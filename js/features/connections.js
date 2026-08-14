@@ -247,7 +247,7 @@ return `<datalist id="taglist-${field}">${values.map((v) => `<option value="${es
 
 function tagChips(items, connId, field) {
 return (items || []).map((t, i) => `<span class="tag-chip">${escapeHtml(t)}<span class="tag-x" data-tag-remove="${connId}" data-tag-field="${field}" data-tag-idx="${i}">&times;</span></span>`).join('')
-+ `<input type="text" class="tag-add-input" placeholder="+ add" list="taglist-${field}" data-tag-add="${connId}" data-tag-field="${field}">`
++ `<input type="text" autocomplete="off" class="tag-add-input" placeholder="+ add" list="taglist-${field}" data-tag-add="${connId}" data-tag-field="${field}">`
 + `<button type="button" class="todo-add-btn" data-tag-add-btn="${connId}" data-tag-add-btn-field="${field}" style="padding:3px 8px;">+</button>`;
 }
 
@@ -277,7 +277,7 @@ function todoListHtml(c) {
 const items = (c.todos || []).map((t) => `<div class="todo-item ${t.done ? 'done' : ''}"><input type="checkbox" ${t.done ? 'checked' : ''} data-todo-toggle="${c.id}" data-todo-id="${t.id}"><span>${escapeHtml(t.text)}</span><span class="tag-x" data-todo-remove="${c.id}" data-todo-id="${t.id}">&times;</span></div>`).join('');
 return `<div class="todo-list">${items}</div>
 <div class="todo-add-row">
-<input type="text" placeholder="e.g. Theatre trip" data-todo-input="${c.id}">
+<input type="text" autocomplete="off" placeholder="e.g. Theatre trip" data-todo-input="${c.id}">
 <button class="todo-add-btn" type="button" data-todo-add="${c.id}">Add</button>
 </div>`;
 }
@@ -404,33 +404,33 @@ ${contactPickerHtml(c.id)}
 <details class="match-details" data-conn-details="${c.id}" ${expandedConnections.has(c.id) ? 'open' : ''}>
 <summary>Details</summary>
 <div class="details-grid">
-<label>Name<input type="text" data-field="name" data-conn-detail="${c.id}" value="${escapeHtml(c.name)}"></label>
-<label>Profile name<input type="text" placeholder="If different — keeps photos findable" data-field="profileName" data-conn-detail="${c.id}" value="${escapeHtml(c.profileName || '')}"></label>
+<label>Name<input type="text" autocomplete="off" data-field="name" data-conn-detail="${c.id}" value="${escapeHtml(c.name)}"></label>
+<label>Profile name<input type="text" autocomplete="off" placeholder="If different — keeps photos findable" data-field="profileName" data-conn-detail="${c.id}" value="${escapeHtml(c.profileName || '')}"></label>
 <label>Source<select data-field="app" data-conn-detail="${c.id}">${appOptions(c.app)}</select></label>
-<label>Age when recorded${ageNoteHtml(c)}<input type="text" data-field="age" data-conn-detail="${c.id}" value="${escapeHtml(c.age || '')}"></label>
+<label>Age when recorded${ageNoteHtml(c)}<input type="text" autocomplete="off" data-field="age" data-conn-detail="${c.id}" value="${escapeHtml(c.age || '')}"></label>
 <label>Date of birth<input type="date" data-field="dob" data-conn-detail="${c.id}" value="${escapeHtml(c.dob || '')}"></label>
-<label>City<input type="text" placeholder="Groups in Overview" data-field="location" data-conn-detail="${c.id}" value="${escapeHtml(c.location || '')}"></label>
-<label class="full">Full address<input type="text" placeholder="Not grouped — detail only" data-field="address" data-conn-detail="${c.id}" value="${escapeHtml(c.address || '')}"></label>
-<label>Kids<input type="text" data-field="kids" data-conn-detail="${c.id}" value="${escapeHtml(c.kids || '')}"></label>
-<label>Job<input type="text" data-field="job" data-conn-detail="${c.id}" value="${escapeHtml(c.job || '')}"></label>
-<label>Height<input type="text" data-field="height" data-conn-detail="${c.id}" value="${escapeHtml(c.height || '')}"></label>
-<label>Education<input type="text" data-field="education" data-conn-detail="${c.id}" value="${escapeHtml(c.education || '')}"></label>
+<label>City<input type="text" autocomplete="off" placeholder="Groups in Overview" data-field="location" data-conn-detail="${c.id}" value="${escapeHtml(c.location || '')}"></label>
+<label class="full">Full address<input type="text" autocomplete="off" placeholder="Not grouped — detail only" data-field="address" data-conn-detail="${c.id}" value="${escapeHtml(c.address || '')}"></label>
+<label>Kids<input type="text" autocomplete="off" data-field="kids" data-conn-detail="${c.id}" value="${escapeHtml(c.kids || '')}"></label>
+<label>Job<input type="text" autocomplete="off" data-field="job" data-conn-detail="${c.id}" value="${escapeHtml(c.job || '')}"></label>
+<label>Height<input type="text" autocomplete="off" data-field="height" data-conn-detail="${c.id}" value="${escapeHtml(c.height || '')}"></label>
+<label>Education<input type="text" autocomplete="off" data-field="education" data-conn-detail="${c.id}" value="${escapeHtml(c.education || '')}"></label>
 <div class="field-block">
 <span class="field-label">Phone</span>
 <span class="phone-row">
-<select class="dial-code" data-dial-for="${c.id}">${dialCodeOptions()}</select>
-<input type="tel" placeholder="Used to match Google Contacts" data-field="phone" data-conn-detail="${c.id}" value="${escapeHtml(c.phone || '')}">
+<select class="dial-code" data-dial-for="${c.id}" autocomplete="off">${dialCodeOptions()}</select>
+<input type="tel" autocomplete="off" placeholder="Used to match Google Contacts" data-field="phone" data-conn-detail="${c.id}" value="${escapeHtml(c.phone || '')}" name="conn-phone-${c.id}">
 </span>
 </div>
-<label>Email<input type="email" placeholder="Also used to match" data-field="email" data-conn-detail="${c.id}" value="${escapeHtml(c.email || '')}"></label>
-<label>What I like most<input type="text" data-field="likes" data-conn-detail="${c.id}" value="${escapeHtml(c.likes || '')}"></label>
+<label>Email<input type="email" autocomplete="off" placeholder="Also used to match" data-field="email" data-conn-detail="${c.id}" value="${escapeHtml(c.email || '')}" name="conn-email-${c.id}"></label>
+<label>What I like most<input type="text" autocomplete="off" data-field="likes" data-conn-detail="${c.id}" value="${escapeHtml(c.likes || '')}"></label>
 <label class="full">Notes<textarea rows="2" data-field="notes" data-conn-detail="${c.id}">${escapeHtml(c.notes || '')}</textarea></label>
 ${visibleTagFields().map((f) => `<label class="full${f.sensitive ? ' sensitive-field' : ''}">${escapeHtml(f.label)}<div class="tag-editor">${tagChips(c[f.field], c.id, f.field)}</div></label>`).join('')}
 <label class="full">Ratings<div class="ratings-block">${RATING_CATS.map(([cat, lbl]) => ratingStars(lbl, cat, c.id, (c.ratings && c.ratings[cat]) || 0)).join('')}</div></label>
 <label class="full">Things to do<div>${todoListHtml(c)}</div></label>
 <label class="full">Photos${galleryHtml(c)}</label>
 <label class="full">Google Photos albums${albumListHtml(c)}</label>
-<label class="full">Drive/OneDrive link (optional, for full-res photos filed elsewhere)<input type="text" placeholder="Paste a share link" data-field="driveLink" data-conn-detail="${c.id}" value="${escapeHtml(c.driveLink || '')}"></label>
+<label class="full">Drive/OneDrive link (optional, for full-res photos filed elsewhere)<input type="text" autocomplete="off" placeholder="Paste a share link" data-field="driveLink" data-conn-detail="${c.id}" value="${escapeHtml(c.driveLink || '')}"></label>
 ${c.driveLink ? `<div class="full"><a href="${escapeHtml(c.driveLink)}" target="_blank" rel="noopener" style="font-size:12px;color:var(--rose);">Open full-res photos &#8599;</a></div>` : ''}
 <label class="full">Merge a duplicate into this one
 <div class="merge-row">

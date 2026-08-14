@@ -30,15 +30,15 @@ badgeHtml = `<span class="expiry-badge">${dn}d left</span>`;
 }
 return `<div class="voucher-row" data-subscription-row="${s.id}">
 <div class="voucher-id">
-<input type="text" class="voucher-edit voucher-name-edit" data-field="name" data-sub-id="${s.id}" value="${escapeHtml(s.name)}">
+<input type="text" autocomplete="off" class="voucher-edit voucher-name-edit" data-field="name" data-sub-id="${s.id}" value="${escapeHtml(s.name)}">
 <div class="voucher-meta">
 <select class="voucher-edit voucher-type-edit" data-field="frequency" data-sub-id="${s.id}">
 ${FREQUENCIES.map((f) => `<option value="${f}" ${f === s.frequency ? 'selected' : ''}>${f}</option>`).join('')}
 </select>
-<input type="text" class="voucher-edit voucher-value-edit" data-field="cost" data-sub-id="${s.id}" value="${escapeHtml(s.cost || '')}" placeholder="Cost">
+<input type="text" autocomplete="off" class="voucher-edit voucher-value-edit" data-field="cost" data-sub-id="${s.id}" value="${escapeHtml(s.cost || '')}" placeholder="Cost">
 </div>
 </div>
-<input type="text" class="voucher-edit voucher-notes-edit" data-field="notes" data-sub-id="${s.id}" value="${escapeHtml(s.notes || '')}" placeholder="Notes">
+<input type="text" autocomplete="off" class="voucher-edit voucher-notes-edit" data-field="notes" data-sub-id="${s.id}" value="${escapeHtml(s.notes || '')}" placeholder="Notes">
 <div class="voucher-expiry">
 <input type="date" class="voucher-edit expiry-date-edit" data-field="nextRenewal" data-sub-id="${s.id}" value="${escapeHtml(s.nextRenewal || '')}">
 ${badgeHtml}
