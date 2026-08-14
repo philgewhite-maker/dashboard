@@ -42,7 +42,12 @@ function initTabs() {
 document.querySelectorAll('[data-tab-btn]').forEach((btn) => {
 btn.addEventListener('click', () => switchTab(btn.dataset.tabBtn));
 });
-switchTab('overview');
+// A task's `link` (or any pasted URL) can point at #<tab> to open the app
+// straight onto that tab — falls back to overview for a missing/unknown
+// hash rather than landing on a blank tab bar with nothing shown.
+const validTabs = new Set([...document.querySelectorAll('[data-tab-btn]')].map((b) => b.dataset.tabBtn));
+const fromHash = location.hash.slice(1);
+switchTab(validTabs.has(fromHash) ? fromHash : 'overview');
 }
 
 function initSaveNote() {

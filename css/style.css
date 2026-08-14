@@ -304,6 +304,16 @@ gap:12px;
 .album-card{position:relative;min-width:0;}
 .tinder-fields{display:flex;flex-direction:column;gap:4px;margin-top:8px;}
 .tinder-field-row{display:flex;align-items:baseline;gap:6px;font-size:12px;font-weight:400;text-transform:none;letter-spacing:normal;}
+.tinder-field-note{color:var(--muted);font-size:11px;}
+.tinder-field-blocked{opacity:.55;}
+.tinder-photo-thumb{opacity:.4;transition:opacity .1s;}
+.tinder-photo-thumb.tinder-photo-included{opacity:1;}
+.tinder-photo-badge{
+position:absolute;top:2px;right:2px;
+width:16px;height:16px;border-radius:50%;
+background:var(--sage);color:#fff;
+font-size:11px;line-height:16px;text-align:center;
+}
 .album-thumb{
 display:block;
 aspect-ratio:1/1;
