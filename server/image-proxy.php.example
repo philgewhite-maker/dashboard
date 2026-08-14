@@ -95,15 +95,27 @@ if (
 $ch = curl_init($url);
 curl_setopt_array($ch, [
     CURLOPT_RETURNTRANSFER => true,
-    CURLOPT_FOLLOWLOCATION => false, // a redirect could point off the allowlist
+    // Google's own signed image URLs commonly 302 to a different Google
+    // host before serving the bytes (confirmed live: a real album cover
+    // URL 302'd rather than serving directly) — refusing to follow that
+    // broke every real fetch, not just a hypothetical one. Followed, but
+    // capped at 3 hops and re-checked against the SAME host allowlist
+    // below once curl is done: the attacker's only lever is the URL given
+    // in the first place, already checked above, and Google's own servers
+    // choosing where their own signed link redirects isn't something an
+    // external caller controls.
+    CURLOPT_FOLLOWLOCATION => true,
+    CURLOPT_MAXREDIRS => 3,
     CURLOPT_TIMEOUT => $TIMEOUT_SECONDS,
     CURLOPT_MAXFILESIZE => $MAX_BYTES,
     CURLOPT_PROTOCOLS => CURLPROTO_HTTPS,
+    CURLOPT_REDIR_PROTOCOLS => CURLPROTO_HTTPS,
     CURLOPT_USERAGENT => 'dashboard-image-proxy/1.0',
 ]);
 $bytes = curl_exec($ch);
 $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 $contentType = curl_getinfo($ch, CURLINFO_CONTENT_TYPE) ?: 'image/jpeg';
+$effectiveUrl = curl_getinfo($ch, CURLINFO_EFFECTIVE_URL);
 $err = curl_error($ch);
 curl_close($ch);
 
@@ -112,6 +124,10 @@ if ($bytes === false) {
 }
 if ($httpCode < 200 || $httpCode >= 300) {
     fail(502, "Google returned HTTP $httpCode for that image");
+}
+$landedHost = parse_url((string) $effectiveUrl, PHP_URL_HOST);
+if (!in_array($landedHost, $ALLOWED_HOSTS, true)) {
+    fail(502, 'A redirect led somewhere unexpected — refusing to return it');
 }
 if (strlen($bytes) > $MAX_BYTES) {
     fail(502, 'Image exceeded the size limit');
