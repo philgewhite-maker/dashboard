@@ -337,12 +337,18 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
 <details style="margin:0 0 10px;">
 <summary style="cursor:pointer;color:var(--muted);font-size:13px;">Show the console snippet</summary>
 <pre id="tinder-snippet" style="white-space:pre-wrap;font-size:12px;background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:10px;margin:8px 0;">(async () => {
-  const $$ = (sel, root) =&gt; [...(root || document).querySelectorAll(sel)];
+  // A messages page shows this profile next to a sidebar list of every
+  // other match's small avatar &mdash; verified against a real captured page,
+  // everything belonging to THIS profile sits inside &lt;main id="main-content"&gt;,
+  // with the sidebar in a separate &lt;aside&gt;. Scoping every lookup to that
+  // root keeps someone else's photo from ending up in this person's record.
+  const root = document.getElementById('main-content') || document;
+  const $$ = (sel, r) =&gt; [...(r || root).querySelectorAll(sel)];
   const GROUP_HEADERS = new Set(['Essentials', 'Lifestyle', 'Interests', 'Messages', 'Photos']);
 
   // Verified against a real captured profile page: name and age share one
   // &lt;h1&gt; whose aria-label is "{name} {age} years".
-  const h1 = document.querySelector('h1[aria-label]');
+  const h1 = root.querySelector('h1[aria-label]');
   let name = '', age = '';
   if (h1) {
     const m = (h1.getAttribute('aria-label') || '').match(/^(.+?)\s+(\d+)\s+years?$/);
@@ -379,15 +385,25 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
   });
 
   // Photos load from a public CDN with no login needed (verified) &mdash;
-  // unlike Google Photos, no byte-capture trick is needed, just ask for a
-  // bigger size than the thumbnail grid uses.
-  const photos = [...new Set($$('*').map((el) =&gt; {
+  // unlike Google Photos, no byte-capture trick is needed. But the carousel
+  // only keeps the CURRENTLY shown photo in the DOM at all &mdash; the rest
+  // are virtualized until you actually click to them (verified: a captured
+  // page mid-scroll only ever had ONE of this profile's photos as a real
+  // URL, out of 8). So click through every numbered photo tab, collecting
+  // whatever newly appears each time, rather than a single one-shot scan.
+  const scanPhotos = () =&gt; $$('*').map((el) =&gt; {
     const b = getComputedStyle(el).backgroundImage;
     const m = b &amp;&amp; b.match(/url\("([^"]+)"\)/);
     return m &amp;&amp; m[1].includes('gotinder.com') ? m[1].replace(/\/\d+x\d+_/, '/640x800_') : null;
-  }).filter(Boolean))];
+  }).filter(Boolean);
+  const photos = new Set(scanPhotos());
+  for (const btn of $$('button[aria-label^="Photo "]')) {
+    btn.click();
+    await new Promise((r) =&gt; setTimeout(r, 300));
+    scanPhotos().forEach((u) =&gt; photos.add(u));
+  }
 
-  const out = { name, age, fields, photos };
+  const out = { name, age, fields, photos: [...photos] };
   const json = JSON.stringify(out, null, 1);
   let copied = false;
   try { copy(json); copied = true; } catch (e) { /* not in a real DevTools console */ }
@@ -395,7 +411,7 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
     try { await navigator.clipboard.writeText(json); copied = true; } catch (e) { /* no clipboard permission/focus */ }
   }
   console.log((copied ? 'Copied — ' : 'Could not auto-copy, select and copy manually — ')
-    + `${name || '(no name found)'}, ${age || '?'}: ${fields.length} field${fields.length === 1 ? '' : 's'}, ${photos.length} photo${photos.length === 1 ? '' : 's'}.`);
+    + `${name || '(no name found)'}, ${age || '?'}: ${fields.length} field${fields.length === 1 ? '' : 's'}, ${out.photos.length} photo${out.photos.length === 1 ? '' : 's'}.`);
   if (!copied) console.log(json);
 })();</pre>
 <button class="sync-btn" type="button" id="tinder-copy-snippet">Copy snippet</button>
