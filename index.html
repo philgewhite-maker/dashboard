@@ -374,6 +374,16 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
   }
 
   const fields = [];
+  // "You matched with X on DD/MM/YYYY" — unverified against real markup
+  // (no captured page has had an open chat yet), so this deliberately
+  // searches by TEXT CONTENT rather than guessing a structural selector.
+  // Safe either way: if the wording differs, this just finds nothing,
+  // same as any other field this snippet doesn't recognise.
+  const matchedEl = [...root.querySelectorAll('*')].find((el) =&gt; el.children.length === 0 &amp;&amp; /you matched.*on\s+\d{1,2}\/\d{1,2}\/\d{2,4}/i.test(el.textContent || ''));
+  if (matchedEl) {
+    const dm = matchedEl.textContent.match(/on\s+(\d{1,2}\/\d{1,2}\/\d{2,4})/i);
+    if (dm) fields.push({ label: 'Matched on', value: dm[1] });
+  }
   const seen = new Set();
   // Every "vital" (kids, education, smoking, pets, communication style,
   // zodiac, languages, and whatever else Tinder adds) is an icon named
