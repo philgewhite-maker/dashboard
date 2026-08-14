@@ -278,7 +278,9 @@ const albums = c.photoAlbums || [];
 if (!albums.length) return '<div class="album-empty">None linked — name an album "' + escapeHtml(c.name) + '_" in Google Photos, then import it on the Dating admin tab.</div>';
 return `<div class="album-strip">${albums.map((a, i) => `<div class="album-card sm">
 <a class="album-thumb" href="${escapeHtml(a.url)}" target="_blank" rel="noopener" title="${escapeHtml(a.title || a.url)}">
-${a.cover ? `<img src="${escapeHtml(a.cover)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : '<span class="album-nocover">open</span>'}
+${a.coverPhotoId ? `<span class="thumb-img" data-photo-id="${escapeHtml(a.coverPhotoId)}"></span>`
+: a.cover ? `<img src="${escapeHtml(a.cover)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.outerHTML='<span class=&quot;album-nocover&quot;>cover link expired &mdash; re-run the snippet</span>'">`
+: '<span class="album-nocover">open</span>'}
 </a>
 <div class="album-caption">${escapeHtml([a.location, a.date, a.other].filter(Boolean).join(' · ') || c.name)}</div>
 <span class="tag-x" data-album-remove="${c.id}" data-album-idx="${i}" title="Unlink">&times;</span>

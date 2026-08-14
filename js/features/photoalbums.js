@@ -28,7 +28,7 @@ import { data, queueSave, TAG_FIELDS } from '../state.js';
 import { escapeHtml, uid, todayStr, hydratePhotos } from '../utils.js';
 import { nameKey, editDistance } from '../googlecontacts.js';
 import { photoGet } from '../db.js';
-import { fetchGoogleImage } from '../files.js';
+import { fetchGoogleImage, storePhoto } from '../files.js';
 import { MissingKeyError, compareFaces } from '../ai.js';
 
 // Album titles are the only thing carrying identity, so a title that doesn't
@@ -328,16 +328,35 @@ const apply = document.getElementById('albums-apply');
 if (apply) apply.addEventListener('click', save);
 }
 
-function save() {
+// A cover embedded as a data: URI (see the snippet) is the actual photo
+// bytes, not a reference — storing it straight in the synced document would
+// bake tens of KB per album into a document that's rewritten whole on every
+// autosave. Routing it through storePhoto() (the same path every other
+// photo in this app takes) gets it onto the server as a proper attachment
+// and leaves only a small id behind, exactly like a connection's own photo.
+// Both keys are always returned (one cleared to '' rather than omitted) so
+// a re-save always fully overwrites the pair via Object.assign — leaving
+// one key untouched would let a stale value from an earlier save survive
+// alongside a fresh one that no longer matches it.
+async function resolveCover(row) {
+if (!row.cover || !row.cover.startsWith('data:')) return { cover: row.cover || '', coverPhotoId: '' };
+const blob = await fetch(row.cover).then((r) => r.blob());
+return { cover: '', coverPhotoId: await storePhoto(blob) };
+}
+
+async function save() {
+const status = document.getElementById('albums-status');
+const toSave = rows.filter((row) => row.chosenId && !row.applied);
+if (!toSave.length) return;
+if (status) status.textContent = `Saving ${toSave.length} link${toSave.length === 1 ? '' : 's'}…`;
 let n = 0;
-rows.forEach((row) => {
-if (!row.chosenId || row.applied) return;
+for (const row of toSave) {
 const conn = data.connections.find((c) => c.id === row.chosenId);
-if (!conn) return;
+if (!conn) continue;
 if (!Array.isArray(conn.photoAlbums)) conn.photoAlbums = [];
 // Keyed on the URL, so re-importing after a title change updates the
 // label in place instead of adding a duplicate album.
-const fields = { location: row.location, date: row.date, other: row.other, cover: row.cover, title: row.title };
+const fields = { location: row.location, date: row.date, other: row.other, title: row.title, ...(await resolveCover(row)) };
 const existing = conn.photoAlbums.find((a) => a.url === row.url);
 if (existing) Object.assign(existing, fields);
 else conn.photoAlbums.push({ url: row.url, ...fields });
@@ -352,10 +371,10 @@ if (!conn.dateLocations.some((v) => nameKey(v) === nameKey(row.location))) conn.
 }
 row.applied = true;
 n++;
-});
+}
 if (!n) return;
 queueSave();
-document.getElementById('albums-status').textContent = `Linked ${n} album${n === 1 ? '' : 's'}.`;
+if (status) status.textContent = `Linked ${n} album${n === 1 ? '' : 's'}.`;
 Promise.all([import('./connections.js'), import('./overview.js')])
 .then(([c, o]) => { c.renderConnections(); o.renderOverview(); });
 render();

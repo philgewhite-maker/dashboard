@@ -390,7 +390,12 @@ Album links are permanent, unlike the face-group links tried previously.
       let cover = '';
       for (const el of a.querySelectorAll('*')) {
         const b = getComputedStyle(el).backgroundImage;
-        if (b &amp;&amp; b.includes('usercontent')) { cover = b.slice(5, -2); break; }
+        // Mid-transition this can be a cross-fade of two layers, e.g.
+        // -fade(url("A") 8.8%, url("B") ...) — not a plain url("..."), so a
+        // fixed-offset slice grabbed the whole thing as garbage. Pull out
+        // the first real url(...) instead, wherever it's wrapped.
+        const m = b &amp;&amp; b.match(/url\("([^"]+)"\)/);
+        if (m &amp;&amp; m[1].includes('usercontent')) { cover = m[1]; break; }
       }
       // The grid requests tiny thumbnails (often 24px); ask for a usable one.
       if (cover) cover = cover.replace(/=s\d+/, '=s400');
@@ -432,6 +437,40 @@ Album links are permanent, unlike the face-group links tried previously.
       .map(a =&gt; a.getAttribute('href')).filter(Boolean);
     console.warn('No albums matched. Paste this back to Claude:', JSON.stringify(sample));
   }
+
+  // A cover URL only resolves for whoever is logged in at the moment it's
+  // fetched — the dashboard is a different site with no way to borrow this
+  // session, so a bare URL 403s the instant it's embedded there, no matter
+  // how fresh. Fetching each cover HERE, while still authenticated, and
+  // embedding the actual bytes as a data URI sidesteps that for good. A few
+  // at a time so it doesn't hammer Google; anything that fails (CORS, a
+  // slow connection, whatever) just keeps its plain URL — never worse than
+  // today, only ever better.
+  if (onAlbums) {
+    const withCover = out.albums.filter(a =&gt; a.cover &amp;&amp; a.cover.startsWith('http'));
+    if (withCover.length) {
+      console.log(`Fetching ${withCover.length} cover images while logged in — give this a few seconds…`);
+      const queue = [...withCover];
+      const embedOne = async (a) =&gt; {
+        try {
+          const res = await fetch(a.cover, { credentials: 'include' });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const blob = await res.blob();
+          a.cover = await new Promise((resolve, reject) =&gt; {
+            const reader = new FileReader();
+            reader.onload = () =&gt; resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+        } catch (e) { /* leave the plain URL — no worse than before */ }
+      };
+      const worker = async () =&gt; { while (queue.length) await embedOne(queue.shift()); };
+      await Promise.all(Array.from({ length: 5 }, worker));
+      const embedded = withCover.filter(a =&gt; a.cover.startsWith('data:')).length;
+      console.log(`Embedded ${embedded} of ${withCover.length} covers` + (embedded &lt; withCover.length ? ' — the rest kept their link and will show as expired in the dashboard.' : '.'));
+    }
+  }
+
   const json = JSON.stringify(out, null, 1);
   // copy() is a DevTools convenience global, injected only into a console
   // opened directly in that panel — it throws ReferenceError anywhere else
