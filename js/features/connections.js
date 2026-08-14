@@ -1,5 +1,6 @@
 import { data, queueSave, reachOutThreshold, isDormantStage, getLocalSettings, TAG_FIELDS, CONTACT_STATUS_LABELS, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness, slugifyField } from '../state.js';
-import { photoPut, photoDelete, photoUrl } from '../db.js';
+import { photoDelete, photoUrl } from '../db.js';
+import { storePhoto } from '../files.js';
 import {
 uid, todayStr, daysSince, escapeHtml, avatarHtml, hydratePhotos, scrollAndFlash, bindForm,
 resizeImageToBlob,
@@ -692,8 +693,7 @@ const files = Array.from(e.target.files).slice(0, 12 - conn.photoIds.length);
 for (const file of files) {
 try {
 const blob = await resizeImageToBlob(file, 900, 0.85);
-const id = uid();
-await photoPut(id, blob);
+const id = await storePhoto(blob);
 conn.photoIds.push(id);
 if (!conn.photoId) conn.photoId = id;
 } catch (err) { /* skip unreadable file */ }
@@ -899,8 +899,7 @@ let failed = 0;
 for (const file of files.slice(0, room)) {
 try {
 const blob = await resizeImageToBlob(file, 900, 0.85);
-const id = uid();
-await photoPut(id, blob);
+const id = await storePhoto(blob);
 conn.photoIds.push(id);
 if (!conn.photoId) conn.photoId = id;
 added++;
@@ -1036,8 +1035,7 @@ let photoId = null;
 const photoIds = [];
 const blobs = isProfile ? (cand.photoBlobs || []) : (cand.photoBlob ? [cand.photoBlob] : []);
 for (const blob of blobs) {
-const pid = uid();
-await photoPut(pid, blob);
+const pid = await storePhoto(blob);
 photoIds.push(pid);
 if (!photoId) photoId = pid;
 }
@@ -1107,8 +1105,7 @@ if (source.lastContact && (!target.lastContact || source.lastContact > target.la
 async function applyCandidateUpdate(existing, cand, isProfile) {
 const blobs = isProfile ? (cand.photoBlobs || []) : (cand.photoBlob ? [cand.photoBlob] : []);
 for (const blob of blobs) {
-const pid = uid();
-await photoPut(pid, blob);
+const pid = await storePhoto(blob);
 existing.photoIds.push(pid);
 if (!existing.photoId) existing.photoId = pid;
 }

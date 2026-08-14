@@ -125,7 +125,7 @@ if (salvaged) return { data: salvaged, truncated: true };
 throw new Error(`Response wasn't JSON: ${stripped.slice(0, 200)}`);
 }
 
-async function callAnthropic(content, maxTokens, modelOverride, purpose) {
+async function callAnthropic(content, maxTokens, modelOverride, purpose, tools) {
 const settings = await getLocalSettings();
 const apiKey = (settings.anthropicApiKey || '').trim();
 if (!apiKey) throw new MissingKeyError();
@@ -145,6 +145,7 @@ body: JSON.stringify({
 model,
 max_tokens: maxTokens || 1500,
 messages: [{ role: 'user', content }],
+...(tools ? { tools } : {}),
 }),
 });
 } catch (networkErr) {
@@ -170,12 +171,19 @@ await recordUsage(purpose || 'other', model, result.usage);
 if (result.stop_reason === 'max_tokens') {
 console.warn('Response was truncated at max_tokens — the JSON may be incomplete.', result);
 }
-const textBlock = (result.content || []).find((b) => b.type === 'text');
-if (!textBlock) throw new Error('No text in response');
+// A server-executed tool (like web_search) runs inside this same response —
+// no client-side loop needed — but it interleaves non-text tool-use/result
+// blocks with one or more text blocks, so the final answer isn't always the
+// single text block a plain call would have. Concatenating every text block
+// gets the full answer regardless of how many search rounds it took.
+const text = tools
+? (result.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n')
+: ((result.content || []).find((b) => b.type === 'text') || {}).text;
+if (!text) throw new Error('No text in response');
 try {
-return extractJson(textBlock.text);
+return extractJson(text);
 } catch (parseErr) {
-console.error('Could not parse JSON from Claude response:', textBlock.text);
+console.error('Could not parse JSON from Claude response:', text);
 throw parseErr;
 }
 }
@@ -418,6 +426,71 @@ fromCache: !!cachedText,
 };
 }
 
+// ---- Recipe extraction (Menu tab) ----
+//
+// Three intake formats share one output shape and one prompt, differing
+// only in how the source material reaches Claude: an image goes through the
+// same vision path as everything else in this file; a PDF uses the
+// Messages API's "document" content block (base64, same shape as an image
+// block, verified against Anthropic's current docs rather than assumed —
+// this is a shape that has changed before); a web page's HTML is fetched
+// server-side (the browser can't read most sites' HTML cross-origin any
+// more than it can read Google's photo bytes) and sent as plain text, no
+// vision needed.
+const RECIPE_MAX_TOKENS = 3000;
+function recipePrompt() {
+return 'Extract this recipe. Return ONLY a JSON object, no other text, no markdown fences: '
++ '{"name":"", "ingredients":["1 tbsp olive oil", "2 cloves garlic, minced"], "instructions":["Step one.", "Step two."], "notes":""}. '
++ 'ingredients: one string per ingredient, quantity included where given, in the order listed. '
++ 'instructions: one string per step, in order, as written — do not merge or split steps. '
++ 'notes: anything else worth keeping (serving size, prep/cook time, a tip) that isn\'t an ingredient or a step, or "" if none. '
++ 'If no recipe is present, return {"name":"", "ingredients":[], "instructions":[], "notes":""}.';
+}
+
+async function extractRecipeFromImage(file) {
+const readable = await ensureBrowserReadableImage(file);
+const base64 = await fileToBase64(readable);
+const { data: raw } = await callAnthropic([
+{ type: 'image', source: { type: 'base64', media_type: readable.type || 'image/jpeg', data: base64 } },
+{ type: 'text', text: recipePrompt() },
+], RECIPE_MAX_TOKENS, null, 'Recipe import');
+return normaliseRecipeExtract(raw);
+}
+
+async function extractRecipeFromPdf(file) {
+const base64 = await fileToBase64(file);
+const { data: raw } = await callAnthropic([
+{ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } },
+{ type: 'text', text: recipePrompt() },
+], RECIPE_MAX_TOKENS, null, 'Recipe import');
+return normaliseRecipeExtract(raw);
+}
+
+// `html` arrives already fetched by recipe-fetch.php — most recipe sites
+// embed a schema.org Recipe as JSON-LD for search-engine rich snippets,
+// which recipes.js checks for and passes through directly when present
+// (reliable and free — no model call needed). This is the fallback: hand
+// the raw HTML to Claude as text when no such structured data was found.
+async function extractRecipeFromHtml(html, sourceUrl) {
+const truncated = html.length > 60000 ? html.slice(0, 60000) : html;
+const { data: raw } = await callTextJson(
+`This is the HTML of a recipe page${sourceUrl ? ` (${sourceUrl})` : ''}. ${recipePrompt()}\n\nHTML:\n${truncated}`,
+RECIPE_MAX_TOKENS,
+null,
+'Recipe import',
+);
+return normaliseRecipeExtract(raw);
+}
+
+function normaliseRecipeExtract(raw) {
+return {
+name: (raw && raw.name) || '',
+ingredients: Array.isArray(raw && raw.ingredients) ? raw.ingredients.map(String) : [],
+instructions: Array.isArray(raw && raw.instructions) ? raw.instructions.map(String) : [],
+notes: (raw && raw.notes) || '',
+};
+}
+
 // Disambiguates a fuzzy name match against an incoming photo — "Alena" and
 // "Alena A" are a plausible fuzzy match on name alone, but obviously
 // different people once both faces are visible. Deliberately not run for
@@ -440,7 +513,36 @@ reason: (data && data.reason) || '',
 };
 }
 
+// ---- Shopping price search ----
+//
+// Uses Anthropic's server-hosted web_search tool: the search itself runs on
+// Anthropic's infrastructure inside this one request, not as a second round
+// trip this app has to drive. Billed per-search on top of tokens — that
+// per-search fee isn't in PRICES_PER_MTOK, so the Settings usage estimate
+// undercounts this purpose specifically.
+const SHOPPING_SEARCH_MODEL = 'claude-haiku-4-5-20251001';
+const SHOPPING_SEARCH_MAX_TOKENS = 2000;
+function shoppingSearchPrompt(item) {
+return `Search for where to buy "${item}" online in the UK, from a couple of well-known retailers that suit this item (e.g. a supermarket, Amazon, a relevant specialist). For each result, note the retailer, the exact product name, the price if shown, and the direct product page URL. `
++ 'After searching, respond with ONLY a JSON array, no other text, no markdown fences, in this exact shape: '
++ '[{"retailer":"","name":"","price":"","url":""}]. Only include results with a real product URL you actually found via search — never invent one. Best matches first, at most 6 results. If nothing useful turns up, return [].';
+}
+async function searchShoppingItem(item) {
+const { data: raw } = await callAnthropic(
+[{ type: 'text', text: shoppingSearchPrompt(item) }],
+SHOPPING_SEARCH_MAX_TOKENS,
+SHOPPING_SEARCH_MODEL,
+'Shopping search',
+[{ type: 'web_search_20260209', name: 'web_search', max_uses: 3 }],
+);
+const results = Array.isArray(raw) ? raw : [];
+return results.filter((r) => r && r.url).slice(0, 6).map((r) => ({
+retailer: String(r.retailer || ''), name: String(r.name || ''), price: String(r.price || ''), url: String(r.url || ''),
+}));
+}
+
 export {
 MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot, quickScanScreenshot,
 callTextJson, DEFAULT_MODEL, summarizeUsage, currentMonthKey, compareFaces,
+extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShoppingItem,
 };

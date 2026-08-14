@@ -330,11 +330,50 @@ The quick-capture box skips the Inbox triage step: picking a context there
 already answers the one question triage exists to ask, so the item goes
 straight to Next Actions.
 
-**Not built**: comparing retailer prices or a two-click add-to-basket. That
-would need either a retailer API (rarely available for personal scripts) or
-driving a real browser session against each site — neither fits a static
-page with no backend of its own. Flagged in the panel itself rather than
-silently dropped.
+**Search prices**: each item has a "Search prices" button that runs an AI web
+search (Claude's server-hosted `web_search` tool — the search itself runs on
+Anthropic's side within one API call, no server of ours involved) for that
+item across a couple of well-known UK retailers, and shows retailer/name/price
+as clickable links straight to the product page.
+
+**Not built**: a two-click add-to-basket. That would need an authenticated
+session against each retailer's site — driving a real browser, not something
+an API call can do — so it stays a manual click-through from the search
+results. Flagged in the panel itself rather than silently dropped.
+
+## Menu tab
+
+Recipes imported from a photo, a PDF, or a web page URL, rated on the same
+configurable star mechanism as Connections (a separate list — Taste/Health/
+Prep by default), with an occasional nudge to actually cook one of them.
+
+**Import**: a photo or PDF goes straight to Claude's vision/document reading
+(the PDF path uses the Messages API's `document` content block). A web URL is
+fetched server-side by `server/recipe-fetch.php` (SSRF-hardened: resolves the
+hostname, rejects anything pointing at a private/internal address, then pins
+the connection to the validated IP) and checked for a schema.org Recipe
+JSON-LD block first — most recipe sites embed one for search-engine rich
+snippets, and reading it is free and more reliable than a model call. Only
+when that's absent does the raw HTML go to Claude as a fallback. Either way
+you get an editable review screen (name/ingredients/instructions/notes)
+before anything is saved.
+
+**Setup**: like `recipe-fetch.php` needs the same treatment as the other
+server files — copy `server/recipe-fetch.php.example` to
+`server/recipe-fetch.php`, set `$SECRET` to match `sync.php`, upload it next
+to the others. Without it, photo and PDF import still work; only the web-URL
+import needs it.
+
+**Cook mode**: opens a full-screen, large-text view of just the ingredients
+and steps — the "actually cooking, phone propped up, hands messy" view,
+separate from the edit form. "Made it today" from there stamps `lastMade` and
+feeds the nudge on the list view, which picks whichever recipe has gone
+longest without being made (weighted slightly by rating) and offers a
+one-tap "Cook it".
+
+**Google Photos**: unlike Connections' full harvest-and-match pipeline, a
+recipe just takes a single pasted album share link — a deliberate scope cut
+given how much smaller a recipe's photo needs are than a person's.
 
 ## Task attachments
 
@@ -439,18 +478,25 @@ to spot by eye:
 
 ## Photo sync
 
-Photos — on connections and on tasks — predate attachments, and originally
-lived only in the IndexedDB of the device that added them. Their *ids* were
-always part of the synced document, but the bytes weren't, so a connection
-imported on the desktop showed initials instead of a face on the phone,
-looking identical to "no photo was ever added".
+Every photo capture point (screenshot import, "add photo" on a connection,
+task/recipe photo attachments) now uploads straight to the same server as
+attachments as soon as it's added, so a photo added on one device shows up on
+every other device without any extra step. If the upload fails for any
+reason — sync isn't set up yet, you're offline, the server hiccups — it falls
+back to storing the photo locally on that device only and doesn't block
+saving whatever you were adding.
 
-**Settings → Photo sync** fixes that: it counts what's on this device only
-and uploads it to the same server as attachments, rewriting every reference
-(including a connection's avatar `photoId` and any photo shared between
-records) to the new server id. It's safe to re-run and safe to stop partway
-— a failed or interrupted upload leaves the original photo untouched and
-still queued. Run it once on each device that holds photos.
+Photos predate that behaviour, though, and older photos (or ones added while
+offline) can still end up local-only: their *ids* were always part of the
+synced document, but the bytes weren't, so a connection imported on one
+device shows initials instead of a face on another, looking identical to "no
+photo was ever added". **Settings → Photo sync** is the mop-up for that: it
+counts what's on this device only and uploads it to the server, rewriting
+every reference (including a connection's avatar `photoId` and any photo
+shared between records) to the new server id. It's safe to re-run and safe to
+stop partway — a failed or interrupted upload leaves the original photo
+untouched and still queued. Worth running once on each device that's been
+used offline or before sync was set up.
 
 Anything still unresolved renders as a hatched "?" rather than a blank
 square, so a photo that lives on another device is visibly different from

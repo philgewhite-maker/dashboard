@@ -11,6 +11,8 @@ server/notion.php
 server/files.php
 # image-proxy.php holds the same shared secret too.
 server/image-proxy.php
+# recipe-fetch.php holds the same shared secret too.
+server/recipe-fetch.php
 
 # The synced document and its lock/temp files, in case anyone ever points
 # $DATA_FILE inside the repo folder while testing.

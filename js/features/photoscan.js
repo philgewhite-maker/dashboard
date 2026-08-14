@@ -10,7 +10,7 @@
 // something you do repeatedly as it grows.
 import { data, queueSave, blankTask } from '../state.js';
 import { uid, escapeHtml, resizeImageToBlob } from '../utils.js';
-import { photoPut } from '../db.js';
+import { storePhoto } from '../files.js';
 import { MissingKeyError, quickScanScreenshot, extractProfileFromScreenshot } from '../ai.js';
 
 // Scan results for the current batch. Not persisted: they're a working set
@@ -107,9 +107,7 @@ const existing = data.connections.find((c) => c.name.toLowerCase() === s.name.to
 const photoIds = [];
 const blobs = (rich.photoBlobs && rich.photoBlobs.length) ? rich.photoBlobs : [await resizeImageToBlob(s.file, 1200, 0.85)];
 for (const blob of blobs.filter(Boolean).slice(0, 6)) {
-const id = uid();
-await photoPut(id, blob);
-photoIds.push(id);
+photoIds.push(await storePhoto(blob));
 }
 
 const fill = (target) => {

@@ -11,6 +11,7 @@
 // attachment still opens offline.
 import { getConfig } from './sync/selfhost.js';
 import { photoPut, photoGet } from './db.js';
+import { uid } from './utils.js';
 
 class FilesNotConfiguredError extends Error {
 constructor() {
@@ -95,6 +96,30 @@ const meta = await res.json();
 // file never re-downloads it.
 try { await photoPut(meta.id, file); } catch (e) { /* cache is optional */ }
 return meta;
+}
+
+// The one place a freshly captured photo (from a screenshot import, a manual
+// "add photo", a task/recipe attachment) turns into a stored id. Uploads
+// straight to the server when sync is configured, rather than landing
+// local-only and waiting on a manual Photo sync run (see photosync.js) to
+// ever reach another device — that step is easy to forget, and "no photo
+// synced yet" looks identical to "no photo was ever added". Falls back to
+// local-only storage on any failure (not configured, offline, server hiccup)
+// so a flaky connection never blocks saving the record; Photo sync still
+// exists to mop up whatever ends up local either way.
+async function storePhoto(blob) {
+try {
+const type = blob.type || 'image/jpeg';
+const ext = type.includes('png') ? 'png' : type.includes('webp') ? 'webp' : 'jpg';
+const file = new File([blob], `photo-${uid()}.${ext}`, { type });
+const meta = await uploadAttachment(file);
+return meta.id;
+} catch (err) {
+console.error('Photo upload failed, storing locally instead:', err);
+const id = uid();
+await photoPut(id, blob);
+return id;
+}
 }
 
 // Returns a Blob for an attachment, from the local cache when possible.
@@ -206,6 +231,6 @@ return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 
 export {
 FilesNotConfiguredError,
-uploadAttachment, fetchAttachment, deleteAttachment, openAttachment, formatBytes,
+uploadAttachment, storePhoto, fetchAttachment, deleteAttachment, openAttachment, formatBytes,
 isServerPhotoId, serverPhotoUrl, fetchGoogleImage,
 };

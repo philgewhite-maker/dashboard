@@ -6,17 +6,19 @@
 // just by opening it in Tasks — nothing shopping-specific has to duplicate
 // that editing UI, it's the same task detail screen.
 //
-// The "fancy feature" from the original ask — comparing retailer prices and
-// adding to a basket in two clicks — isn't built. It would need either a
-// retailer API (rarely available to a personal script) or driving a real
-// browser session against each retailer's site, neither of which fits a
-// client-only static page. Flagged in the panel rather than silently
-// dropped.
+// "Search prices" covers the comparison half of the original ask — an AI web
+// search finds retailers, prices and product links for an item. Adding to a
+// basket stays a manual click-through: that needs an authenticated session
+// against each retailer's site, which doesn't fit a client-only static page.
 import { data, queueSave, SHOPPING_CONTEXTS } from '../state.js';
 import { escapeHtml, daysUntil } from '../utils.js';
 import { captureTask, revealTask } from './tasks.js';
+import { MissingKeyError, searchShoppingItem } from '../ai.js';
 
 let showDone = false;
+// Search results are a working set for the current screen, not app data —
+// re-searching costs nothing structurally, so nothing here is persisted.
+const searchState = new Map(); // taskId -> { status: 'loading'|'done'|'error', results, message }
 
 function dueBadge(t) {
 if (!t.due) return '';
@@ -34,11 +36,27 @@ const others = (t.contexts || []).filter((c) => c !== ctx);
 return others.length ? ` <span class="shop-also">also: ${escapeHtml(others.join(', '))}</span>` : '';
 }
 
+function searchResultsHtml(t) {
+const s = searchState.get(t.id);
+if (!s) return '';
+if (s.status === 'loading') return '<div class="shop-search-results loading">Searching…</div>';
+if (s.status === 'error') return `<div class="shop-search-results error">${escapeHtml(s.message)}</div>`;
+if (s.results.length === 0) return '<div class="shop-search-results empty">No results found.</div>';
+return `<div class="shop-search-results">${s.results.map((r) => `
+<a class="shop-search-hit" href="${escapeHtml(r.url)}" target="_blank" rel="noopener noreferrer">
+<span class="shop-hit-retailer">${escapeHtml(r.retailer || 'Link')}</span>
+<span class="shop-hit-name">${escapeHtml(r.name || t.title)}</span>
+${r.price ? `<span class="shop-hit-price">${escapeHtml(r.price)}</span>` : ''}
+</a>`).join('')}</div>`;
+}
+
 function rowHtml(t, ctx) {
 return `<div class="shop-row${t.bucket === 'done' ? ' done' : ''}">
 <input type="checkbox" class="task-check" data-shop-done="${t.id}" ${t.bucket === 'done' ? 'checked' : ''}>
 <span class="shop-title" data-shop-open="${t.id}">${escapeHtml(t.title || '(untitled)')}</span>
 ${dueBadge(t)}${otherContextsNote(t, ctx)}
+${t.bucket === 'done' ? '' : `<button class="sync-btn sm shop-search-btn" type="button" data-shop-search="${t.id}">Search prices</button>`}
+${searchResultsHtml(t)}
 </div>`;
 }
 
@@ -80,6 +98,24 @@ switchTab('tasks');
 revealTask(span.dataset.shopOpen);
 });
 });
+el.querySelectorAll('[data-shop-search]').forEach((btn) => {
+btn.addEventListener('click', () => runSearch(btn.dataset.shopSearch));
+});
+}
+
+async function runSearch(taskId) {
+const t = data.tasks.find((x) => x.id === taskId);
+if (!t) return;
+searchState.set(taskId, { status: 'loading' });
+render();
+try {
+const results = await searchShoppingItem(t.title);
+searchState.set(taskId, { status: 'done', results });
+} catch (err) {
+const message = err instanceof MissingKeyError ? 'Add an Anthropic API key in Settings first.' : (err.message || String(err));
+searchState.set(taskId, { status: 'error', message });
+}
+render();
 }
 
 function initShopping() {

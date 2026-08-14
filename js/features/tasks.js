@@ -14,9 +14,9 @@
 //    is the point of a tickler: something you genuinely cannot act on until
 //    March should not be adding noise in January.
 import { data, queueSave, TASK_BUCKETS, blankTask } from '../state.js';
-import { photoPut, photoDelete } from '../db.js';
+import { photoDelete } from '../db.js';
 import { uid, todayStr, escapeHtml, hydratePhotos, resizeImageToBlob, daysUntil, daysSince } from '../utils.js';
-import { uploadAttachment, deleteAttachment, openAttachment, formatBytes } from '../files.js';
+import { uploadAttachment, storePhoto, deleteAttachment, openAttachment, formatBytes } from '../files.js';
 
 const BUCKET_LABEL = Object.fromEntries(TASK_BUCKETS.map((b) => [b.bucket, b.label]));
 // Buckets shown as filing destinations. `done` is reached by ticking a task
@@ -449,8 +449,7 @@ const failures = [];
 for (const file of files.slice(0, 6 - (t.photoIds || []).length)) {
 try {
 const blob = await resizeImageToBlob(file, 1200, 0.85);
-const id = uid();
-await photoPut(id, blob);
+const id = await storePhoto(blob);
 t.photoIds.push(id);
 } catch (err) { console.error('Could not attach task photo:', err); failures.push(err.message); }
 }
@@ -587,8 +586,7 @@ let lastError = null;
 for (const file of files) {
 try {
 const blob = await resizeImageToBlob(file, 1200, 0.85);
-const id = uid();
-await photoPut(id, blob);
+const id = await storePhoto(blob);
 photoIds.push(id);
 } catch (err) { console.error('Could not save captured photo:', err); lastError = err; }
 }

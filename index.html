@@ -36,6 +36,7 @@
 <button class="tab-btn" type="button" data-tab-btn="datingadmin">Dating admin</button>
 <button class="tab-btn" type="button" data-tab-btn="finances">Finances</button>
 <button class="tab-btn" type="button" data-tab-btn="shopping">Shopping</button>
+<button class="tab-btn" type="button" data-tab-btn="menu">Menu</button>
 <button class="tab-btn" type="button" data-tab-btn="business">Business</button>
 <button class="tab-btn" type="button" data-tab-btn="settings">Settings</button>
 </div>
@@ -265,6 +266,33 @@ Not built: comparing retailer prices or adding to a basket in two clicks. That w
 </div>
 </section>
 
+<section class="panel wide" id="recipe-capture-panel" data-tab="menu">
+<div class="panel-head">
+<h2><span class="dot amber"></span>Import a recipe</h2>
+</div>
+<div class="sync-row">
+<label class="file-btn" for="recipe-photo-input">From a photo</label>
+<input type="file" id="recipe-photo-input" accept="image/*" style="display:none;">
+<label class="file-btn" for="recipe-pdf-input">From a PDF</label>
+<input type="file" id="recipe-pdf-input" accept="application/pdf" style="display:none;">
+<input type="text" autocomplete="off" id="recipe-url-input" placeholder="Paste a recipe web page URL…" style="flex:1 1 220px;min-width:180px;">
+<button class="sync-btn" id="recipe-url-btn" type="button">Import from URL</button>
+<span class="sync-status" id="recipe-import-status"></span>
+</div>
+<div class="settings-note" style="margin:8px 0 0;">A web import first looks for the recipe data most sites embed for search engines, which is exact and free; only falls back to reading the page with AI if that's not there.</div>
+<div id="recipe-review"></div>
+</section>
+
+<section class="panel wide" id="recipe-list-panel" data-tab="menu">
+<div class="panel-head">
+<h2><span class="dot sage"></span>Recipes</h2>
+<span class="count-badge" id="recipe-count"></span>
+</div>
+<div id="recipe-list"></div>
+</section>
+
+<div id="cook-host"></div>
+
 <section class="panel wide" id="overview-panel" data-tab="dating">
 <div class="panel-head">
 <h2><span class="dot rose"></span>Connections Overview</h2>
@@ -482,6 +510,14 @@ Album links are permanent, unlike the face-group links tried previously.
 The detailed star ratings shown on every connection. Removing one clears every rating already given under it &mdash; there's no way back from that, so it asks first.
 </div>
 <div class="tag-editor" id="rating-categories-list"></div>
+</div>
+
+<div class="settings-block">
+<h3>Menu — recipe rating categories</h3>
+<div class="settings-note" style="margin:0 0 8px;">
+Same idea as Connections' ratings, a separate list (Taste/Health/Prep by default). Removing one clears every rating already given under it, so it asks first.
+</div>
+<div class="tag-editor" id="recipe-rating-categories-list"></div>
 </div>
 
 <div class="settings-block">
