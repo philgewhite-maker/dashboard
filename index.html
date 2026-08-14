@@ -324,15 +324,28 @@ Album links are permanent, unlike the face-group links tried previously.
   window.__dash = window.__dash || { albums: new Map(), people: new Set() };
   const onAlbums = location.pathname.includes('album');
   const grab = () => {
+    // Verified against the live page: each album has TWO anchors sharing an
+    // href (a cover tile and a text tile), aria-label is absent, and the
+    // cover is a CSS background-image on a descendant, not an img. So both
+    // anchors are merged by URL, keeping whichever piece each one carries.
     document.querySelectorAll('a[href*="/album/"]').forEach(a =&gt; {
-      const label = (a.getAttribute('aria-label') || a.innerText || '').trim();
-      if (!label) return;
-      const title = label.split('\n')[0].replace(/,\s*\d+\s*items?$/i, '').trim();
-      const m = label.match(/(\d+)\s*items?/i);
-      const img = a.querySelector('img');
-      window.__dash.albums.set(a.href.split('?')[0], {
-        title, url: a.href.split('?')[0],
-        cover: img ? img.src : '', count: m ? +m[1] : 0,
+      const url = a.href.split('?')[0];
+      const lines = (a.innerText || '').split('\n').map(s =&gt; s.trim()).filter(Boolean);
+      let cover = '';
+      for (const el of a.querySelectorAll('*')) {
+        const b = getComputedStyle(el).backgroundImage;
+        if (b &amp;&amp; b.includes('usercontent')) { cover = b.slice(5, -2); break; }
+      }
+      // The grid requests tiny thumbnails (often 24px); ask for a usable one.
+      if (cover) cover = cover.replace(/=s\d+/, '=s400');
+      const titleLine = lines.find(l =&gt; !/^(no items|\d+\s*items?|more options)$/i.test(l));
+      const countLine = lines.find(l =&gt; /^\d+\s*items?$/i.test(l));
+      const prev = window.__dash.albums.get(url) || {};
+      window.__dash.albums.set(url, {
+        url,
+        title: prev.title || titleLine || '',
+        count: prev.count || (countLine ? parseInt(countLine, 10) : 0),
+        cover: prev.cover || cover,
       });
     });
     document.querySelectorAll('a[href*="/search/"]').forEach(a =&gt; {
@@ -352,7 +365,10 @@ Album links are permanent, unlike the face-group links tried previously.
     await new Promise(r =&gt; setTimeout(r, 320));
   }
   grab();
-  const out = { albums: [...window.__dash.albums.values()], people: [...window.__dash.people] };
+  const out = {
+    albums: [...window.__dash.albums.values()].filter(a =&gt; a.title),
+    people: [...window.__dash.people],
+  };
   if (onAlbums &amp;&amp; out.albums.length === 0) {
     // Google changes this markup from time to time. Rather than fail
     // silently, show what IS on the page so the selector can be corrected.
