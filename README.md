@@ -428,6 +428,40 @@ also inconsistent about which field carries what — some put the link in
 `url`, many put it in `text`, some send only a title — so the task is built
 from whatever actually arrived.
 
+## Tinder web profile import
+
+Dating admin → "Import a Tinder profile". Reads name, age, and whatever
+"Family plans / Education / Height / Looking for" etc. fields a match has
+filled in, plus their photos — straight from the live page's DOM, not a
+screenshot, so there's no AI cost and it's exact rather than read off an
+image.
+
+Open the profile on tinder.com, run the console snippet in that panel, paste
+the JSON here. Every field is generic by design: an icon named
+`.../descriptors/{type}@2x.png` sits inside an `<li>` with its own `<h3>`
+label for every "vital" (kids, education, smoking, pets, communication
+style, zodiac...), so the snippet picks up whatever this profile filled in
+without hardcoding each one, and keeps working if Tinder adds more. "Looking
+for" and prompt answers share a similar `<h2>` label + nearby value shape.
+
+A couple of fields (Family plans → kids, Education → education) map onto
+existing connection fields and only ever fill a gap, never overwrite
+something you already typed. Everything else — communication style, zodiac,
+"Looking for", prompt answers — has no dedicated field in this app, so it's
+kept as a readable `Label: value` line appended to notes instead of being
+dropped.
+
+**Photos are simpler here than Google's.** Tinder's photo CDN
+(`images-ssl.gotinder.com`) is genuinely public — verified live, a photo URL
+loads anonymously with no session at all, unlike Google Photos' private
+per-account URLs. So there's no byte-capture trick needed: the browser just
+fetches each one directly and stores it through the same `storePhoto()` path
+as every other photo in this app.
+
+Every field is shown for review, checkbox-selected, before anything is
+saved — same rule as every other AI- or scrape-assisted import in this app:
+informs a human decision, never applies silently.
+
 ## Google Photos albums
 
 Dating admin → "Google Photos albums". Links albums to connections using a

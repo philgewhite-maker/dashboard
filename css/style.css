@@ -302,6 +302,8 @@ gap:12px;
 }
 .album-strip{grid-template-columns:repeat(auto-fill,minmax(84px,1fr));margin-top:6px;}
 .album-card{position:relative;min-width:0;}
+.tinder-fields{display:flex;flex-direction:column;gap:4px;margin-top:8px;}
+.tinder-field-row{display:flex;align-items:baseline;gap:6px;font-size:12px;font-weight:400;text-transform:none;letter-spacing:normal;}
 .album-thumb{
 display:block;
 aspect-ratio:1/1;

@@ -327,6 +327,87 @@ Not built: comparing retailer prices or adding to a basket in two clicks. That w
 </div>
 </section>
 
+<section class="panel wide" id="tinder-panel" data-tab="datingadmin">
+<div class="panel-head">
+<h2><span class="dot plum"></span>Import a Tinder profile</h2>
+</div>
+<div class="settings-note" style="margin:0 0 10px;">
+Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for&rdquo; etc. this person filled in, and their photos &mdash; straight from the page, not a screenshot. Open their profile on <a href="https://tinder.com/app/matches" target="_blank" rel="noopener">tinder.com</a>, run the snippet below in the console (F12 &rarr; Console), then paste the result here.
+</div>
+<details style="margin:0 0 10px;">
+<summary style="cursor:pointer;color:var(--muted);font-size:13px;">Show the console snippet</summary>
+<pre id="tinder-snippet" style="white-space:pre-wrap;font-size:12px;background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:10px;margin:8px 0;">(async () => {
+  const $$ = (sel, root) =&gt; [...(root || document).querySelectorAll(sel)];
+  const GROUP_HEADERS = new Set(['Essentials', 'Lifestyle', 'Interests', 'Messages', 'Photos']);
+
+  // Verified against a real captured profile page: name and age share one
+  // &lt;h1&gt; whose aria-label is "{name} {age} years".
+  const h1 = document.querySelector('h1[aria-label]');
+  let name = '', age = '';
+  if (h1) {
+    const m = (h1.getAttribute('aria-label') || '').match(/^(.+?)\s+(\d+)\s+years?$/);
+    if (m) { name = m[1].trim(); age = m[2]; } else { name = h1.textContent.trim(); }
+  }
+
+  const fields = [];
+  const seen = new Set();
+  // Every "vital" (kids, education, smoking, pets, communication style,
+  // zodiac, and whatever else Tinder adds) is an icon named
+  // .../descriptors/{type}@2x.png inside an &lt;li&gt; with its own &lt;h3&gt;
+  // label &mdash; generic by design, so it picks up whatever this profile
+  // filled in without hardcoding each field.
+  $$('img[src*="/descriptors/"]').forEach((img) =&gt; {
+    const li = img.closest('li');
+    if (!li) return;
+    const h3 = li.querySelector('h3');
+    const label = h3 ? h3.textContent.trim() : '';
+    const valueEl = [...li.querySelectorAll('div')].find((d) =&gt; d.textContent.trim() &amp;&amp; !d.querySelector('img') &amp;&amp; !d.querySelector('h3'));
+    const value = valueEl ? valueEl.textContent.trim() : '';
+    if (label &amp;&amp; value &amp;&amp; !seen.has(label)) { fields.push({ label, value }); seen.add(label); }
+  });
+  // "Looking for" and prompt answers ("My biography would be called: ...")
+  // share a shape too: an &lt;h2&gt; label with its answer nearby. Skips known
+  // section headers, which wrap a LIST rather than carrying one value.
+  $$('h2').forEach((h2) =&gt; {
+    const label = h2.textContent.trim();
+    if (!label || seen.has(label) || GROUP_HEADERS.has(label)) return;
+    const card = h2.closest('section') || (h2.parentElement &amp;&amp; h2.parentElement.parentElement);
+    if (!card) return;
+    const valueEl = [...card.querySelectorAll('div, span')].find((el) =&gt; el.textContent.trim() &amp;&amp; el.children.length === 0 &amp;&amp; !h2.contains(el) &amp;&amp; el !== h2);
+    const value = valueEl ? valueEl.textContent.trim() : '';
+    if (value &amp;&amp; value !== label) { fields.push({ label, value }); seen.add(label); }
+  });
+
+  // Photos load from a public CDN with no login needed (verified) &mdash;
+  // unlike Google Photos, no byte-capture trick is needed, just ask for a
+  // bigger size than the thumbnail grid uses.
+  const photos = [...new Set($$('*').map((el) =&gt; {
+    const b = getComputedStyle(el).backgroundImage;
+    const m = b &amp;&amp; b.match(/url\("([^"]+)"\)/);
+    return m &amp;&amp; m[1].includes('gotinder.com') ? m[1].replace(/\/\d+x\d+_/, '/640x800_') : null;
+  }).filter(Boolean))];
+
+  const out = { name, age, fields, photos };
+  const json = JSON.stringify(out, null, 1);
+  let copied = false;
+  try { copy(json); copied = true; } catch (e) { /* not in a real DevTools console */ }
+  if (!copied) {
+    try { await navigator.clipboard.writeText(json); copied = true; } catch (e) { /* no clipboard permission/focus */ }
+  }
+  console.log((copied ? 'Copied — ' : 'Could not auto-copy, select and copy manually — ')
+    + `${name || '(no name found)'}, ${age || '?'}: ${fields.length} field${fields.length === 1 ? '' : 's'}, ${photos.length} photo${photos.length === 1 ? '' : 's'}.`);
+  if (!copied) console.log(json);
+})();</pre>
+<button class="sync-btn" type="button" id="tinder-copy-snippet">Copy snippet</button>
+</details>
+<textarea id="tinder-input" rows="4" style="width:100%;font-family:monospace;font-size:12px;" placeholder="Paste the copied JSON here"></textarea>
+<div class="sync-row" style="margin-top:8px;">
+<button class="sync-btn" id="tinder-import-btn" type="button">Read profile</button>
+<span class="sync-status" id="tinder-status"></span>
+</div>
+<div id="tinder-review"></div>
+</section>
+
 <section class="panel wide" id="photoscan-panel" data-tab="datingadmin">
 <div class="panel-head">
 <h2><span class="dot amber"></span>Scan a batch of screenshots</h2>
