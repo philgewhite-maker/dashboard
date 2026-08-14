@@ -346,6 +346,24 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
   const $$ = (sel, r) =&gt; [...(r || root).querySelectorAll(sel)];
   const GROUP_HEADERS = new Set(['Essentials', 'Lifestyle', 'Interests', 'Messages', 'Photos']);
 
+  // Some sections (a photo carousel's other slides, apparently also fields
+  // further down a long profile — verified: a second captured page had
+  // "Lives in London" and "160 cm" but nothing for Languages, which the
+  // profile visibly had) only render into the DOM once scrolled into view.
+  // Scrolling the whole panel first, before reading anything, is the same
+  // fix already needed for photos, just applied earlier.
+  const scrollBox = [...document.querySelectorAll('div')]
+    .filter((d) =&gt; d.scrollHeight &gt; d.clientHeight + 300 &amp;&amp; d.clientHeight &gt; 200)
+    .sort((a, b) =&gt; b.scrollHeight - a.scrollHeight)[0];
+  if (scrollBox) {
+    for (let y = 0; y &lt; scrollBox.scrollHeight; y += 400) {
+      scrollBox.scrollTop = y;
+      await new Promise((r) =&gt; setTimeout(r, 200));
+    }
+    scrollBox.scrollTop = 0;
+    await new Promise((r) =&gt; setTimeout(r, 200));
+  }
+
   // Verified against a real captured profile page: name and age share one
   // &lt;h1&gt; whose aria-label is "{name} {age} years".
   const h1 = root.querySelector('h1[aria-label]');
@@ -358,7 +376,7 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
   const fields = [];
   const seen = new Set();
   // Every "vital" (kids, education, smoking, pets, communication style,
-  // zodiac, and whatever else Tinder adds) is an icon named
+  // zodiac, languages, and whatever else Tinder adds) is an icon named
   // .../descriptors/{type}@2x.png inside an &lt;li&gt; with its own &lt;h3&gt;
   // label &mdash; generic by design, so it picks up whatever this profile
   // filled in without hardcoding each field.
@@ -371,17 +389,72 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
     const value = valueEl ? valueEl.textContent.trim() : '';
     if (label &amp;&amp; value &amp;&amp; !seen.has(label)) { fields.push({ label, value }); seen.add(label); }
   });
+
+  // A second, unlabeled strip right under the name (verified against a
+  // second captured page) — height, job+employer, school, city, pronouns —
+  // each an inline &lt;svg&gt; icon (not a descriptors/ png) followed by ONE
+  // value div with no &lt;h3&gt; of its own, so the label has to come from the
+  // shape of the text itself rather than a heading next to it.
+  const seenText = new Set();
+  root.querySelectorAll('li').forEach((li) =&gt; {
+    if (li.querySelector('img[src*="/descriptors/"]') || li.querySelector('h3') || !li.querySelector('svg')) return;
+    const valueEl = [...li.querySelectorAll('div')].find((d) =&gt; d.textContent.trim() &amp;&amp; d.children.length === 0);
+    if (!valueEl) return;
+    const text = valueEl.textContent.trim();
+    if (!text || seenText.has(text)) return;
+    seenText.add(text);
+    const livesIn = text.match(/^Lives in (.+)$/);
+    if (/^\d+\s*cm$/.test(text) || /^\d+'\d+"?$/.test(text)) fields.push({ label: 'Height', value: text });
+    else if (livesIn) fields.push({ label: 'City', value: livesIn[1] });
+    else if (/^(She|He|They)\/(Her|Him|Them)$/i.test(text)) fields.push({ label: 'Pronouns', value: text });
+    else if (/ at /.test(text)) fields.push({ label: 'Job', value: text });
+    else fields.push({ label: 'Profile detail', value: text });
+  });
+
+  // Interest chips: a &lt;ul aria-labelledby="X"&gt; where h2#X is "Interests"
+  // (verified against a second captured page). A chip Tinder highlights as
+  // something you both like uses a distinct brand-colour background rather
+  // than the plain neutral one every other chip uses — that's the only
+  // signal separating "Travel (shared)" from an ordinary "Theatre".
+  const interestsHeading = $$('h2').find((h) =&gt; h.textContent.trim() === 'Interests');
+  if (interestsHeading &amp;&amp; interestsHeading.id) {
+    const list = root.querySelector(`ul[aria-labelledby="${interestsHeading.id}"]`);
+    if (list) {
+      const chips = [...list.querySelectorAll('li')].map((li) =&gt; {
+        const div = li.querySelector('div');
+        const text = (li.querySelector('span') || li).textContent.trim();
+        if (!text) return '';
+        const shared = div &amp;&amp; !(div.className || '').includes('background-secondary');
+        return shared ? `${text} (shared)` : text;
+      }).filter(Boolean);
+      if (chips.length) fields.push({ label: 'Interests', value: chips.join(', ') });
+    }
+  }
+
   // "Looking for" and prompt answers ("My biography would be called: ...")
   // share a shape too: an &lt;h2&gt; label with its answer nearby. Skips known
   // section headers, which wrap a LIST rather than carrying one value.
+  // "Looking for" specifically opens with an emoji in its own span before
+  // the actual text (verified: grabbing only the first leaf span there
+  // caught nothing but a single heart-eyes emoji) — take the whole value
+  // block's text and strip a leading emoji, rather than the first fragment.
   $$('h2').forEach((h2) =&gt; {
     const label = h2.textContent.trim();
     if (!label || seen.has(label) || GROUP_HEADERS.has(label)) return;
     const card = h2.closest('section') || (h2.parentElement &amp;&amp; h2.parentElement.parentElement);
     if (!card) return;
-    const valueEl = [...card.querySelectorAll('div, span')].find((el) =&gt; el.textContent.trim() &amp;&amp; el.children.length === 0 &amp;&amp; !h2.contains(el) &amp;&amp; el !== h2);
-    const value = valueEl ? valueEl.textContent.trim() : '';
+    const valueBlock = [...card.children].find((el) =&gt; !el.contains(h2) &amp;&amp; el.textContent.trim());
+    let value = valueBlock ? valueBlock.textContent.trim() : '';
+    value = value.replace(/^\p{Extended_Pictographic}️?\s*/u, '').trim();
     if (value &amp;&amp; value !== label) { fields.push({ label, value }); seen.add(label); }
+    // "Looking for" carries a second, separate answer below it — a
+    // relationship-type chip (e.g. "Monogamy") sitting in its own div
+    // after the main value, not inside a &lt;ul&gt; the way Interest chips
+    // are (verified against a real captured page).
+    if (label === 'Looking for') {
+      const chip = [...card.querySelectorAll('div[class*="Bdrs(30px)"]')].find((d) =&gt; !d.closest('ul') &amp;&amp; d.textContent.trim());
+      if (chip) fields.push({ label: 'Relationship type', value: chip.textContent.trim() });
+    }
   });
 
   // Photos load from a public CDN with no login needed (verified) &mdash;
