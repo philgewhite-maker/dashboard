@@ -120,6 +120,16 @@ const DEFAULT_RATING_CATEGORIES = [
 { field: 'practicality', label: 'Practicality' },
 ];
 
+// Recipes' own detailed ratings — a separate configurable list from
+// Connections', not the same one: "Taste"/"Health"/"Prep" are a different
+// axis entirely. What's shared is the mechanism (configurable in Settings,
+// star rows, averaged, sortable), not the categories.
+const DEFAULT_RECIPE_RATING_CATEGORIES = [
+{ field: 'taste', label: 'Taste' },
+{ field: 'health', label: 'Health' },
+{ field: 'prep', label: 'Prep' },
+];
+
 // Turns a typed label into a stable storage key when a new rating category
 // is added in Settings — "Fitness level" -> "fitnesslevel". Collisions (two
 // labels slugging to the same key) fall back to a counter suffix so a
@@ -187,6 +197,7 @@ const TAG_FIELDS = [
 function blankData() {
 return { habits: [], goals: [], jobs: [], connections: [], calendars: [], calendarStatus: {}, vouchers: [], businessIdeas: [], subscriptions: [], enhancementIdeas: [], dealExpiries: [], mailSearches: [], tasks: [], taskContexts: [...DEFAULT_TASK_CONTEXTS],
 ratingCategories: DEFAULT_RATING_CATEGORIES.map((c) => ({ ...c })),
+recipes: [], recipeRatingCategories: DEFAULT_RECIPE_RATING_CATEGORIES.map((c) => ({ ...c })),
 claudeAnswers: {},
 prefs: { ...DEFAULT_PREFS } };
 }
@@ -419,6 +430,33 @@ return { field, label };
 data.businessIdeas.forEach((idea) => {
 if (typeof idea.status !== 'string') idea.status = 'Idea';
 });
+if (!Array.isArray(data.recipeRatingCategories) || data.recipeRatingCategories.length === 0) {
+data.recipeRatingCategories = DEFAULT_RECIPE_RATING_CATEGORIES.map((c) => ({ ...c }));
+} else {
+const takenR = new Set();
+data.recipeRatingCategories = data.recipeRatingCategories.map((c) => {
+const label = String((c && c.label) || '').trim() || 'Rating';
+const field = (c && c.field) || slugifyField(label, takenR);
+takenR.add(field);
+return { field, label };
+});
+}
+if (!Array.isArray(data.recipes)) data.recipes = [];
+data.recipes.forEach((r) => {
+if (typeof r.id !== 'string' || !r.id) r.id = uid();
+if (typeof r.name !== 'string') r.name = '';
+if (!r.source || typeof r.source !== 'object') r.source = { kind: 'manual', url: '' };
+if (typeof r.photoId !== 'string' && r.photoId !== null) r.photoId = null;
+if (!Array.isArray(r.photoIds)) r.photoIds = r.photoId ? [r.photoId] : [];
+if (!Array.isArray(r.photoAlbums)) r.photoAlbums = [];
+if (!Array.isArray(r.ingredients)) r.ingredients = [];
+if (!Array.isArray(r.instructions)) r.instructions = [];
+if (typeof r.notes !== 'string') r.notes = '';
+if (!r.ratings || typeof r.ratings !== 'object') r.ratings = {};
+if (typeof r.createdAt !== 'string') r.createdAt = '';
+if (typeof r.lastMade !== 'string') r.lastMade = '';
+if (!Array.isArray(r.tags)) r.tags = [];
+});
 }
 
 // Every save is a full-document overwrite of DATA_KEY — there's no way to
@@ -578,9 +616,12 @@ return out;
 // so it's excluded rather than dragging the average down. Returns null
 // (not 0) when nothing has been rated at all, so callers can tell "rated
 // low" from "not rated" apart rather than treating them the same.
-function averageRating(conn) {
-const cats = data.ratingCategories || [];
-const values = cats.map((c) => (conn.ratings && conn.ratings[c.field]) || 0).filter((v) => v > 0);
+// `categories` defaults to Connections' own list so every existing call
+// site keeps working unchanged; Recipes passes data.recipeRatingCategories
+// instead, since it's a different axis rated on the same mechanism.
+function averageRating(entity, categories) {
+const cats = categories || data.ratingCategories || [];
+const values = cats.map((c) => (entity.ratings && entity.ratings[c.field]) || 0).filter((v) => v > 0);
 if (values.length === 0) return null;
 return { value: values.reduce((a, b) => a + b, 0) / values.length, count: values.length };
 }
@@ -652,7 +693,7 @@ exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, DEFAULT_PREFS,
 MAIL_SEARCH_KINDS, mailSearchLabel,
 TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask,
 CONTACT_STATUS_LABELS, CONTACT_MATCH_MIN_STAGE,
-DEFAULT_RATING_CATEGORIES, slugifyField,
+DEFAULT_RATING_CATEGORIES, slugifyField, DEFAULT_RECIPE_RATING_CATEGORIES,
 };
 
 // `data` above is exported by binding, but ES module live-bindings only

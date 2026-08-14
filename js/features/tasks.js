@@ -87,6 +87,16 @@ ${kids.map((k) => taskRowHtml(k, depth + 1)).join('')}
 </div>`;
 }
 
+// createdAt has always been stamped on capture, but was never actually
+// shown anywhere — for a task landing on the dashboard from Claude, "when
+// was this written" is exactly the context missing without it.
+function createdAtHtml(t) {
+if (!t.createdAt) return '';
+const d = new Date(t.createdAt);
+if (isNaN(d)) return '';
+return `<div class="task-source">Created ${escapeHtml(d.toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }))}</div>`;
+}
+
 // One row per attachment. The name is a button rather than a link because
 // the bytes may not be local yet — it fetches (or reads the cache) and then
 // hands the browser a download.
@@ -126,6 +136,7 @@ ${data.tasks.filter((o) => o.id !== t.id && o.parentId !== t.id).map((o) => `<op
 <label class="full">Reference link (OneNote, doc, anything)<input type="text" autocomplete="off" placeholder="https://…" data-task-field="link" data-task-id="${t.id}" value="${escapeHtml(t.link || '')}"></label>
 ${t.link ? `<a class="task-link" href="${escapeHtml(t.link)}" target="_blank" rel="noopener">Open reference &#8599;</a>` : ''}
 ${t.source ? `<div class="task-source">From ${escapeHtml(t.source.kind)}: ${t.source.url ? `<a href="${escapeHtml(t.source.url)}" target="_blank" rel="noopener">${escapeHtml(t.source.label)}</a>` : escapeHtml(t.source.label)}</div>` : ''}
+${createdAtHtml(t)}
 <div class="task-photos">${photos}<label class="gallery-add" for="task-photo-${t.id}">+</label>
 <input type="file" id="task-photo-${t.id}" accept="image/*" multiple style="display:none;" data-task-photo-add="${t.id}"></div>
 ${attachmentsHtml(t)}
