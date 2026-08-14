@@ -1,4 +1,4 @@
-import { data, queueSave, reachOutThreshold, isDormantStage, getLocalSettings, TAG_FIELDS, CONTACT_STATUS_LABELS, currentAge, displayAge, photoCoverage, photoLinkLabels } from '../state.js';
+import { data, queueSave, reachOutThreshold, isDormantStage, getLocalSettings, TAG_FIELDS, CONTACT_STATUS_LABELS, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness, slugifyField } from '../state.js';
 import { photoPut, photoDelete, photoUrl } from '../db.js';
 import {
 uid, todayStr, daysSince, escapeHtml, avatarHtml, hydratePhotos, scrollAndFlash, bindForm,
@@ -8,7 +8,6 @@ import { MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreen
 
 const CONN_STAGES = ['Superswiped', 'Matched', 'Chatting in app', 'Moved to WhatsApp', 'Moved to Telegram', 'Arranged to meet', 'Met in person', 'Dating', 'Faded', 'Archived'];
 const STAGE_RANK = { Dating: 8, 'Met in person': 7, 'Arranged to meet': 6, 'Moved to Telegram': 5, 'Moved to WhatsApp': 4, 'Chatting in app': 3, Matched: 2, Superswiped: 1, Faded: 0, Archived: 0 };
-const RATING_CATS = [['looks', 'Looks'], ['intelligence', 'Intelligence'], ['figure', 'Figure'], ['humour', 'Humour'], ['sex', 'Sex'], ['practicality', 'Practicality']];
 // Where a connection came from. Rendered into every source dropdown from
 // here so the add form, the import picker, and the per-connection editor
 // can't drift apart.
@@ -184,18 +183,29 @@ function visibleTagFields() {
 return TAG_FIELDS.filter((f) => showSensitiveFields || !f.sensitive);
 }
 
-const SORT_FIELDS = {
-default: { getValue: (c) => (isDormantStage(c.stage) ? -999 : daysSince(c.lastContact) - reachOutThreshold(c.priority)) },
-priority: { getValue: (c) => c.priority || 0 },
-looks: { getValue: (c) => (c.ratings && c.ratings.looks) || 0 },
-intelligence: { getValue: (c) => (c.ratings && c.ratings.intelligence) || 0 },
-figure: { getValue: (c) => (c.ratings && c.ratings.figure) || 0 },
-humour: { getValue: (c) => (c.ratings && c.ratings.humour) || 0 },
-sex: { getValue: (c) => (c.ratings && c.ratings.sex) || 0 },
-practicality: { getValue: (c) => (c.ratings && c.ratings.practicality) || 0 },
-contact: { getValue: (c) => daysSince(c.lastContact) },
-stage: { getValue: (c) => STAGE_RANK[c.stage] ?? 0 },
+// Fixed sort options that always exist, regardless of what rating
+// categories Settings currently has configured.
+const FIXED_SORT_FIELDS = {
+default: { label: 'Reach-out priority', getValue: (c) => (isDormantStage(c.stage) ? -999 : daysSince(c.lastContact) - reachOutThreshold(c.priority)) },
+priority: { label: 'Overall rating', getValue: (c) => c.priority || 0 },
+average: { label: 'Average detailed rating', getValue: (c) => (averageRating(c) || {}).value || 0 },
+completeness: { label: 'Record completeness', getValue: (c) => completeness(c) },
+added: { label: 'Date added', getValue: (c) => (c.createdAt ? Date.parse(c.createdAt) : -1) || -1 },
+contact: { label: 'Time since contact', getValue: (c) => daysSince(c.lastContact) },
+stage: { label: 'Stage (Met in person → Matched)', getValue: (c) => STAGE_RANK[c.stage] ?? 0 },
 };
+
+// One sort option per configured rating category (looks, IQ, whatever
+// Settings currently lists) — rebuilt on every call rather than cached, so
+// adding or removing a category in Settings is reflected the next time the
+// list renders without a separate refresh step to remember.
+function sortFields() {
+const fields = { ...FIXED_SORT_FIELDS };
+(data.ratingCategories || []).forEach(({ field, label }) => {
+fields[`rating:${field}`] = { label, getValue: (c) => (c.ratings && c.ratings[field]) || 0 };
+});
+return fields;
+}
 
 // Says where the displayed age came from, so "~31" isn't mysterious: either
 // it's exact from a date of birth, or it's the number you entered carried
@@ -219,6 +229,12 @@ return `${Math.floor(age.value / 10) * 10}s`;
 function ratingStars(label, cat, connId, value) {
 const stars = [1, 2, 3, 4, 5].map((n) => `<svg class="star rate-star ${n <= value ? 'filled' : ''}" data-rate-conn="${connId}" data-rate-cat="${cat}" data-rate-star="${n}" viewBox="0 0 20 20" fill="currentColor"><path d="M10 1l2.6 5.9 6.4.6-4.8 4.3 1.4 6.2L10 14.9 4.4 18l1.4-6.2L1 7.5l6.4-.6z"/></svg>`).join('');
 return `<div class="rating-row"><span class="rating-label">${escapeHtml(label)}</span><div class="stars">${stars}</div></div>`;
+}
+
+function averageRatingHtml(c) {
+const avg = averageRating(c);
+if (!avg) return '';
+return ` <span class="rating-average">avg ${avg.value.toFixed(1)} (${avg.count} rated)</span>`;
 }
 
 // Every distinct value already used for `field`, keyed lowercase so the
@@ -295,7 +311,25 @@ let contactPicker = { html: () => '', bind: () => {} };
 function setContactPicker(html, bind) { contactPicker = { html, bind }; }
 function contactPickerHtml(connId) { return contactPicker.html(connId); }
 
+// Rebuilt from data.ratingCategories on every render rather than written
+// once as static HTML, so adding or removing a category in Settings shows
+// up here without a separate refresh step to remember. Selection is driven
+// by the module-level connectionSortPrimary/Secondary vars, not the <select>
+// DOM state, so replacing the options list can't lose what was chosen.
+function renderSortOptions() {
+const primary = document.getElementById('conn-sort-primary');
+const secondary = document.getElementById('conn-sort-secondary');
+if (!primary || !secondary) return;
+const fields = sortFields();
+const order = ['default', 'priority', 'average', 'completeness', 'added',
+...(data.ratingCategories || []).map(({ field }) => `rating:${field}`), 'contact', 'stage'];
+primary.innerHTML = order.map((key) => `<option value="${key}"${key === connectionSortPrimary ? ' selected' : ''}>Sort: ${escapeHtml(fields[key].label)}</option>`).join('');
+secondary.innerHTML = `<option value="none"${connectionSortSecondary === 'none' ? ' selected' : ''}>Then by: &mdash;</option>`
++ order.map((key) => `<option value="${key}"${key === connectionSortSecondary ? ' selected' : ''}>Then by: ${escapeHtml(fields[key].label)}</option>`).join('');
+}
+
 function renderConnections() {
+renderSortOptions();
 const list = document.getElementById('connections-list');
 document.getElementById('connections-count').textContent = data.connections.length + (data.connections.length === 1 ? ' connection' : ' connections');
 if (data.connections.length === 0) {
@@ -359,8 +393,9 @@ list.innerHTML = '<div class="empty">No connections match that search.</div>';
 return;
 }
 
-const primary = SORT_FIELDS[connectionSortPrimary] || SORT_FIELDS.default;
-const secondary = SORT_FIELDS[connectionSortSecondary];
+const fields = sortFields();
+const primary = fields[connectionSortPrimary] || fields.default;
+const secondary = fields[connectionSortSecondary];
 const sorted = [...filtered].sort((a, b) => {
 const diff = primary.getValue(b) - primary.getValue(a);
 if (diff !== 0 || !secondary) return diff;
@@ -426,7 +461,7 @@ ${contactPickerHtml(c.id)}
 <label>What I like most<input type="text" autocomplete="off" data-field="likes" data-conn-detail="${c.id}" value="${escapeHtml(c.likes || '')}"></label>
 <label class="full">Notes<textarea rows="2" data-field="notes" data-conn-detail="${c.id}">${escapeHtml(c.notes || '')}</textarea></label>
 ${visibleTagFields().map((f) => `<label class="full${f.sensitive ? ' sensitive-field' : ''}">${escapeHtml(f.label)}<div class="tag-editor">${tagChips(c[f.field], c.id, f.field)}</div></label>`).join('')}
-<label class="full">Ratings<div class="ratings-block">${RATING_CATS.map(([cat, lbl]) => ratingStars(lbl, cat, c.id, (c.ratings && c.ratings[cat]) || 0)).join('')}</div></label>
+<label class="full">Ratings${averageRatingHtml(c)}<div class="ratings-block">${data.ratingCategories.map(({ field, label }) => ratingStars(label, field, c.id, (c.ratings && c.ratings[field]) || 0)).join('')}</div></label>
 <label class="full">Things to do<div>${todoListHtml(c)}</div></label>
 <label class="full">Photos${galleryHtml(c)}</label>
 <label class="full">Google Photos albums${albumListHtml(c)}</label>
@@ -683,6 +718,54 @@ box.addEventListener('click', () => box.remove());
 document.body.appendChild(box);
 }
 
+// Settings -> "rating categories": add/remove which detailed star ratings
+// exist at all. Mirrors the task-contexts editor's tag-chip pattern.
+// Renaming isn't offered — unlike a task context (just a label on a task), a
+// rating category's `field` key is where real per-person data lives, and
+// there's no safe way to rename in place without either orphaning existing
+// ratings or silently merging two categories' data together.
+function initRatingCategoriesSettings() {
+const el = document.getElementById('rating-categories-list');
+if (!el) return;
+
+function render() {
+const taken = new Set(data.ratingCategories.map((c) => c.field));
+el.innerHTML = data.ratingCategories.map((c) => `<span class="tag-chip">${escapeHtml(c.label)}<span class="tag-x" data-del-rating-cat="${escapeHtml(c.field)}">&times;</span></span>`).join('')
++ '<input type="text" autocomplete="off" class="tag-add-input" id="new-rating-cat-input" placeholder="+ add rating">';
+
+el.querySelectorAll('[data-del-rating-cat]').forEach((x) => {
+x.addEventListener('click', () => {
+const field = x.dataset.delRatingCat;
+const cat = data.ratingCategories.find((c) => c.field === field);
+if (!cat) return;
+const ratedCount = data.connections.filter((c) => c.ratings && c.ratings[field]).length;
+const warning = ratedCount
+? `Remove "${cat.label}"? ${ratedCount} connection${ratedCount === 1 ? ' has' : 's have'} a rating under it — those ratings are lost, not just hidden.`
+: `Remove "${cat.label}"? Nobody has been rated under it yet.`;
+if (!confirm(warning)) return;
+data.ratingCategories = data.ratingCategories.filter((c) => c.field !== field);
+data.connections.forEach((c) => { if (c.ratings) delete c.ratings[field]; });
+render();
+renderConnections();
+queueSave();
+});
+});
+
+const input = el.querySelector('#new-rating-cat-input');
+input.addEventListener('keydown', (e) => {
+if (e.key !== 'Enter') return;
+e.preventDefault();
+const label = input.value.trim();
+if (!label || data.ratingCategories.some((c) => c.label.toLowerCase() === label.toLowerCase())) { input.value = ''; return; }
+data.ratingCategories.push({ field: slugifyField(label, taken), label });
+render();
+renderConnections();
+queueSave();
+});
+}
+render();
+}
+
 function initConnectionForm() {
 fillAppSelect('conn-app-input');
 fillAppSelect('import-app-input');
@@ -693,7 +776,7 @@ const name = nameInput.value.trim();
 if (!name) return;
 const newId = uid();
 data.connections.push({
-id: newId, name, app: appInput.value, priority: 3, stage: 'Matched', lastContact: todayStr(),
+id: newId, name, app: appInput.value, priority: 3, stage: 'Matched', lastContact: todayStr(), createdAt: new Date().toISOString(),
 photoId: null, photoIds: [], age: '', location: '', kids: '', job: '', height: '', education: '',
 likes: '', notes: '',
 languages: [], nationality: [], todos: [], tags: [], dateLocations: [], dateEvents: [], sexTags: [],
@@ -961,7 +1044,7 @@ if (!photoId) photoId = pid;
 data.connections.push({
 // profileName records what the app called them, so renaming the
 // connection to their real name later doesn't orphan the photos.
-id, name: cand.name, profileName: cand.name, app, priority: 3, stage: cand.stage || 'Matched', lastContact: todayStr(),
+id, name: cand.name, profileName: cand.name, app, priority: 3, stage: cand.stage || 'Matched', lastContact: todayStr(), createdAt: new Date().toISOString(),
 photoId, photoIds, age: cand.age || '', location: cand.location || '', kids: cand.kids || '', job: cand.job || '',
 height: cand.height || '', education: cand.education || '',
 likes: '', notes: cand.bio || '', languages: cand.languages || [], nationality: cand.nationality || [],
@@ -1010,8 +1093,8 @@ if (!Array.isArray(target.todos)) target.todos = [];
 if (!target.todos.some((x) => x.text.trim().toLowerCase() === String(t.text).trim().toLowerCase())) target.todos.push(t);
 });
 if (!target.ratings) target.ratings = {};
-RATING_CATS.forEach(([cat]) => {
-if (!target.ratings[cat] && source.ratings && source.ratings[cat]) target.ratings[cat] = source.ratings[cat];
+data.ratingCategories.forEach(({ field }) => {
+if (!target.ratings[field] && source.ratings && source.ratings[field]) target.ratings[field] = source.ratings[field];
 });
 if (!target.priority && source.priority) target.priority = source.priority;
 if ((STAGE_RANK[source.stage] ?? 0) > (STAGE_RANK[target.stage] ?? 0)) target.stage = source.stage;
@@ -1068,5 +1151,5 @@ export {
 renderConnections, initConnectionForm, expandConnection, CONN_STAGES,
 initSensitiveFields, setShowSensitiveFields, visibleTagFields,
 filterByEmptyField, filterBySearch, filterByIds, clearFilters,
-STAGE_RANK, setContactPicker, phoneWithFlagHtml,
+STAGE_RANK, setContactPicker, phoneWithFlagHtml, initRatingCategoriesSettings,
 };

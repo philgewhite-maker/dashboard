@@ -410,30 +410,10 @@ Album links are permanent, unlike the face-group links tried previously.
 <span class="count-badge" id="connections-count"></span>
 </div>
 <div class="sort-row">
-<select id="conn-sort-primary" class="mini">
-<option value="default">Sort: Reach-out priority</option>
-<option value="priority">Sort: Overall rating</option>
-<option value="looks">Sort: Looks</option>
-<option value="intelligence">Sort: Intelligence</option>
-<option value="figure">Sort: Figure</option>
-<option value="humour">Sort: Humour</option>
-<option value="sex">Sort: Sex</option>
-<option value="practicality">Sort: Practicality</option>
-<option value="contact">Sort: Time since contact</option>
-<option value="stage">Sort: Stage (Met in person &rarr; Matched)</option>
-</select>
-<select id="conn-sort-secondary" class="mini">
-<option value="none">Then by: &mdash;</option>
-<option value="priority">Then by: Overall rating</option>
-<option value="looks">Then by: Looks</option>
-<option value="intelligence">Then by: Intelligence</option>
-<option value="figure">Then by: Figure</option>
-<option value="humour">Then by: Humour</option>
-<option value="sex">Then by: Sex</option>
-<option value="practicality">Then by: Practicality</option>
-<option value="contact">Then by: Time since contact</option>
-<option value="stage">Then by: Stage</option>
-</select>
+<!-- Options are rendered by connections.js (renderSortOptions), since the
+     rating-category ones depend on the configurable list in Settings. -->
+<select id="conn-sort-primary" class="mini"></select>
+<select id="conn-sort-secondary" class="mini"></select>
 </div>
 <input type="text" autocomplete="off" class="conn-search" id="conn-search" placeholder="Search by name or tag (e.g. sporty, sober)...">
 <div id="connections-list"></div>
@@ -466,6 +446,14 @@ Album links are permanent, unlike the face-group links tried previously.
 <section class="panel wide" id="settings-panel" data-tab="settings">
 <div class="panel-head">
 <h2><span class="dot plum"></span>Settings</h2>
+</div>
+
+<div class="settings-block">
+<h3>Connections — rating categories</h3>
+<div class="settings-note" style="margin:0 0 8px;">
+The detailed star ratings shown on every connection. Removing one clears every rating already given under it &mdash; there's no way back from that, so it asks first.
+</div>
+<div class="tag-editor" id="rating-categories-list"></div>
 </div>
 
 <div class="settings-block">

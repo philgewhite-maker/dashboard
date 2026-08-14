@@ -445,6 +445,30 @@ retrievable with the secret, and are always served as a forced download with
 execute as a page on your domain. Deleting an attachment, or deleting the
 task holding it, removes the file from the server for every device.
 
+## Connections: ratings and sorting
+
+The detailed star ratings (Looks, Figure, Voice, IQ, EQ, Humour, Sex,
+Practicality by default) are configurable in **Settings → Connections —
+rating categories**, add/remove only — renaming isn't offered, since a
+category's storage key is where real per-person data lives and there's no
+safe way to rename in place without either orphaning existing ratings or
+silently merging two categories together. Removing a category deletes every
+rating already given under it, which it warns about before doing.
+
+An **average of whatever's actually been rated** shows next to "Ratings" on
+each card and is sortable — an unrated category doesn't drag the average
+down, it's just excluded, so "not rated" and "rated low" stay distinguishable.
+
+Sorting also gained **date added** and **record completeness** (a curated
+set of fields — the niche optional ones like a full address are deliberately
+left out, so completeness doesn't feel unfairly punishing for someone
+otherwise well-tracked). Connections that already existed before this had no
+recorded add date, so they sort as unknown/oldest rather than guessing
+today's date for all of them.
+
+`Intelligence` became `IQ` — anyone already rated under the old name had
+that rating moved automatically, not lost.
+
 ## Google Contacts match
 
 Dating tab → "Match contacts". Joins connections to your Google Contacts via

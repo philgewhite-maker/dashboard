@@ -136,7 +136,7 @@ statusEl().textContent = `Merged into ${existing.name}.`;
 } else {
 const conn = {
 id: uid(), name: s.name, profileName: s.name, app: s.app || 'Other', priority: 3,
-stage: 'Matched', lastContact: new Date().toISOString().slice(0, 10),
+stage: 'Matched', lastContact: new Date().toISOString().slice(0, 10), createdAt: new Date().toISOString(),
 photoId: photoIds[0] || null, photoIds,
 age: s.age || rich.age || '', ageAsOf: s.captureDate || '', dob: '',
 location: rich.location || '', address: '', kids: rich.kids || '', job: rich.job || '',

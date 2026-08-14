@@ -97,6 +97,35 @@ const TASK_BUCKETS = [
 
 const DEFAULT_TASK_CONTEXTS = ['Office', 'Home', 'DIY', 'Home PC', 'Outdoor errands'];
 
+// Connections' detailed star ratings. `field` is the stable key stored in
+// c.ratings — kept separate from `label` so a label can be adjusted without
+// silently orphaning every rating already given under the old name.
+// "intelligence" became "iq" (see the migration below, which moves any
+// rating already recorded under the old key rather than losing it) with
+// "eq" and "voice" added alongside.
+const DEFAULT_RATING_CATEGORIES = [
+{ field: 'looks', label: 'Looks' },
+{ field: 'figure', label: 'Figure' },
+{ field: 'voice', label: 'Voice' },
+{ field: 'iq', label: 'IQ' },
+{ field: 'eq', label: 'EQ' },
+{ field: 'humour', label: 'Humour' },
+{ field: 'sex', label: 'Sex' },
+{ field: 'practicality', label: 'Practicality' },
+];
+
+// Turns a typed label into a stable storage key when a new rating category
+// is added in Settings — "Fitness level" -> "fitnesslevel". Collisions (two
+// labels slugging to the same key) fall back to a counter suffix so a
+// second category never silently overwrites the first one's ratings.
+function slugifyField(label, taken) {
+const base = String(label || '').toLowerCase().replace(/[^a-z0-9]+/g, '') || 'cat';
+if (!taken.has(base)) return base;
+let n = 2;
+while (taken.has(`${base}${n}`)) n++;
+return `${base}${n}`;
+}
+
 // How a connection relates to your Google Contacts. Only meaningful for
 // people you've taken off the dating app — see CONTACT_MATCH_MIN_STAGE.
 const CONTACT_STATUS_LABELS = {
@@ -151,6 +180,7 @@ const TAG_FIELDS = [
 
 function blankData() {
 return { habits: [], goals: [], jobs: [], connections: [], calendars: [], calendarStatus: {}, vouchers: [], businessIdeas: [], subscriptions: [], enhancementIdeas: [], dealExpiries: [], mailSearches: [], tasks: [], taskContexts: [...DEFAULT_TASK_CONTEXTS],
+ratingCategories: DEFAULT_RATING_CATEGORIES.map((c) => ({ ...c })),
 claudeAnswers: {},
 prefs: { ...DEFAULT_PREFS } };
 }
@@ -348,7 +378,30 @@ if (typeof c.contactStatus !== 'string') c.contactStatus = '';
 if (typeof c.contactResourceName !== 'string') c.contactResourceName = '';
 if (typeof c.contactEtag !== 'string') c.contactEtag = '';
 if (!c.ratings || typeof c.ratings !== 'object') c.ratings = {};
+// "Intelligence" became "IQ" — move any rating already given under the
+// old key rather than losing it. Guarded so a document that's already
+// been migrated (or never had the old key) is untouched.
+if (c.ratings.intelligence && !c.ratings.iq) c.ratings.iq = c.ratings.intelligence;
+delete c.ratings.intelligence;
+// No prior record of when an existing connection was actually added, so
+// this can't be backfilled — left blank, which "sort by date added"
+// treats as oldest rather than guessing today's date for everyone.
+if (typeof c.createdAt !== 'string') c.createdAt = '';
 });
+if (!Array.isArray(data.ratingCategories) || data.ratingCategories.length === 0) {
+data.ratingCategories = DEFAULT_RATING_CATEGORIES.map((c) => ({ ...c }));
+} else {
+// A document written before "field" existed on each entry (there wasn't
+// one to migrate from, since this is new) — belt and braces in case a
+// hand-edited or partially-synced document is missing one.
+const taken = new Set();
+data.ratingCategories = data.ratingCategories.map((c) => {
+const label = String((c && c.label) || '').trim() || 'Rating';
+const field = (c && c.field) || slugifyField(label, taken);
+taken.add(field);
+return { field, label };
+});
+}
 data.businessIdeas.forEach((idea) => {
 if (typeof idea.status !== 'string') idea.status = 'Idea';
 });
@@ -506,6 +559,41 @@ if (String(conn.driveLink || '').trim()) out.push('Drive link');
 return out;
 }
 
+// Averages whichever of a connection's detailed ratings have actually been
+// given a value — an unrated category is "not yet rated", not "rated 0",
+// so it's excluded rather than dragging the average down. Returns null
+// (not 0) when nothing has been rated at all, so callers can tell "rated
+// low" from "not rated" apart rather than treating them the same.
+function averageRating(conn) {
+const cats = data.ratingCategories || [];
+const values = cats.map((c) => (conn.ratings && conn.ratings[c.field]) || 0).filter((v) => v > 0);
+if (values.length === 0) return null;
+return { value: values.reduce((a, b) => a + b, 0) / values.length, count: values.length };
+}
+
+// A rough 0–1 completeness score, for sorting "who still needs filling in"
+// to the top. Deliberately a curated set rather than every field — niche
+// optional ones (a full address, a Drive link) would make completeness
+// feel unfairly punishing for someone who's otherwise well-tracked.
+const COMPLETENESS_CHECKS = [
+(c) => !!String(c.age || '').trim(),
+(c) => !!String(c.location || '').trim(),
+(c) => !!String(c.job || '').trim(),
+(c) => !!String(c.height || '').trim(),
+(c) => !!String(c.education || '').trim(),
+(c) => !!String(c.phone || '').trim(),
+(c) => !!String(c.email || '').trim(),
+(c) => !!String(c.notes || '').trim(),
+(c) => (c.photoIds || []).length > 0,
+(c) => (c.photoAlbums || []).length > 0,
+(c) => !!averageRating(c),
+(c) => c.contactStatus === 'linked',
+];
+function completeness(conn) {
+const hits = COMPLETENESS_CHECKS.filter((check) => check(conn)).length;
+return hits / COMPLETENESS_CHECKS.length;
+}
+
 // Higher priority = less slack before a "reach out" nudge appears.
 function reachOutThreshold(priority) {
 return 12 - (priority || 0) * 2; // priority 5 -> 2 days, priority 1 -> 10 days
@@ -545,11 +633,12 @@ await replaceData(JSON.parse(text));
 export {
 data, sampleData, loadData, migrate, persist, queueSave, flushSave, setSaveStatusHandler,
 setExternalUpdateHandler, setLocalChangeHandler, getLocalSettings, setLocalSetting, computeStreak, reachOutThreshold,
-isDormantStage, currentAge, displayAge, photoCoverage, photoLinkLabels,
+isDormantStage, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness,
 exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, DEFAULT_PREFS,
 MAIL_SEARCH_KINDS, mailSearchLabel,
 TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, blankTask,
 CONTACT_STATUS_LABELS, CONTACT_MATCH_MIN_STAGE,
+DEFAULT_RATING_CATEGORIES, slugifyField,
 };
 
 // `data` above is exported by binding, but ES module live-bindings only
