@@ -427,9 +427,23 @@ return CYRILLIC_EXONYMS[trimmed.toLowerCase()] || transliterateCyrillic(trimmed)
 const CYRILLIC_LANGUAGES = new Set(['Russian', 'Ukrainian', 'Bulgarian', 'Serbian', 'Belarusian', 'Macedonian']);
 function cyrillicLanguageGuess() {
 const langField = pending && pending.fields && pending.fields.find((f) => f.label === 'Languages');
-if (!langField) return 'Cyrillic';
+if (!langField) return 'Slavic';
 const hits = langField.value.split(',').map((s) => s.trim()).filter((p) => CYRILLIC_LANGUAGES.has(p));
-return hits.length === 1 ? hits[0] : 'Cyrillic';
+return hits.length === 1 ? hits[0] : 'Slavic';
+}
+
+// A generic "+ add <language>" action wherever a field's raw text
+// contains Cyrillic, so a specific language (from the profile's own
+// Languages field, if it names exactly one Cyrillic-script one) or the
+// "Slavic" fallback becomes an actual saved tag, not just a tooltip
+// nobody acts on. Reuses the exact same data-tinder-translate-add
+// handler the Translate button's "+ add" already wires up.
+function cyrillicAddButtonHtml(text) {
+if (!/[Ѐ-ӿ]/.test(text)) return '';
+const lang = cyrillicLanguageGuess();
+const alreadyHasLang = pending.fields.some((f) => f.label === 'Languages' && f.value.split(',').map((s) => s.trim()).includes(lang));
+if (alreadyHasLang) return '';
+return ` <button type="button" class="sync-btn tinder-inline-btn" data-tinder-translate-add="${escapeHtml(lang)}">+ add ${escapeHtml(lang)}</button>`;
 }
 
 const CYRILLIC_RUN_RE = '[\\u0400-\\u04FF]+(?:[ \\-][\\u0400-\\u04FF]+)*';
@@ -508,6 +522,12 @@ if (t.error) return `<div class="tinder-translate-result tinder-translate-error"
 if (t.alreadyEnglish) return `<div class="tinder-translate-result"><span class="tinder-engine-badge tinder-engine-free">Free, on-device</span> Already English — no Anthropic call made.</div>`;
 if (!t.language || !t.translation) return `<div class="tinder-translate-result tinder-translate-error">Couldn't tell what language this is.</div>`;
 const alreadyHasLang = pending.fields.some((f) => f.label === 'Languages' && f.value.split(',').map((s) => s.trim()).includes(t.language));
+// The translation is shown, but nothing saves IT anywhere -- only the
+// language tag has an "+ add" action. "+ save both" appends it onto the
+// field's own value, so the original AND the English version both end
+// up saved together rather than the translation only ever existing as a
+// throwaway preview.
+const alreadySaved = pending.fields[i].value.includes(t.translation);
 // Getting here at all means the free on-device check either said this
 // ISN'T English, or wasn't available to ask in the first place — either
 // way, every translation actually shown came from a paid Anthropic call,
@@ -517,6 +537,7 @@ const alreadyHasLang = pending.fields.some((f) => f.label === 'Languages' && f.v
 // impossible to scroll past without noticing.
 return `<div class="tinder-translate-result"><span class="tinder-engine-badge tinder-engine-paid">via Anthropic</span> <strong>${escapeHtml(t.language)}:</strong> ${escapeHtml(t.translation)}`
 + (alreadyHasLang ? '' : ` <button type="button" class="sync-btn tinder-inline-btn" data-tinder-translate-add="${escapeHtml(t.language)}">+ add ${escapeHtml(t.language)}</button>`)
++ (alreadySaved ? '' : ` <button type="button" class="sync-btn tinder-inline-btn" data-tinder-translate-save="${i}">+ save both</button>`)
 + `</div>`;
 }
 
@@ -578,6 +599,7 @@ return `<div class="tinder-field-row${dim ? ' tinder-field-blocked' : ''}">
 </label>
 ${translateButtonHtml(f, i)}
 ${countryButtonHtml(f, i)}
+${cyrillicAddButtonHtml(f.value)}
 </div>
 ${isChat ? `<div class="tinder-chat-block">${chatHistoryHtml(f.value)}</div>` : ''}
 ${translationResultHtml(i)}
@@ -773,6 +795,16 @@ btn.addEventListener('click', () => runTranslateFor(parseInt(btn.dataset.tinderT
 el.querySelectorAll('[data-tinder-translate-add]').forEach((btn) => {
 btn.addEventListener('click', () => {
 pending.fields.push({ label: 'Languages', value: btn.dataset.tinderTranslateAdd, apply: true });
+render();
+});
+});
+el.querySelectorAll('[data-tinder-translate-save]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const i = parseInt(btn.dataset.tinderTranslateSave, 10);
+const f = pending.fields[i];
+const t = pending.translations[i];
+if (!f || !t || !t.translation) return;
+f.value = `${f.value}\n\n(${t.language} translation) ${t.translation}`;
 render();
 });
 });
