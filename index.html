@@ -468,6 +468,21 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
   // Not exhaustive; anything missing just falls to the generic catch-all
   // below rather than being mis-labelled.
   const LANGUAGES = new Set(['English', 'French', 'Spanish', 'German', 'Italian', 'Portuguese', 'Mandarin', 'Cantonese', 'Chinese', 'Japanese', 'Korean', 'Arabic', 'Russian', 'Polish', 'Dutch', 'Turkish', 'Hindi', 'Urdu', 'Bengali', 'Punjabi', 'Gujarati', 'Marathi', 'Tamil', 'Telugu', 'Kannada', 'Malayalam', 'Vietnamese', 'Thai', 'Indonesian', 'Malay', 'Tagalog', 'Filipino', 'Greek', 'Hebrew', 'Swedish', 'Norwegian', 'Danish', 'Finnish', 'Czech', 'Hungarian', 'Romanian', 'Bulgarian', 'Ukrainian', 'Croatian', 'Serbian', 'Slovak', 'Slovenian', 'Lithuanian', 'Latvian', 'Estonian', 'Icelandic', 'Irish', 'Welsh', 'Catalan', 'Basque', 'Swahili', 'Amharic', 'Yoruba', 'Zulu', 'Afrikaans', 'Persian', 'Farsi', 'Pashto', 'Nepali', 'Sinhala', 'Burmese', 'Khmer', 'Lao', 'Mongolian', 'Georgian', 'Armenian', 'Azerbaijani', 'Kazakh', 'Uzbek', 'Albanian', 'Bosnian', 'Macedonian', 'Luxembourgish', 'Maltese', 'Esperanto', 'Latin']);
+  // Each basics-strip icon is a fixed, reused SVG (not per-profile-random)
+  // &mdash; confirmed by inspecting two different profiles' DOM (Job and
+  // Gender rendered byte-identical path data on both), where Job/Gender/
+  // Language/School/Orientation each use a distinct, exact path shape.
+  // Matching the icon is more reliable than guessing from the text, and is
+  // the only way to catch an open-ended value like a bare job title with
+  // no employer ("Artist", nothing for the " at Company" regex to key off)
+  // or a school name (no shape at all to guess from).
+  const ICON_FIELD = {
+    'M16.995 4.37A2.37 2.37 0 0 0 14.625 2h-5.25a2.37 2.37 0 0 0-2.37 2.37v1.635h-5.5C.677 6.005 0 6.677 0 7.505v11.99c0 .828.677 1.5 1.505 1.5h20.99a1.5 1.5 0 0 0 1.5-1.5V7.505a1.5 1.5 0 0 0-1.5-1.5h-5.5zm-7.62-.375A.375.375 0 0 0 9 4.37v1.635h6V4.37a.375.375 0 0 0-.375-.375zM21.625 8c.207 0 .375.168.375.375v10.25a.375.375 0 0 1-.375.375H18.99V8zM2 8.375C2 8.168 2.168 8 2.375 8H5.01v11H2.375A.375.375 0 0 1 2 18.625zM7.005 19h9.99V8h-9.99z': 'Job',
+    'M12 .933c6.075 0 11 4.925 11 11s-4.925 11-11 11-11-4.924-11-11 4.925-11 11-11m-7.483 16a8.99 8.99 0 0 0 7.483 4 8.99 8.99 0 0 0 7.483-4zM11.41 2.954C6.715 3.258 3 7.161 3 11.934c0 1.429.335 2.78.928 3.98zm8.661 12.96a8.96 8.96 0 0 0 .929-3.98 9 9 0 0 0-8.411-8.98zm-13.266-.98h10.39l-5.195-9z': 'Gender',
+    'M22.53 21.934h-2.56l-.8-2.224h-4.832l-.8 2.223h-2.56l4.448-11.52h2.656zm-7.484-4.193h3.416l-1.708-4.748z': 'Languages',
+    'M11.171 4.182a1.98 1.98 0 0 1 1.658 0l10.578 4.883c.79.365.79 1.505 0 1.87L20 12.507v4.903a2 2 0 0 1-1.02 1.744l-.607.341a13 13 0 0 1-12.746 0l-.608-.341A2 2 0 0 1 4 17.41v-4.902l-1-.462V14a1 1 0 1 1-2 0v-2.877l-.407-.188c-.79-.365-.79-1.505 0-1.87zm1.658 11.636 4.848-2.238H18v3.83l-.607.342a11 11 0 0 1-10.786 0L6 17.41v-3.83h.323l4.848 2.238a1.98 1.98 0 0 0 1.658 0M20.593 10 12 6.033 3.406 10 12 13.967z': 'School',
+    'M10 19.933a1 1 0 1 1 0 2H6a1 1 0 1 1 0-2z': 'Orientation',
+  };
 
   const seenText = new Set();
   root.querySelectorAll('li').forEach((li) =&gt; {
@@ -477,8 +492,14 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
     const text = valueEl.textContent.trim();
     if (!text || seenText.has(text)) return;
     seenText.add(text);
+    // A verification badge, not a profile field &mdash; its own icon+text
+    // pair renders in this same unlabeled strip (confirmed live) and would
+    // otherwise be dumped into notes as noise.
+    if (text === 'Photo verified') return;
     const livesIn = text.match(/^Lives in (.+)$/);
     const away = text.match(/^([\d.]+)\s*(miles?|km)\s*away$/i);
+    const iconEl = li.querySelector('svg path');
+    const iconLabel = ICON_FIELD[iconEl ? iconEl.getAttribute('d') : ''];
     if (/^\d+\s*cm$/.test(text) || /^\d+'\d+"?$/.test(text)) fields.push({ label: 'Height', value: formatHeight(text) });
     else if (livesIn) fields.push({ label: 'City', value: livesIn[1] });
     else if (away) {
@@ -487,6 +508,7 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
       fields.push({ label: 'Distance', value: bucketDistance(miles) });
     }
     else if (/^(She|He|They)\/(Her|Him|Them)$/i.test(text)) fields.push({ label: 'Pronouns', value: text });
+    else if (iconLabel) fields.push({ label: iconLabel, value: text });
     else if (/ at /.test(text)) fields.push({ label: 'Job', value: text });
     // A basics-strip item with a comma is, structurally, the only
     // multi-value one Tinder shows this way — verified live, this is how
@@ -765,6 +787,13 @@ window.tinderBulkImport = async (batchSize) => {
     const ORIENTATIONS = new Set(['Straight', 'Gay', 'Lesbian', 'Bisexual', 'Pansexual', 'Asexual', 'Queer', 'Demisexual']);
     const GENDERS = new Set(['Man', 'Woman', 'Non-binary', 'Trans man', 'Trans woman', 'Transgender', 'Genderqueer', 'Genderfluid', 'Agender', 'Bigender', 'Pangender', 'Demiboy', 'Demigirl', 'Two-Spirit', 'Intersex']);
     const LANGUAGES = new Set(['English', 'French', 'Spanish', 'German', 'Italian', 'Portuguese', 'Mandarin', 'Cantonese', 'Chinese', 'Japanese', 'Korean', 'Arabic', 'Russian', 'Polish', 'Dutch', 'Turkish', 'Hindi', 'Urdu', 'Bengali', 'Punjabi', 'Gujarati', 'Marathi', 'Tamil', 'Telugu', 'Kannada', 'Malayalam', 'Vietnamese', 'Thai', 'Indonesian', 'Malay', 'Tagalog', 'Filipino', 'Greek', 'Hebrew', 'Swedish', 'Norwegian', 'Danish', 'Finnish', 'Czech', 'Hungarian', 'Romanian', 'Bulgarian', 'Ukrainian', 'Croatian', 'Serbian', 'Slovak', 'Slovenian', 'Lithuanian', 'Latvian', 'Estonian', 'Icelandic', 'Irish', 'Welsh', 'Catalan', 'Basque', 'Swahili', 'Amharic', 'Yoruba', 'Zulu', 'Afrikaans', 'Persian', 'Farsi', 'Pashto', 'Nepali', 'Sinhala', 'Burmese', 'Khmer', 'Lao', 'Mongolian', 'Georgian', 'Armenian', 'Azerbaijani', 'Kazakh', 'Uzbek', 'Albanian', 'Bosnian', 'Macedonian', 'Luxembourgish', 'Maltese', 'Esperanto', 'Latin']);
+    const ICON_FIELD = {
+      'M16.995 4.37A2.37 2.37 0 0 0 14.625 2h-5.25a2.37 2.37 0 0 0-2.37 2.37v1.635h-5.5C.677 6.005 0 6.677 0 7.505v11.99c0 .828.677 1.5 1.505 1.5h20.99a1.5 1.5 0 0 0 1.5-1.5V7.505a1.5 1.5 0 0 0-1.5-1.5h-5.5zm-7.62-.375A.375.375 0 0 0 9 4.37v1.635h6V4.37a.375.375 0 0 0-.375-.375zM21.625 8c.207 0 .375.168.375.375v10.25a.375.375 0 0 1-.375.375H18.99V8zM2 8.375C2 8.168 2.168 8 2.375 8H5.01v11H2.375A.375.375 0 0 1 2 18.625zM7.005 19h9.99V8h-9.99z': 'Job',
+      'M12 .933c6.075 0 11 4.925 11 11s-4.925 11-11 11-11-4.924-11-11 4.925-11 11-11m-7.483 16a8.99 8.99 0 0 0 7.483 4 8.99 8.99 0 0 0 7.483-4zM11.41 2.954C6.715 3.258 3 7.161 3 11.934c0 1.429.335 2.78.928 3.98zm8.661 12.96a8.96 8.96 0 0 0 .929-3.98 9 9 0 0 0-8.411-8.98zm-13.266-.98h10.39l-5.195-9z': 'Gender',
+      'M22.53 21.934h-2.56l-.8-2.224h-4.832l-.8 2.223h-2.56l4.448-11.52h2.656zm-7.484-4.193h3.416l-1.708-4.748z': 'Languages',
+      'M11.171 4.182a1.98 1.98 0 0 1 1.658 0l10.578 4.883c.79.365.79 1.505 0 1.87L20 12.507v4.903a2 2 0 0 1-1.02 1.744l-.607.341a13 13 0 0 1-12.746 0l-.608-.341A2 2 0 0 1 4 17.41v-4.902l-1-.462V14a1 1 0 1 1-2 0v-2.877l-.407-.188c-.79-.365-.79-1.505 0-1.87zm1.658 11.636 4.848-2.238H18v3.83l-.607.342a11 11 0 0 1-10.786 0L6 17.41v-3.83h.323l4.848 2.238a1.98 1.98 0 0 0 1.658 0M20.593 10 12 6.033 3.406 10 12 13.967z': 'School',
+      'M10 19.933a1 1 0 1 1 0 2H6a1 1 0 1 1 0-2z': 'Orientation',
+    };
 
     const seenText = new Set();
     root.querySelectorAll('li').forEach((li) =&gt; {
@@ -774,8 +803,11 @@ window.tinderBulkImport = async (batchSize) => {
       const text = valueEl.textContent.trim();
       if (!text || seenText.has(text)) return;
       seenText.add(text);
+      if (text === 'Photo verified') return;
       const livesIn = text.match(/^Lives in (.+)$/);
       const away = text.match(/^([\d.]+)\s*(miles?|km)\s*away$/i);
+      const iconEl = li.querySelector('svg path');
+      const iconLabel = ICON_FIELD[iconEl ? iconEl.getAttribute('d') : ''];
       if (/^\d+\s*cm$/.test(text) || /^\d+'\d+"?$/.test(text)) fields.push({ label: 'Height', value: formatHeight(text) });
       else if (livesIn) fields.push({ label: 'City', value: livesIn[1] });
       else if (away) {
@@ -784,6 +816,7 @@ window.tinderBulkImport = async (batchSize) => {
         fields.push({ label: 'Distance', value: bucketDistance(miles) });
       }
       else if (/^(She|He|They)\/(Her|Him|Them)$/i.test(text)) fields.push({ label: 'Pronouns', value: text });
+      else if (iconLabel) fields.push({ label: iconLabel, value: text });
       else if (/ at /.test(text)) fields.push({ label: 'Job', value: text });
       else if (text.includes(',')) fields.push({ label: 'Languages', value: text });
       else if (LANGUAGES.has(text)) fields.push({ label: 'Languages', value: text });
