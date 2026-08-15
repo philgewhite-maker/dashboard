@@ -1131,6 +1131,11 @@ cursor:pointer;
 .sync-btn:hover{background:var(--teal);color:#fff;}
 .sync-btn:disabled{opacity:.5;cursor:not-allowed;}
 .sync-btn.sm{font-size:11px;padding:4px 8px;width:100%;margin-top:4px;}
+/* Same compact sizing as .sm, minus its width:100% -- that's right for a
+   button stacked alone in a narrow card, wrong for one sitting inline
+   next to other content in a flex row (stretched the Translate button
+   to fill the whole row, confirmed live). */
+.sync-btn.tinder-inline-btn{font-size:11px;padding:4px 8px;width:auto;margin-top:0;flex:0 0 auto;}
 .sync-status{
 font-family:'IBM Plex Mono',monospace;
 font-size:11px;

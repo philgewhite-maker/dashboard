@@ -433,7 +433,7 @@ const SKIP_TRANSLATE_LABELS = new Set(['Height', 'Distance', 'Pronouns', 'Gender
 
 function translateButtonHtml(f, i) {
 if (SKIP_TRANSLATE_LABELS.has(f.label)) return '';
-return `<button type="button" class="sync-btn sm" data-tinder-translate="${i}">Translate</button>`;
+return `<button type="button" class="sync-btn tinder-inline-btn" data-tinder-translate="${i}">Translate</button>`;
 }
 
 function translationResultHtml(i) {
@@ -445,7 +445,7 @@ if (t.alreadyEnglish) return `<div class="tinder-translate-result">(Detected as 
 if (!t.language || !t.translation) return `<div class="tinder-translate-result tinder-translate-error">Couldn't tell what language this is.</div>`;
 const alreadyHasLang = pending.fields.some((f) => f.label === 'Languages' && f.value.split(',').map((s) => s.trim()).includes(t.language));
 return `<div class="tinder-translate-result">→ <strong>${escapeHtml(t.language)}:</strong> ${escapeHtml(t.translation)}`
-+ (alreadyHasLang ? '' : ` <button type="button" class="sync-btn sm" data-tinder-translate-add="${escapeHtml(t.language)}">+ add ${escapeHtml(t.language)}</button>`)
++ (alreadyHasLang ? '' : ` <button type="button" class="sync-btn tinder-inline-btn" data-tinder-translate-add="${escapeHtml(t.language)}">+ add ${escapeHtml(t.language)}</button>`)
 + `</div>`;
 }
 
