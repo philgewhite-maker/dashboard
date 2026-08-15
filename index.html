@@ -543,7 +543,7 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
   // block's text and strip a leading emoji, rather than the first fragment.
   $$('h2').forEach((h2) =&gt; {
     const label = h2.textContent.trim();
-    if (!label || seen.has(label) || GROUP_HEADERS.has(label) || /^Conversation history with /i.test(label)) return;
+    if (!label || seen.has(label) || GROUP_HEADERS.has(label) || /^Conversation history with /i.test(label) || /^Reply to /i.test(label)) return;
     const card = h2.closest('section') || (h2.parentElement &amp;&amp; h2.parentElement.parentElement);
     if (!card) return;
     const valueBlock = [...card.children].find((el) =&gt; !el.contains(h2) &amp;&amp; el.textContent.trim());
@@ -730,7 +730,7 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
 
     $$('h2').forEach((h2) =&gt; {
       const label = h2.textContent.trim();
-      if (!label || seen.has(label) || GROUP_HEADERS.has(label) || /^Conversation history with /i.test(label)) return;
+      if (!label || seen.has(label) || GROUP_HEADERS.has(label) || /^Conversation history with /i.test(label) || /^Reply to /i.test(label)) return;
       const card = h2.closest('section') || (h2.parentElement &amp;&amp; h2.parentElement.parentElement);
       if (!card) return;
       const valueBlock = [...card.children].find((el) =&gt; !el.contains(h2) &amp;&amp; el.textContent.trim());
