@@ -340,6 +340,7 @@ overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 .album-meta{font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .album-card select{width:100%;margin-top:4px;font-size:12px;}
 .album-card.chosen .album-thumb{border-color:var(--sage);box-shadow:0 0 0 2px var(--sage-bg);}
+.album-card.saved .album-thumb{opacity:.55;}
 /* Private albums are dimmed until hovered, so a shared screen doesn't
    surface them just by opening the tab. */
 .album-sensitive .album-thumb img{filter:blur(7px);transition:filter 0.15s;}
@@ -354,7 +355,7 @@ overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 .album-compare-row .album-thumb{flex:1 1 auto;min-width:0;}
 .album-compare{display:flex;align-items:center;gap:2px;flex:0 0 auto;}
 .album-compare .thumb-img{
-width:32px;height:32px;
+width:48px;height:48px;
 border-radius:50%;
 overflow:hidden;
 background:var(--paper);
@@ -904,7 +905,7 @@ cursor:pointer;
 /* Photo gallery */
 .photo-gallery{display:flex;gap:6px;flex-wrap:wrap;align-items:center;}
 .gallery-thumb{position:relative;width:60px;height:60px;border-radius:8px;overflow:hidden;cursor:pointer;}
-.gallery-thumb img{width:100%;height:100%;object-fit:cover;}
+.gallery-thumb img{width:100%;height:100%;object-fit:cover;-webkit-user-drag:none;user-select:none;}
 .gallery-thumb .tag-x{
 position:absolute;top:0;right:2px;
 color:#fff;

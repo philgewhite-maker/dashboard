@@ -70,6 +70,18 @@ function isSensitive(album) {
 return SENSITIVE_LABELS.has(String(album.location || '').toLowerCase());
 }
 
+// What to show in place of a missing cover — distinguishes the one case
+// that's actually fixable (the harvest snippet's scroll pass never caught a
+// background-image for this tile — genuinely random, re-running usually
+// gets it) from the one that isn't (a real 0-item album has no photo to
+// show a cover of, ever). `count` is only known for rows this album import
+// has actually seen — an album linked before this distinction existed has
+// no stored count, so it falls back to the re-run suggestion, the safer of
+// the two guesses.
+function noCoverNote(count) {
+return count === 0 ? 'empty album — nothing to show' : 'no cover captured — re-run the snippet';
+}
+
 function parseInput(text) {
 const trimmed = String(text || '').trim();
 if (!trimmed) return { albums: [], people: [] };
@@ -113,6 +125,17 @@ if (score !== null && (!best || score > best.score)) best = { conn: c, why, scor
 });
 });
 return best;
+}
+
+// Whichever connection already has this exact album URL linked, if any —
+// keyed on the URL rather than the person, since that's what save() itself
+// uses to decide "update in place" vs "new link" (see save() below).
+function alreadyLinked(url) {
+for (const c of data.connections) {
+const album = (c.photoAlbums || []).find((a) => a.url === url);
+if (album) return { conn: c, album };
+}
+return null;
 }
 
 // For the common case in an album import: a real album with no matching
@@ -215,17 +238,17 @@ function thumbHtml(row, i) {
 // the fix is re-running the snippet already in this panel to get fresh ones.
 const img = row.cover
 ? `<img src="${escapeHtml(row.cover)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.outerHTML='<span class=&quot;album-nocover&quot;>cover link expired &mdash; re-run the snippet above</span>'">`
-: '<span class="album-nocover">no cover</span>';
-return `<div class="album-card${row.applied ? ' chosen' : ''}${isSensitive(row) ? ' album-sensitive' : ''}">
+: `<span class="album-nocover">${escapeHtml(noCoverNote(row.count))}</span>`;
+return `<div class="album-card${row.chosenId ? ' chosen' : ''}${row.applied ? ' saved' : ''}${isSensitive(row) ? ' album-sensitive' : ''}">
 <span class="album-compare-row">
 <a class="album-thumb" href="${escapeHtml(row.url)}" target="_blank" rel="noopener" title="${escapeHtml(row.title)}">${img}</a>
 ${existingPhotoHtml(row.chosenId)}
 </span>
 <div class="album-caption">${escapeHtml(captionFor(row))}</div>
-<div class="album-meta">${escapeHtml(row.match ? row.match.why : 'no match')}${row.count ? ` · ${row.count}` : ''}</div>
+<div class="album-meta">${escapeHtml(row.match ? row.match.why : 'no match')}${row.count ? ` · ${row.count}` : ''}${row.applied ? ' · saved' : ''}</div>
 ${aiCompareHtml(row, i)}
 <select data-album-pick="${i}">${optionsFor(row.chosenId)}</select>
-${!row.chosenId ? `<button class="sync-btn sm" type="button" data-album-newconn="${i}">+ New connection</button>` : ''}
+<button class="sync-btn sm" type="button" data-album-newconn="${i}">+ New connection</button>
 </div>`;
 }
 
@@ -356,7 +379,7 @@ if (!conn) continue;
 if (!Array.isArray(conn.photoAlbums)) conn.photoAlbums = [];
 // Keyed on the URL, so re-importing after a title change updates the
 // label in place instead of adding a duplicate album.
-const fields = { location: row.location, date: row.date, other: row.other, title: row.title, ...(await resolveCover(row)) };
+const fields = { location: row.location, date: row.date, other: row.other, title: row.title, count: row.count || 0, ...(await resolveCover(row)) };
 const existing = conn.photoAlbums.find((a) => a.url === row.url);
 if (existing) Object.assign(existing, fields);
 else conn.photoAlbums.push({ url: row.url, ...fields });
@@ -396,16 +419,27 @@ return;
 peopleSeen = parsed.people;
 unparsed = [];
 rows = [];
+// A re-run — expected to become routine as new albums get created over
+// time, not a one-off — will re-list every album in the paste, including
+// hundreds already linked. Anything already linked with a real cover has
+// nothing left to review, so it's left out of `rows` entirely rather than
+// making every routine re-run wade through the whole library again. Kept
+// by URL (see alreadyLinked), same identity save() itself uses.
+let alreadyGood = 0;
 parsed.albums.forEach((a) => {
 const bits = parseAlbumTitle(a.title);
 if (!bits) { unparsed.push(a.title); return; }
-const match = matchPerson(bits.person);
+const existing = alreadyLinked(a.url);
+if (existing && (existing.album.coverPhotoId || existing.album.cover)) { alreadyGood++; return; }
+// Already linked but still missing a cover — its owner is already known
+// for certain (same URL), so that beats re-guessing from the name again.
+const match = existing ? { conn: existing.conn, why: 'already linked', score: 300 } : matchPerson(bits.person);
 rows.push({ ...a, ...bits, match, chosenId: match ? match.conn.id : '', applied: false });
 });
 const matched = rows.filter((r) => r.chosenId).length;
 status.textContent = rows.length === 0 && unparsed.length === 0
-? 'No albums found in that paste.'
-: `${rows.length} album${rows.length === 1 ? '' : 's'} · ${matched} matched${unparsed.length ? ` · ${unparsed.length} not following Name_Label` : ''}${peopleSeen.length ? ` · ${peopleSeen.length} faces seen` : ''}. Check each, then save.`;
+? (alreadyGood ? `All ${alreadyGood} already linked, nothing new to review.` : 'No albums found in that paste.')
+: `${rows.length} album${rows.length === 1 ? '' : 's'} · ${matched} matched${alreadyGood ? ` · ${alreadyGood} already linked, skipped` : ''}${unparsed.length ? ` · ${unparsed.length} not following Name_Label` : ''}${peopleSeen.length ? ` · ${peopleSeen.length} faces seen` : ''}. Check each, then save.`;
 render();
 });
 
@@ -431,4 +465,4 @@ status.textContent = 'Copy failed — select the snippet and copy it manually.';
 render();
 }
 
-export { initPhotoAlbums, parseAlbumTitle, captionFor, matchPerson, parseInput, isSensitive };
+export { initPhotoAlbums, parseAlbumTitle, captionFor, matchPerson, parseInput, isSensitive, noCoverNote };
