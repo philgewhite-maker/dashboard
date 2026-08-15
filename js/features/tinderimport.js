@@ -28,6 +28,7 @@ import { nameKey, editDistance } from '../googlecontacts.js';
 import { storePhoto, fetchProxiedImage } from '../files.js';
 import { photoGet } from '../db.js';
 import { MissingKeyError, compareFaces } from '../ai.js';
+import { findPhoneNumbers, findHandles, formatHandle } from '../contactscan.js';
 
 // Prefers the proxy (works regardless of Tinder's CORS inconsistency) but
 // falls back to a direct fetch if sync isn't configured — still succeeds
@@ -110,6 +111,7 @@ Orientation: { target: 'relationshipTags', split: false },
 };
 
 let pending = null; // { name, age, fields, photos, chosenId, match, matchConfirmed, aiVerdict }
+let queue = []; // raw {name,age,fields,photos} profiles still waiting, from a bulk-import paste
 
 function optionsFor(chosenId) {
 return `<option value=""${chosenId ? '' : ' selected'}>— pick who this is —</option>`
@@ -195,6 +197,51 @@ return `<label class="tinder-field-row${blocked ? ' tinder-field-blocked' : ''}"
 </label>`;
 }
 
+// Same checkbox-with-a-preview shape as fieldPreviewHtml, for whatever the
+// text scan turned up. Nothing here is ever applied without this being
+// visibly checked first — a wrong phone/handle guess is a much smaller
+// mistake than one silently written to a connection.
+function contactPreviewHtml() {
+const conn = data.connections.find((c) => c.id === pending.chosenId);
+// Fill-if-empty means only the FIRST applied phone actually lands — save()
+// stops setting conn.phone as soon as it's non-empty, so if more than one
+// candidate turned up, every one after the first would silently do
+// nothing despite its checkbox saying otherwise. Mirror that here so the
+// preview never claims more than one phone "will set" at once.
+let phoneClaimed = conn ? !!String(conn.phone || '').trim() : false;
+const phoneRows = pending.foundPhones.map((p, i) => {
+let note = 'will set phone';
+let blocked = false;
+if (phoneClaimed) {
+note = conn && String(conn.phone || '').trim()
+? `phone already set to "${conn.phone}" — will be skipped`
+: 'another found phone will be used instead — will be skipped';
+blocked = true;
+} else if (p.apply) {
+phoneClaimed = true; // the next candidate, if any, loses the slot to this one
+}
+return `<label class="tinder-field-row${blocked ? ' tinder-field-blocked' : ''}">
+<input type="checkbox" data-tinder-phone="${i}"${p.apply && !blocked ? ' checked' : ''}${blocked ? ' disabled' : ''}>
+<strong>Phone found:</strong> ${escapeHtml(p.value)} <span class="tinder-field-note">(${escapeHtml(note)})</span>
+</label>`;
+}).join('');
+const handleRows = pending.foundHandles.map((h, i) => {
+const label = formatHandle(h);
+let note = 'will add to Social handles';
+let blocked = false;
+if (conn) {
+const existing = (conn.socialHandles || []).map((s) => s.toLowerCase());
+if (existing.includes(label.toLowerCase())) { note = 'already in Social handles — will be skipped'; blocked = true; }
+}
+return `<label class="tinder-field-row${blocked ? ' tinder-field-blocked' : ''}">
+<input type="checkbox" data-tinder-handle="${i}"${h.apply && !blocked ? ' checked' : ''}${blocked ? ' disabled' : ''}>
+<strong>Handle found:</strong> ${escapeHtml(label)} <span class="tinder-field-note">(${escapeHtml(note)})</span>
+</label>`;
+}).join('');
+if (!phoneRows && !handleRows) return '';
+return `<div class="tinder-fields">${phoneRows}${handleRows}</div>`;
+}
+
 function agePreviewHtml() {
 const conn = data.connections.find((c) => c.id === pending.chosenId);
 if (!pending.age) return '';
@@ -212,6 +259,7 @@ const showSuggestion = !p.chosenId && p.match && p.match.why !== 'exact';
 const canSave = !!p.chosenId && (p.match?.why === 'exact' || p.matchConfirmed || !p.match || data.connections.find((c) => c.id === p.chosenId)?.createdJustNow);
 
 el.innerHTML = `<div class="album-card">
+${queue.length ? `<div class="settings-note" style="margin:0 0 8px;">${queue.length} more queued in this batch — saving auto-advances to the next. <button class="sync-btn sm" type="button" id="tinder-skip" style="margin-left:6px;">Skip this one</button></div>` : ''}
 <div class="album-caption"><strong>${escapeHtml(p.name || '(no name found)')}</strong>${p.age ? `, ${escapeHtml(p.age)}` : ''}</div>
 
 ${showSuggestion ? `<div class="settings-note" style="margin:4px 0;">Possible match: <strong>${escapeHtml(p.match.conn.name)}</strong> (${escapeHtml(p.match.why)}) — not the same as an exact name match, so look before confirming:</div>
@@ -233,6 +281,7 @@ ${p.chosenId ? compareHtml() : ''}
 
 ${agePreviewHtml()}
 ${p.fields.length ? `<div class="tinder-fields">${p.fields.map((f, i) => fieldPreviewHtml(f, i)).join('')}</div>` : ''}
+${contactPreviewHtml()}
 ${p.photos.length ? `<div class="settings-note" style="margin:8px 0 4px;">${p.photos.filter((ph) => ph.apply).length} of ${p.photos.length} photos will be added — click to include/exclude:</div>
 <div class="photo-gallery">${p.photos.map((ph, i) => `<span class="gallery-thumb tinder-photo-thumb${ph.apply ? ' tinder-photo-included' : ''}" data-tinder-photo="${i}"><img src="${escapeHtml(ph.url)}" alt="">${ph.apply ? '<span class="tinder-photo-badge">&check;</span>' : ''}</span>`).join('')}</div>` : ''}
 
@@ -256,8 +305,19 @@ const confirmBtn = document.getElementById('tinder-confirm-match');
 if (confirmBtn) confirmBtn.addEventListener('click', () => { pending.chosenId = pending.match.conn.id; pending.matchConfirmed = true; render(); });
 const rejectBtn = document.getElementById('tinder-reject-match');
 if (rejectBtn) rejectBtn.addEventListener('click', () => { pending.match = null; render(); });
+const skipBtn = document.getElementById('tinder-skip');
+if (skipBtn) skipBtn.addEventListener('click', () => {
+const skippedName = pending.name || '(unnamed)';
+advanceQueue(`Skipped ${skippedName}.`);
+});
 el.querySelectorAll('[data-tinder-field]').forEach((cb) => {
 cb.addEventListener('change', () => { pending.fields[parseInt(cb.dataset.tinderField, 10)].apply = cb.checked; });
+});
+el.querySelectorAll('[data-tinder-phone]').forEach((cb) => {
+cb.addEventListener('change', () => { pending.foundPhones[parseInt(cb.dataset.tinderPhone, 10)].apply = cb.checked; });
+});
+el.querySelectorAll('[data-tinder-handle]').forEach((cb) => {
+cb.addEventListener('change', () => { pending.foundHandles[parseInt(cb.dataset.tinderHandle, 10)].apply = cb.checked; });
 });
 el.querySelectorAll('[data-tinder-photo]').forEach((span) => {
 span.addEventListener('click', () => {
@@ -302,6 +362,16 @@ const line = `${f.label}: ${f.value}`;
 if (!String(conn.notes || '').includes(line)) conn.notes = conn.notes ? `${conn.notes}\n${line}` : line;
 });
 
+pending.foundPhones.filter((p) => p.apply).forEach((p) => {
+if (!String(conn.phone || '').trim()) conn.phone = p.value;
+});
+if (!Array.isArray(conn.socialHandles)) conn.socialHandles = [];
+pending.foundHandles.filter((h) => h.apply).forEach((h) => {
+const label = formatHandle(h);
+const existingLower = conn.socialHandles.map((s) => s.toLowerCase());
+if (!existingLower.includes(label.toLowerCase())) conn.socialHandles.push(label);
+});
+
 const toFetch = pending.photos.filter((ph) => ph.apply);
 let failed = 0;
 let firstError = '';
@@ -340,32 +410,96 @@ if (failed) {
 pending.saveMessage = `Saved fields to ${conn.name}. ${failed} of ${toFetch.length} photo${toFetch.length === 1 ? '' : 's'} failed: ${firstError} — click Save again to retry.`;
 render();
 } else {
-const savedName = conn.name;
-pending = null;
-render();
-const freshStatus = document.getElementById('tinder-status');
-if (freshStatus) freshStatus.textContent = `Saved to ${savedName}.`;
+advanceQueue(`Saved to ${conn.name}.`);
 }
 }
 
-function parseInput(text) {
+// The bulk snippet's output ({profiles: [...]}) and the single-profile
+// snippet's output (one {name,age,fields,photos} object) land in the same
+// textarea — told apart here so one "Read profile(s)" button handles both.
+function parseBatch(text) {
 const trimmed = String(text || '').trim();
-if (!trimmed) return null;
+if (!trimmed) return [];
 const raw = JSON.parse(trimmed);
+return Array.isArray(raw.profiles) ? raw.profiles : [raw];
+}
+
+// Scans every extracted field's text for a phone number or a social handle
+// — not just chat, since both turn up just as often in a bio or a prompt
+// answer. Chat is the one field with more than one author, so it's the one
+// field that needs filtering first: a "[HH:MM] You: ..." line is never the
+// match's own contact info, and skipping those lines catches every format
+// the user might type their own number/handle in, rather than matching
+// against a fixed list of known-own values.
+function scanFields(fields) {
+const phones = [];
+const seenPhones = new Set();
+const handles = [];
+const seenHandles = new Set();
+fields.forEach((f) => {
+const text = f.label === 'Chat history'
+? f.value.split('\n').filter((line) => !/^\[\d{1,2}:\d{2}\]\s*You:/.test(line)).join('\n')
+: f.value;
+findPhoneNumbers(text).forEach((p) => {
+const digits = p.replace(/\D/g, '');
+if (seenPhones.has(digits)) return;
+seenPhones.add(digits);
+phones.push(p);
+});
+findHandles(text).forEach((h) => {
+const key = h.handle.toLowerCase();
+if (seenHandles.has(key)) return;
+seenHandles.add(key);
+handles.push(h);
+});
+});
+return { phones, handles };
+}
+
+// Turns one raw {name,age,fields,photos} object into the shape `pending`
+// needs and runs the same match-and-preselect logic a single paste always
+// has — only an EXACT name match is trusted enough to pre-select; anything
+// looser (the "Leila"/"Lenka" mistake was 2 letters different) is shown as
+// a suggestion requiring an explicit look-and-confirm instead.
+function loadFromRaw(raw) {
 const fields = Array.isArray(raw.fields) ? raw.fields
 .map((f) => ({ label: String(f.label || '').trim(), value: String(f.value || '').trim() }))
 .filter((f) => f.label && f.value) : [];
 const photos = Array.isArray(raw.photos) ? [...new Set(raw.photos.map((u) => String(u || '').trim()).filter(Boolean))] : [];
-return {
+const { phones, handles } = scanFields(fields);
+const parsed = {
 name: String(raw.name || '').trim(),
 age: String(raw.age || '').trim(),
 fields: fields.map((f) => ({ ...f, apply: true })),
 photos: photos.map((url) => ({ url, apply: true })),
+foundPhones: phones.map((value) => ({ value, apply: true })),
+foundHandles: handles.map((h) => ({ ...h, apply: true })),
 chosenId: '',
 match: null,
 matchConfirmed: false,
 aiVerdict: null,
 };
+const match = matchPerson(parsed.name);
+parsed.match = match;
+if (match && match.why === 'exact') { parsed.chosenId = match.conn.id; parsed.matchConfirmed = true; }
+pending = parsed;
+}
+
+// Moves on to whatever's next in a batch (after a save or an explicit
+// skip), or clears the review entirely once nothing's left — the one exit
+// point both save() and the Skip button funnel through.
+function advanceQueue(message) {
+if (queue.length) {
+loadFromRaw(queue.shift());
+render();
+const freshStatus = document.getElementById('tinder-status');
+if (freshStatus) freshStatus.textContent = `${message} Showing the next one — ${queue.length} more after it.`;
+} else {
+pending = null;
+render();
+const freshStatus = document.getElementById('tinder-status');
+if (freshStatus) freshStatus.textContent = message;
+}
 }
 
 function initTinderImport() {
@@ -374,24 +508,21 @@ if (!box) return;
 const status = document.getElementById('tinder-status');
 
 document.getElementById('tinder-import-btn').addEventListener('click', () => {
-let parsed;
+let raws;
 try {
-parsed = parseInput(box.value);
+raws = parseBatch(box.value);
 } catch (err) {
 status.textContent = `Couldn't read that: ${err.message}. Paste the JSON the snippet copied.`;
 return;
 }
-if (!parsed) { status.textContent = 'Paste the copied JSON first.'; return; }
-const match = matchPerson(parsed.name);
-parsed.match = match;
-// Only an EXACT name match is trusted enough to pre-select — anything
-// looser (the "Leila"/"Lenka" mistake was 2 letters different) is shown
-// as a suggestion requiring an explicit look-and-confirm instead.
-if (match && match.why === 'exact') { parsed.chosenId = match.conn.id; parsed.matchConfirmed = true; }
-pending = parsed;
-status.textContent = match
-? (match.why === 'exact' ? `Matched ${match.conn.name} exactly — check the fields below, then save.` : `Possible match found (${match.why}) — confirm it's really them before saving.`)
+if (!raws.length) { status.textContent = 'Paste the copied JSON first.'; return; }
+queue = raws.slice(1);
+loadFromRaw(raws[0]);
+const p = pending;
+const matchNote = p.match
+? (p.match.why === 'exact' ? `Matched ${p.match.conn.name} exactly — check the fields below, then save.` : `Possible match found (${p.match.why}) — confirm it's really them before saving.`)
 : 'No matching connection — pick one or add new.';
+status.textContent = raws.length > 1 ? `Loaded 1 of ${raws.length} in this batch. ${matchNote}` : matchNote;
 render();
 });
 
@@ -402,6 +533,19 @@ try {
 await navigator.clipboard.writeText(document.getElementById('tinder-snippet').textContent);
 copyBtn.textContent = 'Copied';
 setTimeout(() => { copyBtn.textContent = 'Copy snippet'; }, 2000);
+} catch (e) {
+status.textContent = 'Copy failed — select the snippet and copy it manually.';
+}
+});
+}
+
+const bulkCopyBtn = document.getElementById('tinder-bulk-copy-snippet');
+if (bulkCopyBtn) {
+bulkCopyBtn.addEventListener('click', async () => {
+try {
+await navigator.clipboard.writeText(document.getElementById('tinder-bulk-snippet').textContent);
+bulkCopyBtn.textContent = 'Copied';
+setTimeout(() => { bulkCopyBtn.textContent = 'Copy bulk-import snippet'; }, 2000);
 } catch (e) {
 status.textContent = 'Copy failed — select the snippet and copy it manually.';
 }

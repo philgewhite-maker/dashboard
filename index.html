@@ -592,9 +592,277 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
 })();</pre>
 <button class="sync-btn" type="button" id="tinder-copy-snippet">Copy snippet</button>
 </details>
-<textarea id="tinder-input" rows="4" style="width:100%;font-family:monospace;font-size:12px;" placeholder="Paste the copied JSON here"></textarea>
+<div class="settings-note" style="margin:10px 0;">
+<strong>Bulk mode:</strong> steps through your sidebar matches automatically instead of one profile at a time &mdash; up to 15 a day, real randomised delays (5&ndash;15s) between each, remembered on Tinder's own site so tomorrow's run picks up where today's left off. Paste its output into the same box below; it's told apart from a single-profile paste automatically. This runs unattended across many real profiles in a row &mdash; if you see anything that looks like a rate limit or a verification prompt, stop and don't run it again that day.
+</div>
+<details style="margin:0 0 10px;">
+<summary style="cursor:pointer;color:var(--muted);font-size:13px;">Show the bulk-import console snippet</summary>
+<pre id="tinder-bulk-snippet" style="white-space:pre-wrap;font-size:12px;background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:10px;margin:8px 0;">(async () => {
+  // Same per-profile extraction as the single-profile snippet above, just
+  // wrapped as a function so it can run once per match instead of once per
+  // page load. Kept identical to that already-tested logic on purpose &mdash;
+  // this bulk version is the harder-to-verify piece (unattended, many real
+  // profiles in a row), so any drift from the known-good version is exactly
+  // the kind of mistake most likely to go unnoticed until it's already run
+  // 15 times.
+  async function extractProfile() {
+    const root = document.getElementById('main-content') || document;
+    const $$ = (sel, r) =&gt; [...(r || root).querySelectorAll(sel)];
+    const GROUP_HEADERS = new Set(['Essentials', 'Lifestyle', 'Interests', 'Messages', 'Photos', 'More about me']);
+
+    const scrollBox = [...document.querySelectorAll('div')]
+      .filter((d) =&gt; d.scrollHeight &gt; d.clientHeight + 300 &amp;&amp; d.clientHeight &gt; 200)
+      .sort((a, b) =&gt; b.scrollHeight - a.scrollHeight)[0];
+    if (scrollBox) {
+      for (let y = 0; y &lt; scrollBox.scrollHeight; y += 400) {
+        scrollBox.scrollTop = y;
+        await new Promise((r) =&gt; setTimeout(r, 200));
+      }
+      scrollBox.scrollTop = 0;
+      await new Promise((r) =&gt; setTimeout(r, 200));
+    }
+
+    const h1 = root.querySelector('h1[aria-label]');
+    let name = '', age = '';
+    if (h1) {
+      const m = (h1.getAttribute('aria-label') || '').match(/^(.+?)\s+(\d+)\s+years?$/);
+      if (m) { name = m[1].trim(); age = m[2]; } else { name = h1.textContent.trim(); }
+    }
+
+    const fields = [];
+    const matchedEl = [...root.querySelectorAll('*')].find((el) =&gt; el.children.length === 0 &amp;&amp; /you matched.*on\s+\d{1,2}\/\d{1,2}\/\d{2,4}/i.test(el.textContent || ''));
+    if (matchedEl) {
+      const dm = matchedEl.textContent.match(/on\s+(\d{1,2})\/(\d{1,2})\/(\d{2,4})/i);
+      if (dm) fields.push({ label: 'Matched on', value: `${dm[3]}-${dm[2].padStart(2, '0')}-${dm[1].padStart(2, '0')}` });
+    }
+    const seen = new Set();
+    $$('img[src*="/descriptors/"]').forEach((img) =&gt; {
+      const li = img.closest('li');
+      if (!li) return;
+      const h3 = li.querySelector('h3');
+      const label = h3 ? h3.textContent.trim() : '';
+      const valueEl = [...li.querySelectorAll('div')].find((d) =&gt; d.textContent.trim() &amp;&amp; !d.querySelector('img') &amp;&amp; !d.querySelector('h3'));
+      const value = valueEl ? valueEl.textContent.trim() : '';
+      if (label &amp;&amp; value &amp;&amp; !seen.has(label)) { fields.push({ label, value }); seen.add(label); }
+    });
+
+    const DISTANCE_BUCKETS = [2, 5, 10, 20, 30, 50, 100, 1000, 2000];
+    function bucketDistance(mi) {
+      for (const b of DISTANCE_BUCKETS) if (mi &lt;= b) return `≤${b}mi/${Math.round(b * 1.60934)}km`;
+      const roundedMi = Math.round(mi);
+      return `${roundedMi}mi/${Math.round(mi * 1.60934)}km+`;
+    }
+    function formatHeight(text) {
+      const cmMatch = text.match(/^(\d+)\s*cm$/);
+      const ftMatch = text.match(/^(\d+)'(\d+)"?$/);
+      let cm = null;
+      if (cmMatch) cm = parseInt(cmMatch[1], 10);
+      else if (ftMatch) cm = Math.round((parseInt(ftMatch[1], 10) * 12 + parseInt(ftMatch[2], 10)) * 2.54);
+      if (cm === null) return text;
+      const totalIn = cm / 2.54;
+      const ft = Math.floor(totalIn / 12);
+      const inch = Math.round(totalIn % 12);
+      return `${cm}cm / ${ft}'${inch}"`;
+    }
+    const ORIENTATIONS = new Set(['Straight', 'Gay', 'Lesbian', 'Bisexual', 'Pansexual', 'Asexual', 'Queer', 'Demisexual']);
+
+    const seenText = new Set();
+    root.querySelectorAll('li').forEach((li) =&gt; {
+      if (li.querySelector('img[src*="/descriptors/"]') || li.querySelector('h3') || !li.querySelector('svg')) return;
+      const valueEl = [...li.querySelectorAll('div')].find((d) =&gt; d.textContent.trim() &amp;&amp; d.children.length === 0);
+      if (!valueEl) return;
+      const text = valueEl.textContent.trim();
+      if (!text || seenText.has(text)) return;
+      seenText.add(text);
+      const livesIn = text.match(/^Lives in (.+)$/);
+      const away = text.match(/^([\d.]+)\s*(miles?|km)\s*away$/i);
+      if (/^\d+\s*cm$/.test(text) || /^\d+'\d+"?$/.test(text)) fields.push({ label: 'Height', value: formatHeight(text) });
+      else if (livesIn) fields.push({ label: 'City', value: livesIn[1] });
+      else if (away) {
+        const n = parseFloat(away[1]);
+        const miles = /km/i.test(away[2]) ? n * 0.621371 : n;
+        fields.push({ label: 'Distance', value: bucketDistance(miles) });
+      }
+      else if (/^(She|He|They)\/(Her|Him|Them)$/i.test(text)) fields.push({ label: 'Pronouns', value: text });
+      else if (/ at /.test(text)) fields.push({ label: 'Job', value: text });
+      else if (text.includes(',')) fields.push({ label: 'Languages', value: text });
+      else if (ORIENTATIONS.has(text)) fields.push({ label: 'Orientation', value: text });
+      else fields.push({ label: 'Profile detail', value: text });
+    });
+
+    const interestsHeading = $$('h2').find((h) =&gt; h.textContent.trim() === 'Interests');
+    if (interestsHeading &amp;&amp; interestsHeading.id) {
+      const list = root.querySelector(`ul[aria-labelledby="${interestsHeading.id}"]`);
+      if (list) {
+        const chips = [...list.querySelectorAll('li')].map((li) =&gt; {
+          const div = li.querySelector('div');
+          const text = (li.querySelector('span') || li).textContent.trim();
+          if (!text) return '';
+          const shared = div &amp;&amp; !(div.className || '').includes('background-secondary');
+          return shared ? `${text} (shared)` : text;
+        }).filter(Boolean);
+        if (chips.length) fields.push({ label: 'Interests', value: chips.join(', ') });
+      }
+    }
+
+    const chatHeading = $$('h2').find((h) =&gt; /^Conversation history with /i.test(h.textContent.trim()));
+    if (chatHeading) {
+      const card = chatHeading.closest('section') || (chatHeading.parentElement &amp;&amp; chatHeading.parentElement.parentElement);
+      const valueBlock = card &amp;&amp; [...card.children].find((el) =&gt; !el.contains(chatHeading) &amp;&amp; el.textContent.trim());
+      const raw = valueBlock ? valueBlock.textContent : '';
+      const cut = raw.replace(/Reply to .+/s, '');
+      const msgRe = /Sent at (\d{1,2}:\d{2})\d{1,2}:\d{2}([^:]{1,40}):/g;
+      const matches = [...cut.matchAll(msgRe)];
+      const messages = [];
+      for (let i = 0; i &lt; matches.length; i++) {
+        const m = matches[i];
+        const start = m.index + m[0].length;
+        const end = i + 1 &lt; matches.length ? matches[i + 1].index : cut.length;
+        const body = cut.slice(start, end)
+          .replace(/(Sent)?\d{1,2}\/\d{1,2}\/\d{4},?\s*\d{1,2}:\d{2}\s*$/, '')
+          .replace(/Sent\s*$/, '')
+          .trim();
+        const sender = m[2].trim();
+        if (sender &amp;&amp; body) messages.push(`[${m[1]}] ${sender}: ${body}`);
+      }
+      if (messages.length) fields.push({ label: 'Chat history', value: messages.join('\n') });
+    }
+
+    $$('h2').forEach((h2) =&gt; {
+      const label = h2.textContent.trim();
+      if (!label || seen.has(label) || GROUP_HEADERS.has(label) || /^Conversation history with /i.test(label)) return;
+      const card = h2.closest('section') || (h2.parentElement &amp;&amp; h2.parentElement.parentElement);
+      if (!card) return;
+      const valueBlock = [...card.children].find((el) =&gt; !el.contains(h2) &amp;&amp; el.textContent.trim());
+      let value = valueBlock ? valueBlock.textContent.trim() : '';
+      value = value.replace(/^\p{Extended_Pictographic}️?\s*/u, '').trim();
+      if (value &amp;&amp; value !== label) { fields.push({ label, value }); seen.add(label); }
+      if (label === 'Looking for') {
+        const chip = [...card.querySelectorAll('div[class*="Bdrs(30px)"]')].find((d) =&gt; !d.closest('ul') &amp;&amp; d.textContent.trim());
+        if (chip) fields.push({ label: 'Relationship type', value: chip.textContent.trim() });
+      }
+    });
+
+    const scanPhotos = () =&gt; $$('*').map((el) =&gt; {
+      const b = getComputedStyle(el).backgroundImage;
+      const m = b &amp;&amp; b.match(/url\("([^"]+)"\)/);
+      return m &amp;&amp; m[1].includes('gotinder.com') ? m[1].replace(/\/\d+x\d+_/, '/640x800_') : null;
+    }).filter(Boolean);
+    const photos = new Set(scanPhotos());
+    for (const btn of $$('button[aria-label^="Photo "]')) {
+      btn.click();
+      await new Promise((r) =&gt; setTimeout(r, 300));
+      scanPhotos().forEach((u) =&gt; photos.add(u));
+    }
+
+    return { name, age, fields, photos: [...photos] };
+  }
+
+  // Every match/message row in either sidebar list shares the same
+  // /app/messages/&lt;id&gt; URL scheme, and both lists are always in the DOM
+  // at once &mdash; the inactive tab is just transformed off-screen, not
+  // removed &mdash; verified against a real saved page with both tabs
+  // captured. So both can be read without ever clicking between the
+  // Matches and Messages tabs.
+  function collectCandidates() {
+    const seen = new Set();
+    const rows = [];
+    const grab = (ul) =&gt; {
+      if (!ul) return;
+      ul.querySelectorAll('li a[href*="/app/messages/"]').forEach((a) =&gt; {
+        const m = a.href.match(/\/app\/messages\/([a-zA-Z0-9]+)/);
+        if (!m) return;
+        const id = m[1];
+        if (seen.has(id)) return;
+        seen.add(id);
+        const name = (a.getAttribute('aria-label') || '').replace(/\.\s*Start chat\.?$/i, '').trim();
+        rows.push({ id, name, href: a.href });
+      });
+    };
+    grab(document.querySelector('ul[aria-label="Your recent messages"]'));
+    grab(document.querySelector('ul[aria-label="Your matches"]'));
+    return rows;
+  }
+
+  // Polls the profile panel until it's actually showing the person just
+  // clicked, rather than a fixed delay &mdash; SPA navigation time varies,
+  // and a fixed wait is either too short sometimes or wastefully long
+  // every time.
+  async function waitForProfile(expectedName, timeoutMs) {
+    const start = Date.now();
+    while (Date.now() - start &lt; timeoutMs) {
+      const h1 = document.querySelector('#main-content h1[aria-label]');
+      const label = h1 ? (h1.getAttribute('aria-label') || '') : '';
+      if (label &amp;&amp; label.toLowerCase().startsWith(expectedName.toLowerCase())) return true;
+      await new Promise((r) =&gt; setTimeout(r, 250));
+    }
+    return false;
+  }
+
+  // Cross-day memory lives on Tinder's own origin, not the dashboard's --
+  // the two sites can't see each other, so this is the only way tomorrow's
+  // run knows what today's already covered. Keyed by match id, the same
+  // permanent identifier the URL itself uses.
+  const DONE_KEY = 'dashTinderBulkDone';
+  const BATCH_SIZE = 15; // "10-20 or so per day"
+  const MIN_DELAY_MS = 5000, MAX_DELAY_MS = 15000; // randomised, not a fixed interval &mdash; a fixed gap is a bot tell
+
+  let done;
+  try { done = new Set(JSON.parse(localStorage.getItem(DONE_KEY) || '[]')); } catch (e) { done = new Set(); }
+
+  const candidates = collectCandidates();
+  const todo = candidates.filter((r) =&gt; !done.has(r.id)).slice(0, BATCH_SIZE);
+  const profiles = [];
+
+  if (!todo.length) {
+    console.log(`Nothing new -- ${candidates.length} visible in the sidebar, all already processed. Scroll the list down to reveal more, then run again.`);
+  } else {
+    console.log(`Processing ${todo.length} new match${todo.length === 1 ? '' : 'es'} of ${candidates.length} visible. This takes a while -- real delays are the point.`);
+    // Wrapped in try/finally so a crash partway through still outputs and
+    // copies whatever WAS gathered, rather than losing a run's worth of
+    // waiting to one bad profile.
+    try {
+      for (let i = 0; i &lt; todo.length; i++) {
+        const row = todo[i];
+        console.log(`[${i + 1}/${todo.length}] ${row.name}...`);
+        const link = document.querySelector(`a[href="${row.href}"]`);
+        if (!link) { console.warn(`Couldn't find ${row.name} any more -- the sidebar re-rendered. Stopping here.`); break; }
+        link.click();
+        const loaded = await waitForProfile(row.name, 8000);
+        if (!loaded) {
+          console.warn(`${row.name}'s profile didn't load in time -- skipped, will retry next run.`);
+          continue;
+        }
+        await new Promise((r) =&gt; setTimeout(r, 500));
+        try {
+          profiles.push(await extractProfile());
+          done.add(row.id);
+          localStorage.setItem(DONE_KEY, JSON.stringify([...done]));
+        } catch (err) {
+          console.warn(`Extraction failed for ${row.name}: ${err.message} -- skipped.`);
+        }
+        if (i &lt; todo.length - 1) {
+          const delay = MIN_DELAY_MS + Math.random() * (MAX_DELAY_MS - MIN_DELAY_MS);
+          console.log(`Waiting ${Math.round(delay / 1000)}s...`);
+          await new Promise((r) =&gt; setTimeout(r, delay));
+        }
+      }
+    } finally {
+      const out = { profiles };
+      const json = JSON.stringify(out, null, 1);
+      let copied = false;
+      try { copy(json); copied = true; } catch (e) { /* not in a real DevTools console */ }
+      if (!copied) { try { await navigator.clipboard.writeText(json); copied = true; } catch (e) { /* no clipboard permission/focus */ } }
+      console.log(`${copied ? 'Copied' : 'Could not auto-copy -- select and copy manually'} -- ${profiles.length} of ${todo.length} attempted profile${todo.length === 1 ? '' : 's'} extracted. Paste into the dashboard.`);
+      if (!copied) console.log(json);
+    }
+  }
+})();</pre>
+<button class="sync-btn" type="button" id="tinder-bulk-copy-snippet">Copy bulk-import snippet</button>
+</details>
+<textarea id="tinder-input" rows="4" style="width:100%;font-family:monospace;font-size:12px;" placeholder="Paste the copied JSON here — one profile or a batch, either works"></textarea>
 <div class="sync-row" style="margin-top:8px;">
-<button class="sync-btn" id="tinder-import-btn" type="button">Read profile</button>
+<button class="sync-btn" id="tinder-import-btn" type="button">Read profile(s)</button>
 <span class="sync-status" id="tinder-status"></span>
 </div>
 <div id="tinder-review"></div>
