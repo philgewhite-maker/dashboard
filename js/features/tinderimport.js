@@ -185,6 +185,51 @@ const FIELD_MAP = {
 // usual already-set-defaults-to-unchecked rule (see refreshOverrides()).
 const ALWAYS_APPLY_LABELS = new Set(['Last message date']);
 
+// The fields worth a slot even when Tinder's own structured section didn't
+// have one for this particular profile — every one of these has a real
+// destination on the connection (see FIELD_MAP), and every one is exactly
+// the kind of thing that shows up in free prose (About me, a chat message)
+// instead of a dedicated field. Without a slot to transcribe it into, a
+// height spotted in someone's bio had nowhere to go but Notes, unfindable
+// and unflaggable. Left off: the array-mapped fields (Interests,
+// Orientation...) and anything that only ever lands in Notes anyway
+// (Pets, Zodiac...) — a blank box for those has no real destination to
+// pay off filling it in.
+const ALWAYS_SHOW_LABELS = ['Height', 'Job', 'Education', 'City', 'Distance'];
+
+// Purely a display grouping — doesn't change where a field ends up on
+// save, just how the review card reads. A label not listed in any cluster
+// (a field Tinder added that isn't recognised yet) still renders, under
+// "Other", so nothing silently disappears. Chat history is deliberately
+// absent — it's rendered separately, full width, regardless.
+const FIELD_CLUSTERS = [
+// Job/Job title/Work are all just Tinder's own wording for the same
+// `job` field (see FIELD_MAP) -- listed here explicitly since clustering
+// matches by literal label, unlike withAlwaysShowFields() above which
+// already resolves aliases through FIELD_MAP.
+{ title: 'Basics', labels: ['Job', 'Job title', 'Work', 'Education', 'School', 'City', 'Distance', 'Height', 'Matched on'] },
+{ title: 'Family & lifestyle', labels: ['Family plans', 'Pets', 'Drinking', 'How often do you smoke?', 'Workout'] },
+{ title: 'About them', labels: ['Gender', 'Orientation', 'Zodiac', 'Love style'] },
+{ title: 'Looking for', labels: ['Looking for', 'Relationship type'] },
+{ title: 'Interests', labels: ['Interests'] },
+];
+
+// Appends an empty, unchecked entry for every ALWAYS_SHOW_LABELS field this
+// particular scrape didn't produce, so the review card offers a slot for
+// it regardless. Appending rather than inserting in cluster position keeps
+// every existing data-tinder-field="i" index stable against the array this
+// scrape actually produced — clusteredFieldsHtml() below handles the
+// re-ordering for display, this just makes sure the field EXISTS to sort.
+function withAlwaysShowFields(fields) {
+// Checked by FIELD_MAP target, not literal label -- Tinder's own label for
+// this varies ("Work" / "Job title" / "Job" all map to the same `job`
+// field), and matching only the literal string "Job" would add a
+// redundant empty slot right next to an already-scraped "Job title" row.
+const haveTargets = new Set(fields.map((f) => FIELD_MAP[f.label]).filter(Boolean));
+const missing = ALWAYS_SHOW_LABELS.filter((label) => !haveTargets.has(FIELD_MAP[label])).map((label) => ({ label, value: '', apply: false }));
+return [...fields, ...missing];
+}
+
 // Fields that become chips in an existing multi-value tag list instead —
 // added to, never overwritten, so re-importing the same person twice just
 // re-confirms the same tags rather than duplicating or blocking anything.
@@ -626,7 +671,39 @@ return `<div class="tinder-field-note" style="margin:2px 0 8px;">`
 + `</div>`;
 }
 
+// Groups pending.fields into FIELD_CLUSTERS for display — Basics, Family &
+// lifestyle, etc. — each its own little multi-column grid, in cluster
+// order, followed by an "Other" catch-all for anything not in any
+// cluster's label list, followed by Chat history (always last, always
+// full width, rendered outside any cluster grid).
+function clusteredFieldsHtml(fields) {
+const used = new Set();
+const groupHtml = (title, items) => items.length
+? `<div class="tinder-cluster"><h4 class="tinder-cluster-title">${escapeHtml(title)}</h4><div class="tinder-fields">${items.map(({ f, i }) => fieldPreviewHtml(f, i)).join('')}</div></div>`
+: '';
+const indexed = fields.map((f, i) => ({ f, i })).filter(({ f }) => f.label !== 'Chat history');
+const clusters = FIELD_CLUSTERS.map((cluster) => {
+const items = indexed.filter(({ f, i }) => cluster.labels.includes(f.label) && !used.has(i));
+items.forEach(({ i }) => used.add(i));
+return groupHtml(cluster.title, items);
+}).join('');
+const rest = indexed.filter(({ i }) => !used.has(i));
+const chatEntry = fields.map((f, i) => ({ f, i })).find(({ f }) => f.label === 'Chat history');
+return clusters + groupHtml('Other', rest) + (chatEntry ? fieldPreviewHtml(chatEntry.f, chatEntry.i) : '');
+}
+
 function fieldPreviewHtml(f, i) {
+// An ALWAYS_SHOW_LABELS slot this scrape didn't fill -- nothing scraped
+// means nothing to apply/skip, so this is a plain fill-in box rather than
+// the checkbox+value shape below. Typing something IS the decision;
+// there's no separate Apply toggle to also remember to check.
+if (!f.value.trim() && ALWAYS_SHOW_LABELS.includes(f.label)) {
+return `<div class="tinder-field-item">
+<label class="tinder-field-row"><strong>${escapeHtml(f.label)}:</strong>
+<input type="text" autocomplete="off" placeholder="Not captured — spotted in About me or chat? Type it here" data-tinder-field-fill="${i}">
+</label>
+</div>`;
+}
 const conn = data.connections.find((c) => c.id === pending.chosenId);
 const target = FIELD_MAP[f.label];
 const arrayMap = ARRAY_FIELD_MAP[f.label];
@@ -846,7 +923,7 @@ ${saveBlockedNote ? `<div class="tinder-field-note" style="margin:-4px 0 8px;">$
 </div>
 
 ${agePreviewHtml()}
-${p.fields.length ? `<div class="tinder-fields">${p.fields.map((f, i) => fieldPreviewHtml(f, i)).join('')}</div>` : ''}
+${p.fields.length ? clusteredFieldsHtml(p.fields) : ''}
 ${contactPreviewHtml()}
 ${p.photos.length ? `<div class="settings-note" style="margin:8px 0 4px;">${p.photos.filter((ph) => ph.apply).length} of ${p.photos.length} photos will be added — click a photo to view it bigger, click the check to include/exclude:</div>
 <div class="photo-gallery">${p.photos.map((ph, i) => `<span class="gallery-thumb tinder-photo-thumb${ph.apply ? ' tinder-photo-included' : ''}" data-tinder-photo-view="${i}" style="background-image:url('${escapeHtml(ph.url)}')"><span class="tinder-photo-toggle${ph.apply ? ' checked' : ''}" data-tinder-photo-toggle="${i}" title="${ph.apply ? 'Included — click to exclude' : 'Excluded — click to include'}">${ph.apply ? '&check;' : ''}</span></span>`).join('')}</div>` : ''}
@@ -974,6 +1051,14 @@ render();
 });
 el.querySelectorAll('[data-tinder-field]').forEach((cb) => {
 cb.addEventListener('change', () => { pending.fields[parseInt(cb.dataset.tinderField, 10)].apply = cb.checked; });
+});
+el.querySelectorAll('[data-tinder-field-fill]').forEach((input) => {
+input.addEventListener('change', () => {
+const f = pending.fields[parseInt(input.dataset.tinderFieldFill, 10)];
+f.value = input.value.trim();
+f.apply = !!f.value; // typing something IS the apply decision, no separate checkbox
+render();
+});
 });
 el.querySelectorAll('[data-tinder-city]').forEach((hit) => {
 hit.addEventListener('click', (e) => {
@@ -1208,7 +1293,7 @@ const { phones, handles } = scanFields(fields);
 const parsed = {
 name: String(raw.name || '').trim(),
 age: String(raw.age || '').trim(),
-fields: fields.map((f) => ({ ...f, apply: true })),
+fields: withAlwaysShowFields(fields.map((f) => ({ ...f, apply: true }))),
 photos: photos.map((url) => ({ url, apply: true })),
 foundPhones: phones.map((value) => ({ value, apply: true })),
 foundHandles: handles.map((h) => ({ ...h, apply: true })),
