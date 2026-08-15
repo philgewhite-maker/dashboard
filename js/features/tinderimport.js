@@ -22,7 +22,7 @@
 // importer), and the chosen connection's photo stays visible for the whole
 // review regardless of how it got picked, so a wrong dropdown pick is just
 // as visible as a wrong auto-match was invisible before.
-import { data, queueSave, currentAge } from '../state.js';
+import { data, queueSave, currentAge, computeFlags } from '../state.js';
 import { escapeHtml, uid, todayStr, hydratePhotos } from '../utils.js';
 import { nameKey, editDistance } from '../googlecontacts.js';
 import { storePhoto, fetchProxiedImage } from '../files.js';
@@ -505,15 +505,17 @@ const t = pending.translations[i];
 if (!t) return '';
 if (t === 'loading') return `<div class="tinder-translate-result">Checking language…</div>`;
 if (t.error) return `<div class="tinder-translate-result tinder-translate-error">Translate failed: ${escapeHtml(t.error)}</div>`;
-if (t.alreadyEnglish) return `<div class="tinder-translate-result">(Free on-device check: already English — no Anthropic call made.)</div>`;
+if (t.alreadyEnglish) return `<div class="tinder-translate-result"><span class="tinder-engine-badge tinder-engine-free">Free, on-device</span> Already English — no Anthropic call made.</div>`;
 if (!t.language || !t.translation) return `<div class="tinder-translate-result tinder-translate-error">Couldn't tell what language this is.</div>`;
 const alreadyHasLang = pending.fields.some((f) => f.label === 'Languages' && f.value.split(',').map((s) => s.trim()).includes(t.language));
 // Getting here at all means the free on-device check either said this
 // ISN'T English, or wasn't available to ask in the first place — either
 // way, every translation actually shown came from a paid Anthropic call,
 // never the free path (which can only ever short-circuit to the branch
-// above). Says so plainly rather than leaving it to be inferred.
-return `<div class="tinder-translate-result">→ <strong>${escapeHtml(t.language)}:</strong> ${escapeHtml(t.translation)} <span class="tinder-field-note">(via Anthropic)</span>`
+// above). A muted inline "(via Anthropic)" note turned out too easy to
+// miss (confirmed live) -- a coloured badge is the same information made
+// impossible to scroll past without noticing.
+return `<div class="tinder-translate-result"><span class="tinder-engine-badge tinder-engine-paid">via Anthropic</span> <strong>${escapeHtml(t.language)}:</strong> ${escapeHtml(t.translation)}`
 + (alreadyHasLang ? '' : ` <button type="button" class="sync-btn tinder-inline-btn" data-tinder-translate-add="${escapeHtml(t.language)}">+ add ${escapeHtml(t.language)}</button>`)
 + `</div>`;
 }
@@ -635,6 +637,34 @@ const note = current ? `already set to ${current} — will be kept` : `will set 
 return `<div class="tinder-field-row"><strong>Age:</strong> ${escapeHtml(pending.age)} <span class="tinder-field-note">(${escapeHtml(note)})</span></div>`;
 }
 
+// Builds a connection-shaped object out of the INCOMING draft data (not
+// the matched connection's already-saved data, which gets its own flags
+// on the Connections list already) -- so a red/amber/green rule can fire
+// on what THIS profile says before you've even decided whether to save
+// it, using the exact same rules and computeFlags() as everywhere else.
+function draftConnForFlags() {
+const draft = {};
+pending.fields.forEach((f) => {
+const target = FIELD_MAP[f.label];
+if (target) { draft[target] = f.value; return; }
+const arrayMap = ARRAY_FIELD_MAP[f.label];
+if (arrayMap) {
+if (!Array.isArray(draft[arrayMap.target])) draft[arrayMap.target] = [];
+const parts = arrayMap.split ? f.value.split(',').map((s) => s.trim()).filter(Boolean) : [f.value.trim()];
+draft[arrayMap.target].push(...parts);
+}
+});
+if (pending.cityOverride.trim()) draft.location = pending.cityOverride.trim();
+if (pending.age) { draft.age = pending.age; draft.ageAsOf = todayStr(); }
+return draft;
+}
+
+function flagBreakdownHtml() {
+const flags = computeFlags(draftConnForFlags(), data.flagRules);
+if (!flags.hits.length) return '';
+return `<div class="flag-breakdown" style="margin:4px 0 8px;">${flags.hits.map((h) => `<span class="dot ${h.color}"></span>${escapeHtml(h.label)}`).join(' &nbsp; ')}</div>`;
+}
+
 function ratingStarsHtml(current) {
 return [1, 2, 3, 4, 5].map((n) => `<svg class="star tinder-rating-star${n <= current ? ' filled' : ''}" data-tinder-star="${n}" viewBox="0 0 20 20" fill="currentColor"><path d="M10 1l2.6 5.9 6.4.6-4.8 4.3 1.4 6.2L10 14.9 4.4 18l1.4-6.2L1 7.5l6.4-.6z"/></svg>`).join('');
 }
@@ -659,6 +689,7 @@ const saveBlockedNote = !p.chosenId ? 'pick who this is first'
 el.innerHTML = `<div class="album-card">
 ${queue.length ? `<div class="settings-note" style="margin:0 0 8px;">${queue.length} more queued in this batch — saving auto-advances to the next.</div>` : ''}
 <div class="album-caption"><strong>${escapeHtml(p.name || '(no name found)')}</strong>${p.age ? `, ${escapeHtml(p.age)}` : ''}</div>
+${flagBreakdownHtml()}
 
 <select id="tinder-pick">${optionsFor(p.chosenId, p.candidates)}</select>
 
@@ -1056,6 +1087,13 @@ function refreshOverrides() {
 const conn = data.connections.find((c) => c.id === pending.chosenId);
 pending.stageOverride = suggestedStage(conn);
 pending.ratingOverride = conn ? (conn.priority || 0) : 0;
+// If nothing in THIS import's own text mentioned a city, the field falls
+// back to showing what's already saved on the matched connection --
+// otherwise it reads blank even when a city genuinely is on file, which
+// looks like the data was lost rather than just not re-extracted this
+// time. Only when cityOverride is still empty: never overwrites a value
+// that came from the fresh scrape, or that the user has since typed.
+if (conn && !pending.cityOverride.trim() && conn.location) pending.cityOverride = conn.location;
 // A single-value field (Distance, Job, City...) that's already set on the
 // matched connection defaults to unchecked, not disabled -- overwriting
 // stale data (a match moved city, a bad early scrape) is a real need, but
