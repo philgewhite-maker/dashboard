@@ -806,14 +806,32 @@ if (hasGreen && hasRed) return 'amber';
 return null;
 }
 
+// Tinder itself appends " (shared)" to an interest it says you both have
+// (see the console snippet) — stripped before comparing so a rule listing
+// "Hiking" matches both a bare "Hiking" someone typed and the scraped
+// "Hiking (shared)", rather than treating them as unrelated strings.
+function stripSharedSuffix(v) {
+return String(v || '').replace(/\s*\(shared\)\s*$/i, '').trim();
+}
+
 function valueListColor(rule, values) {
-const norm = (values || []).map((v) => String(v).toLowerCase().trim());
+const norm = (values || []).map((v) => stripSharedSuffix(v).toLowerCase());
 if (!norm.length) return null;
-const has = (list) => (list || []).some((x) => norm.includes(String(x).toLowerCase().trim()));
+const has = (list) => (list || []).some((x) => norm.includes(stripSharedSuffix(x).toLowerCase()));
 if (has(rule.red)) return 'red';
 if (has(rule.amber)) return 'amber';
 if (has(rule.green)) return 'green';
 return null;
+}
+
+// Single-value convenience wrapper around valueListColor, for coloring one
+// tag/chip/value at a time (Overview chips, the tag-chip editor) rather
+// than a whole connection's array. Finds the field's rule itself so
+// callers don't need to look it up.
+function valueColorForField(rules, field, value) {
+const rule = (rules || []).find((r) => r.field === field);
+if (!rule || !value) return null;
+return valueListColor(rule, [value]);
 }
 
 // Every rule that matched, plus the worst colour among them (red beats
@@ -920,7 +938,7 @@ MAIL_SEARCH_KINDS, mailSearchLabel,
 TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask,
 CONTACT_STATUS_LABELS, CONTACT_MATCH_MIN_STAGE,
 DEFAULT_RATING_CATEGORIES, slugifyField, DEFAULT_RECIPE_RATING_CATEGORIES,
-FLAG_FIELD_DEFS, DEFAULT_FLAG_RULES, computeFlags, suggestedAction, suggestedQuestions, isTravelPaused, ACTIONS, distanceMiles,
+FLAG_FIELD_DEFS, DEFAULT_FLAG_RULES, computeFlags, valueColorForField, stripSharedSuffix, suggestedAction, suggestedQuestions, isTravelPaused, ACTIONS, distanceMiles,
 };
 
 // `data` above is exported by binding, but ES module live-bindings only

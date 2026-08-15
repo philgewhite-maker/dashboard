@@ -1,4 +1,4 @@
-import { data, queueSave, getLocalSettings, setLocalSetting, CONTACT_STATUS_LABELS, currentAge, displayAge, photoCoverage, photoLinkLabels } from '../state.js';
+import { data, queueSave, getLocalSettings, setLocalSetting, CONTACT_STATUS_LABELS, currentAge, displayAge, photoCoverage, photoLinkLabels, valueColorForField } from '../state.js';
 import { escapeHtml } from '../utils.js';
 import { visibleTagFields } from './connections.js';
 
@@ -43,14 +43,18 @@ return [
 { title: 'Stage', getKeys: (c) => [c.stage], field: null, emptyField: 'stage' },
 { title: 'Location', getKeys: (c) => [c.location], field: null, emptyField: 'location' },
 { title: 'Age', getKeys: (c) => [ageDecade(c)], field: null, emptyField: 'age' },
-{ title: 'Job', getKeys: (c) => [c.job], field: null, emptyField: 'job' },
+// colorField is separate from field (used for bulk tag-assignment) --
+// Job is a scalar, not an array you can push a bulk-picked value into,
+// but it's still a valid flagRules target (see FLAG_FIELD_DEFS) so its
+// chips can still be coloured.
+{ title: 'Job', getKeys: (c) => [c.job], field: null, colorField: 'job', emptyField: 'job' },
 { title: 'Contact match', getKeys: (c) => [CONTACT_STATUS_LABELS[c.contactStatus]], field: null, emptyField: null },
 // Both derived, for finding what needs fixing: who is still on a single
 // import thumbnail, and who has no link out to their photos anywhere.
 { title: 'Photos', getKeys: (c) => [photoCoverage(c)], field: null, emptyField: null },
 { title: 'Photo links', getKeys: (c) => photoLinkLabels(c), field: null, emptyField: 'photoLinks' },
 ...visibleTagFields().map((f) => ({
-title: f.label, getKeys: (c) => c[f.field] || [], field: f.field, emptyField: f.field,
+title: f.label, getKeys: (c) => c[f.field] || [], field: f.field, colorField: f.field, emptyField: f.field,
 })),
 ];
 }
@@ -103,8 +107,9 @@ const chips = keys.map((k) => {
 const isOpen = openAssigner && openAssigner.field === field && openAssigner.key === k;
 const assigner = isOpen ? assignerHtml(field, k, groups[k]) : '';
 const on = isFaceted(dim.title, k);
+const color = dim.colorField ? valueColorForField(data.flagRules, dim.colorField, k) : null;
 return `<span class="overview-chip-wrap">
-<button class="overview-chip${isOpen || on ? ' active' : ''}" data-overview-key="${escapeHtml(k)}" data-overview-title="${escapeHtml(dim.title)}" data-overview-field="${escapeHtml(field || '')}">${escapeHtml(k)} (${groups[k].length})</button>
+<button class="overview-chip${isOpen || on ? ' active' : ''}${color ? ' overview-chip-' + color : ''}" data-overview-key="${escapeHtml(k)}" data-overview-title="${escapeHtml(dim.title)}" data-overview-field="${escapeHtml(field || '')}">${escapeHtml(k)} (${groups[k].length})</button>
 ${assigner}
 </span>`;
 }).join('')

@@ -416,6 +416,7 @@ border-radius:4px;padding:0 3px;
 cursor:pointer;font-weight:600;
 }
 .tinder-cyrillic-hit:hover{background:var(--plum);color:#fff;}
+.tinder-notes-preview{font-size:12px;line-height:1.5;color:var(--muted);margin:-4px 0 0;}
 .tinder-flag-hit{border-radius:4px;padding:0 3px;font-weight:600;}
 .tinder-flag-hit-red{background:var(--red);color:#fff;}
 .tinder-flag-hit-amber{background:var(--amber-bg);color:var(--amber);}
@@ -536,6 +537,16 @@ overflow:hidden;
 .cook-instructions li{padding:6px 0;line-height:1.5;}
 .cook-notes{margin-top:14px;padding-top:10px;border-top:1px dashed var(--line);font-size:13px;color:var(--muted);}
 .cook-foot{padding:12px 20px;border-top:1px solid var(--line);}
+.tag-picker-grid{display:flex;flex-wrap:wrap;gap:6px;}
+.tag-picker-chip{
+font-size:12px;
+background:var(--paper);color:var(--ink);
+border:1px solid var(--line);border-radius:999px;
+padding:4px 11px;cursor:pointer;
+}
+.tag-picker-chip.tag-picker-green{background:var(--sage-bg);color:var(--sage);border-color:transparent;}
+.tag-picker-chip.tag-picker-amber{background:var(--amber-bg);color:var(--amber);border-color:transparent;}
+.tag-picker-chip.tag-picker-red{background:var(--red);color:#fff;border-color:transparent;}
 
 /* Task attachments */
 .task-attachments{margin:10px 0 4px;}
@@ -973,6 +984,9 @@ padding:2px 8px;
 font-size:11px;
 }
 .tag-chip .tag-x{cursor:pointer;font-weight:700;}
+.tag-chip.tag-chip-green{background:var(--sage-bg);border-color:var(--sage);color:var(--sage);}
+.tag-chip.tag-chip-amber{background:var(--amber-bg);border-color:var(--amber);color:var(--amber);}
+.tag-chip.tag-chip-red{background:color-mix(in srgb, var(--red) 15%, var(--card));border-color:var(--red);color:var(--red);}
 .tag-add-input{
 font-family:'Inter',sans-serif;
 font-size:12px;
@@ -1800,6 +1814,12 @@ opacity:.7;
 }
 .overview-chip-wrap{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;}
 .overview-chip.active{background:var(--rose);color:#fff;border-color:var(--rose);}
+/* :not(.active) so selecting a coloured chip still reads as clearly
+   "selected" via the rose fill above, rather than the flag colour and the
+   active state fighting over the same background. */
+.overview-chip.overview-chip-green:not(.active){background:var(--sage-bg);color:var(--sage);}
+.overview-chip.overview-chip-amber:not(.active){background:var(--amber-bg);color:var(--amber);}
+.overview-chip.overview-chip-red:not(.active){background:color-mix(in srgb, var(--red) 15%, var(--card));color:var(--red);}
 /* "None" is a gap to fill rather than a group to browse, so it reads as
    muted and dashed instead of competing with the real values. */
 .overview-chip.none{

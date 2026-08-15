@@ -1,9 +1,9 @@
-import { data, queueSave, reachOutThreshold, isDormantStage, isTravelPaused, getLocalSettings, TAG_FIELDS, CONTACT_STATUS_LABELS, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness, slugifyField, FLAG_FIELD_DEFS, computeFlags, suggestedAction, suggestedQuestions } from '../state.js';
+import { data, queueSave, reachOutThreshold, isDormantStage, isTravelPaused, getLocalSettings, TAG_FIELDS, CONTACT_STATUS_LABELS, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness, slugifyField, FLAG_FIELD_DEFS, computeFlags, valueColorForField, stripSharedSuffix, suggestedAction, suggestedQuestions } from '../state.js';
 import { captureTask, revealTask } from './tasks.js';
 import { photoDelete, photoUrl } from '../db.js';
 import { storePhoto } from '../files.js';
 import {
-uid, todayStr, daysSince, escapeHtml, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, scrollAndFlash, bindForm,
+uid, todayStr, daysSince, escapeHtml, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, scrollAndFlash, bindForm,
 resizeImageToBlob,
 } from '../utils.js';
 import { MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot } from '../ai.js';
@@ -282,7 +282,10 @@ return `<datalist id="taglist-${field}">${values.map((v) => `<option value="${es
 }
 
 function tagChips(items, connId, field) {
-return (items || []).map((t, i) => `<span class="tag-chip">${escapeHtml(t)}<span class="tag-x" data-tag-remove="${connId}" data-tag-field="${field}" data-tag-idx="${i}">&times;</span></span>`).join('')
+return (items || []).map((t, i) => {
+const color = valueColorForField(data.flagRules, field, t);
+return `<span class="tag-chip${color ? ' tag-chip-' + color : ''}">${escapeHtml(t)}<span class="tag-x" data-tag-remove="${connId}" data-tag-field="${field}" data-tag-idx="${i}">&times;</span></span>`;
+}).join('')
 + `<input type="text" autocomplete="off" class="tag-add-input" placeholder="+ add" list="taglist-${field}" data-tag-add="${connId}" data-tag-field="${field}">`
 + `<button type="button" class="todo-add-btn" data-tag-add-btn="${connId}" data-tag-add-btn-field="${field}" style="padding:3px 8px;">+</button>`;
 }
@@ -496,6 +499,13 @@ const flags = computeFlags(c, data.flagRules);
 const action = suggestedAction(c, data.flagRules);
 const questions = suggestedQuestions(c);
 const flagDotHtml = flags.worst ? `<span class="dot ${flags.worst}" title="${escapeHtml(flags.hits.map((h) => `${h.label}: ${h.color}`).join(', '))}"></span> ` : '';
+// Only worth a second, highlighted copy of Notes when it would actually
+// show something the plain textarea doesn't — a flagged word or two.
+// Comparing against a plain escape is what highlightFlagValues() itself
+// falls back to when nothing matched, so an unequal result means a span
+// really got inserted, not just that Notes happens to be non-empty.
+const notesHighlighted = c.notes ? highlightFlagValues(c.notes, data.flagRules) : '';
+const notesHasHits = notesHighlighted && notesHighlighted !== escapeHtml(c.notes);
 return `<div class="match-card" data-conn-row="${c.id}">
 <div class="match-row">
 ${avatarHtml(c.photoId, c.name)}
@@ -554,6 +564,7 @@ ${c.travelStatus === 'travelling' ? `<label>Travelling until<input type="date" d
 <label>Email<input type="email" autocomplete="off" placeholder="Also used to match" data-field="email" data-conn-detail="${c.id}" value="${escapeHtml(c.email || '')}" name="conn-email-${c.id}"></label>
 <label>What I like most<input type="text" autocomplete="off" data-field="likes" data-conn-detail="${c.id}" value="${escapeHtml(c.likes || '')}"></label>
 <label class="full">Notes<textarea rows="2" data-field="notes" data-conn-detail="${c.id}">${escapeHtml(c.notes || '')}</textarea></label>
+${notesHasHits ? `<div class="full tinder-notes-preview">${notesHighlighted}</div>` : ''}
 <label class="full">Chat history<textarea rows="4" placeholder="Imported from Tinder — one message per line" data-field="chatLog" data-conn-detail="${c.id}">${escapeHtml(c.chatLog || '')}</textarea></label>
 ${c.chatLog ? `<div class="full tinder-chat-block" style="margin:0 0 6px;">${chatTranscriptHtml(c.chatLog)}</div>` : ''}
 ${visibleTagFields().map((f) => `<label class="full${f.sensitive ? ' sensitive-field' : ''}">${escapeHtml(f.label)}<div class="tag-editor">${tagChips(c[f.field], c.id, f.field)}</div></label>`).join('')}
@@ -820,6 +831,121 @@ else expandedConnections.delete(el.dataset.connDetails);
 // rating category's `field` key is where real per-person data lives, and
 // there's no safe way to rename in place without either orphaning existing
 // ratings or silently merging two categories' data together.
+// All distinct values ever seen for this field across every connection,
+// most common first, with whether any occurrence carried Tinder's own
+// "(shared)" marker (see the console snippet) -- used to pre-colour a
+// value green in the picker below, since a shared interest is a free,
+// positive signal that didn't need a judgement call.
+function collectFieldValues(field) {
+const def = FLAG_FIELD_DEFS.find((d) => d.field === field);
+if (!def) return [];
+const counts = new Map(); // lowercase canonical value -> {label, count, wasShared}
+data.connections.forEach((c) => {
+(def.getValue(c) || []).forEach((raw) => {
+const canonical = stripSharedSuffix(raw);
+if (!canonical) return;
+const key = canonical.toLowerCase();
+const wasShared = /\(shared\)\s*$/i.test(String(raw));
+const existing = counts.get(key);
+if (existing) { existing.count++; if (wasShared) existing.wasShared = true; }
+else counts.set(key, { label: canonical, count: 1, wasShared });
+});
+});
+return [...counts.values()].sort((a, b) => b.count - a.count);
+}
+
+// A tedious comma-separated text box is a bad way to colour a field with
+// dozens of real-world values (Interests especially) -- this picker shows
+// every value actually seen across your connections instead, so setting
+// up Interests colours is "click the ones that matter" rather than typing
+// out and misspelling values from memory. Click cycles a chip through
+// green -> amber -> red -> none; Save writes straight into the field's
+// flagRules entry (creating one if it didn't exist yet), so it stays the
+// exact same rule the plain text boxes edit -- either UI reflects the other.
+let tagPickerState = null; // { field, values, colors: Map<lowercase, color|null> }
+const TAG_PICKER_CYCLE = [null, 'green', 'amber', 'red'];
+
+function openTagColorPicker(field) {
+const def = FLAG_FIELD_DEFS.find((d) => d.field === field);
+if (!def) return;
+const rule = data.flagRules.find((r) => r.field === field);
+const values = collectFieldValues(field);
+const colors = new Map();
+values.forEach((v) => {
+let color = null;
+if (rule) {
+if ((rule.red || []).some((x) => stripSharedSuffix(x).toLowerCase() === v.label.toLowerCase())) color = 'red';
+else if ((rule.amber || []).some((x) => stripSharedSuffix(x).toLowerCase() === v.label.toLowerCase())) color = 'amber';
+else if ((rule.green || []).some((x) => stripSharedSuffix(x).toLowerCase() === v.label.toLowerCase())) color = 'green';
+}
+if (!color && v.wasShared) color = 'green';
+colors.set(v.label.toLowerCase(), color);
+});
+tagPickerState = { field, values, colors };
+renderTagColorPicker();
+}
+
+function closeTagColorPicker() {
+tagPickerState = null;
+const box = document.getElementById('tag-color-picker');
+if (box) box.remove();
+}
+
+function renderTagColorPicker() {
+let box = document.getElementById('tag-color-picker');
+if (!box) {
+box = document.createElement('div');
+box.id = 'tag-color-picker';
+box.className = 'cook-overlay';
+document.body.appendChild(box);
+}
+if (!tagPickerState) { box.remove(); return; }
+const { field, values, colors } = tagPickerState;
+const def = FLAG_FIELD_DEFS.find((d) => d.field === field);
+const anyShared = values.some((v) => v.wasShared);
+box.innerHTML = `<div class="cook-sheet">
+<div class="cook-head"><h2>${escapeHtml(def.label)} colours</h2><button class="sync-btn sm" type="button" id="tag-picker-close">&times;</button></div>
+<div class="cook-body">
+${values.length ? `<div class="settings-note" style="margin:0 0 10px;">Click a tag to cycle green &rarr; amber &rarr; red &rarr; none. Sorted by how often it comes up.${anyShared ? " Shared interests (Tinder's own marker) start green." : ''}</div>
+<div class="tag-picker-grid">${values.map((v) => {
+const key = v.label.toLowerCase();
+const color = colors.get(key);
+return `<button type="button" class="tag-picker-chip${color ? ' tag-picker-' + color : ''}" data-tag-picker-key="${escapeHtml(key)}" title="${v.count} connection${v.count === 1 ? '' : 's'}${v.wasShared ? ' · shared with you' : ''}">${escapeHtml(v.label)}</button>`;
+}).join('')}</div>`
+: '<div class="empty">No values on file yet for this field.</div>'}
+</div>
+<div class="cook-foot" style="display:flex;gap:8px;justify-content:flex-end;">
+<button class="sync-btn" type="button" id="tag-picker-cancel">Cancel</button>
+<button class="add-btn" type="button" id="tag-picker-save">Save</button>
+</div>
+</div>`;
+box.addEventListener('click', (e) => { if (e.target === box) closeTagColorPicker(); });
+document.getElementById('tag-picker-close').addEventListener('click', closeTagColorPicker);
+document.getElementById('tag-picker-cancel').addEventListener('click', closeTagColorPicker);
+box.querySelectorAll('[data-tag-picker-key]').forEach((chip) => {
+chip.addEventListener('click', () => {
+const key = chip.dataset.tagPickerKey;
+const idx = TAG_PICKER_CYCLE.indexOf(tagPickerState.colors.get(key));
+tagPickerState.colors.set(key, TAG_PICKER_CYCLE[(idx + 1) % TAG_PICKER_CYCLE.length]);
+renderTagColorPicker();
+});
+});
+document.getElementById('tag-picker-save').addEventListener('click', () => {
+let rule = data.flagRules.find((r) => r.field === field);
+if (!rule) { rule = { id: uid(), field, green: [], amber: [], red: [] }; data.flagRules.push(rule); }
+rule.green = []; rule.amber = []; rule.red = [];
+tagPickerState.colors.forEach((color, key) => {
+if (!color) return;
+const v = tagPickerState.values.find((x) => x.label.toLowerCase() === key);
+rule[color].push(v ? v.label : key);
+});
+closeTagColorPicker();
+initFlagRulesSettings();
+renderConnections();
+queueSave();
+});
+}
+
 function flagRuleRowHtml(rule) {
 const def = FLAG_FIELD_DEFS.find((d) => d.field === rule.field);
 if (!def) return '';
@@ -836,7 +962,8 @@ const inputs = def.kind === 'number'
 + `<input type="number" class="mini" data-flag-bound="redMax" data-flag-rule="${rule.id}" value="${rule.redMax ?? ''}" placeholder="Red &le;">`
 : `<input type="text" autocomplete="off" data-flag-list="green" data-flag-rule="${rule.id}" value="${escapeHtml((rule.green || []).join(', '))}" placeholder="Green values, comma separated">`
 + `<input type="text" autocomplete="off" data-flag-list="amber" data-flag-rule="${rule.id}" value="${escapeHtml((rule.amber || []).join(', '))}" placeholder="Amber values, comma separated">`
-+ `<input type="text" autocomplete="off" data-flag-list="red" data-flag-rule="${rule.id}" value="${escapeHtml((rule.red || []).join(', '))}" placeholder="Red values, comma separated">`;
++ `<input type="text" autocomplete="off" data-flag-list="red" data-flag-rule="${rule.id}" value="${escapeHtml((rule.red || []).join(', '))}" placeholder="Red values, comma separated">`
++ `<button type="button" class="sync-btn sm" data-tag-picker-open="${escapeHtml(rule.field)}">Pick tags&hellip;</button>`;
 return `<div class="flag-rule-row">
 <strong>${escapeHtml(def.label)}</strong>
 ${inputs}
@@ -884,6 +1011,9 @@ rule[input.dataset.flagList] = input.value.split(',').map((s) => s.trim()).filte
 renderConnections();
 queueSave();
 });
+});
+el.querySelectorAll('[data-tag-picker-open]').forEach((btn) => {
+btn.addEventListener('click', () => openTagColorPicker(btn.dataset.tagPickerOpen));
 });
 const addBtn = document.getElementById('add-flag-rule-btn');
 if (addBtn) addBtn.addEventListener('click', () => {
