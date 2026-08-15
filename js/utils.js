@@ -110,6 +110,35 @@ el.title = 'This photo is only on the device it was added on — see Settings �
 }));
 }
 
+// Same idea as hydratePhotos(), but paints the photo as a CSS background
+// instead of appending a real <img> — for spots where dragstart
+// prevention on a real <img> wasn't reliably stopping Windows Chrome from
+// still kicking off a native OS-level drag of the blob: URL (confirmed
+// live: still happening on the Connections photo grid with BOTH
+// draggable=false and an explicit dragstart preventDefault() already in
+// place). A CSS background-image has no drag-source behaviour at all —
+// there's no <img> element for Chromium's drag detection to find, so
+// there's nothing left to suppress.
+async function hydratePhotoBackgrounds(root) {
+const nodes = [...root.querySelectorAll('[data-photo-bg]')].filter((el) => !el.classList.contains('photo-bg-done'));
+await Promise.all(nodes.map(async (el) => {
+const id = el.dataset.photoBg;
+let url = await photoUrl(id);
+if (!url && photoFallback) {
+el.classList.add('photo-loading');
+try { url = await photoFallback(id); } catch (e) { /* leave it marked missing */ }
+el.classList.remove('photo-loading');
+}
+if (url) {
+el.style.backgroundImage = `url("${url}")`;
+el.classList.add('photo-bg-done');
+} else {
+el.classList.add('photo-missing');
+el.title = 'This photo is only on the device it was added on — see Settings → Photo sync.';
+}
+}));
+}
+
 function scrollAndFlash(selector) {
 const el = document.querySelector(selector);
 if (!el) return;
@@ -417,7 +446,7 @@ canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.85);
 
 export {
 todayStr, daysAgoStr, last7Dates, uid, daysSince, daysUntil,
-escapeHtml, initials, avatarHtml, hydratePhotos, scrollAndFlash, bindForm,
+escapeHtml, initials, avatarHtml, hydratePhotos, hydratePhotoBackgrounds, scrollAndFlash, bindForm,
 resizeImageToBlob, fileToBase64, loadImage, cropThumbnailToBlob,
 hashFile, captureDateOf, betterCaptureDate, dateFromFilename,
 ensureBrowserReadableImage, setPhotoFallback,

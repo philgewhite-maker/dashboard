@@ -2,7 +2,7 @@ import { data, queueSave, reachOutThreshold, isDormantStage, getLocalSettings, T
 import { photoDelete, photoUrl } from '../db.js';
 import { storePhoto } from '../files.js';
 import {
-uid, todayStr, daysSince, escapeHtml, avatarHtml, hydratePhotos, scrollAndFlash, bindForm,
+uid, todayStr, daysSince, escapeHtml, avatarHtml, hydratePhotos, hydratePhotoBackgrounds, scrollAndFlash, bindForm,
 resizeImageToBlob,
 } from '../utils.js';
 import { MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot } from '../ai.js';
@@ -303,7 +303,7 @@ ${a.coverPhotoId ? `<span class="thumb-img" data-photo-id="${escapeHtml(a.coverP
 }
 
 function galleryHtml(c) {
-const thumbs = (c.photoIds || []).map((id, i) => `<div class="gallery-thumb"><span class="thumb-img" data-photo-id="${escapeHtml(id)}" data-view-photo="${escapeHtml(id)}"></span><span class="tag-x" data-photo-remove="${c.id}" data-photo-idx="${i}">&times;</span></div>`).join('');
+const thumbs = (c.photoIds || []).map((id, i) => `<div class="gallery-thumb"><span class="thumb-img" data-photo-bg="${escapeHtml(id)}" data-view-photo="${escapeHtml(id)}"></span><span class="tag-x" data-photo-remove="${c.id}" data-photo-idx="${i}">&times;</span></div>`).join('');
 return `<div class="photo-gallery">${thumbs}<label class="gallery-add" for="photo-add-${c.id}">+</label><input type="file" id="photo-add-${c.id}" accept="image/*" multiple style="display:none;" data-photo-add="${c.id}"></div>`;
 }
 
@@ -371,6 +371,7 @@ emptyFieldFilter = null;
 renderConnections();
 });
 hydratePhotos(list);
+hydratePhotoBackgrounds(list);
 bindConnectionEvents(list);
 refreshPhotoTargets();
 return;
@@ -383,6 +384,7 @@ list.innerHTML = `<div class="filter-banner">${picked.length} matching ${escapeH
 + tagDatalistsHtml();
 document.getElementById('clear-id-filter').addEventListener('click', () => { idFilter = null; renderConnections(); });
 hydratePhotos(list);
+hydratePhotoBackgrounds(list);
 bindConnectionEvents(list);
 refreshPhotoTargets();
 return;
@@ -423,6 +425,7 @@ return secondary.getValue(b) - secondary.getValue(a);
 list.innerHTML = sorted.map(connectionCardHtml).join('') + tagDatalistsHtml();
 
 hydratePhotos(list);
+hydratePhotoBackgrounds(list);
 bindConnectionEvents(list);
 refreshPhotoTargets();
 }
