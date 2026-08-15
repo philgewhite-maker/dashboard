@@ -38,7 +38,19 @@ async function fetchTinderPhoto(url) {
 try {
 return await fetchProxiedImage(url);
 } catch (proxyErr) {
-return fetch(url).then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.blob(); });
+try {
+const r = await fetch(url);
+if (!r.ok) throw new Error(`HTTP ${r.status}`);
+return await r.blob();
+} catch (directErr) {
+// A direct fetch's CORS failure is always a content-free "Failed to
+// fetch" — the browser deliberately exposes nothing more. The proxy's
+// error, when it has one, actually reached Tinder's server and can
+// say why (not configured, bad host, or — confirmed live against a
+// real broken photo — Tinder itself responding with something that
+// isn't an image at all). Surface that instead of the useless one.
+throw proxyErr;
+}
 }
 }
 
