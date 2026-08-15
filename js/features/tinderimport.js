@@ -341,7 +341,7 @@ if (fresh.length === 0) blocked = true;
 }
 return `<label class="tinder-field-row${blocked ? ' tinder-field-blocked' : ''}">
 <input type="checkbox" data-tinder-field="${i}"${f.apply && !blocked ? ' checked' : ''}${blocked ? ' disabled' : ''}>
-<strong>${escapeHtml(f.label)}:</strong> ${highlightCities(f.value)} <span class="tinder-field-note">(${escapeHtml(note)})</span>
+<span><strong>${escapeHtml(f.label)}:</strong> ${highlightCities(f.value)} <span class="tinder-field-note">(${escapeHtml(note)})</span></span>
 </label>`;
 }
 
