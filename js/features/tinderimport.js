@@ -22,7 +22,7 @@
 // importer), and the chosen connection's photo stays visible for the whole
 // review regardless of how it got picked, so a wrong dropdown pick is just
 // as visible as a wrong auto-match was invisible before.
-import { data, queueSave } from '../state.js';
+import { data, queueSave, currentAge } from '../state.js';
 import { escapeHtml, uid, todayStr, hydratePhotos } from '../utils.js';
 import { nameKey, editDistance } from '../googlecontacts.js';
 import { storePhoto, fetchProxiedImage } from '../files.js';
@@ -114,10 +114,17 @@ throw proxyErr;
 // a real near-miss (e.g. a different "Natalia" already tracked) needs to
 // be visible as its OWN candidate to pick between, not hidden behind
 // whichever one scored a point higher.
-function matchCandidates(name, limit) {
+//
+// incomingAge nudges ordering WITHIN a name tier only (a few points either
+// way) — never enough to jump a "shortened name" candidate ahead of a
+// genuine exact match, just enough to break a tie between two people
+// who'd otherwise score identically on name alone (two "Anna"s is exactly
+// the case this can't tell apart from name text; age usually can).
+function matchCandidates(name, limit, incomingAge) {
 const key = nameKey(name);
 if (!key) return [];
 const namesOf = (c) => [c.name, c.profileName, ...(c.aliases || [])].filter(Boolean);
+const wantAge = Number.isFinite(incomingAge) ? incomingAge : null;
 const results = [];
 data.connections.forEach((c) => {
 let best = null;
@@ -133,7 +140,13 @@ if (d <= 2) { score = 60 - d * 10; why = `${d} letter${d === 1 ? '' : 's'} diffe
 }
 if (score !== null && (!best || score > best.score)) best = { why, score };
 });
-if (best) results.push({ conn: c, why: best.why, score: best.score });
+if (best) {
+if (wantAge !== null) {
+const theirAge = currentAge(c);
+if (theirAge) best.score -= Math.min(Math.abs(theirAge.value - wantAge) * 3, 15);
+}
+results.push({ conn: c, why: best.why, score: best.score });
+}
 });
 results.sort((a, b) => b.score - a.score);
 return typeof limit === 'number' ? results.slice(0, limit) : results;
@@ -635,8 +648,10 @@ ${queue.length ? `<div class="settings-note" style="margin:0 0 8px;">${queue.len
 
 <select id="tinder-pick">${optionsFor(p.chosenId, p.candidates)}</select>
 
-<div class="sync-row" style="margin:6px 0 8px;">
-<button class="add-btn" type="button" id="tinder-save"${canSave ? '' : ' disabled'}>${escapeHtml(saveLabel)}</button>
+${p.risky ? `<div class="tinder-field-note tinder-translate-error" style="margin:6px 0 0;">More than one connection shares this name (and a similar age) — double-check the photo before saving, this pick might be wrong.</div>` : ''}
+<div class="sync-row" style="margin:6px 0 8px;align-items:center;">
+${chosenConn && chosenConn.photoId ? `<span class="tinder-confirm-pic" data-photo-id="${escapeHtml(chosenConn.photoId)}" title="${escapeHtml(chosenConn.name)}"></span>` : ''}
+<button class="add-btn${p.risky ? ' tinder-risky' : ''}" type="button" id="tinder-save"${canSave ? '' : ' disabled'}>${escapeHtml(saveLabel)}</button>
 <button class="sync-btn" type="button" id="tinder-save-open"${canSave ? '' : ' disabled'}>${escapeHtml(saveLabel)} & open profile</button>
 <button class="sync-btn" type="button" id="tinder-skip">Skip</button>
 <button class="sync-btn" type="button" id="tinder-newconn">+ New</button>
@@ -776,10 +791,11 @@ ph.apply = !ph.apply;
 render();
 });
 });
+const confirmRisky = () => !pending.risky || confirm('More than one connection shares this name and a similar age — this pick might be the wrong person. Save anyway?');
 const saveBtn = document.getElementById('tinder-save');
-if (saveBtn) saveBtn.addEventListener('click', () => save(false));
+if (saveBtn) saveBtn.addEventListener('click', () => { if (confirmRisky()) save(false); });
 const saveOpenBtn = document.getElementById('tinder-save-open');
-if (saveOpenBtn) saveOpenBtn.addEventListener('click', () => save(true));
+if (saveOpenBtn) saveOpenBtn.addEventListener('click', () => { if (confirmRisky()) save(true); });
 }
 
 // openAfter opens the connection's own card, expanded, in a new tab once
@@ -993,11 +1009,26 @@ ratingOverride: 0,
 // Tinder's current match list at all, not just "matched at some point".
 matchId: String(raw.matchId || '').trim(),
 };
-const candidates = matchCandidates(parsed.name, 6);
+const incomingAge = parseInt(parsed.age, 10);
+const candidates = matchCandidates(parsed.name, 6, Number.isFinite(incomingAge) ? incomingAge : undefined);
 parsed.candidates = candidates;
-const match = candidates[0] || null;
+let match = candidates[0] || null;
+// A connection already carrying this exact Tinder match id from a
+// previous import is a certain identity match, not a guess — whatever
+// name-based scoring says, this overrides it and skips confirmation
+// entirely, same as an exact name match always has.
+const knownConn = parsed.matchId ? data.connections.find((c) => c.tinderMatchId === parsed.matchId) : null;
+if (knownConn) {
+match = { conn: knownConn, why: 'known match id', score: 999 };
+if (!candidates.some((cand) => cand.conn.id === knownConn.id)) candidates.unshift(match);
+}
 parsed.match = match;
-if (match && match.why === 'exact') { parsed.chosenId = match.conn.id; parsed.matchConfirmed = true; }
+// Two (or more) candidates tied at the same top score means the name
+// alone can't actually tell them apart — even an "exact" match here is a
+// guess between look-alikes, not a certainty, so it's flagged rather
+// than silently auto-picking whichever happened to sort first.
+parsed.risky = !knownConn && candidates.length > 1 && candidates[0].score === candidates[1].score;
+if (match && (match.why === 'exact' || match.why === 'known match id')) { parsed.chosenId = match.conn.id; parsed.matchConfirmed = true; }
 pending = parsed;
 refreshOverrides();
 }
