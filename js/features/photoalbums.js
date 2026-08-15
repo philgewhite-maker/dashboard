@@ -237,7 +237,7 @@ function thumbHtml(row, i) {
 // actually wrong instead of leaving a blank box that just looks broken —
 // the fix is re-running the snippet already in this panel to get fresh ones.
 const img = row.cover
-? `<img src="${escapeHtml(row.cover)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.outerHTML='<span class=&quot;album-nocover&quot;>cover link expired &mdash; re-run the snippet above</span>'">`
+? `<img src="${escapeHtml(row.cover)}" alt="" draggable="false" loading="lazy" referrerpolicy="no-referrer" onerror="this.outerHTML='<span class=&quot;album-nocover&quot;>cover link expired &mdash; re-run the snippet above</span>'">`
 : `<span class="album-nocover">${escapeHtml(noCoverNote(row.count))}</span>`;
 return `<div class="album-card${row.chosenId ? ' chosen' : ''}${row.applied ? ' saved' : ''}${isSensitive(row) ? ' album-sensitive' : ''}">
 <span class="album-compare-row">

@@ -255,7 +255,7 @@ ${aiBlock}
 function moreInfoHtml() {
 if (!pending.showMoreInfo) return '';
 const incomingGrid = pending.photos.length
-? `<div class="tinder-photo-grid">${pending.photos.map((ph) => `<span class="thumb-lg"><img src="${escapeHtml(ph.url)}" alt=""></span>`).join('')}</div>`
+? `<div class="tinder-photo-grid">${pending.photos.map((ph) => `<span class="thumb-lg"><img src="${escapeHtml(ph.url)}" alt="" draggable="false"></span>`).join('')}</div>`
 : '<div class="settings-note" style="margin:4px 0;">No photos in this import.</div>';
 return `<div class="tinder-more-info-overlay" id="tinder-more-info">
 <div class="tinder-more-info-box">
@@ -679,7 +679,7 @@ ${agePreviewHtml()}
 ${p.fields.length ? `<div class="tinder-fields">${p.fields.map((f, i) => fieldPreviewHtml(f, i)).join('')}</div>` : ''}
 ${contactPreviewHtml()}
 ${p.photos.length ? `<div class="settings-note" style="margin:8px 0 4px;">${p.photos.filter((ph) => ph.apply).length} of ${p.photos.length} photos will be added — click to include/exclude:</div>
-<div class="photo-gallery">${p.photos.map((ph, i) => `<span class="gallery-thumb tinder-photo-thumb${ph.apply ? ' tinder-photo-included' : ''}" data-tinder-photo="${i}"><img src="${escapeHtml(ph.url)}" alt="">${ph.apply ? '<span class="tinder-photo-badge">&check;</span>' : ''}</span>`).join('')}</div>` : ''}
+<div class="photo-gallery">${p.photos.map((ph, i) => `<span class="gallery-thumb tinder-photo-thumb${ph.apply ? ' tinder-photo-included' : ''}" data-tinder-photo="${i}"><img src="${escapeHtml(ph.url)}" alt="" draggable="false">${ph.apply ? '<span class="tinder-photo-badge">&check;</span>' : ''}</span>`).join('')}</div>` : ''}
 </div>
 ${moreInfoHtml()}`;
 // Every render rebuilds this whole card, including fresh, un-hydrated

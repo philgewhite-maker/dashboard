@@ -65,6 +65,8 @@ const thumb = el.querySelector(`[data-scan-thumb="${i}"]`);
 if (thumb && s.previewUrl) {
 const img = document.createElement('img');
 img.src = s.previewUrl;
+img.draggable = false;
+img.addEventListener('dragstart', (e) => e.preventDefault());
 thumb.appendChild(img);
 }
 });

@@ -19,6 +19,13 @@
 --plum-bg:#ECE7F0;
 }
 *{box-sizing:border-box;}
+/* A plain <img> is natively draggable; nudging one a pixel mid-click is
+   enough on Windows Chrome to kick off an OS-level drag that pops File
+   Explorer. Kept as a blanket rule (every <img> in the app, not just the
+   spots caught so far) rather than chasing it class-by-class again --
+   confirmed live that draggable=false plus a scoped CSS rule weren't
+   reliably enough on their own even where both were already applied. */
+img{-webkit-user-drag:none;user-drag:none;}
 body{
 margin:0;
 background:var(--paper);

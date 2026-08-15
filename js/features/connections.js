@@ -294,7 +294,7 @@ if (!albums.length) return '<div class="album-empty">None linked — name an alb
 return `<div class="album-strip">${albums.map((a, i) => `<div class="album-card sm${isSensitive(a) ? ' album-sensitive' : ''}">
 <a class="album-thumb" href="${escapeHtml(a.url)}" target="_blank" rel="noopener" title="${escapeHtml(a.title || a.url)}">
 ${a.coverPhotoId ? `<span class="thumb-img" data-photo-id="${escapeHtml(a.coverPhotoId)}"></span>`
-: a.cover ? `<img src="${escapeHtml(a.cover)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.outerHTML='<span class=&quot;album-nocover&quot;>cover link expired &mdash; re-run the snippet</span>'">`
+: a.cover ? `<img src="${escapeHtml(a.cover)}" alt="" draggable="false" loading="lazy" referrerpolicy="no-referrer" onerror="this.outerHTML='<span class=&quot;album-nocover&quot;>cover link expired &mdash; re-run the snippet</span>'">`
 : `<span class="album-nocover">${escapeHtml(noCoverNote(a.count))}</span>`}
 </a>
 <div class="album-caption">${escapeHtml([a.location, a.date, a.other].filter(Boolean).join(' · ') || c.name)}</div>
@@ -735,7 +735,11 @@ const box = document.createElement('div');
 box.className = 'lightbox';
 // A plain <img> is natively draggable; same fix as hydratePhotos()'s
 // gallery thumbnails, but this <img> is built directly and was missed.
+// draggable="false" alone isn't reliably enough on Windows Chrome (still
+// reproduced live) -- dragstart is cancelled explicitly too, everywhere
+// an <img> gets built (see hydratePhotos in utils.js for the other spot).
 box.innerHTML = `<img src="${url}" alt="" draggable="false">`;
+box.querySelector('img').addEventListener('dragstart', (e) => e.preventDefault());
 box.addEventListener('click', () => box.remove());
 document.body.appendChild(box);
 }
@@ -1012,6 +1016,8 @@ const blob = candidates[idx].photoBlob;
 if (blob) {
 const img = document.createElement('img');
 img.src = URL.createObjectURL(blob);
+img.draggable = false;
+img.addEventListener('dragstart', (e) => e.preventDefault());
 el.textContent = '';
 el.appendChild(img);
 }

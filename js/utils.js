@@ -94,7 +94,13 @@ img.alt = '';
 // A plain <img> is natively draggable; nudging one a pixel mid-click is
 // enough on Windows Chrome to kick off an OS-level drag of the blob: URL,
 // which can pop File Explorer instead of (or alongside) a click handler.
+// draggable=false alone turned out not to be reliable enough on its own
+// (confirmed still happening live on the Connections photo grid despite
+// this plus the matching -webkit-user-drag:none CSS) -- explicitly
+// cancelling dragstart is a stronger, event-level block rather than a
+// passive attribute Chromium can apparently still race past.
 img.draggable = false;
+img.addEventListener('dragstart', (e) => e.preventDefault());
 el.textContent = '';
 el.appendChild(img);
 } else {
