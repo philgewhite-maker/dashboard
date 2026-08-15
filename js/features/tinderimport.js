@@ -29,6 +29,21 @@ import { storePhoto, fetchProxiedImage } from '../files.js';
 import { photoGet } from '../db.js';
 import { MissingKeyError, compareFaces } from '../ai.js';
 import { findPhoneNumbers, findHandles, formatHandle } from '../contactscan.js';
+import { STAGE_RANK } from './connections.js';
+
+// True only if the extracted chat has a message from BOTH sides, not just
+// the user reaching out with no reply — a one-sided "You: hey" isn't
+// really "chatting", it's still just a match.
+function hasMutualMessages(chatText) {
+let youSaid = false;
+let theySaid = false;
+chatText.split('\n').forEach((line) => {
+const m = line.match(/^\[\d{1,2}:\d{2}\]\s*([^:]+):/);
+if (!m) return;
+if (m[1].trim() === 'You') youSaid = true; else theySaid = true;
+});
+return youSaid && theySaid;
+}
 
 // Prefers the proxy (works regardless of Tinder's CORS inconsistency) but
 // falls back to a direct fetch if sync isn't configured — still succeeds
@@ -302,6 +317,13 @@ ${p.photos.length ? `<div class="settings-note" style="margin:8px 0 4px;">${p.ph
 <span class="sync-status" id="tinder-save-status">${escapeHtml(p.saveMessage || '')}</span>
 </div>
 </div>`;
+// Every render rebuilds this whole card, including a fresh, un-hydrated
+// [data-photo-id] placeholder for the existing connection's photo — never
+// called here before, so it only ever showed up if something ELSE
+// happened to have hydrated that exact id earlier (e.g. the Connections
+// tab), and vanished again on the very next render (any checkbox toggle,
+// dropdown change, etc. all re-render).
+hydratePhotos(el);
 
 const pick = document.getElementById('tinder-pick');
 if (pick) pick.addEventListener('change', () => { pending.chosenId = pick.value; pending.matchConfirmed = false; pending.aiVerdict = null; render(); });
@@ -401,6 +423,27 @@ console.error('Could not fetch Tinder photo:', ph.url, err);
 if (!firstError) firstError = err.message || String(err);
 failed++;
 }
+}
+
+// Real conversation means the stage is further along than a bare match,
+// and a number given means further still — reflect that automatically
+// rather than leaving every import stuck at "Matched". Rank-compared, not
+// assigned outright, so this only ever moves forward: someone already at
+// "Planning to meet" doesn't get knocked back to "Chatting in app" just
+// because this import also found chat history, and a Faded connection
+// who resumes chatting DOES get pulled back in, which is correct — new
+// mutual messages are real information about them, not noise.
+const chatField = pending.fields.find((f) => f.apply && f.label === 'Chat history' && f.value.trim());
+const gaveNumber = pending.foundPhones.some((p) => p.apply);
+let targetStage = null;
+if (gaveNumber) {
+const allText = pending.fields.map((f) => f.value).join('\n');
+targetStage = /\btelegram\b/i.test(allText) ? 'Moved to Telegram' : 'Moved to WhatsApp';
+} else if (chatField && hasMutualMessages(chatField.value)) {
+targetStage = 'Chatting in app';
+}
+if (targetStage && (STAGE_RANK[targetStage] || 0) > (STAGE_RANK[conn.stage] || 0)) {
+conn.stage = targetStage;
 }
 
 queueSave();
