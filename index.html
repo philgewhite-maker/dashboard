@@ -1265,6 +1265,22 @@ Album links are permanent, unlike the face-group links tried previously.
 <div id="albums-results"></div>
 </section>
 
+<section class="panel wide" id="cleanup-panel" data-tab="datingadmin">
+<div class="panel-head">
+<h2><span class="dot sage"></span>Data Clean up</h2>
+</div>
+<div class="settings-note" style="margin:0 0 10px;">
+Planning space, not built yet &mdash; a place to keep thinking about what this section should actually do before committing to a design. Ideas so far, roughly in the order they'd probably get built:
+</div>
+<div class="tinder-fields" style="margin:0 0 10px;">
+<div class="tinder-field-row"><strong>Check for dropped matches.</strong> Compare every connection's stored Tinder match id against a fresh scrape of the current sidebar; flag anyone no longer in Tinder's own match list &mdash; unmatched, or removed on their end. The match id is already being captured and stored (<code>tinderMatchId</code>) as of today; what's missing is the actual comparison snippet and a report screen.</div>
+<div class="tinder-field-row"><strong>Check data completeness.</strong> Surface connections missing the fields that actually matter &mdash; no photo, no city, no rating, empty notes &mdash; the same "gaps" idea already used for the Google Photos album linker, applied to the whole Connections pool instead of just one source.</div>
+<div class="tinder-field-row"><strong>Targeted incremental re-runs.</strong> "Re-check just City for anyone missing it," "re-capture photos for anyone with none," "re-run anyone extracted before a specific fix" &mdash; the version-stamped done-tracking already makes the last one possible in principle; this would need a way to filter by WHAT'S missing, not just re-run everyone.</div>
+<div class="tinder-field-row"><strong>Archive non-interacted profiles.</strong> A match sitting at Superswiped/Matched for a long time with no chat and no stage progression is realistically dead. Flag (never auto-apply) candidates for Faded/Archived, the mirror image of the Nudges change that surfaces the BEST new matches &mdash; this would surface the ones worth giving up on.</div>
+<div class="tinder-field-row"><strong>(more ideas welcome)</strong> &mdash; whatever else turns out to matter once the above exist and get used for a while.</div>
+</div>
+</section>
+
 <section class="panel wide" id="connections-panel" data-tab="dating">
 <div class="panel-head">
 <h2><span class="dot rose"></span>Connections</h2>
