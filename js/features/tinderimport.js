@@ -448,14 +448,37 @@ return ` <button type="button" class="sync-btn tinder-inline-btn" data-tinder-tr
 
 const CYRILLIC_RUN_RE = '[\\u0400-\\u04FF]+(?:[ \\-][\\u0400-\\u04FF]+)*';
 
+// Every distinct value any red/amber/green value-list rule cares about,
+// so something like "Sober" or "Want kids" gets highlighted wherever it
+// shows up in free text (About me, prompt answers, chat) -- not just
+// when it happens to arrive as a cleanly separate field. Threshold rules
+// (Distance, Height...) have no discrete text values, so they're not
+// part of this. First rule wins on a same-value collision across colours.
+function flagValueMap() {
+const map = new Map(); // lowercase value -> {label: original casing, color}
+(data.flagRules || []).forEach((rule) => {
+['green', 'amber', 'red'].forEach((color) => {
+(rule[color] || []).forEach((v) => {
+const key = String(v).toLowerCase().trim();
+if (key && !map.has(key)) map.set(key, { label: v, color });
+});
+});
+});
+return map;
+}
+
 function highlightCities(text) {
 const cityMap = knownCityMap();
+const flagMap = flagValueMap();
 // Longest names first, so a multi-word city ("New York") wins whole
 // rather than a shorter, unrelated city name that happens to be a
 // substring of it matching first.
 const names = [...cityMap.values()].sort((a, b) => b.length - a.length);
+const flagValues = [...flagMap.values()].map((v) => v.label).sort((a, b) => b.length - a.length);
 const cityPattern = names.length ? `\\b(?:${names.map(escapeRegex).join('|')})\\b` : null;
-const re = new RegExp(cityPattern ? `${cityPattern}|${CYRILLIC_RUN_RE}` : CYRILLIC_RUN_RE, 'gi');
+const flagPattern = flagValues.length ? `\\b(?:${flagValues.map(escapeRegex).join('|')})\\b` : null;
+const parts = [cityPattern, flagPattern, CYRILLIC_RUN_RE].filter(Boolean);
+const re = new RegExp(parts.join('|'), 'gi');
 let out = '';
 let last = 0;
 let m;
@@ -465,6 +488,9 @@ const hit = m[0];
 if (cityMap.has(hit.toLowerCase())) {
 const original = cityMap.get(hit.toLowerCase());
 out += `<span class="tinder-city-hit" data-tinder-city="${escapeHtml(original)}" title="Click to set as City">${escapeHtml(hit)}</span>`;
+} else if (flagMap.has(hit.toLowerCase())) {
+const { color } = flagMap.get(hit.toLowerCase());
+out += `<span class="tinder-flag-hit tinder-flag-hit-${color}" title="Flagged ${color}">${escapeHtml(hit)}</span>`;
 } else {
 const exonym = CYRILLIC_EXONYMS[hit.trim().toLowerCase()];
 // A real place name is a word or two; a long run is a sentence caught

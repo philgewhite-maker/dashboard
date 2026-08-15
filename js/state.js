@@ -215,8 +215,17 @@ const DEFAULT_FLAG_RULES = [
 { id: 'default-distance', field: 'distance', greenMax: 10, redMin: 50 },
 { id: 'default-education', field: 'education', green: ['Bachelor degree', 'Master degree', 'PhD', 'Doctorate degree'], amber: [], red: ['High school'] },
 { id: 'default-smoking', field: 'tags', green: [], amber: [], red: ['Smoker'] },
+{ id: 'default-sober', field: 'tags', green: ['Sober'], amber: [], red: [] },
 { id: 'default-gender', field: 'tags', green: [], amber: [], red: ['Trans man', 'Trans woman', 'Transgender'] },
 { id: 'default-orientation', field: 'relationshipTags', green: [], amber: ['Gay', 'Lesbian', 'Bisexual', 'Pansexual', 'Asexual', 'Queer', 'Demisexual', 'Open relationship', 'Polyamory', 'Ethically non-monogamous'], red: [] },
+// Taller-is-good is the opposite direction from Distance -- greenMin (green
+// if >=) + redMax (red if <=) rather than greenMax/redMin. 170cm ~= 5'7",
+// 152cm = 5'0" (height's stored as "170cm / 5'7"", see heightCm() above).
+{ id: 'default-height', field: 'height', greenMin: 170, redMax: 152 },
+// "Green" here just means "matches a common positive answer" -- not a
+// claim about what YOU actually want; recolour or delete in Settings if
+// wanting kids isn't what you're looking for.
+{ id: 'default-kids', field: 'kids', green: ['Want kids', 'Wants kids'], amber: [], red: [] },
 ];
 
 function blankData() {
@@ -225,6 +234,7 @@ ratingCategories: DEFAULT_RATING_CATEGORIES.map((c) => ({ ...c })),
 recipes: [], recipeRatingCategories: DEFAULT_RECIPE_RATING_CATEGORIES.map((c) => ({ ...c })),
 claudeAnswers: {},
 flagRules: DEFAULT_FLAG_RULES.map((r) => ({ ...r })),
+flagRulesSeeded: DEFAULT_FLAG_RULES.map((r) => r.id),
 prefs: { ...DEFAULT_PREFS } };
 }
 
@@ -449,6 +459,22 @@ if (typeof c.createdAt !== 'string') c.createdAt = '';
 });
 if (!Array.isArray(data.flagRules)) {
 data.flagRules = DEFAULT_FLAG_RULES.map((r) => ({ ...r }));
+data.flagRulesSeeded = DEFAULT_FLAG_RULES.map((r) => r.id);
+} else {
+// flagRulesSeeded is a PERMANENT record of which default rule ids have
+// ever been offered — checking current presence instead would resurrect
+// a default the user deliberately deleted every time a new default (like
+// Height or Family plans) gets added later. Missing entirely means this
+// is the first load since flagRulesSeeded was introduced: best-effort
+// backfill treats whatever's currently present as already-seeded, so
+// this migration doesn't retroactively re-add anything already customised.
+if (!Array.isArray(data.flagRulesSeeded)) data.flagRulesSeeded = data.flagRules.map((r) => r.id);
+const seeded = new Set(data.flagRulesSeeded);
+DEFAULT_FLAG_RULES.forEach((r) => {
+if (seeded.has(r.id)) return;
+data.flagRules.push({ ...r });
+data.flagRulesSeeded.push(r.id);
+});
 }
 if (!Array.isArray(data.ratingCategories) || data.ratingCategories.length === 0) {
 data.ratingCategories = DEFAULT_RATING_CATEGORIES.map((c) => ({ ...c }));
@@ -714,6 +740,15 @@ const m = String(distStr || '').match(/(\d+(?:\.\d+)?)\s*mi/);
 return m ? parseFloat(m[1]) : null;
 }
 
+// Height is stored as "170cm / 5'7"" (see formatHeight() in the console
+// snippet) — the cm figure is always present and already rounded, so it's
+// the cleaner unit to compare on rather than re-deriving feet/inches and
+// risking a second rounding step.
+function heightCm(heightStr) {
+const m = String(heightStr || '').match(/(\d+)\s*cm/);
+return m ? parseInt(m[1], 10) : null;
+}
+
 // Every field a flag rule can target, normalised to the same shape
 // regardless of whether the underlying connection field is a single
 // string (education, job) or an array (the TAG_FIELDS chip lists) — a
@@ -724,8 +759,9 @@ const FLAG_FIELD_DEFS = [
 { field: 'distance', label: 'Distance (miles)', kind: 'number', getValue: (c) => distanceMiles(c.distance) },
 { field: 'age', label: 'Age', kind: 'number', getValue: (c) => { const a = currentAge(c); return a ? a.value : null; } },
 { field: 'education', label: 'Education', kind: 'text', getValue: (c) => (c.education ? [c.education] : []) },
-{ field: 'height', label: 'Height', kind: 'text', getValue: (c) => (c.height ? [c.height] : []) },
+{ field: 'height', label: 'Height (cm)', kind: 'number', getValue: (c) => heightCm(c.height) },
 { field: 'job', label: 'Job', kind: 'text', getValue: (c) => (c.job ? [c.job] : []) },
+{ field: 'kids', label: 'Family plans', kind: 'text', getValue: (c) => (c.kids ? [c.kids] : []) },
 { field: 'location', label: 'City', kind: 'text', getValue: (c) => (c.location ? [c.location] : []) },
 { field: 'stage', label: 'Stage', kind: 'text', getValue: (c) => (c.stage ? [c.stage] : []) },
 ...TAG_FIELDS.map((t) => ({ field: t.field, label: t.label, kind: 'text', getValue: (c) => c[t.field] || [] })),
@@ -734,12 +770,24 @@ const FLAG_FIELD_DEFS = [
 // A threshold rule needs BOTH bounds set to produce an amber band (the
 // gap between them) — one bound alone just flags what it flags and stays
 // silent otherwise, rather than guessing where an unset boundary should be.
+// Four independent optional bounds rather than a fixed "small is good"
+// shape, so the same rule engine covers both directions a threshold can
+// run: Distance is greenMax (green if <=) + redMin (red if >=) -- short
+// is good. Height is the opposite -- tall is good -- so it's greenMin
+// (green if >=) + redMax (red if <=). Whichever bounds are actually set
+// on a given rule define its range; unset ones just don't constrain it.
 function thresholdColor(rule, value) {
 if (value === null || value === undefined || !Number.isFinite(value)) return null;
-const hasGreen = Number.isFinite(rule.greenMax);
-const hasRed = Number.isFinite(rule.redMin);
-if (hasGreen && value <= rule.greenMax) return 'green';
-if (hasRed && value >= rule.redMin) return 'red';
+const hasGreen = Number.isFinite(rule.greenMin) || Number.isFinite(rule.greenMax);
+const inGreen = hasGreen
+&& (!Number.isFinite(rule.greenMin) || value >= rule.greenMin)
+&& (!Number.isFinite(rule.greenMax) || value <= rule.greenMax);
+if (inGreen) return 'green';
+const hasRed = Number.isFinite(rule.redMin) || Number.isFinite(rule.redMax);
+const inRed = hasRed
+&& (!Number.isFinite(rule.redMin) || value >= rule.redMin)
+&& (!Number.isFinite(rule.redMax) || value <= rule.redMax);
+if (inRed) return 'red';
 if (hasGreen && hasRed) return 'amber';
 return null;
 }

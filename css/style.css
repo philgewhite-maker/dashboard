@@ -394,6 +394,10 @@ border-radius:4px;padding:0 3px;
 cursor:pointer;font-weight:600;
 }
 .tinder-cyrillic-hit:hover{background:var(--plum);color:#fff;}
+.tinder-flag-hit{border-radius:4px;padding:0 3px;font-weight:600;}
+.tinder-flag-hit-red{background:var(--red);color:#fff;}
+.tinder-flag-hit-amber{background:var(--amber-bg);color:var(--amber);}
+.tinder-flag-hit-green{background:var(--sage-bg);color:var(--sage);}
 .album-thumb{
 display:block;
 aspect-ratio:1/1;
