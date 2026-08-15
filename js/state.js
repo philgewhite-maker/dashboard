@@ -198,6 +198,11 @@ const TAG_FIELDS = [
 // just from different Tinder sections, and one "Relationship" chip list
 // reads more naturally than two near-empty ones.
 { field: 'relationshipTags', label: 'Relationship', sensitive: false },
+// Found by scanning imported text (chat, bio, prompt answers) for @handle
+// mentions — kept generic rather than per-platform (Instagram/Snapchat/
+// etc.) since a bare @handle rarely says which app it's for; see
+// contactscan.js.
+{ field: 'socialHandles', label: 'Social handles', sensitive: false },
 ];
 
 function blankData() {
@@ -363,6 +368,7 @@ if (!Array.isArray(c.dateEvents)) c.dateEvents = [];
 if (!Array.isArray(c.sexTags)) c.sexTags = [];
 if (!Array.isArray(c.interests)) c.interests = [];
 if (!Array.isArray(c.relationshipTags)) c.relationshipTags = [];
+if (!Array.isArray(c.socialHandles)) c.socialHandles = [];
 if (typeof c.distance !== 'string') c.distance = '';
 if (typeof c.matchedOn !== 'string') c.matchedOn = '';
 if (typeof c.chatLog !== 'string') c.chatLog = '';
