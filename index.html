@@ -610,6 +610,7 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
     return folder &amp;&amp; uuid ? `${folder[1]}/${uuid[0]}` : url;
   }
   const photoMap = new Map();
+  const folderCounts = new Map();
   const scanPhotos = () =&gt; {
     [...photoScope.querySelectorAll('*')].forEach((el) =&gt; {
       if (chatCard &amp;&amp; chatCard.contains(el)) return;
@@ -618,7 +619,11 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
       if (!m || !m[1].includes('gotinder.com')) return;
       const url = m[1].replace(/\/\d+x\d+_/, '/640x800_');
       const key = photoKey(url);
-      if (!photoMap.has(key)) photoMap.set(key, url);
+      if (photoMap.has(key)) return;
+      const folderMatch = url.match(/gotinder\.com\/([a-zA-Z0-9]+)\//);
+      const folder = folderMatch ? folderMatch[1] : null;
+      photoMap.set(key, { url, folder });
+      if (folder) folderCounts.set(folder, (folderCounts.get(folder) || 0) + 1);
     });
   };
   scanPhotos();
@@ -628,7 +633,16 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
     scanPhotos();
   }
 
-  const out = { name, age, fields, photos: [...photoMap.values()] };
+  // Every real photo of one person shares the same Tinder folder id in its
+  // URL, confirmed across every profile captured this session — an
+  // outlier folder id showing up means a DIFFERENT profile's photo got
+  // swept in somehow. Kept to whichever folder id most of the captured
+  // photos actually belong to; anything else is dropped.
+  let dominantFolder = null, dominantCount = 0;
+  folderCounts.forEach((count, folder) =&gt; { if (count &gt; dominantCount) { dominantFolder = folder; dominantCount = count; } });
+  const photos = [...photoMap.values()].filter((p) =&gt; !dominantFolder || !p.folder || p.folder === dominantFolder).map((p) =&gt; p.url);
+
+  const out = { name, age, fields, photos };
   const json = JSON.stringify(out, null, 1);
   let copied = false;
   try { copy(json); copied = true; } catch (e) { /* not in a real DevTools console */ }
@@ -654,10 +668,28 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
   // profiles in a row), so any drift from the known-good version is exactly
   // the kind of mistake most likely to go unnoticed until it's already run
   // 15 times.
-  async function extractProfile() {
+  async function extractProfile(expectedName) {
     const root = document.getElementById('main-content') || document;
     const $$ = (sel, r) =&gt; [...(r || root).querySelectorAll(sel)];
     const GROUP_HEADERS = new Set(['Essentials', 'Lifestyle', 'Interests', 'Messages', 'Photos', 'More about me']);
+
+    // If the visible profile changes mid-extraction -- the user clicking
+    // elsewhere in the tab, or the SPA re-rendering on its own -- reading
+    // on would mix that OTHER profile's photos/fields into this one's
+    // result. Confirmed live: a different match's photo ended up saved as
+    // part of someone else's extract. Checked at every point that spends
+    // real time waiting (the scroll settle, each photo-carousel click),
+    // not just once before starting, so an interruption anywhere aborts
+    // this profile cleanly instead of silently returning contaminated data
+    // -- the caller already skips a profile that throws and retries it
+    // next run.
+    function assertStillHere() {
+      const h1El = root.querySelector('h1[aria-label]');
+      const label = h1El ? (h1El.getAttribute('aria-label') || '') : '';
+      if (!label.toLowerCase().startsWith(String(expectedName || '').toLowerCase())) {
+        throw new Error(`Page moved to a different profile mid-extraction (expected "${expectedName}", now showing "${label}") -- aborting rather than mixing up photos or fields.`);
+      }
+    }
 
     const scrollBox = [...document.querySelectorAll('div')]
       .filter((d) =&gt; d.scrollHeight &gt; d.clientHeight + 300 &amp;&amp; d.clientHeight &gt; 200)
@@ -666,9 +698,11 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
       for (let y = 0; y &lt; scrollBox.scrollHeight; y += 400) {
         scrollBox.scrollTop = y;
         await new Promise((r) =&gt; setTimeout(r, 200));
+        assertStillHere();
       }
       scrollBox.scrollTop = 0;
       await new Promise((r) =&gt; setTimeout(r, 200));
+      assertStillHere();
     }
 
     const h1 = root.querySelector('h1[aria-label]');
@@ -814,6 +848,7 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
       return folder &amp;&amp; uuid ? `${folder[1]}/${uuid[0]}` : url;
     }
     const photoMap = new Map();
+    const folderCounts = new Map();
     const scanPhotos = () =&gt; {
       [...photoScope.querySelectorAll('*')].forEach((el) =&gt; {
         if (chatCard &amp;&amp; chatCard.contains(el)) return;
@@ -822,17 +857,37 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
         if (!m || !m[1].includes('gotinder.com')) return;
         const url = m[1].replace(/\/\d+x\d+_/, '/640x800_');
         const key = photoKey(url);
-        if (!photoMap.has(key)) photoMap.set(key, url);
+        if (photoMap.has(key)) return;
+        const folderMatch = url.match(/gotinder\.com\/([a-zA-Z0-9]+)\//);
+        const folder = folderMatch ? folderMatch[1] : null;
+        photoMap.set(key, { url, folder });
+        if (folder) folderCounts.set(folder, (folderCounts.get(folder) || 0) + 1);
       });
     };
+    assertStillHere();
     scanPhotos();
     for (const btn of photoButtons) {
+      assertStillHere();
       btn.click();
       await new Promise((r) =&gt; setTimeout(r, 300));
+      assertStillHere();
       scanPhotos();
     }
 
-    return { name, age, fields, photos: [...photoMap.values()] };
+    // Every real photo of one person shares the same Tinder folder id in
+    // its URL, confirmed across every profile captured this session — an
+    // outlier folder id showing up means a DIFFERENT profile's photo got
+    // swept in somehow (confirmed live, twice: the same unrelated match's
+    // photo appearing at the tail of two different people's extracts,
+    // even with assertStillHere() in place — whatever caused it didn't
+    // always leave the name check able to catch it). Kept to whichever
+    // folder id most of the captured photos actually belong to; anything
+    // else is dropped.
+    let dominantFolder = null, dominantCount = 0;
+    folderCounts.forEach((count, folder) =&gt; { if (count &gt; dominantCount) { dominantFolder = folder; dominantCount = count; } });
+    const photos = [...photoMap.values()].filter((p) =&gt; !dominantFolder || !p.folder || p.folder === dominantFolder).map((p) =&gt; p.url);
+
+    return { name, age, fields, photos };
   }
 
   // Every match/message row in either sidebar list shares the same
@@ -932,7 +987,7 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
         }
         await new Promise((r) =&gt; setTimeout(r, 500));
         try {
-          profiles.push(await extractProfile());
+          profiles.push(await extractProfile(row.name));
           done.add(row.id);
           localStorage.setItem(DONE_KEY, JSON.stringify([...done]));
         } catch (err) {
