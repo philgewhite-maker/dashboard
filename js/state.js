@@ -1,5 +1,5 @@
 import { kvGet, kvSet, photoDelete } from './db.js';
-import { uid, todayStr, daysAgoStr, last7Dates, daysSince } from './utils.js';
+import { uid, todayStr, daysAgoStr, last7Dates, daysSince, daysUntil } from './utils.js';
 
 const DATA_KEY = 'app-data';
 const REV_KEY = 'app-data-rev'; // separate from DATA_KEY so it never leaks into backup exports
@@ -733,6 +733,18 @@ function isDormantStage(stage) {
 return stage === 'Faded' || stage === 'Archived';
 }
 
+// Orthogonal to stage, not a replacement for it — someone mid-conversation
+// or already met once doesn't lose that progress just because she's now out
+// of normal reach-out rotation. Standby has no end date (a foreign-city
+// match not worth nagging about unless/until travel lines up — cleared
+// manually, or later by trip-date matching); Travelling auto-expires so a
+// forgotten pause doesn't silently suppress nudges forever.
+function isTravelPaused(conn) {
+if (conn.travelStatus === 'standby') return true;
+if (conn.travelStatus === 'travelling' && conn.travelUntil) return daysUntil(conn.travelUntil) >= 0;
+return false;
+}
+
 // Distance is stored as a bucketed display string ("≤10mi/16km",
 // "23mi/37km+" — see bucketDistance() in the console snippet), not a raw
 // number, so a threshold rule needs the leading mile figure pulled back
@@ -829,6 +841,7 @@ const ACTIONS = ['Contact now', 'Set up date', 'Clean up data', 'Confirm faded',
 // reacting to and adjusting, not a claim that it's definitely right.
 function suggestedAction(conn, rules) {
 if (isDormantStage(conn.stage)) return null; // already resolved, nothing to suggest
+if (isTravelPaused(conn)) return null; // deliberately out of reach-out rotation for now
 const since = conn.lastContact ? daysSince(conn.lastContact) : null;
 const threshold = reachOutThreshold(conn.priority, conn.stage);
 if (since !== null && since > threshold * 3) return 'Confirm faded';
@@ -847,6 +860,7 @@ return null; // nothing pressing right now
 // set, not exhaustive.
 function suggestedQuestions(conn) {
 if (isDormantStage(conn.stage)) return [];
+if (isTravelPaused(conn)) return []; // 144 days is expected, not a red flag, while she's out of rotation
 const out = [];
 const since = conn.lastContact ? daysSince(conn.lastContact) : null;
 const threshold = reachOutThreshold(conn.priority, conn.stage);
@@ -906,7 +920,7 @@ MAIL_SEARCH_KINDS, mailSearchLabel,
 TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask,
 CONTACT_STATUS_LABELS, CONTACT_MATCH_MIN_STAGE,
 DEFAULT_RATING_CATEGORIES, slugifyField, DEFAULT_RECIPE_RATING_CATEGORIES,
-FLAG_FIELD_DEFS, DEFAULT_FLAG_RULES, computeFlags, suggestedAction, suggestedQuestions, ACTIONS, distanceMiles,
+FLAG_FIELD_DEFS, DEFAULT_FLAG_RULES, computeFlags, suggestedAction, suggestedQuestions, isTravelPaused, ACTIONS, distanceMiles,
 };
 
 // `data` above is exported by binding, but ES module live-bindings only

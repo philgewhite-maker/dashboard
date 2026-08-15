@@ -1,9 +1,9 @@
-import { data, queueSave, reachOutThreshold, isDormantStage, getLocalSettings, TAG_FIELDS, CONTACT_STATUS_LABELS, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness, slugifyField, FLAG_FIELD_DEFS, computeFlags, suggestedAction, suggestedQuestions } from '../state.js';
+import { data, queueSave, reachOutThreshold, isDormantStage, isTravelPaused, getLocalSettings, TAG_FIELDS, CONTACT_STATUS_LABELS, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness, slugifyField, FLAG_FIELD_DEFS, computeFlags, suggestedAction, suggestedQuestions } from '../state.js';
 import { captureTask, revealTask } from './tasks.js';
 import { photoDelete, photoUrl } from '../db.js';
 import { storePhoto } from '../files.js';
 import {
-uid, todayStr, daysSince, escapeHtml, avatarHtml, hydratePhotoBackgrounds, openLightbox, scrollAndFlash, bindForm,
+uid, todayStr, daysSince, escapeHtml, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, scrollAndFlash, bindForm,
 resizeImageToBlob,
 } from '../utils.js';
 import { MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot } from '../ai.js';
@@ -202,7 +202,10 @@ return i === -1 ? 0 : DISTANCE_BUCKET_ORDER.length - i;
 // Fixed sort options that always exist, regardless of what rating
 // categories Settings currently has configured.
 const FIXED_SORT_FIELDS = {
-default: { label: 'Reach-out priority', getValue: (c) => (isDormantStage(c.stage) ? -999 : daysSince(c.lastContact) - reachOutThreshold(c.priority, c.stage)) },
+// Standby/Travelling sinks the same way a dormant stage does — a 144-day
+// gap that's deliberate (out of rotation) shouldn't outrank someone
+// genuinely overdue just because the raw day count is bigger.
+default: { label: 'Reach-out priority', getValue: (c) => (isDormantStage(c.stage) || isTravelPaused(c) ? -999 : daysSince(c.lastContact) - reachOutThreshold(c.priority, c.stage)) },
 priority: { label: 'Overall rating', getValue: (c) => c.priority || 0 },
 average: { label: 'Average detailed rating', getValue: (c) => (averageRating(c) || {}).value || 0 },
 completeness: { label: 'Record completeness', getValue: (c) => completeness(c) },
@@ -469,9 +472,24 @@ bindConnectionEvents(list);
 refreshPhotoTargets();
 }
 
+// Explains the quiet where suggestedAction()/the "Reach out" badge would
+// normally be — silence with no reason looks like a bug ("why has nobody
+// suggested anything for 144 days?"), not a deliberate pause.
+function travelBadgeHtml(c) {
+if (c.travelStatus === 'standby') return '<span class="travel-badge standby" title="Out of reach-out rotation until you clear this or log matching travel">Standby</span>';
+if (c.travelStatus === 'travelling' && c.travelUntil) {
+const until = new Date(c.travelUntil).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+return isTravelPaused(c)
+? `<span class="travel-badge travelling" title="Reach-out nudges resume automatically after this date">Travelling until ${escapeHtml(until)}</span>`
+: `<span class="travel-badge travelling-expired" title="Travel pause ended — clear it or set a new date">Travel pause ended ${escapeHtml(until)}</span>`;
+}
+return '';
+}
+
 function connectionCardHtml(c) {
 const since = daysSince(c.lastContact);
-const overdue = !isDormantStage(c.stage) && since >= reachOutThreshold(c.priority);
+const travelPaused = isTravelPaused(c);
+const overdue = !isDormantStage(c.stage) && !travelPaused && since >= reachOutThreshold(c.priority);
 const stars = [1, 2, 3, 4, 5].map((n) => `<svg class="star priority-star ${n <= c.priority ? 'filled' : ''}" data-conn="${c.id}" data-star="${n}" viewBox="0 0 20 20" fill="currentColor"><path d="M10 1l2.6 5.9 6.4.6-4.8 4.3 1.4 6.2L10 14.9 4.4 18l1.4-6.2L1 7.5l6.4-.6z"/></svg>`).join('');
 const nameMeta = [displayAge(c), c.location].map((s) => String(s || '').trim()).filter(Boolean).join(' · ');
 const flags = computeFlags(c, data.flagRules);
@@ -493,6 +511,7 @@ ${CONN_STAGES.map((s) => `<option value="${s}" ${s === c.stage ? 'selected' : ''
 </div>
 <div class="match-actions">
 ${c.contactStatus ? `<span class="contact-badge ${escapeHtml(c.contactStatus)}">${escapeHtml(CONTACT_STATUS_LABELS[c.contactStatus] || '')}</span>` : ''}
+${travelBadgeHtml(c)}
 <span class="match-contact">${since === 0 ? 'today' : since + 'd since contact'}</span>
 ${overdue ? '<span class="reach-badge">Reach out</span>' : ''}
 ${action ? `<span class="suggested-action" title="Suggested next step, recomputed fresh each time">${escapeHtml(action)}</span>` : ''}
@@ -514,6 +533,12 @@ ${contactPickerHtml(c.id)}
 <label>City<input type="text" autocomplete="off" placeholder="Groups in Overview" data-field="location" data-conn-detail="${c.id}" value="${escapeHtml(c.location || '')}"></label>
 <label>Distance<input type="text" autocomplete="off" placeholder="e.g. &lt; 10 mi" data-field="distance" data-conn-detail="${c.id}" value="${escapeHtml(c.distance || '')}"></label>
 <label>Matched on<input type="date" data-field="matchedOn" data-conn-detail="${c.id}" value="${escapeHtml(c.matchedOn || '')}"></label>
+<label>Travel status<select data-field="travelStatus" data-conn-detail="${c.id}">
+<option value="" ${!c.travelStatus ? 'selected' : ''}>&mdash; normal reach-out rotation</option>
+<option value="standby" ${c.travelStatus === 'standby' ? 'selected' : ''}>Standby (foreign city, no end date)</option>
+<option value="travelling" ${c.travelStatus === 'travelling' ? 'selected' : ''}>Travelling (auto-resumes on a date)</option>
+</select></label>
+${c.travelStatus === 'travelling' ? `<label>Travelling until<input type="date" data-field="travelUntil" data-conn-detail="${c.id}" value="${escapeHtml(c.travelUntil || '')}"></label>` : ''}
 <label class="full">Full address<input type="text" autocomplete="off" placeholder="Not grouped — detail only" data-field="address" data-conn-detail="${c.id}" value="${escapeHtml(c.address || '')}"></label>
 <label>Kids<input type="text" autocomplete="off" data-field="kids" data-conn-detail="${c.id}" value="${escapeHtml(c.kids || '')}"></label>
 <label>Job<input type="text" autocomplete="off" data-field="job" data-conn-detail="${c.id}" value="${escapeHtml(c.job || '')}"></label>
@@ -530,6 +555,7 @@ ${contactPickerHtml(c.id)}
 <label>What I like most<input type="text" autocomplete="off" data-field="likes" data-conn-detail="${c.id}" value="${escapeHtml(c.likes || '')}"></label>
 <label class="full">Notes<textarea rows="2" data-field="notes" data-conn-detail="${c.id}">${escapeHtml(c.notes || '')}</textarea></label>
 <label class="full">Chat history<textarea rows="4" placeholder="Imported from Tinder — one message per line" data-field="chatLog" data-conn-detail="${c.id}">${escapeHtml(c.chatLog || '')}</textarea></label>
+${c.chatLog ? `<div class="full tinder-chat-block" style="margin:0 0 6px;">${chatTranscriptHtml(c.chatLog)}</div>` : ''}
 ${visibleTagFields().map((f) => `<label class="full${f.sensitive ? ' sensitive-field' : ''}">${escapeHtml(f.label)}<div class="tag-editor">${tagChips(c[f.field], c.id, f.field)}</div></label>`).join('')}
 <label class="full">Ratings${averageRatingHtml(c)}<div class="ratings-block">${data.ratingCategories.map(({ field, label }) => ratingStars(label, field, c.id, (c.ratings && c.ratings[field]) || 0)).join('')}</div></label>
 <label class="full">Things to do<div>${todoListHtml(c)}</div></label>
@@ -605,6 +631,14 @@ conn[el.dataset.field] = el.value;
 // Typing an age states what they are TODAY, so record today as the date
 // it was true — that's what lets it be carried forward later.
 if (el.dataset.field === 'age') conn.ageAsOf = el.value.trim() ? todayStr() : '';
+// "Travelling" without a date would silently never expire — default to a
+// two-week pause (the case the status is named for) so it self-clears
+// even if the actual return date is never filled in.
+if (el.dataset.field === 'travelStatus' && el.value === 'travelling' && !String(conn.travelUntil || '').trim()) {
+const until = new Date();
+until.setDate(until.getDate() + 14);
+conn.travelUntil = until.toISOString().slice(0, 10);
+}
 // These are echoed elsewhere in the card (the name line, the source tag,
 // every merge dropdown), so a full re-render is the only way to keep
 // those honest. `change` fires on blur, not per keystroke, so this costs
@@ -612,8 +646,9 @@ if (el.dataset.field === 'age') conn.ageAsOf = el.value.trim() ? todayStr() : ''
 // The link fields are in here because pasting a URL has to redraw the card
 // for its "Open …" hyperlink to appear — without that the link only shows
 // up the next time something else happened to trigger a render, which looks
-// exactly like the paste not working.
-if (['name', 'app', 'age', 'dob', 'location', 'driveLink'].includes(el.dataset.field)) renderConnections();
+// exactly like the paste not working. travelStatus needs it too, to show/
+// hide the "Travelling until" date field and refresh the badge/action.
+if (['name', 'app', 'age', 'dob', 'location', 'driveLink', 'travelStatus'].includes(el.dataset.field)) renderConnections();
 renderOverviewRef();
 queueSave();
 });

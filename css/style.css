@@ -1260,6 +1260,16 @@ white-space:nowrap;
 .contact-badge.linked{background:var(--teal-bg);color:var(--teal);}
 .contact-badge.review{background:var(--amber-bg);color:var(--amber);}
 .contact-badge.missing{background:transparent;border:1px dashed var(--line);color:var(--muted);}
+.travel-badge{
+font-family:'IBM Plex Mono',monospace;
+font-size:10px;
+border-radius:6px;
+padding:3px 7px;
+white-space:nowrap;
+}
+.travel-badge.standby{background:var(--slate-bg);color:var(--slate);}
+.travel-badge.travelling{background:var(--plum-bg);color:var(--plum);}
+.travel-badge.travelling-expired{background:transparent;border:1px dashed var(--line);color:var(--muted);}
 /* Drill-down mode: the toggle, and the pills showing what's currently
    narrowing the view. */
 .overview-mode{

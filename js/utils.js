@@ -50,6 +50,24 @@ function initials(name) {
 return (name || '?').trim().charAt(0).toUpperCase();
 }
 
+// Parses "[HH:MM] Sender: message" lines (the shape the Tinder import
+// writes into chatLog) into styled bubbles instead of a wall of plain
+// text — shared with tinderimport.js's own chatHistoryHtml() there, which
+// additionally runs highlightCities() per line; that stays local to the
+// importer since it needs pending/data.flagRules state this module
+// doesn't have. A line that doesn't match the pattern (older notes, a
+// manually-typed line) still renders, just without the time/sender pill.
+function chatTranscriptHtml(text) {
+return String(text || '').split('\n').map((line) => {
+const m = line.match(/^\[(\d{1,2}:\d{2})\]\s*([^:]+):\s*(.*)$/);
+if (!m) return `<div class="tinder-chat-line">${escapeHtml(line)}</div>`;
+const [, time, sender, message] = m;
+const senderName = sender.trim();
+const senderClass = senderName === 'You' ? 'tinder-chat-you' : 'tinder-chat-them';
+return `<div class="tinder-chat-line"><span class="tinder-chat-time">[${escapeHtml(time)}]</span> <span class="${senderClass}">${escapeHtml(senderName)}</span>: ${escapeHtml(message)}</div>`;
+}).join('');
+}
+
 // Renders an avatar/photo <div> with a data-photo-bg placeholder; call
 // hydratePhotoBackgrounds() after inserting the returned HTML into the DOM
 // to fill in the actual blob URL asynchronously (IndexedDB reads are async,
@@ -435,7 +453,7 @@ canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.85);
 
 export {
 todayStr, daysAgoStr, last7Dates, uid, daysSince, daysUntil,
-escapeHtml, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, scrollAndFlash, bindForm,
+escapeHtml, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, scrollAndFlash, bindForm,
 resizeImageToBlob, fileToBase64, loadImage, cropThumbnailToBlob,
 hashFile, captureDateOf, betterCaptureDate, dateFromFilename,
 ensureBrowserReadableImage, setPhotoFallback,

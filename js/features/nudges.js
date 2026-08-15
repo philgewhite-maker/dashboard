@@ -1,4 +1,4 @@
-import { data, reachOutThreshold, isDormantStage, getLocalSettings, setLocalSetting } from '../state.js';
+import { data, reachOutThreshold, isDormantStage, isTravelPaused, getLocalSettings, setLocalSetting } from '../state.js';
 import { escapeHtml, scrollAndFlash, daysSince, daysUntil } from '../utils.js';
 import { switchTab } from '../tabs.js';
 import { callTextJson, MissingKeyError } from '../ai.js';
@@ -38,6 +38,12 @@ const pool = [];
 
 data.connections.forEach((c) => {
 const since = daysSince(c.lastContact);
+// Standby/Travelling deliberately takes someone out of reach-out rotation
+// — the whole point is not being nagged about a foreign-city match every
+// few days, so every nudge below that's really just "it's been a while"
+// in disguise skips her while paused. Explicit todos still fire below —
+// those are a decision you already made, not a cadence check.
+if (!isTravelPaused(c)) {
 if ((c.priority || 0) >= 4 && NEW_MATCH_STAGES.has(c.stage) && daysSince(String(c.createdAt || '').slice(0, 10)) <= 14) {
 pool.push({
 text: `You rated ${c.name} ${c.priority} stars — reach out?`,
@@ -64,6 +70,7 @@ text: `Reach out to ${c.name} — it's been ${since} days since you last spoke.`
 target: { type: 'connection', id: c.id },
 signals: { kind: 'overdue-contact', daysSince: since, priority: c.priority || 0 },
 });
+}
 }
 }
 (c.todos || []).filter((t) => !t.done).forEach((t) => {
