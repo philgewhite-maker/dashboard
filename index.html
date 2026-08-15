@@ -1017,7 +1017,7 @@ window.tinderBulkImport = async (batchSize) => {
   // someone already saved is safe either way -- the dashboard fills in
   // whatever's still missing rather than duplicating what's already
   // there.
-  const SCRIPT_VERSION = 2;
+  const SCRIPT_VERSION = 3; // basics-strip Job/Gender/Language/School icon-fingerprint classification fix
   const DONE_KEY = 'dashTinderBulkDone';
   const BATCH_SIZE = batchSize || 15; // "10-20 or so per day" — override per-call: tinderBulkImport(30)
   const MIN_DELAY_MS = 10000, MAX_DELAY_MS = 60000; // randomised, not a fixed interval &mdash; a fixed gap is a bot tell
