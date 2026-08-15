@@ -325,10 +325,11 @@ const conn = data.connections.find((c) => c.id === pending.chosenId);
 const target = FIELD_MAP[f.label];
 const arrayMap = ARRAY_FIELD_MAP[f.label];
 let note = 'will be added to notes';
-let blocked = false;
+let disabled = false; // truly nothing to do (array field, nothing new to add) — stays unchecked and locked
+let dim = false; // already has a value, so unchecked-by-default, but still a real, checkable override
 if (conn && target) {
 const current = String(conn[target] || '').trim();
-if (current) { note = `already set to "${current}" — will be skipped`; blocked = true; }
+if (current) { note = `already set to "${current}" — check to overwrite`; dim = !f.apply; }
 else note = `will set ${f.label}`;
 } else if (conn && arrayMap) {
 const existingTags = new Set((conn[arrayMap.target] || []).map((t) => t.toLowerCase()));
@@ -337,10 +338,10 @@ const fresh = parts.filter((p) => !existingTags.has(p.toLowerCase()));
 note = fresh.length === 0 ? `already in ${arrayMap.target} — will be skipped`
 : fresh.length === parts.length ? `will add to ${arrayMap.target}`
 : `will add ${fresh.length} new to ${arrayMap.target}, rest already there`;
-if (fresh.length === 0) blocked = true;
+if (fresh.length === 0) { disabled = true; dim = true; }
 }
-return `<label class="tinder-field-row${blocked ? ' tinder-field-blocked' : ''}">
-<input type="checkbox" data-tinder-field="${i}"${f.apply && !blocked ? ' checked' : ''}${blocked ? ' disabled' : ''}>
+return `<label class="tinder-field-row${dim ? ' tinder-field-blocked' : ''}">
+<input type="checkbox" data-tinder-field="${i}"${f.apply && !disabled ? ' checked' : ''}${disabled ? ' disabled' : ''}>
 <span><strong>${escapeHtml(f.label)}:</strong> ${highlightCities(f.value)} <span class="tinder-field-note">(${escapeHtml(note)})</span></span>
 </label>`;
 }
@@ -555,7 +556,12 @@ if (pending.age && !String(conn.age || '').trim()) { conn.age = pending.age; con
 pending.fields.filter((f) => f.apply).forEach((f) => {
 const target = FIELD_MAP[f.label];
 if (target) {
-if (!String(conn[target] || '').trim()) conn[target] = f.value;
+// f.apply is now the single source of truth for whether this writes:
+// refreshOverrides() already defaults an already-set field to unchecked,
+// so a field that reaches here checked is a deliberate overwrite, not an
+// accidental one -- the old fill-if-empty guard here silently blocked
+// that override from ever taking effect even once the box was checked.
+conn[target] = f.value;
 return;
 }
 const arrayMap = ARRAY_FIELD_MAP[f.label];
@@ -738,6 +744,18 @@ function refreshOverrides() {
 const conn = data.connections.find((c) => c.id === pending.chosenId);
 pending.stageOverride = suggestedStage(conn);
 pending.ratingOverride = conn ? (conn.priority || 0) : 0;
+// A single-value field (Distance, Job, City...) that's already set on the
+// matched connection defaults to unchecked, not disabled -- overwriting
+// stale data (a match moved city, a bad early scrape) is a real need, but
+// it should be a deliberate click, not pre-selected. Only runs when the
+// matched connection changes, so it can't stomp a toggle the user already
+// made against the SAME connection on a later, unrelated re-render.
+if (conn && Array.isArray(pending.fields)) {
+pending.fields.forEach((f) => {
+const target = FIELD_MAP[f.label];
+if (target && String(conn[target] || '').trim()) f.apply = false;
+});
+}
 }
 
 // Moves on to whatever's next in a batch (after a save or an explicit
