@@ -91,6 +91,10 @@ if (url) {
 const img = document.createElement('img');
 img.src = url;
 img.alt = '';
+// A plain <img> is natively draggable; nudging one a pixel mid-click is
+// enough on Windows Chrome to kick off an OS-level drag of the blob: URL,
+// which can pop File Explorer instead of (or alongside) a click handler.
+img.draggable = false;
 el.textContent = '';
 el.appendChild(img);
 } else {

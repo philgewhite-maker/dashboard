@@ -89,7 +89,10 @@ return conn;
 // dedicated field in this app, so it's kept as a readable line appended to
 // notes instead of being dropped — same fallback the screenshot importer
 // uses for a bio it can't otherwise place.
-const FIELD_MAP = { 'Family plans': 'kids', Education: 'education', Height: 'height', Work: 'job', 'Job title': 'job', Job: 'job', Distance: 'distance', City: 'location' };
+const FIELD_MAP = {
+'Family plans': 'kids', Education: 'education', Height: 'height', Work: 'job', 'Job title': 'job', Job: 'job', Distance: 'distance', City: 'location',
+'Matched on': 'matchedOn', 'Chat history': 'chatLog',
+};
 
 // Fields that become chips in an existing multi-value tag list instead —
 // added to, never overwritten, so re-importing the same person twice just

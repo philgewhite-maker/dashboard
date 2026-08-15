@@ -364,6 +364,8 @@ if (!Array.isArray(c.sexTags)) c.sexTags = [];
 if (!Array.isArray(c.interests)) c.interests = [];
 if (!Array.isArray(c.relationshipTags)) c.relationshipTags = [];
 if (typeof c.distance !== 'string') c.distance = '';
+if (typeof c.matchedOn !== 'string') c.matchedOn = '';
+if (typeof c.chatLog !== 'string') c.chatLog = '';
 if (typeof c.job !== 'string') c.job = '';
 if (typeof c.height !== 'string') c.height = '';
 if (typeof c.education !== 'string') c.education = '';
