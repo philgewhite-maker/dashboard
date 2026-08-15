@@ -784,6 +784,26 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
     return rows;
   }
 
+  // Re-finds a row's link fresh at click time, by match id rather than by
+  // comparing href strings &mdash; confirmed live: `a.href` (the JS
+  // property, always browser-resolved to an absolute URL) doesn't
+  // necessarily equal the raw href ATTRIBUTE Tinder's live DOM actually
+  // carries, so `document.querySelector('a[href="' + resolvedUrl + '"]')`
+  // failed to find a person visibly on screen. Matching on the id parsed
+  // out of the live `.href` property on both sides (same parsing
+  // collectCandidates already does) sidesteps that mismatch entirely.
+  function findLinkById(id) {
+    for (const ul of [document.querySelector('ul[aria-label="Your recent messages"]'), document.querySelector('ul[aria-label="Your matches"]')]) {
+      if (!ul) continue;
+      const found = [...ul.querySelectorAll('li a[href*="/app/messages/"]')].find((a) => {
+        const m = a.href.match(/\/app\/messages\/([a-zA-Z0-9]+)/);
+        return m &amp;&amp; m[1] === id;
+      });
+      if (found) return found;
+    }
+    return null;
+  }
+
   // Polls the profile panel until it's actually showing the person just
   // clicked, rather than a fixed delay &mdash; SPA navigation time varies,
   // and a fixed wait is either too short sometimes or wastefully long
@@ -825,7 +845,7 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
       for (let i = 0; i &lt; todo.length; i++) {
         const row = todo[i];
         console.log(`[${i + 1}/${todo.length}] ${row.name}...`);
-        const link = document.querySelector(`a[href="${row.href}"]`);
+        const link = findLinkById(row.id);
         if (!link) { console.warn(`Couldn't find ${row.name} any more -- the sidebar re-rendered. Stopping here.`); break; }
         link.click();
         const loaded = await waitForProfile(row.name, 8000);
