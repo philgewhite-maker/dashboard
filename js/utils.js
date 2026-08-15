@@ -112,6 +112,22 @@ el.title = 'This photo is only on the device it was added on — see Settings �
 }));
 }
 
+// Full-screen photo preview, painted as a CSS background rather than a real
+// <img> — see hydratePhotoBackgrounds() above. This is the one every photo
+// thumbnail click leads to, so it's the highest-traffic spot in the app for
+// the native-drag-pops-File-Explorer bug; draggable=false plus an explicit
+// dragstart preventDefault() on a real <img> here were both confirmed still
+// not reliable enough on Windows Chrome. Shared by the Connections gallery
+// and the Tinder import photo grid rather than duplicated per feature.
+function openLightbox(url) {
+const box = document.createElement('div');
+box.className = 'lightbox';
+box.innerHTML = '<div class="lightbox-img"></div>';
+box.querySelector('.lightbox-img').style.backgroundImage = `url("${url}")`;
+box.addEventListener('click', () => box.remove());
+document.body.appendChild(box);
+}
+
 function scrollAndFlash(selector) {
 const el = document.querySelector(selector);
 if (!el) return;
@@ -419,7 +435,7 @@ canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.85);
 
 export {
 todayStr, daysAgoStr, last7Dates, uid, daysSince, daysUntil,
-escapeHtml, initials, avatarHtml, hydratePhotoBackgrounds, scrollAndFlash, bindForm,
+escapeHtml, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, scrollAndFlash, bindForm,
 resizeImageToBlob, fileToBase64, loadImage, cropThumbnailToBlob,
 hashFile, captureDateOf, betterCaptureDate, dateFromFilename,
 ensureBrowserReadableImage, setPhotoFallback,

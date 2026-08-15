@@ -327,8 +327,11 @@ gap:12px;
 }
 .album-strip{grid-template-columns:repeat(auto-fill,minmax(84px,1fr));margin-top:6px;}
 .album-card{position:relative;min-width:0;}
-.tinder-fields{display:flex;flex-direction:column;gap:4px;margin-top:8px;}
+.tinder-fields{display:grid;grid-template-columns:repeat(3, 1fr);gap:2px 16px;margin-top:8px;align-items:start;}
+.tinder-field-item{min-width:0;}
+.tinder-field-item-full{grid-column:1 / -1;}
 .tinder-field-row{display:flex;align-items:baseline;gap:6px;font-size:12px;font-weight:400;text-transform:none;letter-spacing:normal;}
+#tinder-stage{max-width:150px;}
 .tinder-field-label{display:flex;align-items:baseline;gap:6px;flex:1;min-width:0;}
 .tinder-field-note{color:var(--muted);font-size:11px;}
 .tinder-field-blocked{opacity:.55;}
@@ -337,20 +340,36 @@ gap:12px;
 .tinder-chat-time{color:var(--muted);font-size:11px;}
 .tinder-chat-you{background:var(--slate-bg);color:var(--slate);font-weight:600;border-radius:4px;padding:0 4px;}
 .tinder-chat-them{background:var(--rose-bg);color:var(--rose);font-weight:600;border-radius:4px;padding:0 4px;}
-.tinder-confirm-pic{width:32px;height:32px;border-radius:50%;overflow:hidden;display:inline-block;background:var(--paper);flex-shrink:0;background-size:cover;background-position:center;}
+.tinder-header-row{display:flex;align-items:center;gap:10px;}
+.tinder-header-id{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px;}
+.tinder-header-id .album-caption{margin:0;}
+.tinder-confirm-pic{width:64px;height:64px;border-radius:12px;overflow:hidden;display:block;background:var(--paper);flex-shrink:0;background-size:cover;background-position:center;cursor:pointer;}
+.tinder-confirm-pic-empty{border:1px dashed var(--line);cursor:default;}
+.tinder-next-step{margin:6px 0;}
+.tinder-hint-chips{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:5px;}
+.tinder-hint-chip{
+font-size:11px;text-align:left;
+background:var(--amber-bg);color:var(--amber);
+border:none;border-radius:999px;
+padding:3px 9px;cursor:pointer;
+}
+.tinder-hint-chip:hover{background:var(--amber);color:#fff;}
+.tinder-next-step input{width:100%;}
 .tinder-translate-result{font-size:12px;color:var(--muted);margin:2px 0 4px 22px;}
 .tinder-translate-error{color:var(--rose);}
 .tinder-engine-badge{display:inline-block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;border-radius:4px;padding:1px 5px;margin-right:2px;}
 .tinder-engine-badge.tinder-engine-free{background:var(--sage-bg);color:var(--sage);}
 .tinder-engine-badge.tinder-engine-paid{background:var(--teal-bg);color:var(--teal);}
-.tinder-photo-thumb{opacity:.4;transition:opacity .1s;background-size:cover;background-position:center;}
+.tinder-photo-thumb{opacity:.4;transition:opacity .1s;background-size:cover;background-position:center;cursor:zoom-in;}
 .tinder-photo-thumb.tinder-photo-included{opacity:1;}
-.tinder-photo-badge{
-position:absolute;top:2px;right:2px;
-width:16px;height:16px;border-radius:50%;
-background:var(--sage);color:#fff;
-font-size:11px;line-height:16px;text-align:center;
+.tinder-photo-toggle{
+position:absolute;top:3px;right:3px;
+width:20px;height:20px;border-radius:50%;
+background:rgba(20,18,15,.45);border:1.5px solid rgba(255,255,255,.85);
+color:#fff;font-size:12px;font-weight:700;line-height:17px;text-align:center;
+cursor:pointer;
 }
+.tinder-photo-toggle.checked{background:var(--sage);border-color:var(--sage);}
 /* More Info panel: everyone worth considering, and every photo, at a size
    you can actually tell faces apart — a single small pic-vs-pic compare
    missed a real match sitting in the incoming set's 2nd photo, confirmed
@@ -1972,6 +1991,7 @@ color:var(--muted);
 .details-grid > label, .details-grid > .field-block{min-width:0;}
 .details-grid{grid-template-columns:1fr;}
 .task-detail-grid{grid-template-columns:1fr;}
+.tinder-fields{grid-template-columns:1fr;}
 .pref-grid{grid-template-columns:1fr;}
 
 /* Sort/filter controls become full width rather than squeezing side by side. */

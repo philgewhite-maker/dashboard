@@ -3,7 +3,7 @@ import { captureTask, revealTask } from './tasks.js';
 import { photoDelete, photoUrl } from '../db.js';
 import { storePhoto } from '../files.js';
 import {
-uid, todayStr, daysSince, escapeHtml, avatarHtml, hydratePhotoBackgrounds, scrollAndFlash, bindForm,
+uid, todayStr, daysSince, escapeHtml, avatarHtml, hydratePhotoBackgrounds, openLightbox, scrollAndFlash, bindForm,
 resizeImageToBlob,
 } from '../utils.js';
 import { MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot } from '../ai.js';
@@ -777,21 +777,6 @@ if (el.open) expandedConnections.add(el.dataset.connDetails);
 else expandedConnections.delete(el.dataset.connDetails);
 });
 });
-}
-
-function openLightbox(url) {
-const box = document.createElement('div');
-box.className = 'lightbox';
-// Painted as a CSS background rather than a real <img> — see
-// hydratePhotoBackgrounds() in utils.js. This is the one every photo
-// thumbnail click leads to, so it's the highest-traffic spot in the app
-// for the native-drag-pops-File-Explorer bug; draggable=false plus an
-// explicit dragstart preventDefault() on a real <img> here were both
-// confirmed still not reliable enough on Windows Chrome.
-box.innerHTML = '<div class="lightbox-img"></div>';
-box.querySelector('.lightbox-img').style.backgroundImage = `url("${url}")`;
-box.addEventListener('click', () => box.remove());
-document.body.appendChild(box);
 }
 
 // Settings -> "rating categories": add/remove which detailed star ratings

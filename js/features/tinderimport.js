@@ -22,11 +22,11 @@
 // importer), and the chosen connection's photo stays visible for the whole
 // review regardless of how it got picked, so a wrong dropdown pick is just
 // as visible as a wrong auto-match was invisible before.
-import { data, queueSave, currentAge, computeFlags, distanceMiles, FLAG_FIELD_DEFS } from '../state.js';
-import { escapeHtml, uid, todayStr, hydratePhotoBackgrounds } from '../utils.js';
+import { data, queueSave, currentAge, computeFlags, distanceMiles, FLAG_FIELD_DEFS, suggestedQuestions } from '../state.js';
+import { escapeHtml, uid, todayStr, hydratePhotoBackgrounds, openLightbox } from '../utils.js';
 import { nameKey, editDistance } from '../googlecontacts.js';
 import { storePhoto, fetchProxiedImage } from '../files.js';
-import { photoGet } from '../db.js';
+import { photoGet, photoUrl } from '../db.js';
 import { MissingKeyError, compareFaces, translateText, identifyCountry } from '../ai.js';
 import { findPhoneNumbers, findHandles, formatHandle } from '../contactscan.js';
 import { STAGE_RANK, CONN_STAGES } from './connections.js';
@@ -656,7 +656,12 @@ const flagColor = isChat ? null : fieldFlagColor(f);
 const valueHtml = isChat ? '' : (flagColor
 ? `<span class="tinder-flag-hit tinder-flag-hit-${flagColor}" title="Flagged ${flagColor}">${highlightCities(f.value)}</span>`
 : highlightCities(f.value));
-return `<div class="tinder-field-row${dim ? ' tinder-field-blocked' : ''}">
+// One wrapper per field so the multi-column grid below has a single,
+// self-contained item to place — the row plus whatever conditional extras
+// (translation, country lookup, chat transcript) go with it, not scattered
+// across separate grid cells as loose siblings.
+return `<div class="tinder-field-item${isChat ? ' tinder-field-item-full' : ''}">
+<div class="tinder-field-row${dim ? ' tinder-field-blocked' : ''}">
 <label class="tinder-field-label">
 <input type="checkbox" data-tinder-field="${i}"${f.apply && !disabled ? ' checked' : ''}${disabled ? ' disabled' : ''}>
 <span><strong>${escapeHtml(f.label)}:</strong>${isChat ? '' : ` ${valueHtml}`} <span class="tinder-field-note">(${escapeHtml(note)})</span></span>
@@ -668,7 +673,8 @@ ${cyrillicAddButtonHtml(f.value)}
 ${f.label === 'Distance' ? proposedCityHtml() : ''}
 ${isChat ? `<div class="tinder-chat-block">${chatHistoryHtml(f.value)}</div>` : ''}
 ${translationResultHtml(i)}
-${countryResultHtml(f, i)}`;
+${countryResultHtml(f, i)}
+</div>`;
 }
 
 // Same checkbox-with-a-preview shape as fieldPreviewHtml, for whatever the
@@ -772,6 +778,21 @@ const hit = flags.hits.find((h) => h.field === target);
 return hit ? hit.color : null;
 }
 
+// A place to jot a quick, human next step ("ask about kids", "plan a
+// comedy date") right here on the review card, instead of a separate trip
+// to the connection's own "Things to do" list later — same deterministic
+// suggestedQuestions() prompts already surfaced on the Connections tab,
+// but reachable a click earlier, while the profile is still on screen.
+// Clicking a hint fills the input so it can be used as-is or edited rather
+// than retyped.
+function nextStepHtml() {
+const questions = suggestedQuestions(draftConnForFlags());
+return `<div class="tinder-next-step">
+${questions.length ? `<div class="tinder-hint-chips">${questions.map((q) => `<button type="button" class="tinder-hint-chip" data-tinder-hint="${escapeHtml(q)}">${escapeHtml(q)}</button>`).join('')}</div>` : ''}
+<input type="text" autocomplete="off" id="tinder-next-step" placeholder="Next step / follow-up (e.g. ask about kids, plan a comedy date)" value="${escapeHtml(pending.nextStepNote)}">
+</div>`;
+}
+
 function ratingStarsHtml(current) {
 return [1, 2, 3, 4, 5].map((n) => `<svg class="star tinder-rating-star${n <= current ? ' filled' : ''}" data-tinder-star="${n}" viewBox="0 0 20 20" fill="currentColor"><path d="M10 1l2.6 5.9 6.4.6-4.8 4.3 1.4 6.2L10 14.9 4.4 18l1.4-6.2L1 7.5l6.4-.6z"/></svg>`).join('');
 }
@@ -795,14 +816,20 @@ const saveBlockedNote = !p.chosenId ? 'pick who this is first'
 
 el.innerHTML = `<div class="album-card">
 ${queue.length ? `<div class="settings-note" style="margin:0 0 8px;">${queue.length} more queued in this batch — saving auto-advances to the next.</div>` : ''}
+<div class="tinder-header-row">
+${chosenConn && chosenConn.photoId
+? `<span class="tinder-confirm-pic" data-photo-bg="${escapeHtml(chosenConn.photoId)}" data-view-photo-confirm="1" title="Click to view ${escapeHtml(chosenConn.name)}'s photo full-size"></span>`
+: '<span class="tinder-confirm-pic tinder-confirm-pic-empty" title="No photo on file for the pick below yet"></span>'}
+<div class="tinder-header-id">
 <div class="album-caption"><strong>${escapeHtml(p.name || '(no name found)')}</strong>${p.age ? `, ${escapeHtml(p.age)}` : ''}</div>
+<select id="tinder-pick">${optionsFor(p.chosenId, p.candidates)}</select>
+</div>
+</div>
 ${flagBreakdownHtml()}
 
-<select id="tinder-pick">${optionsFor(p.chosenId, p.candidates)}</select>
-
 ${p.risky ? `<div class="tinder-field-note tinder-translate-error" style="margin:6px 0 0;">More than one connection shares this name (and a similar age) — double-check the photo before saving, this pick might be wrong.</div>` : ''}
+${nextStepHtml()}
 <div class="sync-row" style="margin:6px 0 8px;align-items:center;">
-${chosenConn && chosenConn.photoId ? `<span class="tinder-confirm-pic" data-photo-bg="${escapeHtml(chosenConn.photoId)}" title="${escapeHtml(chosenConn.name)}"></span>` : ''}
 <button class="add-btn tinder-save-btn${p.risky ? ' tinder-risky' : ''}" type="button" id="tinder-save"${canSave ? '' : ' disabled'} title="${escapeHtml(saveLabel)}">${escapeHtml(saveLabel)}</button>
 <button class="sync-btn" type="button" id="tinder-save-open"${canSave ? '' : ' disabled'} title="${escapeHtml(saveLabel)} & open profile">& open profile</button>
 <button class="sync-btn" type="button" id="tinder-skip">Skip</button>
@@ -821,8 +848,8 @@ ${saveBlockedNote ? `<div class="tinder-field-note" style="margin:-4px 0 8px;">$
 ${agePreviewHtml()}
 ${p.fields.length ? `<div class="tinder-fields">${p.fields.map((f, i) => fieldPreviewHtml(f, i)).join('')}</div>` : ''}
 ${contactPreviewHtml()}
-${p.photos.length ? `<div class="settings-note" style="margin:8px 0 4px;">${p.photos.filter((ph) => ph.apply).length} of ${p.photos.length} photos will be added — click to include/exclude:</div>
-<div class="photo-gallery">${p.photos.map((ph, i) => `<span class="gallery-thumb tinder-photo-thumb${ph.apply ? ' tinder-photo-included' : ''}" data-tinder-photo="${i}" style="background-image:url('${escapeHtml(ph.url)}')">${ph.apply ? '<span class="tinder-photo-badge">&check;</span>' : ''}</span>`).join('')}</div>` : ''}
+${p.photos.length ? `<div class="settings-note" style="margin:8px 0 4px;">${p.photos.filter((ph) => ph.apply).length} of ${p.photos.length} photos will be added — click a photo to view it bigger, click the check to include/exclude:</div>
+<div class="photo-gallery">${p.photos.map((ph, i) => `<span class="gallery-thumb tinder-photo-thumb${ph.apply ? ' tinder-photo-included' : ''}" data-tinder-photo-view="${i}" style="background-image:url('${escapeHtml(ph.url)}')"><span class="tinder-photo-toggle${ph.apply ? ' checked' : ''}" data-tinder-photo-toggle="${i}" title="${ph.apply ? 'Included — click to exclude' : 'Excluded — click to include'}">${ph.apply ? '&check;' : ''}</span></span>`).join('')}</div>` : ''}
 </div>
 ${moreInfoHtml()}`;
 // Every render rebuilds this whole card, including fresh, un-hydrated
@@ -831,6 +858,14 @@ ${moreInfoHtml()}`;
 // first, and vanished again on the very next render (any checkbox
 // toggle, dropdown change, etc. all re-render).
 hydratePhotoBackgrounds(el);
+
+const confirmPic = el.querySelector('[data-view-photo-confirm]');
+if (confirmPic) confirmPic.addEventListener('click', async () => {
+if (chosenConn && chosenConn.photoId) {
+const url = await photoUrl(chosenConn.photoId);
+if (url) openLightbox(url);
+}
+});
 
 const pick = document.getElementById('tinder-pick');
 if (pick) pick.addEventListener('change', () => { pending.chosenId = pick.value; pending.matchConfirmed = false; refreshOverrides(); render(); });
@@ -922,6 +957,14 @@ const stageSel = document.getElementById('tinder-stage');
 if (stageSel) stageSel.addEventListener('change', () => { pending.stageOverride = stageSel.value; });
 const cityInput = document.getElementById('tinder-city');
 if (cityInput) cityInput.addEventListener('input', () => { pending.cityOverride = cityInput.value; });
+const nextStepInput = document.getElementById('tinder-next-step');
+if (nextStepInput) nextStepInput.addEventListener('input', () => { pending.nextStepNote = nextStepInput.value; });
+el.querySelectorAll('[data-tinder-hint]').forEach((chip) => {
+chip.addEventListener('click', () => {
+pending.nextStepNote = chip.dataset.tinderHint;
+render();
+});
+});
 el.querySelectorAll('[data-tinder-star]').forEach((star) => {
 star.addEventListener('click', () => {
 const n = parseInt(star.dataset.tinderStar, 10);
@@ -951,9 +994,16 @@ cb.addEventListener('change', () => { pending.foundPhones[parseInt(cb.dataset.ti
 el.querySelectorAll('[data-tinder-handle]').forEach((cb) => {
 cb.addEventListener('change', () => { pending.foundHandles[parseInt(cb.dataset.tinderHandle, 10)].apply = cb.checked; });
 });
-el.querySelectorAll('[data-tinder-photo]').forEach((span) => {
+el.querySelectorAll('[data-tinder-photo-view]').forEach((span) => {
 span.addEventListener('click', () => {
-const ph = pending.photos[parseInt(span.dataset.tinderPhoto, 10)];
+const ph = pending.photos[parseInt(span.dataset.tinderPhotoView, 10)];
+if (ph) openLightbox(ph.url);
+});
+});
+el.querySelectorAll('[data-tinder-photo-toggle]').forEach((badge) => {
+badge.addEventListener('click', (e) => {
+e.stopPropagation(); // otherwise the click also bubbles to the thumb and opens the lightbox
+const ph = pending.photos[parseInt(badge.dataset.tinderPhotoToggle, 10)];
 ph.apply = !ph.apply;
 render();
 });
@@ -981,6 +1031,12 @@ if (status) status.textContent = 'Saving…';
 // overwrote unconditionally, which is what erased Lenka's real age when
 // Leila's data landed on her record by mistake.
 if (pending.age && !String(conn.age || '').trim()) { conn.age = pending.age; conn.ageAsOf = todayStr(); }
+
+const nextStep = pending.nextStepNote.trim();
+if (nextStep) {
+if (!Array.isArray(conn.todos)) conn.todos = [];
+conn.todos.push({ id: uid(), text: nextStep, done: false });
+}
 
 pending.fields.filter((f) => f.apply).forEach((f) => {
 const target = FIELD_MAP[f.label];
@@ -1171,6 +1227,12 @@ countries: {},
 cityOverride: transliterateCityValue(fields.find((f) => f.label === 'City')?.value || ''),
 stageOverride: 'Matched',
 ratingOverride: 0,
+// A quick, human-written follow-up note — "ask about kids", "plan a
+// comedy date" — captured right here while the profile's still on
+// screen rather than needing a separate trip to the connection's own
+// Details later. Applied as a todo at save time, same mechanism as the
+// "Things to do" list on the connection itself.
+nextStepNote: '',
 // The permanent id back to this exact Tinder match, from the page's own
 // URL — lets a later import check whether this connection is still in
 // Tinder's current match list at all, not just "matched at some point".
