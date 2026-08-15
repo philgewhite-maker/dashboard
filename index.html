@@ -381,8 +381,10 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
   // same as any other field this snippet doesn't recognise.
   const matchedEl = [...root.querySelectorAll('*')].find((el) =&gt; el.children.length === 0 &amp;&amp; /you matched.*on\s+\d{1,2}\/\d{1,2}\/\d{2,4}/i.test(el.textContent || ''));
   if (matchedEl) {
-    const dm = matchedEl.textContent.match(/on\s+(\d{1,2}\/\d{1,2}\/\d{2,4})/i);
-    if (dm) fields.push({ label: 'Matched on', value: dm[1] });
+    const dm = matchedEl.textContent.match(/on\s+(\d{1,2})\/(\d{1,2})\/(\d{2,4})/i);
+    // Tinder shows DD/MM/YYYY; the connection field is an &lt;input type="date"&gt;,
+    // which needs ISO (YYYY-MM-DD) to actually populate rather than sit blank.
+    if (dm) fields.push({ label: 'Matched on', value: `${dm[3]}-${dm[2].padStart(2, '0')}-${dm[1].padStart(2, '0')}` });
   }
   const seen = new Set();
   // Every "vital" (kids, education, smoking, pets, communication style,
@@ -496,6 +498,42 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
     }
   }
 
+  // Chat history: a "Conversation history with {name}" heading whose value
+  // block is the ENTIRE thread's flattened textContent &mdash; verified
+  // against a real captured page, where without this it swept every
+  // message, phone numbers and composer UI chrome into one field via the
+  // generic h2 pass below. Each message carries a visually-hidden "Sent at
+  // HH:MM" accessibility label immediately followed by the same time again,
+  // the sender, and a colon &mdash; a reliable, repeating anchor confirmed
+  // across every message in that real transcript. A "DD/MM/YYYY, HH:MM"
+  // divider (and sometimes a bare "Sent" delivery-status word right before
+  // it, no space) sits between some messages and isn't part of either
+  // one's text. Parsed messages are shown in the review screen before
+  // anything saves, never trusted silently &mdash; misattributing who said
+  // what is worse than a merely misfiled field.
+  const chatHeading = $$('h2').find((h) =&gt; /^Conversation history with /i.test(h.textContent.trim()));
+  if (chatHeading) {
+    const card = chatHeading.closest('section') || (chatHeading.parentElement &amp;&amp; chatHeading.parentElement.parentElement);
+    const valueBlock = card &amp;&amp; [...card.children].find((el) =&gt; !el.contains(chatHeading) &amp;&amp; el.textContent.trim());
+    const raw = valueBlock ? valueBlock.textContent : '';
+    const cut = raw.replace(/Reply to .+/s, '');
+    const msgRe = /Sent at (\d{1,2}:\d{2})\d{1,2}:\d{2}([^:]{1,40}):/g;
+    const matches = [...cut.matchAll(msgRe)];
+    const messages = [];
+    for (let i = 0; i &lt; matches.length; i++) {
+      const m = matches[i];
+      const start = m.index + m[0].length;
+      const end = i + 1 &lt; matches.length ? matches[i + 1].index : cut.length;
+      const body = cut.slice(start, end)
+        .replace(/(Sent)?\d{1,2}\/\d{1,2}\/\d{4},?\s*\d{1,2}:\d{2}\s*$/, '')
+        .replace(/Sent\s*$/, '')
+        .trim();
+      const sender = m[2].trim();
+      if (sender &amp;&amp; body) messages.push(`[${m[1]}] ${sender}: ${body}`);
+    }
+    if (messages.length) fields.push({ label: 'Chat history', value: messages.join('\n') });
+  }
+
   // "Looking for" and prompt answers ("My biography would be called: ...")
   // share a shape too: an &lt;h2&gt; label with its answer nearby. Skips known
   // section headers, which wrap a LIST rather than carrying one value.
@@ -505,7 +543,7 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
   // block's text and strip a leading emoji, rather than the first fragment.
   $$('h2').forEach((h2) =&gt; {
     const label = h2.textContent.trim();
-    if (!label || seen.has(label) || GROUP_HEADERS.has(label)) return;
+    if (!label || seen.has(label) || GROUP_HEADERS.has(label) || /^Conversation history with /i.test(label)) return;
     const card = h2.closest('section') || (h2.parentElement &amp;&amp; h2.parentElement.parentElement);
     if (!card) return;
     const valueBlock = [...card.children].find((el) =&gt; !el.contains(h2) &amp;&amp; el.textContent.trim());
@@ -652,15 +690,27 @@ Album links are permanent, unlike the face-group links tried previously.
   const box = [...document.querySelectorAll('div')]
     .filter(d =&gt; d.scrollHeight &gt; d.clientHeight + 500 &amp;&amp; d.clientHeight &gt; 200)
     .sort((a,b) =&gt; b.scrollHeight - a.scrollHeight)[0] || document.scrollingElement;
+  // Small fixed steps, and TWO full sweeps (down, then back up) rather than
+  // one: verified live against a real library, a single downward pass
+  // missed an album ("Albina_Marbella_2023") completely — not just its
+  // cover, the whole tile — presumably virtualized out of the grid again
+  // before grab() caught it at that scroll position. A second sweep in the
+  // opposite direction gives every tile a second, differently-timed chance
+  // to be in the DOM when grab() runs; window.__dash accumulates across
+  // both, so anything either pass catches is kept.
+  const sweep = async (from, to, step) =&gt; {
+    for (let y = from; step &gt; 0 ? y &lt; to : y &gt; to; y += step) {
+      grab();
+      box.scrollTop = y;
+      await new Promise(r =&gt; setTimeout(r, 380));
+    }
+    grab();
+  };
   box.scrollTop = 0;
   await new Promise(r =&gt; setTimeout(r, 400));
-  // Small fixed steps: big jumps skip rows this grid has already recycled.
-  for (let y = 0; y &lt; box.scrollHeight; y += 220) {
-    grab();
-    box.scrollTop = y;
-    await new Promise(r =&gt; setTimeout(r, 320));
-  }
-  grab();
+  await sweep(0, box.scrollHeight, 160);
+  await new Promise(r =&gt; setTimeout(r, 300));
+  await sweep(box.scrollHeight, 0, -160);
   const out = {
     albums: [...window.__dash.albums.values()].filter(a =&gt; a.title),
     people: [...window.__dash.people],
