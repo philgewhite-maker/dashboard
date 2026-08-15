@@ -580,8 +580,29 @@ translation: String((data && data.translation) || '').trim(),
 };
 }
 
+// ---- Country lookup ----
+//
+// For a city, school or university name — often not in English, and
+// sometimes already transliterated out of Cyrillic — so the country isn't
+// obvious just from the text alone the way it would be for a well-known
+// English place name.
+const COUNTRY_MODEL = 'claude-haiku-4-5-20251001';
+const COUNTRY_MAX_TOKENS = 200;
+function countryPrompt(place) {
+return `What country is this place in: ${JSON.stringify(place)}? It may be a city, school or university name, possibly not in English or already transliterated out of another script.\n\n`
++ 'Reply with ONLY a JSON object, no other text, no markdown fences: {"country":"Italy"} — the country\'s common English name. If you genuinely can\'t tell, use {"country":""}.';
+}
+async function identifyCountry(place) {
+const { data } = await callAnthropic(
+[{ type: 'text', text: countryPrompt(place) }],
+COUNTRY_MAX_TOKENS, COUNTRY_MODEL, 'Country lookup',
+);
+return { country: String((data && data.country) || '').trim() };
+}
+
 export {
 MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot, quickScanScreenshot,
 callTextJson, DEFAULT_MODEL, summarizeUsage, currentMonthKey, compareFaces,
 extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShoppingItem, translateText,
+identifyCountry,
 };

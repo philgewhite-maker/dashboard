@@ -27,7 +27,7 @@ import { escapeHtml, uid, todayStr, hydratePhotos } from '../utils.js';
 import { nameKey, editDistance } from '../googlecontacts.js';
 import { storePhoto, fetchProxiedImage } from '../files.js';
 import { photoGet } from '../db.js';
-import { MissingKeyError, compareFaces, translateText } from '../ai.js';
+import { MissingKeyError, compareFaces, translateText, identifyCountry } from '../ai.js';
 import { findPhoneNumbers, findHandles, formatHandle } from '../contactscan.js';
 import { STAGE_RANK, CONN_STAGES } from './connections.js';
 
@@ -181,6 +181,7 @@ Interests: { target: 'interests', split: true },
 Orientation: { target: 'relationshipTags', split: false },
 'Relationship type': { target: 'relationshipTags', split: false },
 'Looking for': { target: 'relationshipTags', split: false },
+Nationality: { target: 'nationality', split: false },
 };
 
 let pending = null; // { name, age, fields, photos, chosenId, match, matchConfirmed, aiVerdict }
@@ -310,6 +311,18 @@ pending.translations[i] = await translateText(text);
 } catch (err) {
 console.error('Translation failed:', err);
 pending.translations[i] = { error: err instanceof MissingKeyError ? 'Add an Anthropic API key in Settings first.' : (err.message || String(err)) };
+}
+render();
+}
+
+async function runCountryFor(i) {
+pending.countries[i] = 'loading';
+render();
+try {
+pending.countries[i] = await identifyCountry(pending.fields[i].value);
+} catch (err) {
+console.error('Country lookup failed:', err);
+pending.countries[i] = { error: err instanceof MissingKeyError ? 'Add an Anthropic API key in Settings first.' : (err.message || String(err)) };
 }
 render();
 }
@@ -478,6 +491,36 @@ return `<div class="tinder-translate-result">→ <strong>${escapeHtml(t.language
 + `</div>`;
 }
 
+// City and School are the two labels this app ever puts a bare place name
+// in — a job title or prompt answer isn't a place, so a country lookup
+// there wouldn't mean anything.
+const COUNTRY_LOOKUP_LABELS = new Set(['City', 'School']);
+
+function countryButtonHtml(f, i) {
+if (!COUNTRY_LOOKUP_LABELS.has(f.label)) return '';
+return `<button type="button" class="sync-btn tinder-inline-btn" data-tinder-country="${i}">Country</button>`;
+}
+
+function countryResultHtml(f, i) {
+const c = pending.countries[i];
+if (!c) return '';
+if (c === 'loading') return `<div class="tinder-translate-result">Identifying country…</div>`;
+if (c.error) return `<div class="tinder-translate-result tinder-translate-error">Country lookup failed: ${escapeHtml(c.error)}</div>`;
+if (!c.country) return `<div class="tinder-translate-result tinder-translate-error">Couldn't identify a country.</div>`;
+const conn = data.connections.find((x) => x.id === pending.chosenId);
+// City's real value lives in the separate #tinder-city input
+// (pending.cityOverride), not this field's own f.value -- that's what
+// actually gets saved to conn.location, so appending there is what
+// makes the country stick for City specifically.
+const currentValue = f.label === 'City' ? pending.cityOverride : f.value;
+const alreadyAppended = currentValue.toLowerCase().includes(c.country.toLowerCase());
+const alreadyNational = !!(conn && (conn.nationality || []).some((n) => n.toLowerCase() === c.country.toLowerCase()));
+return `<div class="tinder-translate-result">→ <strong>${escapeHtml(c.country)}</strong>`
++ (alreadyAppended ? '' : ` <button type="button" class="sync-btn tinder-inline-btn" data-tinder-country-append="${i}">+ append</button>`)
++ (alreadyNational ? '' : ` <button type="button" class="sync-btn tinder-inline-btn" data-tinder-country-nationality="${i}">+ add nationality</button>`)
++ `</div>`;
+}
+
 function fieldPreviewHtml(f, i) {
 const conn = data.connections.find((c) => c.id === pending.chosenId);
 const target = FIELD_MAP[f.label];
@@ -505,9 +548,11 @@ return `<div class="tinder-field-row${dim ? ' tinder-field-blocked' : ''}">
 <span><strong>${escapeHtml(f.label)}:</strong>${isChat ? '' : ` ${highlightCities(f.value)}`} <span class="tinder-field-note">(${escapeHtml(note)})</span></span>
 </label>
 ${translateButtonHtml(f, i)}
+${countryButtonHtml(f, i)}
 </div>
 ${isChat ? `<div class="tinder-chat-block">${chatHistoryHtml(f.value)}</div>` : ''}
-${translationResultHtml(i)}`;
+${translationResultHtml(i)}
+${countryResultHtml(f, i)}`;
 }
 
 // Same checkbox-with-a-preview shape as fieldPreviewHtml, for whatever the
@@ -668,6 +713,26 @@ btn.addEventListener('click', () => runTranslateFor(parseInt(btn.dataset.tinderT
 el.querySelectorAll('[data-tinder-translate-add]').forEach((btn) => {
 btn.addEventListener('click', () => {
 pending.fields.push({ label: 'Languages', value: btn.dataset.tinderTranslateAdd, apply: true });
+render();
+});
+});
+el.querySelectorAll('[data-tinder-country]').forEach((btn) => {
+btn.addEventListener('click', () => runCountryFor(parseInt(btn.dataset.tinderCountry, 10)));
+});
+el.querySelectorAll('[data-tinder-country-append]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const i = parseInt(btn.dataset.tinderCountryAppend, 10);
+const f = pending.fields[i];
+const country = pending.countries[i].country;
+if (f.label === 'City') pending.cityOverride = `${pending.cityOverride}, ${country}`;
+else f.value = `${f.value}, ${country}`;
+render();
+});
+});
+el.querySelectorAll('[data-tinder-country-nationality]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const i = parseInt(btn.dataset.tinderCountryNationality, 10);
+pending.fields.push({ label: 'Nationality', value: pending.countries[i].country, apply: true });
 render();
 });
 });
@@ -915,6 +980,7 @@ candidates: [],
 showMoreInfo: false,
 aiVerdicts: {},
 translations: {},
+countries: {},
 // City often only ever comes up in the first few chat messages, not any
 // structured Tinder field, so this is a starting point to confirm or
 // correct rather than something trusted outright — pre-filled from a
