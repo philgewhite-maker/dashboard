@@ -733,7 +733,9 @@ else expandedConnections.delete(el.dataset.connDetails);
 function openLightbox(url) {
 const box = document.createElement('div');
 box.className = 'lightbox';
-box.innerHTML = `<img src="${url}" alt="">`;
+// A plain <img> is natively draggable; same fix as hydratePhotos()'s
+// gallery thumbnails, but this <img> is built directly and was missed.
+box.innerHTML = `<img src="${url}" alt="" draggable="false">`;
 box.addEventListener('click', () => box.remove());
 document.body.appendChild(box);
 }

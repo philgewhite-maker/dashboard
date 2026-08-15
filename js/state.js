@@ -372,6 +372,7 @@ if (!Array.isArray(c.socialHandles)) c.socialHandles = [];
 if (typeof c.distance !== 'string') c.distance = '';
 if (typeof c.matchedOn !== 'string') c.matchedOn = '';
 if (typeof c.tinderMatchId !== 'string') c.tinderMatchId = '';
+if (!Array.isArray(c.tinderPhotoKeys)) c.tinderPhotoKeys = [];
 if (typeof c.chatLog !== 'string') c.chatLog = '';
 if (typeof c.job !== 'string') c.job = '';
 if (typeof c.height !== 'string') c.height = '';

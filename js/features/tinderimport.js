@@ -66,6 +66,20 @@ target = 'Chatting in app';
 return target && (STAGE_RANK[target] || 0) > (STAGE_RANK[current] || 0) ? target : current;
 }
 
+// Identifies a Tinder photo by its stable folder id + uuid, not the full
+// URL — the same photo's URL changes between scrapes (size prefix, signed
+// token), but this pair doesn't. Same logic as the console snippet's own
+// photoKey(), used there to dedupe within one scrape; used here to dedupe
+// across import passes, since storePhoto() always mints a fresh id even
+// for byte-identical content, so an id-based check can never catch a
+// re-imported photo.
+const PHOTO_UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+function photoKey(url) {
+const folder = url.match(/gotinder\.com\/([a-zA-Z0-9]+)\//);
+const uuid = url.match(PHOTO_UUID_RE);
+return folder && uuid ? `${folder[1]}/${uuid[0]}` : url;
+}
+
 // Prefers the proxy (works regardless of Tinder's CORS inconsistency) but
 // falls back to a direct fetch if sync isn't configured — still succeeds
 // for whichever photos happen to get the CORS header, rather than failing
@@ -132,7 +146,7 @@ return matchCandidates(name, 1)[0] || null;
 function createConnectionFor(name) {
 const conn = {
 id: uid(), name, profileName: '', app: 'Tinder', priority: 3, stage: 'Matched', lastContact: todayStr(), createdAt: new Date().toISOString(),
-photoId: null, photoIds: [], photoAlbums: [], age: '', dob: '', ageAsOf: '', location: '', address: '',
+photoId: null, photoIds: [], tinderPhotoKeys: [], photoAlbums: [], age: '', dob: '', ageAsOf: '', location: '', address: '',
 kids: '', job: '', height: '', education: '', phone: '', email: '',
 contactStatus: '', contactResourceName: '', contactEtag: '', contactConflicts: [],
 likes: '', notes: '', languages: [], nationality: [],
@@ -566,16 +580,25 @@ const existingLower = conn.socialHandles.map((s) => s.toLowerCase());
 if (!existingLower.includes(label.toLowerCase())) conn.socialHandles.push(label);
 });
 
+if (!Array.isArray(conn.tinderPhotoKeys)) conn.tinderPhotoKeys = [];
 const toFetch = pending.photos.filter((ph) => ph.apply);
 let failed = 0;
 let firstError = '';
+let alreadyHad = 0;
 for (let i = 0; i < toFetch.length; i++) {
 const ph = toFetch[i];
+const key = photoKey(ph.url);
+// storePhoto() always mints a fresh id, even for content already saved
+// on a previous pass, so the id-based check just below this can never
+// catch a re-import — this key-based check is what actually prevents
+// the duplicate.
+if (conn.tinderPhotoKeys.includes(key)) { alreadyHad++; ph.apply = false; continue; }
 if (status) status.textContent = `Saving… photo ${i + 1} of ${toFetch.length}`;
 try {
 const blob = await fetchTinderPhoto(ph.url);
 const id = await storePhoto(blob);
 if (!conn.photoIds.includes(id)) conn.photoIds.push(id);
+conn.tinderPhotoKeys.push(key);
 if (!conn.photoId) conn.photoId = id;
 ph.apply = false; // saved — leave it out of a retry so it can't be re-added as a duplicate
 } catch (err) {
@@ -610,11 +633,12 @@ Promise.all([import('./connections.js'), import('./overview.js')])
 // written to the status span directly — render() rebuilds this card's
 // whole innerHTML, including a brand new (empty) status span, so a
 // direct write here would already be gone by the time anyone saw it.
+const dupeNote = alreadyHad ? ` (${alreadyHad} already had.)` : '';
 if (failed) {
-pending.saveMessage = `Saved fields to ${conn.name}. ${failed} of ${toFetch.length} photo${toFetch.length === 1 ? '' : 's'} failed: ${firstError} — click Save again to retry.`;
+pending.saveMessage = `Saved fields to ${conn.name}. ${failed} of ${toFetch.length} photo${toFetch.length === 1 ? '' : 's'} failed: ${firstError} — click Save again to retry.${dupeNote}`;
 render();
 } else {
-advanceQueue(`Saved to ${conn.name}.`);
+advanceQueue(`Saved to ${conn.name}.${dupeNote}`);
 }
 }
 
