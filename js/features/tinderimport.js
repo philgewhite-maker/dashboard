@@ -29,7 +29,7 @@ import { storePhoto, fetchProxiedImage } from '../files.js';
 import { photoGet } from '../db.js';
 import { MissingKeyError, compareFaces } from '../ai.js';
 import { findPhoneNumbers, findHandles, formatHandle } from '../contactscan.js';
-import { STAGE_RANK } from './connections.js';
+import { STAGE_RANK, CONN_STAGES } from './connections.js';
 
 // True only if the extracted chat has a message from BOTH sides, not just
 // the user reaching out with no reply — a one-sided "You: hey" isn't
@@ -43,6 +43,27 @@ if (!m) return;
 if (m[1].trim() === 'You') youSaid = true; else theySaid = true;
 });
 return youSaid && theySaid;
+}
+
+// Real conversation means the stage is further along than a bare match,
+// and a number given means further still — a default for the editable
+// Stage field in review, not applied silently: rank-compared against
+// whichever connection is chosen so it only ever suggests a step forward
+// (someone already at "Planning to meet" isn't suggested back down to
+// "Chatting in app" just because this import also found chat history),
+// but the user sees and can override it before it's ever saved.
+function suggestedStage(conn) {
+const current = (conn && conn.stage) || 'Matched';
+const chatField = pending.fields.find((f) => f.apply && f.label === 'Chat history' && f.value.trim());
+const gaveNumber = pending.foundPhones.some((p) => p.apply);
+let target = null;
+if (gaveNumber) {
+const allText = pending.fields.map((f) => f.value).join('\n');
+target = /\btelegram\b/i.test(allText) ? 'Moved to Telegram' : 'Moved to WhatsApp';
+} else if (chatField && hasMutualMessages(chatField.value)) {
+target = 'Chatting in app';
+}
+return target && (STAGE_RANK[target] || 0) > (STAGE_RANK[current] || 0) ? target : current;
 }
 
 // Prefers the proxy (works regardless of Tinder's CORS inconsistency) but
@@ -323,6 +344,10 @@ const note = current ? `already set to ${current} — will be kept` : `will set 
 return `<div class="tinder-field-row"><strong>Age:</strong> ${escapeHtml(pending.age)} <span class="tinder-field-note">(${escapeHtml(note)})</span></div>`;
 }
 
+function ratingStarsHtml(current) {
+return [1, 2, 3, 4, 5].map((n) => `<svg class="star tinder-rating-star${n <= current ? ' filled' : ''}" data-tinder-star="${n}" viewBox="0 0 20 20" fill="currentColor"><path d="M10 1l2.6 5.9 6.4.6-4.8 4.3 1.4 6.2L10 14.9 4.4 18l1.4-6.2L1 7.5l6.4-.6z"/></svg>`).join('');
+}
+
 function render() {
 const el = document.getElementById('tinder-review');
 if (!el) return;
@@ -349,10 +374,17 @@ ${queue.length ? `<div class="settings-note" style="margin:0 0 8px;">${queue.len
 <div class="sync-row" style="margin:6px 0 8px;">
 <button class="add-btn" type="button" id="tinder-save"${canSave ? '' : ' disabled'}>${escapeHtml(saveLabel)}</button>
 <button class="sync-btn" type="button" id="tinder-skip">Skip</button>
+<button class="sync-btn" type="button" id="tinder-newconn">+ New</button>
 <button class="sync-btn" type="button" id="tinder-more-info-open">More info</button>
 </div>
 ${saveBlockedNote ? `<div class="tinder-field-note" style="margin:-4px 0 8px;">${escapeHtml(saveBlockedNote)}</div>` : ''}
 <span class="sync-status" id="tinder-save-status">${escapeHtml(p.saveMessage || '')}</span>
+
+<div class="tinder-fields" style="margin:8px 0;">
+<label class="tinder-field-row">Stage <select id="tinder-stage">${CONN_STAGES.map((s) => `<option value="${escapeHtml(s)}"${s === p.stageOverride ? ' selected' : ''}>${escapeHtml(s)}</option>`).join('')}</select></label>
+<label class="tinder-field-row">City <input type="text" id="tinder-city" autocomplete="off" value="${escapeHtml(p.cityOverride)}" placeholder="Often only comes up in chat"></label>
+<label class="tinder-field-row">Rating <span id="tinder-rating">${ratingStarsHtml(p.ratingOverride)}</span></label>
+</div>
 
 ${agePreviewHtml()}
 ${p.fields.length ? `<div class="tinder-fields">${p.fields.map((f, i) => fieldPreviewHtml(f, i)).join('')}</div>` : ''}
@@ -369,11 +401,20 @@ ${moreInfoHtml()}`;
 hydratePhotos(el);
 
 const pick = document.getElementById('tinder-pick');
-if (pick) pick.addEventListener('change', () => { pending.chosenId = pick.value; pending.matchConfirmed = false; render(); });
+if (pick) pick.addEventListener('change', () => { pending.chosenId = pick.value; pending.matchConfirmed = false; refreshOverrides(); render(); });
 const skipBtn = document.getElementById('tinder-skip');
 if (skipBtn) skipBtn.addEventListener('click', () => {
 const skippedName = pending.name || '(unnamed)';
 advanceQueue(`Skipped ${skippedName}.`);
+});
+const newBtn = document.getElementById('tinder-newconn');
+if (newBtn) newBtn.addEventListener('click', () => {
+const conn = createConnectionFor(pending.name || 'Unnamed');
+conn.createdJustNow = true; // not a persisted field — just marks this session's save as safe without a match confirmation
+pending.chosenId = conn.id;
+pending.matchConfirmed = true;
+refreshOverrides();
+render();
 });
 const moreInfoOpenBtn = document.getElementById('tinder-more-info-open');
 if (moreInfoOpenBtn) moreInfoOpenBtn.addEventListener('click', () => { pending.showMoreInfo = true; render(); });
@@ -382,10 +423,11 @@ if (moreInfoCloseBtn) moreInfoCloseBtn.addEventListener('click', () => { pending
 const moreInfoNewBtn = document.getElementById('tinder-more-info-newconn');
 if (moreInfoNewBtn) moreInfoNewBtn.addEventListener('click', () => {
 const conn = createConnectionFor(pending.name || 'Unnamed');
-conn.createdJustNow = true; // not a persisted field — just marks this session's save as safe without a match confirmation
+conn.createdJustNow = true;
 pending.chosenId = conn.id;
 pending.matchConfirmed = true;
 pending.showMoreInfo = false;
+refreshOverrides();
 render();
 });
 el.querySelectorAll('[data-tinder-choose]').forEach((btn) => {
@@ -393,11 +435,23 @@ btn.addEventListener('click', () => {
 pending.chosenId = btn.dataset.tinderChoose;
 pending.matchConfirmed = true;
 pending.showMoreInfo = false;
+refreshOverrides();
 render();
 });
 });
 el.querySelectorAll('[data-tinder-ai-compare]').forEach((btn) => {
 btn.addEventListener('click', () => runAiCompareFor(btn.dataset.tinderAiCompare));
+});
+const stageSel = document.getElementById('tinder-stage');
+if (stageSel) stageSel.addEventListener('change', () => { pending.stageOverride = stageSel.value; });
+const cityInput = document.getElementById('tinder-city');
+if (cityInput) cityInput.addEventListener('input', () => { pending.cityOverride = cityInput.value; });
+el.querySelectorAll('[data-tinder-star]').forEach((star) => {
+star.addEventListener('click', () => {
+const n = parseInt(star.dataset.tinderStar, 10);
+pending.ratingOverride = pending.ratingOverride === n ? 0 : n; // click the same star again to clear
+render();
+});
 });
 el.querySelectorAll('[data-tinder-field]').forEach((cb) => {
 cb.addEventListener('change', () => { pending.fields[parseInt(cb.dataset.tinderField, 10)].apply = cb.checked; });
@@ -478,26 +532,14 @@ failed++;
 }
 }
 
-// Real conversation means the stage is further along than a bare match,
-// and a number given means further still — reflect that automatically
-// rather than leaving every import stuck at "Matched". Rank-compared, not
-// assigned outright, so this only ever moves forward: someone already at
-// "Planning to meet" doesn't get knocked back to "Chatting in app" just
-// because this import also found chat history, and a Faded connection
-// who resumes chatting DOES get pulled back in, which is correct — new
-// mutual messages are real information about them, not noise.
-const chatField = pending.fields.find((f) => f.apply && f.label === 'Chat history' && f.value.trim());
-const gaveNumber = pending.foundPhones.some((p) => p.apply);
-let targetStage = null;
-if (gaveNumber) {
-const allText = pending.fields.map((f) => f.value).join('\n');
-targetStage = /\btelegram\b/i.test(allText) ? 'Moved to Telegram' : 'Moved to WhatsApp';
-} else if (chatField && hasMutualMessages(chatField.value)) {
-targetStage = 'Chatting in app';
-}
-if (targetStage && (STAGE_RANK[targetStage] || 0) > (STAGE_RANK[conn.stage] || 0)) {
-conn.stage = targetStage;
-}
+// Stage, City and overall rating are edited directly in the review card
+// (a suggested stage pre-fills the dropdown, but nothing here is silent —
+// whatever's showing when Save is clicked is what's applied), same as
+// editing them on the Connections tab itself: a direct set, not a
+// fill-if-empty merge.
+if (pending.stageOverride) conn.stage = pending.stageOverride;
+if (pending.cityOverride.trim()) conn.location = pending.cityOverride.trim();
+if (pending.ratingOverride) conn.priority = pending.ratingOverride;
 
 queueSave();
 Promise.all([import('./connections.js'), import('./overview.js')])
@@ -588,6 +630,13 @@ matchConfirmed: false,
 candidates: [],
 showMoreInfo: false,
 aiVerdicts: {},
+// City often only ever comes up in the first few chat messages, not any
+// structured Tinder field, so this is a starting point to confirm or
+// correct rather than something trusted outright — pre-filled from a
+// "City" field if the profile had one, blank otherwise.
+cityOverride: fields.find((f) => f.label === 'City')?.value || '',
+stageOverride: 'Matched',
+ratingOverride: 0,
 };
 const candidates = matchCandidates(parsed.name, 6);
 parsed.candidates = candidates;
@@ -595,6 +644,18 @@ const match = candidates[0] || null;
 parsed.match = match;
 if (match && match.why === 'exact') { parsed.chosenId = match.conn.id; parsed.matchConfirmed = true; }
 pending = parsed;
+refreshOverrides();
+}
+
+// Re-suggests Stage and Rating for whichever connection is now chosen —
+// called on load and every time chosenId changes. City isn't touched
+// here: it comes from the extracted text, not from who's picked, and
+// re-deriving it on every pick would blow away anything the user just
+// typed.
+function refreshOverrides() {
+const conn = data.connections.find((c) => c.id === pending.chosenId);
+pending.stageOverride = suggestedStage(conn);
+pending.ratingOverride = conn ? (conn.priority || 0) : 0;
 }
 
 // Moves on to whatever's next in a batch (after a save or an explicit
