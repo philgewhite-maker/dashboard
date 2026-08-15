@@ -332,8 +332,9 @@ Not built: comparing retailer prices or adding to a basket in two clicks. That w
 <h2><span class="dot plum"></span>Import a Tinder profile</h2>
 </div>
 <div class="settings-note" style="margin:0 0 10px;">
-Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for&rdquo; etc. this person filled in, and their photos &mdash; straight from the page, not a screenshot. Open their profile on <a href="https://tinder.com/app/matches" target="_blank" rel="noopener">tinder.com</a>, run the snippet below in the console (F12 &rarr; Console), then paste the result here.
+Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for&rdquo; etc. this person filled in, and their photos &mdash; straight from the page, not a screenshot. Open their profile on <a href="https://tinder.com/app/matches" target="_blank" rel="noopener">tinder.com</a>, copy the snippet below, run it in the console (F12 &rarr; Console), then paste the result here.
 </div>
+<button class="sync-btn" type="button" id="tinder-copy-snippet">Copy snippet</button>
 <details style="margin:0 0 10px;">
 <summary style="cursor:pointer;color:var(--muted);font-size:13px;">Show the console snippet</summary>
 <pre id="tinder-snippet" style="white-space:pre-wrap;font-size:12px;background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:10px;margin:8px 0;">(async () => {
@@ -653,11 +654,11 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
     + `${name || '(no name found)'}, ${age || '?'}: ${fields.length} field${fields.length === 1 ? '' : 's'}, ${out.photos.length} photo${out.photos.length === 1 ? '' : 's'}.`);
   if (!copied) console.log(json);
 })();</pre>
-<button class="sync-btn" type="button" id="tinder-copy-snippet">Copy snippet</button>
 </details>
 <div class="settings-note" style="margin:10px 0;">
 <strong>Bulk mode:</strong> steps through your sidebar matches automatically instead of one profile at a time &mdash; up to 15 per run, real randomised delays (10&ndash;60s) between each, remembered on Tinder's own site so the next run (later today or tomorrow) only picks up whoever's left. Fine to run a few times a day at that pace. Paste its output into the same box below; it's told apart from a single-profile paste automatically. This runs unattended across many real profiles in a row &mdash; if you see anything that looks like a rate limit or a verification prompt, stop and give it a break.
 </div>
+<button class="sync-btn" type="button" id="tinder-bulk-copy-snippet">Copy bulk-import snippet</button>
 <details style="margin:0 0 10px;">
 <summary style="cursor:pointer;color:var(--muted);font-size:13px;">Show the bulk-import console snippet</summary>
 <pre id="tinder-bulk-snippet" style="white-space:pre-wrap;font-size:12px;background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:10px;margin:8px 0;">(async () => {
@@ -1010,7 +1011,6 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
     }
   }
 })();</pre>
-<button class="sync-btn" type="button" id="tinder-bulk-copy-snippet">Copy bulk-import snippet</button>
 </details>
 <textarea id="tinder-input" rows="4" style="width:100%;font-family:monospace;font-size:12px;" placeholder="Paste the copied JSON here — one profile or a batch, either works"></textarea>
 <div class="sync-row" style="margin-top:8px;">
