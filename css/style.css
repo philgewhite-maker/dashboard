@@ -48,6 +48,14 @@ font-size:34px;
 margin:0;
 letter-spacing:-0.01em;
 }
+.build-stamp{
+font-family:'IBM Plex Mono',monospace;
+font-size:12px;
+font-weight:400;
+color:var(--muted);
+vertical-align:middle;
+margin-left:8px;
+}
 header.top .date{
 font-family:'IBM Plex Mono',monospace;
 color:var(--muted);
