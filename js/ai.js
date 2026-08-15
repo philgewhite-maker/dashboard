@@ -23,6 +23,21 @@ const PRICES_PER_MTOK = {
 'claude-haiku-4-5-20251001': { input: 1, output: 5 },
 };
 
+// Claude's vision API only accepts an EXACT match against these four MIME
+// strings — a browser's own Blob/File.type can carry extra parameters
+// (e.g. "image/webp;charset=binary") or a non-standard variant
+// ("image/jpg") that look right but fail the API's strict check with a
+// 400. Confirmed live: a Tinder-fetched webp failed AI photo comparison
+// with exactly that error. Strips parameters and normalises known
+// variants rather than trusting a blob's raw type string directly.
+const ANTHROPIC_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
+function normalizeImageMediaType(type) {
+const base = String(type || '').split(';')[0].trim().toLowerCase();
+if (ANTHROPIC_IMAGE_TYPES.has(base)) return base;
+if (base === 'image/jpg') return 'image/jpeg';
+return 'image/jpeg';
+}
+
 function currentMonthKey() { return new Date().toISOString().slice(0, 7); }
 
 // Usage is bucketed by month, then by purpose+model, so Settings can show
@@ -190,7 +205,7 @@ throw parseErr;
 
 async function callVision(base64, mediaType, promptText, maxTokens) {
 return callAnthropic([
-{ type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
+{ type: 'image', source: { type: 'base64', media_type: normalizeImageMediaType(mediaType), data: base64 } },
 { type: 'text', text: promptText },
 ], maxTokens, null, 'Photo import');
 }
@@ -451,7 +466,7 @@ async function extractRecipeFromImage(file) {
 const readable = await ensureBrowserReadableImage(file);
 const base64 = await fileToBase64(readable);
 const { data: raw } = await callAnthropic([
-{ type: 'image', source: { type: 'base64', media_type: readable.type || 'image/jpeg', data: base64 } },
+{ type: 'image', source: { type: 'base64', media_type: normalizeImageMediaType(readable.type), data: base64 } },
 { type: 'text', text: recipePrompt() },
 ], RECIPE_MAX_TOKENS, null, 'Recipe import');
 return normaliseRecipeExtract(raw);
@@ -503,8 +518,8 @@ async function compareFaces(blobA, blobB) {
 const [base64A, base64B] = await Promise.all([fileToBase64(blobA), fileToBase64(blobB)]);
 const prompt = 'Image 1 is a photo already saved for a tracked person. Image 2 is a photo from a Google Photos album being considered for the same person. Do these two images show the same person? Reply with ONLY a JSON object, no other text: {"same": true, "reason": "one short sentence"} — using true, false, or the string "unsure" for "same". Say "unsure" rather than guessing if the photos differ too much in angle, lighting or quality to tell, or if either image doesn\'t clearly show a face.';
 const { data } = await callAnthropic([
-{ type: 'image', source: { type: 'base64', media_type: blobA.type || 'image/jpeg', data: base64A } },
-{ type: 'image', source: { type: 'base64', media_type: blobB.type || 'image/jpeg', data: base64B } },
+{ type: 'image', source: { type: 'base64', media_type: normalizeImageMediaType(blobA.type), data: base64A } },
+{ type: 'image', source: { type: 'base64', media_type: normalizeImageMediaType(blobB.type), data: base64B } },
 { type: 'text', text: prompt },
 ], FACE_COMPARE_MAX_TOKENS, FACE_COMPARE_MODEL, 'Face comparison');
 return {
