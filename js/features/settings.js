@@ -43,6 +43,15 @@ ${rows.map((r) => `<tr>
 }
 
 async function initSettings() {
+const myCityInput = document.getElementById('my-city-input');
+if (myCityInput) {
+myCityInput.value = data.myCity || '';
+let myCityTimer = null;
+myCityInput.addEventListener('input', () => {
+clearTimeout(myCityTimer);
+myCityTimer = setTimeout(() => { data.myCity = myCityInput.value.trim(); queueSave(); }, 400);
+});
+}
 const keyInput = document.getElementById('anthropic-key-input');
 const settings = await getLocalSettings();
 keyInput.value = settings.anthropicApiKey || '';

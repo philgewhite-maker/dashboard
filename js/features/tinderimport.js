@@ -22,7 +22,7 @@
 // importer), and the chosen connection's photo stays visible for the whole
 // review regardless of how it got picked, so a wrong dropdown pick is just
 // as visible as a wrong auto-match was invisible before.
-import { data, queueSave, currentAge, computeFlags } from '../state.js';
+import { data, queueSave, currentAge, computeFlags, distanceMiles } from '../state.js';
 import { escapeHtml, uid, todayStr, hydratePhotos } from '../utils.js';
 import { nameKey, editDistance } from '../googlecontacts.js';
 import { storePhoto, fetchProxiedImage } from '../files.js';
@@ -597,6 +597,28 @@ return `<div class="tinder-translate-result">→ <strong>${escapeHtml(c.country)
 + `</div>`;
 }
 
+// A match within a short distance of you is probably in the same city --
+// not certain (tourists, edge-of-city addresses), so this is offered as
+// an amber, addable suggestion next to Distance rather than silently
+// filling City. Deliberately independent of any Distance flag rule's own
+// greenMax -- "is this close enough to be worth pursuing" and "is this
+// probably my own city" are different questions that happen to share a
+// similar number in the common case, not the same setting.
+const PROPOSED_CITY_MAX_MILES = 10;
+function proposedCityHtml() {
+const myCity = String(data.myCity || '').trim();
+if (!myCity) return '';
+const distField = pending.fields.find((f) => f.label === 'Distance');
+if (!distField) return '';
+const miles = distanceMiles(distField.value);
+if (miles === null || miles > PROPOSED_CITY_MAX_MILES) return '';
+if (pending.cityOverride.trim().toLowerCase() === myCity.toLowerCase()) return '';
+return `<div class="tinder-field-note" style="margin:2px 0 8px;">`
++ `<span class="tinder-flag-hit tinder-flag-hit-amber">${escapeHtml(myCity)}</span> — within ${miles}mi of you, probably the same city (tourist or a longer commute could still be wrong) `
++ `<button type="button" class="sync-btn tinder-inline-btn" data-tinder-propose-city="1">+ set as City</button>`
++ `</div>`;
+}
+
 function fieldPreviewHtml(f, i) {
 const conn = data.connections.find((c) => c.id === pending.chosenId);
 const target = FIELD_MAP[f.label];
@@ -627,6 +649,7 @@ ${translateButtonHtml(f, i)}
 ${countryButtonHtml(f, i)}
 ${cyrillicAddButtonHtml(f.value)}
 </div>
+${f.label === 'Distance' ? proposedCityHtml() : ''}
 ${isChat ? `<div class="tinder-chat-block">${chatHistoryHtml(f.value)}</div>` : ''}
 ${translationResultHtml(i)}
 ${countryResultHtml(f, i)}`;
@@ -853,6 +876,11 @@ const i = parseInt(btn.dataset.tinderCountryNationality, 10);
 pending.fields.push({ label: 'Nationality', value: pending.countries[i].country, apply: true });
 render();
 });
+});
+const proposeCityBtn = el.querySelector('[data-tinder-propose-city]');
+if (proposeCityBtn) proposeCityBtn.addEventListener('click', () => {
+pending.cityOverride = String(data.myCity || '').trim();
+render();
 });
 const stageSel = document.getElementById('tinder-stage');
 if (stageSel) stageSel.addEventListener('change', () => { pending.stageOverride = stageSel.value; });

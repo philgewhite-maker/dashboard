@@ -235,6 +235,7 @@ recipes: [], recipeRatingCategories: DEFAULT_RECIPE_RATING_CATEGORIES.map((c) =>
 claudeAnswers: {},
 flagRules: DEFAULT_FLAG_RULES.map((r) => ({ ...r })),
 flagRulesSeeded: DEFAULT_FLAG_RULES.map((r) => r.id),
+myCity: '',
 prefs: { ...DEFAULT_PREFS } };
 }
 
@@ -476,6 +477,7 @@ data.flagRules.push({ ...r });
 data.flagRulesSeeded.push(r.id);
 });
 }
+if (typeof data.myCity !== 'string') data.myCity = '';
 if (!Array.isArray(data.ratingCategories) || data.ratingCategories.length === 0) {
 data.ratingCategories = DEFAULT_RATING_CATEGORIES.map((c) => ({ ...c }));
 } else {
@@ -873,7 +875,7 @@ MAIL_SEARCH_KINDS, mailSearchLabel,
 TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask,
 CONTACT_STATUS_LABELS, CONTACT_MATCH_MIN_STAGE,
 DEFAULT_RATING_CATEGORIES, slugifyField, DEFAULT_RECIPE_RATING_CATEGORIES,
-FLAG_FIELD_DEFS, DEFAULT_FLAG_RULES, computeFlags, suggestedAction, ACTIONS,
+FLAG_FIELD_DEFS, DEFAULT_FLAG_RULES, computeFlags, suggestedAction, ACTIONS, distanceMiles,
 };
 
 // `data` above is exported by binding, but ES module live-bindings only

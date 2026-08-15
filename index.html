@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v38</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v39</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -1404,6 +1404,14 @@ The detailed star ratings shown on every connection. Removing one clears every r
 One rule per field &mdash; a numeric threshold (Distance, Age) or a comma-separated list of values for each colour (everything else). A connection's dot shows the worst colour among every rule that matched. Seeded with a starting set based on values actually mentioned so far &mdash; edit or delete freely.
 </div>
 <div id="flag-rules-list"></div>
+</div>
+
+<div class="settings-block">
+<h3>My current city</h3>
+<div class="settings-note" style="margin:0 0 8px;">
+Used on the Tinder import form: a match within a short distance of you is probably in this city too, so it's offered as an addable suggestion next to Distance rather than guessed at silently.
+</div>
+<input type="text" autocomplete="off" id="my-city-input" placeholder="e.g. London">
 </div>
 
 <div class="settings-block">
