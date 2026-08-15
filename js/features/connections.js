@@ -1,4 +1,5 @@
-import { data, queueSave, reachOutThreshold, isDormantStage, getLocalSettings, TAG_FIELDS, CONTACT_STATUS_LABELS, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness, slugifyField, FLAG_FIELD_DEFS, computeFlags, suggestedAction } from '../state.js';
+import { data, queueSave, reachOutThreshold, isDormantStage, getLocalSettings, TAG_FIELDS, CONTACT_STATUS_LABELS, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness, slugifyField, FLAG_FIELD_DEFS, computeFlags, suggestedAction, suggestedQuestions } from '../state.js';
+import { captureTask, revealTask } from './tasks.js';
 import { photoDelete, photoUrl } from '../db.js';
 import { storePhoto } from '../files.js';
 import {
@@ -346,10 +347,51 @@ secondary.innerHTML = `<option value="none"${connectionSortSecondary === 'none' 
 + order.map((key) => `<option value="${key}"${key === connectionSortSecondary ? ' selected' : ''}>Then by: ${escapeHtml(fields[key].label)}</option>`).join('');
 }
 
+function needsAttentionIds() {
+return data.connections.filter((c) => suggestedQuestions(c).length > 0).map((c) => c.id);
+}
+
+// Matched on a fixed synthetic source (not per-connection — this is one
+// standing "go review the list" task, not a task per person), the same
+// stable-source pattern the Mail and Google Tasks capture buttons use.
+// bucket !== 'done' means marking it Done makes the button offer a fresh
+// capture next time the list isn't empty — that's the "recurring" part.
+const ATTENTION_TASK_SOURCE = { kind: 'needs-attention', url: 'dating-needs-attention' };
+function existingAttentionTask() {
+return data.tasks.find((t) => t.source && t.source.kind === ATTENTION_TASK_SOURCE.kind && t.source.url === ATTENTION_TASK_SOURCE.url && t.bucket !== 'done');
+}
+
 function renderConnections() {
 renderSortOptions();
 const list = document.getElementById('connections-list');
 document.getElementById('connections-count').textContent = data.connections.length + (data.connections.length === 1 ? ' connection' : ' connections');
+const attnBtn = document.getElementById('conn-needs-attention-btn');
+const attnIds = needsAttentionIds();
+if (attnBtn) {
+attnBtn.textContent = `Needs attention (${attnIds.length})`;
+attnBtn.classList.toggle('active', idFilter && idFilter.label === 'Needs attention');
+}
+const taskBtn = document.getElementById('conn-attention-task-btn');
+if (taskBtn) {
+const existing = existingAttentionTask();
+if (existing) {
+taskBtn.hidden = false;
+taskBtn.textContent = '✓ task';
+taskBtn.title = 'Already on your task list — go to it';
+taskBtn.classList.add('done');
+taskBtn.dataset.gotoTask = existing.id;
+delete taskBtn.dataset.captureAttentionTask;
+} else if (attnIds.length > 0) {
+taskBtn.hidden = false;
+taskBtn.textContent = '+ task';
+taskBtn.title = 'Add a task to work through this list';
+taskBtn.classList.remove('done');
+taskBtn.dataset.captureAttentionTask = '1';
+delete taskBtn.dataset.gotoTask;
+} else {
+taskBtn.hidden = true;
+}
+}
 if (data.connections.length === 0) {
 list.innerHTML = '<div class="empty">No matches logged yet. Add one below.</div>';
 refreshPhotoTargets();
@@ -437,6 +479,7 @@ const stars = [1, 2, 3, 4, 5].map((n) => `<svg class="star priority-star ${n <= 
 const nameMeta = [displayAge(c), c.location].map((s) => String(s || '').trim()).filter(Boolean).join(' · ');
 const flags = computeFlags(c, data.flagRules);
 const action = suggestedAction(c, data.flagRules);
+const questions = suggestedQuestions(c);
 const flagDotHtml = flags.worst ? `<span class="dot ${flags.worst}" title="${escapeHtml(flags.hits.map((h) => `${h.label}: ${h.color}`).join(', '))}"></span> ` : '';
 return `<div class="match-card" data-conn-row="${c.id}">
 <div class="match-row">
@@ -461,6 +504,7 @@ ${action ? `<span class="suggested-action" title="Suggested next step, recompute
 </div>
 </div>
 ${flags.hits.length ? `<div class="flag-breakdown">${flags.hits.map((h) => `<span class="dot ${h.color}"></span>${escapeHtml(h.label)}`).join(' &nbsp; ')}</div>` : ''}
+${questions.length ? `<ul class="suggested-questions" title="Deterministic prompts, recomputed fresh each time">${questions.map((q) => `<li>${escapeHtml(q)}</li>`).join('')}</ul>` : ''}
 ${contactPickerHtml(c.id)}
 <details class="match-details" data-conn-details="${c.id}" ${expandedConnections.has(c.id) ? 'open' : ''}>
 <summary>Details</summary>
@@ -903,6 +947,28 @@ queueSave();
 setTimeout(() => scrollAndFlash(`[data-conn-row="${newId}"]`), 50);
 });
 
+document.getElementById('conn-needs-attention-btn').addEventListener('click', () => {
+if (idFilter && idFilter.label === 'Needs attention') { clearFilters(); return; }
+filterByIds(needsAttentionIds(), 'Needs attention');
+});
+document.getElementById('conn-attention-task-btn').addEventListener('click', async (e) => {
+if (e.target.dataset.gotoTask) {
+const { switchTab } = await import('../tabs.js');
+switchTab('tasks');
+revealTask(e.target.dataset.gotoTask);
+return;
+}
+if (e.target.dataset.captureAttentionTask) {
+const n = needsAttentionIds().length;
+captureTask({
+title: `Ask ${n} connection${n === 1 ? '' : 's'} the outstanding questions`,
+notes: 'Open the "Needs attention" filter on the Dating tab and work through the list — each card shows what to ask or check.',
+source: ATTENTION_TASK_SOURCE,
+link: '#dating',
+});
+renderConnections();
+}
+});
 document.getElementById('conn-search').addEventListener('input', (e) => {
 connectionSearchTerm = e.target.value;
 // Typing a search is an implicit "forget the None filter" — leaving both

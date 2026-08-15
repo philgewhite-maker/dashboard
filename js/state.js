@@ -839,6 +839,37 @@ if (since > threshold) return 'Retry in future';
 return null; // nothing pressing right now
 }
 
+// Deterministic, per-connection conversation prompts -- for a personality
+// that tends not to ask enough questions, a short list of "things worth
+// asking or checking" doubles as a data-completeness pass (empty City,
+// empty Family plans) and a "is this actually still going" check, all
+// cheap enough to run over every connection with no AI call. A starting
+// set, not exhaustive.
+function suggestedQuestions(conn) {
+if (isDormantStage(conn.stage)) return [];
+const out = [];
+const since = conn.lastContact ? daysSince(conn.lastContact) : null;
+const threshold = reachOutThreshold(conn.priority, conn.stage);
+if (since !== null && since > threshold * 3) {
+out.push('Still active? Message to check — archive if no reply.');
+}
+if (!String(conn.location || '').trim()) {
+out.push('Where do they live? Ask rather than assume.');
+}
+// Only once there's an actual transcript -- asking about kids on a bare
+// "Matched" with nothing said yet is premature. chatLog (populated only
+// when the Tinder import found mutual messages) is a more reliable
+// signal for "a real conversation has happened" than stage alone, and
+// avoids importing STAGE_RANK from connections.js (circular dependency).
+if (!String(conn.kids || '').trim() && String(conn.chatLog || '').trim()) {
+out.push('Ask whether they have kids, or want them.');
+}
+if ((conn.interests || []).length && !(conn.dateEvents || []).length) {
+out.push(`Mentioned interests (${conn.interests.slice(0, 3).join(', ')}) — worth turning into a date idea?`);
+}
+return out;
+}
+
 async function exportBackup() {
 const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
 const url = URL.createObjectURL(blob);
@@ -875,7 +906,7 @@ MAIL_SEARCH_KINDS, mailSearchLabel,
 TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask,
 CONTACT_STATUS_LABELS, CONTACT_MATCH_MIN_STAGE,
 DEFAULT_RATING_CATEGORIES, slugifyField, DEFAULT_RECIPE_RATING_CATEGORIES,
-FLAG_FIELD_DEFS, DEFAULT_FLAG_RULES, computeFlags, suggestedAction, ACTIONS, distanceMiles,
+FLAG_FIELD_DEFS, DEFAULT_FLAG_RULES, computeFlags, suggestedAction, suggestedQuestions, ACTIONS, distanceMiles,
 };
 
 // `data` above is exported by binding, but ES module live-bindings only

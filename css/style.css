@@ -258,6 +258,8 @@ gap:9px;
 .flag-breakdown{font-size:11px;color:var(--muted);margin-top:2px;}
 .flag-breakdown .dot{margin-right:3px;vertical-align:middle;}
 .suggested-action{font-size:11px;font-weight:600;color:var(--ink);background:var(--paper);border:1px solid var(--line);border-radius:6px;padding:1px 6px;}
+.suggested-questions{font-size:12px;color:var(--muted);margin:4px 0 0;padding-left:18px;}
+.suggested-questions li{margin-bottom:2px;}
 .wide{grid-column:1 / -1;}
 .count-badge{
 font-family:'IBM Plex Mono',monospace;
