@@ -476,7 +476,14 @@ const flagMap = flagValueMap();
 const names = [...cityMap.values()].sort((a, b) => b.length - a.length);
 const flagValues = [...flagMap.values()].map((v) => v.label).sort((a, b) => b.length - a.length);
 const cityPattern = names.length ? `\\b(?:${names.map(escapeRegex).join('|')})\\b` : null;
-const flagPattern = flagValues.length ? `\\b(?:${flagValues.map(escapeRegex).join('|')})\\b` : null;
+// A negated lookbehind on EACH value individually, not wrapped around the
+// whole alternation — otherwise "Non-smoker" still matches "smoker" as a
+// substring (the hyphen is a word boundary on its own), flagging the
+// exact opposite of what was actually said. Confirmed live. Only catches
+// the "non-"/"non " prefix specifically, not general negation ("not a
+// smoker", "don't smoke") -- a real limitation, not a claim of full
+// negation-parsing.
+const flagPattern = flagValues.length ? `(?:${flagValues.map((v) => `(?<!non-)(?<!non )\\b${escapeRegex(v)}\\b`).join('|')})` : null;
 const parts = [cityPattern, flagPattern, CYRILLIC_RUN_RE].filter(Boolean);
 const re = new RegExp(parts.join('|'), 'gi');
 let out = '';

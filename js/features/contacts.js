@@ -10,6 +10,7 @@ import { escapeHtml } from '../utils.js';
 import { canAttemptGoogleAction, hasContactsWrite } from '../sync/googleauth.js';
 import { listContacts, indexContacts, updateContactBirthday, phoneKey, emailKey, nameKey, widerNameCandidates } from '../googlecontacts.js';
 import { STAGE_RANK, setContactPicker, phoneWithFlagHtml } from './connections.js';
+import { switchTab } from '../tabs.js';
 
 // Hand connections.js the inline picker renderer. Registering it rather than
 // having connections.js import this module keeps the dependency one-way.
@@ -347,12 +348,19 @@ el.innerHTML = lastSyncedAt
 : '<div class="empty">Match your post-app connections against Google Contacts. Only people at “Moved to WhatsApp” and beyond are checked.</div>';
 return;
 }
-el.innerHTML = `<div class="empty">${pendingMatches.size} to review — each one is on its own card below.
+// "Below" was wrong -- confirmed live -- this panel lives on the Dating
+// admin tab, but the actual review cards render on each connection's own
+// card in the Connections list, which is the separate Dating tab.
+// filterBySearch() alone only scrolls to #connections-panel, which does
+// nothing visible if that tab isn't already the active one; switchTab()
+// first is what actually gets you there.
+el.innerHTML = `<div class="empty">${pendingMatches.size} to review — each one is on its own card, on the Dating tab.
 <button class="filter-clear" type="button" id="show-review-only">Show just those</button></div>`;
 const btn = document.getElementById('show-review-only');
 if (btn) {
 btn.addEventListener('click', async () => {
 const conns = await import('./connections.js');
+switchTab('dating');
 conns.filterBySearch(CONTACT_STATUS_LABELS.review);
 });
 }
