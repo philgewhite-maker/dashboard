@@ -593,6 +593,7 @@ failed++;
 if (pending.stageOverride) conn.stage = pending.stageOverride;
 if (pending.cityOverride.trim()) conn.location = pending.cityOverride.trim();
 if (pending.ratingOverride) conn.priority = pending.ratingOverride;
+if (pending.matchId && !conn.tinderMatchId) conn.tinderMatchId = pending.matchId;
 
 queueSave();
 Promise.all([import('./connections.js'), import('./overview.js')])
@@ -690,6 +691,10 @@ aiVerdicts: {},
 cityOverride: fields.find((f) => f.label === 'City')?.value || '',
 stageOverride: 'Matched',
 ratingOverride: 0,
+// The permanent id back to this exact Tinder match, from the page's own
+// URL — lets a later import check whether this connection is still in
+// Tinder's current match list at all, not just "matched at some point".
+matchId: String(raw.matchId || '').trim(),
 };
 const candidates = matchCandidates(parsed.name, 6);
 parsed.candidates = candidates;

@@ -658,7 +658,10 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
 <button class="sync-btn" type="button" id="tinder-bulk-copy-snippet">Copy bulk-import snippet</button>
 <details style="margin:0 0 10px;">
 <summary style="cursor:pointer;color:var(--muted);font-size:13px;">Show the bulk-import console snippet</summary>
-<pre id="tinder-bulk-snippet" style="white-space:pre-wrap;font-size:12px;background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:10px;margin:8px 0;">(async () => {
+<pre id="tinder-bulk-snippet" style="white-space:pre-wrap;font-size:12px;background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:10px;margin:8px 0;">// Pasting this runs it once with the default batch size below. To run a
+// different size without re-pasting, just call it again right in the
+// console afterward: tinderBulkImport(30)
+window.tinderBulkImport = async (batchSize) => {
   // Same per-profile extraction as the single-profile snippet above, just
   // wrapped as a function so it can run once per match instead of once per
   // page load. Kept identical to that already-tested logic on purpose &mdash;
@@ -966,7 +969,7 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
   // there.
   const SCRIPT_VERSION = 2;
   const DONE_KEY = 'dashTinderBulkDone';
-  const BATCH_SIZE = 15; // "10-20 or so per day"
+  const BATCH_SIZE = batchSize || 15; // "10-20 or so per day" — override per-call: tinderBulkImport(30)
   const MIN_DELAY_MS = 10000, MAX_DELAY_MS = 60000; // randomised, not a fixed interval &mdash; a fixed gap is a bot tell
 
   let doneVersions = {};
@@ -1017,8 +1020,16 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
         await new Promise((r) =&gt; setTimeout(r, 500));
         try {
           const extracted = await extractProfile(row.name);
-          extracted.matchId = row.id; // already known from the sidebar row — same permanent id the single-profile snippet reads from the URL
-          profiles.push(extracted);
+          // A bare match with no bio, no essentials, no chat, no photos —
+          // nothing the dashboard review screen would actually show
+          // beyond a name to confirm. Not worth a review slot; marked
+          // done and moved past without adding it to the output at all.
+          if (!extracted.fields.length &amp;&amp; !extracted.photos.length) {
+            console.log(`${row.name}: nothing to add -- skipped.`);
+          } else {
+            extracted.matchId = row.id; // already known from the sidebar row — same permanent id the single-profile snippet reads from the URL
+            profiles.push(extracted);
+          }
           doneVersions[row.id] = SCRIPT_VERSION;
           localStorage.setItem(DONE_KEY, JSON.stringify(doneVersions));
         } catch (err) {
@@ -1059,7 +1070,8 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
       if (!copied) console.log(json);
     }
   }
-})();</pre>
+};
+window.tinderBulkImport();</pre>
 </details>
 <textarea id="tinder-input" rows="4" style="width:100%;font-family:monospace;font-size:12px;" placeholder="Paste the copied JSON here — one profile or a batch, either works"></textarea>
 <div class="sync-row" style="margin-top:8px;">
