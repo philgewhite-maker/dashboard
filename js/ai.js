@@ -556,8 +556,32 @@ retailer: String(r.retailer || ''), name: String(r.name || ''), price: String(r.
 }));
 }
 
+// ---- Translation ----
+//
+// A free, local Chrome LanguageDetector check happens client-side before
+// this is ever called (see tinderimport.js) — this is only reached once
+// that's confirmed the text isn't already English, so a cheap/fast model
+// is the right call here rather than whatever vision model Settings has
+// configured for photo work.
+const TRANSLATE_MODEL = 'claude-haiku-4-5-20251001';
+const TRANSLATE_MAX_TOKENS = 800;
+function translatePrompt(text) {
+return `Detect the language of this dating-profile text and translate it into natural English. Text: ${JSON.stringify(text)}\n\n`
++ 'Reply with ONLY a JSON object, no other text, no markdown fences: {"language":"Spanish","translation":"..."} — "language" is the English name of the detected language (e.g. "Spanish", "Russian"), or "English" if it\'s already English (in which case "translation" can just repeat the original text).';
+}
+async function translateText(text) {
+const { data } = await callAnthropic(
+[{ type: 'text', text: translatePrompt(text) }],
+TRANSLATE_MAX_TOKENS, TRANSLATE_MODEL, 'Translation',
+);
+return {
+language: String((data && data.language) || '').trim(),
+translation: String((data && data.translation) || '').trim(),
+};
+}
+
 export {
 MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot, quickScanScreenshot,
 callTextJson, DEFAULT_MODEL, summarizeUsage, currentMonthKey, compareFaces,
-extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShoppingItem,
+extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShoppingItem, translateText,
 };

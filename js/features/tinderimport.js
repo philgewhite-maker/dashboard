@@ -27,7 +27,7 @@ import { escapeHtml, uid, todayStr, hydratePhotos } from '../utils.js';
 import { nameKey, editDistance } from '../googlecontacts.js';
 import { storePhoto, fetchProxiedImage } from '../files.js';
 import { photoGet } from '../db.js';
-import { MissingKeyError, compareFaces } from '../ai.js';
+import { MissingKeyError, compareFaces, translateText } from '../ai.js';
 import { findPhoneNumbers, findHandles, formatHandle } from '../contactscan.js';
 import { STAGE_RANK, CONN_STAGES } from './connections.js';
 
@@ -275,6 +275,45 @@ pending.aiVerdicts[connId] = { same: null, reason: err instanceof MissingKeyErro
 render();
 }
 
+function withTimeout(promise, ms) {
+return Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error('timed out')), ms))]);
+}
+
+// Keyed by field index (pending.translations). Tries Chrome's on-device,
+// fully local LanguageDetector first (free, no network, no API key) — if
+// it confidently says the text is already English, that's the end of it,
+// no Anthropic call spent confirming what's already obvious. Anything
+// else (detector unavailable, uncertain, or genuinely non-English) falls
+// through to Claude, which detects AND translates in the one call. The
+// timeout guard exists because Chrome's on-device APIs are new enough
+// that "unavailable" isn't always a clean, fast rejection.
+const LOCAL_DETECT_TIMEOUT_MS = 6000;
+async function runTranslateFor(i) {
+pending.translations[i] = 'loading';
+render();
+const text = pending.fields[i].value;
+try {
+if (typeof self !== 'undefined' && 'LanguageDetector' in self) {
+try {
+const detector = await withTimeout(self.LanguageDetector.create(), LOCAL_DETECT_TIMEOUT_MS);
+const results = await withTimeout(detector.detect(text), LOCAL_DETECT_TIMEOUT_MS);
+if (results && results[0] && results[0].detectedLanguage === 'en' && results[0].confidence > 0.6) {
+pending.translations[i] = { language: 'English', translation: text, alreadyEnglish: true };
+render();
+return;
+}
+} catch (localErr) {
+console.warn('On-device language detection unavailable, falling back to Anthropic:', localErr);
+}
+}
+pending.translations[i] = await translateText(text);
+} catch (err) {
+console.error('Translation failed:', err);
+pending.translations[i] = { error: err instanceof MissingKeyError ? 'Add an Anthropic API key in Settings first.' : (err.message || String(err)) };
+}
+render();
+}
+
 // What will actually happen to each field if this gets saved right now,
 // computed against whichever connection is currently chosen — a real
 // preview rather than a blind checkbox list, so "this will overwrite
@@ -299,25 +338,115 @@ if (loc && !map.has(loc.toLowerCase())) map.set(loc.toLowerCase(), loc);
 return map;
 }
 
+// Cyrillic place names don't have the luxury of a known-good list (unlike
+// English city hits above) — nobody's own City field is ever stored in
+// Cyrillic. So this is a mechanical fallback: a straightforward per-letter
+// transliteration, upgraded to the real English exonym for the common
+// cities where the two differ (Москва -> "Moskva" is readable but wrong;
+// it should read "Moscow"). Not exhaustive; anything missing still gets a
+// legible transliteration rather than nothing.
+const CYRILLIC_EXONYMS = {
+'москва': 'Moscow', 'санкт-петербург': 'Saint Petersburg', 'киев': 'Kyiv', 'київ': 'Kyiv',
+'минск': 'Minsk', 'одесса': 'Odesa', 'одеса': 'Odesa', 'харьков': 'Kharkiv', 'харків': 'Kharkiv',
+'львов': 'Lviv', 'львів': 'Lviv', 'новосибирск': 'Novosibirsk', 'екатеринбург': 'Yekaterinburg',
+'казань': 'Kazan', 'нижний новгород': 'Nizhny Novgorod', 'ростов-на-дону': 'Rostov-on-Don',
+'краснодар': 'Krasnodar', 'сочи': 'Sochi', 'владивосток': 'Vladivostok', 'челябинск': 'Chelyabinsk',
+'омск': 'Omsk', 'самара': 'Samara', 'уфа': 'Ufa', 'пермь': 'Perm', 'волгоград': 'Volgograd',
+'воронеж': 'Voronezh', 'алматы': 'Almaty', 'ташкент': 'Tashkent', 'баку': 'Baku', 'тбилиси': 'Tbilisi',
+'ереван': 'Yerevan', 'кишинёв': 'Chisinau', 'бишкек': 'Bishkek', 'астана': 'Astana',
+};
+const CYRILLIC_TRANSLIT = {
+а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'yo', ж: 'zh', з: 'z', и: 'i', й: 'y',
+к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f',
+х: 'kh', ц: 'ts', ч: 'ch', ш: 'sh', щ: 'shch', ъ: '', ы: 'y', ь: '', э: 'e', ю: 'yu', я: 'ya',
+і: 'i', ї: 'yi', є: 'ye', ґ: 'g',
+};
+function transliterateCyrillic(text) {
+const out = [...text].map((ch) => {
+const t = CYRILLIC_TRANSLIT[ch.toLowerCase()];
+if (t === undefined) return ch;
+return ch === ch.toLowerCase() ? t : t.charAt(0).toUpperCase() + t.slice(1);
+}).join('');
+return out.charAt(0).toUpperCase() + out.slice(1);
+}
+
+// Cyrillic-script languages this app already knows how to spot in a
+// structured Languages field (see LANGUAGES in the console snippet). If
+// the profile listed exactly one of these, that's almost certainly what
+// the Cyrillic text is in; otherwise there's no way to tell Russian from
+// Ukrainian from Bulgarian short of asking the AI, so it's just labelled
+// by script rather than guessed.
+const CYRILLIC_LANGUAGES = new Set(['Russian', 'Ukrainian', 'Bulgarian', 'Serbian', 'Belarusian', 'Macedonian']);
+function cyrillicLanguageGuess() {
+const langField = pending && pending.fields && pending.fields.find((f) => f.label === 'Languages');
+if (!langField) return 'Cyrillic';
+const hits = langField.value.split(',').map((s) => s.trim()).filter((p) => CYRILLIC_LANGUAGES.has(p));
+return hits.length === 1 ? hits[0] : 'Cyrillic';
+}
+
+const CYRILLIC_RUN_RE = '[\\u0400-\\u04FF]+(?:[ \\-][\\u0400-\\u04FF]+)*';
+
 function highlightCities(text) {
 const cityMap = knownCityMap();
-if (!cityMap.size) return escapeHtml(text);
 // Longest names first, so a multi-word city ("New York") wins whole
 // rather than a shorter, unrelated city name that happens to be a
 // substring of it matching first.
 const names = [...cityMap.values()].sort((a, b) => b.length - a.length);
-const re = new RegExp(`\\b(${names.map(escapeRegex).join('|')})\\b`, 'gi');
+const cityPattern = names.length ? `\\b(?:${names.map(escapeRegex).join('|')})\\b` : null;
+const re = new RegExp(cityPattern ? `${cityPattern}|${CYRILLIC_RUN_RE}` : CYRILLIC_RUN_RE, 'gi');
 let out = '';
 let last = 0;
 let m;
 while ((m = re.exec(text))) {
 out += escapeHtml(text.slice(last, m.index));
-const original = cityMap.get(m[0].toLowerCase()) || m[0];
-out += `<span class="tinder-city-hit" data-tinder-city="${escapeHtml(original)}" title="Click to set as City">${escapeHtml(m[0])}</span>`;
-last = m.index + m[0].length;
+const hit = m[0];
+if (cityMap.has(hit.toLowerCase())) {
+const original = cityMap.get(hit.toLowerCase());
+out += `<span class="tinder-city-hit" data-tinder-city="${escapeHtml(original)}" title="Click to set as City">${escapeHtml(hit)}</span>`;
+} else {
+const exonym = CYRILLIC_EXONYMS[hit.trim().toLowerCase()];
+// A real place name is a word or two; a long run is a sentence caught
+// up in the same Cyrillic-script match, not a city — offering to set
+// City to a transliterated SENTENCE would be actively wrong, and full
+// prose is what the Translate button is for, not this.
+const wordCount = hit.trim().split(/[\s-]+/).filter(Boolean).length;
+if (exonym || wordCount <= 3) {
+const guess = exonym || transliterateCyrillic(hit);
+const lang = cyrillicLanguageGuess();
+out += `<span class="tinder-cyrillic-hit" data-tinder-city="${escapeHtml(guess)}" title="${escapeHtml(`${lang}: "${guess}" — click to set as City`)}">${escapeHtml(hit)}</span>`;
+} else {
+out += escapeHtml(hit);
+}
+}
+last = m.index + hit.length;
 }
 out += escapeHtml(text.slice(last));
 return out;
+}
+
+// Structured, short-value fields where "translate this" is meaningless —
+// a language name, a bearing, a single word already matched against a
+// closed enum. Everything else (job titles, school names, prompt answers,
+// chat, the notes catch-all) is free text that could genuinely be in
+// another language.
+const SKIP_TRANSLATE_LABELS = new Set(['Height', 'Distance', 'Pronouns', 'Gender', 'Orientation', 'Languages']);
+
+function translateButtonHtml(f, i) {
+if (SKIP_TRANSLATE_LABELS.has(f.label)) return '';
+return `<button type="button" class="sync-btn sm" data-tinder-translate="${i}">Translate</button>`;
+}
+
+function translationResultHtml(i) {
+const t = pending.translations[i];
+if (!t) return '';
+if (t === 'loading') return `<div class="tinder-translate-result">Checking language…</div>`;
+if (t.error) return `<div class="tinder-translate-result tinder-translate-error">Translate failed: ${escapeHtml(t.error)}</div>`;
+if (t.alreadyEnglish) return `<div class="tinder-translate-result">(Detected as already English — no translation needed.)</div>`;
+if (!t.language || !t.translation) return `<div class="tinder-translate-result tinder-translate-error">Couldn't tell what language this is.</div>`;
+const alreadyHasLang = pending.fields.some((f) => f.label === 'Languages' && f.value.split(',').map((s) => s.trim()).includes(t.language));
+return `<div class="tinder-translate-result">→ <strong>${escapeHtml(t.language)}:</strong> ${escapeHtml(t.translation)}`
++ (alreadyHasLang ? '' : ` <button type="button" class="sync-btn sm" data-tinder-translate-add="${escapeHtml(t.language)}">+ add ${escapeHtml(t.language)}</button>`)
++ `</div>`;
 }
 
 function fieldPreviewHtml(f, i) {
@@ -340,10 +469,14 @@ note = fresh.length === 0 ? `already in ${arrayMap.target} — will be skipped`
 : `will add ${fresh.length} new to ${arrayMap.target}, rest already there`;
 if (fresh.length === 0) { disabled = true; dim = true; }
 }
-return `<label class="tinder-field-row${dim ? ' tinder-field-blocked' : ''}">
+return `<div class="tinder-field-row${dim ? ' tinder-field-blocked' : ''}">
+<label class="tinder-field-label">
 <input type="checkbox" data-tinder-field="${i}"${f.apply && !disabled ? ' checked' : ''}${disabled ? ' disabled' : ''}>
 <span><strong>${escapeHtml(f.label)}:</strong> ${highlightCities(f.value)} <span class="tinder-field-note">(${escapeHtml(note)})</span></span>
-</label>`;
+</label>
+${translateButtonHtml(f, i)}
+</div>
+${translationResultHtml(i)}`;
 }
 
 // Same checkbox-with-a-preview shape as fieldPreviewHtml, for whatever the
@@ -496,6 +629,15 @@ render();
 });
 el.querySelectorAll('[data-tinder-ai-compare]').forEach((btn) => {
 btn.addEventListener('click', () => runAiCompareFor(btn.dataset.tinderAiCompare));
+});
+el.querySelectorAll('[data-tinder-translate]').forEach((btn) => {
+btn.addEventListener('click', () => runTranslateFor(parseInt(btn.dataset.tinderTranslate, 10)));
+});
+el.querySelectorAll('[data-tinder-translate-add]').forEach((btn) => {
+btn.addEventListener('click', () => {
+pending.fields.push({ label: 'Languages', value: btn.dataset.tinderTranslateAdd, apply: true });
+render();
+});
 });
 const stageSel = document.getElementById('tinder-stage');
 if (stageSel) stageSel.addEventListener('change', () => { pending.stageOverride = stageSel.value; });
@@ -714,6 +856,7 @@ matchConfirmed: false,
 candidates: [],
 showMoreInfo: false,
 aiVerdicts: {},
+translations: {},
 // City often only ever comes up in the first few chat messages, not any
 // structured Tinder field, so this is a starting point to confirm or
 // correct rather than something trusted outright — pre-filled from a
