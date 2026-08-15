@@ -370,6 +370,19 @@ return ch === ch.toLowerCase() ? t : t.charAt(0).toUpperCase() + t.slice(1);
 return out.charAt(0).toUpperCase() + out.slice(1);
 }
 
+// The City field's raw extracted value pre-fills the editable #tinder-city
+// input, which is what actually gets saved (see pending.cityOverride below)
+// — if the extracted value is Cyrillic, that input started pre-filled with
+// the RAW Cyrillic text, so overwriting an existing (also-Cyrillic) City
+// with "the same" value never actually offered a usable English one.
+// Transliterating this ONE spot fixes it at the source rather than at
+// every place the value gets read.
+function transliterateCityValue(v) {
+const trimmed = String(v || '').trim();
+if (!trimmed || !/[Ѐ-ӿ]/.test(trimmed)) return trimmed;
+return CYRILLIC_EXONYMS[trimmed.toLowerCase()] || transliterateCyrillic(trimmed);
+}
+
 // Cyrillic-script languages this app already knows how to spot in a
 // structured Languages field (see LANGUAGES in the console snippet). If
 // the profile listed exactly one of these, that's almost certainly what
@@ -906,7 +919,7 @@ translations: {},
 // structured Tinder field, so this is a starting point to confirm or
 // correct rather than something trusted outright — pre-filled from a
 // "City" field if the profile had one, blank otherwise.
-cityOverride: fields.find((f) => f.label === 'City')?.value || '',
+cityOverride: transliterateCityValue(fields.find((f) => f.label === 'City')?.value || ''),
 stageOverride: 'Matched',
 ratingOverride: 0,
 // The permanent id back to this exact Tinder match, from the page's own
