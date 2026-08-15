@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v33</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v34</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -1396,6 +1396,14 @@ Mostly still a planning space &mdash; a place to keep thinking about what this s
 The detailed star ratings shown on every connection. Removing one clears every rating already given under it &mdash; there's no way back from that, so it asks first.
 </div>
 <div class="tag-editor" id="rating-categories-list"></div>
+</div>
+
+<div class="settings-block">
+<h3>Connections — red/amber/green flags</h3>
+<div class="settings-note" style="margin:0 0 8px;">
+One rule per field &mdash; a numeric threshold (Distance, Age) or a comma-separated list of values for each colour (everything else). A connection's dot shows the worst colour among every rule that matched. Seeded with a starting set based on values actually mentioned so far &mdash; edit or delete freely.
+</div>
+<div id="flag-rules-list"></div>
 </div>
 
 <div class="settings-block">

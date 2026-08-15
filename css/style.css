@@ -250,6 +250,14 @@ gap:9px;
 .dot.rose{background:var(--rose);}
 .dot.teal{background:var(--teal);}
 .dot.plum{background:var(--plum);}
+.dot.red{background:var(--red);}
+.dot.green{background:var(--sage);}
+.flag-rule-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px;}
+.flag-rule-row input[type="text"]{flex:1;min-width:120px;}
+.flag-rule-row input.mini{width:70px;}
+.flag-breakdown{font-size:11px;color:var(--muted);margin-top:2px;}
+.flag-breakdown .dot{margin-right:3px;vertical-align:middle;}
+.suggested-action{font-size:11px;font-weight:600;color:var(--ink);background:var(--paper);border:1px solid var(--line);border-radius:6px;padding:1px 6px;}
 .wide{grid-column:1 / -1;}
 .count-badge{
 font-family:'IBM Plex Mono',monospace;

@@ -199,6 +199,11 @@ Orientation: { target: 'relationshipTags', split: false },
 'Relationship type': { target: 'relationshipTags', split: false },
 'Looking for': { target: 'relationshipTags', split: false },
 Nationality: { target: 'nationality', split: false },
+// Neither of these has a dedicated field of its own — both route into the
+// generic tags chip list so they're at least taggable/flaggable, rather
+// than sitting unfindable in a wall of notes text (where they were before).
+'How often do you smoke?': { target: 'tags', split: false },
+Gender: { target: 'tags', split: false },
 };
 
 let pending = null; // { name, age, fields, photos, chosenId, match, matchConfirmed, aiVerdict }

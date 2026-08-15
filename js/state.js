@@ -1,5 +1,5 @@
 import { kvGet, kvSet, photoDelete } from './db.js';
-import { uid, todayStr, daysAgoStr, last7Dates } from './utils.js';
+import { uid, todayStr, daysAgoStr, last7Dates, daysSince } from './utils.js';
 
 const DATA_KEY = 'app-data';
 const REV_KEY = 'app-data-rev'; // separate from DATA_KEY so it never leaks into backup exports
@@ -205,11 +205,26 @@ const TAG_FIELDS = [
 { field: 'socialHandles', label: 'Social handles', sensitive: false },
 ];
 
+// Starting points, not gospel — surfaced in Settings once real tag values
+// are visible, so these are deliberately conservative rather than an
+// attempt to guess every value Tinder might ever show. "How often do you
+// smoke?" and Gender both route into the generic `tags` field (see
+// tinderimport.js's ARRAY_FIELD_MAP) rather than a dedicated field of
+// their own, so a rule on `tags` can catch either kind of value.
+const DEFAULT_FLAG_RULES = [
+{ id: 'default-distance', field: 'distance', greenMax: 10, redMin: 50 },
+{ id: 'default-education', field: 'education', green: ['Bachelor degree', 'Master degree', 'PhD', 'Doctorate degree'], amber: [], red: ['High school'] },
+{ id: 'default-smoking', field: 'tags', green: [], amber: [], red: ['Smoker'] },
+{ id: 'default-gender', field: 'tags', green: [], amber: [], red: ['Trans man', 'Trans woman', 'Transgender'] },
+{ id: 'default-orientation', field: 'relationshipTags', green: [], amber: ['Gay', 'Lesbian', 'Bisexual', 'Pansexual', 'Asexual', 'Queer', 'Demisexual', 'Open relationship', 'Polyamory', 'Ethically non-monogamous'], red: [] },
+];
+
 function blankData() {
 return { habits: [], goals: [], jobs: [], connections: [], calendars: [], calendarStatus: {}, vouchers: [], businessIdeas: [], subscriptions: [], enhancementIdeas: [], dealExpiries: [], mailSearches: [], tasks: [], taskContexts: [...DEFAULT_TASK_CONTEXTS],
 ratingCategories: DEFAULT_RATING_CATEGORIES.map((c) => ({ ...c })),
 recipes: [], recipeRatingCategories: DEFAULT_RECIPE_RATING_CATEGORIES.map((c) => ({ ...c })),
 claudeAnswers: {},
+flagRules: DEFAULT_FLAG_RULES.map((r) => ({ ...r })),
 prefs: { ...DEFAULT_PREFS } };
 }
 
@@ -432,6 +447,9 @@ delete c.ratings.intelligence;
 // treats as oldest rather than guessing today's date for everyone.
 if (typeof c.createdAt !== 'string') c.createdAt = '';
 });
+if (!Array.isArray(data.flagRules)) {
+data.flagRules = DEFAULT_FLAG_RULES.map((r) => ({ ...r }));
+}
 if (!Array.isArray(data.ratingCategories) || data.ratingCategories.length === 0) {
 data.ratingCategories = DEFAULT_RATING_CATEGORIES.map((c) => ({ ...c }));
 } else {
@@ -687,6 +705,90 @@ function isDormantStage(stage) {
 return stage === 'Faded' || stage === 'Archived';
 }
 
+// Distance is stored as a bucketed display string ("≤10mi/16km",
+// "23mi/37km+" — see bucketDistance() in the console snippet), not a raw
+// number, so a threshold rule needs the leading mile figure pulled back
+// out rather than comparing the string directly.
+function distanceMiles(distStr) {
+const m = String(distStr || '').match(/(\d+(?:\.\d+)?)\s*mi/);
+return m ? parseFloat(m[1]) : null;
+}
+
+// Every field a flag rule can target, normalised to the same shape
+// regardless of whether the underlying connection field is a single
+// string (education, job) or an array (the TAG_FIELDS chip lists) — a
+// value-list rule always compares against an array, a threshold rule
+// always compares against a number, so the matching logic itself never
+// needs to know which kind of field it's looking at.
+const FLAG_FIELD_DEFS = [
+{ field: 'distance', label: 'Distance (miles)', kind: 'number', getValue: (c) => distanceMiles(c.distance) },
+{ field: 'age', label: 'Age', kind: 'number', getValue: (c) => { const a = currentAge(c); return a ? a.value : null; } },
+{ field: 'education', label: 'Education', kind: 'text', getValue: (c) => (c.education ? [c.education] : []) },
+{ field: 'height', label: 'Height', kind: 'text', getValue: (c) => (c.height ? [c.height] : []) },
+{ field: 'job', label: 'Job', kind: 'text', getValue: (c) => (c.job ? [c.job] : []) },
+{ field: 'location', label: 'City', kind: 'text', getValue: (c) => (c.location ? [c.location] : []) },
+{ field: 'stage', label: 'Stage', kind: 'text', getValue: (c) => (c.stage ? [c.stage] : []) },
+...TAG_FIELDS.map((t) => ({ field: t.field, label: t.label, kind: 'text', getValue: (c) => c[t.field] || [] })),
+];
+
+// A threshold rule needs BOTH bounds set to produce an amber band (the
+// gap between them) — one bound alone just flags what it flags and stays
+// silent otherwise, rather than guessing where an unset boundary should be.
+function thresholdColor(rule, value) {
+if (value === null || value === undefined || !Number.isFinite(value)) return null;
+const hasGreen = Number.isFinite(rule.greenMax);
+const hasRed = Number.isFinite(rule.redMin);
+if (hasGreen && value <= rule.greenMax) return 'green';
+if (hasRed && value >= rule.redMin) return 'red';
+if (hasGreen && hasRed) return 'amber';
+return null;
+}
+
+function valueListColor(rule, values) {
+const norm = (values || []).map((v) => String(v).toLowerCase().trim());
+if (!norm.length) return null;
+const has = (list) => (list || []).some((x) => norm.includes(String(x).toLowerCase().trim()));
+if (has(rule.red)) return 'red';
+if (has(rule.amber)) return 'amber';
+if (has(rule.green)) return 'green';
+return null;
+}
+
+// Every rule that matched, plus the worst colour among them (red beats
+// amber beats green) as the one dot a connection row actually shows — a
+// single red flag shouldn't get visually buried under three green ones.
+function computeFlags(conn, rules) {
+const hits = [];
+(rules || []).forEach((rule) => {
+const def = FLAG_FIELD_DEFS.find((d) => d.field === rule.field);
+if (!def) return;
+const color = def.kind === 'number' ? thresholdColor(rule, def.getValue(conn)) : valueListColor(rule, def.getValue(conn));
+if (color) hits.push({ ruleId: rule.id, field: rule.field, label: def.label, color });
+});
+const worst = hits.some((h) => h.color === 'red') ? 'red' : hits.some((h) => h.color === 'amber') ? 'amber' : hits.some((h) => h.color === 'green') ? 'green' : null;
+return { hits, worst };
+}
+
+const ACTIONS = ['Contact now', 'Set up date', 'Clean up data', 'Confirm faded', 'Retry in future'];
+
+// A first-pass heuristic, not a settled formula -- combines stage,
+// dormancy, data completeness, and the red/amber/green flags into one
+// suggested next step, recomputed fresh every time rather than stored
+// (same "suggestion, not silent" spirit as suggestedStage() in the
+// Tinder importer). The priority order below is a starting point worth
+// reacting to and adjusting, not a claim that it's definitely right.
+function suggestedAction(conn, rules) {
+if (isDormantStage(conn.stage)) return null; // already resolved, nothing to suggest
+const since = conn.lastContact ? daysSince(conn.lastContact) : null;
+const threshold = reachOutThreshold(conn.priority, conn.stage);
+if (since !== null && since > threshold * 3) return 'Confirm faded';
+if (URGENT_STAGES.has(conn.stage)) return 'Set up date'; // already committed to a plan
+if (completeness(conn) < 0.4) return 'Clean up data';
+if (since === null) return 'Contact now';
+if (since > threshold) return 'Retry in future';
+return null; // nothing pressing right now
+}
+
 async function exportBackup() {
 const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
 const url = URL.createObjectURL(blob);
@@ -723,6 +825,7 @@ MAIL_SEARCH_KINDS, mailSearchLabel,
 TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask,
 CONTACT_STATUS_LABELS, CONTACT_MATCH_MIN_STAGE,
 DEFAULT_RATING_CATEGORIES, slugifyField, DEFAULT_RECIPE_RATING_CATEGORIES,
+FLAG_FIELD_DEFS, DEFAULT_FLAG_RULES, computeFlags, suggestedAction, ACTIONS,
 };
 
 // `data` above is exported by binding, but ES module live-bindings only

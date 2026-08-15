@@ -1,4 +1,4 @@
-import { data, queueSave, reachOutThreshold, isDormantStage, getLocalSettings, TAG_FIELDS, CONTACT_STATUS_LABELS, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness, slugifyField } from '../state.js';
+import { data, queueSave, reachOutThreshold, isDormantStage, getLocalSettings, TAG_FIELDS, CONTACT_STATUS_LABELS, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness, slugifyField, FLAG_FIELD_DEFS, computeFlags, suggestedAction } from '../state.js';
 import { photoDelete, photoUrl } from '../db.js';
 import { storePhoto } from '../files.js';
 import {
@@ -432,11 +432,14 @@ const since = daysSince(c.lastContact);
 const overdue = !isDormantStage(c.stage) && since >= reachOutThreshold(c.priority);
 const stars = [1, 2, 3, 4, 5].map((n) => `<svg class="star priority-star ${n <= c.priority ? 'filled' : ''}" data-conn="${c.id}" data-star="${n}" viewBox="0 0 20 20" fill="currentColor"><path d="M10 1l2.6 5.9 6.4.6-4.8 4.3 1.4 6.2L10 14.9 4.4 18l1.4-6.2L1 7.5l6.4-.6z"/></svg>`).join('');
 const nameMeta = [displayAge(c), c.location].map((s) => String(s || '').trim()).filter(Boolean).join(' · ');
+const flags = computeFlags(c, data.flagRules);
+const action = suggestedAction(c, data.flagRules);
+const flagDotHtml = flags.worst ? `<span class="dot ${flags.worst}" title="${escapeHtml(flags.hits.map((h) => `${h.label}: ${h.color}`).join(', '))}"></span> ` : '';
 return `<div class="match-card" data-conn-row="${c.id}">
 <div class="match-row">
 ${avatarHtml(c.photoId, c.name)}
 <div class="match-id">
-<div class="match-name">${escapeHtml(c.name)}${nameMeta ? ` <span class="match-meta">${escapeHtml(nameMeta)}</span>` : ''}</div>
+<div class="match-name">${flagDotHtml}${escapeHtml(c.name)}${nameMeta ? ` <span class="match-meta">${escapeHtml(nameMeta)}</span>` : ''}</div>
 <div class="app-tag">${escapeHtml(c.app)}</div>
 </div>
 <div class="stars">${stars}</div>
@@ -449,10 +452,12 @@ ${CONN_STAGES.map((s) => `<option value="${s}" ${s === c.stage ? 'selected' : ''
 ${c.contactStatus ? `<span class="contact-badge ${escapeHtml(c.contactStatus)}">${escapeHtml(CONTACT_STATUS_LABELS[c.contactStatus] || '')}</span>` : ''}
 <span class="match-contact">${since === 0 ? 'today' : since + 'd since contact'}</span>
 ${overdue ? '<span class="reach-badge">Reach out</span>' : ''}
+${action ? `<span class="suggested-action" title="Suggested next step, recomputed fresh each time">${escapeHtml(action)}</span>` : ''}
 <button class="log-btn" data-log="${c.id}">Log contact</button>
 <span class="del-x" style="opacity:1;" data-del-conn="${c.id}">&times;</span>
 </div>
 </div>
+${flags.hits.length ? `<div class="flag-breakdown">${flags.hits.map((h) => `<span class="dot ${h.color}"></span>${escapeHtml(h.label)}`).join(' &nbsp; ')}</div>` : ''}
 ${contactPickerHtml(c.id)}
 <details class="match-details" data-conn-details="${c.id}" ${expandedConnections.has(c.id) ? 'open' : ''}>
 <summary>Details</summary>
@@ -750,6 +755,78 @@ document.body.appendChild(box);
 // rating category's `field` key is where real per-person data lives, and
 // there's no safe way to rename in place without either orphaning existing
 // ratings or silently merging two categories' data together.
+function flagRuleRowHtml(rule) {
+const def = FLAG_FIELD_DEFS.find((d) => d.field === rule.field);
+if (!def) return '';
+const inputs = def.kind === 'number'
+? `<input type="number" class="mini" data-flag-bound="greenMax" data-flag-rule="${rule.id}" value="${rule.greenMax ?? ''}" placeholder="Green &le;">`
++ `<input type="number" class="mini" data-flag-bound="redMin" data-flag-rule="${rule.id}" value="${rule.redMin ?? ''}" placeholder="Red &ge;">`
+: `<input type="text" autocomplete="off" data-flag-list="green" data-flag-rule="${rule.id}" value="${escapeHtml((rule.green || []).join(', '))}" placeholder="Green values, comma separated">`
++ `<input type="text" autocomplete="off" data-flag-list="amber" data-flag-rule="${rule.id}" value="${escapeHtml((rule.amber || []).join(', '))}" placeholder="Amber values, comma separated">`
++ `<input type="text" autocomplete="off" data-flag-list="red" data-flag-rule="${rule.id}" value="${escapeHtml((rule.red || []).join(', '))}" placeholder="Red values, comma separated">`;
+return `<div class="flag-rule-row">
+<strong>${escapeHtml(def.label)}</strong>
+${inputs}
+<span class="tag-x" data-del-flag-rule="${rule.id}">&times;</span>
+</div>`;
+}
+
+// Settings -> "Red/amber/green flags": a generic rule per field, either a
+// numeric threshold (Distance, Age) or a value list (everything else,
+// including the TAG_FIELDS chip lists) -- see computeFlags()/
+// FLAG_FIELD_DEFS in state.js for how a rule actually gets evaluated.
+function initFlagRulesSettings() {
+const el = document.getElementById('flag-rules-list');
+if (!el) return;
+
+function render() {
+if (!Array.isArray(data.flagRules)) data.flagRules = [];
+const addOptions = FLAG_FIELD_DEFS.map((d) => `<option value="${escapeHtml(d.field)}">${escapeHtml(d.label)}</option>`).join('');
+el.innerHTML = data.flagRules.map(flagRuleRowHtml).join('')
++ `<div class="flag-rule-row"><select id="new-flag-rule-field">${addOptions}</select><button class="sync-btn sm" type="button" id="add-flag-rule-btn">+ Add rule</button></div>`;
+
+el.querySelectorAll('[data-del-flag-rule]').forEach((x) => {
+x.addEventListener('click', () => {
+data.flagRules = data.flagRules.filter((r) => r.id !== x.dataset.delFlagRule);
+render();
+renderConnections();
+queueSave();
+});
+});
+el.querySelectorAll('[data-flag-bound]').forEach((input) => {
+input.addEventListener('change', () => {
+const rule = data.flagRules.find((r) => r.id === input.dataset.flagRule);
+if (!rule) return;
+const v = input.value.trim();
+rule[input.dataset.flagBound] = v === '' ? null : parseFloat(v);
+renderConnections();
+queueSave();
+});
+});
+el.querySelectorAll('[data-flag-list]').forEach((input) => {
+input.addEventListener('change', () => {
+const rule = data.flagRules.find((r) => r.id === input.dataset.flagRule);
+if (!rule) return;
+rule[input.dataset.flagList] = input.value.split(',').map((s) => s.trim()).filter(Boolean);
+renderConnections();
+queueSave();
+});
+});
+const addBtn = document.getElementById('add-flag-rule-btn');
+if (addBtn) addBtn.addEventListener('click', () => {
+const field = document.getElementById('new-flag-rule-field').value;
+const def = FLAG_FIELD_DEFS.find((d) => d.field === field);
+if (!def) return;
+data.flagRules.push(def.kind === 'number'
+? { id: uid(), field, greenMax: null, redMin: null }
+: { id: uid(), field, green: [], amber: [], red: [] });
+render();
+queueSave();
+});
+}
+render();
+}
+
 function initRatingCategoriesSettings() {
 const el = document.getElementById('rating-categories-list');
 if (!el) return;
@@ -1177,4 +1254,5 @@ renderConnections, initConnectionForm, expandConnection, CONN_STAGES,
 initSensitiveFields, setShowSensitiveFields, visibleTagFields,
 filterByEmptyField, filterBySearch, filterByIds, clearFilters,
 STAGE_RANK, setContactPicker, phoneWithFlagHtml, initRatingCategoriesSettings,
+initFlagRulesSettings,
 };
