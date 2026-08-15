@@ -653,7 +653,7 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
 })();</pre>
 </details>
 <div class="settings-note" style="margin:10px 0;">
-<strong>Bulk mode:</strong> steps through your sidebar matches automatically instead of one profile at a time &mdash; up to 15 per run, real randomised delays (10&ndash;60s) between each, remembered on Tinder's own site so the next run (later today or tomorrow) only picks up whoever's left. Fine to run a few times a day at that pace. Paste its output into the same box below; it's told apart from a single-profile paste automatically. This runs unattended across many real profiles in a row &mdash; if you see anything that looks like a rate limit or a verification prompt, stop and give it a break.
+<strong>Bulk mode:</strong> steps through your sidebar matches automatically instead of one profile at a time &mdash; 15 per run by default, real randomised delays (10&ndash;60s) between each, remembered on Tinder's own site so the next run (later today or tomorrow) only picks up whoever's left. Fine to run a few times a day at that pace. Pasting the snippet only defines it; run it with <code>tinderBulkImport()</code> in the console for the default 15, or <code>tinderBulkImport(30)</code> for a custom size &mdash; no need to re-paste to change it. Paste its output into the same box below; it's told apart from a single-profile paste automatically. This runs unattended across many real profiles in a row &mdash; if you see anything that looks like a rate limit or a verification prompt, stop and give it a break.
 </div>
 <button class="sync-btn" type="button" id="tinder-bulk-copy-snippet">Copy bulk-import snippet</button>
 <details style="margin:0 0 10px;">
@@ -1071,7 +1071,7 @@ window.tinderBulkImport = async (batchSize) => {
     }
   }
 };
-window.tinderBulkImport();</pre>
+console.log('Ready. Run tinderBulkImport() for the default 15, or tinderBulkImport(30) for a custom size.');</pre>
 </details>
 <textarea id="tinder-input" rows="4" style="width:100%;font-family:monospace;font-size:12px;" placeholder="Paste the copied JSON here — one profile or a batch, either works"></textarea>
 <div class="sync-row" style="margin-top:8px;">
