@@ -561,6 +561,7 @@ ${queue.length ? `<div class="settings-note" style="margin:0 0 8px;">${queue.len
 
 <div class="sync-row" style="margin:6px 0 8px;">
 <button class="add-btn" type="button" id="tinder-save"${canSave ? '' : ' disabled'}>${escapeHtml(saveLabel)}</button>
+<button class="sync-btn" type="button" id="tinder-save-open"${canSave ? '' : ' disabled'}>${escapeHtml(saveLabel)} & open profile</button>
 <button class="sync-btn" type="button" id="tinder-skip">Skip</button>
 <button class="sync-btn" type="button" id="tinder-newconn">+ New</button>
 <button class="sync-btn" type="button" id="tinder-more-info-open">More info</button>
@@ -680,13 +681,20 @@ render();
 });
 });
 const saveBtn = document.getElementById('tinder-save');
-if (saveBtn) saveBtn.addEventListener('click', save);
+if (saveBtn) saveBtn.addEventListener('click', () => save(false));
+const saveOpenBtn = document.getElementById('tinder-save-open');
+if (saveOpenBtn) saveOpenBtn.addEventListener('click', () => save(true));
 }
 
-async function save() {
+// openAfter opens the connection's own card, expanded, in a new tab once
+// the save actually lands -- a separate real page load (this is a single-
+// page app with no per-connection URL otherwise), so it goes through the
+// same #<tab>:<id> hash format initTabs() already parses.
+async function save(openAfter) {
 if (!pending || !pending.chosenId) return;
 const conn = data.connections.find((c) => c.id === pending.chosenId);
 if (!conn) return;
+const connId = conn.id;
 const status = document.getElementById('tinder-save-status');
 if (status) status.textContent = 'Saving…';
 
@@ -769,6 +777,7 @@ if (pending.matchId && !conn.tinderMatchId) conn.tinderMatchId = pending.matchId
 queueSave();
 Promise.all([import('./connections.js'), import('./overview.js')])
 .then(([c, o]) => { c.renderConnections(); o.renderOverview(); hydratePhotos(document.getElementById('conn-list') || document.body); });
+if (openAfter) window.open(`${location.origin}${location.pathname}#dating:${connId}`, '_blank');
 
 // A photo silently not saving with no visible reason (beyond a
 // console.error nobody was watching for) was exactly what happened

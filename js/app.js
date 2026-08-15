@@ -27,7 +27,7 @@ import { initShareTarget } from './features/sharetarget.js';
 // Photos whose bytes aren't on this device are fetched from your own host.
 // Registered rather than imported: the implementation reaches state.js, and
 // state.js imports utils.js, so importing it back would be a cycle.
-import { setPhotoFallback } from './utils.js';
+import { setPhotoFallback, scrollAndFlash } from './utils.js';
 import { serverPhotoUrl } from './files.js';
 // Imported for its side effect: it registers the Notion controls with
 // tasks.js, which keeps that dependency pointing one way.
@@ -44,10 +44,20 @@ btn.addEventListener('click', () => switchTab(btn.dataset.tabBtn));
 });
 // A task's `link` (or any pasted URL) can point at #<tab> to open the app
 // straight onto that tab — falls back to overview for a missing/unknown
-// hash rather than landing on a blank tab bar with nothing shown.
+// hash rather than landing on a blank tab bar with nothing shown. An
+// optional #<tab>:<connId> suffix (used by "Save & open profile" in the
+// Tinder importer, since this is a single-page app with no other way to
+// give a connection its own real URL) also expands and scrolls to that
+// connection once the tab's switched to.
 const validTabs = new Set([...document.querySelectorAll('[data-tab-btn]')].map((b) => b.dataset.tabBtn));
-const fromHash = location.hash.slice(1);
+const [fromHash, connId] = location.hash.slice(1).split(':');
 switchTab(validTabs.has(fromHash) ? fromHash : 'overview');
+if (connId) {
+import('./features/connections.js').then((m) => {
+m.expandConnection(connId);
+setTimeout(() => scrollAndFlash(`[data-conn-row="${connId}"]`), 80);
+});
+}
 }
 
 function initSaveNote() {
