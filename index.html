@@ -952,21 +952,48 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
   // the two sites can't see each other, so this is the only way tomorrow's
   // run knows what today's already covered. Keyed by match id, the same
   // permanent identifier the URL itself uses.
+  //
+  // Version-stamped rather than a flat done/not-done flag: a plain flag
+  // can never be revisited once a bug in the extraction itself is found
+  // and fixed (confirmed live: a photo-scope change broke photo capture
+  // entirely for a while) -- anyone scraped during that window would stay
+  // marked done forever, missing photos, with no way back short of
+  // wiping ALL tracking and re-running everyone. Bump SCRIPT_VERSION
+  // whenever a fix could affect what gets captured; anyone stamped with
+  // an older version is automatically re-offered next run. Re-running
+  // someone already saved is safe either way -- the dashboard fills in
+  // whatever's still missing rather than duplicating what's already
+  // there.
+  const SCRIPT_VERSION = 2;
   const DONE_KEY = 'dashTinderBulkDone';
   const BATCH_SIZE = 15; // "10-20 or so per day"
   const MIN_DELAY_MS = 10000, MAX_DELAY_MS = 60000; // randomised, not a fixed interval &mdash; a fixed gap is a bot tell
 
-  let done;
-  try { done = new Set(JSON.parse(localStorage.getItem(DONE_KEY) || '[]')); } catch (e) { done = new Set(); }
+  let doneVersions = {};
+  try {
+    const raw = JSON.parse(localStorage.getItem(DONE_KEY) || '{}');
+    if (Array.isArray(raw)) {
+      // Legacy format from before version-stamping existed: a flat array
+      // of ids with no version attached. Every one of these could have
+      // been scraped under the exact bug this versioning exists to
+      // recover from, so treat them all as version 0 -- older than any
+      // real version -- and let them be re-offered.
+      raw.forEach((id) =&gt; { doneVersions[id] = 0; });
+    } else {
+      doneVersions = raw || {};
+    }
+  } catch (e) { doneVersions = {}; }
 
   const candidates = collectCandidates();
-  const todo = candidates.filter((r) =&gt; !done.has(r.id)).slice(0, BATCH_SIZE);
+  const isDone = (id) =&gt; (doneVersions[id] || 0) &gt;= SCRIPT_VERSION;
+  const todo = candidates.filter((r) =&gt; !isDone(r.id)).slice(0, BATCH_SIZE);
   const profiles = [];
 
   // Always logged, whether or not there's anything new to actually run --
   // "how far through 205 am I" shouldn't require sitting through another
   // batch to find out.
-  console.log(`${candidates.length} visible in the sidebar -- ${done.size} already done, ${candidates.length - done.size} remaining.`);
+  const doneCount = candidates.filter((r) =&gt; isDone(r.id)).length;
+  console.log(`${candidates.length} visible in the sidebar -- ${doneCount} already done, ${candidates.length - doneCount} remaining.`);
 
   if (!todo.length) {
     console.log(`Nothing new -- all visible matches already processed. Scroll the list down to reveal more, then run again.`);
@@ -992,8 +1019,8 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
           const extracted = await extractProfile(row.name);
           extracted.matchId = row.id; // already known from the sidebar row — same permanent id the single-profile snippet reads from the URL
           profiles.push(extracted);
-          done.add(row.id);
-          localStorage.setItem(DONE_KEY, JSON.stringify([...done]));
+          doneVersions[row.id] = SCRIPT_VERSION;
+          localStorage.setItem(DONE_KEY, JSON.stringify(doneVersions));
         } catch (err) {
           console.warn(`Extraction failed for ${row.name}: ${err.message} -- skipped.`);
         }
@@ -1009,7 +1036,26 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
       let copied = false;
       try { copy(json); copied = true; } catch (e) { /* not in a real DevTools console */ }
       if (!copied) { try { await navigator.clipboard.writeText(json); copied = true; } catch (e) { /* no clipboard permission/focus */ } }
-      console.log(`${copied ? 'Copied' : 'Could not auto-copy -- select and copy manually'} -- ${profiles.length} of ${todo.length} attempted profile${todo.length === 1 ? '' : 's'} extracted. Paste into the dashboard.`);
+      // Marked done in localStorage the moment a profile is scraped here,
+      // not when the dashboard actually saves it -- the two are different
+      // origins with no way to signal back. So the clipboard alone isn't
+      // enough: closing the tab, or the clipboard getting overwritten,
+      // before pasting would lose this batch for good even though it's
+      // already marked as never-offer-again. A real file on disk survives
+      // that -- still there to paste in later even if today's paste never
+      // happens.
+      try {
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `tinder-batch-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() =&gt; URL.revokeObjectURL(url), 10000);
+      } catch (e) { /* download blocked -- clipboard/console log are still there */ }
+      console.log(`${copied ? 'Copied' : 'Could not auto-copy -- select and copy manually'} -- ${profiles.length} of ${todo.length} attempted profile${todo.length === 1 ? '' : 's'} extracted, and saved to a file in your Downloads folder too. Paste into the dashboard now or later.`);
       if (!copied) console.log(json);
     }
   }
