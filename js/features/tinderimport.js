@@ -22,7 +22,7 @@
 // importer), and the chosen connection's photo stays visible for the whole
 // review regardless of how it got picked, so a wrong dropdown pick is just
 // as visible as a wrong auto-match was invisible before.
-import { data, queueSave, currentAge, computeFlags, distanceMiles } from '../state.js';
+import { data, queueSave, currentAge, computeFlags, distanceMiles, FLAG_FIELD_DEFS } from '../state.js';
 import { escapeHtml, uid, todayStr, hydratePhotos } from '../utils.js';
 import { nameKey, editDistance } from '../googlecontacts.js';
 import { storePhoto, fetchProxiedImage } from '../files.js';
@@ -647,10 +647,14 @@ note = fresh.length === 0 ? `already in ${arrayMap.target} — will be skipped`
 if (fresh.length === 0) { disabled = true; dim = true; }
 }
 const isChat = f.label === 'Chat history';
+const flagColor = isChat ? null : fieldFlagColor(f);
+const valueHtml = isChat ? '' : (flagColor
+? `<span class="tinder-flag-hit tinder-flag-hit-${flagColor}" title="Flagged ${flagColor}">${highlightCities(f.value)}</span>`
+: highlightCities(f.value));
 return `<div class="tinder-field-row${dim ? ' tinder-field-blocked' : ''}">
 <label class="tinder-field-label">
 <input type="checkbox" data-tinder-field="${i}"${f.apply && !disabled ? ' checked' : ''}${disabled ? ' disabled' : ''}>
-<span><strong>${escapeHtml(f.label)}:</strong>${isChat ? '' : ` ${highlightCities(f.value)}`} <span class="tinder-field-note">(${escapeHtml(note)})</span></span>
+<span><strong>${escapeHtml(f.label)}:</strong>${isChat ? '' : ` ${valueHtml}`} <span class="tinder-field-note">(${escapeHtml(note)})</span></span>
 </label>
 ${translateButtonHtml(f, i)}
 ${countryButtonHtml(f, i)}
@@ -741,6 +745,26 @@ function flagBreakdownHtml() {
 const flags = computeFlags(draftConnForFlags(), data.flagRules);
 if (!flags.hits.length) return '';
 return `<div class="flag-breakdown" style="margin:4px 0 8px;">${flags.hits.map((h) => `<span class="dot ${h.color}"></span>${escapeHtml(h.label)}`).join(' &nbsp; ')}</div>`;
+}
+
+// Value-list rules (Education, Sober, Smoker...) get their inline
+// highlight via highlightCities()'s literal-phrase matching, but a
+// threshold rule (Height, Distance, Age) has no discrete text value to
+// match against a phrase — it's a number computed from the field, so
+// "178cm" can't be found by scanning for "178cm" the way "Sober" can be
+// found by scanning for "Sober". Confirmed live: Height never
+// highlighted at all under the old scheme. This checks the SAME
+// computeFlags() result the summary breakdown already uses, keyed by
+// which connection field this Tinder field label routes to, so a
+// threshold field's whole value gets wrapped instead of substring-matched.
+function fieldFlagColor(f) {
+const target = FIELD_MAP[f.label];
+if (!target) return null;
+const def = FLAG_FIELD_DEFS.find((d) => d.field === target);
+if (!def || def.kind !== 'number') return null;
+const flags = computeFlags(draftConnForFlags(), data.flagRules);
+const hit = flags.hits.find((h) => h.field === target);
+return hit ? hit.color : null;
 }
 
 function ratingStarsHtml(current) {

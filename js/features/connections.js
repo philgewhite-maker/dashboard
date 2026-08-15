@@ -761,9 +761,17 @@ document.body.appendChild(box);
 function flagRuleRowHtml(rule) {
 const def = FLAG_FIELD_DEFS.find((d) => d.field === rule.field);
 if (!def) return '';
+// All four bounds, not just greenMax/redMin -- thresholdColor() in
+// state.js has supported both directions (short-is-good like Distance,
+// tall-is-good like Height) since the Height rule was added, but this
+// form was never updated to match, so a rule using greenMin/redMax (like
+// the seeded Height default) showed as two blank boxes with no way to
+// see or edit its actual values. Confirmed live.
 const inputs = def.kind === 'number'
-? `<input type="number" class="mini" data-flag-bound="greenMax" data-flag-rule="${rule.id}" value="${rule.greenMax ?? ''}" placeholder="Green &le;">`
+? `<input type="number" class="mini" data-flag-bound="greenMin" data-flag-rule="${rule.id}" value="${rule.greenMin ?? ''}" placeholder="Green &ge;">`
++ `<input type="number" class="mini" data-flag-bound="greenMax" data-flag-rule="${rule.id}" value="${rule.greenMax ?? ''}" placeholder="Green &le;">`
 + `<input type="number" class="mini" data-flag-bound="redMin" data-flag-rule="${rule.id}" value="${rule.redMin ?? ''}" placeholder="Red &ge;">`
++ `<input type="number" class="mini" data-flag-bound="redMax" data-flag-rule="${rule.id}" value="${rule.redMax ?? ''}" placeholder="Red &le;">`
 : `<input type="text" autocomplete="off" data-flag-list="green" data-flag-rule="${rule.id}" value="${escapeHtml((rule.green || []).join(', '))}" placeholder="Green values, comma separated">`
 + `<input type="text" autocomplete="off" data-flag-list="amber" data-flag-rule="${rule.id}" value="${escapeHtml((rule.amber || []).join(', '))}" placeholder="Amber values, comma separated">`
 + `<input type="text" autocomplete="off" data-flag-list="red" data-flag-rule="${rule.id}" value="${escapeHtml((rule.red || []).join(', '))}" placeholder="Red values, comma separated">`;
