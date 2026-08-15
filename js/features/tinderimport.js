@@ -266,6 +266,46 @@ render();
 // preview rather than a blind checkbox list, so "this will overwrite
 // something" or "this is already set and will be skipped" is visible
 // before Save, not discovered after.
+function escapeRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+// City rarely arrives in a structured field — it's usually said in chat —
+// and free-text guessing at what's a place name is too unreliable to
+// trust. But every OTHER connection's own City is a real, known-good
+// value, so matching against that list is exact rather than a guess: any
+// text this profile carries gets scanned for a case-insensitive exact hit
+// against a city that's already on file for someone else, highlighted so
+// it's easy to spot, and clicking it fills the City field rather than
+// applying anything automatically.
+function knownCityMap() {
+const map = new Map(); // lowercase -> original casing (first one seen)
+data.connections.forEach((c) => {
+const loc = String(c.location || '').trim();
+if (loc && !map.has(loc.toLowerCase())) map.set(loc.toLowerCase(), loc);
+});
+return map;
+}
+
+function highlightCities(text) {
+const cityMap = knownCityMap();
+if (!cityMap.size) return escapeHtml(text);
+// Longest names first, so a multi-word city ("New York") wins whole
+// rather than a shorter, unrelated city name that happens to be a
+// substring of it matching first.
+const names = [...cityMap.values()].sort((a, b) => b.length - a.length);
+const re = new RegExp(`\\b(${names.map(escapeRegex).join('|')})\\b`, 'gi');
+let out = '';
+let last = 0;
+let m;
+while ((m = re.exec(text))) {
+out += escapeHtml(text.slice(last, m.index));
+const original = cityMap.get(m[0].toLowerCase()) || m[0];
+out += `<span class="tinder-city-hit" data-city="${escapeHtml(original)}" title="Click to set as City">${escapeHtml(m[0])}</span>`;
+last = m.index + m[0].length;
+}
+out += escapeHtml(text.slice(last));
+return out;
+}
+
 function fieldPreviewHtml(f, i) {
 const conn = data.connections.find((c) => c.id === pending.chosenId);
 const target = FIELD_MAP[f.label];
@@ -287,7 +327,7 @@ if (fresh.length === 0) blocked = true;
 }
 return `<label class="tinder-field-row${blocked ? ' tinder-field-blocked' : ''}">
 <input type="checkbox" data-tinder-field="${i}"${f.apply && !blocked ? ' checked' : ''}${blocked ? ' disabled' : ''}>
-<strong>${escapeHtml(f.label)}:</strong> ${escapeHtml(f.value)} <span class="tinder-field-note">(${escapeHtml(note)})</span>
+<strong>${escapeHtml(f.label)}:</strong> ${highlightCities(f.value)} <span class="tinder-field-note">(${escapeHtml(note)})</span>
 </label>`;
 }
 
@@ -455,6 +495,19 @@ render();
 });
 el.querySelectorAll('[data-tinder-field]').forEach((cb) => {
 cb.addEventListener('change', () => { pending.fields[parseInt(cb.dataset.tinderField, 10)].apply = cb.checked; });
+});
+el.querySelectorAll('[data-tinder-city]').forEach((hit) => {
+hit.addEventListener('click', (e) => {
+// This span sits inside the field's own <label> (the checkbox that
+// toggles whether the WHOLE field gets applied) — a plain click here
+// would also toggle that checkbox via the browser's native
+// label-forwards-to-input behaviour, confirmed live: clicking a city
+// hit silently unchecked the field it was found in.
+e.preventDefault();
+e.stopPropagation();
+pending.cityOverride = hit.dataset.city;
+render();
+});
 });
 el.querySelectorAll('[data-tinder-phone]').forEach((cb) => {
 cb.addEventListener('change', () => { pending.foundPhones[parseInt(cb.dataset.tinderPhone, 10)].apply = cb.checked; });

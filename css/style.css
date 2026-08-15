@@ -346,6 +346,12 @@ border:1px solid var(--line);border-radius:8px;
 padding:10px;margin-bottom:10px;
 }
 .tinder-candidate-row.chosen{border-color:var(--sage);box-shadow:0 0 0 2px var(--sage-bg);}
+.tinder-city-hit{
+background:var(--amber-bg);color:var(--amber);
+border-radius:4px;padding:0 3px;
+cursor:pointer;font-weight:600;
+}
+.tinder-city-hit:hover{background:var(--amber);color:#fff;}
 .album-thumb{
 display:block;
 aspect-ratio:1/1;
