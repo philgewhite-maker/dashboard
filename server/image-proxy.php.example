@@ -97,7 +97,7 @@ if (
     || !isset($parts['host'])
     || !in_array($parts['host'], $ALLOWED_HOSTS, true)
 ) {
-    fail(400, 'That URL is not on an allowed Google Photos host');
+    fail(400, 'That URL is not on an allowed image host');
 }
 
 $ch = curl_init($url);
@@ -131,7 +131,7 @@ if ($bytes === false) {
     fail(502, "Could not fetch the image: $err");
 }
 if ($httpCode < 200 || $httpCode >= 300) {
-    fail(502, "Google returned HTTP $httpCode for that image");
+    fail(502, "The source returned HTTP $httpCode for that image");
 }
 $landedHost = parse_url((string) $effectiveUrl, PHP_URL_HOST);
 if (!in_array($landedHost, $ALLOWED_HOSTS, true)) {

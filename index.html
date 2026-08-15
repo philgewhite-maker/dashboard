@@ -374,6 +374,13 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
   }
 
   const fields = [];
+  // Set once the chat-history block below finds it, so the photo scan
+  // further down can exclude it &mdash; a sender's own small avatar next to
+  // each chat message is a real gotinder.com background-image too, just
+  // not one of THIS profile's photos (confirmed live: the user's own
+  // avatar from their sent messages ended up saved as one of a match's
+  // photos).
+  let chatCard = null;
   // "You matched with X on DD/MM/YYYY" — unverified against real markup
   // (no captured page has had an open chat yet), so this deliberately
   // searches by TEXT CONTENT rather than guessing a structural selector.
@@ -514,6 +521,7 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
   const chatHeading = $$('h2').find((h) =&gt; /^Conversation history with /i.test(h.textContent.trim()));
   if (chatHeading) {
     const card = chatHeading.closest('section') || (chatHeading.parentElement &amp;&amp; chatHeading.parentElement.parentElement);
+    chatCard = card;
     const valueBlock = card &amp;&amp; [...card.children].find((el) =&gt; !el.contains(chatHeading) &amp;&amp; el.textContent.trim());
     const raw = valueBlock ? valueBlock.textContent : '';
     const cut = raw.replace(/Reply to .+/s, '');
@@ -567,19 +575,60 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
   // page mid-scroll only ever had ONE of this profile's photos as a real
   // URL, out of 8). So click through every numbered photo tab, collecting
   // whatever newly appears each time, rather than a single one-shot scan.
-  const scanPhotos = () =&gt; $$('*').map((el) =&gt; {
-    const b = getComputedStyle(el).backgroundImage;
-    const m = b &amp;&amp; b.match(/url\("([^"]+)"\)/);
-    return m &amp;&amp; m[1].includes('gotinder.com') ? m[1].replace(/\/\d+x\d+_/, '/640x800_') : null;
-  }).filter(Boolean);
-  const photos = new Set(scanPhotos());
-  for (const btn of $$('button[aria-label^="Photo "]')) {
+  //
+  // Scoped to the smallest element wrapping every "Photo N" tab button
+  // (the carousel itself), not the whole panel &mdash; confirmed live: an
+  // unscoped scan also picked up a "X liked your photo" card embedded in
+  // the CHAT panel, which shows the user's OWN liked photo full-size, not
+  // one of the match's own photos. chatCard is excluded too, as a second
+  // layer of protection for a single-photo profile with no carousel tabs
+  // to anchor the scope on.
+  function commonAncestor(els) {
+    if (!els.length) return null;
+    let candidates = [];
+    for (let el = els[0]; el; el = el.parentElement) candidates.push(el);
+    for (let i = 1; i &lt; els.length; i++) {
+      const seen = new Set();
+      for (let el = els[i]; el; el = el.parentElement) seen.add(el);
+      candidates = candidates.filter((c) =&gt; seen.has(c));
+    }
+    return candidates[0] || null;
+  }
+  const photoButtons = $$('button[aria-label^="Photo "]');
+  const photoScope = commonAncestor(photoButtons) || root;
+
+  // The same photo can turn up under more than one URL shape in one scan
+  // pass &mdash; confirmed live, a resized "640x800_75_&lt;uuid&gt;.webp" AND a
+  // full-size "original_&lt;uuid&gt;.jpg" of the identical file, which a plain
+  // string dedupe doesn't recognise as the same photo. Keyed on the
+  // (folder id, uuid) pair every shape of the URL carries, keeping
+  // whichever variant was actually seen first.
+  const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+  function photoKey(url) {
+    const folder = url.match(/gotinder\.com\/([a-zA-Z0-9]+)\//);
+    const uuid = url.match(UUID_RE);
+    return folder &amp;&amp; uuid ? `${folder[1]}/${uuid[0]}` : url;
+  }
+  const photoMap = new Map();
+  const scanPhotos = () =&gt; {
+    [...photoScope.querySelectorAll('*')].forEach((el) =&gt; {
+      if (chatCard &amp;&amp; chatCard.contains(el)) return;
+      const b = getComputedStyle(el).backgroundImage;
+      const m = b &amp;&amp; b.match(/url\("([^"]+)"\)/);
+      if (!m || !m[1].includes('gotinder.com')) return;
+      const url = m[1].replace(/\/\d+x\d+_/, '/640x800_');
+      const key = photoKey(url);
+      if (!photoMap.has(key)) photoMap.set(key, url);
+    });
+  };
+  scanPhotos();
+  for (const btn of photoButtons) {
     btn.click();
     await new Promise((r) =&gt; setTimeout(r, 300));
-    scanPhotos().forEach((u) =&gt; photos.add(u));
+    scanPhotos();
   }
 
-  const out = { name, age, fields, photos: [...photos] };
+  const out = { name, age, fields, photos: [...photoMap.values()] };
   const json = JSON.stringify(out, null, 1);
   let copied = false;
   try { copy(json); copied = true; } catch (e) { /* not in a real DevTools console */ }
@@ -630,6 +679,7 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
     }
 
     const fields = [];
+    let chatCard = null;
     const matchedEl = [...root.querySelectorAll('*')].find((el) =&gt; el.children.length === 0 &amp;&amp; /you matched.*on\s+\d{1,2}\/\d{1,2}\/\d{2,4}/i.test(el.textContent || ''));
     if (matchedEl) {
       const dm = matchedEl.textContent.match(/on\s+(\d{1,2})\/(\d{1,2})\/(\d{2,4})/i);
@@ -708,6 +758,7 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
     const chatHeading = $$('h2').find((h) =&gt; /^Conversation history with /i.test(h.textContent.trim()));
     if (chatHeading) {
       const card = chatHeading.closest('section') || (chatHeading.parentElement &amp;&amp; chatHeading.parentElement.parentElement);
+      chatCard = card;
       const valueBlock = card &amp;&amp; [...card.children].find((el) =&gt; !el.contains(chatHeading) &amp;&amp; el.textContent.trim());
       const raw = valueBlock ? valueBlock.textContent : '';
       const cut = raw.replace(/Reply to .+/s, '');
@@ -743,19 +794,45 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
       }
     });
 
-    const scanPhotos = () =&gt; $$('*').map((el) =&gt; {
-      const b = getComputedStyle(el).backgroundImage;
-      const m = b &amp;&amp; b.match(/url\("([^"]+)"\)/);
-      return m &amp;&amp; m[1].includes('gotinder.com') ? m[1].replace(/\/\d+x\d+_/, '/640x800_') : null;
-    }).filter(Boolean);
-    const photos = new Set(scanPhotos());
-    for (const btn of $$('button[aria-label^="Photo "]')) {
+    function commonAncestor(els) {
+      if (!els.length) return null;
+      let candidates = [];
+      for (let el = els[0]; el; el = el.parentElement) candidates.push(el);
+      for (let i = 1; i &lt; els.length; i++) {
+        const seen2 = new Set();
+        for (let el = els[i]; el; el = el.parentElement) seen2.add(el);
+        candidates = candidates.filter((c) =&gt; seen2.has(c));
+      }
+      return candidates[0] || null;
+    }
+    const photoButtons = $$('button[aria-label^="Photo "]');
+    const photoScope = commonAncestor(photoButtons) || root;
+    const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+    function photoKey(url) {
+      const folder = url.match(/gotinder\.com\/([a-zA-Z0-9]+)\//);
+      const uuid = url.match(UUID_RE);
+      return folder &amp;&amp; uuid ? `${folder[1]}/${uuid[0]}` : url;
+    }
+    const photoMap = new Map();
+    const scanPhotos = () =&gt; {
+      [...photoScope.querySelectorAll('*')].forEach((el) =&gt; {
+        if (chatCard &amp;&amp; chatCard.contains(el)) return;
+        const b = getComputedStyle(el).backgroundImage;
+        const m = b &amp;&amp; b.match(/url\("([^"]+)"\)/);
+        if (!m || !m[1].includes('gotinder.com')) return;
+        const url = m[1].replace(/\/\d+x\d+_/, '/640x800_');
+        const key = photoKey(url);
+        if (!photoMap.has(key)) photoMap.set(key, url);
+      });
+    };
+    scanPhotos();
+    for (const btn of photoButtons) {
       btn.click();
       await new Promise((r) =&gt; setTimeout(r, 300));
-      scanPhotos().forEach((u) =&gt; photos.add(u));
+      scanPhotos();
     }
 
-    return { name, age, fields, photos: [...photos] };
+    return { name, age, fields, photos: [...photoMap.values()] };
   }
 
   // Every match/message row in either sidebar list shares the same
