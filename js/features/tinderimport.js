@@ -800,6 +800,24 @@ const raw = JSON.parse(trimmed);
 return Array.isArray(raw.profiles) ? raw.profiles : [raw];
 }
 
+// Shared by the paste box and the file-upload path (a previously-saved
+// tinder-batch-*.json, either the bulk snippet's own automatic download-
+// safety-net file, or any older batch worth re-running through TODAY's
+// import logic — every fix that lives on this side, not the console-
+// snippet side, applies retroactively just by re-feeding the same raw
+// {label,value} data through it again).
+function loadBatch(raws, status) {
+if (!raws.length) { if (status) status.textContent = 'Nothing to import in that.'; return; }
+queue = raws.slice(1);
+loadFromRaw(raws[0]);
+const p = pending;
+const matchNote = p.match
+? (p.match.why === 'exact' ? `Matched ${p.match.conn.name} exactly — check the fields below, then save.` : `Possible match found (${p.match.why}) — confirm it's really them before saving.`)
+: 'No matching connection — pick one or add new.';
+if (status) status.textContent = raws.length > 1 ? `Loaded 1 of ${raws.length} in this batch. ${matchNote}` : matchNote;
+render();
+}
+
 // Scans every extracted field's text for a phone number or a social handle
 // — not just chat, since both turn up just as often in a bio or a prompt
 // answer. Chat is the one field with more than one author, so it's the one
@@ -932,15 +950,25 @@ status.textContent = `Couldn't read that: ${err.message}. Paste the JSON the sni
 return;
 }
 if (!raws.length) { status.textContent = 'Paste the copied JSON first.'; return; }
-queue = raws.slice(1);
-loadFromRaw(raws[0]);
-const p = pending;
-const matchNote = p.match
-? (p.match.why === 'exact' ? `Matched ${p.match.conn.name} exactly — check the fields below, then save.` : `Possible match found (${p.match.why}) — confirm it's really them before saving.`)
-: 'No matching connection — pick one or add new.';
-status.textContent = raws.length > 1 ? `Loaded 1 of ${raws.length} in this batch. ${matchNote}` : matchNote;
-render();
+loadBatch(raws, status);
 });
+
+const fileInput = document.getElementById('tinder-file-input');
+if (fileInput) {
+fileInput.addEventListener('change', async () => {
+const file = fileInput.files[0];
+fileInput.value = ''; // lets the same file be re-picked later without needing a different one first
+if (!file) return;
+let raws;
+try {
+raws = parseBatch(await file.text());
+} catch (err) {
+status.textContent = `Couldn't read "${file.name}": ${err.message}.`;
+return;
+}
+loadBatch(raws, status);
+});
+}
 
 const copyBtn = document.getElementById('tinder-copy-snippet');
 if (copyBtn) {

@@ -1126,6 +1126,8 @@ console.log('Ready. Run tinderBulkImport() for the default 15, or tinderBulkImpo
 <textarea id="tinder-input" rows="4" style="width:100%;font-family:monospace;font-size:12px;" placeholder="Paste the copied JSON here — one profile or a batch, either works"></textarea>
 <div class="sync-row" style="margin-top:8px;">
 <button class="sync-btn" id="tinder-import-btn" type="button">Read profile(s)</button>
+<label class="file-btn" for="tinder-file-input">Or upload a saved .json file</label>
+<input type="file" id="tinder-file-input" accept="application/json" style="display:none;">
 <span class="sync-status" id="tinder-status"></span>
 </div>
 <div id="tinder-review"></div>
