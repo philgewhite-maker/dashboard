@@ -424,6 +424,22 @@ out += escapeHtml(text.slice(last));
 return out;
 }
 
+// One line per message, sender colour-coded — "You" in blue, the match
+// in pink — so a long back-and-forth reads as a conversation instead of
+// one run-on paragraph. Same [HH:MM] Sender: message shape the parser
+// and hasMutualMessages() already assume; a line that doesn't match (
+// shouldn't normally happen) still renders, just without the split.
+function chatHistoryHtml(text) {
+return text.split('\n').map((line) => {
+const m = line.match(/^\[(\d{1,2}:\d{2})\]\s*([^:]+):\s*(.*)$/);
+if (!m) return `<div class="tinder-chat-line">${highlightCities(line)}</div>`;
+const [, time, sender, message] = m;
+const senderName = sender.trim();
+const senderClass = senderName === 'You' ? 'tinder-chat-you' : 'tinder-chat-them';
+return `<div class="tinder-chat-line"><span class="tinder-chat-time">[${escapeHtml(time)}]</span> <span class="${senderClass}">${escapeHtml(senderName)}</span>: ${highlightCities(message)}</div>`;
+}).join('');
+}
+
 // Structured, short-value fields where "translate this" is meaningless —
 // a language name, a bearing, a single word already matched against a
 // closed enum. Everything else (job titles, school names, prompt answers,
@@ -469,13 +485,15 @@ note = fresh.length === 0 ? `already in ${arrayMap.target} — will be skipped`
 : `will add ${fresh.length} new to ${arrayMap.target}, rest already there`;
 if (fresh.length === 0) { disabled = true; dim = true; }
 }
+const isChat = f.label === 'Chat history';
 return `<div class="tinder-field-row${dim ? ' tinder-field-blocked' : ''}">
 <label class="tinder-field-label">
 <input type="checkbox" data-tinder-field="${i}"${f.apply && !disabled ? ' checked' : ''}${disabled ? ' disabled' : ''}>
-<span><strong>${escapeHtml(f.label)}:</strong> ${highlightCities(f.value)} <span class="tinder-field-note">(${escapeHtml(note)})</span></span>
+<span><strong>${escapeHtml(f.label)}:</strong>${isChat ? '' : ` ${highlightCities(f.value)}`} <span class="tinder-field-note">(${escapeHtml(note)})</span></span>
 </label>
 ${translateButtonHtml(f, i)}
 </div>
+${isChat ? `<div class="tinder-chat-block">${chatHistoryHtml(f.value)}</div>` : ''}
 ${translationResultHtml(i)}`;
 }
 

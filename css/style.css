@@ -315,6 +315,11 @@ gap:12px;
 .tinder-field-label{display:flex;align-items:baseline;gap:6px;flex:1;min-width:0;}
 .tinder-field-note{color:var(--muted);font-size:11px;}
 .tinder-field-blocked{opacity:.55;}
+.tinder-chat-block{margin:2px 0 6px 22px;max-height:220px;overflow-y:auto;border:1px solid var(--line);border-radius:6px;padding:6px 8px;}
+.tinder-chat-line{font-size:12px;margin:2px 0;}
+.tinder-chat-time{color:var(--muted);font-size:11px;}
+.tinder-chat-you{color:var(--slate);font-weight:600;}
+.tinder-chat-them{color:var(--rose);font-weight:600;}
 .tinder-translate-result{font-size:12px;color:var(--muted);margin:2px 0 4px 22px;}
 .tinder-translate-error{color:var(--rose);}
 .tinder-photo-thumb{opacity:.4;transition:opacity .1s;}
