@@ -2139,6 +2139,12 @@ cursor:pointer;
 }
 button.add-btn:hover{opacity:.85;}
 button.add-btn.tinder-risky{background:var(--rose);}
+/* Fixed width regardless of the connection's name length ("Save to
+   Christopher" vs "Save to Amy") -- otherwise every button after it
+   (Skip, +New, More info) shifts horizontally per profile, which makes
+   rapid-fire Skip-Skip-Skip clicking at a fixed screen position miss.
+   Full label still available via the title attribute on hover/long-press. */
+button.add-btn.tinder-save-btn{width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;flex-shrink:0;}
 .empty{
 color:var(--muted);
 font-size:13px;

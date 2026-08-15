@@ -774,8 +774,8 @@ ${flagBreakdownHtml()}
 ${p.risky ? `<div class="tinder-field-note tinder-translate-error" style="margin:6px 0 0;">More than one connection shares this name (and a similar age) — double-check the photo before saving, this pick might be wrong.</div>` : ''}
 <div class="sync-row" style="margin:6px 0 8px;align-items:center;">
 ${chosenConn && chosenConn.photoId ? `<span class="tinder-confirm-pic" data-photo-id="${escapeHtml(chosenConn.photoId)}" title="${escapeHtml(chosenConn.name)}"></span>` : ''}
-<button class="add-btn${p.risky ? ' tinder-risky' : ''}" type="button" id="tinder-save"${canSave ? '' : ' disabled'}>${escapeHtml(saveLabel)}</button>
-<button class="sync-btn" type="button" id="tinder-save-open"${canSave ? '' : ' disabled'}>${escapeHtml(saveLabel)} & open profile</button>
+<button class="add-btn tinder-save-btn${p.risky ? ' tinder-risky' : ''}" type="button" id="tinder-save"${canSave ? '' : ' disabled'} title="${escapeHtml(saveLabel)}">${escapeHtml(saveLabel)}</button>
+<button class="sync-btn" type="button" id="tinder-save-open"${canSave ? '' : ' disabled'} title="${escapeHtml(saveLabel)} & open profile">& open profile</button>
 <button class="sync-btn" type="button" id="tinder-skip">Skip</button>
 <button class="sync-btn" type="button" id="tinder-newconn">+ New</button>
 <button class="sync-btn" type="button" id="tinder-more-info-open">More info</button>
