@@ -178,8 +178,12 @@ return conn;
 // uses for a bio it can't otherwise place.
 const FIELD_MAP = {
 'Family plans': 'kids', Education: 'education', Height: 'height', Work: 'job', 'Job title': 'job', Job: 'job', Distance: 'distance', City: 'location',
-'Matched on': 'matchedOn', 'Chat history': 'chatLog',
+'Matched on': 'matchedOn', 'Chat history': 'chatLog', 'Last message date': 'lastContact',
 };
+// Unlike the rest of FIELD_MAP, this one's SUPPOSED to change every import
+// — that's the entire point of extracting it — so it's exempt from the
+// usual already-set-defaults-to-unchecked rule (see refreshOverrides()).
+const ALWAYS_APPLY_LABELS = new Set(['Last message date']);
 
 // Fields that become chips in an existing multi-value tag list instead —
 // added to, never overwritten, so re-importing the same person twice just
@@ -1051,7 +1055,7 @@ pending.ratingOverride = conn ? (conn.priority || 0) : 0;
 if (conn && Array.isArray(pending.fields)) {
 pending.fields.forEach((f) => {
 const target = FIELD_MAP[f.label];
-if (target && String(conn[target] || '').trim()) f.apply = false;
+if (target && String(conn[target] || '').trim() && !ALWAYS_APPLY_LABELS.has(f.label)) f.apply = false;
 });
 }
 }
