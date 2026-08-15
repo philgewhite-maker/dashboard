@@ -15,7 +15,7 @@
 //    March should not be adding noise in January.
 import { data, queueSave, TASK_BUCKETS, blankTask } from '../state.js';
 import { photoDelete } from '../db.js';
-import { uid, todayStr, escapeHtml, hydratePhotos, resizeImageToBlob, daysUntil, daysSince } from '../utils.js';
+import { uid, todayStr, escapeHtml, hydratePhotoBackgrounds, resizeImageToBlob, daysUntil, daysSince } from '../utils.js';
 import { uploadAttachment, storePhoto, deleteAttachment, openAttachment, formatBytes } from '../files.js';
 
 const BUCKET_LABEL = Object.fromEntries(TASK_BUCKETS.map((b) => [b.bucket, b.label]));
@@ -118,7 +118,7 @@ ${rows}
 }
 
 function taskDetailHtml(t) {
-const photos = (t.photoIds || []).map((id, i) => `<div class="gallery-thumb"><span class="thumb-img" data-photo-id="${escapeHtml(id)}"></span><span class="tag-x" data-task-photo-remove="${t.id}" data-photo-idx="${i}">&times;</span></div>`).join('');
+const photos = (t.photoIds || []).map((id, i) => `<div class="gallery-thumb"><span class="thumb-img" data-photo-bg="${escapeHtml(id)}"></span><span class="tag-x" data-task-photo-remove="${t.id}" data-photo-idx="${i}">&times;</span></div>`).join('');
 return `<div class="task-detail">
 <label class="full">Title<input type="text" autocomplete="off" data-task-field="title" data-task-id="${t.id}" value="${escapeHtml(t.title)}"></label>
 <label class="full">Notes<textarea rows="2" data-task-field="notes" data-task-id="${t.id}">${escapeHtml(t.notes || '')}</textarea></label>
@@ -195,7 +195,7 @@ el.innerHTML = `<div class="alloc-grid">
 ${inbox.map((t) => `<div class="alloc-card" draggable="true" data-alloc-card="${t.id}">
 <div class="alloc-title">${escapeHtml(t.title || '(untitled)')}</div>
 ${t.notes ? `<div class="alloc-notes">${escapeHtml(t.notes)}</div>` : ''}
-${(t.photoIds || []).length ? `<div class="alloc-photo"><span class="thumb-img" data-photo-id="${escapeHtml(t.photoIds[0])}"></span></div>` : ''}
+${(t.photoIds || []).length ? `<div class="alloc-photo"><span class="thumb-img" data-photo-bg="${escapeHtml(t.photoIds[0])}"></span></div>` : ''}
 ${t.source ? `<div class="alloc-source">from ${escapeHtml(t.source.kind)}</div>` : ''}
 <div class="alloc-controls">
 <select data-alloc-bucket="${t.id}">
@@ -213,7 +213,7 @@ ${FILING_BUCKETS.map((b) => `<div class="alloc-target" data-drop-bucket="${b.buc
 </div>`).join('')}
 </div>
 </div>`;
-hydratePhotos(el);
+hydratePhotoBackgrounds(el);
 bindAllocation(el);
 }
 
@@ -245,7 +245,7 @@ ${dormant.sort((a, b) => daysUntil(a.bringForward) - daysUntil(b.bringForward)).
 </div>` : '';
 
 el.innerHTML = (sections + dormantHtml) || '<div class="empty">Nothing filed yet — capture something above, then file it from the Inbox.</div>';
-hydratePhotos(el);
+hydratePhotoBackgrounds(el);
 bindTaskRows(el);
 }
 

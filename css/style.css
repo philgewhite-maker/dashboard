@@ -337,14 +337,13 @@ gap:12px;
 .tinder-chat-time{color:var(--muted);font-size:11px;}
 .tinder-chat-you{background:var(--slate-bg);color:var(--slate);font-weight:600;border-radius:4px;padding:0 4px;}
 .tinder-chat-them{background:var(--rose-bg);color:var(--rose);font-weight:600;border-radius:4px;padding:0 4px;}
-.tinder-confirm-pic{width:32px;height:32px;border-radius:50%;overflow:hidden;display:inline-block;background:var(--paper);flex-shrink:0;}
-.tinder-confirm-pic img{width:100%;height:100%;object-fit:cover;display:block;}
+.tinder-confirm-pic{width:32px;height:32px;border-radius:50%;overflow:hidden;display:inline-block;background:var(--paper);flex-shrink:0;background-size:cover;background-position:center;}
 .tinder-translate-result{font-size:12px;color:var(--muted);margin:2px 0 4px 22px;}
 .tinder-translate-error{color:var(--rose);}
 .tinder-engine-badge{display:inline-block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;border-radius:4px;padding:1px 5px;margin-right:2px;}
 .tinder-engine-badge.tinder-engine-free{background:var(--sage-bg);color:var(--sage);}
 .tinder-engine-badge.tinder-engine-paid{background:var(--teal-bg);color:var(--teal);}
-.tinder-photo-thumb{opacity:.4;transition:opacity .1s;}
+.tinder-photo-thumb{opacity:.4;transition:opacity .1s;background-size:cover;background-position:center;}
 .tinder-photo-thumb.tinder-photo-included{opacity:1;}
 .tinder-photo-badge{
 position:absolute;top:2px;right:2px;
@@ -377,8 +376,10 @@ padding:16px;
 width:110px;height:110px;
 border-radius:8px;overflow:hidden;
 background:var(--paper);border:1px solid var(--line);
+background-size:cover;
+background-position:center;
 }
-.tinder-photo-grid .thumb-lg img,.tinder-photo-grid .thumb-lg .thumb-img,.tinder-photo-grid .thumb-lg .thumb-img img{width:100%;height:100%;display:block;object-fit:cover;}
+.tinder-photo-grid .thumb-lg .thumb-img{width:100%;height:100%;display:block;background-size:cover;background-position:center;}
 .tinder-candidate-row{
 border:1px solid var(--line);border-radius:8px;
 padding:10px;margin-bottom:10px;
@@ -409,8 +410,7 @@ background:var(--paper);
 border:1px solid var(--line);
 }
 .album-thumb img{width:100%;height:100%;object-fit:cover;display:block;}
-.album-thumb .thumb-img{display:block;width:100%;height:100%;}
-.album-thumb .thumb-img img{width:100%;height:100%;object-fit:cover;display:block;}
+.album-thumb .thumb-img{display:block;width:100%;height:100%;background-size:cover;background-position:center;}
 .album-nocover{
 display:flex;align-items:center;justify-content:center;
 width:100%;height:100%;
@@ -429,8 +429,8 @@ overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 .album-card.saved .album-thumb{opacity:.55;}
 /* Private albums are dimmed until hovered, so a shared screen doesn't
    surface them just by opening the tab. */
-.album-sensitive .album-thumb img{filter:blur(7px);transition:filter 0.15s;}
-.album-sensitive:hover .album-thumb img{filter:none;}
+.album-sensitive .album-thumb img,.album-sensitive .album-thumb .thumb-img{filter:blur(7px);transition:filter 0.15s;}
+.album-sensitive:hover .album-thumb img,.album-sensitive:hover .album-thumb .thumb-img{filter:none;}
 .album-card.sm .tag-x{position:absolute;top:2px;right:2px;background:var(--card);border-radius:50%;padding:0 4px;}
 .album-empty{font-size:12px;color:var(--muted);margin-top:4px;}
 .album-group h4{margin:14px 0 8px;font-size:13px;}
@@ -447,8 +447,9 @@ overflow:hidden;
 background:var(--paper);
 border:1px solid var(--line);
 flex:0 0 auto;
+background-size:cover;
+background-position:center;
 }
-.album-compare .thumb-img img{width:100%;height:100%;object-fit:cover;display:block;}
 .compare-arrow{color:var(--muted);font-size:13px;}
 .album-ai-compare{
 font-size:11px;
@@ -481,8 +482,9 @@ border-radius:8px;
 overflow:hidden;
 background:var(--paper);
 flex:0 0 auto;
+background-size:cover;
+background-position:center;
 }
-.recipe-row .thumb-img img{width:100%;height:100%;object-fit:cover;display:block;}
 .recipe-noimg{border:1px dashed var(--line);}
 .recipe-id{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;}
 .recipe-name{font-size:14px;font-weight:500;cursor:pointer;}
@@ -853,8 +855,9 @@ justify-content:center;
 font-weight:600;
 font-size:14px;
 flex-shrink:0;
+background-size:cover;
+background-position:center;
 }
-.avatar img{width:100%;height:100%;object-fit:cover;display:block;}
 .avatar.sm{width:28px;height:28px;font-size:11px;}
 .match-card{border-top:1px solid var(--line);padding:12px 0;}
 .match-card:first-of-type{border-top:none;}
@@ -1214,8 +1217,9 @@ border-radius:7px;
 overflow:hidden;
 background:var(--rose-bg);
 display:block;
+background-size:cover;
+background-position:center;
 }
-.scan-thumb img{width:100%;height:100%;object-fit:cover;display:block;}
 .scan-main{flex:1;min-width:150px;display:flex;flex-direction:column;gap:2px;}
 .scan-name{font-size:14px;font-weight:600;}
 .scan-meta{
@@ -1581,8 +1585,9 @@ border-radius:6px;
 overflow:hidden;
 margin-top:6px;
 background:var(--rose-bg);
+background-size:cover;
+background-position:center;
 }
-.alloc-photo img{width:100%;height:100%;object-fit:cover;}
 .alloc-controls{
 display:flex;
 align-items:center;
@@ -1738,8 +1743,9 @@ border-radius:6px;
 overflow:hidden;
 background:var(--card);
 cursor:pointer;
+background-size:cover;
+background-position:center;
 }
-.task-photos img{width:100%;height:100%;object-fit:cover;}
 
 /* Connections Overview — collapsible sections + bulk tag assignment */
 .overview-head{
@@ -2168,4 +2174,4 @@ z-index:100;
 cursor:zoom-out;
 padding:24px;
 }
-.lightbox img{max-width:100%;max-height:100%;border-radius:8px;}
+.lightbox-img{width:100%;height:100%;border-radius:8px;background-size:contain;background-position:center;background-repeat:no-repeat;}

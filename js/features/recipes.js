@@ -201,7 +201,7 @@ const avg = averageRating(r, data.recipeRatingCategories);
 const open = expandedRecipe === r.id;
 return `<div class="recipe-card">
 <div class="recipe-row">
-${r.photoId ? `<span class="thumb-img" data-photo-id="${escapeHtml(r.photoId)}"></span>` : '<span class="thumb-img recipe-noimg"></span>'}
+${r.photoId ? `<span class="thumb-img" data-photo-bg="${escapeHtml(r.photoId)}"></span>` : '<span class="thumb-img recipe-noimg"></span>'}
 <div class="recipe-id">
 <span class="recipe-name" data-recipe-expand="${r.id}">${escapeHtml(r.name)}</span>
 ${avg ? `<span class="rating-average">avg ${avg.value.toFixed(1)} (${avg.count} rated)</span>` : ''}
@@ -224,7 +224,7 @@ return `<div class="recipe-detail">
 ${(r.photoAlbums[0] || {}).url ? `<div class="full"><a href="${escapeHtml(r.photoAlbums[0].url)}" target="_blank" rel="noopener" style="font-size:12px;color:var(--rose);">Open album &#8599;</a></div>` : ''}
 <label class="full">Ratings<div class="ratings-block">${data.recipeRatingCategories.map(({ field, label }) => recipeRatingStars(label, field, r.id, (r.ratings && r.ratings[field]) || 0)).join('')}</div></label>
 <div class="task-photos">
-${r.photoIds.map((id, i) => `<div class="gallery-thumb"><span class="thumb-img" data-photo-id="${escapeHtml(id)}"></span><span class="tag-x" data-recipe-photo-remove="${r.id}" data-photo-idx="${i}">&times;</span></div>`).join('')}
+${r.photoIds.map((id, i) => `<div class="gallery-thumb"><span class="thumb-img" data-photo-bg="${escapeHtml(id)}"></span><span class="tag-x" data-recipe-photo-remove="${r.id}" data-photo-idx="${i}">&times;</span></div>`).join('')}
 <label class="gallery-add" for="recipe-photo-add-${r.id}">+</label>
 <input type="file" id="recipe-photo-add-${r.id}" accept="image/*" multiple style="display:none;" data-recipe-photo-add="${r.id}">
 </div>
@@ -304,7 +304,7 @@ el.innerHTML = suggestionHtml()
 ? '<div class="empty">No recipes yet — import one above.</div>'
 : [...data.recipes].sort((a, b) => a.name.localeCompare(b.name)).map(recipeCardHtml).join(''));
 
-import('../utils.js').then((u) => u.hydratePhotos(el));
+import('../utils.js').then((u) => u.hydratePhotoBackgrounds(el));
 
 el.querySelectorAll('[data-recipe-expand]').forEach((span) => {
 span.addEventListener('click', () => {

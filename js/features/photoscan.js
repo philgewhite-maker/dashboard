@@ -62,13 +62,11 @@ el.innerHTML = order.map(({ s, i }) => rowHtml(s, i)).join('');
 
 order.forEach(({ s, i }) => {
 const thumb = el.querySelector(`[data-scan-thumb="${i}"]`);
-if (thumb && s.previewUrl) {
-const img = document.createElement('img');
-img.src = s.previewUrl;
-img.draggable = false;
-img.addEventListener('dragstart', (e) => e.preventDefault());
-thumb.appendChild(img);
-}
+// Painted as a CSS background rather than a real <img> — a plain <img>
+// is natively draggable enough that a pixel of movement mid-click can
+// kick off an OS-level drag of the blob: URL and pop File Explorer; see
+// hydratePhotoBackgrounds() in utils.js for the fuller story.
+if (thumb && s.previewUrl) thumb.style.backgroundImage = `url("${s.previewUrl}")`;
 });
 el.querySelectorAll('[data-scan-parse]').forEach((btn) => {
 btn.addEventListener('click', () => richParse(parseInt(btn.dataset.scanParse, 10)));

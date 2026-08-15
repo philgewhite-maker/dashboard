@@ -25,7 +25,7 @@
 // Matching by name happens ONCE, at import; what gets stored is the album
 // URL. So renaming an album later doesn't break an already-linked person.
 import { data, queueSave, TAG_FIELDS } from '../state.js';
-import { escapeHtml, uid, todayStr, hydratePhotos } from '../utils.js';
+import { escapeHtml, uid, todayStr, hydratePhotoBackgrounds } from '../utils.js';
 import { nameKey, editDistance } from '../googlecontacts.js';
 import { photoGet } from '../db.js';
 import { fetchProxiedImage, storePhoto } from '../files.js';
@@ -181,7 +181,7 @@ if (!connId) return '';
 const conn = data.connections.find((c) => c.id === connId);
 if (!conn || !conn.photoId) return '';
 return `<span class="album-compare" title="${escapeHtml(conn.name)}'s existing photo — compare before confirming">
-<span class="thumb-img sm" data-photo-id="${escapeHtml(conn.photoId)}"></span>
+<span class="thumb-img sm" data-photo-bg="${escapeHtml(conn.photoId)}"></span>
 <span class="compare-arrow">&harr;</span>
 </span>`;
 }
@@ -320,7 +320,7 @@ el.innerHTML = groups + loose
 <button class="add-btn" type="button" id="albums-apply"${ready ? '' : ' disabled'}>Save ${ready} link${ready === 1 ? '' : 's'}</button>
 </div>`
 + gapsHtml();
-hydratePhotos(el);
+hydratePhotoBackgrounds(el);
 
 el.querySelectorAll('[data-album-pick]').forEach((sel) => {
 sel.addEventListener('change', () => {

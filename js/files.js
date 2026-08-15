@@ -206,7 +206,7 @@ function isServerPhotoId(id) {
 return typeof id === 'string' && /^[a-f0-9]{32}$/.test(id);
 }
 
-// The fallback behind hydratePhotos: called only when a photo's bytes aren't
+// The fallback behind hydratePhotoBackgrounds: called only when a photo's bytes aren't
 // in this device's IndexedDB. Fetches from your host, caches, and returns an
 // object URL. Returns null for anything it can't resolve, which the caller
 // renders as an explicit "missing" marker.

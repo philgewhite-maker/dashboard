@@ -23,7 +23,7 @@
 // review regardless of how it got picked, so a wrong dropdown pick is just
 // as visible as a wrong auto-match was invisible before.
 import { data, queueSave, currentAge, computeFlags, distanceMiles, FLAG_FIELD_DEFS } from '../state.js';
-import { escapeHtml, uid, todayStr, hydratePhotos } from '../utils.js';
+import { escapeHtml, uid, todayStr, hydratePhotoBackgrounds } from '../utils.js';
 import { nameKey, editDistance } from '../googlecontacts.js';
 import { storePhoto, fetchProxiedImage } from '../files.js';
 import { photoGet } from '../db.js';
@@ -238,7 +238,7 @@ function candidateRowHtml(m) {
 const conn = m.conn;
 const existingIds = conn.photoIds && conn.photoIds.length ? conn.photoIds : (conn.photoId ? [conn.photoId] : []);
 const existingPhotos = existingIds.length
-? `<div class="tinder-photo-grid">${existingIds.map((id) => `<span class="thumb-lg"><span class="thumb-img" data-photo-id="${escapeHtml(id)}"></span></span>`).join('')}</div>`
+? `<div class="tinder-photo-grid">${existingIds.map((id) => `<span class="thumb-lg"><span class="thumb-img" data-photo-bg="${escapeHtml(id)}"></span></span>`).join('')}</div>`
 : '<div class="settings-note" style="margin:4px 0;">No photo on file for them.</div>';
 const verdict = pending.aiVerdicts[conn.id];
 const aiBlock = verdict === 'loading' ? '<div class="album-ai-compare loading">Comparing…</div>'
@@ -260,7 +260,7 @@ ${aiBlock}
 function moreInfoHtml() {
 if (!pending.showMoreInfo) return '';
 const incomingGrid = pending.photos.length
-? `<div class="tinder-photo-grid">${pending.photos.map((ph) => `<span class="thumb-lg"><img src="${escapeHtml(ph.url)}" alt="" draggable="false"></span>`).join('')}</div>`
+? `<div class="tinder-photo-grid">${pending.photos.map((ph) => `<span class="thumb-lg" style="background-image:url('${escapeHtml(ph.url)}')"></span>`).join('')}</div>`
 : '<div class="settings-note" style="margin:4px 0;">No photos in this import.</div>';
 return `<div class="tinder-more-info-overlay" id="tinder-more-info">
 <div class="tinder-more-info-box">
@@ -797,7 +797,7 @@ ${flagBreakdownHtml()}
 
 ${p.risky ? `<div class="tinder-field-note tinder-translate-error" style="margin:6px 0 0;">More than one connection shares this name (and a similar age) — double-check the photo before saving, this pick might be wrong.</div>` : ''}
 <div class="sync-row" style="margin:6px 0 8px;align-items:center;">
-${chosenConn && chosenConn.photoId ? `<span class="tinder-confirm-pic" data-photo-id="${escapeHtml(chosenConn.photoId)}" title="${escapeHtml(chosenConn.name)}"></span>` : ''}
+${chosenConn && chosenConn.photoId ? `<span class="tinder-confirm-pic" data-photo-bg="${escapeHtml(chosenConn.photoId)}" title="${escapeHtml(chosenConn.name)}"></span>` : ''}
 <button class="add-btn tinder-save-btn${p.risky ? ' tinder-risky' : ''}" type="button" id="tinder-save"${canSave ? '' : ' disabled'} title="${escapeHtml(saveLabel)}">${escapeHtml(saveLabel)}</button>
 <button class="sync-btn" type="button" id="tinder-save-open"${canSave ? '' : ' disabled'} title="${escapeHtml(saveLabel)} & open profile">& open profile</button>
 <button class="sync-btn" type="button" id="tinder-skip">Skip</button>
@@ -817,15 +817,15 @@ ${agePreviewHtml()}
 ${p.fields.length ? `<div class="tinder-fields">${p.fields.map((f, i) => fieldPreviewHtml(f, i)).join('')}</div>` : ''}
 ${contactPreviewHtml()}
 ${p.photos.length ? `<div class="settings-note" style="margin:8px 0 4px;">${p.photos.filter((ph) => ph.apply).length} of ${p.photos.length} photos will be added — click to include/exclude:</div>
-<div class="photo-gallery">${p.photos.map((ph, i) => `<span class="gallery-thumb tinder-photo-thumb${ph.apply ? ' tinder-photo-included' : ''}" data-tinder-photo="${i}"><img src="${escapeHtml(ph.url)}" alt="" draggable="false">${ph.apply ? '<span class="tinder-photo-badge">&check;</span>' : ''}</span>`).join('')}</div>` : ''}
+<div class="photo-gallery">${p.photos.map((ph, i) => `<span class="gallery-thumb tinder-photo-thumb${ph.apply ? ' tinder-photo-included' : ''}" data-tinder-photo="${i}" style="background-image:url('${escapeHtml(ph.url)}')">${ph.apply ? '<span class="tinder-photo-badge">&check;</span>' : ''}</span>`).join('')}</div>` : ''}
 </div>
 ${moreInfoHtml()}`;
 // Every render rebuilds this whole card, including fresh, un-hydrated
-// [data-photo-id] placeholders — never called here before, so a photo
+// [data-photo-bg] placeholders — never called here before, so a photo
 // only ever showed up if something ELSE had hydrated that exact id
 // first, and vanished again on the very next render (any checkbox
 // toggle, dropdown change, etc. all re-render).
-hydratePhotos(el);
+hydratePhotoBackgrounds(el);
 
 const pick = document.getElementById('tinder-pick');
 if (pick) pick.addEventListener('change', () => { pending.chosenId = pick.value; pending.matchConfirmed = false; refreshOverrides(); render(); });
@@ -1050,7 +1050,7 @@ if (pending.matchId && !conn.tinderMatchId) conn.tinderMatchId = pending.matchId
 
 queueSave();
 Promise.all([import('./connections.js'), import('./overview.js')])
-.then(([c, o]) => { c.renderConnections(); o.renderOverview(); hydratePhotos(document.getElementById('conn-list') || document.body); });
+.then(([c, o]) => { c.renderConnections(); o.renderOverview(); hydratePhotoBackgrounds(document.getElementById('conn-list') || document.body); });
 if (openAfter) window.open(`${location.origin}${location.pathname}#dating:${connId}`, '_blank');
 
 // A photo silently not saving with no visible reason (beyond a

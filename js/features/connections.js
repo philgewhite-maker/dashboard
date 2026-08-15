@@ -3,7 +3,7 @@ import { captureTask, revealTask } from './tasks.js';
 import { photoDelete, photoUrl } from '../db.js';
 import { storePhoto } from '../files.js';
 import {
-uid, todayStr, daysSince, escapeHtml, avatarHtml, hydratePhotos, hydratePhotoBackgrounds, scrollAndFlash, bindForm,
+uid, todayStr, daysSince, escapeHtml, avatarHtml, hydratePhotoBackgrounds, scrollAndFlash, bindForm,
 resizeImageToBlob,
 } from '../utils.js';
 import { MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot } from '../ai.js';
@@ -294,7 +294,7 @@ const albums = c.photoAlbums || [];
 if (!albums.length) return '<div class="album-empty">None linked — name an album "' + escapeHtml(c.name) + '_" in Google Photos, then import it on the Dating admin tab.</div>';
 return `<div class="album-strip">${albums.map((a, i) => `<div class="album-card sm${isSensitive(a) ? ' album-sensitive' : ''}">
 <a class="album-thumb" href="${escapeHtml(a.url)}" target="_blank" rel="noopener" title="${escapeHtml(a.title || a.url)}">
-${a.coverPhotoId ? `<span class="thumb-img" data-photo-id="${escapeHtml(a.coverPhotoId)}"></span>`
+${a.coverPhotoId ? `<span class="thumb-img" data-photo-bg="${escapeHtml(a.coverPhotoId)}"></span>`
 : a.cover ? `<img src="${escapeHtml(a.cover)}" alt="" draggable="false" loading="lazy" referrerpolicy="no-referrer" onerror="this.outerHTML='<span class=&quot;album-nocover&quot;>cover link expired &mdash; re-run the snippet</span>'">`
 : `<span class="album-nocover">${escapeHtml(noCoverNote(a.count))}</span>`}
 </a>
@@ -412,7 +412,6 @@ document.getElementById('clear-empty-filter').addEventListener('click', () => {
 emptyFieldFilter = null;
 renderConnections();
 });
-hydratePhotos(list);
 hydratePhotoBackgrounds(list);
 bindConnectionEvents(list);
 refreshPhotoTargets();
@@ -425,7 +424,6 @@ list.innerHTML = `<div class="filter-banner">${picked.length} matching ${escapeH
 + (picked.length === 0 ? '<div class="empty">Nobody matches all of those.</div>' : picked.map(connectionCardHtml).join(''))
 + tagDatalistsHtml();
 document.getElementById('clear-id-filter').addEventListener('click', () => { idFilter = null; renderConnections(); });
-hydratePhotos(list);
 hydratePhotoBackgrounds(list);
 bindConnectionEvents(list);
 refreshPhotoTargets();
@@ -466,7 +464,6 @@ return secondary.getValue(b) - secondary.getValue(a);
 
 list.innerHTML = sorted.map(connectionCardHtml).join('') + tagDatalistsHtml();
 
-hydratePhotos(list);
 hydratePhotoBackgrounds(list);
 bindConnectionEvents(list);
 refreshPhotoTargets();
@@ -785,13 +782,14 @@ else expandedConnections.delete(el.dataset.connDetails);
 function openLightbox(url) {
 const box = document.createElement('div');
 box.className = 'lightbox';
-// A plain <img> is natively draggable; same fix as hydratePhotos()'s
-// gallery thumbnails, but this <img> is built directly and was missed.
-// draggable="false" alone isn't reliably enough on Windows Chrome (still
-// reproduced live) -- dragstart is cancelled explicitly too, everywhere
-// an <img> gets built (see hydratePhotos in utils.js for the other spot).
-box.innerHTML = `<img src="${url}" alt="" draggable="false">`;
-box.querySelector('img').addEventListener('dragstart', (e) => e.preventDefault());
+// Painted as a CSS background rather than a real <img> — see
+// hydratePhotoBackgrounds() in utils.js. This is the one every photo
+// thumbnail click leads to, so it's the highest-traffic spot in the app
+// for the native-drag-pops-File-Explorer bug; draggable=false plus an
+// explicit dragstart preventDefault() on a real <img> here were both
+// confirmed still not reliable enough on Windows Chrome.
+box.innerHTML = '<div class="lightbox-img"></div>';
+box.querySelector('.lightbox-img').style.backgroundImage = `url("${url}")`;
 box.addEventListener('click', () => box.remove());
 document.body.appendChild(box);
 }
@@ -1163,21 +1161,20 @@ const extra = isProfile
 return candidateRowHtml(idx, cand.name, cand.age, matches, extra);
 }).join('') + '<button class="add-btn" id="confirm-import-btn" type="button" style="margin-top:6px;align-self:flex-start;">Add / update selected</button>';
 
-// hydrate candidate avatar previews from their in-memory blobs (not yet saved to IndexedDB)
+// hydrate candidate avatar previews from their in-memory blobs (not yet saved
+// to IndexedDB) — painted as a CSS background, same reasoning as
+// hydratePhotoBackgrounds() in utils.js: a real <img> here still risked
+// kicking off a native OS-level drag on click.
 candidateList.querySelectorAll('[data-candidate-photo]').forEach((el) => {
 const idx = parseInt(el.dataset.candidatePhoto, 10);
 const blob = candidates[idx].photoBlob;
 if (blob) {
-const img = document.createElement('img');
-img.src = URL.createObjectURL(blob);
-img.draggable = false;
-img.addEventListener('dragstart', (e) => e.preventDefault());
+el.style.backgroundImage = `url("${URL.createObjectURL(blob)}")`;
 el.textContent = '';
-el.appendChild(img);
 }
 });
 // hydrate existing-match avatars (already-saved photos, loaded from IndexedDB)
-await hydratePhotos(candidateList);
+await hydratePhotoBackgrounds(candidateList);
 
 document.getElementById('confirm-import-btn').addEventListener('click', async () => {
 const app = document.getElementById('import-app-input').value;

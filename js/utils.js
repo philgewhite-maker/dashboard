@@ -50,21 +50,19 @@ function initials(name) {
 return (name || '?').trim().charAt(0).toUpperCase();
 }
 
-// Renders an avatar/photo <div> with a data-photo-id placeholder; call
-// hydratePhotos() after inserting the returned HTML into the DOM to fill in
-// the actual blob URL asynchronously (IndexedDB reads are async, but HTML
-// string building is synchronous, so photo src is always a two-step render).
+// Renders an avatar/photo <div> with a data-photo-bg placeholder; call
+// hydratePhotoBackgrounds() after inserting the returned HTML into the DOM
+// to fill in the actual blob URL asynchronously (IndexedDB reads are async,
+// but HTML string building is synchronous, so photo src is always a
+// two-step render).
 function avatarHtml(photoId, name, sizeClass) {
 const cls = `avatar ${sizeClass || ''}`;
 if (photoId) {
-return `<div class="${cls}" data-photo-id="${escapeHtml(photoId)}">${escapeHtml(initials(name))}</div>`;
+return `<div class="${cls}" data-photo-bg="${escapeHtml(photoId)}">${escapeHtml(initials(name))}</div>`;
 }
 return `<div class="${cls}">${escapeHtml(initials(name))}</div>`;
 }
 
-// Finds every element carrying data-photo-id inside `root` and swaps in an
-// <img> once the blob is loaded. Safe to call repeatedly; a no-op for ids
-// that fail to resolve (leaves the initials fallback in place).
 // Resolver for photos whose bytes aren't on this device. Registered by
 // app.js rather than imported, because the implementation lives in files.js,
 // which reaches state.js — and state.js imports this module, so importing it
@@ -72,53 +70,24 @@ return `<div class="${cls}">${escapeHtml(initials(name))}</div>`;
 let photoFallback = null;
 function setPhotoFallback(fn) { photoFallback = fn; }
 
-// Fills in every [data-photo-id] placeholder. Photos are stored per-device,
-// so an id that synced from another device has no local blob; the fallback
-// fetches those from your own host. Anything still unresolved is marked
-// rather than left blank — an empty square looks identical to "no photo was
-// ever added", which is the wrong thing to conclude.
-async function hydratePhotos(root) {
-const nodes = [...root.querySelectorAll('[data-photo-id]')].filter((el) => !el.querySelector('img'));
-await Promise.all(nodes.map(async (el) => {
-const id = el.dataset.photoId;
-let url = await photoUrl(id);
-if (!url && photoFallback) {
-el.classList.add('photo-loading');
-try { url = await photoFallback(id); } catch (e) { /* leave it marked missing */ }
-el.classList.remove('photo-loading');
-}
-if (url) {
-const img = document.createElement('img');
-img.src = url;
-img.alt = '';
-// A plain <img> is natively draggable; nudging one a pixel mid-click is
-// enough on Windows Chrome to kick off an OS-level drag of the blob: URL,
-// which can pop File Explorer instead of (or alongside) a click handler.
-// draggable=false alone turned out not to be reliable enough on its own
-// (confirmed still happening live on the Connections photo grid despite
-// this plus the matching -webkit-user-drag:none CSS) -- explicitly
-// cancelling dragstart is a stronger, event-level block rather than a
-// passive attribute Chromium can apparently still race past.
-img.draggable = false;
-img.addEventListener('dragstart', (e) => e.preventDefault());
-el.textContent = '';
-el.appendChild(img);
-} else {
-el.classList.add('photo-missing');
-el.title = 'This photo is only on the device it was added on — see Settings → Photo sync.';
-}
-}));
-}
-
-// Same idea as hydratePhotos(), but paints the photo as a CSS background
-// instead of appending a real <img> — for spots where dragstart
-// prevention on a real <img> wasn't reliably stopping Windows Chrome from
-// still kicking off a native OS-level drag of the blob: URL (confirmed
-// live: still happening on the Connections photo grid with BOTH
-// draggable=false and an explicit dragstart preventDefault() already in
-// place). A CSS background-image has no drag-source behaviour at all —
-// there's no <img> element for Chromium's drag detection to find, so
-// there's nothing left to suppress.
+// Fills in every [data-photo-bg] placeholder as a CSS background-image
+// rather than a real <img> element — a plain <img> is natively draggable,
+// and nudging one a pixel mid-click was enough on Windows Chrome to kick
+// off an OS-level drag of the blob: URL, popping File Explorer instead of
+// (or alongside) a click handler. draggable=false plus an explicit
+// dragstart preventDefault() on the <img> both turned out not to be
+// reliable enough on their own (confirmed still happening live, repeatedly,
+// across every photo grid in the app). A CSS background-image has no
+// drag-source behaviour at all — there's no <img> element for Chromium's
+// drag detection to find, so there's nothing left to suppress. This is now
+// the ONLY photo-thumbnail renderer in the app; do not add a new
+// <img>-based one for a future photo grid.
+//
+// Photos are stored per-device, so an id that synced from another device
+// has no local blob; the fallback fetches those from your own host.
+// Anything still unresolved is marked rather than left blank — an empty
+// square looks identical to "no photo was ever added", which is the wrong
+// thing to conclude.
 async function hydratePhotoBackgrounds(root) {
 const nodes = [...root.querySelectorAll('[data-photo-bg]')].filter((el) => !el.classList.contains('photo-bg-done'));
 await Promise.all(nodes.map(async (el) => {
@@ -132,6 +101,10 @@ el.classList.remove('photo-loading');
 if (url) {
 el.style.backgroundImage = `url("${url}")`;
 el.classList.add('photo-bg-done');
+// Clears any fallback initials text (avatarHtml renders a letter as a
+// placeholder before the photo loads) so it doesn't sit on top of the
+// image once painted in.
+el.textContent = '';
 } else {
 el.classList.add('photo-missing');
 el.title = 'This photo is only on the device it was added on — see Settings → Photo sync.';
@@ -446,7 +419,7 @@ canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.85);
 
 export {
 todayStr, daysAgoStr, last7Dates, uid, daysSince, daysUntil,
-escapeHtml, initials, avatarHtml, hydratePhotos, hydratePhotoBackgrounds, scrollAndFlash, bindForm,
+escapeHtml, initials, avatarHtml, hydratePhotoBackgrounds, scrollAndFlash, bindForm,
 resizeImageToBlob, fileToBase64, loadImage, cropThumbnailToBlob,
 hashFile, captureDateOf, betterCaptureDate, dateFromFilename,
 ensureBrowserReadableImage, setPhotoFallback,
