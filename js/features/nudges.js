@@ -23,11 +23,28 @@ groups[c.location].push(c);
 return groups;
 }
 
+// A newly-imported high-priority match hasn't had time to become
+// "overdue" by the usual timer below — lastContact is set to today at
+// import, so that check wouldn't fire for weeks. Surfaced separately so
+// a 4-5 star match doesn't just sit unseen in the pool until then. "No
+// real outreach yet" is approximated as still sitting at Matched or
+// Chatting in app — anything further along already has something
+// happening. Bounded to the last 14 days so this doesn't keep duplicating
+// the normal overdue-contact nudge forever once that one takes over.
+const NEW_MATCH_STAGES = new Set(['Matched', 'Chatting in app']);
+
 function buildNudgePool() {
 const pool = [];
 
 data.connections.forEach((c) => {
 const since = daysSince(c.lastContact);
+if ((c.priority || 0) >= 4 && NEW_MATCH_STAGES.has(c.stage) && daysSince(String(c.createdAt || '').slice(0, 10)) <= 14) {
+pool.push({
+text: `You rated ${c.name} ${c.priority} stars — reach out?`,
+target: { type: 'connection', id: c.id },
+signals: { kind: 'high-priority-new-match', priority: c.priority },
+});
+}
 if (c.stage === 'Superswiped') {
 // Not matched yet, so "reach out — you last spoke" doesn't apply; this
 // is a fixed 7-day check rather than the priority-scaled one below,
