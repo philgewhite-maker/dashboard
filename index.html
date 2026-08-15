@@ -593,7 +593,7 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
 <button class="sync-btn" type="button" id="tinder-copy-snippet">Copy snippet</button>
 </details>
 <div class="settings-note" style="margin:10px 0;">
-<strong>Bulk mode:</strong> steps through your sidebar matches automatically instead of one profile at a time &mdash; up to 15 a day, real randomised delays (5&ndash;15s) between each, remembered on Tinder's own site so tomorrow's run picks up where today's left off. Paste its output into the same box below; it's told apart from a single-profile paste automatically. This runs unattended across many real profiles in a row &mdash; if you see anything that looks like a rate limit or a verification prompt, stop and don't run it again that day.
+<strong>Bulk mode:</strong> steps through your sidebar matches automatically instead of one profile at a time &mdash; up to 15 per run, real randomised delays (10&ndash;60s) between each, remembered on Tinder's own site so the next run (later today or tomorrow) only picks up whoever's left. Fine to run a few times a day at that pace. Paste its output into the same box below; it's told apart from a single-profile paste automatically. This runs unattended across many real profiles in a row &mdash; if you see anything that looks like a rate limit or a verification prompt, stop and give it a break.
 </div>
 <details style="margin:0 0 10px;">
 <summary style="cursor:pointer;color:var(--muted);font-size:13px;">Show the bulk-import console snippet</summary>
@@ -825,7 +825,7 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
   // permanent identifier the URL itself uses.
   const DONE_KEY = 'dashTinderBulkDone';
   const BATCH_SIZE = 15; // "10-20 or so per day"
-  const MIN_DELAY_MS = 5000, MAX_DELAY_MS = 15000; // randomised, not a fixed interval &mdash; a fixed gap is a bot tell
+  const MIN_DELAY_MS = 10000, MAX_DELAY_MS = 60000; // randomised, not a fixed interval &mdash; a fixed gap is a bot tell
 
   let done;
   try { done = new Set(JSON.parse(localStorage.getItem(DONE_KEY) || '[]')); } catch (e) { done = new Set(); }
