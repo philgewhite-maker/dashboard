@@ -633,18 +633,23 @@ const arrayMap = ARRAY_FIELD_MAP[f.label];
 let note = 'will be added to notes';
 let disabled = false; // truly nothing to do (array field, nothing new to add) — stays unchecked and locked
 let dim = false; // already has a value, so unchecked-by-default, but still a real, checkable override
-if (conn && target) {
-const current = String(conn[target] || '').trim();
+if (target) {
+// Before a connection is chosen/created (still on "+ New"), there's
+// nothing yet to compare against — that's not the same as "no mapping",
+// so this still names the real destination field rather than falling
+// through to the generic notes text, which used to make every mapped
+// field look like it was about to be dumped into one unstructured blob.
+const current = conn ? String(conn[target] || '').trim() : '';
 if (current) { note = `already set to "${current}" — check to overwrite`; dim = !f.apply; }
 else note = `will set ${f.label}`;
-} else if (conn && arrayMap) {
-const existingTags = new Set((conn[arrayMap.target] || []).map((t) => t.toLowerCase()));
+} else if (arrayMap) {
+const existingTags = conn ? new Set((conn[arrayMap.target] || []).map((t) => t.toLowerCase())) : new Set();
 const parts = arrayMap.split ? f.value.split(',').map((s) => s.trim()).filter(Boolean) : [f.value.trim()];
 const fresh = parts.filter((p) => !existingTags.has(p.toLowerCase()));
 note = fresh.length === 0 ? `already in ${arrayMap.target} — will be skipped`
 : fresh.length === parts.length ? `will add to ${arrayMap.target}`
 : `will add ${fresh.length} new to ${arrayMap.target}, rest already there`;
-if (fresh.length === 0) { disabled = true; dim = true; }
+if (fresh.length === 0 && conn) { disabled = true; dim = true; }
 }
 const isChat = f.label === 'Chat history';
 const flagColor = isChat ? null : fieldFlagColor(f);
