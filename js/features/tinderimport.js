@@ -500,10 +500,15 @@ const t = pending.translations[i];
 if (!t) return '';
 if (t === 'loading') return `<div class="tinder-translate-result">Checking language…</div>`;
 if (t.error) return `<div class="tinder-translate-result tinder-translate-error">Translate failed: ${escapeHtml(t.error)}</div>`;
-if (t.alreadyEnglish) return `<div class="tinder-translate-result">(Detected as already English — no translation needed.)</div>`;
+if (t.alreadyEnglish) return `<div class="tinder-translate-result">(Free on-device check: already English — no Anthropic call made.)</div>`;
 if (!t.language || !t.translation) return `<div class="tinder-translate-result tinder-translate-error">Couldn't tell what language this is.</div>`;
 const alreadyHasLang = pending.fields.some((f) => f.label === 'Languages' && f.value.split(',').map((s) => s.trim()).includes(t.language));
-return `<div class="tinder-translate-result">→ <strong>${escapeHtml(t.language)}:</strong> ${escapeHtml(t.translation)}`
+// Getting here at all means the free on-device check either said this
+// ISN'T English, or wasn't available to ask in the first place — either
+// way, every translation actually shown came from a paid Anthropic call,
+// never the free path (which can only ever short-circuit to the branch
+// above). Says so plainly rather than leaving it to be inferred.
+return `<div class="tinder-translate-result">→ <strong>${escapeHtml(t.language)}:</strong> ${escapeHtml(t.translation)} <span class="tinder-field-note">(via Anthropic)</span>`
 + (alreadyHasLang ? '' : ` <button type="button" class="sync-btn tinder-inline-btn" data-tinder-translate-add="${escapeHtml(t.language)}">+ add ${escapeHtml(t.language)}</button>`)
 + `</div>`;
 }
