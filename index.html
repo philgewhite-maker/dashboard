@@ -577,26 +577,17 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
   // URL, out of 8). So click through every numbered photo tab, collecting
   // whatever newly appears each time, rather than a single one-shot scan.
   //
-  // Scoped to the smallest element wrapping every "Photo N" tab button
-  // (the carousel itself), not the whole panel &mdash; confirmed live: an
-  // unscoped scan also picked up a "X liked your photo" card embedded in
-  // the CHAT panel, which shows the user's OWN liked photo full-size, not
-  // one of the match's own photos. chatCard is excluded too, as a second
-  // layer of protection for a single-photo profile with no carousel tabs
-  // to anchor the scope on.
-  function commonAncestor(els) {
-    if (!els.length) return null;
-    let candidates = [];
-    for (let el = els[0]; el; el = el.parentElement) candidates.push(el);
-    for (let i = 1; i &lt; els.length; i++) {
-      const seen = new Set();
-      for (let el = els[i]; el; el = el.parentElement) seen.add(el);
-      candidates = candidates.filter((c) =&gt; seen.has(c));
-    }
-    return candidates[0] || null;
-  }
+  // Scanned across the whole panel (root), same as before this session's
+  // fixes &mdash; a narrower scope (the smallest element wrapping every
+  // "Photo N" tab button) was tried and reverted: confirmed live, it broke
+  // photo capture entirely, most likely because the actual photo elements
+  // live outside whatever that computed ancestor turned out to be, an
+  // assumption about the carousel's DOM shape that was never independently
+  // verified. chatCard exclusion (a real, verified container) plus the
+  // folder-id filter below are the actual defenses against a stray photo
+  // from elsewhere in the panel — both are independent of scan scope, so
+  // narrowing the scope was never actually necessary for that.
   const photoButtons = $$('button[aria-label^="Photo "]');
-  const photoScope = commonAncestor(photoButtons) || root;
 
   // The same photo can turn up under more than one URL shape in one scan
   // pass &mdash; confirmed live, a resized "640x800_75_&lt;uuid&gt;.webp" AND a
@@ -613,7 +604,7 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
   const photoMap = new Map();
   const folderCounts = new Map();
   const scanPhotos = () =&gt; {
-    [...photoScope.querySelectorAll('*')].forEach((el) =&gt; {
+    $$('*').forEach((el) =&gt; {
       if (chatCard &amp;&amp; chatCard.contains(el)) return;
       const b = getComputedStyle(el).backgroundImage;
       const m = b &amp;&amp; b.match(/url\("([^"]+)"\)/);
@@ -643,7 +634,13 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
   folderCounts.forEach((count, folder) =&gt; { if (count &gt; dominantCount) { dominantFolder = folder; dominantCount = count; } });
   const photos = [...photoMap.values()].filter((p) =&gt; !dominantFolder || !p.folder || p.folder === dominantFolder).map((p) =&gt; p.url);
 
-  const out = { name, age, fields, photos };
+  // The one stable, permanent key back to this exact Tinder match — the
+  // id in the page's own URL (/app/messages/&lt;id&gt;), unrelated to name
+  // (which can change) or anything else that could drift. Stored on the
+  // connection so a later import can check whether it's still in the
+  // current match list at all.
+  const matchId = (location.pathname.match(/\/app\/messages\/([a-zA-Z0-9]+)/) || [])[1] || '';
+  const out = { name, age, fields, photos, matchId };
   const json = JSON.stringify(out, null, 1);
   let copied = false;
   try { copy(json); copied = true; } catch (e) { /* not in a real DevTools console */ }
@@ -829,19 +826,18 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
       }
     });
 
-    function commonAncestor(els) {
-      if (!els.length) return null;
-      let candidates = [];
-      for (let el = els[0]; el; el = el.parentElement) candidates.push(el);
-      for (let i = 1; i &lt; els.length; i++) {
-        const seen2 = new Set();
-        for (let el = els[i]; el; el = el.parentElement) seen2.add(el);
-        candidates = candidates.filter((c) =&gt; seen2.has(c));
-      }
-      return candidates[0] || null;
-    }
+    // Scanned across the whole panel (root), same as before this session's
+    // fixes &mdash; a narrower scope (the smallest element wrapping every
+    // "Photo N" tab button) was tried and reverted: confirmed live, it
+    // broke photo capture entirely, most likely because the actual photo
+    // elements live outside whatever that computed ancestor turned out to
+    // be, an assumption about the carousel's DOM shape that was never
+    // independently verified. chatCard exclusion (a real, verified
+    // container) plus the folder-id filter below are the actual defenses
+    // against a stray photo from elsewhere in the panel — both are
+    // independent of scan scope, so narrowing the scope was never
+    // actually necessary for that.
     const photoButtons = $$('button[aria-label^="Photo "]');
-    const photoScope = commonAncestor(photoButtons) || root;
     const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
     function photoKey(url) {
       const folder = url.match(/gotinder\.com\/([a-zA-Z0-9]+)\//);
@@ -851,7 +847,7 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
     const photoMap = new Map();
     const folderCounts = new Map();
     const scanPhotos = () =&gt; {
-      [...photoScope.querySelectorAll('*')].forEach((el) =&gt; {
+      $$('*').forEach((el) =&gt; {
         if (chatCard &amp;&amp; chatCard.contains(el)) return;
         const b = getComputedStyle(el).backgroundImage;
         const m = b &amp;&amp; b.match(/url\("([^"]+)"\)/);
@@ -967,10 +963,15 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
   const todo = candidates.filter((r) =&gt; !done.has(r.id)).slice(0, BATCH_SIZE);
   const profiles = [];
 
+  // Always logged, whether or not there's anything new to actually run --
+  // "how far through 205 am I" shouldn't require sitting through another
+  // batch to find out.
+  console.log(`${candidates.length} visible in the sidebar -- ${done.size} already done, ${candidates.length - done.size} remaining.`);
+
   if (!todo.length) {
-    console.log(`Nothing new -- ${candidates.length} visible in the sidebar, all already processed. Scroll the list down to reveal more, then run again.`);
+    console.log(`Nothing new -- all visible matches already processed. Scroll the list down to reveal more, then run again.`);
   } else {
-    console.log(`Processing ${todo.length} new match${todo.length === 1 ? '' : 'es'} of ${candidates.length} visible. This takes a while -- real delays are the point.`);
+    console.log(`Processing ${todo.length} new match${todo.length === 1 ? '' : 'es'}. This takes a while -- real delays are the point.`);
     // Wrapped in try/finally so a crash partway through still outputs and
     // copies whatever WAS gathered, rather than losing a run's worth of
     // waiting to one bad profile.
@@ -988,7 +989,9 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
         }
         await new Promise((r) =&gt; setTimeout(r, 500));
         try {
-          profiles.push(await extractProfile(row.name));
+          const extracted = await extractProfile(row.name);
+          extracted.matchId = row.id; // already known from the sidebar row — same permanent id the single-profile snippet reads from the URL
+          profiles.push(extracted);
           done.add(row.id);
           localStorage.setItem(DONE_KEY, JSON.stringify([...done]));
         } catch (err) {

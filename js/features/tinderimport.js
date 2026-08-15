@@ -299,7 +299,7 @@ let m;
 while ((m = re.exec(text))) {
 out += escapeHtml(text.slice(last, m.index));
 const original = cityMap.get(m[0].toLowerCase()) || m[0];
-out += `<span class="tinder-city-hit" data-city="${escapeHtml(original)}" title="Click to set as City">${escapeHtml(m[0])}</span>`;
+out += `<span class="tinder-city-hit" data-tinder-city="${escapeHtml(original)}" title="Click to set as City">${escapeHtml(m[0])}</span>`;
 last = m.index + m[0].length;
 }
 out += escapeHtml(text.slice(last));
@@ -505,7 +505,7 @@ hit.addEventListener('click', (e) => {
 // hit silently unchecked the field it was found in.
 e.preventDefault();
 e.stopPropagation();
-pending.cityOverride = hit.dataset.city;
+pending.cityOverride = hit.dataset.tinderCity;
 render();
 });
 });
