@@ -456,6 +456,18 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
   // — so without this it fell into the generic "Profile detail" catch-all
   // indistinguishably from the person's gender identity, school name, etc.
   const ORIENTATIONS = new Set(['Straight', 'Gay', 'Lesbian', 'Bisexual', 'Pansexual', 'Asexual', 'Queer', 'Demisexual']);
+  // Same reasoning as ORIENTATIONS: gender identity is also a fixed picker
+  // in Tinder's UI, rendered in this same unlabeled strip with no text
+  // label of its own — without an enumerated list it's indistinguishable
+  // from a stray "Profile detail".
+  const GENDERS = new Set(['Man', 'Woman', 'Non-binary', 'Trans man', 'Trans woman', 'Transgender', 'Genderqueer', 'Genderfluid', 'Agender', 'Bigender', 'Pangender', 'Demiboy', 'Demigirl', 'Two-Spirit', 'Intersex']);
+  // Languages usually render as a comma-joined list (caught below by the
+  // comma check), but a person who only speaks one language shows a bare
+  // single name with nothing to structurally distinguish it from a job
+  // title or hobby — so a single language needs its own name list too.
+  // Not exhaustive; anything missing just falls to the generic catch-all
+  // below rather than being mis-labelled.
+  const LANGUAGES = new Set(['English', 'French', 'Spanish', 'German', 'Italian', 'Portuguese', 'Mandarin', 'Cantonese', 'Chinese', 'Japanese', 'Korean', 'Arabic', 'Russian', 'Polish', 'Dutch', 'Turkish', 'Hindi', 'Urdu', 'Bengali', 'Punjabi', 'Gujarati', 'Marathi', 'Tamil', 'Telugu', 'Kannada', 'Malayalam', 'Vietnamese', 'Thai', 'Indonesian', 'Malay', 'Tagalog', 'Filipino', 'Greek', 'Hebrew', 'Swedish', 'Norwegian', 'Danish', 'Finnish', 'Czech', 'Hungarian', 'Romanian', 'Bulgarian', 'Ukrainian', 'Croatian', 'Serbian', 'Slovak', 'Slovenian', 'Lithuanian', 'Latvian', 'Estonian', 'Icelandic', 'Irish', 'Welsh', 'Catalan', 'Basque', 'Swahili', 'Amharic', 'Yoruba', 'Zulu', 'Afrikaans', 'Persian', 'Farsi', 'Pashto', 'Nepali', 'Sinhala', 'Burmese', 'Khmer', 'Lao', 'Mongolian', 'Georgian', 'Armenian', 'Azerbaijani', 'Kazakh', 'Uzbek', 'Albanian', 'Bosnian', 'Macedonian', 'Luxembourgish', 'Maltese', 'Esperanto', 'Latin']);
 
   const seenText = new Set();
   root.querySelectorAll('li').forEach((li) =&gt; {
@@ -480,9 +492,10 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
     // multi-value one Tinder shows this way — verified live, this is how
     // Languages actually renders (NOT the Essentials icon+&lt;h3&gt; pattern
     // this snippet originally assumed it would share with Zodiac/Education).
-    // No language-name list needed; the comma alone is the signal.
     else if (text.includes(',')) fields.push({ label: 'Languages', value: text });
+    else if (LANGUAGES.has(text)) fields.push({ label: 'Languages', value: text });
     else if (ORIENTATIONS.has(text)) fields.push({ label: 'Orientation', value: text });
+    else if (GENDERS.has(text)) fields.push({ label: 'Gender', value: text });
     else fields.push({ label: 'Profile detail', value: text });
   });
 
@@ -750,6 +763,8 @@ window.tinderBulkImport = async (batchSize) => {
       return `${cm}cm / ${ft}'${inch}"`;
     }
     const ORIENTATIONS = new Set(['Straight', 'Gay', 'Lesbian', 'Bisexual', 'Pansexual', 'Asexual', 'Queer', 'Demisexual']);
+    const GENDERS = new Set(['Man', 'Woman', 'Non-binary', 'Trans man', 'Trans woman', 'Transgender', 'Genderqueer', 'Genderfluid', 'Agender', 'Bigender', 'Pangender', 'Demiboy', 'Demigirl', 'Two-Spirit', 'Intersex']);
+    const LANGUAGES = new Set(['English', 'French', 'Spanish', 'German', 'Italian', 'Portuguese', 'Mandarin', 'Cantonese', 'Chinese', 'Japanese', 'Korean', 'Arabic', 'Russian', 'Polish', 'Dutch', 'Turkish', 'Hindi', 'Urdu', 'Bengali', 'Punjabi', 'Gujarati', 'Marathi', 'Tamil', 'Telugu', 'Kannada', 'Malayalam', 'Vietnamese', 'Thai', 'Indonesian', 'Malay', 'Tagalog', 'Filipino', 'Greek', 'Hebrew', 'Swedish', 'Norwegian', 'Danish', 'Finnish', 'Czech', 'Hungarian', 'Romanian', 'Bulgarian', 'Ukrainian', 'Croatian', 'Serbian', 'Slovak', 'Slovenian', 'Lithuanian', 'Latvian', 'Estonian', 'Icelandic', 'Irish', 'Welsh', 'Catalan', 'Basque', 'Swahili', 'Amharic', 'Yoruba', 'Zulu', 'Afrikaans', 'Persian', 'Farsi', 'Pashto', 'Nepali', 'Sinhala', 'Burmese', 'Khmer', 'Lao', 'Mongolian', 'Georgian', 'Armenian', 'Azerbaijani', 'Kazakh', 'Uzbek', 'Albanian', 'Bosnian', 'Macedonian', 'Luxembourgish', 'Maltese', 'Esperanto', 'Latin']);
 
     const seenText = new Set();
     root.querySelectorAll('li').forEach((li) =&gt; {
@@ -771,7 +786,9 @@ window.tinderBulkImport = async (batchSize) => {
       else if (/^(She|He|They)\/(Her|Him|Them)$/i.test(text)) fields.push({ label: 'Pronouns', value: text });
       else if (/ at /.test(text)) fields.push({ label: 'Job', value: text });
       else if (text.includes(',')) fields.push({ label: 'Languages', value: text });
+      else if (LANGUAGES.has(text)) fields.push({ label: 'Languages', value: text });
       else if (ORIENTATIONS.has(text)) fields.push({ label: 'Orientation', value: text });
+      else if (GENDERS.has(text)) fields.push({ label: 'Gender', value: text });
       else fields.push({ label: 'Profile detail', value: text });
     });
 
