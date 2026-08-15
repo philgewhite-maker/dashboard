@@ -74,27 +74,38 @@ throw proxyErr;
 // local rather than imported from connections.js to avoid a circular
 // dependency — connections.js is the one importing this module's init
 // function, not the other way round.
-function matchPerson(name) {
+//
+// Returns every connection that scores at all, not just the single best —
+// a real near-miss (e.g. a different "Natalia" already tracked) needs to
+// be visible as its OWN candidate to pick between, not hidden behind
+// whichever one scored a point higher.
+function matchCandidates(name, limit) {
 const key = nameKey(name);
-if (!key) return null;
+if (!key) return [];
 const namesOf = (c) => [c.name, c.profileName, ...(c.aliases || [])].filter(Boolean);
-const exact = data.connections.find((c) => namesOf(c).some((n) => nameKey(n) === key));
-if (exact) return { conn: exact, why: 'exact', score: 200 };
-let best = null;
+const results = [];
 data.connections.forEach((c) => {
+let best = null;
 namesOf(c).forEach((n) => {
 const nk = nameKey(n);
 let score = null;
 let why = '';
-if (nk.startsWith(key) || key.startsWith(nk)) { score = 100 - Math.abs(nk.length - key.length); why = 'shortened name'; }
+if (nk === key) { score = 200; why = 'exact'; }
+else if (nk.startsWith(key) || key.startsWith(nk)) { score = 100 - Math.abs(nk.length - key.length); why = 'shortened name'; }
 else if (key.length >= 4) {
 const d = editDistance(key, nk, 2);
 if (d <= 2) { score = 60 - d * 10; why = `${d} letter${d === 1 ? '' : 's'} different`; }
 }
-if (score !== null && (!best || score > best.score)) best = { conn: c, why, score };
+if (score !== null && (!best || score > best.score)) best = { why, score };
 });
+if (best) results.push({ conn: c, why: best.why, score: best.score });
 });
-return best;
+results.sort((a, b) => b.score - a.score);
+return typeof limit === 'number' ? results.slice(0, limit) : results;
+}
+
+function matchPerson(name) {
+return matchCandidates(name, 1)[0] || null;
 }
 
 function createConnectionFor(name) {
@@ -140,56 +151,91 @@ Orientation: { target: 'relationshipTags', split: false },
 let pending = null; // { name, age, fields, photos, chosenId, match, matchConfirmed, aiVerdict }
 let queue = []; // raw {name,age,fields,photos} profiles still waiting, from a bulk-import paste
 
-function optionsFor(chosenId) {
+// The dropdown puts whoever the name-matcher flagged at the top, in their
+// own group, ahead of the full alphabetical list — 300+ connections is too
+// many to scan for a likely candidate, but hiding the rest entirely would
+// make picking someone the algorithm didn't guess (a real, common case)
+// awkward.
+function optionsFor(chosenId, candidates) {
+const candidateIds = new Set(candidates.map((m) => m.conn.id));
+const rest = data.connections.slice().filter((c) => !candidateIds.has(c.id)).sort((a, b) => a.name.localeCompare(b.name));
+const candidateOptions = candidates
+.map((m) => `<option value="${escapeHtml(m.conn.id)}"${m.conn.id === chosenId ? ' selected' : ''}>${escapeHtml(m.conn.name)}${m.why === 'exact' ? '' : ` (${escapeHtml(m.why)})`}</option>`)
+.join('');
+const restOptions = rest.map((c) => `<option value="${escapeHtml(c.id)}"${c.id === chosenId ? ' selected' : ''}>${escapeHtml(c.name)}</option>`).join('');
 return `<option value=""${chosenId ? '' : ' selected'}>— pick who this is —</option>`
-+ data.connections.slice().sort((a, b) => a.name.localeCompare(b.name))
-.map((c) => `<option value="${escapeHtml(c.id)}"${c.id === chosenId ? ' selected' : ''}>${escapeHtml(c.name)}</option>`).join('');
++ (candidateOptions ? `<optgroup label="Possible matches">${candidateOptions}</optgroup>` : '')
++ `<optgroup label="All connections">${restOptions}</optgroup>`;
 }
 
-// The one thing that was missing when this went wrong: a face to look at.
-// Shown for ANY chosen connection, not just a loose-match suggestion — a
-// manually picked wrong person from the dropdown deserves the same check.
-function compareHtml() {
-const conn = data.connections.find((c) => c.id === pending.chosenId);
-if (!conn) return '';
-const incoming = pending.photos[0];
-const aiEligible = conn.photoId && incoming;
-return `<div class="album-compare-row" style="margin:8px 0;">
-<span class="album-compare">
-${conn.photoId ? `<span class="thumb-img" data-photo-id="${escapeHtml(conn.photoId)}"></span>` : '<span class="album-nocover" style="width:32px;height:32px;border-radius:50%;">no photo</span>'}
-<span class="compare-arrow">&harr;</span>
-${incoming ? `<span class="thumb-img"><img src="${escapeHtml(incoming.url)}" alt=""></span>` : '<span class="album-nocover" style="width:32px;height:32px;border-radius:50%;">no photo</span>'}
-</span>
-${aiEligible ? aiCompareHtml() : ''}
+// One candidate row inside the More Info panel: their FULL existing photo
+// set next to ALL incoming photos, not just one of each — a real match
+// missed on the first pair (confirmed live: the actual matching photo was
+// the incoming set's 2nd image, not 1st, invisible in a single pic-vs-pic
+// compare) is easy to catch once every photo is actually on screen at a
+// readable size. AI compare stays as a quick supplementary opinion, not
+// the primary tool — it's only ever compared cover-vs-first-photo, and a
+// human scanning both full grids catches what that single pairing can't.
+function candidateRowHtml(m) {
+const conn = m.conn;
+const existingIds = conn.photoIds && conn.photoIds.length ? conn.photoIds : (conn.photoId ? [conn.photoId] : []);
+const existingPhotos = existingIds.length
+? `<div class="tinder-photo-grid">${existingIds.map((id) => `<span class="thumb-lg"><span class="thumb-img" data-photo-id="${escapeHtml(id)}"></span></span>`).join('')}</div>`
+: '<div class="settings-note" style="margin:4px 0;">No photo on file for them.</div>';
+const verdict = pending.aiVerdicts[conn.id];
+const aiBlock = verdict === 'loading' ? '<div class="album-ai-compare loading">Comparing…</div>'
+: verdict ? `<div class="album-ai-compare ${verdict.same === true ? 'yes' : verdict.same === false ? 'no' : 'unsure'}">${escapeHtml(verdict.same === true ? 'AI: looks like the same person' : verdict.same === false ? 'AI: these look like different people' : 'AI: unsure')}${verdict.reason ? ` — ${escapeHtml(verdict.reason)}` : ''}</div>`
+: (conn.photoId && pending.photos[0] ? `<button class="sync-btn sm" type="button" data-tinder-ai-compare="${escapeHtml(conn.id)}">AI compare faces</button>` : '');
+const isChosen = pending.chosenId === conn.id;
+return `<div class="tinder-candidate-row${isChosen ? ' chosen' : ''}">
+<div class="album-caption"><strong>${escapeHtml(conn.name)}</strong>${conn.age ? `, ${escapeHtml(conn.age)}` : ''} <span class="tinder-field-note">(${escapeHtml(m.why)})</span></div>
+${existingPhotos}
+${aiBlock}
+<button class="sync-btn sm" type="button" data-tinder-choose="${escapeHtml(conn.id)}" style="margin-top:6px;">${isChosen ? 'Chosen' : `Choose ${escapeHtml(conn.name)}`}</button>
 </div>`;
 }
 
-function aiCompareHtml() {
-if (pending.aiVerdict === 'loading') return '<div class="album-ai-compare loading">Comparing…</div>';
-if (pending.aiVerdict) {
-const v = pending.aiVerdict;
-const cls = v.same === true ? 'yes' : v.same === false ? 'no' : 'unsure';
-const label = v.same === true ? 'AI: looks like the same person' : v.same === false ? 'AI: these look like different people' : 'AI: unsure';
-return `<div class="album-ai-compare ${cls}">${escapeHtml(label)}${v.reason ? ` — ${escapeHtml(v.reason)}` : ''}</div>`;
-}
-return '<button class="sync-btn sm" type="button" id="tinder-ai-compare">AI compare faces</button>';
+// The whole point of More Info: everyone worth considering, side by side,
+// at a size you can actually read — not the main card's job, which needs
+// to stay a quick Save/Skip decision for the common case (an exact match,
+// or clearly nobody existing).
+function moreInfoHtml() {
+if (!pending.showMoreInfo) return '';
+const incomingGrid = pending.photos.length
+? `<div class="tinder-photo-grid">${pending.photos.map((ph) => `<span class="thumb-lg"><img src="${escapeHtml(ph.url)}" alt=""></span>`).join('')}</div>`
+: '<div class="settings-note" style="margin:4px 0;">No photos in this import.</div>';
+return `<div class="tinder-more-info-overlay" id="tinder-more-info">
+<div class="tinder-more-info-box">
+<h3>${escapeHtml(pending.name || '(no name found)')} — incoming photos</h3>
+${incomingGrid}
+<h3>Who is this?</h3>
+${pending.candidates.length ? pending.candidates.map(candidateRowHtml).join('') : '<div class="settings-note" style="margin:4px 0;">No name-based candidates found.</div>'}
+<button class="sync-btn sm" type="button" id="tinder-more-info-newconn">+ New connection</button>
+<div class="sync-row" style="margin-top:10px;">
+<button class="sync-btn" type="button" id="tinder-more-info-close">Close</button>
+</div>
+</div>
+</div>`;
 }
 
-async function runAiCompare() {
-pending.aiVerdict = 'loading';
+// Keyed by connection id (pending.aiVerdicts) rather than one shared slot
+// — More Info can show several candidates at once, and a verdict about
+// one shouldn't linger on or block checking another.
+async function runAiCompareFor(connId) {
+pending.aiVerdicts[connId] = 'loading';
 render();
 try {
-const conn = data.connections.find((c) => c.id === pending.chosenId);
+const conn = data.connections.find((c) => c.id === connId);
 const incoming = pending.photos[0];
 const [existing, incomingBlob] = await Promise.all([
 photoGet(conn.photoId),
 fetchTinderPhoto(incoming.url),
 ]);
 if (!existing) throw new Error("This connection's existing photo isn't on this device — run Photo sync in Settings first.");
-pending.aiVerdict = await compareFaces(existing, incomingBlob);
+pending.aiVerdicts[connId] = await compareFaces(existing, incomingBlob);
 } catch (err) {
 console.error('Face comparison failed:', err);
-pending.aiVerdict = { same: null, reason: err instanceof MissingKeyError ? 'Add an Anthropic API key in Settings first.' : (err.message || String(err)) };
+pending.aiVerdicts[connId] = { same: null, reason: err instanceof MissingKeyError ? 'Add an Anthropic API key in Settings first.' : (err.message || String(err)) };
 }
 render();
 }
@@ -282,67 +328,76 @@ const el = document.getElementById('tinder-review');
 if (!el) return;
 if (!pending) { el.innerHTML = ''; return; }
 const p = pending;
-const showSuggestion = !p.chosenId && p.match && p.match.why !== 'exact';
-const canSave = !!p.chosenId && (p.match?.why === 'exact' || p.matchConfirmed || !p.match || data.connections.find((c) => c.id === p.chosenId)?.createdJustNow);
+const chosenConn = data.connections.find((c) => c.id === p.chosenId);
+// Exact match, already confirmed via More Info, or a connection created
+// fresh from this review all skip the confirmation gate — everyone else
+// (any non-exact pick, including one made straight from the dropdown)
+// needs an explicit look-and-choose in More Info first. Changing the
+// dropdown always re-arms this, same as before.
+const canSave = !!p.chosenId && (p.match?.why === 'exact' || p.matchConfirmed || !p.match || chosenConn?.createdJustNow);
+const saveLabel = chosenConn ? `Save to ${chosenConn.name}` : 'Save to…';
+const saveBlockedNote = !p.chosenId ? 'pick who this is first'
+: !canSave ? "open More info and confirm it's them first"
+: '';
 
 el.innerHTML = `<div class="album-card">
-${queue.length ? `<div class="settings-note" style="margin:0 0 8px;">${queue.length} more queued in this batch — saving auto-advances to the next. <button class="sync-btn sm" type="button" id="tinder-skip" style="margin-left:6px;">Skip this one</button></div>` : ''}
+${queue.length ? `<div class="settings-note" style="margin:0 0 8px;">${queue.length} more queued in this batch — saving auto-advances to the next.</div>` : ''}
 <div class="album-caption"><strong>${escapeHtml(p.name || '(no name found)')}</strong>${p.age ? `, ${escapeHtml(p.age)}` : ''}</div>
 
-${showSuggestion ? `<div class="settings-note" style="margin:4px 0;">Possible match: <strong>${escapeHtml(p.match.conn.name)}</strong> (${escapeHtml(p.match.why)}) — not the same as an exact name match, so look before confirming:</div>
-<div class="album-compare-row" style="margin:4px 0 8px;">
-<span class="album-compare">
-${p.match.conn.photoId ? `<span class="thumb-img" data-photo-id="${escapeHtml(p.match.conn.photoId)}"></span>` : '<span class="album-nocover" style="width:32px;height:32px;border-radius:50%;">no photo</span>'}
-<span class="compare-arrow">&harr;</span>
-${p.photos[0] ? `<span class="thumb-img"><img src="${escapeHtml(p.photos[0].url)}" alt=""></span>` : '<span class="album-nocover" style="width:32px;height:32px;border-radius:50%;">no photo</span>'}
-</span>
-</div>
-<div class="sync-row" style="margin:0 0 10px;">
-<button class="sync-btn sm" type="button" id="tinder-confirm-match">Yes — same person</button>
-<button class="sync-btn sm" type="button" id="tinder-reject-match">No — different person</button>
-</div>` : ''}
+<select id="tinder-pick">${optionsFor(p.chosenId, p.candidates)}</select>
 
-<select id="tinder-pick">${optionsFor(p.chosenId)}</select>
-${!p.chosenId ? '<button class="sync-btn sm" type="button" id="tinder-newconn">+ New connection</button>' : ''}
-${p.chosenId ? compareHtml() : ''}
+<div class="sync-row" style="margin:6px 0 8px;">
+<button class="add-btn" type="button" id="tinder-save"${canSave ? '' : ' disabled'}>${escapeHtml(saveLabel)}</button>
+<button class="sync-btn" type="button" id="tinder-skip">Skip</button>
+<button class="sync-btn" type="button" id="tinder-more-info-open">More info</button>
+</div>
+${saveBlockedNote ? `<div class="tinder-field-note" style="margin:-4px 0 8px;">${escapeHtml(saveBlockedNote)}</div>` : ''}
+<span class="sync-status" id="tinder-save-status">${escapeHtml(p.saveMessage || '')}</span>
 
 ${agePreviewHtml()}
 ${p.fields.length ? `<div class="tinder-fields">${p.fields.map((f, i) => fieldPreviewHtml(f, i)).join('')}</div>` : ''}
 ${contactPreviewHtml()}
 ${p.photos.length ? `<div class="settings-note" style="margin:8px 0 4px;">${p.photos.filter((ph) => ph.apply).length} of ${p.photos.length} photos will be added — click to include/exclude:</div>
 <div class="photo-gallery">${p.photos.map((ph, i) => `<span class="gallery-thumb tinder-photo-thumb${ph.apply ? ' tinder-photo-included' : ''}" data-tinder-photo="${i}"><img src="${escapeHtml(ph.url)}" alt="">${ph.apply ? '<span class="tinder-photo-badge">&check;</span>' : ''}</span>`).join('')}</div>` : ''}
-
-<div class="sync-row" style="margin-top:8px;">
-<button class="add-btn" type="button" id="tinder-save"${canSave ? '' : ' disabled'}>Save to connection</button>
-<span class="sync-status" id="tinder-save-status">${escapeHtml(p.saveMessage || '')}</span>
 </div>
-</div>`;
-// Every render rebuilds this whole card, including a fresh, un-hydrated
-// [data-photo-id] placeholder for the existing connection's photo — never
-// called here before, so it only ever showed up if something ELSE
-// happened to have hydrated that exact id earlier (e.g. the Connections
-// tab), and vanished again on the very next render (any checkbox toggle,
-// dropdown change, etc. all re-render).
+${moreInfoHtml()}`;
+// Every render rebuilds this whole card, including fresh, un-hydrated
+// [data-photo-id] placeholders — never called here before, so a photo
+// only ever showed up if something ELSE had hydrated that exact id
+// first, and vanished again on the very next render (any checkbox
+// toggle, dropdown change, etc. all re-render).
 hydratePhotos(el);
 
 const pick = document.getElementById('tinder-pick');
-if (pick) pick.addEventListener('change', () => { pending.chosenId = pick.value; pending.matchConfirmed = false; pending.aiVerdict = null; render(); });
-const newBtn = document.getElementById('tinder-newconn');
-if (newBtn) newBtn.addEventListener('click', () => {
-const conn = createConnectionFor(pending.name || 'Unnamed');
-conn.createdJustNow = true; // not a persisted field — just marks this session's save as safe without a match confirmation
-pending.chosenId = conn.id;
-pending.matchConfirmed = true;
-render();
-});
-const confirmBtn = document.getElementById('tinder-confirm-match');
-if (confirmBtn) confirmBtn.addEventListener('click', () => { pending.chosenId = pending.match.conn.id; pending.matchConfirmed = true; render(); });
-const rejectBtn = document.getElementById('tinder-reject-match');
-if (rejectBtn) rejectBtn.addEventListener('click', () => { pending.match = null; render(); });
+if (pick) pick.addEventListener('change', () => { pending.chosenId = pick.value; pending.matchConfirmed = false; render(); });
 const skipBtn = document.getElementById('tinder-skip');
 if (skipBtn) skipBtn.addEventListener('click', () => {
 const skippedName = pending.name || '(unnamed)';
 advanceQueue(`Skipped ${skippedName}.`);
+});
+const moreInfoOpenBtn = document.getElementById('tinder-more-info-open');
+if (moreInfoOpenBtn) moreInfoOpenBtn.addEventListener('click', () => { pending.showMoreInfo = true; render(); });
+const moreInfoCloseBtn = document.getElementById('tinder-more-info-close');
+if (moreInfoCloseBtn) moreInfoCloseBtn.addEventListener('click', () => { pending.showMoreInfo = false; render(); });
+const moreInfoNewBtn = document.getElementById('tinder-more-info-newconn');
+if (moreInfoNewBtn) moreInfoNewBtn.addEventListener('click', () => {
+const conn = createConnectionFor(pending.name || 'Unnamed');
+conn.createdJustNow = true; // not a persisted field — just marks this session's save as safe without a match confirmation
+pending.chosenId = conn.id;
+pending.matchConfirmed = true;
+pending.showMoreInfo = false;
+render();
+});
+el.querySelectorAll('[data-tinder-choose]').forEach((btn) => {
+btn.addEventListener('click', () => {
+pending.chosenId = btn.dataset.tinderChoose;
+pending.matchConfirmed = true;
+pending.showMoreInfo = false;
+render();
+});
+});
+el.querySelectorAll('[data-tinder-ai-compare]').forEach((btn) => {
+btn.addEventListener('click', () => runAiCompareFor(btn.dataset.tinderAiCompare));
 });
 el.querySelectorAll('[data-tinder-field]').forEach((cb) => {
 cb.addEventListener('change', () => { pending.fields[parseInt(cb.dataset.tinderField, 10)].apply = cb.checked; });
@@ -360,8 +415,6 @@ ph.apply = !ph.apply;
 render();
 });
 });
-const aiBtn = document.getElementById('tinder-ai-compare');
-if (aiBtn) aiBtn.addEventListener('click', runAiCompare);
 const saveBtn = document.getElementById('tinder-save');
 if (saveBtn) saveBtn.addEventListener('click', save);
 }
@@ -532,9 +585,13 @@ foundHandles: handles.map((h) => ({ ...h, apply: true })),
 chosenId: '',
 match: null,
 matchConfirmed: false,
-aiVerdict: null,
+candidates: [],
+showMoreInfo: false,
+aiVerdicts: {},
 };
-const match = matchPerson(parsed.name);
+const candidates = matchCandidates(parsed.name, 6);
+parsed.candidates = candidates;
+const match = candidates[0] || null;
 parsed.match = match;
 if (match && match.why === 'exact') { parsed.chosenId = match.conn.id; parsed.matchConfirmed = true; }
 pending = parsed;
