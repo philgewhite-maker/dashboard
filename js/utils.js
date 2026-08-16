@@ -125,14 +125,31 @@ return out;
 // detection needs pending's in-progress scan state, not just
 // data.flagRules. A line that doesn't match the pattern (older notes, a
 // manually-typed line) still renders, just without the time/sender pill.
+// "…T00:00:00" rather than parsing the bare "YYYY-MM-DD" directly --
+// JS treats a date-only ISO string as UTC midnight, which a negative
+// UTC-offset timezone would otherwise roll back to the previous day.
+function formatChatDay(iso) {
+return new Date(`${iso}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+}
+
 function chatTranscriptHtml(text) {
+let lastDate = '';
 return String(text || '').split('\n').map((line) => {
-const m = line.match(/^\[(\d{1,2}:\d{2})\]\s*([^:]+):\s*(.*)$/);
+// The date prefix is optional -- older chatLog text saved before the
+// console snippet started threading a date onto each message (or a
+// message that came before the first day-divider Tinder showed) still
+// parses fine, just without a day heading.
+const m = line.match(/^\[(?:(\d{4}-\d{2}-\d{2}) )?(\d{1,2}:\d{2})\]\s*([^:]+):\s*(.*)$/);
 if (!m) return `<div class="tinder-chat-line">${escapeHtml(line)}</div>`;
-const [, time, sender, message] = m;
+const [, date, time, sender, message] = m;
 const senderName = sender.trim();
 const senderClass = senderName === 'You' ? 'tinder-chat-you' : 'tinder-chat-them';
-return `<div class="tinder-chat-line"><span class="tinder-chat-time">[${escapeHtml(time)}]</span> <span class="${senderClass}">${escapeHtml(senderName)}</span>: ${escapeHtml(message)}</div>`;
+let dayHtml = '';
+if (date && date !== lastDate) {
+dayHtml = `<div class="tinder-chat-day">${escapeHtml(formatChatDay(date))}</div>`;
+lastDate = date;
+}
+return dayHtml + `<div class="tinder-chat-line"><span class="tinder-chat-time">[${escapeHtml(time)}]</span> <span class="${senderClass}">${escapeHtml(senderName)}</span>: ${escapeHtml(message)}</div>`;
 }).join('');
 }
 

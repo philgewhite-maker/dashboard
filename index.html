@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v54</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v55</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -572,6 +572,25 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
     const valueBlock = card &amp;&amp; [...card.children].find((el) =&gt; !el.contains(chatHeading) &amp;&amp; el.textContent.trim());
     const raw = valueBlock ? valueBlock.textContent : '';
     const cut = raw.replace(/Reply to .+/s, '');
+    // A "DD/MM/YYYY, HH:MM" divider sits between messages whenever the day
+    // changes — unverified against a real multi-day transcript, so this
+    // degrades safely: no divider found just means no date on a message,
+    // same as any other pattern this snippet doesn't recognise. Computed
+    // BEFORE the messages loop below (previously only the LAST one was
+    // kept, for lastContact) so every message can look up which divider
+    // was actually in effect at its own position, not just the newest one.
+    const dateDividers = [...cut.matchAll(/(\d{1,2})\/(\d{1,2})\/(\d{4}),?\s*\d{1,2}:\d{2}/g)].map((d) =&gt; ({
+      index: d.index,
+      iso: `${d[3]}-${d[2].padStart(2, '0')}-${d[1].padStart(2, '0')}`,
+    }));
+    // The last divider at or before `pos`, or null if `pos` comes before
+    // any divider at all (Tinder doesn't show one until the day changes
+    // for the first time) — degrades to a time-only prefix in that case.
+    const dateAt = (pos) =&gt; {
+      let found = null;
+      for (const d of dateDividers) { if (d.index &lt;= pos) found = d.iso; else break; }
+      return found;
+    };
     const msgRe = /Sent at (\d{1,2}:\d{2})\d{1,2}:\d{2}([^:]{1,40}):/g;
     const matches = [...cut.matchAll(msgRe)];
     const messages = [];
@@ -584,18 +603,13 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
         .replace(/Sent\s*$/, '')
         .trim();
       const sender = m[2].trim();
-      if (sender &amp;&amp; body) messages.push(`[${m[1]}] ${sender}: ${body}`);
+      const date = dateAt(m.index);
+      const prefix = date ? `${date} ${m[1]}` : m[1];
+      if (sender &amp;&amp; body) messages.push(`[${prefix}] ${sender}: ${body}`);
     }
     if (messages.length) fields.push({ label: 'Chat history', value: messages.join('\n') });
-    // A "DD/MM/YYYY, HH:MM" divider sits between messages whenever the day
-    // changes (see the Chat history comment above) — unverified against a
-    // real multi-day transcript, so this degrades safely: no divider found
-    // just means no date field, same as any other pattern this snippet
-    // doesn't recognise. The LAST one found announces the day the most
-    // recent messages were sent, which is what lastContact actually needs.
-    const dateDividers = [...cut.matchAll(/(\d{1,2})\/(\d{1,2})\/(\d{4}),?\s*\d{1,2}:\d{2}/g)];
     const lastDivider = dateDividers[dateDividers.length - 1];
-    if (lastDivider) fields.push({ label: 'Last message date', value: `${lastDivider[3]}-${lastDivider[2].padStart(2, '0')}-${lastDivider[1].padStart(2, '0')}` });
+    if (lastDivider) fields.push({ label: 'Last message date', value: lastDivider.iso });
   }
 
   // "Looking for" and prompt answers ("My biography would be called: ...")
@@ -874,6 +888,19 @@ window.tinderBulkImport = async (batchSize) => {
       const valueBlock = card &amp;&amp; [...card.children].find((el) =&gt; !el.contains(chatHeading) &amp;&amp; el.textContent.trim());
       const raw = valueBlock ? valueBlock.textContent : '';
       const cut = raw.replace(/Reply to .+/s, '');
+      // See the single-profile snippet's version of this block for why
+      // dateDividers is computed before the messages loop and mapped to
+      // {index, iso} pairs -- every divider now threads its date onto
+      // each message actually in effect for it, not just the last one.
+      const dateDividers = [...cut.matchAll(/(\d{1,2})\/(\d{1,2})\/(\d{4}),?\s*\d{1,2}:\d{2}/g)].map((d) =&gt; ({
+        index: d.index,
+        iso: `${d[3]}-${d[2].padStart(2, '0')}-${d[1].padStart(2, '0')}`,
+      }));
+      const dateAt = (pos) =&gt; {
+        let found = null;
+        for (const d of dateDividers) { if (d.index &lt;= pos) found = d.iso; else break; }
+        return found;
+      };
       const msgRe = /Sent at (\d{1,2}:\d{2})\d{1,2}:\d{2}([^:]{1,40}):/g;
       const matches = [...cut.matchAll(msgRe)];
       const messages = [];
@@ -886,12 +913,13 @@ window.tinderBulkImport = async (batchSize) => {
           .replace(/Sent\s*$/, '')
           .trim();
         const sender = m[2].trim();
-        if (sender &amp;&amp; body) messages.push(`[${m[1]}] ${sender}: ${body}`);
+        const date = dateAt(m.index);
+        const prefix = date ? `${date} ${m[1]}` : m[1];
+        if (sender &amp;&amp; body) messages.push(`[${prefix}] ${sender}: ${body}`);
       }
       if (messages.length) fields.push({ label: 'Chat history', value: messages.join('\n') });
-      const dateDividers = [...cut.matchAll(/(\d{1,2})\/(\d{1,2})\/(\d{4}),?\s*\d{1,2}:\d{2}/g)];
       const lastDivider = dateDividers[dateDividers.length - 1];
-      if (lastDivider) fields.push({ label: 'Last message date', value: `${lastDivider[3]}-${lastDivider[2].padStart(2, '0')}-${lastDivider[1].padStart(2, '0')}` });
+      if (lastDivider) fields.push({ label: 'Last message date', value: lastDivider.iso });
     }
 
     $$('h2').forEach((h2) =&gt; {
@@ -1047,7 +1075,7 @@ window.tinderBulkImport = async (batchSize) => {
   // someone already saved is safe either way -- the dashboard fills in
   // whatever's still missing rather than duplicating what's already
   // there.
-  const SCRIPT_VERSION = 4; // chat history now also captures the last message's date
+  const SCRIPT_VERSION = 5; // chat history now dates every message, not just the last one
   const DONE_KEY = 'dashTinderBulkDone';
   const BATCH_SIZE = batchSize || 15; // "10-20 or so per day" — override per-call: tinderBulkImport(30)
   const MIN_DELAY_MS = 10000, MAX_DELAY_MS = 60000; // randomised, not a fixed interval &mdash; a fixed gap is a bot tell
