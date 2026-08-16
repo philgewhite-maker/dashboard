@@ -3,7 +3,7 @@ import { captureTask, revealTask } from './tasks.js';
 import { photoDelete, photoUrl } from '../db.js';
 import { storePhoto } from '../files.js';
 import {
-uid, todayStr, daysSince, escapeHtml, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, knownCityMap, scrollAndFlash, bindForm,
+uid, todayStr, daysSince, escapeHtml, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, knownCityMap, scrollAndFlash, bindForm, foldDiacritics,
 resizeImageToBlob,
 } from '../utils.js';
 import { MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot } from '../ai.js';
@@ -436,9 +436,9 @@ refreshPhotoTargets();
 return;
 }
 
-const term = connectionSearchTerm.trim().toLowerCase();
+const term = foldDiacritics(connectionSearchTerm.trim().toLowerCase());
 const filtered = term ? data.connections.filter((c) => {
-const haystack = [
+const haystack = foldDiacritics([
 c.name, c.profileName, ...(c.aliases || []), c.location, c.address, c.job, c.education, c.stage, ageDecade(c),
 // So the Connections Overview "Contact match" chips actually filter —
 // they search by their own label, which otherwise matches nothing.
@@ -450,7 +450,7 @@ photoCoverage(c), ...photoLinkLabels(c),
 // searching could surface a row *because* of a field you've chosen
 // not to display, with no visible reason why it matched.
 ...visibleTagFields().flatMap((f) => c[f.field] || []),
-].filter(Boolean).join(' ').toLowerCase();
+].filter(Boolean).join(' ').toLowerCase());
 return haystack.includes(term);
 }) : data.connections;
 

@@ -16,6 +16,13 @@ return arr;
 
 function uid() { return Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4); }
 
+// Lets a plain "Alena" search match a stored "Alëna" (and vice versa) by
+// decomposing accented letters into base + combining mark (NFD) and
+// dropping the marks -- apply to both sides of any free-text match.
+function foldDiacritics(s) {
+  return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
 function daysSince(dateStr) {
 const d = new Date(dateStr);
 const now = new Date(todayStr());
@@ -537,7 +544,7 @@ canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.85);
 }
 
 export {
-todayStr, daysAgoStr, last7Dates, uid, daysSince, daysUntil,
+todayStr, daysAgoStr, last7Dates, uid, daysSince, daysUntil, foldDiacritics,
 escapeHtml, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, knownCityMap, scrollAndFlash, bindForm,
 resizeImageToBlob, fileToBase64, loadImage, cropThumbnailToBlob,
 hashFile, captureDateOf, betterCaptureDate, dateFromFilename,
