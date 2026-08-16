@@ -1198,7 +1198,7 @@ ${conn?.photoId ? `<span class="tinder-bulk-thumb" data-photo-bg="${escapeHtml(c
 ${scrapedPhoto ? `<span class="tinder-bulk-thumb" style="background-image:url('${escapeHtml(scrapedPhoto)}')" title="Just scraped"></span>` : '<span class="tinder-bulk-thumb tinder-bulk-thumb-empty" title="No photo in this scrape"></span>'}
 <span class="tinder-bulk-info"><strong>${escapeHtml(conn ? conn.name : row.p.name)}</strong><br><span class="settings-note">${escapeHtml(row.diff)}</span></span>
 </label>
-<button type="button" class="sync-btn sm" data-tinder-bulk-review="${i}" title="Open in the full one-by-one reviewer instead of bulk-approving it">Review</button>
+<button type="button" class="sync-btn tinder-inline-btn" data-tinder-bulk-review="${i}" title="Open in the full one-by-one reviewer instead of bulk-approving it">Review</button>
 </div>`;
 }).join('')}
 </div>
