@@ -1795,7 +1795,17 @@ parts.push(`+${newCount - oldCount} chat line${newCount - oldCount === 1 ? '' : 
 }
 
 p.fields.filter((f) => f.apply && f.label !== 'Chat history' && FIELD_MAP[f.label]).forEach((f) => {
-if (!String(conn[FIELD_MAP[f.label]] || '').trim()) parts.push(`+${f.label}`);
+const stored = String(conn[FIELD_MAP[f.label]] || '').trim();
+if (!stored) { parts.push(`+${f.label}`); return; }
+// An applied field whose stored value is non-empty and different is
+// about to silently overwrite it. refreshOverrides() already blocks
+// that for every FIELD_MAP field EXCEPT the ones in ALWAYS_APPLY_LABELS
+// (currently just Last message date) -- which turned out capable of
+// being stale itself (a Tinder web-page divider quirk can misdate the
+// most recent message). Un-applying here sends it through the same
+// "differs, not applied" line every other conflicting field already
+// gets below, rather than trusting a value that isn't reliably newer.
+if (f.value.trim() !== stored) f.apply = false;
 });
 
 p.fields.filter((f) => f.apply && ARRAY_FIELD_MAP[f.label]).forEach((f) => {

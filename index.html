@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v58</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v59</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -586,6 +586,14 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
     // The last divider at or before `pos`, or null if `pos` comes before
     // any divider at all (Tinder doesn't show one until the day changes
     // for the first time) — degrades to a time-only prefix in that case.
+    // Tinder's web page also sometimes fails to insert a fresh divider for
+    // the current day (confirmed live: a message sent minutes ago kept
+    // inheriting a real divider from weeks earlier, wrongly, with no way
+    // here to tell that case apart from a message correctly covered by the
+    // last real divider) -- rather than guess which is which and risk
+    // silently mis-dating the wrong one, this stays a straight lookup;
+    // see the "Last message date" note below for how the review screen
+    // catches the stale-date case instead.
     const dateAt = (pos) =&gt; {
       let found = null;
       for (const d of dateDividers) { if (d.index &lt;= pos) found = d.iso; else break; }
@@ -594,6 +602,7 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
     const msgRe = /Sent at (\d{1,2}:\d{2})\d{1,2}:\d{2}([^:]{1,40}):/g;
     const matches = [...cut.matchAll(msgRe)];
     const messages = [];
+    let lastMessageDate = null;
     for (let i = 0; i &lt; matches.length; i++) {
       const m = matches[i];
       const start = m.index + m[0].length;
@@ -605,11 +614,15 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
       const sender = m[2].trim();
       const date = dateAt(m.index);
       const prefix = date ? `${date} ${m[1]}` : m[1];
-      if (sender &amp;&amp; body) messages.push(`[${prefix}] ${sender}: ${body}`);
+      if (sender &amp;&amp; body) { messages.push(`[${prefix}] ${sender}: ${body}`); lastMessageDate = date; }
     }
     if (messages.length) fields.push({ label: 'Chat history', value: messages.join('\n') });
-    const lastDivider = dateDividers[dateDividers.length - 1];
-    if (lastDivider) fields.push({ label: 'Last message date', value: lastDivider.iso });
+    // The actual last EXTRACTED message's own resolved date, same as the
+    // last divider's date in every case this snippet can currently tell
+    // apart -- kept as its own variable (rather than dateDividers[...])
+    // since a message-level fix, if one arrives later, only needs to
+    // change dateAt() and this stays correct for free.
+    if (lastMessageDate) fields.push({ label: 'Last message date', value: lastMessageDate });
   }
 
   // "Looking for" and prompt answers ("My biography would be called: ...")
@@ -890,8 +903,8 @@ window.tinderBulkImport = async (batchSize) => {
       const cut = raw.replace(/Reply to .+/s, '');
       // See the single-profile snippet's version of this block for why
       // dateDividers is computed before the messages loop and mapped to
-      // {index, iso} pairs -- every divider now threads its date onto
-      // each message actually in effect for it, not just the last one.
+      // {index, iso} pairs, and why dateAt() stays a straight lookup
+      // rather than guessing at a stale-divider correction.
       const dateDividers = [...cut.matchAll(/(\d{1,2})\/(\d{1,2})\/(\d{4}),?\s*\d{1,2}:\d{2}/g)].map((d) =&gt; ({
         index: d.index,
         iso: `${d[3]}-${d[2].padStart(2, '0')}-${d[1].padStart(2, '0')}`,
@@ -904,6 +917,7 @@ window.tinderBulkImport = async (batchSize) => {
       const msgRe = /Sent at (\d{1,2}:\d{2})\d{1,2}:\d{2}([^:]{1,40}):/g;
       const matches = [...cut.matchAll(msgRe)];
       const messages = [];
+      let lastMessageDate = null;
       for (let i = 0; i &lt; matches.length; i++) {
         const m = matches[i];
         const start = m.index + m[0].length;
@@ -915,11 +929,10 @@ window.tinderBulkImport = async (batchSize) => {
         const sender = m[2].trim();
         const date = dateAt(m.index);
         const prefix = date ? `${date} ${m[1]}` : m[1];
-        if (sender &amp;&amp; body) messages.push(`[${prefix}] ${sender}: ${body}`);
+        if (sender &amp;&amp; body) { messages.push(`[${prefix}] ${sender}: ${body}`); lastMessageDate = date; }
       }
       if (messages.length) fields.push({ label: 'Chat history', value: messages.join('\n') });
-      const lastDivider = dateDividers[dateDividers.length - 1];
-      if (lastDivider) fields.push({ label: 'Last message date', value: lastDivider.iso });
+      if (lastMessageDate) fields.push({ label: 'Last message date', value: lastMessageDate });
     }
 
     $$('h2').forEach((h2) =&gt; {
@@ -1179,7 +1192,12 @@ window.tinderBulkImport = async (batchSize) => {
           console.warn(`Extraction failed for ${row.name}: ${err.message} -- skipped.`);
         }
         if (i &lt; todo.length - 1) {
-          const delay = MIN_DELAY_MS + Math.random() * (MAX_DELAY_MS - MIN_DELAY_MS);
+          // Squaring the random factor skews toward the low end of the
+          // range instead of a flat spread -- long, near-60s waits get
+          // rarer while the occasional real one still happens (still not a
+          // fixed gap, still not a bot tell), cutting ~24% off the average
+          // total wait versus a uniform pick across the same 10-60s bounds.
+          const delay = MIN_DELAY_MS + Math.pow(Math.random(), 2) * (MAX_DELAY_MS - MIN_DELAY_MS);
           console.log(`Waiting ${Math.round(delay / 1000)}s...`);
           await new Promise((r) =&gt; setTimeout(r, delay));
         }
