@@ -568,6 +568,8 @@ ${contactPickerHtml(c.id)}
 <label>City<input type="text" autocomplete="off" placeholder="Groups in Overview" data-field="location" data-conn-detail="${c.id}" value="${escapeHtml(c.location || '')}"></label>
 <label>Distance<input type="text" autocomplete="off" placeholder="e.g. &lt; 10 mi" data-field="distance" data-conn-detail="${c.id}" value="${escapeHtml(c.distance || '')}"></label>
 <label>Matched on<input type="date" data-field="matchedOn" data-conn-detail="${c.id}" value="${escapeHtml(c.matchedOn || '')}"></label>
+<label class="checkbox-field">Met in person<input type="checkbox" data-field="metInPerson" data-conn-detail="${c.id}"${c.metInPerson ? ' checked' : ''}></label>
+${c.metInPerson ? `<label>Met on<input type="date" data-field="metInPersonDate" data-conn-detail="${c.id}" value="${escapeHtml(c.metInPersonDate || '')}"></label>` : ''}
 <label>Travel status<select data-field="travelStatus" data-conn-detail="${c.id}">
 <option value="" ${!c.travelStatus ? 'selected' : ''}>&mdash; normal reach-out rotation</option>
 <option value="standby" ${c.travelStatus === 'standby' ? 'selected' : ''}>Standby (foreign city, no end date)</option>
@@ -634,6 +636,16 @@ list.querySelectorAll('[data-conn-stage]').forEach((sel) => {
 sel.addEventListener('change', () => {
 const conn = data.connections.find((x) => x.id === sel.dataset.connStage);
 conn.stage = sel.value;
+// Reaching "Met in person" or beyond through the normal stage
+// progression records the fact automatically -- metInPerson stays a
+// separate field precisely so it isn't lost if Stage moves on again
+// later (Faded/Archived rank the same as never-progressed), and this
+// is what saves a manual tick for the common case of getting there the
+// ordinary way rather than jumping straight to Archived.
+if ((STAGE_RANK[sel.value] ?? 0) >= STAGE_RANK['Met in person'] && !conn.metInPerson) {
+conn.metInPerson = true;
+conn.metInPersonDate = conn.metInPersonDate || todayStr();
+}
 renderConnections();
 renderOverviewRef();
 queueSave();
@@ -661,7 +673,7 @@ queueSave();
 list.querySelectorAll('[data-conn-detail]').forEach((el) => {
 el.addEventListener('change', () => {
 const conn = data.connections.find((x) => x.id === el.dataset.connDetail);
-conn[el.dataset.field] = el.value;
+conn[el.dataset.field] = el.type === 'checkbox' ? el.checked : el.value;
 // Typing an age states what they are TODAY, so record today as the date
 // it was true — that's what lets it be carried forward later.
 if (el.dataset.field === 'age') conn.ageAsOf = el.value.trim() ? todayStr() : '';
@@ -673,6 +685,14 @@ const until = new Date();
 until.setDate(until.getDate() + 14);
 conn.travelUntil = until.toISOString().slice(0, 10);
 }
+// Orthogonal to Stage on purpose (see the "met in person" auto-set on
+// the Stage dropdown below) -- ticking this by hand is what lets the
+// fact survive jumping straight from an earlier stage to Faded/Archived
+// without ever passing through "Met in person", where it'd otherwise be
+// lost the moment Stage moves on.
+if (el.dataset.field === 'metInPerson' && el.checked && !String(conn.metInPersonDate || '').trim()) {
+conn.metInPersonDate = todayStr();
+}
 // These are echoed elsewhere in the card (the name line, the source tag,
 // every merge dropdown), so a full re-render is the only way to keep
 // those honest. `change` fires on blur, not per keystroke, so this costs
@@ -682,7 +702,8 @@ conn.travelUntil = until.toISOString().slice(0, 10);
 // up the next time something else happened to trigger a render, which looks
 // exactly like the paste not working. travelStatus needs it too, to show/
 // hide the "Travelling until" date field and refresh the badge/action.
-if (['name', 'app', 'age', 'dob', 'location', 'driveLink', 'travelStatus'].includes(el.dataset.field)) renderConnections();
+// metInPerson needs it too, to show/hide the "Met on" date field.
+if (['name', 'app', 'age', 'dob', 'location', 'driveLink', 'travelStatus', 'metInPerson'].includes(el.dataset.field)) renderConnections();
 renderOverviewRef();
 queueSave();
 });
