@@ -23,7 +23,7 @@
 // review regardless of how it got picked, so a wrong dropdown pick is just
 // as visible as a wrong auto-match was invisible before.
 import { data, queueSave, currentAge, computeFlags, distanceMiles, FLAG_FIELD_DEFS, suggestedQuestions } from '../state.js';
-import { escapeHtml, uid, todayStr, hydratePhotoBackgrounds, openLightbox } from '../utils.js';
+import { escapeHtml, uid, todayStr, hydratePhotoBackgrounds, openLightbox, knownCityMap } from '../utils.js';
 import { nameKey, editDistance } from '../googlecontacts.js';
 import { storePhoto, fetchProxiedImage } from '../files.js';
 import { photoGet, photoUrl } from '../db.js';
@@ -194,8 +194,27 @@ const ALWAYS_APPLY_LABELS = new Set(['Last message date']);
 // and unflaggable. Left off: the array-mapped fields (Interests,
 // Orientation...) and anything that only ever lands in Notes anyway
 // (Pets, Zodiac...) — a blank box for those has no real destination to
-// pay off filling it in.
-const ALWAYS_SHOW_LABELS = ['Height', 'Job', 'Education', 'City', 'Distance'];
+// pay off filling it in. City is ALSO deliberately left off, even though
+// it has a FIELD_MAP target: it already gets this exact treatment via the
+// dedicated #tinder-city / pending.cityOverride input in the Stage/City/
+// Rating row (built specifically because "city often only comes up in
+// chat", same reasoning as this whole feature) -- adding it here too
+// created a second City box that silently conflicted with the first one
+// at save time (cityOverride always wins, discarding whatever was typed
+// into the synthetic slot with no indication that happened). Confirmed
+// live: a profile showed "City: Riga" in the Stage row and an empty
+// "City: not captured" box in Basics at the same time.
+const ALWAYS_SHOW_LABELS = ['Height', 'Job', 'Education', 'Distance'];
+
+// Same idea as ALWAYS_SHOW_LABELS, for the array-mapped (chip-list)
+// fields — Nationality, Languages, etc. are just as likely to come up
+// only in free text as Height or Job is, and were originally left out of
+// the scalar list above on the mistaken assumption that "array-mapped"
+// meant "no real destination to fill in"; they route into a real chip
+// list (see ARRAY_FIELD_MAP) same as a scraped one would. A fill-in here
+// is comma-separated, same as Tinder's own Languages/Interests text.
+// 'Tags' is the synthetic generic-catch-all entry from ARRAY_FIELD_MAP.
+const ALWAYS_SHOW_ARRAY_LABELS = ['Nationality', 'Languages', 'Orientation', 'Relationship type', 'Looking for', 'Gender', 'Tags'];
 
 // Purely a display grouping — doesn't change where a field ends up on
 // save, just how the review card reads. A label not listed in any cluster
@@ -208,25 +227,35 @@ const FIELD_CLUSTERS = [
 // matches by literal label, unlike withAlwaysShowFields() above which
 // already resolves aliases through FIELD_MAP.
 { title: 'Basics', labels: ['Job', 'Job title', 'Work', 'Education', 'School', 'City', 'Distance', 'Height', 'Matched on'] },
-{ title: 'Family & lifestyle', labels: ['Family plans', 'Pets', 'Drinking', 'How often do you smoke?', 'Workout'] },
-{ title: 'About them', labels: ['Gender', 'Orientation', 'Zodiac', 'Love style'] },
+{ title: 'Family & lifestyle', labels: ['Family plans', 'Pets', 'Drinking', 'How often do you smoke?', 'Workout', 'Tags'] },
+{ title: 'About them', labels: ['Gender', 'Orientation', 'Zodiac', 'Love style', 'Nationality', 'Languages'] },
 { title: 'Looking for', labels: ['Looking for', 'Relationship type'] },
 { title: 'Interests', labels: ['Interests'] },
 ];
 
-// Appends an empty, unchecked entry for every ALWAYS_SHOW_LABELS field this
-// particular scrape didn't produce, so the review card offers a slot for
-// it regardless. Appending rather than inserting in cluster position keeps
-// every existing data-tinder-field="i" index stable against the array this
-// scrape actually produced — clusteredFieldsHtml() below handles the
-// re-ordering for display, this just makes sure the field EXISTS to sort.
+// Appends an empty, unchecked entry for every always-show field (scalar or
+// array-mapped) this particular scrape didn't produce, so the review card
+// offers a slot for it regardless. Appending rather than inserting in
+// cluster position keeps every existing data-tinder-field="i" index
+// stable against the array this scrape actually produced —
+// clusteredFieldsHtml() below handles the re-ordering for display, this
+// just makes sure the field EXISTS to sort.
 function withAlwaysShowFields(fields) {
-// Checked by FIELD_MAP target, not literal label -- Tinder's own label for
-// this varies ("Work" / "Job title" / "Job" all map to the same `job`
-// field), and matching only the literal string "Job" would add a
-// redundant empty slot right next to an already-scraped "Job title" row.
+// Scalar fields checked by FIELD_MAP target, not literal label -- Tinder's
+// own label for this varies ("Work" / "Job title" / "Job" all map to the
+// same `job` field), and matching only the literal string "Job" would add
+// a redundant empty slot right next to an already-scraped "Job title"
+// row. Array-mapped fields don't have that alias problem (each has
+// exactly one Tinder label), and target-based matching there would be
+// WRONG anyway -- Gender and "How often do you smoke?" share the same
+// `tags` storage target but are different questions, so checking by
+// target would wrongly treat one as satisfying the other. Literal label
+// match only, for those.
 const haveTargets = new Set(fields.map((f) => FIELD_MAP[f.label]).filter(Boolean));
-const missing = ALWAYS_SHOW_LABELS.filter((label) => !haveTargets.has(FIELD_MAP[label])).map((label) => ({ label, value: '', apply: false }));
+const haveLabels = new Set(fields.map((f) => f.label));
+const missingScalar = ALWAYS_SHOW_LABELS.filter((label) => !haveTargets.has(FIELD_MAP[label]));
+const missingArray = ALWAYS_SHOW_ARRAY_LABELS.filter((label) => !haveLabels.has(label));
+const missing = [...missingScalar, ...missingArray].map((label) => ({ label, value: '', apply: false }));
 return [...fields, ...missing];
 }
 
@@ -249,6 +278,11 @@ Nationality: { target: 'nationality', split: false },
 // than sitting unfindable in a wall of notes text (where they were before).
 'How often do you smoke?': { target: 'tags', split: false },
 Gender: { target: 'tags', split: false },
+// Not a real Tinder field label — a synthetic one, offered as an
+// always-show fill-in (see ALWAYS_SHOW_ARRAY_LABELS) so there's
+// somewhere to jot an arbitrary custom tag Tinder never asked about,
+// same generic bucket the two rows above already share.
+Tags: { target: 'tags', split: true },
 };
 
 let pending = null; // { name, age, fields, photos, chosenId, match, matchConfirmed, aiVerdict }
@@ -402,22 +436,6 @@ render();
 function escapeRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
 // City rarely arrives in a structured field — it's usually said in chat —
-// and free-text guessing at what's a place name is too unreliable to
-// trust. But every OTHER connection's own City is a real, known-good
-// value, so matching against that list is exact rather than a guess: any
-// text this profile carries gets scanned for a case-insensitive exact hit
-// against a city that's already on file for someone else, highlighted so
-// it's easy to spot, and clicking it fills the City field rather than
-// applying anything automatically.
-function knownCityMap() {
-const map = new Map(); // lowercase -> original casing (first one seen)
-data.connections.forEach((c) => {
-const loc = String(c.location || '').trim();
-if (loc && !map.has(loc.toLowerCase())) map.set(loc.toLowerCase(), loc);
-});
-return map;
-}
-
 // Cyrillic place names don't have the luxury of a known-good list (unlike
 // English city hits above) — nobody's own City field is ever stored in
 // Cyrillic. So this is a mechanical fallback: a straightforward per-letter
@@ -513,7 +531,7 @@ return map;
 }
 
 function highlightCities(text) {
-const cityMap = knownCityMap();
+const cityMap = knownCityMap(data.connections);
 const flagMap = flagValueMap();
 // Longest names first, so a multi-word city ("New York") wins whole
 // rather than a shorter, unrelated city name that happens to be a
@@ -693,14 +711,19 @@ return clusters + groupHtml('Other', rest) + (chatEntry ? fieldPreviewHtml(chatE
 }
 
 function fieldPreviewHtml(f, i) {
-// An ALWAYS_SHOW_LABELS slot this scrape didn't fill -- nothing scraped
-// means nothing to apply/skip, so this is a plain fill-in box rather than
-// the checkbox+value shape below. Typing something IS the decision;
-// there's no separate Apply toggle to also remember to check.
-if (!f.value.trim() && ALWAYS_SHOW_LABELS.includes(f.label)) {
+// An always-show slot this scrape didn't fill -- nothing scraped means
+// nothing to apply/skip, so this is a plain fill-in box rather than the
+// checkbox+value shape below. Typing something IS the decision; there's
+// no separate Apply toggle to also remember to check. Array-mapped
+// fields (Nationality, Tags...) take a comma-separated list, same as
+// Tinder's own Languages/Interests text -- routed through the normal
+// arrayMap split/push logic in save() once applied, no special-casing
+// needed there since it doesn't care how the value was entered.
+const isArrayAlwaysShow = ALWAYS_SHOW_ARRAY_LABELS.includes(f.label);
+if (!f.value.trim() && (ALWAYS_SHOW_LABELS.includes(f.label) || isArrayAlwaysShow)) {
 return `<div class="tinder-field-item">
 <label class="tinder-field-row"><strong>${escapeHtml(f.label)}:</strong>
-<input type="text" autocomplete="off" placeholder="Not captured — spotted in About me or chat? Type it here" data-tinder-field-fill="${i}">
+<input type="text" autocomplete="off" placeholder="${isArrayAlwaysShow ? 'Not captured — comma-separated if more than one' : 'Not captured — spotted in About me or chat? Type it here'}" data-tinder-field-fill="${i}">
 </label>
 </div>`;
 }

@@ -3,7 +3,7 @@ import { captureTask, revealTask } from './tasks.js';
 import { photoDelete, photoUrl } from '../db.js';
 import { storePhoto } from '../files.js';
 import {
-uid, todayStr, daysSince, escapeHtml, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, scrollAndFlash, bindForm,
+uid, todayStr, daysSince, escapeHtml, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, knownCityMap, scrollAndFlash, bindForm,
 resizeImageToBlob,
 } from '../utils.js';
 import { MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot } from '../ai.js';
@@ -499,13 +499,38 @@ const flags = computeFlags(c, data.flagRules);
 const action = suggestedAction(c, data.flagRules);
 const questions = suggestedQuestions(c);
 const flagDotHtml = flags.worst ? `<span class="dot ${flags.worst}" title="${escapeHtml(flags.hits.map((h) => `${h.label}: ${h.color}`).join(', '))}"></span> ` : '';
-// Only worth a second, highlighted copy of Notes when it would actually
-// show something the plain textarea doesn't — a flagged word or two.
-// Comparing against a plain escape is what highlightFlagValues() itself
-// falls back to when nothing matched, so an unequal result means a span
-// really got inserted, not just that Notes happens to be non-empty.
-const notesHighlighted = c.notes ? highlightFlagValues(c.notes, data.flagRules) : '';
+// A highlighted preview is only worth showing when it would actually
+// surface something the plain text doesn't — a flagged word, or a city
+// already on file for someone else. Comparing against a plain escape is
+// what highlightFlagValues() itself falls back to when nothing matched,
+// so an unequal result means a span really got inserted, not just that
+// Notes happens to be non-empty.
+const notesHighlighted = c.notes ? highlightFlagValues(c.notes, data.flagRules, knownCityMap(data.connections)) : '';
 const notesHasHits = notesHighlighted && notesHighlighted !== escapeHtml(c.notes);
+// The preview and the raw textarea used to both render at once — the
+// same text twice in a row, once plain and once highlighted, read as
+// duplicated rather than as two views of one thing. Now the preview (or
+// the chat transcript's bubbles) is what's actually shown; the editable
+// textarea sits behind an "Edit raw text" disclosure instead of always
+// being visible underneath. Plain <label> only when there's nothing to
+// preview — the .field-block pattern (not <label>) is what the Photos
+// row already uses for the same reason: a <details> toggle sharing a row
+// with a <label> would forward clicks on it into whatever the label's
+// first control is, same implicit-association hazard fixed there.
+const notesFieldHtml = notesHasHits
+? `<div class="field-block full"><span class="field-label">Notes</span>
+<div class="tinder-notes-preview">${notesHighlighted}</div>
+<details class="tinder-edit-details"><summary>Edit raw text</summary>
+<textarea rows="2" data-field="notes" data-conn-detail="${c.id}">${escapeHtml(c.notes || '')}</textarea>
+</details></div>`
+: `<label class="full">Notes<textarea rows="2" data-field="notes" data-conn-detail="${c.id}">${escapeHtml(c.notes || '')}</textarea></label>`;
+const chatFieldHtml = c.chatLog
+? `<div class="field-block full"><span class="field-label">Chat history</span>
+<div class="tinder-chat-block" style="margin:0;">${chatTranscriptHtml(c.chatLog)}</div>
+<details class="tinder-edit-details"><summary>Edit raw text</summary>
+<textarea rows="4" placeholder="Imported from Tinder — one message per line" data-field="chatLog" data-conn-detail="${c.id}">${escapeHtml(c.chatLog)}</textarea>
+</details></div>`
+: `<label class="full">Chat history<textarea rows="4" placeholder="Imported from Tinder — one message per line" data-field="chatLog" data-conn-detail="${c.id}"></textarea></label>`;
 return `<div class="match-card" data-conn-row="${c.id}">
 <div class="match-row">
 ${avatarHtml(c.photoId, c.name)}
@@ -563,10 +588,8 @@ ${c.travelStatus === 'travelling' ? `<label>Travelling until<input type="date" d
 </div>
 <label>Email<input type="email" autocomplete="off" placeholder="Also used to match" data-field="email" data-conn-detail="${c.id}" value="${escapeHtml(c.email || '')}" name="conn-email-${c.id}"></label>
 <label>What I like most<input type="text" autocomplete="off" data-field="likes" data-conn-detail="${c.id}" value="${escapeHtml(c.likes || '')}"></label>
-<label class="full">Notes<textarea rows="2" data-field="notes" data-conn-detail="${c.id}">${escapeHtml(c.notes || '')}</textarea></label>
-${notesHasHits ? `<div class="full tinder-notes-preview">${notesHighlighted}</div>` : ''}
-<label class="full">Chat history<textarea rows="4" placeholder="Imported from Tinder — one message per line" data-field="chatLog" data-conn-detail="${c.id}">${escapeHtml(c.chatLog || '')}</textarea></label>
-${c.chatLog ? `<div class="full tinder-chat-block" style="margin:0 0 6px;">${chatTranscriptHtml(c.chatLog)}</div>` : ''}
+${notesFieldHtml}
+${chatFieldHtml}
 ${visibleTagFields().map((f) => `<label class="full${f.sensitive ? ' sensitive-field' : ''}">${escapeHtml(f.label)}<div class="tag-editor">${tagChips(c[f.field], c.id, f.field)}</div></label>`).join('')}
 <label class="full">Ratings${averageRatingHtml(c)}<div class="ratings-block">${data.ratingCategories.map(({ field, label }) => ratingStars(label, field, c.id, (c.ratings && c.ratings[field]) || 0)).join('')}</div></label>
 <label class="full">Things to do<div>${todoListHtml(c)}</div></label>
@@ -798,6 +821,17 @@ list.querySelectorAll('[data-view-photo]').forEach((el) => {
 el.addEventListener('click', async () => {
 const url = await photoUrl(el.dataset.viewPhoto);
 if (url) openLightbox(url);
+});
+});
+list.querySelectorAll('.tinder-notes-preview [data-tinder-city]').forEach((hit) => {
+hit.addEventListener('click', () => {
+const row = hit.closest('[data-conn-row]');
+const conn = data.connections.find((x) => x.id === row?.dataset.connRow);
+if (!conn) return;
+conn.location = hit.dataset.tinderCity;
+renderConnections();
+renderOverviewRef();
+queueSave();
 });
 });
 list.querySelectorAll('[data-photo-add]').forEach((input) => {

@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v50</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v51</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -429,8 +429,14 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
   const DISTANCE_BUCKETS = [2, 5, 10, 20, 30, 50, 100, 1000, 2000];
   function bucketDistance(mi) {
     for (const b of DISTANCE_BUCKETS) if (mi &lt;= b) return `≤${b}mi/${Math.round(b * 1.60934)}km`;
-    const roundedMi = Math.round(mi);
-    return `${roundedMi}mi/${Math.round(mi * 1.60934)}km+`;
+    // Anything past the top bucket used to show the raw parsed distance
+    // (Tinder occasionally reports an oddly large, precise-looking number
+    // for a passport-mode or stale-location match, e.g. "2466 miles") --
+    // that defeats the point of bucketing, which is imprecision, and reads
+    // as a random number rather than a deliberate "very far away" bucket.
+    // Capping at the top bucket keeps every far-away match the same label.
+    const top = DISTANCE_BUCKETS[DISTANCE_BUCKETS.length - 1];
+    return `${top}mi/${Math.round(top * 1.60934)}km+`;
   }
 
   // Height likewise shows both units regardless of which one Tinder
@@ -443,9 +449,14 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
     if (cmMatch) cm = parseInt(cmMatch[1], 10);
     else if (ftMatch) cm = Math.round((parseInt(ftMatch[1], 10) * 12 + parseInt(ftMatch[2], 10)) * 2.54);
     if (cm === null) return text;
-    const totalIn = cm / 2.54;
+    // Round the TOTAL inches first, then split -- rounding the leftover
+    // inches on their own (after ft was already floored from the
+    // unrounded total) could round 11.6" up to "12"" without carrying
+    // into the feet, showing e.g. "4'12"" instead of "5'0"". Confirmed
+    // live around 151cm.
+    const totalIn = Math.round(cm / 2.54);
     const ft = Math.floor(totalIn / 12);
-    const inch = Math.round(totalIn % 12);
+    const inch = totalIn % 12;
     return `${cm}cm / ${ft}'${inch}"`;
   }
 
@@ -778,8 +789,10 @@ window.tinderBulkImport = async (batchSize) => {
     const DISTANCE_BUCKETS = [2, 5, 10, 20, 30, 50, 100, 1000, 2000];
     function bucketDistance(mi) {
       for (const b of DISTANCE_BUCKETS) if (mi &lt;= b) return `≤${b}mi/${Math.round(b * 1.60934)}km`;
-      const roundedMi = Math.round(mi);
-      return `${roundedMi}mi/${Math.round(mi * 1.60934)}km+`;
+      // See the single-profile snippet's bucketDistance() for why this
+      // caps at the top bucket instead of showing the raw parsed distance.
+      const top = DISTANCE_BUCKETS[DISTANCE_BUCKETS.length - 1];
+      return `${top}mi/${Math.round(top * 1.60934)}km+`;
     }
     function formatHeight(text) {
       const cmMatch = text.match(/^(\d+)\s*cm$/);
@@ -788,9 +801,14 @@ window.tinderBulkImport = async (batchSize) => {
       if (cmMatch) cm = parseInt(cmMatch[1], 10);
       else if (ftMatch) cm = Math.round((parseInt(ftMatch[1], 10) * 12 + parseInt(ftMatch[2], 10)) * 2.54);
       if (cm === null) return text;
-      const totalIn = cm / 2.54;
+      // Round the TOTAL inches first, then split -- rounding the leftover
+      // inches on their own (after ft was already floored from the
+      // unrounded total) could round 11.6" up to "12"" without carrying
+      // into the feet, showing e.g. "4'12"" instead of "5'0"". Confirmed
+      // live around 151cm.
+      const totalIn = Math.round(cm / 2.54);
       const ft = Math.floor(totalIn / 12);
-      const inch = Math.round(totalIn % 12);
+      const inch = totalIn % 12;
       return `${cm}cm / ${ft}'${inch}"`;
     }
     const ORIENTATIONS = new Set(['Straight', 'Gay', 'Lesbian', 'Bisexual', 'Pansexual', 'Asexual', 'Queer', 'Demisexual']);

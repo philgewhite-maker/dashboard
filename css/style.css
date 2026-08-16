@@ -905,6 +905,16 @@ padding:2px 0;
 }
 .match-details summary::-webkit-details-marker{display:none;}
 .match-details summary:before{content:'Details ▾ ';}
+.tinder-edit-details{margin-top:4px;}
+.tinder-edit-details summary{cursor:pointer;font-size:11px;color:var(--muted);}
+.tinder-edit-details textarea{margin-top:4px;}
+/* Explicit rather than relying on <details> alone to hide its content
+   when closed — confirmed live that the textarea inside was still taking
+   up layout space (getBoundingClientRect height > 0) with no [open]
+   attribute present, so something in this app's cascade was winning
+   against the browser's own collapse behaviour. Keying off [open]
+   directly removes any dependency on that working correctly. */
+.tinder-edit-details:not([open]) textarea{display:none;}
 .match-details[open] summary:before{content:'Details ▴ ';}
 .details-grid{
 display:grid;
@@ -989,7 +999,11 @@ font-size:11px;
 .tag-chip .tag-x{cursor:pointer;font-weight:700;}
 .tag-chip.tag-chip-green{background:var(--sage-bg);border-color:var(--sage);color:var(--sage);}
 .tag-chip.tag-chip-amber{background:var(--amber-bg);border-color:var(--amber);color:var(--amber);}
-.tag-chip.tag-chip-red{background:color-mix(in srgb, var(--red) 15%, var(--card));border-color:var(--red);color:var(--red);}
+/* Solid fill, not a tint mixed with --card -- this chip sits inside
+   .details-grid's pink background, and a translucent-feeling red-on-white
+   tint nearly disappeared against it. A solid var(--red) fill (same
+   pattern as .tinder-flag-hit-red) reads clearly against any background. */
+.tag-chip.tag-chip-red{background:var(--red);border-color:var(--red);color:#fff;}
 .tag-add-input{
 font-family:'Inter',sans-serif;
 font-size:12px;
@@ -1822,7 +1836,7 @@ opacity:.7;
    active state fighting over the same background. */
 .overview-chip.overview-chip-green:not(.active){background:var(--sage-bg);color:var(--sage);}
 .overview-chip.overview-chip-amber:not(.active){background:var(--amber-bg);color:var(--amber);}
-.overview-chip.overview-chip-red:not(.active){background:color-mix(in srgb, var(--red) 15%, var(--card));color:var(--red);}
+.overview-chip.overview-chip-red:not(.active){background:var(--red);color:#fff;}
 /* "None" is a gap to fill rather than a group to browse, so it reads as
    muted and dashed instead of competing with the real values. */
 .overview-chip.none{

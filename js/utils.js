@@ -52,17 +52,37 @@ return (name || '?').trim().charAt(0).toUpperCase();
 
 function escapeRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
+// Every OTHER connection's own City is a real, known-good value (unlike
+// free text, which is too unreliable to guess a place name from) — so
+// scanning incoming text for a case-insensitive exact hit against one is
+// exact, not a guess. Shared by tinderimport.js's own highlightCities()
+// (which layers Cyrillic transliteration on top, so stays local there)
+// and highlightFlagValues() below. Takes `connections` as a parameter
+// rather than importing state.js, which already imports this module.
+function knownCityMap(connections) {
+const map = new Map(); // lowercase -> original casing (first one seen)
+(connections || []).forEach((c) => {
+const loc = String(c.location || '').trim();
+if (loc && !map.has(loc.toLowerCase())) map.set(loc.toLowerCase(), loc);
+});
+return map;
+}
+
 // Wraps any free-text occurrence of a flag-rule value (from ANY rule's
-// green/amber/red list, any field) in a coloured span — the same
-// mechanism tinderimport.js's highlightCities() uses for its flag pass on
-// incoming profile text, extracted so the Notes field on an already-saved
-// connection can get the same treatment. Takes `rules` as a parameter
-// (data.flagRules) rather than importing state.js, which already imports
-// this module. Longest values first so a multi-word value ("Want kids")
-// wins whole rather than a shorter one matching a substring of it first;
-// the negative lookbehind on "non-"/"non " stops "Non-smoker" being
-// flagged as "Smoker" (the hyphen is its own word boundary).
-function highlightFlagValues(text, rules) {
+// green/amber/red list, any field) OR a known city name in a coloured
+// span — the same two mechanisms tinderimport.js's highlightCities() uses
+// on incoming profile text (minus the Cyrillic-transliteration pass,
+// which needs pending's in-progress scan state), extracted so the Notes
+// field on an already-saved connection gets the same treatment: spot a
+// red flag, or click a mentioned city straight into City. `cityMap` is
+// optional — omit it to highlight flag values only. Takes `rules` as a
+// parameter (data.flagRules) rather than importing state.js, which
+// already imports this module. Longest values first so a multi-word
+// value ("Want kids") wins whole rather than a shorter one matching a
+// substring of it first; the negative lookbehind on "non-"/"non " stops
+// "Non-smoker" being flagged as "Smoker" (the hyphen is its own word
+// boundary).
+function highlightFlagValues(text, rules, cityMap) {
 const str = String(text || '');
 const map = new Map();
 (rules || []).forEach((rule) => {
@@ -73,7 +93,9 @@ if (key && !map.has(key)) map.set(key, { label: v, color });
 });
 });
 });
-const values = [...map.values()].map((v) => v.label).sort((a, b) => b.length - a.length);
+const cities = cityMap ? [...cityMap.values()] : [];
+const cityLower = new Set(cities.map((c) => c.toLowerCase()));
+const values = [...cities, ...[...map.values()].map((v) => v.label)].sort((a, b) => b.length - a.length);
 if (!values.length) return escapeHtml(str);
 const re = new RegExp(values.map((v) => `(?<!non-)(?<!non )\\b${escapeRegex(v)}\\b`).join('|'), 'gi');
 let out = '';
@@ -82,8 +104,12 @@ let m;
 while ((m = re.exec(str))) {
 out += escapeHtml(str.slice(last, m.index));
 const hit = m[0];
+if (cityLower.has(hit.toLowerCase())) {
+out += `<span class="tinder-city-hit" data-tinder-city="${escapeHtml(hit)}" title="Click to set as City">${escapeHtml(hit)}</span>`;
+} else {
 const { color } = map.get(hit.toLowerCase());
 out += `<span class="tinder-flag-hit tinder-flag-hit-${color}" title="Flagged ${color}">${escapeHtml(hit)}</span>`;
+}
 last = m.index + hit.length;
 }
 out += escapeHtml(str.slice(last));
@@ -495,7 +521,7 @@ canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.85);
 
 export {
 todayStr, daysAgoStr, last7Dates, uid, daysSince, daysUntil,
-escapeHtml, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, scrollAndFlash, bindForm,
+escapeHtml, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, knownCityMap, scrollAndFlash, bindForm,
 resizeImageToBlob, fileToBase64, loadImage, cropThumbnailToBlob,
 hashFile, captureDateOf, betterCaptureDate, dateFromFilename,
 ensureBrowserReadableImage, setPhotoFallback,
