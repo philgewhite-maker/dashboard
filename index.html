@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v74</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v75</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -1255,7 +1255,7 @@ Album links are permanent, unlike the face-group links tried previously.
   // anything it captured wrong, or never caught at all) across repeated
   // runs in the same tab. Same idea as SCRIPT_VERSION in the Tinder
   // import snippet.
-  const SNIPPET_VERSION = 2; // early-stop past the named section on /people, double-grab per step for async-labelled tiles
+  const SNIPPET_VERSION = 3; // shared albums (/share/ links, not /album/) now captured too, with their key= token kept intact
   window.__dash = (window.__dash &amp;&amp; window.__dash.v === SNIPPET_VERSION) ? window.__dash : { v: SNIPPET_VERSION, albums: new Map(), people: new Set() };
   const onAlbums = location.pathname.includes('album');
   const grab = () => {
@@ -1263,8 +1263,17 @@ Album links are permanent, unlike the face-group links tried previously.
     // href (a cover tile and a text tile), aria-label is absent, and the
     // cover is a CSS background-image on a descendant, not an img. So both
     // anchors are merged by URL, keeping whichever piece each one carries.
-    document.querySelectorAll('a[href*="/album/"]').forEach(a =&gt; {
-      const url = a.href.split('?')[0];
+    // A SHARED album's tile links to /share/&lt;id&gt;?key=... instead of
+    // /album/&lt;id&gt; -- confirmed live from a real Shared-album tile's
+    // outerHTML, and the reason every shared album was silently invisible
+    // to this snippet, not a scroll/timing miss like the others.
+    document.querySelectorAll('a[href*="/album/"], a[href*="/share/"]').forEach(a =&gt; {
+      // The /share/ link's ?key=... IS the access token -- stripping it
+      // (like the plain query-string trim below) would save a URL that
+      // 403s the moment it's opened later. /album/ links carry no such
+      // token, so they keep the existing trim (whatever transient params
+      // Google sometimes appends there aren't part of the link's identity).
+      const url = /\/share\//.test(a.href) ? a.href : a.href.split('?')[0];
       const lines = (a.innerText || '').split('\n').map(s =&gt; s.trim()).filter(Boolean);
       let cover = '';
       for (const el of a.querySelectorAll('*')) {
@@ -1278,8 +1287,13 @@ Album links are permanent, unlike the face-group links tried previously.
       }
       // The grid requests tiny thumbnails (often 24px); ask for a usable one.
       if (cover) cover = cover.replace(/=s\d+/, '=s400');
-      const titleLine = lines.find(l =&gt; !/^(no items|\d+\s*items?|more options)$/i.test(l));
-      const countLine = lines.find(l =&gt; /^\d+\s*items?$/i.test(l));
+      // A shared album's second line reads "47 items · Shared", not just
+      // "47 items" -- the original $-anchored regex only ever matched a
+      // private album's plain count line, so a shared album's count (and,
+      // worse, its title-exclusion check) silently missed every time.
+      const ITEMS_RE = /^\d+\s*items?\b/i;
+      const titleLine = lines.find(l =&gt; l.toLowerCase() !== 'no items' &amp;&amp; l.toLowerCase() !== 'more options' &amp;&amp; !ITEMS_RE.test(l));
+      const countLine = lines.find(l =&gt; ITEMS_RE.test(l));
       const prev = window.__dash.albums.get(url) || {};
       window.__dash.albums.set(url, {
         url,
