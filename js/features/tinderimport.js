@@ -509,6 +509,84 @@ if (alreadyHasLang) return '';
 return ` <button type="button" class="sync-btn tinder-inline-btn" data-tinder-translate-add="${escapeHtml(lang)}">+ add ${escapeHtml(lang)}</button>`;
 }
 
+// A flag emoji is two "Regional Indicator Symbol" code points (U+1F1E6 =
+// 'A' through U+1F1FF = 'Z') that spell out an ISO 3166-1 alpha-2 country
+// code -- 🇧🇷 is literally the letters B and R shifted into that range.
+// Not exhaustive (a few small territories and disputed regions are left
+// out), but covers every country someone's actually likely to drop into
+// an About Me as a "here's where I'm from" flag.
+const FLAG_EMOJI_TO_NATIONALITY = {
+AD: 'Andorran', AE: 'Emirati', AF: 'Afghan', AG: 'Antiguan', AI: 'Anguillan', AL: 'Albanian', AM: 'Armenian',
+AO: 'Angolan', AR: 'Argentine', AT: 'Austrian', AU: 'Australian', AZ: 'Azerbaijani',
+BA: 'Bosnian', BB: 'Barbadian', BD: 'Bangladeshi', BE: 'Belgian', BF: 'Burkinabe', BG: 'Bulgarian',
+BH: 'Bahraini', BI: 'Burundian', BJ: 'Beninese', BN: 'Bruneian', BO: 'Bolivian', BR: 'Brazilian',
+BS: 'Bahamian', BT: 'Bhutanese', BW: 'Motswana', BY: 'Belarusian', BZ: 'Belizean',
+CA: 'Canadian', CD: 'Congolese', CF: 'Central African', CG: 'Congolese', CH: 'Swiss', CI: 'Ivorian',
+CL: 'Chilean', CM: 'Cameroonian', CN: 'Chinese', CO: 'Colombian', CR: 'Costa Rican', CU: 'Cuban',
+CV: 'Cape Verdean', CY: 'Cypriot', CZ: 'Czech',
+DE: 'German', DJ: 'Djiboutian', DK: 'Danish', DM: 'Dominican', DO: 'Dominican', DZ: 'Algerian',
+EC: 'Ecuadorian', EE: 'Estonian', EG: 'Egyptian', ER: 'Eritrean', ES: 'Spanish', ET: 'Ethiopian',
+FI: 'Finnish', FJ: 'Fijian', FM: 'Micronesian', FR: 'French',
+GA: 'Gabonese', GB: 'British', GD: 'Grenadian', GE: 'Georgian', GH: 'Ghanaian', GM: 'Gambian',
+GN: 'Guinean', GQ: 'Equatorial Guinean', GR: 'Greek', GT: 'Guatemalan', GW: 'Guinea-Bissauan', GY: 'Guyanese',
+HK: 'Hong Konger', HN: 'Honduran', HR: 'Croatian', HT: 'Haitian', HU: 'Hungarian',
+ID: 'Indonesian', IE: 'Irish', IL: 'Israeli', IN: 'Indian', IQ: 'Iraqi', IR: 'Iranian', IS: 'Icelandic', IT: 'Italian',
+JM: 'Jamaican', JO: 'Jordanian', JP: 'Japanese',
+KE: 'Kenyan', KG: 'Kyrgyz', KH: 'Cambodian', KI: 'I-Kiribati', KM: 'Comorian', KN: 'Kittitian',
+KP: 'North Korean', KR: 'South Korean', KW: 'Kuwaiti', KZ: 'Kazakhstani',
+LA: 'Lao', LB: 'Lebanese', LC: 'Saint Lucian', LI: 'Liechtensteiner', LK: 'Sri Lankan', LR: 'Liberian',
+LS: 'Basotho', LT: 'Lithuanian', LU: 'Luxembourgish', LV: 'Latvian', LY: 'Libyan',
+MA: 'Moroccan', MC: 'Monegasque', MD: 'Moldovan', ME: 'Montenegrin', MG: 'Malagasy', MH: 'Marshallese',
+MK: 'Macedonian', ML: 'Malian', MM: 'Burmese', MN: 'Mongolian', MR: 'Mauritanian', MT: 'Maltese',
+MU: 'Mauritian', MV: 'Maldivian', MW: 'Malawian', MX: 'Mexican', MY: 'Malaysian', MZ: 'Mozambican',
+NA: 'Namibian', NE: 'Nigerien', NG: 'Nigerian', NI: 'Nicaraguan', NL: 'Dutch', NO: 'Norwegian', NP: 'Nepali',
+NR: 'Nauruan', NZ: 'New Zealand',
+OM: 'Omani',
+PA: 'Panamanian', PE: 'Peruvian', PG: 'Papua New Guinean', PH: 'Filipino', PK: 'Pakistani', PL: 'Polish',
+PS: 'Palestinian', PT: 'Portuguese', PW: 'Palauan', PY: 'Paraguayan',
+QA: 'Qatari',
+RO: 'Romanian', RS: 'Serbian', RU: 'Russian', RW: 'Rwandan',
+SA: 'Saudi', SB: 'Solomon Islander', SC: 'Seychellois', SD: 'Sudanese', SE: 'Swedish', SG: 'Singaporean',
+SI: 'Slovenian', SK: 'Slovak', SL: 'Sierra Leonean', SM: 'Sammarinese', SN: 'Senegalese', SO: 'Somali',
+SR: 'Surinamese', SS: 'South Sudanese', ST: 'Sao Tomean', SV: 'Salvadoran', SY: 'Syrian', SZ: 'Swazi',
+TD: 'Chadian', TG: 'Togolese', TH: 'Thai', TJ: 'Tajik', TL: 'Timorese', TM: 'Turkmen', TN: 'Tunisian',
+TO: 'Tongan', TR: 'Turkish', TT: 'Trinidadian', TV: 'Tuvaluan', TW: 'Taiwanese', TZ: 'Tanzanian',
+UA: 'Ukrainian', UG: 'Ugandan', US: 'American', UY: 'Uruguayan', UZ: 'Uzbekistani',
+VA: 'Vatican', VC: 'Vincentian', VE: 'Venezuelan', VN: 'Vietnamese', VU: 'Ni-Vanuatu',
+WS: 'Samoan',
+YE: 'Yemeni',
+ZA: 'South African', ZM: 'Zambian', ZW: 'Zimbabwean',
+};
+const FLAG_EMOJI_RE = /[\u{1F1E6}-\u{1F1FF}]{2}/gu;
+
+// Decodes every flag emoji in `text` back to its nationality adjective —
+// dedup'd, order of first appearance. codePointAt - 0x1F1E6 + 65 turns
+// the regional-indicator code point back into the plain ASCII letter it
+// represents (U+1F1E6 is 'A', ..., U+1F1FF is 'Z').
+function flagEmojiNationalities(text) {
+const found = [];
+const seen = new Set();
+for (const pair of String(text || '').match(FLAG_EMOJI_RE) || []) {
+const code = [...pair].map((ch) => String.fromCharCode(ch.codePointAt(0) - 0x1F1E6 + 65)).join('');
+const nat = FLAG_EMOJI_TO_NATIONALITY[code];
+if (nat && !seen.has(nat)) { seen.add(nat); found.push(nat); }
+}
+return found;
+}
+
+// A flag emoji is basically a country announcing itself — same "+ add"
+// treatment as a Cyrillic run prompting a language, but generic rather
+// than hardcoded to one target field (see data-tinder-add-label), since
+// this always means the SAME thing regardless of which field it shows up
+// in: add this to Nationality.
+function flagEmojiAddButtonHtml(text) {
+const nats = flagEmojiNationalities(text);
+if (!nats.length) return '';
+const existing = new Set();
+pending.fields.filter((f) => f.label === 'Nationality').forEach((f) => f.value.split(',').map((s) => s.trim()).forEach((v) => existing.add(v)));
+return nats.filter((n) => !existing.has(n)).map((n) => ` <button type="button" class="sync-btn tinder-inline-btn" data-tinder-add-label="Nationality" data-tinder-add-value="${escapeHtml(n)}">+ add ${escapeHtml(n)}</button>`).join('');
+}
+
 const CYRILLIC_RUN_RE = '[\\u0400-\\u04FF]+(?:[ \\-][\\u0400-\\u04FF]+)*';
 
 // Every distinct value any red/amber/green value-list rule cares about,
@@ -769,6 +847,7 @@ return `<div class="tinder-field-item${isChat ? ' tinder-field-item-full' : ''}"
 ${translateButtonHtml(f, i)}
 ${countryButtonHtml(f, i)}
 ${cyrillicAddButtonHtml(f.value)}
+${flagEmojiAddButtonHtml(f.value)}
 </div>
 ${f.label === 'Distance' ? proposedCityHtml() : ''}
 ${isChat ? `<div class="tinder-chat-block">${chatHistoryHtml(f.value)}</div>` : ''}
@@ -1015,6 +1094,12 @@ btn.addEventListener('click', () => runTranslateFor(parseInt(btn.dataset.tinderT
 el.querySelectorAll('[data-tinder-translate-add]').forEach((btn) => {
 btn.addEventListener('click', () => {
 pending.fields.push({ label: 'Languages', value: btn.dataset.tinderTranslateAdd, apply: true });
+render();
+});
+});
+el.querySelectorAll('[data-tinder-add-label]').forEach((btn) => {
+btn.addEventListener('click', () => {
+pending.fields.push({ label: btn.dataset.tinderAddLabel, value: btn.dataset.tinderAddValue, apply: true });
 render();
 });
 });
