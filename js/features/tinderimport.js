@@ -777,6 +777,15 @@ const tagValues = [...tagValueMap.values()].map((v) => v.label).sort((a, b) => b
 const tagValuePattern = tagValues.length ? `\\b(?:${tagValues.map(escapeRegex).join('|')})\\b` : null;
 const parts = [cityPattern, flagPattern, countryPattern, tagValuePattern, CYRILLIC_RUN_RE].filter(Boolean);
 const re = new RegExp(parts.join('|'), 'gi');
+// A question isn't a statement about anyone -- "Do you know Brazil?"
+// mentions a country with zero claim about either person's nationality,
+// but the click-to-add mechanism can't tell that from a real self-
+// description ("Brazilian, living in Spain") without this check: same
+// word, opposite meaning. Chat renders one message per call, so this is
+// exact there; a profile field is closer to a coin flip if it mixes a
+// question in with real self-description, but leaving the add-clicks
+// live on an actual question is the worse failure of the two.
+const looksLikeQuestion = text.trim().endsWith('?');
 let out = '';
 let last = 0;
 let m;
@@ -794,7 +803,7 @@ const { color, field } = flagMap.get(hit.toLowerCase());
 // click-to-add hit yet did nothing when clicked. If the rule's own
 // field routes through the same TAG_FIELDS add mechanism, the flag
 // colour and the click-to-add both apply to the one span.
-const targetLabel = TARGET_TO_ADD_LABEL[field];
+const targetLabel = !looksLikeQuestion ? TARGET_TO_ADD_LABEL[field] : null;
 const addAttrs = targetLabel ? ` data-tinder-add-label="${escapeHtml(targetLabel)}" data-tinder-add-value="${escapeHtml(hit)}"` : '';
 const title = targetLabel ? `Flagged ${color} — click to add to ${targetLabel}` : `Flagged ${color}`;
 out += `<span class="tinder-flag-hit tinder-flag-hit-${color}"${addAttrs} title="${escapeHtml(title)}">${escapeHtml(hit)}</span>`;
@@ -804,13 +813,17 @@ out += `<span class="tinder-flag-hit tinder-flag-hit-${color}"${addAttrs} title=
 // adds its nationality, no separate button needed since the word IS
 // the button here.
 const { nat } = countryNameMap.get(hit.toLowerCase());
-out += `<span class="tinder-city-hit" data-tinder-add-label="Nationality" data-tinder-add-value="${escapeHtml(nat)}" title="Click to add ${escapeHtml(nat)} to Nationality">${escapeHtml(hit)}</span>`;
+out += looksLikeQuestion
+? `<span class="tinder-city-hit" title="Mentioned, not added — this looks like a question, not a statement about them">${escapeHtml(hit)}</span>`
+: `<span class="tinder-city-hit" data-tinder-add-label="Nationality" data-tinder-add-value="${escapeHtml(nat)}" title="Click to add ${escapeHtml(nat)} to Nationality">${escapeHtml(hit)}</span>`;
 } else if (tagValueMap.has(hit.toLowerCase())) {
 // General sweep: any value already saved against ANY connection's tag
 // fields (interests, languages, tags, etc) gets the same click-to-add
 // treatment, not just the hand-written city/flag/nationality tables.
 const { label, targetLabel } = tagValueMap.get(hit.toLowerCase());
-out += `<span class="tinder-city-hit" data-tinder-add-label="${escapeHtml(targetLabel)}" data-tinder-add-value="${escapeHtml(label)}" title="Click to add to ${escapeHtml(targetLabel)}">${escapeHtml(hit)}</span>`;
+out += looksLikeQuestion
+? `<span class="tinder-city-hit" title="Mentioned, not added — this looks like a question, not a statement about them">${escapeHtml(hit)}</span>`
+: `<span class="tinder-city-hit" data-tinder-add-label="${escapeHtml(targetLabel)}" data-tinder-add-value="${escapeHtml(label)}" title="Click to add to ${escapeHtml(targetLabel)}">${escapeHtml(hit)}</span>`;
 } else {
 const exonym = CYRILLIC_EXONYMS[hit.trim().toLowerCase()];
 // A real place name is a word or two; a long run is a sentence caught
