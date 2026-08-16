@@ -219,19 +219,23 @@ const ALWAYS_APPLY_LABELS = new Set(['Last message date']);
 const ALWAYS_SHOW_LABELS = ['Height', 'Job', 'Education', 'Distance'];
 
 // Same idea as ALWAYS_SHOW_LABELS, for the array-mapped (chip-list)
-// fields — Gender and Tags are just as likely to come up only in free text
-// as Height or Job is, and were originally left out of the scalar list
-// above on the mistaken assumption that "array-mapped" meant "no real
-// destination to fill in"; they route into a real chip list (see
-// ARRAY_FIELD_MAP) same as a scraped one would. A fill-in here is
-// comma-separated, same as Tinder's own Interests text. 'Tags' is the
-// synthetic generic-catch-all entry from ARRAY_FIELD_MAP. Nationality/
-// Languages/Orientation/"Relationship type"/"Looking for" deliberately
-// NOT here any more -- they have their own always-visible chip editor now
-// (see CHIP_OVERRIDE_LABELS), so an extra empty fill-in slot for them
-// would just be a second, competing box for the same field (the exact bug
-// City had before its own chip editor existed).
-const ALWAYS_SHOW_ARRAY_LABELS = ['Gender', 'Tags'];
+// fields — Tags is just as likely to come up only in free text as Height
+// or Job is, and was originally left out of the scalar list above on the
+// mistaken assumption that "array-mapped" meant "no real destination to
+// fill in"; it routes into a real chip list (see ARRAY_FIELD_MAP) same as
+// a scraped one would. A fill-in here is comma-separated, same as
+// Tinder's own Interests text. 'Tags' is the synthetic generic-catch-all
+// entry from ARRAY_FIELD_MAP -- Gender is one of the questions that lands
+// there (see ARRAY_FIELD_MAP's own comment) but isn't forced onto screen
+// as an empty fill-in slot the way Tags is: if a scrape actually captured
+// it, it shows and routes into Tags same as anything else; if it didn't,
+// there's nothing to correct or add by hand, so no empty box for it.
+// Nationality/Languages/Orientation/"Relationship type"/"Looking for"
+// deliberately NOT here either -- they have their own always-visible chip
+// editor now (see CHIP_OVERRIDE_LABELS), so an extra empty fill-in slot
+// for them would just be a second, competing box for the same field (the
+// exact bug City had before its own chip editor existed).
+const ALWAYS_SHOW_ARRAY_LABELS = ['Tags'];
 
 // Purely a display grouping — doesn't change where a field ends up on
 // save, just how the review card reads. A label not listed in any cluster
@@ -1001,13 +1005,6 @@ if (t === 'loading') return `<div class="tinder-translate-result">Checking langu
 if (t.error) return `<div class="tinder-translate-result tinder-translate-error">Translate failed: ${escapeHtml(t.error)}</div>`;
 if (t.alreadyEnglish) return `<div class="tinder-translate-result"><span class="tinder-engine-badge tinder-engine-free">Free, on-device</span> Already English — no Anthropic call made.</div>`;
 if (!t.language || !t.translation) return `<div class="tinder-translate-result tinder-translate-error">Couldn't tell what language this is.</div>`;
-const alreadyHasLang = pending.languagesOverride.some((l) => l.toLowerCase() === t.language.toLowerCase());
-// The translation is shown, but nothing saves IT anywhere -- only the
-// language tag has an "+ add" action. "+ save both" appends it onto the
-// field's own value, so the original AND the English version both end
-// up saved together rather than the translation only ever existing as a
-// throwaway preview.
-const alreadySaved = pending.fields[i].value.includes(t.translation);
 // Getting here at all means the free on-device check either said this
 // ISN'T English, or wasn't available to ask in the first place — either
 // way, every translation actually shown came from a paid Anthropic call,
@@ -1015,7 +1012,28 @@ const alreadySaved = pending.fields[i].value.includes(t.translation);
 // above). A muted inline "(via Anthropic)" note turned out too easy to
 // miss (confirmed live) -- a coloured badge is the same information made
 // impossible to scroll past without noticing.
-return `<div class="tinder-translate-result"><span class="tinder-engine-badge tinder-engine-paid">via Anthropic</span> <strong>${escapeHtml(t.language)}:</strong> ${escapeHtml(t.translation)}`
+const badge = `<span class="tinder-engine-badge tinder-engine-paid">via Anthropic</span> <strong>${escapeHtml(t.language)}:</strong> ${escapeHtml(t.translation)}`;
+// City's translation has nowhere useful to go via the generic "+ add
+// {language}" (that's for Languages, not City) or "+ save both" (appends
+// into f.value, which for City is inert -- its real value lives in
+// cityOverride, not the raw scraped field) -- confirmed live: translating
+// a Cyrillic city name and clicking "+ save both" saved nothing anywhere.
+// A dedicated "add the translated name itself as a City chip" is the
+// action that's actually useful here.
+if (pending.fields[i].label === 'City') {
+const alreadyChip = pending.cityOverride.some((c) => c.toLowerCase() === t.translation.toLowerCase());
+return `<div class="tinder-translate-result">${badge}`
++ (alreadyChip ? '' : ` <button type="button" class="sync-btn tinder-inline-btn" data-tinder-translate-add-city="${i}">+ add ${escapeHtml(t.translation)} to City</button>`)
++ `</div>`;
+}
+const alreadyHasLang = pending.languagesOverride.some((l) => l.toLowerCase() === t.language.toLowerCase());
+// The translation is shown, but nothing saves IT anywhere -- only the
+// language tag has an "+ add" action. "+ save both" appends it onto the
+// field's own value, so the original AND the English version both end
+// up saved together rather than the translation only ever existing as a
+// throwaway preview.
+const alreadySaved = pending.fields[i].value.includes(t.translation);
+return `<div class="tinder-translate-result">${badge}`
 + (alreadyHasLang ? '' : ` <button type="button" class="sync-btn tinder-inline-btn" data-tinder-translate-add="${escapeHtml(t.language)}">+ add ${escapeHtml(t.language)}</button>`)
 + (alreadySaved ? '' : ` <button type="button" class="sync-btn tinder-inline-btn" data-tinder-translate-save="${i}">+ save both</button>`)
 + `</div>`;
@@ -1193,13 +1211,31 @@ disabled = true;
 } else if (CHIP_OVERRIDE_LABELS[f.label]) {
 // Same reasoning as City -- Languages/Nationality/Orientation/
 // "Relationship type"/"Looking for" now have their own dedicated chip
-// editor above, kept visible here only so the suggestion buttons below
-// (nationality-to-language, country lookup) still work off the raw
-// scraped value.
+// editor above. This row is redundant on its own (the chip editor
+// already reflects this exact value); it's worth keeping ONLY when it
+// hosts a real action the chip editor doesn't offer (Translate,
+// nationality-to-language suggestion...) -- see the extras check below,
+// which skips rendering this row entirely when none apply.
 note = `see ${CHIP_OVERRIDE_META[CHIP_OVERRIDE_LABELS[f.label]].display} field above`;
 disabled = true;
 }
 const isChat = f.label === 'Chat history';
+const translateHtml = translateButtonHtml(f, i);
+const countryHtml = countryButtonHtml(f, i);
+const cyrillicHtml = cyrillicAddButtonHtml(f.value);
+const flagHtml = flagEmojiAddButtonHtml(f.value);
+const natLangHtml = nationalityLanguageSuggestionHtml(f);
+const translateResultHtml = translationResultHtml(i);
+const countryResultBlock = countryResultHtml(f, i);
+// A locked Languages/Nationality/Orientation/"Relationship type"/"Looking
+// for" row with none of the above is pure noise -- the value it would
+// show is already visible as a chip above, with nothing left to click
+// here. Confirmed live: "Orientation: Straight (see Relationship field
+// above)" sat there with zero buttons, just restating what the chip
+// editor already said.
+if (CHIP_OVERRIDE_LABELS[f.label] && !translateHtml && !countryHtml && !cyrillicHtml && !flagHtml && !natLangHtml && !translateResultHtml && !countryResultBlock) {
+return '';
+}
 const flagColor = isChat ? null : fieldFlagColor(f);
 const valueHtml = isChat ? '' : (flagColor
 ? `<span class="tinder-flag-hit tinder-flag-hit-${flagColor}" title="Flagged ${flagColor}">${highlightCities(f.value)}</span>`
@@ -1214,16 +1250,16 @@ return `<div class="tinder-field-item${isChat ? ' tinder-field-item-full' : ''}"
 <input type="checkbox" data-tinder-field="${i}"${f.apply && !disabled ? ' checked' : ''}${disabled ? ' disabled' : ''}>
 <span><strong>${escapeHtml(f.label)}:</strong>${isChat ? '' : ` ${valueHtml}`} <span class="tinder-field-note">(${escapeHtml(note)})</span></span>
 </label>
-${translateButtonHtml(f, i)}
-${countryButtonHtml(f, i)}
-${cyrillicAddButtonHtml(f.value)}
-${flagEmojiAddButtonHtml(f.value)}
-${nationalityLanguageSuggestionHtml(f)}
+${translateHtml}
+${countryHtml}
+${cyrillicHtml}
+${flagHtml}
+${natLangHtml}
 </div>
 ${f.label === 'Distance' ? proposedCityHtml() : ''}
 ${isChat ? `<div class="tinder-chat-block">${chatHistoryHtml(f.value)}</div>` : ''}
-${translationResultHtml(i)}
-${countryResultHtml(f, i)}
+${translateResultHtml}
+${countryResultBlock}
 </div>`;
 }
 
@@ -1660,6 +1696,14 @@ const f = pending.fields[i];
 const t = pending.translations[i];
 if (!f || !t || !t.translation) return;
 f.value = `${f.value}\n\n(${t.language} translation) ${t.translation}`;
+render();
+});
+});
+el.querySelectorAll('[data-tinder-translate-add-city]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const i = parseInt(btn.dataset.tinderTranslateAddCity, 10);
+const t = pending.translations[i];
+if (t && t.translation) addCityValue(t.translation);
 render();
 });
 });
