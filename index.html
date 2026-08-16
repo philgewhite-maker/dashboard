@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v73</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v74</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -1249,7 +1249,14 @@ Album links are permanent, unlike the face-group links tried previously.
 <summary style="cursor:pointer;color:var(--muted);font-size:13px;">Show the console snippet</summary>
 <pre id="albums-snippet" style="white-space:pre-wrap;font-size:12px;background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:10px;margin:8px 0;">(async () => {
   // Accumulates across pages: run on /albums, then on /people, then paste.
-  window.__dash = window.__dash || { albums: new Map(), people: new Set() };
+  // Bump whenever the capture/scroll logic below changes -- forces
+  // window.__dash to start clean instead of quietly carrying forward
+  // whatever an OLDER version of this script already captured (including
+  // anything it captured wrong, or never caught at all) across repeated
+  // runs in the same tab. Same idea as SCRIPT_VERSION in the Tinder
+  // import snippet.
+  const SNIPPET_VERSION = 2; // early-stop past the named section on /people, double-grab per step for async-labelled tiles
+  window.__dash = (window.__dash &amp;&amp; window.__dash.v === SNIPPET_VERSION) ? window.__dash : { v: SNIPPET_VERSION, albums: new Map(), people: new Set() };
   const onAlbums = location.pathname.includes('album');
   const grab = () => {
     // Verified against the live page: each album has TWO anchors sharing an
@@ -1289,27 +1296,50 @@ Album links are permanent, unlike the face-group links tried previously.
   const box = [...document.querySelectorAll('div')]
     .filter(d =&gt; d.scrollHeight &gt; d.clientHeight + 500 &amp;&amp; d.clientHeight &gt; 200)
     .sort((a,b) =&gt; b.scrollHeight - a.scrollHeight)[0] || document.scrollingElement;
-  // Small fixed steps, and TWO full sweeps (down, then back up) rather than
-  // one: verified live against a real library, a single downward pass
-  // missed an album ("Albina_Marbella_2023") completely — not just its
-  // cover, the whole tile — presumably virtualized out of the grid again
-  // before grab() caught it at that scroll position. A second sweep in the
-  // opposite direction gives every tile a second, differently-timed chance
-  // to be in the DOM when grab() runs; window.__dash accumulates across
-  // both, so anything either pass catches is kept.
-  const sweep = async (from, to, step) =&gt; {
+  const countNow = () =&gt; onAlbums ? window.__dash.albums.size : window.__dash.people.size;
+  // Two things changed here from a plain fixed-step scroll-and-grab:
+  //
+  // 1. grab() runs TWICE per stop, a beat apart, not once. A tile's name
+  //    label can populate a moment after the tile itself lands in the DOM
+  //    (an async render, not a layout one) -- a single grab() right after
+  //    scrolling sampled plenty of tiles mid-render with a blank label,
+  //    confirmed live on /people as a "select, miss, select, miss" pattern
+  //    even though every one of those tiles was clearly a named person on
+  //    screen a moment later.
+  //
+  // 2. On /people specifically (autoStop below), the sweep stops once
+  //    several steps in a row add no one new. Named people cluster at the
+  //    top with no gaps -- past them is Google's much longer "Others"
+  //    section this app has no use for, which used to make the whole
+  //    sweep take minutes for nothing. Albums have no such shape (a real
+  //    album can be anywhere on the page), so autoStop never applies there.
+  const sweep = async (from, to, step, autoStop) =&gt; {
+    let flat = 0;
     for (let y = from; step &gt; 0 ? y &lt; to : y &gt; to; y += step) {
+      const before = countNow();
       grab();
       box.scrollTop = y;
-      await new Promise(r =&gt; setTimeout(r, 380));
+      await new Promise(r =&gt; setTimeout(r, 260));
+      grab();
+      await new Promise(r =&gt; setTimeout(r, 220));
+      if (autoStop) {
+        if (countNow() === before) flat++; else flat = 0;
+        if (flat &gt;= 6) break;
+      }
     }
     grab();
   };
   box.scrollTop = 0;
   await new Promise(r =&gt; setTimeout(r, 400));
-  await sweep(0, box.scrollHeight, 160);
+  await sweep(0, box.scrollHeight, 120, !onAlbums);
+  // Second pass, back upward, over the SAME span the first pass actually
+  // covered (not all the way from scrollHeight down to 0) -- same
+  // "virtualized out of the grid again before grab() caught it" reasoning
+  // that motivated a two-pass sweep in the first place, just bounded to
+  // wherever there was actually anything worth finding.
+  const reachedY = box.scrollTop;
   await new Promise(r =&gt; setTimeout(r, 300));
-  await sweep(box.scrollHeight, 0, -160);
+  await sweep(reachedY, 0, -120, false);
   const out = {
     albums: [...window.__dash.albums.values()].filter(a =&gt; a.title),
     people: [...window.__dash.people],
