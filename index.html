@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v57</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v58</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -722,7 +722,7 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
 })();</pre>
 </details>
 <div class="settings-note" style="margin:10px 0;">
-<strong>Bulk mode:</strong> steps through your sidebar matches automatically instead of one profile at a time &mdash; 15 per run by default, real randomised delays (10&ndash;60s) between each, remembered on Tinder's own site so the next run (later today or tomorrow) only picks up whoever's left. Fine to run a few times a day at that pace. Pasting the snippet only defines it; run it with <code>tinderBulkImport()</code> in the console for the default 15, or <code>tinderBulkImport(30)</code> for a custom size &mdash; no need to re-paste to change it. Paste its output into the same box below; it's told apart from a single-profile paste automatically. This runs unattended across many real profiles in a row &mdash; if you see anything that looks like a rate limit or a verification prompt, stop and give it a break.
+<strong>Bulk mode:</strong> steps through your sidebar matches automatically instead of one profile at a time &mdash; 15 per run by default, real randomised delays (10&ndash;60s) between each, remembered on Tinder's own site so the next run (later today or tomorrow) only picks up whoever's left. Fine to run a few times a day at that pace, or a large number left overnight &mdash; e.g. <code>tinderBulkImport(250)</code>. Pasting the snippet only defines it; run it with <code>tinderBulkImport()</code> in the console for the default 15, or <code>tinderBulkImport(30)</code> for a custom size &mdash; no need to re-paste to change it. Every 25 profiles it checkpoints to its own downloaded file, so a crash, sleep or closed tab partway through an overnight run only loses the last (incomplete) chunk, not the whole night. The dashboard's file picker below takes several of those files at once &mdash; select them all and it sorts anyone it already knows for certain into a bulk-review list (photos, name, and what's new, tick the ones that look right and submit together) and only routes genuinely new or uncertain matches to the one-by-one reviewer. This runs unattended across many real profiles in a row &mdash; if you see anything that looks like a rate limit or a verification prompt, stop and give it a break.
 </div>
 <button class="sync-btn" type="button" id="tinder-bulk-copy-snippet">Copy bulk-import snippet</button>
 <details style="margin:0 0 10px;">
@@ -1077,8 +1077,9 @@ window.tinderBulkImport = async (batchSize) => {
   // there.
   const SCRIPT_VERSION = 5; // chat history now dates every message, not just the last one
   const DONE_KEY = 'dashTinderBulkDone';
-  const BATCH_SIZE = batchSize || 15; // "10-20 or so per day" — override per-call: tinderBulkImport(30)
+  const BATCH_SIZE = batchSize || 15; // "10-20 or so per day" — override per-call: tinderBulkImport(30), or tinderBulkImport(250) left running overnight
   const MIN_DELAY_MS = 10000, MAX_DELAY_MS = 60000; // randomised, not a fixed interval &mdash; a fixed gap is a bot tell
+  const CHUNK_SIZE = 25; // checkpoint to its own downloaded file this often -- a long unattended run surviving a sleep/crash/closed-tab partway through loses at most this many, not the whole run, and each file is pasteable into the dashboard as soon as it lands rather than waiting for the end
 
   let doneVersions = {};
   try {
@@ -1099,6 +1100,39 @@ window.tinderBulkImport = async (batchSize) => {
   const isDone = (id) =&gt; (doneVersions[id] || 0) &gt;= SCRIPT_VERSION;
   const todo = candidates.filter((r) =&gt; !isDone(r.id)).slice(0, BATCH_SIZE);
   const profiles = [];
+  let chunkIndex = 0;
+  let totalSaved = 0;
+
+  // Writes whatever's in `list` to its own downloaded file, optionally also
+  // the clipboard. Called mid-run every CHUNK_SIZE profiles (file only -- no
+  // point fighting over the clipboard with a run nobody's watching), and
+  // once more at the very end for whatever's left over (file + clipboard,
+  // same as every run behaved before chunking existed).
+  function downloadChunk(list, copyToClipboard) {
+    if (!list.length) return;
+    chunkIndex++;
+    totalSaved += list.length;
+    const json = JSON.stringify({ profiles: list }, null, 1);
+    let copied = false;
+    if (copyToClipboard) {
+      try { copy(json); copied = true; } catch (e) { /* not in a real DevTools console */ }
+      if (!copied) { try { navigator.clipboard.writeText(json); copied = true; } catch (e) { /* no clipboard permission/focus */ } }
+    }
+    try {
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `tinder-batch-${new Date().toISOString().replace(/[:.]/g, '-')}-part${chunkIndex}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() =&gt; URL.revokeObjectURL(url), 10000);
+      console.log(`Checkpoint: ${list.length} profile${list.length === 1 ? '' : 's'} saved to part${chunkIndex} in Downloads (${totalSaved} total so far)${copied ? ' -- also on the clipboard' : ''}.`);
+    } catch (e) {
+      console.warn(`Checkpoint download blocked for part${chunkIndex} -- ${list.length} profiles only exist in this tab's memory right now, keep it open.`);
+    }
+  }
 
   // Always logged, whether or not there's anything new to actually run --
   // "how far through 205 am I" shouldn't require sitting through another
@@ -1137,6 +1171,7 @@ window.tinderBulkImport = async (batchSize) => {
           } else {
             extracted.matchId = row.id; // already known from the sidebar row — same permanent id the single-profile snippet reads from the URL
             profiles.push(extracted);
+            if (profiles.length &gt;= CHUNK_SIZE) downloadChunk(profiles.splice(0, profiles.length), false);
           }
           doneVersions[row.id] = SCRIPT_VERSION;
           localStorage.setItem(DONE_KEY, JSON.stringify(doneVersions));
@@ -1150,11 +1185,6 @@ window.tinderBulkImport = async (batchSize) => {
         }
       }
     } finally {
-      const out = { profiles };
-      const json = JSON.stringify(out, null, 1);
-      let copied = false;
-      try { copy(json); copied = true; } catch (e) { /* not in a real DevTools console */ }
-      if (!copied) { try { await navigator.clipboard.writeText(json); copied = true; } catch (e) { /* no clipboard permission/focus */ } }
       // Marked done in localStorage the moment a profile is scraped here,
       // not when the dashboard actually saves it -- the two are different
       // origins with no way to signal back. So the clipboard alone isn't
@@ -1162,32 +1192,24 @@ window.tinderBulkImport = async (batchSize) => {
       // before pasting would lose this batch for good even though it's
       // already marked as never-offer-again. A real file on disk survives
       // that -- still there to paste in later even if today's paste never
-      // happens.
-      try {
-        const blob = new Blob([json], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `tinder-batch-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        setTimeout(() =&gt; URL.revokeObjectURL(url), 10000);
-      } catch (e) { /* download blocked -- clipboard/console log are still there */ }
-      console.log(`${copied ? 'Copied' : 'Could not auto-copy -- select and copy manually'} -- ${profiles.length} of ${todo.length} attempted profile${todo.length === 1 ? '' : 's'} extracted, and saved to a file in your Downloads folder too. Paste into the dashboard now or later.`);
-      if (!copied) console.log(json);
+      // happens. Whatever's left in `profiles` here is the tail end that
+      // hasn't hit a CHUNK_SIZE checkpoint yet -- everyone else already has
+      // their own file, downloaded as the run went.
+      downloadChunk(profiles, true);
+      console.log(`${totalSaved} of ${todo.length} attempted profile${todo.length === 1 ? '' : 's'} extracted, across ${chunkIndex} file${chunkIndex === 1 ? '' : 's'} in your Downloads folder. Paste them into the dashboard now or later -- the file picker there takes several at once.`);
     }
   }
 };
-console.log('Ready. Run tinderBulkImport() for the default 15, or tinderBulkImport(30) for a custom size.');</pre>
+console.log('Ready. Run tinderBulkImport() for the default 15, tinderBulkImport(30) for a custom size, or e.g. tinderBulkImport(250) left running overnight -- checkpoints to a file every 25.');</pre>
 </details>
 <textarea id="tinder-input" rows="4" style="width:100%;font-family:monospace;font-size:12px;" placeholder="Paste the copied JSON here — one profile or a batch, either works"></textarea>
 <div class="sync-row" style="margin-top:8px;">
 <button class="sync-btn" id="tinder-import-btn" type="button">Read profile(s)</button>
-<label class="file-btn" for="tinder-file-input">Or upload a saved .json file</label>
-<input type="file" id="tinder-file-input" accept="application/json" style="display:none;">
+<label class="file-btn" for="tinder-file-input">Or upload saved .json file(s)</label>
+<input type="file" id="tinder-file-input" accept="application/json" multiple style="display:none;">
 <span class="sync-status" id="tinder-status"></span>
 </div>
+<div id="tinder-bulk-review"></div>
 <div id="tinder-review"></div>
 </section>
 

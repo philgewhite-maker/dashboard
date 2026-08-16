@@ -52,13 +52,13 @@ return youSaid && theySaid;
 // (someone already at "Planning to meet" isn't suggested back down to
 // "Chatting in app" just because this import also found chat history),
 // but the user sees and can override it before it's ever saved.
-function suggestedStage(conn) {
+function suggestedStage(conn, p = pending) {
 const current = (conn && conn.stage) || 'Matched';
-const chatField = pending.fields.find((f) => f.apply && f.label === 'Chat history' && f.value.trim());
-const gaveNumber = pending.foundPhones.some((p) => p.apply);
+const chatField = p.fields.find((f) => f.apply && f.label === 'Chat history' && f.value.trim());
+const gaveNumber = p.foundPhones.some((ph) => ph.apply);
 let target = null;
 if (gaveNumber) {
-const allText = pending.fields.map((f) => f.value).join('\n');
+const allText = p.fields.map((f) => f.value).join('\n');
 target = /\btelegram\b/i.test(allText) ? 'Moved to Telegram' : 'Moved to WhatsApp';
 } else if (chatField && hasMutualMessages(chatField.value)) {
 target = 'Chatting in app';
@@ -287,6 +287,13 @@ Tags: { target: 'tags', split: true },
 
 let pending = null; // { name, age, fields, photos, chosenId, match, matchConfirmed, aiVerdict }
 let queue = []; // raw {name,age,fields,photos} profiles still waiting, from a bulk-import paste
+// Certain-identity re-matches (known Tinder match id) with nothing risky
+// about them, held back from the one-by-one queue above for a single
+// tick-and-submit pass instead -- see classifyRaws(). Each row is
+// { p, diff, selected }: `p` the fully-built pending object, ready to
+// apply as-is via applyPendingToConnection(); `diff` a short human summary
+// of whatever's actually new (or "No changes").
+let bulkQueue = [];
 
 // The dropdown puts whoever the name-matcher flagged at the top, in their
 // own group, ahead of the full alphabetical list — 300+ connections is too
@@ -1144,6 +1151,86 @@ function ratingStarsHtml(current) {
 return [1, 2, 3, 4, 5].map((n) => `<svg class="star tinder-rating-star${n <= current ? ' filled' : ''}" data-tinder-star="${n}" viewBox="0 0 20 20" fill="currentColor"><path d="M10 1l2.6 5.9 6.4.6-4.8 4.3 1.4 6.2L10 14.9 4.4 18l1.4-6.2L1 7.5l6.4-.6z"/></svg>`).join('');
 }
 
+// The tick-and-submit list of certain-identity re-matches classifyRaws()
+// held back from the one-by-one reviewer — independent of pending/render()
+// so it keeps showing (and can keep being worked through) even while the
+// one-by-one queue below it is empty, mid-review, or being cleared.
+let bulkSubmitMessage = ''; // outlives the rows it refers to -- see renderBulk()'s empty-list branch
+
+function renderBulk() {
+const el = document.getElementById('tinder-bulk-review');
+if (!el) return;
+if (!bulkQueue.length) {
+// A submit that clears every remaining row also wipes out the status
+// span the confirmation message would have been written into -- shown
+// here instead, in whatever's left of the card, so "Saved 2." doesn't
+// just vanish the instant the last row goes.
+el.innerHTML = bulkSubmitMessage ? `<div class="settings-note" style="margin:6px 0;">${escapeHtml(bulkSubmitMessage)}</div>` : '';
+return;
+}
+const allSelected = bulkQueue.every((r) => r.selected);
+const selectedCount = bulkQueue.filter((r) => r.selected).length;
+el.innerHTML = `<div class="album-card" style="margin-bottom:10px;">
+<div class="album-caption"><strong>${bulkQueue.length} clean re-match${bulkQueue.length === 1 ? '' : 'es'}</strong> — known identity, nothing new or only minor updates. Skim the summary, untick anything you'd rather look at properly, then submit.</div>
+<label class="tinder-field-row" style="margin:6px 0;"><input type="checkbox" id="tinder-bulk-select-all"${allSelected ? ' checked' : ''}> Select all</label>
+<div class="tinder-bulk-list">
+${bulkQueue.map((row, i) => {
+const conn = data.connections.find((c) => c.id === row.p.chosenId);
+const scrapedPhoto = row.p.photos[0]?.url;
+return `<label class="tinder-bulk-row">
+<input type="checkbox" data-tinder-bulk-select="${i}"${row.selected ? ' checked' : ''}>
+${conn?.photoId ? `<span class="tinder-bulk-thumb" data-photo-bg="${escapeHtml(conn.photoId)}" title="On file"></span>` : '<span class="tinder-bulk-thumb tinder-bulk-thumb-empty" title="No photo on file"></span>'}
+${scrapedPhoto ? `<span class="tinder-bulk-thumb" style="background-image:url('${escapeHtml(scrapedPhoto)}')" title="Just scraped"></span>` : '<span class="tinder-bulk-thumb tinder-bulk-thumb-empty" title="No photo in this scrape"></span>'}
+<span class="tinder-bulk-info"><strong>${escapeHtml(conn ? conn.name : row.p.name)}</strong><br><span class="settings-note">${escapeHtml(row.diff)}</span></span>
+</label>`;
+}).join('')}
+</div>
+<div class="sync-row" style="margin-top:8px;">
+<button class="add-btn" type="button" id="tinder-bulk-submit"${selectedCount ? '' : ' disabled'}>Save selected (${selectedCount})</button>
+<span class="sync-status" id="tinder-bulk-status"></span>
+</div>
+</div>`;
+hydratePhotoBackgrounds(el);
+
+const selectAll = document.getElementById('tinder-bulk-select-all');
+if (selectAll) selectAll.addEventListener('change', () => {
+bulkQueue.forEach((r) => { r.selected = selectAll.checked; });
+renderBulk();
+});
+el.querySelectorAll('[data-tinder-bulk-select]').forEach((cb) => {
+cb.addEventListener('change', () => {
+bulkQueue[parseInt(cb.dataset.tinderBulkSelect, 10)].selected = cb.checked;
+renderBulk();
+});
+});
+const submitBtn = document.getElementById('tinder-bulk-submit');
+if (submitBtn) submitBtn.addEventListener('click', async () => {
+const bulkStatus = document.getElementById('tinder-bulk-status');
+const selected = bulkQueue.filter((r) => r.selected);
+if (!selected.length) return;
+submitBtn.disabled = true;
+let saved = 0;
+let photoIssues = 0;
+for (let i = 0; i < selected.length; i++) {
+if (bulkStatus) bulkStatus.textContent = `Saving ${i + 1} of ${selected.length}…`;
+const result = await applyPendingToConnection(selected[i].p);
+if (result.ok) { saved++; if (result.failed) photoIssues++; }
+}
+bulkQueue = bulkQueue.filter((r) => !selected.includes(r));
+Promise.all([import('./connections.js'), import('./overview.js')])
+.then(([c, o]) => { c.renderConnections(); o.renderOverview(); hydratePhotoBackgrounds(document.getElementById('conn-list') || document.body); });
+const message = `Saved ${saved}${photoIssues ? ` (${photoIssues} had a photo that needs a retry — open them individually)` : ''}.`;
+if (bulkQueue.length) {
+renderBulk();
+const finalStatus = document.getElementById('tinder-bulk-status');
+if (finalStatus) finalStatus.textContent = message;
+} else {
+bulkSubmitMessage = message;
+renderBulk();
+}
+});
+}
+
 function render() {
 const el = document.getElementById('tinder-review');
 if (!el) return;
@@ -1402,26 +1489,28 @@ if (saveOpenBtn) saveOpenBtn.addEventListener('click', () => { if (confirmRisky(
 // the save actually lands -- a separate real page load (this is a single-
 // page app with no per-connection URL otherwise), so it goes through the
 // same #<tab>:<id> hash format initTabs() already parses.
-async function save(openAfter) {
-if (!pending || !pending.chosenId) return;
-const conn = data.connections.find((c) => c.id === pending.chosenId);
-if (!conn) return;
-const connId = conn.id;
-const status = document.getElementById('tinder-save-status');
-if (status) status.textContent = 'Saving…';
+// The actual write: applies a built pending object `p` to its chosen
+// connection. Pulled out of save() so the bulk-review submit button can
+// run the exact same logic against many rows in a row, not a reimplemented
+// copy of it — `onProgress`, if given, is called with a short string during
+// the photo-fetch loop (the one part slow enough to want live feedback).
+async function applyPendingToConnection(p, onProgress) {
+if (!p || !p.chosenId) return { ok: false };
+const conn = data.connections.find((c) => c.id === p.chosenId);
+if (!conn) return { ok: false };
 
 // Fill-if-empty, same rule as every other field — age previously
 // overwrote unconditionally, which is what erased Lenka's real age when
 // Leila's data landed on her record by mistake.
-if (pending.age && !String(conn.age || '').trim()) { conn.age = pending.age; conn.ageAsOf = todayStr(); }
+if (p.age && !String(conn.age || '').trim()) { conn.age = p.age; conn.ageAsOf = todayStr(); }
 
-const nextStep = pending.nextStepNote.trim();
+const nextStep = p.nextStepNote.trim();
 if (nextStep) {
 if (!Array.isArray(conn.todos)) conn.todos = [];
 conn.todos.push({ id: uid(), text: nextStep, done: false });
 }
 
-pending.fields.filter((f) => f.apply).forEach((f) => {
+p.fields.filter((f) => f.apply).forEach((f) => {
 const target = FIELD_MAP[f.label];
 if (target) {
 // f.apply is now the single source of truth for whether this writes:
@@ -1437,25 +1526,25 @@ if (arrayMap) {
 if (!Array.isArray(conn[arrayMap.target])) conn[arrayMap.target] = [];
 const parts = arrayMap.split ? f.value.split(',').map((s) => s.trim()).filter(Boolean) : [f.value.trim()];
 const existingLower = conn[arrayMap.target].map((t) => t.toLowerCase());
-parts.forEach((p) => { if (p && !existingLower.includes(p.toLowerCase())) conn[arrayMap.target].push(p); });
+parts.forEach((part) => { if (part && !existingLower.includes(part.toLowerCase())) conn[arrayMap.target].push(part); });
 return;
 }
 const line = `${f.label}: ${f.value}`;
 if (!String(conn.notes || '').includes(line)) conn.notes = conn.notes ? `${conn.notes}\n${line}` : line;
 });
 
-pending.foundPhones.filter((p) => p.apply).forEach((p) => {
-if (!String(conn.phone || '').trim()) conn.phone = p.value;
+p.foundPhones.filter((ph) => ph.apply).forEach((ph) => {
+if (!String(conn.phone || '').trim()) conn.phone = ph.value;
 });
 if (!Array.isArray(conn.socialHandles)) conn.socialHandles = [];
-pending.foundHandles.filter((h) => h.apply).forEach((h) => {
+p.foundHandles.filter((h) => h.apply).forEach((h) => {
 const label = formatHandle(h);
 const existingLower = conn.socialHandles.map((s) => s.toLowerCase());
 if (!existingLower.includes(label.toLowerCase())) conn.socialHandles.push(label);
 });
 
 if (!Array.isArray(conn.tinderPhotoKeys)) conn.tinderPhotoKeys = [];
-const toFetch = pending.photos.filter((ph) => ph.apply);
+const toFetch = p.photos.filter((ph) => ph.apply);
 let failed = 0;
 let firstError = '';
 let alreadyHad = 0;
@@ -1467,7 +1556,7 @@ const key = photoKey(ph.url);
 // catch a re-import — this key-based check is what actually prevents
 // the duplicate.
 if (conn.tinderPhotoKeys.includes(key)) { alreadyHad++; ph.apply = false; continue; }
-if (status) status.textContent = `Saving… photo ${i + 1} of ${toFetch.length}`;
+if (onProgress) onProgress(`photo ${i + 1} of ${toFetch.length}`);
 try {
 const blob = await fetchTinderPhoto(ph.url);
 const id = await storePhoto(blob);
@@ -1487,12 +1576,24 @@ failed++;
 // whatever's showing when Save is clicked is what's applied), same as
 // editing them on the Connections tab itself: a direct set, not a
 // fill-if-empty merge.
-if (pending.stageOverride) conn.stage = pending.stageOverride;
-if (pending.cityOverride.trim()) conn.location = pending.cityOverride.trim();
-if (pending.ratingOverride) conn.priority = pending.ratingOverride;
-if (pending.matchId && !conn.tinderMatchId) conn.tinderMatchId = pending.matchId;
+if (p.stageOverride) conn.stage = p.stageOverride;
+if (p.cityOverride.trim()) conn.location = p.cityOverride.trim();
+if (p.ratingOverride) conn.priority = p.ratingOverride;
+if (p.matchId && !conn.tinderMatchId) conn.tinderMatchId = p.matchId;
 
 queueSave();
+return { ok: true, conn, failed, toFetchLen: toFetch.length, firstError, alreadyHad };
+}
+
+async function save(openAfter) {
+if (!pending || !pending.chosenId) return;
+const status = document.getElementById('tinder-save-status');
+if (status) status.textContent = 'Saving…';
+const result = await applyPendingToConnection(pending, (msg) => { if (status) status.textContent = `Saving… ${msg}`; });
+if (!result.ok) return;
+const { conn, failed, toFetchLen, firstError, alreadyHad } = result;
+const connId = conn.id;
+
 Promise.all([import('./connections.js'), import('./overview.js')])
 .then(([c, o]) => { c.renderConnections(); o.renderOverview(); hydratePhotoBackgrounds(document.getElementById('conn-list') || document.body); });
 if (openAfter) window.open(`${location.origin}${location.pathname}#dating:${connId}`, '_blank');
@@ -1510,7 +1611,7 @@ if (openAfter) window.open(`${location.origin}${location.pathname}#dating:${conn
 // direct write here would already be gone by the time anyone saw it.
 const dupeNote = alreadyHad ? ` (${alreadyHad} already had.)` : '';
 if (failed) {
-pending.saveMessage = `Saved fields to ${conn.name}. ${failed} of ${toFetch.length} photo${toFetch.length === 1 ? '' : 's'} failed: ${firstError} — click Save again to retry.${dupeNote}`;
+pending.saveMessage = `Saved fields to ${conn.name}. ${failed} of ${toFetchLen} photo${toFetchLen === 1 ? '' : 's'} failed: ${firstError} — click Save again to retry.${dupeNote}`;
 render();
 } else {
 advanceQueue(`Saved to ${conn.name}.${dupeNote}`);
@@ -1535,14 +1636,27 @@ return Array.isArray(raw.profiles) ? raw.profiles : [raw];
 // {label,value} data through it again).
 function loadBatch(raws, status) {
 if (!raws.length) { if (status) status.textContent = 'Nothing to import in that.'; return; }
-queue = raws.slice(1);
-loadFromRaw(raws[0]);
+const { bulk, review } = classifyRaws(raws);
+if (bulk.length) bulkSubmitMessage = '';
+bulkQueue = bulkQueue.concat(bulk);
+queue = review.slice(1);
+if (review.length) loadFromRaw(review[0]);
+else pending = null;
+
+const parts = [];
+if (bulk.length) parts.push(`${bulk.length} clean re-match${bulk.length === 1 ? '' : 'es'} ready for bulk review below`);
+if (review.length) {
 const p = pending;
 const matchNote = p.match
 ? (p.match.why === 'exact' ? `Matched ${p.match.conn.name} exactly — check the fields below, then save.` : `Possible match found (${p.match.why}) — confirm it's really them before saving.`)
 : 'No matching connection — pick one or add new.';
-if (status) status.textContent = raws.length > 1 ? `Loaded 1 of ${raws.length} in this batch. ${matchNote}` : matchNote;
+parts.push(review.length > 1 ? `Loaded 1 of ${review.length} needing a full review. ${matchNote}` : matchNote);
+} else if (!bulk.length) {
+parts.push('Nothing new to review.');
+}
+if (status) status.textContent = parts.join(' ');
 render();
+renderBulk();
 }
 
 // Scans every extracted field's text for a phone number or a social handle
@@ -1581,8 +1695,11 @@ return { phones, handles };
 // needs and runs the same match-and-preselect logic a single paste always
 // has — only an EXACT name match is trusted enough to pre-select; anything
 // looser (the "Leila"/"Lenka" mistake was 2 letters different) is shown as
-// a suggestion requiring an explicit look-and-confirm instead.
-function loadFromRaw(raw) {
+// a suggestion requiring an explicit look-and-confirm instead. Pure: builds
+// and returns the object without touching the global `pending`, so a bulk
+// classification pass (see classifyRaws) can build many of these up front
+// without disturbing whatever's currently on screen.
+function buildPending(raw) {
 const fields = Array.isArray(raw.fields) ? raw.fields
 .map((f) => ({ label: String(f.label || '').trim(), value: String(f.value || '').trim() }))
 .filter((f) => f.label && f.value) : [];
@@ -1641,8 +1758,87 @@ parsed.match = match;
 // than silently auto-picking whichever happened to sort first.
 parsed.risky = !knownConn && candidates.length > 1 && candidates[0].score === candidates[1].score;
 if (match && (match.why === 'exact' || match.why === 'known match id')) { parsed.chosenId = match.conn.id; parsed.matchConfirmed = true; }
-pending = parsed;
+return parsed;
+}
+
+function loadFromRaw(raw) {
+pending = buildPending(raw);
 refreshOverrides();
+}
+
+// A short, human-readable list of whatever's actually new on `p` versus
+// what's already saved on `conn` -- the line shown against each row in the
+// bulk-review list, so a glance down the list is enough to catch anything
+// worth a closer look before ticking "submit". Also does one bit of actual
+// work, not just reporting: the chat field is a single-value field like any
+// other, so refreshOverrides() already defaulted it to unapplied if `conn`
+// already has a chat log -- but a re-scrape is always the FULL transcript,
+// never a delta, so "already has one" is exactly the wrong reason to skip
+// it. Growth is detected here and forced back to applied, specifically so
+// chat-only updates flow through the bulk pipe instead of being silently
+// dropped or forced into a full manual review.
+function summarizeCleanMatch(p, conn) {
+if (!conn) return 'No changes';
+const parts = [];
+
+const newPhotoCount = p.photos.filter((ph) => ph.apply && !(conn.tinderPhotoKeys || []).includes(photoKey(ph.url))).length;
+if (newPhotoCount) parts.push(`+${newPhotoCount} photo${newPhotoCount === 1 ? '' : 's'}`);
+
+const chatField = p.fields.find((f) => f.label === 'Chat history');
+if (chatField) {
+const oldCount = String(conn.chatLog || '').split('\n').filter(Boolean).length;
+const newCount = chatField.value.split('\n').filter(Boolean).length;
+if (newCount > oldCount) {
+chatField.apply = true;
+parts.push(`+${newCount - oldCount} chat line${newCount - oldCount === 1 ? '' : 's'}`);
+}
+}
+
+p.fields.filter((f) => f.apply && f.label !== 'Chat history' && FIELD_MAP[f.label]).forEach((f) => {
+if (!String(conn[FIELD_MAP[f.label]] || '').trim()) parts.push(`+${f.label}`);
+});
+
+p.fields.filter((f) => f.apply && ARRAY_FIELD_MAP[f.label]).forEach((f) => {
+const map = ARRAY_FIELD_MAP[f.label];
+const existingLower = (conn[map.target] || []).map((v) => v.toLowerCase());
+const incoming = map.split ? f.value.split(',').map((s) => s.trim()).filter(Boolean) : [f.value.trim()];
+const fresh = incoming.filter((v) => v && !existingLower.includes(v.toLowerCase()));
+if (fresh.length) parts.push(`+${fresh.join(', ')} (${f.label})`);
+});
+
+// Informational only -- these stay unapplied (refreshOverrides already
+// defaults an already-set field to unchecked) so bulk-submitting this row
+// as-is genuinely changes nothing about them, but it's still worth a
+// glance in case it's the one thing that should have pulled this row out
+// of the bulk list entirely.
+p.fields.filter((f) => !f.apply && f.label !== 'Chat history' && FIELD_MAP[f.label]).forEach((f) => {
+const stored = String(conn[FIELD_MAP[f.label]] || '').trim();
+const fresh = f.value.trim();
+if (stored && fresh && fresh !== stored) parts.push(`${f.label}: "${stored}" → "${fresh}" (not applied)`);
+});
+
+return parts.length ? parts.join(' · ') : 'No changes';
+}
+
+// Splits a batch of raw scraped profiles into two piles: certain-identity
+// re-matches safe for the tick-and-submit bulk list, and everyone else
+// (a brand new person, an ambiguous name match, or no match at all) who
+// still needs a real look in the one-by-one reviewer -- that decision
+// ("who is this") is exactly the part bulk review can't safely skip.
+function classifyRaws(raws) {
+const bulk = [];
+const review = [];
+raws.forEach((raw) => {
+const p = buildPending(raw);
+refreshOverrides(p);
+if (p.match && p.match.why === 'known match id' && !p.risky) {
+const conn = data.connections.find((c) => c.id === p.chosenId);
+bulk.push({ p, diff: summarizeCleanMatch(p, conn), selected: true });
+} else {
+review.push(raw);
+}
+});
+return { bulk, review };
 }
 
 // Re-suggests Stage and Rating for whichever connection is now chosen —
@@ -1650,25 +1846,25 @@ refreshOverrides();
 // here: it comes from the extracted text, not from who's picked, and
 // re-deriving it on every pick would blow away anything the user just
 // typed.
-function refreshOverrides() {
-const conn = data.connections.find((c) => c.id === pending.chosenId);
-pending.stageOverride = suggestedStage(conn);
-pending.ratingOverride = conn ? (conn.priority || 0) : 0;
+function refreshOverrides(p = pending) {
+const conn = data.connections.find((c) => c.id === p.chosenId);
+p.stageOverride = suggestedStage(conn, p);
+p.ratingOverride = conn ? (conn.priority || 0) : 0;
 // If nothing in THIS import's own text mentioned a city, the field falls
 // back to showing what's already saved on the matched connection --
 // otherwise it reads blank even when a city genuinely is on file, which
 // looks like the data was lost rather than just not re-extracted this
 // time. Only when cityOverride is still empty: never overwrites a value
 // that came from the fresh scrape, or that the user has since typed.
-if (conn && !pending.cityOverride.trim() && conn.location) pending.cityOverride = conn.location;
+if (conn && !p.cityOverride.trim() && conn.location) p.cityOverride = conn.location;
 // A single-value field (Distance, Job, City...) that's already set on the
 // matched connection defaults to unchecked, not disabled -- overwriting
 // stale data (a match moved city, a bad early scrape) is a real need, but
 // it should be a deliberate click, not pre-selected. Only runs when the
 // matched connection changes, so it can't stomp a toggle the user already
 // made against the SAME connection on a later, unrelated re-render.
-if (conn && Array.isArray(pending.fields)) {
-pending.fields.forEach((f) => {
+if (conn && Array.isArray(p.fields)) {
+p.fields.forEach((f) => {
 const target = FIELD_MAP[f.label];
 if (target && String(conn[target] || '').trim() && !ALWAYS_APPLY_LABELS.has(f.label)) f.apply = false;
 });
@@ -1712,17 +1908,25 @@ loadBatch(raws, status);
 const fileInput = document.getElementById('tinder-file-input');
 if (fileInput) {
 fileInput.addEventListener('change', async () => {
-const file = fileInput.files[0];
-fileInput.value = ''; // lets the same file be re-picked later without needing a different one first
-if (!file) return;
-let raws;
+// The checkpoint chunks from a big overnight tinderBulkImport() run land
+// as several separate files -- selecting them all at once here (the
+// input allows multiple) merges every one into a single classify-and-
+// queue pass instead of needing a separate upload per file.
+const files = [...fileInput.files];
+fileInput.value = ''; // lets the same file(s) be re-picked later without needing different ones first
+if (!files.length) return;
+let raws = [];
+const errors = [];
+for (const file of files) {
 try {
-raws = parseBatch(await file.text());
+raws = raws.concat(parseBatch(await file.text()));
 } catch (err) {
-status.textContent = `Couldn't read "${file.name}": ${err.message}.`;
-return;
+errors.push(`${file.name}: ${err.message}`);
 }
-loadBatch(raws, status);
+}
+if (errors.length) status.textContent = `Couldn't read ${errors.length === 1 ? 'a file' : `${errors.length} files`}: ${errors.join('; ')}`;
+if (raws.length) loadBatch(raws, status);
+else if (!errors.length) status.textContent = 'Nothing to import in that.';
 });
 }
 
