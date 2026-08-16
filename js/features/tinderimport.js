@@ -293,9 +293,11 @@ let queue = []; // raw {name,age,fields,photos} profiles still waiting, from a b
 // Certain-identity re-matches (known Tinder match id) with nothing risky
 // about them, held back from the one-by-one queue above for a single
 // tick-and-submit pass instead -- see classifyRaws(). Each row is
-// { p, diff, selected }: `p` the fully-built pending object, ready to
+// { raw, p, diff, selected }: `p` the fully-built pending object, ready to
 // apply as-is via applyPendingToConnection(); `diff` a short human summary
-// of whatever's actually new (or "No changes").
+// of whatever's actually new (or "No changes"); `raw` kept alongside so a
+// row that turns out to need a real look can still be handed to the
+// one-by-one reviewer via loadFromRaw(), same as everyone else.
 let bulkQueue = [];
 
 // The dropdown puts whoever the name-matcher flagged at the top, in their
@@ -1183,18 +1185,21 @@ return;
 const allSelected = bulkQueue.every((r) => r.selected);
 const selectedCount = bulkQueue.filter((r) => r.selected).length;
 el.innerHTML = `<div class="album-card" style="margin-bottom:10px;">
-<div class="album-caption"><strong>${bulkQueue.length} clean re-match${bulkQueue.length === 1 ? '' : 'es'}</strong> — known identity, nothing new or only minor updates. Skim the summary, untick anything you'd rather look at properly, then submit.</div>
+<div class="album-caption"><strong>${bulkQueue.length} clean re-match${bulkQueue.length === 1 ? '' : 'es'}</strong> — known identity, nothing new or only minor updates. Skim the summary, untick anything you'd rather look at properly (or click "Review" to open it in the full editor), then submit.</div>
 <label class="tinder-field-row" style="margin:6px 0;"><input type="checkbox" id="tinder-bulk-select-all"${allSelected ? ' checked' : ''}> Select all</label>
 <div class="tinder-bulk-list">
 ${bulkQueue.map((row, i) => {
 const conn = data.connections.find((c) => c.id === row.p.chosenId);
 const scrapedPhoto = row.p.photos[0]?.url;
-return `<label class="tinder-bulk-row">
+return `<div class="tinder-bulk-row">
+<label class="tinder-bulk-row-main">
 <input type="checkbox" data-tinder-bulk-select="${i}"${row.selected ? ' checked' : ''}>
 ${conn?.photoId ? `<span class="tinder-bulk-thumb" data-photo-bg="${escapeHtml(conn.photoId)}" title="On file"></span>` : '<span class="tinder-bulk-thumb tinder-bulk-thumb-empty" title="No photo on file"></span>'}
 ${scrapedPhoto ? `<span class="tinder-bulk-thumb" style="background-image:url('${escapeHtml(scrapedPhoto)}')" title="Just scraped"></span>` : '<span class="tinder-bulk-thumb tinder-bulk-thumb-empty" title="No photo in this scrape"></span>'}
 <span class="tinder-bulk-info"><strong>${escapeHtml(conn ? conn.name : row.p.name)}</strong><br><span class="settings-note">${escapeHtml(row.diff)}</span></span>
-</label>`;
+</label>
+<button type="button" class="sync-btn sm" data-tinder-bulk-review="${i}" title="Open in the full one-by-one reviewer instead of bulk-approving it">Review</button>
+</div>`;
 }).join('')}
 </div>
 <div class="sync-row" style="margin-top:8px;">
@@ -1212,6 +1217,20 @@ renderBulk();
 el.querySelectorAll('[data-tinder-bulk-select]').forEach((cb) => {
 cb.addEventListener('change', () => {
 bulkQueue[parseInt(cb.dataset.tinderBulkSelect, 10)].selected = cb.checked;
+renderBulk();
+});
+});
+el.querySelectorAll('[data-tinder-bulk-review]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const [row] = bulkQueue.splice(parseInt(btn.dataset.tinderBulkReview, 10), 1);
+if (!row) return;
+// Same raw {name,age,fields,photos} shape every other queued profile
+// is built from -- goes straight to the front, ahead of anyone
+// already waiting, since opening it here is a direct request to look
+// at THIS one now, not whenever the queue gets to it.
+queue.unshift(row.raw);
+if (!pending) loadFromRaw(queue.shift());
+render();
 renderBulk();
 });
 });
@@ -1903,7 +1922,7 @@ const p = buildPending(raw);
 refreshOverrides(p);
 if (p.match && p.match.why === 'known match id' && !p.risky) {
 const conn = data.connections.find((c) => c.id === p.chosenId);
-bulk.push({ p, diff: summarizeCleanMatch(p, conn), selected: true });
+bulk.push({ raw, p, diff: summarizeCleanMatch(p, conn), selected: true });
 } else {
 review.push(raw);
 }
