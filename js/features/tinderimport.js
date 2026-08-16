@@ -572,6 +572,68 @@ ZA: 'South African', ZM: 'Zambian', ZW: 'Zimbabwean',
 };
 const FLAG_EMOJI_RE = /[\u{1F1E6}-\u{1F1FF}]{2}/gu;
 
+// A country written out in words ("...from Brazil...") is just as clear a
+// nationality signal as its flag emoji — same nationality adjectives as
+// FLAG_EMOJI_TO_NATIONALITY, keyed by the common English name instead of
+// the ISO code, plus a couple of the most common alternate names (USA,
+// UK) since matching only fires on an exact name.
+const COUNTRY_NAME_TO_NATIONALITY = {
+Andorra: 'Andorran', 'United Arab Emirates': 'Emirati', Afghanistan: 'Afghan', 'Antigua and Barbuda': 'Antiguan',
+Anguilla: 'Anguillan', Albania: 'Albanian', Armenia: 'Armenian', Angola: 'Angolan', Argentina: 'Argentine',
+'American Samoa': 'American Samoan', Austria: 'Austrian', Australia: 'Australian', Aruba: 'Aruban', Azerbaijan: 'Azerbaijani',
+'Bosnia and Herzegovina': 'Bosnian', Barbados: 'Barbadian', Bangladesh: 'Bangladeshi', Belgium: 'Belgian',
+'Burkina Faso': 'Burkinabe', Bulgaria: 'Bulgarian', Bahrain: 'Bahraini', Burundi: 'Burundian', Benin: 'Beninese',
+Bermuda: 'Bermudian', Brunei: 'Bruneian', Bolivia: 'Bolivian', Brazil: 'Brazilian', Bahamas: 'Bahamian',
+Bhutan: 'Bhutanese', Botswana: 'Motswana', Belarus: 'Belarusian', Belize: 'Belizean',
+Canada: 'Canadian', 'DR Congo': 'Congolese', 'Central African Republic': 'Central African', Congo: 'Congolese',
+Switzerland: 'Swiss', 'Ivory Coast': 'Ivorian', "Cote d'Ivoire": 'Ivorian', Chile: 'Chilean', Cameroon: 'Cameroonian',
+China: 'Chinese', Colombia: 'Colombian', 'Costa Rica': 'Costa Rican', Cuba: 'Cuban', 'Cape Verde': 'Cape Verdean',
+Cyprus: 'Cypriot', 'Czech Republic': 'Czech', Czechia: 'Czech',
+Germany: 'German', Djibouti: 'Djiboutian', Denmark: 'Danish', Dominica: 'Dominican', 'Dominican Republic': 'Dominican',
+Algeria: 'Algerian',
+Ecuador: 'Ecuadorian', Estonia: 'Estonian', Egypt: 'Egyptian', Eritrea: 'Eritrean', Spain: 'Spanish', Ethiopia: 'Ethiopian',
+Finland: 'Finnish', Fiji: 'Fijian', Micronesia: 'Micronesian', France: 'French',
+Gabon: 'Gabonese', 'United Kingdom': 'British', UK: 'British', Grenada: 'Grenadian', Georgia: 'Georgian',
+Ghana: 'Ghanaian', Gambia: 'Gambian', Guinea: 'Guinean', 'Equatorial Guinea': 'Equatorial Guinean', Greece: 'Greek',
+Guatemala: 'Guatemalan', 'Guinea-Bissau': 'Guinea-Bissauan', Guyana: 'Guyanese', Gibraltar: 'Gibraltarian',
+Greenland: 'Greenlandic', Guam: 'Guamanian',
+'Hong Kong': 'Hong Konger', Honduras: 'Honduran', Croatia: 'Croatian', Haiti: 'Haitian', Hungary: 'Hungarian',
+Indonesia: 'Indonesian', Ireland: 'Irish', Israel: 'Israeli', India: 'Indian', Iraq: 'Iraqi', Iran: 'Iranian',
+Iceland: 'Icelandic', Italy: 'Italian',
+Jamaica: 'Jamaican', Jordan: 'Jordanian', Japan: 'Japanese',
+Kenya: 'Kenyan', Kyrgyzstan: 'Kyrgyz', Cambodia: 'Cambodian', Kiribati: 'I-Kiribati', Comoros: 'Comorian',
+'Saint Kitts and Nevis': 'Kittitian', 'North Korea': 'North Korean', 'South Korea': 'South Korean', Kuwait: 'Kuwaiti',
+'Cayman Islands': 'Caymanian', Kazakhstan: 'Kazakhstani',
+Laos: 'Lao', Lebanon: 'Lebanese', 'Saint Lucia': 'Saint Lucian', Liechtenstein: 'Liechtensteiner', 'Sri Lanka': 'Sri Lankan',
+Liberia: 'Liberian', Lesotho: 'Basotho', Lithuania: 'Lithuanian', Luxembourg: 'Luxembourgish', Latvia: 'Latvian', Libya: 'Libyan',
+Morocco: 'Moroccan', Monaco: 'Monegasque', Moldova: 'Moldovan', Montenegro: 'Montenegrin', Madagascar: 'Malagasy',
+'Marshall Islands': 'Marshallese', 'North Macedonia': 'Macedonian', Mali: 'Malian', Myanmar: 'Burmese', Burma: 'Burmese',
+Mongolia: 'Mongolian', Macau: 'Macanese', Macao: 'Macanese', Mauritania: 'Mauritanian', Malta: 'Maltese',
+Mauritius: 'Mauritian', Maldives: 'Maldivian', Malawi: 'Malawian', Mexico: 'Mexican', Malaysia: 'Malaysian', Mozambique: 'Mozambican',
+Namibia: 'Namibian', 'New Caledonia': 'New Caledonian', Niger: 'Nigerien', Nigeria: 'Nigerian', Nicaragua: 'Nicaraguan',
+Netherlands: 'Dutch', Norway: 'Norwegian', Nepal: 'Nepali', Nauru: 'Nauruan', 'New Zealand': 'New Zealand',
+Oman: 'Omani',
+Panama: 'Panamanian', Peru: 'Peruvian', 'French Polynesia': 'French Polynesian', 'Papua New Guinea': 'Papua New Guinean',
+Philippines: 'Filipino', Pakistan: 'Pakistani', Poland: 'Polish', 'Puerto Rico': 'Puerto Rican', Palestine: 'Palestinian',
+Portugal: 'Portuguese', Palau: 'Palauan', Paraguay: 'Paraguayan',
+Qatar: 'Qatari',
+Romania: 'Romanian', Serbia: 'Serbian', Russia: 'Russian', Rwanda: 'Rwandan',
+'Saudi Arabia': 'Saudi', 'Solomon Islands': 'Solomon Islander', Seychelles: 'Seychellois', Sudan: 'Sudanese',
+Sweden: 'Swedish', Singapore: 'Singaporean', Slovenia: 'Slovenian', Slovakia: 'Slovak', 'Sierra Leone': 'Sierra Leonean',
+'San Marino': 'Sammarinese', Senegal: 'Senegalese', Somalia: 'Somali', Suriname: 'Surinamese', 'South Sudan': 'South Sudanese',
+'Sao Tome and Principe': 'Sao Tomean', 'El Salvador': 'Salvadoran', Syria: 'Syrian', Eswatini: 'Swazi', Swaziland: 'Swazi',
+Chad: 'Chadian', Togo: 'Togolese', Thailand: 'Thai', Tajikistan: 'Tajik', 'Timor-Leste': 'Timorese', 'East Timor': 'Timorese',
+Turkmenistan: 'Turkmen', Tunisia: 'Tunisian', Tonga: 'Tongan', Turkey: 'Turkish', 'Türkiye': 'Turkish',
+'Trinidad and Tobago': 'Trinidadian', Tuvalu: 'Tuvaluan', Taiwan: 'Taiwanese', Tanzania: 'Tanzanian',
+Ukraine: 'Ukrainian', Uganda: 'Ugandan', 'United States': 'American', USA: 'American', 'United States of America': 'American',
+Uruguay: 'Uruguayan', Uzbekistan: 'Uzbekistani',
+'Vatican City': 'Vatican', 'Saint Vincent and the Grenadines': 'Vincentian', Venezuela: 'Venezuelan', Vietnam: 'Vietnamese',
+Vanuatu: 'Ni-Vanuatu',
+Samoa: 'Samoan',
+Yemen: 'Yemeni',
+'South Africa': 'South African', Zambia: 'Zambian', Zimbabwe: 'Zimbabwean',
+};
+
 // Decodes every flag emoji in `text` back to its nationality adjective —
 // dedup'd, order of first appearance. codePointAt - 0x1F1E6 + 65 turns
 // the regional-indicator code point back into the plain ASCII letter it
@@ -629,6 +691,8 @@ const flagMap = flagValueMap();
 // substring of it matching first.
 const names = [...cityMap.values()].sort((a, b) => b.length - a.length);
 const flagValues = [...flagMap.values()].map((v) => v.label).sort((a, b) => b.length - a.length);
+const countryNameMap = new Map(Object.entries(COUNTRY_NAME_TO_NATIONALITY).map(([name, nat]) => [name.toLowerCase(), { name, nat }]));
+const countryNames = Object.keys(COUNTRY_NAME_TO_NATIONALITY).sort((a, b) => b.length - a.length);
 const cityPattern = names.length ? `\\b(?:${names.map(escapeRegex).join('|')})\\b` : null;
 // A negated lookbehind on EACH value individually, not wrapped around the
 // whole alternation — otherwise "Non-smoker" still matches "smoker" as a
@@ -638,7 +702,8 @@ const cityPattern = names.length ? `\\b(?:${names.map(escapeRegex).join('|')})\\
 // smoker", "don't smoke") -- a real limitation, not a claim of full
 // negation-parsing.
 const flagPattern = flagValues.length ? `(?:${flagValues.map((v) => `(?<!non-)(?<!non )\\b${escapeRegex(v)}\\b`).join('|')})` : null;
-const parts = [cityPattern, flagPattern, CYRILLIC_RUN_RE].filter(Boolean);
+const countryPattern = countryNames.length ? `\\b(?:${countryNames.map(escapeRegex).join('|')})\\b` : null;
+const parts = [cityPattern, flagPattern, countryPattern, CYRILLIC_RUN_RE].filter(Boolean);
 const re = new RegExp(parts.join('|'), 'gi');
 let out = '';
 let last = 0;
@@ -652,6 +717,13 @@ out += `<span class="tinder-city-hit" data-tinder-city="${escapeHtml(original)}"
 } else if (flagMap.has(hit.toLowerCase())) {
 const { color } = flagMap.get(hit.toLowerCase());
 out += `<span class="tinder-flag-hit tinder-flag-hit-${color}" title="Flagged ${color}">${escapeHtml(hit)}</span>`;
+} else if (countryNameMap.has(hit.toLowerCase())) {
+// Same generic add-to-a-field mechanism the flag-emoji "+ add" buttons
+// use (see flagEmojiAddButtonHtml) — clicking the country name itself
+// adds its nationality, no separate button needed since the word IS
+// the button here.
+const { nat } = countryNameMap.get(hit.toLowerCase());
+out += `<span class="tinder-city-hit" data-tinder-add-label="Nationality" data-tinder-add-value="${escapeHtml(nat)}" title="Click to add ${escapeHtml(nat)} to Nationality">${escapeHtml(hit)}</span>`;
 } else {
 const exonym = CYRILLIC_EXONYMS[hit.trim().toLowerCase()];
 // A real place name is a word or two; a long run is a sentence caught
@@ -1111,8 +1183,30 @@ render();
 });
 });
 el.querySelectorAll('[data-tinder-add-label]').forEach((btn) => {
-btn.addEventListener('click', () => {
-pending.fields.push({ label: btn.dataset.tinderAddLabel, value: btn.dataset.tinderAddValue, apply: true });
+btn.addEventListener('click', (e) => {
+// Unlike the flag-emoji "+ add" button (a sibling of the field's
+// <label>), an inline country-name-in-text hit renders INSIDE that
+// <label> — same hazard data-tinder-city already guards against: a
+// plain click would also toggle the field's own apply checkbox via
+// the browser's native label-forwards-to-input behaviour.
+e.preventDefault();
+e.stopPropagation();
+const label = btn.dataset.tinderAddLabel;
+const value = btn.dataset.tinderAddValue;
+// Merge into whatever's already there for this label (the empty
+// ALWAYS_SHOW_ARRAY_LABELS fill-in slot, most often) instead of
+// pushing a second row for the same field — confirmed live: two
+// "Nationality" rows, one an empty fill-in, one showing "Brazilian",
+// both at once.
+const existing = pending.fields.find((f) => f.label === label);
+if (existing) {
+const parts = existing.value.split(',').map((s) => s.trim()).filter(Boolean);
+if (!parts.some((p) => p.toLowerCase() === value.toLowerCase())) parts.push(value);
+existing.value = parts.join(', ');
+existing.apply = true;
+} else {
+pending.fields.push({ label, value, apply: true });
+}
 render();
 });
 });
