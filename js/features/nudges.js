@@ -16,9 +16,10 @@ let aiCache = { signature: '', order: null };
 function groupByLocation() {
 const groups = {};
 data.connections.forEach((c) => {
-if (!c.location) return;
-if (!groups[c.location]) groups[c.location] = [];
-groups[c.location].push(c);
+(c.location || []).forEach((loc) => {
+if (!groups[loc]) groups[loc] = [];
+groups[loc].push(c);
+});
 });
 return groups;
 }

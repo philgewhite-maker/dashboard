@@ -186,6 +186,15 @@ const TAG_FIELDS = [
 // "Katerina". Used when matching Google Contacts, so any one of them can
 // find the record.
 { field: 'aliases', label: 'Also known as', sensitive: false },
+// Multi-value on purpose: "Highgate, London" as ONE string meant "London"
+// alone, mentioned in a different profile's chat, never matched it --
+// each place name needs to be its own entry to be independently
+// matchable (knownCityMap() in utils.js). Also lets a manual Cyrillic->
+// Latin correction coexist with a re-scraped value instead of needing to
+// overwrite/"lock" it -- rendered at its own dedicated position near the
+// top of the connection editor, not in the generic tag-field list below
+// (see visibleTagFields()'s exclusion in connections.js).
+{ field: 'location', label: 'City', sensitive: false },
 { field: 'dateLocations', label: 'Date locations', sensitive: false },
 { field: 'dateEvents', label: 'Date events', sensitive: false },
 { field: 'languages', label: 'Language', sensitive: false },
@@ -386,6 +395,11 @@ if (!Array.isArray(c.photoIds)) c.photoIds = c.photoId ? [c.photoId] : [];
 if (typeof c.photoId !== 'string') c.photoId = c.photoIds[0] || null;
 if (!Array.isArray(c.languages)) c.languages = [];
 if (!Array.isArray(c.nationality)) c.nationality = [];
+// location used to be a single string ("Highgate, London" as one value,
+// unmatchable as two places) -- wrap an existing string into a one-item
+// array rather than discarding it, so nobody's saved City is lost.
+if (typeof c.location === 'string') c.location = c.location.trim() ? [c.location.trim()] : [];
+else if (!Array.isArray(c.location)) c.location = [];
 if (!Array.isArray(c.todos)) c.todos = [];
 if (!Array.isArray(c.tags)) c.tags = [];
 if (!Array.isArray(c.aliases)) c.aliases = [];
@@ -697,7 +711,7 @@ return { value: values.reduce((a, b) => a + b, 0) / values.length, count: values
 // feel unfairly punishing for someone who's otherwise well-tracked.
 const COMPLETENESS_CHECKS = [
 (c) => !!String(c.age || '').trim(),
-(c) => !!String(c.location || '').trim(),
+(c) => (c.location || []).length > 0,
 (c) => !!String(c.job || '').trim(),
 (c) => !!String(c.height || '').trim(),
 (c) => !!String(c.education || '').trim(),
@@ -776,8 +790,9 @@ const FLAG_FIELD_DEFS = [
 { field: 'height', label: 'Height (cm)', kind: 'number', getValue: (c) => heightCm(c.height) },
 { field: 'job', label: 'Job', kind: 'text', getValue: (c) => (c.job ? [c.job] : []) },
 { field: 'kids', label: 'Family plans', kind: 'text', getValue: (c) => (c.kids ? [c.kids] : []) },
-{ field: 'location', label: 'City', kind: 'text', getValue: (c) => (c.location ? [c.location] : []) },
 { field: 'stage', label: 'Stage', kind: 'text', getValue: (c) => (c.stage ? [c.stage] : []) },
+// City's own entry comes from this spread now that it's a TAG_FIELDS
+// member (multi-value) rather than a hand-written scalar getValue here.
 ...TAG_FIELDS.map((t) => ({ field: t.field, label: t.label, kind: 'text', getValue: (c) => c[t.field] || [] })),
 ];
 
@@ -885,7 +900,7 @@ const threshold = reachOutThreshold(conn.priority, conn.stage);
 if (since !== null && since > threshold * 3) {
 out.push('Still active? Message to check — archive if no reply.');
 }
-if (!String(conn.location || '').trim()) {
+if (!(conn.location || []).length) {
 out.push('Where do they live? Ask rather than assume.');
 }
 // Only once there's an actual transcript -- asking about kids on a bare

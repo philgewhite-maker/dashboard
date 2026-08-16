@@ -69,8 +69,10 @@ function escapeRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 function knownCityMap(connections) {
 const map = new Map(); // lowercase -> original casing (first one seen)
 (connections || []).forEach((c) => {
-const loc = String(c.location || '').trim();
+(c.location || []).forEach((raw) => {
+const loc = String(raw || '').trim();
 if (loc && !map.has(loc.toLowerCase())) map.set(loc.toLowerCase(), loc);
+});
 });
 return map;
 }

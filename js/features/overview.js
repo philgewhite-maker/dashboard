@@ -41,7 +41,7 @@ return `${Math.floor(age.value / 10) * 10}s`;
 function dimensions() {
 return [
 { title: 'Stage', getKeys: (c) => [c.stage], field: null, emptyField: 'stage' },
-{ title: 'Location', getKeys: (c) => [c.location], field: null, emptyField: 'location' },
+{ title: 'Location', getKeys: (c) => c.location || [], field: null, emptyField: 'location' },
 { title: 'Age', getKeys: (c) => [ageDecade(c)], field: null, emptyField: 'age' },
 // colorField is separate from field (used for bulk tag-assignment) --
 // Job is a scalar, not an array you can push a bulk-picked value into,

@@ -29,7 +29,7 @@ import { storePhoto, fetchProxiedImage } from '../files.js';
 import { photoGet, photoUrl } from '../db.js';
 import { MissingKeyError, compareFaces, translateText, identifyCountry } from '../ai.js';
 import { findPhoneNumbers, findHandles, formatHandle } from '../contactscan.js';
-import { STAGE_RANK, CONN_STAGES } from './connections.js';
+import { STAGE_RANK, CONN_STAGES, unionInto } from './connections.js';
 
 // True only if the extracted chat has a message from BOTH sides, not just
 // the user reaching out with no reply — a one-sided "You: hey" isn't
@@ -180,9 +180,18 @@ return conn;
 // notes instead of being dropped — same fallback the screenshot importer
 // uses for a bio it can't otherwise place.
 const FIELD_MAP = {
-'Family plans': 'kids', Education: 'education', Height: 'height', Work: 'job', 'Job title': 'job', Job: 'job', Distance: 'distance', City: 'location',
+'Family plans': 'kids', Education: 'education', Height: 'height', Work: 'job', 'Job title': 'job', Job: 'job', Distance: 'distance',
 'Matched on': 'matchedOn', 'Chat history': 'chatLog', 'Last message date': 'lastContact',
 };
+// City is deliberately NOT in FIELD_MAP -- it's multi-value (TAG_FIELDS)
+// with its own cityOverride input/save path (see applyPendingToConnection),
+// not the generic single-target apply-a-field mechanism every other row
+// here uses. This used to be a real, currently-latent bug: City WAS in
+// here mapped straight to the scalar `location`, a second write path that
+// raced with cityOverride's own save and always lost (cityOverride ran
+// after and overwrote it) -- confirmed while migrating location to an
+// array, where the two paths would otherwise have fought over string vs.
+// array shape.
 // Unlike the rest of FIELD_MAP, this one's SUPPOSED to change every import
 // — that's the entire point of extracting it — so it's exempt from the
 // usual already-set-defaults-to-unchecked rule (see refreshOverrides()).
@@ -301,8 +310,11 @@ Tags: { target: 'tags', split: true },
 // rather than every raw Tinder label that happens to route there, and
 // excluding the scrape-only ones (Chat history, Last message date) that
 // don't make sense as something to type a value in for by hand.
+// City excluded -- it already has its own dedicated cityOverride input in
+// the Stage/City/Rating/Travel row, not reachable through this generic
+// single-target mechanism (it's multi-value now; see FIELD_MAP's comment).
 const GENERIC_ADD_LABELS = [
-'Job', 'Education', 'Height', 'Distance', 'City', 'Family plans',
+'Job', 'Education', 'Height', 'Distance', 'Family plans',
 'Nationality', 'Languages', 'Interests', 'Relationship type', 'Tags', 'Social handles',
 ];
 
@@ -1100,6 +1112,14 @@ note = fresh.length === 0 ? `already in ${arrayMap.target} — will be skipped`
 : fresh.length === parts.length ? `will add to ${arrayMap.target}`
 : `will add ${fresh.length} new to ${arrayMap.target}, rest already there`;
 if (fresh.length === 0 && conn) { disabled = true; dim = true; }
+} else if (f.label === 'City') {
+// City is multi-value (TAG_FIELDS) with its own dedicated cityOverride
+// input above, not this generic apply-to-a-field path -- kept visible
+// here (not filtered out entirely) only so the country-lookup buttons
+// below still work off the raw scraped value. Locked off rather than
+// left to fall through to the notes catch-all.
+note = 'see City field above';
+disabled = true;
 }
 const isChat = f.label === 'Chat history';
 const flagColor = isChat ? null : fieldFlagColor(f);
@@ -1199,7 +1219,7 @@ const parts = arrayMap.split ? f.value.split(',').map((s) => s.trim()).filter(Bo
 draft[arrayMap.target].push(...parts);
 }
 });
-if (pending.cityOverride.trim()) draft.location = pending.cityOverride.trim();
+if (pending.cityOverride.trim()) draft.location = pending.cityOverride.split(',').map((s) => s.trim()).filter(Boolean);
 if (pending.age) { draft.age = pending.age; draft.ageAsOf = todayStr(); }
 return draft;
 }
@@ -1623,7 +1643,13 @@ hit.addEventListener('click', (e) => {
 // hit silently unchecked the field it was found in.
 e.preventDefault();
 e.stopPropagation();
-pending.cityOverride = hit.dataset.tinderCity;
+// Append, not replace -- cityOverride is comma-separated (multiple
+// places), so clicking a second highlighted mention shouldn't erase
+// the first one already typed/detected.
+const existingParts = pending.cityOverride.split(',').map((s) => s.trim()).filter(Boolean);
+const hitCity = hit.dataset.tinderCity;
+if (!existingParts.some((p) => p.toLowerCase() === hitCity.toLowerCase())) existingParts.push(hitCity);
+pending.cityOverride = existingParts.join(', ');
 render();
 });
 });
@@ -1746,7 +1772,15 @@ failed++;
 // editing them on the Connections tab itself: a direct set, not a
 // fill-if-empty merge.
 if (p.stageOverride) conn.stage = p.stageOverride;
-if (p.cityOverride.trim()) conn.location = p.cityOverride.trim();
+// Additive, not a direct set like Stage/Rating -- cityOverride is
+// comma-separated (same convention as ARRAY_FIELD_MAP's split:true
+// fields), each piece union-added so "Highgate, London" becomes two
+// separate, independently-matchable entries and a manual correction
+// coexists with a re-scraped value instead of one clobbering the other.
+if (p.cityOverride.trim()) {
+if (!Array.isArray(conn.location)) conn.location = [];
+unionInto(conn.location, p.cityOverride.split(',').map((s) => s.trim()).filter(Boolean));
+}
 if (p.ratingOverride) conn.priority = p.ratingOverride;
 // Direct set like Stage/City/Rating above, not fill-if-empty -- an empty
 // string is itself a meaningful choice here (clearing Standby/Travelling
@@ -1886,7 +1920,10 @@ const { phones, handles } = scanFields(fields);
 const parsed = {
 name: String(raw.name || '').trim(),
 age: String(raw.age || '').trim(),
-fields: withAlwaysShowFields(fields.map((f) => ({ ...f, apply: true }))),
+// City defaults unchecked -- its real destination is the dedicated
+// cityOverride input (below), not this generic apply-to-a-field path;
+// see the City special-case in fieldPreviewHtml.
+fields: withAlwaysShowFields(fields.map((f) => ({ ...f, apply: f.label !== 'City' }))),
 photos: photos.map((url) => ({ url, apply: true })),
 foundPhones: phones.map((value) => ({ value, apply: true })),
 foundHandles: handles.map((h) => ({ ...h, apply: true })),
@@ -2053,7 +2090,7 @@ p.travelUntilOverride = conn ? (conn.travelUntil || '') : '';
 // looks like the data was lost rather than just not re-extracted this
 // time. Only when cityOverride is still empty: never overwrites a value
 // that came from the fresh scrape, or that the user has since typed.
-if (conn && !p.cityOverride.trim() && conn.location) p.cityOverride = conn.location;
+if (conn && !p.cityOverride.trim() && (conn.location || []).length) p.cityOverride = conn.location.join(', ');
 // A single-value field (Distance, Job, City...) that's already set on the
 // matched connection defaults to unchecked, not disabled -- overwriting
 // stale data (a match moved city, a bad early scrape) is a real need, but

@@ -439,7 +439,7 @@ return;
 const term = foldDiacritics(connectionSearchTerm.trim().toLowerCase());
 const filtered = term ? data.connections.filter((c) => {
 const haystack = foldDiacritics([
-c.name, c.profileName, ...(c.aliases || []), c.location, c.address, c.job, c.education, c.stage, ageDecade(c),
+c.name, c.profileName, ...(c.aliases || []), c.address, c.job, c.education, c.stage, ageDecade(c),
 // So the Connections Overview "Contact match" chips actually filter —
 // they search by their own label, which otherwise matches nothing.
 CONTACT_STATUS_LABELS[c.contactStatus],
@@ -494,7 +494,7 @@ const since = daysSince(c.lastContact);
 const travelPaused = isTravelPaused(c);
 const overdue = !isDormantStage(c.stage) && !travelPaused && since >= reachOutThreshold(c.priority);
 const stars = [1, 2, 3, 4, 5].map((n) => `<svg class="star priority-star ${n <= c.priority ? 'filled' : ''}" data-conn="${c.id}" data-star="${n}" viewBox="0 0 20 20" fill="currentColor"><path d="M10 1l2.6 5.9 6.4.6-4.8 4.3 1.4 6.2L10 14.9 4.4 18l1.4-6.2L1 7.5l6.4-.6z"/></svg>`).join('');
-const nameMeta = [displayAge(c), c.location].map((s) => String(s || '').trim()).filter(Boolean).join(' · ');
+const nameMeta = [displayAge(c), (c.location || []).join(', ')].map((s) => String(s || '').trim()).filter(Boolean).join(' · ');
 const flags = computeFlags(c, data.flagRules);
 const action = suggestedAction(c, data.flagRules);
 const questions = suggestedQuestions(c);
@@ -565,7 +565,7 @@ ${contactPickerHtml(c.id)}
 <label>Source<select data-field="app" data-conn-detail="${c.id}">${appOptions(c.app)}</select></label>
 <label>Age when recorded${ageNoteHtml(c)}<input type="text" autocomplete="off" data-field="age" data-conn-detail="${c.id}" value="${escapeHtml(c.age || '')}"></label>
 <label>Date of birth<input type="date" data-field="dob" data-conn-detail="${c.id}" value="${escapeHtml(c.dob || '')}"></label>
-<label>City<input type="text" autocomplete="off" placeholder="Groups in Overview" data-field="location" data-conn-detail="${c.id}" value="${escapeHtml(c.location || '')}"></label>
+<label class="full">City <span class="settings-note">Groups in Overview — a borough and its city, or two homes, are two separate entries</span><div class="tag-editor">${tagChips(c.location, c.id, 'location')}</div></label>
 <label>Distance<input type="text" autocomplete="off" placeholder="e.g. &lt; 10 mi" data-field="distance" data-conn-detail="${c.id}" value="${escapeHtml(c.distance || '')}"></label>
 <label>Matched on<input type="date" data-field="matchedOn" data-conn-detail="${c.id}" value="${escapeHtml(c.matchedOn || '')}"></label>
 <label class="checkbox-field">Met in person<input type="checkbox" data-field="metInPerson" data-conn-detail="${c.id}"${c.metInPerson ? ' checked' : ''}></label>
@@ -592,7 +592,7 @@ ${c.travelStatus === 'travelling' ? `<label>Travelling until<input type="date" d
 <label>What I like most<input type="text" autocomplete="off" data-field="likes" data-conn-detail="${c.id}" value="${escapeHtml(c.likes || '')}"></label>
 ${notesFieldHtml}
 ${chatFieldHtml}
-${visibleTagFields().map((f) => `<label class="full${f.sensitive ? ' sensitive-field' : ''}">${escapeHtml(f.label)}<div class="tag-editor">${tagChips(c[f.field], c.id, f.field)}</div></label>`).join('')}
+${visibleTagFields().filter((f) => f.field !== 'location').map((f) => `<label class="full${f.sensitive ? ' sensitive-field' : ''}">${escapeHtml(f.label)}<div class="tag-editor">${tagChips(c[f.field], c.id, f.field)}</div></label>`).join('')}
 <label class="full">Ratings${averageRatingHtml(c)}<div class="ratings-block">${data.ratingCategories.map(({ field, label }) => ratingStars(label, field, c.id, (c.ratings && c.ratings[field]) || 0)).join('')}</div></label>
 <label class="full">Things to do<div>${todoListHtml(c)}</div></label>
 <div class="field-block full"><span class="field-label">Photos</span>${galleryHtml(c)}</div>
@@ -849,7 +849,8 @@ hit.addEventListener('click', () => {
 const row = hit.closest('[data-conn-row]');
 const conn = data.connections.find((x) => x.id === row?.dataset.connRow);
 if (!conn) return;
-conn.location = hit.dataset.tinderCity;
+if (!Array.isArray(conn.location)) conn.location = [];
+unionInto(conn.location, [hit.dataset.tinderCity]);
 renderConnections();
 renderOverviewRef();
 queueSave();
@@ -1427,14 +1428,17 @@ data.connections.push({
 // profileName records what the app called them, so renaming the
 // connection to their real name later doesn't orphan the photos.
 id, name: cand.name, profileName: cand.name, app, priority: 3, stage: cand.stage || 'Matched', lastContact: todayStr(), createdAt: new Date().toISOString(),
-photoId, photoIds, age: cand.age || '', location: cand.location || '', kids: cand.kids || '', job: cand.job || '',
+photoId, photoIds, age: cand.age || '', location: cand.location ? [cand.location] : [], kids: cand.kids || '', job: cand.job || '',
 height: cand.height || '', education: cand.education || '',
 likes: '', notes: cand.bio || '', languages: cand.languages || [], nationality: cand.nationality || [],
 todos: [], tags: [], dateLocations: [], dateEvents: [], sexTags: [], ratings: {}, driveLink: '',
 });
 }
 
-const SCALAR_MERGE_FIELDS = ['age', 'location', 'kids', 'job', 'height', 'education', 'likes', 'driveLink'];
+// location deliberately excluded -- it's a TAG_FIELDS member now (see
+// state.js), so mergeConnectionInto's TAG_FIELDS.forEach loop below
+// already unions it same as Interests/Languages/etc.
+const SCALAR_MERGE_FIELDS = ['age', 'kids', 'job', 'height', 'education', 'likes', 'driveLink'];
 
 // Adds anything in `values` that isn't already there, case-insensitively, so
 // merging "English" into ["english"] doesn't produce a near-duplicate chip.
@@ -1496,12 +1500,17 @@ if (!existing.photoId) existing.photoId = pid;
 // Same merge semantics as mergeConnectionInto: fill gaps, never overwrite.
 // What you typed yourself outranks what a model read off a screenshot.
 const incoming = {
-age: cand.age, location: cand.location, job: cand.job, kids: cand.kids,
+age: cand.age, job: cand.job, kids: cand.kids,
 height: cand.height, education: cand.education,
 };
 SCALAR_MERGE_FIELDS.forEach((k) => {
 if (!String(existing[k] || '').trim() && String(incoming[k] || '').trim()) existing[k] = incoming[k];
 });
+// location is a TAG_FIELDS member (multi-value) -- cand.location is still
+// a single AI best-guess (a screenshot shows one thing), unioned in as one
+// candidate value rather than fill-if-empty overwriting the whole array.
+if (!Array.isArray(existing.location)) existing.location = [];
+unionInto(existing.location, cand.location ? [cand.location] : []);
 if (isProfile) {
 const bio = String(cand.bio || '').trim();
 const notes = String(existing.notes || '').trim();
@@ -1533,5 +1542,5 @@ renderConnections, initConnectionForm, expandConnection, CONN_STAGES,
 initSensitiveFields, setShowSensitiveFields, visibleTagFields,
 filterByEmptyField, filterBySearch, filterByIds, clearFilters,
 STAGE_RANK, setContactPicker, phoneWithFlagHtml, initRatingCategoriesSettings,
-initFlagRulesSettings,
+initFlagRulesSettings, unionInto,
 };

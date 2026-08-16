@@ -118,7 +118,10 @@ set('height', rich.height);
 set('education', rich.education);
 set('job', rich.job);
 set('kids', rich.kids);
-set('location', rich.location);
+// Multi-value now (see state.js's TAG_FIELDS) -- union in rather than
+// fill-if-empty overwrite, same as languages/nationality just below.
+if (!Array.isArray(target.location)) target.location = [];
+if (rich.location && !target.location.includes(rich.location)) target.location.push(rich.location);
 if (rich.bio && !String(target.notes || '').includes(rich.bio)) {
 target.notes = target.notes ? `${target.notes}\n${rich.bio}` : rich.bio;
 }
@@ -137,7 +140,7 @@ id: uid(), name: s.name, profileName: s.name, app: s.app || 'Other', priority: 3
 stage: 'Matched', lastContact: new Date().toISOString().slice(0, 10), createdAt: new Date().toISOString(),
 photoId: photoIds[0] || null, photoIds,
 age: s.age || rich.age || '', ageAsOf: s.captureDate || '', dob: '',
-location: rich.location || '', address: '', kids: rich.kids || '', job: rich.job || '',
+location: rich.location ? [rich.location] : [], address: '', kids: rich.kids || '', job: rich.job || '',
 height: rich.height || '', education: rich.education || '',
 phone: '', email: '', contactStatus: '', contactResourceName: '', contactEtag: '',
 contactConflicts: [], likes: '', notes: rich.bio || '',
