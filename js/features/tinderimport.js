@@ -286,7 +286,25 @@ Gender: { target: 'tags', split: false },
 // somewhere to jot an arbitrary custom tag Tinder never asked about,
 // same generic bucket the two rows above already share.
 Tags: { target: 'tags', split: true },
+// Also synthetic -- lets the generic "Add a field" picker (see
+// GENERIC_ADD_LABELS) route a handle spotted with no @ and no platform
+// word ("Stella_melnychenko" in a bio, not "@Stella_melnychenko") to
+// Social handles directly, since findHandles() has nothing to anchor on
+// for that shape and would never catch it on its own.
+'Social handles': { target: 'socialHandles', split: true },
 };
+
+// Every label worth offering in the generic "Add a field" picker --
+// deduped to ONE representative label per underlying target field (Work/
+// "Job title"/Job in FIELD_MAP, and Orientation/"Looking for"/"Relationship
+// type" in ARRAY_FIELD_MAP, all collapse to a single dropdown entry each)
+// rather than every raw Tinder label that happens to route there, and
+// excluding the scrape-only ones (Chat history, Last message date) that
+// don't make sense as something to type a value in for by hand.
+const GENERIC_ADD_LABELS = [
+'Job', 'Education', 'Height', 'Distance', 'City', 'Family plans',
+'Nationality', 'Languages', 'Interests', 'Relationship type', 'Tags', 'Social handles',
+];
 
 let pending = null; // { name, age, fields, photos, chosenId, match, matchConfirmed, aiVerdict }
 let queue = []; // raw {name,age,fields,photos} profiles still waiting, from a bulk-import paste
@@ -890,6 +908,58 @@ if (SKIP_TRANSLATE_LABELS.has(f.label)) return '';
 return `<button type="button" class="sync-btn tinder-inline-btn" data-tinder-translate="${i}">Translate</button>`;
 }
 
+// Nationality -> the language it's safe to assume, for a "+ add X" nudge on
+// the Nationality field when Languages doesn't already have it -- the same
+// idea as translateButtonHtml's own "+ add French" suggestion after a
+// translation, just triggered from Nationality instead. Deliberately one
+// direction only: Nationality reliably implies its dominant language, but
+// a language essentially never implies one nationality back (someone who
+// speaks English could be British, American, Irish, Australian, Canadian,
+// Nigerian...), so there's no reverse table here to guess wrong with.
+// An EXPLICIT list, not "assume the same word as a default" -- several
+// common nationalities (American, Swiss, Brazilian, Mexican, Egyptian...)
+// don't share a word with their language at all, and silently guessing
+// "American" or "Swiss" as a language name would be worse than no
+// suggestion. Anything not listed here just doesn't get one -- including
+// genuinely multi-language nationalities (Swiss, Belgian, Indian, South
+// African, Nigerian, Canadian...) left out on purpose rather than picking
+// one language among several and presenting it as settled.
+const NATIONALITY_TO_LANGUAGE = {
+German: 'German', French: 'French', Spanish: 'Spanish', Italian: 'Italian', Polish: 'Polish',
+Russian: 'Russian', Ukrainian: 'Ukrainian', Dutch: 'Dutch', Swedish: 'Swedish', Norwegian: 'Norwegian',
+Danish: 'Danish', Finnish: 'Finnish', Greek: 'Greek', Turkish: 'Turkish', Hungarian: 'Hungarian',
+Czech: 'Czech', Slovak: 'Slovak', Romanian: 'Romanian', Bulgarian: 'Bulgarian', Serbian: 'Serbian',
+Croatian: 'Croatian', Slovenian: 'Slovenian', Albanian: 'Albanian', Japanese: 'Japanese',
+Korean: 'Korean', Vietnamese: 'Vietnamese', Thai: 'Thai', Indonesian: 'Indonesian', Icelandic: 'Icelandic',
+Estonian: 'Estonian', Latvian: 'Latvian', Lithuanian: 'Lithuanian', Georgian: 'Georgian',
+Armenian: 'Armenian', Mongolian: 'Mongolian', Portuguese: 'Portuguese', English: 'English',
+American: 'English', British: 'English', Scottish: 'English', Welsh: 'English', Irish: 'English',
+'Northern Irish': 'English', Australian: 'English',
+Mexican: 'Spanish', Argentinian: 'Spanish', Argentine: 'Spanish', Colombian: 'Spanish',
+Venezuelan: 'Spanish', Peruvian: 'Spanish', Chilean: 'Spanish', Ecuadorian: 'Spanish', Cuban: 'Spanish',
+Guatemalan: 'Spanish', Dominican: 'Spanish', Honduran: 'Spanish', Salvadoran: 'Spanish',
+Nicaraguan: 'Spanish', 'Costa Rican': 'Spanish', Panamanian: 'Spanish', Bolivian: 'Spanish',
+Paraguayan: 'Spanish', Uruguayan: 'Spanish',
+Brazilian: 'Portuguese', Angolan: 'Portuguese', Mozambican: 'Portuguese',
+Austrian: 'German',
+Egyptian: 'Arabic', Moroccan: 'Arabic', Algerian: 'Arabic', Tunisian: 'Arabic', Libyan: 'Arabic',
+Lebanese: 'Arabic', Jordanian: 'Arabic', Syrian: 'Arabic', Iraqi: 'Arabic', Saudi: 'Arabic',
+Emirati: 'Arabic', Qatari: 'Arabic', Bahraini: 'Arabic', Kuwaiti: 'Arabic', Omani: 'Arabic',
+Yemeni: 'Arabic', Sudanese: 'Arabic', Palestinian: 'Arabic',
+};
+
+function nationalityLanguageSuggestionHtml(f) {
+if (f.label !== 'Nationality' || !f.value.trim()) return '';
+const languagesField = pending.fields.find((lf) => lf.label === 'Languages');
+const already = languagesField ? new Set(languagesField.value.split(',').map((s) => s.trim().toLowerCase())) : new Set();
+const suggestions = [];
+f.value.split(',').map((s) => s.trim()).filter(Boolean).forEach((nat) => {
+const lang = NATIONALITY_TO_LANGUAGE[nat];
+if (lang && !already.has(lang.toLowerCase()) && !suggestions.includes(lang)) suggestions.push(lang);
+});
+return suggestions.map((lang) => ` <button type="button" class="sync-btn tinder-inline-btn" data-tinder-add-label="Languages" data-tinder-add-value="${escapeHtml(lang)}">+ add ${escapeHtml(lang)}</button>`).join('');
+}
+
 function translationResultHtml(i) {
 const t = pending.translations[i];
 if (!t) return '';
@@ -1050,6 +1120,7 @@ ${translateButtonHtml(f, i)}
 ${countryButtonHtml(f, i)}
 ${cyrillicAddButtonHtml(f.value)}
 ${flagEmojiAddButtonHtml(f.value)}
+${nationalityLanguageSuggestionHtml(f)}
 </div>
 ${f.label === 'Distance' ? proposedCityHtml() : ''}
 ${isChat ? `<div class="tinder-chat-block">${chatHistoryHtml(f.value)}</div>` : ''}
@@ -1275,6 +1346,24 @@ renderBulk();
 });
 }
 
+// Shared by the inline click-to-add hits (a detected country name, a
+// flagged tag value...) and the manual "Add a field" picker below --
+// merges into whatever's already there for this label (the empty
+// ALWAYS_SHOW_ARRAY_LABELS fill-in slot, most often) instead of pushing a
+// second row for the same field. Confirmed live: two "Nationality" rows,
+// one an empty fill-in, one showing "Brazilian", both at once.
+function addFieldValue(label, value) {
+const existing = pending.fields.find((f) => f.label === label);
+if (existing) {
+const parts = existing.value.split(',').map((s) => s.trim()).filter(Boolean);
+if (!parts.some((p) => p.toLowerCase() === value.toLowerCase())) parts.push(value);
+existing.value = parts.join(', ');
+existing.apply = true;
+} else {
+pending.fields.push({ label, value, apply: true });
+}
+}
+
 function render() {
 const el = document.getElementById('tinder-review');
 if (!el) return;
@@ -1339,6 +1428,15 @@ ${saveBlockedNote ? `<div class="tinder-field-note" style="margin:-4px 0 8px;">$
 <option value="travelling"${p.travelStatusOverride === 'travelling' ? ' selected' : ''}>Travelling</option>
 </select></label>
 ${p.travelStatusOverride === 'travelling' ? `<label class="tinder-field-row">Until <input type="date" id="tinder-travel-until" value="${escapeHtml(p.travelUntilOverride)}"></label>` : ''}
+</div>
+
+<div class="tinder-add-field-row">
+<select id="tinder-add-field-label">
+<option value="">Spotted something not shown above? Add it —</option>
+${GENERIC_ADD_LABELS.map((l) => `<option value="${escapeHtml(l)}">${escapeHtml(l)}</option>`).join('')}
+</select>
+<input type="text" id="tinder-add-field-value" autocomplete="off" placeholder="Value">
+<button type="button" class="sync-btn tinder-inline-btn" id="tinder-add-field-btn">Add</button>
 </div>
 
 ${agePreviewHtml()}
@@ -1410,7 +1508,7 @@ btn.addEventListener('click', () => runTranslateFor(parseInt(btn.dataset.tinderT
 });
 el.querySelectorAll('[data-tinder-translate-add]').forEach((btn) => {
 btn.addEventListener('click', () => {
-pending.fields.push({ label: 'Languages', value: btn.dataset.tinderTranslateAdd, apply: true });
+addFieldValue('Languages', btn.dataset.tinderTranslateAdd);
 render();
 });
 });
@@ -1423,22 +1521,7 @@ btn.addEventListener('click', (e) => {
 // the browser's native label-forwards-to-input behaviour.
 e.preventDefault();
 e.stopPropagation();
-const label = btn.dataset.tinderAddLabel;
-const value = btn.dataset.tinderAddValue;
-// Merge into whatever's already there for this label (the empty
-// ALWAYS_SHOW_ARRAY_LABELS fill-in slot, most often) instead of
-// pushing a second row for the same field — confirmed live: two
-// "Nationality" rows, one an empty fill-in, one showing "Brazilian",
-// both at once.
-const existing = pending.fields.find((f) => f.label === label);
-if (existing) {
-const parts = existing.value.split(',').map((s) => s.trim()).filter(Boolean);
-if (!parts.some((p) => p.toLowerCase() === value.toLowerCase())) parts.push(value);
-existing.value = parts.join(', ');
-existing.apply = true;
-} else {
-pending.fields.push({ label, value, apply: true });
-}
+addFieldValue(btn.dataset.tinderAddLabel, btn.dataset.tinderAddValue);
 render();
 });
 });
@@ -1468,7 +1551,7 @@ render();
 el.querySelectorAll('[data-tinder-country-nationality]').forEach((btn) => {
 btn.addEventListener('click', () => {
 const i = parseInt(btn.dataset.tinderCountryNationality, 10);
-pending.fields.push({ label: 'Nationality', value: pending.countries[i].country, apply: true });
+addFieldValue('Nationality', pending.countries[i].country);
 render();
 });
 });
@@ -1495,6 +1578,16 @@ render(); // shows/hides the "Until" date field, unlike Stage/City which don't c
 });
 const travelUntilInput = document.getElementById('tinder-travel-until');
 if (travelUntilInput) travelUntilInput.addEventListener('input', () => { pending.travelUntilOverride = travelUntilInput.value; });
+const addFieldBtn = document.getElementById('tinder-add-field-btn');
+if (addFieldBtn) addFieldBtn.addEventListener('click', () => {
+const labelSel = document.getElementById('tinder-add-field-label');
+const valueInput = document.getElementById('tinder-add-field-value');
+const label = labelSel.value;
+const value = valueInput.value.trim();
+if (!label || !value) return;
+addFieldValue(label, value);
+render();
+});
 const nextStepInput = document.getElementById('tinder-next-step');
 if (nextStepInput) nextStepInput.addEventListener('input', () => { pending.nextStepNote = nextStepInput.value; });
 el.querySelectorAll('[data-tinder-hint]').forEach((chip) => {
