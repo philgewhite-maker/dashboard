@@ -940,7 +940,7 @@ return dayHtml + `<div class="tinder-chat-line"><span class="tinder-chat-time">[
 // closed enum. Everything else (job titles, school names, prompt answers,
 // chat, the notes catch-all) is free text that could genuinely be in
 // another language.
-const SKIP_TRANSLATE_LABELS = new Set(['Height', 'Distance', 'Pronouns', 'Gender', 'Orientation', 'Languages']);
+const SKIP_TRANSLATE_LABELS = new Set(['Height', 'Distance', 'Pronouns', 'Gender', 'Orientation', 'Languages', 'Looking for']);
 
 function translateButtonHtml(f, i) {
 if (SKIP_TRANSLATE_LABELS.has(f.label)) return '';

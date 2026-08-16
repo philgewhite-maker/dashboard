@@ -53,7 +53,12 @@ return [
 // import thumbnail, and who has no link out to their photos anywhere.
 { title: 'Photos', getKeys: (c) => [photoCoverage(c)], field: null, emptyField: null },
 { title: 'Photo links', getKeys: (c) => photoLinkLabels(c), field: null, emptyField: 'photoLinks' },
-...visibleTagFields().map((f) => ({
+// location excluded -- it already has its own explicit 'Location'
+// dimension above (same reasoning connections.js's own tag-editor grid
+// excludes it from the generic loop); without this, City and Location
+// showed up as two dimensions grouping the exact same data under
+// different names. Confirmed live.
+...visibleTagFields().filter((f) => f.field !== 'location').map((f) => ({
 title: f.label, getKeys: (c) => c[f.field] || [], field: f.field, colorField: f.field, emptyField: f.field,
 })),
 ];
