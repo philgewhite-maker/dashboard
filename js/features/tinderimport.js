@@ -512,49 +512,62 @@ return ` <button type="button" class="sync-btn tinder-inline-btn" data-tinder-tr
 // A flag emoji is two "Regional Indicator Symbol" code points (U+1F1E6 =
 // 'A' through U+1F1FF = 'Z') that spell out an ISO 3166-1 alpha-2 country
 // code -- 🇧🇷 is literally the letters B and R shifted into that range.
-// Not exhaustive (a few small territories and disputed regions are left
-// out), but covers every country someone's actually likely to drop into
-// an About Me as a "here's where I'm from" flag.
+// Every assigned code with a permanent civilian population is here, not
+// just sovereign states (a Puerto Rican, Greenlandic, or Hong Kong flag
+// is just as real a "here's where I'm from" signal as a national one).
+// Left out: codes with no permanent population to have a nationality at
+// all -- Antarctica, Bouvet Island, South Georgia, Heard Island, the
+// British Indian Ocean Territory, the French Southern Territories, and
+// the US Minor Outlying Islands are research stations/military bases/
+// uninhabited, not places anyone is "from".
 const FLAG_EMOJI_TO_NATIONALITY = {
 AD: 'Andorran', AE: 'Emirati', AF: 'Afghan', AG: 'Antiguan', AI: 'Anguillan', AL: 'Albanian', AM: 'Armenian',
-AO: 'Angolan', AR: 'Argentine', AT: 'Austrian', AU: 'Australian', AZ: 'Azerbaijani',
+AO: 'Angolan', AR: 'Argentine', AS: 'American Samoan', AT: 'Austrian', AU: 'Australian', AW: 'Aruban',
+AX: 'Ålandic', AZ: 'Azerbaijani',
 BA: 'Bosnian', BB: 'Barbadian', BD: 'Bangladeshi', BE: 'Belgian', BF: 'Burkinabe', BG: 'Bulgarian',
-BH: 'Bahraini', BI: 'Burundian', BJ: 'Beninese', BN: 'Bruneian', BO: 'Bolivian', BR: 'Brazilian',
-BS: 'Bahamian', BT: 'Bhutanese', BW: 'Motswana', BY: 'Belarusian', BZ: 'Belizean',
-CA: 'Canadian', CD: 'Congolese', CF: 'Central African', CG: 'Congolese', CH: 'Swiss', CI: 'Ivorian',
-CL: 'Chilean', CM: 'Cameroonian', CN: 'Chinese', CO: 'Colombian', CR: 'Costa Rican', CU: 'Cuban',
-CV: 'Cape Verdean', CY: 'Cypriot', CZ: 'Czech',
+BH: 'Bahraini', BI: 'Burundian', BJ: 'Beninese', BM: 'Bermudian', BN: 'Bruneian', BO: 'Bolivian',
+BQ: 'Bonairean', BR: 'Brazilian', BS: 'Bahamian', BT: 'Bhutanese', BW: 'Motswana', BY: 'Belarusian', BZ: 'Belizean',
+CA: 'Canadian', CC: 'Cocos Islander', CD: 'Congolese', CF: 'Central African', CG: 'Congolese', CH: 'Swiss',
+CI: 'Ivorian', CK: 'Cook Islander', CL: 'Chilean', CM: 'Cameroonian', CN: 'Chinese', CO: 'Colombian',
+CR: 'Costa Rican', CU: 'Cuban', CV: 'Cape Verdean', CW: 'Curaçaoan', CX: 'Christmas Islander', CY: 'Cypriot', CZ: 'Czech',
 DE: 'German', DJ: 'Djiboutian', DK: 'Danish', DM: 'Dominican', DO: 'Dominican', DZ: 'Algerian',
-EC: 'Ecuadorian', EE: 'Estonian', EG: 'Egyptian', ER: 'Eritrean', ES: 'Spanish', ET: 'Ethiopian',
-FI: 'Finnish', FJ: 'Fijian', FM: 'Micronesian', FR: 'French',
-GA: 'Gabonese', GB: 'British', GD: 'Grenadian', GE: 'Georgian', GH: 'Ghanaian', GM: 'Gambian',
-GN: 'Guinean', GQ: 'Equatorial Guinean', GR: 'Greek', GT: 'Guatemalan', GW: 'Guinea-Bissauan', GY: 'Guyanese',
+EC: 'Ecuadorian', EE: 'Estonian', EG: 'Egyptian', EH: 'Sahrawi', ER: 'Eritrean', ES: 'Spanish', ET: 'Ethiopian',
+FI: 'Finnish', FJ: 'Fijian', FK: 'Falkland Islander', FM: 'Micronesian', FO: 'Faroese', FR: 'French',
+GA: 'Gabonese', GB: 'British', GD: 'Grenadian', GE: 'Georgian', GF: 'French Guianese', GG: 'Guernsey',
+GH: 'Ghanaian', GI: 'Gibraltarian', GL: 'Greenlandic', GM: 'Gambian', GN: 'Guinean', GP: 'Guadeloupean',
+GQ: 'Equatorial Guinean', GR: 'Greek', GT: 'Guatemalan', GU: 'Guamanian', GW: 'Guinea-Bissauan', GY: 'Guyanese',
 HK: 'Hong Konger', HN: 'Honduran', HR: 'Croatian', HT: 'Haitian', HU: 'Hungarian',
-ID: 'Indonesian', IE: 'Irish', IL: 'Israeli', IN: 'Indian', IQ: 'Iraqi', IR: 'Iranian', IS: 'Icelandic', IT: 'Italian',
-JM: 'Jamaican', JO: 'Jordanian', JP: 'Japanese',
+ID: 'Indonesian', IE: 'Irish', IL: 'Israeli', IM: 'Manx', IN: 'Indian', IQ: 'Iraqi', IR: 'Iranian',
+IS: 'Icelandic', IT: 'Italian',
+JE: 'Jersey', JM: 'Jamaican', JO: 'Jordanian', JP: 'Japanese',
 KE: 'Kenyan', KG: 'Kyrgyz', KH: 'Cambodian', KI: 'I-Kiribati', KM: 'Comorian', KN: 'Kittitian',
-KP: 'North Korean', KR: 'South Korean', KW: 'Kuwaiti', KZ: 'Kazakhstani',
+KP: 'North Korean', KR: 'South Korean', KW: 'Kuwaiti', KY: 'Caymanian', KZ: 'Kazakhstani',
 LA: 'Lao', LB: 'Lebanese', LC: 'Saint Lucian', LI: 'Liechtensteiner', LK: 'Sri Lankan', LR: 'Liberian',
 LS: 'Basotho', LT: 'Lithuanian', LU: 'Luxembourgish', LV: 'Latvian', LY: 'Libyan',
-MA: 'Moroccan', MC: 'Monegasque', MD: 'Moldovan', ME: 'Montenegrin', MG: 'Malagasy', MH: 'Marshallese',
-MK: 'Macedonian', ML: 'Malian', MM: 'Burmese', MN: 'Mongolian', MR: 'Mauritanian', MT: 'Maltese',
+MA: 'Moroccan', MC: 'Monegasque', MD: 'Moldovan', ME: 'Montenegrin', MF: 'Saint-Martinois', MG: 'Malagasy',
+MH: 'Marshallese', MK: 'Macedonian', ML: 'Malian', MM: 'Burmese', MN: 'Mongolian', MO: 'Macanese',
+MP: 'Northern Mariana Islander', MQ: 'Martinican', MR: 'Mauritanian', MS: 'Montserratian', MT: 'Maltese',
 MU: 'Mauritian', MV: 'Maldivian', MW: 'Malawian', MX: 'Mexican', MY: 'Malaysian', MZ: 'Mozambican',
-NA: 'Namibian', NE: 'Nigerien', NG: 'Nigerian', NI: 'Nicaraguan', NL: 'Dutch', NO: 'Norwegian', NP: 'Nepali',
-NR: 'Nauruan', NZ: 'New Zealand',
+NA: 'Namibian', NC: 'New Caledonian', NE: 'Nigerien', NF: 'Norfolk Islander', NG: 'Nigerian', NI: 'Nicaraguan',
+NL: 'Dutch', NO: 'Norwegian', NP: 'Nepali', NR: 'Nauruan', NU: 'Niuean', NZ: 'New Zealand',
 OM: 'Omani',
-PA: 'Panamanian', PE: 'Peruvian', PG: 'Papua New Guinean', PH: 'Filipino', PK: 'Pakistani', PL: 'Polish',
-PS: 'Palestinian', PT: 'Portuguese', PW: 'Palauan', PY: 'Paraguayan',
+PA: 'Panamanian', PE: 'Peruvian', PF: 'French Polynesian', PG: 'Papua New Guinean', PH: 'Filipino',
+PK: 'Pakistani', PL: 'Polish', PM: 'Saint-Pierrais', PR: 'Puerto Rican', PS: 'Palestinian', PT: 'Portuguese',
+PW: 'Palauan', PY: 'Paraguayan',
 QA: 'Qatari',
-RO: 'Romanian', RS: 'Serbian', RU: 'Russian', RW: 'Rwandan',
+RE: 'Réunionese', RO: 'Romanian', RS: 'Serbian', RU: 'Russian', RW: 'Rwandan',
 SA: 'Saudi', SB: 'Solomon Islander', SC: 'Seychellois', SD: 'Sudanese', SE: 'Swedish', SG: 'Singaporean',
-SI: 'Slovenian', SK: 'Slovak', SL: 'Sierra Leonean', SM: 'Sammarinese', SN: 'Senegalese', SO: 'Somali',
-SR: 'Surinamese', SS: 'South Sudanese', ST: 'Sao Tomean', SV: 'Salvadoran', SY: 'Syrian', SZ: 'Swazi',
-TD: 'Chadian', TG: 'Togolese', TH: 'Thai', TJ: 'Tajik', TL: 'Timorese', TM: 'Turkmen', TN: 'Tunisian',
-TO: 'Tongan', TR: 'Turkish', TT: 'Trinidadian', TV: 'Tuvaluan', TW: 'Taiwanese', TZ: 'Tanzanian',
+SH: 'Saint Helenian', SI: 'Slovenian', SK: 'Slovak', SL: 'Sierra Leonean', SM: 'Sammarinese', SN: 'Senegalese',
+SO: 'Somali', SR: 'Surinamese', SS: 'South Sudanese', ST: 'Sao Tomean', SV: 'Salvadoran', SX: 'Sint Maarten',
+SY: 'Syrian', SZ: 'Swazi',
+TC: 'Turks and Caicos Islander', TD: 'Chadian', TG: 'Togolese', TH: 'Thai', TJ: 'Tajik', TK: 'Tokelauan',
+TL: 'Timorese', TM: 'Turkmen', TN: 'Tunisian', TO: 'Tongan', TR: 'Turkish', TT: 'Trinidadian', TV: 'Tuvaluan',
+TW: 'Taiwanese', TZ: 'Tanzanian',
 UA: 'Ukrainian', UG: 'Ugandan', US: 'American', UY: 'Uruguayan', UZ: 'Uzbekistani',
-VA: 'Vatican', VC: 'Vincentian', VE: 'Venezuelan', VN: 'Vietnamese', VU: 'Ni-Vanuatu',
-WS: 'Samoan',
-YE: 'Yemeni',
+VA: 'Vatican', VC: 'Vincentian', VE: 'Venezuelan', VG: 'British Virgin Islander', VI: 'US Virgin Islander',
+VN: 'Vietnamese', VU: 'Ni-Vanuatu',
+WF: 'Wallisian and Futunan', WS: 'Samoan',
+YE: 'Yemeni', YT: 'Mahoran',
 ZA: 'South African', ZM: 'Zambian', ZW: 'Zimbabwean',
 };
 const FLAG_EMOJI_RE = /[\u{1F1E6}-\u{1F1FF}]{2}/gu;
