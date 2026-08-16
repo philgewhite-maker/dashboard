@@ -195,6 +195,15 @@ const TAG_FIELDS = [
 // top of the connection editor, not in the generic tag-field list below
 // (see visibleTagFields()'s exclusion in connections.js).
 { field: 'location', label: 'City', sensitive: false },
+// Generalizes what used to be a single metInPerson boolean -- a real
+// relationship has more than one milestone worth a permanent record
+// (Exchanged details, Met, Kissed, Slept together, Holidayed together,
+// Married...), and none of them should be lost just because Stage moves
+// on (Faded/Archived rank the same as never-progressed). Reaching "Met
+// in person" or beyond through the normal Stage dropdown still adds
+// "Met" automatically (see the Stage change handler); everything else
+// is typed by hand, same as any other tag field.
+{ field: 'milestones', label: 'Milestones', sensitive: false },
 { field: 'dateLocations', label: 'Date locations', sensitive: false },
 { field: 'dateEvents', label: 'Date events', sensitive: false },
 { field: 'languages', label: 'Language', sensitive: false },
@@ -400,6 +409,19 @@ if (!Array.isArray(c.nationality)) c.nationality = [];
 // array rather than discarding it, so nobody's saved City is lost.
 if (typeof c.location === 'string') c.location = c.location.trim() ? [c.location.trim()] : [];
 else if (!Array.isArray(c.location)) c.location = [];
+if (!Array.isArray(c.milestones)) c.milestones = [];
+// metInPerson (a plain boolean + date) generalized into milestones (see
+// TAG_FIELDS) -- folded in rather than discarded, so nobody's already-
+// recorded "we met" is lost. The date specifically has nowhere left to
+// live (milestones are plain tags, no per-value date), so it's kept as
+// a notes line instead of silently dropped.
+if (c.metInPerson && !c.milestones.some((m) => m.toLowerCase() === 'met')) c.milestones.push('Met');
+if (c.metInPerson && c.metInPersonDate) {
+const line = `Met in person: ${c.metInPersonDate}`;
+if (!String(c.notes || '').includes(line)) c.notes = c.notes ? `${c.notes}\n${line}` : line;
+}
+delete c.metInPerson;
+delete c.metInPersonDate;
 if (!Array.isArray(c.todos)) c.todos = [];
 if (!Array.isArray(c.tags)) c.tags = [];
 if (!Array.isArray(c.aliases)) c.aliases = [];

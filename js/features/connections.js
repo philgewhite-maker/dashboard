@@ -257,6 +257,11 @@ if (!avg) return '';
 return ` <span class="rating-average">avg ${avg.value.toFixed(1)} (${avg.count} rated)</span>`;
 }
 
+// Unlike every other tag field, milestones has no real data to seed
+// suggestions from the first time it's used -- offer this starter
+// vocabulary until actual saved values take over.
+const MILESTONE_SUGGESTIONS = ['Exchanged details', 'Met', 'Kissed', 'Slept together', 'Holidayed', 'Engaged', 'Married'];
+
 // Every distinct value already used for `field`, keyed lowercase so the
 // first spelling entered becomes the canonical one.
 function existingTagValues(field) {
@@ -267,6 +272,12 @@ const key = String(v).trim().toLowerCase();
 if (key && !byKey.has(key)) byKey.set(key, String(v).trim());
 });
 });
+if (field === 'milestones') {
+MILESTONE_SUGGESTIONS.forEach((v) => {
+const key = v.toLowerCase();
+if (!byKey.has(key)) byKey.set(key, v);
+});
+}
 return [...byKey.values()].sort((a, b) => a.localeCompare(b));
 }
 
@@ -568,8 +579,6 @@ ${contactPickerHtml(c.id)}
 <label class="full">City <span class="settings-note">Groups in Overview — a borough and its city, or two homes, are two separate entries</span><div class="tag-editor">${tagChips(c.location, c.id, 'location')}</div></label>
 <label>Distance<input type="text" autocomplete="off" placeholder="e.g. &lt; 10 mi" data-field="distance" data-conn-detail="${c.id}" value="${escapeHtml(c.distance || '')}"></label>
 <label>Matched on<input type="date" data-field="matchedOn" data-conn-detail="${c.id}" value="${escapeHtml(c.matchedOn || '')}"></label>
-<label class="checkbox-field">Met in person<input type="checkbox" data-field="metInPerson" data-conn-detail="${c.id}"${c.metInPerson ? ' checked' : ''}></label>
-${c.metInPerson ? `<label>Met on<input type="date" data-field="metInPersonDate" data-conn-detail="${c.id}" value="${escapeHtml(c.metInPersonDate || '')}"></label>` : ''}
 <label>Travel status<select data-field="travelStatus" data-conn-detail="${c.id}">
 <option value="" ${!c.travelStatus ? 'selected' : ''}>&mdash; normal reach-out rotation</option>
 <option value="standby" ${c.travelStatus === 'standby' ? 'selected' : ''}>Standby (foreign city, no end date)</option>
@@ -637,14 +646,14 @@ sel.addEventListener('change', () => {
 const conn = data.connections.find((x) => x.id === sel.dataset.connStage);
 conn.stage = sel.value;
 // Reaching "Met in person" or beyond through the normal stage
-// progression records the fact automatically -- metInPerson stays a
+// progression records the milestone automatically -- milestones stays a
 // separate field precisely so it isn't lost if Stage moves on again
 // later (Faded/Archived rank the same as never-progressed), and this
-// is what saves a manual tick for the common case of getting there the
-// ordinary way rather than jumping straight to Archived.
-if ((STAGE_RANK[sel.value] ?? 0) >= STAGE_RANK['Met in person'] && !conn.metInPerson) {
-conn.metInPerson = true;
-conn.metInPersonDate = conn.metInPersonDate || todayStr();
+// saves a manual tick for the common case of getting there the ordinary
+// way rather than jumping straight to Archived.
+if ((STAGE_RANK[sel.value] ?? 0) >= STAGE_RANK['Met in person']) {
+if (!Array.isArray(conn.milestones)) conn.milestones = [];
+unionInto(conn.milestones, ['Met']);
 }
 renderConnections();
 renderOverviewRef();
@@ -685,14 +694,6 @@ const until = new Date();
 until.setDate(until.getDate() + 14);
 conn.travelUntil = until.toISOString().slice(0, 10);
 }
-// Orthogonal to Stage on purpose (see the "met in person" auto-set on
-// the Stage dropdown below) -- ticking this by hand is what lets the
-// fact survive jumping straight from an earlier stage to Faded/Archived
-// without ever passing through "Met in person", where it'd otherwise be
-// lost the moment Stage moves on.
-if (el.dataset.field === 'metInPerson' && el.checked && !String(conn.metInPersonDate || '').trim()) {
-conn.metInPersonDate = todayStr();
-}
 // These are echoed elsewhere in the card (the name line, the source tag,
 // every merge dropdown), so a full re-render is the only way to keep
 // those honest. `change` fires on blur, not per keystroke, so this costs
@@ -702,8 +703,7 @@ conn.metInPersonDate = todayStr();
 // up the next time something else happened to trigger a render, which looks
 // exactly like the paste not working. travelStatus needs it too, to show/
 // hide the "Travelling until" date field and refresh the badge/action.
-// metInPerson needs it too, to show/hide the "Met on" date field.
-if (['name', 'app', 'age', 'dob', 'location', 'driveLink', 'travelStatus', 'metInPerson'].includes(el.dataset.field)) renderConnections();
+if (['name', 'app', 'age', 'dob', 'location', 'driveLink', 'travelStatus'].includes(el.dataset.field)) renderConnections();
 renderOverviewRef();
 queueSave();
 });

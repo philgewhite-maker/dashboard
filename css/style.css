@@ -953,8 +953,6 @@ letter-spacing:.03em;
 color:var(--muted);
 }
 .details-grid label.full,.details-grid .field-block.full{grid-column:1 / -1;}
-.details-grid label.checkbox-field{flex-direction:row;align-items:center;gap:6px;}
-.details-grid label.checkbox-field input{width:auto;}
 .details-grid input, .details-grid textarea{
 font-family:'Inter',sans-serif;
 font-size:13px;
