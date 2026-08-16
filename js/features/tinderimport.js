@@ -1082,16 +1082,26 @@ function fieldPreviewHtml(f, i) {
 // arrayMap split/push logic in save() once applied, no special-casing
 // needed there since it doesn't care how the value was entered.
 const isArrayAlwaysShow = ALWAYS_SHOW_ARRAY_LABELS.includes(f.label);
-if (!f.value.trim() && (ALWAYS_SHOW_LABELS.includes(f.label) || isArrayAlwaysShow)) {
-return `<div class="tinder-field-item">
-<label class="tinder-field-row"><strong>${escapeHtml(f.label)}:</strong>
-<input type="text" autocomplete="off" placeholder="${isArrayAlwaysShow ? 'Not captured — comma-separated if more than one' : 'Not captured — spotted in About me or chat? Type it here'}" data-tinder-field-fill="${i}">
-</label>
-</div>`;
-}
 const conn = data.connections.find((c) => c.id === pending.chosenId);
 const target = FIELD_MAP[f.label];
 const arrayMap = ARRAY_FIELD_MAP[f.label];
+if (!f.value.trim() && (ALWAYS_SHOW_LABELS.includes(f.label) || isArrayAlwaysShow)) {
+// "Not captured" describes THIS scrape only -- it said nothing here even
+// when the connection already has a value from a previous import, which
+// read as "nothing on file at all" and confirmed live as confusing: a
+// chat-highlighted value clicked to "add" it then reported "already in
+// nationality — will be skipped", contradicting the "Not captured" the
+// user had just read seconds earlier. Surfacing what's already saved
+// (if anything) here closes that gap.
+let already = '';
+if (conn && target && String(conn[target] || '').trim()) already = ` <span class="tinder-field-note">(already set to "${escapeHtml(conn[target])}")</span>`;
+else if (conn && arrayMap && (conn[arrayMap.target] || []).length) already = ` <span class="tinder-field-note">(already: ${escapeHtml(conn[arrayMap.target].join(', '))})</span>`;
+return `<div class="tinder-field-item">
+<label class="tinder-field-row"><strong>${escapeHtml(f.label)}:</strong>${already}
+<input type="text" autocomplete="off" placeholder="${isArrayAlwaysShow ? 'Not captured this time — comma-separated if more than one' : 'Not captured this time — spotted in About me or chat? Type it here'}" data-tinder-field-fill="${i}">
+</label>
+</div>`;
+}
 let note = 'will be added to notes';
 let disabled = false; // truly nothing to do (array field, nothing new to add) — stays unchecked and locked
 let dim = false; // already has a value, so unchecked-by-default, but still a real, checkable override
@@ -1436,7 +1446,7 @@ ${nextStepHtml()}
 <button class="sync-btn" type="button" id="tinder-more-info-open">More info</button>
 </div>
 ${saveBlockedNote ? `<div class="tinder-field-note" style="margin:-4px 0 8px;">${escapeHtml(saveBlockedNote)}</div>` : ''}
-<span class="sync-status" id="tinder-save-status">${escapeHtml(p.saveMessage || '')}</span>
+<span class="sync-status" id="tinder-save-status"></span>
 
 <div class="tinder-fields" style="margin:8px 0;">
 <label class="tinder-field-row">Stage <select id="tinder-stage">${CONN_STAGES.map((s) => `<option value="${escapeHtml(s)}"${s === p.stageOverride ? ' selected' : ''}>${escapeHtml(s)}</option>`).join('')}</select></label>
@@ -1763,6 +1773,13 @@ ph.apply = false; // saved — leave it out of a retry so it can't be re-added a
 console.error('Could not fetch Tinder photo:', ph.url, err);
 if (!firstError) firstError = err.message || String(err);
 failed++;
+// Unchecked on failure too, not just success -- confirmed live: several
+// photo URLs 403 every single time (an expired/signed link, presumably),
+// so retrying automatically on every subsequent Save just repeated the
+// same failure and blocked the rest of the import queue behind a photo
+// that was never going to succeed. Still visible and re-checkable by
+// hand in the gallery for the genuinely transient case.
+ph.apply = false;
 }
 }
 
@@ -1808,22 +1825,17 @@ if (openAfter) window.open(`${location.origin}${location.pathname}#dating:${conn
 
 // A photo silently not saving with no visible reason (beyond a
 // console.error nobody was watching for) was exactly what happened
-// before this — so on any failure, the review stays open with the
-// actual error shown, rather than resetting and taking the message with
-// it. Fields are already saved either way; clicking Save again only
-// retries the photos still marked to include, not a duplicate of
-// whatever already succeeded.
-// The message is threaded through pending.saveMessage rather than
-// written to the status span directly — render() rebuilds this card's
-// whole innerHTML, including a brand new (empty) status span, so a
-// direct write here would already be gone by the time anyone saw it.
+// before this fix -- the failure is still surfaced, just no longer
+// blocking. A failed photo is now auto-unchecked (see
+// applyPendingToConnection), same as a succeeded one, since several URLs
+// were confirmed to 403 every single time -- staying open waiting for a
+// "click Save again" retry that could never succeed just stalled the
+// rest of the queue behind it. Fields (and whichever photos DID succeed)
+// are already saved either way; a failed one is still re-checkable by
+// hand in the gallery for the genuinely transient case.
 const dupeNote = alreadyHad ? ` (${alreadyHad} already had.)` : '';
-if (failed) {
-pending.saveMessage = `Saved fields to ${conn.name}. ${failed} of ${toFetchLen} photo${toFetchLen === 1 ? '' : 's'} failed: ${firstError} — click Save again to retry.${dupeNote}`;
-render();
-} else {
-advanceQueue(`Saved to ${conn.name}.${dupeNote}`);
-}
+const failNote = failed ? ` ${failed} of ${toFetchLen} photo${toFetchLen === 1 ? '' : 's'} failed and ${failed === 1 ? 'was' : 'were'} skipped: ${firstError} — re-check it in the gallery to retry.` : '';
+advanceQueue(`Saved to ${conn.name}.${dupeNote}${failNote}`);
 }
 
 // The bulk snippet's output ({profiles: [...]}) and the single-profile
