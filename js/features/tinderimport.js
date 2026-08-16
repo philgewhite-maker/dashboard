@@ -219,14 +219,19 @@ const ALWAYS_APPLY_LABELS = new Set(['Last message date']);
 const ALWAYS_SHOW_LABELS = ['Height', 'Job', 'Education', 'Distance'];
 
 // Same idea as ALWAYS_SHOW_LABELS, for the array-mapped (chip-list)
-// fields — Nationality, Languages, etc. are just as likely to come up
-// only in free text as Height or Job is, and were originally left out of
-// the scalar list above on the mistaken assumption that "array-mapped"
-// meant "no real destination to fill in"; they route into a real chip
-// list (see ARRAY_FIELD_MAP) same as a scraped one would. A fill-in here
-// is comma-separated, same as Tinder's own Languages/Interests text.
-// 'Tags' is the synthetic generic-catch-all entry from ARRAY_FIELD_MAP.
-const ALWAYS_SHOW_ARRAY_LABELS = ['Nationality', 'Languages', 'Orientation', 'Relationship type', 'Looking for', 'Gender', 'Tags'];
+// fields — Gender and Tags are just as likely to come up only in free text
+// as Height or Job is, and were originally left out of the scalar list
+// above on the mistaken assumption that "array-mapped" meant "no real
+// destination to fill in"; they route into a real chip list (see
+// ARRAY_FIELD_MAP) same as a scraped one would. A fill-in here is
+// comma-separated, same as Tinder's own Interests text. 'Tags' is the
+// synthetic generic-catch-all entry from ARRAY_FIELD_MAP. Nationality/
+// Languages/Orientation/"Relationship type"/"Looking for" deliberately
+// NOT here any more -- they have their own always-visible chip editor now
+// (see CHIP_OVERRIDE_LABELS), so an extra empty fill-in slot for them
+// would just be a second, competing box for the same field (the exact bug
+// City had before its own chip editor existed).
+const ALWAYS_SHOW_ARRAY_LABELS = ['Gender', 'Tags'];
 
 // Purely a display grouping — doesn't change where a field ends up on
 // save, just how the review card reads. A label not listed in any cluster
@@ -275,16 +280,16 @@ return [...fields, ...missing];
 // added to, never overwritten, so re-importing the same person twice just
 // re-confirms the same tags rather than duplicating or blocking anything.
 // `split: true` fields are genuinely comma-delimited lists from Tinder
-// (Languages, Interests); `split: false` ones are a single phrase that may
-// just happen to CONTAIN a comma ("Long-term, but short-term OK" is one
-// answer, not two) and would be mangled by splitting it.
+// (Interests); `split: false` ones are a single phrase that may just
+// happen to CONTAIN a comma ("Long-term, but short-term OK" is one answer,
+// not two) and would be mangled by splitting it. Languages/Nationality/
+// Orientation/"Relationship type"/"Looking for" used to live here too —
+// promoted to their own chip editors (see CHIP_OVERRIDE_LABELS) for the
+// same reason City was: typed freely, not just applied wholesale from one
+// scrape, and worth correcting/topping-up without waiting for Tinder to
+// re-offer the exact same phrase.
 const ARRAY_FIELD_MAP = {
-Languages: { target: 'languages', split: true },
 Interests: { target: 'interests', split: true },
-Orientation: { target: 'relationshipTags', split: false },
-'Relationship type': { target: 'relationshipTags', split: false },
-'Looking for': { target: 'relationshipTags', split: false },
-Nationality: { target: 'nationality', split: false },
 // Neither of these has a dedicated field of its own — both route into the
 // generic tags chip list so they're at least taggable/flaggable, rather
 // than sitting unfindable in a wall of notes text (where they were before).
@@ -303,19 +308,39 @@ Tags: { target: 'tags', split: true },
 'Social handles': { target: 'socialHandles', split: true },
 };
 
+// Fields promoted to their own City-style chip editor — typed/clicked
+// freely as individual chips (add one, remove one) rather than applied
+// wholesale via a single checkbox over one scraped value. Keyed by every
+// raw Tinder label that should land here; Orientation/"Relationship type"/
+// "Looking for" are three different questions that share one target
+// (same reasoning ARRAY_FIELD_MAP used to apply to them), so all three
+// collapse to the one relationshipOverride chip list.
+const CHIP_OVERRIDE_LABELS = {
+Languages: 'languagesOverride',
+Nationality: 'nationalityOverride',
+Orientation: 'relationshipOverride',
+'Relationship type': 'relationshipOverride',
+'Looking for': 'relationshipOverride',
+};
+// overrideKey -> [connection target field, display label for "see X above"]
+const CHIP_OVERRIDE_META = {
+languagesOverride: { target: 'languages', display: 'Languages' },
+nationalityOverride: { target: 'nationality', display: 'Nationality' },
+relationshipOverride: { target: 'relationshipTags', display: 'Relationship' },
+};
+
 // Every label worth offering in the generic "Add a field" picker --
 // deduped to ONE representative label per underlying target field (Work/
-// "Job title"/Job in FIELD_MAP, and Orientation/"Looking for"/"Relationship
-// type" in ARRAY_FIELD_MAP, all collapse to a single dropdown entry each)
+// "Job title"/Job in FIELD_MAP all collapse to a single dropdown entry)
 // rather than every raw Tinder label that happens to route there, and
 // excluding the scrape-only ones (Chat history, Last message date) that
 // don't make sense as something to type a value in for by hand.
-// City excluded -- it already has its own dedicated cityOverride chip
-// editor in the Stage/City/Rating/Travel row, not reachable through this
-// generic single-target mechanism (it's multi-value now; see FIELD_MAP's comment).
+// City, Nationality, Languages and Relationship type all excluded -- each
+// already has its own dedicated chip editor in the Stage/City/Rating/
+// Travel row, not reachable through this generic single-target mechanism.
 const GENERIC_ADD_LABELS = [
 'Job', 'Education', 'Height', 'Distance', 'Family plans',
-'Nationality', 'Languages', 'Interests', 'Relationship type', 'Tags', 'Social handles',
+'Interests', 'Tags', 'Social handles',
 ];
 
 let pending = null; // { name, age, fields, photos, chosenId, match, matchConfirmed, aiVerdict }
@@ -545,7 +570,7 @@ return hits.length === 1 ? hits[0] : 'Slavic';
 function cyrillicAddButtonHtml(text) {
 if (!/[Ѐ-ӿ]/.test(text)) return '';
 const lang = cyrillicLanguageGuess();
-const alreadyHasLang = pending.fields.some((f) => f.label === 'Languages' && f.value.split(',').map((s) => s.trim()).includes(lang));
+const alreadyHasLang = pending.languagesOverride.some((l) => l.toLowerCase() === lang.toLowerCase());
 if (alreadyHasLang) return '';
 return ` <button type="button" class="sync-btn tinder-inline-btn" data-tinder-translate-add="${escapeHtml(lang)}">+ add ${escapeHtml(lang)}</button>`;
 }
@@ -703,9 +728,8 @@ return found;
 function flagEmojiAddButtonHtml(text) {
 const nats = flagEmojiNationalities(text);
 if (!nats.length) return '';
-const existing = new Set();
-pending.fields.filter((f) => f.label === 'Nationality').forEach((f) => f.value.split(',').map((s) => s.trim()).forEach((v) => existing.add(v)));
-return nats.filter((n) => !existing.has(n)).map((n) => ` <button type="button" class="sync-btn tinder-inline-btn" data-tinder-add-label="Nationality" data-tinder-add-value="${escapeHtml(n)}">+ add ${escapeHtml(n)}</button>`).join('');
+const existing = new Set(pending.nationalityOverride.map((v) => v.toLowerCase()));
+return nats.filter((n) => !existing.has(n.toLowerCase())).map((n) => ` <button type="button" class="sync-btn tinder-inline-btn" data-tinder-add-label="Nationality" data-tinder-add-value="${escapeHtml(n)}">+ add ${escapeHtml(n)}</button>`).join('');
 }
 
 const CYRILLIC_RUN_RE = '[\\u0400-\\u04FF]+(?:[ \\-][\\u0400-\\u04FF]+)*';
@@ -961,8 +985,7 @@ Yemeni: 'Arabic', Sudanese: 'Arabic', Palestinian: 'Arabic',
 
 function nationalityLanguageSuggestionHtml(f) {
 if (f.label !== 'Nationality' || !f.value.trim()) return '';
-const languagesField = pending.fields.find((lf) => lf.label === 'Languages');
-const already = languagesField ? new Set(languagesField.value.split(',').map((s) => s.trim().toLowerCase())) : new Set();
+const already = new Set(pending.languagesOverride.map((s) => s.toLowerCase()));
 const suggestions = [];
 f.value.split(',').map((s) => s.trim()).filter(Boolean).forEach((nat) => {
 const lang = NATIONALITY_TO_LANGUAGE[nat];
@@ -978,7 +1001,7 @@ if (t === 'loading') return `<div class="tinder-translate-result">Checking langu
 if (t.error) return `<div class="tinder-translate-result tinder-translate-error">Translate failed: ${escapeHtml(t.error)}</div>`;
 if (t.alreadyEnglish) return `<div class="tinder-translate-result"><span class="tinder-engine-badge tinder-engine-free">Free, on-device</span> Already English — no Anthropic call made.</div>`;
 if (!t.language || !t.translation) return `<div class="tinder-translate-result tinder-translate-error">Couldn't tell what language this is.</div>`;
-const alreadyHasLang = pending.fields.some((f) => f.label === 'Languages' && f.value.split(',').map((s) => s.trim()).includes(t.language));
+const alreadyHasLang = pending.languagesOverride.some((l) => l.toLowerCase() === t.language.toLowerCase());
 // The translation is shown, but nothing saves IT anywhere -- only the
 // language tag has an "+ add" action. "+ save both" appends it onto the
 // field's own value, so the original AND the English version both end
@@ -1014,7 +1037,6 @@ if (!c) return '';
 if (c === 'loading') return `<div class="tinder-translate-result">Identifying country…</div>`;
 if (c.error) return `<div class="tinder-translate-result tinder-translate-error">Country lookup failed: ${escapeHtml(c.error)}</div>`;
 if (!c.country) return `<div class="tinder-translate-result tinder-translate-error">Couldn't identify a country.</div>`;
-const conn = data.connections.find((x) => x.id === pending.chosenId);
 // City's real value lives in the separate cityOverride chip list, not
 // this field's own f.value -- that's what actually gets saved to
 // conn.location, so appending there is what makes the country stick
@@ -1022,7 +1044,7 @@ const conn = data.connections.find((x) => x.id === pending.chosenId);
 const alreadyAppended = f.label === 'City'
 ? pending.cityOverride.some((v) => v.toLowerCase() === c.country.toLowerCase())
 : f.value.toLowerCase().includes(c.country.toLowerCase());
-const alreadyNational = !!(conn && (conn.nationality || []).some((n) => n.toLowerCase() === c.country.toLowerCase()));
+const alreadyNational = pending.nationalityOverride.some((n) => n.toLowerCase() === c.country.toLowerCase());
 return `<div class="tinder-translate-result">→ <strong>${escapeHtml(c.country)}</strong>`
 + (alreadyAppended ? '' : ` <button type="button" class="sync-btn tinder-inline-btn" data-tinder-country-append="${i}">+ append</button>`)
 + (alreadyNational ? '' : ` <button type="button" class="sync-btn tinder-inline-btn" data-tinder-country-nationality="${i}">+ add nationality</button>`)
@@ -1038,6 +1060,33 @@ return pending.cityOverride.map((c, i) => `<span class="tag-chip">${escapeHtml(c
 + `<input type="text" id="tinder-city-add" autocomplete="off" class="tag-add-input" placeholder="+ add" list="tinder-city-datalist">`
 + `<button type="button" class="todo-add-btn" id="tinder-city-add-btn" style="padding:3px 8px;">+</button>`
 + `<datalist id="tinder-city-datalist">${[...knownCityMap(data.connections).values()].map((v) => `<option value="${escapeHtml(v)}"></option>`).join('')}</datalist>`;
+}
+
+// Every distinct value already saved for `target` across every connection,
+// original casing preserved -- same idea as knownCityMap(), just for an
+// arbitrary TAG_FIELDS array instead of hardcoded to location.
+function knownFieldValues(target) {
+const map = new Map();
+data.connections.forEach((c) => {
+(c[target] || []).forEach((raw) => {
+const v = String(raw || '').trim();
+if (v && !map.has(v.toLowerCase())) map.set(v.toLowerCase(), v);
+});
+});
+return [...map.values()].sort((a, b) => a.localeCompare(b));
+}
+
+// Generic version of cityChipsHtml() for the other City-style chip fields
+// (Languages, Nationality, Relationship) -- same markup/classes, just
+// parameterised by overrideKey instead of hardcoded to cityOverride, since
+// these three have no bespoke extras (transliteration, propose-my-city...)
+// that would make sharing one renderer awkward.
+function chipOverrideHtml(overrideKey) {
+const { target } = CHIP_OVERRIDE_META[overrideKey];
+return pending[overrideKey].map((c, i) => `<span class="tag-chip">${escapeHtml(c)}<span class="tag-x" data-tinder-chip-remove="${overrideKey}" data-tinder-chip-idx="${i}">&times;</span></span>`).join('')
++ `<input type="text" autocomplete="off" class="tag-add-input" placeholder="+ add" list="tinder-chip-datalist-${overrideKey}" data-tinder-chip-add="${overrideKey}">`
++ `<button type="button" class="todo-add-btn" data-tinder-chip-add-btn="${overrideKey}" style="padding:3px 8px;">+</button>`
++ `<datalist id="tinder-chip-datalist-${overrideKey}">${knownFieldValues(target).map((v) => `<option value="${escapeHtml(v)}"></option>`).join('')}</datalist>`;
 }
 
 // A match within a short distance of you is probably in the same city --
@@ -1141,6 +1190,14 @@ if (fresh.length === 0 && conn) { disabled = true; dim = true; }
 // left to fall through to the notes catch-all.
 note = 'see City field above';
 disabled = true;
+} else if (CHIP_OVERRIDE_LABELS[f.label]) {
+// Same reasoning as City -- Languages/Nationality/Orientation/
+// "Relationship type"/"Looking for" now have their own dedicated chip
+// editor above, kept visible here only so the suggestion buttons below
+// (nationality-to-language, country lookup) still work off the raw
+// scraped value.
+note = `see ${CHIP_OVERRIDE_META[CHIP_OVERRIDE_LABELS[f.label]].display} field above`;
+disabled = true;
 }
 const isChat = f.label === 'Chat history';
 const flagColor = isChat ? null : fieldFlagColor(f);
@@ -1241,6 +1298,9 @@ draft[arrayMap.target].push(...parts);
 }
 });
 if (pending.cityOverride.length) draft.location = [...pending.cityOverride];
+Object.entries(CHIP_OVERRIDE_META).forEach(([overrideKey, { target }]) => {
+if (pending[overrideKey].length) draft[target] = [...pending[overrideKey]];
+});
 if (pending.age) { draft.age = pending.age; draft.ageAsOf = todayStr(); }
 return draft;
 }
@@ -1387,13 +1447,28 @@ renderBulk();
 });
 }
 
-// Shared by the inline click-to-add hits (a detected country name, a
-// flagged tag value...) and the manual "Add a field" picker below --
-// merges into whatever's already there for this label (the empty
-// ALWAYS_SHOW_ARRAY_LABELS fill-in slot, most often) instead of pushing a
-// second row for the same field. Confirmed live: two "Nationality" rows,
-// one an empty fill-in, one showing "Brazilian", both at once.
+// Shared add path for every chip-override field (cityOverride and the
+// CHIP_OVERRIDE_LABELS trio) -- one place to dedupe case-insensitively so
+// no source (typed, clicked from chat, a suggestion button) can push a
+// near-duplicate chip.
+function addChipValue(overrideKey, value) {
+const v = String(value || '').trim();
+if (!v) return;
+if (pending[overrideKey].some((c) => c.toLowerCase() === v.toLowerCase())) return;
+pending[overrideKey].push(v);
+}
+
+// Shared by every inline click-to-add hit (a detected country name, a
+// flagged tag value, the nationality-to-language suggestion...) and the
+// manual "Add a field" picker below. Labels with their own chip editor
+// (see CHIP_OVERRIDE_LABELS) route straight there; everything else merges
+// into whatever's already in pending.fields for this label instead of
+// pushing a second row for the same field. Confirmed live, back when
+// Nationality was still a pending.fields row: two "Nationality" rows, one
+// an empty fill-in, one showing "Brazilian", both at once.
 function addFieldValue(label, value) {
+const overrideKey = CHIP_OVERRIDE_LABELS[label];
+if (overrideKey) { addChipValue(overrideKey, value); return; }
 const existing = pending.fields.find((f) => f.label === label);
 if (existing) {
 const parts = existing.value.split(',').map((s) => s.trim()).filter(Boolean);
@@ -1405,15 +1480,13 @@ pending.fields.push({ label, value, apply: true });
 }
 }
 
-// Shared add path for every City chip source (the add-input/button, the
-// propose-my-city suggestion, the country-lookup append button, and
-// clicking a highlighted city mention in chat) -- one place to dedupe
-// case-insensitively so none of them can push a near-duplicate chip.
+// Thin wrapper kept for City's own call sites (propose-my-city, the
+// country-lookup append button, clicking a highlighted city mention) --
+// City isn't in CHIP_OVERRIDE_LABELS since it has no raw Tinder label of
+// its own to key off (it's assembled from cityOverride directly, not
+// routed through addFieldValue).
 function addCityValue(value) {
-const v = String(value || '').trim();
-if (!v) return;
-if (pending.cityOverride.some((c) => c.toLowerCase() === v.toLowerCase())) return;
-pending.cityOverride.push(v);
+addChipValue('cityOverride', value);
 }
 
 function render() {
@@ -1480,6 +1553,9 @@ ${saveBlockedNote ? `<div class="tinder-field-note" style="margin:-4px 0 8px;">$
 <option value="travelling"${p.travelStatusOverride === 'travelling' ? ' selected' : ''}>Travelling</option>
 </select></label>
 ${p.travelStatusOverride === 'travelling' ? `<label class="tinder-field-row">Until <input type="date" id="tinder-travel-until" value="${escapeHtml(p.travelUntilOverride)}"></label>` : ''}
+<label class="tinder-field-row">Languages <span class="tag-editor">${chipOverrideHtml('languagesOverride')}</span></label>
+<label class="tinder-field-row">Nationality <span class="tag-editor">${chipOverrideHtml('nationalityOverride')}</span></label>
+<label class="tinder-field-row">Relationship <span class="tag-editor">${chipOverrideHtml('relationshipOverride')}</span></label>
 </div>
 
 <div class="tinder-add-field-row">
@@ -1632,6 +1708,30 @@ if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); commitCityAdd(); }
 });
 const cityAddBtn = document.getElementById('tinder-city-add-btn');
 if (cityAddBtn) cityAddBtn.addEventListener('click', commitCityAdd);
+// Generic remove/add for the Languages/Nationality/Relationship chip
+// editors -- one delegated handler set covers all three (keyed by
+// overrideKey in the dataset) rather than repeating City's per-field
+// wiring three more times.
+el.querySelectorAll('[data-tinder-chip-remove]').forEach((x) => {
+x.addEventListener('click', () => {
+pending[x.dataset.tinderChipRemove].splice(parseInt(x.dataset.tinderChipIdx, 10), 1);
+render();
+});
+});
+const commitChipAdd = (overrideKey) => {
+const input = el.querySelector(`[data-tinder-chip-add="${overrideKey}"]`);
+if (!input) return;
+addChipValue(overrideKey, input.value);
+render();
+};
+el.querySelectorAll('[data-tinder-chip-add]').forEach((input) => {
+input.addEventListener('keydown', (e) => {
+if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); commitChipAdd(input.dataset.tinderChipAdd); }
+});
+});
+el.querySelectorAll('[data-tinder-chip-add-btn]').forEach((btn) => {
+btn.addEventListener('click', () => commitChipAdd(btn.dataset.tinderChipAddBtn));
+});
 const travelSel = document.getElementById('tinder-travel-status');
 if (travelSel) travelSel.addEventListener('change', () => {
 pending.travelStatusOverride = travelSel.value;
@@ -1825,11 +1925,17 @@ ph.apply = false;
 if (p.stageOverride) conn.stage = p.stageOverride;
 // Additive, not a direct set like Stage/Rating -- each chip is
 // union-added so a manual correction coexists with a re-scraped value
-// instead of one clobbering the other.
+// instead of one clobbering the other. Same treatment for the
+// Languages/Nationality/Relationship chip editors.
 if (p.cityOverride.length) {
 if (!Array.isArray(conn.location)) conn.location = [];
 unionInto(conn.location, p.cityOverride);
 }
+Object.entries(CHIP_OVERRIDE_META).forEach(([overrideKey, { target }]) => {
+if (!p[overrideKey].length) return;
+if (!Array.isArray(conn[target])) conn[target] = [];
+unionInto(conn[target], p[overrideKey]);
+});
 if (p.ratingOverride) conn.priority = p.ratingOverride;
 // Direct set like Stage/City/Rating above, not fill-if-empty -- an empty
 // string is itself a meaningful choice here (clearing Standby/Travelling
@@ -1955,6 +2061,24 @@ return { phones, handles };
 // and returns the object without touching the global `pending`, so a bulk
 // classification pass (see classifyRaws) can build many of these up front
 // without disturbing whatever's currently on screen.
+// Seeds a chip-override array from every raw scraped field matching one of
+// `labels` -- Orientation/"Relationship type"/"Looking for" are three
+// different questions that can all be present on the same profile at
+// once, so every one of them contributes its own chip(s), not just the
+// first found. `split` follows the same convention ARRAY_FIELD_MAP used:
+// true for genuinely comma-delimited Tinder text (Languages), false for a
+// single phrase that may itself contain a comma.
+function initChipOverride(fields, labels, split) {
+const values = [];
+labels.forEach((label) => {
+const f = fields.find((x) => x.label === label);
+if (!f || !f.value.trim()) return;
+const parts = split ? f.value.split(',').map((s) => s.trim()).filter(Boolean) : [f.value.trim()];
+parts.forEach((p) => { if (!values.some((v) => v.toLowerCase() === p.toLowerCase())) values.push(p); });
+});
+return values;
+}
+
 function buildPending(raw) {
 const fields = Array.isArray(raw.fields) ? raw.fields
 .map((f) => ({ label: String(f.label || '').trim(), value: String(f.value || '').trim() }))
@@ -1964,10 +2088,10 @@ const { phones, handles } = scanFields(fields);
 const parsed = {
 name: String(raw.name || '').trim(),
 age: String(raw.age || '').trim(),
-// City defaults unchecked -- its real destination is the dedicated
-// cityOverride chip editor (below), not this generic apply-to-a-field
-// path; see the City special-case in fieldPreviewHtml.
-fields: withAlwaysShowFields(fields.map((f) => ({ ...f, apply: f.label !== 'City' }))),
+// City and the CHIP_OVERRIDE_LABELS trio default unchecked -- their real
+// destination is a dedicated chip editor (below), not this generic
+// apply-to-a-field path; see their special-case in fieldPreviewHtml.
+fields: withAlwaysShowFields(fields.map((f) => ({ ...f, apply: f.label !== 'City' && !CHIP_OVERRIDE_LABELS[f.label] }))),
 photos: photos.map((url) => ({ url, apply: true })),
 foundPhones: phones.map((value) => ({ value, apply: true })),
 foundHandles: handles.map((h) => ({ ...h, apply: true })),
@@ -1988,6 +2112,11 @@ cityOverride: (() => {
 const v = transliterateCityValue(fields.find((f) => f.label === 'City')?.value || '');
 return v ? [v] : [];
 })(),
+// Same reasoning as cityOverride -- typed freely as chips, added to
+// rather than applied wholesale from one scrape.
+languagesOverride: initChipOverride(fields, ['Languages'], true),
+nationalityOverride: initChipOverride(fields, ['Nationality'], false),
+relationshipOverride: initChipOverride(fields, ['Orientation', 'Relationship type', 'Looking for'], false),
 stageOverride: 'Matched',
 ratingOverride: 0,
 // Orthogonal to Stage (see isTravelPaused in state.js) -- seeded from
@@ -2086,6 +2215,16 @@ const fresh = incoming.filter((v) => v && !existingLower.includes(v.toLowerCase(
 if (fresh.length) parts.push(`+${fresh.join(', ')} (${f.label})`);
 });
 
+// Same "what's new" summary for the Languages/Nationality/Relationship
+// chip editors, now that they're not in ARRAY_FIELD_MAP any more --
+// without this a bulk-review row would apply a new language silently,
+// with nothing in the summary hinting it happened.
+Object.entries(CHIP_OVERRIDE_META).forEach(([overrideKey, { target, display }]) => {
+const existingLower = (conn[target] || []).map((v) => v.toLowerCase());
+const fresh = p[overrideKey].filter((v) => !existingLower.includes(v.toLowerCase()));
+if (fresh.length) parts.push(`+${fresh.join(', ')} (${display})`);
+});
+
 // Informational only -- these stay unapplied (refreshOverrides already
 // defaults an already-set field to unchecked) so bulk-submitting this row
 // as-is genuinely changes nothing about them, but it's still worth a
@@ -2139,6 +2278,10 @@ p.travelUntilOverride = conn ? (conn.travelUntil || '') : '';
 // time. Only when cityOverride is still empty: never overwrites a value
 // that came from the fresh scrape, or that the user has since typed.
 if (conn && !p.cityOverride.length && (conn.location || []).length) p.cityOverride = [...conn.location];
+// Same fallback for the Languages/Nationality/Relationship chip editors.
+Object.entries(CHIP_OVERRIDE_META).forEach(([overrideKey, { target }]) => {
+if (conn && !p[overrideKey].length && (conn[target] || []).length) p[overrideKey] = [...conn[target]];
+});
 // A single-value field (Distance, Job, City...) that's already set on the
 // matched connection defaults to unchecked, not disabled -- overwriting
 // stale data (a match moved city, a bad early scrape) is a real need, but
