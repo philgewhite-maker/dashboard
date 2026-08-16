@@ -22,7 +22,7 @@
 // importer), and the chosen connection's photo stays visible for the whole
 // review regardless of how it got picked, so a wrong dropdown pick is just
 // as visible as a wrong auto-match was invisible before.
-import { data, queueSave, currentAge, computeFlags, distanceMiles, FLAG_FIELD_DEFS, suggestedQuestions } from '../state.js';
+import { data, queueSave, currentAge, computeFlags, distanceMiles, FLAG_FIELD_DEFS, suggestedQuestions, TAG_FIELDS, stripSharedSuffix } from '../state.js';
 import { escapeHtml, uid, todayStr, hydratePhotoBackgrounds, openLightbox, knownCityMap } from '../utils.js';
 import { nameKey, editDistance } from '../googlecontacts.js';
 import { storePhoto, fetchProxiedImage } from '../files.js';
@@ -593,7 +593,12 @@ Germany: 'German', Djibouti: 'Djiboutian', Denmark: 'Danish', Dominica: 'Dominic
 Algeria: 'Algerian',
 Ecuador: 'Ecuadorian', Estonia: 'Estonian', Egypt: 'Egyptian', Eritrea: 'Eritrean', Spain: 'Spanish', Ethiopia: 'Ethiopian',
 Finland: 'Finnish', Fiji: 'Fijian', Micronesia: 'Micronesian', France: 'French',
-Gabon: 'Gabonese', 'United Kingdom': 'British', UK: 'British', Grenada: 'Grenadian', Georgia: 'Georgian',
+Gabon: 'Gabonese', 'United Kingdom': 'British', UK: 'British',
+// Not sovereign states, but by far the most common way someone from the
+// UK actually self-describes ("English", not "British") -- worth their
+// own entries rather than only matching the union they're part of.
+England: 'English', Scotland: 'Scottish', Wales: 'Welsh', 'Northern Ireland': 'Northern Irish',
+Grenada: 'Grenadian', Georgia: 'Georgian',
 Ghana: 'Ghanaian', Gambia: 'Gambian', Guinea: 'Guinean', 'Equatorial Guinea': 'Equatorial Guinean', Greece: 'Greek',
 Guatemala: 'Guatemalan', 'Guinea-Bissau': 'Guinea-Bissauan', Guyana: 'Guyanese', Gibraltar: 'Gibraltarian',
 Greenland: 'Greenlandic', Guam: 'Guamanian',
@@ -683,8 +688,51 @@ if (key && !map.has(key)) map.set(key, { label: v, color });
 return map;
 }
 
+// Which Tinder field label to route a swept TAG_FIELDS value through when
+// adding it -- reverse of ARRAY_FIELD_MAP, hand-written rather than
+// derived because several labels can share one target (tags is also
+// reachable via "Gender"/"How often do you smoke?") and the reverse
+// lookup needs the generic one, not whichever happens to be declared
+// first. Only covers TAG_FIELDS (the array/chip-list fields) -- scalar
+// fields like Job or Education aren't "tags" in the sense meant here, and
+// a couple of TAG_FIELDS are left out on purpose: aliases/socialHandles/
+// dateLocations/dateEvents are specific to ONE person or ONE date, not
+// reusable vocabulary, and sexTags has no Tinder-side field to add it
+// through at all.
+const TARGET_TO_ADD_LABEL = {
+interests: 'Interests', languages: 'Languages', nationality: 'Nationality',
+relationshipTags: 'Relationship type', tags: 'Tags',
+};
+
+// Every value already saved for ANY connection, across every reusable tag
+// field (Interests, Languages, Nationality, Tags, Relationship type) --
+// same reasoning knownCityMap() already uses for City: a value already on
+// file elsewhere is known-good, not a guess, so it's worth a click-to-add
+// wherever it turns up in a new profile's free text. This is the general
+// version of what the flag-emoji/country-name detection above does for
+// Nationality specifically -- that stays too, since it can recognise a
+// country that's never been used before; this catches everything else
+// (an interest, a language, a custom tag) that has no finite reference
+// list to hardcode.
+function knownTagValueMap(connections) {
+const map = new Map(); // lowercase value -> {label: original casing, targetLabel}
+connections.forEach((c) => {
+TAG_FIELDS.forEach((f) => {
+const targetLabel = TARGET_TO_ADD_LABEL[f.field];
+if (!targetLabel) return;
+(c[f.field] || []).forEach((raw) => {
+const value = stripSharedSuffix(raw);
+const key = value.toLowerCase();
+if (value && !map.has(key)) map.set(key, { label: value, targetLabel });
+});
+});
+});
+return map;
+}
+
 function highlightCities(text) {
 const cityMap = knownCityMap(data.connections);
+const tagValueMap = knownTagValueMap(data.connections);
 const flagMap = flagValueMap();
 // Longest names first, so a multi-word city ("New York") wins whole
 // rather than a shorter, unrelated city name that happens to be a
@@ -692,7 +740,17 @@ const flagMap = flagValueMap();
 const names = [...cityMap.values()].sort((a, b) => b.length - a.length);
 const flagValues = [...flagMap.values()].map((v) => v.label).sort((a, b) => b.length - a.length);
 const countryNameMap = new Map(Object.entries(COUNTRY_NAME_TO_NATIONALITY).map(([name, nat]) => [name.toLowerCase(), { name, nat }]));
-const countryNames = Object.keys(COUNTRY_NAME_TO_NATIONALITY).sort((a, b) => b.length - a.length);
+// The adjective itself ("English", "Brazilian"...) is at least as common
+// a way to self-describe as naming the country outright ("About me:
+// ...living in Bayswater" turned out to mean "English professional", not
+// "from England") -- every distinct adjective the table already produces
+// gets a self-referential entry too (skipped if it happens to collide
+// with an existing country-name key, which none currently do).
+[...new Set(Object.values(COUNTRY_NAME_TO_NATIONALITY))].forEach((adj) => {
+const key = adj.toLowerCase();
+if (!countryNameMap.has(key)) countryNameMap.set(key, { name: adj, nat: adj });
+});
+const countryNames = [...countryNameMap.values()].map((v) => v.name).sort((a, b) => b.length - a.length);
 const cityPattern = names.length ? `\\b(?:${names.map(escapeRegex).join('|')})\\b` : null;
 // A negated lookbehind on EACH value individually, not wrapped around the
 // whole alternation — otherwise "Non-smoker" still matches "smoker" as a
@@ -703,7 +761,9 @@ const cityPattern = names.length ? `\\b(?:${names.map(escapeRegex).join('|')})\\
 // negation-parsing.
 const flagPattern = flagValues.length ? `(?:${flagValues.map((v) => `(?<!non-)(?<!non )\\b${escapeRegex(v)}\\b`).join('|')})` : null;
 const countryPattern = countryNames.length ? `\\b(?:${countryNames.map(escapeRegex).join('|')})\\b` : null;
-const parts = [cityPattern, flagPattern, countryPattern, CYRILLIC_RUN_RE].filter(Boolean);
+const tagValues = [...tagValueMap.values()].map((v) => v.label).sort((a, b) => b.length - a.length);
+const tagValuePattern = tagValues.length ? `\\b(?:${tagValues.map(escapeRegex).join('|')})\\b` : null;
+const parts = [cityPattern, flagPattern, countryPattern, tagValuePattern, CYRILLIC_RUN_RE].filter(Boolean);
 const re = new RegExp(parts.join('|'), 'gi');
 let out = '';
 let last = 0;
@@ -724,6 +784,12 @@ out += `<span class="tinder-flag-hit tinder-flag-hit-${color}" title="Flagged ${
 // the button here.
 const { nat } = countryNameMap.get(hit.toLowerCase());
 out += `<span class="tinder-city-hit" data-tinder-add-label="Nationality" data-tinder-add-value="${escapeHtml(nat)}" title="Click to add ${escapeHtml(nat)} to Nationality">${escapeHtml(hit)}</span>`;
+} else if (tagValueMap.has(hit.toLowerCase())) {
+// General sweep: any value already saved against ANY connection's tag
+// fields (interests, languages, tags, etc) gets the same click-to-add
+// treatment, not just the hand-written city/flag/nationality tables.
+const { label, targetLabel } = tagValueMap.get(hit.toLowerCase());
+out += `<span class="tinder-city-hit" data-tinder-add-label="${escapeHtml(targetLabel)}" data-tinder-add-value="${escapeHtml(label)}" title="Click to add to ${escapeHtml(targetLabel)}">${escapeHtml(hit)}</span>`;
 } else {
 const exonym = CYRILLIC_EXONYMS[hit.trim().toLowerCase()];
 // A real place name is a word or two; a long run is a sentence caught
