@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v75</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v76</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -573,6 +573,22 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
     const card = chatHeading.closest('section') || (chatHeading.parentElement &amp;&amp; chatHeading.parentElement.parentElement);
     chatCard = card;
     const list = card &amp;&amp; card.querySelector('ol[aria-label="Messages"]');
+    // The message list only renders what's near its OWN current scroll
+    // position, independent of the whole-profile sweep above -- if the pane
+    // opened scrolled to wherever it last was rather than the bottom, the
+    // newest messages simply aren't in the DOM yet to read. Forcing it to
+    // the bottom first is the fix a human running this by hand already does
+    // by scrolling the chat down before pasting -- doing it here means
+    // forgetting that step can't silently truncate the history any more.
+    const chatScrollBox = list &amp;&amp; [...card.querySelectorAll('*')]
+      .filter((d) =&gt; d.scrollHeight &gt; d.clientHeight + 50 &amp;&amp; d.clientHeight &gt; 100)
+      .sort((a, b) =&gt; b.scrollHeight - a.scrollHeight)[0];
+    if (chatScrollBox) {
+      chatScrollBox.scrollTop = chatScrollBox.scrollHeight;
+      await new Promise((r) =&gt; setTimeout(r, 400));
+      chatScrollBox.scrollTop = chatScrollBox.scrollHeight; // in case new messages rendered in and grew scrollHeight
+      await new Promise((r) =&gt; setTimeout(r, 200));
+    }
     const messages = [];
     let lastMessageDate = null;
     if (list) {
@@ -717,18 +733,20 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
 <button class="sync-btn" type="button" id="tinder-bulk-copy-snippet">Copy bulk-import snippet</button>
 <details style="margin:0 0 10px;">
 <summary style="cursor:pointer;color:var(--muted);font-size:13px;">Show the bulk-import console snippet</summary>
-<pre id="tinder-bulk-snippet" style="white-space:pre-wrap;font-size:12px;background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:10px;margin:8px 0;">// Pasting this runs it once with the default batch size below. To run a
-// different size without re-pasting, just call it again right in the
-// console afterward: tinderBulkImport(30)
-window.tinderBulkImport = async (batchSize) => {
-  // Same per-profile extraction as the single-profile snippet above, just
-  // wrapped as a function so it can run once per match instead of once per
-  // page load. Kept identical to that already-tested logic on purpose &mdash;
-  // this bulk version is the harder-to-verify piece (unattended, many real
-  // profiles in a row), so any drift from the known-good version is exactly
-  // the kind of mistake most likely to go unnoticed until it's already run
-  // 15 times.
-  async function extractProfile(expectedName) {
+<pre id="tinder-bulk-snippet" style="white-space:pre-wrap;font-size:12px;background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:10px;margin:8px 0;">// Pasting this defines tinderBulkImport() and tinderCatchUp() -- nothing
+// runs until one of them is called. Safe to re-paste any time (e.g. after
+// an update) without reloading the page first: everything below lives
+// inside one function that runs immediately and re-creates both on every
+// paste, rather than top-level consts/functions a second paste would
+// collide with.
+(function() {
+// Same per-profile extraction as the single-profile snippet above --
+// kept identical to that already-tested logic on purpose. This bulk
+// version is the harder-to-verify piece (unattended, many real profiles
+// in a row), so any drift from the known-good version is exactly the
+// kind of mistake most likely to go unnoticed until it's already run 15
+// times. Shared by both tinderBulkImport() and tinderCatchUp() below.
+async function extractProfile(expectedName) {
     const root = document.getElementById('main-content') || document;
     const $$ = (sel, r) =&gt; [...(r || root).querySelectorAll(sel)];
     const GROUP_HEADERS = new Set(['Essentials', 'Lifestyle', 'Interests', 'Messages', 'Photos', 'More about me']);
@@ -879,6 +897,18 @@ window.tinderBulkImport = async (batchSize) => {
       // this reads each message's own hidden &lt;time datetime&gt; directly
       // rather than guessing a date from nearby divider text.
       const list = card &amp;&amp; card.querySelector('ol[aria-label="Messages"]');
+      // Same forced-scroll-to-bottom fix as the single-profile snippet --
+      // see its version of this block for why. Doubly worth it in bulk mode,
+      // where there's no human eyeballing each chat pane before it's read.
+      const chatScrollBox = list &amp;&amp; [...card.querySelectorAll('*')]
+        .filter((d) =&gt; d.scrollHeight &gt; d.clientHeight + 50 &amp;&amp; d.clientHeight &gt; 100)
+        .sort((a, b) =&gt; b.scrollHeight - a.scrollHeight)[0];
+      if (chatScrollBox) {
+        chatScrollBox.scrollTop = chatScrollBox.scrollHeight;
+        await new Promise((r) =&gt; setTimeout(r, 400));
+        chatScrollBox.scrollTop = chatScrollBox.scrollHeight;
+        await new Promise((r) =&gt; setTimeout(r, 200));
+      }
       const messages = [];
       let lastMessageDate = null;
       if (list) {
@@ -979,89 +1009,88 @@ window.tinderBulkImport = async (batchSize) => {
     return { name, age, fields, photos };
   }
 
-  // Every match/message row in either sidebar list shares the same
-  // /app/messages/&lt;id&gt; URL scheme, and both lists are always in the DOM
-  // at once &mdash; the inactive tab is just transformed off-screen, not
-  // removed &mdash; verified against a real saved page with both tabs
-  // captured. So both can be read without ever clicking between the
-  // Matches and Messages tabs.
-  function collectCandidates() {
-    const seen = new Set();
-    const rows = [];
-    const grab = (ul) =&gt; {
-      if (!ul) return;
-      ul.querySelectorAll('li a[href*="/app/messages/"]').forEach((a) =&gt; {
-        const m = a.href.match(/\/app\/messages\/([a-zA-Z0-9]+)/);
-        if (!m) return;
-        const id = m[1];
-        if (seen.has(id)) return;
-        seen.add(id);
-        const name = (a.getAttribute('aria-label') || '').replace(/\.\s*Start chat\.?$/i, '').trim();
-        rows.push({ id, name, href: a.href });
-      });
-    };
-    grab(document.querySelector('ul[aria-label="Your recent messages"]'));
-    grab(document.querySelector('ul[aria-label="Your matches"]'));
-    return rows;
+// Every match/message row in either sidebar list shares the same
+// /app/messages/&lt;id&gt; URL scheme, and both lists are always in the DOM
+// at once &mdash; the inactive tab is just transformed off-screen, not
+// removed &mdash; verified against a real saved page with both tabs
+// captured. So both can be read without ever clicking between the
+// Matches and Messages tabs.
+function collectCandidates() {
+  const seen = new Set();
+  const rows = [];
+  const grab = (ul) =&gt; {
+    if (!ul) return;
+    ul.querySelectorAll('li a[href*="/app/messages/"]').forEach((a) =&gt; {
+      const m = a.href.match(/\/app\/messages\/([a-zA-Z0-9]+)/);
+      if (!m) return;
+      const id = m[1];
+      if (seen.has(id)) return;
+      seen.add(id);
+      const name = (a.getAttribute('aria-label') || '').replace(/\.\s*Start chat\.?$/i, '').trim();
+      rows.push({ id, name, href: a.href });
+    });
+  };
+  grab(document.querySelector('ul[aria-label="Your recent messages"]'));
+  grab(document.querySelector('ul[aria-label="Your matches"]'));
+  return rows;
+}
+
+// Re-finds a row's link fresh at click time, by match id rather than by
+// comparing href strings &mdash; confirmed live: `a.href` (the JS
+// property, always browser-resolved to an absolute URL) doesn't
+// necessarily equal the raw href ATTRIBUTE Tinder's live DOM actually
+// carries, so `document.querySelector('a[href="' + resolvedUrl + '"]')`
+// failed to find a person visibly on screen. Matching on the id parsed
+// out of the live `.href` property on both sides (same parsing
+// collectCandidates already does) sidesteps that mismatch entirely.
+function findLinkById(id) {
+  for (const ul of [document.querySelector('ul[aria-label="Your recent messages"]'), document.querySelector('ul[aria-label="Your matches"]')]) {
+    if (!ul) continue;
+    const found = [...ul.querySelectorAll('li a[href*="/app/messages/"]')].find((a) => {
+      const m = a.href.match(/\/app\/messages\/([a-zA-Z0-9]+)/);
+      return m &amp;&amp; m[1] === id;
+    });
+    if (found) return found;
   }
+  return null;
+}
 
-  // Re-finds a row's link fresh at click time, by match id rather than by
-  // comparing href strings &mdash; confirmed live: `a.href` (the JS
-  // property, always browser-resolved to an absolute URL) doesn't
-  // necessarily equal the raw href ATTRIBUTE Tinder's live DOM actually
-  // carries, so `document.querySelector('a[href="' + resolvedUrl + '"]')`
-  // failed to find a person visibly on screen. Matching on the id parsed
-  // out of the live `.href` property on both sides (same parsing
-  // collectCandidates already does) sidesteps that mismatch entirely.
-  function findLinkById(id) {
-    for (const ul of [document.querySelector('ul[aria-label="Your recent messages"]'), document.querySelector('ul[aria-label="Your matches"]')]) {
-      if (!ul) continue;
-      const found = [...ul.querySelectorAll('li a[href*="/app/messages/"]')].find((a) => {
-        const m = a.href.match(/\/app\/messages\/([a-zA-Z0-9]+)/);
-        return m &amp;&amp; m[1] === id;
-      });
-      if (found) return found;
-    }
-    return null;
+// Polls the profile panel until it's actually showing the person just
+// clicked, rather than a fixed delay &mdash; SPA navigation time varies,
+// and a fixed wait is either too short sometimes or wastefully long
+// every time.
+async function waitForProfile(expectedName, timeoutMs) {
+  const start = Date.now();
+  while (Date.now() - start &lt; timeoutMs) {
+    const h1 = document.querySelector('#main-content h1[aria-label]');
+    const label = h1 ? (h1.getAttribute('aria-label') || '') : '';
+    if (label &amp;&amp; label.toLowerCase().startsWith(expectedName.toLowerCase())) return true;
+    await new Promise((r) =&gt; setTimeout(r, 250));
   }
+  return false;
+}
 
-  // Polls the profile panel until it's actually showing the person just
-  // clicked, rather than a fixed delay &mdash; SPA navigation time varies,
-  // and a fixed wait is either too short sometimes or wastefully long
-  // every time.
-  async function waitForProfile(expectedName, timeoutMs) {
-    const start = Date.now();
-    while (Date.now() - start &lt; timeoutMs) {
-      const h1 = document.querySelector('#main-content h1[aria-label]');
-      const label = h1 ? (h1.getAttribute('aria-label') || '') : '';
-      if (label &amp;&amp; label.toLowerCase().startsWith(expectedName.toLowerCase())) return true;
-      await new Promise((r) =&gt; setTimeout(r, 250));
-    }
-    return false;
-  }
+// Cross-day memory lives on Tinder's own origin, not the dashboard's --
+// the two sites can't see each other, so this is the only way a later
+// run knows what an earlier one already covered. Keyed by match id, the
+// same permanent identifier the URL itself uses.
+//
+// Version-stamped rather than a flat done/not-done flag: a plain flag
+// can never be revisited once a bug in the extraction itself is found
+// and fixed (confirmed live: a photo-scope change broke photo capture
+// entirely for a while) -- anyone scraped during that window would stay
+// marked done forever, missing photos, with no way back short of
+// wiping ALL tracking and re-running everyone. Bump SCRIPT_VERSION
+// whenever a fix could affect what gets captured; anyone stamped with
+// an older version is automatically re-offered next run. Re-running
+// someone already saved is safe either way -- the dashboard fills in
+// whatever's still missing rather than duplicating what's already
+// there.
+const SCRIPT_VERSION = 6; // chat dates now come from each message's own timestamp, not a nearby divider guess
+const DONE_KEY = 'dashTinderBulkDone';
+const MIN_DELAY_MS = 10000, MAX_DELAY_MS = 60000; // randomised, not a fixed interval &mdash; a fixed gap is a bot tell
 
-  // Cross-day memory lives on Tinder's own origin, not the dashboard's --
-  // the two sites can't see each other, so this is the only way tomorrow's
-  // run knows what today's already covered. Keyed by match id, the same
-  // permanent identifier the URL itself uses.
-  //
-  // Version-stamped rather than a flat done/not-done flag: a plain flag
-  // can never be revisited once a bug in the extraction itself is found
-  // and fixed (confirmed live: a photo-scope change broke photo capture
-  // entirely for a while) -- anyone scraped during that window would stay
-  // marked done forever, missing photos, with no way back short of
-  // wiping ALL tracking and re-running everyone. Bump SCRIPT_VERSION
-  // whenever a fix could affect what gets captured; anyone stamped with
-  // an older version is automatically re-offered next run. Re-running
-  // someone already saved is safe either way -- the dashboard fills in
-  // whatever's still missing rather than duplicating what's already
-  // there.
-  const SCRIPT_VERSION = 6; // chat dates now come from each message's own timestamp, not a nearby divider guess
-  const DONE_KEY = 'dashTinderBulkDone';
-  const BATCH_SIZE = batchSize || 15; // "10-20 or so per day" — override per-call: tinderBulkImport(30), or tinderBulkImport(250) left running overnight
-  const MIN_DELAY_MS = 10000, MAX_DELAY_MS = 60000; // randomised, not a fixed interval &mdash; a fixed gap is a bot tell
-  const CHUNK_SIZE = 25; // checkpoint to its own downloaded file this often -- a long unattended run surviving a sleep/crash/closed-tab partway through loses at most this many, not the whole run, and each file is pasteable into the dashboard as soon as it lands rather than waiting for the end
-
+function loadDoneVersions() {
   let doneVersions = {};
   try {
     const raw = JSON.parse(localStorage.getItem(DONE_KEY) || '{}');
@@ -1076,117 +1105,323 @@ window.tinderBulkImport = async (batchSize) => {
       doneVersions = raw || {};
     }
   } catch (e) { doneVersions = {}; }
+  return doneVersions;
+}
+function saveDoneVersions(doneVersions) { localStorage.setItem(DONE_KEY, JSON.stringify(doneVersions)); }
+function isDoneWith(doneVersions, id) { return (doneVersions[id] || 0) &gt;= SCRIPT_VERSION; }
 
-  const candidates = collectCandidates();
-  const isDone = (id) =&gt; (doneVersions[id] || 0) &gt;= SCRIPT_VERSION;
-  const todo = candidates.filter((r) =&gt; !isDone(r.id)).slice(0, BATCH_SIZE);
-  const profiles = [];
-  let chunkIndex = 0;
-  let totalSaved = 0;
-
-  // Writes whatever's in `list` to its own downloaded file, optionally also
-  // the clipboard. Called mid-run every CHUNK_SIZE profiles (file only -- no
-  // point fighting over the clipboard with a run nobody's watching), and
-  // once more at the very end for whatever's left over (file + clipboard,
-  // same as every run behaved before chunking existed).
-  function downloadChunk(list, copyToClipboard) {
-    if (!list.length) return;
-    chunkIndex++;
-    totalSaved += list.length;
-    const json = JSON.stringify({ profiles: list }, null, 1);
-    let copied = false;
-    if (copyToClipboard) {
-      try { copy(json); copied = true; } catch (e) { /* not in a real DevTools console */ }
-      if (!copied) { try { navigator.clipboard.writeText(json); copied = true; } catch (e) { /* no clipboard permission/focus */ } }
-    }
-    try {
-      const blob = new Blob([json], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `tinder-batch-${new Date().toISOString().replace(/[:.]/g, '-')}-part${chunkIndex}.json`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() =&gt; URL.revokeObjectURL(url), 10000);
-      console.log(`Checkpoint: ${list.length} profile${list.length === 1 ? '' : 's'} saved to part${chunkIndex} in Downloads (${totalSaved} total so far)${copied ? ' -- also on the clipboard' : ''}.`);
-    } catch (e) {
-      console.warn(`Checkpoint download blocked for part${chunkIndex} -- ${list.length} profiles only exist in this tab's memory right now, keep it open.`);
-    }
+// Writes whatever's in `list` to its own downloaded file, optionally also
+// the clipboard. `state` ({chunkIndex, totalSaved}) belongs to the
+// caller, not a shared counter here -- tinderBulkImport() and
+// tinderCatchUp() each track their own run's numbering independently, so
+// one doesn't pick up a count left over from the other.
+function downloadChunk(list, copyToClipboard, state) {
+  if (!list.length) return;
+  state.chunkIndex++;
+  state.totalSaved += list.length;
+  const json = JSON.stringify({ profiles: list }, null, 1);
+  let copied = false;
+  if (copyToClipboard) {
+    try { copy(json); copied = true; } catch (e) { /* not in a real DevTools console */ }
+    if (!copied) { try { navigator.clipboard.writeText(json); copied = true; } catch (e) { /* no clipboard permission/focus */ } }
   }
+  try {
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `tinder-batch-${new Date().toISOString().replace(/[:.]/g, '-')}-part${state.chunkIndex}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() =&gt; URL.revokeObjectURL(url), 10000);
+    console.log(`Checkpoint: ${list.length} profile${list.length === 1 ? '' : 's'} saved to part${state.chunkIndex} in Downloads (${state.totalSaved} total so far)${copied ? ' -- also on the clipboard' : ''}.`);
+  } catch (e) {
+    console.warn(`Checkpoint download blocked for part${state.chunkIndex} -- ${list.length} profiles only exist in this tab's memory right now, keep it open.`);
+  }
+}
+
+// Squaring the random factor skews toward the low end of the range
+// instead of a flat spread -- long, near-60s waits get rarer while the
+// occasional real one still happens (still not a fixed gap, still not a
+// bot tell), cutting ~24% off the average total wait versus a uniform
+// pick across the same 10-60s bounds.
+async function randomDelay() {
+  const delay = MIN_DELAY_MS + Math.pow(Math.random(), 2) * (MAX_DELAY_MS - MIN_DELAY_MS);
+  console.log(`Waiting ${Math.round(delay / 1000)}s...`);
+  await new Promise((r) =&gt; setTimeout(r, delay));
+}
+
+window.tinderBulkImport = async (batchSize) => {
+  const BATCH_SIZE = batchSize || 15; // "10-20 or so per day" — override per-call: tinderBulkImport(30), or tinderBulkImport(250) left running overnight
+  const CHUNK_SIZE = 25; // checkpoint to its own downloaded file this often -- a long unattended run surviving a sleep/crash/closed-tab partway through loses at most this many, not the whole run, and each file is pasteable into the dashboard as soon as it lands rather than waiting for the end
+
+  const doneVersions = loadDoneVersions();
+  const candidates = collectCandidates();
+  const todo = candidates.filter((r) =&gt; !isDoneWith(doneVersions, r.id)).slice(0, BATCH_SIZE);
+  const profiles = [];
+  const chunkState = { chunkIndex: 0, totalSaved: 0 };
 
   // Always logged, whether or not there's anything new to actually run --
   // "how far through 205 am I" shouldn't require sitting through another
   // batch to find out.
-  const doneCount = candidates.filter((r) =&gt; isDone(r.id)).length;
+  const doneCount = candidates.filter((r) =&gt; isDoneWith(doneVersions, r.id)).length;
   console.log(`${candidates.length} visible in the sidebar -- ${doneCount} already done, ${candidates.length - doneCount} remaining.`);
 
   if (!todo.length) {
     console.log(`Nothing new -- all visible matches already processed. Scroll the list down to reveal more, then run again.`);
-  } else {
-    console.log(`Processing ${todo.length} new match${todo.length === 1 ? '' : 'es'}. This takes a while -- real delays are the point.`);
-    // Wrapped in try/finally so a crash partway through still outputs and
-    // copies whatever WAS gathered, rather than losing a run's worth of
-    // waiting to one bad profile.
-    try {
-      for (let i = 0; i &lt; todo.length; i++) {
-        const row = todo[i];
-        console.log(`[${i + 1}/${todo.length}] ${row.name}...`);
-        const link = findLinkById(row.id);
-        if (!link) { console.warn(`Couldn't find ${row.name} any more -- the sidebar re-rendered. Stopping here.`); break; }
-        link.click();
-        const loaded = await waitForProfile(row.name, 8000);
-        if (!loaded) {
-          console.warn(`${row.name}'s profile didn't load in time -- skipped, will retry next run.`);
-          continue;
-        }
-        await new Promise((r) =&gt; setTimeout(r, 500));
-        try {
-          const extracted = await extractProfile(row.name);
-          // A bare match with no bio, no essentials, no chat, no photos —
-          // nothing the dashboard review screen would actually show
-          // beyond a name to confirm. Not worth a review slot; marked
-          // done and moved past without adding it to the output at all.
-          if (!extracted.fields.length &amp;&amp; !extracted.photos.length) {
-            console.log(`${row.name}: nothing to add -- skipped.`);
-          } else {
-            extracted.matchId = row.id; // already known from the sidebar row — same permanent id the single-profile snippet reads from the URL
-            profiles.push(extracted);
-            if (profiles.length &gt;= CHUNK_SIZE) downloadChunk(profiles.splice(0, profiles.length), false);
-          }
-          doneVersions[row.id] = SCRIPT_VERSION;
-          localStorage.setItem(DONE_KEY, JSON.stringify(doneVersions));
-        } catch (err) {
-          console.warn(`Extraction failed for ${row.name}: ${err.message} -- skipped.`);
-        }
-        if (i &lt; todo.length - 1) {
-          // Squaring the random factor skews toward the low end of the
-          // range instead of a flat spread -- long, near-60s waits get
-          // rarer while the occasional real one still happens (still not a
-          // fixed gap, still not a bot tell), cutting ~24% off the average
-          // total wait versus a uniform pick across the same 10-60s bounds.
-          const delay = MIN_DELAY_MS + Math.pow(Math.random(), 2) * (MAX_DELAY_MS - MIN_DELAY_MS);
-          console.log(`Waiting ${Math.round(delay / 1000)}s...`);
-          await new Promise((r) =&gt; setTimeout(r, delay));
-        }
+    return;
+  }
+  console.log(`Processing ${todo.length} new match${todo.length === 1 ? '' : 'es'}. This takes a while -- real delays are the point.`);
+  // Wrapped in try/finally so a crash partway through still outputs and
+  // copies whatever WAS gathered, rather than losing a run's worth of
+  // waiting to one bad profile.
+  try {
+    for (let i = 0; i &lt; todo.length; i++) {
+      const row = todo[i];
+      console.log(`[${i + 1}/${todo.length}] ${row.name}...`);
+      const link = findLinkById(row.id);
+      if (!link) { console.warn(`Couldn't find ${row.name} any more -- the sidebar re-rendered. Stopping here.`); break; }
+      link.click();
+      const loaded = await waitForProfile(row.name, 8000);
+      if (!loaded) {
+        console.warn(`${row.name}'s profile didn't load in time -- skipped, will retry next run.`);
+        continue;
       }
-    } finally {
-      // Marked done in localStorage the moment a profile is scraped here,
-      // not when the dashboard actually saves it -- the two are different
-      // origins with no way to signal back. So the clipboard alone isn't
-      // enough: closing the tab, or the clipboard getting overwritten,
-      // before pasting would lose this batch for good even though it's
-      // already marked as never-offer-again. A real file on disk survives
-      // that -- still there to paste in later even if today's paste never
-      // happens. Whatever's left in `profiles` here is the tail end that
-      // hasn't hit a CHUNK_SIZE checkpoint yet -- everyone else already has
-      // their own file, downloaded as the run went.
-      downloadChunk(profiles, true);
-      console.log(`${totalSaved} of ${todo.length} attempted profile${todo.length === 1 ? '' : 's'} extracted, across ${chunkIndex} file${chunkIndex === 1 ? '' : 's'} in your Downloads folder. Paste them into the dashboard now or later -- the file picker there takes several at once.`);
+      await new Promise((r) =&gt; setTimeout(r, 500));
+      try {
+        const extracted = await extractProfile(row.name);
+        // A bare match with no bio, no essentials, no chat, no photos —
+        // nothing the dashboard review screen would actually show
+        // beyond a name to confirm. Not worth a review slot; marked
+        // done and moved past without adding it to the output at all.
+        if (!extracted.fields.length &amp;&amp; !extracted.photos.length) {
+          console.log(`${row.name}: nothing to add -- skipped.`);
+        } else {
+          extracted.matchId = row.id; // already known from the sidebar row — same permanent id the single-profile snippet reads from the URL
+          profiles.push(extracted);
+          if (profiles.length &gt;= CHUNK_SIZE) downloadChunk(profiles.splice(0, profiles.length), false, chunkState);
+        }
+        doneVersions[row.id] = SCRIPT_VERSION;
+        saveDoneVersions(doneVersions);
+      } catch (err) {
+        console.warn(`Extraction failed for ${row.name}: ${err.message} -- skipped.`);
+      }
+      if (i &lt; todo.length - 1) await randomDelay();
     }
+  } finally {
+    // Marked done in localStorage the moment a profile is scraped here,
+    // not when the dashboard actually saves it -- the two are different
+    // origins with no way to signal back. So the clipboard alone isn't
+    // enough: closing the tab, or the clipboard getting overwritten,
+    // before pasting would lose this batch for good even though it's
+    // already marked as never-offer-again. A real file on disk survives
+    // that -- still there to paste in later even if today's paste never
+    // happens. Whatever's left in `profiles` here is the tail end that
+    // hasn't hit a CHUNK_SIZE checkpoint yet -- everyone else already has
+    // their own file, downloaded as the run went.
+    downloadChunk(profiles, true, chunkState);
+    console.log(`${chunkState.totalSaved} of ${todo.length} attempted profile${todo.length === 1 ? '' : 's'} extracted, across ${chunkState.chunkIndex} file${chunkState.chunkIndex === 1 ? '' : 's'} in your Downloads folder. Paste them into the dashboard now or later -- the file picker there takes several at once.`);
   }
 };
-console.log('Ready. Run tinderBulkImport() for the default 15, tinderBulkImport(30) for a custom size, or e.g. tinderBulkImport(250) left running overnight -- checkpoints to a file every 25.');</pre>
+
+// Re-checks people ALREADY captured for new activity since a given date,
+// instead of only ever picking up brand-new matches like
+// tinderBulkImport() does -- someone marked done there is never
+// revisited again even after a new message arrives. Built on an
+// assumption about Tinder's own sidebar order, per the request that
+// prompted this: the Messages tab is sorted by last-message-date, newest
+// first, and the Matches tab by match-date, newest first &mdash;
+// unverified against a real long list, since no captured page has had
+// one to check.
+//
+// Two genuinely different questions, not one applied twice:
+//
+// Matches = "is this a profile I've never indexed at all?" A match with
+// no chat yet has no reliable date signal on the row itself to compare
+// against anything -- presence in doneVersions (seen it before, yes/no)
+// IS the only signal, so this sweeps with `floor` pinned to EPOCH
+// ("date zero") and never even reads a date field: an already-indexed
+// match is skipped WITHOUT opening it at all (nothing new a plain
+// re-index would find), stopping once several in a row turn out
+// already-known. This only ever catches brand-new matches -- it does
+// NOT re-check an old match's profile for edits (bio/photos changed with
+// no message sent) or notice an unmatch; see the note below on why.
+//
+// Messages = "does this conversation (new OR already-known) have
+// activity since `since`?" Once two people exchange even one message,
+// Tinder moves that row here and it carries both the profile AND the
+// chat -- so this is also where a profile edit on an already-known match
+// would actually surface, IF they've messaged at all. Every row gets
+// reopened here, including already-done ones (that's the whole point),
+// reading the real "Last message date" and stopping the first time it's
+// older than `since`.
+//
+// Both run through the one sweep() below, just anchored to a different
+// floor (EPOCH vs a real date) -- not two copies of the same logic.
+//
+// Not done: detecting an UNMATCH (someone vanishes from the Matches
+// list entirely) needs a full walk of the current list diffed against
+// everyone already known as matched -- worth doing once, as a distinct
+// tracked attribute, but not worth the weekly cost of walking the whole
+// list just for that, so this sweep keeps its early-stop rather than
+// running Matches to completion every time.
+//
+// Either sweep can also hit a safety cap before running out of rows -- a
+// guard against the sort-order assumption turning out wrong for some
+// account or view. A loud, bounded stop ("hit the cap") beats silently
+// missing everything past a wrongly-ordered entry.
+window.tinderCatchUp = async (sinceDate, batchSize) => {
+  const since = String(sinceDate || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(since)) {
+    console.warn('tinderCatchUp needs a since date like "2026-08-10" -- e.g. tinderCatchUp("2026-08-10")');
+    return;
+  }
+  const EPOCH = '0000-01-01'; // sentinel for "no date signal, presence-only" -- see the Matches note above
+
+  const CAP = batchSize || 40; // per sweep -- see the safety-cap note above
+  const doneVersions = loadDoneVersions();
+  const chunkState = { chunkIndex: 0, totalSaved: 0 };
+  const profiles = [];
+  const visited = new Set();
+
+  async function processRow(row) {
+    const link = findLinkById(row.id);
+    if (!link) return { stop: true, reason: `Couldn't find ${row.name} any more -- the sidebar re-rendered.` };
+    link.click();
+    const loaded = await waitForProfile(row.name, 8000);
+    if (!loaded) { console.warn(`${row.name}'s profile didn't load in time -- skipped.`); return { skip: true }; }
+    await new Promise((r) =&gt; setTimeout(r, 500));
+    try {
+      return { extracted: await extractProfile(row.name) };
+    } catch (err) {
+      console.warn(`Extraction failed for ${row.name}: ${err.message} -- skipped.`);
+      return { skip: true };
+    }
+  }
+
+  function rowsFrom(ul) {
+    return (ul ? [...ul.querySelectorAll('li a[href*="/app/messages/"]')] : []).map((a) =&gt; {
+      const m = a.href.match(/\/app\/messages\/([a-zA-Z0-9]+)/);
+      if (!m) return null;
+      return { id: m[1], name: (a.getAttribute('aria-label') || '').replace(/\.\s*Start chat\.?$/i, '').trim() };
+    }).filter(Boolean);
+  }
+
+  function keep(row, extracted) {
+    if (!extracted.fields.length &amp;&amp; !extracted.photos.length) {
+      console.log(`${row.name}: nothing to add -- skipped.`);
+    } else {
+      extracted.matchId = row.id;
+      profiles.push(extracted);
+      if (profiles.length &gt;= 25) downloadChunk(profiles.splice(0, profiles.length), false, chunkState);
+    }
+    doneVersions[row.id] = SCRIPT_VERSION;
+    saveDoneVersions(doneVersions);
+  }
+
+  // One sweep, used for both tabs -- see the comment above the function
+  // for what `floor` (a real date, or EPOCH) actually changes.
+  async function sweep(label, ul, dateFieldLabel, floor) {
+    const rows = rowsFrom(ul);
+    console.log(`${label}: ${rows.length} visible, scanning from the top for activity since ${floor === EPOCH ? 'the beginning' : floor}...`);
+    let n = 0;
+    let consecutiveDone = 0;
+    for (const row of rows) {
+      if (visited.has(row.id)) continue;
+      if (floor === EPOCH &amp;&amp; isDoneWith(doneVersions, row.id)) {
+        consecutiveDone++;
+        if (consecutiveDone &gt;= 5) { console.log(`${label}: 5 already-known in a row -- stopping (list is date-sorted, so the rest are presumably older too).`); break; }
+        continue;
+      }
+      consecutiveDone = 0;
+      if (n &gt;= CAP) { console.log(`${label}: hit the safety cap of ${CAP} -- stopping here.`); break; }
+      n++;
+      visited.add(row.id);
+      console.log(`${label} [${n}] ${row.name}...`);
+      const result = await processRow(row);
+      if (result.stop) { console.warn(result.reason); break; }
+      if (!result.skip) {
+        if (floor === EPOCH) {
+          keep(row, result.extracted); // brand-new row -- no date gate needed, just keep it
+        } else {
+          const dateField = result.extracted.fields.find((f) =&gt; f.label === dateFieldLabel);
+          if (!dateField) {
+            console.log(`${row.name}: no ${dateFieldLabel.toLowerCase()} found -- skipped from this pass.`);
+          } else if (dateField.value &lt; floor) {
+            console.log(`${row.name}: ${dateFieldLabel.toLowerCase()} ${dateField.value}, before ${floor} -- ${label} is date-sorted, so stopping here.`);
+            break;
+          } else {
+            keep(row, result.extracted);
+          }
+        }
+      }
+      await randomDelay();
+    }
+  }
+
+  try {
+    await sweep('Messages', document.querySelector('ul[aria-label="Your recent messages"]'), 'Last message date', since);
+    await sweep('Matches', document.querySelector('ul[aria-label="Your matches"]'), null, EPOCH); // dateFieldLabel unused when floor is EPOCH -- see the note above
+  } finally {
+    downloadChunk(profiles, true, chunkState);
+    console.log(`${chunkState.totalSaved} profile${chunkState.totalSaved === 1 ? '' : 's'} with activity since ${since}, across ${chunkState.chunkIndex} file${chunkState.chunkIndex === 1 ? '' : 's'} in your Downloads folder.`);
+  }
+};
+
+// A one-off, fast check -- no profile opens, no delays between people,
+// since it's just comparing two lists of ids already sitting in the DOM
+// (once fully scrolled) against everyone this account has ever indexed.
+// Unlike tinderBulkImport()/tinderCatchUp(), completeness genuinely
+// matters here: collectCandidates() alone only sees whatever's currently
+// scrolled into view, so a merely-not-yet-loaded person would look
+// identical to a real unmatch. Both sidebars get scrolled to the bottom
+// first for exactly that reason -- unverified against a real long list,
+// since no captured page has had one to check the scroll behaviour on.
+window.tinderFindUnmatched = async () => {
+  // Same "find the nearest real scroll container, not necessarily the
+  // list element itself" approach used elsewhere in this snippet, just
+  // run to actual completion (scrollHeight stops growing) rather than a
+  // fixed number of steps, since there's no known list length to aim for
+  // up front the way the whole-profile-panel sweep has.
+  async function scrollListFully(ul) {
+    if (!ul) return;
+    let box = ul;
+    while (box &amp;&amp; !(box.scrollHeight &gt; box.clientHeight + 50 &amp;&amp; box.clientHeight &gt; 100)) box = box.parentElement;
+    if (!box) return;
+    let lastHeight = -1;
+    let stable = 0;
+    for (let i = 0; i &lt; 200 &amp;&amp; stable &lt; 3; i++) {
+      box.scrollTop = box.scrollHeight;
+      await new Promise((r) =&gt; setTimeout(r, 300));
+      if (box.scrollHeight === lastHeight) stable++; else stable = 0;
+      lastHeight = box.scrollHeight;
+    }
+  }
+
+  console.log('Scrolling both lists to load everyone first -- this can take a while for a long history...');
+  await scrollListFully(document.querySelector('ul[aria-label="Your recent messages"]'));
+  await scrollListFully(document.querySelector('ul[aria-label="Your matches"]'));
+
+  const currentIds = new Set(collectCandidates().map((r) =&gt; r.id));
+  const doneVersions = loadDoneVersions();
+  const everKnown = Object.keys(doneVersions);
+  const unmatched = everKnown.filter((id) =&gt; !currentIds.has(id));
+
+  if (!unmatched.length) {
+    console.log(`${currentIds.size} currently visible, ${everKnown.length} ever indexed -- nobody missing.`);
+    return;
+  }
+  const json = JSON.stringify({ unmatched }, null, 1);
+  let copied = false;
+  try { copy(json); copied = true; } catch (e) { /* not in a real DevTools console */ }
+  if (!copied) { try { await navigator.clipboard.writeText(json); copied = true; } catch (e) { /* no clipboard permission/focus */ } }
+  console.log(`${unmatched.length} previously-indexed id${unmatched.length === 1 ? '' : 's'} no longer visible in either list -- ${copied ? 'copied' : 'shown below'}. Paste into the dashboard same as any other batch (it only adds a note and a tag, nothing destructive).`);
+  if (!copied) console.log(json);
+};
+
+console.log('Ready. Run tinderBulkImport() for the default 15, tinderBulkImport(30) for a custom size, or e.g. tinderBulkImport(250) left running overnight -- checkpoints to a file every 25. Or tinderCatchUp("2026-08-10") to re-check active conversations and new matches since a date -- good for a weekly pass. Or tinderFindUnmatched() to spot anyone missing from both lists since they were last indexed.');
+})();</pre>
 </details>
 <textarea id="tinder-input" rows="4" style="width:100%;font-family:monospace;font-size:12px;" placeholder="Paste the copied JSON here — one profile or a batch, either works"></textarea>
 <div class="sync-row" style="margin-top:8px;">
@@ -1245,6 +1480,7 @@ then paste the result here. Run it on <a href="https://photos.google.com/people"
 too and it also lists faces Google knows about that have no album yet.
 Album links are permanent, unlike the face-group links tried previously.
 </div>
+<button class="sync-btn" type="button" id="albums-copy-snippet">Copy snippet</button>
 <details style="margin:0 0 10px;">
 <summary style="cursor:pointer;color:var(--muted);font-size:13px;">Show the console snippet</summary>
 <pre id="albums-snippet" style="white-space:pre-wrap;font-size:12px;background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:10px;margin:8px 0;">(async () => {
@@ -1255,7 +1491,7 @@ Album links are permanent, unlike the face-group links tried previously.
   // anything it captured wrong, or never caught at all) across repeated
   // runs in the same tab. Same idea as SCRIPT_VERSION in the Tinder
   // import snippet.
-  const SNIPPET_VERSION = 3; // shared albums (/share/ links, not /album/) now captured too, with their key= token kept intact
+  const SNIPPET_VERSION = 4; // /people match is now by aria-label presence, not a base64-alignment-fragile href substring that missed roughly half the tiles
   window.__dash = (window.__dash &amp;&amp; window.__dash.v === SNIPPET_VERSION) ? window.__dash : { v: SNIPPET_VERSION, albums: new Map(), people: new Set() };
   const onAlbums = location.pathname.includes('album');
   const grab = () => {
@@ -1302,9 +1538,20 @@ Album links are permanent, unlike the face-group links tried previously.
         cover: prev.cover || cover,
       });
     });
-    document.querySelectorAll('a[href*="/search/"]').forEach(a =&gt; {
-      const t = (a.getAttribute('aria-label') || a.textContent || '').trim();
-      if (t &amp;&amp; /QUYxUWlw/.test(a.href) &amp;&amp; !/^Photo|\d{1,2}:\d{2}/.test(t)) window.__dash.people.add(t);
+    // The old /QUYxUWlw/ check on a.href was a base64 substring match on a
+    // length-prefixed protobuf blob -- it only ever matched by coincidence,
+    // when the preceding name's byte length happened to leave the token
+    // 3-byte-aligned. A shorter or longer name shifts that alignment and
+    // produces a DIFFERENT base64 rendering of the exact same underlying
+    // token (confirmed against two real tiles: "Phil White" matched,
+    // "Tamara White" -- one character shorter -- didn't, same page, same
+    // kind of tile). Requiring an aria-label instead is both more reliable
+    // and simpler: every real person tile carries one (verified against
+    // several real tiles), and it's what a person's name actually lives in
+    // regardless of how the href happens to encode.
+    document.querySelectorAll('a[href*="/search/"][aria-label]').forEach(a =&gt; {
+      const t = (a.getAttribute('aria-label') || '').trim();
+      if (t &amp;&amp; !/^Photo|\d{1,2}:\d{2}/.test(t)) window.__dash.people.add(t);
     });
   };
   const box = [...document.querySelectorAll('div')]
@@ -1416,7 +1663,6 @@ Album links are permanent, unlike the face-group links tried previously.
     + (onAlbums ? ' Now run this again on /people to spot people with no album.' : ''));
   if (!copied) console.log(json);
 })();</pre>
-<button class="sync-btn" type="button" id="albums-copy-snippet">Copy snippet</button>
 </details>
 <textarea id="albums-input" rows="4" style="width:100%;font-family:monospace;font-size:12px;" placeholder="Paste the copied JSON here"></textarea>
 <div class="sync-row" style="margin-top:8px;">

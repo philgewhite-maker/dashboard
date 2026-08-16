@@ -2020,14 +2020,51 @@ const failNote = failed ? ` ${failed} of ${toFetchLen} photo${toFetchLen === 1 ?
 advanceQueue(`Saved to ${conn.name}.${dupeNote}${failNote}`);
 }
 
-// The bulk snippet's output ({profiles: [...]}) and the single-profile
-// snippet's output (one {name,age,fields,photos} object) land in the same
-// textarea — told apart here so one "Read profile(s)" button handles both.
+// The bulk snippet's output ({profiles: [...]}), the single-profile
+// snippet's output (one {name,age,fields,photos} object), and
+// tinderFindUnmatched()'s output ({unmatched: [id, ...]}, no profiles at
+// all) land in the same textarea — told apart here so one "Read
+// profile(s)" button handles all three. A bare {unmatched: [...]} report
+// must NOT fall through to being treated as one stray profile object —
+// checked for explicitly rather than just "no profiles key".
 function parseBatch(text) {
 const trimmed = String(text || '').trim();
-if (!trimmed) return [];
+if (!trimmed) return { profiles: [], unmatchedIds: [] };
 const raw = JSON.parse(trimmed);
-return Array.isArray(raw.profiles) ? raw.profiles : [raw];
+const unmatchedIds = Array.isArray(raw.unmatched) ? raw.unmatched.map((id) => String(id || '').trim()).filter(Boolean) : [];
+const profiles = Array.isArray(raw.profiles) ? raw.profiles : (raw.unmatched !== undefined ? [] : [raw]);
+return { profiles, unmatchedIds };
+}
+
+// Additive-only (a date, a note line, a tag) and never destructive, so
+// this applies immediately rather than going through the per-profile
+// review queue everything else here uses — there's nothing to confirm,
+// only something to record. Never re-stamps a later run's date over an
+// already-recorded one.
+function applyUnmatched(ids, status) {
+let n = 0;
+let alreadyFlagged = 0;
+let notFound = 0;
+ids.forEach((id) => {
+const conn = data.connections.find((c) => c.tinderMatchId === id);
+if (!conn) { notFound++; return; }
+if (conn.unmatchedAt) { alreadyFlagged++; return; }
+conn.unmatchedAt = todayStr();
+const line = `Unmatched: ${conn.unmatchedAt}`;
+if (!String(conn.notes || '').includes(line)) conn.notes = conn.notes ? `${conn.notes}\n${line}` : line;
+if (!Array.isArray(conn.tags)) conn.tags = [];
+if (!conn.tags.some((t) => t.toLowerCase() === 'unmatched')) conn.tags.push('Unmatched');
+n++;
+});
+if (n) {
+queueSave();
+Promise.all([import('./connections.js'), import('./overview.js')]).then(([c, o]) => { c.renderConnections(); o.renderOverview(); });
+}
+if (status) {
+status.textContent = n ? `Marked ${n} connection${n === 1 ? '' : 's'} unmatched.` + (alreadyFlagged ? ` ${alreadyFlagged} already were.` : '') + (notFound ? ` ${notFound} not on file at all.` : '')
+: alreadyFlagged ? `Already flagged -- nothing new.`
+: `No matching connections found for those unmatched ids.`;
+}
 }
 
 // Shared by the paste box and the file-upload path (a previously-saved
@@ -2363,15 +2400,19 @@ if (!box) return;
 const status = document.getElementById('tinder-status');
 
 document.getElementById('tinder-import-btn').addEventListener('click', () => {
-let raws;
+let parsed;
 try {
-raws = parseBatch(box.value);
+parsed = parseBatch(box.value);
 } catch (err) {
 status.textContent = `Couldn't read that: ${err.message}. Paste the JSON the snippet copied.`;
 return;
 }
-if (!raws.length) { status.textContent = 'Paste the copied JSON first.'; return; }
-loadBatch(raws, status);
+if (parsed.unmatchedIds.length) applyUnmatched(parsed.unmatchedIds, status);
+if (!parsed.profiles.length) {
+if (!parsed.unmatchedIds.length) status.textContent = 'Paste the copied JSON first.';
+return;
+}
+loadBatch(parsed.profiles, status);
 });
 
 const fileInput = document.getElementById('tinder-file-input');
@@ -2385,17 +2426,21 @@ const files = [...fileInput.files];
 fileInput.value = ''; // lets the same file(s) be re-picked later without needing different ones first
 if (!files.length) return;
 let raws = [];
+let unmatchedIds = [];
 const errors = [];
 for (const file of files) {
 try {
-raws = raws.concat(parseBatch(await file.text()));
+const parsed = parseBatch(await file.text());
+raws = raws.concat(parsed.profiles);
+unmatchedIds = unmatchedIds.concat(parsed.unmatchedIds);
 } catch (err) {
 errors.push(`${file.name}: ${err.message}`);
 }
 }
 if (errors.length) status.textContent = `Couldn't read ${errors.length === 1 ? 'a file' : `${errors.length} files`}: ${errors.join('; ')}`;
+if (unmatchedIds.length) applyUnmatched(unmatchedIds, status);
 if (raws.length) loadBatch(raws, status);
-else if (!errors.length) status.textContent = 'Nothing to import in that.';
+else if (!errors.length && !unmatchedIds.length) status.textContent = 'Nothing to import in that.';
 });
 }
 
