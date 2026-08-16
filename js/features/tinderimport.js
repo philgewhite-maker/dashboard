@@ -208,7 +208,7 @@ const ALWAYS_APPLY_LABELS = new Set(['Last message date']);
 // (Pets, Zodiac...) — a blank box for those has no real destination to
 // pay off filling it in. City is ALSO deliberately left off, even though
 // it has a FIELD_MAP target: it already gets this exact treatment via the
-// dedicated #tinder-city / pending.cityOverride input in the Stage/City/
+// dedicated pending.cityOverride chip editor in the Stage/City/
 // Rating row (built specifically because "city often only comes up in
 // chat", same reasoning as this whole feature) -- adding it here too
 // created a second City box that silently conflicted with the first one
@@ -310,9 +310,9 @@ Tags: { target: 'tags', split: true },
 // rather than every raw Tinder label that happens to route there, and
 // excluding the scrape-only ones (Chat history, Last message date) that
 // don't make sense as something to type a value in for by hand.
-// City excluded -- it already has its own dedicated cityOverride input in
-// the Stage/City/Rating/Travel row, not reachable through this generic
-// single-target mechanism (it's multi-value now; see FIELD_MAP's comment).
+// City excluded -- it already has its own dedicated cityOverride chip
+// editor in the Stage/City/Rating/Travel row, not reachable through this
+// generic single-target mechanism (it's multi-value now; see FIELD_MAP's comment).
 const GENERIC_ADD_LABELS = [
 'Job', 'Education', 'Height', 'Distance', 'Family plans',
 'Nationality', 'Languages', 'Interests', 'Relationship type', 'Tags', 'Social handles',
@@ -510,11 +510,10 @@ return ch === ch.toLowerCase() ? t : t.charAt(0).toUpperCase() + t.slice(1);
 return out.charAt(0).toUpperCase() + out.slice(1);
 }
 
-// The City field's raw extracted value pre-fills the editable #tinder-city
-// input, which is what actually gets saved (see pending.cityOverride below)
-// — if the extracted value is Cyrillic, that input started pre-filled with
-// the RAW Cyrillic text, so overwriting an existing (also-Cyrillic) City
-// with "the same" value never actually offered a usable English one.
+// The City field's raw extracted value seeds the editable cityOverride
+// chip list (see below) — if the extracted value is Cyrillic, that chip
+// started out RAW Cyrillic, so overwriting an existing (also-Cyrillic)
+// City with "the same" value never actually offered a usable English one.
 // Transliterating this ONE spot fixes it at the source rather than at
 // every place the value gets read.
 function transliterateCityValue(v) {
@@ -1016,17 +1015,29 @@ if (c === 'loading') return `<div class="tinder-translate-result">Identifying co
 if (c.error) return `<div class="tinder-translate-result tinder-translate-error">Country lookup failed: ${escapeHtml(c.error)}</div>`;
 if (!c.country) return `<div class="tinder-translate-result tinder-translate-error">Couldn't identify a country.</div>`;
 const conn = data.connections.find((x) => x.id === pending.chosenId);
-// City's real value lives in the separate #tinder-city input
-// (pending.cityOverride), not this field's own f.value -- that's what
-// actually gets saved to conn.location, so appending there is what
-// makes the country stick for City specifically.
-const currentValue = f.label === 'City' ? pending.cityOverride : f.value;
-const alreadyAppended = currentValue.toLowerCase().includes(c.country.toLowerCase());
+// City's real value lives in the separate cityOverride chip list, not
+// this field's own f.value -- that's what actually gets saved to
+// conn.location, so appending there is what makes the country stick
+// for City specifically.
+const alreadyAppended = f.label === 'City'
+? pending.cityOverride.some((v) => v.toLowerCase() === c.country.toLowerCase())
+: f.value.toLowerCase().includes(c.country.toLowerCase());
 const alreadyNational = !!(conn && (conn.nationality || []).some((n) => n.toLowerCase() === c.country.toLowerCase()));
 return `<div class="tinder-translate-result">→ <strong>${escapeHtml(c.country)}</strong>`
 + (alreadyAppended ? '' : ` <button type="button" class="sync-btn tinder-inline-btn" data-tinder-country-append="${i}">+ append</button>`)
 + (alreadyNational ? '' : ` <button type="button" class="sync-btn tinder-inline-btn" data-tinder-country-nationality="${i}">+ add nationality</button>`)
 + `</div>`;
+}
+
+// City is multi-value like conn.location, edited as chips -- same visual
+// language as tagChips() in connections.js (reuses its CSS classes) but a
+// standalone renderer/handler set since pending isn't a real connection
+// (no connId to key data-tag-* attributes off).
+function cityChipsHtml() {
+return pending.cityOverride.map((c, i) => `<span class="tag-chip">${escapeHtml(c)}<span class="tag-x" data-tinder-city-remove="${i}">&times;</span></span>`).join('')
++ `<input type="text" id="tinder-city-add" autocomplete="off" class="tag-add-input" placeholder="+ add" list="tinder-city-datalist">`
++ `<button type="button" class="todo-add-btn" id="tinder-city-add-btn" style="padding:3px 8px;">+</button>`
++ `<datalist id="tinder-city-datalist">${[...knownCityMap(data.connections).values()].map((v) => `<option value="${escapeHtml(v)}"></option>`).join('')}</datalist>`;
 }
 
 // A match within a short distance of you is probably in the same city --
@@ -1044,10 +1055,10 @@ const distField = pending.fields.find((f) => f.label === 'Distance');
 if (!distField) return '';
 const miles = distanceMiles(distField.value);
 if (miles === null || miles > PROPOSED_CITY_MAX_MILES) return '';
-if (pending.cityOverride.trim().toLowerCase() === myCity.toLowerCase()) return '';
+if (pending.cityOverride.some((c) => c.toLowerCase() === myCity.toLowerCase())) return '';
 return `<div class="tinder-field-note" style="margin:2px 0 8px;">`
 + `<span class="tinder-flag-hit tinder-flag-hit-amber">${escapeHtml(myCity)}</span> — within ${miles}mi of you, probably the same city (tourist or a longer commute could still be wrong) `
-+ `<button type="button" class="sync-btn tinder-inline-btn" data-tinder-propose-city="1">+ set as City</button>`
++ `<button type="button" class="sync-btn tinder-inline-btn" data-tinder-propose-city="1">+ add as City</button>`
 + `</div>`;
 }
 
@@ -1229,7 +1240,7 @@ const parts = arrayMap.split ? f.value.split(',').map((s) => s.trim()).filter(Bo
 draft[arrayMap.target].push(...parts);
 }
 });
-if (pending.cityOverride.trim()) draft.location = pending.cityOverride.split(',').map((s) => s.trim()).filter(Boolean);
+if (pending.cityOverride.length) draft.location = [...pending.cityOverride];
 if (pending.age) { draft.age = pending.age; draft.ageAsOf = todayStr(); }
 return draft;
 }
@@ -1394,6 +1405,17 @@ pending.fields.push({ label, value, apply: true });
 }
 }
 
+// Shared add path for every City chip source (the add-input/button, the
+// propose-my-city suggestion, the country-lookup append button, and
+// clicking a highlighted city mention in chat) -- one place to dedupe
+// case-insensitively so none of them can push a near-duplicate chip.
+function addCityValue(value) {
+const v = String(value || '').trim();
+if (!v) return;
+if (pending.cityOverride.some((c) => c.toLowerCase() === v.toLowerCase())) return;
+pending.cityOverride.push(v);
+}
+
 function render() {
 const el = document.getElementById('tinder-review');
 if (!el) return;
@@ -1450,7 +1472,7 @@ ${saveBlockedNote ? `<div class="tinder-field-note" style="margin:-4px 0 8px;">$
 
 <div class="tinder-fields" style="margin:8px 0;">
 <label class="tinder-field-row">Stage <select id="tinder-stage">${CONN_STAGES.map((s) => `<option value="${escapeHtml(s)}"${s === p.stageOverride ? ' selected' : ''}>${escapeHtml(s)}</option>`).join('')}</select></label>
-<label class="tinder-field-row">City <input type="text" id="tinder-city" autocomplete="off" value="${escapeHtml(p.cityOverride)}" placeholder="Often only comes up in chat"></label>
+<label class="tinder-field-row">City <span class="tag-editor">${cityChipsHtml()}</span></label>
 <label class="tinder-field-row">Rating <span id="tinder-rating">${ratingStarsHtml(p.ratingOverride)}</span></label>
 <label class="tinder-field-row">Travel <select id="tinder-travel-status">
 <option value=""${!p.travelStatusOverride ? ' selected' : ''}>&mdash; normal</option>
@@ -1573,7 +1595,7 @@ btn.addEventListener('click', () => {
 const i = parseInt(btn.dataset.tinderCountryAppend, 10);
 const f = pending.fields[i];
 const country = pending.countries[i].country;
-if (f.label === 'City') pending.cityOverride = `${pending.cityOverride}, ${country}`;
+if (f.label === 'City') addCityValue(country);
 else f.value = `${f.value}, ${country}`;
 render();
 });
@@ -1587,13 +1609,29 @@ render();
 });
 const proposeCityBtn = el.querySelector('[data-tinder-propose-city]');
 if (proposeCityBtn) proposeCityBtn.addEventListener('click', () => {
-pending.cityOverride = String(data.myCity || '').trim();
+addCityValue(data.myCity);
 render();
 });
 const stageSel = document.getElementById('tinder-stage');
 if (stageSel) stageSel.addEventListener('change', () => { pending.stageOverride = stageSel.value; });
-const cityInput = document.getElementById('tinder-city');
-if (cityInput) cityInput.addEventListener('input', () => { pending.cityOverride = cityInput.value; });
+el.querySelectorAll('[data-tinder-city-remove]').forEach((x) => {
+x.addEventListener('click', () => {
+pending.cityOverride.splice(parseInt(x.dataset.tinderCityRemove, 10), 1);
+render();
+});
+});
+const commitCityAdd = () => {
+const input = document.getElementById('tinder-city-add');
+if (!input) return;
+addCityValue(input.value);
+render();
+};
+const cityAddInput = document.getElementById('tinder-city-add');
+if (cityAddInput) cityAddInput.addEventListener('keydown', (e) => {
+if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); commitCityAdd(); }
+});
+const cityAddBtn = document.getElementById('tinder-city-add-btn');
+if (cityAddBtn) cityAddBtn.addEventListener('click', commitCityAdd);
 const travelSel = document.getElementById('tinder-travel-status');
 if (travelSel) travelSel.addEventListener('change', () => {
 pending.travelStatusOverride = travelSel.value;
@@ -1653,13 +1691,9 @@ hit.addEventListener('click', (e) => {
 // hit silently unchecked the field it was found in.
 e.preventDefault();
 e.stopPropagation();
-// Append, not replace -- cityOverride is comma-separated (multiple
-// places), so clicking a second highlighted mention shouldn't erase
-// the first one already typed/detected.
-const existingParts = pending.cityOverride.split(',').map((s) => s.trim()).filter(Boolean);
-const hitCity = hit.dataset.tinderCity;
-if (!existingParts.some((p) => p.toLowerCase() === hitCity.toLowerCase())) existingParts.push(hitCity);
-pending.cityOverride = existingParts.join(', ');
+// Adds a chip, doesn't replace the array -- clicking a second
+// highlighted mention shouldn't lose the first one already added.
+addCityValue(hit.dataset.tinderCity);
 render();
 });
 });
@@ -1789,14 +1823,12 @@ ph.apply = false;
 // editing them on the Connections tab itself: a direct set, not a
 // fill-if-empty merge.
 if (p.stageOverride) conn.stage = p.stageOverride;
-// Additive, not a direct set like Stage/Rating -- cityOverride is
-// comma-separated (same convention as ARRAY_FIELD_MAP's split:true
-// fields), each piece union-added so "Highgate, London" becomes two
-// separate, independently-matchable entries and a manual correction
-// coexists with a re-scraped value instead of one clobbering the other.
-if (p.cityOverride.trim()) {
+// Additive, not a direct set like Stage/Rating -- each chip is
+// union-added so a manual correction coexists with a re-scraped value
+// instead of one clobbering the other.
+if (p.cityOverride.length) {
 if (!Array.isArray(conn.location)) conn.location = [];
-unionInto(conn.location, p.cityOverride.split(',').map((s) => s.trim()).filter(Boolean));
+unionInto(conn.location, p.cityOverride);
 }
 if (p.ratingOverride) conn.priority = p.ratingOverride;
 // Direct set like Stage/City/Rating above, not fill-if-empty -- an empty
@@ -1933,8 +1965,8 @@ const parsed = {
 name: String(raw.name || '').trim(),
 age: String(raw.age || '').trim(),
 // City defaults unchecked -- its real destination is the dedicated
-// cityOverride input (below), not this generic apply-to-a-field path;
-// see the City special-case in fieldPreviewHtml.
+// cityOverride chip editor (below), not this generic apply-to-a-field
+// path; see the City special-case in fieldPreviewHtml.
 fields: withAlwaysShowFields(fields.map((f) => ({ ...f, apply: f.label !== 'City' }))),
 photos: photos.map((url) => ({ url, apply: true })),
 foundPhones: phones.map((value) => ({ value, apply: true })),
@@ -1950,8 +1982,12 @@ countries: {},
 // City often only ever comes up in the first few chat messages, not any
 // structured Tinder field, so this is a starting point to confirm or
 // correct rather than something trusted outright — pre-filled from a
-// "City" field if the profile had one, blank otherwise.
-cityOverride: transliterateCityValue(fields.find((f) => f.label === 'City')?.value || ''),
+// "City" field if the profile had one, blank otherwise. Multi-value
+// (like conn.location itself), edited as chips, not free text.
+cityOverride: (() => {
+const v = transliterateCityValue(fields.find((f) => f.label === 'City')?.value || '');
+return v ? [v] : [];
+})(),
 stageOverride: 'Matched',
 ratingOverride: 0,
 // Orthogonal to Stage (see isTravelPaused in state.js) -- seeded from
@@ -2102,7 +2138,7 @@ p.travelUntilOverride = conn ? (conn.travelUntil || '') : '';
 // looks like the data was lost rather than just not re-extracted this
 // time. Only when cityOverride is still empty: never overwrites a value
 // that came from the fresh scrape, or that the user has since typed.
-if (conn && !p.cityOverride.trim() && (conn.location || []).length) p.cityOverride = conn.location.join(', ');
+if (conn && !p.cityOverride.length && (conn.location || []).length) p.cityOverride = [...conn.location];
 // A single-value field (Distance, Job, City...) that's already set on the
 // matched connection defaults to unchecked, not disabled -- overwriting
 // stale data (a match moved city, a bad early scrape) is a real need, but
