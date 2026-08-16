@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v59</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v60</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -552,76 +552,53 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
     }
   }
 
-  // Chat history: a "Conversation history with {name}" heading whose value
-  // block is the ENTIRE thread's flattened textContent &mdash; verified
-  // against a real captured page, where without this it swept every
-  // message, phone numbers and composer UI chrome into one field via the
-  // generic h2 pass below. Each message carries a visually-hidden "Sent at
-  // HH:MM" accessibility label immediately followed by the same time again,
-  // the sender, and a colon &mdash; a reliable, repeating anchor confirmed
-  // across every message in that real transcript. A "DD/MM/YYYY, HH:MM"
-  // divider (and sometimes a bare "Sent" delivery-status word right before
-  // it, no space) sits between some messages and isn't part of either
-  // one's text. Parsed messages are shown in the review screen before
-  // anything saves, never trusted silently &mdash; misattributing who said
-  // what is worse than a merely misfiled field.
+  // Chat history: a "Conversation history with {name}" heading whose
+  // messages live in an &lt;ol aria-label="Messages"&gt; -- each message &lt;li&gt;
+  // holds a role="article" with its own hidden &lt;time datetime="ISO-8601
+  // ..."&gt;, precise to the millisecond, independent of whatever day-divider
+  // row Tinder chooses to render nearby (verified against a real captured
+  // page). Reading the timestamp straight off the element is what actually
+  // fixes a real bug: a message sent today was inheriting a stale date from
+  // weeks earlier under an older, divider-text-guessing version of this,
+  // which had no way to tell a message correctly covered by the last real
+  // divider apart from one that should have gotten a newer divider Tinder
+  // never rendered -- this sidesteps that ambiguity entirely by never
+  // needing a divider at all. A divider &lt;li&gt; (no role="article" inside)
+  // is skipped, same as any other pattern this snippet doesn't recognise.
+  // Parsed messages are shown in the review screen before anything saves,
+  // never trusted silently — misattributing who said what is worse than a
+  // merely misfiled field.
   const chatHeading = $$('h2').find((h) =&gt; /^Conversation history with /i.test(h.textContent.trim()));
   if (chatHeading) {
     const card = chatHeading.closest('section') || (chatHeading.parentElement &amp;&amp; chatHeading.parentElement.parentElement);
     chatCard = card;
-    const valueBlock = card &amp;&amp; [...card.children].find((el) =&gt; !el.contains(chatHeading) &amp;&amp; el.textContent.trim());
-    const raw = valueBlock ? valueBlock.textContent : '';
-    const cut = raw.replace(/Reply to .+/s, '');
-    // A "DD/MM/YYYY, HH:MM" divider sits between messages whenever the day
-    // changes — unverified against a real multi-day transcript, so this
-    // degrades safely: no divider found just means no date on a message,
-    // same as any other pattern this snippet doesn't recognise. Computed
-    // BEFORE the messages loop below (previously only the LAST one was
-    // kept, for lastContact) so every message can look up which divider
-    // was actually in effect at its own position, not just the newest one.
-    const dateDividers = [...cut.matchAll(/(\d{1,2})\/(\d{1,2})\/(\d{4}),?\s*\d{1,2}:\d{2}/g)].map((d) =&gt; ({
-      index: d.index,
-      iso: `${d[3]}-${d[2].padStart(2, '0')}-${d[1].padStart(2, '0')}`,
-    }));
-    // The last divider at or before `pos`, or null if `pos` comes before
-    // any divider at all (Tinder doesn't show one until the day changes
-    // for the first time) — degrades to a time-only prefix in that case.
-    // Tinder's web page also sometimes fails to insert a fresh divider for
-    // the current day (confirmed live: a message sent minutes ago kept
-    // inheriting a real divider from weeks earlier, wrongly, with no way
-    // here to tell that case apart from a message correctly covered by the
-    // last real divider) -- rather than guess which is which and risk
-    // silently mis-dating the wrong one, this stays a straight lookup;
-    // see the "Last message date" note below for how the review screen
-    // catches the stale-date case instead.
-    const dateAt = (pos) =&gt; {
-      let found = null;
-      for (const d of dateDividers) { if (d.index &lt;= pos) found = d.iso; else break; }
-      return found;
-    };
-    const msgRe = /Sent at (\d{1,2}:\d{2})\d{1,2}:\d{2}([^:]{1,40}):/g;
-    const matches = [...cut.matchAll(msgRe)];
+    const list = card &amp;&amp; card.querySelector('ol[aria-label="Messages"]');
     const messages = [];
     let lastMessageDate = null;
-    for (let i = 0; i &lt; matches.length; i++) {
-      const m = matches[i];
-      const start = m.index + m[0].length;
-      const end = i + 1 &lt; matches.length ? matches[i + 1].index : cut.length;
-      const body = cut.slice(start, end)
-        .replace(/(Sent)?\d{1,2}\/\d{1,2}\/\d{4},?\s*\d{1,2}:\d{2}\s*$/, '')
-        .replace(/Sent\s*$/, '')
-        .trim();
-      const sender = m[2].trim();
-      const date = dateAt(m.index);
-      const prefix = date ? `${date} ${m[1]}` : m[1];
-      if (sender &amp;&amp; body) { messages.push(`[${prefix}] ${sender}: ${body}`); lastMessageDate = date; }
+    if (list) {
+      [...list.querySelectorAll('li')].forEach((li) =&gt; {
+        const article = li.querySelector('[role="article"]');
+        if (!article) return; // a "Messages from ..." day-divider row, not a message
+        const timeEl = article.querySelector('time[datetime]');
+        // A real Date, not a slice of the raw (UTC) attribute string — its
+        // local getters land on whatever this snippet's own browser (the
+        // user's, on tinder.com) is set to, which is what actually matches
+        // the "Sent at HH:MM" Tinder itself shows next to the message, and
+        // correctly handles the local-midnight day boundary too.
+        const sentAt = timeEl ? new Date(timeEl.getAttribute('datetime')) : null;
+        const date = sentAt ? `${sentAt.getFullYear()}-${String(sentAt.getMonth() + 1).padStart(2, '0')}-${String(sentAt.getDate()).padStart(2, '0')}` : '';
+        const time = sentAt ? `${String(sentAt.getHours()).padStart(2, '0')}:${String(sentAt.getMinutes()).padStart(2, '0')}` : '';
+        const senderEl = article.querySelector('strong');
+        const sender = senderEl ? senderEl.textContent.replace(/:\s*$/, '').trim() : '';
+        const bodyEl = article.querySelector('.text');
+        const body = bodyEl ? bodyEl.textContent.trim() : '';
+        if (sender &amp;&amp; body) {
+          messages.push(`[${date ? `${date} ${time}` : time}] ${sender}: ${body}`);
+          if (date) lastMessageDate = date;
+        }
+      });
     }
     if (messages.length) fields.push({ label: 'Chat history', value: messages.join('\n') });
-    // The actual last EXTRACTED message's own resolved date, same as the
-    // last divider's date in every case this snippet can currently tell
-    // apart -- kept as its own variable (rather than dateDividers[...])
-    // since a message-level fix, if one arrives later, only needs to
-    // change dateAt() and this stays correct for free.
     if (lastMessageDate) fields.push({ label: 'Last message date', value: lastMessageDate });
   }
 
@@ -898,38 +875,29 @@ window.tinderBulkImport = async (batchSize) => {
     if (chatHeading) {
       const card = chatHeading.closest('section') || (chatHeading.parentElement &amp;&amp; chatHeading.parentElement.parentElement);
       chatCard = card;
-      const valueBlock = card &amp;&amp; [...card.children].find((el) =&gt; !el.contains(chatHeading) &amp;&amp; el.textContent.trim());
-      const raw = valueBlock ? valueBlock.textContent : '';
-      const cut = raw.replace(/Reply to .+/s, '');
       // See the single-profile snippet's version of this block for why
-      // dateDividers is computed before the messages loop and mapped to
-      // {index, iso} pairs, and why dateAt() stays a straight lookup
-      // rather than guessing at a stale-divider correction.
-      const dateDividers = [...cut.matchAll(/(\d{1,2})\/(\d{1,2})\/(\d{4}),?\s*\d{1,2}:\d{2}/g)].map((d) =&gt; ({
-        index: d.index,
-        iso: `${d[3]}-${d[2].padStart(2, '0')}-${d[1].padStart(2, '0')}`,
-      }));
-      const dateAt = (pos) =&gt; {
-        let found = null;
-        for (const d of dateDividers) { if (d.index &lt;= pos) found = d.iso; else break; }
-        return found;
-      };
-      const msgRe = /Sent at (\d{1,2}:\d{2})\d{1,2}:\d{2}([^:]{1,40}):/g;
-      const matches = [...cut.matchAll(msgRe)];
+      // this reads each message's own hidden &lt;time datetime&gt; directly
+      // rather than guessing a date from nearby divider text.
+      const list = card &amp;&amp; card.querySelector('ol[aria-label="Messages"]');
       const messages = [];
       let lastMessageDate = null;
-      for (let i = 0; i &lt; matches.length; i++) {
-        const m = matches[i];
-        const start = m.index + m[0].length;
-        const end = i + 1 &lt; matches.length ? matches[i + 1].index : cut.length;
-        const body = cut.slice(start, end)
-          .replace(/(Sent)?\d{1,2}\/\d{1,2}\/\d{4},?\s*\d{1,2}:\d{2}\s*$/, '')
-          .replace(/Sent\s*$/, '')
-          .trim();
-        const sender = m[2].trim();
-        const date = dateAt(m.index);
-        const prefix = date ? `${date} ${m[1]}` : m[1];
-        if (sender &amp;&amp; body) { messages.push(`[${prefix}] ${sender}: ${body}`); lastMessageDate = date; }
+      if (list) {
+        [...list.querySelectorAll('li')].forEach((li) =&gt; {
+          const article = li.querySelector('[role="article"]');
+          if (!article) return;
+          const timeEl = article.querySelector('time[datetime]');
+          const sentAt = timeEl ? new Date(timeEl.getAttribute('datetime')) : null;
+          const date = sentAt ? `${sentAt.getFullYear()}-${String(sentAt.getMonth() + 1).padStart(2, '0')}-${String(sentAt.getDate()).padStart(2, '0')}` : '';
+          const time = sentAt ? `${String(sentAt.getHours()).padStart(2, '0')}:${String(sentAt.getMinutes()).padStart(2, '0')}` : '';
+          const senderEl = article.querySelector('strong');
+          const sender = senderEl ? senderEl.textContent.replace(/:\s*$/, '').trim() : '';
+          const bodyEl = article.querySelector('.text');
+          const body = bodyEl ? bodyEl.textContent.trim() : '';
+          if (sender &amp;&amp; body) {
+            messages.push(`[${date ? `${date} ${time}` : time}] ${sender}: ${body}`);
+            if (date) lastMessageDate = date;
+          }
+        });
       }
       if (messages.length) fields.push({ label: 'Chat history', value: messages.join('\n') });
       if (lastMessageDate) fields.push({ label: 'Last message date', value: lastMessageDate });
@@ -1088,7 +1056,7 @@ window.tinderBulkImport = async (batchSize) => {
   // someone already saved is safe either way -- the dashboard fills in
   // whatever's still missing rather than duplicating what's already
   // there.
-  const SCRIPT_VERSION = 5; // chat history now dates every message, not just the last one
+  const SCRIPT_VERSION = 6; // chat dates now come from each message's own timestamp, not a nearby divider guess
   const DONE_KEY = 'dashTinderBulkDone';
   const BATCH_SIZE = batchSize || 15; // "10-20 or so per day" — override per-call: tinderBulkImport(30), or tinderBulkImport(250) left running overnight
   const MIN_DELAY_MS = 10000, MAX_DELAY_MS = 60000; // randomised, not a fixed interval &mdash; a fixed gap is a bot tell
