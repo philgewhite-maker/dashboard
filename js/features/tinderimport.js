@@ -38,7 +38,10 @@ function hasMutualMessages(chatText) {
 let youSaid = false;
 let theySaid = false;
 chatText.split('\n').forEach((line) => {
-const m = line.match(/^\[\d{1,2}:\d{2}\]\s*([^:]+):/);
+// Time-only OR "YYYY-MM-DD HH:MM" -- see scanFields()'s note below on
+// the same shape; this one silently returned false for every dated
+// chat instead of just the undated ones, since NO line matched at all.
+const m = line.match(/^\[(?:\d{4}-\d{2}-\d{2}\s+)?\d{1,2}:\d{2}\]\s*([^:]+):/);
 if (!m) return;
 if (m[1].trim() === 'You') youSaid = true; else theySaid = true;
 });
@@ -683,12 +686,12 @@ const CYRILLIC_RUN_RE = '[\\u0400-\\u04FF]+(?:[ \\-][\\u0400-\\u04FF]+)*';
 // (Distance, Height...) have no discrete text values, so they're not
 // part of this. First rule wins on a same-value collision across colours.
 function flagValueMap() {
-const map = new Map(); // lowercase value -> {label: original casing, color}
+const map = new Map(); // lowercase value -> {label: original casing, color, field}
 (data.flagRules || []).forEach((rule) => {
 ['green', 'amber', 'red'].forEach((color) => {
 (rule[color] || []).forEach((v) => {
 const key = String(v).toLowerCase().trim();
-if (key && !map.has(key)) map.set(key, { label: v, color });
+if (key && !map.has(key)) map.set(key, { label: v, color, field: rule.field });
 });
 });
 });
@@ -782,8 +785,17 @@ if (cityMap.has(hit.toLowerCase())) {
 const original = cityMap.get(hit.toLowerCase());
 out += `<span class="tinder-city-hit" data-tinder-city="${escapeHtml(original)}" title="Click to set as City">${escapeHtml(hit)}</span>`;
 } else if (flagMap.has(hit.toLowerCase())) {
-const { color } = flagMap.get(hit.toLowerCase());
-out += `<span class="tinder-flag-hit tinder-flag-hit-${color}" title="Flagged ${color}">${escapeHtml(hit)}</span>`;
+const { color, field } = flagMap.get(hit.toLowerCase());
+// A value already colour-flagged (e.g. a Nationality rule covering
+// "Ukrainian") used to render as a dead-end: highlighted, but with no
+// data-tinder-add-* attributes, so it looked exactly like every other
+// click-to-add hit yet did nothing when clicked. If the rule's own
+// field routes through the same TAG_FIELDS add mechanism, the flag
+// colour and the click-to-add both apply to the one span.
+const targetLabel = TARGET_TO_ADD_LABEL[field];
+const addAttrs = targetLabel ? ` data-tinder-add-label="${escapeHtml(targetLabel)}" data-tinder-add-value="${escapeHtml(hit)}"` : '';
+const title = targetLabel ? `Flagged ${color} — click to add to ${targetLabel}` : `Flagged ${color}`;
+out += `<span class="tinder-flag-hit tinder-flag-hit-${color}"${addAttrs} title="${escapeHtml(title)}">${escapeHtml(hit)}</span>`;
 } else if (countryNameMap.has(hit.toLowerCase())) {
 // Same generic add-to-a-field mechanism the flag-emoji "+ add" buttons
 // use (see flagEmojiAddButtonHtml) — clicking the country name itself
@@ -1247,16 +1259,28 @@ const saveLabel = chosenConn ? `Save to ${chosenConn.name}` : 'Save to…';
 const saveBlockedNote = !p.chosenId ? 'pick who this is first'
 : !canSave ? "open More info and confirm it's them first"
 : '';
+// A Tinder-id join is a certain identity, not a name-based guess (risky
+// already stays false for it — see buildPending) -- showing the full
+// candidate dropdown here anyway read as "pick one of these near-
+// matches" for a decision that's already made with certainty, and ate
+// the space the old-vs-new photo comparison below needed. Plain text
+// instead; More info is still there for the rare case it needs undoing.
+const secureMatch = p.match?.why === 'known match id';
 
 el.innerHTML = `<div class="album-card">
 ${queue.length ? `<div class="settings-note" style="margin:0 0 8px;">${queue.length} more queued in this batch — saving auto-advances to the next.</div>` : ''}
 <div class="tinder-header-row">
 ${chosenConn && chosenConn.photoId
-? `<span class="tinder-confirm-pic" data-photo-bg="${escapeHtml(chosenConn.photoId)}" data-view-photo-confirm="1" title="Click to view ${escapeHtml(chosenConn.name)}'s photo full-size"></span>`
+? `<span class="tinder-confirm-pic" data-photo-bg="${escapeHtml(chosenConn.photoId)}" data-view-photo-confirm="1" title="Click to view ${escapeHtml(chosenConn.name)}'s photo on file, full-size"></span>`
 : '<span class="tinder-confirm-pic tinder-confirm-pic-empty" title="No photo on file for the pick below yet"></span>'}
+${p.photos[0]
+? `<span class="tinder-confirm-pic" data-tinder-photo-view="0" style="background-image:url('${escapeHtml(p.photos[0].url)}')" title="Click to view this import's photo, full-size"></span>`
+: '<span class="tinder-confirm-pic tinder-confirm-pic-empty" title="No photos in this import"></span>'}
 <div class="tinder-header-id">
 <div class="album-caption"><strong>${escapeHtml(p.name || '(no name found)')}</strong>${p.age ? `, ${escapeHtml(p.age)}` : ''}</div>
-<select id="tinder-pick">${optionsFor(p.chosenId, p.candidates)}</select>
+${secureMatch
+? `<div class="tinder-field-note">Matched to <strong>${escapeHtml(chosenConn ? chosenConn.name : '')}</strong> by Tinder ID</div>`
+: `<select id="tinder-pick">${optionsFor(p.chosenId, p.candidates)}</select>`}
 </div>
 </div>
 ${flagBreakdownHtml()}
@@ -1277,6 +1301,12 @@ ${saveBlockedNote ? `<div class="tinder-field-note" style="margin:-4px 0 8px;">$
 <label class="tinder-field-row">Stage <select id="tinder-stage">${CONN_STAGES.map((s) => `<option value="${escapeHtml(s)}"${s === p.stageOverride ? ' selected' : ''}>${escapeHtml(s)}</option>`).join('')}</select></label>
 <label class="tinder-field-row">City <input type="text" id="tinder-city" autocomplete="off" value="${escapeHtml(p.cityOverride)}" placeholder="Often only comes up in chat"></label>
 <label class="tinder-field-row">Rating <span id="tinder-rating">${ratingStarsHtml(p.ratingOverride)}</span></label>
+<label class="tinder-field-row">Travel <select id="tinder-travel-status">
+<option value=""${!p.travelStatusOverride ? ' selected' : ''}>&mdash; normal</option>
+<option value="standby"${p.travelStatusOverride === 'standby' ? ' selected' : ''}>Standby</option>
+<option value="travelling"${p.travelStatusOverride === 'travelling' ? ' selected' : ''}>Travelling</option>
+</select></label>
+${p.travelStatusOverride === 'travelling' ? `<label class="tinder-field-row">Until <input type="date" id="tinder-travel-until" value="${escapeHtml(p.travelUntilOverride)}"></label>` : ''}
 </div>
 
 ${agePreviewHtml()}
@@ -1419,6 +1449,20 @@ const stageSel = document.getElementById('tinder-stage');
 if (stageSel) stageSel.addEventListener('change', () => { pending.stageOverride = stageSel.value; });
 const cityInput = document.getElementById('tinder-city');
 if (cityInput) cityInput.addEventListener('input', () => { pending.cityOverride = cityInput.value; });
+const travelSel = document.getElementById('tinder-travel-status');
+if (travelSel) travelSel.addEventListener('change', () => {
+pending.travelStatusOverride = travelSel.value;
+// Same 30-days-out default as the Connections-screen editor -- a
+// starting point to adjust, not a real guess at when travel ends.
+if (travelSel.value === 'travelling' && !pending.travelUntilOverride) {
+const until = new Date();
+until.setDate(until.getDate() + 30);
+pending.travelUntilOverride = until.toISOString().slice(0, 10);
+}
+render(); // shows/hides the "Until" date field, unlike Stage/City which don't change shape
+});
+const travelUntilInput = document.getElementById('tinder-travel-until');
+if (travelUntilInput) travelUntilInput.addEventListener('input', () => { pending.travelUntilOverride = travelUntilInput.value; });
 const nextStepInput = document.getElementById('tinder-next-step');
 if (nextStepInput) nextStepInput.addEventListener('input', () => { pending.nextStepNote = nextStepInput.value; });
 el.querySelectorAll('[data-tinder-hint]').forEach((chip) => {
@@ -1579,6 +1623,11 @@ failed++;
 if (p.stageOverride) conn.stage = p.stageOverride;
 if (p.cityOverride.trim()) conn.location = p.cityOverride.trim();
 if (p.ratingOverride) conn.priority = p.ratingOverride;
+// Direct set like Stage/City/Rating above, not fill-if-empty -- an empty
+// string is itself a meaningful choice here (clearing Standby/Travelling
+// back to normal rotation), not "nothing to apply".
+conn.travelStatus = p.travelStatusOverride || '';
+if (p.travelStatusOverride === 'travelling') conn.travelUntil = p.travelUntilOverride;
 if (p.matchId && !conn.tinderMatchId) conn.tinderMatchId = p.matchId;
 
 queueSave();
@@ -1665,7 +1714,11 @@ renderBulk();
 // field that needs filtering first: a "[HH:MM] You: ..." line is never the
 // match's own contact info, and skipping those lines catches every format
 // the user might type their own number/handle in, rather than matching
-// against a fixed list of known-own values.
+// against a fixed list of known-own values. The prefix is time-only OR
+// "YYYY-MM-DD HH:MM" (dated messages, since the DOM-timestamp rewrite) --
+// matching only the bare-time shape silently stopped filtering every
+// dated "You:" line, confirmed live: the user's own phone number in a
+// dated message started showing up as a found number again.
 function scanFields(fields) {
 const phones = [];
 const seenPhones = new Set();
@@ -1673,7 +1726,7 @@ const handles = [];
 const seenHandles = new Set();
 fields.forEach((f) => {
 const text = f.label === 'Chat history'
-? f.value.split('\n').filter((line) => !/^\[\d{1,2}:\d{2}\]\s*You:/.test(line)).join('\n')
+? f.value.split('\n').filter((line) => !/^\[(?:\d{4}-\d{2}-\d{2}\s+)?\d{1,2}:\d{2}\]\s*You:/.test(line)).join('\n')
 : f.value;
 findPhoneNumbers(text).forEach((p) => {
 const digits = p.replace(/\D/g, '');
@@ -1727,6 +1780,13 @@ countries: {},
 cityOverride: transliterateCityValue(fields.find((f) => f.label === 'City')?.value || ''),
 stageOverride: 'Matched',
 ratingOverride: 0,
+// Orthogonal to Stage (see isTravelPaused in state.js) -- seeded from
+// whatever's already on the matched connection in refreshOverrides(),
+// same direct-set-not-merge pattern as Stage/City/Rating. Otherwise the
+// only way to notice and mark someone Standby was leaving the import
+// screen for the Connections tab mid-review.
+travelStatusOverride: '',
+travelUntilOverride: '',
 // A quick, human-written follow-up note — "ask about kids", "plan a
 // comedy date" — captured right here while the profile's still on
 // screen rather than needing a separate trip to the connection's own
@@ -1860,6 +1920,8 @@ function refreshOverrides(p = pending) {
 const conn = data.connections.find((c) => c.id === p.chosenId);
 p.stageOverride = suggestedStage(conn, p);
 p.ratingOverride = conn ? (conn.priority || 0) : 0;
+p.travelStatusOverride = conn ? (conn.travelStatus || '') : '';
+p.travelUntilOverride = conn ? (conn.travelUntil || '') : '';
 // If nothing in THIS import's own text mentioned a city, the field falls
 // back to showing what's already saved on the matched connection --
 // otherwise it reads blank even when a city genuinely is on file, which

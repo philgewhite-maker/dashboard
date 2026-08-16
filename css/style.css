@@ -351,6 +351,7 @@ margin:10px 0 4px;padding-top:8px;border-top:1px dashed var(--line);
 .tinder-chat-them{background:var(--rose-bg);color:var(--rose);font-weight:600;border-radius:4px;padding:0 4px;}
 .tinder-header-row{display:flex;align-items:center;gap:10px;}
 .tinder-header-id{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px;}
+.tinder-header-id select{width:100%;max-width:100%;}
 .tinder-header-id .album-caption{margin:0;}
 .tinder-confirm-pic{width:64px;height:64px;border-radius:12px;overflow:hidden;display:block;background:var(--paper);flex-shrink:0;background-size:cover;background-position:center;cursor:pointer;}
 .tinder-confirm-pic-empty{border:1px dashed var(--line);cursor:default;}
