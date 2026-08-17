@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v76</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v77</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -1753,11 +1753,28 @@ One rule per field &mdash; a numeric threshold (Distance, Age) or a comma-separa
 </div>
 
 <div class="settings-block">
-<h3>My current city</h3>
+<h3>My info</h3>
 <div class="settings-note" style="margin:0 0 8px;">
-Used on the Tinder import form: a match within a short distance of you is probably in this city too, so it's offered as an addable suggestion next to Distance rather than guessed at silently.
+Kept so your own details can be filtered OUT of what a Tinder import or Google Contacts match saves onto a connection &mdash; a phone number you typed in chat to arrange a date is checked against yours before it's ever offered as <em>theirs</em>, and a connection can't get auto-linked to your own contact card. City is also offered as an addable suggestion on the Tinder import form when a match is within a short distance of you.
 </div>
-<input type="text" autocomplete="off" id="my-city-input" placeholder="e.g. London">
+<label class="settings-note" style="display:block;margin:0 0 4px;">City</label>
+<input type="text" autocomplete="off" id="my-city-input" placeholder="e.g. London" style="margin-bottom:10px;">
+<label class="settings-note" style="display:block;margin:0 0 4px;">Name</label>
+<input type="text" autocomplete="off" id="my-name-input" placeholder="e.g. Phil White" style="margin-bottom:10px;">
+<label class="settings-note" style="display:block;margin:0 0 4px;">Phone</label>
+<input type="tel" autocomplete="off" id="my-phone-input" placeholder="e.g. +44 7..." style="margin-bottom:10px;">
+<label class="settings-note" style="display:block;margin:0 0 4px;">Email</label>
+<input type="email" autocomplete="off" id="my-email-input" placeholder="you@example.com" style="margin-bottom:10px;">
+<label class="settings-note" style="display:block;margin:0 0 4px;">Address</label>
+<input type="text" autocomplete="off" id="my-address-input" placeholder="e.g. 12 Example St, London">
+</div>
+
+<div class="settings-block">
+<h3>Check connections for your own info</h3>
+<div class="settings-note" style="margin:0 0 8px;">
+Compares every connection's phone/email/address/aliases against what you entered above, in case an import or a Google Contacts auto-link ever attributed your own details to a match. Clearing a field also resets that connection's contact link, so a re-sync looks for the real match instead of re-applying the same wrong one.
+</div>
+<div id="self-info-check"></div>
 </div>
 
 <div class="settings-block">

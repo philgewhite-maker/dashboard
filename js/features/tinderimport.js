@@ -24,7 +24,7 @@
 // as visible as a wrong auto-match was invisible before.
 import { data, queueSave, currentAge, computeFlags, distanceMiles, FLAG_FIELD_DEFS, suggestedQuestions, TAG_FIELDS, stripSharedSuffix } from '../state.js';
 import { escapeHtml, uid, todayStr, hydratePhotoBackgrounds, openLightbox, knownCityMap } from '../utils.js';
-import { nameKey, editDistance } from '../googlecontacts.js';
+import { nameKey, editDistance, phoneKey } from '../googlecontacts.js';
 import { storePhoto, fetchProxiedImage } from '../files.js';
 import { photoGet, photoUrl } from '../db.js';
 import { MissingKeyError, compareFaces, translateText, identifyCountry } from '../ai.js';
@@ -2114,6 +2114,18 @@ const phones = [];
 const seenPhones = new Set();
 const handles = [];
 const seenHandles = new Set();
+// A second, independent line of defence alongside the "You:"-line filter
+// below -- that filter only works if Tinder's chat DOM literally labels
+// your own messages "You" (unverified against a real open chat, see the
+// console snippet's own comment). If it ever doesn't -- a different
+// label, a rendering variant -- a phone number YOU typed to arrange a
+// date would otherwise get attributed to the match instead. Confirmed
+// live: this happened, and the wrongly-saved number then auto-linked the
+// connection to the user's own Google Contact card on the next sync,
+// pulling in their own name and address too (see contacts.js's
+// findMatch()). Comparing against a known "my own number" closes the gap
+// regardless of which upstream assumption actually failed.
+const myPhone = phoneKey(data.myPhone);
 fields.forEach((f) => {
 const text = f.label === 'Chat history'
 ? f.value.split('\n').filter((line) => !/^\[(?:\d{4}-\d{2}-\d{2}\s+)?\d{1,2}:\d{2}\]\s*You:/.test(line)).join('\n')
@@ -2121,6 +2133,7 @@ const text = f.label === 'Chat history'
 findPhoneNumbers(text).forEach((p) => {
 const digits = p.replace(/\D/g, '');
 if (seenPhones.has(digits)) return;
+if (myPhone && phoneKey(p) === myPhone) return;
 seenPhones.add(digits);
 phones.push(p);
 });

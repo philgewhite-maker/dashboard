@@ -254,6 +254,10 @@ claudeAnswers: {},
 flagRules: DEFAULT_FLAG_RULES.map((r) => ({ ...r })),
 flagRulesSeeded: DEFAULT_FLAG_RULES.map((r) => r.id),
 myCity: '',
+// Your own details, kept explicitly so they can be filtered OUT of
+// import/matching -- see the migration guard below and their use in
+// tinderimport.js's scanFields() and contacts.js's findMatch().
+myName: '', myPhone: '', myEmail: '', myAddress: '',
 prefs: { ...DEFAULT_PREFS } };
 }
 
@@ -514,6 +518,10 @@ data.flagRulesSeeded.push(r.id);
 });
 }
 if (typeof data.myCity !== 'string') data.myCity = '';
+if (typeof data.myName !== 'string') data.myName = '';
+if (typeof data.myPhone !== 'string') data.myPhone = '';
+if (typeof data.myEmail !== 'string') data.myEmail = '';
+if (typeof data.myAddress !== 'string') data.myAddress = '';
 if (!Array.isArray(data.ratingCategories) || data.ratingCategories.length === 0) {
 data.ratingCategories = DEFAULT_RATING_CATEGORIES.map((c) => ({ ...c }));
 } else {

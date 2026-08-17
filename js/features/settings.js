@@ -10,6 +10,7 @@ import { pullRemote } from '../sync/selfhost.js';
 import { restartAutoSync } from '../sync/autosync.js';
 import { canAttemptGoogleAction, refreshScopes } from '../sync/googleauth.js';
 import { getRemoteInfo, getRemoteCounts, countsOf, pushToGoogleDrive, pullFromGoogleDrive } from '../sync/googledrive.js';
+import { phoneKey, emailKey, nameKey } from '../googlecontacts.js';
 
 // Spend is only ever an estimate: it's computed from the token counts the
 // API reports multiplied by list prices baked into ai.js, so it ignores
@@ -42,16 +43,91 @@ ${rows.map((r) => `<tr>
 <div class="settings-note" style="margin:6px 0 0;">Estimated from reported token counts at list prices${anyUnpriced ? ', excluding models with no price on file' : ''}. Counted on this device only.</div>`;
 }
 
-async function initSettings() {
-const myCityInput = document.getElementById('my-city-input');
-if (myCityInput) {
-myCityInput.value = data.myCity || '';
-let myCityTimer = null;
-myCityInput.addEventListener('input', () => {
-clearTimeout(myCityTimer);
-myCityTimer = setTimeout(() => { data.myCity = myCityInput.value.trim(); queueSave(); }, 400);
+// Finds connections that ended up holding YOUR OWN details instead of the
+// match's -- confirmed live as a real bug: a phone number typed in chat to
+// arrange a date got saved as the match's phone, which then auto-linked
+// the connection to the user's own Google Contact on the next sync,
+// pulling in their own name (as an alias) and address too. Only ever
+// checks fields you've actually filled in above -- an empty myPhone can't
+// false-positive-match a connection with no phone either, both keys
+// non-empty already, but this keeps the intent explicit.
+function findSelfInfoLeaks() {
+const myPhone = phoneKey(data.myPhone);
+const myEmail = emailKey(data.myEmail);
+const myAddress = String(data.myAddress || '').trim().toLowerCase();
+const myName = nameKey(data.myName);
+if (!myPhone && !myEmail && !myAddress && !myName) return [];
+const hits = [];
+data.connections.forEach((c) => {
+const fields = [];
+if (myPhone && phoneKey(c.phone) === myPhone) fields.push('phone');
+if (myEmail && emailKey(c.email) === myEmail) fields.push('email');
+if (myAddress && String(c.address || '').trim().toLowerCase() === myAddress) fields.push('address');
+if (myName && (c.aliases || []).some((a) => nameKey(a) === myName)) fields.push('aliases');
+if (fields.length) hits.push({ conn: c, fields });
+});
+return hits;
+}
+
+function renderSelfInfoCheck() {
+const el = document.getElementById('self-info-check');
+if (!el) return;
+const hits = findSelfInfoLeaks();
+if (!hits.length) {
+el.innerHTML = '<div class="settings-note" style="margin:0;">Nothing found.</div>';
+return;
+}
+el.innerHTML = hits.map(({ conn, fields }) => `<div class="cleanup-section" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+<span><strong>${escapeHtml(conn.name)}</strong> &mdash; ${fields.map(escapeHtml).join(', ')}</span>
+<button class="sync-btn sm" type="button" data-clear-selfinfo="${escapeHtml(conn.id)}" data-clear-fields="${escapeHtml(fields.join(','))}">Clear</button>
+</div>`).join('');
+el.querySelectorAll('[data-clear-selfinfo]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const conn = data.connections.find((c) => c.id === btn.dataset.clearSelfinfo);
+if (!conn) return;
+btn.dataset.clearFields.split(',').forEach((f) => {
+if (f === 'aliases') {
+const myName = nameKey(data.myName);
+conn.aliases = (conn.aliases || []).filter((a) => nameKey(a) !== myName);
+} else {
+conn[f] = '';
+}
+});
+// The auto-link itself is how the alias/address got here in the first
+// place, not just the field that seeded it -- resetting it means a
+// re-sync looks for the real match instead of re-applying the same
+// wrong one straight back.
+conn.contactStatus = '';
+conn.contactResourceName = '';
+conn.contactEtag = '';
+conn.contactMatchedBy = '';
+queueSave();
+renderSelfInfoCheck();
+Promise.all([import('./connections.js'), import('./overview.js')]).then(([c, o]) => { c.renderConnections(); o.renderOverview(); });
+});
 });
 }
+
+async function initSettings() {
+// Same debounced-save pattern for every "my own info" field -- one loop
+// instead of five near-identical listener blocks.
+[
+['my-city-input', 'myCity'],
+['my-name-input', 'myName'],
+['my-phone-input', 'myPhone'],
+['my-email-input', 'myEmail'],
+['my-address-input', 'myAddress'],
+].forEach(([id, key]) => {
+const input = document.getElementById(id);
+if (!input) return;
+input.value = data[key] || '';
+let timer = null;
+input.addEventListener('input', () => {
+clearTimeout(timer);
+timer = setTimeout(() => { data[key] = input.value.trim(); queueSave(); renderSelfInfoCheck(); }, 400);
+});
+});
+renderSelfInfoCheck();
 const keyInput = document.getElementById('anthropic-key-input');
 const settings = await getLocalSettings();
 keyInput.value = settings.anthropicApiKey || '';

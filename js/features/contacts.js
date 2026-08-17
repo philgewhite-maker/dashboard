@@ -38,11 +38,24 @@ return data.connections.filter(isPostAppStage);
 
 // Returns {matched, candidates} — `matched` only when the evidence is a
 // phone or email, which identify a person; a name never does on its own.
+//
+// A connection's phone/email is expected to be THEIRS, but a scraping bug
+// can attribute something the user typed about themselves to the match
+// instead (confirmed live: a phone number typed in chat to arrange a
+// date got saved as the match's phone). A phone/email match is normally
+// trusted as certain and applied with no confirmation, so if that field
+// happens to be YOUR OWN number/email, this would otherwise silently
+// link the connection to your own contact card and pull in your own
+// name and address. Checked here rather than only at the scrape source,
+// since this guard also protects a record that was ALREADY poisoned
+// before myPhone/myEmail were ever set.
 function findMatch(conn, index) {
+const myPhone = phoneKey(data.myPhone);
+const myEmail = emailKey(data.myEmail);
 const byPhone = phoneKey(conn.phone);
-if (byPhone && index.byPhone.has(byPhone)) return { matched: index.byPhone.get(byPhone), how: 'phone' };
+if (byPhone && byPhone !== myPhone && index.byPhone.has(byPhone)) return { matched: index.byPhone.get(byPhone), how: 'phone' };
 const byEmail = emailKey(conn.email);
-if (byEmail && index.byEmail.has(byEmail)) return { matched: index.byEmail.get(byEmail), how: 'email' };
+if (byEmail && byEmail !== myEmail && index.byEmail.has(byEmail)) return { matched: index.byEmail.get(byEmail), how: 'email' };
 
 // Fall back to names, gathering every contact that could be them. Tries
 // the full name and its first word (a connection is often recorded as just

@@ -99,9 +99,9 @@ if (!parsed) return escapeHtml(phone || '');
 return `<span class="dial-tag" title="${escapeHtml(parsed.name)}">${flagEmoji(parsed.iso)} ${escapeHtml(parsed.dial)}</span> ${escapeHtml(parsed.rest)}`;
 }
 
-function dialCodeOptions() {
+function dialCodeOptions(selectedDial) {
 return '<option value="">Country code…</option>' + DIAL_CODES
-.map(([iso, dial, name]) => `<option value="${dial}">${flagEmoji(iso)} ${dial} — ${escapeHtml(name)}</option>`)
+.map(([iso, dial, name]) => `<option value="${dial}" ${dial === selectedDial ? 'selected' : ''}>${flagEmoji(iso)} ${dial} — ${escapeHtml(name)}</option>`)
 .join('');
 }
 
@@ -593,7 +593,7 @@ ${c.travelStatus === 'travelling' ? `<label>Travelling until<input type="date" d
 <div class="field-block">
 <span class="field-label">Phone</span>
 <span class="phone-row">
-<select class="dial-code" data-dial-for="${c.id}" autocomplete="off">${dialCodeOptions()}</select>
+<select class="dial-code" data-dial-for="${c.id}" autocomplete="off">${dialCodeOptions((splitDialCode(c.phone) || {}).dial)}</select>
 <input type="tel" autocomplete="off" placeholder="Used to match Google Contacts" data-field="phone" data-conn-detail="${c.id}" value="${escapeHtml(c.phone || '')}" name="conn-phone-${c.id}">
 </span>
 </div>
@@ -718,7 +718,6 @@ const input = list.querySelector(`input[data-field="phone"][data-conn-detail="${
 const rest = String(input.value || '').replace(/^\s*\+\d{1,4}\s*/, '').replace(/^0/, '').trim();
 conn.phone = `${sel.value} ${rest}`.trim();
 input.value = conn.phone;
-sel.value = '';
 queueSave();
 });
 });
