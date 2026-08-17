@@ -11,6 +11,7 @@ import { renderEnhancementIdeas } from './features/enhancements.js';
 import { renderOverview } from './features/overview.js';
 import { renderTasks } from './features/tasks.js';
 import { renderNudges } from './features/nudges.js';
+import { renderTagCleanup } from './features/tagcleanup.js';
 
 function renderAll() {
 renderHabits();
@@ -26,6 +27,7 @@ renderEnhancementIdeas();
 renderTasks();
 renderOverview();
 renderNudges();
+renderTagCleanup();
 }
 
 export { renderAll };
