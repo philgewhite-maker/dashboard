@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v83</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v84</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -1737,6 +1737,11 @@ Mostly still a planning space &mdash; a place to keep thinking about what this s
 <input type="text" autocomplete="off" class="conn-search" id="conn-search" placeholder="Search by name or tag (e.g. sporty, sober)...">
 <button class="overview-chip" type="button" id="conn-needs-attention-btn">Needs attention</button>
 <button class="mini-task-btn" type="button" id="conn-attention-task-btn" hidden></button>
+<button class="overview-chip" type="button" id="conn-reachout-settings-btn">⏱ Reach-out timing</button>
+<div class="reachout-settings" id="conn-reachout-settings" hidden>
+<p class="settings-note">Days since last contact before the "Reach out" badge can appear, per stage. Leave blank to use the default (priority-scaled, or 2 days for Planning to meet/call). A stuck stage full of old matches you don't want nagging you — set it high.</p>
+<div id="conn-reachout-settings-rows"></div>
+</div>
 <div id="connections-list"></div>
 <div class="add-form" id="connection-form">
 <input type="text" autocomplete="off" id="conn-name-input" placeholder="Name or nickname">

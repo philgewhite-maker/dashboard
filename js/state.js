@@ -258,6 +258,10 @@ myCity: '',
 // import/matching -- see the migration guard below and their use in
 // tinderimport.js's scanFields() and contacts.js's findMatch().
 myName: '', myPhone: '', myEmail: '', myAddress: '',
+// Per-stage override for reachOutThreshold(), in days -- {stage: days}.
+// A stage with no entry falls back to the priority-scaled formula. See
+// reachOutThreshold() below.
+reachOutStageDays: {},
 prefs: { ...DEFAULT_PREFS } };
 }
 
@@ -531,6 +535,7 @@ if (typeof data.myName !== 'string') data.myName = '';
 if (typeof data.myPhone !== 'string') data.myPhone = '';
 if (typeof data.myEmail !== 'string') data.myEmail = '';
 if (typeof data.myAddress !== 'string') data.myAddress = '';
+if (!data.reachOutStageDays || typeof data.reachOutStageDays !== 'object') data.reachOutStageDays = {};
 if (!Array.isArray(data.ratingCategories) || data.ratingCategories.length === 0) {
 data.ratingCategories = DEFAULT_RATING_CATEGORIES.map((c) => ({ ...c }));
 } else {
@@ -776,8 +781,14 @@ return hits / COMPLETENESS_CHECKS.length;
 // places without them drifting out of sync with each other.
 const URGENT_STAGES = new Set(['Planning to meet', 'Planning to call']);
 
-// Higher priority = less slack before a "reach out" nudge appears.
+// Higher priority = less slack before a "reach out" nudge appears. A
+// per-stage override (set in the Connections panel) always wins -- it's the
+// only way to quiet a stage that's stuck (e.g. old "Matched" entries that
+// never progressed and never got manually marked Faded) without touching
+// every connection in it individually.
 function reachOutThreshold(priority, stage) {
+const override = data.reachOutStageDays[stage];
+if (typeof override === 'number' && override >= 0) return override;
 if (URGENT_STAGES.has(stage)) return 2;
 return 12 - (priority || 0) * 2; // priority 5 -> 2 days, priority 1 -> 10 days
 }

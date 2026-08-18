@@ -462,7 +462,7 @@ return !!(c.attentionSnoozedUntil && c.attentionSnoozedUntil > todayStr());
 // just becomes wallpaper once there are more than a handful.
 function reachOutOverdueAmount(c) {
 if (isDormantStage(c.stage) || isTravelPaused(c) || isReachOutSnoozed(c)) return -Infinity;
-return daysSince(c.lastContact) - reachOutThreshold(c.priority);
+return daysSince(c.lastContact) - reachOutThreshold(c.priority, c.stage);
 }
 
 // Recomputed once per renderConnections() call (see topReachOutIdSet
@@ -480,6 +480,51 @@ data.connections
 }
 
 let topReachOutIdSet = new Set();
+
+// Mirrors state.js's URGENT_STAGES -- only used here to show the right
+// placeholder ("auto (2)" vs "auto") when a stage has no override yet.
+const FIXED_DEFAULT_STAGES = new Set(['Planning to meet', 'Planning to call']);
+
+// Per-stage override for reachOutThreshold(), so a stage full of old
+// connections that never got manually moved to Faded (see
+// isDormantStage()) can be quieted without touching every connection in
+// it, and without the blunt "reach out to nobody" of snoozing them one by
+// one.
+function initReachOutSettings() {
+const btn = document.getElementById('conn-reachout-settings-btn');
+const panel = document.getElementById('conn-reachout-settings');
+const rowsEl = document.getElementById('conn-reachout-settings-rows');
+if (!btn || !panel || !rowsEl) return;
+
+function renderRows() {
+const stages = CONN_STAGES.filter((s) => !isDormantStage(s));
+rowsEl.innerHTML = stages.map((s) => {
+const val = data.reachOutStageDays[s];
+const placeholder = FIXED_DEFAULT_STAGES.has(s) ? 'auto (2)' : 'auto';
+return `<div class="reachout-stage-row">
+<span class="reachout-stage-label">${escapeHtml(s)}</span>
+<input type="number" min="0" class="mini" data-reachout-days="${escapeHtml(s)}" value="${typeof val === 'number' ? val : ''}" placeholder="${placeholder}">
+<span class="reachout-stage-unit">days</span>
+</div>`;
+}).join('');
+rowsEl.querySelectorAll('[data-reachout-days]').forEach((input) => {
+input.addEventListener('change', () => {
+const stage = input.dataset.reachoutDays;
+const v = input.value.trim();
+if (v === '') delete data.reachOutStageDays[stage];
+else data.reachOutStageDays[stage] = Math.max(0, parseInt(v, 10) || 0);
+queueSave();
+renderConnections();
+});
+});
+}
+
+btn.addEventListener('click', () => {
+const wasHidden = panel.hidden;
+panel.hidden = !wasHidden;
+if (wasHidden) renderRows();
+});
+}
 
 // Matched on a fixed synthetic source (not per-connection — this is one
 // standing "go review the list" task, not a task per person), the same
@@ -1383,6 +1428,7 @@ link: '#dating',
 renderConnections();
 }
 });
+initReachOutSettings();
 document.getElementById('conn-search').addEventListener('input', (e) => {
 connectionSearchTerm = e.target.value;
 // Typing a search is an implicit "forget the None filter" — leaving both

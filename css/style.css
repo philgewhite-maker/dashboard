@@ -841,6 +841,11 @@ background:none;border:none;cursor:pointer;
 font-size:12px;padding:0 2px;opacity:.7;
 }
 .snooze-btn:hover{opacity:1;}
+.reachout-settings{background:var(--paper-alt,#faf8f5);border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-top:6px;}
+.reachout-stage-row{display:flex;align-items:center;gap:8px;padding:3px 0;}
+.reachout-stage-label{flex:1;font-size:12px;}
+.reachout-stage-row input[type="number"]{width:64px;}
+.reachout-stage-unit{font-size:11px;color:var(--muted);}
 .match-actions{
 margin-left:auto;
 display:flex;
