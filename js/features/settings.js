@@ -101,6 +101,10 @@ conn.contactStatus = '';
 conn.contactResourceName = '';
 conn.contactEtag = '';
 conn.contactMatchedBy = '';
+// The link that produced these is what's just been reset — any pending
+// conflicts against it are moot, and left alone they'd keep showing a
+// "Differs from Google Contacts" prompt for a link that no longer exists.
+conn.contactConflicts = [];
 queueSave();
 renderSelfInfoCheck();
 Promise.all([import('./connections.js'), import('./overview.js')]).then(([c, o]) => { c.renderConnections(); o.renderOverview(); });

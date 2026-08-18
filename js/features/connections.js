@@ -903,6 +903,14 @@ list.querySelectorAll('[data-conn-detail]').forEach((el) => {
 el.addEventListener('change', () => {
 const conn = data.connections.find((x) => x.id === el.dataset.connDetail);
 conn[el.dataset.field] = el.type === 'checkbox' ? el.checked : el.value;
+// A field you just typed into by hand has, by definition, just been
+// resolved -- drop any stale "differs from Google Contacts" conflict still
+// parked against it (contactConflicts is a snapshot taken at match/sync
+// time, not recomputed live, so it otherwise keeps showing an outdated
+// Keep/Use prompt referencing a value that's no longer even on the card).
+if (Array.isArray(conn.contactConflicts) && conn.contactConflicts.some((k) => k.field === el.dataset.field)) {
+conn.contactConflicts = conn.contactConflicts.filter((k) => k.field !== el.dataset.field);
+}
 // Typing an age states what they are TODAY, so record today as the date
 // it was true — that's what lets it be carried forward later.
 if (el.dataset.field === 'age') conn.ageAsOf = el.value.trim() ? todayStr() : '';
@@ -923,7 +931,10 @@ conn.travelUntil = until.toISOString().slice(0, 10);
 // up the next time something else happened to trigger a render, which looks
 // exactly like the paste not working. travelStatus needs it too, to show/
 // hide the "Travelling until" date field and refresh the badge/action.
-if (['name', 'app', 'age', 'dob', 'location', 'driveLink', 'travelStatus'].includes(el.dataset.field)) renderConnections();
+// phone/email are here so a just-dropped stale conflict (above) actually
+// disappears from the card instead of waiting for some other edit to
+// trigger the next full render.
+if (['name', 'app', 'age', 'dob', 'location', 'driveLink', 'travelStatus', 'phone', 'email'].includes(el.dataset.field)) renderConnections();
 renderOverviewRef();
 queueSave();
 });
