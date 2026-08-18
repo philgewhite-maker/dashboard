@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v79</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v80</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -1449,6 +1449,21 @@ Export a chat from WhatsApp (open the chat &rarr; &#8942; &rarr; More &rarr; Exp
 <span class="sync-status" id="whatsapp-status"></span>
 </div>
 <div id="whatsapp-review"></div>
+</section>
+
+<section class="panel wide" id="telegram-panel" data-tab="datingadmin">
+<div class="panel-head">
+<h2><span class="dot slate"></span>Import Telegram chats</h2>
+</div>
+<div class="settings-note" style="margin:0 0 10px;">
+Telegram Desktop &rarr; Settings &rarr; Advanced &rarr; Export Telegram data &rarr; pick JSON or HTML, chats included. Point this at the exported folder (the one containing <span class="mono" style="font-family:monospace;">lists</span> and <span class="mono" style="font-family:monospace;">chats</span>) &mdash; it reads every chat plus your phone contacts locally, matches them against existing connections, and lets you pick which to bring in. Nothing leaves this device.
+</div>
+<div class="sync-row">
+<label class="file-btn" for="telegram-folder-input">Pick the export folder</label>
+<input type="file" id="telegram-folder-input" webkitdirectory multiple style="display:none;">
+<span class="sync-status" id="telegram-status"></span>
+</div>
+<div id="telegram-review"></div>
 </section>
 
 <section class="panel wide" id="photoscan-panel" data-tab="datingadmin">
