@@ -500,6 +500,28 @@ return isTravelPaused(c)
 return '';
 }
 
+// Every chat source writes the identical "[date time] Sender: message"
+// line format (see whatsappimport.js's formatMessageLine) into its own
+// field (chatLog for Tinder, chatLogWhatsApp, chatLogTelegram -- kept
+// separate so one source can never overwrite or hide another's history,
+// see state.js's migration guard), so a single merged, date-sorted view
+// reads as one real conversation regardless of which app carried it. A
+// line with no date prefix (older chatLog saved before dates were
+// threaded through) has no sort key and is treated as earliest rather
+// than dropped.
+function mergedChatLog(c) {
+const lines = [
+...String(c.chatLog || '').split('\n'),
+...String(c.chatLogWhatsApp || '').split('\n'),
+...String(c.chatLogTelegram || '').split('\n'),
+].filter(Boolean);
+return lines.sort((a, b) => {
+const da = (a.match(/^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\]/) || [])[1] || '';
+const db = (b.match(/^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\]/) || [])[1] || '';
+return da < db ? -1 : da > db ? 1 : 0;
+}).join('\n');
+}
+
 function connectionCardHtml(c) {
 const since = daysSince(c.lastContact);
 const travelPaused = isTravelPaused(c);
@@ -535,11 +557,17 @@ const notesFieldHtml = notesHasHits
 <textarea rows="2" data-field="notes" data-conn-detail="${c.id}">${escapeHtml(c.notes || '')}</textarea>
 </details></div>`
 : `<label class="full">Notes<textarea rows="2" data-field="notes" data-conn-detail="${c.id}">${escapeHtml(c.notes || '')}</textarea></label>`;
-const chatFieldHtml = c.chatLog
+const chatSources = [
+{ field: 'chatLog', label: 'Tinder', text: c.chatLog },
+{ field: 'chatLogWhatsApp', label: 'WhatsApp', text: c.chatLogWhatsApp },
+{ field: 'chatLogTelegram', label: 'Telegram', text: c.chatLogTelegram },
+].filter((s) => s.text);
+const mergedChat = mergedChatLog(c);
+const chatFieldHtml = mergedChat
 ? `<div class="field-block full"><span class="field-label">Chat history</span>
-<div class="tinder-chat-block" style="margin:0;">${chatTranscriptHtml(c.chatLog)}</div>
+<div class="tinder-chat-block" style="margin:0;">${chatTranscriptHtml(mergedChat)}</div>
 <details class="tinder-edit-details"><summary>Edit raw text</summary>
-<textarea rows="4" placeholder="Imported from Tinder — one message per line" data-field="chatLog" data-conn-detail="${c.id}">${escapeHtml(c.chatLog)}</textarea>
+${chatSources.map((s) => `<div class="settings-note" style="margin:6px 0 2px;">${escapeHtml(s.label)}</div><textarea rows="4" placeholder="One message per line" data-field="${s.field}" data-conn-detail="${c.id}">${escapeHtml(s.text)}</textarea>`).join('')}
 </details></div>`
 : `<label class="full">Chat history<textarea rows="4" placeholder="Imported from Tinder — one message per line" data-field="chatLog" data-conn-detail="${c.id}"></textarea></label>`;
 return `<div class="match-card" data-conn-row="${c.id}">

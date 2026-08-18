@@ -23,7 +23,7 @@
 // review regardless of how it got picked, so a wrong dropdown pick is just
 // as visible as a wrong auto-match was invisible before.
 import { data, queueSave, currentAge, computeFlags, distanceMiles, FLAG_FIELD_DEFS, suggestedQuestions, TAG_FIELDS, stripSharedSuffix } from '../state.js';
-import { escapeHtml, uid, todayStr, hydratePhotoBackgrounds, openLightbox, knownCityMap } from '../utils.js';
+import { escapeHtml, uid, todayStr, hydratePhotoBackgrounds, openLightbox, knownCityMap, COUNTRY_NAME_TO_NATIONALITY } from '../utils.js';
 import { nameKey, editDistance, phoneKey } from '../googlecontacts.js';
 import { storePhoto, fetchProxiedImage } from '../files.js';
 import { photoGet, photoUrl } from '../db.js';
@@ -165,7 +165,7 @@ id: uid(), name, profileName: '', app: 'Tinder', priority: 3, stage: 'Matched', 
 photoId: null, photoIds: [], tinderPhotoKeys: [], photoAlbums: [], age: '', dob: '', ageAsOf: '', location: [], address: '',
 kids: '', job: '', height: '', education: '', phone: '', email: '',
 contactStatus: '', contactResourceName: '', contactEtag: '', contactConflicts: [],
-likes: '', notes: '', languages: [], nationality: [],
+likes: '', notes: '', chatLog: '', chatLogWhatsApp: '', chatLogTelegram: '', languages: [], nationality: [],
 todos: [], tags: [], aliases: [], dateLocations: [], dateEvents: [], sexTags: [],
 ratings: {}, driveLink: '', photosAlbumUrl: '', photosPersonUrl: '',
 };
@@ -647,68 +647,6 @@ const FLAG_EMOJI_RE = /[\u{1F1E6}-\u{1F1FF}]{2}/gu;
 // FLAG_EMOJI_TO_NATIONALITY, keyed by the common English name instead of
 // the ISO code, plus a couple of the most common alternate names (USA,
 // UK) since matching only fires on an exact name.
-const COUNTRY_NAME_TO_NATIONALITY = {
-Andorra: 'Andorran', 'United Arab Emirates': 'Emirati', Afghanistan: 'Afghan', 'Antigua and Barbuda': 'Antiguan',
-Anguilla: 'Anguillan', Albania: 'Albanian', Armenia: 'Armenian', Angola: 'Angolan', Argentina: 'Argentine',
-'American Samoa': 'American Samoan', Austria: 'Austrian', Australia: 'Australian', Aruba: 'Aruban', Azerbaijan: 'Azerbaijani',
-'Bosnia and Herzegovina': 'Bosnian', Barbados: 'Barbadian', Bangladesh: 'Bangladeshi', Belgium: 'Belgian',
-'Burkina Faso': 'Burkinabe', Bulgaria: 'Bulgarian', Bahrain: 'Bahraini', Burundi: 'Burundian', Benin: 'Beninese',
-Bermuda: 'Bermudian', Brunei: 'Bruneian', Bolivia: 'Bolivian', Brazil: 'Brazilian', Bahamas: 'Bahamian',
-Bhutan: 'Bhutanese', Botswana: 'Motswana', Belarus: 'Belarusian', Belize: 'Belizean',
-Canada: 'Canadian', 'DR Congo': 'Congolese', 'Central African Republic': 'Central African', Congo: 'Congolese',
-Switzerland: 'Swiss', 'Ivory Coast': 'Ivorian', "Cote d'Ivoire": 'Ivorian', Chile: 'Chilean', Cameroon: 'Cameroonian',
-China: 'Chinese', Colombia: 'Colombian', 'Costa Rica': 'Costa Rican', Cuba: 'Cuban', 'Cape Verde': 'Cape Verdean',
-Cyprus: 'Cypriot', 'Czech Republic': 'Czech', Czechia: 'Czech',
-Germany: 'German', Djibouti: 'Djiboutian', Denmark: 'Danish', Dominica: 'Dominican', 'Dominican Republic': 'Dominican',
-Algeria: 'Algerian',
-Ecuador: 'Ecuadorian', Estonia: 'Estonian', Egypt: 'Egyptian', Eritrea: 'Eritrean', Spain: 'Spanish', Ethiopia: 'Ethiopian',
-Finland: 'Finnish', Fiji: 'Fijian', Micronesia: 'Micronesian', France: 'French',
-Gabon: 'Gabonese', 'United Kingdom': 'British', UK: 'British',
-// Not sovereign states, but by far the most common way someone from the
-// UK actually self-describes ("English", not "British") -- worth their
-// own entries rather than only matching the union they're part of.
-England: 'English', Scotland: 'Scottish', Wales: 'Welsh', 'Northern Ireland': 'Northern Irish',
-Grenada: 'Grenadian', Georgia: 'Georgian',
-Ghana: 'Ghanaian', Gambia: 'Gambian', Guinea: 'Guinean', 'Equatorial Guinea': 'Equatorial Guinean', Greece: 'Greek',
-Guatemala: 'Guatemalan', 'Guinea-Bissau': 'Guinea-Bissauan', Guyana: 'Guyanese', Gibraltar: 'Gibraltarian',
-Greenland: 'Greenlandic', Guam: 'Guamanian',
-'Hong Kong': 'Hong Konger', Honduras: 'Honduran', Croatia: 'Croatian', Haiti: 'Haitian', Hungary: 'Hungarian',
-Indonesia: 'Indonesian', Ireland: 'Irish', Israel: 'Israeli', India: 'Indian', Iraq: 'Iraqi', Iran: 'Iranian',
-Iceland: 'Icelandic', Italy: 'Italian',
-Jamaica: 'Jamaican', Jordan: 'Jordanian', Japan: 'Japanese',
-Kenya: 'Kenyan', Kyrgyzstan: 'Kyrgyz', Cambodia: 'Cambodian', Kiribati: 'I-Kiribati', Comoros: 'Comorian',
-'Saint Kitts and Nevis': 'Kittitian', 'North Korea': 'North Korean', 'South Korea': 'South Korean', Kuwait: 'Kuwaiti',
-'Cayman Islands': 'Caymanian', Kazakhstan: 'Kazakhstani',
-Laos: 'Lao', Lebanon: 'Lebanese', 'Saint Lucia': 'Saint Lucian', Liechtenstein: 'Liechtensteiner', 'Sri Lanka': 'Sri Lankan',
-Liberia: 'Liberian', Lesotho: 'Basotho', Lithuania: 'Lithuanian', Luxembourg: 'Luxembourgish', Latvia: 'Latvian', Libya: 'Libyan',
-Morocco: 'Moroccan', Monaco: 'Monegasque', Moldova: 'Moldovan', Montenegro: 'Montenegrin', Madagascar: 'Malagasy',
-'Marshall Islands': 'Marshallese', 'North Macedonia': 'Macedonian', Mali: 'Malian', Myanmar: 'Burmese', Burma: 'Burmese',
-Mongolia: 'Mongolian', Macau: 'Macanese', Macao: 'Macanese', Mauritania: 'Mauritanian', Malta: 'Maltese',
-Mauritius: 'Mauritian', Maldives: 'Maldivian', Malawi: 'Malawian', Mexico: 'Mexican', Malaysia: 'Malaysian', Mozambique: 'Mozambican',
-Namibia: 'Namibian', 'New Caledonia': 'New Caledonian', Niger: 'Nigerien', Nigeria: 'Nigerian', Nicaragua: 'Nicaraguan',
-Netherlands: 'Dutch', Norway: 'Norwegian', Nepal: 'Nepali', Nauru: 'Nauruan', 'New Zealand': 'New Zealand',
-Oman: 'Omani',
-Panama: 'Panamanian', Peru: 'Peruvian', 'French Polynesia': 'French Polynesian', 'Papua New Guinea': 'Papua New Guinean',
-Philippines: 'Filipino', Pakistan: 'Pakistani', Poland: 'Polish', 'Puerto Rico': 'Puerto Rican', Palestine: 'Palestinian',
-Portugal: 'Portuguese', Palau: 'Palauan', Paraguay: 'Paraguayan',
-Qatar: 'Qatari',
-Romania: 'Romanian', Serbia: 'Serbian', Russia: 'Russian', Rwanda: 'Rwandan',
-'Saudi Arabia': 'Saudi', 'Solomon Islands': 'Solomon Islander', Seychelles: 'Seychellois', Sudan: 'Sudanese',
-Sweden: 'Swedish', Singapore: 'Singaporean', Slovenia: 'Slovenian', Slovakia: 'Slovak', 'Sierra Leone': 'Sierra Leonean',
-'San Marino': 'Sammarinese', Senegal: 'Senegalese', Somalia: 'Somali', Suriname: 'Surinamese', 'South Sudan': 'South Sudanese',
-'Sao Tome and Principe': 'Sao Tomean', 'El Salvador': 'Salvadoran', Syria: 'Syrian', Eswatini: 'Swazi', Swaziland: 'Swazi',
-Chad: 'Chadian', Togo: 'Togolese', Thailand: 'Thai', Tajikistan: 'Tajik', 'Timor-Leste': 'Timorese', 'East Timor': 'Timorese',
-Turkmenistan: 'Turkmen', Tunisia: 'Tunisian', Tonga: 'Tongan', Turkey: 'Turkish', 'Türkiye': 'Turkish',
-'Trinidad and Tobago': 'Trinidadian', Tuvalu: 'Tuvaluan', Taiwan: 'Taiwanese', Tanzania: 'Tanzanian',
-Ukraine: 'Ukrainian', Uganda: 'Ugandan', 'United States': 'American', USA: 'American', 'United States of America': 'American',
-Uruguay: 'Uruguayan', Uzbekistan: 'Uzbekistani',
-'Vatican City': 'Vatican', 'Saint Vincent and the Grenadines': 'Vincentian', Venezuela: 'Venezuelan', Vietnam: 'Vietnamese',
-Vanuatu: 'Ni-Vanuatu',
-Samoa: 'Samoan',
-Yemen: 'Yemeni',
-'South Africa': 'South African', Zambia: 'Zambian', Zimbabwe: 'Zimbabwean',
-};
-
 // Decodes every flag emoji in `text` back to its nationality adjective —
 // dedup'd, order of first appearance. codePointAt - 0x1F1E6 + 65 turns
 // the regional-indicator code point back into the plain ASCII letter it

@@ -436,6 +436,15 @@ if (typeof c.matchedOn !== 'string') c.matchedOn = '';
 if (typeof c.tinderMatchId !== 'string') c.tinderMatchId = '';
 if (!Array.isArray(c.tinderPhotoKeys)) c.tinderPhotoKeys = [];
 if (typeof c.chatLog !== 'string') c.chatLog = '';
+// Separate per-source so a WhatsApp or Telegram import can never overwrite
+// or hide another source's history -- chatLog stays Tinder's own (it
+// predates these two and re-scrapes are always the full transcript, same
+// growth-check merge as before). A connection whose Stage moved from
+// "Chatting in app" to "Moved to WhatsApp" to "Moved to Telegram" is
+// expected to end up with all three eventually; connections.js merges and
+// sorts all three chronologically for display rather than showing one.
+if (typeof c.chatLogWhatsApp !== 'string') c.chatLogWhatsApp = '';
+if (typeof c.chatLogTelegram !== 'string') c.chatLogTelegram = '';
 if (typeof c.job !== 'string') c.job = '';
 if (typeof c.height !== 'string') c.height = '';
 if (typeof c.education !== 'string') c.education = '';
@@ -930,11 +939,12 @@ if (!(conn.location || []).length) {
 out.push('Where do they live? Ask rather than assume.');
 }
 // Only once there's an actual transcript -- asking about kids on a bare
-// "Matched" with nothing said yet is premature. chatLog (populated only
-// when the Tinder import found mutual messages) is a more reliable
-// signal for "a real conversation has happened" than stage alone, and
-// avoids importing STAGE_RANK from connections.js (circular dependency).
-if (!String(conn.kids || '').trim() && String(conn.chatLog || '').trim()) {
+// "Matched" with nothing said yet is premature. Any of the three chat
+// fields (populated only once an import found real messages, on whichever
+// app the conversation happened) is a more reliable signal for "a real
+// conversation has happened" than stage alone, and avoids importing
+// STAGE_RANK from connections.js (circular dependency).
+if (!String(conn.kids || '').trim() && (String(conn.chatLog || '').trim() || String(conn.chatLogWhatsApp || '').trim() || String(conn.chatLogTelegram || '').trim())) {
 out.push('Ask whether they have kids, or want them.');
 }
 if ((conn.interests || []).length && !(conn.dateEvents || []).length) {

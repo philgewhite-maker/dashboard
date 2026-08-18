@@ -5,10 +5,13 @@
 // cross-matches every chat against existing connections, and lets a bulk
 // review pass apply the confident ones while flagging the rest for a glance.
 import { data, queueSave } from '../state.js';
-import { escapeHtml, knownCityMap, highlightFlagValues } from '../utils.js';
+import { escapeHtml, findMentions } from '../utils.js';
 import { nameKey, editDistance, phoneKey } from '../googlecontacts.js';
-import { STAGE_RANK, renderConnections } from './connections.js';
+import { STAGE_RANK, renderConnections, unionInto } from './connections.js';
 import { formatMessageLine, buildChatLogText } from './whatsappimport.js';
+import { storePhoto } from '../files.js';
+
+const FIELD_LABELS = { location: 'City', nationality: 'Nationality' };
 
 // ---------- parsing lists/chats.html and lists/contacts.html ----------
 
@@ -53,11 +56,16 @@ return '📷';
 // unlike WhatsApp, which repeats the sender on every single line) -- the
 // sender has to be carried forward from the last labelled message instead
 // of read fresh each time.
-function parseTelegramMessages(html) {
+// initialSender carries the last-known sender across a page boundary --
+// Telegram splits a long chat into messages.html, messages2.html,
+// messages3.html... and each page after the first can still open with a
+// "joined" (unlabelled) block, so parsing a later page cold would
+// miscount its opening run as unattributed system lines.
+function parseTelegramMessages(html, initialSender = '') {
 const doc = new DOMParser().parseFromString(html, 'text/html');
 const nodes = [...doc.querySelectorAll('.history > .message')];
 const messages = [];
-let currentSender = '';
+let currentSender = initialSender;
 let systemCount = 0;
 
 nodes.forEach((el) => {
@@ -101,7 +109,7 @@ text = tmp.textContent.replace(/[ \t]+/g, ' ').trim();
 messages.push({ dateISO: `${yyyy}-${mm}-${dd}`, time: `${hh}:${min}`, sender: currentSender, mediaFile, text });
 });
 
-return { messages, systemCount };
+return { messages, systemCount, lastSender: currentSender };
 }
 
 function detectSenders(messages) {
@@ -159,7 +167,7 @@ stage: 'Matched', lastContact: '', createdAt: new Date().toISOString(),
 photoId: null, photoIds: [], tinderPhotoKeys: [], photoAlbums: [], age: '', dob: '', ageAsOf: '', location: [], address: '',
 kids: '', job: '', height: '', education: '', phone: '', email: '',
 contactStatus: '', contactResourceName: '', contactEtag: '', contactConflicts: [],
-likes: '', notes: '', chatLog: '', languages: [], nationality: [],
+likes: '', notes: '', chatLog: '', chatLogWhatsApp: '', chatLogTelegram: '', languages: [], nationality: [],
 todos: [], tags: [], aliases: [], dateLocations: [], dateEvents: [], sexTags: [],
 ratings: {}, driveLink: '', photosAlbumUrl: '', photosPersonUrl: '',
 };
@@ -172,23 +180,46 @@ return conn;
 // Matched by suffix rather than a stripped-prefix path, so this doesn't
 // care what the export's top-level folder is named (it changes every
 // export -- "DataExport_2026-08-18" today, a different date next time).
+//
+// A chat past a few hundred messages splits across messages.html,
+// messages2.html, messages3.html... (confirmed: Vanessa Torres' 5768-message
+// chat is nowhere near one file) -- every page for a chat is collected and
+// sorted here so applyImport() can walk them in order rather than silently
+// reading only the first.
 function indexFiles(fileList) {
 const files = [...fileList];
 const chatsHtmlFile = files.find((f) => /(^|\/)lists\/chats\.html$/.test(f.webkitRelativePath));
 const contactsHtmlFile = files.find((f) => /(^|\/)lists\/contacts\.html$/.test(f.webkitRelativePath));
-const messagesByChat = new Map();
+const messagePages = new Map();
+const photosByChat = new Map();
 files.forEach((f) => {
-const m = f.webkitRelativePath.match(/(^|\/)chats\/(chat_\d+)\/messages\.html$/);
-if (m) messagesByChat.set(m[2], f);
+const mm = f.webkitRelativePath.match(/(^|\/)chats\/(chat_\d+)\/messages(\d*)\.html$/);
+if (mm) {
+const chatId = mm[2];
+const page = mm[3] ? parseInt(mm[3], 10) : 1;
+if (!messagePages.has(chatId)) messagePages.set(chatId, []);
+messagePages.get(chatId).push({ page, file: f });
+return;
+}
+const pm = f.webkitRelativePath.match(/(^|\/)chats\/(chat_\d+)\/photos\/([^/]+)$/);
+if (pm) {
+if (!photosByChat.has(pm[2])) photosByChat.set(pm[2], new Map());
+photosByChat.get(pm[2]).set(pm[3], f);
+}
 });
-return { chatsHtmlFile, contactsHtmlFile, messagesByChat };
+const messagesByChat = new Map();
+messagePages.forEach((pages, chatId) => {
+pages.sort((a, b) => a.page - b.page);
+messagesByChat.set(chatId, pages.map((p) => p.file));
+});
+return { chatsHtmlFile, contactsHtmlFile, messagesByChat, photosByChat };
 }
 
 let pending = null;
 
 async function handleFolderPick(fileList) {
 const status = document.getElementById('telegram-status');
-const { chatsHtmlFile, contactsHtmlFile, messagesByChat } = indexFiles(fileList);
+const { chatsHtmlFile, contactsHtmlFile, messagesByChat, photosByChat } = indexFiles(fileList);
 if (!chatsHtmlFile || !contactsHtmlFile) {
 status.textContent = "Couldn't find lists/chats.html and lists/contacts.html in that folder — pick the export's top-level folder (the one containing \"lists\" and \"chats\").";
 return;
@@ -218,9 +249,47 @@ return { chat, nameMatches, phoneMatch, chosenId, confident, checked: confident 
 });
 rows.sort((a, b) => b.chat.messageCount - a.chat.messageCount);
 
-pending = { messagesByChat, rows, skippedCount: allChats.length - chats.length };
+const generation = (pending?.generation || 0) + 1;
+pending = { messagesByChat, photosByChat, rows, importPhotos: false, skippedCount: allChats.length - chats.length, generation };
 status.textContent = '';
 render();
+scanMentions(generation);
+}
+
+// Runs after the list is already on screen -- reading and highlighting
+// every chat up front would delay the initial render for no reason, so
+// this walks rows in the background and patches each "Mentioned" cell in
+// as its result lands, same city/flag-rule pipeline the WhatsApp and
+// Tinder reviews already use. Caches the parsed messages on the row too,
+// so applyImport() doesn't re-read the same files a second time.
+async function scanMentions(generation) {
+if (!pending || pending.generation !== generation) return;
+for (let i = 0; i < pending.rows.length; i++) {
+if (!pending || pending.generation !== generation) return;
+const row = pending.rows[i];
+const files = pending.messagesByChat.get(row.chat.chatId);
+if (!files || !files.length) continue;
+const messages = await readAllMessages(files);
+if (!pending || pending.generation !== generation) return;
+row.messages = messages;
+const flatText = messages.map((m) => m.text).filter(Boolean).join('\n');
+row.mentions = findMentions(flatText, data.connections, data.flagRules);
+const cell = document.querySelector(`[data-tg-mentions="${i}"]`);
+if (cell) cell.innerHTML = mentionsChipsHtml(row, i);
+}
+}
+
+// Chips are clickable once a real connection is chosen for the row, same
+// "pick who this is first" gate as WhatsApp's import -- rendered by both
+// the initial table build and scanMentions()'s later per-cell patch, so
+// they need to stay in sync rather than duplicating the markup twice.
+function mentionsChipsHtml(row, i) {
+if (!row.mentions) return '<span class="settings-note" style="margin:0;">scanning…</span>';
+if (!row.mentions.length) return '—';
+const conn = row.chosenId && row.chosenId !== '__new__' ? data.connections.find((c) => c.id === row.chosenId) : null;
+return row.mentions.map((h, j) => conn
+? `<button type="button" class="tag-chip" style="cursor:pointer;border:none;" data-tg-mention="${i}:${j}" title="Click to add to ${FIELD_LABELS[h.field]}">+ ${escapeHtml(h.value)} (${FIELD_LABELS[h.field]})</button>`
+: `<span class="tag-chip" title="Pick who this is to add it">${escapeHtml(h.value)} (${FIELD_LABELS[h.field]})</span>`).join(' ');
 }
 
 function optionsFor(chosenId, nameMatches) {
@@ -249,16 +318,18 @@ ${pending.rows.length} chat${pending.rows.length === 1 ? '' : 's'} with a real c
 <div class="sync-row" style="margin-bottom:8px;">
 <button class="sync-btn" type="button" id="tg-select-confident">Select all confident matches</button>
 <button class="sync-btn" type="button" id="tg-import-go">Import selected</button>
+<label><input type="checkbox" id="tg-import-photos" ${pending.importPhotos ? 'checked' : ''}> Also bring in the photos actually included in each chat (uses more space/sync)</label>
 </div>
 <div style="overflow-x:auto;">
 <table class="limits-table">
-<thead><tr><th></th><th>Chat</th><th>Messages</th><th>Match into</th></tr></thead>
+<thead><tr><th></th><th>Chat</th><th>Messages</th><th>Match into</th><th>Mentioned</th></tr></thead>
 <tbody>
 ${pending.rows.map((row, i) => `<tr>
 <td><input type="checkbox" data-tg-row="${i}" ${row.checked ? 'checked' : ''}></td>
-<td>${escapeHtml(row.chat.name)}${row.phoneMatch ? ' <span class="settings-note" style="display:inline;margin:0;">(phone match)</span>' : ''}</td>
+<td>${escapeHtml(row.chat.name)}${row.phoneMatch ? ' <span class="settings-note" style="display:inline;margin:0;">(phone match)</span>' : ''}${pending.photosByChat.has(row.chat.chatId) ? ' 📷' : ''}</td>
 <td>${row.chat.messageCount}</td>
 <td><select data-tg-select="${i}">${optionsFor(row.chosenId, row.nameMatches)}</select></td>
+<td data-tg-mentions="${i}">${mentionsChipsHtml(row, i)}</td>
 </tr>`).join('')}
 </tbody>
 </table>
@@ -270,31 +341,58 @@ cb.addEventListener('change', () => { pending.rows[+cb.dataset.tgRow].checked = 
 });
 el.querySelectorAll('[data-tg-select]').forEach((sel) => {
 sel.addEventListener('change', () => {
-const row = pending.rows[+sel.dataset.tgSelect];
+const i = +sel.dataset.tgSelect;
+const row = pending.rows[i];
 row.chosenId = sel.value;
 row.checked = !!sel.value;
+// Whether a mention chip is clickable depends on a real connection
+// being chosen -- refresh just that cell rather than the whole table.
+const cell = document.querySelector(`[data-tg-mentions="${i}"]`);
+if (cell) cell.innerHTML = mentionsChipsHtml(row, i);
 });
 });
 document.getElementById('tg-select-confident').addEventListener('click', () => {
 pending.rows.forEach((r) => { if (r.confident) r.checked = true; });
 render();
 });
+document.getElementById('tg-import-photos').addEventListener('change', (e) => { pending.importPhotos = e.target.checked; });
 document.getElementById('tg-import-go').addEventListener('click', () => applyImport());
+}
+
+// Reads every page of a chat in order (messages.html, messages2.html, ...),
+// threading the last-seen sender across the page boundary so a page that
+// opens mid-"joined"-run still attributes correctly.
+async function readAllMessages(files) {
+let messages = [];
+let lastSender = '';
+for (const file of files) {
+const html = await file.text();
+const parsed = parseTelegramMessages(html, lastSender);
+messages = messages.concat(parsed.messages);
+lastSender = parsed.lastSender;
+}
+return messages;
 }
 
 async function applyImport() {
 const status = document.getElementById('telegram-status');
 const toImport = pending.rows.filter((r) => r.checked && r.chosenId);
 if (!toImport.length) { status.textContent = 'Nothing selected.'; return; }
-status.textContent = `Importing ${toImport.length} chat${toImport.length === 1 ? '' : 's'}…`;
+const importPhotos = pending.importPhotos;
 
 let importedCount = 0;
+let photoCount = 0;
 let changed = false;
 for (const row of toImport) {
-const file = pending.messagesByChat.get(row.chat.chatId);
-if (!file) continue;
-const html = await file.text();
-const { messages } = parseTelegramMessages(html);
+status.textContent = `Importing ${row.chat.name}… (${importedCount + 1}/${toImport.length})`;
+// Reuses scanMentions()'s cached parse when it's already landed for this
+// row, rather than reading the same files a second time.
+let messages = row.messages;
+if (!messages) {
+const files = pending.messagesByChat.get(row.chat.chatId);
+if (!files || !files.length) continue;
+messages = await readAllMessages(files);
+}
 if (!messages.length) continue;
 const senders = detectSenders(messages);
 const themName = row.chat.name;
@@ -304,14 +402,34 @@ const conn = row.chosenId === '__new__' ? createConnectionFor(row.chat.name) : d
 if (!conn) continue;
 
 const newText = buildChatLogText(messages, meName);
-const oldCount = String(conn.chatLog || '').split('\n').filter(Boolean).length;
-if (messages.length > oldCount) { conn.chatLog = newText; changed = true; }
+const oldCount = String(conn.chatLogTelegram || '').split('\n').filter(Boolean).length;
+if (messages.length > oldCount) { conn.chatLogTelegram = newText; changed = true; }
 if ((STAGE_RANK['Moved to Telegram'] ?? 0) > (STAGE_RANK[conn.stage] ?? 0)) { conn.stage = 'Moved to Telegram'; changed = true; }
 if (!conn.lastContact) conn.lastContact = messages[messages.length - 1].dateISO;
+
+// mediaFile is only ever a real filename for an actually-included photo
+// -- the excluded-media placeholder is a human-readable sentence that
+// never matches a real file, so this needs no separate type tag.
+if (importPhotos) {
+const chatPhotos = pending.photosByChat.get(row.chat.chatId);
+if (chatPhotos) {
+const seen = new Set();
+for (const m of messages) {
+if (!m.mediaFile || seen.has(m.mediaFile)) continue;
+const file = chatPhotos.get(m.mediaFile);
+if (!file) continue;
+seen.add(m.mediaFile);
+const id = await storePhoto(file);
+if (!conn.photoIds.includes(id)) conn.photoIds.push(id);
+photoCount++;
+changed = true;
+}
+}
+}
 importedCount++;
 }
 
-status.textContent = `Imported ${importedCount} chat${importedCount === 1 ? '' : 's'}.`;
+status.textContent = `Imported ${importedCount} chat${importedCount === 1 ? '' : 's'}${importPhotos ? `, ${photoCount} photo${photoCount === 1 ? '' : 's'}` : ''}.`;
 if (changed) { queueSave(); renderConnections(); }
 pending = null;
 render();
@@ -323,6 +441,29 @@ if (!input) return;
 input.addEventListener('change', () => {
 if (input.files.length) handleFolderPick(input.files);
 });
+// Delegated once here rather than re-attached on every render() -- the
+// review table's innerHTML gets replaced often (row toggles, "select all
+// confident"), and re-adding a listener each time would fire a click
+// handler once per render since old listeners on the same #telegram-review
+// element are never removed.
+const reviewEl = document.getElementById('telegram-review');
+if (reviewEl) {
+reviewEl.addEventListener('click', (e) => {
+const btn = e.target.closest('[data-tg-mention]');
+if (!btn || !pending) return;
+const [rowIdx, mentionIdx] = btn.dataset.tgMention.split(':').map(Number);
+const row = pending.rows[rowIdx];
+if (!row) return;
+const conn = row.chosenId && row.chosenId !== '__new__' ? data.connections.find((c) => c.id === row.chosenId) : null;
+if (!conn) return;
+const hit = row.mentions[mentionIdx];
+unionInto(conn[hit.field], [hit.value]);
+queueSave();
+renderConnections();
+const status = document.getElementById('telegram-status');
+if (status) status.textContent = `Added ${hit.value} to ${conn.name}'s ${FIELD_LABELS[hit.field]}.`;
+});
+}
 }
 
 export {

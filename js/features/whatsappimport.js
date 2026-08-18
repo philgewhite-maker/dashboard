@@ -5,9 +5,9 @@
 // summarizeCleanMatch) -- so importing again just overwrites chatLog with
 // whatever's now longer, rather than needing to dedupe line by line.
 import { data, queueSave } from '../state.js';
-import { escapeHtml, knownCityMap, highlightFlagValues } from '../utils.js';
+import { escapeHtml, findMentions } from '../utils.js';
 import { nameKey, editDistance } from '../googlecontacts.js';
-import { STAGE_RANK, renderConnections } from './connections.js';
+import { STAGE_RANK, renderConnections, unionInto } from './connections.js';
 
 // "DD/MM/YYYY, HH:MM - rest of line". Everything after this prefix belongs
 // to whichever entry it starts; a line that doesn't match is a continuation
@@ -133,13 +133,15 @@ stage: 'Matched', lastContact: '', createdAt: new Date().toISOString(),
 photoId: null, photoIds: [], tinderPhotoKeys: [], photoAlbums: [], age: '', dob: '', ageAsOf: '', location: [], address: '',
 kids: '', job: '', height: '', education: '', phone: '', email: '',
 contactStatus: '', contactResourceName: '', contactEtag: '', contactConflicts: [],
-likes: '', notes: '', chatLog: '', languages: [], nationality: [],
+likes: '', notes: '', chatLog: '', chatLogWhatsApp: '', chatLogTelegram: '', languages: [], nationality: [],
 todos: [], tags: [], aliases: [], dateLocations: [], dateEvents: [], sexTags: [],
 ratings: {}, driveLink: '', photosAlbumUrl: '', photosPersonUrl: '',
 };
 data.connections.push(conn);
 return conn;
 }
+
+const FIELD_LABELS = { location: 'City', nationality: 'Nationality' };
 
 let pending = null;
 
@@ -173,22 +175,8 @@ if (!pending.chosenId) {
 const exact = pending.candidates.find((c) => c.why === 'exact');
 if (exact) pending.chosenId = exact.conn.id;
 }
-// highlightFlagValues() falls back to a plain escape of the whole input
-// when nothing matched (see connections.js's own notesHighlighted) -- an
-// unequal result is the only reliable signal a span actually got inserted,
-// not just that there was text to scan.
 const flatText = messages.map((m) => m.text).filter(Boolean).join('\n');
-const highlighted = flatText ? highlightFlagValues(flatText, data.flagRules, knownCityMap(data.connections)) : '';
-// A whole chat is too long to show back as one highlighted block (unlike
-// Notes, which this same function was built for) -- pull out just the
-// matched terms themselves, deduped, into a short chip list instead.
-if (highlighted && highlighted !== escapeHtml(flatText)) {
-const wrapper = document.createElement('div');
-wrapper.innerHTML = highlighted;
-pending.highlighted = [...new Set([...wrapper.querySelectorAll('span')].map((s) => s.textContent.trim()).filter(Boolean))];
-} else {
-pending.highlighted = [];
-}
+pending.mentions = findMentions(flatText, data.connections, data.flagRules);
 }
 
 function optionsFor(chosenId, candidates) {
@@ -217,7 +205,7 @@ return;
 
 const conn = pending.chosenId && pending.chosenId !== '__new__' ? data.connections.find((c) => c.id === pending.chosenId) : null;
 const rangeHtml = pending.dateRange ? `${pending.dateRange[0]} → ${pending.dateRange[1]}` : '—';
-const existingLines = conn ? String(conn.chatLog || '').split('\n').filter(Boolean).length : 0;
+const existingLines = conn ? String(conn.chatLogWhatsApp || '').split('\n').filter(Boolean).length : 0;
 const newLines = pending.messages.length;
 const growthNote = conn
 ? (newLines > existingLines ? `+${newLines - existingLines} chat line${newLines - existingLines === 1 ? '' : 's'} over what's saved` : 'No longer than what’s already saved — importing would not add anything')
@@ -231,7 +219,9 @@ el.innerHTML = `
 &nbsp;·&nbsp; ${pending.mediaCount} media${pending.mediaNamedCount !== pending.mediaCount ? ` (${pending.mediaNamedCount} named)` : ''}
 ${pending.systemCount ? `&nbsp;·&nbsp; ${pending.systemCount} system line${pending.systemCount === 1 ? '' : 's'} skipped` : ''}
 </div>
-${pending.highlighted.length ? `<div class="settings-note" style="margin:0 0 10px;"><b>Mentioned:</b> ${pending.highlighted.map((h) => `<span class="tag-chip">${escapeHtml(h)}</span>`).join(' ')}</div>` : ''}
+${pending.mentions.length ? `<div class="settings-note" style="margin:0 0 10px;"><b>Mentioned:</b> ${pending.mentions.map((h, i) => conn
+? `<button type="button" class="tag-chip" style="cursor:pointer;border:none;" data-wa-mention="${i}" title="Click to add to ${FIELD_LABELS[h.field]}">+ ${escapeHtml(h.value)} (${FIELD_LABELS[h.field]})</button>`
+: `<span class="tag-chip" title="Pick who this is to add it">${escapeHtml(h.value)} (${FIELD_LABELS[h.field]})</span>`).join(' ')}</div>` : ''}
 <div class="sync-row">
 <label>Import into <select id="wa-conn-select">${optionsFor(pending.chosenId, pending.candidates)}</select></label>
 <span class="sync-status">${escapeHtml(growthNote)}</span>
@@ -252,6 +242,17 @@ document.getElementById('wa-conn-select').addEventListener('change', (e) => {
 pending.chosenId = e.target.value;
 render();
 });
+el.querySelectorAll('[data-wa-mention]').forEach((btn) => {
+btn.addEventListener('click', () => {
+if (!conn) return;
+const hit = pending.mentions[+btn.dataset.waMention];
+unionInto(conn[hit.field], [hit.value]);
+queueSave();
+renderConnections();
+const status = document.getElementById('whatsapp-status');
+if (status) status.textContent = `Added ${hit.value} to ${conn.name}'s ${FIELD_LABELS[hit.field]}.`;
+});
+});
 document.getElementById('wa-import-go').addEventListener('click', () => applyImport());
 }
 
@@ -261,10 +262,10 @@ const conn = pending.chosenId === '__new__' ? createConnectionFor(pending.themNa
 if (!conn) return;
 
 const newText = buildChatLogText(pending.messages, pending.meName);
-const oldCount = String(conn.chatLog || '').split('\n').filter(Boolean).length;
+const oldCount = String(conn.chatLogWhatsApp || '').split('\n').filter(Boolean).length;
 const newCount = pending.messages.length;
 let changed = false;
-if (newCount > oldCount) { conn.chatLog = newText; changed = true; }
+if (newCount > oldCount) { conn.chatLogWhatsApp = newText; changed = true; }
 
 if ((STAGE_RANK['Moved to WhatsApp'] ?? 0) > (STAGE_RANK[conn.stage] ?? 0)) {
 conn.stage = 'Moved to WhatsApp';
@@ -282,6 +283,154 @@ const textarea = document.getElementById('whatsapp-input');
 if (textarea) textarea.value = '';
 }
 
+// ---------- bulk mode: many .txt files at once ----------
+
+// WhatsApp's own export filename, e.g. "WhatsApp Chat with Katrina.txt" or
+// "...no media.txt" -- a much more reliable "who is this" signal than
+// guessing from message-count alone (a very one-sided chat could otherwise
+// pick the wrong side as "them"), so it's preferred when present.
+const FILENAME_NAME_RE = /^WhatsApp Chat with (.+?)(?:\s*\(\d+\))?(?:\s*no media)?\.txt$/i;
+
+let bulkPending = null;
+
+async function handleBulkFiles(fileList) {
+const status = document.getElementById('whatsapp-status');
+const el = document.getElementById('whatsapp-bulk-review');
+document.getElementById('whatsapp-review').innerHTML = '';
+pending = null;
+if (status) status.textContent = `Reading ${fileList.length} files…`;
+
+const rows = [];
+for (const file of [...fileList]) {
+const text = await file.text();
+const nameMatch = file.name.match(FILENAME_NAME_RE);
+const filenameHint = nameMatch ? nameMatch[1].trim() : '';
+const senders = detectSenders(text);
+if (!senders.length) { rows.push({ fileName: file.name, error: 'No timestamped messages found', senders: [] }); continue; }
+
+let themGuess = filenameHint ? senders.find((s) => nameKey(s.name) === nameKey(filenameHint)) : null;
+if (!themGuess) themGuess = senders.find((s) => nameKey(s.name) !== nameKey(data.myName)) || senders[senders.length > 1 ? 1 : 0];
+const meGuess = senders.find((s) => s !== themGuess) || senders[0];
+
+const { messages } = parseWhatsAppExport(text, meGuess.name, themGuess.name);
+const flatText = messages.map((m) => m.text).filter(Boolean).join('\n');
+const mentions = findMentions(flatText, data.connections, data.flagRules);
+const displayName = filenameHint || themGuess.name;
+const candidates = matchCandidates(displayName, 5);
+let chosenId = '';
+let confident = false;
+const exact = candidates.find((c) => c.why === 'exact');
+if (exact) { chosenId = exact.conn.id; confident = true; }
+
+rows.push({
+fileName: file.name, displayName, meName: meGuess.name, themName: themGuess.name,
+messages, mentions, candidates, chosenId, confident, checked: confident,
+});
+}
+bulkPending = { rows };
+if (status) status.textContent = '';
+renderBulk();
+}
+
+function bulkOptionsFor(chosenId, candidates) {
+const matchIds = new Set(candidates.map((m) => m.conn.id));
+const rest = data.connections.filter((c) => !matchIds.has(c.id)).sort((a, b) => a.name.localeCompare(b.name));
+const matchOptions = candidates.map((m) => `<option value="${escapeHtml(m.conn.id)}"${m.conn.id === chosenId ? ' selected' : ''}>${escapeHtml(m.conn.name)}${m.why === 'exact' ? '' : ` (${escapeHtml(m.why)})`}</option>`).join('');
+const restOptions = rest.map((c) => `<option value="${escapeHtml(c.id)}"${c.id === chosenId ? ' selected' : ''}>${escapeHtml(c.name)}</option>`).join('');
+return `<option value=""${chosenId ? '' : ' selected'}>— skip —</option>`
++ (matchOptions ? `<optgroup label="Likely match">${matchOptions}</optgroup>` : '')
++ `<optgroup label="Everyone else">${restOptions}</optgroup>`
++ `<option value="__new__">+ New connection…</option>`;
+}
+
+function bulkMentionsChipsHtml(row, i) {
+if (!row.mentions.length) return '—';
+const conn = row.chosenId && row.chosenId !== '__new__' ? data.connections.find((c) => c.id === row.chosenId) : null;
+return row.mentions.map((h, j) => conn
+? `<button type="button" class="tag-chip" style="cursor:pointer;border:none;" data-wab-mention="${i}:${j}" title="Click to add to ${FIELD_LABELS[h.field]}">+ ${escapeHtml(h.value)} (${FIELD_LABELS[h.field]})</button>`
+: `<span class="tag-chip" title="Pick who this is to add it">${escapeHtml(h.value)} (${FIELD_LABELS[h.field]})</span>`).join(' ');
+}
+
+function renderBulk() {
+const el = document.getElementById('whatsapp-bulk-review');
+if (!el) return;
+if (!bulkPending) { el.innerHTML = ''; return; }
+if (!bulkPending.rows.length) { el.innerHTML = '<div class="settings-note" style="margin:0;">No files read.</div>'; return; }
+
+const errorRows = bulkPending.rows.filter((r) => r.error);
+const goodRows = bulkPending.rows.filter((r) => !r.error);
+const confidentCount = goodRows.filter((r) => r.confident).length;
+
+el.innerHTML = `
+<div class="settings-note" style="margin:0 0 10px;">
+${goodRows.length} chat${goodRows.length === 1 ? '' : 's'} read${errorRows.length ? `, ${errorRows.length} couldn't be parsed (${errorRows.map((r) => escapeHtml(r.fileName)).join(', ')})` : ''}
+&nbsp;·&nbsp; ${confidentCount} exact-name-matched
+</div>
+<div class="sync-row" style="margin-bottom:8px;">
+<button class="sync-btn" type="button" id="wab-select-confident">Select all confident matches</button>
+<button class="sync-btn" type="button" id="wab-import-go">Import selected</button>
+</div>
+<div style="overflow-x:auto;">
+<table class="limits-table">
+<thead><tr><th></th><th>File</th><th>Messages</th><th>Match into</th><th>Mentioned</th></tr></thead>
+<tbody>
+${goodRows.map((row, i) => `<tr>
+<td><input type="checkbox" data-wab-row="${i}" ${row.checked ? 'checked' : ''}></td>
+<td>${escapeHtml(row.displayName)} <span class="settings-note" style="display:inline;margin:0;">(${escapeHtml(row.fileName)})</span></td>
+<td>${row.messages.length}</td>
+<td><select data-wab-select="${i}">${bulkOptionsFor(row.chosenId, row.candidates)}</select></td>
+<td data-wab-mentions="${i}">${bulkMentionsChipsHtml(row, i)}</td>
+</tr>`).join('')}
+</tbody>
+</table>
+</div>
+`;
+
+el.querySelectorAll('[data-wab-row]').forEach((cb) => {
+cb.addEventListener('change', () => { goodRows[+cb.dataset.wabRow].checked = cb.checked; });
+});
+el.querySelectorAll('[data-wab-select]').forEach((sel) => {
+sel.addEventListener('change', () => {
+const i = +sel.dataset.wabSelect;
+const row = goodRows[i];
+row.chosenId = sel.value;
+row.checked = !!sel.value;
+const cell = document.querySelector(`[data-wab-mentions="${i}"]`);
+if (cell) cell.innerHTML = bulkMentionsChipsHtml(row, i);
+});
+});
+document.getElementById('wab-select-confident').addEventListener('click', () => {
+goodRows.forEach((r) => { if (r.confident) r.checked = true; });
+renderBulk();
+});
+document.getElementById('wab-import-go').addEventListener('click', () => applyBulkImport());
+}
+
+async function applyBulkImport() {
+const status = document.getElementById('whatsapp-status');
+const goodRows = bulkPending.rows.filter((r) => !r.error);
+const toImport = goodRows.filter((r) => r.checked && r.chosenId);
+if (!toImport.length) { if (status) status.textContent = 'Nothing selected.'; return; }
+
+let importedCount = 0;
+let changed = false;
+for (const row of toImport) {
+const conn = row.chosenId === '__new__' ? createConnectionFor(row.displayName) : data.connections.find((c) => c.id === row.chosenId);
+if (!conn) continue;
+const newText = buildChatLogText(row.messages, row.meName);
+const oldCount = String(conn.chatLogWhatsApp || '').split('\n').filter(Boolean).length;
+if (row.messages.length > oldCount) { conn.chatLogWhatsApp = newText; changed = true; }
+if ((STAGE_RANK['Moved to WhatsApp'] ?? 0) > (STAGE_RANK[conn.stage] ?? 0)) { conn.stage = 'Moved to WhatsApp'; changed = true; }
+if (!conn.lastContact && row.messages.length) conn.lastContact = row.messages[row.messages.length - 1].dateISO;
+importedCount++;
+}
+
+if (status) status.textContent = `Imported ${importedCount} chat${importedCount === 1 ? '' : 's'}.`;
+if (changed) { queueSave(); renderConnections(); }
+bulkPending = null;
+renderBulk();
+}
+
 function initWhatsAppImport() {
 const btn = document.getElementById('whatsapp-import-btn');
 const textarea = document.getElementById('whatsapp-input');
@@ -293,20 +442,52 @@ btn.addEventListener('click', () => {
 const text = textarea.value.trim();
 if (!text) { if (status) status.textContent = 'Paste the exported chat text first.'; return; }
 if (status) status.textContent = '';
+document.getElementById('whatsapp-bulk-review').innerHTML = '';
+bulkPending = null;
 parseInput(text);
 render();
 });
 
 fileInput.addEventListener('change', async () => {
+if (!fileInput.files.length) return;
+if (fileInput.files.length > 1) {
+await handleBulkFiles(fileInput.files);
+fileInput.value = '';
+return;
+}
 const file = fileInput.files[0];
-if (!file) return;
 const text = await file.text();
 textarea.value = text;
 if (status) status.textContent = '';
+document.getElementById('whatsapp-bulk-review').innerHTML = '';
+bulkPending = null;
 parseInput(text);
 render();
 fileInput.value = '';
 });
+
+// Delegated once, same reasoning as telegramimport.js's own mention
+// click handler -- #whatsapp-bulk-review's innerHTML gets replaced on
+// every renderBulk() call, and re-attaching a listener each time would
+// fire once per render.
+const bulkEl = document.getElementById('whatsapp-bulk-review');
+if (bulkEl) {
+bulkEl.addEventListener('click', (e) => {
+const mBtn = e.target.closest('[data-wab-mention]');
+if (!mBtn || !bulkPending) return;
+const [rowIdx, mentionIdx] = mBtn.dataset.wabMention.split(':').map(Number);
+const goodRows = bulkPending.rows.filter((r) => !r.error);
+const row = goodRows[rowIdx];
+if (!row) return;
+const conn = row.chosenId && row.chosenId !== '__new__' ? data.connections.find((c) => c.id === row.chosenId) : null;
+if (!conn) return;
+const hit = row.mentions[mentionIdx];
+unionInto(conn[hit.field], [hit.value]);
+queueSave();
+renderConnections();
+if (status) status.textContent = `Added ${hit.value} to ${conn.name}'s ${FIELD_LABELS[hit.field]}.`;
+});
+}
 }
 
 export { initWhatsAppImport, parseWhatsAppExport, detectSenders, buildChatLogText, formatMessageLine };
