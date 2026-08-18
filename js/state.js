@@ -287,13 +287,9 @@ function setExternalUpdateHandler(fn) { onExternalUpdate = fn; }
 async function loadData() {
 const stored = await kvGet(DATA_KEY);
 knownRev = (await kvGet(REV_KEY)) || 0;
-if (stored) {
-data = stored;
+data = stored || sampleData();
 migrate();
-return;
-}
-data = sampleData();
-await persist();
+if (!stored) await persist();
 }
 
 // Fills in fields added after the schema grew, so older saved data doesn't

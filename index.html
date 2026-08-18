@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v78</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v79</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -1432,6 +1432,23 @@ console.log('Ready. Run tinderBulkImport() for the default 15, tinderBulkImport(
 </div>
 <div id="tinder-bulk-review"></div>
 <div id="tinder-review"></div>
+</section>
+
+<section class="panel wide" id="whatsapp-panel" data-tab="datingadmin">
+<div class="panel-head">
+<h2><span class="dot teal"></span>Import a WhatsApp chat</h2>
+</div>
+<div class="settings-note" style="margin:0 0 10px;">
+Export a chat from WhatsApp (open the chat &rarr; &#8942; &rarr; More &rarr; Export chat, with or without media) and paste the .txt content below, or upload the file directly. Either export works &mdash; the no-media one is lighter but drops photo/video captions. Photos/videos themselves go through the screenshot scanner below, not here.
+</div>
+<textarea id="whatsapp-input" rows="4" style="width:100%;font-family:monospace;font-size:12px;" placeholder="Paste the exported chat .txt content here"></textarea>
+<div class="sync-row" style="margin-top:8px;">
+<button class="sync-btn" id="whatsapp-import-btn" type="button">Read chat</button>
+<label class="file-btn" for="whatsapp-file-input">Or upload the .txt file</label>
+<input type="file" id="whatsapp-file-input" accept=".txt,text/plain" style="display:none;">
+<span class="sync-status" id="whatsapp-status"></span>
+</div>
+<div id="whatsapp-review"></div>
 </section>
 
 <section class="panel wide" id="photoscan-panel" data-tab="datingadmin">

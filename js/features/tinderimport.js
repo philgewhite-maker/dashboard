@@ -162,7 +162,7 @@ return matchCandidates(name, 1)[0] || null;
 function createConnectionFor(name) {
 const conn = {
 id: uid(), name, profileName: '', app: 'Tinder', priority: 3, stage: 'Matched', lastContact: todayStr(), createdAt: new Date().toISOString(),
-photoId: null, photoIds: [], tinderPhotoKeys: [], photoAlbums: [], age: '', dob: '', ageAsOf: '', location: '', address: '',
+photoId: null, photoIds: [], tinderPhotoKeys: [], photoAlbums: [], age: '', dob: '', ageAsOf: '', location: [], address: '',
 kids: '', job: '', height: '', education: '', phone: '', email: '',
 contactStatus: '', contactResourceName: '', contactEtag: '', contactConflicts: [],
 likes: '', notes: '', languages: [], nationality: [],
