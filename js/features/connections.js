@@ -20,6 +20,77 @@ const CONN_APPS = ['Bumble', 'Tinder', 'Hinge', 'WhatsApp', 'Telegram', 'Instagr
 // met, not a UI, so they're deliberately left out of that hint.
 const SCREENSHOT_APPS = new Set(['Bumble', 'Tinder', 'Hinge', 'WhatsApp', 'Telegram', 'Instagram']);
 
+// One small icon per place evidence of this connection can come from —
+// replaces the plain "TINDER" text label and the separate "In contacts"
+// text badge with a single hoverable row (see sourceIconsHtml()). Keyed by
+// c.app value where it's a real platform, plus the extra non-app sources
+// (a chat field being populated, a linked Google Photos album, a matched
+// Google Contact) that CONN_APPS has no slot for at all.
+const SOURCE_ICONS = {
+Bumble: { icon: '🐝', label: 'Bumble' },
+Tinder: { icon: '🔥', label: 'Tinder' },
+Hinge: { icon: '💜', label: 'Hinge' },
+WhatsApp: { icon: '💬', label: 'WhatsApp', cls: 'src-whatsapp' },
+Telegram: { icon: '✈️', label: 'Telegram', cls: 'src-telegram' },
+Instagram: { icon: '📸', label: 'Instagram' },
+'Real life': { icon: '🤝', label: 'Met in real life' },
+Other: { icon: '❔', label: 'Other' },
+googlePhotos: { icon: '🖼️', label: 'Google Photos' },
+googleContacts: { icon: '📇', label: 'Google Contacts' },
+};
+
+// One icon per Stage value (see CONN_STAGES above) -- shown next to the
+// source icons so the card's whole "where things stand" reads at a glance
+// without needing to open the Stage dropdown.
+const STAGE_ICONS = {
+Superswiped: '🌟', Matched: '🔗', 'Chatting in app': '💭',
+'Moved to WhatsApp': '💬', 'Moved to Telegram': '✈️',
+'Planning to call': '📞', 'Planning to meet': '🗓️', 'Arranged to meet': '📌',
+'Met in person': '🤝', Dating: '❤️', Faded: '🌫️', Archived: '📦',
+};
+
+// One icon per milestone value (see MILESTONE_SUGGESTIONS below) -- a
+// milestone typed as free text that isn't in this table still saves fine,
+// it just doesn't get its own icon (falls back to a generic marker).
+const MILESTONE_ICONS = {
+'Exchanged details': '📱', Met: '🤝', Kissed: '💋',
+'Slept together': '🍆', Holidayed: '🌴', Engaged: '💍', Married: '💒',
+};
+const MILESTONE_ICON_FALLBACK = '✳️';
+
+function iconSpan(icon, label, extraCls) {
+return `<span class="src-icon${extraCls ? ` ${extraCls}` : ''}" title="${escapeHtml(label)}">${icon}</span>`;
+}
+
+// Every place there's real evidence this connection exists somewhere --
+// not just c.app (the original match platform), since a conversation
+// routinely continues on a second app after matching (see the Stage
+// values "Moved to WhatsApp"/"Moved to Telegram"), and Google Photos/
+// Contacts are never "the app" but are still worth a glance-able icon.
+function sourceIconsHtml(c) {
+const parts = [];
+const appInfo = SOURCE_ICONS[c.app];
+if (appInfo) parts.push(iconSpan(appInfo.icon, appInfo.label, appInfo.cls));
+if (c.chatLog && c.app !== 'Tinder') parts.push(iconSpan(SOURCE_ICONS.Tinder.icon, 'Tinder chat'));
+if (c.chatLogWhatsApp && c.app !== 'WhatsApp') parts.push(iconSpan(SOURCE_ICONS.WhatsApp.icon, 'WhatsApp chat', SOURCE_ICONS.WhatsApp.cls));
+if (c.chatLogTelegram && c.app !== 'Telegram') parts.push(iconSpan(SOURCE_ICONS.Telegram.icon, 'Telegram chat', SOURCE_ICONS.Telegram.cls));
+if ((c.photoAlbums || []).length) {
+const n = c.photoAlbums.length;
+parts.push(iconSpan(SOURCE_ICONS.googlePhotos.icon, `Google Photos (${n} album${n === 1 ? '' : 's'})`));
+}
+if (c.contactStatus === 'linked') parts.push(iconSpan(SOURCE_ICONS.googleContacts.icon, 'In Google Contacts'));
+return parts.join('');
+}
+
+function stageIconHtml(c) {
+const icon = STAGE_ICONS[c.stage];
+return icon ? iconSpan(icon, `Stage: ${c.stage}`) : '';
+}
+
+function milestoneIconsHtml(c) {
+return (c.milestones || []).map((m) => iconSpan(MILESTONE_ICONS[m] || MILESTONE_ICON_FALLBACK, m)).join('');
+}
+
 // Keeps an unrecognised existing value (older data, or a source since removed
 // from the list) as a selectable option instead of silently switching the
 // connection to whatever happens to be first.
@@ -306,6 +377,11 @@ return `<span class="tag-chip${color ? ' tag-chip-' + color : ''}">${escapeHtml(
 // but displaying them is fine. A plain "Name_" album is captioned with the
 // person's name; anything else shows just its qualifier, since the name is
 // already the card you're looking at.
+function coverPinHtml(connId, photoId, currentCoverId) {
+const isCover = photoId === currentCoverId;
+return `<button type="button" class="cover-pin${isCover ? ' is-cover' : ''}" data-set-cover="${connId}" data-set-cover-id="${escapeHtml(photoId)}" title="${isCover ? 'Cover photo' : 'Set as cover photo'}">${isCover ? '★' : '☆'}</button>`;
+}
+
 function albumListHtml(c) {
 const albums = c.photoAlbums || [];
 if (!albums.length) return '<div class="album-empty">None linked — name an album "' + escapeHtml(c.name) + '_" in Google Photos, then import it on the Dating admin tab.</div>';
@@ -315,13 +391,21 @@ ${a.coverPhotoId ? `<span class="thumb-img" data-photo-bg="${escapeHtml(a.coverP
 : a.cover ? `<img src="${escapeHtml(a.cover)}" alt="" draggable="false" loading="lazy" referrerpolicy="no-referrer" onerror="this.outerHTML='<span class=&quot;album-nocover&quot;>cover link expired &mdash; re-run the snippet</span>'">`
 : `<span class="album-nocover">${escapeHtml(noCoverNote(a.count))}</span>`}
 </a>
+${a.coverPhotoId ? coverPinHtml(c.id, a.coverPhotoId, c.photoId) : ''}
 <div class="album-caption">${escapeHtml([a.location, a.date, a.other].filter(Boolean).join(' · ') || c.name)}</div>
 <span class="tag-x" data-album-remove="${c.id}" data-album-idx="${i}" title="Unlink">&times;</span>
 </div>`).join('')}</div>`;
 }
 
+// A gallery thumbnail's own click already opens the lightbox (data-view-
+// photo) -- "make this the cover" needed its own separate control rather
+// than overloading that click, hence the small pin button rather than a
+// click-the-photo-itself gesture. Same pin reused on album covers (only
+// when a real stored coverPhotoId exists, see task #44 -- a live Google
+// session URL isn't a storable photo id) so either source can become the
+// connection's main photo.
 function galleryHtml(c) {
-const thumbs = (c.photoIds || []).map((id, i) => `<div class="gallery-thumb"><span class="thumb-img" data-photo-bg="${escapeHtml(id)}" data-view-photo="${escapeHtml(id)}"></span><span class="tag-x" data-photo-remove="${c.id}" data-photo-idx="${i}">&times;</span></div>`).join('');
+const thumbs = (c.photoIds || []).map((id, i) => `<div class="gallery-thumb"><span class="thumb-img" data-photo-bg="${escapeHtml(id)}" data-view-photo="${escapeHtml(id)}"></span>${coverPinHtml(c.id, id, c.photoId)}<span class="tag-x" data-photo-remove="${c.id}" data-photo-idx="${i}">&times;</span></div>`).join('');
 return `<div class="photo-gallery">${thumbs}<label class="gallery-add" for="photo-add-${c.id}">+</label><input type="file" id="photo-add-${c.id}" accept="image/*" multiple style="display:none;" data-photo-add="${c.id}"></div>`;
 }
 
@@ -368,6 +452,35 @@ function needsAttentionIds() {
 return data.connections.filter((c) => suggestedQuestions(c).length > 0).map((c) => c.id);
 }
 
+function isReachOutSnoozed(c) {
+return !!(c.attentionSnoozedUntil && c.attentionSnoozedUntil > todayStr());
+}
+
+// Margin past the connection's OWN threshold (priority-scaled), not just
+// a plain yes/no -- used only to rank who gets the badge below, since
+// "everyone past their threshold" stops being an actionable shortlist and
+// just becomes wallpaper once there are more than a handful.
+function reachOutOverdueAmount(c) {
+if (isDormantStage(c.stage) || isTravelPaused(c) || isReachOutSnoozed(c)) return -Infinity;
+return daysSince(c.lastContact) - reachOutThreshold(c.priority);
+}
+
+// Recomputed once per renderConnections() call (see topReachOutIdSet
+// below) rather than per-card, since "who's in the top 10" is a property
+// of the whole list, not any one connection in isolation.
+function computeTopReachOut(n = 10) {
+return new Set(
+data.connections
+.map((c) => ({ id: c.id, amount: reachOutOverdueAmount(c) }))
+.filter((x) => x.amount >= 0)
+.sort((a, b) => b.amount - a.amount)
+.slice(0, n)
+.map((x) => x.id),
+);
+}
+
+let topReachOutIdSet = new Set();
+
 // Matched on a fixed synthetic source (not per-connection — this is one
 // standing "go review the list" task, not a task per person), the same
 // stable-source pattern the Mail and Google Tasks capture buttons use.
@@ -380,6 +493,7 @@ return data.tasks.find((t) => t.source && t.source.kind === ATTENTION_TASK_SOURC
 
 function renderConnections() {
 renderSortOptions();
+topReachOutIdSet = computeTopReachOut();
 const list = document.getElementById('connections-list');
 document.getElementById('connections-count').textContent = data.connections.length + (data.connections.length === 1 ? ' connection' : ' connections');
 const attnBtn = document.getElementById('conn-needs-attention-btn');
@@ -509,23 +623,37 @@ return '';
 // line with no date prefix (older chatLog saved before dates were
 // threaded through) has no sort key and is treated as earliest rather
 // than dropped.
-function mergedChatLog(c) {
-const lines = [
-...String(c.chatLog || '').split('\n'),
-...String(c.chatLogWhatsApp || '').split('\n'),
-...String(c.chatLogTelegram || '').split('\n'),
-].filter(Boolean);
-return lines.sort((a, b) => {
-const da = (a.match(/^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\]/) || [])[1] || '';
-const db = (b.match(/^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\]/) || [])[1] || '';
+// Which icon a chat line's own field maps to -- separate from the Stage/
+// c.app source icons above, since a line's platform is fixed by which
+// field it was imported into regardless of what the connection's current
+// Stage or original match app say.
+const CHAT_FIELD_SOURCE_ICONS = {
+chatLog: SOURCE_ICONS.Tinder,
+chatLogWhatsApp: SOURCE_ICONS.WhatsApp,
+chatLogTelegram: SOURCE_ICONS.Telegram,
+};
+
+// Tagged with which field each line came from (not just concatenated),
+// so a chat spanning more than one platform can still show which is which
+// per line -- interleaving three platforms' worth of messages with no way
+// to tell them apart was the actual complaint, not the merge itself.
+function mergedChatLines(c) {
+const tagged = [
+...String(c.chatLog || '').split('\n').filter(Boolean).map((text) => ({ source: 'chatLog', text })),
+...String(c.chatLogWhatsApp || '').split('\n').filter(Boolean).map((text) => ({ source: 'chatLogWhatsApp', text })),
+...String(c.chatLogTelegram || '').split('\n').filter(Boolean).map((text) => ({ source: 'chatLogTelegram', text })),
+];
+return tagged.sort((a, b) => {
+const da = (a.text.match(/^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\]/) || [])[1] || '';
+const db = (b.text.match(/^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\]/) || [])[1] || '';
 return da < db ? -1 : da > db ? 1 : 0;
-}).join('\n');
+});
 }
 
 function connectionCardHtml(c) {
 const since = daysSince(c.lastContact);
 const travelPaused = isTravelPaused(c);
-const overdue = !isDormantStage(c.stage) && !travelPaused && since >= reachOutThreshold(c.priority);
+const overdue = topReachOutIdSet.has(c.id);
 const stars = [1, 2, 3, 4, 5].map((n) => `<svg class="star priority-star ${n <= c.priority ? 'filled' : ''}" data-conn="${c.id}" data-star="${n}" viewBox="0 0 20 20" fill="currentColor"><path d="M10 1l2.6 5.9 6.4.6-4.8 4.3 1.4 6.2L10 14.9 4.4 18l1.4-6.2L1 7.5l6.4-.6z"/></svg>`).join('');
 const nameMeta = [displayAge(c), (c.location || []).join(', ')].map((s) => String(s || '').trim()).filter(Boolean).join(' · ');
 const flags = computeFlags(c, data.flagRules);
@@ -562,10 +690,17 @@ const chatSources = [
 { field: 'chatLogWhatsApp', label: 'WhatsApp', text: c.chatLogWhatsApp },
 { field: 'chatLogTelegram', label: 'Telegram', text: c.chatLogTelegram },
 ].filter((s) => s.text);
-const mergedChat = mergedChatLog(c);
-const chatFieldHtml = mergedChat
+const mergedLines = mergedChatLines(c);
+// Per-line source icons only kick in once there's genuinely more than one
+// platform to tell apart -- a single-source chat doesn't need clarifying.
+const multiSource = chatSources.length > 1;
+const chatSourceRow = multiSource
+? `<div class="icon-row" style="margin:0 0 6px;">${chatSources.map((s) => iconSpan(CHAT_FIELD_SOURCE_ICONS[s.field].icon, `${s.label} chat`, CHAT_FIELD_SOURCE_ICONS[s.field].cls)).join('')}</div>`
+: '';
+const chatFieldHtml = mergedLines.length
 ? `<div class="field-block full"><span class="field-label">Chat history</span>
-<div class="tinder-chat-block" style="margin:0;">${chatTranscriptHtml(mergedChat, data.flagRules, knownCityMap(data.connections))}</div>
+${chatSourceRow}
+<div class="tinder-chat-block" style="margin:0;">${chatTranscriptHtml(mergedLines, data.flagRules, knownCityMap(data.connections), multiSource ? CHAT_FIELD_SOURCE_ICONS : null)}</div>
 <details class="tinder-edit-details"><summary>Edit raw text</summary>
 ${chatSources.map((s) => `<div class="settings-note" style="margin:6px 0 2px;">${escapeHtml(s.label)}</div><textarea rows="4" placeholder="One message per line" data-field="${s.field}" data-conn-detail="${c.id}">${escapeHtml(s.text)}</textarea>`).join('')}
 </details></div>`
@@ -575,7 +710,7 @@ return `<div class="match-card" data-conn-row="${c.id}">
 ${avatarHtml(c.photoId, c.name)}
 <div class="match-id">
 <div class="match-name">${flagDotHtml}${escapeHtml(c.name)}${nameMeta ? ` <span class="match-meta">${escapeHtml(nameMeta)}</span>` : ''}</div>
-<div class="app-tag">${escapeHtml(c.app)}</div>
+<div class="icon-row">${sourceIconsHtml(c)}${stageIconHtml(c)}${milestoneIconsHtml(c)}</div>
 </div>
 <div class="stars">${stars}</div>
 <div class="match-stage">
@@ -584,10 +719,10 @@ ${CONN_STAGES.map((s) => `<option value="${s}" ${s === c.stage ? 'selected' : ''
 </select>
 </div>
 <div class="match-actions">
-${c.contactStatus ? `<span class="contact-badge ${escapeHtml(c.contactStatus)}">${escapeHtml(CONTACT_STATUS_LABELS[c.contactStatus] || '')}</span>` : ''}
+${c.contactStatus === 'review' ? `<span class="contact-badge review">${escapeHtml(CONTACT_STATUS_LABELS.review)}</span>` : ''}
 ${travelBadgeHtml(c)}
 <span class="match-contact">${since === 0 ? 'today' : since + 'd since contact'}</span>
-${overdue ? '<span class="reach-badge">Reach out</span>' : ''}
+${overdue ? `<span class="reach-badge" title="${escapeHtml(`${since}d since contact, ${c.priority}★ threshold is ${reachOutThreshold(c.priority)}d${questions.length ? ` — also: ${questions.join('; ')}` : ''}`)}">Reach out</span><button type="button" class="snooze-btn" data-snooze="${c.id}" title="Snooze this for a week">💤</button>` : ''}
 ${action ? `<span class="suggested-action" title="Suggested next step, recomputed fresh each time">${escapeHtml(action)}</span>` : ''}
 <button class="log-btn" data-log="${c.id}">Log contact</button>
 <span class="del-x" style="opacity:1;" data-del-conn="${c.id}">&times;</span>
@@ -599,6 +734,7 @@ ${contactPickerHtml(c.id)}
 <details class="match-details" data-conn-details="${c.id}" ${expandedConnections.has(c.id) ? 'open' : ''}>
 <summary>Details</summary>
 <div class="details-grid">
+${c.photoId ? `<div class="full conn-hero-photo">${avatarHtml(c.photoId, c.name, 'hero')}</div>` : ''}
 <label>Name<input type="text" autocomplete="off" data-field="name" data-conn-detail="${c.id}" value="${escapeHtml(c.name)}"></label>
 <label>Profile name<input type="text" autocomplete="off" placeholder="If different — keeps photos findable" data-field="profileName" data-conn-detail="${c.id}" value="${escapeHtml(c.profileName || '')}"></label>
 <label>Source<select data-field="app" data-conn-detail="${c.id}">${appOptions(c.app)}</select></label>
@@ -692,6 +828,17 @@ list.querySelectorAll('[data-log]').forEach((btn) => {
 btn.addEventListener('click', () => {
 const conn = data.connections.find((x) => x.id === btn.dataset.log);
 conn.lastContact = todayStr();
+renderConnections();
+queueSave();
+});
+});
+list.querySelectorAll('[data-snooze]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const conn = data.connections.find((x) => x.id === btn.dataset.snooze);
+if (!conn) return;
+const d = new Date();
+d.setDate(d.getDate() + 7);
+conn.attentionSnoozedUntil = d.toISOString().slice(0, 10);
 renderConnections();
 queueSave();
 });
@@ -869,6 +1016,17 @@ list.querySelectorAll('[data-view-photo]').forEach((el) => {
 el.addEventListener('click', async () => {
 const url = await photoUrl(el.dataset.viewPhoto);
 if (url) openLightbox(url);
+});
+});
+list.querySelectorAll('[data-set-cover]').forEach((btn) => {
+btn.addEventListener('click', (e) => {
+e.preventDefault();
+e.stopPropagation();
+const conn = data.connections.find((x) => x.id === btn.dataset.setCover);
+if (!conn) return;
+conn.photoId = btn.dataset.setCoverId;
+renderConnections();
+queueSave();
 });
 });
 // Wired identically for both Notes and Chat history previews -- a city or

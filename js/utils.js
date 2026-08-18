@@ -253,10 +253,17 @@ return new Date(`${iso}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short
 // chat gets the same live click-to-add-City/Nationality treatment Notes
 // already has (a city or country mentioned mid-conversation is exactly
 // the kind of thing worth catching), omitted anywhere else this is called
-// where that wouldn't make sense.
-function chatTranscriptHtml(text, rules, cityMap) {
+// where that wouldn't make sense. `lines` is either a plain string (split
+// on \n here, no per-line source) or a pre-tagged [{source, text}] array —
+// connections.js passes the latter once a chat spans more than one
+// platform, plus a sourceIcons map ({source: {icon, label}}) so each line
+// can carry a tiny icon showing which app it came from, since a merged,
+// interleaved chat with no per-line indication of platform is exactly
+// what read as "weird" before this.
+function chatTranscriptHtml(lines, rules, cityMap, sourceIcons) {
+const arr = Array.isArray(lines) ? lines : String(lines || '').split('\n').filter(Boolean).map((text) => ({ text }));
 let lastDate = '';
-return String(text || '').split('\n').map((line) => {
+return arr.map(({ text: line, source }) => {
 // The date prefix is optional -- older chatLog text saved before the
 // console snippet started threading a date onto each message (or a
 // message that came before the first day-divider Tinder showed) still
@@ -272,7 +279,9 @@ dayHtml = `<div class="tinder-chat-day">${escapeHtml(formatChatDay(date))}</div>
 lastDate = date;
 }
 const body = rules || cityMap ? highlightFlagValues(message, rules, cityMap) : escapeHtml(message);
-return dayHtml + `<div class="tinder-chat-line"><span class="tinder-chat-time">[${escapeHtml(time)}]</span> <span class="${senderClass}">${escapeHtml(senderName)}</span>: ${body}</div>`;
+const info = sourceIcons && source ? sourceIcons[source] : null;
+const srcIcon = info ? `<span class="tinder-chat-src" title="${escapeHtml(info.label)}">${info.icon}</span> ` : '';
+return dayHtml + `<div class="tinder-chat-line">${srcIcon}<span class="tinder-chat-time">[${escapeHtml(time)}]</span> <span class="${senderClass}">${escapeHtml(senderName)}</span>: ${body}</div>`;
 }).join('');
 }
 

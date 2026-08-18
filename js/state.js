@@ -445,6 +445,10 @@ if (typeof c.chatLog !== 'string') c.chatLog = '';
 // sorts all three chronologically for display rather than showing one.
 if (typeof c.chatLogWhatsApp !== 'string') c.chatLogWhatsApp = '';
 if (typeof c.chatLogTelegram !== 'string') c.chatLogTelegram = '';
+// ISO date the "Reach out" badge is suppressed until, even though the
+// connection is still past its threshold -- lets a specific overdue
+// connection be dismissed for a while without changing Stage or priority.
+if (typeof c.attentionSnoozedUntil !== 'string') c.attentionSnoozedUntil = '';
 if (typeof c.job !== 'string') c.job = '';
 if (typeof c.height !== 'string') c.height = '';
 if (typeof c.education !== 'string') c.education = '';

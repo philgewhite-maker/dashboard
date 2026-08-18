@@ -344,6 +344,7 @@ gap:12px;
 .tinder-chat-block{margin:2px 0 6px 22px;max-height:220px;overflow-y:auto;border:1px solid var(--line);border-radius:6px;padding:6px 8px;}
 .tinder-chat-line{font-size:12px;margin:2px 0;}
 .tinder-chat-time{color:var(--muted);font-size:11px;}
+.tinder-chat-src{font-size:11px;}
 .tinder-chat-day{
 font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;
 color:var(--muted);text-align:center;
@@ -772,6 +773,16 @@ letter-spacing:.04em;
 color:var(--muted);
 margin-top:2px;
 }
+/* Replaces .app-tag's plain text label + the separate "In contacts" badge
+   on the collapsed row -- one hoverable row of small icons for every
+   source/stage/milestone signal a connection carries. */
+.icon-row{margin-top:3px;display:flex;flex-wrap:wrap;gap:3px;}
+.src-icon{
+display:inline-flex;align-items:center;justify-content:center;
+font-size:13px;line-height:1;cursor:default;
+}
+.src-icon.src-whatsapp{filter:saturate(1.3);}
+.src-icon.src-telegram{filter:hue-rotate(-10deg);}
 .stars{
 display:flex;
 gap:3px;
@@ -823,7 +834,13 @@ color:#fff;
 border-radius:5px;
 padding:3px 7px;
 white-space:nowrap;
+cursor:help;
 }
+.snooze-btn{
+background:none;border:none;cursor:pointer;
+font-size:12px;padding:0 2px;opacity:.7;
+}
+.snooze-btn:hover{opacity:1;}
 .match-actions{
 margin-left:auto;
 display:flex;
@@ -910,6 +927,11 @@ background-size:cover;
 background-position:center;
 }
 .avatar.sm{width:28px;height:28px;font-size:11px;}
+/* The bigger cover photo shown at the top of a connection's expanded
+   details -- the collapsed row keeps the small circular .avatar, this is
+   only rendered when a photo actually exists, see connectionCardHtml(). */
+.avatar.hero{width:100%;max-width:280px;height:280px;border-radius:12px;font-size:48px;margin:0 auto 4px;}
+.conn-hero-photo{display:flex;justify-content:center;}
 .match-card{border-top:1px solid var(--line);padding:12px 0;}
 .match-card:first-of-type{border-top:none;}
 .match-card .match-row{border-top:none;padding:0 0 6px 0;}
@@ -1075,6 +1097,17 @@ text-shadow:0 0 3px rgba(0,0,0,.8);
 font-size:14px;
 cursor:pointer;
 }
+/* The small pin toggling which photo is the connection's cover/avatar --
+   sits bottom-left on a gallery thumbnail or album cover so it never
+   collides with the remove/unlink × already in the top-right corner. */
+.cover-pin{
+position:absolute;bottom:2px;left:2px;
+background:none;border:none;padding:0;
+font-size:14px;line-height:1;cursor:pointer;
+color:#fff;text-shadow:0 0 3px rgba(0,0,0,.8);
+}
+.album-card .cover-pin{position:absolute;bottom:20px;left:4px;}
+.cover-pin.is-cover{color:var(--amber,#d9a441);}
 .gallery-add{
 width:60px;height:60px;
 border-radius:8px;
