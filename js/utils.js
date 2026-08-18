@@ -78,19 +78,23 @@ return map;
 }
 
 // Wraps any free-text occurrence of a flag-rule value (from ANY rule's
-// green/amber/red list, any field) OR a known city name in a coloured
-// span — the same two mechanisms tinderimport.js's highlightCities() uses
-// on incoming profile text (minus the Cyrillic-transliteration pass,
-// which needs pending's in-progress scan state), extracted so the Notes
-// field on an already-saved connection gets the same treatment: spot a
-// red flag, or click a mentioned city straight into City. `cityMap` is
-// optional — omit it to highlight flag values only. Takes `rules` as a
-// parameter (data.flagRules) rather than importing state.js, which
-// already imports this module. Longest values first so a multi-word
-// value ("Want kids") wins whole rather than a shorter one matching a
-// substring of it first; the negative lookbehind on "non-"/"non " stops
-// "Non-smoker" being flagged as "Smoker" (the hyphen is its own word
-// boundary).
+// green/amber/red list, any field), a known city name, or a country
+// name/nationality adjective in a clickable span — the same mechanisms
+// tinderimport.js's fuller highlightCities() uses on incoming profile text
+// (minus the Cyrillic-transliteration pass, which needs pending's
+// in-progress scan state), extracted so every OTHER place that shows chat
+// or notes text — an already-saved connection's Notes and chat history,
+// the WhatsApp/Telegram import review screens — gets the same click-to-add
+// treatment from one place instead of each growing its own copy. `cityMap`
+// is optional — omit it to skip city detection. Takes `rules` as a
+// parameter (data.flagRules) rather than importing state.js, which already
+// imports this module. Longest values first so a multi-word value ("Want
+// kids") wins whole rather than a shorter one matching a substring of it
+// first; the negative lookbehind on "non-"/"non " stops "Non-smoker" being
+// flagged as "Smoker" (the hyphen is its own word boundary). City wins
+// over country/nationality wins over flag-rule on a same-value collision,
+// matching the priority order that already existed before country names
+// were added here.
 function highlightFlagValues(text, rules, cityMap) {
 const str = String(text || '');
 const map = new Map();
@@ -104,7 +108,13 @@ if (key && !map.has(key)) map.set(key, { label: v, color });
 });
 const cities = cityMap ? [...cityMap.values()] : [];
 const cityLower = new Set(cities.map((c) => c.toLowerCase()));
-const values = [...cities, ...[...map.values()].map((v) => v.label)].sort((a, b) => b.length - a.length);
+const countryMap = new Map(Object.entries(COUNTRY_NAME_TO_NATIONALITY).map(([name, nat]) => [name.toLowerCase(), { name, nat }]));
+[...new Set(Object.values(COUNTRY_NAME_TO_NATIONALITY))].forEach((adj) => {
+const key = adj.toLowerCase();
+if (!countryMap.has(key)) countryMap.set(key, { name: adj, nat: adj });
+});
+const countryNames = [...countryMap.values()].map((v) => v.name);
+const values = [...cities, ...countryNames, ...[...map.values()].map((v) => v.label)].sort((a, b) => b.length - a.length);
 if (!values.length) return escapeHtml(str);
 const re = new RegExp(values.map((v) => `(?<!non-)(?<!non )\\b${escapeRegex(v)}\\b`).join('|'), 'gi');
 let out = '';
@@ -113,10 +123,14 @@ let m;
 while ((m = re.exec(str))) {
 out += escapeHtml(str.slice(last, m.index));
 const hit = m[0];
-if (cityLower.has(hit.toLowerCase())) {
+const hitLower = hit.toLowerCase();
+if (cityLower.has(hitLower)) {
 out += `<span class="tinder-city-hit" data-tinder-city="${escapeHtml(hit)}" title="Click to set as City">${escapeHtml(hit)}</span>`;
+} else if (countryMap.has(hitLower)) {
+const { nat } = countryMap.get(hitLower);
+out += `<span class="tinder-city-hit" data-tinder-add-label="Nationality" data-tinder-add-value="${escapeHtml(nat)}" title="Click to add ${escapeHtml(nat)} to Nationality">${escapeHtml(hit)}</span>`;
 } else {
-const { color } = map.get(hit.toLowerCase());
+const { color } = map.get(hitLower);
 out += `<span class="tinder-flag-hit tinder-flag-hit-${color}" title="Flagged ${color}">${escapeHtml(hit)}</span>`;
 }
 last = m.index + hit.length;
@@ -189,45 +203,33 @@ Yemen: 'Yemeni',
 'South Africa': 'South African', Zambia: 'Zambian', Zimbabwe: 'Zimbabwean',
 };
 
-// The generic click-to-add-somewhere version of highlightFlagValues() above
-// -- adds country names AND their adjective forms ("Russia" and "Russian"
-// both point at Nationality) to the same city-detection pass, and returns
-// plain {value, field} hits rather than pre-rendered spans, since a bulk
-// import review (many chats/profiles at once) wants a short chip list, not
-// the whole message text echoed back with inline highlights. No
-// looksLikeQuestion check here (unlike tinderimport.js's fuller per-line
-// version) -- this scans a whole flattened conversation at once, where
-// "ends with a question mark" says nothing about the blob as a whole.
+// A short {value, field} chip list for a bulk import review (many chats at
+// once, where echoing the whole message text back with inline spans isn't
+// practical) -- built directly on highlightFlagValues()'s own output
+// rather than re-running the city/country detection separately, so there's
+// exactly one place that logic lives. Flag-rule hits are left out here
+// (they're a colour/warning, not a "which field" click-to-add), which is
+// why this can't just be "count the spans" -- it reads each span's own
+// data attributes to know whether it's a city or a country/nationality
+// hit and what field that maps to.
 function findMentions(text, connections, flagRules) {
 const str = String(text || '');
 if (!str.trim()) return [];
-const cityMap = knownCityMap(connections);
-const countryMap = new Map(Object.entries(COUNTRY_NAME_TO_NATIONALITY).map(([name, nat]) => [name.toLowerCase(), { name, nat }]));
-[...new Set(Object.values(COUNTRY_NAME_TO_NATIONALITY))].forEach((adj) => {
-const key = adj.toLowerCase();
-if (!countryMap.has(key)) countryMap.set(key, { name: adj, nat: adj });
-});
-const cityNames = [...cityMap.values()];
-const countryNames = [...countryMap.values()].map((v) => v.name);
-const values = [...cityNames, ...countryNames].sort((a, b) => b.length - a.length);
-if (!values.length) return [];
-const re = new RegExp(values.map((v) => `\\b${escapeRegex(v)}\\b`).join('|'), 'gi');
+const highlighted = highlightFlagValues(str, flagRules, knownCityMap(connections));
+if (!highlighted || highlighted === escapeHtml(str)) return [];
+const wrapper = document.createElement('div');
+wrapper.innerHTML = highlighted;
 const seen = new Set();
 const hits = [];
-let m;
-while ((m = re.exec(str))) {
-const hit = m[0];
-const key = hit.toLowerCase();
-if (cityMap.has(key)) {
-const value = cityMap.get(key);
-const dedupeKey = `location:${value.toLowerCase()}`;
-if (!seen.has(dedupeKey)) { seen.add(dedupeKey); hits.push({ value, field: 'location' }); }
-} else if (countryMap.has(key)) {
-const { nat } = countryMap.get(key);
-const dedupeKey = `nationality:${nat.toLowerCase()}`;
-if (!seen.has(dedupeKey)) { seen.add(dedupeKey); hits.push({ value: nat, field: 'nationality' }); }
-}
-}
+wrapper.querySelectorAll('[data-tinder-city], [data-tinder-add-value]').forEach((span) => {
+const field = span.dataset.tinderCity !== undefined ? 'location' : (span.dataset.tinderAddLabel === 'Nationality' ? 'nationality' : null);
+const value = span.dataset.tinderCity !== undefined ? span.dataset.tinderCity : span.dataset.tinderAddValue;
+if (!field || !value) return;
+const dedupeKey = `${field}:${value.toLowerCase()}`;
+if (seen.has(dedupeKey)) return;
+seen.add(dedupeKey);
+hits.push({ value, field });
+});
 return hits;
 }
 
@@ -247,7 +249,12 @@ function formatChatDay(iso) {
 return new Date(`${iso}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-function chatTranscriptHtml(text) {
+// rules/cityMap are optional -- passed in by connections.js so a saved
+// chat gets the same live click-to-add-City/Nationality treatment Notes
+// already has (a city or country mentioned mid-conversation is exactly
+// the kind of thing worth catching), omitted anywhere else this is called
+// where that wouldn't make sense.
+function chatTranscriptHtml(text, rules, cityMap) {
 let lastDate = '';
 return String(text || '').split('\n').map((line) => {
 // The date prefix is optional -- older chatLog text saved before the
@@ -264,7 +271,8 @@ if (date && date !== lastDate) {
 dayHtml = `<div class="tinder-chat-day">${escapeHtml(formatChatDay(date))}</div>`;
 lastDate = date;
 }
-return dayHtml + `<div class="tinder-chat-line"><span class="tinder-chat-time">[${escapeHtml(time)}]</span> <span class="${senderClass}">${escapeHtml(senderName)}</span>: ${escapeHtml(message)}</div>`;
+const body = rules || cityMap ? highlightFlagValues(message, rules, cityMap) : escapeHtml(message);
+return dayHtml + `<div class="tinder-chat-line"><span class="tinder-chat-time">[${escapeHtml(time)}]</span> <span class="${senderClass}">${escapeHtml(senderName)}</span>: ${body}</div>`;
 }).join('');
 }
 

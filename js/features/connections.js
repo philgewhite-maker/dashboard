@@ -565,7 +565,7 @@ const chatSources = [
 const mergedChat = mergedChatLog(c);
 const chatFieldHtml = mergedChat
 ? `<div class="field-block full"><span class="field-label">Chat history</span>
-<div class="tinder-chat-block" style="margin:0;">${chatTranscriptHtml(mergedChat)}</div>
+<div class="tinder-chat-block" style="margin:0;">${chatTranscriptHtml(mergedChat, data.flagRules, knownCityMap(data.connections))}</div>
 <details class="tinder-edit-details"><summary>Edit raw text</summary>
 ${chatSources.map((s) => `<div class="settings-note" style="margin:6px 0 2px;">${escapeHtml(s.label)}</div><textarea rows="4" placeholder="One message per line" data-field="${s.field}" data-conn-detail="${c.id}">${escapeHtml(s.text)}</textarea>`).join('')}
 </details></div>`
@@ -871,7 +871,17 @@ const url = await photoUrl(el.dataset.viewPhoto);
 if (url) openLightbox(url);
 });
 });
-list.querySelectorAll('.tinder-notes-preview [data-tinder-city]').forEach((hit) => {
+// Wired identically for both Notes and Chat history previews -- a city or
+// nationality mentioned mid-conversation is exactly as worth a click-to-add
+// as one mentioned in Notes, and this was the one place that treatment
+// hadn't reached (see chatTranscriptHtml() in utils.js, which now runs the
+// same highlightFlagValues() pass Notes always has). data-tinder-city
+// stays its own attribute (pre-dates the generic mechanism, and City's
+// mapping is fixed); data-tinder-add-label/-value is the generic one
+// highlightFlagValues() now also uses for country/nationality hits.
+const ADD_LABEL_TO_FIELD = { Nationality: 'nationality' };
+['.tinder-notes-preview', '.tinder-chat-block'].forEach((scope) => {
+list.querySelectorAll(`${scope} [data-tinder-city]`).forEach((hit) => {
 hit.addEventListener('click', () => {
 const row = hit.closest('[data-conn-row]');
 const conn = data.connections.find((x) => x.id === row?.dataset.connRow);
@@ -881,6 +891,21 @@ unionInto(conn.location, [hit.dataset.tinderCity]);
 renderConnections();
 renderOverviewRef();
 queueSave();
+});
+});
+list.querySelectorAll(`${scope} [data-tinder-add-label]`).forEach((hit) => {
+hit.addEventListener('click', () => {
+const field = ADD_LABEL_TO_FIELD[hit.dataset.tinderAddLabel];
+if (!field) return;
+const row = hit.closest('[data-conn-row]');
+const conn = data.connections.find((x) => x.id === row?.dataset.connRow);
+if (!conn) return;
+if (!Array.isArray(conn[field])) conn[field] = [];
+unionInto(conn[field], [hit.dataset.tinderAddValue]);
+renderConnections();
+renderOverviewRef();
+queueSave();
+});
 });
 });
 list.querySelectorAll('[data-photo-add]').forEach((input) => {
