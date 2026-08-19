@@ -276,7 +276,7 @@ const FIXED_SORT_FIELDS = {
 // Standby/Travelling sinks the same way a dormant stage does — a 144-day
 // gap that's deliberate (out of rotation) shouldn't outrank someone
 // genuinely overdue just because the raw day count is bigger.
-default: { label: 'Reach-out priority', getValue: (c) => (isDormantStage(c.stage) || isTravelPaused(c) ? -999 : daysSince(c.lastContact) - reachOutThreshold(c.priority, c.stage)) },
+default: { label: 'Reach-out priority', getValue: (c) => (isDormantStage(c.stage) || isTravelPaused(c) ? -999 : daysSince(c.lastContact) - reachOutThreshold(c.priority, c.stage) + reachOutQualityBonus(c)) },
 priority: { label: 'Overall rating', getValue: (c) => c.priority || 0 },
 average: { label: 'Average detailed rating', getValue: (c) => (averageRating(c) || {}).value || 0 },
 completeness: { label: 'Record completeness', getValue: (c) => completeness(c) },
@@ -465,15 +465,31 @@ if (isDormantStage(c.stage) || isTravelPaused(c) || isReachOutSnoozed(c)) return
 return daysSince(c.lastContact) - reachOutThreshold(c.priority, c.stage);
 }
 
+// A modest days-equivalent nudge so a well-rated, green-flagged match can
+// outrank someone who's simply gone quiet for longer but isn't as
+// promising -- a RANKING signal only, layered on top of the overdue
+// margin above, never a substitute for it (eligibility still comes purely
+// from actual elapsed time vs. threshold, so quality can't manufacture
+// urgency for someone not due yet). Weights are a first-pass starting
+// point, same spirit as suggestedAction()'s -- worth adjusting, not a
+// claim they're definitively right.
+function reachOutQualityBonus(c) {
+const flags = computeFlags(c, data.flagRules);
+const green = flags.hits.filter((h) => h.color === 'green').length;
+const red = flags.hits.filter((h) => h.color === 'red').length;
+const rating = averageRating(c);
+return (c.priority - 3) * 2 + green * 1.5 - red * 3 + (rating ? rating.value - 3 : 0);
+}
+
 // Recomputed once per renderConnections() call (see topReachOutIdSet
 // below) rather than per-card, since "who's in the top 10" is a property
 // of the whole list, not any one connection in isolation.
 function computeTopReachOut(n = 10) {
 return new Set(
 data.connections
-.map((c) => ({ id: c.id, amount: reachOutOverdueAmount(c) }))
+.map((c) => ({ id: c.id, amount: reachOutOverdueAmount(c), c }))
 .filter((x) => x.amount >= 0)
-.sort((a, b) => b.amount - a.amount)
+.sort((a, b) => (b.amount + reachOutQualityBonus(b.c)) - (a.amount + reachOutQualityBonus(a.c)))
 .slice(0, n)
 .map((x) => x.id),
 );
