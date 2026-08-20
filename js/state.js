@@ -404,6 +404,15 @@ s.events = s.found && s.date ? [{ title: s.title, date: s.date }] : [];
 }
 });
 data.connections.forEach((c) => {
+// A screenshot import whose vision response had no readable name used to
+// write name: null straight onto a new connection (see
+// addNewConnectionFromCandidate() in connections.js, now fixed at the
+// source) -- and every later .toLowerCase() call across the app that
+// scans connections by name would crash on it, breaking every
+// subsequent screenshot import, not just the one that created it. Heals
+// any record already carrying that damage on load, so the fix above
+// doesn't require hunting down the bad connection by hand.
+if (typeof c.name !== 'string') c.name = 'Unnamed match';
 if (!Array.isArray(c.photoIds)) c.photoIds = c.photoId ? [c.photoId] : [];
 if (typeof c.photoId !== 'string') c.photoId = c.photoIds[0] || null;
 if (!Array.isArray(c.languages)) c.languages = [];

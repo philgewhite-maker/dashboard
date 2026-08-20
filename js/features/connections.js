@@ -1643,7 +1643,7 @@ e.target.value = '';
 
 async function renderCandidateReview(candidateList, candidates, isProfile) {
 candidateList.innerHTML = candidates.map((cand, idx) => {
-const matches = data.connections.filter((c) => c.name.toLowerCase() === String(cand.name).toLowerCase());
+const matches = data.connections.filter((c) => String(c.name || '').toLowerCase() === String(cand.name || '').toLowerCase());
 const extra = isProfile
 ? [cand.age, cand.height, cand.location, cand.job, cand.education, (cand.languages || []).join('/'), cand.bio].filter(Boolean).join(' · ')
 : (cand.stage ? `Detected stage: ${cand.stage}` : '');
@@ -1709,8 +1709,15 @@ if (!photoId) photoId = pid;
 }
 data.connections.push({
 // profileName records what the app called them, so renaming the
-// connection to their real name later doesn't orphan the photos.
-id, name: cand.name, profileName: cand.name, app, priority: 3, stage: cand.stage || 'Matched', lastContact: todayStr(), createdAt: new Date().toISOString(),
+// connection to their real name later doesn't orphan the photos. Falls
+// back to a placeholder rather than null/'' -- a nameless connection
+// isn't just cosmetically odd, every later screenshot import scans
+// every existing connection by name (see renderCandidateReview below)
+// and a non-string name there crashes ALL future imports, not just
+// this one (confirmed live: a Bumble matches-list row with no readable
+// name broke every screenshot import after it until the record was
+// found and fixed).
+id, name: cand.name || 'Unnamed match', profileName: cand.name || '', app, priority: 3, stage: cand.stage || 'Matched', lastContact: todayStr(), createdAt: new Date().toISOString(),
 photoId, photoIds, age: cand.age || '', location: cand.location ? [cand.location] : [], kids: cand.kids || '', job: cand.job || '',
 height: cand.height || '', education: cand.education || '',
 likes: '', notes: cand.bio || '', languages: cand.languages || [], nationality: cand.nationality || [],

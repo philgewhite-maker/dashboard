@@ -29,7 +29,7 @@ return `${scanned.length} scanned · ${named} with a name · ${rich} look detail
 }
 
 function rowHtml(s, i) {
-const already = data.connections.find((c) => c.name.toLowerCase() === String(s.name || '').toLowerCase());
+const already = data.connections.find((c) => String(c.name || '').toLowerCase() === String(s.name || '').toLowerCase());
 return `<div class="scan-row${s.chosen ? ' chosen' : ''}" data-scan-row="${i}">
 <span class="scan-thumb" data-scan-thumb="${i}"></span>
 <span class="scan-main">
@@ -102,7 +102,7 @@ async function saveToConnections(index) {
 const s = scanned[index];
 if (!s || !s.name) return;
 const rich = s.rich || {};
-const existing = data.connections.find((c) => c.name.toLowerCase() === s.name.toLowerCase());
+const existing = data.connections.find((c) => String(c.name || '').toLowerCase() === s.name.toLowerCase());
 
 const photoIds = [];
 const blobs = (rich.photoBlobs && rich.photoBlobs.length) ? rich.photoBlobs : [await resizeImageToBlob(s.file, 1200, 0.85)];

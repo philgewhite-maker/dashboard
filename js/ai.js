@@ -331,7 +331,7 @@ const merged = isBanded ? dedupeByNameAndPosition(people) : people;
 const candidates = [];
 for (const r of merged) {
 const photoBlob = await cropThumbnailToBlob(img, r.bbox);
-candidates.push({ name: r.name, age: r.age || '', stage: r.stage === 'Chatting in app' ? 'Chatting in app' : 'Matched', photoBlob });
+candidates.push({ name: r.name || '', age: r.age || '', stage: r.stage === 'Chatting in app' ? 'Chatting in app' : 'Matched', photoBlob });
 }
 return { candidates, truncated };
 }
