@@ -528,6 +528,24 @@ function needsAttentionIds() {
 return data.connections.filter((c) => suggestedQuestions(c).length > 0).map((c) => c.id);
 }
 
+// A matches-list-only import (the "Bumble list" screenshot flow, though
+// Tinder/Hinge's equivalent produces the same shape) captures a name and
+// maybe an age -- nothing else. Approximated here by photo count rather
+// than checking for the AI-crop's exact 160x160 signature (see
+// flagLowResThumbnails): confirming that would mean decoding every
+// connection's photo on every filter click, and "one photo, none of the
+// core detail fields" is already a reliable enough signal that a real,
+// fleshed-out profile essentially never matches by coincidence.
+function isThinProfile(c) {
+if (isDormantStage(c.stage)) return false; // already resolved, not a cleanup target
+if ((c.photoIds || []).length > 1) return false;
+return [c.age, c.height, c.job, c.education].every((v) => !String(v || '').trim());
+}
+
+function thinProfileIds() {
+return data.connections.filter(isThinProfile).map((c) => c.id);
+}
+
 function isReachOutSnoozed(c) {
 return !!(c.attentionSnoozedUntil && c.attentionSnoozedUntil > todayStr());
 }
@@ -638,6 +656,11 @@ const attnIds = needsAttentionIds();
 if (attnBtn) {
 attnBtn.textContent = `Needs attention (${attnIds.length})`;
 attnBtn.classList.toggle('active', idFilter && idFilter.label === 'Needs attention');
+}
+const thinBtn = document.getElementById('conn-thin-profiles-btn');
+if (thinBtn) {
+thinBtn.textContent = `Thin profiles (${thinProfileIds().length})`;
+thinBtn.classList.toggle('active', idFilter && idFilter.label === 'Thin profiles');
 }
 const taskBtn = document.getElementById('conn-attention-task-btn');
 if (taskBtn) {
@@ -1564,6 +1587,10 @@ setTimeout(() => scrollAndFlash(`[data-conn-row="${newId}"]`), 50);
 document.getElementById('conn-needs-attention-btn').addEventListener('click', () => {
 if (idFilter && idFilter.label === 'Needs attention') { clearFilters(); return; }
 filterByIds(needsAttentionIds(), 'Needs attention');
+});
+document.getElementById('conn-thin-profiles-btn').addEventListener('click', () => {
+if (idFilter && idFilter.label === 'Thin profiles') { clearFilters(); return; }
+filterByIds(thinProfileIds(), 'Thin profiles');
 });
 document.getElementById('conn-attention-task-btn').addEventListener('click', async (e) => {
 if (e.target.dataset.gotoTask) {
