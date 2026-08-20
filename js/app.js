@@ -87,11 +87,16 @@ window.addEventListener('pagehide', () => { flushSave(); });
 }
 
 function registerServiceWorker() {
-if ('serviceWorker' in navigator) {
-window.addEventListener('load', () => {
-navigator.serviceWorker.register('./sw.js').catch(() => { /* offline support is best-effort */ });
-});
-}
+if (!('serviceWorker' in navigator)) return;
+// Called from deep inside main(), well after several awaited IndexedDB
+// round-trips -- by then the page's own `load` event has almost always
+// already fired (confirmed live: registrations were empty on a totally
+// clean load, every time), and a listener attached after an event fires
+// never receives it. Register immediately if the page is already done
+// loading; only wait for `load` if it genuinely hasn't happened yet.
+const register = () => navigator.serviceWorker.register('./sw.js').catch(() => { /* offline support is best-effort */ });
+if (document.readyState === 'complete') register();
+else window.addEventListener('load', register);
 }
 
 async function main() {
