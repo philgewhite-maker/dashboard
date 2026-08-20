@@ -1109,6 +1109,19 @@ text-shadow:0 0 3px rgba(0,0,0,.8);
 font-size:14px;
 cursor:pointer;
 }
+/* Flags a gallery thumbnail whose actual pixel dimensions are exactly
+   160x160 -- the fixed size every AI-cropped photo comes out at, see
+   flagLowResThumbnails() -- and reveals the replace control that's
+   otherwise hidden on every normal, full-size thumbnail. */
+.gallery-thumb.low-res{outline:2px dashed var(--amber,#d9a441);outline-offset:-2px;}
+.gallery-thumb-replace{
+display:none;position:absolute;bottom:2px;right:2px;
+width:18px;height:18px;border-radius:50%;
+align-items:center;justify-content:center;
+background:rgba(0,0,0,.6);color:#fff;
+font-size:12px;line-height:1;cursor:pointer;
+}
+.gallery-thumb.low-res .gallery-thumb-replace{display:flex;}
 /* The small pin toggling which photo is the connection's cover/avatar --
    sits bottom-left on a gallery thumbnail or album cover so it never
    collides with the remove/unlink × already in the top-right corner. */

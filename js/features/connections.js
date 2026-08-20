@@ -4,7 +4,7 @@ import { photoDelete, photoUrl } from '../db.js';
 import { storePhoto } from '../files.js';
 import {
 uid, todayStr, daysSince, escapeHtml, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, knownCityMap, scrollAndFlash, bindForm, foldDiacritics,
-resizeImageToBlob, classifyProfileUpload, cropToContentBlob,
+resizeImageToBlob, classifyProfileUpload, cropToContentBlob, contentCropBounds, loadImage,
 } from '../utils.js';
 import { MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot } from '../ai.js';
 import { isSensitive, noCoverNote } from './photoalbums.js';
@@ -411,8 +411,60 @@ ${a.coverPhotoId ? coverPinHtml(c.id, a.coverPhotoId, c.photoId) : ''}
 // session URL isn't a storable photo id) so either source can become the
 // connection's main photo.
 function galleryHtml(c) {
-const thumbs = (c.photoIds || []).map((id, i) => `<div class="gallery-thumb"><span class="thumb-img" data-photo-bg="${escapeHtml(id)}" data-view-photo="${escapeHtml(id)}"></span>${coverPinHtml(c.id, id, c.photoId)}<span class="tag-x" data-photo-remove="${c.id}" data-photo-idx="${i}">&times;</span></div>`).join('');
+// The replace control is always in the markup, not conditionally
+// rendered -- whether a thumbnail IS low-res is only known once its
+// actual pixel dimensions load (flagLowResThumbnails, async, after this
+// HTML is already in the DOM), so visibility is purely CSS-gated on the
+// .low-res class that async check adds.
+const thumbs = (c.photoIds || []).map((id, i) => `<div class="gallery-thumb" data-gallery-thumb="${escapeHtml(id)}">
+<span class="thumb-img" data-photo-bg="${escapeHtml(id)}" data-view-photo="${escapeHtml(id)}"></span>
+${coverPinHtml(c.id, id, c.photoId)}
+<label class="gallery-thumb-replace" for="replace-photo-${c.id}-${i}" title="Low resolution — click to replace with a full-size photo">&#8635;</label>
+<input type="file" id="replace-photo-${c.id}-${i}" accept="image/*" style="display:none;" data-replace-photo="${c.id}" data-replace-idx="${i}">
+<span class="tag-x" data-photo-remove="${c.id}" data-photo-idx="${i}">&times;</span>
+</div>`).join('');
 return `<div class="photo-gallery">${thumbs}<label class="gallery-add" for="photo-add-${c.id}">+</label><input type="file" id="photo-add-${c.id}" accept="image/*" multiple style="display:none;" data-photo-add="${c.id}"></div>`;
+}
+
+// cropThumbnailToBlob hard-codes every AI-cropped photo to exactly
+// 160x160 -- specific enough that no genuine photo is likely to land on
+// it by chance, so it doubles as a reliable "this is a placeholder, not
+// a real upload" signature with no extra field needed on the connection
+// itself. Only known once the actual bytes decode, hence async and run
+// after the card's already in the DOM (same timing as
+// hydratePhotoBackgrounds, which this runs alongside).
+async function flagLowResThumbnails(root) {
+const thumbs = [...root.querySelectorAll('[data-gallery-thumb]')];
+await Promise.all(thumbs.map(async (el) => {
+try {
+const url = await photoUrl(el.dataset.galleryThumb);
+if (!url) return;
+const img = await loadImage(url);
+if (img.naturalWidth === 160 && img.naturalHeight === 160) el.classList.add('low-res');
+} catch (e) { /* leave unflagged rather than guess */ }
+}));
+}
+
+// Swaps one specific gallery photo for a better one, in place -- same
+// array index, same cover-photo role if it had one -- rather than making
+// the low-res flag a dead end that still needs a manual delete-then-
+// re-add. Letterbox-strips the replacement too (utils.js), since it's
+// just as likely to be a full-screen photo-view screenshot as the
+// original was.
+async function replacePhotoInPlace(connId, idx, file) {
+const conn = data.connections.find((c) => c.id === connId);
+if (!conn || !file || !Number.isInteger(idx)) return;
+const img = await loadImage(file);
+const bounds = contentCropBounds(img);
+const blob = await cropToContentBlob(img, bounds, 0.85, 900);
+if (!blob) return;
+const newId = await storePhoto(blob);
+const oldId = conn.photoIds[idx];
+conn.photoIds[idx] = newId;
+if (conn.photoId === oldId) conn.photoId = newId;
+if (oldId) { try { await photoDelete(oldId); } catch (e) { /* orphaned blob, not worth failing the replace over */ } }
+renderConnections();
+queueSave();
 }
 
 function todoListHtml(c) {
@@ -629,6 +681,7 @@ emptyFieldFilter = null;
 renderConnections();
 });
 hydratePhotoBackgrounds(list);
+flagLowResThumbnails(list);
 bindConnectionEvents(list);
 refreshPhotoTargets();
 return;
@@ -641,6 +694,7 @@ list.innerHTML = `<div class="filter-banner">${picked.length} matching ${escapeH
 + tagDatalistsHtml();
 document.getElementById('clear-id-filter').addEventListener('click', () => { idFilter = null; renderConnections(); });
 hydratePhotoBackgrounds(list);
+flagLowResThumbnails(list);
 bindConnectionEvents(list);
 refreshPhotoTargets();
 return;
@@ -681,6 +735,7 @@ return secondary.getValue(b) - secondary.getValue(a);
 list.innerHTML = sorted.map(connectionCardHtml).join('') + tagDatalistsHtml();
 
 hydratePhotoBackgrounds(list);
+flagLowResThumbnails(list);
 bindConnectionEvents(list);
 refreshPhotoTargets();
 }
@@ -1224,6 +1279,14 @@ const files = Array.from(e.target.files);
 e.target.value = '';
 if (!files.length) return;
 await applyDirectProfileUpload(files, input.dataset.parseProfile);
+});
+});
+list.querySelectorAll('[data-replace-photo]').forEach((input) => {
+input.addEventListener('change', async (e) => {
+const file = e.target.files[0];
+e.target.value = '';
+if (!file) return;
+await replacePhotoInPlace(input.dataset.replacePhoto, parseInt(input.dataset.replaceIdx, 10), file);
 });
 });
 }
