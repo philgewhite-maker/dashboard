@@ -668,6 +668,115 @@ canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.85);
 });
 }
 
+// A screenshot of a single photo, taken full-screen on a phone whose own
+// aspect ratio doesn't match the photo's, comes with solid letterbox (top/
+// bottom) or pillarbox (left/right) bars baked in -- not the actual photo
+// content. Detecting and trimming those matters for two things: the photo
+// itself shouldn't be stored with black/white bars in it, and the trimmed
+// CONTENT aspect ratio is what should decide "is this a photo or a tall
+// composite screenshot", not the raw file's aspect ratio (a modern tall
+// phone screen's native ratio, e.g. ~1:2.17 on a Galaxy S25 Ultra, already
+// sits past a naive "photos are wider than 1:2" cutoff before any bars are
+// even trimmed).
+//
+// Downscaled to a small sample width for speed -- band detection doesn't
+// need full resolution, just enough rows/columns to tell "flat" from "has
+// content". A row/column counts as a band edge if MOST of it (not all —
+// small UI chrome like a status-bar icon sitting on an otherwise solid
+// background shouldn't defeat this) is close to that row's own dominant
+// colour. Trimming is capped per edge so a genuinely uniform photo (a
+// solid-colour studio background, say) never gets crushed to nothing --
+// letterboxing is a border, not most of the image.
+const BAND_SAMPLE_WIDTH = 100;
+const BAND_UNIFORM_FRACTION = 0.92;
+const BAND_COLOR_TOLERANCE = 18; // summed per-channel RGB distance allowed
+const BAND_MAX_TRIM_FRACTION = 0.35;
+
+function contentCropBounds(img) {
+const w = img.naturalWidth, h = img.naturalHeight;
+if (!w || !h) return { x: 0, y: 0, w: 1, h: 1 };
+const sw = Math.min(BAND_SAMPLE_WIDTH, w);
+const sh = Math.max(1, Math.round(h * (sw / w)));
+const canvas = document.createElement('canvas');
+canvas.width = sw; canvas.height = sh;
+const ctx = canvas.getContext('2d');
+ctx.drawImage(img, 0, 0, sw, sh);
+const { data } = ctx.getImageData(0, 0, sw, sh);
+const px = (x, y) => (y * sw + x) * 4;
+
+const rowUniform = (y) => {
+const m = px(Math.floor(sw / 2), y);
+const r = data[m], g = data[m + 1], b = data[m + 2];
+let matches = 0;
+for (let x = 0; x < sw; x++) {
+const i = px(x, y);
+if (Math.abs(data[i] - r) + Math.abs(data[i + 1] - g) + Math.abs(data[i + 2] - b) <= BAND_COLOR_TOLERANCE * 3) matches++;
+}
+return matches / sw >= BAND_UNIFORM_FRACTION;
+};
+const colUniform = (x) => {
+const m = px(x, Math.floor(sh / 2));
+const r = data[m], g = data[m + 1], b = data[m + 2];
+let matches = 0;
+for (let y = 0; y < sh; y++) {
+const i = px(x, y);
+if (Math.abs(data[i] - r) + Math.abs(data[i + 1] - g) + Math.abs(data[i + 2] - b) <= BAND_COLOR_TOLERANCE * 3) matches++;
+}
+return matches / sh >= BAND_UNIFORM_FRACTION;
+};
+
+let top = 0, bottom = sh - 1, left = 0, right = sw - 1;
+const maxTopBottom = Math.floor(sh * BAND_MAX_TRIM_FRACTION);
+const maxLeftRight = Math.floor(sw * BAND_MAX_TRIM_FRACTION);
+while (top < maxTopBottom && rowUniform(top)) top++;
+while (bottom > sh - 1 - maxTopBottom && bottom > top && rowUniform(bottom)) bottom--;
+while (left < maxLeftRight && colUniform(left)) left++;
+while (right > sw - 1 - maxLeftRight && right > left && colUniform(right)) right--;
+
+if (bottom <= top || right <= left) return { x: 0, y: 0, w: 1, h: 1 };
+return { x: left / sw, y: top / sh, w: (right - left + 1) / sw, h: (bottom - top + 1) / sh };
+}
+
+// Crops an image down to fractional bounds (as returned by
+// contentCropBounds) at full resolution — unlike cropThumbnailToBlob, this
+// keeps the source's aspect ratio and size rather than squashing to a
+// fixed thumbnail, since the result is meant to be stored as the real
+// photo, not a preview.
+function cropToContentBlob(img, bounds, quality) {
+return new Promise((resolve) => {
+const sx = bounds.x * img.naturalWidth;
+const sy = bounds.y * img.naturalHeight;
+const sw = bounds.w * img.naturalWidth;
+const sh = bounds.h * img.naturalHeight;
+if (sw <= 0 || sh <= 0) { resolve(null); return; }
+const canvas = document.createElement('canvas');
+canvas.width = Math.max(1, Math.round(sw));
+canvas.height = Math.max(1, Math.round(sh));
+canvas.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+canvas.toBlob((blob) => resolve(blob), 'image/jpeg', quality || 0.9);
+});
+}
+
+// Below this width:height ratio (narrower than 1:2), a file is treated as
+// a composite/scrolling screenshot rather than a single photo -- there's
+// comfortable separation between a real photo's content aspect ratio (even
+// an extreme full-body portrait rarely goes past ~1:1.8) and a genuine
+// multi-section scrolled profile screenshot (typically 1:5 or narrower),
+// once letterbox bars are trimmed out of the comparison.
+const PHOTO_ASPECT_THRESHOLD = 0.5;
+
+// Loads a file, trims letterbox/pillarbox bars, and classifies it as a
+// single photo (direct save, no AI) or a composite screenshot (needs the
+// banded AI parse) based on the CONTENT aspect ratio, not the raw file's.
+async function classifyProfileUpload(file) {
+const img = await loadImage(file);
+const bounds = contentCropBounds(img);
+const contentW = img.naturalWidth * bounds.w;
+const contentH = img.naturalHeight * bounds.h;
+const ratio = contentH > 0 ? contentW / contentH : 1;
+return { img, bounds, isScreenshot: ratio < PHOTO_ASPECT_THRESHOLD };
+}
+
 export {
 todayStr, daysAgoStr, last7Dates, uid, daysSince, daysUntil, foldDiacritics,
 escapeHtml, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, knownCityMap, scrollAndFlash, bindForm,
@@ -675,4 +784,5 @@ findMentions, COUNTRY_NAME_TO_NATIONALITY,
 resizeImageToBlob, fileToBase64, loadImage, cropThumbnailToBlob,
 hashFile, captureDateOf, betterCaptureDate, dateFromFilename,
 ensureBrowserReadableImage, setPhotoFallback,
+contentCropBounds, cropToContentBlob, classifyProfileUpload,
 };

@@ -203,11 +203,11 @@ throw parseErr;
 }
 }
 
-async function callVision(base64, mediaType, promptText, maxTokens) {
+async function callVision(base64, mediaType, promptText, maxTokens, modelOverride) {
 return callAnthropic([
 { type: 'image', source: { type: 'base64', media_type: normalizeImageMediaType(mediaType), data: base64 } },
 { type: 'text', text: promptText },
-], maxTokens, null, 'Photo import');
+], maxTokens, modelOverride || null, 'Photo import');
 }
 
 // Text-only Claude call, no image — used for reasoning-over-JSON tasks like
@@ -226,6 +226,16 @@ return callAnthropic([{ type: 'text', text: promptText }], maxTokens, modelOverr
 // whichever prefix parsed and a `truncated: true` flag instead of an error.
 const MATCHES_MAX_TOKENS = 16000;
 const PROFILE_MAX_TOKENS = 2000;
+// Explicitly locked rather than left to inherit settings.anthropicModel/
+// DEFAULT_MODEL (Opus 5) -- reading a profile's stats/bio and drawing photo
+// bounding boxes is structured extraction, not a task that benefits from
+// Opus-tier reasoning, and Haiku undersells accuracy on the nuanced bits
+// (height written as "5'7\"" vs "170cm", a bio that needs summarising).
+// Sonnet 5 is the deliberate middle tier for this job. Now banded for long
+// profile screenshots (see BAND_TARGET_HEIGHT below), so this runs more
+// than once per import -- worth pricing right, not just inheriting the
+// user's chosen default.
+const PROFILE_PARSE_MODEL = 'claude-sonnet-5';
 
 // A vision model estimating bounding-box coordinates has no pixel grid to
 // anchor against, so a raw absolute-position guess drifts the further down
@@ -389,8 +399,71 @@ await parseCachePut(hash, 'quick', { result, model: QUICK_SCAN_MODEL, captured }
 return { ...result, hash, captureDate: (captured || {}).date || '', fromCache: false };
 }
 
+// Same fields+shape as the unbanded prompt, plus banded-mode caveats: only
+// report a field if it's genuinely visible in THIS section (another band
+// supplies what this one can't see, rather than this one guessing), and
+// skip a photo box cut off at the very top/bottom edge (under half
+// visible) since it's fully visible in the adjacent overlapping band.
+function profilePrompt(isBand, app) {
+return `This is a screenshot of ONE person's ${app ? `${app} ` : 'dating app '}profile page`
++ (isBand ? ', showing one vertical section of a longer scrolling screenshot' : '') + '.'
++ ' Extract what\'s visible: name, age, their height exactly as written (e.g. "5\'7\\"" or "170cm", empty if not shown), their education or university (empty if not shown), a short list of languages they speak (array), a short list of nationalities (array, empty if not stated), whether they mention having kids (short phrase or empty), their job/occupation (empty if not shown), their location or city (empty if not shown), a one or two sentence bio/about-me summary, and rough bounding boxes (fractions 0 to 1 of the full image, keys x,y,w,h) around each distinct profile photo visible in the screenshot (there may be several).'
++ (isBand ? ' Only report a field if its value is genuinely visible in THIS section — leave it empty rather than guessing from context, since another section will supply it. If a photo is cut off at the very top or bottom edge of this image (less than half visible), SKIP its bounding box entirely — it is fully visible in an adjacent section and will be captured there instead.' : '')
++ ' Return ONLY a JSON object, no other text, no markdown fences, in this exact shape: {"name":"Alex","age":"29","height":"","education":"","languages":["English"],"nationality":[],"kids":"","job":"","location":"","bio":"","photoBoxes":[{"x":0.1,"y":0.05,"w":0.8,"h":0.4}]}. Use empty string/array if something is not visible or unsure — do not guess.';
+}
+
+// Two bands overlap on purpose (see BAND_OVERLAP) -- a photo box fully
+// inside the overlap zone can legitimately come back from both bands
+// intact. No name to key off here (unlike dedupeByNameAndPosition), so
+// this dedupes on position alone.
+function dedupePhotoBoxesByPosition(boxes) {
+const out = [];
+for (const b of boxes) {
+const dupe = out.some((o) => Math.abs(o.y - b.y) < 0.03 && Math.abs(o.x - b.x) < 0.05);
+if (!dupe) out.push(b);
+}
+return out;
+}
+
+// Merges one result per band into the single flat shape the rest of this
+// function (and the cache) expects. Scalars: first band to actually see
+// the field wins (the isBand prompt above asks each band not to guess a
+// field it can't see, so "first non-empty" is "the band that saw it," not
+// a race). Arrays union; bio concatenates (a bio can itself span a band
+// boundary); photo boxes translate into whole-image coordinates and dedupe
+// across the overlap the same way extractMatchesFromScreenshot does.
+function mergeProfileBandResults(results, bands, totalHeight) {
+const firstNonEmpty = (key) => (results.map((r) => r[key]).find((v) => String(v || '').trim())) || '';
+const unionArr = (key) => {
+const seen = new Set(); const out = [];
+results.forEach((r) => (Array.isArray(r[key]) ? r[key] : []).forEach((v) => {
+const k = String(v || '').trim().toLowerCase();
+if (k && !seen.has(k)) { seen.add(k); out.push(v); }
+}));
+return out;
+};
+const bios = [...new Set(results.map((r) => String(r.bio || '').trim()).filter(Boolean))];
+const photoBoxes = dedupePhotoBoxesByPosition(
+results.flatMap((r, i) => (Array.isArray(r.photoBoxes) ? r.photoBoxes : []).map((b) => ({
+x: b.x, y: (bands[i].y0 + b.y * bands[i].h) / totalHeight, w: b.w, h: (b.h * bands[i].h) / totalHeight,
+}))),
+);
+return {
+name: firstNonEmpty('name'), age: firstNonEmpty('age'), height: firstNonEmpty('height'),
+education: firstNonEmpty('education'), languages: unionArr('languages'), nationality: unionArr('nationality'),
+kids: firstNonEmpty('kids'), job: firstNonEmpty('job'), location: firstNonEmpty('location'),
+bio: bios.join(' '), photoBoxes,
+};
+}
+
 // Screenshot of ONE person's full profile page — richer fields, possibly
-// several photos.
+// several photos. Long composite screenshots (a full scrolled profile,
+// several photos plus every text section) are sliced into overlapping
+// bands (see planBands, same mechanism extractMatchesFromScreenshot
+// already uses) so text stays legible and photo boxes stay accurate —
+// sent whole, a tall enough image gets downscaled by the API to fit its
+// size budget, which for an extreme portrait aspect ratio can squash
+// small text into illegibility before Claude ever reads it.
 async function extractProfileFromScreenshot(file, app) {
 file = await ensureBrowserReadableImage(file);
 const base64 = await fileToBase64(file);
@@ -408,19 +481,37 @@ betterCaptureDate(await captureDateOf(file), cachedText && cachedText.captured),
 quickCached && quickCached.captured,
 );
 const captureDate = (captured || {}).date || '';
-const prompt = `This is a screenshot of ONE person's ${app ? `${app} ` : 'dating app '}profile page.`
-+ ' Extract what\'s visible: name, age, their height exactly as written (e.g. "5\'7\\"" or "170cm", empty if not shown), their education or university (empty if not shown), a short list of languages they speak (array), a short list of nationalities (array, empty if not stated), whether they mention having kids (short phrase or empty), their job/occupation (empty if not shown), their location or city (empty if not shown), a one or two sentence bio/about-me summary, and rough bounding boxes (fractions 0 to 1 of the full image, keys x,y,w,h) around each distinct profile photo visible in the screenshot (there may be several). Return ONLY a JSON object, no other text, no markdown fences, in this exact shape: {"name":"Alex","age":"29","height":"","education":"","languages":["English"],"nationality":[],"kids":"","job":"","location":"","bio":"","photoBoxes":[{"x":0.1,"y":0.05,"w":0.8,"h":0.4}]}. Use empty string/array if something is not visible or unsure — do not guess.';
-const [raw, img] = await Promise.all([
-cachedText ? Promise.resolve(cachedText.result) : callVision(base64, mediaType, prompt, PROFILE_MAX_TOKENS).then((r) => r.data),
-loadImage(dataUrl),
-]);
+const img = await loadImage(dataUrl);
+
+let raw;
+if (cachedText) {
+raw = cachedText.result;
+} else {
+const bands = planBands(img.naturalHeight);
+const isBanded = bands.length > 1;
+const settled = await Promise.allSettled(bands.map(async (band) => {
+const bandBase64 = isBanded ? await sliceToBase64(img, band.y0, band.h) : base64;
+const bandMediaType = isBanded ? 'image/png' : mediaType;
+const { data } = await callVision(bandBase64, bandMediaType, profilePrompt(isBanded, app), PROFILE_MAX_TOKENS, PROFILE_PARSE_MODEL);
+return data;
+}));
+const results = [];
+const okBands = [];
+settled.forEach((r, i) => {
+if (r.status === 'fulfilled') { results.push(r.value); okBands.push(bands[i]); }
+else console.error(`Profile band ${i + 1}/${bands.length} failed:`, r.reason);
+});
+if (!results.length) throw settled[0].reason;
+raw = isBanded ? mergeProfileBandResults(results, okBands, img.naturalHeight) : results[0];
+await parseCachePut(hash, 'rich', { result: raw, captured });
+}
+
 const photoBoxes = Array.isArray(raw.photoBoxes) ? raw.photoBoxes : [];
 const photoBlobs = [];
 for (const box of photoBoxes) {
 const blob = await cropThumbnailToBlob(img, box);
 if (blob) photoBlobs.push(blob);
 }
-if (!cachedText) await parseCachePut(hash, 'rich', { result: raw, captured });
 return {
 name: raw.name || 'unidentified',
 age: raw.age || '',
