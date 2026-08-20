@@ -59,12 +59,22 @@ const myName = nameKey(data.myName);
 if (!myPhone && !myEmail && !myAddress && !myName) return [];
 const hits = [];
 data.connections.forEach((c) => {
-const fields = [];
-if (myPhone && phoneKey(c.phone) === myPhone) fields.push('phone');
-if (myEmail && emailKey(c.email) === myEmail) fields.push('email');
-if (myAddress && String(c.address || '').trim().toLowerCase() === myAddress) fields.push('address');
-if (myName && (c.aliases || []).some((a) => nameKey(a) === myName)) fields.push('aliases');
-if (fields.length) hits.push({ conn: c, fields });
+const fields = new Set();
+if (myPhone && phoneKey(c.phone) === myPhone) fields.add('phone');
+if (myEmail && emailKey(c.email) === myEmail) fields.add('email');
+if (myAddress && String(c.address || '').trim().toLowerCase() === myAddress) fields.add('address');
+if (myName && (c.aliases || []).some((a) => nameKey(a) === myName)) fields.add('aliases');
+// contactConflicts is a snapshot taken at match/sync time -- a field can
+// already have been cleared or overwritten since, while the leak is
+// still sitting in the "mine" side of a pending conflict, invisible to
+// the checks above (confirmed live: a connection's phone no longer held
+// the user's own number, but its stale conflict box still offered
+// "Keep <the leaked number>").
+(c.contactConflicts || []).forEach((k) => {
+if (k.field === 'phone' && myPhone && phoneKey(k.mine) === myPhone) fields.add('phone');
+if (k.field === 'email' && myEmail && emailKey(k.mine) === myEmail) fields.add('email');
+});
+if (fields.size) hits.push({ conn: c, fields: [...fields] });
 });
 return hits;
 }
