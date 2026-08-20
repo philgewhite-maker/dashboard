@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v89</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v90</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -323,6 +323,8 @@ Not built: comparing retailer prices or adding to a basket in two clicks. That w
 <input type="file" id="photo-only-input" accept="image/*" multiple style="display:none;">
 </div>
 <div class="import-status" id="import-status"></div>
+<div class="settings-note import-last-run" id="import-file-last-run"></div>
+<div class="settings-note import-last-run" id="import-profile-last-run"></div>
 <div class="candidate-list" id="candidate-list"></div>
 </div>
 </section>
@@ -1437,6 +1439,7 @@ console.log('Ready. Run tinderBulkImport() for the default 15, tinderBulkImport(
 <input type="file" id="tinder-file-input" accept="application/json" multiple style="display:none;">
 <span class="sync-status" id="tinder-status"></span>
 </div>
+<div class="settings-note import-last-run" id="tinder-last-run"></div>
 <div id="tinder-bulk-review"></div>
 <div id="tinder-review"></div>
 </section>
@@ -1455,6 +1458,7 @@ Export a chat from WhatsApp (open the chat &rarr; &#8942; &rarr; More &rarr; Exp
 <input type="file" id="whatsapp-file-input" accept=".txt,text/plain" multiple style="display:none;">
 <span class="sync-status" id="whatsapp-status"></span>
 </div>
+<div class="settings-note import-last-run" id="whatsapp-last-run"></div>
 <div id="whatsapp-review"></div>
 <div id="whatsapp-bulk-review"></div>
 </section>
@@ -1471,6 +1475,7 @@ Telegram Desktop &rarr; Settings &rarr; Advanced &rarr; Export Telegram data &ra
 <input type="file" id="telegram-folder-input" webkitdirectory multiple style="display:none;">
 <span class="sync-status" id="telegram-status"></span>
 </div>
+<div class="settings-note import-last-run" id="telegram-last-run"></div>
 <div id="telegram-review"></div>
 </section>
 
@@ -1485,6 +1490,7 @@ Telegram Desktop &rarr; Settings &rarr; Advanced &rarr; Export Telegram data &ra
 <button class="sync-btn" id="scan-clear-btn" type="button">Clear</button>
 <span class="sync-status" id="scan-status"></span>
 </div>
+<div class="settings-note import-last-run" id="photoscan-last-run"></div>
 <div class="settings-note" style="margin:0 0 10px;">Pick files, <strong>drag them onto this panel</strong>, or copy an image anywhere (in Google Photos: right-click &rarr; Copy image) and press <strong>Ctrl+V</strong>. A cheap first pass reads just a name, age and whether the screenshot looks detailed &mdash; pennies for a whole album. Full parse only the ones worth it. Anything scanned before is free.</div>
 <div id="scan-results"></div>
 </section>
@@ -1707,9 +1713,12 @@ Album links are permanent, unlike the face-group links tried previously.
 <textarea id="albums-input" rows="4" style="width:100%;font-family:monospace;font-size:12px;" placeholder="Paste the copied JSON here"></textarea>
 <div class="sync-row" style="margin-top:8px;">
 <button class="sync-btn" id="albums-match-btn" type="button">Match to connections</button>
+<label class="file-btn" for="albums-file-input">Or upload saved .json file</label>
+<input type="file" id="albums-file-input" accept="application/json" style="display:none;">
 <button class="sync-btn" id="albums-clear-btn" type="button">Clear</button>
 <span class="sync-status" id="albums-status"></span>
 </div>
+<div class="settings-note import-last-run" id="albums-last-run"></div>
 <div id="albums-results"></div>
 </section>
 

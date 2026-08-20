@@ -8,7 +8,7 @@
 // Every result is cached against a hash of the image bytes, so re-scanning
 // the same album costs nothing. That matters because reviewing an album is
 // something you do repeatedly as it grows.
-import { data, queueSave, blankTask } from '../state.js';
+import { data, queueSave, blankTask, recordImportRun, importStatusLine } from '../state.js';
 import { uid, escapeHtml, resizeImageToBlob } from '../utils.js';
 import { storePhoto } from '../files.js';
 import { MissingKeyError, quickScanScreenshot, extractProfileFromScreenshot } from '../ai.js';
@@ -196,9 +196,16 @@ return;
 render();
 }
 statusEl().textContent = `Scanned ${images.length}. ${billed} cost anything; ${images.length - billed} came from cache.`;
+recordImportRun('photoscan', { scope: `${images.length} screenshot${images.length === 1 ? '' : 's'}`, count: images.length });
+renderPhotoScanLastRun();
 } finally {
 scanning = false;
 }
+}
+
+function renderPhotoScanLastRun() {
+const el = document.getElementById('photoscan-last-run');
+if (el) el.textContent = importStatusLine('photoscan');
 }
 
 // Dragging an image out of a web page hands over a URL, not the bytes — and
@@ -216,6 +223,7 @@ return 'Nothing to scan in that drop — drag image files, or copy an image and 
 function initPhotoScan() {
 const input = document.getElementById('scan-input');
 if (!input) return;
+renderPhotoScanLastRun();
 
 input.addEventListener('change', async (e) => {
 const files = Array.from(e.target.files);

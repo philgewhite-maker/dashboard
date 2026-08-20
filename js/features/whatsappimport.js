@@ -4,7 +4,7 @@
 // assumption Tinder's own chat import already makes (see tinderimport.js's
 // summarizeCleanMatch) -- so importing again just overwrites chatLog with
 // whatever's now longer, rather than needing to dedupe line by line.
-import { data, queueSave } from '../state.js';
+import { data, queueSave, recordImportRun, importStatusLine } from '../state.js';
 import { escapeHtml, findMentions } from '../utils.js';
 import { nameKey, editDistance } from '../googlecontacts.js';
 import { STAGE_RANK, renderConnections, unionInto } from './connections.js';
@@ -276,6 +276,8 @@ if (!conn.lastContact && pending.dateRange) conn.lastContact = pending.dateRange
 const status = document.getElementById('whatsapp-status');
 if (status) status.textContent = changed ? `Saved to ${conn.name} (+${Math.max(newCount - oldCount, 0)} lines).` : `Nothing new for ${conn.name}.`;
 
+recordImportRun('whatsapp', { scope: conn.name, count: changed ? 1 : 0 });
+renderWhatsAppLastRun();
 if (changed) { queueSave(); renderConnections(); }
 pending = null;
 render();
@@ -426,12 +428,20 @@ importedCount++;
 }
 
 if (status) status.textContent = `Imported ${importedCount} chat${importedCount === 1 ? '' : 's'}.`;
+recordImportRun('whatsapp', { scope: `bulk, ${toImport.length} file${toImport.length === 1 ? '' : 's'}`, count: importedCount });
+renderWhatsAppLastRun();
 if (changed) { queueSave(); renderConnections(); }
 bulkPending = null;
 renderBulk();
 }
 
+function renderWhatsAppLastRun() {
+const el = document.getElementById('whatsapp-last-run');
+if (el) el.textContent = importStatusLine('whatsapp');
+}
+
 function initWhatsAppImport() {
+renderWhatsAppLastRun();
 const btn = document.getElementById('whatsapp-import-btn');
 const textarea = document.getElementById('whatsapp-input');
 const fileInput = document.getElementById('whatsapp-file-input');

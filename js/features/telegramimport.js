@@ -4,7 +4,7 @@
 // numbers -- so this reads the whole thing at once (via a folder picker),
 // cross-matches every chat against existing connections, and lets a bulk
 // review pass apply the confident ones while flagging the rest for a glance.
-import { data, queueSave } from '../state.js';
+import { data, queueSave, recordImportRun, importStatusLine } from '../state.js';
 import { escapeHtml, findMentions } from '../utils.js';
 import { nameKey, editDistance, phoneKey } from '../googlecontacts.js';
 import { STAGE_RANK, renderConnections, unionInto } from './connections.js';
@@ -430,12 +430,20 @@ importedCount++;
 }
 
 status.textContent = `Imported ${importedCount} chat${importedCount === 1 ? '' : 's'}${importPhotos ? `, ${photoCount} photo${photoCount === 1 ? '' : 's'}` : ''}.`;
+recordImportRun('telegram', { scope: `${toImport.length} chat${toImport.length === 1 ? '' : 's'} selected`, count: importedCount });
+renderTelegramLastRun();
 if (changed) { queueSave(); renderConnections(); }
 pending = null;
 render();
 }
 
+function renderTelegramLastRun() {
+const el = document.getElementById('telegram-last-run');
+if (el) el.textContent = importStatusLine('telegram');
+}
+
 function initTelegramImport() {
+renderTelegramLastRun();
 const input = document.getElementById('telegram-folder-input');
 if (!input) return;
 input.addEventListener('change', () => {

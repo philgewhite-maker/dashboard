@@ -24,7 +24,7 @@
 //
 // Matching by name happens ONCE, at import; what gets stored is the album
 // URL. So renaming an album later doesn't break an already-linked person.
-import { data, queueSave, TAG_FIELDS } from '../state.js';
+import { data, queueSave, TAG_FIELDS, recordImportRun, importStatusLine } from '../state.js';
 import { escapeHtml, uid, todayStr, hydratePhotoBackgrounds } from '../utils.js';
 import { nameKey, editDistance } from '../googlecontacts.js';
 import { photoGet } from '../db.js';
@@ -403,15 +403,15 @@ Promise.all([import('./connections.js'), import('./overview.js')])
 render();
 }
 
-function initPhotoAlbums() {
-const box = document.getElementById('albums-input');
-if (!box) return;
-const status = document.getElementById('albums-status');
+function renderAlbumsLastRun() {
+const el = document.getElementById('albums-last-run');
+if (el) el.textContent = importStatusLine('googlePhotosAlbums');
+}
 
-document.getElementById('albums-match-btn').addEventListener('click', () => {
+function runAlbumsMatch(text, status) {
 let parsed;
 try {
-parsed = parseInput(box.value);
+parsed = parseInput(text);
 } catch (err) {
 status.textContent = `Couldn't read that: ${err.message}. Paste the JSON the snippet copied.`;
 return;
@@ -440,8 +440,30 @@ const matched = rows.filter((r) => r.chosenId).length;
 status.textContent = rows.length === 0 && unparsed.length === 0
 ? (alreadyGood ? `All ${alreadyGood} already linked, nothing new to review.` : 'No albums found in that paste.')
 : `${rows.length} album${rows.length === 1 ? '' : 's'} · ${matched} matched${alreadyGood ? ` · ${alreadyGood} already linked, skipped` : ''}${unparsed.length ? ` · ${unparsed.length} not following Name_Label` : ''}${peopleSeen.length ? ` · ${peopleSeen.length} faces seen` : ''}. Check each, then save.`;
+recordImportRun('googlePhotosAlbums', { scope: `${parsed.albums.length} album${parsed.albums.length === 1 ? '' : 's'} seen`, count: rows.length });
+renderAlbumsLastRun();
 render();
+}
+
+function initPhotoAlbums() {
+const box = document.getElementById('albums-input');
+if (!box) return;
+const status = document.getElementById('albums-status');
+renderAlbumsLastRun();
+
+document.getElementById('albums-match-btn').addEventListener('click', () => runAlbumsMatch(box.value, status));
+
+const fileInput = document.getElementById('albums-file-input');
+if (fileInput) {
+fileInput.addEventListener('change', async () => {
+const file = fileInput.files[0];
+fileInput.value = '';
+if (!file) return;
+const text = await file.text();
+box.value = text;
+runAlbumsMatch(text, status);
 });
+}
 
 document.getElementById('albums-clear-btn').addEventListener('click', () => {
 box.value = '';

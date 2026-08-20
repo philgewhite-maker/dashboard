@@ -22,7 +22,7 @@
 // importer), and the chosen connection's photo stays visible for the whole
 // review regardless of how it got picked, so a wrong dropdown pick is just
 // as visible as a wrong auto-match was invisible before.
-import { data, queueSave, currentAge, computeFlags, distanceMiles, FLAG_FIELD_DEFS, suggestedQuestions, TAG_FIELDS, stripSharedSuffix } from '../state.js';
+import { data, queueSave, currentAge, computeFlags, distanceMiles, FLAG_FIELD_DEFS, suggestedQuestions, TAG_FIELDS, stripSharedSuffix, recordImportRun, importStatusLine } from '../state.js';
 import { escapeHtml, uid, todayStr, hydratePhotoBackgrounds, openLightbox, knownCityMap, COUNTRY_NAME_TO_NATIONALITY } from '../utils.js';
 import { nameKey, editDistance, phoneKey } from '../googlecontacts.js';
 import { storePhoto, fetchProxiedImage } from '../files.js';
@@ -2013,6 +2013,8 @@ status.textContent = n ? `Marked ${n} connection${n === 1 ? '' : 's'} unmatched.
 // {label,value} data through it again).
 function loadBatch(raws, status) {
 if (!raws.length) { if (status) status.textContent = 'Nothing to import in that.'; return; }
+recordImportRun('tinderSnippet', { scope: `${raws.length} profile${raws.length === 1 ? '' : 's'} read`, count: raws.length });
+renderTinderLastRun();
 const { bulk, review } = classifyRaws(raws);
 if (bulk.length) bulkSubmitMessage = '';
 bulkQueue = bulkQueue.concat(bulk);
@@ -2345,9 +2347,15 @@ if (freshStatus) freshStatus.textContent = message;
 }
 }
 
+function renderTinderLastRun() {
+const el = document.getElementById('tinder-last-run');
+if (el) el.textContent = importStatusLine('tinderSnippet');
+}
+
 function initTinderImport() {
 const box = document.getElementById('tinder-input');
 if (!box) return;
+renderTinderLastRun();
 const status = document.getElementById('tinder-status');
 
 document.getElementById('tinder-import-btn').addEventListener('click', () => {

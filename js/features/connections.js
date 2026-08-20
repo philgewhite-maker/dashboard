@@ -1,4 +1,4 @@
-import { data, queueSave, reachOutThreshold, isDormantStage, isTravelPaused, getLocalSettings, TAG_FIELDS, CONTACT_STATUS_LABELS, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness, slugifyField, FLAG_FIELD_DEFS, computeFlags, valueColorForField, stripSharedSuffix, suggestedAction, suggestedQuestions } from '../state.js';
+import { data, queueSave, reachOutThreshold, isDormantStage, isTravelPaused, getLocalSettings, TAG_FIELDS, CONTACT_STATUS_LABELS, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness, slugifyField, FLAG_FIELD_DEFS, computeFlags, valueColorForField, stripSharedSuffix, suggestedAction, suggestedQuestions, recordImportRun, importStatusLine } from '../state.js';
 import { captureTask, revealTask } from './tasks.js';
 import { photoDelete, photoUrl } from '../db.js';
 import { storePhoto } from '../files.js';
@@ -1605,9 +1605,17 @@ const app = document.getElementById('import-app-input').value;
 return SCREENSHOT_APPS.has(app) ? app : null;
 }
 
+function renderImportLastRun() {
+const fileLine = document.getElementById('import-file-last-run');
+const profileLine = document.getElementById('import-profile-last-run');
+if (fileLine) fileLine.textContent = importStatusLine('screenshotMatches');
+if (profileLine) profileLine.textContent = importStatusLine('screenshotProfile');
+}
+
 function initImport() {
 const status = document.getElementById('import-status');
 const candidateList = document.getElementById('candidate-list');
+renderImportLastRun();
 
 document.getElementById('photo-only-input').addEventListener('change', async (e) => {
 const files = Array.from(e.target.files);
@@ -1624,6 +1632,8 @@ candidateList.innerHTML = '';
 status.textContent = 'Reading screenshot…';
 await withImportStatus(status, async () => {
 const { candidates, truncated } = await extractMatchesFromScreenshot(file, screenshotAppHint());
+recordImportRun('screenshotMatches', { scope: screenshotAppHint() || 'matches list', count: candidates.length });
+renderImportLastRun();
 if (candidates.length === 0) { status.textContent = 'No people found in that screenshot.'; return; }
 const truncatedNote = truncated ? ' (the screenshot had more people than fit in one response — the rest were skipped; try cropping the screenshot shorter and importing the remainder separately)' : '';
 status.textContent = `Found ${candidates.length} ${candidates.length === 1 ? 'person' : 'people'}${truncatedNote} — review below:`;
@@ -1643,6 +1653,8 @@ const profiles = results.filter((r) => r.status === 'fulfilled').map((r) => r.va
 const failures = results.filter((r) => r.status === 'rejected').map((r) => r.reason);
 failures.forEach((err) => console.error('Profile screenshot import failed:', err));
 const failedCount = failures.length;
+recordImportRun('screenshotProfile', { scope: screenshotAppHint() || `${files.length} screenshot${files.length === 1 ? '' : 's'}`, count: profiles.length });
+renderImportLastRun();
 if (profiles.length === 0) {
 const firstMissingKey = failures.find((err) => err instanceof MissingKeyError);
 const detail = firstMissingKey ? firstMissingKey.message : (failures[0]?.message || 'unknown error');

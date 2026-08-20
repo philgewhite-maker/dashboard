@@ -262,6 +262,10 @@ myName: '', myPhone: '', myEmail: '', myAddress: '',
 // A stage with no entry falls back to the priority-scaled formula. See
 // reachOutThreshold() below.
 reachOutStageDays: {},
+// Per-importer run history, keyed by importer id (see recordImportRun()
+// below) -- name -> {lastRunAt, scope, count}. Same shape/spirit as
+// calendarStatus above, just for the various dating-import panels.
+importStatus: {},
 prefs: { ...DEFAULT_PREFS } };
 }
 
@@ -545,6 +549,7 @@ if (typeof data.myPhone !== 'string') data.myPhone = '';
 if (typeof data.myEmail !== 'string') data.myEmail = '';
 if (typeof data.myAddress !== 'string') data.myAddress = '';
 if (!data.reachOutStageDays || typeof data.reachOutStageDays !== 'object') data.reachOutStageDays = {};
+if (!data.importStatus || typeof data.importStatus !== 'object') data.importStatus = {};
 if (!Array.isArray(data.ratingCategories) || data.ratingCategories.length === 0) {
 data.ratingCategories = DEFAULT_RATING_CATEGORIES.map((c) => ({ ...c }));
 } else {
@@ -779,6 +784,31 @@ const COMPLETENESS_CHECKS = [
 function completeness(conn) {
 const hits = COMPLETENESS_CHECKS.filter((check) => check(conn)).length;
 return hits / COMPLETENESS_CHECKS.length;
+}
+
+// Shared "when did I last run this import, and how much did it cover"
+// tracker for every import panel (Tinder snippet, WhatsApp, Telegram,
+// screenshot imports, Photo Scan, Google Photos albums) -- one small
+// keyed object rather than a bespoke field per importer, same pattern as
+// calendarStatus above. `scope` is a free-text hint ("since 2026-08-01",
+// "full history") since only the caller knows what kind of run it was;
+// omit it for importers that don't have a meaningful notion of scope.
+function recordImportRun(key, info) {
+if (!data.importStatus) data.importStatus = {};
+data.importStatus[key] = {
+lastRunAt: new Date().toISOString(),
+scope: (info && info.scope) || '',
+count: info && typeof info.count === 'number' ? info.count : null,
+};
+queueSave();
+}
+
+function importStatusLine(key) {
+const s = data.importStatus && data.importStatus[key];
+if (!s || !s.lastRunAt) return '';
+const when = new Date(s.lastRunAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+const parts = [s.scope, typeof s.count === 'number' ? `${s.count} item${s.count === 1 ? '' : 's'}` : ''].filter(Boolean);
+return `Last run: ${when}${parts.length ? ' — ' + parts.join(', ') : ''}`;
 }
 
 // A plan already made ("Planning to meet"/"Planning to call") is
@@ -1017,6 +1047,7 @@ TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask,
 CONTACT_STATUS_LABELS, CONTACT_MATCH_MIN_STAGE,
 DEFAULT_RATING_CATEGORIES, slugifyField, DEFAULT_RECIPE_RATING_CATEGORIES,
 FLAG_FIELD_DEFS, DEFAULT_FLAG_RULES, computeFlags, valueColorForField, stripSharedSuffix, suggestedAction, suggestedQuestions, isTravelPaused, ACTIONS, distanceMiles,
+recordImportRun, importStatusLine,
 };
 
 // `data` above is exported by binding, but ES module live-bindings only
