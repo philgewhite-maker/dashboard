@@ -4,7 +4,7 @@
 // numbers -- so this reads the whole thing at once (via a folder picker),
 // cross-matches every chat against existing connections, and lets a bulk
 // review pass apply the confident ones while flagging the rest for a glance.
-import { data, queueSave, recordImportRun, importStatusLine } from '../state.js';
+import { data, queueSave, recordImportRun, importStatusLine, upsertIdentity } from '../state.js';
 import { escapeHtml, findMentions } from '../utils.js';
 import { nameKey, editDistance, phoneKey } from '../googlecontacts.js';
 import { STAGE_RANK, renderConnections, unionInto } from './connections.js';
@@ -162,7 +162,7 @@ return conn ? { conn, phone } : null;
 
 function createConnectionFor(name) {
 const conn = {
-id: `tg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, name, profileName: '', app: 'Telegram', priority: 3,
+id: `tg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, name, profileName: '', identities: [], app: 'Telegram', priority: 3,
 stage: 'Matched', lastContact: '', createdAt: new Date().toISOString(),
 photoId: null, photoIds: [], tinderPhotoKeys: [], photoAlbums: [], age: '', dob: '', ageAsOf: '', location: [], address: '',
 kids: '', job: '', height: '', education: '', phone: '', email: '',
@@ -406,6 +406,7 @@ const oldCount = String(conn.chatLogTelegram || '').split('\n').filter(Boolean).
 if (messages.length > oldCount) { conn.chatLogTelegram = newText; changed = true; }
 if ((STAGE_RANK['Moved to Telegram'] ?? 0) > (STAGE_RANK[conn.stage] ?? 0)) { conn.stage = 'Moved to Telegram'; changed = true; }
 if (!conn.lastContact) conn.lastContact = messages[messages.length - 1].dateISO;
+upsertIdentity(conn, { platform: 'Telegram', handle: row.chat.name, matchId: row.chat.chatId });
 
 // mediaFile is only ever a real filename for an actually-included photo
 // -- the excluded-media placeholder is a human-readable sentence that

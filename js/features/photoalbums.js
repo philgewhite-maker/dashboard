@@ -147,7 +147,7 @@ return null;
 // step by hand rather than factored out.
 function createConnectionFor(name) {
 const conn = {
-id: uid(), name, profileName: '', app: 'Real life', priority: 3, stage: 'Matched', lastContact: todayStr(), createdAt: new Date().toISOString(),
+id: uid(), name, profileName: '', identities: [], app: 'Real life', priority: 3, stage: 'Matched', lastContact: todayStr(), createdAt: new Date().toISOString(),
 photoId: null, photoIds: [], photoAlbums: [], age: '', dob: '', ageAsOf: '', location: '', address: '',
 kids: '', job: '', height: '', education: '', phone: '', email: '',
 contactStatus: '', contactResourceName: '', contactEtag: '', contactConflicts: [],

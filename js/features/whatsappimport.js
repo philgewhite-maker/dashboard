@@ -4,7 +4,7 @@
 // assumption Tinder's own chat import already makes (see tinderimport.js's
 // summarizeCleanMatch) -- so importing again just overwrites chatLog with
 // whatever's now longer, rather than needing to dedupe line by line.
-import { data, queueSave, recordImportRun, importStatusLine } from '../state.js';
+import { data, queueSave, recordImportRun, importStatusLine, upsertIdentity } from '../state.js';
 import { escapeHtml, findMentions } from '../utils.js';
 import { nameKey, editDistance } from '../googlecontacts.js';
 import { STAGE_RANK, renderConnections, unionInto } from './connections.js';
@@ -128,7 +128,7 @@ return typeof limit === 'number' ? results.slice(0, limit) : results;
 
 function createConnectionFor(name) {
 const conn = {
-id: `wa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, name, profileName: '', app: 'WhatsApp', priority: 3,
+id: `wa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, name, profileName: '', identities: [], app: 'WhatsApp', priority: 3,
 stage: 'Matched', lastContact: '', createdAt: new Date().toISOString(),
 photoId: null, photoIds: [], tinderPhotoKeys: [], photoAlbums: [], age: '', dob: '', ageAsOf: '', location: [], address: '',
 kids: '', job: '', height: '', education: '', phone: '', email: '',
@@ -272,6 +272,7 @@ conn.stage = 'Moved to WhatsApp';
 changed = true;
 }
 if (!conn.lastContact && pending.dateRange) conn.lastContact = pending.dateRange[1];
+upsertIdentity(conn, { platform: 'WhatsApp', handle: pending.themName });
 
 const status = document.getElementById('whatsapp-status');
 if (status) status.textContent = changed ? `Saved to ${conn.name} (+${Math.max(newCount - oldCount, 0)} lines).` : `Nothing new for ${conn.name}.`;
@@ -424,6 +425,7 @@ const oldCount = String(conn.chatLogWhatsApp || '').split('\n').filter(Boolean).
 if (row.messages.length > oldCount) { conn.chatLogWhatsApp = newText; changed = true; }
 if ((STAGE_RANK['Moved to WhatsApp'] ?? 0) > (STAGE_RANK[conn.stage] ?? 0)) { conn.stage = 'Moved to WhatsApp'; changed = true; }
 if (!conn.lastContact && row.messages.length) conn.lastContact = row.messages[row.messages.length - 1].dateISO;
+upsertIdentity(conn, { platform: 'WhatsApp', handle: row.displayName });
 importedCount++;
 }
 

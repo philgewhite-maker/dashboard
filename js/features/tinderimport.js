@@ -22,7 +22,7 @@
 // importer), and the chosen connection's photo stays visible for the whole
 // review regardless of how it got picked, so a wrong dropdown pick is just
 // as visible as a wrong auto-match was invisible before.
-import { data, queueSave, currentAge, computeFlags, distanceMiles, FLAG_FIELD_DEFS, suggestedQuestions, TAG_FIELDS, stripSharedSuffix, recordImportRun, importStatusLine } from '../state.js';
+import { data, queueSave, currentAge, computeFlags, distanceMiles, FLAG_FIELD_DEFS, suggestedQuestions, TAG_FIELDS, stripSharedSuffix, recordImportRun, importStatusLine, upsertIdentity } from '../state.js';
 import { escapeHtml, uid, todayStr, hydratePhotoBackgrounds, openLightbox, knownCityMap, COUNTRY_NAME_TO_NATIONALITY } from '../utils.js';
 import { nameKey, editDistance, phoneKey } from '../googlecontacts.js';
 import { storePhoto, fetchProxiedImage } from '../files.js';
@@ -161,7 +161,7 @@ return matchCandidates(name, 1)[0] || null;
 
 function createConnectionFor(name) {
 const conn = {
-id: uid(), name, profileName: '', app: 'Tinder', priority: 3, stage: 'Matched', lastContact: todayStr(), createdAt: new Date().toISOString(),
+id: uid(), name, profileName: '', identities: [], app: 'Tinder', priority: 3, stage: 'Matched', lastContact: todayStr(), createdAt: new Date().toISOString(),
 photoId: null, photoIds: [], tinderPhotoKeys: [], photoAlbums: [], age: '', dob: '', ageAsOf: '', location: [], address: '',
 kids: '', job: '', height: '', education: '', phone: '', email: '',
 contactStatus: '', contactResourceName: '', contactEtag: '', contactConflicts: [],
@@ -1925,6 +1925,7 @@ if (p.ratingOverride) conn.priority = p.ratingOverride;
 conn.travelStatus = p.travelStatusOverride || '';
 if (p.travelStatusOverride === 'travelling') conn.travelUntil = p.travelUntilOverride;
 if (p.matchId && !conn.tinderMatchId) conn.tinderMatchId = p.matchId;
+upsertIdentity(conn, { platform: 'Tinder', handle: p.name, matchId: p.matchId });
 
 queueSave();
 return { ok: true, conn, failed, toFetchLen: toFetch.length, firstError, alreadyHad };

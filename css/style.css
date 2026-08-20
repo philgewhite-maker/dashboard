@@ -1060,6 +1060,13 @@ color:var(--ink);
 width:90px;
 }
 
+/* Platform identities */
+.identity-list{display:flex;flex-direction:column;gap:4px;margin-top:4px;}
+.identity-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
+.identity-row select{flex:0 0 auto;}
+.identity-row input[type="text"]{flex:1 1 120px;min-width:0;}
+.identity-row .tag-x{cursor:pointer;color:var(--muted);}
+
 /* Todos */
 .todo-list{display:flex;flex-direction:column;gap:4px;}
 .todo-item{display:flex;align-items:center;gap:6px;font-size:12px;}

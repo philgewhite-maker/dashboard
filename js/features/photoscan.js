@@ -8,7 +8,7 @@
 // Every result is cached against a hash of the image bytes, so re-scanning
 // the same album costs nothing. That matters because reviewing an album is
 // something you do repeatedly as it grows.
-import { data, queueSave, blankTask, recordImportRun, importStatusLine } from '../state.js';
+import { data, queueSave, blankTask, recordImportRun, importStatusLine, upsertIdentity } from '../state.js';
 import { uid, escapeHtml, resizeImageToBlob } from '../utils.js';
 import { storePhoto } from '../files.js';
 import { MissingKeyError, quickScanScreenshot, extractProfileFromScreenshot } from '../ai.js';
@@ -133,10 +133,11 @@ if (!target.photoId) target.photoId = target.photoIds[0] || null;
 
 if (existing) {
 fill(existing);
+upsertIdentity(existing, { platform: s.app || 'Other', handle: s.name });
 statusEl().textContent = `Merged into ${existing.name}.`;
 } else {
 const conn = {
-id: uid(), name: s.name, profileName: s.name, app: s.app || 'Other', priority: 3,
+id: uid(), name: s.name, profileName: s.name, identities: [], app: s.app || 'Other', priority: 3,
 stage: 'Matched', lastContact: new Date().toISOString().slice(0, 10), createdAt: new Date().toISOString(),
 photoId: photoIds[0] || null, photoIds,
 age: s.age || rich.age || '', ageAsOf: s.captureDate || '', dob: '',
@@ -148,6 +149,7 @@ languages: rich.languages || [], nationality: rich.nationality || [],
 todos: [], tags: [], aliases: [], dateLocations: [], dateEvents: [], sexTags: [],
 ratings: {}, driveLink: '', photosAlbumUrl: '', photosPersonUrl: '',
 };
+upsertIdentity(conn, { platform: conn.app, handle: s.name });
 data.connections.push(conn);
 statusEl().textContent = `Added ${conn.name}.`;
 }

@@ -1,4 +1,4 @@
-import { data, queueSave, reachOutThreshold, isDormantStage, isTravelPaused, getLocalSettings, TAG_FIELDS, CONTACT_STATUS_LABELS, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness, slugifyField, FLAG_FIELD_DEFS, computeFlags, valueColorForField, stripSharedSuffix, suggestedAction, suggestedQuestions, recordImportRun, importStatusLine } from '../state.js';
+import { data, queueSave, reachOutThreshold, isDormantStage, isTravelPaused, getLocalSettings, TAG_FIELDS, CONTACT_STATUS_LABELS, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness, slugifyField, FLAG_FIELD_DEFS, computeFlags, valueColorForField, stripSharedSuffix, suggestedAction, suggestedQuestions, recordImportRun, importStatusLine, upsertIdentity } from '../state.js';
 import { captureTask, revealTask } from './tasks.js';
 import { photoDelete, photoUrl } from '../db.js';
 import { storePhoto } from '../files.js';
@@ -424,6 +424,24 @@ return `<div class="todo-list">${items}</div>
 </div>`;
 }
 
+// One row per platform this connection has actually been found on --
+// replaces the old single "Profile name" scalar, which had no way to
+// hold "Tinder called her Kat23, Bumble called her Katya" at once.
+// Modeled on todoListHtml() just above, not tagChips() -- a flat string
+// chip has no room for a second/third column.
+function identityListHtml(c) {
+const rows = (c.identities || []).map((r) => `
+<div class="identity-row">
+<select data-identity-field="platform" data-identity-id="${r.id}" data-conn="${c.id}">${appOptions(r.platform)}</select>
+<input type="text" autocomplete="off" placeholder="Display name / handle" data-identity-field="handle" data-identity-id="${r.id}" data-conn="${c.id}" value="${escapeHtml(r.handle || '')}">
+<input type="text" autocomplete="off" placeholder="Match ID / key" data-identity-field="matchId" data-identity-id="${r.id}" data-conn="${c.id}" value="${escapeHtml(r.matchId || '')}">
+${r.platform === 'WhatsApp' && c.phone ? `<span class="settings-note">(phone: ${escapeHtml(c.phone)})</span>` : ''}
+<span class="tag-x" data-identity-remove="${c.id}" data-identity-id="${r.id}">&times;</span>
+</div>`).join('');
+return `<div class="identity-list">${rows}</div>
+<button class="todo-add-btn" type="button" data-identity-add="${c.id}">+ Add platform identity</button>`;
+}
+
 function renderOverviewRef() {
 // lazily imported to avoid a circular import at module-eval time
 import('./overview.js').then((m) => m.renderOverview());
@@ -631,7 +649,7 @@ return;
 const term = foldDiacritics(connectionSearchTerm.trim().toLowerCase());
 const filtered = term ? data.connections.filter((c) => {
 const haystack = foldDiacritics([
-c.name, c.profileName, ...(c.aliases || []), c.address, c.job, c.education, c.stage, ageDecade(c),
+c.name, c.profileName, ...(c.identities || []).flatMap((r) => [r.handle, r.matchId]), ...(c.aliases || []), c.address, c.job, c.education, c.stage, ageDecade(c),
 // So the Connections Overview "Contact match" chips actually filter —
 // they search by their own label, which otherwise matches nothing.
 CONTACT_STATUS_LABELS[c.contactStatus],
@@ -803,7 +821,7 @@ ${contactPickerHtml(c.id)}
 <div class="details-grid">
 ${c.photoId ? `<div class="full conn-hero-photo">${avatarHtml(c.photoId, c.name, 'hero')}</div>` : ''}
 <label>Name<input type="text" autocomplete="off" data-field="name" data-conn-detail="${c.id}" value="${escapeHtml(c.name)}"></label>
-<label>Profile name<input type="text" autocomplete="off" placeholder="If different — keeps photos findable" data-field="profileName" data-conn-detail="${c.id}" value="${escapeHtml(c.profileName || '')}"></label>
+<label class="full">Platform identities<span class="settings-note">What each app called them, and its own match key where there is one</span>${identityListHtml(c)}</label>
 <label>Source<select data-field="app" data-conn-detail="${c.id}">${appOptions(c.app)}</select></label>
 <label>Age when recorded${ageNoteHtml(c)}<input type="text" autocomplete="off" data-field="age" data-conn-detail="${c.id}" value="${escapeHtml(c.age || '')}"></label>
 <label>Date of birth<input type="date" data-field="dob" data-conn-detail="${c.id}" value="${escapeHtml(c.dob || '')}"></label>
@@ -1067,6 +1085,35 @@ if (e.key === 'Enter') {
 e.preventDefault();
 list.querySelector(`[data-todo-add="${input.dataset.todoInput}"]`).click();
 }
+});
+});
+list.querySelectorAll('[data-identity-field]').forEach((el) => {
+el.addEventListener('change', () => {
+const conn = data.connections.find((x) => x.id === el.dataset.conn);
+if (!conn) return;
+const row = (conn.identities || []).find((r) => r.id === el.dataset.identityId);
+if (!row) return;
+row[el.dataset.identityField] = el.value;
+queueSave();
+});
+});
+list.querySelectorAll('[data-identity-remove]').forEach((el) => {
+el.addEventListener('click', () => {
+const conn = data.connections.find((x) => x.id === el.dataset.identityRemove);
+if (!conn) return;
+conn.identities = (conn.identities || []).filter((r) => r.id !== el.dataset.identityId);
+renderConnections();
+queueSave();
+});
+});
+list.querySelectorAll('[data-identity-add]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const conn = data.connections.find((x) => x.id === btn.dataset.identityAdd);
+if (!conn) return;
+if (!Array.isArray(conn.identities)) conn.identities = [];
+conn.identities.push({ id: uid(), platform: 'Tinder', handle: '', matchId: '' });
+renderConnections();
+queueSave();
 });
 });
 list.querySelectorAll('[data-photo-remove]').forEach((el) => {
@@ -1426,7 +1473,7 @@ const name = nameInput.value.trim();
 if (!name) return;
 const newId = uid();
 data.connections.push({
-id: newId, name, app: appInput.value, priority: 3, stage: 'Matched', lastContact: todayStr(), createdAt: new Date().toISOString(),
+id: newId, name, identities: [], app: appInput.value, priority: 3, stage: 'Matched', lastContact: todayStr(), createdAt: new Date().toISOString(),
 photoId: null, photoIds: [], age: '', location: '', kids: '', job: '', height: '', education: '',
 likes: '', notes: '',
 languages: [], nationality: [], todos: [], tags: [], dateLocations: [], dateEvents: [], sexTags: [],
@@ -1707,7 +1754,7 @@ const cand = candidates[parseInt(sel.dataset.decision, 10)];
 if (sel.value.startsWith('update:')) {
 const existing = data.connections.find((c) => c.id === sel.value.slice(7));
 if (existing) {
-await applyCandidateUpdate(existing, cand, isProfile);
+await applyCandidateUpdate(existing, cand, isProfile, app);
 updatedCount++;
 }
 } else if (sel.value === 'new') {
@@ -1744,12 +1791,14 @@ data.connections.push({
 // this one (confirmed live: a Bumble matches-list row with no readable
 // name broke every screenshot import after it until the record was
 // found and fixed).
-id, name: cand.name || 'Unnamed match', profileName: cand.name || '', app, priority: 3, stage: cand.stage || 'Matched', lastContact: todayStr(), createdAt: new Date().toISOString(),
+id, name: cand.name || 'Unnamed match', profileName: cand.name || '', identities: [], app, priority: 3, stage: cand.stage || 'Matched', lastContact: todayStr(), createdAt: new Date().toISOString(),
 photoId, photoIds, age: cand.age || '', location: cand.location ? [cand.location] : [], kids: cand.kids || '', job: cand.job || '',
 height: cand.height || '', education: cand.education || '',
 likes: '', notes: cand.bio || '', languages: cand.languages || [], nationality: cand.nationality || [],
 todos: [], tags: [], dateLocations: [], dateEvents: [], sexTags: [], ratings: {}, driveLink: '',
 });
+const conn = data.connections[data.connections.length - 1];
+upsertIdentity(conn, { platform: app, handle: cand.name });
 }
 
 // location deliberately excluded -- it's a TAG_FIELDS member now (see
@@ -1788,6 +1837,11 @@ const targetNotes = String(target.notes || '').trim();
 if (sourceNotes && sourceNotes !== targetNotes) {
 target.notes = targetNotes ? `${targetNotes}\n${sourceNotes}` : sourceNotes;
 }
+// Structured field, not a TAG_FIELDS member, so the plain-string union
+// loop above doesn't touch it -- reuse upsertIdentity's own fill-gaps
+// rule so a same-platform row on each side merges into one rather than
+// leaving two rows for what's really the same account.
+(source.identities || []).forEach((r) => upsertIdentity(target, { platform: r.platform, handle: r.handle, matchId: r.matchId }));
 if (!Array.isArray(target.photoIds)) target.photoIds = [];
 (source.photoIds || []).forEach((pid) => { if (!target.photoIds.includes(pid)) target.photoIds.push(pid); });
 if (!target.photoId) target.photoId = target.photoIds[0] || null;
@@ -1807,13 +1861,14 @@ if ((STAGE_RANK[source.stage] ?? 0) > (STAGE_RANK[target.stage] ?? 0)) target.st
 if (source.lastContact && (!target.lastContact || source.lastContact > target.lastContact)) target.lastContact = source.lastContact;
 }
 
-async function applyCandidateUpdate(existing, cand, isProfile) {
+async function applyCandidateUpdate(existing, cand, isProfile, app) {
 const blobs = isProfile ? (cand.photoBlobs || []) : (cand.photoBlob ? [cand.photoBlob] : []);
 for (const blob of blobs) {
 const pid = await storePhoto(blob);
 existing.photoIds.push(pid);
 if (!existing.photoId) existing.photoId = pid;
 }
+upsertIdentity(existing, { platform: app, handle: cand.name });
 // Same merge semantics as mergeConnectionInto: fill gaps, never overwrite.
 // What you typed yourself outranks what a model read off a screenshot.
 const incoming = {

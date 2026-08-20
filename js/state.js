@@ -496,6 +496,16 @@ if (typeof c.email !== 'string') c.email = '';
 // actually called without losing the key that photos and screenshots were
 // filed under.
 if (typeof c.profileName !== 'string') c.profileName = '';
+// One-shot: seed the new per-platform identity table from whatever this
+// connection already had recorded (profileName + tinderMatchId), so it
+// isn't empty on day one. Never runs again once identities exists, even
+// if it stays [] (e.g. a connection that had neither).
+if (!Array.isArray(c.identities)) {
+c.identities = [];
+const seedName = String(c.profileName || '').trim();
+if (seedName) upsertIdentity(c, { platform: c.app || 'Other', handle: seedName, matchId: c.tinderMatchId });
+else if (c.tinderMatchId) upsertIdentity(c, { platform: 'Tinder', matchId: c.tinderMatchId });
+}
 if (typeof c.dob !== 'string') c.dob = '';
 // `location` is the city and is what Connections Overview groups by;
 // `address` holds the full postal address, which is detail rather than a
@@ -921,6 +931,29 @@ function stripSharedSuffix(v) {
 return String(v || '').replace(/\s*\(shared\)\s*$/i, '').trim();
 }
 
+// One row per platform a connection has actually been found on, replacing
+// the old single `profileName` scalar (which had no way to hold "Tinder
+// called her Kat23, Bumble called her Katya" at once). Fill-gaps merge,
+// same rule as applyCandidateUpdate()'s scalar setters -- a value already
+// recorded outranks a re-scrape, never silently overwritten. `matchId` is
+// the platform's own identifier where one exists (Tinder's match id,
+// Telegram's chat id); left blank for sources that don't have one.
+function upsertIdentity(conn, { platform, handle = '', matchId = '' }) {
+if (!platform || (!String(handle || '').trim() && !String(matchId || '').trim())) return;
+if (!Array.isArray(conn.identities)) conn.identities = [];
+// Matches an identical matchId, or a same-platform row that hasn't got
+// one recorded yet (so a later import can fill in a blank slot) -- but
+// NOT a same-platform row that already carries a *different* matchId,
+// since that's a genuine re-match under a new id, not the same record.
+const row = conn.identities.find((r) => r.platform === platform && (!matchId || !r.matchId || r.matchId === matchId));
+if (row) {
+if (!String(row.handle || '').trim() && handle) row.handle = handle;
+if (!String(row.matchId || '').trim() && matchId) row.matchId = matchId;
+} else {
+conn.identities.push({ id: uid(), platform, handle: handle || '', matchId: matchId || '' });
+}
+}
+
 function valueListColor(rule, values) {
 const norm = (values || []).map((v) => stripSharedSuffix(v).toLowerCase());
 if (!norm.length) return null;
@@ -1047,7 +1080,7 @@ TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask,
 CONTACT_STATUS_LABELS, CONTACT_MATCH_MIN_STAGE,
 DEFAULT_RATING_CATEGORIES, slugifyField, DEFAULT_RECIPE_RATING_CATEGORIES,
 FLAG_FIELD_DEFS, DEFAULT_FLAG_RULES, computeFlags, valueColorForField, stripSharedSuffix, suggestedAction, suggestedQuestions, isTravelPaused, ACTIONS, distanceMiles,
-recordImportRun, importStatusLine,
+recordImportRun, importStatusLine, upsertIdentity,
 };
 
 // `data` above is exported by binding, but ES module live-bindings only
