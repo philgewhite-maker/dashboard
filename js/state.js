@@ -803,7 +803,10 @@ return 12 - (priority || 0) * 2; // priority 5 -> 2 days, priority 1 -> 10 days
 }
 
 function isDormantStage(stage) {
-return stage === 'Faded' || stage === 'Archived';
+// 'Backlog review' deliberately excluded -- it's an active triage bucket
+// (see connections.js's "Backlog review 180+" bulk-move button), not a
+// resolved outcome like these three.
+return stage === 'Faded' || stage === 'Archived' || stage === 'FriendZone';
 }
 
 // Orthogonal to stage, not a replacement for it — someone mid-conversation

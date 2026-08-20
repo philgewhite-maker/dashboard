@@ -9,8 +9,14 @@ resizeImageToBlob,
 import { MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot } from '../ai.js';
 import { isSensitive, noCoverNote } from './photoalbums.js';
 
-const CONN_STAGES = ['Superswiped', 'Matched', 'Chatting in app', 'Moved to WhatsApp', 'Moved to Telegram', 'Planning to call', 'Planning to meet', 'Arranged to meet', 'Met in person', 'Dating', 'Faded', 'Archived'];
-const STAGE_RANK = { Dating: 10, 'Met in person': 9, 'Arranged to meet': 8, 'Planning to meet': 7, 'Planning to call': 6, 'Moved to Telegram': 5, 'Moved to WhatsApp': 4, 'Chatting in app': 3, Matched: 2, Superswiped: 1, Faded: 0, Archived: 0 };
+// 'Backlog review' is an active triage bucket (see the "Backlog review
+// 180+" button below), not a resolved outcome -- it's excluded from
+// isDormantStage() on purpose, so it still gets ordinary reach-out
+// treatment (tune it via the per-stage Reach-out timing settings if it
+// should nag less than that). 'FriendZone' IS a resolved outcome --
+// grouped with Faded/Archived below.
+const CONN_STAGES = ['Superswiped', 'Matched', 'Chatting in app', 'Moved to WhatsApp', 'Moved to Telegram', 'Planning to call', 'Planning to meet', 'Arranged to meet', 'Met in person', 'Dating', 'Backlog review', 'FriendZone', 'Faded', 'Archived'];
+const STAGE_RANK = { Dating: 10, 'Met in person': 9, 'Arranged to meet': 8, 'Planning to meet': 7, 'Planning to call': 6, 'Moved to Telegram': 5, 'Moved to WhatsApp': 4, 'Chatting in app': 3, Matched: 2, Superswiped: 1, 'Backlog review': 0, FriendZone: 0, Faded: 0, Archived: 0 };
 // Where a connection came from. Rendered into every source dropdown from
 // here so the add form, the import picker, and the per-connection editor
 // can't drift apart.
@@ -46,7 +52,7 @@ const STAGE_ICONS = {
 Superswiped: '🌟', Matched: '🔗', 'Chatting in app': '💭',
 'Moved to WhatsApp': '💬', 'Moved to Telegram': '✈️',
 'Planning to call': '📞', 'Planning to meet': '🗓️', 'Arranged to meet': '📌',
-'Met in person': '🤝', Dating: '❤️', Faded: '🌫️', Archived: '📦',
+'Met in person': '🤝', Dating: '❤️', 'Backlog review': '📥', FriendZone: '🧑‍🤝‍🧑', Faded: '🌫️', Archived: '📦',
 };
 
 // One icon per milestone value (see MILESTONE_SUGGESTIONS below) -- a
@@ -1456,6 +1462,15 @@ renderConnections();
 }
 });
 initReachOutSettings();
+document.getElementById('conn-backlog-review-btn').addEventListener('click', () => {
+const candidates = data.connections.filter((c) => c.stage !== 'Backlog review' && !isDormantStage(c.stage) && !isTravelPaused(c) && daysSince(c.lastContact) >= 180);
+if (!candidates.length) { alert('Nobody is 180+ days since last contact right now (outside Faded/Archived/FriendZone/travel-paused).'); return; }
+if (!confirm(`Move ${candidates.length} connection${candidates.length === 1 ? '' : 's'} (180+ days since last contact) to "Backlog review"?`)) return;
+candidates.forEach((c) => { c.stage = 'Backlog review'; });
+renderConnections();
+renderOverviewRef();
+queueSave();
+});
 document.getElementById('conn-search').addEventListener('input', (e) => {
 connectionSearchTerm = e.target.value;
 // Typing a search is an implicit "forget the None filter" — leaving both

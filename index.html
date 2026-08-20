@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v88</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v89</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -606,8 +606,13 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
         const time = sentAt ? `${String(sentAt.getHours()).padStart(2, '0')}:${String(sentAt.getMinutes()).padStart(2, '0')}` : '';
         const senderEl = article.querySelector('strong');
         const sender = senderEl ? senderEl.textContent.replace(/:\s*$/, '').trim() : '';
-        const bodyEl = article.querySelector('.text');
-        const body = bodyEl ? bodyEl.textContent.trim() : '';
+        // A message can render its text across more than one .text-classed
+        // element -- e.g. a shared link's own block sitting alongside the
+        // written text. querySelector only ever returned the first,
+        // silently dropping anything after it (confirmed live: a link
+        // pasted after a sentence vanished). Join every match instead.
+        const bodyEls = [...article.querySelectorAll('.text')];
+        const body = bodyEls.map((el) =&gt; el.textContent.trim()).filter(Boolean).join(' ');
         if (sender &amp;&amp; body) {
           messages.push(`[${date ? `${date} ${time}` : time}] ${sender}: ${body}`);
           if (date) lastMessageDate = date;
@@ -921,8 +926,10 @@ async function extractProfile(expectedName) {
           const time = sentAt ? `${String(sentAt.getHours()).padStart(2, '0')}:${String(sentAt.getMinutes()).padStart(2, '0')}` : '';
           const senderEl = article.querySelector('strong');
           const sender = senderEl ? senderEl.textContent.replace(/:\s*$/, '').trim() : '';
-          const bodyEl = article.querySelector('.text');
-          const body = bodyEl ? bodyEl.textContent.trim() : '';
+          // See the single-profile snippet's version of this block -- a
+          // message's text can span more than one .text-classed element.
+          const bodyEls = [...article.querySelectorAll('.text')];
+          const body = bodyEls.map((el) =&gt; el.textContent.trim()).filter(Boolean).join(' ');
           if (sender &amp;&amp; body) {
             messages.push(`[${date ? `${date} ${time}` : time}] ${sender}: ${body}`);
             if (date) lastMessageDate = date;
@@ -1738,6 +1745,7 @@ Mostly still a planning space &mdash; a place to keep thinking about what this s
 <button class="overview-chip" type="button" id="conn-needs-attention-btn">Needs attention</button>
 <button class="mini-task-btn" type="button" id="conn-attention-task-btn" hidden></button>
 <button class="overview-chip" type="button" id="conn-reachout-settings-btn">⏱ Reach-out timing</button>
+<button class="overview-chip" type="button" id="conn-backlog-review-btn" title="Move every non-dormant connection 180+ days since last contact into the &quot;Backlog review&quot; stage">📥 Backlog review 180+</button>
 <div class="reachout-settings" id="conn-reachout-settings" hidden>
 <p class="settings-note">Days since last contact before the "Reach out" badge can appear, per stage. Leave blank to use the default (priority-scaled, or 2 days for Planning to meet/call). A stuck stage full of old matches you don't want nagging you — set it high.</p>
 <div id="conn-reachout-settings-rows"></div>
