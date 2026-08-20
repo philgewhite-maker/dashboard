@@ -738,21 +738,26 @@ return { x: left / sw, y: top / sh, w: (right - left + 1) / sw, h: (bottom - top
 }
 
 // Crops an image down to fractional bounds (as returned by
-// contentCropBounds) at full resolution — unlike cropThumbnailToBlob, this
-// keeps the source's aspect ratio and size rather than squashing to a
-// fixed thumbnail, since the result is meant to be stored as the real
-// photo, not a preview.
-function cropToContentBlob(img, bounds, quality) {
+// contentCropBounds), optionally also capping the longer side to maxDim —
+// unlike cropThumbnailToBlob, this keeps the source's aspect ratio rather
+// than squashing to a fixed thumbnail, since the result is meant to be
+// stored as the real photo, not a preview. Crop and resize happen in the
+// same canvas draw so a photo needing both isn't put through two separate
+// JPEG re-encodes (crop-then-resize as two passes loses more to
+// compression than doing both at once).
+function cropToContentBlob(img, bounds, quality, maxDim) {
 return new Promise((resolve) => {
 const sx = bounds.x * img.naturalWidth;
 const sy = bounds.y * img.naturalHeight;
 const sw = bounds.w * img.naturalWidth;
 const sh = bounds.h * img.naturalHeight;
 if (sw <= 0 || sh <= 0) { resolve(null); return; }
+const scale = maxDim ? Math.min(1, maxDim / Math.max(sw, sh)) : 1;
+const dw = Math.max(1, Math.round(sw * scale));
+const dh = Math.max(1, Math.round(sh * scale));
 const canvas = document.createElement('canvas');
-canvas.width = Math.max(1, Math.round(sw));
-canvas.height = Math.max(1, Math.round(sh));
-canvas.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+canvas.width = dw; canvas.height = dh;
+canvas.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, dw, dh);
 canvas.toBlob((blob) => resolve(blob), 'image/jpeg', quality || 0.9);
 });
 }

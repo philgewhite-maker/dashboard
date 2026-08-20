@@ -4,7 +4,7 @@ import { photoDelete, photoUrl } from '../db.js';
 import { storePhoto } from '../files.js';
 import {
 uid, todayStr, daysSince, escapeHtml, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, knownCityMap, scrollAndFlash, bindForm, foldDiacritics,
-resizeImageToBlob,
+resizeImageToBlob, classifyProfileUpload, cropToContentBlob,
 } from '../utils.js';
 import { MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot } from '../ai.js';
 import { isSensitive, noCoverNote } from './photoalbums.js';
@@ -853,7 +853,11 @@ ${chatFieldHtml}
 ${visibleTagFields().filter((f) => f.field !== 'location').map((f) => `<label class="full${f.sensitive ? ' sensitive-field' : ''}">${escapeHtml(f.label)}<div class="tag-editor">${tagChips(c[f.field], c.id, f.field)}</div></label>`).join('')}
 <label class="full">Ratings${averageRatingHtml(c)}<div class="ratings-block">${data.ratingCategories.map(({ field, label }) => ratingStars(label, field, c.id, (c.ratings && c.ratings[field]) || 0)).join('')}</div></label>
 <label class="full">Things to do<div>${todoListHtml(c)}</div></label>
-<div class="field-block full"><span class="field-label">Photos</span>${galleryHtml(c)}</div>
+<div class="field-block full"><span class="field-label">Photos</span>${galleryHtml(c)}
+<label class="file-btn" for="parse-profile-${c.id}">📥 Add photos &amp; parse profile</label>
+<input type="file" id="parse-profile-${c.id}" accept="image/*" multiple style="display:none;" data-parse-profile="${c.id}">
+<span class="settings-note" id="parse-profile-status-${c.id}"></span>
+</div>
 <label class="full">Google Photos albums${albumListHtml(c)}</label>
 <label class="full">Drive/OneDrive link (optional, for full-res photos filed elsewhere)<input type="text" autocomplete="off" placeholder="Paste a share link" data-field="driveLink" data-conn-detail="${c.id}" value="${escapeHtml(c.driveLink || '')}"></label>
 ${c.driveLink ? `<div class="full"><a href="${escapeHtml(c.driveLink)}" target="_blank" rel="noopener" style="font-size:12px;color:var(--rose);">Open full-res photos &#8599;</a></div>` : ''}
@@ -1212,6 +1216,14 @@ list.querySelectorAll('[data-conn-details]').forEach((el) => {
 el.addEventListener('toggle', () => {
 if (el.open) expandedConnections.add(el.dataset.connDetails);
 else expandedConnections.delete(el.dataset.connDetails);
+});
+});
+list.querySelectorAll('[data-parse-profile]').forEach((input) => {
+input.addEventListener('change', async (e) => {
+const files = Array.from(e.target.files);
+e.target.value = '';
+if (!files.length) return;
+await applyDirectProfileUpload(files, input.dataset.parseProfile);
 });
 });
 }
@@ -1902,6 +1914,62 @@ existing.stage = cand.stage;
 // the screenshot itself was proof you just had. Only "today" is known
 // here, not when the screenshot was actually taken.
 if (cand.stage === 'Chatting in app') existing.lastContact = todayStr();
+}
+
+// Combined upload scoped to ONE connection -- no match-selection dropdown,
+// since the target is already known. Accepts individual photos and/or a
+// composite profile screenshot together in one picker: each file is
+// classified by its CONTENT aspect ratio (classifyProfileUpload, which
+// trims letterbox/pillarbox bars first) into a photo (direct local
+// resize+save, no AI) or a screenshot (banded AI parse). Both buckets fire
+// concurrently -- neither waits on the other -- and the "how many full-res
+// photos came in this batch" count is known synchronously from the file
+// list itself, not from whichever finishes first, so the AI parse's photo
+// crops can skip that many up front: no low-res duplicate ever sits next
+// to a full-res photo of the same picture.
+async function applyDirectProfileUpload(files, connId) {
+const conn = data.connections.find((c) => c.id === connId);
+const status = document.getElementById(`parse-profile-status-${connId}`);
+if (!conn || !files.length) return;
+if (status) status.textContent = `Reading ${files.length} file${files.length === 1 ? '' : 's'}…`;
+try {
+const classified = await Promise.all(files.map(async (f) => ({ f, ...(await classifyProfileUpload(f)) })));
+const photoItems = classified.filter((c) => !c.isScreenshot);
+const screenshotItems = classified.filter((c) => c.isScreenshot);
+const skipCount = photoItems.length;
+
+const [photoIds, screenshotResults] = await Promise.all([
+Promise.all(photoItems.map(({ img, bounds }) => cropToContentBlob(img, bounds, 0.85, 900).then((b) => (b ? storePhoto(b) : null)))),
+Promise.all(screenshotItems.map(({ f }) => extractProfileFromScreenshot(f, conn.app).catch((err) => { console.error('Profile parse failed:', err); return null; }))),
+]);
+
+photoIds.filter(Boolean).forEach((id) => {
+if (!conn.photoIds.includes(id)) conn.photoIds.push(id);
+});
+if (!conn.photoId) conn.photoId = conn.photoIds[0] || null;
+
+let parsedCount = 0;
+for (const cand of screenshotResults) {
+if (!cand) continue;
+cand.photoBlobs = (cand.photoBlobs || []).slice(skipCount);
+await applyCandidateUpdate(conn, cand, true, conn.app);
+parsedCount++;
+}
+recordImportRun('directProfileUpload', { scope: conn.name, count: photoIds.filter(Boolean).length + parsedCount });
+const message = `Added ${photoIds.filter(Boolean).length} photo${photoIds.filter(Boolean).length === 1 ? '' : 's'}${parsedCount ? `, parsed ${parsedCount} screenshot${parsedCount === 1 ? '' : 's'}` : ''}.`;
+renderConnections();
+renderOverviewRef();
+queueSave();
+// After renderConnections(), not before -- it redraws this whole card
+// (fresh, empty status span included), so setting the message any
+// earlier would just get overwritten before anyone saw it.
+const freshStatus = document.getElementById(`parse-profile-status-${connId}`);
+if (freshStatus) freshStatus.textContent = message;
+} catch (err) {
+console.error('Direct profile upload failed:', err);
+const freshStatus = document.getElementById(`parse-profile-status-${connId}`);
+if (freshStatus) freshStatus.textContent = err instanceof MissingKeyError ? 'Add an Anthropic API key in Settings first.' : `Couldn't read that: ${err.message || err}`;
+}
 }
 
 function expandConnection(id) {
