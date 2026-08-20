@@ -681,16 +681,21 @@ canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.85);
 //
 // Downscaled to a small sample width for speed -- band detection doesn't
 // need full resolution, just enough rows/columns to tell "flat" from "has
-// content". A row/column counts as a band edge if MOST of it (not all —
-// small UI chrome like a status-bar icon sitting on an otherwise solid
-// background shouldn't defeat this) is close to that row's own dominant
-// colour. Trimming is capped per edge so a genuinely uniform photo (a
-// solid-colour studio background, say) never gets crushed to nothing --
-// letterboxing is a border, not most of the image.
+// content". A row/column counts as flat by its LOCAL variance -- the
+// average pixel-to-pixel colour change along it -- rather than by distance
+// from one "dominant" colour. That distinction matters: a full-screen
+// photo-view screenshot's chrome is often a gradient scrim behind the
+// status bar/caption, not a solid bar (confirmed live: a solid-colour
+// check left a real photo screenshot completely untrimmed, since a
+// gradient has no single dominant colour to measure against). A smooth
+// gradient has low pixel-to-pixel variance same as a solid bar; real photo
+// content (edges, texture, a face) has high variance even when its
+// average colour is similar. Trimming is capped per edge so a genuinely
+// flat photo (a solid-colour studio background, say) never gets crushed
+// to nothing -- letterboxing is a border, not most of the image.
 const BAND_SAMPLE_WIDTH = 100;
-const BAND_UNIFORM_FRACTION = 0.92;
-const BAND_COLOR_TOLERANCE = 18; // summed per-channel RGB distance allowed
-const BAND_MAX_TRIM_FRACTION = 0.35;
+const BAND_FLATNESS_THRESHOLD = 12; // avg per-step summed-RGB delta allowed
+const BAND_MAX_TRIM_FRACTION = 0.45;
 
 function contentCropBounds(img) {
 const w = img.naturalWidth, h = img.naturalHeight;
@@ -704,34 +709,32 @@ ctx.drawImage(img, 0, 0, sw, sh);
 const { data } = ctx.getImageData(0, 0, sw, sh);
 const px = (x, y) => (y * sw + x) * 4;
 
-const rowUniform = (y) => {
-const m = px(Math.floor(sw / 2), y);
-const r = data[m], g = data[m + 1], b = data[m + 2];
-let matches = 0;
-for (let x = 0; x < sw; x++) {
-const i = px(x, y);
-if (Math.abs(data[i] - r) + Math.abs(data[i + 1] - g) + Math.abs(data[i + 2] - b) <= BAND_COLOR_TOLERANCE * 3) matches++;
+const rowFlat = (y) => {
+if (sw < 2) return true;
+let total = 0;
+for (let x = 1; x < sw; x++) {
+const i = px(x, y), p = px(x - 1, y);
+total += Math.abs(data[i] - data[p]) + Math.abs(data[i + 1] - data[p + 1]) + Math.abs(data[i + 2] - data[p + 2]);
 }
-return matches / sw >= BAND_UNIFORM_FRACTION;
+return total / (sw - 1) <= BAND_FLATNESS_THRESHOLD;
 };
-const colUniform = (x) => {
-const m = px(x, Math.floor(sh / 2));
-const r = data[m], g = data[m + 1], b = data[m + 2];
-let matches = 0;
-for (let y = 0; y < sh; y++) {
-const i = px(x, y);
-if (Math.abs(data[i] - r) + Math.abs(data[i + 1] - g) + Math.abs(data[i + 2] - b) <= BAND_COLOR_TOLERANCE * 3) matches++;
+const colFlat = (x) => {
+if (sh < 2) return true;
+let total = 0;
+for (let y = 1; y < sh; y++) {
+const i = px(x, y), p = px(x, y - 1);
+total += Math.abs(data[i] - data[p]) + Math.abs(data[i + 1] - data[p + 1]) + Math.abs(data[i + 2] - data[p + 2]);
 }
-return matches / sh >= BAND_UNIFORM_FRACTION;
+return total / (sh - 1) <= BAND_FLATNESS_THRESHOLD;
 };
 
 let top = 0, bottom = sh - 1, left = 0, right = sw - 1;
 const maxTopBottom = Math.floor(sh * BAND_MAX_TRIM_FRACTION);
 const maxLeftRight = Math.floor(sw * BAND_MAX_TRIM_FRACTION);
-while (top < maxTopBottom && rowUniform(top)) top++;
-while (bottom > sh - 1 - maxTopBottom && bottom > top && rowUniform(bottom)) bottom--;
-while (left < maxLeftRight && colUniform(left)) left++;
-while (right > sw - 1 - maxLeftRight && right > left && colUniform(right)) right--;
+while (top < maxTopBottom && rowFlat(top)) top++;
+while (bottom > sh - 1 - maxTopBottom && bottom > top && rowFlat(bottom)) bottom--;
+while (left < maxLeftRight && colFlat(left)) left++;
+while (right > sw - 1 - maxLeftRight && right > left && colFlat(right)) right--;
 
 if (bottom <= top || right <= left) return { x: 0, y: 0, w: 1, h: 1 };
 return { x: left / sw, y: top / sh, w: (right - left + 1) / sw, h: (bottom - top + 1) / sh };

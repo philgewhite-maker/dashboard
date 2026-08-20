@@ -407,9 +407,9 @@ return { ...result, hash, captureDate: (captured || {}).date || '', fromCache: f
 function profilePrompt(isBand, app) {
 return `This is a screenshot of ONE person's ${app ? `${app} ` : 'dating app '}profile page`
 + (isBand ? ', showing one vertical section of a longer scrolling screenshot' : '') + '.'
-+ ' Extract what\'s visible: name, age, their height exactly as written (e.g. "5\'7\\"" or "170cm", empty if not shown), their education or university (empty if not shown), a short list of languages they speak (array), a short list of nationalities (array, empty if not stated), whether they mention having kids (short phrase or empty), their job/occupation (empty if not shown), their location or city (empty if not shown), a one or two sentence bio/about-me summary, and rough bounding boxes (fractions 0 to 1 of the full image, keys x,y,w,h) around each distinct profile photo visible in the screenshot (there may be several).'
++ ' Extract what\'s visible: name, age, their height exactly as written (e.g. "5\'7\\"" or "170cm", empty if not shown), their education or university (empty if not shown), a short list of languages they speak (array), a short list of nationalities (array, empty if not stated), whether they mention having kids (short phrase or empty), their job/occupation (empty if not shown), their location or city (empty if not shown), a one or two sentence bio/about-me summary, a short list of their stated interests/hobbies shown as tags or chips (array, e.g. "Tennis", "Wine" — not free-text bio content), what they say they\'re looking for/relationship goal (short phrase exactly as written, e.g. "Open to seeing where things go", empty if not shown), their drinking habit exactly as written or shown by icon+label (e.g. "Yes", "Socially", "Never", empty if not shown), their smoking habit the same way (empty if not shown), and rough bounding boxes (fractions 0 to 1 of the full image, keys x,y,w,h) around each distinct profile photo visible in the screenshot (there may be several).'
 + (isBand ? ' Only report a field if its value is genuinely visible in THIS section — leave it empty rather than guessing from context, since another section will supply it. If a photo is cut off at the very top or bottom edge of this image (less than half visible), SKIP its bounding box entirely — it is fully visible in an adjacent section and will be captured there instead.' : '')
-+ ' Return ONLY a JSON object, no other text, no markdown fences, in this exact shape: {"name":"Alex","age":"29","height":"","education":"","languages":["English"],"nationality":[],"kids":"","job":"","location":"","bio":"","photoBoxes":[{"x":0.1,"y":0.05,"w":0.8,"h":0.4}]}. Use empty string/array if something is not visible or unsure — do not guess.';
++ ' Return ONLY a JSON object, no other text, no markdown fences, in this exact shape: {"name":"Alex","age":"29","height":"","education":"","languages":["English"],"nationality":[],"kids":"","job":"","location":"","bio":"","interests":["Tennis","Wine"],"lookingFor":"","drinking":"","smoking":"","photoBoxes":[{"x":0.1,"y":0.05,"w":0.8,"h":0.4}]}. Use empty string/array if something is not visible or unsure — do not guess.';
 }
 
 // Two bands overlap on purpose (see BAND_OVERLAP) -- a photo box fully
@@ -452,7 +452,8 @@ return {
 name: firstNonEmpty('name'), age: firstNonEmpty('age'), height: firstNonEmpty('height'),
 education: firstNonEmpty('education'), languages: unionArr('languages'), nationality: unionArr('nationality'),
 kids: firstNonEmpty('kids'), job: firstNonEmpty('job'), location: firstNonEmpty('location'),
-bio: bios.join(' '), photoBoxes,
+bio: bios.join(' '), interests: unionArr('interests'), lookingFor: firstNonEmpty('lookingFor'),
+drinking: firstNonEmpty('drinking'), smoking: firstNonEmpty('smoking'), photoBoxes,
 };
 }
 
@@ -527,6 +528,10 @@ kids: raw.kids || '',
 job: raw.job || '',
 location: raw.location || '',
 bio: raw.bio || '',
+interests: Array.isArray(raw.interests) ? raw.interests : [],
+lookingFor: raw.lookingFor || '',
+drinking: raw.drinking || '',
+smoking: raw.smoking || '',
 photoBlobs,
 fromCache: !!cachedText,
 };

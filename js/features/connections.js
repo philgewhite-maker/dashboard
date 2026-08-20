@@ -1991,6 +1991,23 @@ const notes = String(existing.notes || '').trim();
 if (bio && bio !== notes) existing.notes = notes ? `${notes}\n${bio}` : bio;
 unionInto(existing.languages, cand.languages);
 unionInto(existing.nationality, cand.nationality);
+if (!Array.isArray(existing.interests)) existing.interests = [];
+unionInto(existing.interests, cand.interests);
+// "Looking for" is Bumble/Tinder's own relationship-goal question --
+// TAG_FIELDS' relationshipTags, same field the Tinder console-snippet
+// importer's Orientation/"Relationship type"/"Looking for" chip already
+// writes into.
+if (!Array.isArray(existing.relationshipTags)) existing.relationshipTags = [];
+unionInto(existing.relationshipTags, cand.lookingFor ? [cand.lookingFor] : []);
+// Drinking/smoking have no dedicated field -- same generic tags
+// catch-all the Tinder importer routes its own Drinking/"How often do
+// you smoke?" answers into, just labelled so a bare "Yes"/"No" reads
+// unambiguously as a standalone tag.
+if (!Array.isArray(existing.tags)) existing.tags = [];
+const habitTags = [];
+if (cand.drinking) habitTags.push(`Drinking: ${cand.drinking}`);
+if (cand.smoking) habitTags.push(`Smoking: ${cand.smoking}`);
+unionInto(existing.tags, habitTags);
 }
 // Only move the stage forward, never back — a screenshot re-import
 // shouldn't undo progress you've logged manually since (e.g. re-scanning
