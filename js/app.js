@@ -4,7 +4,7 @@ import { switchTab } from './tabs.js';
 import { initHabitForm } from './features/habits.js';
 import { initGoalForm } from './features/goals.js';
 import { initJobForm } from './features/jobs.js';
-import { initConnectionForm, initSensitiveFields, initRatingCategoriesSettings, initFlagRulesSettings } from './features/connections.js';
+import { initConnectionForm, initSensitiveFields, initRatingCategoriesSettings, initFlagRulesSettings, initHideArchivedFaded } from './features/connections.js';
 import { initOverviewPrefs } from './features/overview.js';
 import { initCalendarForm, initCalendarSync, initCalendarListLoader } from './features/calendars.js';
 import { initVoucherForm } from './features/vouchers.js';
@@ -111,7 +111,7 @@ await loadData();
 // Both read device-local display preferences that renderAll() depends on
 // (which tag fields are visible, which overview sections are folded), so
 // they have to land before the first paint or it renders once wrong.
-await Promise.all([initSensitiveFields(), initOverviewPrefs()]);
+await Promise.all([initSensitiveFields(), initOverviewPrefs(), initHideArchivedFaded()]);
 renderAll();
 
 initTabs();

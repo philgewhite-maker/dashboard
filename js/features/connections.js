@@ -1,4 +1,4 @@
-import { data, queueSave, reachOutThreshold, isDormantStage, isTravelPaused, getLocalSettings, TAG_FIELDS, CONTACT_STATUS_LABELS, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness, slugifyField, FLAG_FIELD_DEFS, computeFlags, valueColorForField, stripSharedSuffix, suggestedAction, suggestedQuestions, recordImportRun, importStatusLine, upsertIdentity } from '../state.js';
+import { data, queueSave, reachOutThreshold, isDormantStage, isTravelPaused, getLocalSettings, setLocalSetting, TAG_FIELDS, CONTACT_STATUS_LABELS, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness, slugifyField, FLAG_FIELD_DEFS, computeFlags, valueColorForField, stripSharedSuffix, suggestedAction, suggestedQuestions, recordImportRun, importStatusLine, upsertIdentity } from '../state.js';
 import { captureTask, revealTask } from './tasks.js';
 import { photoDelete, photoUrl } from '../db.js';
 import { storePhoto } from '../files.js';
@@ -546,6 +546,24 @@ function thinProfileIds() {
 return data.connections.filter(isThinProfile).map((c) => c.id);
 }
 
+// Archived/Faded pile up over time and are rarely what anyone's browsing
+// for -- hidden from the default list view so the common case doesn't
+// render (and scroll past) every resolved match. Not a "filter mode" like
+// idFilter/emptyFieldFilter above: it's a base-view preference, so search
+// and the Overview stage chips both deliberately bypass it (see the `term`
+// handling in renderConnections) -- hiding them by default shouldn't also
+// make them unfindable by name or via "Archived (12)". Device-local, same
+// pattern as showSensitiveFields.
+let showArchivedFaded = false;
+const HIDDEN_BY_DEFAULT_STAGES = new Set(['Archived', 'Faded']);
+async function initHideArchivedFaded() {
+const settings = await getLocalSettings();
+showArchivedFaded = !!settings.showArchivedFaded;
+}
+function archivedFadedIds() {
+return data.connections.filter((c) => HIDDEN_BY_DEFAULT_STAGES.has(c.stage)).map((c) => c.id);
+}
+
 function isReachOutSnoozed(c) {
 return !!(c.attentionSnoozedUntil && c.attentionSnoozedUntil > todayStr());
 }
@@ -665,6 +683,13 @@ if (thinBtn) {
 thinBtn.textContent = `Thin profiles (${thinProfileIds().length})`;
 thinBtn.classList.toggle('active', idFilter && idFilter.label === 'Thin profiles');
 }
+const archivedBtn = document.getElementById('conn-show-archived-btn');
+if (archivedBtn) {
+const hiddenCount = archivedFadedIds().length;
+archivedBtn.textContent = showArchivedFaded ? `Hide archived & faded (${hiddenCount})` : `Show archived & faded (${hiddenCount})`;
+archivedBtn.classList.toggle('active', showArchivedFaded);
+archivedBtn.hidden = hiddenCount === 0 && !showArchivedFaded;
+}
 const taskBtn = document.getElementById('conn-attention-task-btn');
 if (taskBtn) {
 const existing = existingAttentionTask();
@@ -727,7 +752,12 @@ return;
 }
 
 const term = foldDiacritics(connectionSearchTerm.trim().toLowerCase());
-const filtered = term ? data.connections.filter((c) => {
+// Archived/Faded are hidden from the default browse, but a search term is
+// an explicit lookup for someone specific -- it searches everyone
+// regardless, same as the Overview stage chips (idFilter above) already
+// bypass this via their own early return.
+const base = (!term && !showArchivedFaded) ? data.connections.filter((c) => !HIDDEN_BY_DEFAULT_STAGES.has(c.stage)) : data.connections;
+const filtered = term ? base.filter((c) => {
 const haystack = foldDiacritics([
 c.name, c.profileName, ...(c.identities || []).flatMap((r) => [r.handle, r.matchId]), ...(c.aliases || []), c.address, c.job, c.education, c.stage, ageDecade(c),
 // So the Connections Overview "Contact match" chips actually filter —
@@ -742,10 +772,12 @@ photoCoverage(c), ...photoLinkLabels(c),
 ...visibleTagFields().flatMap((f) => c[f.field] || []),
 ].filter(Boolean).join(' ').toLowerCase());
 return haystack.includes(term);
-}) : data.connections;
+}) : base;
 
 if (filtered.length === 0) {
-list.innerHTML = '<div class="empty">No connections match that search.</div>';
+list.innerHTML = term
+? '<div class="empty">No connections match that search.</div>'
+: '<div class="empty">Everyone here is Archived or Faded — use "Show archived &amp; faded" above to see them.</div>';
 return;
 }
 
@@ -908,7 +940,7 @@ ${c.photoId ? `<div class="full conn-hero-photo">${avatarHtml(c.photoId, c.name,
 <label class="full">Platform identities<span class="settings-note">What each app called them, and its own match key where there is one</span>${identityListHtml(c)}</label>
 <label>Source<select data-field="app" data-conn-detail="${c.id}">${appOptions(c.app)}</select></label>
 <label>Age when recorded${ageNoteHtml(c)}<input type="text" autocomplete="off" data-field="age" data-conn-detail="${c.id}" value="${escapeHtml(c.age || '')}"></label>
-<label>Date of birth<input type="date" data-field="dob" data-conn-detail="${c.id}" value="${escapeHtml(c.dob || '')}"></label>
+<label>Date of birth<input type="date" data-field="dob" data-conn-detail="${c.id}" min="1900-01-01" max="${todayStr()}" value="${escapeHtml(c.dob || '')}"></label>
 <label class="full">City <span class="settings-note">Groups in Overview — a borough and its city, or two homes, are two separate entries</span><div class="tag-editor">${tagChips(c.location, c.id, 'location')}</div></label>
 <label>Distance<input type="text" autocomplete="off" placeholder="e.g. &lt; 10 mi" data-field="distance" data-conn-detail="${c.id}" value="${escapeHtml(c.distance || '')}"></label>
 <label>Matched on<input type="date" data-field="matchedOn" data-conn-detail="${c.id}" value="${escapeHtml(c.matchedOn || '')}"></label>
@@ -945,15 +977,6 @@ ${visibleTagFields().filter((f) => f.field !== 'location').map((f) => `<label cl
 <label class="full">Google Photos albums${albumListHtml(c)}</label>
 <label class="full">Drive/OneDrive link (optional, for full-res photos filed elsewhere)<input type="text" autocomplete="off" placeholder="Paste a share link" data-field="driveLink" data-conn-detail="${c.id}" value="${escapeHtml(c.driveLink || '')}"></label>
 ${c.driveLink ? `<div class="full"><a href="${escapeHtml(c.driveLink)}" target="_blank" rel="noopener" style="font-size:12px;color:var(--rose);">Open full-res photos &#8599;</a></div>` : ''}
-<label class="full">Merge a duplicate into this one
-<div class="merge-row">
-<select data-merge-source="${c.id}">
-<option value="">Pick a duplicate&hellip;</option>
-${data.connections.filter((o) => o.id !== c.id).map((o) => `<option value="${o.id}">${escapeHtml(o.name)}${displayAge(o) ? ', ' + escapeHtml(displayAge(o)) : ''}${o.app ? ' — ' + escapeHtml(o.app) : ''}</option>`).join('')}
-</select>
-<button class="todo-add-btn" type="button" data-merge-btn="${c.id}">Merge in</button>
-</div>
-</label>
 </div>
 </details>
 </div>`;
@@ -1081,20 +1104,6 @@ queueSave();
 });
 });
 
-list.querySelectorAll('[data-merge-btn]').forEach((btn) => {
-btn.addEventListener('click', async () => {
-const target = data.connections.find((x) => x.id === btn.dataset.mergeBtn);
-const select = list.querySelector(`[data-merge-source="${btn.dataset.mergeBtn}"]`);
-const source = data.connections.find((x) => x.id === select.value);
-if (!target || !source) return;
-if (!confirm(`Merge "${source.name}" into "${target.name}"?\n\nEverything from "${source.name}" — photos, notes, ratings, tags, to-dos — is folded in, keeping "${target.name}"'s values wherever both have one. "${source.name}" is then removed.\n\nThis can't be undone.`)) return;
-mergeConnectionInto(target, source);
-data.connections = data.connections.filter((x) => x.id !== source.id);
-renderConnections();
-renderOverviewRef();
-queueSave();
-});
-});
 list.querySelectorAll('[data-tag-remove]').forEach((el) => {
 el.addEventListener('click', () => {
 const conn = data.connections.find((x) => x.id === el.dataset.tagRemove);
@@ -1598,6 +1607,29 @@ document.getElementById('conn-thin-profiles-btn').addEventListener('click', () =
 if (idFilter && idFilter.label === 'Thin profiles') { clearFilters(); return; }
 filterByIds(thinProfileIds(), 'Thin profiles');
 });
+document.getElementById('conn-show-archived-btn').addEventListener('click', () => {
+showArchivedFaded = !showArchivedFaded;
+setLocalSetting('showArchivedFaded', showArchivedFaded);
+renderConnections();
+});
+document.getElementById('merge-admin-btn').addEventListener('click', () => {
+const targetSel = document.getElementById('merge-target-input');
+const sourceSel = document.getElementById('merge-source-input');
+const status = document.getElementById('merge-admin-status');
+const target = data.connections.find((x) => x.id === targetSel.value);
+const source = data.connections.find((x) => x.id === sourceSel.value);
+if (!target || !source) { status.textContent = 'Pick both a profile to keep and one to merge in.'; return; }
+if (target.id === source.id) { status.textContent = "Can't merge a profile into itself."; return; }
+if (!confirm(`Merge "${source.name}" into "${target.name}"?\n\nEverything from "${source.name}" — photos, notes, ratings, tags, to-dos — is folded in, keeping "${target.name}"'s values wherever both have one. "${source.name}" is then removed.\n\nThis can't be undone.`)) return;
+mergeConnectionInto(target, source);
+data.connections = data.connections.filter((x) => x.id !== source.id);
+status.textContent = `Merged "${source.name}" into "${target.name}".`;
+targetSel.value = '';
+sourceSel.value = '';
+renderConnections();
+renderOverviewRef();
+queueSave();
+});
 document.getElementById('conn-attention-task-btn').addEventListener('click', async (e) => {
 if (e.target.dataset.gotoTask) {
 const { switchTab } = await import('../tabs.js');
@@ -1702,16 +1734,33 @@ return `<label class="candidate-row" data-idx="${idx}">
 // Keeps the "Add photos to…" picker in step with the connection list. The
 // import box sits outside #connections-list so it isn't rebuilt by
 // renderConnections' innerHTML assignment — it has to be refreshed here.
-function refreshPhotoTargets() {
-const select = document.getElementById('photo-target-input');
-if (!select) return;
-const previous = select.value;
-select.innerHTML = '<option value="">Add photos to&hellip;</option>'
-+ [...data.connections]
+// Shared by every "pick a connection" dropdown in Dating admin (photo
+// target, both merge slots) -- built once per render rather than once per
+// select, and each select keeps its own previous value independently.
+function connectionOptionsHtml() {
+return [...data.connections]
 .sort((a, b) => a.name.localeCompare(b.name))
 .map((c) => `<option value="${c.id}">${escapeHtml(c.name)}${displayAge(c) ? ', ' + escapeHtml(displayAge(c)) : ''}${c.app ? ' — ' + escapeHtml(c.app) : ''}</option>`)
 .join('');
+}
+
+function fillConnectionSelect(id, placeholder) {
+const select = document.getElementById(id);
+if (!select) return;
+const previous = select.value;
+select.innerHTML = `<option value="">${placeholder}</option>` + connectionOptionsHtml();
 if ([...select.options].some((o) => o.value === previous)) select.value = previous;
+}
+
+function refreshPhotoTargets() {
+fillConnectionSelect('photo-target-input', 'Add photos to&hellip;');
+// Was per-card before (one "everyone else" dropdown rendered inside EVERY
+// connection's Details) -- with a few hundred connections that's a few
+// hundred times a few hundred options, most of them inside a closed
+// <details> nobody was looking at. Two flat pickers here cost the same
+// list built twice, not once per card.
+fillConnectionSelect('merge-target-input', 'Keep this one&hellip;');
+fillConnectionSelect('merge-source-input', 'Merge this one in&hellip;');
 }
 
 // Stores photos straight onto a connection with no API call. Most profile
@@ -2119,5 +2168,5 @@ renderConnections, initConnectionForm, expandConnection, CONN_STAGES,
 initSensitiveFields, setShowSensitiveFields, visibleTagFields,
 filterByEmptyField, filterBySearch, filterByIds, clearFilters,
 STAGE_RANK, setContactPicker, phoneWithFlagHtml, initRatingCategoriesSettings,
-initFlagRulesSettings, unionInto,
+initFlagRulesSettings, unionInto, initHideArchivedFaded,
 };

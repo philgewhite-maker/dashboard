@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v101</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v102</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -327,6 +327,19 @@ Not built: comparing retailer prices or adding to a basket in two clicks. That w
 <div class="settings-note import-last-run" id="import-profile-last-run"></div>
 <div class="candidate-list" id="candidate-list"></div>
 </div>
+</section>
+
+<section class="panel wide" id="merge-panel" data-tab="datingadmin">
+<div class="panel-head">
+<h2><span class="dot rose"></span>Merge duplicates</h2>
+</div>
+<div class="settings-note">Moved here from each connection's own card — two flat pickers instead of a full "everyone else" dropdown repeated on every card.</div>
+<div class="merge-row">
+<select id="merge-target-input"><option value="">Keep this one&hellip;</option></select>
+<select id="merge-source-input"><option value="">Merge this one in&hellip;</option></select>
+<button class="todo-add-btn" type="button" id="merge-admin-btn">Merge</button>
+</div>
+<div class="settings-note" id="merge-admin-status"></div>
 </section>
 
 <section class="panel wide" id="tinder-panel" data-tab="datingadmin">
@@ -1753,6 +1766,7 @@ Mostly still a planning space &mdash; a place to keep thinking about what this s
 <input type="text" autocomplete="off" class="conn-search" id="conn-search" placeholder="Search by name or tag (e.g. sporty, sober)...">
 <button class="overview-chip" type="button" id="conn-needs-attention-btn">Needs attention</button>
 <button class="overview-chip" type="button" id="conn-thin-profiles-btn" title="One photo or fewer, none of age/height/job/education filled in -- usually a matches-list-only import that never got fleshed out">Thin profiles</button>
+<button class="overview-chip" type="button" id="conn-show-archived-btn" title="Archived and Faded are hidden from the list by default -- searching by name still finds them either way">Show archived &amp; faded</button>
 <button class="mini-task-btn" type="button" id="conn-attention-task-btn" hidden></button>
 <button class="overview-chip" type="button" id="conn-reachout-settings-btn">⏱ Reach-out timing</button>
 <button class="overview-chip" type="button" id="conn-backlog-review-btn" title="Move every non-dormant connection 180+ days since last contact into the &quot;Backlog review&quot; stage">📥 Backlog review 180+</button>
