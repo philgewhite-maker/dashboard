@@ -2001,12 +2001,36 @@ if (!Array.isArray(existing.relationshipTags)) existing.relationshipTags = [];
 unionInto(existing.relationshipTags, cand.lookingFor ? [cand.lookingFor] : []);
 // Drinking/smoking have no dedicated field -- same generic tags
 // catch-all the Tinder importer routes its own Drinking/"How often do
-// you smoke?" answers into, just labelled so a bare "Yes"/"No" reads
-// unambiguously as a standalone tag.
+// you smoke?" answers into, verbatim. Tinder's raw values are already
+// standalone tags ("Non-smoker", "Sober", "Social drinker"...), and the
+// default flag rules key on that exact wording (state.js: red 'Smoker',
+// green 'Sober') -- so a Bumble profile whose icon+label answer is a bare
+// "Yes"/"No" needs normalizing to the same words, or it neither matches
+// an existing Tinder-sourced tag nor trips the flag rule. Bumble's smoking
+// question is effectively binary, so both directions map cleanly.
+// Drinking has no single-word opposite of "Sober" in this vocabulary --
+// Tinder's own "does drink" side is always one of several granular
+// answers (Social drinker, Sometimes, At the weekend...) that only the
+// person's actual selection can supply, not a bare "Yes" -- so "Drinks"
+// is a deliberately generic stand-in, not a claim of matching Tinder's
+// phrasing. Anything already more specific than yes/no (e.g. "Socially",
+// "Trying to quit") passes through as-is.
+const normalizeHabitTag = (kind, raw) => {
+const v = String(raw || '').trim();
+if (!v) return '';
+const lower = v.toLowerCase();
+if (kind === 'smoking') {
+if (['no', 'never', 'non-smoker', 'nonsmoker'].includes(lower)) return 'Non-smoker';
+if (['yes', 'smoker'].includes(lower)) return 'Smoker';
+}
+if (kind === 'drinking') {
+if (['no', 'never', 'sober'].includes(lower)) return 'Sober';
+if (lower === 'yes') return 'Drinks';
+}
+return v;
+};
 if (!Array.isArray(existing.tags)) existing.tags = [];
-const habitTags = [];
-if (cand.drinking) habitTags.push(`Drinking: ${cand.drinking}`);
-if (cand.smoking) habitTags.push(`Smoking: ${cand.smoking}`);
+const habitTags = [normalizeHabitTag('drinking', cand.drinking), normalizeHabitTag('smoking', cand.smoking)].filter(Boolean);
 unionInto(existing.tags, habitTags);
 }
 // Only move the stage forward, never back — a screenshot re-import
