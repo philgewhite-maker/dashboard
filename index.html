@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v104</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v105</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -133,6 +133,19 @@
 </div>
 <div class="settings-note" style="margin:0 0 10px;">For anywhere Google Tasks is reachable but this dashboard isn't &mdash; a work web filter, a quick voice-add on a phone. One-way: pulling something in never changes it in Google Tasks, and re-loading won't offer the same item twice. Use &ldquo;Capture all shown&rdquo; once to migrate an existing list in; use &ldquo;Load&rdquo; day to day to catch what's new.</div>
 <div id="gtasks-list"></div>
+</section>
+
+<section class="panel wide" id="capture-inbox-panel" data-tab="tasks">
+<div class="panel-head">
+<h2><span class="dot amber"></span>Capture Inbox</h2>
+<span class="count-badge" id="capture-inbox-count"></span>
+</div>
+<div class="capture-row">
+<label class="file-btn" for="capture-inbox-file-input">+ Capture files</label>
+<input type="file" id="capture-inbox-file-input" multiple style="display:none;">
+</div>
+<div class="settings-note" style="margin:8px 0 10px;">Photos, CSVs, or anything else shared or picked in one go &mdash; grouped as a batch here until you decide where each one belongs. Mainly reached via Android's share sheet.</div>
+<div id="capture-inbox-list"></div>
 </section>
 
 <section class="panel wide" id="inbox-panel" data-tab="tasks">

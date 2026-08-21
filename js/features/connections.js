@@ -2126,11 +2126,18 @@ if (cand.stage === 'Chatting in app') existing.lastContact = todayStr();
 // list itself, not from whichever finishes first, so the AI parse's photo
 // crops can skip that many up front: no low-res duplicate ever sits next
 // to a full-res photo of the same picture.
-async function applyDirectProfileUpload(files, connId) {
+// `onStatus`, if given, replaces the two default status writes below --
+// lets a caller with no `#parse-profile-status-${connId}` element in the
+// DOM (the Capture Inbox triage card, which isn't a connection card) get
+// the same progress/result text through its own UI instead.
+async function applyDirectProfileUpload(files, connId, { onStatus } = {}) {
 const conn = data.connections.find((c) => c.id === connId);
-const status = document.getElementById(`parse-profile-status-${connId}`);
+const report = onStatus || ((msg) => {
+const el = document.getElementById(`parse-profile-status-${connId}`);
+if (el) el.textContent = msg;
+});
 if (!conn || !files.length) return;
-if (status) status.textContent = `Reading ${files.length} file${files.length === 1 ? '' : 's'}…`;
+report(`Reading ${files.length} file${files.length === 1 ? '' : 's'}…`);
 try {
 const classified = await Promise.all(files.map(async (f) => ({ f, ...(await classifyProfileUpload(f)) })));
 const photoItems = classified.filter((c) => !c.isScreenshot);
@@ -2160,14 +2167,13 @@ renderConnections();
 renderOverviewRef();
 queueSave();
 // After renderConnections(), not before -- it redraws this whole card
-// (fresh, empty status span included), so setting the message any
-// earlier would just get overwritten before anyone saw it.
-const freshStatus = document.getElementById(`parse-profile-status-${connId}`);
-if (freshStatus) freshStatus.textContent = message;
+// (fresh, empty status span included), and report()'s default branch
+// re-queries the DOM by id on every call rather than closing over a
+// stale element, so this still lands correctly.
+report(message);
 } catch (err) {
 console.error('Direct profile upload failed:', err);
-const freshStatus = document.getElementById(`parse-profile-status-${connId}`);
-if (freshStatus) freshStatus.textContent = err instanceof MissingKeyError ? 'Add an Anthropic API key in Settings first.' : `Couldn't read that: ${err.message || err}`;
+report(err instanceof MissingKeyError ? 'Add an Anthropic API key in Settings first.' : `Couldn't read that: ${err.message || err}`);
 }
 }
 
@@ -2182,4 +2188,5 @@ initSensitiveFields, setShowSensitiveFields, visibleTagFields,
 filterByEmptyField, filterBySearch, filterByIds, clearFilters,
 STAGE_RANK, setContactPicker, phoneWithFlagHtml, initRatingCategoriesSettings,
 initFlagRulesSettings, unionInto, initHideArchivedFaded,
+connectionOptionsHtml, applyDirectProfileUpload,
 };

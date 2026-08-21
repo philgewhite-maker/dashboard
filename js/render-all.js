@@ -10,6 +10,7 @@ import { renderBusinessIdeas } from './features/ideas.js';
 import { renderEnhancementIdeas } from './features/enhancements.js';
 import { renderOverview } from './features/overview.js';
 import { renderTasks } from './features/tasks.js';
+import { renderCaptureInbox } from './features/captureinbox.js';
 import { renderNudges } from './features/nudges.js';
 import { renderTagCleanup } from './features/tagcleanup.js';
 
@@ -25,6 +26,7 @@ renderDealExpiries();
 renderBusinessIdeas();
 renderEnhancementIdeas();
 renderTasks();
+renderCaptureInbox();
 renderOverview();
 renderNudges();
 renderTagCleanup();

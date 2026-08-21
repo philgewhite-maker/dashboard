@@ -181,6 +181,29 @@ completedAt: '',
 };
 }
 
+// A batch of files captured together (mainly via Android's share sheet,
+// or the in-app multi-file picker) waiting to be triaged into wherever
+// they actually belong -- a Dating connection's photos, a Task
+// attachment, or a future Health import. Removed from data.captureInbox
+// entirely once every item in it is routed or discarded; no status field,
+// since an emptied inbox entry just isn't an inbox entry any more.
+function blankCaptureBatch(fields = {}) {
+return {
+id: uid(),
+createdAt: new Date().toISOString(),
+label: '',
+notes: '',
+source: null, // {kind:'share'|'manual', label, url}
+// {id, name, type, size, kind:'photo'|'attachment'} -- 'photo' items went
+// through storePhoto() (graceful local fallback, thumbnail via
+// photoUrl(id)); 'attachment' items went through uploadAttachment()
+// directly (hard-fail-and-report, download via openAttachment(meta)) --
+// same two conventions every other photo/file in this app already uses.
+items: [],
+...fields,
+};
+}
+
 const TAG_FIELDS = [
 // Other names the same person goes by — "Kat" is also "Katya" and
 // "Katerina". Used when matching Google Contacts, so any one of them can
@@ -370,6 +393,16 @@ t.attachments = Array.isArray(t.attachments)
 // Promote it rather than silently orphaning it.
 const taskIds = new Set(data.tasks.map((t) => t.id));
 data.tasks.forEach((t) => { if (t.parentId && !taskIds.has(t.parentId)) t.parentId = null; });
+if (!Array.isArray(data.captureInbox)) data.captureInbox = [];
+data.captureInbox = data.captureInbox.map((b) => ({ ...blankCaptureBatch(), ...b, id: b.id || uid() }));
+data.captureInbox.forEach((b) => {
+b.items = Array.isArray(b.items)
+? b.items.filter((it) => it && typeof it.id === 'string' && it.id && (it.kind === 'photo' || it.kind === 'attachment'))
+: [];
+});
+// A batch with nothing left (everything already routed/discarded, e.g. a
+// save landed mid-triage) is clutter, not a real inbox entry.
+data.captureInbox = data.captureInbox.filter((b) => b.items.length > 0);
 // Seed the mail search rows from the old fixed shape the first time only.
 // Keyed on the array's absence rather than its emptiness, so deleting every
 // row stays deleted instead of being helpfully repopulated next reload.
@@ -1076,7 +1109,7 @@ setExternalUpdateHandler, setLocalChangeHandler, getLocalSettings, setLocalSetti
 isDormantStage, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness,
 exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, DEFAULT_PREFS,
 MAIL_SEARCH_KINDS, mailSearchLabel,
-TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask,
+TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureBatch,
 CONTACT_STATUS_LABELS, CONTACT_MATCH_MIN_STAGE,
 DEFAULT_RATING_CATEGORIES, slugifyField, DEFAULT_RECIPE_RATING_CATEGORIES,
 FLAG_FIELD_DEFS, DEFAULT_FLAG_RULES, computeFlags, valueColorForField, stripSharedSuffix, suggestedAction, suggestedQuestions, isTravelPaused, ACTIONS, distanceMiles,

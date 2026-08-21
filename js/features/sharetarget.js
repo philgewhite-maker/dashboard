@@ -1,4 +1,9 @@
-// Turns an Android "Share → Dashboard" into a task in the Inbox.
+// Turns an Android "Share → Dashboard" into either a Task or a Capture
+// Inbox batch, depending on what was shared: a share carrying one or more
+// files (photos, a CSV, anything) becomes a Capture Inbox batch, waiting
+// to be triaged into wherever it actually belongs -- see captureinbox.js.
+// A pure text/link share (nothing but a title/text/url, no files) still
+// becomes a Task in the GTD Inbox exactly as before.
 //
 // The service worker answers the POST from the share sheet (GitHub Pages
 // can't) and stashes the payload in a cache; this reads it on the next page
@@ -9,7 +14,6 @@
 // Only works from an installed PWA on Android. iOS has no share target.
 import { escapeHtml } from '../utils.js';
 import { captureTask, revealTask } from './tasks.js';
-import { uploadAttachment } from '../files.js';
 
 const SHARE_CACHE = 'pending-share';
 
@@ -75,19 +79,17 @@ source: { kind: 'share', label: title || link || 'Shared from another app', url:
 };
 }
 
-function banner(message, taskId) {
+function banner(message, onOpen) {
 const el = document.createElement('div');
 el.className = 'share-banner';
-el.innerHTML = `<span>${escapeHtml(message)}</span>${taskId ? '<button type="button">Open it</button>' : ''}<span class="share-x">&times;</span>`;
+el.innerHTML = `<span>${escapeHtml(message)}</span>${onOpen ? '<button type="button">Open it</button>' : ''}<span class="share-x">&times;</span>`;
 document.body.appendChild(el);
 const close = () => el.remove();
 el.querySelector('.share-x').addEventListener('click', close);
 const open = el.querySelector('button');
 if (open) {
 open.addEventListener('click', async () => {
-const { switchTab } = await import('../tabs.js');
-switchTab('tasks');
-revealTask(taskId);
+await onOpen();
 close();
 });
 }
@@ -102,30 +104,38 @@ let share;
 try { share = await takePendingShare(); } catch (e) { console.error('Share pickup failed:', e); return; }
 if (!share) return;
 
+// A share carrying files goes to the Capture Inbox to be triaged --
+// Dating photos, a Task attachment, a future Health import -- rather
+// than always becoming a Task the way it used to. A pure text/link
+// share (no files) falls through below, unchanged.
+if (share.files.length > 0) {
+const { addCaptureBatch, revealCaptureBatch } = await import('./captureinbox.js');
+const title = (share.title || '').trim();
+const url = (share.url || '').trim();
+const text = (share.text || '').trim();
+const label = title || url || text.split('\n')[0].slice(0, 120) || `${share.files.length} shared file${share.files.length === 1 ? '' : 's'}`;
+const { batch, failed } = await addCaptureBatch({
+label,
+notes: text && text !== label ? text : '',
+source: { kind: 'share', label: title || url || 'Shared from another app', url },
+files: share.files,
+});
+let msg = `Captured ${batch.items.length} file${batch.items.length === 1 ? '' : 's'} to your Capture Inbox as "${label.slice(0, 60)}".`;
+if (failed.length) msg += ` ${failed.length} couldn't be captured — see Settings.`;
+banner(msg, async () => {
+const { switchTab } = await import('../tabs.js');
+switchTab('tasks');
+revealCaptureBatch(batch.id);
+});
+return;
+}
+
 const task = captureTask(composeTask(share));
-
-const failed = [];
-for (const file of share.files) {
-try {
-task.attachments.push(await uploadAttachment(file));
-} catch (err) {
-console.error('Could not attach a shared file:', err);
-failed.push(`${file.name}: ${err.message || err}`);
-}
-}
-if (share.files.length) {
-const { queueSave } = await import('../state.js');
-queueSave();
-const { renderTasks } = await import('./tasks.js');
-renderTasks();
-}
-
-const n = share.files.length - failed.length;
-let msg = `Captured "${task.title.slice(0, 60)}" to your Inbox`;
-if (n) msg += ` with ${n} file${n === 1 ? '' : 's'}`;
-msg += '.';
-if (failed.length) msg += ` ${failed.length} file${failed.length === 1 ? '' : 's'} couldn't be attached — see Settings.`;
-banner(msg, task.id);
+banner(`Captured "${task.title.slice(0, 60)}" to your Inbox.`, async () => {
+const { switchTab } = await import('../tabs.js');
+switchTab('tasks');
+revealTask(task.id);
+});
 }
 
 export { initShareTarget, composeTask, takePendingShare };
