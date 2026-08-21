@@ -21,11 +21,21 @@ let openAssigner = null; // { field, key }
 // rather than a decision.
 let drillDown = false;
 let facets = []; // [{title, key}]
+// The whole panel, not just one dimension within it -- defaults CLOSED
+// (unlike the per-dimension `collapsed` map above, which defaults open)
+// since building it recomputes every dimension across every connection on
+// every single edit anywhere in the Dating tab (renderOverviewRef() is
+// called from a dozen-plus places in connections.js). Left open once, it
+// stays open on reload -- `!== false` rather than `?? true` so an absent
+// key (never touched) and an explicit `true` (chose to open, then closed
+// again) are told apart the same way.
+let panelCollapsed = true;
 
 async function initOverviewPrefs() {
 const settings = await getLocalSettings();
 collapsed = settings.overviewCollapsed || {};
 drillDown = !!settings.overviewDrillDown;
+panelCollapsed = settings.overviewPanelCollapsed !== false;
 }
 
 // Uses the derived current age, so someone recorded at 29 two years ago is
@@ -164,8 +174,23 @@ ${facets.map((f, i) => `<button class="facet-pill" type="button" data-drop-facet
 
 function renderOverview() {
 const el = document.getElementById('overview-content');
+const toggleHtml = `<button class="overview-panel-toggle" type="button" id="overview-panel-toggle">${panelCollapsed ? '▸ Show connections overview' : '▾ Hide connections overview'}</button>`;
+// Bound after every innerHTML replacement below, whichever branch wrote
+// it -- the button itself always exists, so this one binding covers all
+// three return paths.
+const bindToggle = () => document.getElementById('overview-panel-toggle').addEventListener('click', () => {
+panelCollapsed = !panelCollapsed;
+setLocalSetting('overviewPanelCollapsed', panelCollapsed);
+renderOverview();
+});
+if (panelCollapsed) {
+el.innerHTML = toggleHtml;
+bindToggle();
+return;
+}
 if (data.connections.length === 0) {
-el.innerHTML = '<div class="empty">Add some connections to see them grouped here.</div>';
+el.innerHTML = toggleHtml + '<div class="empty">Add some connections to see them grouped here.</div>';
+bindToggle();
 return;
 }
 const dims = dimensions();
@@ -181,8 +206,9 @@ const scope = drillDown ? connectionsMatching(dims, dim.title) : data.connection
 return overviewDimension(dim, groupConnectionsBy(scope, dim.getKeys));
 }).filter(Boolean).join('');
 
-el.innerHTML = modeHtml + activeFacetsHtml() + (sections
+el.innerHTML = toggleHtml + modeHtml + activeFacetsHtml() + (sections
 || '<div class="empty">Nothing matches those filters.</div>');
+bindToggle();
 
 document.getElementById('drilldown-toggle').addEventListener('change', (e) => {
 drillDown = e.target.checked;

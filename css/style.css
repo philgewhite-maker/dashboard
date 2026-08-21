@@ -1379,6 +1379,19 @@ white-space:nowrap;
 .travel-badge.travelling-expired{background:transparent;border:1px dashed var(--line);color:var(--muted);}
 /* Drill-down mode: the toggle, and the pills showing what's currently
    narrowing the view. */
+.overview-panel-toggle{
+display:block;
+width:100%;
+text-align:left;
+background:transparent;
+border:none;
+padding:2px 0 6px;
+cursor:pointer;
+font-family:'IBM Plex Mono',monospace;
+font-size:12px;
+font-weight:600;
+color:var(--rose);
+}
 .overview-mode{
 font-size:12px;
 color:var(--muted);

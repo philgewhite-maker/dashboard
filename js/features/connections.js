@@ -649,6 +649,9 @@ return data.tasks.find((t) => t.source && t.source.kind === ATTENTION_TASK_SOURC
 function renderConnections() {
 renderSortOptions();
 topReachOutIdSet = computeTopReachOut();
+// Built once per render, not once per card -- see connectionCardHtml's
+// own comment on why that used to be an O(n) rebuild done n times over.
+const cityMap = knownCityMap(data.connections);
 const list = document.getElementById('connections-list');
 document.getElementById('connections-count').textContent = data.connections.length + (data.connections.length === 1 ? ' connection' : ' connections');
 const attnBtn = document.getElementById('conn-needs-attention-btn');
@@ -697,7 +700,7 @@ const missing = data.connections.filter((c) => isFieldEmpty(c, field));
 list.innerHTML = `<div class="filter-banner">Showing ${missing.length} with no ${escapeHtml(label)} <button class="filter-clear" type="button" id="clear-empty-filter">Clear</button></div>`
 + (missing.length === 0
 ? '<div class="empty">Everyone has at least one.</div>'
-: missing.map(connectionCardHtml).join(''))
+: missing.map((c) => connectionCardHtml(c, cityMap)).join(''))
 + tagDatalistsHtml();
 document.getElementById('clear-empty-filter').addEventListener('click', () => {
 emptyFieldFilter = null;
@@ -713,7 +716,7 @@ return;
 if (idFilter) {
 const picked = data.connections.filter((c) => idFilter.ids.has(c.id));
 list.innerHTML = `<div class="filter-banner">${picked.length} matching ${escapeHtml(idFilter.label)} <button class="filter-clear" type="button" id="clear-id-filter">Clear</button></div>`
-+ (picked.length === 0 ? '<div class="empty">Nobody matches all of those.</div>' : picked.map(connectionCardHtml).join(''))
++ (picked.length === 0 ? '<div class="empty">Nobody matches all of those.</div>' : picked.map((c) => connectionCardHtml(c, cityMap)).join(''))
 + tagDatalistsHtml();
 document.getElementById('clear-id-filter').addEventListener('click', () => { idFilter = null; renderConnections(); });
 hydratePhotoBackgrounds(list);
@@ -755,7 +758,7 @@ if (diff !== 0 || !secondary) return diff;
 return secondary.getValue(b) - secondary.getValue(a);
 });
 
-list.innerHTML = sorted.map(connectionCardHtml).join('') + tagDatalistsHtml();
+list.innerHTML = sorted.map((c) => connectionCardHtml(c, cityMap)).join('') + tagDatalistsHtml();
 
 hydratePhotoBackgrounds(list);
 flagLowResThumbnails(list);
@@ -813,7 +816,10 @@ return da < db ? -1 : da > db ? 1 : 0;
 });
 }
 
-function connectionCardHtml(c) {
+// cityMap is passed in rather than recomputed here -- it's built from
+// every connection's location, so rebuilding it once per card (as this
+// used to) is an O(n) rebuild done n times over for a full list render.
+function connectionCardHtml(c, cityMap) {
 const since = daysSince(c.lastContact);
 const travelPaused = isTravelPaused(c);
 const overdue = topReachOutIdSet.has(c.id);
@@ -829,7 +835,7 @@ const flagDotHtml = flags.worst ? `<span class="dot ${flags.worst}" title="${esc
 // what highlightFlagValues() itself falls back to when nothing matched,
 // so an unequal result means a span really got inserted, not just that
 // Notes happens to be non-empty.
-const notesHighlighted = c.notes ? highlightFlagValues(c.notes, data.flagRules, knownCityMap(data.connections)) : '';
+const notesHighlighted = c.notes ? highlightFlagValues(c.notes, data.flagRules, cityMap) : '';
 const notesHasHits = notesHighlighted && notesHighlighted !== escapeHtml(c.notes);
 // The preview and the raw textarea used to both render at once — the
 // same text twice in a row, once plain and once highlighted, read as
@@ -863,7 +869,7 @@ const chatSourceRow = multiSource
 const chatFieldHtml = mergedLines.length
 ? `<div class="field-block full"><span class="field-label">Chat history</span>
 ${chatSourceRow}
-<div class="tinder-chat-block" style="margin:0;">${chatTranscriptHtml(mergedLines, data.flagRules, knownCityMap(data.connections), multiSource ? CHAT_FIELD_SOURCE_ICONS : null)}</div>
+<div class="tinder-chat-block" style="margin:0;">${chatTranscriptHtml(mergedLines, data.flagRules, cityMap, multiSource ? CHAT_FIELD_SOURCE_ICONS : null)}</div>
 <details class="tinder-edit-details"><summary>Edit raw text</summary>
 ${chatSources.map((s) => `<div class="settings-note" style="margin:6px 0 2px;">${escapeHtml(s.label)}</div><textarea rows="4" placeholder="One message per line" data-field="${s.field}" data-conn-detail="${c.id}">${escapeHtml(s.text)}</textarea>`).join('')}
 </details></div>`
