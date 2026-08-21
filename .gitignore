@@ -23,3 +23,7 @@ dashboard-data.json
 *.json.tmp
 health-data.jsonl
 *.jsonl.lock
+
+# Scratch folder for pasting real screenshots/photos in for debugging --
+# never belongs in a public repo.
+Debug/

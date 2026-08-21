@@ -696,6 +696,16 @@ canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.85);
 const BAND_SAMPLE_WIDTH = 100;
 const BAND_FLATNESS_THRESHOLD = 12; // avg per-step summed-RGB delta allowed
 const BAND_MAX_TRIM_FRACTION = 0.45;
+// A status-bar clock or battery icon sitting inside an otherwise-solid
+// letterbox bar is only a few sample-rows/columns tall -- confirmed live
+// against real Android photo-viewer screenshots: the old scan stopped
+// trimming the instant it touched the icon, leaving almost the entire black
+// bar (and the photo misclassified as a screenshot, since the untrimmed
+// content ratio landed under PHOTO_ASPECT_THRESHOLD). Requiring a run this
+// long of consecutive non-flat samples before calling it "real content"
+// lets the scan skip over an icon-sized blip and keep trimming into the
+// flat margin beyond it.
+const BAND_CONTENT_RUN = 6;
 
 function contentCropBounds(img) {
 const w = img.naturalWidth, h = img.naturalHeight;
@@ -728,13 +738,29 @@ total += Math.abs(data[i] - data[p]) + Math.abs(data[i + 1] - data[p + 1]) + Mat
 return total / (sh - 1) <= BAND_FLATNESS_THRESHOLD;
 };
 
-let top = 0, bottom = sh - 1, left = 0, right = sw - 1;
+// Scans inward from an edge, trimming flat samples. A non-flat sample only
+// ends the trim if it starts a run of at least BAND_CONTENT_RUN consecutive
+// non-flat samples (real content); a shorter run is a blip -- skipped over,
+// scan continues past it. `index(i)` maps a 0-based scan step to the actual
+// row/column, so the same logic serves all four edges.
+function findEdge(maxTrim, isFlat, index) {
+let i = 0;
+while (i < maxTrim) {
+if (isFlat(index(i))) { i++; continue; }
+let run = 0;
+while (i + run < maxTrim && !isFlat(index(i + run))) run++;
+if (run >= BAND_CONTENT_RUN) return i;
+i += run;
+}
+return maxTrim;
+}
+
 const maxTopBottom = Math.floor(sh * BAND_MAX_TRIM_FRACTION);
 const maxLeftRight = Math.floor(sw * BAND_MAX_TRIM_FRACTION);
-while (top < maxTopBottom && rowFlat(top)) top++;
-while (bottom > sh - 1 - maxTopBottom && bottom > top && rowFlat(bottom)) bottom--;
-while (left < maxLeftRight && colFlat(left)) left++;
-while (right > sw - 1 - maxLeftRight && right > left && colFlat(right)) right--;
+const top = findEdge(maxTopBottom, rowFlat, (i) => i);
+const bottom = sh - 1 - findEdge(maxTopBottom, rowFlat, (i) => sh - 1 - i);
+const left = findEdge(maxLeftRight, colFlat, (i) => i);
+const right = sw - 1 - findEdge(maxLeftRight, colFlat, (i) => sw - 1 - i);
 
 if (bottom <= top || right <= left) return { x: 0, y: 0, w: 1, h: 1 };
 return { x: left / sw, y: top / sh, w: (right - left + 1) / sw, h: (bottom - top + 1) / sh };
