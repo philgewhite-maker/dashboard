@@ -940,7 +940,7 @@ ${c.photoId ? `<div class="full conn-hero-photo">${avatarHtml(c.photoId, c.name,
 <label class="full">Platform identities<span class="settings-note">What each app called them, and its own match key where there is one</span>${identityListHtml(c)}</label>
 <label>Source<select data-field="app" data-conn-detail="${c.id}">${appOptions(c.app)}</select></label>
 <label>Age when recorded${ageNoteHtml(c)}<input type="text" autocomplete="off" data-field="age" data-conn-detail="${c.id}" value="${escapeHtml(c.age || '')}"></label>
-<label>Date of birth<input type="date" data-field="dob" data-conn-detail="${c.id}" min="1900-01-01" max="${todayStr()}" value="${escapeHtml(c.dob || '')}"></label>
+<label>Date of birth<input type="text" inputmode="numeric" autocomplete="off" placeholder="YYYY-MM-DD" pattern="\d{4}-\d{2}-\d{2}" data-field="dob" data-conn-detail="${c.id}" value="${escapeHtml(c.dob || '')}"></label>
 <label class="full">City <span class="settings-note">Groups in Overview — a borough and its city, or two homes, are two separate entries</span><div class="tag-editor">${tagChips(c.location, c.id, 'location')}</div></label>
 <label>Distance<input type="text" autocomplete="off" placeholder="e.g. &lt; 10 mi" data-field="distance" data-conn-detail="${c.id}" value="${escapeHtml(c.distance || '')}"></label>
 <label>Matched on<input type="date" data-field="matchedOn" data-conn-detail="${c.id}" value="${escapeHtml(c.matchedOn || '')}"></label>
