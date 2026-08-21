@@ -236,6 +236,15 @@ const PROFILE_MAX_TOKENS = 2000;
 // than once per import -- worth pricing right, not just inheriting the
 // user's chosen default.
 const PROFILE_PARSE_MODEL = 'claude-sonnet-5';
+// Bumped whenever profilePrompt()'s requested fields change. The rich-parse
+// cache is keyed on this alongside the image hash -- without it, re-parsing
+// the exact same screenshot after a prompt change (a genuinely common thing
+// to do while testing a fix) silently serves the OLD cached result forever,
+// since nothing else about the cache key ever changes. Confirmed live:
+// re-uploading the same screenshot twice after adding new fields to the
+// prompt kept returning the pre-change result with no error or indication
+// why nothing was different.
+const PROFILE_SCHEMA_VERSION = 2;
 
 // A vision model estimating bounding-box coordinates has no pixel grid to
 // anchor against, so a raw absolute-position guess drifts the further down
@@ -473,7 +482,8 @@ const dataUrl = `data:${mediaType};base64,${base64}`;
 // The text half is cached; the cropped photos are not, because they're
 // blobs that would bloat the cache and are cheap to re-cut from the image.
 const hash = await hashFile(file);
-const cachedText = await parseCacheGet(hash, 'rich');
+const richCacheKind = `rich-v${PROFILE_SCHEMA_VERSION}`;
+const cachedText = await parseCacheGet(hash, richCacheKind);
 const quickCached = await parseCacheGet(hash, 'quick');
 // Reuse a better-evidenced date recorded by an earlier scan of this same
 // image, whichever pass found it.
@@ -504,7 +514,7 @@ else console.error(`Profile band ${i + 1}/${bands.length} failed:`, r.reason);
 });
 if (!results.length) throw settled[0].reason;
 raw = isBanded ? mergeProfileBandResults(results, okBands, img.naturalHeight) : results[0];
-await parseCachePut(hash, 'rich', { result: raw, captured });
+await parseCachePut(hash, richCacheKind, { result: raw, captured });
 }
 
 const photoBoxes = Array.isArray(raw.photoBoxes) ? raw.photoBoxes : [];
