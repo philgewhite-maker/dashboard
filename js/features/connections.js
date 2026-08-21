@@ -1651,7 +1651,20 @@ renderConnections();
 initReachOutSettings();
 document.getElementById('conn-backlog-review-btn').addEventListener('click', () => {
 const candidates = data.connections.filter((c) => c.stage !== 'Backlog review' && !isDormantStage(c.stage) && !isTravelPaused(c) && daysSince(c.lastContact) >= 180);
-if (!candidates.length) { alert('Nobody is 180+ days since last contact right now (outside Faded/Archived/FriendZone/travel-paused).'); return; }
+if (!candidates.length) {
+// "Nobody qualifies" reads as "you have no stale matches" -- but this
+// only ever looks at people NOT already in Backlog review (so a repeat
+// click doesn't re-flag the same people every time), so the far more
+// common reason for zero is that everyone currently 180+ days stale is
+// already sitting there from an earlier run. Distinguish the two rather
+// than showing one message for both. Confirmed live: reported as
+// confusing when a connections list already had plenty in that stage.
+const alreadyThere = data.connections.filter((c) => c.stage === 'Backlog review' && daysSince(c.lastContact) >= 180).length;
+alert(alreadyThere
+? `No NEW connections crossed 180 days since last contact — ${alreadyThere} already in "Backlog review" are still that stale, if you want to review them.`
+: 'Nobody is 180+ days since last contact right now (outside Faded/Archived/FriendZone/travel-paused).');
+return;
+}
 if (!confirm(`Move ${candidates.length} connection${candidates.length === 1 ? '' : 's'} (180+ days since last contact) to "Backlog review"?`)) return;
 candidates.forEach((c) => { c.stage = 'Backlog review'; });
 renderConnections();
