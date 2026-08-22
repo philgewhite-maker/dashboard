@@ -45,7 +45,14 @@ const since = daysSince(c.lastContact);
 // in disguise skips her while paused. Explicit todos still fire below —
 // those are a decision you already made, not a cadence check.
 if (!isTravelPaused(c)) {
-if ((c.priority || 0) >= 4 && NEW_MATCH_STAGES.has(c.stage) && daysSince(String(c.createdAt || '').slice(0, 10)) <= 14) {
+// lastContact defaults to the match date at import (see the comment
+// above), so it only moves forward once real outreach happens. Without
+// this check, marking someone contacted (which sets lastContact but
+// doesn't necessarily change stage) had no effect on this nudge -- it
+// kept firing "reach out?" for up to 14 days after you already had.
+const createdDate = String(c.createdAt || '').slice(0, 10);
+const contactedSinceMatch = c.lastContact && c.lastContact > createdDate;
+if (!contactedSinceMatch && (c.priority || 0) >= 4 && NEW_MATCH_STAGES.has(c.stage) && daysSince(createdDate) <= 14) {
 pool.push({
 text: `You rated ${c.name} ${c.priority} stars — reach out?`,
 target: { type: 'connection', id: c.id },
@@ -88,8 +95,12 @@ category: 'dating',
 });
 // A location with 2+ connections is a genuinely different suggestion from
 // "go see this one person" — worth framing as its own trip rather than
-// just repeating the single-connection phrasing N times.
+// just repeating the single-connection phrasing N times. Your own home
+// city (Settings → Privacy → My info) is excluded entirely: "plan a trip
+// to see everyone in the city you already live in" isn't a suggestion.
+const myCity = String(data.myCity || '').trim().toLowerCase();
 Object.entries(groupByLocation()).forEach(([loc, conns]) => {
+if (myCity && loc.trim().toLowerCase() === myCity) return;
 if (conns.length >= 2) {
 pool.push({
 text: `You've got ${conns.length} connections in ${loc} — worth planning a city-break weekend to see them all?`,
