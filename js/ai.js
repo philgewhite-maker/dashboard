@@ -698,12 +698,41 @@ translation: String((data && data.translation) || '').trim(),
 // gives (nuanced reading, not deep reasoning).
 const WELLNESS_MODEL = 'claude-sonnet-5';
 const WELLNESS_MAX_TOKENS = 800;
-// Bumped whenever wellnessPrompt()'s requested fields change -- same reason
-// PROFILE_SCHEMA_VERSION exists above: without it, re-extracting the exact
-// same screenshot after a prompt change would silently keep serving the OLD
-// cached result forever, which is exactly what would happen re-testing the
-// screenshots that motivated the Min/Max-interpolation change below.
-const WELLNESS_SCHEMA_VERSION = 2;
+// Bumped whenever wellnessPrompt()'s requested fields or WELLNESS_BANDS
+// change -- same reason PROFILE_SCHEMA_VERSION exists above: without it,
+// re-extracting the exact same screenshot after a prompt change would
+// silently keep serving the OLD cached result forever, which is exactly
+// what would happen re-testing the screenshots that motivated this.
+const WELLNESS_SCHEMA_VERSION = 3;
+
+// Real category-band numeric ranges, confirmed by the user against their
+// own live Samsung Health app -- these charts have no numbered y-axis, but
+// the bands they ARE labelled with (Low/Adequate/High/...) correspond to
+// fixed, known ranges. Feeding the model the band ORDER (so it can match
+// what's actually printed on the chart) and doing the label->range->value
+// lookup here, rather than asking the model to recall or reproduce these
+// numbers itself, keeps the one part that must be exactly right out of
+// generation entirely.
+const WELLNESS_BANDS = {
+ages: [
+{ label: 'low', min: 190, max: 398 },
+{ label: 'adequate', min: 398, max: 436 },
+{ label: 'high', min: 436, max: 644 },
+{ label: 'very high', min: 644, max: 796 },
+],
+antioxidant: [
+{ label: 'very low', min: 0, max: 49 },
+{ label: 'low', min: 50, max: 74 },
+{ label: 'adequate', min: 75, max: 100 },
+],
+};
+
+function bandRange(metric, label) {
+const bands = WELLNESS_BANDS[metric];
+if (!bands) return null;
+const norm = String(label || '').trim().toLowerCase();
+return bands.find((b) => b.label === norm) || null;
+}
 
 function wellnessPrompt(todayIso) {
 return `This is a screenshot from the Samsung Health app (measurements taken via a Galaxy Watch). It shows ONE of these three 7-day charts: Antioxidant index, AGEs (Advanced Glycation End-products) index, or Sleeping heart rate variability (HRV). Today's date is ${todayIso}.
@@ -715,14 +744,14 @@ Identify which metric this is, then extract:
 - The headline grade/category text if shown (e.g. "Good", "Adequate", "Low", "Very low", "High", "Very high") for the period or the most recent reading.
 - The unit if shown (e.g. "ms" for HRV).
 - For EACH day with a visible plotted dot, resolve its ISO date (YYYY-MM-DD), then:
-  - If a number is printed directly on or next to that dot, record it as "value" with "exact":true.
-  - Otherwise, if the chart shows BOTH a Min and a Max as text (even though the axis itself has no numbers), you can still place that dot on the scale those two numbers define: look at the dot that sits LOWEST on the chart and the dot that sits HIGHEST, and treat those as the Min and Max positions. For every other dot, judge how far up the vertical gap between the lowest and highest dot it sits, as a fraction from 0.0 (level with the lowest dot) to 1.0 (level with the highest dot), to the nearest 0.05, and record it as "fraction" with "exact":false. Do NOT invent a "value" yourself in this case -- report only the fraction, the value gets computed afterward from the real Min/Max text.
-  - If neither a printed number nor a Min+Max pair is available for a dot, leave that day out of "days" entirely rather than guessing.
+  - If a number is printed directly on or next to that dot -- including a callout/tooltip bubble showing one specific day's exact value, which appears when that day has been tapped/highlighted -- record it as "value" with "exact":true.
+  - Otherwise, for an Antioxidant or AGEs chart specifically: these charts are divided into horizontal bands, each labelled with a category name along the right edge (Antioxidant, top to bottom: Adequate, Low, Very low. AGEs, top to bottom: Very high, High, Adequate, Low). Identify which band's region the dot sits inside, and how far up that ONE band's own vertical span it sits, as a fraction from 0.0 (at that band's lower boundary line) to 1.0 (at that band's upper boundary line), to the nearest 0.05. Record the band's label exactly as printed (lowercase it) as "band" and the fraction as "bandFraction", with "exact":false. Do NOT invent a numeric "value" yourself here -- the real number is computed afterward from the band's known range, you're only reporting which band and where within it.
+  - If none of the above apply to a dot (an HRV chart with no number printed at that point, for instance), leave that day out of "days" entirely rather than guessing.
 
 Reply with ONLY a JSON object, no other text, no markdown fences:
-{"metric":"hrv"|"antioxidant"|"ages"|"unrecognized","periodLabel":"16–22 Aug"|null,"asOfDate":"2026-08-22","days":[{"date":"2026-08-22","value":38,"exact":true},{"date":"2026-08-19","fraction":0.6,"exact":false}],"average":46|null,"min":43|null,"max":50|null,"headlineGrade":"Good"|null,"unit":"ms"|null}
+{"metric":"hrv"|"antioxidant"|"ages"|"unrecognized","periodLabel":"16–22 Aug"|null,"asOfDate":"2026-08-22","days":[{"date":"2026-08-22","value":38,"exact":true},{"date":"2026-08-19","band":"adequate","bandFraction":0.4,"exact":false}],"average":46|null,"min":43|null,"max":50|null,"headlineGrade":"Good"|null,"unit":"ms"|null}
 - "asOfDate": the resolved date of the LAST (rightmost/most recent) day the chart covers -- always include this even when "days" is empty, since it's what the period average/min/max/grade describe.
-- "days": can be empty if the chart shows neither printed numbers nor a Min+Max pair to place dots against (e.g. an AGEs chart that only states a period average with no Min/Max).
+- "days": can be empty if a chart shows no printed numbers, no tapped-day callout, and (for HRV specifically, which has no bands) no other way to place a dot.
 - If "metric" is "unrecognized", every other field should be null/empty -- don't guess at a chart type you're not confident about.`;
 }
 
@@ -744,30 +773,32 @@ const { data: raw } = await callAnthropic(
 WELLNESS_MAX_TOKENS, WELLNESS_MODEL, 'Wellness screenshot',
 );
 const isIsoDate = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
-const min = typeof raw.min === 'number' ? raw.min : null;
-const max = typeof raw.max === 'number' ? raw.max : null;
-// The model only ever reports a *fraction* between the visually lowest and
-// highest dot for an unlabelled point (never a value it invented itself) --
-// the actual number is computed here from the real Min/Max text, so a
-// vision-model arithmetic slip can't produce a wrong reading on its own.
-// Rounded to a whole number: every real printed value seen on these charts
-// so far (HRV ms, antioxidant index) has been an integer.
+const metric = ['hrv', 'antioxidant', 'ages'].includes(raw.metric) ? raw.metric : 'unrecognized';
+// The model only ever reports which band a dot is in plus a fraction
+// within that band -- never a value it invented itself. The actual number
+// is computed here from WELLNESS_BANDS' real, user-confirmed ranges, so a
+// vision-model arithmetic slip (or a misremembered boundary) can't produce
+// a wrong reading on its own. Rounded to a whole number: every real
+// printed value seen on these charts so far has been an integer.
 const days = Array.isArray(raw.days) ? raw.days.map((d) => {
 if (!isIsoDate(d.date)) return null;
 if (d.exact === true && typeof d.value === 'number') return { date: d.date, value: d.value, exact: true };
-if (d.exact === false && typeof d.fraction === 'number' && min != null && max != null) {
-const fraction = Math.min(1, Math.max(0, d.fraction));
-return { date: d.date, value: Math.round(min + fraction * (max - min)), exact: false };
+if (d.exact === false && typeof d.bandFraction === 'number') {
+const range = bandRange(metric, d.band);
+if (!range) return null;
+const fraction = Math.min(1, Math.max(0, d.bandFraction));
+return { date: d.date, value: Math.round(range.min + fraction * (range.max - range.min)), exact: false };
 }
 return null;
 }).filter(Boolean) : [];
 const result = {
-metric: ['hrv', 'antioxidant', 'ages'].includes(raw.metric) ? raw.metric : 'unrecognized',
+metric,
 periodLabel: raw.periodLabel || null,
 asOfDate: isIsoDate(raw.asOfDate) ? raw.asOfDate : null,
 days,
 average: typeof raw.average === 'number' ? raw.average : null,
-min, max,
+min: typeof raw.min === 'number' ? raw.min : null,
+max: typeof raw.max === 'number' ? raw.max : null,
 headlineGrade: raw.headlineGrade || null,
 unit: raw.unit || null,
 };

@@ -92,7 +92,7 @@ return isNaN(d) ? iso : d.toLocaleDateString('en-GB', { weekday: 'short', day: '
 // it reads as "estimated" rather than a typo on hover/tap.
 function metricCellHtml(value, exact, unit, grade) {
 if (value == null) return '—';
-const prefix = exact === false ? '<span title="Estimated from the dot\'s position between the chart\'s stated Min and Max, not a printed number">~</span>' : '';
+const prefix = exact === false ? '<span title="Estimated from the dot\'s position within its category band (e.g. Adequate), not a printed number">~</span>' : '';
 const gradeHtml = grade ? ` <span class="settings-note" style="display:inline;">(${escapeHtml(grade)})</span>` : '';
 return `${prefix}${value}${unit || ''}${gradeHtml}`;
 }
