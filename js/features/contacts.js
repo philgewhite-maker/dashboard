@@ -163,6 +163,9 @@ filled.forEach(({ field, value }) => {
 if (field === 'aliases') {
 if (!Array.isArray(conn.aliases)) conn.aliases = [];
 if (!conn.aliases.some((a) => nameKey(a) === nameKey(value))) conn.aliases.push(value);
+} else if (ARRAY_COMPARABLE_FIELDS.has(field)) {
+if (!Array.isArray(conn[field])) conn[field] = [];
+if (!conn[field].some((v) => String(v).trim().toLowerCase() === value.trim().toLowerCase())) conn[field].push(value);
 } else {
 conn[field] = value;
 }
@@ -181,6 +184,16 @@ const COMPARABLE = [
 { field: 'address', label: 'Address', from: (c) => c.address || '' },
 { field: 'job', label: 'Job', from: (c) => c.job || '' },
 ];
+
+// `location` is a TAG_FIELDS multi-value array on the connection (you can
+// record more than one city), but Google Contacts only ever has one. Treated
+// the same way as `aliases` below: Google's city is new information to ADD
+// if it's not already one of the connection's cities, never a value to
+// overwrite the field with (that would turn the array into a bare string —
+// the exact bug that used to crash the whole Connections render) and never
+// something to flag as a "conflict" (having *more* cities than Google knows
+// about isn't a disagreement).
+const ARRAY_COMPARABLE_FIELDS = new Set(['location']);
 
 // Contact group labels that name a dating app. A contact filed under
 // "tinder" while the connection says Bumble is exactly the kind of thing
@@ -202,8 +215,14 @@ const filled = [];
 const conflicts = [];
 COMPARABLE.forEach(({ field, label, from }) => {
 const theirs = String(from(contact) || '').trim();
-const mine = String(conn[field] || '').trim();
 if (!theirs) return;
+if (ARRAY_COMPARABLE_FIELDS.has(field)) {
+const mine = Array.isArray(conn[field]) ? conn[field] : [];
+const already = mine.some((v) => String(v).trim().toLowerCase() === theirs.toLowerCase());
+if (!already) filled.push({ field, label, value: theirs });
+return;
+}
+const mine = String(conn[field] || '').trim();
 if (!mine) { filled.push({ field, label, value: theirs }); return; }
 // Phones only "disagree" if they're genuinely different numbers, not
 // merely written differently.

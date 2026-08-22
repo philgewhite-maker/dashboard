@@ -1587,7 +1587,7 @@ if (!name) return;
 const newId = uid();
 data.connections.push({
 id: newId, name, identities: [], app: appInput.value, priority: 3, stage: 'Matched', lastContact: todayStr(), createdAt: new Date().toISOString(),
-photoId: null, photoIds: [], age: '', location: '', kids: '', job: '', height: '', education: '',
+photoId: null, photoIds: [], age: '', location: [], kids: '', job: '', height: '', education: '',
 likes: '', notes: '',
 languages: [], nationality: [], todos: [], tags: [], dateLocations: [], dateEvents: [], sexTags: [],
 ratings: {}, driveLink: '',
