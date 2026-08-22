@@ -14,10 +14,13 @@
 // against an authoritative source (the bridge app's own README shows a
 // string example, "running", but the real payload sends bare numeric
 // codes like "8" -- no verified table for what each number means was
-// found). Rather than guess and risk mislabelling a session, only add an
-// entry here once it's actually been confirmed; anything absent falls
-// back to a plain, honest "Exercise (type N)".
-const EXERCISE_TYPE_LABELS = {};
+// found in any authoritative source). Rather than guess and risk
+// mislabelling a session, only add an entry here once it's actually been
+// confirmed; anything absent falls back to a plain, honest
+// "Exercise (type N)".
+const EXERCISE_TYPE_LABELS = {
+'8': 'Bike', // confirmed against real records seen in Samsung Health
+};
 
 function exerciseTypeLabel(type) {
 return EXERCISE_TYPE_LABELS[type] || `Exercise (type ${type})`;
