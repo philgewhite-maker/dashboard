@@ -24,7 +24,7 @@ import { initTinderImport } from './features/tinderimport.js';
 import { initWhatsAppImport } from './features/whatsappimport.js';
 import { initTelegramImport } from './features/telegramimport.js';
 import { initPhotoSync } from './features/photosync.js';
-import { initHealthSync } from './features/health.js';
+import { initHealthSync, initHealthDaily } from './features/health.js';
 import { initShareTarget } from './features/sharetarget.js';
 import { initCaptureInbox } from './features/captureinbox.js';
 // Photos whose bytes aren't on this device are fetched from your own host.
@@ -146,6 +146,7 @@ initWhatsAppImport();
 initTelegramImport();
 initPhotoSync();
 initHealthSync();
+initHealthDaily();
 initNudges();
 await initSettings();
 registerServiceWorker();

@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v105</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v106</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -38,6 +38,7 @@
 <button class="tab-btn" type="button" data-tab-btn="shopping">Shopping</button>
 <button class="tab-btn" type="button" data-tab-btn="menu">Menu</button>
 <button class="tab-btn" type="button" data-tab-btn="business">Business</button>
+<button class="tab-btn" type="button" data-tab-btn="health">Health</button>
 <button class="tab-btn" type="button" data-tab-btn="settings">Settings</button>
 </div>
 
@@ -1811,6 +1812,25 @@ Mostly still a planning space &mdash; a place to keep thinking about what this s
 <input type="text" autocomplete="off" id="idea-title-input" placeholder="Idea title">
 <textarea id="idea-notes-input" placeholder="What's the idea?" rows="3" style="font-family:'Inter',sans-serif;font-size:13px;border:1px solid var(--line);border-radius:7px;padding:7px 9px;background:var(--paper);color:var(--ink);resize:vertical;"></textarea>
 <button class="add-btn" type="button" style="align-self:flex-start;">Add idea</button>
+</div>
+</section>
+
+<section class="panel wide" id="health-panel" data-tab="health">
+<div class="panel-head">
+<h2><span class="dot sage"></span>Health</h2>
+</div>
+<div class="settings-note" style="margin:0 0 10px;">One row per day, parsed from whatever your Health Connect bridge app has posted to <code>health.php</code> &mdash; steps, sleep, heart rate, distance, calories, weight, body fat, and exercise sessions. See Settings for the raw payload viewer and setup notes.</div>
+<div class="capture-row" style="margin-bottom:10px;">
+<button class="todo-add-btn" type="button" id="health-parse-btn">&#8635; Sync &amp; parse</button>
+<span class="sync-status" id="health-parse-status"></span>
+</div>
+<div style="overflow-x:auto;">
+<table class="health-table">
+<thead><tr>
+<th>Date</th><th>Steps</th><th>Sleep</th><th>HR</th><th>O&#8322;</th><th>Distance</th><th>Calories</th><th>Weight</th><th>Body fat</th><th>Exercise</th>
+</tr></thead>
+<tbody id="health-daily-body"></tbody>
+</table>
 </div>
 </section>
 

@@ -1,17 +1,27 @@
-// Health Connect data, via a bridge app on your phone (e.g. "HC Webhook")
-// posting to server/health.php rather than this app reading Health Connect
-// directly — a browser page has no way to do that at all, native-only API,
-// see the "Health data" README section for why.
+// Health Connect data, via a bridge app on your phone (e.g. "HC Webhook",
+// or the Life Dashboard Companion app) posting to server/health.php rather
+// than this app reading Health Connect directly — a browser page has no
+// way to do that at all, native-only API, see the "Health data" README
+// section for why.
 //
-// This is deliberately just a raw viewer for now, not a parser: the real
-// shape of what the bridge app posts is unverified, so rather than guess at
-// field names, this shows exactly what arrived. Once a real payload is seen,
-// the actual parsing into Habits/Goals happens as a follow-up, the same
-// build-then-verify-then-parse order as every other import built tonight.
+// Two things live here: the raw-payload viewer (Settings) that's been here
+// since before a real payload had ever been seen, kept as-is for
+// inspecting exactly what arrived when something looks wrong; and the real
+// parse-and-store pipeline (the Health tab) that turns the server's whole
+// log into one row per day via healthparse.js, now that a real payload's
+// shape is confirmed.
+import { data, queueSave } from '../state.js';
 import { getConfig } from '../sync/selfhost.js';
 import { escapeHtml } from '../utils.js';
+import { parseHealthPayloads } from './healthparse.js';
 
 const REQUEST_TIMEOUT_MS = 15000;
+// health.php's own GET cap (server/health.php.example: $DEFAULT_LIMIT is
+// 500, but ?limit= is honoured up to this) -- asking for the max every
+// parse means the daily rollup is only ever missing data health.php itself
+// has already trimmed off the end of its log, not data this app chose not
+// to ask for.
+const PARSE_FETCH_LIMIT = 2000;
 
 // health.php sits next to sync.php, same reasoning as files.php/
 // image-proxy.php/recipe-fetch.php — one URL configured once, every server
@@ -77,4 +87,85 @@ btn.addEventListener('click', render);
 render();
 }
 
-export { initHealthSync, fetchHealthEntries };
+function formatMinutes(mins) {
+if (!mins) return '—';
+const h = Math.floor(mins / 60), m = Math.round(mins % 60);
+return h ? `${h}h ${m}m` : `${m}m`;
+}
+
+function formatKm(meters) {
+if (!meters) return '—';
+return `${(meters / 1000).toFixed(meters >= 10000 ? 0 : 1)}km`;
+}
+
+function formatDate(iso) {
+const d = new Date(`${iso}T00:00:00`);
+return isNaN(d) ? iso : d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+}
+
+function dayRowHtml(d) {
+const hr = d.heartRate ? `${d.heartRate.avg} <span class="settings-note" style="display:inline;">(${d.heartRate.min}–${d.heartRate.max})</span>` : '—';
+const o2 = d.oxygenSaturation ? `${d.oxygenSaturation.avg}%` : '—';
+const sleepDetail = d.sleepMinutes
+? `${Object.entries(d.sleepStages).filter(([, v]) => v > 0).map(([k, v]) => `${k} ${formatMinutes(v)}`).join(', ')}`
+: '';
+const exerciseDetail = d.exerciseSessions.length
+? d.exerciseSessions.map((s) => `${escapeHtml(s.label)} (${formatMinutes(s.minutes)})`).join(', ')
+: '—';
+return `<tr>
+<td>${escapeHtml(formatDate(d.date))}</td>
+<td>${d.steps ? d.steps.toLocaleString() : '—'}</td>
+<td title="${escapeHtml(sleepDetail)}">${formatMinutes(d.sleepMinutes)}</td>
+<td>${hr}</td>
+<td>${o2}</td>
+<td>${formatKm(d.distanceMeters)}</td>
+<td>${d.totalCalories ? d.totalCalories.toLocaleString() : '—'}</td>
+<td>${d.weightKg != null ? `${d.weightKg}kg` : '—'}</td>
+<td>${d.bodyFatPct != null ? `${d.bodyFatPct}%` : '—'}</td>
+<td>${exerciseDetail}</td>
+</tr>`;
+}
+
+function renderHealthDaily() {
+const el = document.getElementById('health-daily-body');
+if (!el) return;
+if (!data.healthDaily.length) {
+el.innerHTML = '<tr><td colspan="10" class="empty">Nothing parsed yet — click "Sync &amp; parse" once the bridge app has sent at least one sync.</td></tr>';
+return;
+}
+el.innerHTML = data.healthDaily.map(dayRowHtml).join('');
+}
+
+// The one place a sync fetch turns into data.healthDaily. Fully re-fetches
+// and re-derives every time (see healthparse.js's own header comment on
+// why that's simpler and safer than incremental merging) rather than only
+// pulling what's new since the last parse.
+async function parseAndStoreHealthData(statusEl) {
+if (statusEl) statusEl.textContent = 'Fetching…';
+const entries = await fetchHealthEntries(PARSE_FETCH_LIMIT);
+data.healthDaily = parseHealthPayloads(entries);
+queueSave();
+renderHealthDaily();
+const msg = data.healthDaily.length
+? `Parsed ${entries.length} synced entr${entries.length === 1 ? 'y' : 'ies'} into ${data.healthDaily.length} day${data.healthDaily.length === 1 ? '' : 's'}.`
+: 'Nothing to parse yet.';
+if (statusEl) statusEl.textContent = msg;
+return { entryCount: entries.length, dayCount: data.healthDaily.length };
+}
+
+function initHealthDaily() {
+const btn = document.getElementById('health-parse-btn');
+const status = document.getElementById('health-parse-status');
+if (btn) {
+btn.addEventListener('click', async () => {
+try {
+await parseAndStoreHealthData(status);
+} catch (err) {
+if (status) status.textContent = err.message || String(err);
+}
+});
+}
+renderHealthDaily();
+}
+
+export { initHealthSync, fetchHealthEntries, initHealthDaily, renderHealthDaily, parseAndStoreHealthData };

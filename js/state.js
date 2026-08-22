@@ -403,6 +403,10 @@ b.items = Array.isArray(b.items)
 // A batch with nothing left (everything already routed/discarded, e.g. a
 // save landed mid-triage) is clutter, not a real inbox entry.
 data.captureInbox = data.captureInbox.filter((b) => b.items.length > 0);
+// One row per local calendar day, fully rebuilt from server-held raw
+// payloads on every parse (see healthparse.js) rather than edited by hand
+// -- no per-item blank-factory needed, just an array-shape guard.
+if (!Array.isArray(data.healthDaily)) data.healthDaily = [];
 // Seed the mail search rows from the old fixed shape the first time only.
 // Keyed on the array's absence rather than its emptiness, so deleting every
 // row stays deleted instead of being helpfully repopulated next reload.

@@ -1689,6 +1689,30 @@ gap:8px;
 align-items:center;
 flex-wrap:wrap;
 }
+.health-table{
+width:100%;
+border-collapse:collapse;
+font-family:'Inter',sans-serif;
+font-size:13px;
+white-space:nowrap;
+}
+.health-table th{
+text-align:left;
+font-family:'IBM Plex Mono',monospace;
+font-size:10px;
+text-transform:uppercase;
+letter-spacing:.06em;
+color:var(--muted);
+padding:0 10px 6px 0;
+border-bottom:1px solid var(--line);
+}
+.health-table td{
+padding:6px 10px 6px 0;
+border-bottom:1px solid var(--line);
+color:var(--ink);
+}
+.health-table tr:last-child td{border-bottom:none;}
+.health-table .empty{white-space:normal;}
 .capture-row input[type=text]{
 flex:1 1 260px;
 min-width:0;
