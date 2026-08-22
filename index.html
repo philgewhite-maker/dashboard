@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v107</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v108</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -1839,21 +1839,83 @@ Mostly still a planning space &mdash; a place to keep thinking about what this s
 <h2><span class="dot plum"></span>Settings</h2>
 </div>
 
+<details class="settings-group">
+<summary><span class="dot teal"></span>Account &amp; sync</summary>
+
 <div class="settings-block">
-<h3>Connections — rating categories</h3>
-<div class="settings-note" style="margin:0 0 8px;">
-The detailed star ratings shown on every connection. Removing one clears every rating already given under it &mdash; there's no way back from that, so it asks first.
+<h3>Google account</h3>
+<div class="settings-note" style="margin:0 0 8px;">Sign in/out button lives in the header, since it's needed often.</div>
+<div class="settings-note" id="sync-account"></div>
+<div class="settings-note" id="sync-status"></div>
+<div class="backup-row">
+<button class="log-btn" id="sync-push-btn" type="button">Push to Google Drive</button>
+<button class="log-btn" id="sync-pull-btn" type="button">Pull from Google Drive</button>
 </div>
-<div class="tag-editor" id="rating-categories-list"></div>
+<div class="settings-note" id="drive-sync-status"></div>
 </div>
 
 <div class="settings-block">
-<h3>Connections — red/amber/green flags</h3>
+<h3>Live sync (your own server)</h3>
+<div class="settings-note" style="margin:0 0 8px;">Saves changes to your own hosting automatically, a couple of seconds after you stop typing, and picks up changes from your other devices. No sign-in, so nothing expires. Leave both boxes empty to stay on manual Google Drive push/pull above.</div>
+<label for="sync-url-input" style="font-size:13px;font-weight:500;display:block;margin-bottom:6px;">Sync URL</label>
+<input type="text" autocomplete="off" id="sync-url-input" class="settings-input" placeholder="https://georgewhiteeuropean.co.uk/sync.php">
+<label for="sync-secret-input" style="font-size:13px;font-weight:500;display:block;margin:10px 0 6px;">Sync secret</label>
+<input type="password" autocomplete="new-password" id="sync-secret-input" class="settings-input" placeholder="the same string as $SECRET in sync.php">
+<div class="sync-row" style="margin-top:10px;">
+<button class="sync-btn" id="sync-test-btn" type="button">Test &amp; start syncing</button>
+</div>
+<div class="sync-result" id="sync-test-status"></div>
+<div class="settings-note">Stored only on this device, never exported in a backup and never committed to the repo. Enter the same pair on each device you use.</div>
+</div>
+
+<div class="settings-block">
+<h3>Google Contacts</h3>
+<div class="settings-note" style="margin:0 0 8px;">Matching reads your contacts. Writing back is a separate, much broader permission — it can change and clear fields in your real address book — so it's off unless you turn it on here.</div>
+<label class="settings-note" style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0;">
+<input type="checkbox" id="contacts-write-toggle">
+Allow writing back to Google Contacts (e.g. saving a birthday)
+</label>
+<div class="settings-note" id="contacts-write-note"></div>
+</div>
+
+<div class="settings-block">
+<h3>Photo sync</h3>
 <div class="settings-note" style="margin:0 0 8px;">
-One rule per field &mdash; a numeric threshold (Distance, Age) or a comma-separated list of values for each colour (everything else). A connection's dot shows the worst colour among every rule that matched. Seeded with a starting set based on values actually mentioned so far &mdash; edit or delete freely.
+Photos added before task attachments existed live only on the device that added them &mdash; their ids sync, but the images don't, so a connection imported on the desktop shows initials instead of a face on the phone. This uploads them to your own server (the same one as live sync and attachments) so they appear everywhere. Safe to re-run, and safe to stop partway.
 </div>
-<div id="flag-rules-list"></div>
+<div id="photosync-body"></div>
+<div class="sync-row" style="margin-top:8px;">
+<button class="sync-btn" id="photosync-refresh" type="button">Re-check</button>
 </div>
+</div>
+
+<div class="settings-block">
+<h3>Notion</h3>
+<div class="settings-note" style="margin:0 0 8px;">Notion blocks direct browser access, so calls go through <code>notion.php</code> on your own host — which also keeps your Notion token off this device entirely. See README, "Notion".</div>
+<label for="notion-url-input" style="font-size:13px;font-weight:500;display:block;margin-bottom:6px;">Proxy URL</label>
+<input type="text" autocomplete="off" id="notion-url-input" class="settings-input" placeholder="https://georgewhiteeuropean.co.uk/notion.php">
+<label for="notion-db-input" style="font-size:13px;font-weight:500;display:block;margin:10px 0 6px;">Projects database ID</label>
+<input type="text" autocomplete="off" id="notion-db-input" class="settings-input" placeholder="32 characters from the database URL">
+<div class="sync-row" style="margin-top:10px;">
+<button class="sync-btn" id="notion-test-btn" type="button">Test connection</button>
+</div>
+<div class="sync-result" id="notion-test-status"></div>
+<div class="settings-note">Uses the same secret as Live sync above.</div>
+</div>
+
+<div class="settings-block">
+<h3>Backup</h3>
+<div class="backup-row">
+<button class="log-btn" id="export-btn" type="button">Export backup</button>
+<label class="file-btn" for="import-backup-input">Import backup</label>
+<input type="file" id="import-backup-input" accept="application/json" style="display:none;">
+<span class="settings-note" id="backup-status" style="margin:0;"></span>
+</div>
+</div>
+</details>
+
+<details class="settings-group">
+<summary><span class="dot slate"></span>Privacy</summary>
 
 <div class="settings-block">
 <h3>My info</h3>
@@ -1881,37 +1943,17 @@ Compares every connection's phone/email/address/aliases against what you entered
 </div>
 
 <div class="settings-block">
-<h3>Menu — recipe rating categories</h3>
-<div class="settings-note" style="margin:0 0 8px;">
-Same idea as Connections' ratings, a separate list (Taste/Health/Prep by default). Removing one clears every rating already given under it, so it asks first.
+<h3>Private fields</h3>
+<label class="settings-note" style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0;">
+<input type="checkbox" id="sensitive-fields-toggle">
+Show the "Sex" field on connections and in Connections Overview
+</label>
+<div class="settings-note">Off by default. This only controls what's shown on this device — anything already recorded stays saved and still syncs; it just isn't displayed, grouped, or searchable while hidden.</div>
 </div>
-<div class="tag-editor" id="recipe-rating-categories-list"></div>
-</div>
+</details>
 
-<div class="settings-block">
-<h3>Photo sync</h3>
-<div class="settings-note" style="margin:0 0 8px;">
-Photos added before task attachments existed live only on the device that added them &mdash; their ids sync, but the images don't, so a connection imported on the desktop shows initials instead of a face on the phone. This uploads them to your own server (the same one as live sync and attachments) so they appear everywhere. Safe to re-run, and safe to stop partway.
-</div>
-<div id="photosync-body"></div>
-<div class="sync-row" style="margin-top:8px;">
-<button class="sync-btn" id="photosync-refresh" type="button">Re-check</button>
-</div>
-</div>
-
-<div class="settings-block">
-<h3>Health data (Health Connect)</h3>
-<div class="settings-note" style="margin:0 0 8px;">
-A browser page has no way to read Health Connect directly &mdash; it's a native Android API with no web equivalent. Instead, a bridge app on your phone (e.g. <strong>HC Webhook</strong> / "Health Connect Webhook" from Google Play) posts whatever data you grant it to <code>health.php</code> on this same server. This panel is a raw viewer for now, showing exactly what's arrived, rather than a finished chart &mdash; the actual display gets built once a real payload's shape is known.
-</div>
-<div class="settings-note" style="margin:0 0 8px;">
-<strong>Setup:</strong> copy <code>server/health.php.example</code> to <code>server/health.php</code>, set <code>$SECRET</code> to the <em>same</em> value as <code>sync.php</code>, upload next to it. In the bridge app, point its webhook target at that URL &mdash; append <code>?secret=&lt;your secret&gt;</code> to it if the app doesn't let you set a custom header.
-</div>
-<div id="health-sync-body"></div>
-<div class="sync-row" style="margin-top:8px;">
-<button class="sync-btn" id="health-sync-refresh" type="button">Check for data</button>
-</div>
-</div>
+<details class="settings-group">
+<summary><span class="dot amber"></span>AI &amp; data quality</summary>
 
 <div class="settings-block">
 <h3>AI features</h3>
@@ -1933,65 +1975,65 @@ Smart nudges — let Claude pick what's most urgent, important, and overdue, ins
 </div>
 
 <div class="settings-block">
+<h3>Health data (Health Connect)</h3>
+<div class="settings-note" style="margin:0 0 8px;">
+A browser page has no way to read Health Connect directly &mdash; it's a native Android API with no web equivalent. Instead, a bridge app on your phone (e.g. <strong>HC Webhook</strong> / "Health Connect Webhook" from Google Play) posts whatever data you grant it to <code>health.php</code> on this same server. This panel is a raw viewer for inspecting exactly what's arrived &mdash; see the Health tab for the parsed daily rollup.
+</div>
+<div class="settings-note" style="margin:0 0 8px;">
+<strong>Setup:</strong> copy <code>server/health.php.example</code> to <code>server/health.php</code>, set <code>$SECRET</code> to the <em>same</em> value as <code>sync.php</code>, upload next to it. In the bridge app, point its webhook target at that URL &mdash; append <code>?secret=&lt;your secret&gt;</code> to it if the app doesn't let you set a custom header.
+</div>
+<div id="health-sync-body"></div>
+<div class="sync-row" style="margin-top:8px;">
+<button class="sync-btn" id="health-sync-refresh" type="button">Check for data</button>
+</div>
+</div>
+
+<div class="settings-block">
 <h3>Tidy up tags</h3>
 <div class="settings-note" style="margin:0 0 10px;">Every tag value in use, with how many connections have it. Values differing only by capitalisation or spacing are flagged for one-click merging; anything else can be renamed or merged by hand. Changes apply across all connections.</div>
 <div id="tag-cleanup"></div>
 </div>
+</details>
+
+<details class="settings-group">
+<summary><span class="dot rose"></span>Customize categories &amp; limits</summary>
 
 <div class="settings-block">
-<h3>Google Contacts</h3>
-<div class="settings-note" style="margin:0 0 8px;">Matching reads your contacts. Writing back is a separate, much broader permission — it can change and clear fields in your real address book — so it's off unless you turn it on here.</div>
-<label class="settings-note" style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0;">
-<input type="checkbox" id="contacts-write-toggle">
-Allow writing back to Google Contacts (e.g. saving a birthday)
-</label>
-<div class="settings-note" id="contacts-write-note"></div>
+<h3>Connections — rating categories</h3>
+<div class="settings-note" style="margin:0 0 8px;">
+The detailed star ratings shown on every connection. Removing one clears every rating already given under it &mdash; there's no way back from that, so it asks first.
 </div>
-
-<div class="settings-block">
-<h3>Private fields</h3>
-<label class="settings-note" style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0;">
-<input type="checkbox" id="sensitive-fields-toggle">
-Show the "Sex" field on connections and in Connections Overview
-</label>
-<div class="settings-note">Off by default. This only controls what's shown on this device — anything already recorded stays saved and still syncs; it just isn't displayed, grouped, or searchable while hidden.</div>
+<div class="tag-editor" id="rating-categories-list"></div>
 </div>
 
 <div class="settings-block">
-<h3>Live sync (your own server)</h3>
-<div class="settings-note" style="margin:0 0 8px;">Saves changes to your own hosting automatically, a couple of seconds after you stop typing, and picks up changes from your other devices. No sign-in, so nothing expires. Leave both boxes empty to stay on manual Google Drive push/pull below.</div>
-<label for="sync-url-input" style="font-size:13px;font-weight:500;display:block;margin-bottom:6px;">Sync URL</label>
-<input type="text" autocomplete="off" id="sync-url-input" class="settings-input" placeholder="https://georgewhiteeuropean.co.uk/sync.php">
-<label for="sync-secret-input" style="font-size:13px;font-weight:500;display:block;margin:10px 0 6px;">Sync secret</label>
-<input type="password" autocomplete="new-password" id="sync-secret-input" class="settings-input" placeholder="the same string as $SECRET in sync.php">
-<div class="sync-row" style="margin-top:10px;">
-<button class="sync-btn" id="sync-test-btn" type="button">Test &amp; start syncing</button>
+<h3>Connections — red/amber/green flags</h3>
+<div class="settings-note" style="margin:0 0 8px;">
+One rule per field &mdash; a numeric threshold (Distance, Age) or a comma-separated list of values for each colour (everything else). A connection's dot shows the worst colour among every rule that matched. Seeded with a starting set based on values actually mentioned so far &mdash; edit or delete freely.
 </div>
-<div class="sync-result" id="sync-test-status"></div>
-<div class="settings-note">Stored only on this device, never exported in a backup and never committed to the repo. Enter the same pair on each device you use.</div>
+<div id="flag-rules-list"></div>
 </div>
 
 <div class="settings-block">
-<h3>Google account</h3>
-<div class="settings-note" style="margin:0 0 8px;">Sign in/out button lives in the header, since it's needed often.</div>
-<div class="settings-note" id="sync-account"></div>
-<div class="settings-note" id="sync-status"></div>
-<div class="backup-row">
-<button class="log-btn" id="sync-push-btn" type="button">Push to Google Drive</button>
-<button class="log-btn" id="sync-pull-btn" type="button">Pull from Google Drive</button>
+<h3>Menu — recipe rating categories</h3>
+<div class="settings-note" style="margin:0 0 8px;">
+Same idea as Connections' ratings, a separate list (Taste/Health/Prep by default). Removing one clears every rating already given under it, so it asks first.
 </div>
-<div class="settings-note" id="drive-sync-status"></div>
+<div class="tag-editor" id="recipe-rating-categories-list"></div>
 </div>
 
 <div class="settings-block">
-<h3>Backup</h3>
-<div class="backup-row">
-<button class="log-btn" id="export-btn" type="button">Export backup</button>
-<label class="file-btn" for="import-backup-input">Import backup</label>
-<input type="file" id="import-backup-input" accept="application/json" style="display:none;">
-<span class="settings-note" id="backup-status" style="margin:0;"></span>
+<h3>Calendar limits</h3>
+<div id="calendar-limits"></div>
+<div class="pref-grid" style="margin-top:10px;">
+<label>Default max events, when a calendar's is blank<input type="number" min="1" max="50" id="pref-cal-count"></label>
+<label>Default max results, when a mail search's is blank<input type="number" min="1" max="50" id="pref-mail-count"></label>
 </div>
 </div>
+</details>
+
+<details class="settings-group">
+<summary><span class="dot sage"></span>Quick add</summary>
 
 <div class="settings-block">
 <h3>Track a new habit</h3>
@@ -2025,33 +2067,10 @@ Show the "Sex" field on connections and in Connections Overview
 </div>
 
 <div class="settings-block">
-<h3>Notion</h3>
-<div class="settings-note" style="margin:0 0 8px;">Notion blocks direct browser access, so calls go through <code>notion.php</code> on your own host — which also keeps your Notion token off this device entirely. See README, "Notion".</div>
-<label for="notion-url-input" style="font-size:13px;font-weight:500;display:block;margin-bottom:6px;">Proxy URL</label>
-<input type="text" autocomplete="off" id="notion-url-input" class="settings-input" placeholder="https://georgewhiteeuropean.co.uk/notion.php">
-<label for="notion-db-input" style="font-size:13px;font-weight:500;display:block;margin:10px 0 6px;">Projects database ID</label>
-<input type="text" autocomplete="off" id="notion-db-input" class="settings-input" placeholder="32 characters from the database URL">
-<div class="sync-row" style="margin-top:10px;">
-<button class="sync-btn" id="notion-test-btn" type="button">Test connection</button>
-</div>
-<div class="sync-result" id="notion-test-status"></div>
-<div class="settings-note">Uses the same secret as Live sync above.</div>
-</div>
-
-<div class="settings-block">
 <h3>Mail searches</h3>
 <div class="settings-note" style="margin:0 0 10px;">Each row becomes its own section in the Mail panel, with its own limits. Synced, so these follow you to your other devices.</div>
 <div id="mail-searches"></div>
 <button class="add-btn" id="add-mail-search-btn" type="button" style="margin-top:8px;">Add search</button>
-</div>
-
-<div class="settings-block">
-<h3>Calendar limits</h3>
-<div id="calendar-limits"></div>
-<div class="pref-grid" style="margin-top:10px;">
-<label>Default max events, when a calendar's is blank<input type="number" min="1" max="50" id="pref-cal-count"></label>
-<label>Default max results, when a mail search's is blank<input type="number" min="1" max="50" id="pref-mail-count"></label>
-</div>
 </div>
 
 <div class="settings-block">
@@ -2064,6 +2083,7 @@ Show the "Sex" field on connections and in Connections Overview
 <button class="add-btn" type="button" style="align-self:flex-start;">Add idea</button>
 </div>
 </div>
+</details>
 </section>
 </div>
 
