@@ -19,6 +19,24 @@ function captureItemKind(file) {
 return (file.type || '').startsWith('image/') ? 'photo' : 'attachment';
 }
 
+// A batch shared at once (a night's swiping, say) often holds more than
+// one person's photos -- 5 of one, 4 of another, a full profile screenshot
+// plus a few loose photos for a third. Sending is per-selection, not
+// per-batch: check whichever photos belong together (a profile screenshot
+// counts as a photo here too -- applyDirectProfileUpload classifies each
+// file itself, so selecting a screenshot alongside its photos and sending
+// them together still gets the screenshot AI-parsed and the photos
+// direct-saved, same as if they'd been picked from one connection's own
+// upload button). Keyed by batch id, cleared once that batch is gone or a
+// send clears it back to empty -- never persisted, this is just in-page
+// triage state.
+const selectedItems = new Map(); // batchId -> Set<itemId>
+
+function selectionFor(batchId) {
+if (!selectedItems.has(batchId)) selectedItems.set(batchId, new Set());
+return selectedItems.get(batchId);
+}
+
 // The one place a batch of raw files becomes an inbox entry. Saves after
 // each item lands (not once at the end) so an interrupted multi-file
 // capture keeps whatever already succeeded -- same reasoning tasks.js's
@@ -64,19 +82,26 @@ function batchCardHtml(b) {
 const photoItems = b.items.filter((it) => it.kind === 'photo');
 const fileItems = b.items.filter((it) => it.kind !== 'photo');
 const sourceLabel = b.source?.kind === 'share' ? (b.source.label || 'Shared from another app') : 'Picked in-app';
+const selected = selectionFor(b.id);
+const selectedCount = photoItems.filter((it) => selected.has(it.id)).length;
 return `<div class="alloc-card" data-inbox-batch="${b.id}">
 <div class="alloc-title">${escapeHtml(b.label || 'Captured batch')}</div>
 ${b.notes ? `<div class="alloc-notes">${escapeHtml(b.notes)}</div>` : ''}
-<div class="task-source">from ${escapeHtml(sourceLabel)} · ${photoItems.length} photo${photoItems.length === 1 ? '' : 's'}${fileItems.length ? `, ${fileItems.length} file${fileItems.length === 1 ? '' : 's'}` : ''}</div>
-${photoItems.length ? `<div class="task-photos">${photoItems.map((it) => `<div class="gallery-thumb"><span class="thumb-img" data-photo-bg="${escapeHtml(it.id)}"></span></div>`).join('')}</div>` : ''}
+<div class="task-source">from ${escapeHtml(sourceLabel)} · ${photoItems.length} photo${photoItems.length === 1 ? '' : 's'}${fileItems.length ? `, ${fileItems.length} file${fileItems.length === 1 ? '' : 's'}` : ''}${photoItems.length > 1 ? ' — tick who belongs together, e.g. a profile screenshot plus that person\'s loose photos, then send that group' : ''}</div>
+${photoItems.length ? `<div class="task-photos">${photoItems.map((it) => `<label class="gallery-thumb${selected.has(it.id) ? ' selected' : ''}" title="Tap to select">
+<input type="checkbox" class="gallery-thumb-check" data-inbox-item-check="${b.id}" data-item-id="${escapeHtml(it.id)}" ${selected.has(it.id) ? 'checked' : ''}>
+<span class="thumb-img" data-photo-bg="${escapeHtml(it.id)}"></span>
+</label>`).join('')}</div>` : ''}
 ${fileItems.map((it) => `<div class="attach-row">
 <button class="attach-name" type="button" data-inbox-item-open="${b.id}" data-inbox-item-id="${escapeHtml(it.id)}" title="Download ${escapeHtml(it.name || 'file')}">${escapeHtml(it.name || 'file')}</button>
 <span class="attach-size">${escapeHtml(formatBytes(it.size))}</span>
 </div>`).join('')}
 <div class="alloc-controls">
-<button class="todo-add-btn" type="button" data-inbox-attach-task="${b.id}">Attach to a Task</button>
-${photoItems.length ? `<select data-inbox-dating-select="${b.id}"><option value="">Send photos to&hellip;</option></select>
+${photoItems.length ? `<span class="settings-note" data-inbox-selected-count="${b.id}">${selectedCount} of ${photoItems.length} selected</span>
+${photoItems.length > 1 ? `<button class="todo-add-btn" type="button" data-inbox-select-all="${b.id}">${selectedCount === photoItems.length ? 'Select none' : 'Select all'}</button>` : ''}
+<select data-inbox-dating-select="${b.id}"><option value="">Send selected to&hellip;</option></select>
 <button class="todo-add-btn" type="button" data-inbox-send-dating="${b.id}">Send</button>` : ''}
+<button class="todo-add-btn" type="button" data-inbox-attach-task="${b.id}">Attach ${photoItems.length ? 'everything left ' : ''}to a Task</button>
 <button class="del-x" type="button" data-inbox-discard="${b.id}">Discard</button>
 </div>
 <span class="sync-status" data-inbox-status="${b.id}"></span>
@@ -100,7 +125,7 @@ if (data.captureInbox.some((b) => b.items.some((it) => it.kind === 'photo'))) {
 import('./connections.js').then(({ connectionOptionsHtml }) => {
 el.querySelectorAll('[data-inbox-dating-select]').forEach((sel) => {
 const previous = sel.value;
-sel.innerHTML = '<option value="">Send photos to&hellip;</option>' + connectionOptionsHtml();
+sel.innerHTML = '<option value="">Send selected to&hellip;</option>' + connectionOptionsHtml();
 if ([...sel.options].some((o) => o.value === previous)) sel.value = previous;
 });
 });
@@ -126,9 +151,40 @@ const { captureTask, renderTasks } = await import('./tasks.js');
 const task = captureTask({ title: batch.label, notes: batch.notes, source: batch.source });
 task.attachments.push(...batch.items.map(({ id, name, type, size }) => ({ id, name, type, size })));
 data.captureInbox = data.captureInbox.filter((b) => b.id !== batch.id);
+selectedItems.delete(batch.id);
 renderTasks();
 renderCaptureInbox();
 queueSave();
+});
+});
+
+// A checkbox toggle only updates the selection Set and the visible count
+// -- not a full renderCaptureInbox(), which would re-hydrate every
+// thumbnail in the batch for one click.
+root.querySelectorAll('[data-inbox-item-check]').forEach((cb) => {
+cb.addEventListener('change', () => {
+const batchId = cb.dataset.inboxItemCheck;
+const itemId = cb.dataset.itemId;
+const sel = selectionFor(batchId);
+if (cb.checked) sel.add(itemId); else sel.delete(itemId);
+cb.closest('.gallery-thumb')?.classList.toggle('selected', cb.checked);
+const batch = data.captureInbox.find((b) => b.id === batchId);
+const photoCount = batch ? batch.items.filter((it) => it.kind === 'photo').length : 0;
+const countEl = root.querySelector(`[data-inbox-selected-count="${batchId}"]`);
+if (countEl) countEl.textContent = `${sel.size} of ${photoCount} selected`;
+const allBtn = root.querySelector(`[data-inbox-select-all="${batchId}"]`);
+if (allBtn) allBtn.textContent = sel.size === photoCount ? 'Select none' : 'Select all';
+});
+});
+
+root.querySelectorAll('[data-inbox-select-all]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const batch = data.captureInbox.find((b) => b.id === btn.dataset.inboxSelectAll);
+if (!batch) return;
+const photoIds = batch.items.filter((it) => it.kind === 'photo').map((it) => it.id);
+const sel = selectionFor(batch.id);
+if (sel.size === photoIds.length) sel.clear(); else photoIds.forEach((id) => sel.add(id));
+renderCaptureInbox();
 });
 });
 
@@ -140,19 +196,22 @@ const status = root.querySelector(`[data-inbox-status="${batch.id}"]`);
 const sel = root.querySelector(`[data-inbox-dating-select="${batch.id}"]`);
 const connId = sel?.value;
 if (!connId) { if (status) status.textContent = 'Pick a connection first.'; return; }
-const photoItems = batch.items.filter((it) => it.kind === 'photo');
-if (status) status.textContent = `Reading ${photoItems.length} photo${photoItems.length === 1 ? '' : 's'}…`;
+const selectedIds = selectionFor(batch.id);
+const chosen = batch.items.filter((it) => it.kind === 'photo' && selectedIds.has(it.id));
+if (!chosen.length) { if (status) status.textContent = 'Tick at least one photo first.'; return; }
+if (status) status.textContent = `Reading ${chosen.length} photo${chosen.length === 1 ? '' : 's'}…`;
 try {
-const files = await Promise.all(photoItems.map(async (it) => {
+const files = await Promise.all(chosen.map(async (it) => {
 const blob = await fetchAttachment(it.id);
 return new File([blob], it.name || 'photo', { type: it.type || blob.type });
 }));
 const { applyDirectProfileUpload } = await import('./connections.js');
 await applyDirectProfileUpload(files, connId, { onStatus: (msg) => { if (status) status.textContent = msg; } });
-// Only the photo items were sent -- a CSV or other file left in the
-// same batch stays behind for separate triage.
-for (const it of photoItems) await deleteItemBytes(it);
-batch.items = batch.items.filter((it) => it.kind !== 'photo');
+// Only the ticked items were sent -- anything left unticked (someone
+// else's photos, a CSV, etc.) stays behind for separate triage.
+for (const it of chosen) { await deleteItemBytes(it); selectedIds.delete(it.id); }
+const chosenIds = new Set(chosen.map((it) => it.id));
+batch.items = batch.items.filter((it) => !chosenIds.has(it.id));
 removeBatchIfEmpty(batch);
 renderCaptureInbox();
 queueSave();
@@ -170,6 +229,7 @@ if (!batch) return;
 if (!confirm(`Discard "${batch.label || 'this batch'}"? This deletes ${batch.items.length} file${batch.items.length === 1 ? '' : 's'} for good.`)) return;
 for (const it of batch.items) await deleteItemBytes(it);
 data.captureInbox = data.captureInbox.filter((b) => b.id !== batch.id);
+selectedItems.delete(batch.id);
 renderCaptureInbox();
 queueSave();
 });

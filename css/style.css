@@ -1096,6 +1096,10 @@ cursor:pointer;
 /* Photo gallery */
 .photo-gallery{display:flex;gap:6px;flex-wrap:wrap;align-items:center;}
 .gallery-thumb{position:relative;width:60px;height:60px;border-radius:8px;overflow:hidden;cursor:pointer;}
+/* Capture Inbox's per-photo picker: the whole thumb is a <label> around a
+   checkbox, so tapping the image toggles it -- no separate hit target. */
+.gallery-thumb-check{position:absolute;top:4px;left:4px;z-index:1;width:16px;height:16px;margin:0;accent-color:var(--rose);}
+.gallery-thumb.selected{outline:2px solid var(--rose);outline-offset:-2px;}
 .gallery-thumb img{width:100%;height:100%;object-fit:cover;-webkit-user-drag:none;user-select:none;}
 /* Rendered as a background-image (hydratePhotoBackgrounds), not a real
    <img> -- see the comment on that function in utils.js. Scoped to the
