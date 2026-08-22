@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v114</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v115</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -1841,6 +1841,16 @@ Mostly still a planning space &mdash; a place to keep thinking about what this s
 <th>Date</th><th>Weight</th><th>BMI</th><th>Body fat</th><th>Muscle mass</th><th>Visceral fat</th><th>Metabolic age</th>
 </tr></thead>
 <tbody id="renpho-daily-body"></tbody>
+</table>
+</div>
+<h3 style="margin:22px 0 6px;">Wellness (Samsung Health)</h3>
+<div class="settings-note" style="margin:0 0 10px;">HRV, AGEs index, and Antioxidant index &mdash; read from a screenshot via AI vision, not deterministic like the sources above, so double-check a new row against the source screenshot before trusting it. Select the screenshot in Capture Inbox and use &quot;Extract wellness data&quot;.</div>
+<div style="overflow-x:auto;">
+<table class="health-table">
+<thead><tr>
+<th>Date</th><th>HRV</th><th>Antioxidant</th><th>AGEs</th>
+</tr></thead>
+<tbody id="wellness-daily-body"></tbody>
 </table>
 </div>
 </section>

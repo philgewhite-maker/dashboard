@@ -411,6 +411,9 @@ if (!Array.isArray(data.healthDaily)) data.healthDaily = [];
 // (not rebuilt) across however many CSV exports get shared over time --
 // see renpho.js's mergeRenphoDaily() for why a re-share is safe to repeat.
 if (!Array.isArray(data.renphoDaily)) data.renphoDaily = [];
+// One row per local calendar day of AI-vision-extracted Samsung Health
+// readings (HRV, AGEs index, Antioxidant index) -- see wellness.js.
+if (!Array.isArray(data.wellnessDaily)) data.wellnessDaily = [];
 // Seed the mail search rows from the old fixed shape the first time only.
 // Keyed on the array's absence rather than its emptiness, so deleting every
 // row stays deleted instead of being helpfully repopulated next reload.

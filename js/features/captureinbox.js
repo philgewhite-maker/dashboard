@@ -134,7 +134,8 @@ ${fileItems.map((it) => `<div class="attach-row">
 ${photoItems.length ? `<span class="settings-note" data-inbox-selected-count="${b.id}">${selectedCount} of ${photoItems.length} selected</span>
 ${photoItems.length > 1 ? `<button class="todo-add-btn" type="button" data-inbox-select-all="${b.id}">${selectedCount === photoItems.length ? 'Select none' : 'Select all'}</button>` : ''}
 <select data-inbox-dating-select="${b.id}"><option value="">Send selected to&hellip;</option></select>
-<button class="todo-add-btn" type="button" data-inbox-send-dating="${b.id}">Send</button>` : ''}
+<button class="todo-add-btn" type="button" data-inbox-send-dating="${b.id}">Send</button>
+<button class="todo-add-btn" type="button" data-inbox-extract-wellness="${b.id}" title="For an HRV, AGEs index, or Antioxidant index screenshot from Samsung Health">Extract wellness data</button>` : ''}
 <button class="todo-add-btn" type="button" data-inbox-attach-task="${b.id}">Attach ${photoItems.length ? 'everything left ' : ''}to a Task</button>
 <button class="del-x" type="button" data-inbox-discard="${b.id}">Discard</button>
 </div>
@@ -273,6 +274,49 @@ batch.items = batch.items.filter((it) => it.id !== item.id);
 selectionFor(batch.id).delete(item.id);
 removeBatchIfEmpty(batch);
 renderCaptureInbox();
+queueSave();
+});
+});
+
+// Unlike Send-to-Dating, this reads straight from the local photo blob --
+// no server round-trip needed for a vision call. A vision read is a guess,
+// not a certainty (unlike the Renpho CSV's deterministic parse), so this
+// stays a manual per-selection action rather than something that fires the
+// moment a matching image lands in the batch.
+root.querySelectorAll('[data-inbox-extract-wellness]').forEach((btn) => {
+btn.addEventListener('click', async () => {
+const batch = data.captureInbox.find((b) => b.id === btn.dataset.inboxExtractWellness);
+if (!batch) return;
+const status = root.querySelector(`[data-inbox-status="${batch.id}"]`);
+const selectedIds = selectionFor(batch.id);
+const chosen = batch.items.filter((it) => it.kind === 'photo' && selectedIds.has(it.id));
+if (!chosen.length) { if (status) status.textContent = 'Tick at least one photo first.'; return; }
+const { extractAndMergeWellnessFile } = await import('./wellness.js');
+const done = [];
+const messages = [];
+for (const it of chosen) {
+if (status) status.textContent = `Reading ${it.name || 'photo'}…`;
+try {
+const blob = await fetchAttachment(it.id);
+const file = new File([blob], it.name || 'photo', { type: it.type || blob.type });
+const { ok, message } = await extractAndMergeWellnessFile(file);
+messages.push(message);
+if (ok) done.push(it);
+} catch (err) {
+console.error('Wellness extraction failed:', err);
+messages.push(err?.name === 'MissingKeyError' ? 'Add an Anthropic API key in Settings to extract wellness data.' : `${it.name || 'that image'}: ${err.message || err}`);
+}
+}
+for (const it of done) { await deleteItemBytes(it); selectedIds.delete(it.id); }
+const doneIds = new Set(done.map((it) => it.id));
+batch.items = batch.items.filter((it) => !doneIds.has(it.id));
+removeBatchIfEmpty(batch);
+if (status) status.textContent = messages.join(' ');
+renderCaptureInbox();
+if (done.length) {
+const { renderWellnessDaily } = await import('./wellness.js');
+renderWellnessDaily();
+}
 queueSave();
 });
 });

@@ -686,6 +686,69 @@ translation: String((data && data.translation) || '').trim(),
 };
 }
 
+// ---- Wellness screenshot (Samsung Health) ----
+//
+// Reads one of three Samsung Health 7-day charts (Antioxidant index, AGEs
+// index, Sleeping HRV) confirmed against real screenshots: each shows a
+// row of day-of-month numbers under the chart, sometimes with an explicit
+// "16–22 Aug"-style header and sometimes without (e.g. the HRV chart is
+// often seen mid-scroll on a longer page, header cropped out). Structured
+// extraction, same tier as profile parsing -- Sonnet 5, not the user's
+// chosen vision model, for the same reasoning profilePrompt's own comment
+// gives (nuanced reading, not deep reasoning).
+const WELLNESS_MODEL = 'claude-sonnet-5';
+const WELLNESS_MAX_TOKENS = 800;
+
+function wellnessPrompt(todayIso) {
+return `This is a screenshot from the Samsung Health app (measurements taken via a Galaxy Watch). It shows ONE of these three 7-day charts: Antioxidant index, AGEs (Advanced Glycation End-products) index, or Sleeping heart rate variability (HRV). Today's date is ${todayIso}.
+
+Work out the actual calendar date for each day-of-month number on the x-axis. If a date-range header is visible (e.g. "16–22 Aug"), use its month directly. If only bare day-of-month numbers are visible with no month shown, assume the LAST (rightmost/highest) day number falls within the same calendar month as today (${todayIso}) unless that day number is greater than today's day-of-month, in which case it falls in the previous calendar month -- then count backwards from there for the earlier days (a run of consecutive day-of-month numbers on one chart never crosses more than one month boundary).
+
+Identify which metric this is, then extract:
+- For EACH day that has an explicit number printed directly on or next to its data point (not just an unlabelled dot), that day's resolved ISO date (YYYY-MM-DD) and its printed value. Skip a day entirely if no number is printed at its point -- never estimate a value from pixel position alone.
+- The period average, min, and max if shown as text (e.g. "Average 46", "Min 43", "Max 50", or "410 (Daily average)").
+- The headline grade/category text if shown (e.g. "Good", "Adequate", "Low", "Very low", "High", "Very high") for the period or the most recent reading.
+- The unit if shown (e.g. "ms" for HRV).
+
+Reply with ONLY a JSON object, no other text, no markdown fences:
+{"metric":"hrv"|"antioxidant"|"ages"|"unrecognized","periodLabel":"16–22 Aug"|null,"asOfDate":"2026-08-22","days":[{"date":"2026-08-22","value":38}],"average":46|null,"min":43|null,"max":50|null,"headlineGrade":"Good"|null,"unit":"ms"|null}
+- "asOfDate": the resolved date of the LAST (rightmost/most recent) day the chart covers -- always include this even when "days" is empty, since it's what the period average/min/max/grade describe.
+- "days": ONLY entries with a real printed number -- can be empty if the chart only shows dot positions with no per-day labels (e.g. an AGEs chart that only states a period average).
+- If "metric" is "unrecognized", every other field should be null/empty -- don't guess at a chart type you're not confident about.`;
+}
+
+async function extractWellnessScreenshot(file) {
+file = await ensureBrowserReadableImage(file);
+const hash = await hashFile(file);
+const cached = await parseCacheGet(hash, 'wellness');
+if (cached) return { ...cached.result, fromCache: true };
+
+const base64 = await fileToBase64(file);
+const mediaType = normalizeImageMediaType(file.type || 'image/png');
+const todayIso = new Date().toISOString().slice(0, 10);
+const { data: raw } = await callAnthropic(
+[
+{ type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
+{ type: 'text', text: wellnessPrompt(todayIso) },
+],
+WELLNESS_MAX_TOKENS, WELLNESS_MODEL, 'Wellness screenshot',
+);
+const isIsoDate = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
+const result = {
+metric: ['hrv', 'antioxidant', 'ages'].includes(raw.metric) ? raw.metric : 'unrecognized',
+periodLabel: raw.periodLabel || null,
+asOfDate: isIsoDate(raw.asOfDate) ? raw.asOfDate : null,
+days: Array.isArray(raw.days) ? raw.days.filter((d) => isIsoDate(d.date) && typeof d.value === 'number') : [],
+average: typeof raw.average === 'number' ? raw.average : null,
+min: typeof raw.min === 'number' ? raw.min : null,
+max: typeof raw.max === 'number' ? raw.max : null,
+headlineGrade: raw.headlineGrade || null,
+unit: raw.unit || null,
+};
+await parseCachePut(hash, 'wellness', { result });
+return { ...result, fromCache: false };
+}
+
 // ---- Country lookup ----
 //
 // For a city, school or university name — often not in English, and
@@ -710,5 +773,5 @@ export {
 MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot, quickScanScreenshot,
 callTextJson, DEFAULT_MODEL, summarizeUsage, currentMonthKey, compareFaces,
 extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShoppingItem, translateText,
-identifyCountry,
+identifyCountry, extractWellnessScreenshot,
 };
