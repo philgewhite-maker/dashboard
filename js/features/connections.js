@@ -183,6 +183,7 @@ return '<option value="">Country code…</option>' + DIAL_CODES
 }
 
 let connectionSearchTerm = '';
+let searchDebounceTimer = null;
 let connectionSortPrimary = 'default';
 let connectionSortSecondary = 'none';
 // Set by the "None" chips in Connections Overview: {field, label}. Kept
@@ -835,17 +836,35 @@ chatLogTelegram: SOURCE_ICONS.Telegram,
 // so a chat spanning more than one platform can still show which is which
 // per line -- interleaving three platforms' worth of messages with no way
 // to tell them apart was the actual complaint, not the merge itself.
+//
+// Cached per connection: a full split-tag-and-sort of every line across all
+// three chat fields is real work for an active conversation (thousands of
+// lines is normal for a months-long WhatsApp history), and every keystroke
+// in search re-renders every visible card regardless of whether that
+// connection's own chat changed. Keyed by connection id, invalidated by a
+// cheap signature (each field's length) rather than re-diffing content --
+// a same-length edit slipping through uncached is an acceptable edge case
+// for a performance cache, not a correctness-critical one.
+const mergedChatLinesCache = new Map(); // id -> { sig, lines }
+function chatSignature(c) {
+return `${(c.chatLog || '').length}|${(c.chatLogWhatsApp || '').length}|${(c.chatLogTelegram || '').length}`;
+}
 function mergedChatLines(c) {
+const sig = chatSignature(c);
+const cached = mergedChatLinesCache.get(c.id);
+if (cached && cached.sig === sig) return cached.lines;
 const tagged = [
 ...String(c.chatLog || '').split('\n').filter(Boolean).map((text) => ({ source: 'chatLog', text })),
 ...String(c.chatLogWhatsApp || '').split('\n').filter(Boolean).map((text) => ({ source: 'chatLogWhatsApp', text })),
 ...String(c.chatLogTelegram || '').split('\n').filter(Boolean).map((text) => ({ source: 'chatLogTelegram', text })),
 ];
-return tagged.sort((a, b) => {
+const lines = tagged.sort((a, b) => {
 const da = (a.text.match(/^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\]/) || [])[1] || '';
 const db = (b.text.match(/^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\]/) || [])[1] || '';
 return da < db ? -1 : da > db ? 1 : 0;
 });
+mergedChatLinesCache.set(c.id, { sig, lines });
+return lines;
 }
 
 // cityMap is passed in rather than recomputed here -- it's built from
@@ -1676,7 +1695,12 @@ connectionSearchTerm = e.target.value;
 // Typing a search is an implicit "forget the None filter" — leaving both
 // active would show a filtered subset with no indication why.
 emptyFieldFilter = null;
-renderConnections();
+// Debounced: a full render (every visible card's chat/tags/highlighting
+// rebuilt) is real work even after the per-line matcher fix below, so
+// firing it on every single keystroke rather than once you pause typing
+// is wasted work piling up behind whatever's currently mid-render.
+clearTimeout(searchDebounceTimer);
+searchDebounceTimer = setTimeout(renderConnections, 150);
 });
 document.getElementById('conn-sort-primary').addEventListener('change', (e) => {
 connectionSortPrimary = e.target.value;

@@ -95,8 +95,33 @@ return map;
 // over country/nationality wins over flag-rule on a same-value collision,
 // matching the priority order that already existed before country names
 // were added here.
-function highlightFlagValues(text, rules, cityMap) {
-const str = String(text || '');
+// The country/nationality lookup derived from COUNTRY_NAME_TO_NATIONALITY
+// is pure static data -- rebuilding it from that constant on every call was
+// pointless work repeated identically forever. Lazily built once (not at
+// module load, since COUNTRY_NAME_TO_NATIONALITY is declared further down
+// this file) and cached from then on.
+let countryMatchDataCache = null;
+function countryMatchData() {
+if (countryMatchDataCache) return countryMatchDataCache;
+const countryMap = new Map(Object.entries(COUNTRY_NAME_TO_NATIONALITY).map(([name, nat]) => [name.toLowerCase(), { name, nat }]));
+[...new Set(Object.values(COUNTRY_NAME_TO_NATIONALITY))].forEach((adj) => {
+const key = adj.toLowerCase();
+if (!countryMap.has(key)) countryMap.set(key, { name: adj, nat: adj });
+});
+countryMatchDataCache = { countryMap, countryNames: [...countryMap.values()].map((v) => v.name) };
+return countryMatchDataCache;
+}
+
+// The expensive part of highlightFlagValues() split out on its own: builds
+// the color map, city set, and compiled regex ONCE for a given (rules,
+// cityMap) pair, so a caller scanning many pieces of text against the same
+// rules/cities (chatTranscriptHtml, one chat line at a time) can build this
+// a single time and reuse it, instead of paying this cost per line. A chat
+// history with a few thousand lines was confirmed live to turn "search box
+// re-renders a card" into a multi-second stall for exactly this reason --
+// the color map, city set, and a length-sorted, freshly-compiled RegExp
+// were being rebuilt from scratch per line, not once per render.
+function buildFlagMatcher(rules, cityMap) {
 const map = new Map();
 (rules || []).forEach((rule) => {
 ['green', 'amber', 'red'].forEach((color) => {
@@ -108,19 +133,24 @@ if (key && !map.has(key)) map.set(key, { label: v, color });
 });
 const cities = cityMap ? [...cityMap.values()] : [];
 const cityLower = new Set(cities.map((c) => c.toLowerCase()));
-const countryMap = new Map(Object.entries(COUNTRY_NAME_TO_NATIONALITY).map(([name, nat]) => [name.toLowerCase(), { name, nat }]));
-[...new Set(Object.values(COUNTRY_NAME_TO_NATIONALITY))].forEach((adj) => {
-const key = adj.toLowerCase();
-if (!countryMap.has(key)) countryMap.set(key, { name: adj, nat: adj });
-});
-const countryNames = [...countryMap.values()].map((v) => v.name);
+const { countryMap, countryNames } = countryMatchData();
 const values = [...cities, ...countryNames, ...[...map.values()].map((v) => v.label)].sort((a, b) => b.length - a.length);
-if (!values.length) return escapeHtml(str);
-const re = new RegExp(values.map((v) => `(?<!non-)(?<!non )\\b${escapeRegex(v)}\\b`).join('|'), 'gi');
+if (!values.length) return null;
+const regex = new RegExp(values.map((v) => `(?<!non-)(?<!non )\\b${escapeRegex(v)}\\b`).join('|'), 'gi');
+return { regex, cityLower, countryMap, map };
+}
+
+// Applies a matcher built by buildFlagMatcher() above to one piece of text.
+// A null matcher (nothing to match against) just escapes the text.
+function applyFlagMatcher(text, matcher) {
+const str = String(text || '');
+if (!matcher) return escapeHtml(str);
+const { regex, cityLower, countryMap, map } = matcher;
+regex.lastIndex = 0; // matcher is reused across calls -- a shared RegExp keeps state between exec() calls otherwise
 let out = '';
 let last = 0;
 let m;
-while ((m = re.exec(str))) {
+while ((m = regex.exec(str))) {
 out += escapeHtml(str.slice(last, m.index));
 const hit = m[0];
 const hitLower = hit.toLowerCase();
@@ -137,6 +167,15 @@ last = m.index + hit.length;
 }
 out += escapeHtml(str.slice(last));
 return out;
+}
+
+// Convenience wrapper for every single-call site (Notes, the bulk-import
+// mention scanner) -- builds a matcher and applies it in one call, exactly
+// the previous behavior. chatTranscriptHtml() below is the one caller that
+// bypasses this and calls buildFlagMatcher()/applyFlagMatcher() directly,
+// since it needs the matcher built once and reused across many lines.
+function highlightFlagValues(text, rules, cityMap) {
+return applyFlagMatcher(text, buildFlagMatcher(rules, cityMap));
 }
 
 // Moved here from tinderimport.js's own highlightCities() so WhatsApp and
@@ -262,6 +301,10 @@ return new Date(`${iso}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short
 // what read as "weird" before this.
 function chatTranscriptHtml(lines, rules, cityMap, sourceIcons) {
 const arr = Array.isArray(lines) ? lines : String(lines || '').split('\n').filter(Boolean).map((text) => ({ text }));
+// Built once for the whole transcript, not once per line -- see
+// buildFlagMatcher()'s own comment on why that used to turn a long chat
+// history into a multi-second render.
+const matcher = (rules || cityMap) ? buildFlagMatcher(rules, cityMap) : null;
 let lastDate = '';
 return arr.map(({ text: line, source }) => {
 // The date prefix is optional -- older chatLog text saved before the
@@ -278,7 +321,7 @@ if (date && date !== lastDate) {
 dayHtml = `<div class="tinder-chat-day">${escapeHtml(formatChatDay(date))}</div>`;
 lastDate = date;
 }
-const body = rules || cityMap ? highlightFlagValues(message, rules, cityMap) : escapeHtml(message);
+const body = matcher ? applyFlagMatcher(message, matcher) : escapeHtml(message);
 const info = sourceIcons && source ? sourceIcons[source] : null;
 const srcIcon = info ? `<span class="tinder-chat-src" title="${escapeHtml(info.label)}">${info.icon}</span> ` : '';
 return dayHtml + `<div class="tinder-chat-line">${srcIcon}<span class="tinder-chat-time">[${escapeHtml(time)}]</span> <span class="${senderClass}">${escapeHtml(senderName)}</span>: ${body}</div>`;
