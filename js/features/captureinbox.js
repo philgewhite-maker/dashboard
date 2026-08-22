@@ -17,20 +17,19 @@ import { todayStr, escapeHtml, hydratePhotoBackgrounds, resizeImageToBlob } from
 import { storePhoto, uploadAttachment, deleteAttachment, fetchAttachment, openAttachment, formatBytes } from '../files.js';
 import { looksLikeRenphoCsv, parseRenphoCsv, mergeRenphoDaily, looksLikeHrvCsv } from './renpho.js';
 
-// Only worth sniffing content for file types that could plausibly be a
-// recognised data export -- no point reading the first bytes of a photo or
-// a PDF, and it keeps this off the hot path for the common case (photos).
-const SNIFFABLE_RE = /\.(csv|txt)$/i;
-
+// Sniffs by content, not by filename/MIME type -- confirmed necessary live:
+// a real Renpho export shared from Android's share sheet didn't match a
+// filename+MIME gate that worked fine for a file fetched directly in
+// testing (Android is inconsistent about what MIME type a share carries,
+// and won't always keep the original filename either). Only skipped for
+// images, since that's the one case common enough to be worth the shortcut.
 async function captureItemKind(file) {
 if ((file.type || '').startsWith('image/')) return 'photo';
-if (SNIFFABLE_RE.test(file.name || '') || file.type === 'text/csv') {
 try {
 const head = await file.slice(0, 300).text();
 if (looksLikeRenphoCsv(head)) return 'renpho-csv';
 if (looksLikeHrvCsv(head)) return 'hrv-csv'; // never true yet -- see renpho.js
 } catch (err) { /* unreadable as text -- fall through to a plain attachment */ }
-}
 return 'attachment';
 }
 
@@ -47,8 +46,17 @@ return 'attachment';
 // triage state.
 const selectedItems = new Map(); // batchId -> Set<itemId>
 
-function selectionFor(batchId) {
-if (!selectedItems.has(batchId)) selectedItems.set(batchId, new Set());
+// photoItems is only needed the FIRST time a batch's selection is touched --
+// every later call (checkbox toggles, select-all, discard) just wants the
+// already-initialized Set, so it's optional and ignored once one exists.
+function selectionFor(batchId, photoItems) {
+if (!selectedItems.has(batchId)) {
+const initial = new Set();
+// A single photo needs no "which ones belong together" judgement call --
+// default it selected so Send/Extract work with zero taps.
+if (photoItems && photoItems.length === 1) initial.add(photoItems[0].id);
+selectedItems.set(batchId, initial);
+}
 return selectedItems.get(batchId);
 }
 
@@ -114,7 +122,7 @@ function batchCardHtml(b) {
 const photoItems = b.items.filter((it) => it.kind === 'photo');
 const fileItems = b.items.filter((it) => it.kind !== 'photo');
 const sourceLabel = b.source?.kind === 'share' ? (b.source.label || 'Shared from another app') : 'Picked in-app';
-const selected = selectionFor(b.id);
+const selected = selectionFor(b.id, photoItems);
 const selectedCount = photoItems.filter((it) => selected.has(it.id)).length;
 return `<div class="alloc-card" data-inbox-batch="${b.id}">
 <div class="alloc-title">${escapeHtml(b.label || 'Captured batch')}</div>

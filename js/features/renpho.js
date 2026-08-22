@@ -23,8 +23,12 @@ import { data } from '../state.js';
 
 const HEADER_SIGNATURE = 'No.,Date,Time,Weight(kg),BMI,';
 
+// Strips a leading UTF-8 BOM (﻿) before comparing -- a real export
+// shared from an Android device carried one and silently failed a bare
+// startsWith() check, confirmed live. Some exporters add it, some don't;
+// tolerating it either way costs nothing.
 function looksLikeRenphoCsv(headText) {
-return (headText || '').startsWith(HEADER_SIGNATURE);
+return (headText || '').replace(/^﻿/, '').startsWith(HEADER_SIGNATURE);
 }
 
 // Minimal quote-aware split -- Renpho's own export never quotes a field in
