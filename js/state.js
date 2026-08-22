@@ -407,6 +407,10 @@ data.captureInbox = data.captureInbox.filter((b) => b.items.length > 0);
 // payloads on every parse (see healthparse.js) rather than edited by hand
 // -- no per-item blank-factory needed, just an array-shape guard.
 if (!Array.isArray(data.healthDaily)) data.healthDaily = [];
+// One row per local calendar day of Renpho scale readings, accumulated
+// (not rebuilt) across however many CSV exports get shared over time --
+// see renpho.js's mergeRenphoDaily() for why a re-share is safe to repeat.
+if (!Array.isArray(data.renphoDaily)) data.renphoDaily = [];
 // Seed the mail search rows from the old fixed shape the first time only.
 // Keyed on the array's absence rather than its emptiness, so deleting every
 // row stays deleted instead of being helpfully repopulated next reload.

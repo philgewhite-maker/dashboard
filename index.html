@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v113</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v114</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -145,7 +145,8 @@
 <label class="file-btn" for="capture-inbox-file-input">+ Capture files</label>
 <input type="file" id="capture-inbox-file-input" multiple style="display:none;">
 </div>
-<div class="settings-note" style="margin:8px 0 10px;">Photos, CSVs, or anything else shared or picked in one go &mdash; grouped as a batch here until you decide where each one belongs. Mainly reached via Android's share sheet.</div>
+<div class="settings-note" style="margin:8px 0 10px;">Photos, CSVs, or anything else shared or picked in one go &mdash; grouped as a batch here until you decide where each one belongs. Mainly reached via Android's share sheet. A recognised Health CSV (Renpho scale export so far) skips the batch entirely and is imported straight into the Health tab.</div>
+<div class="sync-status" id="capture-inbox-status"></div>
 <div id="capture-inbox-list"></div>
 </section>
 
@@ -1830,6 +1831,16 @@ Mostly still a planning space &mdash; a place to keep thinking about what this s
 <th>Date</th><th>Steps</th><th>Sleep</th><th>HR</th><th>O&#8322;</th><th>Distance</th><th>Calories</th><th>Weight</th><th>Body fat</th><th>Exercise</th>
 </tr></thead>
 <tbody id="health-daily-body"></tbody>
+</table>
+</div>
+<h3 style="margin:22px 0 6px;">Body composition (Renpho)</h3>
+<div class="settings-note" style="margin:0 0 10px;">Share a Renpho scale CSV export through Capture Inbox (or the phone's share sheet) and it lands here automatically &mdash; no manual import step.</div>
+<div style="overflow-x:auto;">
+<table class="health-table">
+<thead><tr>
+<th>Date</th><th>Weight</th><th>BMI</th><th>Body fat</th><th>Muscle mass</th><th>Visceral fat</th><th>Metabolic age</th>
+</tr></thead>
+<tbody id="renpho-daily-body"></tbody>
 </table>
 </div>
 </section>

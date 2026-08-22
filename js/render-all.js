@@ -12,6 +12,7 @@ import { renderOverview } from './features/overview.js';
 import { renderTasks } from './features/tasks.js';
 import { renderCaptureInbox } from './features/captureinbox.js';
 import { renderHealthDaily } from './features/health.js';
+import { renderRenphoDaily } from './features/renpho.js';
 import { renderNudges } from './features/nudges.js';
 import { renderTagCleanup } from './features/tagcleanup.js';
 
@@ -29,6 +30,7 @@ renderEnhancementIdeas();
 renderTasks();
 renderCaptureInbox();
 renderHealthDaily();
+renderRenphoDaily();
 renderOverview();
 renderNudges();
 renderTagCleanup();

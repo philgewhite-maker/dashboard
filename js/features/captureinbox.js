@@ -2,21 +2,36 @@
 // (see sharetarget.js, which routes any share carrying files here instead
 // of onto a Task), or the in-app "+ Capture files" picker for desktop/iOS
 // parity -- waiting to be triaged into wherever it actually belongs: a
-// Dating connection's photos, a Task's attachments, or (once one exists)
-// a Health import. Not image-only: whatever the share sheet hands over
-// (CSV, PDF, plain text...) lands here too, just without a thumbnail.
+// Dating connection's photos, a Task's attachments, or a Health import. Not
+// image-only: whatever the share sheet hands over (CSV, PDF, plain text...)
+// lands here too, just without a thumbnail.
 //
-// A batch disappears from data.captureInbox once every item in it has
-// been routed or discarded -- see captureItemKind() below for the one
-// seam a future deterministic router (e.g. a recognised Health CSV shape)
-// would hook into, ahead of the generic per-item triage buttons.
+// A batch disappears from data.captureInbox once every item in it has been
+// routed or discarded. A recognised Health CSV shape (Renpho scale export,
+// so far) skips triage entirely -- see captureItemKind() below, which is the
+// one seam a future deterministic shape (e.g. an HRV export, once a real
+// one's been seen to check the format against) would hook into next.
 import { data, queueSave, blankCaptureBatch } from '../state.js';
 import { photoDelete } from '../db.js';
 import { todayStr, escapeHtml, hydratePhotoBackgrounds, resizeImageToBlob } from '../utils.js';
 import { storePhoto, uploadAttachment, deleteAttachment, fetchAttachment, openAttachment, formatBytes } from '../files.js';
+import { looksLikeRenphoCsv, parseRenphoCsv, mergeRenphoDaily, looksLikeHrvCsv } from './renpho.js';
 
-function captureItemKind(file) {
-return (file.type || '').startsWith('image/') ? 'photo' : 'attachment';
+// Only worth sniffing content for file types that could plausibly be a
+// recognised data export -- no point reading the first bytes of a photo or
+// a PDF, and it keeps this off the hot path for the common case (photos).
+const SNIFFABLE_RE = /\.(csv|txt)$/i;
+
+async function captureItemKind(file) {
+if ((file.type || '').startsWith('image/')) return 'photo';
+if (SNIFFABLE_RE.test(file.name || '') || file.type === 'text/csv') {
+try {
+const head = await file.slice(0, 300).text();
+if (looksLikeRenphoCsv(head)) return 'renpho-csv';
+if (looksLikeHrvCsv(head)) return 'hrv-csv'; // never true yet -- see renpho.js
+} catch (err) { /* unreadable as text -- fall through to a plain attachment */ }
+}
+return 'attachment';
 }
 
 // A batch shared at once (a night's swiping, say) often holds more than
@@ -40,13 +55,26 @@ return selectedItems.get(batchId);
 // The one place a batch of raw files becomes an inbox entry. Saves after
 // each item lands (not once at the end) so an interrupted multi-file
 // capture keeps whatever already succeeded -- same reasoning tasks.js's
-// own attach-a-file handler saves per file rather than once per batch.
+// own attach-a-file handler saves per file rather than once per batch. A
+// recognised Health CSV is consumed straight into its own store and never
+// becomes a batch item at all -- there's nothing to triage, the data's
+// already where it belongs.
 async function addCaptureBatch({ label, notes = '', source = null, files }) {
 const batch = blankCaptureBatch({ label, notes, source });
 const failed = [];
+const healthImports = [];
 for (const file of files) {
 try {
-if (captureItemKind(file) === 'photo') {
+const kind = await captureItemKind(file);
+if (kind === 'renpho-csv') {
+const text = await file.text();
+const rows = parseRenphoCsv(text);
+const days = mergeRenphoDaily(rows);
+healthImports.push(`${file.name || 'Renpho export'}: ${days} day${days === 1 ? '' : 's'} of scale readings imported.`);
+queueSave();
+continue;
+}
+if (kind === 'photo') {
 const blob = await resizeImageToBlob(file, 1200, 0.85);
 const id = await storePhoto(blob);
 batch.items.push({ id, name: file.name || 'photo', type: file.type || blob.type, size: blob.size, kind: 'photo' });
@@ -62,7 +90,11 @@ failed.push(`${file.name || 'file'}: ${err.message || err}`);
 }
 }
 renderCaptureInbox();
-return { batch, failed };
+if (healthImports.length) {
+const { renderRenphoDaily } = await import('./renpho.js');
+renderRenphoDaily();
+}
+return { batch, failed, healthImports };
 }
 
 function removeBatchIfEmpty(batch) {
@@ -266,11 +298,13 @@ input.addEventListener('change', async (e) => {
 const files = Array.from(e.target.files);
 e.target.value = '';
 if (!files.length) return;
-await addCaptureBatch({
+const status = document.getElementById('capture-inbox-status');
+const { healthImports } = await addCaptureBatch({
 label: files.length === 1 ? files[0].name : `${files.length} files captured ${todayStr()}`,
 source: { kind: 'manual', label: 'Picked in-app' },
 files,
 });
+if (status) status.textContent = healthImports.join(' ');
 });
 }
 }

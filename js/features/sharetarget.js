@@ -105,28 +105,43 @@ try { share = await takePendingShare(); } catch (e) { console.error('Share picku
 if (!share) return;
 
 // A share carrying files goes to the Capture Inbox to be triaged --
-// Dating photos, a Task attachment, a future Health import -- rather
-// than always becoming a Task the way it used to. A pure text/link
-// share (no files) falls through below, unchanged.
+// Dating photos, a Task attachment, a Health import -- rather than
+// always becoming a Task the way it used to. A pure text/link share
+// (no files) falls through below, unchanged.
 if (share.files.length > 0) {
 const { addCaptureBatch, revealCaptureBatch } = await import('./captureinbox.js');
 const title = (share.title || '').trim();
 const url = (share.url || '').trim();
 const text = (share.text || '').trim();
 const label = title || url || text.split('\n')[0].slice(0, 120) || `${share.files.length} shared file${share.files.length === 1 ? '' : 's'}`;
-const { batch, failed } = await addCaptureBatch({
+const { batch, failed, healthImports } = await addCaptureBatch({
 label,
 notes: text && text !== label ? text : '',
 source: { kind: 'share', label: title || url || 'Shared from another app', url },
 files: share.files,
 });
-let msg = `Captured ${batch.items.length} file${batch.items.length === 1 ? '' : 's'} to your Capture Inbox as "${label.slice(0, 60)}".`;
-if (failed.length) msg += ` ${failed.length} couldn't be captured — see Settings.`;
+// A recognised Health CSV is fully consumed on the way in and never
+// becomes a batch item -- if that's everything that was shared, there's
+// nothing left in Capture Inbox to open.
+const parts = [];
+if (batch.items.length) parts.push(`Captured ${batch.items.length} file${batch.items.length === 1 ? '' : 's'} to your Capture Inbox as "${label.slice(0, 60)}".`);
+if (healthImports.length) parts.push(healthImports.join(' '));
+if (failed.length) parts.push(`${failed.length} couldn't be captured — see Settings.`);
+const msg = parts.join(' ') || `Nothing from "${label.slice(0, 60)}" could be captured — see Settings.`;
+if (batch.items.length) {
 banner(msg, async () => {
 const { switchTab } = await import('../tabs.js');
 switchTab('tasks');
 revealCaptureBatch(batch.id);
 });
+} else if (healthImports.length) {
+banner(msg, async () => {
+const { switchTab } = await import('../tabs.js');
+switchTab('health');
+});
+} else {
+banner(msg);
+}
 return;
 }
 
