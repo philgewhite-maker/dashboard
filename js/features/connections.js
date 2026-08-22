@@ -3,7 +3,7 @@ import { captureTask, revealTask } from './tasks.js';
 import { photoDelete, photoUrl } from '../db.js';
 import { storePhoto } from '../files.js';
 import {
-uid, todayStr, daysSince, escapeHtml, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, knownCityMap, scrollAndFlash, bindForm, foldDiacritics,
+uid, todayStr, daysSince, escapeHtml, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, buildFlagMatcher, applyFlagMatcher, knownCityMap, scrollAndFlash, bindForm, foldDiacritics,
 resizeImageToBlob, classifyProfileUpload, cropToContentBlob, contentCropBounds, loadImage,
 } from '../utils.js';
 import { MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot } from '../ai.js';
@@ -671,6 +671,15 @@ topReachOutIdSet = computeTopReachOut();
 // Built once per render, not once per card -- see connectionCardHtml's
 // own comment on why that used to be an O(n) rebuild done n times over.
 const cityMap = knownCityMap(data.connections);
+// Same reasoning, one level deeper: highlightFlagValues' matcher (color
+// map, city set, and a compiled regex over every flag-rule value + city +
+// country name) doesn't change within a single render either, but every
+// card's Notes preview used to call highlightFlagValues() itself, each
+// call rebuilding it from scratch -- confirmed live as still a multi-
+// second render with 300 search matches even after the chat-transcript
+// fix below stopped rebuilding it per LINE. Built once here and threaded
+// through connectionCardHtml() for both Notes and chat use.
+const matcher = buildFlagMatcher(data.flagRules, cityMap);
 const list = document.getElementById('connections-list');
 document.getElementById('connections-count').textContent = data.connections.length + (data.connections.length === 1 ? ' connection' : ' connections');
 const attnBtn = document.getElementById('conn-needs-attention-btn');
@@ -726,7 +735,7 @@ const missing = data.connections.filter((c) => isFieldEmpty(c, field));
 list.innerHTML = `<div class="filter-banner">Showing ${missing.length} with no ${escapeHtml(label)} <button class="filter-clear" type="button" id="clear-empty-filter">Clear</button></div>`
 + (missing.length === 0
 ? '<div class="empty">Everyone has at least one.</div>'
-: missing.map((c) => connectionCardHtml(c, cityMap)).join(''))
+: missing.map((c) => connectionCardHtml(c, cityMap, matcher)).join(''))
 + tagDatalistsHtml();
 document.getElementById('clear-empty-filter').addEventListener('click', () => {
 emptyFieldFilter = null;
@@ -742,7 +751,7 @@ return;
 if (idFilter) {
 const picked = data.connections.filter((c) => idFilter.ids.has(c.id));
 list.innerHTML = `<div class="filter-banner">${picked.length} matching ${escapeHtml(idFilter.label)} <button class="filter-clear" type="button" id="clear-id-filter">Clear</button></div>`
-+ (picked.length === 0 ? '<div class="empty">Nobody matches all of those.</div>' : picked.map((c) => connectionCardHtml(c, cityMap)).join(''))
++ (picked.length === 0 ? '<div class="empty">Nobody matches all of those.</div>' : picked.map((c) => connectionCardHtml(c, cityMap, matcher)).join(''))
 + tagDatalistsHtml();
 document.getElementById('clear-id-filter').addEventListener('click', () => { idFilter = null; renderConnections(); });
 hydratePhotoBackgrounds(list);
@@ -791,7 +800,7 @@ if (diff !== 0 || !secondary) return diff;
 return secondary.getValue(b) - secondary.getValue(a);
 });
 
-list.innerHTML = sorted.map((c) => connectionCardHtml(c, cityMap)).join('') + tagDatalistsHtml();
+list.innerHTML = sorted.map((c) => connectionCardHtml(c, cityMap, matcher)).join('') + tagDatalistsHtml();
 
 hydratePhotoBackgrounds(list);
 flagLowResThumbnails(list);
@@ -870,7 +879,7 @@ return lines;
 // cityMap is passed in rather than recomputed here -- it's built from
 // every connection's location, so rebuilding it once per card (as this
 // used to) is an O(n) rebuild done n times over for a full list render.
-function connectionCardHtml(c, cityMap) {
+function connectionCardHtml(c, cityMap, matcher) {
 const since = daysSince(c.lastContact);
 const travelPaused = isTravelPaused(c);
 const overdue = topReachOutIdSet.has(c.id);
@@ -883,10 +892,12 @@ const flagDotHtml = flags.worst ? `<span class="dot ${flags.worst}" title="${esc
 // A highlighted preview is only worth showing when it would actually
 // surface something the plain text doesn't — a flagged word, or a city
 // already on file for someone else. Comparing against a plain escape is
-// what highlightFlagValues() itself falls back to when nothing matched,
-// so an unequal result means a span really got inserted, not just that
-// Notes happens to be non-empty.
-const notesHighlighted = c.notes ? highlightFlagValues(c.notes, data.flagRules, cityMap) : '';
+// what applyFlagMatcher() itself falls back to when nothing matched, so
+// an unequal result means a span really got inserted, not just that
+// Notes happens to be non-empty. Uses the pre-built matcher (see
+// renderConnections' own comment) rather than calling highlightFlagValues()
+// itself, which would rebuild it from scratch for every card's Notes.
+const notesHighlighted = c.notes ? applyFlagMatcher(c.notes, matcher) : '';
 const notesHasHits = notesHighlighted && notesHighlighted !== escapeHtml(c.notes);
 // The preview and the raw textarea used to both render at once — the
 // same text twice in a row, once plain and once highlighted, read as
@@ -910,21 +921,39 @@ const chatSources = [
 { field: 'chatLogWhatsApp', label: 'WhatsApp', text: c.chatLogWhatsApp },
 { field: 'chatLogTelegram', label: 'Telegram', text: c.chatLogTelegram },
 ].filter((s) => s.text);
+// Merging and highlighting a chat history is real work for a long
+// conversation (a genuinely active WhatsApp thread can run thousands of
+// lines) -- and this whole field sits inside the collapsible Details
+// section below, invisible while collapsed regardless. Skipped entirely
+// for a card that isn't expanded, confirmed live as the remaining cost
+// behind "search still feels slow with 300+ matches" even after the
+// per-line highlight-matcher fix, since every match's full chat was still
+// being built into HTML on every render whether or not anyone could see
+// it. The toggle handler in bindConnectionEvents re-renders just this one
+// card the moment it's actually opened, so nothing stays permanently
+// hidden -- it's deferred until looked at, not skipped.
+const isExpanded = expandedConnections.has(c.id);
+let chatFieldHtml;
+if (chatSources.length && !isExpanded) {
+chatFieldHtml = `<div class="field-block full"><span class="field-label">Chat history</span><span class="settings-note">Expand Details to view.</span></div>`;
+} else {
 const mergedLines = mergedChatLines(c);
-// Per-line source icons only kick in once there's genuinely more than one
-// platform to tell apart -- a single-source chat doesn't need clarifying.
+// Per-line source icons only kick in once there's genuinely more than
+// one platform to tell apart -- a single-source chat doesn't need
+// clarifying.
 const multiSource = chatSources.length > 1;
 const chatSourceRow = multiSource
 ? `<div class="icon-row" style="margin:0 0 6px;">${chatSources.map((s) => iconSpan(CHAT_FIELD_SOURCE_ICONS[s.field].icon, `${s.label} chat`, CHAT_FIELD_SOURCE_ICONS[s.field].cls)).join('')}</div>`
 : '';
-const chatFieldHtml = mergedLines.length
+chatFieldHtml = mergedLines.length
 ? `<div class="field-block full"><span class="field-label">Chat history</span>
 ${chatSourceRow}
-<div class="tinder-chat-block" style="margin:0;">${chatTranscriptHtml(mergedLines, data.flagRules, cityMap, multiSource ? CHAT_FIELD_SOURCE_ICONS : null)}</div>
+<div class="tinder-chat-block" style="margin:0;">${chatTranscriptHtml(mergedLines, matcher, multiSource ? CHAT_FIELD_SOURCE_ICONS : null)}</div>
 <details class="tinder-edit-details"><summary>Edit raw text</summary>
 ${chatSources.map((s) => `<div class="settings-note" style="margin:6px 0 2px;">${escapeHtml(s.label)}</div><textarea rows="4" placeholder="One message per line" data-field="${s.field}" data-conn-detail="${c.id}">${escapeHtml(s.text)}</textarea>`).join('')}
 </details></div>`
 : `<label class="full">Chat history<textarea rows="4" placeholder="Imported from Tinder — one message per line" data-field="chatLog" data-conn-detail="${c.id}"></textarea></label>`;
+}
 return `<div class="match-card" data-conn-row="${c.id}">
 <div class="match-row">
 ${avatarHtml(c.photoId, c.name)}
@@ -1326,8 +1355,34 @@ queueSave();
 });
 list.querySelectorAll('[data-conn-details]').forEach((el) => {
 el.addEventListener('toggle', () => {
-if (el.open) expandedConnections.add(el.dataset.connDetails);
-else expandedConnections.delete(el.dataset.connDetails);
+const id = el.dataset.connDetails;
+const wasOpen = expandedConnections.has(id);
+if (el.open) expandedConnections.add(id);
+else expandedConnections.delete(id);
+// Opening (not closing) needs a targeted re-render: connectionCardHtml
+// skips the chat history entirely while collapsed (see its own comment),
+// so the lightweight placeholder needs swapping for the real transcript
+// now that it's actually visible. Closing doesn't need this -- the
+// content already there just becomes hidden again by the browser: no
+// need to tear it down and rebuild the (cheap) placeholder in its place.
+// Scoped to this one card, not a full renderConnections(), so opening
+// one connection's Details among 300+ search results doesn't pay to
+// rebuild every other card too.
+if (el.open && !wasOpen) {
+const card = el.closest('.match-card');
+const conn = data.connections.find((x) => x.id === id);
+if (card && conn) {
+const cityMap = knownCityMap(data.connections);
+const matcher = buildFlagMatcher(data.flagRules, cityMap);
+card.outerHTML = connectionCardHtml(conn, cityMap, matcher);
+const fresh = list.querySelector(`[data-conn-row="${CSS.escape(id)}"]`);
+if (fresh) {
+hydratePhotoBackgrounds(fresh);
+flagLowResThumbnails(fresh);
+bindConnectionEvents(fresh);
+}
+}
+}
 });
 });
 list.querySelectorAll('[data-parse-profile]').forEach((input) => {

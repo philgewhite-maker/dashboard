@@ -288,23 +288,23 @@ function formatChatDay(iso) {
 return new Date(`${iso}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-// rules/cityMap are optional -- passed in by connections.js so a saved
-// chat gets the same live click-to-add-City/Nationality treatment Notes
-// already has (a city or country mentioned mid-conversation is exactly
-// the kind of thing worth catching), omitted anywhere else this is called
-// where that wouldn't make sense. `lines` is either a plain string (split
-// on \n here, no per-line source) or a pre-tagged [{source, text}] array —
-// connections.js passes the latter once a chat spans more than one
-// platform, plus a sourceIcons map ({source: {icon, label}}) so each line
-// can carry a tiny icon showing which app it came from, since a merged,
-// interleaved chat with no per-line indication of platform is exactly
-// what read as "weird" before this.
-function chatTranscriptHtml(lines, rules, cityMap, sourceIcons) {
+// `matcher` is a pre-built buildFlagMatcher() result (or null to skip
+// highlighting entirely) -- the caller's job, not this function's, since a
+// caller rendering many transcripts in one pass (connections.js, one card
+// per connection) needs to build it ONCE for the whole render rather than
+// once per transcript. Passed in by connections.js so a saved chat gets the
+// same live click-to-add-City/Nationality treatment Notes already has (a
+// city or country mentioned mid-conversation is exactly the kind of thing
+// worth catching), omitted anywhere else this is called where that
+// wouldn't make sense. `lines` is either a plain string (split on \n here,
+// no per-line source) or a pre-tagged [{source, text}] array — connections.js
+// passes the latter once a chat spans more than one platform, plus a
+// sourceIcons map ({source: {icon, label}}) so each line can carry a tiny
+// icon showing which app it came from, since a merged, interleaved chat
+// with no per-line indication of platform is exactly what read as "weird"
+// before this.
+function chatTranscriptHtml(lines, matcher, sourceIcons) {
 const arr = Array.isArray(lines) ? lines : String(lines || '').split('\n').filter(Boolean).map((text) => ({ text }));
-// Built once for the whole transcript, not once per line -- see
-// buildFlagMatcher()'s own comment on why that used to turn a long chat
-// history into a multi-second render.
-const matcher = (rules || cityMap) ? buildFlagMatcher(rules, cityMap) : null;
 let lastDate = '';
 return arr.map(({ text: line, source }) => {
 // The date prefix is optional -- older chatLog text saved before the
@@ -856,7 +856,7 @@ return { img, bounds, isScreenshot: ratio < PHOTO_ASPECT_THRESHOLD };
 
 export {
 todayStr, daysAgoStr, last7Dates, uid, daysSince, daysUntil, foldDiacritics,
-escapeHtml, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, knownCityMap, scrollAndFlash, bindForm,
+escapeHtml, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, buildFlagMatcher, applyFlagMatcher, knownCityMap, scrollAndFlash, bindForm,
 findMentions, COUNTRY_NAME_TO_NATIONALITY,
 resizeImageToBlob, fileToBase64, loadImage, cropThumbnailToBlob,
 hashFile, captureDateOf, betterCaptureDate, dateFromFilename,
