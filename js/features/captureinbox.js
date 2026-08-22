@@ -91,10 +91,12 @@ ${b.notes ? `<div class="alloc-notes">${escapeHtml(b.notes)}</div>` : ''}
 ${photoItems.length ? `<div class="task-photos">${photoItems.map((it) => `<label class="gallery-thumb${selected.has(it.id) ? ' selected' : ''}" title="Tap to select">
 <input type="checkbox" class="gallery-thumb-check" data-inbox-item-check="${b.id}" data-item-id="${escapeHtml(it.id)}" ${selected.has(it.id) ? 'checked' : ''}>
 <span class="thumb-img" data-photo-bg="${escapeHtml(it.id)}"></span>
+<span class="tag-x" data-inbox-item-remove="${b.id}" data-item-id="${escapeHtml(it.id)}" title="Delete this photo — don't send it anywhere">&times;</span>
 </label>`).join('')}</div>` : ''}
 ${fileItems.map((it) => `<div class="attach-row">
 <button class="attach-name" type="button" data-inbox-item-open="${b.id}" data-inbox-item-id="${escapeHtml(it.id)}" title="Download ${escapeHtml(it.name || 'file')}">${escapeHtml(it.name || 'file')}</button>
 <span class="attach-size">${escapeHtml(formatBytes(it.size))}</span>
+<span class="tag-x" data-inbox-item-remove="${b.id}" data-item-id="${escapeHtml(it.id)}" title="Delete this file — don't send it anywhere">&times;</span>
 </div>`).join('')}
 <div class="alloc-controls">
 ${photoItems.length ? `<span class="settings-note" data-inbox-selected-count="${b.id}">${selectedCount} of ${photoItems.length} selected</span>
@@ -219,6 +221,27 @@ queueSave();
 console.error('Send to Dating failed:', err);
 if (status) status.textContent = `Couldn't send that: ${err.message || err}`;
 }
+});
+});
+
+// A single item you don't want to send anywhere -- e.g. one stray photo
+// in an otherwise-useful batch. Photos delete with one click (they're
+// local-only until sent, same as a task's own photo removal); files
+// confirm first since uploadAttachment already put them on the server,
+// same as a task's own attachment removal.
+root.querySelectorAll('[data-inbox-item-remove]').forEach((x) => {
+x.addEventListener('click', async (e) => {
+e.preventDefault();
+const batch = data.captureInbox.find((b) => b.id === x.dataset.inboxItemRemove);
+const item = batch?.items.find((it) => it.id === x.dataset.itemId);
+if (!batch || !item) return;
+if (item.kind !== 'photo' && !confirm(`Delete "${item.name || 'this file'}"? This deletes it from the server for every device.`)) return;
+await deleteItemBytes(item);
+batch.items = batch.items.filter((it) => it.id !== item.id);
+selectionFor(batch.id).delete(item.id);
+removeBatchIfEmpty(batch);
+renderCaptureInbox();
+queueSave();
 });
 });
 
