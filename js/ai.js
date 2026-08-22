@@ -698,6 +698,12 @@ translation: String((data && data.translation) || '').trim(),
 // gives (nuanced reading, not deep reasoning).
 const WELLNESS_MODEL = 'claude-sonnet-5';
 const WELLNESS_MAX_TOKENS = 800;
+// Bumped whenever wellnessPrompt()'s requested fields change -- same reason
+// PROFILE_SCHEMA_VERSION exists above: without it, re-extracting the exact
+// same screenshot after a prompt change would silently keep serving the OLD
+// cached result forever, which is exactly what would happen re-testing the
+// screenshots that motivated the Min/Max-interpolation change below.
+const WELLNESS_SCHEMA_VERSION = 2;
 
 function wellnessPrompt(todayIso) {
 return `This is a screenshot from the Samsung Health app (measurements taken via a Galaxy Watch). It shows ONE of these three 7-day charts: Antioxidant index, AGEs (Advanced Glycation End-products) index, or Sleeping heart rate variability (HRV). Today's date is ${todayIso}.
@@ -705,22 +711,26 @@ return `This is a screenshot from the Samsung Health app (measurements taken via
 Work out the actual calendar date for each day-of-month number on the x-axis. If a date-range header is visible (e.g. "16–22 Aug"), use its month directly. If only bare day-of-month numbers are visible with no month shown, assume the LAST (rightmost/highest) day number falls within the same calendar month as today (${todayIso}) unless that day number is greater than today's day-of-month, in which case it falls in the previous calendar month -- then count backwards from there for the earlier days (a run of consecutive day-of-month numbers on one chart never crosses more than one month boundary).
 
 Identify which metric this is, then extract:
-- For EACH day that has an explicit number printed directly on or next to its data point (not just an unlabelled dot), that day's resolved ISO date (YYYY-MM-DD) and its printed value. Skip a day entirely if no number is printed at its point -- never estimate a value from pixel position alone.
 - The period average, min, and max if shown as text (e.g. "Average 46", "Min 43", "Max 50", or "410 (Daily average)").
 - The headline grade/category text if shown (e.g. "Good", "Adequate", "Low", "Very low", "High", "Very high") for the period or the most recent reading.
 - The unit if shown (e.g. "ms" for HRV).
+- For EACH day with a visible plotted dot, resolve its ISO date (YYYY-MM-DD), then:
+  - If a number is printed directly on or next to that dot, record it as "value" with "exact":true.
+  - Otherwise, if the chart shows BOTH a Min and a Max as text (even though the axis itself has no numbers), you can still place that dot on the scale those two numbers define: look at the dot that sits LOWEST on the chart and the dot that sits HIGHEST, and treat those as the Min and Max positions. For every other dot, judge how far up the vertical gap between the lowest and highest dot it sits, as a fraction from 0.0 (level with the lowest dot) to 1.0 (level with the highest dot), to the nearest 0.05, and record it as "fraction" with "exact":false. Do NOT invent a "value" yourself in this case -- report only the fraction, the value gets computed afterward from the real Min/Max text.
+  - If neither a printed number nor a Min+Max pair is available for a dot, leave that day out of "days" entirely rather than guessing.
 
 Reply with ONLY a JSON object, no other text, no markdown fences:
-{"metric":"hrv"|"antioxidant"|"ages"|"unrecognized","periodLabel":"16–22 Aug"|null,"asOfDate":"2026-08-22","days":[{"date":"2026-08-22","value":38}],"average":46|null,"min":43|null,"max":50|null,"headlineGrade":"Good"|null,"unit":"ms"|null}
+{"metric":"hrv"|"antioxidant"|"ages"|"unrecognized","periodLabel":"16–22 Aug"|null,"asOfDate":"2026-08-22","days":[{"date":"2026-08-22","value":38,"exact":true},{"date":"2026-08-19","fraction":0.6,"exact":false}],"average":46|null,"min":43|null,"max":50|null,"headlineGrade":"Good"|null,"unit":"ms"|null}
 - "asOfDate": the resolved date of the LAST (rightmost/most recent) day the chart covers -- always include this even when "days" is empty, since it's what the period average/min/max/grade describe.
-- "days": ONLY entries with a real printed number -- can be empty if the chart only shows dot positions with no per-day labels (e.g. an AGEs chart that only states a period average).
+- "days": can be empty if the chart shows neither printed numbers nor a Min+Max pair to place dots against (e.g. an AGEs chart that only states a period average with no Min/Max).
 - If "metric" is "unrecognized", every other field should be null/empty -- don't guess at a chart type you're not confident about.`;
 }
 
 async function extractWellnessScreenshot(file) {
 file = await ensureBrowserReadableImage(file);
 const hash = await hashFile(file);
-const cached = await parseCacheGet(hash, 'wellness');
+const cacheKind = `wellness-v${WELLNESS_SCHEMA_VERSION}`;
+const cached = await parseCacheGet(hash, cacheKind);
 if (cached) return { ...cached.result, fromCache: true };
 
 const base64 = await fileToBase64(file);
@@ -734,18 +744,34 @@ const { data: raw } = await callAnthropic(
 WELLNESS_MAX_TOKENS, WELLNESS_MODEL, 'Wellness screenshot',
 );
 const isIsoDate = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
+const min = typeof raw.min === 'number' ? raw.min : null;
+const max = typeof raw.max === 'number' ? raw.max : null;
+// The model only ever reports a *fraction* between the visually lowest and
+// highest dot for an unlabelled point (never a value it invented itself) --
+// the actual number is computed here from the real Min/Max text, so a
+// vision-model arithmetic slip can't produce a wrong reading on its own.
+// Rounded to a whole number: every real printed value seen on these charts
+// so far (HRV ms, antioxidant index) has been an integer.
+const days = Array.isArray(raw.days) ? raw.days.map((d) => {
+if (!isIsoDate(d.date)) return null;
+if (d.exact === true && typeof d.value === 'number') return { date: d.date, value: d.value, exact: true };
+if (d.exact === false && typeof d.fraction === 'number' && min != null && max != null) {
+const fraction = Math.min(1, Math.max(0, d.fraction));
+return { date: d.date, value: Math.round(min + fraction * (max - min)), exact: false };
+}
+return null;
+}).filter(Boolean) : [];
 const result = {
 metric: ['hrv', 'antioxidant', 'ages'].includes(raw.metric) ? raw.metric : 'unrecognized',
 periodLabel: raw.periodLabel || null,
 asOfDate: isIsoDate(raw.asOfDate) ? raw.asOfDate : null,
-days: Array.isArray(raw.days) ? raw.days.filter((d) => isIsoDate(d.date) && typeof d.value === 'number') : [],
+days,
 average: typeof raw.average === 'number' ? raw.average : null,
-min: typeof raw.min === 'number' ? raw.min : null,
-max: typeof raw.max === 'number' ? raw.max : null,
+min, max,
 headlineGrade: raw.headlineGrade || null,
 unit: raw.unit || null,
 };
-await parseCachePut(hash, 'wellness', { result });
+await parseCachePut(hash, cacheKind, { result });
 return { ...result, fromCache: false };
 }
 

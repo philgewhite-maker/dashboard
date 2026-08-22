@@ -9,7 +9,12 @@ import { extractWellnessScreenshot } from '../ai.js';
 import { escapeHtml } from '../utils.js';
 
 function blankWellnessDay(date) {
-return { date, hrvMs: undefined, hrvGrade: undefined, antioxidantIndex: undefined, antioxidantGrade: undefined, agesDailyAvg: undefined, agesGrade: undefined };
+return {
+date,
+hrvMs: undefined, hrvGrade: undefined, hrvExact: undefined,
+antioxidantIndex: undefined, antioxidantGrade: undefined, antioxidantExact: undefined,
+agesDailyAvg: undefined, agesGrade: undefined, agesExact: undefined,
+};
 }
 
 function dayFor(date) {
@@ -18,11 +23,15 @@ if (!row) { row = blankWellnessDay(date); data.wellnessDaily.push(row); }
 return row;
 }
 
-// Real per-day readings (a printed number next to that day's point) go
-// straight onto that date. A period-only rollup (no per-day numbers at
-// all -- the AGEs chart in practice, which only ever states a 7-day
-// average) attaches to asOfDate instead, under a field name that says
-// "avg" so it's never mistaken for a genuine single-day reading.
+// A day's value is either a real printed number (exact:true) or read off
+// the chart's vertical position between the stated Min and Max (exact:
+// false -- see wellnessPrompt's own comment in ai.js for how that's
+// computed). Both go onto that date; the render function marks estimated
+// ones visibly (a "~") so a wrong one is easy to spot against the source
+// screenshot rather than looking identical to a confirmed reading. A
+// period-only rollup (no per-day dots placeable at all -- the AGEs chart
+// when it states only a 7-day average, no Min/Max) attaches to asOfDate
+// instead, also marked not-exact for the same reason.
 function mergeWellnessExtraction(extraction) {
 const { metric, days, average, headlineGrade } = extraction;
 if (metric !== 'hrv' && metric !== 'antioxidant' && metric !== 'ages') return { daysWritten: 0, wroteAverage: false };
@@ -31,21 +40,21 @@ if (metric !== 'hrv' && metric !== 'antioxidant' && metric !== 'ages') return { 
 // grade"), not the whole week -- attach it only to the day it actually
 // applies to (the chart's most recent point), not to every day written.
 let daysWritten = 0;
-days.forEach(({ date, value }) => {
+days.forEach(({ date, value, exact }) => {
 const row = dayFor(date);
 const grade = date === extraction.asOfDate ? headlineGrade : undefined;
-if (metric === 'hrv') { row.hrvMs = value; if (grade) row.hrvGrade = grade; }
-else if (metric === 'antioxidant') { row.antioxidantIndex = value; if (grade) row.antioxidantGrade = grade; }
-else if (metric === 'ages') { row.agesDailyAvg = value; if (grade) row.agesGrade = grade; }
+if (metric === 'hrv') { row.hrvMs = value; row.hrvExact = exact; if (grade) row.hrvGrade = grade; }
+else if (metric === 'antioxidant') { row.antioxidantIndex = value; row.antioxidantExact = exact; if (grade) row.antioxidantGrade = grade; }
+else if (metric === 'ages') { row.agesDailyAvg = value; row.agesExact = exact; if (grade) row.agesGrade = grade; }
 daysWritten++;
 });
 
 let wroteAverage = false;
 if (days.length === 0 && average != null && extraction.asOfDate) {
 const row = dayFor(extraction.asOfDate);
-if (metric === 'ages') { row.agesDailyAvg = average; row.agesGrade = headlineGrade || row.agesGrade; wroteAverage = true; }
-else if (metric === 'antioxidant') { row.antioxidantIndex = average; row.antioxidantGrade = headlineGrade || row.antioxidantGrade; wroteAverage = true; }
-else if (metric === 'hrv') { row.hrvMs = average; row.hrvGrade = headlineGrade || row.hrvGrade; wroteAverage = true; }
+if (metric === 'ages') { row.agesDailyAvg = average; row.agesExact = false; row.agesGrade = headlineGrade || row.agesGrade; wroteAverage = true; }
+else if (metric === 'antioxidant') { row.antioxidantIndex = average; row.antioxidantExact = false; row.antioxidantGrade = headlineGrade || row.antioxidantGrade; wroteAverage = true; }
+else if (metric === 'hrv') { row.hrvMs = average; row.hrvExact = false; row.hrvGrade = headlineGrade || row.hrvGrade; wroteAverage = true; }
 }
 
 data.wellnessDaily.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
@@ -78,12 +87,22 @@ const d = new Date(`${iso}T00:00:00`);
 return isNaN(d) ? iso : d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
+// A "~" prefix marks a value read off the chart's vertical position rather
+// than a number Samsung actually printed -- title text spells out why, so
+// it reads as "estimated" rather than a typo on hover/tap.
+function metricCellHtml(value, exact, unit, grade) {
+if (value == null) return '—';
+const prefix = exact === false ? '<span title="Estimated from the dot\'s position between the chart\'s stated Min and Max, not a printed number">~</span>' : '';
+const gradeHtml = grade ? ` <span class="settings-note" style="display:inline;">(${escapeHtml(grade)})</span>` : '';
+return `${prefix}${value}${unit || ''}${gradeHtml}`;
+}
+
 function wellnessRowHtml(r) {
 return `<tr>
 <td>${escapeHtml(formatWellnessDate(r.date))}</td>
-<td>${r.hrvMs != null ? `${r.hrvMs}ms` : '—'}${r.hrvGrade ? ` <span class="settings-note" style="display:inline;">(${escapeHtml(r.hrvGrade)})</span>` : ''}</td>
-<td>${r.antioxidantIndex != null ? r.antioxidantIndex : '—'}${r.antioxidantGrade ? ` <span class="settings-note" style="display:inline;">(${escapeHtml(r.antioxidantGrade)})</span>` : ''}</td>
-<td>${r.agesDailyAvg != null ? r.agesDailyAvg : '—'}${r.agesGrade ? ` <span class="settings-note" style="display:inline;">(${escapeHtml(r.agesGrade)})</span>` : ''}</td>
+<td>${metricCellHtml(r.hrvMs, r.hrvExact, 'ms', r.hrvGrade)}</td>
+<td>${metricCellHtml(r.antioxidantIndex, r.antioxidantExact, '', r.antioxidantGrade)}</td>
+<td>${metricCellHtml(r.agesDailyAvg, r.agesExact, '', r.agesGrade)}</td>
 </tr>`;
 }
 
