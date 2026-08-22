@@ -655,12 +655,18 @@ transition:background .12s;
 .week .cell.done{background:var(--sage);border-color:var(--sage);}
 .week .cell:hover{border-color:var(--sage);}
 .del-x{
-opacity:0;
+opacity:.7;
 cursor:pointer;
 color:var(--muted);
 font-size:15px;
 padding:0 4px;
 }
+.del-x:hover{opacity:1;}
+/* Habit rows are the one place a visible delete "x" sitting there
+   permanently would be too noisy (a dense weekly grid) -- every other
+   consumer of .del-x wants it visible by default, confirmed by the fact
+   they'd otherwise all need their own opacity:1 override just to be seen. */
+.habit-row .del-x{opacity:0;}
 .habit-row:hover .del-x{opacity:1;}
 
 /* Goals */
