@@ -6,7 +6,7 @@
 // notionplan.js already uses for a project task ↔ its Notion page. The
 // detail has to live here rather than in Notion because the itinerary
 // export has to work fully offline.
-import { data, queueSave, blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS } from '../state.js';
+import { data, queueSave, blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS } from '../state.js';
 import { escapeHtml, uid } from '../utils.js';
 import { deleteAttachment, formatBytes, openAttachment } from '../files.js';
 
@@ -79,6 +79,42 @@ if (!leg) return;
 delete leg.gapStatus[field];
 queueSave();
 }
+function setLegStatus(tripId, legId, status) {
+const leg = legById(tripId, legId);
+if (!leg || !LEG_STATUSES.includes(status)) return;
+leg.bookingStatus = status;
+queueSave();
+}
+function updateLegNotes(tripId, legId, value) {
+const leg = legById(tripId, legId);
+if (!leg) return;
+leg.notes = String(value || '');
+queueSave();
+}
+
+// A leg-level "seat" can't represent more than one traveller -- this is the
+// real per-passenger detail (seat, baggage) a multi-person booking actually
+// needs, one row per person on that specific leg.
+function addPassenger(tripId, legId, { name, seat = '', baggage = '' }) {
+const leg = legById(tripId, legId);
+const n = String(name || '').trim();
+if (!leg || !n) return;
+leg.passengers.push({ id: uid(), name: n, seat: String(seat || '').trim(), baggage: String(baggage || '').trim() });
+queueSave();
+}
+function removePassenger(tripId, legId, passengerId) {
+const leg = legById(tripId, legId);
+if (!leg) return;
+leg.passengers = leg.passengers.filter((p) => p.id !== passengerId);
+queueSave();
+}
+function updatePassengerField(tripId, legId, passengerId, field, value) {
+const leg = legById(tripId, legId);
+const p = leg?.passengers.find((x) => x.id === passengerId);
+if (!p || !['name', 'seat', 'baggage'].includes(field)) return;
+p[field] = String(value || '').trim();
+queueSave();
+}
 
 async function deleteLeg(tripId, legId) {
 const trip = tripById(tripId);
@@ -139,7 +175,27 @@ leg.fields[k] = val;
 delete leg.gapStatus[k];
 filled++;
 });
+// Matched by name (case-insensitive) so re-reading the same confirmation,
+// or a follow-up email that only updates a seat, refines the same
+// passenger rather than duplicating them.
+(extraction.passengers || []).forEach((p) => {
+const name = String(p.name || '').trim();
+if (!name) return;
+const existing = leg.passengers.find((x) => x.name.trim().toLowerCase() === name.toLowerCase());
+if (existing) {
+if (p.seat) existing.seat = p.seat;
+if (p.baggage) existing.baggage = p.baggage;
+} else {
+leg.passengers.push({ id: uid(), name, seat: p.seat || '', baggage: p.baggage || '' });
+}
+filled++;
+});
 if (!leg.label && extraction.label) leg.label = String(extraction.label).trim();
+// A confirmation document was just successfully read, so the booking is
+// no longer merely planned -- never downgrades a status the user already
+// set by hand (there's no path from 'confirmed' back to anything lower
+// here in the first place, since this only ever moves forward).
+if (filled > 0 && leg.bookingStatus !== 'confirmed') leg.bookingStatus = 'confirmed';
 queueSave();
 return { filled };
 }
@@ -258,24 +314,52 @@ ${isOpenGap ? `<button class="todo-add-btn" type="button" data-leg-confirm-na="$
 </div></div>`;
 }
 
+function passengerRowHtml(tripId, leg, p) {
+return `<div class="attach-row" data-passenger-row="${p.id}">
+<input type="text" data-passenger-field="name" data-passenger-id="${p.id}" data-leg-id="${leg.id}" data-trip-id="${tripId}" value="${escapeHtml(p.name)}" placeholder="Name" style="flex:1;min-width:100px;">
+<input type="text" data-passenger-field="seat" data-passenger-id="${p.id}" data-leg-id="${leg.id}" data-trip-id="${tripId}" value="${escapeHtml(p.seat)}" placeholder="Seat" style="width:56px;">
+<input type="text" data-passenger-field="baggage" data-passenger-id="${p.id}" data-leg-id="${leg.id}" data-trip-id="${tripId}" value="${escapeHtml(p.baggage)}" placeholder="Baggage" style="flex:2;min-width:140px;">
+<span class="tag-x" data-passenger-remove="${p.id}" data-leg-id="${leg.id}" data-trip-id="${tripId}" title="Remove this passenger">&times;</span>
+</div>`;
+}
+
 function legCardHtml(trip, leg) {
 const defs = LEG_FIELD_DEFS[leg.kind] || [];
 const gaps = gapsFor(leg);
-const sourceLabel = leg.source?.kind === 'mail' ? `parsed from an email${leg.source.label ? `: ${leg.source.label}` : ''}`
-: leg.source?.kind === 'screenshot' ? 'parsed from a screenshot' : 'entered manually';
+const sourceLabel = leg.source?.kind === 'mail' ? `Parsed from an email${leg.source.label ? `: ${leg.source.label}` : ''}`
+: leg.source?.kind === 'screenshot' ? 'Parsed from a screenshot' : 'Entered manually';
+const sourceHtml = leg.source?.url
+? `<a href="${escapeHtml(leg.source.url)}" target="_blank" rel="noopener">${escapeHtml(sourceLabel)}</a>`
+: escapeHtml(sourceLabel);
 return `<div class="alloc-card" data-leg-card="${leg.id}" style="margin-top:8px;">
 <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
 <select data-leg-kind="${leg.id}" data-trip-id="${trip.id}">
 ${LEG_KINDS.map((k) => `<option value="${k}"${k === leg.kind ? ' selected' : ''}>${escapeHtml(LEG_KIND_LABELS[k])}</option>`).join('')}
 </select>
 <input type="text" data-leg-label="${leg.id}" data-trip-id="${trip.id}" value="${escapeHtml(leg.label)}" placeholder="${escapeHtml(LEG_KIND_LABELS[leg.kind])}" style="flex:1;min-width:120px;">
+<select data-leg-status="${leg.id}" data-trip-id="${trip.id}">
+${LEG_STATUSES.map((s) => `<option value="${s}"${s === leg.bookingStatus ? ' selected' : ''}>${escapeHtml(LEG_STATUS_LABELS[s])}</option>`).join('')}
+</select>
 <span class="del-x" data-leg-delete="${leg.id}" data-trip-id="${trip.id}" title="Delete this leg">&times;</span>
 </div>
 <div class="details-grid" style="background:var(--slate-bg);">
 ${defs.map((f) => legFieldRowHtml(trip, leg, f)).join('')}
 </div>
+<div style="margin-top:8px;">
+<span class="field-label">Passengers</span>
+<div style="display:flex;flex-direction:column;gap:4px;margin-top:4px;">
+${leg.passengers.map((p) => passengerRowHtml(trip.id, leg, p)).join('')}
+</div>
+<div class="attach-row">
+<input type="text" class="tag-add-input" data-passenger-add-name="${leg.id}" data-trip-id="${trip.id}" placeholder="+ passenger name">
+<input type="text" class="tag-add-input" data-passenger-add-seat="${leg.id}" placeholder="Seat" style="width:56px;">
+<input type="text" class="tag-add-input" data-passenger-add-baggage="${leg.id}" placeholder="Baggage">
+<button class="todo-add-btn" type="button" data-passenger-add="${leg.id}" data-trip-id="${trip.id}">Add</button>
+</div>
+</div>
 ${leg.attachments.length ? `<div style="margin-top:6px;">${leg.attachments.map((a) => `<div class="attach-row"><button class="attach-name" type="button" data-leg-attach-open="${leg.id}" data-trip-id="${trip.id}" data-attach-id="${escapeHtml(a.id)}">${escapeHtml(a.name || 'file')}</button><span class="attach-size">${escapeHtml(formatBytes(a.size))}</span></div>`).join('')}</div>` : ''}
-<div class="settings-note" style="margin-top:4px;">${escapeHtml(sourceLabel)}${gaps.length ? ` · ${gaps.length} still needed` : ' · complete'}</div>
+<textarea data-leg-notes="${leg.id}" data-trip-id="${trip.id}" placeholder="Notes" style="width:100%;margin-top:8px;min-height:44px;">${escapeHtml(leg.notes)}</textarea>
+<div class="settings-note" style="margin-top:4px;">${sourceHtml}${gaps.length ? ` · ${gaps.length} still needed` : ' · complete'}</div>
 </div>`;
 }
 
@@ -377,6 +461,33 @@ if (leg) { leg.label = input.value.trim(); queueSave(); }
 root.querySelectorAll('[data-leg-delete]').forEach((x) => {
 x.addEventListener('click', async () => { await deleteLeg(x.dataset.tripId, x.dataset.legDelete); renderTravel(); });
 });
+root.querySelectorAll('[data-leg-status]').forEach((sel) => {
+sel.addEventListener('change', () => { setLegStatus(sel.dataset.tripId, sel.dataset.legStatus, sel.value); });
+});
+root.querySelectorAll('[data-leg-notes]').forEach((ta) => {
+ta.addEventListener('change', () => { updateLegNotes(ta.dataset.tripId, ta.dataset.legNotes, ta.value); });
+});
+root.querySelectorAll('[data-passenger-field]').forEach((input) => {
+input.addEventListener('change', () => {
+updatePassengerField(input.dataset.tripId, input.dataset.legId, input.dataset.passengerId, input.dataset.passengerField, input.value);
+renderTravel();
+});
+});
+root.querySelectorAll('[data-passenger-remove]').forEach((x) => {
+x.addEventListener('click', () => { removePassenger(x.dataset.tripId, x.dataset.legId, x.dataset.passengerRemove); renderTravel(); });
+});
+root.querySelectorAll('[data-passenger-add]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const legId = btn.dataset.passengerAdd;
+const tripId = btn.dataset.tripId;
+const nameInput = root.querySelector(`[data-passenger-add-name="${legId}"]`);
+const seatInput = root.querySelector(`[data-passenger-add-seat="${legId}"]`);
+const baggageInput = root.querySelector(`[data-passenger-add-baggage="${legId}"]`);
+if (!nameInput || !nameInput.value.trim()) return;
+addPassenger(tripId, legId, { name: nameInput.value, seat: seatInput?.value, baggage: baggageInput?.value });
+renderTravel();
+});
+});
 root.querySelectorAll('[data-leg-field]').forEach((input) => {
 input.addEventListener('change', () => { updateLegField(input.dataset.tripId, input.dataset.legId, input.dataset.legField, input.value); renderTravel(); });
 });
@@ -461,9 +572,12 @@ if (na) return `<tr><th>${fmt(LEG_FIELD_LABELS[f] || f)}</th><td class="muted">n
 if (LEG_SOFT_FIELDS.has(f)) return '';
 return `<tr><th>${fmt(LEG_FIELD_LABELS[f] || f)}</th><td class="gap">⚠ not yet confirmed</td></tr>`;
 }).join('');
+const passengerRows = l.passengers.map((p) => `<tr><th>${fmt(p.name)}</th><td>${[p.seat, p.baggage].filter(Boolean).map(fmt).join(' — ') || '—'}</td></tr>`).join('');
 return `<section class="leg">
-<h2>${fmt(l.label) || fmt(LEG_KIND_LABELS[l.kind])}</h2>
+<h2>${fmt(l.label) || fmt(LEG_KIND_LABELS[l.kind])} <span class="status">${fmt(LEG_STATUS_LABELS[l.bookingStatus] || l.bookingStatus)}</span></h2>
 <table>${rows}</table>
+${passengerRows ? `<h3>Passengers</h3><table>${passengerRows}</table>` : ''}
+${l.notes ? `<p class="notes">${fmt(l.notes)}</p>` : ''}
 </section>`;
 }).join('');
 const peopleHtml = trip.people.length ? `<ul>${trip.people.map((p) => `<li>${fmt(p.name)}${p.relation !== 'other' ? ` — ${fmt(RELATION_LABELS[p.relation] || p.relation)}` : ''}</li>`).join('')}</ul>` : '<p class="muted">No one listed.</p>';
@@ -475,12 +589,15 @@ h1{font-size:1.8rem;margin-bottom:.2rem;}
 .sub{color:#666;font-family:Arial,sans-serif;font-size:.9rem;margin-bottom:1.5rem;}
 .warn{background:#fff3d6;border:1px solid #e0a800;padding:.6rem 1rem;border-radius:6px;font-family:Arial,sans-serif;font-size:.9rem;margin-bottom:1.5rem;}
 h2{font-family:Arial,sans-serif;font-size:1.05rem;border-bottom:1px solid #ccc;padding-bottom:.3rem;margin-top:2rem;}
+h2 .status{font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:#7a7a7a;border:1px solid #ccc;border-radius:4px;padding:1px 6px;margin-left:.5rem;vertical-align:middle;}
+h3{font-family:Arial,sans-serif;font-size:.85rem;color:#666;margin:1rem 0 .3rem;}
 table{width:100%;border-collapse:collapse;font-family:Arial,sans-serif;font-size:.92rem;}
 th{text-align:left;color:#666;font-weight:600;padding:.3rem .6rem .3rem 0;width:38%;vertical-align:top;}
 td{padding:.3rem 0;}
 td.gap{color:#a35b00;font-weight:600;}
 td.muted{color:#999;}
 .muted{color:#999;}
+p.notes{font-family:Arial,sans-serif;font-size:.88rem;color:#444;white-space:pre-wrap;margin:.6rem 0 0;}
 @media print{body{background:#fff;}}
 </style></head><body>
 <h1>${fmt(trip.title) || 'Trip'}${trip.destination ? ` — ${fmt(trip.destination)}` : ''}</h1>
@@ -495,6 +612,7 @@ ${legHtml || '<p class="muted">No logistics added yet.</p>'}
 
 export {
 createTrip, addLeg, updateLegField, confirmGapNA, reopenGap, deleteLeg, deleteTrip,
+setLegStatus, updateLegNotes, addPassenger, removePassenger, updatePassengerField,
 addPerson, removePerson, gapsFor, tripIsComplete, tripGapCount, enrichLegFromExtraction,
 applyLegExtraction, tripOptionsHtml, legTargetPickerHtml, bindLegTargetPicker, readLegTargetPicker,
 generateItineraryHtml, renderTravel, initTravel, revealTrip, tripById, legById,

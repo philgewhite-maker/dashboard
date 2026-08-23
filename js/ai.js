@@ -816,18 +816,25 @@ return { ...result, fromCache: false };
 // numbers. travel.js's enrichLegFromExtraction is what actually writes
 // these onto a leg.
 const TRIP_MODEL = 'claude-sonnet-5';
-const TRIP_MAX_TOKENS = 1000;
+// Room for several passengers each with their own seat/baggage line -- a
+// family-of-5 booking confirmation genuinely needs more output than a
+// single-traveller one, and 1000 tokens was confirmed live to be tight
+// enough that a 3-passenger Ryanair confirmation came back with names and
+// baggage dropped even though every one of them was printed in the email.
+const TRIP_MAX_TOKENS = 1800;
 // Bumped whenever tripFieldGuide()'s field list changes -- same reason
 // WELLNESS_SCHEMA_VERSION exists, so a prompt change doesn't silently keep
-// serving a stale cached screenshot result.
-const TRIP_SCHEMA_VERSION = 1;
+// serving a stale cached screenshot result. v2: added per-passenger
+// seat/baggage (previously a single leg-level "seat" field, which can't
+// represent more than one traveller) and a `company` field for transfer.
+const TRIP_SCHEMA_VERSION = 2;
 
 const LEG_KIND_SET = new Set(['flight', 'car_hire', 'accommodation', 'transfer', 'other']);
 
-const TRIP_FIELD_GUIDE = `- flight: airline, flightNumber, departAirport, departTime (ISO date+time if both known, else just what's printed), arriveAirport, arriveTime, confirmationRef (booking reference / PNR), seat
+const TRIP_FIELD_GUIDE = `- flight: airline, flightNumber, departAirport, departTime (ISO date+time if both known, else just what's printed), arriveAirport, arriveTime, confirmationRef (booking reference / PNR)
 - car_hire: company, pickupLocation, pickupTime, dropoffLocation, dropoffTime, confirmationRef, carType
 - accommodation: name, address, checkIn, checkOut, confirmationRef, contactPhone
-- transfer: mode (e.g. "taxi", "train"), from, to, departTime, confirmationRef
+- transfer: company (the train operator or taxi/transfer firm, if named), mode (e.g. "taxi", "train"), from, to, departTime, confirmationRef
 - other: description, when, confirmationRef`;
 
 function tripExtractionInstructions() {
@@ -836,9 +843,26 @@ return `Identify which ONE of these five kinds of travel logistics this is: flig
 Fields by kind (use exactly these JSON key names, only the ones for the kind you identified):
 ${TRIP_FIELD_GUIDE}
 
-Reply with ONLY a JSON object, no other text, no markdown fences:
-{"kind":"flight","label":"a short human label like 'Outbound: LHR to LIS' or 'Lisbon hotel', or null","suggestedTripTitle":"a short trip name if the destination/purpose is obvious, else null","fields":{"airline":"TAP Portugal","confirmationRef":"ABC123"}}
-If nothing recognisable as travel logistics is present, reply {"kind":null,"label":null,"suggestedTripTitle":null,"fields":{}}.`;
+Separately, list EVERY named passenger/traveller/guest on this booking, each with whatever of these is printed for them specifically: their seat (e.g. "12A"), and their baggage/luggage allowance exactly as printed (e.g. "Checked Bag (20kg), Priority & 2 Cabin Bags"). Keep each name as printed, honorific included if shown (e.g. "Mr PHILIP WHITE"). A booking can have several passengers each with a DIFFERENT seat and baggage mix -- list all of them, don't collapse them into one.
+
+Reply with ONLY a JSON object, no other text, no markdown fences. Example, for a 3-passenger Ryanair flight confirmation:
+{"kind":"flight","label":"Outbound: London Stansted to Zadar","suggestedTripTitle":"Zadar trip","fields":{"airline":"Ryanair","flightNumber":"FR8388","departAirport":"London (Stansted) - STN","departTime":"Sat 22 Aug 2026, 20:10","arriveAirport":"Zadar - ZAD","arriveTime":"23:30","confirmationRef":"VZIJXS"},"passengers":[{"name":"Mr PHILIP WHITE","seat":"12A","baggage":"Baby equipment, Checked Bag (20kg), Priority & 2 Cabin Bags"},{"name":"Mr LEWIS WHITE","seat":"12B","baggage":"Priority & 2 Cabin Bags"},{"name":"Ms ZARA WHITE","seat":"12C","baggage":"Priority & 2 Cabin Bags"}]}
+If nothing recognisable as travel logistics is present, reply {"kind":null,"label":null,"suggestedTripTitle":null,"fields":{},"passengers":[]}.`;
+}
+
+function shapeTripExtraction(raw) {
+const passengers = Array.isArray(raw.passengers)
+? raw.passengers.filter((p) => p && String(p.name || '').trim()).map((p) => ({
+name: String(p.name).trim(), seat: p.seat ? String(p.seat).trim() : '', baggage: p.baggage ? String(p.baggage).trim() : '',
+}))
+: [];
+return {
+kind: LEG_KIND_SET.has(raw.kind) ? raw.kind : null,
+label: raw.label || null,
+suggestedTripTitle: raw.suggestedTripTitle || null,
+fields: (raw.fields && typeof raw.fields === 'object') ? raw.fields : {},
+passengers,
+};
 }
 
 async function extractTripScreenshot(file) {
@@ -858,12 +882,7 @@ const { data: raw } = await callAnthropic(
 ],
 TRIP_MAX_TOKENS, TRIP_MODEL, 'Trip screenshot',
 );
-const result = {
-kind: LEG_KIND_SET.has(raw.kind) ? raw.kind : null,
-label: raw.label || null,
-suggestedTripTitle: raw.suggestedTripTitle || null,
-fields: (raw.fields && typeof raw.fields === 'object') ? raw.fields : {},
-};
+const result = shapeTripExtraction(raw);
 await parseCachePut(hash, cacheKind, { result });
 return { ...result, fromCache: false };
 }
@@ -878,12 +897,7 @@ ${String(bodyText || '').slice(0, 12000)}
 
 ${tripExtractionInstructions()}`;
 const { data: raw } = await callTextJson(prompt, TRIP_MAX_TOKENS, TRIP_MODEL, 'Trip email');
-return {
-kind: LEG_KIND_SET.has(raw.kind) ? raw.kind : null,
-label: raw.label || null,
-suggestedTripTitle: raw.suggestedTripTitle || null,
-fields: (raw.fields && typeof raw.fields === 'object') ? raw.fields : {},
-};
+return shapeTripExtraction(raw);
 }
 
 // ---- Country lookup ----

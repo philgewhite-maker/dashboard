@@ -234,11 +234,19 @@ return {
 id: uid(),
 kind: 'flight',
 label: '', // "Outbound: LHR -> LIS", shown instead of a generic kind name
+bookingStatus: 'unbooked',
 fields: {},
 // Per-field resolution: absent = still open, 'confirmed-na' = the user
 // said this one doesn't apply. A real value in `fields` supersedes
 // either state -- see updateLegField in travel.js.
 gapStatus: {},
+// Who's actually on THIS booking and what they're carrying -- a flat
+// leg-level "seat" field can't represent three people on one flight with
+// three different seats and three different baggage allowances (the real
+// case that motivated this: a Ryanair confirmation for 3 passengers, each
+// with their own seat and bag mix). {id, name, seat, baggage}.
+passengers: [],
+notes: '',
 source: null, // {kind:'mail'|'screenshot'|'manual', label, url}
 attachments: [],
 createdAt: new Date().toISOString(),
@@ -246,20 +254,26 @@ createdAt: new Date().toISOString(),
 };
 }
 
+const LEG_STATUSES = ['unbooked', 'booked', 'confirmed'];
+const LEG_STATUS_LABELS = { unbooked: 'Not booked yet', booked: 'Booked', confirmed: 'Confirmed' };
+
 // The single source of truth for what counts as "complete" per leg kind --
 // drives both the entry form and gap detection. Fields in LEG_SOFT_FIELDS
-// are filled in when known but never block completeness.
+// are filled in when known but never block completeness. `company` on
+// transfer covers the train operator / taxi firm the way it already did for
+// car_hire -- airline (flight) and name (accommodation) play the same role
+// for those kinds, so every kind now names its actual provider somewhere.
 const LEG_FIELD_DEFS = {
-flight: ['airline', 'flightNumber', 'departAirport', 'departTime', 'arriveAirport', 'arriveTime', 'confirmationRef', 'seat'],
+flight: ['airline', 'flightNumber', 'departAirport', 'departTime', 'arriveAirport', 'arriveTime', 'confirmationRef'],
 car_hire: ['company', 'pickupLocation', 'pickupTime', 'dropoffLocation', 'dropoffTime', 'confirmationRef', 'carType'],
 accommodation: ['name', 'address', 'checkIn', 'checkOut', 'confirmationRef', 'contactPhone'],
-transfer: ['mode', 'from', 'to', 'departTime', 'confirmationRef'],
+transfer: ['company', 'mode', 'from', 'to', 'departTime', 'confirmationRef'],
 other: ['description', 'when', 'confirmationRef'],
 };
-const LEG_SOFT_FIELDS = new Set(['seat', 'carType', 'contactPhone']);
+const LEG_SOFT_FIELDS = new Set(['carType', 'contactPhone']);
 const LEG_FIELD_LABELS = {
 airline: 'Airline', flightNumber: 'Flight number', departAirport: 'Departure airport', departTime: 'Departure time',
-arriveAirport: 'Arrival airport', arriveTime: 'Arrival time', confirmationRef: 'Confirmation ref', seat: 'Seat',
+arriveAirport: 'Arrival airport', arriveTime: 'Arrival time', confirmationRef: 'Confirmation ref',
 company: 'Company', pickupLocation: 'Pickup location', pickupTime: 'Pickup time', dropoffLocation: 'Drop-off location',
 dropoffTime: 'Drop-off time', carType: 'Car type', name: 'Name', address: 'Address', checkIn: 'Check-in',
 checkOut: 'Check-out', contactPhone: 'Contact phone', mode: 'Mode', from: 'From', to: 'To',
@@ -481,7 +495,14 @@ data.trips = data.trips.map((t) => ({ ...blankTrip(), ...t, id: t.id || uid() })
 data.trips.forEach((t) => {
 t.people = Array.isArray(t.people) ? t.people : [];
 t.legs = Array.isArray(t.legs)
-? t.legs.map((l) => ({ ...blankTripLeg(), ...l, id: l.id || uid(), fields: l.fields || {}, gapStatus: l.gapStatus || {} }))
+? t.legs.map((l) => ({
+...blankTripLeg(), ...l, id: l.id || uid(), fields: l.fields || {}, gapStatus: l.gapStatus || {},
+notes: l.notes || '',
+bookingStatus: LEG_STATUSES.includes(l.bookingStatus) ? l.bookingStatus : 'unbooked',
+passengers: Array.isArray(l.passengers)
+? l.passengers.filter((p) => p && String(p.name || '').trim()).map((p) => ({ id: p.id || uid(), name: p.name, seat: p.seat || '', baggage: p.baggage || '' }))
+: [],
+}))
 : [];
 });
 // A trip whose project task was deleted has nothing left routing it into
@@ -1197,7 +1218,7 @@ isDormantStage, currentAge, displayAge, photoCoverage, photoLinkLabels, averageR
 exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, DEFAULT_PREFS,
 MAIL_SEARCH_KINDS, mailSearchLabel,
 TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureBatch,
-blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS,
+blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS,
 CONTACT_STATUS_LABELS, CONTACT_MATCH_MIN_STAGE,
 DEFAULT_RATING_CATEGORIES, slugifyField, DEFAULT_RECIPE_RATING_CATEGORIES,
 FLAG_FIELD_DEFS, DEFAULT_FLAG_RULES, computeFlags, valueColorForField, stripSharedSuffix, suggestedAction, suggestedQuestions, isTravelPaused, ACTIONS, distanceMiles,
