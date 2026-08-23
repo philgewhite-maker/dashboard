@@ -7,10 +7,13 @@
 // lands here too, just without a thumbnail.
 //
 // A batch disappears from data.captureInbox once every item in it has been
-// routed or discarded. A recognised Health CSV shape (Renpho scale export,
-// so far) skips triage entirely -- see captureItemKind() below, which is the
-// one seam a future deterministic shape (e.g. an HRV export, once a real
-// one's been seen to check the format against) would hook into next.
+// routed or discarded. Two recognised health shapes skip triage entirely:
+// a Renpho scale CSV (content-sniffed, see captureItemKind() below -- the
+// seam a future deterministic CSV shape would hook into), and a Samsung
+// Health screenshot (filename-matched, see
+// looksLikeSamsungHealthScreenshot() -- an image can't be content-sniffed
+// this cheaply, so a real AI vision call decides, with a safe fallback to
+// normal triage if it doesn't recognise the chart).
 import { data, queueSave, blankCaptureBatch } from '../state.js';
 import { photoDelete } from '../db.js';
 import { todayStr, escapeHtml, hydratePhotoBackgrounds, resizeImageToBlob } from '../utils.js';
@@ -32,6 +35,18 @@ if (looksLikeRenphoCsv(head)) return 'renpho-csv';
 if (looksLikeHrvCsv(head)) return 'hrv-csv'; // never true yet -- see renpho.js
 } catch (err) { /* unreadable as text -- fall through to a plain attachment */ }
 return 'attachment';
+}
+
+// Samsung Health's own screenshot filenames follow this shape (confirmed
+// live: "Screenshot_20260823_183715_Samsung Health.jpg") -- unlike the
+// Renpho CSV's content sniff, there's no cheap way to peek at an image's
+// pixels before a real AI vision call, so this is a filename check rather
+// than a content one. A false negative just means normal manual triage
+// (nothing lost); a false positive costs one vision call that returns
+// "unrecognized" and falls back to normal triage the same way -- see the
+// try/catch around extractAndMergeWellnessFile below.
+function looksLikeSamsungHealthScreenshot(filename) {
+return /samsung[ _]?health/i.test(String(filename || ''));
 }
 
 // A batch shared at once (a night's swiping, say) often holds more than
@@ -72,6 +87,8 @@ async function addCaptureBatch({ label, notes = '', source = null, files }) {
 const batch = blankCaptureBatch({ label, notes, source });
 const failed = [];
 const healthImports = [];
+let renphoImported = false;
+let wellnessImported = false;
 for (const file of files) {
 try {
 const kind = await captureItemKind(file);
@@ -80,8 +97,28 @@ const text = await file.text();
 const rows = parseRenphoCsv(text);
 const days = mergeRenphoDaily(rows);
 healthImports.push(`${file.name || 'Renpho export'}: ${days} day${days === 1 ? '' : 's'} of scale readings imported.`);
+renphoImported = true;
 queueSave();
 continue;
+}
+// A filename match is a hint, not a certainty (see
+// looksLikeSamsungHealthScreenshot's own comment) -- extraction runs
+// inside its own try/catch so a missing API key, a network error, or
+// the model genuinely not recognising the chart all fall through to
+// ordinary photo triage below rather than losing the screenshot.
+if (kind === 'photo' && looksLikeSamsungHealthScreenshot(file.name)) {
+try {
+const { extractAndMergeWellnessFile } = await import('./wellness.js');
+const { ok, message } = await extractAndMergeWellnessFile(file);
+if (ok) {
+healthImports.push(message);
+wellnessImported = true;
+queueSave();
+continue;
+}
+} catch (err) {
+console.error('Auto wellness extraction failed, falling back to manual triage:', err);
+}
 }
 if (kind === 'photo') {
 const blob = await resizeImageToBlob(file, 1200, 0.85);
@@ -99,9 +136,13 @@ failed.push(`${file.name || 'file'}: ${err.message || err}`);
 }
 }
 renderCaptureInbox();
-if (healthImports.length) {
+if (renphoImported) {
 const { renderRenphoDaily } = await import('./renpho.js');
 renderRenphoDaily();
+}
+if (wellnessImported) {
+const { renderWellnessDaily } = await import('./wellness.js');
+renderWellnessDaily();
 }
 return { batch, failed, healthImports };
 }
