@@ -101,11 +101,28 @@ renphoImported = true;
 queueSave();
 continue;
 }
+let item;
+if (kind === 'photo') {
+const blob = await resizeImageToBlob(file, 1200, 0.85);
+const id = await storePhoto(blob);
+item = { id, name: file.name || 'photo', type: file.type || blob.type, size: blob.size, kind: 'photo' };
+} else {
+item = { ...(await uploadAttachment(file)), kind: 'attachment' };
+}
+batch.items.push(item);
+if (!data.captureInbox.includes(batch)) data.captureInbox.push(batch);
+queueSave();
 // A filename match is a hint, not a certainty (see
-// looksLikeSamsungHealthScreenshot's own comment) -- extraction runs
-// inside its own try/catch so a missing API key, a network error, or
-// the model genuinely not recognising the chart all fall through to
-// ordinary photo triage below rather than losing the screenshot.
+// looksLikeSamsungHealthScreenshot's own comment), and this is a
+// several-second AI vision call -- it runs AFTER the photo is already
+// safely stored above, not before. Confirmed necessary live: running it
+// first meant a share interrupted mid-call (Android backgrounding the
+// PWA right after the user shares, which happens routinely -- sharing
+// feels "done" the moment the share sheet closes) lost the screenshot
+// entirely, with nothing landing in Capture Inbox and nothing extracted
+// either. Now the worst case if interrupted is the photo already saved
+// above just sits there for manual "Extract wellness data" later,
+// exactly like any other unrecognised photo.
 if (kind === 'photo' && looksLikeSamsungHealthScreenshot(file.name)) {
 try {
 const { extractAndMergeWellnessFile } = await import('./wellness.js');
@@ -113,23 +130,15 @@ const { ok, message } = await extractAndMergeWellnessFile(file);
 if (ok) {
 healthImports.push(message);
 wellnessImported = true;
+await deleteItemBytes(item);
+batch.items = batch.items.filter((it) => it.id !== item.id);
+removeBatchIfEmpty(batch);
 queueSave();
-continue;
 }
 } catch (err) {
-console.error('Auto wellness extraction failed, falling back to manual triage:', err);
+console.error('Auto wellness extraction failed, photo stays in Capture Inbox for manual triage:', err);
 }
 }
-if (kind === 'photo') {
-const blob = await resizeImageToBlob(file, 1200, 0.85);
-const id = await storePhoto(blob);
-batch.items.push({ id, name: file.name || 'photo', type: file.type || blob.type, size: blob.size, kind: 'photo' });
-} else {
-const meta = await uploadAttachment(file);
-batch.items.push({ ...meta, kind: 'attachment' });
-}
-if (!data.captureInbox.includes(batch)) data.captureInbox.push(batch);
-queueSave();
 } catch (err) {
 console.error('Could not capture a shared file:', err);
 failed.push(`${file.name || 'file'}: ${err.message || err}`);
