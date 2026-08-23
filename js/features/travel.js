@@ -170,27 +170,65 @@ return { trip, leg, filled };
 }
 
 // Reused by both mail.js and captureinbox.js so the "pick a target trip"
-// UI (and its "+ New trip" branch) exists in exactly one place.
+// UI exists in exactly one place. Framed as two explicit buttons rather
+// than a single dropdown with a "+ New trip" option buried in it, per the
+// user's own suggestion -- and with exactly one trip open, "Existing trip"
+// auto-routes straight to it with nothing left to pick (see setMode below),
+// so the common case (one trip in flight) is a single click, not a lookup.
 function legTargetPickerHtml(prefix) {
-return `<select data-leg-target-trip="${prefix}">
-<option value="__new__">+ New trip</option>
-${tripOptionsHtml()}
-</select>
-<input type="text" class="tag-add-input" data-leg-target-title="${prefix}" placeholder="Trip name" style="display:none;">
+const hasTrips = data.trips.length > 0;
+return `<div class="leg-target-picker" data-leg-target-picker="${prefix}">
+<div class="leg-target-mode-row">
+<button type="button" class="leg-target-mode-btn" data-leg-target-mode-btn="${prefix}" data-mode="existing"${hasTrips ? '' : ' disabled title="No trips yet"'}>Existing trip</button>
+<button type="button" class="leg-target-mode-btn" data-leg-target-mode-btn="${prefix}" data-mode="new">New trip</button>
+</div>
+<select data-leg-target-trip="${prefix}">${tripOptionsHtml()}</select>
+<span class="settings-note" data-leg-target-single="${prefix}" hidden></span>
+<input type="text" class="tag-add-input" data-leg-target-title="${prefix}" placeholder="Trip name" hidden>
 <select data-leg-target-kind="${prefix}">
 ${LEG_KINDS.map((k) => `<option value="${k}">${escapeHtml(LEG_KIND_LABELS[k])}</option>`).join('')}
-</select>`;
+</select>
+</div>`;
 }
 function bindLegTargetPicker(root, prefix) {
+const container = root.querySelector(`[data-leg-target-picker="${prefix}"]`);
+const modeBtns = root.querySelectorAll(`[data-leg-target-mode-btn="${prefix}"]`);
 const tripSel = root.querySelector(`[data-leg-target-trip="${prefix}"]`);
+const singleNote = root.querySelector(`[data-leg-target-single="${prefix}"]`);
 const titleInput = root.querySelector(`[data-leg-target-title="${prefix}"]`);
-if (!tripSel || !titleInput) return;
-titleInput.style.display = tripSel.value === '__new__' ? '' : 'none';
-tripSel.addEventListener('change', () => { titleInput.style.display = tripSel.value === '__new__' ? '' : 'none'; });
+if (!container || !tripSel || !titleInput) return;
+
+function setMode(mode) {
+container.dataset.mode = mode;
+modeBtns.forEach((b) => b.classList.toggle('active', b.dataset.mode === mode));
+if (mode === 'new') {
+tripSel.hidden = true;
+singleNote.hidden = true;
+titleInput.hidden = false;
+} else if (data.trips.length === 1) {
+// Only one trip open -- nothing to choose, so skip the dropdown
+// entirely and just say where this is going.
+tripSel.hidden = true;
+tripSel.value = data.trips[0].id;
+singleNote.hidden = false;
+singleNote.textContent = `→ ${data.trips[0].title}`;
+titleInput.hidden = true;
+} else {
+tripSel.hidden = false;
+singleNote.hidden = true;
+titleInput.hidden = true;
+}
+}
+
+modeBtns.forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
+setMode(data.trips.length > 0 ? 'existing' : 'new');
 }
 function readLegTargetPicker(root, prefix) {
+const container = root.querySelector(`[data-leg-target-picker="${prefix}"]`);
+const mode = container?.dataset.mode || (data.trips.length > 0 ? 'existing' : 'new');
+const tripSel = root.querySelector(`[data-leg-target-trip="${prefix}"]`);
 return {
-tripId: root.querySelector(`[data-leg-target-trip="${prefix}"]`)?.value || '__new__',
+tripId: mode === 'new' ? '__new__' : (tripSel?.value || '__new__'),
 newTripTitle: root.querySelector(`[data-leg-target-title="${prefix}"]`)?.value || '',
 kind: root.querySelector(`[data-leg-target-kind="${prefix}"]`)?.value || 'other',
 };
