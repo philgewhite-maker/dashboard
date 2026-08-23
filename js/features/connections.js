@@ -1,4 +1,4 @@
-import { data, queueSave, reachOutThreshold, isDormantStage, isTravelPaused, getLocalSettings, setLocalSetting, TAG_FIELDS, CONTACT_STATUS_LABELS, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness, slugifyField, FLAG_FIELD_DEFS, computeFlags, valueColorForField, stripSharedSuffix, suggestedAction, suggestedQuestions, recordImportRun, importStatusLine, upsertIdentity } from '../state.js';
+import { data, queueSave, reachOutThreshold, isDormantStage, isTravelPaused, getLocalSettings, setLocalSetting, TAG_FIELDS, CONTACT_STATUS_LABELS, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness, slugifyField, FLAG_FIELD_DEFS, DEFAULT_FLAG_RULES, computeFlags, valueColorForField, stripSharedSuffix, suggestedAction, suggestedQuestions, recordImportRun, importStatusLine, upsertIdentity, blankConnection } from '../state.js';
 import { captureTask, revealTask } from './tasks.js';
 import { photoDelete, photoUrl } from '../db.js';
 import { storePhoto } from '../files.js';
@@ -1659,13 +1659,7 @@ const appInput = document.getElementById('conn-app-input');
 const name = nameInput.value.trim();
 if (!name) return;
 const newId = uid();
-data.connections.push({
-id: newId, name, identities: [], app: appInput.value, priority: 3, stage: 'Matched', lastContact: todayStr(), createdAt: new Date().toISOString(),
-photoId: null, photoIds: [], age: '', location: [], kids: '', job: '', height: '', education: '',
-likes: '', notes: '',
-languages: [], nationality: [], todos: [], tags: [], dateLocations: [], dateEvents: [], sexTags: [],
-ratings: {}, driveLink: '',
-});
+data.connections.push(blankConnection({ id: newId, name, app: appInput.value, lastContact: todayStr() }));
 nameInput.value = '';
 renderConnections();
 renderOverviewRef();
@@ -2021,7 +2015,6 @@ queueSave();
 }
 
 async function addNewConnectionFromCandidate(cand, app, isProfile) {
-const id = uid();
 let photoId = null;
 const photoIds = [];
 const blobs = isProfile ? (cand.photoBlobs || []) : (cand.photoBlob ? [cand.photoBlob] : []);
@@ -2030,7 +2023,6 @@ const pid = await storePhoto(blob);
 photoIds.push(pid);
 if (!photoId) photoId = pid;
 }
-data.connections.push({
 // profileName records what the app called them, so renaming the
 // connection to their real name later doesn't orphan the photos. Falls
 // back to a placeholder rather than null/'' -- a nameless connection
@@ -2040,14 +2032,20 @@ data.connections.push({
 // this one (confirmed live: a Bumble matches-list row with no readable
 // name broke every screenshot import after it until the record was
 // found and fixed).
-id, name: cand.name || 'Unnamed match', profileName: cand.name || '', identities: [], app, priority: 3, stage: cand.stage || 'Matched', lastContact: todayStr(), createdAt: new Date().toISOString(),
+const conn = blankConnection({
+name: cand.name || 'Unnamed match', profileName: cand.name || '', app, stage: cand.stage || 'Matched', lastContact: todayStr(),
 photoId, photoIds, age: cand.age || '', location: cand.location ? [cand.location] : [], kids: cand.kids || '', job: cand.job || '',
 height: cand.height || '', education: cand.education || '',
-likes: '', notes: cand.bio || '', languages: cand.languages || [], nationality: cand.nationality || [],
-todos: [], tags: [], dateLocations: [], dateEvents: [], sexTags: [], ratings: {}, driveLink: '',
 });
-const conn = data.connections[data.connections.length - 1];
+data.connections.push(conn);
 upsertIdentity(conn, { platform: app, handle: cand.name });
+// A profile screenshot (not a bare matches-list one) carries bio/
+// languages/nationality/interests/lookingFor/drinking/smoking too --
+// same fields an update to an EXISTING connection already picks up via
+// applyCandidateUpdate's isProfile branch. This is the "new connection"
+// counterpart, so a brand-new person parsed from a profile screenshot no
+// longer loses everything beyond the handful of scalar fields above.
+if (isProfile) applyProfileFieldsToConnection(conn, cand);
 }
 
 // location deliberately excluded -- it's a TAG_FIELDS member now (see
@@ -2110,36 +2108,55 @@ if ((STAGE_RANK[source.stage] ?? 0) > (STAGE_RANK[target.stage] ?? 0)) target.st
 if (source.lastContact && (!target.lastContact || source.lastContact > target.lastContact)) target.lastContact = source.lastContact;
 }
 
-async function applyCandidateUpdate(existing, cand, isProfile, app) {
-const blobs = isProfile ? (cand.photoBlobs || []) : (cand.photoBlob ? [cand.photoBlob] : []);
-for (const blob of blobs) {
-const pid = await storePhoto(blob);
-existing.photoIds.push(pid);
-if (!existing.photoId) existing.photoId = pid;
+// Tinder appends " (shared)" to an interest it says you both have --
+// stripSharedSuffix already exists so a flag rule listing "Hiking" matches
+// either spelling, but the STORED value used to keep the literal
+// "Hiking (shared)" text forever, showing up verbatim everywhere interests
+// render. Trimmed before storing now; a genuinely shared one (the suffix
+// was actually present, not just absent) is also folded into the
+// interests flag rule's green list -- Tinder is telling you this is a real
+// positive signal, the same as any other confirmed-good match criterion.
+const SHARED_INTEREST_RE = /\(shared\)\s*$/i;
+function markInterestGreen(cleanValue) {
+if (!cleanValue) return;
+let rule = data.flagRules.find((r) => r.field === 'interests');
+if (!rule) {
+rule = { id: 'default-interests-shared', field: 'interests', green: [], amber: [], red: [] };
+data.flagRules.push(rule);
+if (!data.flagRulesSeeded.includes(rule.id)) data.flagRulesSeeded.push(rule.id);
 }
-upsertIdentity(existing, { platform: app, handle: cand.name });
-// Same merge semantics as mergeConnectionInto: fill gaps, never overwrite.
-// What you typed yourself outranks what a model read off a screenshot.
-const incoming = {
-age: cand.age, job: cand.job, kids: cand.kids,
-height: cand.height, education: cand.education,
-};
-SCALAR_MERGE_FIELDS.forEach((k) => {
-if (!String(existing[k] || '').trim() && String(incoming[k] || '').trim()) existing[k] = incoming[k];
-});
-// location is a TAG_FIELDS member (multi-value) -- cand.location is still
-// a single AI best-guess (a screenshot shows one thing), unioned in as one
-// candidate value rather than fill-if-empty overwriting the whole array.
-if (!Array.isArray(existing.location)) existing.location = [];
-unionInto(existing.location, cand.location ? [cand.location] : []);
-if (isProfile) {
+if (!Array.isArray(rule.green)) rule.green = [];
+if (!Array.isArray(rule.amber)) rule.amber = [];
+if (!Array.isArray(rule.red)) rule.red = [];
+const norm = stripSharedSuffix(cleanValue).toLowerCase();
+const alreadyColored = [...rule.green, ...rule.amber, ...rule.red]
+.some((v) => stripSharedSuffix(v).toLowerCase() === norm);
+// Never overrides a color the user already picked by hand -- this only
+// fills in a fresh interest that isn't colored anywhere yet.
+if (!alreadyColored) rule.green.push(cleanValue);
+}
+function processIncomingInterest(raw) {
+const wasShared = SHARED_INTEREST_RE.test(String(raw || ''));
+const clean = stripSharedSuffix(raw);
+if (wasShared && clean) markInterestGreen(clean);
+return clean;
+}
+
+// Everything a PROFILE screenshot/scrape can add beyond the basic scalar
+// fields (bio, languages, nationality, interests, relationship-goal tag,
+// drinking/smoking) -- shared by both the "update an existing connection"
+// and "create a brand new one from this screenshot" paths, so a new
+// connection no longer loses fields an update of the same screenshot would
+// have kept (confirmed real: addNewConnectionFromCandidate used to skip
+// this whole block entirely).
+function applyProfileFieldsToConnection(existing, cand) {
 const bio = String(cand.bio || '').trim();
 const notes = String(existing.notes || '').trim();
 if (bio && bio !== notes) existing.notes = notes ? `${notes}\n${bio}` : bio;
 unionInto(existing.languages, cand.languages);
 unionInto(existing.nationality, cand.nationality);
 if (!Array.isArray(existing.interests)) existing.interests = [];
-unionInto(existing.interests, cand.interests);
+unionInto(existing.interests, (cand.interests || []).map(processIncomingInterest).filter(Boolean));
 // "Looking for" is Bumble/Tinder's own relationship-goal question --
 // TAG_FIELDS' relationshipTags, same field the Tinder console-snippet
 // importer's Orientation/"Relationship type"/"Looking for" chip already
@@ -2180,6 +2197,30 @@ if (!Array.isArray(existing.tags)) existing.tags = [];
 const habitTags = [normalizeHabitTag('drinking', cand.drinking), normalizeHabitTag('smoking', cand.smoking)].filter(Boolean);
 unionInto(existing.tags, habitTags);
 }
+
+async function applyCandidateUpdate(existing, cand, isProfile, app) {
+const blobs = isProfile ? (cand.photoBlobs || []) : (cand.photoBlob ? [cand.photoBlob] : []);
+for (const blob of blobs) {
+const pid = await storePhoto(blob);
+existing.photoIds.push(pid);
+if (!existing.photoId) existing.photoId = pid;
+}
+upsertIdentity(existing, { platform: app, handle: cand.name });
+// Same merge semantics as mergeConnectionInto: fill gaps, never overwrite.
+// What you typed yourself outranks what a model read off a screenshot.
+const incoming = {
+age: cand.age, job: cand.job, kids: cand.kids,
+height: cand.height, education: cand.education,
+};
+SCALAR_MERGE_FIELDS.forEach((k) => {
+if (!String(existing[k] || '').trim() && String(incoming[k] || '').trim()) existing[k] = incoming[k];
+});
+// location is a TAG_FIELDS member (multi-value) -- cand.location is still
+// a single AI best-guess (a screenshot shows one thing), unioned in as one
+// candidate value rather than fill-if-empty overwriting the whole array.
+if (!Array.isArray(existing.location)) existing.location = [];
+unionInto(existing.location, cand.location ? [cand.location] : []);
+if (isProfile) applyProfileFieldsToConnection(existing, cand);
 // Only move the stage forward, never back — a screenshot re-import
 // shouldn't undo progress you've logged manually since (e.g. re-scanning
 // an old "New Matches" screenshot after you've already met up).
@@ -2267,5 +2308,5 @@ initSensitiveFields, setShowSensitiveFields, visibleTagFields,
 filterByEmptyField, filterBySearch, filterByIds, clearFilters,
 STAGE_RANK, setContactPicker, phoneWithFlagHtml, initRatingCategoriesSettings,
 initFlagRulesSettings, unionInto, initHideArchivedFaded,
-connectionOptionsHtml, applyDirectProfileUpload,
+connectionOptionsHtml, applyDirectProfileUpload, applyProfileFieldsToConnection,
 };

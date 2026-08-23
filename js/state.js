@@ -322,6 +322,36 @@ const TAG_FIELDS = [
 { field: 'socialHandles', label: 'Social handles', sensitive: false },
 ];
 
+// One connection, with every field any part of the app reads off one
+// already defaulted -- manual add, screenshot import, and the WhatsApp/
+// Telegram/Tinder/Photos importers used to each build a different ad-hoc
+// object literal by hand, drifting further apart every time a field got
+// added to only one of them (confirmed: photoalbums.js's copy had
+// `location: ''`, a string, instead of the array every other field expects
+// -- the exact same crash class already fixed once for the manual-add site).
+// Same factory pattern blankTask()/blankTrip() already use for their own
+// entities. TAG_FIELDS' array fields are spread in rather than hand-listed
+// again here, so a future addition to TAG_FIELDS is picked up automatically
+// instead of needing this factory remembered too.
+function blankConnection(fields = {}) {
+return {
+id: uid(),
+name: '', profileName: '', identities: [], app: '', priority: 3, stage: 'Matched',
+lastContact: '', createdAt: new Date().toISOString(),
+photoId: null, photoIds: [], tinderPhotoKeys: [], photoAlbums: [],
+age: '', dob: '', ageAsOf: '',
+address: '', kids: '', job: '', height: '', education: '',
+phone: '', email: '',
+contactStatus: '', contactResourceName: '', contactEtag: '', contactConflicts: [],
+contactMatchedBy: '', unmatchedAt: '',
+likes: '', notes: '', chatLog: '', chatLogWhatsApp: '', chatLogTelegram: '',
+todos: [], ratings: {}, driveLink: '', photosAlbumUrl: '', photosPersonUrl: '',
+distance: '', matchedOn: '', tinderMatchId: '', attentionSnoozedUntil: '',
+...Object.fromEntries(TAG_FIELDS.map((t) => [t.field, []])),
+...fields,
+};
+}
+
 // Starting points, not gospel — surfaced in Settings once real tag values
 // are visible, so these are deliberately conservative rather than an
 // attempt to guess every value Tinder might ever show. "How often do you
@@ -664,6 +694,11 @@ if (!Array.isArray(c.contactConflicts)) c.contactConflicts = [];
 if (typeof c.contactStatus !== 'string') c.contactStatus = '';
 if (typeof c.contactResourceName !== 'string') c.contactResourceName = '';
 if (typeof c.contactEtag !== 'string') c.contactEtag = '';
+// Written by contacts.js (match confirmation) and tinderimport.js (the
+// "unmatched" sweep) but never guarded here until now -- the one gap in
+// this migration pass every other connection field already goes through.
+if (typeof c.contactMatchedBy !== 'string') c.contactMatchedBy = '';
+if (typeof c.unmatchedAt !== 'string') c.unmatchedAt = '';
 if (!c.ratings || typeof c.ratings !== 'object') c.ratings = {};
 // "Intelligence" became "IQ" — move any rating already given under the
 // old key rather than losing it. Guarded so a document that's already
@@ -1217,7 +1252,7 @@ setExternalUpdateHandler, setLocalChangeHandler, getLocalSettings, setLocalSetti
 isDormantStage, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness,
 exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, DEFAULT_PREFS,
 MAIL_SEARCH_KINDS, mailSearchLabel,
-TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureBatch,
+TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureBatch, blankConnection,
 blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS,
 CONTACT_STATUS_LABELS, CONTACT_MATCH_MIN_STAGE,
 DEFAULT_RATING_CATEGORIES, slugifyField, DEFAULT_RECIPE_RATING_CATEGORIES,

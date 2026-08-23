@@ -30,6 +30,20 @@ const expandedTasks = new Set();
 function taskById(id) { return data.tasks.find((t) => t.id === id); }
 function childrenOf(id) { return data.tasks.filter((t) => t.parentId === id); }
 
+// One pass over the whole array instead of one filter() PER NODE -- the
+// recursive tree render below used to call childrenOf() (a full data.tasks
+// scan) once for every task in the tree, which is O(n) work times O(n)
+// nodes. Built once per render, threaded through the recursive calls.
+function buildChildrenMap() {
+const map = new Map();
+data.tasks.forEach((t) => {
+if (!t.parentId) return;
+if (!map.has(t.parentId)) map.set(t.parentId, []);
+map.get(t.parentId).push(t);
+});
+return map;
+}
+
 // A task is "dormant" while its bring-forward date is still in the future.
 // It stays in the document and in the Scheduled list, but keeps out of the
 // lists you work from.
@@ -69,8 +83,8 @@ if (isDormant(t)) return `<span class="task-badge dormant">back ${escapeHtml(t.b
 return '';
 }
 
-function taskRowHtml(t, depth = 0) {
-const kids = childrenOf(t.id);
+function taskRowHtml(t, depth = 0, childrenMap) {
+const kids = childrenMap ? (childrenMap.get(t.id) || []) : childrenOf(t.id);
 const openDetail = expandedTasks.has(t.id);
 const doneKids = kids.filter((k) => k.bucket === 'done').length;
 return `<div class="task-row${t.bucket === 'done' ? ' done' : ''}${isDormant(t) ? ' dormant' : ''}" data-task-row="${t.id}" style="--depth:${depth};">
@@ -83,7 +97,7 @@ ${contextChipsHtml(t)}
 <span class="del-x" style="opacity:1;" data-task-del="${t.id}">&times;</span>
 </div>
 ${openDetail ? taskDetailHtml(t) : ''}
-${kids.map((k) => taskRowHtml(k, depth + 1)).join('')}
+${kids.map((k) => taskRowHtml(k, depth + 1, childrenMap)).join('')}
 </div>`;
 }
 
@@ -219,6 +233,7 @@ bindAllocation(el);
 
 function renderLists() {
 const el = document.getElementById('task-lists');
+const childrenMap = buildChildrenMap();
 const active = data.tasks.filter((t) => t.bucket !== 'inbox' && t.parentId === null);
 const sections = TASK_BUCKETS.filter((b) => b.bucket !== 'inbox').map((b) => {
 if (b.bucket === 'done' && !showDone) return '';
@@ -234,14 +249,14 @@ return ad - bd;
 });
 return `<div class="task-section">
 <h3>${escapeHtml(b.label)} <span class="task-section-count">${items.length}</span></h3>
-${items.map((t) => taskRowHtml(t)).join('')}
+${items.map((t) => taskRowHtml(t, 0, childrenMap)).join('')}
 </div>`;
 }).filter(Boolean).join('');
 
 const dormant = data.tasks.filter((t) => t.bucket !== 'done' && isDormant(t));
 const dormantHtml = dormant.length ? `<div class="task-section">
 <h3>Scheduled to surface <span class="task-section-count">${dormant.length}</span></h3>
-${dormant.sort((a, b) => daysUntil(a.bringForward) - daysUntil(b.bringForward)).map((t) => taskRowHtml(t)).join('')}
+${dormant.sort((a, b) => daysUntil(a.bringForward) - daysUntil(b.bringForward)).map((t) => taskRowHtml(t, 0, childrenMap)).join('')}
 </div>` : '';
 
 el.innerHTML = (sections + dormantHtml) || '<div class="empty">Nothing filed yet — capture something above, then file it from the Inbox.</div>';

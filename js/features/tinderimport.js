@@ -22,7 +22,7 @@
 // importer), and the chosen connection's photo stays visible for the whole
 // review regardless of how it got picked, so a wrong dropdown pick is just
 // as visible as a wrong auto-match was invisible before.
-import { data, queueSave, currentAge, computeFlags, distanceMiles, FLAG_FIELD_DEFS, suggestedQuestions, TAG_FIELDS, stripSharedSuffix, recordImportRun, importStatusLine, upsertIdentity } from '../state.js';
+import { data, queueSave, currentAge, computeFlags, distanceMiles, FLAG_FIELD_DEFS, suggestedQuestions, TAG_FIELDS, stripSharedSuffix, recordImportRun, importStatusLine, upsertIdentity, blankConnection } from '../state.js';
 import { escapeHtml, uid, todayStr, hydratePhotoBackgrounds, openLightbox, knownCityMap, COUNTRY_NAME_TO_NATIONALITY } from '../utils.js';
 import { nameKey, editDistance, phoneKey } from '../googlecontacts.js';
 import { storePhoto, fetchProxiedImage } from '../files.js';
@@ -160,15 +160,7 @@ return matchCandidates(name, 1)[0] || null;
 }
 
 function createConnectionFor(name) {
-const conn = {
-id: uid(), name, profileName: '', identities: [], app: 'Tinder', priority: 3, stage: 'Matched', lastContact: todayStr(), createdAt: new Date().toISOString(),
-photoId: null, photoIds: [], tinderPhotoKeys: [], photoAlbums: [], age: '', dob: '', ageAsOf: '', location: [], address: '',
-kids: '', job: '', height: '', education: '', phone: '', email: '',
-contactStatus: '', contactResourceName: '', contactEtag: '', contactConflicts: [],
-likes: '', notes: '', chatLog: '', chatLogWhatsApp: '', chatLogTelegram: '', languages: [], nationality: [],
-todos: [], tags: [], aliases: [], dateLocations: [], dateEvents: [], sexTags: [],
-ratings: {}, driveLink: '', photosAlbumUrl: '', photosPersonUrl: '',
-};
+const conn = blankConnection({ name, app: 'Tinder', lastContact: todayStr() });
 data.connections.push(conn);
 return conn;
 }
@@ -1810,6 +1802,23 @@ if (saveOpenBtn) saveOpenBtn.addEventListener('click', () => { if (confirmRisky(
 // the save actually lands -- a separate real page load (this is a single-
 // page app with no per-connection URL otherwise), so it goes through the
 // same #<tab>:<id> hash format initTabs() already parses.
+// "Family plans" is free text (Tinder shows many different answers, not a
+// boolean), but its one common "wants kids" answer has shown up under two
+// verb conjugations -- "Want kids" and "Wants kids" -- sitting side by side
+// in the default flag rule's green list because both have been seen in the
+// wild and neither could be safely dropped without risking an existing
+// connection's green flag silently stopping matching. Narrow and additive:
+// only touches that one known duplicate going forward, so new imports
+// converge on one spelling instead of the flag rule needing to keep
+// defensively listing every variant Tinder's copy might use. Every other
+// "Family plans" answer (there are many -- "Open to kids", "Has kids"...)
+// passes through unchanged, and every other FIELD_MAP field is untouched.
+function normalizeScalarFieldValue(label, value) {
+const v = String(value || '').trim();
+if (label === 'Family plans' && /^wants?\s+kids$/i.test(v)) return 'Want kids';
+return v;
+}
+
 // The actual write: applies a built pending object `p` to its chosen
 // connection. Pulled out of save() so the bulk-review submit button can
 // run the exact same logic against many rows in a row, not a reimplemented
@@ -1839,7 +1848,7 @@ if (target) {
 // so a field that reaches here checked is a deliberate overwrite, not an
 // accidental one -- the old fill-if-empty guard here silently blocked
 // that override from ever taking effect even once the box was checked.
-conn[target] = f.value;
+conn[target] = normalizeScalarFieldValue(f.label, f.value);
 return;
 }
 const arrayMap = ARRAY_FIELD_MAP[f.label];

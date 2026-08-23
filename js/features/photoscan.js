@@ -8,8 +8,8 @@
 // Every result is cached against a hash of the image bytes, so re-scanning
 // the same album costs nothing. That matters because reviewing an album is
 // something you do repeatedly as it grows.
-import { data, queueSave, blankTask, recordImportRun, importStatusLine, upsertIdentity } from '../state.js';
-import { uid, escapeHtml, resizeImageToBlob } from '../utils.js';
+import { data, queueSave, blankTask, recordImportRun, importStatusLine, upsertIdentity, blankConnection } from '../state.js';
+import { escapeHtml, resizeImageToBlob } from '../utils.js';
 import { storePhoto } from '../files.js';
 import { MissingKeyError, quickScanScreenshot, extractProfileFromScreenshot } from '../ai.js';
 
@@ -110,6 +110,11 @@ for (const blob of blobs.filter(Boolean).slice(0, 6)) {
 photoIds.push(await storePhoto(blob));
 }
 
+// bio/languages/nationality/interests/lookingFor/drinking/smoking are all
+// handled by the shared applyProfileFieldsToConnection() call below instead
+// -- fill() only covers what that function doesn't: the scalar fields and
+// photos this screenshot-triage flow has that a plain profile-screenshot
+// import doesn't (age/captureDate specifically).
 const fill = (target) => {
 const set = (field, value) => { if (value && !String(target[field] || '').trim()) target[field] = value; };
 set('age', s.age || rich.age);
@@ -119,38 +124,38 @@ set('education', rich.education);
 set('job', rich.job);
 set('kids', rich.kids);
 // Multi-value now (see state.js's TAG_FIELDS) -- union in rather than
-// fill-if-empty overwrite, same as languages/nationality just below.
+// fill-if-empty overwrite.
 if (!Array.isArray(target.location)) target.location = [];
 if (rich.location && !target.location.includes(rich.location)) target.location.push(rich.location);
-if (rich.bio && !String(target.notes || '').includes(rich.bio)) {
-target.notes = target.notes ? `${target.notes}\n${rich.bio}` : rich.bio;
-}
-(rich.languages || []).forEach((l) => { if (!target.languages.includes(l)) target.languages.push(l); });
-(rich.nationality || []).forEach((n) => { if (!target.nationality.includes(n)) target.nationality.push(n); });
 photoIds.forEach((id) => { if (!target.photoIds.includes(id)) target.photoIds.push(id); });
 if (!target.photoId) target.photoId = target.photoIds[0] || null;
 };
 
+// rich is the same shape extractProfileFromScreenshot produces everywhere
+// else (bio/languages/nationality/interests/lookingFor/drinking/smoking),
+// so both branches route it through the one shared merge function
+// connections.js already uses for its own profile-screenshot paths --
+// this used to have its own smaller hand-rolled fill(), which (like
+// addNewConnectionFromCandidate before this fix) silently dropped
+// interests/lookingFor/drinking/smoking entirely.
 if (existing) {
 fill(existing);
+const { applyProfileFieldsToConnection } = await import('./connections.js');
+applyProfileFieldsToConnection(existing, rich);
 upsertIdentity(existing, { platform: s.app || 'Other', handle: s.name });
 statusEl().textContent = `Merged into ${existing.name}.`;
 } else {
-const conn = {
-id: uid(), name: s.name, profileName: s.name, identities: [], app: s.app || 'Other', priority: 3,
-stage: 'Matched', lastContact: new Date().toISOString().slice(0, 10), createdAt: new Date().toISOString(),
+const conn = blankConnection({
+name: s.name, profileName: s.name, app: s.app || 'Other', lastContact: new Date().toISOString().slice(0, 10),
 photoId: photoIds[0] || null, photoIds,
-age: s.age || rich.age || '', ageAsOf: s.captureDate || '', dob: '',
-location: rich.location ? [rich.location] : [], address: '', kids: rich.kids || '', job: rich.job || '',
+age: s.age || rich.age || '', ageAsOf: s.captureDate || '',
+location: rich.location ? [rich.location] : [], kids: rich.kids || '', job: rich.job || '',
 height: rich.height || '', education: rich.education || '',
-phone: '', email: '', contactStatus: '', contactResourceName: '', contactEtag: '',
-contactConflicts: [], likes: '', notes: rich.bio || '',
-languages: rich.languages || [], nationality: rich.nationality || [],
-todos: [], tags: [], aliases: [], dateLocations: [], dateEvents: [], sexTags: [],
-ratings: {}, driveLink: '', photosAlbumUrl: '', photosPersonUrl: '',
-};
+});
 upsertIdentity(conn, { platform: conn.app, handle: s.name });
 data.connections.push(conn);
+const { applyProfileFieldsToConnection } = await import('./connections.js');
+applyProfileFieldsToConnection(conn, rich);
 statusEl().textContent = `Added ${conn.name}.`;
 }
 s.saved = true;

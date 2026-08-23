@@ -4,7 +4,7 @@
 // assumption Tinder's own chat import already makes (see tinderimport.js's
 // summarizeCleanMatch) -- so importing again just overwrites chatLog with
 // whatever's now longer, rather than needing to dedupe line by line.
-import { data, queueSave, recordImportRun, importStatusLine, upsertIdentity } from '../state.js';
+import { data, queueSave, recordImportRun, importStatusLine, upsertIdentity, blankConnection } from '../state.js';
 import { escapeHtml, findMentions } from '../utils.js';
 import { nameKey, editDistance } from '../googlecontacts.js';
 import { STAGE_RANK, renderConnections, unionInto } from './connections.js';
@@ -127,16 +127,7 @@ return typeof limit === 'number' ? results.slice(0, limit) : results;
 }
 
 function createConnectionFor(name) {
-const conn = {
-id: `wa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, name, profileName: '', identities: [], app: 'WhatsApp', priority: 3,
-stage: 'Matched', lastContact: '', createdAt: new Date().toISOString(),
-photoId: null, photoIds: [], tinderPhotoKeys: [], photoAlbums: [], age: '', dob: '', ageAsOf: '', location: [], address: '',
-kids: '', job: '', height: '', education: '', phone: '', email: '',
-contactStatus: '', contactResourceName: '', contactEtag: '', contactConflicts: [],
-likes: '', notes: '', chatLog: '', chatLogWhatsApp: '', chatLogTelegram: '', languages: [], nationality: [],
-todos: [], tags: [], aliases: [], dateLocations: [], dateEvents: [], sexTags: [],
-ratings: {}, driveLink: '', photosAlbumUrl: '', photosPersonUrl: '',
-};
+const conn = blankConnection({ name, app: 'WhatsApp' });
 data.connections.push(conn);
 return conn;
 }

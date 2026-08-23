@@ -4,7 +4,7 @@
 // numbers -- so this reads the whole thing at once (via a folder picker),
 // cross-matches every chat against existing connections, and lets a bulk
 // review pass apply the confident ones while flagging the rest for a glance.
-import { data, queueSave, recordImportRun, importStatusLine, upsertIdentity } from '../state.js';
+import { data, queueSave, recordImportRun, importStatusLine, upsertIdentity, blankConnection } from '../state.js';
 import { escapeHtml, findMentions } from '../utils.js';
 import { nameKey, editDistance, phoneKey } from '../googlecontacts.js';
 import { STAGE_RANK, renderConnections, unionInto } from './connections.js';
@@ -161,16 +161,7 @@ return conn ? { conn, phone } : null;
 }
 
 function createConnectionFor(name) {
-const conn = {
-id: `tg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, name, profileName: '', identities: [], app: 'Telegram', priority: 3,
-stage: 'Matched', lastContact: '', createdAt: new Date().toISOString(),
-photoId: null, photoIds: [], tinderPhotoKeys: [], photoAlbums: [], age: '', dob: '', ageAsOf: '', location: [], address: '',
-kids: '', job: '', height: '', education: '', phone: '', email: '',
-contactStatus: '', contactResourceName: '', contactEtag: '', contactConflicts: [],
-likes: '', notes: '', chatLog: '', chatLogWhatsApp: '', chatLogTelegram: '', languages: [], nationality: [],
-todos: [], tags: [], aliases: [], dateLocations: [], dateEvents: [], sexTags: [],
-ratings: {}, driveLink: '', photosAlbumUrl: '', photosPersonUrl: '',
-};
+const conn = blankConnection({ name, app: 'Telegram' });
 data.connections.push(conn);
 return conn;
 }

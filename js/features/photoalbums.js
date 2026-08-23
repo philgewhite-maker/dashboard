@@ -24,8 +24,8 @@
 //
 // Matching by name happens ONCE, at import; what gets stored is the album
 // URL. So renaming an album later doesn't break an already-linked person.
-import { data, queueSave, TAG_FIELDS, recordImportRun, importStatusLine } from '../state.js';
-import { escapeHtml, uid, todayStr, hydratePhotoBackgrounds } from '../utils.js';
+import { data, queueSave, TAG_FIELDS, recordImportRun, importStatusLine, blankConnection } from '../state.js';
+import { escapeHtml, todayStr, hydratePhotoBackgrounds } from '../utils.js';
 import { nameKey, editDistance } from '../googlecontacts.js';
 import { photoGet } from '../db.js';
 import { fetchProxiedImage, storePhoto } from '../files.js';
@@ -141,20 +141,14 @@ return null;
 // For the common case in an album import: a real album with no matching
 // name at all, not a near-miss worth fixing by hand. "Real life" fits
 // better than a dating-app name here, since these come from Photos, not a
-// swipe. Shape mirrors the other two connection-creation sites in
-// connections.js (the manual add form, and screenshot import) — this file
-// doesn't import from there to avoid a circular dependency, so it's kept in
-// step by hand rather than factored out.
+// swipe. Used to hand-roll its own object literal to avoid importing from
+// connections.js (circular dependency) -- blankConnection() lives in
+// state.js instead, which every file already imports, so that's no longer
+// a reason to keep a separate, driftable copy by hand. (That copy had
+// `location: ''`, a string where every other field expects an array --
+// the same crash class already fixed once for the manual-add site.)
 function createConnectionFor(name) {
-const conn = {
-id: uid(), name, profileName: '', identities: [], app: 'Real life', priority: 3, stage: 'Matched', lastContact: todayStr(), createdAt: new Date().toISOString(),
-photoId: null, photoIds: [], photoAlbums: [], age: '', dob: '', ageAsOf: '', location: '', address: '',
-kids: '', job: '', height: '', education: '', phone: '', email: '',
-contactStatus: '', contactResourceName: '', contactEtag: '', contactConflicts: [],
-likes: '', notes: '', languages: [], nationality: [],
-todos: [], tags: [], aliases: [], dateLocations: [], dateEvents: [], sexTags: [],
-ratings: {}, driveLink: '', photosAlbumUrl: '', photosPersonUrl: '',
-};
+const conn = blankConnection({ name, app: 'Real life', lastContact: todayStr() });
 data.connections.push(conn);
 queueSave();
 return conn;
