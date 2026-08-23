@@ -16,6 +16,7 @@ import { photoDelete } from '../db.js';
 import { todayStr, escapeHtml, hydratePhotoBackgrounds, resizeImageToBlob } from '../utils.js';
 import { storePhoto, uploadAttachment, deleteAttachment, fetchAttachment, openAttachment, formatBytes } from '../files.js';
 import { looksLikeRenphoCsv, parseRenphoCsv, mergeRenphoDaily, looksLikeHrvCsv } from './renpho.js';
+import { legTargetPickerHtml, bindLegTargetPicker, readLegTargetPicker, applyLegExtraction } from './travel.js';
 
 // Sniffs by content, not by filename/MIME type -- confirmed necessary live:
 // a real Renpho export shared from Android's share sheet didn't match a
@@ -143,10 +144,15 @@ ${photoItems.length ? `<span class="settings-note" data-inbox-selected-count="${
 ${photoItems.length > 1 ? `<button class="todo-add-btn" type="button" data-inbox-select-all="${b.id}">${selectedCount === photoItems.length ? 'Select none' : 'Select all'}</button>` : ''}
 <select data-inbox-dating-select="${b.id}"><option value="">Send selected to&hellip;</option></select>
 <button class="todo-add-btn" type="button" data-inbox-send-dating="${b.id}">Send</button>
-<button class="todo-add-btn" type="button" data-inbox-extract-wellness="${b.id}" title="For an HRV, AGEs index, or Antioxidant index screenshot from Samsung Health">Extract wellness data</button>` : ''}
+<button class="todo-add-btn" type="button" data-inbox-extract-wellness="${b.id}" title="For an HRV, AGEs index, or Antioxidant index screenshot from Samsung Health">Extract wellness data</button>
+<button class="todo-add-btn" type="button" data-inbox-extract-trip-toggle="${b.id}" title="For a boarding pass, hotel, car hire, or transfer confirmation">Extract into a trip leg</button>` : ''}
 <button class="todo-add-btn" type="button" data-inbox-attach-task="${b.id}">Attach ${photoItems.length ? 'everything left ' : ''}to a Task</button>
 <button class="del-x" type="button" data-inbox-discard="${b.id}">Discard</button>
 </div>
+${photoItems.length ? `<div class="mail-trip-picker" data-inbox-trip-picker="${b.id}" hidden>
+${legTargetPickerHtml(b.id)}
+<button class="todo-add-btn" type="button" data-inbox-trip-extract="${b.id}">Extract selected</button>
+</div>` : ''}
 <span class="sync-status" data-inbox-status="${b.id}"></span>
 </div>`;
 }
@@ -325,6 +331,64 @@ if (done.length) {
 const { renderWellnessDaily } = await import('./wellness.js');
 renderWellnessDaily();
 }
+queueSave();
+});
+});
+
+root.querySelectorAll('[data-inbox-extract-trip-toggle]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const batchId = btn.dataset.inboxExtractTripToggle;
+const picker = root.querySelector(`[data-inbox-trip-picker="${batchId}"]`);
+if (!picker) return;
+picker.hidden = !picker.hidden;
+if (!picker.hidden) bindLegTargetPicker(picker, batchId);
+});
+});
+
+// Each selected screenshot becomes its OWN leg on the picked trip (a boarding
+// pass and a hotel confirmation ticked together are two different legs, not
+// one) -- only the trip target and a starting kind guess are shared from the
+// picker; each extraction can still reclassify its own leg's kind.
+root.querySelectorAll('[data-inbox-trip-extract]').forEach((btn) => {
+btn.addEventListener('click', async () => {
+const batch = data.captureInbox.find((b) => b.id === btn.dataset.inboxTripExtract);
+if (!batch) return;
+const status = root.querySelector(`[data-inbox-status="${batch.id}"]`);
+const picker = root.querySelector(`[data-inbox-trip-picker="${batch.id}"]`);
+const selectedIds = selectionFor(batch.id);
+const chosen = batch.items.filter((it) => it.kind === 'photo' && selectedIds.has(it.id));
+if (!chosen.length) { if (status) status.textContent = 'Tick at least one photo first.'; return; }
+if (!picker) return;
+const picked = readLegTargetPicker(picker, batch.id);
+const { extractTripScreenshot } = await import('../ai.js');
+const done = [];
+const messages = [];
+let sharedTripId = picked.tripId;
+for (const it of chosen) {
+if (status) status.textContent = `Reading ${it.name || 'photo'}…`;
+try {
+const blob = await fetchAttachment(it.id);
+const file = new File([blob], it.name || 'photo', { type: it.type || blob.type });
+const extraction = await extractTripScreenshot(file);
+if (!extraction.kind && Object.keys(extraction.fields).length === 0) {
+messages.push(`${it.name || 'that image'}: didn't look like travel logistics.`);
+continue;
+}
+const { trip, leg, filled } = await applyLegExtraction({ ...picked, tripId: sharedTripId, extraction, source: { kind: 'screenshot', label: it.name || '', url: '' } });
+sharedTripId = trip.id; // once a "+ New trip" is created, later items in this batch join the same trip
+messages.push(`${it.name || 'that image'}: added ${filled} field${filled === 1 ? '' : 's'} to "${trip.title}" — ${leg.kind}.`);
+done.push(it);
+} catch (err) {
+console.error('Trip screenshot extraction failed:', err);
+messages.push(err?.name === 'MissingKeyError' ? 'Add an Anthropic API key in Settings to extract trip details.' : `${it.name || 'that image'}: ${err.message || err}`);
+}
+}
+for (const it of done) { await deleteItemBytes(it); selectedIds.delete(it.id); }
+const doneIds = new Set(done.map((it) => it.id));
+batch.items = batch.items.filter((it) => !doneIds.has(it.id));
+removeBatchIfEmpty(batch);
+if (status) status.textContent = messages.join(' ');
+renderCaptureInbox();
 queueSave();
 });
 });

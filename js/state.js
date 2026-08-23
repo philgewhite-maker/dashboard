@@ -204,6 +204,68 @@ items: [],
 };
 }
 
+// A trip is a `bucket:'project'` task (see blankTask) plus this entry
+// holding the travel-specific structure -- same split notionplan.js already
+// uses (task ↔ notionPageId ↔ Notion detail), except the "detail" here has
+// to be readable offline for the itinerary export, so it lives in the
+// synced document rather than an external service.
+function blankTrip(fields = {}) {
+return {
+id: uid(),
+taskId: '', // the project task this trip is the detail behind
+title: '',
+destination: '',
+startDate: '', endDate: '', // best-known bounds; refined as legs fill in
+people: [], // {id, name, relation:'self'|'partner'|'child'|'other', connectionId}
+legs: [],
+createdAt: new Date().toISOString(),
+...fields,
+};
+}
+
+const LEG_KINDS = ['flight', 'car_hire', 'accommodation', 'transfer', 'other'];
+
+// One logistics item. `fields` is a flat bag rather than a rigid per-kind
+// shape, so a leg can hold partial data from the moment it exists (a bare
+// shell the itinerary generator flags as one big gap) through to fully
+// enriched by an email/screenshot extraction.
+function blankTripLeg(fields = {}) {
+return {
+id: uid(),
+kind: 'flight',
+label: '', // "Outbound: LHR -> LIS", shown instead of a generic kind name
+fields: {},
+// Per-field resolution: absent = still open, 'confirmed-na' = the user
+// said this one doesn't apply. A real value in `fields` supersedes
+// either state -- see updateLegField in travel.js.
+gapStatus: {},
+source: null, // {kind:'mail'|'screenshot'|'manual', label, url}
+attachments: [],
+createdAt: new Date().toISOString(),
+...fields,
+};
+}
+
+// The single source of truth for what counts as "complete" per leg kind --
+// drives both the entry form and gap detection. Fields in LEG_SOFT_FIELDS
+// are filled in when known but never block completeness.
+const LEG_FIELD_DEFS = {
+flight: ['airline', 'flightNumber', 'departAirport', 'departTime', 'arriveAirport', 'arriveTime', 'confirmationRef', 'seat'],
+car_hire: ['company', 'pickupLocation', 'pickupTime', 'dropoffLocation', 'dropoffTime', 'confirmationRef', 'carType'],
+accommodation: ['name', 'address', 'checkIn', 'checkOut', 'confirmationRef', 'contactPhone'],
+transfer: ['mode', 'from', 'to', 'departTime', 'confirmationRef'],
+other: ['description', 'when', 'confirmationRef'],
+};
+const LEG_SOFT_FIELDS = new Set(['seat', 'carType', 'contactPhone']);
+const LEG_FIELD_LABELS = {
+airline: 'Airline', flightNumber: 'Flight number', departAirport: 'Departure airport', departTime: 'Departure time',
+arriveAirport: 'Arrival airport', arriveTime: 'Arrival time', confirmationRef: 'Confirmation ref', seat: 'Seat',
+company: 'Company', pickupLocation: 'Pickup location', pickupTime: 'Pickup time', dropoffLocation: 'Drop-off location',
+dropoffTime: 'Drop-off time', carType: 'Car type', name: 'Name', address: 'Address', checkIn: 'Check-in',
+checkOut: 'Check-out', contactPhone: 'Contact phone', mode: 'Mode', from: 'From', to: 'To',
+description: 'Description', when: 'When',
+};
+
 const TAG_FIELDS = [
 // Other names the same person goes by — "Kat" is also "Katya" and
 // "Katerina". Used when matching Google Contacts, so any one of them can
@@ -414,6 +476,20 @@ if (!Array.isArray(data.renphoDaily)) data.renphoDaily = [];
 // One row per local calendar day of AI-vision-extracted Samsung Health
 // readings (HRV, AGEs index, Antioxidant index) -- see wellness.js.
 if (!Array.isArray(data.wellnessDaily)) data.wellnessDaily = [];
+if (!Array.isArray(data.trips)) data.trips = [];
+data.trips = data.trips.map((t) => ({ ...blankTrip(), ...t, id: t.id || uid() }));
+data.trips.forEach((t) => {
+t.people = Array.isArray(t.people) ? t.people : [];
+t.legs = Array.isArray(t.legs)
+? t.legs.map((l) => ({ ...blankTripLeg(), ...l, id: l.id || uid(), fields: l.fields || {}, gapStatus: l.gapStatus || {} }))
+: [];
+});
+// A trip whose project task was deleted has nothing left routing it into
+// the normal Tasks workflow -- same "promote or drop" instinct as the
+// orphaned-subtask guard just above, but a trip has no meaningful "promote"
+// so it's simply dropped rather than left dangling with a dead taskId.
+const tripTaskIds = new Set(data.tasks.map((t) => t.id));
+data.trips = data.trips.filter((t) => !t.taskId || tripTaskIds.has(t.taskId));
 // Seed the mail search rows from the old fixed shape the first time only.
 // Keyed on the array's absence rather than its emptiness, so deleting every
 // row stays deleted instead of being helpfully repopulated next reload.
@@ -1121,6 +1197,7 @@ isDormantStage, currentAge, displayAge, photoCoverage, photoLinkLabels, averageR
 exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, DEFAULT_PREFS,
 MAIL_SEARCH_KINDS, mailSearchLabel,
 TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureBatch,
+blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS,
 CONTACT_STATUS_LABELS, CONTACT_MATCH_MIN_STAGE,
 DEFAULT_RATING_CATEGORIES, slugifyField, DEFAULT_RECIPE_RATING_CATEGORIES,
 FLAG_FIELD_DEFS, DEFAULT_FLAG_RULES, computeFlags, valueColorForField, stripSharedSuffix, suggestedAction, suggestedQuestions, isTravelPaused, ACTIONS, distanceMiles,

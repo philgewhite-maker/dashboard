@@ -1,8 +1,9 @@
 import { data, mailSearchLabel } from '../state.js';
 import { escapeHtml } from '../utils.js';
 import { canAttemptGoogleAction } from '../sync/googleauth.js';
-import { fetchMailSearches } from '../googlemail.js';
+import { fetchMailSearches, getMessageBody } from '../googlemail.js';
 import { captureTask } from './tasks.js';
+import { legTargetPickerHtml, bindLegTargetPicker, readLegTargetPicker, applyLegExtraction } from './travel.js';
 
 // "Tamara White" <tamara.anna.white@gmail.com> -> "Tamara White"; falls
 // back to the raw email if there's no display name on the header.
@@ -34,6 +35,14 @@ data-mail-task="${escapeHtml(m.id)}"
 data-mail-subject="${escapeHtml(m.subject)}"
 data-mail-from="${escapeHtml(displayName(m.from))}"
 data-mail-url="${escapeHtml(m.link)}">+ task</button>`}
+<button class="mini-task-btn" type="button" title="Pull flight/hotel/car-hire details from this email into a trip"
+data-mail-trip-toggle="${escapeHtml(m.id)}">+ trip leg</button>
+</div>
+<div class="mail-trip-picker" data-mail-trip-picker="${escapeHtml(m.id)}" hidden>
+${legTargetPickerHtml(m.id)}
+<button class="todo-add-btn" type="button" data-mail-trip-extract="${escapeHtml(m.id)}"
+data-mail-subject="${escapeHtml(m.subject)}" data-mail-from="${escapeHtml(displayName(m.from))}" data-mail-url="${escapeHtml(m.link)}">Read email &amp; add</button>
+<span class="sync-status" data-mail-trip-status="${escapeHtml(m.id)}"></span>
 </div>`;
 }
 
@@ -86,6 +95,51 @@ source: { kind: 'mail', label: btn.dataset.mailSubject, url: btn.dataset.mailUrl
 });
 btn.textContent = '✓ captured';
 btn.disabled = true;
+});
+});
+
+list.querySelectorAll('[data-mail-trip-toggle]').forEach((btn) => {
+btn.addEventListener('click', (e) => {
+e.preventDefault();
+const id = btn.dataset.mailTripToggle;
+const picker = list.querySelector(`[data-mail-trip-picker="${CSS.escape(id)}"]`);
+if (!picker) return;
+picker.hidden = !picker.hidden;
+if (!picker.hidden) bindLegTargetPicker(picker, id);
+});
+});
+
+list.querySelectorAll('[data-mail-trip-extract]').forEach((btn) => {
+btn.addEventListener('click', async (e) => {
+e.preventDefault();
+const id = btn.dataset.mailTripExtract;
+const picker = list.querySelector(`[data-mail-trip-picker="${CSS.escape(id)}"]`);
+const status = list.querySelector(`[data-mail-trip-status="${CSS.escape(id)}"]`);
+if (!picker) return;
+const say = (msg) => { if (status) status.textContent = msg; };
+btn.disabled = true;
+say('Reading the email…');
+try {
+const [{ extractTripLegFromEmail }, body] = await Promise.all([import('../ai.js'), getMessageBody(id)]);
+say('Pulling out the details…');
+const extraction = await extractTripLegFromEmail(btn.dataset.mailSubject, btn.dataset.mailFrom, body);
+if (!extraction.kind && Object.keys(extraction.fields).length === 0) {
+say("Didn't recognise this as travel logistics.");
+return;
+}
+const picked = readLegTargetPicker(picker, id);
+const { trip, leg, filled } = await applyLegExtraction({
+...picked,
+extraction,
+source: { kind: 'mail', label: btn.dataset.mailSubject, url: btn.dataset.mailUrl },
+});
+say(`Added ${filled} field${filled === 1 ? '' : 's'} to "${trip.title}" — ${leg.kind}.`);
+} catch (err) {
+console.error('Trip email extraction failed:', err);
+say(err?.name === 'MissingKeyError' ? 'Add an Anthropic API key in Settings to read trip details from email.' : `Couldn't read that: ${err.message || err}`);
+} finally {
+btn.disabled = false;
+}
 });
 });
 }

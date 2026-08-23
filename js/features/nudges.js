@@ -2,8 +2,13 @@ import { data, reachOutThreshold, isDormantStage, isTravelPaused, getLocalSettin
 import { escapeHtml, scrollAndFlash, daysSince, daysUntil } from '../utils.js';
 import { switchTab } from '../tabs.js';
 import { callTextJson, MissingKeyError } from '../ai.js';
+import { gapsFor } from './travel.js';
 
-const TARGET_TABS = { connection: 'dating', search: 'dating', habit: 'overview', goal: 'overview', job: 'jobhunt', voucher: 'finances', calendar: 'overview', business: 'business', task: 'tasks', health: 'health' };
+const TARGET_TABS = { connection: 'dating', search: 'dating', habit: 'overview', goal: 'overview', job: 'jobhunt', voucher: 'finances', calendar: 'overview', business: 'business', task: 'tasks', health: 'health', trip: 'travel', 'trip-suggestion': 'travel' };
+// Lead time for the "trip's coming up and still has gaps" nudge -- same
+// 14-day window as NEW_MATCH_STAGES below, so a trip nudge doesn't start
+// nagging the moment it's created, only once it's genuinely close.
+const TRIP_GAP_LEAD_DAYS = 14;
 const TOP_N = 6;
 // Cheap, fast model for a ranking task — no need for the vision model the
 // user may have set for screenshot import.
@@ -102,9 +107,13 @@ const myCity = String(data.myCity || '').trim().toLowerCase();
 Object.entries(groupByLocation()).forEach(([loc, conns]) => {
 if (myCity && loc.trim().toLowerCase() === myCity) return;
 if (conns.length >= 2) {
+// Clicking this nudge creates the trip directly (see goToTarget's
+// 'trip-suggestion' branch) -- the "via a nudge" trip-creation path,
+// pre-seeded with the people it's actually about rather than a blank
+// trip you'd have to re-add them to.
 pool.push({
 text: `You've got ${conns.length} connections in ${loc} — worth planning a city-break weekend to see them all?`,
-target: { type: 'search', term: loc },
+target: { type: 'trip-suggestion', location: loc, connectionIds: conns.map((c) => c.id) },
 signals: { kind: 'city-break-suggestion', count: conns.length },
 category: 'creative',
 });
@@ -113,6 +122,26 @@ pool.push({
 text: `What about visiting your connection in ${loc}?`,
 target: { type: 'search', term: loc },
 signals: { kind: 'suggestion' },
+category: 'creative',
+});
+}
+});
+
+// A trip getting close with logistics still unconfirmed is worth
+// surfacing here too, not just as a standing warning inside the Travel
+// tab itself -- same "don't make someone go looking for it" reasoning
+// every other deadline-style nudge in this pool follows.
+data.trips.forEach((t) => {
+const legDates = t.legs.map((l) => l.fields.departTime || l.fields.checkIn || l.fields.pickupTime || l.fields.when).filter(Boolean).sort();
+const earliest = legDates[0] ? legDates[0].slice(0, 10) : t.startDate;
+if (!earliest) return;
+const until = daysUntil(earliest);
+const gapCount = t.legs.reduce((n, l) => n + gapsFor(l).length, 0);
+if (until !== null && until >= 0 && until <= TRIP_GAP_LEAD_DAYS && gapCount > 0) {
+pool.push({
+text: `Your trip to ${t.destination || t.title} is in ${until} day${until === 1 ? '' : 's'} — ${gapCount} thing${gapCount === 1 ? '' : 's'} still need confirming.`,
+target: { type: 'trip', id: t.id },
+signals: { kind: 'trip-gaps', daysUntil: until, gaps: gapCount },
 category: 'creative',
 });
 }
@@ -360,11 +389,21 @@ setTimeout(() => scrollAndFlash(`[data-cal-row="${CSS.escape(target.name)}"]`), 
 setTimeout(() => scrollAndFlash(`[data-idea-row="${target.id}"]`), 50);
 } else if (target.type === 'task') {
 setTimeout(() => scrollAndFlash(`[data-task-row="${target.id}"], [data-alloc-card="${target.id}"]`), 50);
+} else if (target.type === 'trip') {
+import('./travel.js').then((m) => m.revealTrip(target.id));
+} else if (target.type === 'trip-suggestion') {
+import('./travel.js').then(async (m) => {
+const people = data.connections
+.filter((c) => target.connectionIds.includes(c.id))
+.map((c) => ({ id: c.id, name: c.name, relation: 'other', connectionId: c.id }));
+const trip = await m.createTrip({ title: `${target.location} trip`, destination: target.location, people });
+m.revealTrip(trip.id);
+});
 }
 }
 
 function itemKey(n) {
-return `${n.target.type}:${n.target.id || n.target.term || n.target.name}:${n.text}`;
+return `${n.target.type}:${n.target.id || n.target.term || n.target.name || n.target.location}:${n.text}`;
 }
 
 // A stable fingerprint of the current pool. Changes whenever an item is

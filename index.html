@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v121</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v122</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -39,6 +39,7 @@
 <button class="tab-btn" type="button" data-tab-btn="menu">Menu</button>
 <button class="tab-btn" type="button" data-tab-btn="business">Business</button>
 <button class="tab-btn" type="button" data-tab-btn="health">Health</button>
+<button class="tab-btn" type="button" data-tab-btn="travel">Travel</button>
 <button class="tab-btn" type="button" data-tab-btn="settings">Settings</button>
 </div>
 
@@ -1853,6 +1854,20 @@ Mostly still a planning space &mdash; a place to keep thinking about what this s
 <tbody id="wellness-daily-body"></tbody>
 </table>
 </div>
+</section>
+
+<section class="panel wide" id="travel-panel" data-tab="travel">
+<div class="panel-head">
+<h2><span class="dot teal"></span>Travel</h2>
+<span class="count-badge" id="travel-count"></span>
+</div>
+<div class="settings-note" style="margin:0 0 10px;">A trip is a project you can also work from the Tasks tab &mdash; add flights, car hire, accommodation and transfers here, enrich them from a booking email (Mail's &quot;+ trip leg&quot;) or a screenshot (Capture Inbox's &quot;Extract into a trip leg&quot;), and download a self-contained offline itinerary once it's ready. Anything still open is flagged &#9888; rather than left blank &mdash; fill it in or mark it N/A.</div>
+<div class="capture-row" style="margin-bottom:14px;">
+<input type="text" autocomplete="off" id="travel-new-trip-title" placeholder="Trip name, e.g. Lisbon long weekend">
+<input type="text" autocomplete="off" id="travel-new-trip-destination" placeholder="Destination (optional)">
+<button class="todo-add-btn" type="button" id="travel-new-trip-btn">+ New trip</button>
+</div>
+<div id="travel-list"></div>
 </section>
 
 <section class="panel wide" id="settings-panel" data-tab="settings">

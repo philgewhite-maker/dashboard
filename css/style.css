@@ -1178,6 +1178,16 @@ border:none;
 
 /* Mail */
 .mail-section{display:flex;flex-direction:column;}
+.mail-trip-picker{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 0 10px;}
+.mail-trip-picker select, .mail-trip-picker input{
+font-family:'Inter',sans-serif;
+font-size:12px;
+border:1px solid var(--line);
+border-radius:6px;
+padding:5px 7px;
+background:var(--card);
+color:var(--ink);
+}
 .mail-row{
 display:flex;
 align-items:baseline;

@@ -27,6 +27,7 @@ import { initPhotoSync } from './features/photosync.js';
 import { initHealthSync, initHealthDaily } from './features/health.js';
 import { initShareTarget } from './features/sharetarget.js';
 import { initCaptureInbox } from './features/captureinbox.js';
+import { initTravel } from './features/travel.js';
 // Photos whose bytes aren't on this device are fetched from your own host.
 // Registered rather than imported: the implementation reaches state.js, and
 // state.js imports utils.js, so importing it back would be a cycle.
@@ -136,6 +137,7 @@ initIdeaForm();
 initEnhancementForm();
 initTasks();
 initCaptureInbox();
+initTravel();
 initGoogleTasksFeed();
 initQuestions();
 initContacts();

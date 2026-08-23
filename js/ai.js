@@ -806,6 +806,86 @@ await parseCachePut(hash, cacheKind, { result });
 return { ...result, fromCache: false };
 }
 
+// ---- Trip logistics (screenshot + email) ----
+//
+// Two input paths (a booking confirmation screenshot dropped in Capture
+// Inbox, or an email's full body read via Gmail), one shared field guide and
+// result shape -- both only ever report a field they actually found stated
+// in the source, same "never invent a gap-filling guess" principle
+// wellnessPrompt's band-interpolation comment already establishes for
+// numbers. travel.js's enrichLegFromExtraction is what actually writes
+// these onto a leg.
+const TRIP_MODEL = 'claude-sonnet-5';
+const TRIP_MAX_TOKENS = 1000;
+// Bumped whenever tripFieldGuide()'s field list changes -- same reason
+// WELLNESS_SCHEMA_VERSION exists, so a prompt change doesn't silently keep
+// serving a stale cached screenshot result.
+const TRIP_SCHEMA_VERSION = 1;
+
+const LEG_KIND_SET = new Set(['flight', 'car_hire', 'accommodation', 'transfer', 'other']);
+
+const TRIP_FIELD_GUIDE = `- flight: airline, flightNumber, departAirport, departTime (ISO date+time if both known, else just what's printed), arriveAirport, arriveTime, confirmationRef (booking reference / PNR), seat
+- car_hire: company, pickupLocation, pickupTime, dropoffLocation, dropoffTime, confirmationRef, carType
+- accommodation: name, address, checkIn, checkOut, confirmationRef, contactPhone
+- transfer: mode (e.g. "taxi", "train"), from, to, departTime, confirmationRef
+- other: description, when, confirmationRef`;
+
+function tripExtractionInstructions() {
+return `Identify which ONE of these five kinds of travel logistics this is: flight, car_hire, accommodation, transfer, or other. Then extract ONLY the fields below that are actually stated in the source -- never guess or infer a value that isn't really there; leave a field out entirely if it's not present rather than filling it with something plausible.
+
+Fields by kind (use exactly these JSON key names, only the ones for the kind you identified):
+${TRIP_FIELD_GUIDE}
+
+Reply with ONLY a JSON object, no other text, no markdown fences:
+{"kind":"flight","label":"a short human label like 'Outbound: LHR to LIS' or 'Lisbon hotel', or null","suggestedTripTitle":"a short trip name if the destination/purpose is obvious, else null","fields":{"airline":"TAP Portugal","confirmationRef":"ABC123"}}
+If nothing recognisable as travel logistics is present, reply {"kind":null,"label":null,"suggestedTripTitle":null,"fields":{}}.`;
+}
+
+async function extractTripScreenshot(file) {
+file = await ensureBrowserReadableImage(file);
+const hash = await hashFile(file);
+const cacheKind = `trip-v${TRIP_SCHEMA_VERSION}`;
+const cached = await parseCacheGet(hash, cacheKind);
+if (cached) return { ...cached.result, fromCache: true };
+
+const base64 = await fileToBase64(file);
+const mediaType = normalizeImageMediaType(file.type || 'image/png');
+const prompt = `This is a screenshot of a travel booking confirmation (a flight boarding pass or e-ticket, a car hire confirmation, a hotel/accommodation booking, or a transfer/taxi booking). ${tripExtractionInstructions()}`;
+const { data: raw } = await callAnthropic(
+[
+{ type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
+{ type: 'text', text: prompt },
+],
+TRIP_MAX_TOKENS, TRIP_MODEL, 'Trip screenshot',
+);
+const result = {
+kind: LEG_KIND_SET.has(raw.kind) ? raw.kind : null,
+label: raw.label || null,
+suggestedTripTitle: raw.suggestedTripTitle || null,
+fields: (raw.fields && typeof raw.fields === 'object') ? raw.fields : {},
+};
+await parseCachePut(hash, cacheKind, { result });
+return { ...result, fromCache: false };
+}
+
+async function extractTripLegFromEmail(subject, from, bodyText) {
+const prompt = `This is an email that may be a travel booking confirmation. Subject: "${subject || ''}". From: "${from || ''}".
+
+Email body:
+"""
+${String(bodyText || '').slice(0, 12000)}
+"""
+
+${tripExtractionInstructions()}`;
+const { data: raw } = await callTextJson(prompt, TRIP_MAX_TOKENS, TRIP_MODEL, 'Trip email');
+return {
+kind: LEG_KIND_SET.has(raw.kind) ? raw.kind : null,
+label: raw.label || null,
+suggestedTripTitle: raw.suggestedTripTitle || null,
+fields: (raw.fields && typeof raw.fields === 'object') ? raw.fields : {},
+};
+}
+
 // ---- Country lookup ----
 //
 // For a city, school or university name — often not in English, and
@@ -831,4 +911,5 @@ MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot, qui
 callTextJson, DEFAULT_MODEL, summarizeUsage, currentMonthKey, compareFaces,
 extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShoppingItem, translateText,
 identifyCountry, extractWellnessScreenshot,
+extractTripScreenshot, extractTripLegFromEmail,
 };

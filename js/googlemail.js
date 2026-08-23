@@ -87,4 +87,48 @@ messages: ids.map((id) => summaries[id]).filter(Boolean)
 }));
 }
 
-export { fetchMailSearches, buildQuery };
+// Gmail's API uses URL-safe base64 (- and _ instead of + and /), often
+// without the trailing = padding a normal atob() needs.
+function base64UrlDecode(data) {
+const b64 = data.replace(/-/g, '+').replace(/_/g, '/');
+const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+const binary = atob(padded);
+const bytes = new Uint8Array(binary.length);
+for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+return new TextDecoder('utf-8').decode(bytes);
+}
+
+function stripHtml(html) {
+const doc = new DOMParser().parseFromString(html, 'text/html');
+return (doc.body?.textContent || '').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+// Depth-first search through a (possibly multipart/nested) message payload
+// for the first part of the given MIME type's raw base64 body data.
+function findBodyPart(payload, mimeType) {
+if (!payload) return null;
+if (payload.mimeType === mimeType && payload.body?.data) return payload.body.data;
+for (const part of payload.parts || []) {
+const found = findBodyPart(part, mimeType);
+if (found) return found;
+}
+return null;
+}
+
+// Full message body, for AI extraction (trip logistics) rather than the
+// From/Subject/snippet metadata fetchMailSearches deals in -- a separate,
+// heavier call so the normal mail list stays cheap. Prefers the plain-text
+// part; falls back to stripping the HTML part, since some booking
+// confirmations are HTML-only.
+async function getMessageBody(id) {
+const res = await googleFetch(`${GMAIL_API}/messages/${id}?format=full`);
+if (!res.ok) throw new Error(`Gmail message fetch failed: ${res.status}`);
+const json = await res.json();
+const plain = findBodyPart(json.payload, 'text/plain');
+if (plain) return base64UrlDecode(plain);
+const html = findBodyPart(json.payload, 'text/html');
+if (html) return stripHtml(base64UrlDecode(html));
+return '';
+}
+
+export { fetchMailSearches, buildQuery, getMessageBody };

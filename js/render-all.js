@@ -14,6 +14,7 @@ import { renderCaptureInbox } from './features/captureinbox.js';
 import { renderHealthDaily } from './features/health.js';
 import { renderRenphoDaily } from './features/renpho.js';
 import { renderWellnessDaily } from './features/wellness.js';
+import { renderTravel } from './features/travel.js';
 import { renderNudges } from './features/nudges.js';
 import { renderTagCleanup } from './features/tagcleanup.js';
 
@@ -33,6 +34,7 @@ renderCaptureInbox();
 renderHealthDaily();
 renderRenphoDaily();
 renderWellnessDaily();
+renderTravel();
 renderOverview();
 renderNudges();
 renderTagCleanup();
