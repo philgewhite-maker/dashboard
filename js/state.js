@@ -341,6 +341,15 @@ lastContact: '', createdAt: new Date().toISOString(),
 photoId: null, photoIds: [], tinderPhotoKeys: [], photoAlbums: [],
 age: '', dob: '', ageAsOf: '',
 address: '', kids: '', job: '', height: '', education: '',
+// Free text, exactly as the app shows it -- captured the same way kids
+// already is, not forced into a fixed Yes/No vocabulary. Used to be
+// mashed into the generic tags array as one of a small hand-picked set
+// of normalized strings ('Smoker'/'Non-smoker'/'Sober'/'Drinks'), which
+// couldn't represent "Trying to quit" or "Socially, at the weekend" --
+// real answers seen on both Tinder and Bumble -- and gave smoking and
+// drinking the exact adjective-vs-verb mismatch the housekeeping audit
+// flagged. Each is now its own field with its own flag rule, same as kids.
+drinking: '', smoking: '',
 phone: '', email: '',
 contactStatus: '', contactResourceName: '', contactEtag: '', contactConflicts: [],
 contactMatchedBy: '', unmatchedAt: '',
@@ -354,15 +363,17 @@ distance: '', matchedOn: '', tinderMatchId: '', attentionSnoozedUntil: '',
 
 // Starting points, not gospel — surfaced in Settings once real tag values
 // are visible, so these are deliberately conservative rather than an
-// attempt to guess every value Tinder might ever show. "How often do you
-// smoke?" and Gender both route into the generic `tags` field (see
-// tinderimport.js's ARRAY_FIELD_MAP) rather than a dedicated field of
-// their own, so a rule on `tags` can catch either kind of value.
+// attempt to guess every value Tinder might ever show. Gender routes into
+// the generic `tags` field (see tinderimport.js's ARRAY_FIELD_MAP) since it
+// has no dedicated field of its own; smoking/drinking used to share that
+// same arrangement but now have their own fields (see blankConnection),
+// so a rule on each can hold its own vocabulary instead of fighting for
+// space in one shared list.
 const DEFAULT_FLAG_RULES = [
 { id: 'default-distance', field: 'distance', greenMax: 10, redMin: 50 },
 { id: 'default-education', field: 'education', green: ['Bachelor degree', 'Master degree', 'PhD', 'Doctorate degree'], amber: [], red: ['High school'] },
-{ id: 'default-smoking', field: 'tags', green: [], amber: [], red: ['Smoker'] },
-{ id: 'default-sober', field: 'tags', green: ['Sober'], amber: [], red: [] },
+{ id: 'default-smoking', field: 'smoking', green: [], amber: [], red: ['Smoker'] },
+{ id: 'default-sober', field: 'drinking', green: ['Sober'], amber: [], red: [] },
 { id: 'default-gender', field: 'tags', green: [], amber: [], red: ['Trans man', 'Trans woman', 'Transgender'] },
 { id: 'default-orientation', field: 'relationshipTags', green: [], amber: ['Gay', 'Lesbian', 'Bisexual', 'Pansexual', 'Asexual', 'Queer', 'Demisexual', 'Open relationship', 'Polyamory', 'Ethically non-monogamous'], red: [] },
 // Taller-is-good is the opposite direction from Distance -- greenMin (green
@@ -640,6 +651,28 @@ if (typeof c.attentionSnoozedUntil !== 'string') c.attentionSnoozedUntil = '';
 if (typeof c.job !== 'string') c.job = '';
 if (typeof c.height !== 'string') c.height = '';
 if (typeof c.education !== 'string') c.education = '';
+if (typeof c.drinking !== 'string') c.drinking = '';
+if (typeof c.smoking !== 'string') c.smoking = '';
+// One-time: drinking/smoking used to have no field of their own and were
+// normalized into a small fixed set of strings pushed onto the generic
+// tags array. Only those exact, unambiguous strings are moved out -- tags
+// is a flat, provenance-free bag (see the audit's own "tag is 4
+// incompatible shapes" finding), so anything else in there (a genuinely
+// generic tag, or a richer un-normalized value like "Trying to quit" that
+// happened to land in tags via a different path) can't be safely
+// attributed to one field or the other by guessing, and is left in place.
+if (Array.isArray(c.tags)) {
+const migrateHabitTag = (value, field) => {
+if (c[field]) return false; // already set -- don't overwrite
+const idx = c.tags.findIndex((t) => t === value);
+if (idx === -1) return false;
+c[field] = value;
+c.tags.splice(idx, 1);
+return true;
+};
+migrateHabitTag('Smoker', 'smoking') || migrateHabitTag('Non-smoker', 'smoking');
+migrateHabitTag('Sober', 'drinking') || migrateHabitTag('Drinks', 'drinking');
+}
 if (typeof c.driveLink !== 'string') c.driveLink = '';
 // Google Photos links kept separate from driveLink so the Overview can
 // tell "has an album" from "has a face/person link" — they're different
@@ -729,6 +762,16 @@ data.flagRules.push({ ...r });
 data.flagRulesSeeded.push(r.id);
 });
 }
+// One-time: these two rules used to target the generic `tags` field
+// (drinking/smoking had no field of their own yet). Repointing an
+// existing rule object at the new field preserves any green/amber/red
+// customisation already made -- only the id match is checked, and only
+// while it's still sitting on the old shared field, so this never
+// touches a rule the user has already re-pointed or renamed by hand.
+data.flagRules.forEach((r) => {
+if (r.id === 'default-smoking' && r.field === 'tags') r.field = 'smoking';
+if (r.id === 'default-sober' && r.field === 'tags') r.field = 'drinking';
+});
 if (typeof data.myCity !== 'string') data.myCity = '';
 if (typeof data.myName !== 'string') data.myName = '';
 if (typeof data.myPhone !== 'string') data.myPhone = '';
@@ -1068,6 +1111,8 @@ const FLAG_FIELD_DEFS = [
 { field: 'height', label: 'Height (cm)', kind: 'number', getValue: (c) => heightCm(c.height) },
 { field: 'job', label: 'Job', kind: 'text', getValue: (c) => (c.job ? [c.job] : []) },
 { field: 'kids', label: 'Family plans', kind: 'text', getValue: (c) => (c.kids ? [c.kids] : []) },
+{ field: 'drinking', label: 'Drinking', kind: 'text', getValue: (c) => (c.drinking ? [c.drinking] : []) },
+{ field: 'smoking', label: 'Smoking', kind: 'text', getValue: (c) => (c.smoking ? [c.smoking] : []) },
 { field: 'stage', label: 'Stage', kind: 'text', getValue: (c) => (c.stage ? [c.stage] : []) },
 // City's own entry comes from this spread now that it's a TAG_FIELDS
 // member (multi-value) rather than a hand-written scalar getValue here.

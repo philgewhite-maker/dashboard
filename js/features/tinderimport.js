@@ -174,6 +174,13 @@ return conn;
 const FIELD_MAP = {
 'Family plans': 'kids', Education: 'education', Height: 'height', Work: 'job', 'Job title': 'job', Job: 'job', Distance: 'distance',
 'Matched on': 'matchedOn', 'Chat history': 'chatLog', 'Last message date': 'lastContact',
+// Own scalar fields now (see blankConnection in state.js), captured
+// verbatim -- previously 'How often do you smoke?' dumped straight into
+// the generic tags array unnormalized, and 'Drinking' had no mapping at
+// all (present in FIELD_CLUSTERS' display grouping below, but never
+// actually saved anywhere -- confirmed live as a real gap, not just an
+// inconsistency: filling in a "Drinking" row and applying it did nothing).
+Drinking: 'drinking', 'How often do you smoke?': 'smoking',
 };
 // City is deliberately NOT in FIELD_MAP -- it's multi-value (TAG_FIELDS)
 // with its own cityOverride input/save path (see applyPendingToConnection),
@@ -208,7 +215,7 @@ const ALWAYS_APPLY_LABELS = new Set(['Last message date']);
 // into the synthetic slot with no indication that happened). Confirmed
 // live: a profile showed "City: Riga" in the Stage row and an empty
 // "City: not captured" box in Basics at the same time.
-const ALWAYS_SHOW_LABELS = ['Height', 'Job', 'Education', 'Distance'];
+const ALWAYS_SHOW_LABELS = ['Height', 'Job', 'Education', 'Distance', 'Drinking', 'How often do you smoke?'];
 
 // Same idea as ALWAYS_SHOW_LABELS, for the array-mapped (chip-list)
 // fields — Tags is just as likely to come up only in free text as Height
@@ -259,11 +266,7 @@ function withAlwaysShowFields(fields) {
 // same `job` field), and matching only the literal string "Job" would add
 // a redundant empty slot right next to an already-scraped "Job title"
 // row. Array-mapped fields don't have that alias problem (each has
-// exactly one Tinder label), and target-based matching there would be
-// WRONG anyway -- Gender and "How often do you smoke?" share the same
-// `tags` storage target but are different questions, so checking by
-// target would wrongly treat one as satisfying the other. Literal label
-// match only, for those.
+// exactly one Tinder label), so literal label match is used there instead.
 const haveTargets = new Set(fields.map((f) => FIELD_MAP[f.label]).filter(Boolean));
 const haveLabels = new Set(fields.map((f) => f.label));
 const missingScalar = ALWAYS_SHOW_LABELS.filter((label) => !haveTargets.has(FIELD_MAP[label]));
@@ -286,10 +289,11 @@ return [...fields, ...missing];
 // re-offer the exact same phrase.
 const ARRAY_FIELD_MAP = {
 Interests: { target: 'interests', split: true },
-// Neither of these has a dedicated field of its own — both route into the
-// generic tags chip list so they're at least taggable/flaggable, rather
-// than sitting unfindable in a wall of notes text (where they were before).
-'How often do you smoke?': { target: 'tags', split: false },
+// Gender has no dedicated field of its own, so it routes into the
+// generic tags chip list to at least be taggable/flaggable, rather than
+// sitting unfindable in a wall of notes text (where it was before).
+// "How often do you smoke?" used to share this same treatment -- moved to
+// FIELD_MAP (its own scalar `smoking` field) once that field existed.
 Gender: { target: 'tags', split: false },
 // Not a real Tinder field label — a synthetic one, offered as an
 // always-show fill-in (see ALWAYS_SHOW_ARRAY_LABELS) so there's
