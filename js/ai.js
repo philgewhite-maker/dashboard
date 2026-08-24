@@ -762,7 +762,7 @@ const WELLNESS_MAX_TOKENS = 4000;
 // re-extracting the exact same screenshot after a prompt change would
 // silently keep serving the OLD cached result forever, which is exactly
 // what would happen re-testing the screenshots that motivated this.
-const WELLNESS_SCHEMA_VERSION = 4;
+const WELLNESS_SCHEMA_VERSION = 5;
 
 // Real category-band numeric ranges, confirmed by the user against their
 // own live Samsung Health app -- these charts have no numbered y-axis, but
@@ -849,7 +849,7 @@ Identify which metric this is, then extract:
 - For an Antioxidant or AGEs chart specifically, which are divided into horizontal bands labelled along the right edge (Antioxidant, top to bottom: Adequate, Low, Very low. AGEs, top to bottom: Very high, High, Adequate, Low) with a horizontal gridline at every boundary between them: report the y-position of EVERY boundary gridline as "gridlines", an array of fractions from 0.0 (very top of the whole image) to 1.0 (very bottom of the whole image), to the nearest 0.01, ordered top to bottom -- for Antioxidant (3 bands) that's 4 lines: above Adequate, between Adequate/Low, between Low/Very low, below Very low; for AGEs (4 bands) that's 5 lines. Look for the actual drawn horizontal rule lines, not the text labels (a label usually sits inside a band, not on its boundary line). Omit "gridlines" entirely (leave it null) if the lines genuinely aren't visible or countable -- don't estimate their positions from the labels alone.
 - For EACH day with a visible plotted dot, resolve its ISO date (YYYY-MM-DD), then:
   - If a number is printed directly on or next to that dot -- including a callout/tooltip bubble showing one specific day's exact value, which appears when that day has been tapped/highlighted -- record it as "value" with "exact":true.
-  - Otherwise, for an Antioxidant or AGEs chart where "gridlines" was reported above: record ONLY the dot's own vertical position as "yFraction", 0.0 (very top of the image) to 1.0 (very bottom), same coordinate system as "gridlines", to the nearest 0.01, with "exact":false. Do NOT judge which band it's in or how far within it -- just the dot's plain y-position; the band and value are computed afterward from where you placed the gridlines.
+  - Otherwise, for an Antioxidant or AGEs chart where "gridlines" was reported above: record ONLY the dot's own vertical position as "yFraction", 0.0 (very top of the image) to 1.0 (very bottom), same coordinate system as "gridlines", to the nearest 0.01, with "exact":false. Use the vertical CENTER of the dot marker itself, not its top edge or outer rim -- a dot has a visible radius, and measuring from its edge instead of its middle biases every reading in the same direction. Do NOT judge which band it's in or how far within it -- just the dot's plain y-position; the band and value are computed afterward from where you placed the gridlines.
   - If none of the above apply to a dot (an HRV chart with no number printed at that point, for instance, or gridlines weren't reported), leave that day out of "days" entirely rather than guessing.
 
 Reply with ONLY a JSON object, no other text, no markdown fences:
