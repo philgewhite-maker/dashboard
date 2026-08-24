@@ -208,6 +208,17 @@ try {
 return extractJson(text);
 } catch (parseErr) {
 console.error('Could not parse JSON from Claude response:', text);
+// Confirmed live: a wellness extraction failed with a raw "Response
+// wasn't JSON" dump of a cut-off object -- the real cause (hit
+// max_tokens before the closing brace) was buried in a console.warn
+// several lines above stop_reason==='max_tokens', not in the error the
+// user actually saw. Object responses can't be salvaged the way
+// extractJson's salvageArrayPrefix repairs a cut-off array, so this is
+// the one place that can name the real cause plainly instead of dumping
+// unparseable text at whoever's reading the error message.
+if (result.stop_reason === 'max_tokens') {
+throw new Error(`Response was cut off at the ${maxTokens || 1500}-token limit before it finished — try again, or this call may need a higher limit.`);
+}
 throw parseErr;
 }
 }
@@ -719,7 +730,16 @@ translation: String((data && data.translation) || '').trim(),
 // chosen vision model, for the same reasoning profilePrompt's own comment
 // gives (nuanced reading, not deep reasoning).
 const WELLNESS_MODEL = 'claude-sonnet-5';
-const WELLNESS_MAX_TOKENS = 800;
+// Confirmed live too tight at 800: a real 7-day chart's worth of banded day
+// entries (date + band + bandFraction + exact per day, up to 7 of them) can
+// run the response past that before the closing brace, and unlike the
+// matches-list extraction elsewhere in this file, a truncated JSON *object*
+// can't be salvaged the way a truncated array can (extractJson's
+// salvageArrayPrefix only knows how to close off a cut-off array) -- so a
+// truncated wellness response fails outright rather than degrading
+// gracefully. Same "output tokens are cheap, a failed import isn't" reasoning
+// PROFILE_MAX_TOKENS/MATCHES_MAX_TOKENS already use.
+const WELLNESS_MAX_TOKENS = 1500;
 // Bumped whenever wellnessPrompt()'s requested fields or WELLNESS_BANDS
 // change -- same reason PROFILE_SCHEMA_VERSION exists above: without it,
 // re-extracting the exact same screenshot after a prompt change would
