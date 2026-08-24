@@ -124,13 +124,25 @@ selectedItems.set(batchId, initial);
 return selectedItems.get(batchId);
 }
 
-// The one place a batch of raw files becomes an inbox entry. Saves after
-// each item lands (not once at the end) so an interrupted multi-file
-// capture keeps whatever already succeeded -- same reasoning tasks.js's
-// own attach-a-file handler saves per file rather than once per batch. A
-// recognised Health CSV is consumed straight into its own store and never
-// becomes a batch item at all -- there's nothing to triage, the data's
-// already where it belongs.
+// The one place a batch of raw files becomes an inbox entry. Two phases,
+// deliberately not interleaved per file:
+//
+// Phase 1 stores every file -- fast, local, no network/AI -- and only
+// after that does Phase 2 attempt the slow AI auto-detection passes
+// (wellness, Bumble) on whichever items matched a filename hint. Confirmed
+// live as a real bug when these WERE interleaved (extraction attempted
+// right after each file's own storage, before moving to the next file):
+// sharing 6 files together where the first was a Bumble profile screenshot
+// lost the other 5 entirely. Android backgrounds the PWA tab the moment
+// the share sheet closes -- sharing feels "done" at that point, not when
+// this function actually finishes -- and if the loop was still awaiting a
+// several-second AI call on file 1 when that happened, files 2-6 never
+// even reached their own (fast, local) storage step. Splitting into two
+// phases means every file is durably captured before ANY slow call starts,
+// so the worst case an interruption can now cause is an unfinished
+// extraction on an already-safely-stored photo -- exactly the existing,
+// already-safe fallback (manual triage later) -- never a file that was
+// never stored at all.
 async function addCaptureBatch({ label, notes = '', source = null, files }) {
 const batch = blankCaptureBatch({ label, notes, source });
 const failed = [];
@@ -138,6 +150,9 @@ const healthImports = [];
 const matchesImports = [];
 let renphoImported = false;
 let wellnessImported = false;
+const autoRouteCandidates = []; // [{file, item}] -- photo items worth a slow AI pass, filled in Phase 1
+
+// Phase 1: capture and durably store every file.
 for (const file of files) {
 try {
 const kind = await captureItemKind(file);
@@ -161,18 +176,21 @@ item = { ...(await uploadAttachment(file)), kind: 'attachment' };
 batch.items.push(item);
 if (!data.captureInbox.includes(batch)) data.captureInbox.push(batch);
 queueSave();
-// A filename match is a hint, not a certainty (see
-// looksLikeSamsungHealthScreenshot's own comment), and this is a
-// several-second AI vision call -- it runs AFTER the photo is already
-// safely stored above, not before. Confirmed necessary live: running it
-// first meant a share interrupted mid-call (Android backgrounding the
-// PWA right after the user shares, which happens routinely -- sharing
-// feels "done" the moment the share sheet closes) lost the screenshot
-// entirely, with nothing landing in Capture Inbox and nothing extracted
-// either. Now the worst case if interrupted is the photo already saved
-// above just sits there for manual "Extract wellness data" later,
-// exactly like any other unrecognised photo.
-if (kind === 'photo' && looksLikeSamsungHealthScreenshot(file.name)) {
+if (kind === 'photo' && (looksLikeSamsungHealthScreenshot(file.name) || looksLikeBumbleScreenshot(file.name))) {
+autoRouteCandidates.push({ file, item });
+}
+} catch (err) {
+console.error('Could not capture a shared file:', err);
+failed.push(`${file.name || 'file'}: ${err.message || err}`);
+}
+}
+
+// Phase 2: now that everything above is safely stored, spend the slow AI
+// calls -- a filename match is a hint, not a certainty (see
+// looksLikeSamsungHealthScreenshot's own comment), so finding nothing is a
+// normal outcome that just leaves that one item for manual triage.
+for (const { file, item } of autoRouteCandidates) {
+if (looksLikeSamsungHealthScreenshot(file.name)) {
 try {
 const { extractAndMergeWellnessFile } = await import('./wellness.js');
 const { ok, message } = await extractAndMergeWellnessFile(file);
@@ -188,14 +206,7 @@ queueSave();
 console.error('Auto wellness extraction failed, photo stays in Capture Inbox for manual triage:', err);
 }
 }
-// Same ordering reasoning as the wellness auto-trigger above: only after
-// the photo is safely stored. Not routed (a plain photo, a chat, anything
-// unrecognised) is a normal, silent outcome here -- the item only leaves
-// the batch when autoRouteBumbleScreenshot actually found something. The
-// persisted pendingImports queue (connections.js) means multiple Bumble
-// screenshots shared together can each land their own reviewable entry --
-// no single-slot limit to guard against any more.
-if (kind === 'photo' && looksLikeBumbleScreenshot(file.name)) {
+if (looksLikeBumbleScreenshot(file.name)) {
 try {
 const result = await autoRouteBumbleScreenshot(file, 'Bumble');
 if (result.routed) {
@@ -209,11 +220,8 @@ queueSave();
 console.error('Auto Bumble-screenshot routing failed, photo stays in Capture Inbox for manual triage:', err);
 }
 }
-} catch (err) {
-console.error('Could not capture a shared file:', err);
-failed.push(`${file.name || 'file'}: ${err.message || err}`);
 }
-}
+
 renderCaptureInbox();
 if (renphoImported) {
 const { renderRenphoDaily } = await import('./renpho.js');
