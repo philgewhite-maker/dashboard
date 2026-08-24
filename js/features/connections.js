@@ -1922,7 +1922,11 @@ if (profileLine) profileLine.textContent = importStatusLine('screenshotProfile')
 async function queuePendingImport({ candidates, kind, app, sourceLabel }) {
 for (const cand of candidates) {
 const blobs = kind === 'profile' ? (cand.photoBlobs || []) : (cand.photoBlob ? [cand.photoBlob] : []);
-cand.photoIds = [];
+// Preserve any ids a caller already stored (e.g. loose photos ticked
+// alongside this candidate's own screenshot -- see
+// importProfileWithPhotosFile) rather than starting a fresh array, so
+// the screenshot's own photo(s) land alongside them, not instead of them.
+if (!Array.isArray(cand.photoIds)) cand.photoIds = [];
 for (const blob of blobs) cand.photoIds.push(await storePhoto(blob));
 delete cand.photoBlob;
 delete cand.photoBlobs;
@@ -1970,6 +1974,40 @@ return { candidate: null };
 recordImportRun('screenshotProfile', { scope: appHint || file.name || 'profile screenshot', count: 1 });
 renderImportLastRun();
 if (statusEl) statusEl.textContent = `Found a profile — review below:`;
+await queuePendingImport({ candidates: [candidate], kind: 'profile', app: appHint, sourceLabel: file.name || 'profile screenshot' });
+return { candidate };
+}
+
+// Same as importProfileScreenshotFile, but for when the screenshot was
+// ticked together with loose photos of the same person -- the "tick who
+// belongs together" convention Capture Inbox already uses for Send-to-
+// connection. Those extra photos get cropped/stored the exact same way
+// applyDirectProfileUpload already does for an EXISTING connection
+// (contentCropBounds + cropToContentBlob, trimming letterbox bars rather
+// than squashing to a fixed thumbnail), and attached to THIS candidate
+// before it's queued, so confirming it creates the connection with every
+// photo already on it -- no separate manual pass through Capture Inbox
+// needed, matching what the pull-side combined upload could already do.
+async function importProfileWithPhotosFile(file, appHint, extraFiles, statusEl) {
+if (statusEl) statusEl.textContent = 'Reading screenshot…';
+let candidate;
+try {
+candidate = await extractProfileFromScreenshot(file, appHint);
+} catch (err) {
+console.error('Profile screenshot import failed:', err);
+if (statusEl) statusEl.textContent = err instanceof MissingKeyError ? err.message : `Couldn't read that screenshot: ${err.message || err}`;
+return { candidate: null };
+}
+recordImportRun('screenshotProfile', { scope: appHint || file.name || 'profile screenshot', count: 1 });
+renderImportLastRun();
+candidate.photoIds = [];
+for (const f of extraFiles) {
+const img = await loadImage(f);
+const bounds = contentCropBounds(img);
+const blob = await cropToContentBlob(img, bounds, 0.85, 900);
+if (blob) candidate.photoIds.push(await storePhoto(blob));
+}
+if (statusEl) statusEl.textContent = `Found a profile with ${extraFiles.length} extra photo${extraFiles.length === 1 ? '' : 's'} — review below:`;
 await queuePendingImport({ candidates: [candidate], kind: 'profile', app: appHint, sourceLabel: file.name || 'profile screenshot' });
 return { candidate };
 }
@@ -2383,5 +2421,5 @@ filterByEmptyField, filterBySearch, filterByIds, clearFilters,
 STAGE_RANK, setContactPicker, phoneWithFlagHtml, initRatingCategoriesSettings,
 initFlagRulesSettings, unionInto, initHideArchivedFaded,
 connectionOptionsHtml, applyDirectProfileUpload, applyProfileFieldsToConnection,
-importMatchesListFile, importProfileScreenshotFile, renderPendingImports,
+importMatchesListFile, importProfileScreenshotFile, importProfileWithPhotosFile, renderPendingImports,
 };
