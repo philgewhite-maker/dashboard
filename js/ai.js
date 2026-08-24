@@ -730,16 +730,22 @@ translation: String((data && data.translation) || '').trim(),
 // chosen vision model, for the same reasoning profilePrompt's own comment
 // gives (nuanced reading, not deep reasoning).
 const WELLNESS_MODEL = 'claude-sonnet-5';
-// Confirmed live too tight at 800: a real 7-day chart's worth of banded day
-// entries (date + band + bandFraction + exact per day, up to 7 of them) can
-// run the response past that before the closing brace, and unlike the
-// matches-list extraction elsewhere in this file, a truncated JSON *object*
-// can't be salvaged the way a truncated array can (extractJson's
-// salvageArrayPrefix only knows how to close off a cut-off array) -- so a
-// truncated wellness response fails outright rather than degrading
-// gracefully. Same "output tokens are cheap, a failed import isn't" reasoning
-// PROFILE_MAX_TOKENS/MATCHES_MAX_TOKENS already use.
-const WELLNESS_MAX_TOKENS = 1500;
+// Confirmed live: this model returns a "thinking" content block even though
+// nothing here ever requests one (no `thinking` param is sent) -- and that
+// block counts against max_tokens the same as the actual answer. At 800,
+// then even at 1500, the whole budget went to thinking and the call hit
+// stop_reason:'max_tokens' with NO text block at all, let alone finished
+// JSON. Unlike the matches-list extraction elsewhere in this file, a
+// truncated JSON *object* also can't be salvaged the way a truncated array
+// can (extractJson's salvageArrayPrefix only closes off a cut-off array), so
+// this failed outright rather than degrading gracefully. Sized generously
+// enough to leave real room after thinking, same "output tokens are cheap, a
+// failed import isn't" reasoning PROFILE_MAX_TOKENS/MATCHES_MAX_TOKENS
+// already use. If this model's thinking is actually an account-level default
+// (an Anthropic Console setting on the API key, not something this app
+// requests), no client-side token budget fixes the underlying waste -- worth
+// checking there if this keeps needing headroom.
+const WELLNESS_MAX_TOKENS = 4000;
 // Bumped whenever wellnessPrompt()'s requested fields or WELLNESS_BANDS
 // change -- same reason PROFILE_SCHEMA_VERSION exists above: without it,
 // re-extracting the exact same screenshot after a prompt change would
