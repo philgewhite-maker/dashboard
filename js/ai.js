@@ -194,7 +194,16 @@ console.warn('Response was truncated at max_tokens — the JSON may be incomplet
 const text = tools
 ? (result.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n')
 : ((result.content || []).find((b) => b.type === 'text') || {}).text;
-if (!text) throw new Error('No text in response');
+if (!text) {
+// A bare "No text in response" told a user nothing actionable when this
+// fired for real (a wellness screenshot that should have parsed fine) --
+// stop_reason and what block types actually came back are the two things
+// that explain WHY, so both the console and the thrown message (which
+// callers surface straight to the user) now carry them.
+const blockTypes = (result.content || []).map((b) => b.type).join(', ') || 'none';
+console.error('Anthropic response had no text block:', result);
+throw new Error(`No text in response (stop_reason: ${result.stop_reason || 'unknown'}, content: ${blockTypes})`);
+}
 try {
 return extractJson(text);
 } catch (parseErr) {
