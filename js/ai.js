@@ -762,7 +762,7 @@ const WELLNESS_MAX_TOKENS = 4000;
 // re-extracting the exact same screenshot after a prompt change would
 // silently keep serving the OLD cached result forever, which is exactly
 // what would happen re-testing the screenshots that motivated this.
-const WELLNESS_SCHEMA_VERSION = 3;
+const WELLNESS_SCHEMA_VERSION = 4;
 
 // Real category-band numeric ranges, confirmed by the user against their
 // own live Samsung Health app -- these charts have no numbered y-axis, but
@@ -793,6 +793,50 @@ const norm = String(label || '').trim().toLowerCase();
 return bands.find((b) => b.label === norm) || null;
 }
 
+// Same top-to-bottom screen order named in wellnessPrompt() below --
+// exported as data here (not just prose in the prompt) so
+// resolveBandedDayValue can turn "N band labels" into "N+1 boundary
+// y-fractions" without re-deriving the order from anywhere else.
+const WELLNESS_BAND_SCREEN_ORDER = {
+antioxidant: ['adequate', 'low', 'very low'],
+ages: ['very high', 'high', 'adequate', 'low'],
+};
+
+// Confirmed live: asking the model to directly judge "how far up within
+// this band" a dot sits (a 0.0-1.0 fraction, no anchor to check itself
+// against) produced wildly wrong values -- two dots visibly almost level
+// with a known-correct 41 came back as ~2. Proportional-position-within-an-
+// unlabelled-region is exactly the kind of fine judgement vision models are
+// unreliable at. What they ARE reliably good at (this app's own matches-
+// screenshot importer already relies on it for avatar bounding boxes) is
+// reporting a coordinate anchored to something visible -- so the model's
+// job here is now just "where is each gridline, where is each dot", both
+// plain pixel-fraction coordinates, and the interpolation into an actual
+// value is done afterward with real arithmetic against those two measured
+// positions, not a self-reported guess.
+function resolveBandedDayValue(metric, yFractions, dotY) {
+const order = WELLNESS_BAND_SCREEN_ORDER[metric];
+if (!order || !Array.isArray(yFractions) || yFractions.length !== order.length + 1) return null;
+if (typeof dotY !== 'number') return null;
+// yFractions must be monotonically increasing top-to-bottom (0=top of
+// image) -- a model reporting them out of order means it didn't actually
+// locate the lines, and no value here can be trusted.
+for (let i = 1; i < yFractions.length; i++) if (yFractions[i] <= yFractions[i - 1]) return null;
+const y = Math.min(yFractions[yFractions.length - 1], Math.max(yFractions[0], dotY));
+for (let i = 0; i < order.length; i++) {
+const top = yFractions[i], bottom = yFractions[i + 1];
+if (y < top || y > bottom) continue;
+const range = bandRange(metric, order[i]);
+if (!range) return null;
+// Higher up the screen (smaller y) = higher value, for every band on
+// both of these charts -- so fractionUp is 1.0 at the band's top edge
+// (its max) and 0.0 at its bottom edge (its min).
+const fractionUp = bottom > top ? (bottom - y) / (bottom - top) : 0.5;
+return Math.round(range.min + fractionUp * (range.max - range.min));
+}
+return null;
+}
+
 function wellnessPrompt(todayIso) {
 return `This is a screenshot from the Samsung Health app (measurements taken via a Galaxy Watch). It shows ONE of these three 7-day charts: Antioxidant index, AGEs (Advanced Glycation End-products) index, or Sleeping heart rate variability (HRV). Today's date is ${todayIso}.
 
@@ -802,13 +846,14 @@ Identify which metric this is, then extract:
 - The period average, min, and max if shown as text (e.g. "Average 46", "Min 43", "Max 50", or "410 (Daily average)").
 - The headline grade/category text if shown (e.g. "Good", "Adequate", "Low", "Very low", "High", "Very high") for the period or the most recent reading.
 - The unit if shown (e.g. "ms" for HRV).
+- For an Antioxidant or AGEs chart specifically, which are divided into horizontal bands labelled along the right edge (Antioxidant, top to bottom: Adequate, Low, Very low. AGEs, top to bottom: Very high, High, Adequate, Low) with a horizontal gridline at every boundary between them: report the y-position of EVERY boundary gridline as "gridlines", an array of fractions from 0.0 (very top of the whole image) to 1.0 (very bottom of the whole image), to the nearest 0.01, ordered top to bottom -- for Antioxidant (3 bands) that's 4 lines: above Adequate, between Adequate/Low, between Low/Very low, below Very low; for AGEs (4 bands) that's 5 lines. Look for the actual drawn horizontal rule lines, not the text labels (a label usually sits inside a band, not on its boundary line). Omit "gridlines" entirely (leave it null) if the lines genuinely aren't visible or countable -- don't estimate their positions from the labels alone.
 - For EACH day with a visible plotted dot, resolve its ISO date (YYYY-MM-DD), then:
   - If a number is printed directly on or next to that dot -- including a callout/tooltip bubble showing one specific day's exact value, which appears when that day has been tapped/highlighted -- record it as "value" with "exact":true.
-  - Otherwise, for an Antioxidant or AGEs chart specifically: these charts are divided into horizontal bands, each labelled with a category name along the right edge (Antioxidant, top to bottom: Adequate, Low, Very low. AGEs, top to bottom: Very high, High, Adequate, Low). Identify which band's region the dot sits inside, and how far up that ONE band's own vertical span it sits, as a fraction from 0.0 (at that band's lower boundary line) to 1.0 (at that band's upper boundary line), to the nearest 0.05. Record the band's label exactly as printed (lowercase it) as "band" and the fraction as "bandFraction", with "exact":false. Do NOT invent a numeric "value" yourself here -- the real number is computed afterward from the band's known range, you're only reporting which band and where within it.
-  - If none of the above apply to a dot (an HRV chart with no number printed at that point, for instance), leave that day out of "days" entirely rather than guessing.
+  - Otherwise, for an Antioxidant or AGEs chart where "gridlines" was reported above: record ONLY the dot's own vertical position as "yFraction", 0.0 (very top of the image) to 1.0 (very bottom), same coordinate system as "gridlines", to the nearest 0.01, with "exact":false. Do NOT judge which band it's in or how far within it -- just the dot's plain y-position; the band and value are computed afterward from where you placed the gridlines.
+  - If none of the above apply to a dot (an HRV chart with no number printed at that point, for instance, or gridlines weren't reported), leave that day out of "days" entirely rather than guessing.
 
 Reply with ONLY a JSON object, no other text, no markdown fences:
-{"metric":"hrv"|"antioxidant"|"ages"|"unrecognized","periodLabel":"16–22 Aug"|null,"asOfDate":"2026-08-22","days":[{"date":"2026-08-22","value":38,"exact":true},{"date":"2026-08-19","band":"adequate","bandFraction":0.4,"exact":false}],"average":46|null,"min":43|null,"max":50|null,"headlineGrade":"Good"|null,"unit":"ms"|null}
+{"metric":"hrv"|"antioxidant"|"ages"|"unrecognized","periodLabel":"16–22 Aug"|null,"asOfDate":"2026-08-22","gridlines":[0.12,0.38,0.61,0.85]|null,"days":[{"date":"2026-08-22","value":38,"exact":true},{"date":"2026-08-19","yFraction":0.47,"exact":false}],"average":46|null,"min":43|null,"max":50|null,"headlineGrade":"Good"|null,"unit":"ms"|null}
 - "asOfDate": the resolved date of the LAST (rightmost/most recent) day the chart covers -- always include this even when "days" is empty, since it's what the period average/min/max/grade describe.
 - "days": can be empty if a chart shows no printed numbers, no tapped-day callout, and (for HRV specifically, which has no bands) no other way to place a dot.
 - If "metric" is "unrecognized", every other field should be null/empty -- don't guess at a chart type you're not confident about.`;
@@ -840,20 +885,21 @@ WELLNESS_MAX_TOKENS, WELLNESS_MODEL, 'Wellness screenshot', null, 'low',
 );
 const isIsoDate = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
 const metric = ['hrv', 'antioxidant', 'ages'].includes(raw.metric) ? raw.metric : 'unrecognized';
-// The model only ever reports which band a dot is in plus a fraction
-// within that band -- never a value it invented itself. The actual number
-// is computed here from WELLNESS_BANDS' real, user-confirmed ranges, so a
-// vision-model arithmetic slip (or a misremembered boundary) can't produce
-// a wrong reading on its own. Rounded to a whole number: every real
-// printed value seen on these charts so far has been an integer.
+const gridlines = Array.isArray(raw.gridlines) && raw.gridlines.every((n) => typeof n === 'number') ? raw.gridlines : null;
+// The model only ever reports plain pixel-fraction coordinates -- where the
+// gridlines are, where a dot is -- never a value or a band judgement it
+// worked out itself. resolveBandedDayValue does that arithmetic here
+// against WELLNESS_BANDS' real, user-confirmed ranges, so neither a vision
+// misjudgement of "how far within this band" nor an arithmetic slip can
+// produce a wrong reading (see its own comment for why this replaced
+// asking the model to self-report that fraction directly).
 const days = Array.isArray(raw.days) ? raw.days.map((d) => {
 if (!isIsoDate(d.date)) return null;
 if (d.exact === true && typeof d.value === 'number') return { date: d.date, value: d.value, exact: true };
-if (d.exact === false && typeof d.bandFraction === 'number') {
-const range = bandRange(metric, d.band);
-if (!range) return null;
-const fraction = Math.min(1, Math.max(0, d.bandFraction));
-return { date: d.date, value: Math.round(range.min + fraction * (range.max - range.min)), exact: false };
+if (d.exact === false && typeof d.yFraction === 'number' && gridlines) {
+const value = resolveBandedDayValue(metric, gridlines, d.yFraction);
+if (value == null) return null;
+return { date: d.date, value, exact: false };
 }
 return null;
 }).filter(Boolean) : [];
