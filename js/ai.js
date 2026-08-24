@@ -140,7 +140,7 @@ if (salvaged) return { data: salvaged, truncated: true };
 throw new Error(`Response wasn't JSON: ${stripped.slice(0, 200)}`);
 }
 
-async function callAnthropic(content, maxTokens, modelOverride, purpose, tools) {
+async function callAnthropic(content, maxTokens, modelOverride, purpose, tools, effort) {
 const settings = await getLocalSettings();
 const apiKey = (settings.anthropicApiKey || '').trim();
 if (!apiKey) throw new MissingKeyError();
@@ -161,6 +161,17 @@ model,
 max_tokens: maxTokens || 1500,
 messages: [{ role: 'user', content }],
 ...(tools ? { tools } : {}),
+// Confirmed against Anthropic's docs: Sonnet 5 defaults to "high"
+// effort with no `thinking` param needed to trigger it -- "at higher
+// effort levels, Claude thinks on most requests and at greater
+// length; at lower levels, it can skip thinking entirely for simpler
+// problems." That thinking counts against max_tokens the same as the
+// real answer, which is exactly what starved a wellness extraction of
+// any room for its JSON (see WELLNESS_MAX_TOKENS's own comment).
+// Callers doing plain structured extraction (not open-ended
+// reasoning) pass 'low' here so the model skips thinking rather than
+// silently eating the token budget on a task that doesn't need it.
+...(effort ? { output_config: { effort } } : {}),
 }),
 });
 } catch (networkErr) {
@@ -223,18 +234,18 @@ throw parseErr;
 }
 }
 
-async function callVision(base64, mediaType, promptText, maxTokens, modelOverride) {
+async function callVision(base64, mediaType, promptText, maxTokens, modelOverride, effort) {
 return callAnthropic([
 { type: 'image', source: { type: 'base64', media_type: normalizeImageMediaType(mediaType), data: base64 } },
 { type: 'text', text: promptText },
-], maxTokens, modelOverride || null, 'Photo import');
+], maxTokens, modelOverride || null, 'Photo import', null, effort);
 }
 
 // Text-only Claude call, no image — used for reasoning-over-JSON tasks like
 // ranking nudges. modelOverride lets a cheap/fast task (like ranking) skip
 // past the user's chosen vision model without touching their Settings.
-async function callTextJson(promptText, maxTokens, modelOverride, purpose) {
-return callAnthropic([{ type: 'text', text: promptText }], maxTokens, modelOverride, purpose || 'other');
+async function callTextJson(promptText, maxTokens, modelOverride, purpose, effort) {
+return callAnthropic([{ type: 'text', text: promptText }], maxTokens, modelOverride, purpose || 'other', null, effort);
 }
 
 // maxTokens defaults are generous on purpose: output tokens are cheap
@@ -818,7 +829,14 @@ const { data: raw } = await callAnthropic(
 { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
 { type: 'text', text: wellnessPrompt(todayIso) },
 ],
-WELLNESS_MAX_TOKENS, WELLNESS_MODEL, 'Wellness screenshot',
+// 'low' effort: confirmed live this model thinks by default (Sonnet 5's
+// API default is 'high' effort, which "thinks on most requests") even
+// though nothing here ever asked for it, and that thinking ate the whole
+// max_tokens budget before any JSON came out -- see WELLNESS_MAX_TOKENS's
+// own comment. This is plain structured extraction, not reasoning, so
+// low effort is the correct fix, not just a workaround: it tells the
+// model to skip thinking on a task simple enough not to need it.
+WELLNESS_MAX_TOKENS, WELLNESS_MODEL, 'Wellness screenshot', null, 'low',
 );
 const isIsoDate = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
 const metric = ['hrv', 'antioxidant', 'ages'].includes(raw.metric) ? raw.metric : 'unrecognized';
