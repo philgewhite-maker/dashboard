@@ -1837,6 +1837,23 @@ return [...data.connections]
 .join('');
 }
 
+// Lets Capture Inbox's "Send selected to…" picker create the person on the
+// spot instead of forcing a trip to the manual Add-connection form first
+// before the photos have anywhere to go -- same "why is this an extra step"
+// friction already fixed for screenshot+photo grouping. Minimal on purpose:
+// just a name, same "Unnamed match"/thin-profile precedent
+// addNewConnectionFromCandidate already uses for a screenshot-derived
+// candidate -- everything else (app, stage, bio...) fills in later from the
+// connection's own card, exactly as it would for any thin profile.
+function createBlankConnection(name) {
+const conn = blankConnection({ name: (name || '').trim() || 'Unnamed match', lastContact: todayStr() });
+data.connections.push(conn);
+queueSave();
+renderConnections();
+renderOverviewRef();
+return conn;
+}
+
 function fillConnectionSelect(id, placeholder) {
 const select = document.getElementById(id);
 if (!select) return;
@@ -2452,4 +2469,5 @@ STAGE_RANK, setContactPicker, phoneWithFlagHtml, initRatingCategoriesSettings,
 initFlagRulesSettings, unionInto, initHideArchivedFaded,
 connectionOptionsHtml, applyDirectProfileUpload, applyProfileFieldsToConnection,
 importMatchesListFile, importProfileScreenshotFile, importProfileWithPhotosFile, extractDatingScreenshot, renderPendingImports,
+createBlankConnection,
 };

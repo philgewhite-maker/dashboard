@@ -307,6 +307,7 @@ ${fileItems.map((it) => `<div class="attach-row">
 ${photoItems.length ? `<span class="settings-note" data-inbox-selected-count="${b.id}">${selectedCount} of ${photoItems.length} selected</span>
 ${photoItems.length > 1 ? `<button class="todo-add-btn" type="button" data-inbox-select-all="${b.id}">${selectedCount === photoItems.length ? 'Select none' : 'Select all'}</button>` : ''}
 <select data-inbox-dating-select="${b.id}"><option value="">Send selected to&hellip;</option></select>
+<input type="text" autocomplete="off" data-inbox-new-name="${b.id}" placeholder="New connection's name" hidden>
 <button class="todo-add-btn" type="button" data-inbox-send-dating="${b.id}">Send</button>
 <button class="todo-add-btn" type="button" data-inbox-extract-wellness="${b.id}" title="For an HRV, AGEs index, or Antioxidant index screenshot from Samsung Health">Extract wellness data</button>
 <button class="todo-add-btn" type="button" data-inbox-extract-trip-toggle="${b.id}" title="For a boarding pass, hotel, car hire, or transfer confirmation">Extract into a trip leg</button>
@@ -339,7 +340,7 @@ if (data.captureInbox.some((b) => b.items.some((it) => it.kind === 'photo'))) {
 import('./connections.js').then(({ connectionOptionsHtml }) => {
 el.querySelectorAll('[data-inbox-dating-select]').forEach((sel) => {
 const previous = sel.value;
-sel.innerHTML = '<option value="">Send selected to&hellip;</option>' + connectionOptionsHtml();
+sel.innerHTML = '<option value="">Send selected to&hellip;</option><option value="__new__">+ Add new connection</option>' + connectionOptionsHtml();
 if ([...sel.options].some((o) => o.value === previous)) sel.value = previous;
 });
 });
@@ -402,14 +403,31 @@ renderCaptureInbox();
 });
 });
 
+// Reveals the name field only once "+ Add new connection" is actually
+// picked -- keeps the common case (an existing connection already in the
+// list) exactly as uncluttered as it was before this option existed.
+root.querySelectorAll('[data-inbox-dating-select]').forEach((sel) => {
+sel.addEventListener('change', () => {
+const nameInput = root.querySelector(`[data-inbox-new-name="${sel.dataset.inboxDatingSelect}"]`);
+if (nameInput) nameInput.hidden = sel.value !== '__new__';
+});
+});
+
 root.querySelectorAll('[data-inbox-send-dating]').forEach((btn) => {
 btn.addEventListener('click', async () => {
 const batch = data.captureInbox.find((b) => b.id === btn.dataset.inboxSendDating);
 if (!batch) return;
 const status = root.querySelector(`[data-inbox-status="${batch.id}"]`);
 const sel = root.querySelector(`[data-inbox-dating-select="${batch.id}"]`);
-const connId = sel?.value;
+let connId = sel?.value;
 if (!connId) { if (status) status.textContent = 'Pick a connection first.'; return; }
+if (connId === '__new__') {
+const nameInput = root.querySelector(`[data-inbox-new-name="${batch.id}"]`);
+const name = (nameInput?.value || '').trim();
+if (!name) { if (status) status.textContent = "Type the new connection's name first."; return; }
+const { createBlankConnection } = await import('./connections.js');
+connId = createBlankConnection(name).id;
+}
 const selectedIds = selectionFor(batch.id);
 const chosen = batch.items.filter((it) => it.kind === 'photo' && selectedIds.has(it.id));
 if (!chosen.length) { if (status) status.textContent = 'Tick at least one photo first.'; return; }
