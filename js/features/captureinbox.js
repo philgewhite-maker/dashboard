@@ -49,6 +49,18 @@ function looksLikeSamsungHealthScreenshot(filename) {
 return /samsung[ _]?health/i.test(String(filename || ''));
 }
 
+// Android names a Bumble screenshot with the app name baked in, same
+// convention as Samsung Health's own filenames (see above) -- but unlike
+// a health chart, "came from Bumble" doesn't tell you WHAT kind of Bumble
+// screen it is (matches/discovery list, one profile, a chat, a saved
+// photo), so the filename hint only earns the file one attempt at
+// extractMatchesFromScreenshot; finding zero people is a completely normal
+// outcome (a chat screenshot, say) and just leaves it for manual triage
+// exactly like a false negative would, not an error.
+function looksLikeBumbleScreenshot(filename) {
+return /bumble/i.test(String(filename || ''));
+}
+
 // A batch shared at once (a night's swiping, say) often holds more than
 // one person's photos -- 5 of one, 4 of another, a full profile screenshot
 // plus a few loose photos for a third. Sending is per-selection, not
@@ -87,8 +99,16 @@ async function addCaptureBatch({ label, notes = '', source = null, files }) {
 const batch = blankCaptureBatch({ label, notes, source });
 const failed = [];
 const healthImports = [];
+const matchesImports = [];
 let renphoImported = false;
 let wellnessImported = false;
+// The candidate-review queue (connections.js's #candidate-list) only ever
+// holds one screenshot's worth of results at a time -- a second successful
+// extraction in the same batch would silently overwrite the first with no
+// way to recover it (its source photo would already be gone too). Once
+// this batch has committed one, later Bumble-named files fall back to
+// normal manual triage instead of risking that.
+let matchesListConsumed = false;
 for (const file of files) {
 try {
 const kind = await captureItemKind(file);
@@ -139,6 +159,26 @@ queueSave();
 console.error('Auto wellness extraction failed, photo stays in Capture Inbox for manual triage:', err);
 }
 }
+// Same ordering reasoning as the wellness auto-trigger above: only after
+// the photo is safely stored. Zero candidates found is a normal, silent
+// outcome here (see looksLikeBumbleScreenshot's own comment) -- the item
+// only leaves the batch on an actual match.
+if (kind === 'photo' && looksLikeBumbleScreenshot(file.name) && !matchesListConsumed) {
+try {
+const { importMatchesListFile } = await import('./connections.js');
+const { candidates } = await importMatchesListFile(file, 'Bumble');
+if (candidates.length) {
+matchesImports.push(`${file.name || 'that image'}: found ${candidates.length} ${candidates.length === 1 ? 'person' : 'people'} — review in Dating admin.`);
+matchesListConsumed = true;
+await deleteItemBytes(item);
+batch.items = batch.items.filter((it) => it.id !== item.id);
+removeBatchIfEmpty(batch);
+queueSave();
+}
+} catch (err) {
+console.error('Auto matches-list extraction failed, photo stays in Capture Inbox for manual triage:', err);
+}
+}
 } catch (err) {
 console.error('Could not capture a shared file:', err);
 failed.push(`${file.name || 'file'}: ${err.message || err}`);
@@ -153,7 +193,7 @@ if (wellnessImported) {
 const { renderWellnessDaily } = await import('./wellness.js');
 renderWellnessDaily();
 }
-return { batch, failed, healthImports };
+return { batch, failed, healthImports, matchesImports };
 }
 
 function removeBatchIfEmpty(batch) {
@@ -209,7 +249,8 @@ ${photoItems.length > 1 ? `<button class="todo-add-btn" type="button" data-inbox
 <select data-inbox-dating-select="${b.id}"><option value="">Send selected to&hellip;</option></select>
 <button class="todo-add-btn" type="button" data-inbox-send-dating="${b.id}">Send</button>
 <button class="todo-add-btn" type="button" data-inbox-extract-wellness="${b.id}" title="For an HRV, AGEs index, or Antioxidant index screenshot from Samsung Health">Extract wellness data</button>
-<button class="todo-add-btn" type="button" data-inbox-extract-trip-toggle="${b.id}" title="For a boarding pass, hotel, car hire, or transfer confirmation">Extract into a trip leg</button>` : ''}
+<button class="todo-add-btn" type="button" data-inbox-extract-trip-toggle="${b.id}" title="For a boarding pass, hotel, car hire, or transfer confirmation">Extract into a trip leg</button>
+<button class="todo-add-btn" type="button" data-inbox-extract-matches="${b.id}" title="For a Bumble/Tinder/Hinge matches or chat list screenshot — pulls out everyone visible for review">Extract matches list</button>` : ''}
 <button class="todo-add-btn" type="button" data-inbox-attach-task="${b.id}">Attach ${photoItems.length ? 'everything left ' : ''}to a Task</button>
 <button class="del-x" type="button" data-inbox-discard="${b.id}">Discard</button>
 </div>
@@ -403,6 +444,48 @@ queueSave();
 // the panel, well above a card that's scrolled into view, and confirmed
 // live as effectively invisible there when the card itself still exists.
 writeInboxStatus(root, batchId, messages.join(' '));
+});
+});
+
+// The candidate-review queue this feeds (connections.js's #candidate-list)
+// only ever holds one screenshot's worth of results -- a second call would
+// silently overwrite the first, same reasoning as matchesListConsumed in
+// addCaptureBatch() above -- so this only ever processes ONE selected photo
+// per click, regardless of how many are ticked.
+root.querySelectorAll('[data-inbox-extract-matches]').forEach((btn) => {
+btn.addEventListener('click', async () => {
+const batch = data.captureInbox.find((b) => b.id === btn.dataset.inboxExtractMatches);
+if (!batch) return;
+const status = root.querySelector(`[data-inbox-status="${batch.id}"]`);
+const selectedIds = selectionFor(batch.id);
+const chosen = batch.items.filter((it) => it.kind === 'photo' && selectedIds.has(it.id));
+if (!chosen.length) { if (status) status.textContent = 'Tick at least one photo first.'; return; }
+if (chosen.length > 1 && status) status.textContent = `Reading the first of ${chosen.length} selected — do the rest one at a time.`;
+const it = chosen[0];
+if (status) status.textContent = `Reading ${it.name || 'photo'}…`;
+let message;
+try {
+const blob = await fetchAttachment(it.id);
+const file = new File([blob], it.name || 'photo', { type: it.type || blob.type });
+const { importMatchesListFile } = await import('./connections.js');
+const { candidates } = await importMatchesListFile(file, null);
+if (candidates.length) {
+message = `${it.name || 'that image'}: found ${candidates.length} ${candidates.length === 1 ? 'person' : 'people'} — review in Dating admin.`;
+await deleteItemBytes(it);
+selectedIds.delete(it.id);
+batch.items = batch.items.filter((x) => x.id !== it.id);
+removeBatchIfEmpty(batch);
+queueSave();
+} else {
+message = `${it.name || 'that image'}: didn't look like a matches/chat list.`;
+}
+} catch (err) {
+console.error('Matches-list extraction failed:', err);
+message = err?.name === 'MissingKeyError' ? 'Add an Anthropic API key in Settings to extract a matches list.' : `${it.name || 'that image'}: ${err.message || err}`;
+}
+const batchId = batch.id;
+renderCaptureInbox();
+writeInboxStatus(root, batchId, message);
 });
 });
 

@@ -114,17 +114,19 @@ const title = (share.title || '').trim();
 const url = (share.url || '').trim();
 const text = (share.text || '').trim();
 const label = title || url || text.split('\n')[0].slice(0, 120) || `${share.files.length} shared file${share.files.length === 1 ? '' : 's'}`;
-const { batch, failed, healthImports } = await addCaptureBatch({
+const { batch, failed, healthImports, matchesImports } = await addCaptureBatch({
 label,
 notes: text && text !== label ? text : '',
 source: { kind: 'share', label: title || url || 'Shared from another app', url },
 files: share.files,
 });
-// A recognised Health CSV is fully consumed on the way in and never
-// becomes a batch item -- if that's everything that was shared, there's
-// nothing left in Capture Inbox to open.
+// A recognised Health CSV, or a Bumble matches-list screenshot that
+// yielded candidates, is fully consumed on the way in and never becomes a
+// batch item -- if that's everything that was shared, there's nothing
+// left in Capture Inbox to open.
 const parts = [];
 if (batch.items.length) parts.push(`Captured ${batch.items.length} file${batch.items.length === 1 ? '' : 's'} to your Capture Inbox as "${label.slice(0, 60)}".`);
+if (matchesImports.length) parts.push(matchesImports.join(' '));
 if (healthImports.length) parts.push(healthImports.join(' '));
 if (failed.length) parts.push(`${failed.length} couldn't be captured — see Settings.`);
 const msg = parts.join(' ') || `Nothing from "${label.slice(0, 60)}" could be captured — see Settings.`;
@@ -133,6 +135,11 @@ banner(msg, async () => {
 const { switchTab } = await import('../tabs.js');
 switchTab('tasks');
 revealCaptureBatch(batch.id);
+});
+} else if (matchesImports.length) {
+banner(msg, async () => {
+const { switchTab } = await import('../tabs.js');
+switchTab('datingadmin');
 });
 } else if (healthImports.length) {
 banner(msg, async () => {

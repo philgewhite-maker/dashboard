@@ -1904,6 +1904,28 @@ if (fileLine) fileLine.textContent = importStatusLine('screenshotMatches');
 if (profileLine) profileLine.textContent = importStatusLine('screenshotProfile');
 }
 
+// Shared by the manual "Import matches list" file input below and Capture
+// Inbox's auto-detected/manual Bumble-screenshot paths (see
+// looksLikeBumbleScreenshot in captureinbox.js) -- same extraction, same
+// review queue, same bookkeeping, regardless of how the screenshot arrived.
+// statusEl is optional: Capture Inbox's auto-trigger has nowhere sensible
+// to print interim status, so it just omits one.
+async function importMatchesListFile(file, appHint, statusEl) {
+if (statusEl) statusEl.textContent = 'Reading screenshot…';
+const { candidates, truncated } = await extractMatchesFromScreenshot(file, appHint);
+recordImportRun('screenshotMatches', { scope: appHint || 'matches list', count: candidates.length });
+renderImportLastRun();
+if (candidates.length === 0) {
+if (statusEl) statusEl.textContent = 'No people found in that screenshot.';
+return { candidates, truncated };
+}
+const truncatedNote = truncated ? ' (the screenshot had more people than fit in one response — the rest were skipped; try cropping the screenshot shorter and importing the remainder separately)' : '';
+if (statusEl) statusEl.textContent = `Found ${candidates.length} ${candidates.length === 1 ? 'person' : 'people'}${truncatedNote} — review below:`;
+const candidateList = document.getElementById('candidate-list');
+if (candidateList) await renderCandidateReview(candidateList, candidates);
+return { candidates, truncated };
+}
+
 function initImport() {
 const status = document.getElementById('import-status');
 const candidateList = document.getElementById('candidate-list');
@@ -1921,16 +1943,7 @@ document.getElementById('import-file-input').addEventListener('change', async (e
 const file = e.target.files[0];
 if (!file) return;
 candidateList.innerHTML = '';
-status.textContent = 'Reading screenshot…';
-await withImportStatus(status, async () => {
-const { candidates, truncated } = await extractMatchesFromScreenshot(file, screenshotAppHint());
-recordImportRun('screenshotMatches', { scope: screenshotAppHint() || 'matches list', count: candidates.length });
-renderImportLastRun();
-if (candidates.length === 0) { status.textContent = 'No people found in that screenshot.'; return; }
-const truncatedNote = truncated ? ' (the screenshot had more people than fit in one response — the rest were skipped; try cropping the screenshot shorter and importing the remainder separately)' : '';
-status.textContent = `Found ${candidates.length} ${candidates.length === 1 ? 'person' : 'people'}${truncatedNote} — review below:`;
-await renderCandidateReview(candidateList, candidates);
-});
+await withImportStatus(status, () => importMatchesListFile(file, screenshotAppHint(), status));
 e.target.value = '';
 });
 
@@ -2285,4 +2298,5 @@ filterByEmptyField, filterBySearch, filterByIds, clearFilters,
 STAGE_RANK, setContactPicker, phoneWithFlagHtml, initRatingCategoriesSettings,
 initFlagRulesSettings, unionInto, initHideArchivedFaded,
 connectionOptionsHtml, applyDirectProfileUpload, applyProfileFieldsToConnection,
+importMatchesListFile,
 };
