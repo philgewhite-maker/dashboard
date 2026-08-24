@@ -13,11 +13,16 @@
 // screenshot (filename-matched, see looksLikeSamsungHealthScreenshot() --
 // an image can't be content-sniffed this cheaply, so a real AI vision call
 // decides, with a safe fallback to normal triage if it doesn't recognise
-// the chart), and a Bumble matches-list/full-profile screenshot
-// (filename-matched, then classified deterministically by aspect ratio and
-// cheaply by AI kind -- see autoRouteBumbleScreenshot() -- landing in the
-// persisted pendingImports review queue in connections.js rather than
-// staying a Capture Inbox item).
+// the chart), and a Bumble matches-list/full-profile screenshot shared
+// ALONE (filename-matched, then classified deterministically by aspect
+// ratio and cheaply by AI kind -- see autoRouteBumbleScreenshot() --
+// landing in the persisted pendingImports review queue in connections.js
+// rather than staying a Capture Inbox item). A Bumble screenshot shared
+// alongside other photos deliberately does NOT auto-route -- see the
+// comment above the Phase 2 loop in addCaptureBatch() for why -- so the
+// whole group stays put for the user to tick a subset per person and use
+// the manual "Extract dating screenshot" button, which can group a
+// screenshot with whichever photos are ticked alongside it.
 import { data, queueSave, blankCaptureBatch } from '../state.js';
 import { photoDelete } from '../db.js';
 import { todayStr, escapeHtml, hydratePhotoBackgrounds, resizeImageToBlob } from '../utils.js';
@@ -189,6 +194,23 @@ failed.push(`${file.name || 'file'}: ${err.message || err}`);
 // calls -- a filename match is a hint, not a certainty (see
 // looksLikeSamsungHealthScreenshot's own comment), so finding nothing is a
 // normal outcome that just leaves that one item for manual triage.
+//
+// The Bumble auto-route only fires when its screenshot is the ONLY photo
+// in the whole share -- confirmed by the user as the wrong default
+// otherwise: sharing a profile screenshot together with that person's own
+// photos is exactly the "tick who belongs together" combined case Capture
+// Inbox's manual "Extract dating screenshot" button now handles (see
+// importProfileWithPhotosFile in connections.js), and if the auto-route
+// eagerly consumed the screenshot alone the moment the share landed, it
+// would already be gone from the batch before the user ever got a chance
+// to tick it together with the right photos -- silently breaking the very
+// grouping the manual flow exists to support. A share with more than one
+// photo just leaves everything in Capture Inbox untouched, so the user can
+// tick whichever subset is person 1, extract that, then tick whichever
+// subset is person 2, and so on -- full manual control over multi-person
+// shares, at the cost of one extra tap for the common single-screenshot
+// share (which still auto-routes exactly as before).
+const totalPhotoCount = batch.items.filter((it) => it.kind === 'photo').length;
 for (const { file, item } of autoRouteCandidates) {
 if (looksLikeSamsungHealthScreenshot(file.name)) {
 try {
@@ -206,7 +228,7 @@ queueSave();
 console.error('Auto wellness extraction failed, photo stays in Capture Inbox for manual triage:', err);
 }
 }
-if (looksLikeBumbleScreenshot(file.name)) {
+if (looksLikeBumbleScreenshot(file.name) && totalPhotoCount === 1) {
 try {
 const result = await autoRouteBumbleScreenshot(file, 'Bumble');
 if (result.routed) {
