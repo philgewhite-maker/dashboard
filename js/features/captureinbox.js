@@ -160,6 +160,20 @@ function removeBatchIfEmpty(batch) {
 if (!batch.items.length) data.captureInbox = data.captureInbox.filter((b) => b.id !== batch.id);
 }
 
+// Call AFTER renderCaptureInbox() -- the per-card status span is freshly
+// rebuilt at that point (see the extraction handlers below), so this finds
+// the recreated one and writes there, right next to the buttons the user is
+// actually looking at, rather than the page-level line up at the top of the
+// panel which is easy to miss when the card is scrolled below it. Only
+// falls back to the page-level line when the batch itself is gone (every
+// item in it succeeded) and there's no card left to point the message at.
+function writeInboxStatus(root, batchId, message) {
+const cardStatus = root.querySelector(`[data-inbox-status="${batchId}"]`);
+if (cardStatus) { cardStatus.textContent = message; return; }
+const pageStatus = document.getElementById('capture-inbox-status');
+if (pageStatus) pageStatus.textContent = message;
+}
+
 // Best-effort delete of both copies -- server (if any) then the local
 // IndexedDB cache -- exactly the precedent already in tasks.js's own
 // task-delete and attach-remove handlers: a stray orphaned file is the
@@ -373,6 +387,7 @@ messages.push(err?.name === 'MissingKeyError' ? 'Add an Anthropic API key in Set
 }
 for (const it of done) { await deleteItemBytes(it); selectedIds.delete(it.id); }
 const doneIds = new Set(done.map((it) => it.id));
+const batchId = batch.id;
 batch.items = batch.items.filter((it) => !doneIds.has(it.id));
 removeBatchIfEmpty(batch);
 renderCaptureInbox();
@@ -381,17 +396,13 @@ const { renderWellnessDaily } = await import('./wellness.js');
 renderWellnessDaily();
 }
 queueSave();
-// renderCaptureInbox() just rebuilt the whole list from fresh markup --
-// confirmed live as a real bug: setting the result message on the
-// per-card status span BEFORE that call meant it was destroyed a moment
-// later regardless of whether the batch got emptied, so the message
-// (which metric, which day, what grade -- or the actual error) was
-// computed correctly but never once visible to look at. The page-level
-// status sits in the static panel markup, untouched by rebuilding the
-// list, so it's the one place a message set here actually survives --
-// and it has to be set AFTER renderCaptureInbox(), not before.
-const pageStatus = document.getElementById('capture-inbox-status');
-if (pageStatus) pageStatus.textContent = messages.join(' ');
+// Must run AFTER renderCaptureInbox() -- it rebuilds the whole list from
+// fresh markup, wiping any status text written before it ran. And it
+// writes to the per-card status span (found fresh, post-rebuild) rather
+// than only the page-level one -- the page-level line sits at the TOP of
+// the panel, well above a card that's scrolled into view, and confirmed
+// live as effectively invisible there when the card itself still exists.
+writeInboxStatus(root, batchId, messages.join(' '));
 });
 });
 
@@ -445,11 +456,15 @@ messages.push(err?.name === 'MissingKeyError' ? 'Add an Anthropic API key in Set
 }
 for (const it of done) { await deleteItemBytes(it); selectedIds.delete(it.id); }
 const doneIds = new Set(done.map((it) => it.id));
+const batchId = batch.id;
 batch.items = batch.items.filter((it) => !doneIds.has(it.id));
 removeBatchIfEmpty(batch);
-if (status) status.textContent = messages.join(' ');
 renderCaptureInbox();
 queueSave();
+// Same ordering fix as the wellness handler above -- must run AFTER
+// renderCaptureInbox(), and target the per-card status where it still
+// exists rather than only the easy-to-miss page-level line.
+writeInboxStatus(root, batchId, messages.join(' '));
 });
 });
 
