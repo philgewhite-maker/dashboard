@@ -512,20 +512,28 @@ writeInboxStatus(root, batchId, messages.join(' '));
 // old ephemeral single-slot version -- there's no reason to only process
 // one selected photo per click any more.
 //
-// Confirmed by the user as a real inconsistency: the "pull" combined-
-// upload path (applyDirectProfileUpload, Send-to-connection) already
-// merges a screenshot ticked alongside loose photos into one action for an
-// EXISTING connection, but this button treated every ticked item
-// independently, leaving a new person's photos stranded even after their
-// profile screenshot got extracted. Fixed the same way: classify the whole
-// ticked group first (cheap, no AI -- aspect ratio only), and if it
-// cleanly decomposes into exactly one profile screenshot plus some loose
-// photos, treat it as one person -- extract the screenshot AND attach the
-// photos to that same new candidate, matching the "tick who belongs
-// together" convention already printed on this card. Anything messier (no
-// screenshot, more than one, or a matches-list rather than a single
-// profile -- ambiguous which photos belong to whom) falls back to handling
-// every item independently, same as before.
+// Confirmed by the user twice over as a real inconsistency, not two
+// separate bugs:
+// 1. The "pull" combined-upload path (applyDirectProfileUpload, Send-to-
+//    connection) already merges a screenshot ticked alongside loose photos
+//    into one action for an EXISTING connection -- fixed here the same way
+//    for a NEW one: classify the ticked group by aspect ratio only (cheap,
+//    no AI -- just deciding which ticked item, if any, IS the screenshot
+//    for grouping purposes), and if it cleanly decomposes into exactly one
+//    screenshot plus some loose photos, extract the screenshot AND attach
+//    the photos to that same new candidate.
+// 2. A quick Haiku pre-scan used to gate WHICH extraction to even attempt
+//    (matches vs profile vs "didn't look like either") -- removed. A real
+//    Bumble "Chats" screen (several people, each row showing a message
+//    preview) succeeded via Dating admin's own "Import matches list"
+//    button directly, but was rejected here because the cheap 4-way
+//    pre-scan saw "chat" (singular) as a different bucket than "matches"
+//    (a list) for that exact shape. extractDatingScreenshot
+//    (connections.js) composes the SAME two functions those Dating-admin
+//    buttons call directly -- matches first, any candidates found is
+//    success exactly like that button's own success condition, profile
+//    second -- no separate classifier layer in between that can reject a
+//    screenshot the real extraction would have handled fine.
 root.querySelectorAll('[data-inbox-extract-matches]').forEach((btn) => {
 btn.addEventListener('click', async () => {
 const batch = data.captureInbox.find((b) => b.id === btn.dataset.inboxExtractMatches);
@@ -536,6 +544,7 @@ const chosen = batch.items.filter((it) => it.kind === 'photo' && selectedIds.has
 if (!chosen.length) { if (status) status.textContent = 'Tick at least one photo first.'; return; }
 
 const { classifyProfileUpload } = await import('../utils.js');
+const { extractDatingScreenshot } = await import('./connections.js');
 const withFiles = await Promise.all(chosen.map(async (it) => {
 const blob = await fetchAttachment(it.id);
 const file = new File([blob], it.name || 'photo', { type: it.type || blob.type });
@@ -552,46 +561,40 @@ if (screenshots.length === 1 && plainPhotos.length > 0) {
 const { it, file } = screenshots[0];
 if (status) status.textContent = `Reading ${it.name || 'photo'}…`;
 try {
-const { quickScanScreenshot } = await import('../ai.js');
-const scan = await quickScanScreenshot(file, null);
-if (scan.kind === 'profile') {
-const { importProfileWithPhotosFile } = await import('./connections.js');
-const { candidate } = await importProfileWithPhotosFile(file, null, plainPhotos.map((p) => p.file));
-if (candidate) {
-messages.push(`${it.name || 'that image'}: found a profile with ${plainPhotos.length} extra photo${plainPhotos.length === 1 ? '' : 's'} — review in Dating admin.`);
-done.push(it, ...plainPhotos.map((p) => p.it));
-} else {
-messages.push(`${it.name || 'that image'}: didn't look like a profile.`);
-}
-} else if (scan.kind === 'matches') {
+const result = await extractDatingScreenshot(file, null, plainPhotos.map((p) => p.file), status);
+if (result.kind === 'matches') {
 // A matches list has several people -- no single obvious owner for
 // the other ticked photos, so only the list itself gets extracted;
 // the loose photos are left for a separate, unambiguous action.
-const { importMatchesListFile } = await import('./connections.js');
-const { candidates } = await importMatchesListFile(file, null);
-if (candidates.length) {
-messages.push(`${it.name || 'that image'}: found ${candidates.length} ${candidates.length === 1 ? 'person' : 'people'} (a list, not one profile, so the other ticked photos weren't attached to anyone) — review in Dating admin.`);
+messages.push(`${it.name || 'that image'}: found ${result.candidates.length} ${result.candidates.length === 1 ? 'person' : 'people'} (a list, not one profile, so the other ticked photos weren't attached to anyone) — review in Dating admin.`);
 done.push(it);
+} else if (result.kind === 'profile') {
+messages.push(`${it.name || 'that image'}: found a profile with ${plainPhotos.length} extra photo${plainPhotos.length === 1 ? '' : 's'} — review in Dating admin.`);
+done.push(it, ...plainPhotos.map((p) => p.it));
 } else {
-messages.push(`${it.name || 'that image'}: didn't look like a matches list.`);
-}
-} else {
-messages.push(`${it.name || 'that image'}: didn't look like a matches list or profile.`);
+// result.error is set when the profile-stage extraction itself failed
+// (e.g. no API key) rather than genuinely finding neither shape --
+// importProfileScreenshotFile/importProfileWithPhotosFile catch that
+// internally so it never reaches this try/catch's own catch block, so
+// it has to be read back off the result instead of assumed absent.
+messages.push(result.error?.name === 'MissingKeyError' ? 'Add an Anthropic API key in Settings to extract a dating screenshot.' : `${it.name || 'that image'}: didn't look like a matches list or profile.`);
 }
 } catch (err) {
 console.error('Dating screenshot extraction failed:', err);
 messages.push(err?.name === 'MissingKeyError' ? 'Add an Anthropic API key in Settings to extract a dating screenshot.' : `${it.name || 'that image'}: ${err.message || err}`);
 }
 } else {
-for (const { it, file } of withFiles) {
+for (const { it, file, isScreenshot } of withFiles) {
+if (!isScreenshot) { messages.push(`${it.name || 'that image'}: not a screenshot, skipped.`); continue; }
 if (status) status.textContent = `Reading ${it.name || 'photo'}…`;
 try {
-const result = await autoRouteBumbleScreenshot(file, null);
-if (result.routed) {
-messages.push(`${it.name || 'that image'}: found ${result.count} ${result.count === 1 ? 'person' : 'people'} (${result.kind}) — review in Dating admin.`);
+const result = await extractDatingScreenshot(file, null, [], status);
+if (result.kind) {
+const count = result.candidates ? result.candidates.length : 1;
+messages.push(`${it.name || 'that image'}: found ${count} ${count === 1 ? 'person' : 'people'} (${result.kind}) — review in Dating admin.`);
 done.push(it);
 } else {
-messages.push(`${it.name || 'that image'}: didn't look like a matches list or profile.`);
+messages.push(result.error?.name === 'MissingKeyError' ? 'Add an Anthropic API key in Settings to extract a dating screenshot.' : `${it.name || 'that image'}: didn't look like a matches list or profile.`);
 }
 } catch (err) {
 console.error('Dating screenshot extraction failed:', err);

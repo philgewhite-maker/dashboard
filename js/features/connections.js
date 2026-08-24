@@ -1969,7 +1969,11 @@ candidate = await extractProfileFromScreenshot(file, appHint);
 } catch (err) {
 console.error('Profile screenshot import failed:', err);
 if (statusEl) statusEl.textContent = err instanceof MissingKeyError ? err.message : `Couldn't read that screenshot: ${err.message || err}`;
-return { candidate: null };
+// Surfaced to the caller (not just written to statusEl and dropped) --
+// extractDatingScreenshot needs to tell "genuinely didn't look like
+// either shape" apart from "couldn't even attempt it" so it can show
+// the real reason instead of a generic not-found message.
+return { candidate: null, error: err };
 }
 recordImportRun('screenshotProfile', { scope: appHint || file.name || 'profile screenshot', count: 1 });
 renderImportLastRun();
@@ -1996,7 +2000,7 @@ candidate = await extractProfileFromScreenshot(file, appHint);
 } catch (err) {
 console.error('Profile screenshot import failed:', err);
 if (statusEl) statusEl.textContent = err instanceof MissingKeyError ? err.message : `Couldn't read that screenshot: ${err.message || err}`;
-return { candidate: null };
+return { candidate: null, error: err };
 }
 recordImportRun('screenshotProfile', { scope: appHint || file.name || 'profile screenshot', count: 1 });
 renderImportLastRun();
@@ -2010,6 +2014,32 @@ if (blob) candidate.photoIds.push(await storePhoto(blob));
 if (statusEl) statusEl.textContent = `Found a profile with ${extraFiles.length} extra photo${extraFiles.length === 1 ? '' : 's'} — review below:`;
 await queuePendingImport({ candidates: [candidate], kind: 'profile', app: appHint, sourceLabel: file.name || 'profile screenshot' });
 return { candidate };
+}
+
+// Capture Inbox's "Extract dating screenshot" button, for an explicit,
+// deliberate user action -- unlike autoRouteBumbleScreenshot (captureinbox.js's
+// unconfirmed auto-trigger, deliberately gated by a cheap Haiku pre-scan
+// since it fires with no confirmation), this composes the SAME two
+// functions the Dating-admin "Import matches list" and "Import profile
+// screenshot(s)" buttons already call directly, with no classifier in
+// between deciding which one to even attempt. Confirmed live as a real
+// bug this replaces: a Bumble "Chats" screen (several people, each row
+// showing a message preview) succeeded via "Import matches list" directly
+// -- extractMatchesFromScreenshot is explicitly built to read a message-
+// preview row as someone you're "Chatting in app" with -- but the 4-way
+// Haiku pre-scan gating the auto-detecting path only sees "chat" (singular)
+// as a bucket distinct from "matches" (a list), misrouted it, and rejected
+// the screenshot before the real extraction ever ran. Trying the matches
+// extraction first and accepting any candidates found, exactly matching
+// that button's own success condition, removes the extra unreliable layer
+// entirely rather than trying to make it smarter.
+async function extractDatingScreenshot(file, appHint, extraFiles, statusEl) {
+const matchesResult = await importMatchesListFile(file, appHint, statusEl);
+if (matchesResult.candidates.length > 0) return { kind: 'matches', ...matchesResult };
+const profileResult = (extraFiles && extraFiles.length)
+? await importProfileWithPhotosFile(file, appHint, extraFiles, statusEl)
+: await importProfileScreenshotFile(file, appHint, statusEl);
+return { kind: profileResult.candidate ? 'profile' : null, ...profileResult };
 }
 
 function initImport() {
@@ -2421,5 +2451,5 @@ filterByEmptyField, filterBySearch, filterByIds, clearFilters,
 STAGE_RANK, setContactPicker, phoneWithFlagHtml, initRatingCategoriesSettings,
 initFlagRulesSettings, unionInto, initHideArchivedFaded,
 connectionOptionsHtml, applyDirectProfileUpload, applyProfileFieldsToConnection,
-importMatchesListFile, importProfileScreenshotFile, importProfileWithPhotosFile, renderPendingImports,
+importMatchesListFile, importProfileScreenshotFile, importProfileWithPhotosFile, extractDatingScreenshot, renderPendingImports,
 };
