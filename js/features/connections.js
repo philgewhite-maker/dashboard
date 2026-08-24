@@ -1,4 +1,4 @@
-import { data, queueSave, reachOutThreshold, isDormantStage, isTravelPaused, getLocalSettings, setLocalSetting, TAG_FIELDS, CONTACT_STATUS_LABELS, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness, slugifyField, FLAG_FIELD_DEFS, DEFAULT_FLAG_RULES, computeFlags, valueColorForField, stripSharedSuffix, suggestedAction, suggestedQuestions, recordImportRun, importStatusLine, upsertIdentity, blankConnection } from '../state.js';
+import { data, queueSave, reachOutThreshold, isDormantStage, isTravelPaused, getLocalSettings, setLocalSetting, TAG_FIELDS, CONTACT_STATUS_LABELS, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness, slugifyField, FLAG_FIELD_DEFS, DEFAULT_FLAG_RULES, computeFlags, valueColorForField, stripSharedSuffix, suggestedAction, suggestedQuestions, recordImportRun, importStatusLine, upsertIdentity, blankConnection, blankPendingImport } from '../state.js';
 import { captureTask, revealTask } from './tasks.js';
 import { photoDelete, photoUrl } from '../db.js';
 import { storePhoto } from '../files.js';
@@ -1787,7 +1787,12 @@ parts.push(m.lastContact ? `contacted ${daysSince(m.lastContact)}d ago` : 'never
 return parts.join(' · ');
 }
 
-function candidateRowHtml(idx, name, age, matches, extraDetail) {
+// photoId is already a durably-stored photo by the time this renders (see
+// queuePendingImport) -- same avatarHtml() every existing-connection avatar
+// on this page already uses, rather than the special ObjectURL-from-Blob
+// hydration the old ephemeral review list needed before photos were saved
+// this early.
+function candidateRowHtml(idx, name, age, matches, extraDetail, photoId) {
 if (matches && matches.length > 0) {
 const existingHtml = matches.map((m) => `
 <div class="compare-existing">
@@ -1800,7 +1805,7 @@ return `<div class="candidate-row ambiguous" data-idx="${idx}">
 <div class="compare">
 ${existingHtml}
 <span class="vs">existing vs new</span>
-<span class="avatar sm" data-candidate-photo="${idx}">${escapeHtml((name || '?').charAt(0).toUpperCase())}</span>
+${avatarHtml(photoId, name, 'sm')}
 </div>
 <div>${escapeHtml(name)}${age ? ', ' + escapeHtml(age) : ''} <span class="candidate-tag">${tag}</span></div>
 ${extraDetail ? `<div style="font-size:11px;color:var(--muted);">${escapeHtml(extraDetail)}</div>` : ''}
@@ -1813,7 +1818,7 @@ ${updateOptions}
 }
 return `<label class="candidate-row" data-idx="${idx}">
 <input type="checkbox" data-new-idx="${idx}" checked>
-<span class="avatar sm" data-candidate-photo="${idx}">${escapeHtml((name || '?').charAt(0).toUpperCase())}</span>
+${avatarHtml(photoId, name, 'sm')}
 <span>${escapeHtml(name)}${age ? ', ' + escapeHtml(age) : ''}${extraDetail ? `<br><span style="font-size:11px;color:var(--muted);">${escapeHtml(extraDetail)}</span>` : ''}</span>
 <span class="candidate-tag">new</span>
 </label>`;
@@ -1904,12 +1909,37 @@ if (fileLine) fileLine.textContent = importStatusLine('screenshotMatches');
 if (profileLine) profileLine.textContent = importStatusLine('screenshotProfile');
 }
 
+// The one place a raw extraction result becomes durable. Candidate photo
+// Blobs are stored via storePhoto() right here -- BEFORE anything is
+// rendered or the user gets a chance to navigate away -- and the pending
+// import itself is pushed into data.pendingImports and saved immediately.
+// Confirmed live as a real bug otherwise: a matches-list import that only
+// existed as an in-memory array plus unsaved Blobs, referenced by a closure
+// around the confirm button, "disappeared" before it could be reviewed --
+// Android backgrounding the PWA tab is an unpredictable reload from this
+// app's point of view, the same root cause already fixed for Capture Inbox
+// and wellness extraction by storing first and processing after.
+async function queuePendingImport({ candidates, kind, app, sourceLabel }) {
+for (const cand of candidates) {
+const blobs = kind === 'profile' ? (cand.photoBlobs || []) : (cand.photoBlob ? [cand.photoBlob] : []);
+cand.photoIds = [];
+for (const blob of blobs) cand.photoIds.push(await storePhoto(blob));
+delete cand.photoBlob;
+delete cand.photoBlobs;
+}
+const pending = blankPendingImport({ kind, app: app || '', sourceLabel: sourceLabel || '', candidates });
+data.pendingImports.push(pending);
+queueSave();
+renderPendingImports();
+return pending;
+}
+
 // Shared by the manual "Import matches list" file input below and Capture
 // Inbox's auto-detected/manual Bumble-screenshot paths (see
-// looksLikeBumbleScreenshot in captureinbox.js) -- same extraction, same
-// review queue, same bookkeeping, regardless of how the screenshot arrived.
-// statusEl is optional: Capture Inbox's auto-trigger has nowhere sensible
-// to print interim status, so it just omits one.
+// autoRouteBumbleScreenshot in captureinbox.js) -- same extraction, same
+// persisted review queue, same bookkeeping, regardless of how the
+// screenshot arrived. statusEl is optional: Capture Inbox's auto-trigger
+// has nowhere sensible to print interim status, so it just omits one.
 async function importMatchesListFile(file, appHint, statusEl) {
 if (statusEl) statusEl.textContent = 'Reading screenshot…';
 const { candidates, truncated } = await extractMatchesFromScreenshot(file, appHint);
@@ -1921,28 +1951,44 @@ return { candidates, truncated };
 }
 const truncatedNote = truncated ? ' (the screenshot had more people than fit in one response — the rest were skipped; try cropping the screenshot shorter and importing the remainder separately)' : '';
 if (statusEl) statusEl.textContent = `Found ${candidates.length} ${candidates.length === 1 ? 'person' : 'people'}${truncatedNote} — review below:`;
-const candidateList = document.getElementById('candidate-list');
-if (candidateList) await renderCandidateReview(candidateList, candidates);
+await queuePendingImport({ candidates, kind: 'matches', app: appHint, sourceLabel: file.name || 'matches list' });
 return { candidates, truncated };
+}
+
+// One full profile per file, same shape used by the manual "Import profile
+// screenshot(s)" input and by Capture Inbox's type-2 auto-route.
+async function importProfileScreenshotFile(file, appHint, statusEl) {
+if (statusEl) statusEl.textContent = 'Reading screenshot…';
+let candidate;
+try {
+candidate = await extractProfileFromScreenshot(file, appHint);
+} catch (err) {
+console.error('Profile screenshot import failed:', err);
+if (statusEl) statusEl.textContent = err instanceof MissingKeyError ? err.message : `Couldn't read that screenshot: ${err.message || err}`;
+return { candidate: null };
+}
+recordImportRun('screenshotProfile', { scope: appHint || file.name || 'profile screenshot', count: 1 });
+renderImportLastRun();
+if (statusEl) statusEl.textContent = `Found a profile — review below:`;
+await queuePendingImport({ candidates: [candidate], kind: 'profile', app: appHint, sourceLabel: file.name || 'profile screenshot' });
+return { candidate };
 }
 
 function initImport() {
 const status = document.getElementById('import-status');
-const candidateList = document.getElementById('candidate-list');
 renderImportLastRun();
+renderPendingImports();
 
 document.getElementById('photo-only-input').addEventListener('change', async (e) => {
 const files = Array.from(e.target.files);
 e.target.value = '';
 if (files.length === 0) return;
-candidateList.innerHTML = '';
 await addPhotosWithoutParsing(files, status);
 });
 
 document.getElementById('import-file-input').addEventListener('change', async (e) => {
 const file = e.target.files[0];
 if (!file) return;
-candidateList.innerHTML = '';
 await withImportStatus(status, () => importMatchesListFile(file, screenshotAppHint(), status));
 e.target.value = '';
 });
@@ -1950,65 +1996,85 @@ e.target.value = '';
 document.getElementById('import-profile-input').addEventListener('change', async (e) => {
 const files = Array.from(e.target.files);
 if (files.length === 0) return;
-candidateList.innerHTML = '';
 status.textContent = `Reading ${files.length} profile screenshot${files.length === 1 ? '' : 's'}…`;
 await withImportStatus(status, async () => {
-const results = await Promise.allSettled(files.map((f) => extractProfileFromScreenshot(f, screenshotAppHint())));
-const profiles = results.filter((r) => r.status === 'fulfilled').map((r) => r.value);
-const failures = results.filter((r) => r.status === 'rejected').map((r) => r.reason);
-failures.forEach((err) => console.error('Profile screenshot import failed:', err));
-const failedCount = failures.length;
-recordImportRun('screenshotProfile', { scope: screenshotAppHint() || `${files.length} screenshot${files.length === 1 ? '' : 's'}`, count: profiles.length });
-renderImportLastRun();
-if (profiles.length === 0) {
-const firstMissingKey = failures.find((err) => err instanceof MissingKeyError);
-const detail = firstMissingKey ? firstMissingKey.message : (failures[0]?.message || 'unknown error');
-status.textContent = `Couldn't read ${failedCount === 1 ? 'that screenshot' : 'those screenshots'}: ${detail}`;
-return;
+const appHint = screenshotAppHint();
+let done = 0, failed = 0;
+for (const f of files) {
+const { candidate } = await importProfileScreenshotFile(f, appHint, null);
+if (candidate) done++; else failed++;
 }
-status.textContent = `Found ${profiles.length} profile${profiles.length === 1 ? '' : 's'}${failedCount ? ` (${failedCount} unreadable — see console)` : ''} — review below:`;
-await renderCandidateReview(candidateList, profiles.map((p) => ({ ...p, photoBlob: p.photoBlobs[0] || null })), true);
+status.textContent = `Found ${done} profile${done === 1 ? '' : 's'}${failed ? ` (${failed} unreadable — see console)` : ''}${done ? ' — review below:' : '.'}`;
 });
 e.target.value = '';
 });
+
+// Delegated once, on the (never-destroyed) list container itself -- every
+// renderPendingImports() call rebuilds its innerHTML, but confirm/discard
+// buttons inside it are re-generated content, not stable elements, so a
+// listener bound directly to a button would need re-binding after every
+// render. Same pattern captureinbox.js/health.js already use for their own
+// repeatedly-rebuilt lists.
+const candidateList = document.getElementById('candidate-list');
+if (candidateList) {
+candidateList.addEventListener('click', async (e) => {
+const confirmBtn = e.target.closest('[data-confirm-pending]');
+if (confirmBtn) { await confirmPendingImport(confirmBtn.dataset.confirmPending); return; }
+const discardBtn = e.target.closest('[data-discard-pending]');
+if (discardBtn) { await discardPendingImport(discardBtn.dataset.discardPending); }
+});
+}
 }
 
-async function renderCandidateReview(candidateList, candidates, isProfile) {
-candidateList.innerHTML = candidates.map((cand, idx) => {
+// Renders every entry in data.pendingImports as its own reviewable card --
+// N cards, not one ephemeral list, since the queue can now hold as many
+// pending screenshots as piled up (the old single-slot ephemeral version
+// could only ever hold one, which is exactly the state a second successful
+// extraction used to silently clobber). Candidate photos are already
+// durably stored by the time this runs (see queuePendingImport), so this
+// is one hydratePhotoBackgrounds() pass same as everywhere else in the app
+// -- no special ObjectURL-from-Blob handling needed any more.
+async function renderPendingImports() {
+const candidateList = document.getElementById('candidate-list');
+if (!candidateList) return;
+candidateList.innerHTML = data.pendingImports.map((p) => {
+const isProfile = p.kind === 'profile';
+const rows = p.candidates.map((cand, idx) => {
 const matches = data.connections.filter((c) => String(c.name || '').toLowerCase() === String(cand.name || '').toLowerCase());
 const extra = isProfile
 ? [cand.age, cand.height, cand.location, cand.job, cand.education, (cand.languages || []).join('/'), cand.bio].filter(Boolean).join(' · ')
 : (cand.stage ? `Detected stage: ${cand.stage}` : '');
-return candidateRowHtml(idx, cand.name, cand.age, matches, extra);
-}).join('') + '<button class="add-btn" id="confirm-import-btn" type="button" style="margin-top:6px;align-self:flex-start;">Add / update selected</button>';
-
-// hydrate candidate avatar previews from their in-memory blobs (not yet saved
-// to IndexedDB) — painted as a CSS background, same reasoning as
-// hydratePhotoBackgrounds() in utils.js: a real <img> here still risked
-// kicking off a native OS-level drag on click.
-candidateList.querySelectorAll('[data-candidate-photo]').forEach((el) => {
-const idx = parseInt(el.dataset.candidatePhoto, 10);
-const blob = candidates[idx].photoBlob;
-if (blob) {
-el.style.backgroundImage = `url("${URL.createObjectURL(blob)}")`;
-el.textContent = '';
-}
-});
-// hydrate existing-match avatars (already-saved photos, loaded from IndexedDB)
+return candidateRowHtml(idx, cand.name, cand.age, matches, extra, (cand.photoIds || [])[0] || null);
+}).join('');
+const when = new Date(p.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+return `<div class="alloc-card" data-pending-import="${p.id}">
+<div class="alloc-title">${escapeHtml(isProfile ? 'Profile' : 'Matches list')}</div>
+<div class="alloc-notes">${escapeHtml(p.app || 'unknown app')} &middot; ${escapeHtml(p.sourceLabel)} &middot; ${escapeHtml(when)}</div>
+<div class="candidate-list" style="margin-top:8px;">${rows}</div>
+<div class="alloc-controls">
+<button class="add-btn" type="button" data-confirm-pending="${p.id}">Add / update selected</button>
+<button class="del-x" type="button" data-discard-pending="${p.id}">Discard</button>
+</div>
+</div>`;
+}).join('');
 await hydratePhotoBackgrounds(candidateList);
+}
 
-document.getElementById('confirm-import-btn').addEventListener('click', async () => {
-const app = document.getElementById('import-app-input').value;
+async function confirmPendingImport(id) {
+const pending = data.pendingImports.find((p) => p.id === id);
+const card = document.querySelector(`[data-pending-import="${id}"]`);
+if (!pending || !card) return;
+const isProfile = pending.kind === 'profile';
+const app = pending.app || document.getElementById('import-app-input').value;
 let addedCount = 0, updatedCount = 0;
 
-for (const cb of candidateList.querySelectorAll('input[data-new-idx]:checked')) {
-const cand = candidates[parseInt(cb.dataset.newIdx, 10)];
+for (const cb of card.querySelectorAll('input[data-new-idx]:checked')) {
+const cand = pending.candidates[parseInt(cb.dataset.newIdx, 10)];
 await addNewConnectionFromCandidate(cand, app, isProfile);
 addedCount++;
 }
-
-for (const sel of candidateList.querySelectorAll('select[data-decision]')) {
-const cand = candidates[parseInt(sel.dataset.decision, 10)];
+for (const sel of card.querySelectorAll('select[data-decision]')) {
+const cand = pending.candidates[parseInt(sel.dataset.decision, 10)];
 if (sel.value.startsWith('update:')) {
 const existing = data.connections.find((c) => c.id === sel.value.slice(7));
 if (existing) {
@@ -2021,28 +2087,42 @@ addedCount++;
 }
 }
 
-candidateList.innerHTML = '';
-document.getElementById('import-status').textContent = `Added ${addedCount}, updated ${updatedCount}.`;
+data.pendingImports = data.pendingImports.filter((p) => p.id !== id);
+renderPendingImports();
+const status = document.getElementById('import-status');
+if (status) status.textContent = `Added ${addedCount}, updated ${updatedCount}.`;
 renderConnections();
 renderOverviewRef();
 queueSave();
-});
+}
+
+async function discardPendingImport(id) {
+const pending = data.pendingImports.find((p) => p.id === id);
+if (!pending) return;
+const count = pending.candidates.length;
+if (!confirm(`Discard this ${pending.kind === 'profile' ? 'profile' : 'matches list'} import (${count} ${count === 1 ? 'person' : 'people'})? This deletes ${count === 1 ? 'their' : 'their'} photo${count === 1 ? '' : 's'} too.`)) return;
+for (const cand of pending.candidates) {
+for (const pid of cand.photoIds || []) {
+try { await photoDelete(pid); } catch (err) { /* already gone */ }
+}
+}
+data.pendingImports = data.pendingImports.filter((p) => p.id !== id);
+renderPendingImports();
+queueSave();
 }
 
 async function addNewConnectionFromCandidate(cand, app, isProfile) {
-let photoId = null;
-const photoIds = [];
-const blobs = isProfile ? (cand.photoBlobs || []) : (cand.photoBlob ? [cand.photoBlob] : []);
-for (const blob of blobs) {
-const pid = await storePhoto(blob);
-photoIds.push(pid);
-if (!photoId) photoId = pid;
-}
+// photoIds are already durable by this point -- storePhoto() ran back in
+// queuePendingImport(), right after extraction, not here. See its own
+// comment for why that timing matters (a Blob only stored at confirm time
+// is exactly the state that got lost when a review queue sat unreviewed).
+const photoIds = cand.photoIds || [];
+const photoId = photoIds[0] || null;
 // profileName records what the app called them, so renaming the
 // connection to their real name later doesn't orphan the photos. Falls
 // back to a placeholder rather than null/'' -- a nameless connection
 // isn't just cosmetically odd, every later screenshot import scans
-// every existing connection by name (see renderCandidateReview below)
+// every existing connection by name (see renderPendingImports below)
 // and a non-string name there crashes ALL future imports, not just
 // this one (confirmed live: a Bumble matches-list row with no readable
 // name broke every screenshot import after it until the record was
@@ -2188,9 +2268,9 @@ if (!String(existing.smoking || '').trim() && String(cand.smoking || '').trim())
 }
 
 async function applyCandidateUpdate(existing, cand, isProfile, app) {
-const blobs = isProfile ? (cand.photoBlobs || []) : (cand.photoBlob ? [cand.photoBlob] : []);
-for (const blob of blobs) {
-const pid = await storePhoto(blob);
+// photoIds are already durable -- see addNewConnectionFromCandidate's own
+// comment on why this reads them rather than storing Blobs here.
+for (const pid of cand.photoIds || []) {
 existing.photoIds.push(pid);
 if (!existing.photoId) existing.photoId = pid;
 }
@@ -2266,7 +2346,12 @@ if (!conn.photoId) conn.photoId = conn.photoIds[0] || null;
 let parsedCount = 0;
 for (const cand of screenshotResults) {
 if (!cand) continue;
-cand.photoBlobs = (cand.photoBlobs || []).slice(skipCount);
+// applyCandidateUpdate now expects durable photoIds, not Blobs -- see its
+// own comment (same fix as the pendingImports queue: store as soon as the
+// bytes exist, not deferred until some later confirm step).
+const blobs = (cand.photoBlobs || []).slice(skipCount);
+cand.photoIds = [];
+for (const blob of blobs) cand.photoIds.push(await storePhoto(blob));
 await applyCandidateUpdate(conn, cand, true, conn.app);
 parsedCount++;
 }
@@ -2298,5 +2383,5 @@ filterByEmptyField, filterBySearch, filterByIds, clearFilters,
 STAGE_RANK, setContactPicker, phoneWithFlagHtml, initRatingCategoriesSettings,
 initFlagRulesSettings, unionInto, initHideArchivedFaded,
 connectionOptionsHtml, applyDirectProfileUpload, applyProfileFieldsToConnection,
-importMatchesListFile,
+importMatchesListFile, importProfileScreenshotFile, renderPendingImports,
 };

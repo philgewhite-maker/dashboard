@@ -204,6 +204,29 @@ items: [],
 };
 }
 
+// A screenshot-derived candidate list (Bumble/Tinder/Hinge matches list, or
+// a single full profile) waiting for the user to accept/merge/discard each
+// row -- see connections.js's queuePendingImport(). Persisted rather than
+// kept in memory: confirmed live that a matches-list import "disappeared"
+// before it could be reviewed, because the extraction result only ever
+// lived in a closure around the confirm button, and Android backgrounding
+// the PWA tab (the same unpredictable-reload risk already hit for Capture
+// Inbox and wellness extraction) wiped it with nothing recoverable. Each
+// candidate's photos are already durably stored (real photoIds, not Blobs)
+// by the time a pending import lands here -- see queuePendingImport's own
+// comment for why that has to happen at extraction time, not confirm time.
+function blankPendingImport(fields = {}) {
+return {
+id: uid(),
+kind: 'matches', // 'matches' | 'profile' -- which candidate shape/fields to render and merge
+app: '', // e.g. 'Bumble', or '' if unknown
+sourceLabel: '', // filename or share label, shown on the review card
+candidates: [],
+createdAt: new Date().toISOString(),
+...fields,
+};
+}
+
 // A trip is a `bucket:'project'` task (see blankTask) plus this entry
 // holding the travel-specific structure -- same split notionplan.js already
 // uses (task ↔ notionPageId ↔ Notion detail), except the "detail" here has
@@ -520,6 +543,12 @@ b.items = Array.isArray(b.items)
 // A batch with nothing left (everything already routed/discarded, e.g. a
 // save landed mid-triage) is clutter, not a real inbox entry.
 data.captureInbox = data.captureInbox.filter((b) => b.items.length > 0);
+if (!Array.isArray(data.pendingImports)) data.pendingImports = [];
+data.pendingImports = data.pendingImports.map((p) => ({ ...blankPendingImport(), ...p, id: p.id || uid(), candidates: Array.isArray(p.candidates) ? p.candidates : [] }));
+// A pending import with nothing left (every candidate already
+// added/updated/discarded) is clutter, not a real review entry -- same
+// reasoning as the captureInbox filter just above.
+data.pendingImports = data.pendingImports.filter((p) => p.candidates.length > 0);
 // One row per local calendar day, fully rebuilt from server-held raw
 // payloads on every parse (see healthparse.js) rather than edited by hand
 // -- no per-item blank-factory needed, just an array-shape guard.
@@ -1297,7 +1326,7 @@ setExternalUpdateHandler, setLocalChangeHandler, getLocalSettings, setLocalSetti
 isDormantStage, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness,
 exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, DEFAULT_PREFS,
 MAIL_SEARCH_KINDS, mailSearchLabel,
-TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureBatch, blankConnection,
+TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureBatch, blankPendingImport, blankConnection,
 blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS,
 CONTACT_STATUS_LABELS, CONTACT_MATCH_MIN_STAGE,
 DEFAULT_RATING_CATEGORIES, slugifyField, DEFAULT_RECIPE_RATING_CATEGORIES,

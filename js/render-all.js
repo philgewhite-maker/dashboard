@@ -1,7 +1,7 @@
 import { renderHabits } from './features/habits.js';
 import { renderGoals } from './features/goals.js';
 import { renderJobs } from './features/jobs.js';
-import { renderConnections } from './features/connections.js';
+import { renderConnections, renderPendingImports } from './features/connections.js';
 import { renderCalendars } from './features/calendars.js';
 import { renderVouchers } from './features/vouchers.js';
 import { renderSubscriptions } from './features/subscriptions.js';
@@ -27,6 +27,7 @@ renderHabits();
 renderGoals();
 renderJobs();
 renderConnections();
+renderPendingImports();
 renderCalendars();
 renderVouchers();
 renderSubscriptions();

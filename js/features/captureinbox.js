@@ -7,13 +7,17 @@
 // lands here too, just without a thumbnail.
 //
 // A batch disappears from data.captureInbox once every item in it has been
-// routed or discarded. Two recognised health shapes skip triage entirely:
-// a Renpho scale CSV (content-sniffed, see captureItemKind() below -- the
-// seam a future deterministic CSV shape would hook into), and a Samsung
-// Health screenshot (filename-matched, see
-// looksLikeSamsungHealthScreenshot() -- an image can't be content-sniffed
-// this cheaply, so a real AI vision call decides, with a safe fallback to
-// normal triage if it doesn't recognise the chart).
+// routed or discarded. Three recognised shapes skip triage entirely: a
+// Renpho scale CSV (content-sniffed, see captureItemKind() below -- the
+// seam a future deterministic CSV shape would hook into), a Samsung Health
+// screenshot (filename-matched, see looksLikeSamsungHealthScreenshot() --
+// an image can't be content-sniffed this cheaply, so a real AI vision call
+// decides, with a safe fallback to normal triage if it doesn't recognise
+// the chart), and a Bumble matches-list/full-profile screenshot
+// (filename-matched, then classified deterministically by aspect ratio and
+// cheaply by AI kind -- see autoRouteBumbleScreenshot() -- landing in the
+// persisted pendingImports review queue in connections.js rather than
+// staying a Capture Inbox item).
 import { data, queueSave, blankCaptureBatch } from '../state.js';
 import { photoDelete } from '../db.js';
 import { todayStr, escapeHtml, hydratePhotoBackgrounds, resizeImageToBlob } from '../utils.js';
@@ -50,15 +54,47 @@ return /samsung[ _]?health/i.test(String(filename || ''));
 }
 
 // Android names a Bumble screenshot with the app name baked in, same
-// convention as Samsung Health's own filenames (see above) -- but unlike
-// a health chart, "came from Bumble" doesn't tell you WHAT kind of Bumble
-// screen it is (matches/discovery list, one profile, a chat, a saved
-// photo), so the filename hint only earns the file one attempt at
-// extractMatchesFromScreenshot; finding zero people is a completely normal
-// outcome (a chat screenshot, say) and just leaves it for manual triage
-// exactly like a false negative would, not an error.
+// convention as Samsung Health's own filenames (see above) -- but unlike a
+// health chart, "came from Bumble" doesn't tell you WHAT kind of Bumble
+// screen it is. The filename hint just earns the file one attempt at
+// autoRouteBumbleScreenshot below; finding nothing routable is a normal
+// outcome (a chat screenshot, a saved photo) and just leaves it for manual
+// triage exactly like a false negative would, not an error.
 function looksLikeBumbleScreenshot(filename) {
 return /bumble/i.test(String(filename || ''));
+}
+
+// Bumble's screenshots come in three shapes, only distinguishable with a
+// little work: a matches/chat list (several people, thin data), a full
+// profile (one person, rich data), or a plain saved photo (squarish, not a
+// composite screenshot at all). Two already-proven primitives tell them
+// apart without any new AI work:
+// - classifyProfileUpload() (utils.js) -- deterministic, aspect-ratio only,
+//   no AI call: separates a squarish photo from a long composite screenshot.
+// - quickScanScreenshot() (ai.js) -- a cheap, cached Haiku call already
+//   built for album triage, returning kind:"profile"|"matches"|"chat"|
+//   "other" -- exactly the list-vs-profile signal needed for whatever
+//   survives the aspect-ratio check.
+// A squarish photo, a chat screenshot, or anything unrecognised all return
+// routed:false and are left for normal manual triage, same as any other
+// false negative in this file.
+async function autoRouteBumbleScreenshot(file, appHint) {
+const { classifyProfileUpload } = await import('../utils.js');
+const { isScreenshot } = await classifyProfileUpload(file);
+if (!isScreenshot) return { routed: false, kind: 'photo' };
+const { quickScanScreenshot } = await import('../ai.js');
+const scan = await quickScanScreenshot(file, appHint);
+if (scan.kind === 'matches') {
+const { importMatchesListFile } = await import('./connections.js');
+const { candidates } = await importMatchesListFile(file, appHint);
+return { routed: candidates.length > 0, kind: 'matches', count: candidates.length };
+}
+if (scan.kind === 'profile') {
+const { importProfileScreenshotFile } = await import('./connections.js');
+const { candidate } = await importProfileScreenshotFile(file, appHint);
+return { routed: !!candidate, kind: 'profile', count: candidate ? 1 : 0 };
+}
+return { routed: false, kind: scan.kind };
 }
 
 // A batch shared at once (a night's swiping, say) often holds more than
@@ -102,13 +138,6 @@ const healthImports = [];
 const matchesImports = [];
 let renphoImported = false;
 let wellnessImported = false;
-// The candidate-review queue (connections.js's #candidate-list) only ever
-// holds one screenshot's worth of results at a time -- a second successful
-// extraction in the same batch would silently overwrite the first with no
-// way to recover it (its source photo would already be gone too). Once
-// this batch has committed one, later Bumble-named files fall back to
-// normal manual triage instead of risking that.
-let matchesListConsumed = false;
 for (const file of files) {
 try {
 const kind = await captureItemKind(file);
@@ -160,23 +189,24 @@ console.error('Auto wellness extraction failed, photo stays in Capture Inbox for
 }
 }
 // Same ordering reasoning as the wellness auto-trigger above: only after
-// the photo is safely stored. Zero candidates found is a normal, silent
-// outcome here (see looksLikeBumbleScreenshot's own comment) -- the item
-// only leaves the batch on an actual match.
-if (kind === 'photo' && looksLikeBumbleScreenshot(file.name) && !matchesListConsumed) {
+// the photo is safely stored. Not routed (a plain photo, a chat, anything
+// unrecognised) is a normal, silent outcome here -- the item only leaves
+// the batch when autoRouteBumbleScreenshot actually found something. The
+// persisted pendingImports queue (connections.js) means multiple Bumble
+// screenshots shared together can each land their own reviewable entry --
+// no single-slot limit to guard against any more.
+if (kind === 'photo' && looksLikeBumbleScreenshot(file.name)) {
 try {
-const { importMatchesListFile } = await import('./connections.js');
-const { candidates } = await importMatchesListFile(file, 'Bumble');
-if (candidates.length) {
-matchesImports.push(`${file.name || 'that image'}: found ${candidates.length} ${candidates.length === 1 ? 'person' : 'people'} — review in Dating admin.`);
-matchesListConsumed = true;
+const result = await autoRouteBumbleScreenshot(file, 'Bumble');
+if (result.routed) {
+matchesImports.push(`${file.name || 'that image'}: found ${result.count} ${result.count === 1 ? 'person' : 'people'} (${result.kind}) — review in Dating admin.`);
 await deleteItemBytes(item);
 batch.items = batch.items.filter((it) => it.id !== item.id);
 removeBatchIfEmpty(batch);
 queueSave();
 }
 } catch (err) {
-console.error('Auto matches-list extraction failed, photo stays in Capture Inbox for manual triage:', err);
+console.error('Auto Bumble-screenshot routing failed, photo stays in Capture Inbox for manual triage:', err);
 }
 }
 } catch (err) {
@@ -250,7 +280,7 @@ ${photoItems.length > 1 ? `<button class="todo-add-btn" type="button" data-inbox
 <button class="todo-add-btn" type="button" data-inbox-send-dating="${b.id}">Send</button>
 <button class="todo-add-btn" type="button" data-inbox-extract-wellness="${b.id}" title="For an HRV, AGEs index, or Antioxidant index screenshot from Samsung Health">Extract wellness data</button>
 <button class="todo-add-btn" type="button" data-inbox-extract-trip-toggle="${b.id}" title="For a boarding pass, hotel, car hire, or transfer confirmation">Extract into a trip leg</button>
-<button class="todo-add-btn" type="button" data-inbox-extract-matches="${b.id}" title="For a Bumble/Tinder/Hinge matches or chat list screenshot — pulls out everyone visible for review">Extract matches list</button>` : ''}
+<button class="todo-add-btn" type="button" data-inbox-extract-matches="${b.id}" title="For a Bumble/Tinder/Hinge matches list or full profile screenshot — auto-detects which and pulls it out for review">Extract dating screenshot</button>` : ''}
 <button class="todo-add-btn" type="button" data-inbox-attach-task="${b.id}">Attach ${photoItems.length ? 'everything left ' : ''}to a Task</button>
 <button class="del-x" type="button" data-inbox-discard="${b.id}">Discard</button>
 </div>
@@ -447,11 +477,11 @@ writeInboxStatus(root, batchId, messages.join(' '));
 });
 });
 
-// The candidate-review queue this feeds (connections.js's #candidate-list)
-// only ever holds one screenshot's worth of results -- a second call would
-// silently overwrite the first, same reasoning as matchesListConsumed in
-// addCaptureBatch() above -- so this only ever processes ONE selected photo
-// per click, regardless of how many are ticked.
+// The pendingImports queue this feeds is persisted (data.pendingImports,
+// connections.js) and can hold as many entries as pile up, so -- unlike the
+// old ephemeral single-slot version -- there's no reason to only process
+// one selected photo per click any more; each ticked photo gets its own
+// reviewable entry.
 root.querySelectorAll('[data-inbox-extract-matches]').forEach((btn) => {
 btn.addEventListener('click', async () => {
 const batch = data.captureInbox.find((b) => b.id === btn.dataset.inboxExtractMatches);
@@ -460,29 +490,31 @@ const status = root.querySelector(`[data-inbox-status="${batch.id}"]`);
 const selectedIds = selectionFor(batch.id);
 const chosen = batch.items.filter((it) => it.kind === 'photo' && selectedIds.has(it.id));
 if (!chosen.length) { if (status) status.textContent = 'Tick at least one photo first.'; return; }
-if (chosen.length > 1 && status) status.textContent = `Reading the first of ${chosen.length} selected — do the rest one at a time.`;
-const it = chosen[0];
+const done = [];
+const messages = [];
+for (const it of chosen) {
 if (status) status.textContent = `Reading ${it.name || 'photo'}…`;
-let message;
 try {
 const blob = await fetchAttachment(it.id);
 const file = new File([blob], it.name || 'photo', { type: it.type || blob.type });
-const { importMatchesListFile } = await import('./connections.js');
-const { candidates } = await importMatchesListFile(file, null);
-if (candidates.length) {
-message = `${it.name || 'that image'}: found ${candidates.length} ${candidates.length === 1 ? 'person' : 'people'} — review in Dating admin.`;
-await deleteItemBytes(it);
-selectedIds.delete(it.id);
-batch.items = batch.items.filter((x) => x.id !== it.id);
-removeBatchIfEmpty(batch);
-queueSave();
+const result = await autoRouteBumbleScreenshot(file, null);
+if (result.routed) {
+messages.push(`${it.name || 'that image'}: found ${result.count} ${result.count === 1 ? 'person' : 'people'} (${result.kind}) — review in Dating admin.`);
+done.push(it);
 } else {
-message = `${it.name || 'that image'}: didn't look like a matches/chat list.`;
+messages.push(`${it.name || 'that image'}: didn't look like a matches list or profile.`);
 }
 } catch (err) {
-console.error('Matches-list extraction failed:', err);
-message = err?.name === 'MissingKeyError' ? 'Add an Anthropic API key in Settings to extract a matches list.' : `${it.name || 'that image'}: ${err.message || err}`;
+console.error('Dating screenshot extraction failed:', err);
+messages.push(err?.name === 'MissingKeyError' ? 'Add an Anthropic API key in Settings to extract a dating screenshot.' : `${it.name || 'that image'}: ${err.message || err}`);
 }
+}
+for (const it of done) { await deleteItemBytes(it); selectedIds.delete(it.id); }
+const doneIds = new Set(done.map((it) => it.id));
+batch.items = batch.items.filter((it) => !doneIds.has(it.id));
+removeBatchIfEmpty(batch);
+queueSave();
+const message = messages.join(' ');
 const batchId = batch.id;
 renderCaptureInbox();
 writeInboxStatus(root, batchId, message);

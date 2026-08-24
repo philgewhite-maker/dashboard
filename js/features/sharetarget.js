@@ -120,10 +120,10 @@ notes: text && text !== label ? text : '',
 source: { kind: 'share', label: title || url || 'Shared from another app', url },
 files: share.files,
 });
-// A recognised Health CSV, or a Bumble matches-list screenshot that
-// yielded candidates, is fully consumed on the way in and never becomes a
-// batch item -- if that's everything that was shared, there's nothing
-// left in Capture Inbox to open.
+// A recognised Health CSV, or a Bumble matches-list/full-profile
+// screenshot that yielded candidates, is fully consumed on the way in and
+// never becomes a batch item -- if that's everything that was shared,
+// there's nothing left in Capture Inbox to open.
 const parts = [];
 if (batch.items.length) parts.push(`Captured ${batch.items.length} file${batch.items.length === 1 ? '' : 's'} to your Capture Inbox as "${label.slice(0, 60)}".`);
 if (matchesImports.length) parts.push(matchesImports.join(' '));
