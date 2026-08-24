@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v130</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v131</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -1826,6 +1826,22 @@ Mostly still a planning space &mdash; a place to keep thinking about what this s
 <button class="todo-add-btn" type="button" id="health-parse-btn">&#8635; Sync &amp; parse</button>
 <span class="sync-status" id="health-parse-status"></span>
 </div>
+
+<div class="health-history-toggle-row">
+<label class="health-history-toggle"><input type="checkbox" id="health-history-toggle"> Show full daily history</label>
+<span class="settings-note" style="margin:0;">Off by default: the tables below show daily rows for the last month, monthly averages back to a year, quarterly back to 5 years, and annual beyond that. Nothing is ever deleted &mdash; every raw day is still there when this is switched on.</span>
+</div>
+
+<h3 style="margin:22px 0 8px;">Trends</h3>
+<div class="settings-note" style="margin:0 0 10px;">Overlay any metrics across all three sources below. The first two picked get a real, labelled axis; the rest are scaled to fit the same chart and read via hover or their end-of-line value. Drag across the chart to zoom into a period.</div>
+<div id="health-chart-controls">
+<div class="chart-canvas-wrap"><canvas id="health-chart"></canvas></div>
+<div class="chart-legend" id="health-chart-legend"></div>
+<div class="chart-picker" id="health-chart-picker"></div>
+<div class="chart-range-row" id="health-chart-range"></div>
+</div>
+
+<h3 style="margin:22px 0 6px;">Daily activity (Health Connect)</h3>
 <div style="overflow-x:auto;">
 <table class="health-table">
 <thead><tr>

@@ -6,7 +6,8 @@
 // auto-consumes a photo the moment it lands, the way a recognised CSV does.
 import { data, queueSave } from '../state.js';
 import { extractWellnessScreenshot } from '../ai.js';
-import { escapeHtml } from '../utils.js';
+import { escapeHtml, todayStr } from '../utils.js';
+import { tieredRowsForDisplay, isFullHistoryMode, isPeriodRow, periodLabel } from './healthrollup.js';
 
 function blankWellnessDay(date) {
 return {
@@ -97,12 +98,20 @@ const gradeHtml = grade ? ` <span class="settings-note" style="display:inline;">
 return `${prefix}${value}${unit || ''}${gradeHtml}`;
 }
 
+// Handles both a raw day and an aggregated period row. A period average has
+// no single band/exact reading behind it (those only make sense for one
+// day's dot), so it always renders as a plain averaged number -- exact:true
+// styling, no "~" estimate marker, since the average itself isn't an
+// estimate of anything, it's exactly what it says.
 function wellnessRowHtml(r) {
-return `<tr>
-<td>${escapeHtml(formatWellnessDate(r.date))}</td>
-<td>${metricCellHtml(r.hrvMs, r.hrvExact, 'ms', r.hrvGrade)}</td>
-<td>${metricCellHtml(r.antioxidantIndex, r.antioxidantExact, '', r.antioxidantGrade)}</td>
-<td>${metricCellHtml(r.agesDailyAvg, r.agesExact, '', r.agesGrade)}</td>
+const period = isPeriodRow(r);
+const get = (key) => (period ? r.metrics[key] : r[key]);
+const label = period ? periodLabel(r) : formatWellnessDate(r.date);
+return `<tr${period ? ' class="health-row-summary"' : ''}>
+<td>${escapeHtml(label)}</td>
+<td>${metricCellHtml(get('hrvMs'), period ? true : r.hrvExact, 'ms', period ? null : r.hrvGrade)}</td>
+<td>${metricCellHtml(get('antioxidantIndex'), period ? true : r.antioxidantExact, '', period ? null : r.antioxidantGrade)}</td>
+<td>${metricCellHtml(get('agesDailyAvg'), period ? true : r.agesExact, '', period ? null : r.agesGrade)}</td>
 </tr>`;
 }
 
@@ -112,9 +121,14 @@ if (!el) return;
 const rows = data.wellnessDaily || [];
 if (!rows.length) {
 el.innerHTML = '<tr><td colspan="4" class="empty">No wellness data yet — select an HRV, AGEs, or Antioxidant index screenshot in Capture Inbox and use "Extract wellness data".</td></tr>';
-return;
-}
+} else if (isFullHistoryMode()) {
 el.innerHTML = rows.map(wellnessRowHtml).join('');
+} else {
+const { daily, monthly, quarterly, annual } = tieredRowsForDisplay(rows, todayStr());
+el.innerHTML = [...daily, ...monthly, ...quarterly, ...annual].map(wellnessRowHtml).join('');
+}
+// Same fire-and-forget chart refresh as renpho.js -- see its own comment.
+import('./health.js').then(({ renderHealthChart }) => renderHealthChart());
 }
 
 export { mergeWellnessExtraction, extractAndMergeWellnessFile, renderWellnessDaily };

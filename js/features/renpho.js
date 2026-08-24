@@ -20,6 +20,8 @@
 // "--" for everything else in the source file; those come through as
 // undefined here rather than a fabricated zero.
 import { data } from '../state.js';
+import { todayStr } from '../utils.js';
+import { tieredRowsForDisplay, isFullHistoryMode, isPeriodRow, periodLabel } from './healthrollup.js';
 
 const HEADER_SIGNATURE = 'No.,Date,Time,Weight(kg),BMI,';
 
@@ -114,15 +116,27 @@ const d = new Date(`${iso}T00:00:00`);
 return isNaN(d) ? iso : d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
+// Handles both a raw day (r.weightKg etc directly on it) and an aggregated
+// period row (the same fields under r.metrics) -- see healthrollup.js's
+// isPeriodRow/periodLabel for how the two are told apart and labelled.
 function renphoRowHtml(r) {
-return `<tr>
-<td>${formatRenphoDate(r.date)}</td>
-<td>${r.weightKg != null ? `${r.weightKg}kg` : '—'}</td>
-<td>${r.bmi != null ? r.bmi : '—'}</td>
-<td>${r.bodyFatPct != null ? `${r.bodyFatPct}%` : '—'}</td>
-<td>${r.muscleMassKg != null ? `${r.muscleMassKg}kg` : '—'}</td>
-<td>${r.visceralFat != null ? r.visceralFat : '—'}</td>
-<td>${r.metabolicAge != null ? r.metabolicAge : '—'}</td>
+const period = isPeriodRow(r);
+const get = (key) => (period ? r.metrics[key] : r[key]);
+const weightKg = get('weightKg');
+const bmi = get('bmi');
+const bodyFatPct = get('bodyFatPct');
+const muscleMassKg = get('muscleMassKg');
+const visceralFat = get('visceralFat');
+const metabolicAge = get('metabolicAge');
+const label = period ? periodLabel(r) : formatRenphoDate(r.date);
+return `<tr${period ? ' class="health-row-summary"' : ''}>
+<td>${label}</td>
+<td>${weightKg != null ? `${weightKg}kg` : '—'}</td>
+<td>${bmi != null ? bmi : '—'}</td>
+<td>${bodyFatPct != null ? `${bodyFatPct}%` : '—'}</td>
+<td>${muscleMassKg != null ? `${muscleMassKg}kg` : '—'}</td>
+<td>${visceralFat != null ? visceralFat : '—'}</td>
+<td>${metabolicAge != null ? metabolicAge : '—'}</td>
 </tr>`;
 }
 
@@ -132,9 +146,18 @@ if (!el) return;
 const rows = data.renphoDaily || [];
 if (!rows.length) {
 el.innerHTML = '<tr><td colspan="7" class="empty">No Renpho data yet — share a Renpho CSV export from your phone and it\'ll land here automatically.</td></tr>';
-return;
-}
+} else if (isFullHistoryMode()) {
 el.innerHTML = rows.map(renphoRowHtml).join('');
+} else {
+const { daily, monthly, quarterly, annual } = tieredRowsForDisplay(rows, todayStr());
+el.innerHTML = [...daily, ...monthly, ...quarterly, ...annual].map(renphoRowHtml).join('');
+}
+// Fire-and-forget: keeps the trend chart in sync with whichever table last
+// changed, without every data-mutation call site (CSV import, manual
+// triage) needing its own separate chart-refresh call. Dynamic rather than
+// a static import -- health.js doesn't need to know about renpho.js, only
+// the reverse, so this avoids a compile-time cycle between the two.
+import('./health.js').then(({ renderHealthChart }) => renderHealthChart());
 }
 
 export { looksLikeRenphoCsv, parseRenphoCsv, mergeRenphoDaily, looksLikeHrvCsv, renderRenphoDaily };

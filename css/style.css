@@ -1747,6 +1747,86 @@ color:var(--ink);
 }
 .health-table tr:last-child td{border-bottom:none;}
 .health-table .empty{white-space:normal;}
+/* An averaged period row (from the tiered summary view) rather than one
+   real day -- italic + slightly muted so it visibly reads as "not a single
+   reading" without needing its own column. */
+.health-row-summary td{font-style:italic;color:var(--muted);}
+.health-row-summary td:first-child{color:var(--ink);}
+
+.health-history-toggle-row{
+display:flex;
+flex-direction:column;
+gap:4px;
+margin-bottom:14px;
+padding:8px 10px;
+background:var(--card);
+border:1px solid var(--line);
+border-radius:8px;
+}
+.health-history-toggle{
+display:flex;
+align-items:center;
+gap:6px;
+font-size:12px;
+font-weight:600;
+cursor:pointer;
+}
+
+.chart-canvas-wrap{
+width:100%;
+height:280px;
+background:var(--card);
+border:1px solid var(--line);
+border-radius:8px;
+}
+#health-chart{width:100%;height:100%;display:block;touch-action:none;}
+.chart-legend{
+display:flex;
+flex-wrap:wrap;
+gap:6px;
+margin-top:10px;
+}
+.chart-legend-chip{
+display:inline-flex;
+align-items:center;
+gap:5px;
+font-size:11px;
+background:var(--card);
+border:1px solid var(--line);
+border-radius:20px;
+padding:3px 4px 3px 8px;
+}
+.chart-legend-swatch{
+width:9px;
+height:9px;
+border-radius:50%;
+flex:none;
+}
+.chart-legend-remove{
+font-size:13px;
+line-height:1;
+border:none;
+background:none;
+color:var(--muted);
+cursor:pointer;
+padding:2px 4px;
+}
+.chart-legend-remove:hover{color:var(--red);}
+.chart-picker{
+display:flex;
+flex-wrap:wrap;
+gap:6px;
+margin-top:8px;
+}
+.chart-picker .todo-add-btn{background:var(--slate);}
+.chart-range-row{
+display:flex;
+flex-wrap:wrap;
+gap:6px;
+margin-top:10px;
+}
+.chart-range-row .todo-add-btn{background:var(--teal);}
+.chart-range-row [data-chart-reset-zoom]{background:var(--amber);}
 .capture-row input[type=text]{
 flex:1 1 260px;
 min-width:0;
