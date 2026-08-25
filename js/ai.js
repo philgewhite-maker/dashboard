@@ -256,7 +256,7 @@ return callAnthropic([{ type: 'text', text: promptText }], maxTokens, modelOverr
 // the average one; if a screenshot still overflows it, the caller gets back
 // whichever prefix parsed and a `truncated: true` flag instead of an error.
 const MATCHES_MAX_TOKENS = 16000;
-const PROFILE_MAX_TOKENS = 2000;
+const PROFILE_MAX_TOKENS = 3000;
 // Explicitly locked rather than left to inherit settings.anthropicModel/
 // DEFAULT_MODEL (Opus 5) -- reading a profile's stats/bio and drawing photo
 // bounding boxes is structured extraction, not a task that benefits from
@@ -275,7 +275,7 @@ const PROFILE_PARSE_MODEL = 'claude-sonnet-5';
 // re-uploading the same screenshot twice after adding new fields to the
 // prompt kept returning the pre-change result with no error or indication
 // why nothing was different.
-const PROFILE_SCHEMA_VERSION = 3;
+const PROFILE_SCHEMA_VERSION = 4;
 
 // A vision model estimating bounding-box coordinates has no pixel grid to
 // anchor against, so a raw absolute-position guess drifts the further down
@@ -460,7 +460,7 @@ const HABIT_FIELD_GUIDE = 'Their drinking habit and smoking habit specifically -
 function profilePrompt(isBand, app) {
 return `This is a screenshot of ONE person's ${app ? `${app} ` : 'dating app '}profile page`
 + (isBand ? ', showing one vertical section of a longer scrolling screenshot' : '') + '.'
-+ ' Extract what\'s visible: name, age, their height exactly as written (e.g. "5\'7\\"" or "170cm", empty if not shown), their education or university (empty if not shown), a short list of languages they speak (array), a short list of nationalities (array, empty if not stated), whether they mention having kids (short phrase or empty), their job/occupation (empty if not shown), their location or city (empty if not shown), a one or two sentence bio/about-me summary, a short list of their stated interests/hobbies shown as tags or chips (array, e.g. "Tennis", "Wine" — not free-text bio content), what they say they\'re looking for/relationship goal (short phrase exactly as written, e.g. "Open to seeing where things go", empty if not shown). ' + HABIT_FIELD_GUIDE + ' Also give rough bounding boxes (fractions 0 to 1 of the full image, keys x,y,w,h) around each distinct profile photo visible in the screenshot (there may be several).'
++ ' Extract what\'s visible: name, age, their height exactly as written (e.g. "5\'7\\"" or "170cm", empty if not shown), their education or university (empty if not shown), a short list of languages they speak (array), a short list of nationalities (array, empty if not stated), whether they mention having kids (short phrase or empty), their job/occupation (empty if not shown), their location or city (empty if not shown), their bio/about-me text -- capture ALL of it verbatim, not a summary: a plain free-text paragraph if that\'s what\'s shown, OR if the app shows separate named prompt-and-answer sections (e.g. Bumble/Hinge style "My simple pleasures are..." followed by their answer), include every one of those prompts with its answer, joined together, a short list of their stated interests/hobbies shown as tags or chips (array, e.g. "Tennis", "Wine" — not free-text bio content), what they say they\'re looking for/relationship goal (short phrase exactly as written, e.g. "Open to seeing where things go", empty if not shown). ' + HABIT_FIELD_GUIDE + ' Also give rough bounding boxes (fractions 0 to 1 of the full image, keys x,y,w,h) around each distinct profile photo visible in the screenshot (there may be several).'
 + (isBand ? ' Only report a field if its value is genuinely visible in THIS section — leave it empty rather than guessing from context, since another section will supply it. If a photo is cut off at the very top or bottom edge of this image (less than half visible), SKIP its bounding box entirely — it is fully visible in an adjacent section and will be captured there instead.' : '')
 + ' Return ONLY a JSON object, no other text, no markdown fences, in this exact shape: {"name":"Alex","age":"29","height":"","education":"","languages":["English"],"nationality":[],"kids":"","job":"","location":"","bio":"","interests":["Tennis","Wine"],"lookingFor":"","drinking":"Rarely","smoking":"No","photoBoxes":[{"x":0.1,"y":0.05,"w":0.8,"h":0.4}]}. Use empty string/array if something is not visible or unsure — do not guess.';
 }
@@ -547,7 +547,7 @@ const isBanded = bands.length > 1;
 const settled = await Promise.allSettled(bands.map(async (band) => {
 const bandBase64 = isBanded ? await sliceToBase64(img, band.y0, band.h) : base64;
 const bandMediaType = isBanded ? 'image/png' : mediaType;
-const { data } = await callVision(bandBase64, bandMediaType, profilePrompt(isBanded, app), PROFILE_MAX_TOKENS, PROFILE_PARSE_MODEL);
+const { data } = await callVision(bandBase64, bandMediaType, profilePrompt(isBanded, app), PROFILE_MAX_TOKENS, PROFILE_PARSE_MODEL, 'low');
 return data;
 }));
 const results = [];
@@ -992,7 +992,7 @@ const { data: raw } = await callAnthropic(
 { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
 { type: 'text', text: prompt },
 ],
-TRIP_MAX_TOKENS, TRIP_MODEL, 'Trip screenshot',
+TRIP_MAX_TOKENS, TRIP_MODEL, 'Trip screenshot', null, 'low',
 );
 const result = shapeTripExtraction(raw);
 await parseCachePut(hash, cacheKind, { result });
@@ -1008,7 +1008,7 @@ ${String(bodyText || '').slice(0, 12000)}
 """
 
 ${tripExtractionInstructions()}`;
-const { data: raw } = await callTextJson(prompt, TRIP_MAX_TOKENS, TRIP_MODEL, 'Trip email');
+const { data: raw } = await callTextJson(prompt, TRIP_MAX_TOKENS, TRIP_MODEL, 'Trip email', 'low');
 return shapeTripExtraction(raw);
 }
 
