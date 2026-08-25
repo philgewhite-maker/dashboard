@@ -1798,7 +1798,7 @@ if (matches && matches.length > 0) {
 const existingHtml = matches.map((m) => `
 <div class="compare-existing">
 ${avatarHtml(m.photoId, m.name, 'sm')}
-<span class="compare-caption">${escapeHtml(existingMatchCaption(m))}</span>
+<span class="compare-caption"><strong>${escapeHtml(m.name)}</strong><br>${escapeHtml(existingMatchCaption(m))}</span>
 </div>`).join('');
 const updateOptions = matches.map((m) => `<option value="update:${m.id}">Same person &mdash; merge into ${escapeHtml(m.name)} (${escapeHtml(existingMatchCaption(m))})</option>`).join('');
 const tag = matches.length > 1 ? `${matches.length} existing people share this name` : 'same name already tracked';
@@ -2143,12 +2143,26 @@ if (cKey === candKey) return true;
 // surname, so requiring exact equality here meant a genuinely-existing
 // connection with a fuller name was never even offered as a match
 // candidate, only ever reachable via "add as new" and manual cleanup.
-if (cKey.startsWith(candKey + ' ') || candKey.startsWith(cKey + ' ')) return true;
-// Small spelling/transliteration drift on the first name alone.
-const cFirst = cKey.split(' ')[0];
-if (candFirst.length >= 4 && cFirst.length >= 4 && editDistance(candFirst, cFirst, 2) <= 2) return true;
-return false;
+return cKey.startsWith(candKey + ' ') || candKey.startsWith(cKey + ' ');
 }) : [];
+// Small spelling/transliteration drift on the first name alone (e.g.
+// Bumble's "Alena" vs a Ukrainian-convention "Alona" for the same
+// Cyrillic name, Альона). Kept separate from the pass above and capped
+// to the 3 closest, same as widerNameCandidates -- an uncapped
+// edit-distance-2 pass over a dating-contacts list this size (hundreds
+// of connections) surfaced 26 "matches" for one name, almost all
+// unrelated, which is useless as a review list rather than more
+// thorough.
+if (candKey && candFirst.length >= 4) {
+const already = new Set(matches.map((m) => m.id));
+data.connections
+.filter((c) => !already.has(c.id))
+.map((c) => ({ c, d: editDistance(candFirst, nameKey(c.name).split(' ')[0], 2) }))
+.filter((x) => x.d <= 2)
+.sort((a, b) => a.d - b.d)
+.slice(0, 3)
+.forEach((x) => matches.push(x.c));
+}
 const extra = isProfile
 ? [cand.age, cand.height, cand.location, cand.job, cand.education, (cand.languages || []).join('/'), cand.bio].filter(Boolean).join(' · ')
 : (cand.stage ? `Detected stage: ${cand.stage}` : '');
