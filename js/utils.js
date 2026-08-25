@@ -687,6 +687,28 @@ img.src = URL.createObjectURL(dataUrlOrFile);
 });
 }
 
+// Deterministic backstop for the vision model repeatedly boxing a text/UI
+// card (bio, a prompt-and-answer widget, an app menu) as if it were a
+// profile photo -- two rounds of tightening the prompt's wording didn't
+// stop it. A card in this app-family's style is an overwhelmingly white/
+// near-white background with a small fraction of near-black text and
+// almost no color, which a real photo essentially never is (even a plain
+// or washed-out one). Thresholds set conservatively strict on both axes
+// so a real photo is never mistaken for a card -- missing a genuine text
+// misfire is a much smaller cost than silently dropping a wanted photo.
+function looksLikeTextCard(ctx, size) {
+const { data } = ctx.getImageData(0, 0, size, size);
+let white = 0; let satSum = 0; let n = 0;
+for (let i = 0; i < data.length; i += 16) { // sample every 4th pixel (4 channels) for speed
+const r = data[i]; const g = data[i + 1]; const b = data[i + 2];
+const max = Math.max(r, g, b); const min = Math.min(r, g, b);
+if (r > 240 && g > 240 && b > 240) white++;
+satSum += max === 0 ? 0 : (max - min) / max;
+n++;
+}
+return n > 0 && (white / n) > 0.65 && (satSum / n) < 0.10;
+}
+
 // Crops a tight square thumbnail from a fractional bounding box (0..1,
 // top-left origin) as returned by the vision-based screenshot import.
 function cropThumbnailToBlob(img, bbox) {
@@ -707,6 +729,7 @@ const side = Math.min(sw, sh);
 sx = sx + (sw - side) / 2;
 sy = sy + (sh - side) / 2;
 ctx.drawImage(img, sx, sy, side, side, 0, 0, SIZE, SIZE);
+if (looksLikeTextCard(ctx, SIZE)) { resolve(null); return; }
 canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.85);
 });
 }

@@ -275,7 +275,7 @@ const PROFILE_PARSE_MODEL = 'claude-sonnet-5';
 // re-uploading the same screenshot twice after adding new fields to the
 // prompt kept returning the pre-change result with no error or indication
 // why nothing was different.
-const PROFILE_SCHEMA_VERSION = 6;
+const PROFILE_SCHEMA_VERSION = 7;
 
 // A vision model estimating bounding-box coordinates has no pixel grid to
 // anchor against, so a raw absolute-position guess drifts the further down
