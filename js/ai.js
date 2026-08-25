@@ -267,6 +267,16 @@ const PROFILE_MAX_TOKENS = 3000;
 // once per import -- worth pricing right, not just inheriting the user's
 // chosen default.
 const PROFILE_PARSE_MODEL = 'claude-sonnet-5';
+// Escalation for an image tall/narrow enough to need more than one band
+// even on the standard vision tier -- see VISION_TIER_HIGH_RES for why
+// that specifically means Opus, not "a smarter model": Opus 4.7+ gets a
+// materially larger native-resolution budget (2576px/4784 tokens vs
+// Sonnet's 1568/1568), so the same image needs roughly half as many
+// bands, each at higher fidelity, cutting the band-boundary risk that
+// BAND_OVERLAP exists to manage. Reserved for the images that actually
+// need it -- a normal-length profile never triggers this and stays on
+// cheaper Sonnet.
+const PROFILE_PARSE_MODEL_TALL = 'claude-opus-5';
 // Bumped whenever profilePrompt()'s requested fields change. The rich-parse
 // cache is keyed on this alongside the image hash -- without it, re-parsing
 // the exact same screenshot after a prompt change (a genuinely common thing
@@ -275,7 +285,7 @@ const PROFILE_PARSE_MODEL = 'claude-sonnet-5';
 // re-uploading the same screenshot twice after adding new fields to the
 // prompt kept returning the pre-change result with no error or indication
 // why nothing was different.
-const PROFILE_SCHEMA_VERSION = 10;
+const PROFILE_SCHEMA_VERSION = 11;
 
 // A vision model estimating bounding-box coordinates has no pixel grid to
 // anchor against, so a raw absolute-position guess drifts the further down
@@ -314,13 +324,20 @@ const PROFILE_SCHEMA_VERSION = 10;
 // phrase in the vision docs is a per-family version cutoff at the point
 // high-res was introduced, not a cross-family chronological one; Sonnet
 // never had a "4.7", it jumped straight from 4.6 to 5.
-const VISION_LONG_EDGE = 1568;
-const VISION_MAX_TOKENS = 1568;
+const VISION_TIER_STANDARD = { longEdge: 1568, maxTokens: 1568 };
+// Confirmed live (Opus 5 migration guide): "Claude Opus 4.7 is the first
+// Claude model with high-resolution image support" -- an Opus-lineage
+// feature inherited by 4.8 and 5, automatic, no opt-in. Sonnet never had
+// a 4.7 release and stays on the standard tier above (see the note on
+// VISION_TIER_STANDARD's callers). Used only when escalating a
+// too-tall-for-standard-tier image to Opus -- see the model-selection
+// comment in extractProfileFromScreenshot/extractMatchesFromScreenshot.
+const VISION_TIER_HIGH_RES = { longEdge: 2576, maxTokens: 4784 };
 const VISION_PATCH = 28;
-function safeBandHeight(width) {
+function safeBandHeight(width, tier) {
 const patchesW = Math.max(1, Math.ceil(width / VISION_PATCH));
-const maxPatchesH = Math.max(1, Math.floor(VISION_MAX_TOKENS / patchesW));
-return Math.min(VISION_LONG_EDGE, maxPatchesH * VISION_PATCH);
+const maxPatchesH = Math.max(1, Math.floor(tier.maxTokens / patchesW));
+return Math.min(tier.longEdge, maxPatchesH * VISION_PATCH);
 }
 // Widened from a fixed 220 -- that was sized for avatar-row drift on
 // matches lists, but a profile's bio/prompt-answer text widget is taller
@@ -351,8 +368,8 @@ return `This is a screenshot of ${app ? `the ${app} app's` : 'a dating app'} mat
 // width (see safeBandHeight) rather than a fixed constant, so a band is
 // never taller than what THIS image's width can carry without the API
 // silently downscaling it.
-function planBands(totalWidth, totalHeight) {
-const targetHeight = safeBandHeight(totalWidth);
+function planBands(totalWidth, totalHeight, tier) {
+const targetHeight = safeBandHeight(totalWidth, tier);
 if (totalHeight <= targetHeight * 1.3) return [{ y0: 0, h: totalHeight }];
 const overlap = Math.min(BAND_OVERLAP, Math.floor(targetHeight * 0.25));
 const bands = [];
@@ -403,7 +420,14 @@ const base64 = await fileToBase64(file);
 const mediaType = file.type || 'image/png';
 const dataUrl = `data:${mediaType};base64,${base64}`;
 const img = await loadImage(dataUrl);
-const bands = planBands(img.naturalWidth, img.naturalHeight);
+// Standard tier, not the escalate-to-Opus treatment extractProfileFrom
+// Screenshot gets -- this path sends no modelOverride to callVision, so
+// it resolves to whatever the user has set as their default model in
+// Settings (falling back to DEFAULT_MODEL). Standard-tier band sizing is
+// always a safe floor regardless of which model that ends up being: a
+// high-res-eligible model just gets more bands than it strictly needs,
+// never smaller-than-safe ones.
+const bands = planBands(img.naturalWidth, img.naturalHeight, VISION_TIER_STANDARD);
 const isBanded = bands.length > 1;
 
 const settled = await Promise.allSettled(bands.map(async (band) => {
@@ -595,12 +619,17 @@ let raw;
 if (cachedText) {
 raw = cachedText.result;
 } else {
-const bands = planBands(img.naturalWidth, img.naturalHeight);
+let bands = planBands(img.naturalWidth, img.naturalHeight, VISION_TIER_STANDARD);
+let parseModel = PROFILE_PARSE_MODEL;
+if (bands.length > 1) {
+parseModel = PROFILE_PARSE_MODEL_TALL;
+bands = planBands(img.naturalWidth, img.naturalHeight, VISION_TIER_HIGH_RES);
+}
 const isBanded = bands.length > 1;
 const settled = await Promise.allSettled(bands.map(async (band) => {
 const bandBase64 = isBanded ? await sliceToBase64(img, band.y0, band.h) : base64;
 const bandMediaType = isBanded ? 'image/png' : mediaType;
-const { data } = await callVision(bandBase64, bandMediaType, profilePrompt(isBanded, app), PROFILE_MAX_TOKENS, PROFILE_PARSE_MODEL, 'low');
+const { data } = await callVision(bandBase64, bandMediaType, profilePrompt(isBanded, app), PROFILE_MAX_TOKENS, parseModel, 'low');
 return data;
 }));
 const results = [];
