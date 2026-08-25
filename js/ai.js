@@ -275,7 +275,7 @@ const PROFILE_PARSE_MODEL = 'claude-sonnet-5';
 // re-uploading the same screenshot twice after adding new fields to the
 // prompt kept returning the pre-change result with no error or indication
 // why nothing was different.
-const PROFILE_SCHEMA_VERSION = 8;
+const PROFILE_SCHEMA_VERSION = 9;
 
 // A vision model estimating bounding-box coordinates has no pixel grid to
 // anchor against, so a raw absolute-position guess drifts the further down
@@ -299,8 +299,17 @@ const PROFILE_SCHEMA_VERSION = 8;
 // the tallest band THIS image's actual width can carry at native
 // resolution, so bands are only as tall as they can be without triggering
 // any server-side downscale, rather than a single guessed constant.
-const VISION_LONG_EDGE = 1568;
-const VISION_MAX_TOKENS = 1568;
+//
+// Set to the high-resolution tier (2576px edge / 4784 tokens), not the
+// standard tier (1568/1568) used above -- the docs say that tier applies
+// automatically, no opt-in, to "Claude 4.7 and later models", and Sonnet
+// 5 is later than 4.7 in Anthropic's own version line (4.6 -> 4.7 -> 4.8
+// -> 5). Not 100% certain from the docs alone (they name it by version,
+// not by "Sonnet 5" explicitly) -- if a future real screenshot comes back
+// garbled the same way the Jenra one did, that's the signal this guess
+// was wrong and these two constants should drop back to 1568/1568.
+const VISION_LONG_EDGE = 2576;
+const VISION_MAX_TOKENS = 4784;
 const VISION_PATCH = 28;
 function safeBandHeight(width) {
 const patchesW = Math.max(1, Math.ceil(width / VISION_PATCH));
