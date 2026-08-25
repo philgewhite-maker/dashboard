@@ -2125,7 +2125,17 @@ if (!candidateList) return;
 candidateList.innerHTML = data.pendingImports.map((p) => {
 const isProfile = p.kind === 'profile';
 const rows = p.candidates.map((cand, idx) => {
-const matches = data.connections.filter((c) => String(c.name || '').toLowerCase() === String(cand.name || '').toLowerCase());
+const candNorm = foldDiacritics(String(cand.name || '').toLowerCase()).trim();
+const matches = candNorm ? data.connections.filter((c) => {
+const cNorm = foldDiacritics(String(c.name || '').toLowerCase()).trim();
+// Exact match, or a first-name-only extraction ("Alena") against a
+// fuller stored name ("Alena Ovchar") in either direction -- a
+// screenshot rarely has a surname, so requiring exact equality here
+// meant a genuinely-existing connection with a fuller name was never
+// even offered as a match candidate, only ever reachable via "add as
+// new" and manual cleanup after.
+return cNorm === candNorm || cNorm.startsWith(candNorm + ' ') || candNorm.startsWith(cNorm + ' ');
+}) : [];
 const extra = isProfile
 ? [cand.age, cand.height, cand.location, cand.job, cand.education, (cand.languages || []).join('/'), cand.bio].filter(Boolean).join(' · ')
 : (cand.stage ? `Detected stage: ${cand.stage}` : '');
