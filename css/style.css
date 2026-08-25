@@ -998,19 +998,6 @@ background:var(--card);
 color:var(--ink);
 resize:vertical;
 }
-.compare{
-display:flex;
-align-items:center;
-gap:8px;
-flex-wrap:wrap;
-}
-.compare .vs{font-size:10px;color:var(--muted);}
-.compare-existing{
-display:flex;
-flex-direction:column;
-align-items:center;
-gap:3px;
-}
 .compare-caption{
 font-family:'IBM Plex Mono',monospace;
 font-size:9px;
@@ -1019,11 +1006,48 @@ white-space:nowrap;
 }
 .candidate-row.ambiguous{
 flex-direction:column;
-align-items:flex-start;
-gap:8px;
+align-items:stretch;
+gap:10px;
 background:var(--amber-bg);
 }
-.decision-select{
+/* The newly-extracted profile being decided on -- shown first and once,
+   distinct from the list of possible existing matches below it. */
+.pending-new{
+display:flex;
+align-items:center;
+gap:10px;
+padding-bottom:8px;
+border-bottom:1px dashed var(--line);
+}
+.pending-new-info{font-size:13px;}
+.pending-options{
+display:flex;
+flex-direction:column;
+gap:2px;
+}
+/* Each candidate/decision is one row: avatar, name+caption, and the
+   radio that picks it, all together -- no separate dropdown to
+   cross-reference against the avatars shown above it. */
+.pending-option{
+display:flex;
+align-items:center;
+gap:8px;
+padding:6px 8px;
+border-radius:7px;
+cursor:pointer;
+}
+.pending-option:has(input:checked){
+background:var(--card);
+}
+.pending-option input[type=radio]{flex-shrink:0;}
+.pending-option-info{
+display:flex;
+flex-direction:column;
+gap:1px;
+font-size:13px;
+}
+.zoomable-avatar{cursor:zoom-in;}
+.decision-pick{
 font-family:'Inter',sans-serif;
 font-size:12px;
 border:1px solid var(--line);
@@ -1031,7 +1055,7 @@ border-radius:6px;
 padding:5px 7px;
 background:var(--card);
 color:var(--ink);
-width:100%;
+margin:0 0 2px 30px;
 }
 
 /* Tags (languages / nationality) */

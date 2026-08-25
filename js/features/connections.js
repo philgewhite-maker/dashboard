@@ -1788,33 +1788,113 @@ parts.push(m.lastContact ? `contacted ${daysSince(m.lastContact)}d ago` : 'never
 return parts.join(' · ');
 }
 
+// Wraps avatarHtml with a click-to-zoom hook (same [data-view-photo] +
+// openLightbox pattern the main connections list already uses) -- only
+// when there's an actual photo to zoom into, since a blank initials
+// circle has nothing to show.
+function zoomableAvatarHtml(photoId, name, sizeClass) {
+const html = avatarHtml(photoId, name, sizeClass);
+if (!photoId) return html;
+return `<span class="zoomable-avatar" data-view-photo="${escapeHtml(photoId)}">${html}</span>`;
+}
+
+// Ranks existing connections as candidates for "is this the same person".
+// Two tiers, scored so exact/alias matches always outrank loose ones
+// rather than needing to be kept in separate lists:
+//  - 100: name (or a recorded "also known as") matches exactly, or the
+//    extracted name is a bare first name that's a prefix of a fuller
+//    stored name (a screenshot rarely has a surname).
+//  - 40 minus 10 per edit: small spelling/transliteration drift on the
+//    first name alone (e.g. Bumble's "Alena" vs a Ukrainian-convention
+//    "Alona" for the same Cyrillic name) -- same tolerance already
+//    proven in googlecontacts.js's widerNameCandidates.
+// +20 if the connection is already tracked on this same platform (its
+// primary app, or a recorded identity row for it) -- the user's own
+// ranking ask: a same-platform exact match should beat a cross-platform
+// one. Capped to the 5 closest total, same shape as widerNameCandidates,
+// so a large connections list can't flood the review card the way an
+// uncapped edit-distance pass once did (26 "matches" for one name).
+function candidateExistingMatches(cand, app) {
+const candKey = nameKey(cand.name);
+if (!candKey) return [];
+const candFirst = candKey.split(' ')[0];
+const appKey = String(app || '').trim().toLowerCase();
+const scored = [];
+data.connections.forEach((c) => {
+const cKey = nameKey(c.name);
+let tier = 0; let viaAlias = '';
+if (cKey && (cKey === candKey || cKey.startsWith(candKey + ' ') || candKey.startsWith(cKey + ' '))) {
+tier = 100;
+} else {
+const aliasHit = (c.aliases || []).find((a) => nameKey(a) === candKey);
+if (aliasHit) { tier = 100; viaAlias = aliasHit; }
+}
+if (!tier && candFirst.length >= 4) {
+const cFirst = cKey.split(' ')[0];
+if (cFirst.length >= 4) {
+const d = editDistance(candFirst, cFirst, 2);
+if (d <= 2) tier = 40 - d * 10;
+}
+}
+if (!tier) return;
+const samePlatform = !!appKey && (String(c.app || '').toLowerCase() === appKey
+|| (c.identities || []).some((i) => String(i.platform || '').toLowerCase() === appKey));
+scored.push({ c, score: tier + (samePlatform ? 20 : 0), viaAlias, samePlatform });
+});
+return scored
+.sort((a, b) => b.score - a.score || String(b.c.createdAt || '').localeCompare(String(a.c.createdAt || '')))
+.slice(0, 5);
+}
+
 // photoId is already a durably-stored photo by the time this renders (see
 // queuePendingImport) -- same avatarHtml() every existing-connection avatar
 // on this page already uses, rather than the special ObjectURL-from-Blob
 // hydration the old ephemeral review list needed before photos were saved
 // this early.
-function candidateRowHtml(idx, name, age, matches, extraDetail, photoId) {
+//
+// Every option -- each possible match, "pick a different connection",
+// "add as new", "skip" -- is one radio in a single visible list rather
+// than hidden inside a <select>, so the photo, name and decision for a
+// candidate all sit in the same row instead of the avatar strip and the
+// dropdown text needing to be cross-referenced by eye. The new profile
+// itself is shown first, since that's what's actually being decided on.
+function candidateRowHtml(pendingId, idx, name, age, matches, extraDetail, photoId) {
+const groupName = `decision-${pendingId}-${idx}`;
 if (matches && matches.length > 0) {
-const existingHtml = matches.map((m) => `
-<div class="compare-existing">
-${avatarHtml(m.photoId, m.name, 'sm')}
-<span class="compare-caption"><strong>${escapeHtml(m.name)}</strong><br>${escapeHtml(existingMatchCaption(m))}</span>
-</div>`).join('');
-const updateOptions = matches.map((m) => `<option value="update:${m.id}">Same person &mdash; merge into ${escapeHtml(m.name)} (${escapeHtml(existingMatchCaption(m))})</option>`).join('');
-const tag = matches.length > 1 ? `${matches.length} existing people share this name` : 'same name already tracked';
+const matchOptions = matches.map((m) => `
+<label class="pending-option">
+<input type="radio" name="${groupName}" value="update:${m.c.id}" data-decision="${idx}">
+${zoomableAvatarHtml(m.c.photoId, m.c.name, 'sm')}
+<span class="pending-option-info">
+<strong>${escapeHtml(m.c.name)}</strong>
+<span class="compare-caption">${escapeHtml(existingMatchCaption(m.c))}${m.viaAlias ? ` &middot; also known as "${escapeHtml(m.viaAlias)}"` : ''}${m.samePlatform ? ' &middot; same platform' : ''}</span>
+</span>
+</label>`).join('');
+const tag = matches.length > 1 ? `${matches.length} possible matches` : '1 possible match';
 return `<div class="candidate-row ambiguous" data-idx="${idx}">
-<div class="compare">
-${existingHtml}
-<span class="vs">existing vs new</span>
-${avatarHtml(photoId, name, 'sm')}
-</div>
+<div class="pending-new">
+${zoomableAvatarHtml(photoId, name, 'md')}
+<div class="pending-new-info">
 <div>${escapeHtml(name)}${age ? ', ' + escapeHtml(age) : ''} <span class="candidate-tag">${tag}</span></div>
 ${extraDetail ? `<div style="font-size:11px;color:var(--muted);">${escapeHtml(extraDetail)}</div>` : ''}
-<select class="decision-select" data-decision="${idx}">
-${updateOptions}
-<option value="new">Different person &mdash; add as new</option>
-<option value="skip" selected>Skip for now</option>
-</select>
+</div>
+</div>
+<div class="pending-options">
+${matchOptions}
+<label class="pending-option">
+<input type="radio" name="${groupName}" value="pick" data-decision="${idx}">
+<span class="pending-option-info">Different existing connection&hellip;</span>
+</label>
+<select class="decision-pick" data-pending-pick="${idx}" hidden><option value="">Choose&hellip;</option>${connectionOptionsHtml()}</select>
+<label class="pending-option">
+<input type="radio" name="${groupName}" value="new" data-decision="${idx}">
+<span class="pending-option-info">Different person &mdash; add as new</span>
+</label>
+<label class="pending-option">
+<input type="radio" name="${groupName}" value="skip" data-decision="${idx}" checked>
+<span class="pending-option-info">Skip for now</span>
+</label>
+</div>
 </div>`;
 }
 return `<label class="candidate-row" data-idx="${idx}">
@@ -2107,7 +2187,26 @@ candidateList.addEventListener('click', async (e) => {
 const confirmBtn = e.target.closest('[data-confirm-pending]');
 if (confirmBtn) { await confirmPendingImport(confirmBtn.dataset.confirmPending); return; }
 const discardBtn = e.target.closest('[data-discard-pending]');
-if (discardBtn) { await discardPendingImport(discardBtn.dataset.discardPending); }
+if (discardBtn) { await discardPendingImport(discardBtn.dataset.discardPending); return; }
+const zoom = e.target.closest('[data-view-photo]');
+if (zoom) {
+const url = await photoUrl(zoom.dataset.viewPhoto);
+if (url) openLightbox(url);
+}
+});
+// Reveals the "choose a connection" picker only while its own "pick"
+// radio is the checked one in that candidate's group -- every other
+// radio in the group (including "skip") hides it again.
+candidateList.addEventListener('change', (e) => {
+const radio = e.target.closest('input[type=radio][data-decision]');
+if (!radio) return;
+// candidate indices reset to 0 per card, so the picker lookup has to
+// stay scoped to this radio's own card -- a global lookup would grab
+// index 0's picker in a DIFFERENT pending-import card if more than one
+// is on screen at once.
+const card = radio.closest('[data-pending-import]');
+const picker = card && card.querySelector(`[data-pending-pick="${radio.dataset.decision}"]`);
+if (picker) picker.hidden = radio.value !== 'pick';
 });
 }
 }
@@ -2126,47 +2225,11 @@ if (!candidateList) return;
 candidateList.innerHTML = data.pendingImports.map((p) => {
 const isProfile = p.kind === 'profile';
 const rows = p.candidates.map((cand, idx) => {
-// nameKey (already used for Google Contacts matching) folds diacritics
-// and transliterates Cyrillic, but that alone doesn't catch two
-// different Latin transliterations of the same Cyrillic name -- e.g.
-// Bumble's "Alena" vs a Ukrainian-convention "Alona" for Альона. The
-// edit-distance tier below is the same loose-match tolerance already
-// proven for that in widerNameCandidates.
-const candKey = nameKey(cand.name);
-const candFirst = candKey.split(' ')[0];
-const matches = candKey ? data.connections.filter((c) => {
-const cKey = nameKey(c.name);
-if (!cKey) return false;
-if (cKey === candKey) return true;
-// First-name-only extraction ("Alena") against a fuller stored name
-// ("Alena Ovchar") in either direction -- a screenshot rarely has a
-// surname, so requiring exact equality here meant a genuinely-existing
-// connection with a fuller name was never even offered as a match
-// candidate, only ever reachable via "add as new" and manual cleanup.
-return cKey.startsWith(candKey + ' ') || candKey.startsWith(cKey + ' ');
-}) : [];
-// Small spelling/transliteration drift on the first name alone (e.g.
-// Bumble's "Alena" vs a Ukrainian-convention "Alona" for the same
-// Cyrillic name, Альона). Kept separate from the pass above and capped
-// to the 3 closest, same as widerNameCandidates -- an uncapped
-// edit-distance-2 pass over a dating-contacts list this size (hundreds
-// of connections) surfaced 26 "matches" for one name, almost all
-// unrelated, which is useless as a review list rather than more
-// thorough.
-if (candKey && candFirst.length >= 4) {
-const already = new Set(matches.map((m) => m.id));
-data.connections
-.filter((c) => !already.has(c.id))
-.map((c) => ({ c, d: editDistance(candFirst, nameKey(c.name).split(' ')[0], 2) }))
-.filter((x) => x.d <= 2)
-.sort((a, b) => a.d - b.d)
-.slice(0, 3)
-.forEach((x) => matches.push(x.c));
-}
+const matches = candidateExistingMatches(cand, p.app);
 const extra = isProfile
 ? [cand.age, cand.height, cand.location, cand.job, cand.education, (cand.languages || []).join('/'), cand.bio].filter(Boolean).join(' · ')
 : (cand.stage ? `Detected stage: ${cand.stage}` : '');
-return candidateRowHtml(idx, cand.name, cand.age, matches, extra, (cand.photoIds || [])[0] || null);
+return candidateRowHtml(p.id, idx, cand.name, cand.age, matches, extra, (cand.photoIds || [])[0] || null);
 }).join('');
 const when = new Date(p.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 return `<div class="alloc-card" data-pending-import="${p.id}">
@@ -2195,15 +2258,21 @@ const cand = pending.candidates[parseInt(cb.dataset.newIdx, 10)];
 await addNewConnectionFromCandidate(cand, app, isProfile);
 addedCount++;
 }
-for (const sel of card.querySelectorAll('select[data-decision]')) {
-const cand = pending.candidates[parseInt(sel.dataset.decision, 10)];
-if (sel.value.startsWith('update:')) {
-const existing = data.connections.find((c) => c.id === sel.value.slice(7));
+for (const radio of card.querySelectorAll('input[type=radio][data-decision]:checked')) {
+const idx = radio.dataset.decision;
+const cand = pending.candidates[parseInt(idx, 10)];
+let value = radio.value;
+if (value === 'pick') {
+const picker = card.querySelector(`select[data-pending-pick="${idx}"]`);
+value = picker && picker.value ? `update:${picker.value}` : 'skip';
+}
+if (value.startsWith('update:')) {
+const existing = data.connections.find((c) => c.id === value.slice(7));
 if (existing) {
 await applyCandidateUpdate(existing, cand, isProfile, app);
 updatedCount++;
 }
-} else if (sel.value === 'new') {
+} else if (value === 'new') {
 await addNewConnectionFromCandidate(cand, app, isProfile);
 addedCount++;
 }
