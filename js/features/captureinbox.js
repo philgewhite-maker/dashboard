@@ -23,6 +23,21 @@
 // whole group stays put for the user to tick a subset per person and use
 // the manual "Extract dating screenshot" button, which can group a
 // screenshot with whichever photos are ticked alongside it.
+//
+// PUSH/PULL CONSISTENCY: this file is the PUSH side (files arriving via
+// share) of every import capability that also has a PULL side (a
+// deliberate file-picker upload, mostly in connections.js's Dating admin
+// panel, plus health.js/wellness.js/renpho.js for their own imports).
+// The two sides have diverged more than once because a capability landed
+// on only one of them -- see extractDatingScreenshot's own comment in
+// connections.js for a real example (a two-part profile share silently
+// lost its second half's fields because push had no equivalent to a
+// combine capability pull had just gained). When adding or changing an
+// import capability here, check whether the matching pull-side entry
+// point needs the same change, and vice versa -- and prefer routing both
+// through the SAME underlying extraction function (e.g. extractProfile
+// FromScreenshot, extractDatingScreenshot) rather than parallel logic
+// that can quietly grow apart.
 import { data, queueSave, blankCaptureBatch } from '../state.js';
 import { photoDelete } from '../db.js';
 import { todayStr, escapeHtml, hydratePhotoBackgrounds, resizeImageToBlob } from '../utils.js';
@@ -575,7 +590,45 @@ const plainPhotos = withFiles.filter((c) => !c.isScreenshot);
 const done = [];
 const messages = [];
 
-if (screenshots.length === 1 && plainPhotos.length > 0) {
+// PUSH/PULL CONSISTENCY: this is the push (share sheet) side's only
+// caller of extractDatingScreenshot -- see that function's own comment
+// in connections.js for the full principle. Several screenshot-shaped
+// items ticked together now get ONE combined attempt (matching Dating
+// admin's own "Selected files are one profile, in pieces" checkbox on
+// the pull side), not "first wins, the rest silently become photos" --
+// that gap is exactly what dropped a second screenshot's height/
+// drinking/smoking/age from a real two-part profile share.
+//
+// Whatever extractDatingScreenshot didn't actually consume (its own
+// heuristic decided the pieces don't look related, or only one of
+// several matched as a list) is deliberately left OUT of `done` here so
+// the per-file loop below still runs for it, same as if it had never
+// been grouped -- consumedFiles is matched by File reference, not
+// position, since the matches-list attempt can succeed on any file in
+// the array, not necessarily the first.
+if (screenshots.length > 1) {
+if (status) status.textContent = `Reading ${screenshots.length} screenshots…`;
+try {
+const result = await extractDatingScreenshot(screenshots.map((s) => s.file), null, plainPhotos.map((p) => p.file), status);
+const consumedFiles = new Set(result.consumedFiles || []);
+const consumedItems = screenshots.filter((s) => consumedFiles.has(s.file)).map((s) => s.it);
+if (result.kind === 'matches') {
+messages.push(`Found ${result.candidates.length} ${result.candidates.length === 1 ? 'person' : 'people'} (a list) — review in Dating admin.`);
+done.push(...consumedItems);
+} else if (result.kind === 'profile' && consumedItems.length > 1) {
+messages.push(`Combined ${consumedItems.length} screenshots into one profile${plainPhotos.length ? ` with ${plainPhotos.length} extra photo${plainPhotos.length === 1 ? '' : 's'}` : ''} — review in Dating admin.`);
+done.push(...consumedItems, ...plainPhotos.map((p) => p.it));
+} else if (result.kind === 'profile') {
+messages.push(`${consumedItems[0]?.name || 'that image'}: found a profile${plainPhotos.length ? ` with ${plainPhotos.length} extra photo${plainPhotos.length === 1 ? '' : 's'}` : ''} — didn't look related enough to the other screenshot(s) to combine, handling those separately — review in Dating admin.`);
+done.push(...consumedItems, ...plainPhotos.map((p) => p.it));
+} else {
+messages.push(result.error?.name === 'MissingKeyError' ? 'Add an Anthropic API key in Settings to extract a dating screenshot.' : "Those screenshots didn't look like a matches list or profile.");
+}
+} catch (err) {
+console.error('Dating screenshot extraction failed:', err);
+messages.push(err?.name === 'MissingKeyError' ? 'Add an Anthropic API key in Settings to extract a dating screenshot.' : `Reading those screenshots failed: ${err.message || err}`);
+}
+} else if (screenshots.length === 1 && plainPhotos.length > 0) {
 const { it, file } = screenshots[0];
 if (status) status.textContent = `Reading ${it.name || 'photo'}…`;
 try {
@@ -601,8 +654,14 @@ messages.push(result.error?.name === 'MissingKeyError' ? 'Add an Anthropic API k
 console.error('Dating screenshot extraction failed:', err);
 messages.push(err?.name === 'MissingKeyError' ? 'Add an Anthropic API key in Settings to extract a dating screenshot.' : `${it.name || 'that image'}: ${err.message || err}`);
 }
-} else {
+}
+
+// Always runs, not just in an else branch: covers the plain 0-or-1-
+// screenshot cases untouched by either branch above, AND any leftover
+// screenshots the >1 combine branch didn't end up consuming.
+const alreadyDoneIds = new Set(done.map((d) => d.id));
 for (const { it, file, isScreenshot } of withFiles) {
+if (alreadyDoneIds.has(it.id)) continue;
 if (!isScreenshot) { messages.push(`${it.name || 'that image'}: not a screenshot, skipped.`); continue; }
 if (status) status.textContent = `Reading ${it.name || 'photo'}…`;
 try {
@@ -617,7 +676,6 @@ messages.push(result.error?.name === 'MissingKeyError' ? 'Add an Anthropic API k
 } catch (err) {
 console.error('Dating screenshot extraction failed:', err);
 messages.push(err?.name === 'MissingKeyError' ? 'Add an Anthropic API key in Settings to extract a dating screenshot.' : `${it.name || 'that image'}: ${err.message || err}`);
-}
 }
 }
 

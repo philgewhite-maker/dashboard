@@ -877,6 +877,49 @@ const ratio = contentH > 0 ? contentW / contentH : 1;
 return { img, bounds, isScreenshot: ratio < PHOTO_ASPECT_THRESHOLD };
 }
 
+// Android/Samsung screenshot filenames embed a capture timestamp --
+// "Screenshot_20260825_235939_Bumble.jpg" -- down to the second, not just
+// the day dateFromFilename() extracts. Used to tell "two screenshots taken
+// back to back while scrolling one profile" apart from "two unrelated
+// screenshots that happen to look similar", below.
+function screenshotTimeFromName(name) {
+const m = String(name || '').match(/(20\d{2})(\d{2})(\d{2})[-_](\d{2})(\d{2})(\d{2})/);
+if (!m) return null;
+const [, y, mo, d, h, mi, s] = m;
+const ms = Date.parse(`${y}-${mo}-${d}T${h}:${mi}:${s}`);
+return Number.isNaN(ms) ? null : ms;
+}
+
+// Deterministic signal for "were these several screenshots captured as
+// native-resolution pieces of the SAME longer scroll", with no AI call --
+// matching the precedent classifyProfileUpload itself already set (a
+// cheap, explainable check the manual/explicit import path can rely on
+// without an unreliable classifier layer in between, see extractDating
+// Screenshot's own comment on why that layer was removed once already).
+// Takes classifyProfileUpload's own already-loaded {img, bounds} per file
+// so this doesn't reload anything. All signals must agree:
+//  - content width matches within 5% -- contentCropBounds has already
+//    trimmed any letterbox/pillarbox margin (the "solid colour banding" a
+//    scroll-capture tool often pads with), so this compares real content
+//    width, not incidental canvas padding;
+//  - filenames carry timestamps within 15 minutes of each other, when
+//    every file has one -- plausibly the same capture sitting, not
+//    coincidentally similar-looking screenshots from different days.
+// A false negative here just means the pieces import as separate (wrong)
+// candidates needing manual cleanup, or the user falls back to the
+// explicit "combine" checkbox in Dating admin -- not silent data loss --
+// so this can afford to be conservative rather than guess.
+function looksLikeSameScreenshotPieces(pieces) {
+if (pieces.length < 2) return false;
+const widths = pieces.map((p) => p.img.naturalWidth * p.bounds.w);
+const maxW = Math.max(...widths);
+const minW = Math.min(...widths);
+if (maxW <= 0 || (maxW - minW) / maxW > 0.05) return false;
+const times = pieces.map((p) => screenshotTimeFromName(p.file.name)).filter((t) => t !== null);
+if (times.length === pieces.length && (Math.max(...times) - Math.min(...times)) > 15 * 60 * 1000) return false;
+return true;
+}
+
 export {
 todayStr, daysAgoStr, last7Dates, uid, daysSince, daysUntil, foldDiacritics,
 escapeHtml, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, buildFlagMatcher, applyFlagMatcher, knownCityMap, scrollAndFlash, bindForm,
@@ -884,5 +927,5 @@ findMentions, COUNTRY_NAME_TO_NATIONALITY,
 resizeImageToBlob, fileToBase64, loadImage, cropThumbnailToBlob,
 hashFile, captureDateOf, betterCaptureDate, dateFromFilename,
 ensureBrowserReadableImage, setPhotoFallback,
-contentCropBounds, cropToContentBlob, classifyProfileUpload,
+contentCropBounds, cropToContentBlob, classifyProfileUpload, looksLikeSameScreenshotPieces,
 };

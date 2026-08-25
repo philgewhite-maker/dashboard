@@ -1767,7 +1767,27 @@ initImport();
 }
 
 // ---- Screenshot import ----
-
+//
+// PUSH/PULL CONSISTENCY: this section is the PULL side (Dating admin's
+// own file-picker buttons -- a deliberate upload) of every screenshot
+// import capability; captureinbox.js is the PUSH side (files arriving via
+// Android's share sheet). The extraction functions here (importMatches
+// ListFile, importProfileScreenshotFile, importProfileWithPhotosFile) are
+// the SAME ones both sides call -- Dating admin calls them directly,
+// Capture Inbox calls them through extractDatingScreenshot's cascade --
+// so a fix or capability added to one of these functions reaches both
+// sides for free. The risk is upstream of these functions: a decision
+// about WHICH files to pass them (e.g. "these several screenshots are one
+// profile, combine them" -- see the "Selected files are one profile, in
+// pieces" checkbox below, and extractDatingScreenshot's own deterministic
+// equivalent for push, looksLikeSameScreenshotPieces in utils.js) has to
+// be made and kept in sync on BOTH sides separately, since push has no
+// upfront checkbox to ask the user and pull has no batch of already-
+// landed files to pattern-match. That gap is exactly how a real profile
+// shared in two parts silently lost its second half's fields once
+// already -- when adding a similar capability, build the shared decision
+// as an exported, deterministic helper (not private inline logic) so
+// it's usable from either side, then wire it into both.
 async function withImportStatus(statusEl, fn) {
 try {
 await fn();
@@ -2094,16 +2114,19 @@ await queuePendingImport({ candidates: [candidate], kind: 'profile', app: appHin
 return { candidate };
 }
 
-// Same as importProfileScreenshotFile, but for when the screenshot was
-// ticked together with loose photos of the same person -- the "tick who
-// belongs together" convention Capture Inbox already uses for Send-to-
-// connection. Those extra photos get cropped/stored the exact same way
-// applyDirectProfileUpload already does for an EXISTING connection
-// (contentCropBounds + cropToContentBlob, trimming letterbox bars rather
-// than squashing to a fixed thumbnail), and attached to THIS candidate
-// before it's queued, so confirming it creates the connection with every
-// photo already on it -- no separate manual pass through Capture Inbox
-// needed, matching what the pull-side combined upload could already do.
+// Same as importProfileScreenshotFile, but for when the screenshot(s)
+// were ticked together with loose photos of the same person -- the "tick
+// who belongs together" convention Capture Inbox already uses for Send-to-
+// connection. `file` may be a single File or an array (see
+// extractProfileFromScreenshot -- several native-resolution pieces of one
+// profile, still with loose photos ticked alongside). Those extra photos
+// get cropped/stored the exact same way applyDirectProfileUpload already
+// does for an EXISTING connection (contentCropBounds + cropToContentBlob,
+// trimming letterbox bars rather than squashing to a fixed thumbnail),
+// and attached to THIS candidate before it's queued, so confirming it
+// creates the connection with every photo already on it -- no separate
+// manual pass through Capture Inbox needed, matching what the pull-side
+// combined upload could already do.
 async function importProfileWithPhotosFile(file, appHint, extraFiles, statusEl) {
 if (statusEl) statusEl.textContent = 'Reading screenshot…';
 let candidate;
@@ -2114,7 +2137,8 @@ console.error('Profile screenshot import failed:', err);
 if (statusEl) statusEl.textContent = err instanceof MissingKeyError ? err.message : `Couldn't read that screenshot: ${err.message || err}`;
 return { candidate: null, error: err };
 }
-recordImportRun('screenshotProfile', { scope: appHint || file.name || 'profile screenshot', count: 1 });
+const sourceLabel = screenshotSourceLabel(file);
+recordImportRun('screenshotProfile', { scope: appHint || sourceLabel, count: 1 });
 renderImportLastRun();
 candidate.photoIds = [];
 for (const f of extraFiles) {
@@ -2124,34 +2148,86 @@ const blob = await cropToContentBlob(img, bounds, 0.85, 900);
 if (blob) candidate.photoIds.push(await storePhoto(blob));
 }
 if (statusEl) statusEl.textContent = `Found a profile with ${extraFiles.length} extra photo${extraFiles.length === 1 ? '' : 's'} — review below:`;
-await queuePendingImport({ candidates: [candidate], kind: 'profile', app: appHint, sourceLabel: file.name || 'profile screenshot' });
+await queuePendingImport({ candidates: [candidate], kind: 'profile', app: appHint, sourceLabel });
 return { candidate };
 }
 
 // Capture Inbox's "Extract dating screenshot" button, for an explicit,
 // deliberate user action -- unlike autoRouteBumbleScreenshot (captureinbox.js's
 // unconfirmed auto-trigger, deliberately gated by a cheap Haiku pre-scan
-// since it fires with no confirmation), this composes the SAME two
-// functions the Dating-admin "Import matches list" and "Import profile
-// screenshot(s)" buttons already call directly, with no classifier in
-// between deciding which one to even attempt. Confirmed live as a real
-// bug this replaces: a Bumble "Chats" screen (several people, each row
-// showing a message preview) succeeded via "Import matches list" directly
-// -- extractMatchesFromScreenshot is explicitly built to read a message-
-// preview row as someone you're "Chatting in app" with -- but the 4-way
-// Haiku pre-scan gating the auto-detecting path only sees "chat" (singular)
-// as a bucket distinct from "matches" (a list), misrouted it, and rejected
-// the screenshot before the real extraction ever ran. Trying the matches
+// since it fires with no confirmation), this composes the SAME functions
+// the Dating-admin "Import matches list" and "Import profile screenshot(s)"
+// buttons already call directly, with no classifier in between deciding
+// which one to even attempt. Confirmed live as a real bug this replaces: a
+// Bumble "Chats" screen (several people, each row showing a message
+// preview) succeeded via "Import matches list" directly -- extractMatches
+// FromScreenshot is explicitly built to read a message-preview row as
+// someone you're "Chatting in app" with -- but the 4-way Haiku pre-scan
+// gating the auto-detecting path only sees "chat" (singular) as a bucket
+// distinct from "matches" (a list), misrouted it, and rejected the
+// screenshot before the real extraction ever ran. Trying the matches
 // extraction first and accepting any candidates found, exactly matching
 // that button's own success condition, removes the extra unreliable layer
 // entirely rather than trying to make it smarter.
-async function extractDatingScreenshot(file, appHint, extraFiles, statusEl) {
-const matchesResult = await importMatchesListFile(file, appHint, statusEl);
-if (matchesResult.candidates.length > 0) return { kind: 'matches', ...matchesResult };
+//
+// PUSH/PULL CONSISTENCY: this is the ONLY entry point Capture Inbox
+// (push -- files arriving via Android's share sheet) uses; Dating admin's
+// own buttons (pull -- a deliberate file-picker upload) call importMatches
+// ListFile/importProfileScreenshotFile/importProfileWithPhotosFile
+// directly, not through here. Whenever a capability is added to one side
+// (like the "several native-resolution screenshots are pieces of ONE
+// profile" combine logic below, or the "Selected files are one profile,
+// in pieces" checkbox on Dating admin's own upload input), check whether
+// the OTHER side needs the equivalent -- they have diverged more than
+// once already because a fix landed on only one path (see the real bug
+// this comment sits next to: a two-part share got its second half's
+// height/drinking/smoking/age silently dropped because push had no
+// combine capability the pull side had just gained). Where a genuinely
+// new decision is needed that only makes sense for one side (e.g. this
+// function's own multi-file combine-or-not heuristic, which push needs
+// because it has no upfront "combine?" checkbox to ask the user, unlike
+// pull), prefer a shared, exported, deterministic helper (see
+// looksLikeSameScreenshotPieces in utils.js) over private inline logic,
+// so a future pull-side UI wanting the same auto-detect isn't stuck
+// re-deriving it.
+//
+// `files` may be a single File or an array. With more than one file:
+// each is tried as an independent matches list first (a list is already
+// a complete unit in itself, unlike a profile, which genuinely can be
+// captured in pieces -- see extractProfileFromScreenshot), then the
+// deterministic heuristic decides whether the untried remainder look
+// like pieces of one profile (combine into a single candidate) or not
+// (fall through to the single-file cascade for just the first one,
+// leaving the rest in Capture Inbox for a separate pass). Returns
+// consumedFiles -- the actual File objects (by reference, same instances
+// passed in) that were used -- rather than a bare count: the matches-
+// list loop below can succeed on any file in the array, not necessarily
+// the first, so a caller that assumed "count means the first N" would
+// mark the wrong Capture Inbox items done and delete the wrong bytes.
+async function extractDatingScreenshot(files, appHint, extraFiles, statusEl) {
+files = Array.isArray(files) ? files : [files];
+
+if (files.length > 1) {
+for (const f of files) {
+const matchesResult = await importMatchesListFile(f, appHint, statusEl);
+if (matchesResult.candidates.length > 0) return { kind: 'matches', consumedFiles: [f], ...matchesResult };
+}
+const { classifyProfileUpload, looksLikeSameScreenshotPieces } = await import('../utils.js');
+const classified = await Promise.all(files.map(async (f) => ({ file: f, ...(await classifyProfileUpload(f)) })));
+if (looksLikeSameScreenshotPieces(classified)) {
 const profileResult = (extraFiles && extraFiles.length)
-? await importProfileWithPhotosFile(file, appHint, extraFiles, statusEl)
-: await importProfileScreenshotFile(file, appHint, statusEl);
-return { kind: profileResult.candidate ? 'profile' : null, ...profileResult };
+? await importProfileWithPhotosFile(files, appHint, extraFiles, statusEl)
+: await importProfileScreenshotFile(files, appHint, statusEl);
+return { kind: profileResult.candidate ? 'profile' : null, consumedFiles: profileResult.candidate ? files : [], ...profileResult };
+}
+}
+
+const matchesResult = await importMatchesListFile(files[0], appHint, statusEl);
+if (matchesResult.candidates.length > 0) return { kind: 'matches', consumedFiles: [files[0]], ...matchesResult };
+const profileResult = (extraFiles && extraFiles.length)
+? await importProfileWithPhotosFile(files[0], appHint, extraFiles, statusEl)
+: await importProfileScreenshotFile(files[0], appHint, statusEl);
+return { kind: profileResult.candidate ? 'profile' : null, consumedFiles: profileResult.candidate ? [files[0]] : [], ...profileResult };
 }
 
 function initImport() {
