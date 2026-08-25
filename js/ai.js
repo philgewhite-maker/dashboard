@@ -560,9 +560,13 @@ return out;
 // the field wins (the isBand prompt above asks each band not to guess a
 // field it can't see, so "first non-empty" is "the band that saw it," not
 // a race). Arrays union; bio concatenates (a bio can itself span a band
-// boundary); photo boxes translate into whole-image coordinates and dedupe
-// across the overlap the same way extractMatchesFromScreenshot does.
-function mergeProfileBandResults(results, bands, totalHeight) {
+// boundary). Photo boxes are handled separately, per source file, by the
+// caller -- unlike text, a box's coordinates only mean something relative
+// to the ONE image it was read from, so once a profile spans more than
+// one source file (see extractProfileFromScreenshot) they can't be
+// merged into a single shared coordinate space the way bands within one
+// file's own image already can.
+function mergeProfileBandResults(results) {
 const firstNonEmpty = (key) => (results.map((r) => r[key]).find((v) => String(v || '').trim())) || '';
 const unionArr = (key) => {
 const seen = new Set(); const out = [];
@@ -573,52 +577,30 @@ if (k && !seen.has(k)) { seen.add(k); out.push(v); }
 return out;
 };
 const bios = [...new Set(results.map((r) => String(r.bio || '').trim()).filter(Boolean))];
-const photoBoxes = dedupePhotoBoxesByPosition(
-results.flatMap((r, i) => (Array.isArray(r.photoBoxes) ? r.photoBoxes : []).map((b) => ({
-x: b.x, y: (bands[i].y0 + b.y * bands[i].h) / totalHeight, w: b.w, h: (b.h * bands[i].h) / totalHeight,
-}))),
-);
 return {
 name: firstNonEmpty('name'), age: firstNonEmpty('age'), height: firstNonEmpty('height'),
 education: firstNonEmpty('education'), languages: unionArr('languages'), nationality: unionArr('nationality'),
 kids: firstNonEmpty('kids'), job: firstNonEmpty('job'), location: firstNonEmpty('location'),
 bio: bios.join(' '), interests: unionArr('interests'), lookingFor: firstNonEmpty('lookingFor'),
-drinking: firstNonEmpty('drinking'), smoking: firstNonEmpty('smoking'), photoBoxes,
+drinking: firstNonEmpty('drinking'), smoking: firstNonEmpty('smoking'),
 };
 }
 
-// Screenshot of ONE person's full profile page — richer fields, possibly
-// several photos. Long composite screenshots (a full scrolled profile,
-// several photos plus every text section) are sliced into overlapping
-// bands (see planBands, same mechanism extractMatchesFromScreenshot
-// already uses) so text stays legible and photo boxes stay accurate —
-// sent whole, a tall enough image gets downscaled by the API to fit its
-// size budget, which for an extreme portrait aspect ratio can squash
-// small text into illegibility before Claude ever reads it.
-async function extractProfileFromScreenshot(file, app) {
-file = await ensureBrowserReadableImage(file);
+// Runs the band-plan -> vision -> photo-box pipeline for one already-
+// loaded source image. Split out so extractProfileFromScreenshot can run
+// it once per file when a profile was captured as several native-
+// resolution pieces instead of one long stitched screenshot -- some
+// phones' scroll-capture tools silently downscale a single very-tall
+// stitched capture to keep it under an internal size cap, discarding
+// detail no amount of banding downstream can recover; shorter, native-
+// resolution pieces avoid that at the source. Returns photoBoxes already
+// translated to whole-image fractions (dedup'd against this image's own
+// other bands), NOT yet cropped -- cropping needs to know which source
+// file each box belongs to, which only the caller has.
+async function extractProfileBandsFromFile(img, file, app) {
 const base64 = await fileToBase64(file);
 const mediaType = file.type || 'image/png';
-const dataUrl = `data:${mediaType};base64,${base64}`;
-// The text half is cached; the cropped photos are not, because they're
-// blobs that would bloat the cache and are cheap to re-cut from the image.
-const hash = await hashFile(file);
-const richCacheKind = `rich-v${PROFILE_SCHEMA_VERSION}`;
-const cachedText = await parseCacheGet(hash, richCacheKind);
-const quickCached = await parseCacheGet(hash, 'quick');
-// Reuse a better-evidenced date recorded by an earlier scan of this same
-// image, whichever pass found it.
-const captured = betterCaptureDate(
-betterCaptureDate(await captureDateOf(file), cachedText && cachedText.captured),
-quickCached && quickCached.captured,
-);
-const captureDate = (captured || {}).date || '';
-const img = await loadImage(dataUrl);
 
-let raw;
-if (cachedText) {
-raw = cachedText.result;
-} else {
 let bands = planBands(img.naturalWidth, img.naturalHeight, VISION_TIER_STANDARD);
 let parseModel = PROFILE_PARSE_MODEL;
 if (bands.length > 1) {
@@ -632,20 +614,80 @@ const bandMediaType = isBanded ? 'image/png' : mediaType;
 const { data } = await callVision(bandBase64, bandMediaType, profilePrompt(isBanded, app), PROFILE_MAX_TOKENS, parseModel, 'low');
 return data;
 }));
-const results = [];
+const textResults = [];
 const okBands = [];
 settled.forEach((r, i) => {
-if (r.status === 'fulfilled') { results.push(r.value); okBands.push(bands[i]); }
+if (r.status === 'fulfilled') { textResults.push(r.value); okBands.push(bands[i]); }
 else console.error(`Profile band ${i + 1}/${bands.length} failed:`, r.reason);
 });
-if (!results.length) throw settled[0].reason;
-raw = isBanded ? mergeProfileBandResults(results, okBands, img.naturalHeight) : results[0];
+if (!textResults.length) throw settled[0].reason;
+
+const photoBoxes = dedupePhotoBoxesByPosition(
+textResults.flatMap((r, i) => (Array.isArray(r.photoBoxes) ? r.photoBoxes : []).map((b) => ({
+x: b.x, y: (okBands[i].y0 + b.y * okBands[i].h) / img.naturalHeight, w: b.w, h: (b.h * okBands[i].h) / img.naturalHeight,
+}))),
+);
+return { textResults, photoBoxes };
+}
+
+// Screenshot(s) of ONE person's full profile page — richer fields,
+// possibly several photos. Accepts a single File or an array of them:
+// a profile is sometimes captured as two or three shorter, native-
+// resolution pieces rather than one long stitched screenshot (see
+// extractProfileBandsFromFile for why that's often better, not just
+// different). Each file's own long composite content is independently
+// sliced into overlapping bands (see planBands, same mechanism
+// extractMatchesFromScreenshot already uses) so text stays legible and
+// photo boxes stay accurate -- sent whole, a tall enough image gets
+// downscaled by the API to fit its size budget, which for an extreme
+// portrait aspect ratio can squash small text into illegibility before
+// Claude ever reads it.
+async function extractProfileFromScreenshot(files, app) {
+files = Array.isArray(files) ? files : [files];
+files = await Promise.all(files.map((f) => ensureBrowserReadableImage(f)));
+
+// The text half is cached; the cropped photos are not, because they're
+// blobs that would bloat the cache and are cheap to re-cut from the
+// image. The cache key joins every file's own hash -- for the common
+// single-file call this reduces to that one hash unchanged (nothing to
+// join), so existing single-screenshot cache entries keep working.
+const fileHashes = await Promise.all(files.map((f) => hashFile(f)));
+const hash = fileHashes.join('_');
+const richCacheKind = `rich-v${PROFILE_SCHEMA_VERSION}`;
+const cachedText = await parseCacheGet(hash, richCacheKind);
+const quickCached = await parseCacheGet(hash, 'quick');
+// Reuse a better-evidenced date recorded by an earlier scan of any of
+// these same images, whichever pass found it.
+let captured = betterCaptureDate(cachedText && cachedText.captured, quickCached && quickCached.captured);
+for (const f of files) captured = betterCaptureDate(await captureDateOf(f), captured);
+const captureDate = (captured || {}).date || '';
+
+const imgs = await Promise.all(files.map(async (f) => {
+const base64 = await fileToBase64(f);
+const mediaType = f.type || 'image/png';
+return loadImage(`data:${mediaType};base64,${base64}`);
+}));
+
+let raw;
+if (cachedText) {
+raw = cachedText.result;
+} else {
+const perFile = await Promise.all(files.map((f, i) => extractProfileBandsFromFile(imgs[i], f, app)));
+const allTextResults = perFile.flatMap((p) => p.textResults);
+// Each box remembers which source file it came from -- with more than
+// one file involved, x/y/w/h are only meaningful relative to that ONE
+// image, unlike bands within a single file's own image, which do
+// share one coordinate space (see mergeProfileBandResults).
+const photoBoxes = perFile.flatMap((p, fi) => p.photoBoxes.map((b) => ({ ...b, fileIndex: fi })));
+raw = { ...mergeProfileBandResults(allTextResults), photoBoxes };
 await parseCachePut(hash, richCacheKind, { result: raw, captured });
 }
 
 const photoBoxes = Array.isArray(raw.photoBoxes) ? raw.photoBoxes : [];
 const photoBlobs = [];
 for (const box of photoBoxes) {
+const img = imgs[box.fileIndex || 0];
+if (!img) continue;
 const blob = await cropThumbnailToBlob(img, box);
 if (blob) photoBlobs.push(blob);
 }

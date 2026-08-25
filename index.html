@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v155</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v156</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -332,6 +332,9 @@ Not built: comparing retailer prices or adding to a basket in two clicks. That w
 <input type="file" id="import-file-input" accept="image/*" style="display:none;">
 <label class="file-btn" for="import-profile-input" id="import-profile-label">Import profile screenshot(s) + parse</label>
 <input type="file" id="import-profile-input" accept="image/*" multiple style="display:none;">
+<label class="settings-note" style="display:flex;align-items:center;gap:6px;margin:0;cursor:pointer;" title="Tick this when the selected files are several native-resolution pieces of ONE profile (e.g. captured in halves to avoid a phone's scroll-capture tool downscaling one very long stitched screenshot), not separate people. Leave unticked (default) to import each selected file as its own person, as before.">
+<input type="checkbox" id="import-profile-combine"> Selected files are one profile, in pieces
+</label>
 </div>
 <div class="import-row">
 <select id="photo-target-input"><option value="">Add photos to&hellip;</option></select>

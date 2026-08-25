@@ -2057,8 +2057,21 @@ await queuePendingImport({ candidates, kind: 'matches', app: appHint, sourceLabe
 return { candidates, truncated };
 }
 
-// One full profile per file, same shape used by the manual "Import profile
-// screenshot(s)" input and by Capture Inbox's type-2 auto-route.
+// One person's name/label for a File or an array of Files (see
+// extractProfileFromScreenshot -- several files can be combined into one
+// profile when captured as native-resolution pieces rather than a single
+// long stitched screenshot).
+function screenshotSourceLabel(fileOrFiles) {
+const files = Array.isArray(fileOrFiles) ? fileOrFiles : [fileOrFiles];
+if (files.length === 1) return files[0].name || 'profile screenshot';
+return `${files.length} screenshots (combined)`;
+}
+
+// One full profile per call, same shape used by the manual "Import profile
+// screenshot(s)" input and by Capture Inbox's type-2 auto-route. `file`
+// may be a single File, or an array when several native-resolution
+// pieces of the same profile are being combined (see
+// extractProfileFromScreenshot).
 async function importProfileScreenshotFile(file, appHint, statusEl) {
 if (statusEl) statusEl.textContent = 'Reading screenshot…';
 let candidate;
@@ -2073,10 +2086,11 @@ if (statusEl) statusEl.textContent = err instanceof MissingKeyError ? err.messag
 // the real reason instead of a generic not-found message.
 return { candidate: null, error: err };
 }
-recordImportRun('screenshotProfile', { scope: appHint || file.name || 'profile screenshot', count: 1 });
+const sourceLabel = screenshotSourceLabel(file);
+recordImportRun('screenshotProfile', { scope: appHint || sourceLabel, count: 1 });
 renderImportLastRun();
 if (statusEl) statusEl.textContent = `Found a profile — review below:`;
-await queuePendingImport({ candidates: [candidate], kind: 'profile', app: appHint, sourceLabel: file.name || 'profile screenshot' });
+await queuePendingImport({ candidates: [candidate], kind: 'profile', app: appHint, sourceLabel });
 return { candidate };
 }
 
@@ -2162,9 +2176,22 @@ e.target.value = '';
 document.getElementById('import-profile-input').addEventListener('change', async (e) => {
 const files = Array.from(e.target.files);
 if (files.length === 0) return;
+const combine = files.length > 1 && document.getElementById('import-profile-combine').checked;
+const appHint = screenshotAppHint();
+if (combine) {
+// Several native-resolution pieces of ONE profile (see
+// extractProfileFromScreenshot) -- one merged candidate, not one per
+// file the way the default multi-select below works.
+status.textContent = `Reading ${files.length} pieces of one profile…`;
+await withImportStatus(status, async () => {
+const { candidate } = await importProfileScreenshotFile(files, appHint, null);
+status.textContent = candidate ? 'Found a profile — review below:' : "Couldn't read those screenshots — see console.";
+});
+e.target.value = '';
+return;
+}
 status.textContent = `Reading ${files.length} profile screenshot${files.length === 1 ? '' : 's'}…`;
 await withImportStatus(status, async () => {
-const appHint = screenshotAppHint();
 let done = 0, failed = 0;
 for (const f of files) {
 const { candidate } = await importProfileScreenshotFile(f, appHint, null);
