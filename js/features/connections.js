@@ -8,6 +8,7 @@ resizeImageToBlob, classifyProfileUpload, cropToContentBlob, contentCropBounds, 
 } from '../utils.js';
 import { MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot } from '../ai.js';
 import { isSensitive, noCoverNote } from './photoalbums.js';
+import { nameKey, editDistance } from '../googlecontacts.js';
 
 // 'Backlog review' is an active triage bucket (see the "Backlog review
 // 180+" button below), not a resolved outcome -- it's excluded from
@@ -2125,16 +2126,28 @@ if (!candidateList) return;
 candidateList.innerHTML = data.pendingImports.map((p) => {
 const isProfile = p.kind === 'profile';
 const rows = p.candidates.map((cand, idx) => {
-const candNorm = foldDiacritics(String(cand.name || '').toLowerCase()).trim();
-const matches = candNorm ? data.connections.filter((c) => {
-const cNorm = foldDiacritics(String(c.name || '').toLowerCase()).trim();
-// Exact match, or a first-name-only extraction ("Alena") against a
-// fuller stored name ("Alena Ovchar") in either direction -- a
-// screenshot rarely has a surname, so requiring exact equality here
-// meant a genuinely-existing connection with a fuller name was never
-// even offered as a match candidate, only ever reachable via "add as
-// new" and manual cleanup after.
-return cNorm === candNorm || cNorm.startsWith(candNorm + ' ') || candNorm.startsWith(cNorm + ' ');
+// nameKey (already used for Google Contacts matching) folds diacritics
+// and transliterates Cyrillic, but that alone doesn't catch two
+// different Latin transliterations of the same Cyrillic name -- e.g.
+// Bumble's "Alena" vs a Ukrainian-convention "Alona" for Альона. The
+// edit-distance tier below is the same loose-match tolerance already
+// proven for that in widerNameCandidates.
+const candKey = nameKey(cand.name);
+const candFirst = candKey.split(' ')[0];
+const matches = candKey ? data.connections.filter((c) => {
+const cKey = nameKey(c.name);
+if (!cKey) return false;
+if (cKey === candKey) return true;
+// First-name-only extraction ("Alena") against a fuller stored name
+// ("Alena Ovchar") in either direction -- a screenshot rarely has a
+// surname, so requiring exact equality here meant a genuinely-existing
+// connection with a fuller name was never even offered as a match
+// candidate, only ever reachable via "add as new" and manual cleanup.
+if (cKey.startsWith(candKey + ' ') || candKey.startsWith(cKey + ' ')) return true;
+// Small spelling/transliteration drift on the first name alone.
+const cFirst = cKey.split(' ')[0];
+if (candFirst.length >= 4 && cFirst.length >= 4 && editDistance(candFirst, cFirst, 2) <= 2) return true;
+return false;
 }) : [];
 const extra = isProfile
 ? [cand.age, cand.height, cand.location, cand.job, cand.education, (cand.languages || []).join('/'), cand.bio].filter(Boolean).join(' · ')
