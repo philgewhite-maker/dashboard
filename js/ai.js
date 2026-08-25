@@ -275,7 +275,7 @@ const PROFILE_PARSE_MODEL = 'claude-sonnet-5';
 // re-uploading the same screenshot twice after adding new fields to the
 // prompt kept returning the pre-change result with no error or indication
 // why nothing was different.
-const PROFILE_SCHEMA_VERSION = 9;
+const PROFILE_SCHEMA_VERSION = 10;
 
 // A vision model estimating bounding-box coordinates has no pixel grid to
 // anchor against, so a raw absolute-position guess drifts the further down
@@ -300,16 +300,22 @@ const PROFILE_SCHEMA_VERSION = 9;
 // resolution, so bands are only as tall as they can be without triggering
 // any server-side downscale, rather than a single guessed constant.
 //
-// Set to the high-resolution tier (2576px edge / 4784 tokens), not the
-// standard tier (1568/1568) used above -- the docs say that tier applies
-// automatically, no opt-in, to "Claude 4.7 and later models", and Sonnet
-// 5 is later than 4.7 in Anthropic's own version line (4.6 -> 4.7 -> 4.8
-// -> 5). Not 100% certain from the docs alone (they name it by version,
-// not by "Sonnet 5" explicitly) -- if a future real screenshot comes back
-// garbled the same way the Jenra one did, that's the signal this guess
-// was wrong and these two constants should drop back to 1568/1568.
-const VISION_LONG_EDGE = 2576;
-const VISION_MAX_TOKENS = 4784;
+// Standard tier (1568px edge / 1568 tokens), not the high-resolution
+// tier (2576/4784). Briefly tried the high-res numbers on the theory
+// that "Claude 4.7 and later models" (the docs' cutoff) would include
+// Sonnet 5 by release order -- reverted after checking Sonnet 5's own
+// changelog page directly: it explicitly bills itself as a drop-in
+// upgrade for Sonnet 4.6 "with three behavior changes" (adaptive
+// thinking default, extended thinking removed, sampling params
+// rejected) and states the page "summarizes everything new at launch."
+// No vision/resolution change is mentioned anywhere on it, and Sonnet
+// 4.6 predates the numeric "4.7" cutoff, so Sonnet 4.6 -- and therefore,
+// by inheritance, Sonnet 5 -- is standard tier. The "4.7 and later"
+// phrase in the vision docs is a per-family version cutoff at the point
+// high-res was introduced, not a cross-family chronological one; Sonnet
+// never had a "4.7", it jumped straight from 4.6 to 5.
+const VISION_LONG_EDGE = 1568;
+const VISION_MAX_TOKENS = 1568;
 const VISION_PATCH = 28;
 function safeBandHeight(width) {
 const patchesW = Math.max(1, Math.ceil(width / VISION_PATCH));
