@@ -263,9 +263,9 @@ const PROFILE_MAX_TOKENS = 3000;
 // Opus-tier reasoning, and Haiku undersells accuracy on the nuanced bits
 // (height written as "5'7\"" vs "170cm", a bio that needs summarising).
 // Sonnet 5 is the deliberate middle tier for this job. Now banded for long
-// profile screenshots (see BAND_TARGET_HEIGHT below), so this runs more
-// than once per import -- worth pricing right, not just inheriting the
-// user's chosen default.
+// profile screenshots (see safeBandHeight below), so this runs more than
+// once per import -- worth pricing right, not just inheriting the user's
+// chosen default.
 const PROFILE_PARSE_MODEL = 'claude-sonnet-5';
 // Bumped whenever profilePrompt()'s requested fields change. The rich-parse
 // cache is keyed on this alongside the image hash -- without it, re-parsing
@@ -275,25 +275,50 @@ const PROFILE_PARSE_MODEL = 'claude-sonnet-5';
 // re-uploading the same screenshot twice after adding new fields to the
 // prompt kept returning the pre-change result with no error or indication
 // why nothing was different.
-const PROFILE_SCHEMA_VERSION = 7;
+const PROFILE_SCHEMA_VERSION = 8;
 
 // A vision model estimating bounding-box coordinates has no pixel grid to
 // anchor against, so a raw absolute-position guess drifts the further down
 // a long image it's looking (observed: roughly half an avatar's diameter
 // off by ~26 rows into a long Tinder screenshot). The main fix is in the
 // prompt below — anchoring each avatar box to that row's name text instead
-// of guessing an absolute position. Banding is a secondary safety net, not
-// the primary fix, so the threshold is set high (most real screenshots
-// never hit it) rather than aggressively slicing every long list.
-const BAND_TARGET_HEIGHT = 4000;
-// Widened from 220 -- that was sized for avatar-row drift on matches
-// lists, but a profile's bio/prompt-answer text widget is taller than an
-// avatar row (often 300-500px). A widget straddling the boundary without
-// fitting fully inside the overlap gets a partial view in BOTH adjacent
-// bands, and each now correctly declines to guess-complete a partial read
-// (see profilePrompt's isBand text-skip instruction) -- so instead of a
-// duplicate, it goes missing from both. A wider overlap makes it more
-// likely any single widget lands fully inside the shared zone.
+// of guessing an absolute position. Banding is a secondary safety net,
+// but a band that's too tall carries its own accuracy cost -- see
+// safeBandHeight below.
+//
+// Confirmed live against Anthropic's current vision docs (2026-08-25):
+// the standard resolution tier caps an image at a 1568px long edge AND a
+// 1568-visual-token budget (28x28px patches); anything past either limit
+// is silently downscaled server-side before the model reads it. A fixed
+// 4000px band height was well past that on the long edge alone -- for a
+// real 540-wide, 8712-tall profile screenshot (a "Jenra" Bumble profile,
+// root-caused from the actual file rather than guessed at), each 4000px
+// band was getting downscaled to roughly 210px wide, past where already-
+// small profile text stays legible. That screenshot came back with the
+// wrong age and almost every other field empty. safeBandHeight computes
+// the tallest band THIS image's actual width can carry at native
+// resolution, so bands are only as tall as they can be without triggering
+// any server-side downscale, rather than a single guessed constant.
+const VISION_LONG_EDGE = 1568;
+const VISION_MAX_TOKENS = 1568;
+const VISION_PATCH = 28;
+function safeBandHeight(width) {
+const patchesW = Math.max(1, Math.ceil(width / VISION_PATCH));
+const maxPatchesH = Math.max(1, Math.floor(VISION_MAX_TOKENS / patchesW));
+return Math.min(VISION_LONG_EDGE, maxPatchesH * VISION_PATCH);
+}
+// Widened from a fixed 220 -- that was sized for avatar-row drift on
+// matches lists, but a profile's bio/prompt-answer text widget is taller
+// than an avatar row (often 300-500px). A widget straddling the boundary
+// without fitting fully inside the overlap gets a partial view in BOTH
+// adjacent bands, and each now correctly declines to guess-complete a
+// partial read (see profilePrompt's isBand text-skip instruction) -- so
+// instead of a duplicate, it goes missing from both. A wider overlap
+// makes it more likely any single widget lands fully inside the shared
+// zone. Capped to a fraction of the actual band height in planBands
+// below, since bands are now often much shorter than the old fixed 4000px
+// -- an uncapped 500px overlap against, say, a 1120px band would waste
+// nearly half of it re-covering the same content.
 const BAND_OVERLAP = 500;
 
 function matchesPrompt(isBand, app) {
@@ -307,16 +332,21 @@ return `This is a screenshot of ${app ? `the ${app} app's` : 'a dating app'} mat
 
 // [{ y0, h }, ...] in source-image pixels. A single band covering the whole
 // image when it's already short, so typical screenshots take the same one
-// unsliced path as before.
-function planBands(totalHeight) {
-if (totalHeight <= BAND_TARGET_HEIGHT * 1.3) return [{ y0: 0, h: totalHeight }];
+// unsliced path as before. Band height is derived from the image's own
+// width (see safeBandHeight) rather than a fixed constant, so a band is
+// never taller than what THIS image's width can carry without the API
+// silently downscaling it.
+function planBands(totalWidth, totalHeight) {
+const targetHeight = safeBandHeight(totalWidth);
+if (totalHeight <= targetHeight * 1.3) return [{ y0: 0, h: totalHeight }];
+const overlap = Math.min(BAND_OVERLAP, Math.floor(targetHeight * 0.25));
 const bands = [];
 let y0 = 0;
 while (y0 < totalHeight) {
-const h = Math.min(BAND_TARGET_HEIGHT, totalHeight - y0);
+const h = Math.min(targetHeight, totalHeight - y0);
 bands.push({ y0, h });
 if (y0 + h >= totalHeight) break;
-y0 += BAND_TARGET_HEIGHT - BAND_OVERLAP;
+y0 += targetHeight - overlap;
 }
 return bands;
 }
@@ -358,7 +388,7 @@ const base64 = await fileToBase64(file);
 const mediaType = file.type || 'image/png';
 const dataUrl = `data:${mediaType};base64,${base64}`;
 const img = await loadImage(dataUrl);
-const bands = planBands(img.naturalHeight);
+const bands = planBands(img.naturalWidth, img.naturalHeight);
 const isBanded = bands.length > 1;
 
 const settled = await Promise.allSettled(bands.map(async (band) => {
@@ -550,7 +580,7 @@ let raw;
 if (cachedText) {
 raw = cachedText.result;
 } else {
-const bands = planBands(img.naturalHeight);
+const bands = planBands(img.naturalWidth, img.naturalHeight);
 const isBanded = bands.length > 1;
 const settled = await Promise.allSettled(bands.map(async (band) => {
 const bandBase64 = isBanded ? await sliceToBase64(img, band.y0, band.h) : base64;
