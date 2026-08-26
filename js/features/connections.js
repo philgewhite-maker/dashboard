@@ -2252,8 +2252,23 @@ e.target.value = '';
 document.getElementById('import-profile-input').addEventListener('change', async (e) => {
 const files = Array.from(e.target.files);
 if (files.length === 0) return;
-const combine = files.length > 1 && document.getElementById('import-profile-combine').checked;
 const appHint = screenshotAppHint();
+// The checkbox is a FORCE-combine override, not a required pre-condition
+// -- this file input's change event fires the instant the OS picker
+// closes, before any further clicks, so a box ticked AFTER selecting
+// files never takes effect for that run (confirmed real: "Found 1
+// profile (1 unreadable)" is the non-combine path's own message
+// template, proving that's what ran despite the box being ticked).
+// When it isn't ticked (or was ticked too late to matter), fall back to
+// the same deterministic auto-detect the push side (Capture Inbox) uses
+// -- looksLikeSameScreenshotPieces in utils.js -- so combining doesn't
+// depend on click order at all for the common case.
+let combine = files.length > 1 && document.getElementById('import-profile-combine').checked;
+if (files.length > 1 && !combine) {
+const { classifyProfileUpload, looksLikeSameScreenshotPieces } = await import('../utils.js');
+const classified = await Promise.all(files.map(async (f) => ({ file: f, ...(await classifyProfileUpload(f)) })));
+combine = classified.every((c) => c.isScreenshot) && looksLikeSameScreenshotPieces(classified);
+}
 if (combine) {
 // Several native-resolution pieces of ONE profile (see
 // extractProfileFromScreenshot) -- one merged candidate, not one per
