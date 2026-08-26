@@ -898,10 +898,18 @@ return Number.isNaN(ms) ? null : ms;
 // Screenshot's own comment on why that layer was removed once already).
 // Takes classifyProfileUpload's own already-loaded {img, bounds} per file
 // so this doesn't reload anything. All signals must agree:
-//  - content width matches within 5% -- contentCropBounds has already
-//    trimmed any letterbox/pillarbox margin (the "solid colour banding" a
-//    scroll-capture tool often pads with), so this compares real content
-//    width, not incidental canvas padding;
+//  - RAW pixel width matches exactly -- two pieces of the same profile,
+//    captured on the same device in the same sitting, share one screen
+//    width by construction, so this should never legitimately differ.
+//    Deliberately NOT the content-cropped width (naturalWidth * bounds.w):
+//    tried that first and it failed on two real, genuinely-matching
+//    screenshots (both 1080px raw) because contentCropBounds' letterbox
+//    trim -- built to strip incidental padding around a single photo, not
+//    to be a precision measurement -- landed at 972px for one and 1037px
+//    for the other purely from each image's own content differing near
+//    the edges. A ~6% content-width gap on an identical-resolution pair
+//    is normal noise for that algorithm, not a signal these are
+//    different-resolution captures;
 //  - filenames carry timestamps within 15 minutes of each other, when
 //    every file has one -- plausibly the same capture sitting, not
 //    coincidentally similar-looking screenshots from different days.
@@ -911,10 +919,8 @@ return Number.isNaN(ms) ? null : ms;
 // so this can afford to be conservative rather than guess.
 function looksLikeSameScreenshotPieces(pieces) {
 if (pieces.length < 2) return false;
-const widths = pieces.map((p) => p.img.naturalWidth * p.bounds.w);
-const maxW = Math.max(...widths);
-const minW = Math.min(...widths);
-if (maxW <= 0 || (maxW - minW) / maxW > 0.05) return false;
+const widths = pieces.map((p) => p.img.naturalWidth);
+if (widths.some((w) => w !== widths[0])) return false;
 const times = pieces.map((p) => screenshotTimeFromName(p.file.name)).filter((t) => t !== null);
 if (times.length === pieces.length && (Math.max(...times) - Math.min(...times)) > 15 * 60 * 1000) return false;
 return true;
