@@ -1776,18 +1776,16 @@ initImport();
 // the SAME ones both sides call -- Dating admin calls them directly,
 // Capture Inbox calls them through extractDatingScreenshot's cascade --
 // so a fix or capability added to one of these functions reaches both
-// sides for free. The risk is upstream of these functions: a decision
-// about WHICH files to pass them (e.g. "these several screenshots are one
-// profile, combine them" -- see the "Selected files are one profile, in
-// pieces" checkbox below, and extractDatingScreenshot's own deterministic
-// equivalent for push, looksLikeSameScreenshotPieces in utils.js) has to
-// be made and kept in sync on BOTH sides separately, since push has no
-// upfront checkbox to ask the user and pull has no batch of already-
-// landed files to pattern-match. That gap is exactly how a real profile
-// shared in two parts silently lost its second half's fields once
-// already -- when adding a similar capability, build the shared decision
-// as an exported, deterministic helper (not private inline logic) so
-// it's usable from either side, then wire it into both.
+// sides for free. The decision about WHICH files to pass them (e.g.
+// "these several screenshots are one profile, combine them") is answered
+// by ONE shared function both sides call -- screenshotsLookCombinable in
+// utils.js, used below by the "Selected files are one profile, in
+// pieces" checkbox's auto-detect fallback AND by extractDatingScreenshot
+// for push. That decision used to be duplicated as near-identical inline
+// glue in both places instead (caught directly, not guessed at, when the
+// user asked "common piece of logic?" and it turned out not to be) --
+// when extending this decision with a new signal, add it inside
+// screenshotsLookCombinable itself, not in a caller.
 async function withImportStatus(statusEl, fn) {
 try {
 await fn();
@@ -2212,9 +2210,8 @@ for (const f of files) {
 const matchesResult = await importMatchesListFile(f, appHint, statusEl);
 if (matchesResult.candidates.length > 0) return { kind: 'matches', consumedFiles: [f], ...matchesResult };
 }
-const { classifyProfileUpload, looksLikeSameScreenshotPieces } = await import('../utils.js');
-const classified = await Promise.all(files.map(async (f) => ({ file: f, ...(await classifyProfileUpload(f)) })));
-if (looksLikeSameScreenshotPieces(classified)) {
+const { screenshotsLookCombinable } = await import('../utils.js');
+if (await screenshotsLookCombinable(files)) {
 const profileResult = (extraFiles && extraFiles.length)
 ? await importProfileWithPhotosFile(files, appHint, extraFiles, statusEl)
 : await importProfileScreenshotFile(files, appHint, statusEl);
@@ -2260,14 +2257,14 @@ const appHint = screenshotAppHint();
 // profile (1 unreadable)" is the non-combine path's own message
 // template, proving that's what ran despite the box being ticked).
 // When it isn't ticked (or was ticked too late to matter), fall back to
-// the same deterministic auto-detect the push side (Capture Inbox) uses
-// -- looksLikeSameScreenshotPieces in utils.js -- so combining doesn't
-// depend on click order at all for the common case.
+// screenshotsLookCombinable -- the exact same shared decision the push
+// side (Capture Inbox's extractDatingScreenshot) calls, not a separately
+// re-derived version of it -- so combining doesn't depend on click order
+// at all for the common case.
 let combine = files.length > 1 && document.getElementById('import-profile-combine').checked;
 if (files.length > 1 && !combine) {
-const { classifyProfileUpload, looksLikeSameScreenshotPieces } = await import('../utils.js');
-const classified = await Promise.all(files.map(async (f) => ({ file: f, ...(await classifyProfileUpload(f)) })));
-combine = classified.every((c) => c.isScreenshot) && looksLikeSameScreenshotPieces(classified);
+const { screenshotsLookCombinable } = await import('../utils.js');
+combine = await screenshotsLookCombinable(files);
 }
 if (combine) {
 // Several native-resolution pieces of ONE profile (see

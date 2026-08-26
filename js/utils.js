@@ -920,6 +920,22 @@ if (times.length === pieces.length && (Math.max(...times) - Math.min(...times)) 
 return true;
 }
 
+// The actual "should these raw Files be combined into one profile"
+// decision, wrapping classifyProfileUpload + looksLikeSameScreenshot
+// Pieces together. PUSH/PULL CONSISTENCY: both extractDatingScreenshot
+// (connections.js, push) and Dating admin's own file-picker handler
+// (connections.js, pull) call this exact function rather than each
+// independently classifying files and invoking the heuristic -- when
+// this was first written, the classify-then-check glue was duplicated
+// near-verbatim in both places instead, which the user caught and asked
+// about directly. If the combinability decision ever needs a new
+// signal, add it here once, not in every caller.
+async function screenshotsLookCombinable(files) {
+if (files.length < 2) return false;
+const classified = await Promise.all(files.map(async (f) => ({ file: f, ...(await classifyProfileUpload(f)) })));
+return classified.every((c) => c.isScreenshot) && looksLikeSameScreenshotPieces(classified);
+}
+
 export {
 todayStr, daysAgoStr, last7Dates, uid, daysSince, daysUntil, foldDiacritics,
 escapeHtml, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, buildFlagMatcher, applyFlagMatcher, knownCityMap, scrollAndFlash, bindForm,
@@ -927,5 +943,5 @@ findMentions, COUNTRY_NAME_TO_NATIONALITY,
 resizeImageToBlob, fileToBase64, loadImage, cropThumbnailToBlob,
 hashFile, captureDateOf, betterCaptureDate, dateFromFilename,
 ensureBrowserReadableImage, setPhotoFallback,
-contentCropBounds, cropToContentBlob, classifyProfileUpload, looksLikeSameScreenshotPieces,
+contentCropBounds, cropToContentBlob, classifyProfileUpload, looksLikeSameScreenshotPieces, screenshotsLookCombinable,
 };
