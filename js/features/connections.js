@@ -1654,6 +1654,7 @@ render();
 }
 
 function initConnectionForm() {
+bindConnPickers();
 fillAppSelect('conn-app-input');
 fillAppSelect('import-app-input');
 bindForm('connection-form', () => {
@@ -1684,19 +1685,15 @@ setLocalSetting('showArchivedFaded', showArchivedFaded);
 renderConnections();
 });
 document.getElementById('merge-admin-btn').addEventListener('click', () => {
-const targetSel = document.getElementById('merge-target-input');
-const sourceSel = document.getElementById('merge-source-input');
 const status = document.getElementById('merge-admin-status');
-const target = data.connections.find((x) => x.id === targetSel.value);
-const source = data.connections.find((x) => x.id === sourceSel.value);
+const target = data.connections.find((x) => x.id === document.getElementById('merge-target-input').value);
+const source = data.connections.find((x) => x.id === document.getElementById('merge-source-input').value);
 if (!target || !source) { status.textContent = 'Pick both a profile to keep and one to merge in.'; return; }
 if (target.id === source.id) { status.textContent = "Can't merge a profile into itself."; return; }
 if (!confirm(`Merge "${source.name}" into "${target.name}"?\n\nEverything from "${source.name}" — photos, notes, ratings, tags, to-dos — is folded in, keeping "${target.name}"'s values wherever both have one. "${source.name}" is then removed.\n\nThis can't be undone.`)) return;
 mergeConnectionInto(target, source);
 data.connections = data.connections.filter((x) => x.id !== source.id);
 status.textContent = `Merged "${source.name}" into "${target.name}".`;
-targetSel.value = '';
-sourceSel.value = '';
 renderConnections();
 renderOverviewRef();
 queueSave();
@@ -1903,7 +1900,7 @@ ${matchOptions}
 <input type="radio" name="${groupName}" value="pick" data-decision="${idx}">
 <span class="pending-option-info">Different existing connection&hellip;</span>
 </label>
-<select class="decision-pick" data-pending-pick="${idx}" hidden><option value="">Choose&hellip;</option>${connectionOptionsHtml()}</select>
+<div class="decision-pick" data-pending-pick="${idx}" hidden>${connectionPickerHtml(`decision-pick-${pendingId}-${idx}`, 'Choose&hellip;')}</div>
 <label class="pending-option">
 <input type="radio" name="${groupName}" value="new" data-decision="${idx}">
 <span class="pending-option-info">Different person &mdash; add as new</span>
@@ -1923,17 +1920,156 @@ ${avatarHtml(photoId, name, 'sm')}
 </label>`;
 }
 
-// Keeps the "Add photos to…" picker in step with the connection list. The
-// import box sits outside #connections-list so it isn't rebuilt by
-// renderConnections' innerHTML assignment — it has to be refreshed here.
-// Shared by every "pick a connection" dropdown in Dating admin (photo
-// target, both merge slots) -- built once per render rather than once per
-// select, and each select keeps its own previous value independently.
-function connectionOptionsHtml() {
-return [...data.connections]
-.sort((a, b) => a.name.localeCompare(b.name))
-.map((c) => `<option value="${c.id}">${escapeHtml(c.name)}${displayAge(c) ? ', ' + escapeHtml(displayAge(c)) : ''}${c.app ? ' — ' + escapeHtml(c.app) : ''}</option>`)
-.join('');
+// A plain <option> can never show a picture -- no browser renders an <img>
+// inside one -- so every native <select> that lists connections left
+// same-named duplicates (two separate "Julia, 43, Bumble" people, say)
+// indistinguishable until you actually picked one and read the result. This
+// custom trigger+panel widget replaces every one of those <select>s with a
+// small avatar-plus-name row per connection, search-filterable, while
+// keeping the exact same read/write contract a <select> had: a hidden
+// <input id="${id}"> holds the chosen connection id (or '' for none), so
+// every existing `document.getElementById(id).value` call elsewhere in this
+// file and in captureinbox.js keeps working unchanged.
+//
+// Built once per (re)render rather than incrementally patched -- same
+// "just rebuild the HTML" idiom the rest of this app uses for lists that
+// change size, simpler than diffing rows in and out by hand.
+function connectionPickerRowHtml(c) {
+const caption = [c.app, displayAge(c)].filter(Boolean).join(' · ');
+return `<button type="button" class="conn-picker-row" data-conn-picker-value="${escapeHtml(c.id)}" data-conn-picker-search="${escapeHtml(foldDiacritics(c.name).toLowerCase())}">
+${avatarHtml(c.photoId, c.name, 'sm')}
+<span class="conn-picker-row-info"><strong>${escapeHtml(c.name)}</strong>${caption ? `<span class="compare-caption">${escapeHtml(caption)}</span>` : ''}</span>
+</button>`;
+}
+
+// Used only by Capture Inbox's "Send selected to…" picker, which needs a
+// way to create the person on the spot (see createBlankConnection below) --
+// baked in as an ordinary-looking row rather than a separate control so it
+// sorts and filters right alongside everyone else.
+function connectionPickerNewRowHtml() {
+return `<button type="button" class="conn-picker-row" data-conn-picker-value="__new__" data-conn-picker-search="add new connection">
+<span class="avatar sm conn-picker-plus">+</span>
+<span class="conn-picker-row-info"><strong>Add new connection</strong></span>
+</button>`;
+}
+
+function connectionPickerListHtml(extraRowsHtml) {
+const rows = [...data.connections].sort((a, b) => a.name.localeCompare(b.name)).map(connectionPickerRowHtml).join('');
+return (extraRowsHtml || '') + rows;
+}
+
+function connectionPickerHtml(id, placeholder, extraRowsHtml) {
+return `<div class="conn-picker" data-conn-picker-id="${id}" data-conn-picker-placeholder="${placeholder}">
+<input type="hidden" id="${id}" value="">
+<button type="button" class="conn-picker-trigger" data-conn-picker-trigger>${placeholder}</button>
+<div class="conn-picker-panel" hidden>
+<input type="text" class="conn-picker-search" placeholder="Search&hellip;" autocomplete="off">
+<div class="conn-picker-list" data-conn-picker-list>${connectionPickerListHtml(extraRowsHtml)}</div>
+</div>
+</div>`;
+}
+
+// Rebuilds one of the three static Dating-admin pickers (list content +
+// previously-chosen value, if it's still valid) -- the "keeps the list in
+// step with data.connections" job fillConnectionSelect used to do for a
+// <select>. First call finds the empty "#${id}-mount" div index.html
+// declares and fills it in; every later call finds the widget that first
+// call created (by its own data-conn-picker-id) and replaces it wholesale.
+// Nothing holds a reference into it beyond this call -- every interaction
+// is delegated (see bindConnPickers) -- so a freshly created node behaves
+// identically to the one it replaced.
+function renderConnPicker(id, placeholder, extraRowsHtml) {
+const existing = document.querySelector(`[data-conn-picker-id="${id}"]`);
+const mount = existing ? null : document.getElementById(`${id}-mount`);
+if (!existing && !mount) return;
+const previous = document.getElementById(id)?.value || '';
+const html = connectionPickerHtml(id, placeholder, extraRowsHtml);
+if (existing) existing.outerHTML = html; else mount.innerHTML = html;
+const stillValid = previous === '__new__' || data.connections.some((c) => c.id === previous);
+if (previous && stillValid) setConnPickerValue(id, previous, { silent: true });
+const list = document.querySelector(`[data-conn-picker-id="${id}"] [data-conn-picker-list]`);
+if (list) hydratePhotoBackgrounds(list);
+}
+
+// Sets a picker's value both places it lives -- the hidden input (what
+// every .value reader actually sees) and the trigger button's own label
+// (what the user sees instead of an <option> flashing by) -- and fires a
+// real 'change' event so anything that ever wants to listen for one still
+// can, same as a <select> would. { silent: true } skips that event for the
+// restore-after-rebuild path in renderConnPicker, where nothing actually
+// changed.
+function setConnPickerValue(id, value, { silent } = {}) {
+const wrap = document.querySelector(`[data-conn-picker-id="${id}"]`);
+if (!wrap) return;
+const hidden = document.getElementById(id);
+const trigger = wrap.querySelector('[data-conn-picker-trigger]');
+hidden.value = value || '';
+if (!value) {
+trigger.innerHTML = wrap.dataset.connPickerPlaceholder;
+} else if (value === '__new__') {
+trigger.textContent = '+ Add new connection';
+} else {
+const c = data.connections.find((x) => x.id === value);
+if (c) {
+trigger.innerHTML = `${avatarHtml(c.photoId, c.name, 'sm')}<span>${escapeHtml(c.name)}</span>`;
+hydratePhotoBackgrounds(trigger);
+} else {
+trigger.innerHTML = wrap.dataset.connPickerPlaceholder;
+hidden.value = '';
+}
+}
+if (!silent) hidden.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+// Delegated once on document, exactly like the candidate-list click
+// handler above -- every conn-picker is rebuilt wholesale on data changes
+// (renderConnPicker, or a full card re-render), so binding to individual
+// elements would mean re-binding after every single one.
+let connPickersBound = false;
+function bindConnPickers() {
+if (connPickersBound) return;
+connPickersBound = true;
+document.addEventListener('click', (e) => {
+const trigger = e.target.closest('[data-conn-picker-trigger]');
+if (trigger) {
+const wrap = trigger.closest('.conn-picker');
+const panel = wrap.querySelector('.conn-picker-panel');
+const wasOpen = !panel.hidden;
+document.querySelectorAll('.conn-picker-panel').forEach((p) => { p.hidden = true; });
+panel.hidden = wasOpen;
+if (!panel.hidden) {
+const search = panel.querySelector('.conn-picker-search');
+search.value = '';
+panel.querySelectorAll('.conn-picker-row').forEach((r) => { r.hidden = false; });
+search.focus();
+}
+return;
+}
+const row = e.target.closest('.conn-picker-row');
+if (row) {
+const wrap = row.closest('.conn-picker');
+setConnPickerValue(wrap.dataset.connPickerId, row.dataset.connPickerValue);
+wrap.querySelector('.conn-picker-panel').hidden = true;
+return;
+}
+// Click landed outside every open panel -- close them all.
+if (!e.target.closest('.conn-picker-panel')) {
+document.querySelectorAll('.conn-picker-panel').forEach((p) => { p.hidden = true; });
+}
+});
+document.addEventListener('input', (e) => {
+if (!e.target.classList.contains('conn-picker-search')) return;
+const query = foldDiacritics(e.target.value).toLowerCase().trim();
+const list = e.target.closest('.conn-picker-panel').querySelector('.conn-picker-list');
+list.querySelectorAll('.conn-picker-row').forEach((r) => {
+r.hidden = query.length > 0 && !r.dataset.connPickerSearch.includes(query);
+});
+});
+document.addEventListener('keydown', (e) => {
+if (e.key !== 'Escape') return;
+const openPanel = document.querySelector('.conn-picker-panel:not([hidden])');
+if (openPanel) openPanel.hidden = true;
+});
 }
 
 // Lets Capture Inbox's "Send selected to…" picker create the person on the
@@ -1953,23 +2089,15 @@ renderOverviewRef();
 return conn;
 }
 
-function fillConnectionSelect(id, placeholder) {
-const select = document.getElementById(id);
-if (!select) return;
-const previous = select.value;
-select.innerHTML = `<option value="">${placeholder}</option>` + connectionOptionsHtml();
-if ([...select.options].some((o) => o.value === previous)) select.value = previous;
-}
-
 function refreshPhotoTargets() {
-fillConnectionSelect('photo-target-input', 'Add photos to&hellip;');
+renderConnPicker('photo-target-input', 'Add photos to&hellip;');
 // Was per-card before (one "everyone else" dropdown rendered inside EVERY
 // connection's Details) -- with a few hundred connections that's a few
 // hundred times a few hundred options, most of them inside a closed
 // <details> nobody was looking at. Two flat pickers here cost the same
 // list built twice, not once per card.
-fillConnectionSelect('merge-target-input', 'Keep this one&hellip;');
-fillConnectionSelect('merge-source-input', 'Merge this one in&hellip;');
+renderConnPicker('merge-target-input', 'Keep this one&hellip;');
+renderConnPicker('merge-source-input', 'Merge this one in&hellip;');
 }
 
 // Stores photos straight onto a connection with no API call. Most profile
@@ -2378,7 +2506,7 @@ const idx = radio.dataset.decision;
 const cand = pending.candidates[parseInt(idx, 10)];
 let value = radio.value;
 if (value === 'pick') {
-const picker = card.querySelector(`select[data-pending-pick="${idx}"]`);
+const picker = card.querySelector(`[data-pending-pick="${idx}"] input[type=hidden]`);
 value = picker && picker.value ? `update:${picker.value}` : 'skip';
 }
 if (value.startsWith('update:')) {
@@ -2688,7 +2816,7 @@ initSensitiveFields, setShowSensitiveFields, visibleTagFields,
 filterByEmptyField, filterBySearch, filterByIds, clearFilters,
 STAGE_RANK, setContactPicker, phoneWithFlagHtml, initRatingCategoriesSettings,
 initFlagRulesSettings, unionInto, initHideArchivedFaded,
-connectionOptionsHtml, applyDirectProfileUpload, applyProfileFieldsToConnection,
+connectionPickerHtml, connectionPickerNewRowHtml, bindConnPickers, applyDirectProfileUpload, applyProfileFieldsToConnection,
 importMatchesListFile, importProfileScreenshotFile, importProfileWithPhotosFile, extractDatingScreenshot, renderPendingImports,
 createBlankConnection,
 };

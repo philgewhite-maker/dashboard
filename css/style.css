@@ -1047,6 +1047,51 @@ gap:1px;
 font-size:13px;
 }
 .zoomable-avatar{cursor:zoom-in;}
+
+/* Custom "pick a connection" widget -- replaces every plain <select> that
+   lists connections, since a native <option> can never show a picture (no
+   browser renders an <img> inside one). Trigger button looks like the
+   <select>s it replaces; the panel is the same avatar-row idiom as
+   .pending-option above, just search-filterable and reusable anywhere a
+   connection needs picking. See connectionPickerHtml() in connections.js. */
+.conn-picker{position:relative;display:inline-flex;min-width:0;vertical-align:middle;}
+.conn-picker-trigger{
+display:flex;align-items:center;gap:6px;
+font-family:'Inter',sans-serif;font-size:13px;
+border:1px solid var(--line);border-radius:7px;
+padding:6px 9px;background:var(--paper);color:var(--ink);
+cursor:pointer;max-width:220px;text-align:left;
+}
+.conn-picker-trigger span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.conn-picker-panel{
+position:absolute;top:100%;left:0;z-index:20;
+margin-top:4px;width:260px;max-width:80vw;
+background:var(--card);border:1px solid var(--line);border-radius:9px;
+box-shadow:0 8px 24px rgba(0,0,0,.18);padding:6px;
+display:flex;flex-direction:column;gap:6px;
+}
+/* .conn-picker-panel's own display:flex above has equal specificity to the
+   browser's built-in [hidden]{display:none} rule and would otherwise win
+   (author styles beat the UA stylesheet regardless of the tie) -- same fix
+   already needed once before for .tinder-edit-details, see its own comment. */
+.conn-picker-panel[hidden]{display:none;}
+.conn-picker-search{
+font-family:'Inter',sans-serif;font-size:13px;
+border:1px solid var(--line);border-radius:6px;
+padding:6px 8px;background:var(--paper);color:var(--ink);
+}
+.conn-picker-list{display:flex;flex-direction:column;gap:1px;max-height:260px;overflow-y:auto;}
+.conn-picker-row{
+display:flex;align-items:center;gap:8px;
+padding:5px 6px;border-radius:6px;border:none;background:none;
+font-family:'Inter',sans-serif;font-size:13px;color:var(--ink);
+cursor:pointer;text-align:left;width:100%;
+}
+.conn-picker-row:hover{background:var(--rose-bg);}
+.conn-picker-row[hidden]{display:none;}
+.conn-picker-row-info{display:flex;flex-direction:column;gap:1px;overflow:hidden;}
+.conn-picker-row-info strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.conn-picker-plus{background:var(--rose-bg);color:var(--rose);font-weight:700;font-size:16px;}
 .decision-pick{
 font-family:'Inter',sans-serif;
 font-size:12px;
@@ -2308,6 +2353,9 @@ color:var(--muted);
 /* File pickers and their dropdowns stack. */
 .import-row{flex-direction:column;align-items:stretch;}
 .import-row select, .import-row .file-btn{width:100%;text-align:center;}
+.import-row .conn-picker, .merge-row .conn-picker{width:100%;}
+.import-row .conn-picker-trigger, .merge-row .conn-picker-trigger{width:100%;max-width:none;justify-content:center;}
+.import-row .conn-picker-panel, .merge-row .conn-picker-panel{width:100%;max-width:none;}
 
 /* Add-forms are a column of full-width fields on a phone. */
 .add-form{flex-direction:column;align-items:stretch;}

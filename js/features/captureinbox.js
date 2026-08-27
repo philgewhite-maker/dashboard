@@ -321,7 +321,7 @@ ${fileItems.map((it) => `<div class="attach-row">
 <div class="alloc-controls">
 ${photoItems.length ? `<span class="settings-note" data-inbox-selected-count="${b.id}">${selectedCount} of ${photoItems.length} selected</span>
 ${photoItems.length > 1 ? `<button class="todo-add-btn" type="button" data-inbox-select-all="${b.id}">${selectedCount === photoItems.length ? 'Select none' : 'Select all'}</button>` : ''}
-<select data-inbox-dating-select="${b.id}"><option value="">Send selected to&hellip;</option></select>
+<span data-inbox-dating-select-mount="${b.id}"></span>
 <input type="text" autocomplete="off" data-inbox-new-name="${b.id}" placeholder="New connection's name" hidden>
 <button class="todo-add-btn" type="button" data-inbox-send-dating="${b.id}">Send</button>
 <button class="todo-add-btn" type="button" data-inbox-extract-wellness="${b.id}" title="For an HRV, AGEs index, or Antioxidant index screenshot from Samsung Health">Extract wellness data</button>
@@ -347,17 +347,17 @@ el.innerHTML = data.captureInbox.length
 ? data.captureInbox.map(batchCardHtml).join('')
 : '<div class="empty">Nothing captured. Share files from your phone, or use "+ Capture files" below.</div>';
 hydratePhotoBackgrounds(el);
-// The connection picker's option list needs the live Dating module, kept
-// as a dynamic import so this module never has to load connections.js
-// (and everything it pulls in) up front for a panel most sessions won't
-// touch.
+// The connection picker's row list needs the live Dating module, kept as a
+// dynamic import so this module never has to load connections.js (and
+// everything it pulls in) up front for a panel most sessions won't touch.
 if (data.captureInbox.some((b) => b.items.some((it) => it.kind === 'photo'))) {
-import('./connections.js').then(({ connectionOptionsHtml }) => {
-el.querySelectorAll('[data-inbox-dating-select]').forEach((sel) => {
-const previous = sel.value;
-sel.innerHTML = '<option value="">Send selected to&hellip;</option><option value="__new__">+ Add new connection</option>' + connectionOptionsHtml();
-if ([...sel.options].some((o) => o.value === previous)) sel.value = previous;
+import('./connections.js').then(({ connectionPickerHtml, connectionPickerNewRowHtml, bindConnPickers }) => {
+bindConnPickers();
+el.querySelectorAll('[data-inbox-dating-select-mount]').forEach((mount) => {
+const bId = mount.dataset.inboxDatingSelectMount;
+mount.innerHTML = connectionPickerHtml(`inbox-dating-select-${bId}`, 'Send selected to&hellip;', connectionPickerNewRowHtml());
 });
+hydratePhotoBackgrounds(el);
 });
 }
 bindCaptureInbox(el);
@@ -421,10 +421,16 @@ renderCaptureInbox();
 // Reveals the name field only once "+ Add new connection" is actually
 // picked -- keeps the common case (an existing connection already in the
 // list) exactly as uncluttered as it was before this option existed.
-root.querySelectorAll('[data-inbox-dating-select]').forEach((sel) => {
-sel.addEventListener('change', () => {
-const nameInput = root.querySelector(`[data-inbox-new-name="${sel.dataset.inboxDatingSelect}"]`);
-if (nameInput) nameInput.hidden = sel.value !== '__new__';
+// Bound to the stable mount span, not the hidden input inside it -- the
+// picker's markup lands asynchronously (see renderCaptureInbox's dynamic
+// import above), so the input doesn't exist yet at bind time here. 'change'
+// bubbles up from it once it does, same as it would from a plain <select>.
+root.querySelectorAll('[data-inbox-dating-select-mount]').forEach((mount) => {
+const bId = mount.dataset.inboxDatingSelectMount;
+mount.addEventListener('change', () => {
+const hidden = document.getElementById(`inbox-dating-select-${bId}`);
+const nameInput = root.querySelector(`[data-inbox-new-name="${bId}"]`);
+if (nameInput && hidden) nameInput.hidden = hidden.value !== '__new__';
 });
 });
 
@@ -433,7 +439,7 @@ btn.addEventListener('click', async () => {
 const batch = data.captureInbox.find((b) => b.id === btn.dataset.inboxSendDating);
 if (!batch) return;
 const status = root.querySelector(`[data-inbox-status="${batch.id}"]`);
-const sel = root.querySelector(`[data-inbox-dating-select="${batch.id}"]`);
+const sel = document.getElementById(`inbox-dating-select-${batch.id}`);
 let connId = sel?.value;
 if (!connId) { if (status) status.textContent = 'Pick a connection first.'; return; }
 if (connId === '__new__') {

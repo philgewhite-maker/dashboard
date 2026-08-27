@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v161</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v162</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -337,7 +337,7 @@ Not built: comparing retailer prices or adding to a basket in two clicks. That w
 </label>
 </div>
 <div class="import-row">
-<select id="photo-target-input"><option value="">Add photos to&hellip;</option></select>
+<div id="photo-target-input-mount"></div>
 <label class="file-btn" for="photo-only-input" id="photo-only-label">Add photos, no parsing (free)</label>
 <input type="file" id="photo-only-input" accept="image/*" multiple style="display:none;">
 </div>
@@ -354,8 +354,8 @@ Not built: comparing retailer prices or adding to a basket in two clicks. That w
 </div>
 <div class="settings-note">Moved here from each connection's own card — two flat pickers instead of a full "everyone else" dropdown repeated on every card.</div>
 <div class="merge-row">
-<select id="merge-target-input"><option value="">Keep this one&hellip;</option></select>
-<select id="merge-source-input"><option value="">Merge this one in&hellip;</option></select>
+<div id="merge-target-input-mount"></div>
+<div id="merge-source-input-mount"></div>
 <button class="todo-add-btn" type="button" id="merge-admin-btn">Merge</button>
 </div>
 <div class="settings-note" id="merge-admin-status"></div>
