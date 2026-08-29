@@ -14,10 +14,13 @@ import { nameKey, editDistance } from '../googlecontacts.js';
 // 180+" button below), not a resolved outcome -- it's excluded from
 // isDormantStage() on purpose, so it still gets ordinary reach-out
 // treatment (tune it via the per-stage Reach-out timing settings if it
-// should nag less than that). 'FriendZone' IS a resolved outcome --
-// grouped with Faded/Archived below.
-const CONN_STAGES = ['Superswiped', 'Matched', 'Chatting in app', 'Moved to WhatsApp', 'Moved to Telegram', 'Planning to call', 'Planning to meet', 'Arranged to meet', 'Met in person', 'Dating', 'Backlog review', 'FriendZone', 'Faded', 'Archived'];
-const STAGE_RANK = { Dating: 10, 'Met in person': 9, 'Arranged to meet': 8, 'Planning to meet': 7, 'Planning to call': 6, 'Moved to Telegram': 5, 'Moved to WhatsApp': 4, 'Chatting in app': 3, Matched: 2, Superswiped: 1, 'Backlog review': 0, FriendZone: 0, Faded: 0, Archived: 0 };
+// should nag less than that). 'FriendZone', 'Faded', 'Archived' and 'Got
+// Away' ARE resolved outcomes -- grouped together below, and 'Got Away'
+// additionally joins HIDDEN_BY_DEFAULT_STAGES further down, same as
+// Faded/Archived (someone who slipped away is exactly the kind of
+// resolved match that shouldn't keep cluttering the default browse).
+const CONN_STAGES = ['Superswiped', 'Matched', 'Chatting in app', 'Moved to WhatsApp', 'Moved to Telegram', 'Planning to call', 'Planning to meet', 'Arranged to meet', 'Met in person', 'Dating', 'Backlog review', 'FriendZone', 'Faded', 'Archived', 'Got Away'];
+const STAGE_RANK = { Dating: 10, 'Met in person': 9, 'Arranged to meet': 8, 'Planning to meet': 7, 'Planning to call': 6, 'Moved to Telegram': 5, 'Moved to WhatsApp': 4, 'Chatting in app': 3, Matched: 2, Superswiped: 1, 'Backlog review': 0, FriendZone: 0, Faded: 0, Archived: 0, 'Got Away': 0 };
 // Where a connection came from. Rendered into every source dropdown from
 // here so the add form, the import picker, and the per-connection editor
 // can't drift apart.
@@ -53,7 +56,7 @@ const STAGE_ICONS = {
 Superswiped: '🌟', Matched: '🔗', 'Chatting in app': '💭',
 'Moved to WhatsApp': '💬', 'Moved to Telegram': '✈️',
 'Planning to call': '📞', 'Planning to meet': '🗓️', 'Arranged to meet': '📌',
-'Met in person': '🤝', Dating: '❤️', 'Backlog review': '📥', FriendZone: '🧑‍🤝‍🧑', Faded: '🌫️', Archived: '📦',
+'Met in person': '🤝', Dating: '❤️', 'Backlog review': '📥', FriendZone: '🧑‍🤝‍🧑', Faded: '🌫️', Archived: '📦', 'Got Away': '🎣',
 };
 
 // One icon per milestone value (see MILESTONE_SUGGESTIONS below) -- a
@@ -558,16 +561,16 @@ function thinProfileIds() {
 return data.connections.filter(isThinProfile).map((c) => c.id);
 }
 
-// Archived/Faded pile up over time and are rarely what anyone's browsing
-// for -- hidden from the default list view so the common case doesn't
-// render (and scroll past) every resolved match. Not a "filter mode" like
-// idFilter/emptyFieldFilter above: it's a base-view preference, so search
-// and the Overview stage chips both deliberately bypass it (see the `term`
-// handling in renderConnections) -- hiding them by default shouldn't also
-// make them unfindable by name or via "Archived (12)". Device-local, same
-// pattern as showSensitiveFields.
+// Archived/Faded/Got Away pile up over time and are rarely what anyone's
+// browsing for -- hidden from the default list view so the common case
+// doesn't render (and scroll past) every resolved match. Not a "filter
+// mode" like idFilter/emptyFieldFilter above: it's a base-view preference,
+// so search and the Overview stage chips both deliberately bypass it (see
+// the `term` handling in renderConnections) -- hiding them by default
+// shouldn't also make them unfindable by name or via "Archived (12)".
+// Device-local, same pattern as showSensitiveFields.
 let showArchivedFaded = false;
-const HIDDEN_BY_DEFAULT_STAGES = new Set(['Archived', 'Faded']);
+const HIDDEN_BY_DEFAULT_STAGES = new Set(['Archived', 'Faded', 'Got Away']);
 async function initHideArchivedFaded() {
 const settings = await getLocalSettings();
 showArchivedFaded = !!settings.showArchivedFaded;
@@ -707,7 +710,7 @@ thinBtn.classList.toggle('active', idFilter && idFilter.label === 'Thin profiles
 const archivedBtn = document.getElementById('conn-show-archived-btn');
 if (archivedBtn) {
 const hiddenCount = archivedFadedIds().length;
-archivedBtn.textContent = showArchivedFaded ? `Hide archived & faded (${hiddenCount})` : `Show archived & faded (${hiddenCount})`;
+archivedBtn.textContent = showArchivedFaded ? `Hide archived, faded & got away (${hiddenCount})` : `Show archived, faded & got away (${hiddenCount})`;
 archivedBtn.classList.toggle('active', showArchivedFaded);
 archivedBtn.hidden = hiddenCount === 0 && !showArchivedFaded;
 }
@@ -798,7 +801,7 @@ return haystack.includes(term);
 if (filtered.length === 0) {
 list.innerHTML = term
 ? '<div class="empty">No connections match that search.</div>'
-: '<div class="empty">Everyone here is Archived or Faded — use "Show archived &amp; faded" above to see them.</div>';
+: '<div class="empty">Everyone here is Archived, Faded or Got Away — use "Show archived, faded &amp; got away" above to see them.</div>';
 return;
 }
 
@@ -1740,7 +1743,7 @@ if (!candidates.length) {
 const alreadyThere = data.connections.filter((c) => c.stage === 'Backlog review' && daysSince(c.lastContact) >= 180).length;
 alert(alreadyThere
 ? `No NEW connections crossed 180 days since last contact — ${alreadyThere} already in "Backlog review" are still that stale, if you want to review them.`
-: 'Nobody is 180+ days since last contact right now (outside Faded/Archived/FriendZone/travel-paused).');
+: 'Nobody is 180+ days since last contact right now (outside Faded/Archived/FriendZone/Got Away/travel-paused).');
 return;
 }
 if (!confirm(`Move ${candidates.length} connection${candidates.length === 1 ? '' : 's'} (180+ days since last contact) to "Backlog review"?`)) return;
