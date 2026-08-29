@@ -101,14 +101,24 @@ return (c.milestones || []).map((m) => iconSpan(MILESTONE_ICONS[m] || MILESTONE_
 // Keeps an unrecognised existing value (older data, or a source since removed
 // from the list) as a selectable option instead of silently switching the
 // connection to whatever happens to be first.
-function appOptions(selected) {
+//
+// blankLabel adds a value="" option at the top, selected whenever nothing
+// else is -- used only for import-app-input (see fillAppSelect below), so
+// leaving it untouched reads as "not deliberately set" (screenshotAppHint
+// then falls back to reading the app off the filename) rather than
+// silently defaulting to Bumble just because it's first in CONN_APPS.
+// conn-app-input has no blankLabel: the manual add-connection form has no
+// filename to fall back to, so defaulting to the first app is the best
+// available guess there, same as before.
+function appOptions(selected, blankLabel) {
 const list = !selected || CONN_APPS.includes(selected) ? CONN_APPS : [selected, ...CONN_APPS];
-return list.map((a) => `<option value="${escapeHtml(a)}"${a === selected ? ' selected' : ''}>${escapeHtml(a)}</option>`).join('');
+const blank = blankLabel ? `<option value=""${!selected ? ' selected' : ''}>${blankLabel}</option>` : '';
+return blank + list.map((a) => `<option value="${escapeHtml(a)}"${a === selected ? ' selected' : ''}>${escapeHtml(a)}</option>`).join('');
 }
 
-function fillAppSelect(id) {
+function fillAppSelect(id, blankLabel) {
 const el = document.getElementById(id);
-if (el) el.innerHTML = appOptions(el.value);
+if (el) el.innerHTML = appOptions(el.value, blankLabel);
 }
 
 // Dial codes for entering a phone in a form the Contacts match can use.
@@ -1656,7 +1666,7 @@ render();
 function initConnectionForm() {
 bindConnPickers();
 fillAppSelect('conn-app-input');
-fillAppSelect('import-app-input');
+fillAppSelect('import-app-input', 'Auto-detect from filename&hellip;');
 bindForm('connection-form', () => {
 const nameInput = document.getElementById('conn-name-input');
 const appInput = document.getElementById('conn-app-input');
@@ -2139,11 +2149,38 @@ renderConnections();
 queueSave();
 }
 
-// The source picked next to the import buttons, but only when it names an
-// app whose layout the model can actually use as a hint.
-function screenshotAppHint() {
+// Android's own share-sheet screenshot naming bakes the source app's name
+// right into the filename (e.g. "Screenshot_20260827_143022_Tinder.jpg" --
+// note the underscore right before the app name, same convention
+// looksLikeBumbleScreenshot in captureinbox.js already relies on), and a
+// manually-saved/renamed file often does too ("Tinder profile.png").
+// Falling back to this when the app picker wasn't usefully set beats
+// silently trusting whatever the dropdown happens to still be showing from
+// a previous, unrelated import -- confirmed live as a real bug: a Tinder
+// profile imported with the picker left on its default came out labelled
+// Bumble. Plain case-insensitive substring match, same as
+// looksLikeBumbleScreenshot/looksLikeSamsungHealthScreenshot already use --
+// a \b word-boundary regex looks stricter but actually isn't one here,
+// since '_' counts as a \w character and would block the boundary right
+// where these filenames need it to match.
+function appHintFromFilename(fileOrFiles) {
+const files = Array.isArray(fileOrFiles) ? fileOrFiles : [fileOrFiles];
+for (const f of files) {
+const name = ((f && f.name) || '').toLowerCase();
+for (const app of SCREENSHOT_APPS) {
+if (name.includes(app.toLowerCase())) return app;
+}
+}
+return null;
+}
+
+// The source picked next to the import buttons, when it names an app whose
+// layout the model can actually use as a hint -- falling back to whatever
+// the filename(s) of the file(s) actually being imported reveal when the
+// picker wasn't usefully set (see appHintFromFilename above).
+function screenshotAppHint(fileOrFiles) {
 const app = document.getElementById('import-app-input').value;
-return SCREENSHOT_APPS.has(app) ? app : null;
+return SCREENSHOT_APPS.has(app) ? app : appHintFromFilename(fileOrFiles);
 }
 
 function renderImportLastRun() {
@@ -2370,14 +2407,14 @@ await addPhotosWithoutParsing(files, status);
 document.getElementById('import-file-input').addEventListener('change', async (e) => {
 const file = e.target.files[0];
 if (!file) return;
-await withImportStatus(status, () => importMatchesListFile(file, screenshotAppHint(), status));
+await withImportStatus(status, () => importMatchesListFile(file, screenshotAppHint(file), status));
 e.target.value = '';
 });
 
 document.getElementById('import-profile-input').addEventListener('change', async (e) => {
 const files = Array.from(e.target.files);
 if (files.length === 0) return;
-const appHint = screenshotAppHint();
+const appHint = screenshotAppHint(files);
 // The checkbox is a FORCE-combine override, not a required pre-condition
 // -- this file input's change event fires the instant the OS picker
 // closes, before any further clicks, so a box ticked AFTER selecting
@@ -2818,5 +2855,5 @@ STAGE_RANK, setContactPicker, phoneWithFlagHtml, initRatingCategoriesSettings,
 initFlagRulesSettings, unionInto, initHideArchivedFaded,
 connectionPickerHtml, connectionPickerNewRowHtml, bindConnPickers, applyDirectProfileUpload, applyProfileFieldsToConnection,
 importMatchesListFile, importProfileScreenshotFile, importProfileWithPhotosFile, extractDatingScreenshot, renderPendingImports,
-createBlankConnection,
+createBlankConnection, appHintFromFilename,
 };

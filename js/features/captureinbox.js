@@ -583,7 +583,7 @@ const chosen = batch.items.filter((it) => it.kind === 'photo' && selectedIds.has
 if (!chosen.length) { if (status) status.textContent = 'Tick at least one photo first.'; return; }
 
 const { classifyProfileUpload } = await import('../utils.js');
-const { extractDatingScreenshot } = await import('./connections.js');
+const { extractDatingScreenshot, appHintFromFilename } = await import('./connections.js');
 const withFiles = await Promise.all(chosen.map(async (it) => {
 const blob = await fetchAttachment(it.id);
 const file = new File([blob], it.name || 'photo', { type: it.type || blob.type });
@@ -615,7 +615,8 @@ const messages = [];
 if (screenshots.length > 1) {
 if (status) status.textContent = `Reading ${screenshots.length} screenshots…`;
 try {
-const result = await extractDatingScreenshot(screenshots.map((s) => s.file), null, plainPhotos.map((p) => p.file), status);
+const screenshotFiles = screenshots.map((s) => s.file);
+const result = await extractDatingScreenshot(screenshotFiles, appHintFromFilename(screenshotFiles), plainPhotos.map((p) => p.file), status);
 const consumedFiles = new Set(result.consumedFiles || []);
 const consumedItems = screenshots.filter((s) => consumedFiles.has(s.file)).map((s) => s.it);
 if (result.kind === 'matches') {
@@ -638,7 +639,7 @@ messages.push(err?.name === 'MissingKeyError' ? 'Add an Anthropic API key in Set
 const { it, file } = screenshots[0];
 if (status) status.textContent = `Reading ${it.name || 'photo'}…`;
 try {
-const result = await extractDatingScreenshot(file, null, plainPhotos.map((p) => p.file), status);
+const result = await extractDatingScreenshot(file, appHintFromFilename(file), plainPhotos.map((p) => p.file), status);
 if (result.kind === 'matches') {
 // A matches list has several people -- no single obvious owner for
 // the other ticked photos, so only the list itself gets extracted;
@@ -671,7 +672,7 @@ if (alreadyDoneIds.has(it.id)) continue;
 if (!isScreenshot) { messages.push(`${it.name || 'that image'}: not a screenshot, skipped.`); continue; }
 if (status) status.textContent = `Reading ${it.name || 'photo'}…`;
 try {
-const result = await extractDatingScreenshot(file, null, [], status);
+const result = await extractDatingScreenshot(file, appHintFromFilename(file), [], status);
 if (result.kind) {
 const count = result.candidates ? result.candidates.length : 1;
 messages.push(`${it.name || 'that image'}: found ${count} ${count === 1 ? 'person' : 'people'} (${result.kind}) — review in Dating admin.`);
