@@ -2031,7 +2031,13 @@ if (list) hydratePhotoBackgrounds(list);
 // can, same as a <select> would. { silent: true } skips that event for the
 // restore-after-rebuild path in renderConnPicker, where nothing actually
 // changed.
-function setConnPickerValue(id, value, { silent } = {}) {
+// `label`, when given, is trusted as-is (already-escaped HTML) for a
+// caller-supplied extra row -- "+ Add new connection", travel.js's own
+// "Someone else…", or any future one -- none of which are real connection
+// ids, so there's nothing to look up. Without a label, the value is looked
+// up fresh against data.connections so the trigger reflects live data
+// (name/photo) rather than a frozen copy from whenever the row was drawn.
+function setConnPickerValue(id, value, { silent, label } = {}) {
 const wrap = document.querySelector(`[data-conn-picker-id="${id}"]`);
 if (!wrap) return;
 const hidden = document.getElementById(id);
@@ -2039,8 +2045,8 @@ const trigger = wrap.querySelector('[data-conn-picker-trigger]');
 hidden.value = value || '';
 if (!value) {
 trigger.innerHTML = wrap.dataset.connPickerPlaceholder;
-} else if (value === '__new__') {
-trigger.textContent = '+ Add new connection';
+} else if (label) {
+trigger.innerHTML = label;
 } else {
 const c = data.connections.find((x) => x.id === value);
 if (c) {
@@ -2081,7 +2087,16 @@ return;
 const row = e.target.closest('.conn-picker-row');
 if (row) {
 const wrap = row.closest('.conn-picker');
-setConnPickerValue(wrap.dataset.connPickerId, row.dataset.connPickerValue);
+const rowValue = row.dataset.connPickerValue;
+// A real connection row's value IS a connection id -- setConnPickerValue
+// looks that up itself. Any other row (an extra row a caller supplied,
+// e.g. connectionPickerNewRowHtml's "+ Add new connection" or travel.js's
+// own "Someone else…") isn't a connection at all, so its own
+// already-rendered content becomes the trigger's label directly -- fixes
+// a real bug confirmed live where any extra value other than the one
+// hardcoded '__new__' case silently reset the picker back to empty.
+const isRealConnection = data.connections.some((c) => c.id === rowValue);
+setConnPickerValue(wrap.dataset.connPickerId, rowValue, isRealConnection ? {} : { label: row.innerHTML });
 wrap.querySelector('.conn-picker-panel').hidden = true;
 return;
 }

@@ -7,7 +7,7 @@
 // detail has to live here rather than in Notion because the itinerary
 // export has to work fully offline.
 import { data, queueSave, blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS } from '../state.js';
-import { escapeHtml, uid } from '../utils.js';
+import { escapeHtml, uid, hydratePhotoBackgrounds } from '../utils.js';
 import { deleteAttachment, formatBytes, openAttachment } from '../files.js';
 
 function tripById(id) { return data.trips.find((t) => t.id === id); }
@@ -297,6 +297,19 @@ function personChipHtml(tripId, p) {
 return `<span class="tag-chip">${escapeHtml(p.name)}${p.relation !== 'other' ? ` (${escapeHtml(RELATION_LABELS[p.relation] || p.relation)})` : ''}<span class="tag-x" data-trip-remove-person="${tripId}" data-person-id="${p.id}">&times;</span></span>`;
 }
 
+// The "+ person" picker's own extra row -- deliberately NOT
+// connectionPickerNewRowHtml() from connections.js, which creates a real
+// dating connection. A trip companion who isn't already a connection
+// (family, a friend, a colleague) shouldn't become one just for being
+// added here; picking this row reveals a plain name field instead (see
+// the picker mount's 'change' handler in bindTravel).
+function personPickerFreetextRowHtml() {
+return `<button type="button" class="conn-picker-row" data-conn-picker-value="__freetext__" data-conn-picker-search="someone else">
+<span class="avatar sm conn-picker-plus">+</span>
+<span class="conn-picker-row-info"><strong>Someone else&hellip;</strong></span>
+</button>`;
+}
+
 function legFieldRowHtml(trip, leg, field) {
 const value = leg.fields[field] || '';
 const label = LEG_FIELD_LABELS[field] || field;
@@ -378,7 +391,8 @@ return `<div class="alloc-card" data-trip-card="${trip.id}">
 </div>
 <div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:8px;">
 ${trip.people.map((p) => personChipHtml(trip.id, p)).join('')}
-<input type="text" class="tag-add-input" data-trip-person-name="${trip.id}" placeholder="+ person">
+<span data-trip-person-picker-mount="${trip.id}"></span>
+<input type="text" class="tag-add-input" data-trip-person-freetext="${trip.id}" placeholder="Name" hidden>
 <select data-trip-person-relation="${trip.id}">${Object.entries(RELATION_LABELS).map(([k, v]) => `<option value="${k}">${escapeHtml(v)}</option>`).join('')}</select>
 <button class="todo-add-btn" type="button" data-trip-add-person="${trip.id}">Add</button>
 </div>
@@ -401,6 +415,21 @@ if (countEl) countEl.textContent = data.trips.length ? `${data.trips.length} tri
 const sorted = [...data.trips].sort((a, b) => (a.startDate || '9999').localeCompare(b.startDate || '9999') || a.createdAt.localeCompare(b.createdAt));
 el.innerHTML = sorted.length ? sorted.map(tripCardHtml).join('') : '<div class="empty">No trips yet. Add one below, or turn a "city-break" nudge or a booking email into one.</div>';
 bindTravel(el);
+// The "+ person" picker's row list needs the live Dating module, kept as
+// a dynamic import so this module never has to load connections.js (and
+// everything it pulls in) up front for a tab most sessions won't touch --
+// same reasoning and same mount-then-fill shape captureinbox.js's own
+// connection picker already uses.
+if (el.querySelector('[data-trip-person-picker-mount]')) {
+import('./connections.js').then(({ connectionPickerHtml, bindConnPickers }) => {
+bindConnPickers();
+el.querySelectorAll('[data-trip-person-picker-mount]').forEach((mount) => {
+const tripId = mount.dataset.tripPersonPickerMount;
+mount.innerHTML = connectionPickerHtml(`trip-person-picker-${tripId}`, 'Pick a connection&hellip;', personPickerFreetextRowHtml());
+});
+hydratePhotoBackgrounds(el);
+});
+}
 }
 
 function bindTravel(root) {
@@ -425,13 +454,36 @@ await deleteTrip(t.id);
 renderTravel();
 });
 });
+// Bound to the stable mount span, not the hidden input inside it -- the
+// picker's markup lands asynchronously (see renderTravel's dynamic import
+// above), so the input doesn't exist yet at bind time here. 'change'
+// bubbles up from it once it does, same pattern captureinbox.js's own
+// connection picker already uses.
+root.querySelectorAll('[data-trip-person-picker-mount]').forEach((mount) => {
+const tripId = mount.dataset.tripPersonPickerMount;
+mount.addEventListener('change', () => {
+const picker = document.getElementById(`trip-person-picker-${tripId}`);
+const freeInput = root.querySelector(`[data-trip-person-freetext="${tripId}"]`);
+if (freeInput) freeInput.hidden = !picker || picker.value !== '__freetext__';
+});
+});
 root.querySelectorAll('[data-trip-add-person]').forEach((btn) => {
 btn.addEventListener('click', () => {
 const tripId = btn.dataset.tripAddPerson;
-const nameInput = root.querySelector(`[data-trip-person-name="${tripId}"]`);
 const relSel = root.querySelector(`[data-trip-person-relation="${tripId}"]`);
-if (!nameInput || !nameInput.value.trim()) return;
-addPerson(tripId, { name: nameInput.value, relation: relSel?.value || 'other' });
+const picker = document.getElementById(`trip-person-picker-${tripId}`);
+const freeInput = root.querySelector(`[data-trip-person-freetext="${tripId}"]`);
+const pickerValue = picker ? picker.value : '';
+if (pickerValue === '__freetext__') {
+if (!freeInput || !freeInput.value.trim()) return;
+addPerson(tripId, { name: freeInput.value, relation: relSel?.value || 'other' });
+} else if (pickerValue) {
+const conn = data.connections.find((c) => c.id === pickerValue);
+if (!conn) return;
+addPerson(tripId, { name: conn.name, relation: relSel?.value || 'other', connectionId: conn.id });
+} else {
+return;
+}
 renderTravel();
 });
 });
