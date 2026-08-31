@@ -23,6 +23,22 @@ const partial = calendarList.find((c) => (c.summary || '').trim().toLowerCase().
 return partial ? partial.id : null;
 }
 
+// Creates an all-day event -- the Planner tab (js/features/planner.js)
+// works in whole days, not time slots, so start/end are both a bare date
+// rather than a dateTime. Requires the opt-in calendar.events write scope
+// (see hasCalendarWrite() in sync/googleauth.js) -- callers are expected to
+// check that before offering the push button, same as Contacts write
+// already does.
+async function createEvent(calendarId, { title, description, date }) {
+const res = await googleFetch(`${EVENTS_API}/${encodeURIComponent(calendarId)}/events`, {
+method: 'POST',
+headers: { 'Content-Type': 'application/json' },
+body: JSON.stringify({ summary: title, description, start: { date }, end: { date } }),
+});
+if (!res.ok) throw new Error(`Couldn't create calendar event: ${res.status}`);
+return res.json();
+}
+
 async function getUpcomingEvents(calendarId, count, daysAhead) {
 const params = new URLSearchParams({
 timeMin: new Date().toISOString(),
@@ -82,4 +98,4 @@ status[name] = { found: false, events: [], error: err.message, syncedAt };
 return status;
 }
 
-export { syncCalendars, listCalendars };
+export { syncCalendars, listCalendars, createEvent };

@@ -303,6 +303,41 @@ checkOut: 'Check-out', contactPhone: 'Contact phone', mode: 'Mode', from: 'From'
 description: 'Description', when: 'When',
 };
 
+// One dated placement of a connection or an activity into a day box --
+// either the main 14-day grid (tripId: '') or a specific trip's own
+// mini-planner (tripId set). Deliberately NOT reusing data.tasks: a
+// placement isn't a GTD action with contexts/bucket/due-date semantics,
+// it's "this person/activity, this day, draft or firm" -- closer in shape
+// to a trip leg's passengers list than to anything in tasks.js.
+function blankPlannerEntry(fields = {}) {
+return {
+id: uid(),
+date: '', // ISO yyyy-mm-dd -- the day box this sits in
+tripId: '', // '' for the main grid, else the trip this entry belongs to
+kind: 'connection', // 'connection' | 'activity'
+connectionId: '', // set when kind === 'connection'
+activityId: '', // set when kind === 'activity'
+status: 'draft', // 'draft' | 'firm'
+notes: '',
+calendarPushed: false, // true once pushed -- lets the push UI show what's already gone out
+createdAt: new Date().toISOString(),
+...fields,
+};
+}
+
+// The reusable "things to do" pool (Picnic, Theatre show...) -- a short
+// user-curated list, same spirit as taskContexts/ratingCategories below,
+// not one-off GTD actions.
+function blankPlannerActivity(fields = {}) {
+return {
+id: uid(),
+title: '',
+notes: '',
+createdAt: new Date().toISOString(),
+...fields,
+};
+}
+
 const TAG_FIELDS = [
 // Other names the same person goes by — "Kat" is also "Katya" and
 // "Katerina". Used when matching Google Contacts, so any one of them can
@@ -360,6 +395,13 @@ function blankConnection(fields = {}) {
 return {
 id: uid(),
 name: '', profileName: '', identities: [], app: '', priority: 3, stage: 'Matched',
+// Explicit "spend time with this person" marker for the Planner tab's
+// priority pool -- separate from the 1-5 star `priority` rating above
+// (that's a general quality rating; this is "show me in the drag list
+// regardless of stage"). isPriorityConnection() in connections.js also
+// treats a late-enough Stage as automatically qualifying, so this flag
+// only needs setting for someone worth prioritising before that.
+priorityFlag: false,
 lastContact: '', createdAt: new Date().toISOString(),
 photoId: null, photoIds: [], tinderPhotoKeys: [], photoAlbums: [],
 age: '', dob: '', ageAsOf: '',
@@ -581,6 +623,15 @@ passengers: Array.isArray(l.passengers)
 // so it's simply dropped rather than left dangling with a dead taskId.
 const tripTaskIds = new Set(data.tasks.map((t) => t.id));
 data.trips = data.trips.filter((t) => !t.taskId || tripTaskIds.has(t.taskId));
+if (!Array.isArray(data.plannerActivities)) data.plannerActivities = [];
+data.plannerActivities = data.plannerActivities.map((a) => ({ ...blankPlannerActivity(), ...a, id: a.id || uid() }));
+if (!Array.isArray(data.plannerEntries)) data.plannerEntries = [];
+data.plannerEntries = data.plannerEntries.map((e) => ({ ...blankPlannerEntry(), ...e, id: e.id || uid() }));
+// A trip-scoped entry whose trip no longer exists (deleted, or dropped by
+// the orphaned-trip filter just above) has nowhere left to render -- same
+// "nothing left to route it" reasoning as the trip filter itself.
+const plannerTripIds = new Set(data.trips.map((t) => t.id));
+data.plannerEntries = data.plannerEntries.filter((e) => !e.tripId || plannerTripIds.has(e.tripId));
 // Seed the mail search rows from the old fixed shape the first time only.
 // Keyed on the array's absence rather than its emptiness, so deleting every
 // row stays deleted instead of being helpfully repopulated next reload.
@@ -628,6 +679,7 @@ data.connections.forEach((c) => {
 // any record already carrying that damage on load, so the fix above
 // doesn't require hunting down the bad connection by hand.
 if (typeof c.name !== 'string') c.name = 'Unnamed match';
+if (typeof c.priorityFlag !== 'boolean') c.priorityFlag = false;
 if (!Array.isArray(c.photoIds)) c.photoIds = c.photoId ? [c.photoId] : [];
 if (typeof c.photoId !== 'string') c.photoId = c.photoIds[0] || null;
 if (!Array.isArray(c.languages)) c.languages = [];
@@ -1328,6 +1380,7 @@ exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, DEFAULT_PREFS,
 MAIL_SEARCH_KINDS, mailSearchLabel,
 TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureBatch, blankPendingImport, blankConnection,
 blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS,
+blankPlannerEntry, blankPlannerActivity,
 CONTACT_STATUS_LABELS, CONTACT_MATCH_MIN_STAGE,
 DEFAULT_RATING_CATEGORIES, slugifyField, DEFAULT_RECIPE_RATING_CATEGORIES,
 FLAG_FIELD_DEFS, DEFAULT_FLAG_RULES, computeFlags, valueColorForField, stripSharedSuffix, suggestedAction, suggestedQuestions, isTravelPaused, ACTIONS, distanceMiles,

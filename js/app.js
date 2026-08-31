@@ -28,6 +28,7 @@ import { initHealthSync, initHealthDaily, initHealthChart } from './features/hea
 import { initShareTarget } from './features/sharetarget.js';
 import { initCaptureInbox } from './features/captureinbox.js';
 import { initTravel } from './features/travel.js';
+import { initPlanner } from './features/planner.js';
 // Photos whose bytes aren't on this device are fetched from your own host.
 // Registered rather than imported: the implementation reaches state.js, and
 // state.js imports utils.js, so importing it back would be a cycle.
@@ -138,6 +139,7 @@ initEnhancementForm();
 initTasks();
 initCaptureInbox();
 initTravel();
+initPlanner();
 initGoogleTasksFeed();
 initQuestions();
 initContacts();

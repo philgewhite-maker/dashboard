@@ -202,6 +202,19 @@ contactsWriteNote.textContent = contactsWrite.checked
 : 'Sign out and back in to drop the write permission.';
 });
 
+// Same shape as Contacts write above -- see its own comment for why
+// changing this can't take effect until a fresh sign-in.
+const calendarWrite = document.getElementById('calendar-write-toggle');
+const calendarWriteNote = document.getElementById('calendar-write-note');
+calendarWrite.checked = !!settings.calendarWriteEnabled;
+calendarWrite.addEventListener('change', async () => {
+await setLocalSetting('calendarWriteEnabled', calendarWrite.checked);
+await refreshScopes();
+calendarWriteNote.textContent = calendarWrite.checked
+? 'Sign out and back in to grant the write permission — Google won\'t widen a token that\'s already been issued.'
+: 'Sign out and back in to drop the write permission.';
+});
+
 const sensitiveToggle = document.getElementById('sensitive-fields-toggle');
 sensitiveToggle.checked = !!settings.showSensitiveFields;
 sensitiveToggle.addEventListener('change', async () => {

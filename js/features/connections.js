@@ -21,6 +21,17 @@ import { nameKey, editDistance } from '../googlecontacts.js';
 // resolved match that shouldn't keep cluttering the default browse).
 const CONN_STAGES = ['Superswiped', 'Matched', 'Chatting in app', 'Moved to WhatsApp', 'Moved to Telegram', 'Planning to call', 'Planning to meet', 'Arranged to meet', 'Met in person', 'Dating', 'Backlog review', 'FriendZone', 'Faded', 'Archived', 'Got Away'];
 const STAGE_RANK = { Dating: 10, 'Met in person': 9, 'Arranged to meet': 8, 'Planning to meet': 7, 'Planning to call': 6, 'Moved to Telegram': 5, 'Moved to WhatsApp': 4, 'Chatting in app': 3, Matched: 2, Superswiped: 1, 'Backlog review': 0, FriendZone: 0, Faded: 0, Archived: 0, 'Got Away': 0 };
+
+// Who shows up in the Planner tab's draggable "priority" pool -- either
+// explicitly pinned (c.priorityFlag, see the 📌 toggle on the card header)
+// or far enough along that spending time with them is already imminent/
+// ongoing (Planning to meet or later). Lives here rather than state.js
+// because it needs STAGE_RANK, which state.js can't import without a cycle
+// (connections.js already imports FROM state.js) -- same cross-module shape
+// contacts.js's isPostAppStage already uses against this same table.
+function isPriorityConnection(c) {
+return !!c.priorityFlag || (STAGE_RANK[c.stage] ?? 0) >= STAGE_RANK['Planning to meet'];
+}
 // Where a connection came from. Rendered into every source dropdown from
 // here so the add form, the import picker, and the per-connection editor
 // can't drift apart.
@@ -975,6 +986,7 @@ ${avatarHtml(c.photoId, c.name)}
 <div class="match-name">${flagDotHtml}${escapeHtml(c.name)}${nameMeta ? ` <span class="match-meta">${escapeHtml(nameMeta)}</span>` : ''}</div>
 <div class="icon-row">${sourceIconsHtml(c)}${stageIconHtml(c)}${milestoneIconsHtml(c)}</div>
 </div>
+<button type="button" class="planner-priority-btn${c.priorityFlag ? ' active' : ''}" data-priority-flag="${c.id}" title="${c.priorityFlag ? 'Priority for the Planner — click to unset' : 'Mark as a priority for the Planner tab'}">📌</button>
 <div class="stars">${stars}</div>
 <div class="match-stage">
 <select data-conn-stage="${c.id}">
@@ -1052,6 +1064,14 @@ list.querySelectorAll('.priority-star').forEach((star) => {
 star.addEventListener('click', () => {
 const conn = data.connections.find((x) => x.id === star.dataset.conn);
 conn.priority = parseInt(star.dataset.star, 10);
+renderConnections();
+queueSave();
+});
+});
+list.querySelectorAll('[data-priority-flag]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const conn = data.connections.find((x) => x.id === btn.dataset.priorityFlag);
+conn.priorityFlag = !conn.priorityFlag;
 renderConnections();
 queueSave();
 });
@@ -2858,5 +2878,5 @@ STAGE_RANK, setContactPicker, phoneWithFlagHtml, initRatingCategoriesSettings,
 initFlagRulesSettings, unionInto, initHideArchivedFaded,
 connectionPickerHtml, connectionPickerNewRowHtml, bindConnPickers, applyDirectProfileUpload, applyProfileFieldsToConnection,
 importMatchesListFile, importProfileScreenshotFile, importProfileWithPhotosFile, extractDatingScreenshot, renderPendingImports,
-createBlankConnection, appHintFromFilename,
+createBlankConnection, appHintFromFilename, isPriorityConnection,
 };

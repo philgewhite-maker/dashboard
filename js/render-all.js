@@ -19,6 +19,7 @@ import { renderHealthDaily } from './features/health.js';
 import { renderRenphoDaily } from './features/renpho.js';
 import { renderWellnessDaily } from './features/wellness.js';
 import { renderTravel } from './features/travel.js';
+import { renderPlanner } from './features/planner.js';
 import { renderNudges } from './features/nudges.js';
 import { renderTagCleanup } from './features/tagcleanup.js';
 
@@ -40,6 +41,7 @@ renderHealthDaily();
 renderRenphoDaily();
 renderWellnessDaily();
 renderTravel();
+renderPlanner();
 renderOverview();
 renderNudges();
 renderTagCleanup();

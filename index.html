@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v164</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v165</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -40,6 +40,7 @@
 <button class="tab-btn" type="button" data-tab-btn="business">Business</button>
 <button class="tab-btn" type="button" data-tab-btn="health">Health</button>
 <button class="tab-btn" type="button" data-tab-btn="travel">Travel</button>
+<button class="tab-btn" type="button" data-tab-btn="planner">Planner</button>
 <button class="tab-btn" type="button" data-tab-btn="settings">Settings</button>
 </div>
 
@@ -1890,6 +1891,47 @@ Mostly still a planning space &mdash; a place to keep thinking about what this s
 <div id="travel-list"></div>
 </section>
 
+<section class="panel wide" id="planner-panel" data-tab="planner">
+<div class="panel-head">
+<h2><span class="dot sage"></span>Planner</h2>
+</div>
+<div class="settings-note" style="margin:0 0 10px;">Drag a priority connection or a thing-to-do onto a day below to plan it. Mark each placement Draft or Firm; a trip with known dates gets its own mini planner further down, alongside whatever's already booked on the Travel tab.</div>
+
+<div class="planner-pools">
+<div class="planner-pool">
+<h3>Priority connections</h3>
+<div class="planner-pool-list" id="planner-priority-pool"></div>
+</div>
+<div class="planner-pool">
+<h3>Things to do</h3>
+<div class="planner-pool-list" id="planner-activities-pool"></div>
+<div class="add-form" id="planner-activity-form" style="margin-top:8px;">
+<input type="text" autocomplete="off" id="planner-activity-input" placeholder="Add something, e.g. Picnic">
+<button class="todo-add-btn" type="button">+ Add</button>
+</div>
+</div>
+</div>
+
+<div class="planner-grid" id="planner-main-grid"></div>
+
+<div class="planner-push-row">
+<button type="button" class="todo-add-btn" id="planner-push-btn">Push firm plans to Google Calendar</button>
+<span class="settings-note" id="planner-push-status"></span>
+</div>
+<div class="planner-push-panel" id="planner-push-panel" hidden>
+<label class="settings-note">Calendar
+<select id="planner-push-calendar"></select>
+</label>
+<div class="planner-push-list" id="planner-push-list"></div>
+<div class="planner-push-actions">
+<button type="button" class="todo-add-btn" id="planner-push-confirm-btn">Push selected</button>
+<button type="button" class="del-x" id="planner-push-cancel-btn">Cancel</button>
+</div>
+</div>
+
+<div id="planner-trips"></div>
+</section>
+
 <section class="panel wide" id="settings-panel" data-tab="settings">
 <div class="panel-head">
 <h2><span class="dot plum"></span>Settings</h2>
@@ -1932,6 +1974,16 @@ Mostly still a planning space &mdash; a place to keep thinking about what this s
 Allow writing back to Google Contacts (e.g. saving a birthday)
 </label>
 <div class="settings-note" id="contacts-write-note"></div>
+</div>
+
+<div class="settings-block">
+<h3>Google Calendar</h3>
+<div class="settings-note" style="margin:0 0 8px;">Calendars are read to show upcoming events. Creating events (the Planner tab's "Push to Google Calendar" step) is a separate permission — so it's off unless you turn it on here.</div>
+<label class="settings-note" style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0;">
+<input type="checkbox" id="calendar-write-toggle">
+Allow creating events in Google Calendar (Planner tab)
+</label>
+<div class="settings-note" id="calendar-write-note"></div>
 </div>
 
 <div class="settings-block">

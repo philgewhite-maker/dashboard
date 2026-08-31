@@ -800,6 +800,15 @@ cursor:pointer;
 color:var(--line);
 }
 .star.filled{color:var(--rose);}
+/* The Planner tab's "priority" pin -- deliberately plain (not styled like
+   the 5-star rating above it) so the two "priority" concepts on this card
+   (a 1-5 quality rating vs. a flat yes/no planning flag) don't read as the
+   same control. */
+.planner-priority-btn{
+border:none;background:none;padding:0;margin:0;
+font-size:14px;line-height:1;cursor:pointer;opacity:.3;filter:grayscale(1);
+}
+.planner-priority-btn.active{opacity:1;filter:none;}
 .match-stage select{
 font-family:'Inter',sans-serif;
 font-size:12px;
@@ -1972,6 +1981,70 @@ gap:2px;
 .alloc-target strong{font-size:13px;}
 .alloc-target span{font-size:11px;color:var(--muted);}
 .alloc-target.over{border-color:var(--teal);background:var(--teal-bg);}
+
+/* Planner tab -- pools of draggable priority connections / things-to-do
+   feeding a 14-day grid (and a per-trip mini grid further down), built on
+   the .alloc-card/.alloc-target drag-and-drop base just above (see
+   planner.js's own comment on why the same mechanics are reused rather
+   than reinvented). */
+.planner-pools{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:18px;}
+.planner-pool{flex:1;min-width:220px;}
+.planner-pool h3{font-size:14px;margin:0 0 8px;}
+.planner-pool-list{display:flex;flex-wrap:wrap;gap:8px;}
+.planner-pool-card{
+display:flex;align-items:center;gap:6px;
+padding:6px 10px;font-size:13px;
+}
+.planner-grid{
+display:grid;
+grid-template-columns:repeat(auto-fill, minmax(140px, 1fr));
+gap:10px;
+margin:14px 0;
+}
+.planner-grid-trip{grid-template-columns:repeat(auto-fill, minmax(120px, 1fr));}
+.planner-day{min-height:90px;}
+.planner-day-label{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.02em;}
+.planner-day-entries{display:flex;flex-direction:column;gap:6px;margin-top:6px;}
+.planner-entry{
+display:flex;align-items:center;gap:6px;flex-wrap:wrap;
+padding:6px 8px;font-size:12px;cursor:grab;
+}
+.planner-entry-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.planner-status-pill{
+font-family:'IBM Plex Mono',monospace;font-size:9px;text-transform:uppercase;letter-spacing:.03em;
+border-radius:5px;padding:2px 6px;cursor:pointer;
+}
+.planner-status-draft{background:var(--paper);color:var(--muted);border:1px dashed var(--line);}
+.planner-status-firm{background:var(--rose);color:#fff;border:1px solid var(--rose);}
+.planner-entry-remove{cursor:pointer;color:var(--muted);font-size:14px;line-height:1;}
+.planner-entry-remove:hover{color:var(--rose);}
+.planner-leg-chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;}
+.planner-leg-chip{
+font-family:'IBM Plex Mono',monospace;font-size:9px;
+background:var(--teal-bg);color:var(--teal);
+border-radius:5px;padding:2px 5px;
+}
+.planner-trip-panel{margin-top:20px;padding-top:14px;border-top:1px dashed var(--line);}
+.planner-trip-panel h3{margin:0 0 8px;}
+.planner-push-row{display:flex;align-items:center;gap:10px;margin:14px 0;flex-wrap:wrap;}
+.planner-push-panel{
+border:1px solid var(--line);border-radius:9px;padding:12px;margin-bottom:14px;
+display:flex;flex-direction:column;gap:10px;
+}
+/* Same fix needed for .conn-picker-panel/.tinder-edit-details before it --
+   display:flex above ties [hidden]{display:none} on specificity, and an
+   author rule wins that tie regardless of source order, so the panel would
+   otherwise show every time this file is loaded, hidden attribute or not. */
+.planner-push-panel[hidden]{display:none;}
+.planner-push-panel select{
+font-family:'Inter',sans-serif;font-size:13px;border:1px solid var(--line);border-radius:6px;padding:6px 8px;background:var(--paper);color:var(--ink);
+}
+.planner-push-list{display:flex;flex-direction:column;gap:2px;max-height:280px;overflow-y:auto;}
+.planner-push-actions{display:flex;gap:8px;}
+@media (max-width:760px){
+.planner-grid, .planner-grid-trip{grid-template-columns:repeat(2, 1fr);}
+.planner-pools{flex-direction:column;}
+}
 
 .task-section{margin-bottom:18px;}
 .task-section h3{

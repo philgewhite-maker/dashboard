@@ -28,13 +28,21 @@ const BASE_SCOPES = [
 // issued token.
 const CONTACTS_WRITE_SCOPE = 'https://www.googleapis.com/auth/contacts';
 
+// Same reasoning, same off-by-default/replace-not-add shape, for the
+// Planner tab's "push to Google Calendar" step (js/features/planner.js) --
+// creating events is a heavier permission than just reading them.
+const CALENDAR_WRITE_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
+
 let scopesForSession = BASE_SCOPES.join(' ');
 
 async function refreshScopes() {
 const settings = await getLocalSettings();
-const scopes = settings.contactsWriteEnabled
+let scopes = settings.contactsWriteEnabled
 ? BASE_SCOPES.filter((s) => s !== 'https://www.googleapis.com/auth/contacts.readonly').concat(CONTACTS_WRITE_SCOPE)
 : BASE_SCOPES;
+if (settings.calendarWriteEnabled) {
+scopes = scopes.filter((s) => s !== 'https://www.googleapis.com/auth/calendar.readonly').concat(CALENDAR_WRITE_SCOPE);
+}
 const next = scopes.join(' ');
 if (next !== scopesForSession) {
 scopesForSession = next;
@@ -161,8 +169,13 @@ function hasContactsWrite() {
 return scopesForSession.includes(CONTACTS_WRITE_SCOPE);
 }
 
+// Same check for the Calendar write scope -- see CALENDAR_WRITE_SCOPE above.
+function hasCalendarWrite() {
+return scopesForSession.includes(CALENDAR_WRITE_SCOPE);
+}
+
 export {
 NotConfiguredError,
 isSignedIn, wasConnectedBefore, canAttemptGoogleAction, tryReconnectSilently, signIn, signOut,
-googleFetch, refreshScopes, hasContactsWrite,
+googleFetch, refreshScopes, hasContactsWrite, hasCalendarWrite,
 };
