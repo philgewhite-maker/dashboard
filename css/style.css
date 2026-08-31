@@ -257,6 +257,16 @@ gap:9px;
 .flag-rule-row input.mini{width:70px;}
 .flag-breakdown{font-size:11px;color:var(--muted);margin-top:2px;}
 .flag-breakdown .dot{margin-right:3px;vertical-align:middle;}
+/* Reverse links to the Planner tab -- same draft/firm color language as
+   .planner-entry's own border/dot indicator, so the two surfaces read
+   consistently. */
+.conn-plans-row{display:flex;flex-wrap:wrap;gap:5px;margin-top:4px;}
+.conn-plan-chip{
+font-family:'IBM Plex Mono',monospace;font-size:10px;
+border-radius:6px;padding:2px 7px;cursor:pointer;white-space:nowrap;
+}
+.conn-plan-chip.conn-plan-draft{background:var(--paper);color:var(--muted);border:1px dashed var(--line);}
+.conn-plan-chip.conn-plan-firm{background:var(--rose);color:#fff;border:1px solid var(--rose);}
 .suggested-action{font-size:11px;font-weight:600;color:var(--ink);background:var(--paper);border:1px solid var(--line);border-radius:6px;padding:1px 6px;}
 .suggested-questions{font-size:12px;color:var(--muted);margin:4px 0 0;padding-left:18px;}
 .suggested-questions li{margin-bottom:2px;}
@@ -2008,14 +2018,25 @@ margin:14px 0;
 .planner-entry{
 display:flex;align-items:center;gap:6px;flex-wrap:wrap;
 padding:6px 8px;font-size:12px;cursor:grab;
+border-style:dashed;
 }
+/* Draft/firm used to be a wide text pill ("DRAFT"/"FIRM") -- confirmed to
+   crowd the name off a phone's 2-column day grid. Replaced with signals
+   that cost zero row width: the card's own border and the label's weight,
+   plus a small dot (below) in place of the pill for the actual click
+   target. */
+.planner-entry.status-firm{border-style:solid;border-color:var(--rose);}
+.planner-entry.status-draft .planner-entry-label{font-style:italic;}
+.planner-entry.status-firm .planner-entry-label{font-weight:700;}
+.planner-entry-link{display:inline-flex;align-items:center;gap:6px;min-width:0;flex:1;}
+.planner-entry-link[data-planner-open-connection]{cursor:pointer;}
 .planner-entry-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.planner-status-pill{
-font-family:'IBM Plex Mono',monospace;font-size:9px;text-transform:uppercase;letter-spacing:.03em;
-border-radius:5px;padding:2px 6px;cursor:pointer;
+.planner-status-dot{
+width:9px;height:9px;border-radius:50%;flex-shrink:0;cursor:pointer;
+border:1.5px solid var(--muted);padding:0;background:transparent;
 }
-.planner-status-draft{background:var(--paper);color:var(--muted);border:1px dashed var(--line);}
-.planner-status-firm{background:var(--rose);color:#fff;border:1px solid var(--rose);}
+.planner-status-dot.status-firm{background:var(--rose);border-color:var(--rose);}
+.planner-entry-trip-link{cursor:pointer;font-size:12px;flex-shrink:0;}
 .planner-entry-remove{cursor:pointer;color:var(--muted);font-size:14px;line-height:1;}
 .planner-entry-remove:hover{color:var(--rose);}
 .planner-leg-chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;}
@@ -2026,6 +2047,7 @@ border-radius:5px;padding:2px 5px;
 }
 .planner-trip-panel{margin-top:20px;padding-top:14px;border-top:1px dashed var(--line);}
 .planner-trip-panel h3{margin:0 0 8px;}
+.planner-trip-panel h4{font-size:13px;margin:14px 0 6px;color:var(--muted);}
 .planner-push-row{display:flex;align-items:center;gap:10px;margin:14px 0;flex-wrap:wrap;}
 .planner-push-panel{
 border:1px solid var(--line);border-radius:9px;padding:12px;margin-bottom:14px;

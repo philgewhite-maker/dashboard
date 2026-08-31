@@ -9,6 +9,7 @@ resizeImageToBlob, classifyProfileUpload, cropToContentBlob, contentCropBounds, 
 import { MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot } from '../ai.js';
 import { isSensitive, noCoverNote } from './photoalbums.js';
 import { nameKey, editDistance } from '../googlecontacts.js';
+import { switchTab } from '../tabs.js';
 
 // 'Backlog review' is an active triage bucket (see the "Backlog review
 // 180+" button below), not a resolved outcome -- it's excluded from
@@ -31,6 +32,27 @@ const STAGE_RANK = { Dating: 10, 'Met in person': 9, 'Arranged to meet': 8, 'Pla
 // contacts.js's isPostAppStage already uses against this same table.
 function isPriorityConnection(c) {
 return !!c.priorityFlag || (STAGE_RANK[c.stage] ?? 0) >= STAGE_RANK['Planning to meet'];
+}
+
+// The reverse of Planner's forward links: every plannerEntry that placed
+// this connection on a day, so a card shows what's already been planned
+// with them instead of that living one-way in the Planner tab only.
+function plannerEntriesForConnection(connId) {
+return (data.plannerEntries || []).filter((e) => e.kind === 'connection' && e.connectionId === connId).sort((a, b) => a.date.localeCompare(b.date));
+}
+function shortPlanDate(iso) {
+const d = new Date(`${iso}T00:00:00`);
+return isNaN(d) ? iso : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+}
+// Click jumps to Planner and flashes the exact entry -- a DYNAMIC import of
+// planner.js, not a static one: planner.js already imports several things
+// (isPriorityConnection, renderConnPicker, bindConnPickers, expandConnection)
+// FROM this file, so a static back-import here would cycle. Same technique
+// nudges.js's goToTarget already uses for jumping to travel.js's revealTrip.
+function reversePlansHtml(c) {
+const entries = plannerEntriesForConnection(c.id);
+if (!entries.length) return '';
+return `<div class="conn-plans-row">${entries.map((e) => `<span class="conn-plan-chip conn-plan-${e.status}" data-conn-open-plan="${e.id}" title="${e.status === 'firm' ? 'Firm' : 'Draft'} plan — click to open in Planner">${e.tripId ? '&#9992; ' : ''}${escapeHtml(shortPlanDate(e.date))}</span>`).join('')}</div>`;
 }
 // Where a connection came from. Rendered into every source dropdown from
 // here so the add form, the import picker, and the per-connection editor
@@ -718,6 +740,11 @@ if (thinBtn) {
 thinBtn.textContent = `Thin profiles (${thinProfileIds().length})`;
 thinBtn.classList.toggle('active', idFilter && idFilter.label === 'Thin profiles');
 }
+const priorityBtn = document.getElementById('conn-priority-btn');
+if (priorityBtn) {
+priorityBtn.textContent = `Priority (${data.connections.filter(isPriorityConnection).length})`;
+priorityBtn.classList.toggle('active', idFilter && idFilter.label === 'Priority');
+}
 const archivedBtn = document.getElementById('conn-show-archived-btn');
 if (archivedBtn) {
 const hiddenCount = archivedFadedIds().length;
@@ -1003,6 +1030,7 @@ ${action ? `<span class="suggested-action" title="Suggested next step, recompute
 <span class="del-x" style="opacity:1;" data-del-conn="${c.id}">&times;</span>
 </div>
 </div>
+${reversePlansHtml(c)}
 ${flags.hits.length ? `<div class="flag-breakdown">${flags.hits.map((h) => `<span class="dot ${h.color}"></span>${escapeHtml(h.label)}`).join(' &nbsp; ')}</div>` : ''}
 ${questions.length ? `<ul class="suggested-questions" title="Deterministic prompts, recomputed fresh each time">${questions.map((q) => `<li>${escapeHtml(q)}</li>`).join('')}</ul>` : ''}
 ${contactPickerHtml(c.id)}
@@ -1074,6 +1102,12 @@ const conn = data.connections.find((x) => x.id === btn.dataset.priorityFlag);
 conn.priorityFlag = !conn.priorityFlag;
 renderConnections();
 queueSave();
+});
+});
+list.querySelectorAll('[data-conn-open-plan]').forEach((el) => {
+el.addEventListener('click', () => {
+switchTab('planner');
+import('./planner.js').then((m) => m.revealPlannerEntry(el.dataset.connOpenPlan));
 });
 });
 list.querySelectorAll('.rate-star').forEach((star) => {
@@ -1711,6 +1745,10 @@ filterByIds(needsAttentionIds(), 'Needs attention');
 document.getElementById('conn-thin-profiles-btn').addEventListener('click', () => {
 if (idFilter && idFilter.label === 'Thin profiles') { clearFilters(); return; }
 filterByIds(thinProfileIds(), 'Thin profiles');
+});
+document.getElementById('conn-priority-btn').addEventListener('click', () => {
+if (idFilter && idFilter.label === 'Priority') { clearFilters(); return; }
+filterByIds(data.connections.filter(isPriorityConnection).map((c) => c.id), 'Priority');
 });
 document.getElementById('conn-show-archived-btn').addEventListener('click', () => {
 showArchivedFaded = !showArchivedFaded;

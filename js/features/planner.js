@@ -14,9 +14,11 @@
 // drag sources by tagging the payload's kind: "connection:<id>",
 // "activity:<id>", or "entry:<entryId>" for an already-placed card being
 // dragged to a different day.
-import { data, queueSave, blankPlannerEntry, blankPlannerActivity } from '../state.js';
-import { escapeHtml, uid, todayStr, dateStrAdd, avatarHtml, hydratePhotoBackgrounds, bindForm } from '../utils.js';
-import { isPriorityConnection, renderConnPicker, bindConnPickers } from './connections.js';
+import { data, queueSave, blankPlannerEntry, blankPlannerActivity, isDormantStage, isTravelPaused } from '../state.js';
+import { escapeHtml, uid, todayStr, dateStrAdd, avatarHtml, hydratePhotoBackgrounds, bindForm, foldDiacritics, scrollAndFlash } from '../utils.js';
+import { isPriorityConnection, renderConnPicker, bindConnPickers, expandConnection } from './connections.js';
+import { switchTab } from '../tabs.js';
+import { revealTrip } from './travel.js';
 
 // The 14-day grid (and a long trip's mini-grid) routinely runs well past
 // the fold, but native HTML5 drag-and-drop does NOT auto-scroll the page
@@ -105,21 +107,28 @@ return isNaN(d) ? dateStr : d.toLocaleDateString('en-GB', { weekday: 'short', da
 }
 
 function plannerEntryHtml(entry) {
-let label, avatar = '';
+let label, avatar = '', openAttr = '';
 if (entry.kind === 'connection') {
 const c = data.connections.find((x) => x.id === entry.connectionId);
 if (!c) return ''; // the connection was deleted since this was placed
 label = escapeHtml(c.name);
 avatar = avatarHtml(c.photoId, c.name, 'sm');
+openAttr = ` data-planner-open-connection="${c.id}"`;
 } else {
 const a = data.plannerActivities.find((x) => x.id === entry.activityId);
 if (!a) return ''; // the activity was removed from the pool since this was placed
 label = escapeHtml(a.title);
 }
-return `<div class="planner-entry alloc-card" draggable="true" data-planner-entry="${entry.id}">
-${avatar}
-<span class="planner-entry-label">${label}</span>
-<button type="button" class="planner-status-pill planner-status-${entry.status}" data-planner-toggle-status="${entry.id}" title="Click to mark ${entry.status === 'draft' ? 'firm' : 'draft'}">${entry.status === 'draft' ? 'Draft' : 'Firm'}</button>
+// Draft/firm used to be a wide text pill ("DRAFT"/"FIRM") -- confirmed
+// live to crowd the name off a phone's 2-column day grid. Replaced with
+// signals that cost zero row width: the card's own border (dashed vs
+// solid+rose, via the status-${status} class) and the label's weight
+// (italic vs bold), plus a small dot in place of the pill for the actual
+// click-to-toggle target.
+return `<div class="planner-entry alloc-card status-${entry.status}" draggable="true" data-planner-entry="${entry.id}">
+<span class="planner-entry-link"${openAttr}>${avatar}<span class="planner-entry-label">${label}</span></span>
+<button type="button" class="planner-status-dot status-${entry.status}" data-planner-toggle-status="${entry.id}" title="${entry.status === 'draft' ? 'Draft' : 'Firm'} — click to mark ${entry.status === 'draft' ? 'firm' : 'draft'}"></button>
+${entry.tripId ? `<span class="planner-entry-trip-link" data-planner-open-trip="${entry.tripId}" title="Open this trip on the Travel tab">&#9992;</span>` : ''}
 <span class="planner-entry-remove" data-planner-remove="${entry.id}" title="Remove">&times;</span>
 </div>`;
 }
@@ -142,8 +151,7 @@ function priorityPoolHtml() {
 const priority = data.connections.filter(isPriorityConnection);
 if (!priority.length) return '<div class="empty">No priority connections yet — pin someone (📌) below, on the Dating tab, or they\'ll appear automatically once things reach "Planning to meet" or later.</div>';
 return priority.map((c) => `<div class="planner-pool-card alloc-card" draggable="true" data-planner-drag="connection:${c.id}">
-${avatarHtml(c.photoId, c.name, 'sm')}
-<span>${escapeHtml(c.name)}</span>
+<span class="planner-entry-link" data-planner-open-connection="${c.id}">${avatarHtml(c.photoId, c.name, 'sm')}<span>${escapeHtml(c.name)}</span></span>
 </div>`).join('');
 }
 
@@ -184,16 +192,35 @@ transfer: ['departTime'],
 other: ['when'],
 };
 
-// Tolerant of freeform text in a field that hasn't actually been filled in
-// as a real date yet -- only a value that starts like an ISO date
-// contributes a day bucket, so a half-entered leg just contributes nothing
-// rather than mis-bucketing garbage.
+// A leg's date fields are plain text inputs (travel.js's legFieldRowHtml),
+// not a real date picker -- and the AI email/screenshot extraction is
+// explicitly allowed to fall back to "just what's printed" when it isn't
+// fully confident (ai.js's TRIP_FIELD_GUIDE), not always ISO. An ISO-prefix
+// check alone silently dropped anything else ("10 Sep 2026, 14:30", "Wed 10
+// September") -- confirmed as the actual cause of leg data not
+// consistently showing up here, not any kind of completeness filter.
+// Date.parse() (via `new Date(str)`) handles most human-written formats
+// reasonably; requiring the string to itself contain a 4-digit year first
+// guards against a bare time like "14:30" silently resolving against
+// today's date, which would be a wrong bucket, worse than no bucket at
+// all. Reads the parsed date's LOCAL fields rather than toISOString()
+// (UTC) -- same UTC/local-timezone reasoning dateStrAdd's own fix this
+// session already established.
+function parseLegDateValue(v) {
+const str = String(v || '').trim();
+if (!str) return '';
+const isoMatch = str.match(/^\d{4}-\d{2}-\d{2}/);
+if (isoMatch) return isoMatch[0];
+if (!/\b(19|20)\d{2}\b/.test(str)) return '';
+const parsed = new Date(str);
+if (isNaN(parsed)) return '';
+const y = parsed.getFullYear(), m = String(parsed.getMonth() + 1).padStart(2, '0'), d = String(parsed.getDate()).padStart(2, '0');
+return `${y}-${m}-${d}`;
+}
+
 function legDatesFor(leg) {
 const fields = LEG_DATE_FIELDS[leg.kind] || [];
-return fields
-.map((f) => leg.fields[f])
-.filter((v) => v && /^\d{4}-\d{2}-\d{2}/.test(String(v)))
-.map((v) => String(v).slice(0, 10));
+return fields.map((f) => parseLegDateValue(leg.fields[f])).filter(Boolean);
 }
 
 function legChipsForDay(trip, dateStr) {
@@ -217,6 +244,31 @@ end = end || legDates[legDates.length - 1];
 return { start, end };
 }
 
+// Who's actually reachable at a trip's destination(s), pickable straight
+// into that trip's own day grid -- "who's around while I'm there" rather
+// than making the user go check Connections' City field separately.
+// foldDiacritics matches knownCityMap's own reasoning (utils.js) for
+// loosely matching a place name; the dormant/paused exclusion matches the
+// app's established "who's actually in rotation" predicate pair (see e.g.
+// connections.js's reachOutOverdueAmount).
+function connectionsAtDestinations(destinations) {
+const wanted = (destinations || []).map((d) => foldDiacritics(String(d).trim().toLowerCase())).filter(Boolean);
+if (!wanted.length) return [];
+return data.connections.filter((c) => !isDormantStage(c.stage) && !isTravelPaused(c)
+&& (c.location || []).some((loc) => wanted.includes(foldDiacritics(String(loc).trim().toLowerCase()))));
+}
+
+function destinationConnectionsPoolHtml(trip) {
+if (!trip.destinations.length) return '';
+const matches = connectionsAtDestinations(trip.destinations);
+const body = matches.length
+? `<div class="planner-pool-list">${matches.map((c) => `<div class="planner-pool-card alloc-card" draggable="true" data-planner-drag="connection:${c.id}">
+<span class="planner-entry-link" data-planner-open-connection="${c.id}">${avatarHtml(c.photoId, c.name, 'sm')}<span>${escapeHtml(c.name)}</span></span>
+</div>`).join('')}</div>`
+: `<div class="empty">No non-archived connections listed at ${escapeHtml(trip.destinations.join(', '))} yet.</div>`;
+return `<h4>Connections in ${escapeHtml(trip.destinations.join(', '))}</h4>${body}`;
+}
+
 function tripPanelHtml(trip) {
 const { start, end } = tripRangeFor(trip);
 if (!start || !end || start > end) return ''; // nothing dated yet -- nothing to lay a grid out against
@@ -227,8 +279,9 @@ let cur = start;
 // covers any real holiday with headroom.
 for (let i = 0; i < 60 && cur <= end; i++) { days.push(cur); cur = dateStrAdd(cur, 1); }
 return `<div class="planner-trip-panel">
-<h3>${escapeHtml(trip.title || trip.destination || 'Trip')}</h3>
+<h3>${escapeHtml(trip.title || trip.destinations.join(', ') || 'Trip')}</h3>
 <div class="planner-grid planner-grid-trip">${days.map((d) => plannerDayHtml(d, trip.id, legChipsForDay(trip, d))).join('')}</div>
+${destinationConnectionsPoolHtml(trip)}
 </div>`;
 }
 
@@ -243,7 +296,11 @@ priorityEl.innerHTML = priorityPoolHtml();
 renderConnPicker('planner-add-connection-picker', 'Add someone else&hellip;', '');
 activitiesEl.innerHTML = activitiesPoolHtml();
 gridEl.innerHTML = mainGridHtml();
-const tripPanels = data.trips.map(tripPanelHtml).filter(Boolean).join('');
+const sortedTrips = [...data.trips].sort((a, b) => {
+const as = tripRangeFor(a).start || '9999', bs = tripRangeFor(b).start || '9999';
+return as.localeCompare(bs) || a.createdAt.localeCompare(b.createdAt);
+});
+const tripPanels = sortedTrips.map(tripPanelHtml).filter(Boolean).join('');
 tripsEl.innerHTML = tripPanels || '<div class="empty">No trips with known dates yet — add dates on the Travel tab and they\'ll show up here.</div>';
 hydratePhotoBackgrounds(priorityEl);
 hydratePhotoBackgrounds(gridEl);
@@ -299,6 +356,26 @@ btn.addEventListener('click', () => removeEntry(btn.dataset.plannerRemove));
 root.querySelectorAll('[data-planner-del-activity]').forEach((btn) => {
 btn.addEventListener('click', () => {
 if (confirm("Remove this from the things-to-do list? Any day it's already placed on loses it too.")) removeActivity(btn.dataset.plannerDelActivity);
+});
+});
+// Same cross-tab jump already used by app.js's "Save & open profile" hash
+// handler and nudges.js's goToTarget -- switch tab, expand that
+// connection's Details, scroll/flash it. stopPropagation so a click here
+// (inside a draggable card) never bubbles into anything drag-related.
+root.querySelectorAll('[data-planner-open-connection]').forEach((el) => {
+el.addEventListener('click', (e) => {
+e.stopPropagation();
+const id = el.dataset.plannerOpenConnection;
+switchTab('dating');
+expandConnection(id);
+setTimeout(() => scrollAndFlash(`[data-conn-row="${id}"]`), 80);
+});
+});
+root.querySelectorAll('[data-planner-open-trip]').forEach((el) => {
+el.addEventListener('click', (e) => {
+e.stopPropagation();
+switchTab('travel');
+revealTrip(el.dataset.plannerOpenTrip);
 });
 });
 }
@@ -424,4 +501,18 @@ if (e.target.id === 'planner-add-connection-picker' && e.target.value) addConnec
 });
 }
 
-export { renderPlanner, initPlanner };
+// Cross-tab jump target for connections.js's reverse "Plans" chip row --
+// mirrors travel.js's own revealTrip exactly.
+function revealPlannerEntry(entryId) {
+renderPlanner();
+setTimeout(() => {
+const el = document.querySelector(`[data-planner-entry="${entryId}"]`);
+if (el) {
+el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+el.classList.add('flash-new');
+setTimeout(() => el.classList.remove('flash-new'), 1800);
+}
+}, 60);
+}
+
+export { renderPlanner, initPlanner, revealPlannerEntry };

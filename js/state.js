@@ -237,7 +237,7 @@ return {
 id: uid(),
 taskId: '', // the project task this trip is the detail behind
 title: '',
-destination: '',
+destinations: [], // multi-value, same reasoning as blankConnection's location -- a multi-city trip needs each place as its own entry, both for display and so planner.js can match connections' own location tags against it
 startDate: '', endDate: '', // best-known bounds; refined as legs fill in
 people: [], // {id, name, relation:'self'|'partner'|'child'|'other', connectionId}
 legs: [],
@@ -605,6 +605,14 @@ if (!Array.isArray(data.wellnessDaily)) data.wellnessDaily = [];
 if (!Array.isArray(data.trips)) data.trips = [];
 data.trips = data.trips.map((t) => ({ ...blankTrip(), ...t, id: t.id || uid() }));
 data.trips.forEach((t) => {
+// destination -> destinations migration. Idempotent -- the old field is
+// deleted below, so this is a no-op on every load after the first.
+if (!Array.isArray(t.destinations)) t.destinations = [];
+if (typeof t.destination === 'string') {
+const legacy = t.destination.trim();
+if (legacy && !t.destinations.length) t.destinations = [legacy];
+delete t.destination;
+}
 t.people = Array.isArray(t.people) ? t.people : [];
 t.legs = Array.isArray(t.legs)
 ? t.legs.map((l) => ({

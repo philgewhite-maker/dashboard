@@ -36,9 +36,9 @@ return trip.legs.reduce((n, l) => n + gapsFor(l).length, 0);
 // The task exists so a trip's open logistics show up in the normal Tasks
 // workflow (and so notionplan.js's existing "draft a plan" button is free
 // on it) -- captureTask already handles the render/save side of creating one.
-async function createTrip({ title, destination = '', people = [] }) {
+async function createTrip({ title, destinations = [], people = [] }) {
 const { captureTask } = await import('./tasks.js');
-const trip = blankTrip({ title, destination, people });
+const trip = blankTrip({ title, destinations, people });
 const task = captureTask({ title: `Trip: ${title}`, bucket: 'project', source: { kind: 'trip', label: title, url: '' } });
 trip.taskId = task.id;
 data.trips.push(trip);
@@ -203,7 +203,7 @@ return { filled };
 function tripOptionsHtml() {
 return [...data.trips]
 .sort((a, b) => a.title.localeCompare(b.title))
-.map((t) => `<option value="${t.id}">${escapeHtml(t.title)}${t.destination ? ' — ' + escapeHtml(t.destination) : ''}</option>`)
+.map((t) => `<option value="${t.id}">${escapeHtml(t.title)}${t.destinations.length ? ' — ' + escapeHtml(t.destinations.join(', ')) : ''}</option>`)
 .join('');
 }
 
@@ -376,6 +376,15 @@ ${leg.attachments.length ? `<div style="margin-top:6px;">${leg.attachments.map((
 </div>`;
 }
 
+// Same shape as connections.js's tagChips() (City field) minus the
+// flag-rule color lookup, which is a connections-only concept -- a trip's
+// destinations are plain text, no per-value coloring.
+function destinationChipsHtml(trip) {
+return trip.destinations.map((d, i) => `<span class="tag-chip">${escapeHtml(d)}<span class="tag-x" data-trip-dest-remove="${trip.id}" data-trip-dest-idx="${i}">&times;</span></span>`).join('')
++ `<input type="text" autocomplete="off" class="tag-add-input" placeholder="+ destination" data-trip-dest-add="${trip.id}">`
++ `<button type="button" class="todo-add-btn" data-trip-dest-add-btn="${trip.id}" style="padding:3px 8px;">+</button>`;
+}
+
 function tripCardHtml(trip) {
 const gapCount = tripGapCount(trip);
 const complete = tripIsComplete(trip);
@@ -384,8 +393,8 @@ return `<div class="alloc-card" data-trip-card="${trip.id}">
 <input type="text" data-trip-title="${trip.id}" value="${escapeHtml(trip.title)}" placeholder="Trip title" style="flex:1;font-weight:700;">
 <span class="del-x" data-trip-delete="${trip.id}" title="Delete this trip">&times;</span>
 </div>
-<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;">
-<input type="text" data-trip-destination="${trip.id}" value="${escapeHtml(trip.destination)}" placeholder="Destination" style="flex:1;min-width:100px;">
+<div class="tag-editor" style="margin-top:4px;">${destinationChipsHtml(trip)}</div>
+<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">
 <input type="date" data-trip-start="${trip.id}" value="${escapeHtml(trip.startDate)}">
 <input type="date" data-trip-end="${trip.id}" value="${escapeHtml(trip.endDate)}" min="${escapeHtml(trip.startDate)}">
 </div>
@@ -436,8 +445,33 @@ function bindTravel(root) {
 root.querySelectorAll('[data-trip-title]').forEach((input) => {
 input.addEventListener('change', () => { const t = tripById(input.dataset.tripTitle); if (t) { t.title = input.value.trim(); queueSave(); renderTravel(); } });
 });
-root.querySelectorAll('[data-trip-destination]').forEach((input) => {
-input.addEventListener('change', () => { const t = tripById(input.dataset.tripDestination); if (t) { t.destination = input.value.trim(); queueSave(); } });
+root.querySelectorAll('[data-trip-dest-remove]').forEach((el) => {
+el.addEventListener('click', () => {
+const t = tripById(el.dataset.tripDestRemove);
+if (!t) return;
+t.destinations.splice(parseInt(el.dataset.tripDestIdx, 10), 1);
+queueSave();
+renderTravel();
+});
+});
+const commitDestAdd = (tripId, inputEl) => {
+const t = tripById(tripId);
+const raw = inputEl.value.trim().replace(/,$/, '').trim();
+if (!t || !raw) return;
+if (!t.destinations.some((d) => d.toLowerCase() === raw.toLowerCase())) t.destinations.push(raw);
+queueSave();
+renderTravel();
+};
+root.querySelectorAll('[data-trip-dest-add]').forEach((input) => {
+input.addEventListener('keydown', (e) => {
+if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); commitDestAdd(input.dataset.tripDestAdd, input); }
+});
+});
+root.querySelectorAll('[data-trip-dest-add-btn]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const input = root.querySelector(`[data-trip-dest-add="${btn.dataset.tripDestAddBtn}"]`);
+if (input) commitDestAdd(btn.dataset.tripDestAddBtn, input);
+});
 });
 root.querySelectorAll('[data-trip-start]').forEach((input) => {
 input.addEventListener('change', () => {
@@ -605,7 +639,8 @@ if (!btn || !titleInput) return;
 btn.addEventListener('click', async () => {
 const title = titleInput.value.trim();
 if (!title) return;
-await createTrip({ title, destination: (destInput?.value || '').trim() });
+const destValue = (destInput?.value || '').trim();
+await createTrip({ title, destinations: destValue ? [destValue] : [] });
 titleInput.value = '';
 if (destInput) destInput.value = '';
 });
@@ -671,7 +706,7 @@ td.muted{color:#999;}
 p.notes{font-family:Arial,sans-serif;font-size:.88rem;color:#444;white-space:pre-wrap;margin:.6rem 0 0;}
 @media print{body{background:#fff;}}
 </style></head><body>
-<h1>${fmt(trip.title) || 'Trip'}${trip.destination ? ` — ${fmt(trip.destination)}` : ''}</h1>
+<h1>${fmt(trip.title) || 'Trip'}${trip.destinations.length ? ` — ${fmt(trip.destinations.join(', '))}` : ''}</h1>
 <div class="sub">${trip.startDate ? fmt(trip.startDate) : ''}${trip.startDate && trip.endDate ? ' to ' : ''}${trip.endDate ? fmt(trip.endDate) : ''}</div>
 ${gapCount > 0 ? `<div class="warn">⚠ ${gapCount} thing${gapCount === 1 ? '' : 's'} below still ${gapCount === 1 ? 'needs' : 'need'} confirming.</div>` : ''}
 <h2>People</h2>

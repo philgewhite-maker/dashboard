@@ -139,7 +139,7 @@ const until = daysUntil(earliest);
 const gapCount = t.legs.reduce((n, l) => n + gapsFor(l).length, 0);
 if (until !== null && until >= 0 && until <= TRIP_GAP_LEAD_DAYS && gapCount > 0) {
 pool.push({
-text: `Your trip to ${t.destination || t.title} is in ${until} day${until === 1 ? '' : 's'} — ${gapCount} thing${gapCount === 1 ? '' : 's'} still need confirming.`,
+text: `Your trip to ${t.destinations.length ? t.destinations.join(', ') : t.title} is in ${until} day${until === 1 ? '' : 's'} — ${gapCount} thing${gapCount === 1 ? '' : 's'} still need confirming.`,
 target: { type: 'trip', id: t.id },
 signals: { kind: 'trip-gaps', daysUntil: until, gaps: gapCount },
 category: 'creative',
@@ -396,7 +396,7 @@ import('./travel.js').then(async (m) => {
 const people = data.connections
 .filter((c) => target.connectionIds.includes(c.id))
 .map((c) => ({ id: c.id, name: c.name, relation: 'other', connectionId: c.id }));
-const trip = await m.createTrip({ title: `${target.location} trip`, destination: target.location, people });
+const trip = await m.createTrip({ title: `${target.location} trip`, destinations: target.location ? [target.location] : [], people });
 m.revealTrip(trip.id);
 });
 }
