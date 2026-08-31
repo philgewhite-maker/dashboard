@@ -7,7 +7,7 @@
 // detail has to live here rather than in Notion because the itinerary
 // export has to work fully offline.
 import { data, queueSave, blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS } from '../state.js';
-import { escapeHtml, uid, hydratePhotoBackgrounds } from '../utils.js';
+import { escapeHtml, uid, dateStrAdd, hydratePhotoBackgrounds } from '../utils.js';
 import { deleteAttachment, formatBytes, openAttachment } from '../files.js';
 
 function tripById(id) { return data.trips.find((t) => t.id === id); }
@@ -387,7 +387,7 @@ return `<div class="alloc-card" data-trip-card="${trip.id}">
 <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;">
 <input type="text" data-trip-destination="${trip.id}" value="${escapeHtml(trip.destination)}" placeholder="Destination" style="flex:1;min-width:100px;">
 <input type="date" data-trip-start="${trip.id}" value="${escapeHtml(trip.startDate)}">
-<input type="date" data-trip-end="${trip.id}" value="${escapeHtml(trip.endDate)}">
+<input type="date" data-trip-end="${trip.id}" value="${escapeHtml(trip.endDate)}" min="${escapeHtml(trip.startDate)}">
 </div>
 <div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:8px;">
 ${trip.people.map((p) => personChipHtml(trip.id, p)).join('')}
@@ -440,7 +440,26 @@ root.querySelectorAll('[data-trip-destination]').forEach((input) => {
 input.addEventListener('change', () => { const t = tripById(input.dataset.tripDestination); if (t) { t.destination = input.value.trim(); queueSave(); } });
 });
 root.querySelectorAll('[data-trip-start]').forEach((input) => {
-input.addEventListener('change', () => { const t = tripById(input.dataset.tripStart); if (t) { t.startDate = input.value; queueSave(); } });
+input.addEventListener('change', () => {
+const t = tripById(input.dataset.tripStart);
+if (!t) return;
+t.startDate = input.value;
+const endInput = input.closest('[data-trip-card]')?.querySelector('[data-trip-end]');
+if (endInput) {
+endInput.min = input.value; // stops picking an end date before the trip starts, whether or not it's blank
+// Only when the end date hasn't been set yet -- a start-date correction
+// on an already-dated trip shouldn't clobber an end date the user
+// already chose. showPicker() (where supported) opens the end-date
+// calendar straight to the value just filled in, so "opens from that
+// date" and "defaults to start+2" are the same one fix.
+if (input.value && !endInput.value) {
+endInput.value = dateStrAdd(input.value, 2);
+t.endDate = endInput.value;
+try { endInput.showPicker?.(); } catch (e) { /* unsupported browser -- the filled-in default still stands */ }
+}
+}
+queueSave();
+});
 });
 root.querySelectorAll('[data-trip-end]').forEach((input) => {
 input.addEventListener('change', () => { const t = tripById(input.dataset.tripEnd); if (t) { t.endDate = input.value; queueSave(); } });

@@ -8,6 +8,22 @@ d.setDate(d.getDate() - n);
 return d.toISOString().slice(0, 10);
 }
 
+// Entirely UTC, deliberately -- parsing "${base}T00:00:00" as LOCAL
+// midnight and then reading it back via toISOString() (UTC) is timezone-
+// dependent, and confirmed live as a real bug (planner.js's 14-day grid):
+// in a timezone where local midnight converts to the PREVIOUS UTC day,
+// adding 1 day and losing 1 day to that conversion cancel out exactly, so
+// a day never actually advances. Date.UTC + getUTCDate/setUTCDate never
+// touches the local clock at all. Shared here (not left local to
+// planner.js) so travel.js's trip-date defaulting can't reintroduce the
+// same bug by rolling its own version.
+function dateStrAdd(base, days) {
+const [y, m, d] = base.split('-').map(Number);
+const dt = new Date(Date.UTC(y, m - 1, d));
+dt.setUTCDate(dt.getUTCDate() + days);
+return dt.toISOString().slice(0, 10);
+}
+
 function last7Dates() {
 const arr = [];
 for (let i = 6; i >= 0; i--) arr.push(daysAgoStr(i));
@@ -943,7 +959,7 @@ return classified.every((c) => c.isScreenshot) && looksLikeSameScreenshotPieces(
 }
 
 export {
-todayStr, daysAgoStr, last7Dates, uid, daysSince, daysUntil, foldDiacritics,
+todayStr, daysAgoStr, dateStrAdd, last7Dates, uid, daysSince, daysUntil, foldDiacritics,
 escapeHtml, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, buildFlagMatcher, applyFlagMatcher, knownCityMap, scrollAndFlash, bindForm,
 findMentions, COUNTRY_NAME_TO_NATIONALITY,
 resizeImageToBlob, fileToBase64, loadImage, cropThumbnailToBlob,

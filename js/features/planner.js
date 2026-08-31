@@ -15,8 +15,31 @@
 // "activity:<id>", or "entry:<entryId>" for an already-placed card being
 // dragged to a different day.
 import { data, queueSave, blankPlannerEntry, blankPlannerActivity } from '../state.js';
-import { escapeHtml, uid, todayStr, avatarHtml, hydratePhotoBackgrounds, bindForm } from '../utils.js';
-import { isPriorityConnection } from './connections.js';
+import { escapeHtml, uid, todayStr, dateStrAdd, avatarHtml, hydratePhotoBackgrounds, bindForm } from '../utils.js';
+import { isPriorityConnection, renderConnPicker, bindConnPickers } from './connections.js';
+
+// The 14-day grid (and a long trip's mini-grid) routinely runs well past
+// the fold, but native HTML5 drag-and-drop does NOT auto-scroll the page
+// as the cursor nears the viewport edge -- confirmed live: dragging a
+// connection toward a day box below the bottom of the screen just has the
+// cursor stall there with no way to reach it short of dropping, scrolling
+// manually, and dragging again. Guarded by plannerDragActive (set true/
+// false around every planner-sourced drag in bindPlannerEvents below) so
+// this document-level listener -- bound once in initPlanner(), not
+// per-render -- never scrolls the page during some unrelated drag
+// elsewhere in the app (e.g. the Tasks tab's own allocation drag).
+let plannerDragActive = false;
+const PLANNER_SCROLL_EDGE = 90;
+const PLANNER_SCROLL_MAX_SPEED = 24;
+function autoScrollDuringPlannerDrag(e) {
+if (!plannerDragActive) return;
+const y = e.clientY;
+if (y < PLANNER_SCROLL_EDGE) {
+window.scrollBy(0, -Math.ceil(((PLANNER_SCROLL_EDGE - y) / PLANNER_SCROLL_EDGE) * PLANNER_SCROLL_MAX_SPEED));
+} else if (y > window.innerHeight - PLANNER_SCROLL_EDGE) {
+window.scrollBy(0, Math.ceil(((y - (window.innerHeight - PLANNER_SCROLL_EDGE)) / PLANNER_SCROLL_EDGE) * PLANNER_SCROLL_MAX_SPEED));
+}
+}
 
 function entriesForDay(date, tripId = '') {
 return data.plannerEntries.filter((e) => e.date === date && (e.tripId || '') === (tripId || ''));
@@ -76,20 +99,6 @@ queueSave();
 renderPlanner();
 }
 
-// Entirely UTC, deliberately -- parsing "${base}T00:00:00" as LOCAL
-// midnight and then reading it back via toISOString() (UTC) is timezone-
-// dependent, and confirmed live as a real bug: in a timezone where local
-// midnight converts to the PREVIOUS UTC day, adding 1 day and losing 1 day
-// to that conversion cancel out exactly, so a day never actually advances
-// and every "day box" in a 14-day grid silently renders the same date.
-// Date.UTC + getUTCDate/setUTCDate never touches the local clock at all.
-function dateStrAdd(base, days) {
-const [y, m, d] = base.split('-').map(Number);
-const dt = new Date(Date.UTC(y, m - 1, d));
-dt.setUTCDate(dt.getUTCDate() + days);
-return dt.toISOString().slice(0, 10);
-}
-
 function formatDayLabel(dateStr) {
 const d = new Date(`${dateStr}T00:00:00`);
 return isNaN(d) ? dateStr : d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
@@ -131,11 +140,29 @@ return days.map((d) => plannerDayHtml(d)).join('');
 
 function priorityPoolHtml() {
 const priority = data.connections.filter(isPriorityConnection);
-if (!priority.length) return '<div class="empty">No priority connections yet — pin someone (📌) on the Dating tab, or they\'ll appear automatically once things reach "Planning to meet" or later.</div>';
+if (!priority.length) return '<div class="empty">No priority connections yet — pin someone (📌) below, on the Dating tab, or they\'ll appear automatically once things reach "Planning to meet" or later.</div>';
 return priority.map((c) => `<div class="planner-pool-card alloc-card" draggable="true" data-planner-drag="connection:${c.id}">
 ${avatarHtml(c.photoId, c.name, 'sm')}
 <span>${escapeHtml(c.name)}</span>
 </div>`).join('');
+}
+
+// The auto-priority filter (flag OR stage) is deliberately narrow -- this
+// picker is the escape hatch for anyone else worth dragging in just for a
+// particular window (a friend visiting, a family member), without having
+// to go pin them on the Dating tab first. Picking someone here sets the
+// same priorityFlag the 📌 button on their connection card does, so they
+// keep showing up in this pool afterwards too, not just for one drag.
+function addConnectionToPriority(connId) {
+const c = data.connections.find((x) => x.id === connId);
+if (!c) return;
+if (!c.priorityFlag) { c.priorityFlag = true; queueSave(); }
+// Cleared before renderPlanner() re-renders the picker, so it resets to
+// its placeholder instead of renderConnPicker restoring the just-picked
+// value (which would leave it looking stuck on the last person added).
+const picker = document.getElementById('planner-add-connection-picker');
+if (picker) picker.value = '';
+renderPlanner();
 }
 
 function activitiesPoolHtml() {
@@ -213,6 +240,7 @@ const activitiesEl = document.getElementById('planner-activities-pool');
 const gridEl = document.getElementById('planner-main-grid');
 const tripsEl = document.getElementById('planner-trips');
 priorityEl.innerHTML = priorityPoolHtml();
+renderConnPicker('planner-add-connection-picker', 'Add someone else&hellip;', '');
 activitiesEl.innerHTML = activitiesPoolHtml();
 gridEl.innerHTML = mainGridHtml();
 const tripPanels = data.trips.map(tripPanelHtml).filter(Boolean).join('');
@@ -229,16 +257,18 @@ card.addEventListener('dragstart', (e) => {
 e.dataTransfer.setData('text/plain', card.dataset.plannerDrag);
 e.dataTransfer.effectAllowed = 'move';
 card.classList.add('dragging');
+plannerDragActive = true;
 });
-card.addEventListener('dragend', () => card.classList.remove('dragging'));
+card.addEventListener('dragend', () => { card.classList.remove('dragging'); plannerDragActive = false; });
 });
 root.querySelectorAll('[data-planner-entry]').forEach((card) => {
 card.addEventListener('dragstart', (e) => {
 e.dataTransfer.setData('text/plain', `entry:${card.dataset.plannerEntry}`);
 e.dataTransfer.effectAllowed = 'move';
 card.classList.add('dragging');
+plannerDragActive = true;
 });
-card.addEventListener('dragend', () => card.classList.remove('dragging'));
+card.addEventListener('dragend', () => { card.classList.remove('dragging'); plannerDragActive = false; });
 });
 root.querySelectorAll('[data-planner-day]').forEach((zone) => {
 zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('over'); });
@@ -371,6 +401,7 @@ renderPlanner();
 }
 
 function initPlanner() {
+bindConnPickers();
 bindForm('planner-activity-form', () => {
 const input = document.getElementById('planner-activity-input');
 if (!input) return;
@@ -383,6 +414,14 @@ const confirmBtn = document.getElementById('planner-push-confirm-btn');
 if (pushBtn) pushBtn.addEventListener('click', openPushPanel);
 if (cancelBtn) cancelBtn.addEventListener('click', () => { document.getElementById('planner-push-panel').hidden = true; });
 if (confirmBtn) confirmBtn.addEventListener('click', confirmPush);
+document.addEventListener('dragover', autoScrollDuringPlannerDrag);
+// The picker's own row-click handler (connections.js's bindConnPickers)
+// fires a bubbling 'change' on the hidden input -- delegated here once
+// rather than re-bound every render, same reasoning as the dragover
+// listener above.
+document.addEventListener('change', (e) => {
+if (e.target.id === 'planner-add-connection-picker' && e.target.value) addConnectionToPriority(e.target.value);
+});
 }
 
 export { renderPlanner, initPlanner };
