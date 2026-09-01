@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v179</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v180</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -764,6 +764,13 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
   // string dedupe doesn't recognise as the same photo. Keyed on the
   // (folder id, uuid) pair every shape of the URL carries, keeping
   // whichever variant was actually seen first.
+  //
+  // Do NOT normalise the resolution prefix (e.g. force every URL to
+  // "640x800_") &mdash; confirmed live, Tinder's CDN only serves the exact
+  // crop it actually generated for that photo (403 on any other size), so
+  // a photo natively cropped "640x640_" turns into a permanently-403 URL
+  // the moment its prefix gets rewritten. The prefix on the URL actually
+  // rendered live is the only one guaranteed to work.
   const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
   function photoKey(url) {
     const folder = url.match(/gotinder\.com\/([a-zA-Z0-9]+)\//);
@@ -778,7 +785,7 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
     const b = getComputedStyle(el).backgroundImage;
     const m = b &amp;&amp; b.match(/url\("([^"]+)"\)/);
     if (!m || !m[1].includes('gotinder.com')) return false;
-    const url = m[1].replace(/\/\d+x\d+_/, '/640x800_');
+    const url = m[1];
     const key = photoKey(url);
     if (!photoMap.has(key)) {
       const folderMatch = url.match(/gotinder\.com\/([a-zA-Z0-9]+)\//);
@@ -1105,6 +1112,16 @@ async function extractProfile(expectedName) {
     // independent of scan scope, so narrowing the scope was never
     // actually necessary for that.
     const photoButtons = $$('button[aria-label^="Photo "]');
+    // Do NOT normalise the resolution prefix (e.g. force every URL to
+    // "640x800_") &mdash; confirmed live, Tinder's CDN only serves the exact
+    // crop it actually generated for that photo (403 on any other size),
+    // so a photo natively cropped "640x640_" turns into a permanently-403
+    // URL the moment its prefix gets rewritten. The prefix on the URL
+    // actually rendered live is the only one guaranteed to work. The
+    // (folder id, uuid) key below still dedupes the same photo turning up
+    // under more than one *legit* shape (e.g. a resized webp vs the
+    // full-size original of the same file), it just no longer invents a
+    // shape that was never actually served.
     const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
     function photoKey(url) {
       const folder = url.match(/gotinder\.com\/([a-zA-Z0-9]+)\//);
@@ -1119,7 +1136,7 @@ async function extractProfile(expectedName) {
       const b = getComputedStyle(el).backgroundImage;
       const m = b &amp;&amp; b.match(/url\("([^"]+)"\)/);
       if (!m || !m[1].includes('gotinder.com')) return false;
-      const url = m[1].replace(/\/\d+x\d+_/, '/640x800_');
+      const url = m[1];
       const key = photoKey(url);
       if (!photoMap.has(key)) {
         const folderMatch = url.match(/gotinder\.com\/([a-zA-Z0-9]+)\//);
@@ -1244,7 +1261,7 @@ async function waitForProfile(expectedName, timeoutMs) {
 // someone already saved is safe either way -- the dashboard fills in
 // whatever's still missing rather than duplicating what's already
 // there.
-const SCRIPT_VERSION = 8; // photo capture missed most of a profile's photos on a real 9-photo profile (only photos 8-9 caught) -- the virtualized carousel's mount timing didn't reliably line up with a single fixed-wait scan
+const SCRIPT_VERSION = 9; // captured photo URLs had their resolution prefix force-rewritten to "640x800_", which 403s for any photo Tinder didn't natively crop to that size -- confirmed live (640x640 photo: 200 OK unmodified, 403 once rewritten to 640x800). Now keeps the exact URL actually rendered live.
 const DONE_KEY = 'dashTinderBulkDone';
 const MIN_DELAY_MS = 10000, MAX_DELAY_MS = 60000; // randomised, not a fixed interval &mdash; a fixed gap is a bot tell
 
