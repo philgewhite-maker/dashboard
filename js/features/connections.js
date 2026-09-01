@@ -2949,7 +2949,7 @@ initSensitiveFields, setShowSensitiveFields, visibleTagFields,
 filterByEmptyField, filterBySearch, filterByIds, clearFilters,
 STAGE_RANK, setContactPicker, phoneWithFlagHtml, initRatingCategoriesSettings,
 initFlagRulesSettings, unionInto, initHideArchivedFaded,
-connectionPickerHtml, connectionPickerNewRowHtml, bindConnPickers, renderConnPicker, applyDirectProfileUpload, applyProfileFieldsToConnection,
+connectionPickerHtml, connectionPickerNewRowHtml, bindConnPickers, renderConnPicker, setConnPickerValue, applyDirectProfileUpload, applyProfileFieldsToConnection,
 importMatchesListFile, importProfileScreenshotFile, importProfileWithPhotosFile, extractDatingScreenshot, renderPendingImports,
 createBlankConnection, appHintFromFilename, isPriorityConnection,
 };

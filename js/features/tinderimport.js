@@ -22,14 +22,14 @@
 // importer), and the chosen connection's photo stays visible for the whole
 // review regardless of how it got picked, so a wrong dropdown pick is just
 // as visible as a wrong auto-match was invisible before.
-import { data, queueSave, currentAge, computeFlags, distanceMiles, FLAG_FIELD_DEFS, suggestedQuestions, TAG_FIELDS, stripSharedSuffix, recordImportRun, importStatusLine, upsertIdentity, blankConnection } from '../state.js';
-import { escapeHtml, uid, todayStr, hydratePhotoBackgrounds, openLightbox, knownCityMap, COUNTRY_NAME_TO_NATIONALITY } from '../utils.js';
+import { data, queueSave, currentAge, displayAge, computeFlags, distanceMiles, FLAG_FIELD_DEFS, suggestedQuestions, TAG_FIELDS, stripSharedSuffix, recordImportRun, importStatusLine, upsertIdentity, blankConnection } from '../state.js';
+import { escapeHtml, uid, todayStr, hydratePhotoBackgrounds, openLightbox, knownCityMap, COUNTRY_NAME_TO_NATIONALITY, avatarHtml, foldDiacritics } from '../utils.js';
 import { nameKey, editDistance, phoneKey } from '../googlecontacts.js';
 import { storePhoto, fetchProxiedImage } from '../files.js';
 import { photoGet, photoUrl } from '../db.js';
 import { MissingKeyError, compareFaces, translateText, identifyCountry } from '../ai.js';
 import { findPhoneNumbers, findHandles, formatHandle } from '../contactscan.js';
-import { STAGE_RANK, CONN_STAGES, unionInto } from './connections.js';
+import { STAGE_RANK, CONN_STAGES, unionInto, connectionPickerHtml, bindConnPickers, setConnPickerValue } from './connections.js';
 
 // True only if the extracted chat has a message from BOTH sides, not just
 // the user reaching out with no reply — a one-sided "You: hey" isn't
@@ -355,21 +355,29 @@ let queue = []; // raw {name,age,fields,photos} profiles still waiting, from a b
 // one-by-one reviewer via loadFromRaw(), same as everyone else.
 let bulkQueue = [];
 
-// The dropdown puts whoever the name-matcher flagged at the top, in their
-// own group, ahead of the full alphabetical list — 300+ connections is too
-// many to scan for a likely candidate, but hiding the rest entirely would
-// make picking someone the algorithm didn't guess (a real, common case)
-// awkward.
-function optionsFor(chosenId, candidates) {
-const candidateIds = new Set(candidates.map((m) => m.conn.id));
-const rest = data.connections.slice().filter((c) => !candidateIds.has(c.id)).sort((a, b) => a.name.localeCompare(b.name));
-const candidateOptions = candidates
-.map((m) => `<option value="${escapeHtml(m.conn.id)}"${m.conn.id === chosenId ? ' selected' : ''}>${escapeHtml(m.conn.name)}${m.why === 'exact' ? '' : ` (${escapeHtml(m.why)})`}</option>`)
-.join('');
-const restOptions = rest.map((c) => `<option value="${escapeHtml(c.id)}"${c.id === chosenId ? ' selected' : ''}>${escapeHtml(c.name)}</option>`).join('');
-return `<option value=""${chosenId ? '' : ' selected'}>— pick who this is —</option>`
-+ (candidateOptions ? `<optgroup label="Possible matches">${candidateOptions}</optgroup>` : '')
-+ `<optgroup label="All connections">${restOptions}</optgroup>`;
+// Reuses the same searchable avatar+name+caption picker every other
+// cross-connection lookup in the app already uses (travel.js's person
+// picker, planner.js's add-connection picker, Dating admin's own static
+// pickers) -- this was the one place still using a bare <select> of names
+// only, with no photo/age/platform, confirmed inconsistent with the rest
+// of the app. The name-matcher's own likely candidates are still
+// surfaced first -- a plain alphabetical list of 300+ connections is too
+// many to scan for a probable match -- as extra rows ahead of the
+// picker's normal full list, which still includes them again further
+// down; a candidate showing up twice is a fair trade for reusing the
+// shared, already-hydrated component rather than hand-rolling a second
+// grouped-list renderer just for this one picker.
+function tinderPickCandidateRowsHtml(candidates) {
+if (!candidates.length) return '';
+const rows = candidates.map((m) => {
+const c = m.conn;
+const caption = [c.app, displayAge(c), m.why === 'exact' ? '' : m.why].filter(Boolean).join(' · ');
+return `<button type="button" class="conn-picker-row" data-conn-picker-value="${escapeHtml(c.id)}" data-conn-picker-search="${escapeHtml(foldDiacritics(c.name).toLowerCase())}">
+${avatarHtml(c.photoId, c.name, 'sm')}
+<span class="conn-picker-row-info"><strong>${escapeHtml(c.name)}</strong>${caption ? `<span class="compare-caption">${escapeHtml(caption)}</span>` : ''}</span>
+</button>`;
+}).join('');
+return `<div class="settings-note" style="padding:4px 8px 2px;">Possible matches</div>${rows}`;
 }
 
 // One candidate row inside the More Info panel: their FULL existing photo
@@ -1496,7 +1504,7 @@ ${p.photos[0]
 <div class="album-caption"><strong>${escapeHtml(p.name || '(no name found)')}</strong>${p.age ? `, ${escapeHtml(p.age)}` : ''}</div>
 ${secureMatch
 ? `<div class="tinder-field-note">Matched to <strong>${escapeHtml(chosenConn ? chosenConn.name : '')}</strong> by Tinder ID</div>`
-: `<select id="tinder-pick">${optionsFor(p.chosenId, p.candidates)}</select>`}
+: connectionPickerHtml('tinder-pick', '&mdash; pick who this is &mdash;', tinderPickCandidateRowsHtml(p.candidates))}
 </div>
 </div>
 ${flagBreakdownHtml()}
@@ -1550,6 +1558,16 @@ ${moreInfoHtml()}`;
 // first, and vanished again on the very next render (any checkbox
 // toggle, dropdown change, etc. all re-render).
 hydratePhotoBackgrounds(el);
+// bindConnPickers() is a document-level delegated listener, guarded
+// idempotent — safe to call on every render rather than only once.
+// setConnPickerValue restores whatever was already chosen (an earlier
+// exact match, a prior pick, More Info's own "Choose X" button) since
+// the picker itself always starts back on its placeholder otherwise,
+// unlike the old <select>'s `selected` attribute.
+if (!secureMatch) {
+bindConnPickers();
+if (p.chosenId) setConnPickerValue('tinder-pick', p.chosenId, { silent: true });
+}
 
 const confirmPic = el.querySelector('[data-view-photo-confirm]');
 if (confirmPic) confirmPic.addEventListener('click', async () => {
