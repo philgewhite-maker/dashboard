@@ -14,8 +14,8 @@
 // drag sources by tagging the payload's kind: "connection:<id>",
 // "activity:<id>", or "entry:<entryId>" for an already-placed card being
 // dragged to a different day.
-import { data, queueSave, blankPlannerEntry, blankPlannerActivity, isDormantStage, isTravelPaused } from '../state.js';
-import { escapeHtml, uid, todayStr, dateStrAdd, avatarHtml, hydratePhotoBackgrounds, bindForm, foldDiacritics, scrollAndFlash } from '../utils.js';
+import { data, queueSave, blankPlannerEntry, blankPlannerActivity, isDormantStage, isTravelPaused, LEG_DATE_FIELDS } from '../state.js';
+import { escapeHtml, uid, todayStr, dateStrAdd, avatarHtml, hydratePhotoBackgrounds, bindForm, foldDiacritics, scrollAndFlash, parseLooseDateTime } from '../utils.js';
 import { isPriorityConnection, renderConnPicker, bindConnPickers, expandConnection } from './connections.js';
 import { switchTab } from '../tabs.js';
 import { revealTrip } from './travel.js';
@@ -123,13 +123,17 @@ label = escapeHtml(a.title);
 // live to crowd the name off a phone's 2-column day grid. Replaced with
 // signals that cost zero row width: the card's own border (dashed vs
 // solid+rose, via the status-${status} class) and the label's weight
-// (italic vs bold), plus a small dot in place of the pill for the actual
-// click-to-toggle target.
+// (italic vs bold). The dot/plane/remove controls that took the pill's
+// place still crowded a longer name on one line (confirmed live) -- moved
+// onto their own row below the name instead of competing with it for the
+// same line.
 return `<div class="planner-entry alloc-card status-${entry.status}" draggable="true" data-planner-entry="${entry.id}">
 <span class="planner-entry-link"${openAttr}>${avatar}<span class="planner-entry-label">${label}</span></span>
+<div class="planner-entry-controls">
 <button type="button" class="planner-status-dot status-${entry.status}" data-planner-toggle-status="${entry.id}" title="${entry.status === 'draft' ? 'Draft' : 'Firm'} — click to mark ${entry.status === 'draft' ? 'firm' : 'draft'}"></button>
 ${entry.tripId ? `<span class="planner-entry-trip-link" data-planner-open-trip="${entry.tripId}" title="Open this trip on the Travel tab">&#9992;</span>` : ''}
 <span class="planner-entry-remove" data-planner-remove="${entry.id}" title="Remove">&times;</span>
+</div>
 </div>`;
 }
 
@@ -181,50 +185,24 @@ return data.plannerActivities.map((a) => `<div class="planner-pool-card alloc-ca
 </div>`).join('');
 }
 
-// Which of a leg's own fields actually hold a date, per kind -- same field
-// names LEG_FIELD_DEFS (state.js) uses, just narrowed to the ones worth
-// bucketing a leg chip under a specific day for.
-const LEG_DATE_FIELDS = {
-flight: ['departTime', 'arriveTime'],
-car_hire: ['pickupTime', 'dropoffTime'],
-accommodation: ['checkIn', 'checkOut'],
-transfer: ['departTime'],
-other: ['when'],
-};
-
-// A leg's date fields are plain text inputs (travel.js's legFieldRowHtml),
-// not a real date picker -- and the AI email/screenshot extraction is
-// explicitly allowed to fall back to "just what's printed" when it isn't
-// fully confident (ai.js's TRIP_FIELD_GUIDE), not always ISO. An ISO-prefix
-// check alone silently dropped anything else ("10 Sep 2026, 14:30", "Wed 10
-// September") -- confirmed as the actual cause of leg data not
-// consistently showing up here, not any kind of completeness filter.
-// Date.parse() (via `new Date(str)`) handles most human-written formats
-// reasonably; requiring the string to itself contain a 4-digit year first
-// guards against a bare time like "14:30" silently resolving against
-// today's date, which would be a wrong bucket, worse than no bucket at
-// all. Reads the parsed date's LOCAL fields rather than toISOString()
-// (UTC) -- same UTC/local-timezone reasoning dateStrAdd's own fix this
-// session already established.
-function parseLegDateValue(v) {
-const str = String(v || '').trim();
-if (!str) return '';
-const isoMatch = str.match(/^\d{4}-\d{2}-\d{2}/);
-if (isoMatch) return isoMatch[0];
-if (!/\b(19|20)\d{2}\b/.test(str)) return '';
-const parsed = new Date(str);
-if (isNaN(parsed)) return '';
-const y = parsed.getFullYear(), m = String(parsed.getMonth() + 1).padStart(2, '0'), d = String(parsed.getDate()).padStart(2, '0');
-return `${y}-${m}-${d}`;
-}
-
-function legDatesFor(leg) {
+// A leg's date fields are free text (travel.js's legFieldRowHtml normalizes
+// them to a fixed form on capture, but older/AI-extracted values may still
+// be loose) -- parseLooseDateTime (utils.js) is the shared parser travel.js
+// also uses, so both sides tolerate the same shapes identically. `hintYear`
+// corrects a year-less date to the trip's own known year rather than
+// whatever Date.parse would otherwise guess. Doesn't handle a trip spanning
+// a New Year's Eve boundary correctly (a leg dated "2 Jan" would get the
+// trip's START year, not start+1) -- a real but rare imperfection, and a
+// wrong-year bucket is still strictly better than the leg vanishing
+// entirely.
+function legDatesFor(leg, hintYear) {
 const fields = LEG_DATE_FIELDS[leg.kind] || [];
-return fields.map((f) => parseLegDateValue(leg.fields[f])).filter(Boolean);
+return fields.map((f) => parseLooseDateTime(leg.fields[f], hintYear)?.date).filter(Boolean);
 }
 
 function legChipsForDay(trip, dateStr) {
-const legs = trip.legs.filter((l) => legDatesFor(l).includes(dateStr));
+const hintYear = trip.startDate ? parseInt(trip.startDate.slice(0, 4), 10) : undefined;
+const legs = trip.legs.filter((l) => legDatesFor(l, hintYear).includes(dateStr));
 if (!legs.length) return '';
 return `<div class="planner-leg-chips">${legs.map((l) => `<span class="planner-leg-chip" title="Already scheduled — edit on the Travel tab">${escapeHtml(l.label || l.kind)}</span>`).join('')}</div>`;
 }
@@ -235,7 +213,13 @@ return `<div class="planner-leg-chips">${legs.map((l) => `<span class="planner-l
 function tripRangeFor(trip) {
 let start = trip.startDate, end = trip.endDate;
 if (!start || !end) {
-const legDates = trip.legs.flatMap(legDatesFor).sort();
+// Explicit wrapper, not a bare `legDatesFor` reference -- flatMap's
+// callback gets (leg, index, array), and legDatesFor's 2nd param is
+// hintYear; passing it directly would silently feed the array INDEX in as
+// a year (setFullYear(1), setFullYear(2)...) for every leg after the
+// first. No year hint available at this point anyway -- that's exactly
+// what this fallback is trying to establish.
+const legDates = trip.legs.flatMap((l) => legDatesFor(l)).sort();
 if (legDates.length) {
 start = start || legDates[0];
 end = end || legDates[legDates.length - 1];

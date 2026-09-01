@@ -302,6 +302,18 @@ dropoffTime: 'Drop-off time', carType: 'Car type', name: 'Name', address: 'Addre
 checkOut: 'Check-out', contactPhone: 'Contact phone', mode: 'Mode', from: 'From', to: 'To',
 description: 'Description', when: 'When',
 };
+// Which of a leg's own fields actually hold a date (as opposed to a place,
+// reference number, etc.) -- shared by travel.js (normalizes these to a
+// fixed form the moment they're typed in) and planner.js (buckets a leg
+// under the right day in a trip's mini-planner). Living here rather than
+// duplicated in both keeps the field taxonomy in exactly one place.
+const LEG_DATE_FIELDS = {
+flight: ['departTime', 'arriveTime'],
+car_hire: ['pickupTime', 'dropoffTime'],
+accommodation: ['checkIn', 'checkOut'],
+transfer: ['departTime'],
+other: ['when'],
+};
 
 // One dated placement of a connection or an activity into a day box --
 // either the main 14-day grid (tripId: '') or a specific trip's own
@@ -1387,7 +1399,7 @@ isDormantStage, currentAge, displayAge, photoCoverage, photoLinkLabels, averageR
 exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, DEFAULT_PREFS,
 MAIL_SEARCH_KINDS, mailSearchLabel,
 TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureBatch, blankPendingImport, blankConnection,
-blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS,
+blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS, LEG_DATE_FIELDS,
 blankPlannerEntry, blankPlannerActivity,
 CONTACT_STATUS_LABELS, CONTACT_MATCH_MIN_STAGE,
 DEFAULT_RATING_CATEGORIES, slugifyField, DEFAULT_RECIPE_RATING_CATEGORIES,

@@ -24,6 +24,54 @@ dt.setUTCDate(dt.getUTCDate() + days);
 return dt.toISOString().slice(0, 10);
 }
 
+// Parses a loosely-formatted date(+time) string into fixed components,
+// tolerant of the shapes a trip leg's date fields actually hold (free
+// text -- travel.js's legFieldRowHtml, not a real date input; see its own
+// comment) -- ISO ("2026-09-19T15:00" or "2026-09-19"), day/month[/year]
+// as this app is used in throughout (en-GB, "19/09/2026") -- confirmed
+// live as a real leg that went missing here: JS's own Date.parse assumes
+// US month-first order for slash dates, so "19/09/2026" either fails
+// outright (day > 12, no such month) or, worse, silently parses as the
+// WRONG date when day <= 12 ("03/04/2026" as 3 April, not 4 March) -- and
+// free text Date.parse can otherwise make sense of ("15 Sep 2026, 14:30").
+// Returns {date:'YYYY-MM-DD', time:'HH:MM'} (time '' if none found), or
+// null if nothing recognizable. `hintYear` corrects a year-less date (very
+// common on accommodation confirmations -- "Check-in: 15 Sep") to a known
+// year instead of trusting whatever year Date.parse would otherwise guess
+// (usually "now", wrong once the trip isn't this year).
+function parseLooseDateTime(v, hintYear) {
+const str = String(v || '').trim();
+if (!str) return null;
+const timeMatch = str.match(/\b(\d{1,2}):(\d{2})\s*(am|pm)?\b/i);
+let time = '';
+if (timeMatch) {
+let h = parseInt(timeMatch[1], 10);
+const ap = (timeMatch[3] || '').toLowerCase();
+if (ap === 'pm' && h < 12) h += 12;
+if (ap === 'am' && h === 12) h = 0;
+time = `${String(h).padStart(2, '0')}:${timeMatch[2]}`;
+}
+const isoMatch = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+if (isoMatch) return { date: isoMatch[0], time };
+const dmy = str.match(/(\d{1,2})[/\-.](\d{1,2})(?:[/\-.](\d{2,4}))?/);
+if (dmy) {
+const day = parseInt(dmy[1], 10), month = parseInt(dmy[2], 10);
+if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+let year = dmy[3] ? parseInt(dmy[3], 10) : hintYear;
+if (year && year < 100) year += 2000;
+if (year) return { date: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`, time };
+}
+}
+if (/^\d{1,2}:\d{2}\s*(am|pm)?$/i.test(str)) return null; // just a time, no date content at all
+const parsed = new Date(str);
+if (isNaN(parsed)) return null;
+if (hintYear && !/\b(19|20)\d{2}\b/.test(str)) parsed.setFullYear(hintYear);
+// LOCAL fields, not toISOString() (UTC) -- same UTC/local-timezone
+// reasoning dateStrAdd's own fix this session already established.
+const y = parsed.getFullYear(), m = String(parsed.getMonth() + 1).padStart(2, '0'), d = String(parsed.getDate()).padStart(2, '0');
+return { date: `${y}-${m}-${d}`, time };
+}
+
 function last7Dates() {
 const arr = [];
 for (let i = 6; i >= 0; i--) arr.push(daysAgoStr(i));
@@ -959,7 +1007,7 @@ return classified.every((c) => c.isScreenshot) && looksLikeSameScreenshotPieces(
 }
 
 export {
-todayStr, daysAgoStr, dateStrAdd, last7Dates, uid, daysSince, daysUntil, foldDiacritics,
+todayStr, daysAgoStr, dateStrAdd, parseLooseDateTime, last7Dates, uid, daysSince, daysUntil, foldDiacritics,
 escapeHtml, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, buildFlagMatcher, applyFlagMatcher, knownCityMap, scrollAndFlash, bindForm,
 findMentions, COUNTRY_NAME_TO_NATIONALITY,
 resizeImageToBlob, fileToBase64, loadImage, cropThumbnailToBlob,

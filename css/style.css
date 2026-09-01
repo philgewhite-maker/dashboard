@@ -2028,9 +2028,14 @@ border-style:dashed;
 .planner-entry.status-firm{border-style:solid;border-color:var(--rose);}
 .planner-entry.status-draft .planner-entry-label{font-style:italic;}
 .planner-entry.status-firm .planner-entry-label{font-weight:700;}
-.planner-entry-link{display:inline-flex;align-items:center;gap:6px;min-width:0;flex:1;}
+/* flex-basis:100% on the name row forces the controls row (below) onto its
+   own line rather than competing with the name for the same one -- was a
+   single row before (avatar+name+dot+plane+×), confirmed live to crowd a
+   longer name out even with the pill already gone. */
+.planner-entry-link{display:flex;align-items:center;gap:6px;min-width:0;flex:1 0 100%;}
 .planner-entry-link[data-planner-open-connection]{cursor:pointer;}
 .planner-entry-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.planner-entry-controls{flex:0 0 100%;display:flex;align-items:center;justify-content:flex-end;gap:8px;}
 .planner-status-dot{
 width:9px;height:9px;border-radius:50%;flex-shrink:0;cursor:pointer;
 border:1.5px solid var(--muted);padding:0;background:transparent;

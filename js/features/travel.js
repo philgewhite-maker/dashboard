@@ -6,8 +6,8 @@
 // notionplan.js already uses for a project task ↔ its Notion page. The
 // detail has to live here rather than in Notion because the itinerary
 // export has to work fully offline.
-import { data, queueSave, blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS } from '../state.js';
-import { escapeHtml, uid, dateStrAdd, hydratePhotoBackgrounds } from '../utils.js';
+import { data, queueSave, blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS, LEG_DATE_FIELDS } from '../state.js';
+import { escapeHtml, uid, dateStrAdd, hydratePhotoBackgrounds, parseLooseDateTime } from '../utils.js';
 import { deleteAttachment, formatBytes, openAttachment } from '../files.js';
 
 function tripById(id) { return data.trips.find((t) => t.id === id); }
@@ -62,7 +62,20 @@ return leg;
 function updateLegField(tripId, legId, field, value) {
 const leg = legById(tripId, legId);
 if (!leg) return;
-const v = String(value || '').trim();
+let v = String(value || '').trim();
+// Date-bearing fields get enforced to one fixed form the moment they're
+// typed in -- "19/09/2026" becomes "2026-09-19 15:00" -- rather than
+// staying free text that only gets tolerantly re-parsed downstream every
+// time planner.js needs to bucket the leg under a day. Left exactly as
+// typed if it doesn't parse as a date at all (never silently discard
+// what the user actually wrote); the trip's own startDate corrects a
+// year-less value ("Check-in: 15 Sep") to the trip's real year.
+if (v && (LEG_DATE_FIELDS[leg.kind] || []).includes(field)) {
+const trip = tripById(tripId);
+const hintYear = trip?.startDate ? parseInt(trip.startDate.slice(0, 4), 10) : undefined;
+const parsed = parseLooseDateTime(v, hintYear);
+if (parsed) v = parsed.time ? `${parsed.date} ${parsed.time}` : parsed.date;
+}
 if (v) { leg.fields[field] = v; delete leg.gapStatus[field]; }
 else delete leg.fields[field];
 queueSave();
@@ -167,10 +180,20 @@ function enrichLegFromExtraction(tripId, legId, extraction) {
 const leg = legById(tripId, legId);
 if (!leg) return { filled: 0 };
 if (extraction.kind && LEG_KINDS.includes(extraction.kind) && leg.kind === 'other') leg.kind = extraction.kind;
+const trip = tripById(tripId);
+const hintYear = trip?.startDate ? parseInt(trip.startDate.slice(0, 4), 10) : undefined;
 let filled = 0;
 Object.entries(extraction.fields || {}).forEach(([k, v]) => {
-const val = String(v || '').trim();
+let val = String(v || '').trim();
 if (!val || !(LEG_FIELD_DEFS[leg.kind] || []).includes(k)) return;
+// Same fixed-form enforcement updateLegField applies to manual entry --
+// the AI extraction is explicitly allowed to write "just what's printed"
+// when unsure (ai.js's TRIP_FIELD_GUIDE), so a date field landing here
+// needs exactly the same normalization, not a second, divergent path.
+if ((LEG_DATE_FIELDS[leg.kind] || []).includes(k)) {
+const parsed = parseLooseDateTime(val, hintYear);
+if (parsed) val = parsed.time ? `${parsed.date} ${parsed.time}` : parsed.date;
+}
 leg.fields[k] = val;
 delete leg.gapStatus[k];
 filled++;
