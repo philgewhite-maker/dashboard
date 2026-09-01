@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v177</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v178</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -410,6 +410,20 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
     if (m) { name = m[1].trim(); age = m[2]; } else { name = h1.textContent.trim(); }
   }
 
+  // If the visible profile changes mid-extraction -- clicking elsewhere in
+  // the tab, or the SPA re-rendering on its own -- reading on would mix
+  // that OTHER profile's photos/fields into this one's result. Checked
+  // before each photo-carousel click, same as the bulk snippet's own
+  // version of this (see its comment for the confirmed-live case this
+  // caught).
+  function assertStillHere() {
+    const h1El = root.querySelector('h1[aria-label]');
+    const label = h1El ? (h1El.getAttribute('aria-label') || '') : '';
+    if (!label.toLowerCase().startsWith(String(name || '').toLowerCase())) {
+      throw new Error(`Page moved to a different profile mid-extraction (expected "${name}", now showing "${label}") -- stop and re-run rather than mixing up photos or fields.`);
+    }
+  }
+
   const fields = [];
   // Set once the chat-history block below finds it, so the photo scan
   // further down can exclude it &mdash; a sender's own small avatar next to
@@ -720,11 +734,18 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
 
   // Photos load from a public CDN with no login needed (verified) &mdash;
   // unlike Google Photos, no byte-capture trick is needed. But the carousel
-  // only keeps the CURRENTLY shown photo in the DOM at all &mdash; the rest
-  // are virtualized until you actually click to them (verified: a captured
-  // page mid-scroll only ever had ONE of this profile's photos as a real
-  // URL, out of 8). So click through every numbered photo tab, collecting
-  // whatever newly appears each time, rather than a single one-shot scan.
+  // is virtualized -- only ~1-2 slides stay mounted in the DOM at once,
+  // around whatever the current position is (confirmed live: sitting on
+  // photo 9 of a real 9-photo profile, only photos 8 and 9 had ANY DOM
+  // element at all -- 1 through 7 simply weren't there). Clicking through
+  // every numbered tab and scanning the WHOLE panel after one fixed wait
+  // each time -- the previous fix for this same virtualization -- still
+  // missed most photos whenever the mount/unmount timing didn't happen to
+  // line up with when the scan ran (confirmed live: 6 of 9 photos missing
+  // on a real profile). Reading each clicked slide's OWN aria-label
+  // directly, with a short poll instead of one fixed wait, doesn't care
+  // how many neighbours are or aren't mounted at that moment -- only
+  // whether THIS specific slide has shown up yet.
   //
   // Scanned across the whole panel (root), same as before this session's
   // fixes &mdash; a narrower scope (the smallest element wrapping every
@@ -732,10 +753,9 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
   // photo capture entirely, most likely because the actual photo elements
   // live outside whatever that computed ancestor turned out to be, an
   // assumption about the carousel's DOM shape that was never independently
-  // verified. chatCard exclusion (a real, verified container) plus the
-  // folder-id filter below are the actual defenses against a stray photo
-  // from elsewhere in the panel — both are independent of scan scope, so
-  // narrowing the scope was never actually necessary for that.
+  // verified. The folder-id filter below is the actual defense against a
+  // stray photo from elsewhere in the panel — independent of scan scope,
+  // so narrowing the scope was never actually necessary for that.
   const photoButtons = $$('button[aria-label^="Photo "]');
 
   // The same photo can turn up under more than one URL shape in one scan
@@ -752,26 +772,45 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
   }
   const photoMap = new Map();
   const folderCounts = new Map();
-  const scanPhotos = () =&gt; {
-    $$('*').forEach((el) =&gt; {
-      if (chatCard &amp;&amp; chatCard.contains(el)) return;
-      const b = getComputedStyle(el).backgroundImage;
-      const m = b &amp;&amp; b.match(/url\("([^"]+)"\)/);
-      if (!m || !m[1].includes('gotinder.com')) return;
-      const url = m[1].replace(/\/\d+x\d+_/, '/640x800_');
-      const key = photoKey(url);
-      if (photoMap.has(key)) return;
+  function recordPhotoSlide(n) {
+    const el = root.querySelector(`[aria-label="Profile photo ${n}"]`);
+    if (!el) return false;
+    const b = getComputedStyle(el).backgroundImage;
+    const m = b &amp;&amp; b.match(/url\("([^"]+)"\)/);
+    if (!m || !m[1].includes('gotinder.com')) return false;
+    const url = m[1].replace(/\/\d+x\d+_/, '/640x800_');
+    const key = photoKey(url);
+    if (!photoMap.has(key)) {
       const folderMatch = url.match(/gotinder\.com\/([a-zA-Z0-9]+)\//);
       const folder = folderMatch ? folderMatch[1] : null;
       photoMap.set(key, { url, folder });
       if (folder) folderCounts.set(folder, (folderCounts.get(folder) || 0) + 1);
-    });
-  };
-  scanPhotos();
-  for (const btn of photoButtons) {
-    btn.click();
-    await new Promise((r) =&gt; setTimeout(r, 300));
-    scanPhotos();
+    }
+    return true;
+  }
+  // Two passes, not one uniform slow one -- confirmed live, under 5% of
+  // photos actually need more than a short wait to mount. A single fast
+  // check per photo (150ms, faster than the old flat 300ms) catches
+  // those immediately; only whatever it actually misses pays the slower,
+  // patient retry below, so a normal 9-photo profile isn't held up
+  // waiting on a worst case that usually doesn't happen.
+  const missedSlides = [];
+  for (let i = 0; i &lt; photoButtons.length; i++) {
+    assertStillHere();
+    photoButtons[i].click();
+    await new Promise((r) =&gt; setTimeout(r, 150));
+    assertStillHere();
+    if (!recordPhotoSlide(i + 1)) missedSlides.push(i + 1);
+  }
+  for (const n of missedSlides) {
+    assertStillHere();
+    if (photoButtons[n - 1]) photoButtons[n - 1].click();
+    let found = false;
+    for (let attempt = 0; attempt &lt; 10 &amp;&amp; !found; attempt++) {
+      await new Promise((r) =&gt; setTimeout(r, 100));
+      found = recordPhotoSlide(n);
+    }
+    assertStillHere();
   }
 
   // Every real photo of one person shares the same Tinder folder id in its
@@ -1043,15 +1082,26 @@ async function extractProfile(expectedName) {
       }
     });
 
+    // The carousel is virtualized -- only ~1-2 slides stay mounted at
+    // once, around whatever the current position is (confirmed live:
+    // sitting on photo 9 of a real 9-photo profile, only photos 8 and 9
+    // had ANY DOM element at all). Scanning the whole panel after one
+    // fixed wait per click -- the previous fix for this same
+    // virtualization -- still missed most photos whenever the mount/
+    // unmount timing didn't line up with when the scan ran (confirmed
+    // live: 6 of 9 missing on a real profile). Reading each clicked
+    // slide's OWN aria-label directly, with a short poll instead of one
+    // fixed wait, doesn't care how many neighbours are or aren't mounted
+    // at that moment -- only whether THIS slide has shown up yet.
+    //
     // Scanned across the whole panel (root), same as before this session's
     // fixes &mdash; a narrower scope (the smallest element wrapping every
     // "Photo N" tab button) was tried and reverted: confirmed live, it
     // broke photo capture entirely, most likely because the actual photo
     // elements live outside whatever that computed ancestor turned out to
     // be, an assumption about the carousel's DOM shape that was never
-    // independently verified. chatCard exclusion (a real, verified
-    // container) plus the folder-id filter below are the actual defenses
-    // against a stray photo from elsewhere in the panel — both are
+    // independently verified. The folder-id filter below is the actual
+    // defense against a stray photo from elsewhere in the panel —
     // independent of scan scope, so narrowing the scope was never
     // actually necessary for that.
     const photoButtons = $$('button[aria-label^="Photo "]');
@@ -1063,29 +1113,42 @@ async function extractProfile(expectedName) {
     }
     const photoMap = new Map();
     const folderCounts = new Map();
-    const scanPhotos = () =&gt; {
-      $$('*').forEach((el) =&gt; {
-        if (chatCard &amp;&amp; chatCard.contains(el)) return;
-        const b = getComputedStyle(el).backgroundImage;
-        const m = b &amp;&amp; b.match(/url\("([^"]+)"\)/);
-        if (!m || !m[1].includes('gotinder.com')) return;
-        const url = m[1].replace(/\/\d+x\d+_/, '/640x800_');
-        const key = photoKey(url);
-        if (photoMap.has(key)) return;
+    function recordPhotoSlide(n) {
+      const el = root.querySelector(`[aria-label="Profile photo ${n}"]`);
+      if (!el) return false;
+      const b = getComputedStyle(el).backgroundImage;
+      const m = b &amp;&amp; b.match(/url\("([^"]+)"\)/);
+      if (!m || !m[1].includes('gotinder.com')) return false;
+      const url = m[1].replace(/\/\d+x\d+_/, '/640x800_');
+      const key = photoKey(url);
+      if (!photoMap.has(key)) {
         const folderMatch = url.match(/gotinder\.com\/([a-zA-Z0-9]+)\//);
         const folder = folderMatch ? folderMatch[1] : null;
         photoMap.set(key, { url, folder });
         if (folder) folderCounts.set(folder, (folderCounts.get(folder) || 0) + 1);
-      });
-    };
-    assertStillHere();
-    scanPhotos();
-    for (const btn of photoButtons) {
+      }
+      return true;
+    }
+    // Two passes, not one uniform slow one -- see the single-profile
+    // snippet's version of this block for why (confirmed live: under 5%
+    // of photos actually need more than a short wait).
+    const missedSlides = [];
+    for (let i = 0; i &lt; photoButtons.length; i++) {
       assertStillHere();
-      btn.click();
-      await new Promise((r) =&gt; setTimeout(r, 300));
+      photoButtons[i].click();
+      await new Promise((r) =&gt; setTimeout(r, 150));
       assertStillHere();
-      scanPhotos();
+      if (!recordPhotoSlide(i + 1)) missedSlides.push(i + 1);
+    }
+    for (const n of missedSlides) {
+      assertStillHere();
+      if (photoButtons[n - 1]) photoButtons[n - 1].click();
+      let found = false;
+      for (let attempt = 0; attempt &lt; 10 &amp;&amp; !found; attempt++) {
+        await new Promise((r) =&gt; setTimeout(r, 100));
+        found = recordPhotoSlide(n);
+      }
+      assertStillHere();
     }
 
     // Every real photo of one person shares the same Tinder folder id in
@@ -1181,7 +1244,7 @@ async function waitForProfile(expectedName, timeoutMs) {
 // someone already saved is safe either way -- the dashboard fills in
 // whatever's still missing rather than duplicating what's already
 // there.
-const SCRIPT_VERSION = 7; // "You" messages (no <strong> sender label, no <time> of their own) were silently DROPPED, not just mis-dated -- a real opening message vanished, leaving just a one-emoji wave-back
+const SCRIPT_VERSION = 8; // photo capture missed most of a profile's photos on a real 9-photo profile (only photos 8-9 caught) -- the virtualized carousel's mount timing didn't reliably line up with a single fixed-wait scan
 const DONE_KEY = 'dashTinderBulkDone';
 const MIN_DELAY_MS = 10000, MAX_DELAY_MS = 60000; // randomised, not a fixed interval &mdash; a fixed gap is a bot tell
 
