@@ -1452,6 +1452,9 @@ const v = String(value || '').trim();
 if (!v) return;
 if (pending[overrideKey].some((c) => c.toLowerCase() === v.toLowerCase())) return;
 pending[overrideKey].push(v);
+// No longer a bare fallback value once the user (or a suggestion click)
+// has actually added something -- see refreshOverrides()'s own comment.
+if (pending.overrideFallbackFrom) delete pending.overrideFallbackFrom[overrideKey];
 }
 
 // Shared by every inline click-to-add hit (a detected country name, a
@@ -1707,6 +1710,7 @@ if (stageSel) stageSel.addEventListener('change', () => { pending.stageOverride 
 el.querySelectorAll('[data-tinder-city-remove]').forEach((x) => {
 x.addEventListener('click', () => {
 pending.cityOverride.splice(parseInt(x.dataset.tinderCityRemove, 10), 1);
+if (pending.overrideFallbackFrom) delete pending.overrideFallbackFrom.cityOverride;
 render();
 });
 });
@@ -1729,6 +1733,7 @@ if (cityAddBtn) cityAddBtn.addEventListener('click', commitCityAdd);
 el.querySelectorAll('[data-tinder-chip-remove]').forEach((x) => {
 x.addEventListener('click', () => {
 pending[x.dataset.tinderChipRemove].splice(parseInt(x.dataset.tinderChipIdx, 10), 1);
+if (pending.overrideFallbackFrom) delete pending.overrideFallbackFrom[x.dataset.tinderChipRemove];
 render();
 });
 });
@@ -2210,6 +2215,17 @@ return v ? [v] : [];
 languagesOverride: initChipOverride(fields, ['Languages'], true),
 nationalityOverride: initChipOverride(fields, ['Nationality'], false),
 relationshipOverride: initChipOverride(fields, ['Orientation', 'Relationship type', 'Looking for'], false),
+// Tracks which override fields currently hold a FALLBACK value copied in
+// by refreshOverrides() from whichever connection is picked (as opposed
+// to something from the actual scrape, or typed/edited by hand) -- keyed
+// by override field name, value is the connection id it came from. See
+// refreshOverrides()'s own comment: this is what lets switching the
+// picker to a DIFFERENT connection correctly drop a stale fallback value
+// instead of carrying the wrong person's city/nationality/etc. forward
+// onto whoever's newly picked. Never set here at construction time --
+// nothing in buildPending() is fallback-derived yet, only refreshOverrides
+// (called right after, on every load) fills that in.
+overrideFallbackFrom: {},
 stageOverride: 'Matched',
 ratingOverride: 0,
 // Orthogonal to Stage (see isTravelPaused in state.js) -- seeded from
@@ -2364,26 +2380,46 @@ return { bulk, review };
 }
 
 // Re-suggests Stage and Rating for whichever connection is now chosen —
-// called on load and every time chosenId changes. City isn't touched
-// here: it comes from the extracted text, not from who's picked, and
-// re-deriving it on every pick would blow away anything the user just
-// typed.
+// called on load and every time chosenId changes.
+//
+// City/Languages/Nationality/Relationship each fall back to showing
+// whatever's already saved on the matched connection when the import
+// itself didn't mention one -- otherwise the field reads blank even when
+// real data is on file, which looks like data loss rather than just
+// nothing new to report. That fallback used to have no memory of WHERE it
+// came from: switching the picker to a different connection left the
+// FIRST connection's city/nationality/etc. sitting in the override,
+// looking identical to a genuine scrape value or a manual edit -- so
+// Saving would silently write person A's city onto person B's record.
+// Confirmed live as a real bug, not theoretical.
+//
+// overrideFallbackFrom (set on p by buildPending) tracks, per field,
+// which connection id a currently-fallback-filled value actually came
+// from. addChipValue()/the chip-remove handlers clear a field's entry
+// the instant the user touches it by hand (typed, clicked a suggestion,
+// removed a chip) -- from that point it's treated as owned, never
+// auto-dropped. A field the scrape itself provided never gets an entry
+// here at all, so it's equally immune. Only a value that's STILL exactly
+// what fallback put there, unmodified, gets cleared -- and only when the
+// connection has actually changed since.
 function refreshOverrides(p = pending) {
 const conn = data.connections.find((c) => c.id === p.chosenId);
+const connId = conn ? conn.id : '';
 p.stageOverride = suggestedStage(conn, p);
 p.ratingOverride = conn ? (conn.priority || 0) : 0;
 p.travelStatusOverride = conn ? (conn.travelStatus || '') : '';
 p.travelUntilOverride = conn ? (conn.travelUntil || '') : '';
-// If nothing in THIS import's own text mentioned a city, the field falls
-// back to showing what's already saved on the matched connection --
-// otherwise it reads blank even when a city genuinely is on file, which
-// looks like the data was lost rather than just not re-extracted this
-// time. Only when cityOverride is still empty: never overwrites a value
-// that came from the fresh scrape, or that the user has since typed.
-if (conn && !p.cityOverride.length && (conn.location || []).length) p.cityOverride = [...conn.location];
-// Same fallback for the Languages/Nationality/Relationship chip editors.
-Object.entries(CHIP_OVERRIDE_META).forEach(([overrideKey, { target }]) => {
-if (conn && !p[overrideKey].length && (conn[target] || []).length) p[overrideKey] = [...conn[target]];
+if (!p.overrideFallbackFrom) p.overrideFallbackFrom = {};
+const FALLBACK_TARGETS = { cityOverride: 'location', ...Object.fromEntries(Object.entries(CHIP_OVERRIDE_META).map(([k, v]) => [k, v.target])) };
+Object.entries(FALLBACK_TARGETS).forEach(([overrideKey, target]) => {
+if (p.overrideFallbackFrom[overrideKey] && p.overrideFallbackFrom[overrideKey] !== connId) {
+p[overrideKey] = [];
+delete p.overrideFallbackFrom[overrideKey];
+}
+if (conn && !p[overrideKey].length && (conn[target] || []).length) {
+p[overrideKey] = [...conn[target]];
+p.overrideFallbackFrom[overrideKey] = connId;
+}
 });
 // A single-value field (Distance, Job, City...) that's already set on the
 // matched connection defaults to unchecked, not disabled -- overwriting
