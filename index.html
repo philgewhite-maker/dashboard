@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v176</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v177</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -627,10 +627,33 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
     }
     const messages = [];
     let lastMessageDate = null;
+    // Coarse fallback date for a message with no <time> of its own (see
+    // below) -- updated as a "Messages from 30 August 2026"-style divider
+    // row is passed. Better than leaving a real message dateless. Primed
+    // with the FIRST divider found anywhere in the list (not just ones
+    // already walked past) -- confirmed live as necessary: an opening
+    // message with no <time> of its own sits BEFORE the very first
+    // divider in DOM order, so a walk-forward-only value is still empty
+    // by the time that message is read; same-day as the next divider it
+    // precedes is the best available guess.
+    let currentDayFromDivider = '';
     if (list) {
+      const firstDivider = [...list.querySelectorAll('li')].find((li) =&gt; !li.querySelector('[role="article"]') &amp;&amp; li.querySelector('time[datetime]'));
+      if (firstDivider) {
+        const d = new Date(firstDivider.querySelector('time[datetime]').getAttribute('datetime'));
+        if (!isNaN(d)) currentDayFromDivider = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      }
       [...list.querySelectorAll('li')].forEach((li) =&gt; {
         const article = li.querySelector('[role="article"]');
-        if (!article) return; // a "Messages from ..." day-divider row, not a message
+        if (!article) {
+          // A "Messages from ..." day-divider row, not a message.
+          const dividerTime = li.querySelector('time[datetime]');
+          if (dividerTime) {
+            const d = new Date(dividerTime.getAttribute('datetime'));
+            if (!isNaN(d)) currentDayFromDivider = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+          }
+          return;
+        }
         const timeEl = article.querySelector('time[datetime]');
         // A real Date, not a slice of the raw (UTC) attribute string — its
         // local getters land on whatever this snippet's own browser (the
@@ -638,10 +661,20 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
         // the "Sent at HH:MM" Tinder itself shows next to the message, and
         // correctly handles the local-midnight day boundary too.
         const sentAt = timeEl ? new Date(timeEl.getAttribute('datetime')) : null;
-        const date = sentAt ? `${sentAt.getFullYear()}-${String(sentAt.getMonth() + 1).padStart(2, '0')}-${String(sentAt.getDate()).padStart(2, '0')}` : '';
+        const date = sentAt ? `${sentAt.getFullYear()}-${String(sentAt.getMonth() + 1).padStart(2, '0')}-${String(sentAt.getDate()).padStart(2, '0')}` : currentDayFromDivider;
         const time = sentAt ? `${String(sentAt.getHours()).padStart(2, '0')}:${String(sentAt.getMinutes()).padStart(2, '0')}` : '';
-        const senderEl = article.querySelector('strong');
-        const sender = senderEl ? senderEl.textContent.replace(/:\s*$/, '').trim() : '';
+        // A message YOU sent carries no &lt;strong&gt; sender label and no
+        // &lt;time&gt; of its own at all -- confirmed against real captured
+        // markup: Tinder only renders those for the OTHER person's bubble.
+        // The old &lt;strong&gt;-only version silently DROPPED every "You"
+        // message outright (sender came back '' and failed the sender &amp;&amp;
+        // body gate below) -- confirmed live: a real opening message
+        // vanished entirely, leaving only the one-emoji wave-back that
+        // followed it. .msg--received identifies a RECEIVED bubble
+        // directly and needs no per-message name tag at all, so it also
+        // can't be fooled by Tinder omitting &lt;strong&gt; on a received
+        // message that's part of a consecutive run from the same sender.
+        const sender = article.querySelector('.msg--received') ? name : 'You';
         // A message can render its text across more than one .text-classed
         // element -- e.g. a shared link's own block sitting alongside the
         // written text. querySelector only ever returned the first,
@@ -650,7 +683,7 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
         const bodyEls = [...article.querySelectorAll('.text')];
         const body = bodyEls.map((el) =&gt; el.textContent.trim()).filter(Boolean).join(' ');
         if (sender &amp;&amp; body) {
-          messages.push(`[${date ? `${date} ${time}` : time}] ${sender}: ${body}`);
+          messages.push(`[${date ? `${date}${time ? ' ' + time : ''}` : time}] ${sender}: ${body}`);
           if (date) lastMessageDate = date;
         }
       });
@@ -952,22 +985,41 @@ async function extractProfile(expectedName) {
       }
       const messages = [];
       let lastMessageDate = null;
+      // See the single-profile snippet's version of this block for why --
+      // fallback date for a message with no &lt;time&gt; of its own, primed
+      // with the FIRST divider found anywhere (not just ones already
+      // walked past), since a dateless opening message sits BEFORE it.
+      let currentDayFromDivider = '';
       if (list) {
+        const firstDivider = [...list.querySelectorAll('li')].find((li) =&gt; !li.querySelector('[role="article"]') &amp;&amp; li.querySelector('time[datetime]'));
+        if (firstDivider) {
+          const d = new Date(firstDivider.querySelector('time[datetime]').getAttribute('datetime'));
+          if (!isNaN(d)) currentDayFromDivider = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        }
         [...list.querySelectorAll('li')].forEach((li) =&gt; {
           const article = li.querySelector('[role="article"]');
-          if (!article) return;
+          if (!article) {
+            const dividerTime = li.querySelector('time[datetime]');
+            if (dividerTime) {
+              const d = new Date(dividerTime.getAttribute('datetime'));
+              if (!isNaN(d)) currentDayFromDivider = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+            }
+            return;
+          }
           const timeEl = article.querySelector('time[datetime]');
           const sentAt = timeEl ? new Date(timeEl.getAttribute('datetime')) : null;
-          const date = sentAt ? `${sentAt.getFullYear()}-${String(sentAt.getMonth() + 1).padStart(2, '0')}-${String(sentAt.getDate()).padStart(2, '0')}` : '';
+          const date = sentAt ? `${sentAt.getFullYear()}-${String(sentAt.getMonth() + 1).padStart(2, '0')}-${String(sentAt.getDate()).padStart(2, '0')}` : currentDayFromDivider;
           const time = sentAt ? `${String(sentAt.getHours()).padStart(2, '0')}:${String(sentAt.getMinutes()).padStart(2, '0')}` : '';
-          const senderEl = article.querySelector('strong');
-          const sender = senderEl ? senderEl.textContent.replace(/:\s*$/, '').trim() : '';
-          // See the single-profile snippet's version of this block -- a
-          // message's text can span more than one .text-classed element.
+          // See the single-profile snippet's version of this block for why
+          // -- a message YOU sent has no &lt;strong&gt; sender label and no
+          // &lt;time&gt; of its own at all, which silently dropped every "You"
+          // message outright under the old &lt;strong&gt;-only version.
+          const sender = article.querySelector('.msg--received') ? expectedName : 'You';
+          // A message's text can span more than one .text-classed element.
           const bodyEls = [...article.querySelectorAll('.text')];
           const body = bodyEls.map((el) =&gt; el.textContent.trim()).filter(Boolean).join(' ');
           if (sender &amp;&amp; body) {
-            messages.push(`[${date ? `${date} ${time}` : time}] ${sender}: ${body}`);
+            messages.push(`[${date ? `${date}${time ? ' ' + time : ''}` : time}] ${sender}: ${body}`);
             if (date) lastMessageDate = date;
           }
         });
@@ -1129,7 +1181,7 @@ async function waitForProfile(expectedName, timeoutMs) {
 // someone already saved is safe either way -- the dashboard fills in
 // whatever's still missing rather than duplicating what's already
 // there.
-const SCRIPT_VERSION = 6; // chat dates now come from each message's own timestamp, not a nearby divider guess
+const SCRIPT_VERSION = 7; // "You" messages (no <strong> sender label, no <time> of their own) were silently DROPPED, not just mis-dated -- a real opening message vanished, leaving just a one-emoji wave-back
 const DONE_KEY = 'dashTinderBulkDone';
 const MIN_DELAY_MS = 10000, MAX_DELAY_MS = 60000; // randomised, not a fixed interval &mdash; a fixed gap is a bot tell
 
@@ -1492,6 +1544,20 @@ window.tinderFindUnmatched = async () => {
 // so a normal paste seeds it with zero extra typing -- callable by hand
 // too, e.g. after importing profiles from somewhere this browser never
 // ran the snippet against.
+//
+// KNOWN EDGE CASE: this stamps ids at the CURRENT SCRIPT_VERSION, trusting
+// that whatever the dashboard already has for them is fine -- it has no
+// way to know whether that data actually reflects the current version's
+// extraction logic or an older, since-fixed one (there's no per-
+// connection "captured at script version N" record, only
+// tinderLastScrapedAt, a timestamp). So a SCRIPT_VERSION bump meant to
+// force everyone to be re-checked (per the comment above SCRIPT_VERSION)
+// gets silently defeated the next time this seeds someone at the NEW
+// version without them having actually been re-scraped. tinderCatchUp()'s
+// Messages-tab sweep doesn't have this problem -- it never consults
+// doneVersions at all, it just re-opens everyone with activity since a
+// date -- so THAT (not a SCRIPT_VERSION bump + tinderBulkImport) is the
+// reliable way to force a real re-verification after a fix like this one.
 window.tinderSeedDone = (ids) =&gt; {
   const idSet = new Set((ids || []).filter(Boolean));
   const doneVersions = loadDoneVersions();
