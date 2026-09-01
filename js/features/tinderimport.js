@@ -1974,6 +1974,14 @@ if (p.ratingOverride) conn.priority = p.ratingOverride;
 conn.travelStatus = p.travelStatusOverride || '';
 if (p.travelStatusOverride === 'travelling') conn.travelUntil = p.travelUntilOverride;
 if (p.matchId && !conn.tinderMatchId) conn.tinderMatchId = p.matchId;
+// Stamped on every successful save, not just the first -- this is the
+// dashboard-side signal the "Copy bulk-import snippet" button feeds back
+// into the console snippet's stale-profile sweep (tinderSeedStale below),
+// so staleness is driven by when the DASHBOARD actually last got fresh
+// data for this person, not by whichever browser happened to run the
+// snippet last -- the same cross-session reasoning tinderSeedDone already
+// established for the done-list.
+conn.tinderLastScrapedAt = new Date().toISOString();
 upsertIdentity(conn, { platform: 'Tinder', handle: p.name, matchId: p.matchId });
 
 queueSave();
@@ -2481,18 +2489,22 @@ const bulkCopyBtn = document.getElementById('tinder-bulk-copy-snippet');
 if (bulkCopyBtn) {
 bulkCopyBtn.addEventListener('click', async () => {
 try {
-// Appends a call to the snippet's own tinderSeedDone() with every
-// tinderMatchId this dashboard already has, so pasting it primes
-// localStorage's doneVersions immediately -- tinderBulkImport()/
-// tinderCatchUp() skip all of them from the very first run, at zero
-// cost (no profile opens, no anti-bot delay), instead of relying on
-// THIS browser having personally scraped them before. Matters most
-// on a fresh browser/profile or after site data was cleared, where
-// localStorage otherwise remembers nothing and every match the
-// dashboard already has looks brand-new again.
-const knownIds = data.connections.map((c) => c.tinderMatchId).filter(Boolean);
+// Appends calls to the snippet's own tinderSeedDone()/tinderSeedStale()
+// with every tinderMatchId this dashboard already has (plus, for the
+// latter, when it was last actually refreshed), so pasting it primes
+// localStorage immediately -- tinderBulkImport()/tinderCatchUp() skip
+// known matches from the very first run at zero cost (no profile opens,
+// no anti-bot delay) instead of relying on THIS browser having personally
+// scraped them before, and their own tail-end stale-profile sweep knows
+// who's genuinely most overdue for a recheck by the DASHBOARD's own
+// record, not whichever browser happened to run the snippet last.
+// Matters most on a fresh browser/profile or after site data was
+// cleared, where localStorage otherwise remembers nothing.
+const known = data.connections.filter((c) => c.tinderMatchId);
+const knownIds = known.map((c) => c.tinderMatchId);
+const staleById = Object.fromEntries(known.map((c) => [c.tinderMatchId, c.tinderLastScrapedAt || '']));
 const snippet = document.getElementById('tinder-bulk-snippet').textContent
-+ `\ntinderSeedDone(${JSON.stringify(knownIds)});\n`;
++ `\ntinderSeedDone(${JSON.stringify(knownIds)});\ntinderSeedStale(${JSON.stringify(staleById)});\n`;
 await navigator.clipboard.writeText(snippet);
 bulkCopyBtn.textContent = 'Copied';
 setTimeout(() => { bulkCopyBtn.textContent = 'Copy bulk-import snippet'; }, 2000);

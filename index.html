@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v174</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v175</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -1157,8 +1157,12 @@ function isDoneWith(doneVersions, id) { return (doneVersions[id] || 0) &gt;= SCR
 // the clipboard. `state` ({chunkIndex, totalSaved}) belongs to the
 // caller, not a shared counter here -- tinderBulkImport() and
 // tinderCatchUp() each track their own run's numbering independently, so
-// one doesn't pick up a count left over from the other.
-function downloadChunk(list, copyToClipboard, state) {
+// one doesn't pick up a count left over from the other. `filePrefix`
+// (default 'tinder-batch') lets the stale-profile sweep below save to a
+// visibly different filename in Downloads rather than mixing in with a
+// run's own primary output -- it's a distinct, no-rush batch, not part of
+// the count the primary task reports.
+function downloadChunk(list, copyToClipboard, state, filePrefix) {
   if (!list.length) return;
   state.chunkIndex++;
   state.totalSaved += list.length;
@@ -1173,7 +1177,7 @@ function downloadChunk(list, copyToClipboard, state) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `tinder-batch-${new Date().toISOString().replace(/[:.]/g, '-')}-part${state.chunkIndex}.json`;
+    a.download = `${filePrefix || 'tinder-batch'}-${new Date().toISOString().replace(/[:.]/g, '-')}-part${state.chunkIndex}.json`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -1195,7 +1199,7 @@ async function randomDelay() {
   await new Promise((r) =&gt; setTimeout(r, delay));
 }
 
-window.tinderBulkImport = async (batchSize) => {
+window.tinderBulkImport = async (batchSize, staleBatchSize) => {
   const BATCH_SIZE = batchSize || 15; // "10-20 or so per day" — override per-call: tinderBulkImport(30), or tinderBulkImport(250) left running overnight
   const CHUNK_SIZE = 25; // checkpoint to its own downloaded file this often -- a long unattended run surviving a sleep/crash/closed-tab partway through loses at most this many, not the whole run, and each file is pasteable into the dashboard as soon as it lands rather than waiting for the end
 
@@ -1211,10 +1215,15 @@ window.tinderBulkImport = async (batchSize) => {
   const doneCount = candidates.filter((r) =&gt; isDoneWith(doneVersions, r.id)).length;
   console.log(`${candidates.length} visible in the sidebar -- ${doneCount} already done, ${candidates.length - doneCount} remaining.`);
 
+  // "Nothing new" no longer returns early -- it still falls through to the
+  // stale-refresh tail below. Once everyone visible has been imported at
+  // least once (the steady state most runs actually hit), the "new
+  // matches" loop has nothing to do every single time -- an early return
+  // here would silently skip the stale sweep on almost every run, which
+  // defeats the point of it running automatically at all.
   if (!todo.length) {
     console.log(`Nothing new -- all visible matches already processed. Scroll the list down to reveal more, then run again.`);
-    return;
-  }
+  } else {
   console.log(`Processing ${todo.length} new match${todo.length === 1 ? '' : 'es'}. This takes a while -- real delays are the point.`);
   // Wrapped in try/finally so a crash partway through still outputs and
   // copies whatever WAS gathered, rather than losing a run's worth of
@@ -1266,6 +1275,11 @@ window.tinderBulkImport = async (batchSize) => {
     downloadChunk(profiles, true, chunkState);
     console.log(`${chunkState.totalSaved} of ${todo.length} attempted profile${todo.length === 1 ? '' : 's'} extracted, across ${chunkState.chunkIndex} file${chunkState.chunkIndex === 1 ? '' : 's'} in your Downloads folder. Paste them into the dashboard now or later -- the file picker there takes several at once.`);
   }
+  }
+  // Runs after the primary task either way (nothing new, a clean finish,
+  // or a crash partway through) -- its own separate, no-rush file. See
+  // staleSweepTail's own comment.
+  await staleSweepTail(staleBatchSize ?? 25);
 };
 
 // Re-checks people ALREADY captured for new activity since a given date,
@@ -1314,7 +1328,7 @@ window.tinderBulkImport = async (batchSize) => {
 // guard against the sort-order assumption turning out wrong for some
 // account or view. A loud, bounded stop ("hit the cap") beats silently
 // missing everything past a wrongly-ordered entry.
-window.tinderCatchUp = async (sinceDate, batchSize) => {
+window.tinderCatchUp = async (sinceDate, batchSize, staleBatchSize) => {
   const since = String(sinceDate || '').trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(since)) {
     console.warn('tinderCatchUp needs a since date like "2026-08-10" -- e.g. tinderCatchUp("2026-08-10")');
@@ -1409,6 +1423,7 @@ window.tinderCatchUp = async (sinceDate, batchSize) => {
   } finally {
     downloadChunk(profiles, true, chunkState);
     console.log(`${chunkState.totalSaved} profile${chunkState.totalSaved === 1 ? '' : 's'} with activity since ${since}, across ${chunkState.chunkIndex} file${chunkState.chunkIndex === 1 ? '' : 's'} in your Downloads folder.`);
+    await staleSweepTail(staleBatchSize ?? 25);
   }
 };
 
@@ -1489,7 +1504,80 @@ window.tinderSeedDone = (ids) =&gt; {
   if (missing.length) console.log(`${missing.length} of those aren't in the currently-visible sidebar -- scroll both lists down to load everyone before trusting this as "unmatched": ${missing.join(', ')}`);
 };
 
-console.log('Ready. Run tinderBulkImport() for the default 15, tinderBulkImport(30) for a custom size, or e.g. tinderBulkImport(250) left running overnight -- checkpoints to a file every 25. Or tinderCatchUp("2026-08-10") to re-check active conversations and new matches since a date -- good for a weekly pass. Or tinderFindUnmatched() to spot anyone missing from both lists since they were last indexed. Or tinderSeedDone([...ids]) to mark ids you already have elsewhere as done without opening them -- the dashboard\'s "Copy bulk-import snippet" button does this automatically.');
+const STALE_KEY = 'dashTinderStale';
+function loadStaleMap() {
+  try { return JSON.parse(localStorage.getItem(STALE_KEY) || '{}') || {}; } catch (e) { return {}; }
+}
+function saveStaleMap(map) { localStorage.setItem(STALE_KEY, JSON.stringify(map)); }
+
+// A pure data drop, same spirit as tinderSeedDone -- staleSweepTail()
+// below is what actually acts on it. Seeded by the dashboard's own "Copy
+// bulk-import snippet" button with every known match id's own
+// tinderLastScrapedAt (blank for one that's never actually been through a
+// successful Save on the dashboard side -- sorts first, most overdue).
+// Driven by the DASHBOARD's own record of when it last got fresh data for
+// someone, not this browser's — same cross-session reasoning tinderSeedDone
+// already established, extended from "have we ever scraped them" to "how
+// long ago, really".
+window.tinderSeedStale = (dateById) => {
+  const map = dateById || {};
+  saveStaleMap(map);
+  console.log(`Stale-refresh list seeded with ${Object.keys(map).length} known id${Object.keys(map).length === 1 ? '' : 's'}.`);
+};
+
+// Runs automatically at the tail of tinderBulkImport()/tinderCatchUp(),
+// after their own primary work -- closes the one gap neither of those (nor
+// tinderFindUnmatched) can see: a match you've never messaged can still
+// quietly change its bio or photos, with nothing here ever noticing, since
+// the Matches-tab sweep only ever checks "have I seen this id before",
+// never re-opening an already-known profile. Re-opening EVERY already-
+// known profile to catch that would defeat the entire point of skip-
+// tracking, so this instead re-checks just the `n` longest-untouched ones
+// each run -- a slow rotation through everyone over many runs, not a
+// one-shot fix.
+//
+// Its own separate checkpoint file (a distinct name — see downloadChunk's
+// filePrefix), deliberately NOT folded into the primary run's own count or
+// output: explicitly fine to skip pasting it in on any given day (per the
+// request that shaped this) -- whoever doesn't get refreshed today just
+// carries over and gets picked again next run, same as a normal missed day
+// costs nothing.
+async function staleSweepTail(n) {
+  const staleMap = loadStaleMap();
+  const ids = Object.keys(staleMap);
+  if (!ids.length) return; // never seeded (e.g. an old copy of this snippet, pasted by hand) -- nothing to act on
+  const currentById = new Map(collectCandidates().map((r) => [r.id, r]));
+  const ranked = ids
+    .filter((id) => currentById.has(id))
+    .sort((a, b) => (staleMap[a] || '').localeCompare(staleMap[b] || '')); // '' (never scraped) sorts first -- most overdue
+  const batch = ranked.slice(0, n);
+  if (!batch.length) { console.log('Stale-refresh: nothing visible to refresh right now.'); return; }
+  console.log(`Stale-refresh: re-checking the ${batch.length} longest-untouched already-known profile${batch.length === 1 ? '' : 's'} -- separate from the run above, its own file, no rush.`);
+  const profiles = [];
+  const chunkState = { chunkIndex: 0, totalSaved: 0 };
+  for (let i = 0; i < batch.length; i++) {
+    const row = currentById.get(batch[i]);
+    console.log(`[stale ${i + 1}/${batch.length}] ${row.name}...`);
+    const link = findLinkById(row.id);
+    if (!link) { console.warn(`Stale-refresh: couldn't find ${row.name} any more -- skipped.`); continue; }
+    link.click();
+    const loaded = await waitForProfile(row.name, 8000);
+    if (!loaded) { console.warn(`Stale-refresh: ${row.name}'s profile didn't load in time -- skipped.`); continue; }
+    await new Promise((r) => setTimeout(r, 500));
+    try {
+      const extracted = await extractProfile(row.name);
+      extracted.matchId = row.id;
+      profiles.push(extracted);
+    } catch (err) {
+      console.warn(`Stale-refresh: extraction failed for ${row.name}: ${err.message} -- skipped.`);
+    }
+    if (i < batch.length - 1) await randomDelay();
+  }
+  downloadChunk(profiles, false, chunkState, 'tinder-stale-refresh');
+  console.log(`Stale-refresh: ${chunkState.totalSaved} of ${batch.length} saved to its own file in Downloads -- paste in whenever, no rush; anyone skipped today just gets picked again another run.`);
+}
+
+console.log('Ready. Run tinderBulkImport() for the default 15, tinderBulkImport(30) for a custom size, or e.g. tinderBulkImport(250) left running overnight -- checkpoints to a file every 25. Or tinderCatchUp("2026-08-10") to re-check active conversations and new matches since a date -- good for a weekly pass. Or tinderFindUnmatched() to spot anyone missing from both lists since they were last indexed. Or tinderSeedDone([...ids]) to mark ids you already have elsewhere as done without opening them -- the dashboard\'s "Copy bulk-import snippet" button does this automatically, along with tinderSeedStale({...}) which both tinderBulkImport() and tinderCatchUp() use to also refresh a handful of your longest-untouched profiles after their main run, in their own separate file.');
 })();</pre>
 </details>
 <textarea id="tinder-input" rows="4" style="width:100%;font-family:monospace;font-size:12px;" placeholder="Paste the copied JSON here — one profile or a batch, either works"></textarea>

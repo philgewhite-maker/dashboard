@@ -432,7 +432,7 @@ contactStatus: '', contactResourceName: '', contactEtag: '', contactConflicts: [
 contactMatchedBy: '', unmatchedAt: '',
 likes: '', notes: '', chatLog: '', chatLogWhatsApp: '', chatLogTelegram: '',
 todos: [], ratings: {}, driveLink: '', photosAlbumUrl: '', photosPersonUrl: '',
-distance: '', matchedOn: '', tinderMatchId: '', attentionSnoozedUntil: '',
+distance: '', matchedOn: '', tinderMatchId: '', tinderLastScrapedAt: '', attentionSnoozedUntil: '',
 ...Object.fromEntries(TAG_FIELDS.map((t) => [t.field, []])),
 ...fields,
 };
