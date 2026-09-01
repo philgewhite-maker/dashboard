@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v178</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v179</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -1593,6 +1593,54 @@ window.tinderFindUnmatched = async () => {
   if (!copied) console.log(json);
 };
 
+// Re-extracts a SPECIFIC list of match ids -- unlike tinderBulkImport()
+// (todo = not yet marked done) or tinderCatchUp() (todo = active
+// conversations since a date), this is driven entirely by an explicit id
+// list. Built for exactly the situation a fix like the virtualized-photo-
+// carousel one creates: cross-referencing already-downloaded batch files
+// for whoever's best-ever scrape still came back suspiciously thin is far
+// more targeted than re-running a broad sweep over everyone. Reuses
+// extractProfile/findLinkById/waitForProfile/randomDelay/downloadChunk --
+// same per-row shape tinderBulkImport() itself uses, just fed an explicit
+// list instead of filtering by doneVersions.
+window.tinderReextract = async (ids) =&gt; {
+  const idSet = new Set((ids || []).filter(Boolean));
+  if (!idSet.size) { console.warn('tinderReextract needs an array of match ids -- e.g. tinderReextract(["abc123", "def456"])'); return; }
+  const candidates = collectCandidates().filter((r) =&gt; idSet.has(r.id));
+  const missingIds = [...idSet].filter((id) =&gt; !candidates.some((r) =&gt; r.id === id));
+  if (missingIds.length) console.warn(`${missingIds.length} id${missingIds.length === 1 ? '' : 's'} not currently visible in the sidebar -- scroll both lists down to load everyone before running this, or they'll just be skipped: ${missingIds.join(', ')}`);
+  if (!candidates.length) { console.log('Nothing to re-extract -- none of those ids are currently visible.'); return; }
+  console.log(`Re-extracting ${candidates.length} targeted profile${candidates.length === 1 ? '' : 's'}. This takes a while -- real delays are the point.`);
+  const doneVersions = loadDoneVersions();
+  const profiles = [];
+  const chunkState = { chunkIndex: 0, totalSaved: 0 };
+  try {
+    for (let i = 0; i &lt; candidates.length; i++) {
+      const row = candidates[i];
+      console.log(`[${i + 1}/${candidates.length}] ${row.name}...`);
+      const link = findLinkById(row.id);
+      if (!link) { console.warn(`Couldn't find ${row.name} any more -- skipped.`); continue; }
+      link.click();
+      const loaded = await waitForProfile(row.name, 8000);
+      if (!loaded) { console.warn(`${row.name}'s profile didn't load in time -- skipped.`); continue; }
+      await new Promise((r) =&gt; setTimeout(r, 500));
+      try {
+        const extracted = await extractProfile(row.name);
+        extracted.matchId = row.id;
+        profiles.push(extracted);
+        doneVersions[row.id] = SCRIPT_VERSION;
+        saveDoneVersions(doneVersions);
+      } catch (err) {
+        console.warn(`Extraction failed for ${row.name}: ${err.message} -- skipped.`);
+      }
+      if (i &lt; candidates.length - 1) await randomDelay();
+    }
+  } finally {
+    downloadChunk(profiles, true, chunkState, 'tinder-reextract');
+    console.log(`${chunkState.totalSaved} of ${candidates.length} targeted profiles re-extracted. When pasting into the dashboard: Chat history AND photo checkboxes default to UNCHECKED for an already-known connection (only empty fields auto-apply) -- tick them per profile to actually overwrite the incomplete data, or it'll silently keep what's already there.`);
+  }
+};
+
 // Primes doneVersions from ids the DASHBOARD already knows about (its own
 // connections' tinderMatchId), not just whatever THIS browser has
 // personally scraped before -- localStorage only remembers a browser's
@@ -1706,7 +1754,7 @@ async function staleSweepTail(n) {
   console.log(`Stale-refresh: ${chunkState.totalSaved} of ${batch.length} saved to its own file in Downloads -- paste in whenever, no rush; anyone skipped today just gets picked again another run.`);
 }
 
-console.log('Ready. Run tinderBulkImport() for the default 15, tinderBulkImport(30) for a custom size, or e.g. tinderBulkImport(250) left running overnight -- checkpoints to a file every 25. Or tinderCatchUp("2026-08-10") to re-check active conversations and new matches since a date -- good for a weekly pass. Or tinderFindUnmatched() to spot anyone missing from both lists since they were last indexed. Or tinderSeedDone([...ids]) to mark ids you already have elsewhere as done without opening them -- the dashboard\'s "Copy bulk-import snippet" button does this automatically, along with tinderSeedStale({...}) which both tinderBulkImport() and tinderCatchUp() use to also refresh a handful of your longest-untouched profiles after their main run, in their own separate file.');
+console.log('Ready. Run tinderBulkImport() for the default 15, tinderBulkImport(30) for a custom size, or e.g. tinderBulkImport(250) left running overnight -- checkpoints to a file every 25. Or tinderCatchUp("2026-08-10") to re-check active conversations and new matches since a date -- good for a weekly pass. Or tinderFindUnmatched() to spot anyone missing from both lists since they were last indexed. Or tinderReextract(["id1", "id2", ...]) to re-check a specific, already-known list of ids -- e.g. profiles a JSON cross-check flagged as suspiciously incomplete. Or tinderSeedDone([...ids]) to mark ids you already have elsewhere as done without opening them -- the dashboard\'s "Copy bulk-import snippet" button does this automatically, along with tinderSeedStale({...}) which both tinderBulkImport() and tinderCatchUp() use to also refresh a handful of your longest-untouched profiles after their main run, in their own separate file.');
 })();</pre>
 </details>
 <textarea id="tinder-input" rows="4" style="width:100%;font-family:monospace;font-size:12px;" placeholder="Paste the copied JSON here — one profile or a batch, either works"></textarea>
