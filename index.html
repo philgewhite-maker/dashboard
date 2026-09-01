@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v180</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v181</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -361,6 +361,11 @@ Not built: comparing retailer prices or adding to a basket in two clicks. That w
 <button class="todo-add-btn" type="button" id="merge-admin-btn">Merge</button>
 </div>
 <div class="settings-note" id="merge-admin-status"></div>
+<div class="sync-row" style="margin-top:10px;">
+<button class="sync-btn sm" type="button" id="dup-find-btn">Find possible duplicates</button>
+</div>
+<div class="settings-note">Checks every pair for a shared Tinder match ID, a shared photo, or a similar name backed up by a matching age or city — never merges anything on its own, just points out who's worth a closer look.</div>
+<div id="dup-find-results"></div>
 </section>
 
 <section class="panel wide" id="tinder-panel" data-tab="datingadmin">

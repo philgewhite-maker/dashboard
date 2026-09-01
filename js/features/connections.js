@@ -1769,6 +1769,12 @@ renderConnections();
 renderOverviewRef();
 queueSave();
 });
+document.getElementById('dup-find-btn').addEventListener('click', () => {
+dupCandidates = findDuplicateCandidates();
+dupCompareOpen = null;
+dupDismissed.clear();
+renderDupFinder();
+});
 document.getElementById('conn-attention-task-btn').addEventListener('click', async (e) => {
 if (e.target.dataset.gotoTask) {
 const { switchTab } = await import('../tabs.js');
@@ -2713,7 +2719,14 @@ if (isProfile) applyProfileFieldsToConnection(conn, cand);
 // location deliberately excluded -- it's a TAG_FIELDS member now (see
 // state.js), so mergeConnectionInto's TAG_FIELDS.forEach loop below
 // already unions it same as Interests/Languages/etc.
-const SCALAR_MERGE_FIELDS = ['age', 'kids', 'job', 'height', 'education', 'likes', 'driveLink'];
+//
+// tinderMatchId included on purpose -- confirmed live, merging a
+// duplicate found BY matching tinderMatchId used to silently drop that
+// same matchId the instant the merge ran (it wasn't in this list), so
+// the very evidence that proved the two records were the same person
+// vanished right when it would have been most useful to keep (e.g. to
+// recognise a re-scrape as "already known" afterwards).
+const SCALAR_MERGE_FIELDS = ['age', 'kids', 'job', 'height', 'education', 'likes', 'driveLink', 'tinderMatchId'];
 
 // Adds anything in `values` that isn't already there, case-insensitively, so
 // merging "English" into ["english"] doesn't produce a near-duplicate chip.
@@ -2754,6 +2767,19 @@ target.notes = targetNotes ? `${targetNotes}\n${sourceNotes}` : sourceNotes;
 if (!Array.isArray(target.photoIds)) target.photoIds = [];
 (source.photoIds || []).forEach((pid) => { if (!target.photoIds.includes(pid)) target.photoIds.push(pid); });
 if (!target.photoId) target.photoId = target.photoIds[0] || null;
+// Union, not fill-if-empty like tinderMatchId above -- these are dedup
+// keys against future re-scrapes (see tinderimport.js's applyPendingTo-
+// Connection), not a single identifying value, so losing either side's
+// set would just let an already-merged-in photo get re-added as a
+// "new" one next time that person is re-scraped.
+if (!Array.isArray(target.tinderPhotoKeys)) target.tinderPhotoKeys = [];
+unionInto(target.tinderPhotoKeys, source.tinderPhotoKeys);
+// Same "more recent wins" rule as lastContact just below -- whichever
+// side was actually scraped later is the one worth trusting for "how
+// stale is this person's data".
+if (source.tinderLastScrapedAt && (!target.tinderLastScrapedAt || source.tinderLastScrapedAt > target.tinderLastScrapedAt)) {
+target.tinderLastScrapedAt = source.tinderLastScrapedAt;
+}
 if (!Array.isArray(target.todos)) target.todos = [];
 (source.todos || []).forEach((t) => {
 if (!target.todos.some((x) => x.text.trim().toLowerCase() === String(t.text).trim().toLowerCase())) target.todos.push(t);
@@ -2768,6 +2794,171 @@ if ((STAGE_RANK[source.stage] ?? 0) > (STAGE_RANK[target.stage] ?? 0)) target.st
 // make someone look staler than they actually are and trigger a false
 // "reach out" nudge.
 if (source.lastContact && (!target.lastContact || source.lastContact > target.lastContact)) target.lastContact = source.lastContact;
+}
+
+// Finds pairs of DIFFERENT connections that look like the same real
+// person recorded twice -- someone re-matched under a slightly changed
+// name, or got picked wrong out of a look-alike "Possible matches" list
+// during import. Three independent signals, strongest first:
+//   1. Same Tinder match id -- about as close to proof as this data gets.
+//   2. A shared tinderPhotoKeys entry -- a (folder id, uuid) pair from a
+//      real photo FILE, not a guess; two different records pointing at
+//      the exact same photo is the "look for a shared photo" test asked
+//      for directly. Only catches Tinder-imported photos (that's the
+//      only field that tracks this), not a screenshot-only duplicate.
+//   3. A similar name (including aliases, for "Kat"/"Katya" cases) PLUS
+//      a corroborating age or city match -- name similarity alone is a
+//      known false-match risk in this exact data (see the "Leila"/
+//      "Lenka" story at the top of tinderimport.js), so it only counts
+//      here alongside a second, independent signal agreeing with it.
+// Never merges anything itself -- every pair still needs a human look via
+// Compare, same "no silent auto-match" rule the Tinder importer follows.
+function connNameKeys(c) {
+return [nameKey(c.name), ...(c.aliases || []).map(nameKey)].filter(Boolean);
+}
+function namesLookSimilar(c1, c2) {
+const keysA = connNameKeys(c1), keysB = connNameKeys(c2);
+return keysA.some((ka) => keysB.some((kb) => {
+if (ka === kb) return true;
+// Short names ("Ana"/"Eve") tolerate a lot less drift before "similar"
+// stops meaning anything -- distance 2 on a 3-letter name matches half
+// the phone book.
+const maxDist = Math.min(ka.length, kb.length) <= 4 ? 1 : 2;
+return editDistance(ka, kb, maxDist) <= maxDist;
+}));
+}
+function findDuplicateCandidates() {
+const conns = data.connections;
+const pairs = [];
+for (let i = 0; i < conns.length; i++) {
+for (let j = i + 1; j < conns.length; j++) {
+const a = conns[i], b = conns[j];
+const reasons = [];
+let rank = 0;
+if (a.tinderMatchId && a.tinderMatchId === b.tinderMatchId) { reasons.push('Same Tinder match ID'); rank = 3; }
+const sharedPhotos = (a.tinderPhotoKeys || []).filter((k) => (b.tinderPhotoKeys || []).includes(k));
+if (sharedPhotos.length) {
+reasons.push(`${sharedPhotos.length} shared photo${sharedPhotos.length === 1 ? '' : 's'}`);
+rank = Math.max(rank, 2);
+}
+// Name similarity is only its own reason when nothing stronger already
+// fired -- otherwise it's redundant noise next to actual proof.
+if (!reasons.length && namesLookSimilar(a, b)) {
+const ageA = currentAge(a), ageB = currentAge(b);
+const ageMatch = !!(ageA && ageB && Math.abs(ageA.value - ageB.value) <= 1);
+const cityShared = (a.location || []).some((loc) => (b.location || []).some((l2) => String(loc).trim().toLowerCase() === String(l2).trim().toLowerCase()));
+if (ageMatch || cityShared) {
+reasons.push(`Similar name${ageMatch ? ' + same age' : ''}${cityShared ? ' + same city' : ''}`);
+rank = 1;
+}
+}
+if (reasons.length) pairs.push({ a, b, reasons, rank, sharedCount: sharedPhotos.length });
+}
+}
+return pairs.sort((x, y) => y.rank - x.rank || y.sharedCount - x.sharedCount);
+}
+
+// Session-only -- resets on reload rather than a synced "dismissed
+// pairs" list in `data`, since this is an on-demand admin scan, not a
+// standing nag that needs to remember your answer forever.
+let dupCandidates = null; // null = not run yet this session; [] = run, nothing found
+let dupCompareOpen = null; // { a, b, reasons } -- the pair currently in the compare overlay
+const dupDismissed = new Set();
+function dupPairKey(a, b) { return [a.id, b.id].sort().join('|'); }
+
+function dupPairRowHtml(pair) {
+const { a, b, reasons } = pair;
+return `<div class="tinder-candidate-row">
+<div class="album-caption">${escapeHtml(a.name || '(no name)')}${displayAge(a) ? `, ${escapeHtml(displayAge(a))}` : ''} &harr; ${escapeHtml(b.name || '(no name)')}${displayAge(b) ? `, ${escapeHtml(displayAge(b))}` : ''}</div>
+<div class="tinder-field-note">${reasons.map(escapeHtml).join(' &middot; ')}</div>
+<div class="sync-row" style="margin-top:6px;">
+<button class="sync-btn sm" type="button" data-dup-compare="${escapeHtml(dupPairKey(a, b))}">Compare</button>
+<button class="sync-btn sm" type="button" data-dup-dismiss="${escapeHtml(dupPairKey(a, b))}">Not a duplicate</button>
+</div>
+</div>`;
+}
+// Reuses tinderimport.js's own More Info overlay classes (tinder-more-
+// info-overlay/-box, tinder-photo-grid, tinder-candidate-row) -- purely
+// visual/layout classes with no tinder-specific behaviour wired to them,
+// and it's literally the same "everyone worth considering, side by side,
+// at a size you can actually read" job More Info already does.
+function dupPhotoGridHtml(c) {
+const ids = c.photoIds && c.photoIds.length ? c.photoIds : (c.photoId ? [c.photoId] : []);
+return ids.length
+? `<div class="tinder-photo-grid">${ids.map((id) => `<span class="thumb-lg" data-dup-view-photo="${escapeHtml(id)}" title="Click to view full-size"><span class="thumb-img" data-photo-bg="${escapeHtml(id)}"></span></span>`).join('')}</div>`
+: '<div class="settings-note" style="margin:4px 0;">No photo on file.</div>';
+}
+function dupSideSummary(c) {
+const bits = [];
+if (c.stage) bits.push(c.stage);
+if ((c.location || []).length) bits.push(c.location.join(', '));
+return `<h3>${escapeHtml(c.name || '(no name)')}${displayAge(c) ? `, ${escapeHtml(displayAge(c))}` : ''}${bits.length ? ` <span class="tinder-field-note">(${escapeHtml(bits.join(' &middot; '))})</span>` : ''}</h3>`;
+}
+function dupCompareOverlayHtml() {
+if (!dupCompareOpen) return '';
+const { a, b, reasons } = dupCompareOpen;
+return `<div class="tinder-more-info-overlay" id="dup-compare-overlay">
+<div class="tinder-more-info-box">
+<h3>Possible duplicate</h3>
+<div class="settings-note">${reasons.map(escapeHtml).join(' &middot; ')}</div>
+${dupSideSummary(a)}
+${dupPhotoGridHtml(a)}
+${dupSideSummary(b)}
+${dupPhotoGridHtml(b)}
+<div class="sync-row" style="margin-top:10px;flex-wrap:wrap;">
+<button class="sync-btn sm" type="button" data-dup-merge-keep="${escapeHtml(a.id)}" data-dup-merge-drop="${escapeHtml(b.id)}">Keep "${escapeHtml(a.name)}", merge in "${escapeHtml(b.name)}"</button>
+<button class="sync-btn sm" type="button" data-dup-merge-keep="${escapeHtml(b.id)}" data-dup-merge-drop="${escapeHtml(a.id)}">Keep "${escapeHtml(b.name)}", merge in "${escapeHtml(a.name)}"</button>
+</div>
+<div class="sync-row" style="margin-top:6px;">
+<button class="sync-btn" type="button" id="dup-compare-close">Close</button>
+</div>
+</div>
+</div>`;
+}
+function renderDupFinder() {
+const root = document.getElementById('dup-find-results');
+if (!root) return;
+if (dupCandidates === null) { root.innerHTML = ''; return; }
+const visible = dupCandidates.filter((p) => !dupDismissed.has(dupPairKey(p.a, p.b)));
+const listHtml = visible.length ? visible.map(dupPairRowHtml).join('')
+: '<div class="settings-note" style="margin:6px 0;">No likely duplicates found.</div>';
+root.innerHTML = `<div class="settings-note" style="margin:8px 0 4px;">${visible.length} possible duplicate pair${visible.length === 1 ? '' : 's'} found${dupDismissed.size ? ` (${dupDismissed.size} dismissed)` : ''}:</div>
+${listHtml}
+${dupCompareOverlayHtml()}`;
+hydratePhotoBackgrounds(root);
+root.querySelectorAll('[data-dup-compare]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const pair = dupCandidates.find((p) => dupPairKey(p.a, p.b) === btn.dataset.dupCompare);
+if (pair) { dupCompareOpen = pair; renderDupFinder(); }
+});
+});
+root.querySelectorAll('[data-dup-dismiss]').forEach((btn) => {
+btn.addEventListener('click', () => { dupDismissed.add(btn.dataset.dupDismiss); renderDupFinder(); });
+});
+root.querySelectorAll('[data-dup-view-photo]').forEach((el) => {
+el.addEventListener('click', async () => {
+const url = await photoUrl(el.dataset.dupViewPhoto);
+if (url) openLightbox(url);
+});
+});
+const closeBtn = document.getElementById('dup-compare-close');
+if (closeBtn) closeBtn.addEventListener('click', () => { dupCompareOpen = null; renderDupFinder(); });
+root.querySelectorAll('[data-dup-merge-keep]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const target = data.connections.find((x) => x.id === btn.dataset.dupMergeKeep);
+const source = data.connections.find((x) => x.id === btn.dataset.dupMergeDrop);
+if (!target || !source) return;
+if (!confirm(`Merge "${source.name}" into "${target.name}"?\n\nEverything from "${source.name}" — photos, notes, ratings, tags, to-dos — is folded in, keeping "${target.name}"'s values wherever both have one. "${source.name}" is then removed.\n\nThis can't be undone.`)) return;
+mergeConnectionInto(target, source);
+data.connections = data.connections.filter((x) => x.id !== source.id);
+dupCandidates = dupCandidates.filter((p) => p.a.id !== source.id && p.b.id !== source.id);
+dupCompareOpen = null;
+renderConnections();
+renderOverviewRef();
+queueSave();
+renderDupFinder();
+});
+});
 }
 
 // Tinder appends " (shared)" to an interest it says you both have --
