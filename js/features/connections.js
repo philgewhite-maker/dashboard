@@ -2423,12 +2423,16 @@ return { candidate };
 // height/drinking/smoking/age silently dropped because push had no
 // combine capability the pull side had just gained). Where a genuinely
 // new decision is needed that only makes sense for one side (e.g. this
-// function's own multi-file combine-or-not heuristic, which push needs
-// because it has no upfront "combine?" checkbox to ask the user, unlike
-// pull), prefer a shared, exported, deterministic helper (see
-// looksLikeSameScreenshotPieces in utils.js) over private inline logic,
-// so a future pull-side UI wanting the same auto-detect isn't stuck
-// re-deriving it.
+// function's own multi-file combine-or-not heuristic), prefer a shared,
+// exported, deterministic helper (see looksLikeSameScreenshotPieces in
+// utils.js) over private inline logic, so a future pull-side UI wanting
+// the same auto-detect isn't stuck re-deriving it. Push later gained its
+// own force-combine override too (the `forceCombine` param below) for
+// exactly the same reason pull's checkbox exists -- the auto-heuristic
+// can't always be sure (real report: on mobile, Capture Inbox's "Extract
+// dating screenshot" had no recourse when it guessed wrong, and reaching
+// Dating admin's own checkbox from inside another app's share sheet isn't
+// realistic on a phone).
 //
 // `files` may be a single File or an array. With more than one file:
 // each is tried as an independent matches list first (a list is already
@@ -2443,16 +2447,32 @@ return { candidate };
 // list loop below can succeed on any file in the array, not necessarily
 // the first, so a caller that assumed "count means the first N" would
 // mark the wrong Capture Inbox items done and delete the wrong bytes.
-async function extractDatingScreenshot(files, appHint, extraFiles, statusEl) {
+// `forceCombine` is push's equivalent of Dating admin's own "Selected
+// files are one profile, in pieces" checkbox -- added because push (the
+// share sheet) had no recourse when the auto-detect heuristic
+// (screenshotsLookCombinable) couldn't confirm two screenshots belong
+// together (different raw pixel width, or filenames/timestamps more than
+// 15 minutes apart -- both plausible after Android's share intent has
+// touched the images), unlike pull which could always just tick the box.
+// Mirrors the checkbox's own semantics exactly: skips the matches-list
+// attempt entirely (a user who says "this is one profile" has already
+// answered that question) and goes straight to the profile cascade.
+async function extractDatingScreenshot(files, appHint, extraFiles, statusEl, forceCombine) {
 files = Array.isArray(files) ? files : [files];
 
 if (files.length > 1) {
+if (!forceCombine) {
 for (const f of files) {
 const matchesResult = await importMatchesListFile(f, appHint, statusEl);
 if (matchesResult.candidates.length > 0) return { kind: 'matches', consumedFiles: [f], ...matchesResult };
 }
+}
+let combine = !!forceCombine;
+if (!combine) {
 const { screenshotsLookCombinable } = await import('../utils.js');
-if (await screenshotsLookCombinable(files)) {
+combine = await screenshotsLookCombinable(files);
+}
+if (combine) {
 const profileResult = (extraFiles && extraFiles.length)
 ? await importProfileWithPhotosFile(files, appHint, extraFiles, statusEl)
 : await importProfileScreenshotFile(files, appHint, statusEl);

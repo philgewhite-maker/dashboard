@@ -326,7 +326,11 @@ ${photoItems.length > 1 ? `<button class="todo-add-btn" type="button" data-inbox
 <button class="todo-add-btn" type="button" data-inbox-send-dating="${b.id}">Send</button>
 <button class="todo-add-btn" type="button" data-inbox-extract-wellness="${b.id}" title="For an HRV, AGEs index, or Antioxidant index screenshot from Samsung Health">Extract wellness data</button>
 <button class="todo-add-btn" type="button" data-inbox-extract-trip-toggle="${b.id}" title="For a boarding pass, hotel, car hire, or transfer confirmation">Extract into a trip leg</button>
-<button class="todo-add-btn" type="button" data-inbox-extract-matches="${b.id}" title="For a Bumble/Tinder/Hinge matches list or full profile screenshot — auto-detects which and pulls it out for review">Extract dating screenshot</button>` : ''}
+<button class="todo-add-btn" type="button" data-inbox-extract-matches="${b.id}" title="For a Bumble/Tinder/Hinge matches list or full profile screenshot — auto-detects which and pulls it out for review">Extract dating screenshot</button>
+${photoItems.length > 1 ? `<label class="settings-note" style="display:flex;align-items:center;gap:4px;">
+<input type="checkbox" data-inbox-force-combine="${b.id}">
+These screenshots are one profile, in pieces
+</label>` : ''}` : ''}
 <button class="todo-add-btn" type="button" data-inbox-attach-task="${b.id}">Attach ${photoItems.length ? 'everything left ' : ''}to a Task</button>
 <button class="del-x" type="button" data-inbox-discard="${b.id}">Discard</button>
 </div>
@@ -592,6 +596,12 @@ return { it, file, isScreenshot };
 }));
 const screenshots = withFiles.filter((c) => c.isScreenshot);
 const plainPhotos = withFiles.filter((c) => !c.isScreenshot);
+// Push's own equivalent of Dating admin's "Selected files are one
+// profile, in pieces" checkbox -- see extractDatingScreenshot's own
+// comment (connections.js) for why push needed this too: no recourse when
+// the auto-heuristic guesses wrong, and Dating admin isn't realistically
+// reachable from inside another app's share sheet on a phone.
+const forceCombine = !!root.querySelector(`[data-inbox-force-combine="${batch.id}"]`)?.checked;
 
 const done = [];
 const messages = [];
@@ -616,7 +626,7 @@ if (screenshots.length > 1) {
 if (status) status.textContent = `Reading ${screenshots.length} screenshots…`;
 try {
 const screenshotFiles = screenshots.map((s) => s.file);
-const result = await extractDatingScreenshot(screenshotFiles, appHintFromFilename(screenshotFiles), plainPhotos.map((p) => p.file), status);
+const result = await extractDatingScreenshot(screenshotFiles, appHintFromFilename(screenshotFiles), plainPhotos.map((p) => p.file), status, forceCombine);
 const consumedFiles = new Set(result.consumedFiles || []);
 const consumedItems = screenshots.filter((s) => consumedFiles.has(s.file)).map((s) => s.it);
 if (result.kind === 'matches') {
