@@ -123,7 +123,18 @@ throw proxyErr;
 // genuine exact match, just enough to break a tie between two people
 // who'd otherwise score identically on name alone (two "Anna"s is exactly
 // the case this can't tell apart from name text; age usually can).
-function matchCandidates(name, limit, incomingAge) {
+//
+// incomingMatchId flags a candidate as `conflict: true` when THEY already
+// carry a DIFFERENT Tinder match id from a previous import — real,
+// permanent evidence they're a different conversation, not a same-name
+// guess. Name matching alone can't see this (confirmed live: two
+// different real people sharing a name were being offered interchangeably
+// as "possible matches" with no visible reason not to trust an exact name
+// hit) — buildPending uses this to stop an exact-name candidate from
+// silently auto-confirming when it's actually contradicted by a match id
+// already on file, and the picker row surfaces it as an explicit warning
+// rather than leaving the two ids to compare invisibly.
+function matchCandidates(name, limit, incomingAge, incomingMatchId) {
 const key = nameKey(name);
 if (!key) return [];
 const namesOf = (c) => [c.name, c.profileName, ...(c.aliases || [])].filter(Boolean);
@@ -148,7 +159,8 @@ if (wantAge !== null) {
 const theirAge = currentAge(c);
 if (theirAge) best.score -= Math.min(Math.abs(theirAge.value - wantAge) * 3, 15);
 }
-results.push({ conn: c, why: best.why, score: best.score });
+const conflict = !!(incomingMatchId && c.tinderMatchId && c.tinderMatchId !== incomingMatchId);
+results.push({ conn: c, why: best.why, score: best.score, conflict, theirMatchId: c.tinderMatchId });
 }
 });
 results.sort((a, b) => b.score - a.score);
@@ -372,9 +384,15 @@ if (!candidates.length) return '';
 const rows = candidates.map((m) => {
 const c = m.conn;
 const caption = [c.app, displayAge(c), m.why === 'exact' ? '' : m.why].filter(Boolean).join(' · ');
+// Real, permanent evidence (a different Tinder match id already on
+// file) contradicting the name-based guess -- shown in-line, in the
+// warning color the "risky" banner already uses, rather than leaving
+// the two ids to compare invisibly. title carries both raw ids for
+// anyone who wants to check them directly.
+const conflictNote = m.conflict ? `<span class="tinder-translate-error" title="This connection's Tinder match id: ${escapeHtml(m.theirMatchId)}">already linked to a different Tinder match</span>` : '';
 return `<button type="button" class="conn-picker-row" data-conn-picker-value="${escapeHtml(c.id)}" data-conn-picker-search="${escapeHtml(foldDiacritics(c.name).toLowerCase())}">
 ${avatarHtml(c.photoId, c.name, 'sm')}
-<span class="conn-picker-row-info"><strong>${escapeHtml(c.name)}</strong>${caption ? `<span class="compare-caption">${escapeHtml(caption)}</span>` : ''}</span>
+<span class="conn-picker-row-info"><strong>${escapeHtml(c.name)}</strong>${caption ? `<span class="compare-caption">${escapeHtml(caption)}</span>` : ''}${conflictNote}</span>
 </button>`;
 }).join('');
 return `<div class="settings-note" style="padding:4px 8px 2px;">Possible matches</div>${rows}`;
@@ -1509,7 +1527,7 @@ ${secureMatch
 </div>
 ${flagBreakdownHtml()}
 
-${p.risky ? `<div class="tinder-field-note tinder-translate-error" style="margin:6px 0 0;">More than one connection shares this name (and a similar age) — double-check the photo before saving, this pick might be wrong.</div>` : ''}
+${p.risky ? `<div class="tinder-field-note tinder-translate-error" style="margin:6px 0 0;">${p.candidates[0]?.conflict ? "The top name match is already linked to a different Tinder match id — this is very likely a different person with the same name, not this profile." : 'More than one connection shares this name (and a similar age) — double-check the photo before saving, this pick might be wrong.'}</div>` : ''}
 ${nextStepHtml()}
 <div class="sync-row" style="margin:6px 0 8px;align-items:center;">
 <button class="add-btn tinder-save-btn${p.risky ? ' tinder-risky' : ''}" type="button" id="tinder-save"${canSave ? '' : ' disabled'} title="${escapeHtml(saveLabel)}">${escapeHtml(saveLabel)}</button>
@@ -2059,7 +2077,8 @@ if (bulk.length) parts.push(`${bulk.length} clean re-match${bulk.length === 1 ? 
 if (review.length) {
 const p = pending;
 const matchNote = p.match
-? (p.match.why === 'exact' ? `Matched ${p.match.conn.name} exactly — check the fields below, then save.` : `Possible match found (${p.match.why}) — confirm it's really them before saving.`)
+? (p.match.conflict ? `${p.match.conn.name} shares this name but is already linked to a different Tinder match — probably a different person. Pick who this really is.`
+: p.match.why === 'exact' ? `Matched ${p.match.conn.name} exactly — check the fields below, then save.` : `Possible match found (${p.match.why}) — confirm it's really them before saving.`)
 : 'No matching connection — pick one or add new.';
 parts.push(review.length > 1 ? `Loaded 1 of ${review.length} needing a full review. ${matchNote}` : matchNote);
 } else if (!bulk.length) {
@@ -2204,7 +2223,7 @@ nextStepNote: '',
 matchId: String(raw.matchId || '').trim(),
 };
 const incomingAge = parseInt(parsed.age, 10);
-const candidates = matchCandidates(parsed.name, 6, Number.isFinite(incomingAge) ? incomingAge : undefined);
+const candidates = matchCandidates(parsed.name, 6, Number.isFinite(incomingAge) ? incomingAge : undefined, parsed.matchId);
 parsed.candidates = candidates;
 let match = candidates[0] || null;
 // A connection already carrying this exact Tinder match id from a
@@ -2220,9 +2239,19 @@ parsed.match = match;
 // Two (or more) candidates tied at the same top score means the name
 // alone can't actually tell them apart — even an "exact" match here is a
 // guess between look-alikes, not a certainty, so it's flagged rather
-// than silently auto-picking whichever happened to sort first.
-parsed.risky = !knownConn && candidates.length > 1 && candidates[0].score === candidates[1].score;
-if (match && (match.why === 'exact' || match.why === 'known match id')) { parsed.chosenId = match.conn.id; parsed.matchConfirmed = true; }
+// than silently auto-picking whichever happened to sort first. A top
+// candidate already carrying a DIFFERENT known match id is flagged the
+// same way — real evidence contradicting the name guess, not just an
+// ambiguous tie.
+parsed.risky = !knownConn && candidates.length > 0 && ((candidates.length > 1 && candidates[0].score === candidates[1].score) || candidates[0].conflict);
+// An exact name match no longer auto-confirms when it's contradicted by a
+// match id already on file -- that candidate is almost certainly a
+// DIFFERENT real person who happens to share a name, not this profile,
+// and silently picking them would misfile everything from this import
+// onto the wrong connection. Left unchosen (not even pre-selected) so the
+// picker's own conflict warning is what the user sees first, rather than
+// a confident-looking "Save to X" button for the wrong X.
+if (match && (match.why === 'exact' || match.why === 'known match id') && !match.conflict) { parsed.chosenId = match.conn.id; parsed.matchConfirmed = true; }
 return parsed;
 }
 
