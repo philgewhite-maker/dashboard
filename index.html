@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v171</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v172</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -1463,7 +1463,33 @@ window.tinderFindUnmatched = async () => {
   if (!copied) console.log(json);
 };
 
-console.log('Ready. Run tinderBulkImport() for the default 15, tinderBulkImport(30) for a custom size, or e.g. tinderBulkImport(250) left running overnight -- checkpoints to a file every 25. Or tinderCatchUp("2026-08-10") to re-check active conversations and new matches since a date -- good for a weekly pass. Or tinderFindUnmatched() to spot anyone missing from both lists since they were last indexed.');
+// Primes doneVersions from ids the DASHBOARD already knows about (its own
+// connections' tinderMatchId), not just whatever THIS browser has
+// personally scraped before -- localStorage only remembers a browser's
+// own runs, so a fresh browser/profile, or one with site data cleared,
+// makes every match look brand-new again even for someone who's been in
+// the dashboard for months, paying the full anti-bot delay hundreds of
+// times over for nothing new. No profile opens, no delays -- marking done
+// is instant; the only cost is comparing against whatever's currently
+// scrolled into the sidebar (collectCandidates()), same completeness
+// caveat tinderFindUnmatched() already documents. The dashboard's own
+// "Copy bulk-import snippet" button appends a call to this automatically,
+// so a normal paste seeds it with zero extra typing -- callable by hand
+// too, e.g. after importing profiles from somewhere this browser never
+// ran the snippet against.
+window.tinderSeedDone = (ids) =&gt; {
+  const idSet = new Set((ids || []).filter(Boolean));
+  const doneVersions = loadDoneVersions();
+  let newlyMarked = 0;
+  idSet.forEach((id) =&gt; { if (!isDoneWith(doneVersions, id)) newlyMarked++; doneVersions[id] = SCRIPT_VERSION; });
+  saveDoneVersions(doneVersions);
+  const currentIds = new Set(collectCandidates().map((r) =&gt; r.id));
+  const missing = [...idSet].filter((id) =&gt; !currentIds.has(id));
+  console.log(`Seeded ${idSet.size} known match id${idSet.size === 1 ? '' : 's'} (${newlyMarked} new to this browser) -- tinderBulkImport()/tinderCatchUp() will skip all of them now.`);
+  if (missing.length) console.log(`${missing.length} of those aren't in the currently-visible sidebar -- scroll both lists down to load everyone before trusting this as "unmatched": ${missing.join(', ')}`);
+};
+
+console.log('Ready. Run tinderBulkImport() for the default 15, tinderBulkImport(30) for a custom size, or e.g. tinderBulkImport(250) left running overnight -- checkpoints to a file every 25. Or tinderCatchUp("2026-08-10") to re-check active conversations and new matches since a date -- good for a weekly pass. Or tinderFindUnmatched() to spot anyone missing from both lists since they were last indexed. Or tinderSeedDone([...ids]) to mark ids you already have elsewhere as done without opening them -- the dashboard\'s "Copy bulk-import snippet" button does this automatically.');
 })();</pre>
 </details>
 <textarea id="tinder-input" rows="4" style="width:100%;font-family:monospace;font-size:12px;" placeholder="Paste the copied JSON here — one profile or a batch, either works"></textarea>

@@ -2434,7 +2434,19 @@ const bulkCopyBtn = document.getElementById('tinder-bulk-copy-snippet');
 if (bulkCopyBtn) {
 bulkCopyBtn.addEventListener('click', async () => {
 try {
-await navigator.clipboard.writeText(document.getElementById('tinder-bulk-snippet').textContent);
+// Appends a call to the snippet's own tinderSeedDone() with every
+// tinderMatchId this dashboard already has, so pasting it primes
+// localStorage's doneVersions immediately -- tinderBulkImport()/
+// tinderCatchUp() skip all of them from the very first run, at zero
+// cost (no profile opens, no anti-bot delay), instead of relying on
+// THIS browser having personally scraped them before. Matters most
+// on a fresh browser/profile or after site data was cleared, where
+// localStorage otherwise remembers nothing and every match the
+// dashboard already has looks brand-new again.
+const knownIds = data.connections.map((c) => c.tinderMatchId).filter(Boolean);
+const snippet = document.getElementById('tinder-bulk-snippet').textContent
++ `\ntinderSeedDone(${JSON.stringify(knownIds)});\n`;
+await navigator.clipboard.writeText(snippet);
 bulkCopyBtn.textContent = 'Copied';
 setTimeout(() => { bulkCopyBtn.textContent = 'Copy bulk-import snippet'; }, 2000);
 } catch (e) {
