@@ -27,6 +27,10 @@ return (conn ? conflictsHtml(conn) : '') + candidatePickerHtml(connId);
 // next session, so they're recomputed on each sync rather than resurrected.
 let pendingMatches = new Map();
 let lastSyncedAt = null;
+// `total` from the most recent sync's result -- the one number that
+// genuinely can't change between resolves (linked/review/missing all can,
+// as matches get confirmed/rejected one by one on the Dating tab).
+let lastSyncTotal = null;
 
 function isPostAppStage(c) {
 return (STAGE_RANK[c.stage] ?? 0) >= CONTACT_MATCH_MIN_STAGE;
@@ -146,6 +150,7 @@ missing++;
 });
 
 lastSyncedAt = new Date().toISOString();
+lastSyncTotal = contacts.length;
 queueSave();
 return { total: contacts.length, linked, review, missing };
 }
@@ -371,6 +376,19 @@ countEl.textContent = lastSyncedAt
 ? `${counts.linked} linked · ${counts.review} to review · ${counts.missing} missing`
 : `${eligibleConnections().length} eligible`;
 }
+// The "Checked N contacts…" status line used to be written once, at the
+// moment a sync completed, and never touched again -- so confirming or
+// rejecting even one match afterward (each of which already calls this
+// function) left it silently lying about how many were still "to
+// review", while THIS panel's own count updated correctly right below it.
+// Confirmed live as the actual source of the contradiction: "11 to
+// review" frozen in the status line, "10 to review" (then fewer, as more
+// got resolved) in the panel. Regenerated from the same live counts every
+// time, so the two can never disagree again.
+const statusEl = document.getElementById('contacts-sync-status');
+if (statusEl && lastSyncTotal !== null) {
+statusEl.textContent = `Checked ${lastSyncTotal} contacts: ${counts.linked} linked, ${counts.review} to review, ${counts.missing} not found.`;
+}
 
 // The panel is now just the action and a summary — the actual reviewing
 // happens on each connection's own card, next to their photo and details.
@@ -415,8 +433,11 @@ return;
 }
 btn.disabled = true;
 try {
-const result = await syncContacts((msg) => { status.textContent = msg; });
-status.textContent = `Checked ${result.total} contacts: ${result.linked} linked, ${result.review} to review, ${result.missing} not found.`;
+// renderContactReview() writes the "Checked…" summary itself now (from
+// the same live counts its own panel uses), so this doesn't set it
+// directly -- a second, separate write here is exactly how the two went
+// out of sync before.
+await syncContacts((msg) => { status.textContent = msg; });
 renderContactReview();
 refreshConnections();
 } catch (err) {
