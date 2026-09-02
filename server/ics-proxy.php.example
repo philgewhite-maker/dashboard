@@ -1,0 +1,148 @@
+<?php
+declare(strict_types=1);
+
+/**
+ * Fetches an Airbnb (or any other) calendar-export .ics feed server-side,
+ * for the Overview tab's Airbnb reservation sync. A browser can't read
+ * these directly -- no Access-Control-Allow-Origin header, same problem
+ * image-proxy.php and recipe-fetch.php already exist to work around.
+ *
+ * Copied from recipe-fetch.php's approach rather than image-proxy.php's:
+ * Airbnb serves its export from several regional hostnames (airbnb.com,
+ * airbnb.co.uk, airbnb.de, ...) and there's no fixed list worth
+ * maintaining, so this validates the TARGET rather than trusting a
+ * hostname allowlist. Same three-step SSRF defence, same reasoning:
+ *
+ *   1. Resolve the hostname to its IPv4 addresses yourself (gethostbynamel).
+ *   2. Reject if ANY of them is private/reserved (loopback, RFC1918,
+ *      link-local -- which is also where cloud metadata endpoints like
+ *      169.254.169.254 live).
+ *   3. Pin curl to the EXACT IP just checked (CURLOPT_RESOLVE), so the
+ *      actual request cannot re-resolve to something different a moment
+ *      later (DNS rebinding).
+ *
+ * GET ?url=<ics-export-url>   -> the feed's raw text (capped, see MAX_BYTES)
+ *
+ * Upload next to sync.php, files.php and image-proxy.php; set $SECRET to
+ * the SAME value as those. See README.md.
+ */
+
+// ---- Configuration ---------------------------------------------------
+
+$SECRET = 'PUT-A-LONG-RANDOM-STRING-HERE';
+$MAX_BYTES = 3 * 1024 * 1024;
+$TIMEOUT_SECONDS = 10;
+
+$ALLOWED_ORIGINS = [
+    'https://philgewhite-maker.github.io',
+    'http://localhost:8743',
+    'http://localhost:5173',
+];
+
+// ---- End of configuration --------------------------------------------
+
+$origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+if ($origin !== '' && in_array($origin, $ALLOWED_ORIGINS, true)) {
+    header('Access-Control-Allow-Origin: ' . $origin);
+    header('Vary: Origin');
+}
+header('Access-Control-Allow-Headers: X-Sync-Secret');
+header('Access-Control-Allow-Methods: GET, OPTIONS');
+header('Access-Control-Max-Age: 86400');
+header('Cache-Control: no-store');
+header('X-Content-Type-Options: nosniff');
+
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
+    http_response_code(204);
+    exit;
+}
+
+function fail(int $code, string $message): void {
+    http_response_code($code);
+    header('Content-Type: application/json');
+    echo json_encode(['error' => $message]);
+    exit;
+}
+
+$provided = $_SERVER['HTTP_X_SYNC_SECRET'] ?? '';
+if ($SECRET === '' || $SECRET === 'PUT-A-LONG-RANDOM-STRING-HERE') {
+    fail(500, 'Server not configured: set $SECRET in ics-proxy.php');
+}
+if (!is_string($provided) || !hash_equals($SECRET, $provided)) {
+    fail(401, 'Bad or missing sync secret');
+}
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'GET') {
+    fail(405, 'Use GET');
+}
+if (!function_exists('curl_init')) {
+    fail(500, "PHP's curl extension isn't enabled — ask your host to turn it on");
+}
+
+$url = $_GET['url'] ?? '';
+$parts = is_string($url) ? parse_url($url) : false;
+if (!is_array($parts) || ($parts['scheme'] ?? '') !== 'https' || empty($parts['host'])) {
+    fail(400, 'Give a full https:// URL');
+}
+$host = $parts['host'];
+
+// Step 1 + 2: resolve, then reject anything private/reserved. FILTER_VALIDATE_IP
+// with these two flags is PHP's own check for exactly this -- RFC1918,
+// loopback, link-local (which covers the 169.254.169.254 metadata address
+// several cloud providers use), and other reserved ranges in one call.
+$ips = @gethostbynamel($host);
+if ($ips === false || count($ips) === 0) {
+    fail(400, "Could not resolve $host");
+}
+$safeIp = null;
+foreach ($ips as $ip) {
+    if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) !== false) {
+        $safeIp = $ip;
+        break;
+    }
+}
+if ($safeIp === null) {
+    // Every resolved address was private/reserved -- refuse outright rather
+    // than picking one, since ANY of them being internal is the attack.
+    fail(400, 'That host resolves to a private or internal address');
+}
+
+// Step 3: pin the request to the exact IP just validated.
+$port = $parts['port'] ?? 443;
+$ch = curl_init($url);
+curl_setopt_array($ch, [
+    CURLOPT_RETURNTRANSFER => true,
+    CURLOPT_FOLLOWLOCATION => false, // see the file header -- redirects aren't re-validated, so they're refused rather than trusted
+    CURLOPT_TIMEOUT => $TIMEOUT_SECONDS,
+    CURLOPT_PROTOCOLS => CURLPROTO_HTTPS,
+    CURLOPT_USERAGENT => 'Mozilla/5.0 (compatible; dashboard-ics-proxy/1.0)',
+    CURLOPT_RESOLVE => ["$host:$port:$safeIp"],
+    CURLOPT_HTTPHEADER => ['Accept: text/calendar,text/plain,*/*'],
+]);
+$ics = curl_exec($ch);
+$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+$contentType = curl_getinfo($ch, CURLINFO_CONTENT_TYPE) ?: '';
+$err = curl_error($ch);
+curl_close($ch);
+
+if ($ics === false) {
+    fail(502, "Could not fetch that feed: $err");
+}
+if ($httpCode >= 300 && $httpCode < 400) {
+    fail(502, "That feed redirected (HTTP $httpCode) — try the URL it redirects to directly");
+}
+if ($httpCode < 200 || $httpCode >= 300) {
+    fail(502, "That feed returned HTTP $httpCode");
+}
+// Airbnb's export serves as text/calendar; some hosts send text/plain
+// instead. Neither is trusted blindly -- just checked loosely enough that
+// a genuine calendar feed passes and something wildly different (an HTML
+// error page mislabelled as 200) doesn't.
+if ($contentType !== '' && strpos($contentType, 'calendar') === false && strpos($contentType, 'text/') === false && strpos($contentType, 'octet-stream') === false) {
+    fail(502, "That URL didn't return a calendar feed (got $contentType)");
+}
+if (strlen($ics) > $MAX_BYTES) {
+    $ics = substr($ics, 0, $MAX_BYTES);
+}
+
+header('Content-Type: text/plain; charset=utf-8');
+echo $ics;

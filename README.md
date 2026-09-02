@@ -132,6 +132,50 @@ anything from a couple of tracked senders (`TRACKED_SENDERS` in
 `js/googlemail.js`) in the last 2 days. A message that's both starred and
 from a tracked sender only appears once, under Starred.
 
+## Airbnb reservation sync
+
+Settings → "Airbnb listings": one row per listing you host or co-host
+(label, that listing's calendar-export URL, a short prefix, and a colour).
+Find the export URL on Airbnb: Calendar → Availability → Connect calendars
+→ Export calendar — it's a private `.ics` link, not a login, and it's
+officially supported (unlike scraping the site or an unofficial API
+wrapper). Prefix and colour both identify the physical *room*, not the
+listing — give two listings that are really the same room the same colour,
+so the Planner's occupancy stripe and the Google Calendar push both treat
+them as one room with two sources of bookings.
+
+Overview tab → "Sync" pulls each listing's feed and merges it into
+`data.airbnbReservations`, keyed on the feed's own event id so re-syncing
+updates in place rather than duplicating. **Airbnb's export never includes
+the guest's name, on any plan** — that's a privacy limit on their side, not
+a gap here — so add a name (and any notes) per reservation on the Overview
+panel yourself.
+
+The Planner tab's day cells show a thin, text-free colour stripe across the
+bottom for whichever room(s) have activity that day — checkout, check-in,
+or mid-stay all count, so a same-day changeover between two same-coloured
+listings shows two segments of that colour rather than one disappearing a
+day early. Nudges remind you to line up a clean a couple of days before a
+checkout and flag an arriving guest the day before check-in.
+
+"Push to Google Calendar" (needs the Calendar write scope — see below)
+creates a real event titled `"<prefix> — <guest name>"` spanning check-in to
+check-out. Before creating anything, it searches the target calendar for an
+event that already mentions the listing's prefix in that date range — a
+reservation you'd typed in by hand before this feature existed, once
+renamed to include the prefix, is *adopted* (its id is remembered) instead
+of duplicated. More than one match is left for you to resolve by hand
+rather than guessed at.
+
+**Setup**: like `image-proxy.php`/`recipe-fetch.php`, the ICS feeds are
+fetched server-side (SSRF-hardened the same way `recipe-fetch.php` is —
+resolves the hostname, rejects a private/internal address, pins the
+connection to the validated IP) to work around the missing CORS header a
+browser fetch needs. Copy `server/ics-proxy.php.example` to
+`server/ics-proxy.php`, set `$SECRET` to match `sync.php`, upload it next to
+the others. Without it, Sync will fail with a clear error; nothing else on
+this tab needs it.
+
 ## Tasks (GTD)
 
 The Tasks tab is built around capture being separate from deciding.

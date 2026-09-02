@@ -26,6 +26,9 @@ jobs: [],
 connections: [],
 calendars: [], // array of tracked calendar NAMES, as they appear in Google Calendar
 calendarStatus: {}, // name -> {found, title, date, syncedAt} — filled in by Sync
+airbnbListings: [], // {id, label, icsUrl, prefix, colour} -- configured in Settings
+airbnbReservations: [], // synced from each listing's ICS feed, see js/features/airbnb.js
+airbnbSyncStatus: {}, // listingId -> {ok, syncedAt, added, updated, removed, error}
 vouchers: [],
 businessIdeas: [],
 subscriptions: [],
@@ -55,6 +58,7 @@ prefs: { ...DEFAULT_PREFS },
 const DEFAULT_PREFS = {
 calendarEventCount: 1,
 mailResultCount: 5,
+airbnbCalendarId: '', // which Google Calendar "Push to Google Calendar" targets -- picked once, remembered
 };
 
 // Each mail search is one row in Settings: a kind, its value, and its own
@@ -345,6 +349,34 @@ return {
 id: uid(),
 title: '',
 notes: '',
+createdAt: new Date().toISOString(),
+...fields,
+};
+}
+
+// One Airbnb listing's calendar-export config -- prefix and colour are
+// both about ROOM identity (two listings sharing a colour are the same
+// physical room presented as two separate listings), not the listing
+// itself. `colour` is a name from the app's fixed palette (see
+// css/style.css's --X custom properties + .dot.X classes), not a free
+// pick -- there's no colour-picker UI anywhere else to reuse either.
+function blankAirbnbListing(fields = {}) {
+return { id: uid(), label: '', icsUrl: '', prefix: '', colour: 'blue', ...fields };
+}
+
+// One reservation synced from a listing's ICS feed. `uid` is the feed's
+// OWN event UID (not this record's `id`) -- the stable key a re-sync
+// matches against so re-running Sync updates in place instead of piling
+// up duplicates. Airbnb's export never includes the guest's name (a
+// genuine privacy limit on their side, not a gap here), so guestName/
+// notes are always user-entered after the fact, never scraped.
+function blankAirbnbReservation(fields = {}) {
+return {
+id: uid(),
+listingId: '', uid: '',
+checkin: '', checkout: '', // ISO yyyy-mm-dd, checkout is exclusive (the turnover day, not an occupied night)
+guestName: '', notes: '',
+googleEventId: '', googleCalendarId: '', // set once pushed -- see js/googlecalendar.js's findEvents()/createEvent()
 createdAt: new Date().toISOString(),
 ...fields,
 };
@@ -652,6 +684,16 @@ data.plannerEntries = data.plannerEntries.map((e) => ({ ...blankPlannerEntry(), 
 // "nothing left to route it" reasoning as the trip filter itself.
 const plannerTripIds = new Set(data.trips.map((t) => t.id));
 data.plannerEntries = data.plannerEntries.filter((e) => !e.tripId || plannerTripIds.has(e.tripId));
+if (!Array.isArray(data.airbnbListings)) data.airbnbListings = [];
+data.airbnbListings = data.airbnbListings.map((l) => ({ ...blankAirbnbListing(), ...l, id: l.id || uid() }));
+if (!Array.isArray(data.airbnbReservations)) data.airbnbReservations = [];
+data.airbnbReservations = data.airbnbReservations.map((r) => ({ ...blankAirbnbReservation(), ...r, id: r.id || uid() }));
+// A reservation whose listing was since deleted from Settings has nothing
+// left to sync it or show it against -- same orphan-drop reasoning as the
+// planner-entries filter just above.
+const airbnbListingIds = new Set(data.airbnbListings.map((l) => l.id));
+data.airbnbReservations = data.airbnbReservations.filter((r) => airbnbListingIds.has(r.listingId));
+if (!data.airbnbSyncStatus || typeof data.airbnbSyncStatus !== 'object' || Array.isArray(data.airbnbSyncStatus)) data.airbnbSyncStatus = {};
 // Seed the mail search rows from the old fixed shape the first time only.
 // Keyed on the array's absence rather than its emptiness, so deleting every
 // row stays deleted instead of being helpfully repopulated next reload.
@@ -1401,6 +1443,7 @@ MAIL_SEARCH_KINDS, mailSearchLabel,
 TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureBatch, blankPendingImport, blankConnection,
 blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS, LEG_DATE_FIELDS,
 blankPlannerEntry, blankPlannerActivity,
+blankAirbnbListing, blankAirbnbReservation,
 CONTACT_STATUS_LABELS, CONTACT_MATCH_MIN_STAGE,
 DEFAULT_RATING_CATEGORIES, slugifyField, DEFAULT_RECIPE_RATING_CATEGORIES,
 FLAG_FIELD_DEFS, DEFAULT_FLAG_RULES, computeFlags, valueColorForField, stripSharedSuffix, suggestedAction, suggestedQuestions, isTravelPaused, ACTIONS, distanceMiles,

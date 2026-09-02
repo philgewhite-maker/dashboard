@@ -25,18 +25,43 @@ return partial ? partial.id : null;
 
 // Creates an all-day event -- the Planner tab (js/features/planner.js)
 // works in whole days, not time slots, so start/end are both a bare date
-// rather than a dateTime. Requires the opt-in calendar.events write scope
-// (see hasCalendarWrite() in sync/googleauth.js) -- callers are expected to
-// check that before offering the push button, same as Contacts write
-// already does.
-async function createEvent(calendarId, { title, description, date }) {
+// rather than a dateTime. `endDate` is optional (defaults to `date`, a
+// single-day event) -- added for the Airbnb push (js/features/airbnb.js),
+// which needs a real check-in/check-out span; the Planner call site
+// never passes it, so its behaviour is unchanged. Requires the opt-in
+// calendar.events write scope (see hasCalendarWrite() in
+// sync/googleauth.js) -- callers are expected to check that before
+// offering the push button, same as Contacts write already does.
+async function createEvent(calendarId, { title, description, date, endDate }) {
 const res = await googleFetch(`${EVENTS_API}/${encodeURIComponent(calendarId)}/events`, {
 method: 'POST',
 headers: { 'Content-Type': 'application/json' },
-body: JSON.stringify({ summary: title, description, start: { date }, end: { date } }),
+body: JSON.stringify({ summary: title, description, start: { date }, end: { date: endDate || date } }),
 });
 if (!res.ok) throw new Error(`Couldn't create calendar event: ${res.status}`);
 return res.json();
+}
+
+// Searches for existing events, unlike getUpcomingEvents just below (always
+// forward-looking from "now", and deliberately narrow-fielded -- no id, no
+// description). Built for the Airbnb push's de-dup step: recognising a
+// reservation the user already typed into Google Calendar by hand (see
+// airbnb.js) so a push adopts that event instead of creating a duplicate.
+// `q` is Google's own free-text search across summary/description/etc. --
+// there's no per-field search, which is exactly why the push logic asks
+// for a listing PREFIX to appear in the event title in the first place.
+async function findEvents(calendarId, { timeMin, timeMax, q }) {
+const params = new URLSearchParams({
+timeMin, timeMax,
+singleEvents: 'true',
+orderBy: 'startTime',
+fields: 'items(id,summary,description,start,end)',
+});
+if (q) params.set('q', q);
+const res = await googleFetch(`${EVENTS_API}/${encodeURIComponent(calendarId)}/events?${params}`);
+if (!res.ok) throw new Error(`Calendar search failed: ${res.status}`);
+const json = await res.json();
+return json.items || [];
 }
 
 async function getUpcomingEvents(calendarId, count, daysAhead) {
@@ -98,4 +123,4 @@ status[name] = { found: false, events: [], error: err.message, syncedAt };
 return status;
 }
 
-export { syncCalendars, listCalendars, createEvent };
+export { syncCalendars, listCalendars, createEvent, findEvents };

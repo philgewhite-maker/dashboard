@@ -4,11 +4,13 @@ import { switchTab } from '../tabs.js';
 import { callTextJson, MissingKeyError } from '../ai.js';
 import { gapsFor } from './travel.js';
 
-const TARGET_TABS = { connection: 'dating', search: 'dating', habit: 'overview', goal: 'overview', job: 'jobhunt', voucher: 'finances', calendar: 'overview', business: 'business', task: 'tasks', health: 'health', trip: 'travel', 'trip-suggestion': 'travel' };
+const TARGET_TABS = { connection: 'dating', search: 'dating', habit: 'overview', goal: 'overview', job: 'jobhunt', voucher: 'finances', calendar: 'overview', business: 'business', task: 'tasks', health: 'health', trip: 'travel', 'trip-suggestion': 'travel', airbnb: 'overview' };
 // Lead time for the "trip's coming up and still has gaps" nudge -- same
 // 14-day window as NEW_MATCH_STAGES below, so a trip nudge doesn't start
 // nagging the moment it's created, only once it's genuinely close.
 const TRIP_GAP_LEAD_DAYS = 14;
+const AIRBNB_CLEAN_LEAD_DAYS = 2; // "line up the clean" reminder, this many days before a checkout
+const AIRBNB_GREET_LEAD_DAYS = 1; // "guest arriving" reminder, this many days before a check-in
 const TOP_N = 6;
 // Cheap, fast model for a ranking task — no need for the vision model the
 // user may have set for screenshot import.
@@ -298,8 +300,42 @@ category: 'business',
 });
 
 buildHealthNudges(pool);
+buildAirbnbNudges(pool);
 
 return pool;
+}
+
+// Checkout -> "line up the clean" and check-in -> "greet the guest" --
+// deliberately just reminders, not calendar entries of their own; the
+// user adds cleaner/kids-staying events to Google Calendar by hand
+// separately (js/features/airbnb.js's push only ever creates the
+// RESERVATION event itself). No snooze/dismiss, matching every other
+// nudge in this pool -- none of them have one, the pool re-shuffles each
+// render instead.
+function buildAirbnbNudges(pool) {
+data.airbnbReservations.forEach((r) => {
+const listing = data.airbnbListings.find((l) => l.id === r.listingId);
+if (!listing) return;
+const label = listing.label || listing.prefix || 'A listing';
+const dOut = daysUntil(r.checkout);
+if (dOut >= 0 && dOut <= AIRBNB_CLEAN_LEAD_DAYS) {
+pool.push({
+text: `${label}: checkout ${dOut === 0 ? 'today' : `in ${dOut} day${dOut === 1 ? '' : 's'}`} — line up the clean.`,
+target: { type: 'airbnb', id: r.id },
+signals: { kind: 'airbnb-clean', daysUntil: dOut },
+category: 'airbnb',
+});
+}
+const dIn = daysUntil(r.checkin);
+if (dIn >= 0 && dIn <= AIRBNB_GREET_LEAD_DAYS) {
+pool.push({
+text: `${label}: ${r.guestName || 'a guest'} checks in ${dIn === 0 ? 'today' : 'tomorrow'}.`,
+target: { type: 'airbnb', id: r.id },
+signals: { kind: 'airbnb-greet', daysUntil: dIn },
+category: 'airbnb',
+});
+}
+});
 }
 
 // Sleep/weight/exercise only — heart rate and oxygen saturation are left out
@@ -385,6 +421,8 @@ setTimeout(() => scrollAndFlash(`[data-job-row="${target.id}"]`), 50);
 setTimeout(() => scrollAndFlash(`[data-voucher-row="${target.id}"]`), 50);
 } else if (target.type === 'calendar') {
 setTimeout(() => scrollAndFlash(`[data-cal-row="${CSS.escape(target.name)}"]`), 50);
+} else if (target.type === 'airbnb') {
+setTimeout(() => scrollAndFlash(`[data-airbnb-row="${target.id}"]`), 50);
 } else if (target.type === 'business') {
 setTimeout(() => scrollAndFlash(`[data-idea-row="${target.id}"]`), 50);
 } else if (target.type === 'task') {

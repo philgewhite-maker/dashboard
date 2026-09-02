@@ -43,6 +43,17 @@ throw new Error(`Couldn't work out the image-proxy URL from "${url}" — it shou
 return { endpoint, secret };
 }
 
+// ics-proxy.php sits next to sync.php too, same reasoning as filesEndpoint.
+async function icsProxyEndpoint() {
+const { url, secret, configured } = await getConfig();
+if (!configured) throw new FilesNotConfiguredError();
+const endpoint = url.replace(/sync\.php(?=$|\?)/, 'ics-proxy.php');
+if (endpoint === url) {
+throw new Error(`Couldn't work out the ics-proxy URL from "${url}" — it should end in sync.php.`);
+}
+return { endpoint, secret };
+}
+
 const UPLOAD_TIMEOUT_MS = 120000; // uploads are far slower than a JSON save
 const DOWNLOAD_TIMEOUT_MS = 120000;
 
@@ -167,6 +178,25 @@ proxiedImageCache.set(url, blob);
 return blob;
 }
 
+// Fetches an Airbnb (or other) calendar-export feed's raw text via
+// ics-proxy.php -- same CORS problem as fetchProxiedImage above, different
+// content. Deliberately NOT cached like fetchProxiedImage is: a photo's
+// bytes never change, but the whole point of clicking Sync again is
+// picking up whatever changed since the last one, so every call here is a
+// genuine re-fetch.
+async function fetchIcs(url) {
+const { endpoint, secret } = await icsProxyEndpoint();
+const res = await withTimeout(DOWNLOAD_TIMEOUT_MS, (signal) => fetch(`${endpoint}?url=${encodeURIComponent(url)}`, {
+headers: { 'X-Sync-Secret': secret },
+signal,
+}));
+if (!res.ok) {
+if (res.status === 401) throw new Error('The ics-proxy server rejected the secret — check ics-proxy.php uses the same one as sync.php.');
+throw new Error(await errorFrom(res, `Couldn't fetch that calendar (HTTP ${res.status}).`));
+}
+return res.text();
+}
+
 // Deleting is best-effort on the server: if it fails, the attachment is
 // still removed from the task, because leaving a row the user just deleted
 // visible on screen is worse than leaving an orphaned file on disk.
@@ -235,5 +265,5 @@ return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 export {
 FilesNotConfiguredError,
 uploadAttachment, storePhoto, fetchAttachment, deleteAttachment, openAttachment, formatBytes,
-isServerPhotoId, serverPhotoUrl, fetchProxiedImage,
+isServerPhotoId, serverPhotoUrl, fetchProxiedImage, fetchIcs,
 };

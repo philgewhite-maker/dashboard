@@ -19,6 +19,7 @@ import { escapeHtml, uid, todayStr, dateStrAdd, avatarHtml, hydratePhotoBackgrou
 import { isPriorityConnection, renderConnPicker, bindConnPickers, expandConnection } from './connections.js';
 import { switchTab } from '../tabs.js';
 import { revealTrip } from './travel.js';
+import { airbnbSegmentsForDay } from './airbnb.js';
 
 // The 14-day grid (and a long trip's mini-grid) routinely runs well past
 // the fold, but native HTML5 drag-and-drop does NOT auto-scroll the page
@@ -137,12 +138,23 @@ ${entry.tripId ? `<span class="planner-entry-trip-link" data-planner-open-trip="
 </div>`;
 }
 
+// Airbnb occupancy stripes only apply to the main grid (tripId === '') --
+// a trip's own mini-grid is about a PERSON's travel dates, not which of
+// your own rooms is occupied, so it stays out of that context entirely.
+function airbnbStripeHtml(dateStr, tripId) {
+if (tripId) return '';
+const segments = airbnbSegmentsForDay(dateStr);
+if (!segments.length) return '';
+return `<div class="planner-day-stripe">${segments.map((s) => `<span class="stripe-seg stripe-${escapeHtml(s.colour)}" title="${escapeHtml(s.title)}"></span>`).join('')}</div>`;
+}
+
 function plannerDayHtml(dateStr, tripId = '', legChipsHtml = '') {
 const entries = entriesForDay(dateStr, tripId);
 return `<div class="planner-day alloc-target" data-planner-day="${dateStr}" data-planner-trip="${tripId}">
 <div class="planner-day-label">${formatDayLabel(dateStr)}</div>
 ${legChipsHtml}
 <div class="planner-day-entries">${entries.map(plannerEntryHtml).join('')}</div>
+${airbnbStripeHtml(dateStr, tripId)}
 </div>`;
 }
 

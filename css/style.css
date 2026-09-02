@@ -17,6 +17,15 @@
 --teal-bg:#E3EFF1;
 --plum:#7A5C8F;
 --plum-bg:#ECE7F0;
+/* Added for the Airbnb room-colour palette -- --slate/--rose already
+   exist but read as blue-grey/mauve respectively, not a genuine blue or
+   pink, so a listing configured "Blue" or "Pink" gets its own true
+   value here rather than a re-purposed near-miss. Kept in the same
+   muted, mid-saturation family as the rest of this palette. */
+--blue:#3E6DA6;
+--blue-bg:#E5ECF5;
+--pink:#C15C86;
+--pink-bg:#F6E8EE;
 }
 *{box-sizing:border-box;}
 /* A plain <img> is natively draggable; nudging one a pixel mid-click is
@@ -252,6 +261,8 @@ gap:9px;
 .dot.plum{background:var(--plum);}
 .dot.red{background:var(--red);}
 .dot.green{background:var(--sage);}
+.dot.blue{background:var(--blue);}
+.dot.pink{background:var(--pink);}
 .flag-rule-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px;}
 .flag-rule-row input[type="text"]{flex:1;min-width:120px;}
 .flag-rule-row input.mini{width:70px;}
@@ -2012,8 +2023,26 @@ gap:10px;
 margin:14px 0;
 }
 .planner-grid-trip{grid-template-columns:repeat(auto-fill, minmax(120px, 1fr));}
-.planner-day{min-height:90px;}
+.planner-day{min-height:90px;position:relative;}
+.planner-day:has(.planner-day-stripe){padding-bottom:16px;}
 .planner-day-label{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.02em;}
+/* Airbnb room-occupancy stripe -- deliberately just colour, no text, on
+   the day cell itself (the listing/guest name is in each segment's
+   title tooltip instead, and in the Google Calendar push). One segment
+   per occupied LISTING, so a same-room changeover day shows two
+   same-coloured segments side by side, not one -- see
+   airbnbSegmentsForDay() in js/features/airbnb.js. */
+.planner-day-stripe{position:absolute;left:6px;right:6px;bottom:4px;height:3px;display:flex;gap:2px;border-radius:2px;overflow:hidden;}
+.stripe-seg{flex:1;min-width:4px;}
+.stripe-blue{background:var(--blue);}
+.stripe-pink{background:var(--pink);}
+.stripe-sage{background:var(--sage);}
+.stripe-amber{background:var(--amber);}
+.stripe-slate{background:var(--slate);}
+.stripe-rose{background:var(--rose);}
+.stripe-teal{background:var(--teal);}
+.stripe-plum{background:var(--plum);}
+.stripe-red{background:var(--red);}
 .planner-day-entries{display:flex;flex-direction:column;gap:6px;margin-top:6px;}
 .planner-entry{
 display:flex;align-items:center;gap:6px;flex-wrap:wrap;

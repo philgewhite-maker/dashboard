@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v182</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v183</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -80,6 +80,19 @@
 <span class="sync-status" id="cal-sync-status"></span>
 </div>
 <div id="calendars-list"></div>
+</section>
+
+<section class="panel wide" id="airbnb-panel" data-tab="overview">
+<div class="panel-head">
+<h2><span class="dot blue"></span>Airbnb</h2>
+<span class="count-badge" id="airbnb-count"></span>
+</div>
+<div class="sync-row">
+<button class="sync-btn" id="airbnb-sync-btn" type="button">&#8635; Sync</button>
+<select id="airbnb-push-calendar" title="Which Google Calendar &quot;Push to Google Calendar&quot; sends to"><option value="">Push to&hellip;</option></select>
+<span class="sync-status" id="airbnb-sync-status"></span>
+</div>
+<div id="airbnb-list"></div>
 </section>
 
 <section class="panel wide" id="mail-panel" data-tab="overview">
@@ -2496,6 +2509,13 @@ Same idea as Connections' ratings, a separate list (Taste/Health/Prep by default
 <div class="settings-note" style="margin:0 0 10px;">Each row becomes its own section in the Mail panel, with its own limits. Synced, so these follow you to your other devices.</div>
 <div id="mail-searches"></div>
 <button class="add-btn" id="add-mail-search-btn" type="button" style="margin-top:8px;">Add search</button>
+</div>
+
+<div class="settings-block">
+<h3>Airbnb listings</h3>
+<div class="settings-note" style="margin:0 0 10px;">One row per listing you host or co-host. Find each one's export URL on Airbnb: Calendar &rarr; Availability &rarr; Connect calendars &rarr; Export calendar. Prefix and colour identify the physical room (two listings for the same room should share a colour); Sync on the Overview tab pulls reservation dates in, never guest names &mdash; Airbnb's export doesn't include those on any plan, so add a name per reservation there yourself.</div>
+<div id="airbnb-listings"></div>
+<button class="add-btn" id="add-airbnb-listing-btn" type="button" style="margin-top:8px;">Add listing</button>
 </div>
 
 <div class="settings-block">
