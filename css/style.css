@@ -11,6 +11,7 @@
 --slate:#51678A;
 --slate-bg:#E9EDF3;
 --red:#B8503E;
+--red-bg:#F5E4E0;
 --rose:#B8567A;
 --rose-bg:#F5E9EE;
 --teal:#3E8FA0;
@@ -1410,6 +1411,18 @@ padding:4px 9px;
 white-space:nowrap;
 }
 .cal-badge.today{background:var(--teal);color:#fff;}
+/* Room-colour variants -- the Airbnb list colours its date-range badge by
+   the listing's own configured colour instead of the default teal, so
+   the pill reads as "which room" at a glance, same as the dot next to
+   the name and the Planner's own occupancy stripe. */
+.cal-badge.blue{background:var(--blue-bg);color:var(--blue);}
+.cal-badge.pink{background:var(--pink-bg);color:var(--pink);}
+.cal-badge.sage{background:var(--sage-bg);color:var(--sage);}
+.cal-badge.amber{background:var(--amber-bg);color:var(--amber);}
+.cal-badge.slate{background:var(--slate-bg);color:var(--slate);}
+.cal-badge.rose{background:var(--rose-bg);color:var(--rose);}
+.cal-badge.plum{background:var(--plum-bg);color:var(--plum);}
+.cal-badge.red{background:var(--red-bg);color:var(--red);}
 .cal-actions{
 margin-left:auto;
 display:flex;
@@ -1440,8 +1453,10 @@ cursor:pointer;
 /* Same compact sizing as .sm, minus its width:100% -- that's right for a
    button stacked alone in a narrow card, wrong for one sitting inline
    next to other content in a flex row (stretched the Translate button
-   to fill the whole row, confirmed live). */
-.sync-btn.tinder-inline-btn{font-size:11px;padding:4px 8px;width:auto;margin-top:0;flex:0 0 auto;}
+   to fill the whole row, confirmed live). Neutrally named and reused
+   as-is by anything else that hits the same problem (the Airbnb push
+   button, confirmed live -- it filled its entire row before this). */
+.sync-btn.tinder-inline-btn,.sync-btn.inline{font-size:11px;padding:4px 8px;width:auto;margin-top:0;flex:0 0 auto;}
 .sync-status{
 font-family:'IBM Plex Mono',monospace;
 font-size:11px;

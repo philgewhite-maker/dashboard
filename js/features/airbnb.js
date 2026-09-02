@@ -261,14 +261,14 @@ const nights = Math.round((new Date(`${r.checkout}T00:00:00`) - new Date(`${r.ch
 return `<div class="cal-row" data-airbnb-row="${r.id}">
 <div class="cal-head">
 <span class="cal-name"><span class="dot ${escapeHtml(listing.colour)}"></span>${escapeHtml(listing.label || listing.prefix || 'Listing')}</span>
-<span class="cal-badge">${formatAirbnbDate(r.checkin)} &rarr; ${formatAirbnbDate(r.checkout)} &middot; ${nights} night${nights === 1 ? '' : 's'}</span>
+<span class="cal-badge ${escapeHtml(listing.colour)}">${formatAirbnbDate(r.checkin)} &rarr; ${formatAirbnbDate(r.checkout)} &middot; ${nights} night${nights === 1 ? '' : 's'}</span>
 </div>
 <div class="cal-event-row">
-<input type="text" autocomplete="off" class="tag-add-input" placeholder="Guest name" data-airbnb-res-field="guestName" data-airbnb-res-id="${r.id}" value="${escapeHtml(r.guestName)}" style="max-width:160px;">
-<input type="text" autocomplete="off" class="tag-add-input" placeholder="Notes" data-airbnb-res-field="notes" data-airbnb-res-id="${r.id}" value="${escapeHtml(r.notes)}" style="max-width:220px;">
+<input type="text" autocomplete="off" class="tag-add-input" placeholder="Guest name" data-airbnb-res-field="guestName" data-airbnb-res-id="${r.id}" value="${escapeHtml(r.guestName)}" style="max-width:130px;">
+<input type="text" autocomplete="off" class="tag-add-input" placeholder="Notes" data-airbnb-res-field="notes" data-airbnb-res-id="${r.id}" value="${escapeHtml(r.notes)}" style="max-width:160px;">
 ${r.googleEventId
-? '<span class="settings-note" style="margin:0;">Pushed to Google Calendar.</span>'
-: `<button class="sync-btn sm" type="button" data-airbnb-push="${r.id}">Push to Google Calendar</button>`}
+? '<span class="settings-note" style="margin:0;">Pushed &#10003;</span>'
+: `<button class="sync-btn inline" type="button" data-airbnb-push="${r.id}" title="Push to Google Calendar">Push</button>`}
 <span class="sync-status" data-airbnb-push-status="${r.id}"></span>
 </div>
 </div>`;
@@ -373,13 +373,33 @@ statusEl.textContent = `Couldn't push: ${err.message || err}`;
 }
 }
 
-// Populates the calendar picker from the real Google Calendar list, on
-// demand rather than automatically -- same explicit-click-adjacent
-// pattern as Calendars/Mail's own "load calendars" step, just triggered
-// by Sync itself here since there's no separate "load" button.
-async function loadAirbnbCalendarOptions() {
+// Populates the calendar picker from the real Google Calendar list.
+// Confirmed live: calling this once at page load (the original design
+// here) silently did nothing most of the time -- Google's silent
+// reconnect is async and often hasn't resolved that early, so
+// canAttemptGoogleAction() said no and this gave up for good, with no
+// error and no retry. Now called both on every Sync click (by then
+// sign-in has had time to settle) and lazily the moment the dropdown
+// itself is opened (belt and braces for whichever comes first), and
+// failures actually say why instead of leaving an unexplained empty
+// picker.
+// `silent` skips writing to the shared sync-status span -- used by the
+// Sync click handler, which has its own, more relevant result text to
+// show there (a calendar-picker sign-in nudge shouldn't clobber "Synced
+// just now."); the initial load and the on-focus retry below have
+// nothing competing for that span, so they show it directly.
+async function loadAirbnbCalendarOptions({ silent } = {}) {
 const select = document.getElementById('airbnb-push-calendar');
-if (!select || !(await canAttemptGoogleAction())) return;
+const status = document.getElementById('airbnb-sync-status');
+if (!select) return;
+if (!(await canAttemptGoogleAction())) {
+if (!silent && status) status.textContent = 'Sign in to Google (Settings) to enable "Push to…".';
+return;
+}
+if (!hasCalendarWrite()) {
+if (!silent && status) status.textContent = 'Turn on "Allow creating events in Google Calendar" in Settings, then sign out and back in, to enable "Push to…".';
+return;
+}
 try {
 const list = await listCalendars();
 const current = data.prefs.airbnbCalendarId;
@@ -387,6 +407,7 @@ select.innerHTML = '<option value="">Push to…</option>'
 + list.map((c) => `<option value="${escapeHtml(c.id)}"${c.id === current ? ' selected' : ''}>${escapeHtml(c.summary || '(untitled)')}</option>`).join('');
 } catch (err) {
 console.error('Could not load calendars for the Airbnb push picker:', err);
+if (!silent && status) status.textContent = `Couldn't load your Google Calendars: ${err.message || err}`;
 }
 }
 
@@ -401,6 +422,7 @@ status.textContent = 'Syncing…';
 try {
 await syncAllAirbnbListings();
 renderAirbnb();
+loadAirbnbCalendarOptions({ silent: true });
 // Stripes live on the Planner tab -- dynamic import avoids a static
 // import cycle, since planner.js itself statically imports
 // airbnbSegmentsForDay from this file. Same pattern connections.js/
@@ -429,6 +451,13 @@ btn.disabled = false;
 loadAirbnbCalendarOptions();
 const calSelect = document.getElementById('airbnb-push-calendar');
 if (calSelect) {
+// Belt and braces alongside the page-load attempt above and the
+// Sync-click one -- whichever of the three actually lands after
+// sign-in has settled is the one that fixes it. Not { once: true }:
+// cheap enough to re-attempt every time the picker is opened, and a
+// one-shot listener that fires before sign-in settles would otherwise
+// use up its only try and never get another.
+calSelect.addEventListener('focus', () => loadAirbnbCalendarOptions());
 calSelect.addEventListener('change', () => {
 data.prefs.airbnbCalendarId = calSelect.value;
 queueSave();
