@@ -123,7 +123,14 @@ try {
 const result = await syncAirbnbListing(listing);
 data.airbnbSyncStatus[listing.id] = { ok: true, syncedAt: new Date().toISOString(), ...result };
 } catch (err) {
-data.airbnbSyncStatus[listing.id] = { ok: false, syncedAt: new Date().toISOString(), error: err.message || String(err) };
+const message = err.message || String(err);
+data.airbnbSyncStatus[listing.id] = { ok: false, syncedAt: new Date().toISOString(), error: message };
+// The sync-button status line points here on a failure -- previously
+// a broken promise, nothing was ever actually logged per listing, so
+// "see console" showed an empty console. Logged per listing (not
+// just once for the whole batch) so a mix of one broken feed and two
+// working ones doesn't bury which is which.
+console.error(`Airbnb sync failed for "${listing.label || listing.prefix || listing.id}":`, err);
 }
 }
 queueSave();
@@ -238,6 +245,20 @@ ${r.googleEventId
 </div>`;
 }
 
+// A failed listing contributes zero reservations, which used to fail
+// completely silently on this panel -- the only place its error ever
+// showed was the sync button's OWN status line, gone the moment you
+// navigate away or reload. Same "Sync error: ..." convention
+// calendars.js's own renderCalendars() already uses for exactly this.
+function airbnbSyncErrorsHtml() {
+const failed = data.airbnbListings.filter((l) => {
+const s = data.airbnbSyncStatus[l.id];
+return s && !s.ok;
+});
+if (!failed.length) return '';
+return failed.map((l) => `<div class="cal-row"><div class="cal-event-row"><span class="cal-event empty-state">${escapeHtml(l.label || l.prefix || 'Listing')}: sync error — ${escapeHtml(data.airbnbSyncStatus[l.id].error)}</span></div></div>`).join('');
+}
+
 function renderAirbnb() {
 const el = document.getElementById('airbnb-list');
 const countEl = document.getElementById('airbnb-count');
@@ -246,9 +267,10 @@ const upcoming = data.airbnbReservations
 .filter((r) => r.checkout >= todayStr())
 .sort((a, b) => (a.checkin < b.checkin ? -1 : a.checkin > b.checkin ? 1 : 0));
 if (countEl) countEl.textContent = upcoming.length ? String(upcoming.length) : '';
-el.innerHTML = upcoming.length
+const errorsHtml = airbnbSyncErrorsHtml();
+el.innerHTML = errorsHtml + (upcoming.length
 ? upcoming.map(reservationRowHtml).join('')
-: '<div class="empty">Nothing upcoming — add a listing in Settings and Sync.</div>';
+: (errorsHtml ? '' : '<div class="empty">Nothing upcoming — add a listing in Settings and Sync.</div>'));
 
 el.querySelectorAll('[data-airbnb-res-field]').forEach((input) => {
 input.addEventListener('change', () => {
@@ -357,9 +379,17 @@ renderAirbnb();
 const { renderPlanner } = await import('./planner.js');
 renderPlanner();
 const failed = data.airbnbListings.filter((l) => data.airbnbSyncStatus[l.id] && !data.airbnbSyncStatus[l.id].ok);
-status.textContent = failed.length
-? `Synced, but ${failed.length} listing${failed.length === 1 ? '' : 's'} failed — see console.`
-: 'Synced just now.';
+if (!failed.length) {
+status.textContent = 'Synced just now.';
+} else {
+// The actual error, right here -- not just a count pointing at devtools
+// most people never open. Every failed listing likely has the SAME
+// cause (an unconfigured/undeployed ics-proxy.php, a wrong secret), so
+// showing just the first one's real message is more useful than a
+// generic "N failed", not less informative.
+const first = data.airbnbSyncStatus[failed[0].id];
+status.textContent = `Synced, but ${failed.length} of ${data.airbnbListings.length} listing${failed.length === 1 ? '' : 's'} failed: ${first.error}`;
+}
 } catch (err) {
 status.textContent = `Couldn't sync: ${err.message || err}`;
 console.error('Airbnb sync failed:', err);
