@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v190</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v191</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -2101,7 +2101,7 @@ Mostly still a planning space &mdash; a place to keep thinking about what this s
 
 <div class="settings-block">
 <h3>City/Nationality fill-ins</h3>
-<div class="settings-note" style="margin:0 0 10px;">For anyone not obviously based in London, checks their Education/Job/Notes/Likes text for a city or nationality word already known from your OWN data (a city already recorded on someone else, or a country/nationality word this app already ships with), plus a language they speak that's also a nationality word (French, German, Italian...). Keyword matching only &mdash; no outside lookups, no guessing which city a university is in &mdash; so it's things worth checking with them, not facts. Never applied without a click.</div>
+<div class="settings-note" style="margin:0 0 10px;">For anyone not obviously based in London, checks their Education/Job/Notes/Likes text for a city or nationality word already known from your OWN data, plus a language they speak that's also a nationality word (French, German, Italian...) &mdash; but only when it's the clear rarest of the languages they speak (checked against how rare it is across your own connections); a tie, or nothing rare enough, proposes nothing rather than guessing between several. Ranked by how many independent signals agree &mdash; a repeated mention, or Distance confirming they're not just nearby, ranks higher; a genuinely ambiguous case (two different cities mentioned, no clear winner) is dropped rather than shown. Keyword matching only, no outside lookups &mdash; things worth checking with them, not facts. Never applied without a click.</div>
 <div class="sync-row" style="margin-top:0;">
 <button class="sync-btn" id="location-fillins-scan-btn" type="button">Scan</button>
 </div>

@@ -6,7 +6,7 @@
 // Two levels of help: groups that differ only by case or spacing are flagged
 // automatically with a one-click merge, and everything else can be renamed
 // or merged by hand.
-import { data, queueSave, TAG_FIELDS } from '../state.js';
+import { data, queueSave, TAG_FIELDS, distanceMiles } from '../state.js';
 import { escapeHtml, findMentions, COUNTRY_NAME_TO_NATIONALITY, scrollAndFlash } from '../utils.js';
 
 // Values that should almost certainly be the same tag. Case and runs of
@@ -140,54 +140,117 @@ afterChange();
 // for a city or nationality word ALREADY known to this app -- a city
 // already recorded on some OTHER connection (findMentions' own
 // knownCityMap), or a country/nationality word from the static built-in
-// list (COUNTRY_NAME_TO_NATIONALITY) -- and proposes it as a fill-in for
-// whichever of City/Nationality is still blank on that connection.
-// Deliberately keyword-only: no external gazetteer, no "which city is
-// this university in" real-world knowledge -- a wrong guess dressed up as
-// confident is worse than a blank field staying blank, so every
-// proposal is a match against vocabulary already sitting in this data or
-// already shipped in this app, never invented or looked up live. Every
-// row names WHERE the match came from, and nothing is ever applied
-// without a click -- these are things to check with the person, not
-// facts.
+// list (COUNTRY_NAME_TO_NATIONALITY). Deliberately keyword-only: no
+// external gazetteer, no "which city is this university in" real-world
+// knowledge -- a wrong guess dressed up as confident is worse than a
+// blank field staying blank.
+//
+// Ranked by how many independent signals agree, not just scan order --
+// confirmed by explicit feedback that a flat, unranked list of every
+// single passing mention was unusable. A repeated mention of the same
+// value across different fields, or a value corroborated by Distance
+// being clearly non-local, is far more trustworthy than one passing
+// mention, and a genuinely ambiguous case -- several DIFFERENT candidate
+// values with no clear winner, or someone whose several languages don't
+// obviously point at one particular home -- is DROPPED rather than
+// guessed between and shown as noise. A language-based nationality guess
+// only ever counts when it's the clear rarest among that PERSON'S OWN
+// languages (checked against how rare it is across this dataset's own
+// connections, not a hardcoded world-population figure -- "rare in your
+// own dating pool", which is real, derived evidence, not invented
+// geography knowledge) -- someone listing English, Spanish, French and
+// Montenegrin proposes Montenegrin alone, someone listing only common
+// languages proposes nothing.
 const LONDON_RE = /london/i;
 const NATIONALITY_WORDS = [...new Set(Object.values(COUNTRY_NAME_TO_NATIONALITY))];
+const FAR_AWAY_MILES = 30; // corroborates a foreign guess -- clearly not just a nearby Londoner
+const CLEARLY_LOCAL_MILES = 5; // contradicts one -- a "Paris" hit this close reads more like a name/venue than the city
+const RARE_LANGUAGE_MAX_COUNT = 3; // spoken by more connections than this and it's not a distinctive signal any more
+
+function languageFrequencies() {
+const freq = new Map();
+data.connections.forEach((c) => (c.languages || []).forEach((l) => {
+const key = String(l).trim().toLowerCase();
+if (key) freq.set(key, (freq.get(key) || 0) + 1);
+}));
+return freq;
+}
+
+// The single rarest of this person's OWN languages that's also a
+// nationality word -- only if it's a clear, unique minimum among their
+// own list (tied with another of their languages means no standout) and
+// rare enough in absolute terms. Anything else returns null on purpose.
+function rareLanguageNationality(conn, langFreq) {
+const candidates = (conn.languages || [])
+.map((l) => String(l).trim())
+.filter((l) => NATIONALITY_WORDS.some((nat) => nat.toLowerCase() === l.toLowerCase()))
+.map((l) => ({ value: l, count: langFreq.get(l.toLowerCase()) || 0 }));
+if (!candidates.length) return null;
+candidates.sort((a, b) => a.count - b.count);
+const [best, second] = candidates;
+if (second && second.count === best.count) return null; // tied -- no standout
+if (best.count > RARE_LANGUAGE_MAX_COUNT) return null; // not actually rare
+return best.value;
+}
+
+// Collapses every raw hit for one field down to a single winning value --
+// the one with the most distinct corroborating sources. Two+ DIFFERENT
+// candidate values tied for the lead are dropped rather than guessed
+// between, same "either ignore it, or find the standout" rule the
+// language signal follows.
+function bestCandidate(hits) {
+const byValue = new Map();
+hits.forEach(({ value, source }) => {
+const key = value.toLowerCase();
+if (!byValue.has(key)) byValue.set(key, { value, sources: new Set() });
+byValue.get(key).sources.add(source);
+});
+const ranked = [...byValue.values()].sort((a, b) => b.sources.size - a.sources.size);
+if (!ranked.length) return null;
+if (ranked.length > 1 && ranked[1].sources.size === ranked[0].sources.size) return null;
+return ranked[0];
+}
 
 function locationFillInProposals() {
-const proposals = [];
+const langFreq = languageFrequencies();
+const results = [];
 data.connections.forEach((c) => {
 if (LONDON_RE.test((c.location || []).join(' '))) return;
 const missingCity = !(c.location || []).length;
 const missingNationality = !(c.nationality || []).length;
 if (!missingCity && !missingNationality) return;
 
-const seen = new Set();
-const add = (field, value, source) => {
-if ((field === 'location' && !missingCity) || (field === 'nationality' && !missingNationality)) return;
-const key = `${field}:${String(value).toLowerCase()}`;
-if (seen.has(key)) return;
-seen.add(key);
-proposals.push({ connId: c.id, name: c.name, field, value, source });
-};
-
+const cityHits = [], natHits = [];
 [['Education', c.education], ['Job', c.job], ['Notes', c.notes], ['Likes', c.likes]].forEach(([label, text]) => {
-findMentions(text, data.connections, data.flagRules).forEach((hit) => add(hit.field, hit.value, `mentioned in ${label}`));
+findMentions(text, data.connections, data.flagRules).forEach((hit) => {
+if (hit.field === 'location' && missingCity) cityHits.push({ value: hit.value, source: label });
+else if (hit.field === 'nationality' && missingNationality) natHits.push({ value: hit.value, source: label });
 });
-
-// A language they speak sharing an exact name with a known nationality
-// adjective (French/German/Italian/Japanese/...) -- a real but weak
-// signal, since plenty of other countries share the same language, so
-// always offered as "worth checking", never as a confident answer.
+});
 if (missingNationality) {
-(c.languages || []).forEach((lang) => {
-const norm = String(lang).trim().toLowerCase();
-if (NATIONALITY_WORDS.some((nat) => nat.toLowerCase() === norm)) {
-add('nationality', lang, `speaks ${lang} — other countries share this language too, worth checking`);
+const rareLang = rareLanguageNationality(c, langFreq);
+if (rareLang) natHits.push({ value: rareLang, source: `rarest of the languages they speak` });
 }
+
+const distMiles = distanceMiles(c.distance);
+const farAway = distMiles != null && distMiles >= FAR_AWAY_MILES;
+const clearlyLocal = distMiles != null && distMiles <= CLEARLY_LOCAL_MILES;
+if (clearlyLocal) return; // Distance itself contradicts a foreign guess -- drop the whole person, not just weight it down
+
+const fields = [];
+[['location', 'City', missingCity ? bestCandidate(cityHits) : null], ['nationality', 'Nationality', missingNationality ? bestCandidate(natHits) : null]]
+.forEach(([field, label, best]) => {
+if (!best) return;
+let sourceText = [...best.sources].join(', ');
+let signals = best.sources.size;
+if (farAway) { signals += 1; sourceText += `, ${Math.round(distMiles)}mi away`; }
+fields.push({ field, label, value: best.value, signals, sourceText });
 });
-}
+if (!fields.length) return;
+results.push({ connId: c.id, name: c.name, fields, confidence: fields.reduce((sum, f) => sum + f.signals, 0) });
 });
-return proposals;
+results.sort((a, b) => b.confidence - a.confidence);
+return results;
 }
 
 // Cached from the last Scan click, not re-derived on every render -- a
@@ -199,15 +262,16 @@ return proposals;
 // something to pay on every ordinary Connections-tab render.
 let fillInResults = null;
 
-function fillInRowHtml(p, idx) {
-const fieldLabel = p.field === 'location' ? 'City' : 'Nationality';
-return `<tr>
-<td><a href="#" data-fillin-open="${escapeHtml(p.connId)}">${escapeHtml(p.name || '(no name)')}</a></td>
-<td>${fieldLabel}</td>
-<td>${escapeHtml(p.value)}</td>
-<td class="settings-note">${escapeHtml(p.source)}</td>
-<td><button class="sync-btn sm" type="button" data-fillin-apply="${idx}">Fill in</button></td>
-</tr>`;
+function fillInRowHtml(p) {
+const fieldsHtml = p.fields.map((f) => `<div class="tinder-field-row">
+<strong>${escapeHtml(f.label)}:</strong> ${escapeHtml(f.value)}
+<button class="sync-btn inline" type="button" data-fillin-apply="${escapeHtml(p.connId)}" data-fillin-apply-field="${escapeHtml(f.field)}" data-fillin-apply-value="${escapeHtml(f.value)}">Fill in</button>
+<div class="settings-note" style="margin:2px 0 0;">${escapeHtml(f.sourceText)}</div>
+</div>`).join('');
+return `<div class="tinder-candidate-row">
+<div class="album-caption"><a href="#" data-fillin-open="${escapeHtml(p.connId)}">${escapeHtml(p.name || '(no name)')}</a> <span class="cal-badge">${p.confidence} signal${p.confidence === 1 ? '' : 's'}</span></div>
+${fieldsHtml}
+</div>`;
 }
 
 function renderLocationFillIns() {
@@ -218,13 +282,10 @@ el.innerHTML = '<div class="settings-note" style="margin:0;">Click "Scan" to che
 return;
 }
 if (!fillInResults.length) {
-el.innerHTML = '<div class="settings-note" style="margin:0;">Nothing to propose right now.</div>';
+el.innerHTML = '<div class="settings-note" style="margin:0;">Nothing worth proposing right now — not every gap is fillable, and an ambiguous one is dropped rather than guessed at.</div>';
 return;
 }
-el.innerHTML = `<table class="limits-table">
-<thead><tr><th>Connection</th><th>Field</th><th>Proposed value</th><th>Why</th><th></th></tr></thead>
-<tbody>${fillInResults.map(fillInRowHtml).join('')}</tbody>
-</table>`;
+el.innerHTML = fillInResults.map(fillInRowHtml).join('');
 el.querySelectorAll('[data-fillin-open]').forEach((a) => {
 a.addEventListener('click', async (e) => {
 e.preventDefault();
@@ -237,13 +298,18 @@ setTimeout(() => scrollAndFlash(`[data-conn-row="${id}"]`), 80);
 });
 el.querySelectorAll('[data-fillin-apply]').forEach((btn) => {
 btn.addEventListener('click', () => {
-const p = fillInResults[parseInt(btn.dataset.fillinApply, 10)];
-if (!p) return;
-const conn = data.connections.find((c) => c.id === p.connId);
+const { fillinApply: connId, fillinApplyField: field, fillinApplyValue: value } = btn.dataset;
+const conn = data.connections.find((c) => c.id === connId);
 if (!conn) return;
-if (!Array.isArray(conn[p.field])) conn[p.field] = [];
-if (!conn[p.field].some((v) => String(v).toLowerCase() === p.value.toLowerCase())) conn[p.field].push(p.value);
-fillInResults = fillInResults.filter((x) => x !== p);
+if (!Array.isArray(conn[field])) conn[field] = [];
+if (!conn[field].some((v) => String(v).toLowerCase() === value.toLowerCase())) conn[field].push(value);
+// Drop just this field from that person's card; drop the whole card
+// once nothing's left on it.
+const person = fillInResults.find((p) => p.connId === connId);
+if (person) {
+person.fields = person.fields.filter((f) => f.field !== field);
+if (!person.fields.length) fillInResults = fillInResults.filter((p) => p !== person);
+}
 queueSave();
 renderLocationFillIns();
 import('./connections.js').then((m) => m.renderConnections());
