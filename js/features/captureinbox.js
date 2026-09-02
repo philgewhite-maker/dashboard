@@ -324,7 +324,7 @@ ${photoItems.length > 1 ? `<button class="todo-add-btn" type="button" data-inbox
 <span data-inbox-dating-select-mount="${b.id}"></span>
 <input type="text" autocomplete="off" data-inbox-new-name="${b.id}" placeholder="New connection's name" hidden>
 <button class="todo-add-btn" type="button" data-inbox-send-dating="${b.id}">Send</button>
-<button class="todo-add-btn" type="button" data-inbox-extract-wellness="${b.id}" title="For an HRV, AGEs index, or Antioxidant index screenshot from Samsung Health">Extract wellness data</button>
+<button class="todo-add-btn" type="button" data-inbox-extract-wellness="${b.id}" title="For an HRV, Sleeping HR, AGEs index, or Antioxidant index screenshot from Samsung Health">Extract wellness data</button>
 <button class="todo-add-btn" type="button" data-inbox-extract-trip-toggle="${b.id}" title="For a boarding pass, hotel, car hire, or transfer confirmation">Extract into a trip leg</button>
 <button class="todo-add-btn" type="button" data-inbox-extract-matches="${b.id}" title="For a Bumble/Tinder/Hinge matches list or full profile screenshot — auto-detects which and pulls it out for review">Extract dating screenshot</button>
 ${photoItems.length > 1 ? `<label class="settings-note" style="display:flex;align-items:center;gap:4px;">

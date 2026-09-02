@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v183</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v184</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -2177,7 +2177,7 @@ Mostly still a planning space &mdash; a place to keep thinking about what this s
 <div style="overflow-x:auto;">
 <table class="health-table">
 <thead><tr>
-<th>Date</th><th>Steps</th><th>Sleep</th><th>HR</th><th>O&#8322;</th><th>Distance</th><th>Calories</th><th>Weight</th><th>Body fat</th><th>Exercise</th>
+<th>Date</th><th>Steps</th><th>Distance</th><th>Calories</th><th>Exercise</th><th>Sleep</th><th>HR min</th><th>HR avg</th><th>HR max</th><th>O&#8322;</th><th>Weight</th><th>Body fat</th>
 </tr></thead>
 <tbody id="health-daily-body"></tbody>
 </table>
@@ -2193,11 +2193,11 @@ Mostly still a planning space &mdash; a place to keep thinking about what this s
 </table>
 </div>
 <h3 style="margin:22px 0 6px;">Wellness (Samsung Health)</h3>
-<div class="settings-note" style="margin:0 0 10px;">HRV, AGEs index, and Antioxidant index &mdash; read from a screenshot via AI vision, not deterministic like the sources above, so double-check a new row against the source screenshot before trusting it. A <strong>~</strong> before a number means it's estimated from the dot's position within its category band (e.g. Adequate), not a number Samsung actually printed &mdash; tap/highlight a day in the app before screenshotting to get its exact value instead. Select the screenshot in Capture Inbox and use &quot;Extract wellness data&quot;.</div>
+<div class="settings-note" style="margin:0 0 10px;">HRV, Sleeping HR, AGEs index, and Antioxidant index &mdash; read from a screenshot via AI vision, not deterministic like the sources above, so double-check a new row against the source screenshot before trusting it. Sleeping HR (resting heart rate overnight, bpm) is here rather than in Health Connect because Samsung doesn't export it there at all &mdash; it's genuinely only available this way. A <strong>~</strong> before a number means it's estimated from the dot's position within its category band (e.g. Adequate), not a number Samsung actually printed &mdash; tap/highlight a day in the app before screenshotting to get its exact value instead. Select the screenshot in Capture Inbox and use &quot;Extract wellness data&quot;.</div>
 <div style="overflow-x:auto;">
 <table class="health-table">
 <thead><tr>
-<th>Date</th><th>HRV</th><th>Antioxidant</th><th>AGEs</th>
+<th>Date</th><th>HRV</th><th>Sleeping HR</th><th>Antioxidant</th><th>AGEs</th>
 </tr></thead>
 <tbody id="wellness-daily-body"></tbody>
 </table>

@@ -41,6 +41,12 @@ function flattenHealthDailyRow(d) {
 return {
 ...d,
 heartRateAvg: d.heartRate ? d.heartRate.avg : undefined,
+// Min/max flattened too now, same as avg -- so a period row (a month's
+// worth of days averaged together) shows a real "average of the daily
+// lows/highs" rather than leaving those two columns blank just because
+// they weren't tracked here before.
+heartRateMin: d.heartRate ? d.heartRate.min : undefined,
+heartRateMax: d.heartRate ? d.heartRate.max : undefined,
 oxygenSaturationAvg: d.oxygenSaturation ? d.oxygenSaturation.avg : undefined,
 };
 }

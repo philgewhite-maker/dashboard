@@ -114,10 +114,16 @@ return isNaN(d) ? iso : d.toLocaleDateString('en-GB', { weekday: 'short', day: '
 function healthRowHtml(r) {
 const period = isPeriodRow(r);
 const get = (key) => (period ? r.metrics[key] : r[key]);
+// Three separate columns rather than one "avg (min–max)" cell -- min and
+// max are now flattened the same way avg always was (see
+// flattenHealthDailyRow), so a period row shows a real, if averaged,
+// figure in all three rather than leaving two of them blank.
+const heartRateMin = get('heartRateMin');
 const heartRateAvg = get('heartRateAvg');
-const hr = heartRateAvg == null ? '—'
-: (!period && r.heartRate) ? `${r.heartRate.avg} <span class="settings-note" style="display:inline;">(${r.heartRate.min}–${r.heartRate.max})</span>`
-: `${Math.round(heartRateAvg)}`;
+const heartRateMax = get('heartRateMax');
+const hrMinCell = heartRateMin == null ? '—' : Math.round(heartRateMin);
+const hrAvgCell = heartRateAvg == null ? '—' : Math.round(heartRateAvg);
+const hrMaxCell = heartRateMax == null ? '—' : Math.round(heartRateMax);
 const o2Avg = get('oxygenSaturationAvg');
 const o2 = o2Avg != null ? `${Math.round(o2Avg)}%` : '—';
 const sleepMinutes = get('sleepMinutes') || 0;
@@ -135,14 +141,16 @@ const label = period ? periodLabel(r) : formatDate(r.date);
 return `<tr${period ? ' class="health-row-summary"' : ''}>
 <td>${escapeHtml(label)}</td>
 <td>${steps ? Math.round(steps).toLocaleString() : '—'}</td>
-<td title="${escapeHtml(sleepDetail)}">${formatMinutes(sleepMinutes)}</td>
-<td>${hr}</td>
-<td>${o2}</td>
 <td>${formatKm(get('distanceMeters'))}</td>
 <td>${totalCalories ? Math.round(totalCalories).toLocaleString() : '—'}</td>
+<td>${exerciseDetail}</td>
+<td title="${escapeHtml(sleepDetail)}">${formatMinutes(sleepMinutes)}</td>
+<td>${hrMinCell}</td>
+<td>${hrAvgCell}</td>
+<td>${hrMaxCell}</td>
+<td>${o2}</td>
 <td>${weightKg != null ? `${weightKg}kg` : '—'}</td>
 <td>${bodyFatPct != null ? `${bodyFatPct}%` : '—'}</td>
-<td>${exerciseDetail}</td>
 </tr>`;
 }
 
@@ -150,7 +158,7 @@ function renderHealthDaily() {
 const el = document.getElementById('health-daily-body');
 if (!el) return;
 if (!data.healthDaily.length) {
-el.innerHTML = '<tr><td colspan="10" class="empty">Nothing parsed yet — click "Sync &amp; parse" once the bridge app has sent at least one sync.</td></tr>';
+el.innerHTML = '<tr><td colspan="12" class="empty">Nothing parsed yet — click "Sync &amp; parse" once the bridge app has sent at least one sync.</td></tr>';
 renderHealthChart();
 return;
 }

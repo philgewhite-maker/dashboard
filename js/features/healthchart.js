@@ -28,9 +28,14 @@ const HEALTH_METRICS = [
 { key: 'health.weightKg', label: 'Weight (Health Connect)', unit: 'kg', source: 'health', field: 'weightKg', decimals: 1, colorVar: '--sage' },
 { key: 'renpho.weightKg', label: 'Weight (scale)', unit: 'kg', source: 'renpho', field: 'weightKg', decimals: 1, colorVar: '--teal' },
 { key: 'wellness.hrvMs', label: 'HRV', unit: 'ms', source: 'wellness', field: 'hrvMs', decimals: 0, colorVar: '--amber' },
+// Distinct from health.heartRateAvg just below -- that one's from Health
+// Connect (phone/watch, all-day); this is Samsung's overnight resting HR,
+// which Samsung doesn't export to Health Connect at all, so it only ever
+// arrives via the screenshot-read wellness pipeline (see wellness.js).
+{ key: 'wellness.sleepingHrBpm', label: 'Sleeping HR (Samsung Health)', unit: 'bpm', source: 'wellness', field: 'sleepingHrBpm', decimals: 0, colorVar: '--blue' },
 { key: 'health.steps', label: 'Steps', unit: '', source: 'health', field: 'steps', decimals: 0, colorVar: '--slate' },
 { key: 'health.sleepMinutes', label: 'Sleep', unit: 'min', source: 'health', field: 'sleepMinutes', decimals: 0, colorVar: '--rose' },
-{ key: 'health.heartRateAvg', label: 'Heart rate', unit: 'bpm', source: 'health', field: 'heartRateAvg', decimals: 0, colorVar: '--red' },
+{ key: 'health.heartRateAvg', label: 'Heart rate (Health Connect)', unit: 'bpm', source: 'health', field: 'heartRateAvg', decimals: 0, colorVar: '--red' },
 { key: 'health.bodyFatPct', label: 'Body fat % (Health Connect)', unit: '%', source: 'health', field: 'bodyFatPct', decimals: 1, colorVar: '--plum' },
 { key: 'renpho.bodyFatPct', label: 'Body fat % (scale)', unit: '%', source: 'renpho', field: 'bodyFatPct', decimals: 1, colorVar: '--sage' },
 { key: 'renpho.muscleMassKg', label: 'Muscle mass', unit: 'kg', source: 'renpho', field: 'muscleMassKg', decimals: 1, colorVar: '--teal' },

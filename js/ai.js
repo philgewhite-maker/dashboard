@@ -856,8 +856,9 @@ translation: String((data && data.translation) || '').trim(),
 
 // ---- Wellness screenshot (Samsung Health) ----
 //
-// Reads one of three Samsung Health 7-day charts (Antioxidant index, AGEs
-// index, Sleeping HRV) confirmed against real screenshots: each shows a
+// Reads one of four Samsung Health 7-day charts (Antioxidant index, AGEs
+// index, Sleeping HRV, Sleeping heart rate) confirmed against real
+// screenshots: each shows a
 // row of day-of-month numbers under the chart, sometimes with an explicit
 // "16–22 Aug"-style header and sometimes without (e.g. the HRV chart is
 // often seen mid-scroll on a longer page, header cropped out). Structured
@@ -886,7 +887,7 @@ const WELLNESS_MAX_TOKENS = 4000;
 // re-extracting the exact same screenshot after a prompt change would
 // silently keep serving the OLD cached result forever, which is exactly
 // what would happen re-testing the screenshots that motivated this.
-const WELLNESS_SCHEMA_VERSION = 5;
+const WELLNESS_SCHEMA_VERSION = 6;
 
 // Real category-band numeric ranges, confirmed by the user against their
 // own live Samsung Health app -- these charts have no numbered y-axis, but
@@ -962,7 +963,7 @@ return null;
 }
 
 function wellnessPrompt(todayIso) {
-return `This is a screenshot from the Samsung Health app (measurements taken via a Galaxy Watch). It shows ONE of these three 7-day charts: Antioxidant index, AGEs (Advanced Glycation End-products) index, or Sleeping heart rate variability (HRV). Today's date is ${todayIso}.
+return `This is a screenshot from the Samsung Health app (measurements taken via a Galaxy Watch). It shows ONE of these four 7-day charts: Antioxidant index, AGEs (Advanced Glycation End-products) index, Sleeping heart rate variability (HRV), or Sleeping heart rate (resting heart rate overnight -- NOT variability; Samsung doesn't export this one to Android's Health Connect at all, which is why it's read from a screenshot the same as the others). Distinguish the two heart-rate charts by their unit and typical range, not just the title: HRV is in milliseconds (ms), usually a two-digit number; Sleeping heart rate is in beats per minute (bpm), usually 40-90. Today's date is ${todayIso}.
 
 Work out the actual calendar date for each day-of-month number on the x-axis. If a date-range header is visible (e.g. "16–22 Aug"), use its month directly. If only bare day-of-month numbers are visible with no month shown, assume the LAST (rightmost/highest) day number falls within the same calendar month as today (${todayIso}) unless that day number is greater than today's day-of-month, in which case it falls in the previous calendar month -- then count backwards from there for the earlier days (a run of consecutive day-of-month numbers on one chart never crosses more than one month boundary).
 
@@ -977,7 +978,7 @@ Identify which metric this is, then extract:
   - If none of the above apply to a dot (an HRV chart with no number printed at that point, for instance, or gridlines weren't reported), leave that day out of "days" entirely rather than guessing.
 
 Reply with ONLY a JSON object, no other text, no markdown fences:
-{"metric":"hrv"|"antioxidant"|"ages"|"unrecognized","periodLabel":"16–22 Aug"|null,"asOfDate":"2026-08-22","gridlines":[0.12,0.38,0.61,0.85]|null,"days":[{"date":"2026-08-22","value":38,"exact":true},{"date":"2026-08-19","yFraction":0.47,"exact":false}],"average":46|null,"min":43|null,"max":50|null,"headlineGrade":"Good"|null,"unit":"ms"|null}
+{"metric":"hrv"|"antioxidant"|"ages"|"sleepingHr"|"unrecognized","periodLabel":"16–22 Aug"|null,"asOfDate":"2026-08-22","gridlines":[0.12,0.38,0.61,0.85]|null,"days":[{"date":"2026-08-22","value":38,"exact":true},{"date":"2026-08-19","yFraction":0.47,"exact":false}],"average":46|null,"min":43|null,"max":50|null,"headlineGrade":"Good"|null,"unit":"ms"|null}
 - "asOfDate": the resolved date of the LAST (rightmost/most recent) day the chart covers -- always include this even when "days" is empty, since it's what the period average/min/max/grade describe.
 - "days": can be empty if a chart shows no printed numbers, no tapped-day callout, and (for HRV specifically, which has no bands) no other way to place a dot.
 - If "metric" is "unrecognized", every other field should be null/empty -- don't guess at a chart type you're not confident about.`;
@@ -1008,7 +1009,7 @@ const { data: raw } = await callAnthropic(
 WELLNESS_MAX_TOKENS, WELLNESS_MODEL, 'Wellness screenshot', null, 'low',
 );
 const isIsoDate = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
-const metric = ['hrv', 'antioxidant', 'ages'].includes(raw.metric) ? raw.metric : 'unrecognized';
+const metric = ['hrv', 'antioxidant', 'ages', 'sleepingHr'].includes(raw.metric) ? raw.metric : 'unrecognized';
 const gridlines = Array.isArray(raw.gridlines) && raw.gridlines.every((n) => typeof n === 'number') ? raw.gridlines : null;
 // The model only ever reports plain pixel-fraction coordinates -- where the
 // gridlines are, where a dot is -- never a value or a band judgement it

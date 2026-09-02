@@ -15,6 +15,11 @@ date,
 hrvMs: undefined, hrvGrade: undefined, hrvExact: undefined,
 antioxidantIndex: undefined, antioxidantGrade: undefined, antioxidantExact: undefined,
 agesDailyAvg: undefined, agesGrade: undefined, agesExact: undefined,
+// Resting heart rate overnight, in bpm -- NOT the same chart as hrvMs
+// above (that's variability, in ms). Samsung doesn't export this one to
+// Health Connect at all, so it's screenshot-read the same as the other
+// three, not pulled from data.healthDaily's own heartRate stats.
+sleepingHrBpm: undefined, sleepingHrGrade: undefined, sleepingHrExact: undefined,
 };
 }
 
@@ -35,7 +40,7 @@ return row;
 // instead, also marked not-exact for the same reason.
 function mergeWellnessExtraction(extraction) {
 const { metric, days, average, headlineGrade } = extraction;
-if (metric !== 'hrv' && metric !== 'antioxidant' && metric !== 'ages') return { daysWritten: 0, wroteAverage: false };
+if (metric !== 'hrv' && metric !== 'antioxidant' && metric !== 'ages' && metric !== 'sleepingHr') return { daysWritten: 0, wroteAverage: false };
 
 // The headline grade describes one specific reading ("last night's HRV
 // grade"), not the whole week -- attach it only to the day it actually
@@ -47,6 +52,7 @@ const grade = date === extraction.asOfDate ? headlineGrade : undefined;
 if (metric === 'hrv') { row.hrvMs = value; row.hrvExact = exact; if (grade) row.hrvGrade = grade; }
 else if (metric === 'antioxidant') { row.antioxidantIndex = value; row.antioxidantExact = exact; if (grade) row.antioxidantGrade = grade; }
 else if (metric === 'ages') { row.agesDailyAvg = value; row.agesExact = exact; if (grade) row.agesGrade = grade; }
+else if (metric === 'sleepingHr') { row.sleepingHrBpm = value; row.sleepingHrExact = exact; if (grade) row.sleepingHrGrade = grade; }
 daysWritten++;
 });
 
@@ -56,6 +62,7 @@ const row = dayFor(extraction.asOfDate);
 if (metric === 'ages') { row.agesDailyAvg = average; row.agesExact = false; row.agesGrade = headlineGrade || row.agesGrade; wroteAverage = true; }
 else if (metric === 'antioxidant') { row.antioxidantIndex = average; row.antioxidantExact = false; row.antioxidantGrade = headlineGrade || row.antioxidantGrade; wroteAverage = true; }
 else if (metric === 'hrv') { row.hrvMs = average; row.hrvExact = false; row.hrvGrade = headlineGrade || row.hrvGrade; wroteAverage = true; }
+else if (metric === 'sleepingHr') { row.sleepingHrBpm = average; row.sleepingHrExact = false; row.sleepingHrGrade = headlineGrade || row.sleepingHrGrade; wroteAverage = true; }
 }
 
 data.wellnessDaily.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
@@ -74,7 +81,7 @@ return { ok: false, message: `${file.name || 'that image'}: didn't look like a r
 }
 const { daysWritten, wroteAverage } = mergeWellnessExtraction(extraction);
 queueSave();
-const METRIC_LABEL = { hrv: 'HRV', antioxidant: 'Antioxidant index', ages: 'AGEs index' };
+const METRIC_LABEL = { hrv: 'HRV', antioxidant: 'Antioxidant index', ages: 'AGEs index', sleepingHr: 'Sleeping HR' };
 const label = METRIC_LABEL[extraction.metric];
 let detail;
 if (daysWritten > 0) detail = `${daysWritten} day${daysWritten === 1 ? '' : 's'}`;
@@ -110,6 +117,7 @@ const label = period ? periodLabel(r) : formatWellnessDate(r.date);
 return `<tr${period ? ' class="health-row-summary"' : ''}>
 <td>${escapeHtml(label)}</td>
 <td>${metricCellHtml(get('hrvMs'), period ? true : r.hrvExact, 'ms', period ? null : r.hrvGrade)}</td>
+<td>${metricCellHtml(get('sleepingHrBpm'), period ? true : r.sleepingHrExact, 'bpm', period ? null : r.sleepingHrGrade)}</td>
 <td>${metricCellHtml(get('antioxidantIndex'), period ? true : r.antioxidantExact, '', period ? null : r.antioxidantGrade)}</td>
 <td>${metricCellHtml(get('agesDailyAvg'), period ? true : r.agesExact, '', period ? null : r.agesGrade)}</td>
 </tr>`;
@@ -120,7 +128,7 @@ const el = document.getElementById('wellness-daily-body');
 if (!el) return;
 const rows = data.wellnessDaily || [];
 if (!rows.length) {
-el.innerHTML = '<tr><td colspan="4" class="empty">No wellness data yet — select an HRV, AGEs, or Antioxidant index screenshot in Capture Inbox and use "Extract wellness data".</td></tr>';
+el.innerHTML = '<tr><td colspan="5" class="empty">No wellness data yet — select an HRV, Sleeping HR, AGEs, or Antioxidant index screenshot in Capture Inbox and use "Extract wellness data".</td></tr>';
 } else if (isFullHistoryMode()) {
 el.innerHTML = rows.map(wellnessRowHtml).join('');
 } else {
