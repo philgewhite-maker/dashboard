@@ -7,7 +7,7 @@
 // automatically with a one-click merge, and everything else can be renamed
 // or merged by hand.
 import { data, queueSave, TAG_FIELDS } from '../state.js';
-import { escapeHtml } from '../utils.js';
+import { escapeHtml, findMentions, COUNTRY_NAME_TO_NATIONALITY, scrollAndFlash } from '../utils.js';
 
 // Values that should almost certainly be the same tag. Case and runs of
 // whitespace are the differences worth auto-detecting; anything cleverer
@@ -134,6 +134,133 @@ afterChange();
 });
 }
 
+// ---- City/Nationality fill-in proposals ---------------------------------
+//
+// For anyone not obviously based in London, scans a few free-text fields
+// for a city or nationality word ALREADY known to this app -- a city
+// already recorded on some OTHER connection (findMentions' own
+// knownCityMap), or a country/nationality word from the static built-in
+// list (COUNTRY_NAME_TO_NATIONALITY) -- and proposes it as a fill-in for
+// whichever of City/Nationality is still blank on that connection.
+// Deliberately keyword-only: no external gazetteer, no "which city is
+// this university in" real-world knowledge -- a wrong guess dressed up as
+// confident is worse than a blank field staying blank, so every
+// proposal is a match against vocabulary already sitting in this data or
+// already shipped in this app, never invented or looked up live. Every
+// row names WHERE the match came from, and nothing is ever applied
+// without a click -- these are things to check with the person, not
+// facts.
+const LONDON_RE = /london/i;
+const NATIONALITY_WORDS = [...new Set(Object.values(COUNTRY_NAME_TO_NATIONALITY))];
+
+function locationFillInProposals() {
+const proposals = [];
+data.connections.forEach((c) => {
+if (LONDON_RE.test((c.location || []).join(' '))) return;
+const missingCity = !(c.location || []).length;
+const missingNationality = !(c.nationality || []).length;
+if (!missingCity && !missingNationality) return;
+
+const seen = new Set();
+const add = (field, value, source) => {
+if ((field === 'location' && !missingCity) || (field === 'nationality' && !missingNationality)) return;
+const key = `${field}:${String(value).toLowerCase()}`;
+if (seen.has(key)) return;
+seen.add(key);
+proposals.push({ connId: c.id, name: c.name, field, value, source });
+};
+
+[['Education', c.education], ['Job', c.job], ['Notes', c.notes], ['Likes', c.likes]].forEach(([label, text]) => {
+findMentions(text, data.connections, data.flagRules).forEach((hit) => add(hit.field, hit.value, `mentioned in ${label}`));
+});
+
+// A language they speak sharing an exact name with a known nationality
+// adjective (French/German/Italian/Japanese/...) -- a real but weak
+// signal, since plenty of other countries share the same language, so
+// always offered as "worth checking", never as a confident answer.
+if (missingNationality) {
+(c.languages || []).forEach((lang) => {
+const norm = String(lang).trim().toLowerCase();
+if (NATIONALITY_WORDS.some((nat) => nat.toLowerCase() === norm)) {
+add('nationality', lang, `speaks ${lang} — other countries share this language too, worth checking`);
+}
+});
+}
+});
+return proposals;
+}
+
+// Cached from the last Scan click, not re-derived on every render -- a
+// few hundred connections times several free-text fields each means a
+// few hundred findMentions() calls, each rebuilding a matcher against a
+// freshly-constructed city map (knownCityMap() returns a new Map every
+// call, so nothing upstream can cache across calls either). Fine for a
+// deliberate, occasional "check for anything worth fixing" click; not
+// something to pay on every ordinary Connections-tab render.
+let fillInResults = null;
+
+function fillInRowHtml(p, idx) {
+const fieldLabel = p.field === 'location' ? 'City' : 'Nationality';
+return `<tr>
+<td><a href="#" data-fillin-open="${escapeHtml(p.connId)}">${escapeHtml(p.name || '(no name)')}</a></td>
+<td>${fieldLabel}</td>
+<td>${escapeHtml(p.value)}</td>
+<td class="settings-note">${escapeHtml(p.source)}</td>
+<td><button class="sync-btn sm" type="button" data-fillin-apply="${idx}">Fill in</button></td>
+</tr>`;
+}
+
+function renderLocationFillIns() {
+const el = document.getElementById('location-fillins');
+if (!el) return;
+if (fillInResults === null) {
+el.innerHTML = '<div class="settings-note" style="margin:0;">Click "Scan" to check everyone not obviously based in London against known cities/nationalities from your own data.</div>';
+return;
+}
+if (!fillInResults.length) {
+el.innerHTML = '<div class="settings-note" style="margin:0;">Nothing to propose right now.</div>';
+return;
+}
+el.innerHTML = `<table class="limits-table">
+<thead><tr><th>Connection</th><th>Field</th><th>Proposed value</th><th>Why</th><th></th></tr></thead>
+<tbody>${fillInResults.map(fillInRowHtml).join('')}</tbody>
+</table>`;
+el.querySelectorAll('[data-fillin-open]').forEach((a) => {
+a.addEventListener('click', async (e) => {
+e.preventDefault();
+const id = a.dataset.fillinOpen;
+const [{ switchTab }, { expandConnection }] = await Promise.all([import('../tabs.js'), import('./connections.js')]);
+switchTab('dating');
+expandConnection(id);
+setTimeout(() => scrollAndFlash(`[data-conn-row="${id}"]`), 80);
+});
+});
+el.querySelectorAll('[data-fillin-apply]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const p = fillInResults[parseInt(btn.dataset.fillinApply, 10)];
+if (!p) return;
+const conn = data.connections.find((c) => c.id === p.connId);
+if (!conn) return;
+if (!Array.isArray(conn[p.field])) conn[p.field] = [];
+if (!conn[p.field].some((v) => String(v).toLowerCase() === p.value.toLowerCase())) conn[p.field].push(p.value);
+fillInResults = fillInResults.filter((x) => x !== p);
+queueSave();
+renderLocationFillIns();
+import('./connections.js').then((m) => m.renderConnections());
+});
+});
+}
+
+function initLocationFillIns() {
+const btn = document.getElementById('location-fillins-scan-btn');
+if (!btn) return;
+btn.addEventListener('click', () => {
+fillInResults = locationFillInProposals();
+renderLocationFillIns();
+});
+renderLocationFillIns();
+}
+
 // Tag changes show up in the connection cards and in Connections Overview,
 // so both need redrawing, not just this panel.
 function afterChange() {
@@ -143,4 +270,4 @@ Promise.all([import('./connections.js'), import('./overview.js')])
 .then(([conns, overview]) => { conns.renderConnections(); overview.renderOverview(); });
 }
 
-export { renderTagCleanup, duplicateGroups, renameValue };
+export { renderTagCleanup, duplicateGroups, renameValue, initLocationFillIns, locationFillInProposals };

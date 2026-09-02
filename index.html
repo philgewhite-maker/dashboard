@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v189</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v190</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -2093,9 +2093,19 @@ Mostly still a planning space &mdash; a place to keep thinking about what this s
 <div class="tinder-field-row">✅ <strong>Re-run a saved batch through today's import logic.</strong> Built &mdash; the "Or upload a saved .json file" option above the paste box in Tinder import replays a <code>tinder-batch-*.json</code> file (the bulk snippet's own download safety-net, or any older saved batch) through whatever the CURRENT dashboard code does with it, so a parsing/routing fix made after that batch was scraped still applies. Only covers dashboard-side fixes, not console-snippet-side ones like icon classification &mdash; those need an actual re-scrape (SCRIPT_VERSION handles that).</div>
 <div class="tinder-field-row"><strong>Check for dropped matches.</strong> Compare every connection's stored Tinder match id against a fresh scrape of the current sidebar; flag anyone no longer in Tinder's own match list &mdash; unmatched, or removed on their end. The match id is already being captured and stored (<code>tinderMatchId</code>); what's missing is the actual comparison snippet and a report screen.</div>
 <div class="tinder-field-row">✅ <strong>Check data completeness &mdash; as questions to ask, not just gaps.</strong> Built &mdash; each connection card on the Dating tab shows a short list of deterministic prompts (stale/still-alive check, missing City, missing kids-plan once there's an actual chat log, an interest never turned into a date). The "Needs attention (N)" button above the Connections list filters down to just those; "+ task" next to it captures one standing task linking back here, findable again after it's marked Done (a genuinely recurring nudge, not a one-off).</div>
+<div class="tinder-field-row">✅ <strong>Propose City/Nationality fill-ins from what's already known.</strong> Built &mdash; see below.</div>
 <div class="tinder-field-row"><strong>Targeted incremental re-runs.</strong> "Re-check just City for anyone missing it," "re-capture photos for anyone with none" &mdash; would need a way to filter by WHAT'S missing, not just re-run everyone.</div>
 <div class="tinder-field-row"><strong>Archive non-interacted profiles.</strong> A match sitting at Superswiped/Matched for a long time with no chat and no stage progression is realistically dead. Flag (never auto-apply) candidates for Faded/Archived, the mirror image of the Nudges change that surfaces the BEST new matches &mdash; this would surface the ones worth giving up on.</div>
 <div class="tinder-field-row"><strong>(more ideas welcome)</strong> &mdash; whatever else turns out to matter once the above exist and get used for a while.</div>
+</div>
+
+<div class="settings-block">
+<h3>City/Nationality fill-ins</h3>
+<div class="settings-note" style="margin:0 0 10px;">For anyone not obviously based in London, checks their Education/Job/Notes/Likes text for a city or nationality word already known from your OWN data (a city already recorded on someone else, or a country/nationality word this app already ships with), plus a language they speak that's also a nationality word (French, German, Italian...). Keyword matching only &mdash; no outside lookups, no guessing which city a university is in &mdash; so it's things worth checking with them, not facts. Never applied without a click.</div>
+<div class="sync-row" style="margin-top:0;">
+<button class="sync-btn" id="location-fillins-scan-btn" type="button">Scan</button>
+</div>
+<div id="location-fillins"></div>
 </div>
 </section>
 
