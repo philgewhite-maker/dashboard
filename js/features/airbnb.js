@@ -55,10 +55,23 @@ const name = line.slice(0, colon).split(';')[0].toUpperCase();
 return { name, value: line.slice(colon + 1) };
 }
 
+// Not a real reservation -- confirmed live against a real feed, Airbnb
+// inserts one of these at the far edge of its own booking window (a year
+// out), no guest behind it at all. A host's own manual block on Airbnb's
+// calendar (unrelated to this feature, someone blocking dates for
+// maintenance/personal use) reads the same way -- no guest, just a "not
+// available" marker -- so this is dropped by SUMMARY text, always, not
+// just the one specific known case.
+function isNotAvailablePlaceholder(summary) {
+return /not available/i.test(summary || '');
+}
+
 // Airbnb's export is simple -- flat VEVENT blocks, no recurrence rules, no
 // timezone complexity. Returns {uid, checkin, checkout}[], silently
 // skipping any block missing a UID or a usable date pair (a
-// cancelled/malformed entry) rather than failing the whole sync over it.
+// cancelled/malformed entry), or one of Airbnb's own "Not available"
+// placeholders (see isNotAvailablePlaceholder above), rather than failing
+// the whole sync over it.
 function parseIcs(text) {
 const lines = unfoldIcsLines(text);
 const events = [];
@@ -66,7 +79,7 @@ let current = null;
 lines.forEach((line) => {
 if (line === 'BEGIN:VEVENT') { current = {}; return; }
 if (line === 'END:VEVENT') {
-if (current && current.uid && current.checkin && current.checkout) events.push(current);
+if (current && current.uid && current.checkin && current.checkout && !isNotAvailablePlaceholder(current.summary)) events.push(current);
 current = null;
 return;
 }
@@ -76,6 +89,7 @@ if (!prop) return;
 if (prop.name === 'UID') current.uid = prop.value.trim();
 else if (prop.name === 'DTSTART') current.checkin = icsDateOnly(prop.value);
 else if (prop.name === 'DTEND') current.checkout = icsDateOnly(prop.value);
+else if (prop.name === 'SUMMARY') current.summary = prop.value.trim();
 });
 return events;
 }
@@ -87,7 +101,17 @@ return events;
 // in place instead of piling up duplicates every time.
 async function syncAirbnbListing(listing) {
 const text = await fetchIcs(listing.icsUrl);
-const events = parseIcs(text);
+const today = todayStr();
+// Completed stays aren't tracked at all -- this feature is about what's
+// coming up (occupancy stripes, nudges, the Overview list, the Google
+// Calendar push), not a booking history, and Airbnb's export can carry
+// years of past reservations that would otherwise just sit in the synced
+// document forever, growing it for no benefit (same "don't let an
+// ever-growing log make every save heavier" reasoning health.php's own
+// separate append-only log exists for). Filtered here, before a past
+// event is ever turned into a stored record, not just hidden from a
+// display list downstream.
+const events = parseIcs(text).filter((e) => e.checkout >= today);
 const existingByUid = new Map(
 data.airbnbReservations.filter((r) => r.listingId === listing.id).map((r) => [r.uid, r])
 );
@@ -102,17 +126,14 @@ data.airbnbReservations.push(blankAirbnbReservation({ listingId: listing.id, uid
 added++;
 }
 });
-// Whatever's left in existingByUid was on a previous sync but isn't in
-// this one any more -- a cancelled booking. Past reservations are left
-// alone (history, and maybe already pushed/enriched); only a
-// still-future one that vanished is worth dropping automatically.
+// Whatever's left in existingByUid is either a cancelled booking (isn't
+// in this sync's events at all any more) or one that's simply completed
+// since the last sync (past events are excluded above, so it can no
+// longer match anything) -- either way, gone.
 let removed = 0;
-const today = todayStr();
 existingByUid.forEach((r) => {
-if (r.checkout >= today) {
 data.airbnbReservations = data.airbnbReservations.filter((x) => x.id !== r.id);
 removed++;
-}
 });
 return { added, updated, removed };
 }
@@ -220,9 +241,17 @@ queueSave();
 
 // ---- Overview panel -------------------------------------------------------
 
+// Confirmed live: dropping the year made a genuine year-out date ("2
+// Sept 2027") look identical to today's date ("2 Sept 2026") -- read as
+// a bogus same-day "reservation" until the raw feed was checked. Only
+// shown when it's not the current year, so the common case (a booking a
+// few weeks or months out) stays as terse as before.
 function formatAirbnbDate(iso) {
 const d = new Date(`${iso}T00:00:00`);
-return isNaN(d) ? iso : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+if (isNaN(d)) return iso;
+const opts = { day: 'numeric', month: 'short' };
+if (d.getFullYear() !== new Date().getFullYear()) opts.year = 'numeric';
+return d.toLocaleDateString('en-GB', opts);
 }
 
 function reservationRowHtml(r) {
