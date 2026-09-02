@@ -138,11 +138,11 @@ ${entry.tripId ? `<span class="planner-entry-trip-link" data-planner-open-trip="
 </div>`;
 }
 
-// Airbnb occupancy stripes only apply to the main grid (tripId === '') --
-// a trip's own mini-grid is about a PERSON's travel dates, not which of
-// your own rooms is occupied, so it stays out of that context entirely.
-function airbnbStripeHtml(dateStr, tripId) {
-if (tripId) return '';
+// Same stripe on a trip's own mini-grid as the main grid -- useful there
+// too (e.g. "will a room be occupied while I'm away"), not just on the
+// main 14-day view. airbnbSegmentsForDay() is date-only and doesn't care
+// which grid is asking, so this needs no tripId branch at all any more.
+function airbnbStripeHtml(dateStr) {
 const segments = airbnbSegmentsForDay(dateStr);
 if (!segments.length) return '';
 return `<div class="planner-day-stripe">${segments.map((s) => `<span class="stripe-seg stripe-${escapeHtml(s.colour)}" title="${escapeHtml(s.title)}"></span>`).join('')}</div>`;
@@ -154,7 +154,7 @@ return `<div class="planner-day alloc-target" data-planner-day="${dateStr}" data
 <div class="planner-day-label">${formatDayLabel(dateStr)}</div>
 ${legChipsHtml}
 <div class="planner-day-entries">${entries.map(plannerEntryHtml).join('')}</div>
-${airbnbStripeHtml(dateStr, tripId)}
+${airbnbStripeHtml(dateStr)}
 </div>`;
 }
 
@@ -292,7 +292,17 @@ priorityEl.innerHTML = priorityPoolHtml();
 renderConnPicker('planner-add-connection-picker', 'Add someone else&hellip;', '');
 activitiesEl.innerHTML = activitiesPoolHtml();
 gridEl.innerHTML = mainGridHtml();
-const sortedTrips = [...data.trips].sort((a, b) => {
+// Same "this is about what's coming up, not history" reasoning as the
+// Airbnb sync's own past-reservation exclusion -- a trip that's already
+// finished (a real end date, already before today) has nothing left to
+// plan, so its whole mini-grid panel is dropped rather than sitting
+// here as dead weight below the still-relevant ones. An undated trip
+// (tripRangeFor has no end yet) is left alone here -- tripPanelHtml
+// already renders nothing for it either way, nothing to filter.
+const today = todayStr();
+const sortedTrips = [...data.trips]
+.filter((t) => { const { end } = tripRangeFor(t); return !end || end >= today; })
+.sort((a, b) => {
 const as = tripRangeFor(a).start || '9999', bs = tripRangeFor(b).start || '9999';
 return as.localeCompare(bs) || a.createdAt.localeCompare(b.createdAt);
 });
