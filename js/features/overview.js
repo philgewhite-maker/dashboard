@@ -112,7 +112,12 @@ return facets.some((f) => f.title === title && f.key === key);
 }
 
 function overviewDimension(dim, { groups, none }) {
-const keys = Object.keys(groups).sort((a, b) => groups[b].length - groups[a].length);
+// Count descending, alphabetical tiebreak -- same rule tagcleanup.js's
+// own count-sorted list already uses. Without the tiebreak, a run of
+// same-count chips (common once a dimension has more than a couple of
+// singletons) sat in Object.keys' arbitrary insertion order instead of
+// anywhere a person would expect to find one.
+const keys = Object.keys(groups).sort((a, b) => groups[b].length - groups[a].length || a.localeCompare(b));
 const activeHere = facets.filter((f) => f.title === dim.title);
 if (keys.length === 0 && none.length === 0 && activeHere.length === 0) return '';
 const isCollapsed = !!collapsed[dim.title];

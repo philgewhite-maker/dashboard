@@ -1037,7 +1037,7 @@ function cityChipsHtml() {
 return pending.cityOverride.map((c, i) => `<span class="tag-chip">${escapeHtml(c)}<span class="tag-x" data-tinder-city-remove="${i}">&times;</span></span>`).join('')
 + `<input type="text" id="tinder-city-add" autocomplete="off" class="tag-add-input" placeholder="+ add" list="tinder-city-datalist">`
 + `<button type="button" class="todo-add-btn" id="tinder-city-add-btn" style="padding:3px 8px;">+</button>`
-+ `<datalist id="tinder-city-datalist">${[...knownCityMap(data.connections).values()].map((v) => `<option value="${escapeHtml(v)}"></option>`).join('')}</datalist>`;
++ `<datalist id="tinder-city-datalist">${[...knownCityMap(data.connections).values()].sort((a, b) => a.localeCompare(b)).map((v) => `<option value="${escapeHtml(v)}"></option>`).join('')}</datalist>`;
 }
 
 // Every distinct value already saved for `target` across every connection,
