@@ -23,7 +23,7 @@
 // review regardless of how it got picked, so a wrong dropdown pick is just
 // as visible as a wrong auto-match was invisible before.
 import { data, queueSave, currentAge, displayAge, computeFlags, distanceMiles, heightCm, FLAG_FIELD_DEFS, suggestedQuestions, TAG_FIELDS, stripSharedSuffix, recordImportRun, importStatusLine, upsertIdentity, blankConnection } from '../state.js';
-import { escapeHtml, uid, todayStr, hydratePhotoBackgrounds, openLightbox, knownCityMap, COUNTRY_NAME_TO_NATIONALITY, avatarHtml, foldDiacritics } from '../utils.js';
+import { escapeHtml, uid, todayStr, hydratePhotoBackgrounds, openLightbox, knownCityMap, knownScalarValues, pickChipHtml, COUNTRY_NAME_TO_NATIONALITY, avatarHtml, foldDiacritics } from '../utils.js';
 import { nameKey, editDistance, phoneKey } from '../googlecontacts.js';
 import { storePhoto, fetchProxiedImage } from '../files.js';
 import { photoGet, photoUrl } from '../db.js';
@@ -361,11 +361,13 @@ let queue = []; // raw {name,age,fields,photos} profiles still waiting, from a b
 // Certain-identity re-matches (known Tinder match id) with nothing risky
 // about them, held back from the one-by-one queue above for a single
 // tick-and-submit pass instead -- see classifyRaws(). Each row is
-// { raw, p, diff, selected }: `p` the fully-built pending object, ready to
-// apply as-is via applyPendingToConnection(); `diff` a short human summary
-// of whatever's actually new (or "No changes"); `raw` kept alongside so a
-// row that turns out to need a real look can still be handed to the
-// one-by-one reviewer via loadFromRaw(), same as everyone else.
+// { raw, p, selected }: `p` the fully-built pending object, ready to apply
+// as-is via applyPendingToConnection(); `raw` kept alongside so a row that
+// turns out to need a real look can still be handed to the one-by-one
+// reviewer via loadFromRaw(), same as everyone else. What's actually new
+// (or "No changes") is read live off `p` on every render by
+// bulkRowFieldLines() -- not stored on the row -- see that function's own
+// comment for why.
 let bulkQueue = [];
 
 // Reuses the same searchable avatar+name+caption picker every other
@@ -1164,6 +1166,19 @@ if (!f.value.trim() && (ALWAYS_SHOW_LABELS.includes(f.label) || isArrayAlwaysSho
 let already = '';
 if (conn && target && String(conn[target] || '').trim()) already = ` <span class="tinder-field-note">(already set to "${escapeHtml(conn[target])}")</span>`;
 else if (conn && arrayMap && (conn[arrayMap.target] || []).length) already = ` <span class="tinder-field-note">(already: ${escapeHtml(conn[arrayMap.target].join(', '))})</span>`;
+// Drinking/Smoking are a fairly fixed set of answers -- a fixed-list
+// pill picker (same widget the Connections card now uses) beats a free
+// text box here, same reasoning as City/Nationality's own dedicated
+// editors above. Only this "not captured this time" branch gets it --
+// the scraped-value reconciliation branch below (checkbox + "already set
+// to X") is a different job (accept/reject Tinder's own incoming text
+// as-is), left as a plain checkbox+text row.
+if (target === 'drinking' || target === 'smoking') {
+return `<div class="tinder-field-item">
+<label class="tinder-field-row"><strong>${escapeHtml(f.label)}:</strong>${already}</label>
+<span class="tag-editor" data-tinder-pick-idx="${i}">${pickChipHtml(target, f.value, knownScalarValues(data.connections, target))}</span>
+</div>`;
+}
 return `<div class="tinder-field-item">
 <label class="tinder-field-row"><strong>${escapeHtml(f.label)}:</strong>${already}
 <input type="text" autocomplete="off" placeholder="${isArrayAlwaysShow ? 'Not captured this time — comma-separated if more than one' : 'Not captured this time — spotted in About me or chat? Type it here'}" data-tinder-field-fill="${i}">
@@ -1888,6 +1903,27 @@ input.addEventListener('change', () => {
 const f = pending.fields[parseInt(input.dataset.tinderFieldFill, 10)];
 f.value = input.value.trim();
 f.apply = !!f.value; // typing something IS the apply decision, no separate checkbox
+render();
+});
+});
+// Drinking/Smoking's fixed-list picker (see fieldPreviewHtml()'s special
+// case above) -- same "picking something IS the apply decision" rule as
+// the generic fill-in input just above.
+el.querySelectorAll('[data-tinder-pick-idx] [data-pick-value]').forEach((pill) => {
+pill.addEventListener('click', () => {
+const f = pending.fields[parseInt(pill.closest('[data-tinder-pick-idx]').dataset.tinderPickIdx, 10)];
+f.value = f.value === pill.dataset.pickValue ? '' : pill.dataset.pickValue;
+f.apply = !!f.value;
+render();
+});
+});
+el.querySelectorAll('[data-tinder-pick-idx] [data-pick-add]').forEach((input) => {
+input.addEventListener('change', () => {
+const value = input.value.trim();
+if (!value) return;
+const f = pending.fields[parseInt(input.closest('[data-tinder-pick-idx]').dataset.tinderPickIdx, 10)];
+f.value = value;
+f.apply = true;
 render();
 });
 });

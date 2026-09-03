@@ -141,6 +141,41 @@ if (loc && !map.has(loc.toLowerCase())) map.set(loc.toLowerCase(), loc);
 return map;
 }
 
+// Scalar analogue of knownCityMap() -- every distinct value already on
+// file for a single-value field (Drinking, Smoking), original casing
+// preserved, most-used first so a pill row built from this leads with
+// what's actually common in this dataset. Never hardcoded: Tinder's own
+// wording for these isn't guaranteed stable, and an empty list that
+// fills itself in from real scrapes beats a wrong guess dressed up as
+// complete (same reasoning knownCityMap() and tagcleanup.js's
+// languageFrequencies() already follow).
+function knownScalarValues(connections, field) {
+const counts = new Map(); // lowercase -> { value, count }
+(connections || []).forEach((c) => {
+const v = String(c[field] || '').trim();
+if (!v) return;
+const key = v.toLowerCase();
+const entry = counts.get(key) || { value: v, count: 0 };
+entry.count += 1;
+counts.set(key, entry);
+});
+return [...counts.values()].sort((a, b) => b.count - a.count || a.value.localeCompare(b.value)).map((e) => e.value);
+}
+
+// Pure markup for a single-select fixed-list picker -- one pill per known
+// value (current value highlighted active), plus a "+ add" custom-value
+// fallback so a value not yet on file is never blocked. `field`
+// namespaces the data attributes so a page with more than one of these
+// (Drinking AND Smoking) can tell them apart in one delegated handler --
+// the caller owns what clicking a pill actually DOES (write straight to
+// a saved connection, or to a staged pending field), this only builds
+// the HTML.
+function pickChipHtml(field, current, knownValues) {
+const val = String(current || '');
+return knownValues.map((v) => `<span class="pick-chip${v.toLowerCase() === val.toLowerCase() ? ' active' : ''}" data-pick-field="${escapeHtml(field)}" data-pick-value="${escapeHtml(v)}">${escapeHtml(v)}</span>`).join('')
++ `<input type="text" autocomplete="off" class="tag-add-input" placeholder="+ add" data-pick-add="${escapeHtml(field)}">`;
+}
+
 // Wraps any free-text occurrence of a flag-rule value (from ANY rule's
 // green/amber/red list, any field), a known city name, or a country
 // name/nationality adjective in a clickable span — the same mechanisms
@@ -1008,7 +1043,7 @@ return classified.every((c) => c.isScreenshot) && looksLikeSameScreenshotPieces(
 
 export {
 todayStr, daysAgoStr, dateStrAdd, parseLooseDateTime, last7Dates, uid, daysSince, daysUntil, foldDiacritics,
-escapeHtml, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, buildFlagMatcher, applyFlagMatcher, knownCityMap, scrollAndFlash, bindForm,
+escapeHtml, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, buildFlagMatcher, applyFlagMatcher, knownCityMap, knownScalarValues, pickChipHtml, scrollAndFlash, bindForm,
 findMentions, COUNTRY_NAME_TO_NATIONALITY,
 resizeImageToBlob, fileToBase64, loadImage, cropThumbnailToBlob,
 hashFile, captureDateOf, betterCaptureDate, dateFromFilename,

@@ -1157,6 +1157,25 @@ font-size:11px;
    tint nearly disappeared against it. A solid var(--red) fill (same
    pattern as .tinder-flag-hit-red) reads clearly against any background. */
 .tag-chip.tag-chip-red{background:var(--red);border-color:var(--red);color:#fff;}
+/* pickChipHtml() (utils.js) -- a single-select fixed-list pill, unlike
+   .tag-chip's multi-add/remove-x list: outline by default, filled solid
+   when it's the current value, no × (click the active one again to
+   clear instead, same "click the same star again" pattern the rating
+   stars already use). */
+.pick-chip{
+display:inline-flex;
+align-items:center;
+background:transparent;
+border:1px solid var(--line);
+color:var(--muted);
+border-radius:12px;
+padding:2px 8px;
+font-size:11px;
+cursor:pointer;
+margin:0 4px 4px 0;
+}
+.pick-chip:hover{border-color:var(--rose);color:var(--rose);}
+.pick-chip.active{background:var(--rose);border-color:var(--rose);color:#fff;}
 .tag-add-input{
 font-family:'Inter',sans-serif;
 font-size:12px;

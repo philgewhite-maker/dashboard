@@ -59,6 +59,41 @@ return acc;
 });
 }
 
+// A connection whose own drinking/smoking value is ALSO sitting as a
+// plain Tags entry -- leftover from before Smoking got its own FIELD_MAP
+// target on the Tinder-import side (see js/features/tinderimport.js's
+// ARRAY_FIELD_MAP comment): re-importing the same profile now applies
+// BOTH, so the value shows twice on the card (once as Smoking, once as a
+// Tags chip). Detected only, never auto-fixed -- the button below removes
+// just the Tags entry; the connection's own drinking/smoking value is
+// never touched.
+function strayScalarTagDuplicates() {
+const out = [];
+data.connections.forEach((c) => {
+[['drinking', 'Drinking'], ['smoking', 'Smoking']].forEach(([field, label]) => {
+const val = String(c[field] || '').trim();
+if (!val || !Array.isArray(c.tags)) return;
+const hit = c.tags.find((t) => String(t).trim().toLowerCase() === val.toLowerCase());
+if (hit) out.push({ connId: c.id, name: c.name, field, label, value: hit });
+});
+});
+return out;
+}
+
+function strayScalarTagDuplicatesHtml() {
+const hits = strayScalarTagDuplicates();
+if (!hits.length) return '';
+return `<div class="cleanup-section">
+<h4>Drinking/Smoking also sitting in Tags <span class="cleanup-count">${hits.length} found</span></h4>
+<div class="dupe-block">
+${hits.map((h) => `<div class="dupe-row">
+<span class="dupe-variants"><strong>${escapeHtml(h.name)}</strong>'s Tags also has <code>${escapeHtml(h.value)}</code> — already their ${escapeHtml(h.label)}</span>
+<button class="sync-btn" type="button" data-remove-stray-tag="${escapeHtml(h.connId)}:${escapeHtml(h.field)}">Remove from Tags</button>
+</div>`).join('')}
+</div>
+</div>`;
+}
+
 function renderTagCleanup() {
 const el = document.getElementById('tag-cleanup');
 if (!el) return;
@@ -102,7 +137,8 @@ ${values.filter(([other]) => other !== value).map(([other]) => `<option value="$
 </div>`;
 }).filter(Boolean).join('');
 
-el.innerHTML = sections || '<div class="settings-note" style="margin:0;">No tags recorded yet.</div>';
+const strayHtml = strayScalarTagDuplicatesHtml();
+el.innerHTML = (sections + strayHtml) || '<div class="settings-note" style="margin:0;">No tags recorded yet.</div>';
 
 el.querySelectorAll('[data-merge-dupes]').forEach((btn) => {
 btn.addEventListener('click', () => {
@@ -129,6 +165,22 @@ el.querySelectorAll('[data-mergeinto-field]').forEach((sel) => {
 sel.addEventListener('change', () => {
 if (!sel.value) return;
 renameValue(sel.dataset.mergeintoField, sel.dataset.mergeintoFrom, sel.value);
+afterChange();
+});
+});
+
+el.querySelectorAll('[data-remove-stray-tag]').forEach((btn) => {
+btn.addEventListener('click', () => {
+// Re-derived from live data by connection id + field, not a captured
+// array index -- same care duplicateGroups()'s own merge button above
+// takes, since a stale positional index could point at the wrong row
+// after any other edit re-renders this list.
+const [connId, field] = btn.dataset.removeStrayTag.split(':');
+const conn = data.connections.find((c) => c.id === connId);
+if (!conn || !Array.isArray(conn.tags)) return;
+const val = String(conn[field] || '').trim().toLowerCase();
+const idx = conn.tags.findIndex((t) => String(t).trim().toLowerCase() === val);
+if (idx >= 0) conn.tags.splice(idx, 1);
 afterChange();
 });
 });

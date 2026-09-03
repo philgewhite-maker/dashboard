@@ -3,7 +3,7 @@ import { captureTask, revealTask } from './tasks.js';
 import { photoDelete, photoUrl } from '../db.js';
 import { storePhoto } from '../files.js';
 import {
-uid, todayStr, daysSince, escapeHtml, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, buildFlagMatcher, applyFlagMatcher, knownCityMap, scrollAndFlash, bindForm, foldDiacritics,
+uid, todayStr, daysSince, escapeHtml, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, buildFlagMatcher, applyFlagMatcher, knownCityMap, knownScalarValues, pickChipHtml, scrollAndFlash, bindForm, foldDiacritics,
 resizeImageToBlob, classifyProfileUpload, cropToContentBlob, contentCropBounds, loadImage,
 } from '../utils.js';
 import { MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot } from '../ai.js';
@@ -1057,8 +1057,15 @@ ${c.travelStatus === 'travelling' ? `<label>Travelling until<input type="date" d
 <label>Job<input type="text" autocomplete="off" data-field="job" data-conn-detail="${c.id}" value="${escapeHtml(c.job || '')}"></label>
 <label>Height<input type="text" autocomplete="off" data-field="height" data-conn-detail="${c.id}" value="${escapeHtml(c.height || '')}"></label>
 <label>Education<input type="text" autocomplete="off" data-field="education" data-conn-detail="${c.id}" value="${escapeHtml(c.education || '')}"></label>
-<label>Drinking<input type="text" autocomplete="off" placeholder="e.g. Socially, at the weekend" data-field="drinking" data-conn-detail="${c.id}" value="${escapeHtml(c.drinking || '')}"></label>
-<label>Smoking<input type="text" autocomplete="off" placeholder="e.g. Trying to quit" data-field="smoking" data-conn-detail="${c.id}" value="${escapeHtml(c.smoking || '')}"></label>
+
+<div class="field-block">
+<span class="field-label">Drinking</span>
+<span class="tag-editor" data-pick-conn="${c.id}">${pickChipHtml('drinking', c.drinking, knownScalarValues(data.connections, 'drinking'))}</span>
+</div>
+<div class="field-block">
+<span class="field-label">Smoking</span>
+<span class="tag-editor" data-pick-conn="${c.id}">${pickChipHtml('smoking', c.smoking, knownScalarValues(data.connections, 'smoking'))}</span>
+</div>
 <div class="field-block">
 <span class="field-label">Phone</span>
 <span class="phone-row">
@@ -1204,6 +1211,44 @@ conn.travelUntil = until.toISOString().slice(0, 10);
 // disappears from the card instead of waiting for some other edit to
 // trigger the next full render.
 if (['name', 'app', 'age', 'dob', 'location', 'driveLink', 'travelStatus', 'phone', 'email'].includes(el.dataset.field)) renderConnections();
+renderOverviewRef();
+queueSave();
+});
+});
+// Drinking/Smoking pick-chip picker (see pickChipHtml() in utils.js) --
+// a scalar field, so no add/remove list like TAG_FIELDS' own tagChips()
+// gets, just one active pill at a time. Always a full renderConnections()
+// after a change (unlike data-conn-detail above, which skips it for most
+// fields to avoid stealing focus from an in-progress edit elsewhere) --
+// a click has no cursor to lose, and the vocabulary these pills draw from
+// (knownScalarValues) is shared across every connection, so adding a new
+// value here should show up as a pill on everyone else's card too.
+list.querySelectorAll('[data-pick-conn] [data-pick-value]').forEach((pill) => {
+pill.addEventListener('click', () => {
+const conn = data.connections.find((x) => x.id === pill.closest('[data-pick-conn]').dataset.pickConn);
+if (!conn) return;
+const field = pill.dataset.pickField;
+conn[field] = conn[field] === pill.dataset.pickValue ? '' : pill.dataset.pickValue;
+if (Array.isArray(conn.contactConflicts) && conn.contactConflicts.some((k) => k.field === field)) {
+conn.contactConflicts = conn.contactConflicts.filter((k) => k.field !== field);
+}
+renderConnections();
+renderOverviewRef();
+queueSave();
+});
+});
+list.querySelectorAll('[data-pick-conn] [data-pick-add]').forEach((input) => {
+input.addEventListener('change', () => {
+const value = input.value.trim();
+if (!value) return;
+const conn = data.connections.find((x) => x.id === input.closest('[data-pick-conn]').dataset.pickConn);
+if (!conn) return;
+const field = input.dataset.pickAdd;
+conn[field] = value;
+if (Array.isArray(conn.contactConflicts) && conn.contactConflicts.some((k) => k.field === field)) {
+conn.contactConflicts = conn.contactConflicts.filter((k) => k.field !== field);
+}
+renderConnections();
 renderOverviewRef();
 queueSave();
 });
