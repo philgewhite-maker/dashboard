@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v191</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v192</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -1202,12 +1202,18 @@ async function extractProfile(expectedName) {
     return { name, age, fields, photos };
   }
 
-// Every match/message row in either sidebar list shares the same
-// /app/messages/&lt;id&gt; URL scheme, and both lists are always in the DOM
-// at once &mdash; the inactive tab is just transformed off-screen, not
-// removed &mdash; verified against a real saved page with both tabs
-// captured. So both can be read without ever clicking between the
-// Matches and Messages tabs.
+// CORRECTION to this function's own former claim ("both lists are always
+// in the DOM at once, verified against a real saved page with both tabs
+// captured"): that was true of a STATIC SAVED HTML capture, which
+// preserves whatever markup existed at save time regardless of
+// visibility -- but confirmed live, in the actual running app, only the
+// CURRENTLY ACTIVE tab's &lt;ul&gt; is ever mounted at all; switching tabs
+// swaps which one exists in the DOM, it doesn't just show/hide both. So
+// this only ever reads whichever ONE of Matches/Messages is currently
+// selected -- every caller that genuinely needs the full combined set
+// uses collectAllCandidates() below instead, which switches tabs itself.
+// Kept as the cheap, no-navigation building block for callers that only
+// need a fast sanity check against whatever's already showing.
 function collectCandidates() {
   const seen = new Set();
   const rows = [];
@@ -1228,6 +1234,59 @@ function collectCandidates() {
   return rows;
 }
 
+// The real tab buttons (confirmed live against the actual markup, a
+// standard ARIA tablist: role="tab" buttons with aria-selected, not just
+// styled links) -- selected by visible text rather than their id
+// attributes, which look auto-generated and aren't safe to hardcode.
+function findTabButton(label) {
+  return [...document.querySelectorAll('[role="tab"]')].find((b) =&gt; b.textContent.trim().startsWith(label));
+}
+
+// Clicks a tab and waits for it to actually take effect -- aria-selected
+// flips as soon as the click handler runs, but the new tab's own content
+// still needs a moment to actually mount, so a short settle delay follows
+// the flip rather than treating aria-selected alone as "ready".
+async function switchToTab(label) {
+  const tab = findTabButton(label);
+  if (!tab) return false;
+  if (tab.getAttribute('aria-selected') !== 'true') {
+    tab.click();
+    for (let i = 0; i &lt; 20 &amp;&amp; tab.getAttribute('aria-selected') !== 'true'; i++) {
+      await new Promise((r) =&gt; setTimeout(r, 100));
+    }
+  }
+  await new Promise((r) =&gt; setTimeout(r, 400));
+  return true;
+}
+
+// The actual fix for the "only ever sees one tab" problem above: switches
+// to Matches, reads it, switches to Messages, reads that too, merges by
+// id, then returns to whichever tab was active when called so the
+// visible UI ends up where it started. Costs a couple of tab-switches
+// (roughly a second) -- worth it here, where completeness genuinely
+// matters and a real extraction is about to happen anyway, but NOT baked
+// into collectCandidates() itself, which stays instant for callers that
+// don't need it.
+async function collectAllCandidates() {
+  const originalTab = findTabButton('Matches')?.getAttribute('aria-selected') === 'true' ? 'Matches'
+    : findTabButton('Messages')?.getAttribute('aria-selected') === 'true' ? 'Messages' : null;
+  const seen = new Set();
+  const rows = [];
+  const grabInto = () => {
+    collectCandidates().forEach((row) => {
+      if (seen.has(row.id)) return;
+      seen.add(row.id);
+      rows.push(row);
+    });
+  };
+  await switchToTab('Matches');
+  grabInto();
+  await switchToTab('Messages');
+  grabInto();
+  if (originalTab) await switchToTab(originalTab);
+  return rows;
+}
+
 // Re-finds a row's link fresh at click time, by match id rather than by
 // comparing href strings &mdash; confirmed live: `a.href` (the JS
 // property, always browser-resolved to an absolute URL) doesn't
@@ -1235,17 +1294,27 @@ function collectCandidates() {
 // carries, so `document.querySelector('a[href="' + resolvedUrl + '"]')`
 // failed to find a person visibly on screen. Matching on the id parsed
 // out of the live `.href` property on both sides (same parsing
-// collectCandidates already does) sidesteps that mismatch entirely.
-function findLinkById(id) {
-  for (const ul of [document.querySelector('ul[aria-label="Your recent messages"]'), document.querySelector('ul[aria-label="Your matches"]')]) {
-    if (!ul) continue;
-    const found = [...ul.querySelectorAll('li a[href*="/app/messages/"]')].find((a) => {
-      const m = a.href.match(/\/app\/messages\/([a-zA-Z0-9]+)/);
-      return m &amp;&amp; m[1] === id;
-    });
-    if (found) return found;
-  }
-  return null;
+// collectCandidates already does) sidesteps that mismatch entirely. Tries
+// the currently active tab first (free, no navigation) -- only if that
+// misses does it switch to the other tab and try again, since a row
+// collected via collectAllCandidates() could belong to either one.
+async function findLinkById(id) {
+  const tryCurrent = () => {
+    for (const ul of [document.querySelector('ul[aria-label="Your recent messages"]'), document.querySelector('ul[aria-label="Your matches"]')]) {
+      if (!ul) continue;
+      const found = [...ul.querySelectorAll('li a[href*="/app/messages/"]')].find((a) => {
+        const m = a.href.match(/\/app\/messages\/([a-zA-Z0-9]+)/);
+        return m &amp;&amp; m[1] === id;
+      });
+      if (found) return found;
+    }
+    return null;
+  };
+  const first = tryCurrent();
+  if (first) return first;
+  const otherTab = findTabButton('Matches')?.getAttribute('aria-selected') === 'true' ? 'Messages' : 'Matches';
+  await switchToTab(otherTab);
+  return tryCurrent();
 }
 
 // Polls the profile panel until it's actually showing the person just
@@ -1354,7 +1423,7 @@ window.tinderBulkImport = async (batchSize, staleBatchSize) => {
   const CHUNK_SIZE = 25; // checkpoint to its own downloaded file this often -- a long unattended run surviving a sleep/crash/closed-tab partway through loses at most this many, not the whole run, and each file is pasteable into the dashboard as soon as it lands rather than waiting for the end
 
   const doneVersions = loadDoneVersions();
-  const candidates = collectCandidates();
+  const candidates = await collectAllCandidates();
   const todo = candidates.filter((r) =&gt; !isDoneWith(doneVersions, r.id)).slice(0, BATCH_SIZE);
   const profiles = [];
   const chunkState = { chunkIndex: 0, totalSaved: 0 };
@@ -1382,7 +1451,7 @@ window.tinderBulkImport = async (batchSize, staleBatchSize) => {
     for (let i = 0; i &lt; todo.length; i++) {
       const row = todo[i];
       console.log(`[${i + 1}/${todo.length}] ${row.name}...`);
-      const link = findLinkById(row.id);
+      const link = await findLinkById(row.id);
       if (!link) { console.warn(`Couldn't find ${row.name} any more -- the sidebar re-rendered. Stopping here.`); break; }
       link.click();
       const loaded = await waitForProfile(row.name, 8000);
@@ -1493,7 +1562,7 @@ window.tinderCatchUp = async (sinceDate, batchSize, staleBatchSize) => {
   const visited = new Set();
 
   async function processRow(row) {
-    const link = findLinkById(row.id);
+    const link = await findLinkById(row.id);
     if (!link) return { stop: true, reason: `Couldn't find ${row.name} any more -- the sidebar re-rendered.` };
     link.click();
     const loaded = await waitForProfile(row.name, 8000);
@@ -1567,10 +1636,20 @@ window.tinderCatchUp = async (sinceDate, batchSize, staleBatchSize) => {
     }
   }
 
+  // Each sweep needs its own tab actually selected first -- confirmed
+  // live, only the CURRENTLY ACTIVE tab's &lt;ul&gt; is ever mounted at all
+  // (see collectAllCandidates()'s own comment for the fuller story), so
+  // computing both &lt;ul&gt;s up front the way this used to would've silently
+  // handed the second sweep a null list every time.
+  const startedOnTab = findTabButton('Matches')?.getAttribute('aria-selected') === 'true' ? 'Matches'
+    : findTabButton('Messages')?.getAttribute('aria-selected') === 'true' ? 'Messages' : null;
   try {
+    await switchToTab('Messages');
     await sweep('Messages', document.querySelector('ul[aria-label="Your recent messages"]'), 'Last message date', since);
+    await switchToTab('Matches');
     await sweep('Matches', document.querySelector('ul[aria-label="Your matches"]'), null, EPOCH); // dateFieldLabel unused when floor is EPOCH -- see the note above
   } finally {
+    if (startedOnTab) await switchToTab(startedOnTab);
     downloadChunk(profiles, true, chunkState);
     console.log(`${chunkState.totalSaved} profile${chunkState.totalSaved === 1 ? '' : 's'} with activity since ${since}, across ${chunkState.chunkIndex} file${chunkState.chunkIndex === 1 ? '' : 's'} in your Downloads folder.`);
     await staleSweepTail(staleBatchSize ?? 25);
@@ -1581,11 +1660,13 @@ window.tinderCatchUp = async (sinceDate, batchSize, staleBatchSize) => {
 // since it's just comparing two lists of ids already sitting in the DOM
 // (once fully scrolled) against everyone this account has ever indexed.
 // Unlike tinderBulkImport()/tinderCatchUp(), completeness genuinely
-// matters here: collectCandidates() alone only sees whatever's currently
-// scrolled into view, so a merely-not-yet-loaded person would look
-// identical to a real unmatch. Both sidebars get scrolled to the bottom
-// first for exactly that reason -- unverified against a real long list,
-// since no captured page has had one to check the scroll behaviour on.
+// matters here: whatever's currently scrolled into view -- or, confirmed
+// live, whatever's on the currently ACTIVE TAB at all, Matches and
+// Messages are never both mounted at once -- would otherwise look
+// identical to a real unmatch. Both tabs get switched to and scrolled to
+// the bottom in turn for exactly that reason. Unverified against a real
+// long list, since no captured page has had one to check the scroll
+// behaviour on.
 window.tinderFindUnmatched = async () => {
   // Same "find the nearest real scroll container, not necessarily the
   // list element itself" approach used elsewhere in this snippet, just
@@ -1607,11 +1688,18 @@ window.tinderFindUnmatched = async () => {
     }
   }
 
+  const startedOnTab = findTabButton('Matches')?.getAttribute('aria-selected') === 'true' ? 'Matches'
+    : findTabButton('Messages')?.getAttribute('aria-selected') === 'true' ? 'Messages' : null;
   console.log('Scrolling both lists to load everyone first -- this can take a while for a long history...');
-  await scrollListFully(document.querySelector('ul[aria-label="Your recent messages"]'));
+  const currentIds = new Set();
+  await switchToTab('Matches');
   await scrollListFully(document.querySelector('ul[aria-label="Your matches"]'));
+  collectCandidates().forEach((r) => currentIds.add(r.id));
+  await switchToTab('Messages');
+  await scrollListFully(document.querySelector('ul[aria-label="Your recent messages"]'));
+  collectCandidates().forEach((r) => currentIds.add(r.id));
+  if (startedOnTab) await switchToTab(startedOnTab);
 
-  const currentIds = new Set(collectCandidates().map((r) =&gt; r.id));
   const doneVersions = loadDoneVersions();
   const everKnown = Object.keys(doneVersions);
   const unmatched = everKnown.filter((id) =&gt; !currentIds.has(id));
@@ -1641,7 +1729,7 @@ window.tinderFindUnmatched = async () => {
 window.tinderReextract = async (ids) =&gt; {
   const idSet = new Set((ids || []).filter(Boolean));
   if (!idSet.size) { console.warn('tinderReextract needs an array of match ids -- e.g. tinderReextract(["abc123", "def456"])'); return; }
-  const candidates = collectCandidates().filter((r) =&gt; idSet.has(r.id));
+  const candidates = (await collectAllCandidates()).filter((r) =&gt; idSet.has(r.id));
   const missingIds = [...idSet].filter((id) =&gt; !candidates.some((r) =&gt; r.id === id));
   if (missingIds.length) console.warn(`${missingIds.length} id${missingIds.length === 1 ? '' : 's'} not currently visible in the sidebar -- scroll both lists down to load everyone before running this, or they'll just be skipped: ${missingIds.join(', ')}`);
   if (!candidates.length) { console.log('Nothing to re-extract -- none of those ids are currently visible.'); return; }
@@ -1653,7 +1741,7 @@ window.tinderReextract = async (ids) =&gt; {
     for (let i = 0; i &lt; candidates.length; i++) {
       const row = candidates[i];
       console.log(`[${i + 1}/${candidates.length}] ${row.name}...`);
-      const link = findLinkById(row.id);
+      const link = await findLinkById(row.id);
       if (!link) { console.warn(`Couldn't find ${row.name} any more -- skipped.`); continue; }
       link.click();
       const loaded = await waitForProfile(row.name, 8000);
@@ -1758,7 +1846,7 @@ async function staleSweepTail(n) {
   const staleMap = loadStaleMap();
   const ids = Object.keys(staleMap);
   if (!ids.length) return; // never seeded (e.g. an old copy of this snippet, pasted by hand) -- nothing to act on
-  const currentById = new Map(collectCandidates().map((r) => [r.id, r]));
+  const currentById = new Map((await collectAllCandidates()).map((r) => [r.id, r]));
   const ranked = ids
     .filter((id) => currentById.has(id))
     .sort((a, b) => (staleMap[a] || '').localeCompare(staleMap[b] || '')); // '' (never scraped) sorts first -- most overdue
@@ -1770,7 +1858,7 @@ async function staleSweepTail(n) {
   for (let i = 0; i < batch.length; i++) {
     const row = currentById.get(batch[i]);
     console.log(`[stale ${i + 1}/${batch.length}] ${row.name}...`);
-    const link = findLinkById(row.id);
+    const link = await findLinkById(row.id);
     if (!link) { console.warn(`Stale-refresh: couldn't find ${row.name} any more -- skipped.`); continue; }
     link.click();
     const loaded = await waitForProfile(row.name, 8000);
