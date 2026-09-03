@@ -1392,6 +1392,9 @@ out.push('Still active? Message to check — archive if no reply.');
 if (!(conn.location || []).length) {
 out.push('Where do they live? Ask rather than assume.');
 }
+if (!(conn.nationality || []).length) {
+out.push("What's their nationality? Ask rather than assume.");
+}
 // Only once there's an actual transcript -- asking about kids on a bare
 // "Matched" with nothing said yet is premature. Any of the three chat
 // fields (populated only once an import found real messages, on whichever

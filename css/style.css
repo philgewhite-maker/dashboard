@@ -382,13 +382,15 @@ margin:10px 0 4px;padding-top:8px;border-top:1px dashed var(--line);
 .tinder-confirm-pic{width:64px;height:64px;border-radius:12px;overflow:hidden;display:block;background:var(--paper);flex-shrink:0;background-size:cover;background-position:center;cursor:pointer;}
 .tinder-confirm-pic-empty{border:1px dashed var(--line);cursor:default;}
 .tinder-bulk-list{display:flex;flex-direction:column;gap:4px;max-height:480px;overflow-y:auto;margin:6px 0;}
-.tinder-bulk-row{display:flex;align-items:center;gap:8px;padding:6px;border-radius:8px;background:var(--paper);}
+.tinder-bulk-row{display:flex;flex-direction:column;gap:2px;padding:6px;border-radius:8px;background:var(--paper);}
 .tinder-bulk-row:hover{background:var(--card);}
+.tinder-bulk-row-top{display:flex;align-items:center;gap:8px;}
 .tinder-bulk-row-main{display:flex;align-items:center;gap:8px;flex:1;min-width:0;cursor:pointer;}
 .tinder-bulk-thumb{width:36px;height:36px;border-radius:8px;background:var(--card);background-size:cover;background-position:center;flex-shrink:0;}
 .tinder-bulk-thumb-empty{border:1px dashed var(--line);}
 .tinder-bulk-info{flex:1;min-width:0;font-size:12px;line-height:1.4;}
 .tinder-bulk-info .settings-note{font-size:11px;}
+.tinder-bulk-field-row{display:block;margin-left:44px;font-size:11px;color:var(--amber);}
 .tinder-next-step{margin:6px 0;}
 .tinder-hint-chips{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:5px;}
 .tinder-hint-chip{

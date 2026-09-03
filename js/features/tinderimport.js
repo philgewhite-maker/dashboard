@@ -30,6 +30,7 @@ import { photoGet, photoUrl } from '../db.js';
 import { MissingKeyError, compareFaces, translateText, identifyCountry } from '../ai.js';
 import { findPhoneNumbers, findHandles, formatHandle } from '../contactscan.js';
 import { STAGE_RANK, CONN_STAGES, unionInto, connectionPickerHtml, bindConnPickers, setConnPickerValue } from './connections.js';
+import { proposalsForPerson, languageFrequencies } from './tagcleanup.js';
 
 // True only if the extracted chat has a message from BOTH sides, not just
 // the user reaching out with no reply — a one-sided "You: hey" isn't
@@ -1089,6 +1090,35 @@ return `<div class="tinder-field-note" style="margin:2px 0 8px;">`
 + `</div>`;
 }
 
+// Same "found a candidate value, offer to add it" job as proposedCityHtml()
+// above (Distance-based), fed by tagcleanup.js's shared keyword-matching
+// scan instead -- a city or nationality mentioned in THIS profile's own
+// scraped Education/Work text, matched against cities/nationalities
+// already known from OTHER connections (see proposalsForPerson()'s own
+// header comment for the full "keyword-only, no guessing" reasoning).
+// Adapts pending's chip-override arrays + scraped p.fields into the plain
+// shape proposalsForPerson() expects -- the same check a saved
+// connection gets from the Settings tab's own "Scan" button, just run
+// live here since there's only ever one person to check, not hundreds.
+function personShapeFromPending(p) {
+const val = (label) => p.fields.find((f) => f.label === label)?.value || '';
+return {
+id: p.chosenId || 'pending', name: p.name,
+location: p.cityOverride, nationality: p.nationalityOverride, languages: p.languagesOverride,
+education: val('Education'), job: val('Work') || val('Job title') || val('Job'),
+notes: '', likes: '', distance: val('Distance'),
+};
+}
+function fillInSuggestionHtml(proposal, field) {
+const hit = proposal?.fields.find((f) => f.field === field);
+if (!hit) return '';
+const addAttr = field === 'location' ? `data-tinder-fillin-city="${escapeHtml(hit.value)}"` : `data-tinder-fillin-nationality="${escapeHtml(hit.value)}"`;
+return `<div class="tinder-field-note" style="margin:2px 0 8px;">`
++ `Possibly <span class="tinder-flag-hit tinder-flag-hit-amber">${escapeHtml(hit.value)}</span> — ${escapeHtml(hit.sourceText)} `
++ `<button type="button" class="sync-btn tinder-inline-btn" ${addAttr}>+ add</button>`
++ `</div>`;
+}
+
 // Groups pending.fields into FIELD_CLUSTERS for display — Basics, Family &
 // lifestyle, etc. — each its own little multi-column grid, in cluster
 // order, followed by an "Other" catch-all for anything not in any
@@ -1365,21 +1395,42 @@ return;
 }
 const allSelected = bulkQueue.every((r) => r.selected);
 const selectedCount = bulkQueue.filter((r) => r.selected).length;
+// Read fresh every render -- see bulkRowFieldLines()'s own comment for why
+// this replaced the old frozen row.diff string.
+const rowLines = bulkQueue.map((row) => {
+const conn = data.connections.find((c) => c.id === row.p.chosenId);
+return { conn, lines: bulkRowFieldLines(row.p, conn) };
+});
+// Distinct field labels with at least one real conflict somewhere in the
+// batch right now -- each gets an "Apply all: X" master toggle above the
+// list. Checked only when every current occurrence is already applied, so
+// it can't drift from the per-row checkboxes it drives.
+const masterLabels = [...new Set(rowLines.flatMap(({ lines }) => lines.pending.map((f) => f.label)))].sort();
+const masterChecked = (label) => rowLines.every(({ lines }) => {
+const hit = lines.pending.find((f) => f.label === label);
+return !hit || hit.apply;
+});
 el.innerHTML = `<div class="album-card" style="margin-bottom:10px;">
-<div class="album-caption"><strong>${bulkQueue.length} clean re-match${bulkQueue.length === 1 ? '' : 'es'}</strong> — known identity, nothing new or only minor updates. Skim the summary, untick anything you'd rather look at properly (or click "Review" to open it in the full editor), then submit.</div>
+<div class="album-caption"><strong>${bulkQueue.length} clean re-match${bulkQueue.length === 1 ? '' : 'es'}</strong> — known identity, nothing new or only minor updates. Skim the summary, untick anything you'd rather look at properly (or click "Review" to open it in the full editor); tick a conflicting field below to overwrite it too, then submit.</div>
 <label class="tinder-field-row" style="margin:6px 0;"><input type="checkbox" id="tinder-bulk-select-all"${allSelected ? ' checked' : ''}> Select all</label>
+${masterLabels.length ? `<div class="tinder-bulk-apply-all" style="margin:0 0 8px;display:flex;flex-wrap:wrap;gap:4px 12px;">${masterLabels.map((label) => `<label class="tinder-field-row" style="margin:0;"><input type="checkbox" data-tinder-bulk-apply-all="${escapeHtml(label)}"${masterChecked(label) ? ' checked' : ''}> Apply all: ${escapeHtml(label)}</label>`).join('')}</div>` : ''}
 <div class="tinder-bulk-list">
 ${bulkQueue.map((row, i) => {
-const conn = data.connections.find((c) => c.id === row.p.chosenId);
+const { conn, lines } = rowLines[i];
 const scrapedPhoto = row.p.photos[0]?.url;
 return `<div class="tinder-bulk-row">
+<div class="tinder-bulk-row-top">
 <label class="tinder-bulk-row-main">
 <input type="checkbox" data-tinder-bulk-select="${i}"${row.selected ? ' checked' : ''}>
 ${conn?.photoId ? `<span class="tinder-bulk-thumb" data-photo-bg="${escapeHtml(conn.photoId)}" title="On file"></span>` : '<span class="tinder-bulk-thumb tinder-bulk-thumb-empty" title="No photo on file"></span>'}
 ${scrapedPhoto ? `<span class="tinder-bulk-thumb" style="background-image:url('${escapeHtml(scrapedPhoto)}')" title="Just scraped"></span>` : '<span class="tinder-bulk-thumb tinder-bulk-thumb-empty" title="No photo in this scrape"></span>'}
-<span class="tinder-bulk-info"><strong>${escapeHtml(conn ? conn.name : row.p.name)}</strong><br><span class="settings-note">${escapeHtml(row.diff)}</span></span>
+<span class="tinder-bulk-info"><strong>${escapeHtml(conn ? conn.name : row.p.name)}</strong><br>
+${lines.applied.length ? `<span class="settings-note">${escapeHtml(lines.applied.join(' · '))}</span>` : ''}
+</span>
 </label>
 <button type="button" class="sync-btn tinder-inline-btn" data-tinder-bulk-review="${i}" title="Open in the full one-by-one reviewer instead of bulk-approving it">Review</button>
+</div>
+${lines.pending.map((f) => `<label class="tinder-bulk-field-row"><input type="checkbox" data-bulk-field-apply="${i}:${f.fieldIndex}"${f.apply ? ' checked' : ''}> ${escapeHtml(f.label)}: "${escapeHtml(f.stored)}" → "${escapeHtml(f.fresh)}"</label>`).join('')}
 </div>`;
 }).join('')}
 </div>
@@ -1398,6 +1449,24 @@ renderBulk();
 el.querySelectorAll('[data-tinder-bulk-select]').forEach((cb) => {
 cb.addEventListener('change', () => {
 bulkQueue[parseInt(cb.dataset.tinderBulkSelect, 10)].selected = cb.checked;
+renderBulk();
+});
+});
+el.querySelectorAll('[data-tinder-bulk-apply-all]').forEach((cb) => {
+cb.addEventListener('change', () => {
+const label = cb.dataset.tinderBulkApplyAll;
+rowLines.forEach(({ lines }, i) => {
+lines.pending.filter((f) => f.label === label).forEach((f) => {
+bulkQueue[i].p.fields[f.fieldIndex].apply = cb.checked;
+});
+});
+renderBulk();
+});
+});
+el.querySelectorAll('[data-bulk-field-apply]').forEach((cb) => {
+cb.addEventListener('change', () => {
+const [rowIdx, fieldIdx] = cb.dataset.bulkFieldApply.split(':').map((s) => parseInt(s, 10));
+bulkQueue[rowIdx].p.fields[fieldIdx].apply = cb.checked;
 renderBulk();
 });
 });
@@ -1511,6 +1580,10 @@ const saveBlockedNote = !p.chosenId ? 'pick who this is first'
 // the space the old-vs-new photo comparison below needed. Plain text
 // instead; More info is still there for the rare case it needs undoing.
 const secureMatch = p.match?.why === 'known match id';
+// Cheap to run fresh every render for one person -- unlike the Settings
+// tab's own "Scan" button (tagcleanup.js), which sweeps every saved
+// connection and only runs on demand.
+const fillInProposal = proposalsForPerson(personShapeFromPending(p), languageFrequencies());
 
 el.innerHTML = `<div class="album-card">
 ${queue.length ? `<div class="settings-note" style="margin:0 0 8px;">${queue.length} more queued in this batch — saving auto-advances to the next.</div>` : ''}
@@ -1522,7 +1595,7 @@ ${p.photos[0]
 ? `<span class="tinder-confirm-pic" data-tinder-photo-view="0" style="background-image:url('${escapeHtml(p.photos[0].url)}')" title="Click to view this import's photo, full-size"></span>`
 : '<span class="tinder-confirm-pic tinder-confirm-pic-empty" title="No photos in this import"></span>'}
 <div class="tinder-header-id">
-<div class="album-caption"><strong>${escapeHtml(p.name || '(no name found)')}</strong>${p.age ? `, ${escapeHtml(p.age)}` : ''}</div>
+<div class="album-caption"><strong>${escapeHtml(p.name || '(no name found)')}</strong>${p.age ? `, ${escapeHtml(p.age)}` : ''} <button type="button" class="planner-priority-btn${p.priorityFlagOverride ? ' active' : ''}" data-tinder-priority-toggle="1" title="${p.priorityFlagOverride ? 'Priority for the Planner — click to unset' : 'Mark as a priority for the Planner tab'}">📌</button></div>
 ${secureMatch
 ? `<div class="tinder-field-note">Matched to <strong>${escapeHtml(chosenConn ? chosenConn.name : '')}</strong> by Tinder ID</div>`
 : connectionPickerHtml('tinder-pick', '&mdash; pick who this is &mdash;', tinderPickCandidateRowsHtml(p.candidates))}
@@ -1545,6 +1618,7 @@ ${saveBlockedNote ? `<div class="tinder-field-note" style="margin:-4px 0 8px;">$
 <div class="tinder-fields" style="margin:8px 0;">
 <label class="tinder-field-row">Stage <select id="tinder-stage">${CONN_STAGES.map((s) => `<option value="${escapeHtml(s)}"${s === p.stageOverride ? ' selected' : ''}>${escapeHtml(s)}</option>`).join('')}</select></label>
 <label class="tinder-field-row">City <span class="tag-editor">${cityChipsHtml()}</span></label>
+${fillInSuggestionHtml(fillInProposal, 'location')}
 <label class="tinder-field-row">Rating <span id="tinder-rating">${ratingStarsHtml(p.ratingOverride)}</span></label>
 <label class="tinder-field-row">Travel <select id="tinder-travel-status">
 <option value=""${!p.travelStatusOverride ? ' selected' : ''}>&mdash; normal</option>
@@ -1554,6 +1628,7 @@ ${saveBlockedNote ? `<div class="tinder-field-note" style="margin:-4px 0 8px;">$
 ${p.travelStatusOverride === 'travelling' ? `<label class="tinder-field-row">Until <input type="date" id="tinder-travel-until" value="${escapeHtml(p.travelUntilOverride)}"></label>` : ''}
 <label class="tinder-field-row">Languages <span class="tag-editor">${chipOverrideHtml('languagesOverride')}</span></label>
 <label class="tinder-field-row">Nationality <span class="tag-editor">${chipOverrideHtml('nationalityOverride')}</span></label>
+${fillInSuggestionHtml(fillInProposal, 'nationality')}
 <label class="tinder-field-row">Relationship <span class="tag-editor">${chipOverrideHtml('relationshipOverride')}</span></label>
 </div>
 
@@ -1703,6 +1778,21 @@ render();
 const proposeCityBtn = el.querySelector('[data-tinder-propose-city]');
 if (proposeCityBtn) proposeCityBtn.addEventListener('click', () => {
 addCityValue(data.myCity);
+render();
+});
+const fillinCityBtn = el.querySelector('[data-tinder-fillin-city]');
+if (fillinCityBtn) fillinCityBtn.addEventListener('click', () => {
+addCityValue(fillinCityBtn.dataset.tinderFillinCity);
+render();
+});
+const fillinNatBtn = el.querySelector('[data-tinder-fillin-nationality]');
+if (fillinNatBtn) fillinNatBtn.addEventListener('click', () => {
+addChipValue('nationalityOverride', fillinNatBtn.dataset.tinderFillinNationality);
+render();
+});
+const priorityBtn = el.querySelector('[data-tinder-priority-toggle]');
+if (priorityBtn) priorityBtn.addEventListener('click', () => {
+p.priorityFlagOverride = !p.priorityFlagOverride;
 render();
 });
 const stageSel = document.getElementById('tinder-stage');
@@ -1973,6 +2063,9 @@ if (!Array.isArray(conn[target])) conn[target] = [];
 unionInto(conn[target], p[overrideKey]);
 });
 if (p.ratingOverride) conn.priority = p.ratingOverride;
+// Direct set, same as Stage/Rating above -- a toggled-off pin is a real
+// choice, not "nothing to apply".
+conn.priorityFlag = p.priorityFlagOverride;
 // Direct set like Stage/City/Rating above, not fill-if-empty -- an empty
 // string is itself a meaningful choice here (clearing Standby/Travelling
 // back to normal rotation), not "nothing to apply".
@@ -2228,6 +2321,12 @@ relationshipOverride: initChipOverride(fields, ['Orientation', 'Relationship typ
 overrideFallbackFrom: {},
 stageOverride: 'Matched',
 ratingOverride: 0,
+// Mirrors a connection's own 📌 (connections.js's priorityFlag) -- seeded
+// from the matched connection in refreshOverrides(), same direct-set
+// pattern as Stage/Rating above, and flushed back in
+// applyPendingToConnection(). Defaults false for a brand new profile too
+// (blankConnection() already starts priorityFlag:false).
+priorityFlagOverride: false,
 // Orthogonal to Stage (see isTravelPaused in state.js) -- seeded from
 // whatever's already on the matched connection in refreshOverrides(),
 // same direct-set-not-merge pattern as Stage/City/Rating. Otherwise the
@@ -2295,6 +2394,67 @@ refreshOverrides();
 // it. Growth is detected here and forced back to applied, specifically so
 // chat-only updates flow through the bulk pipe instead of being silently
 // dropped or forced into a full manual review.
+// Pure, render-safe read of the same "what's new" state summarizeCleanMatch()
+// computes -- but unlike that function, this never MUTATES anything (no
+// forcing Chat history's apply flag, no un-applying a conflicting field).
+// summarizeCleanMatch() still runs exactly once, at classify time
+// (classifyRaws()), specifically so its mutations settle each field's
+// initial apply flag; from then on renderBulk() calls this instead on every
+// re-render, so ticking a per-field checkbox and re-rendering can't get
+// silently undone by summarizeCleanMatch() re-running its conflict check.
+// Splits into `applied` (already flowing through as plain text -- nothing
+// to lose by leaving it alone) and `pending` (a FIELD_MAP field whose
+// stored value genuinely differs from the fresh one, offered as a
+// checkbox reflecting current apply state either way).
+function bulkRowFieldLines(p, conn) {
+if (!conn) return { applied: ['No changes'], pending: [] };
+const applied = [];
+const pending = [];
+
+const newPhotoCount = p.photos.filter((ph) => ph.apply && !(conn.tinderPhotoKeys || []).includes(photoKey(ph.url))).length;
+if (newPhotoCount) applied.push(`+${newPhotoCount} photo${newPhotoCount === 1 ? '' : 's'}`);
+
+const chatField = p.fields.find((f) => f.label === 'Chat history');
+if (chatField && chatField.apply) {
+const oldCount = String(conn.chatLog || '').split('\n').filter(Boolean).length;
+const newCount = chatField.value.split('\n').filter(Boolean).length;
+if (newCount > oldCount) applied.push(`+${newCount - oldCount} chat line${newCount - oldCount === 1 ? '' : 's'}`);
+}
+
+p.fields.forEach((f, fieldIndex) => {
+if (f.label === 'Chat history' || !FIELD_MAP[f.label]) return;
+const stored = String(conn[FIELD_MAP[f.label]] || '').trim();
+const fresh = f.value.trim();
+if (!stored) { if (f.apply) applied.push(`+${f.label}`); return; }
+if (fresh === stored) return; // genuinely unchanged either way -- nothing to report
+// Same false-positive guard summarizeCleanMatch() itself uses: "152cm /
+// 4'12"" and "152cm / 5'0"" are the same height, just Tinder's own
+// feet/inches rounding landing on the boundary differently each scrape.
+if (f.label === 'Height') {
+const storedCm = heightCm(stored), freshCm = heightCm(fresh);
+if (storedCm != null && storedCm === freshCm) return;
+}
+pending.push({ fieldIndex, label: f.label, stored, fresh, apply: !!f.apply });
+});
+
+p.fields.filter((f) => f.apply && ARRAY_FIELD_MAP[f.label]).forEach((f) => {
+const map = ARRAY_FIELD_MAP[f.label];
+const existingLower = (conn[map.target] || []).map((v) => v.toLowerCase());
+const incoming = map.split ? f.value.split(',').map((s) => s.trim()).filter(Boolean) : [f.value.trim()];
+const fresh = incoming.filter((v) => v && !existingLower.includes(v.toLowerCase()));
+if (fresh.length) applied.push(`+${fresh.join(', ')} (${f.label})`);
+});
+
+Object.entries(CHIP_OVERRIDE_META).forEach(([overrideKey, { target, display }]) => {
+const existingLower = (conn[target] || []).map((v) => v.toLowerCase());
+const fresh = p[overrideKey].filter((v) => !existingLower.includes(v.toLowerCase()));
+if (fresh.length) applied.push(`+${fresh.join(', ')} (${display})`);
+});
+
+if (!applied.length && !pending.length) applied.push('No changes');
+return { applied, pending };
+}
+
 function summarizeCleanMatch(p, conn) {
 if (!conn) return 'No changes';
 const parts = [];
@@ -2384,7 +2544,14 @@ const p = buildPending(raw);
 refreshOverrides(p);
 if (p.match && p.match.why === 'known match id' && !p.risky) {
 const conn = data.connections.find((c) => c.id === p.chosenId);
-bulk.push({ raw, p, diff: summarizeCleanMatch(p, conn), selected: true });
+// The return value itself is unused now (renderBulk() reads live state
+// via bulkRowFieldLines() instead) -- this call still has to happen
+// exactly once, here, for its mutating side effects: force-applying a
+// grown Chat history, un-applying a field whose fresh value actually
+// conflicts. See bulkRowFieldLines()'s own comment for why it's never
+// safe to call this a second time on the same row.
+summarizeCleanMatch(p, conn);
+bulk.push({ raw, p, selected: true });
 } else {
 review.push(raw);
 }
@@ -2420,6 +2587,7 @@ const conn = data.connections.find((c) => c.id === p.chosenId);
 const connId = conn ? conn.id : '';
 p.stageOverride = suggestedStage(conn, p);
 p.ratingOverride = conn ? (conn.priority || 0) : 0;
+p.priorityFlagOverride = conn ? !!conn.priorityFlag : false;
 p.travelStatusOverride = conn ? (conn.travelStatus || '') : '';
 p.travelUntilOverride = conn ? (conn.travelUntil || '') : '';
 if (!p.overrideFallbackFrom) p.overrideFallbackFrom = {};

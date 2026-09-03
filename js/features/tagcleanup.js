@@ -211,31 +211,36 @@ if (ranked.length > 1 && ranked[1].sources.size === ranked[0].sources.size) retu
 return ranked[0];
 }
 
-function locationFillInProposals() {
-const langFreq = languageFrequencies();
-const results = [];
-data.connections.forEach((c) => {
-if (LONDON_RE.test((c.location || []).join(' '))) return;
-const missingCity = !(c.location || []).length;
-const missingNationality = !(c.nationality || []).length;
-if (!missingCity && !missingNationality) return;
+// The actual per-person check, pulled out of locationFillInProposals()'s
+// own forEach so a not-yet-saved Tinder pending profile can run the
+// identical test (see js/features/tinderimport.js's personShapeFromPending()),
+// not just an already-saved connection -- nothing in here is specific to
+// a saved connection, it only ever reads plain field values off `person`.
+// `person` needs: id, name, location (array), nationality (array),
+// languages (array), education/job/notes/likes/distance (strings).
+// Returns null when there's nothing worth proposing.
+function proposalsForPerson(person, langFreq) {
+if (LONDON_RE.test((person.location || []).join(' '))) return null;
+const missingCity = !(person.location || []).length;
+const missingNationality = !(person.nationality || []).length;
+if (!missingCity && !missingNationality) return null;
 
 const cityHits = [], natHits = [];
-[['Education', c.education], ['Job', c.job], ['Notes', c.notes], ['Likes', c.likes]].forEach(([label, text]) => {
+[['Education', person.education], ['Job', person.job], ['Notes', person.notes], ['Likes', person.likes]].forEach(([label, text]) => {
 findMentions(text, data.connections, data.flagRules).forEach((hit) => {
 if (hit.field === 'location' && missingCity) cityHits.push({ value: hit.value, source: label });
 else if (hit.field === 'nationality' && missingNationality) natHits.push({ value: hit.value, source: label });
 });
 });
 if (missingNationality) {
-const rareLang = rareLanguageNationality(c, langFreq);
+const rareLang = rareLanguageNationality(person, langFreq);
 if (rareLang) natHits.push({ value: rareLang, source: `rarest of the languages they speak` });
 }
 
-const distMiles = distanceMiles(c.distance);
+const distMiles = distanceMiles(person.distance);
 const farAway = distMiles != null && distMiles >= FAR_AWAY_MILES;
 const clearlyLocal = distMiles != null && distMiles <= CLEARLY_LOCAL_MILES;
-if (clearlyLocal) return; // Distance itself contradicts a foreign guess -- drop the whole person, not just weight it down
+if (clearlyLocal) return null; // Distance itself contradicts a foreign guess -- drop the whole person, not just weight it down
 
 const fields = [];
 [['location', 'City', missingCity ? bestCandidate(cityHits) : null], ['nationality', 'Nationality', missingNationality ? bestCandidate(natHits) : null]]
@@ -246,9 +251,15 @@ let signals = best.sources.size;
 if (farAway) { signals += 1; sourceText += `, ${Math.round(distMiles)}mi away`; }
 fields.push({ field, label, value: best.value, signals, sourceText });
 });
-if (!fields.length) return;
-results.push({ connId: c.id, name: c.name, fields, confidence: fields.reduce((sum, f) => sum + f.signals, 0) });
-});
+if (!fields.length) return null;
+return { connId: person.id, name: person.name, fields, confidence: fields.reduce((sum, f) => sum + f.signals, 0) };
+}
+
+function locationFillInProposals() {
+const langFreq = languageFrequencies();
+const results = data.connections
+.map((c) => proposalsForPerson({ id: c.id, name: c.name, location: c.location, nationality: c.nationality, languages: c.languages, education: c.education, job: c.job, notes: c.notes, likes: c.likes, distance: c.distance }, langFreq))
+.filter(Boolean);
 results.sort((a, b) => b.confidence - a.confidence);
 return results;
 }
@@ -336,4 +347,4 @@ Promise.all([import('./connections.js'), import('./overview.js')])
 .then(([conns, overview]) => { conns.renderConnections(); overview.renderOverview(); });
 }
 
-export { renderTagCleanup, duplicateGroups, renameValue, initLocationFillIns, locationFillInProposals };
+export { renderTagCleanup, duplicateGroups, renameValue, initLocationFillIns, locationFillInProposals, proposalsForPerson, languageFrequencies };
