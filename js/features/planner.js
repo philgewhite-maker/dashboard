@@ -281,6 +281,39 @@ ${destinationConnectionsPoolHtml(trip)}
 </div>`;
 }
 
+// Fills in any day of the trip's KNOWN range that hasn't already been
+// synced for a given person -- idempotent and safe to call repeatedly (on
+// every Planner render, and right after someone's added to a trip), since
+// autoPlacedDates permanently marks a (person, date) pair as handled the
+// first time, so a day the user later drags this person OFF never gets
+// silently re-filled, even if the trip's dates are edited again
+// afterwards. Only ever ADDS entries -- a date range that shrinks is left
+// alone, same "no silent deletion" reasoning airbnb.js and
+// tinderimport.js's overrideFallbackFrom marker already follow elsewhere.
+function syncTripPeopleEntries(trip) {
+if (!trip) return;
+const { start, end } = tripRangeFor(trip);
+if (!start || !end || start > end) return;
+let changed = false;
+trip.people.forEach((p) => {
+// 'self' has no connection to place, and freetext-only people (added
+// via the picker's "someone not in Connections yet" row) have no
+// connectionId either -- nothing for a planner entry to point at.
+if (!p.connectionId || p.relation === 'self') return;
+if (!Array.isArray(p.autoPlacedDates)) p.autoPlacedDates = [];
+let cur = start;
+for (let i = 0; i < 60 && cur <= end; i++) { // same 60-day cap tripPanelHtml's own day loop already uses
+if (!p.autoPlacedDates.includes(cur)) {
+p.autoPlacedDates.push(cur);
+data.plannerEntries.push(blankPlannerEntry({ date: cur, tripId: trip.id, kind: 'connection', connectionId: p.connectionId }));
+changed = true;
+}
+cur = dateStrAdd(cur, 1);
+}
+});
+if (changed) queueSave();
+}
+
 function renderPlanner() {
 const panel = document.getElementById('planner-panel');
 if (!panel) return; // tab not in this build's DOM
@@ -306,6 +339,12 @@ const sortedTrips = [...data.trips]
 const as = tripRangeFor(a).start || '9999', bs = tripRangeFor(b).start || '9999';
 return as.localeCompare(bs) || a.createdAt.localeCompare(b.createdAt);
 });
+// General backstop for syncTripPeopleEntries() -- covers a trip whose
+// dates only just became known (a start/end date typed in, a leg date
+// filled in) with no hook needed anywhere in travel.js for date edits;
+// the very next time this tab renders, it catches up. Cheap and
+// idempotent when there's nothing new to add.
+sortedTrips.forEach(syncTripPeopleEntries);
 const tripPanels = sortedTrips.map(tripPanelHtml).filter(Boolean).join('');
 tripsEl.innerHTML = tripPanels || '<div class="empty">No trips with known dates yet — add dates on the Travel tab and they\'ll show up here.</div>';
 hydratePhotoBackgrounds(priorityEl);
@@ -521,4 +560,4 @@ setTimeout(() => el.classList.remove('flash-new'), 1800);
 }, 60);
 }
 
-export { renderPlanner, initPlanner, revealPlannerEntry };
+export { renderPlanner, initPlanner, revealPlannerEntry, syncTripPeopleEntries };

@@ -153,6 +153,12 @@ try { await deleteAttachment(att.id); } catch (err) { console.error('Could not d
 }
 }
 if (trip.taskId) data.tasks = data.tasks.filter((t) => t.id !== trip.taskId && t.parentId !== trip.taskId);
+// Same "the record and its dependents are one unit" reasoning as the
+// task cleanup just above -- without this, every day syncTripPeopleEntries()
+// (planner.js) placed for this trip's people is orphaned: still in
+// data.plannerEntries, invisible forever since no trip panel exists any
+// more to show it.
+data.plannerEntries = data.plannerEntries.filter((e) => e.tripId !== tripId);
 data.trips = data.trips.filter((t) => t.id !== tripId);
 queueSave();
 }
@@ -161,12 +167,24 @@ function addPerson(tripId, { name, relation = 'other', connectionId = null }) {
 const trip = tripById(tripId);
 const n = String(name || '').trim();
 if (!trip || !n) return;
-trip.people.push({ id: uid(), name: n, relation, connectionId: connectionId || null });
+// autoPlacedDates: dates syncTripPeopleEntries() (planner.js) has already
+// placed a planner entry for this person on -- see that function's own
+// comment for why it's tracked permanently rather than re-derived.
+trip.people.push({ id: uid(), name: n, relation, connectionId: connectionId || null, autoPlacedDates: [] });
 queueSave();
 }
 function removePerson(tripId, personId) {
 const trip = tripById(tripId);
 if (!trip) return;
+const person = trip.people.find((p) => p.id === personId);
+// Drop only the entries THIS feature placed for this person on this trip
+// -- matched by exactly the dates in their own autoPlacedDates, not a
+// blanket "any entry for this connection on this trip" sweep, which
+// would also catch an entry for the same person independently dragged
+// in via destinationConnectionsPoolHtml's separate pool (planner.js).
+if (person?.connectionId && Array.isArray(person.autoPlacedDates)) {
+data.plannerEntries = data.plannerEntries.filter((e) => !(e.tripId === tripId && e.connectionId === person.connectionId && person.autoPlacedDates.includes(e.date)));
+}
 trip.people = trip.people.filter((p) => p.id !== personId);
 queueSave();
 }
@@ -560,6 +578,13 @@ addPerson(tripId, { name: conn.name, relation: relSel?.value || 'other', connect
 } else {
 return;
 }
+// Immediate feedback rather than waiting for a Planner-tab visit --
+// renderPlanner()'s own trip loop already calls this as a general
+// backstop, this is just the fast path. Dynamic import to avoid a
+// circular import (planner.js already imports revealTrip from this
+// file) -- same shape this file's own connections.js import already
+// uses above.
+import('./planner.js').then(({ syncTripPeopleEntries }) => syncTripPeopleEntries(tripById(tripId)));
 renderTravel();
 });
 });
