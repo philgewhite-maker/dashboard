@@ -22,7 +22,7 @@
 // importer), and the chosen connection's photo stays visible for the whole
 // review regardless of how it got picked, so a wrong dropdown pick is just
 // as visible as a wrong auto-match was invisible before.
-import { data, queueSave, currentAge, displayAge, computeFlags, distanceMiles, FLAG_FIELD_DEFS, suggestedQuestions, TAG_FIELDS, stripSharedSuffix, recordImportRun, importStatusLine, upsertIdentity, blankConnection } from '../state.js';
+import { data, queueSave, currentAge, displayAge, computeFlags, distanceMiles, heightCm, FLAG_FIELD_DEFS, suggestedQuestions, TAG_FIELDS, stripSharedSuffix, recordImportRun, importStatusLine, upsertIdentity, blankConnection } from '../state.js';
 import { escapeHtml, uid, todayStr, hydratePhotoBackgrounds, openLightbox, knownCityMap, COUNTRY_NAME_TO_NATIONALITY, avatarHtml, foldDiacritics } from '../utils.js';
 import { nameKey, editDistance, phoneKey } from '../googlecontacts.js';
 import { storePhoto, fetchProxiedImage } from '../files.js';
@@ -2352,7 +2352,20 @@ if (fresh.length) parts.push(`+${fresh.join(', ')} (${display})`);
 p.fields.filter((f) => !f.apply && f.label !== 'Chat history' && FIELD_MAP[f.label]).forEach((f) => {
 const stored = String(conn[FIELD_MAP[f.label]] || '').trim();
 const fresh = f.value.trim();
-if (stored && fresh && fresh !== stored) parts.push(`${f.label}: "${stored}" → "${fresh}" (not applied)`);
+if (!stored || !fresh || fresh === stored) return;
+// Height prints as "152cm / 4'12"" one scrape and "152cm / 5'0""
+// another -- the exact same height (12 inches = 1 foot), just Tinder's
+// own feet/inches rounding landing on the boundary differently each
+// time. Confirmed live: this repeated on every single re-import of the
+// same person, forever, since the string never matched even though
+// nothing had actually changed. Compared by the cm figure instead
+// (heightCm(), already used elsewhere for this exact reason) so a
+// genuinely unchanged height stops being reported as a change at all.
+if (f.label === 'Height') {
+const storedCm = heightCm(stored), freshCm = heightCm(fresh);
+if (storedCm != null && storedCm === freshCm) return;
+}
+parts.push(`${f.label}: "${stored}" → "${fresh}" (not applied)`);
 });
 
 return parts.length ? parts.join(' · ') : 'No changes';
