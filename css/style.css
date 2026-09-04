@@ -521,10 +521,18 @@ background-position:center;
    reusing .album-compare's own circular before/after thumbnails above. */
 .quality-row{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line);flex-wrap:wrap;}
 .quality-row:last-child{border-bottom:none;}
-.quality-name{font-weight:600;font-size:13px;flex:0 0 auto;min-width:90px;}
 .thumb-img.thumb-img-empty{display:flex;align-items:center;justify-content:center;background:var(--paper);color:var(--muted);font-size:9px;}
 .thumb-img.thumb-img-empty::after{content:'none';}
 .quality-upload-tile{width:28px;height:28px;font-size:14px;flex:0 0 auto;margin-left:auto;}
+.quality-candidates{display:flex;flex-wrap:wrap;gap:4px;}
+.thumb-img.quality-candidate{cursor:pointer;opacity:.5;transition:opacity .1s,outline .1s;}
+.thumb-img.quality-candidate:hover{opacity:.85;}
+.thumb-img.quality-candidate.quality-candidate-selected{opacity:1;outline:2px solid var(--rose);outline-offset:1px;}
+/* Same blur-until-hover a sensitive album's own cover already gets on
+   its album card (.album-sensitive) -- never shown in the clear by
+   default here either, just because it's now a pickable candidate. */
+.thumb-img.quality-candidate-sensitive{filter:blur(6px);}
+.thumb-img.quality-candidate-sensitive:hover{filter:none;}
 /* Drop-target feedback while a drag is over the row -- whole row, not
    just the small upload tile, is a valid drop target (see photoquality.js). */
 .quality-row.quality-row-dragover{background:var(--rose-bg);outline:2px dashed var(--rose);outline-offset:-2px;}
