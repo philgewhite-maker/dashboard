@@ -59,6 +59,78 @@ return acc;
 });
 }
 
+// Drinking/Smoking are scalar connection fields (blankConnection,
+// state.js), not TAG_FIELDS arrays -- pickChipHtml() (utils.js) already
+// offers a fixed-list picker for them on the connection's own card, but
+// nothing cleans up values already on file the way the TAG_FIELDS
+// rename/merge table above does. Same idea, adapted for "one value per
+// connection" instead of an array: no de-dup step needed on rename (a
+// scalar only ever held the one value to begin with), and a value that's
+// really two answers squashed together (a comma-joined scrape or manual
+// entry, e.g. "Vaping, 420") can be split into the real scalar answer
+// plus Tags entries for the rest, rather than staying stuck as one
+// unmatchable value forever.
+const SCALAR_CLEANUP_FIELDS = [{ field: 'drinking', label: 'Drinking' }, { field: 'smoking', label: 'Smoking' }];
+
+function scalarValueCounts(field) {
+const counts = new Map();
+data.connections.forEach((c) => {
+const v = String(c[field] || '').trim();
+if (v) counts.set(v, (counts.get(v) || 0) + 1);
+});
+return counts;
+}
+
+function renameScalarValue(field, from, to) {
+const target = String(to).trim();
+if (!target) return;
+data.connections.forEach((c) => {
+if (String(c[field] || '').trim() === String(from).trim()) c[field] = target;
+});
+}
+
+// `extras` (everything after the first comma) lands in Tags rather than
+// being lost -- same lowercase-dedup-and-push shape renameValue() above
+// already uses locally, rather than pulling in connections.js's own
+// unionInto() just for this one call (this file deliberately doesn't
+// depend on connections.js elsewhere).
+function splitScalarValue(field, from, primary, extras) {
+const target = String(primary || '').trim();
+data.connections.forEach((c) => {
+if (String(c[field] || '').trim() !== String(from).trim()) return;
+c[field] = target;
+if (!Array.isArray(c.tags)) c.tags = [];
+const existingLower = c.tags.map((t) => t.toLowerCase());
+extras.forEach((v) => { if (v && !existingLower.includes(v.toLowerCase())) { c.tags.push(v); existingLower.push(v.toLowerCase()); } });
+});
+}
+
+function scalarCleanupHtml() {
+return SCALAR_CLEANUP_FIELDS.map(({ field, label }) => {
+const counts = scalarValueCounts(field);
+if (!counts.size) return '';
+const values = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+return `<div class="cleanup-section">
+<h4>${escapeHtml(label)} <span class="cleanup-count">${counts.size} value${counts.size === 1 ? '' : 's'}</span></h4>
+<table class="limits-table">
+<thead><tr><th>Value</th><th>Used</th><th>Rename to</th><th></th></tr></thead>
+<tbody>${values.map(([value, count]) => {
+const parts = value.split(',').map((s) => s.trim()).filter(Boolean);
+const splitBtn = parts.length > 1
+? `<button class="sync-btn" type="button" data-split-scalar="${escapeHtml(field)}" data-split-from="${escapeHtml(value)}" title="Keep &quot;${escapeHtml(parts[0])}&quot; as ${escapeHtml(label)}; add ${parts.slice(1).map((p) => `&quot;${escapeHtml(p)}&quot;`).join(', ')} to Tags">Split</button>`
+: '';
+return `<tr>
+<td>${escapeHtml(value)}</td>
+<td>${count}</td>
+<td><input type="text" autocomplete="off" data-rename-scalar-field="${escapeHtml(field)}" data-rename-scalar-from="${escapeHtml(value)}" placeholder="${escapeHtml(value)}"></td>
+<td>${splitBtn}</td>
+</tr>`;
+}).join('')}</tbody>
+</table>
+</div>`;
+}).filter(Boolean).join('');
+}
+
 // A connection whose own drinking/smoking value is ALSO sitting as a
 // plain Tags entry -- leftover from before Smoking got its own FIELD_MAP
 // target on the Tinder-import side (see js/features/tinderimport.js's
@@ -137,8 +209,9 @@ ${values.filter(([other]) => other !== value).map(([other]) => `<option value="$
 </div>`;
 }).filter(Boolean).join('');
 
+const scalarHtml = scalarCleanupHtml();
 const strayHtml = strayScalarTagDuplicatesHtml();
-el.innerHTML = (sections + strayHtml) || '<div class="settings-note" style="margin:0;">No tags recorded yet.</div>';
+el.innerHTML = (sections + scalarHtml + strayHtml) || '<div class="settings-note" style="margin:0;">No tags recorded yet.</div>';
 
 el.querySelectorAll('[data-merge-dupes]').forEach((btn) => {
 btn.addEventListener('click', () => {
@@ -165,6 +238,24 @@ el.querySelectorAll('[data-mergeinto-field]').forEach((sel) => {
 sel.addEventListener('change', () => {
 if (!sel.value) return;
 renameValue(sel.dataset.mergeintoField, sel.dataset.mergeintoFrom, sel.value);
+afterChange();
+});
+});
+
+el.querySelectorAll('[data-rename-scalar-field]').forEach((input) => {
+input.addEventListener('change', () => {
+const to = input.value.trim();
+if (!to || to === input.dataset.renameScalarFrom) { input.value = ''; return; }
+renameScalarValue(input.dataset.renameScalarField, input.dataset.renameScalarFrom, to);
+afterChange();
+});
+});
+
+el.querySelectorAll('[data-split-scalar]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const [primary, ...extras] = btn.dataset.splitFrom.split(',').map((s) => s.trim()).filter(Boolean);
+if (!primary) return;
+splitScalarValue(btn.dataset.splitScalar, btn.dataset.splitFrom, primary, extras);
 afterChange();
 });
 });
