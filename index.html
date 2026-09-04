@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v204</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v205</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -2199,6 +2199,17 @@ Mostly still a planning space &mdash; a place to keep thinking about what this s
 <button class="sync-btn" id="location-fillins-scan-btn" type="button">Scan</button>
 </div>
 <div id="location-fillins"></div>
+</div>
+
+<div class="settings-block">
+<h3>Photo quality</h3>
+<div class="settings-note" style="margin:0 0 10px;">
+Finds connections whose cover photo is missing or is really just the small placeholder cropped out of a Bumble/WhatsApp matches-list or chat header, and proposes a better one from data already on file &mdash; first a higher-res photo already saved for that same connection, then (failing that) the cover of any linked Photos album for that name. Never applied without a click.
+</div>
+<div class="sync-row" style="margin-top:0;">
+<button class="sync-btn" id="photo-quality-scan-btn" type="button">Scan</button>
+</div>
+<div id="photo-quality-results"></div>
 </div>
 </section>
 

@@ -517,6 +517,13 @@ background-size:cover;
 background-position:center;
 }
 .compare-arrow{color:var(--muted);font-size:13px;}
+/* photoquality.js's Scan results -- one row per flagged connection,
+   reusing .album-compare's own circular before/after thumbnails above. */
+.quality-row{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line);flex-wrap:wrap;}
+.quality-row:last-child{border-bottom:none;}
+.quality-name{font-weight:600;font-size:13px;flex:0 0 auto;min-width:90px;}
+.thumb-img.thumb-img-empty{display:flex;align-items:center;justify-content:center;background:var(--paper);color:var(--muted);font-size:9px;}
+.thumb-img.thumb-img-empty::after{content:'none';}
 .album-ai-compare{
 font-size:11px;
 margin:4px 0;
