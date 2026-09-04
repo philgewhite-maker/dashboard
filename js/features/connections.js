@@ -2978,8 +2978,39 @@ const maxDist = Math.min(ka.length, kb.length) <= 4 ? 1 : 2;
 return editDistance(ka, kb, maxDist) <= maxDist;
 }));
 }
+// How many of the MOST common cities in this dataset get excluded from
+// counting as a "shared city" duplicate signal below -- same "how rare
+// is this in MY OWN data" principle tagcleanup.js's own
+// languageFrequencies() rarity check uses. Two different real people
+// both listed as, say, London (typically the single most common city in
+// this kind of dataset) is unremarkable and proves nothing about
+// whether a similar-name pair is actually the same person; a shared
+// city that's genuinely uncommon here is real corroborating evidence.
+const COMMON_CITY_EXCLUDE_COUNT = 3;
+// A city ranking in the top 3 by pure count isn't necessarily actually
+// common -- with few distinct cities on file, the top 3 can include
+// ones shared by only 2-3 people, which is exactly the kind of real
+// signal this exclusion shouldn't swallow. Requiring real volume too
+// (same "absolute floor, not just relative rank" shape tagcleanup.js's
+// own RARE_LANGUAGE_MAX_COUNT already uses) keeps a small/sparse
+// dataset from wrongly excluding a genuinely rare city.
+const COMMON_CITY_MIN_COUNT = 4;
+function topCommonCities(connections) {
+const counts = new Map();
+connections.forEach((c) => (c.location || []).forEach((loc) => {
+const key = String(loc).trim().toLowerCase();
+if (key) counts.set(key, (counts.get(key) || 0) + 1);
+}));
+return new Set([...counts.entries()]
+.filter(([, count]) => count >= COMMON_CITY_MIN_COUNT)
+.sort((a, b) => b[1] - a[1])
+.slice(0, COMMON_CITY_EXCLUDE_COUNT)
+.map(([key]) => key));
+}
+
 function findDuplicateCandidates() {
 const conns = data.connections;
+const commonCities = topCommonCities(conns);
 const pairs = [];
 for (let i = 0; i < conns.length; i++) {
 for (let j = i + 1; j < conns.length; j++) {
@@ -2997,9 +3028,17 @@ rank = Math.max(rank, 2);
 if (!reasons.length && namesLookSimilar(a, b)) {
 const ageA = currentAge(a), ageB = currentAge(b);
 const ageMatch = !!(ageA && ageB && Math.abs(ageA.value - ageB.value) <= 1);
-const cityShared = (a.location || []).some((loc) => (b.location || []).some((l2) => String(loc).trim().toLowerCase() === String(l2).trim().toLowerCase()));
-if (ageMatch || cityShared) {
-reasons.push(`Similar name${ageMatch ? ' + same age' : ''}${cityShared ? ' + same city' : ''}`);
+// Named, not just flagged -- "same city" alone doesn't tell you which
+// one, so keep the original-casing display string, not just a boolean.
+let sharedCityName = null;
+for (const loc of a.location || []) {
+const key = String(loc).trim().toLowerCase();
+if (!key || commonCities.has(key)) continue; // too common here to mean anything
+const hit = (b.location || []).find((l2) => String(l2).trim().toLowerCase() === key);
+if (hit) { sharedCityName = String(loc).trim(); break; }
+}
+if (ageMatch || sharedCityName) {
+reasons.push(`Similar name${ageMatch ? ' + same age' : ''}${sharedCityName ? ` + same city (${sharedCityName})` : ''}`);
 rank = 1;
 }
 }
@@ -3017,10 +3056,15 @@ let dupCompareOpen = null; // { a, b, reasons } -- the pair currently in the com
 const dupDismissed = new Set();
 function dupPairKey(a, b) { return [a.id, b.id].sort().join('|'); }
 
+// Standard connection-reference chip (record-reference-convention,
+// CLAUDE.md) -- avatar + name + click-through to the real card -- for
+// each side, instead of the bare "Name, age" text this row started
+// with.
 function dupPairRowHtml(pair) {
 const { a, b, reasons } = pair;
+const sideHtml = (c) => connectionChipHtml(c, displayAge(c) ? ` <span class="compare-caption">${escapeHtml(displayAge(c))}</span>` : '');
 return `<div class="tinder-candidate-row">
-<div class="album-caption">${escapeHtml(a.name || '(no name)')}${displayAge(a) ? `, ${escapeHtml(displayAge(a))}` : ''} &harr; ${escapeHtml(b.name || '(no name)')}${displayAge(b) ? `, ${escapeHtml(displayAge(b))}` : ''}</div>
+<div class="album-caption dup-pair-names">${sideHtml(a)} <span class="compare-arrow">&harr;</span> ${sideHtml(b)}</div>
 <div class="tinder-field-note">${reasons.map(escapeHtml).join(' &middot; ')}</div>
 <div class="sync-row" style="margin-top:6px;">
 <button class="sync-btn sm" type="button" data-dup-compare="${escapeHtml(dupPairKey(a, b))}">Compare</button>
@@ -3077,6 +3121,7 @@ root.innerHTML = `<div class="settings-note" style="margin:8px 0 4px;">${visible
 ${listHtml}
 ${dupCompareOverlayHtml()}`;
 hydratePhotoBackgrounds(root);
+bindConnectionChips();
 root.querySelectorAll('[data-dup-compare]').forEach((btn) => {
 btn.addEventListener('click', () => {
 const pair = dupCandidates.find((p) => dupPairKey(p.a, p.b) === btn.dataset.dupCompare);

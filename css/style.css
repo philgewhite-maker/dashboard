@@ -490,6 +490,10 @@ font-weight:500;
 overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
 .album-meta{font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+/* dupPairRowHtml()'s two connectionChipHtml() chips + arrow need to wrap
+   and lay out as flex items -- .album-caption's own nowrap/ellipsis
+   (sized for a single line of plain text) would otherwise clip them. */
+.dup-pair-names{display:flex;align-items:center;flex-wrap:wrap;gap:4px;white-space:normal;overflow:visible;text-overflow:clip;}
 .album-card select{width:100%;margin-top:4px;font-size:12px;}
 .album-card.chosen .album-thumb{border-color:var(--sage);box-shadow:0 0 0 2px var(--sage-bg);}
 .album-card.saved .album-thumb{opacity:.55;}
