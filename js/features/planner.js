@@ -275,7 +275,7 @@ let cur = start;
 // covers any real holiday with headroom.
 for (let i = 0; i < 60 && cur <= end; i++) { days.push(cur); cur = dateStrAdd(cur, 1); }
 return `<div class="planner-trip-panel">
-<h3>${escapeHtml(trip.title || trip.destinations.join(', ') || 'Trip')}</h3>
+<h3 class="planner-trip-title-link" data-planner-open-trip="${trip.id}" title="Open this trip on the Travel tab">${escapeHtml(trip.title || trip.destinations.join(', ') || 'Trip')}</h3>
 <div class="planner-grid planner-grid-trip">${days.map((d) => plannerDayHtml(d, trip.id, legChipsForDay(trip, d))).join('')}</div>
 ${destinationConnectionsPoolHtml(trip)}
 </div>`;
