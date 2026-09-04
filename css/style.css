@@ -524,6 +524,10 @@ background-position:center;
 .quality-name{font-weight:600;font-size:13px;flex:0 0 auto;min-width:90px;}
 .thumb-img.thumb-img-empty{display:flex;align-items:center;justify-content:center;background:var(--paper);color:var(--muted);font-size:9px;}
 .thumb-img.thumb-img-empty::after{content:'none';}
+.quality-upload-tile{width:28px;height:28px;font-size:14px;flex:0 0 auto;margin-left:auto;}
+/* Drop-target feedback while a drag is over the row -- whole row, not
+   just the small upload tile, is a valid drop target (see photoquality.js). */
+.quality-row.quality-row-dragover{background:var(--rose-bg);outline:2px dashed var(--rose);outline-offset:-2px;}
 .album-ai-compare{
 font-size:11px;
 margin:4px 0;

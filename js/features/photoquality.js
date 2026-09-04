@@ -94,6 +94,31 @@ qualityResults = qualityResults.filter((r) => r.connId !== connId);
 renderPhotoQuality();
 }
 
+// A manually supplied replacement -- drag or file-pick, right on the row
+// -- for when neither automatic source has anything (the reported "can't
+// fix" cases), or the automatic proposal isn't the one wanted. Same
+// content-crop treatment connections.js's own replacePhotoInPlace() gives
+// a manually-picked file, since a drop/upload here is just as likely to
+// be a full-screen screenshot as the photo it's replacing was -- unlike
+// the two automatic sources above, which are already-resolved photos and
+// deliberately left uncropped.
+async function applyManualCover(connId, file) {
+const conn = data.connections.find((c) => c.id === connId);
+if (!conn || !file) return;
+const img = await loadImage(file);
+const bounds = contentCropBounds(img);
+const blob = await cropToContentBlob(img, bounds, 0.85, 900);
+if (!blob) return;
+const newId = await storePhoto(blob);
+if (!Array.isArray(conn.photoIds)) conn.photoIds = [];
+conn.photoIds.unshift(newId);
+conn.photoId = newId;
+queueSave();
+import('./connections.js').then((m) => m.renderConnections());
+qualityResults = qualityResults.filter((r) => r.connId !== connId);
+renderPhotoQuality();
+}
+
 // Reuses the same "before → after" circular-thumbnail comparison
 // photoalbums.js's own duplicate-photo Compare screen already uses
 // (.album-compare/.compare-arrow), rather than a new pair of classes for
@@ -106,7 +131,13 @@ const proposedThumb = row.proposedPhotoId
 ? `<span class="thumb-img" data-photo-bg="${escapeHtml(row.proposedPhotoId)}" title="Proposed replacement"></span>`
 : null;
 const sourceLabel = row.source === 'own-photo' ? 'already-saved photo' : row.source === 'album-cover' ? 'linked album cover' : '';
-return `<div class="quality-row">
+// Drag-or-upload straight onto the row -- same escape hatch every
+// "found nothing" row needs, and just as usable to override an
+// automatic proposal that isn't the right one. Reuses .gallery-add's
+// existing dashed-tile look (connections.js's own "+ photo" tile)
+// rather than a new drop-zone style, sized down to sit inline in a row.
+const id = escapeHtml(row.connId);
+return `<div class="quality-row" data-quality-row="${id}">
 <span class="quality-name">${escapeHtml(row.name)}</span>
 <span class="album-compare">
 ${currentThumb}
@@ -114,7 +145,9 @@ ${currentThumb}
 ${proposedThumb || '<em class="settings-note" style="margin:0;">no replacement found</em>'}
 </span>
 ${sourceLabel ? `<span class="settings-note" style="margin:0;">${escapeHtml(sourceLabel)}</span>` : ''}
-${row.proposedPhotoId ? `<button class="sync-btn" type="button" data-apply-quality="${escapeHtml(row.connId)}">Use this</button>` : ''}
+${row.proposedPhotoId ? `<button class="sync-btn" type="button" data-apply-quality="${id}">Use this</button>` : ''}
+<label class="gallery-add quality-upload-tile" for="quality-upload-${id}" title="Drag a photo onto this row, or click to upload one">+</label>
+<input type="file" id="quality-upload-${id}" accept="image/*" style="display:none;" data-quality-upload="${id}">
 </div>`;
 }
 
@@ -134,6 +167,25 @@ hydratePhotoBackgrounds(el);
 el.querySelectorAll('[data-apply-quality]').forEach((btn) => {
 btn.addEventListener('click', () => applyProposedCover(btn.dataset.applyQuality));
 });
+el.querySelectorAll('[data-quality-upload]').forEach((input) => {
+input.addEventListener('change', () => {
+const file = input.files[0];
+if (file) applyManualCover(input.dataset.qualityUpload, file);
+});
+});
+// Drag-and-drop lands anywhere on the row, not just the small upload
+// tile -- dragover has to preventDefault too, or the browser's own
+// "open this file" navigation wins instead of firing drop.
+el.querySelectorAll('[data-quality-row]').forEach((row) => {
+row.addEventListener('dragover', (e) => { e.preventDefault(); row.classList.add('quality-row-dragover'); });
+row.addEventListener('dragleave', () => row.classList.remove('quality-row-dragover'));
+row.addEventListener('drop', (e) => {
+e.preventDefault();
+row.classList.remove('quality-row-dragover');
+const file = [...(e.dataTransfer?.files || [])].find((f) => f.type.startsWith('image/'));
+if (file) applyManualCover(row.dataset.qualityRow, file);
+});
+});
 }
 
 function initPhotoQuality() {
@@ -150,4 +202,4 @@ btn.textContent = 'Scan';
 renderPhotoQuality();
 }
 
-export { initPhotoQuality, scanPhotoQuality, applyProposedCover, isPlaceholderPhoto };
+export { initPhotoQuality, scanPhotoQuality, applyProposedCover, applyManualCover, isPlaceholderPhoto };
