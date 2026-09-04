@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v197</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v198</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -1890,6 +1890,18 @@ console.log('Ready. Run tinderBulkImport() for the default 15, tinderBulkImport(
 <div class="settings-note import-last-run" id="tinder-last-run"></div>
 <div id="tinder-bulk-review"></div>
 <div id="tinder-review"></div>
+</section>
+
+<section class="panel wide" id="manual-import-panel" data-tab="datingadmin">
+<div class="panel-head">
+<h2><span class="dot plum"></span>Import connections from a CSV</h2>
+</div>
+<div class="settings-note" style="margin:0 0 10px;">
+Header row: <code>Name,City,Language,Nationality,Connected,Tags,Sex,Stage,Milestones,Notes,Date Locations,Date Events,Stars</code> &mdash; a comma-separated cell (e.g. multiple Tags) becomes multiple chips. Matches against existing connections by name; anything confidently matched merges in (nothing already on file gets overwritten), anything new or ambiguous is yours to confirm below before importing.
+</div>
+<label class="file-btn" for="manual-import-file">Choose CSV file&hellip;</label>
+<input type="file" id="manual-import-file" accept=".csv,text/csv" style="display:none;">
+<div id="manual-import-review"></div>
 </section>
 
 <section class="panel wide" id="whatsapp-panel" data-tab="datingadmin">

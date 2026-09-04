@@ -2771,7 +2771,7 @@ if (isProfile) applyProfileFieldsToConnection(conn, cand);
 // the very evidence that proved the two records were the same person
 // vanished right when it would have been most useful to keep (e.g. to
 // recognise a re-scrape as "already known" afterwards).
-const SCALAR_MERGE_FIELDS = ['age', 'kids', 'job', 'height', 'education', 'likes', 'driveLink', 'tinderMatchId'];
+const SCALAR_MERGE_FIELDS = ['age', 'kids', 'job', 'height', 'education', 'likes', 'driveLink', 'tinderMatchId', 'matchedOn'];
 
 // Adds anything in `values` that isn't already there, case-insensitively, so
 // merging "English" into ["english"] doesn't produce a near-duplicate chip.
@@ -2839,6 +2839,68 @@ if ((STAGE_RANK[source.stage] ?? 0) > (STAGE_RANK[target.stage] ?? 0)) target.st
 // make someone look staler than they actually are and trigger a false
 // "reach out" nudge.
 if (source.lastContact && (!target.lastContact || source.lastContact > target.lastContact)) target.lastContact = source.lastContact;
+}
+
+// Same two-pass approach as the other import paths (screenshot scan, album
+// linking): exact name match first, then a deliberately loose pass. Moved
+// here from tinderimport.js once a second import (manualimport.js's CSV
+// import) needed the identical matching logic -- this file is now the one
+// every import path pulls FROM (tinderimport.js already imports several
+// other things from here), never the reverse, so this stays a one-way
+// dependency with no circular-import risk.
+//
+// Returns every connection that scores at all, not just the single best —
+// a real near-miss (e.g. a different "Natalia" already tracked) needs to
+// be visible as its OWN candidate to pick between, not hidden behind
+// whichever one scored a point higher.
+//
+// incomingAge nudges ordering WITHIN a name tier only (a few points either
+// way) — never enough to jump a "shortened name" candidate ahead of a
+// genuine exact match, just enough to break a tie between two people
+// who'd otherwise score identically on name alone (two "Anna"s is exactly
+// the case this can't tell apart from name text; age usually can).
+//
+// incomingMatchId flags a candidate as `conflict: true` when THEY already
+// carry a DIFFERENT Tinder match id from a previous import — real,
+// permanent evidence they're a different conversation, not a same-name
+// guess. Name matching alone can't see this (confirmed live: two
+// different real people sharing a name were being offered interchangeably
+// as "possible matches" with no visible reason not to trust an exact name
+// hit) — buildPending (tinderimport.js) uses this to stop an exact-name
+// candidate from silently auto-confirming when it's actually contradicted
+// by a match id already on file. A caller with no such concept (a plain
+// CSV row) simply omits incomingMatchId/incomingAge -- both are optional.
+function matchCandidates(name, limit, incomingAge, incomingMatchId) {
+const key = nameKey(name);
+if (!key) return [];
+const namesOf = (c) => [c.name, c.profileName, ...(c.aliases || [])].filter(Boolean);
+const wantAge = Number.isFinite(incomingAge) ? incomingAge : null;
+const results = [];
+data.connections.forEach((c) => {
+let best = null;
+namesOf(c).forEach((n) => {
+const nk = nameKey(n);
+let score = null;
+let why = '';
+if (nk === key) { score = 200; why = 'exact'; }
+else if (nk.startsWith(key) || key.startsWith(nk)) { score = 100 - Math.abs(nk.length - key.length); why = 'shortened name'; }
+else if (key.length >= 4) {
+const d = editDistance(key, nk, 2);
+if (d <= 2) { score = 60 - d * 10; why = `${d} letter${d === 1 ? '' : 's'} different`; }
+}
+if (score !== null && (!best || score > best.score)) best = { why, score };
+});
+if (best) {
+if (wantAge !== null) {
+const theirAge = currentAge(c);
+if (theirAge) best.score -= Math.min(Math.abs(theirAge.value - wantAge) * 3, 15);
+}
+const conflict = !!(incomingMatchId && c.tinderMatchId && c.tinderMatchId !== incomingMatchId);
+results.push({ conn: c, why: best.why, score: best.score, conflict, theirMatchId: c.tinderMatchId });
+}
+});
+results.sort((a, b) => b.score - a.score);
+return typeof limit === 'number' ? results.slice(0, limit) : results;
 }
 
 // Finds pairs of DIFFERENT connections that look like the same real
@@ -3188,4 +3250,5 @@ initFlagRulesSettings, unionInto, initHideArchivedFaded,
 connectionPickerHtml, connectionPickerNewRowHtml, bindConnPickers, renderConnPicker, setConnPickerValue, applyDirectProfileUpload, applyProfileFieldsToConnection,
 importMatchesListFile, importProfileScreenshotFile, importProfileWithPhotosFile, extractDatingScreenshot, renderPendingImports,
 createBlankConnection, appHintFromFilename, isPriorityConnection,
+matchCandidates, mergeConnectionInto,
 };

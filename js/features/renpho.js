@@ -20,7 +20,7 @@
 // "--" for everything else in the source file; those come through as
 // undefined here rather than a fabricated zero.
 import { data } from '../state.js';
-import { todayStr } from '../utils.js';
+import { todayStr, splitCsvLine } from '../utils.js';
 import { tieredRowsForDisplay, isFullHistoryMode, isPeriodRow, periodLabel } from './healthrollup.js';
 
 const HEADER_SIGNATURE = 'No.,Date,Time,Weight(kg),BMI,';
@@ -31,23 +31,6 @@ const HEADER_SIGNATURE = 'No.,Date,Time,Weight(kg),BMI,';
 // tolerating it either way costs nothing.
 function looksLikeRenphoCsv(headText) {
 return (headText || '').replace(/^﻿/, '').startsWith(HEADER_SIGNATURE);
-}
-
-// Minimal quote-aware split -- Renpho's own export never quotes a field in
-// the sample seen so far, but Remarks is free text and could contain a
-// comma, so this is cheap insurance rather than a bare .split(',').
-function splitCsvLine(line) {
-const out = [];
-let cur = '';
-let inQuotes = false;
-for (let i = 0; i < line.length; i++) {
-const c = line[i];
-if (c === '"') { inQuotes = !inQuotes; continue; }
-if (c === ',' && !inQuotes) { out.push(cur); cur = ''; continue; }
-cur += c;
-}
-out.push(cur);
-return out;
 }
 
 function num(v) {

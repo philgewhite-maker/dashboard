@@ -123,6 +123,26 @@ return (name || '?').trim().charAt(0).toUpperCase();
 
 function escapeRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
+// Minimal quote-aware CSV line split -- a field can contain a comma as
+// long as it's wrapped in double quotes ("Legs, Bum, No Boobs, Retry"),
+// same shape both renpho.js's own export (a free-text Remarks column)
+// and a manual connections import need. Originally written for Renpho,
+// promoted here once a second feature needed the identical logic rather
+// than a second hand-rolled copy.
+function splitCsvLine(line) {
+const out = [];
+let cur = '';
+let inQuotes = false;
+for (let i = 0; i < line.length; i++) {
+const c = line[i];
+if (c === '"') { inQuotes = !inQuotes; continue; }
+if (c === ',' && !inQuotes) { out.push(cur); cur = ''; continue; }
+cur += c;
+}
+out.push(cur);
+return out;
+}
+
 // Every OTHER connection's own City is a real, known-good value (unlike
 // free text, which is too unreliable to guess a place name from) — so
 // scanning incoming text for a case-insensitive exact hit against one is
@@ -1043,7 +1063,7 @@ return classified.every((c) => c.isScreenshot) && looksLikeSameScreenshotPieces(
 
 export {
 todayStr, daysAgoStr, dateStrAdd, parseLooseDateTime, last7Dates, uid, daysSince, daysUntil, foldDiacritics,
-escapeHtml, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, buildFlagMatcher, applyFlagMatcher, knownCityMap, knownScalarValues, pickChipHtml, scrollAndFlash, bindForm,
+escapeHtml, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, buildFlagMatcher, applyFlagMatcher, knownCityMap, knownScalarValues, pickChipHtml, splitCsvLine, scrollAndFlash, bindForm,
 findMentions, COUNTRY_NAME_TO_NATIONALITY,
 resizeImageToBlob, fileToBase64, loadImage, cropThumbnailToBlob,
 hashFile, captureDateOf, betterCaptureDate, dateFromFilename,

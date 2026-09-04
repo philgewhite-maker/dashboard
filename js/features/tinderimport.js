@@ -22,14 +22,14 @@
 // importer), and the chosen connection's photo stays visible for the whole
 // review regardless of how it got picked, so a wrong dropdown pick is just
 // as visible as a wrong auto-match was invisible before.
-import { data, queueSave, currentAge, displayAge, computeFlags, distanceMiles, heightCm, FLAG_FIELD_DEFS, suggestedQuestions, TAG_FIELDS, stripSharedSuffix, recordImportRun, importStatusLine, upsertIdentity, blankConnection } from '../state.js';
+import { data, queueSave, displayAge, computeFlags, distanceMiles, heightCm, FLAG_FIELD_DEFS, suggestedQuestions, TAG_FIELDS, stripSharedSuffix, recordImportRun, importStatusLine, upsertIdentity, blankConnection } from '../state.js';
 import { escapeHtml, uid, todayStr, hydratePhotoBackgrounds, openLightbox, knownCityMap, knownScalarValues, pickChipHtml, COUNTRY_NAME_TO_NATIONALITY, avatarHtml, foldDiacritics } from '../utils.js';
-import { nameKey, editDistance, phoneKey } from '../googlecontacts.js';
+import { phoneKey } from '../googlecontacts.js';
 import { storePhoto, fetchProxiedImage } from '../files.js';
 import { photoGet, photoUrl } from '../db.js';
 import { MissingKeyError, compareFaces, translateText, identifyCountry } from '../ai.js';
 import { findPhoneNumbers, findHandles, formatHandle } from '../contactscan.js';
-import { STAGE_RANK, CONN_STAGES, unionInto, connectionPickerHtml, bindConnPickers, setConnPickerValue } from './connections.js';
+import { STAGE_RANK, CONN_STAGES, unionInto, connectionPickerHtml, bindConnPickers, setConnPickerValue, matchCandidates } from './connections.js';
 import { proposalsForPerson, languageFrequencies } from './tagcleanup.js';
 
 // True only if the extracted chat has a message from BOTH sides, not just
@@ -108,65 +108,10 @@ throw proxyErr;
 }
 }
 
-// Same two-pass approach as the other import paths (screenshot scan, album
-// linking): exact name match first, then a deliberately loose pass. Kept
-// local rather than imported from connections.js to avoid a circular
-// dependency — connections.js is the one importing this module's init
-// function, not the other way round.
-//
-// Returns every connection that scores at all, not just the single best —
-// a real near-miss (e.g. a different "Natalia" already tracked) needs to
-// be visible as its OWN candidate to pick between, not hidden behind
-// whichever one scored a point higher.
-//
-// incomingAge nudges ordering WITHIN a name tier only (a few points either
-// way) — never enough to jump a "shortened name" candidate ahead of a
-// genuine exact match, just enough to break a tie between two people
-// who'd otherwise score identically on name alone (two "Anna"s is exactly
-// the case this can't tell apart from name text; age usually can).
-//
-// incomingMatchId flags a candidate as `conflict: true` when THEY already
-// carry a DIFFERENT Tinder match id from a previous import — real,
-// permanent evidence they're a different conversation, not a same-name
-// guess. Name matching alone can't see this (confirmed live: two
-// different real people sharing a name were being offered interchangeably
-// as "possible matches" with no visible reason not to trust an exact name
-// hit) — buildPending uses this to stop an exact-name candidate from
-// silently auto-confirming when it's actually contradicted by a match id
-// already on file, and the picker row surfaces it as an explicit warning
-// rather than leaving the two ids to compare invisibly.
-function matchCandidates(name, limit, incomingAge, incomingMatchId) {
-const key = nameKey(name);
-if (!key) return [];
-const namesOf = (c) => [c.name, c.profileName, ...(c.aliases || [])].filter(Boolean);
-const wantAge = Number.isFinite(incomingAge) ? incomingAge : null;
-const results = [];
-data.connections.forEach((c) => {
-let best = null;
-namesOf(c).forEach((n) => {
-const nk = nameKey(n);
-let score = null;
-let why = '';
-if (nk === key) { score = 200; why = 'exact'; }
-else if (nk.startsWith(key) || key.startsWith(nk)) { score = 100 - Math.abs(nk.length - key.length); why = 'shortened name'; }
-else if (key.length >= 4) {
-const d = editDistance(key, nk, 2);
-if (d <= 2) { score = 60 - d * 10; why = `${d} letter${d === 1 ? '' : 's'} different`; }
-}
-if (score !== null && (!best || score > best.score)) best = { why, score };
-});
-if (best) {
-if (wantAge !== null) {
-const theirAge = currentAge(c);
-if (theirAge) best.score -= Math.min(Math.abs(theirAge.value - wantAge) * 3, 15);
-}
-const conflict = !!(incomingMatchId && c.tinderMatchId && c.tinderMatchId !== incomingMatchId);
-results.push({ conn: c, why: best.why, score: best.score, conflict, theirMatchId: c.tinderMatchId });
-}
-});
-results.sort((a, b) => b.score - a.score);
-return typeof limit === 'number' ? results.slice(0, limit) : results;
-}
+// matchCandidates() now lives in connections.js (imported above) --
+// moved there once manualimport.js's CSV import needed the identical
+// name-matching logic, since this file already imports several other
+// things from connections.js one-way with no circular-import issue.
 
 function matchPerson(name) {
 return matchCandidates(name, 1)[0] || null;
