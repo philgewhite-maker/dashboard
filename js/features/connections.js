@@ -1976,7 +1976,15 @@ if (d <= 2) tier = 40 - d * 10;
 if (!tier) return;
 const samePlatform = !!appKey && (String(c.app || '').toLowerCase() === appKey
 || (c.identities || []).some((i) => String(i.platform || '').toLowerCase() === appKey));
-scored.push({ c, score: tier + (samePlatform ? 20 : 0), viaAlias, samePlatform });
+// A screenshot carries no match id of its own to compare against (unlike
+// tinderimport.js's own JSON-paste flow, which flags a real id conflict
+// via matchCandidates()'s `conflict` field) -- but a candidate ALREADY
+// confirmed via a Tinder match id is still worth a caution here, not
+// left silent: a same-name guess from a screenshot is much weaker
+// evidence than the id-based confirmation already on file, so re-
+// matching this candidate risks overwriting a settled identity with a
+// look-alike's data.
+scored.push({ c, score: tier + (samePlatform ? 20 : 0), viaAlias, samePlatform, hasConfirmedId: !!c.tinderMatchId });
 });
 return scored
 .sort((a, b) => b.score - a.score || String(b.c.createdAt || '').localeCompare(String(a.c.createdAt || '')))
@@ -2005,6 +2013,7 @@ ${zoomableAvatarHtml(m.c.photoId, m.c.name, 'sm')}
 <span class="pending-option-info">
 <strong>${escapeHtml(m.c.name)}</strong>
 <span class="compare-caption">${escapeHtml(existingMatchCaption(m.c))}${m.viaAlias ? ` &middot; also known as "${escapeHtml(m.viaAlias)}"` : ''}${m.samePlatform ? ' &middot; same platform' : ''}</span>
+${m.hasConfirmedId ? `<span class="compare-warning" title="Tinder match id on file: ${escapeHtml(m.c.tinderMatchId)}">Already confirmed via a Tinder match id &mdash; a name/photo guess here could be a different person</span>` : ''}
 </span>
 </label>`).join('');
 const tag = matches.length > 1 ? `${matches.length} possible matches` : '1 possible match';

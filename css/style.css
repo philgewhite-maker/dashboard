@@ -1037,6 +1037,12 @@ font-size:9px;
 color:var(--muted);
 white-space:nowrap;
 }
+/* A name/photo-only candidate that's already confirmed via a real id
+   elsewhere (e.g. a Tinder match id) -- same rose warning colour
+   .tinder-translate-error already uses, under a neutral name since this
+   isn't Tinder- or translate-specific. Wraps (unlike .compare-caption's
+   nowrap single-line style) since the message is a full sentence. */
+.compare-warning{display:block;font-size:10px;color:var(--rose);white-space:normal;}
 .candidate-row.ambiguous{
 flex-direction:column;
 align-items:stretch;
