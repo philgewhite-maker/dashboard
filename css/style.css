@@ -2099,6 +2099,13 @@ border-style:dashed;
    longer name out even with the pill already gone. */
 .planner-entry-link{display:flex;align-items:center;gap:6px;min-width:0;flex:1 0 100%;}
 .planner-entry-link[data-planner-open-connection]{cursor:pointer;}
+/* connectionChipHtml() (connections.js) -- the standard connection-
+   reference chip used anywhere outside a connection's own detail card.
+   Deliberately the same shape .planner-entry-link already had (avatar +
+   name, pointer cursor) under a neutral name so every other caller isn't
+   stuck reaching for a planner-specific class. */
+.conn-chip{display:inline-flex;align-items:center;gap:6px;min-width:0;cursor:pointer;}
+.conn-chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .planner-entry-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .planner-entry-controls{flex:0 0 100%;display:flex;align-items:center;justify-content:flex-end;gap:8px;}
 .planner-status-dot{

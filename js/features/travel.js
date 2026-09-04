@@ -7,7 +7,7 @@
 // detail has to live here rather than in Notion because the itinerary
 // export has to work fully offline.
 import { data, queueSave, blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS, LEG_DATE_FIELDS } from '../state.js';
-import { escapeHtml, uid, dateStrAdd, hydratePhotoBackgrounds, parseLooseDateTime } from '../utils.js';
+import { escapeHtml, uid, dateStrAdd, hydratePhotoBackgrounds, parseLooseDateTime, scrollAndFlash } from '../utils.js';
 import { deleteAttachment, formatBytes, openAttachment } from '../files.js';
 
 function tripById(id) { return data.trips.find((t) => t.id === id); }
@@ -334,8 +334,23 @@ kind: root.querySelector(`[data-leg-target-kind="${prefix}"]`)?.value || 'other'
 const LEG_KIND_LABELS = { flight: 'Flight', car_hire: 'Car hire', accommodation: 'Accommodation', transfer: 'Transfer', other: 'Other' };
 const RELATION_LABELS = { self: 'Me', partner: 'Date / partner', child: 'Child', other: 'Other' };
 
+// A trip companion linked to a real connection gets the standard
+// connectionChipHtml() treatment (avatar + name + click-through to their
+// card) instead of bare text -- the clearest violation the record-
+// reference-convention audit found (no photo, no link, despite holding a
+// real connectionId). connections.js is deliberately not statically
+// imported here (this whole file stays lazy-loadable -- see this file's
+// own header comment), so the chip starts as plain text and is upgraded
+// in place once renderTravel()'s existing dynamic import resolves (see
+// the `[data-person-chip-mount]` fill-in there) -- same "mount now, fill
+// in once loaded" shape the "+ person" picker itself already uses just
+// below. A freetext-only companion (no connectionId) has no record to
+// link to, so stays plain text permanently.
 function personChipHtml(tripId, p) {
-return `<span class="tag-chip">${escapeHtml(p.name)}${p.relation !== 'other' ? ` (${escapeHtml(RELATION_LABELS[p.relation] || p.relation)})` : ''}<span class="tag-x" data-trip-remove-person="${tripId}" data-person-id="${p.id}">&times;</span></span>`;
+const relationSuffix = p.relation !== 'other' ? ` (${escapeHtml(RELATION_LABELS[p.relation] || p.relation)})` : '';
+const removeBtn = `<span class="tag-x" data-trip-remove-person="${tripId}" data-person-id="${p.id}">&times;</span>`;
+const nameHtml = p.connectionId ? `<span data-person-chip-mount="${p.id}">${escapeHtml(p.name)}</span>` : escapeHtml(p.name);
+return `<span class="tag-chip">${nameHtml}${relationSuffix}${removeBtn}</span>`;
 }
 
 // The "+ person" picker's own extra row -- deliberately NOT
@@ -471,11 +486,23 @@ bindTravel(el);
 // same reasoning and same mount-then-fill shape captureinbox.js's own
 // connection picker already uses.
 if (el.querySelector('[data-trip-person-picker-mount]')) {
-import('./connections.js').then(({ connectionPickerHtml, bindConnPickers }) => {
+import('./connections.js').then(({ connectionPickerHtml, bindConnPickers, connectionChipHtml, bindConnectionChips }) => {
 bindConnPickers();
+bindConnectionChips();
 el.querySelectorAll('[data-trip-person-picker-mount]').forEach((mount) => {
 const tripId = mount.dataset.tripPersonPickerMount;
 mount.innerHTML = connectionPickerHtml(`trip-person-picker-${tripId}`, 'Pick a connection&hellip;', personPickerFreetextRowHtml());
+});
+// Upgrades each connection-linked person's chip from the plain-text
+// placeholder personChipHtml() rendered synchronously (see that
+// function's own comment) to the real avatar+name+click-through chip,
+// now that connections.js has loaded.
+el.querySelectorAll('[data-person-chip-mount]').forEach((mount) => {
+const personId = mount.dataset.personChipMount;
+let person = null;
+for (const trip of data.trips) { person = trip.people.find((p) => p.id === personId); if (person) break; }
+const conn = person?.connectionId ? data.connections.find((c) => c.id === person.connectionId) : null;
+if (conn) mount.outerHTML = connectionChipHtml(conn);
 });
 hydratePhotoBackgrounds(el);
 });
@@ -696,14 +723,7 @@ if (destInput) destInput.value = '';
 
 function revealTrip(id) {
 renderTravel();
-setTimeout(() => {
-const el = document.querySelector(`[data-trip-card="${id}"]`);
-if (el) {
-el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-el.classList.add('flash-new');
-setTimeout(() => el.classList.remove('flash-new'), 1800);
-}
-}, 60);
+setTimeout(() => scrollAndFlash(`[data-trip-card="${id}"]`), 60);
 }
 
 // The literal offline itinerary: one self-contained HTML file, no external

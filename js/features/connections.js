@@ -2064,6 +2064,41 @@ ${avatarHtml(c.photoId, c.name, 'sm')}
 </button>`;
 }
 
+// Standard "reference this connection" chip -- avatar + name, click
+// navigates to the real record. The base pattern agreed for referencing a
+// connection anywhere outside its own detail card (see the
+// record-reference-convention standards); `extraHtml` is for a context's
+// own legitimate additions (Planner's status dot, trip-link plane icon...)
+// appended alongside the chip, never replacing it. Click is handled by
+// the single delegated bindConnectionChips() listener below, not here --
+// same "build markup, bind once elsewhere" split connectionPickerRowHtml
+// above already uses.
+function connectionChipHtml(conn, extraHtml = '') {
+return `<span class="conn-chip" data-open-connection="${escapeHtml(conn.id)}">${avatarHtml(conn.photoId, conn.name, 'sm')}<span>${escapeHtml(conn.name)}</span></span>${extraHtml}`;
+}
+
+// One delegated handler for every connectionChipHtml() click, anywhere in
+// the app -- replaces the several separately-typed copies of "switchTab
+// then expandConnection then scrollAndFlash" the record-reference audit
+// found (planner.js, tagcleanup.js x2, nudges.js's goToTarget). Bound
+// once, guarded the same way bindConnPickers() already is, since a chip
+// can appear inside content that gets rebuilt (innerHTML) many times.
+let connectionChipsBound = false;
+function bindConnectionChips() {
+if (connectionChipsBound) return;
+connectionChipsBound = true;
+document.addEventListener('click', (e) => {
+const chip = e.target.closest('[data-open-connection]');
+if (!chip) return;
+const id = chip.dataset.openConnection;
+import('../tabs.js').then(({ switchTab }) => {
+switchTab('dating');
+expandConnection(id);
+setTimeout(() => scrollAndFlash(`[data-conn-row="${id}"]`), 80);
+});
+});
+}
+
 // Used only by Capture Inbox's "Send selected to…" picker, which needs a
 // way to create the person on the spot (see createBlankConnection below) --
 // baked in as an ordinary-looking row rather than a separate control so it
@@ -3250,5 +3285,5 @@ initFlagRulesSettings, unionInto, initHideArchivedFaded,
 connectionPickerHtml, connectionPickerNewRowHtml, bindConnPickers, renderConnPicker, setConnPickerValue, applyDirectProfileUpload, applyProfileFieldsToConnection,
 importMatchesListFile, importProfileScreenshotFile, importProfileWithPhotosFile, extractDatingScreenshot, renderPendingImports,
 createBlankConnection, appHintFromFilename, isPriorityConnection,
-matchCandidates, mergeConnectionInto,
+matchCandidates, mergeConnectionInto, connectionChipHtml, bindConnectionChips,
 };

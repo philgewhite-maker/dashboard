@@ -40,7 +40,7 @@
 // that can quietly grow apart.
 import { data, queueSave, blankCaptureBatch } from '../state.js';
 import { photoDelete } from '../db.js';
-import { todayStr, escapeHtml, hydratePhotoBackgrounds, resizeImageToBlob } from '../utils.js';
+import { todayStr, escapeHtml, hydratePhotoBackgrounds, resizeImageToBlob, scrollAndFlash } from '../utils.js';
 import { storePhoto, uploadAttachment, deleteAttachment, fetchAttachment, openAttachment, formatBytes } from '../files.js';
 import { looksLikeRenphoCsv, parseRenphoCsv, mergeRenphoDaily, looksLikeHrvCsv } from './renpho.js';
 import { legTargetPickerHtml, bindLegTargetPicker, readLegTargetPicker, applyLegExtraction } from './travel.js';
@@ -804,14 +804,7 @@ if (status) status.textContent = healthImports.join(' ');
 
 function revealCaptureBatch(id) {
 renderCaptureInbox();
-setTimeout(() => {
-const el = document.querySelector(`[data-inbox-batch="${id}"]`);
-if (el) {
-el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-el.classList.add('flash-new');
-setTimeout(() => el.classList.remove('flash-new'), 1800);
-}
-}, 60);
+setTimeout(() => scrollAndFlash(`[data-inbox-batch="${id}"]`), 60);
 }
 
 export { renderCaptureInbox, initCaptureInbox, addCaptureBatch, revealCaptureBatch };

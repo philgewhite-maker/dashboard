@@ -15,7 +15,7 @@
 //    March should not be adding noise in January.
 import { data, queueSave, TASK_BUCKETS, blankTask } from '../state.js';
 import { photoDelete } from '../db.js';
-import { uid, todayStr, escapeHtml, hydratePhotoBackgrounds, resizeImageToBlob, daysUntil, daysSince } from '../utils.js';
+import { uid, todayStr, escapeHtml, hydratePhotoBackgrounds, resizeImageToBlob, daysUntil, daysSince, scrollAndFlash } from '../utils.js';
 import { uploadAttachment, storePhoto, deleteAttachment, openAttachment, formatBytes } from '../files.js';
 
 const BUCKET_LABEL = Object.fromEntries(TASK_BUCKETS.map((b) => [b.bucket, b.label]));
@@ -631,14 +631,7 @@ const toggle = document.getElementById('show-done-toggle');
 if (toggle) toggle.checked = true;
 }
 renderTasks();
-setTimeout(() => {
-const el = document.querySelector(`[data-task-row="${id}"], [data-alloc-card="${id}"]`);
-if (el) {
-el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-el.classList.add('flash-new');
-setTimeout(() => el.classList.remove('flash-new'), 1800);
-}
-}, 60);
+setTimeout(() => scrollAndFlash(`[data-task-row="${id}"], [data-alloc-card="${id}"]`), 60);
 }
 
 export { renderTasks, initTasks, captureTask, isDormant, setNotionPanel, revealTask };
