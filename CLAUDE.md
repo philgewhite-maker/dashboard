@@ -57,10 +57,20 @@ have their own copy — a real consolidation opportunity, not yet done).
 
 Before writing the first render function, ask: does this show a
 connection, a task, a trip, or a chip-shaped value? If yes, use the
-matching pattern above from the start. After writing it, before calling
-it done: re-read this checklist against the diff, the same way a
-`/code-review` or `/simplify` pass would — don't rely on having kept it
-in mind while deep in the feature's own mechanics.
+matching pattern above from the start.
+
+**Self-review pass, scoped to bigger changes only** — after finishing,
+before calling it done, re-read this checklist against the diff, the
+same way a `/code-review` or `/simplify` pass would. Trigger this when
+the change is plan-mode-sized: a new file, a new UI surface that renders
+a connection/task/trip/chip-value in a list or card, or anything that
+actually went through (or should have gone through) `EnterPlanMode`.
+Skip it for a small, single-file fix, a copy/wording change, a CSS-only
+tweak, or a minor extension of an already-reviewed pattern (e.g. one
+more field added to an existing rename table) — running a review pass
+on every one-line fix is noise, not signal, and the point is catching
+"invented a 5th variant instead of reusing X" in the cases large enough
+to actually risk it.
 
 ## Deploy ritual
 
