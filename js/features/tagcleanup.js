@@ -87,7 +87,7 @@ return `<div class="cleanup-section">
 <h4>Drinking/Smoking also sitting in Tags <span class="cleanup-count">${hits.length} found</span></h4>
 <div class="dupe-block">
 ${hits.map((h) => `<div class="dupe-row">
-<span class="dupe-variants"><strong>${escapeHtml(h.name)}</strong>'s Tags also has <code>${escapeHtml(h.value)}</code> — already their ${escapeHtml(h.label)}</span>
+<span class="dupe-variants"><a href="#" data-fillin-open="${escapeHtml(h.connId)}">${escapeHtml(h.name)}</a>: Tags still has <code>${escapeHtml(h.value)}</code>, duplicating their ${escapeHtml(h.label)} answer</span>
 <button class="sync-btn" type="button" data-remove-stray-tag="${escapeHtml(h.connId)}:${escapeHtml(h.field)}">Remove from Tags</button>
 </div>`).join('')}
 </div>
@@ -182,6 +182,20 @@ const val = String(conn[field] || '').trim().toLowerCase();
 const idx = conn.tags.findIndex((t) => String(t).trim().toLowerCase() === val);
 if (idx >= 0) conn.tags.splice(idx, 1);
 afterChange();
+});
+});
+// Same jump-to-connection-card link renderLocationFillIns() below already
+// uses for its own name links -- a different container (#tag-cleanup vs
+// #location-fillins), so it needs its own binding rather than sharing
+// that one.
+el.querySelectorAll('[data-fillin-open]').forEach((a) => {
+a.addEventListener('click', async (e) => {
+e.preventDefault();
+const id = a.dataset.fillinOpen;
+const [{ switchTab }, { expandConnection }] = await Promise.all([import('../tabs.js'), import('./connections.js')]);
+switchTab('dating');
+expandConnection(id);
+setTimeout(() => scrollAndFlash(`[data-conn-row="${id}"]`), 80);
 });
 });
 }
