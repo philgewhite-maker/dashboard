@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v200</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v201</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -383,10 +383,16 @@ Not built: comparing retailer prices or adding to a basket in two clicks. That w
 
 <section class="panel wide" id="tinder-panel" data-tab="datingadmin">
 <div class="panel-head">
-<h2><span class="dot plum"></span>Import a Tinder profile</h2>
+<h2><span class="dot plum"></span>Import connections</h2>
 </div>
 <div class="settings-note" style="margin:0 0 10px;">
-Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for&rdquo; etc. this person filled in, and their photos &mdash; straight from the page, not a screenshot. Open their profile on <a href="https://tinder.com/app/matches" target="_blank" rel="noopener">tinder.com</a>, copy the snippet below, run it in the console (F12 &rarr; Console), then paste the result here.
+Paste or upload data from any of the sources below — the format's detected automatically, so there's one box for all of them (see "Import data" further down). Open an entry here for the exact steps to get that source's data in the first place.
+</div>
+<div class="settings-note" style="margin:0 0 4px;font-weight:600;">Where do I get this from?</div>
+<details style="margin:0 0 8px;">
+<summary style="cursor:pointer;color:var(--muted);font-size:13px;">Tinder profile &mdash; paste JSON copied from tinder.com</summary>
+<div class="settings-note" style="margin:6px 0 10px;">
+Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for&rdquo; etc. this person filled in, and their photos &mdash; straight from the page, not a screenshot. Open their profile on <a href="https://tinder.com/app/matches" target="_blank" rel="noopener">tinder.com</a>, copy the snippet below, run it in the console (F12 &rarr; Console), then paste the result into "Import data" below.
 </div>
 <button class="sync-btn" type="button" id="tinder-copy-snippet">Copy snippet</button>
 <details style="margin:0 0 10px;">
@@ -1880,44 +1886,31 @@ async function staleSweepTail(n) {
 console.log('Ready. Run tinderBulkImport() for the default 15, tinderBulkImport(30) for a custom size, or e.g. tinderBulkImport(250) left running overnight -- checkpoints to a file every 25. Or tinderCatchUp("2026-08-10") to re-check active conversations and new matches since a date -- good for a weekly pass. Or tinderFindUnmatched() to spot anyone missing from both lists since they were last indexed. Or tinderReextract(["id1", "id2", ...]) to re-check a specific, already-known list of ids -- e.g. profiles a JSON cross-check flagged as suspiciously incomplete. Or tinderSeedDone([...ids]) to mark ids you already have elsewhere as done without opening them -- the dashboard\'s "Copy bulk-import snippet" button does this automatically, along with tinderSeedStale({...}) which both tinderBulkImport() and tinderCatchUp() use to also refresh a handful of your longest-untouched profiles after their main run, in their own separate file.');
 })();</pre>
 </details>
-<textarea id="tinder-input" rows="4" style="width:100%;font-family:monospace;font-size:12px;" placeholder="Paste the copied JSON here — one profile or a batch, either works"></textarea>
+</details>
+<details style="margin:0 0 8px;">
+<summary style="cursor:pointer;color:var(--muted);font-size:13px;">WhatsApp chat &mdash; export from the app</summary>
+<div class="settings-note" style="margin:6px 0 10px;">
+Export a chat from WhatsApp (open the chat &rarr; &#8942; &rarr; More &rarr; Export chat, with or without media). Either export works &mdash; the no-media one is lighter but drops photo/video captions. Photos/videos themselves go through the screenshot scanner further down, not here. Several .txt files at once (e.g. WhatsApp's own "WhatsApp Chat with X.txt" naming) switches to a bulk review list, same as the Telegram importer.
+</div>
+</details>
+<details style="margin:0 0 10px;">
+<summary style="cursor:pointer;color:var(--muted);font-size:13px;">Connections CSV &mdash; your own spreadsheet</summary>
+<div class="settings-note" style="margin:6px 0 10px;">
+Header row: <code>Name,City,Language,Nationality,Connected,Tags,Sex,Stage,Milestones,Notes,Date Locations,Date Events,Stars</code> &mdash; a comma-separated cell (e.g. multiple Tags) becomes multiple chips. Matches against existing connections by name; anything confidently matched merges in (nothing already on file gets overwritten), anything new or ambiguous is yours to confirm before importing.
+</div>
+</details>
+<div class="settings-note" style="margin:0 0 4px;font-weight:600;">Import data</div>
+<textarea id="dating-import-paste" rows="4" style="width:100%;font-family:monospace;font-size:12px;" placeholder="Paste JSON from Tinder, a WhatsApp .txt export, or connections CSV text — format is detected automatically"></textarea>
 <div class="sync-row" style="margin-top:8px;">
-<button class="sync-btn" id="tinder-import-btn" type="button">Read profile(s)</button>
-<label class="file-btn" for="tinder-file-input">Or upload saved .json file(s)</label>
-<input type="file" id="tinder-file-input" accept="application/json" multiple style="display:none;">
-<span class="sync-status" id="tinder-status"></span>
+<button class="sync-btn" id="dating-import-read-btn" type="button">Read</button>
+<label class="file-btn" for="dating-import-file-input">Or upload file(s)&hellip;</label>
+<input type="file" id="dating-import-file-input" accept=".json,application/json,.txt,text/plain,.csv,text/csv" multiple style="display:none;">
+<span class="sync-status" id="dating-import-status"></span>
 </div>
 <div class="settings-note import-last-run" id="tinder-last-run"></div>
 <div id="tinder-bulk-review"></div>
 <div id="tinder-review"></div>
-</section>
-
-<section class="panel wide" id="manual-import-panel" data-tab="datingadmin">
-<div class="panel-head">
-<h2><span class="dot plum"></span>Import connections from a CSV</h2>
-</div>
-<div class="settings-note" style="margin:0 0 10px;">
-Header row: <code>Name,City,Language,Nationality,Connected,Tags,Sex,Stage,Milestones,Notes,Date Locations,Date Events,Stars</code> &mdash; a comma-separated cell (e.g. multiple Tags) becomes multiple chips. Matches against existing connections by name; anything confidently matched merges in (nothing already on file gets overwritten), anything new or ambiguous is yours to confirm below before importing.
-</div>
-<label class="file-btn" for="manual-import-file">Choose CSV file&hellip;</label>
-<input type="file" id="manual-import-file" accept=".csv,text/csv" style="display:none;">
 <div id="manual-import-review"></div>
-</section>
-
-<section class="panel wide" id="whatsapp-panel" data-tab="datingadmin">
-<div class="panel-head">
-<h2><span class="dot teal"></span>Import a WhatsApp chat</h2>
-</div>
-<div class="settings-note" style="margin:0 0 10px;">
-Export a chat from WhatsApp (open the chat &rarr; &#8942; &rarr; More &rarr; Export chat, with or without media) and paste the .txt content below, or upload the file directly. Either export works &mdash; the no-media one is lighter but drops photo/video captions. Photos/videos themselves go through the screenshot scanner below, not here. Uploading several .txt files at once (e.g. WhatsApp's own "WhatsApp Chat with X.txt" naming) switches to a bulk review list, same as the Telegram importer.
-</div>
-<textarea id="whatsapp-input" rows="4" style="width:100%;font-family:monospace;font-size:12px;" placeholder="Paste the exported chat .txt content here"></textarea>
-<div class="sync-row" style="margin-top:8px;">
-<button class="sync-btn" id="whatsapp-import-btn" type="button">Read chat</button>
-<label class="file-btn" for="whatsapp-file-input">Or upload .txt file(s)</label>
-<input type="file" id="whatsapp-file-input" accept=".txt,text/plain" multiple style="display:none;">
-<span class="sync-status" id="whatsapp-status"></span>
-</div>
 <div class="settings-note import-last-run" id="whatsapp-last-run"></div>
 <div id="whatsapp-review"></div>
 <div id="whatsapp-bulk-review"></div>

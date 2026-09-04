@@ -433,42 +433,31 @@ const el = document.getElementById('whatsapp-last-run');
 if (el) el.textContent = importStatusLine('whatsapp');
 }
 
+// Entry points called by the shared Dating-admin import router
+// (manualimport.js's initDatingImport) once it's detected a paste/file as
+// WhatsApp-shaped -- this module no longer binds its own paste box/file
+// input directly (index.html's tinder-panel now hosts one shared intake
+// widget for Tinder/WhatsApp/Manual-CSV, see that panel's own comment).
+// Both still route through the exact same parseInput()/handleBulkFiles()
+// this file always used, just called from outside instead of from a
+// local button/input listener.
+function handleWhatsAppText(text) {
+const status = document.getElementById('whatsapp-status');
+if (status) status.textContent = '';
+const bulkEl = document.getElementById('whatsapp-bulk-review');
+if (bulkEl) bulkEl.innerHTML = '';
+bulkPending = null;
+parseInput(text);
+render();
+}
+async function handleWhatsAppFiles(fileList) {
+if (!fileList.length) return;
+if (fileList.length > 1) { await handleBulkFiles(fileList); return; }
+handleWhatsAppText(await fileList[0].text());
+}
+
 function initWhatsAppImport() {
 renderWhatsAppLastRun();
-const btn = document.getElementById('whatsapp-import-btn');
-const textarea = document.getElementById('whatsapp-input');
-const fileInput = document.getElementById('whatsapp-file-input');
-const status = document.getElementById('whatsapp-status');
-if (!btn || !textarea) return;
-
-btn.addEventListener('click', () => {
-const text = textarea.value.trim();
-if (!text) { if (status) status.textContent = 'Paste the exported chat text first.'; return; }
-if (status) status.textContent = '';
-document.getElementById('whatsapp-bulk-review').innerHTML = '';
-bulkPending = null;
-parseInput(text);
-render();
-});
-
-fileInput.addEventListener('change', async () => {
-if (!fileInput.files.length) return;
-if (fileInput.files.length > 1) {
-await handleBulkFiles(fileInput.files);
-fileInput.value = '';
-return;
-}
-const file = fileInput.files[0];
-const text = await file.text();
-textarea.value = text;
-if (status) status.textContent = '';
-document.getElementById('whatsapp-bulk-review').innerHTML = '';
-bulkPending = null;
-parseInput(text);
-render();
-fileInput.value = '';
-});
-
 // Delegated once, same reasoning as telegramimport.js's own mention
 // click handler -- #whatsapp-bulk-review's innerHTML gets replaced on
 // every renderBulk() call, and re-attaching a listener each time would
@@ -488,9 +477,10 @@ const hit = row.mentions[mentionIdx];
 unionInto(conn[hit.field], [hit.value]);
 queueSave();
 renderConnections();
+const status = document.getElementById('whatsapp-status');
 if (status) status.textContent = `Added ${hit.value} to ${conn.name}'s ${FIELD_LABELS[hit.field]}.`;
 });
 }
 }
 
-export { initWhatsAppImport, parseWhatsAppExport, detectSenders, buildChatLogText, formatMessageLine };
+export { initWhatsAppImport, parseWhatsAppExport, detectSenders, buildChatLogText, formatMessageLine, handleWhatsAppText, handleWhatsAppFiles };

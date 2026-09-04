@@ -17,9 +17,23 @@
 import { data, queueSave, blankConnection } from '../state.js';
 import { escapeHtml, splitCsvLine, hydratePhotoBackgrounds, avatarHtml } from '../utils.js';
 import { CONN_STAGES, matchCandidates, mergeConnectionInto, connectionPickerHtml, bindConnPickers, renderConnections } from './connections.js';
+import { handleTinderText, handleTinderFiles } from './tinderimport.js';
+import { handleWhatsAppText, handleWhatsAppFiles, detectSenders } from './whatsappimport.js';
 
 function splitList(s) {
 return String(s || '').split(',').map((v) => v.trim()).filter(Boolean);
+}
+
+// Signature check for the shared Dating-admin import router
+// (detectDatingImportKind() below) -- same "plain string-prefix check
+// against the header row" shape renpho.js's own looksLikeRenphoCsv()
+// already uses for its CSV. Column order isn't required to match (the
+// real parse below matches by name, not position), just the presence of
+// the two columns that essentially never appear together in anything
+// else someone might paste/drop here.
+function looksLikeManualConnectionsCsv(headLine) {
+const header = splitCsvLine(String(headLine || '')).map((h) => h.trim().toLowerCase());
+return header.includes('name') && header.includes('city');
 }
 
 // One row per non-blank line past the header -- matched by column NAME
@@ -210,21 +224,97 @@ const cancelBtn = document.getElementById('manual-import-cancel');
 if (cancelBtn) cancelBtn.addEventListener('click', () => { manualRows = []; manualImportMessage = ''; renderManualImport(); });
 }
 
-function initManualImport() {
-const fileInput = document.getElementById('manual-import-file');
-if (!fileInput) return; // panel not in this build's DOM
-fileInput.addEventListener('change', () => {
-const file = fileInput.files[0];
-if (!file) return;
-const reader = new FileReader();
-reader.onload = () => {
-const rows = parseManualCsv(String(reader.result || ''));
-manualRows = classifyManualRows(rows);
+// Entry point called by the shared Dating-admin import router below once
+// it's detected a paste/file as Manual-CSV-shaped.
+function handleManualCsvText(text) {
+manualRows = classifyManualRows(parseManualCsv(text));
 renderManualImport();
-fileInput.value = ''; // lets the same filename be re-picked after a Cancel
-};
-reader.readAsText(file);
+}
+
+// Shared "what is this" sniffer for the Dating-admin tab's one consolidated
+// paste-or-upload widget (index.html's tinder-panel, now hosting Tinder/
+// WhatsApp/Manual-CSV together -- see that panel's own "Where do I get
+// this from?" copy). Checked in order, each a real signature rather than
+// an assumption based on which of the 3 old separate boxes something
+// landed in:
+//   1. Tinder JSON's own shape -- the same branch parseBatch() (tinder
+//      import.js) already reads post-hoc, promoted to a pre-check.
+//   2. The Manual CSV header signature (looksLikeManualConnectionsCsv
+//      above) -- same "plain string-prefix check" shape renpho.js's own
+//      looksLikeRenphoCsv() already uses.
+//   3. WhatsApp's own detectSenders() (whatsappimport.js) -- already a
+//      real structural regex scan, just previously assumed rather than
+//      gated.
+// Telegram (a folder picker, a different browser affordance entirely)
+// and the screenshot panels (an AI classification, not a signature) are
+// deliberately NOT covered here -- see the consolidation plan's own
+// reasoning for why those stay their own thing.
+function detectDatingImportKind(text) {
+const trimmed = String(text || '').trim();
+if (!trimmed) return 'unknown';
+if (trimmed[0] === '{' || trimmed[0] === '[') {
+try {
+const raw = JSON.parse(trimmed);
+if (Array.isArray(raw.profiles) || raw.unmatched !== undefined || (raw.name !== undefined && raw.fields !== undefined && raw.photos !== undefined)) return 'tinder';
+} catch (e) { /* not valid JSON -- fall through to the other checks below */ }
+}
+if (looksLikeManualConnectionsCsv(trimmed.split(/\r?\n/)[0])) return 'manual-csv';
+if (detectSenders(trimmed).length > 0) return 'whatsapp';
+return 'unknown';
+}
+
+async function routeDatingImportText(text, status) {
+const kind = detectDatingImportKind(text);
+if (kind === 'tinder') handleTinderText(text);
+else if (kind === 'manual-csv') handleManualCsvText(text);
+else if (kind === 'whatsapp') handleWhatsAppText(text);
+else if (status) status.textContent = "Couldn't tell what this is — paste/upload the console JSON, a WhatsApp .txt export, or the connections CSV.";
+}
+
+function initDatingImport() {
+const textarea = document.getElementById('dating-import-paste');
+const readBtn = document.getElementById('dating-import-read-btn');
+const fileInput = document.getElementById('dating-import-file-input');
+const status = document.getElementById('dating-import-status');
+if (!textarea || !readBtn) return; // panel not in this build's DOM
+
+readBtn.addEventListener('click', async () => {
+const text = textarea.value.trim();
+if (!text) { if (status) status.textContent = 'Paste something first.'; return; }
+if (status) status.textContent = '';
+await routeDatingImportText(text, status);
+textarea.value = '';
+});
+
+fileInput.addEventListener('change', async () => {
+const files = [...fileInput.files];
+fileInput.value = ''; // lets the same file(s) be re-picked later
+if (!files.length) return;
+if (status) status.textContent = '';
+// A multi-file drop can mix formats (e.g. the CSV and a WhatsApp export
+// picked together) -- each file is sniffed and routed independently
+// rather than assuming the whole selection is one format. WhatsApp's
+// own handler additionally branches on how MANY of its own files there
+// are (bulk review vs single chat), so its files are grouped and handed
+// over together rather than one call per file.
+// Tinder's own file handler combines every file it's given into one
+// classify-and-queue pass (checkpoint chunks from a big bulk run land as
+// several files); WhatsApp's branches on how many files it gets (bulk
+// review vs a single chat) -- both need their whole group at once, not
+// one call per file, so files are sniffed and grouped first.
+const tinderFiles = [];
+const whatsappFiles = [];
+for (const file of files) {
+const text = await file.text();
+const kind = detectDatingImportKind(text);
+if (kind === 'tinder') tinderFiles.push(file);
+else if (kind === 'manual-csv') handleManualCsvText(text);
+else if (kind === 'whatsapp') whatsappFiles.push(file);
+else if (status) status.textContent = (status.textContent ? status.textContent + ' ' : '') + `Couldn't tell what "${file.name}" is.`;
+}
+if (tinderFiles.length) await handleTinderFiles(tinderFiles);
+if (whatsappFiles.length) await handleWhatsAppFiles(whatsappFiles);
 });
 }
 
-export { initManualImport, parseManualCsv, rowToConnFields, classifyManualRows };
+export { initDatingImport, parseManualCsv, rowToConnFields, classifyManualRows, looksLikeManualConnectionsCsv, detectDatingImportKind };

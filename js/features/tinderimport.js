@@ -2619,38 +2619,35 @@ const el = document.getElementById('tinder-last-run');
 if (el) el.textContent = importStatusLine('tinderSnippet');
 }
 
-function initTinderImport() {
-const box = document.getElementById('tinder-input');
-if (!box) return;
-renderTinderLastRun();
-const status = document.getElementById('tinder-status');
-
-document.getElementById('tinder-import-btn').addEventListener('click', () => {
+// Entry points called by the shared Dating-admin import router
+// (manualimport.js's initDatingImport) once it's detected a paste/file as
+// Tinder-JSON-shaped -- this module no longer binds its own paste box/
+// file input directly (index.html's tinder-panel now hosts one shared
+// intake widget for Tinder/WhatsApp/Manual-CSV). Both still route through
+// the exact same parseBatch()/loadBatch()/applyUnmatched() this file
+// always used, just called from outside instead of from a local button/
+// input listener. `status` is the shared #dating-import-status span.
+function handleTinderText(text) {
+const status = document.getElementById('dating-import-status');
 let parsed;
 try {
-parsed = parseBatch(box.value);
+parsed = parseBatch(text);
 } catch (err) {
-status.textContent = `Couldn't read that: ${err.message}. Paste the JSON the snippet copied.`;
+if (status) status.textContent = `Couldn't read that as Tinder JSON: ${err.message}.`;
 return;
 }
 if (parsed.unmatchedIds.length) applyUnmatched(parsed.unmatchedIds, status);
 if (!parsed.profiles.length) {
-if (!parsed.unmatchedIds.length) status.textContent = 'Paste the copied JSON first.';
+if (!parsed.unmatchedIds.length && status) status.textContent = 'Nothing to import in that.';
 return;
 }
 loadBatch(parsed.profiles, status);
-});
-
-const fileInput = document.getElementById('tinder-file-input');
-if (fileInput) {
-fileInput.addEventListener('change', async () => {
+}
 // The checkpoint chunks from a big overnight tinderBulkImport() run land
-// as several separate files -- selecting them all at once here (the
-// input allows multiple) merges every one into a single classify-and-
-// queue pass instead of needing a separate upload per file.
-const files = [...fileInput.files];
-fileInput.value = ''; // lets the same file(s) be re-picked later without needing different ones first
-if (!files.length) return;
+// as several separate files -- merging every one into a single classify-
+// and-queue pass instead of needing a separate upload per file.
+async function handleTinderFiles(files) {
+const status = document.getElementById('dating-import-status');
 let raws = [];
 let unmatchedIds = [];
 const errors = [];
@@ -2663,12 +2660,15 @@ unmatchedIds = unmatchedIds.concat(parsed.unmatchedIds);
 errors.push(`${file.name}: ${err.message}`);
 }
 }
-if (errors.length) status.textContent = `Couldn't read ${errors.length === 1 ? 'a file' : `${errors.length} files`}: ${errors.join('; ')}`;
+if (errors.length && status) status.textContent = `Couldn't read ${errors.length === 1 ? 'a file' : `${errors.length} files`}: ${errors.join('; ')}`;
 if (unmatchedIds.length) applyUnmatched(unmatchedIds, status);
 if (raws.length) loadBatch(raws, status);
-else if (!errors.length && !unmatchedIds.length) status.textContent = 'Nothing to import in that.';
-});
+else if (!errors.length && !unmatchedIds.length && status) status.textContent = 'Nothing to import in that.';
 }
+
+function initTinderImport() {
+renderTinderLastRun();
+const status = document.getElementById('dating-import-status');
 
 const copyBtn = document.getElementById('tinder-copy-snippet');
 if (copyBtn) {
@@ -2714,4 +2714,4 @@ status.textContent = 'Copy failed — select the snippet and copy it manually.';
 render();
 }
 
-export { initTinderImport };
+export { initTinderImport, handleTinderText, handleTinderFiles };
