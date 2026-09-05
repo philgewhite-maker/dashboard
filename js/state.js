@@ -409,7 +409,7 @@ fundingAmount: '', fundingFromAccountId: '',
 // A card's own equivalent of a CASS switch -- but unlike CASS (one
 // switch opens the account), a card can receive several separate
 // balance transfers over its life, so this is a list, not a single
-// field: [{id, fromAccountId, amount}].
+// field: [{id, fromAccountId, amount, date}].
 balanceTransfers: [],
 colour: 'blue', // fixed palette, see ACCOUNT_COLOURS in financeaccounts.js -- also the card's accent stripe when logoUrl is blank
 logoUrl: '', // pasted image URL (e.g. the provider's own Play Store listing icon) -- hotlinked, never downloaded/stored locally
@@ -631,7 +631,7 @@ data.financeAccounts.forEach((a) => {
 if (a.cassLinkedAccountId && !a.cassFromAccountId) a.cassFromAccountId = a.cassLinkedAccountId;
 delete a.cassLinkedAccountId;
 if (!Array.isArray(a.balanceTransfers)) a.balanceTransfers = [];
-a.balanceTransfers = a.balanceTransfers.map((bt) => ({ id: bt.id || uid(), fromAccountId: bt.fromAccountId || '', amount: bt.amount || '' }));
+a.balanceTransfers = a.balanceTransfers.map((bt) => ({ id: bt.id || uid(), fromAccountId: bt.fromAccountId || '', amount: bt.amount || '', date: bt.date || '' }));
 });
 // A CASS-from-account, funding-source, or balance-transfer source
 // pointing at an account since deleted is a dangling reference -- same

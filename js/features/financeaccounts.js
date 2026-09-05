@@ -79,6 +79,20 @@ function directDebitsHtml(a) {
 return (a.directDebits || []).map((dd) => `<span class="tag-chip">${escapeHtml(dd)}<span class="tag-x" data-dd-remove="${escapeHtml(a.id)}:${escapeHtml(dd)}">&times;</span></span>`).join('');
 }
 
+// Same terse "day + month, year only if not this year" shape
+// airbnb.js's own formatAirbnbDate uses for a compact date sitting
+// inside a small UI element -- no shared date-formatting utility exists
+// to import instead (every feature file that needs one has its own
+// small local copy, confirmed by checking).
+function formatShortDate(iso) {
+if (!iso) return '';
+const d = new Date(`${iso}T00:00:00`);
+if (isNaN(d)) return iso;
+const opts = { day: 'numeric', month: 'short' };
+if (d.getFullYear() !== new Date().getFullYear()) opts.year = 'numeric';
+return d.toLocaleDateString('en-GB', opts);
+}
+
 // A card's own equivalent of a CASS switch, but there can be several --
 // each rendered as "£X from <account>" rather than a bare amount, since
 // which OTHER account it came from is exactly the fact a bare list of
@@ -86,7 +100,8 @@ return (a.directDebits || []).map((dd) => `<span class="tag-chip">${escapeHtml(d
 function balanceTransfersHtml(a) {
 return (a.balanceTransfers || []).map((bt) => {
 const from = data.financeAccounts.find((x) => x.id === bt.fromAccountId);
-const label = `${bt.amount ? escapeHtml(bt.amount) : 'Amount not set'} from ${escapeHtml(from ? accountLabel(from) : 'a deleted account')}`;
+const dateStr = formatShortDate(bt.date);
+const label = `${bt.amount ? escapeHtml(bt.amount) : 'Amount not set'} from ${escapeHtml(from ? accountLabel(from) : 'a deleted account')}${dateStr ? ` · ${escapeHtml(dateStr)}` : ''}`;
 return `<span class="tag-chip">${label}<span class="tag-x" data-bt-remove="${escapeHtml(a.id)}:${escapeHtml(bt.id)}">&times;</span></span>`;
 }).join('');
 }
@@ -131,6 +146,7 @@ ${dealBadgeHtml(a)}
 <div class="sync-row" style="margin-top:6px;">
 <select data-bt-from="${a.id}">${otherAccountOptionsHtml(a.id, '')}</select>
 <input type="text" autocomplete="off" class="tag-add-input" placeholder="Amount, e.g. £2,000" data-bt-amount="${a.id}" style="max-width:140px;">
+<input type="date" data-bt-date="${a.id}" title="When the transfer happened">
 <button class="sync-btn sm" type="button" data-bt-add="${a.id}">Add</button>
 </div>
 </div>
@@ -203,17 +219,25 @@ edges.push({ from: a.fundingFromAccountId, to: a.id, kind: 'funding', label: a.f
 } else if (mode === 'cass') {
 // Directional now (cassFromAccountId, not the old undirected-sounding
 // cassLinkedAccountId) -- one edge per account that has it set, no
-// pair-dedup needed since the field only ever points one way.
+// pair-dedup needed since the field only ever points one way. No
+// separate "CASS date" field exists to capture -- the switch date IS
+// the FROM account's own closeDate (the old account you switched away
+// from), so the label reads it straight off that account rather than
+// asking for the same date twice.
 data.financeAccounts.forEach((a) => {
 if (a.cassFromAccountId && accountOk(a.cassFromAccountId) && accountOk(a.id)) {
-edges.push({ from: a.cassFromAccountId, to: a.id, kind: 'cass', label: 'CASS' });
+const fromAccount = byId.get(a.cassFromAccountId);
+const dateStr = formatShortDate(fromAccount?.closeDate);
+edges.push({ from: a.cassFromAccountId, to: a.id, kind: 'cass', label: dateStr ? `CASS · ${dateStr}` : 'CASS' });
 }
 });
 } else if (mode === 'balance-transfer') {
 data.financeAccounts.forEach((a) => {
 (a.balanceTransfers || []).forEach((bt) => {
 if (bt.fromAccountId && accountOk(bt.fromAccountId) && accountOk(a.id)) {
-edges.push({ from: bt.fromAccountId, to: a.id, kind: 'balance-transfer', label: bt.amount ? `${bt.amount} BT` : 'BT' });
+const dateStr = formatShortDate(bt.date);
+const label = [bt.amount || 'BT', dateStr].filter(Boolean).join(' · ');
+edges.push({ from: bt.fromAccountId, to: a.id, kind: 'balance-transfer', label });
 }
 });
 });
@@ -483,14 +507,16 @@ btn.addEventListener('click', () => {
 const id = btn.dataset.btAdd;
 const fromSelect = list.querySelector(`[data-bt-from="${id}"]`);
 const amountInput = list.querySelector(`[data-bt-amount="${id}"]`);
+const dateInput = list.querySelector(`[data-bt-date="${id}"]`);
 const fromAccountId = fromSelect.value;
 if (!fromAccountId) return;
 const a = data.financeAccounts.find((x) => x.id === id);
 if (!a) return;
 if (!Array.isArray(a.balanceTransfers)) a.balanceTransfers = [];
-a.balanceTransfers.push({ id: uid(), fromAccountId, amount: amountInput.value.trim() });
+a.balanceTransfers.push({ id: uid(), fromAccountId, amount: amountInput.value.trim(), date: dateInput.value });
 fromSelect.value = '';
 amountInput.value = '';
+dateInput.value = '';
 queueSave();
 renderFinanceAccounts();
 });
