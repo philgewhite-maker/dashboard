@@ -1473,7 +1473,16 @@ white-space:nowrap;
 .cal-badge.rose{background:var(--rose-bg);color:var(--rose);}
 .cal-badge.plum{background:var(--plum-bg);color:var(--plum);}
 .cal-badge.red{background:var(--red-bg);color:var(--red);}
-.cal-clean-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;}
+/* Sits INSIDE .cal-event-row (bottom-right of the row, alongside guest
+   name/notes/Push) rather than its own row -- a dedicated 3rd row read
+   as too much vertical weight on desktop, and .cal-event-row already
+   wraps on narrow viewports, so this still stacks sanely on mobile. */
+.cal-clean-group{display:flex;gap:6px;flex-wrap:wrap;margin-left:auto;}
+/* .cal-event-row .cal-badge{margin-left:auto} below (existing rule, used
+   by calendars.js's own "Today" badge) would otherwise also apply to
+   EACH cleaner chip individually, pushing them apart from each other
+   instead of the pair sitting together at the row's right edge. */
+.cal-clean-group .cal-badge{margin-left:0;}
 /* Cleaner chips can't safely reuse any of the room-colour fills above --
    all 9 are already claimed by AIRBNB_COLOURS, so any one of them could
    collide with whichever colour the listing badge just above happens to
