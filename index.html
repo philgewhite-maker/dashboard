@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v230</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v231</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -224,9 +224,10 @@
 <div class="panel-head">
 <h2><span class="dot plum"></span>Switch opportunities</h2>
 </div>
-<div class="settings-note" style="margin:0 0 10px;">Checks <a href="https://www.moneysavingexpert.com/banking/compare-best-bank-accounts/#switch" target="_blank" rel="noopener">MoneySavingExpert's current switch offers</a> against your own account history (including closed accounts) and which accounts are CASS-ready &mdash; a suggestion to look into, never applied automatically.</div>
+<div class="settings-note" style="margin:0 0 10px;">Cross-references <a href="https://www.moneysavingexpert.com/banking/compare-best-bank-accounts/#switch" target="_blank" rel="noopener">MoneySavingExpert's current switch offers</a> against your own account history (including closed accounts) and which accounts are CASS-ready &mdash; a suggestion to look into, never applied automatically. MSE blocks this being fetched automatically, so open the page yourself, select and copy the switching section's text, and paste it below.</div>
+<textarea id="switch-offers-paste" rows="6" style="width:100%;font-family:'Inter',sans-serif;font-size:12px;border:1px solid var(--line);border-radius:7px;padding:7px 9px;background:var(--paper);color:var(--ink);resize:vertical;box-sizing:border-box;margin-bottom:8px;" placeholder="Paste the copied MoneySavingExpert switch-offers text here"></textarea>
 <div class="sync-row">
-<button class="sync-btn" id="switch-offers-scan-btn" type="button">Check for switch opportunities</button>
+<button class="sync-btn" id="switch-offers-scan-btn" type="button">Analyse pasted text</button>
 <span class="sync-status" id="switch-offers-scan-status"></span>
 </div>
 <div class="settings-note" id="switch-offers-checked-status" style="margin:6px 0 10px;"></div>

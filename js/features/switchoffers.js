@@ -2,21 +2,33 @@
 // against your own bank account history (which banks you've already
 // held or claimed a bonus from, and which open accounts are actually
 // free to CASS away -- stage === 'CASS-ready') so you don't have to do
-// that comparison by hand. Confirmed feasible before building: the
-// offer text (headline AND detailed eligibility bullets) is embedded in
-// the page's own server-rendered HTML, not injected by client-side JS,
-// so a plain server-side fetch sees everything a real browser would.
-// Same "scan -> human-reviewed list, never auto-apply" shape every
-// other data-quality feature in this app already uses (Photo Quality,
-// the duplicate finder, tag cleanup's location fill-ins) -- this is a
-// real financial decision, so the feature only ever proposes.
+// that comparison by hand.
+//
+// Originally built as an automatic server-side fetch (via the same
+// ics-proxy.php used for Airbnb calendar feeds) -- confirmed live that
+// the offer text really is server-rendered HTML, not client-JS-
+// injected, so a plain fetch would see everything a real browser does.
+// But confirmed live, twice, that MoneySavingExpert sits behind
+// Cloudflare Bot Management and 403s the proxy's request even after
+// swapping in a full real-browser User-Agent + headers -- an IP/ASN
+// reputation block, not a header one, which no amount of header-tuning
+// fixes. Deliberately NOT chasing this further (TLS fingerprint
+// spoofing, rotating through other services) -- that crosses from
+// "personal convenience automation" into actively defeating a site's
+// anti-bot measures, which its own terms almost certainly prohibit.
+// Instead: open the page in your own browser (never blocked -- it's a
+// real browsing session), copy its text, paste it in below. Same
+// eligibility-reasoning call either way -- only how the page text
+// arrives changed. Same "scan -> human-reviewed list, never auto-apply"
+// shape every other data-quality feature in this app already uses
+// (Photo Quality, the duplicate finder, tag cleanup's location
+// fill-ins) -- this is a real financial decision, so the feature only
+// ever proposes.
 import { data, queueSave } from '../state.js';
-import { escapeHtml, uid, todayStr, daysSince } from '../utils.js';
-import { fetchIcs, FilesNotConfiguredError } from '../files.js';
+import { escapeHtml, uid, todayStr } from '../utils.js';
 import { callTextJson, MissingKeyError } from '../ai.js';
 import { accountLabel, expandAccountRow, formatShortDate } from './financeaccounts.js';
 
-const MSE_SWITCH_URL = 'https://www.moneysavingexpert.com/banking/compare-best-bank-accounts/#switch';
 // Locked, same reasoning as notionplan.js's own PLAN_MODEL choice --
 // interpreting an offer's actual exclusion wording ("no account on
 // [date]" vs. "never held one") deserves a real reasoning pass, not the
@@ -24,39 +36,21 @@ const MSE_SWITCH_URL = 'https://www.moneysavingexpert.com/banking/compare-best-b
 // job.
 const SWITCH_MODEL = 'claude-sonnet-5';
 const SWITCH_MAX_TOKENS = 3000;
-// A generous flat cap, not fragile section-anchor slicing (MSE could
-// reword its own headings any time). Confirmed live: the ~670KB raw
-// page is only ~77,000 characters once script/style tag bodies are
-// stripped (see extractReadableText -- element.textContent otherwise
-// pulls those in too, confirmed live as a real bug: a first pass
-// without stripping them burned the entire cap on CSS before reaching
-// any article text at all). 80,000 comfortably covers the whole
-// article, not just the switching section, so a future MSE reshuffle
-// can't accidentally push a relevant offer past the cut-off.
+// A generous flat cap -- a pasted selection is normally just the
+// switching section, but this guards against pasting the whole page
+// (or several) without needing fragile section-anchor slicing.
 const PAGE_TEXT_CAP = 80000;
 
-// DOMParser parses the string into a DOM tree without executing any
-// embedded <script> -- safe to run on a large, untrusted third-party
-// page purely to read its text.
-function extractReadableText(html) {
-const doc = new DOMParser().parseFromString(html, 'text/html');
-// .textContent otherwise pulls in <script>/<style> tag bodies too --
-// confirmed live as a real bug: a first pass without stripping these
-// burned the entire cap on CSS before reaching any article text.
-doc.querySelectorAll('script, style, noscript').forEach((el) => el.remove());
-return (doc.body?.textContent || '').replace(/\s+/g, ' ').trim().slice(0, PAGE_TEXT_CAP);
+function cleanPastedText(text) {
+return String(text || '').replace(/\s+/g, ' ').trim().slice(0, PAGE_TEXT_CAP);
 }
 
-async function scanSwitchOffers() {
-// fetchIcs is a generic "fetch this URL server-side, return its text"
-// proxy despite the name (files.js) -- nothing calendar-specific on the
-// client side, reused as-is rather than adding a new backend endpoint.
-const html = await fetchIcs(MSE_SWITCH_URL);
-const pageText = extractReadableText(html);
+async function scanSwitchOffers(rawText) {
+const pageText = cleanPastedText(rawText);
 const ownAccounts = data.financeAccounts.map((a) => ({
 bank: a.bank, name: a.name, openDate: a.openDate, closeDate: a.closeDate, stage: a.stage,
 }));
-const prompt = `Below is the current text of MoneySavingExpert's bank switch offers page, followed by my own bank account history (including closed accounts).
+const prompt = `Below is text pasted from MoneySavingExpert's bank switch offers page, followed by my own bank account history (including closed accounts).
 
 PAGE TEXT:
 ${pageText}
@@ -106,7 +100,7 @@ if (!list) return;
 const visible = (data.switchOffers || []).filter((o) => !o.dismissed);
 list.innerHTML = visible.length
 ? visible.map(opportunityRowHtml).join('')
-: '<div class="empty">Nothing found yet — click Check for the current offers.</div>';
+: '<div class="empty">Nothing found yet — paste the page text below and click Analyse.</div>';
 if (statusEl) {
 statusEl.textContent = data.prefs.switchOffersCheckedAt
 ? `Last checked ${formatShortDate(data.prefs.switchOffersCheckedAt)}.`
@@ -127,22 +121,24 @@ el.addEventListener('click', () => expandAccountRow(el.dataset.openAccountRef));
 
 function initSwitchOffers() {
 const btn = document.getElementById('switch-offers-scan-btn');
-if (!btn) return; // panel not in this build's DOM
+const textarea = document.getElementById('switch-offers-paste');
+if (!btn || !textarea) return; // panel not in this build's DOM
 const statusEl = document.getElementById('switch-offers-scan-status');
 const say = (m) => { if (statusEl) statusEl.textContent = m; };
 btn.addEventListener('click', async () => {
+const text = textarea.value.trim();
+if (!text) { say('Paste the page text first.'); return; }
 btn.disabled = true;
-say('Fetching the current offers…');
+say('Reading the offers…');
 try {
-data.switchOffers = await scanSwitchOffers();
+data.switchOffers = await scanSwitchOffers(text);
 data.prefs.switchOffersCheckedAt = todayStr();
 queueSave();
-say(data.switchOffers.length ? `Found ${data.switchOffers.length} offer${data.switchOffers.length === 1 ? '' : 's'}.` : 'No current switch offers found.');
+say(data.switchOffers.length ? `Found ${data.switchOffers.length} offer${data.switchOffers.length === 1 ? '' : 's'}.` : 'No current switch offers found in that text.');
+textarea.value = '';
 renderSwitchOffers();
 } catch (err) {
-say(err instanceof FilesNotConfiguredError || err instanceof MissingKeyError
-? err.message
-: `Couldn't check: ${err.message || err}`);
+say(err instanceof MissingKeyError ? err.message : `Couldn't check: ${err.message || err}`);
 console.error('Switch-offers scan failed:', err);
 } finally {
 btn.disabled = false;
