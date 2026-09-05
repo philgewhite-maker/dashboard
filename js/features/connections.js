@@ -3327,6 +3327,18 @@ report(err instanceof MissingKeyError ? 'Add an Anthropic API key in Settings fi
 
 function expandConnection(id) {
 expandedConnections.add(id);
+// Navigating here should always actually reveal the person. Without
+// this, a connectionChipHtml link to anyone Archived/Faded/Got Away
+// (see HIDDEN_BY_DEFAULT_STAGES above) silently did nothing visible --
+// the tab switched, but the default list view was already filtering
+// that connection out, so there was nothing for scrollAndFlash to find.
+// Confirmed live via the Photo Quality panel, which skews toward exactly
+// these stale/inactive matches.
+const conn = data.connections.find((c) => c.id === id);
+if (conn && HIDDEN_BY_DEFAULT_STAGES.has(conn.stage) && !showArchivedFaded) {
+showArchivedFaded = true;
+setLocalSetting('showArchivedFaded', true);
+}
 renderConnections();
 }
 
