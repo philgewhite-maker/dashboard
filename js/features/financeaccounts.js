@@ -7,6 +7,7 @@
 // just capturing more fields.
 import { data, queueSave, blankFinanceAccount } from '../state.js';
 import { escapeHtml, bindForm, daysUntil, scrollAndFlash } from '../utils.js';
+import { matchBankLogo } from '../bankLogos.js';
 
 const ACCOUNT_TYPES = ['Current account', 'Savings', 'Credit card', 'Mortgage', 'Loan', 'Other'];
 // Same idea as airbnb.js's own AIRBNB_COLOURS -- a small, locally-declared
@@ -347,6 +348,14 @@ el.addEventListener('change', () => {
 const a = data.financeAccounts.find((x) => x.id === el.dataset.accountId);
 if (!a) return;
 a[el.dataset.field] = el.value.trim();
+// Auto-fill from the pre-fetched bank-logo lookup (bankLogos.js) the
+// moment a recognised bank name is typed -- only when logoUrl is still
+// blank, so this never overwrites a logo the user already picked or
+// pasted themselves.
+if (el.dataset.field === 'bank' && !a.logoUrl) {
+const match = matchBankLogo(a.bank);
+if (match) a.logoUrl = match;
+}
 queueSave();
 renderFinanceAccounts();
 });
@@ -416,7 +425,7 @@ const nameInput = document.getElementById('account-name-input');
 const bank = bankInput.value.trim();
 const name = nameInput.value.trim();
 if (!bank && !name) return;
-data.financeAccounts.push(blankFinanceAccount({ bank, name }));
+data.financeAccounts.push(blankFinanceAccount({ bank, name, logoUrl: matchBankLogo(bank) || '' }));
 bankInput.value = '';
 nameInput.value = '';
 renderFinanceAccounts();
