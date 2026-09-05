@@ -35,7 +35,15 @@ import { accountLabel, expandAccountRow, formatShortDate } from './financeaccoun
 // cheap ranking tier nudges.js's own RANK_MODEL uses for a much simpler
 // job.
 const SWITCH_MODEL = 'claude-sonnet-5';
-const SWITCH_MAX_TOKENS = 3000;
+// Confirmed live: Sonnet 5 thinks by default at this call's effort level
+// (no 'low' passed, deliberately -- see above), and that thinking block
+// counts against max_tokens same as the real answer. At 3000 the whole
+// budget went to thinking and the call hit stop_reason:'max_tokens' with
+// NO text block at all -- same failure ai.js's own WELLNESS_MAX_TOKENS
+// comment documents. Sized generously to leave real room after thinking,
+// same "output tokens are cheap, a failed check isn't" reasoning as that
+// constant and notionplan.js's PLAN_MAX_TOKENS.
+const SWITCH_MAX_TOKENS = 8000;
 // A generous flat cap -- a pasted selection is normally just the
 // switching section, but this guards against pasting the whole page
 // (or several) without needing fragile section-anchor slicing.
