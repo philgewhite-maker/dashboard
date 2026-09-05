@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v212</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v213</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -205,6 +205,21 @@
 </div>
 </section>
 
+<section class="panel wide" id="accounts-panel" data-tab="finances">
+<div class="panel-head">
+<h2><span class="dot plum"></span>Accounts</h2>
+<span class="count-badge" id="accounts-count"></span>
+</div>
+<div class="settings-note" style="margin:0 0 10px;">Bank accounts and credit cards kept open for their incentive &mdash; a switch bonus, cashback, or a 0% balance-transfer deal. Click a card to see and edit its full details.</div>
+<div id="accounts-flow-mount"></div>
+<div id="accounts-list"></div>
+<div class="add-form" id="account-form">
+<input type="text" autocomplete="off" id="account-bank-input" placeholder="Bank, e.g. Halifax">
+<input type="text" autocomplete="off" id="account-name-input" placeholder="Account name">
+<button class="add-btn" type="button">Add</button>
+</div>
+</section>
+
 <section class="panel wide" id="vouchers-panel" data-tab="finances">
 <div class="panel-head">
 <h2><span class="dot plum"></span>Vouchers &amp; Credits</h2>
@@ -244,27 +259,6 @@
 <input type="text" autocomplete="off" id="subscription-cost-input" placeholder="Cost (optional)">
 <input type="date" id="subscription-renewal-input">
 <input type="text" autocomplete="off" id="subscription-notes-input" placeholder="Notes (optional)">
-<button class="add-btn" type="button">Add</button>
-</div>
-</section>
-
-<section class="panel wide" id="deals-panel" data-tab="finances">
-<div class="panel-head">
-<h2><span class="dot plum"></span>Deal Expiries</h2>
-<span class="count-badge" id="deals-count"></span>
-</div>
-<div id="deals-list"></div>
-<div class="add-form" id="deal-form">
-<input type="text" autocomplete="off" id="deal-name-input" placeholder="e.g. Halifax mortgage fixed rate">
-<select id="deal-type-input">
-<option>Mortgage</option>
-<option>Credit card</option>
-<option>Loan</option>
-<option>Insurance</option>
-<option>Other</option>
-</select>
-<input type="date" id="deal-expiry-input">
-<input type="text" autocomplete="off" id="deal-notes-input" placeholder="Notes (optional)">
 <button class="add-btn" type="button">Add</button>
 </div>
 </section>

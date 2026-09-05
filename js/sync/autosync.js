@@ -34,7 +34,7 @@ statusEl.className = `live-sync-status${kind ? ' ' + kind : ''}`;
 // skipping the backup on a device that did have real data.
 function hasLocalContent() {
 return ['connections', 'habits', 'goals', 'jobs', 'vouchers', 'businessIdeas',
-'subscriptions', 'dealExpiries', 'enhancementIdeas', 'calendars']
+'subscriptions', 'financeAccounts', 'enhancementIdeas', 'calendars']
 .some((key) => Array.isArray(data[key]) && data[key].length > 0);
 }
 

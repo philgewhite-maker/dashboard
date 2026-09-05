@@ -3,8 +3,9 @@ import { escapeHtml, scrollAndFlash, daysSince, daysUntil } from '../utils.js';
 import { switchTab } from '../tabs.js';
 import { callTextJson, MissingKeyError } from '../ai.js';
 import { gapsFor } from './travel.js';
+import { accountLabel } from './financeaccounts.js';
 
-const TARGET_TABS = { connection: 'dating', search: 'dating', habit: 'overview', goal: 'overview', job: 'jobhunt', voucher: 'finances', calendar: 'overview', business: 'business', task: 'tasks', health: 'health', trip: 'travel', 'trip-suggestion': 'travel', airbnb: 'overview' };
+const TARGET_TABS = { connection: 'dating', search: 'dating', habit: 'overview', goal: 'overview', job: 'jobhunt', voucher: 'finances', financeAccount: 'finances', calendar: 'overview', business: 'business', task: 'tasks', health: 'health', trip: 'travel', 'trip-suggestion': 'travel', airbnb: 'overview' };
 // Lead time for the "trip's coming up and still has gaps" nudge -- same
 // 14-day window as NEW_MATCH_STAGES below, so a trip nudge doesn't start
 // nagging the moment it's created, only once it's genuinely close.
@@ -199,6 +200,22 @@ text: `${v.name} expires in ${dn} day${dn === 1 ? '' : 's'} — use it soon.`,
 target: { type: 'voucher', id: v.id },
 signals: { kind: 'voucher-expiring', daysUntil: dn },
 category: 'voucher',
+});
+}
+});
+
+// A closed account's old deal isn't actionable any more -- same "don't
+// nudge about something already resolved" reasoning the voucher block
+// above doesn't need (a voucher has no close-date equivalent).
+data.financeAccounts.forEach((a) => {
+if (!a.dealEndDate || a.closeDate) return;
+const dn = daysUntil(a.dealEndDate);
+if (dn >= 0 && dn <= 30) {
+pool.push({
+text: `${accountLabel(a)}: "${a.deal || 'deal'}" ends in ${dn === 0 ? 'today' : dn + ' day' + (dn === 1 ? '' : 's')}.`,
+target: { type: 'financeAccount', id: a.id },
+signals: { kind: 'account-deal-expiring', daysUntil: dn },
+category: 'finance',
 });
 }
 });
@@ -419,6 +436,13 @@ setTimeout(() => scrollAndFlash(`[data-goal-row="${target.id}"]`), 50);
 setTimeout(() => scrollAndFlash(`[data-job-row="${target.id}"]`), 50);
 } else if (target.type === 'voucher') {
 setTimeout(() => scrollAndFlash(`[data-voucher-row="${target.id}"]`), 50);
+} else if (target.type === 'financeAccount') {
+// financeaccounts.js's own expandAccountRow() does the open-then-
+// scroll-and-flash itself (the account card is a <details>, unlike a
+// voucher's flat row, so it needs marking open before anything can be
+// scrolled to) -- dynamically imported, same pattern the 'connection'
+// branch above already uses for its own feature file.
+import('./financeaccounts.js').then((m) => m.expandAccountRow(target.id));
 } else if (target.type === 'calendar') {
 setTimeout(() => scrollAndFlash(`[data-cal-row="${CSS.escape(target.name)}"]`), 50);
 } else if (target.type === 'airbnb') {
