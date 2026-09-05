@@ -2877,6 +2877,15 @@ margin-top:auto;
    ddCountLabel() in financeaccounts.js. */
 .flow-card-dd{font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--muted);}
 
+/* Switch-offer scan results -- same border-top-separated row shape
+   .voucher-row/.account-card already use for a flat list. */
+.switch-offer-row{padding:10px 0;border-top:1px solid var(--line);}
+.switch-offer-row:first-of-type{border-top:none;}
+.switch-offer-head{display:flex;align-items:center;gap:8px;}
+.switch-offer-bank{font-size:14px;font-weight:600;}
+.switch-offer-offer{font-size:12px;color:var(--muted);margin-top:2px;}
+.switch-offer-reasoning{font-size:12px;color:var(--ink);margin-top:4px;}
+
 /* Settings */
 .settings-group{
 border:1px solid var(--line);

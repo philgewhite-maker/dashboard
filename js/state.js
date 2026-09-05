@@ -36,6 +36,7 @@ businessIdeas: [],
 subscriptions: [],
 enhancementIdeas: [],
 financeAccounts: [], // bank/card accounts -- see js/features/financeaccounts.js, blankFinanceAccount() below
+switchOffers: [], // [{id, bank, offer, eligible, reasoning, suggestedFromAccountId, dismissed}] -- last bank-switch-offers scan, see js/features/switchoffers.js
 mailSearches: [],
 tasks: [],
 taskContexts: [...DEFAULT_TASK_CONTEXTS],
@@ -61,6 +62,7 @@ const DEFAULT_PREFS = {
 calendarEventCount: 1,
 mailResultCount: 5,
 airbnbCalendarId: '', // which Google Calendar "Push to Google Calendar" targets -- picked once, remembered
+switchOffersCheckedAt: '', // ISO date of the last bank-switch-offers scan -- drives the 30-day nudge, see js/features/switchoffers.js
 };
 
 // Each mail search is one row in Settings: a kind, its value, and its own
@@ -552,7 +554,7 @@ const DEFAULT_FLAG_RULES = [
 ];
 
 function blankData() {
-return { habits: [], goals: [], jobs: [], connections: [], calendars: [], calendarStatus: {}, vouchers: [], businessIdeas: [], subscriptions: [], enhancementIdeas: [], financeAccounts: [], mailSearches: [], tasks: [], taskContexts: [...DEFAULT_TASK_CONTEXTS],
+return { habits: [], goals: [], jobs: [], connections: [], calendars: [], calendarStatus: {}, vouchers: [], businessIdeas: [], subscriptions: [], enhancementIdeas: [], financeAccounts: [], switchOffers: [], mailSearches: [], tasks: [], taskContexts: [...DEFAULT_TASK_CONTEXTS],
 ratingCategories: DEFAULT_RATING_CATEGORIES.map((c) => ({ ...c })),
 recipes: [], recipeRatingCategories: DEFAULT_RECIPE_RATING_CATEGORIES.map((c) => ({ ...c })),
 claudeAnswers: {},
@@ -641,6 +643,7 @@ if (!Array.isArray(data.businessIdeas)) data.businessIdeas = [];
 if (!Array.isArray(data.subscriptions)) data.subscriptions = [];
 if (!Array.isArray(data.enhancementIdeas)) data.enhancementIdeas = [];
 if (!Array.isArray(data.financeAccounts)) data.financeAccounts = [];
+if (!Array.isArray(data.switchOffers)) data.switchOffers = [];
 data.financeAccounts = data.financeAccounts.map((a) => ({ ...blankFinanceAccount(), ...a, id: a.id || uid() }));
 // cassLinkedAccountId -> cassFromAccountId rename (2026-09-05) -- carry
 // forward anyone's already-entered link rather than silently dropping

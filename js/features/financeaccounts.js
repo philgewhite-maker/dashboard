@@ -818,4 +818,4 @@ renderFinanceAccounts();
 setTimeout(() => scrollAndFlash(`[data-account-row="${id}"]`), 50);
 }
 
-export { renderFinanceAccounts, initFinanceAccountForm, expandAccountRow, accountLabel };
+export { renderFinanceAccounts, initFinanceAccountForm, expandAccountRow, accountLabel, formatShortDate };

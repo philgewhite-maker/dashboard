@@ -5,7 +5,7 @@ import { callTextJson, MissingKeyError } from '../ai.js';
 import { gapsFor } from './travel.js';
 import { accountLabel } from './financeaccounts.js';
 
-const TARGET_TABS = { connection: 'dating', search: 'dating', habit: 'overview', goal: 'overview', job: 'jobhunt', voucher: 'finances', financeAccount: 'finances', calendar: 'overview', business: 'business', task: 'tasks', health: 'health', trip: 'travel', 'trip-suggestion': 'travel', airbnb: 'overview' };
+const TARGET_TABS = { connection: 'dating', search: 'dating', habit: 'overview', goal: 'overview', job: 'jobhunt', voucher: 'finances', financeAccount: 'finances', switchOffers: 'finances', calendar: 'overview', business: 'business', task: 'tasks', health: 'health', trip: 'travel', 'trip-suggestion': 'travel', airbnb: 'overview' };
 // Lead time for the "trip's coming up and still has gaps" nudge -- same
 // 14-day window as NEW_MATCH_STAGES below, so a trip nudge doesn't start
 // nagging the moment it's created, only once it's genuinely close.
@@ -219,6 +219,21 @@ category: 'finance',
 });
 }
 });
+
+// Checking MoneySavingExpert's switch offers is a deliberate, costs-an-
+// API-call action (see switchoffers.js's own Scan button) -- this nudge
+// only ever points at the button, never runs the scan itself.
+{
+const checkedAt = data.prefs.switchOffersCheckedAt;
+if (!checkedAt || daysSince(checkedAt) >= 30) {
+pool.push({
+text: 'Worth a look: check for new bank switch offers — it\'s been over a month.',
+target: { type: 'switchOffers' },
+signals: { kind: 'switch-offers-check', daysSince: checkedAt ? daysSince(checkedAt) : Infinity },
+category: 'finance',
+});
+}
+}
 
 data.calendars.forEach((cal) => {
 const status = data.calendarStatus[cal.name];
@@ -443,6 +458,11 @@ setTimeout(() => scrollAndFlash(`[data-voucher-row="${target.id}"]`), 50);
 // scrolled to) -- dynamically imported, same pattern the 'connection'
 // branch above already uses for its own feature file.
 import('./financeaccounts.js').then((m) => m.expandAccountRow(target.id));
+} else if (target.type === 'switchOffers') {
+// Deliberately just scrolls there -- the scan itself costs an API call
+// and is a manual button press, not something a nudge click should
+// trigger on your behalf.
+setTimeout(() => scrollAndFlash('#switch-offers-panel'), 50);
 } else if (target.type === 'calendar') {
 setTimeout(() => scrollAndFlash(`[data-cal-row="${CSS.escape(target.name)}"]`), 50);
 } else if (target.type === 'airbnb') {
