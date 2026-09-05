@@ -151,6 +151,31 @@ function cassToAccount(a) {
 return data.financeAccounts.find((x) => x.cassFromAccountId === a.id);
 }
 
+// Deterministic, recomputed fresh every render -- same shape state.js's
+// own suggestedQuestions() uses for a connection's "Needs attention"
+// prompts, reused here rather than inventing a second convention.
+// Closed accounts get their OWN short list, not the open-account checks
+// below -- a closed account's missing sort code isn't worth flagging,
+// but "closed with nothing explaining where it went" still is.
+function accountIssues(a) {
+if (isClosed(a)) {
+return cassToAccount(a) ? [] : ['Closed, but no other account records a CASS switch from this one — actually CASS\'d away, or just closed outright?'];
+}
+const out = [];
+if (!a.bank && !a.name) out.push('No bank or account name set yet.');
+if (!a.sortCode || !a.accountNumber) out.push('Missing sort code or account number.');
+if (a.cassFromAccountId && !a.openDate) out.push('Came from a CASS switch but has no open date recorded.');
+if (a.dealEndDate && daysUntil(a.dealEndDate) < 0) out.push('Deal ended — still open. Close it, or record a new deal?');
+if (a.deal) {
+if (!a.fundingAmount && !a.fundingFromAccountId) out.push('Has a deal but no funding transfer set up — is one needed to keep it?');
+if (!(a.directDebits || []).length) out.push('Has a deal but no Direct Debits recorded — often a condition worth checking.');
+} else if (!a.purpose && !a.notes) {
+out.push('No deal, purpose, or notes recorded — why is this kept open?');
+}
+if (!!a.fundingAmount !== !!a.fundingFromAccountId) out.push('Funding amount and source account don\'t match — one is set without the other.');
+return out;
+}
+
 function accountCardHtml(a) {
 let closedTag = '';
 if (isClosed(a)) {
@@ -158,6 +183,8 @@ const to = cassToAccount(a);
 const closedLabel = to ? `Closed — CASS to ${escapeHtml(to.bank || accountLabel(to))}` : 'Closed';
 closedTag = `<span class="tag-chip" style="opacity:.7;">${closedLabel}</span>`;
 }
+const issues = accountIssues(a);
+const issuesTag = issues.length ? `<span class="tag-chip tag-chip-amber" title="${escapeHtml(issues.join(' • '))}">⚠ ${issues.length}</span>` : '';
 return `<details class="account-card" data-account-row="${escapeHtml(a.id)}" ${expandedAccounts.has(a.id) ? 'open' : ''}>
 <summary class="account-summary">
 ${accountBadgeHtml(a, 'sm')}
@@ -165,8 +192,10 @@ ${accountBadgeHtml(a, 'sm')}
 <span class="tag-chip">${escapeHtml(a.accountType)}</span>
 ${closedTag}
 ${dealBadgeHtml(a)}
+${issuesTag}
 </summary>
 <div class="account-detail">
+${issues.length ? `<ul class="suggested-questions" title="Deterministic prompts, recomputed fresh each time">${issues.map((q) => `<li>${escapeHtml(q)}</li>`).join('')}</ul>` : ''}
 <div class="account-field-row">
 <label>Bank<input type="text" autocomplete="off" data-field="bank" data-account-id="${a.id}" value="${escapeHtml(a.bank)}" placeholder="e.g. Halifax"></label>
 <label>Account name<input type="text" autocomplete="off" data-field="name" data-account-id="${a.id}" value="${escapeHtml(a.name)}" placeholder="e.g. Reward Current Account"></label>
@@ -484,10 +513,16 @@ return num ? `•••• ${num.slice(-4)}` : '';
 function flowCardHtml(a) {
 const masked = maskedAccountNumber(a);
 const dd = ddCountLabel(a);
-return `<div class="flow-card ${escapeHtml(a.colour)}" data-flow-node="${escapeHtml(a.id)}">
+const closed = isClosed(a);
+// Same "Closed" / "Closed — CASS to X" wording the collapsed row's own
+// tag already uses (cassToAccount()) -- one fact, shown consistently
+// wherever the account appears, not a second copy of the logic.
+const closedNote = closed ? (cassToAccount(a) ? `Closed — CASS to ${cassToAccount(a).bank || accountLabel(cassToAccount(a))}` : 'Closed') : '';
+return `<div class="flow-card ${escapeHtml(a.colour)}${closed ? ' flow-card-closed' : ''}" data-flow-node="${escapeHtml(a.id)}">
 <div class="flow-card-top">${accountBadgeHtml(a, 'lg')}<span class="flow-card-type">${escapeHtml(a.accountType)}</span></div>
 ${masked ? `<div class="flow-card-number">${escapeHtml(masked)}</div>` : ''}
 <div class="flow-card-name">${escapeHtml(accountLabel(a))}</div>
+${closedNote ? `<div class="flow-card-closed-note">${escapeHtml(closedNote)}</div>` : ''}
 ${dd ? `<div class="flow-card-dd" title="${escapeHtml(dd.title)}">DD ${escapeHtml(dd.text)}</div>` : ''}
 </div>`;
 }
