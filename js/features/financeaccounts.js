@@ -331,7 +331,19 @@ const flowMount = document.getElementById('accounts-flow-mount');
 const countEl = document.getElementById('accounts-count');
 if (!list) return;
 if (countEl) countEl.textContent = data.financeAccounts.length + (data.financeAccounts.length === 1 ? ' account' : ' accounts');
-if (flowMount) { flowMount.innerHTML = flowDiagramHtml(); bindLogoFallbacks(flowMount); }
+if (flowMount) {
+flowMount.innerHTML = flowDiagramHtml();
+bindLogoFallbacks(flowMount);
+// A flow card is a reference to the real account row below, same as
+// every other record reference in this app links back to its record
+// (CLAUDE.md's record-reference standards) -- easy to miss here since
+// the diagram reads as its own self-contained view, but it's still
+// just another place this account is shown, not a settled destination
+// in its own right.
+flowMount.querySelectorAll('.flow-card').forEach((card) => {
+card.addEventListener('click', () => expandAccountRow(card.dataset.flowNode));
+});
+}
 list.innerHTML = data.financeAccounts.length
 ? data.financeAccounts.map(accountCardHtml).join('')
 : '<div class="empty">No accounts tracked yet. Add one below.</div>';

@@ -2800,7 +2800,10 @@ padding:10px 12px;
 border-radius:12px;
 border-left:4px solid transparent;
 background:var(--paper);
+cursor:pointer;
+transition:transform .1s ease;
 }
+.flow-card:hover{transform:translateY(-2px);}
 .flow-card.blue{border-left-color:var(--blue);background:var(--blue-bg);}
 .flow-card.pink{border-left-color:var(--pink);background:var(--pink-bg);}
 .flow-card.sage{border-left-color:var(--sage);background:var(--sage-bg);}
