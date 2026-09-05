@@ -75,11 +75,44 @@ return `<option value="">None</option>` + data.financeAccounts
 .join('');
 }
 
+// deal-linked/transferrable reuses the exact idiom planner.js's own
+// draft/firm distinction settled on: border style + font weight, no new
+// visual language (planner.js:123-130 -- a wide text pill used to spell
+// this out, confirmed live to crowd everything else off the row; the
+// border/weight signal costs zero extra width). Blank/unclassified stays
+// the plain default chip look.
+const DD_STATUS_LABEL = { 'deal-linked': 'Deal-linked', transferrable: 'Transferrable' };
+function ddStatusCycle(status) {
+if (status === 'deal-linked') return 'transferrable';
+if (status === 'transferrable') return '';
+return 'deal-linked';
+}
 function directDebitsHtml(a) {
 return (a.directDebits || []).map((dd) => {
 const label = `${escapeHtml(dd.beneficiary || 'Unnamed')}${dd.amount ? ` · ${escapeHtml(dd.amount)}` : ''}`;
-return `<span class="tag-chip">${label}<span class="tag-x" data-dd-remove="${escapeHtml(a.id)}:${escapeHtml(dd.id)}">&times;</span></span>`;
+const statusClass = dd.status ? ` tag-chip-${dd.status}` : '';
+const statusTitle = dd.status ? DD_STATUS_LABEL[dd.status] : 'Not set';
+// The status-cycle click target is a SIBLING of the × remove button,
+// not its wrapper -- clicking × would otherwise also bubble into a
+// parent status-toggle and cycle the status on every removal.
+return `<span class="tag-chip${statusClass}"><span class="dd-status-toggle" data-dd-status-cycle="${escapeHtml(a.id)}:${escapeHtml(dd.id)}" title="${escapeHtml(statusTitle)} — click to change">${label}</span><span class="tag-x" data-dd-remove="${escapeHtml(a.id)}:${escapeHtml(dd.id)}">&times;</span></span>`;
 }).join('');
+}
+
+// The flow-card's compact summary of an account's Direct Debits --
+// "3 (1)" for 3 deal-linked, 1 transferrable. Unclassified ones aren't
+// counted in either number (only visible via the full chip list), so
+// the tooltip spells out the total whenever it doesn't already match.
+function ddCountLabel(a) {
+const dds = a.directDebits || [];
+if (!dds.length) return null;
+const linked = dds.filter((dd) => dd.status === 'deal-linked').length;
+const transferrable = dds.filter((dd) => dd.status === 'transferrable').length;
+const unclassified = dds.length - linked - transferrable;
+const title = `${linked} deal-linked, ${transferrable} transferrable`
++ (unclassified ? `, ${unclassified} not yet set` : '')
++ ` (${dds.length} Direct Debit${dds.length === 1 ? '' : 's'} total)`;
+return { text: `${linked} (${transferrable})`, title };
 }
 
 // Same terse "day + month, year only if not this year" shape
@@ -399,10 +432,12 @@ return num ? `•••• ${num.slice(-4)}` : '';
 // graph.
 function flowCardHtml(a) {
 const masked = maskedAccountNumber(a);
+const dd = ddCountLabel(a);
 return `<div class="flow-card ${escapeHtml(a.colour)}" data-flow-node="${escapeHtml(a.id)}">
 <div class="flow-card-top">${accountBadgeHtml(a, 'lg')}<span class="flow-card-type">${escapeHtml(a.accountType)}</span></div>
 ${masked ? `<div class="flow-card-number">${escapeHtml(masked)}</div>` : ''}
 <div class="flow-card-name">${escapeHtml(accountLabel(a))}</div>
+${dd ? `<div class="flow-card-dd" title="${escapeHtml(dd.title)}">DD ${escapeHtml(dd.text)}</div>` : ''}
 </div>`;
 }
 
@@ -505,7 +540,7 @@ if (!beneficiary) return;
 const a = data.financeAccounts.find((x) => x.id === id);
 if (!a) return;
 if (!Array.isArray(a.directDebits)) a.directDebits = [];
-a.directDebits.push({ id: uid(), beneficiary, amount: amountInput.value.trim() });
+a.directDebits.push({ id: uid(), beneficiary, amount: amountInput.value.trim(), status: '' });
 beneficiaryInput.value = '';
 amountInput.value = '';
 queueSave();
@@ -518,6 +553,17 @@ const [id, ddId] = x.dataset.ddRemove.split(':');
 const a = data.financeAccounts.find((acc) => acc.id === id);
 if (!a) return;
 a.directDebits = (a.directDebits || []).filter((dd) => dd.id !== ddId);
+queueSave();
+renderFinanceAccounts();
+});
+});
+list.querySelectorAll('[data-dd-status-cycle]').forEach((el) => {
+el.addEventListener('click', () => {
+const [id, ddId] = el.dataset.ddStatusCycle.split(':');
+const a = data.financeAccounts.find((acc) => acc.id === id);
+const dd = a && (a.directDebits || []).find((x) => x.id === ddId);
+if (!dd) return;
+dd.status = ddStatusCycle(dd.status);
 queueSave();
 renderFinanceAccounts();
 });

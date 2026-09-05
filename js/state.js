@@ -404,7 +404,7 @@ openDate: '', closeDate: '',
 cassFromAccountId: '',
 deal: '', dealEndDate: '',
 purpose: '',
-directDebits: [], // [{id, beneficiary, amount}] -- often a condition of the deal, not a real transaction ledger (was plain strings; migrated below, 2026-09-05)
+directDebits: [], // [{id, beneficiary, amount, status}] -- often a condition of the deal, not a real transaction ledger (was plain strings; migrated below, 2026-09-05). status: '' | 'deal-linked' | 'transferrable'
 fundingAmount: '', fundingFromAccountId: '',
 // A card's own equivalent of a CASS switch -- but unlike CASS (one
 // switch opens the account), a card can receive several separate
@@ -637,8 +637,11 @@ a.balanceTransfers = a.balanceTransfers.map((bt) => ({ id: bt.id || uid(), fromA
 // nothing already typed in is lost.
 if (!Array.isArray(a.directDebits)) a.directDebits = [];
 a.directDebits = a.directDebits.map((dd) => (typeof dd === 'string'
-? { id: uid(), beneficiary: dd, amount: '' }
-: { id: dd.id || uid(), beneficiary: dd.beneficiary || '', amount: dd.amount || '' }));
+? { id: uid(), beneficiary: dd, amount: '', status: '' }
+// status: '' | 'deal-linked' | 'transferrable' -- whether this DD is
+// required to keep the deal's own funding criteria met, or free to
+// move elsewhere. Blank means not yet classified, not "neither".
+: { id: dd.id || uid(), beneficiary: dd.beneficiary || '', amount: dd.amount || '', status: dd.status || '' }));
 });
 // A CASS-from-account, funding-source, or balance-transfer source
 // pointing at an account since deleted is a dangling reference -- same

@@ -1179,6 +1179,14 @@ padding:2px 8px;
 font-size:11px;
 }
 .tag-chip .tag-x{cursor:pointer;font-weight:700;}
+.dd-status-toggle{cursor:pointer;}
+/* Same idiom planner.js's own draft/firm distinction settled on --
+   border style + font weight, not a new colour/shape -- deal-linked
+   reads as "locked in" (solid fill, like Planner's Firm), transferrable
+   as "loose" (dashed border + italic, like Planner's Draft). Unset stays
+   the plain default .tag-chip look, deliberately not a third style. */
+.tag-chip.tag-chip-deal-linked{background:var(--rose);color:#fff;font-weight:700;}
+.tag-chip.tag-chip-transferrable{border-style:dashed;font-style:italic;}
 .tag-chip.tag-chip-green{background:var(--sage-bg);border-color:var(--sage);color:var(--sage);}
 .tag-chip.tag-chip-amber{background:var(--amber-bg);border-color:var(--amber);color:var(--amber);}
 /* Solid fill, not a tint mixed with --card -- this chip sits inside
@@ -2853,6 +2861,9 @@ color:var(--ink);
 margin-top:auto;
 }
 .flow-card-name{font-size:11px;font-weight:600;color:var(--ink);}
+/* "3 (1)" -- deal-linked count, then transferrable in brackets, see
+   ddCountLabel() in financeaccounts.js. */
+.flow-card-dd{font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--muted);}
 
 /* Settings */
 .settings-group{
