@@ -109,8 +109,22 @@ return `<span class="tag-chip">${label}<span class="tag-x" data-bt-remove="${esc
 }).join('');
 }
 
+// The account (if any) this one was CASS'd OUT to -- the reverse
+// direction of cassFromAccountId, which only ever names the account
+// switched FROM. Not stored anywhere itself; derived by scanning for
+// whoever else's cassFromAccountId points back at this account, same
+// as any other reverse-lookup in this app.
+function cassToAccount(a) {
+return data.financeAccounts.find((x) => x.cassFromAccountId === a.id);
+}
+
 function accountCardHtml(a) {
-const closedTag = isClosed(a) ? '<span class="tag-chip" style="opacity:.7;">Closed</span>' : '';
+let closedTag = '';
+if (isClosed(a)) {
+const to = cassToAccount(a);
+const closedLabel = to ? `Closed — CASS to ${escapeHtml(to.bank || accountLabel(to))}` : 'Closed';
+closedTag = `<span class="tag-chip" style="opacity:.7;">${closedLabel}</span>`;
+}
 return `<details class="account-card" data-account-row="${escapeHtml(a.id)}" ${expandedAccounts.has(a.id) ? 'open' : ''}>
 <summary class="account-summary">
 ${accountBadgeHtml(a, 'sm')}
