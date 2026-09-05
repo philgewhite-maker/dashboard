@@ -386,22 +386,31 @@ createdAt: new Date().toISOString(),
 
 // A bank account or credit card kept open for its incentive -- a switch
 // bonus, cashback, or a 0% balance-transfer deal. See
-// js/features/financeaccounts.js. cassLinkedAccountId/
-// fundingFromAccountId are self-references into data.financeAccounts
-// (the CASS switch partner, and which account funds this one's monthly
-// minimum-funding requirement) -- kept as plain ids, not embedded
-// copies, so editing the OTHER account never leaves this one stale.
+// js/features/financeaccounts.js. cassFromAccountId/
+// fundingFromAccountId/balanceTransfers[].fromAccountId are self-
+// references into data.financeAccounts -- kept as plain ids, not
+// embedded copies, so editing the OTHER account never leaves this one
+// stale. All three are directional, named consistently ("X from
+// account") -- cassFromAccountId is the OLD account this one was
+// CASS-switched from (was cassLinkedAccountId, an undirected-sounding
+// name for what was always really a one-way relationship; renamed
+// 2026-09-05, see the migration guard below).
 function blankFinanceAccount(fields = {}) {
 return {
 id: uid(),
 bank: '', name: '', accountType: 'Current account', // Current account | Savings | Credit card | Mortgage | Loan | Other
 sortCode: '', accountNumber: '',
 openDate: '', closeDate: '',
-cassLinkedAccountId: '',
+cassFromAccountId: '',
 deal: '', dealEndDate: '',
 purpose: '',
 directDebits: [], // plain strings -- often a condition of the deal, not a real transaction ledger
 fundingAmount: '', fundingFromAccountId: '',
+// A card's own equivalent of a CASS switch -- but unlike CASS (one
+// switch opens the account), a card can receive several separate
+// balance transfers over its life, so this is a list, not a single
+// field: [{id, fromAccountId, amount}].
+balanceTransfers: [],
 colour: 'blue', // fixed palette, see ACCOUNT_COLOURS in financeaccounts.js -- also the card's accent stripe when logoUrl is blank
 logoUrl: '', // pasted image URL (e.g. the provider's own Play Store listing icon) -- hotlinked, never downloaded/stored locally
 notes: '',
@@ -614,15 +623,27 @@ if (!Array.isArray(data.subscriptions)) data.subscriptions = [];
 if (!Array.isArray(data.enhancementIdeas)) data.enhancementIdeas = [];
 if (!Array.isArray(data.financeAccounts)) data.financeAccounts = [];
 data.financeAccounts = data.financeAccounts.map((a) => ({ ...blankFinanceAccount(), ...a, id: a.id || uid() }));
-// A CASS-link or funding-source pointing at an account since deleted is
-// a dangling reference -- same orphan-drop reasoning as an Airbnb
-// reservation whose listing was removed, just clearing a field instead
-// of the whole record (the account itself is still fine on its own).
+// cassLinkedAccountId -> cassFromAccountId rename (2026-09-05) -- carry
+// forward anyone's already-entered link rather than silently dropping
+// it. Only when cassFromAccountId isn't already set, so this can't
+// clobber a value someone re-entered under the new field name.
+data.financeAccounts.forEach((a) => {
+if (a.cassLinkedAccountId && !a.cassFromAccountId) a.cassFromAccountId = a.cassLinkedAccountId;
+delete a.cassLinkedAccountId;
+if (!Array.isArray(a.balanceTransfers)) a.balanceTransfers = [];
+a.balanceTransfers = a.balanceTransfers.map((bt) => ({ id: bt.id || uid(), fromAccountId: bt.fromAccountId || '', amount: bt.amount || '' }));
+});
+// A CASS-from-account, funding-source, or balance-transfer source
+// pointing at an account since deleted is a dangling reference -- same
+// orphan-drop reasoning as an Airbnb reservation whose listing was
+// removed, just clearing a field (or dropping one balanceTransfers
+// entry) instead of the whole record.
 {
 const financeAccountIds = new Set(data.financeAccounts.map((a) => a.id));
 data.financeAccounts.forEach((a) => {
-if (a.cassLinkedAccountId && !financeAccountIds.has(a.cassLinkedAccountId)) a.cassLinkedAccountId = '';
+if (a.cassFromAccountId && !financeAccountIds.has(a.cassFromAccountId)) a.cassFromAccountId = '';
 if (a.fundingFromAccountId && !financeAccountIds.has(a.fundingFromAccountId)) a.fundingFromAccountId = '';
+a.balanceTransfers = a.balanceTransfers.filter((bt) => financeAccountIds.has(bt.fromAccountId));
 });
 }
 // Deal Expiries (name/type/date/notes only -- no account identity, no

@@ -6,7 +6,7 @@
 // actually connect them -- the connectivity itself was the ask, not
 // just capturing more fields.
 import { data, queueSave, blankFinanceAccount } from '../state.js';
-import { escapeHtml, bindForm, daysUntil, scrollAndFlash } from '../utils.js';
+import { uid, escapeHtml, bindForm, daysUntil, scrollAndFlash } from '../utils.js';
 import { matchBankLogo } from '../bankLogos.js';
 
 const ACCOUNT_TYPES = ['Current account', 'Savings', 'Credit card', 'Mortgage', 'Loan', 'Other'];
@@ -20,6 +20,10 @@ const ACCOUNT_COLOURS = ['blue', 'pink', 'sage', 'amber', 'slate', 'rose', 'teal
 // field), so which <details> card is open has to be tracked outside the
 // DOM, not read back from it.
 const expandedAccounts = new Set();
+
+function isClosed(a) {
+return !!(a.closeDate && a.closeDate <= new Date().toISOString().slice(0, 10));
+}
 
 function accountLabel(a) {
 return [a.bank, a.name].filter(Boolean).join(' — ') || 'Unnamed account';
@@ -75,8 +79,20 @@ function directDebitsHtml(a) {
 return (a.directDebits || []).map((dd) => `<span class="tag-chip">${escapeHtml(dd)}<span class="tag-x" data-dd-remove="${escapeHtml(a.id)}:${escapeHtml(dd)}">&times;</span></span>`).join('');
 }
 
+// A card's own equivalent of a CASS switch, but there can be several --
+// each rendered as "£X from <account>" rather than a bare amount, since
+// which OTHER account it came from is exactly the fact a bare list of
+// amounts would lose.
+function balanceTransfersHtml(a) {
+return (a.balanceTransfers || []).map((bt) => {
+const from = data.financeAccounts.find((x) => x.id === bt.fromAccountId);
+const label = `${bt.amount ? escapeHtml(bt.amount) : 'Amount not set'} from ${escapeHtml(from ? accountLabel(from) : 'a deleted account')}`;
+return `<span class="tag-chip">${label}<span class="tag-x" data-bt-remove="${escapeHtml(a.id)}:${escapeHtml(bt.id)}">&times;</span></span>`;
+}).join('');
+}
+
 function accountCardHtml(a) {
-const closedTag = a.closeDate && a.closeDate <= new Date().toISOString().slice(0, 10) ? '<span class="tag-chip" style="opacity:.7;">Closed</span>' : '';
+const closedTag = isClosed(a) ? '<span class="tag-chip" style="opacity:.7;">Closed</span>' : '';
 return `<details class="account-card" data-account-row="${escapeHtml(a.id)}" ${expandedAccounts.has(a.id) ? 'open' : ''}>
 <summary class="account-summary">
 ${accountBadgeHtml(a, 'sm')}
@@ -98,7 +114,7 @@ ${dealBadgeHtml(a)}
 <div class="account-field-row">
 <label>Opened<input type="date" data-field="openDate" data-account-id="${a.id}" value="${escapeHtml(a.openDate)}"></label>
 <label>Closed<input type="date" data-field="closeDate" data-account-id="${a.id}" value="${escapeHtml(a.closeDate)}"></label>
-<label>CASS-linked account<select data-field="cassLinkedAccountId" data-account-id="${a.id}">${otherAccountOptionsHtml(a.id, a.cassLinkedAccountId)}</select></label>
+<label>CASS switch from<select data-field="cassFromAccountId" data-account-id="${a.id}">${otherAccountOptionsHtml(a.id, a.cassFromAccountId)}</select></label>
 </div>
 <div class="account-field-row">
 <label>Deal / incentive<input type="text" autocomplete="off" data-field="deal" data-account-id="${a.id}" value="${escapeHtml(a.deal)}" placeholder="e.g. £200 switch bonus, 0% BT 30mo"></label>
@@ -108,6 +124,15 @@ ${dealBadgeHtml(a)}
 <div class="account-field-row">
 <label>Monthly funding in<input type="text" autocomplete="off" data-field="fundingAmount" data-account-id="${a.id}" value="${escapeHtml(a.fundingAmount)}" placeholder="e.g. £1,000/mo"></label>
 <label>Funded from<select data-field="fundingFromAccountId" data-account-id="${a.id}">${otherAccountOptionsHtml(a.id, a.fundingFromAccountId)}</select></label>
+</div>
+<div class="account-field-full">
+<label style="display:block;margin-bottom:4px;">Balance transfers <span class="settings-note" style="display:inline;margin:0;">(a card's own equivalent of a CASS switch — there can be several, over time)</span></label>
+<div class="tag-editor">${balanceTransfersHtml(a)}</div>
+<div class="sync-row" style="margin-top:6px;">
+<select data-bt-from="${a.id}">${otherAccountOptionsHtml(a.id, '')}</select>
+<input type="text" autocomplete="off" class="tag-add-input" placeholder="Amount, e.g. £2,000" data-bt-amount="${a.id}" style="max-width:140px;">
+<button class="sync-btn sm" type="button" data-bt-add="${a.id}">Add</button>
+</div>
 </div>
 <div class="account-field-full">
 <label style="display:block;margin-bottom:4px;">Direct Debits <span class="settings-note" style="display:inline;margin:0;">(often a condition of the deal)</span></label>
@@ -134,52 +159,90 @@ ${dealBadgeHtml(a)}
 
 // ---- Money-flow diagram ---------------------------------------------------
 
-// Only accounts that are a source or target of at least one link appear
-// as nodes -- otherwise every unlinked account would clutter what's
-// meant to be a focused "how does money actually move" view, not a
-// second copy of the full roster.
-function flowEdges() {
+// Which relationship the diagram currently shows -- Ongoing (funding),
+// CASS, or Balance transfers, never more than one at once (see
+// FLOW_MODES below). Module-level, not persisted -- resets to Ongoing
+// on reload, the most-relevant-day-to-day default.
+let flowMode = 'funding';
+const FLOW_MODES = [
+{ key: 'funding', label: 'Ongoing' },
+{ key: 'cass', label: 'CASS' },
+{ key: 'balance-transfer', label: 'Balance transfers' },
+];
+const FLOW_MODE_EMPTY = {
+funding: 'Once you add a monthly funding transfer between accounts, they\'ll show here.',
+cass: 'Once you record a CASS switch between accounts, they\'ll show here.',
+'balance-transfer': 'Once you record a balance transfer between cards, they\'ll show here.',
+};
+
+// Only accounts that are a source or target of at least one edge of the
+// CURRENT mode appear as nodes -- otherwise every unrelated account
+// would clutter what's meant to be a focused "how does money actually
+// move" view, not a second copy of the full roster.
+//
+// Closed-account visibility deliberately differs by mode: Ongoing
+// (funding) hides closed accounts entirely -- a closed account has no
+// ongoing payments to show, and its own edge (if any lingering data
+// still has one) would be misleading. CASS and Balance transfers are
+// both one-off HISTORICAL moves, not recurring ones, so closed accounts
+// stay visible there -- the account you switched FROM, or transferred a
+// balance out of, is very often exactly the one that's since been
+// closed; hiding it would erase the point of showing that history at
+// all.
+function flowEdges(mode) {
+const closedOk = mode !== 'funding';
+const byId = new Map(data.financeAccounts.map((a) => [a.id, a]));
+const accountOk = (id) => { const a = byId.get(id); return !!a && (closedOk || !isClosed(a)); };
 const edges = [];
+if (mode === 'funding') {
 data.financeAccounts.forEach((a) => {
-if (a.fundingFromAccountId && data.financeAccounts.some((x) => x.id === a.fundingFromAccountId)) {
+if (a.fundingFromAccountId && accountOk(a.fundingFromAccountId) && accountOk(a.id)) {
 edges.push({ from: a.fundingFromAccountId, to: a.id, kind: 'funding', label: a.fundingAmount ? `${a.fundingAmount}/mo` : 'funds' });
 }
 });
-// CASS links are naturally stored on both sides once two accounts point
-// at each other, so de-dupe by an order-independent pair key -- one
-// line per pair, not two overlapping ones.
-const seenCass = new Set();
+} else if (mode === 'cass') {
+// Directional now (cassFromAccountId, not the old undirected-sounding
+// cassLinkedAccountId) -- one edge per account that has it set, no
+// pair-dedup needed since the field only ever points one way.
 data.financeAccounts.forEach((a) => {
-if (!a.cassLinkedAccountId || !data.financeAccounts.some((x) => x.id === a.cassLinkedAccountId)) return;
-const key = [a.id, a.cassLinkedAccountId].sort().join('|');
-if (seenCass.has(key)) return;
-seenCass.add(key);
-edges.push({ from: a.id, to: a.cassLinkedAccountId, kind: 'cass', label: 'CASS' });
+if (a.cassFromAccountId && accountOk(a.cassFromAccountId) && accountOk(a.id)) {
+edges.push({ from: a.cassFromAccountId, to: a.id, kind: 'cass', label: 'CASS' });
+}
 });
+} else if (mode === 'balance-transfer') {
+data.financeAccounts.forEach((a) => {
+(a.balanceTransfers || []).forEach((bt) => {
+if (bt.fromAccountId && accountOk(bt.fromAccountId) && accountOk(a.id)) {
+edges.push({ from: bt.fromAccountId, to: a.id, kind: 'balance-transfer', label: bt.amount ? `${bt.amount} BT` : 'BT' });
+}
+});
+});
+}
 return edges;
 }
 
-// Layered left-to-right layout: an account with no incoming funding
-// edge (within the linked set) sits in column 0; anyone it funds sits
-// one column to the right, and so on -- so money visibly flows
-// left-to-right instead of a single row where 3+ funding lines into one
-// account would have nowhere sane to go. CASS-only accounts (no funding
-// edge at all) default to column 0 alongside true sources -- there's no
-// "money flowing in" to place them by. Cycles (two accounts funding
-// each other) are defended against with a per-path visited set, which
-// just stops the recursion rather than resolving them "correctly" --
-// not a shape the UI should encourage, just not allowed to hang on it.
+// Layered left-to-right layout: an account with no incoming edge of the
+// current mode (within the linked set) sits in column 0; anyone it
+// funds/CASS'd/transferred a balance to sits one column to the right,
+// and so on -- so money visibly flows left-to-right instead of a single
+// row where 3+ lines into one account would have nowhere sane to go.
+// `edges` is always a single kind (flowEdges(mode) only ever returns
+// one), so no per-kind filtering is needed here -- every edge passed in
+// counts. Cycles (two accounts funding each other) are defended against
+// with a per-path visited set, which just stops the recursion rather
+// than resolving them "correctly" -- not a shape the UI should
+// encourage, just not allowed to hang on it.
 function flowColumns(nodeIds, edges) {
-const incomingFunding = new Map();
-edges.filter((e) => e.kind === 'funding').forEach((e) => {
-if (!incomingFunding.has(e.to)) incomingFunding.set(e.to, []);
-incomingFunding.get(e.to).push(e.from);
+const incoming = new Map();
+edges.forEach((e) => {
+if (!incoming.has(e.to)) incoming.set(e.to, []);
+incoming.get(e.to).push(e.from);
 });
 const depthCache = new Map();
 function depthOf(id, path) {
 if (depthCache.has(id)) return depthCache.get(id);
 if (path.has(id)) return 0;
-const sources = incomingFunding.get(id) || [];
+const sources = incoming.get(id) || [];
 if (!sources.length) { depthCache.set(id, 0); return 0; }
 path.add(id);
 const d = 1 + Math.max(...sources.map((s) => depthOf(s, path)));
@@ -205,15 +268,19 @@ return [...byDepth.keys()].sort((x, y) => x - y).map((d) => byDepth.get(d));
 // right edge, incoming along the left) instead of every line converging
 // on one shared centre point -- a hub funding 4 accounts gets 4 spaced
 // exit points, a target funded by 3 gets 3 spaced entry points, each
-// computed independently per node. CASS links are typically a single
-// relationship per account, so they stay a simple straight dashed line
-// centre-to-centre rather than needing the same treatment.
-function drawFlowLines() {
+// computed independently per node. Applied uniformly to every edge kind
+// now (not just funding) -- a card can just as easily receive several
+// balance transfers, and treating every kind the same way here is both
+// simpler and still correct. Only the line STYLE (solid/dashed/dotted,
+// FLOW_DASH_BY_KIND below) and label vary by kind -- purely cosmetic,
+// since a given view only ever shows one kind at a time (FLOW_MODES).
+const FLOW_DASH_BY_KIND = { funding: '', cass: 'stroke-dasharray="5 3"', 'balance-transfer': 'stroke-dasharray="1.5 3"' };
+function drawFlowLines(mode) {
 const container = document.getElementById('account-flow-diagram');
 if (!container) return;
 const svg = container.querySelector('.flow-lines');
 if (!svg) return;
-const edges = flowEdges();
+const edges = flowEdges(mode);
 const rect = container.getBoundingClientRect();
 svg.setAttribute('width', String(rect.width));
 svg.setAttribute('height', String(rect.height));
@@ -227,7 +294,7 @@ return { top: r.top - rect.top, left: r.left - rect.left, width: r.width, height
 };
 
 const outEdges = new Map(), inEdges = new Map();
-edges.filter((e) => e.kind === 'funding').forEach((e) => {
+edges.forEach((e) => {
 if (!outEdges.has(e.from)) outEdges.set(e.from, []);
 outEdges.get(e.from).push(e);
 if (!inEdges.has(e.to)) inEdges.set(e.to, []);
@@ -244,17 +311,8 @@ return { x: side === 'out' ? r.left + r.width : r.left, y };
 
 const defs = `<defs><marker id="flow-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--ink)"></path></marker></defs>`;
 const parts = edges.map((e) => {
-let p1, p2, dash = '';
-if (e.kind === 'funding') {
-p1 = anchorPoint(e.from, e, 'out');
-p2 = anchorPoint(e.to, e, 'in');
-} else {
-const r1 = rectOf(e.from), r2 = rectOf(e.to);
-if (!r1 || !r2) return '';
-p1 = { x: r1.left + r1.width / 2, y: r1.top + r1.height / 2 };
-p2 = { x: r2.left + r2.width / 2, y: r2.top + r2.height / 2 };
-dash = 'stroke-dasharray="4 3"';
-}
+const p1 = anchorPoint(e.from, e, 'out');
+const p2 = anchorPoint(e.to, e, 'in');
 if (!p1 || !p2) return '';
 const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
 // A backing rect roughly sized to the label text so it doesn't render
@@ -262,16 +320,14 @@ const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
 // character count rather than measured, which is fine at this label
 // length ("£1,000/mo", "CASS").
 const labelW = Math.max(28, e.label.length * 6 + 8);
-// A gentle S-curve for funding edges -- the horizontal control-point
-// offset is what makes several lines fanning out of/into the same
-// card edge read as distinct paths instead of a straight-line tangle.
-// (Its true midpoint is exactly (mx, my): standard cubic-bezier
-// symmetry when both control points share their endpoint's y and sit
-// at the same x, so the label needs no separate curve-point math.)
-const path = e.kind === 'funding'
-? `M${p1.x},${p1.y} C${mx},${p1.y} ${mx},${p2.y} ${p2.x},${p2.y}`
-: `M${p1.x},${p1.y} L${p2.x},${p2.y}`;
-return `<path d="${path}" fill="none" stroke="var(--ink)" stroke-width="1.5" ${dash} marker-end="url(#flow-arrow)"></path>
+// A gentle S-curve -- the horizontal control-point offset is what
+// makes several lines fanning out of/into the same card edge read as
+// distinct paths instead of a straight-line tangle. (Its true midpoint
+// is exactly (mx, my): standard cubic-bezier symmetry when both
+// control points share their endpoint's y and sit at the same x, so
+// the label needs no separate curve-point math.)
+const path = `M${p1.x},${p1.y} C${mx},${p1.y} ${mx},${p2.y} ${p2.x},${p2.y}`;
+return `<path d="${path}" fill="none" stroke="var(--ink)" stroke-width="1.5" ${FLOW_DASH_BY_KIND[e.kind] || ''} marker-end="url(#flow-arrow)"></path>
 <rect x="${mx - labelW / 2}" y="${my - 8}" width="${labelW}" height="16" rx="4" fill="var(--paper)"></rect>
 <text x="${mx}" y="${my + 4}" text-anchor="middle" font-size="10" font-family="'IBM Plex Mono', monospace" fill="var(--ink)">${escapeHtml(e.label)}</text>`;
 }).join('');
@@ -281,7 +337,7 @@ svg.innerHTML = defs + parts;
 let resizeTimer = null;
 function scheduleFlowRedraw() {
 clearTimeout(resizeTimer);
-resizeTimer = setTimeout(drawFlowLines, 120);
+resizeTimer = setTimeout(() => drawFlowLines(flowMode), 120);
 }
 let resizeBound = false;
 
@@ -308,16 +364,25 @@ ${masked ? `<div class="flow-card-number">${escapeHtml(masked)}</div>` : ''}
 </div>`;
 }
 
+// .overview-chip/.overview-chip.active is the same "pick one of a few"
+// pill pattern the Tasks filter and Overview's own dimension chips
+// already use -- reused as-is rather than inventing a second toggle
+// style.
+function flowModeToggleHtml() {
+return `<div class="flow-mode-toggle">${FLOW_MODES.map((m) => `<button type="button" class="overview-chip${m.key === flowMode ? ' active' : ''}" data-flow-mode="${m.key}">${escapeHtml(m.label)}</button>`).join('')}</div>`;
+}
+
 function flowDiagramHtml() {
-const edges = flowEdges();
+const toggle = flowModeToggleHtml();
+const edges = flowEdges(flowMode);
 if (!edges.length) {
-return '<div class="settings-note" style="margin:0 0 12px;">Once you link accounts via CASS or a funding transfer, they\'ll show here.</div>';
+return `${toggle}<div class="settings-note" style="margin:8px 0 12px;">${FLOW_MODE_EMPTY[flowMode]}</div>`;
 }
 const nodeIds = new Set();
 edges.forEach((e) => { nodeIds.add(e.from); nodeIds.add(e.to); });
 const columns = flowColumns(nodeIds, edges);
 const cardById = new Map(data.financeAccounts.map((a) => [a.id, a]));
-return `<div class="flow-diagram" id="account-flow-diagram">
+return `${toggle}<div class="flow-diagram" id="account-flow-diagram">
 <svg class="flow-lines"></svg>
 <div class="flow-columns">${columns.map((col) => `<div class="flow-column">${col.map((id) => flowCardHtml(cardById.get(id))).join('')}</div>`).join('')}</div>
 </div>`;
@@ -342,6 +407,12 @@ bindLogoFallbacks(flowMount);
 // in its own right.
 flowMount.querySelectorAll('.flow-card').forEach((card) => {
 card.addEventListener('click', () => expandAccountRow(card.dataset.flowNode));
+});
+flowMount.querySelectorAll('[data-flow-mode]').forEach((btn) => {
+btn.addEventListener('click', () => {
+flowMode = btn.dataset.flowMode;
+renderFinanceAccounts();
+});
 });
 }
 list.innerHTML = data.financeAccounts.length
@@ -407,6 +478,33 @@ queueSave();
 renderFinanceAccounts();
 });
 });
+list.querySelectorAll('[data-bt-add]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const id = btn.dataset.btAdd;
+const fromSelect = list.querySelector(`[data-bt-from="${id}"]`);
+const amountInput = list.querySelector(`[data-bt-amount="${id}"]`);
+const fromAccountId = fromSelect.value;
+if (!fromAccountId) return;
+const a = data.financeAccounts.find((x) => x.id === id);
+if (!a) return;
+if (!Array.isArray(a.balanceTransfers)) a.balanceTransfers = [];
+a.balanceTransfers.push({ id: uid(), fromAccountId, amount: amountInput.value.trim() });
+fromSelect.value = '';
+amountInput.value = '';
+queueSave();
+renderFinanceAccounts();
+});
+});
+list.querySelectorAll('[data-bt-remove]').forEach((x) => {
+x.addEventListener('click', () => {
+const [id, btId] = x.dataset.btRemove.split(':');
+const a = data.financeAccounts.find((acc) => acc.id === id);
+if (!a) return;
+a.balanceTransfers = (a.balanceTransfers || []).filter((bt) => bt.id !== btId);
+queueSave();
+renderFinanceAccounts();
+});
+});
 list.querySelectorAll('[data-colour-pick]').forEach((sw) => {
 sw.addEventListener('click', () => {
 const [id, colour] = sw.dataset.colourPick.split(':');
@@ -424,8 +522,9 @@ data.financeAccounts = data.financeAccounts.filter((a) => a.id !== id);
 // Same orphan-drop reasoning as the state.js migration guard --
 // another account's link to this one is now dangling.
 data.financeAccounts.forEach((a) => {
-if (a.cassLinkedAccountId === id) a.cassLinkedAccountId = '';
+if (a.cassFromAccountId === id) a.cassFromAccountId = '';
 if (a.fundingFromAccountId === id) a.fundingFromAccountId = '';
+a.balanceTransfers = (a.balanceTransfers || []).filter((bt) => bt.fromAccountId !== id);
 });
 expandedAccounts.delete(id);
 queueSave();
@@ -433,7 +532,7 @@ renderFinanceAccounts();
 });
 });
 
-drawFlowLines();
+drawFlowLines(flowMode);
 if (!resizeBound) {
 resizeBound = true;
 window.addEventListener('resize', scheduleFlowRedraw);

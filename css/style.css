@@ -2784,14 +2784,21 @@ border:2px solid transparent;
 .account-colour-swatch.red{background:var(--red);}
 .account-colour-swatch.account-colour-selected{border-color:var(--ink);}
 
+/* Ongoing/CASS/Balance transfers -- picking one narrows the diagram to
+   just that relationship (each has its own closed-account visibility
+   rule, see flowEdges() in financeaccounts.js), reusing .overview-chip's
+   existing pill-toggle look rather than a new one. */
+.flow-mode-toggle{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;}
+
 /* Money-flow diagram -- cards are ordinary flexbox elements (a flex row
    of columns, each a flex column) so normal document flow does the
    positioning; an absolutely-positioned <svg> overlay just measures
    their real on-screen edges and draws connecting lines -- see
    drawFlowLines()/flowColumns() in financeaccounts.js. Left-to-right
-   columns by funding "depth" (a hub account left, whoever it funds one
-   column to the right), not a single wrapped row -- what actually
-   makes room for one account having 3+ funding lines. */
+   columns by "depth" within whichever relationship is currently shown
+   (a hub account left, whoever it funds/was CASS'd to/transferred a
+   balance to one column right), not a single wrapped row -- what
+   actually makes room for one account having 3+ lines. */
 .flow-diagram{position:relative;margin-bottom:14px;padding:16px 12px;background:var(--card);border-radius:8px;overflow-x:auto;}
 .flow-lines{position:absolute;inset:0;pointer-events:none;}
 .flow-columns{position:relative;display:flex;gap:48px;align-items:center;width:max-content;min-width:100%;}
