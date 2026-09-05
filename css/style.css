@@ -2742,6 +2742,11 @@ font-size:11px;font-weight:600;
 flex-shrink:0;
 }
 .account-badge.sm{width:22px;height:22px;font-size:10px;}
+/* Squarer, app-icon-like radius for the bigger flow-card badge -- a
+   pasted Play-Store-style icon looks odd forced into a perfect circle
+   at this size, and .account-badge-logo's img below inherits whichever
+   radius its size class sets. */
+.account-badge.lg{width:40px;height:40px;font-size:15px;border-radius:10px;}
 .account-badge.blue{background:var(--blue-bg);color:var(--blue);}
 .account-badge.pink{background:var(--pink-bg);color:var(--pink);}
 .account-badge.sage{background:var(--sage-bg);color:var(--sage);}
@@ -2751,6 +2756,9 @@ flex-shrink:0;
 .account-badge.teal{background:var(--teal-bg);color:var(--teal);}
 .account-badge.plum{background:var(--plum-bg);color:var(--plum);}
 .account-badge.red{background:var(--red-bg);color:var(--red);}
+.account-badge.account-badge-logo{padding:0;overflow:hidden;position:relative;}
+.account-badge-logo img{width:100%;height:100%;object-fit:cover;border-radius:inherit;display:block;}
+.account-badge-fallback{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;border-radius:inherit;}
 .account-colour-picker{display:flex;gap:6px;flex-wrap:wrap;}
 .account-colour-swatch{
 width:20px;height:20px;
@@ -2769,23 +2777,57 @@ border:2px solid transparent;
 .account-colour-swatch.red{background:var(--red);}
 .account-colour-swatch.account-colour-selected{border-color:var(--ink);}
 
-/* Money-flow diagram -- nodes are ordinary flexbox-wrapped DOM elements
-   (normal document flow handles the layout), an absolutely-positioned
-   <svg> overlay just measures their real on-screen centres and draws
-   straight connecting lines -- see drawFlowLines() in
-   financeaccounts.js. Deliberately simple: no graph-layout algorithm. */
-.flow-diagram{position:relative;margin-bottom:14px;padding:12px;background:var(--card);border-radius:8px;}
+/* Money-flow diagram -- cards are ordinary flexbox elements (a flex row
+   of columns, each a flex column) so normal document flow does the
+   positioning; an absolutely-positioned <svg> overlay just measures
+   their real on-screen edges and draws connecting lines -- see
+   drawFlowLines()/flowColumns() in financeaccounts.js. Left-to-right
+   columns by funding "depth" (a hub account left, whoever it funds one
+   column to the right), not a single wrapped row -- what actually
+   makes room for one account having 3+ funding lines. */
+.flow-diagram{position:relative;margin-bottom:14px;padding:16px 12px;background:var(--card);border-radius:8px;overflow-x:auto;}
 .flow-lines{position:absolute;inset:0;pointer-events:none;}
-.flow-nodes{position:relative;display:flex;flex-wrap:wrap;gap:24px;justify-content:space-around;padding:20px 8px;}
-.flow-node{
-display:flex;
-flex-direction:column;
-align-items:center;
-gap:4px;
-font-size:11px;
-text-align:center;
-max-width:90px;
+.flow-columns{position:relative;display:flex;gap:48px;align-items:center;width:max-content;min-width:100%;}
+.flow-column{display:flex;flex-direction:column;gap:28px;}
+/* Debit/credit-card-shaped node -- logo + account type where a real
+   card's issuer wordmark sits, a masked number, bank+account name --
+   instead of a bare badge+label chip, so the diagram carries an
+   account's own identity, not just its position in the graph. */
+.flow-card{
+width:150px;min-height:92px;
+display:flex;flex-direction:column;gap:8px;
+padding:10px 12px;
+border-radius:12px;
+border-left:4px solid transparent;
+background:var(--paper);
 }
+.flow-card.blue{border-left-color:var(--blue);background:var(--blue-bg);}
+.flow-card.pink{border-left-color:var(--pink);background:var(--pink-bg);}
+.flow-card.sage{border-left-color:var(--sage);background:var(--sage-bg);}
+.flow-card.amber{border-left-color:var(--amber);background:var(--amber-bg);}
+.flow-card.slate{border-left-color:var(--slate);background:var(--slate-bg);}
+.flow-card.rose{border-left-color:var(--rose);background:var(--rose-bg);}
+.flow-card.teal{border-left-color:var(--teal);background:var(--teal-bg);}
+.flow-card.plum{border-left-color:var(--plum);background:var(--plum-bg);}
+.flow-card.red{border-left-color:var(--red);background:var(--red-bg);}
+.flow-card-top{display:flex;align-items:flex-start;justify-content:space-between;gap:6px;}
+.flow-card-type{
+font-family:'IBM Plex Mono',monospace;
+font-size:8px;
+text-transform:uppercase;
+letter-spacing:.05em;
+color:var(--muted);
+text-align:right;
+padding-top:2px;
+}
+.flow-card-number{
+font-family:'IBM Plex Mono',monospace;
+font-size:12px;
+letter-spacing:.05em;
+color:var(--ink);
+margin-top:auto;
+}
+.flow-card-name{font-size:11px;font-weight:600;color:var(--ink);}
 
 /* Settings */
 .settings-group{

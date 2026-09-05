@@ -26,8 +26,31 @@ return [a.bank, a.name].filter(Boolean).join(' — ') || 'Unnamed account';
 function accountInitials(a) {
 return (a.bank || a.name || '?').trim().slice(0, 2).toUpperCase();
 }
+// Prefers a pasted logo image (e.g. the provider's own Play Store
+// listing icon, hotlinked -- never downloaded/stored locally, see
+// blankFinanceAccount's own comment) over the coloured-initials
+// fallback. `img[error]` doesn't bubble, so the fallback-reveal has to
+// be bound per-image after insertion -- see bindLogoFallbacks() below,
+// called after every render.
 function accountBadgeHtml(a, sizeClass) {
-return `<span class="account-badge ${escapeHtml(a.colour)} ${sizeClass || ''}">${escapeHtml(accountInitials(a))}</span>`;
+const cls = `account-badge ${escapeHtml(a.colour)} ${sizeClass || ''}`;
+const initials = escapeHtml(accountInitials(a));
+if (a.logoUrl) {
+return `<span class="${cls} account-badge-logo"><img src="${escapeHtml(a.logoUrl)}" alt="" data-badge-img="1"><span class="account-badge-fallback" data-badge-fallback hidden>${initials}</span></span>`;
+}
+return `<span class="${cls}">${initials}</span>`;
+}
+function bindLogoFallbacks(root) {
+root?.querySelectorAll('img[data-badge-img]').forEach((img) => {
+img.addEventListener('error', () => {
+// closest() has to run BEFORE remove() -- once detached, the img has
+// no parent left to walk up from and the lookup silently finds
+// nothing, leaving the fallback stuck hidden behind a blank badge.
+const badge = img.closest('.account-badge');
+img.remove();
+badge?.querySelector('[data-badge-fallback]')?.removeAttribute('hidden');
+}, { once: true });
+});
 }
 
 // Same expiry-badge classes vouchers.js/subscriptions.js/the old
@@ -93,8 +116,11 @@ ${dealBadgeHtml(a)}
 <button class="sync-btn sm" type="button" data-dd-add="${a.id}">Add</button>
 </div>
 </div>
+<div class="account-field-row">
+<label class="account-field-full">Logo URL <span class="settings-note" style="display:inline;margin:0;">(optional -- e.g. the bank's own Play Store listing icon)</span><input type="text" autocomplete="off" data-field="logoUrl" data-account-id="${a.id}" value="${escapeHtml(a.logoUrl)}" placeholder="https://play-lh.googleusercontent.com/…"></label>
+</div>
 <div class="account-field-full">
-<label style="display:block;margin-bottom:4px;">Colour</label>
+<label style="display:block;margin-bottom:4px;">Colour <span class="settings-note" style="display:inline;margin:0;">(the card's accent stripe, and the fallback badge if no logo)</span></label>
 <div class="account-colour-picker">${ACCOUNT_COLOURS.map((c) => `<span class="account-colour-swatch ${c} ${c === a.colour ? 'account-colour-selected' : ''}" data-colour-pick="${a.id}:${c}" title="${c}"></span>`).join('')}</div>
 </div>
 <label class="account-field-full">Notes<textarea data-field="notes" data-account-id="${a.id}" rows="2" placeholder="Anything else worth remembering">${escapeHtml(a.notes)}</textarea></label>
@@ -132,11 +158,55 @@ edges.push({ from: a.id, to: a.cassLinkedAccountId, kind: 'cass', label: 'CASS' 
 return edges;
 }
 
-// Nodes are laid out by ordinary flexbox wrap in the DOM -- no custom
-// graph-layout algorithm. This just measures where they actually
-// landed and draws straight SVG lines between the real centre points,
-// deliberately simple for a first version: no edge-crossing avoidance,
-// no smart node ordering beyond insertion order.
+// Layered left-to-right layout: an account with no incoming funding
+// edge (within the linked set) sits in column 0; anyone it funds sits
+// one column to the right, and so on -- so money visibly flows
+// left-to-right instead of a single row where 3+ funding lines into one
+// account would have nowhere sane to go. CASS-only accounts (no funding
+// edge at all) default to column 0 alongside true sources -- there's no
+// "money flowing in" to place them by. Cycles (two accounts funding
+// each other) are defended against with a per-path visited set, which
+// just stops the recursion rather than resolving them "correctly" --
+// not a shape the UI should encourage, just not allowed to hang on it.
+function flowColumns(nodeIds, edges) {
+const incomingFunding = new Map();
+edges.filter((e) => e.kind === 'funding').forEach((e) => {
+if (!incomingFunding.has(e.to)) incomingFunding.set(e.to, []);
+incomingFunding.get(e.to).push(e.from);
+});
+const depthCache = new Map();
+function depthOf(id, path) {
+if (depthCache.has(id)) return depthCache.get(id);
+if (path.has(id)) return 0;
+const sources = incomingFunding.get(id) || [];
+if (!sources.length) { depthCache.set(id, 0); return 0; }
+path.add(id);
+const d = 1 + Math.max(...sources.map((s) => depthOf(s, path)));
+path.delete(id);
+depthCache.set(id, d);
+return d;
+}
+const byDepth = new Map();
+nodeIds.forEach((id) => {
+const d = depthOf(id, new Set());
+if (!byDepth.has(d)) byDepth.set(d, []);
+byDepth.get(d).push(id);
+});
+return [...byDepth.keys()].sort((x, y) => x - y).map((d) => byDepth.get(d));
+}
+
+// Nodes are laid out by ordinary flexbox (columns of a flex row, each a
+// flex column) -- normal document flow does the positioning, no pixel
+// math for placement. This just measures where cards actually landed
+// and draws SVG connectors between them. The part that actually solves
+// "some accounts have 3+ funding lines": each node's OWN edges are
+// distributed evenly along its relevant border (outgoing along the
+// right edge, incoming along the left) instead of every line converging
+// on one shared centre point -- a hub funding 4 accounts gets 4 spaced
+// exit points, a target funded by 3 gets 3 spaced entry points, each
+// computed independently per node. CASS links are typically a single
+// relationship per account, so they stay a simple straight dashed line
+// centre-to-centre rather than needing the same treatment.
 function drawFlowLines() {
 const container = document.getElementById('account-flow-diagram');
 if (!container) return;
@@ -147,15 +217,43 @@ const rect = container.getBoundingClientRect();
 svg.setAttribute('width', String(rect.width));
 svg.setAttribute('height', String(rect.height));
 svg.setAttribute('viewBox', `0 0 ${rect.width} ${rect.height}`);
-const centreOf = (id) => {
+
+const rectOf = (id) => {
 const el = container.querySelector(`[data-flow-node="${id}"]`);
 if (!el) return null;
 const r = el.getBoundingClientRect();
-return { x: r.left + r.width / 2 - rect.left, y: r.top + r.height / 2 - rect.top };
+return { top: r.top - rect.top, left: r.left - rect.left, width: r.width, height: r.height };
 };
+
+const outEdges = new Map(), inEdges = new Map();
+edges.filter((e) => e.kind === 'funding').forEach((e) => {
+if (!outEdges.has(e.from)) outEdges.set(e.from, []);
+outEdges.get(e.from).push(e);
+if (!inEdges.has(e.to)) inEdges.set(e.to, []);
+inEdges.get(e.to).push(e);
+});
+const anchorPoint = (id, edge, side) => {
+const r = rectOf(id);
+if (!r) return null;
+const list = (side === 'out' ? outEdges : inEdges).get(id) || [];
+const idx = list.indexOf(edge);
+const y = r.top + ((idx + 1) / (list.length + 1)) * r.height;
+return { x: side === 'out' ? r.left + r.width : r.left, y };
+};
+
 const defs = `<defs><marker id="flow-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--ink)"></path></marker></defs>`;
-const lines = edges.map((e) => {
-const p1 = centreOf(e.from), p2 = centreOf(e.to);
+const parts = edges.map((e) => {
+let p1, p2, dash = '';
+if (e.kind === 'funding') {
+p1 = anchorPoint(e.from, e, 'out');
+p2 = anchorPoint(e.to, e, 'in');
+} else {
+const r1 = rectOf(e.from), r2 = rectOf(e.to);
+if (!r1 || !r2) return '';
+p1 = { x: r1.left + r1.width / 2, y: r1.top + r1.height / 2 };
+p2 = { x: r2.left + r2.width / 2, y: r2.top + r2.height / 2 };
+dash = 'stroke-dasharray="4 3"';
+}
 if (!p1 || !p2) return '';
 const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
 // A backing rect roughly sized to the label text so it doesn't render
@@ -163,11 +261,20 @@ const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
 // character count rather than measured, which is fine at this label
 // length ("£1,000/mo", "CASS").
 const labelW = Math.max(28, e.label.length * 6 + 8);
-return `<line x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}" stroke="var(--ink)" stroke-width="1.5" ${e.kind === 'cass' ? 'stroke-dasharray="4 3"' : ''} marker-end="url(#flow-arrow)"></line>
+// A gentle S-curve for funding edges -- the horizontal control-point
+// offset is what makes several lines fanning out of/into the same
+// card edge read as distinct paths instead of a straight-line tangle.
+// (Its true midpoint is exactly (mx, my): standard cubic-bezier
+// symmetry when both control points share their endpoint's y and sit
+// at the same x, so the label needs no separate curve-point math.)
+const path = e.kind === 'funding'
+? `M${p1.x},${p1.y} C${mx},${p1.y} ${mx},${p2.y} ${p2.x},${p2.y}`
+: `M${p1.x},${p1.y} L${p2.x},${p2.y}`;
+return `<path d="${path}" fill="none" stroke="var(--ink)" stroke-width="1.5" ${dash} marker-end="url(#flow-arrow)"></path>
 <rect x="${mx - labelW / 2}" y="${my - 8}" width="${labelW}" height="16" rx="4" fill="var(--paper)"></rect>
 <text x="${mx}" y="${my + 4}" text-anchor="middle" font-size="10" font-family="'IBM Plex Mono', monospace" fill="var(--ink)">${escapeHtml(e.label)}</text>`;
 }).join('');
-svg.innerHTML = defs + lines;
+svg.innerHTML = defs + parts;
 }
 
 let resizeTimer = null;
@@ -177,6 +284,29 @@ resizeTimer = setTimeout(drawFlowLines, 120);
 }
 let resizeBound = false;
 
+// Masked like a real card face ("•••• 1234") -- a light, cosmetic touch,
+// not a security measure (the full number is still one click away in
+// the account's own detail form).
+function maskedAccountNumber(a) {
+const num = String(a.accountNumber || '').replace(/\s+/g, '');
+return num ? `•••• ${num.slice(-4)}` : '';
+}
+
+// Each node rendered as a debit/credit-card-shaped face -- logo (or the
+// colour+initials fallback) top-left, account type top-right like an
+// issuer wordmark, masked number, bank+account name -- instead of a
+// bare badge+label chip, so the diagram carries enough of an account's
+// own identity to be read at a glance, not just its position in the
+// graph.
+function flowCardHtml(a) {
+const masked = maskedAccountNumber(a);
+return `<div class="flow-card ${escapeHtml(a.colour)}" data-flow-node="${escapeHtml(a.id)}">
+<div class="flow-card-top">${accountBadgeHtml(a, 'lg')}<span class="flow-card-type">${escapeHtml(a.accountType)}</span></div>
+${masked ? `<div class="flow-card-number">${escapeHtml(masked)}</div>` : ''}
+<div class="flow-card-name">${escapeHtml(accountLabel(a))}</div>
+</div>`;
+}
+
 function flowDiagramHtml() {
 const edges = flowEdges();
 if (!edges.length) {
@@ -184,10 +314,11 @@ return '<div class="settings-note" style="margin:0 0 12px;">Once you link accoun
 }
 const nodeIds = new Set();
 edges.forEach((e) => { nodeIds.add(e.from); nodeIds.add(e.to); });
-const nodes = data.financeAccounts.filter((a) => nodeIds.has(a.id));
+const columns = flowColumns(nodeIds, edges);
+const cardById = new Map(data.financeAccounts.map((a) => [a.id, a]));
 return `<div class="flow-diagram" id="account-flow-diagram">
 <svg class="flow-lines"></svg>
-<div class="flow-nodes">${nodes.map((a) => `<div class="flow-node" data-flow-node="${escapeHtml(a.id)}">${accountBadgeHtml(a, 'sm')}<span>${escapeHtml(accountLabel(a))}</span></div>`).join('')}</div>
+<div class="flow-columns">${columns.map((col) => `<div class="flow-column">${col.map((id) => flowCardHtml(cardById.get(id))).join('')}</div>`).join('')}</div>
 </div>`;
 }
 
@@ -199,10 +330,11 @@ const flowMount = document.getElementById('accounts-flow-mount');
 const countEl = document.getElementById('accounts-count');
 if (!list) return;
 if (countEl) countEl.textContent = data.financeAccounts.length + (data.financeAccounts.length === 1 ? ' account' : ' accounts');
-if (flowMount) flowMount.innerHTML = flowDiagramHtml();
+if (flowMount) { flowMount.innerHTML = flowDiagramHtml(); bindLogoFallbacks(flowMount); }
 list.innerHTML = data.financeAccounts.length
 ? data.financeAccounts.map(accountCardHtml).join('')
 : '<div class="empty">No accounts tracked yet. Add one below.</div>';
+bindLogoFallbacks(list);
 
 list.querySelectorAll('details.account-card').forEach((el) => {
 el.addEventListener('toggle', () => {

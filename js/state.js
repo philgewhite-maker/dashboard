@@ -402,7 +402,8 @@ deal: '', dealEndDate: '',
 purpose: '',
 directDebits: [], // plain strings -- often a condition of the deal, not a real transaction ledger
 fundingAmount: '', fundingFromAccountId: '',
-colour: 'blue', // fixed palette, see ACCOUNT_COLOURS in financeaccounts.js
+colour: 'blue', // fixed palette, see ACCOUNT_COLOURS in financeaccounts.js -- also the card's accent stripe when logoUrl is blank
+logoUrl: '', // pasted image URL (e.g. the provider's own Play Store listing icon) -- hotlinked, never downloaded/stored locally
 notes: '',
 createdAt: new Date().toISOString(),
 ...fields,
