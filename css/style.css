@@ -1473,6 +1473,14 @@ white-space:nowrap;
 .cal-badge.rose{background:var(--rose-bg);color:var(--rose);}
 .cal-badge.plum{background:var(--plum-bg);color:var(--plum);}
 .cal-badge.red{background:var(--red-bg);color:var(--red);}
+.cal-clean-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;}
+/* Cleaner chips can't safely reuse any of the room-colour fills above --
+   all 9 are already claimed by AIRBNB_COLOURS, so any one of them could
+   collide with whichever colour the listing badge just above happens to
+   use. An outlined treatment (not a new filled hue) stays visually
+   distinct no matter which room colour it's sitting under. */
+.cal-badge.cleaner-chip{background:var(--paper);border:1px solid var(--ink);color:var(--ink);}
+.cal-badge.cleaner-chip-tbc{background:transparent;border:1px dashed var(--muted);color:var(--muted);font-style:italic;}
 .cal-actions{
 margin-left:auto;
 display:flex;

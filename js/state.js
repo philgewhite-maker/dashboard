@@ -29,6 +29,8 @@ calendarStatus: {}, // name -> {found, title, date, syncedAt} — filled in by S
 airbnbListings: [], // {id, label, icsUrl, prefix, colour} -- configured in Settings
 airbnbReservations: [], // synced from each listing's ICS feed, see js/features/airbnb.js
 airbnbSyncStatus: {}, // listingId -> {ok, syncedAt, added, updated, removed, error}
+airbnbCleanerEvents: [], // [{date, name}] -- last scan of "Cleaner - <Name>" events on the push-target calendar, see js/features/airbnb.js
+airbnbCleanerSyncStatus: null, // {ok, syncedAt, error} for the cleaner-event scan above
 vouchers: [],
 businessIdeas: [],
 subscriptions: [],
@@ -694,6 +696,7 @@ data.airbnbReservations = data.airbnbReservations.map((r) => ({ ...blankAirbnbRe
 const airbnbListingIds = new Set(data.airbnbListings.map((l) => l.id));
 data.airbnbReservations = data.airbnbReservations.filter((r) => airbnbListingIds.has(r.listingId));
 if (!data.airbnbSyncStatus || typeof data.airbnbSyncStatus !== 'object' || Array.isArray(data.airbnbSyncStatus)) data.airbnbSyncStatus = {};
+if (!Array.isArray(data.airbnbCleanerEvents)) data.airbnbCleanerEvents = [];
 // Seed the mail search rows from the old fixed shape the first time only.
 // Keyed on the array's absence rather than its emptiness, so deleting every
 // row stays deleted instead of being helpfully repopulated next reload.

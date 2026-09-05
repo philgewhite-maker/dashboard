@@ -254,6 +254,97 @@ if (d.getFullYear() !== new Date().getFullYear()) opts.year = 'numeric';
 return d.toLocaleDateString('en-GB', opts);
 }
 
+// ---- Cleaner events (read-only Google Calendar search) -------------------
+
+// Independent of nudges.js's own AIRBNB_CLEAN_LEAD_DAYS (a "remind me to
+// book a clean" lead time) -- this is "how far from the stay date is a
+// cleaner event still plausibly for THIS turnover," a different question.
+const CLEANER_MATCH_WINDOW_DAYS = 4;
+
+function parseCleanerEventName(summary) {
+const m = /^cleaner\s*-\s*(.+)$/i.exec(String(summary || '').trim());
+return m ? m[1].trim() : null;
+}
+
+// Cleaner events are typed straight into Google Calendar by hand (see
+// nudges.js's buildAirbnbNudges comment) on the SAME calendar "Push to..."
+// targets (data.prefs.airbnbCalendarId) -- confirmed with the user, no
+// separate per-listing calendar exists for this. Read-only: calendar.
+// readonly is a base sign-in scope (sync/googleauth.js), always present,
+// so no hasCalendarWrite() gate is needed here, only canAttemptGoogleAction()
+// (checked implicitly -- findEvents/googleFetch already surface a clear
+// error if signed out, same as every other read in this file). `q` is a
+// cheap server-side prefilter (same pattern pushReservation's own search
+// already uses); the regex above is the real confirmation.
+async function syncCleanerEvents() {
+const calendarId = data.prefs.airbnbCalendarId;
+const upcoming = data.airbnbReservations.filter((r) => r.checkout >= todayStr());
+if (!calendarId || !upcoming.length) { data.airbnbCleanerEvents = []; return; }
+const earliest = upcoming.reduce((min, r) => (r.checkin < min ? r.checkin : min), upcoming[0].checkin);
+const latest = upcoming.reduce((max, r) => (r.checkout > max ? r.checkout : max), upcoming[0].checkout);
+try {
+const items = await findEvents(calendarId, {
+timeMin: `${dateStrAdd(earliest, -CLEANER_MATCH_WINDOW_DAYS)}T00:00:00Z`,
+timeMax: `${dateStrAdd(latest, CLEANER_MATCH_WINDOW_DAYS)}T00:00:00Z`,
+q: 'Cleaner',
+});
+data.airbnbCleanerEvents = items
+.map((e) => ({ date: e.start?.date || (e.start?.dateTime || '').slice(0, 10), name: parseCleanerEventName(e.summary) }))
+.filter((e) => e.date && e.name);
+data.airbnbCleanerSyncStatus = { ok: true, syncedAt: new Date().toISOString() };
+} catch (err) {
+data.airbnbCleanerSyncStatus = { ok: false, syncedAt: new Date().toISOString(), error: err.message || String(err) };
+console.error('Cleaner-event scan failed:', err);
+}
+// Self-contained save, same as syncAllAirbnbListings -- this runs AFTER
+// that function's own queueSave(), so without this call the freshly
+// scanned cleaner events would sit unsaved until some later, unrelated
+// change happened to trigger one.
+queueSave();
+}
+
+// `gapStart`/`gapEnd` is the span between a candidate cleaner event and
+// the reservation edge it would apply to. ANY other same-listing stay
+// that overlaps that span at all disqualifies the candidate -- not just
+// one that sits entirely inside it (a guest who checked in before a
+// would-be check-out clean is already a real scheduling problem even if
+// their own stay runs past the clean's window). Standard half-open
+// interval overlap test, consistent with checkout already being treated
+// as exclusive everywhere else in this file -- a same-day turnover
+// (checkout == next checkin) correctly does NOT count as overlap.
+function otherStayOverlaps(sameListing, gapStart, gapEnd) {
+return sameListing.some((o) => o.checkin < gapEnd && o.checkout > gapStart);
+}
+
+// Scoped to the same listingId only, not other listings that might share
+// a physical room -- a known limitation, not solved speculatively.
+function findCleanerMatch(reservation, edge) {
+const events = data.airbnbCleanerEvents || [];
+const sameListing = data.airbnbReservations.filter((r) => r.listingId === reservation.listingId && r.id !== reservation.id);
+if (edge === 'checkin') {
+const windowStart = dateStrAdd(reservation.checkin, -CLEANER_MATCH_WINDOW_DAYS);
+const best = events
+.filter((e) => e.date >= windowStart && e.date <= reservation.checkin)
+.sort((a, b) => (a.date < b.date ? 1 : -1))[0];
+if (!best) return null;
+return otherStayOverlaps(sameListing, best.date, reservation.checkin) ? null : best;
+}
+const windowEnd = dateStrAdd(reservation.checkout, CLEANER_MATCH_WINDOW_DAYS);
+const best = events
+.filter((e) => e.date >= reservation.checkout && e.date <= windowEnd)
+.sort((a, b) => (a.date < b.date ? -1 : 1))[0];
+if (!best) return null;
+return otherStayOverlaps(sameListing, reservation.checkout, best.date) ? null : best;
+}
+
+function cleanerChipHtml(reservation, edge) {
+const match = findCleanerMatch(reservation, edge);
+const label = edge === 'checkin' ? 'Check-in clean' : 'Check-out clean';
+return match
+? `<span class="cal-badge cleaner-chip">${label}: ${formatAirbnbDate(match.date)} &middot; ${escapeHtml(match.name)}</span>`
+: `<span class="cal-badge cleaner-chip cleaner-chip-tbc">${label}: TBC</span>`;
+}
+
 function reservationRowHtml(r) {
 const listing = data.airbnbListings.find((l) => l.id === r.listingId);
 if (!listing) return '';
@@ -263,6 +354,7 @@ return `<div class="cal-row" data-airbnb-row="${r.id}">
 <span class="cal-name"><span class="dot ${escapeHtml(listing.colour)}"></span>${escapeHtml(listing.label || listing.prefix || 'Listing')}</span>
 <span class="cal-badge ${escapeHtml(listing.colour)}">${formatAirbnbDate(r.checkin)} &rarr; ${formatAirbnbDate(r.checkout)} &middot; ${nights} night${nights === 1 ? '' : 's'}</span>
 </div>
+${data.prefs.airbnbCalendarId ? `<div class="cal-clean-row">${cleanerChipHtml(r, 'checkin')}${cleanerChipHtml(r, 'checkout')}</div>` : ''}
 <div class="cal-event-row">
 <input type="text" autocomplete="off" class="tag-add-input" placeholder="Guest name" data-airbnb-res-field="guestName" data-airbnb-res-id="${r.id}" value="${escapeHtml(r.guestName)}" style="max-width:130px;">
 <input type="text" autocomplete="off" class="tag-add-input" placeholder="Notes" data-airbnb-res-field="notes" data-airbnb-res-id="${r.id}" value="${escapeHtml(r.notes)}" style="max-width:160px;">
@@ -421,6 +513,7 @@ btn.disabled = true;
 status.textContent = 'Syncing…';
 try {
 await syncAllAirbnbListings();
+await syncCleanerEvents();
 renderAirbnb();
 loadAirbnbCalendarOptions({ silent: true });
 // Stripes live on the Planner tab -- dynamic import avoids a static
