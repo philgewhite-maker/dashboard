@@ -2759,6 +2759,13 @@ flex-shrink:0;
 .account-badge.account-badge-logo{padding:0;overflow:hidden;position:relative;}
 .account-badge-logo img{width:100%;height:100%;object-fit:cover;border-radius:inherit;display:block;}
 .account-badge-fallback{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;border-radius:inherit;}
+/* The browser's own [hidden]{display:none} UA rule ties on specificity
+   with .account-badge-fallback's own display:flex above and loses --
+   confirmed live: the initials sat rendered behind a logo the whole
+   time, showing through any transparent-background icon (Barclays'
+   eagle, among others). This wins on specificity regardless of source
+   order, so the attribute actually hides it. */
+.account-badge-fallback[hidden]{display:none;}
 .account-colour-picker{display:flex;gap:6px;flex-wrap:wrap;}
 .account-colour-swatch{
 width:20px;height:20px;
