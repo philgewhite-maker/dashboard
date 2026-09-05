@@ -2801,7 +2801,15 @@ border:2px solid transparent;
    actually makes room for one account having 3+ lines. */
 .flow-diagram{position:relative;margin-bottom:14px;padding:16px 12px;background:var(--card);border-radius:8px;overflow-x:auto;}
 .flow-lines{position:absolute;inset:0;pointer-events:none;}
-.flow-columns{position:relative;display:flex;gap:48px;align-items:center;width:max-content;min-width:100%;}
+/* Wide enough for the longest realistic edge label ("£12,345/mo · 31 Dec
+   2024" is ~170px at drawFlowLines()'s own labelW estimate) to sit
+   entirely within the gap -- .flow-columns paints AFTER (on top of)
+   .flow-lines in DOM/stacking order (both position:relative/absolute,
+   z-index:auto), so a label wider than the gap doesn't get clipped by
+   the SVG viewport, it gets silently painted OVER by the next card.
+   Confirmed live: 48px was nowhere near enough for a dated CASS/funding
+   label, just about enough for a bare "CASS". */
+.flow-columns{position:relative;display:flex;gap:200px;align-items:center;width:max-content;min-width:100%;}
 .flow-column{display:flex;flex-direction:column;gap:28px;}
 /* Debit/credit-card-shaped node -- logo + account type where a real
    card's issuer wordmark sits, a masked number, bank+account name --
