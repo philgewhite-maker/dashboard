@@ -348,14 +348,24 @@ el.addEventListener('change', () => {
 const a = data.financeAccounts.find((x) => x.id === el.dataset.accountId);
 if (!a) return;
 a[el.dataset.field] = el.value.trim();
-// Auto-fill from the pre-fetched bank-logo lookup (bankLogos.js) the
-// moment a recognised bank name is typed -- only when logoUrl is still
-// blank, so this never overwrites a logo the user already picked or
-// pasted themselves.
-if (el.dataset.field === 'bank' && !a.logoUrl) {
-const match = matchBankLogo(a.bank);
-if (match) a.logoUrl = match;
-}
+queueSave();
+renderFinanceAccounts();
+});
+});
+// A dedicated `blur` handler on just the bank field, separate from the
+// generic `change`-based save above -- `change` only fires when a
+// field's value actually differs from what it was on focus, so simply
+// re-confirming an already-correct bank name (nothing to "change") would
+// never reach the change handler at all. `blur` fires every time the
+// field is left regardless, which is exactly "retype the name (or just
+// tab through it again) and it still tries to fill in a blank logo."
+list.querySelectorAll('[data-field="bank"][data-account-id]').forEach((el) => {
+el.addEventListener('blur', () => {
+const a = data.financeAccounts.find((x) => x.id === el.dataset.accountId);
+if (!a || a.logoUrl) return;
+const match = matchBankLogo(el.value.trim() || a.bank);
+if (!match) return;
+a.logoUrl = match;
 queueSave();
 renderFinanceAccounts();
 });

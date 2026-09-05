@@ -2,7 +2,7 @@
 // deletes every cache that isn't the current name, so raising the version is
 // what actually evicts a stale copy from a device that has been running the
 // app for a while.
-const CACHE_NAME = 'dashboard-v215';
+const CACHE_NAME = 'dashboard-v216';
 const CORE_ASSETS = [
 './',
 './index.html',
@@ -128,6 +128,19 @@ return Response.redirect(shareUrl('index.html?shared=1'), 303);
 
 // Network-first for same-origin app files (so edits show up quickly),
 // falling back to cache when offline. Never intercepts API calls.
+//
+// `cache: 'no-store'` on the fetch itself matters: without it, "network-
+// first" only means "ask the network" -- it does NOT mean the network
+// actually gets asked. A plain fetch() still consults the browser's own
+// native HTTP cache first (governed by whatever Cache-Control/Expires
+// GitHub Pages happens to send), completely separate from this file's
+// own CACHE_NAME/Cache-API storage below. Confirmed live: a genuine
+// fresh reload showed the new build-stamp (index.html itself came
+// through) while a deployed JS file's actual BEHAVIOUR was still the
+// old version for a few minutes after push -- the exact silent-stale
+// case this line exists to rule out, not just GitHub Pages' own CDN
+// propagation delay (which no client-side fix can shorten, but at least
+// isn't compounded by an extra, avoidable browser-cache layer on top).
 self.addEventListener('fetch', (event) => {
 const url = new URL(event.request.url);
 if (url.origin !== self.location.origin) return;
@@ -140,7 +153,7 @@ return;
 if (event.request.method !== 'GET') return;
 
 event.respondWith(
-fetch(event.request)
+fetch(event.request, { cache: 'no-store' })
 .then((res) => {
 const clone = res.clone();
 caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
