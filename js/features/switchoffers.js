@@ -28,6 +28,9 @@ import { data, queueSave } from '../state.js';
 import { escapeHtml, uid, todayStr } from '../utils.js';
 import { callTextJson, MissingKeyError } from '../ai.js';
 import { accountLabel, expandAccountRow, formatShortDate } from './financeaccounts.js';
+import { captureTask, revealTask } from './tasks.js';
+
+const MSE_SWITCH_URL = 'https://www.moneysavingexpert.com/banking/compare-best-bank-accounts/#switch';
 
 // Locked, same reasoning as notionplan.js's own PLAN_MODEL choice --
 // interpreting an offer's actual exclusion wording ("no account on
@@ -81,11 +84,23 @@ eligible: ['yes', 'no', 'unsure'].includes(o.eligible) ? o.eligible : 'unsure',
 reasoning: String(o.reasoning || ''),
 suggestedFromAccountId: (data.financeAccounts.find((a) => a.stage === 'CASS-ready' && a.bank === o.suggestedFromBank) || {}).id || '',
 dismissed: false,
+taskId: '', // set once "Create task" is clicked -- see switchOfferActionHtml
 }));
 }
 
 const ELIGIBLE_LABEL = { yes: 'Eligible', unsure: 'Unsure', no: 'Not eligible' };
 const ELIGIBLE_CLASS = { yes: 'tag-chip-green', unsure: 'tag-chip-amber' }; // 'no' stays the plain default chip -- not a warning, just inapplicable
+
+// Only offered for genuinely eligible offers -- "unsure"/"no" aren't
+// something to act on yet. Once a task exists, this switches to the
+// standard record-reference link (CLAUDE.md's convention) rather than
+// staying a button, so re-clicking can't spawn a second task for the
+// same offer.
+function switchOfferActionHtml(o) {
+if (o.eligible !== 'yes') return '';
+if (o.taskId) return `<span class="dd-to-account-link" data-open-task-ref="${escapeHtml(o.taskId)}">&rarr; View task</span>`;
+return `<button class="sync-btn inline" type="button" data-switch-offer-task="${escapeHtml(o.id)}">Create task</button>`;
+}
 
 function opportunityRowHtml(o) {
 const account = o.suggestedFromAccountId ? data.financeAccounts.find((a) => a.id === o.suggestedFromAccountId) : null;
@@ -93,6 +108,7 @@ return `<div class="switch-offer-row" data-switch-offer="${escapeHtml(o.id)}">
 <div class="switch-offer-head">
 <span class="switch-offer-bank">${escapeHtml(o.bank)}</span>
 <span class="tag-chip ${ELIGIBLE_CLASS[o.eligible] || ''}">${ELIGIBLE_LABEL[o.eligible]}</span>
+${switchOfferActionHtml(o)}
 <span class="del-x" style="opacity:1;margin-left:auto;" data-switch-offer-dismiss="${escapeHtml(o.id)}" title="Dismiss">&times;</span>
 </div>
 <div class="switch-offer-offer">${escapeHtml(o.offer)}</div>
@@ -124,6 +140,28 @@ renderSwitchOffers();
 });
 list.querySelectorAll('[data-open-account-ref]').forEach((el) => {
 el.addEventListener('click', () => expandAccountRow(el.dataset.openAccountRef));
+});
+list.querySelectorAll('[data-switch-offer-task]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const o = data.switchOffers.find((entry) => entry.id === btn.dataset.switchOfferTask);
+if (!o || o.taskId) return; // already actioned -- the button shouldn't still be showing, but don't double-create if it is
+const account = o.suggestedFromAccountId ? data.financeAccounts.find((a) => a.id === o.suggestedFromAccountId) : null;
+const task = captureTask({
+title: `Switch to ${o.bank} (${o.offer})`,
+notes: `${o.reasoning}${account ? ` Switch from ${accountLabel(account)}.` : ''}`,
+source: { kind: 'switch offer', label: o.bank, url: MSE_SWITCH_URL },
+});
+o.taskId = task.id;
+queueSave();
+renderSwitchOffers();
+});
+});
+list.querySelectorAll('[data-open-task-ref]').forEach((el) => {
+el.addEventListener('click', async () => {
+const { switchTab } = await import('../tabs.js');
+switchTab('tasks');
+revealTask(el.dataset.openTaskRef);
+});
 });
 }
 
