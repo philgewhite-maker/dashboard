@@ -10,6 +10,17 @@ import { uid, escapeHtml, bindForm, daysUntil, scrollAndFlash } from '../utils.j
 import { matchBankLogo } from '../bankLogos.js';
 
 const ACCOUNT_TYPES = ['Current account', 'Savings', 'Credit card', 'Mortgage', 'Loan', 'Other'];
+// A genuine DECISION, not a fact derivable from other fields -- "closed"
+// and "has a live deal" were proposed alongside this but deliberately
+// aren't members of it, since both are already fully computed elsewhere
+// (isClosed() below, dealBadgeHtml() from dealEndDate) and a manually-
+// set stage for either would just go stale the moment the real field
+// changes without this one being remembered too. Undecided is the
+// neutral default -- shown as no chip at all (see accountCardHtml),
+// same "nothing to say yet" reasoning every other conditional badge on
+// this card already uses.
+const ACCOUNT_STAGES = ['Undecided', 'To keep', 'CASS-ready'];
+const ACCOUNT_STAGE_COLOUR = { 'To keep': 'green', 'CASS-ready': 'amber' };
 // Same idea as airbnb.js's own AIRBNB_COLOURS -- a small, locally-declared
 // fixed palette, since there's no free colour-picker anywhere else to
 // reuse and accounts aren't the same colour space as Airbnb listings.
@@ -189,7 +200,7 @@ return cassToAccount(a) ? [] : ['Closed, but no other account records a CASS swi
 const out = [];
 if (!a.bank && !a.name) out.push('No bank or account name set yet.');
 if (a.cassFromAccountId && !a.openDate) out.push('Came from a CASS switch but has no open date recorded.');
-if (a.dealEndDate && daysUntil(a.dealEndDate) < 0) out.push('Deal ended — still open. Close it, or record a new deal?');
+if (a.dealEndDate && daysUntil(a.dealEndDate) < 0 && a.stage !== 'CASS-ready') out.push('Deal ended — still open. Mark it CASS-ready, close it, or record a new deal?');
 if (a.deal) {
 if (!a.fundingAmount && !a.fundingFromAccountId) out.push('Has a deal but no funding transfer set up — is one needed to keep it?');
 if (!(a.outgoings || []).some((o) => outgoingMethod(o) === 'Direct Debit')) out.push('Has a deal but no Direct Debits recorded — often a condition worth checking.');
@@ -207,6 +218,11 @@ const to = cassToAccount(a);
 const closedLabel = to ? `Closed — CASS to ${escapeHtml(to.bank || accountLabel(to))}` : 'Closed';
 closedTag = `<span class="tag-chip" style="opacity:.7;">${closedLabel}</span>`;
 }
+// Only shown while open -- once closed, closedTag above is already the
+// more informative, more terminal fact; a leftover "To keep" sitting
+// next to "Closed" would just read as contradictory.
+const stageColour = ACCOUNT_STAGE_COLOUR[a.stage];
+const stageTag = (!isClosed(a) && stageColour) ? `<span class="tag-chip tag-chip-${stageColour}">${escapeHtml(a.stage)}</span>` : '';
 const issues = accountIssues(a);
 const issuesTag = issues.length ? `<span class="tag-chip tag-chip-amber" title="${escapeHtml(issues.join(' • '))}">⚠ ${issues.length}</span>` : '';
 return `<details class="account-card" data-account-row="${escapeHtml(a.id)}" ${expandedAccounts.has(a.id) ? 'open' : ''}>
@@ -214,6 +230,7 @@ return `<details class="account-card" data-account-row="${escapeHtml(a.id)}" ${e
 ${accountBadgeHtml(a, 'sm')}
 <span class="account-summary-name">${escapeHtml(accountLabel(a))}</span>
 <span class="tag-chip">${escapeHtml(a.accountType)}</span>
+${stageTag}
 ${closedTag}
 ${dealBadgeHtml(a)}
 ${issuesTag}
@@ -224,6 +241,7 @@ ${issues.length ? `<ul class="suggested-questions" title="Deterministic prompts,
 <label>Bank<input type="text" autocomplete="off" data-field="bank" data-account-id="${a.id}" value="${escapeHtml(a.bank)}" placeholder="e.g. Halifax"></label>
 <label>Account name<input type="text" autocomplete="off" data-field="name" data-account-id="${a.id}" value="${escapeHtml(a.name)}" placeholder="e.g. Reward Current Account"></label>
 <label>Type<select data-field="accountType" data-account-id="${a.id}">${ACCOUNT_TYPES.map((t) => `<option value="${t}" ${t === a.accountType ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+<label>Stage <span class="settings-note" style="display:inline;margin:0;">(a decision, not a fact — closed/deal-active are shown automatically from their own dates)</span><select data-field="stage" data-account-id="${a.id}">${ACCOUNT_STAGES.map((s) => `<option value="${s}" ${s === a.stage ? 'selected' : ''}>${s}</option>`).join('')}</select></label>
 </div>
 <div class="account-field-row">
 <label>Sort code<input type="text" autocomplete="off" data-field="sortCode" data-account-id="${a.id}" value="${escapeHtml(a.sortCode)}" placeholder="00-00-00"></label>

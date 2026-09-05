@@ -399,6 +399,15 @@ function blankFinanceAccount(fields = {}) {
 return {
 id: uid(),
 bank: '', name: '', accountType: 'Current account', // Current account | Savings | Credit card | Mortgage | Loan | Other
+// Undecided | To keep | CASS-ready -- a genuine DECISION, not a fact
+// derivable from other fields, which is deliberately why "closed" and
+// "has a live deal" AREN'T members of this list even though they were
+// proposed alongside it: both are already fully computed elsewhere
+// (isClosed()/closeDate, dealBadgeHtml()/dealEndDate in
+// financeaccounts.js) and manually setting a stage for either would
+// just go stale the moment the real underlying field changes without
+// this one being remembered too.
+stage: 'Undecided',
 sortCode: '', accountNumber: '',
 openDate: '', closeDate: '',
 cassFromAccountId: '',
