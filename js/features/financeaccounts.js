@@ -331,7 +331,58 @@ const d = depthOf(id, new Set());
 if (!byDepth.has(d)) byDepth.set(d, []);
 byDepth.get(d).push(id);
 });
-return [...byDepth.keys()].sort((x, y) => x - y).map((d) => byDepth.get(d));
+const columns = [...byDepth.keys()].sort((x, y) => x - y).map((d) => byDepth.get(d));
+return orderRowsToReduceCrossings(columns, edges);
+}
+
+// Which COLUMN a node lands in was never the problem -- source accounts
+// left, whoever they fund/CASS'd/transferred to one column right. The
+// actual mess (confirmed live: a CASS view with 8 accounts, dashed
+// lines zigzagging across the entire diagram) was row order WITHIN each
+// column being arbitrary insertion order, unrelated to which row its
+// actual edge partner sat on. Standard barycenter heuristic for layered
+// graph drawing: repeatedly re-sort each column by the average row
+// position of the neighbours it's actually connected to in the
+// adjacent column, alternating left-to-right (by predecessors) and
+// right-to-left (by successors) passes until it settles. Not a true
+// crossing-minimiser (that's NP-hard in general) -- a few passes of
+// this converges to something close enough to read cleanly, which is
+// all a diagram at this scale needs.
+function orderRowsToReduceCrossings(columns, edges) {
+if (columns.length < 2) return columns;
+const incomingOf = new Map(), outgoingOf = new Map();
+edges.forEach((e) => {
+if (!incomingOf.has(e.to)) incomingOf.set(e.to, []);
+incomingOf.get(e.to).push(e.from);
+if (!outgoingOf.has(e.from)) outgoingOf.set(e.from, []);
+outgoingOf.get(e.from).push(e.to);
+});
+let cols = columns.map((c) => [...c]);
+function sweep(leftToRight) {
+const range = leftToRight
+? Array.from({ length: cols.length - 1 }, (_, i) => i + 1)
+: Array.from({ length: cols.length - 1 }, (_, i) => cols.length - 2 - i);
+range.forEach((i) => {
+const neighbourCol = cols[leftToRight ? i - 1 : i + 1];
+const neighbourPos = new Map(neighbourCol.map((id, pos) => [id, pos]));
+const neighboursOf = leftToRight ? incomingOf : outgoingOf;
+const currentPos = new Map(cols[i].map((id, pos) => [id, pos]));
+const scored = cols[i].map((id) => {
+const neighbours = (neighboursOf.get(id) || []).filter((n) => neighbourPos.has(n));
+// No neighbour in the adjacent column on this pass (e.g. a source
+// node has nothing to its left) -- keep its current relative
+// position rather than collapsing everything untethered to the top.
+const score = neighbours.length
+? neighbours.reduce((sum, n) => sum + neighbourPos.get(n), 0) / neighbours.length
+: currentPos.get(id);
+return { id, score };
+});
+scored.sort((a, b) => a.score - b.score);
+cols[i] = scored.map((s) => s.id);
+});
+}
+for (let iter = 0; iter < 4; iter++) { sweep(true); sweep(false); }
+return cols;
 }
 
 // Nodes are laid out by ordinary flexbox (columns of a flex row, each a
