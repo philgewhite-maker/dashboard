@@ -75,43 +75,68 @@ return `<option value="">None</option>` + data.financeAccounts
 .join('');
 }
 
+// Every regular outgoing, not just Direct Debits -- standing orders,
+// card payments, anything recurring -- but Direct Debit is still the
+// dominant/default case (deal criteria almost always name DDs
+// specifically), so it stays the default `method` and the ONLY one
+// counted on the flow-card summary (ddCountLabel below).
+const OUTGOING_METHODS = ['Direct Debit', 'Standing Order', 'Card payment', 'Other'];
+const outgoingMethod = (o) => o.method || 'Direct Debit'; // pre-method entries were always DDs
+
 // deal-linked/transferrable reuses the exact idiom planner.js's own
 // draft/firm distinction settled on: border style + font weight, no new
 // visual language (planner.js:123-130 -- a wide text pill used to spell
 // this out, confirmed live to crowd everything else off the row; the
 // border/weight signal costs zero extra width). Blank/unclassified stays
 // the plain default chip look.
-const DD_STATUS_LABEL = { 'deal-linked': 'Deal-linked', transferrable: 'Transferrable' };
-function ddStatusCycle(status) {
+const OUTGOING_STATUS_LABEL = { 'deal-linked': 'Deal-linked', transferrable: 'Transferrable' };
+function outgoingStatusCycle(status) {
 if (status === 'deal-linked') return 'transferrable';
 if (status === 'transferrable') return '';
 return 'deal-linked';
 }
-function directDebitsHtml(a) {
-return (a.directDebits || []).map((dd) => {
-const label = `${escapeHtml(dd.beneficiary || 'Unnamed')}${dd.amount ? ` · ${escapeHtml(dd.amount)}` : ''}`;
-const statusClass = dd.status ? ` tag-chip-${dd.status}` : '';
-const statusTitle = dd.status ? DD_STATUS_LABEL[dd.status] : 'Not set';
+function outgoingsHtml(a) {
+return (a.outgoings || []).map((o) => {
+const toAccount = o.toAccountId ? data.financeAccounts.find((x) => x.id === o.toAccountId) : null;
+const method = outgoingMethod(o);
+const label = `${escapeHtml(o.beneficiary || (toAccount ? 'Transfer' : 'Unnamed'))}${o.amount ? ` · ${escapeHtml(o.amount)}` : ''}${method !== 'Direct Debit' ? ` (${escapeHtml(method)})` : ''}`;
+const statusClass = o.status ? ` tag-chip-${o.status}` : '';
+const statusTitle = o.status ? OUTGOING_STATUS_LABEL[o.status] : 'Not set';
+// toAccountId means this actually pays another of YOUR OWN tracked
+// accounts (e.g. a mortgage overpayment) -- shown as its own small
+// clickable link (record-reference convention: any account referenced
+// elsewhere links back to it), separate from the status-toggle text so
+// the two clicks (cycle status vs. open that account) can't collide.
+const toAccountLink = toAccount
+? ` <span class="dd-to-account-link" data-open-account-ref="${escapeHtml(toAccount.id)}" title="Pays into ${escapeHtml(accountLabel(toAccount))} — an internal transfer between your own accounts, not really money leaving">&rarr; ${escapeHtml(accountLabel(toAccount))}</span>`
+: '';
 // The status-cycle click target is a SIBLING of the × remove button,
 // not its wrapper -- clicking × would otherwise also bubble into a
 // parent status-toggle and cycle the status on every removal.
-return `<span class="tag-chip${statusClass}"><span class="dd-status-toggle" data-dd-status-cycle="${escapeHtml(a.id)}:${escapeHtml(dd.id)}" title="${escapeHtml(statusTitle)} — click to change">${label}</span><span class="tag-x" data-dd-remove="${escapeHtml(a.id)}:${escapeHtml(dd.id)}">&times;</span></span>`;
+return `<span class="tag-chip${statusClass}"><span class="dd-status-toggle" data-dd-status-cycle="${escapeHtml(a.id)}:${escapeHtml(o.id)}" title="${escapeHtml(statusTitle)} — click to change">${label}</span>${toAccountLink}<span class="tag-x" data-dd-remove="${escapeHtml(a.id)}:${escapeHtml(o.id)}">&times;</span></span>`;
 }).join('');
 }
 
-// The flow-card's compact summary of an account's Direct Debits --
-// "3 (1)" for 3 deal-linked, 1 transferrable. Unclassified ones aren't
-// counted in either number (only visible via the full chip list), so
-// the tooltip spells out the total whenever it doesn't already match.
+// The flow-card's compact summary of an account's Direct Debits
+// SPECIFICALLY -- "3 (1)" for 3 deal-linked, 1 transferrable -- even
+// though the underlying list now holds any regular outgoing. Standing
+// orders/card payments/etc. don't count toward this number at all (a
+// deal's own conditions are almost always phrased in terms of DDs, not
+// "any 2 regular payments"); the tooltip notes them separately so
+// they're not simply invisible. Unclassified DDs aren't counted in
+// either number (only visible via the full chip list).
 function ddCountLabel(a) {
-const dds = a.directDebits || [];
+const all = a.outgoings || [];
+const dds = all.filter((o) => outgoingMethod(o) === 'Direct Debit');
 if (!dds.length) return null;
 const linked = dds.filter((dd) => dd.status === 'deal-linked').length;
 const transferrable = dds.filter((dd) => dd.status === 'transferrable').length;
 const unclassified = dds.length - linked - transferrable;
+const otherCount = all.length - dds.length;
 const title = `${linked} deal-linked, ${transferrable} transferrable`
 + (unclassified ? `, ${unclassified} not yet set` : '')
-+ ` (${dds.length} Direct Debit${dds.length === 1 ? '' : 's'} total)`;
++ ` (${dds.length} Direct Debit${dds.length === 1 ? '' : 's'} total)`
++ (otherCount ? ` + ${otherCount} other regular outgoing${otherCount === 1 ? '' : 's'}` : '');
 return { text: `${linked} (${transferrable})`, title };
 }
 
@@ -163,12 +188,11 @@ return cassToAccount(a) ? [] : ['Closed, but no other account records a CASS swi
 }
 const out = [];
 if (!a.bank && !a.name) out.push('No bank or account name set yet.');
-if (!a.sortCode || !a.accountNumber) out.push('Missing sort code or account number.');
 if (a.cassFromAccountId && !a.openDate) out.push('Came from a CASS switch but has no open date recorded.');
 if (a.dealEndDate && daysUntil(a.dealEndDate) < 0) out.push('Deal ended — still open. Close it, or record a new deal?');
 if (a.deal) {
 if (!a.fundingAmount && !a.fundingFromAccountId) out.push('Has a deal but no funding transfer set up — is one needed to keep it?');
-if (!(a.directDebits || []).length) out.push('Has a deal but no Direct Debits recorded — often a condition worth checking.');
+if (!(a.outgoings || []).some((o) => outgoingMethod(o) === 'Direct Debit')) out.push('Has a deal but no Direct Debits recorded — often a condition worth checking.');
 } else if (!a.purpose && !a.notes) {
 out.push('No deal, purpose, or notes recorded — why is this kept open?');
 }
@@ -230,11 +254,13 @@ ${issues.length ? `<ul class="suggested-questions" title="Deterministic prompts,
 </div>
 </div>
 <div class="account-field-full">
-<label style="display:block;margin-bottom:4px;">Direct Debits <span class="settings-note" style="display:inline;margin:0;">(often a condition of the deal)</span></label>
-<div class="tag-editor">${directDebitsHtml(a)}</div>
+<label style="display:block;margin-bottom:4px;">Direct Debits &amp; other outgoings <span class="settings-note" style="display:inline;margin:0;">(DDs are often a condition of the deal; the flow-card count is DD-specific)</span></label>
+<div class="tag-editor">${outgoingsHtml(a)}</div>
 <div class="sync-row" style="margin-top:6px;">
-<input type="text" autocomplete="off" class="tag-add-input" placeholder="Beneficiary, e.g. Netflix" data-dd-beneficiary="${a.id}" style="max-width:160px;">
-<input type="text" autocomplete="off" class="tag-add-input" placeholder="Amount, e.g. £9.99/mo" data-dd-amount="${a.id}" style="max-width:130px;">
+<input type="text" autocomplete="off" class="tag-add-input" placeholder="Beneficiary, e.g. Netflix" data-dd-beneficiary="${a.id}" style="max-width:150px;">
+<input type="text" autocomplete="off" class="tag-add-input" placeholder="Amount, e.g. £9.99/mo" data-dd-amount="${a.id}" style="max-width:120px;">
+<select data-dd-method="${a.id}" title="How it's paid">${OUTGOING_METHODS.map((m) => `<option value="${m}">${m}</option>`).join('')}</select>
+<select data-dd-to-account="${a.id}" title="Pays into one of your own accounts instead of a third party (e.g. a mortgage overpayment)">${otherAccountOptionsHtml(a.id, '')}</select>
 <button class="sync-btn sm" type="button" data-dd-add="${a.id}">Add</button>
 </div>
 </div>
@@ -621,14 +647,22 @@ btn.addEventListener('click', () => {
 const id = btn.dataset.ddAdd;
 const beneficiaryInput = list.querySelector(`[data-dd-beneficiary="${id}"]`);
 const amountInput = list.querySelector(`[data-dd-amount="${id}"]`);
+const methodSelect = list.querySelector(`[data-dd-method="${id}"]`);
+const toAccountSelect = list.querySelector(`[data-dd-to-account="${id}"]`);
 const beneficiary = beneficiaryInput.value.trim();
-if (!beneficiary) return;
+const toAccountId = toAccountSelect.value;
+// A picked "pays into" account already identifies the outgoing on its
+// own (accountLabel() falls back to it, see outgoingsHtml) -- only
+// require typed text when there's no such link.
+if (!beneficiary && !toAccountId) return;
 const a = data.financeAccounts.find((x) => x.id === id);
 if (!a) return;
-if (!Array.isArray(a.directDebits)) a.directDebits = [];
-a.directDebits.push({ id: uid(), beneficiary, amount: amountInput.value.trim(), status: '' });
+if (!Array.isArray(a.outgoings)) a.outgoings = [];
+a.outgoings.push({ id: uid(), beneficiary, amount: amountInput.value.trim(), status: '', method: methodSelect.value, toAccountId });
 beneficiaryInput.value = '';
 amountInput.value = '';
+methodSelect.value = OUTGOING_METHODS[0];
+toAccountSelect.value = '';
 queueSave();
 renderFinanceAccounts();
 });
@@ -638,7 +672,7 @@ x.addEventListener('click', () => {
 const [id, ddId] = x.dataset.ddRemove.split(':');
 const a = data.financeAccounts.find((acc) => acc.id === id);
 if (!a) return;
-a.directDebits = (a.directDebits || []).filter((dd) => dd.id !== ddId);
+a.outgoings = (a.outgoings || []).filter((o) => o.id !== ddId);
 queueSave();
 renderFinanceAccounts();
 });
@@ -647,12 +681,15 @@ list.querySelectorAll('[data-dd-status-cycle]').forEach((el) => {
 el.addEventListener('click', () => {
 const [id, ddId] = el.dataset.ddStatusCycle.split(':');
 const a = data.financeAccounts.find((acc) => acc.id === id);
-const dd = a && (a.directDebits || []).find((x) => x.id === ddId);
-if (!dd) return;
-dd.status = ddStatusCycle(dd.status);
+const o = a && (a.outgoings || []).find((x) => x.id === ddId);
+if (!o) return;
+o.status = outgoingStatusCycle(o.status);
 queueSave();
 renderFinanceAccounts();
 });
+});
+list.querySelectorAll('[data-open-account-ref]').forEach((el) => {
+el.addEventListener('click', () => expandAccountRow(el.dataset.openAccountRef));
 });
 list.querySelectorAll('[data-bt-add]').forEach((btn) => {
 btn.addEventListener('click', () => {
@@ -703,6 +740,11 @@ data.financeAccounts.forEach((a) => {
 if (a.cassFromAccountId === id) a.cassFromAccountId = '';
 if (a.fundingFromAccountId === id) a.fundingFromAccountId = '';
 a.balanceTransfers = (a.balanceTransfers || []).filter((bt) => bt.fromAccountId !== id);
+// An outgoing's toAccountId is optional enrichment, not the whole
+// point of the entry (the beneficiary text stands alone) -- clear it
+// back to an ordinary external-looking outgoing rather than dropping
+// the entry, same reasoning as state.js's own orphan-cleanup guard.
+(a.outgoings || []).forEach((o) => { if (o.toAccountId === id) o.toAccountId = ''; });
 });
 expandedAccounts.delete(id);
 queueSave();

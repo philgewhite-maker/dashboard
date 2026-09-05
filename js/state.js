@@ -404,7 +404,17 @@ openDate: '', closeDate: '',
 cassFromAccountId: '',
 deal: '', dealEndDate: '',
 purpose: '',
-directDebits: [], // [{id, beneficiary, amount, status}] -- often a condition of the deal, not a real transaction ledger (was plain strings; migrated below, 2026-09-05). status: '' | 'deal-linked' | 'transferrable'
+// [{id, beneficiary, amount, status, method, toAccountId}] -- every
+// regular outgoing, Direct Debits and anything else (standing orders,
+// card payments...), not just DDs specifically (was directDebits, DD-
+// only; broadened 2026-09-05, migrated below). method: 'Direct Debit' |
+// 'Standing Order' | 'Card payment' | 'Other'. toAccountId: set when
+// this payment actually goes to ANOTHER of your own tracked accounts
+// (e.g. a mortgage overpayment) rather than a real third party --
+// matters for a future "account monthly surplus" check, which needs to
+// treat that as an internal transfer between your own accounts, not
+// money actually leaving your overall position.
+outgoings: [],
 fundingAmount: '', fundingFromAccountId: '',
 // A card's own equivalent of a CASS switch -- but unlike CASS (one
 // switch opens the account), a card can receive several separate
@@ -632,28 +642,48 @@ if (a.cassLinkedAccountId && !a.cassFromAccountId) a.cassFromAccountId = a.cassL
 delete a.cassLinkedAccountId;
 if (!Array.isArray(a.balanceTransfers)) a.balanceTransfers = [];
 a.balanceTransfers = a.balanceTransfers.map((bt) => ({ id: bt.id || uid(), fromAccountId: bt.fromAccountId || '', amount: bt.amount || '', date: bt.date || '' }));
-// directDebits: plain strings -> {id, beneficiary, amount} (2026-09-05)
-// -- a bare string becomes that entry's beneficiary, amount blank, so
-// nothing already typed in is lost.
-if (!Array.isArray(a.directDebits)) a.directDebits = [];
-a.directDebits = a.directDebits.map((dd) => (typeof dd === 'string'
-? { id: uid(), beneficiary: dd, amount: '', status: '' }
-// status: '' | 'deal-linked' | 'transferrable' -- whether this DD is
-// required to keep the deal's own funding criteria met, or free to
+// directDebits -> outgoings (2026-09-05) -- carries the array forward
+// under its new name (old field deleted, not left as dead data), and
+// each entry gains method (defaults 'Direct Debit', preserving what
+// every existing entry already meant) + toAccountId (blank -- nothing
+// already on file could have captured that yet). A bare string (the
+// even-older shape, pre-dating amount/status too) becomes that entry's
+// beneficiary with everything else blank, so nothing already typed in
+// is lost across either migration step.
+// blankFinanceAccount()'s own `outgoings: []` default is already spread
+// onto `a` by the `{...blankFinanceAccount(), ...a}` pass above -- an
+// `Array.isArray(a.outgoings)` check alone would see that empty default
+// and never fall through to the real data still sitting in
+// a.directDebits. Migrate from it whenever it exists, unless a.outgoings
+// already has REAL content (idempotent on a second migrate() call).
+if (Array.isArray(a.directDebits) && a.directDebits.length && !(Array.isArray(a.outgoings) && a.outgoings.length)) {
+a.outgoings = a.directDebits;
+}
+delete a.directDebits;
+if (!Array.isArray(a.outgoings)) a.outgoings = [];
+a.outgoings = a.outgoings.map((dd) => (typeof dd === 'string'
+? { id: uid(), beneficiary: dd, amount: '', status: '', method: 'Direct Debit', toAccountId: '' }
+// status: '' | 'deal-linked' | 'transferrable' -- whether this outgoing
+// is required to keep the deal's own funding criteria met, or free to
 // move elsewhere. Blank means not yet classified, not "neither".
-: { id: dd.id || uid(), beneficiary: dd.beneficiary || '', amount: dd.amount || '', status: dd.status || '' }));
+: { id: dd.id || uid(), beneficiary: dd.beneficiary || '', amount: dd.amount || '', status: dd.status || '', method: dd.method || 'Direct Debit', toAccountId: dd.toAccountId || '' }));
 });
 // A CASS-from-account, funding-source, or balance-transfer source
 // pointing at an account since deleted is a dangling reference -- same
 // orphan-drop reasoning as an Airbnb reservation whose listing was
 // removed, just clearing a field (or dropping one balanceTransfers
-// entry) instead of the whole record.
+// entry) instead of the whole record. An outgoing's toAccountId is
+// different: it's optional enrichment on an entry that's still
+// meaningful without it (the beneficiary text stands alone), so that
+// one just clears back to '' -- an ordinary external-looking outgoing
+// again -- rather than dropping the whole entry.
 {
 const financeAccountIds = new Set(data.financeAccounts.map((a) => a.id));
 data.financeAccounts.forEach((a) => {
 if (a.cassFromAccountId && !financeAccountIds.has(a.cassFromAccountId)) a.cassFromAccountId = '';
 if (a.fundingFromAccountId && !financeAccountIds.has(a.fundingFromAccountId)) a.fundingFromAccountId = '';
 a.balanceTransfers = a.balanceTransfers.filter((bt) => financeAccountIds.has(bt.fromAccountId));
+a.outgoings.forEach((o) => { if (o.toAccountId && !financeAccountIds.has(o.toAccountId)) o.toAccountId = ''; });
 });
 }
 // Deal Expiries (name/type/date/notes only -- no account identity, no

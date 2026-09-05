@@ -1180,6 +1180,10 @@ font-size:11px;
 }
 .tag-chip .tag-x{cursor:pointer;font-weight:700;}
 .dd-status-toggle{cursor:pointer;}
+/* The "pays into one of your own accounts" link -- separate clickable
+   target from .dd-status-toggle so cycling status and opening the
+   linked account can never collide on the same click. */
+.dd-to-account-link{cursor:pointer;text-decoration:underline;text-decoration-style:dotted;}
 /* Same idiom planner.js's own draft/firm distinction settled on --
    border style + font weight, not a new colour/shape -- deal-linked
    reads as "locked in" (solid fill, like Planner's Firm), transferrable
