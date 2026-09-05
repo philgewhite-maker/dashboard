@@ -76,7 +76,10 @@ return `<option value="">None</option>` + data.financeAccounts
 }
 
 function directDebitsHtml(a) {
-return (a.directDebits || []).map((dd) => `<span class="tag-chip">${escapeHtml(dd)}<span class="tag-x" data-dd-remove="${escapeHtml(a.id)}:${escapeHtml(dd)}">&times;</span></span>`).join('');
+return (a.directDebits || []).map((dd) => {
+const label = `${escapeHtml(dd.beneficiary || 'Unnamed')}${dd.amount ? ` · ${escapeHtml(dd.amount)}` : ''}`;
+return `<span class="tag-chip">${label}<span class="tag-x" data-dd-remove="${escapeHtml(a.id)}:${escapeHtml(dd.id)}">&times;</span></span>`;
+}).join('');
 }
 
 // Same terse "day + month, year only if not this year" shape
@@ -154,7 +157,8 @@ ${dealBadgeHtml(a)}
 <label style="display:block;margin-bottom:4px;">Direct Debits <span class="settings-note" style="display:inline;margin:0;">(often a condition of the deal)</span></label>
 <div class="tag-editor">${directDebitsHtml(a)}</div>
 <div class="sync-row" style="margin-top:6px;">
-<input type="text" autocomplete="off" class="tag-add-input" placeholder="Add a Direct Debit…" data-dd-input="${a.id}" style="max-width:200px;">
+<input type="text" autocomplete="off" class="tag-add-input" placeholder="Beneficiary, e.g. Netflix" data-dd-beneficiary="${a.id}" style="max-width:160px;">
+<input type="text" autocomplete="off" class="tag-add-input" placeholder="Amount, e.g. £9.99/mo" data-dd-amount="${a.id}" style="max-width:130px;">
 <button class="sync-btn sm" type="button" data-dd-add="${a.id}">Add</button>
 </div>
 </div>
@@ -480,24 +484,26 @@ renderFinanceAccounts();
 list.querySelectorAll('[data-dd-add]').forEach((btn) => {
 btn.addEventListener('click', () => {
 const id = btn.dataset.ddAdd;
-const input = list.querySelector(`[data-dd-input="${id}"]`);
-const value = input.value.trim();
-if (!value) return;
+const beneficiaryInput = list.querySelector(`[data-dd-beneficiary="${id}"]`);
+const amountInput = list.querySelector(`[data-dd-amount="${id}"]`);
+const beneficiary = beneficiaryInput.value.trim();
+if (!beneficiary) return;
 const a = data.financeAccounts.find((x) => x.id === id);
 if (!a) return;
 if (!Array.isArray(a.directDebits)) a.directDebits = [];
-if (!a.directDebits.includes(value)) a.directDebits.push(value);
-input.value = '';
+a.directDebits.push({ id: uid(), beneficiary, amount: amountInput.value.trim() });
+beneficiaryInput.value = '';
+amountInput.value = '';
 queueSave();
 renderFinanceAccounts();
 });
 });
 list.querySelectorAll('[data-dd-remove]').forEach((x) => {
 x.addEventListener('click', () => {
-const [id, value] = x.dataset.ddRemove.split(':');
+const [id, ddId] = x.dataset.ddRemove.split(':');
 const a = data.financeAccounts.find((acc) => acc.id === id);
 if (!a) return;
-a.directDebits = (a.directDebits || []).filter((dd) => dd !== value);
+a.directDebits = (a.directDebits || []).filter((dd) => dd.id !== ddId);
 queueSave();
 renderFinanceAccounts();
 });

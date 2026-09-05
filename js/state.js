@@ -404,7 +404,7 @@ openDate: '', closeDate: '',
 cassFromAccountId: '',
 deal: '', dealEndDate: '',
 purpose: '',
-directDebits: [], // plain strings -- often a condition of the deal, not a real transaction ledger
+directDebits: [], // [{id, beneficiary, amount}] -- often a condition of the deal, not a real transaction ledger (was plain strings; migrated below, 2026-09-05)
 fundingAmount: '', fundingFromAccountId: '',
 // A card's own equivalent of a CASS switch -- but unlike CASS (one
 // switch opens the account), a card can receive several separate
@@ -632,6 +632,13 @@ if (a.cassLinkedAccountId && !a.cassFromAccountId) a.cassFromAccountId = a.cassL
 delete a.cassLinkedAccountId;
 if (!Array.isArray(a.balanceTransfers)) a.balanceTransfers = [];
 a.balanceTransfers = a.balanceTransfers.map((bt) => ({ id: bt.id || uid(), fromAccountId: bt.fromAccountId || '', amount: bt.amount || '', date: bt.date || '' }));
+// directDebits: plain strings -> {id, beneficiary, amount} (2026-09-05)
+// -- a bare string becomes that entry's beneficiary, amount blank, so
+// nothing already typed in is lost.
+if (!Array.isArray(a.directDebits)) a.directDebits = [];
+a.directDebits = a.directDebits.map((dd) => (typeof dd === 'string'
+? { id: uid(), beneficiary: dd, amount: '' }
+: { id: dd.id || uid(), beneficiary: dd.beneficiary || '', amount: dd.amount || '' }));
 });
 // A CASS-from-account, funding-source, or balance-transfer source
 // pointing at an account since deleted is a dangling reference -- same
