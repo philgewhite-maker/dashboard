@@ -1489,7 +1489,10 @@ white-space:nowrap;
    use. An outlined treatment (not a new filled hue) stays visually
    distinct no matter which room colour it's sitting under. */
 .cal-badge.cleaner-chip{background:var(--paper);border:1px solid var(--ink);color:var(--ink);}
-.cal-badge.cleaner-chip-tbc{background:transparent;border:1px dashed var(--muted);color:var(--muted);font-style:italic;}
+/* A missing clean is a to-do, not a neutral fact -- --rose (the same
+   reddish-pink .compare-warning already uses for "look at this") reads
+   as more worth acting on than a muted, easy-to-skim-past grey. */
+.cal-badge.cleaner-chip-tbc{background:var(--rose-bg);border:1px dashed var(--rose);color:var(--rose);font-style:italic;}
 .cal-actions{
 margin-left:auto;
 display:flex;
