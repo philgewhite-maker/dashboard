@@ -311,6 +311,15 @@ cass: 'Once you record a CASS switch between accounts, they\'ll show here.',
 // balance out of, is very often exactly the one that's since been
 // closed; hiding it would erase the point of showing that history at
 // all.
+// Estimated from character count rather than measured, which is fine
+// at these label lengths ("£1,000/mo", "CASS · 12 Mar 2024"). Shared by
+// drawFlowLines (sizes each label's own backing rect) and
+// neededColumnGap (sizes the column gap itself) so the two can never
+// disagree about how much room a label actually needs.
+function labelBoxWidth(label) {
+return Math.max(28, label.length * 6 + 8);
+}
+
 function flowEdges(mode) {
 const closedOk = mode !== 'funding';
 const byId = new Map(data.financeAccounts.map((a) => [a.id, a]));
@@ -497,10 +506,8 @@ const p2 = anchorPoint(e.to, e, 'in');
 if (!p1 || !p2) return '';
 const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
 // A backing rect roughly sized to the label text so it doesn't render
-// unreadably crossed by the line underneath it -- estimated from
-// character count rather than measured, which is fine at this label
-// length ("£1,000/mo", "CASS").
-const labelW = Math.max(28, e.label.length * 6 + 8);
+// unreadably crossed by the line underneath it.
+const labelW = labelBoxWidth(e.label);
 // A gentle S-curve -- the horizontal control-point offset is what
 // makes several lines fanning out of/into the same card edge read as
 // distinct paths instead of a straight-line tangle. (Its true midpoint
@@ -571,9 +578,20 @@ const nodeIds = new Set();
 edges.forEach((e) => { nodeIds.add(e.from); nodeIds.add(e.to); });
 const columns = flowColumns(nodeIds, edges);
 const cardById = new Map(data.financeAccounts.map((a) => [a.id, a]));
+// Sized to THIS view's own longest label, not a flat worst-case
+// constant -- confirmed live that a fixed wide gap (originally added so
+// a long dated CASS label wouldn't be painted over by the next card,
+// see drawFlowLines/labelBoxWidth) looked absurdly sprawling for
+// Ongoing's short "£X/mo" labels, which never carry a date at all.
+// One uniform gap can't perfectly fit every column boundary when label
+// lengths vary a lot within the same view (a mixed graph might have one
+// short edge and one long one) -- kept simple rather than computing a
+// separate gap per boundary, which flexbox's single `gap` can't express
+// anyway.
+const gap = Math.max(60, Math.max(...edges.map((e) => labelBoxWidth(e.label))) + 30);
 return `${toggle}<div class="flow-diagram" id="account-flow-diagram">
 <svg class="flow-lines"></svg>
-<div class="flow-columns">${columns.map((col) => `<div class="flow-column">${col.map((id) => flowCardHtml(cardById.get(id))).join('')}</div>`).join('')}</div>
+<div class="flow-columns" style="gap:${gap}px;">${columns.map((col) => `<div class="flow-column">${col.map((id) => flowCardHtml(cardById.get(id))).join('')}</div>`).join('')}</div>
 </div>`;
 }
 
