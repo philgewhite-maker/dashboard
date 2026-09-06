@@ -4,8 +4,8 @@
 // idea), with an occasional nudge to actually cook one of them.
 import { data, queueSave, DEFAULT_RECIPE_RATING_CATEGORIES, slugifyField, averageRating, getLocalSettings, setLocalSetting } from '../state.js';
 import { photoDelete, photoGet, photoUrl } from '../db.js';
-import { escapeHtml, uid, todayStr, resizeImageToBlob, openLightbox } from '../utils.js';
-import { MissingKeyError, extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml } from '../ai.js';
+import { escapeHtml, uid, todayStr, resizeImageToBlob, openLightbox, pickChipHtml } from '../utils.js';
+import { MissingKeyError, extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, parseIngredients, assessIngredient, ALLERGEN_LIST, FODMAP_COMPONENTS } from '../ai.js';
 import { storePhoto, uploadAttachment, deleteAttachment, openAttachment, formatBytes } from '../files.js';
 import { getConfig } from '../sync/selfhost.js';
 
@@ -137,6 +137,8 @@ notes: document.getElementById('recipe-review-notes').value.trim(),
 source,
 photoId: null, photoIds: [], photoAlbums: [], ratings: {}, tags: [],
 createdAt: new Date().toISOString(), lastMade: '',
+course: '', glutenStatus: '', dairyStatus: '', fodmapLevel: '', servings: null,
+ingredientData: [], ingredientsParsedAt: '', ingredientsSignature: '',
 };
 data.recipes.push(recipe);
 pending = null;
@@ -237,27 +239,40 @@ let activeTagFilter = null; // a tag string, or null for "All"
 // empty lastMade.
 let activeMadeFilter = null;
 let recipeOverviewCollapsed = true;
+// Ingredient-reference panel (see renderIngredientReference) -- same collapse-
+// and-remember pattern as recipeOverviewCollapsed, one flag for the
+// whole panel rather than per-entry.
+let referencePanelCollapsed = true;
+// Per-recipe, per-ingredient-line "use the substitute instead" toggle --
+// UI-only/in-memory (not persisted): id -> Set of ingredientData indices
+// currently showing their substitute's figures instead of their own.
+// This is exactly what makes "toggle between the as-written and
+// substituted version of a recipe" free -- flipping a toggle just
+// re-sums already-cached numbers (computeRecipeDiet), no AI call.
+const substituteToggles = new Map();
+let expandedDiet = new Set(); // recipe ids currently showing their diet section
 
-// A handful of common categories to suggest right away (a course, a main
-// ingredient, a cooking style, an occasion, a dietary status...) --
-// ordinary starting points, not a fixed enum or fixed groups; typing
-// anything else just adds it as its own new tag, same as any of these.
-// The dietary ones (Gluten/Dairy/FODMAP) read as three-way choices per
-// recipe (a dish is Gluten OR Gluten-free OR Gluten-subs, not several at
-// once) but nothing here actually enforces that -- tags stay the same
-// open, multi-value, no-exclusivity shape as everything else (Meat +
-// Curry + Christmas all on one recipe is exactly the point), so getting
-// a dietary tag right or wrong is on whoever tags the recipe, same as
-// any other tag. Recipes already reuses this open-ended tag shape
-// rather than a fixed category picker, same as Connections' own City/
-// Interests tags.
-const SUGGESTED_RECIPE_TAGS = [
-'Meat', 'Fish', 'One-pot', 'Curry', 'Fruit', 'Christmas',
-'Starter', 'Main', 'Dessert', 'Snack', 'Drink',
-'Gluten-free', 'Gluten', 'Gluten-subs',
-'Low-FODMAP', 'Reduced-FODMAP', 'High-FODMAP',
-'Dairy-free', 'Dairy', 'Dairy-subs',
-];
+// A handful of common categories to suggest right away (a main
+// ingredient, a cooking style, an occasion...) -- ordinary starting
+// points, not a fixed enum; typing anything else just adds it as its
+// own new tag. Course and the three dietary statuses used to be in here
+// too, but they're genuinely single-choice per recipe (a dish is Gluten
+// OR Gluten-free OR Gluten-subs, not several at once) -- moved to their
+// own dedicated pickers below (same shape as Connections' Drinking/
+// Smoking) instead of living in this open, multi-value, no-exclusivity
+// bag where nothing stopped all three landing on one recipe at once.
+const SUGGESTED_RECIPE_TAGS = ['Meat', 'Fish', 'One-pot', 'Curry', 'Fruit', 'Christmas'];
+
+// Fixed option sets for the four dedicated pickers just below -- unlike
+// Drinking/Smoking's own knownScalarValues() (learned entirely from
+// real data, starting empty), these start from a known, deliberate list
+// since there's no existing data to learn from and the wording matters
+// for consistency. pickChipHtml's own free-text "+add" still works
+// underneath for a one-off value outside the set.
+const COURSE_OPTIONS = ['Starter', 'Main', 'Dessert', 'Snack', 'Drink'];
+const GLUTEN_OPTIONS = ['Gluten', 'Gluten-free', 'Gluten-subs'];
+const DAIRY_OPTIONS = ['Dairy', 'Dairy-free', 'Dairy-subs'];
+const FODMAP_OPTIONS = ['Low-FODMAP', 'Reduced-FODMAP', 'High-FODMAP'];
 
 async function initRecipeOverviewPrefs() {
 const settings = await getLocalSettings();
@@ -357,6 +372,23 @@ return `<div class="field-block full">
 </div>`;
 }
 
+// Four single-select pickers, each its own field-block/heading -- same
+// markup connections.js uses for Drinking/Smoking (a .tag-editor holding
+// pickChipHtml's pills), just with a fixed option list passed straight
+// in instead of knownScalarValues(). Deliberately separate from the
+// general Tags editor below: single-choice, own heading, not mixed in
+// with free multi-value tags (per feedback after v262 got this wrong).
+function recipeCategoryPickersHtml(r) {
+const picker = (label, field, options) => `<div class="field-block">
+<span class="field-label">${escapeHtml(label)}</span>
+<span class="tag-editor" data-recipe-pick="${r.id}">${pickChipHtml(field, r[field], options)}</span>
+</div>`;
+return picker('Course', 'course', COURSE_OPTIONS)
++ picker('Gluten', 'glutenStatus', GLUTEN_OPTIONS)
++ picker('Dairy', 'dairyStatus', DAIRY_OPTIONS)
++ picker('FODMAP', 'fodmapLevel', FODMAP_OPTIONS);
+}
+
 // Same shape as connections.js's own tagChips (chips + a datalist-backed
 // add input + button) -- not the same function, since it's tied to a
 // connId and connections.js's own field-based binding, but the identical
@@ -376,6 +408,285 @@ ${chips}
 </div>`;
 }
 
+// ---- ingredient parsing, shared reference table, diet totals ----
+//
+// The free-text Ingredients textarea (recipeDetailHtml, further below)
+// stays exactly as it is -- structure is DERIVED from it on demand,
+// wholesale (never hand-edited), so a stable signature (just the raw
+// joined text -- no need for anything fancier) is what tells "still
+// fresh" from "edited since".
+function ingredientsSignatureOf(ingredients) {
+return (ingredients || []).join('\n');
+}
+
+function findReferenceEntry(name, form) {
+const n = String(name || '').trim().toLowerCase();
+const f = String(form || '').trim().toLowerCase();
+return data.ingredientReference.find((e) => e.name.toLowerCase() === n && (e.form || '').toLowerCase() === f);
+}
+
+async function runParseIngredients(r) {
+const parsed = await parseIngredients(r.ingredients);
+r.ingredientData = parsed;
+r.ingredientsParsedAt = new Date().toISOString();
+r.ingredientsSignature = ingredientsSignatureOf(r.ingredients);
+}
+
+// The one AI-calling step in the whole diet-analysis path besides the
+// parse itself -- and only for ingredients (or their toggled-in
+// substitute) that don't already have a reference entry. Every OTHER
+// recipe sharing that same (name, form) reuses the entry this creates;
+// nothing here is ever re-requested just because a DIFFERENT recipe
+// happens to also contain flour.
+async function ensureReferenceEntry(name, form) {
+if (findReferenceEntry(name, form)) return;
+const assessed = await assessIngredient(name, form);
+data.ingredientReference.push({
+id: uid(), name, form,
+...assessed,
+subs: assessed.subs.map((s) => ({ id: uid(), ...s })),
+aiFilledAt: new Date().toISOString(),
+userEdited: false,
+});
+}
+
+async function analyseIngredients(recipeId) {
+const r = data.recipes.find((x) => x.id === recipeId);
+if (!r) return;
+setStatus('Reading the ingredients…');
+try {
+if (!r.ingredientsParsedAt || r.ingredientsSignature !== ingredientsSignatureOf(r.ingredients)) {
+await runParseIngredients(r);
+}
+const seen = new Set();
+const toAssess = [];
+r.ingredientData.forEach((line) => {
+if (!line.name) return;
+const key = `${line.name.toLowerCase()}|${line.form.toLowerCase()}`;
+if (seen.has(key) || findReferenceEntry(line.name, line.form)) return;
+seen.add(key);
+toAssess.push(line);
+});
+for (let i = 0; i < toAssess.length; i += 1) {
+setStatus(`Assessing ${toAssess[i].name}… (${i + 1}/${toAssess.length})`);
+await ensureReferenceEntry(toAssess[i].name, toAssess[i].form);
+}
+setStatus('');
+} catch (err) {
+setStatus(err instanceof MissingKeyError ? 'Add an Anthropic API key in Settings first.' : `Couldn't analyse that: ${err.message || err}`);
+}
+renderRecipes();
+renderIngredientReference();
+queueSave();
+}
+
+const FODMAP_RANK = { none: 0, low: 1, moderate: 2, high: 3 };
+const MACRO_FIELDS = ['calories', 'protein', 'carbs', 'sugars', 'fat', 'saturates', 'fibre', 'salt'];
+
+// Pure arithmetic over already-cached reference entries -- no AI call,
+// safe to re-run on every render. Returns null (not partial numbers) if
+// any line can't be resolved yet, so the UI can tell "fully analysed"
+// from "still missing something" without silently under-reporting.
+function computeRecipeDiet(r) {
+const toggled = substituteToggles.get(r.id) || new Set();
+const totals = {}; MACRO_FIELDS.forEach((k) => { totals[k] = 0; });
+const fodmap = {}; FODMAP_COMPONENTS.forEach((k) => { fodmap[k] = 'none'; });
+const allergens = new Set();
+let resolvedCount = 0;
+for (let i = 0; i < r.ingredientData.length; i += 1) {
+const line = r.ingredientData[i];
+if (!line.name) { resolvedCount += 1; continue; } // a blank/unparseable line contributes nothing, isn't a gap
+let entry = findReferenceEntry(line.name, line.form);
+if (!entry) return null; // not analysed yet -- caller shows "Analyse ingredients" instead
+if (toggled.has(i) && entry.subs && entry.subs[0]) {
+// v1: one toggle is on/off, not a picker among several subs -- uses
+// the first listed substitute's own reference entry once it exists.
+const subEntry = findReferenceEntry(entry.subs[0].name, '');
+if (subEntry) entry = subEntry;
+}
+resolvedCount += 1;
+if (line.quantity != null) {
+const scale = line.quantity / (entry.unitBasis.quantity || 1);
+MACRO_FIELDS.forEach((k) => { totals[k] += (entry.nutrition[k] || 0) * scale; });
+FODMAP_COMPONENTS.forEach((k) => { if (FODMAP_RANK[entry.fodmap[k]] > FODMAP_RANK[fodmap[k]]) fodmap[k] = entry.fodmap[k]; });
+}
+(entry.allergens || []).forEach((a) => allergens.add(a));
+}
+if (resolvedCount < r.ingredientData.length) return null;
+return { totals, fodmap, allergens: [...allergens] };
+}
+
+function recipeIngredientsStatusHtml(r) {
+if (!r.ingredientsParsedAt) return `<div class="full"><span class="inline-goto-link" data-recipe-parse="${r.id}">Parse ingredients</span></div>`;
+if (r.ingredientsSignature !== ingredientsSignatureOf(r.ingredients)) return `<div class="full"><span class="inline-goto-link" data-recipe-parse="${r.id}">Ingredients changed since last parse — re-parse</span></div>`;
+return '';
+}
+
+// One row per parsed ingredient with a substitute on file -- the toggle
+// IS the "view the substituted version" control; nothing to show for a
+// line with no substitute, or before ingredients have been parsed at
+// all (recipeIngredientsStatusHtml/recipeDietHtml below handle those).
+function recipeSubstituteTogglesHtml(r) {
+if (!r.ingredientsParsedAt) return '';
+const toggled = substituteToggles.get(r.id) || new Set();
+const rows = r.ingredientData.map((line, i) => {
+if (!line.name) return '';
+const entry = findReferenceEntry(line.name, line.form);
+if (!entry || !entry.subs || !entry.subs.length) return '';
+const sub = entry.subs[0];
+const on = toggled.has(i);
+return `<label class="settings-note" style="display:flex;align-items:center;gap:6px;margin:2px 0;">
+<input type="checkbox" data-recipe-sub-toggle="${r.id}" data-sub-idx="${i}" ${on ? 'checked' : ''}>
+${escapeHtml(line.name)}${line.form ? ` (${escapeHtml(line.form)})` : ''} &rarr; <strong>${escapeHtml(sub.name)}</strong>${sub.note ? ` — ${escapeHtml(sub.note)}` : ''}
+</label>`;
+}).join('');
+if (!rows) return '';
+return `<div class="field-block full"><span class="field-label">Substitutes on file</span>${rows}</div>`;
+}
+
+function fodmapRowHtml(fodmap) {
+return FODMAP_COMPONENTS.map((k) => `<span class="pick-chip${fodmap[k] !== 'none' ? ' active' : ''}" title="${escapeHtml(k)}">${escapeHtml(k)}: ${escapeHtml(fodmap[k])}</span>`).join(' ');
+}
+
+function allergenListHtml(present) {
+return ALLERGEN_LIST.map((a) => `<span class="pick-chip${present.includes(a) ? ' active' : ''}">${escapeHtml(a)}</span>`).join(' ');
+}
+
+// Nothing rendered at all until "Analyse ingredients" has been run once
+// AND every line resolves -- the load-bearing requirement that a recipe
+// nobody's touched this feature on looks exactly like it always did.
+function recipeDietHtml(r) {
+if (!r.ingredientsParsedAt) return '';
+const diet = computeRecipeDiet(r);
+if (!diet) return `<div class="full"><span class="inline-goto-link" data-recipe-analyse="${r.id}">Analyse ingredients</span></div>`;
+const per = r.servings ? r.servings : null;
+const row = (label, key, unit) => `<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0;"><span>${escapeHtml(label)}</span><span>${diet.totals[key].toFixed(1)}${unit}${per ? ` (${(diet.totals[key] / per).toFixed(1)}${unit}/serving)` : ''}</span></div>`;
+return `<div class="full">
+<button class="overview-panel-toggle" type="button" data-recipe-diet-toggle="${r.id}">${expandedDiet.has(r.id) ? '▾ Hide diet analysis' : '▸ Show diet analysis'}</button>
+${expandedDiet.has(r.id) ? `<div class="field-block" style="margin-top:6px;">
+<span class="field-label">FODMAP (per component)</span>
+<div>${fodmapRowHtml(diet.fodmap)}</div>
+</div>
+<div class="field-block" style="margin-top:6px;">
+<span class="field-label">Allergens</span>
+<div>${allergenListHtml(diet.allergens)}</div>
+</div>
+<div class="field-block" style="margin-top:6px;">
+<span class="field-label">Macros${per ? ` — total, and per serving (${per})` : ' — recipe total'}</span>
+${row('Calories', 'calories', ' kcal')}
+${row('Protein', 'protein', 'g')}
+${row('Carbs', 'carbs', 'g')}
+${row('— of which sugars', 'sugars', 'g')}
+${row('Fat', 'fat', 'g')}
+${row('— of which saturates', 'saturates', 'g')}
+${row('Fibre', 'fibre', 'g')}
+${row('Salt', 'salt', 'g')}
+</div>
+<div class="settings-note" style="margin-top:6px;">AI estimate from the ingredient reference table — not a verified nutritional or medical analysis; correct an entry below directly if it looks wrong.</div>
+${recipeSubstituteTogglesHtml(r)}` : ''}
+</div>`;
+}
+
+// ---- shared ingredient reference panel -- collapsed by default, absent
+// entirely (the whole index.html section hidden, see renderIngredientReference)
+// until the first ingredient is ever analysed ----
+let editingReferenceId = null;
+
+function ingredientRefEditHtml(e) {
+const macroInput = (label, key) => `<label>${escapeHtml(label)}<input type="number" step="any" data-ref-nutrition="${key}" value="${e.nutrition[key]}"></label>`;
+const fodmapSelect = (key) => `<label>${escapeHtml(key)}<select data-ref-fodmap="${key}">${['none', 'low', 'moderate', 'high'].map((lvl) => `<option value="${lvl}" ${e.fodmap[key] === lvl ? 'selected' : ''}>${lvl}</option>`).join('')}</select></label>`;
+return `<div class="idea-row" data-ingredient-ref-row="${e.id}">
+<div class="idea-top"><span class="idea-title">Editing: ${escapeHtml(e.name)}${e.form ? ` (${escapeHtml(e.form)})` : ''}</span></div>
+<div class="tinder-fields" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+${macroInput('Calories', 'calories')}${macroInput('Protein (g)', 'protein')}
+${macroInput('Carbs (g)', 'carbs')}${macroInput('— sugars (g)', 'sugars')}
+${macroInput('Fat (g)', 'fat')}${macroInput('— saturates (g)', 'saturates')}
+${macroInput('Fibre (g)', 'fibre')}${macroInput('Salt (g)', 'salt')}
+${FODMAP_COMPONENTS.map(fodmapSelect).join('')}
+</div>
+<label class="full">Allergens present<div class="tag-editor">${ALLERGEN_LIST.map((a) => `<span class="pick-chip${e.allergens.includes(a) ? ' active' : ''}" data-ref-allergen="${escapeHtml(a)}">${escapeHtml(a)}</span>`).join('')}</div></label>
+<div class="idea-actions">
+<button class="add-btn" type="button" data-ingredient-ref-save="${e.id}">Save</button>
+<span class="inline-goto-link" data-ingredient-ref-cancel="1">Cancel</span>
+</div>
+</div>`;
+}
+
+function ingredientRefRowHtml(e) {
+if (editingReferenceId === e.id) return ingredientRefEditHtml(e);
+return `<div class="idea-row" data-ingredient-ref-row="${e.id}">
+<div class="idea-top"><span class="idea-title">${escapeHtml(e.name)}${e.form ? ` (${escapeHtml(e.form)})` : ''}</span>
+<span class="idea-date">per ${e.unitBasis.quantity}${escapeHtml(e.unitBasis.unit)}${e.userEdited ? ' · edited' : ''}</span></div>
+<div class="settings-note">Cal ${e.nutrition.calories} · Protein ${e.nutrition.protein}g · Carbs ${e.nutrition.carbs}g · Fat ${e.nutrition.fat}g · Fibre ${e.nutrition.fibre}g · Salt ${e.nutrition.salt}g</div>
+<div>${fodmapRowHtml(e.fodmap)}</div>
+${e.allergens.length ? `<div class="settings-note">Allergens: ${e.allergens.map(escapeHtml).join(', ')}</div>` : ''}
+${e.subs.length ? `<div class="settings-note">Substitutes: ${e.subs.map((s) => `${escapeHtml(s.name)}${s.note ? ` (${escapeHtml(s.note)})` : ''}`).join('; ')}</div>` : ''}
+<div class="idea-actions">
+<span class="inline-goto-link" data-ingredient-ref-edit="${e.id}">Edit</span>
+<span class="del-x" style="opacity:1;" data-ingredient-ref-del="${e.id}">&times;</span>
+</div>
+</div>`;
+}
+
+function renderIngredientReference() {
+const section = document.getElementById('ingredient-reference-panel');
+const el = document.getElementById('ingredient-reference-content');
+if (!el || !section) return;
+// Absent entirely, not just collapsed, until there's actually something
+// in it -- an empty panel header floating over nothing is exactly the
+// "looks awful when unused" case this whole feature is built to avoid.
+section.hidden = data.ingredientReference.length === 0;
+if (!data.ingredientReference.length) { el.innerHTML = ''; return; }
+const toggleHtml = `<button class="overview-panel-toggle" type="button" id="ingredient-reference-toggle">${referencePanelCollapsed ? '▸ Show ingredient reference' : '▾ Hide ingredient reference'}</button>`;
+el.innerHTML = referencePanelCollapsed ? toggleHtml
+: `${toggleHtml}<div style="margin-top:6px;">${[...data.ingredientReference].sort((a, b) => a.name.localeCompare(b.name)).map(ingredientRefRowHtml).join('')}</div>`;
+
+document.getElementById('ingredient-reference-toggle').addEventListener('click', () => {
+referencePanelCollapsed = !referencePanelCollapsed;
+renderIngredientReference();
+});
+el.querySelectorAll('[data-ingredient-ref-edit]').forEach((x) => {
+x.addEventListener('click', () => { editingReferenceId = x.dataset.ingredientRefEdit; renderIngredientReference(); });
+});
+el.querySelectorAll('[data-ingredient-ref-cancel]').forEach((x) => {
+x.addEventListener('click', () => { editingReferenceId = null; renderIngredientReference(); });
+});
+el.querySelectorAll('[data-ingredient-ref-del]').forEach((x) => {
+x.addEventListener('click', () => {
+const e = data.ingredientReference.find((r2) => r2.id === x.dataset.ingredientRefDel);
+if (!e || !confirm(`Remove the reference entry for "${e.name}"? The next analysis that needs it will re-ask AI.`)) return;
+data.ingredientReference = data.ingredientReference.filter((r2) => r2.id !== e.id);
+renderIngredientReference();
+renderRecipes();
+queueSave();
+});
+});
+el.querySelectorAll('[data-ref-allergen]').forEach((chip) => {
+chip.addEventListener('click', () => chip.classList.toggle('active'));
+});
+el.querySelectorAll('[data-ingredient-ref-save]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const e = data.ingredientReference.find((r2) => r2.id === btn.dataset.ingredientRefSave);
+if (!e) return;
+const row = btn.closest('[data-ingredient-ref-row]');
+row.querySelectorAll('[data-ref-nutrition]').forEach((input) => {
+const v = parseFloat(input.value);
+e.nutrition[input.dataset.refNutrition] = Number.isFinite(v) ? v : 0;
+});
+row.querySelectorAll('[data-ref-fodmap]').forEach((select) => { e.fodmap[select.dataset.refFodmap] = select.value; });
+e.allergens = [...row.querySelectorAll('[data-ref-allergen].active')].map((chip) => chip.dataset.refAllergen);
+// The whole reason this field exists (the tinned-vs-dried-chickpeas
+// case): once a person corrects an entry, a later "Analyse ingredients"
+// on some other recipe must never silently overwrite it again.
+e.userEdited = true;
+editingReferenceId = null;
+renderIngredientReference();
+renderRecipes();
+queueSave();
+});
+});
+}
+
 function recipeDetailHtml(r) {
 // Photo comes right after Name now, not buried below Ratings -- it's a
 // direct upload (resizeImageToBlob + storePhoto, same as a task's own
@@ -386,6 +697,7 @@ function recipeDetailHtml(r) {
 // (same reasoning connections.js's own Photos row already documents).
 return `<div class="recipe-detail details-grid">
 <label class="full">Name<input type="text" autocomplete="off" data-recipe-field="name" data-recipe-id="${r.id}" value="${escapeHtml(r.name)}"></label>
+<label class="full">Servings <span class="settings-note">Optional — turns a diet analysis total into a per-portion figure</span><input type="number" min="1" step="1" autocomplete="off" data-recipe-field="servings" data-recipe-id="${r.id}" value="${r.servings != null ? escapeHtml(String(r.servings)) : ''}"></label>
 <div class="field-block full">
 <span class="field-label">Photo</span>
 <div class="task-photos">
@@ -394,8 +706,11 @@ ${r.photoIds.map((id, i) => `<div class="gallery-thumb"><span class="thumb-img" 
 <input type="file" id="recipe-photo-add-${r.id}" accept="image/*" multiple style="display:none;" data-recipe-photo-add="${r.id}">
 </div>
 </div>
+${recipeCategoryPickersHtml(r)}
 ${recipeTagsHtml(r)}
 <label class="full">Ingredients (one per line)<textarea rows="6" data-recipe-field="ingredients" data-recipe-id="${r.id}">${escapeHtml(r.ingredients.join('\n'))}</textarea></label>
+${recipeIngredientsStatusHtml(r)}
+${recipeDietHtml(r)}
 <label class="full">Instructions (one step per line)<textarea rows="8" data-recipe-field="instructions" data-recipe-id="${r.id}">${escapeHtml(r.instructions.join('\n'))}</textarea></label>
 <label class="full">Notes<textarea rows="2" data-recipe-field="notes" data-recipe-id="${r.id}">${escapeHtml(r.notes || '')}</textarea></label>
 <label class="full">Google Photos album <span class="settings-note">Optional — for a bigger set (the occasion it was made for, several attempts...), not needed just for a quick single photo above</span>
@@ -518,10 +833,40 @@ if (!r) return;
 const field = input.dataset.recipeField;
 if (field === 'ingredients' || field === 'instructions') {
 r[field] = input.value.split('\n').map((s) => s.trim()).filter(Boolean);
+} else if (field === 'servings') {
+const n = parseInt(input.value, 10);
+r.servings = Number.isFinite(n) && n > 0 ? n : null;
 } else {
 r[field] = input.value;
 }
-if (field === 'name') renderRecipes();
+// Re-renders the whole list for either -- servings feeds directly into
+// the per-serving figures in the (possibly already-open) diet section,
+// same as name needing a full re-render for the card title elsewhere.
+if (field === 'name' || field === 'servings') renderRecipes();
+queueSave();
+});
+});
+// Same toggle-off-on-repeat-click behaviour as Drinking/Smoking's own
+// [data-pick-conn] binding in connections.js -- clicking the already-
+// active pill clears the field rather than staying stuck on it.
+el.querySelectorAll('[data-recipe-pick] [data-pick-value]').forEach((pill) => {
+pill.addEventListener('click', () => {
+const r = data.recipes.find((x) => x.id === pill.closest('[data-recipe-pick]').dataset.recipePick);
+if (!r) return;
+const field = pill.dataset.pickField;
+r[field] = r[field] === pill.dataset.pickValue ? '' : pill.dataset.pickValue;
+renderRecipes();
+queueSave();
+});
+});
+el.querySelectorAll('[data-recipe-pick] [data-pick-add]').forEach((input) => {
+input.addEventListener('change', () => {
+const value = input.value.trim();
+if (!value) return;
+const r = data.recipes.find((x) => x.id === input.closest('[data-recipe-pick]').dataset.recipePick);
+if (!r) return;
+r[input.dataset.pickAdd] = value;
+renderRecipes();
 queueSave();
 });
 });
@@ -583,6 +928,41 @@ el.querySelectorAll('[data-recipe-source-pdf]').forEach((el2) => {
 el2.addEventListener('click', () => {
 const r = data.recipes.find((x) => x.id === el2.dataset.recipeSourcePdf);
 if (r && r.source && r.source.attachment) openAttachment(r.source.attachment).catch((err) => alert(err.message || String(err)));
+});
+});
+el.querySelectorAll('[data-recipe-parse]').forEach((link) => {
+link.addEventListener('click', async () => {
+const r = data.recipes.find((x) => x.id === link.dataset.recipeParse);
+if (!r) return;
+setStatus('Reading the ingredients…');
+try { await runParseIngredients(r); setStatus(''); } catch (err) {
+setStatus(err instanceof MissingKeyError ? 'Add an Anthropic API key in Settings first.' : `Couldn't parse that: ${err.message || err}`);
+}
+renderRecipes();
+queueSave();
+});
+});
+el.querySelectorAll('[data-recipe-analyse]').forEach((link) => {
+link.addEventListener('click', () => analyseIngredients(link.dataset.recipeAnalyse));
+});
+el.querySelectorAll('[data-recipe-diet-toggle]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const id = btn.dataset.recipeDietToggle;
+if (expandedDiet.has(id)) expandedDiet.delete(id); else expandedDiet.add(id);
+renderRecipes();
+});
+});
+el.querySelectorAll('[data-recipe-sub-toggle]').forEach((cb) => {
+cb.addEventListener('change', () => {
+const id = cb.dataset.recipeSubToggle;
+const idx = parseInt(cb.dataset.subIdx, 10);
+if (!substituteToggles.has(id)) substituteToggles.set(id, new Set());
+const set = substituteToggles.get(id);
+if (cb.checked) set.add(idx); else set.delete(idx);
+// Only the diet section's own numbers need to change here -- flipping
+// a toggle is pure arithmetic over cached figures (computeRecipeDiet),
+// never an AI call, so this can safely re-render immediately.
+renderRecipes();
 });
 });
 el.querySelectorAll('[data-recipe-rate]').forEach((star) => {
@@ -700,6 +1080,7 @@ initCapture();
 initRecipeRatingCategoriesSettings();
 renderReview();
 renderRecipes();
+renderIngredientReference();
 await initRecipeOverviewPrefs();
 renderRecipeOverview();
 }

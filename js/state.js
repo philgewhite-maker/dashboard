@@ -579,7 +579,7 @@ const DEFAULT_FLAG_RULES = [
 function blankData() {
 return { habits: [], goals: [], jobs: [], connections: [], calendars: [], calendarStatus: {}, vouchers: [], businessIdeas: [], subscriptions: [], enhancementIdeas: [], financeAccounts: [], switchOffers: [], mailSearches: [], tasks: [], taskContexts: [...DEFAULT_TASK_CONTEXTS],
 ratingCategories: DEFAULT_RATING_CATEGORIES.map((c) => ({ ...c })),
-recipes: [], recipeRatingCategories: DEFAULT_RECIPE_RATING_CATEGORIES.map((c) => ({ ...c })),
+recipes: [], recipeRatingCategories: DEFAULT_RECIPE_RATING_CATEGORIES.map((c) => ({ ...c })), ingredientReference: [],
 claudeAnswers: {},
 flagRules: DEFAULT_FLAG_RULES.map((r) => ({ ...r })),
 flagRulesSeeded: DEFAULT_FLAG_RULES.map((r) => r.id),
@@ -1166,7 +1166,26 @@ if (!r.ratings || typeof r.ratings !== 'object') r.ratings = {};
 if (typeof r.createdAt !== 'string') r.createdAt = '';
 if (typeof r.lastMade !== 'string') r.lastMade = '';
 if (!Array.isArray(r.tags)) r.tags = [];
+// Single-select, own field each -- Course/Gluten/Dairy/FODMAP status,
+// same shape as Connections' own Drinking/Smoking (a scalar, not a tag),
+// deliberately kept out of the free-form r.tags bag (see recipes.js's
+// recipeCategoryPickersHtml).
+if (typeof r.course !== 'string') r.course = '';
+if (typeof r.glutenStatus !== 'string') r.glutenStatus = '';
+if (typeof r.dairyStatus !== 'string') r.dairyStatus = '';
+if (typeof r.fodmapLevel !== 'string') r.fodmapLevel = '';
+// Optional; only meaningful once a diet analysis total exists to divide
+// by it (see recipes.js's diet-analysis aggregation).
+if (typeof r.servings !== 'number' && r.servings !== null) r.servings = null;
+// Ingredients stay free-text (r.ingredients, above) -- this is a
+// DERIVED structured parse of that text, regenerated wholesale on
+// request rather than hand-edited, so it's fine for it to just be
+// blank until "Parse ingredients" is used for the first time.
+if (!Array.isArray(r.ingredientData)) r.ingredientData = [];
+if (typeof r.ingredientsParsedAt !== 'string') r.ingredientsParsedAt = '';
+if (typeof r.ingredientsSignature !== 'string') r.ingredientsSignature = '';
 });
+if (!Array.isArray(data.ingredientReference)) data.ingredientReference = [];
 }
 
 // Every save is a full-document overwrite of DATA_KEY — there's no way to

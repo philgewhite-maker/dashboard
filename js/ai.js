@@ -780,6 +780,104 @@ notes: (raw && raw.notes) || '',
 };
 }
 
+// ---- ingredient parsing + per-ingredient diet assessment ----
+//
+// Two separate, deliberately small AI calls rather than one big
+// "assess this recipe" call: parseIngredients turns the free-text
+// ingredients lines a recipe already has into structured objects
+// (recipes.js keeps the free text as the thing you actually edit; this
+// is a derived, regenerate-on-demand parse of it). assessIngredient
+// looks up ONE ingredient at a time, cached by recipes.js in a shared
+// reference table (data.ingredientReference) keyed by name+form and
+// reused across every recipe that contains it -- so a recipe's own
+// totals end up being arithmetic over cached numbers (see recipes.js),
+// not a fresh AI call every time.
+
+const INGREDIENT_PARSE_MAX_TOKENS = 2000;
+function ingredientParsePrompt(lines) {
+return 'Parse each of these recipe ingredient lines into a structured object. '
++ 'Return ONLY a JSON array, no other text, no markdown fences, exactly one object per input line IN THE SAME ORDER: '
++ '[{"name":"", "form":"", "quantity":0, "unit":"", "notes":""}, ...]. '
++ 'name: the canonical, singular ingredient name (e.g. "wheat flour" not "2 cups plain flour"; "chickpeas" not "1 tin chickpeas, drained"). '
++ 'form: a preparation/state ONLY when it plausibly changes nutrition or FODMAP content (e.g. "tinned", "dried", "fresh", "frozen", "cooked") -- "" when it doesn\'t apply or isn\'t stated. '
++ 'quantity: a plain number in `unit`, normalised toward grams or millilitres where sensible, otherwise a countable unit the line itself used (e.g. "clove", "medium", "tbsp", "tsp"); null if the amount is too vague to give a number ("a pinch", "to taste", "a splash"). '
++ 'unit: the unit `quantity` is in, or "" if quantity is null. '
++ 'notes: anything else from the line worth keeping (e.g. "drained", "minced") that isn\'t the name/quantity/unit itself, or "" if none.\n\nLines:\n'
++ lines.map((l, i) => `${i + 1}. ${l}`).join('\n');
+}
+function normaliseIngredientParse(raw, expectedCount) {
+const arr = Array.isArray(raw) ? raw : [];
+const out = [];
+for (let i = 0; i < expectedCount; i += 1) {
+const item = arr[i] || {};
+out.push({
+name: String(item.name || '').trim(),
+form: String(item.form || '').trim(),
+quantity: (typeof item.quantity === 'number' && isFinite(item.quantity)) ? item.quantity : null,
+unit: String(item.unit || '').trim(),
+notes: String(item.notes || '').trim(),
+});
+}
+return out;
+}
+async function parseIngredients(lines) {
+if (!lines.length) return [];
+const { data: raw } = await callTextJson(ingredientParsePrompt(lines), INGREDIENT_PARSE_MAX_TOKENS, null, 'Ingredient parse');
+return normaliseIngredientParse(raw, lines.length);
+}
+
+// The standard UK/EU 14 labelled allergens -- a known, finite checklist
+// rather than an arbitrary/open list, so "not mentioned" reliably means
+// "checked, absent" rather than "not checked". Exported so recipes.js
+// can render the same fixed list a diet analysis is assessed against.
+const ALLERGEN_LIST = ['Cereals containing gluten', 'Crustaceans', 'Eggs', 'Fish', 'Peanuts', 'Soybeans', 'Milk', 'Tree nuts', 'Celery', 'Mustard', 'Sesame', 'Sulphites', 'Lupin', 'Molluscs'];
+// The five standard FODMAP components -- assessed individually rather
+// than one bucketed score, per feedback.
+const FODMAP_COMPONENTS = ['fructans', 'gos', 'lactose', 'excessFructose', 'polyols'];
+const FODMAP_LEVELS = ['none', 'low', 'moderate', 'high'];
+
+const INGREDIENT_ASSESS_MAX_TOKENS = 1200;
+function ingredientAssessPrompt(name, form) {
+return `Assess this single food ingredient: "${name}"${form ? ` (${form})` : ''}. Return ONLY a JSON object, no other text, no markdown fences: `
++ '{"unitBasis":{"quantity":100,"unit":"g"}, '
++ '"nutrition":{"calories":0,"protein":0,"carbs":0,"sugars":0,"fat":0,"saturates":0,"fibre":0,"salt":0}, '
++ '"fodmap":{"fructans":"none","gos":"none","lactose":"none","excessFructose":"none","polyols":"none"}, '
++ '"allergens":[], "subs":[{"name":"","note":""}]}. '
++ 'unitBasis: whatever this ingredient is naturally measured in -- {"quantity":100,"unit":"g"} for most things, or a countable unit like {"quantity":1,"unit":"clove"} / {"quantity":1,"unit":"medium"} for produce typically counted rather than weighed. '
++ 'nutrition: standard nutrition-label figures, PER unitBasis. '
++ `fodmap: PER unitBasis, EVERY one of fructans/gos/lactose/excessFructose/polyols rated one of ${JSON.stringify(FODMAP_LEVELS)} -- don't omit any, even if "none". `
++ `allergens: which of these EXACT strings this ingredient contains, as a subset of ${JSON.stringify(ALLERGEN_LIST)} -- [] if none apply. `
++ 'subs: 1-3 common substitutes for this ingredient (useful for a gluten-free, dairy-free, low-FODMAP, or otherwise allergen-conscious kitchen where relevant), each a short note on when/why -- [] if nothing sensible applies. '
++ 'Give a reasonable best estimate -- this is a starting point a person can correct, not a lab measurement.';
+}
+function normaliseIngredientAssess(raw) {
+const r = raw || {};
+const unitBasis = (r.unitBasis && typeof r.unitBasis === 'object') ? r.unitBasis : {};
+const nutrition = (r.nutrition && typeof r.nutrition === 'object') ? r.nutrition : {};
+const fodmapRaw = (r.fodmap && typeof r.fodmap === 'object') ? r.fodmap : {};
+const numOr0 = (v) => ((typeof v === 'number' && isFinite(v)) ? v : 0);
+const fodmap = {};
+FODMAP_COMPONENTS.forEach((k) => { fodmap[k] = FODMAP_LEVELS.includes(fodmapRaw[k]) ? fodmapRaw[k] : 'none'; });
+return {
+unitBasis: { quantity: numOr0(unitBasis.quantity) || 100, unit: String(unitBasis.unit || 'g') },
+nutrition: {
+calories: numOr0(nutrition.calories), protein: numOr0(nutrition.protein), carbs: numOr0(nutrition.carbs),
+sugars: numOr0(nutrition.sugars), fat: numOr0(nutrition.fat), saturates: numOr0(nutrition.saturates),
+fibre: numOr0(nutrition.fibre), salt: numOr0(nutrition.salt),
+},
+fodmap,
+allergens: Array.isArray(r.allergens) ? r.allergens.filter((a) => ALLERGEN_LIST.includes(a)) : [],
+// No id assigned here -- ai.js stays a pure call-and-normalise layer;
+// recipes.js assigns ids when it actually persists a sub into
+// data.ingredientReference.
+subs: Array.isArray(r.subs) ? r.subs.map((s) => ({ name: String((s && s.name) || '').trim(), note: String((s && s.note) || '').trim() })).filter((s) => s.name) : [],
+};
+}
+async function assessIngredient(name, form) {
+const { data: raw } = await callTextJson(ingredientAssessPrompt(name, form), INGREDIENT_ASSESS_MAX_TOKENS, null, 'Ingredient assessment');
+return normaliseIngredientAssess(raw);
+}
+
 // Disambiguates a fuzzy name match against an incoming photo — "Alena" and
 // "Alena A" are a plausible fuzzy match on name alone, but obviously
 // different people once both faces are visible. Deliberately not run for
@@ -1163,4 +1261,5 @@ callTextJson, DEFAULT_MODEL, summarizeUsage, currentMonthKey, compareFaces,
 extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShoppingItem, translateText,
 identifyCountry, extractWellnessScreenshot,
 extractTripScreenshot, extractTripLegFromEmail,
+parseIngredients, assessIngredient, ALLERGEN_LIST, FODMAP_COMPONENTS, FODMAP_LEVELS,
 };
