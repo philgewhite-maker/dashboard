@@ -1128,6 +1128,17 @@ return { field, label };
 }
 data.businessIdeas.forEach((idea) => {
 if (typeof idea.status !== 'string') idea.status = 'Idea';
+// Lightweight checklist for fleshing an idea out before it's real enough
+// to become a task -- same {id, text, done} shape as a connection's own
+// todos (connections.js), not a fresh shape invented for this.
+if (!Array.isArray(idea.steps)) idea.steps = [];
+if (typeof idea.taskId !== 'string') idea.taskId = '';
+// If the task this idea was upgraded into has since been deleted,
+// revert to the normal editable/upgradable state rather than leaving a
+// dead "view task" link -- unlike a trip's own taskId (which drops the
+// trip entirely, see the orphan guard above), an idea has real content
+// of its own independent of the task, so there's nothing to drop here.
+if (idea.taskId && !taskIds.has(idea.taskId)) idea.taskId = '';
 });
 if (!Array.isArray(data.recipeRatingCategories) || data.recipeRatingCategories.length === 0) {
 data.recipeRatingCategories = DEFAULT_RECIPE_RATING_CATEGORIES.map((c) => ({ ...c }));

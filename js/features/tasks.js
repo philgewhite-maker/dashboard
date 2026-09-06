@@ -564,8 +564,8 @@ console.error('Attachment delete failed on the server:', err);
 // `bucket` defaults to blankTask's own 'inbox' when omitted — only passed
 // through when a caller (like Shopping's quick-capture) already knows where
 // something belongs and wants to skip the triage step.
-function captureTask({ title, notes = '', source = null, photoIds = [], due = '', link = '', contexts = [], bucket }) {
-const fields = { title, notes, source, photoIds, due, link, contexts };
+function captureTask({ title, notes = '', source = null, photoIds = [], due = '', link = '', contexts = [], bucket, parentId = null }) {
+const fields = { title, notes, source, photoIds, due, link, contexts, parentId };
 if (bucket) fields.bucket = bucket;
 const task = blankTask(fields);
 data.tasks.push(task);
