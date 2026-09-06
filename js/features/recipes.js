@@ -238,12 +238,26 @@ let activeTagFilter = null; // a tag string, or null for "All"
 let activeMadeFilter = null;
 let recipeOverviewCollapsed = true;
 
-// A handful of common categories to suggest right away (Meat, Fish, a
-// cooking style, an occasion...) -- ordinary starting points, not a fixed
-// enum; typing anything else just adds it as its own new tag. Recipes
-// already reuses this open-ended tag shape rather than a fixed category
-// picker, same as Connections' own City/Interests tags.
-const SUGGESTED_RECIPE_TAGS = ['Meat', 'Fish', 'One-pot', 'Curry', 'Dessert', 'Fruit', 'Christmas'];
+// A handful of common categories to suggest right away (a course, a main
+// ingredient, a cooking style, an occasion, a dietary status...) --
+// ordinary starting points, not a fixed enum or fixed groups; typing
+// anything else just adds it as its own new tag, same as any of these.
+// The dietary ones (Gluten/Dairy/FODMAP) read as three-way choices per
+// recipe (a dish is Gluten OR Gluten-free OR Gluten-subs, not several at
+// once) but nothing here actually enforces that -- tags stay the same
+// open, multi-value, no-exclusivity shape as everything else (Meat +
+// Curry + Christmas all on one recipe is exactly the point), so getting
+// a dietary tag right or wrong is on whoever tags the recipe, same as
+// any other tag. Recipes already reuses this open-ended tag shape
+// rather than a fixed category picker, same as Connections' own City/
+// Interests tags.
+const SUGGESTED_RECIPE_TAGS = [
+'Meat', 'Fish', 'One-pot', 'Curry', 'Fruit', 'Christmas',
+'Starter', 'Main', 'Dessert', 'Snack', 'Drink',
+'Gluten-free', 'Gluten', 'Gluten-subs',
+'Low-FODMAP', 'Reduced-FODMAP', 'High-FODMAP',
+'Dairy-free', 'Dairy', 'Dairy-subs',
+];
 
 async function initRecipeOverviewPrefs() {
 const settings = await getLocalSettings();
