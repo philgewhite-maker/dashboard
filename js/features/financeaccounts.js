@@ -577,13 +577,24 @@ const offDiagram = (a.outgoings || []).filter((o) => !o.toAccountId);
 if (offDiagram.length) {
 let sum = 0;
 let unset = 0;
+const methodsUsed = new Set();
 offDiagram.forEach((o) => {
+methodsUsed.add(outgoingMethod(o));
 if (o.amount === '' || o.amount == null || !isFinite(Number(o.amount))) { unset += 1; return; }
 sum += Number(o.amount);
 });
-const label = sum ? `£${Math.round(sum).toLocaleString('en-GB')}/mo` : 'amount not set';
+// Confirmed live: this used to show NO code at all -- a real
+// inconsistency next to every other arrow now carrying one. When
+// every off-diagram payment shares one method, show its code (and
+// the manual-payment dash, same as a push edge would); when mixed,
+// join the distinct codes rather than picking one arbitrarily or
+// staying silent.
+const codes = [...methodsUsed].map((m) => OUTGOING_METHOD_CODE[m] || 'OT');
+const amountText = sum ? `£${Math.round(sum).toLocaleString('en-GB')}/mo` : 'amount not set';
+const label = `${amountText} · ${codes.join('+')}`;
+const dash = (methodsUsed.size === 1 && methodsUsed.has('Manual payment')) ? FUNDING_EDGE_DASH.manual : '';
 const dotTitle = `${offDiagram.length} payment${offDiagram.length === 1 ? '' : 's'} outside your tracked accounts${unset ? ` (${unset} with no amount set)` : ''}`;
-edges.push({ from: a.id, to: `dot-out-${a.id}`, kind: 'funding', label, dotTitle });
+edges.push({ from: a.id, to: `dot-out-${a.id}`, kind: 'funding', label, dash, dotTitle });
 }
 // Inbound dot -- funding from a genuinely external source (Salary,
 // Airbnb, a side gig, or free-text "Other"), i.e. fundingSource set
