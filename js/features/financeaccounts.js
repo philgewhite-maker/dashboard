@@ -729,6 +729,59 @@ for (let iter = 0; iter < 4; iter++) { sweep(true); sweep(false); }
 return cols;
 }
 
+// A single-node column with exactly one edge to a single-node next
+// column wastes a whole column-slot's worth of horizontal width on
+// one hop -- confirmed live (a real screenshot): "Krak" funding
+// "First Direct" funding 5 real accounts drew Krak and First Direct
+// each in their OWN column, both mostly blank space either side of
+// one small card. Per feedback, staggering their ROW position (see
+// applySparseColumnStagger) saves vertical space but none of the
+// horizontal space that was the actual complaint -- this collapses
+// such a chain into ONE column, stacked top to bottom, instead.
+// Cascades naturally (a funding-source dot -> Krak -> First Direct
+// all collapse into one column, dot on top) since the scan restarts
+// after every merge, and checks the LAST node of an already-merged
+// column, not the column's own length -- once the dot has merged in,
+// the column has 2 nodes, but it's still a clean single-file chain
+// and whether it can merge FURTHER only depends on that last node's
+// own out-edge. Deliberately conservative otherwise -- the target
+// column must have exactly one node with exactly one incoming edge,
+// so this can never fire anywhere with real fan-out (the 5-account
+// column, the Halifax/Santander cluster) or misrepresent a node that
+// has more than one real relationship worth its own line.
+function mergeSparseChains(columns, edges) {
+const outCount = new Map(), inCount = new Map();
+edges.forEach((e) => {
+outCount.set(e.from, (outCount.get(e.from) || 0) + 1);
+inCount.set(e.to, (inCount.get(e.to) || 0) + 1);
+});
+let cols = columns.map((c) => [...c]);
+const connectors = []; // { aboveId, belowId, label, dash }
+let merged = true;
+while (merged) {
+merged = false;
+for (let i = 0; i < cols.length - 1; i++) {
+// The LAST node in the column, not the column's own length -- once
+// a dot has already merged into this column (cascading), the column
+// itself has 2+ nodes even though it's still a clean single-file
+// chain. Whether IT can merge further depends only on that last
+// node's own out-edge, same check as a plain single-node column.
+const id = cols[i][cols[i].length - 1];
+if ((outCount.get(id) || 0) !== 1) continue;
+const edge = edges.find((e) => e.from === id);
+if (!edge || cols[i + 1].length !== 1 || cols[i + 1][0] !== edge.to) continue;
+if ((inCount.get(edge.to) || 0) !== 1) continue;
+cols[i + 1] = [...cols[i], ...cols[i + 1]];
+cols.splice(i, 1);
+connectors.push({ aboveId: id, belowId: edge.to, label: edge.label, dash: edge.dash });
+merged = true;
+break; // indices shifted -- restart the scan
+}
+}
+const mergedPairs = new Set(connectors.map((c) => `${c.aboveId}>${c.belowId}`));
+return { columns: cols, edges: edges.filter((e) => !mergedPairs.has(`${e.from}>${e.to}`)), connectors };
+}
+
 // Nodes are laid out by ordinary flexbox (columns of a flex row, each a
 // flex column) -- normal document flow does the positioning, no pixel
 // math for placement. This just measures where cards actually landed
@@ -804,7 +857,15 @@ const container = document.getElementById('account-flow-diagram');
 if (!container) return;
 const svg = container.querySelector('.flow-lines');
 if (!svg) return;
-const edges = flowEdges(mode);
+// Same merge pass flowDiagramHtml() ran to build the HTML -- a merged
+// edge is rendered as an inline row between two stacked cards, not an
+// SVG curve, so it has to be excluded here too or a line would be
+// drawn for a relationship that no longer has two separate columns to
+// span.
+const rawEdges = flowEdges(mode);
+const rawNodeIds = new Set();
+rawEdges.forEach((e) => { rawNodeIds.add(e.from); rawNodeIds.add(e.to); });
+const edges = mergeSparseChains(flowColumns(rawNodeIds, rawEdges), rawEdges).edges;
 const rect = container.getBoundingClientRect();
 svg.setAttribute('width', String(rect.width));
 svg.setAttribute('height', String(rect.height));
@@ -969,6 +1030,20 @@ const edge = edges.find((e) => e.from === id || e.to === id);
 return `<div class="flow-dot" data-flow-node="${escapeHtml(id)}" title="${escapeHtml(edge?.dotTitle || '')}"></div>`;
 }
 
+// A merged (mergeSparseChains) same-column edge isn't drawn as an SVG
+// curve at all -- the existing left/right anchor math is built for
+// cards side by side, and would loop weirdly for two stacked top to
+// bottom in the same column. Rendered as a small inline row directly
+// between them instead, right in the column's own HTML flow.
+function flowColumnHtml(col, connectors, edges, cardById) {
+return col.map((id) => {
+const cardHtml = id.startsWith('dot-') ? flowDotHtml(id, edges) : flowCardHtml(cardById.get(id));
+const conn = connectors.find((c) => c.aboveId === id);
+const connectorHtml = conn ? `<div class="flow-inline-connector${conn.dash ? ' dashed' : ''}">&darr; ${escapeHtml(conn.label)}</div>` : '';
+return cardHtml + connectorHtml;
+}).join('');
+}
+
 // .overview-chip/.overview-chip.active is the same "pick one of a few"
 // pill pattern the Tasks filter and Overview's own dimension chips
 // already use -- reused as-is rather than inventing a second toggle
@@ -986,6 +1061,7 @@ return `${toggle}<div class="settings-note" style="margin:8px 0 12px;">${FLOW_MO
 const nodeIds = new Set();
 edges.forEach((e) => { nodeIds.add(e.from); nodeIds.add(e.to); });
 const columns = flowColumns(nodeIds, edges);
+const { columns: mergedColumns, edges: remainingEdges, connectors } = mergeSparseChains(columns, edges);
 const cardById = new Map(data.financeAccounts.map((a) => [a.id, a]));
 // Sized to THIS view's own longest label, not a flat worst-case
 // constant -- confirmed live that a fixed wide gap (originally added so
@@ -996,11 +1072,12 @@ const cardById = new Map(data.financeAccounts.map((a) => [a.id, a]));
 // lengths vary a lot within the same view (a mixed graph might have one
 // short edge and one long one) -- kept simple rather than computing a
 // separate gap per boundary, which flexbox's single `gap` can't express
-// anyway.
-const gap = Math.max(60, Math.max(...edges.map((e) => labelBoxWidth(e.label))) + 30);
+// anyway. Sized off remainingEdges (merged-away edges no longer need
+// any gap at all, they're inline now, not spanning a column boundary).
+const gap = remainingEdges.length ? Math.max(60, Math.max(...remainingEdges.map((e) => labelBoxWidth(e.label))) + 30) : 60;
 return `${toggle}<div class="flow-diagram" id="account-flow-diagram">
 <svg class="flow-lines"></svg>
-<div class="flow-columns" style="gap:${gap}px;">${columns.map((col) => `<div class="flow-column">${col.map((id) => (id.startsWith('dot-') ? flowDotHtml(id, edges) : flowCardHtml(cardById.get(id)))).join('')}</div>`).join('')}</div>
+<div class="flow-columns" style="gap:${gap}px;">${mergedColumns.map((col) => `<div class="flow-column">${flowColumnHtml(col, connectors, remainingEdges, cardById)}</div>`).join('')}</div>
 </div>`;
 }
 

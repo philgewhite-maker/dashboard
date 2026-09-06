@@ -2903,6 +2903,12 @@ color:var(--muted);
    income source like Salary/Airbnb), grouped rather than drawn as its
    own card. See flowDotHtml()/flowEdges() in financeaccounts.js. */
 .flow-dot{width:14px;height:14px;border-radius:50%;background:var(--muted);opacity:.55;align-self:center;flex:0 0 auto;cursor:default;}
+/* A merged single-item chain's own connector -- see mergeSparseChains()/
+   flowColumnHtml() in financeaccounts.js. Sits between two stacked
+   cards in the same column instead of an SVG line, since there's no
+   column boundary left for a curve to span. */
+.flow-inline-connector{font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--muted);text-align:center;padding:1px 0;}
+.flow-inline-connector.dashed{border-top:1px dashed var(--line);border-bottom:1px dashed var(--line);}
 
 /* Switch-offer scan results -- same border-top-separated row shape
    .voucher-row/.account-card already use for a flat list. */
