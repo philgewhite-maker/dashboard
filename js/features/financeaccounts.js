@@ -676,7 +676,7 @@ if (!byDepth.has(d)) byDepth.set(d, []);
 byDepth.get(d).push(id);
 });
 const columns = [...byDepth.keys()].sort((x, y) => x - y).map((d) => byDepth.get(d));
-return orderRowsToReduceCrossings(columns, edges);
+return transposeRowsForShortestEdges(orderRowsToReduceCrossings(columns, edges), edges);
 }
 
 // Which COLUMN a node lands in was never the problem -- source accounts
@@ -726,6 +726,63 @@ cols[i] = scored.map((s) => s.id);
 });
 }
 for (let iter = 0; iter < 4; iter++) { sweep(true); sweep(false); }
+return cols;
+}
+
+// Barycenter (above) optimises for FEWER crossings, which isn't the
+// same thing as SHORT edges -- a node with two sources far apart in
+// their own column lands at their average row, which can be far from
+// EITHER of them, forcing a long diagonal that cuts across whatever
+// sits between (confirmed live: Halifax's own DD from Barclays reading
+// as visually "lame"/crowded, per feedback -- "nearest" or "shortest
+// arrow length" would likely avoid many of these problems). This is
+// the classic complementary step (Sugiyama's own "transpose" heuristic
+// -- swap two ADJACENT rows if it helps, repeat until nothing helps
+// left), adapted from its usual job (fewer crossings) to this one
+// instead: minimise total edge length -- literally sum of |rowA-rowB|
+// across every edge touching this column boundary, both the incoming
+// side (from the column to its left) and outgoing side (to its right)
+// -- swapping two rows whenever doing so shortens that sum. Runs AFTER
+// barycenter, on top of its result, not instead of it -- barycenter
+// still does the bulk of the organising; this just nudges individual
+// rows shorter where a swap genuinely helps.
+function transposeRowsForShortestEdges(columns, edges) {
+if (columns.length < 2) return columns;
+const incomingOf = new Map(), outgoingOf = new Map();
+edges.forEach((e) => {
+if (!incomingOf.has(e.to)) incomingOf.set(e.to, []);
+incomingOf.get(e.to).push(e.from);
+if (!outgoingOf.has(e.from)) outgoingOf.set(e.from, []);
+outgoingOf.get(e.from).push(e.to);
+});
+const cols = columns.map((c) => [...c]);
+let improved = true;
+let iterations = 0;
+while (improved && iterations < 10) {
+improved = false;
+iterations += 1;
+for (let ci = 0; ci < cols.length; ci += 1) {
+const col = cols[ci];
+const leftPos = ci > 0 ? new Map(cols[ci - 1].map((id, pos) => [id, pos])) : null;
+const rightPos = ci < cols.length - 1 ? new Map(cols[ci + 1].map((id, pos) => [id, pos])) : null;
+const costAt = (id, row) => {
+let cost = 0;
+if (leftPos) (incomingOf.get(id) || []).forEach((n) => { if (leftPos.has(n)) cost += Math.abs(row - leftPos.get(n)); });
+if (rightPos) (outgoingOf.get(id) || []).forEach((n) => { if (rightPos.has(n)) cost += Math.abs(row - rightPos.get(n)); });
+return cost;
+};
+for (let ri = 0; ri < col.length - 1; ri += 1) {
+const a = col[ri], b = col[ri + 1];
+const before = costAt(a, ri) + costAt(b, ri + 1);
+const after = costAt(b, ri) + costAt(a, ri + 1);
+if (after < before) {
+col[ri] = b;
+col[ri + 1] = a;
+improved = true;
+}
+}
+}
+}
 return cols;
 }
 
