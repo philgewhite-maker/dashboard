@@ -165,7 +165,7 @@ return days.map((d) => plannerDayHtml(d)).join('');
 
 function priorityPoolHtml() {
 const priority = data.connections.filter(isPriorityConnection);
-if (!priority.length) return '<div class="empty">No priority connections yet — pin someone (📌) below, on the Dating tab, or they\'ll appear automatically once things reach "Planning to meet" or later.</div>';
+if (!priority.length) return '<div class="empty">No priority connections yet — pin someone (📌) below, on the <span class="inline-goto-link" data-goto-tab="dating">Dating tab</span>, or they\'ll appear automatically once things reach "Planning to meet" or later.</div>';
 return priority.map((c) => `<div class="planner-pool-card alloc-card" draggable="true" data-planner-drag="connection:${c.id}">
 <span class="planner-entry-link" data-planner-open-connection="${c.id}">${avatarHtml(c.photoId, c.name, 'sm')}<span>${escapeHtml(c.name)}</span></span>
 </div>`).join('');
@@ -346,7 +346,7 @@ return as.localeCompare(bs) || a.createdAt.localeCompare(b.createdAt);
 // idempotent when there's nothing new to add.
 sortedTrips.forEach(syncTripPeopleEntries);
 const tripPanels = sortedTrips.map(tripPanelHtml).filter(Boolean).join('');
-tripsEl.innerHTML = tripPanels || '<div class="empty">No trips with known dates yet — add dates on the Travel tab and they\'ll show up here.</div>';
+tripsEl.innerHTML = tripPanels || '<div class="empty">No trips with known dates yet — add dates on the <span class="inline-goto-link" data-goto-tab="travel">Travel tab</span> and they\'ll show up here.</div>';
 hydratePhotoBackgrounds(priorityEl);
 hydratePhotoBackgrounds(gridEl);
 hydratePhotoBackgrounds(tripsEl);
@@ -421,6 +421,17 @@ el.addEventListener('click', (e) => {
 e.stopPropagation();
 switchTab('travel');
 revealTrip(el.dataset.plannerOpenTrip);
+});
+});
+// Generic "this phrase just names a whole tab, not a specific record on
+// it" link -- no scrollAndFlash target, unlike data-planner-open-trip
+// above, since there's nothing more specific to point at (e.g.
+// priorityPoolHtml's empty state naming the Dating tab in general, not
+// any one connection).
+root.querySelectorAll('[data-goto-tab]').forEach((el) => {
+el.addEventListener('click', (e) => {
+e.stopPropagation();
+switchTab(el.dataset.gotoTab);
 });
 });
 }
