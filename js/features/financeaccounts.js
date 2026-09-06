@@ -119,7 +119,7 @@ const statusTitle = o.status ? OUTGOING_STATUS_LABEL[o.status] : 'Not set';
 // elsewhere links back to it), separate from the status-toggle text so
 // the two clicks (cycle status vs. open that account) can't collide.
 const toAccountLink = toAccount
-? ` <span class="dd-to-account-link" data-open-account-ref="${escapeHtml(toAccount.id)}" title="Pays into ${escapeHtml(accountLabel(toAccount))} — leaves this account, but not your overall financial perimeter, so it's excluded from the monthly surplus check">&rarr; ${escapeHtml(accountLabel(toAccount))}</span>`
+? ` <span class="dd-to-account-link" data-open-account-ref="${escapeHtml(toAccount.id)}" title="Pays into ${escapeHtml(accountLabel(toAccount))} — leaves this account's own monthly surplus, and counts as funding coming IN on ${escapeHtml(accountLabel(toAccount))}'s own">&rarr; ${escapeHtml(accountLabel(toAccount))}</span>`
 : '';
 // The status-cycle click target is a SIBLING of the × remove button,
 // not its wrapper -- clicking × would otherwise also bubble into a
@@ -164,20 +164,49 @@ function accountsFundedBy(a) {
 return data.financeAccounts.filter((x) => x.id !== a.id && x.fundingFromAccountId === a.id && x.fundingAmount !== '' && x.fundingAmount != null && isFinite(Number(x.fundingAmount)));
 }
 
+// Reverse of outgoings[].toAccountId -- every OTHER tracked account's
+// Direct Debit/Standing Order that pushes money INTO this one. The
+// "push" counterpart to accountsFundedBy's "pull" outflow above: a
+// transfer can be recorded either way (the receiver naming its source
+// via fundingFromAccountId, or the source holding the actual DD/
+// Standing Order via toAccountId) -- both stay supported side by side,
+// so this adds the push half without touching the pull logic at all.
+// Neither double-counts the other: one is money arriving via another
+// account's own outgoing, the other is money leaving via this account
+// naming itself as someone else's pull source.
+function accountsPushingInto(a) {
+const result = [];
+data.financeAccounts.forEach((x) => {
+if (x.id === a.id) return;
+(x.outgoings || []).forEach((o) => {
+if (o.toAccountId !== a.id || !['Direct Debit', 'Standing Order'].includes(outgoingMethod(o))) return;
+if (o.amount === '' || o.amount == null || !isFinite(Number(o.amount))) return;
+result.push({ from: x, amount: Number(o.amount) });
+});
+});
+return result;
+}
+
 // £x funded in, minus what actually leaves the account: every Direct
 // Debit/Standing Order (INCLUDING ones paying into another of your own
 // tracked accounts, e.g. a mortgage overpayment -- it still leaves
 // THIS account's own balance, whatever else it means at a household
 // level; see outgoingsHtml's own comment on toAccountId) plus whatever
-// this account itself sends on to fund other tracked accounts
-// (accountsFundedBy, above). Card payment/Other stay excluded: unlike
-// a DD or standing order, their amount isn't a fixed recurring figure
-// by definition, so folding them in would make the total look more
-// precise than it really is. Returns null when there's no funding
-// figure to net against at all -- nothing to show, not a computed £0.
+// this account itself sends on to fund other tracked accounts via the
+// pull mechanism (accountsFundedBy, above). Funding in is the pull
+// field (fundingAmount, "external" -- money genuinely from outside any
+// tracked account, or a source named the pull way) PLUS anything
+// pushed in via another account's own DD/Standing Order
+// (accountsPushingInto). Card payment/Other stay excluded from the
+// out side: unlike a DD or standing order, their amount isn't a fixed
+// recurring figure by definition, so folding them in would make the
+// total look more precise than it really is. Returns null only when
+// there's truly nothing on this account at all to compute from.
 function accountMonthlySurplus(a) {
-if (a.fundingAmount === '' || a.fundingAmount == null || !isFinite(Number(a.fundingAmount))) return null;
-const fundingIn = Number(a.fundingAmount);
+const externalIn = (a.fundingAmount !== '' && a.fundingAmount != null && isFinite(Number(a.fundingAmount))) ? Number(a.fundingAmount) : 0;
+const pushedIn = accountsPushingInto(a);
+const pushedInTotal = pushedIn.reduce((sum, p) => sum + p.amount, 0);
+const fundingIn = externalIn + pushedInTotal;
 const relevant = (a.outgoings || []).filter((o) => ['Direct Debit', 'Standing Order'].includes(outgoingMethod(o)));
 let out = 0;
 let unset = 0;
@@ -185,10 +214,11 @@ relevant.forEach((o) => {
 if (o.amount === '' || o.amount == null || !isFinite(Number(o.amount))) { unset += 1; return; }
 out += Number(o.amount);
 });
+if (fundingIn === 0 && out === 0 && relevant.length === 0) return null;
 const fundedAccounts = accountsFundedBy(a);
 const fundingOut = fundedAccounts.reduce((sum, x) => sum + Number(x.fundingAmount), 0);
 const excludedOther = (a.outgoings || []).filter((o) => !['Direct Debit', 'Standing Order'].includes(outgoingMethod(o))).length;
-return { net: fundingIn - out - fundingOut, fundingIn, out, unset, excludedOther, fundingOut, fundedAccounts };
+return { net: fundingIn - out - fundingOut, fundingIn, externalIn, pushedIn, pushedInTotal, out, unset, excludedOther, fundingOut, fundedAccounts };
 }
 
 function surplusSign(s) { return s.net < 0 ? '−' : '+'; }
@@ -197,7 +227,10 @@ function surplusAmountText(s) { return `${surplusSign(s)}£${Math.round(Math.abs
 // tooltip -- one place computing the breakdown sentence/phrase so the
 // three surfaces can't drift out of sync with each other.
 function surplusTitle(s) {
-let title = `£${s.fundingIn.toLocaleString('en-GB')} funding`;
+const inParts = [];
+if (s.externalIn) inParts.push(`£${s.externalIn.toLocaleString('en-GB')} funding`);
+if (s.pushedInTotal) inParts.push(`£${s.pushedInTotal.toLocaleString('en-GB')} from ${s.pushedIn.map((p) => accountLabel(p.from)).join(', ')}`);
+let title = inParts.length ? inParts.join(' + ') : '£0 in';
 if (s.out) title += ` − £${s.out.toLocaleString('en-GB')} Direct Debit/standing order`;
 if (s.fundingOut) title += ` − £${s.fundingOut.toLocaleString('en-GB')} funding ${s.fundedAccounts.length} other account${s.fundedAccounts.length === 1 ? '' : 's'} (${s.fundedAccounts.map((x) => accountLabel(x)).join(', ')})`;
 if (s.unset) title += `, ${s.unset} outgoing${s.unset === 1 ? '' : 's'} with no amount set (excluded)`;
@@ -240,7 +273,10 @@ function surplusDetailHtml(a) {
 const s = accountMonthlySurplus(a);
 if (!s) return '';
 const suffix = s.net < 0 ? 'short' : 'left over';
-let text = `Net monthly: £${s.fundingIn.toLocaleString('en-GB')} funding`;
+const inParts = [];
+if (s.externalIn) inParts.push(`£${s.externalIn.toLocaleString('en-GB')} funding`);
+if (s.pushedInTotal) inParts.push(`£${s.pushedInTotal.toLocaleString('en-GB')} from ${s.pushedIn.map((p) => accountLabel(p.from)).join(', ')}`);
+let text = `Net monthly: ${inParts.length ? inParts.join(' + ') : '£0 in'}`;
 if (s.out) text += ` − £${s.out.toLocaleString('en-GB')} Direct Debit/standing order`;
 if (s.fundingOut) text += ` − £${s.fundingOut.toLocaleString('en-GB')} funding ${s.fundedAccounts.length} other account${s.fundedAccounts.length === 1 ? '' : 's'} (${s.fundedAccounts.map((x) => accountLabel(x)).join(', ')})`;
 text += ` = £${Math.round(Math.abs(s.net)).toLocaleString('en-GB')}/mo ${suffix}.`;
@@ -383,7 +419,7 @@ ${surplusDetailHtml(a)}
 <input type="text" autocomplete="off" class="tag-add-input" placeholder="Beneficiary, e.g. Netflix" data-dd-beneficiary="${a.id}" style="max-width:150px;">
 <input type="number" step="0.01" min="0" autocomplete="off" class="tag-add-input" placeholder="£/mo, e.g. 9.99" data-dd-amount="${a.id}" style="max-width:120px;">
 <select data-dd-method="${a.id}" title="How it's paid">${OUTGOING_METHODS.map((m) => `<option value="${m}">${m}</option>`).join('')}</select>
-<select data-dd-to-account="${a.id}" title="Pays into one of your own accounts instead of a third party (e.g. a mortgage overpayment)">${otherAccountOptionsHtml(a.id, '')}</select>
+<select data-dd-to-account="${a.id}" title="Pays into one of your own accounts instead of a third party -- e.g. a mortgage overpayment, or a Standing Order funding another tracked account (shows in the Ongoing diagram either way)">${otherAccountOptionsHtml(a.id, '')}</select>
 <button class="sync-btn sm" type="button" data-dd-add="${a.id}">Add</button>
 </div>
 </div>
@@ -450,9 +486,24 @@ const accountOk = (id) => { const a = byId.get(id); return !!a && (closedOk || !
 const edges = [];
 if (mode === 'funding') {
 data.financeAccounts.forEach((a) => {
+// "Pull" -- the receiving account names its source.
 if (a.fundingFromAccountId && accountOk(a.fundingFromAccountId) && accountOk(a.id)) {
 edges.push({ from: a.fundingFromAccountId, to: a.id, kind: 'funding', label: (a.fundingAmount !== '' && a.fundingAmount != null) ? `£${a.fundingAmount}/mo` : 'funds' });
 }
+// "Push" -- a Direct Debit/Standing Order the SOURCE account holds,
+// paying into another of the user's own tracked accounts
+// (outgoings[].toAccountId, e.g. a mortgage overpayment or a
+// standing order funding a second current account). Confirmed live
+// as a real gap: this relationship existed in the data but never
+// drew an edge here at all, since this loop only ever read the pull
+// field above. Card payment/Other stay out, same reasoning as
+// accountMonthlySurplus's own DD/Standing-Order-only filter.
+(a.outgoings || []).forEach((o) => {
+if (!o.toAccountId || !['Direct Debit', 'Standing Order'].includes(outgoingMethod(o))) return;
+if (!accountOk(o.toAccountId) || !accountOk(a.id)) return;
+const amountLabel = (o.amount !== '' && o.amount != null) ? `£${o.amount}/mo` : 'transfer';
+edges.push({ from: a.id, to: o.toAccountId, kind: 'funding', label: `${amountLabel} · ${outgoingMethod(o) === 'Direct Debit' ? 'DD' : 'SO'}` });
+});
 });
 } else if (mode === 'cass') {
 // Directional now (cassFromAccountId, not the old undirected-sounding
