@@ -2829,8 +2829,8 @@ border:2px solid transparent;
    instead of a bare badge+label chip, so the diagram carries an
    account's own identity, not just its position in the graph. */
 .flow-card{
-width:150px;min-height:92px;
-display:flex;flex-direction:column;gap:8px;
+width:150px;min-height:68px;
+display:flex;flex-direction:column;gap:5px;
 padding:10px 12px;
 border-radius:12px;
 border-left:4px solid transparent;
@@ -2855,6 +2855,11 @@ transition:transform .1s ease;
    coming later in the stylesheet). */
 .flow-card.flow-card-closed{background:var(--card);border-left-style:dashed;border-left-color:var(--muted);filter:grayscale(.8);opacity:.6;}
 .flow-card-top{display:flex;align-items:flex-start;justify-content:space-between;gap:6px;}
+/* Type + a short masked number ("x1234") stacked here instead of the
+   number getting its own full-width row below the badge -- confirmed
+   live that extra row was the single biggest contributor to cards
+   running too tall. */
+.flow-card-top-right{display:flex;flex-direction:column;align-items:flex-end;gap:1px;}
 .flow-card-type{
 font-family:'IBM Plex Mono',monospace;
 font-size:8px;
@@ -2862,17 +2867,18 @@ text-transform:uppercase;
 letter-spacing:.05em;
 color:var(--muted);
 text-align:right;
-padding-top:2px;
 }
 .flow-card-number{
 font-family:'IBM Plex Mono',monospace;
-font-size:12px;
-letter-spacing:.05em;
-color:var(--ink);
-margin-top:auto;
+font-size:9px;
+color:var(--muted);
 }
 .flow-card-name{font-size:11px;font-weight:600;color:var(--ink);}
 .flow-card-closed-note{font-size:9px;font-style:italic;color:var(--muted);}
+/* Surplus + DD count share one row (see flowCardHtml) instead of each
+   getting its own line -- same "cards were too tall" fix as
+   .flow-card-top-right above. */
+.flow-card-stats{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;}
 /* "3 (1)" -- deal-linked count, then transferrable in brackets, see
    ddCountLabel() in financeaccounts.js. */
 .flow-card-dd{font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--muted);}

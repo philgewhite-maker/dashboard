@@ -657,15 +657,18 @@ let resizeBound = false;
 // the account's own detail form).
 function maskedAccountNumber(a) {
 const num = String(a.accountNumber || '').replace(/\s+/g, '');
-return num ? `•••• ${num.slice(-4)}` : '';
+return num ? `x${num.slice(-4)}` : '';
 }
 
 // Each node rendered as a debit/credit-card-shaped face -- logo (or the
-// colour+initials fallback) top-left, account type top-right like an
-// issuer wordmark, masked number, bank+account name -- instead of a
-// bare badge+label chip, so the diagram carries enough of an account's
-// own identity to be read at a glance, not just its position in the
-// graph.
+// colour+initials fallback) top-left, account type + a short masked
+// number stacked top-right like an issuer wordmark, bank+account name
+// below -- instead of a bare badge+label chip, so the diagram carries
+// enough of an account's own identity to be read at a glance, not just
+// its position in the graph. Type and number share the top row (not
+// separate lines) and surplus/DD share one stats row -- kept short
+// deliberately: confirmed live the original stacked-everything layout
+// made cards too tall once the surplus figure was added.
 function flowCardHtml(a) {
 const masked = maskedAccountNumber(a);
 const dd = ddCountLabel(a);
@@ -674,13 +677,20 @@ const closed = isClosed(a);
 // tag already uses (cassToAccount()) -- one fact, shown consistently
 // wherever the account appears, not a second copy of the logic.
 const closedNote = closed ? (cassToAccount(a) ? `Closed — CASS to ${cassToAccount(a).bank || accountLabel(cassToAccount(a))}` : 'Closed') : '';
+const surplus = flowCardSurplusHtml(a);
+const ddLine = dd ? `<div class="flow-card-dd" title="${escapeHtml(dd.title)}">DD ${escapeHtml(dd.text)}</div>` : '';
+const statsRow = (surplus || ddLine) ? `<div class="flow-card-stats">${surplus}${ddLine}</div>` : '';
 return `<div class="flow-card ${escapeHtml(a.colour)}${closed ? ' flow-card-closed' : ''}" data-flow-node="${escapeHtml(a.id)}">
-<div class="flow-card-top">${accountBadgeHtml(a, 'lg')}<span class="flow-card-type">${escapeHtml(a.accountType)}</span></div>
-${masked ? `<div class="flow-card-number">${escapeHtml(masked)}</div>` : ''}
+<div class="flow-card-top">
+${accountBadgeHtml(a, 'lg')}
+<div class="flow-card-top-right">
+<span class="flow-card-type">${escapeHtml(a.accountType)}</span>
+${masked ? `<span class="flow-card-number">${escapeHtml(masked)}</span>` : ''}
+</div>
+</div>
 <div class="flow-card-name">${escapeHtml(accountLabel(a))}</div>
 ${closedNote ? `<div class="flow-card-closed-note">${escapeHtml(closedNote)}</div>` : ''}
-${flowCardSurplusHtml(a)}
-${dd ? `<div class="flow-card-dd" title="${escapeHtml(dd.title)}">DD ${escapeHtml(dd.text)}</div>` : ''}
+${statsRow}
 </div>`;
 }
 
