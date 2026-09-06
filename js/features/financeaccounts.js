@@ -770,6 +770,18 @@ outEdges.get(e.from).push(e);
 if (!inEdges.has(e.to)) inEdges.set(e.to, []);
 inEdges.get(e.to).push(e);
 });
+// Confirmed live: leaving each list in raw edge-array order (arbitrary,
+// unrelated to where anything actually rendered) meant a node's exit/
+// entry points didn't line up with its neighbours' actual row order --
+// "top arrow to top card, 2nd arrow to 2nd card" wasn't happening even
+// after orderRowsToReduceCrossings had already put the RIGHT rows next
+// to each other, causing lines to visibly cross that didn't need to.
+// Sorting each node's own edge list by the OTHER endpoint's actual
+// rendered top position (not the barycenter's row-index estimate --
+// the real pixel position, already measured for anchorPoint below)
+// fixes that directly.
+outEdges.forEach((list) => list.sort((x, y) => (rectOf(x.to)?.top ?? 0) - (rectOf(y.to)?.top ?? 0)));
+inEdges.forEach((list) => list.sort((x, y) => (rectOf(x.from)?.top ?? 0) - (rectOf(y.from)?.top ?? 0)));
 const anchorPoint = (id, edge, side) => {
 const r = rectOf(id);
 if (!r) return null;
