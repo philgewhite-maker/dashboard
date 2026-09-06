@@ -676,7 +676,7 @@ if (!byDepth.has(d)) byDepth.set(d, []);
 byDepth.get(d).push(id);
 });
 const columns = [...byDepth.keys()].sort((x, y) => x - y).map((d) => byDepth.get(d));
-return transposeRowsForShortestEdges(orderRowsByDeadEndPreference(columns, edges), edges);
+return orderRowsByDeadEndPreference(columns, edges);
 }
 
 // Which COLUMN a node lands in was never the problem -- source accounts
@@ -773,17 +773,24 @@ cols[ci] = result;
 return cols;
 }
 
-// The pass above optimises for each node landing at its OWN best row;
-// this is the complementary step (Sugiyama's own "transpose" heuristic
-// -- swap two ADJACENT rows if it helps, repeat until nothing helps
-// left), adapted from its usual job (fewer crossings) to minimise total
-// edge length instead -- literally sum of |rowA-rowB| across every edge
-// touching this column boundary, both the incoming side (from the
-// column to its left) and outgoing side (to its right) -- swapping two
-// rows whenever doing so shortens that sum. Runs AFTER the pass above,
-// on top of its result, not instead of it -- a cheap cleanup for
-// whatever that deterministic walk didn't have a strong opinion about
-// (the shared, leftover-filled targets), not the main organising step.
+// NOT called by flowColumns any more -- kept only for window.__flowDebug
+// (below), to compare against orderRowsByDeadEndPreference's own result
+// when diagnosing a layout question, same way it was used to actually
+// FIND this problem in the first place. Originally paired with the old
+// barycenter pass (Sugiyama's own "transpose" heuristic -- swap two
+// ADJACENT rows if it helps, repeat until nothing helps left -- adapted
+// from its usual job, fewer crossings, to minimise total row-INDEX
+// distance instead). Confirmed live, via the real account data and this
+// exact function called side by side with and without it (see the
+// debug session that found this): it was undoing orderRowsByDeadEndPreference's
+// deliberate placement, not refining it -- a swap it judged as
+// "shorter" (row-index distance treats a tiny dot and a full card as
+// the same one unit of height) pulled a node's row away from right next
+// to its own target and dragged it across an unrelated cluster instead
+// -- exactly the "still bending things needlessly" a fresh pair of eyes
+// on the real diagram caught. orderRowsByDeadEndPreference's own
+// placement is deliberate enough on its own now that this no longer
+// earns its keep as an automatic cleanup pass.
 function transposeRowsForShortestEdges(columns, edges) {
 if (columns.length < 2) return columns;
 const incomingOf = new Map(), outgoingOf = new Map();
