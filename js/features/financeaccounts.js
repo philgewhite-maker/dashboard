@@ -676,7 +676,7 @@ if (!byDepth.has(d)) byDepth.set(d, []);
 byDepth.get(d).push(id);
 });
 const columns = [...byDepth.keys()].sort((x, y) => x - y).map((d) => byDepth.get(d));
-return transposeRowsForShortestEdges(orderRowsToReduceCrossings(columns, edges), edges);
+return transposeRowsForShortestEdges(orderRowsByDeadEndPreference(columns, edges), edges);
 }
 
 // Which COLUMN a node lands in was never the problem -- source accounts
@@ -684,68 +684,106 @@ return transposeRowsForShortestEdges(orderRowsToReduceCrossings(columns, edges),
 // actual mess (confirmed live: a CASS view with 8 accounts, dashed
 // lines zigzagging across the entire diagram) was row order WITHIN each
 // column being arbitrary insertion order, unrelated to which row its
-// actual edge partner sat on. Standard barycenter heuristic for layered
-// graph drawing: repeatedly re-sort each column by the average row
-// position of the neighbours it's actually connected to in the
-// adjacent column, alternating left-to-right (by predecessors) and
-// right-to-left (by successors) passes until it settles. Not a true
-// crossing-minimiser (that's NP-hard in general) -- a few passes of
-// this converges to something close enough to read cleanly, which is
-// all a diagram at this scale needs.
-function orderRowsToReduceCrossings(columns, edges) {
+// actual edge partner sat on.
+//
+// Previously a barycenter heuristic (re-sort each column by the AVERAGE
+// row of its neighbours, alternating sweeps until it settles) -- replaced
+// per feedback after it kept undershooting on real data (Halifax's own
+// card moving "about 10% of the distance" wanted): an average is exactly
+// the wrong target when a node's real anchor is ONE specific source, not
+// a blend of several. This is a deterministic, single left-to-right pass
+// instead: walk the prior (already-ordered) column from its top card
+// down, and for each source claim the row its target actually belongs
+// at rather than estimating one. A target is claimed at the OUTERMOST
+// free row (top of the column for a source near the top, working
+// inward), preferring whichever of a source's edges nothing else can
+// ever compete for -- a dot is always safe (by construction it only
+// ever has the one edge); a card is safe when no OTHER account in this
+// same prior column also reaches for it. The bottom half mirrors this
+// from the opposite end -- walked from the prior column's LAST card
+// upward, claiming the current column's LAST row first and working
+// inward -- so a source near the bottom pulls its own dead-end target
+// down to meet it instead of drifting toward wherever an average
+// happened to land. A target genuinely shared by more than one source
+// has no single row to prefer either way, and falls into whatever gap
+// is left between the two passes once they're done.
+function orderRowsByDeadEndPreference(columns, edges) {
 if (columns.length < 2) return columns;
-const incomingOf = new Map(), outgoingOf = new Map();
-edges.forEach((e) => {
-if (!incomingOf.has(e.to)) incomingOf.set(e.to, []);
-incomingOf.get(e.to).push(e.from);
-if (!outgoingOf.has(e.from)) outgoingOf.set(e.from, []);
-outgoingOf.get(e.from).push(e.to);
+const cols = columns.map((c) => [...c]);
+for (let ci = 1; ci < cols.length; ci += 1) {
+const prior = cols[ci - 1];
+const current = cols[ci];
+const priorSet = new Set(prior);
+const currentSet = new Set(current);
+const edgesFromPrior = edges.filter((e) => priorSet.has(e.from) && currentSet.has(e.to));
+// In-degree counted ONLY across edges from THIS prior column -- a
+// target is "safe" to claim when nothing else in this column also
+// reaches for it, regardless of what it sends onward itself.
+const inDegree = new Map();
+edgesFromPrior.forEach((e) => inDegree.set(e.to, (inDegree.get(e.to) || 0) + 1));
+const edgesBySource = new Map();
+edgesFromPrior.forEach((e) => {
+if (!edgesBySource.has(e.from)) edgesBySource.set(e.from, []);
+edgesBySource.get(e.from).push(e);
 });
-let cols = columns.map((c) => [...c]);
-function sweep(leftToRight) {
-const range = leftToRight
-? Array.from({ length: cols.length - 1 }, (_, i) => i + 1)
-: Array.from({ length: cols.length - 1 }, (_, i) => cols.length - 2 - i);
-range.forEach((i) => {
-const neighbourCol = cols[leftToRight ? i - 1 : i + 1];
-const neighbourPos = new Map(neighbourCol.map((id, pos) => [id, pos]));
-const neighboursOf = leftToRight ? incomingOf : outgoingOf;
-const currentPos = new Map(cols[i].map((id, pos) => [id, pos]));
-const scored = cols[i].map((id) => {
-const neighbours = (neighboursOf.get(id) || []).filter((n) => neighbourPos.has(n));
-// No neighbour in the adjacent column on this pass (e.g. a source
-// node has nothing to its left) -- keep its current relative
-// position rather than collapsing everything untethered to the top.
-const score = neighbours.length
-? neighbours.reduce((sum, n) => sum + neighbourPos.get(n), 0) / neighbours.length
-: currentPos.get(id);
-return { id, score };
-});
-scored.sort((a, b) => a.score - b.score);
-cols[i] = scored.map((s) => s.id);
-});
+const isDot = (id) => id.startsWith('dot-');
+const isSafe = (id) => (inDegree.get(id) || 0) <= 1;
+// Dead ends first (a dot before a dead-end card -- smaller, and never
+// contested by construction), everything else after; a stable sort
+// keeps ties in their original edge order.
+const rankOf = (id) => (isSafe(id) ? (isDot(id) ? 0 : 1) : 2);
+const result = new Array(current.length).fill(null);
+const placed = new Set();
+const half = Math.ceil(prior.length / 2);
+let topRow = 0;
+for (let pi = 0; pi < half; pi += 1) {
+const srcEdges = (edgesBySource.get(prior[pi]) || []).filter((e) => !placed.has(e.to));
+srcEdges.sort((a, b) => rankOf(a.to) - rankOf(b.to));
+for (const e of srcEdges) {
+if (placed.has(e.to)) continue; // an earlier source in this same pass already claimed it
+if (topRow > current.length - 1) break;
+result[topRow] = e.to;
+placed.add(e.to);
+topRow += 1;
 }
-for (let iter = 0; iter < 4; iter++) { sweep(true); sweep(false); }
+}
+let bottomRow = current.length - 1;
+for (let pi = prior.length - 1; pi >= half; pi -= 1) {
+const srcEdges = (edgesBySource.get(prior[pi]) || []).filter((e) => !placed.has(e.to));
+srcEdges.sort((a, b) => rankOf(a.to) - rankOf(b.to));
+for (const e of srcEdges) {
+if (placed.has(e.to)) continue;
+if (bottomRow < topRow) break; // the two passes have met -- no room left to claim
+result[bottomRow] = e.to;
+placed.add(e.to);
+bottomRow -= 1;
+}
+}
+// Whatever neither pass claimed (a target shared by more than one
+// source, or one with no edge back into this specific prior column)
+// fills the untouched gap in between, in its existing relative order --
+// this pass has no opinion about those.
+const leftover = current.filter((id) => !placed.has(id));
+let li = 0;
+for (let row = 0; row < result.length; row += 1) {
+if (result[row] == null) { result[row] = leftover[li]; li += 1; }
+}
+cols[ci] = result;
+}
 return cols;
 }
 
-// Barycenter (above) optimises for FEWER crossings, which isn't the
-// same thing as SHORT edges -- a node with two sources far apart in
-// their own column lands at their average row, which can be far from
-// EITHER of them, forcing a long diagonal that cuts across whatever
-// sits between (confirmed live: Halifax's own DD from Barclays reading
-// as visually "lame"/crowded, per feedback -- "nearest" or "shortest
-// arrow length" would likely avoid many of these problems). This is
-// the classic complementary step (Sugiyama's own "transpose" heuristic
+// The pass above optimises for each node landing at its OWN best row;
+// this is the complementary step (Sugiyama's own "transpose" heuristic
 // -- swap two ADJACENT rows if it helps, repeat until nothing helps
-// left), adapted from its usual job (fewer crossings) to this one
-// instead: minimise total edge length -- literally sum of |rowA-rowB|
-// across every edge touching this column boundary, both the incoming
-// side (from the column to its left) and outgoing side (to its right)
-// -- swapping two rows whenever doing so shortens that sum. Runs AFTER
-// barycenter, on top of its result, not instead of it -- barycenter
-// still does the bulk of the organising; this just nudges individual
-// rows shorter where a swap genuinely helps.
+// left), adapted from its usual job (fewer crossings) to minimise total
+// edge length instead -- literally sum of |rowA-rowB| across every edge
+// touching this column boundary, both the incoming side (from the
+// column to its left) and outgoing side (to its right) -- swapping two
+// rows whenever doing so shortens that sum. Runs AFTER the pass above,
+// on top of its result, not instead of it -- a cheap cleanup for
+// whatever that deterministic walk didn't have a strong opinion about
+// (the shared, leftover-filled targets), not the main organising step.
 function transposeRowsForShortestEdges(columns, edges) {
 if (columns.length < 2) return columns;
 const incomingOf = new Map(), outgoingOf = new Map();
@@ -946,7 +984,7 @@ inEdges.get(e.to).push(e);
 // unrelated to where anything actually rendered) meant a node's exit/
 // entry points didn't line up with its neighbours' actual row order --
 // "top arrow to top card, 2nd arrow to 2nd card" wasn't happening even
-// after orderRowsToReduceCrossings had already put the RIGHT rows next
+// after orderRowsByDeadEndPreference had already put the RIGHT rows next
 // to each other, causing lines to visibly cross that didn't need to.
 // Sorting each node's own edge list by the OTHER endpoint's actual
 // rendered top position (not the barycenter's row-index estimate --
