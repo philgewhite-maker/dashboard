@@ -214,21 +214,34 @@ ${open ? recipeDetailHtml(r) : ''}
 }
 
 function recipeDetailHtml(r) {
-return `<div class="recipe-detail">
+// Photo comes right after Name now, not buried below Ratings -- it's a
+// direct upload (resizeImageToBlob + storePhoto, same as a task's own
+// photo gallery), completely independent of the Google Photos album
+// link further down. A .field-block, not a <label>, since it wraps a
+// row of thumbnails and an add tile rather than one control -- a
+// <label> here would forward its click to the first thing inside it
+// (same reasoning connections.js's own Photos row already documents).
+return `<div class="recipe-detail details-grid">
 <label class="full">Name<input type="text" autocomplete="off" data-recipe-field="name" data-recipe-id="${r.id}" value="${escapeHtml(r.name)}"></label>
-<label class="full">Ingredients (one per line)<textarea rows="6" data-recipe-field="ingredients" data-recipe-id="${r.id}">${escapeHtml(r.ingredients.join('\n'))}</textarea></label>
-<label class="full">Instructions (one step per line)<textarea rows="8" data-recipe-field="instructions" data-recipe-id="${r.id}">${escapeHtml(r.instructions.join('\n'))}</textarea></label>
-<label class="full">Notes<textarea rows="2" data-recipe-field="notes" data-recipe-id="${r.id}">${escapeHtml(r.notes || '')}</textarea></label>
-<label class="full">Google Photos album (paste a share link — of the finished dish, an occasion it was made for, whatever)
-<input type="text" autocomplete="off" placeholder="https://photos.google.com/album/…" data-recipe-album="${r.id}" value="${escapeHtml((r.photoAlbums[0] || {}).url || '')}"></label>
-${(r.photoAlbums[0] || {}).url ? `<div class="full"><a href="${escapeHtml(r.photoAlbums[0].url)}" target="_blank" rel="noopener" style="font-size:12px;color:var(--rose);">Open album &#8599;</a></div>` : ''}
-<label class="full">Ratings<div class="ratings-block">${data.recipeRatingCategories.map(({ field, label }) => recipeRatingStars(label, field, r.id, (r.ratings && r.ratings[field]) || 0)).join('')}</div></label>
+<div class="field-block full">
+<span class="field-label">Photo</span>
 <div class="task-photos">
 ${r.photoIds.map((id, i) => `<div class="gallery-thumb"><span class="thumb-img" data-photo-bg="${escapeHtml(id)}"></span><span class="tag-x" data-recipe-photo-remove="${r.id}" data-photo-idx="${i}">&times;</span></div>`).join('')}
 <label class="gallery-add" for="recipe-photo-add-${r.id}">+</label>
 <input type="file" id="recipe-photo-add-${r.id}" accept="image/*" multiple style="display:none;" data-recipe-photo-add="${r.id}">
 </div>
-<div class="sync-row" style="margin-top:8px;">
+</div>
+<label class="full">Ingredients (one per line)<textarea rows="6" data-recipe-field="ingredients" data-recipe-id="${r.id}">${escapeHtml(r.ingredients.join('\n'))}</textarea></label>
+<label class="full">Instructions (one step per line)<textarea rows="8" data-recipe-field="instructions" data-recipe-id="${r.id}">${escapeHtml(r.instructions.join('\n'))}</textarea></label>
+<label class="full">Notes<textarea rows="2" data-recipe-field="notes" data-recipe-id="${r.id}">${escapeHtml(r.notes || '')}</textarea></label>
+<label class="full">Google Photos album <span class="settings-note">Optional — for a bigger set (the occasion it was made for, several attempts...), not needed just for a quick single photo above</span>
+<input type="text" autocomplete="off" placeholder="https://photos.google.com/album/…" data-recipe-album="${r.id}" value="${escapeHtml((r.photoAlbums[0] || {}).url || '')}"></label>
+${(r.photoAlbums[0] || {}).url ? `<div class="full"><a href="${escapeHtml(r.photoAlbums[0].url)}" target="_blank" rel="noopener" style="font-size:12px;color:var(--rose);">Open album &#8599;</a></div>` : ''}
+<div class="field-block full">
+<span class="field-label">Ratings</span>
+<div class="ratings-block">${data.recipeRatingCategories.map(({ field, label }) => recipeRatingStars(label, field, r.id, (r.ratings && r.ratings[field]) || 0)).join('')}</div>
+</div>
+<div class="sync-row full" style="margin-top:8px;">
 <button class="sync-btn" type="button" data-recipe-made="${r.id}">Mark made today</button>
 <span class="del-x" data-recipe-del="${r.id}" title="Delete recipe">&times; Delete</span>
 </div>

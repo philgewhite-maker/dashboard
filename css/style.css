@@ -578,7 +578,15 @@ background-position:center;
 .recipe-id{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;}
 .recipe-name{font-size:14px;font-weight:500;cursor:pointer;}
 .recipe-lastmade{font-size:11px;color:var(--muted);}
-.recipe-detail{margin-top:10px;display:flex;flex-direction:column;gap:8px;}
+/* Layout itself now comes from .details-grid (same polished 2-column
+   card connections.js/tasks.js already use) -- this class is just a
+   semantic hook for anything recipe-specific, kept separate rather than
+   merged into .details-grid so a future recipe-only tweak has somewhere
+   to live without touching every OTHER details-grid consumer. Previously
+   defined its own bare flex column with no card background, no grid, no
+   label styling -- confirmed as the actual cause of "layout is awful":
+   every <label> just fell back to the browser's own default stacking. */
+.recipe-detail{}
 .cook-overlay{
 position:fixed;inset:0;
 background:rgba(0,0,0,0.5);
@@ -1041,7 +1049,10 @@ text-transform:uppercase;
 letter-spacing:.03em;
 color:var(--muted);
 }
-.details-grid label.full,.details-grid .field-block.full{grid-column:1 / -1;}
+/* Generic "spans the full grid width" -- was scoped to just label.full/
+   .field-block.full, but the same need comes up for any direct child
+   (a trailing .sync-row of actions, e.g.), not only a field itself. */
+.details-grid > .full{grid-column:1 / -1;}
 .details-grid input, .details-grid textarea{
 font-family:'Inter',sans-serif;
 font-size:13px;
