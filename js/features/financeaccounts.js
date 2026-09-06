@@ -893,32 +893,29 @@ resizeTimer = setTimeout(redrawFlowDiagram, 120);
 // offset, and nothing ever re-ran it once the tab actually became
 // visible. A plain `resize` listener (the only trigger this used to
 // have) never fires just from SWITCHING tabs, only from the window
-// itself changing size -- it caught the symptom on some later
-// incidental resize, never the actual cause.
+// itself changing size.
 //
 // A ResizeObserver on the mount element looked like the textbook fix
 // (MDN documents exactly this "detect a hidden element becoming
 // visible" use case) but confirmed live, with an instrumented
 // ResizeObserver logging every callback: it never fired at all here,
 // neither on the initial (hidden, 0x0) observe() nor on the later
-// display:none -> block transition. Not chasing why further -- this
-// environment's behaviour doesn't match the documented one, and the
-// actual moment that matters is unambiguous anyway: the Finances tab
-// button being clicked. Hooking that directly, once, is simpler than
-// a generic size-watcher and doesn't depend on browser-specific
-// ResizeObserver timing at all.
-// A genuine window resize is a separate, real need from the tab-show
-// case above (the diagram can still need reflowing once already
-// visible) -- bound alongside it, same guard, same debounced target.
-let flowRedrawHooked = false;
-function ensureFlowRedrawOnTabShow() {
-if (flowRedrawHooked) return;
-const btn = document.querySelector('[data-tab-btn="finances"]');
-if (!btn) return;
-flowRedrawHooked = true;
-btn.addEventListener('click', () => scheduleFlowRedraw());
+// display:none -> block transition. Not chasing why further.
+//
+// A click listener on the Finances tab BUTTON specifically was the
+// next attempt, and worked... for a click. Confirmed live it still
+// missed the case where the app loads straight onto #finances from
+// the URL hash (app.js's own initial hash handling calls switchTab()
+// directly, never through a click) -- exactly the state this tab is
+// usually left in after actually using it, so this was the common
+// case, not an edge case. Fixed properly at the source instead:
+// tabs.js's switchTab() now fires a 'tabshown' event on EVERY switch,
+// however it was triggered, and this listens for the 'finances' one.
+// Bound once at module load (not render time) -- document always
+// exists, no DOM-readiness guard needed the way the old button-lookup
+// version did.
+document.addEventListener('tabshown', (e) => { if (e.detail.tab === 'finances') scheduleFlowRedraw(); });
 window.addEventListener('resize', scheduleFlowRedraw);
-}
 
 // Masked like a real card face ("•••• 1234") -- a light, cosmetic touch,
 // not a security measure (the full number is still one click away in
@@ -1019,7 +1016,6 @@ if (flowMount) {
 flowMount.innerHTML = flowDiagramHtml();
 bindLogoFallbacks(flowMount);
 applySparseColumnStagger(flowMount);
-ensureFlowRedrawOnTabShow();
 // A flow card is a reference to the real account row below, same as
 // every other record reference in this app links back to its record
 // (CLAUDE.md's record-reference standards) -- easy to miss here since
