@@ -2876,6 +2876,14 @@ margin-top:auto;
 /* "3 (1)" -- deal-linked count, then transferrable in brackets, see
    ddCountLabel() in financeaccounts.js. */
 .flow-card-dd{font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--muted);}
+/* Same green/red convention as .tag-chip-green/.tag-chip-red -- just
+   colour, not a filled chip, so it sits quietly among the card's other
+   small text lines rather than competing with the DD count for
+   attention. See accountMonthlySurplus()/flowCardSurplusHtml() in
+   financeaccounts.js. */
+.flow-card-surplus{font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:600;}
+.flow-card-surplus.positive{color:var(--sage);}
+.flow-card-surplus.negative{color:var(--red);}
 
 /* Switch-offer scan results -- same border-top-separated row shape
    .voucher-row/.account-card already use for a flat list. */

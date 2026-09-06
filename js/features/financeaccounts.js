@@ -151,29 +151,58 @@ const title = `${linked} deal-linked, ${transferrable} transferrable`
 return { text: `${linked} (${transferrable})`, title };
 }
 
-// Only Direct Debit/Standing Order count as the regular "out" side --
-// matches how this is actually framed day to day ("£x funded, £y out by
-// DD, £z out by standing order, what's left"). Card payment/Other are
-// excluded: unlike a DD or standing order, their amount isn't a fixed
-// recurring figure by definition, so folding them in would make the
-// total look more precise than it really is. toAccountId-linked
-// outgoings are excluded too -- they leave this account but not the
-// user's overall financial perimeter (see outgoingsHtml's own comment
-// on toAccountId, the mortgage-overpayment case). Returns null when
-// there's no funding figure to net against at all -- nothing to show,
-// not a computed £0.
+// Reverse of fundingFromAccountId -- every OTHER tracked account that
+// names this one as its funding source. Same reverse-lookup shape as
+// cassToAccount() below. Needed for accountMonthlySurplus: an account
+// can be the SOURCE for several others (a household "hub" account
+// funding five current accounts) and confirmed live as a real gap --
+// none of that outflow was visible anywhere on the source account's
+// OWN data (it only exists as fundingAmount/fundingFromAccountId on
+// each RECIPIENT), so the source showed a wildly wrong positive
+// surplus with the outflow simply invisible.
+function accountsFundedBy(a) {
+return data.financeAccounts.filter((x) => x.id !== a.id && x.fundingFromAccountId === a.id && x.fundingAmount !== '' && x.fundingAmount != null && isFinite(Number(x.fundingAmount)));
+}
+
+// £x funded in, minus what actually leaves the account: every Direct
+// Debit/Standing Order (INCLUDING ones paying into another of your own
+// tracked accounts, e.g. a mortgage overpayment -- it still leaves
+// THIS account's own balance, whatever else it means at a household
+// level; see outgoingsHtml's own comment on toAccountId) plus whatever
+// this account itself sends on to fund other tracked accounts
+// (accountsFundedBy, above). Card payment/Other stay excluded: unlike
+// a DD or standing order, their amount isn't a fixed recurring figure
+// by definition, so folding them in would make the total look more
+// precise than it really is. Returns null when there's no funding
+// figure to net against at all -- nothing to show, not a computed £0.
 function accountMonthlySurplus(a) {
 if (a.fundingAmount === '' || a.fundingAmount == null || !isFinite(Number(a.fundingAmount))) return null;
 const fundingIn = Number(a.fundingAmount);
-const relevant = (a.outgoings || []).filter((o) => !o.toAccountId && ['Direct Debit', 'Standing Order'].includes(outgoingMethod(o)));
+const relevant = (a.outgoings || []).filter((o) => ['Direct Debit', 'Standing Order'].includes(outgoingMethod(o)));
 let out = 0;
 let unset = 0;
 relevant.forEach((o) => {
 if (o.amount === '' || o.amount == null || !isFinite(Number(o.amount))) { unset += 1; return; }
 out += Number(o.amount);
 });
-const excludedOther = (a.outgoings || []).filter((o) => !o.toAccountId && !['Direct Debit', 'Standing Order'].includes(outgoingMethod(o))).length;
-return { net: fundingIn - out, fundingIn, out, unset, excludedOther };
+const fundedAccounts = accountsFundedBy(a);
+const fundingOut = fundedAccounts.reduce((sum, x) => sum + Number(x.fundingAmount), 0);
+const excludedOther = (a.outgoings || []).filter((o) => !['Direct Debit', 'Standing Order'].includes(outgoingMethod(o))).length;
+return { net: fundingIn - out - fundingOut, fundingIn, out, unset, excludedOther, fundingOut, fundedAccounts };
+}
+
+function surplusSign(s) { return s.net < 0 ? '−' : '+'; }
+function surplusAmountText(s) { return `${surplusSign(s)}£${Math.round(Math.abs(s.net)).toLocaleString('en-GB')}/mo`; }
+// Shared between the card badge, the flow-diagram card, and the detail
+// tooltip -- one place computing the breakdown sentence/phrase so the
+// three surfaces can't drift out of sync with each other.
+function surplusTitle(s) {
+let title = `£${s.fundingIn.toLocaleString('en-GB')} funding`;
+if (s.out) title += ` − £${s.out.toLocaleString('en-GB')} Direct Debit/standing order`;
+if (s.fundingOut) title += ` − £${s.fundingOut.toLocaleString('en-GB')} funding ${s.fundedAccounts.length} other account${s.fundedAccounts.length === 1 ? '' : 's'} (${s.fundedAccounts.map((x) => accountLabel(x)).join(', ')})`;
+if (s.unset) title += `, ${s.unset} outgoing${s.unset === 1 ? '' : 's'} with no amount set (excluded)`;
+if (s.excludedOther) title += `, excludes ${s.excludedOther} card payment/other outgoing${s.excludedOther === 1 ? '' : 's'}`;
+return title;
 }
 
 // The account card's own compact "am I breaking even" badge --
@@ -187,21 +216,34 @@ if (isClosed(a)) return '';
 const s = accountMonthlySurplus(a);
 if (!s) return '';
 const cls = s.net < 0 ? 'tag-chip-red' : 'tag-chip-green';
-const sign = s.net < 0 ? '−' : '+';
-let title = `£${s.fundingIn.toLocaleString('en-GB')} funding − £${s.out.toLocaleString('en-GB')} Direct Debit/standing order`;
-if (s.unset) title += `, ${s.unset} outgoing${s.unset === 1 ? '' : 's'} with no amount set (excluded)`;
-if (s.excludedOther) title += `, excludes ${s.excludedOther} card payment/other outgoing${s.excludedOther === 1 ? '' : 's'}`;
-return `<span class="tag-chip ${cls}" title="${escapeHtml(title)}">${sign}£${Math.round(Math.abs(s.net)).toLocaleString('en-GB')}/mo</span>`;
+return `<span class="tag-chip ${cls}" title="${escapeHtml(surplusTitle(s))}">${surplusAmountText(s)}</span>`;
+}
+
+// Same figure, same colour convention, for the money-flow diagram card
+// -- put there because that's exactly where a "funds 5 other accounts"
+// relationship is drawn as edges, so the source card is the natural
+// place to see what that leaves it with.
+function flowCardSurplusHtml(a) {
+if (isClosed(a)) return '';
+const s = accountMonthlySurplus(a);
+if (!s) return '';
+const cls = s.net < 0 ? 'negative' : 'positive';
+return `<div class="flow-card-surplus ${cls}" title="${escapeHtml(surplusTitle(s))}">${surplusAmountText(s)}</div>`;
 }
 
 // The same figure as surplusTag, spelled out in full sentence form in
 // the detail view -- the badge is for a glance, this is for actually
-// checking the arithmetic.
+// checking the arithmetic. Builds its own sentence rather than reusing
+// surplusTitle()'s comma-joined phrase -- full stops between clauses
+// read better at this length than one long qualifier-laden clause.
 function surplusDetailHtml(a) {
 const s = accountMonthlySurplus(a);
 if (!s) return '';
 const suffix = s.net < 0 ? 'short' : 'left over';
-let text = `Net monthly: £${s.fundingIn.toLocaleString('en-GB')} funding − £${s.out.toLocaleString('en-GB')} Direct Debit/standing order = £${Math.round(Math.abs(s.net)).toLocaleString('en-GB')}/mo ${suffix}.`;
+let text = `Net monthly: £${s.fundingIn.toLocaleString('en-GB')} funding`;
+if (s.out) text += ` − £${s.out.toLocaleString('en-GB')} Direct Debit/standing order`;
+if (s.fundingOut) text += ` − £${s.fundingOut.toLocaleString('en-GB')} funding ${s.fundedAccounts.length} other account${s.fundedAccounts.length === 1 ? '' : 's'} (${s.fundedAccounts.map((x) => accountLabel(x)).join(', ')})`;
+text += ` = £${Math.round(Math.abs(s.net)).toLocaleString('en-GB')}/mo ${suffix}.`;
 if (s.unset) text += ` ${s.unset} outgoing${s.unset === 1 ? '' : 's'} with no amount set aren't included.`;
 if (s.excludedOther) text += ` Excludes ${s.excludedOther} card payment/other outgoing${s.excludedOther === 1 ? '' : 's'} (not a fixed monthly figure).`;
 return `<div class="settings-note" style="margin:2px 0 0;">${escapeHtml(text)}</div>`;
@@ -637,6 +679,7 @@ return `<div class="flow-card ${escapeHtml(a.colour)}${closed ? ' flow-card-clos
 ${masked ? `<div class="flow-card-number">${escapeHtml(masked)}</div>` : ''}
 <div class="flow-card-name">${escapeHtml(accountLabel(a))}</div>
 ${closedNote ? `<div class="flow-card-closed-note">${escapeHtml(closedNote)}</div>` : ''}
+${flowCardSurplusHtml(a)}
 ${dd ? `<div class="flow-card-dd" title="${escapeHtml(dd.title)}">DD ${escapeHtml(dd.text)}</div>` : ''}
 </div>`;
 }
