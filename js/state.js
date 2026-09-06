@@ -414,6 +414,12 @@ sortCode: '', accountNumber: '',
 openDate: '', closeDate: '',
 cassFromAccountId: '',
 deal: '', dealEndDate: '',
+// Some deals genuinely never expire (an ongoing cashback rate, a
+// permanent fee waiver) -- dealOngoing says so explicitly rather than
+// leaving dealEndDate blank and ambiguous between "no end date" and
+// "just haven't recorded it yet". Mutually exclusive with dealEndDate
+// in the UI (financeaccounts.js clears one when the other is set).
+dealOngoing: false,
 purpose: '',
 // [{id, beneficiary, amount, status, method, toAccountId}] -- every
 // regular outgoing, Direct Debits and anything else (standing orders,

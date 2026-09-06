@@ -71,7 +71,13 @@ badge?.querySelector('[data-badge-fallback]')?.removeAttribute('hidden');
 
 // Same expiry-badge classes vouchers.js/subscriptions.js/the old
 // dealexpiries.js all already use -- no new CSS needed for this part.
+// dealOngoing (a permanent cashback rate, a fee waiver with no end
+// date) gets its own plain badge rather than staying silent -- before
+// this, a deal with no dealEndDate showed NO badge at all, identical
+// to an account with no deal recorded, which is exactly the ambiguity
+// dealOngoing exists to remove.
 function dealBadgeHtml(a) {
+if (a.dealOngoing) return `<span class="expiry-badge">Deal: ongoing</span>`;
 if (!a.dealEndDate) return '';
 const dn = daysUntil(a.dealEndDate);
 if (dn < 0) return `<span class="expiry-badge expired">Deal expired</span>`;
@@ -334,10 +340,11 @@ return cassToAccount(a) ? [] : ['Closed, but no other account records a CASS swi
 const out = [];
 if (!a.bank && !a.name) out.push('No bank or account name set yet.');
 if (a.cassFromAccountId && !a.openDate) out.push('Came from a CASS switch but has no open date recorded.');
-if (a.dealEndDate && daysUntil(a.dealEndDate) < 0 && a.stage !== 'CASS-ready') out.push('Deal ended — still open. Mark it CASS-ready, close it, or record a new deal?');
+if (a.dealEndDate && !a.dealOngoing && daysUntil(a.dealEndDate) < 0 && a.stage !== 'CASS-ready') out.push('Deal ended — still open. Mark it CASS-ready, close it, or record a new deal?');
 if (a.deal) {
 if (!a.fundingAmount && !a.fundingFromAccountId) out.push('Has a deal but no funding transfer set up — is one needed to keep it?');
 if (!(a.outgoings || []).some((o) => outgoingMethod(o) === 'Direct Debit')) out.push('Has a deal but no Direct Debits recorded — often a condition worth checking.');
+if (!a.dealEndDate && !a.dealOngoing) out.push('Has a deal but no end date set — ongoing, or just not recorded yet?');
 } else if (!a.purpose && !a.notes) {
 out.push('No deal, purpose, or notes recorded — why is this kept open?');
 }
@@ -394,7 +401,8 @@ ${issues.length ? `<ul class="suggested-questions" title="Deterministic prompts,
 </div>
 <div class="account-field-row">
 <label>Deal / incentive<input type="text" autocomplete="off" data-field="deal" data-account-id="${a.id}" value="${escapeHtml(a.deal)}" placeholder="e.g. £200 switch bonus, 0% BT 30mo"></label>
-<label>Deal ends<input type="date" data-field="dealEndDate" data-account-id="${a.id}" value="${escapeHtml(a.dealEndDate)}"></label>
+<label>Deal ends<input type="date" data-field="dealEndDate" data-account-id="${a.id}" value="${escapeHtml(a.dealEndDate)}" ${a.dealOngoing ? 'disabled' : ''}></label>
+<label><input type="checkbox" data-field="dealOngoing" data-account-id="${a.id}" ${a.dealOngoing ? 'checked' : ''}> Ongoing (no end date)</label>
 </div>
 <label class="account-field-full">Purpose<input type="text" autocomplete="off" data-field="purpose" data-account-id="${a.id}" value="${escapeHtml(a.purpose)}" placeholder="e.g. Switch bonus farming, Emergency fund"></label>
 <div class="account-field-row">
@@ -822,7 +830,13 @@ list.querySelectorAll('[data-field][data-account-id]').forEach((el) => {
 el.addEventListener('change', () => {
 const a = data.financeAccounts.find((x) => x.id === el.dataset.accountId);
 if (!a) return;
-a[el.dataset.field] = el.value.trim();
+const field = el.dataset.field;
+a[field] = el.type === 'checkbox' ? el.checked : el.value.trim();
+// dealOngoing/dealEndDate are mutually exclusive -- a deal can't be
+// both "ongoing, no end date" and have a specific end date at once,
+// so setting either one clears the other.
+if (field === 'dealOngoing' && a.dealOngoing) a.dealEndDate = '';
+if (field === 'dealEndDate' && a.dealEndDate) a.dealOngoing = false;
 queueSave();
 renderFinanceAccounts();
 });
