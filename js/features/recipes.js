@@ -630,7 +630,21 @@ if (toggled.has(i) && entry.subs && entry.subs[0]) {
 const subEntry = findReferenceEntry(entry.subs[0].name, '');
 if (subEntry) { entry = subEntry; label += ` &rarr; using substitute: ${escapeHtml(subEntry.name)}`; }
 }
-const used = line.quantity != null ? `${line.quantity}${escapeHtml(line.unit)} used` : escapeHtml(line.notes || 'amount not specified');
+// FODMAP is a per-PORTION question ("is a serving of this low/high"),
+// not a per-batch one -- 250g of flour across a whole traybake reads
+// very differently once it's divided by however many portions that
+// traybake actually makes. line.quantity is the WHOLE-RECIPE amount (as
+// written -- "250g wheat flour" is for the batch, not one portion), so
+// showing that alone next to a per-portion-shaped rating invites exactly
+// the wrong comparison. Divided by r.servings when it's set; flagged
+// explicitly (not silently left as the whole-batch figure) when it
+// isn't, since that ambiguity is itself worth surfacing rather than
+// guessing past.
+const whole = line.quantity != null ? `${line.quantity}${escapeHtml(line.unit)}` : null;
+const perPortion = whole && r.servings ? `${(line.quantity / r.servings).toFixed(1)}${escapeHtml(line.unit)}` : null;
+const used = !whole ? escapeHtml(line.notes || 'amount not specified')
+: perPortion ? `${perPortion} per portion (${whole} across all ${r.servings})`
+: `${whole} across the whole recipe — set Servings above for a per-portion figure`;
 return `<div style="padding:4px 0;border-top:1px solid var(--line);">
 <div style="font-size:12px;">${label} — ${used}, rated per ${entry.unitBasis.quantity}${escapeHtml(entry.unitBasis.unit)}</div>
 <div>${fodmapRowHtml(entry.fodmap)}</div>
@@ -639,7 +653,7 @@ return `<div style="padding:4px 0;border-top:1px solid var(--line);">
 if (!rows) return '';
 return `<div class="field-block" style="margin-top:6px;">
 <span class="field-label">FODMAP by ingredient</span>
-<div class="settings-note">Each rated at its own reference amount (below), NOT scaled to how much this recipe actually uses — edit the entry in Ingredient Reference if a rating looks wrong for the amount used here.</div>
+<div class="settings-note">Each rated at its own reference amount (below) -- compare against the PER-PORTION figure, not the whole-recipe one; a rating isn't linearly divisible by amount, but a portion using much less than the reference amount is a real reason to expect better than the rating shown. Edit the entry in Ingredient Reference if it looks wrong even at the right amount.</div>
 ${rows}
 </div>`;
 }
