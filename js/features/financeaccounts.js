@@ -110,7 +110,7 @@ function outgoingsHtml(a) {
 return (a.outgoings || []).map((o) => {
 const toAccount = o.toAccountId ? data.financeAccounts.find((x) => x.id === o.toAccountId) : null;
 const method = outgoingMethod(o);
-const label = `${escapeHtml(o.beneficiary || (toAccount ? 'Transfer' : 'Unnamed'))}${o.amount ? ` · ${escapeHtml(o.amount)}` : ''}${method !== 'Direct Debit' ? ` (${escapeHtml(method)})` : ''}`;
+const label = `${escapeHtml(o.beneficiary || (toAccount ? 'Transfer' : 'Unnamed'))}${o.amount !== '' && o.amount != null ? ` · £${escapeHtml(String(o.amount))}/mo` : ''}${method !== 'Direct Debit' ? ` (${escapeHtml(method)})` : ''}`;
 const statusClass = o.status ? ` tag-chip-${o.status}` : '';
 const statusTitle = o.status ? OUTGOING_STATUS_LABEL[o.status] : 'Not set';
 // toAccountId means this actually pays another of YOUR OWN tracked
@@ -119,7 +119,7 @@ const statusTitle = o.status ? OUTGOING_STATUS_LABEL[o.status] : 'Not set';
 // elsewhere links back to it), separate from the status-toggle text so
 // the two clicks (cycle status vs. open that account) can't collide.
 const toAccountLink = toAccount
-? ` <span class="dd-to-account-link" data-open-account-ref="${escapeHtml(toAccount.id)}" title="Pays into ${escapeHtml(accountLabel(toAccount))} — an internal transfer between your own accounts, not really money leaving">&rarr; ${escapeHtml(accountLabel(toAccount))}</span>`
+? ` <span class="dd-to-account-link" data-open-account-ref="${escapeHtml(toAccount.id)}" title="Pays into ${escapeHtml(accountLabel(toAccount))} — leaves this account, but not your overall financial perimeter, so it's excluded from the monthly surplus check">&rarr; ${escapeHtml(accountLabel(toAccount))}</span>`
 : '';
 // The status-cycle click target is a SIBLING of the × remove button,
 // not its wrapper -- clicking × would otherwise also bubble into a
@@ -149,6 +149,62 @@ const title = `${linked} deal-linked, ${transferrable} transferrable`
 + ` (${dds.length} Direct Debit${dds.length === 1 ? '' : 's'} total)`
 + (otherCount ? ` + ${otherCount} other regular outgoing${otherCount === 1 ? '' : 's'}` : '');
 return { text: `${linked} (${transferrable})`, title };
+}
+
+// Only Direct Debit/Standing Order count as the regular "out" side --
+// matches how this is actually framed day to day ("£x funded, £y out by
+// DD, £z out by standing order, what's left"). Card payment/Other are
+// excluded: unlike a DD or standing order, their amount isn't a fixed
+// recurring figure by definition, so folding them in would make the
+// total look more precise than it really is. toAccountId-linked
+// outgoings are excluded too -- they leave this account but not the
+// user's overall financial perimeter (see outgoingsHtml's own comment
+// on toAccountId, the mortgage-overpayment case). Returns null when
+// there's no funding figure to net against at all -- nothing to show,
+// not a computed £0.
+function accountMonthlySurplus(a) {
+if (a.fundingAmount === '' || a.fundingAmount == null || !isFinite(Number(a.fundingAmount))) return null;
+const fundingIn = Number(a.fundingAmount);
+const relevant = (a.outgoings || []).filter((o) => !o.toAccountId && ['Direct Debit', 'Standing Order'].includes(outgoingMethod(o)));
+let out = 0;
+let unset = 0;
+relevant.forEach((o) => {
+if (o.amount === '' || o.amount == null || !isFinite(Number(o.amount))) { unset += 1; return; }
+out += Number(o.amount);
+});
+const excludedOther = (a.outgoings || []).filter((o) => !o.toAccountId && !['Direct Debit', 'Standing Order'].includes(outgoingMethod(o))).length;
+return { net: fundingIn - out, fundingIn, out, unset, excludedOther };
+}
+
+// The account card's own compact "am I breaking even" badge --
+// green/red the same way stageTag/issuesTag already use colour to make
+// status scannable at a glance. isClosed is checked explicitly here
+// (not left to accountMonthlySurplus alone) so a closed account that
+// still has a stale fundingAmount lying around doesn't show a
+// misleading badge.
+function surplusTag(a) {
+if (isClosed(a)) return '';
+const s = accountMonthlySurplus(a);
+if (!s) return '';
+const cls = s.net < 0 ? 'tag-chip-red' : 'tag-chip-green';
+const sign = s.net < 0 ? '−' : '+';
+let title = `£${s.fundingIn.toLocaleString('en-GB')} funding − £${s.out.toLocaleString('en-GB')} Direct Debit/standing order`;
+if (s.unset) title += `, ${s.unset} outgoing${s.unset === 1 ? '' : 's'} with no amount set (excluded)`;
+if (s.excludedOther) title += `, excludes ${s.excludedOther} card payment/other outgoing${s.excludedOther === 1 ? '' : 's'}`;
+return `<span class="tag-chip ${cls}" title="${escapeHtml(title)}">${sign}£${Math.round(Math.abs(s.net)).toLocaleString('en-GB')}/mo</span>`;
+}
+
+// The same figure as surplusTag, spelled out in full sentence form in
+// the detail view -- the badge is for a glance, this is for actually
+// checking the arithmetic.
+function surplusDetailHtml(a) {
+const s = accountMonthlySurplus(a);
+if (!s) return '';
+const suffix = s.net < 0 ? 'short' : 'left over';
+let text = `Net monthly: £${s.fundingIn.toLocaleString('en-GB')} funding − £${s.out.toLocaleString('en-GB')} Direct Debit/standing order = £${Math.round(Math.abs(s.net)).toLocaleString('en-GB')}/mo ${suffix}.`;
+if (s.unset) text += ` ${s.unset} outgoing${s.unset === 1 ? '' : 's'} with no amount set aren't included.`;
+if (s.excludedOther) text += ` Excludes ${s.excludedOther} card payment/other outgoing${s.excludedOther === 1 ? '' : 's'} (not a fixed monthly figure).`;
+return `<div class="settings-note" style="margin:2px 0 0;">${escapeHtml(text)}</div>`;
 }
 
 // Same terse "day + month, year only if not this year" shape
@@ -208,6 +264,11 @@ if (!(a.outgoings || []).some((o) => outgoingMethod(o) === 'Direct Debit')) out.
 out.push('No deal, purpose, or notes recorded — why is this kept open?');
 }
 if (!!a.fundingAmount !== !!a.fundingFromAccountId) out.push('Funding amount and source account don\'t match — one is set without the other.');
+const surplus = accountMonthlySurplus(a);
+if (surplus) {
+if (surplus.net < 0) out.push(`Outgoings (Direct Debit/standing order) exceed funding by £${Math.round(-surplus.net).toLocaleString('en-GB')}/mo — funding, DDs, or amounts may be out of date.`);
+if (surplus.unset) out.push(`${surplus.unset} Direct Debit/standing order${surplus.unset === 1 ? ' has' : 's have'} no amount set — excluded from the monthly surplus check.`);
+}
 return out;
 }
 
@@ -233,6 +294,7 @@ ${accountBadgeHtml(a, 'sm')}
 ${stageTag}
 ${closedTag}
 ${dealBadgeHtml(a)}
+${surplusTag(a)}
 ${issuesTag}
 </summary>
 <div class="account-detail">
@@ -258,9 +320,10 @@ ${issues.length ? `<ul class="suggested-questions" title="Deterministic prompts,
 </div>
 <label class="account-field-full">Purpose<input type="text" autocomplete="off" data-field="purpose" data-account-id="${a.id}" value="${escapeHtml(a.purpose)}" placeholder="e.g. Switch bonus farming, Emergency fund"></label>
 <div class="account-field-row">
-<label>Monthly funding in<input type="text" autocomplete="off" data-field="fundingAmount" data-account-id="${a.id}" value="${escapeHtml(a.fundingAmount)}" placeholder="e.g. £1,000/mo"></label>
+<label>Monthly funding in (£)<input type="number" step="0.01" min="0" autocomplete="off" data-field="fundingAmount" data-account-id="${a.id}" value="${escapeHtml(a.fundingAmount)}" placeholder="e.g. 1000"></label>
 <label>Funded from<select data-field="fundingFromAccountId" data-account-id="${a.id}">${otherAccountOptionsHtml(a.id, a.fundingFromAccountId)}</select></label>
 </div>
+${surplusDetailHtml(a)}
 <div class="account-field-full">
 <label style="display:block;margin-bottom:4px;">Balance transfers <span class="settings-note" style="display:inline;margin:0;">(a card's own equivalent of a CASS switch — there can be several, over time)</span></label>
 <div class="tag-editor">${balanceTransfersHtml(a)}</div>
@@ -276,7 +339,7 @@ ${issues.length ? `<ul class="suggested-questions" title="Deterministic prompts,
 <div class="tag-editor">${outgoingsHtml(a)}</div>
 <div class="sync-row" style="margin-top:6px;">
 <input type="text" autocomplete="off" class="tag-add-input" placeholder="Beneficiary, e.g. Netflix" data-dd-beneficiary="${a.id}" style="max-width:150px;">
-<input type="text" autocomplete="off" class="tag-add-input" placeholder="Amount, e.g. £9.99/mo" data-dd-amount="${a.id}" style="max-width:120px;">
+<input type="number" step="0.01" min="0" autocomplete="off" class="tag-add-input" placeholder="£/mo, e.g. 9.99" data-dd-amount="${a.id}" style="max-width:120px;">
 <select data-dd-method="${a.id}" title="How it's paid">${OUTGOING_METHODS.map((m) => `<option value="${m}">${m}</option>`).join('')}</select>
 <select data-dd-to-account="${a.id}" title="Pays into one of your own accounts instead of a third party (e.g. a mortgage overpayment)">${otherAccountOptionsHtml(a.id, '')}</select>
 <button class="sync-btn sm" type="button" data-dd-add="${a.id}">Add</button>
@@ -346,7 +409,7 @@ const edges = [];
 if (mode === 'funding') {
 data.financeAccounts.forEach((a) => {
 if (a.fundingFromAccountId && accountOk(a.fundingFromAccountId) && accountOk(a.id)) {
-edges.push({ from: a.fundingFromAccountId, to: a.id, kind: 'funding', label: a.fundingAmount ? `${a.fundingAmount}/mo` : 'funds' });
+edges.push({ from: a.fundingFromAccountId, to: a.id, kind: 'funding', label: (a.fundingAmount !== '' && a.fundingAmount != null) ? `£${a.fundingAmount}/mo` : 'funds' });
 }
 });
 } else if (mode === 'cass') {

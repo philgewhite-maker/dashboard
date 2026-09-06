@@ -422,9 +422,11 @@ purpose: '',
 // 'Standing Order' | 'Card payment' | 'Other'. toAccountId: set when
 // this payment actually goes to ANOTHER of your own tracked accounts
 // (e.g. a mortgage overpayment) rather than a real third party --
-// matters for a future "account monthly surplus" check, which needs to
-// treat that as an internal transfer between your own accounts, not
-// money actually leaving your overall position.
+// used by the account monthly surplus check
+// (financeaccounts.js's accountMonthlySurplus): it still leaves THIS
+// account, but doesn't leave your overall financial perimeter, so it's
+// excluded from that total the same way a bare internal transfer would
+// be.
 outgoings: [],
 fundingAmount: '', fundingFromAccountId: '',
 // A card's own equivalent of a CASS switch -- but unlike CASS (one
@@ -609,6 +611,26 @@ if (!stored) await persist();
 
 // Fills in fields added after the schema grew, so older saved data doesn't
 // break newer rendering code that expects these to exist.
+// fundingAmount/outgoing amounts: free text ("£1,000/mo", "£9.99/mo",
+// "£120/yr") until 2026-09-06 -- switched to plain numeric £/month
+// fields so the account monthly surplus check (financeaccounts.js's
+// accountMonthlySurplus) can do arithmetic directly instead of
+// guessing at a cadence suffix on every render. Parsed ONCE here: an
+// already-numeric value (or blank) passes straight through untouched,
+// so this is a no-op on every migrate() call after an account's first.
+function parseLegacyMonthlyAmount(v) {
+if (v === '' || v == null || typeof v === 'number') return v;
+const s = String(v).toLowerCase();
+const m = s.match(/[\d,]+(\.\d+)?/);
+if (!m) return '';
+const n = parseFloat(m[0].replace(/,/g, ''));
+if (!isFinite(n)) return '';
+if (/\/\s*(yr|year|annum|pa)\b/.test(s)) return Math.round((n / 12) * 100) / 100;
+if (/\/\s*(wk|week)\b/.test(s)) return Math.round((n * 52 / 12) * 100) / 100;
+if (/\/\s*(qtr|quarter)\b/.test(s)) return Math.round((n / 3) * 100) / 100;
+return n;
+}
+
 function migrate() {
 if (!Array.isArray(data.habits)) data.habits = [];
 if (!Array.isArray(data.goals)) data.goals = [];
@@ -679,6 +701,8 @@ a.outgoings = a.outgoings.map((dd) => (typeof dd === 'string'
 // is required to keep the deal's own funding criteria met, or free to
 // move elsewhere. Blank means not yet classified, not "neither".
 : { id: dd.id || uid(), beneficiary: dd.beneficiary || '', amount: dd.amount || '', status: dd.status || '', method: dd.method || 'Direct Debit', toAccountId: dd.toAccountId || '' }));
+a.fundingAmount = parseLegacyMonthlyAmount(a.fundingAmount);
+a.outgoings.forEach((o) => { o.amount = parseLegacyMonthlyAmount(o.amount); });
 });
 // A CASS-from-account, funding-source, or balance-transfer source
 // pointing at an account since deleted is a dangling reference -- same
