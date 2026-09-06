@@ -238,7 +238,15 @@ if (!same) conflicts.push({ field, label, mine, theirs, source: 'contact' });
 });
 
 const groupApp = appFromGroups(contact.groups);
-if (groupApp && conn.app && groupApp.toLowerCase() !== String(conn.app).toLowerCase()) {
+// Not a real disagreement when the connection is already KNOWN to be on
+// both -- a Google Contacts group labelled "tinder" while conn.app says
+// "Bumble" used to always flag, even once conn.identities (the actual
+// per-platform record, see state.js's upsertIdentity) already listed a
+// Tinder row for this same person. conn.app is just which app the FIRST
+// match happened on, not the only one they're known by, so this only
+// flags when the labelled app is genuinely absent from what's on file.
+const knownPlatforms = new Set([conn.app, ...(conn.identities || []).map((r) => r.platform)].filter(Boolean).map((p) => String(p).toLowerCase()));
+if (groupApp && conn.app && !knownPlatforms.has(groupApp.toLowerCase())) {
 conflicts.push({ field: 'app', label: 'Source', mine: conn.app, theirs: groupApp, source: 'contact label' });
 }
 
