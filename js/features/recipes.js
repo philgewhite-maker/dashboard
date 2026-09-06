@@ -2,7 +2,7 @@
 // the same configurable-star mechanism as Connections (a distinct category
 // list — Taste/Health/Prep by default — not the same list, just the same
 // idea), with an occasional nudge to actually cook one of them.
-import { data, queueSave, DEFAULT_RECIPE_RATING_CATEGORIES, slugifyField, averageRating } from '../state.js';
+import { data, queueSave, DEFAULT_RECIPE_RATING_CATEGORIES, slugifyField, averageRating, getLocalSettings, setLocalSetting } from '../state.js';
 import { photoDelete, photoGet, photoUrl } from '../db.js';
 import { escapeHtml, uid, todayStr, resizeImageToBlob, openLightbox } from '../utils.js';
 import { MissingKeyError, extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml } from '../ai.js';
@@ -142,6 +142,7 @@ data.recipes.push(recipe);
 pending = null;
 renderReview();
 renderRecipes();
+renderRecipeOverview();
 queueSave();
 setStatus('');
 }
@@ -227,6 +228,85 @@ return `<div class="rating-row"><span class="rating-label">${escapeHtml(label)}<
 
 let expandedRecipe = null; // id, or null
 let cookingRecipe = null; // id, or null
+let activeTagFilter = null; // a tag string, or null for "All"
+// 'made' | 'notmade' | null -- derived from lastMade rather than a stored
+// field of its own (same reasoning Connections Overview's own "Photos"/
+// "Contact match" dimensions are computed, not stored): it can never drift
+// out of sync with the one real fact (when a recipe was last made), and a
+// recipe already has nothing that actually means "not made yet" beyond an
+// empty lastMade.
+let activeMadeFilter = null;
+let recipeOverviewCollapsed = true;
+
+// A handful of common categories to suggest right away (Meat, Fish, a
+// cooking style, an occasion...) -- ordinary starting points, not a fixed
+// enum; typing anything else just adds it as its own new tag. Recipes
+// already reuses this open-ended tag shape rather than a fixed category
+// picker, same as Connections' own City/Interests tags.
+const SUGGESTED_RECIPE_TAGS = ['Meat', 'Fish', 'One-pot', 'Curry', 'Dessert', 'Fruit', 'Christmas'];
+
+async function initRecipeOverviewPrefs() {
+const settings = await getLocalSettings();
+recipeOverviewCollapsed = settings.recipeOverviewPanelCollapsed !== false;
+}
+
+// Mirrors Connections Overview's own shape (collapsible panel, clickable
+// chips that filter the list below) but deliberately without its full
+// drill-down/faceting machinery -- two small dimensions here (Made, Tags)
+// don't need a general per-dimension-collapse, bulk-assign, multi-facet
+// system built for Connections' much larger, richer set of dimensions.
+function renderRecipeOverview() {
+const el = document.getElementById('recipe-overview-content');
+if (!el) return;
+const toggleHtml = `<button class="overview-panel-toggle" type="button" id="recipe-overview-toggle">${recipeOverviewCollapsed ? '▸ Show recipes overview' : '▾ Hide recipes overview'}</button>`;
+if (recipeOverviewCollapsed) {
+el.innerHTML = toggleHtml;
+document.getElementById('recipe-overview-toggle').addEventListener('click', () => {
+recipeOverviewCollapsed = false;
+setLocalSetting('recipeOverviewPanelCollapsed', false);
+renderRecipeOverview();
+});
+return;
+}
+const madeCount = data.recipes.filter((r) => r.lastMade).length;
+const notMadeCount = data.recipes.length - madeCount;
+const madeChips = [
+{ key: 'made', label: 'Made', count: madeCount },
+{ key: 'notmade', label: 'Not made yet', count: notMadeCount },
+].filter((c) => c.count).map((c) => `<button class="overview-chip${activeMadeFilter === c.key ? ' active' : ''}" type="button" data-recipe-overview-made="${c.key}">${escapeHtml(c.label)} (${c.count})</button>`).join('');
+
+const tagCounts = {};
+data.recipes.forEach((r) => (r.tags || []).forEach((t) => { tagCounts[t] = (tagCounts[t] || 0) + 1; }));
+const tagKeys = Object.keys(tagCounts).sort((a, b) => tagCounts[b] - tagCounts[a] || a.localeCompare(b));
+const tagChips = tagKeys.map((t) => `<button class="overview-chip${activeTagFilter === t ? ' active' : ''}" type="button" data-recipe-overview-tag="${escapeHtml(t)}">${escapeHtml(t)} (${tagCounts[t]})</button>`).join('');
+
+el.innerHTML = `${toggleHtml}
+${madeChips ? `<div class="overview-group"><span class="field-label">Made</span><div class="overview-chips">${madeChips}</div></div>` : ''}
+${tagChips ? `<div class="overview-group"><span class="field-label">Tags</span><div class="overview-chips">${tagChips}</div></div>` : ''}
+${!madeChips && !tagChips ? '<div class="settings-note" style="margin-top:8px;">Add a few recipes (and some tags) to see them grouped here.</div>' : ''}`;
+
+document.getElementById('recipe-overview-toggle').addEventListener('click', () => {
+recipeOverviewCollapsed = true;
+setLocalSetting('recipeOverviewPanelCollapsed', true);
+renderRecipeOverview();
+});
+el.querySelectorAll('[data-recipe-overview-made]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const key = btn.dataset.recipeOverviewMade;
+activeMadeFilter = activeMadeFilter === key ? null : key;
+renderRecipeOverview();
+renderRecipes();
+});
+});
+el.querySelectorAll('[data-recipe-overview-tag]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const key = btn.dataset.recipeOverviewTag;
+activeTagFilter = activeTagFilter === key ? null : key;
+renderRecipeOverview();
+renderRecipes();
+});
+});
+}
 
 function recipeCardHtml(r) {
 const avg = averageRating(r, data.recipeRatingCategories);
@@ -263,6 +343,25 @@ return `<div class="field-block full">
 </div>`;
 }
 
+// Same shape as connections.js's own tagChips (chips + a datalist-backed
+// add input + button) -- not the same function, since it's tied to a
+// connId and connections.js's own field-based binding, but the identical
+// visual/interaction pattern rather than a new one invented for recipes.
+function recipeTagsHtml(r) {
+const known = new Set([...SUGGESTED_RECIPE_TAGS, ...data.recipes.flatMap((x) => x.tags || [])]);
+const chips = (r.tags || []).map((t, i) => `<span class="tag-chip">${escapeHtml(t)}<span class="tag-x" data-recipe-tag-remove="${r.id}" data-tag-idx="${i}">&times;</span></span>`).join('');
+const options = [...known].sort((a, b) => a.localeCompare(b)).map((t) => `<option value="${escapeHtml(t)}"></option>`).join('');
+return `<div class="field-block full">
+<span class="field-label">Tags</span>
+<div class="tag-editor">
+${chips}
+<input type="text" autocomplete="off" class="tag-add-input" placeholder="+ add (e.g. Curry, Christmas)" list="recipe-taglist-${r.id}" data-recipe-tag-add="${r.id}">
+<button type="button" class="todo-add-btn" data-recipe-tag-add-btn="${r.id}" style="padding:3px 8px;">+</button>
+</div>
+<datalist id="recipe-taglist-${r.id}">${options}</datalist>
+</div>`;
+}
+
 function recipeDetailHtml(r) {
 // Photo comes right after Name now, not buried below Ratings -- it's a
 // direct upload (resizeImageToBlob + storePhoto, same as a task's own
@@ -281,6 +380,7 @@ ${r.photoIds.map((id, i) => `<div class="gallery-thumb"><span class="thumb-img" 
 <input type="file" id="recipe-photo-add-${r.id}" accept="image/*" multiple style="display:none;" data-recipe-photo-add="${r.id}">
 </div>
 </div>
+${recipeTagsHtml(r)}
 <label class="full">Ingredients (one per line)<textarea rows="6" data-recipe-field="ingredients" data-recipe-id="${r.id}">${escapeHtml(r.ingredients.join('\n'))}</textarea></label>
 <label class="full">Instructions (one step per line)<textarea rows="8" data-recipe-field="instructions" data-recipe-id="${r.id}">${escapeHtml(r.instructions.join('\n'))}</textarea></label>
 <label class="full">Notes<textarea rows="2" data-recipe-field="notes" data-recipe-id="${r.id}">${escapeHtml(r.notes || '')}</textarea></label>
@@ -338,6 +438,7 @@ r.lastMade = new Date().toISOString();
 cookingRecipe = null;
 renderCookOverlay();
 renderRecipes();
+renderRecipeOverview();
 queueSave();
 });
 }
@@ -358,15 +459,31 @@ const pick = scored[0].r;
 return `<div class="settings-note" style="margin:0 0 10px;">Haven't made <strong>${escapeHtml(pick.name)}</strong> in a while — worth another go? <button class="sync-btn sm" type="button" data-recipe-cook="${pick.id}" style="width:auto;display:inline-block;">Cook it</button></div>`;
 }
 
+function recipesMatchingFilters() {
+return data.recipes.filter((r) => {
+if (activeMadeFilter === 'made' && !r.lastMade) return false;
+if (activeMadeFilter === 'notmade' && r.lastMade) return false;
+if (activeTagFilter && !(r.tags || []).includes(activeTagFilter)) return false;
+return true;
+});
+}
+
 function renderRecipes() {
 const el = document.getElementById('recipe-list');
 if (!el) return;
+const filtered = recipesMatchingFilters();
 const count = document.getElementById('recipe-count');
-if (count) count.textContent = data.recipes.length ? `${data.recipes.length} recipe${data.recipes.length === 1 ? '' : 's'}` : '';
+if (count) {
+count.textContent = !data.recipes.length ? ''
+: filtered.length === data.recipes.length ? `${data.recipes.length} recipe${data.recipes.length === 1 ? '' : 's'}`
+: `${filtered.length} of ${data.recipes.length}`;
+}
 el.innerHTML = suggestionHtml()
 + (data.recipes.length === 0
 ? '<div class="empty">No recipes yet — import one above.</div>'
-: [...data.recipes].sort((a, b) => a.name.localeCompare(b.name)).map(recipeCardHtml).join(''));
+: filtered.length === 0
+? '<div class="empty">Nothing matches this filter.</div>'
+: [...filtered].sort((a, b) => a.name.localeCompare(b.name)).map(recipeCardHtml).join(''));
 
 import('../utils.js').then((u) => u.hydratePhotoBackgrounds(el));
 
@@ -403,6 +520,45 @@ r.photoAlbums = url ? [{ url, cover: '', title: r.name }] : [];
 queueSave();
 });
 });
+el.querySelectorAll('[data-recipe-tag-remove]').forEach((x) => {
+x.addEventListener('click', () => {
+const r = data.recipes.find((rec) => rec.id === x.dataset.recipeTagRemove);
+if (!r) return;
+r.tags.splice(parseInt(x.dataset.tagIdx, 10), 1);
+renderRecipes();
+renderRecipeOverview();
+queueSave();
+});
+});
+// Reuses the spelling already in use elsewhere (across EVERY recipe, not
+// just this one) so typing "curry" when "Curry" already exists on another
+// recipe doesn't create a second tag that groups separately in Overview
+// -- same reasoning connections.js's own commitTagAdd already documents.
+const commitRecipeTagAdd = (recipeId, inputEl) => {
+const raw = inputEl.value.trim().replace(/,$/, '').trim();
+if (!raw) return;
+const r = data.recipes.find((x) => x.id === recipeId);
+if (!r) return;
+if (!Array.isArray(r.tags)) r.tags = [];
+const allKnown = data.recipes.flatMap((x) => x.tags || []);
+const canonical = allKnown.find((v) => v.toLowerCase() === raw.toLowerCase()) || raw;
+if (r.tags.some((v) => String(v).trim().toLowerCase() === canonical.toLowerCase())) { inputEl.value = ''; return; }
+r.tags.push(canonical);
+renderRecipes();
+renderRecipeOverview();
+queueSave();
+};
+el.querySelectorAll('[data-recipe-tag-add]').forEach((input) => {
+input.addEventListener('keydown', (e) => {
+if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); commitRecipeTagAdd(input.dataset.recipeTagAdd, input); }
+});
+});
+el.querySelectorAll('[data-recipe-tag-add-btn]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const input = el.querySelector(`[data-recipe-tag-add="${btn.dataset.recipeTagAddBtn}"]`);
+if (input) commitRecipeTagAdd(btn.dataset.recipeTagAddBtn, input);
+});
+});
 el.querySelectorAll('[data-view-photo]').forEach((el2) => {
 el2.addEventListener('click', async () => {
 const url = await photoUrl(el2.dataset.viewPhoto);
@@ -431,6 +587,7 @@ const r = data.recipes.find((x) => x.id === btn.dataset.recipeMade);
 if (!r) return;
 r.lastMade = new Date().toISOString();
 renderRecipes();
+renderRecipeOverview();
 queueSave();
 });
 });
@@ -445,6 +602,7 @@ if (source.photoId) await photoDelete(source.photoId).catch(() => {});
 if (source.attachment) await deleteAttachment(source.attachment.id).catch(() => {});
 data.recipes = data.recipes.filter((rec) => rec.id !== r.id);
 renderRecipes();
+renderRecipeOverview();
 queueSave();
 });
 });
@@ -523,11 +681,13 @@ queueSave();
 render();
 }
 
-function initRecipes() {
+async function initRecipes() {
 initCapture();
 initRecipeRatingCategoriesSettings();
 renderReview();
 renderRecipes();
+await initRecipeOverviewPrefs();
+renderRecipeOverview();
 }
 
 export { initRecipes };
