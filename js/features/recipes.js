@@ -607,6 +607,43 @@ function allergenListHtml(present) {
 return ALLERGEN_LIST.map((a) => `<span class="pick-chip${present.includes(a) ? ' active' : ''}">${escapeHtml(a)}</span>`).join(' ');
 }
 
+// The recipe-level FODMAP row above this (fodmapRowHtml(diet.fodmap)) is
+// a worst-case rollup -- the highest rating any single ingredient
+// contributes, per component -- which says nothing about which
+// ingredient that was, or whether it's rated at anywhere near the
+// amount this recipe actually uses. Real FODMAP ratings are typically
+// given for a SPECIFIC reference serving and don't scale down linearly
+// with less of it (a real threshold effect, not something safe to
+// approximate) -- so rather than pretend to divide it down, this shows
+// each ingredient's rating exactly as assessed, next to how much this
+// recipe actually calls for, so a look-wrong rating (or a scaling
+// mismatch worth a manual override) is something to actually check
+// against, not a black box.
+function recipeFodmapByLineHtml(r) {
+const toggled = substituteToggles.get(r.id) || new Set();
+const rows = r.ingredientData.map((line, i) => {
+if (!line.name) return '';
+let entry = findReferenceEntry(line.name, line.form);
+if (!entry) return '';
+let label = `${escapeHtml(line.name)}${line.form ? ` (${escapeHtml(line.form)})` : ''}`;
+if (toggled.has(i) && entry.subs && entry.subs[0]) {
+const subEntry = findReferenceEntry(entry.subs[0].name, '');
+if (subEntry) { entry = subEntry; label += ` &rarr; using substitute: ${escapeHtml(subEntry.name)}`; }
+}
+const used = line.quantity != null ? `${line.quantity}${escapeHtml(line.unit)} used` : escapeHtml(line.notes || 'amount not specified');
+return `<div style="padding:4px 0;border-top:1px solid var(--line);">
+<div style="font-size:12px;">${label} — ${used}, rated per ${entry.unitBasis.quantity}${escapeHtml(entry.unitBasis.unit)}</div>
+<div>${fodmapRowHtml(entry.fodmap)}</div>
+</div>`;
+}).join('');
+if (!rows) return '';
+return `<div class="field-block" style="margin-top:6px;">
+<span class="field-label">FODMAP by ingredient</span>
+<div class="settings-note">Each rated at its own reference amount (below), NOT scaled to how much this recipe actually uses — edit the entry in Ingredient Reference if a rating looks wrong for the amount used here.</div>
+${rows}
+</div>`;
+}
+
 // Nothing rendered at all until "Analyse ingredients" has been run once
 // AND every line resolves -- the load-bearing requirement that a recipe
 // nobody's touched this feature on looks exactly like it always did.
@@ -620,9 +657,10 @@ const row = (label, key, unit) => `<div style="display:flex;justify-content:spac
 return `<div class="full">
 <button class="overview-panel-toggle" type="button" data-recipe-diet-toggle="${r.id}">${expandedDiet.has(r.id) ? '▾ Hide diet analysis' : '▸ Show diet analysis'}</button>
 ${expandedDiet.has(r.id) ? `<div class="field-block" style="margin-top:6px;">
-<span class="field-label">FODMAP (per component)</span>
+<span class="field-label">FODMAP (per component) — worst case across ingredients</span>
 <div>${fodmapRowHtml(diet.fodmap)}</div>
 </div>
+${recipeFodmapByLineHtml(r)}
 <div class="field-block" style="margin-top:6px;">
 <span class="field-label">Allergens</span>
 <div>${allergenListHtml(diet.allergens)}</div>
