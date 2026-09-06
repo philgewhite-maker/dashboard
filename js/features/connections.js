@@ -438,7 +438,7 @@ return `<button type="button" class="cover-pin${isCover ? ' is-cover' : ''}" dat
 
 function albumListHtml(c) {
 const albums = c.photoAlbums || [];
-if (!albums.length) return '<div class="album-empty">None linked — name an album "' + escapeHtml(c.name) + '_" in Google Photos, then import it on the Dating admin tab.</div>';
+if (!albums.length) return '<div class="album-empty">None linked — name an album "' + escapeHtml(c.name) + '_" in Google Photos, then <span class="inline-goto-link" data-goto-albums="1">import it on the Dating admin tab</span>.</div>';
 return `<div class="album-strip">${albums.map((a, i) => `<div class="album-card sm${isSensitive(a) ? ' album-sensitive' : ''}">
 <a class="album-thumb" href="${escapeHtml(a.url)}" target="_blank" rel="noopener" title="${escapeHtml(a.title || a.url)}">
 ${a.coverPhotoId ? `<span class="thumb-img" data-photo-bg="${escapeHtml(a.coverPhotoId)}"></span>`
@@ -1412,6 +1412,18 @@ if (!conn) return;
 conn.photoId = btn.dataset.setCoverId;
 renderConnections();
 queueSave();
+});
+});
+// "None linked — ... import it on the Dating admin tab" (albumListHtml)
+// used to just say where to go in plain text -- now actually takes you
+// there, same switchTab+scrollAndFlash shape every other cross-tab
+// reference in this app already uses.
+list.querySelectorAll('[data-goto-albums]').forEach((el) => {
+el.addEventListener('click', (e) => {
+e.preventDefault();
+e.stopPropagation();
+switchTab('datingadmin');
+scrollAndFlash('#albums-panel');
 });
 });
 // Wired identically for both Notes and Chat history previews -- a city or

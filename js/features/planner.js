@@ -216,7 +216,7 @@ function legChipsForDay(trip, dateStr) {
 const hintYear = trip.startDate ? parseInt(trip.startDate.slice(0, 4), 10) : undefined;
 const legs = trip.legs.filter((l) => legDatesFor(l, hintYear).includes(dateStr));
 if (!legs.length) return '';
-return `<div class="planner-leg-chips">${legs.map((l) => `<span class="planner-leg-chip" title="Already scheduled — edit on the Travel tab">${escapeHtml(l.label || l.kind)}</span>`).join('')}</div>`;
+return `<div class="planner-leg-chips">${legs.map((l) => `<span class="planner-leg-chip" data-planner-open-trip="${escapeHtml(trip.id)}" title="Already scheduled — click to edit on the Travel tab">${escapeHtml(l.label || l.kind)}</span>`).join('')}</div>`;
 }
 
 // Best-known bounds, falling back to legs' earliest/latest dated fields when

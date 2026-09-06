@@ -1184,6 +1184,13 @@ font-size:11px;
    target from .dd-status-toggle so cycling status and opening the
    linked account can never collide on the same click. */
 .dd-to-account-link{cursor:pointer;text-decoration:underline;text-decoration-style:dotted;}
+/* Generic "this phrase takes you to the setting/tab it names" inline
+   link -- same dotted-underline treatment as .dd-to-account-link
+   above, under a name that isn't finance-specific since this is used
+   wherever explanatory text names another tab/panel to go set up
+   (starting with connections.js's own "import it on the Dating admin
+   tab" line). */
+.inline-goto-link{cursor:pointer;text-decoration:underline;text-decoration-style:dotted;}
 /* Same idiom planner.js's own draft/firm distinction settled on --
    border style + font weight, not a new colour/shape -- deal-linked
    reads as "locked in" (solid fill, like Planner's Firm), transferrable
