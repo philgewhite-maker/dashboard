@@ -2890,6 +2890,12 @@ color:var(--muted);
 .flow-card-surplus{font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:600;}
 .flow-card-surplus.positive{color:var(--sage);}
 .flow-card-surplus.negative{color:var(--red);}
+/* A dot is NOT a real node in the graph -- it's the diagram's stand-in
+   for "everything between this one account and the outside world"
+   (an aggregate spend total to real third parties, or an external
+   income source like Salary/Airbnb), grouped rather than drawn as its
+   own card. See flowDotHtml()/flowEdges() in financeaccounts.js. */
+.flow-dot{width:14px;height:14px;border-radius:50%;background:var(--muted);opacity:.55;align-self:center;flex:0 0 auto;cursor:default;}
 
 /* Switch-offer scan results -- same border-top-separated row shape
    .voucher-row/.account-card already use for a flat list. */

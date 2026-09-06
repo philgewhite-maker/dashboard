@@ -427,14 +427,29 @@ purpose: '',
 // only; broadened 2026-09-05, migrated below). method: 'Direct Debit' |
 // 'Standing Order' | 'Card payment' | 'Other'. toAccountId: set when
 // this payment actually goes to ANOTHER of your own tracked accounts
-// (e.g. a mortgage overpayment) rather than a real third party --
-// used by the account monthly surplus check
-// (financeaccounts.js's accountMonthlySurplus): it still leaves THIS
-// account, but doesn't leave your overall financial perimeter, so it's
-// excluded from that total the same way a bare internal transfer would
-// be.
+// (e.g. a mortgage overpayment, or funding a second account) rather
+// than a real third party -- used by the account monthly surplus check
+// (financeaccounts.js's accountMonthlySurplus/accountsPushingInto): it
+// counts as real "out" on THIS account (it does leave the account's
+// own balance), and separately as "in" (pushed funding) on whichever
+// account it's paid into. An outgoing with NO toAccountId is a real
+// third party -- those get grouped into the diagram's own per-account
+// "external spend" dot rather than drawing an edge to nowhere.
 outgoings: [],
 fundingAmount: '', fundingFromAccountId: '',
+// Funding can come from outside any tracked account (Salary, Airbnb, a
+// side gig) as well as from another tracked account -- mutually
+// exclusive with fundingFromAccountId (financeaccounts.js clears
+// whichever isn't chosen). fundingSourceOther disambiguates "Other,
+// nothing typed yet" from "nothing chosen at all" so the picker can
+// still show Other selected (and reveal its text box) before any text
+// exists.
+fundingSource: '', fundingSourceOther: false,
+// Salary is a known, reliable figure; Airbnb income isn't -- this
+// flags an inbound amount (whichever source it's from) as a rough
+// estimate rather than a hard number. Shown in the diagram as a
+// dotted line and a "~" prefix on the amount.
+fundingVariable: false,
 // A card's own equivalent of a CASS switch -- but unlike CASS (one
 // switch opens the account), a card can receive several separate
 // balance transfers over its life, so this is a list, not a single

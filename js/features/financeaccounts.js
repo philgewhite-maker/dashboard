@@ -92,13 +92,58 @@ return `<option value="">None</option>` + data.financeAccounts
 .join('');
 }
 
+// The "Funded from" picker -- one dropdown mixing external-source
+// presets (Salary/Airbnb/Side gig), a free-text "Other", and the
+// existing tracked-account list, grouped under its own <optgroup> so
+// "who else did I add" doesn't get visually confused with "what KIND
+// of source is this" while still living in one control. Preset option
+// values are the preset text itself (self-describing, no separate
+// lookup needed on change -- see the dedicated select handler); real
+// account ids come from otherAccountOptionsHtml, reused as-is.
+function fundingSourceOptionsHtml(a) {
+const presetOpts = FUNDING_SOURCE_PRESETS.map((p) => `<option value="${escapeHtml(p)}" ${!a.fundingFromAccountId && !a.fundingSourceOther && a.fundingSource === p ? 'selected' : ''}>${escapeHtml(p)}</option>`).join('');
+const otherOpt = `<option value="__other__" ${a.fundingSourceOther ? 'selected' : ''}>Other…</option>`;
+const acctOpts = data.financeAccounts
+.filter((x) => x.id !== a.id)
+.map((x) => `<option value="${escapeHtml(x.id)}" ${a.fundingFromAccountId === x.id ? 'selected' : ''}>${escapeHtml(accountLabel(x))}</option>`)
+.join('');
+return `<option value="">None</option>${presetOpts}${otherOpt}<optgroup label="My accounts">${acctOpts}</optgroup>`;
+}
+
 // Every regular outgoing, not just Direct Debits -- standing orders,
-// card payments, anything recurring -- but Direct Debit is still the
-// dominant/default case (deal criteria almost always name DDs
-// specifically), so it stays the default `method` and the ONLY one
-// counted on the flow-card summary (ddCountLabel below).
-const OUTGOING_METHODS = ['Direct Debit', 'Standing Order', 'Card payment', 'Other'];
+// manual payments, card payments, anything recurring -- but Direct
+// Debit is still the dominant/default case (deal criteria almost
+// always name DDs specifically), so it stays the default `method` and
+// the ONLY one counted on the flow-card summary (ddCountLabel below).
+const OUTGOING_METHODS = ['Direct Debit', 'Standing Order', 'Manual payment', 'Card payment', 'Other'];
 const outgoingMethod = (o) => o.method || 'Direct Debit'; // pre-method entries were always DDs
+// A Manual payment is still a real, INTENDED recurring transfer -- just
+// executed by hand instead of automatically -- so it joins DD/Standing
+// Order everywhere those are treated as "reliable recurring outflow"
+// (the surplus calc's out/pushedIn totals). Card payment/Other stay
+// excluded from all of that: unlike these three, their amount isn't a
+// fixed recurring figure by definition. The diagram is more permissive
+// than this list (see flowEdges) -- it draws an edge for ANY method
+// with toAccountId set, just doesn't count Card payment/Other toward
+// the £ totals.
+const REGULAR_OUTGOING_METHODS = ['Direct Debit', 'Standing Order', 'Manual payment'];
+// 2-letter code shown on every diagram arrow (Ongoing view) so "what
+// kind of payment is this" never has to be inferred from dash style
+// alone. AC (below) is the separate code for a fundingFromAccountId
+// pull -- not a method, so it isn't in this map.
+const OUTGOING_METHOD_CODE = { 'Direct Debit': 'DD', 'Standing Order': 'SO', 'Manual payment': 'MP', 'Card payment': 'CP', 'Other': 'OT' };
+const PULL_ACCOUNT_CODE = 'AC';
+// External funding sources -- money genuinely from outside any tracked
+// account. "Other" isn't listed here: it's handled as free text (see
+// fundingSourceOther) with its own fixed 'OT' code below.
+const FUNDING_SOURCE_PRESETS = ['Salary', 'Airbnb', 'Side gig'];
+const FUNDING_SOURCE_CODE = { Salary: 'SA', Airbnb: 'AB', 'Side gig': 'SG' };
+// Dash styles for the Ongoing view specifically -- per EDGE, not per
+// MODE like the existing FLOW_DASH_BY_KIND (cass/balance-transfer),
+// since Ongoing now needs several different line styles within the
+// same single view (a mix of automated, manual and variable-income
+// edges can all appear together).
+const FUNDING_EDGE_DASH = { manual: 'stroke-dasharray="4 3"', variable: 'stroke-dasharray="1 3"' };
 
 // deal-linked/transferrable reuses the exact idiom planner.js's own
 // draft/firm distinction settled on: border style + font weight, no new
@@ -185,7 +230,7 @@ const result = [];
 data.financeAccounts.forEach((x) => {
 if (x.id === a.id) return;
 (x.outgoings || []).forEach((o) => {
-if (o.toAccountId !== a.id || !['Direct Debit', 'Standing Order'].includes(outgoingMethod(o))) return;
+if (o.toAccountId !== a.id || !REGULAR_OUTGOING_METHODS.includes(outgoingMethod(o))) return;
 if (o.amount === '' || o.amount == null || !isFinite(Number(o.amount))) return;
 result.push({ from: x, amount: Number(o.amount) });
 });
@@ -193,27 +238,27 @@ result.push({ from: x, amount: Number(o.amount) });
 return result;
 }
 
-// £x funded in, minus what actually leaves the account: every Direct
-// Debit/Standing Order (INCLUDING ones paying into another of your own
-// tracked accounts, e.g. a mortgage overpayment -- it still leaves
-// THIS account's own balance, whatever else it means at a household
-// level; see outgoingsHtml's own comment on toAccountId) plus whatever
-// this account itself sends on to fund other tracked accounts via the
-// pull mechanism (accountsFundedBy, above). Funding in is the pull
-// field (fundingAmount, "external" -- money genuinely from outside any
-// tracked account, or a source named the pull way) PLUS anything
-// pushed in via another account's own DD/Standing Order
-// (accountsPushingInto). Card payment/Other stay excluded from the
-// out side: unlike a DD or standing order, their amount isn't a fixed
-// recurring figure by definition, so folding them in would make the
-// total look more precise than it really is. Returns null only when
+// £x funded in, minus what actually leaves the account: every
+// REGULAR_OUTGOING_METHODS outgoing (INCLUDING ones paying into
+// another of your own tracked accounts, e.g. a mortgage overpayment --
+// it still leaves THIS account's own balance, whatever else it means
+// at a household level; see outgoingsHtml's own comment on toAccountId)
+// plus whatever this account itself sends on to fund other tracked
+// accounts via the pull mechanism (accountsFundedBy, above). Funding in
+// is the pull field (fundingAmount -- external, from outside any
+// tracked account, or from one named the pull way) PLUS anything pushed
+// in via another account's own REGULAR_OUTGOING_METHODS outgoing
+// (accountsPushingInto). Card payment/Other stay excluded from the out
+// side: unlike DD/Standing Order/Manual payment, their amount isn't a
+// fixed recurring figure by definition, so folding them in would make
+// the total look more precise than it really is. Returns null only when
 // there's truly nothing on this account at all to compute from.
 function accountMonthlySurplus(a) {
 const externalIn = (a.fundingAmount !== '' && a.fundingAmount != null && isFinite(Number(a.fundingAmount))) ? Number(a.fundingAmount) : 0;
 const pushedIn = accountsPushingInto(a);
 const pushedInTotal = pushedIn.reduce((sum, p) => sum + p.amount, 0);
 const fundingIn = externalIn + pushedInTotal;
-const relevant = (a.outgoings || []).filter((o) => ['Direct Debit', 'Standing Order'].includes(outgoingMethod(o)));
+const relevant = (a.outgoings || []).filter((o) => REGULAR_OUTGOING_METHODS.includes(outgoingMethod(o)));
 let out = 0;
 let unset = 0;
 relevant.forEach((o) => {
@@ -223,8 +268,8 @@ out += Number(o.amount);
 if (fundingIn === 0 && out === 0 && relevant.length === 0) return null;
 const fundedAccounts = accountsFundedBy(a);
 const fundingOut = fundedAccounts.reduce((sum, x) => sum + Number(x.fundingAmount), 0);
-const excludedOther = (a.outgoings || []).filter((o) => !['Direct Debit', 'Standing Order'].includes(outgoingMethod(o))).length;
-return { net: fundingIn - out - fundingOut, fundingIn, externalIn, pushedIn, pushedInTotal, out, unset, excludedOther, fundingOut, fundedAccounts };
+const excludedOther = (a.outgoings || []).filter((o) => !REGULAR_OUTGOING_METHODS.includes(outgoingMethod(o))).length;
+return { net: fundingIn - out - fundingOut, fundingIn, externalIn, externalSource: a.fundingSource, externalVariable: a.fundingVariable, pushedIn, pushedInTotal, out, unset, excludedOther, fundingOut, fundedAccounts };
 }
 
 function surplusSign(s) { return s.net < 0 ? '−' : '+'; }
@@ -234,7 +279,7 @@ function surplusAmountText(s) { return `${surplusSign(s)}£${Math.round(Math.abs
 // three surfaces can't drift out of sync with each other.
 function surplusTitle(s) {
 const inParts = [];
-if (s.externalIn) inParts.push(`£${s.externalIn.toLocaleString('en-GB')} funding`);
+if (s.externalIn) inParts.push(`${s.externalVariable ? '~' : ''}£${s.externalIn.toLocaleString('en-GB')}${s.externalSource ? ` from ${s.externalSource}` : ' funding'}`);
 if (s.pushedInTotal) inParts.push(`£${s.pushedInTotal.toLocaleString('en-GB')} from ${s.pushedIn.map((p) => accountLabel(p.from)).join(', ')}`);
 let title = inParts.length ? inParts.join(' + ') : '£0 in';
 if (s.out) title += ` − £${s.out.toLocaleString('en-GB')} Direct Debit/standing order`;
@@ -280,7 +325,7 @@ const s = accountMonthlySurplus(a);
 if (!s) return '';
 const suffix = s.net < 0 ? 'short' : 'left over';
 const inParts = [];
-if (s.externalIn) inParts.push(`£${s.externalIn.toLocaleString('en-GB')} funding`);
+if (s.externalIn) inParts.push(`${s.externalVariable ? '~' : ''}£${s.externalIn.toLocaleString('en-GB')}${s.externalSource ? ` from ${s.externalSource}` : ' funding'}`);
 if (s.pushedInTotal) inParts.push(`£${s.pushedInTotal.toLocaleString('en-GB')} from ${s.pushedIn.map((p) => accountLabel(p.from)).join(', ')}`);
 let text = `Net monthly: ${inParts.length ? inParts.join(' + ') : '£0 in'}`;
 if (s.out) text += ` − £${s.out.toLocaleString('en-GB')} Direct Debit/standing order`;
@@ -348,7 +393,7 @@ if (!a.dealEndDate && !a.dealOngoing) out.push('Has a deal but no end date set �
 } else if (!a.purpose && !a.notes) {
 out.push('No deal, purpose, or notes recorded — why is this kept open?');
 }
-if (!!a.fundingAmount !== !!a.fundingFromAccountId) out.push('Funding amount and source account don\'t match — one is set without the other.');
+if (!!a.fundingAmount !== !!(a.fundingFromAccountId || a.fundingSource)) out.push('Funding amount and source don\'t match — one is set without the other.');
 const surplus = accountMonthlySurplus(a);
 if (surplus) {
 if (surplus.net < 0) out.push(`Outgoings (Direct Debit/standing order) exceed funding by £${Math.round(-surplus.net).toLocaleString('en-GB')}/mo — funding, DDs, or amounts may be out of date.`);
@@ -407,7 +452,9 @@ ${issues.length ? `<ul class="suggested-questions" title="Deterministic prompts,
 <label class="account-field-full">Purpose<input type="text" autocomplete="off" data-field="purpose" data-account-id="${a.id}" value="${escapeHtml(a.purpose)}" placeholder="e.g. Switch bonus farming, Emergency fund"></label>
 <div class="account-field-row">
 <label>Monthly funding in (£)<input type="number" step="0.01" min="0" autocomplete="off" data-field="fundingAmount" data-account-id="${a.id}" value="${escapeHtml(a.fundingAmount)}" placeholder="e.g. 1000"></label>
-<label>Funded from<select data-field="fundingFromAccountId" data-account-id="${a.id}">${otherAccountOptionsHtml(a.id, a.fundingFromAccountId)}</select></label>
+<label><input type="checkbox" data-field="fundingVariable" data-account-id="${a.id}" ${a.fundingVariable ? 'checked' : ''}> Variable amount <span class="settings-note" style="display:inline;margin:0;">(a rough estimate, e.g. Airbnb bookings, not a fixed figure like a salary)</span></label>
+<label>Funded from<select data-funding-source-select="${a.id}">${fundingSourceOptionsHtml(a)}</select></label>
+${a.fundingSourceOther ? `<label>Source name<input type="text" autocomplete="off" data-field="fundingSource" data-account-id="${a.id}" value="${escapeHtml(a.fundingSource)}" placeholder="e.g. Freelance writing"></label>` : ''}
 </div>
 ${surplusDetailHtml(a)}
 <div class="account-field-full">
@@ -494,24 +541,64 @@ const accountOk = (id) => { const a = byId.get(id); return !!a && (closedOk || !
 const edges = [];
 if (mode === 'funding') {
 data.financeAccounts.forEach((a) => {
-// "Pull" -- the receiving account names its source.
-if (a.fundingFromAccountId && accountOk(a.fundingFromAccountId) && accountOk(a.id)) {
-edges.push({ from: a.fundingFromAccountId, to: a.id, kind: 'funding', label: (a.fundingAmount !== '' && a.fundingAmount != null) ? `£${a.fundingAmount}/mo` : 'funds' });
+if (!accountOk(a.id)) return;
+// "Pull" -- the receiving account names a tracked account as its
+// source. Coded 'AC' (account transfer) like every other edge kind
+// now carries an explicit type, not just amount.
+if (a.fundingFromAccountId && accountOk(a.fundingFromAccountId)) {
+const amountLabel = (a.fundingAmount !== '' && a.fundingAmount != null) ? `£${a.fundingAmount}/mo` : 'transfer';
+edges.push({ from: a.fundingFromAccountId, to: a.id, kind: 'funding', label: `${amountLabel} · ${PULL_ACCOUNT_CODE}` });
 }
-// "Push" -- a Direct Debit/Standing Order the SOURCE account holds,
-// paying into another of the user's own tracked accounts
-// (outgoings[].toAccountId, e.g. a mortgage overpayment or a
-// standing order funding a second current account). Confirmed live
-// as a real gap: this relationship existed in the data but never
-// drew an edge here at all, since this loop only ever read the pull
-// field above. Card payment/Other stay out, same reasoning as
-// accountMonthlySurplus's own DD/Standing-Order-only filter.
+// "Push" -- any outgoing the SOURCE account holds that pays into
+// another of the user's own tracked accounts (outgoings[].toAccountId,
+// e.g. a mortgage overpayment, or a standing order funding a second
+// account). ALL methods draw here now, each with its own 2-letter
+// code (OUTGOING_METHOD_CODE) -- confirmed the diagram should show
+// every type of money flow, not just DD/Standing Order. Only Manual
+// payment gets the dashed line; this is purely about what's VISIBLE
+// here, not what accountMonthlySurplus counts (that stays
+// REGULAR_OUTGOING_METHODS -- Card payment/Other still aren't a fixed
+// recurring figure, so still excluded from the £ totals even though
+// they're drawn).
 (a.outgoings || []).forEach((o) => {
-if (!o.toAccountId || !['Direct Debit', 'Standing Order'].includes(outgoingMethod(o))) return;
-if (!accountOk(o.toAccountId) || !accountOk(a.id)) return;
+if (!o.toAccountId || !accountOk(o.toAccountId)) return;
+const method = outgoingMethod(o);
 const amountLabel = (o.amount !== '' && o.amount != null) ? `£${o.amount}/mo` : 'transfer';
-edges.push({ from: a.id, to: o.toAccountId, kind: 'funding', label: `${amountLabel} · ${outgoingMethod(o) === 'Direct Debit' ? 'DD' : 'SO'}` });
+edges.push({ from: a.id, to: o.toAccountId, kind: 'funding', label: `${amountLabel} · ${OUTGOING_METHOD_CODE[method] || 'OT'}`, dash: method === 'Manual payment' ? FUNDING_EDGE_DASH.manual : '' });
 });
+// Outbound dot -- every outgoing that does NOT point at a tracked
+// account (a real third party: utilities, Netflix, a manual rent
+// transfer to someone not tracked) is otherwise invisible on this
+// diagram entirely. Grouped into ONE summed arrow per account rather
+// than a card per payee, which would turn "money leaves eventually"
+// into diagram clutter unrelated to the actual question (does this
+// account's money move between MY OWN accounts).
+const offDiagram = (a.outgoings || []).filter((o) => !o.toAccountId);
+if (offDiagram.length) {
+let sum = 0;
+let unset = 0;
+offDiagram.forEach((o) => {
+if (o.amount === '' || o.amount == null || !isFinite(Number(o.amount))) { unset += 1; return; }
+sum += Number(o.amount);
+});
+const label = sum ? `£${Math.round(sum).toLocaleString('en-GB')}/mo` : 'amount not set';
+const dotTitle = `${offDiagram.length} payment${offDiagram.length === 1 ? '' : 's'} outside your tracked accounts${unset ? ` (${unset} with no amount set)` : ''}`;
+edges.push({ from: a.id, to: `dot-out-${a.id}`, kind: 'funding', label, dotTitle });
+}
+// Inbound dot -- funding from a genuinely external source (Salary,
+// Airbnb, a side gig, or free-text "Other"), i.e. fundingSource set
+// rather than fundingFromAccountId. There's no tracked account to
+// draw FROM, so this gets its own small per-account source dot
+// instead. fundingVariable (Airbnb booking income vs a fixed salary)
+// gets both a "~" on the amount and the dotted line style, not just
+// the code letters, since the whole point is that this number is a
+// rough estimate, not a hard figure.
+if (a.fundingSource) {
+const code = FUNDING_SOURCE_CODE[a.fundingSource] || 'OT';
+const amountText = (a.fundingAmount !== '' && a.fundingAmount != null) ? `£${a.fundingAmount}/mo` : 'amount not set';
+const label = `${a.fundingVariable ? '~' : ''}${amountText} · ${code}`;
+edges.push({ from: `dot-in-${a.id}`, to: a.id, kind: 'funding', label, dash: a.fundingVariable ? FUNDING_EDGE_DASH.variable : '', dotTitle: a.fundingSource });
+}
 });
 } else if (mode === 'cass') {
 // Directional now (cassFromAccountId, not the old undirected-sounding
@@ -697,7 +784,7 @@ const labelW = labelBoxWidth(e.label);
 // control points share their endpoint's y and sit at the same x, so
 // the label needs no separate curve-point math.)
 const path = `M${p1.x},${p1.y} C${mx},${p1.y} ${mx},${p2.y} ${p2.x},${p2.y}`;
-return `<path d="${path}" fill="none" stroke="var(--ink)" stroke-width="1.5" ${FLOW_DASH_BY_KIND[e.kind] || ''} marker-end="url(#flow-arrow)"></path>
+return `<path d="${path}" fill="none" stroke="var(--ink)" stroke-width="1.5" ${e.dash || FLOW_DASH_BY_KIND[e.kind] || ''} marker-end="url(#flow-arrow)"></path>
 <rect x="${mx - labelW / 2}" y="${my - 8}" width="${labelW}" height="16" rx="4" fill="var(--paper)"></rect>
 <text x="${mx}" y="${my + 4}" text-anchor="middle" font-size="10" font-family="'IBM Plex Mono', monospace" fill="var(--ink)">${escapeHtml(e.label)}</text>`;
 }).join('');
@@ -753,6 +840,16 @@ ${statsRow}
 </div>`;
 }
 
+// A dot is deliberately NOT styled like a real account card -- it
+// isn't one, and giving it card chrome would visually claim otherwise.
+// Its own edge (always exactly one) carries everything worth showing;
+// the dot itself is just an anchor point for the connector line plus a
+// hover tooltip (dotTitle, set in flowEdges).
+function flowDotHtml(id, edges) {
+const edge = edges.find((e) => e.from === id || e.to === id);
+return `<div class="flow-dot" data-flow-node="${escapeHtml(id)}" title="${escapeHtml(edge?.dotTitle || '')}"></div>`;
+}
+
 // .overview-chip/.overview-chip.active is the same "pick one of a few"
 // pill pattern the Tasks filter and Overview's own dimension chips
 // already use -- reused as-is rather than inventing a second toggle
@@ -784,7 +881,7 @@ const cardById = new Map(data.financeAccounts.map((a) => [a.id, a]));
 const gap = Math.max(60, Math.max(...edges.map((e) => labelBoxWidth(e.label))) + 30);
 return `${toggle}<div class="flow-diagram" id="account-flow-diagram">
 <svg class="flow-lines"></svg>
-<div class="flow-columns" style="gap:${gap}px;">${columns.map((col) => `<div class="flow-column">${col.map((id) => flowCardHtml(cardById.get(id))).join('')}</div>`).join('')}</div>
+<div class="flow-columns" style="gap:${gap}px;">${columns.map((col) => `<div class="flow-column">${col.map((id) => (id.startsWith('dot-') ? flowDotHtml(id, edges) : flowCardHtml(cardById.get(id)))).join('')}</div>`).join('')}</div>
 </div>`;
 }
 
@@ -837,6 +934,27 @@ a[field] = el.type === 'checkbox' ? el.checked : el.value.trim();
 // so setting either one clears the other.
 if (field === 'dealOngoing' && a.dealOngoing) a.dealEndDate = '';
 if (field === 'dealEndDate' && a.dealEndDate) a.dealOngoing = false;
+queueSave();
+renderFinanceAccounts();
+});
+});
+// The "Funded from" select fans out to THREE different fields
+// depending on what's picked (a tracked account, a preset source, or
+// "Other"), so it can't use the generic one-field-in-one-field-out
+// handler above -- every option clears the other two, keeping exactly
+// one of fundingFromAccountId/fundingSource/fundingSourceOther live at
+// once.
+list.querySelectorAll('[data-funding-source-select]').forEach((sel) => {
+sel.addEventListener('change', () => {
+const a = data.financeAccounts.find((x) => x.id === sel.dataset.fundingSourceSelect);
+if (!a) return;
+const v = sel.value;
+a.fundingFromAccountId = '';
+a.fundingSource = '';
+a.fundingSourceOther = false;
+if (v === '__other__') a.fundingSourceOther = true;
+else if (FUNDING_SOURCE_PRESETS.includes(v)) a.fundingSource = v;
+else if (v) a.fundingFromAccountId = v;
 queueSave();
 renderFinanceAccounts();
 });
