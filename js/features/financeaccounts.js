@@ -1039,7 +1039,10 @@ function flowColumnHtml(col, connectors, edges, cardById) {
 return col.map((id) => {
 const cardHtml = id.startsWith('dot-') ? flowDotHtml(id, edges) : flowCardHtml(cardById.get(id));
 const conn = connectors.find((c) => c.aboveId === id);
-const connectorHtml = conn ? `<div class="flow-inline-connector${conn.dash ? ' dashed' : ''}">&darr; ${escapeHtml(conn.label)}</div>` : '';
+// A real small arrow (line + solid triangle head), not just a "↓"
+// character -- confirmed live that read as "lame" next to the SVG
+// diagram's own proper arrowheads (drawFlowLines' marker-end).
+const connectorHtml = conn ? `<div class="flow-inline-connector${conn.dash ? ' dashed' : ''}"><span class="flow-inline-connector-line"></span><span class="flow-inline-connector-label">${escapeHtml(conn.label)}</span></div>` : '';
 return cardHtml + connectorHtml;
 }).join('');
 }

@@ -2907,8 +2907,15 @@ color:var(--muted);
    flowColumnHtml() in financeaccounts.js. Sits between two stacked
    cards in the same column instead of an SVG line, since there's no
    column boundary left for a curve to span. */
-.flow-inline-connector{font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--muted);text-align:center;padding:1px 0;}
-.flow-inline-connector.dashed{border-top:1px dashed var(--line);border-bottom:1px dashed var(--line);}
+.flow-inline-connector{display:flex;align-items:center;justify-content:center;gap:5px;padding:3px 0;}
+/* A real line + solid triangle head, same visual language as the SVG
+   diagram's own arrows (drawFlowLines' marker-end) -- not just a "↓"
+   character, which read as flat and out of place next to them. */
+.flow-inline-connector-line{position:relative;flex:0 0 auto;width:9px;height:13px;}
+.flow-inline-connector-line::before{content:'';position:absolute;left:50%;top:0;bottom:4px;width:1.5px;background:var(--ink);opacity:.5;transform:translateX(-50%);}
+.flow-inline-connector-line::after{content:'';position:absolute;left:50%;bottom:0;width:0;height:0;border-left:3.5px solid transparent;border-right:3.5px solid transparent;border-top:5px solid var(--ink);opacity:.5;transform:translateX(-50%);}
+.flow-inline-connector.dashed .flow-inline-connector-line::before{background:transparent;border-left:1.5px dashed var(--ink);opacity:.5;width:0;}
+.flow-inline-connector-label{font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--muted);}
 
 /* Switch-offer scan results -- same border-top-separated row shape
    .voucher-row/.account-card already use for a flat list. */
