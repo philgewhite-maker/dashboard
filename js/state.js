@@ -1465,20 +1465,50 @@ return String(v || '').replace(/\s*\(shared\)\s*$/i, '').trim();
 // recorded outranks a re-scrape, never silently overwritten. `matchId` is
 // the platform's own identifier where one exists (Tinder's match id,
 // Telegram's chat id); left blank for sources that don't have one.
+// Confirmed live as a real bug: the old match rule ("same platform + a
+// row with no matchId recorded yet") could pick up ANY blank-matchId
+// row on that platform, not necessarily one for the SAME handle -- a
+// re-match under a brand new profile name could silently attach its
+// matchId to an older, differently-named row instead of getting its
+// own, leaving that new handle with no matchId recorded anywhere and
+// no way for a later re-scrape to recognise it via matchId. Matching
+// now prefers, in order: (1) an exact matchId match -- a re-scrape of
+// the exact same match, handle may have changed; (2) an exact handle
+// match on this platform -- the same profile name seen before, matchId
+// newly available this time; (3) only as a last resort, a row that's
+// COMPLETELY empty (no handle AND no matchId) -- never a row that
+// already names someone else.
 function upsertIdentity(conn, { platform, handle = '', matchId = '' }) {
-if (!platform || (!String(handle || '').trim() && !String(matchId || '').trim())) return;
+const h = String(handle || '').trim();
+const m = String(matchId || '').trim();
+if (!platform || (!h && !m)) return;
 if (!Array.isArray(conn.identities)) conn.identities = [];
-// Matches an identical matchId, or a same-platform row that hasn't got
-// one recorded yet (so a later import can fill in a blank slot) -- but
-// NOT a same-platform row that already carries a *different* matchId,
-// since that's a genuine re-match under a new id, not the same record.
-const row = conn.identities.find((r) => r.platform === platform && (!matchId || !r.matchId || r.matchId === matchId));
+let row = m ? conn.identities.find((r) => r.platform === platform && r.matchId === m) : null;
+if (!row && h) row = conn.identities.find((r) => r.platform === platform && r.handle === h);
+if (!row) row = conn.identities.find((r) => r.platform === platform && !r.handle && !r.matchId);
 if (row) {
-if (!String(row.handle || '').trim() && handle) row.handle = handle;
-if (!String(row.matchId || '').trim() && matchId) row.matchId = matchId;
+if (!String(row.handle || '').trim() && h) row.handle = h;
+if (!String(row.matchId || '').trim() && m) row.matchId = m;
 } else {
-conn.identities.push({ id: uid(), platform, handle: handle || '', matchId: matchId || '' });
+conn.identities.push({ id: uid(), platform, handle: h, matchId: m });
 }
+}
+
+// Every Tinder match id this connection is already known by -- there can
+// be several (a genuine re-match under a new profile after unmatching
+// gets its own id each time), not just the single legacy tinderMatchId
+// scalar (which only ever holds whichever one was recorded FIRST and is
+// never overwritten once set -- see its own comment). Anything that
+// needs to recognise "have I already seen this exact Tinder match
+// before" (the known-match-id fast path, the name-candidate conflict
+// check) needs the FULL set, or a connection's 2nd/3rd+ re-match can
+// never be recognised this way at all -- confirmed live as the actual
+// cause of a real, reproducible failure.
+function tinderMatchIds(c) {
+const ids = new Set();
+if (c.tinderMatchId) ids.add(c.tinderMatchId);
+(c.identities || []).forEach((r) => { if (r.platform === 'Tinder' && r.matchId) ids.add(r.matchId); });
+return ids;
 }
 
 function valueListColor(rule, values) {
@@ -1613,7 +1643,7 @@ blankAirbnbListing, blankAirbnbReservation, blankFinanceAccount,
 CONTACT_STATUS_LABELS, CONTACT_MATCH_MIN_STAGE,
 DEFAULT_RATING_CATEGORIES, slugifyField, DEFAULT_RECIPE_RATING_CATEGORIES,
 FLAG_FIELD_DEFS, DEFAULT_FLAG_RULES, computeFlags, valueColorForField, stripSharedSuffix, suggestedAction, suggestedQuestions, isTravelPaused, ACTIONS, distanceMiles, heightCm,
-recordImportRun, importStatusLine, upsertIdentity,
+recordImportRun, importStatusLine, upsertIdentity, tinderMatchIds,
 };
 
 // `data` above is exported by binding, but ES module live-bindings only

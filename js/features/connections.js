@@ -1,4 +1,4 @@
-import { data, queueSave, reachOutThreshold, isDormantStage, isTravelPaused, getLocalSettings, setLocalSetting, TAG_FIELDS, CONTACT_STATUS_LABELS, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness, slugifyField, FLAG_FIELD_DEFS, DEFAULT_FLAG_RULES, computeFlags, valueColorForField, stripSharedSuffix, suggestedAction, suggestedQuestions, recordImportRun, importStatusLine, upsertIdentity, blankConnection, blankPendingImport } from '../state.js';
+import { data, queueSave, reachOutThreshold, isDormantStage, isTravelPaused, getLocalSettings, setLocalSetting, TAG_FIELDS, CONTACT_STATUS_LABELS, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness, slugifyField, FLAG_FIELD_DEFS, DEFAULT_FLAG_RULES, computeFlags, valueColorForField, stripSharedSuffix, suggestedAction, suggestedQuestions, recordImportRun, importStatusLine, upsertIdentity, tinderMatchIds, blankConnection, blankPendingImport } from '../state.js';
 import { captureTask, revealTask } from './tasks.js';
 import { photoDelete, photoUrl } from '../db.js';
 import { storePhoto } from '../files.js';
@@ -2951,7 +2951,16 @@ if (wantAge !== null) {
 const theirAge = currentAge(c);
 if (theirAge) best.score -= Math.min(Math.abs(theirAge.value - wantAge) * 3, 15);
 }
-const conflict = !!(incomingMatchId && c.tinderMatchId && c.tinderMatchId !== incomingMatchId);
+// Checks every Tinder match id this connection is already known by
+// (tinderMatchIds), not just the single legacy tinderMatchId scalar --
+// confirmed live as a real bug: a connection re-matched more than
+// once (a genuine 2nd, 3rd+ profile after unmatching) has SEVERAL
+// valid ids, and the scalar only ever holds whichever was recorded
+// first. Checking just that one made every later re-match look like a
+// "conflict with a different person" instead of what it actually is:
+// the same person, one more time.
+const knownIds = tinderMatchIds(c);
+const conflict = !!(incomingMatchId && knownIds.size > 0 && !knownIds.has(incomingMatchId));
 results.push({ conn: c, why: best.why, score: best.score, conflict, theirMatchId: c.tinderMatchId });
 }
 });

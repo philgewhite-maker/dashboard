@@ -22,7 +22,7 @@
 // importer), and the chosen connection's photo stays visible for the whole
 // review regardless of how it got picked, so a wrong dropdown pick is just
 // as visible as a wrong auto-match was invisible before.
-import { data, queueSave, displayAge, computeFlags, distanceMiles, heightCm, FLAG_FIELD_DEFS, suggestedQuestions, TAG_FIELDS, stripSharedSuffix, recordImportRun, importStatusLine, upsertIdentity, blankConnection } from '../state.js';
+import { data, queueSave, displayAge, computeFlags, distanceMiles, heightCm, FLAG_FIELD_DEFS, suggestedQuestions, TAG_FIELDS, stripSharedSuffix, recordImportRun, importStatusLine, upsertIdentity, tinderMatchIds, blankConnection } from '../state.js';
 import { escapeHtml, uid, todayStr, hydratePhotoBackgrounds, openLightbox, knownCityMap, knownScalarValues, pickChipHtml, COUNTRY_NAME_TO_NATIONALITY, avatarHtml, foldDiacritics } from '../utils.js';
 import { phoneKey } from '../googlecontacts.js';
 import { storePhoto, fetchProxiedImage } from '../files.js';
@@ -2358,8 +2358,16 @@ let match = candidates[0] || null;
 // A connection already carrying this exact Tinder match id from a
 // previous import is a certain identity match, not a guess — whatever
 // name-based scoring says, this overrides it and skips confirmation
-// entirely, same as an exact name match always has.
-const knownConn = parsed.matchId ? data.connections.find((c) => c.tinderMatchId === parsed.matchId) : null;
+// entirely, same as an exact name match always has. Checks every
+// match id this connection is already known by (tinderMatchIds), not
+// just the single legacy tinderMatchId scalar -- confirmed live as a
+// real bug: a connection re-matched more than once (a genuine 2nd,
+// 3rd+ profile after unmatching, each under its own Tinder-issued id)
+// could never be recognised past its FIRST ever match id, since the
+// scalar only ever holds that one. Every later re-match fell through
+// to risky name-guessing instead of the certain path it should have
+// taken.
+const knownConn = parsed.matchId ? data.connections.find((c) => tinderMatchIds(c).has(parsed.matchId)) : null;
 if (knownConn) {
 match = { conn: knownConn, why: 'known match id', score: 999 };
 if (!candidates.some((cand) => cand.conn.id === knownConn.id)) candidates.unshift(match);
