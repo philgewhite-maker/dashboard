@@ -744,6 +744,60 @@ return cols;
 // simpler and still correct. Only the line STYLE (solid/dashed/dotted,
 // FLOW_DASH_BY_KIND below) and label vary by kind -- purely cosmetic,
 // since a given view only ever shows one kind at a time (FLOW_MODES).
+// Must match .flow-column's own CSS `gap` so a staggered run's rhythm
+// looks identical to a column's ordinary card spacing.
+const FLOW_COLUMN_GAP = 28;
+// "Far fewer than in other columns", per the user's own wording -- not
+// literally "less than the max" (a column with 4 next to one with 5
+// isn't meaningfully sparse), a real fraction of it.
+const SPARSE_HEIGHT_FRACTION = 0.5;
+
+// Confirmed by a real screenshot: a column with just one or two cards
+// (Krak, First Direct) next to a much busier one (5 accounts) was
+// independently centred across the FULL diagram height -- flexbox
+// align-items:center gives every column the SAME centre line, so a
+// lone card just floats in a sea of blank space with a long line to
+// reach its edge partner. Fix, run as a post-pass AFTER the columns
+// are in the DOM (needs their real rendered heights): a maximal run of
+// CONSECUTIVE sparse columns is staggered top-to-bottom as a group --
+// column i (furthest from the dense column) highest, the next one
+// below it, and so on -- rather than each independently centred on the
+// same line. The whole staggered group is still centred together on
+// the diagram's own midline (that's the point of using
+// getBoundingClientRect for the actual heights, not a guess). A
+// deliberate exception to keeping arrows exactly horizontal for this
+// one case, per feedback -- a short edge ending up slightly diagonal
+// matters less than a lone card wasting most of the diagram's height.
+// Achieved with a `margin-top` DELTA on top of the existing centred
+// position (not an absolute override) -- flexbox is still doing the
+// real layout, this just nudges it.
+function applySparseColumnStagger(container) {
+const colEls = [...container.querySelectorAll('.flow-column')];
+colEls.forEach((el) => { el.style.marginTop = ''; }); // always reset before recomputing -- a rebuilt diagram starts from a clean slate, never compounds a prior run's offsets
+if (colEls.length < 2) return;
+const heights = colEls.map((el) => el.getBoundingClientRect().height);
+const maxHeight = Math.max(...heights);
+let i = 0;
+while (i < colEls.length) {
+if (heights[i] >= maxHeight * SPARSE_HEIGHT_FRACTION) { i += 1; continue; }
+let j = i;
+while (j < colEls.length && heights[j] < maxHeight * SPARSE_HEIGHT_FRACTION) j += 1;
+if (j - i > 1) {
+const runHeights = heights.slice(i, j);
+const combinedHeight = runHeights.reduce((s, h) => s + h, 0) + (j - i - 1) * FLOW_COLUMN_GAP;
+const startY = (maxHeight - combinedHeight) / 2;
+let cumulative = 0;
+for (let k = i; k < j; k += 1) {
+const desiredTop = startY + cumulative;
+const defaultTop = (maxHeight - heights[k]) / 2; // where align-items:center already put it
+colEls[k].style.marginTop = `${desiredTop - defaultTop}px`;
+cumulative += heights[k] + FLOW_COLUMN_GAP;
+}
+}
+i = j;
+}
+}
+
 const FLOW_DASH_BY_KIND = { funding: '', cass: 'stroke-dasharray="5 3"', 'balance-transfer': 'stroke-dasharray="1.5 3"' };
 function drawFlowLines(mode) {
 const container = document.getElementById('account-flow-diagram');
@@ -919,6 +973,7 @@ if (countEl) countEl.textContent = data.financeAccounts.length + (data.financeAc
 if (flowMount) {
 flowMount.innerHTML = flowDiagramHtml();
 bindLogoFallbacks(flowMount);
+applySparseColumnStagger(flowMount);
 // A flow card is a reference to the real account row below, same as
 // every other record reference in this app links back to its record
 // (CLAUDE.md's record-reference standards) -- easy to miss here since
