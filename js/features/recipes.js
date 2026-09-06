@@ -3,10 +3,10 @@
 // list — Taste/Health/Prep by default — not the same list, just the same
 // idea), with an occasional nudge to actually cook one of them.
 import { data, queueSave, DEFAULT_RECIPE_RATING_CATEGORIES, slugifyField, averageRating } from '../state.js';
-import { photoDelete, photoGet } from '../db.js';
-import { escapeHtml, uid, todayStr, resizeImageToBlob } from '../utils.js';
+import { photoDelete, photoGet, photoUrl } from '../db.js';
+import { escapeHtml, uid, todayStr, resizeImageToBlob, openLightbox } from '../utils.js';
 import { MissingKeyError, extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml } from '../ai.js';
-import { storePhoto } from '../files.js';
+import { storePhoto, uploadAttachment, deleteAttachment, openAttachment, formatBytes } from '../files.js';
 import { getConfig } from '../sync/selfhost.js';
 
 // ---- web import: structured data first, AI as a fallback ----
@@ -84,7 +84,12 @@ return { ...ai, sourceKind: 'web (AI-read)' };
 
 // ---- capture + review ----
 
-let pending = null; // {name, ingredients, instructions, notes, sourceKind, sourceUrl}
+// {name, ingredients, instructions, notes, sourceKind, sourceUrl, sourceFile}
+// -- sourceFile (the raw File, photo/PDF imports only) is held here in
+// memory just long enough to upload once Save is actually clicked; nothing
+// is stored until the user confirms the extracted text, same as the text
+// fields themselves are only committed on save.
+let pending = null;
 
 function renderReview() {
 const el = document.getElementById('recipe-review');
@@ -105,15 +110,31 @@ document.getElementById('recipe-review-save').addEventListener('click', saveRevi
 document.getElementById('recipe-review-discard').addEventListener('click', () => { pending = null; renderReview(); });
 }
 
-function saveReview() {
+async function saveReview() {
 const name = document.getElementById('recipe-review-name').value.trim();
 if (!name) return;
+const saveBtn = document.getElementById('recipe-review-save');
+saveBtn.disabled = true;
+// The original the recipe was read FROM -- kept alongside the extracted
+// text, not instead of it, so a garbled ingredient can be checked
+// against the real thing later. A web import already had its own url
+// (pending.sourceUrl); a photo/PDF import only had the file transiently,
+// for the AI read -- storePhoto/uploadAttachment are the same paths a
+// recipe's own dish photos and a task's attachments already go through.
+const source = { kind: pending.sourceKind, url: pending.sourceUrl || '', photoId: '', attachment: null };
+if (pending.sourceFile && pending.sourceKind === 'a photo') {
+setStatus('Saving the original photo…');
+try { source.photoId = await storePhoto(pending.sourceFile); } catch (err) { console.error('Keeping the source photo failed:', err); }
+} else if (pending.sourceFile && pending.sourceKind === 'a PDF') {
+setStatus('Saving the original PDF…');
+try { source.attachment = await uploadAttachment(pending.sourceFile); } catch (err) { console.error("Keeping the source PDF failed:", err); }
+}
 const recipe = {
 id: uid(), name,
 ingredients: document.getElementById('recipe-review-ingredients').value.split('\n').map((s) => s.trim()).filter(Boolean),
 instructions: document.getElementById('recipe-review-instructions').value.split('\n').map((s) => s.trim()).filter(Boolean),
 notes: document.getElementById('recipe-review-notes').value.trim(),
-source: { kind: pending.sourceKind, url: pending.sourceUrl || '' },
+source,
 photoId: null, photoIds: [], photoAlbums: [], ratings: {}, tags: [],
 createdAt: new Date().toISOString(), lastMade: '',
 };
@@ -122,6 +143,7 @@ pending = null;
 renderReview();
 renderRecipes();
 queueSave();
+setStatus('');
 }
 
 function setStatus(msg) {
@@ -134,6 +156,7 @@ const photoInput = document.getElementById('recipe-photo-input');
 const pdfInput = document.getElementById('recipe-pdf-input');
 const urlInput = document.getElementById('recipe-url-input');
 const urlBtn = document.getElementById('recipe-url-btn');
+const manualBtn = document.getElementById('recipe-manual-btn');
 if (!photoInput) return;
 
 photoInput.addEventListener('change', async (e) => {
@@ -143,7 +166,7 @@ if (!file) return;
 setStatus('Reading the photo…');
 try {
 const extract = await extractRecipeFromImage(file);
-pending = { ...extract, sourceKind: 'a photo' };
+pending = { ...extract, sourceKind: 'a photo', sourceFile: file };
 renderReview();
 setStatus('');
 } catch (err) {
@@ -158,7 +181,7 @@ if (!file) return;
 setStatus('Reading the PDF…');
 try {
 const extract = await extractRecipeFromPdf(file);
-pending = { ...extract, sourceKind: 'a PDF' };
+pending = { ...extract, sourceKind: 'a PDF', sourceFile: file };
 renderReview();
 setStatus('');
 } catch (err) {
@@ -179,6 +202,15 @@ urlInput.value = '';
 } catch (err) {
 setStatus(err instanceof MissingKeyError ? 'Add an Anthropic API key in Settings first.' : `Couldn't import that: ${err.message || err}`);
 }
+});
+
+// No file, no URL -- a recipe typed (or pasted) straight in, e.g. a
+// family recipe with no real "source" at all. Reuses the exact same
+// review form every other capture path lands on rather than a separate
+// blank-entry UI, since that form is already a plain editable draft.
+manualBtn.addEventListener('click', () => {
+pending = { name: '', ingredients: [], instructions: [], notes: '', sourceKind: 'typed in manually' };
+renderReview();
 });
 }
 
@@ -213,6 +245,24 @@ ${open ? recipeDetailHtml(r) : ''}
 </div>`;
 }
 
+// The actual photo/PDF/page the recipe was read FROM, kept alongside the
+// extracted text (see saveReview) so a garbled ingredient can be checked
+// against the original later -- distinct from r.photoIds (the Photo
+// section above, photos OF the finished dish). Nothing to show for a
+// manually typed-in recipe, which has none of the three.
+function recipeSourceHtml(r) {
+const source = r.source || {};
+if (!source.url && !source.photoId && !source.attachment) return '';
+const parts = [];
+if (source.url) parts.push(`<a href="${escapeHtml(source.url)}" target="_blank" rel="noopener" style="font-size:12px;color:var(--rose);">Open original page &#8599;</a>`);
+if (source.photoId) parts.push(`<span class="thumb-img" data-view-photo="${escapeHtml(source.photoId)}" data-photo-bg="${escapeHtml(source.photoId)}" style="width:52px;height:52px;border-radius:8px;cursor:pointer;flex:0 0 auto;"></span>`);
+if (source.attachment) parts.push(`<span class="inline-goto-link" data-recipe-source-pdf="${r.id}">Open original PDF (${escapeHtml(formatBytes(source.attachment.size))})</span>`);
+return `<div class="field-block full">
+<span class="field-label">Original source${source.kind ? ` — from ${escapeHtml(source.kind)}` : ''}</span>
+<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">${parts.join('')}</div>
+</div>`;
+}
+
 function recipeDetailHtml(r) {
 // Photo comes right after Name now, not buried below Ratings -- it's a
 // direct upload (resizeImageToBlob + storePhoto, same as a task's own
@@ -237,6 +287,7 @@ ${r.photoIds.map((id, i) => `<div class="gallery-thumb"><span class="thumb-img" 
 <label class="full">Google Photos album <span class="settings-note">Optional — for a bigger set (the occasion it was made for, several attempts...), not needed just for a quick single photo above</span>
 <input type="text" autocomplete="off" placeholder="https://photos.google.com/album/…" data-recipe-album="${r.id}" value="${escapeHtml((r.photoAlbums[0] || {}).url || '')}"></label>
 ${(r.photoAlbums[0] || {}).url ? `<div class="full"><a href="${escapeHtml(r.photoAlbums[0].url)}" target="_blank" rel="noopener" style="font-size:12px;color:var(--rose);">Open album &#8599;</a></div>` : ''}
+${recipeSourceHtml(r)}
 <div class="field-block full">
 <span class="field-label">Ratings</span>
 <div class="ratings-block">${data.recipeRatingCategories.map(({ field, label }) => recipeRatingStars(label, field, r.id, (r.ratings && r.ratings[field]) || 0)).join('')}</div>
@@ -352,6 +403,18 @@ r.photoAlbums = url ? [{ url, cover: '', title: r.name }] : [];
 queueSave();
 });
 });
+el.querySelectorAll('[data-view-photo]').forEach((el2) => {
+el2.addEventListener('click', async () => {
+const url = await photoUrl(el2.dataset.viewPhoto);
+if (url) openLightbox(url);
+});
+});
+el.querySelectorAll('[data-recipe-source-pdf]').forEach((el2) => {
+el2.addEventListener('click', () => {
+const r = data.recipes.find((x) => x.id === el2.dataset.recipeSourcePdf);
+if (r && r.source && r.source.attachment) openAttachment(r.source.attachment).catch((err) => alert(err.message || String(err)));
+});
+});
 el.querySelectorAll('[data-recipe-rate]').forEach((star) => {
 star.addEventListener('click', () => {
 const r = data.recipes.find((x) => x.id === star.dataset.recipeRate);
@@ -377,6 +440,9 @@ const r = data.recipes.find((rec) => rec.id === x.dataset.recipeDel);
 if (!r) return;
 if (!confirm(`Delete "${r.name}"? This can't be undone.`)) return;
 for (const pid of r.photoIds) await photoDelete(pid).catch(() => {});
+const source = r.source || {};
+if (source.photoId) await photoDelete(source.photoId).catch(() => {});
+if (source.attachment) await deleteAttachment(source.attachment.id).catch(() => {});
 data.recipes = data.recipes.filter((rec) => rec.id !== r.id);
 renderRecipes();
 queueSave();
