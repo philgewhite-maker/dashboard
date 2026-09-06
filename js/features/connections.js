@@ -968,10 +968,20 @@ const notesFieldHtml = notesHasHits
 <textarea rows="2" data-field="notes" data-conn-detail="${c.id}">${escapeHtml(c.notes || '')}</textarea>
 </details></div>`
 : `<label class="full">Notes<textarea rows="2" data-field="notes" data-conn-detail="${c.id}">${escapeHtml(c.notes || '')}</textarea></label>`;
-// One entry per identity row that actually carries a transcript -- can be
-// more than one per platform now (two Tinder match ids), unlike the old
-// three-scalar model which could only ever have one thread per platform.
-const chatSources = (c.identities || []).filter((r) => String(r.chatLog || '').trim());
+// Every identity row -- not just the ones that already have a
+// transcript. A row added specifically to receive a recovered/pasted
+// chat (the "+ Add platform identity" flow, used right after adding a
+// defunct old match id back on) starts out with an EMPTY chatLog and
+// still needs a box to paste into -- confirmed live as a real gap: the
+// only boxes shown used to be for rows that already had text, so a
+// freshly-added empty identity had nowhere to receive anything at all.
+const allIdentities = c.identities || [];
+// The read-only merged view and its icon row only care about threads
+// that actually have something to show -- an empty row contributes
+// nothing there, same as before. Can be more than one per platform now
+// (two Tinder match ids), unlike the old three-scalar model which could
+// only ever hold one thread per platform.
+const chatSources = allIdentities.filter((r) => String(r.chatLog || '').trim());
 // Merging and highlighting a chat history is real work for a long
 // conversation (a genuinely active WhatsApp thread can run thousands of
 // lines) -- and this whole field sits inside the collapsible Details
@@ -995,24 +1005,32 @@ const mergedLines = mergedChatLines(c);
 const multiSource = chatSources.length > 1;
 // Two threads can share the same platform now (Violeta's exact case: two
 // Tinder match ids) -- only THOSE need a handle/match-id suffix to tell
-// apart; a lone thread on a platform just shows the platform name.
-const platformCounts = chatSources.reduce((m, r) => { m[r.platform] = (m[r.platform] || 0) + 1; return m; }, {});
+// apart; a lone thread on a platform just shows the platform name. Worked
+// out across EVERY identity, not just the ones with text -- a lone
+// existing Tinder thread plus a freshly-added, still-empty second Tinder
+// identity need telling apart the moment either has anything typed in.
+const platformCounts = allIdentities.reduce((m, r) => { m[r.platform] = (m[r.platform] || 0) + 1; return m; }, {});
 const threadLabel = (r) => platformCounts[r.platform] > 1 ? `${r.platform} (${r.handle || r.matchId || 'thread'})` : r.platform;
 const chatSourceRow = multiSource
 ? `<div class="icon-row" style="margin:0 0 6px;">${chatSources.map((r) => iconSpan((SOURCE_ICONS[r.platform] || SOURCE_ICONS.Other).icon, `${threadLabel(r)} chat`, (SOURCE_ICONS[r.platform] || SOURCE_ICONS.Other).cls)).join('')}</div>`
 : '';
+// One box per identity, always -- including the ones with nothing typed
+// in yet, so adding a platform identity specifically to receive a
+// recovered transcript actually gives you somewhere to paste it. Falls
+// back to one generic box only when there's no identity at all yet
+// (creates its own first identity on save -- see the
+// data-identity-chat="__new__" handling in bindConnectionEvents).
+const editorsHtml = allIdentities.length
+? allIdentities.map((r) => `<div class="settings-note" style="margin:6px 0 2px;">${escapeHtml(threadLabel(r))}${r.chatLog ? '' : ' — nothing pasted in yet'}</div><textarea rows="4" placeholder="One message per line" data-identity-chat="${r.id}" data-conn-detail="${c.id}">${escapeHtml(r.chatLog || '')}</textarea>`).join('')
+: `<textarea rows="4" placeholder="Imported from Tinder — one message per line" data-identity-chat="__new__" data-conn-detail="${c.id}"></textarea>`;
 chatFieldHtml = mergedLines.length
 ? `<div class="field-block full"><span class="field-label">Chat history</span>
 ${chatSourceRow}
 <div class="tinder-chat-block" style="margin:0;">${chatTranscriptHtml(mergedLines, matcher, multiSource ? SOURCE_ICONS : null)}</div>
 <details class="tinder-edit-details"><summary>Edit raw text</summary>
-${chatSources.map((r) => `<div class="settings-note" style="margin:6px 0 2px;">${escapeHtml(threadLabel(r))}</div><textarea rows="4" placeholder="One message per line" data-identity-chat="${r.id}" data-conn-detail="${c.id}">${escapeHtml(r.chatLog)}</textarea>`).join('')}
+${editorsHtml}
 </details></div>`
-// No thread has any text yet -- a fresh manual paste creates its own new
-// identity row on first save (see the data-identity-chat="__new__"
-// handling in bindConnectionEvents) rather than having anywhere existing
-// to land, so it can never collide with a thread imported later.
-: `<label class="full">Chat history<textarea rows="4" placeholder="Imported from Tinder — one message per line" data-identity-chat="__new__" data-conn-detail="${c.id}"></textarea></label>`;
+: `<div class="field-block full"><span class="field-label">Chat history</span>${editorsHtml}</div>`;
 }
 return `<div class="match-card" data-conn-row="${c.id}">
 <div class="match-row">
