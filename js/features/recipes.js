@@ -641,12 +641,26 @@ if (subEntry) { entry = subEntry; label += ` &rarr; using substitute: ${escapeHt
 // isn't, since that ambiguity is itself worth surfacing rather than
 // guessing past.
 const whole = line.quantity != null ? `${line.quantity}${escapeHtml(line.unit)}` : null;
-const perPortion = whole && r.servings ? `${(line.quantity / r.servings).toFixed(1)}${escapeHtml(line.unit)}` : null;
+const perPortionQty = whole && r.servings ? line.quantity / r.servings : (line.quantity != null ? line.quantity : null);
+const perPortion = whole && r.servings ? `${perPortionQty.toFixed(1)}${escapeHtml(line.unit)}` : null;
 const used = !whole ? escapeHtml(line.notes || 'amount not specified')
 : perPortion ? `${perPortion} per portion (${whole} across all ${r.servings})`
 : `${whole} across the whole recipe — set Servings above for a per-portion figure`;
+// A rating is only as useful as the amount it's actually FOR -- a spice
+// used in fractions of a teaspoon rated per 100g (confirmed live: sweet
+// paprika, 0.3tsp, rated "moderate" per 100g -- 100g of paprika isn't a
+// realistic amount in any dish) makes the rating essentially noise.
+// Only computed when the units actually match (never guess a cross-unit
+// conversion); a hedged, not asserted, read on how far off the scale is
+// -- this app doesn't know the real per-food threshold curve, only that
+// a rating for 30-50x the amount actually used deserves real scepticism.
+let scaleNote = '';
+if (perPortionQty != null && line.unit && entry.unitBasis.unit && line.unit.trim().toLowerCase() === entry.unitBasis.unit.trim().toLowerCase() && entry.unitBasis.quantity > 0) {
+const pct = (perPortionQty / entry.unitBasis.quantity) * 100;
+scaleNote = ` (${pct < 1 ? '<1' : pct.toFixed(0)}% of that amount${pct < 10 ? ' — probably an overestimate at this little' : ''})`;
+}
 return `<div style="padding:4px 0;border-top:1px solid var(--line);">
-<div style="font-size:12px;">${label} — ${used}, rated per ${entry.unitBasis.quantity}${escapeHtml(entry.unitBasis.unit)}</div>
+<div style="font-size:12px;">${label} — ${used}, rated per ${entry.unitBasis.quantity}${escapeHtml(entry.unitBasis.unit)}${scaleNote}</div>
 <div>${fodmapRowHtml(entry.fodmap)}</div>
 </div>`;
 }).join('');
@@ -1100,16 +1114,46 @@ queueSave();
 });
 });
 el.querySelectorAll('[data-recipe-sub-toggle]').forEach((cb) => {
-cb.addEventListener('change', () => {
+cb.addEventListener('change', async () => {
 const id = cb.dataset.recipeSubToggle;
 const idx = parseInt(cb.dataset.subIdx, 10);
 if (!substituteToggles.has(id)) substituteToggles.set(id, new Set());
 const set = substituteToggles.get(id);
-if (cb.checked) set.add(idx); else set.delete(idx);
-// Only the diet section's own numbers need to change here -- flipping
-// a toggle is pure arithmetic over cached figures (computeRecipeDiet),
-// never an AI call, so this can safely re-render immediately.
+if (!cb.checked) {
+set.delete(idx);
 renderRecipes();
+return;
+}
+set.add(idx);
+// Flipping the toggle is pure arithmetic over cached figures
+// (computeRecipeDiet) ONLY once the substitute has its OWN reference
+// entry -- the first time a given substitute is ever toggled on,
+// nothing has assessed IT yet (only the original ingredient gets
+// assessed by "Analyse ingredients"). Confirmed live as a real bug:
+// the toggle just silently did nothing, since computeRecipeDiet only
+// swaps in a substitute's entry when one already exists. Same
+// busy-indicator treatment as Parse/Analyse -- this is a real AI call
+// the first time, not instant.
+const r = data.recipes.find((x) => x.id === id);
+const line = r && r.ingredientData[idx];
+const entry = line && findReferenceEntry(line.name, line.form);
+const sub = entry && entry.subs && entry.subs[0];
+if (sub && !findReferenceEntry(sub.name, '')) {
+busyIngredientAction.set(id, `Assessing substitute: ${sub.name}…`);
+renderRecipes();
+try {
+await ensureReferenceEntry(sub.name, '');
+} catch (err) {
+setStatus(err instanceof MissingKeyError ? 'Add an Anthropic API key in Settings first.' : `Couldn't assess that substitute: ${err.message || err}`);
+set.delete(idx);
+cb.checked = false; // revert -- a toggle left "on" but unresolved would look identical to a fixed bug
+} finally {
+busyIngredientAction.delete(id);
+}
+renderIngredientReference();
+}
+renderRecipes();
+queueSave();
 });
 });
 el.querySelectorAll('[data-recipe-rate]').forEach((star) => {

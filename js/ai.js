@@ -843,7 +843,7 @@ return `Assess this single food ingredient: "${name}"${form ? ` (${form})` : ''}
 + '"nutrition":{"calories":0,"protein":0,"carbs":0,"sugars":0,"fat":0,"saturates":0,"fibre":0,"salt":0}, '
 + '"fodmap":{"fructans":"none","gos":"none","lactose":"none","excessFructose":"none","polyols":"none"}, '
 + '"allergens":[], "subs":[{"name":"","note":""}]}. '
-+ 'unitBasis: whatever this ingredient is naturally measured in -- {"quantity":100,"unit":"g"} for most things, or a countable unit like {"quantity":1,"unit":"clove"} / {"quantity":1,"unit":"medium"} for produce typically counted rather than weighed. '
++ 'unitBasis: pick an amount close to how much of this a person actually uses in ONE dish, not a fixed default -- {"quantity":100,"unit":"g"} for a vegetable, meat, or other ingredient normally used in bulk; a countable unit like {"quantity":1,"unit":"clove"} / {"quantity":1,"unit":"medium"} for produce typically counted rather than weighed; but for anything used in small, potent amounts -- a spice, herb, stock cube, extract, seasoning -- use ITS typical amount instead ({"quantity":1,"unit":"tsp"}, {"quantity":1,"unit":"clove"}, {"quantity":1,"unit":"cube"}...), never 100g of something no dish would ever contain 100g of. '
 + 'nutrition: standard nutrition-label figures, PER unitBasis. '
 + `fodmap: PER unitBasis, EVERY one of fructans/gos/lactose/excessFructose/polyols rated one of ${JSON.stringify(FODMAP_LEVELS)} -- don't omit any, even if "none". `
 + `allergens: which of these EXACT strings this ingredient contains, as a subset of ${JSON.stringify(ALLERGEN_LIST)} -- [] if none apply. `
