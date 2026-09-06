@@ -250,7 +250,23 @@ let referencePanelCollapsed = true;
 // substituted version of a recipe" free -- flipping a toggle just
 // re-sums already-cached numbers (computeRecipeDiet), no AI call.
 const substituteToggles = new Map();
+// recipeId -> a short "what's happening" string, shown IN PLACE of the
+// Parse/Analyse link itself (not just the top status bar, which sits far
+// from a card scrolled down the list and is easy to miss entirely --
+// confirmed live: "is it dead or slow, or did I not actually click it").
+// Every AI-calling action sets this before its first await and clears it
+// in a finally, so a click always gets an immediate, visible reaction.
+const busyIngredientAction = new Map();
+function ingredientBusyHtml(r) {
+const msg = busyIngredientAction.get(r.id);
+return msg ? `<div class="full"><span class="settings-note">⏳ ${escapeHtml(msg)}</span></div>` : '';
+}
 let expandedDiet = new Set(); // recipe ids currently showing their diet section
+// Recipe ids currently showing their parsed-ingredients table -- added to
+// automatically right when a parse finishes (see runParseIngredients'
+// callers), so a mis-parse is visible immediately, before it feeds into
+// any totals; collapsible afterward once it's been checked over.
+let expandedIngredientData = new Set();
 
 // A handful of common categories to suggest right away (a main
 // ingredient, a cooking style, an occasion...) -- ordinary starting
@@ -453,10 +469,16 @@ userEdited: false,
 async function analyseIngredients(recipeId) {
 const r = data.recipes.find((x) => x.id === recipeId);
 if (!r) return;
-setStatus('Reading the ingredients…');
+// Set BEFORE the first await and render immediately -- a click needs a
+// visible reaction right away, not whenever the eventual status text
+// happens to reach the top status bar (which sits far from a card
+// scrolled down the list, easy to miss entirely).
+busyIngredientAction.set(r.id, 'Reading the ingredients…');
+renderRecipes();
 try {
 if (!r.ingredientsParsedAt || r.ingredientsSignature !== ingredientsSignatureOf(r.ingredients)) {
 await runParseIngredients(r);
+expandedIngredientData.add(r.id);
 }
 const seen = new Set();
 const toAssess = [];
@@ -468,12 +490,14 @@ seen.add(key);
 toAssess.push(line);
 });
 for (let i = 0; i < toAssess.length; i += 1) {
-setStatus(`Assessing ${toAssess[i].name}… (${i + 1}/${toAssess.length})`);
+busyIngredientAction.set(r.id, `Assessing ${toAssess[i].name}… (${i + 1}/${toAssess.length})`);
+renderRecipes();
 await ensureReferenceEntry(toAssess[i].name, toAssess[i].form);
 }
-setStatus('');
 } catch (err) {
 setStatus(err instanceof MissingKeyError ? 'Add an Anthropic API key in Settings first.' : `Couldn't analyse that: ${err.message || err}`);
+} finally {
+busyIngredientAction.delete(r.id);
 }
 renderRecipes();
 renderIngredientReference();
@@ -517,9 +541,40 @@ return { totals, fodmap, allergens: [...allergens] };
 }
 
 function recipeIngredientsStatusHtml(r) {
+if (busyIngredientAction.has(r.id)) return ingredientBusyHtml(r);
 if (!r.ingredientsParsedAt) return `<div class="full"><span class="inline-goto-link" data-recipe-parse="${r.id}">Parse ingredients</span></div>`;
 if (r.ingredientsSignature !== ingredientsSignatureOf(r.ingredients)) return `<div class="full"><span class="inline-goto-link" data-recipe-parse="${r.id}">Ingredients changed since last parse — re-parse</span></div>`;
 return '';
+}
+
+// The actual structured read-back of every ingredient line -- shown (and
+// editable) so a mis-parse ("2 cloves garlic" read as quantity 2 unit
+// "tsp", say) can be caught and fixed by hand BEFORE it ever feeds into
+// a reference lookup or a summed total, rather than silently propagating.
+// Editing a field here only touches ingredientData, never the free-text
+// Ingredients textarea or its signature -- a manual correction isn't
+// "stale" relative to the text it came from, it's a correction of how
+// that text was read, and stays put across renders.
+function recipeParsedIngredientsHtml(r) {
+if (!r.ingredientsParsedAt) return '';
+const open = expandedIngredientData.has(r.id);
+const rows = r.ingredientData.map((line, i) => `
+<div class="idea-row" style="padding:6px 0;">
+<div class="tinder-fields" style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:6px;">
+<input type="text" placeholder="name" data-ingdata-field="name" data-ingdata-recipe="${r.id}" data-ingdata-idx="${i}" value="${escapeHtml(line.name)}">
+<input type="text" placeholder="form" data-ingdata-field="form" data-ingdata-recipe="${r.id}" data-ingdata-idx="${i}" value="${escapeHtml(line.form)}">
+<input type="number" step="any" placeholder="qty" data-ingdata-field="quantity" data-ingdata-recipe="${r.id}" data-ingdata-idx="${i}" value="${line.quantity != null ? line.quantity : ''}">
+<input type="text" placeholder="unit" data-ingdata-field="unit" data-ingdata-recipe="${r.id}" data-ingdata-idx="${i}" value="${escapeHtml(line.unit)}">
+</div>
+<div class="settings-note" style="margin-top:2px;">from: “${escapeHtml(r.ingredients[i] || '')}”${line.notes ? ` · ${escapeHtml(line.notes)}` : ''}</div>
+</div>`).join('');
+return `<div class="full">
+<button class="overview-panel-toggle" type="button" data-recipe-ingdata-toggle="${r.id}">${open ? '▾ Hide parsed ingredients' : '▸ Show parsed ingredients'}</button>
+${open ? `<div style="margin-top:4px;">
+<div class="tinder-fields" style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:6px;"><span class="field-label">Name</span><span class="field-label">Form</span><span class="field-label">Qty</span><span class="field-label">Unit</span></div>
+${rows || '<div class="empty">Nothing parsed.</div>'}
+</div>` : ''}
+</div>`;
 }
 
 // One row per parsed ingredient with a substitute on file -- the toggle
@@ -556,6 +611,7 @@ return ALLERGEN_LIST.map((a) => `<span class="pick-chip${present.includes(a) ? '
 // AND every line resolves -- the load-bearing requirement that a recipe
 // nobody's touched this feature on looks exactly like it always did.
 function recipeDietHtml(r) {
+if (busyIngredientAction.has(r.id)) return ''; // recipeIngredientsStatusHtml already shows the busy indicator, right above this
 if (!r.ingredientsParsedAt) return '';
 const diet = computeRecipeDiet(r);
 if (!diet) return `<div class="full"><span class="inline-goto-link" data-recipe-analyse="${r.id}">Analyse ingredients</span></div>`;
@@ -710,6 +766,7 @@ ${recipeCategoryPickersHtml(r)}
 ${recipeTagsHtml(r)}
 <label class="full">Ingredients (one per line)<textarea rows="6" data-recipe-field="ingredients" data-recipe-id="${r.id}">${escapeHtml(r.ingredients.join('\n'))}</textarea></label>
 ${recipeIngredientsStatusHtml(r)}
+${recipeParsedIngredientsHtml(r)}
 ${recipeDietHtml(r)}
 <label class="full">Instructions (one step per line)<textarea rows="8" data-recipe-field="instructions" data-recipe-id="${r.id}">${escapeHtml(r.instructions.join('\n'))}</textarea></label>
 <label class="full">Notes<textarea rows="2" data-recipe-field="notes" data-recipe-id="${r.id}">${escapeHtml(r.notes || '')}</textarea></label>
@@ -934,9 +991,19 @@ el.querySelectorAll('[data-recipe-parse]').forEach((link) => {
 link.addEventListener('click', async () => {
 const r = data.recipes.find((x) => x.id === link.dataset.recipeParse);
 if (!r) return;
-setStatus('Reading the ingredients…');
-try { await runParseIngredients(r); setStatus(''); } catch (err) {
+busyIngredientAction.set(r.id, 'Reading the ingredients…');
+renderRecipes();
+try {
+await runParseIngredients(r);
+// Opens automatically right when a fresh parse lands, so a mis-parse
+// is visible immediately rather than needing a second click to reveal
+// it -- exactly the "I need to see the parsed ingredients... before it
+// feeds into more analysis" ask this was built for.
+expandedIngredientData.add(r.id);
+} catch (err) {
 setStatus(err instanceof MissingKeyError ? 'Add an Anthropic API key in Settings first.' : `Couldn't parse that: ${err.message || err}`);
+} finally {
+busyIngredientAction.delete(r.id);
 }
 renderRecipes();
 queueSave();
@@ -950,6 +1017,34 @@ btn.addEventListener('click', () => {
 const id = btn.dataset.recipeDietToggle;
 if (expandedDiet.has(id)) expandedDiet.delete(id); else expandedDiet.add(id);
 renderRecipes();
+});
+});
+el.querySelectorAll('[data-recipe-ingdata-toggle]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const id = btn.dataset.recipeIngdataToggle;
+if (expandedIngredientData.has(id)) expandedIngredientData.delete(id); else expandedIngredientData.add(id);
+renderRecipes();
+});
+});
+el.querySelectorAll('[data-ingdata-field]').forEach((input) => {
+input.addEventListener('change', () => {
+const r = data.recipes.find((x) => x.id === input.dataset.ingdataRecipe);
+if (!r) return;
+const line = r.ingredientData[parseInt(input.dataset.ingdataIdx, 10)];
+if (!line) return;
+const field = input.dataset.ingdataField;
+if (field === 'quantity') {
+const v = parseFloat(input.value);
+line.quantity = Number.isFinite(v) ? v : null;
+} else {
+line[field] = input.value.trim();
+}
+// A hand-fix here only corrects how a line was READ, not the line
+// itself -- deliberately doesn't touch r.ingredients or
+// r.ingredientsSignature, so this never shows as "stale" relative to
+// the free text it came from.
+renderRecipes();
+queueSave();
 });
 });
 el.querySelectorAll('[data-recipe-sub-toggle]').forEach((cb) => {
