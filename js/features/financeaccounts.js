@@ -829,10 +829,11 @@ return cols;
 // one hop -- confirmed live (a real screenshot): "Krak" funding
 // "First Direct" funding 5 real accounts drew Krak and First Direct
 // each in their OWN column, both mostly blank space either side of
-// one small card. Per feedback, staggering their ROW position (see
-// applySparseColumnStagger) saves vertical space but none of the
-// horizontal space that was the actual complaint -- this collapses
-// such a chain into ONE column, stacked top to bottom, instead.
+// one small card. Per feedback, staggering their ROW position (an
+// earlier version of the column-alignment pass further below) saves
+// vertical space but none of the horizontal space that was the actual
+// complaint -- this collapses such a chain into ONE column, stacked
+// top to bottom, instead.
 // Cascades naturally (a funding-source dot -> Krak -> First Direct
 // all collapse into one column, dot on top) since the scan restarts
 // after every merge, and checks the LAST node of an already-merged
@@ -892,57 +893,53 @@ return { columns: cols, edges: edges.filter((e) => !mergedPairs.has(`${e.from}>$
 // simpler and still correct. Only the line STYLE (solid/dashed/dotted,
 // FLOW_DASH_BY_KIND below) and label vary by kind -- purely cosmetic,
 // since a given view only ever shows one kind at a time (FLOW_MODES).
-// Must match .flow-column's own CSS `gap` so a staggered run's rhythm
-// looks identical to a column's ordinary card spacing.
-const FLOW_COLUMN_GAP = 28;
-// "Far fewer than in other columns", per the user's own wording -- not
-// literally "less than the max" (a column with 4 next to one with 5
-// isn't meaningfully sparse), a real fraction of it.
-const SPARSE_HEIGHT_FRACTION = 0.5;
 
-// Confirmed by a real screenshot: a column with just one or two cards
-// (Krak, First Direct) next to a much busier one (5 accounts) was
-// independently centred across the FULL diagram height -- flexbox
-// align-items:center gives every column the SAME centre line, so a
-// lone card just floats in a sea of blank space with a long line to
-// reach its edge partner. Fix, run as a post-pass AFTER the columns
-// are in the DOM (needs their real rendered heights): a maximal run of
-// CONSECUTIVE sparse columns is staggered top-to-bottom as a group --
-// column i (furthest from the dense column) highest, the next one
-// below it, and so on -- rather than each independently centred on the
-// same line. The whole staggered group is still centred together on
-// the diagram's own midline (that's the point of using
-// getBoundingClientRect for the actual heights, not a guess). A
-// deliberate exception to keeping arrows exactly horizontal for this
-// one case, per feedback -- a short edge ending up slightly diagonal
-// matters less than a lone card wasting most of the diagram's height.
-// Achieved with a `margin-top` DELTA on top of the existing centred
-// position (not an absolute override) -- flexbox is still doing the
-// real layout, this just nudges it.
-function applySparseColumnStagger(container) {
+// Confirmed live, via the diagram's own debug hook (window.__flowDebug,
+// below) rather than guessed from a screenshot a second time: row ORDER
+// was already correct (the top source's dead-end target really was row 0
+// of the next column) -- what was actually wrong is that flexbox's
+// `align-items:center` on .flow-columns centres every column
+// INDEPENDENTLY, each on the SAME line, regardless of how tall its own
+// content is. A column of mostly small dots is much shorter than a
+// column of full-size cards next to it, so centering it put its row 0
+// well below the tall column's row 0 -- "everything pulled to the
+// centre", per feedback, and exactly why a correctly-ordered top item
+// still didn't render near the top.
+//
+// Previously fixed only for a special case (a maximal RUN of 2+
+// consecutive sparse columns, staggered as a group) -- too narrow: a
+// single short column next to normal ones, which is the common case,
+// still got plain independent centering. Replaced with the general
+// rule the ordering pass itself already promises: column i's row 0
+// aligns with column (i-1)'s row 0, column i's own actual rendered
+// position (not a guess), cascading left to right so each column reads
+// off its LEFT neighbour's real, already-adjusted position. Column 0
+// has no left neighbour and keeps flexbox's own centering -- it's the
+// one anchor everything else lines up against.
+function alignFlowColumnsToPriorRow(container) {
 const colEls = [...container.querySelectorAll('.flow-column')];
 colEls.forEach((el) => { el.style.marginTop = ''; }); // always reset before recomputing -- a rebuilt diagram starts from a clean slate, never compounds a prior run's offsets
 if (colEls.length < 2) return;
-const heights = colEls.map((el) => el.getBoundingClientRect().height);
-const maxHeight = Math.max(...heights);
-let i = 0;
-while (i < colEls.length) {
-if (heights[i] >= maxHeight * SPARSE_HEIGHT_FRACTION) { i += 1; continue; }
-let j = i;
-while (j < colEls.length && heights[j] < maxHeight * SPARSE_HEIGHT_FRACTION) j += 1;
-if (j - i > 1) {
-const runHeights = heights.slice(i, j);
-const combinedHeight = runHeights.reduce((s, h) => s + h, 0) + (j - i - 1) * FLOW_COLUMN_GAP;
-const startY = (maxHeight - combinedHeight) / 2;
-let cumulative = 0;
-for (let k = i; k < j; k += 1) {
-const desiredTop = startY + cumulative;
-const defaultTop = (maxHeight - heights[k]) / 2; // where align-items:center already put it
-colEls[k].style.marginTop = `${desiredTop - defaultTop}px`;
-cumulative += heights[k] + FLOW_COLUMN_GAP;
-}
-}
-i = j;
+for (let i = 1; i < colEls.length; i += 1) {
+const prevFirst = colEls[i - 1].firstElementChild;
+const curFirst = colEls[i].firstElementChild;
+if (!prevFirst || !curFirst) continue;
+// Centres, not top edges -- a lone dot is much shorter than a card,
+// and it's each element's own vertical MIDDLE (roughly where its
+// connecting line actually leaves/arrives) that should line up, not
+// their top edges.
+const prevRect = prevFirst.getBoundingClientRect();
+const curRect = curFirst.getBoundingClientRect();
+const prevCenter = prevRect.top + prevRect.height / 2;
+const curCenter = curRect.top + curRect.height / 2;
+// DOUBLED -- confirmed live: under align-items:center, the container
+// centres each column's MARGIN box, so an asymmetric margin-top (set
+// here, no matching margin-bottom) only shifts the visible content by
+// HALF its value -- the other half gets absorbed back into where
+// "centred" is recalculated from. A plain 1:1 delta left every column
+// exactly half-corrected (confirmed by measuring the actual rendered
+// gap against the predicted one before adding this factor).
+colEls[i].style.marginTop = `${2 * (prevCenter - curCenter)}px`;
 }
 }
 
@@ -1024,15 +1021,15 @@ return `<path d="${path}" fill="none" stroke="var(--ink)" stroke-width="1.5" ${e
 svg.innerHTML = defs + parts;
 }
 
-// Stagger AND lines both need real, on-screen dimensions to compute
+// Alignment AND lines both need real, on-screen dimensions to compute
 // correctly -- neither means anything against a hidden (0x0) tab.
 // redrawFlowDiagram() re-runs both together, in the right order (the
-// stagger changes card positions, which the lines then have to
+// alignment pass changes card positions, which the lines then have to
 // measure), so nothing calling for "the diagram needs recomputing" has
 // to remember there are two passes, not one.
 function redrawFlowDiagram() {
 const flowMount = document.getElementById('accounts-flow-mount');
-if (flowMount) applySparseColumnStagger(flowMount);
+if (flowMount) alignFlowColumnsToPriorRow(flowMount);
 drawFlowLines(flowMode);
 }
 let resizeTimer = null;
@@ -1190,7 +1187,7 @@ if (countEl) countEl.textContent = data.financeAccounts.length + (data.financeAc
 if (flowMount) {
 flowMount.innerHTML = flowDiagramHtml();
 bindLogoFallbacks(flowMount);
-applySparseColumnStagger(flowMount);
+alignFlowColumnsToPriorRow(flowMount);
 // A flow card is a reference to the real account row below, same as
 // every other record reference in this app links back to its record
 // (CLAUDE.md's record-reference standards) -- easy to miss here since
@@ -1407,5 +1404,14 @@ expandedAccounts.add(id);
 renderFinanceAccounts();
 setTimeout(() => scrollAndFlash(`[data-account-row="${id}"]`), 50);
 }
+
+// Debug aid, console-only: exposes the money-flow diagram's own internal
+// layout functions against REAL data, so a layout question ("why did this
+// card land here") can be traced against exactly what actually ran,
+// rather than a hand-reconstructed guess at the edges from a screenshot --
+// a console snippet duplicating flowEdges() externally risks drifting out
+// of sync with the real thing and answering the wrong question. Read-only,
+// no UI surface, nothing in the app itself calls it.
+if (typeof window !== 'undefined') window.__flowDebug = { flowEdges, flowColumns, mergeSparseChains, orderRowsByDeadEndPreference, transposeRowsForShortestEdges };
 
 export { renderFinanceAccounts, initFinanceAccountForm, expandAccountRow, accountLabel, formatShortDate };
