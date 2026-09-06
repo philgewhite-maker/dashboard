@@ -365,11 +365,18 @@ const aiBlock = verdict === 'loading' ? '<div class="album-ai-compare loading">C
 : verdict ? `<div class="album-ai-compare ${verdict.same === true ? 'yes' : verdict.same === false ? 'no' : 'unsure'}">${escapeHtml(verdict.same === true ? 'AI: looks like the same person' : verdict.same === false ? 'AI: these look like different people' : 'AI: unsure')}${verdict.reason ? ` — ${escapeHtml(verdict.reason)}` : ''}</div>`
 : (conn.photoId && pending.photos[0] ? `<button class="sync-btn sm" type="button" data-tinder-ai-compare="${escapeHtml(conn.id)}">AI compare faces</button>` : '');
 const isChosen = pending.chosenId === conn.id;
+// Confirmed vs merely chosen are different states -- someone picked
+// from the plain dropdown (moreInfoCandidates' own synthesized row for
+// them) is isChosen but NOT YET matchConfirmed, and "Chosen" read as a
+// done deal with nothing left to click, when a click here is exactly
+// what's still needed to unblock Save.
+const isConfirmed = isChosen && pending.matchConfirmed;
+const btnLabel = isConfirmed ? 'Chosen' : isChosen ? `Confirm it's ${escapeHtml(conn.name)}` : `Choose ${escapeHtml(conn.name)}`;
 return `<div class="tinder-candidate-row${isChosen ? ' chosen' : ''}">
 <div class="album-caption"><strong>${escapeHtml(conn.name)}</strong>${conn.age ? `, ${escapeHtml(conn.age)}` : ''} <span class="tinder-field-note">(${escapeHtml(m.why)})</span></div>
 ${existingPhotos}
 ${aiBlock}
-<button class="sync-btn sm" type="button" data-tinder-choose="${escapeHtml(conn.id)}" style="margin-top:6px;">${isChosen ? 'Chosen' : `Choose ${escapeHtml(conn.name)}`}</button>
+<button class="sync-btn sm" type="button" data-tinder-choose="${escapeHtml(conn.id)}" style="margin-top:6px;">${btnLabel}</button>
 </div>`;
 }
 
@@ -377,17 +384,35 @@ ${aiBlock}
 // at a size you can actually read — not the main card's job, which needs
 // to stay a quick Save/Skip decision for the common case (an exact match,
 // or clearly nobody existing).
+// pending.candidates is built from NAME similarity against the
+// incoming profile's CURRENT display name (buildPending) -- someone
+// re-matched under a throwaway/unrelated Tinder name (confirmed live:
+// "LoyalHuman" for a connection actually named Violeta) never lands in
+// it at all. Picking them from the plain dropdown instead still needs
+// confirming here (matchConfirmed deliberately starts false on any
+// non-exact dropdown pick -- see canSave's own comment), but until now
+// there was no way to: More Info only ever showed the (wrong) name-
+// based guess plus "+ New connection", nothing to actually confirm the
+// pick that had already been made. Whoever's currently chosen gets
+// listed here too when they're not already one of the real candidates.
+function moreInfoCandidates() {
+const chosen = pending.chosenId ? data.connections.find((c) => c.id === pending.chosenId) : null;
+if (!chosen || pending.candidates.some((m) => m.conn.id === chosen.id)) return pending.candidates;
+return [{ conn: chosen, why: 'already picked from the dropdown' }, ...pending.candidates];
+}
+
 function moreInfoHtml() {
 if (!pending.showMoreInfo) return '';
 const incomingGrid = pending.photos.length
 ? `<div class="tinder-photo-grid">${pending.photos.map((ph) => `<span class="thumb-lg" style="background-image:url('${escapeHtml(ph.url)}')"></span>`).join('')}</div>`
 : '<div class="settings-note" style="margin:4px 0;">No photos in this import.</div>';
+const candidates = moreInfoCandidates();
 return `<div class="tinder-more-info-overlay" id="tinder-more-info">
 <div class="tinder-more-info-box">
 <h3>${escapeHtml(pending.name || '(no name found)')} — incoming photos</h3>
 ${incomingGrid}
 <h3>Who is this?</h3>
-${pending.candidates.length ? pending.candidates.map(candidateRowHtml).join('') : '<div class="settings-note" style="margin:4px 0;">No name-based candidates found.</div>'}
+${candidates.length ? candidates.map(candidateRowHtml).join('') : '<div class="settings-note" style="margin:4px 0;">No name-based candidates found.</div>'}
 <button class="sync-btn sm" type="button" id="tinder-more-info-newconn">+ New connection</button>
 <div class="sync-row" style="margin-top:10px;">
 <button class="sync-btn" type="button" id="tinder-more-info-close">Close</button>
