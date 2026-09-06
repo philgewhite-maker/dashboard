@@ -1,4 +1,4 @@
-import { data, queueSave, reachOutThreshold, isDormantStage, isTravelPaused, getLocalSettings, setLocalSetting, TAG_FIELDS, CONTACT_STATUS_LABELS, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness, slugifyField, FLAG_FIELD_DEFS, DEFAULT_FLAG_RULES, computeFlags, valueColorForField, stripSharedSuffix, suggestedAction, suggestedQuestions, recordImportRun, importStatusLine, upsertIdentity, tinderMatchIds, blankConnection, blankPendingImport } from '../state.js';
+import { data, queueSave, reachOutThreshold, isDormantStage, isTravelPaused, getLocalSettings, setLocalSetting, TAG_FIELDS, CONTACT_STATUS_LABELS, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness, slugifyField, FLAG_FIELD_DEFS, DEFAULT_FLAG_RULES, computeFlags, valueColorForField, stripSharedSuffix, suggestedAction, suggestedQuestions, recordImportRun, importStatusLine, upsertIdentity, tinderMatchIds, mergeChatLog, blankConnection, blankPendingImport } from '../state.js';
 import { captureTask, revealTask } from './tasks.js';
 import { photoDelete, photoUrl } from '../db.js';
 import { storePhoto } from '../files.js';
@@ -114,9 +114,14 @@ function sourceIconsHtml(c) {
 const parts = [];
 const appInfo = SOURCE_ICONS[c.app];
 if (appInfo) parts.push(iconSpan(appInfo.icon, appInfo.label, appInfo.cls));
-if (c.chatLog && c.app !== 'Tinder') parts.push(iconSpan(SOURCE_ICONS.Tinder.icon, 'Tinder chat'));
-if (c.chatLogWhatsApp && c.app !== 'WhatsApp') parts.push(iconSpan(SOURCE_ICONS.WhatsApp.icon, 'WhatsApp chat', SOURCE_ICONS.WhatsApp.cls));
-if (c.chatLogTelegram && c.app !== 'Telegram') parts.push(iconSpan(SOURCE_ICONS.Telegram.icon, 'Telegram chat', SOURCE_ICONS.Telegram.cls));
+// Platforms with a real chat thread (any identity row with text) -- not
+// just the legacy chatLog/chatLogWhatsApp/chatLogTelegram scalars, which
+// stop being written to once a thread is migrated onto its own identity
+// row (see state.js's one-shot migration) and would otherwise go stale.
+const chatPlatforms = new Set((c.identities || []).filter((r) => String(r.chatLog || '').trim()).map((r) => r.platform));
+if (chatPlatforms.has('Tinder') && c.app !== 'Tinder') parts.push(iconSpan(SOURCE_ICONS.Tinder.icon, 'Tinder chat'));
+if (chatPlatforms.has('WhatsApp') && c.app !== 'WhatsApp') parts.push(iconSpan(SOURCE_ICONS.WhatsApp.icon, 'WhatsApp chat', SOURCE_ICONS.WhatsApp.cls));
+if (chatPlatforms.has('Telegram') && c.app !== 'Telegram') parts.push(iconSpan(SOURCE_ICONS.Telegram.icon, 'Telegram chat', SOURCE_ICONS.Telegram.cls));
 if ((c.photoAlbums || []).length) {
 const n = c.photoAlbums.length;
 parts.push(iconSpan(SOURCE_ICONS.googlePhotos.icon, `Google Photos (${n} album${n === 1 ? '' : 's'})`));
@@ -875,50 +880,45 @@ return '';
 }
 
 // Every chat source writes the identical "[date time] Sender: message"
-// line format (see whatsappimport.js's formatMessageLine) into its own
-// field (chatLog for Tinder, chatLogWhatsApp, chatLogTelegram -- kept
-// separate so one source can never overwrite or hide another's history,
-// see state.js's migration guard), so a single merged, date-sorted view
-// reads as one real conversation regardless of which app carried it. A
-// line with no date prefix (older chatLog saved before dates were
-// threaded through) has no sort key and is treated as earliest rather
-// than dropped.
-// Which icon a chat line's own field maps to -- separate from the Stage/
-// c.app source icons above, since a line's platform is fixed by which
-// field it was imported into regardless of what the connection's current
-// Stage or original match app say.
-const CHAT_FIELD_SOURCE_ICONS = {
-chatLog: SOURCE_ICONS.Tinder,
-chatLogWhatsApp: SOURCE_ICONS.WhatsApp,
-chatLogTelegram: SOURCE_ICONS.Telegram,
-};
-
-// Tagged with which field each line came from (not just concatenated),
-// so a chat spanning more than one platform can still show which is which
-// per line -- interleaving three platforms' worth of messages with no way
-// to tell them apart was the actual complaint, not the merge itself.
+// line format (see whatsappimport.js's formatMessageLine) into its OWN
+// identity row's chatLog (see state.js's upsertIdentity/mergeChatLog) --
+// one row per distinct thread (a Tinder match id, a WhatsApp/Telegram
+// chat), so a second thread on the same platform can never overwrite or
+// hide an earlier one's history the way the old single chatLog/
+// chatLogWhatsApp/chatLogTelegram connection-level scalars could (and, in
+// one real case, did). A single merged, date-sorted view still reads as
+// one real conversation across every thread and platform. A line with no
+// date prefix (older chatLog text saved before dates were threaded
+// through) has no sort key and is treated as earliest rather than dropped.
 //
-// Cached per connection: a full split-tag-and-sort of every line across all
-// three chat fields is real work for an active conversation (thousands of
-// lines is normal for a months-long WhatsApp history), and every keystroke
-// in search re-renders every visible card regardless of whether that
-// connection's own chat changed. Keyed by connection id, invalidated by a
-// cheap signature (each field's length) rather than re-diffing content --
-// a same-length edit slipping through uncached is an acceptable edge case
-// for a performance cache, not a correctness-critical one.
+// Icon per line now just reuses SOURCE_ICONS (already keyed by platform,
+// same table the Stage/c.app icons above use) directly -- no separate
+// field-name-keyed table needed once the source IS the platform.
+
+// Tagged with which identity row each line came from (not just
+// concatenated), so a chat spanning more than one platform -- or more
+// than one thread on the SAME platform, Violeta's exact case -- can still
+// show which is which per line.
+//
+// Cached per connection: a full split-tag-and-sort of every line across
+// every identity row is real work for an active conversation (thousands
+// of lines is normal for a months-long WhatsApp history), and every
+// keystroke in search re-renders every visible card regardless of
+// whether that connection's own chat changed. Keyed by connection id,
+// invalidated by a cheap signature (each row's own length) rather than
+// re-diffing content -- a same-length edit slipping through uncached is
+// an acceptable edge case for a performance cache, not a
+// correctness-critical one.
 const mergedChatLinesCache = new Map(); // id -> { sig, lines }
 function chatSignature(c) {
-return `${(c.chatLog || '').length}|${(c.chatLogWhatsApp || '').length}|${(c.chatLogTelegram || '').length}`;
+return (c.identities || []).map((r) => `${r.id}:${(r.chatLog || '').length}`).join('|');
 }
 function mergedChatLines(c) {
 const sig = chatSignature(c);
 const cached = mergedChatLinesCache.get(c.id);
 if (cached && cached.sig === sig) return cached.lines;
-const tagged = [
-...String(c.chatLog || '').split('\n').filter(Boolean).map((text) => ({ source: 'chatLog', text })),
-...String(c.chatLogWhatsApp || '').split('\n').filter(Boolean).map((text) => ({ source: 'chatLogWhatsApp', text })),
-...String(c.chatLogTelegram || '').split('\n').filter(Boolean).map((text) => ({ source: 'chatLogTelegram', text })),
-];
+const tagged = (c.identities || []).flatMap((r) => String(r.chatLog || '').split('\n').filter(Boolean)
+.map((text) => ({ source: r.platform, rowId: r.id, text })));
 const lines = tagged.sort((a, b) => {
 const da = (a.text.match(/^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\]/) || [])[1] || '';
 const db = (b.text.match(/^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\]/) || [])[1] || '';
@@ -968,11 +968,10 @@ const notesFieldHtml = notesHasHits
 <textarea rows="2" data-field="notes" data-conn-detail="${c.id}">${escapeHtml(c.notes || '')}</textarea>
 </details></div>`
 : `<label class="full">Notes<textarea rows="2" data-field="notes" data-conn-detail="${c.id}">${escapeHtml(c.notes || '')}</textarea></label>`;
-const chatSources = [
-{ field: 'chatLog', label: 'Tinder', text: c.chatLog },
-{ field: 'chatLogWhatsApp', label: 'WhatsApp', text: c.chatLogWhatsApp },
-{ field: 'chatLogTelegram', label: 'Telegram', text: c.chatLogTelegram },
-].filter((s) => s.text);
+// One entry per identity row that actually carries a transcript -- can be
+// more than one per platform now (two Tinder match ids), unlike the old
+// three-scalar model which could only ever have one thread per platform.
+const chatSources = (c.identities || []).filter((r) => String(r.chatLog || '').trim());
 // Merging and highlighting a chat history is real work for a long
 // conversation (a genuinely active WhatsApp thread can run thousands of
 // lines) -- and this whole field sits inside the collapsible Details
@@ -991,20 +990,29 @@ chatFieldHtml = `<div class="field-block full"><span class="field-label">Chat hi
 } else {
 const mergedLines = mergedChatLines(c);
 // Per-line source icons only kick in once there's genuinely more than
-// one platform to tell apart -- a single-source chat doesn't need
+// one thread to tell apart -- a single-source chat doesn't need
 // clarifying.
 const multiSource = chatSources.length > 1;
+// Two threads can share the same platform now (Violeta's exact case: two
+// Tinder match ids) -- only THOSE need a handle/match-id suffix to tell
+// apart; a lone thread on a platform just shows the platform name.
+const platformCounts = chatSources.reduce((m, r) => { m[r.platform] = (m[r.platform] || 0) + 1; return m; }, {});
+const threadLabel = (r) => platformCounts[r.platform] > 1 ? `${r.platform} (${r.handle || r.matchId || 'thread'})` : r.platform;
 const chatSourceRow = multiSource
-? `<div class="icon-row" style="margin:0 0 6px;">${chatSources.map((s) => iconSpan(CHAT_FIELD_SOURCE_ICONS[s.field].icon, `${s.label} chat`, CHAT_FIELD_SOURCE_ICONS[s.field].cls)).join('')}</div>`
+? `<div class="icon-row" style="margin:0 0 6px;">${chatSources.map((r) => iconSpan((SOURCE_ICONS[r.platform] || SOURCE_ICONS.Other).icon, `${threadLabel(r)} chat`, (SOURCE_ICONS[r.platform] || SOURCE_ICONS.Other).cls)).join('')}</div>`
 : '';
 chatFieldHtml = mergedLines.length
 ? `<div class="field-block full"><span class="field-label">Chat history</span>
 ${chatSourceRow}
-<div class="tinder-chat-block" style="margin:0;">${chatTranscriptHtml(mergedLines, matcher, multiSource ? CHAT_FIELD_SOURCE_ICONS : null)}</div>
+<div class="tinder-chat-block" style="margin:0;">${chatTranscriptHtml(mergedLines, matcher, multiSource ? SOURCE_ICONS : null)}</div>
 <details class="tinder-edit-details"><summary>Edit raw text</summary>
-${chatSources.map((s) => `<div class="settings-note" style="margin:6px 0 2px;">${escapeHtml(s.label)}</div><textarea rows="4" placeholder="One message per line" data-field="${s.field}" data-conn-detail="${c.id}">${escapeHtml(s.text)}</textarea>`).join('')}
+${chatSources.map((r) => `<div class="settings-note" style="margin:6px 0 2px;">${escapeHtml(threadLabel(r))}</div><textarea rows="4" placeholder="One message per line" data-identity-chat="${r.id}" data-conn-detail="${c.id}">${escapeHtml(r.chatLog)}</textarea>`).join('')}
 </details></div>`
-: `<label class="full">Chat history<textarea rows="4" placeholder="Imported from Tinder — one message per line" data-field="chatLog" data-conn-detail="${c.id}"></textarea></label>`;
+// No thread has any text yet -- a fresh manual paste creates its own new
+// identity row on first save (see the data-identity-chat="__new__"
+// handling in bindConnectionEvents) rather than having anywhere existing
+// to land, so it can never collide with a thread imported later.
+: `<label class="full">Chat history<textarea rows="4" placeholder="Imported from Tinder — one message per line" data-identity-chat="__new__" data-conn-detail="${c.id}"></textarea></label>`;
 }
 return `<div class="match-card" data-conn-row="${c.id}">
 <div class="match-row">
@@ -1178,6 +1186,23 @@ queueSave();
 list.querySelectorAll('[data-conn-detail]').forEach((el) => {
 el.addEventListener('change', () => {
 const conn = data.connections.find((x) => x.id === el.dataset.connDetail);
+// A chat thread's own textarea -- writes onto that ONE identity row's
+// chatLog, never a connection-level scalar, so editing one thread by
+// hand can never touch another (see state.js's mergeChatLog for the
+// same guarantee on the import side). "__new__" is the empty-state box
+// (no thread has any text yet): a real identity row is created for it
+// on first save, so a fresh manual paste gets its own thread from day
+// one instead of needing somewhere pre-existing to land.
+if (el.dataset.identityChat) {
+const row = el.dataset.identityChat === '__new__'
+? upsertIdentity(conn, { platform: conn.app || 'Other' })
+: (conn.identities || []).find((r) => r.id === el.dataset.identityChat);
+if (row) row.chatLog = el.value;
+renderConnections();
+renderOverviewRef();
+queueSave();
+return;
+}
 conn[el.dataset.field] = el.type === 'checkbox' ? el.checked : el.value;
 // A field you just typed into by hand has, by definition, just been
 // resolved -- drop any stale "differs from Google Contacts" conflict still
@@ -1361,6 +1386,12 @@ list.querySelectorAll('[data-identity-remove]').forEach((el) => {
 el.addEventListener('click', () => {
 const conn = data.connections.find((x) => x.id === el.dataset.identityRemove);
 if (!conn) return;
+const row = (conn.identities || []).find((r) => r.id === el.dataset.identityId);
+// A row can carry its own chat transcript now -- removing it is exactly
+// the kind of silent, unrecoverable loss this whole fix exists to
+// prevent, so it gets one explicit confirmation instead of a plain
+// click-to-delete like an empty row.
+if (row && String(row.chatLog || '').trim() && !confirm(`This identity has a saved chat history (${row.chatLog.split('\n').filter(Boolean).length} lines). Remove it and lose that history?`)) return;
 conn.identities = (conn.identities || []).filter((r) => r.id !== el.dataset.identityId);
 renderConnections();
 queueSave();
@@ -1371,7 +1402,7 @@ btn.addEventListener('click', () => {
 const conn = data.connections.find((x) => x.id === btn.dataset.identityAdd);
 if (!conn) return;
 if (!Array.isArray(conn.identities)) conn.identities = [];
-conn.identities.push({ id: uid(), platform: 'Tinder', handle: '', matchId: '' });
+conn.identities.push({ id: uid(), platform: 'Tinder', handle: '', matchId: '', chatLog: '' });
 renderConnections();
 queueSave();
 });
@@ -2862,9 +2893,18 @@ target.notes = targetNotes ? `${targetNotes}\n${sourceNotes}` : sourceNotes;
 }
 // Structured field, not a TAG_FIELDS member, so the plain-string union
 // loop above doesn't touch it -- reuse upsertIdentity's own fill-gaps
-// rule so a same-platform row on each side merges into one rather than
-// leaving two rows for what's really the same account.
-(source.identities || []).forEach((r) => upsertIdentity(target, { platform: r.platform, handle: r.handle, matchId: r.matchId }));
+// rule so a same-platform-and-matchId (or same-handle) row on each side
+// merges into one rather than leaving two rows for what's really the
+// same account. Genuinely distinct threads (a different match id) get
+// their own new row on target instead, each keeping its own full
+// chatLog -- this is the direct answer to "does merging interleave the
+// chat history, or put one in place of the other": neither, each
+// thread's own transcript survives on its own row, same growth-guarded
+// merge the importers themselves use for a same-thread re-scrape.
+(source.identities || []).forEach((r) => {
+const row = upsertIdentity(target, { platform: r.platform, handle: r.handle, matchId: r.matchId });
+if (row && r.chatLog) mergeChatLog(row, r.chatLog);
+});
 if (!Array.isArray(target.photoIds)) target.photoIds = [];
 (source.photoIds || []).forEach((pid) => { if (!target.photoIds.includes(pid)) target.photoIds.push(pid); });
 if (!target.photoId) target.photoId = target.photoIds[0] || null;

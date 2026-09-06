@@ -22,7 +22,7 @@
 // importer), and the chosen connection's photo stays visible for the whole
 // review regardless of how it got picked, so a wrong dropdown pick is just
 // as visible as a wrong auto-match was invisible before.
-import { data, queueSave, displayAge, computeFlags, distanceMiles, heightCm, FLAG_FIELD_DEFS, suggestedQuestions, TAG_FIELDS, stripSharedSuffix, recordImportRun, importStatusLine, upsertIdentity, tinderMatchIds, blankConnection } from '../state.js';
+import { data, queueSave, displayAge, computeFlags, distanceMiles, heightCm, FLAG_FIELD_DEFS, suggestedQuestions, TAG_FIELDS, stripSharedSuffix, recordImportRun, importStatusLine, upsertIdentity, tinderMatchIds, mergeChatLog, blankConnection } from '../state.js';
 import { escapeHtml, uid, todayStr, hydratePhotoBackgrounds, openLightbox, knownCityMap, knownScalarValues, pickChipHtml, COUNTRY_NAME_TO_NATIONALITY, avatarHtml, foldDiacritics } from '../utils.js';
 import { phoneKey } from '../googlecontacts.js';
 import { storePhoto, fetchProxiedImage } from '../files.js';
@@ -1982,6 +1982,14 @@ conn.todos.push({ id: uid(), text: nextStep, done: false });
 }
 
 p.fields.filter((f) => f.apply).forEach((f) => {
+// Chat history is deliberately excluded here even though FIELD_MAP still
+// names 'chatLog' as its target (other lookups -- ALWAYS_SHOW_LABELS,
+// fieldFlagColor -- still need that mapping to find it). A generic
+// conn[target] = value overwrite would clobber whichever thread's
+// transcript happened to be there before, regardless of match id --
+// exactly the bug that lost Violeta's earlier conversation. It's applied
+// separately below, onto the specific identity row for p.matchId.
+if (f.label === 'Chat history') return;
 const target = FIELD_MAP[f.label];
 if (target) {
 // f.apply is now the single source of truth for whether this writes:
@@ -2086,7 +2094,11 @@ if (p.matchId && !conn.tinderMatchId) conn.tinderMatchId = p.matchId;
 // snippet last -- the same cross-session reasoning tinderSeedDone already
 // established for the done-list.
 conn.tinderLastScrapedAt = new Date().toISOString();
-upsertIdentity(conn, { platform: 'Tinder', handle: p.name, matchId: p.matchId });
+const identityRow = upsertIdentity(conn, { platform: 'Tinder', handle: p.name, matchId: p.matchId });
+// Chat history writes onto THIS match id's own row only -- see the
+// exclusion of 'Chat history' from the generic field loop above.
+const chatField = p.fields.find((f) => f.label === 'Chat history' && f.apply);
+if (chatField) mergeChatLog(identityRow, chatField.value);
 
 queueSave();
 return { ok: true, conn, failed, toFetchLen: toFetch.length, firstError, alreadyHad };
@@ -2430,7 +2442,10 @@ if (newPhotoCount) applied.push(`+${newPhotoCount} photo${newPhotoCount === 1 ? 
 
 const chatField = p.fields.find((f) => f.label === 'Chat history');
 if (chatField && chatField.apply) {
-const oldCount = String(conn.chatLog || '').split('\n').filter(Boolean).length;
+// Read-only lookup of THIS match id's own thread -- never upsertIdentity
+// here, this function must stay pure (see its own comment above).
+const chatRow = (conn.identities || []).find((r) => r.platform === 'Tinder' && r.matchId === p.matchId);
+const oldCount = String(chatRow?.chatLog || '').split('\n').filter(Boolean).length;
 const newCount = chatField.value.split('\n').filter(Boolean).length;
 if (newCount > oldCount) applied.push(`+${newCount - oldCount} chat line${newCount - oldCount === 1 ? '' : 's'}`);
 }
@@ -2478,7 +2493,9 @@ if (newPhotoCount) parts.push(`+${newPhotoCount} photo${newPhotoCount === 1 ? ''
 
 const chatField = p.fields.find((f) => f.label === 'Chat history');
 if (chatField) {
-const oldCount = String(conn.chatLog || '').split('\n').filter(Boolean).length;
+// Same read-only per-thread lookup as bulkRowFieldLines above.
+const chatRow = (conn.identities || []).find((r) => r.platform === 'Tinder' && r.matchId === p.matchId);
+const oldCount = String(chatRow?.chatLog || '').split('\n').filter(Boolean).length;
 const newCount = chatField.value.split('\n').filter(Boolean).length;
 if (newCount > oldCount) {
 chatField.apply = true;
@@ -2624,6 +2641,15 @@ p.overrideFallbackFrom[overrideKey] = connId;
 // made against the SAME connection on a later, unrelated re-render.
 if (conn && Array.isArray(p.fields)) {
 p.fields.forEach((f) => {
+if (f.label === 'Chat history') {
+// Whether THIS match id's own thread already has stored text -- not
+// the legacy conn.chatLog scalar, which may hold a different,
+// already-migrated thread's history and would wrongly default this
+// checkbox off for a genuinely new thread.
+const chatRow = (conn.identities || []).find((r) => r.platform === 'Tinder' && r.matchId === p.matchId);
+if (String(chatRow?.chatLog || '').trim()) f.apply = false;
+return;
+}
 const target = FIELD_MAP[f.label];
 if (target && String(conn[target] || '').trim() && !ALWAYS_APPLY_LABELS.has(f.label)) f.apply = false;
 });

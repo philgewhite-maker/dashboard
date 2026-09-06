@@ -4,7 +4,7 @@
 // assumption Tinder's own chat import already makes (see tinderimport.js's
 // summarizeCleanMatch) -- so importing again just overwrites chatLog with
 // whatever's now longer, rather than needing to dedupe line by line.
-import { data, queueSave, recordImportRun, importStatusLine, upsertIdentity, blankConnection } from '../state.js';
+import { data, queueSave, recordImportRun, importStatusLine, upsertIdentity, mergeChatLog, blankConnection } from '../state.js';
 import { escapeHtml, findMentions } from '../utils.js';
 import { nameKey, editDistance } from '../googlecontacts.js';
 import { STAGE_RANK, renderConnections, unionInto } from './connections.js';
@@ -196,7 +196,10 @@ return;
 
 const conn = pending.chosenId && pending.chosenId !== '__new__' ? data.connections.find((c) => c.id === pending.chosenId) : null;
 const rangeHtml = pending.dateRange ? `${pending.dateRange[0]} → ${pending.dateRange[1]}` : '—';
-const existingLines = conn ? String(conn.chatLogWhatsApp || '').split('\n').filter(Boolean).length : 0;
+// Read-only lookup of this contact's own WhatsApp thread -- never
+// upsertIdentity here, this is just a preview before Import is clicked.
+const existingRow = conn ? (conn.identities || []).find((r) => r.platform === 'WhatsApp' && r.handle === pending.themName) : null;
+const existingLines = existingRow ? String(existingRow.chatLog || '').split('\n').filter(Boolean).length : 0;
 const newLines = pending.messages.length;
 const growthNote = conn
 ? (newLines > existingLines ? `+${newLines - existingLines} chat line${newLines - existingLines === 1 ? '' : 's'} over what's saved` : 'No longer than what’s already saved — importing would not add anything')
@@ -253,17 +256,19 @@ const conn = pending.chosenId === '__new__' ? createConnectionFor(pending.themNa
 if (!conn) return;
 
 const newText = buildChatLogText(pending.messages, pending.meName);
-const oldCount = String(conn.chatLogWhatsApp || '').split('\n').filter(Boolean).length;
+// This contact's own WhatsApp thread -- upsertIdentity runs first so
+// mergeChatLog writes onto exactly this row, never another WhatsApp
+// contact's history sharing the old connection-level scalar.
+const row = upsertIdentity(conn, { platform: 'WhatsApp', handle: pending.themName });
+const oldCount = String(row.chatLog || '').split('\n').filter(Boolean).length;
 const newCount = pending.messages.length;
-let changed = false;
-if (newCount > oldCount) { conn.chatLogWhatsApp = newText; changed = true; }
+let changed = mergeChatLog(row, newText);
 
 if ((STAGE_RANK['Moved to WhatsApp'] ?? 0) > (STAGE_RANK[conn.stage] ?? 0)) {
 conn.stage = 'Moved to WhatsApp';
 changed = true;
 }
 if (!conn.lastContact && pending.dateRange) conn.lastContact = pending.dateRange[1];
-upsertIdentity(conn, { platform: 'WhatsApp', handle: pending.themName });
 
 const status = document.getElementById('whatsapp-status');
 if (status) status.textContent = changed ? `Saved to ${conn.name} (+${Math.max(newCount - oldCount, 0)} lines).` : `Nothing new for ${conn.name}.`;
@@ -412,11 +417,10 @@ for (const row of toImport) {
 const conn = row.chosenId === '__new__' ? createConnectionFor(row.displayName) : data.connections.find((c) => c.id === row.chosenId);
 if (!conn) continue;
 const newText = buildChatLogText(row.messages, row.meName);
-const oldCount = String(conn.chatLogWhatsApp || '').split('\n').filter(Boolean).length;
-if (row.messages.length > oldCount) { conn.chatLogWhatsApp = newText; changed = true; }
+const identityRow = upsertIdentity(conn, { platform: 'WhatsApp', handle: row.displayName });
+if (mergeChatLog(identityRow, newText)) changed = true;
 if ((STAGE_RANK['Moved to WhatsApp'] ?? 0) > (STAGE_RANK[conn.stage] ?? 0)) { conn.stage = 'Moved to WhatsApp'; changed = true; }
 if (!conn.lastContact && row.messages.length) conn.lastContact = row.messages[row.messages.length - 1].dateISO;
-upsertIdentity(conn, { platform: 'WhatsApp', handle: row.displayName });
 importedCount++;
 }
 

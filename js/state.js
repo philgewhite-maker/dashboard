@@ -1016,6 +1016,33 @@ const seedName = String(c.profileName || '').trim();
 if (seedName) upsertIdentity(c, { platform: c.app || 'Other', handle: seedName, matchId: c.tinderMatchId });
 else if (c.tinderMatchId) upsertIdentity(c, { platform: 'Tinder', matchId: c.tinderMatchId });
 }
+// Every identity row needs its own chatLog now (see mergeChatLog) --
+// rows created before this field existed (including the seed above, on
+// a connection touched for the first time on an old data file) land
+// here with none at all.
+c.identities.forEach((r) => { if (typeof r.chatLog !== 'string') r.chatLog = ''; });
+// One-shot: move each legacy connection-level chat scalar onto the
+// identity row it actually belongs to. Before this, chatLog/
+// chatLogWhatsApp/chatLogTelegram were shared by every thread on that
+// platform -- a second Tinder match id (a real re-match under a new
+// profile) silently overwrote the first one's transcript, which is what
+// actually happened and lost a real conversation. Guarded so it runs
+// exactly once and never re-fires (never re-attributes text once a row
+// already has its own chatLog, even if the legacy scalar is later read
+// for some other reason).
+if (!c.chatMigratedToIdentities) {
+c.chatMigratedToIdentities = true;
+const moveInto = (text, platform, matchId) => {
+const t = String(text || '');
+if (!t.trim()) return;
+const row = upsertIdentity(c, { platform, matchId: matchId || '' })
+|| c.identities.find((r) => r.platform === platform);
+if (row && !row.chatLog) row.chatLog = t;
+};
+moveInto(c.chatLog, 'Tinder', c.tinderMatchId);
+moveInto(c.chatLogWhatsApp, 'WhatsApp', '');
+moveInto(c.chatLogTelegram, 'Telegram', '');
+}
 if (typeof c.dob !== 'string') c.dob = '';
 // `location` is the city and is what Connections Overview groups by;
 // `address` holds the full postal address, which is detail rather than a
@@ -1478,10 +1505,13 @@ return String(v || '').replace(/\s*\(shared\)\s*$/i, '').trim();
 // newly available this time; (3) only as a last resort, a row that's
 // COMPLETELY empty (no handle AND no matchId) -- never a row that
 // already names someone else.
+// Returns the row it found or created -- callers that need to write a
+// per-thread chatLog onto the exact right identity (see mergeChatLog)
+// need this back, not just the side effect.
 function upsertIdentity(conn, { platform, handle = '', matchId = '' }) {
 const h = String(handle || '').trim();
 const m = String(matchId || '').trim();
-if (!platform || (!h && !m)) return;
+if (!platform || (!h && !m)) return null;
 if (!Array.isArray(conn.identities)) conn.identities = [];
 let row = m ? conn.identities.find((r) => r.platform === platform && r.matchId === m) : null;
 if (!row && h) row = conn.identities.find((r) => r.platform === platform && r.handle === h);
@@ -1490,8 +1520,27 @@ if (row) {
 if (!String(row.handle || '').trim() && h) row.handle = h;
 if (!String(row.matchId || '').trim() && m) row.matchId = m;
 } else {
-conn.identities.push({ id: uid(), platform, handle: h, matchId: m });
+row = { id: uid(), platform, handle: h, matchId: m, chatLog: '' };
+conn.identities.push(row);
 }
+return row;
+}
+
+// Centralizes the "only overwrite if the new text is genuinely longer"
+// growth heuristic that used to be hand-rolled, three near-identical
+// times, across tinderimport.js/whatsappimport.js/telegramimport.js --
+// each guarding a DIRECT scalar overwrite of a connection-level field
+// shared by every thread on that platform. Now it guards a write onto
+// one specific identity row (see upsertIdentity), so a distinct thread
+// (a different match id, a different WhatsApp/Telegram chat) never
+// touches another thread's own chatLog at all, regardless of which is
+// longer -- this only ever compares a thread against its OWN prior text.
+function mergeChatLog(row, newText) {
+if (!row) return false;
+const oldCount = String(row.chatLog || '').split('\n').filter(Boolean).length;
+const newCount = String(newText || '').split('\n').filter(Boolean).length;
+if (newCount > oldCount) { row.chatLog = newText; return true; }
+return false;
 }
 
 // Every Tinder match id this connection is already known by -- there can
@@ -1594,7 +1643,9 @@ out.push("What's their nationality? Ask rather than assume.");
 // app the conversation happened) is a more reliable signal for "a real
 // conversation has happened" than stage alone, and avoids importing
 // STAGE_RANK from connections.js (circular dependency).
-if (!String(conn.kids || '').trim() && (String(conn.chatLog || '').trim() || String(conn.chatLogWhatsApp || '').trim() || String(conn.chatLogTelegram || '').trim())) {
+const hasAnyChat = (conn.identities || []).some((r) => String(r.chatLog || '').trim())
+|| String(conn.chatLog || '').trim() || String(conn.chatLogWhatsApp || '').trim() || String(conn.chatLogTelegram || '').trim();
+if (!String(conn.kids || '').trim() && hasAnyChat) {
 out.push('Ask whether they have kids, or want them.');
 }
 if ((conn.interests || []).length && !(conn.dateEvents || []).length) {
@@ -1643,7 +1694,7 @@ blankAirbnbListing, blankAirbnbReservation, blankFinanceAccount,
 CONTACT_STATUS_LABELS, CONTACT_MATCH_MIN_STAGE,
 DEFAULT_RATING_CATEGORIES, slugifyField, DEFAULT_RECIPE_RATING_CATEGORIES,
 FLAG_FIELD_DEFS, DEFAULT_FLAG_RULES, computeFlags, valueColorForField, stripSharedSuffix, suggestedAction, suggestedQuestions, isTravelPaused, ACTIONS, distanceMiles, heightCm,
-recordImportRun, importStatusLine, upsertIdentity, tinderMatchIds,
+recordImportRun, importStatusLine, upsertIdentity, tinderMatchIds, mergeChatLog,
 };
 
 // `data` above is exported by binding, but ES module live-bindings only

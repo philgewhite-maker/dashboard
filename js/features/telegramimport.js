@@ -4,7 +4,7 @@
 // numbers -- so this reads the whole thing at once (via a folder picker),
 // cross-matches every chat against existing connections, and lets a bulk
 // review pass apply the confident ones while flagging the rest for a glance.
-import { data, queueSave, recordImportRun, importStatusLine, upsertIdentity, blankConnection } from '../state.js';
+import { data, queueSave, recordImportRun, importStatusLine, upsertIdentity, mergeChatLog, blankConnection } from '../state.js';
 import { escapeHtml, findMentions } from '../utils.js';
 import { nameKey, editDistance, phoneKey } from '../googlecontacts.js';
 import { STAGE_RANK, renderConnections, unionInto } from './connections.js';
@@ -393,11 +393,13 @@ const conn = row.chosenId === '__new__' ? createConnectionFor(row.chat.name) : d
 if (!conn) continue;
 
 const newText = buildChatLogText(messages, meName);
-const oldCount = String(conn.chatLogTelegram || '').split('\n').filter(Boolean).length;
-if (messages.length > oldCount) { conn.chatLogTelegram = newText; changed = true; }
+// This specific Telegram chat's own thread, keyed by chatId -- a
+// contact with more than one Telegram chat (rare, but the same shape as
+// Tinder's re-match case) gets its own row and its own history.
+const identityRow = upsertIdentity(conn, { platform: 'Telegram', handle: row.chat.name, matchId: row.chat.chatId });
+if (mergeChatLog(identityRow, newText)) changed = true;
 if ((STAGE_RANK['Moved to Telegram'] ?? 0) > (STAGE_RANK[conn.stage] ?? 0)) { conn.stage = 'Moved to Telegram'; changed = true; }
 if (!conn.lastContact) conn.lastContact = messages[messages.length - 1].dateISO;
-upsertIdentity(conn, { platform: 'Telegram', handle: row.chat.name, matchId: row.chat.chatId });
 
 // mediaFile is only ever a real filename for an actually-included photo
 // -- the excluded-media placeholder is a human-readable sentence that
