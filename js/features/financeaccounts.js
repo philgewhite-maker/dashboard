@@ -868,12 +868,57 @@ return `<path d="${path}" fill="none" stroke="var(--ink)" stroke-width="1.5" ${e
 svg.innerHTML = defs + parts;
 }
 
+// Stagger AND lines both need real, on-screen dimensions to compute
+// correctly -- neither means anything against a hidden (0x0) tab.
+// redrawFlowDiagram() re-runs both together, in the right order (the
+// stagger changes card positions, which the lines then have to
+// measure), so nothing calling for "the diagram needs recomputing" has
+// to remember there are two passes, not one.
+function redrawFlowDiagram() {
+const flowMount = document.getElementById('accounts-flow-mount');
+if (flowMount) applySparseColumnStagger(flowMount);
+drawFlowLines(flowMode);
+}
 let resizeTimer = null;
 function scheduleFlowRedraw() {
 clearTimeout(resizeTimer);
-resizeTimer = setTimeout(() => drawFlowLines(flowMode), 120);
+resizeTimer = setTimeout(redrawFlowDiagram, 120);
 }
-let resizeBound = false;
+// Confirmed live as a real bug, more than once (including in the
+// user's own real data, not just this session's own testing): the
+// FIRST render often happens while the Finances tab is still hidden
+// behind another one (tabs are plain display:none toggles, not
+// separate routes) -- every rect involved reads 0x0 at that point, so
+// the stagger sees every column as equally (non-)sparse and applies no
+// offset, and nothing ever re-ran it once the tab actually became
+// visible. A plain `resize` listener (the only trigger this used to
+// have) never fires just from SWITCHING tabs, only from the window
+// itself changing size -- it caught the symptom on some later
+// incidental resize, never the actual cause.
+//
+// A ResizeObserver on the mount element looked like the textbook fix
+// (MDN documents exactly this "detect a hidden element becoming
+// visible" use case) but confirmed live, with an instrumented
+// ResizeObserver logging every callback: it never fired at all here,
+// neither on the initial (hidden, 0x0) observe() nor on the later
+// display:none -> block transition. Not chasing why further -- this
+// environment's behaviour doesn't match the documented one, and the
+// actual moment that matters is unambiguous anyway: the Finances tab
+// button being clicked. Hooking that directly, once, is simpler than
+// a generic size-watcher and doesn't depend on browser-specific
+// ResizeObserver timing at all.
+// A genuine window resize is a separate, real need from the tab-show
+// case above (the diagram can still need reflowing once already
+// visible) -- bound alongside it, same guard, same debounced target.
+let flowRedrawHooked = false;
+function ensureFlowRedrawOnTabShow() {
+if (flowRedrawHooked) return;
+const btn = document.querySelector('[data-tab-btn="finances"]');
+if (!btn) return;
+flowRedrawHooked = true;
+btn.addEventListener('click', () => scheduleFlowRedraw());
+window.addEventListener('resize', scheduleFlowRedraw);
+}
 
 // Masked like a real card face ("•••• 1234") -- a light, cosmetic touch,
 // not a security measure (the full number is still one click away in
@@ -974,6 +1019,7 @@ if (flowMount) {
 flowMount.innerHTML = flowDiagramHtml();
 bindLogoFallbacks(flowMount);
 applySparseColumnStagger(flowMount);
+ensureFlowRedrawOnTabShow();
 // A flow card is a reference to the real account row below, same as
 // every other record reference in this app links back to its record
 // (CLAUDE.md's record-reference standards) -- easy to miss here since
@@ -1166,10 +1212,6 @@ renderFinanceAccounts();
 });
 
 drawFlowLines(flowMode);
-if (!resizeBound) {
-resizeBound = true;
-window.addEventListener('resize', scheduleFlowRedraw);
-}
 }
 
 function initFinanceAccountForm() {
