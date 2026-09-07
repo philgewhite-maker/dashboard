@@ -247,12 +247,24 @@ let referencePanelCollapsed = true;
 // (not persisted, same as the toggle this replaced): recipeId -> Map of
 // ingredientData index -> one of:
 //   { mode: 'sub', subName }   -- use a listed substitute's own reference entry
-//   { mode: 'reduced', qty }   -- use LESS of the same ingredient (qty is
-//                                 PER-PORTION, in the line's own unit) --
-//                                 the third strategy from feedback: some
-//                                 problem ingredients don't need swapping
-//                                 out, just cutting down (Monash's own
-//                                 "cut the chickpeas by 18g/portion" case)
+//   { mode: 'reduced', qty, basis } -- use LESS of the same ingredient
+//                                 (qty is PER-PORTION, in the line's own
+//                                 unit) -- the third strategy from
+//                                 feedback: some problem ingredients
+//                                 don't need swapping out, just cutting
+//                                 down (Monash's own "cut the chickpeas
+//                                 by 18g/portion" case). `basis` ('line'
+//                                 or 'recipe') records which "reach low"
+//                                 target the qty came from -- this
+//                                 ingredient's own concentration alone,
+//                                 or the amount that keeps the WHOLE
+//                                 recipe's stacked total under low
+//                                 (FODMAP grams are additive across every
+//                                 ingredient, so a line that's low on its
+//                                 own can still leave the recipe total
+//                                 moderate/high) -- purely cosmetic
+//                                 (which dropdown option shows selected);
+//                                 the qty itself is what actually matters.
 //   { mode: 'dropped' }        -- leave it out of the analysis entirely
 // No entry for a line means "as written". This is exactly what makes
 // exploring these free -- every mode is pure arithmetic over already-
@@ -497,22 +509,48 @@ r.ingredientsParsedAt = new Date().toISOString();
 r.ingredientsSignature = ingredientsSignatureOf(r.ingredients);
 }
 
+// True when an ingredient either has no reference entry at all, or has
+// one that predates dietaryFlags and was never actually asked about it
+// (state.js's migration marks these dietaryFlagsStale rather than
+// guessing -- an empty dietaryFlags array is ambiguous on its own,
+// "genuinely none present" and "never checked" look identical). Shared
+// by every call site that decides whether ensureReferenceEntry has real
+// work to do, so a stale entry is never silently skipped as if it were
+// already complete.
+function needsAssessment(name, form) {
+const e = findReferenceEntry(name, form);
+return !e || !!e.dietaryFlagsStale;
+}
+
 // The one AI-calling step in the whole diet-analysis path besides the
 // parse itself -- and only for ingredients (or a chosen substitute) that
-// don't already have a reference entry AND aren't one of the static
+// need it (see needsAssessment) and aren't one of the static
 // TRIVIAL_INGREDIENTS above. Every OTHER recipe sharing that same
 // (name, form) reuses the entry this creates; nothing here is ever
 // re-requested just because a DIFFERENT recipe happens to also contain
 // flour.
 async function ensureReferenceEntry(name, form) {
-if (findReferenceEntry(name, form)) return;
+const existing = findReferenceEntry(name, form);
+if (existing && !existing.dietaryFlagsStale) return;
 const trivial = trivialReferenceEntry(name, form);
 const assessed = trivial || await assessIngredient(name, form);
+if (existing) {
+// A stale-flagged entry already has real (possibly user-corrected)
+// macro/FODMAP/allergen data -- this refresh exists ONLY to fill in
+// dietaryFlags, so that's the only field it touches. A full overwrite
+// here would silently undo a manual correction the same way a
+// careless re-assessment of the FODMAP figures would.
+existing.dietaryFlags = assessed.dietaryFlags;
+existing.dietaryAssessedAt = new Date().toISOString();
+delete existing.dietaryFlagsStale;
+return;
+}
 data.ingredientReference.push({
 id: uid(), name, form,
 ...assessed,
 subs: assessed.subs.map((s) => ({ id: uid(), ...s })),
 aiFilledAt: trivial ? '' : new Date().toISOString(),
+dietaryAssessedAt: new Date().toISOString(),
 userEdited: false,
 });
 }
@@ -536,7 +574,7 @@ const toAssess = [];
 r.ingredientData.forEach((line) => {
 if (!line.name) return;
 const key = `${canonicalIngredientName(line.name)}|${line.form.toLowerCase()}`;
-if (seen.has(key) || findReferenceEntry(line.name, line.form)) return;
+if (seen.has(key) || !needsAssessment(line.name, line.form)) return;
 seen.add(key);
 toAssess.push(line);
 });
@@ -596,6 +634,39 @@ if (minQty == null || targetQty < minQty) minQty = targetQty;
 return minQty;
 }
 
+// The "reach low" target above judges this ingredient in ISOLATION --
+// but FODMAP grams are additive across the WHOLE recipe (computeRecipeDiet),
+// so a line that's individually "low" can still leave the recipe's own
+// total moderate/high once every other ingredient's contribution is
+// stacked on top -- confirmed live: "doesn't target recipe level low
+// levels (stacking)". This targets the recipe TOTAL instead: how much of
+// THIS line, added to everything ELSE already in the recipe (at their
+// own current overrides), keeps each component's combined total under
+// its own "low" cutoff. Returns null when the entry has no FODMAP
+// content at all; a target of 0 for a component means even NONE of this
+// ingredient would help -- the other ingredients alone already exceed
+// that cutoff, and no amount of THIS one can fix that.
+function suggestedLowQtyPerPortionForRecipeTotal(r, i, entry) {
+const diet = computeRecipeDiet(r);
+if (!diet) return null;
+const line = r.ingredientData[i];
+const resolved = resolveLineEntry(r, line, i);
+const thisPortionQty = resolved ? resolved.portionQty : null;
+let minQty = null;
+FODMAP_COMPONENTS.forEach((k) => {
+const gramsPerUnit = (entry.fodmapGrams[k] || 0) / (entry.unitBasis.quantity || 1);
+if (gramsPerUnit <= 0) return;
+const thisContribution = thisPortionQty != null ? (entry.fodmapGrams[k] || 0) * (thisPortionQty / (entry.unitBasis.quantity || 1)) : 0;
+const othersTotal = Math.max(0, (diet.fodmapGrams[k] || 0) - thisContribution);
+const category = (k === 'fructans' || k === 'gos') ? entry.oligoCategory : 'any';
+const bounds = fodmapBoundsFor(k, category);
+const headroom = (bounds[0] * THRESHOLD_SAFETY_MARGIN) - othersTotal;
+const targetQty = headroom > 0 ? headroom / gramsPerUnit : 0;
+if (minQty == null || targetQty < minQty) minQty = targetQty;
+});
+return minQty;
+}
+
 // Resolves one ingredient line to the reference entry (and effective
 // quantity) it should actually be judged against, taking the line's
 // current lineOverrides entry (if any) into account -- the ONE place
@@ -635,6 +706,18 @@ return { entry, dropped, portionQty, wholeQty, subName };
 }
 
 const MIXED_OLIGO_CATEGORY = 'veg_fruit'; // conservative default when a recipe's fructans/GOS come from more than one category -- see computeRecipeDiet
+// A genuinely mixed-category recipe (say, real onion AND real wheat both
+// contributing meaningful fructans) has no single correct table to sum
+// against, hence the conservative MIXED_OLIGO_CATEGORY fallback -- but a
+// TRACE contribution from a second category (every other ingredient
+// reading <0.01g, rounding-error-level) shouldn't be enough to drag the
+// whole recipe onto the stricter table when it's really a one-ingredient
+// question. Confirmed live: chickpeas alone drove the total, every other
+// GOS source was <0.01g/"None", yet the mere presence of a second
+// category flipped the recipe to the narrower veg_fruit window. This
+// threshold says the dominant category's own table still applies as
+// long as it accounts for at least this share of the total.
+const OLIGO_CATEGORY_DOMINANCE_THRESHOLD = 0.95;
 
 // Pure arithmetic over already-cached reference entries -- no AI call,
 // safe to re-run on every render. Returns null (not partial numbers) if
@@ -652,17 +735,19 @@ const totals = {}; MACRO_FIELDS.forEach((k) => { totals[k] = 0; });
 const fodmapGrams = {}; FODMAP_COMPONENTS.forEach((k) => { fodmapGrams[k] = 0; });
 // oligoCategory only matters for fructans/GOS -- tracked per component,
 // not just once, since a recipe could have fructans-only from a grain
-// and GOS-only from a vegetable at the same time. A single contributing
-// category (the common case -- most recipes' fructan/GOS sources are
-// all produce, or all grains/legumes, not a genuine mix) is judged
-// against ITS OWN correct table; only a real mix falls back to the
-// conservative MIXED_OLIGO_CATEGORY default, so a single-ingredient
+// and GOS-only from a vegetable at the same time. Grams are tracked PER
+// CATEGORY (not just which categories appear at all), so a dominant
+// ingredient's own correct table still applies even when trace amounts
+// from a differently-categorised ingredient are also present -- see
+// OLIGO_CATEGORY_DOMINANCE_THRESHOLD below. Only a genuine mix (no
+// single category accounting for the bulk of the total) falls back to
+// the conservative MIXED_OLIGO_CATEGORY default, so a single-ingredient
 // recipe never disagrees with its own per-line breakdown the way a
 // blanket default would (confirmed live: 0.43g GOS from tinned
 // chickpeas alone read "moderate" per-line under grain_legume_nut but
 // "high" at rollup under a blanket veg_fruit default -- the same grams,
 // two different verdicts).
-const oligoCatsSeen = { fructans: new Set(), gos: new Set() };
+const oligoCatGrams = { fructans: {}, gos: {} };
 const allergens = new Set();
 const dietaryFlags = new Set();
 let resolvedCount = 0;
@@ -683,7 +768,9 @@ const portionScale = portionQty / (entry.unitBasis.quantity || 1);
 FODMAP_COMPONENTS.forEach((k) => {
 const grams = (entry.fodmapGrams[k] || 0) * portionScale;
 fodmapGrams[k] += grams;
-if ((k === 'fructans' || k === 'gos') && grams > 0) oligoCatsSeen[k].add(entry.oligoCategory);
+if ((k === 'fructans' || k === 'gos') && grams > 0) {
+oligoCatGrams[k][entry.oligoCategory] = (oligoCatGrams[k][entry.oligoCategory] || 0) + grams;
+}
 });
 }
 (entry.allergens || []).forEach((a) => allergens.add(a));
@@ -692,8 +779,18 @@ if ((k === 'fructans' || k === 'gos') && grams > 0) oligoCatsSeen[k].add(entry.o
 if (resolvedCount < r.ingredientData.length) return null;
 const fodmap = {};
 FODMAP_COMPONENTS.forEach((k) => {
-const cats = oligoCatsSeen[k];
-const category = cats && cats.size === 1 ? [...cats][0] : MIXED_OLIGO_CATEGORY;
+let category = MIXED_OLIGO_CATEGORY;
+if (k === 'fructans' || k === 'gos') {
+const byCat = Object.entries(oligoCatGrams[k]);
+if (byCat.length <= 1) {
+// Zero or one category contributed at all -- the simple case,
+// no dominance question to ask.
+category = byCat.length === 1 ? byCat[0][0] : MIXED_OLIGO_CATEGORY;
+} else {
+const [dominantCat, dominantGrams] = byCat.reduce((a, b) => (b[1] > a[1] ? b : a));
+category = (dominantGrams / fodmapGrams[k]) >= OLIGO_CATEGORY_DOMINANCE_THRESHOLD ? dominantCat : MIXED_OLIGO_CATEGORY;
+}
+}
 fodmap[k] = fodmapLevelFromGrams(k, fodmapGrams[k], category);
 });
 return { totals, fodmapGrams, fodmap, allergens: [...allergens], dietaryFlags: [...dietaryFlags] };
@@ -819,25 +916,45 @@ lineDietaryFlags.length ? `Also: ${lineDietaryFlags.map(escapeHtml).join(', ')}`
 : '';
 let chips = '';
 let worstLevel = 'none';
-if (!dropped && portionQty != null && entry.unitBasis.quantity > 0) {
+let noQtyNote = '';
+if (!dropped) {
+// A line with no stated quantity (an "optional" ingredient, or a vague
+// "to taste") still has FODMAP content worth knowing about -- confirmed
+// live gap: an ingredient like this showed its allergens (a boolean
+// presence, needing no quantity) but silently showed NO FODMAP chips
+// at all, since the scaled figure had nothing to scale BY. Falls back
+// to the entry's own reference amount (scale 1) rather than omitting
+// entirely, clearly flagged as unscaled since it isn't this line's
+// real amount.
+const hasQty = portionQty != null && entry.unitBasis.quantity > 0;
+const scale = hasQty ? portionQty / entry.unitBasis.quantity : 1;
+if (!hasQty) noQtyNote = `No quantity given for this line — shown at the reference amount (${entry.unitBasis.quantity}${entry.unitBasis.unit}), not scaled to what's actually used here.`;
 // The actual grams of each carbohydrate THIS PORTION contributes --
 // concentration (entry.fodmapGrams, per its own unitBasis) scaled by
 // how much of the ingredient this portion actually uses. Sound at
 // ANY quantity, unlike trying to interpolate a pre-assigned category
 // down (the old approach): this is the same real chemistry the
 // recipe-level total (computeRecipeDiet) sums across ingredients.
-const scale = portionQty / entry.unitBasis.quantity;
 chips = FODMAP_COMPONENTS.map((k) => {
 const grams = (entry.fodmapGrams[k] || 0) * scale;
 const category = (k === 'fructans' || k === 'gos') ? entry.oligoCategory : 'any';
 const level = fodmapLevelFromGrams(k, grams, category);
-if (level === 'high') worstLevel = 'high'; else if (level === 'moderate' && worstLevel !== 'high') worstLevel = 'moderate';
+// Tracks the worst level actually reached, INCLUDING 'low' -- a real
+// bug caught live: this used to only ever record 'moderate'/'high',
+// so an ingredient rated 'low' across the board (white onion, at a
+// small enough portion) never made needsOverride true below, hiding
+// its substitute/reduce/drop control even though it's a genuinely
+// FODMAP-relevant ingredient worth being able to act on.
+if (level === 'high') worstLevel = 'high';
+else if (level === 'moderate' && worstLevel !== 'high') worstLevel = 'moderate';
+else if (level === 'low' && worstLevel === 'none') worstLevel = 'low';
 // "Cut by Xg/portion to reach a lower rating" -- given this
 // ingredient's own concentration (grams of the compound per unit of
 // the ingredient, held constant), solve for how much LESS of it
 // would land the contribution just under the next threshold down.
+// Only offered with a REAL portion quantity to cut down from.
 let cutNote = '';
-if ((level === 'moderate' || level === 'high') && entry.fodmapGrams[k] > 0) {
+if (hasQty && (level === 'moderate' || level === 'high') && entry.fodmapGrams[k] > 0) {
 const bounds = fodmapBoundsFor(k, category);
 const thresholdGrams = (level === 'high' ? bounds[1] : bounds[0]) * THRESHOLD_SAFETY_MARGIN;
 const gramsPerUnit = entry.fodmapGrams[k] / entry.unitBasis.quantity;
@@ -852,10 +969,11 @@ return `<span class="fodmap-chip level-${level}" title="${escapeHtml(k)}">${esca
 }).join(' ');
 }
 // The override control only earns its place on a line that actually
-// NEEDS one -- a medium/high FODMAP component, an allergen, or a
-// dietary flag -- exactly "for each medium or high scoring fodmap, or
-// allergen, a substitute (or drop) option", per feedback; a fully
-// benign line stays quiet rather than growing a control nobody needs.
+// NEEDS one -- a FODMAP component above 'none', an allergen, or a
+// dietary flag -- per feedback ("for each medium or high scoring
+// fodmap, or allergen..."), broadened to include 'low' once the
+// worstLevel tracking bug above was found: a 'low' rating is still a
+// real, actionable FODMAP fact about the ingredient, not nothing.
 // `!!override` covers the dropped/reduced/sub cases directly (once a
 // line has an override at all, its control must stay visible so it can
 // be changed back) -- the other three conditions are what make the
@@ -863,11 +981,18 @@ return `<span class="fodmap-chip level-${level}" title="${escapeHtml(k)}">${esca
 const needsOverride = worstLevel !== 'none' || lineAllergens.length || lineDietaryFlags.length || !!override;
 let overrideHtml = '';
 if (needsOverride) {
-const mode = override ? (override.mode === 'sub' ? `sub:${override.subName}` : override.mode) : 'original';
+// A "reduced" override can come from either "less of just this
+// ingredient" or "less, accounting for what everything ELSE in the
+// recipe already contributes" (see suggestedLowQtyPerPortion vs.
+// suggestedLowQtyPerPortionForRecipeTotal) -- override.basis records
+// which one was picked, purely so the right option stays highlighted;
+// both set the same {mode:'reduced', qty} shape computeRecipeDiet reads.
+const mode = override ? (override.mode === 'sub' ? `sub:${override.subName}` : override.mode === 'reduced' ? `reduced-${override.basis || 'line'}` : override.mode) : 'original';
 const options = [`<option value="original"${mode === 'original' ? ' selected' : ''}>Use as written</option>`]
 .concat((entry.subs || []).map((s) => `<option value="sub:${escapeHtml(s.name)}"${mode === `sub:${s.name}` ? ' selected' : ''}>Substitute: ${escapeHtml(s.name)}${s.note ? ` (${escapeHtml(s.note)})` : ''}</option>`))
 .concat([
-`<option value="reduced"${mode === 'reduced' ? ' selected' : ''}>Use less…</option>`,
+`<option value="reduced-line"${mode === 'reduced-line' ? ' selected' : ''}>Use less (this ingredient to low)…</option>`,
+`<option value="reduced-recipe"${mode === 'reduced-recipe' ? ' selected' : ''}>Use less (whole recipe to low)…</option>`,
 `<option value="dropped"${mode === 'dropped' ? ' selected' : ''}>Drop from analysis</option>`,
 ]).join('');
 overrideHtml = `<div style="margin-top:4px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
@@ -879,6 +1004,7 @@ return `<div style="padding:4px 0;border-top:1px solid var(--line);${dropped ? '
 <div style="font-size:12px;">${label} — ${used}</div>
 ${flagsNote}
 ${chips ? `<div>${chips}</div>` : ''}
+${noQtyNote ? `<div class="settings-note">${escapeHtml(noQtyNote)}</div>` : ''}
 ${overrideHtml}
 </div>`;
 }).join('');
@@ -893,6 +1019,23 @@ ${rows}
 // Nothing rendered at all until "Analyse ingredients" has been run once
 // AND every line resolves -- the load-bearing requirement that a recipe
 // nobody's touched this feature on looks exactly like it always did.
+// True when some ingredient on this recipe has a reference entry that
+// EXISTS but predates dietary-flag checks (see state.js's migration) --
+// distinct from "no entry at all" (recipeIngredientsStatusHtml/the
+// "Analyse ingredients" link below handle that case). Needed because
+// once every line resolves to SOME entry, computeRecipeDiet stops
+// returning null and that link disappears entirely -- with nothing left
+// prompting a re-check, a stale entry's dietary flags would otherwise
+// never get filled in (confirmed live: chorizo's Pork/Meat/Animal-
+// product flags stayed blank forever with no way to trigger a refresh).
+function recipeHasStaleReference(r) {
+return r.ingredientData.some((line) => {
+if (!line.name) return false;
+const entry = findReferenceEntry(line.name, line.form);
+return entry && entry.dietaryFlagsStale;
+});
+}
+
 function recipeDietHtml(r) {
 if (busyIngredientAction.has(r.id)) return ''; // recipeIngredientsStatusHtml already shows the busy indicator, right above this
 if (!r.ingredientsParsedAt) return '';
@@ -902,7 +1045,8 @@ const per = r.servings ? r.servings : null;
 const row = (label, key, unit) => `<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0;"><span>${escapeHtml(label)}</span><span>${diet.totals[key].toFixed(1)}${unit}${per ? ` (${(diet.totals[key] / per).toFixed(1)}${unit}/serving)` : ''}</span></div>`;
 return `<div class="full">
 <button class="overview-panel-toggle" type="button" data-recipe-diet-toggle="${r.id}">${expandedDiet.has(r.id) ? '▾ Hide diet analysis' : '▸ Show diet analysis'}</button>
-${expandedDiet.has(r.id) ? `<div class="field-block" style="margin-top:6px;">
+${expandedDiet.has(r.id) ? `${recipeHasStaleReference(r) ? `<div class="settings-note" style="margin-top:6px;">Some ingredients predate dietary-flag checks (kosher/halal/vegetarian/vegan) — <span class="inline-goto-link" data-recipe-analyse="${r.id}">refresh</span> to fill them in.</div>` : ''}
+<div class="field-block" style="margin-top:6px;">
 <span class="field-label">FODMAP (per component) — summed across ingredients${per ? `, per portion (${per})` : ' -- set Servings above for a true per-portion figure; this is the whole-recipe total'}</span>
 <div>${fodmapRowHtml(diet.fodmap, diet.fodmapGrams)}</div>
 </div>
@@ -962,6 +1106,13 @@ ${FODMAP_COMPONENTS.map(fodmapInput).join('')}
 <label class="full">Allergens present<div class="tag-editor">${ALLERGEN_LIST.map((a) => `<span class="pick-chip${e.allergens.includes(a) ? ' active' : ''}" data-ref-allergen="${escapeHtml(a)}">${escapeHtml(a)}</span>`).join('')}</div></label>
 <label class="full">Also worth knowing <span class="settings-note">kosher/halal/vegetarian/vegan-relevant facts, checked the same way as allergens</span>
 <div class="tag-editor">${DIETARY_FLAGS.map((a) => `<span class="pick-chip${e.dietaryFlags.includes(a) ? ' active' : ''}" data-ref-dietary="${escapeHtml(a)}">${escapeHtml(a)}</span>`).join('')}</div></label>
+<label class="full">Substitutes <span class="settings-note">what a recipe's per-line "Substitute:" option offers -- add one if AI didn't find any</span>
+<div class="tag-editor">
+${e.subs.map((s, si) => `<span class="tag-chip">${escapeHtml(s.name)}${s.note ? ` — ${escapeHtml(s.note)}` : ''}<span class="tag-x" data-ingredient-ref-sub-remove="${e.id}" data-sub-idx="${si}">&times;</span></span>`).join('')}
+<input type="text" autocomplete="off" class="tag-add-input" placeholder="substitute name" data-ingredient-ref-sub-name="${e.id}" style="width:130px;">
+<input type="text" autocomplete="off" class="tag-add-input" placeholder="note (optional)" data-ingredient-ref-sub-note="${e.id}" style="width:160px;">
+<button type="button" class="todo-add-btn" data-ingredient-ref-sub-add="${e.id}" style="padding:3px 8px;">+</button>
+</div></label>
 <div class="idea-actions">
 <button class="add-btn" type="button" data-ingredient-ref-save="${e.id}">Save</button>
 <span class="inline-goto-link" data-ingredient-ref-cancel="1">Cancel</span>
@@ -1024,6 +1175,38 @@ chip.addEventListener('click', () => chip.classList.toggle('active'));
 });
 el.querySelectorAll('[data-ref-dietary]').forEach((chip) => {
 chip.addEventListener('click', () => chip.classList.toggle('active'));
+});
+// Substitutes commit immediately (add/remove), same as a recipe's own
+// Tags editor -- unlike the macro/FODMAP/allergen fields above, which
+// batch until Save, there's no natural "pending" state for a list where
+// re-rendering after every change is exactly what confirms it worked.
+// Doesn't set userEdited -- adding a substitute isn't correcting the
+// AI's own nutrition/FODMAP assessment, so it shouldn't block a future
+// re-assessment of THOSE figures the way an actual correction should.
+el.querySelectorAll('[data-ingredient-ref-sub-remove]').forEach((x) => {
+x.addEventListener('click', () => {
+const e = data.ingredientReference.find((r2) => r2.id === x.dataset.ingredientRefSubRemove);
+if (!e) return;
+e.subs.splice(parseInt(x.dataset.subIdx, 10), 1);
+renderIngredientReference();
+renderRecipes();
+queueSave();
+});
+});
+el.querySelectorAll('[data-ingredient-ref-sub-add]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const e = data.ingredientReference.find((r2) => r2.id === btn.dataset.ingredientRefSubAdd);
+if (!e) return;
+const row = btn.closest('[data-ingredient-ref-row]');
+const nameInput = row.querySelector('[data-ingredient-ref-sub-name]');
+const noteInput = row.querySelector('[data-ingredient-ref-sub-note]');
+const name = nameInput.value.trim();
+if (!name) return;
+e.subs.push({ id: uid(), name, note: noteInput.value.trim() });
+renderIngredientReference();
+renderRecipes();
+queueSave();
+});
 });
 el.querySelectorAll('[data-ingredient-ref-save]').forEach((btn) => {
 btn.addEventListener('click', () => {
@@ -1369,17 +1552,26 @@ const map = lineOverrides.get(recipeId);
 const val = select.value;
 if (val === 'original') { map.delete(idx); renderRecipes(); return; }
 if (val === 'dropped') { map.set(idx, { mode: 'dropped' }); renderRecipes(); return; }
-if (val === 'reduced') {
+if (val === 'reduced-line' || val === 'reduced-recipe') {
 const line = r.ingredientData[idx];
 const entry = line && findReferenceEntry(line.name, line.form);
 const asWrittenPortion = line && line.quantity != null ? (r.servings ? line.quantity / r.servings : line.quantity) : 0;
-const suggested = entry ? suggestedLowQtyPerPortion(entry) : null;
+// Two different targets for "less" -- this ingredient's OWN
+// concentration alone (suggestedLowQtyPerPortion) vs. accounting for
+// what every OTHER ingredient in the recipe already contributes to
+// the same components (suggestedLowQtyPerPortionForRecipeTotal).
+// FODMAP grams stack across a recipe, so a line that's individually
+// "low" can still leave the recipe TOTAL moderate/high -- confirmed
+// live gap: "doesn't target recipe level low levels (stacking)".
+const suggested = !entry ? null
+: val === 'reduced-line' ? suggestedLowQtyPerPortion(entry)
+: suggestedLowQtyPerPortionForRecipeTotal(r, idx, entry);
 // A default that's actually a reduction -- the smaller of the as-
 // written amount and the suggested "reach low" target, so picking
 // this from a line that's already fine doesn't paradoxically suggest
 // using MORE of it.
 const qty = suggested != null ? Math.min(suggested, asWrittenPortion) : asWrittenPortion;
-map.set(idx, { mode: 'reduced', qty: Math.max(0, qty) });
+map.set(idx, { mode: 'reduced', qty: Math.max(0, qty), basis: val === 'reduced-line' ? 'line' : 'recipe' });
 renderRecipes();
 return;
 }
@@ -1392,7 +1584,7 @@ map.set(idx, { mode: 'sub', subName });
 // assessed IT yet (only the original ingredient gets assessed by
 // "Analyse ingredients"). Same busy-indicator treatment as Parse/
 // Analyse -- this is a real AI call the first time, not instant.
-if (!findReferenceEntry(subName, '')) {
+if (needsAssessment(subName, '')) {
 busyIngredientAction.set(recipeId, `Assessing substitute: ${subName}…`);
 renderRecipes();
 try {
@@ -1417,7 +1609,8 @@ const idx = parseInt(input.dataset.lineOverrideQty, 10);
 if (!lineOverrides.has(recipeId)) lineOverrides.set(recipeId, new Map());
 const map = lineOverrides.get(recipeId);
 const v = parseFloat(input.value);
-map.set(idx, { mode: 'reduced', qty: Number.isFinite(v) && v >= 0 ? v : 0 });
+const prevBasis = (map.get(idx) || {}).basis; // preserve which "less" option is shown selected after a manual tweak
+map.set(idx, { mode: 'reduced', qty: Number.isFinite(v) && v >= 0 ? v : 0, basis: prevBasis });
 renderRecipes();
 });
 });

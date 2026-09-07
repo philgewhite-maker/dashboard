@@ -1200,7 +1200,20 @@ data.ingredientReference = data.ingredientReference.filter((e) => e && e.fodmapG
 // the same way as allergens) is newer than fodmapGrams itself -- an
 // entry surviving the filter above may still predate it, so default
 // rather than drop (nothing about it is invalid, just incomplete).
-data.ingredientReference.forEach((e) => { if (!Array.isArray(e.dietaryFlags)) e.dietaryFlags = []; });
+// `dietaryAssessedAt` is the actual signal an entry was ever asked about
+// dietary flags at all -- an EMPTY dietaryFlags array is ambiguous on
+// its own (genuinely none present, vs. never actually checked), so
+// recipes.js's ensureReferenceEntry uses the absence of this timestamp
+// (not the array's own contents) to queue a real re-check next time the
+// ingredient is used, without discarding anything else already on the
+// entry (confirmed live: wine/chorizo/fish assessed before this field
+// existed stayed silently blank forever under the first, naive version
+// of this migration, which set dietaryFlags:[] with no way to tell that
+// apart from "AI checked and found none").
+data.ingredientReference.forEach((e) => {
+if (!Array.isArray(e.dietaryFlags)) e.dietaryFlags = [];
+if (!e.dietaryAssessedAt) e.dietaryFlagsStale = true;
+});
 }
 
 // Every save is a full-document overwrite of DATA_KEY — there's no way to
