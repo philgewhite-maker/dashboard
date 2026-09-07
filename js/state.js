@@ -1186,6 +1186,16 @@ if (typeof r.ingredientsParsedAt !== 'string') r.ingredientsParsedAt = '';
 if (typeof r.ingredientsSignature !== 'string') r.ingredientsSignature = '';
 });
 if (!Array.isArray(data.ingredientReference)) data.ingredientReference = [];
+// FODMAP moved from a flat low/moderate/high rating per component (old
+// `entry.fodmap`) to real grams of the actual carbohydrate per component
+// (`entry.fodmapGrams`, compared against fixed published thresholds) --
+// see js/ai.js's FODMAP_THRESHOLDS_G. An entry filled under the old shape
+// has no valid way to become the new one (a category can't be reversed
+// back into a gram figure), so rather than guess, drop it and let it get
+// re-assessed fresh next time a recipe needs it. A user-edited entry is
+// dropped too -- there's no way to know what gram figures the person who
+// corrected the old rating actually intended.
+data.ingredientReference = data.ingredientReference.filter((e) => e && e.fodmapGrams && typeof e.fodmapGrams === 'object');
 }
 
 // Every save is a full-document overwrite of DATA_KEY — there's no way to

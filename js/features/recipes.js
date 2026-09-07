@@ -5,7 +5,7 @@
 import { data, queueSave, DEFAULT_RECIPE_RATING_CATEGORIES, slugifyField, averageRating, getLocalSettings, setLocalSetting } from '../state.js';
 import { photoDelete, photoGet, photoUrl } from '../db.js';
 import { escapeHtml, uid, todayStr, resizeImageToBlob, openLightbox, pickChipHtml } from '../utils.js';
-import { MissingKeyError, extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, parseIngredients, assessIngredient, ALLERGEN_LIST, FODMAP_COMPONENTS } from '../ai.js';
+import { MissingKeyError, extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, parseIngredients, assessIngredient, ALLERGEN_LIST, FODMAP_COMPONENTS, FODMAP_THRESHOLDS_G, OLIGO_CATEGORIES, fodmapLevelFromGrams } from '../ai.js';
 import { storePhoto, uploadAttachment, deleteAttachment, openAttachment, formatBytes } from '../files.js';
 import { getConfig } from '../sync/selfhost.js';
 
@@ -504,17 +504,46 @@ renderIngredientReference();
 queueSave();
 }
 
-const FODMAP_RANK = { none: 0, low: 1, moderate: 2, high: 3 };
 const MACRO_FIELDS = ['calories', 'protein', 'carbs', 'sugars', 'fat', 'saturates', 'fibre', 'salt'];
+
+// The bounds ([lowMax, highMin], in grams of the actual carbohydrate) a
+// given component/category is judged against -- same fallback order
+// fodmapLevelFromGrams (ai.js) uses internally, exposed here too since the
+// "cut by Xg to reach a lower rating" suggestion (recipeFodmapByLineHtml)
+// needs the raw numbers, not just the derived level.
+function fodmapBoundsFor(component, category) {
+const table = FODMAP_THRESHOLDS_G[component];
+if (!table) return null;
+return table.any || table[category] || table.veg_fruit;
+}
 
 // Pure arithmetic over already-cached reference entries -- no AI call,
 // safe to re-run on every render. Returns null (not partial numbers) if
 // any line can't be resolved yet, so the UI can tell "fully analysed"
 // from "still missing something" without silently under-reporting.
+//
+// FODMAP is summed as real grams of each carbohydrate (fructans, GOS,
+// lactose, excess fructose, polyols) across every line -- genuinely
+// additive chemistry, unlike the old flat low/moderate/high rollup
+// (which just took the single worst-rated ingredient regardless of how
+// little of it was actually used). The final per-component LEVEL is only
+// derived once, after the sum, against the fixed published thresholds.
 function computeRecipeDiet(r) {
 const toggled = substituteToggles.get(r.id) || new Set();
 const totals = {}; MACRO_FIELDS.forEach((k) => { totals[k] = 0; });
-const fodmap = {}; FODMAP_COMPONENTS.forEach((k) => { fodmap[k] = 'none'; });
+const fodmapGrams = {}; FODMAP_COMPONENTS.forEach((k) => { fodmapGrams[k] = 0; });
+// oligoCategory only matters for fructans/GOS -- tracked per component,
+// not just once, since a recipe could have fructans-only from a grain
+// and GOS-only from a vegetable at the same time. A single contributing
+// category (the common case -- most recipes' fructan/GOS sources are
+// all produce, or all grains/legumes, not a genuine mix) is judged
+// against ITS OWN correct table; only a real mix falls back to the
+// conservative 'veg_fruit' default, so a single-ingredient recipe never
+// disagrees with its own per-line breakdown the way a blanket default
+// would (confirmed live: 0.43g GOS from tinned chickpeas alone read
+// "moderate" per-line under grain_legume_nut but "high" at rollup under
+// a blanket veg_fruit default -- the same grams, two different verdicts).
+const oligoCatsSeen = { fructans: new Set(), gos: new Set() };
 const allergens = new Set();
 let resolvedCount = 0;
 for (let i = 0; i < r.ingredientData.length; i += 1) {
@@ -532,12 +561,30 @@ resolvedCount += 1;
 if (line.quantity != null) {
 const scale = line.quantity / (entry.unitBasis.quantity || 1);
 MACRO_FIELDS.forEach((k) => { totals[k] += (entry.nutrition[k] || 0) * scale; });
-FODMAP_COMPONENTS.forEach((k) => { if (FODMAP_RANK[entry.fodmap[k]] > FODMAP_RANK[fodmap[k]]) fodmap[k] = entry.fodmap[k]; });
+// FODMAP thresholds are inherently a per-PORTION question (same
+// reasoning recipeFodmapByLineHtml documents) -- unlike the macro
+// totals above (whole-recipe, divided for display only), this sums
+// PER-PORTION grams directly, so the rollup below is comparable to the
+// published thresholds as-is. Falls back to the whole-recipe amount
+// (flagged in the label, recipeDietHtml) when Servings isn't set.
+const portionQty = r.servings ? line.quantity / r.servings : line.quantity;
+const portionScale = portionQty / (entry.unitBasis.quantity || 1);
+FODMAP_COMPONENTS.forEach((k) => {
+const grams = (entry.fodmapGrams[k] || 0) * portionScale;
+fodmapGrams[k] += grams;
+if ((k === 'fructans' || k === 'gos') && grams > 0) oligoCatsSeen[k].add(entry.oligoCategory);
+});
 }
 (entry.allergens || []).forEach((a) => allergens.add(a));
 }
 if (resolvedCount < r.ingredientData.length) return null;
-return { totals, fodmap, allergens: [...allergens] };
+const fodmap = {};
+FODMAP_COMPONENTS.forEach((k) => {
+const cats = oligoCatsSeen[k];
+const category = cats && cats.size === 1 ? [...cats][0] : 'veg_fruit';
+fodmap[k] = fodmapLevelFromGrams(k, fodmapGrams[k], category);
+});
+return { totals, fodmapGrams, fodmap, allergens: [...allergens] };
 }
 
 function recipeIngredientsStatusHtml(r) {
@@ -599,8 +646,28 @@ if (!rows) return '';
 return `<div class="field-block full"><span class="field-label">Substitutes on file</span>${rows}</div>`;
 }
 
-function fodmapRowHtml(fodmap) {
-return FODMAP_COMPONENTS.map((k) => `<span class="pick-chip${fodmap[k] !== 'none' ? ' active' : ''}" title="${escapeHtml(k)}">${escapeHtml(k)}: ${escapeHtml(fodmap[k])}</span>`).join(' ');
+// `grams`, when given, is a {component: totalGrams} map shown alongside
+// each level -- the actual figure the level was derived from, not just
+// the bucket it landed in.
+function fodmapRowHtml(fodmap, grams) {
+return FODMAP_COMPONENTS.map((k) => {
+const g = grams ? grams[k] : null;
+const gText = g != null ? ` (${g < 0.01 ? '<0.01' : g.toFixed(2)}g)` : '';
+return `<span class="pick-chip${fodmap[k] !== 'none' ? ' active' : ''}" title="${escapeHtml(k)}">${escapeHtml(k)}: ${escapeHtml(fodmap[k])}${gText}</span>`;
+}).join(' ');
+}
+
+// A reference entry's OWN levels, derived from its fodmapGrams + its own
+// oligoCategory -- used for the ingredient-reference panel's read view,
+// which (unlike a recipe line) has no quantity to scale by, just the
+// entry exactly as assessed per its own unitBasis.
+function entryFodmapLevels(e) {
+const levels = {};
+FODMAP_COMPONENTS.forEach((k) => {
+const category = (k === 'fructans' || k === 'gos') ? e.oligoCategory : 'any';
+levels[k] = fodmapLevelFromGrams(k, e.fodmapGrams[k] || 0, category);
+});
+return levels;
 }
 
 function allergenListHtml(present) {
@@ -646,28 +713,49 @@ const perPortion = whole && r.servings ? `${perPortionQty.toFixed(1)}${escapeHtm
 const used = !whole ? escapeHtml(line.notes || 'amount not specified')
 : perPortion ? `${perPortion} per portion (${whole} across all ${r.servings})`
 : `${whole} across the whole recipe — set Servings above for a per-portion figure`;
-// A rating is only as useful as the amount it's actually FOR -- a spice
-// used in fractions of a teaspoon rated per 100g (confirmed live: sweet
-// paprika, 0.3tsp, rated "moderate" per 100g -- 100g of paprika isn't a
-// realistic amount in any dish) makes the rating essentially noise.
-// Only computed when the units actually match (never guess a cross-unit
-// conversion); a hedged, not asserted, read on how far off the scale is
-// -- this app doesn't know the real per-food threshold curve, only that
-// a rating for 30-50x the amount actually used deserves real scepticism.
-let scaleNote = '';
-if (perPortionQty != null && line.unit && entry.unitBasis.unit && line.unit.trim().toLowerCase() === entry.unitBasis.unit.trim().toLowerCase() && entry.unitBasis.quantity > 0) {
-const pct = (perPortionQty / entry.unitBasis.quantity) * 100;
-scaleNote = ` (${pct < 1 ? '<1' : pct.toFixed(0)}% of that amount${pct < 10 ? ' — probably an overestimate at this little' : ''})`;
-}
+if (perPortionQty == null || !(entry.unitBasis.quantity > 0)) {
 return `<div style="padding:4px 0;border-top:1px solid var(--line);">
-<div style="font-size:12px;">${label} — ${used}, rated per ${entry.unitBasis.quantity}${escapeHtml(entry.unitBasis.unit)}${scaleNote}</div>
-<div>${fodmapRowHtml(entry.fodmap)}</div>
+<div style="font-size:12px;">${label} — ${used}</div>
+</div>`;
+}
+// The actual grams of each carbohydrate THIS PORTION contributes --
+// concentration (entry.fodmapGrams, per its own unitBasis) scaled by
+// how much of the ingredient this portion actually uses. Sound at ANY
+// quantity, unlike trying to interpolate a pre-assigned category down
+// (the old approach): this is the same real chemistry the recipe-level
+// total (computeRecipeDiet) sums across ingredients.
+const scale = perPortionQty / entry.unitBasis.quantity;
+const chips = FODMAP_COMPONENTS.map((k) => {
+const grams = (entry.fodmapGrams[k] || 0) * scale;
+const category = (k === 'fructans' || k === 'gos') ? entry.oligoCategory : 'any';
+const level = fodmapLevelFromGrams(k, grams, category);
+// "Cut by Xg/portion to reach a lower rating" -- exactly the ask: given
+// this ingredient's own concentration (grams of the compound per gram/
+// unit of the ingredient, held constant), solve for how much LESS of
+// it would land the contribution just under the next threshold down.
+let cutNote = '';
+if ((level === 'moderate' || level === 'high') && entry.fodmapGrams[k] > 0) {
+const bounds = fodmapBoundsFor(k, category);
+const thresholdGrams = level === 'high' ? bounds[1] : bounds[0];
+const gramsPerUnit = entry.fodmapGrams[k] / entry.unitBasis.quantity;
+const targetQty = thresholdGrams / gramsPerUnit;
+const cutQty = perPortionQty - targetQty;
+if (cutQty > 0.01) {
+const nextLevel = level === 'high' ? 'moderate' : 'low';
+cutNote = ` — cut by about ${cutQty < 1 ? cutQty.toFixed(2) : cutQty.toFixed(1)}${escapeHtml(entry.unitBasis.unit)}/portion to reach ${nextLevel}`;
+}
+}
+return `<span class="pick-chip${level !== 'none' ? ' active' : ''}" title="${escapeHtml(k)}">${escapeHtml(k)}: ${escapeHtml(level)} (${grams < 0.01 ? '<0.01' : grams.toFixed(2)}g)${cutNote}</span>`;
+}).join(' ');
+return `<div style="padding:4px 0;border-top:1px solid var(--line);">
+<div style="font-size:12px;">${label} — ${used}</div>
+<div>${chips}</div>
 </div>`;
 }).join('');
 if (!rows) return '';
 return `<div class="field-block" style="margin-top:6px;">
 <span class="field-label">FODMAP by ingredient</span>
-<div class="settings-note">Each rated at its own reference amount (below) -- compare against the PER-PORTION figure, not the whole-recipe one; a rating isn't linearly divisible by amount, but a portion using much less than the reference amount is a real reason to expect better than the rating shown. Edit the entry in Ingredient Reference if it looks wrong even at the right amount.</div>
+<div class="settings-note">Grams of the actual carbohydrate this PORTION contributes, compared against fixed published thresholds -- genuinely valid at any quantity, and additive with the other ingredients (the total above is the real sum, not a worst-case guess). Edit the entry in Ingredient Reference if the underlying concentration looks wrong.</div>
 ${rows}
 </div>`;
 }
@@ -685,8 +773,8 @@ const row = (label, key, unit) => `<div style="display:flex;justify-content:spac
 return `<div class="full">
 <button class="overview-panel-toggle" type="button" data-recipe-diet-toggle="${r.id}">${expandedDiet.has(r.id) ? '▾ Hide diet analysis' : '▸ Show diet analysis'}</button>
 ${expandedDiet.has(r.id) ? `<div class="field-block" style="margin-top:6px;">
-<span class="field-label">FODMAP (per component) — worst case across ingredients</span>
-<div>${fodmapRowHtml(diet.fodmap)}</div>
+<span class="field-label">FODMAP (per component) — summed across ingredients${per ? `, per portion (${per})` : ' -- set Servings above for a true per-portion figure; this is the whole-recipe total'}</span>
+<div>${fodmapRowHtml(diet.fodmap, diet.fodmapGrams)}</div>
 </div>
 ${recipeFodmapByLineHtml(r)}
 <div class="field-block" style="margin-top:6px;">
@@ -716,16 +804,28 @@ let editingReferenceId = null;
 
 function ingredientRefEditHtml(e) {
 const macroInput = (label, key) => `<label>${escapeHtml(label)}<input type="number" step="any" data-ref-nutrition="${key}" value="${e.nutrition[key]}"></label>`;
-const fodmapSelect = (key) => `<label>${escapeHtml(key)}<select data-ref-fodmap="${key}">${['none', 'low', 'moderate', 'high'].map((lvl) => `<option value="${lvl}" ${e.fodmap[key] === lvl ? 'selected' : ''}>${lvl}</option>`).join('')}</select></label>`;
+// Grams of the actual FODMAP carbohydrate (fructans, GOS, lactose, excess
+// fructose, polyols) per the unit basis above -- NOT a low/moderate/high
+// category any more (see js/ai.js's FODMAP_THRESHOLDS_G/fodmapLevelFromGrams);
+// the level shown elsewhere is always DERIVED from this figure against
+// fixed published thresholds, never set directly.
+const fodmapInput = (key) => `<label>${escapeHtml(key)} (g)<input type="number" step="any" min="0" data-ref-fodmap="${key}" value="${e.fodmapGrams[key]}"></label>`;
 return `<div class="idea-row" data-ingredient-ref-row="${e.id}">
-<div class="idea-top"><span class="idea-title">Editing: ${escapeHtml(e.name)}${e.form ? ` (${escapeHtml(e.form)})` : ''}</span></div>
+<div class="idea-top"><span class="idea-title">Editing: ${escapeHtml(e.name)}${e.form ? ` (${escapeHtml(e.form)})` : ''}</span>
+<span class="idea-date">per ${e.unitBasis.quantity}${escapeHtml(e.unitBasis.unit)}</span></div>
 <div class="tinder-fields" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
 ${macroInput('Calories', 'calories')}${macroInput('Protein (g)', 'protein')}
 ${macroInput('Carbs (g)', 'carbs')}${macroInput('— sugars (g)', 'sugars')}
 ${macroInput('Fat (g)', 'fat')}${macroInput('— saturates (g)', 'saturates')}
 ${macroInput('Fibre (g)', 'fibre')}${macroInput('Salt (g)', 'salt')}
-${FODMAP_COMPONENTS.map(fodmapSelect).join('')}
 </div>
+<label class="full">Fructan/GOS table <span class="settings-note">which published threshold window this ingredient's fructans/GOS are judged against</span>
+<select data-ref-oligo>${OLIGO_CATEGORIES.map((c) => `<option value="${c}" ${e.oligoCategory === c ? 'selected' : ''}>${c === 'grain_legume_nut' ? 'Grain / legume / nut (wider window)' : 'Vegetable / fruit (narrower window)'}</option>`).join('')}</select>
+</label>
+<div class="tinder-fields" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+${FODMAP_COMPONENTS.map(fodmapInput).join('')}
+</div>
+<div class="settings-note">Grams of the actual carbohydrate per ${e.unitBasis.quantity}${escapeHtml(e.unitBasis.unit)} -- e.g. tinned chickpeas typically hold less GOS than dried/cooked, since some leaches into the tinning liquid.</div>
 <label class="full">Allergens present<div class="tag-editor">${ALLERGEN_LIST.map((a) => `<span class="pick-chip${e.allergens.includes(a) ? ' active' : ''}" data-ref-allergen="${escapeHtml(a)}">${escapeHtml(a)}</span>`).join('')}</div></label>
 <div class="idea-actions">
 <button class="add-btn" type="button" data-ingredient-ref-save="${e.id}">Save</button>
@@ -740,7 +840,7 @@ return `<div class="idea-row" data-ingredient-ref-row="${e.id}">
 <div class="idea-top"><span class="idea-title">${escapeHtml(e.name)}${e.form ? ` (${escapeHtml(e.form)})` : ''}</span>
 <span class="idea-date">per ${e.unitBasis.quantity}${escapeHtml(e.unitBasis.unit)}${e.userEdited ? ' · edited' : ''}</span></div>
 <div class="settings-note">Cal ${e.nutrition.calories} · Protein ${e.nutrition.protein}g · Carbs ${e.nutrition.carbs}g · Fat ${e.nutrition.fat}g · Fibre ${e.nutrition.fibre}g · Salt ${e.nutrition.salt}g</div>
-<div>${fodmapRowHtml(e.fodmap)}</div>
+<div>${fodmapRowHtml(entryFodmapLevels(e), e.fodmapGrams)}</div>
 ${e.allergens.length ? `<div class="settings-note">Allergens: ${e.allergens.map(escapeHtml).join(', ')}</div>` : ''}
 ${e.subs.length ? `<div class="settings-note">Substitutes: ${e.subs.map((s) => `${escapeHtml(s.name)}${s.note ? ` (${escapeHtml(s.note)})` : ''}`).join('; ')}</div>` : ''}
 <div class="idea-actions">
@@ -795,7 +895,12 @@ row.querySelectorAll('[data-ref-nutrition]').forEach((input) => {
 const v = parseFloat(input.value);
 e.nutrition[input.dataset.refNutrition] = Number.isFinite(v) ? v : 0;
 });
-row.querySelectorAll('[data-ref-fodmap]').forEach((select) => { e.fodmap[select.dataset.refFodmap] = select.value; });
+row.querySelectorAll('[data-ref-fodmap]').forEach((input) => {
+const v = parseFloat(input.value);
+e.fodmapGrams[input.dataset.refFodmap] = Number.isFinite(v) && v >= 0 ? v : 0;
+});
+const oligoSelect = row.querySelector('[data-ref-oligo]');
+if (oligoSelect) e.oligoCategory = OLIGO_CATEGORIES.includes(oligoSelect.value) ? oligoSelect.value : 'veg_fruit';
 e.allergens = [...row.querySelectorAll('[data-ref-allergen].active')].map((chip) => chip.dataset.refAllergen);
 // The whole reason this field exists (the tinned-vs-dried-chickpeas
 // case): once a person corrects an entry, a later "Analyse ingredients"

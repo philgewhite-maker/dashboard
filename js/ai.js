@@ -836,16 +836,62 @@ const ALLERGEN_LIST = ['Cereals containing gluten', 'Crustaceans', 'Eggs', 'Fish
 const FODMAP_COMPONENTS = ['fructans', 'gos', 'lactose', 'excessFructose', 'polyols'];
 const FODMAP_LEVELS = ['none', 'low', 'moderate', 'high'];
 
+// Real published (Monash-style) symptom-risk thresholds, per the user's
+// own research -- ABSOLUTE GRAMS of the actual carbohydrate present, not
+// grams of the food. This is the crucial correction over an earlier
+// version of this feature, which stored a flat low/moderate/high rating
+// per ingredient at one arbitrary reference amount: that can't be scaled
+// (a category isn't a number), and conflated "how much of this food" with
+// "how much of the actual FODMAP compound it contains". The right model
+// -- confirmed by the user's own sourced data -- is that the compound
+// mass genuinely IS additive and linear (real chemistry: more food really
+// does contain proportionally more of the sugar/fibre in question), so
+// what belongs in the reference table is a per-ingredient CONCENTRATION
+// (grams of the compound per unitBasis), and the threshold that turns a
+// gram figure into low/moderate/high is fixed and universal, not
+// per-ingredient. [lowMax, highMin) -- below lowMax is "low", from
+// lowMax up to (not including) highMin is "moderate", at/above highMin
+// is "high". Oligosaccharides (fructans/GOS) have a stricter threshold
+// for vegetables/fruits than for grains/legumes/nuts; excess fructose
+// has a stricter threshold when other FODMAPs are also present, which a
+// real multi-ingredient recipe almost always has -- so that row (not the
+// single-FODMAP row) is the one used throughout this app.
+const FODMAP_THRESHOLDS_G = {
+fructans: { grain_legume_nut: [0.30, 0.45], veg_fruit: [0.20, 0.30] },
+gos: { grain_legume_nut: [0.30, 0.45], veg_fruit: [0.20, 0.30] },
+lactose: { any: [1.00, 4.00] },
+excessFructose: { any: [0.15, 0.25] },
+polyols: { any: [0.40, 0.60] }, // "total polyols combined" row -- sorbitol and mannitol aren't broken out individually
+};
+const OLIGO_CATEGORIES = ['grain_legume_nut', 'veg_fruit'];
+
+// Turns an actual gram figure into a level using the fixed table above --
+// the ONE place that decision is made, so a recipe's totals and a single
+// ingredient's own contribution are always judged the same way.
+// oligoCategory only matters for fructans/gos; ignored for the other three.
+function fodmapLevelFromGrams(component, grams, oligoCategory) {
+if (!(grams > 0)) return 'none';
+const table = FODMAP_THRESHOLDS_G[component];
+if (!table) return 'none';
+const bounds = table.any || table[oligoCategory] || table.veg_fruit;
+const [lowMax, highMin] = bounds;
+if (grams < lowMax) return 'low';
+if (grams < highMin) return 'moderate';
+return 'high';
+}
+
 const INGREDIENT_ASSESS_MAX_TOKENS = 1200;
 function ingredientAssessPrompt(name, form) {
 return `Assess this single food ingredient: "${name}"${form ? ` (${form})` : ''}. Return ONLY a JSON object, no other text, no markdown fences: `
 + '{"unitBasis":{"quantity":100,"unit":"g"}, '
 + '"nutrition":{"calories":0,"protein":0,"carbs":0,"sugars":0,"fat":0,"saturates":0,"fibre":0,"salt":0}, '
-+ '"fodmap":{"fructans":"none","gos":"none","lactose":"none","excessFructose":"none","polyols":"none"}, '
++ '"oligoCategory":"veg_fruit", '
++ '"fodmapGrams":{"fructans":0,"gos":0,"lactose":0,"excessFructose":0,"polyols":0}, '
 + '"allergens":[], "subs":[{"name":"","note":""}]}. '
 + 'unitBasis: pick an amount close to how much of this a person actually uses in ONE dish, not a fixed default -- {"quantity":100,"unit":"g"} for a vegetable, meat, or other ingredient normally used in bulk; a countable unit like {"quantity":1,"unit":"clove"} / {"quantity":1,"unit":"medium"} for produce typically counted rather than weighed; but for anything used in small, potent amounts -- a spice, herb, stock cube, extract, seasoning -- use ITS typical amount instead ({"quantity":1,"unit":"tsp"}, {"quantity":1,"unit":"clove"}, {"quantity":1,"unit":"cube"}...), never 100g of something no dish would ever contain 100g of. '
 + 'nutrition: standard nutrition-label figures, PER unitBasis. '
-+ `fodmap: PER unitBasis, EVERY one of fructans/gos/lactose/excessFructose/polyols rated one of ${JSON.stringify(FODMAP_LEVELS)} -- don't omit any, even if "none". `
++ `oligoCategory: which published FODMAP threshold table this food's fructans/GOS are judged against -- "grain_legume_nut" for a grain, legume, pulse, or nut/seed; "veg_fruit" for a vegetable or fruit (use "veg_fruit" for anything that's neither, e.g. a spice, dairy, or meat). `
++ 'fodmapGrams: how many GRAMS OF THE ACTUAL CARBOHYDRATE (fructans, GOS, lactose, excess fructose, total polyols) this ingredient contains PER unitBasis -- NOT a low/moderate/high rating, an actual gram figure (can be a decimal like 0.15, or 0 if genuinely absent) -- these get compared against fixed published thresholds separately, so give your best real estimate of the amount present, not a category. '
 + `allergens: which of these EXACT strings this ingredient contains, as a subset of ${JSON.stringify(ALLERGEN_LIST)} -- [] if none apply. `
 + 'subs: 1-3 common substitutes for this ingredient (useful for a gluten-free, dairy-free, low-FODMAP, or otherwise allergen-conscious kitchen where relevant), each a short note on when/why -- [] if nothing sensible applies. '
 + 'Give a reasonable best estimate -- this is a starting point a person can correct, not a lab measurement.';
@@ -854,10 +900,10 @@ function normaliseIngredientAssess(raw) {
 const r = raw || {};
 const unitBasis = (r.unitBasis && typeof r.unitBasis === 'object') ? r.unitBasis : {};
 const nutrition = (r.nutrition && typeof r.nutrition === 'object') ? r.nutrition : {};
-const fodmapRaw = (r.fodmap && typeof r.fodmap === 'object') ? r.fodmap : {};
+const fodmapRaw = (r.fodmapGrams && typeof r.fodmapGrams === 'object') ? r.fodmapGrams : {};
 const numOr0 = (v) => ((typeof v === 'number' && isFinite(v)) ? v : 0);
-const fodmap = {};
-FODMAP_COMPONENTS.forEach((k) => { fodmap[k] = FODMAP_LEVELS.includes(fodmapRaw[k]) ? fodmapRaw[k] : 'none'; });
+const fodmapGrams = {};
+FODMAP_COMPONENTS.forEach((k) => { fodmapGrams[k] = Math.max(0, numOr0(fodmapRaw[k])); });
 return {
 unitBasis: { quantity: numOr0(unitBasis.quantity) || 100, unit: String(unitBasis.unit || 'g') },
 nutrition: {
@@ -865,7 +911,11 @@ calories: numOr0(nutrition.calories), protein: numOr0(nutrition.protein), carbs:
 sugars: numOr0(nutrition.sugars), fat: numOr0(nutrition.fat), saturates: numOr0(nutrition.saturates),
 fibre: numOr0(nutrition.fibre), salt: numOr0(nutrition.salt),
 },
-fodmap,
+// Defaults to the STRICTER table (veg_fruit) on anything unrecognised --
+// same conservative-by-default reasoning as the excess-fructose
+// threshold row always being the "multiple FODMAPs present" one.
+oligoCategory: OLIGO_CATEGORIES.includes(r.oligoCategory) ? r.oligoCategory : 'veg_fruit',
+fodmapGrams,
 allergens: Array.isArray(r.allergens) ? r.allergens.filter((a) => ALLERGEN_LIST.includes(a)) : [],
 // No id assigned here -- ai.js stays a pure call-and-normalise layer;
 // recipes.js assigns ids when it actually persists a sub into
@@ -1262,4 +1312,5 @@ extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShopp
 identifyCountry, extractWellnessScreenshot,
 extractTripScreenshot, extractTripLegFromEmail,
 parseIngredients, assessIngredient, ALLERGEN_LIST, FODMAP_COMPONENTS, FODMAP_LEVELS,
+FODMAP_THRESHOLDS_G, OLIGO_CATEGORIES, fodmapLevelFromGrams,
 };
