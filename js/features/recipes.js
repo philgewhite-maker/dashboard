@@ -5,7 +5,7 @@
 import { data, queueSave, DEFAULT_RECIPE_RATING_CATEGORIES, slugifyField, averageRating, getLocalSettings, setLocalSetting } from '../state.js';
 import { photoDelete, photoGet, photoUrl } from '../db.js';
 import { escapeHtml, uid, todayStr, resizeImageToBlob, openLightbox, pickChipHtml } from '../utils.js';
-import { MissingKeyError, extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, parseIngredients, assessIngredient, ALLERGEN_LIST, FODMAP_COMPONENTS, FODMAP_THRESHOLDS_G, OLIGO_CATEGORIES, fodmapLevelFromGrams } from '../ai.js';
+import { MissingKeyError, extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, parseIngredients, assessIngredient, ALLERGEN_LIST, DIETARY_FLAGS, FODMAP_COMPONENTS, FODMAP_THRESHOLDS_G, OLIGO_CATEGORIES, fodmapLevelFromGrams } from '../ai.js';
 import { storePhoto, uploadAttachment, deleteAttachment, openAttachment, formatBytes } from '../files.js';
 import { getConfig } from '../sync/selfhost.js';
 
@@ -243,13 +243,22 @@ let recipeOverviewCollapsed = true;
 // and-remember pattern as recipeOverviewCollapsed, one flag for the
 // whole panel rather than per-entry.
 let referencePanelCollapsed = true;
-// Per-recipe, per-ingredient-line "use the substitute instead" toggle --
-// UI-only/in-memory (not persisted): id -> Set of ingredientData indices
-// currently showing their substitute's figures instead of their own.
-// This is exactly what makes "toggle between the as-written and
-// substituted version of a recipe" free -- flipping a toggle just
-// re-sums already-cached numbers (computeRecipeDiet), no AI call.
-const substituteToggles = new Map();
+// Per-recipe, per-ingredient-line "what if" override -- UI-only/in-memory
+// (not persisted, same as the toggle this replaced): recipeId -> Map of
+// ingredientData index -> one of:
+//   { mode: 'sub', subName }   -- use a listed substitute's own reference entry
+//   { mode: 'reduced', qty }   -- use LESS of the same ingredient (qty is
+//                                 PER-PORTION, in the line's own unit) --
+//                                 the third strategy from feedback: some
+//                                 problem ingredients don't need swapping
+//                                 out, just cutting down (Monash's own
+//                                 "cut the chickpeas by 18g/portion" case)
+//   { mode: 'dropped' }        -- leave it out of the analysis entirely
+// No entry for a line means "as written". This is exactly what makes
+// exploring these free -- every mode is pure arithmetic over already-
+// cached numbers (computeRecipeDiet) once the relevant reference entry
+// exists; only picking a not-yet-assessed substitute costs a real AI call.
+const lineOverrides = new Map();
 // recipeId -> a short "what's happening" string, shown IN PLACE of the
 // Parse/Analyse link itself (not just the top status bar, which sits far
 // from a card scrolled down the list and is easy to miss entirely --
@@ -435,10 +444,50 @@ function ingredientsSignatureOf(ingredients) {
 return (ingredients || []).join('\n');
 }
 
+// Strips common prep/size adjectives so "chopped onion", "onion (diced)",
+// and "large onion" all resolve to the same reference entry as plain
+// "onion" -- confirmed live pain point: an ingredient this common
+// shouldn't trigger a fresh AI call almost every time just because two
+// recipes' AI-parsed name differed by a leading adjective. Only touches
+// matching -- the entry itself still stores and displays whatever name it
+// was first created under.
+const NAME_FILLER_WORDS = ['chopped', 'diced', 'sliced', 'minced', 'crushed', 'grated', 'peeled', 'fresh', 'dried', 'ground', 'finely', 'roughly', 'large', 'medium', 'small', 'ripe', 'raw', 'cooked'];
+function canonicalIngredientName(name) {
+let n = String(name || '').trim().toLowerCase().replace(/[(),]/g, ' ');
+NAME_FILLER_WORDS.forEach((w) => { n = n.replace(new RegExp(`\\b${w}\\b`, 'g'), ' '); });
+return n.replace(/\s+/g, ' ').trim();
+}
+
 function findReferenceEntry(name, form) {
-const n = String(name || '').trim().toLowerCase();
+const n = canonicalIngredientName(name);
 const f = String(form || '').trim().toLowerCase();
-return data.ingredientReference.find((e) => e.name.toLowerCase() === n && (e.form || '').toLowerCase() === f);
+return data.ingredientReference.find((e) => canonicalIngredientName(e.name) === n && (e.form || '').toLowerCase() === f);
+}
+
+// A handful of ingredients that are always FODMAP/allergen/macro-
+// negligible regardless of recipe -- a static fact, not worth an AI call.
+// Confirmed live pain point: "particularly stupid to ask for water or
+// salt to be assessed". Deliberately narrow (no herbs/spices here -- those
+// genuinely vary, per the earlier paprika case) and skipped entirely when
+// a form is stated ("smoked salt", say) since that's a real signal it's
+// worth an actual look, not assumed generic.
+const TRIVIAL_INGREDIENTS = {
+water: { unit: 'ml' }, salt: { salt: 100 }, 'table salt': { salt: 100 }, 'sea salt': { salt: 100 },
+ice: { unit: 'ml' }, 'ice cubes': { unit: 'ml' },
+'black pepper': {}, pepper: {}, 'ground black pepper': {}, 'white pepper': {},
+'bicarbonate of soda': {}, 'baking soda': {},
+};
+function trivialReferenceEntry(name, form) {
+if (form) return null;
+const spec = TRIVIAL_INGREDIENTS[canonicalIngredientName(name)];
+if (!spec) return null;
+return {
+unitBasis: { quantity: 100, unit: spec.unit || 'g' },
+nutrition: { calories: 0, protein: 0, carbs: 0, sugars: 0, fat: 0, saturates: 0, fibre: 0, salt: spec.salt || 0 },
+oligoCategory: 'veg_fruit',
+fodmapGrams: { fructans: 0, gos: 0, lactose: 0, excessFructose: 0, polyols: 0 },
+allergens: [], dietaryFlags: [], subs: [],
+};
 }
 
 async function runParseIngredients(r) {
@@ -449,19 +498,21 @@ r.ingredientsSignature = ingredientsSignatureOf(r.ingredients);
 }
 
 // The one AI-calling step in the whole diet-analysis path besides the
-// parse itself -- and only for ingredients (or their toggled-in
-// substitute) that don't already have a reference entry. Every OTHER
-// recipe sharing that same (name, form) reuses the entry this creates;
-// nothing here is ever re-requested just because a DIFFERENT recipe
-// happens to also contain flour.
+// parse itself -- and only for ingredients (or a chosen substitute) that
+// don't already have a reference entry AND aren't one of the static
+// TRIVIAL_INGREDIENTS above. Every OTHER recipe sharing that same
+// (name, form) reuses the entry this creates; nothing here is ever
+// re-requested just because a DIFFERENT recipe happens to also contain
+// flour.
 async function ensureReferenceEntry(name, form) {
 if (findReferenceEntry(name, form)) return;
-const assessed = await assessIngredient(name, form);
+const trivial = trivialReferenceEntry(name, form);
+const assessed = trivial || await assessIngredient(name, form);
 data.ingredientReference.push({
 id: uid(), name, form,
 ...assessed,
 subs: assessed.subs.map((s) => ({ id: uid(), ...s })),
-aiFilledAt: new Date().toISOString(),
+aiFilledAt: trivial ? '' : new Date().toISOString(),
 userEdited: false,
 });
 }
@@ -484,7 +535,7 @@ const seen = new Set();
 const toAssess = [];
 r.ingredientData.forEach((line) => {
 if (!line.name) return;
-const key = `${line.name.toLowerCase()}|${line.form.toLowerCase()}`;
+const key = `${canonicalIngredientName(line.name)}|${line.form.toLowerCase()}`;
 if (seen.has(key) || findReferenceEntry(line.name, line.form)) return;
 seen.add(key);
 toAssess.push(line);
@@ -509,13 +560,81 @@ const MACRO_FIELDS = ['calories', 'protein', 'carbs', 'sugars', 'fat', 'saturate
 // The bounds ([lowMax, highMin], in grams of the actual carbohydrate) a
 // given component/category is judged against -- same fallback order
 // fodmapLevelFromGrams (ai.js) uses internally, exposed here too since the
-// "cut by Xg to reach a lower rating" suggestion (recipeFodmapByLineHtml)
+// "cut by Xg to reach a lower rating" suggestion (recipeIngredientAnalysisHtml)
 // needs the raw numbers, not just the derived level.
 function fodmapBoundsFor(component, category) {
 const table = FODMAP_THRESHOLDS_G[component];
 if (!table) return null;
 return table.any || table[category] || table.veg_fruit;
 }
+
+// fodmapLevelFromGrams uses a STRICT "<" against the threshold -- a
+// target landed exactly ON the boundary (the naive division) still comes
+// back as the higher level, not the lower one it was meant to reach.
+// Confirmed live: 42.000042g of chickpeas (float division artefact, not
+// even the boundary exactly) still read "moderate". A small margin below
+// the threshold, imperceptible against any real quantity, keeps every
+// suggested target actually landing where it claims to.
+const THRESHOLD_SAFETY_MARGIN = 0.99;
+
+// Same suggested-target math as the "cut by Xg/portion" note
+// (recipeIngredientAnalysisHtml) -- the SMALLEST per-portion quantity
+// that would bring every one of this entry's flagged components under
+// its own "low" cutoff, so switching a line to "Use less…" starts from
+// a genuinely useful default rather than an arbitrary or unchanged one.
+// null when the entry has no FODMAP content at all to cut down.
+function suggestedLowQtyPerPortion(entry) {
+let minQty = null;
+FODMAP_COMPONENTS.forEach((k) => {
+const gramsPerUnit = (entry.fodmapGrams[k] || 0) / (entry.unitBasis.quantity || 1);
+if (gramsPerUnit <= 0) return;
+const category = (k === 'fructans' || k === 'gos') ? entry.oligoCategory : 'any';
+const bounds = fodmapBoundsFor(k, category);
+const targetQty = (bounds[0] * THRESHOLD_SAFETY_MARGIN) / gramsPerUnit;
+if (minQty == null || targetQty < minQty) minQty = targetQty;
+});
+return minQty;
+}
+
+// Resolves one ingredient line to the reference entry (and effective
+// quantity) it should actually be judged against, taking the line's
+// current lineOverrides entry (if any) into account -- the ONE place
+// that decision is made, shared by computeRecipeDiet (the totals) and
+// the per-line analysis UI (recipeIngredientAnalysisHtml), so the two
+// can never disagree about which entry/quantity a line is using.
+// Returns null only when the line's OWN ingredient has no reference
+// entry yet (nothing to resolve); a 'sub' override whose substitute
+// isn't assessed yet silently falls back to the original entry (the
+// override control only ever sets that mode once the substitute's
+// entry exists -- see the data-line-override-mode handler below).
+function resolveLineEntry(r, line, i) {
+let entry = findReferenceEntry(line.name, line.form);
+if (!entry) return null;
+const override = (lineOverrides.get(r.id) || new Map()).get(i);
+const dropped = !!(override && override.mode === 'dropped');
+let subName = '';
+if (override && override.mode === 'sub' && override.subName) {
+const subEntry = findReferenceEntry(override.subName, '');
+if (subEntry) { entry = subEntry; subName = override.subName; }
+}
+// portionQty is what FODMAP thresholds are judged against (a per-
+// PORTION question); wholeQty is what the macro totals scale by
+// (those stay whole-recipe, divided only for the per-serving display).
+// A 'reduced' override is expressed directly as a per-portion figure
+// (the natural unit for "cut it down by Xg/portion") and back-derived
+// into a whole-recipe equivalent for the macro side, rather than the
+// other way round.
+let portionQty = r.servings && line.quantity != null ? line.quantity / r.servings : line.quantity;
+let wholeQty = line.quantity;
+if (dropped) { portionQty = 0; wholeQty = 0; }
+else if (override && override.mode === 'reduced' && override.qty != null) {
+portionQty = override.qty;
+wholeQty = r.servings ? override.qty * r.servings : override.qty;
+}
+return { entry, dropped, portionQty, wholeQty, subName };
+}
+
+const MIXED_OLIGO_CATEGORY = 'veg_fruit'; // conservative default when a recipe's fructans/GOS come from more than one category -- see computeRecipeDiet
 
 // Pure arithmetic over already-cached reference entries -- no AI call,
 // safe to re-run on every render. Returns null (not partial numbers) if
@@ -529,7 +648,6 @@ return table.any || table[category] || table.veg_fruit;
 // little of it was actually used). The final per-component LEVEL is only
 // derived once, after the sum, against the fixed published thresholds.
 function computeRecipeDiet(r) {
-const toggled = substituteToggles.get(r.id) || new Set();
 const totals = {}; MACRO_FIELDS.forEach((k) => { totals[k] = 0; });
 const fodmapGrams = {}; FODMAP_COMPONENTS.forEach((k) => { fodmapGrams[k] = 0; });
 // oligoCategory only matters for fructans/GOS -- tracked per component,
@@ -538,36 +656,29 @@ const fodmapGrams = {}; FODMAP_COMPONENTS.forEach((k) => { fodmapGrams[k] = 0; }
 // category (the common case -- most recipes' fructan/GOS sources are
 // all produce, or all grains/legumes, not a genuine mix) is judged
 // against ITS OWN correct table; only a real mix falls back to the
-// conservative 'veg_fruit' default, so a single-ingredient recipe never
-// disagrees with its own per-line breakdown the way a blanket default
-// would (confirmed live: 0.43g GOS from tinned chickpeas alone read
-// "moderate" per-line under grain_legume_nut but "high" at rollup under
-// a blanket veg_fruit default -- the same grams, two different verdicts).
+// conservative MIXED_OLIGO_CATEGORY default, so a single-ingredient
+// recipe never disagrees with its own per-line breakdown the way a
+// blanket default would (confirmed live: 0.43g GOS from tinned
+// chickpeas alone read "moderate" per-line under grain_legume_nut but
+// "high" at rollup under a blanket veg_fruit default -- the same grams,
+// two different verdicts).
 const oligoCatsSeen = { fructans: new Set(), gos: new Set() };
 const allergens = new Set();
+const dietaryFlags = new Set();
 let resolvedCount = 0;
 for (let i = 0; i < r.ingredientData.length; i += 1) {
 const line = r.ingredientData[i];
 if (!line.name) { resolvedCount += 1; continue; } // a blank/unparseable line contributes nothing, isn't a gap
-let entry = findReferenceEntry(line.name, line.form);
-if (!entry) return null; // not analysed yet -- caller shows "Analyse ingredients" instead
-if (toggled.has(i) && entry.subs && entry.subs[0]) {
-// v1: one toggle is on/off, not a picker among several subs -- uses
-// the first listed substitute's own reference entry once it exists.
-const subEntry = findReferenceEntry(entry.subs[0].name, '');
-if (subEntry) entry = subEntry;
-}
+const resolved = resolveLineEntry(r, line, i);
+if (!resolved) return null; // not analysed yet -- caller shows "Analyse ingredients" instead
 resolvedCount += 1;
-if (line.quantity != null) {
-const scale = line.quantity / (entry.unitBasis.quantity || 1);
+const { entry, dropped, portionQty, wholeQty } = resolved;
+if (dropped) continue; // excluded from every total, including allergens -- "drop it" means drop it
+if (wholeQty != null) {
+const scale = wholeQty / (entry.unitBasis.quantity || 1);
 MACRO_FIELDS.forEach((k) => { totals[k] += (entry.nutrition[k] || 0) * scale; });
-// FODMAP thresholds are inherently a per-PORTION question (same
-// reasoning recipeFodmapByLineHtml documents) -- unlike the macro
-// totals above (whole-recipe, divided for display only), this sums
-// PER-PORTION grams directly, so the rollup below is comparable to the
-// published thresholds as-is. Falls back to the whole-recipe amount
-// (flagged in the label, recipeDietHtml) when Servings isn't set.
-const portionQty = r.servings ? line.quantity / r.servings : line.quantity;
+}
+if (portionQty != null) {
 const portionScale = portionQty / (entry.unitBasis.quantity || 1);
 FODMAP_COMPONENTS.forEach((k) => {
 const grams = (entry.fodmapGrams[k] || 0) * portionScale;
@@ -576,15 +687,16 @@ if ((k === 'fructans' || k === 'gos') && grams > 0) oligoCatsSeen[k].add(entry.o
 });
 }
 (entry.allergens || []).forEach((a) => allergens.add(a));
+(entry.dietaryFlags || []).forEach((f) => dietaryFlags.add(f));
 }
 if (resolvedCount < r.ingredientData.length) return null;
 const fodmap = {};
 FODMAP_COMPONENTS.forEach((k) => {
 const cats = oligoCatsSeen[k];
-const category = cats && cats.size === 1 ? [...cats][0] : 'veg_fruit';
+const category = cats && cats.size === 1 ? [...cats][0] : MIXED_OLIGO_CATEGORY;
 fodmap[k] = fodmapLevelFromGrams(k, fodmapGrams[k], category);
 });
-return { totals, fodmapGrams, fodmap, allergens: [...allergens] };
+return { totals, fodmapGrams, fodmap, allergens: [...allergens], dietaryFlags: [...dietaryFlags] };
 }
 
 function recipeIngredientsStatusHtml(r) {
@@ -624,36 +736,17 @@ ${rows || '<div class="empty">Nothing parsed.</div>'}
 </div>`;
 }
 
-// One row per parsed ingredient with a substitute on file -- the toggle
-// IS the "view the substituted version" control; nothing to show for a
-// line with no substitute, or before ingredients have been parsed at
-// all (recipeIngredientsStatusHtml/recipeDietHtml below handle those).
-function recipeSubstituteTogglesHtml(r) {
-if (!r.ingredientsParsedAt) return '';
-const toggled = substituteToggles.get(r.id) || new Set();
-const rows = r.ingredientData.map((line, i) => {
-if (!line.name) return '';
-const entry = findReferenceEntry(line.name, line.form);
-if (!entry || !entry.subs || !entry.subs.length) return '';
-const sub = entry.subs[0];
-const on = toggled.has(i);
-return `<label class="settings-note" style="display:flex;align-items:center;gap:6px;margin:2px 0;">
-<input type="checkbox" data-recipe-sub-toggle="${r.id}" data-sub-idx="${i}" ${on ? 'checked' : ''}>
-${escapeHtml(line.name)}${line.form ? ` (${escapeHtml(line.form)})` : ''} &rarr; <strong>${escapeHtml(sub.name)}</strong>${sub.note ? ` — ${escapeHtml(sub.note)}` : ''}
-</label>`;
-}).join('');
-if (!rows) return '';
-return `<div class="field-block full"><span class="field-label">Substitutes on file</span>${rows}</div>`;
-}
-
 // `grams`, when given, is a {component: totalGrams} map shown alongside
 // each level -- the actual figure the level was derived from, not just
-// the bucket it landed in.
+// the bucket it landed in. Red/amber/green (fodmap-chip's level-* classes),
+// not the app's usual pink -- a flat "active" highlight read no
+// differently for "low" than for "high", which defeats the point of a
+// severity indicator (per feedback).
 function fodmapRowHtml(fodmap, grams) {
 return FODMAP_COMPONENTS.map((k) => {
 const g = grams ? grams[k] : null;
 const gText = g != null ? ` (${g < 0.01 ? '<0.01' : g.toFixed(2)}g)` : '';
-return `<span class="pick-chip${fodmap[k] !== 'none' ? ' active' : ''}" title="${escapeHtml(k)}">${escapeHtml(k)}: ${escapeHtml(fodmap[k])}${gText}</span>`;
+return `<span class="fodmap-chip level-${escapeHtml(fodmap[k])}" title="${escapeHtml(k)}">${escapeHtml(k)}: ${escapeHtml(fodmap[k])}${gText}</span>`;
 }).join(' ');
 }
 
@@ -670,92 +763,129 @@ levels[k] = fodmapLevelFromGrams(k, e.fodmapGrams[k] || 0, category);
 return levels;
 }
 
-function allergenListHtml(present) {
-return ALLERGEN_LIST.map((a) => `<span class="pick-chip${present.includes(a) ? ' active' : ''}">${escapeHtml(a)}</span>`).join(' ');
+// Shared by the Allergens and Dietary flags rollups (same shape: a fixed
+// checklist, present ones highlighted) -- `list` is ALLERGEN_LIST or
+// DIETARY_FLAGS, `present` the subset actually found in this recipe.
+function flagListHtml(list, present) {
+return list.map((a) => `<span class="pick-chip${present.includes(a) ? ' active' : ''}">${escapeHtml(a)}</span>`).join(' ');
 }
 
-// The recipe-level FODMAP row above this (fodmapRowHtml(diet.fodmap)) is
-// a worst-case rollup -- the highest rating any single ingredient
-// contributes, per component -- which says nothing about which
-// ingredient that was, or whether it's rated at anywhere near the
-// amount this recipe actually uses. Real FODMAP ratings are typically
-// given for a SPECIFIC reference serving and don't scale down linearly
-// with less of it (a real threshold effect, not something safe to
-// approximate) -- so rather than pretend to divide it down, this shows
-// each ingredient's rating exactly as assessed, next to how much this
-// recipe actually calls for, so a look-wrong rating (or a scaling
-// mismatch worth a manual override) is something to actually check
-// against, not a black box.
-function recipeFodmapByLineHtml(r) {
-const toggled = substituteToggles.get(r.id) || new Set();
+// Per-ingredient-line breakdown -- FODMAP (with the recipe-level rollup's
+// own reasoning: a rollup alone can't say WHICH ingredient, or whether
+// it's near the amount actually used), plus the allergens/dietary flags
+// THIS line contributes (the recipe-level rollup lists them but not their
+// source -- confirmed live pain point: "where is Cereals containing
+// gluten coming from... I don't see it per component" -- an ingredient
+// contributing an allergen at all is reason enough to show it here even
+// when its FODMAP levels are all fine), and -- inline, not a separate
+// block -- the "what if" control for this line: swap in a substitute,
+// use less of it, or drop it, live-recomputing every total above.
+function recipeIngredientAnalysisHtml(r) {
 const rows = r.ingredientData.map((line, i) => {
 if (!line.name) return '';
-let entry = findReferenceEntry(line.name, line.form);
-if (!entry) return '';
+const resolved = resolveLineEntry(r, line, i);
+if (!resolved) return '';
+const { entry, dropped, portionQty, subName } = resolved;
+const override = (lineOverrides.get(r.id) || new Map()).get(i);
 let label = `${escapeHtml(line.name)}${line.form ? ` (${escapeHtml(line.form)})` : ''}`;
-if (toggled.has(i) && entry.subs && entry.subs[0]) {
-const subEntry = findReferenceEntry(entry.subs[0].name, '');
-if (subEntry) { entry = subEntry; label += ` &rarr; using substitute: ${escapeHtml(subEntry.name)}`; }
-}
+if (subName) label += ` &rarr; using substitute: <strong>${escapeHtml(subName)}</strong>`;
 // FODMAP is a per-PORTION question ("is a serving of this low/high"),
 // not a per-batch one -- 250g of flour across a whole traybake reads
 // very differently once it's divided by however many portions that
-// traybake actually makes. line.quantity is the WHOLE-RECIPE amount (as
-// written -- "250g wheat flour" is for the batch, not one portion), so
-// showing that alone next to a per-portion-shaped rating invites exactly
-// the wrong comparison. Divided by r.servings when it's set; flagged
-// explicitly (not silently left as the whole-batch figure) when it
-// isn't, since that ambiguity is itself worth surfacing rather than
-// guessing past.
-const whole = line.quantity != null ? `${line.quantity}${escapeHtml(line.unit)}` : null;
-const perPortionQty = whole && r.servings ? line.quantity / r.servings : (line.quantity != null ? line.quantity : null);
-const perPortion = whole && r.servings ? `${perPortionQty.toFixed(1)}${escapeHtml(line.unit)}` : null;
-const used = !whole ? escapeHtml(line.notes || 'amount not specified')
-: perPortion ? `${perPortion} per portion (${whole} across all ${r.servings})`
-: `${whole} across the whole recipe — set Servings above for a per-portion figure`;
-if (perPortionQty == null || !(entry.unitBasis.quantity > 0)) {
-return `<div style="padding:4px 0;border-top:1px solid var(--line);">
-<div style="font-size:12px;">${label} — ${used}</div>
-</div>`;
+// traybake actually makes. line.quantity is the WHOLE-RECIPE amount
+// as written, so the AS-WRITTEN per-portion figure is shown alongside
+// whatever the current override actually resolves to, when they differ.
+const asWrittenWhole = line.quantity != null ? `${line.quantity}${escapeHtml(line.unit)}` : null;
+const asWrittenPortion = asWrittenWhole && r.servings ? line.quantity / r.servings : (line.quantity != null ? line.quantity : null);
+let used;
+if (dropped) {
+used = 'excluded from this analysis';
+} else if (!asWrittenWhole) {
+used = escapeHtml(line.notes || 'amount not specified');
+} else if (!r.servings) {
+used = `${asWrittenWhole} across the whole recipe — set Servings above for a per-portion figure`;
+} else if (override && override.mode === 'reduced') {
+used = `${portionQty.toFixed(1)}${escapeHtml(line.unit)}/portion (cut down from ${asWrittenPortion.toFixed(1)}${escapeHtml(line.unit)} as written)`;
+} else {
+used = `${asWrittenPortion.toFixed(1)}${escapeHtml(line.unit)} per portion (${asWrittenWhole} across all ${r.servings})`;
 }
+const lineAllergens = dropped ? [] : (entry.allergens || []);
+const lineDietaryFlags = dropped ? [] : (entry.dietaryFlags || []);
+const flagsNote = (lineAllergens.length || lineDietaryFlags.length)
+? `<div class="settings-note">${[
+lineAllergens.length ? `Allergens: ${lineAllergens.map(escapeHtml).join(', ')}` : '',
+lineDietaryFlags.length ? `Also: ${lineDietaryFlags.map(escapeHtml).join(', ')}` : '',
+].filter(Boolean).join(' · ')}</div>`
+: '';
+let chips = '';
+let worstLevel = 'none';
+if (!dropped && portionQty != null && entry.unitBasis.quantity > 0) {
 // The actual grams of each carbohydrate THIS PORTION contributes --
 // concentration (entry.fodmapGrams, per its own unitBasis) scaled by
-// how much of the ingredient this portion actually uses. Sound at ANY
-// quantity, unlike trying to interpolate a pre-assigned category down
-// (the old approach): this is the same real chemistry the recipe-level
-// total (computeRecipeDiet) sums across ingredients.
-const scale = perPortionQty / entry.unitBasis.quantity;
-const chips = FODMAP_COMPONENTS.map((k) => {
+// how much of the ingredient this portion actually uses. Sound at
+// ANY quantity, unlike trying to interpolate a pre-assigned category
+// down (the old approach): this is the same real chemistry the
+// recipe-level total (computeRecipeDiet) sums across ingredients.
+const scale = portionQty / entry.unitBasis.quantity;
+chips = FODMAP_COMPONENTS.map((k) => {
 const grams = (entry.fodmapGrams[k] || 0) * scale;
 const category = (k === 'fructans' || k === 'gos') ? entry.oligoCategory : 'any';
 const level = fodmapLevelFromGrams(k, grams, category);
-// "Cut by Xg/portion to reach a lower rating" -- exactly the ask: given
-// this ingredient's own concentration (grams of the compound per gram/
-// unit of the ingredient, held constant), solve for how much LESS of
-// it would land the contribution just under the next threshold down.
+if (level === 'high') worstLevel = 'high'; else if (level === 'moderate' && worstLevel !== 'high') worstLevel = 'moderate';
+// "Cut by Xg/portion to reach a lower rating" -- given this
+// ingredient's own concentration (grams of the compound per unit of
+// the ingredient, held constant), solve for how much LESS of it
+// would land the contribution just under the next threshold down.
 let cutNote = '';
 if ((level === 'moderate' || level === 'high') && entry.fodmapGrams[k] > 0) {
 const bounds = fodmapBoundsFor(k, category);
-const thresholdGrams = level === 'high' ? bounds[1] : bounds[0];
+const thresholdGrams = (level === 'high' ? bounds[1] : bounds[0]) * THRESHOLD_SAFETY_MARGIN;
 const gramsPerUnit = entry.fodmapGrams[k] / entry.unitBasis.quantity;
 const targetQty = thresholdGrams / gramsPerUnit;
-const cutQty = perPortionQty - targetQty;
+const cutQty = portionQty - targetQty;
 if (cutQty > 0.01) {
 const nextLevel = level === 'high' ? 'moderate' : 'low';
 cutNote = ` — cut by about ${cutQty < 1 ? cutQty.toFixed(2) : cutQty.toFixed(1)}${escapeHtml(entry.unitBasis.unit)}/portion to reach ${nextLevel}`;
 }
 }
-return `<span class="pick-chip${level !== 'none' ? ' active' : ''}" title="${escapeHtml(k)}">${escapeHtml(k)}: ${escapeHtml(level)} (${grams < 0.01 ? '<0.01' : grams.toFixed(2)}g)${cutNote}</span>`;
+return `<span class="fodmap-chip level-${level}" title="${escapeHtml(k)}">${escapeHtml(k)}: ${escapeHtml(level)} (${grams < 0.01 ? '<0.01' : grams.toFixed(2)}g)${cutNote}</span>`;
 }).join(' ');
-return `<div style="padding:4px 0;border-top:1px solid var(--line);">
+}
+// The override control only earns its place on a line that actually
+// NEEDS one -- a medium/high FODMAP component, an allergen, or a
+// dietary flag -- exactly "for each medium or high scoring fodmap, or
+// allergen, a substitute (or drop) option", per feedback; a fully
+// benign line stays quiet rather than growing a control nobody needs.
+// `!!override` covers the dropped/reduced/sub cases directly (once a
+// line has an override at all, its control must stay visible so it can
+// be changed back) -- the other three conditions are what make the
+// control appear in the FIRST place, before any override exists.
+const needsOverride = worstLevel !== 'none' || lineAllergens.length || lineDietaryFlags.length || !!override;
+let overrideHtml = '';
+if (needsOverride) {
+const mode = override ? (override.mode === 'sub' ? `sub:${override.subName}` : override.mode) : 'original';
+const options = [`<option value="original"${mode === 'original' ? ' selected' : ''}>Use as written</option>`]
+.concat((entry.subs || []).map((s) => `<option value="sub:${escapeHtml(s.name)}"${mode === `sub:${s.name}` ? ' selected' : ''}>Substitute: ${escapeHtml(s.name)}${s.note ? ` (${escapeHtml(s.note)})` : ''}</option>`))
+.concat([
+`<option value="reduced"${mode === 'reduced' ? ' selected' : ''}>Use less…</option>`,
+`<option value="dropped"${mode === 'dropped' ? ' selected' : ''}>Drop from analysis</option>`,
+]).join('');
+overrideHtml = `<div style="margin-top:4px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+<select data-line-override-mode="${i}" data-line-recipe="${r.id}" style="font-size:12px;">${options}</select>
+${override && override.mode === 'reduced' ? `<input type="number" step="any" min="0" data-line-override-qty="${i}" data-line-recipe="${r.id}" value="${override.qty}" style="width:70px;font-size:12px;"> ${escapeHtml(line.unit)}/portion` : ''}
+</div>`;
+}
+return `<div style="padding:4px 0;border-top:1px solid var(--line);${dropped ? 'opacity:.55;' : ''}">
 <div style="font-size:12px;">${label} — ${used}</div>
-<div>${chips}</div>
+${flagsNote}
+${chips ? `<div>${chips}</div>` : ''}
+${overrideHtml}
 </div>`;
 }).join('');
 if (!rows) return '';
 return `<div class="field-block" style="margin-top:6px;">
-<span class="field-label">FODMAP by ingredient</span>
-<div class="settings-note">Grams of the actual carbohydrate this PORTION contributes, compared against fixed published thresholds -- genuinely valid at any quantity, and additive with the other ingredients (the total above is the real sum, not a worst-case guess). Edit the entry in Ingredient Reference if the underlying concentration looks wrong.</div>
+<span class="field-label">Ingredients — FODMAP, allergens, and substitute/reduce options</span>
+<div class="settings-note">Grams of the actual carbohydrate this PORTION contributes, compared against fixed published thresholds -- genuinely valid at any quantity, and additive with the other ingredients (the totals above are the real sum, not a worst-case guess). Edit the entry in Ingredient Reference if the underlying concentration looks wrong.</div>
 ${rows}
 </div>`;
 }
@@ -776,11 +906,15 @@ ${expandedDiet.has(r.id) ? `<div class="field-block" style="margin-top:6px;">
 <span class="field-label">FODMAP (per component) — summed across ingredients${per ? `, per portion (${per})` : ' -- set Servings above for a true per-portion figure; this is the whole-recipe total'}</span>
 <div>${fodmapRowHtml(diet.fodmap, diet.fodmapGrams)}</div>
 </div>
-${recipeFodmapByLineHtml(r)}
 <div class="field-block" style="margin-top:6px;">
 <span class="field-label">Allergens</span>
-<div>${allergenListHtml(diet.allergens)}</div>
+<div>${flagListHtml(ALLERGEN_LIST, diet.allergens)}</div>
 </div>
+<div class="field-block" style="margin-top:6px;">
+<span class="field-label">Also worth knowing <span class="settings-note">kosher/halal/vegetarian/vegan-relevant facts, assessed the same way as allergens</span></span>
+<div>${flagListHtml(DIETARY_FLAGS, diet.dietaryFlags)}</div>
+</div>
+${recipeIngredientAnalysisHtml(r)}
 <div class="field-block" style="margin-top:6px;">
 <span class="field-label">Macros${per ? ` — total, and per serving (${per})` : ' — recipe total'}</span>
 ${row('Calories', 'calories', ' kcal')}
@@ -792,8 +926,7 @@ ${row('— of which saturates', 'saturates', 'g')}
 ${row('Fibre', 'fibre', 'g')}
 ${row('Salt', 'salt', 'g')}
 </div>
-<div class="settings-note" style="margin-top:6px;">AI estimate from the ingredient reference table — not a verified nutritional or medical analysis; correct an entry below directly if it looks wrong.</div>
-${recipeSubstituteTogglesHtml(r)}` : ''}
+<div class="settings-note" style="margin-top:6px;">AI estimate from the ingredient reference table — not a verified nutritional or medical analysis; correct an entry below directly if it looks wrong.</div>` : ''}
 </div>`;
 }
 
@@ -827,6 +960,8 @@ ${FODMAP_COMPONENTS.map(fodmapInput).join('')}
 </div>
 <div class="settings-note">Grams of the actual carbohydrate per ${e.unitBasis.quantity}${escapeHtml(e.unitBasis.unit)} -- e.g. tinned chickpeas typically hold less GOS than dried/cooked, since some leaches into the tinning liquid.</div>
 <label class="full">Allergens present<div class="tag-editor">${ALLERGEN_LIST.map((a) => `<span class="pick-chip${e.allergens.includes(a) ? ' active' : ''}" data-ref-allergen="${escapeHtml(a)}">${escapeHtml(a)}</span>`).join('')}</div></label>
+<label class="full">Also worth knowing <span class="settings-note">kosher/halal/vegetarian/vegan-relevant facts, checked the same way as allergens</span>
+<div class="tag-editor">${DIETARY_FLAGS.map((a) => `<span class="pick-chip${e.dietaryFlags.includes(a) ? ' active' : ''}" data-ref-dietary="${escapeHtml(a)}">${escapeHtml(a)}</span>`).join('')}</div></label>
 <div class="idea-actions">
 <button class="add-btn" type="button" data-ingredient-ref-save="${e.id}">Save</button>
 <span class="inline-goto-link" data-ingredient-ref-cancel="1">Cancel</span>
@@ -842,6 +977,7 @@ return `<div class="idea-row" data-ingredient-ref-row="${e.id}">
 <div class="settings-note">Cal ${e.nutrition.calories} · Protein ${e.nutrition.protein}g · Carbs ${e.nutrition.carbs}g · Fat ${e.nutrition.fat}g · Fibre ${e.nutrition.fibre}g · Salt ${e.nutrition.salt}g</div>
 <div>${fodmapRowHtml(entryFodmapLevels(e), e.fodmapGrams)}</div>
 ${e.allergens.length ? `<div class="settings-note">Allergens: ${e.allergens.map(escapeHtml).join(', ')}</div>` : ''}
+${e.dietaryFlags.length ? `<div class="settings-note">Also: ${e.dietaryFlags.map(escapeHtml).join(', ')}</div>` : ''}
 ${e.subs.length ? `<div class="settings-note">Substitutes: ${e.subs.map((s) => `${escapeHtml(s.name)}${s.note ? ` (${escapeHtml(s.note)})` : ''}`).join('; ')}</div>` : ''}
 <div class="idea-actions">
 <span class="inline-goto-link" data-ingredient-ref-edit="${e.id}">Edit</span>
@@ -886,6 +1022,9 @@ queueSave();
 el.querySelectorAll('[data-ref-allergen]').forEach((chip) => {
 chip.addEventListener('click', () => chip.classList.toggle('active'));
 });
+el.querySelectorAll('[data-ref-dietary]').forEach((chip) => {
+chip.addEventListener('click', () => chip.classList.toggle('active'));
+});
 el.querySelectorAll('[data-ingredient-ref-save]').forEach((btn) => {
 btn.addEventListener('click', () => {
 const e = data.ingredientReference.find((r2) => r2.id === btn.dataset.ingredientRefSave);
@@ -902,6 +1041,7 @@ e.fodmapGrams[input.dataset.refFodmap] = Number.isFinite(v) && v >= 0 ? v : 0;
 const oligoSelect = row.querySelector('[data-ref-oligo]');
 if (oligoSelect) e.oligoCategory = OLIGO_CATEGORIES.includes(oligoSelect.value) ? oligoSelect.value : 'veg_fruit';
 e.allergens = [...row.querySelectorAll('[data-ref-allergen].active')].map((chip) => chip.dataset.refAllergen);
+e.dietaryFlags = [...row.querySelectorAll('[data-ref-dietary].active')].map((chip) => chip.dataset.refDietary);
 // The whole reason this field exists (the tinned-vs-dried-chickpeas
 // case): once a person corrects an entry, a later "Analyse ingredients"
 // on some other recipe must never silently overwrite it again.
@@ -1218,47 +1358,67 @@ renderRecipes();
 queueSave();
 });
 });
-el.querySelectorAll('[data-recipe-sub-toggle]').forEach((cb) => {
-cb.addEventListener('change', async () => {
-const id = cb.dataset.recipeSubToggle;
-const idx = parseInt(cb.dataset.subIdx, 10);
-if (!substituteToggles.has(id)) substituteToggles.set(id, new Set());
-const set = substituteToggles.get(id);
-if (!cb.checked) {
-set.delete(idx);
+el.querySelectorAll('[data-line-override-mode]').forEach((select) => {
+select.addEventListener('change', async () => {
+const recipeId = select.dataset.lineRecipe;
+const idx = parseInt(select.dataset.lineOverrideMode, 10);
+const r = data.recipes.find((x) => x.id === recipeId);
+if (!r) return;
+if (!lineOverrides.has(recipeId)) lineOverrides.set(recipeId, new Map());
+const map = lineOverrides.get(recipeId);
+const val = select.value;
+if (val === 'original') { map.delete(idx); renderRecipes(); return; }
+if (val === 'dropped') { map.set(idx, { mode: 'dropped' }); renderRecipes(); return; }
+if (val === 'reduced') {
+const line = r.ingredientData[idx];
+const entry = line && findReferenceEntry(line.name, line.form);
+const asWrittenPortion = line && line.quantity != null ? (r.servings ? line.quantity / r.servings : line.quantity) : 0;
+const suggested = entry ? suggestedLowQtyPerPortion(entry) : null;
+// A default that's actually a reduction -- the smaller of the as-
+// written amount and the suggested "reach low" target, so picking
+// this from a line that's already fine doesn't paradoxically suggest
+// using MORE of it.
+const qty = suggested != null ? Math.min(suggested, asWrittenPortion) : asWrittenPortion;
+map.set(idx, { mode: 'reduced', qty: Math.max(0, qty) });
 renderRecipes();
 return;
 }
-set.add(idx);
-// Flipping the toggle is pure arithmetic over cached figures
+if (val.startsWith('sub:')) {
+const subName = val.slice(4);
+map.set(idx, { mode: 'sub', subName });
+// Flipping to a substitute is pure arithmetic over cached figures
 // (computeRecipeDiet) ONLY once the substitute has its OWN reference
-// entry -- the first time a given substitute is ever toggled on,
-// nothing has assessed IT yet (only the original ingredient gets
-// assessed by "Analyse ingredients"). Confirmed live as a real bug:
-// the toggle just silently did nothing, since computeRecipeDiet only
-// swaps in a substitute's entry when one already exists. Same
-// busy-indicator treatment as Parse/Analyse -- this is a real AI call
-// the first time, not instant.
-const r = data.recipes.find((x) => x.id === id);
-const line = r && r.ingredientData[idx];
-const entry = line && findReferenceEntry(line.name, line.form);
-const sub = entry && entry.subs && entry.subs[0];
-if (sub && !findReferenceEntry(sub.name, '')) {
-busyIngredientAction.set(id, `Assessing substitute: ${sub.name}…`);
+// entry -- the first time a given substitute is picked, nothing has
+// assessed IT yet (only the original ingredient gets assessed by
+// "Analyse ingredients"). Same busy-indicator treatment as Parse/
+// Analyse -- this is a real AI call the first time, not instant.
+if (!findReferenceEntry(subName, '')) {
+busyIngredientAction.set(recipeId, `Assessing substitute: ${subName}…`);
 renderRecipes();
 try {
-await ensureReferenceEntry(sub.name, '');
+await ensureReferenceEntry(subName, '');
 } catch (err) {
 setStatus(err instanceof MissingKeyError ? 'Add an Anthropic API key in Settings first.' : `Couldn't assess that substitute: ${err.message || err}`);
-set.delete(idx);
-cb.checked = false; // revert -- a toggle left "on" but unresolved would look identical to a fixed bug
+map.delete(idx); // revert -- a selection left pointing at an unresolved substitute would look identical to a fixed bug
 } finally {
-busyIngredientAction.delete(id);
+busyIngredientAction.delete(recipeId);
 }
 renderIngredientReference();
+queueSave();
 }
 renderRecipes();
-queueSave();
+}
+});
+});
+el.querySelectorAll('[data-line-override-qty]').forEach((input) => {
+input.addEventListener('change', () => {
+const recipeId = input.dataset.lineRecipe;
+const idx = parseInt(input.dataset.lineOverrideQty, 10);
+if (!lineOverrides.has(recipeId)) lineOverrides.set(recipeId, new Map());
+const map = lineOverrides.get(recipeId);
+const v = parseFloat(input.value);
+map.set(idx, { mode: 'reduced', qty: Number.isFinite(v) && v >= 0 ? v : 0 });
+renderRecipes();
 });
 });
 el.querySelectorAll('[data-recipe-rate]').forEach((star) => {

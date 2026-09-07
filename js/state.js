@@ -1196,6 +1196,11 @@ if (!Array.isArray(data.ingredientReference)) data.ingredientReference = [];
 // dropped too -- there's no way to know what gram figures the person who
 // corrected the old rating actually intended.
 data.ingredientReference = data.ingredientReference.filter((e) => e && e.fodmapGrams && typeof e.fodmapGrams === 'object');
+// dietaryFlags (kosher/halal/vegetarian/vegan-relevant facts, assessed
+// the same way as allergens) is newer than fodmapGrams itself -- an
+// entry surviving the filter above may still predate it, so default
+// rather than drop (nothing about it is invalid, just incomplete).
+data.ingredientReference.forEach((e) => { if (!Array.isArray(e.dietaryFlags)) e.dietaryFlags = []; });
 }
 
 // Every save is a full-document overwrite of DATA_KEY — there's no way to

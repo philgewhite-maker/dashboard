@@ -1240,6 +1240,15 @@ margin:0 4px 4px 0;
 }
 .pick-chip:hover{border-color:var(--rose);color:var(--rose);}
 .pick-chip.active{background:var(--rose);border-color:var(--rose);color:#fff;}
+/* FODMAP severity specifically wants red/amber/green, not the app's usual
+   rose highlight -- a flat pink "high" reads no differently from "low" at
+   a glance, which defeats the point of a severity indicator. Reuses the
+   existing --sage (this app's only green) / --amber / --red tokens rather
+   than inventing new ones -- not a new palette, just the right ones. */
+.fodmap-chip{display:inline-flex;align-items:center;background:transparent;border:1px solid var(--line);color:var(--muted);border-radius:12px;padding:2px 8px;font-size:11px;margin:0 4px 4px 0;}
+.fodmap-chip.level-low{background:var(--sage-bg);border-color:transparent;color:var(--sage);}
+.fodmap-chip.level-moderate{background:var(--amber-bg);border-color:transparent;color:var(--amber);}
+.fodmap-chip.level-high{background:var(--red);border-color:transparent;color:#fff;}
 .tag-add-input{
 font-family:'Inter',sans-serif;
 font-size:12px;

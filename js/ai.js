@@ -831,6 +831,13 @@ return normaliseIngredientParse(raw, lines.length);
 // "checked, absent" rather than "not checked". Exported so recipes.js
 // can render the same fixed list a diet analysis is assessed against.
 const ALLERGEN_LIST = ['Cereals containing gluten', 'Crustaceans', 'Eggs', 'Fish', 'Peanuts', 'Soybeans', 'Milk', 'Tree nuts', 'Celery', 'Mustard', 'Sesame', 'Sulphites', 'Lupin', 'Molluscs'];
+// Common dietary-restriction facts about an ingredient, assessed and
+// stored the SAME way as the 14 labelled allergens above (a fixed
+// checklist, per-ingredient, additive across a recipe) even though
+// they aren't legally "allergens" -- a kosher, halal, vegetarian, or
+// vegan kitchen has exactly the same need to know "does this ingredient
+// contain X", per feedback.
+const DIETARY_FLAGS = ['Pork', 'Shellfish', 'Alcohol', 'Meat (non-vegetarian)', 'Animal product (non-vegan)'];
 // The five standard FODMAP components -- assessed individually rather
 // than one bucketed score, per feedback.
 const FODMAP_COMPONENTS = ['fructans', 'gos', 'lactose', 'excessFructose', 'polyols'];
@@ -887,13 +894,14 @@ return `Assess this single food ingredient: "${name}"${form ? ` (${form})` : ''}
 + '"nutrition":{"calories":0,"protein":0,"carbs":0,"sugars":0,"fat":0,"saturates":0,"fibre":0,"salt":0}, '
 + '"oligoCategory":"veg_fruit", '
 + '"fodmapGrams":{"fructans":0,"gos":0,"lactose":0,"excessFructose":0,"polyols":0}, '
-+ '"allergens":[], "subs":[{"name":"","note":""}]}. '
++ '"allergens":[], "dietaryFlags":[], "subs":[{"name":"","note":""}]}. '
 + 'unitBasis: pick an amount close to how much of this a person actually uses in ONE dish, not a fixed default -- {"quantity":100,"unit":"g"} for a vegetable, meat, or other ingredient normally used in bulk; a countable unit like {"quantity":1,"unit":"clove"} / {"quantity":1,"unit":"medium"} for produce typically counted rather than weighed; but for anything used in small, potent amounts -- a spice, herb, stock cube, extract, seasoning -- use ITS typical amount instead ({"quantity":1,"unit":"tsp"}, {"quantity":1,"unit":"clove"}, {"quantity":1,"unit":"cube"}...), never 100g of something no dish would ever contain 100g of. '
 + 'nutrition: standard nutrition-label figures, PER unitBasis. '
 + `oligoCategory: which published FODMAP threshold table this food's fructans/GOS are judged against -- "grain_legume_nut" for a grain, legume, pulse, or nut/seed; "veg_fruit" for a vegetable or fruit (use "veg_fruit" for anything that's neither, e.g. a spice, dairy, or meat). `
 + 'fodmapGrams: how many GRAMS OF THE ACTUAL CARBOHYDRATE (fructans, GOS, lactose, excess fructose, total polyols) this ingredient contains PER unitBasis -- NOT a low/moderate/high rating, an actual gram figure (can be a decimal like 0.15, or 0 if genuinely absent) -- these get compared against fixed published thresholds separately, so give your best real estimate of the amount present, not a category. '
 + `allergens: which of these EXACT strings this ingredient contains, as a subset of ${JSON.stringify(ALLERGEN_LIST)} -- [] if none apply. `
-+ 'subs: 1-3 common substitutes for this ingredient (useful for a gluten-free, dairy-free, low-FODMAP, or otherwise allergen-conscious kitchen where relevant), each a short note on when/why -- [] if nothing sensible applies. '
++ `dietaryFlags: which of these EXACT strings apply, as a subset of ${JSON.stringify(DIETARY_FLAGS)} -- e.g. "Pork" for bacon/chorizo/lard, "Alcohol" for wine/beer/spirits used as an ingredient (not a trace that fully cooks off), "Meat (non-vegetarian)" for any meat/poultry INCLUDING one already covered by Pork, "Animal product (non-vegan)" for meat, fish, dairy, eggs, or honey -- [] if none apply. `
++ 'subs: 1-3 common substitutes for this ingredient (useful for a gluten-free, dairy-free, low-FODMAP, kosher/halal/vegetarian/vegan, or otherwise restricted kitchen where relevant), each a short note on when/why -- [] if nothing sensible applies. '
 + 'Give a reasonable best estimate -- this is a starting point a person can correct, not a lab measurement.';
 }
 function normaliseIngredientAssess(raw) {
@@ -917,6 +925,7 @@ fibre: numOr0(nutrition.fibre), salt: numOr0(nutrition.salt),
 oligoCategory: OLIGO_CATEGORIES.includes(r.oligoCategory) ? r.oligoCategory : 'veg_fruit',
 fodmapGrams,
 allergens: Array.isArray(r.allergens) ? r.allergens.filter((a) => ALLERGEN_LIST.includes(a)) : [],
+dietaryFlags: Array.isArray(r.dietaryFlags) ? r.dietaryFlags.filter((f) => DIETARY_FLAGS.includes(f)) : [],
 // No id assigned here -- ai.js stays a pure call-and-normalise layer;
 // recipes.js assigns ids when it actually persists a sub into
 // data.ingredientReference.
@@ -1311,6 +1320,6 @@ callTextJson, DEFAULT_MODEL, summarizeUsage, currentMonthKey, compareFaces,
 extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShoppingItem, translateText,
 identifyCountry, extractWellnessScreenshot,
 extractTripScreenshot, extractTripLegFromEmail,
-parseIngredients, assessIngredient, ALLERGEN_LIST, FODMAP_COMPONENTS, FODMAP_LEVELS,
+parseIngredients, assessIngredient, ALLERGEN_LIST, DIETARY_FLAGS, FODMAP_COMPONENTS, FODMAP_LEVELS,
 FODMAP_THRESHOLDS_G, OLIGO_CATEGORIES, fodmapLevelFromGrams,
 };
