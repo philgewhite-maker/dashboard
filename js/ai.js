@@ -897,7 +897,7 @@ return `Assess this single food ingredient: "${name}"${form ? ` (${form})` : ''}
 + '"nutrition":{"calories":0,"protein":0,"carbs":0,"sugars":0,"fat":0,"saturates":0,"fibre":0,"salt":0}, '
 + '"oligoCategory":"veg_fruit", '
 + '"fodmapGrams":{"fructans":0,"gos":0,"lactose":0,"excessFructose":0,"polyols":0}, '
-+ '"allergens":[], "dietaryFlags":[], "unitWeights":{}, "subs":[{"name":"","note":""}]}. '
++ '"allergens":[], "dietaryFlags":[], "unitWeights":{}, "subs":[{"name":"","note":"","subQuantity":0,"subUnit":"","origQuantity":0,"origUnit":""}]}. '
 + 'unitBasis: pick an amount close to how much of this a person actually uses in ONE dish, not a fixed default -- {"quantity":100,"unit":"g"} for a vegetable, meat, or other ingredient normally used in bulk; a countable unit like {"quantity":1,"unit":"clove"} / {"quantity":1,"unit":"medium"} for produce typically counted rather than weighed; but for anything used in small, potent amounts -- a spice, herb, stock cube, extract, seasoning -- use ITS typical amount instead ({"quantity":1,"unit":"tsp"}, {"quantity":1,"unit":"clove"}, {"quantity":1,"unit":"cube"}...), never 100g of something no dish would ever contain 100g of. '
 + 'nutrition: standard nutrition-label figures, PER unitBasis. '
 + `oligoCategory: which published FODMAP threshold table this food's fructans/GOS are judged against -- "grain_legume_nut" for a grain, legume, pulse, or nut/seed; "veg_fruit" for a vegetable or fruit (use "veg_fruit" for anything that's neither, e.g. a spice, dairy, or meat). `
@@ -905,7 +905,7 @@ return `Assess this single food ingredient: "${name}"${form ? ` (${form})` : ''}
 + `allergens: which of these EXACT strings this ingredient contains, as a subset of ${JSON.stringify(ALLERGEN_LIST)} -- [] if none apply. `
 + `dietaryFlags: which of these EXACT strings apply, as a subset of ${JSON.stringify(DIETARY_FLAGS)} -- e.g. "Pork" for bacon/chorizo/lard, "Alcohol" for wine/beer/spirits used as an ingredient (not a trace that fully cooks off), "Meat (non-vegetarian)" for any meat/poultry INCLUDING one already covered by Pork, "Animal product (non-vegan)" for meat, fish, dairy, eggs, or honey -- [] if none apply. `
 + 'unitWeights: OTHER units a DIFFERENT recipe might reasonably use for this SAME ingredient instead of your own unitBasis above -- e.g. if unitBasis is 100g, give {"medium":110,"large":150,"small":70} for an onion, or {"tsp":5,"tbsp":15} for a paste/puree, or {"clove":5} for garlic -- each value is how many GRAMS ONE of that unit weighs. This is what lets a recipe parsed as "1 medium onion" or "2 tsp tomato puree" be scaled correctly even though it wasn\'t assessed in that exact unit -- include 2-4 realistic alternates a recipe might plausibly use, or {} if this ingredient is essentially only ever measured the one way (e.g. already unitBasis itself, or something with no other sensible unit). '
-+ 'subs: 1-3 common substitutes for this ingredient (useful for a gluten-free, dairy-free, low-FODMAP, kosher/halal/vegetarian/vegan, or otherwise restricted kitchen where relevant), each a short note on when/why -- [] if nothing sensible applies. '
++ 'subs: 1-3 common substitutes for this ingredient (useful for a gluten-free, dairy-free, low-FODMAP, kosher/halal/vegetarian/vegan, or otherwise restricted kitchen where relevant), each a short note on when/why -- [] if nothing sensible applies. ALSO give the practical substitution ratio whenever there is a clear one: subQuantity of subUnit (the SUBSTITUTE) that replaces origQuantity of origUnit (THIS ingredient) -- e.g. "1 tbsp garlic-infused oil replaces 2 cloves of garlic" -> subQuantity:1, subUnit:"tbsp", origQuantity:2, origUnit:"clove". Leave subQuantity/origQuantity as 0 (and subUnit/origUnit as "") when there\'s no clean amount-for-amount swap (e.g. "a tiny pinch fried in oil" has no real ratio) -- never invent one just to fill the field. '
 + 'Give a reasonable best estimate -- this is a starting point a person can correct, not a lab measurement.';
 }
 function normaliseIngredientAssess(raw) {
@@ -944,8 +944,25 @@ allergens: Array.isArray(r.allergens) ? r.allergens.filter((a) => ALLERGEN_LIST.
 dietaryFlags: Array.isArray(r.dietaryFlags) ? r.dietaryFlags.filter((f) => DIETARY_FLAGS.includes(f)) : [],
 // No id assigned here -- ai.js stays a pure call-and-normalise layer;
 // recipes.js assigns ids when it actually persists a sub into
-// data.ingredientReference.
-subs: Array.isArray(r.subs) ? r.subs.map((s) => ({ name: String((s && s.name) || '').trim(), note: String((s && s.note) || '').trim() })).filter((s) => s.name) : [],
+// data.ingredientReference. The four ratio fields are kept ALL-OR-
+// NOTHING (a partial ratio -- an amount with no unit, say -- isn't a
+// usable fact) so recipes.js can trust that subQuantity present means
+// all four are.
+subs: Array.isArray(r.subs) ? r.subs.map((s) => {
+const subQuantity = s && typeof s.subQuantity === 'number' && isFinite(s.subQuantity) && s.subQuantity > 0 ? s.subQuantity : null;
+const origQuantity = s && typeof s.origQuantity === 'number' && isFinite(s.origQuantity) && s.origQuantity > 0 ? s.origQuantity : null;
+const subUnit = String((s && s.subUnit) || '').trim();
+const origUnit = String((s && s.origUnit) || '').trim();
+const hasRatio = subQuantity != null && origQuantity != null && subUnit && origUnit;
+return {
+name: String((s && s.name) || '').trim(),
+note: String((s && s.note) || '').trim(),
+subQuantity: hasRatio ? subQuantity : null,
+subUnit: hasRatio ? subUnit : '',
+origQuantity: hasRatio ? origQuantity : null,
+origUnit: hasRatio ? origUnit : '',
+};
+}).filter((s) => s.name) : [],
 };
 }
 async function assessIngredient(name, form) {

@@ -956,6 +956,49 @@ if (lineGramsPerOne != null && basisGramsPerOne != null) return lineGramsPerOne 
 return null;
 }
 
+// A substitute's own reference entry may already carry everything needed
+// to bridge ITS unit mismatch, the moment it's first created -- if the
+// original ingredient's own AI assessment stated a practical ratio in its
+// `subs[]` note ("1 tbsp garlic-infused oil replaces 2 cloves garlic"),
+// that's a unitBasisRatios fact for the SUBSTITUTE entry, not a fresh
+// unknown -- applying it here means the "clove" mismatch never occurs in
+// the first place, no "Ask AI" round-trip needed. Never overwrites an
+// existing ratio (a user or an earlier resolve may already have set one
+// more precisely than the original assessment's own note).
+// unitBasisRatios[unit] means "how many of entry.unitBasis.unit is ONE
+// `unit` worth" (see unitConversionRatio above) -- note this is per ONE
+// basis unit, NOT per unitBasis.quantity of it (a "100g" unitBasis still
+// means the ratio is basis-units, i.e. grams, per one `unit`, not per
+// 100g), so unitBasis.quantity plays no part in this calculation at all.
+//   substitute amount per 1 origUnit, in subUnit  = subQuantity / origQuantity
+//   ...converted to basisUnit (if subUnit isn't already the basis unit)
+function applySubstitutionRatioHint(subRecord, substituteEntry) {
+if (!subRecord || !substituteEntry || !subRecord.subQuantity || !subRecord.origQuantity) return;
+const origUnit = String(subRecord.origUnit || '').trim().toLowerCase();
+if (!origUnit || origUnit in substituteEntry.unitBasisRatios) return;
+const subUnit = String(subRecord.subUnit || '').trim().toLowerCase();
+const basisUnit = String(substituteEntry.unitBasis.unit || '').trim().toLowerCase();
+if (!subUnit || !basisUnit) return;
+const subPerOrig = subRecord.subQuantity / subRecord.origQuantity;
+let basisUnitsPerOrig;
+if (subUnit === basisUnit) {
+// Common case: the sub note is already phrased in the substitute's
+// own reference unit -- no bridging needed at all.
+basisUnitsPerOrig = subPerOrig;
+} else {
+// The note used some other unit for the substitute itself (rare --
+// most subs are phrased in the entry's own natural unit). Only
+// resolvable if THAT unit also has a known grams weight on this
+// entry to bridge through; never guessed.
+const subUnitGrams = gramsEquivalentPerOne(substituteEntry, subUnit);
+const basisGrams = gramsEquivalentPerOne(substituteEntry, basisUnit);
+if (subUnitGrams == null || basisGrams == null) return;
+basisUnitsPerOrig = subPerOrig * subUnitGrams / basisGrams;
+}
+if (!(basisUnitsPerOrig > 0)) return;
+substituteEntry.unitBasisRatios[origUnit] = basisUnitsPerOrig;
+}
+
 // A parsed line's OWN ingredient (never a substitute -- this is about the
 // reference table for what's actually written, checked as soon as the
 // line has an entry at all) has no bridge to its reference entry's
@@ -2283,6 +2326,19 @@ busyIngredientAction.set(recipeId, `Assessing substitute: ${subName}…`);
 renderRecipes();
 try {
 await ensureReferenceEntry(subName, '');
+// The original ingredient's own assessment may already have stated
+// a practical ratio for exactly this substitute (e.g. "1 tbsp
+// garlic-infused oil replaces 2 cloves garlic") -- apply it now, on
+// the substitute's freshly-created entry, so its unit mismatch (if
+// any) is already resolved before the user ever sees it. Zero extra
+// AI calls: this is just reading a field the assessment above (or an
+// earlier one, for the original ingredient) already returned.
+const line = r.ingredientData[idx];
+const originalEntry = line && findReferenceEntry(line.name, line.form);
+const subRecord = originalEntry && Array.isArray(originalEntry.subs)
+? originalEntry.subs.find((s) => s.name === subName) : null;
+const substituteEntry = findReferenceEntry(subName, '');
+if (subRecord && substituteEntry) applySubstitutionRatioHint(subRecord, substituteEntry);
 } catch (err) {
 setStatus(err instanceof MissingKeyError ? 'Add an Anthropic API key in Settings first.' : `Couldn't assess that substitute: ${err.message || err}`);
 map.delete(idx); // revert -- a selection left pointing at an unresolved substitute would look identical to a fixed bug
