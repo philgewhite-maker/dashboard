@@ -282,6 +282,14 @@ function ingredientBusyHtml(r) {
 const msg = busyIngredientAction.get(r.id);
 return msg ? `<div class="full"><span class="settings-note">⏳ ${escapeHtml(msg)}</span></div>` : '';
 }
+// `${recipeId}|${lineIdx}` -> the message from the last FAILED "ask AI"
+// unit-weight lookup (resolveUnitMismatch) -- kept around (not just
+// flashed to the top status bar, which sits far from the card and is
+// easy to miss/overwrite by the next unrelated status) until the next
+// attempt or a manual entry clears it, so a failure is something the
+// user actually sees where the problem is, not silence. UI-only, never
+// persisted.
+const unitMismatchErrors = new Map();
 let expandedDiet = new Set(); // recipe ids currently showing their diet section
 // Recipe ids currently showing their parsed-ingredients table -- added to
 // automatically right when a parse finishes (see runParseIngredients'
@@ -623,6 +631,8 @@ if (!line || !line.unit) return;
 const entry = findReferenceEntry(line.name, line.form);
 if (!entry) return;
 const unit = line.unit.trim().toLowerCase();
+const errKey = `${recipeId}|${lineIdx}`;
+unitMismatchErrors.delete(errKey); // clear any earlier failure before this fresh attempt
 busyIngredientAction.set(r.id, `Asking how many grams is 1 ${line.unit} of ${line.name}…`);
 renderRecipes();
 try {
@@ -633,15 +643,62 @@ entry.unitWeightsAssessedAt = new Date().toISOString();
 delete entry.unitWeightsStale;
 queueSave();
 } else {
-setStatus(`Couldn't work out a gram figure for "${line.unit}" of "${line.name}" -- add one by hand in Ingredient Reference instead.`);
+// Not an exception -- AI answered, just couldn't give a usable
+// figure. Reported the same way as a genuine error (inline, not the
+// top status bar) since either way the mismatch is still unresolved
+// and the manual-entry box right below is the actual way out.
+unitMismatchErrors.set(errKey, `AI couldn't work out a gram figure for "${line.unit}" of "${line.name}" -- enter one below.`);
 }
 } catch (err) {
-setStatus(err instanceof MissingKeyError ? 'Add an Anthropic API key in Settings first.' : `Couldn't look that up: ${err.message || err}`);
+unitMismatchErrors.set(errKey, err instanceof MissingKeyError ? 'Add an Anthropic API key in Settings first, or enter the figure below yourself.' : `Couldn't look that up: ${err.message || err} -- enter one below.`);
 } finally {
 busyIngredientAction.delete(r.id);
 }
 renderRecipes();
 renderIngredientReference();
+}
+
+// The manual-entry half of the same mismatch note -- typed directly at
+// the point of failure rather than requiring a trip to Ingredient
+// Reference. Same target and same staleness-clearing as a successful
+// AI answer above; the only difference is where the number came from.
+function setUnitWeightManually(recipeId, lineIdx, gramsValue) {
+const r = data.recipes.find((x) => x.id === recipeId);
+if (!r) return;
+const line = r.ingredientData[lineIdx];
+if (!line || !line.unit) return;
+const entry = findReferenceEntry(line.name, line.form);
+if (!entry) return;
+const grams = parseFloat(gramsValue);
+if (!Number.isFinite(grams) || grams <= 0) return;
+entry.unitWeights[line.unit.trim().toLowerCase()] = grams;
+entry.unitWeightsAssessedAt = new Date().toISOString();
+delete entry.unitWeightsStale;
+unitMismatchErrors.delete(`${recipeId}|${lineIdx}`);
+queueSave();
+renderRecipes();
+renderIngredientReference();
+}
+
+// Shared by both places a unit mismatch shows (the parsed-ingredients
+// table and the diet-analysis per-line breakdown) -- one definition, so
+// wording/behaviour can't quietly drift apart the way it briefly did
+// between the two (one said "ask AI how many grams that is", the other
+// named the actual unit). Amber .unit-mismatch-note styling (not a plain
+// .settings-note) so a real gap in the totals actually stands out
+// against the page's usual muted captions, per feedback.
+function unitMismatchNoteHtml(recipeId, lineIdx, line, basisUnit) {
+const err = unitMismatchErrors.get(`${recipeId}|${lineIdx}`);
+return `<div class="unit-mismatch-note">
+⚠ "${escapeHtml(line.unit)}" doesn't match this ingredient's reference amount ("${escapeHtml(basisUnit)}") -- can't convert automatically.
+<div style="margin-top:4px;">
+<span class="inline-goto-link" data-recipe-resolve-unit="${recipeId}" data-resolve-unit-idx="${lineIdx}">Ask AI how many grams 1 ${escapeHtml(line.unit)} is</span>
+&nbsp;or&nbsp;
+<input type="number" step="any" min="0" placeholder="grams" data-recipe-manual-unit-grams="${recipeId}" data-manual-unit-idx="${lineIdx}">
+<button type="button" class="todo-add-btn" data-recipe-manual-unit-save="${recipeId}" data-manual-unit-idx="${lineIdx}" style="padding:2px 8px;">Save</button>
+</div>
+${err ? `<span class="unit-mismatch-error">${escapeHtml(err)}</span>` : ''}
+</div>`;
 }
 
 async function analyseIngredients(recipeId) {
@@ -672,6 +729,7 @@ busyIngredientAction.set(r.id, `Assessing ${toAssess[i].name}… (${i + 1}/${toA
 renderRecipes();
 await ensureReferenceEntry(toAssess[i].name, toAssess[i].form);
 }
+applyStatedUnitHints(r);
 // A unit mismatch can only be KNOWN once an entry exists to compare
 // against -- this is the earliest point that's true. Auto-opens the
 // parsed-ingredients panel so it's actually seen here, not just
@@ -831,6 +889,28 @@ if (!line.name || !line.unit) return null;
 const entry = findReferenceEntry(line.name, line.form);
 if (!entry || !entry.unitBasis.unit) return null;
 return unitConversionRatio(entry, line.unit) == null ? entry : null;
+}
+
+// Some recipes state a gram equivalent right in the ingredient text
+// itself -- "1 stick (5g) cinnamon", "2 tbsp (30g) honey" -- which
+// parseIngredients now captures as `statedGrams` (see ai.js) but was
+// otherwise being read and discarded at parse time. Applied once an
+// entry actually exists to receive it (parsing happens before
+// assessment, so there's nothing to attach a unit weight TO any
+// earlier than this): a stated hint is at least as trustworthy as an
+// AI guess, so it's used automatically rather than waiting for
+// "ask AI"/manual entry to duplicate work the recipe already did.
+// Never overwrites an existing unitWeights value (AI-assessed, user-
+// entered, or from an earlier recipe's own hint) -- only fills a gap.
+function applyStatedUnitHints(r) {
+r.ingredientData.forEach((line) => {
+if (!line.name || !line.unit || line.statedGrams == null || !line.quantity) return;
+const unit = line.unit.trim().toLowerCase();
+if (unit === 'g') return; // already in grams -- nothing to bridge
+const entry = findReferenceEntry(line.name, line.form);
+if (!entry || unit in entry.unitWeights) return;
+entry.unitWeights[unit] = line.statedGrams / line.quantity;
+});
 }
 
 // The bounds ([lowMax, highMin], in grams of the actual carbohydrate) a
@@ -1119,7 +1199,7 @@ return `
 <input type="text" placeholder="unit" data-ingdata-field="unit" data-ingdata-recipe="${r.id}" data-ingdata-idx="${i}" value="${escapeHtml(line.unit)}">
 </div>
 <div class="settings-note" style="margin-top:2px;">from: “${escapeHtml(r.ingredients[i] || '')}”${line.notes ? ` · ${escapeHtml(line.notes)}` : ''}</div>
-${mismatchEntry ? `<div class="settings-note" style="margin-top:2px;">⚠ "${escapeHtml(line.unit)}" doesn't match this ingredient's reference amount ("${escapeHtml(mismatchEntry.unitBasis.unit)}") -- <span class="inline-goto-link" data-recipe-resolve-unit="${r.id}" data-resolve-unit-idx="${i}">ask AI how many grams that is</span>, or fix the unit above.</div>` : ''}
+${mismatchEntry ? unitMismatchNoteHtml(r.id, i, line, mismatchEntry.unitBasis.unit) : ''}
 </div>`;
 }).join('');
 return `<div class="full">
@@ -1215,7 +1295,7 @@ lineDietaryFlags.length ? `Also: ${lineDietaryFlags.map(escapeHtml).join(', ')}`
 let chips = '';
 let worstLevel = 'none';
 let noQtyNote = '';
-let unitMismatchActionHtml = '';
+let unitMismatchHtml = '';
 if (!dropped && unitMismatch) {
 // Genuinely can't compute a figure here at all -- unlike "no quantity
 // given" below (nothing to scale BY), this line HAS a quantity, just
@@ -1226,8 +1306,7 @@ if (!dropped && unitMismatch) {
 // live: "white onion — 0.3large per portion... gos: low" was this
 // exact bug, dividing 0.3 BY 100 as if "large" and "g" were the same
 // unit -- a number that means nothing, not a conservative estimate.
-noQtyNote = `This line is parsed as "${line.unit}", but its reference entry is per "${entry.unitBasis.unit}" — these can't be converted automatically, so no figure is shown (and it's excluded from the totals above).`;
-unitMismatchActionHtml = ` <span class="inline-goto-link" data-recipe-resolve-unit="${r.id}" data-resolve-unit-idx="${i}">ask AI how many grams 1 ${escapeHtml(line.unit)} is</span>, fix the unit in "Show parsed ingredients", or edit the entry's own basis in Ingredient Reference.`;
+unitMismatchHtml = unitMismatchNoteHtml(r.id, i, line, entry.unitBasis.unit);
 } else if (!dropped) {
 // A line with no stated quantity (an "optional" ingredient, or a vague
 // "to taste") still has FODMAP content worth knowing about -- confirmed
@@ -1333,7 +1412,8 @@ return `<div style="padding:4px 0;border-top:1px solid var(--line);${dropped ? '
 <div style="font-size:12px;">${label} — ${used}</div>
 ${flagsNote}
 ${chips ? `<div>${chips}</div>` : ''}
-${noQtyNote ? `<div class="settings-note">${escapeHtml(noQtyNote)}${unitMismatchActionHtml}</div>` : ''}
+${unitMismatchHtml}
+${!unitMismatchHtml && noQtyNote ? `<div class="settings-note">${escapeHtml(noQtyNote)}</div>` : ''}
 ${overrideHtml}
 </div>`;
 }).join('');
@@ -1977,6 +2057,21 @@ link.addEventListener('click', () => analyseIngredients(link.dataset.recipeAnaly
 });
 el.querySelectorAll('[data-recipe-resolve-unit]').forEach((link) => {
 link.addEventListener('click', () => resolveUnitMismatch(link.dataset.recipeResolveUnit, parseInt(link.dataset.resolveUnitIdx, 10)));
+});
+el.querySelectorAll('[data-recipe-manual-unit-save]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const recipeId = btn.dataset.recipeManualUnitSave;
+const idx = parseInt(btn.dataset.manualUnitIdx, 10);
+const input = document.querySelector(`[data-recipe-manual-unit-grams="${recipeId}"][data-manual-unit-idx="${idx}"]`);
+if (input) setUnitWeightManually(recipeId, idx, input.value);
+});
+});
+el.querySelectorAll('[data-recipe-manual-unit-grams]').forEach((input) => {
+input.addEventListener('keydown', (e) => {
+if (e.key !== 'Enter') return;
+e.preventDefault();
+setUnitWeightManually(input.dataset.recipeManualUnitGrams, parseInt(input.dataset.manualUnitIdx, 10), input.value);
+});
 });
 el.querySelectorAll('[data-recipe-regenerate]').forEach((btn) => {
 btn.addEventListener('click', () => regenerateVariant(btn.dataset.recipeRegenerate));

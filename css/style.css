@@ -1249,6 +1249,15 @@ margin:0 4px 4px 0;
 .fodmap-chip.level-low{background:var(--sage-bg);border-color:transparent;color:var(--sage);}
 .fodmap-chip.level-moderate{background:var(--amber-bg);border-color:transparent;color:var(--amber);}
 .fodmap-chip.level-high{background:var(--red);border-color:transparent;color:#fff;}
+/* A unit mismatch is a real gap in the totals, not routine informational
+   copy -- a plain .settings-note (muted grey, identical to a dozen other
+   captions on the same card) let it blend in and go unnoticed. Same
+   amber warning treatment as .sync-result.error/.tag-chip-amber
+   elsewhere in the app, not a new colour language. */
+.unit-mismatch-note{background:var(--amber-bg);border:1px solid var(--amber);color:var(--amber);border-radius:6px;padding:6px 8px;margin-top:4px;font-size:11px;}
+.unit-mismatch-note .inline-goto-link{color:var(--amber);text-decoration:underline;font-weight:600;}
+.unit-mismatch-note input[type="number"]{width:70px;font-size:11px;padding:2px 4px;}
+.unit-mismatch-note .unit-mismatch-error{display:block;margin-top:4px;color:var(--red);}
 .tag-add-input{
 font-family:'Inter',sans-serif;
 font-size:12px;

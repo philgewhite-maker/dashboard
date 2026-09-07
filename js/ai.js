@@ -797,12 +797,13 @@ const INGREDIENT_PARSE_MAX_TOKENS = 2000;
 function ingredientParsePrompt(lines) {
 return 'Parse each of these recipe ingredient lines into a structured object. '
 + 'Return ONLY a JSON array, no other text, no markdown fences, exactly one object per input line IN THE SAME ORDER: '
-+ '[{"name":"", "form":"", "quantity":0, "unit":"", "notes":""}, ...]. '
++ '[{"name":"", "form":"", "quantity":0, "unit":"", "notes":"", "statedGrams":null}, ...]. '
 + 'name: the canonical, singular ingredient name (e.g. "wheat flour" not "2 cups plain flour"; "chickpeas" not "1 tin chickpeas, drained"). '
 + 'form: a preparation/state ONLY when it plausibly changes nutrition or FODMAP content (e.g. "tinned", "dried", "fresh", "frozen", "cooked") -- "" when it doesn\'t apply or isn\'t stated. '
 + 'quantity: a plain number in `unit`, normalised toward grams or millilitres where sensible, otherwise a countable unit the line itself used (e.g. "clove", "medium", "tbsp", "tsp"); null if the amount is too vague to give a number ("a pinch", "to taste", "a splash"). '
 + 'unit: the unit `quantity` is in, or "" if quantity is null. '
-+ 'notes: anything else from the line worth keeping (e.g. "drained", "minced") that isn\'t the name/quantity/unit itself, or "" if none.\n\nLines:\n'
++ 'notes: anything else from the line worth keeping (e.g. "drained", "minced") that isn\'t the name/quantity/unit itself, or "" if none. '
++ 'statedGrams: ONLY when this line\'s own text directly states a GRAM figure for this same quantity (e.g. "1 stick (5g) cinnamon" -> 5; "2 tbsp (30g) honey" -> 30; "400g tin chickpeas (240g drained)" -> 240, with quantity/unit describing whichever amount is the ingredient\'s actual usable quantity) -- the number of grams stated, for the FULL quantity above (not divided down to one unit). Ignore a stated ML/volume figure (a different measure, not grams) -- leave null unless a genuine gram figure is written in the line itself; never estimate or invent one here.\n\nLines:\n'
 + lines.map((l, i) => `${i + 1}. ${l}`).join('\n');
 }
 function normaliseIngredientParse(raw, expectedCount) {
@@ -810,12 +811,14 @@ const arr = Array.isArray(raw) ? raw : [];
 const out = [];
 for (let i = 0; i < expectedCount; i += 1) {
 const item = arr[i] || {};
+const statedGrams = (typeof item.statedGrams === 'number' && isFinite(item.statedGrams) && item.statedGrams > 0) ? item.statedGrams : null;
 out.push({
 name: String(item.name || '').trim(),
 form: String(item.form || '').trim(),
 quantity: (typeof item.quantity === 'number' && isFinite(item.quantity)) ? item.quantity : null,
 unit: String(item.unit || '').trim(),
 notes: String(item.notes || '').trim(),
+statedGrams,
 });
 }
 return out;
