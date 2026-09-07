@@ -486,7 +486,24 @@ NAME_FILLER_WORDS.forEach((w) => { n = n.replace(new RegExp(`\\b${w}\\b`, 'g'), 
 return n.replace(/\s+/g, ' ').trim();
 }
 
+// Alias key format shared with mergeIngredientEntries/data.ingredientAliases.
+function aliasKeyOf(name, form) {
+return `${canonicalIngredientName(name)}|${String(form || '').trim().toLowerCase()}`;
+}
+
 function findReferenceEntry(name, form) {
+// A user-merged name ("eggplant" -> the "aubergine" entry) resolves
+// straight to its target, bypassing normal name matching entirely --
+// this is what makes two genuinely different spellings/varieties share
+// one entry (and one AI assessment) going forward, not just filler-word
+// variants of the same literal name. Falls through to normal matching
+// if the target was since deleted (a dangling alias, rather than crash
+// or silently resolve to nothing).
+const aliasTargetId = data.ingredientAliases[aliasKeyOf(name, form)];
+if (aliasTargetId) {
+const target = data.ingredientReference.find((e) => e.id === aliasTargetId);
+if (target) return target;
+}
 const n = canonicalIngredientName(name);
 const f = String(form || '').trim().toLowerCase();
 return data.ingredientReference.find((e) => canonicalIngredientName(e.name) === n && (e.form || '').toLowerCase() === f);
@@ -1334,6 +1351,9 @@ ${changes.length ? `<div class="field-block full" style="margin-top:6px;">
 // entirely (the whole index.html section hidden, see renderIngredientReference)
 // until the first ingredient is ever analysed ----
 let editingReferenceId = null;
+// The entry currently showing its "Merge into…" picker (see
+// ingredientRefRowHtml/mergeIngredientEntries) -- null when none is.
+let mergingReferenceId = null;
 
 function ingredientRefEditHtml(e) {
 const macroInput = (label, key) => `<label>${escapeHtml(label)}<input type="number" step="any" data-ref-nutrition="${key}" value="${e.nutrition[key]}"></label>`;
@@ -1383,9 +1403,39 @@ ${Object.keys(e.unitWeights).sort().map((u) => `<span class="tag-chip">${escapeH
 </div>`;
 }
 
+// Folds `sourceId` into `targetId`: every future lookup of the source
+// entry's own (name, form) resolves straight to the target instead (see
+// findReferenceEntry's alias check), and the source entry itself is
+// removed -- it's now redundant, since nothing will ever match it
+// directly again. Deliberately doesn't try to combine the two entries'
+// own data (subs, unitWeights, nutrition...) -- keeping ONLY the
+// target's figures is the simplest rule to actually predict, and the
+// confirm dialog says so explicitly before it happens. Never automatic
+// (see state.js's own comment on data.ingredientAliases) -- always one
+// person's own explicit choice between two entries they picked.
+function mergeIngredientEntries(sourceId, targetId) {
+const source = data.ingredientReference.find((e) => e.id === sourceId);
+const target = data.ingredientReference.find((e) => e.id === targetId);
+if (!source || !target || source.id === target.id) return;
+if (!confirm(`Merge "${source.name}" into "${target.name}"? Every recipe using "${source.name}" will use "${target.name}"'s figures from now on -- "${source.name}"'s own entry (and anything different about it) will be removed.`)) return;
+data.ingredientAliases[aliasKeyOf(source.name, source.form)] = target.id;
+data.ingredientReference = data.ingredientReference.filter((e) => e.id !== sourceId);
+mergingReferenceId = null;
+renderIngredientReference();
+renderRecipes();
+queueSave();
+}
+
 function ingredientRefRowHtml(e) {
 if (editingReferenceId === e.id) return ingredientRefEditHtml(e);
 const unitWeightKeys = Object.keys(e.unitWeights);
+const mergePicker = mergingReferenceId === e.id ? `<div style="margin-top:4px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+<select data-ingredient-ref-merge-target="${e.id}" style="font-size:12px;">
+<option value="">Merge into…</option>
+${[...data.ingredientReference].filter((o) => o.id !== e.id).sort((a, b) => a.name.localeCompare(b.name)).map((o) => `<option value="${o.id}">${escapeHtml(o.name)}${o.form ? ` (${escapeHtml(o.form)})` : ''}</option>`).join('')}
+</select>
+<span class="inline-goto-link" data-ingredient-ref-merge-cancel="1">Cancel</span>
+</div>` : '';
 return `<div class="idea-row" data-ingredient-ref-row="${e.id}">
 <div class="idea-top"><span class="idea-title">${escapeHtml(e.name)}${e.form ? ` (${escapeHtml(e.form)})` : ''}</span>
 <span class="idea-date">per ${e.unitBasis.quantity}${escapeHtml(e.unitBasis.unit)}${e.userEdited ? ' · edited' : ''}</span></div>
@@ -1397,8 +1447,10 @@ ${e.subs.length ? `<div class="settings-note">Substitutes: ${e.subs.map((s) => `
 ${unitWeightKeys.length ? `<div class="settings-note">Also scales for: ${unitWeightKeys.sort().map((u) => `${escapeHtml(u)} (${e.unitWeights[u]}g)`).join(', ')}</div>` : ''}
 <div class="idea-actions">
 <span class="inline-goto-link" data-ingredient-ref-edit="${e.id}">Edit</span>
+<span class="inline-goto-link" data-ingredient-ref-merge="${e.id}">Merge into…</span>
 <span class="del-x" style="opacity:1;" data-ingredient-ref-del="${e.id}">&times;</span>
 </div>
+${mergePicker}
 </div>`;
 }
 
@@ -1412,18 +1464,52 @@ if (!el || !section) return;
 section.hidden = data.ingredientReference.length === 0;
 if (!data.ingredientReference.length) { el.innerHTML = ''; return; }
 const toggleHtml = `<button class="overview-panel-toggle" type="button" id="ingredient-reference-toggle">${referencePanelCollapsed ? '▸ Show ingredient reference' : '▾ Hide ingredient reference'}</button>`;
+// Merged names -- the alias itself no longer has its own row (it was
+// removed by the merge), so this is the only place it's visible at all
+// afterward, and the only way to undo one (deleting the alias just
+// means that name gets a completely fresh AI assessment next time it's
+// used, same as any other never-seen ingredient).
+const aliasKeys = Object.keys(data.ingredientAliases);
+const aliasesHtml = aliasKeys.length ? `<div class="field-block" style="margin-top:6px;">
+<span class="field-label">Merged names</span>
+${aliasKeys.map((key) => {
+const targetId = data.ingredientAliases[key];
+const target = data.ingredientReference.find((e) => e.id === targetId);
+const aliasName = key.split('|')[0];
+return `<div class="settings-note">${escapeHtml(aliasName)} &rarr; ${target ? escapeHtml(target.name) : '(deleted)'} <span class="inline-goto-link" data-ingredient-ref-unmerge="${escapeHtml(key)}">undo</span></div>`;
+}).join('')}
+</div>` : '';
 el.innerHTML = referencePanelCollapsed ? toggleHtml
-: `${toggleHtml}<div style="margin-top:6px;">${[...data.ingredientReference].sort((a, b) => a.name.localeCompare(b.name)).map(ingredientRefRowHtml).join('')}</div>`;
+: `${toggleHtml}${aliasesHtml}<div style="margin-top:6px;">${[...data.ingredientReference].sort((a, b) => a.name.localeCompare(b.name)).map(ingredientRefRowHtml).join('')}</div>`;
 
 document.getElementById('ingredient-reference-toggle').addEventListener('click', () => {
 referencePanelCollapsed = !referencePanelCollapsed;
 renderIngredientReference();
+});
+el.querySelectorAll('[data-ingredient-ref-unmerge]').forEach((x) => {
+x.addEventListener('click', () => {
+delete data.ingredientAliases[x.dataset.ingredientRefUnmerge];
+renderIngredientReference();
+renderRecipes();
+queueSave();
+});
 });
 el.querySelectorAll('[data-ingredient-ref-edit]').forEach((x) => {
 x.addEventListener('click', () => { editingReferenceId = x.dataset.ingredientRefEdit; renderIngredientReference(); });
 });
 el.querySelectorAll('[data-ingredient-ref-cancel]').forEach((x) => {
 x.addEventListener('click', () => { editingReferenceId = null; renderIngredientReference(); });
+});
+el.querySelectorAll('[data-ingredient-ref-merge]').forEach((x) => {
+x.addEventListener('click', () => { mergingReferenceId = mergingReferenceId === x.dataset.ingredientRefMerge ? null : x.dataset.ingredientRefMerge; renderIngredientReference(); });
+});
+el.querySelectorAll('[data-ingredient-ref-merge-cancel]').forEach((x) => {
+x.addEventListener('click', () => { mergingReferenceId = null; renderIngredientReference(); });
+});
+el.querySelectorAll('[data-ingredient-ref-merge-target]').forEach((select) => {
+select.addEventListener('change', () => {
+if (select.value) mergeIngredientEntries(select.dataset.ingredientRefMergeTarget, select.value);
+});
 });
 el.querySelectorAll('[data-ingredient-ref-del]').forEach((x) => {
 x.addEventListener('click', () => {

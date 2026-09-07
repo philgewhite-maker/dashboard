@@ -579,7 +579,7 @@ const DEFAULT_FLAG_RULES = [
 function blankData() {
 return { habits: [], goals: [], jobs: [], connections: [], calendars: [], calendarStatus: {}, vouchers: [], businessIdeas: [], subscriptions: [], enhancementIdeas: [], financeAccounts: [], switchOffers: [], mailSearches: [], tasks: [], taskContexts: [...DEFAULT_TASK_CONTEXTS],
 ratingCategories: DEFAULT_RATING_CATEGORIES.map((c) => ({ ...c })),
-recipes: [], recipeRatingCategories: DEFAULT_RECIPE_RATING_CATEGORIES.map((c) => ({ ...c })), ingredientReference: [],
+recipes: [], recipeRatingCategories: DEFAULT_RECIPE_RATING_CATEGORIES.map((c) => ({ ...c })), ingredientReference: [], ingredientAliases: {},
 claudeAnswers: {},
 flagRules: DEFAULT_FLAG_RULES.map((r) => ({ ...r })),
 flagRulesSeeded: DEFAULT_FLAG_RULES.map((r) => r.id),
@@ -1230,6 +1230,18 @@ if (!e.dietaryAssessedAt) e.dietaryFlagsStale = true;
 if (!e.unitWeights || typeof e.unitWeights !== 'object') e.unitWeights = {};
 if (!e.unitWeightsAssessedAt) e.unitWeightsStale = true;
 });
+// User-controlled "these are the same ingredient" merges (recipes.js's
+// mergeIngredientEntries) -- e.g. "eggplant" and "aubergine", or "brown
+// onion" and "white onion", folded into one shared reference entry so
+// picking a known substitute (or anything else about the ingredient)
+// only ever gets assessed once, not once per spelling. Deliberately
+// never automatic -- a merge that's obviously right for onion (colour
+// doesn't change much) would be wrong for something like apples (colour
+// genuinely changes sugar content), so this is a person's own call, not
+// a heuristic. Keyed by "canonicalName|form" (the alias, i.e. the name
+// no longer has its own entry) -> the id of the entry it now resolves
+// to (see recipes.js's findReferenceEntry).
+if (!data.ingredientAliases || typeof data.ingredientAliases !== 'object') data.ingredientAliases = {};
 }
 
 // Every save is a full-document overwrite of DATA_KEY — there's no way to
