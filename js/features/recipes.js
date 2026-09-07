@@ -5,7 +5,7 @@
 import { data, queueSave, DEFAULT_RECIPE_RATING_CATEGORIES, slugifyField, averageRating, getLocalSettings, setLocalSetting } from '../state.js';
 import { photoDelete, photoGet, photoUrl } from '../db.js';
 import { escapeHtml, uid, todayStr, resizeImageToBlob, openLightbox, pickChipHtml, scrollAndFlash } from '../utils.js';
-import { MissingKeyError, extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, parseIngredients, assessIngredient, ALLERGEN_LIST, DIETARY_FLAGS, FODMAP_COMPONENTS, FODMAP_THRESHOLDS_G, OLIGO_CATEGORIES, fodmapLevelFromGrams, regenerateRecipeVariant, assessUnitWeight } from '../ai.js';
+import { MissingKeyError, extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, parseIngredients, assessIngredient, ALLERGEN_LIST, DIETARY_FLAGS, FODMAP_COMPONENTS, FODMAP_THRESHOLDS_G, OLIGO_CATEGORIES, fodmapLevelFromGrams, regenerateRecipeVariant, assessUnitWeight, assessUnitRatio } from '../ai.js';
 import { storePhoto, uploadAttachment, deleteAttachment, openAttachment, formatBytes } from '../files.js';
 import { getConfig } from '../sync/selfhost.js';
 
@@ -536,7 +536,7 @@ const spec = TRIVIAL_INGREDIENTS[canonicalIngredientName(name)];
 if (!spec) return null;
 return {
 unitBasis: { quantity: 100, unit: spec.unit || 'g' },
-unitWeights: {},
+unitWeights: {}, unitBasisRatios: {},
 nutrition: { calories: 0, protein: 0, carbs: 0, sugars: 0, fat: 0, saturates: 0, fibre: 0, salt: spec.salt || 0 },
 oligoCategory: 'veg_fruit',
 fodmapGrams: { fructans: 0, gos: 0, lactose: 0, excessFructose: 0, polyols: 0 },
@@ -606,6 +606,7 @@ return;
 data.ingredientReference.push({
 id: uid(), name, form,
 ...assessed,
+unitBasisRatios: {},
 subs: assessed.subs.map((s) => ({ id: uid(), ...s })),
 aiFilledAt: trivial ? '' : new Date().toISOString(),
 dietaryAssessedAt: new Date().toISOString(),
@@ -614,15 +615,27 @@ userEdited: false,
 });
 }
 
+// True when a gram figure for the mismatched unit ALONE would actually
+// be enough to resolve it -- only when the entry's own reference amount
+// is itself in grams. Otherwise a gram figure is useless on its own
+// (confirmed live: "grams doesn't help - we need how many tsp in 1
+// stick" -- an entry assessed "per 1 tsp" needs a DIRECT ratio to tsp,
+// not a weight nothing else can relate back to that basis).
+function unitMismatchNeedsDirectRatio(entry) {
+return String(entry.unitBasis.unit || '').trim().toLowerCase() !== 'g';
+}
+
 // Fills in exactly the ONE missing unit conversion a mismatched line
-// needs -- "how many grams is 1 stick of lemongrass" -- rather than a
-// full re-assessment, so answering it can never disturb anything else
-// already on the entry (FODMAP/nutrition figures, an existing
-// substitute, a userEdited correction...). Requested directly: "can
-// some of the failed to match units be resolved by getting a value from
-// the AI for the new units". Always targets the LINE's own ingredient
-// entry (never a hypothetical substitute) -- this is about completing
-// the reference table for what's actually written.
+// needs, rather than a full re-assessment, so answering it can never
+// disturb anything else already on the entry (FODMAP/nutrition figures,
+// an existing substitute, a userEdited correction...). Requested
+// directly: "can some of the failed to match units be resolved by
+// getting a value from the AI for the new units". Asks whichever
+// question can ACTUALLY resolve this entry -- a gram figure when the
+// basis is grams, otherwise a direct ratio to the basis unit (see
+// unitMismatchNeedsDirectRatio). Always targets the LINE's own
+// ingredient entry (never a hypothetical substitute) -- this is about
+// completing the reference table for what's actually written.
 async function resolveUnitMismatch(recipeId, lineIdx) {
 const r = data.recipes.find((x) => x.id === recipeId);
 if (!r) return;
@@ -632,13 +645,18 @@ const entry = findReferenceEntry(line.name, line.form);
 if (!entry) return;
 const unit = line.unit.trim().toLowerCase();
 const errKey = `${recipeId}|${lineIdx}`;
+const directRatio = unitMismatchNeedsDirectRatio(entry);
 unitMismatchErrors.delete(errKey); // clear any earlier failure before this fresh attempt
-busyIngredientAction.set(r.id, `Asking how many grams is 1 ${line.unit} of ${line.name}…`);
+busyIngredientAction.set(r.id, directRatio
+? `Asking how many ${entry.unitBasis.unit} is 1 ${line.unit} of ${line.name}…`
+: `Asking how many grams is 1 ${line.unit} of ${line.name}…`);
 renderRecipes();
 try {
-const grams = await assessUnitWeight(line.name, line.form, line.unit);
-if (grams > 0) {
-entry.unitWeights[unit] = grams;
+const value = directRatio
+? await assessUnitRatio(line.name, line.form, line.unit, entry.unitBasis.quantity, entry.unitBasis.unit)
+: await assessUnitWeight(line.name, line.form, line.unit);
+if (value > 0) {
+if (directRatio) entry.unitBasisRatios[unit] = value; else entry.unitWeights[unit] = value;
 entry.unitWeightsAssessedAt = new Date().toISOString();
 delete entry.unitWeightsStale;
 queueSave();
@@ -647,7 +665,7 @@ queueSave();
 // figure. Reported the same way as a genuine error (inline, not the
 // top status bar) since either way the mismatch is still unresolved
 // and the manual-entry box right below is the actual way out.
-unitMismatchErrors.set(errKey, `AI couldn't work out a gram figure for "${line.unit}" of "${line.name}" -- enter one below.`);
+unitMismatchErrors.set(errKey, `AI couldn't work out a figure for "${line.unit}" of "${line.name}" -- enter one below, or fix the ingredient's own reference amount in Ingredient Reference.`);
 }
 } catch (err) {
 unitMismatchErrors.set(errKey, err instanceof MissingKeyError ? 'Add an Anthropic API key in Settings first, or enter the figure below yourself.' : `Couldn't look that up: ${err.message || err} -- enter one below.`);
@@ -660,24 +678,43 @@ renderIngredientReference();
 
 // The manual-entry half of the same mismatch note -- typed directly at
 // the point of failure rather than requiring a trip to Ingredient
-// Reference. Same target and same staleness-clearing as a successful
-// AI answer above; the only difference is where the number came from.
-function setUnitWeightManually(recipeId, lineIdx, gramsValue) {
+// Reference. Same target, same staleness-clearing, and the same choice
+// of WHAT the number means (grams, or a direct ratio to the basis unit)
+// as a successful AI answer above; the only difference is where the
+// number came from.
+function setUnitWeightManually(recipeId, lineIdx, value) {
 const r = data.recipes.find((x) => x.id === recipeId);
 if (!r) return;
 const line = r.ingredientData[lineIdx];
 if (!line || !line.unit) return;
 const entry = findReferenceEntry(line.name, line.form);
 if (!entry) return;
-const grams = parseFloat(gramsValue);
-if (!Number.isFinite(grams) || grams <= 0) return;
-entry.unitWeights[line.unit.trim().toLowerCase()] = grams;
+const num = parseFloat(value);
+if (!Number.isFinite(num) || num <= 0) return;
+const unit = line.unit.trim().toLowerCase();
+if (unitMismatchNeedsDirectRatio(entry)) entry.unitBasisRatios[unit] = num; else entry.unitWeights[unit] = num;
 entry.unitWeightsAssessedAt = new Date().toISOString();
 delete entry.unitWeightsStale;
 unitMismatchErrors.delete(`${recipeId}|${lineIdx}`);
 queueSave();
 renderRecipes();
 renderIngredientReference();
+}
+
+// Expands Ingredient Reference (if collapsed), opens the given entry's
+// full edit form, and scrolls/flashes it into view -- a direct route
+// from a mismatch note to fixing EVERYTHING about that ingredient, not
+// just the one missing unit. Requested directly ("give me a direct
+// link, popup or something to fix these") for exactly the case a unit
+// conversion alone can't fix: the reference amount itself is wrong
+// (confirmed live: chilli assessed "per 1 tsp" when the natural unit is
+// "1 whole" -- no conversion factor rescues a basis that's simply the
+// wrong thing to measure this ingredient by).
+function jumpToIngredientRef(entryId) {
+referencePanelCollapsed = false;
+editingReferenceId = entryId;
+renderIngredientReference();
+setTimeout(() => scrollAndFlash(`[data-ingredient-ref-row="${entryId}"]`), 0);
 }
 
 // Shared by both places a unit mismatch shows (the parsed-ingredients
@@ -687,16 +724,21 @@ renderIngredientReference();
 // named the actual unit). Amber .unit-mismatch-note styling (not a plain
 // .settings-note) so a real gap in the totals actually stands out
 // against the page's usual muted captions, per feedback.
-function unitMismatchNoteHtml(recipeId, lineIdx, line, basisUnit) {
+function unitMismatchNoteHtml(recipeId, lineIdx, line, entry) {
 const err = unitMismatchErrors.get(`${recipeId}|${lineIdx}`);
+const directRatio = unitMismatchNeedsDirectRatio(entry);
+const basisUnit = entry.unitBasis.unit;
+const askLabel = directRatio ? `Ask AI how many ${escapeHtml(basisUnit)} 1 ${escapeHtml(line.unit)} is` : `Ask AI how many grams 1 ${escapeHtml(line.unit)} is`;
+const inputPlaceholder = directRatio ? escapeHtml(basisUnit) : 'grams';
 return `<div class="unit-mismatch-note">
 ⚠ "${escapeHtml(line.unit)}" doesn't match this ingredient's reference amount ("${escapeHtml(basisUnit)}") -- can't convert automatically.
 <div style="margin-top:4px;">
-<span class="inline-goto-link" data-recipe-resolve-unit="${recipeId}" data-resolve-unit-idx="${lineIdx}">Ask AI how many grams 1 ${escapeHtml(line.unit)} is</span>
+<span class="inline-goto-link" data-recipe-resolve-unit="${recipeId}" data-resolve-unit-idx="${lineIdx}">${askLabel}</span>
 &nbsp;or&nbsp;
-<input type="number" step="any" min="0" placeholder="grams" data-recipe-manual-unit-grams="${recipeId}" data-manual-unit-idx="${lineIdx}">
+<input type="number" step="any" min="0" placeholder="${inputPlaceholder}" data-recipe-manual-unit-grams="${recipeId}" data-manual-unit-idx="${lineIdx}">
 <button type="button" class="todo-add-btn" data-recipe-manual-unit-save="${recipeId}" data-manual-unit-idx="${lineIdx}" style="padding:2px 8px;">Save</button>
 </div>
+<div style="margin-top:4px;"><span class="inline-goto-link" data-recipe-edit-ref="${entry.id}">Edit "${escapeHtml(entry.name)}" in Ingredient Reference…</span></div>
 ${err ? `<span class="unit-mismatch-error">${escapeHtml(err)}</span>` : ''}
 </div>`;
 }
@@ -860,16 +902,27 @@ return (typeof w === 'number' && w > 0) ? w : null;
 
 // How many entry.unitBasis.unit's ONE `lineUnit` is worth -- 1 when the
 // two are literally the same unit (the exact-match case, needing no
-// weight data of any kind); otherwise bridged through grams via
-// gramsEquivalentPerOne on BOTH sides (the entry's own unitBasis unit
-// might itself be a countable/spoon unit, not necessarily "g"); null
-// when genuinely unresolvable, which callers must treat as unresolved
-// (never guessed) -- see resolveLineEntry's unitMismatch/unitRatio.
+// weight data of any kind); otherwise checked two ways:
+//  1. entry.unitBasisRatios[lineUnit] -- a DIRECT ratio to the basis
+//     unit ("1 stick = 2 tsp"), when that's what was actually resolved
+//     (see resolveUnitMismatch). Needs no grams fact for either unit --
+//     the only way to bridge an entry whose OWN basis isn't grams
+//     (assessed "per 1 tsp", say): a gram figure for the mismatched
+//     unit alone can never resolve that case, since nothing separately
+//     establishes how many grams the BASIS unit itself is either.
+//  2. failing that, bridged through grams via gramsEquivalentPerOne on
+//     BOTH sides (works whenever both units have a known gram weight,
+//     regardless of which one the basis happens to be).
+// null when genuinely unresolvable, which callers must treat as
+// unresolved (never guessed) -- see resolveLineEntry's unitMismatch/
+// unitRatio.
 function unitConversionRatio(entry, lineUnit) {
 const lu = String(lineUnit || '').trim().toLowerCase();
 const bu = String(entry.unitBasis.unit || '').trim().toLowerCase();
 if (!lu || !bu) return null;
 if (lu === bu) return 1;
+const direct = entry.unitBasisRatios && entry.unitBasisRatios[lu];
+if (typeof direct === 'number' && direct > 0) return direct;
 const lineGramsPerOne = gramsEquivalentPerOne(entry, lu);
 const basisGramsPerOne = gramsEquivalentPerOne(entry, bu);
 if (lineGramsPerOne != null && basisGramsPerOne != null) return lineGramsPerOne / basisGramsPerOne;
@@ -1199,7 +1252,7 @@ return `
 <input type="text" placeholder="unit" data-ingdata-field="unit" data-ingdata-recipe="${r.id}" data-ingdata-idx="${i}" value="${escapeHtml(line.unit)}">
 </div>
 <div class="settings-note" style="margin-top:2px;">from: “${escapeHtml(r.ingredients[i] || '')}”${line.notes ? ` · ${escapeHtml(line.notes)}` : ''}</div>
-${mismatchEntry ? unitMismatchNoteHtml(r.id, i, line, mismatchEntry.unitBasis.unit) : ''}
+${mismatchEntry ? unitMismatchNoteHtml(r.id, i, line, mismatchEntry) : ''}
 </div>`;
 }).join('');
 return `<div class="full">
@@ -1306,7 +1359,7 @@ if (!dropped && unitMismatch) {
 // live: "white onion — 0.3large per portion... gos: low" was this
 // exact bug, dividing 0.3 BY 100 as if "large" and "g" were the same
 // unit -- a number that means nothing, not a conservative estimate.
-unitMismatchHtml = unitMismatchNoteHtml(r.id, i, line, entry.unitBasis.unit);
+unitMismatchHtml = unitMismatchNoteHtml(r.id, i, line, entry);
 } else if (!dropped) {
 // A line with no stated quantity (an "optional" ingredient, or a vague
 // "to taste") still has FODMAP content worth knowing about -- confirmed
@@ -1514,8 +1567,14 @@ const macroInput = (label, key) => `<label>${escapeHtml(label)}<input type="numb
 // fixed published thresholds, never set directly.
 const fodmapInput = (key) => `<label>${escapeHtml(key)} (g)<input type="number" step="any" min="0" data-ref-fodmap="${key}" value="${e.fodmapGrams[key]}"></label>`;
 return `<div class="idea-row" data-ingredient-ref-row="${e.id}">
-<div class="idea-top"><span class="idea-title">Editing: ${escapeHtml(e.name)}${e.form ? ` (${escapeHtml(e.form)})` : ''}</span>
-<span class="idea-date">per ${e.unitBasis.quantity}${escapeHtml(e.unitBasis.unit)}</span></div>
+<div class="idea-top"><span class="idea-title">Editing: ${escapeHtml(e.name)}${e.form ? ` (${escapeHtml(e.form)})` : ''}</span></div>
+<label class="full">Reference amount <span class="settings-note">what every figure below is PER -- e.g. change "1 tsp" to "1 whole" if AI picked an unnatural unit for this ingredient (a whole chilli, not a spice measure)</span>
+<div style="display:flex;align-items:center;gap:6px;">
+<input type="number" step="any" min="0" data-ref-basis-quantity value="${e.unitBasis.quantity}" style="width:70px;">
+<input type="text" autocomplete="off" data-ref-basis-unit value="${escapeHtml(e.unitBasis.unit)}" style="width:90px;">
+</div>
+</label>
+<div class="settings-note">⚠ Changing this does NOT rescale the macro/FODMAP figures below -- they stay whatever number they already are, now against the NEW amount. Check and correct them too if the amount changed meaningfully.</div>
 <div class="tinder-fields" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
 ${macroInput('Calories', 'calories')}${macroInput('Protein (g)', 'protein')}
 ${macroInput('Carbs (g)', 'carbs')}${macroInput('— sugars (g)', 'sugars')}
@@ -1595,6 +1654,7 @@ ${e.allergens.length ? `<div class="settings-note">Allergens: ${e.allergens.map(
 ${e.dietaryFlags.length ? `<div class="settings-note">Also: ${e.dietaryFlags.map(escapeHtml).join(', ')}</div>` : ''}
 ${e.subs.length ? `<div class="settings-note">Substitutes: ${e.subs.map((s) => `${escapeHtml(s.name)}${s.note ? ` (${escapeHtml(s.note)})` : ''}`).join('; ')}</div>` : ''}
 ${unitWeightKeys.length ? `<div class="settings-note">Also scales for: ${unitWeightKeys.sort().map((u) => `${escapeHtml(u)} (${e.unitWeights[u]}g)`).join(', ')}</div>` : ''}
+${Object.keys(e.unitBasisRatios).length ? `<div class="settings-note">Also scales for: ${Object.keys(e.unitBasisRatios).sort().map((u) => `${escapeHtml(u)} (1 = ${e.unitBasisRatios[u]} ${escapeHtml(e.unitBasis.unit)})`).join(', ')}</div>` : ''}
 <div class="idea-actions">
 <span class="inline-goto-link" data-ingredient-ref-edit="${e.id}">Edit</span>
 <span class="inline-goto-link" data-ingredient-ref-merge="${e.id}">Merge into…</span>
@@ -1751,6 +1811,22 @@ btn.addEventListener('click', () => {
 const e = data.ingredientReference.find((r2) => r2.id === btn.dataset.ingredientRefSave);
 if (!e) return;
 const row = btn.closest('[data-ingredient-ref-row]');
+const basisQtyInput = row.querySelector('[data-ref-basis-quantity]');
+const basisUnitInput = row.querySelector('[data-ref-basis-unit]');
+if (basisQtyInput && basisUnitInput) {
+const q = parseFloat(basisQtyInput.value);
+const newUnit = basisUnitInput.value.trim();
+const unitChanged = newUnit && newUnit.toLowerCase() !== e.unitBasis.unit.trim().toLowerCase();
+if (Number.isFinite(q) && q > 0) e.unitBasis.quantity = q;
+if (newUnit) e.unitBasis.unit = newUnit;
+// unitBasisRatios are ratios TO the basis unit specifically ("1 stick
+// = 2 tsp") -- if the basis itself just changed (tsp -> whole, say),
+// every stored ratio is now relative to a unit that's no longer the
+// reference at all, and would silently produce a WRONG conversion if
+// left in place rather than genuinely fixing the mismatch it was
+// meant to resolve.
+if (unitChanged) e.unitBasisRatios = {};
+}
 row.querySelectorAll('[data-ref-nutrition]').forEach((input) => {
 const v = parseFloat(input.value);
 e.nutrition[input.dataset.refNutrition] = Number.isFinite(v) ? v : 0;
@@ -2072,6 +2148,9 @@ if (e.key !== 'Enter') return;
 e.preventDefault();
 setUnitWeightManually(input.dataset.recipeManualUnitGrams, parseInt(input.dataset.manualUnitIdx, 10), input.value);
 });
+});
+el.querySelectorAll('[data-recipe-edit-ref]').forEach((link) => {
+link.addEventListener('click', () => jumpToIngredientRef(link.dataset.recipeEditRef));
 });
 el.querySelectorAll('[data-recipe-regenerate]').forEach((btn) => {
 btn.addEventListener('click', () => regenerateVariant(btn.dataset.recipeRegenerate));

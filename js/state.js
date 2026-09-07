@@ -1229,6 +1229,16 @@ if (!e.dietaryAssessedAt) e.dietaryFlagsStale = true;
 // own "100g" unitBasis forever.
 if (!e.unitWeights || typeof e.unitWeights !== 'object') e.unitWeights = {};
 if (!e.unitWeightsAssessedAt) e.unitWeightsStale = true;
+// A DIRECT ratio to the entry's own unitBasis unit ("1 stick = 2 tsp"),
+// separate from unitWeights (grams-per-one) -- needed for an entry whose
+// own basis ISN'T grams (assessed "per 1 tsp", say): a gram figure for
+// the mismatched unit alone can't bridge that, since nothing ever
+// establishes how many grams the BASIS unit itself is either. No
+// staleness flag of its own -- unlike unitWeights/dietaryFlags, this is
+// never proactively assessed up front, only filled in on demand per
+// mismatch (see recipes.js's resolveUnitMismatch), so an empty object
+// here always just means "none needed yet", not "never checked".
+if (!e.unitBasisRatios || typeof e.unitBasisRatios !== 'object') e.unitBasisRatios = {};
 });
 // User-controlled "these are the same ingredient" merges (recipes.js's
 // mergeIngredientEntries) -- e.g. "eggplant" and "aubergine", or "brown

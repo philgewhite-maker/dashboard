@@ -971,6 +971,27 @@ const { data: raw } = await callTextJson(unitWeightPrompt(name, form, unit), UNI
 return normaliseUnitWeight(raw);
 }
 
+// A gram figure only bridges a mismatch when the entry's OWN reference
+// amount is ALSO in grams -- confirmed live gap: an entry assessed "per
+// 1 tsp" (a spice/potent ingredient, per this file's own unitBasis
+// guidance) can't be bridged to "1 stick" by asking for the stick's own
+// weight alone, since nothing ever asked how many grams 1 tsp is either
+// ("grams doesn't help - we need how many tsp in 1 stick"). This asks
+// the DIRECT question instead -- how the two units compare to EACH
+// OTHER -- which needs no grams fact for either one.
+const UNIT_RATIO_MAX_TOKENS = 200;
+function unitRatioPrompt(name, form, unit, basisQuantity, basisUnit) {
+return `For the food ingredient "${name}"${form ? ` (${form})` : ''}: how many "${basisUnit}" is ONE "${unit}" equivalent to? Return ONLY a JSON object, no other text, no markdown fences: {"ratio": 0} -- e.g. if 1 "${unit}" of this ingredient is roughly equivalent to 2 "${basisUnit}", ratio would be 2. For reference, this ingredient is normally measured in units of ${basisQuantity} "${basisUnit}". Give your best real-world estimate -- this is a starting point a person can correct, not a lab measurement.`;
+}
+function normaliseUnitRatio(raw) {
+const v = raw && typeof raw.ratio === 'number' && isFinite(raw.ratio) ? raw.ratio : 0;
+return v > 0 ? v : 0;
+}
+async function assessUnitRatio(name, form, unit, basisQuantity, basisUnit) {
+const { data: raw } = await callTextJson(unitRatioPrompt(name, form, unit, basisQuantity, basisUnit), UNIT_RATIO_MAX_TOKENS, null, 'Unit ratio assessment');
+return normaliseUnitRatio(raw);
+}
+
 // ---- "make it like this": turning a recipe's per-line substitute/
 // reduce/drop overrides (recipes.js's lineOverrides -- a session-only
 // "what if" exploration, never persisted) into an actual rewritten
@@ -1386,5 +1407,5 @@ extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShopp
 identifyCountry, extractWellnessScreenshot,
 extractTripScreenshot, extractTripLegFromEmail,
 parseIngredients, assessIngredient, ALLERGEN_LIST, DIETARY_FLAGS, FODMAP_COMPONENTS, FODMAP_LEVELS,
-FODMAP_THRESHOLDS_G, OLIGO_CATEGORIES, fodmapLevelFromGrams, regenerateRecipeVariant, assessUnitWeight,
+FODMAP_THRESHOLDS_G, OLIGO_CATEGORIES, fodmapLevelFromGrams, regenerateRecipeVariant, assessUnitWeight, assessUnitRatio,
 };
