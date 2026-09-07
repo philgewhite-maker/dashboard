@@ -716,7 +716,23 @@ wholeQty = r.servings ? override.qty * r.servings : override.qty;
 // as written" again fired no `change` event at all (as far as the
 // browser was concerned, nothing changed), so it could never be used to
 // undo a substitution.
-return { entry, originalEntry, dropped, portionQty, wholeQty, subName };
+//
+// unitMismatch: the ingredient LINE's own unit ("large", "clove"...)
+// against the (possibly substituted) entry's unitBasis.unit -- everywhere
+// else in this file just divides `portionQty`/`wholeQty` by
+// `entry.unitBasis.quantity`, a NAIVE number-only scale that assumes the
+// two are already in the same unit. Two independent AI calls (the
+// ingredient parser and the ingredient assessor) choose their own units
+// with no coordination at all, so nothing actually guaranteed that until
+// now -- a real, confirmed gap: "white onion" parsed as "1 large" against
+// a reference entry assessed per "100g" silently divided 1 by 100 as if
+// they were the same unit, producing a number with no real meaning.
+// Per the app's own unit-matching safety principle (never guess a
+// cross-unit conversion), a mismatch here must make every caller treat
+// the line as UNRESOLVED, not silently compute and display a wrong
+// figure -- see computeRecipeDiet and recipeIngredientAnalysisHtml.
+const unitMismatch = !!(line.unit && entry.unitBasis.unit && line.unit.trim().toLowerCase() !== entry.unitBasis.unit.trim().toLowerCase());
+return { entry, originalEntry, dropped, portionQty, wholeQty, subName, unitMismatch };
 }
 
 const MIXED_OLIGO_CATEGORY = 'veg_fruit'; // conservative default when a recipe's fructans/GOS come from more than one category -- see computeRecipeDiet
@@ -764,6 +780,15 @@ const fodmapGrams = {}; FODMAP_COMPONENTS.forEach((k) => { fodmapGrams[k] = 0; }
 const oligoCatGrams = { fructans: {}, gos: {} };
 const allergens = new Set();
 const dietaryFlags = new Set();
+// Lines that couldn't be scaled at all -- their unit doesn't match
+// their (possibly substituted) reference entry's unitBasis, so macros/
+// FODMAP are withheld for THAT line specifically (never guess a cross-
+// unit conversion -- see resolveLineEntry's own comment) rather than
+// blocking the whole recipe's totals over one ingredient's parsing
+// hiccup. recipeDietHtml surfaces this list so the totals below are
+// never silently incomplete -- what's excluded, and why, is always
+// visible right next to them.
+const unmatchedLines = [];
 let resolvedCount = 0;
 for (let i = 0; i < r.ingredientData.length; i += 1) {
 const line = r.ingredientData[i];
@@ -771,8 +796,15 @@ if (!line.name) { resolvedCount += 1; continue; } // a blank/unparseable line co
 const resolved = resolveLineEntry(r, line, i);
 if (!resolved) return null; // not analysed yet -- caller shows "Analyse ingredients" instead
 resolvedCount += 1;
-const { entry, dropped, portionQty, wholeQty } = resolved;
+const { entry, dropped, portionQty, wholeQty, unitMismatch } = resolved;
 if (dropped) continue; // excluded from every total, including allergens -- "drop it" means drop it
+// Allergen/dietary-flag presence is boolean, not quantity-scaled -- a
+// trace of gluten doesn't stop being gluten just because THIS line's
+// unit couldn't be scaled, so these are recorded regardless of
+// unitMismatch, unlike the quantity-dependent totals just below.
+(entry.allergens || []).forEach((a) => allergens.add(a));
+(entry.dietaryFlags || []).forEach((f) => dietaryFlags.add(f));
+if (unitMismatch) { unmatchedLines.push({ line, entry }); continue; }
 if (wholeQty != null) {
 const scale = wholeQty / (entry.unitBasis.quantity || 1);
 MACRO_FIELDS.forEach((k) => { totals[k] += (entry.nutrition[k] || 0) * scale; });
@@ -787,8 +819,6 @@ oligoCatGrams[k][entry.oligoCategory] = (oligoCatGrams[k][entry.oligoCategory] |
 }
 });
 }
-(entry.allergens || []).forEach((a) => allergens.add(a));
-(entry.dietaryFlags || []).forEach((f) => dietaryFlags.add(f));
 }
 if (resolvedCount < r.ingredientData.length) return null;
 const fodmap = {};
@@ -807,7 +837,7 @@ category = (dominantGrams / fodmapGrams[k]) >= OLIGO_CATEGORY_DOMINANCE_THRESHOL
 }
 fodmap[k] = fodmapLevelFromGrams(k, fodmapGrams[k], category);
 });
-return { totals, fodmapGrams, fodmap, allergens: [...allergens], dietaryFlags: [...dietaryFlags] };
+return { totals, fodmapGrams, fodmap, allergens: [...allergens], dietaryFlags: [...dietaryFlags], unmatchedLines };
 }
 
 function recipeIngredientsStatusHtml(r) {
@@ -896,7 +926,7 @@ const rows = r.ingredientData.map((line, i) => {
 if (!line.name) return '';
 const resolved = resolveLineEntry(r, line, i);
 if (!resolved) return '';
-const { entry, originalEntry, dropped, portionQty, subName } = resolved;
+const { entry, originalEntry, dropped, portionQty, subName, unitMismatch } = resolved;
 const override = (lineOverrides.get(r.id) || new Map()).get(i);
 let label = `${escapeHtml(line.name)}${line.form ? ` (${escapeHtml(line.form)})` : ''}`;
 if (subName) label += ` &rarr; using substitute: <strong>${escapeHtml(subName)}</strong>`;
@@ -931,7 +961,18 @@ lineDietaryFlags.length ? `Also: ${lineDietaryFlags.map(escapeHtml).join(', ')}`
 let chips = '';
 let worstLevel = 'none';
 let noQtyNote = '';
-if (!dropped) {
+if (!dropped && unitMismatch) {
+// Genuinely can't compute a figure here at all -- unlike "no quantity
+// given" below (nothing to scale BY), this line HAS a quantity, just
+// in a unit ("large", say) that doesn't match the reference entry's
+// own basis ("g") -- silently falling back to the reference amount
+// the way the no-quantity case does would show a number that has
+// nothing to do with what's actually in this dish. Real gap caught
+// live: "white onion — 0.3large per portion... gos: low" was this
+// exact bug, dividing 0.3 BY 100 as if "large" and "g" were the same
+// unit -- a number that means nothing, not a conservative estimate.
+noQtyNote = `This line is parsed as "${line.unit}", but its reference entry is per "${entry.unitBasis.unit}" — these can't be converted automatically, so no figure is shown (and it's excluded from the totals above). Fix the parsed unit above, pick a substitute assessed in a compatible unit, or edit the entry's own basis in Ingredient Reference.`;
+} else if (!dropped) {
 // A line with no stated quantity (an "optional" ingredient, or a vague
 // "to taste") still has FODMAP content worth knowing about -- confirmed
 // live gap: an ingredient like this showed its allergens (a boolean
@@ -992,7 +1033,7 @@ return `<span class="fodmap-chip level-${level}" title="${escapeHtml(k)}">${esca
 // line has an override at all, its control must stay visible so it can
 // be changed back) -- the other three conditions are what make the
 // control appear in the FIRST place, before any override exists.
-const needsOverride = worstLevel !== 'none' || lineAllergens.length || lineDietaryFlags.length || !!override;
+const needsOverride = worstLevel !== 'none' || lineAllergens.length || lineDietaryFlags.length || unitMismatch || !!override;
 let overrideHtml = '';
 if (needsOverride) {
 // A "reduced" override can come from either "less of just this
@@ -1011,11 +1052,15 @@ const mode = override ? (override.mode === 'sub' ? `sub:${override.subName}` : o
 // written" the moment a swap is made.
 const options = [`<option value="original"${mode === 'original' ? ' selected' : ''}>Use as written</option>`]
 .concat((originalEntry.subs || []).map((s) => `<option value="sub:${escapeHtml(s.name)}"${mode === `sub:${s.name}` ? ' selected' : ''}>Substitute: ${escapeHtml(s.name)}${s.note ? ` (${escapeHtml(s.note)})` : ''}</option>`))
-.concat([
+// "Use less" needs a real, correctly-scaled quantity to suggest a
+// target FROM -- meaningless on a unit-mismatched line (there's no
+// valid scale to compute against), so it's left out entirely rather
+// than offering a control that can't actually do its job.
+.concat(unitMismatch ? [] : [
 `<option value="reduced-line"${mode === 'reduced-line' ? ' selected' : ''}>Use less (this ingredient to low)…</option>`,
 `<option value="reduced-recipe"${mode === 'reduced-recipe' ? ' selected' : ''}>Use less (whole recipe to low)…</option>`,
-`<option value="dropped"${mode === 'dropped' ? ' selected' : ''}>Drop from analysis</option>`,
-]).join('');
+])
+.concat([`<option value="dropped"${mode === 'dropped' ? ' selected' : ''}>Drop from analysis</option>`]).join('');
 overrideHtml = `<div style="margin-top:4px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
 <select data-line-override-mode="${i}" data-line-recipe="${r.id}" style="font-size:12px;">${options}</select>
 ${override && override.mode === 'reduced' ? `<input type="number" step="any" min="0" data-line-override-qty="${i}" data-line-recipe="${r.id}" value="${override.qty}" style="width:70px;font-size:12px;"> ${escapeHtml(line.unit)}/portion` : ''}
@@ -1067,6 +1112,7 @@ const row = (label, key, unit) => `<div style="display:flex;justify-content:spac
 return `<div class="full">
 <button class="overview-panel-toggle" type="button" data-recipe-diet-toggle="${r.id}">${expandedDiet.has(r.id) ? '▾ Hide diet analysis' : '▸ Show diet analysis'}</button>
 ${expandedDiet.has(r.id) ? `${recipeHasStaleReference(r) ? `<div class="settings-note" style="margin-top:6px;">Some ingredients predate dietary-flag checks (kosher/halal/vegetarian/vegan) — <span class="inline-goto-link" data-recipe-analyse="${r.id}">refresh</span> to fill them in.</div>` : ''}
+${diet.unmatchedLines.length ? `<div class="settings-note" style="margin-top:6px;">Totals below EXCLUDE ${diet.unmatchedLines.length} ingredient${diet.unmatchedLines.length === 1 ? '' : 's'} whose parsed unit doesn't match its reference entry's own basis (never guessed automatically): ${diet.unmatchedLines.map(({ line, entry }) => `${escapeHtml(line.name)} ("${escapeHtml(line.unit)}" vs "${escapeHtml(entry.unitBasis.unit)}")`).join(', ')}. See the ingredient list below to fix the parsed unit, or edit the entry's basis in Ingredient Reference.</div>` : ''}
 <div class="field-block" style="margin-top:6px;">
 <span class="field-label">FODMAP (per component) — summed across ingredients${per ? `, per portion (${per})` : ' -- set Servings above for a true per-portion figure; this is the whole-recipe total'}</span>
 <div>${fodmapRowHtml(diet.fodmap, diet.fodmapGrams)}</div>
