@@ -5,7 +5,7 @@
 import { data, queueSave, DEFAULT_RECIPE_RATING_CATEGORIES, slugifyField, averageRating, getLocalSettings, setLocalSetting } from '../state.js';
 import { photoDelete, photoGet, photoUrl } from '../db.js';
 import { escapeHtml, uid, todayStr, resizeImageToBlob, openLightbox, pickChipHtml, scrollAndFlash } from '../utils.js';
-import { MissingKeyError, extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, parseIngredients, assessIngredient, ALLERGEN_LIST, DIETARY_FLAGS, FODMAP_COMPONENTS, FODMAP_THRESHOLDS_G, OLIGO_CATEGORIES, fodmapLevelFromGrams, regenerateRecipeVariant } from '../ai.js';
+import { MissingKeyError, extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, parseIngredients, assessIngredient, ALLERGEN_LIST, DIETARY_FLAGS, FODMAP_COMPONENTS, FODMAP_THRESHOLDS_G, OLIGO_CATEGORIES, fodmapLevelFromGrams, regenerateRecipeVariant, assessUnitWeight } from '../ai.js';
 import { storePhoto, uploadAttachment, deleteAttachment, openAttachment, formatBytes } from '../files.js';
 import { getConfig } from '../sync/selfhost.js';
 
@@ -606,6 +606,44 @@ userEdited: false,
 });
 }
 
+// Fills in exactly the ONE missing unit conversion a mismatched line
+// needs -- "how many grams is 1 stick of lemongrass" -- rather than a
+// full re-assessment, so answering it can never disturb anything else
+// already on the entry (FODMAP/nutrition figures, an existing
+// substitute, a userEdited correction...). Requested directly: "can
+// some of the failed to match units be resolved by getting a value from
+// the AI for the new units". Always targets the LINE's own ingredient
+// entry (never a hypothetical substitute) -- this is about completing
+// the reference table for what's actually written.
+async function resolveUnitMismatch(recipeId, lineIdx) {
+const r = data.recipes.find((x) => x.id === recipeId);
+if (!r) return;
+const line = r.ingredientData[lineIdx];
+if (!line || !line.unit) return;
+const entry = findReferenceEntry(line.name, line.form);
+if (!entry) return;
+const unit = line.unit.trim().toLowerCase();
+busyIngredientAction.set(r.id, `Asking how many grams is 1 ${line.unit} of ${line.name}…`);
+renderRecipes();
+try {
+const grams = await assessUnitWeight(line.name, line.form, line.unit);
+if (grams > 0) {
+entry.unitWeights[unit] = grams;
+entry.unitWeightsAssessedAt = new Date().toISOString();
+delete entry.unitWeightsStale;
+queueSave();
+} else {
+setStatus(`Couldn't work out a gram figure for "${line.unit}" of "${line.name}" -- add one by hand in Ingredient Reference instead.`);
+}
+} catch (err) {
+setStatus(err instanceof MissingKeyError ? 'Add an Anthropic API key in Settings first.' : `Couldn't look that up: ${err.message || err}`);
+} finally {
+busyIngredientAction.delete(r.id);
+}
+renderRecipes();
+renderIngredientReference();
+}
+
 async function analyseIngredients(recipeId) {
 const r = data.recipes.find((x) => x.id === recipeId);
 if (!r) return;
@@ -634,6 +672,13 @@ busyIngredientAction.set(r.id, `Assessing ${toAssess[i].name}… (${i + 1}/${toA
 renderRecipes();
 await ensureReferenceEntry(toAssess[i].name, toAssess[i].form);
 }
+// A unit mismatch can only be KNOWN once an entry exists to compare
+// against -- this is the earliest point that's true. Auto-opens the
+// parsed-ingredients panel so it's actually seen here, not just
+// discoverable later by someone who happens to expand "Show diet
+// analysis" -- per feedback ("highlighted at the stage of parsing
+// ingredients rather than wait for a lookup fail later").
+if (r.ingredientData.some((line) => lineUnitMismatchEntry(line))) expandedIngredientData.add(r.id);
 } catch (err) {
 setStatus(err instanceof MissingKeyError ? 'Add an Anthropic API key in Settings first.' : `Couldn't analyse that: ${err.message || err}`);
 } finally {
@@ -771,6 +816,21 @@ const lineGramsPerOne = gramsEquivalentPerOne(entry, lu);
 const basisGramsPerOne = gramsEquivalentPerOne(entry, bu);
 if (lineGramsPerOne != null && basisGramsPerOne != null) return lineGramsPerOne / basisGramsPerOne;
 return null;
+}
+
+// A parsed line's OWN ingredient (never a substitute -- this is about the
+// reference table for what's actually written, checked as soon as the
+// line has an entry at all) has no bridge to its reference entry's
+// unitBasis unit. Returns the entry it can't be scaled against, or null
+// when there's nothing to flag (no entry yet, no unit, or units that
+// already line up) -- used to surface this at parse-time
+// (recipeParsedIngredientsHtml) rather than only once "Show diet
+// analysis" is expanded, per feedback.
+function lineUnitMismatchEntry(line) {
+if (!line.name || !line.unit) return null;
+const entry = findReferenceEntry(line.name, line.form);
+if (!entry || !entry.unitBasis.unit) return null;
+return unitConversionRatio(entry, line.unit) == null ? entry : null;
 }
 
 // The bounds ([lowMax, highMin], in grams of the actual carbohydrate) a
@@ -1044,7 +1104,13 @@ return '';
 function recipeParsedIngredientsHtml(r) {
 if (!r.ingredientsParsedAt) return '';
 const open = expandedIngredientData.has(r.id);
-const rows = r.ingredientData.map((line, i) => `
+const rows = r.ingredientData.map((line, i) => {
+// Surfaced HERE, not just deep inside "Show diet analysis" -- per
+// feedback: a unit mismatch is something to notice and fix (or resolve
+// via AI) right where the parsed line already sits, not discovered
+// later as an unexplained gap in the totals.
+const mismatchEntry = lineUnitMismatchEntry(line);
+return `
 <div class="idea-row" style="padding:6px 0;">
 <div class="tinder-fields" style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:6px;">
 <input type="text" placeholder="name" data-ingdata-field="name" data-ingdata-recipe="${r.id}" data-ingdata-idx="${i}" value="${escapeHtml(line.name)}">
@@ -1053,7 +1119,9 @@ const rows = r.ingredientData.map((line, i) => `
 <input type="text" placeholder="unit" data-ingdata-field="unit" data-ingdata-recipe="${r.id}" data-ingdata-idx="${i}" value="${escapeHtml(line.unit)}">
 </div>
 <div class="settings-note" style="margin-top:2px;">from: “${escapeHtml(r.ingredients[i] || '')}”${line.notes ? ` · ${escapeHtml(line.notes)}` : ''}</div>
-</div>`).join('');
+${mismatchEntry ? `<div class="settings-note" style="margin-top:2px;">⚠ "${escapeHtml(line.unit)}" doesn't match this ingredient's reference amount ("${escapeHtml(mismatchEntry.unitBasis.unit)}") -- <span class="inline-goto-link" data-recipe-resolve-unit="${r.id}" data-resolve-unit-idx="${i}">ask AI how many grams that is</span>, or fix the unit above.</div>` : ''}
+</div>`;
+}).join('');
 return `<div class="full">
 <button class="overview-panel-toggle" type="button" data-recipe-ingdata-toggle="${r.id}">${open ? '▾ Hide parsed ingredients' : '▸ Show parsed ingredients'}</button>
 ${open ? `<div style="margin-top:4px;">
@@ -1147,6 +1215,7 @@ lineDietaryFlags.length ? `Also: ${lineDietaryFlags.map(escapeHtml).join(', ')}`
 let chips = '';
 let worstLevel = 'none';
 let noQtyNote = '';
+let unitMismatchActionHtml = '';
 if (!dropped && unitMismatch) {
 // Genuinely can't compute a figure here at all -- unlike "no quantity
 // given" below (nothing to scale BY), this line HAS a quantity, just
@@ -1157,7 +1226,8 @@ if (!dropped && unitMismatch) {
 // live: "white onion — 0.3large per portion... gos: low" was this
 // exact bug, dividing 0.3 BY 100 as if "large" and "g" were the same
 // unit -- a number that means nothing, not a conservative estimate.
-noQtyNote = `This line is parsed as "${line.unit}", but its reference entry is per "${entry.unitBasis.unit}" — these can't be converted automatically, so no figure is shown (and it's excluded from the totals above). Fix the parsed unit above, pick a substitute assessed in a compatible unit, or edit the entry's own basis in Ingredient Reference.`;
+noQtyNote = `This line is parsed as "${line.unit}", but its reference entry is per "${entry.unitBasis.unit}" — these can't be converted automatically, so no figure is shown (and it's excluded from the totals above).`;
+unitMismatchActionHtml = ` <span class="inline-goto-link" data-recipe-resolve-unit="${r.id}" data-resolve-unit-idx="${i}">ask AI how many grams 1 ${escapeHtml(line.unit)} is</span>, fix the unit in "Show parsed ingredients", or edit the entry's own basis in Ingredient Reference.`;
 } else if (!dropped) {
 // A line with no stated quantity (an "optional" ingredient, or a vague
 // "to taste") still has FODMAP content worth knowing about -- confirmed
@@ -1263,7 +1333,7 @@ return `<div style="padding:4px 0;border-top:1px solid var(--line);${dropped ? '
 <div style="font-size:12px;">${label} — ${used}</div>
 ${flagsNote}
 ${chips ? `<div>${chips}</div>` : ''}
-${noQtyNote ? `<div class="settings-note">${escapeHtml(noQtyNote)}</div>` : ''}
+${noQtyNote ? `<div class="settings-note">${escapeHtml(noQtyNote)}${unitMismatchActionHtml}</div>` : ''}
 ${overrideHtml}
 </div>`;
 }).join('');
@@ -1904,6 +1974,9 @@ queueSave();
 });
 el.querySelectorAll('[data-recipe-analyse]').forEach((link) => {
 link.addEventListener('click', () => analyseIngredients(link.dataset.recipeAnalyse));
+});
+el.querySelectorAll('[data-recipe-resolve-unit]').forEach((link) => {
+link.addEventListener('click', () => resolveUnitMismatch(link.dataset.recipeResolveUnit, parseInt(link.dataset.resolveUnitIdx, 10)));
 });
 el.querySelectorAll('[data-recipe-regenerate]').forEach((btn) => {
 btn.addEventListener('click', () => regenerateVariant(btn.dataset.recipeRegenerate));

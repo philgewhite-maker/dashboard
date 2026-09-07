@@ -950,6 +950,24 @@ const { data: raw } = await callTextJson(ingredientAssessPrompt(name, form), ING
 return normaliseIngredientAssess(raw);
 }
 
+// A single missing unitWeights entry (recipes.js's resolveUnitMismatch)
+// -- e.g. "how many grams is 1 stick of lemongrass" -- deliberately its
+// own small, targeted call rather than a full assessIngredient re-run,
+// so answering it can never touch anything else already on the entry
+// (the FODMAP/nutrition figures, an existing userEdited correction...).
+const UNIT_WEIGHT_MAX_TOKENS = 200;
+function unitWeightPrompt(name, form, unit) {
+return `How many GRAMS does ONE "${unit}" of "${name}"${form ? ` (${form})` : ''} weigh? Return ONLY a JSON object, no other text, no markdown fences: {"grams": 0}. Give your best real-world estimate for a typical example of this unit (one average stick, one average clove, one average teaspoon...) -- this is a starting point a person can correct, not a lab measurement.`;
+}
+function normaliseUnitWeight(raw) {
+const g = raw && typeof raw.grams === 'number' && isFinite(raw.grams) ? raw.grams : 0;
+return g > 0 ? g : 0;
+}
+async function assessUnitWeight(name, form, unit) {
+const { data: raw } = await callTextJson(unitWeightPrompt(name, form, unit), UNIT_WEIGHT_MAX_TOKENS, null, 'Unit weight assessment');
+return normaliseUnitWeight(raw);
+}
+
 // ---- "make it like this": turning a recipe's per-line substitute/
 // reduce/drop overrides (recipes.js's lineOverrides -- a session-only
 // "what if" exploration, never persisted) into an actual rewritten
@@ -1365,5 +1383,5 @@ extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShopp
 identifyCountry, extractWellnessScreenshot,
 extractTripScreenshot, extractTripLegFromEmail,
 parseIngredients, assessIngredient, ALLERGEN_LIST, DIETARY_FLAGS, FODMAP_COMPONENTS, FODMAP_LEVELS,
-FODMAP_THRESHOLDS_G, OLIGO_CATEGORIES, fodmapLevelFromGrams, regenerateRecipeVariant,
+FODMAP_THRESHOLDS_G, OLIGO_CATEGORIES, fodmapLevelFromGrams, regenerateRecipeVariant, assessUnitWeight,
 };
