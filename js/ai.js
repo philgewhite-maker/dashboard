@@ -959,15 +959,25 @@ return normaliseIngredientAssess(raw);
 // so answering it can never touch anything else already on the entry
 // (the FODMAP/nutrition figures, an existing userEdited correction...).
 const UNIT_WEIGHT_MAX_TOKENS = 200;
-function unitWeightPrompt(name, form, unit) {
+// `substitutingFor`, when given, means `unit` actually belongs to a
+// DIFFERENT ingredient this one is standing in for (e.g. the recipe line
+// says "clove" but is measuring GARLIC, while `name` here is "garlic-
+// infused oil", its chosen substitute) -- asking "how many grams is 1
+// clove of garlic-infused oil" is nonsense (oil doesn't come in cloves);
+// the real question is a substitution equivalence, not a same-ingredient
+// unit conversion, and needs different phrasing entirely.
+function unitWeightPrompt(name, form, unit, substitutingFor) {
+if (substitutingFor) {
+return `As a low-FODMAP/allergen-friendly substitute, "${unit}" of "${substitutingFor}" is typically replaced by how many GRAMS of "${name}"${form ? ` (${form})` : ''}? Return ONLY a JSON object, no other text, no markdown fences: {"grams": 0}. Give your best real-world estimate of a typical substitution amount -- this is a starting point a person can correct, not a lab measurement.`;
+}
 return `How many GRAMS does ONE "${unit}" of "${name}"${form ? ` (${form})` : ''} weigh? Return ONLY a JSON object, no other text, no markdown fences: {"grams": 0}. Give your best real-world estimate for a typical example of this unit (one average stick, one average clove, one average teaspoon...) -- this is a starting point a person can correct, not a lab measurement.`;
 }
 function normaliseUnitWeight(raw) {
 const g = raw && typeof raw.grams === 'number' && isFinite(raw.grams) ? raw.grams : 0;
 return g > 0 ? g : 0;
 }
-async function assessUnitWeight(name, form, unit) {
-const { data: raw } = await callTextJson(unitWeightPrompt(name, form, unit), UNIT_WEIGHT_MAX_TOKENS, null, 'Unit weight assessment');
+async function assessUnitWeight(name, form, unit, substitutingFor) {
+const { data: raw } = await callTextJson(unitWeightPrompt(name, form, unit, substitutingFor), UNIT_WEIGHT_MAX_TOKENS, null, 'Unit weight assessment');
 return normaliseUnitWeight(raw);
 }
 
@@ -980,15 +990,21 @@ return normaliseUnitWeight(raw);
 // the DIRECT question instead -- how the two units compare to EACH
 // OTHER -- which needs no grams fact for either one.
 const UNIT_RATIO_MAX_TOKENS = 200;
-function unitRatioPrompt(name, form, unit, basisQuantity, basisUnit) {
+// Same substitutingFor distinction as unitWeightPrompt above -- "how many
+// tbsp is 1 clove of garlic-infused oil" is nonsense when `unit` (clove)
+// actually belongs to the ingredient being SUBSTITUTED, not this one.
+function unitRatioPrompt(name, form, unit, basisQuantity, basisUnit, substitutingFor) {
+if (substitutingFor) {
+return `As a low-FODMAP/allergen-friendly substitute, "${unit}" of "${substitutingFor}" is typically replaced by how many "${basisUnit}" of "${name}"${form ? ` (${form})` : ''}? Return ONLY a JSON object, no other text, no markdown fences: {"ratio": 0} -- e.g. if 1 clove of garlic is typically replaced by 0.5 "${basisUnit}" of "${name}", ratio would be 0.5. For reference, "${name}" is normally measured in units of ${basisQuantity} "${basisUnit}". Give your best real-world estimate of a typical substitution amount -- this is a starting point a person can correct, not a lab measurement.`;
+}
 return `For the food ingredient "${name}"${form ? ` (${form})` : ''}: how many "${basisUnit}" is ONE "${unit}" equivalent to? Return ONLY a JSON object, no other text, no markdown fences: {"ratio": 0} -- e.g. if 1 "${unit}" of this ingredient is roughly equivalent to 2 "${basisUnit}", ratio would be 2. For reference, this ingredient is normally measured in units of ${basisQuantity} "${basisUnit}". Give your best real-world estimate -- this is a starting point a person can correct, not a lab measurement.`;
 }
 function normaliseUnitRatio(raw) {
 const v = raw && typeof raw.ratio === 'number' && isFinite(raw.ratio) ? raw.ratio : 0;
 return v > 0 ? v : 0;
 }
-async function assessUnitRatio(name, form, unit, basisQuantity, basisUnit) {
-const { data: raw } = await callTextJson(unitRatioPrompt(name, form, unit, basisQuantity, basisUnit), UNIT_RATIO_MAX_TOKENS, null, 'Unit ratio assessment');
+async function assessUnitRatio(name, form, unit, basisQuantity, basisUnit, substitutingFor) {
+const { data: raw } = await callTextJson(unitRatioPrompt(name, form, unit, basisQuantity, basisUnit, substitutingFor), UNIT_RATIO_MAX_TOKENS, null, 'Unit ratio assessment');
 return normaliseUnitRatio(raw);
 }
 

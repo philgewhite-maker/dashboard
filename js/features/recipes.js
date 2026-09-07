@@ -641,20 +641,34 @@ const r = data.recipes.find((x) => x.id === recipeId);
 if (!r) return;
 const line = r.ingredientData[lineIdx];
 if (!line || !line.unit) return;
-const entry = findReferenceEntry(line.name, line.form);
-if (!entry) return;
+// resolveLineEntry, NOT a raw findReferenceEntry -- real bug, caught
+// live: with a substitute active, the mismatch note is built against
+// the SUBSTITUTE's own entry ("clove" vs garlic-infused oil's "tbsp"),
+// but a plain findReferenceEntry(line.name, line.form) here would have
+// resolved GARLIC's entry instead (line.name never changes when a
+// substitute is picked) -- silently fixing the WRONG entry, leaving the
+// note exactly as broken as before with no visible error at all.
+const resolved = resolveLineEntry(r, line, lineIdx);
+if (!resolved || resolved.dropped) return;
+const { entry, subName } = resolved;
 const unit = line.unit.trim().toLowerCase();
 const errKey = `${recipeId}|${lineIdx}`;
 const directRatio = unitMismatchNeedsDirectRatio(entry);
 unitMismatchErrors.delete(errKey); // clear any earlier failure before this fresh attempt
 busyIngredientAction.set(r.id, directRatio
-? `Asking how many ${entry.unitBasis.unit} is 1 ${line.unit} of ${line.name}…`
-: `Asking how many grams is 1 ${line.unit} of ${line.name}…`);
+? `Asking how many ${entry.unitBasis.unit} is 1 ${line.unit} of ${subName || line.name}…`
+: `Asking how many grams is 1 ${line.unit} of ${subName || line.name}…`);
 renderRecipes();
 try {
+// When a substitute is active, `unit` (e.g. "clove") belongs to the
+// ORIGINAL ingredient (garlic), not `entry` (the substitute, garlic-
+// infused oil) -- subName tells both AI calls to ask a substitution-
+// equivalence question ("1 clove of garlic replaced by how much oil")
+// instead of a same-ingredient unit conversion, which would otherwise
+// be asked of the wrong substance entirely.
 const value = directRatio
-? await assessUnitRatio(line.name, line.form, line.unit, entry.unitBasis.quantity, entry.unitBasis.unit)
-: await assessUnitWeight(line.name, line.form, line.unit);
+? await assessUnitRatio(entry.name, entry.form, line.unit, entry.unitBasis.quantity, entry.unitBasis.unit, subName ? line.name : null)
+: await assessUnitWeight(entry.name, entry.form, line.unit, subName ? line.name : null);
 if (value > 0) {
 if (directRatio) entry.unitBasisRatios[unit] = value; else entry.unitWeights[unit] = value;
 entry.unitWeightsAssessedAt = new Date().toISOString();
@@ -665,7 +679,7 @@ queueSave();
 // figure. Reported the same way as a genuine error (inline, not the
 // top status bar) since either way the mismatch is still unresolved
 // and the manual-entry box right below is the actual way out.
-unitMismatchErrors.set(errKey, `AI couldn't work out a figure for "${line.unit}" of "${line.name}" -- enter one below, or fix the ingredient's own reference amount in Ingredient Reference.`);
+unitMismatchErrors.set(errKey, `AI couldn't work out a figure for "${line.unit}" of "${entry.name}" -- enter one below, or fix the ingredient's own reference amount in Ingredient Reference.`);
 }
 } catch (err) {
 unitMismatchErrors.set(errKey, err instanceof MissingKeyError ? 'Add an Anthropic API key in Settings first, or enter the figure below yourself.' : `Couldn't look that up: ${err.message || err} -- enter one below.`);
@@ -678,17 +692,19 @@ renderIngredientReference();
 
 // The manual-entry half of the same mismatch note -- typed directly at
 // the point of failure rather than requiring a trip to Ingredient
-// Reference. Same target, same staleness-clearing, and the same choice
-// of WHAT the number means (grams, or a direct ratio to the basis unit)
-// as a successful AI answer above; the only difference is where the
-// number came from.
+// Reference. Same target (resolveLineEntry, substitute-aware -- see
+// resolveUnitMismatch above), same staleness-clearing, and the same
+// choice of WHAT the number means (grams, or a direct ratio to the
+// basis unit) as a successful AI answer above; the only difference is
+// where the number came from.
 function setUnitWeightManually(recipeId, lineIdx, value) {
 const r = data.recipes.find((x) => x.id === recipeId);
 if (!r) return;
 const line = r.ingredientData[lineIdx];
 if (!line || !line.unit) return;
-const entry = findReferenceEntry(line.name, line.form);
-if (!entry) return;
+const resolved = resolveLineEntry(r, line, lineIdx);
+if (!resolved || resolved.dropped) return;
+const entry = resolved.entry;
 const num = parseFloat(value);
 if (!Number.isFinite(num) || num <= 0) return;
 const unit = line.unit.trim().toLowerCase();
@@ -724,14 +740,25 @@ setTimeout(() => scrollAndFlash(`[data-ingredient-ref-row="${entryId}"]`), 0);
 // named the actual unit). Amber .unit-mismatch-note styling (not a plain
 // .settings-note) so a real gap in the totals actually stands out
 // against the page's usual muted captions, per feedback.
-function unitMismatchNoteHtml(recipeId, lineIdx, line, entry) {
+// `subName`, when given, means `entry` is a SUBSTITUTE standing in for
+// the line's own ingredient (line.name) -- "this ingredient" would be
+// genuinely ambiguous then (which one -- the line, or the substitute
+// it's showing figures for?), so the entry is always named explicitly,
+// and the question itself becomes a substitution equivalence rather
+// than a same-ingredient unit conversion. Confirmed live: "clove"
+// doesn't belong to "Garlic-infused oil" at all -- it's garlic's own
+// unit, carried over from the line it's replacing.
+function unitMismatchNoteHtml(recipeId, lineIdx, line, entry, subName) {
 const err = unitMismatchErrors.get(`${recipeId}|${lineIdx}`);
 const directRatio = unitMismatchNeedsDirectRatio(entry);
 const basisUnit = entry.unitBasis.unit;
-const askLabel = directRatio ? `Ask AI how many ${escapeHtml(basisUnit)} 1 ${escapeHtml(line.unit)} is` : `Ask AI how many grams 1 ${escapeHtml(line.unit)} is`;
+const entryLabel = `"${escapeHtml(entry.name)}"`;
+const askLabel = subName
+? `Ask AI how many ${escapeHtml(directRatio ? basisUnit : 'grams')} of ${entryLabel} replaces 1 ${escapeHtml(line.unit)} of "${escapeHtml(line.name)}"`
+: (directRatio ? `Ask AI how many ${escapeHtml(basisUnit)} 1 ${escapeHtml(line.unit)} is` : `Ask AI how many grams 1 ${escapeHtml(line.unit)} is`);
 const inputPlaceholder = directRatio ? escapeHtml(basisUnit) : 'grams';
 return `<div class="unit-mismatch-note">
-⚠ "${escapeHtml(line.unit)}" doesn't match this ingredient's reference amount ("${escapeHtml(basisUnit)}") -- can't convert automatically.
+⚠ "${escapeHtml(line.unit)}" doesn't match ${entryLabel}${subName ? ` (substituting for "${escapeHtml(line.name)}")` : ''}'s reference amount ("${escapeHtml(basisUnit)}") -- can't convert automatically.
 <div style="margin-top:4px;">
 <span class="inline-goto-link" data-recipe-resolve-unit="${recipeId}" data-resolve-unit-idx="${lineIdx}">${askLabel}</span>
 &nbsp;or&nbsp;
@@ -1359,7 +1386,7 @@ if (!dropped && unitMismatch) {
 // live: "white onion — 0.3large per portion... gos: low" was this
 // exact bug, dividing 0.3 BY 100 as if "large" and "g" were the same
 // unit -- a number that means nothing, not a conservative estimate.
-unitMismatchHtml = unitMismatchNoteHtml(r.id, i, line, entry);
+unitMismatchHtml = unitMismatchNoteHtml(r.id, i, line, entry, subName);
 } else if (!dropped) {
 // A line with no stated quantity (an "optional" ingredient, or a vague
 // "to taste") still has FODMAP content worth knowing about -- confirmed
