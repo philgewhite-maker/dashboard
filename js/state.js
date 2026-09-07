@@ -1184,6 +1184,11 @@ if (typeof r.servings !== 'number' && r.servings !== null) r.servings = null;
 if (!Array.isArray(r.ingredientData)) r.ingredientData = [];
 if (typeof r.ingredientsParsedAt !== 'string') r.ingredientsParsedAt = '';
 if (typeof r.ingredientsSignature !== 'string') r.ingredientsSignature = '';
+// Set only on a recipe created via "Save as a new recipe with these
+// changes" (recipes.js's regenerateVariant) -- the id of the recipe it
+// was adapted FROM, so its detail view can link back to the original
+// (see recipeVariantSourceHtml). '' for every ordinary recipe.
+if (typeof r.variantOf !== 'string') r.variantOf = '';
 });
 if (!Array.isArray(data.ingredientReference)) data.ingredientReference = [];
 // FODMAP moved from a flat low/moderate/high rating per component (old

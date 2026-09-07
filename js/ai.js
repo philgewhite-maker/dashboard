@@ -937,6 +937,37 @@ const { data: raw } = await callTextJson(ingredientAssessPrompt(name, form), ING
 return normaliseIngredientAssess(raw);
 }
 
+// ---- "make it like this": turning a recipe's per-line substitute/
+// reduce/drop overrides (recipes.js's lineOverrides -- a session-only
+// "what if" exploration, never persisted) into an actual rewritten
+// recipe someone could cook. Same shape as extractRecipeFromImage/
+// parseIngredients -- a prompt + a normaliser, following this file's
+// own established pattern.
+const REGENERATE_VARIANT_MAX_TOKENS = 3000;
+function regenerateVariantPrompt(ingredients, instructions, changes) {
+return `Rewrite this recipe to reflect the changes listed below, keeping everything else as close to the original as sensible. Return ONLY a JSON object, no other text, no markdown fences: `
++ '{"ingredients":["...", "..."], "instructions":["...", "..."]}. '
++ `Original ingredients (one per line): ${JSON.stringify(ingredients)}. `
++ `Original instructions (one step per line): ${JSON.stringify(instructions)}. `
++ `Changes to apply: ${changes.map((c) => `- ${c}`).join(' ')}. `
++ 'ingredients: the full ingredient list AFTER applying every change above -- an omitted ingredient is removed from the list entirely; a substituted one is renamed (and re-quantified only if the substitute is naturally measured differently, e.g. swapping a liquid for a solid); a reduced one has its quantity updated to the new amount given. Ingredients NOT mentioned in the changes are copied over unchanged, in the same order. '
++ 'instructions: the full method AFTER applying every change above -- update any step that names a changed ingredient (a renamed substitute, an omitted ingredient removed from its step, a reduced quantity mentioned in a step) so the method still reads naturally and correctly for the new ingredient list. Steps that don\'t mention a changed ingredient are copied over unchanged, in the same order -- only drop a whole step if it becomes genuinely pointless (entirely about an omitted ingredient and nothing else).';
+}
+function normaliseRegenerateVariant(raw, fallbackIngredients, fallbackInstructions) {
+const r = raw || {};
+const clean = (v) => (Array.isArray(v) ? v.map((s) => String(s || '').trim()).filter(Boolean) : null);
+return {
+ingredients: clean(r.ingredients) || fallbackIngredients,
+instructions: clean(r.instructions) || fallbackInstructions,
+};
+}
+// `changes` is a list of plain-English instructions (recipes.js's
+// describeLineOverrides) -- one per overridden ingredient line.
+async function regenerateRecipeVariant(ingredients, instructions, changes) {
+const { data: raw } = await callTextJson(regenerateVariantPrompt(ingredients, instructions, changes), REGENERATE_VARIANT_MAX_TOKENS, null, 'Recipe variant regeneration');
+return normaliseRegenerateVariant(raw, ingredients, instructions);
+}
+
 // Disambiguates a fuzzy name match against an incoming photo — "Alena" and
 // "Alena A" are a plausible fuzzy match on name alone, but obviously
 // different people once both faces are visible. Deliberately not run for
@@ -1321,5 +1352,5 @@ extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShopp
 identifyCountry, extractWellnessScreenshot,
 extractTripScreenshot, extractTripLegFromEmail,
 parseIngredients, assessIngredient, ALLERGEN_LIST, DIETARY_FLAGS, FODMAP_COMPONENTS, FODMAP_LEVELS,
-FODMAP_THRESHOLDS_G, OLIGO_CATEGORIES, fodmapLevelFromGrams,
+FODMAP_THRESHOLDS_G, OLIGO_CATEGORIES, fodmapLevelFromGrams, regenerateRecipeVariant,
 };

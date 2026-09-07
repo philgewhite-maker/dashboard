@@ -4,8 +4,8 @@
 // idea), with an occasional nudge to actually cook one of them.
 import { data, queueSave, DEFAULT_RECIPE_RATING_CATEGORIES, slugifyField, averageRating, getLocalSettings, setLocalSetting } from '../state.js';
 import { photoDelete, photoGet, photoUrl } from '../db.js';
-import { escapeHtml, uid, todayStr, resizeImageToBlob, openLightbox, pickChipHtml } from '../utils.js';
-import { MissingKeyError, extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, parseIngredients, assessIngredient, ALLERGEN_LIST, DIETARY_FLAGS, FODMAP_COMPONENTS, FODMAP_THRESHOLDS_G, OLIGO_CATEGORIES, fodmapLevelFromGrams } from '../ai.js';
+import { escapeHtml, uid, todayStr, resizeImageToBlob, openLightbox, pickChipHtml, scrollAndFlash } from '../utils.js';
+import { MissingKeyError, extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, parseIngredients, assessIngredient, ALLERGEN_LIST, DIETARY_FLAGS, FODMAP_COMPONENTS, FODMAP_THRESHOLDS_G, OLIGO_CATEGORIES, fodmapLevelFromGrams, regenerateRecipeVariant } from '../ai.js';
 import { storePhoto, uploadAttachment, deleteAttachment, openAttachment, formatBytes } from '../files.js';
 import { getConfig } from '../sync/selfhost.js';
 
@@ -138,7 +138,7 @@ source,
 photoId: null, photoIds: [], photoAlbums: [], ratings: {}, tags: [],
 createdAt: new Date().toISOString(), lastMade: '',
 course: '', glutenStatus: '', dairyStatus: '', fodmapLevel: '', servings: null,
-ingredientData: [], ingredientsParsedAt: '', ingredientsSignature: '',
+ingredientData: [], ingredientsParsedAt: '', ingredientsSignature: '', variantOf: '',
 };
 data.recipes.push(recipe);
 pending = null;
@@ -377,7 +377,7 @@ renderRecipes();
 function recipeCardHtml(r) {
 const avg = averageRating(r, data.recipeRatingCategories);
 const open = expandedRecipe === r.id;
-return `<div class="recipe-card">
+return `<div class="recipe-card" data-recipe-row="${r.id}">
 <div class="recipe-row">
 ${r.photoId ? `<span class="thumb-img" data-photo-bg="${escapeHtml(r.photoId)}"></span>` : '<span class="thumb-img recipe-noimg"></span>'}
 <div class="recipe-id">
@@ -406,6 +406,22 @@ if (source.attachment) parts.push(`<span class="inline-goto-link" data-recipe-so
 return `<div class="field-block full">
 <span class="field-label">Original source${source.kind ? ` — from ${escapeHtml(source.kind)}` : ''}</span>
 <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">${parts.join('')}</div>
+</div>`;
+}
+
+// Set only on a recipe created via "Save as a new recipe with these
+// changes" (see regenerateVariant) -- links back to the recipe it was
+// adapted FROM, per the record-reference convention (click -> expand +
+// scroll the source card into view). Nothing shown for an ordinary
+// recipe, or if the source has since been deleted (a dead reference
+// isn't worth showing at all).
+function recipeVariantSourceHtml(r) {
+if (!r.variantOf) return '';
+const source = data.recipes.find((x) => x.id === r.variantOf);
+if (!source) return '';
+return `<div class="field-block full">
+<span class="field-label">Adapted from</span>
+<span class="inline-goto-link" data-recipe-goto="${source.id}">${escapeHtml(source.name)}</span>
 </div>`;
 }
 
@@ -591,6 +607,99 @@ busyIngredientAction.delete(r.id);
 renderRecipes();
 renderIngredientReference();
 queueSave();
+}
+
+// Turns the current lineOverrides state for a recipe into plain-English
+// instructions an AI rewrite can follow -- one sentence per overridden
+// line, in the exact three shapes the "what if" control offers (sub/
+// reduced/dropped). Empty array means nothing's been changed yet, which
+// is also what gates whether "Save as a new recipe" even appears
+// (regenerateVariant below) -- there's nothing to regenerate FROM until
+// at least one override exists.
+function describeLineOverrides(r) {
+const overrides = lineOverrides.get(r.id);
+if (!overrides || !overrides.size) return [];
+const out = [];
+r.ingredientData.forEach((line, i) => {
+const override = overrides.get(i);
+if (!override || !line.name) return;
+if (override.mode === 'dropped') {
+out.push(`Omit "${line.name}"${line.form ? ` (${line.form})` : ''} entirely.`);
+} else if (override.mode === 'sub') {
+out.push(`Replace "${line.name}"${line.form ? ` (${line.form})` : ''} with "${override.subName}", keeping a similar quantity/preparation unless the substitute is naturally measured differently.`);
+} else if (override.mode === 'reduced' && override.qty != null) {
+const wholeQty = r.servings ? override.qty * r.servings : override.qty;
+const round = (n) => (n < 10 ? Math.round(n * 100) / 100 : Math.round(n * 10) / 10);
+out.push(`Reduce "${line.name}"${line.form ? ` (${line.form})` : ''} from ${line.quantity}${line.unit} to about ${round(wholeQty)}${line.unit} in total (the recipe still serves ${r.servings || 'the same number of people'}).`);
+}
+});
+return out;
+}
+
+// "${base} (adjusted)", de-duplicated against every existing recipe name
+// -- same reasoning connections.js's own tag-canonicalisation avoids
+// accidental near-duplicates, just for a recipe title instead of a tag.
+function uniqueVariantName(baseName) {
+const base = `${baseName} (adjusted)`;
+if (!data.recipes.some((x) => x.name === base)) return base;
+let n = 2;
+while (data.recipes.some((x) => x.name === `${base} ${n}`)) n += 1;
+return `${base} ${n}`;
+}
+
+// "Make it like this" -- the one AI call that turns a recipe's session-
+// only "what if" exploration (lineOverrides: substitute/reduce/drop,
+// never persisted -- see the Map's own comment) into something actually
+// cookable. Saved as a NEW recipe (variantOf pointing back at this one)
+// rather than overwriting the original -- the original stays exactly as
+// it was, still cookable as written, and its own diet analysis/overrides
+// are untouched; the variant starts with a completely fresh
+// ingredientData/diet state of its own (its ingredient TEXT genuinely
+// changed, so re-parsing and re-analysing from scratch is correct, not
+// just convenient).
+async function regenerateVariant(recipeId) {
+const r = data.recipes.find((x) => x.id === recipeId);
+if (!r) return;
+const changes = describeLineOverrides(r);
+if (!changes.length) return;
+busyIngredientAction.set(r.id, 'Rewriting the recipe with these changes…');
+renderRecipes();
+let newVariantId = null;
+try {
+const { ingredients, instructions } = await regenerateRecipeVariant(r.ingredients, r.instructions, changes);
+const variant = {
+id: uid(), name: uniqueVariantName(r.name),
+ingredients, instructions,
+notes: [r.notes, `Adapted from "${r.name}":`, ...changes.map((c) => `- ${c}`)].filter(Boolean).join('\n'),
+source: { kind: `adapted from "${r.name}"`, url: '', photoId: '', attachment: null },
+photoId: null, photoIds: [], photoAlbums: [], ratings: {}, tags: [...(r.tags || [])],
+createdAt: new Date().toISOString(), lastMade: '',
+// Course carries over (unrelated to which ingredients changed);
+// the three ingredient-content-specific pickers reset -- copying
+// the OLD recipe's status here would risk claiming something (e.g.
+// "Gluten-free") the actual rewritten ingredients haven't earned.
+course: r.course, glutenStatus: '', dairyStatus: '', fodmapLevel: '', servings: r.servings,
+ingredientData: [], ingredientsParsedAt: '', ingredientsSignature: '',
+variantOf: r.id,
+};
+data.recipes.push(variant);
+expandedRecipe = variant.id;
+newVariantId = variant.id;
+} catch (err) {
+setStatus(err instanceof MissingKeyError ? 'Add an Anthropic API key in Settings first.' : `Couldn't regenerate that: ${err.message || err}`);
+} finally {
+busyIngredientAction.delete(r.id);
+}
+renderRecipes();
+renderRecipeOverview();
+queueSave();
+// Alphabetically sorted, so a new recipe can land anywhere in a long
+// list -- scrolled + flashed into view the same way any other in-app
+// cross-reference lands on its target, so it's never just silently
+// added somewhere off-screen. Only once busyIngredientAction is
+// actually cleared and this render has landed, hence AFTER the block
+// above, not inside the try.
+if (newVariantId) setTimeout(() => scrollAndFlash(`[data-recipe-row="${newVariantId}"]`), 0);
 }
 
 const MACRO_FIELDS = ['calories', 'protein', 'carbs', 'sugars', 'fat', 'saturates', 'fibre', 'salt'];
@@ -1107,6 +1216,7 @@ if (busyIngredientAction.has(r.id)) return ''; // recipeIngredientsStatusHtml al
 if (!r.ingredientsParsedAt) return '';
 const diet = computeRecipeDiet(r);
 if (!diet) return `<div class="full"><span class="inline-goto-link" data-recipe-analyse="${r.id}">Analyse ingredients</span></div>`;
+const changes = describeLineOverrides(r);
 const per = r.servings ? r.servings : null;
 const row = (label, key, unit) => `<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0;"><span>${escapeHtml(label)}</span><span>${diet.totals[key].toFixed(1)}${unit}${per ? ` (${(diet.totals[key] / per).toFixed(1)}${unit}/serving)` : ''}</span></div>`;
 return `<div class="full">
@@ -1137,6 +1247,12 @@ ${row('— of which saturates', 'saturates', 'g')}
 ${row('Fibre', 'fibre', 'g')}
 ${row('Salt', 'salt', 'g')}
 </div>
+${changes.length ? `<div class="field-block full" style="margin-top:6px;">
+<span class="field-label">Make it like this</span>
+<div class="settings-note">The substitute/reduce/drop choices above are exploration only -- nothing is saved to this recipe until you do this:</div>
+<div class="settings-note">${changes.map(escapeHtml).join('<br>')}</div>
+<button class="add-btn" type="button" data-recipe-regenerate="${r.id}" style="margin-top:6px;">Save as a new recipe with these changes</button>
+</div>` : ''}
 <div class="settings-note" style="margin-top:6px;">AI estimate from the ingredient reference table — not a verified nutritional or medical analysis; correct an entry below directly if it looks wrong.</div>` : ''}
 </div>`;
 }
@@ -1335,6 +1451,7 @@ ${recipeDietHtml(r)}
 <input type="text" autocomplete="off" placeholder="https://photos.google.com/album/…" data-recipe-album="${r.id}" value="${escapeHtml((r.photoAlbums[0] || {}).url || '')}"></label>
 ${(r.photoAlbums[0] || {}).url ? `<div class="full"><a href="${escapeHtml(r.photoAlbums[0].url)}" target="_blank" rel="noopener" style="font-size:12px;color:var(--rose);">Open album &#8599;</a></div>` : ''}
 ${recipeSourceHtml(r)}
+${recipeVariantSourceHtml(r)}
 <div class="field-block full">
 <span class="field-label">Ratings</span>
 <div class="ratings-block">${data.recipeRatingCategories.map(({ field, label }) => recipeRatingStars(label, field, r.id, (r.ratings && r.ratings[field]) || 0)).join('')}</div>
@@ -1572,6 +1689,22 @@ queueSave();
 });
 el.querySelectorAll('[data-recipe-analyse]').forEach((link) => {
 link.addEventListener('click', () => analyseIngredients(link.dataset.recipeAnalyse));
+});
+el.querySelectorAll('[data-recipe-regenerate]').forEach((btn) => {
+btn.addEventListener('click', () => regenerateVariant(btn.dataset.recipeRegenerate));
+});
+// Record-reference convention: expand the source card and scroll+flash
+// it into view, same shape as every other in-app cross-reference.
+el.querySelectorAll('[data-recipe-goto]').forEach((link) => {
+link.addEventListener('click', () => {
+const id = link.dataset.recipeGoto;
+activeMadeFilter = null;
+activeTagFilter = null;
+expandedRecipe = id;
+renderRecipes();
+renderRecipeOverview();
+setTimeout(() => scrollAndFlash(`[data-recipe-row="${id}"]`), 0);
+});
 });
 el.querySelectorAll('[data-recipe-diet-toggle]').forEach((btn) => {
 btn.addEventListener('click', () => {
