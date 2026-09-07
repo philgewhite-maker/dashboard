@@ -894,13 +894,14 @@ return `Assess this single food ingredient: "${name}"${form ? ` (${form})` : ''}
 + '"nutrition":{"calories":0,"protein":0,"carbs":0,"sugars":0,"fat":0,"saturates":0,"fibre":0,"salt":0}, '
 + '"oligoCategory":"veg_fruit", '
 + '"fodmapGrams":{"fructans":0,"gos":0,"lactose":0,"excessFructose":0,"polyols":0}, '
-+ '"allergens":[], "dietaryFlags":[], "subs":[{"name":"","note":""}]}. '
++ '"allergens":[], "dietaryFlags":[], "unitWeights":{}, "subs":[{"name":"","note":""}]}. '
 + 'unitBasis: pick an amount close to how much of this a person actually uses in ONE dish, not a fixed default -- {"quantity":100,"unit":"g"} for a vegetable, meat, or other ingredient normally used in bulk; a countable unit like {"quantity":1,"unit":"clove"} / {"quantity":1,"unit":"medium"} for produce typically counted rather than weighed; but for anything used in small, potent amounts -- a spice, herb, stock cube, extract, seasoning -- use ITS typical amount instead ({"quantity":1,"unit":"tsp"}, {"quantity":1,"unit":"clove"}, {"quantity":1,"unit":"cube"}...), never 100g of something no dish would ever contain 100g of. '
 + 'nutrition: standard nutrition-label figures, PER unitBasis. '
 + `oligoCategory: which published FODMAP threshold table this food's fructans/GOS are judged against -- "grain_legume_nut" for a grain, legume, pulse, or nut/seed; "veg_fruit" for a vegetable or fruit (use "veg_fruit" for anything that's neither, e.g. a spice, dairy, or meat). `
 + 'fodmapGrams: how many GRAMS OF THE ACTUAL CARBOHYDRATE (fructans, GOS, lactose, excess fructose, total polyols) this ingredient contains PER unitBasis -- NOT a low/moderate/high rating, an actual gram figure (can be a decimal like 0.15, or 0 if genuinely absent) -- these get compared against fixed published thresholds separately, so give your best real estimate of the amount present, not a category. '
 + `allergens: which of these EXACT strings this ingredient contains, as a subset of ${JSON.stringify(ALLERGEN_LIST)} -- [] if none apply. `
 + `dietaryFlags: which of these EXACT strings apply, as a subset of ${JSON.stringify(DIETARY_FLAGS)} -- e.g. "Pork" for bacon/chorizo/lard, "Alcohol" for wine/beer/spirits used as an ingredient (not a trace that fully cooks off), "Meat (non-vegetarian)" for any meat/poultry INCLUDING one already covered by Pork, "Animal product (non-vegan)" for meat, fish, dairy, eggs, or honey -- [] if none apply. `
++ 'unitWeights: OTHER units a DIFFERENT recipe might reasonably use for this SAME ingredient instead of your own unitBasis above -- e.g. if unitBasis is 100g, give {"medium":110,"large":150,"small":70} for an onion, or {"tsp":5,"tbsp":15} for a paste/puree, or {"clove":5} for garlic -- each value is how many GRAMS ONE of that unit weighs. This is what lets a recipe parsed as "1 medium onion" or "2 tsp tomato puree" be scaled correctly even though it wasn\'t assessed in that exact unit -- include 2-4 realistic alternates a recipe might plausibly use, or {} if this ingredient is essentially only ever measured the one way (e.g. already unitBasis itself, or something with no other sensible unit). '
 + 'subs: 1-3 common substitutes for this ingredient (useful for a gluten-free, dairy-free, low-FODMAP, kosher/halal/vegetarian/vegan, or otherwise restricted kitchen where relevant), each a short note on when/why -- [] if nothing sensible applies. '
 + 'Give a reasonable best estimate -- this is a starting point a person can correct, not a lab measurement.';
 }
@@ -912,8 +913,20 @@ const fodmapRaw = (r.fodmapGrams && typeof r.fodmapGrams === 'object') ? r.fodma
 const numOr0 = (v) => ((typeof v === 'number' && isFinite(v)) ? v : 0);
 const fodmapGrams = {};
 FODMAP_COMPONENTS.forEach((k) => { fodmapGrams[k] = Math.max(0, numOr0(fodmapRaw[k])); });
+// Grams-per-one for any OTHER unit a recipe might call this ingredient
+// by -- the bridge that lets "1 medium onion" scale correctly against
+// an entry assessed per 100g, without ever guessing a conversion that
+// wasn't actually supplied (see recipes.js's unitConversionRatio).
+const unitWeightsRaw = (r.unitWeights && typeof r.unitWeights === 'object') ? r.unitWeights : {};
+const unitWeights = {};
+Object.keys(unitWeightsRaw).forEach((u) => {
+const key = String(u || '').trim().toLowerCase();
+const v = unitWeightsRaw[u];
+if (key && typeof v === 'number' && isFinite(v) && v > 0) unitWeights[key] = v;
+});
 return {
 unitBasis: { quantity: numOr0(unitBasis.quantity) || 100, unit: String(unitBasis.unit || 'g') },
+unitWeights,
 nutrition: {
 calories: numOr0(nutrition.calories), protein: numOr0(nutrition.protein), carbs: numOr0(nutrition.carbs),
 sugars: numOr0(nutrition.sugars), fat: numOr0(nutrition.fat), saturates: numOr0(nutrition.saturates),

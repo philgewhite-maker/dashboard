@@ -1218,6 +1218,17 @@ data.ingredientReference = data.ingredientReference.filter((e) => e && e.fodmapG
 data.ingredientReference.forEach((e) => {
 if (!Array.isArray(e.dietaryFlags)) e.dietaryFlags = [];
 if (!e.dietaryAssessedAt) e.dietaryFlagsStale = true;
+// unitWeights (grams-per-one for other units a recipe might call this
+// ingredient by -- "medium"/"large" for produce, "tsp"/"tbsp" for a
+// paste or spice) is newer still. Same staleness pattern as
+// dietaryFlags immediately above, for the same reason: an entry that
+// predates it has no valid weights to fall back on (an empty object
+// isn't "no other units exist", it's "never asked"), so it's flagged
+// for the same lazy re-check next time the ingredient is used, rather
+// than silently staying unable to bridge "1 medium onion" against its
+// own "100g" unitBasis forever.
+if (!e.unitWeights || typeof e.unitWeights !== 'object') e.unitWeights = {};
+if (!e.unitWeightsAssessedAt) e.unitWeightsStale = true;
 });
 }
 

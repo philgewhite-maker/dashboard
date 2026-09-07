@@ -511,6 +511,7 @@ const spec = TRIVIAL_INGREDIENTS[canonicalIngredientName(name)];
 if (!spec) return null;
 return {
 unitBasis: { quantity: 100, unit: spec.unit || 'g' },
+unitWeights: {},
 nutrition: { calories: 0, protein: 0, carbs: 0, sugars: 0, fat: 0, saturates: 0, fibre: 0, salt: spec.salt || 0 },
 oligoCategory: 'veg_fruit',
 fodmapGrams: { fructans: 0, gos: 0, lactose: 0, excessFructose: 0, polyols: 0 },
@@ -526,16 +527,24 @@ r.ingredientsSignature = ingredientsSignatureOf(r.ingredients);
 }
 
 // True when an ingredient either has no reference entry at all, or has
-// one that predates dietaryFlags and was never actually asked about it
-// (state.js's migration marks these dietaryFlagsStale rather than
-// guessing -- an empty dietaryFlags array is ambiguous on its own,
-// "genuinely none present" and "never checked" look identical). Shared
-// by every call site that decides whether ensureReferenceEntry has real
-// work to do, so a stale entry is never silently skipped as if it were
-// already complete.
+// one that predates dietaryFlags and/or unitWeights and was never
+// actually asked about them (state.js's migration marks these
+// dietaryFlagsStale/unitWeightsStale rather than guessing -- an empty
+// array/object is ambiguous on its own, "genuinely none" and "never
+// checked" look identical). Shared by every call site that decides
+// whether ensureReferenceEntry has real work to do, so a stale entry is
+// never silently skipped as if it were already complete.
 function needsAssessment(name, form) {
 const e = findReferenceEntry(name, form);
-return !e || !!e.dietaryFlagsStale;
+if (!e) return true;
+// A userEdited entry is never auto-refreshed, full stop -- whichever
+// field(s) are stale on it stay that way until corrected by hand (both
+// the Save form and the unit-weight/substitute editors already clear
+// their own staleness the moment they're actually used -- see those
+// handlers), the same guarantee the FODMAP/nutrition figures already
+// have.
+if (e.userEdited) return false;
+return !!e.dietaryFlagsStale || !!e.unitWeightsStale;
 }
 
 // The one AI-calling step in the whole diet-analysis path besides the
@@ -547,18 +556,26 @@ return !e || !!e.dietaryFlagsStale;
 // flour.
 async function ensureReferenceEntry(name, form) {
 const existing = findReferenceEntry(name, form);
-if (existing && !existing.dietaryFlagsStale) return;
+if (existing && (existing.userEdited || (!existing.dietaryFlagsStale && !existing.unitWeightsStale))) return;
 const trivial = trivialReferenceEntry(name, form);
 const assessed = trivial || await assessIngredient(name, form);
 if (existing) {
 // A stale-flagged entry already has real (possibly user-corrected)
 // macro/FODMAP/allergen data -- this refresh exists ONLY to fill in
-// dietaryFlags, so that's the only field it touches. A full overwrite
-// here would silently undo a manual correction the same way a
-// careless re-assessment of the FODMAP figures would.
+// whichever field(s) are actually flagged stale, so that's ALL it
+// touches. A full overwrite here would silently undo a manual
+// correction the same way a careless re-assessment of the FODMAP
+// figures would.
+if (existing.dietaryFlagsStale) {
 existing.dietaryFlags = assessed.dietaryFlags;
 existing.dietaryAssessedAt = new Date().toISOString();
 delete existing.dietaryFlagsStale;
+}
+if (existing.unitWeightsStale) {
+existing.unitWeights = assessed.unitWeights;
+existing.unitWeightsAssessedAt = new Date().toISOString();
+delete existing.unitWeightsStale;
+}
 return;
 }
 data.ingredientReference.push({
@@ -567,6 +584,7 @@ id: uid(), name, form,
 subs: assessed.subs.map((s) => ({ id: uid(), ...s })),
 aiFilledAt: trivial ? '' : new Date().toISOString(),
 dietaryAssessedAt: new Date().toISOString(),
+unitWeightsAssessedAt: new Date().toISOString(),
 userEdited: false,
 });
 }
@@ -704,6 +722,40 @@ if (newVariantId) setTimeout(() => scrollAndFlash(`[data-recipe-row="${newVarian
 
 const MACRO_FIELDS = ['calories', 'protein', 'carbs', 'sugars', 'fat', 'saturates', 'fibre', 'salt'];
 
+// How many grams ONE of `unit` weighs, for THIS entry specifically --
+// grams are grams universally (not a conversion, a tautology), so "g"
+// always resolves to 1 with no lookup needed; every other unit only
+// resolves when the entry's own AI-assessed unitWeights actually says
+// so (never guessed -- an ingredient with no known weight for a unit
+// simply can't be bridged through it). Confirmed live pain point: "1
+// medium onion" parsed against an entry assessed per "100g" had no way
+// to reconcile the two at all before this existed.
+function gramsEquivalentPerOne(entry, unit) {
+const u = String(unit || '').trim().toLowerCase();
+if (!u) return null;
+if (u === 'g') return 1;
+const w = entry.unitWeights && entry.unitWeights[u];
+return (typeof w === 'number' && w > 0) ? w : null;
+}
+
+// How many entry.unitBasis.unit's ONE `lineUnit` is worth -- 1 when the
+// two are literally the same unit (the exact-match case, needing no
+// weight data of any kind); otherwise bridged through grams via
+// gramsEquivalentPerOne on BOTH sides (the entry's own unitBasis unit
+// might itself be a countable/spoon unit, not necessarily "g"); null
+// when genuinely unresolvable, which callers must treat as unresolved
+// (never guessed) -- see resolveLineEntry's unitMismatch/unitRatio.
+function unitConversionRatio(entry, lineUnit) {
+const lu = String(lineUnit || '').trim().toLowerCase();
+const bu = String(entry.unitBasis.unit || '').trim().toLowerCase();
+if (!lu || !bu) return null;
+if (lu === bu) return 1;
+const lineGramsPerOne = gramsEquivalentPerOne(entry, lu);
+const basisGramsPerOne = gramsEquivalentPerOne(entry, bu);
+if (lineGramsPerOne != null && basisGramsPerOne != null) return lineGramsPerOne / basisGramsPerOne;
+return null;
+}
+
 // The bounds ([lowMax, highMin], in grams of the actual carbohydrate) a
 // given component/category is judged against -- same fallback order
 // fodmapLevelFromGrams (ai.js) uses internally, exposed here too since the
@@ -725,15 +777,19 @@ return table.any || table[category] || table.veg_fruit;
 const THRESHOLD_SAFETY_MARGIN = 0.99;
 
 // Same suggested-target math as the "cut by Xg/portion" note
-// (recipeIngredientAnalysisHtml) -- the SMALLEST per-portion quantity
-// that would bring every one of this entry's flagged components under
-// its own "low" cutoff, so switching a line to "Use less…" starts from
-// a genuinely useful default rather than an arbitrary or unchanged one.
-// null when the entry has no FODMAP content at all to cut down.
-function suggestedLowQtyPerPortion(entry) {
+// (recipeIngredientAnalysisHtml) -- the SMALLEST per-portion quantity,
+// IN THE LINE'S OWN UNIT, that would bring every one of this entry's
+// flagged components under its own "low" cutoff, so switching a line to
+// "Use less…" starts from a genuinely useful default rather than an
+// arbitrary or unchanged one. `unitRatio` (from resolveLineEntry) is
+// what expresses the target back in the line's own unit rather than the
+// entry's unitBasis unit, when the two differ -- pass 1 for an exact-
+// match line. null when the entry has no FODMAP content at all to cut
+// down.
+function suggestedLowQtyPerPortion(entry, unitRatio) {
 let minQty = null;
 FODMAP_COMPONENTS.forEach((k) => {
-const gramsPerUnit = (entry.fodmapGrams[k] || 0) / (entry.unitBasis.quantity || 1);
+const gramsPerUnit = ((entry.fodmapGrams[k] || 0) / (entry.unitBasis.quantity || 1)) * unitRatio;
 if (gramsPerUnit <= 0) return;
 const category = (k === 'fructans' || k === 'gos') ? entry.oligoCategory : 'any';
 const bounds = fodmapBoundsFor(k, category);
@@ -761,11 +817,12 @@ if (!diet) return null;
 const line = r.ingredientData[i];
 const resolved = resolveLineEntry(r, line, i);
 const thisPortionQty = resolved ? resolved.portionQty : null;
+const unitRatio = resolved ? resolved.unitRatio : 1;
 let minQty = null;
 FODMAP_COMPONENTS.forEach((k) => {
-const gramsPerUnit = (entry.fodmapGrams[k] || 0) / (entry.unitBasis.quantity || 1);
+const gramsPerUnit = ((entry.fodmapGrams[k] || 0) / (entry.unitBasis.quantity || 1)) * unitRatio;
 if (gramsPerUnit <= 0) return;
-const thisContribution = thisPortionQty != null ? (entry.fodmapGrams[k] || 0) * (thisPortionQty / (entry.unitBasis.quantity || 1)) : 0;
+const thisContribution = thisPortionQty != null ? thisPortionQty * gramsPerUnit : 0;
 const othersTotal = Math.max(0, (diet.fodmapGrams[k] || 0) - thisContribution);
 const category = (k === 'fructans' || k === 'gos') ? entry.oligoCategory : 'any';
 const bounds = fodmapBoundsFor(k, category);
@@ -826,22 +883,25 @@ wholeQty = r.servings ? override.qty * r.servings : override.qty;
 // browser was concerned, nothing changed), so it could never be used to
 // undo a substitution.
 //
-// unitMismatch: the ingredient LINE's own unit ("large", "clove"...)
-// against the (possibly substituted) entry's unitBasis.unit -- everywhere
-// else in this file just divides `portionQty`/`wholeQty` by
-// `entry.unitBasis.quantity`, a NAIVE number-only scale that assumes the
-// two are already in the same unit. Two independent AI calls (the
-// ingredient parser and the ingredient assessor) choose their own units
-// with no coordination at all, so nothing actually guaranteed that until
-// now -- a real, confirmed gap: "white onion" parsed as "1 large" against
-// a reference entry assessed per "100g" silently divided 1 by 100 as if
-// they were the same unit, producing a number with no real meaning.
-// Per the app's own unit-matching safety principle (never guess a
-// cross-unit conversion), a mismatch here must make every caller treat
-// the line as UNRESOLVED, not silently compute and display a wrong
-// figure -- see computeRecipeDiet and recipeIngredientAnalysisHtml.
-const unitMismatch = !!(line.unit && entry.unitBasis.unit && line.unit.trim().toLowerCase() !== entry.unitBasis.unit.trim().toLowerCase());
-return { entry, originalEntry, dropped, portionQty, wholeQty, subName, unitMismatch };
+// unitRatio: how many entry.unitBasis.unit's ONE of the LINE's own unit
+// ("large", "tsp"...) is worth -- everywhere else in this file scales by
+// `qty * unitRatio / entry.unitBasis.quantity` rather than the NAIVE
+// `qty / entry.unitBasis.quantity` this used to be, which silently
+// assumed the two were already the same unit. Two independent AI calls
+// (the ingredient parser and the ingredient assessor) choose their own
+// units with no coordination at all, so nothing ever guaranteed that --
+// a real, confirmed gap: "white onion" parsed as "1 large" against a
+// reference entry assessed per "100g" used to silently divide 1 by 100
+// as if they were the same unit, producing a number with no real
+// meaning. unitConversionRatio bridges the two through the entry's own
+// AI-assessed unitWeights (e.g. "1 medium onion ≈ 110g") when a
+// conversion is actually known; unitMismatch (ratio === null) means NO
+// bridge exists, and every caller must treat the line as UNRESOLVED --
+// never guess a cross-unit conversion that was never actually supplied
+// -- see computeRecipeDiet and recipeIngredientAnalysisHtml.
+const unitRatio = unitConversionRatio(entry, line.unit);
+const unitMismatch = !!line.unit && !!entry.unitBasis.unit && unitRatio == null;
+return { entry, originalEntry, dropped, portionQty, wholeQty, subName, unitMismatch, unitRatio };
 }
 
 const MIXED_OLIGO_CATEGORY = 'veg_fruit'; // conservative default when a recipe's fructans/GOS come from more than one category -- see computeRecipeDiet
@@ -905,7 +965,7 @@ if (!line.name) { resolvedCount += 1; continue; } // a blank/unparseable line co
 const resolved = resolveLineEntry(r, line, i);
 if (!resolved) return null; // not analysed yet -- caller shows "Analyse ingredients" instead
 resolvedCount += 1;
-const { entry, dropped, portionQty, wholeQty, unitMismatch } = resolved;
+const { entry, dropped, portionQty, wholeQty, unitMismatch, unitRatio } = resolved;
 if (dropped) continue; // excluded from every total, including allergens -- "drop it" means drop it
 // Allergen/dietary-flag presence is boolean, not quantity-scaled -- a
 // trace of gluten doesn't stop being gluten just because THIS line's
@@ -915,11 +975,11 @@ if (dropped) continue; // excluded from every total, including allergens -- "dro
 (entry.dietaryFlags || []).forEach((f) => dietaryFlags.add(f));
 if (unitMismatch) { unmatchedLines.push({ line, entry }); continue; }
 if (wholeQty != null) {
-const scale = wholeQty / (entry.unitBasis.quantity || 1);
+const scale = (wholeQty * unitRatio) / (entry.unitBasis.quantity || 1);
 MACRO_FIELDS.forEach((k) => { totals[k] += (entry.nutrition[k] || 0) * scale; });
 }
 if (portionQty != null) {
-const portionScale = portionQty / (entry.unitBasis.quantity || 1);
+const portionScale = (portionQty * unitRatio) / (entry.unitBasis.quantity || 1);
 FODMAP_COMPONENTS.forEach((k) => {
 const grams = (entry.fodmapGrams[k] || 0) * portionScale;
 fodmapGrams[k] += grams;
@@ -1035,7 +1095,7 @@ const rows = r.ingredientData.map((line, i) => {
 if (!line.name) return '';
 const resolved = resolveLineEntry(r, line, i);
 if (!resolved) return '';
-const { entry, originalEntry, dropped, portionQty, subName, unitMismatch } = resolved;
+const { entry, originalEntry, dropped, portionQty, subName, unitMismatch, unitRatio } = resolved;
 const override = (lineOverrides.get(r.id) || new Map()).get(i);
 let label = `${escapeHtml(line.name)}${line.form ? ` (${escapeHtml(line.form)})` : ''}`;
 if (subName) label += ` &rarr; using substitute: <strong>${escapeHtml(subName)}</strong>`;
@@ -1091,7 +1151,11 @@ noQtyNote = `This line is parsed as "${line.unit}", but its reference entry is p
 // entirely, clearly flagged as unscaled since it isn't this line's
 // real amount.
 const hasQty = portionQty != null && entry.unitBasis.quantity > 0;
-const scale = hasQty ? portionQty / entry.unitBasis.quantity : 1;
+// unitRatio is guaranteed non-null here -- this whole branch only runs
+// when !unitMismatch (the unitMismatch case above returns before this
+// point), so either the units matched exactly (ratio 1) or a real
+// bridge was found via unitWeights.
+const scale = hasQty ? (portionQty * unitRatio) / entry.unitBasis.quantity : 1;
 if (!hasQty) noQtyNote = `No quantity given for this line — shown at the reference amount (${entry.unitBasis.quantity}${entry.unitBasis.unit}), not scaled to what's actually used here.`;
 // The actual grams of each carbohydrate THIS PORTION contributes --
 // concentration (entry.fodmapGrams, per its own unitBasis) scaled by
@@ -1121,12 +1185,15 @@ let cutNote = '';
 if (hasQty && (level === 'moderate' || level === 'high') && entry.fodmapGrams[k] > 0) {
 const bounds = fodmapBoundsFor(k, category);
 const thresholdGrams = (level === 'high' ? bounds[1] : bounds[0]) * THRESHOLD_SAFETY_MARGIN;
-const gramsPerUnit = entry.fodmapGrams[k] / entry.unitBasis.quantity;
+// Grams of the compound per 1 LINE unit (not per 1 unitBasis unit) --
+// factoring in unitRatio here is what keeps targetQty/cutQty directly
+// comparable to portionQty, which is always in the line's own unit.
+const gramsPerUnit = (entry.fodmapGrams[k] / entry.unitBasis.quantity) * unitRatio;
 const targetQty = thresholdGrams / gramsPerUnit;
 const cutQty = portionQty - targetQty;
 if (cutQty > 0.01) {
 const nextLevel = level === 'high' ? 'moderate' : 'low';
-cutNote = ` — cut by about ${cutQty < 1 ? cutQty.toFixed(2) : cutQty.toFixed(1)}${escapeHtml(entry.unitBasis.unit)}/portion to reach ${nextLevel}`;
+cutNote = ` — cut by about ${cutQty < 1 ? cutQty.toFixed(2) : cutQty.toFixed(1)}${escapeHtml(line.unit)}/portion to reach ${nextLevel}`;
 }
 }
 return `<span class="fodmap-chip level-${level}" title="${escapeHtml(k)}">${escapeHtml(k)}: ${escapeHtml(level)} (${grams < 0.01 ? '<0.01' : grams.toFixed(2)}g)${cutNote}</span>`;
@@ -1195,19 +1262,25 @@ ${rows}
 // AND every line resolves -- the load-bearing requirement that a recipe
 // nobody's touched this feature on looks exactly like it always did.
 // True when some ingredient on this recipe has a reference entry that
-// EXISTS but predates dietary-flag checks (see state.js's migration) --
-// distinct from "no entry at all" (recipeIngredientsStatusHtml/the
-// "Analyse ingredients" link below handle that case). Needed because
-// once every line resolves to SOME entry, computeRecipeDiet stops
-// returning null and that link disappears entirely -- with nothing left
-// prompting a re-check, a stale entry's dietary flags would otherwise
-// never get filled in (confirmed live: chorizo's Pork/Meat/Animal-
-// product flags stayed blank forever with no way to trigger a refresh).
+// EXISTS but predates dietary-flag and/or unit-weight checks (see
+// state.js's migration) -- distinct from "no entry at all"
+// (recipeIngredientsStatusHtml/the "Analyse ingredients" link below
+// handle that case). Needed because once every line resolves to SOME
+// entry, computeRecipeDiet stops returning null and that link
+// disappears entirely -- with nothing left prompting a re-check, a
+// stale entry would otherwise never get filled in (confirmed live:
+// chorizo's Pork/Meat/Animal-product flags stayed blank forever with no
+// way to trigger a refresh -- unit weights have the exact same gap).
 function recipeHasStaleReference(r) {
 return r.ingredientData.some((line) => {
 if (!line.name) return false;
 const entry = findReferenceEntry(line.name, line.form);
-return entry && entry.dietaryFlagsStale;
+// A userEdited entry's own stale flags (if any lingered from before
+// it was ever corrected) can no longer be cleared by "refresh" --
+// needsAssessment/ensureReferenceEntry now both skip a userEdited
+// entry outright -- so there's no point offering a link that would
+// silently do nothing; the actual fix is editing the entry directly.
+return entry && !entry.userEdited && (entry.dietaryFlagsStale || entry.unitWeightsStale);
 });
 }
 
@@ -1221,7 +1294,7 @@ const per = r.servings ? r.servings : null;
 const row = (label, key, unit) => `<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0;"><span>${escapeHtml(label)}</span><span>${diet.totals[key].toFixed(1)}${unit}${per ? ` (${(diet.totals[key] / per).toFixed(1)}${unit}/serving)` : ''}</span></div>`;
 return `<div class="full">
 <button class="overview-panel-toggle" type="button" data-recipe-diet-toggle="${r.id}">${expandedDiet.has(r.id) ? '▾ Hide diet analysis' : '▸ Show diet analysis'}</button>
-${expandedDiet.has(r.id) ? `${recipeHasStaleReference(r) ? `<div class="settings-note" style="margin-top:6px;">Some ingredients predate dietary-flag checks (kosher/halal/vegetarian/vegan) — <span class="inline-goto-link" data-recipe-analyse="${r.id}">refresh</span> to fill them in.</div>` : ''}
+${expandedDiet.has(r.id) ? `${recipeHasStaleReference(r) ? `<div class="settings-note" style="margin-top:6px;">Some ingredients predate dietary-flag checks (kosher/halal/vegetarian/vegan) and/or known unit weights ("medium onion" = how many grams) — <span class="inline-goto-link" data-recipe-analyse="${r.id}">refresh</span> to fill them in.</div>` : ''}
 ${diet.unmatchedLines.length ? `<div class="settings-note" style="margin-top:6px;">Totals below EXCLUDE ${diet.unmatchedLines.length} ingredient${diet.unmatchedLines.length === 1 ? '' : 's'} whose parsed unit doesn't match its reference entry's own basis (never guessed automatically): ${diet.unmatchedLines.map(({ line, entry }) => `${escapeHtml(line.name)} ("${escapeHtml(line.unit)}" vs "${escapeHtml(entry.unitBasis.unit)}")`).join(', ')}. See the ingredient list below to fix the parsed unit, or edit the entry's basis in Ingredient Reference.</div>` : ''}
 <div class="field-block" style="margin-top:6px;">
 <span class="field-label">FODMAP (per component) — summed across ingredients${per ? `, per portion (${per})` : ' -- set Servings above for a true per-portion figure; this is the whole-recipe total'}</span>
@@ -1296,6 +1369,13 @@ ${e.subs.map((s, si) => `<span class="tag-chip">${escapeHtml(s.name)}${s.note ? 
 <input type="text" autocomplete="off" class="tag-add-input" placeholder="note (optional)" data-ingredient-ref-sub-note="${e.id}" style="width:160px;">
 <button type="button" class="todo-add-btn" data-ingredient-ref-sub-add="${e.id}" style="padding:3px 8px;">+</button>
 </div></label>
+<label class="full">Other units <span class="settings-note">how many grams ONE of another unit weighs -- e.g. "medium" = 110 for a medium onion, "tsp" = 5 for a tsp of this -- lets a recipe parsed in a different unit than "per ${e.unitBasis.quantity}${escapeHtml(e.unitBasis.unit)}" above still be scaled correctly instead of excluded as a unit mismatch</span>
+<div class="tag-editor">
+${Object.keys(e.unitWeights).sort().map((u) => `<span class="tag-chip">${escapeHtml(u)} = ${e.unitWeights[u]}g<span class="tag-x" data-ingredient-ref-unitweight-remove="${e.id}" data-unit="${escapeHtml(u)}">&times;</span></span>`).join('')}
+<input type="text" autocomplete="off" class="tag-add-input" placeholder="unit (e.g. medium)" data-ingredient-ref-unitweight-name="${e.id}" style="width:110px;">
+<input type="number" step="any" min="0" autocomplete="off" class="tag-add-input" placeholder="grams" data-ingredient-ref-unitweight-grams="${e.id}" style="width:80px;">
+<button type="button" class="todo-add-btn" data-ingredient-ref-unitweight-add="${e.id}" style="padding:3px 8px;">+</button>
+</div></label>
 <div class="idea-actions">
 <button class="add-btn" type="button" data-ingredient-ref-save="${e.id}">Save</button>
 <span class="inline-goto-link" data-ingredient-ref-cancel="1">Cancel</span>
@@ -1305,6 +1385,7 @@ ${e.subs.map((s, si) => `<span class="tag-chip">${escapeHtml(s.name)}${s.note ? 
 
 function ingredientRefRowHtml(e) {
 if (editingReferenceId === e.id) return ingredientRefEditHtml(e);
+const unitWeightKeys = Object.keys(e.unitWeights);
 return `<div class="idea-row" data-ingredient-ref-row="${e.id}">
 <div class="idea-top"><span class="idea-title">${escapeHtml(e.name)}${e.form ? ` (${escapeHtml(e.form)})` : ''}</span>
 <span class="idea-date">per ${e.unitBasis.quantity}${escapeHtml(e.unitBasis.unit)}${e.userEdited ? ' · edited' : ''}</span></div>
@@ -1313,6 +1394,7 @@ return `<div class="idea-row" data-ingredient-ref-row="${e.id}">
 ${e.allergens.length ? `<div class="settings-note">Allergens: ${e.allergens.map(escapeHtml).join(', ')}</div>` : ''}
 ${e.dietaryFlags.length ? `<div class="settings-note">Also: ${e.dietaryFlags.map(escapeHtml).join(', ')}</div>` : ''}
 ${e.subs.length ? `<div class="settings-note">Substitutes: ${e.subs.map((s) => `${escapeHtml(s.name)}${s.note ? ` (${escapeHtml(s.note)})` : ''}`).join('; ')}</div>` : ''}
+${unitWeightKeys.length ? `<div class="settings-note">Also scales for: ${unitWeightKeys.sort().map((u) => `${escapeHtml(u)} (${e.unitWeights[u]}g)`).join(', ')}</div>` : ''}
 <div class="idea-actions">
 <span class="inline-goto-link" data-ingredient-ref-edit="${e.id}">Edit</span>
 <span class="del-x" style="opacity:1;" data-ingredient-ref-del="${e.id}">&times;</span>
@@ -1391,6 +1473,43 @@ renderRecipes();
 queueSave();
 });
 });
+// Other-unit weights, same immediate-commit shape as Substitutes just
+// above -- also doesn't set userEdited, for the same reason (adding a
+// unit weight isn't correcting the nutrition/FODMAP figures).
+el.querySelectorAll('[data-ingredient-ref-unitweight-remove]').forEach((x) => {
+x.addEventListener('click', () => {
+const e = data.ingredientReference.find((r2) => r2.id === x.dataset.ingredientRefUnitweightRemove);
+if (!e) return;
+delete e.unitWeights[x.dataset.unit];
+// Touching this list by hand IS the real check unitWeightsStale
+// exists to ensure happens -- same reasoning as the main Save
+// handler clearing dietaryFlagsStale, so a later background refresh
+// never silently re-adds back a unit the user deliberately removed.
+delete e.unitWeightsStale;
+e.unitWeightsAssessedAt = new Date().toISOString();
+renderIngredientReference();
+renderRecipes();
+queueSave();
+});
+});
+el.querySelectorAll('[data-ingredient-ref-unitweight-add]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const e = data.ingredientReference.find((r2) => r2.id === btn.dataset.ingredientRefUnitweightAdd);
+if (!e) return;
+const row = btn.closest('[data-ingredient-ref-row]');
+const nameInput = row.querySelector('[data-ingredient-ref-unitweight-name]');
+const gramsInput = row.querySelector('[data-ingredient-ref-unitweight-grams]');
+const unit = nameInput.value.trim().toLowerCase();
+const grams = parseFloat(gramsInput.value);
+if (!unit || !Number.isFinite(grams) || grams <= 0) return;
+e.unitWeights[unit] = grams;
+delete e.unitWeightsStale;
+e.unitWeightsAssessedAt = new Date().toISOString();
+renderIngredientReference();
+renderRecipes();
+queueSave();
+});
+});
 el.querySelectorAll('[data-ingredient-ref-save]').forEach((btn) => {
 btn.addEventListener('click', () => {
 const e = data.ingredientReference.find((r2) => r2.id === btn.dataset.ingredientRefSave);
@@ -1408,6 +1527,16 @@ const oligoSelect = row.querySelector('[data-ref-oligo]');
 if (oligoSelect) e.oligoCategory = OLIGO_CATEGORIES.includes(oligoSelect.value) ? oligoSelect.value : 'veg_fruit';
 e.allergens = [...row.querySelectorAll('[data-ref-allergen].active')].map((chip) => chip.dataset.refAllergen);
 e.dietaryFlags = [...row.querySelectorAll('[data-ref-dietary].active')].map((chip) => chip.dataset.refDietary);
+// Saving this form IS the real check dietaryFlagsStale exists to
+// ensure happens -- clearing it here (not just setting userEdited,
+// which ensureReferenceEntry's merge-refresh now also respects as a
+// belt-and-suspenders guard) is what stops a later "Analyse
+// ingredients" elsewhere from silently re-running an AI check that
+// would overwrite what was just manually confirmed. Real gap caught
+// while building unitWeights: this line was missing entirely before,
+// so a correction made here could still get quietly clobbered later.
+delete e.dietaryFlagsStale;
+e.dietaryAssessedAt = new Date().toISOString();
 // The whole reason this field exists (the tinned-vs-dried-chickpeas
 // case): once a person corrects an entry, a later "Analyse ingredients"
 // on some other recipe must never silently overwrite it again.
@@ -1754,7 +1883,12 @@ if (val === 'original') { map.delete(idx); renderRecipes(); return; }
 if (val === 'dropped') { map.set(idx, { mode: 'dropped' }); renderRecipes(); return; }
 if (val === 'reduced-line' || val === 'reduced-recipe') {
 const line = r.ingredientData[idx];
-const entry = line && findReferenceEntry(line.name, line.form);
+// Resolved (not a raw findReferenceEntry lookup) so this picks up
+// whatever entry is CURRENTLY effective for this line (e.g. mid-
+// substitute) and its unitRatio, consistently with everything else
+// that reads this line.
+const resolved = line && resolveLineEntry(r, line, idx);
+const entry = resolved && resolved.entry;
 const asWrittenPortion = line && line.quantity != null ? (r.servings ? line.quantity / r.servings : line.quantity) : 0;
 // Two different targets for "less" -- this ingredient's OWN
 // concentration alone (suggestedLowQtyPerPortion) vs. accounting for
@@ -1763,8 +1897,8 @@ const asWrittenPortion = line && line.quantity != null ? (r.servings ? line.quan
 // FODMAP grams stack across a recipe, so a line that's individually
 // "low" can still leave the recipe TOTAL moderate/high -- confirmed
 // live gap: "doesn't target recipe level low levels (stacking)".
-const suggested = !entry ? null
-: val === 'reduced-line' ? suggestedLowQtyPerPortion(entry)
+const suggested = !entry || resolved.unitMismatch ? null
+: val === 'reduced-line' ? suggestedLowQtyPerPortion(entry, resolved.unitRatio)
 : suggestedLowQtyPerPortionForRecipeTotal(r, idx, entry);
 // A default that's actually a reduction -- the smaller of the as-
 // written amount and the suggested "reach low" target, so picking
