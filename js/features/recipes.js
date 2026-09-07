@@ -679,8 +679,9 @@ return minQty;
 // override control only ever sets that mode once the substitute's
 // entry exists -- see the data-line-override-mode handler below).
 function resolveLineEntry(r, line, i) {
-let entry = findReferenceEntry(line.name, line.form);
-if (!entry) return null;
+const originalEntry = findReferenceEntry(line.name, line.form);
+if (!originalEntry) return null;
+let entry = originalEntry;
 const override = (lineOverrides.get(r.id) || new Map()).get(i);
 const dropped = !!(override && override.mode === 'dropped');
 let subName = '';
@@ -702,7 +703,20 @@ else if (override && override.mode === 'reduced' && override.qty != null) {
 portionQty = override.qty;
 wholeQty = r.servings ? override.qty * r.servings : override.qty;
 }
-return { entry, dropped, portionQty, wholeQty, subName };
+// `originalEntry` is exposed alongside the (possibly substituted)
+// `entry` specifically so the override <select>'s own option list can
+// always be built from the ingredient AS WRITTEN's substitutes, not
+// whatever entry currently happens to be in effect -- real bug, caught
+// live: once a substitute was active, `entry` became the SUBSTITUTE's
+// own entry, so the options list was rebuilt from the SUBSTITUTE's own
+// subs (a different list entirely), meaning the active substitute never
+// matched any option, no option got `selected`, and the browser fell
+// back to showing "Use as written" as selected BY DEFAULT even though
+// the override was still very much active -- which meant clicking "Use
+// as written" again fired no `change` event at all (as far as the
+// browser was concerned, nothing changed), so it could never be used to
+// undo a substitution.
+return { entry, originalEntry, dropped, portionQty, wholeQty, subName };
 }
 
 const MIXED_OLIGO_CATEGORY = 'veg_fruit'; // conservative default when a recipe's fructans/GOS come from more than one category -- see computeRecipeDiet
@@ -882,7 +896,7 @@ const rows = r.ingredientData.map((line, i) => {
 if (!line.name) return '';
 const resolved = resolveLineEntry(r, line, i);
 if (!resolved) return '';
-const { entry, dropped, portionQty, subName } = resolved;
+const { entry, originalEntry, dropped, portionQty, subName } = resolved;
 const override = (lineOverrides.get(r.id) || new Map()).get(i);
 let label = `${escapeHtml(line.name)}${line.form ? ` (${escapeHtml(line.form)})` : ''}`;
 if (subName) label += ` &rarr; using substitute: <strong>${escapeHtml(subName)}</strong>`;
@@ -988,8 +1002,15 @@ if (needsOverride) {
 // which one was picked, purely so the right option stays highlighted;
 // both set the same {mode:'reduced', qty} shape computeRecipeDiet reads.
 const mode = override ? (override.mode === 'sub' ? `sub:${override.subName}` : override.mode === 'reduced' ? `reduced-${override.basis || 'line'}` : override.mode) : 'original';
+// Built from the ORIGINAL ingredient's own subs, not the currently-
+// effective `entry` -- once a substitute is active, `entry` IS that
+// substitute, and its own subs are a different list entirely (see
+// resolveLineEntry's comment on `originalEntry`). Using the original
+// list here is what keeps the active substitute actually matchable as
+// `selected` below, rather than silently falling back to "Use as
+// written" the moment a swap is made.
 const options = [`<option value="original"${mode === 'original' ? ' selected' : ''}>Use as written</option>`]
-.concat((entry.subs || []).map((s) => `<option value="sub:${escapeHtml(s.name)}"${mode === `sub:${s.name}` ? ' selected' : ''}>Substitute: ${escapeHtml(s.name)}${s.note ? ` (${escapeHtml(s.note)})` : ''}</option>`))
+.concat((originalEntry.subs || []).map((s) => `<option value="sub:${escapeHtml(s.name)}"${mode === `sub:${s.name}` ? ' selected' : ''}>Substitute: ${escapeHtml(s.name)}${s.note ? ` (${escapeHtml(s.note)})` : ''}</option>`))
 .concat([
 `<option value="reduced-line"${mode === 'reduced-line' ? ' selected' : ''}>Use less (this ingredient to low)…</option>`,
 `<option value="reduced-recipe"${mode === 'reduced-recipe' ? ' selected' : ''}>Use less (whole recipe to low)…</option>`,
