@@ -2597,8 +2597,14 @@ color:var(--muted);
    though the grid itself is only 1 column wide. min-width:0 on the items
    removes that floor; .details-grid input/select/textarea already had it,
    but that only fixed each *field*, not the grid item (the label/row)
-   wrapping it. */
-.details-grid > label, .details-grid > .field-block{min-width:0;}
+   wrapping it. `> *` rather than enumerating `label`/`.field-block` by
+   name -- confirmed live: a `.full`-wrapped block (Recipes' diet-analysis
+   section, its "Use less…" <select> options being the widest text on the
+   whole card) hit exactly this, missed by the narrower selector, and blew
+   the grid out to 330px against a 269px-wide phone panel. Any FUTURE
+   direct child, in any class, needs this same floor -- no reason to make
+   it opt-in per class again. */
+.details-grid > *{min-width:0;}
 .details-grid{grid-template-columns:1fr;}
 .task-detail-grid{grid-template-columns:1fr;}
 .tinder-fields{grid-template-columns:1fr;}
