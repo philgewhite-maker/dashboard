@@ -2154,7 +2154,20 @@ margin:14px 0;
 .planner-grid-trip{grid-template-columns:repeat(auto-fill, minmax(120px, 1fr));}
 .planner-day{min-height:90px;position:relative;}
 .planner-day:has(.planner-day-stripe){padding-bottom:16px;}
-.planner-day-label{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.02em;}
+.planner-day-label{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.02em;display:flex;align-items:center;justify-content:space-between;gap:6px;}
+/* One-step "add something for this day" -- the usual route (add to the
+   Activities pool, drag it up) stays for anything reusable, but a lot of
+   what goes in a day box is a one-off with nothing to reuse. */
+.planner-day-add-toggle{
+background:transparent;border:1px solid var(--line);color:var(--muted);
+border-radius:50%;width:16px;height:16px;line-height:1;font-size:12px;
+padding:0;cursor:pointer;flex:0 0 auto;
+}
+.planner-day-add-toggle:hover{border-color:var(--rose);color:var(--rose);}
+.planner-day-add-input{
+width:100%;font-size:12px;padding:4px 6px;margin-top:6px;
+border:1px solid var(--rose);border-radius:6px;box-sizing:border-box;
+}
 /* Airbnb room-occupancy stripe -- deliberately just colour, no text, on
    the day cell itself (the listing/guest name is in each segment's
    title tooltip instead, and in the Google Calendar push). One segment

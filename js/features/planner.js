@@ -32,6 +32,12 @@ import { airbnbSegmentsForDay } from './airbnb.js';
 // per-render -- never scrolls the page during some unrelated drag
 // elsewhere in the app (e.g. the Tasks tab's own allocation drag).
 let plannerDragActive = false;
+// Which day box(es) currently show their inline "+" add-input (see
+// plannerDayHtml/addActivityToDay) -- keyed "date|tripId" since the main
+// grid and a trip's own mini-grid can both have a box for the same date.
+// UI-only/session-only, same as every other "is this expanded" Set in
+// the app; never persisted.
+const plannerAddOpenKeys = new Set();
 const PLANNER_SCROLL_EDGE = 90;
 const PLANNER_SCROLL_MAX_SPEED = 24;
 function autoScrollDuringPlannerDrag(e) {
@@ -88,6 +94,23 @@ function addActivity(title) {
 const t = String(title || '').trim();
 if (!t) return;
 data.plannerActivities.push(blankPlannerActivity({ title: t }));
+queueSave();
+renderPlanner();
+}
+
+// A day box's own "+" (see plannerDayHtml) -- one step instead of the
+// usual two (add to the Activities pool below, then drag it up to the
+// right day), for the common case of "this one thing, this one day"
+// with nothing reusable about it. Still lands in the pool afterwards
+// (same blankPlannerActivity everything else there goes through), so
+// it's just as draggable to a DIFFERENT day later if that turns out to
+// be wanted -- this isn't a separate, lesser kind of entry.
+function addActivityToDay(date, tripId, title) {
+const t = String(title || '').trim();
+if (!t) return;
+const activity = blankPlannerActivity({ title: t });
+data.plannerActivities.push(activity);
+data.plannerEntries.push(blankPlannerEntry({ kind: 'activity', date, tripId, activityId: activity.id }));
 queueSave();
 renderPlanner();
 }
@@ -150,10 +173,13 @@ return `<div class="planner-day-stripe">${segments.map((s) => `<span class="stri
 
 function plannerDayHtml(dateStr, tripId = '', legChipsHtml = '') {
 const entries = entriesForDay(dateStr, tripId);
+const addKey = `${dateStr}|${tripId}`;
+const addOpen = plannerAddOpenKeys.has(addKey);
 return `<div class="planner-day alloc-target" data-planner-day="${dateStr}" data-planner-trip="${tripId}">
-<div class="planner-day-label">${formatDayLabel(dateStr)}</div>
+<div class="planner-day-label">${formatDayLabel(dateStr)}<button type="button" class="planner-day-add-toggle" data-planner-add-toggle="${dateStr}" data-planner-add-trip="${tripId}" title="Add something for this day">+</button></div>
 ${legChipsHtml}
 <div class="planner-day-entries">${entries.map(plannerEntryHtml).join('')}</div>
+${addOpen ? `<input type="text" autocomplete="off" class="planner-day-add-input" placeholder="Add & press Enter…" data-planner-add-input="${dateStr}" data-planner-add-trip="${tripId}">` : ''}
 ${airbnbStripeHtml(dateStr)}
 </div>`;
 }
@@ -387,6 +413,37 @@ const date = zone.dataset.plannerDay;
 const tripId = zone.dataset.plannerTrip || '';
 if (kind === 'entry') moveEntry(refId, date, tripId);
 else if (kind === 'connection' || kind === 'activity') placeEntry(kind, refId, date, tripId);
+});
+});
+root.querySelectorAll('[data-planner-add-toggle]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const key = `${btn.dataset.plannerAddToggle}|${btn.dataset.plannerAddTrip}`;
+if (plannerAddOpenKeys.has(key)) plannerAddOpenKeys.delete(key); else plannerAddOpenKeys.add(key);
+renderPlanner();
+if (plannerAddOpenKeys.has(key)) {
+const input = document.querySelector(`[data-planner-add-input="${btn.dataset.plannerAddToggle}"][data-planner-add-trip="${btn.dataset.plannerAddTrip}"]`);
+if (input) input.focus();
+}
+});
+});
+root.querySelectorAll('[data-planner-add-input]').forEach((input) => {
+const key = `${input.dataset.plannerAddInput}|${input.dataset.plannerAddTrip}`;
+input.addEventListener('keydown', (e) => {
+if (e.key === 'Escape') { plannerAddOpenKeys.delete(key); renderPlanner(); return; }
+if (e.key !== 'Enter') return;
+e.preventDefault();
+// Cleared BEFORE the add -- addActivityToDay's own renderPlanner() (part
+// of its normal queueSave+renderPlanner pattern) is what actually redraws
+// the day box, so the key needs to already be gone by then, or that
+// render just redraws the SAME now-stale input right back in (confirmed
+// live: the input stayed visibly open, inert, after a successful add).
+plannerAddOpenKeys.delete(key);
+addActivityToDay(input.dataset.plannerAddInput, input.dataset.plannerAddTrip, input.value);
+});
+// Left empty and clicked away from -- close it rather than leaving a
+// stray blank input sitting open in the day box.
+input.addEventListener('blur', () => {
+if (!input.value.trim() && plannerAddOpenKeys.has(key)) { plannerAddOpenKeys.delete(key); renderPlanner(); }
 });
 });
 root.querySelectorAll('[data-planner-toggle-status]').forEach((btn) => {
