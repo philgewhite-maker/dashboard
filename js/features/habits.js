@@ -8,7 +8,7 @@ const list = document.getElementById('habits-list');
 const dates = last7Dates();
 document.getElementById('habits-count').textContent = data.habits.length + (data.habits.length === 1 ? ' habit' : ' habits');
 if (data.habits.length === 0) {
-list.innerHTML = '<div class="empty">No habits yet. Add one in Settings.</div>';
+list.innerHTML = '<div class="empty">No habits yet. Add one below.</div>';
 return;
 }
 list.innerHTML = data.habits.map((h) => {

@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v282</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v283</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -113,6 +113,10 @@
 <span class="count-badge" id="habits-count"></span>
 </div>
 <div id="habits-list"></div>
+<div class="add-form" id="habit-form">
+<input type="text" autocomplete="off" id="habit-input" placeholder="New habit, e.g. Stretch">
+<button class="add-btn" type="button">Add</button>
+</div>
 </section>
 
 <section class="panel" id="goals-panel" data-tab="overview">
@@ -121,6 +125,10 @@
 <span class="count-badge" id="goals-count"></span>
 </div>
 <div id="goals-list"></div>
+<div class="add-form" id="goal-form">
+<input type="text" autocomplete="off" id="goal-input" placeholder="New goal">
+<button class="add-btn" type="button">Add</button>
+</div>
 </section>
 
 <section class="panel wide" id="capture-panel" data-tab="tasks">
@@ -2609,22 +2617,6 @@ Same idea as Connections' ratings, a separate list (Taste/Health/Prep by default
 
 <details class="settings-group">
 <summary><span class="dot sage"></span>Quick add</summary>
-
-<div class="settings-block">
-<h3>Track a new habit</h3>
-<div class="add-form" id="habit-form" style="margin-top:0;padding-top:0;border-top:none;">
-<input type="text" autocomplete="off" id="habit-input" placeholder="New habit, e.g. Stretch">
-<button class="add-btn" type="button">Add</button>
-</div>
-</div>
-
-<div class="settings-block">
-<h3>Track a new goal</h3>
-<div class="add-form" id="goal-form" style="margin-top:0;padding-top:0;border-top:none;">
-<input type="text" autocomplete="off" id="goal-input" placeholder="New goal">
-<button class="add-btn" type="button">Add</button>
-</div>
-</div>
 
 <div class="settings-block">
 <h3>Track a new calendar</h3>

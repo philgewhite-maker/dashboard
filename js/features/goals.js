@@ -5,7 +5,7 @@ function renderGoals() {
 const list = document.getElementById('goals-list');
 document.getElementById('goals-count').textContent = data.goals.length + (data.goals.length === 1 ? ' goal' : ' goals');
 if (data.goals.length === 0) {
-list.innerHTML = '<div class="empty">No goals yet. Add one in Settings.</div>';
+list.innerHTML = '<div class="empty">No goals yet. Add one below.</div>';
 return;
 }
 list.innerHTML = data.goals.map((g) => `
