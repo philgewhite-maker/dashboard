@@ -5,7 +5,7 @@
 import { data, queueSave, DEFAULT_RECIPE_RATING_CATEGORIES, slugifyField, averageRating, getLocalSettings, setLocalSetting } from '../state.js';
 import { photoDelete, photoGet, photoUrl } from '../db.js';
 import { escapeHtml, uid, todayStr, resizeImageToBlob, openLightbox, pickChipHtml, scrollAndFlash } from '../utils.js';
-import { MissingKeyError, extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, parseIngredients, assessIngredient, ALLERGEN_LIST, DIETARY_FLAGS, FODMAP_COMPONENTS, FODMAP_THRESHOLDS_G, OLIGO_CATEGORIES, fodmapLevelFromGrams, regenerateRecipeVariant, assessUnitWeight, assessUnitRatio } from '../ai.js';
+import { MissingKeyError, extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, parseIngredients, assessIngredient, ALLERGEN_LIST, DIETARY_FLAGS, FODMAP_COMPONENTS, FODMAP_THRESHOLDS_G, OLIGO_CATEGORIES, fodmapLevelFromGrams, regenerateRecipeVariant, assessUnitWeight, assessUnitRatio, glycemicLevelFromLoad } from '../ai.js';
 import { storePhoto, uploadAttachment, deleteAttachment, openAttachment, formatBytes } from '../files.js';
 import { getConfig } from '../sync/selfhost.js';
 
@@ -243,6 +243,9 @@ let recipeOverviewCollapsed = true;
 // and-remember pattern as recipeOverviewCollapsed, one flag for the
 // whole panel rather than per-entry.
 let referencePanelCollapsed = true;
+// Diet-interests panel (see renderDietInterests) -- same collapse-and-
+// remember pattern as the two above.
+let dietInterestsCollapsed = true;
 // Per-recipe, per-ingredient-line "what if" override -- UI-only/in-memory
 // (not persisted, same as the toggle this replaced): recipeId -> Map of
 // ingredientData index -> one of:
@@ -540,6 +543,7 @@ unitWeights: {}, unitBasisRatios: {},
 nutrition: { calories: 0, protein: 0, carbs: 0, sugars: 0, fat: 0, saturates: 0, fibre: 0, salt: spec.salt || 0 },
 oligoCategory: 'veg_fruit',
 fodmapGrams: { fructans: 0, gos: 0, lactose: 0, excessFructose: 0, polyols: 0 },
+glycemicIndex: null,
 allergens: [], dietaryFlags: [], subs: [],
 };
 }
@@ -569,7 +573,7 @@ if (!e) return true;
 // handlers), the same guarantee the FODMAP/nutrition figures already
 // have.
 if (e.userEdited) return false;
-return !!e.dietaryFlagsStale || !!e.unitWeightsStale;
+return !!e.dietaryFlagsStale || !!e.unitWeightsStale || !!e.glycemicStale;
 }
 
 // The one AI-calling step in the whole diet-analysis path besides the
@@ -581,7 +585,7 @@ return !!e.dietaryFlagsStale || !!e.unitWeightsStale;
 // flour.
 async function ensureReferenceEntry(name, form) {
 const existing = findReferenceEntry(name, form);
-if (existing && (existing.userEdited || (!existing.dietaryFlagsStale && !existing.unitWeightsStale))) return;
+if (existing && (existing.userEdited || (!existing.dietaryFlagsStale && !existing.unitWeightsStale && !existing.glycemicStale))) return;
 const trivial = trivialReferenceEntry(name, form);
 const assessed = trivial || await assessIngredient(name, form);
 if (existing) {
@@ -601,6 +605,11 @@ existing.unitWeights = assessed.unitWeights;
 existing.unitWeightsAssessedAt = new Date().toISOString();
 delete existing.unitWeightsStale;
 }
+if (existing.glycemicStale) {
+existing.glycemicIndex = assessed.glycemicIndex;
+existing.glycemicAssessedAt = new Date().toISOString();
+delete existing.glycemicStale;
+}
 return;
 }
 data.ingredientReference.push({
@@ -611,6 +620,7 @@ subs: assessed.subs.map((s) => ({ id: uid(), ...s })),
 aiFilledAt: trivial ? '' : new Date().toISOString(),
 dietaryAssessedAt: new Date().toISOString(),
 unitWeightsAssessedAt: new Date().toISOString(),
+glycemicAssessedAt: new Date().toISOString(),
 userEdited: false,
 });
 }
@@ -833,7 +843,7 @@ if (!override || !line.name) return;
 if (override.mode === 'dropped') {
 out.push(`Omit "${line.name}"${line.form ? ` (${line.form})` : ''} entirely.`);
 } else if (override.mode === 'sub') {
-out.push(`Replace "${line.name}"${line.form ? ` (${line.form})` : ''} with "${override.subName}", keeping a similar quantity/preparation unless the substitute is naturally measured differently.`);
+out.push(`Replace "${line.name}"${line.form ? ` (${line.form})` : ''} with "${override.subName}"${override.subForm ? ` (${override.subForm})` : ''}, keeping a similar quantity/preparation unless the substitute is naturally measured differently.`);
 } else if (override.mode === 'reduced' && override.qty != null) {
 const wholeQty = r.servings ? override.qty * r.servings : override.qty;
 const round = (n) => (n < 10 ? Math.round(n * 100) / 100 : Math.round(n * 10) / 10);
@@ -910,6 +920,22 @@ if (newVariantId) setTimeout(() => scrollAndFlash(`[data-recipe-row="${newVarian
 }
 
 const MACRO_FIELDS = ['calories', 'protein', 'carbs', 'sugars', 'fat', 'saturates', 'fibre', 'salt'];
+
+// Which diet-analysis sections a household actually cares about -- purely
+// a UI declutter (see dietInterestOn below): every ingredient still gets
+// fully assessed and cached regardless of these, so flipping one back on
+// needs no new AI call, just re-shows data that was there all along.
+// Deliberately doesn't gate the Ingredient Reference EDIT form itself --
+// that's a deliberate, occasional action, not passive clutter, and every
+// field has to stay correctable no matter which interests are current.
+const DIET_INTERESTS = [
+{ key: 'macros', label: 'Macros' },
+{ key: 'fodmap', label: 'FODMAP' },
+{ key: 'diabetic', label: 'Diabetic (glycemic load)' },
+{ key: 'allergens', label: 'Allergens' },
+{ key: 'dietaryFlags', label: 'Kosher / halal / vegetarian / vegan' },
+];
+const dietInterestOn = (key) => data.prefs.dietInterests.includes(key);
 
 // How many grams ONE of `unit` weighs, for THIS entry specifically --
 // grams are grams universally (not a conversion, a tautology), so "g"
@@ -1132,7 +1158,13 @@ const override = (lineOverrides.get(r.id) || new Map()).get(i);
 const dropped = !!(override && override.mode === 'dropped');
 let subName = '';
 if (override && override.mode === 'sub' && override.subName) {
-const subEntry = findReferenceEntry(override.subName, '');
+// `subForm` matters for a same-NAME, different-preparation substitute
+// (e.g. "pasta", form "cooked and cooled" -- v282's resistant-starch
+// diabetic substitute) -- without it, that sub would resolve to the
+// exact SAME reference entry as the original ingredient (form ''),
+// making the whole swap a silent no-op. See the dropdown/change-
+// handler that set this override for the matching encode/decode.
+const subEntry = findReferenceEntry(override.subName, override.subForm || '');
 if (subEntry) { entry = subEntry; subName = override.subName; }
 }
 // portionQty is what FODMAP thresholds are judged against (a per-
@@ -1229,6 +1261,12 @@ const fodmapGrams = {}; FODMAP_COMPONENTS.forEach((k) => { fodmapGrams[k] = 0; }
 const oligoCatGrams = { fructans: {}, gos: {} };
 const allergens = new Set();
 const dietaryFlags = new Set();
+// Available (digestible) carbohydrate x Glycemic Index / 100, summed --
+// the standard Glycemic Load formula, additive across ingredients the
+// same real way FODMAP grams are (see GLYCEMIC_LOAD_THRESHOLDS in
+// ai.js). Per-portion, like FODMAP -- a diabetic question is about what
+// one serving does, not the whole batch.
+let glycemicLoad = 0;
 // Lines that couldn't be scaled at all -- their unit doesn't match
 // their (possibly substituted) reference entry's unitBasis, so macros/
 // FODMAP are withheld for THAT line specifically (never guess a cross-
@@ -1238,6 +1276,15 @@ const dietaryFlags = new Set();
 // never silently incomplete -- what's excluded, and why, is always
 // visible right next to them.
 const unmatchedLines = [];
+// A line marked optional (bread served alongside a stew) contributes
+// NOTHING to the totals/Sets above -- excluded the same way a `dropped`
+// line already is -- but unlike `dropped`, its own contribution is
+// still computed and kept here, so the UI can show "if you include
+// this" instead of just silently discarding it. `macros`/`fodmapGrams`/
+// `glycemicLoad` are null when a unit mismatch means they can't be
+// computed at all -- allergens/dietaryFlags are still known regardless
+// (boolean, not quantity-dependent).
+const optional = [];
 let resolvedCount = 0;
 for (let i = 0; i < r.ingredientData.length; i += 1) {
 const line = r.ingredientData[i];
@@ -1247,27 +1294,47 @@ if (!resolved) return null; // not analysed yet -- caller shows "Analyse ingredi
 resolvedCount += 1;
 const { entry, dropped, portionQty, wholeQty, unitMismatch, unitRatio } = resolved;
 if (dropped) continue; // excluded from every total, including allergens -- "drop it" means drop it
+if (unitMismatch) {
+unmatchedLines.push({ line, entry });
 // Allergen/dietary-flag presence is boolean, not quantity-scaled -- a
 // trace of gluten doesn't stop being gluten just because THIS line's
-// unit couldn't be scaled, so these are recorded regardless of
-// unitMismatch, unlike the quantity-dependent totals just below.
+// unit couldn't be scaled, so these are still recorded (into the
+// core Sets, or the optional line's own record) even though nothing
+// numeric can be computed for it.
+if (line.optional) {
+optional.push({ line, entry, macros: null, fodmapGrams: null, glycemicLoad: null, allergens: entry.allergens || [], dietaryFlags: entry.dietaryFlags || [] });
+} else {
 (entry.allergens || []).forEach((a) => allergens.add(a));
 (entry.dietaryFlags || []).forEach((f) => dietaryFlags.add(f));
-if (unitMismatch) { unmatchedLines.push({ line, entry }); continue; }
-if (wholeQty != null) {
-const scale = (wholeQty * unitRatio) / (entry.unitBasis.quantity || 1);
-MACRO_FIELDS.forEach((k) => { totals[k] += (entry.nutrition[k] || 0) * scale; });
 }
-if (portionQty != null) {
-const portionScale = (portionQty * unitRatio) / (entry.unitBasis.quantity || 1);
+continue;
+}
+const wholeScale = wholeQty != null ? (wholeQty * unitRatio) / (entry.unitBasis.quantity || 1) : null;
+const portionScale = portionQty != null ? (portionQty * unitRatio) / (entry.unitBasis.quantity || 1) : null;
+const lineMacros = {};
+MACRO_FIELDS.forEach((k) => { lineMacros[k] = wholeScale != null ? (entry.nutrition[k] || 0) * wholeScale : 0; });
+const lineFodmapGrams = {};
+FODMAP_COMPONENTS.forEach((k) => { lineFodmapGrams[k] = portionScale != null ? (entry.fodmapGrams[k] || 0) * portionScale : 0; });
+// Available carbs = total carbs minus fibre (fibre isn't digested/
+// doesn't spike blood sugar) -- the standard convention Glycemic Load
+// is defined against.
+const netCarbs = Math.max(0, (entry.nutrition.carbs || 0) - (entry.nutrition.fibre || 0));
+const lineGlycemicLoad = (portionScale != null && entry.glycemicIndex != null)
+? (netCarbs * portionScale) * (entry.glycemicIndex / 100) : 0;
+if (line.optional) {
+optional.push({ line, entry, macros: lineMacros, fodmapGrams: lineFodmapGrams, glycemicLoad: lineGlycemicLoad, allergens: entry.allergens || [], dietaryFlags: entry.dietaryFlags || [] });
+continue;
+}
+(entry.allergens || []).forEach((a) => allergens.add(a));
+(entry.dietaryFlags || []).forEach((f) => dietaryFlags.add(f));
+MACRO_FIELDS.forEach((k) => { totals[k] += lineMacros[k]; });
 FODMAP_COMPONENTS.forEach((k) => {
-const grams = (entry.fodmapGrams[k] || 0) * portionScale;
-fodmapGrams[k] += grams;
-if ((k === 'fructans' || k === 'gos') && grams > 0) {
-oligoCatGrams[k][entry.oligoCategory] = (oligoCatGrams[k][entry.oligoCategory] || 0) + grams;
+fodmapGrams[k] += lineFodmapGrams[k];
+if ((k === 'fructans' || k === 'gos') && lineFodmapGrams[k] > 0) {
+oligoCatGrams[k][entry.oligoCategory] = (oligoCatGrams[k][entry.oligoCategory] || 0) + lineFodmapGrams[k];
 }
 });
-}
+glycemicLoad += lineGlycemicLoad;
 }
 if (resolvedCount < r.ingredientData.length) return null;
 const fodmap = {};
@@ -1286,7 +1353,10 @@ category = (dominantGrams / fodmapGrams[k]) >= OLIGO_CATEGORY_DOMINANCE_THRESHOL
 }
 fodmap[k] = fodmapLevelFromGrams(k, fodmapGrams[k], category);
 });
-return { totals, fodmapGrams, fodmap, allergens: [...allergens], dietaryFlags: [...dietaryFlags], unmatchedLines };
+return {
+totals, fodmapGrams, fodmap, allergens: [...allergens], dietaryFlags: [...dietaryFlags], unmatchedLines,
+glycemicLoad, glycemicLevel: glycemicLevelFromLoad(glycemicLoad), optional,
+};
 }
 
 function recipeIngredientsStatusHtml(r) {
@@ -1322,6 +1392,10 @@ return `
 <input type="text" placeholder="unit" data-ingdata-field="unit" data-ingdata-recipe="${r.id}" data-ingdata-idx="${i}" value="${escapeHtml(line.unit)}">
 </div>
 <div class="settings-note" style="margin-top:2px;">from: “${escapeHtml(r.ingredients[i] || '')}”${line.notes ? ` · ${escapeHtml(line.notes)}` : ''}</div>
+<label style="display:flex;align-items:center;gap:4px;margin-top:2px;font-size:11px;font-weight:400;">
+<input type="checkbox" data-ingdata-optional-toggle="${r.id}" data-ingdata-idx="${i}" ${line.optional ? 'checked' : ''}>
+Optional <span class="settings-note">e.g. bread served on the side -- left out of this recipe's own totals below</span>
+</label>
 ${mismatchEntry ? unitMismatchNoteHtml(r.id, i, line, mismatchEntry) : ''}
 </div>`;
 }).join('');
@@ -1407,8 +1481,18 @@ used = `${portionQty.toFixed(1)}${escapeHtml(line.unit)}/portion (cut down from 
 } else {
 used = `${asWrittenPortion.toFixed(1)}${escapeHtml(line.unit)} per portion (${asWrittenWhole} across all ${r.servings})`;
 }
-const lineAllergens = dropped ? [] : (entry.allergens || []);
-const lineDietaryFlags = dropped ? [] : (entry.dietaryFlags || []);
+// Optional lines still show their as-written amount above -- only what
+// happens to the TOTALS changes (see computeRecipeDiet's `optional`
+// carve-out) -- this note is just what makes that fact visible right
+// here, not a separate branch of `used` that would hide the amount.
+if (!dropped && line.optional) used += ' — optional, not counted in the totals below';
+// Each piece only counts (for display AND for whether the override
+// control below earns its place) when the household is actually
+// interested in it -- see dietInterestOn/DIET_INTERESTS. An allergen
+// nobody here needs to avoid shouldn't trigger a substitute/reduce/drop
+// control any more than it should show its own chip.
+const lineAllergens = (dropped || !dietInterestOn('allergens')) ? [] : (entry.allergens || []);
+const lineDietaryFlags = (dropped || !dietInterestOn('dietaryFlags')) ? [] : (entry.dietaryFlags || []);
 const flagsNote = (lineAllergens.length || lineDietaryFlags.length)
 ? `<div class="settings-note">${[
 lineAllergens.length ? `Allergens: ${lineAllergens.map(escapeHtml).join(', ')}` : '',
@@ -1416,7 +1500,13 @@ lineDietaryFlags.length ? `Also: ${lineDietaryFlags.map(escapeHtml).join(', ')}`
 ].filter(Boolean).join(' · ')}</div>`
 : '';
 let chips = '';
+let glycemicChip = '';
 let worstLevel = 'none';
+const bumpWorst = (level) => {
+if (level === 'high') worstLevel = 'high';
+else if (level === 'moderate' && worstLevel !== 'high') worstLevel = 'moderate';
+else if (level === 'low' && worstLevel === 'none') worstLevel = 'low';
+};
 let noQtyNote = '';
 let unitMismatchHtml = '';
 if (!dropped && unitMismatch) {
@@ -1445,7 +1535,8 @@ const hasQty = portionQty != null && entry.unitBasis.quantity > 0;
 // point), so either the units matched exactly (ratio 1) or a real
 // bridge was found via unitWeights.
 const scale = hasQty ? (portionQty * unitRatio) / entry.unitBasis.quantity : 1;
-if (!hasQty) noQtyNote = `No quantity given for this line — shown at the reference amount (${entry.unitBasis.quantity}${entry.unitBasis.unit}), not scaled to what's actually used here.`;
+if (!hasQty && (dietInterestOn('fodmap') || dietInterestOn('diabetic'))) noQtyNote = `No quantity given for this line — shown at the reference amount (${entry.unitBasis.quantity}${entry.unitBasis.unit}), not scaled to what's actually used here.`;
+if (dietInterestOn('fodmap')) {
 // The actual grams of each carbohydrate THIS PORTION contributes --
 // concentration (entry.fodmapGrams, per its own unitBasis) scaled by
 // how much of the ingredient this portion actually uses. Sound at
@@ -1462,9 +1553,7 @@ const level = fodmapLevelFromGrams(k, grams, category);
 // small enough portion) never made needsOverride true below, hiding
 // its substitute/reduce/drop control even though it's a genuinely
 // FODMAP-relevant ingredient worth being able to act on.
-if (level === 'high') worstLevel = 'high';
-else if (level === 'moderate' && worstLevel !== 'high') worstLevel = 'moderate';
-else if (level === 'low' && worstLevel === 'none') worstLevel = 'low';
+bumpWorst(level);
 // "Cut by Xg/portion to reach a lower rating" -- given this
 // ingredient's own concentration (grams of the compound per unit of
 // the ingredient, held constant), solve for how much LESS of it
@@ -1488,6 +1577,17 @@ cutNote = ` — cut by about ${cutQty < 1 ? cutQty.toFixed(2) : cutQty.toFixed(1
 return `<span class="fodmap-chip level-${level}" title="${escapeHtml(k)}">${escapeHtml(k)}: ${escapeHtml(level)} (${grams < 0.01 ? '<0.01' : grams.toFixed(2)}g)${cutNote}</span>`;
 }).join(' ');
 }
+if (dietInterestOn('diabetic') && entry.glycemicIndex != null) {
+// Same shape as the FODMAP chips above -- available carbs (total minus
+// fibre) x GI / 100, scaled the same portion-relative way, judged
+// against the fixed published Glycemic Load bands.
+const netCarbs = Math.max(0, (entry.nutrition.carbs || 0) - (entry.nutrition.fibre || 0));
+const load = netCarbs * scale * (entry.glycemicIndex / 100);
+const level = glycemicLevelFromLoad(load);
+bumpWorst(level);
+glycemicChip = `<span class="fodmap-chip level-${level}" title="glycemic load">glycemic load: ${escapeHtml(level)} (${load < 0.1 ? '<0.1' : load.toFixed(1)}, GI ${entry.glycemicIndex})</span>`;
+}
+}
 // The override control only earns its place on a line that actually
 // NEEDS one -- a FODMAP component above 'none', an allergen, or a
 // dietary flag -- per feedback ("for each medium or high scoring
@@ -1507,7 +1607,11 @@ if (needsOverride) {
 // suggestedLowQtyPerPortionForRecipeTotal) -- override.basis records
 // which one was picked, purely so the right option stays highlighted;
 // both set the same {mode:'reduced', qty} shape computeRecipeDiet reads.
-const mode = override ? (override.mode === 'sub' ? `sub:${override.subName}` : override.mode === 'reduced' ? `reduced-${override.basis || 'line'}` : override.mode) : 'original';
+// `subForm` is baked into the option value (see below) -- needed to
+// tell apart two subs that share a NAME but differ in preparation
+// (e.g. "pasta" plain vs. "pasta" cooked-and-cooled), which otherwise
+// look identical to both this matcher and findReferenceEntry.
+const mode = override ? (override.mode === 'sub' ? `sub:${override.subName}|${override.subForm || ''}` : override.mode === 'reduced' ? `reduced-${override.basis || 'line'}` : override.mode) : 'original';
 // Built from the ORIGINAL ingredient's own subs, not the currently-
 // effective `entry` -- once a substitute is active, `entry` IS that
 // substitute, and its own subs are a different list entirely (see
@@ -1516,7 +1620,10 @@ const mode = override ? (override.mode === 'sub' ? `sub:${override.subName}` : o
 // `selected` below, rather than silently falling back to "Use as
 // written" the moment a swap is made.
 const options = [`<option value="original"${mode === 'original' ? ' selected' : ''}>Use as written</option>`]
-.concat((originalEntry.subs || []).map((s) => `<option value="sub:${escapeHtml(s.name)}"${mode === `sub:${s.name}` ? ' selected' : ''}>Substitute: ${escapeHtml(s.name)}${s.note ? ` (${escapeHtml(s.note)})` : ''}</option>`))
+.concat((originalEntry.subs || []).map((s) => {
+const optVal = `sub:${s.name}|${s.form || ''}`;
+return `<option value="${escapeHtml(optVal)}"${mode === optVal ? ' selected' : ''}>Substitute: ${escapeHtml(s.name)}${s.form ? ` (${escapeHtml(s.form)})` : ''}${s.note ? ` (${escapeHtml(s.note)})` : ''}</option>`;
+}))
 // "Use less" needs a real, correctly-scaled quantity to suggest a
 // target FROM -- meaningless on a unit-mismatched line (there's no
 // valid scale to compute against), so it's left out entirely rather
@@ -1533,8 +1640,9 @@ ${override && override.mode === 'reduced' ? `<input type="number" step="any" min
 }
 return `<div style="padding:4px 0;border-top:1px solid var(--line);${dropped ? 'opacity:.55;' : ''}">
 <div style="font-size:12px;">${label} — ${used}</div>
+${dropped ? '' : `<label style="display:flex;align-items:center;gap:4px;margin-top:2px;font-size:11px;font-weight:400;"><input type="checkbox" data-ingdata-optional-toggle="${r.id}" data-ingdata-idx="${i}" ${line.optional ? 'checked' : ''}> Optional</label>`}
 ${flagsNote}
-${chips ? `<div>${chips}</div>` : ''}
+${chips || glycemicChip ? `<div>${chips}${chips && glycemicChip ? ' ' : ''}${glycemicChip}</div>` : ''}
 ${unitMismatchHtml}
 ${!unitMismatchHtml && noQtyNote ? `<div class="settings-note">${escapeHtml(noQtyNote)}</div>` : ''}
 ${overrideHtml}
@@ -1570,7 +1678,7 @@ const entry = findReferenceEntry(line.name, line.form);
 // needsAssessment/ensureReferenceEntry now both skip a userEdited
 // entry outright -- so there's no point offering a link that would
 // silently do nothing; the actual fix is editing the entry directly.
-return entry && !entry.userEdited && (entry.dietaryFlagsStale || entry.unitWeightsStale);
+return entry && !entry.userEdited && (entry.dietaryFlagsStale || entry.unitWeightsStale || entry.glycemicStale);
 });
 }
 
@@ -1586,20 +1694,24 @@ return `<div class="full">
 <button class="overview-panel-toggle" type="button" data-recipe-diet-toggle="${r.id}">${expandedDiet.has(r.id) ? '▾ Hide diet analysis' : '▸ Show diet analysis'}</button>
 ${expandedDiet.has(r.id) ? `${recipeHasStaleReference(r) ? `<div class="settings-note" style="margin-top:6px;">Some ingredients predate dietary-flag checks (kosher/halal/vegetarian/vegan) and/or known unit weights ("medium onion" = how many grams) — <span class="inline-goto-link" data-recipe-analyse="${r.id}">refresh</span> to fill them in.</div>` : ''}
 ${diet.unmatchedLines.length ? `<div class="settings-note" style="margin-top:6px;">Totals below EXCLUDE ${diet.unmatchedLines.length} ingredient${diet.unmatchedLines.length === 1 ? '' : 's'} whose parsed unit doesn't match its reference entry's own basis (never guessed automatically): ${diet.unmatchedLines.map(({ line, entry }) => `${escapeHtml(line.name)} ("${escapeHtml(line.unit)}" vs "${escapeHtml(entry.unitBasis.unit)}")`).join(', ')}. See the ingredient list below to fix the parsed unit, or edit the entry's basis in Ingredient Reference.</div>` : ''}
-<div class="field-block" style="margin-top:6px;">
+${dietInterestOn('fodmap') ? `<div class="field-block" style="margin-top:6px;">
 <span class="field-label">FODMAP (per component) — summed across ingredients${per ? `, per portion (${per})` : ' -- set Servings above for a true per-portion figure; this is the whole-recipe total'}</span>
 <div>${fodmapRowHtml(diet.fodmap, diet.fodmapGrams)}</div>
-</div>
-<div class="field-block" style="margin-top:6px;">
+</div>` : ''}
+${dietInterestOn('diabetic') ? `<div class="field-block" style="margin-top:6px;">
+<span class="field-label">Diabetic — glycemic load${per ? `, per portion (${per})` : ' -- set Servings above for a true per-portion figure; this is the whole-recipe total'} <span class="settings-note">GI x available carbs / 100, summed across ingredients</span></span>
+<div><span class="fodmap-chip level-${diet.glycemicLevel}">glycemic load: ${escapeHtml(diet.glycemicLevel)} (${diet.glycemicLoad < 0.1 ? '<0.1' : diet.glycemicLoad.toFixed(1)})</span></div>
+</div>` : ''}
+${dietInterestOn('allergens') ? `<div class="field-block" style="margin-top:6px;">
 <span class="field-label">Allergens</span>
 <div>${flagListHtml(ALLERGEN_LIST, diet.allergens)}</div>
-</div>
-<div class="field-block" style="margin-top:6px;">
+</div>` : ''}
+${dietInterestOn('dietaryFlags') ? `<div class="field-block" style="margin-top:6px;">
 <span class="field-label">Also worth knowing <span class="settings-note">kosher/halal/vegetarian/vegan-relevant facts, assessed the same way as allergens</span></span>
 <div>${flagListHtml(DIETARY_FLAGS, diet.dietaryFlags)}</div>
-</div>
+</div>` : ''}
 ${recipeIngredientAnalysisHtml(r)}
-<div class="field-block" style="margin-top:6px;">
+${dietInterestOn('macros') ? `<div class="field-block" style="margin-top:6px;">
 <span class="field-label">Macros${per ? ` — total, and per serving (${per})` : ' — recipe total'}</span>
 ${row('Calories', 'calories', ' kcal')}
 ${row('Protein', 'protein', 'g')}
@@ -1609,7 +1721,31 @@ ${row('Fat', 'fat', 'g')}
 ${row('— of which saturates', 'saturates', 'g')}
 ${row('Fibre', 'fibre', 'g')}
 ${row('Salt', 'salt', 'g')}
-</div>
+</div>` : ''}
+${diet.optional.length ? `<div class="field-block full" style="margin-top:6px;">
+<span class="field-label">Optional additions <span class="settings-note">not counted in the totals above -- what each would add if included</span></span>
+${diet.optional.map((o) => {
+const parts = [];
+if (o.macros && dietInterestOn('macros')) parts.push(`${o.macros.calories.toFixed(0)} kcal`);
+if (o.fodmapGrams && dietInterestOn('fodmap')) {
+const worst = FODMAP_COMPONENTS.reduce((w, k) => {
+const lvl = fodmapLevelFromGrams(k, o.fodmapGrams[k], (k === 'fructans' || k === 'gos') ? o.entry.oligoCategory : 'any');
+const rank = { none: 0, low: 1, moderate: 2, high: 3 };
+return rank[lvl] > rank[w] ? lvl : w;
+}, 'none');
+if (worst !== 'none') parts.push(`FODMAP ${worst}`);
+}
+if (o.glycemicLoad != null && dietInterestOn('diabetic')) {
+const level = glycemicLevelFromLoad(o.glycemicLoad);
+if (level !== 'none') parts.push(`glycemic ${level}`);
+}
+if (dietInterestOn('allergens')) {
+const newAllergens = o.allergens.filter((a) => !diet.allergens.includes(a));
+if (newAllergens.length) parts.push(`introduces: ${newAllergens.join(', ')}`);
+}
+return `<div class="settings-note">${escapeHtml(o.line.name)}${o.line.form ? ` (${escapeHtml(o.line.form)})` : ''}${parts.length ? ` — if included: ${parts.map(escapeHtml).join(', ')}` : ' — nothing notable'}</div>`;
+}).join('')}
+</div>` : ''}
 ${changes.length ? `<div class="field-block full" style="margin-top:6px;">
 <span class="field-label">Make it like this</span>
 <div class="settings-note">The substitute/reduce/drop choices above are exploration only -- nothing is saved to this recipe until you do this:</div>
@@ -1658,6 +1794,9 @@ ${macroInput('Fibre (g)', 'fibre')}${macroInput('Salt (g)', 'salt')}
 ${FODMAP_COMPONENTS.map(fodmapInput).join('')}
 </div>
 <div class="settings-note">Grams of the actual carbohydrate per ${e.unitBasis.quantity}${escapeHtml(e.unitBasis.unit)} -- e.g. tinned chickpeas typically hold less GOS than dried/cooked, since some leaches into the tinning liquid.</div>
+<label>Glycemic Index <span class="settings-note">glucose = 100 reference -- leave blank if this ingredient has no meaningful digestible carbohydrate (meat, fish, eggs, fats/oils, most herbs/spices)</span>
+<input type="number" step="any" min="0" max="110" data-ref-glycemic value="${e.glycemicIndex != null ? e.glycemicIndex : ''}" placeholder="n/a">
+</label>
 <label class="full">Allergens present<div class="tag-editor">${ALLERGEN_LIST.map((a) => `<span class="pick-chip${e.allergens.includes(a) ? ' active' : ''}" data-ref-allergen="${escapeHtml(a)}">${escapeHtml(a)}</span>`).join('')}</div></label>
 <label class="full">Also worth knowing <span class="settings-note">kosher/halal/vegetarian/vegan-relevant facts, checked the same way as allergens</span>
 <div class="tag-editor">${DIETARY_FLAGS.map((a) => `<span class="pick-chip${e.dietaryFlags.includes(a) ? ' active' : ''}" data-ref-dietary="${escapeHtml(a)}">${escapeHtml(a)}</span>`).join('')}</div></label>
@@ -1718,10 +1857,11 @@ ${[...data.ingredientReference].filter((o) => o.id !== e.id).sort((a, b) => a.na
 return `<div class="idea-row" data-ingredient-ref-row="${e.id}">
 <div class="idea-top"><span class="idea-title">${escapeHtml(e.name)}${e.form ? ` (${escapeHtml(e.form)})` : ''}</span>
 <span class="idea-date">per ${e.unitBasis.quantity}${escapeHtml(e.unitBasis.unit)}${e.userEdited ? ' · edited' : ''}</span></div>
-<div class="settings-note">Cal ${e.nutrition.calories} · Protein ${e.nutrition.protein}g · Carbs ${e.nutrition.carbs}g · Fat ${e.nutrition.fat}g · Fibre ${e.nutrition.fibre}g · Salt ${e.nutrition.salt}g</div>
-<div>${fodmapRowHtml(entryFodmapLevels(e), e.fodmapGrams)}</div>
-${e.allergens.length ? `<div class="settings-note">Allergens: ${e.allergens.map(escapeHtml).join(', ')}</div>` : ''}
-${e.dietaryFlags.length ? `<div class="settings-note">Also: ${e.dietaryFlags.map(escapeHtml).join(', ')}</div>` : ''}
+${dietInterestOn('macros') ? `<div class="settings-note">Cal ${e.nutrition.calories} · Protein ${e.nutrition.protein}g · Carbs ${e.nutrition.carbs}g · Fat ${e.nutrition.fat}g · Fibre ${e.nutrition.fibre}g · Salt ${e.nutrition.salt}g</div>` : ''}
+${dietInterestOn('fodmap') ? `<div>${fodmapRowHtml(entryFodmapLevels(e), e.fodmapGrams)}</div>` : ''}
+${dietInterestOn('diabetic') ? `<div class="settings-note">Glycemic Index: ${e.glycemicIndex != null ? e.glycemicIndex : 'n/a'}</div>` : ''}
+${dietInterestOn('allergens') && e.allergens.length ? `<div class="settings-note">Allergens: ${e.allergens.map(escapeHtml).join(', ')}</div>` : ''}
+${dietInterestOn('dietaryFlags') && e.dietaryFlags.length ? `<div class="settings-note">Also: ${e.dietaryFlags.map(escapeHtml).join(', ')}</div>` : ''}
 ${e.subs.length ? `<div class="settings-note">Substitutes: ${e.subs.map((s) => `${escapeHtml(s.name)}${s.note ? ` (${escapeHtml(s.note)})` : ''}`).join('; ')}</div>` : ''}
 ${unitWeightKeys.length ? `<div class="settings-note">Also scales for: ${unitWeightKeys.sort().map((u) => `${escapeHtml(u)} (${e.unitWeights[u]}g)`).join(', ')}</div>` : ''}
 ${Object.keys(e.unitBasisRatios).length ? `<div class="settings-note">Also scales for: ${Object.keys(e.unitBasisRatios).sort().map((u) => `${escapeHtml(u)} (1 = ${e.unitBasisRatios[u]} ${escapeHtml(e.unitBasis.unit)})`).join(', ')}</div>` : ''}
@@ -1732,6 +1872,37 @@ ${Object.keys(e.unitBasisRatios).length ? `<div class="settings-note">Also scale
 </div>
 ${mergePicker}
 </div>`;
+}
+
+// Which diet-analysis sections actually matter to this household -- see
+// DIET_INTERESTS/dietInterestOn. Lives on the Menu tab, right next to
+// what it declutters, same collapsed-by-default pattern as Ingredient
+// Reference -- unlike that panel, this one is never hidden entirely
+// (there's always something to set here, even before any recipe's ever
+// been analysed).
+function renderDietInterests() {
+const el = document.getElementById('diet-interests-content');
+if (!el) return;
+const toggleHtml = `<button class="overview-panel-toggle" type="button" id="diet-interests-toggle">${dietInterestsCollapsed ? '▸ Show diet interests' : '▾ Hide diet interests'}</button>`;
+el.innerHTML = dietInterestsCollapsed ? toggleHtml
+: `${toggleHtml}<div class="settings-note" style="margin-top:6px;">Which sections show on a recipe's diet analysis -- every ingredient still gets fully assessed and cached regardless, so turning one back on shows what was there all along, no re-checking needed.</div>
+<div class="tag-editor" style="margin-top:6px;">${DIET_INTERESTS.map((d) => `<span class="pick-chip${dietInterestOn(d.key) ? ' active' : ''}" data-diet-interest-toggle="${d.key}">${escapeHtml(d.label)}</span>`).join('')}</div>`;
+document.getElementById('diet-interests-toggle').addEventListener('click', () => {
+dietInterestsCollapsed = !dietInterestsCollapsed;
+renderDietInterests();
+});
+el.querySelectorAll('[data-diet-interest-toggle]').forEach((chip) => {
+chip.addEventListener('click', () => {
+const key = chip.dataset.dietInterestToggle;
+data.prefs.dietInterests = dietInterestOn(key)
+? data.prefs.dietInterests.filter((k) => k !== key)
+: [...data.prefs.dietInterests, key];
+renderDietInterests();
+renderRecipes();
+renderIngredientReference();
+queueSave();
+});
+});
 }
 
 function renderIngredientReference() {
@@ -1907,6 +2078,16 @@ e.fodmapGrams[input.dataset.refFodmap] = Number.isFinite(v) && v >= 0 ? v : 0;
 });
 const oligoSelect = row.querySelector('[data-ref-oligo]');
 if (oligoSelect) e.oligoCategory = OLIGO_CATEGORIES.includes(oligoSelect.value) ? oligoSelect.value : 'veg_fruit';
+const glycemicInput = row.querySelector('[data-ref-glycemic]');
+if (glycemicInput) {
+// Blank means "not applicable" (meat, oil, most spices) -- a real,
+// meaningful value in its own right, not "unset" -- so an empty field
+// saves as null, not 0 or a leftover previous number.
+const g = parseFloat(glycemicInput.value);
+e.glycemicIndex = (glycemicInput.value.trim() !== '' && Number.isFinite(g) && g >= 0) ? g : null;
+delete e.glycemicStale;
+e.glycemicAssessedAt = new Date().toISOString();
+}
 e.allergens = [...row.querySelectorAll('[data-ref-allergen].active')].map((chip) => chip.dataset.refAllergen);
 e.dietaryFlags = [...row.querySelectorAll('[data-ref-dietary].active')].map((chip) => chip.dataset.refDietary);
 // Saving this form IS the real check dietaryFlagsStale exists to
@@ -2273,6 +2454,17 @@ renderRecipes();
 queueSave();
 });
 });
+el.querySelectorAll('[data-ingdata-optional-toggle]').forEach((checkbox) => {
+checkbox.addEventListener('change', () => {
+const r = data.recipes.find((x) => x.id === checkbox.dataset.ingdataOptionalToggle);
+if (!r) return;
+const line = r.ingredientData[parseInt(checkbox.dataset.ingdataIdx, 10)];
+if (!line) return;
+line.optional = checkbox.checked;
+renderRecipes();
+queueSave();
+});
+});
 el.querySelectorAll('[data-line-override-mode]').forEach((select) => {
 select.addEventListener('change', async () => {
 const recipeId = select.dataset.lineRecipe;
@@ -2313,19 +2505,27 @@ renderRecipes();
 return;
 }
 if (val.startsWith('sub:')) {
-const subName = val.slice(4);
-map.set(idx, { mode: 'sub', subName });
+const rest = val.slice(4);
+const sepIdx = rest.indexOf('|');
+// `subForm` distinguishes a same-NAME, different-preparation
+// substitute (e.g. "pasta" plain vs. "pasta" cooked-and-cooled -- the
+// resistant-starch diabetic swap) from the original ingredient itself
+// -- without it, both would resolve to the identical reference entry
+// (form ''), and picking the sub would silently do nothing.
+const subName = sepIdx >= 0 ? rest.slice(0, sepIdx) : rest;
+const subForm = sepIdx >= 0 ? rest.slice(sepIdx + 1) : '';
+map.set(idx, { mode: 'sub', subName, subForm });
 // Flipping to a substitute is pure arithmetic over cached figures
 // (computeRecipeDiet) ONLY once the substitute has its OWN reference
 // entry -- the first time a given substitute is picked, nothing has
 // assessed IT yet (only the original ingredient gets assessed by
 // "Analyse ingredients"). Same busy-indicator treatment as Parse/
 // Analyse -- this is a real AI call the first time, not instant.
-if (needsAssessment(subName, '')) {
-busyIngredientAction.set(recipeId, `Assessing substitute: ${subName}…`);
+if (needsAssessment(subName, subForm)) {
+busyIngredientAction.set(recipeId, `Assessing substitute: ${subName}${subForm ? ` (${subForm})` : ''}…`);
 renderRecipes();
 try {
-await ensureReferenceEntry(subName, '');
+await ensureReferenceEntry(subName, subForm);
 // The original ingredient's own assessment may already have stated
 // a practical ratio for exactly this substitute (e.g. "1 tbsp
 // garlic-infused oil replaces 2 cloves garlic") -- apply it now, on
@@ -2336,8 +2536,8 @@ await ensureReferenceEntry(subName, '');
 const line = r.ingredientData[idx];
 const originalEntry = line && findReferenceEntry(line.name, line.form);
 const subRecord = originalEntry && Array.isArray(originalEntry.subs)
-? originalEntry.subs.find((s) => s.name === subName) : null;
-const substituteEntry = findReferenceEntry(subName, '');
+? originalEntry.subs.find((s) => s.name === subName && (s.form || '') === subForm) : null;
+const substituteEntry = findReferenceEntry(subName, subForm);
 if (subRecord && substituteEntry) applySubstitutionRatioHint(subRecord, substituteEntry);
 } catch (err) {
 setStatus(err instanceof MissingKeyError ? 'Add an Anthropic API key in Settings first.' : `Couldn't assess that substitute: ${err.message || err}`);
@@ -2479,6 +2679,7 @@ initCapture();
 initRecipeRatingCategoriesSettings();
 renderReview();
 renderRecipes();
+renderDietInterests();
 renderIngredientReference();
 await initRecipeOverviewPrefs();
 renderRecipeOverview();

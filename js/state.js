@@ -63,6 +63,13 @@ calendarEventCount: 1,
 mailResultCount: 5,
 airbnbCalendarId: '', // which Google Calendar "Push to Google Calendar" targets -- picked once, remembered
 switchOffersCheckedAt: '', // ISO date of the last bank-switch-offers scan -- drives the 30-day nudge, see js/features/switchoffers.js
+// Which diet-analysis sections actually matter to this household --
+// purely a UI declutter (see recipes.js's dietInterestOn): every
+// ingredient still gets fully assessed and cached regardless, so
+// turning one back on needs no new AI call. Defaults to ALL of them --
+// a recipe nobody's touched this preference on looks exactly as it
+// always has, same rule the whole diet-analysis feature follows.
+dietInterests: ['macros', 'fodmap', 'diabetic', 'allergens', 'dietaryFlags'],
 };
 
 // Each mail search is one row in Settings: a kind, its value, and its own
@@ -1182,6 +1189,11 @@ if (typeof r.servings !== 'number' && r.servings !== null) r.servings = null;
 // request rather than hand-edited, so it's fine for it to just be
 // blank until "Parse ingredients" is used for the first time.
 if (!Array.isArray(r.ingredientData)) r.ingredientData = [];
+// Whether this line (bread served alongside a stew, say) should be left
+// OUT of the recipe's own totals -- see recipes.js's computeRecipeDiet.
+// Defaults false for any line parsed before this existed, same as any
+// other structured-parse field that's genuinely optional to state.
+r.ingredientData.forEach((line) => { if (typeof line.optional !== 'boolean') line.optional = false; });
 if (typeof r.ingredientsParsedAt !== 'string') r.ingredientsParsedAt = '';
 if (typeof r.ingredientsSignature !== 'string') r.ingredientsSignature = '';
 // Set only on a recipe created via "Save as a new recipe with these
@@ -1239,6 +1251,13 @@ if (!e.unitWeightsAssessedAt) e.unitWeightsStale = true;
 // mismatch (see recipes.js's resolveUnitMismatch), so an empty object
 // here always just means "none needed yet", not "never checked".
 if (!e.unitBasisRatios || typeof e.unitBasisRatios !== 'object') e.unitBasisRatios = {};
+// Glycemic Index (diabetic relevance) -- newer still, same staleness
+// pattern as dietaryFlags/unitWeights above: an entry that predates
+// this has no real figure to fall back on (glycemicIndex could
+// genuinely be `null` -- "not applicable" -- so an absent value can't
+// be told apart from "never checked" any other way), so it's flagged
+// for the same lazy re-check next time the ingredient is used.
+if (!e.glycemicAssessedAt) e.glycemicStale = true;
 });
 // User-controlled "these are the same ingredient" merges (recipes.js's
 // mergeIngredientEntries) -- e.g. "eggplant" and "aubergine", or "brown

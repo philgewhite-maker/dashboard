@@ -797,13 +797,14 @@ const INGREDIENT_PARSE_MAX_TOKENS = 2000;
 function ingredientParsePrompt(lines) {
 return 'Parse each of these recipe ingredient lines into a structured object. '
 + 'Return ONLY a JSON array, no other text, no markdown fences, exactly one object per input line IN THE SAME ORDER: '
-+ '[{"name":"", "form":"", "quantity":0, "unit":"", "notes":"", "statedGrams":null}, ...]. '
++ '[{"name":"", "form":"", "quantity":0, "unit":"", "notes":"", "statedGrams":null, "optional":false}, ...]. '
 + 'name: the canonical, singular ingredient name (e.g. "wheat flour" not "2 cups plain flour"; "chickpeas" not "1 tin chickpeas, drained"). '
 + 'form: a preparation/state ONLY when it plausibly changes nutrition or FODMAP content (e.g. "tinned", "dried", "fresh", "frozen", "cooked") -- "" when it doesn\'t apply or isn\'t stated. '
 + 'quantity: a plain number in `unit`, normalised toward grams or millilitres where sensible, otherwise a countable unit the line itself used (e.g. "clove", "medium", "tbsp", "tsp"); null if the amount is too vague to give a number ("a pinch", "to taste", "a splash"). '
 + 'unit: the unit `quantity` is in, or "" if quantity is null. '
 + 'notes: anything else from the line worth keeping (e.g. "drained", "minced") that isn\'t the name/quantity/unit itself, or "" if none. '
-+ 'statedGrams: ONLY when this line\'s own text directly states a GRAM figure for this same quantity (e.g. "1 stick (5g) cinnamon" -> 5; "2 tbsp (30g) honey" -> 30; "400g tin chickpeas (240g drained)" -> 240, with quantity/unit describing whichever amount is the ingredient\'s actual usable quantity) -- the number of grams stated, for the FULL quantity above (not divided down to one unit). Ignore a stated ML/volume figure (a different measure, not grams) -- leave null unless a genuine gram figure is written in the line itself; never estimate or invent one here.\n\nLines:\n'
++ 'statedGrams: ONLY when this line\'s own text directly states a GRAM figure for this same quantity (e.g. "1 stick (5g) cinnamon" -> 5; "2 tbsp (30g) honey" -> 30; "400g tin chickpeas (240g drained)" -> 240, with quantity/unit describing whichever amount is the ingredient\'s actual usable quantity) -- the number of grams stated, for the FULL quantity above (not divided down to one unit). Ignore a stated ML/volume figure (a different measure, not grams) -- leave null unless a genuine gram figure is written in the line itself; never estimate or invent one here. '
++ 'optional: true ONLY when the line\'s own wording marks it as not really part of the dish itself -- "to serve", "optional", "for garnish", "on the side", "if desired" and similar; false for anything actually cooked into or making up the dish, including a normal garnish that\'s always used (a squeeze of lemon stirred through isn\'t optional just because it\'s a small amount). This is just a starting guess -- easy to correct by hand afterward, so when genuinely unsure, false.\n\nLines:\n'
 + lines.map((l, i) => `${i + 1}. ${l}`).join('\n');
 }
 function normaliseIngredientParse(raw, expectedCount) {
@@ -819,6 +820,7 @@ quantity: (typeof item.quantity === 'number' && isFinite(item.quantity)) ? item.
 unit: String(item.unit || '').trim(),
 notes: String(item.notes || '').trim(),
 statedGrams,
+optional: item.optional === true,
 });
 }
 return out;
@@ -890,6 +892,21 @@ if (grams < highMin) return 'moderate';
 return 'high';
 }
 
+// Standard published Glycemic Load bands (University of Sydney GI
+// Database convention), PER PORTION -- same "fixed threshold against a
+// summed real quantity" shape as FODMAP_THRESHOLDS_G above, not a
+// per-ingredient verdict: glycemic load genuinely is additive across a
+// recipe's ingredients (GL = GI x available-carbohydrate-grams / 100),
+// so the level a dish reads at has to come from the SUM, not the worst
+// single ingredient.
+const GLYCEMIC_LOAD_THRESHOLDS = { low: 10, high: 20 };
+function glycemicLevelFromLoad(load) {
+if (!(load > 0)) return 'none';
+if (load <= GLYCEMIC_LOAD_THRESHOLDS.low) return 'low';
+if (load < GLYCEMIC_LOAD_THRESHOLDS.high) return 'moderate';
+return 'high';
+}
+
 const INGREDIENT_ASSESS_MAX_TOKENS = 1200;
 function ingredientAssessPrompt(name, form) {
 return `Assess this single food ingredient: "${name}"${form ? ` (${form})` : ''}. Return ONLY a JSON object, no other text, no markdown fences: `
@@ -897,15 +914,17 @@ return `Assess this single food ingredient: "${name}"${form ? ` (${form})` : ''}
 + '"nutrition":{"calories":0,"protein":0,"carbs":0,"sugars":0,"fat":0,"saturates":0,"fibre":0,"salt":0}, '
 + '"oligoCategory":"veg_fruit", '
 + '"fodmapGrams":{"fructans":0,"gos":0,"lactose":0,"excessFructose":0,"polyols":0}, '
++ '"glycemicIndex":null, '
 + '"allergens":[], "dietaryFlags":[], "unitWeights":{}, "subs":[{"name":"","note":"","subQuantity":0,"subUnit":"","origQuantity":0,"origUnit":""}]}. '
 + 'unitBasis: pick an amount close to how much of this a person actually uses in ONE dish, not a fixed default -- {"quantity":100,"unit":"g"} for a vegetable, meat, or other ingredient normally used in bulk; a countable unit like {"quantity":1,"unit":"clove"} / {"quantity":1,"unit":"medium"} for produce typically counted rather than weighed; but for anything used in small, potent amounts -- a spice, herb, stock cube, extract, seasoning -- use ITS typical amount instead ({"quantity":1,"unit":"tsp"}, {"quantity":1,"unit":"clove"}, {"quantity":1,"unit":"cube"}...), never 100g of something no dish would ever contain 100g of. '
 + 'nutrition: standard nutrition-label figures, PER unitBasis. '
 + `oligoCategory: which published FODMAP threshold table this food's fructans/GOS are judged against -- "grain_legume_nut" for a grain, legume, pulse, or nut/seed; "veg_fruit" for a vegetable or fruit (use "veg_fruit" for anything that's neither, e.g. a spice, dairy, or meat). `
 + 'fodmapGrams: how many GRAMS OF THE ACTUAL CARBOHYDRATE (fructans, GOS, lactose, excess fructose, total polyols) this ingredient contains PER unitBasis -- NOT a low/moderate/high rating, an actual gram figure (can be a decimal like 0.15, or 0 if genuinely absent) -- these get compared against fixed published thresholds separately, so give your best real estimate of the amount present, not a category. '
++ 'glycemicIndex: this food\'s standard Glycemic Index (glucose = 100 reference), as a plain number 0-110, or null if it has no meaningful digestible carbohydrate at all (meat, fish, eggs, fats/oils, most herbs/spices in typical amounts) -- never force a number onto something GI genuinely doesn\'t apply to, and never guess one just to avoid null. '
 + `allergens: which of these EXACT strings this ingredient contains, as a subset of ${JSON.stringify(ALLERGEN_LIST)} -- [] if none apply. `
 + `dietaryFlags: which of these EXACT strings apply, as a subset of ${JSON.stringify(DIETARY_FLAGS)} -- e.g. "Pork" for bacon/chorizo/lard, "Alcohol" for wine/beer/spirits used as an ingredient (not a trace that fully cooks off), "Meat (non-vegetarian)" for any meat/poultry INCLUDING one already covered by Pork, "Animal product (non-vegan)" for meat, fish, dairy, eggs, or honey -- [] if none apply. `
 + 'unitWeights: OTHER units a DIFFERENT recipe might reasonably use for this SAME ingredient instead of your own unitBasis above -- e.g. if unitBasis is 100g, give {"medium":110,"large":150,"small":70} for an onion, or {"tsp":5,"tbsp":15} for a paste/puree, or {"clove":5} for garlic -- each value is how many GRAMS ONE of that unit weighs. This is what lets a recipe parsed as "1 medium onion" or "2 tsp tomato puree" be scaled correctly even though it wasn\'t assessed in that exact unit -- include 2-4 realistic alternates a recipe might plausibly use, or {} if this ingredient is essentially only ever measured the one way (e.g. already unitBasis itself, or something with no other sensible unit). '
-+ 'subs: 1-3 common substitutes for this ingredient (useful for a gluten-free, dairy-free, low-FODMAP, kosher/halal/vegetarian/vegan, or otherwise restricted kitchen where relevant), each a short note on when/why -- [] if nothing sensible applies. ALSO give the practical substitution ratio whenever there is a clear one: subQuantity of subUnit (the SUBSTITUTE) that replaces origQuantity of origUnit (THIS ingredient) -- e.g. "1 tbsp garlic-infused oil replaces 2 cloves of garlic" -> subQuantity:1, subUnit:"tbsp", origQuantity:2, origUnit:"clove". Leave subQuantity/origQuantity as 0 (and subUnit/origUnit as "") when there\'s no clean amount-for-amount swap (e.g. "a tiny pinch fried in oil" has no real ratio) -- never invent one just to fill the field. '
++ 'subs: 1-3 common substitutes for this ingredient (useful for a gluten-free, dairy-free, low-FODMAP, diabetic/low-glycemic, kosher/halal/vegetarian/vegan, or otherwise restricted kitchen where relevant), each a short note on when/why -- [] if nothing sensible applies. Include a SAME-ingredient, different-PREPARATION substitute when it materially changes something worth knowing -- most notably cooling (then optionally reheating) a cooked starch like pasta, rice, or potatoes, which measurably raises resistant starch and lowers its effective glycemic impact: give that a `name` matching this same ingredient\'s own name (e.g. "pasta") with a `form` describing the prep (e.g. "cooked and cooled"), so it gets assessed as its own reference entry with its own lower glycemicIndex, same as any other substitute. ALSO give the practical substitution ratio whenever there is a clear one: subQuantity of subUnit (the SUBSTITUTE) that replaces origQuantity of origUnit (THIS ingredient) -- e.g. "1 tbsp garlic-infused oil replaces 2 cloves of garlic" -> subQuantity:1, subUnit:"tbsp", origQuantity:2, origUnit:"clove" (a same-ingredient prep swap like the cooled-pasta case above is typically a plain 1:1 -- same amount, same unit, just prepared differently). Leave subQuantity/origQuantity as 0 (and subUnit/origUnit as "") when there\'s no clean amount-for-amount swap (e.g. "a tiny pinch fried in oil" has no real ratio) -- never invent one just to fill the field. '
 + 'Give a reasonable best estimate -- this is a starting point a person can correct, not a lab measurement.';
 }
 function normaliseIngredientAssess(raw) {
@@ -940,6 +959,11 @@ fibre: numOr0(nutrition.fibre), salt: numOr0(nutrition.salt),
 // threshold row always being the "multiple FODMAPs present" one.
 oligoCategory: OLIGO_CATEGORIES.includes(r.oligoCategory) ? r.oligoCategory : 'veg_fruit',
 fodmapGrams,
+// null means "not applicable" (meat, oil, most herbs/spices) -- kept
+// distinct from 0, which would wrongly claim glucose-flat behaviour for
+// something that just wasn't assessed. Only a genuine in-range number
+// overrides that default.
+glycemicIndex: (typeof r.glycemicIndex === 'number' && isFinite(r.glycemicIndex) && r.glycemicIndex >= 0) ? r.glycemicIndex : null,
 allergens: Array.isArray(r.allergens) ? r.allergens.filter((a) => ALLERGEN_LIST.includes(a)) : [],
 dietaryFlags: Array.isArray(r.dietaryFlags) ? r.dietaryFlags.filter((f) => DIETARY_FLAGS.includes(f)) : [],
 // No id assigned here -- ai.js stays a pure call-and-normalise layer;
@@ -1441,4 +1465,5 @@ identifyCountry, extractWellnessScreenshot,
 extractTripScreenshot, extractTripLegFromEmail,
 parseIngredients, assessIngredient, ALLERGEN_LIST, DIETARY_FLAGS, FODMAP_COMPONENTS, FODMAP_LEVELS,
 FODMAP_THRESHOLDS_G, OLIGO_CATEGORIES, fodmapLevelFromGrams, regenerateRecipeVariant, assessUnitWeight, assessUnitRatio,
+GLYCEMIC_LOAD_THRESHOLDS, glycemicLevelFromLoad,
 };
