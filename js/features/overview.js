@@ -30,12 +30,18 @@ let facets = []; // [{title, key}]
 // key (never touched) and an explicit `true` (chose to open, then closed
 // again) are told apart the same way.
 let panelCollapsed = true;
+// How every dimension's chips are ordered -- 'count' (busiest first, alpha
+// tiebreak) or 'alpha' (A-Z, ties impossible). Device-local like the
+// other display preferences above, not synced -- purely how you like to
+// scan the list on THIS screen.
+let chipSort = 'count';
 
 async function initOverviewPrefs() {
 const settings = await getLocalSettings();
 collapsed = settings.overviewCollapsed || {};
 drillDown = !!settings.overviewDrillDown;
 panelCollapsed = settings.overviewPanelCollapsed !== false;
+chipSort = settings.overviewChipSort === 'alpha' ? 'alpha' : 'count';
 }
 
 // Uses the derived current age, so someone recorded at 29 two years ago is
@@ -112,12 +118,14 @@ return facets.some((f) => f.title === title && f.key === key);
 }
 
 function overviewDimension(dim, { groups, none }) {
-// Count descending, alphabetical tiebreak -- same rule tagcleanup.js's
-// own count-sorted list already uses. Without the tiebreak, a run of
-// same-count chips (common once a dimension has more than a couple of
-// singletons) sat in Object.keys' arbitrary insertion order instead of
-// anywhere a person would expect to find one.
-const keys = Object.keys(groups).sort((a, b) => groups[b].length - groups[a].length || a.localeCompare(b));
+// 'count': busiest first, alphabetical tiebreak -- same rule
+// tagcleanup.js's own count-sorted list already uses. Without the
+// tiebreak, a run of same-count chips (common once a dimension has more
+// than a couple of singletons) sat in Object.keys' arbitrary insertion
+// order instead of anywhere a person would expect to find one.
+// 'alpha': A-Z regardless of count -- for finding one specific chip in
+// a long dimension (a City list, say) rather than scanning by size.
+const keys = Object.keys(groups).sort((a, b) => (chipSort === 'alpha' ? a.localeCompare(b) : groups[b].length - groups[a].length || a.localeCompare(b)));
 const activeHere = facets.filter((f) => f.title === dim.title);
 if (keys.length === 0 && none.length === 0 && activeHere.length === 0) return '';
 const isCollapsed = !!collapsed[dim.title];
@@ -202,6 +210,7 @@ const dims = dimensions();
 
 const modeHtml = `<div class="overview-mode">
 <label><input type="checkbox" id="drilldown-toggle"${drillDown ? ' checked' : ''}> Drill down — chips combine and filter each other</label>
+<label>Sort chips <select id="overview-chip-sort"><option value="count"${chipSort === 'count' ? ' selected' : ''}>By count</option><option value="alpha"${chipSort === 'alpha' ? ' selected' : ''}>A–Z</option></select></label>
 </div>`;
 
 const sections = dims.map((dim) => {
@@ -221,6 +230,12 @@ facets = [];
 setLocalSetting('overviewDrillDown', drillDown);
 renderOverview();
 applyToList();
+});
+
+document.getElementById('overview-chip-sort').addEventListener('change', (e) => {
+chipSort = e.target.value === 'alpha' ? 'alpha' : 'count';
+setLocalSetting('overviewChipSort', chipSort);
+renderOverview();
 });
 
 el.querySelectorAll('[data-drop-facet]').forEach((pill) => {

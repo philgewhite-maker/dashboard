@@ -239,6 +239,10 @@ let activeTagFilter = null; // a tag string, or null for "All"
 // empty lastMade.
 let activeMadeFilter = null;
 let recipeOverviewCollapsed = true;
+// How the Tags chips below are ordered -- 'count' (busiest first,
+// alphabetical tiebreak) or 'alpha' (A-Z) -- device-local, same as
+// recipeOverviewCollapsed above.
+let recipeOverviewChipSort = 'count';
 // Ingredient-reference panel (see renderIngredientReference) -- same collapse-
 // and-remember pattern as recipeOverviewCollapsed, one flag for the
 // whole panel rather than per-entry.
@@ -325,6 +329,7 @@ const FODMAP_OPTIONS = ['Low-FODMAP', 'Reduced-FODMAP', 'High-FODMAP'];
 async function initRecipeOverviewPrefs() {
 const settings = await getLocalSettings();
 recipeOverviewCollapsed = settings.recipeOverviewPanelCollapsed !== false;
+recipeOverviewChipSort = settings.recipeOverviewChipSort === 'alpha' ? 'alpha' : 'count';
 }
 
 // Mirrors Connections Overview's own shape (collapsible panel, clickable
@@ -354,12 +359,14 @@ const madeChips = [
 
 const tagCounts = {};
 data.recipes.forEach((r) => (r.tags || []).forEach((t) => { tagCounts[t] = (tagCounts[t] || 0) + 1; }));
-const tagKeys = Object.keys(tagCounts).sort((a, b) => tagCounts[b] - tagCounts[a] || a.localeCompare(b));
+const tagKeys = Object.keys(tagCounts).sort((a, b) => (recipeOverviewChipSort === 'alpha' ? a.localeCompare(b) : tagCounts[b] - tagCounts[a] || a.localeCompare(b)));
 const tagChips = tagKeys.map((t) => `<button class="overview-chip${activeTagFilter === t ? ' active' : ''}" type="button" data-recipe-overview-tag="${escapeHtml(t)}">${escapeHtml(t)} (${tagCounts[t]})</button>`).join('');
+const sortHtml = tagChips ? `<label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:7px;margin-top:6px;">Sort tags <select id="recipe-overview-chip-sort"><option value="count"${recipeOverviewChipSort === 'count' ? ' selected' : ''}>By count</option><option value="alpha"${recipeOverviewChipSort === 'alpha' ? ' selected' : ''}>A–Z</option></select></label>` : '';
 
 el.innerHTML = `${toggleHtml}
 ${madeChips ? `<div class="overview-group"><span class="field-label">Made</span><div class="overview-chips">${madeChips}</div></div>` : ''}
 ${tagChips ? `<div class="overview-group"><span class="field-label">Tags</span><div class="overview-chips">${tagChips}</div></div>` : ''}
+${sortHtml}
 ${!madeChips && !tagChips ? '<div class="settings-note" style="margin-top:8px;">Add a few recipes (and some tags) to see them grouped here.</div>' : ''}`;
 
 document.getElementById('recipe-overview-toggle').addEventListener('click', () => {
@@ -367,6 +374,14 @@ recipeOverviewCollapsed = true;
 setLocalSetting('recipeOverviewPanelCollapsed', true);
 renderRecipeOverview();
 });
+const chipSortSelect = document.getElementById('recipe-overview-chip-sort');
+if (chipSortSelect) {
+chipSortSelect.addEventListener('change', (e) => {
+recipeOverviewChipSort = e.target.value === 'alpha' ? 'alpha' : 'count';
+setLocalSetting('recipeOverviewChipSort', recipeOverviewChipSort);
+renderRecipeOverview();
+});
+}
 el.querySelectorAll('[data-recipe-overview-made]').forEach((btn) => {
 btn.addEventListener('click', () => {
 const key = btn.dataset.recipeOverviewMade;
