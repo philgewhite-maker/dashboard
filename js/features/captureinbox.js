@@ -40,7 +40,7 @@
 // that can quietly grow apart.
 import { data, queueSave, blankCaptureBatch } from '../state.js';
 import { photoDelete } from '../db.js';
-import { todayStr, escapeHtml, hydratePhotoBackgrounds, resizeImageToBlob, scrollAndFlash } from '../utils.js';
+import { todayStr, escapeHtml, hydratePhotoBackgrounds, resizeImageToBlob, scrollAndFlash, looksLikeHeic, sniffsAsHeic } from '../utils.js';
 import { storePhoto, uploadAttachment, deleteAttachment, fetchAttachment, openAttachment, formatBytes } from '../files.js';
 import { looksLikeRenphoCsv, parseRenphoCsv, mergeRenphoDaily, looksLikeHrvCsv } from './renpho.js';
 import { legTargetPickerHtml, bindLegTargetPicker, readLegTargetPicker, applyLegExtraction } from './travel.js';
@@ -53,6 +53,15 @@ import { legTargetPickerHtml, bindLegTargetPicker, readLegTargetPicker, applyLeg
 // images, since that's the one case common enough to be worth the shortcut.
 async function captureItemKind(file) {
 if ((file.type || '').startsWith('image/')) return 'photo';
+// A HEIC/HEIF share is exactly the case the MIME-type shortcut above
+// misses -- Android is inconsistent about what type it attaches to a
+// share, and a HEIC file commonly arrives as "application/octet-stream"
+// or with no type at all (see looksLikeHeic's own comment). Without
+// this, one landed as a plain attachment (a bare download link) instead
+// of a photo -- no thumbnail, and none of the HEIC-to-JPEG conversion
+// the real photo path (resizeImageToBlob -> ensureBrowserReadableImage)
+// already handles. Confirmed live.
+if (looksLikeHeic(file) || await sniffsAsHeic(file)) return 'photo';
 try {
 const head = await file.slice(0, 300).text();
 if (looksLikeRenphoCsv(head)) return 'renpho-csv';
@@ -305,7 +314,7 @@ const sourceLabel = b.source?.kind === 'share' ? (b.source.label || 'Shared from
 const selected = selectionFor(b.id, photoItems);
 const selectedCount = photoItems.filter((it) => selected.has(it.id)).length;
 return `<div class="alloc-card" data-inbox-batch="${b.id}">
-<div class="alloc-title">${escapeHtml(b.label || 'Captured batch')}</div>
+<input type="text" class="alloc-title" autocomplete="off" data-inbox-label="${b.id}" value="${escapeHtml(b.label || 'Captured batch')}" placeholder="Captured batch">
 ${b.notes ? `<div class="alloc-notes">${escapeHtml(b.notes)}</div>` : ''}
 <div class="task-source">from ${escapeHtml(sourceLabel)} · ${photoItems.length} photo${photoItems.length === 1 ? '' : 's'}${fileItems.length ? `, ${fileItems.length} file${fileItems.length === 1 ? '' : 's'}` : ''}${photoItems.length > 1 ? ' — tick who belongs together, e.g. a profile screenshot plus that person\'s loose photos, then send that group' : ''}</div>
 ${photoItems.length ? `<div class="task-photos">${photoItems.map((it) => `<label class="gallery-thumb${selected.has(it.id) ? ' selected' : ''}" title="Tap to select">
@@ -368,6 +377,22 @@ bindCaptureInbox(el);
 }
 
 function bindCaptureInbox(root) {
+// `change` (fires on blur/Enter), not `input` -- a full renderCaptureInbox()
+// on every keystroke would re-hydrate every thumbnail in the panel and
+// steal focus mid-type. Whatever's here when the field loses focus is
+// what "Attach to a Task" below will use as the task's own title.
+root.querySelectorAll('[data-inbox-label]').forEach((input) => {
+input.addEventListener('change', () => {
+const batch = data.captureInbox.find((b) => b.id === input.dataset.inboxLabel);
+if (!batch) return;
+// Never left blank -- this becomes a Task's title verbatim on "Attach
+// to a Task" below, and a titleless task is worse than the generic
+// default it would otherwise have kept.
+batch.label = input.value.trim() || 'Captured batch';
+input.value = batch.label;
+queueSave();
+});
+});
 root.querySelectorAll('[data-inbox-item-open]').forEach((btn) => {
 btn.addEventListener('click', async () => {
 const batch = data.captureInbox.find((b) => b.id === btn.dataset.inboxItemOpen);

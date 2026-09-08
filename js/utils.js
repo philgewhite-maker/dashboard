@@ -1067,6 +1067,6 @@ escapeHtml, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTra
 findMentions, COUNTRY_NAME_TO_NATIONALITY,
 resizeImageToBlob, fileToBase64, loadImage, cropThumbnailToBlob,
 hashFile, captureDateOf, betterCaptureDate, dateFromFilename,
-ensureBrowserReadableImage, setPhotoFallback,
+ensureBrowserReadableImage, setPhotoFallback, looksLikeHeic, sniffsAsHeic,
 contentCropBounds, cropToContentBlob, classifyProfileUpload, looksLikeSameScreenshotPieces, screenshotsLookCombinable,
 };

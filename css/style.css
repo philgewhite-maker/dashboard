@@ -2102,6 +2102,24 @@ cursor:grab;
 }
 .alloc-card.dragging{opacity:.45;}
 .alloc-title{font-size:14px;font-weight:600;}
+/* A shared photo/file batch's own title, editable in place -- an Android
+   share often arrives with no usable text of its own (a bare "1 image"
+   from the OS's own share-sheet default, say), and there was previously
+   no way to give it a real label before it became a task -- confirmed
+   live pain point. Styled to still read as a plain title, not an
+   obviously-a-form-field input, until you actually focus it. */
+input.alloc-title{
+width:100%;
+border:1px solid transparent;
+background:transparent;
+color:var(--ink);
+font-family:'Inter',sans-serif;
+border-radius:5px;
+padding:2px 4px;
+margin:0 0 0 -4px;
+}
+input.alloc-title:hover{border-color:var(--line);}
+input.alloc-title:focus{border-color:var(--line);background:var(--paper);outline:none;}
 .alloc-notes{font-size:12px;color:var(--muted);margin-top:2px;white-space:pre-wrap;}
 .alloc-source{
 font-family:'IBM Plex Mono',monospace;
