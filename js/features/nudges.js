@@ -95,7 +95,7 @@ category: 'dating',
 (c.todos || []).filter((t) => !t.done).forEach((t) => {
 pool.push({
 text: `What about that "${t.text}" with ${c.name}?`,
-target: { type: 'connection', id: c.id },
+target: { type: 'connection', id: c.id, todoId: t.id },
 signals: { kind: 'todo', priority: c.priority || 0 },
 category: 'dating',
 });
@@ -525,6 +525,27 @@ if (!addedThisRound) break;
 return picked;
 }
 
+// A nudge earns an inline "mark it done right here" button only when
+// there's ONE unambiguous action that resolves it -- a goal's progress
+// slider or "check for new offers" don't have that, so most nudges stay
+// click-to-navigate only. label/action are resolved lazily (dynamic
+// import, matching goToTarget's own connections.js import below) so
+// nudges.js doesn't need to statically depend on every feature file just
+// to build its own text.
+function quickCompleteFor(n) {
+const target = n.target;
+switch (n.signals && n.signals.kind) {
+case 'overdue-contact':
+return { label: 'Contacted', action: async () => (await import('./connections.js')).logContactNow(target.id) };
+case 'todo':
+return { label: 'Done', action: async () => (await import('./connections.js')).setTodoDone(target.id, target.todoId, true) };
+case 'habit-streak-broken':
+return { label: 'Log it', action: async () => (await import('./habits.js')).logHabitToday(target.id) };
+default:
+return null;
+}
+}
+
 function paintNudgeList(list) {
 const el = document.getElementById('nudges-list');
 currentShown = list;
@@ -532,10 +553,36 @@ if (list.length === 0) {
 el.innerHTML = '<div class="nudge-empty">Nothing to nudge you about right now.</div>';
 return;
 }
-el.innerHTML = `<div class="nudge-list">${list.map((n, i) => `<div class="nudge-item" data-nudge-idx="${i}">${escapeHtml(n.text)} &rarr;</div>`).join('')}</div>`;
+el.innerHTML = `<div class="nudge-list">${list.map((n, i) => {
+const quick = quickCompleteFor(n);
+return `<div class="nudge-item" data-nudge-idx="${i}" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+<span>${escapeHtml(n.text)} &rarr;</span>
+${quick ? `<button type="button" class="add-btn" data-nudge-quick="${i}" style="padding:4px 9px;font-size:11px;flex-shrink:0;">${escapeHtml(quick.label)}</button>` : ''}
+</div>`;
+}).join('')}</div>`;
 el.querySelectorAll('[data-nudge-idx]').forEach((item) => {
 item.addEventListener('click', () => {
 goToTarget(currentShown[parseInt(item.dataset.nudgeIdx, 10)].target);
+});
+});
+// Bound AFTER the item-level click above, on the button itself -- and
+// stops the click there, so tapping "Contacted" resolves the nudge in
+// place instead of also navigating away to the connection it was about.
+el.querySelectorAll('[data-nudge-quick]').forEach((btn) => {
+btn.addEventListener('click', async (e) => {
+e.stopPropagation();
+const n = currentShown[parseInt(btn.dataset.nudgeQuick, 10)];
+const quick = quickCompleteFor(n);
+if (!quick) return;
+btn.disabled = true;
+btn.textContent = '✓';
+await quick.action();
+// The nudge's own underlying condition (overdue, undone todo, broken
+// streak) is now resolved, so a fresh pool naturally won't include it
+// any more -- simplest correct way to make it disappear, rather than
+// hand-splicing this one item out of a list an AI ranking may have
+// ordered.
+renderNudges();
 });
 });
 }

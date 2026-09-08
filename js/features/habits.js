@@ -1,5 +1,5 @@
 import { data, computeStreak, queueSave } from '../state.js';
-import { uid, last7Dates, escapeHtml, bindForm } from '../utils.js';
+import { uid, last7Dates, escapeHtml, bindForm, todayStr } from '../utils.js';
 
 const DAY_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 
@@ -49,6 +49,17 @@ queueSave();
 });
 }
 
+// Marks TODAY done for one habit -- same mutation a day cell's own click
+// makes (habit.completions[date] = true), just not a toggle: shared by a
+// nudge's quick-complete button (see nudges.js), where "log it" should
+// always mean done, never accidentally UN-log an already-logged day.
+function logHabitToday(habitId) {
+const habit = data.habits.find((x) => x.id === habitId);
+if (!habit) return;
+habit.completions[todayStr()] = true;
+queueSave();
+}
+
 function initHabitForm() {
 bindForm('habit-form', () => {
 const input = document.getElementById('habit-input');
@@ -61,4 +72,4 @@ queueSave();
 });
 }
 
-export { renderHabits, initHabitForm };
+export { renderHabits, initHabitForm, logHabitToday };

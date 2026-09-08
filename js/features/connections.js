@@ -1173,10 +1173,8 @@ queueSave();
 });
 list.querySelectorAll('[data-log]').forEach((btn) => {
 btn.addEventListener('click', () => {
-const conn = data.connections.find((x) => x.id === btn.dataset.log);
-conn.lastContact = todayStr();
+logContactNow(btn.dataset.log);
 renderConnections();
-queueSave();
 });
 });
 list.querySelectorAll('[data-snooze]').forEach((btn) => {
@@ -1354,11 +1352,8 @@ if (input) commitTagAdd(btn.dataset.tagAddBtn, btn.dataset.tagAddBtnField, input
 });
 list.querySelectorAll('[data-todo-toggle]').forEach((cb) => {
 cb.addEventListener('change', () => {
-const conn = data.connections.find((x) => x.id === cb.dataset.todoToggle);
-const todo = conn.todos.find((t) => t.id === cb.dataset.todoId);
-if (todo) todo.done = cb.checked;
+setTodoDone(cb.dataset.todoToggle, cb.dataset.todoId, cb.checked);
 renderConnections();
-queueSave();
 });
 });
 list.querySelectorAll('[data-todo-remove]').forEach((el) => {
@@ -3421,12 +3416,37 @@ setLocalSetting('showArchivedFaded', true);
 renderConnections();
 }
 
+// The actual "you spoke to them" fact -- moves the reach-out clock
+// forward, same mutation the row's own "Log contact" button always did
+// (now shared, so a nudge's own quick-complete button -- see nudges.js
+// -- does exactly the same thing rather than a parallel copy that could
+// drift). Deliberately just the timestamp, not a stage change: contact
+// doesn't imply progress, only that a conversation happened.
+function logContactNow(connId) {
+const conn = data.connections.find((x) => x.id === connId);
+if (!conn) return;
+conn.lastContact = todayStr();
+queueSave();
+}
+
+// Marks (or unmarks) one specific todo on a connection -- shared by the
+// row's own checkbox and a nudge's quick-complete button, same reasoning
+// as logContactNow above.
+function setTodoDone(connId, todoId, done) {
+const conn = data.connections.find((x) => x.id === connId);
+const todo = conn && conn.todos.find((t) => t.id === todoId);
+if (!todo) return;
+todo.done = done;
+queueSave();
+}
+
 export {
 renderConnections, initConnectionForm, expandConnection, CONN_STAGES,
 initSensitiveFields, setShowSensitiveFields, visibleTagFields,
 filterByEmptyField, filterBySearch, filterByIds, clearFilters,
 STAGE_RANK, setContactPicker, phoneWithFlagHtml, initRatingCategoriesSettings,
 initFlagRulesSettings, unionInto, initHideArchivedFaded,
+logContactNow, setTodoDone,
 connectionPickerHtml, connectionPickerNewRowHtml, bindConnPickers, renderConnPicker, setConnPickerValue, applyDirectProfileUpload, applyProfileFieldsToConnection,
 importMatchesListFile, importProfileScreenshotFile, importProfileWithPhotosFile, extractDatingScreenshot, renderPendingImports,
 createBlankConnection, appHintFromFilename, isPriorityConnection,
