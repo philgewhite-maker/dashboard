@@ -1401,16 +1401,15 @@ const mismatchEntry = lineUnitMismatchEntry(line);
 return `
 <div class="idea-row" style="padding:6px 0;">
 <div class="tinder-fields" style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:6px;">
-<input type="text" placeholder="name" data-ingdata-field="name" data-ingdata-recipe="${r.id}" data-ingdata-idx="${i}" value="${escapeHtml(line.name)}">
+<div style="display:flex;align-items:center;gap:4px;min-width:0;">
+<input type="checkbox" data-ingdata-optional-toggle="${r.id}" data-ingdata-idx="${i}" title="Optional -- left out of this recipe's own totals" ${line.optional ? 'checked' : ''} style="flex-shrink:0;">
+<input type="text" placeholder="name" data-ingdata-field="name" data-ingdata-recipe="${r.id}" data-ingdata-idx="${i}" value="${escapeHtml(line.name)}" style="min-width:0;">
+</div>
 <input type="text" placeholder="form" data-ingdata-field="form" data-ingdata-recipe="${r.id}" data-ingdata-idx="${i}" value="${escapeHtml(line.form)}">
 <input type="number" step="any" placeholder="qty" data-ingdata-field="quantity" data-ingdata-recipe="${r.id}" data-ingdata-idx="${i}" value="${line.quantity != null ? line.quantity : ''}">
 <input type="text" placeholder="unit" data-ingdata-field="unit" data-ingdata-recipe="${r.id}" data-ingdata-idx="${i}" value="${escapeHtml(line.unit)}">
 </div>
 <div class="settings-note" style="margin-top:2px;">from: “${escapeHtml(r.ingredients[i] || '')}”${line.notes ? ` · ${escapeHtml(line.notes)}` : ''}</div>
-<label style="display:flex;align-items:center;gap:4px;margin-top:2px;font-size:11px;font-weight:400;">
-<input type="checkbox" data-ingdata-optional-toggle="${r.id}" data-ingdata-idx="${i}" ${line.optional ? 'checked' : ''}>
-Optional <span class="settings-note">e.g. bread served on the side -- left out of this recipe's own totals below</span>
-</label>
 ${mismatchEntry ? unitMismatchNoteHtml(r.id, i, line, mismatchEntry) : ''}
 </div>`;
 }).join('');
@@ -1474,7 +1473,15 @@ const resolved = resolveLineEntry(r, line, i);
 if (!resolved) return '';
 const { entry, originalEntry, dropped, portionQty, subName, unitMismatch, unitRatio } = resolved;
 const override = (lineOverrides.get(r.id) || new Map()).get(i);
-let label = `${escapeHtml(line.name)}${line.form ? ` (${escapeHtml(line.form)})` : ''}`;
+// The ingredient name is the one thing on this line worth finding at a
+// glance while scanning a long list -- everything else here (the used-
+// amount, chips, controls) is detail you read once you've found it, so
+// it gets its own bolder/larger treatment instead of blending into the
+// same 12px run as the rest of the line. "Optional: " prefixes it
+// (rather than a separate tickbox here, which just duplicated the real
+// one on the parsed-ingredients row above) so an optional line is
+// obviously not part of the totals the moment you see its name.
+let label = `<span class="ingdiet-name">${line.optional ? 'Optional: ' : ''}${escapeHtml(line.name)}${line.form ? ` <span class="ingdiet-form">(${escapeHtml(line.form)})</span>` : ''}</span>`;
 if (subName) label += ` &rarr; using substitute: <strong>${escapeHtml(subName)}</strong>`;
 // FODMAP is a per-PORTION question ("is a serving of this low/high"),
 // not a per-batch one -- 250g of flour across a whole traybake reads
@@ -1655,11 +1662,11 @@ ${override && override.mode === 'reduced' ? `<input type="number" step="any" min
 }
 return `<div style="padding:4px 0;border-top:1px solid var(--line);${dropped ? 'opacity:.55;' : ''}">
 <div style="font-size:12px;">${label} — ${used}</div>
-${dropped ? '' : `<label style="display:flex;align-items:center;gap:4px;margin-top:2px;font-size:11px;font-weight:400;"><input type="checkbox" data-ingdata-optional-toggle="${r.id}" data-ingdata-idx="${i}" ${line.optional ? 'checked' : ''}> Optional</label>`}
 ${flagsNote}
 ${chips || glycemicChip ? `<div>${chips}${chips && glycemicChip ? ' ' : ''}${glycemicChip}</div>` : ''}
 ${unitMismatchHtml}
 ${!unitMismatchHtml && noQtyNote ? `<div class="settings-note">${escapeHtml(noQtyNote)}</div>` : ''}
+${!dropped ? `<div style="margin-top:2px;"><span class="inline-goto-link" data-recipe-edit-ref="${entry.id}" style="font-size:11px;">Wrong allergens/FODMAP/etc? Edit "${escapeHtml(entry.name)}" in Ingredient Reference…</span></div>` : ''}
 ${overrideHtml}
 </div>`;
 }).join('');
@@ -1704,7 +1711,12 @@ const diet = computeRecipeDiet(r);
 if (!diet) return `<div class="full"><span class="inline-goto-link" data-recipe-analyse="${r.id}">Analyse ingredients</span></div>`;
 const changes = describeLineOverrides(r);
 const per = r.servings ? r.servings : null;
-const row = (label, key, unit) => `<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0;"><span>${escapeHtml(label)}</span><span>${diet.totals[key].toFixed(1)}${unit}${per ? ` (${(diet.totals[key] / per).toFixed(1)}${unit}/serving)` : ''}</span></div>`;
+// A fixed-width label column (not space-between, which pushed the actual
+// number all the way to the panel's far edge, well away from its own
+// title) keeps the figure right next to what it's a figure OF -- the
+// whole point of a macros table being scannable at all. Confirmed live
+// pain point: "numbers nearer to the titles".
+const row = (label, key, unit) => `<div style="display:flex;gap:10px;font-size:12px;padding:2px 0;"><span style="width:130px;flex-shrink:0;">${escapeHtml(label)}</span><span>${diet.totals[key].toFixed(1)}${unit}${per ? ` (${(diet.totals[key] / per).toFixed(1)}${unit}/serving)` : ''}</span></div>`;
 return `<div class="full">
 <button class="overview-panel-toggle" type="button" data-recipe-diet-toggle="${r.id}">${expandedDiet.has(r.id) ? '▾ Hide diet analysis' : '▸ Show diet analysis'}</button>
 ${expandedDiet.has(r.id) ? `${recipeHasStaleReference(r) ? `<div class="settings-note" style="margin-top:6px;">Some ingredients predate dietary-flag checks (kosher/halal/vegetarian/vegan) and/or known unit weights ("medium onion" = how many grams) — <span class="inline-goto-link" data-recipe-analyse="${r.id}">refresh</span> to fill them in.</div>` : ''}

@@ -1249,6 +1249,13 @@ margin:0 4px 4px 0;
 .fodmap-chip.level-low{background:var(--sage-bg);border-color:transparent;color:var(--sage);}
 .fodmap-chip.level-moderate{background:var(--amber-bg);border-color:transparent;color:var(--amber);}
 .fodmap-chip.level-high{background:var(--red);border-color:transparent;color:#fff;}
+/* The ingredient name is the one thing worth finding at a glance while
+   scanning a long per-line diet-analysis list -- everything else on the
+   line (amount used, chips, links) is detail read only once the name's
+   already found. Confirmed live pain point: "very hard to scan" when
+   the name sat in the same 12px run as the rest of the line. */
+.ingdiet-name{font-size:14px;font-weight:600;color:var(--ink);}
+.ingdiet-form{font-weight:400;color:var(--muted);font-size:12px;}
 /* A unit mismatch is a real gap in the totals, not routine informational
    copy -- a plain .settings-note (muted grey, identical to a dozen other
    captions on the same card) let it blend in and go unnoticed. Same
