@@ -2,7 +2,7 @@
 // the same configurable-star mechanism as Connections (a distinct category
 // list — Taste/Health/Prep by default — not the same list, just the same
 // idea), with an occasional nudge to actually cook one of them.
-import { data, queueSave, DEFAULT_RECIPE_RATING_CATEGORIES, slugifyField, averageRating, getLocalSettings, setLocalSetting } from '../state.js';
+import { data, queueSave, DEFAULT_RECIPE_RATING_CATEGORIES, DEFAULT_PREFS, slugifyField, averageRating, getLocalSettings, setLocalSetting } from '../state.js';
 import { photoDelete, photoGet, photoUrl } from '../db.js';
 import { escapeHtml, uid, todayStr, resizeImageToBlob, openLightbox, pickChipHtml, scrollAndFlash } from '../utils.js';
 import { MissingKeyError, extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, parseIngredients, assessIngredient, ALLERGEN_LIST, DIETARY_FLAGS, FODMAP_COMPONENTS, FODMAP_THRESHOLDS_G, OLIGO_CATEGORIES, fodmapLevelFromGrams, regenerateRecipeVariant, assessUnitWeight, assessUnitRatio, glycemicLevelFromLoad } from '../ai.js';
@@ -230,14 +230,27 @@ return `<div class="rating-row"><span class="rating-label">${escapeHtml(label)}<
 
 let expandedRecipe = null; // id, or null
 let cookingRecipe = null; // id, or null
-let activeTagFilter = null; // a tag string, or null for "All"
-// 'made' | 'notmade' | null -- derived from lastMade rather than a stored
-// field of its own (same reasoning Connections Overview's own "Photos"/
-// "Contact match" dimensions are computed, not stored): it can never drift
-// out of sync with the one real fact (when a recipe was last made), and a
-// recipe already has nothing that actually means "not made yet" beyond an
-// empty lastMade.
-let activeMadeFilter = null;
+// Overview chips as combinable facets -- [{title, key}], AND-matched
+// across every active one (see recipesMatchingFacets). Replaces the
+// earlier one-filter-per-dimension model (a single activeTagFilter/
+// activeMadeFilter) now that there are three dimensions (Made/Tags/
+// Diet) and Diet especially is naturally multi-valued (a recipe can be
+// both "High protein" and "Gluten-free" at once) -- per feedback,
+// "as per connections", which combines its own Overview chips the same
+// way. Unlike Connections' own drill-down, this is always on rather
+// than gated behind a mode toggle: Recipes Overview has none of the
+// extra weight (bulk-assign, per-chip colouring) that toggle exists to
+// protect against there, so plain combining chips is just the natural
+// default here, not an opt-in.
+let recipeFacets = [];
+// 'made' | 'notmade' -- derived from lastMade rather than a stored field
+// of its own (same reasoning Connections Overview's own "Photos"/
+// "Contact match" dimensions are computed, not stored): it can never
+// drift out of sync with the one real fact (when a recipe was last
+// made), and a recipe already has nothing that actually means "not made
+// yet" beyond an empty lastMade. Only dimension where two facets would
+// be contradictory (a recipe can't be both), so picking a new one here
+// replaces rather than adds -- see recipeDimensions' `single` flag.
 let recipeOverviewCollapsed = true;
 // How the Tags chips below are ordered -- 'count' (busiest first,
 // alphabetical tiebreak) or 'alpha' (A-Z) -- device-local, same as
@@ -250,6 +263,9 @@ let referencePanelCollapsed = true;
 // Diet-interests panel (see renderDietInterests) -- same collapse-and-
 // remember pattern as the two above.
 let dietInterestsCollapsed = true;
+// Diet-tags thresholds panel (see renderDietTagThresholds) -- same
+// pattern again, lives right below Diet interests.
+let dietTagThresholdsCollapsed = true;
 // Per-recipe, per-ingredient-line "what if" override -- UI-only/in-memory
 // (not persisted, same as the toggle this replaced): recipeId -> Map of
 // ingredientData index -> one of:
@@ -332,11 +348,71 @@ recipeOverviewCollapsed = settings.recipeOverviewPanelCollapsed !== false;
 recipeOverviewChipSort = settings.recipeOverviewChipSort === 'alpha' ? 'alpha' : 'count';
 }
 
-// Mirrors Connections Overview's own shape (collapsible panel, clickable
-// chips that filter the list below) but deliberately without its full
-// drill-down/faceting machinery -- two small dimensions here (Made, Tags)
-// don't need a general per-dimension-collapse, bulk-assign, multi-facet
-// system built for Connections' much larger, richer set of dimensions.
+// One place defining what the Overview chips group by -- mirrors
+// Connections Overview's own {title, getKeys} dimensions() shape
+// (js/features/overview.js), scoped down: no field/colorField/assigner/
+// none-bucket, since recipes has no bulk-assign concept and every
+// dimension here is either always-populated (Made) or fine leaving
+// zero-key recipes out entirely (Tags/Diet -- a recipe with no tags
+// just doesn't show up under Tags, nothing to explain).
+// `single: true` (Made only) means picking a new value REPLACES the
+// existing facet on that dimension rather than adding to it -- a
+// recipe can't be both Made and Not-made-yet, so two facets there would
+// just match nobody. Tags/Diet are naturally multi-valued (a recipe can
+// be both "High protein" and "Gluten-free" at once) and stack.
+function recipeDimensions() {
+return [
+{ title: 'Made', single: true, getKeys: (r) => [r.lastMade ? 'Made' : 'Not made yet'] },
+{ title: 'Tags', getKeys: (r) => r.tags || [] },
+{ title: 'Diet', getKeys: (r) => recipeDietTags(r) },
+];
+}
+
+function matchesRecipeFacet(r, facet, dims) {
+const dim = dims.find((d) => d.title === facet.title);
+return dim ? (dim.getKeys(r) || []).includes(facet.key) : true;
+}
+
+// Recipes matching every active facet, optionally ignoring facets on one
+// dimension -- so that dimension still shows its OWN alternatives
+// (switching Made<->Not-made-yet stays possible instead of the chip you
+// didn't pick vanishing the moment you pick one).
+function recipesMatchingFacets(dims, exceptTitle) {
+const active = recipeFacets.filter((f) => f.title !== exceptTitle);
+if (active.length === 0) return data.recipes;
+return data.recipes.filter((r) => active.every((f) => matchesRecipeFacet(r, f, dims)));
+}
+
+function groupRecipesBy(list, getKeys) {
+const groups = {};
+list.forEach((r) => {
+(getKeys(r) || []).filter(Boolean).forEach((k) => {
+if (!groups[k]) groups[k] = [];
+groups[k].push(r);
+});
+});
+return groups;
+}
+
+const isRecipeFaceted = (title, key) => recipeFacets.some((f) => f.title === title && f.key === key);
+
+function recipeOverviewDimensionHtml(dim, groups) {
+const keys = Object.keys(groups).sort((a, b) => (recipeOverviewChipSort === 'alpha' ? a.localeCompare(b) : groups[b].length - groups[a].length || a.localeCompare(b)));
+if (!keys.length) return '';
+const chips = keys.map((k) => `<button class="overview-chip${isRecipeFaceted(dim.title, k) ? ' active' : ''}" type="button" data-recipe-overview-facet="${escapeHtml(dim.title)}" data-recipe-overview-key="${escapeHtml(k)}" data-recipe-overview-single="${dim.single ? '1' : ''}">${escapeHtml(k)} (${groups[k].length})</button>`).join('');
+return `<div class="overview-group"><span class="field-label">${escapeHtml(dim.title)}</span><div class="overview-chips">${chips}</div></div>`;
+}
+
+function recipeFacetBarHtml() {
+if (!recipeFacets.length) return '';
+const matching = recipesMatchingFacets(recipeDimensions()).length;
+return `<div class="facet-bar">
+<span class="facet-label">${matching} match${matching === 1 ? '' : 'es'}</span>
+${recipeFacets.map((f, i) => `<button class="facet-pill" type="button" data-recipe-drop-facet="${i}">${escapeHtml(f.title)}: ${escapeHtml(f.key)} ×</button>`).join('')}
+<button class="filter-clear" type="button" id="recipe-clear-facets">Clear all</button>
+</div>`;
+}
+
 function renderRecipeOverview() {
 const el = document.getElementById('recipe-overview-content');
 if (!el) return;
@@ -350,24 +426,21 @@ renderRecipeOverview();
 });
 return;
 }
-const madeCount = data.recipes.filter((r) => r.lastMade).length;
-const notMadeCount = data.recipes.length - madeCount;
-const madeChips = [
-{ key: 'made', label: 'Made', count: madeCount },
-{ key: 'notmade', label: 'Not made yet', count: notMadeCount },
-].filter((c) => c.count).map((c) => `<button class="overview-chip${activeMadeFilter === c.key ? ' active' : ''}" type="button" data-recipe-overview-made="${c.key}">${escapeHtml(c.label)} (${c.count})</button>`).join('');
-
-const tagCounts = {};
-data.recipes.forEach((r) => (r.tags || []).forEach((t) => { tagCounts[t] = (tagCounts[t] || 0) + 1; }));
-const tagKeys = Object.keys(tagCounts).sort((a, b) => (recipeOverviewChipSort === 'alpha' ? a.localeCompare(b) : tagCounts[b] - tagCounts[a] || a.localeCompare(b)));
-const tagChips = tagKeys.map((t) => `<button class="overview-chip${activeTagFilter === t ? ' active' : ''}" type="button" data-recipe-overview-tag="${escapeHtml(t)}">${escapeHtml(t)} (${tagCounts[t]})</button>`).join('');
-const sortHtml = tagChips ? `<label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:7px;margin-top:6px;">Sort tags <select id="recipe-overview-chip-sort"><option value="count"${recipeOverviewChipSort === 'count' ? ' selected' : ''}>By count</option><option value="alpha"${recipeOverviewChipSort === 'alpha' ? ' selected' : ''}>A–Z</option></select></label>` : '';
+const dims = recipeDimensions();
+const sections = dims.map((dim) => {
+// Each dimension counts against everything EXCEPT its own facets, same
+// reasoning as overview.js's own connectionsMatching.
+const scope = recipesMatchingFacets(dims, dim.title);
+return recipeOverviewDimensionHtml(dim, groupRecipesBy(scope, dim.getKeys));
+}).filter(Boolean).join('');
+const anyChips = sections.length > 0;
+const sortHtml = anyChips ? `<label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:7px;margin-top:6px;">Sort chips <select id="recipe-overview-chip-sort"><option value="count"${recipeOverviewChipSort === 'count' ? ' selected' : ''}>By count</option><option value="alpha"${recipeOverviewChipSort === 'alpha' ? ' selected' : ''}>A–Z</option></select></label>` : '';
 
 el.innerHTML = `${toggleHtml}
-${madeChips ? `<div class="overview-group"><span class="field-label">Made</span><div class="overview-chips">${madeChips}</div></div>` : ''}
-${tagChips ? `<div class="overview-group"><span class="field-label">Tags</span><div class="overview-chips">${tagChips}</div></div>` : ''}
+${recipeFacetBarHtml()}
+${sections}
 ${sortHtml}
-${!madeChips && !tagChips ? '<div class="settings-note" style="margin-top:8px;">Add a few recipes (and some tags) to see them grouped here.</div>' : ''}`;
+${!anyChips ? '<div class="settings-note" style="margin-top:8px;">Add a few recipes (and some tags) to see them grouped here.</div>' : ''}`;
 
 document.getElementById('recipe-overview-toggle').addEventListener('click', () => {
 recipeOverviewCollapsed = true;
@@ -382,18 +455,28 @@ setLocalSetting('recipeOverviewChipSort', recipeOverviewChipSort);
 renderRecipeOverview();
 });
 }
-el.querySelectorAll('[data-recipe-overview-made]').forEach((btn) => {
-btn.addEventListener('click', () => {
-const key = btn.dataset.recipeOverviewMade;
-activeMadeFilter = activeMadeFilter === key ? null : key;
+el.querySelectorAll('[data-recipe-drop-facet]').forEach((pill) => {
+pill.addEventListener('click', () => {
+recipeFacets.splice(parseInt(pill.dataset.recipeDropFacet, 10), 1);
 renderRecipeOverview();
 renderRecipes();
 });
 });
-el.querySelectorAll('[data-recipe-overview-tag]').forEach((btn) => {
+const clearBtn = document.getElementById('recipe-clear-facets');
+if (clearBtn) {
+clearBtn.addEventListener('click', () => { recipeFacets = []; renderRecipeOverview(); renderRecipes(); });
+}
+el.querySelectorAll('[data-recipe-overview-facet]').forEach((btn) => {
 btn.addEventListener('click', () => {
-const key = btn.dataset.recipeOverviewTag;
-activeTagFilter = activeTagFilter === key ? null : key;
+const title = btn.dataset.recipeOverviewFacet;
+const key = btn.dataset.recipeOverviewKey;
+const single = !!btn.dataset.recipeOverviewSingle;
+const existing = recipeFacets.findIndex((f) => f.title === title && f.key === key);
+if (existing >= 0) recipeFacets.splice(existing, 1);
+else {
+if (single) recipeFacets = recipeFacets.filter((f) => f.title !== title);
+recipeFacets.push({ title, key });
+}
 renderRecipeOverview();
 renderRecipes();
 });
@@ -559,6 +642,7 @@ nutrition: { calories: 0, protein: 0, carbs: 0, sugars: 0, fat: 0, saturates: 0,
 oligoCategory: 'veg_fruit',
 fodmapGrams: { fructans: 0, gos: 0, lactose: 0, excessFructose: 0, polyols: 0 },
 glycemicIndex: null,
+antioxidantMmol: null,
 allergens: [], dietaryFlags: [], subs: [],
 };
 }
@@ -588,7 +672,7 @@ if (!e) return true;
 // handlers), the same guarantee the FODMAP/nutrition figures already
 // have.
 if (e.userEdited) return false;
-return !!e.dietaryFlagsStale || !!e.unitWeightsStale || !!e.glycemicStale;
+return !!e.dietaryFlagsStale || !!e.unitWeightsStale || !!e.glycemicStale || !!e.antioxidantStale;
 }
 
 // The one AI-calling step in the whole diet-analysis path besides the
@@ -600,7 +684,7 @@ return !!e.dietaryFlagsStale || !!e.unitWeightsStale || !!e.glycemicStale;
 // flour.
 async function ensureReferenceEntry(name, form) {
 const existing = findReferenceEntry(name, form);
-if (existing && (existing.userEdited || (!existing.dietaryFlagsStale && !existing.unitWeightsStale && !existing.glycemicStale))) return;
+if (existing && (existing.userEdited || (!existing.dietaryFlagsStale && !existing.unitWeightsStale && !existing.glycemicStale && !existing.antioxidantStale))) return;
 const trivial = trivialReferenceEntry(name, form);
 const assessed = trivial || await assessIngredient(name, form);
 if (existing) {
@@ -625,6 +709,11 @@ existing.glycemicIndex = assessed.glycemicIndex;
 existing.glycemicAssessedAt = new Date().toISOString();
 delete existing.glycemicStale;
 }
+if (existing.antioxidantStale) {
+existing.antioxidantMmol = assessed.antioxidantMmol;
+existing.antioxidantAssessedAt = new Date().toISOString();
+delete existing.antioxidantStale;
+}
 return;
 }
 data.ingredientReference.push({
@@ -636,6 +725,7 @@ aiFilledAt: trivial ? '' : new Date().toISOString(),
 dietaryAssessedAt: new Date().toISOString(),
 unitWeightsAssessedAt: new Date().toISOString(),
 glycemicAssessedAt: new Date().toISOString(),
+antioxidantAssessedAt: new Date().toISOString(),
 userEdited: false,
 });
 }
@@ -1282,6 +1372,12 @@ const dietaryFlags = new Set();
 // ai.js). Per-portion, like FODMAP -- a diabetic question is about what
 // one serving does, not the whole batch.
 let glycemicLoad = 0;
+// Whole-recipe total (like totals.calories, not per-portion like
+// glycemicLoad/fodmapGrams above) -- antioxidant content is an ordinary
+// extensive nutritional quantity, not a symptom/glycemic-response
+// threshold that's inherently a per-serving question, so it's summed
+// and divided into portions the same way calories/protein already are.
+let antioxidantMmol = 0;
 // Lines that couldn't be scaled at all -- their unit doesn't match
 // their (possibly substituted) reference entry's unitBasis, so macros/
 // FODMAP are withheld for THAT line specifically (never guess a cross-
@@ -1317,7 +1413,7 @@ unmatchedLines.push({ line, entry });
 // core Sets, or the optional line's own record) even though nothing
 // numeric can be computed for it.
 if (line.optional) {
-optional.push({ line, entry, macros: null, fodmapGrams: null, glycemicLoad: null, allergens: entry.allergens || [], dietaryFlags: entry.dietaryFlags || [] });
+optional.push({ line, entry, macros: null, fodmapGrams: null, glycemicLoad: null, antioxidantMmol: null, allergens: entry.allergens || [], dietaryFlags: entry.dietaryFlags || [] });
 } else {
 (entry.allergens || []).forEach((a) => allergens.add(a));
 (entry.dietaryFlags || []).forEach((f) => dietaryFlags.add(f));
@@ -1336,8 +1432,9 @@ FODMAP_COMPONENTS.forEach((k) => { lineFodmapGrams[k] = portionScale != null ? (
 const netCarbs = Math.max(0, (entry.nutrition.carbs || 0) - (entry.nutrition.fibre || 0));
 const lineGlycemicLoad = (portionScale != null && entry.glycemicIndex != null)
 ? (netCarbs * portionScale) * (entry.glycemicIndex / 100) : 0;
+const lineAntioxidantMmol = (wholeScale != null && entry.antioxidantMmol != null) ? entry.antioxidantMmol * wholeScale : 0;
 if (line.optional) {
-optional.push({ line, entry, macros: lineMacros, fodmapGrams: lineFodmapGrams, glycemicLoad: lineGlycemicLoad, allergens: entry.allergens || [], dietaryFlags: entry.dietaryFlags || [] });
+optional.push({ line, entry, macros: lineMacros, fodmapGrams: lineFodmapGrams, glycemicLoad: lineGlycemicLoad, antioxidantMmol: lineAntioxidantMmol, allergens: entry.allergens || [], dietaryFlags: entry.dietaryFlags || [] });
 continue;
 }
 (entry.allergens || []).forEach((a) => allergens.add(a));
@@ -1350,6 +1447,7 @@ oligoCatGrams[k][entry.oligoCategory] = (oligoCatGrams[k][entry.oligoCategory] |
 }
 });
 glycemicLoad += lineGlycemicLoad;
+antioxidantMmol += lineAntioxidantMmol;
 }
 if (resolvedCount < r.ingredientData.length) return null;
 const fodmap = {};
@@ -1370,8 +1468,64 @@ fodmap[k] = fodmapLevelFromGrams(k, fodmapGrams[k], category);
 });
 return {
 totals, fodmapGrams, fodmap, allergens: [...allergens], dietaryFlags: [...dietaryFlags], unmatchedLines,
-glycemicLoad, glycemicLevel: glycemicLevelFromLoad(glycemicLoad), optional,
+glycemicLoad, glycemicLevel: glycemicLevelFromLoad(glycemicLoad), antioxidantMmol, optional,
 };
+}
+
+// A handful of ALLERGEN_LIST's own labels read awkwardly with a bare
+// "-free" suffix tacked straight on ("Eggs-free", "Cereals containing
+// gluten-free") -- everything not listed here already reads fine as-is
+// ("Celery-free", "Mustard-free", "Sesame-free", "Sulphites-free",
+// "Lupin-free").
+const FREE_FROM_LABELS = {
+'Cereals containing gluten': 'Gluten', Milk: 'Dairy', 'Tree nuts': 'Tree nut',
+Peanuts: 'Peanut', Crustaceans: 'Crustacean', Molluscs: 'Mollusc', Eggs: 'Egg', Soybeans: 'Soy',
+};
+const freeFromLabel = (allergen) => FREE_FROM_LABELS[allergen] || allergen;
+
+// Every tag here is DERIVED, never stored onto r.tags -- an auto-computed
+// fact ("Low calorie") mixed into the same array as a person's own
+// manual tags would have no way to be told apart from one, and would go
+// stale the moment an ingredient's own reference data changes (fix a
+// fat figure and a stored "Low calorie" tag would silently stop being
+// true). Recomputed fresh every call instead, the same "safe to re-run
+// on every render" property computeRecipeDiet itself already has.
+// Returns [] for a recipe that hasn't been analysed yet, same as every
+// other diet-analysis figure in this file.
+function recipeDietTags(r) {
+return recipeDietTagsFromDiet(r, computeRecipeDiet(r));
+}
+
+// Split from recipeDietTags so a caller that's already run
+// computeRecipeDiet (recipeDietHtml, building its diet-analysis section
+// anyway) doesn't have to pay for a second, identical pass over the
+// same recipe just to also get its badges.
+function recipeDietTagsFromDiet(r, diet) {
+if (!diet) return [];
+const t = data.prefs.dietTagThresholds;
+const tags = [];
+ALLERGEN_LIST.forEach((a) => {
+if (!diet.allergens.includes(a)) tags.push(`${freeFromLabel(a)}-free`);
+});
+// % of energy from protein -- the EU "high protein" nutrition-claim
+// basis (>=20% by default). A ratio of the recipe's own totals, so
+// unlike the three below it needs no Servings figure to be meaningful.
+const energyFromProtein = diet.totals.calories > 0
+? (diet.totals.protein * 4 / diet.totals.calories) * 100 : 0;
+if (energyFromProtein >= t.highProteinPctEnergy) tags.push('High protein');
+// These three are all per-SERVING -- meaningless without Servings set,
+// same "can't derive it without enough info" rule the rest of this
+// feature already follows (e.g. FODMAP's own per-portion figures).
+if (r.servings) {
+if (diet.totals.calories / r.servings <= t.lowCalorieKcalPerServing) tags.push('Low calorie');
+if (diet.totals.fibre / r.servings >= t.highFibrePerServingG) tags.push('High fibre');
+if (diet.antioxidantMmol / r.servings >= t.highAntioxidantMmolPerServing) tags.push('High antioxidant');
+}
+// Glycemic LOAD (not a raw per-ingredient GI number) is the correct
+// additive metric for a multi-ingredient dish -- already computed,
+// needs no new threshold of its own.
+if (diet.glycemicLevel === 'low') tags.push('Low-GI');
+return tags;
 }
 
 function recipeIngredientsStatusHtml(r) {
@@ -1700,7 +1854,7 @@ const entry = findReferenceEntry(line.name, line.form);
 // needsAssessment/ensureReferenceEntry now both skip a userEdited
 // entry outright -- so there's no point offering a link that would
 // silently do nothing; the actual fix is editing the entry directly.
-return entry && !entry.userEdited && (entry.dietaryFlagsStale || entry.unitWeightsStale || entry.glycemicStale);
+return entry && !entry.userEdited && (entry.dietaryFlagsStale || entry.unitWeightsStale || entry.glycemicStale || entry.antioxidantStale);
 });
 }
 
@@ -1711,15 +1865,24 @@ const diet = computeRecipeDiet(r);
 if (!diet) return `<div class="full"><span class="inline-goto-link" data-recipe-analyse="${r.id}">Analyse ingredients</span></div>`;
 const changes = describeLineOverrides(r);
 const per = r.servings ? r.servings : null;
+// Same tags recipeDietTags derives from this exact diet -- computed
+// once here rather than calling recipeDietTags(r) again (which would
+// just re-run computeRecipeDiet a second time for no reason).
+const dietTags = recipeDietTagsFromDiet(r, diet);
 // A fixed-width label column (not space-between, which pushed the actual
 // number all the way to the panel's far edge, well away from its own
 // title) keeps the figure right next to what it's a figure OF -- the
 // whole point of a macros table being scannable at all. Confirmed live
-// pain point: "numbers nearer to the titles".
-const row = (label, key, unit) => `<div style="display:flex;gap:10px;font-size:12px;padding:2px 0;"><span style="width:130px;flex-shrink:0;">${escapeHtml(label)}</span><span>${diet.totals[key].toFixed(1)}${unit}${per ? ` (${(diet.totals[key] / per).toFixed(1)}${unit}/serving)` : ''}</span></div>`;
+// pain point: "numbers nearer to the titles". `good`, when passed,
+// colours the value the same green a "High protein"/"Low calorie"/
+// "High fibre" badge above already claims -- the badge and the number
+// it came from should visibly be the same claim, not two disconnected
+// facts.
+const row = (label, key, unit, good) => `<div style="display:flex;gap:10px;font-size:12px;padding:2px 0;"><span style="width:130px;flex-shrink:0;">${escapeHtml(label)}</span><span class="${good ? 'diet-good-value' : ''}">${diet.totals[key].toFixed(1)}${unit}${per ? ` (${(diet.totals[key] / per).toFixed(1)}${unit}/serving)` : ''}</span></div>`;
 return `<div class="full">
 <button class="overview-panel-toggle" type="button" data-recipe-diet-toggle="${r.id}">${expandedDiet.has(r.id) ? '▾ Hide diet analysis' : '▸ Show diet analysis'}</button>
-${expandedDiet.has(r.id) ? `${recipeHasStaleReference(r) ? `<div class="settings-note" style="margin-top:6px;">Some ingredients predate dietary-flag checks (kosher/halal/vegetarian/vegan) and/or known unit weights ("medium onion" = how many grams) — <span class="inline-goto-link" data-recipe-analyse="${r.id}">refresh</span> to fill them in.</div>` : ''}
+${expandedDiet.has(r.id) ? `${dietTags.length ? `<div style="margin-top:6px;">${flagListHtml(dietTags, dietTags)}</div>` : ''}
+${recipeHasStaleReference(r) ? `<div class="settings-note" style="margin-top:6px;">Some ingredients predate dietary-flag checks (kosher/halal/vegetarian/vegan) and/or known unit weights ("medium onion" = how many grams) — <span class="inline-goto-link" data-recipe-analyse="${r.id}">refresh</span> to fill them in.</div>` : ''}
 ${diet.unmatchedLines.length ? `<div class="settings-note" style="margin-top:6px;">Totals below EXCLUDE ${diet.unmatchedLines.length} ingredient${diet.unmatchedLines.length === 1 ? '' : 's'} whose parsed unit doesn't match its reference entry's own basis (never guessed automatically): ${diet.unmatchedLines.map(({ line, entry }) => `${escapeHtml(line.name)} ("${escapeHtml(line.unit)}" vs "${escapeHtml(entry.unitBasis.unit)}")`).join(', ')}. See the ingredient list below to fix the parsed unit, or edit the entry's basis in Ingredient Reference.</div>` : ''}
 ${dietInterestOn('fodmap') ? `<div class="field-block" style="margin-top:6px;">
 <span class="field-label">FODMAP (per component) — summed across ingredients${per ? `, per portion (${per})` : ' -- set Servings above for a true per-portion figure; this is the whole-recipe total'}</span>
@@ -1740,13 +1903,13 @@ ${dietInterestOn('dietaryFlags') ? `<div class="field-block" style="margin-top:6
 ${recipeIngredientAnalysisHtml(r)}
 ${dietInterestOn('macros') ? `<div class="field-block" style="margin-top:6px;">
 <span class="field-label">Macros${per ? ` — total, and per serving (${per})` : ' — recipe total'}</span>
-${row('Calories', 'calories', ' kcal')}
-${row('Protein', 'protein', 'g')}
+${row('Calories', 'calories', ' kcal', dietTags.includes('Low calorie'))}
+${row('Protein', 'protein', 'g', dietTags.includes('High protein'))}
 ${row('Carbs', 'carbs', 'g')}
 ${row('— of which sugars', 'sugars', 'g')}
 ${row('Fat', 'fat', 'g')}
 ${row('— of which saturates', 'saturates', 'g')}
-${row('Fibre', 'fibre', 'g')}
+${row('Fibre', 'fibre', 'g', dietTags.includes('High fibre'))}
 ${row('Salt', 'salt', 'g')}
 </div>` : ''}
 ${diet.optional.length ? `<div class="field-block full" style="margin-top:6px;">
@@ -1824,6 +1987,9 @@ ${FODMAP_COMPONENTS.map(fodmapInput).join('')}
 <label>Glycemic Index <span class="settings-note">glucose = 100 reference -- leave blank if this ingredient has no meaningful digestible carbohydrate (meat, fish, eggs, fats/oils, most herbs/spices)</span>
 <input type="number" step="any" min="0" max="110" data-ref-glycemic value="${e.glycemicIndex != null ? e.glycemicIndex : ''}" placeholder="n/a">
 </label>
+<label>Antioxidant (mmol) <span class="settings-note">FRAP assay, Carlsen et al. 2010 -- per ${e.unitBasis.quantity}${escapeHtml(e.unitBasis.unit)}; leave blank if negligible (salt, sugar, most refined oils/starches)</span>
+<input type="number" step="any" min="0" data-ref-antioxidant value="${e.antioxidantMmol != null ? e.antioxidantMmol : ''}" placeholder="n/a">
+</label>
 <label class="full">Allergens present<div class="tag-editor">${ALLERGEN_LIST.map((a) => `<span class="pick-chip${e.allergens.includes(a) ? ' active' : ''}" data-ref-allergen="${escapeHtml(a)}">${escapeHtml(a)}</span>`).join('')}</div></label>
 <label class="full">Also worth knowing <span class="settings-note">kosher/halal/vegetarian/vegan-relevant facts, checked the same way as allergens</span>
 <div class="tag-editor">${DIETARY_FLAGS.map((a) => `<span class="pick-chip${e.dietaryFlags.includes(a) ? ' active' : ''}" data-ref-dietary="${escapeHtml(a)}">${escapeHtml(a)}</span>`).join('')}</div></label>
@@ -1887,6 +2053,7 @@ return `<div class="idea-row" data-ingredient-ref-row="${e.id}">
 ${dietInterestOn('macros') ? `<div class="settings-note">Cal ${e.nutrition.calories} · Protein ${e.nutrition.protein}g · Carbs ${e.nutrition.carbs}g · Fat ${e.nutrition.fat}g · Fibre ${e.nutrition.fibre}g · Salt ${e.nutrition.salt}g</div>` : ''}
 ${dietInterestOn('fodmap') ? `<div>${fodmapRowHtml(entryFodmapLevels(e), e.fodmapGrams)}</div>` : ''}
 ${dietInterestOn('diabetic') ? `<div class="settings-note">Glycemic Index: ${e.glycemicIndex != null ? e.glycemicIndex : 'n/a'}</div>` : ''}
+<div class="settings-note">Antioxidant: ${e.antioxidantMmol != null ? `${e.antioxidantMmol} mmol` : 'n/a'}</div>
 ${dietInterestOn('allergens') && e.allergens.length ? `<div class="settings-note">Allergens: ${e.allergens.map(escapeHtml).join(', ')}</div>` : ''}
 ${dietInterestOn('dietaryFlags') && e.dietaryFlags.length ? `<div class="settings-note">Also: ${e.dietaryFlags.map(escapeHtml).join(', ')}</div>` : ''}
 ${e.subs.length ? `<div class="settings-note">Substitutes: ${e.subs.map((s) => `${escapeHtml(s.name)}${s.note ? ` (${escapeHtml(s.note)})` : ''}`).join('; ')}</div>` : ''}
@@ -1927,6 +2094,53 @@ data.prefs.dietInterests = dietInterestOn(key)
 renderDietInterests();
 renderRecipes();
 renderIngredientReference();
+queueSave();
+});
+});
+}
+
+// The cutoffs behind the auto-derived Diet tags (recipeDietTags) --
+// unlike FODMAP/glycemic-load (published, clinical, deliberately fixed
+// constants in ai.js), none of these four has one universal "correct"
+// value, so they're the app's first user-configurable nutrition
+// thresholds. Same mechanical pattern data.prefs.calendarEventCount/
+// mailResultCount already use (settings.js's initFetchPrefs): plain
+// number inputs, `change` handler, fall back to the DEFAULT_PREFS value
+// on blank/NaN, mirror the clamped value back into the field. Lives
+// right below Diet interests -- "which sections show" next to "where
+// the cutoffs sit" is a natural pair.
+const DIET_TAG_THRESHOLD_FIELDS = [
+{ key: 'highProteinPctEnergy', label: 'High protein', suffix: '% of energy from protein', note: 'EU "high protein" claim default: 20%' },
+{ key: 'lowCalorieKcalPerServing', label: 'Low calorie', suffix: 'kcal/serving or under', note: 'no published per-recipe standard -- your own call' },
+{ key: 'highFibrePerServingG', label: 'High fibre', suffix: 'g fibre/serving', note: 'inspired by (not identical to) the UK/EU "high fibre" claim (≥6g/100g of food)' },
+{ key: 'highAntioxidantMmolPerServing', label: 'High antioxidant', suffix: 'mmol/serving', note: 'FRAP/Carlsen et al. scale -- no clinical "high" cutoff exists, a reasonable round number' },
+];
+function renderDietTagThresholds() {
+const el = document.getElementById('diet-tag-thresholds-content');
+if (!el) return;
+const toggleHtml = `<button class="overview-panel-toggle" type="button" id="diet-tag-thresholds-toggle">${dietTagThresholdsCollapsed ? '▸ Show diet tag thresholds' : '▾ Hide diet tag thresholds'}</button>`;
+el.innerHTML = dietTagThresholdsCollapsed ? toggleHtml
+: `${toggleHtml}<div class="settings-note" style="margin-top:6px;">Cutoffs behind the auto-derived Diet tags (High protein/Low calorie/High fibre/High antioxidant) on every recipe -- the three per-serving ones only apply once a recipe has Servings set. Low-GI has no cutoff here -- it reuses the glycemic-load bands already used elsewhere.</div>
+<div class="tinder-fields" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px;">
+${DIET_TAG_THRESHOLD_FIELDS.map((f) => `<label>${escapeHtml(f.label)} <span class="settings-note">${escapeHtml(f.note)}</span>
+<div style="display:flex;align-items:center;gap:6px;">
+<input type="number" step="any" min="0" data-diet-tag-threshold="${f.key}" value="${data.prefs.dietTagThresholds[f.key]}" style="width:80px;">
+<span class="settings-note">${escapeHtml(f.suffix)}</span>
+</div>
+</label>`).join('')}
+</div>`;
+document.getElementById('diet-tag-thresholds-toggle').addEventListener('click', () => {
+dietTagThresholdsCollapsed = !dietTagThresholdsCollapsed;
+renderDietTagThresholds();
+});
+el.querySelectorAll('[data-diet-tag-threshold]').forEach((input) => {
+input.addEventListener('change', () => {
+const key = input.dataset.dietTagThreshold;
+const v = parseFloat(input.value);
+data.prefs.dietTagThresholds[key] = Number.isFinite(v) && v >= 0 ? v : DEFAULT_PREFS.dietTagThresholds[key];
+input.value = data.prefs.dietTagThresholds[key];
+renderRecipes();
+renderRecipeOverview();
 queueSave();
 });
 });
@@ -2115,6 +2329,14 @@ e.glycemicIndex = (glycemicInput.value.trim() !== '' && Number.isFinite(g) && g 
 delete e.glycemicStale;
 e.glycemicAssessedAt = new Date().toISOString();
 }
+const antioxidantInput = row.querySelector('[data-ref-antioxidant]');
+if (antioxidantInput) {
+// Same blank-means-not-applicable treatment as glycemicIndex above.
+const a = parseFloat(antioxidantInput.value);
+e.antioxidantMmol = (antioxidantInput.value.trim() !== '' && Number.isFinite(a) && a >= 0) ? a : null;
+delete e.antioxidantStale;
+e.antioxidantAssessedAt = new Date().toISOString();
+}
 e.allergens = [...row.querySelectorAll('[data-ref-allergen].active')].map((chip) => chip.dataset.refAllergen);
 e.dietaryFlags = [...row.querySelectorAll('[data-ref-dietary].active')].map((chip) => chip.dataset.refDietary);
 // Saving this form IS the real check dietaryFlagsStale exists to
@@ -2243,12 +2465,7 @@ return `<div class="settings-note" style="margin:0 0 10px;">Haven't made <strong
 }
 
 function recipesMatchingFilters() {
-return data.recipes.filter((r) => {
-if (activeMadeFilter === 'made' && !r.lastMade) return false;
-if (activeMadeFilter === 'notmade' && r.lastMade) return false;
-if (activeTagFilter && !(r.tags || []).includes(activeTagFilter)) return false;
-return true;
-});
+return recipesMatchingFacets(recipeDimensions());
 }
 
 function renderRecipes() {
@@ -2438,8 +2655,7 @@ btn.addEventListener('click', () => regenerateVariant(btn.dataset.recipeRegenera
 el.querySelectorAll('[data-recipe-goto]').forEach((link) => {
 link.addEventListener('click', () => {
 const id = link.dataset.recipeGoto;
-activeMadeFilter = null;
-activeTagFilter = null;
+recipeFacets = [];
 expandedRecipe = id;
 renderRecipes();
 renderRecipeOverview();
@@ -2707,6 +2923,7 @@ initRecipeRatingCategoriesSettings();
 renderReview();
 renderRecipes();
 renderDietInterests();
+renderDietTagThresholds();
 renderIngredientReference();
 await initRecipeOverviewPrefs();
 renderRecipeOverview();

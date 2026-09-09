@@ -1256,6 +1256,11 @@ margin:0 4px 4px 0;
    the name sat in the same 12px run as the rest of the line. */
 .ingdiet-name{font-size:14px;font-weight:600;color:var(--ink);}
 .ingdiet-form{font-weight:400;color:var(--muted);font-size:12px;}
+/* A macro's value cell when it's ALSO the reason a Diet-tags badge fired
+   (High protein/Low calorie/High fibre) -- the badge and the number it
+   came from should visibly read as the same claim. Same sage as the
+   fodmap-chip's own level-low, this app's established "good" colour. */
+.diet-good-value{color:var(--sage);font-weight:600;}
 /* A unit mismatch is a real gap in the totals, not routine informational
    copy -- a plain .settings-note (muted grey, identical to a dozen other
    captions on the same card) let it blend in and go unnoticed. Same

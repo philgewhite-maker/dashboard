@@ -914,13 +914,14 @@ return `Assess this single food ingredient: "${name}"${form ? ` (${form})` : ''}
 + '"nutrition":{"calories":0,"protein":0,"carbs":0,"sugars":0,"fat":0,"saturates":0,"fibre":0,"salt":0}, '
 + '"oligoCategory":"veg_fruit", '
 + '"fodmapGrams":{"fructans":0,"gos":0,"lactose":0,"excessFructose":0,"polyols":0}, '
-+ '"glycemicIndex":null, '
++ '"glycemicIndex":null, "antioxidantMmol":null, '
 + '"allergens":[], "dietaryFlags":[], "unitWeights":{}, "subs":[{"name":"","note":"","subQuantity":0,"subUnit":"","origQuantity":0,"origUnit":""}]}. '
 + 'unitBasis: pick an amount close to how much of this a person actually uses in ONE dish, not a fixed default -- {"quantity":100,"unit":"g"} for a vegetable, meat, or other ingredient normally used in bulk; a countable unit like {"quantity":1,"unit":"clove"} / {"quantity":1,"unit":"medium"} for produce typically counted rather than weighed; but for anything used in small, potent amounts -- a spice, herb, stock cube, extract, seasoning -- use ITS typical amount instead ({"quantity":1,"unit":"tsp"}, {"quantity":1,"unit":"clove"}, {"quantity":1,"unit":"cube"}...), never 100g of something no dish would ever contain 100g of. '
 + 'nutrition: standard nutrition-label figures, PER unitBasis. '
 + `oligoCategory: which published FODMAP threshold table this food's fructans/GOS are judged against -- "grain_legume_nut" for a grain, legume, pulse, or nut/seed; "veg_fruit" for a vegetable or fruit (use "veg_fruit" for anything that's neither, e.g. a spice, dairy, or meat). `
 + 'fodmapGrams: how many GRAMS OF THE ACTUAL CARBOHYDRATE (fructans, GOS, lactose, excess fructose, total polyols) this ingredient contains PER unitBasis -- NOT a low/moderate/high rating, an actual gram figure (can be a decimal like 0.15, or 0 if genuinely absent) -- these get compared against fixed published thresholds separately, so give your best real estimate of the amount present, not a category. '
 + 'glycemicIndex: this food\'s standard Glycemic Index (glucose = 100 reference), as a plain number 0-110, or null if it has no meaningful digestible carbohydrate at all (meat, fish, eggs, fats/oils, most herbs/spices in typical amounts) -- never force a number onto something GI genuinely doesn\'t apply to, and never guess one just to avoid null. '
++ 'antioxidantMmol: this food\'s total antioxidant content in mmol PER unitBasis, on the FRAP-assay scale used by Carlsen et al. (2010, "The total antioxidant content of more than 3100 foods, beverages, spices, herbs and supplements used worldwide", Nutrition Journal) -- anchor your estimate against real values from that study: dried cloves ~277 mmol/100g, walnuts ~22 mmol/100g, red wine ~2.5 mmol/100ml, most everyday vegetables/meats/grains under 1 mmol/100g. null if this ingredient has no meaningful antioxidant content (salt, sugar, most refined starches/oils) -- never force a number, never guess just to avoid null. '
 + `allergens: which of these EXACT strings this ingredient contains, as a subset of ${JSON.stringify(ALLERGEN_LIST)} -- [] if none apply. `
 + `dietaryFlags: which of these EXACT strings apply, as a subset of ${JSON.stringify(DIETARY_FLAGS)} -- e.g. "Pork" for bacon/chorizo/lard, "Alcohol" for wine/beer/spirits used as an ingredient (not a trace that fully cooks off), "Meat (non-vegetarian)" for any meat/poultry INCLUDING one already covered by Pork, "Animal product (non-vegan)" for meat, fish, dairy, eggs, or honey -- [] if none apply. `
 + 'unitWeights: OTHER units a DIFFERENT recipe might reasonably use for this SAME ingredient instead of your own unitBasis above -- e.g. if unitBasis is 100g, give {"medium":110,"large":150,"small":70} for an onion, or {"tsp":5,"tbsp":15} for a paste/puree, or {"clove":5} for garlic -- each value is how many GRAMS ONE of that unit weighs. This is what lets a recipe parsed as "1 medium onion" or "2 tsp tomato puree" be scaled correctly even though it wasn\'t assessed in that exact unit -- include 2-4 realistic alternates a recipe might plausibly use, or {} if this ingredient is essentially only ever measured the one way (e.g. already unitBasis itself, or something with no other sensible unit). '
@@ -964,6 +965,9 @@ fodmapGrams,
 // something that just wasn't assessed. Only a genuine in-range number
 // overrides that default.
 glycemicIndex: (typeof r.glycemicIndex === 'number' && isFinite(r.glycemicIndex) && r.glycemicIndex >= 0) ? r.glycemicIndex : null,
+// Same null-means-not-applicable treatment as glycemicIndex above (salt,
+// sugar, most refined oils/starches genuinely have none).
+antioxidantMmol: (typeof r.antioxidantMmol === 'number' && isFinite(r.antioxidantMmol) && r.antioxidantMmol >= 0) ? r.antioxidantMmol : null,
 allergens: Array.isArray(r.allergens) ? r.allergens.filter((a) => ALLERGEN_LIST.includes(a)) : [],
 dietaryFlags: Array.isArray(r.dietaryFlags) ? r.dietaryFlags.filter((f) => DIETARY_FLAGS.includes(f)) : [],
 // No id assigned here -- ai.js stays a pure call-and-normalise layer;

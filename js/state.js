@@ -70,6 +70,20 @@ switchOffersCheckedAt: '', // ISO date of the last bank-switch-offers scan -- dr
 // a recipe nobody's touched this preference on looks exactly as it
 // always has, same rule the whole diet-analysis feature follows.
 dietInterests: ['macros', 'fodmap', 'diabetic', 'allergens', 'dietaryFlags'],
+// Cutoffs behind the auto-derived "Diet tags" (High protein/Low
+// calorie/High fibre/High antioxidant -- see recipes.js's
+// recipeDietTags). Unlike the FODMAP gram thresholds or glycemic-load
+// bands above (published, clinical, deliberately fixed), none of these
+// four has one universal "correct" number -- highProteinPctEnergy is
+// the one real published figure here (EU "high protein" claim, >=20%
+// of energy from protein); the other three are reasonable defaults a
+// household is meant to actually tune, not settled science.
+dietTagThresholds: {
+highProteinPctEnergy: 20,
+lowCalorieKcalPerServing: 400,
+highFibrePerServingG: 6,
+highAntioxidantMmolPerServing: 5,
+},
 };
 
 // Each mail search is one row in Settings: a kind, its value, and its own
@@ -1258,6 +1272,11 @@ if (!e.unitBasisRatios || typeof e.unitBasisRatios !== 'object') e.unitBasisRati
 // be told apart from "never checked" any other way), so it's flagged
 // for the same lazy re-check next time the ingredient is used.
 if (!e.glycemicAssessedAt) e.glycemicStale = true;
+// Antioxidant content (mmol/100... per unitBasis, FRAP assay) -- same
+// staleness pattern again, for the same reason: `antioxidantMmol` can
+// genuinely be `null` ("negligible"), so only a real timestamp can tell
+// "checked, none" apart from "never checked".
+if (!e.antioxidantAssessedAt) e.antioxidantStale = true;
 });
 // User-controlled "these are the same ingredient" merges (recipes.js's
 // mergeIngredientEntries) -- e.g. "eggplant" and "aubergine", or "brown
