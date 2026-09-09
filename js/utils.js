@@ -600,6 +600,33 @@ return false;
 }
 }
 
+// The SAME "Android's own MIME type can't be trusted" problem sniffsAsHeic
+// exists for, generalised to the common raster formats too -- confirmed
+// live: a plain JPEG shared straight into Capture Inbox hit the exact same
+// "just a link, no thumbnail" failure a HEIC file did before sniffsAsHeic
+// existed, because it *also* arrived with no usable image/... type. Magic
+// bytes only (JPEG/PNG/GIF/BMP/WEBP's own fixed header signatures) --
+// deliberately NOT a real decode attempt (unlike resizeImageToBlob, which
+// needs one and has its own 10s timeout guard for exactly this reason):
+// this only has to answer "is this worth trying to decode as a photo at
+// all", cheaply and for every captured file, not "can it actually be
+// decoded" -- a real decode failure still surfaces via resizeImageToBlob's
+// own timeout/reject afterwards, same as any other bad image already does.
+async function sniffsAsRasterImage(file) {
+try {
+const head = new Uint8Array(await file.slice(0, 12).arrayBuffer());
+if (head[0] === 0xFF && head[1] === 0xD8 && head[2] === 0xFF) return true; // JPEG
+if (head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4E && head[3] === 0x47) return true; // PNG
+if (head[0] === 0x47 && head[1] === 0x49 && head[2] === 0x46) return true; // GIF
+if (head[0] === 0x42 && head[1] === 0x4D) return true; // BMP
+const asText = String.fromCharCode(...head);
+if (asText.startsWith('RIFF') && asText.slice(8, 12) === 'WEBP') return true;
+return false;
+} catch (e) {
+return false;
+}
+}
+
 // heic-to (https://github.com/hoppergee/heic-to) wraps libheif compiled to
 // WASM. Loaded from CDN rather than bundled, since this project has no
 // build step — everything else here is a plain ES module import too. The
@@ -1067,6 +1094,6 @@ escapeHtml, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTra
 findMentions, COUNTRY_NAME_TO_NATIONALITY,
 resizeImageToBlob, fileToBase64, loadImage, cropThumbnailToBlob,
 hashFile, captureDateOf, betterCaptureDate, dateFromFilename,
-ensureBrowserReadableImage, setPhotoFallback, looksLikeHeic, sniffsAsHeic,
+ensureBrowserReadableImage, setPhotoFallback, looksLikeHeic, sniffsAsHeic, sniffsAsRasterImage,
 contentCropBounds, cropToContentBlob, classifyProfileUpload, looksLikeSameScreenshotPieces, screenshotsLookCombinable,
 };

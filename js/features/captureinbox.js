@@ -40,7 +40,7 @@
 // that can quietly grow apart.
 import { data, queueSave, blankCaptureBatch } from '../state.js';
 import { photoDelete } from '../db.js';
-import { todayStr, escapeHtml, hydratePhotoBackgrounds, resizeImageToBlob, scrollAndFlash, looksLikeHeic, sniffsAsHeic } from '../utils.js';
+import { todayStr, escapeHtml, hydratePhotoBackgrounds, resizeImageToBlob, scrollAndFlash, looksLikeHeic, sniffsAsHeic, sniffsAsRasterImage } from '../utils.js';
 import { storePhoto, uploadAttachment, deleteAttachment, fetchAttachment, openAttachment, formatBytes } from '../files.js';
 import { looksLikeRenphoCsv, parseRenphoCsv, mergeRenphoDaily, looksLikeHrvCsv } from './renpho.js';
 import { legTargetPickerHtml, bindLegTargetPicker, readLegTargetPicker, applyLegExtraction } from './travel.js';
@@ -62,6 +62,12 @@ if ((file.type || '').startsWith('image/')) return 'photo';
 // the real photo path (resizeImageToBlob -> ensureBrowserReadableImage)
 // already handles. Confirmed live.
 if (looksLikeHeic(file) || await sniffsAsHeic(file)) return 'photo';
+// The exact same problem, generalised: a perfectly ordinary JPEG/PNG
+// screenshot can ALSO arrive with no usable image/... type -- confirmed
+// live, the HEIC fix above didn't catch it because it isn't HEIC. Cheap
+// magic-byte check (no real decode attempted), same reasoning as the
+// HEIC one just above.
+if (await sniffsAsRasterImage(file)) return 'photo';
 try {
 const head = await file.slice(0, 300).text();
 if (looksLikeRenphoCsv(head)) return 'renpho-csv';
