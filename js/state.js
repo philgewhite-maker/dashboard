@@ -353,7 +353,8 @@ other: ['when'],
 function blankPlannerEntry(fields = {}) {
 return {
 id: uid(),
-date: '', // ISO yyyy-mm-dd -- the day box this sits in
+date: '', // ISO yyyy-mm-dd -- the day box this sits in (its span's START, once endDate is set)
+endDate: '', // '' means single-day (today's behaviour); set means this entry also covers every day through endDate inclusive -- see planner.js's entryCoversDay
 tripId: '', // '' for the main grid, else the trip this entry belongs to
 kind: 'connection', // 'connection' | 'activity'
 connectionId: '', // set when kind === 'connection'

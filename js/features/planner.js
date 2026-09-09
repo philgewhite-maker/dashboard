@@ -50,8 +50,24 @@ window.scrollBy(0, Math.ceil(((y - (window.innerHeight - PLANNER_SCROLL_EDGE)) /
 }
 }
 
+// Plain day-count from date string `a` to `b` (positive when b is later).
+// dateStrAdd's own UTC-noon-free construction, run in reverse -- kept
+// local rather than a new utils.js export since nothing outside this
+// file needs a generic date-delta yet.
+function daysBetween(a, b) {
+const [ay, am, ad] = a.split('-').map(Number);
+const [by, bm, bd] = b.split('-').map(Number);
+return Math.round((Date.UTC(by, bm - 1, bd) - Date.UTC(ay, am - 1, ad)) / 86400000);
+}
+
+// True when `dateStr` falls anywhere in the entry's own span -- a single
+// day (no endDate) is just the degenerate one-day case of the same check.
+function entryCoversDay(entry, dateStr) {
+return dateStr >= entry.date && dateStr <= (entry.endDate || entry.date);
+}
+
 function entriesForDay(date, tripId = '') {
-return data.plannerEntries.filter((e) => e.date === date && (e.tripId || '') === (tripId || ''));
+return data.plannerEntries.filter((e) => entryCoversDay(e, date) && (e.tripId || '') === (tripId || ''));
 }
 
 function placeEntry(kind, refId, date, tripId = '') {
@@ -67,11 +83,45 @@ renderPlanner();
 // Also updates tripId to match wherever it was dropped -- an entry moved
 // from the main grid into a trip's own mini-grid (or back) should belong
 // to that zone, not silently keep pointing at the old one.
+//
+// A multi-day entry renders once per day it spans (see entryCoversDay),
+// so the SAME entry can be the thing being dragged regardless of which
+// of its own occurrences was actually grabbed -- HTML5 drag-and-drop
+// gives no way to tell those apart. Two things follow from that:
+// - Dropping shifts BOTH date and endDate by the same delta, preserving
+//   the span's length ("this is where it now starts"), rather than
+//   overwriting date alone and leaving endDate stale relative to it.
+// - Dropping back onto a day that's already within the entry's OWN
+//   current span (re-grabbing, say, its 3rd-day occurrence and letting
+//   go without really moving it) is a no-op, not a reshift -- otherwise
+//   an accidental re-drop onto its own box would silently yank the
+//   whole span to start there instead.
 function moveEntry(entryId, date, tripId = '') {
 const entry = data.plannerEntries.find((e) => e.id === entryId);
 if (!entry) return;
+if ((entry.tripId || '') === (tripId || '') && entryCoversDay(entry, date)) return;
+if (entry.endDate) {
+const delta = daysBetween(entry.date, date);
+entry.endDate = dateStrAdd(entry.endDate, delta);
+}
 entry.date = date;
 entry.tripId = tripId;
+queueSave();
+renderPlanner();
+}
+
+// The »/« buttons on a placed entry -- delta +1 extends the span one day
+// later, -1 pulls it back one day (clearing endDate, i.e. back to
+// single-day, once it would no longer be after `date`).
+function extendEntry(entryId, delta) {
+const entry = data.plannerEntries.find((e) => e.id === entryId);
+if (!entry) return;
+if (delta > 0) {
+entry.endDate = dateStrAdd(entry.endDate || entry.date, 1);
+} else {
+const shrunk = dateStrAdd(entry.endDate || entry.date, -1);
+entry.endDate = shrunk > entry.date ? shrunk : '';
+}
 queueSave();
 renderPlanner();
 }
@@ -155,6 +205,8 @@ return `<div class="planner-entry alloc-card status-${entry.status}" draggable="
 <span class="planner-entry-link"${openAttr}>${avatar}<span class="planner-entry-label">${label}</span></span>
 <div class="planner-entry-controls">
 <button type="button" class="planner-status-dot status-${entry.status}" data-planner-toggle-status="${entry.id}" title="${entry.status === 'draft' ? 'Draft' : 'Firm'} — click to mark ${entry.status === 'draft' ? 'firm' : 'draft'}"></button>
+${entry.endDate ? `<button type="button" class="planner-span-btn" data-planner-shrink="${entry.id}" title="Shrink by one day">&laquo;</button>` : ''}
+<button type="button" class="planner-span-btn" data-planner-extend="${entry.id}" title="Extend to the next day">&raquo;</button>
 ${entry.tripId ? `<span class="planner-entry-trip-link" data-planner-open-trip="${entry.tripId}" title="Open this trip on the Travel tab">&#9992;</span>` : ''}
 <span class="planner-entry-remove" data-planner-remove="${entry.id}" title="Remove">&times;</span>
 </div>
@@ -171,6 +223,53 @@ if (!segments.length) return '';
 return `<div class="planner-day-stripe">${segments.map((s) => `<span class="stripe-seg stripe-${escapeHtml(s.colour)}" title="${escapeHtml(s.title)}"></span>`).join('')}</div>`;
 }
 
+// The connection name or activity title a plannerEntryHtml card ALSO
+// needs, factored out only for the mirror chip below (which wants just
+// the text, not the avatar/open-link plannerEntryHtml's own version
+// builds alongside it) -- null when the thing it pointed at was since
+// deleted, same "quietly omit" rule plannerEntryHtml already follows.
+function entryLabel(entry) {
+if (entry.kind === 'connection') {
+const c = data.connections.find((x) => x.id === entry.connectionId);
+return c ? c.name : null;
+}
+const a = data.plannerActivities.find((x) => x.id === entry.activityId);
+return a ? a.title : null;
+}
+
+// Everything placed on this same calendar date anywhere ELSE -- the
+// main grid, or any other trip -- regardless of whether that other
+// scope's own grid happens to be scrolled into view right now.
+function mirrorEntriesForDay(dateStr, ownTripId) {
+return data.plannerEntries.filter((e) => (e.tripId || '') !== (ownTripId || '') && entryCoversDay(e, dateStr));
+}
+
+// Read-only pointers to entries placed elsewhere on this same day --
+// same visual shape as legChipsForDay's own chips, its own class since
+// it's a conceptually different kind (an entry living somewhere else,
+// not a leg belonging to THIS trip). Never draggable, no remove
+// control -- the entry still only belongs to, and is only editable
+// from, wherever it actually lives; clicking just scrolls there
+// (renderPlanner always renders the main grid and every dated trip's
+// mini-grid together on the one page, so the real card is always
+// reachable this way, no cross-tab jump needed either direction).
+function plannerMirrorChipsHtml(dateStr, ownTripId) {
+const chips = mirrorEntriesForDay(dateStr, ownTripId).map((e) => {
+const label = entryLabel(e);
+if (!label) return '';
+let ownerLabel;
+if (e.tripId) {
+const owner = data.trips.find((t) => t.id === e.tripId);
+if (!owner) return ''; // the owning trip was since deleted -- dangling, skip
+ownerLabel = tripLabel(owner);
+} else {
+ownerLabel = 'Main planner';
+}
+return `<span class="planner-mirror-chip" data-planner-goto-entry="${e.id}" title="Also placed on this day, in ${escapeHtml(ownerLabel)} — click to jump there">${escapeHtml(label)} <span class="planner-mirror-chip-source">(${escapeHtml(ownerLabel)})</span></span>`;
+}).filter(Boolean).join('');
+return chips ? `<div class="planner-mirror-chips">${chips}</div>` : '';
+}
+
 function plannerDayHtml(dateStr, tripId = '', legChipsHtml = '') {
 const entries = entriesForDay(dateStr, tripId);
 const addKey = `${dateStr}|${tripId}`;
@@ -178,6 +277,7 @@ const addOpen = plannerAddOpenKeys.has(addKey);
 return `<div class="planner-day alloc-target" data-planner-day="${dateStr}" data-planner-trip="${tripId}">
 <div class="planner-day-label">${formatDayLabel(dateStr)}<button type="button" class="planner-day-add-toggle" data-planner-add-toggle="${dateStr}" data-planner-add-trip="${tripId}" title="Add something for this day">+</button></div>
 ${legChipsHtml}
+${plannerMirrorChipsHtml(dateStr, tripId)}
 <div class="planner-day-entries">${entries.map(plannerEntryHtml).join('')}</div>
 ${addOpen ? `<input type="text" autocomplete="off" class="planner-day-add-input" placeholder="Add & press Enter…" data-planner-add-input="${dateStr}" data-planner-add-trip="${tripId}">` : ''}
 ${airbnbStripeHtml(dateStr)}
@@ -291,6 +391,11 @@ const body = matches.length
 return `<h4>Connections in ${escapeHtml(trip.destinations.join(', '))}</h4>${body}`;
 }
 
+// Shared with plannerMirrorChipsHtml's own label for a trip-owned entry.
+function tripLabel(trip) {
+return trip.title || trip.destinations.join(', ') || 'Trip';
+}
+
 function tripPanelHtml(trip) {
 const { start, end } = tripRangeFor(trip);
 if (!start || !end || start > end) return ''; // nothing dated yet -- nothing to lay a grid out against
@@ -301,7 +406,7 @@ let cur = start;
 // covers any real holiday with headroom.
 for (let i = 0; i < 60 && cur <= end; i++) { days.push(cur); cur = dateStrAdd(cur, 1); }
 return `<div class="planner-trip-panel">
-<h3 class="planner-trip-title-link" data-planner-open-trip="${trip.id}" title="Open this trip on the Travel tab">${escapeHtml(trip.title || trip.destinations.join(', ') || 'Trip')}</h3>
+<h3 class="planner-trip-title-link" data-planner-open-trip="${trip.id}" title="Open this trip on the Travel tab">${escapeHtml(tripLabel(trip))}</h3>
 <div class="planner-grid planner-grid-trip">${days.map((d) => plannerDayHtml(d, trip.id, legChipsForDay(trip, d))).join('')}</div>
 ${destinationConnectionsPoolHtml(trip)}
 </div>`;
@@ -454,6 +559,18 @@ if (entry) setEntryStatus(entry.id, entry.status === 'draft' ? 'firm' : 'draft')
 });
 root.querySelectorAll('[data-planner-remove]').forEach((btn) => {
 btn.addEventListener('click', () => removeEntry(btn.dataset.plannerRemove));
+});
+root.querySelectorAll('[data-planner-extend]').forEach((btn) => {
+btn.addEventListener('click', () => extendEntry(btn.dataset.plannerExtend, 1));
+});
+root.querySelectorAll('[data-planner-shrink]').forEach((btn) => {
+btn.addEventListener('click', () => extendEntry(btn.dataset.plannerShrink, -1));
+});
+// A mirror chip is read-only -- this just jumps to the real card, same
+// scrollAndFlash "record-reference" convention every other in-app
+// cross-reference already uses.
+root.querySelectorAll('[data-planner-goto-entry]').forEach((chip) => {
+chip.addEventListener('click', () => scrollAndFlash(`[data-planner-entry="${chip.dataset.plannerGotoEntry}"]`));
 });
 root.querySelectorAll('[data-planner-del-activity]').forEach((btn) => {
 btn.addEventListener('click', () => {
