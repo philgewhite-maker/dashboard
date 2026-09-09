@@ -1753,7 +1753,8 @@ cutNote = ` — cut by about ${cutQty < 1 ? cutQty.toFixed(2) : cutQty.toFixed(1
 return `<span class="fodmap-chip level-${level}" title="${escapeHtml(k)}">${escapeHtml(k)}: ${escapeHtml(level)} (${grams < 0.01 ? '<0.01' : grams.toFixed(2)}g)${cutNote}</span>`;
 }).join(' ');
 }
-if (dietInterestOn('diabetic') && entry.glycemicIndex != null) {
+if (dietInterestOn('diabetic')) {
+if (entry.glycemicIndex != null) {
 // Same shape as the FODMAP chips above -- available carbs (total minus
 // fibre) x GI / 100, scaled the same portion-relative way, judged
 // against the fixed published Glycemic Load bands.
@@ -1762,6 +1763,22 @@ const load = netCarbs * scale * (entry.glycemicIndex / 100);
 const level = glycemicLevelFromLoad(load);
 bumpWorst(level);
 glycemicChip = `<span class="fodmap-chip level-${level}" title="glycemic load">glycemic load: ${escapeHtml(level)} (${load < 0.1 ? '<0.1' : load.toFixed(1)}, GI ${entry.glycemicIndex})</span>`;
+} else if (entry.glycemicStale) {
+// Never actually checked (predates the field, or was never assessed)
+// -- silently contributing 0 to the dish-level total would make that
+// total look "clean" for the wrong reason, indistinguishable from a
+// genuine "no meaningful carbs" verdict. Confirmed live pain point:
+// a dish's own glycemic load read "none" with nothing per-line to
+// explain why -- this is what makes that explicable instead of a
+// black box.
+glycemicChip = `<span class="settings-note">glycemic load: not yet assessed — <span class="inline-goto-link" data-recipe-analyse="${r.id}">refresh</span> to check</span>`;
+} else {
+// Genuinely assessed and found to have no meaningful digestible
+// carbohydrate (meat, oil, most herbs/spices) -- shown explicitly
+// rather than just silently omitted, so "why isn't this ingredient
+// contributing to the total" always has a visible answer.
+glycemicChip = '<span class="settings-note">glycemic load: n/a (no significant digestible carbs)</span>';
+}
 }
 }
 // The override control only earns its place on a line that actually
