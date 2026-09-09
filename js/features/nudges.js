@@ -587,19 +587,79 @@ renderNudges();
 });
 }
 
+// A cheap LOCAL stand-in for "roughly how urgent", used only to trim the
+// candidate list below -- not a substitute for the AI's own judgement
+// (which still sees every signal on whatever it's actually shown).
+// Larger daysSince/daysUntil-till-soon/priority/priorStreak/progress-gap
+// all read as more worth surfacing; an item with no numeric signal at
+// all (a bare "creative" suggestion, say) scores 0, not excluded --
+// candidatesForRanking's own per-category round-robin below is what
+// keeps a 0-scoring category from being shut out entirely.
+function urgencyScore(n) {
+const s = n.signals || {};
+let score = 0;
+if (typeof s.daysSince === 'number' && isFinite(s.daysSince)) score = Math.max(score, s.daysSince);
+if (typeof s.daysUntil === 'number' && isFinite(s.daysUntil)) score = Math.max(score, 30 - s.daysUntil);
+if (typeof s.priority === 'number') score += s.priority * 5;
+if (typeof s.priorStreak === 'number') score += s.priorStreak;
+if (typeof s.progress === 'number') score += (100 - s.progress) / 5;
+if (typeof s.count === 'number') score += s.count;
+if (typeof s.gaps === 'number') score += s.gaps * 3;
+if (typeof s.deltaKg === 'number') score += Math.abs(s.deltaKg) * 5;
+return score;
+}
+
+// Caps what actually gets shipped to the ranking call -- confirmed live
+// as a real cost problem: an unbounded pool (every overdue connection,
+// every open todo, every stale task...) was being JSON-stringified into
+// the prompt IN FULL every single call, which scales with how much data
+// is in the app, not with the 6 items that ever get chosen. Same
+// category-round-robin shape diversePick already uses for its own
+// instant fallback, so a rare/low-signal category still gets a fair
+// shot -- but deterministic (urgency-sorted within each category, no
+// Math.random() anywhere), unlike diversePick's own shuffle: an
+// unchanged pool has to produce the exact same trimmed set every time,
+// or renderNudges' aiCache (keyed on the pool's own signature) would
+// never hit, turning "nothing actually changed" into a fresh, full-price
+// call on every single render.
+const RANK_CANDIDATE_CAP = 60;
+function candidatesForRanking(pool) {
+if (pool.length <= RANK_CANDIDATE_CAP) return pool;
+const byCategory = new Map();
+pool.forEach((item) => {
+const cat = item.category || 'other';
+if (!byCategory.has(cat)) byCategory.set(cat, []);
+byCategory.get(cat).push(item);
+});
+byCategory.forEach((items) => items.sort((a, b) => urgencyScore(b) - urgencyScore(a)));
+const cats = [...byCategory.keys()].sort();
+const picked = [];
+for (let round = 0; picked.length < RANK_CANDIDATE_CAP; round++) {
+let addedThisRound = false;
+for (const cat of cats) {
+if (picked.length >= RANK_CANDIDATE_CAP) break;
+const items = byCategory.get(cat);
+if (items[round]) { picked.push(items[round]); addedThisRound = true; }
+}
+if (!addedThisRound) break;
+}
+return picked;
+}
+
 // Asks Claude to pick and order the TOP_N items worth surfacing right now,
 // balancing urgency (deadlines/expiries/events), importance (priority/
 // rating), and neglect (long overdue). Returns pool items, not rewritten
 // text — the model only chooses indices, so a bad response can never
 // hallucinate a click target that doesn't exist.
 async function rankWithAI(pool) {
-const items = pool.map((n, i) => ({ i, text: n.text, category: n.category || 'other', ...n.signals }));
+const candidates = candidatesForRanking(pool);
+const items = candidates.map((n, i) => ({ i, text: n.text, category: n.category || 'other', ...n.signals }));
 const prompt = `You're picking which reminders to surface on someone's personal dashboard home screen. Below is a JSON array of candidate reminders, each with an index "i", the reminder text, a "category" (dating, task, health, business, habit, goal, job, voucher, calendar, creative), and signal fields explaining why it might matter: daysSince/daysUntil (age or time to a deadline), priority (1-5, how much they personally rated that person/goal), progress (% complete, lower means more room to matter), priorStreak (a habit streak that just broke — bigger is a bigger loss), stage/kind (further context). Choose the ${TOP_N} most worth showing RIGHT NOW. Balance genuine time pressure (something expiring or happening soon), importance (high priority/rating items), and neglect (things aged the longest) — don't just pick the single biggest number in one field. Also actively prefer a MIX of categories over filling most slots from one — a panel that's nothing but "reach out to so-and-so" reads as naggy and one-note even when each one is individually justified. Only repeat a category if the pool genuinely has nothing else worth surfacing. Avoid picking near-duplicate items about the same person or thing. Respond with ONLY a JSON array of the chosen "i" values, most important first, e.g. [3,0,7,1]. No other text.
 
 ${JSON.stringify(items)}`;
 const { data: order } = await callTextJson(prompt, 300, RANK_MODEL, 'Smart nudges');
 if (!Array.isArray(order)) throw new Error('Unexpected response shape from ranking call');
-const picked = order.filter((i) => Number.isInteger(i) && i >= 0 && i < pool.length).map((i) => pool[i]);
+const picked = order.filter((i) => Number.isInteger(i) && i >= 0 && i < candidates.length).map((i) => candidates[i]);
 return picked.slice(0, TOP_N);
 }
 
