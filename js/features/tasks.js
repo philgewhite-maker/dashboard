@@ -114,12 +114,27 @@ return `<div class="task-source">Created ${escapeHtml(d.toLocaleString('en-GB', 
 // One row per attachment. The name is a button rather than a link because
 // the bytes may not be local yet — it fetches (or reads the cache) and then
 // hands the browser a download.
+//
+// An image attachment (most commonly a photo/screenshot shared straight
+// into a Task via Capture Inbox's "Attach to a Task") also gets a real
+// thumbnail, not just a filename -- confirmed live pain point: a shared
+// screenshot showed up as a bare text link with no visual preview at
+// all. `a.id` is already a storePhoto() id regardless of how the
+// attachment arrived (storePhoto uploads through the exact same
+// endpoint uploadAttachment does, id and all -- see files.js), the same
+// id-space t.photoIds' own gallery just below already resolves through
+// hydratePhotoBackgrounds/photoFallback, so this reuses that unchanged
+// rather than a new image-loading path.
 function attachmentsHtml(t) {
-const rows = (t.attachments || []).map((a) => `<div class="attach-row">
+const rows = (t.attachments || []).map((a) => {
+const isImage = (a.type || '').startsWith('image/');
+return `<div class="attach-row">
+${isImage ? `<span class="thumb-img attach-thumb" data-photo-bg="${escapeHtml(a.id)}"></span>` : ''}
 <button class="attach-name" type="button" data-attach-open="${t.id}" data-attach-id="${escapeHtml(a.id)}" title="Download ${escapeHtml(a.name || 'attachment')}">${escapeHtml(a.name || 'attachment')}</button>
 <span class="attach-size">${escapeHtml(formatBytes(a.size))}</span>
 <span class="tag-x" data-attach-remove="${t.id}" data-attach-id="${escapeHtml(a.id)}" title="Remove">&times;</span>
-</div>`).join('');
+</div>`;
+}).join('');
 return `<div class="task-attachments">
 <div class="attach-head">Attachments <span class="attach-hint">any file — synced to your other devices</span></div>
 ${rows}

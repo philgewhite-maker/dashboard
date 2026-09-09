@@ -665,6 +665,16 @@ text-overflow:ellipsis;
 white-space:nowrap;
 }
 .attach-name:disabled{cursor:default;opacity:0.6;}
+/* Only present on an image attachment (see attachmentsHtml) -- a bit
+   smaller than .task-photos' own 56px gallery thumbs since this sits
+   inline in a compact row, not a dedicated photo grid. */
+.attach-thumb{
+display:block;flex-shrink:0;
+width:36px;height:36px;
+border-radius:5px;overflow:hidden;
+background:var(--card);
+background-size:cover;background-position:center;
+}
 .attach-size{
 font-family:'IBM Plex Mono',monospace;
 font-size:11px;
@@ -2678,7 +2688,16 @@ color:var(--muted);
    the grid out to 330px against a 269px-wide phone panel. Any FUTURE
    direct child, in any class, needs this same floor -- no reason to make
    it opt-in per class again. */
-.details-grid > *{min-width:0;}
+/* All four collapse to one column below -- every one of them needs the
+   same floor on its OWN direct children, not just .details-grid (which
+   is where this rule started out -- confirmed live AGAIN here: the Task
+   detail panel's "Part of" <select> lists every other task's title as
+   an <option>, and a long one is enough to set that select's own
+   min-content width, which .task-detail-grid's missing floor let blow
+   the grid past the panel exactly the way the comment above already
+   warned a future miss would). Applied to all four at once rather than
+   fixing them one at a time as each is separately caught. */
+.details-grid > *, .task-detail-grid > *, .tinder-fields > *, .pref-grid > *{min-width:0;}
 .details-grid{grid-template-columns:1fr;}
 .task-detail-grid{grid-template-columns:1fr;}
 .tinder-fields{grid-template-columns:1fr;}
