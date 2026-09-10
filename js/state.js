@@ -588,6 +588,12 @@ contactMatchedBy: '', unmatchedAt: '',
 likes: '', notes: '', chatLog: '', chatLogWhatsApp: '', chatLogTelegram: '',
 todos: [], ratings: {}, driveLink: '', photosAlbumUrl: '', photosPersonUrl: '',
 distance: '', matchedOn: '', tinderMatchId: '', tinderLastScrapedAt: '', attentionSnoozedUntil: '',
+// Import values this person's re-scrape keeps offering that you've
+// already judged wrong -- {field, value} where field is a FIELD_MAP
+// label ("Height") and value is the exact incoming string to stop
+// prompting to apply. See tinderimport.js's isImportIgnored / the
+// "ignore" control on a bulk-review conflict row.
+importIgnored: [],
 // A family member the Telegram bot can message -- NOT a dating match,
 // but still a real connection record (see telegramfamily.js's own
 // header comment for why this reuses `connections` rather than a
@@ -989,6 +995,7 @@ if (typeof c.priorityFlag !== 'boolean') c.priorityFlag = false;
 if (typeof c.isFamily !== 'boolean') c.isFamily = false;
 if (typeof c.telegramChatId !== 'string') c.telegramChatId = '';
 if (typeof c.telegramUsername !== 'string') c.telegramUsername = '';
+if (!Array.isArray(c.importIgnored)) c.importIgnored = [];
 if (!Array.isArray(c.photoIds)) c.photoIds = c.photoId ? [c.photoId] : [];
 if (typeof c.photoId !== 'string') c.photoId = c.photoIds[0] || null;
 if (!Array.isArray(c.languages)) c.languages = [];

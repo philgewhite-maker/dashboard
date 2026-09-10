@@ -405,7 +405,11 @@ margin:10px 0 4px;padding-top:8px;border-top:1px dashed var(--line);
 .tinder-bulk-thumb-empty{border:1px dashed var(--line);}
 .tinder-bulk-info{flex:1;min-width:0;font-size:12px;line-height:1.4;}
 .tinder-bulk-info .settings-note{font-size:11px;}
-.tinder-bulk-field-row{display:block;margin-left:44px;font-size:11px;color:var(--amber);}
+.tinder-bulk-field-row{display:flex;align-items:center;gap:6px;margin-left:44px;font-size:11px;color:var(--amber);}
+.tinder-bulk-field-row label{display:block;cursor:pointer;}
+.tinder-bulk-ignore-btn{flex:0 0 auto;font-size:10px;padding:1px 6px;border:1px solid var(--line);border-radius:5px;background:transparent;color:var(--muted);cursor:pointer;}
+.tinder-bulk-ignore-btn:hover{border-color:var(--amber);color:var(--amber);}
+.tinder-bulk-ignored-line{margin-left:44px;font-size:11px;}
 .tinder-next-step{margin:6px 0;}
 .tinder-hint-chips{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:5px;}
 .tinder-hint-chip{

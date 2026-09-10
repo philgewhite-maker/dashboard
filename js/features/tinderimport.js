@@ -1426,7 +1426,8 @@ ${lines.applied.length ? `<span class="settings-note">${escapeHtml(lines.applied
 </label>
 <button type="button" class="sync-btn tinder-inline-btn" data-tinder-bulk-review="${i}" title="Open in the full one-by-one reviewer instead of bulk-approving it">Review</button>
 </div>
-${lines.pending.map((f) => `<label class="tinder-bulk-field-row"><input type="checkbox" data-bulk-field-apply="${i}:${f.fieldIndex}"${f.apply ? ' checked' : ''}> ${escapeHtml(f.label)}: "${escapeHtml(f.stored)}" → "${escapeHtml(f.fresh)}"</label>`).join('')}
+${lines.pending.map((f) => `<div class="tinder-bulk-field-row"><label style="flex:1;min-width:0;"><input type="checkbox" data-bulk-field-apply="${i}:${f.fieldIndex}"${f.apply ? ' checked' : ''}> ${escapeHtml(f.label)}: "${escapeHtml(f.stored)}" → "${escapeHtml(f.fresh)}"</label><button type="button" class="tinder-bulk-ignore-btn" data-bulk-field-ignore="${i}:${f.fieldIndex}" title="Stop offering Tinder's &quot;${escapeHtml(f.fresh)}&quot; for ${escapeHtml(f.label)} on this person">ignore</button></div>`).join('')}
+${conn && (conn.importIgnored || []).length ? `<div class="settings-note tinder-bulk-ignored-line">Ignoring Tinder's: ${conn.importIgnored.map((e, ei) => `${escapeHtml(e.field)} "${escapeHtml(e.value)}" <span class="tag-x" data-bulk-ignore-remove="${escapeHtml(conn.id)}:${ei}" title="Stop ignoring — let this prompt again">&times;</span>`).join(' &middot; ')}</div>` : ''}
 </div>`;
 }).join('')}
 </div>
@@ -1466,6 +1467,33 @@ el.querySelectorAll('[data-bulk-field-apply]').forEach((cb) => {
 cb.addEventListener('change', () => {
 const [rowIdx, fieldIdx] = cb.dataset.bulkFieldApply.split(':').map((s) => parseInt(s, 10));
 bulkQueue[rowIdx].p.fields[fieldIdx].apply = cb.checked;
+renderBulk();
+});
+});
+el.querySelectorAll('[data-bulk-field-ignore]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const [rowIdx, fieldIdx] = btn.dataset.bulkFieldIgnore.split(':').map((s) => parseInt(s, 10));
+const p = bulkQueue[rowIdx].p;
+const f = p.fields[fieldIdx];
+const conn = data.connections.find((c) => c.id === p.chosenId);
+if (!conn || !f) return;
+if (!Array.isArray(conn.importIgnored)) conn.importIgnored = [];
+const value = f.value.trim();
+if (!conn.importIgnored.some((e) => e.field === f.label && e.value === value)) {
+conn.importIgnored.push({ field: f.label, value });
+}
+f.apply = false;
+queueSave();
+renderBulk();
+});
+});
+el.querySelectorAll('[data-bulk-ignore-remove]').forEach((x) => {
+x.addEventListener('click', () => {
+const [connId, idx] = x.dataset.bulkIgnoreRemove.split(':');
+const conn = data.connections.find((c) => c.id === connId);
+if (!conn || !Array.isArray(conn.importIgnored)) return;
+conn.importIgnored.splice(parseInt(idx, 10), 1);
+queueSave();
 renderBulk();
 });
 });
@@ -2446,6 +2474,16 @@ refreshOverrides();
 // to lose by leaving it alone) and `pending` (a FIELD_MAP field whose
 // stored value genuinely differs from the fresh one, offered as a
 // checkbox reflecting current apply state either way).
+// A specific incoming value the user has told us to stop offering for
+// this person and field -- see conn.importIgnored (state.js) and the
+// "ignore" control on a bulk-review conflict row. Case-insensitive
+// trimmed match, same as every other value comparison in this file.
+function isImportIgnored(conn, label, freshValue) {
+if (!conn || !Array.isArray(conn.importIgnored)) return false;
+const v = String(freshValue || '').trim().toLowerCase();
+return conn.importIgnored.some((e) => e.field === label && String(e.value || '').trim().toLowerCase() === v);
+}
+
 function bulkRowFieldLines(p, conn) {
 if (!conn) return { applied: ['No changes'], pending: [] };
 const applied = [];
@@ -2469,7 +2507,11 @@ if (f.label === 'Chat history' || !FIELD_MAP[f.label]) return;
 const stored = String(conn[FIELD_MAP[f.label]] || '').trim();
 const fresh = f.value.trim();
 if (!stored) { if (f.apply) applied.push(`+${f.label}`); return; }
+// A scrape that captured nothing here has nothing to reconcile -- never
+// offer to overwrite a real stored value with an empty import value.
+if (!fresh) return;
 if (fresh === stored) return; // genuinely unchanged either way -- nothing to report
+if (isImportIgnored(conn, f.label, fresh)) return; // user already settled this exact value
 // Same false-positive guard summarizeCleanMatch() itself uses: "152cm /
 // 4'12"" and "152cm / 5'0"" are the same height, just Tinder's own
 // feet/inches rounding landing on the boundary differently each scrape.
@@ -2558,6 +2600,7 @@ p.fields.filter((f) => !f.apply && f.label !== 'Chat history' && FIELD_MAP[f.lab
 const stored = String(conn[FIELD_MAP[f.label]] || '').trim();
 const fresh = f.value.trim();
 if (!stored || !fresh || fresh === stored) return;
+if (isImportIgnored(conn, f.label, fresh)) return; // user already settled this exact value
 // Height prints as "152cm / 4'12"" one scrape and "152cm / 5'0""
 // another -- the exact same height (12 inches = 1 foot), just Tinder's
 // own feet/inches rounding landing on the boundary differently each
