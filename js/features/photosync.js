@@ -105,11 +105,18 @@ running = false;
 }
 }
 
+// Returns HTML, not plain text -- the missing-photo count, when present,
+// is its own span carrying the explainer as a title= tooltip instead of a
+// second permanently-visible paragraph underneath (that paragraph read as
+// noise on a status line most visits never need to see).
 function statusLine(s) {
 const bits = [];
 bits.push(`${s.synced.length} synced`);
 bits.push(`${s.local.length} on this device only${s.local.length ? ` (${formatBytes(s.localBytes)})` : ''}`);
-if (s.missing.length) bits.push(`${s.missing.length} missing here`);
+if (s.missing.length) {
+const tip = `${s.missing.length} photo${s.missing.length === 1 ? '' : 's'} referenced here ${s.missing.length === 1 ? 'has' : 'have'} no copy on this device — run this on the device that originally added them, and they'll appear here afterwards.`;
+bits.push(`<span title="${escapeHtml(tip)}" style="text-decoration:underline dotted; cursor:help;">${s.missing.length} missing here</span>`);
+}
 return bits.join(' · ');
 }
 
@@ -117,13 +124,12 @@ async function render() {
 const el = document.getElementById('photosync-body');
 if (!el) return;
 const s = await scanPhotos();
-el.innerHTML = `<div class="settings-note" style="margin:0 0 8px;">${escapeHtml(statusLine(s))}</div>
+el.innerHTML = `<div class="settings-note" style="margin:0 0 8px;">${statusLine(s)}</div>
 ${s.local.length ? `<div class="sync-row">
 <button class="sync-btn" id="photosync-run" type="button">Upload ${s.local.length} photo${s.local.length === 1 ? '' : 's'} to my server</button>
 <button class="sync-btn" id="photosync-stop" type="button" style="display:none;">Stop</button>
 <span class="sync-status" id="photosync-status"></span>
-</div>` : '<div class="settings-note" style="margin:0;">Nothing to upload from this device.</div>'}
-${s.missing.length ? `<div class="settings-note" style="margin:8px 0 0;">${s.missing.length} photo${s.missing.length === 1 ? '' : 's'} referenced here ${s.missing.length === 1 ? 'has' : 'have'} no copy on this device — run this on the device that originally added them, and they'll appear here afterwards.</div>` : ''}`;
+</div>` : '<div class="settings-note" style="margin:0;">Nothing to upload from this device.</div>'}`;
 
 const run = document.getElementById('photosync-run');
 if (!run) return;

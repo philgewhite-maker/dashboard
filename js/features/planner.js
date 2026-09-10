@@ -14,6 +14,14 @@
 // drag sources by tagging the payload's kind: "connection:<id>",
 // "activity:<id>", or "entry:<entryId>" for an already-placed card being
 // dragged to a different day.
+//
+// Also mirrors tasks.js's OTHER half: HTML5 drag-and-drop never fires at
+// all on iOS Safari (confirmed -- Planner's grid was completely inert on
+// an iPhone until this existed), so every draggable card here also carries
+// a <select> that performs the identical placeEntry/moveEntry call a drop
+// would -- see plannerDaySelectOptionsHtml. Drag is a mouse enhancement;
+// the select is the real interface, same as tasks.js's own "File to…"
+// dropdowns next to its draggable Inbox cards.
 import { data, queueSave, blankPlannerEntry, blankPlannerActivity, isDormantStage, isTravelPaused, LEG_DATE_FIELDS } from '../state.js';
 import { escapeHtml, uid, todayStr, dateStrAdd, avatarHtml, hydratePhotoBackgrounds, bindForm, foldDiacritics, scrollAndFlash, parseLooseDateTime } from '../utils.js';
 import { isPriorityConnection, renderConnPicker, bindConnPickers, expandConnection } from './connections.js';
@@ -180,6 +188,47 @@ const d = new Date(`${dateStr}T00:00:00`);
 return isNaN(d) ? dateStr : d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
+// Every "day box" the grid currently renders, as {tripId, label, days[]}
+// groups -- the single source of truth behind BOTH the visual grid
+// (mainGridHtml/tripPanelHtml, built independently below) and the
+// <select> fallback controls this powers, so the two can't drift about
+// which days actually exist to place/move something onto right now.
+// Trip filtering/ordering mirrors renderPlanner's own sortedTrips exactly
+// -- a finished or undated trip has no day boxes to target either way.
+function plannerDayTargets() {
+const targets = [{ tripId: '', label: 'Main planner', days: Array.from({ length: 14 }, (_, i) => dateStrAdd(todayStr(), i)) }];
+const today = todayStr();
+[...data.trips]
+.filter((t) => { const { end } = tripRangeFor(t); return !end || end >= today; })
+.sort((a, b) => {
+const as = tripRangeFor(a).start || '9999', bs = tripRangeFor(b).start || '9999';
+return as.localeCompare(bs) || a.createdAt.localeCompare(b.createdAt);
+})
+.forEach((trip) => {
+const { start, end } = tripRangeFor(trip);
+if (!start || !end || start > end) return;
+const days = [];
+let cur = start;
+for (let i = 0; i < 60 && cur <= end; i++) { days.push(cur); cur = dateStrAdd(cur, 1); } // same 60-day cap tripPanelHtml's own day loop uses
+if (days.length) targets.push({ tripId: trip.id, label: tripLabel(trip), days });
+});
+return targets;
+}
+
+// Touch devices -- iOS Safari chief among them -- never fire HTML5 drag
+// events at all, so a Planner used entirely by touch had no way to place
+// or move anything. Same gap, and same fix, as tasks.js's Inbox filing
+// cards: a <select> that performs the identical action as a drop, always
+// present rather than gated behind a touch/mouse detection guess -- drag
+// stays a mouse enhancement, this is the real interface. optionsHtml is
+// shared between the "place a pool card" and "move a placed entry"
+// selects below; `selected` is only set for the latter.
+function plannerDaySelectOptionsHtml(selected) {
+return plannerDayTargets().map((scope) => `<optgroup label="${escapeHtml(scope.label)}">
+${scope.days.map((d) => `<option value="${d}|${scope.tripId}"${selected && d === selected.date && scope.tripId === (selected.tripId || '') ? ' selected' : ''}>${escapeHtml(formatDayLabel(d))}</option>`).join('')}
+</optgroup>`).join('');
+}
+
 function plannerEntryHtml(entry) {
 let label, avatar = '', openAttr = '';
 if (entry.kind === 'connection') {
@@ -210,6 +259,7 @@ ${entry.endDate ? `<button type="button" class="planner-span-btn" data-planner-s
 ${entry.tripId ? `<span class="planner-entry-trip-link" data-planner-open-trip="${entry.tripId}" title="Open this trip on the Travel tab">&#9992;</span>` : ''}
 <span class="planner-entry-remove" data-planner-remove="${entry.id}" title="Remove">&times;</span>
 </div>
+<select class="planner-select" data-planner-move="${entry.id}" title="Move to a different day">${plannerDaySelectOptionsHtml({ date: entry.date, tripId: entry.tripId })}</select>
 </div>`;
 }
 
@@ -294,6 +344,7 @@ const priority = data.connections.filter(isPriorityConnection);
 if (!priority.length) return '<div class="empty">No priority connections yet — pin someone (📌) below, on the <span class="inline-goto-link" data-goto-tab="dating">Dating tab</span>, or they\'ll appear automatically once things reach "Planning to meet" or later.</div>';
 return priority.map((c) => `<div class="planner-pool-card alloc-card" draggable="true" data-planner-drag="connection:${c.id}">
 <span class="planner-entry-link" data-planner-open-connection="${c.id}">${avatarHtml(c.photoId, c.name, 'sm')}<span>${escapeHtml(c.name)}</span></span>
+<select class="planner-select" data-planner-place="connection:${c.id}"><option value="">Place on…</option>${plannerDaySelectOptionsHtml()}</select>
 </div>`).join('');
 }
 
@@ -320,6 +371,7 @@ if (!data.plannerActivities.length) return '<div class="empty">Nothing yet — a
 return data.plannerActivities.map((a) => `<div class="planner-pool-card alloc-card" draggable="true" data-planner-drag="activity:${a.id}">
 <span>${escapeHtml(a.title)}</span>
 <span class="tag-x" data-planner-del-activity="${a.id}" title="Remove from the list">&times;</span>
+<select class="planner-select" data-planner-place="activity:${a.id}"><option value="">Place on…</option>${plannerDaySelectOptionsHtml()}</select>
 </div>`).join('');
 }
 
@@ -386,6 +438,7 @@ const matches = connectionsAtDestinations(trip.destinations);
 const body = matches.length
 ? `<div class="planner-pool-list">${matches.map((c) => `<div class="planner-pool-card alloc-card" draggable="true" data-planner-drag="connection:${c.id}">
 <span class="planner-entry-link" data-planner-open-connection="${c.id}">${avatarHtml(c.photoId, c.name, 'sm')}<span>${escapeHtml(c.name)}</span></span>
+<select class="planner-select" data-planner-place="connection:${c.id}"><option value="">Place on…</option>${plannerDaySelectOptionsHtml()}</select>
 </div>`).join('')}</div>`
 : `<div class="empty">No non-archived connections listed at ${escapeHtml(trip.destinations.join(', '))} yet.</div>`;
 return `<h4>Connections in ${escapeHtml(trip.destinations.join(', '))}</h4>${body}`;
@@ -485,6 +538,27 @@ bindPlannerEvents(panel);
 }
 
 function bindPlannerEvents(root) {
+// The touch/no-drag fallback -- see plannerDaySelectOptionsHtml's own
+// comment. Parses the same "kind:refId" / "date|tripId" encodings the
+// drag payload and drop-zone dataset already use, then calls the exact
+// same placeEntry/moveEntry the drag path calls, so the two routes can
+// never produce different results for the same action.
+root.querySelectorAll('[data-planner-place]').forEach((sel) => {
+sel.addEventListener('change', () => {
+if (!sel.value) return;
+const sep = sel.dataset.plannerPlace.indexOf(':');
+const kind = sel.dataset.plannerPlace.slice(0, sep);
+const refId = sel.dataset.plannerPlace.slice(sep + 1);
+const [date, tripId] = sel.value.split('|');
+placeEntry(kind, refId, date, tripId);
+});
+});
+root.querySelectorAll('[data-planner-move]').forEach((sel) => {
+sel.addEventListener('change', () => {
+const [date, tripId] = sel.value.split('|');
+moveEntry(sel.dataset.plannerMove, date, tripId);
+});
+});
 root.querySelectorAll('[data-planner-drag]').forEach((card) => {
 card.addEventListener('dragstart', (e) => {
 e.dataTransfer.setData('text/plain', card.dataset.plannerDrag);

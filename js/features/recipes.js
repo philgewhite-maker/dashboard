@@ -1843,8 +1843,7 @@ ${overrideHtml}
 }).join('');
 if (!rows) return '';
 return `<div class="field-block" style="margin-top:6px;">
-<span class="field-label">Ingredients — FODMAP, allergens, and substitute/reduce options</span>
-<div class="settings-note">Grams of the actual carbohydrate this PORTION contributes, compared against fixed published thresholds -- genuinely valid at any quantity, and additive with the other ingredients (the totals above are the real sum, not a worst-case guess). Edit the entry in Ingredient Reference if the underlying concentration looks wrong.</div>
+<span class="field-label">Ingredients — FODMAP, allergens, and substitute/reduce options <span class="settings-note" title="Grams of the actual carbohydrate this PORTION contributes, compared against fixed published thresholds -- genuinely valid at any quantity, and additive with the other ingredients (the totals above are the real sum, not a worst-case guess). Edit the entry in Ingredient Reference if the underlying concentration looks wrong." style="cursor:help; text-decoration:underline dotted;">(what these figures mean)</span></span>
 ${rows}
 </div>`;
 }

@@ -2199,10 +2199,28 @@ gap:2px;
 .planner-pools{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:18px;}
 .planner-pool{flex:1;min-width:220px;}
 .planner-pool h3{font-size:14px;margin:0 0 8px;}
-.planner-pool-list{display:flex;flex-wrap:wrap;gap:8px;}
+/* Stacked full-width rows, not side-by-side chips -- switched from the
+   original flex-wrap chip layout so each card has room to host its own
+   full-width "Place on…" <select> (the touch/no-drag fallback, see
+   planner.js) without any circular flex-sizing tricks. */
+.planner-pool-list{display:flex;flex-direction:column;gap:8px;}
 .planner-pool-card{
-display:flex;align-items:center;gap:6px;
+display:flex;align-items:center;flex-wrap:wrap;gap:6px;
 padding:6px 10px;font-size:13px;
+}
+/* The touch/no-drag fallback control -- same compact look as
+   .alloc-controls select (tasks.js's own equivalent). flex:1 0 100% drops
+   it onto its own line below whatever else is in the card/entry row. */
+.planner-select{
+flex:1 0 100%;
+width:100%;box-sizing:border-box;
+font-family:'Inter',sans-serif;
+font-size:12px;
+border:1px solid var(--line);
+border-radius:6px;
+padding:5px 7px;
+background:var(--card);
+color:var(--ink);
 }
 .planner-grid{
 display:grid;

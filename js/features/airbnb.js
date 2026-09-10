@@ -194,7 +194,7 @@ el.innerHTML = '<div class="settings-note" style="margin:0;">No listings yet —
 return;
 }
 el.innerHTML = `<table class="limits-table">
-<thead><tr><th>Label</th><th>Calendar export URL</th><th>Prefix</th><th>Colour</th><th></th></tr></thead>
+<thead><tr><th>Label</th><th>Calendar export URL</th><th title="Identifies the physical ROOM, not the listing — give two listings for the same room the same prefix. Once you rename any manually-entered Google Calendar events for a room to include its prefix, &quot;Push to Google Calendar&quot; recognises and adopts them instead of duplicating." style="cursor:help; text-decoration:underline dotted;">Prefix</th><th title="Identifies the physical ROOM, not the listing — give two listings for the same room the same colour." style="cursor:help; text-decoration:underline dotted;">Colour</th><th></th></tr></thead>
 <tbody>${data.airbnbListings.map((l) => `<tr>
 <td><input type="text" autocomplete="off" data-airbnb-listing-field="label" data-airbnb-listing-id="${l.id}" value="${escapeHtml(l.label)}" placeholder="e.g. Entire studio"></td>
 <td><input type="text" autocomplete="off" data-airbnb-listing-field="icsUrl" data-airbnb-listing-id="${l.id}" value="${escapeHtml(l.icsUrl)}" placeholder="https://www.airbnb..../calendar/ical/....ics"></td>
@@ -204,8 +204,7 @@ ${AIRBNB_COLOURS.map((c) => `<option value="${c}"${c === l.colour ? ' selected' 
 </select></td>
 <td><span class="del-x" style="opacity:1;" data-del-airbnb-listing="${l.id}">&times;</span></td>
 </tr>`).join('')}</tbody>
-</table>
-<div class="settings-note" style="margin:6px 0 0;">Prefix and colour both identify the physical ROOM, not the listing — give two listings for the same room the same colour. Once you rename any manually-entered Google Calendar events for a room to include its prefix, "Push to Google Calendar" recognises and adopts them instead of duplicating.</div>`;
+</table>`;
 
 el.querySelectorAll('[data-airbnb-listing-field]').forEach((input) => {
 input.addEventListener('change', () => {
