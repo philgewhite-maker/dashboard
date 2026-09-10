@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v303</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v304</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -1423,6 +1423,21 @@ function loadDoneVersions() {
 function saveDoneVersions(doneVersions) { localStorage.setItem(DONE_KEY, JSON.stringify(doneVersions)); }
 function isDoneWith(doneVersions, id) { return (doneVersions[id] || 0) &gt;= SCRIPT_VERSION; }
 
+// A real Tinder profile always has at least one photo, so an extract
+// that came back with zero photos (but didn't throw) almost certainly
+// read the panel before it finished rendering -- not a genuinely empty
+// match. Rather than mark it done and never retry (the old behaviour,
+// which is how profiles went missing from the dashboard), it's left
+// un-done and retried next run. This counts those misses per id so a
+// genuinely pathological one (a deleted-account match card, say) still
+// gets given up on after a few runs instead of looping forever.
+const EMPTY_MISS_KEY = 'dashTinderEmptyMisses';
+const EMPTY_MISS_GIVE_UP = 3;
+function loadEmptyMisses() {
+  try { return JSON.parse(localStorage.getItem(EMPTY_MISS_KEY) || '{}') || {}; } catch (e) { return {}; }
+}
+function saveEmptyMisses(misses) { localStorage.setItem(EMPTY_MISS_KEY, JSON.stringify(misses)); }
+
 // Writes whatever's in `list` to its own downloaded file, optionally also
 // the clipboard. `state` ({chunkIndex, totalSaved}) belongs to the
 // caller, not a shared counter here -- tinderBulkImport() and
@@ -1474,6 +1489,7 @@ window.tinderBulkImport = async (batchSize, staleBatchSize) => {
   const CHUNK_SIZE = 25; // checkpoint to its own downloaded file this often -- a long unattended run surviving a sleep/crash/closed-tab partway through loses at most this many, not the whole run, and each file is pasteable into the dashboard as soon as it lands rather than waiting for the end
 
   const doneVersions = loadDoneVersions();
+  const emptyMisses = loadEmptyMisses();
   const candidates = await collectAllCandidates();
   const todo = candidates.filter((r) =&gt; !isDoneWith(doneVersions, r.id)).slice(0, BATCH_SIZE);
   const profiles = [];
@@ -1513,19 +1529,32 @@ window.tinderBulkImport = async (batchSize, staleBatchSize) => {
       await new Promise((r) =&gt; setTimeout(r, 500));
       try {
         const extracted = await extractProfile(row.name);
-        // A bare match with no bio, no essentials, no chat, no photos —
-        // nothing the dashboard review screen would actually show
-        // beyond a name to confirm. Not worth a review slot; marked
-        // done and moved past without adding it to the output at all.
-        if (!extracted.fields.length &amp;&amp; !extracted.photos.length) {
-          console.log(`${row.name}: nothing to add -- skipped.`);
+        // Zero photos on an extract that didn't throw = the panel wasn't
+        // rendered when it was read (a real profile always has &ge;1
+        // photo). Leave it un-done so next run retries it -- unless it's
+        // failed this way EMPTY_MISS_GIVE_UP runs running, in which case
+        // it's genuinely stuck (e.g. a deleted-account match card) and
+        // gets marked done so it can't loop forever.
+        if (!extracted.photos.length) {
+          emptyMisses[row.id] = (emptyMisses[row.id] || 0) + 1;
+          if (emptyMisses[row.id] &gt;= EMPTY_MISS_GIVE_UP) {
+            console.warn(`${row.name}: still no photos after ${emptyMisses[row.id]} tries -- giving up, marking done.`);
+            doneVersions[row.id] = SCRIPT_VERSION;
+            saveDoneVersions(doneVersions);
+          } else {
+            console.warn(`${row.name}: no photos captured -- panel likely not loaded, will retry next run.`);
+          }
+          saveEmptyMisses(emptyMisses);
         } else {
+          // Photos but no fields is a real bare match -- still worth
+          // capturing for the photos alone, which the review screen shows.
           extracted.matchId = row.id; // already known from the sidebar row — same permanent id the single-profile snippet reads from the URL
           profiles.push(extracted);
           if (profiles.length &gt;= CHUNK_SIZE) downloadChunk(profiles.splice(0, profiles.length), false, chunkState);
+          doneVersions[row.id] = SCRIPT_VERSION;
+          saveDoneVersions(doneVersions);
+          if (emptyMisses[row.id]) { delete emptyMisses[row.id]; saveEmptyMisses(emptyMisses); }
         }
-        doneVersions[row.id] = SCRIPT_VERSION;
-        saveDoneVersions(doneVersions);
       } catch (err) {
         console.warn(`Extraction failed for ${row.name}: ${err.message} -- skipped.`);
       }
@@ -1608,6 +1637,7 @@ window.tinderCatchUp = async (sinceDate, batchSize, staleBatchSize) => {
 
   const CAP = batchSize || 40; // per sweep -- see the safety-cap note above
   const doneVersions = loadDoneVersions();
+  const emptyMisses = loadEmptyMisses();
   const chunkState = { chunkIndex: 0, totalSaved: 0 };
   const profiles = [];
   const visited = new Set();
@@ -1636,15 +1666,26 @@ window.tinderCatchUp = async (sinceDate, batchSize, staleBatchSize) => {
   }
 
   function keep(row, extracted) {
-    if (!extracted.fields.length &amp;&amp; !extracted.photos.length) {
-      console.log(`${row.name}: nothing to add -- skipped.`);
-    } else {
-      extracted.matchId = row.id;
-      profiles.push(extracted);
-      if (profiles.length &gt;= 25) downloadChunk(profiles.splice(0, profiles.length), false, chunkState);
+    // Same "zero photos = not rendered, not empty" rule as
+    // tinderBulkImport -- see loadEmptyMisses()'s own comment.
+    if (!extracted.photos.length) {
+      emptyMisses[row.id] = (emptyMisses[row.id] || 0) + 1;
+      if (emptyMisses[row.id] &gt;= EMPTY_MISS_GIVE_UP) {
+        console.warn(`${row.name}: still no photos after ${emptyMisses[row.id]} tries -- giving up, marking done.`);
+        doneVersions[row.id] = SCRIPT_VERSION;
+        saveDoneVersions(doneVersions);
+      } else {
+        console.warn(`${row.name}: no photos captured -- panel likely not loaded, will retry next run.`);
+      }
+      saveEmptyMisses(emptyMisses);
+      return;
     }
+    extracted.matchId = row.id;
+    profiles.push(extracted);
+    if (profiles.length &gt;= 25) downloadChunk(profiles.splice(0, profiles.length), false, chunkState);
     doneVersions[row.id] = SCRIPT_VERSION;
     saveDoneVersions(doneVersions);
+    if (emptyMisses[row.id]) { delete emptyMisses[row.id]; saveEmptyMisses(emptyMisses); }
   }
 
   // One sweep, used for both tabs -- see the comment above the function

@@ -1974,7 +1974,22 @@ ph.apply = !ph.apply;
 render();
 });
 });
-const confirmRisky = () => !pending.risky || confirm('More than one connection shares this name and a similar age — this pick might be the wrong person. Save anyway?');
+// Only actually block a save when the user is about to file onto a
+// candidate the matcher itself flagged `conflict` -- an existing
+// same-name connection that already carries a DIFFERENT Tinder match
+// id, i.e. very likely a different real person. Every other "risky"
+// shape (a plain top-2 name-score tie, or a conflict where they've
+// picked a clean match or "+ new") already shows the inline red note
+// and the .tinder-risky button; a modal on top of that fired on almost
+// every save, since any common first name collides with someone.
+const confirmRisky = () => {
+if (!pending.risky) return true;
+const chosen = (pending.candidates || []).find((c) => c.conn.id === pending.chosenId);
+if (chosen && chosen.conflict) {
+return confirm('This connection already has a different Tinder match id — likely a different person with the same name. Save onto it anyway?');
+}
+return true;
+};
 const saveBtn = document.getElementById('tinder-save');
 if (saveBtn) saveBtn.addEventListener('click', () => { if (confirmRisky()) save(false); });
 const saveOpenBtn = document.getElementById('tinder-save-open');
