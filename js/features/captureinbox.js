@@ -13,12 +13,13 @@
 // screenshot (filename-matched, see looksLikeSamsungHealthScreenshot() --
 // an image can't be content-sniffed this cheaply, so a real AI vision call
 // decides, with a safe fallback to normal triage if it doesn't recognise
-// the chart), and a Bumble matches-list/full-profile screenshot shared
-// ALONE (filename-matched, then classified deterministically by aspect
-// ratio and cheaply by AI kind -- see autoRouteBumbleScreenshot() --
-// landing in the persisted pendingImports review queue in connections.js
-// rather than staying a Capture Inbox item). A Bumble screenshot shared
-// alongside other photos deliberately does NOT auto-route -- see the
+// the chart), and a Bumble/Tinder/Hinge matches-list/full-profile
+// screenshot shared ALONE (filename-matched, then classified
+// deterministically by aspect ratio and cheaply by AI kind -- see
+// autoRouteDatingScreenshot() -- landing in the persisted pendingImports
+// review queue in connections.js rather than staying a Capture Inbox
+// item). A dating-app screenshot shared alongside other photos
+// deliberately does NOT auto-route -- see the
 // comment above the Phase 2 loop in addCaptureBatch() for why -- so the
 // whole group stays put for the user to tick a subset per person and use
 // the manual "Extract dating screenshot" button, which can group a
@@ -93,19 +94,26 @@ function looksLikeSamsungHealthScreenshot(filename) {
 return /samsung[ _]?health/i.test(String(filename || ''));
 }
 
-// Android names a Bumble screenshot with the app name baked in, same
+// Android names a dating-app screenshot with the app name baked in, same
 // convention as Samsung Health's own filenames (see above) -- but unlike a
-// health chart, "came from Bumble" doesn't tell you WHAT kind of Bumble
-// screen it is. The filename hint just earns the file one attempt at
-// autoRouteBumbleScreenshot below; finding nothing routable is a normal
-// outcome (a chat screenshot, a saved photo) and just leaves it for manual
-// triage exactly like a false negative would, not an error.
-function looksLikeBumbleScreenshot(filename) {
-return /bumble/i.test(String(filename || ''));
+// health chart, "came from Bumble/Tinder/Hinge" doesn't tell you WHAT kind
+// of screen it is. Reuses connections.js's own appHintFromFilename rather
+// than a second bespoke regex, so the set of recognised apps can't drift
+// between this auto-route path and the manual "Extract dating screenshot"
+// button, which already supports all three (confirmed by the user: Android
+// embeds the foregrounded app's name in a screenshot's filename the same
+// way for Tinder and Hinge as it does for Bumble). The filename hint just
+// earns the file one attempt at autoRouteDatingScreenshot below; finding
+// nothing routable is a normal outcome (a chat screenshot, a saved photo)
+// and just leaves it for manual triage exactly like a false negative
+// would, not an error.
+async function datingAppHintFromFilename(filename) {
+const { appHintFromFilename } = await import('./connections.js');
+return appHintFromFilename({ name: filename });
 }
 
-// Bumble's screenshots come in three shapes, only distinguishable with a
-// little work: a matches/chat list (several people, thin data), a full
+// A dating-app screenshot comes in three shapes, only distinguishable with
+// a little work: a matches/chat list (several people, thin data), a full
 // profile (one person, rich data), or a plain saved photo (squarish, not a
 // composite screenshot at all). Two already-proven primitives tell them
 // apart without any new AI work:
@@ -117,8 +125,10 @@ return /bumble/i.test(String(filename || ''));
 //   survives the aspect-ratio check.
 // A squarish photo, a chat screenshot, or anything unrecognised all return
 // routed:false and are left for normal manual triage, same as any other
-// false negative in this file.
-async function autoRouteBumbleScreenshot(file, appHint) {
+// false negative in this file. appHint is whichever app's name matched the
+// filename (Bumble/Tinder/Hinge/...) -- passed through to the vision calls
+// below exactly like the manual button's own screenshotAppHint does.
+async function autoRouteDatingScreenshot(file, appHint) {
 const { classifyProfileUpload } = await import('../utils.js');
 const { isScreenshot } = await classifyProfileUpload(file);
 if (!isScreenshot) return { routed: false, kind: 'photo' };
@@ -216,7 +226,7 @@ item = { ...(await uploadAttachment(file)), kind: 'attachment' };
 batch.items.push(item);
 if (!data.captureInbox.includes(batch)) data.captureInbox.push(batch);
 queueSave();
-if (kind === 'photo' && (looksLikeSamsungHealthScreenshot(file.name) || looksLikeBumbleScreenshot(file.name))) {
+if (kind === 'photo' && (looksLikeSamsungHealthScreenshot(file.name) || await datingAppHintFromFilename(file.name))) {
 autoRouteCandidates.push({ file, item });
 }
 } catch (err) {
@@ -230,8 +240,8 @@ failed.push(`${file.name || 'file'}: ${err.message || err}`);
 // looksLikeSamsungHealthScreenshot's own comment), so finding nothing is a
 // normal outcome that just leaves that one item for manual triage.
 //
-// The Bumble auto-route only fires when its screenshot is the ONLY photo
-// in the whole share -- confirmed by the user as the wrong default
+// The dating-app auto-route only fires when its screenshot is the ONLY
+// photo in the whole share -- confirmed by the user as the wrong default
 // otherwise: sharing a profile screenshot together with that person's own
 // photos is exactly the "tick who belongs together" combined case Capture
 // Inbox's manual "Extract dating screenshot" button now handles (see
@@ -263,9 +273,10 @@ queueSave();
 console.error('Auto wellness extraction failed, photo stays in Capture Inbox for manual triage:', err);
 }
 }
-if (looksLikeBumbleScreenshot(file.name) && totalPhotoCount === 1) {
+const datingAppHint = await datingAppHintFromFilename(file.name);
+if (datingAppHint && totalPhotoCount === 1) {
 try {
-const result = await autoRouteBumbleScreenshot(file, 'Bumble');
+const result = await autoRouteDatingScreenshot(file, datingAppHint);
 if (result.routed) {
 matchesImports.push(`${file.name || 'that image'}: found ${result.count} ${result.count === 1 ? 'person' : 'people'} (${result.kind}) — review in Dating admin.`);
 await deleteItemBytes(item);
@@ -274,7 +285,7 @@ removeBatchIfEmpty(batch);
 queueSave();
 }
 } catch (err) {
-console.error('Auto Bumble-screenshot routing failed, photo stays in Capture Inbox for manual triage:', err);
+console.error(`Auto ${datingAppHint}-screenshot routing failed, photo stays in Capture Inbox for manual triage:`, err);
 }
 }
 }
