@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v297</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v298</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -2487,6 +2487,20 @@ Photos added before task attachments existed live only on the device that added 
 </div>
 
 <div class="settings-block">
+<h3>Health data (Health Connect)</h3>
+<div class="settings-note" style="margin:0 0 8px;">
+A browser page has no way to read Health Connect directly &mdash; it's a native Android API with no web equivalent. Instead, a bridge app on your phone (e.g. <strong>HC Webhook</strong> / "Health Connect Webhook" from Google Play) posts whatever data you grant it to <code>health.php</code> on this same server. This panel is a raw viewer for inspecting exactly what's arrived &mdash; see the Health tab for the parsed daily rollup.
+</div>
+<div class="settings-note" style="margin:0 0 8px;">
+<strong>Setup:</strong> copy <code>server/health.php.example</code> to <code>server/health.php</code>, set <code>$SECRET</code> to the <em>same</em> value as <code>sync.php</code>, upload next to it. In the bridge app, point its webhook target at that URL &mdash; append <code>?secret=&lt;your secret&gt;</code> to it if the app doesn't let you set a custom header.
+</div>
+<div id="health-sync-body"></div>
+<div class="sync-row" style="margin-top:8px;">
+<button class="sync-btn" id="health-sync-refresh" type="button">Check for data</button>
+</div>
+</div>
+
+<div class="settings-block">
 <h3>Notion</h3>
 <div class="settings-note" style="margin:0 0 8px;">Notion blocks direct browser access, so calls go through <code>notion.php</code> on your own host — which also keeps your Notion token off this device entirely. See README, "Notion".</div>
 <label for="notion-url-input" style="font-size:13px;font-weight:500;display:block;margin-bottom:6px;">Proxy URL</label>
@@ -2550,50 +2564,7 @@ Show the "Sex" field on connections and in Connections Overview
 </details>
 
 <details class="settings-group">
-<summary><span class="dot amber"></span>AI &amp; data quality</summary>
-
-<div class="settings-block">
-<h3>AI features</h3>
-<label for="anthropic-key-input" style="font-size:13px;font-weight:500;display:block;margin-bottom:6px;">Anthropic API key (for photo/screenshot import)</label>
-<input type="password" autocomplete="new-password" id="anthropic-key-input" class="settings-input" placeholder="sk-ant-...">
-<div class="settings-note">
-Stored only in this browser's local storage on this device — never synced, never sent anywhere except directly to api.anthropic.com. You'll need to enter it again on each device. Calls are billed to your own account (typically a fraction of a cent per screenshot).
-<a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">Get a key &rarr;</a>
-</div>
-<label class="settings-note" style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:10px;">
-<input type="checkbox" id="smart-nudges-toggle">
-Smart nudges — let Claude pick what's most urgent, important, and overdue, instead of a random pick (uses the API key above)
-</label>
-<div class="sync-row" style="margin-top:12px;">
-<span class="settings-note" style="margin:0;font-weight:500;">API usage this month</span>
-<button class="sync-btn" id="refresh-usage-btn" type="button">Refresh</button>
-</div>
-<div id="usage-summary"></div>
-</div>
-
-<div class="settings-block">
-<h3>Health data (Health Connect)</h3>
-<div class="settings-note" style="margin:0 0 8px;">
-A browser page has no way to read Health Connect directly &mdash; it's a native Android API with no web equivalent. Instead, a bridge app on your phone (e.g. <strong>HC Webhook</strong> / "Health Connect Webhook" from Google Play) posts whatever data you grant it to <code>health.php</code> on this same server. This panel is a raw viewer for inspecting exactly what's arrived &mdash; see the Health tab for the parsed daily rollup.
-</div>
-<div class="settings-note" style="margin:0 0 8px;">
-<strong>Setup:</strong> copy <code>server/health.php.example</code> to <code>server/health.php</code>, set <code>$SECRET</code> to the <em>same</em> value as <code>sync.php</code>, upload next to it. In the bridge app, point its webhook target at that URL &mdash; append <code>?secret=&lt;your secret&gt;</code> to it if the app doesn't let you set a custom header.
-</div>
-<div id="health-sync-body"></div>
-<div class="sync-row" style="margin-top:8px;">
-<button class="sync-btn" id="health-sync-refresh" type="button">Check for data</button>
-</div>
-</div>
-
-<div class="settings-block">
-<h3>Tidy up tags</h3>
-<div class="settings-note" style="margin:0 0 10px;">Every tag value in use, with how many connections have it. Values differing only by capitalisation or spacing are flagged for one-click merging; anything else can be renamed or merged by hand. Changes apply across all connections.</div>
-<div id="tag-cleanup"></div>
-</div>
-</details>
-
-<details class="settings-group">
-<summary><span class="dot rose"></span>Customize categories &amp; limits</summary>
+<summary><span class="dot sage"></span>Feature preferences</summary>
 
 <div class="settings-block">
 <h3>Connections — rating categories</h3>
@@ -2627,10 +2598,6 @@ Same idea as Connections' ratings, a separate list (Taste/Health/Prep by default
 <label>Default max results, when a mail search's is blank<input type="number" min="1" max="50" id="pref-mail-count"></label>
 </div>
 </div>
-</details>
-
-<details class="settings-group">
-<summary><span class="dot sage"></span>Quick add</summary>
 
 <div class="settings-block">
 <h3>Track a new calendar</h3>
@@ -2659,6 +2626,39 @@ Same idea as Connections' ratings, a separate list (Taste/Health/Prep by default
 <div class="settings-note" style="margin:0 0 10px;">One row per listing you host or co-host. Find each one's export URL on Airbnb: Calendar &rarr; Availability &rarr; Connect calendars &rarr; Export calendar. Prefix and colour identify the physical room (two listings for the same room should share a colour); Sync on the Overview tab pulls reservation dates in, never guest names &mdash; Airbnb's export doesn't include those on any plan, so add a name per reservation there yourself.</div>
 <div id="airbnb-listings"></div>
 <button class="add-btn" id="add-airbnb-listing-btn" type="button" style="margin-top:8px;">Add listing</button>
+</div>
+</details>
+
+<details class="settings-group">
+<summary><span class="dot amber"></span>AI features</summary>
+
+<div class="settings-block">
+<h3>AI features</h3>
+<label for="anthropic-key-input" style="font-size:13px;font-weight:500;display:block;margin-bottom:6px;">Anthropic API key (for photo/screenshot import)</label>
+<input type="password" autocomplete="new-password" id="anthropic-key-input" class="settings-input" placeholder="sk-ant-...">
+<div class="settings-note">
+Stored only in this browser's local storage on this device — never synced, never sent anywhere except directly to api.anthropic.com. You'll need to enter it again on each device. Calls are billed to your own account (typically a fraction of a cent per screenshot).
+<a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">Get a key &rarr;</a>
+</div>
+<label class="settings-note" style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:10px;">
+<input type="checkbox" id="smart-nudges-toggle">
+Smart nudges — let Claude pick what's most urgent, important, and overdue, instead of a random pick (uses the API key above)
+</label>
+<div class="sync-row" style="margin-top:12px;">
+<span class="settings-note" style="margin:0;font-weight:500;">API usage this month</span>
+<button class="sync-btn" id="refresh-usage-btn" type="button">Refresh</button>
+</div>
+<div id="usage-summary"></div>
+</div>
+</details>
+
+<details class="settings-group">
+<summary><span class="dot rose"></span>Advanced</summary>
+
+<div class="settings-block">
+<h3>Tidy up tags</h3>
+<div class="settings-note" style="margin:0 0 10px;">Every tag value in use, with how many connections have it. Values differing only by capitalisation or spacing are flagged for one-click merging; anything else can be renamed or merged by hand. Changes apply across all connections.</div>
+<div id="tag-cleanup"></div>
 </div>
 
 <div class="settings-block">
