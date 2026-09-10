@@ -82,6 +82,17 @@ const ai = await extractRecipeFromHtml(html, pageUrl);
 return { ...ai, sourceKind: 'web (AI-read)' };
 }
 
+// Entry point for sharetarget.js's 'recipe' auto-route action: same
+// fetch/extract as the "Import from URL" button, landing on the same
+// module-local `pending` + review form. Deliberately lets any failure
+// throw straight through -- the caller catches it and falls back to
+// filing a plain task with the URL and the error, so nothing is lost.
+async function importSharedRecipeUrl(url) {
+const extract = await importFromUrl(url);
+pending = { ...extract, sourceUrl: url };
+renderReview();
+}
+
 // ---- capture + review ----
 
 // {name, ingredients, instructions, notes, sourceKind, sourceUrl, sourceFile}
@@ -2945,4 +2956,4 @@ await initRecipeOverviewPrefs();
 renderRecipeOverview();
 }
 
-export { initRecipes };
+export { initRecipes, importSharedRecipeUrl };

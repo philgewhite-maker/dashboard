@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v299</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v300</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -2644,6 +2644,13 @@ Same idea as Connections' ratings, a separate list (Taste/Health/Prep by default
 <div class="settings-note" style="margin:0 0 10px;">One row per listing you host or co-host. Find each one's export URL on Airbnb: Calendar &rarr; Availability &rarr; Connect calendars &rarr; Export calendar. Prefix and colour identify the physical room (two listings for the same room should share a colour); Sync on the Overview tab pulls reservation dates in, never guest names &mdash; Airbnb's export doesn't include those on any plan, so add a name per reservation there yourself.</div>
 <div id="airbnb-listings"></div>
 <button class="add-btn" id="add-airbnb-listing-btn" type="button" style="margin-top:8px;">Add listing</button>
+</div>
+
+<div class="settings-block">
+<h3>Shared-link auto-routing</h3>
+<div class="settings-note" style="margin:0 0 10px;">When you share a web link to the Dashboard, a matching rule here opens it straight into the right flow (e.g. a recipe site &rarr; the recipe importer) instead of just filing a task. Seeded with a few recipe sites &mdash; edit freely.</div>
+<div id="share-url-rules"></div>
+<button class="add-btn" id="add-share-rule-btn" type="button" style="margin-top:8px;">Add rule</button>
 </div>
 </details>
 

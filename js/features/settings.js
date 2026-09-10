@@ -11,6 +11,7 @@ import { restartAutoSync } from '../sync/autosync.js';
 import { canAttemptGoogleAction, refreshScopes } from '../sync/googleauth.js';
 import { getRemoteInfo, getRemoteCounts, countsOf, pushToGoogleDrive, pullFromGoogleDrive } from '../sync/googledrive.js';
 import { phoneKey, emailKey, nameKey } from '../googlecontacts.js';
+import { SHARE_ACTIONS } from './sharetarget.js';
 
 // Spend is only ever an estimate: it's computed from the token counts the
 // API reports multiplied by list prices baked into ai.js, so it ignores
@@ -310,6 +311,69 @@ document.getElementById('add-mail-search-btn').addEventListener('click', () => {
 data.mailSearches.push({ id: uid(), kind: 'from', value: '', maxDays: 0, maxEvents: 0 });
 renderMailSearches();
 queueSave();
+});
+
+renderShareUrlRules();
+const addRuleBtn = document.getElementById('add-share-rule-btn');
+if (addRuleBtn) addRuleBtn.addEventListener('click', () => {
+data.prefs.shareUrlRules = data.prefs.shareUrlRules || [];
+data.prefs.shareUrlRules.push({ id: uid(), host: '', path: '', action: Object.keys(SHARE_ACTIONS)[0] });
+renderShareUrlRules();
+queueSave();
+});
+}
+
+// Pastes of a full URL are common here -- pull the bits the matcher
+// actually uses (host without www., pathname) out of one, so a rule
+// entered by pasting "https://www.airbnb.co.uk/rooms/123?x=1" ends up as
+// host "airbnb.co.uk" + path "/rooms/".
+function normaliseRuleHost(value) {
+const v = String(value || '').trim();
+try {
+const u = new URL(v.includes('://') ? v : `https://${v}`);
+return u.hostname.replace(/^www\./, '').toLowerCase();
+} catch (e) {
+return v.replace(/^https?:\/\//i, '').replace(/^www\./i, '').split('/')[0].toLowerCase();
+}
+}
+
+// One editable row per shared-link auto-route rule. See
+// sharetarget.js's SHARE_ACTIONS / matchShareRule.
+function renderShareUrlRules() {
+const el = document.getElementById('share-url-rules');
+if (!el) return;
+const rules = data.prefs.shareUrlRules || [];
+const actionKeys = Object.keys(SHARE_ACTIONS);
+const rowsHtml = rules.map((r) => `<tr>
+<td><input type="text" autocomplete="off" data-share-rule-field="host" data-share-rule-id="${r.id}" value="${escapeHtml(r.host || '')}" placeholder="example.com"></td>
+<td><input type="text" autocomplete="off" data-share-rule-field="path" data-share-rule-id="${r.id}" value="${escapeHtml(r.path || '')}" placeholder="any"></td>
+<td><select data-share-rule-field="action" data-share-rule-id="${r.id}">
+${actionKeys.map((k) => `<option value="${k}"${k === r.action ? ' selected' : ''}>${escapeHtml(SHARE_ACTIONS[k].label)}</option>`).join('')}
+</select></td>
+<td><span class="del-x" style="opacity:1;" data-del-share-rule="${r.id}">&times;</span></td>
+</tr>`).join('');
+el.innerHTML = `${rules.length ? `<table class="limits-table">
+<thead><tr><th>Host</th><th>Path contains</th><th>Action</th><th></th></tr></thead>
+<tbody>${rowsHtml}</tbody>
+</table>` : '<div class="settings-note" style="margin:0;">No rules — every shared link becomes a task.</div>'}
+<div class="settings-note" style="margin:6px 0 0;">A link shared to the app whose host (and "path contains", if set) matches runs that action instead of filing a task. Anything that then fails falls back to a task carrying the link and the error.</div>`;
+
+el.querySelectorAll('[data-share-rule-field]').forEach((input) => {
+input.addEventListener('change', () => {
+const rule = (data.prefs.shareUrlRules || []).find((r) => r.id === input.dataset.shareRuleId);
+if (!rule) return;
+const field = input.dataset.shareRuleField;
+rule[field] = field === 'host' ? normaliseRuleHost(input.value) : input.value.trim();
+input.value = rule[field];
+queueSave();
+});
+});
+el.querySelectorAll('[data-del-share-rule]').forEach((x) => {
+x.addEventListener('click', () => {
+data.prefs.shareUrlRules = (data.prefs.shareUrlRules || []).filter((r) => r.id !== x.dataset.delShareRule);
+renderShareUrlRules();
+queueSave();
+});
 });
 }
 

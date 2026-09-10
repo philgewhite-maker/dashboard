@@ -13,9 +13,58 @@
 //
 // Only works from an installed PWA on Android. iOS has no share target.
 import { escapeHtml } from '../utils.js';
+import { data } from '../state.js';
 import { captureTask, revealTask } from './tasks.js';
 
 const SHARE_CACHE = 'pending-share';
+
+// Shared-link auto-routing. A URL shared to the app is matched against
+// data.prefs.shareUrlRules (see state.js); a matching rule's `action`
+// keys into here. Adding an action later is just another entry -- the
+// Settings rule editor lists whatever's registered, and the routing
+// below dispatches by key with a uniform "throws -> fall back to a
+// plain task carrying the URL and the error" contract. Only 'recipe' is
+// wired today; airbnb/event/etc. slot in the same way.
+const SHARE_ACTIONS = {
+recipe: {
+label: 'Import as a recipe',
+successBanner: (host) => `Read a recipe from ${host} — review and save it on the Menu tab.`,
+run: async (url) => {
+const { importSharedRecipeUrl } = await import('./recipes.js');
+await importSharedRecipeUrl(url); // throws on any failure -> caller falls back
+const { switchTab } = await import('../tabs.js');
+switchTab('menu');
+},
+},
+};
+
+// Case-insensitive exact-or-dot-boundary host match, so a rule for
+// "bbcgoodfood.com" catches "www."/"m." subdomains but not
+// "notbbcgoodfood.com".
+function hostMatches(ruleHost, actualHost) {
+const r = String(ruleHost || '').toLowerCase().replace(/^www\./, '');
+const a = String(actualHost || '').toLowerCase();
+return a === r || a.endsWith('.' + r);
+}
+
+// The rule that best matches `link`, or null. Among all rules whose host
+// and (optional) path substring both match, the one with the longest
+// `path` wins -- so airbnb.co.uk + "/rooms/" beats a bare airbnb.co.uk
+// rule for a /rooms/ URL, and a /guest/messages/ URL matches neither.
+function matchShareRule(link) {
+let u;
+try { u = new URL(link); } catch (e) { return null; }
+if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+const rules = (data.prefs && data.prefs.shareUrlRules) || [];
+const hits = rules.filter((rule) => {
+if (!SHARE_ACTIONS[rule.action]) return false;
+if (!hostMatches(rule.host, u.hostname)) return false;
+const path = String(rule.path || '');
+return !path || u.pathname.includes(path);
+});
+if (!hits.length) return null;
+return hits.sort((a, b) => String(b.path || '').length - String(a.path || '').length)[0];
+}
 
 function metaUrl() {
 return new URL('__share-meta', new URL('./', location.href)).href;
@@ -152,12 +201,43 @@ banner(msg);
 return;
 }
 
-const task = captureTask(composeTask(share));
-banner(`Captured "${task.title.slice(0, 60)}" to your Inbox.`, async () => {
+// A pure link share: try to auto-route it (recipe import, and whatever
+// else gets registered later) before falling back to a plain Inbox task.
+const composed = composeTask(share);
+const link = composed.link;
+const hit = link ? matchShareRule(link) : null;
+if (hit) {
+const host = (() => { try { return new URL(link).hostname.replace(/^www\./, ''); } catch (e) { return link; } })();
+const action = SHARE_ACTIONS[hit.action];
+banner(`Opening ${host}…`);
+try {
+await action.run(link);
+banner(action.successBanner(host), async () => {
+const { switchTab } = await import('../tabs.js');
+switchTab(hit.action === 'recipe' ? 'menu' : 'tasks');
+});
+return;
+} catch (err) {
+// Fall through to the task fallback below, carrying the reason.
+fileShareAsTask(composed, `Tried to auto-open this (${action.label}) but: ${err.message || err}`);
+return;
+}
+}
+
+fileShareAsTask(composed);
+}
+
+// The unchanged fallback: a shared link becomes an Inbox task. `note`,
+// when given, is an auto-route failure reason appended to the task's
+// notes so the URL and what went wrong stay together.
+function fileShareAsTask(composed, note) {
+const notes = note ? (composed.notes ? `${composed.notes}\n\n${note}` : note) : composed.notes;
+const task = captureTask({ ...composed, notes });
+banner(`Captured "${task.title.slice(0, 60)}" to your Inbox${note ? ' — auto-open didn\'t work, see its notes' : ''}.`, async () => {
 const { switchTab } = await import('../tabs.js');
 switchTab('tasks');
 revealTask(task.id);
 });
 }
 
-export { initShareTarget, composeTask, takePendingShare };
+export { initShareTarget, composeTask, takePendingShare, SHARE_ACTIONS, matchShareRule };

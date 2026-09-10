@@ -84,6 +84,26 @@ lowCalorieKcalPerServing: 400,
 highFibrePerServingG: 6,
 highAntioxidantMmolPerServing: 5,
 },
+// Shared-link auto-routing: when a URL shared to the app matches one of
+// these rules, run the named action instead of just filing a task. See
+// js/features/sharetarget.js -- SHARE_ACTIONS is the registry of what
+// `action` can be (only 'recipe' is wired today; the model is
+// deliberately open for airbnb/event/etc. later). `host` is matched by
+// exact or dot-boundary suffix; `path` (optional, '' = any) is a plain
+// substring the URL's pathname must contain, so a rule can be as
+// specific as airbnb.co.uk + '/rooms/' without also catching
+// '/guest/messages/'. Starter set is recipe sites since that's the one
+// working action.
+shareUrlRules: [
+{ id: 'seed-bbcgoodfood', host: 'bbcgoodfood.com', path: '', action: 'recipe' },
+{ id: 'seed-seriouseats', host: 'seriouseats.com', path: '', action: 'recipe' },
+{ id: 'seed-allrecipes', host: 'allrecipes.com', path: '', action: 'recipe' },
+{ id: 'seed-bonappetit', host: 'bonappetit.com', path: '', action: 'recipe' },
+{ id: 'seed-smittenkitchen', host: 'smittenkitchen.com', path: '', action: 'recipe' },
+{ id: 'seed-recipetineats', host: 'recipetineats.com', path: '', action: 'recipe' },
+{ id: 'seed-nytcooking', host: 'cooking.nytimes.com', path: '', action: 'recipe' },
+{ id: 'seed-delicious', host: 'deliciousmagazine.co.uk', path: '', action: 'recipe' },
+],
 };
 
 // Each mail search is one row in Settings: a kind, its value, and its own
