@@ -1554,7 +1554,7 @@ const rows = r.ingredientData.map((line, i) => {
 const mismatchEntry = lineUnitMismatchEntry(line);
 return `
 <div class="idea-row" style="padding:6px 0;">
-<div class="tinder-fields" style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:6px;">
+<div class="tinder-fields tinder-fields-4col">
 <div style="display:flex;align-items:center;gap:4px;min-width:0;">
 <input type="checkbox" data-ingdata-optional-toggle="${r.id}" data-ingdata-idx="${i}" title="Optional -- left out of this recipe's own totals" ${line.optional ? 'checked' : ''} style="flex-shrink:0;">
 <input type="text" placeholder="name" data-ingdata-field="name" data-ingdata-recipe="${r.id}" data-ingdata-idx="${i}" value="${escapeHtml(line.name)}" style="min-width:0;">
@@ -1570,7 +1570,7 @@ ${mismatchEntry ? unitMismatchNoteHtml(r.id, i, line, mismatchEntry) : ''}
 return `<div class="full">
 <button class="overview-panel-toggle" type="button" data-recipe-ingdata-toggle="${r.id}">${open ? '▾ Hide parsed ingredients' : '▸ Show parsed ingredients'}</button>
 ${open ? `<div style="margin-top:4px;">
-<div class="tinder-fields" style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:6px;"><span class="field-label">Name</span><span class="field-label">Form</span><span class="field-label">Qty</span><span class="field-label">Unit</span></div>
+<div class="tinder-fields tinder-fields-4col"><span class="field-label">Name</span><span class="field-label">Form</span><span class="field-label">Qty</span><span class="field-label">Unit</span></div>
 ${rows || '<div class="empty">Nothing parsed.</div>'}
 </div>` : ''}
 </div>`;
@@ -1988,7 +1988,7 @@ return `<div class="idea-row" data-ingredient-ref-row="${e.id}">
 </div>
 </label>
 <div class="settings-note">⚠ Changing this does NOT rescale the macro/FODMAP figures below -- they stay whatever number they already are, now against the NEW amount. Check and correct them too if the amount changed meaningfully.</div>
-<div class="tinder-fields" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+<div class="tinder-fields tinder-fields-2col">
 ${macroInput('Calories', 'calories')}${macroInput('Protein (g)', 'protein')}
 ${macroInput('Carbs (g)', 'carbs')}${macroInput('— sugars (g)', 'sugars')}
 ${macroInput('Fat (g)', 'fat')}${macroInput('— saturates (g)', 'saturates')}
@@ -1997,7 +1997,7 @@ ${macroInput('Fibre (g)', 'fibre')}${macroInput('Salt (g)', 'salt')}
 <label class="full">Fructan/GOS table <span class="settings-note">which published threshold window this ingredient's fructans/GOS are judged against</span>
 <select data-ref-oligo>${OLIGO_CATEGORIES.map((c) => `<option value="${c}" ${e.oligoCategory === c ? 'selected' : ''}>${c === 'grain_legume_nut' ? 'Grain / legume / nut (wider window)' : 'Vegetable / fruit (narrower window)'}</option>`).join('')}</select>
 </label>
-<div class="tinder-fields" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+<div class="tinder-fields tinder-fields-2col">
 ${FODMAP_COMPONENTS.map(fodmapInput).join('')}
 </div>
 <div class="settings-note">Grams of the actual carbohydrate per ${e.unitBasis.quantity}${escapeHtml(e.unitBasis.unit)} -- e.g. tinned chickpeas typically hold less GOS than dried/cooked, since some leaches into the tinning liquid.</div>
@@ -2138,7 +2138,7 @@ if (!el) return;
 const toggleHtml = `<button class="overview-panel-toggle" type="button" id="diet-tag-thresholds-toggle">${dietTagThresholdsCollapsed ? '▸ Show diet tag thresholds' : '▾ Hide diet tag thresholds'}</button>`;
 el.innerHTML = dietTagThresholdsCollapsed ? toggleHtml
 : `${toggleHtml}<div class="settings-note" style="margin-top:6px;">Cutoffs behind the auto-derived Diet tags (High protein/Low calorie/High fibre/High antioxidant) on every recipe -- the three per-serving ones only apply once a recipe has Servings set. Low-GI has no cutoff here -- it reuses the glycemic-load bands already used elsewhere.</div>
-<div class="tinder-fields" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px;">
+<div class="tinder-fields tinder-fields-2col" style="margin-top:6px;">
 ${DIET_TAG_THRESHOLD_FIELDS.map((f) => `<label>${escapeHtml(f.label)} <span class="settings-note">${escapeHtml(f.note)}</span>
 <div style="display:flex;align-items:center;gap:6px;">
 <input type="number" step="any" min="0" data-diet-tag-threshold="${f.key}" value="${data.prefs.dietTagThresholds[f.key]}" style="width:80px;">

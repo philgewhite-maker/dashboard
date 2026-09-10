@@ -40,7 +40,7 @@
 // that can quietly grow apart.
 import { data, queueSave, blankCaptureBatch } from '../state.js';
 import { photoDelete } from '../db.js';
-import { todayStr, escapeHtml, hydratePhotoBackgrounds, resizeImageToBlob, scrollAndFlash, looksLikeHeic, sniffsAsHeic, sniffsAsRasterImage } from '../utils.js';
+import { todayStr, escapeHtml, hydratePhotoBackgrounds, resizeImageToBlob, scrollAndFlash, looksLikeHeic, sniffsAsHeic, sniffsAsRasterImage, sniffsAsAvif } from '../utils.js';
 import { storePhoto, uploadAttachment, deleteAttachment, fetchAttachment, openAttachment, formatBytes } from '../files.js';
 import { looksLikeRenphoCsv, parseRenphoCsv, mergeRenphoDaily, looksLikeHrvCsv } from './renpho.js';
 import { legTargetPickerHtml, bindLegTargetPicker, readLegTargetPicker, applyLegExtraction } from './travel.js';
@@ -68,6 +68,11 @@ if (looksLikeHeic(file) || await sniffsAsHeic(file)) return 'photo';
 // magic-byte check (no real decode attempted), same reasoning as the
 // HEIC one just above.
 if (await sniffsAsRasterImage(file)) return 'photo';
+// AVIF too -- same untrustworthy-MIME-type problem, but checked
+// separately from the HEIC branch above (see sniffsAsAvif's own
+// comment): AVIF already decodes natively, it just needs correct
+// classification, not HEIC-to-JPEG conversion.
+if (await sniffsAsAvif(file)) return 'photo';
 try {
 const head = await file.slice(0, 300).text();
 if (looksLikeRenphoCsv(head)) return 'renpho-csv';

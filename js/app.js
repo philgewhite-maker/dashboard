@@ -52,6 +52,17 @@ function initTabs() {
 document.querySelectorAll('[data-tab-btn]').forEach((btn) => {
 btn.addEventListener('click', () => switchTab(btn.dataset.tabBtn));
 });
+// One shared, document-level binding for "go to the X tab" text mentions
+// anywhere in the app (`<span class="inline-goto-link" data-goto-tab="...">`)
+// -- bound ONCE here rather than re-bound per feature file on every one of
+// their own re-renders, since a plain switchTab() call needs nothing
+// feature-specific to work. Delegated (one listener on the document, not
+// one per element) so it keeps working across every re-render of whatever
+// panel the link happens to live in, with nothing extra to wire up there.
+document.addEventListener('click', (e) => {
+const link = e.target.closest('[data-goto-tab]');
+if (link) switchTab(link.dataset.gotoTab);
+});
 // A task's `link` (or any pasted URL) can point at #<tab> to open the app
 // straight onto that tab — falls back to overview for a missing/unknown
 // hash rather than landing on a blank tab bar with nothing shown. An

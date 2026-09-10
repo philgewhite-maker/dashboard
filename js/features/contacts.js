@@ -412,7 +412,7 @@ return;
 // filterBySearch() alone only scrolls to #connections-panel, which does
 // nothing visible if that tab isn't already the active one; switchTab()
 // first is what actually gets you there.
-el.innerHTML = `<div class="empty">${pendingMatches.size} to review — each one is on its own card, on the Dating tab.
+el.innerHTML = `<div class="empty">${pendingMatches.size} to review — each one is on its own card, on the <span class="inline-goto-link" data-goto-tab="dating">Dating tab</span>.
 <button class="filter-clear" type="button" id="show-review-only">Show just those</button></div>`;
 const btn = document.getElementById('show-review-only');
 if (btn) {

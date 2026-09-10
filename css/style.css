@@ -355,6 +355,16 @@ gap:12px;
 .album-strip{grid-template-columns:repeat(auto-fill,minmax(84px,1fr));margin-top:6px;}
 .album-card{position:relative;min-width:0;}
 .tinder-fields{display:grid;grid-template-columns:repeat(3, 1fr);gap:2px 16px;margin-top:8px;align-items:start;}
+/* A handful of .tinder-fields uses need a different column count than
+   the 3-column default -- these exist as real classes rather than an
+   inline `style="grid-template-columns:..."` specifically so the mobile
+   single-column override two screens down still applies: an inline
+   style beats any stylesheet rule regardless of media query, which
+   silently defeated that fix on every panel that used one (recipes.js's
+   parsed-ingredients editor, the macro/FODMAP/diet-threshold editors)
+   -- confirmed live. */
+.tinder-fields-4col{grid-template-columns:2fr 1fr 1fr 1fr;gap:6px;}
+.tinder-fields-2col{grid-template-columns:1fr 1fr;gap:6px;}
 .tinder-cluster{margin-top:10px;padding-top:8px;border-top:1px solid var(--line);}
 .tinder-cluster:first-child{margin-top:0;padding-top:0;border-top:none;}
 .tinder-cluster-title{margin:0 0 2px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);}
@@ -2345,7 +2355,7 @@ gap:8px;
 flex-wrap:wrap;
 }
 .task-check{flex-shrink:0;}
-.task-title{font-size:14px;cursor:pointer;flex:1 1 auto;min-width:120px;}
+.task-title{font-size:14px;font-weight:600;cursor:pointer;flex:1 1 auto;min-width:120px;}
 .task-row.done .task-title{text-decoration:line-through;color:var(--muted);}
 .task-row.dormant .task-title{color:var(--muted);}
 .task-kidcount{
@@ -2372,7 +2382,7 @@ white-space:nowrap;
 .shop-list h3{margin:0 0 6px;font-size:13px;}
 .shop-row{display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--line);flex-wrap:wrap;}
 .shop-row:first-of-type{border-top:none;}
-.shop-title{font-size:14px;cursor:pointer;flex:1 1 auto;min-width:120px;}
+.shop-title{font-size:14px;font-weight:600;cursor:pointer;flex:1 1 auto;min-width:120px;}
 .shop-row.done .shop-title{text-decoration:line-through;color:var(--muted);}
 .shop-also{font-size:11px;color:var(--muted);}
 .shop-search-btn{width:auto;margin-top:0;flex:0 0 auto;}
@@ -2697,7 +2707,8 @@ color:var(--muted);
    the grid past the panel exactly the way the comment above already
    warned a future miss would). Applied to all four at once rather than
    fixing them one at a time as each is separately caught. */
-.details-grid > *, .task-detail-grid > *, .tinder-fields > *, .pref-grid > *{min-width:0;}
+.details-grid > *, .task-detail-grid > *, .tinder-fields > *, .pref-grid > *,
+.alloc-grid > *, .planner-grid > *, .planner-grid-trip > *{min-width:0;}
 .details-grid{grid-template-columns:1fr;}
 .task-detail-grid{grid-template-columns:1fr;}
 .tinder-fields{grid-template-columns:1fr;}

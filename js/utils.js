@@ -600,6 +600,26 @@ return false;
 }
 }
 
+// AVIF uses the SAME ISO-BMFF "ftyp" box HEIC does, just a different
+// brand -- but unlike HEIC, Chrome/Android's own <img>/canvas decode
+// already handles AVIF natively, so this is deliberately its own check
+// rather than one more entry in HEIC_BRANDS above: adding it there would
+// route a perfectly decodable AVIF through the HEIC-only heic-to
+// conversion library (which isn't built for AVIF), trading a working
+// format for a broken one instead of fixing anything. Checked alongside
+// sniffsAsRasterImage in captureItemKind, not sniffsAsHeic.
+const AVIF_BRANDS = ['avif', 'avis'];
+async function sniffsAsAvif(file) {
+try {
+const head = new Uint8Array(await file.slice(0, 32).arrayBuffer());
+if (String.fromCharCode(...head.slice(4, 8)) !== 'ftyp') return false;
+const tail = String.fromCharCode(...head.slice(8, 32));
+return AVIF_BRANDS.some((b) => tail.includes(b));
+} catch (e) {
+return false;
+}
+}
+
 // The SAME "Android's own MIME type can't be trusted" problem sniffsAsHeic
 // exists for, generalised to the common raster formats too -- confirmed
 // live: a plain JPEG shared straight into Capture Inbox hit the exact same
@@ -1094,6 +1114,6 @@ escapeHtml, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTra
 findMentions, COUNTRY_NAME_TO_NATIONALITY,
 resizeImageToBlob, fileToBase64, loadImage, cropThumbnailToBlob,
 hashFile, captureDateOf, betterCaptureDate, dateFromFilename,
-ensureBrowserReadableImage, setPhotoFallback, looksLikeHeic, sniffsAsHeic, sniffsAsRasterImage,
+ensureBrowserReadableImage, setPhotoFallback, looksLikeHeic, sniffsAsHeic, sniffsAsRasterImage, sniffsAsAvif,
 contentCropBounds, cropToContentBlob, classifyProfileUpload, looksLikeSameScreenshotPieces, screenshotsLookCombinable,
 };

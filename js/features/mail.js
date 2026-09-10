@@ -73,7 +73,7 @@ const total = sections.reduce((n, s) => n + s.messages.length, 0);
 document.getElementById('mail-count').textContent = `${total} shown`;
 const html = sections.map((s) => sectionHtml(sectionTitle(s.search), s.messages)).filter(Boolean).join('');
 list.innerHTML = html || (data.mailSearches.length === 0
-? '<div class="empty">No mail searches set up — add some in Settings.</div>'
+? '<div class="empty">No mail searches set up — add some in <span class="inline-goto-link" data-goto-tab="settings">Settings</span>.</div>'
 : '<div class="empty">Nothing matched your mail searches.</div>');
 
 list.querySelectorAll('[data-goto-task]').forEach((btn) => {

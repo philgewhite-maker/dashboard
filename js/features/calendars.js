@@ -12,7 +12,7 @@ function renderCalendars() {
 const list = document.getElementById('calendars-list');
 document.getElementById('calendars-count').textContent = data.calendars.length + (data.calendars.length === 1 ? ' calendar' : ' calendars');
 if (data.calendars.length === 0) {
-list.innerHTML = '<div class="empty">Nothing tracked yet. Add one in Settings, then Sync.</div>';
+list.innerHTML = '<div class="empty">Nothing tracked yet. Add one in <span class="inline-goto-link" data-goto-tab="settings">Settings</span>, then Sync.</div>';
 return;
 }
 // Sort by each calendar's soonest event so whatever is happening next
