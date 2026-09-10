@@ -2817,8 +2817,14 @@ try {
 const known = data.connections.filter((c) => c.tinderMatchId);
 const knownIds = known.map((c) => c.tinderMatchId);
 const staleById = Object.fromEntries(known.map((c) => [c.tinderMatchId, c.tinderLastScrapedAt || '']));
+// Every match id ANY connection is known by (identity rows + the legacy
+// scalar), not just the tinderMatchId scalar -- tinderFindMissing()
+// compares the whole sidebar against this to spot anyone the dashboard
+// never stored, so a connection known by a second/renamed id shouldn't
+// look missing.
+const allKnownMatchIds = [...new Set(data.connections.flatMap((c) => [...tinderMatchIds(c)]))].filter(Boolean);
 const snippet = document.getElementById('tinder-bulk-snippet').textContent
-+ `\ntinderSeedDone(${JSON.stringify(knownIds)});\ntinderSeedStale(${JSON.stringify(staleById)});\n`;
++ `\ntinderSeedDone(${JSON.stringify(knownIds)});\ntinderSeedStale(${JSON.stringify(staleById)});\nwindow.__dashKnownIds = ${JSON.stringify(allKnownMatchIds)};\n`;
 await navigator.clipboard.writeText(snippet);
 bulkCopyBtn.textContent = 'Copied';
 setTimeout(() => { bulkCopyBtn.textContent = 'Copy bulk-import snippet'; }, 2000);

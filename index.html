@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v302</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v303</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -917,7 +917,7 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
 })();</pre>
 </details>
 <div class="settings-note" style="margin:10px 0;">
-<strong>Bulk mode:</strong> steps through your sidebar matches automatically instead of one profile at a time &mdash; 15 per run by default, real randomised delays (10&ndash;60s) between each, remembered on Tinder's own site so the next run (later today or tomorrow) only picks up whoever's left. Fine to run a few times a day at that pace, or a large number left overnight &mdash; e.g. <code>tinderBulkImport(250)</code>. Pasting the snippet only defines it; run it with <code>tinderBulkImport()</code> in the console for the default 15, or <code>tinderBulkImport(30)</code> for a custom size &mdash; no need to re-paste to change it. Every 25 profiles it checkpoints to its own downloaded file, so a crash, sleep or closed tab partway through an overnight run only loses the last (incomplete) chunk, not the whole night. The dashboard's file picker below takes several of those files at once &mdash; select them all and it sorts anyone it already knows for certain into a bulk-review list (photos, name, and what's new, tick the ones that look right and submit together) and only routes genuinely new or uncertain matches to the one-by-one reviewer. This runs unattended across many real profiles in a row &mdash; if you see anything that looks like a rate limit or a verification prompt, stop and give it a break.
+<strong>Bulk mode:</strong> steps through your sidebar matches automatically instead of one profile at a time &mdash; 15 per run by default, real randomised delays (10&ndash;60s) between each, remembered on Tinder's own site so the next run (later today or tomorrow) only picks up whoever's left. Fine to run a few times a day at that pace, or a large number left overnight &mdash; e.g. <code>tinderBulkImport(250)</code>. Pasting the snippet only defines it; run it with <code>tinderBulkImport()</code> in the console for the default 15, or <code>tinderBulkImport(30)</code> for a custom size &mdash; no need to re-paste to change it. Every 25 profiles it checkpoints to its own downloaded file, so a crash, sleep or closed tab partway through an overnight run only loses the last (incomplete) chunk, not the whole night. The dashboard's file picker below takes several of those files at once &mdash; select them all and it sorts anyone it already knows for certain into a bulk-review list (photos, name, and what's new, tick the ones that look right and submit together) and only routes genuinely new or uncertain matches to the one-by-one reviewer. This runs unattended across many real profiles in a row &mdash; if you see anything that looks like a rate limit or a verification prompt, stop and give it a break. If you ever notice a match that never made it into the dashboard (an early run can scrape a profile while its panel hasn't finished loading, mark it done, and never send it on), run <code>tinderFindMissing()</code> after a full scroll of both lists &mdash; it compares your whole match list against what the dashboard already has (ignoring this browser's skip-list) and prints a ready <code>tinderReextract([...])</code> call for anyone missing.
 </div>
 <button class="sync-btn" type="button" id="tinder-bulk-copy-snippet">Copy bulk-import snippet</button>
 <details style="margin:0 0 10px;">
@@ -1767,6 +1767,60 @@ window.tinderFindUnmatched = async () => {
   if (!copied) console.log(json);
 };
 
+// The mirror image of tinderFindUnmatched: that one finds ids that
+// VANISHED from the sidebar; this finds ids that are IN the sidebar but
+// the DASHBOARD never got. Deliberately compares against the dashboard's
+// own known match ids (window.__dashKnownIds, appended by its "Copy
+// bulk-import snippet" button, same as tinderSeedDone/tinderSeedStale) --
+// NOT this browser's doneVersions, which is exactly the skip-list that
+// hides a profile an early run scraped while its panel hadn't finished
+// rendering (marked done, empty, never sent on). Same full-scroll-both-
+// tabs sweep tinderFindUnmatched uses, since collectAllCandidates() alone
+// doesn't scroll. Output feeds straight into tinderReextract().
+window.tinderFindMissing = async (knownIds) =&gt; {
+  const known = new Set((knownIds || window.__dashKnownIds || []).filter(Boolean));
+  if (!known.size) { console.warn('tinderFindMissing needs the dashboard\'s known match ids -- copy the bulk-import snippet from the dashboard (it appends them), or pass an array: tinderFindMissing(["id1","id2"]).'); return; }
+
+  async function scrollListFully(ul) {
+    if (!ul) return;
+    let box = ul;
+    while (box &amp;&amp; !(box.scrollHeight &gt; box.clientHeight + 50 &amp;&amp; box.clientHeight &gt; 100)) box = box.parentElement;
+    if (!box) return;
+    let lastHeight = -1, stable = 0;
+    for (let i = 0; i &lt; 200 &amp;&amp; stable &lt; 3; i++) {
+      box.scrollTop = box.scrollHeight;
+      await new Promise((r) =&gt; setTimeout(r, 300));
+      if (box.scrollHeight === lastHeight) stable++; else stable = 0;
+      lastHeight = box.scrollHeight;
+    }
+  }
+
+  const startedOnTab = findTabButton('Matches')?.getAttribute('aria-selected') === 'true' ? 'Matches'
+    : findTabButton('Messages')?.getAttribute('aria-selected') === 'true' ? 'Messages' : null;
+  console.log('Scrolling both lists to load your whole match history first -- this can take a while...');
+  const visible = new Map();
+  await switchToTab('Matches');
+  await scrollListFully(document.querySelector('ul[aria-label="Your matches"]'));
+  collectCandidates().forEach((r) =&gt; visible.set(r.id, r.name));
+  await switchToTab('Messages');
+  await scrollListFully(document.querySelector('ul[aria-label="Your recent messages"]'));
+  collectCandidates().forEach((r) =&gt; visible.set(r.id, r.name));
+  if (startedOnTab) await switchToTab(startedOnTab);
+
+  const missing = [...visible.keys()].filter((id) =&gt; !known.has(id));
+  if (!missing.length) {
+    console.log(`${visible.size} matches visible, all ${known.size} known to the dashboard -- nothing missing.`);
+    return;
+  }
+  missing.forEach((id) =&gt; console.log(`  missing: ${visible.get(id) || '(no name)'} -- ${id}`));
+  const json = JSON.stringify({ reextract: missing }, null, 1);
+  let copied = false;
+  try { copy(json); copied = true; } catch (e) { /* not a real DevTools console */ }
+  if (!copied) { try { await navigator.clipboard.writeText(json); copied = true; } catch (e) { /* no clipboard */ } }
+  console.log(`${missing.length} match${missing.length === 1 ? '' : 'es'} in your sidebar the dashboard has never stored${copied ? ' (copied)' : ''}. Pull them now with:\n\n  tinderReextract(${JSON.stringify(missing)})\n\nthen paste the downloaded file into the dashboard as usual.`);
+  if (!copied) console.log(json);
+};
+
 // Re-extracts a SPECIFIC list of match ids -- unlike tinderBulkImport()
 // (todo = not yet marked done) or tinderCatchUp() (todo = active
 // conversations since a date), this is driven entirely by an explicit id
@@ -1928,7 +1982,7 @@ async function staleSweepTail(n) {
   console.log(`Stale-refresh: ${chunkState.totalSaved} of ${batch.length} saved to its own file in Downloads -- paste in whenever, no rush; anyone skipped today just gets picked again another run.`);
 }
 
-console.log('Ready. Run tinderBulkImport() for the default 15, tinderBulkImport(30) for a custom size, or e.g. tinderBulkImport(250) left running overnight -- checkpoints to a file every 25. Or tinderCatchUp("2026-08-10") to re-check active conversations and new matches since a date -- good for a weekly pass. Or tinderFindUnmatched() to spot anyone missing from both lists since they were last indexed. Or tinderReextract(["id1", "id2", ...]) to re-check a specific, already-known list of ids -- e.g. profiles a JSON cross-check flagged as suspiciously incomplete. Or tinderSeedDone([...ids]) to mark ids you already have elsewhere as done without opening them -- the dashboard\'s "Copy bulk-import snippet" button does this automatically, along with tinderSeedStale({...}) which both tinderBulkImport() and tinderCatchUp() use to also refresh a handful of your longest-untouched profiles after their main run, in their own separate file.');
+console.log('Ready. Run tinderBulkImport() for the default 15, tinderBulkImport(30) for a custom size, or e.g. tinderBulkImport(250) left running overnight -- checkpoints to a file every 25. Or tinderCatchUp("2026-08-10") to re-check active conversations and new matches since a date -- good for a weekly pass. Or tinderFindUnmatched() to spot anyone missing from both lists since they were last indexed. Or tinderFindMissing() to spot the opposite -- matches in your sidebar the dashboard never stored (e.g. an early run scraped them before their panel loaded); it prints a ready tinderReextract([...]) call, and ignores this browser\'s skip-list. Or tinderReextract(["id1", "id2", ...]) to re-check a specific, already-known list of ids -- e.g. profiles a JSON cross-check flagged as suspiciously incomplete. Or tinderSeedDone([...ids]) to mark ids you already have elsewhere as done without opening them -- the dashboard\'s "Copy bulk-import snippet" button does this automatically, along with tinderSeedStale({...}) which both tinderBulkImport() and tinderCatchUp() use to also refresh a handful of your longest-untouched profiles after their main run, in their own separate file.');
 })();</pre>
 </details>
 </details>
