@@ -2562,7 +2562,7 @@ max-width:100%;
    container holding one needs to be listed here — a .limits-table without a
    scrolling parent pushes the whole page sideways. */
 @media (max-width:600px){
-#mail-searches, #calendar-limits, #tag-cleanup, .cleanup-section{overflow-x:auto;}
+#mail-searches, #calendar-limits, #tag-cleanup, .cleanup-section, #telegramfamily-body{overflow-x:auto;}
 .limits-table{min-width:460px;}
 }
 

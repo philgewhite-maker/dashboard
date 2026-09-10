@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v298</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v299</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -1977,6 +1977,16 @@ Telegram Desktop &rarr; Settings &rarr; Advanced &rarr; Export Telegram data &ra
 <div id="telegram-review"></div>
 </section>
 
+<section class="panel wide" id="telegramfamily-panel" data-tab="datingadmin">
+<div class="panel-head">
+<h2><span class="dot rose"></span>Family (Telegram bot)</h2>
+</div>
+<div class="settings-note" style="margin:0 0 10px;">
+Family members are added here as ordinary connections (so they can be placed on a trip, same as anyone else) but kept out of the dating lists above. Set the bot's URL and token in Settings &mdash; Account &amp; sync &mdash; before this works. See server/telegram-bot.php.example.
+</div>
+<div id="telegramfamily-body"></div>
+</section>
+
 <section class="panel wide" id="photoscan-panel" data-tab="datingadmin">
 <div class="panel-head">
 <h2><span class="dot amber"></span>Scan a batch of screenshots</h2>
@@ -2511,6 +2521,14 @@ A browser page has no way to read Health Connect directly &mdash; it's a native 
 <button class="sync-btn" id="notion-test-btn" type="button">Test connection</button>
 </div>
 <div class="sync-result" id="notion-test-status"></div>
+<div class="settings-note">Uses the same secret as Live sync above.</div>
+</div>
+
+<div class="settings-block">
+<h3>Telegram bot</h3>
+<div class="settings-note" style="margin:0 0 8px;">Lets family members be messaged and reply back into the app &mdash; see the Family panel on Dating admin. Set up server/telegram-bot.php.example (copy it, fill in a bot token from @BotFather and a webhook secret, upload, then register the webhook once — the file's own top comment has the exact steps).</div>
+<label for="telegrambot-url-input" style="font-size:13px;font-weight:500;display:block;margin-bottom:6px;">Bot URL</label>
+<input type="text" autocomplete="off" id="telegrambot-url-input" class="settings-input" placeholder="https://georgewhiteeuropean.co.uk/telegram-bot.php">
 <div class="settings-note">Uses the same secret as Live sync above.</div>
 </div>
 

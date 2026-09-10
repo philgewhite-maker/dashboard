@@ -24,6 +24,7 @@ import { renderTravel } from './features/travel.js';
 import { renderPlanner } from './features/planner.js';
 import { renderNudges } from './features/nudges.js';
 import { renderTagCleanup } from './features/tagcleanup.js';
+import { renderTelegramFamily } from './features/telegramfamily.js';
 
 function renderAll() {
 renderHabits();
@@ -49,6 +50,7 @@ renderPlanner();
 renderOverview();
 renderNudges();
 renderTagCleanup();
+renderTelegramFamily();
 }
 
 export { renderAll };

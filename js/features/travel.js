@@ -429,6 +429,7 @@ ${leg.passengers.map((p) => passengerRowHtml(trip.id, leg, p)).join('')}
 ${leg.attachments.length ? `<div style="margin-top:6px;">${leg.attachments.map((a) => `<div class="attach-row"><button class="attach-name" type="button" data-leg-attach-open="${leg.id}" data-trip-id="${trip.id}" data-attach-id="${escapeHtml(a.id)}">${escapeHtml(a.name || 'file')}</button><span class="attach-size">${escapeHtml(formatBytes(a.size))}</span></div>`).join('')}</div>` : ''}
 <textarea data-leg-notes="${leg.id}" data-trip-id="${trip.id}" placeholder="Notes" style="width:100%;margin-top:8px;min-height:44px;">${escapeHtml(leg.notes)}</textarea>
 <div class="settings-note" style="margin-top:4px;">${sourceHtml}${gaps.length ? ` · ${gaps.length} still needed` : ' · complete'}</div>
+<button type="button" class="todo-add-btn" data-ask-telegram="trip" data-ask-telegram-trip="${trip.id}" data-ask-telegram-leg="${leg.id}" title="Ask a family member about this leg via Telegram" style="margin-top:6px;">Ask via Telegram</button>
 </div>`;
 }
 

@@ -93,10 +93,19 @@ return dim ? keysFor(dim, c).includes(facet.key) : true;
 // dimension. Ignoring its own facets is what lets a faceted dimension still
 // show its siblings — otherwise picking "London" would leave Location
 // showing only London, and you could never switch to Paris.
+// isFamily connections (see telegramfamily.js) are real connection
+// records but not dating matches, so this Overview -- entirely a dating-
+// pipeline view -- works off this pool rather than data.connections
+// directly, same exclusion connections.js's own renderConnections now
+// applies to the Dating tab's default list.
+function datingPool() {
+return data.connections.filter((c) => !c.isFamily);
+}
+
 function connectionsMatching(dims, exceptTitle) {
 const active = facets.filter((f) => f.title !== exceptTitle);
-if (active.length === 0) return data.connections;
-return data.connections.filter((c) => active.every((f) => matchesFacet(c, f, dims)));
+if (active.length === 0) return datingPool();
+return datingPool().filter((c) => active.every((f) => matchesFacet(c, f, dims)));
 }
 
 function groupConnectionsBy(list, getKeys) {
@@ -201,7 +210,7 @@ el.innerHTML = toggleHtml;
 bindToggle();
 return;
 }
-if (data.connections.length === 0) {
+if (datingPool().length === 0) {
 el.innerHTML = toggleHtml + '<div class="empty">Add some connections to see them grouped here.</div>';
 bindToggle();
 return;
@@ -216,7 +225,7 @@ const modeHtml = `<div class="overview-mode">
 const sections = dims.map((dim) => {
 // Each dimension counts against everything EXCEPT its own facets, so its
 // alternatives stay visible and switchable.
-const scope = drillDown ? connectionsMatching(dims, dim.title) : data.connections;
+const scope = drillDown ? connectionsMatching(dims, dim.title) : datingPool();
 return overviewDimension(dim, groupConnectionsBy(scope, dim.getKeys));
 }).filter(Boolean).join('');
 
@@ -285,7 +294,7 @@ return;
 // Date-locations tag that happens to contain the same word as a
 // Location chip ("Mallorca" the city vs. "Mallorca" a date-location).
 const dim = dims.find((d) => d.title === title);
-const ids = dim ? data.connections.filter((c) => keysFor(dim, c).includes(key)).map((c) => c.id) : [];
+const ids = dim ? datingPool().filter((c) => keysFor(dim, c).includes(key)).map((c) => c.id) : [];
 import('./connections.js').then((m) => m.filterByIds(ids, `${title}: ${key}`));
 if (field) {
 const alreadyOpen = openAssigner && openAssigner.field === field && openAssigner.key === key;

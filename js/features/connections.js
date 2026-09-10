@@ -578,7 +578,7 @@ secondary.innerHTML = `<option value="none"${connectionSortSecondary === 'none' 
 }
 
 function needsAttentionIds() {
-return data.connections.filter((c) => suggestedQuestions(c).length > 0).map((c) => c.id);
+return data.connections.filter((c) => !c.isFamily && suggestedQuestions(c).length > 0).map((c) => c.id);
 }
 
 // A matches-list-only import (the "Bumble list" screenshot flow, though
@@ -596,7 +596,7 @@ return [c.age, c.height, c.job, c.education].every((v) => !String(v || '').trim(
 }
 
 function thinProfileIds() {
-return data.connections.filter(isThinProfile).map((c) => c.id);
+return data.connections.filter((c) => !c.isFamily && isThinProfile(c)).map((c) => c.id);
 }
 
 // Archived/Faded/Got Away pile up over time and are rarely what anyone's
@@ -614,7 +614,7 @@ const settings = await getLocalSettings();
 showArchivedFaded = !!settings.showArchivedFaded;
 }
 function archivedFadedIds() {
-return data.connections.filter((c) => HIDDEN_BY_DEFAULT_STAGES.has(c.stage)).map((c) => c.id);
+return data.connections.filter((c) => !c.isFamily && HIDDEN_BY_DEFAULT_STAGES.has(c.stage)).map((c) => c.id);
 }
 
 function isReachOutSnoozed(c) {
@@ -652,6 +652,7 @@ return (c.priority - 3) * 2 + green * 1.5 - red * 3 + (rating ? rating.value - 3
 function computeTopReachOut(n = 10) {
 return new Set(
 data.connections
+.filter((c) => !c.isFamily)
 .map((c) => ({ id: c.id, amount: reachOutOverdueAmount(c), c }))
 .filter((x) => x.amount >= 0)
 .sort((a, b) => (b.amount + reachOutQualityBonus(b.c)) - (a.amount + reachOutQualityBonus(a.c)))
@@ -720,9 +721,17 @@ return data.tasks.find((t) => t.source && t.source.kind === ATTENTION_TASK_SOURC
 function renderConnections() {
 renderSortOptions();
 topReachOutIdSet = computeTopReachOut();
+// isFamily connections are real connection records (so trip.people,
+// Planner, and chip references all work against them for free -- see
+// telegramfamily.js's own header comment) but not dating matches, so
+// every Dating-tab housekeeping view below works off this pool instead
+// of data.connections directly. Not applied to search (below) — same
+// "an explicit lookup finds everyone" exception showArchivedFaded's own
+// comment already documents for archived/faded.
+const datingPool = data.connections.filter((c) => !c.isFamily);
 // Built once per render, not once per card -- see connectionCardHtml's
 // own comment on why that used to be an O(n) rebuild done n times over.
-const cityMap = knownCityMap(data.connections);
+const cityMap = knownCityMap(datingPool);
 // Same reasoning, one level deeper: highlightFlagValues' matcher (color
 // map, city set, and a compiled regex over every flag-rule value + city +
 // country name) doesn't change within a single render either, but every
@@ -733,7 +742,7 @@ const cityMap = knownCityMap(data.connections);
 // through connectionCardHtml() for both Notes and chat use.
 const matcher = buildFlagMatcher(data.flagRules, cityMap);
 const list = document.getElementById('connections-list');
-document.getElementById('connections-count').textContent = data.connections.length + (data.connections.length === 1 ? ' connection' : ' connections');
+document.getElementById('connections-count').textContent = datingPool.length + (datingPool.length === 1 ? ' connection' : ' connections');
 const attnBtn = document.getElementById('conn-needs-attention-btn');
 const attnIds = needsAttentionIds();
 if (attnBtn) {
@@ -747,7 +756,7 @@ thinBtn.classList.toggle('active', idFilter && idFilter.label === 'Thin profiles
 }
 const priorityBtn = document.getElementById('conn-priority-btn');
 if (priorityBtn) {
-priorityBtn.textContent = `Priority (${data.connections.filter(isPriorityConnection).length})`;
+priorityBtn.textContent = `Priority (${datingPool.filter(isPriorityConnection).length})`;
 priorityBtn.classList.toggle('active', idFilter && idFilter.label === 'Priority');
 }
 const archivedBtn = document.getElementById('conn-show-archived-btn');
@@ -778,7 +787,7 @@ delete taskBtn.dataset.gotoTask;
 taskBtn.hidden = true;
 }
 }
-if (data.connections.length === 0) {
+if (datingPool.length === 0) {
 list.innerHTML = '<div class="empty">No matches logged yet. Add one below.</div>';
 refreshPhotoTargets();
 return;
@@ -788,7 +797,7 @@ return;
 // search, so it's a separate filter mode rather than a magic search term.
 if (emptyFieldFilter) {
 const { field, label } = emptyFieldFilter;
-const missing = data.connections.filter((c) => isFieldEmpty(c, field));
+const missing = datingPool.filter((c) => isFieldEmpty(c, field));
 list.innerHTML = `<div class="filter-banner">Showing ${missing.length} with no ${escapeHtml(label)} <button class="filter-clear" type="button" id="clear-empty-filter">Clear</button></div>`
 + (missing.length === 0
 ? '<div class="empty">Everyone has at least one.</div>'
@@ -806,7 +815,7 @@ return;
 }
 
 if (idFilter) {
-const picked = data.connections.filter((c) => idFilter.ids.has(c.id));
+const picked = datingPool.filter((c) => idFilter.ids.has(c.id));
 list.innerHTML = `<div class="filter-banner">${picked.length} matching ${escapeHtml(idFilter.label)} <button class="filter-clear" type="button" id="clear-id-filter">Clear</button></div>`
 + (picked.length === 0 ? '<div class="empty">Nobody matches all of those.</div>' : picked.map((c) => connectionCardHtml(c, cityMap, matcher)).join(''))
 + tagDatalistsHtml();
@@ -823,7 +832,7 @@ const term = foldDiacritics(connectionSearchTerm.trim().toLowerCase());
 // an explicit lookup for someone specific -- it searches everyone
 // regardless, same as the Overview stage chips (idFilter above) already
 // bypass this via their own early return.
-const base = (!term && !showArchivedFaded) ? data.connections.filter((c) => !HIDDEN_BY_DEFAULT_STAGES.has(c.stage)) : data.connections;
+const base = (!term && !showArchivedFaded) ? datingPool.filter((c) => !HIDDEN_BY_DEFAULT_STAGES.has(c.stage)) : datingPool;
 const filtered = term ? base.filter((c) => {
 const haystack = foldDiacritics([
 c.name, c.profileName, ...(c.identities || []).flatMap((r) => [r.handle, r.matchId]), ...(c.aliases || []), c.address, c.job, c.education, c.stage, ageDecade(c),

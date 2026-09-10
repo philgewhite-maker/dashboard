@@ -568,7 +568,41 @@ contactMatchedBy: '', unmatchedAt: '',
 likes: '', notes: '', chatLog: '', chatLogWhatsApp: '', chatLogTelegram: '',
 todos: [], ratings: {}, driveLink: '', photosAlbumUrl: '', photosPersonUrl: '',
 distance: '', matchedOn: '', tinderMatchId: '', tinderLastScrapedAt: '', attentionSnoozedUntil: '',
+// A family member the Telegram bot can message -- NOT a dating match,
+// but still a real connection record (see telegramfamily.js's own
+// header comment for why this reuses `connections` rather than a
+// separate registry: trip.people's connectionId link, chip rendering,
+// and Planner's connectionsAtDestinations all already work against
+// "a connection," and inventing a parallel person-registry would just
+// mean rebuilding all of that a second time). Every dating-pipeline
+// field above (stage, sexTags, orientation...) is simply left at its
+// default for one of these -- the app already tolerates a sparsely
+// filled connection record. isFamily is the one flag the Dating tab's
+// default list and Connections Overview filter OUT on, so family
+// members don't clutter the dating pipeline.
+isFamily: false,
+telegramChatId: '', // learned the first time this person messages the bot -- see data.telegramUnclaimed
+telegramUsername: '', // optional, entered by hand -- purely a label, chat id is what actually addresses them
 ...Object.fromEntries(TAG_FIELDS.map((t) => [t.field, []])),
+...fields,
+};
+}
+
+// One "ask -> reply" exchange with a family member over Telegram. context
+// is what a later automation pass (explicitly deferred -- see
+// telegramfamily.js) would need to act on a reply directly: which trip
+// leg or task the question was actually about.
+function blankTelegramThread(fields = {}) {
+return {
+id: uid(),
+connectionId: '', // the isFamily connection this was sent to
+question: '',
+context: { kind: 'general', tripId: '', legId: '', taskId: '' },
+status: 'sent', // 'sent' | 'replied' | 'resolved'
+sentAt: new Date().toISOString(),
+replyText: '',
+repliedAt: '',
+resolvedAt: '',
 ...fields,
 };
 }
@@ -819,6 +853,11 @@ data.pendingImports = data.pendingImports.map((p) => ({ ...blankPendingImport(),
 // added/updated/discarded) is clutter, not a real review entry -- same
 // reasoning as the captureInbox filter just above.
 data.pendingImports = data.pendingImports.filter((p) => p.candidates.length > 0);
+if (!Array.isArray(data.telegramThreads)) data.telegramThreads = [];
+data.telegramThreads = data.telegramThreads.map((t) => ({ ...blankTelegramThread(), ...t, id: t.id || uid(), context: { kind: 'general', tripId: '', legId: '', taskId: '', ...(t.context || {}) } }));
+// {chatId, fromName, text, date} entries the bot has seen but nobody's
+// linked to a connection yet -- see telegramfamily.js's pollTelegramInbox.
+if (!Array.isArray(data.telegramUnclaimed)) data.telegramUnclaimed = [];
 // One row per local calendar day, fully rebuilt from server-held raw
 // payloads on every parse (see healthparse.js) rather than edited by hand
 // -- no per-item blank-factory needed, just an array-shape guard.
@@ -927,6 +966,9 @@ data.connections.forEach((c) => {
 // doesn't require hunting down the bad connection by hand.
 if (typeof c.name !== 'string') c.name = 'Unnamed match';
 if (typeof c.priorityFlag !== 'boolean') c.priorityFlag = false;
+if (typeof c.isFamily !== 'boolean') c.isFamily = false;
+if (typeof c.telegramChatId !== 'string') c.telegramChatId = '';
+if (typeof c.telegramUsername !== 'string') c.telegramUsername = '';
 if (!Array.isArray(c.photoIds)) c.photoIds = c.photoId ? [c.photoId] : [];
 if (typeof c.photoId !== 'string') c.photoId = c.photoIds[0] || null;
 if (!Array.isArray(c.languages)) c.languages = [];
@@ -1822,7 +1864,7 @@ setExternalUpdateHandler, setLocalChangeHandler, getLocalSettings, setLocalSetti
 isDormantStage, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness,
 exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, DEFAULT_PREFS,
 MAIL_SEARCH_KINDS, mailSearchLabel,
-TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureBatch, blankPendingImport, blankConnection,
+TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureBatch, blankPendingImport, blankConnection, blankTelegramThread,
 blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS, LEG_DATE_FIELDS,
 blankPlannerEntry, blankPlannerActivity,
 blankAirbnbListing, blankAirbnbReservation, blankFinanceAccount,

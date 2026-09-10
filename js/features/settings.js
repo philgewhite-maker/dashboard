@@ -185,6 +185,7 @@ e.target.value = '';
 
 initLiveSync(settings);
 initNotion(settings);
+initTelegramBotUrl(settings);
 initFetchPrefs();
 renderTagCleanup();
 
@@ -366,6 +367,19 @@ queueSave();
 // The URL/secret pair is saved as you type (debounced), but syncing only
 // (re)starts when you press Test — otherwise a half-typed URL would fire a
 // stream of failing requests on every keystroke.
+// Just the URL -- the secret is the same one Live sync above already
+// stores/saves, see telegramfamily.js's own botConfig().
+function initTelegramBotUrl(settings) {
+const urlInput = document.getElementById('telegrambot-url-input');
+if (!urlInput) return;
+urlInput.value = settings.telegramBotUrl || '';
+let saveTimer = null;
+urlInput.addEventListener('input', () => {
+clearTimeout(saveTimer);
+saveTimer = setTimeout(() => setLocalSetting('telegramBotUrl', urlInput.value.trim()), 400);
+});
+}
+
 function initLiveSync(settings) {
 const urlInput = document.getElementById('sync-url-input');
 const secretInput = document.getElementById('sync-secret-input');

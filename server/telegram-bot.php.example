@@ -1,0 +1,196 @@
+<?php
+declare(strict_types=1);
+
+/**
+ * Telegram bot bridge -- lets family members be messaged directly ("For
+ * trip X, does this flight work?") and have their reply land back in the
+ * dashboard against the record it was about. See js/features/
+ * telegramfamily.js for the client half of this loop.
+ *
+ * Three operations, each with its OWN auth -- see below for why they can't
+ * share one secret:
+ *   POST ?action=receive  Telegram's webhook target. Verified by
+ *                         $WEBHOOK_SECRET. Appends the incoming message to
+ *                         an append-only log, same shape as health.php.
+ *   POST ?action=send     Called by the dashboard itself. Verified by
+ *                         $SECRET (the same one sync.php/health.php/
+ *                         notion.php already use). Sends a message to a
+ *                         family member via Telegram's own API, using
+ *                         $BOT_TOKEN -- which never reaches the browser.
+ *   GET                   Called by the dashboard to absorb new replies.
+ *                         Verified by $SECRET. Returns recent entries from
+ *                         the same log ?action=receive appends to.
+ *
+ * Why three secrets, not one: $SECRET already proves "this request came
+ * from my own signed-in device" everywhere else in this app -- but
+ * Telegram's webhook can't send it (Telegram has no way to know it), so
+ * the receive side needs its OWN secret ($WEBHOOK_SECRET, set once via
+ * Telegram's setWebhook call) or this would be an open endpoint anyone
+ * could post fake "replies" to. $BOT_TOKEN is Telegram's own credential
+ * for sending messages as this bot -- kept server-side only, same
+ * reasoning as every other API key already handled this way in this app.
+ *
+ * Setup:
+ *   1. Message @BotFather on Telegram, /newbot, copy the token into
+ *      $BOT_TOKEN below.
+ *   2. Generate a random string for $WEBHOOK_SECRET (openssl rand -hex 32
+ *      works, same as every other secret in this app).
+ *   3. Upload this file to your Krystal hosting, then register the
+ *      webhook once (replace both placeholders):
+ *        curl "https://api.telegram.org/bot<BOT_TOKEN>/setWebhook" \
+ *          -d "url=https://georgewhiteeuropean.co.uk/telegram-bot.php?action=receive" \
+ *          -d "secret_token=<WEBHOOK_SECRET>"
+ *   4. Enter the same $SECRET this app already uses (Settings -> the new
+ *      Telegram block) so the dashboard can call ?action=send.
+ */
+
+// ---- Configuration ---------------------------------------------------
+
+// Same value as sync.php's $SECRET -- proves an ?action=send/GET request
+// really came from Phil's own signed-in device.
+$SECRET = 'PUT-THE-SAME-STRING-AS-SYNC.PHP-HERE';
+
+// Telegram's own bot token, from @BotFather. Never sent to the browser.
+$BOT_TOKEN = 'PUT-YOUR-BOTFATHER-TOKEN-HERE';
+
+// A second, separate secret -- proves an incoming ?action=receive POST
+// really came from Telegram (set via setWebhook's secret_token, step 3
+// above), not a random hit against this necessarily-public URL.
+$WEBHOOK_SECRET = 'PUT-A-DIFFERENT-LONG-RANDOM-STRING-HERE';
+
+// Outside public_html, like sync.php's own document.
+$DATA_FILE = dirname(__DIR__) . '/telegram-inbox.jsonl';
+
+$DEFAULT_LIMIT = 200;
+
+$ALLOWED_ORIGINS = [
+    'https://philgewhite-maker.github.io',
+    'http://localhost:8743',
+];
+
+// ---- End of configuration --------------------------------------------
+
+$origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+if ($origin !== '' && in_array($origin, $ALLOWED_ORIGINS, true)) {
+    header('Access-Control-Allow-Origin: ' . $origin);
+    header('Vary: Origin');
+}
+header('Access-Control-Allow-Headers: Content-Type, X-Sync-Secret');
+header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+header('Access-Control-Max-Age: 86400');
+header('Content-Type: application/json');
+header('Cache-Control: no-store');
+
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
+    http_response_code(204);
+    exit;
+}
+
+function fail(int $code, string $message): void {
+    http_response_code($code);
+    echo json_encode(['error' => $message]);
+    exit;
+}
+
+function append_entry(string $file, array $entry): bool {
+    $lock = fopen($file . '.lock', 'c');
+    if ($lock === false) return false;
+    flock($lock, LOCK_EX);
+    $ok = file_put_contents($file, json_encode($entry) . "\n", FILE_APPEND | LOCK_EX);
+    flock($lock, LOCK_UN);
+    fclose($lock);
+    return $ok !== false;
+}
+
+$method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+$action = $_GET['action'] ?? '';
+
+// ---- Telegram -> us: an incoming message ------------------------------
+if ($method === 'POST' && $action === 'receive') {
+    $provided = $_SERVER['HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN'] ?? '';
+    if ($WEBHOOK_SECRET === '' || $WEBHOOK_SECRET === 'PUT-A-DIFFERENT-LONG-RANDOM-STRING-HERE') {
+        fail(500, 'Server not configured: set $WEBHOOK_SECRET in telegram-bot.php');
+    }
+    if (!is_string($provided) || !hash_equals($WEBHOOK_SECRET, $provided)) {
+        // Telegram doesn't act on the response either way, but 401 (not a
+        // 2xx) keeps this from looking like a handled update in its logs.
+        fail(401, 'Bad or missing webhook secret');
+    }
+    $update = json_decode(file_get_contents('php://input') ?: '', true);
+    $message = is_array($update) ? ($update['message'] ?? null) : null;
+    // Not every update carries a text message (could be an edited message,
+    // a sticker, a join notice...) -- nothing useful to log, but still a
+    // valid webhook call, so 200 it and move on rather than failing.
+    if (!is_array($message) || !isset($message['chat']['id'])) {
+        echo json_encode(['ok' => true]);
+        exit;
+    }
+    $entry = [
+        'receivedAt' => gmdate('c'),
+        'chatId' => (string) $message['chat']['id'],
+        'fromName' => trim(($message['from']['first_name'] ?? '') . ' ' . ($message['from']['last_name'] ?? '')),
+        'text' => (string) ($message['text'] ?? ''),
+        'date' => $message['date'] ?? null,
+    ];
+    if (!append_entry($DATA_FILE, $entry)) fail(500, 'Could not write inbox file — check directory permissions');
+    echo json_encode(['ok' => true]);
+    exit;
+}
+
+// ---- Everything else needs the dashboard's own secret ------------------
+if ($SECRET === '' || $SECRET === 'PUT-THE-SAME-STRING-AS-SYNC.PHP-HERE') {
+    fail(500, 'Server not configured: set $SECRET in telegram-bot.php');
+}
+$provided = $_SERVER['HTTP_X_SYNC_SECRET'] ?? '';
+if (!is_string($provided) || !hash_equals($SECRET, $provided)) {
+    fail(401, 'Bad or missing sync secret');
+}
+
+// ---- Us -> Telegram: send a message on the dashboard's behalf ---------
+if ($method === 'POST' && $action === 'send') {
+    if ($BOT_TOKEN === '' || $BOT_TOKEN === 'PUT-YOUR-BOTFATHER-TOKEN-HERE') {
+        fail(500, 'Server not configured: set $BOT_TOKEN in telegram-bot.php');
+    }
+    $body = json_decode(file_get_contents('php://input') ?: '', true);
+    $chatId = is_array($body) ? ($body['chatId'] ?? '') : '';
+    $text = is_array($body) ? ($body['text'] ?? '') : '';
+    if (!is_string($chatId) || $chatId === '' || !is_string($text) || $text === '') {
+        fail(400, 'Expected a JSON body of {chatId, text}');
+    }
+    $payload = json_encode(['chat_id' => $chatId, 'text' => $text]);
+    $context = stream_context_create([
+        'http' => [
+            'method' => 'POST',
+            'header' => "Content-Type: application/json\r\n",
+            'content' => $payload,
+            'ignore_errors' => true,
+            'timeout' => 15,
+        ],
+    ]);
+    $result = @file_get_contents("https://api.telegram.org/bot{$BOT_TOKEN}/sendMessage", false, $context);
+    $decoded = $result !== false ? json_decode($result, true) : null;
+    if (!is_array($decoded) || empty($decoded['ok'])) {
+        fail(502, 'Telegram rejected the message: ' . ($decoded['description'] ?? 'no response'));
+    }
+    echo json_encode(['ok' => true]);
+    exit;
+}
+
+// ---- Absorb new replies -------------------------------------------------
+if ($method === 'GET') {
+    if (!is_file($DATA_FILE)) {
+        echo json_encode(['entries' => []]);
+        exit;
+    }
+    $limit = isset($_GET['limit']) ? max(1, min(2000, (int) $_GET['limit'])) : $DEFAULT_LIMIT;
+    $lines = file($DATA_FILE, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [];
+    $recent = array_slice($lines, -$limit);
+    $entries = array_values(array_filter(array_map(
+        function ($line) { return json_decode($line, true); },
+        $recent
+    )));
+    echo json_encode(['entries' => array_reverse($entries)]);
+    exit;
+}
+
+fail(405, 'Use GET or POST');

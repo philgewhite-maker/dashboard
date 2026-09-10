@@ -170,6 +170,7 @@ ${createdAtHtml(t)}
 <input type="file" id="task-photo-${t.id}" accept="image/*" multiple style="display:none;" data-task-photo-add="${t.id}"></div>
 ${attachmentsHtml(t)}
 <button class="todo-add-btn" type="button" data-task-addsub="${t.id}">+ Subtask</button>
+<button class="todo-add-btn" type="button" data-ask-telegram="task" data-ask-telegram-task="${t.id}" title="Ask a family member about this via Telegram">Ask via Telegram</button>
 ${notionPanel.html(t)}
 </div>`;
 }
