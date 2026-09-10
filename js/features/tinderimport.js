@@ -1395,6 +1395,17 @@ const masterChecked = (label) => rowLines.every(({ lines }) => {
 const hit = lines.pending.find((f) => f.label === label);
 return !hit || hit.apply;
 });
+// Every checkbox in this list re-renders the whole thing (aggregate
+// state -- Select-all, the "Apply all" masters, the submit count --
+// all depend on it). Replacing innerHTML briefly collapses this block
+// to nothing; since it's the tallest thing on a long page, the browser
+// clamps the now-too-large scroll position down and never restores it,
+// so a tick halfway down the list jumps you back to the top. Capture
+// and restore the page scroll around the swap. rAF as well as the
+// synchronous restore covers any late layout shift from
+// hydratePhotoBackgrounds.
+const scrollBefore = window.scrollY;
+const restoreScroll = () => window.scrollTo(window.scrollX, scrollBefore);
 el.innerHTML = `<div class="album-card" style="margin-bottom:10px;">
 <div class="album-caption"><strong>${bulkQueue.length} clean re-match${bulkQueue.length === 1 ? '' : 'es'}</strong> — known identity, nothing new or only minor updates. Skim the summary, untick anything you'd rather look at properly (or click "Review" to open it in the full editor); tick a conflicting field below to overwrite it too, then submit.</div>
 <label class="tinder-field-row" style="margin:6px 0;"><input type="checkbox" id="tinder-bulk-select-all"${allSelected ? ' checked' : ''}> Select all</label>
@@ -1424,7 +1435,10 @@ ${lines.pending.map((f) => `<label class="tinder-bulk-field-row"><input type="ch
 <span class="sync-status" id="tinder-bulk-status"></span>
 </div>
 </div>`;
+restoreScroll();
 hydratePhotoBackgrounds(el);
+restoreScroll();
+requestAnimationFrame(restoreScroll);
 
 const selectAll = document.getElementById('tinder-bulk-select-all');
 if (selectAll) selectAll.addEventListener('change', () => {
