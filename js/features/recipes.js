@@ -263,6 +263,10 @@ let recipeFacets = [];
 // be contradictory (a recipe can't be both), so picking a new one here
 // replaces rather than adds -- see recipeDimensions' `single` flag.
 let recipeOverviewCollapsed = true;
+// Per-section (Made/Tags/Diet) collapse inside the overview panel, keyed
+// by dimension title -- device-local, same shape as overview.js's own
+// `collapsed` map for Connections Overview. Defaults open.
+let recipeSectionCollapsed = {};
 // How the Tags chips below are ordered -- 'count' (busiest first,
 // alphabetical tiebreak) or 'alpha' (A-Z) -- device-local, same as
 // recipeOverviewCollapsed above.
@@ -356,6 +360,7 @@ const FODMAP_OPTIONS = ['Low-FODMAP', 'Reduced-FODMAP', 'High-FODMAP'];
 async function initRecipeOverviewPrefs() {
 const settings = await getLocalSettings();
 recipeOverviewCollapsed = settings.recipeOverviewPanelCollapsed !== false;
+recipeSectionCollapsed = settings.recipeSectionCollapsed || {};
 recipeOverviewChipSort = settings.recipeOverviewChipSort === 'alpha' ? 'alpha' : 'count';
 }
 
@@ -410,8 +415,15 @@ const isRecipeFaceted = (title, key) => recipeFacets.some((f) => f.title === tit
 function recipeOverviewDimensionHtml(dim, groups) {
 const keys = Object.keys(groups).sort((a, b) => (recipeOverviewChipSort === 'alpha' ? a.localeCompare(b) : groups[b].length - groups[a].length || a.localeCompare(b)));
 if (!keys.length) return '';
+const isCollapsed = !!recipeSectionCollapsed[dim.title];
 const chips = keys.map((k) => `<button class="overview-chip${isRecipeFaceted(dim.title, k) ? ' active' : ''}" type="button" data-recipe-overview-facet="${escapeHtml(dim.title)}" data-recipe-overview-key="${escapeHtml(k)}" data-recipe-overview-single="${dim.single ? '1' : ''}">${escapeHtml(k)} (${groups[k].length})</button>`).join('');
-return `<div class="overview-group"><span class="field-label">${escapeHtml(dim.title)}</span><div class="overview-chips">${chips}</div></div>`;
+return `<div class="overview-group">
+<button class="overview-head" type="button" data-recipe-section-collapse="${escapeHtml(dim.title)}">
+<span class="overview-caret">${isCollapsed ? '▸' : '▾'}</span>${escapeHtml(dim.title)}
+<span class="overview-head-count">${keys.length}</span>
+</button>
+<div class="overview-chips"${isCollapsed ? ' hidden' : ''}>${chips}</div>
+</div>`;
 }
 
 function recipeFacetBarHtml() {
@@ -477,6 +489,14 @@ const clearBtn = document.getElementById('recipe-clear-facets');
 if (clearBtn) {
 clearBtn.addEventListener('click', () => { recipeFacets = []; renderRecipeOverview(); renderRecipes(); });
 }
+el.querySelectorAll('[data-recipe-section-collapse]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const t = btn.dataset.recipeSectionCollapse;
+recipeSectionCollapsed[t] = !recipeSectionCollapsed[t];
+setLocalSetting('recipeSectionCollapsed', recipeSectionCollapsed);
+renderRecipeOverview();
+});
+});
 el.querySelectorAll('[data-recipe-overview-facet]').forEach((btn) => {
 btn.addEventListener('click', () => {
 const title = btn.dataset.recipeOverviewFacet;

@@ -247,6 +247,19 @@ setLocalSetting('overviewChipSort', chipSort);
 renderOverview();
 });
 
+// The per-dimension caret + `collapsed` map + `hidden` on
+// `.overview-chips` were all already rendered by overviewDimension(),
+// but nothing ever toggled the map -- so every heading looked
+// collapsible (▾) and did nothing. This is the missing half.
+el.querySelectorAll('[data-collapse]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const t = btn.dataset.collapse;
+collapsed[t] = !collapsed[t];
+setLocalSetting('overviewCollapsed', collapsed);
+renderOverview();
+});
+});
+
 el.querySelectorAll('[data-drop-facet]').forEach((pill) => {
 pill.addEventListener('click', () => {
 facets.splice(parseInt(pill.dataset.dropFacet, 10), 1);
