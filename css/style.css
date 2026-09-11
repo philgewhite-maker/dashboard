@@ -1346,6 +1346,10 @@ cursor:pointer;
 .gallery-thumb-check{position:absolute;top:4px;left:4px;z-index:1;width:16px;height:16px;margin:0;accent-color:var(--rose);}
 .gallery-thumb.selected{outline:2px solid var(--rose);outline-offset:-2px;}
 .gallery-thumb img{width:100%;height:100%;object-fit:cover;-webkit-user-drag:none;user-select:none;}
+.gallery-thumb video{width:100%;height:100%;object-fit:cover;display:block;background:var(--rose-bg);}
+/* A video thumb is worth a bit more room than a still -- the play control
+   is unusable at 60px. */
+.gallery-thumb-video{width:96px;height:120px;cursor:default;}
 /* Rendered as a background-image (hydratePhotoBackgrounds), not a real
    <img> -- see the comment on that function in utils.js. Scoped to the
    [data-photo-bg] attribute specifically so this can't affect any other

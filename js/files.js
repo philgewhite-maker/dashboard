@@ -121,7 +121,7 @@ return meta;
 async function storePhoto(blob) {
 try {
 const type = blob.type || 'image/jpeg';
-const ext = type.includes('png') ? 'png' : type.includes('webp') ? 'webp' : 'jpg';
+const ext = type.includes('png') ? 'png' : type.includes('webp') ? 'webp' : type.includes('mp4') || type.startsWith('video/') ? 'mp4' : 'jpg';
 const file = new File([blob], `photo-${uid()}.${ext}`, { type });
 const meta = await uploadAttachment(file);
 return meta.id;

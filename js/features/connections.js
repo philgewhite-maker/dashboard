@@ -1,7 +1,7 @@
 import { data, queueSave, reachOutThreshold, isDormantStage, isTravelPaused, getLocalSettings, setLocalSetting, TAG_FIELDS, CONTACT_STATUS_LABELS, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness, slugifyField, FLAG_FIELD_DEFS, DEFAULT_FLAG_RULES, computeFlags, valueColorForField, stripSharedSuffix, suggestedAction, suggestedQuestions, recordImportRun, importStatusLine, upsertIdentity, tinderMatchIds, mergeChatLog, blankConnection, blankPendingImport } from '../state.js';
 import { captureTask, revealTask } from './tasks.js';
 import { photoDelete, photoUrl } from '../db.js';
-import { storePhoto } from '../files.js';
+import { storePhoto, serverPhotoUrl } from '../files.js';
 import {
 uid, todayStr, daysSince, escapeHtml, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, buildFlagMatcher, applyFlagMatcher, knownCityMap, knownScalarValues, pickChipHtml, scrollAndFlash, bindForm, foldDiacritics,
 resizeImageToBlob, classifyProfileUpload, cropToContentBlob, contentCropBounds, loadImage,
@@ -476,7 +476,29 @@ ${coverPinHtml(c.id, id, c.photoId)}
 <input type="file" id="replace-photo-${c.id}-${i}" accept="image/*" style="display:none;" data-replace-photo="${c.id}" data-replace-idx="${i}">
 <span class="tag-x" data-photo-remove="${c.id}" data-photo-idx="${i}">&times;</span>
 </div>`).join('');
-return `<div class="photo-gallery">${thumbs}<label class="gallery-add" for="photo-add-${c.id}">+</label><input type="file" id="photo-add-${c.id}" accept="image/*" multiple style="display:none;" data-photo-add="${c.id}"></div>`;
+// Short profile video clips captured from Tinder -- a slide that was a
+// <video>, not just a still. Stored as attachment ids like photos; the
+// blob is set as the <video> src by hydrateConnectionVideos (below), in
+// the same pass flagLowResThumbnails runs.
+const videoThumbs = (c.videoIds || []).map((id, i) => `<div class="gallery-thumb gallery-thumb-video">
+<video data-conn-video="${escapeHtml(id)}" controls muted playsinline preload="metadata"></video>
+<span class="tag-x" data-video-remove="${c.id}" data-video-idx="${i}">&times;</span>
+</div>`).join('');
+return `<div class="photo-gallery">${thumbs}${videoThumbs}<label class="gallery-add" for="photo-add-${c.id}">+</label><input type="file" id="photo-add-${c.id}" accept="image/*" multiple style="display:none;" data-photo-add="${c.id}"></div>`;
+}
+
+// Sets each connection-card video thumb's src from its stored blob
+// (local cache first, then the server), same resolve order
+// hydratePhotoBackgrounds uses for photos.
+async function hydrateConnectionVideos(root) {
+const vids = [...root.querySelectorAll('video[data-conn-video]')].filter((el) => !el.dataset.connVideoDone);
+await Promise.all(vids.map(async (el) => {
+const id = el.dataset.connVideo;
+let url = null;
+try { url = await photoUrl(id); } catch (e) { /* fall through to server */ }
+if (!url) { try { url = await serverPhotoUrl(id); } catch (e) { /* leave unresolved */ } }
+if (url) { el.src = url; el.dataset.connVideoDone = '1'; }
+}));
 }
 
 // cropThumbnailToBlob hard-codes every AI-cropped photo to exactly
@@ -487,6 +509,7 @@ return `<div class="photo-gallery">${thumbs}<label class="gallery-add" for="phot
 // after the card's already in the DOM (same timing as
 // hydratePhotoBackgrounds, which this runs alongside).
 async function flagLowResThumbnails(root) {
+hydrateConnectionVideos(root);
 const thumbs = [...root.querySelectorAll('[data-gallery-thumb]')];
 await Promise.all(thumbs.map(async (el) => {
 try {
@@ -1202,6 +1225,7 @@ el.addEventListener('click', async () => {
 const conn = data.connections.find((x) => x.id === el.dataset.delConn);
 if (!confirm(`Delete "${conn.name}"? This removes all notes, ratings, and photos for them.`)) return;
 for (const id of conn.photoIds || []) await photoDelete(id);
+for (const id of conn.videoIds || []) { try { await photoDelete(id); } catch (e) { /* already gone */ } }
 data.connections = data.connections.filter((x) => x.id !== el.dataset.delConn);
 renderConnections();
 renderOverviewRef();
@@ -1436,6 +1460,16 @@ const idx = parseInt(el.dataset.photoIdx, 10);
 const [removedId] = conn.photoIds.splice(idx, 1);
 if (conn.photoId === removedId) conn.photoId = conn.photoIds[0] || null;
 if (removedId) await photoDelete(removedId);
+renderConnections();
+queueSave();
+});
+});
+list.querySelectorAll('[data-video-remove]').forEach((el) => {
+el.addEventListener('click', async () => {
+const conn = data.connections.find((x) => x.id === el.dataset.videoRemove);
+if (!conn || !Array.isArray(conn.videoIds)) return;
+const [removedId] = conn.videoIds.splice(parseInt(el.dataset.videoIdx, 10), 1);
+if (removedId) { try { await photoDelete(removedId); } catch (e) { /* already gone */ } }
 renderConnections();
 queueSave();
 });

@@ -1673,6 +1673,8 @@ ${p.fields.length ? clusteredFieldsHtml(p.fields) : ''}
 ${contactPreviewHtml()}
 ${p.photos.length ? `<div class="settings-note" style="margin:8px 0 4px;">${p.photos.filter((ph) => ph.apply).length} of ${p.photos.length} photos will be added — click a photo to view it bigger, click the check to include/exclude:</div>
 <div class="photo-gallery">${p.photos.map((ph, i) => `<span class="gallery-thumb tinder-photo-thumb${ph.apply ? ' tinder-photo-included' : ''}" data-tinder-photo-view="${i}" style="background-image:url('${escapeHtml(ph.url)}')"><span class="tinder-photo-toggle${ph.apply ? ' checked' : ''}" data-tinder-photo-toggle="${i}" title="${ph.apply ? 'Included — click to exclude' : 'Excluded — click to include'}">${ph.apply ? '&check;' : ''}</span></span>`).join('')}</div>` : ''}
+${(p.videos || []).length ? `<div class="settings-note" style="margin:8px 0 4px;">${p.videos.filter((v) => v.apply).length} of ${p.videos.length} video clip${p.videos.length === 1 ? '' : 's'} will be added — click the check to include/exclude:</div>
+<div class="photo-gallery">${p.videos.map((v, i) => `<span class="gallery-thumb tinder-photo-thumb${v.apply ? ' tinder-photo-included' : ''}"><video src="${escapeHtml(v.url)}" controls muted playsinline preload="metadata" style="width:100%;height:100%;object-fit:cover;border-radius:inherit;"></video><span class="tinder-photo-toggle${v.apply ? ' checked' : ''}" data-tinder-video-toggle="${i}" title="${v.apply ? 'Included — click to exclude' : 'Excluded — click to include'}">${v.apply ? '&check;' : ''}</span></span>`).join('')}</div>` : ''}
 </div>
 ${moreInfoHtml()}`;
 // Every render rebuilds this whole card, including fresh, un-hydrated
@@ -1974,6 +1976,14 @@ ph.apply = !ph.apply;
 render();
 });
 });
+el.querySelectorAll('[data-tinder-video-toggle]').forEach((badge) => {
+badge.addEventListener('click', (e) => {
+e.stopPropagation();
+const v = pending.videos[parseInt(badge.dataset.tinderVideoToggle, 10)];
+v.apply = !v.apply;
+render();
+});
+});
 // Only actually block a save when the user is about to file onto a
 // candidate the matcher itself flagged `conflict` -- an existing
 // same-name connection that already carries a DIFFERENT Tinder match
@@ -2111,6 +2121,32 @@ failed++;
 // that was never going to succeed. Still visible and re-checkable by
 // hand in the gallery for the genuinely transient case.
 ph.apply = false;
+}
+}
+
+// Video clips -- same fetch/store/dedupe as photos (fetchTinderPhoto
+// isn't image-specific, and the mp4 is on the same allowed host), just
+// into videoIds / tinderVideoKeys. Kept a separate key set because a
+// clip and its poster still share a uuid.
+if (!Array.isArray(conn.videoIds)) conn.videoIds = [];
+if (!Array.isArray(conn.tinderVideoKeys)) conn.tinderVideoKeys = [];
+const vidsToFetch = (p.videos || []).filter((v) => v.apply);
+for (let i = 0; i < vidsToFetch.length; i++) {
+const v = vidsToFetch[i];
+const key = photoKey(v.url);
+if (conn.tinderVideoKeys.includes(key)) { alreadyHad++; v.apply = false; continue; }
+if (onProgress) onProgress(`video ${i + 1} of ${vidsToFetch.length}`);
+try {
+const blob = await fetchTinderPhoto(v.url);
+const id = await storePhoto(blob);
+if (!conn.videoIds.includes(id)) conn.videoIds.push(id);
+conn.tinderVideoKeys.push(key);
+v.apply = false;
+} catch (err) {
+console.error('Could not fetch Tinder video:', v.url, err);
+if (!firstError) firstError = err.message || String(err);
+failed++;
+v.apply = false;
 }
 }
 
@@ -2350,6 +2386,7 @@ const fields = Array.isArray(raw.fields) ? raw.fields
 .map((f) => ({ label: String(f.label || '').trim(), value: String(f.value || '').trim() }))
 .filter((f) => f.label && f.value) : [];
 const photos = Array.isArray(raw.photos) ? [...new Set(raw.photos.map((u) => String(u || '').trim()).filter(Boolean))] : [];
+const videos = Array.isArray(raw.videos) ? [...new Set(raw.videos.map((u) => String(u || '').trim()).filter(Boolean))] : [];
 const { phones, handles } = scanFields(fields);
 const parsed = {
 name: String(raw.name || '').trim(),
@@ -2359,6 +2396,7 @@ age: String(raw.age || '').trim(),
 // apply-to-a-field path; see their special-case in fieldPreviewHtml.
 fields: withAlwaysShowFields(fields.map((f) => ({ ...f, apply: f.label !== 'City' && !CHIP_OVERRIDE_LABELS[f.label] }))),
 photos: photos.map((url) => ({ url, apply: true })),
+videos: videos.map((url) => ({ url, apply: true })),
 foundPhones: phones.map((value) => ({ value, apply: true })),
 foundHandles: handles.map((h) => ({ ...h, apply: true })),
 chosenId: '',
@@ -2506,6 +2544,8 @@ const pending = [];
 
 const newPhotoCount = p.photos.filter((ph) => ph.apply && !(conn.tinderPhotoKeys || []).includes(photoKey(ph.url))).length;
 if (newPhotoCount) applied.push(`+${newPhotoCount} photo${newPhotoCount === 1 ? '' : 's'}`);
+const newVideoCount = (p.videos || []).filter((v) => v.apply && !(conn.tinderVideoKeys || []).includes(photoKey(v.url))).length;
+if (newVideoCount) applied.push(`+${newVideoCount} video${newVideoCount === 1 ? '' : 's'}`);
 
 const chatField = p.fields.find((f) => f.label === 'Chat history');
 if (chatField && chatField.apply) {
@@ -2561,6 +2601,8 @@ const parts = [];
 
 const newPhotoCount = p.photos.filter((ph) => ph.apply && !(conn.tinderPhotoKeys || []).includes(photoKey(ph.url))).length;
 if (newPhotoCount) parts.push(`+${newPhotoCount} photo${newPhotoCount === 1 ? '' : 's'}`);
+const newVideoCount = (p.videos || []).filter((v) => v.apply && !(conn.tinderVideoKeys || []).includes(photoKey(v.url))).length;
+if (newVideoCount) parts.push(`+${newVideoCount} video${newVideoCount === 1 ? '' : 's'}`);
 
 const chatField = p.fields.find((f) => f.label === 'Chat history');
 if (chatField) {

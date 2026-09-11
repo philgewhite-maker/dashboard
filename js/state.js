@@ -571,6 +571,12 @@ name: '', profileName: '', identities: [], app: '', priority: 3, stage: 'Matched
 priorityFlag: false,
 lastContact: '', createdAt: new Date().toISOString(),
 photoId: null, photoIds: [], tinderPhotoKeys: [], photoAlbums: [],
+// Short profile video clips captured from Tinder (a slide that's a
+// <video>, not just a still). Stored as attachment ids the same way
+// photoIds are; tinderVideoKeys dedupes a re-import (kept separate from
+// tinderPhotoKeys because a clip and its poster still share a uuid, so
+// one key set would treat the video as "already had").
+videoIds: [], tinderVideoKeys: [],
 age: '', dob: '', ageAsOf: '',
 address: '', kids: '', job: '', height: '', education: '',
 // Free text, exactly as the app shows it -- captured the same way kids
@@ -1031,6 +1037,8 @@ if (typeof c.distance !== 'string') c.distance = '';
 if (typeof c.matchedOn !== 'string') c.matchedOn = '';
 if (typeof c.tinderMatchId !== 'string') c.tinderMatchId = '';
 if (!Array.isArray(c.tinderPhotoKeys)) c.tinderPhotoKeys = [];
+if (!Array.isArray(c.videoIds)) c.videoIds = [];
+if (!Array.isArray(c.tinderVideoKeys)) c.tinderVideoKeys = [];
 if (typeof c.chatLog !== 'string') c.chatLog = '';
 // Separate per-source so a WhatsApp or Telegram import can never overwrite
 // or hide another source's history -- chatLog stays Tinder's own (it

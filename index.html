@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v305</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v306</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -847,10 +847,24 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
     return folder &amp;&amp; uuid ? `${folder[1]}/${uuid[0]}` : url;
   }
   const photoMap = new Map();
+  const videoMap = new Map();
   const folderCounts = new Map();
   function recordPhotoSlide(n) {
     const el = root.querySelector(`[aria-label="Profile photo ${n}"]`);
     if (!el) return false;
+    // A video slide keeps a .webp poster as its background-image AND a
+    // sibling &lt;video src="..._h264.mp4"&gt;. Capture the still into photos
+    // (thumbnail) and the clip's URL into videos, keyed the same way so a
+    // re-scrape dedupes. The mp4 is on the same gotinder.com host as the
+    // photos, so image-proxy.php fetches it with no allowlist change.
+    const vid = (el.closest('[class*="imgShadow"]') || el.parentElement || el).querySelector('video');
+    if (vid &amp;&amp; vid.src &amp;&amp; vid.src.includes('gotinder.com')) {
+      const vkey = photoKey(vid.src);
+      if (!videoMap.has(vkey)) {
+        const vf = vid.src.match(/gotinder\.com\/([a-zA-Z0-9]+)\//);
+        videoMap.set(vkey, { url: vid.src, folder: vf ? vf[1] : null });
+      }
+    }
     const b = getComputedStyle(el).backgroundImage;
     const m = b &amp;&amp; b.match(/url\("([^"]+)"\)/);
     if (!m || !m[1].includes('gotinder.com')) return false;
@@ -897,6 +911,7 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
   let dominantFolder = null, dominantCount = 0;
   folderCounts.forEach((count, folder) =&gt; { if (count &gt; dominantCount) { dominantFolder = folder; dominantCount = count; } });
   const photos = [...photoMap.values()].filter((p) =&gt; !dominantFolder || !p.folder || p.folder === dominantFolder).map((p) =&gt; p.url);
+  const videos = [...videoMap.values()].filter((p) =&gt; !dominantFolder || !p.folder || p.folder === dominantFolder).map((p) =&gt; p.url);
 
   // The one stable, permanent key back to this exact Tinder match — the
   // id in the page's own URL (/app/messages/&lt;id&gt;), unrelated to name
@@ -904,7 +919,7 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
   // connection so a later import can check whether it's still in the
   // current match list at all.
   const matchId = (location.pathname.match(/\/app\/messages\/([a-zA-Z0-9]+)/) || [])[1] || '';
-  const out = { name, age, fields, photos, matchId };
+  const out = { name, age, fields, photos, videos, matchId };
   const json = JSON.stringify(out, null, 1);
   let copied = false;
   try { copy(json); copied = true; } catch (e) { /* not in a real DevTools console */ }
@@ -912,12 +927,12 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
     try { await navigator.clipboard.writeText(json); copied = true; } catch (e) { /* no clipboard permission/focus */ }
   }
   console.log((copied ? 'Copied — ' : 'Could not auto-copy, select and copy manually — ')
-    + `${name || '(no name found)'}, ${age || '?'}: ${fields.length} field${fields.length === 1 ? '' : 's'}, ${out.photos.length} photo${out.photos.length === 1 ? '' : 's'}.`);
+    + `${name || '(no name found)'}, ${age || '?'}: ${fields.length} field${fields.length === 1 ? '' : 's'}, ${out.photos.length} photo${out.photos.length === 1 ? '' : 's'}${out.videos.length ? `, ${out.videos.length} video${out.videos.length === 1 ? '' : 's'}` : ''}.`);
   if (!copied) console.log(json);
 })();</pre>
 </details>
 <div class="settings-note" style="margin:10px 0;">
-<strong>Bulk mode:</strong> steps through your sidebar matches automatically instead of one profile at a time &mdash; 15 per run by default, real randomised delays (10&ndash;60s) between each, remembered on Tinder's own site so the next run (later today or tomorrow) only picks up whoever's left. Fine to run a few times a day at that pace, or a large number left overnight &mdash; e.g. <code>tinderBulkImport(250)</code>. Pasting the snippet only defines it; run it with <code>tinderBulkImport()</code> in the console for the default 15, or <code>tinderBulkImport(30)</code> for a custom size &mdash; no need to re-paste to change it. Every 25 profiles it checkpoints to its own downloaded file, so a crash, sleep or closed tab partway through an overnight run only loses the last (incomplete) chunk, not the whole night. The dashboard's file picker below takes several of those files at once &mdash; select them all and it sorts anyone it already knows for certain into a bulk-review list (photos, name, and what's new, tick the ones that look right and submit together) and only routes genuinely new or uncertain matches to the one-by-one reviewer. This runs unattended across many real profiles in a row &mdash; if you see anything that looks like a rate limit or a verification prompt, stop and give it a break. If you ever notice a match that never made it into the dashboard (an early run can scrape a profile while its panel hasn't finished loading, mark it done, and never send it on), run <code>tinderFindMissing()</code> after a full scroll of both lists &mdash; it compares your whole match list against what the dashboard already has (ignoring this browser's skip-list) and prints a ready <code>tinderReextract([...])</code> call for anyone missing.
+<strong>Bulk mode:</strong> steps through your sidebar matches automatically instead of one profile at a time &mdash; 15 per run by default, real randomised delays (10&ndash;60s) between each, remembered on Tinder's own site so the next run (later today or tomorrow) only picks up whoever's left. Fine to run a few times a day at that pace, or a large number left overnight &mdash; e.g. <code>tinderBulkImport(250)</code>. Pasting the snippet only defines it; run it with <code>tinderBulkImport()</code> in the console for the default 15, or <code>tinderBulkImport(30)</code> for a custom size &mdash; no need to re-paste to change it. Every 25 profiles it checkpoints to its own downloaded file, so a crash, sleep or closed tab partway through an overnight run only loses the last (incomplete) chunk, not the whole night. The dashboard's file picker below takes several of those files at once &mdash; select them all and it sorts anyone it already knows for certain into a bulk-review list (photos, name, and what's new, tick the ones that look right and submit together) and only routes genuinely new or uncertain matches to the one-by-one reviewer. This runs unattended across many real profiles in a row &mdash; if you see anything that looks like a rate limit or a verification prompt, stop and give it a break. A slide that's a short video clip (not just a photo) is captured too &mdash; its poster still goes in with the photos, the clip itself imports as a playable attachment on the connection. If you ever notice a match that never made it into the dashboard (an early run can scrape a profile while its panel hasn't finished loading, mark it done, and never send it on), run <code>tinderFindMissing()</code> after a full scroll of both lists &mdash; it compares your whole match list against what the dashboard already has (ignoring this browser's skip-list) and prints a ready <code>tinderReextract([...])</code> call for anyone missing.
 </div>
 <button class="sync-btn" type="button" id="tinder-bulk-copy-snippet">Copy bulk-import snippet</button>
 <details style="margin:0 0 10px;">
@@ -1198,10 +1213,21 @@ async function extractProfile(expectedName) {
       return folder &amp;&amp; uuid ? `${folder[1]}/${uuid[0]}` : url;
     }
     const photoMap = new Map();
+    const videoMap = new Map();
     const folderCounts = new Map();
     function recordPhotoSlide(n) {
       const el = root.querySelector(`[aria-label="Profile photo ${n}"]`);
       if (!el) return false;
+      // See the single-profile snippet's copy of this for the video-slide
+      // reasoning (poster still into photos, _h264.mp4 into videos).
+      const vid = (el.closest('[class*="imgShadow"]') || el.parentElement || el).querySelector('video');
+      if (vid &amp;&amp; vid.src &amp;&amp; vid.src.includes('gotinder.com')) {
+        const vkey = photoKey(vid.src);
+        if (!videoMap.has(vkey)) {
+          const vf = vid.src.match(/gotinder\.com\/([a-zA-Z0-9]+)\//);
+          videoMap.set(vkey, { url: vid.src, folder: vf ? vf[1] : null });
+        }
+      }
       const b = getComputedStyle(el).backgroundImage;
       const m = b &amp;&amp; b.match(/url\("([^"]+)"\)/);
       if (!m || !m[1].includes('gotinder.com')) return false;
@@ -1249,8 +1275,9 @@ async function extractProfile(expectedName) {
     let dominantFolder = null, dominantCount = 0;
     folderCounts.forEach((count, folder) =&gt; { if (count &gt; dominantCount) { dominantFolder = folder; dominantCount = count; } });
     const photos = [...photoMap.values()].filter((p) =&gt; !dominantFolder || !p.folder || p.folder === dominantFolder).map((p) =&gt; p.url);
+    const videos = [...videoMap.values()].filter((p) =&gt; !dominantFolder || !p.folder || p.folder === dominantFolder).map((p) =&gt; p.url);
 
-    return { name, age, fields, photos };
+    return { name, age, fields, photos, videos };
   }
 
 // CORRECTION to this function's own former claim ("both lists are always

@@ -43,6 +43,10 @@ $ALLOWED_HOSTS = [
     'images-ssl.gotinder.com',
 ];
 
+// Also covers the short profile video clips the Tinder importer now
+// pulls (same images-ssl.gotinder.com host, an _h264.mp4 rather than a
+// .webp). A few-second 640x800 clip is well under this; raise it if a
+// longer one ever 502s.
 $MAX_BYTES = 8 * 1024 * 1024;
 $TIMEOUT_SECONDS = 10;
 
