@@ -1407,6 +1407,13 @@ color:var(--muted);
 margin:0 0 8px;
 }
 .overview-chips{display:flex;flex-wrap:wrap;gap:7px;}
+/* The caret toggle sets the standard `hidden` attribute, but at equal
+   (0,1,0) specificity an author rule always beats the UA default
+   [hidden]{display:none} -- so .overview-chips{display:flex} above wins
+   and the section never actually visually collapses even though the
+   attribute (and the caret glyph, driven by the same isCollapsed flag)
+   are both correct. Confirmed live: caret flips, content stays put. */
+.overview-chips[hidden]{display:none;}
 .overview-chip{
 font-family:'Inter',sans-serif;
 font-size:12px;
