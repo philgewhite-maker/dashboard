@@ -1397,15 +1397,24 @@ return !hit || hit.apply;
 });
 // Every checkbox in this list re-renders the whole thing (aggregate
 // state -- Select-all, the "Apply all" masters, the submit count --
-// all depend on it). Replacing innerHTML briefly collapses this block
-// to nothing; since it's the tallest thing on a long page, the browser
-// clamps the now-too-large scroll position down and never restores it,
-// so a tick halfway down the list jumps you back to the top. Capture
-// and restore the page scroll around the swap. rAF as well as the
-// synchronous restore covers any late layout shift from
-// hydratePhotoBackgrounds.
+// all depend on it). Two DISTINCT scroll positions get wiped by that:
+// the page's own scroll (briefly collapsing this block to nothing while
+// it's the tallest thing on the page can clamp window.scrollY down), and
+// -- the one that actually matters for a long list, confirmed live still
+// jumping after only the page-scroll fix -- .tinder-bulk-list's OWN
+// scrollTop. That div is `max-height:480px;overflow-y:auto` (css/
+// style.css), a real internal scroll container, and el.innerHTML below
+// destroys and recreates it from scratch every render -- a brand new
+// element always starts at scrollTop 0, regardless of what window.scrollY
+// does, which is why restoring only the page scroll never fixed the
+// in-list jump a tick halfway down a long list actually causes.
 const scrollBefore = window.scrollY;
-const restoreScroll = () => window.scrollTo(window.scrollX, scrollBefore);
+const listScrollBefore = el.querySelector('.tinder-bulk-list')?.scrollTop || 0;
+const restoreScroll = () => {
+window.scrollTo(window.scrollX, scrollBefore);
+const list = el.querySelector('.tinder-bulk-list');
+if (list) list.scrollTop = listScrollBefore;
+};
 el.innerHTML = `<div class="album-card" style="margin-bottom:10px;">
 <div class="album-caption"><strong>${bulkQueue.length} clean re-match${bulkQueue.length === 1 ? '' : 'es'}</strong> — known identity, nothing new or only minor updates. Skim the summary, untick anything you'd rather look at properly (or click "Review" to open it in the full editor); tick a conflicting field below to overwrite it too, then submit.</div>
 <label class="tinder-field-row" style="margin:6px 0;"><input type="checkbox" id="tinder-bulk-select-all"${allSelected ? ' checked' : ''}> Select all</label>
