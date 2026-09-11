@@ -2874,6 +2874,14 @@ try {
 const known = data.connections.filter((c) => c.tinderMatchId);
 const knownIds = known.map((c) => c.tinderMatchId);
 const staleById = Object.fromEntries(known.map((c) => [c.tinderMatchId, c.tinderLastScrapedAt || '']));
+// Profiles the stale sweep should re-check for a video clip FIRST -- has
+// photos, no video yet, and not re-scraped since video capture shipped
+// (v306, 2026-09-11). Self-clearing: once one is re-scraped its
+// tinderLastScrapedAt moves past the cutoff and it drops off this list.
+const VIDEO_FEATURE_DATE = '2026-09-11';
+const videoBacklogIds = known
+.filter((c) => (c.photoIds || []).length && !(c.videoIds || []).length && String(c.tinderLastScrapedAt || '') < VIDEO_FEATURE_DATE)
+.map((c) => c.tinderMatchId);
 // Every match id ANY connection is known by (identity rows + the legacy
 // scalar), not just the tinderMatchId scalar -- tinderFindMissing()
 // compares the whole sidebar against this to spot anyone the dashboard
@@ -2881,7 +2889,7 @@ const staleById = Object.fromEntries(known.map((c) => [c.tinderMatchId, c.tinder
 // look missing.
 const allKnownMatchIds = [...new Set(data.connections.flatMap((c) => [...tinderMatchIds(c)]))].filter(Boolean);
 const snippet = document.getElementById('tinder-bulk-snippet').textContent
-+ `\ntinderSeedDone(${JSON.stringify(knownIds)});\ntinderSeedStale(${JSON.stringify(staleById)});\nwindow.__dashKnownIds = ${JSON.stringify(allKnownMatchIds)};\n`;
++ `\ntinderSeedDone(${JSON.stringify(knownIds)});\ntinderSeedStale(${JSON.stringify(staleById)}, ${JSON.stringify(videoBacklogIds)});\nwindow.__dashKnownIds = ${JSON.stringify(allKnownMatchIds)};\n`;
 await navigator.clipboard.writeText(snippet);
 bulkCopyBtn.textContent = 'Copied';
 setTimeout(() => { bulkCopyBtn.textContent = 'Copy bulk-import snippet'; }, 2000);

@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v306</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v307</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -1982,6 +1982,18 @@ function loadStaleMap() {
   try { return JSON.parse(localStorage.getItem(STALE_KEY) || '{}') || {}; } catch (e) { return {}; }
 }
 function saveStaleMap(map) { localStorage.setItem(STALE_KEY, JSON.stringify(map)); }
+// Match ids the dashboard has photos for but no video clip yet, and that
+// haven't been re-scraped since video capture existed -- staleSweepTail()
+// pulls these to the FRONT of its rotation so pre-video-feature profiles
+// get their clips (if any) grabbed a few per run instead of waiting years
+// for their turn by date alone. Self-clearing: once one is re-scraped its
+// dashboard tinderLastScrapedAt moves past the cutoff and the dashboard
+// stops listing it here.
+const VIDEO_BACKLOG_KEY = 'dashTinderVideoBacklog';
+function loadVideoBacklog() {
+  try { return new Set(JSON.parse(localStorage.getItem(VIDEO_BACKLOG_KEY) || '[]') || []); } catch (e) { return new Set(); }
+}
+function saveVideoBacklog(ids) { localStorage.setItem(VIDEO_BACKLOG_KEY, JSON.stringify([...ids])); }
 
 // A pure data drop, same spirit as tinderSeedDone -- staleSweepTail()
 // below is what actually acts on it. Seeded by the dashboard's own "Copy
@@ -1992,10 +2004,12 @@ function saveStaleMap(map) { localStorage.setItem(STALE_KEY, JSON.stringify(map)
 // someone, not this browser's — same cross-session reasoning tinderSeedDone
 // already established, extended from "have we ever scraped them" to "how
 // long ago, really".
-window.tinderSeedStale = (dateById) => {
+window.tinderSeedStale = (dateById, videoBacklogIds) => {
   const map = dateById || {};
   saveStaleMap(map);
-  console.log(`Stale-refresh list seeded with ${Object.keys(map).length} known id${Object.keys(map).length === 1 ? '' : 's'}.`);
+  const backlog = new Set((videoBacklogIds || []).filter(Boolean));
+  saveVideoBacklog(backlog);
+  console.log(`Stale-refresh list seeded with ${Object.keys(map).length} known id${Object.keys(map).length === 1 ? '' : 's'}${backlog.size ? ` (${backlog.size} awaiting a video-clip check -- refreshed first)` : ''}.`);
 };
 
 // Runs automatically at the tail of tinderBulkImport()/tinderCatchUp(),
@@ -2020,9 +2034,16 @@ async function staleSweepTail(n) {
   const ids = Object.keys(staleMap);
   if (!ids.length) return; // never seeded (e.g. an old copy of this snippet, pasted by hand) -- nothing to act on
   const currentById = new Map((await collectAllCandidates()).map((r) => [r.id, r]));
+  const videoBacklog = loadVideoBacklog();
   const ranked = ids
     .filter((id) => currentById.has(id))
-    .sort((a, b) => (staleMap[a] || '').localeCompare(staleMap[b] || '')); // '' (never scraped) sorts first -- most overdue
+    // Video-backlog ids first (they haven't been re-scraped since video
+    // capture existed), then everyone else -- date-sorted within each
+    // group, '' (never scraped) still first.
+    .sort((a, b) => {
+      const va = videoBacklog.has(a) ? 0 : 1, vb = videoBacklog.has(b) ? 0 : 1;
+      return va - vb || (staleMap[a] || '').localeCompare(staleMap[b] || '');
+    });
   const batch = ranked.slice(0, n);
   if (!batch.length) { console.log('Stale-refresh: nothing visible to refresh right now.'); return; }
   console.log(`Stale-refresh: re-checking the ${batch.length} longest-untouched already-known profile${batch.length === 1 ? '' : 's'} -- separate from the run above, its own file, no rush.`);
@@ -2050,7 +2071,7 @@ async function staleSweepTail(n) {
   console.log(`Stale-refresh: ${chunkState.totalSaved} of ${batch.length} saved to its own file in Downloads -- paste in whenever, no rush; anyone skipped today just gets picked again another run.`);
 }
 
-console.log('Ready. Run tinderBulkImport() for the default 15, tinderBulkImport(30) for a custom size, or e.g. tinderBulkImport(250) left running overnight -- checkpoints to a file every 25. Or tinderCatchUp("2026-08-10") to re-check active conversations and new matches since a date -- good for a weekly pass. Or tinderFindUnmatched() to spot anyone missing from both lists since they were last indexed. Or tinderFindMissing() to spot the opposite -- matches in your sidebar the dashboard never stored (e.g. an early run scraped them before their panel loaded); it prints a ready tinderReextract([...]) call, and ignores this browser\'s skip-list. Or tinderReextract(["id1", "id2", ...]) to re-check a specific, already-known list of ids -- e.g. profiles a JSON cross-check flagged as suspiciously incomplete. Or tinderSeedDone([...ids]) to mark ids you already have elsewhere as done without opening them -- the dashboard\'s "Copy bulk-import snippet" button does this automatically, along with tinderSeedStale({...}) which both tinderBulkImport() and tinderCatchUp() use to also refresh a handful of your longest-untouched profiles after their main run, in their own separate file.');
+console.log('Ready. Run tinderBulkImport() for the default 15, tinderBulkImport(30) for a custom size, or e.g. tinderBulkImport(250) left running overnight -- checkpoints to a file every 25. Or tinderCatchUp("2026-08-10") to re-check active conversations and new matches since a date -- good for a weekly pass. Or tinderFindUnmatched() to spot anyone missing from both lists since they were last indexed. Or tinderFindMissing() to spot the opposite -- matches in your sidebar the dashboard never stored (e.g. an early run scraped them before their panel loaded); it prints a ready tinderReextract([...]) call, and ignores this browser\'s skip-list. Or tinderReextract(["id1", "id2", ...]) to re-check a specific, already-known list of ids -- e.g. profiles a JSON cross-check flagged as suspiciously incomplete. Or tinderSeedDone([...ids]) to mark ids you already have elsewhere as done without opening them -- the dashboard\'s "Copy bulk-import snippet" button does this automatically, along with tinderSeedStale({...}, [...]) which both tinderBulkImport() and tinderCatchUp() use to also refresh a handful of your longest-untouched profiles after their main run (2nd arg: ids still owed a video-clip check from before that feature existed -- those go first), in their own separate file.');
 })();</pre>
 </details>
 </details>
