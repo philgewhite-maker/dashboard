@@ -198,6 +198,7 @@ const batch = blankCaptureBatch({ label, notes, source });
 const failed = [];
 const healthImports = [];
 const matchesImports = [];
+const markerImports = []; // messages for a photo auto-routed by captureRules (see Phase 2 below)
 let renphoImported = false;
 let wellnessImported = false;
 const autoRouteCandidates = []; // [{file, item}] -- photo items worth a slow AI pass, filled in Phase 1
@@ -226,7 +227,12 @@ item = { ...(await uploadAttachment(file)), kind: 'attachment' };
 batch.items.push(item);
 if (!data.captureInbox.includes(batch)) data.captureInbox.push(batch);
 queueSave();
-if (kind === 'photo' && (looksLikeSamsungHealthScreenshot(file.name) || await datingAppHintFromFilename(file.name))) {
+// Every photo is a Phase-2 candidate now, not just filename-hinted
+// ones -- the capture-marker check below (no filename signal needed)
+// runs for anyone that Samsung Health/dating-app detection doesn't
+// claim, so an ordinary unhinted screenshot still gets one shot at
+// auto-routing before falling back to Capture Inbox.
+if (kind === 'photo') {
 autoRouteCandidates.push({ file, item });
 }
 } catch (err) {
@@ -257,6 +263,7 @@ failed.push(`${file.name || 'file'}: ${err.message || err}`);
 // share (which still auto-routes exactly as before).
 const totalPhotoCount = batch.items.filter((it) => it.kind === 'photo').length;
 for (const { file, item } of autoRouteCandidates) {
+let handled = false;
 if (looksLikeSamsungHealthScreenshot(file.name)) {
 try {
 const { extractAndMergeWellnessFile } = await import('./wellness.js');
@@ -268,12 +275,13 @@ await deleteItemBytes(item);
 batch.items = batch.items.filter((it) => it.id !== item.id);
 removeBatchIfEmpty(batch);
 queueSave();
+handled = true;
 }
 } catch (err) {
 console.error('Auto wellness extraction failed, photo stays in Capture Inbox for manual triage:', err);
 }
 }
-const datingAppHint = await datingAppHintFromFilename(file.name);
+const datingAppHint = !handled && await datingAppHintFromFilename(file.name);
 if (datingAppHint && totalPhotoCount === 1) {
 try {
 const result = await autoRouteDatingScreenshot(file, datingAppHint);
@@ -283,9 +291,36 @@ await deleteItemBytes(item);
 batch.items = batch.items.filter((it) => it.id !== item.id);
 removeBatchIfEmpty(batch);
 queueSave();
+handled = true;
 }
 } catch (err) {
 console.error(`Auto ${datingAppHint}-screenshot routing failed, photo stays in Capture Inbox for manual triage:`, err);
+}
+}
+// No filename signal at all claimed this photo -- the one place a
+// deliberately-marked photo (see captureOutcomes.js's header comment)
+// gets its chance, same "sole photo in the share" gate the dating-app
+// check above already uses (a marker is drawn onto one specific photo
+// you mean to route, not a bulk album dump).
+if (!handled && totalPhotoCount === 1) {
+try {
+const { scanForCaptureMarker } = await import('../ai.js');
+const { letter } = await scanForCaptureMarker(file);
+if (letter) {
+const { matchCaptureRule, CAPTURE_OUTCOMES } = await import('./captureOutcomes.js');
+const rule = matchCaptureRule(data, 'imageMarker', letter);
+if (rule) {
+const outcome = CAPTURE_OUTCOMES[rule.outcome];
+await outcome.run({ title: file.name || `Marked ${letter}`, notes: '', url: '', photoIds: [item.id], source: { kind: 'captureMarker', label: `Photo marked ${letter}`, url: '' } });
+markerImports.push(`${file.name || 'that image'}: marked ${letter} — sent to ${outcome.label}.`);
+await deleteItemBytes(item);
+batch.items = batch.items.filter((it) => it.id !== item.id);
+removeBatchIfEmpty(batch);
+queueSave();
+}
+}
+} catch (err) {
+console.error('Capture-marker scan failed, photo stays in Capture Inbox for manual triage:', err);
 }
 }
 }
@@ -299,7 +334,7 @@ if (wellnessImported) {
 const { renderWellnessDaily } = await import('./wellness.js');
 renderWellnessDaily();
 }
-return { batch, failed, healthImports, matchesImports };
+return { batch, failed, healthImports, matchesImports, markerImports };
 }
 
 function removeBatchIfEmpty(batch) {

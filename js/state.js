@@ -104,6 +104,22 @@ shareUrlRules: [
 { id: 'seed-nytcooking', host: 'cooking.nytimes.com', path: '', action: 'recipe' },
 { id: 'seed-delicious', host: 'deliciousmagazine.co.uk', path: '', action: 'recipe' },
 ],
+// A second, explicit-intent way into the same outcomes shareUrlRules
+// routes to (js/features/captureOutcomes.js's CAPTURE_OUTCOMES) --
+// `trigger` is a bare letter, the same vocabulary regardless of which
+// sense detects it: a hand-drawn/highlighted letter in a shared photo's
+// corner (inputMethod 'imageMarker', read by AI vision), or a `#<letter>`
+// suffix on a shared link (inputMethod 'urlSuffix', read by the URL
+// parser, no AI needed). "T always means task" is one fact to remember,
+// not two. An explicit trigger is a deliberate override -- it bypasses
+// shareUrlRules' own host/path inference entirely ("I want this as a
+// task today regardless of what site it's from").
+captureRules: [
+{ id: 'seed-marker-task', inputMethod: 'imageMarker', trigger: 'T', outcome: 'task' },
+{ id: 'seed-marker-reading', inputMethod: 'imageMarker', trigger: 'R', outcome: 'reading' },
+{ id: 'seed-suffix-task', inputMethod: 'urlSuffix', trigger: 'T', outcome: 'task' },
+{ id: 'seed-suffix-reading', inputMethod: 'urlSuffix', trigger: 'R', outcome: 'reading' },
+],
 };
 
 // Each mail search is one row in Settings: a kind, its value, and its own
@@ -249,6 +265,26 @@ source: null, // {kind:'share'|'manual', label, url}
 // directly (hard-fail-and-report, download via openAttachment(meta)) --
 // same two conventions every other photo/file in this app already uses.
 items: [],
+...fields,
+};
+}
+
+// A "read this later" item -- the 'reading' outcome in captureOutcomes.js
+// lands here instead of the GTD Inbox. Deliberately lighter than a Task
+// (no bucket/due/context/source-of-truth fields): the unread flag IS the
+// review queue, same reasoning Capture Inbox's own items already follow.
+function blankReadingItem(fields = {}) {
+return {
+id: uid(),
+title: '', url: '', notes: '',
+// Usually URL-based (a link marked #R), but a photo marked R -- a
+// screenshot of an article, say -- has no URL at all, so the photo
+// itself is the content. Same dual shape Tasks already has
+// (link + photoIds), same id-space (storePhoto()).
+photoIds: [],
+source: null, // {kind:'share'|'captureMarker'|'urlSuffix', label, url}
+addedAt: new Date().toISOString(),
+read: false,
 ...fields,
 };
 }
@@ -879,6 +915,8 @@ b.items = Array.isArray(b.items)
 // A batch with nothing left (everything already routed/discarded, e.g. a
 // save landed mid-triage) is clutter, not a real inbox entry.
 data.captureInbox = data.captureInbox.filter((b) => b.items.length > 0);
+if (!Array.isArray(data.readingList)) data.readingList = [];
+data.readingList = data.readingList.map((r) => ({ ...blankReadingItem(), ...r, id: r.id || uid() }));
 if (!Array.isArray(data.pendingImports)) data.pendingImports = [];
 data.pendingImports = data.pendingImports.map((p) => ({ ...blankPendingImport(), ...p, id: p.id || uid(), candidates: Array.isArray(p.candidates) ? p.candidates : [] }));
 // A pending import with nothing left (every candidate already
@@ -1899,7 +1937,7 @@ setExternalUpdateHandler, setLocalChangeHandler, getLocalSettings, setLocalSetti
 isDormantStage, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness,
 exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, DEFAULT_PREFS,
 MAIL_SEARCH_KINDS, mailSearchLabel,
-TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureBatch, blankPendingImport, blankConnection, blankTelegramThread,
+TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureBatch, blankPendingImport, blankConnection, blankTelegramThread, blankReadingItem,
 blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS, LEG_DATE_FIELDS,
 blankPlannerEntry, blankPlannerActivity,
 blankAirbnbListing, blankAirbnbReservation, blankFinanceAccount,

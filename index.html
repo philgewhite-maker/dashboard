@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v309</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v310</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -171,6 +171,14 @@
 <div class="settings-note" style="margin:8px 0 10px;">Photos, CSVs, or anything else shared or picked in one go &mdash; grouped as a batch here until you decide where each one belongs. Mainly reached via Android's share sheet. A recognised Health CSV (Renpho scale export so far) skips the batch entirely and is imported straight into the Health tab.</div>
 <div class="sync-status" id="capture-inbox-status"></div>
 <div id="capture-inbox-list"></div>
+</section>
+
+<section class="panel wide" id="reading-list-panel" data-tab="tasks">
+<div class="panel-head">
+<h2><span class="dot teal"></span>Reading list</h2>
+<span class="count-badge" id="reading-list-count"></span>
+</div>
+<div id="reading-list"></div>
 </section>
 
 <section class="panel wide" id="inbox-panel" data-tab="tasks">
@@ -2794,6 +2802,12 @@ Same idea as Connections' ratings, a separate list (Taste/Health/Prep by default
 <div class="settings-note" style="margin:0 0 10px;">When you share a web link to the Dashboard, a matching rule here opens it straight into the right flow (e.g. a recipe site &rarr; the recipe importer) instead of just filing a task. Seeded with a few recipe sites &mdash; edit freely.</div>
 <div id="share-url-rules"></div>
 <button class="add-btn" id="add-share-rule-btn" type="button" style="margin-top:8px;">Add rule</button>
+</div>
+
+<div class="settings-block">
+<h3>Capture markers &amp; suffixes</h3>
+<div id="capture-rules"></div>
+<button class="add-btn" id="add-capture-rule-btn" type="button" style="margin-top:8px;">Add trigger</button>
 </div>
 </details>
 

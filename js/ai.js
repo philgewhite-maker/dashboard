@@ -516,6 +516,40 @@ await parseCachePut(hash, 'quick', { result, model: QUICK_SCAN_MODEL, captured }
 return { ...result, hash, captureDate: (captured || {}).date || '', fromCache: false };
 }
 
+// Looks for a single hand-drawn or highlighted capital letter marked
+// somewhere in a shared photo -- captureinbox.js's own capture-routing
+// step (see captureOutcomes.js's matchCaptureRule), same cost tier as
+// quickScanScreenshot above and only ever called when every cheaper,
+// filename-based signal has already come up empty. Same
+// hash/cache/model pattern as quickScanScreenshot, so a re-share of the
+// identical image never pays for a second call.
+async function scanForCaptureMarker(file) {
+file = await ensureBrowserReadableImage(file);
+const hash = await hashFile(file);
+const cached = await parseCacheGet(hash, 'marker');
+if (cached) return cached.result;
+
+const base64 = await fileToBase64(file);
+const mediaType = file.type || 'image/png';
+const prompt = `Look ONLY for a single capital letter that was deliberately marked onto this image afterwards -- hand-drawn, highlighted, or added with an annotation/markup tool -- distinct from the photo's own real content (not a letter that's just part of a sign, label, or screenshot text). It's usually in a corner. Return ONLY a JSON object, no other text, no markdown fences:
+{"letter":""}
+- letter: the single capital letter marked on, e.g. "T", or "" if there's no deliberately-added marker.`;
+
+const { data: raw } = await callAnthropic(
+[
+{ type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
+{ type: 'text', text: prompt },
+],
+QUICK_SCAN_MAX_TOKENS,
+QUICK_SCAN_MODEL,
+'Capture-marker scan',
+);
+const letter = String(raw.letter || '').trim().toUpperCase().slice(0, 1);
+const result = { letter: /^[A-Z]$/.test(letter) ? letter : '' };
+await parseCachePut(hash, 'marker', { result, model: QUICK_SCAN_MODEL });
+return result;
+}
+
 // Same fields+shape as the unbanded prompt, plus banded-mode caveats: only
 // report a field if it's genuinely visible in THIS section (another band
 // supplies what this one can't see, rather than this one guessing), and
@@ -1462,7 +1496,7 @@ return { country: String((data && data.country) || '').trim() };
 }
 
 export {
-MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot, quickScanScreenshot,
+MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot, quickScanScreenshot, scanForCaptureMarker,
 callTextJson, DEFAULT_MODEL, summarizeUsage, currentMonthKey, compareFaces,
 extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShoppingItem, translateText,
 identifyCountry, extractWellnessScreenshot,

@@ -11,7 +11,7 @@ import { restartAutoSync } from '../sync/autosync.js';
 import { canAttemptGoogleAction, refreshScopes } from '../sync/googleauth.js';
 import { getRemoteInfo, getRemoteCounts, countsOf, pushToGoogleDrive, pullFromGoogleDrive } from '../sync/googledrive.js';
 import { phoneKey, emailKey, nameKey } from '../googlecontacts.js';
-import { SHARE_ACTIONS } from './sharetarget.js';
+import { CAPTURE_OUTCOMES } from './captureOutcomes.js';
 
 // Spend is only ever an estimate: it's computed from the token counts the
 // API reports multiplied by list prices baked into ai.js, so it ignores
@@ -317,9 +317,69 @@ renderShareUrlRules();
 const addRuleBtn = document.getElementById('add-share-rule-btn');
 if (addRuleBtn) addRuleBtn.addEventListener('click', () => {
 data.prefs.shareUrlRules = data.prefs.shareUrlRules || [];
-data.prefs.shareUrlRules.push({ id: uid(), host: '', path: '', action: Object.keys(SHARE_ACTIONS)[0] });
+data.prefs.shareUrlRules.push({ id: uid(), host: '', path: '', action: Object.keys(CAPTURE_OUTCOMES)[0] });
 renderShareUrlRules();
 queueSave();
+});
+
+renderCaptureRules();
+const addCaptureRuleBtn = document.getElementById('add-capture-rule-btn');
+if (addCaptureRuleBtn) addCaptureRuleBtn.addEventListener('click', () => {
+data.prefs.captureRules = data.prefs.captureRules || [];
+data.prefs.captureRules.push({ id: uid(), inputMethod: 'imageMarker', trigger: '', outcome: Object.keys(CAPTURE_OUTCOMES)[0] });
+renderCaptureRules();
+queueSave();
+});
+}
+
+const CAPTURE_INPUT_METHODS = [
+{ value: 'imageMarker', label: 'Image marker' },
+{ value: 'urlSuffix', label: 'URL suffix' },
+];
+
+// One editable row per explicit capture trigger. See captureOutcomes.js's
+// matchCaptureRule -- reads as "when [input method] shows [trigger],
+// create a [outcome]." A bare letter, not a "#letter" or a colour: the
+// URL parser strips the "#" itself, and the vision scan is asked for
+// the letter alone (see ai.js's scanForCaptureMarker), so one trigger
+// value works for both input methods without translation.
+function renderCaptureRules() {
+const el = document.getElementById('capture-rules');
+if (!el) return;
+const rules = data.prefs.captureRules || [];
+const outcomeKeys = Object.keys(CAPTURE_OUTCOMES);
+const rowsHtml = rules.map((r) => `<tr>
+<td><select data-capture-rule-field="inputMethod" data-capture-rule-id="${r.id}">
+${CAPTURE_INPUT_METHODS.map((m) => `<option value="${m.value}"${m.value === r.inputMethod ? ' selected' : ''}>${escapeHtml(m.label)}</option>`).join('')}
+</select></td>
+<td><input type="text" autocomplete="off" maxlength="1" style="width:44px;text-align:center;text-transform:uppercase;" data-capture-rule-field="trigger" data-capture-rule-id="${r.id}" value="${escapeHtml(r.trigger || '')}" placeholder="T"></td>
+<td><select data-capture-rule-field="outcome" data-capture-rule-id="${r.id}">
+${outcomeKeys.map((k) => `<option value="${k}"${k === r.outcome ? ' selected' : ''}>${escapeHtml(CAPTURE_OUTCOMES[k].label)}</option>`).join('')}
+</select></td>
+<td><span class="del-x" style="opacity:1;" data-del-capture-rule="${r.id}">&times;</span></td>
+</tr>`).join('');
+el.innerHTML = `${rules.length ? `<table class="limits-table">
+<thead><tr><th>Input method</th><th>Trigger</th><th>Creates</th><th></th></tr></thead>
+<tbody>${rowsHtml}</tbody>
+</table>` : '<div class="settings-note" style="margin:0;">No triggers set — markers and suffixes are ignored.</div>'}
+<div class="settings-note" style="margin:6px 0 0;">Image marker: before sharing a photo, draw or highlight the trigger letter somewhere in it (any colour, any corner) — a lone photo with a recognised letter and no other signal (not a dating screenshot, not a health chart) is routed instead of landing in Capture Inbox. URL suffix: add "#" + the trigger letter to the end of a link before sharing it, e.g. "https://example.com/article#R" — this always wins over the domain rules above.</div>`;
+
+el.querySelectorAll('[data-capture-rule-field]').forEach((input) => {
+input.addEventListener('change', () => {
+const rule = (data.prefs.captureRules || []).find((r) => r.id === input.dataset.captureRuleId);
+if (!rule) return;
+const field = input.dataset.captureRuleField;
+rule[field] = field === 'trigger' ? input.value.trim().toUpperCase().slice(0, 1) : input.value;
+input.value = rule[field];
+queueSave();
+});
+});
+el.querySelectorAll('[data-del-capture-rule]').forEach((x) => {
+x.addEventListener('click', () => {
+data.prefs.captureRules = (data.prefs.captureRules || []).filter((r) => r.id !== x.dataset.delCaptureRule);
+renderCaptureRules();
+queueSave();
+});
 });
 }
 
@@ -338,17 +398,18 @@ return v.replace(/^https?:\/\//i, '').replace(/^www\./i, '').split('/')[0].toLow
 }
 
 // One editable row per shared-link auto-route rule. See
-// sharetarget.js's SHARE_ACTIONS / matchShareRule.
+// captureOutcomes.js's CAPTURE_OUTCOMES and sharetarget.js's own
+// matchShareRule.
 function renderShareUrlRules() {
 const el = document.getElementById('share-url-rules');
 if (!el) return;
 const rules = data.prefs.shareUrlRules || [];
-const actionKeys = Object.keys(SHARE_ACTIONS);
+const actionKeys = Object.keys(CAPTURE_OUTCOMES);
 const rowsHtml = rules.map((r) => `<tr>
 <td><input type="text" autocomplete="off" data-share-rule-field="host" data-share-rule-id="${r.id}" value="${escapeHtml(r.host || '')}" placeholder="example.com"></td>
 <td><input type="text" autocomplete="off" data-share-rule-field="path" data-share-rule-id="${r.id}" value="${escapeHtml(r.path || '')}" placeholder="any"></td>
 <td><select data-share-rule-field="action" data-share-rule-id="${r.id}">
-${actionKeys.map((k) => `<option value="${k}"${k === r.action ? ' selected' : ''}>${escapeHtml(SHARE_ACTIONS[k].label)}</option>`).join('')}
+${actionKeys.map((k) => `<option value="${k}"${k === r.action ? ' selected' : ''}>${escapeHtml(CAPTURE_OUTCOMES[k].label)}</option>`).join('')}
 </select></td>
 <td><span class="del-x" style="opacity:1;" data-del-share-rule="${r.id}">&times;</span></td>
 </tr>`).join('');
