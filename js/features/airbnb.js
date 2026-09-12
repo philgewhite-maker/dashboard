@@ -409,6 +409,108 @@ if (r && statusEl) pushReservation(r, statusEl);
 });
 }
 
+// ---- Guest names via email --------------------------------------------------
+//
+// The ICS feed (syncAirbnbListing, above) never carries a guest's name --
+// a genuine Airbnb privacy limit (see this file's own top-of-file
+// comment). Airbnb's OWN "Reservation confirmed" email to the host does
+// carry it, in a fixed subject template: "Reservation confirmed - <name>
+// arrives <date>". Requiring BOTH "Reservation confirmed" AND "arrives"
+// in the subject (a raw Gmail query, not a user-configured mail search
+// row) is what keeps this from also matching a reservation confirmation
+// for a stay booked elsewhere AS A GUEST -- that uses different wording,
+// with no "arrives" (that word only appears in the host-facing template,
+// describing someone else arriving at your place).
+const GUEST_NAME_SUBJECT_RE = /^Reservation confirmed\s*[-–—]\s*(.+?)\s+arrives\s+(.+)$/i;
+const GUEST_NAME_QUERY = 'subject:"Reservation confirmed" subject:"arrives"';
+const GUEST_NAME_SEARCH_LIMIT = 25;
+const MONTH_NAMES = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
+// The subject carries a day+month with no year ("23 Sept" or "Sept 23"
+// -- Airbnb's own template isn't pinned to one order, so both are tried).
+// No year is needed: matchReservationForArrival below gets the year from
+// whichever real reservation's own checkin actually lands on this
+// day+month, rather than this function guessing one.
+function parseArrivalDayMonth(text) {
+const dayFirst = /(\d{1,2})(?:st|nd|rd|th)?\s+([a-z]{3,})/i.exec(text);
+if (dayFirst) {
+const month = MONTH_NAMES.indexOf(dayFirst[2].slice(0, 3).toLowerCase());
+if (month !== -1) return { day: Number(dayFirst[1]), month: month + 1 };
+}
+const monthFirst = /([a-z]{3,})\s+(\d{1,2})(?:st|nd|rd|th)?/i.exec(text);
+if (monthFirst) {
+const month = MONTH_NAMES.indexOf(monthFirst[1].slice(0, 3).toLowerCase());
+if (month !== -1) return { day: Number(monthFirst[2]), month: month + 1 };
+}
+return null;
+}
+
+// The one pending reservation (upcoming, no guest name entered yet --
+// this never overwrites a name already typed in) whose real checkin date
+// lands on this day+month, any year. More than one match is genuinely
+// ambiguous -- skipped rather than guessed, same never-auto-pick-between-
+// candidates discipline pushReservation's own Google Calendar match uses
+// below.
+function matchReservationForArrival(day, month) {
+const candidates = data.airbnbReservations.filter((r) => {
+if (r.guestName || r.checkout < todayStr()) return false;
+const d = new Date(`${r.checkin}T00:00:00`);
+return d.getDate() === day && d.getMonth() + 1 === month;
+});
+return candidates.length === 1 ? candidates[0] : null;
+}
+
+// Runs the search and fills in whatever it can match; never touches a
+// reservation that already has a name. A non-Latin name (the common case
+// this exists for) is romanized via ai.js -- only when actually needed,
+// same "check before spending an AI call" discipline the Chrome
+// LanguageDetector pre-check in tinderimport.js uses ahead of
+// translateText. The original script is kept in notes (appended, not
+// overwriting anything already there) so the romanization can be
+// double-checked against it rather than trusted blind.
+async function syncGuestNamesFromEmail() {
+const pending = data.airbnbReservations.filter((r) => !r.guestName && r.checkout >= todayStr());
+if (!pending.length || !(await canAttemptGoogleAction())) return { filled: 0 };
+
+const { fetchMailSearches } = await import('../googlemail.js');
+const search = { kind: 'query', value: GUEST_NAME_QUERY, maxDays: 0, maxEvents: GUEST_NAME_SEARCH_LIMIT };
+let sections;
+try {
+sections = await fetchMailSearches([search], GUEST_NAME_SEARCH_LIMIT);
+} catch (err) {
+console.error('Guest-name email search failed:', err);
+return { filled: 0, error: err.message || String(err) };
+}
+
+let filled = 0;
+for (const m of sections[0]?.messages || []) {
+const subjectMatch = GUEST_NAME_SUBJECT_RE.exec(String(m.subject || '').trim());
+if (!subjectMatch) continue;
+const rawName = subjectMatch[1].trim();
+const arrival = parseArrivalDayMonth(subjectMatch[2]);
+if (!rawName || !arrival) continue;
+const reservation = matchReservationForArrival(arrival.day, arrival.month);
+if (!reservation) continue;
+
+let name = rawName;
+if (/[^\x00-\x7F]/.test(rawName)) {
+try {
+const { romanizeName } = await import('../ai.js');
+name = (await romanizeName(rawName)) || rawName;
+} catch (err) {
+console.error('Guest-name romanization failed, using the raw name:', err);
+}
+}
+reservation.guestName = name;
+if (name !== rawName) {
+reservation.notes = reservation.notes ? `${reservation.notes} · Booking name: ${rawName}` : `Booking name: ${rawName}`;
+}
+filled++;
+}
+if (filled) queueSave();
+return { filled };
+}
+
 // ---- Google Calendar push -------------------------------------------------
 
 // Two distinct jobs, in order: (1) never re-push a reservation this
@@ -513,6 +615,7 @@ status.textContent = 'Syncing…';
 try {
 await syncAllAirbnbListings();
 await syncCleanerEvents();
+const guestResult = await syncGuestNamesFromEmail();
 renderAirbnb();
 loadAirbnbCalendarOptions({ silent: true });
 // Stripes live on the Planner tab -- dynamic import avoids a static
@@ -523,7 +626,9 @@ const { renderPlanner } = await import('./planner.js');
 renderPlanner();
 const failed = data.airbnbListings.filter((l) => data.airbnbSyncStatus[l.id] && !data.airbnbSyncStatus[l.id].ok);
 if (!failed.length) {
-status.textContent = 'Synced just now.';
+status.textContent = guestResult.filled
+? `Synced just now — filled in ${guestResult.filled} guest name${guestResult.filled === 1 ? '' : 's'} from email.`
+: 'Synced just now.';
 } else {
 // The actual error, right here -- not just a count pointing at devtools
 // most people never open. Every failed listing likely has the SAME

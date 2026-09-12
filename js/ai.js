@@ -1192,6 +1192,28 @@ translation: String((data && data.translation) || '').trim(),
 };
 }
 
+// ---- Name romanization ----
+//
+// A guest's name as Airbnb's own confirmation email carries it (their
+// profile name, in whatever script they typed it in) isn't something to
+// "translate" -- a name has no meaning to translate, just a standard
+// Latin-alphabet form. Distinct, narrower prompt from translatePrompt
+// above rather than a reuse of its dating-profile-specific wording.
+// Same cheap/fast tier: this is a lookup, not reasoning.
+const ROMANIZE_MODEL = 'claude-haiku-4-5-20251001';
+const ROMANIZE_MAX_TOKENS = 200;
+function romanizeNamePrompt(name) {
+return `Give the standard English-readable (Latin-alphabet) form of this person's name, as it would normally be written in English -- given name first if that's the usual convention for the name's origin, standard romanization for a non-Latin script (e.g. Korean "은영 박" -> "Eunyoung Park"). Name: ${JSON.stringify(name)}\n\n`
++ 'Reply with ONLY a JSON object, no other text, no markdown fences: {"name":"Eunyoung Park"}';
+}
+async function romanizeName(name) {
+const { data } = await callAnthropic(
+[{ type: 'text', text: romanizeNamePrompt(name) }],
+ROMANIZE_MAX_TOKENS, ROMANIZE_MODEL, 'Guest name romanization', null, 'low',
+);
+return String((data && data.name) || '').trim();
+}
+
 // ---- Wellness screenshot (Samsung Health) ----
 //
 // Reads one of four Samsung Health 7-day charts (Antioxidant index, AGEs
@@ -1498,7 +1520,7 @@ return { country: String((data && data.country) || '').trim() };
 export {
 MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot, quickScanScreenshot, scanForCaptureMarker,
 callTextJson, DEFAULT_MODEL, summarizeUsage, currentMonthKey, compareFaces,
-extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShoppingItem, translateText,
+extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShoppingItem, translateText, romanizeName,
 identifyCountry, extractWellnessScreenshot,
 extractTripScreenshot, extractTripLegFromEmail,
 parseIngredients, assessIngredient, ALLERGEN_LIST, DIETARY_FLAGS, FODMAP_COMPONENTS, FODMAP_LEVELS,
