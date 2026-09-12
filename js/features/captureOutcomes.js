@@ -27,6 +27,22 @@
 // doc's proposals #3/#4 for why voice in particular needs a persisted
 // draft, not an in-memory one: the gap between capturing and reviewing
 // can be hours, not seconds.
+import { todayStr, dateStrAdd } from '../utils.js';
+
+// Tinder's own share-profile link shape is
+// go.tinder.com/<token>-<name> -- the trailing segment after the last
+// "-" is the person's first name. Best-effort: any URL that doesn't
+// parse or fit that shape just returns null, and the caller falls back
+// to whatever else it has (the surrounding message text) rather than
+// failing the capture.
+function nameFromTinderShareUrl(url) {
+  let u;
+  try { u = new URL(url); } catch (e) { return null; }
+  const slug = u.pathname.split('/').filter(Boolean).pop() || '';
+  const name = slug.split('-').pop();
+  return name && /[a-z]/i.test(name) ? name : null;
+}
+
 const CAPTURE_OUTCOMES = {
 task: {
 label: 'Task',
@@ -70,6 +86,34 @@ const { importSharedRecipeUrl } = await import('./recipes.js');
 await importSharedRecipeUrl(ctx.url); // throws on any failure -> caller falls back
 const { switchTab } = await import('../tabs.js');
 switchTab('menu');
+},
+},
+// A shared Tinder profile link, no photo -- not identity-resolved
+// enough to be a connection, but Super Likes reached this way stay
+// usable for 7 days from capture, so it's worth an actionable
+// reminder rather than sitting untriaged. Reuses Task rather than a
+// new record type: due date gets the existing overdue/soon badge for
+// free, the "Super Like" context makes it a one-click filtered list.
+superlike: {
+label: 'Super Like candidate',
+commitMode: 'direct',
+successBanner: () => `Added as a Super Like candidate — 7 days to use it.`,
+run: async (ctx) => {
+const { captureTask } = await import('./tasks.js');
+const { data, queueSave } = await import('../state.js');
+const name = nameFromTinderShareUrl(ctx.url) || ctx.title || 'Super Like candidate';
+if (!data.taskContexts.includes('Super Like')) {
+data.taskContexts.push('Super Like');
+queueSave();
+}
+captureTask({
+title: name,
+notes: ctx.title && ctx.title !== name ? ctx.title : (ctx.notes || ''),
+link: ctx.url || '',
+due: dateStrAdd(todayStr(), 7),
+contexts: ['Super Like'],
+source: ctx.source || null,
+});
 },
 },
 };

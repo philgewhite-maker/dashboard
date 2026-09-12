@@ -114,9 +114,15 @@ const title = (share.title || '').trim();
 const text = (share.text || '').trim();
 const url = (share.url || '').trim();
 
-// A bare URL sitting in `text` is the common Chrome case.
+// A bare URL sitting in `text` is the common Chrome case. A forwarded
+// message (WhatsApp, a Tinder profile share) usually carries a link
+// embedded in a longer sentence instead -- pull out the first one
+// found, trimming the trailing punctuation a sentence naturally leaves
+// stuck to it, so routing still has something to match against.
 const textIsUrl = /^https?:\/\/\S+$/i.test(text);
-const link = url || (textIsUrl ? text : '');
+const embeddedMatch = !textIsUrl && text ? text.match(/https?:\/\/\S+/i) : null;
+const embeddedLink = embeddedMatch ? embeddedMatch[0].replace(/[)\]}>.,!?'"]+$/, '') : '';
+const link = url || (textIsUrl ? text : embeddedLink);
 
 let taskTitle = title;
 if (!taskTitle && text && !textIsUrl) taskTitle = text.split('\n')[0].slice(0, 120);
@@ -125,7 +131,10 @@ if (!taskTitle && share.files.length) taskTitle = share.files[0].name;
 if (!taskTitle) taskTitle = 'Shared item';
 
 // The link isn't repeated in the notes: it already has its own field on
-// the task (rendered as "Open reference") and is kept on `source`.
+// the task (rendered as "Open reference") and is kept on `source`. An
+// embedded link stays in the notes too (unlike a bare-URL text) since
+// it's still part of the original message, not just a duplicate of the
+// link field.
 const notes = (text && text !== taskTitle && !textIsUrl) ? text : '';
 
 return {

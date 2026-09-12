@@ -103,6 +103,7 @@ shareUrlRules: [
 { id: 'seed-recipetineats', host: 'recipetineats.com', path: '', action: 'recipe' },
 { id: 'seed-nytcooking', host: 'cooking.nytimes.com', path: '', action: 'recipe' },
 { id: 'seed-delicious', host: 'deliciousmagazine.co.uk', path: '', action: 'recipe' },
+{ id: 'seed-tinder-share', host: 'go.tinder.com', path: '', action: 'superlike' },
 ],
 // A second, explicit-intent way into the same outcomes shareUrlRules
 // routes to (js/features/captureOutcomes.js's CAPTURE_OUTCOMES) --
