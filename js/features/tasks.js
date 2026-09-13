@@ -15,7 +15,7 @@
 //    March should not be adding noise in January.
 import { data, queueSave, TASK_BUCKETS, blankTask } from '../state.js';
 import { photoDelete } from '../db.js';
-import { uid, todayStr, escapeHtml, hydratePhotoBackgrounds, resizeImageToBlob, daysUntil, daysSince, scrollAndFlash } from '../utils.js';
+import { uid, todayStr, escapeHtml, affiliateLink, hydratePhotoBackgrounds, resizeImageToBlob, daysUntil, daysSince, scrollAndFlash } from '../utils.js';
 import { uploadAttachment, storePhoto, deleteAttachment, openAttachment, formatBytes } from '../files.js';
 
 const BUCKET_LABEL = Object.fromEntries(TASK_BUCKETS.map((b) => [b.bucket, b.label]));
@@ -163,8 +163,8 @@ ${data.tasks.filter((o) => o.id !== t.id && o.parentId !== t.id).map((o) => `<op
 </select></label>
 </div>
 <label class="full">Reference link (OneNote, doc, anything)<input type="text" autocomplete="off" placeholder="https://…" data-task-field="link" data-task-id="${t.id}" value="${escapeHtml(t.link || '')}"></label>
-${t.link ? `<a class="task-link" href="${escapeHtml(t.link)}" target="_blank" rel="noopener">Open reference &#8599;</a>` : ''}
-${t.source ? `<div class="task-source">From ${escapeHtml(t.source.kind)}: ${t.source.url ? `<a href="${escapeHtml(t.source.url)}" target="_blank" rel="noopener">${escapeHtml(t.source.label)}</a>` : escapeHtml(t.source.label)}</div>` : ''}
+${t.link ? `<a class="task-link" href="${escapeHtml(affiliateLink(t.link))}" target="_blank" rel="noopener">Open reference &#8599;</a>` : ''}
+${t.source ? `<div class="task-source">From ${escapeHtml(t.source.kind)}: ${t.source.url ? `<a href="${escapeHtml(affiliateLink(t.source.url))}" target="_blank" rel="noopener">${escapeHtml(t.source.label)}</a>` : escapeHtml(t.source.label)}</div>` : ''}
 ${createdAtHtml(t)}
 <div class="task-photos">${photos}<label class="gallery-add" for="task-photo-${t.id}">+</label>
 <input type="file" id="task-photo-${t.id}" accept="image/*" multiple style="display:none;" data-task-photo-add="${t.id}"></div>

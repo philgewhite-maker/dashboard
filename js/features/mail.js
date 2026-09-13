@@ -1,5 +1,5 @@
 import { data, mailSearchLabel } from '../state.js';
-import { escapeHtml } from '../utils.js';
+import { escapeHtml, affiliateLink } from '../utils.js';
 import { canAttemptGoogleAction } from '../sync/googleauth.js';
 import { fetchMailSearches, getMessageBody } from '../googlemail.js';
 import { captureTask } from './tasks.js';
@@ -20,7 +20,7 @@ return d.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digi
 
 function messageRowHtml(m) {
 return `<div class="mail-row">
-<a class="mail-link" href="${escapeHtml(m.link)}" target="_blank" rel="noopener">
+<a class="mail-link" href="${escapeHtml(affiliateLink(m.link))}" target="_blank" rel="noopener">
 <span class="mail-from">${escapeHtml(displayName(m.from))}</span>
 <span class="mail-subject">${escapeHtml(m.subject)}</span>
 <span class="mail-date">${escapeHtml(formatDate(m.date))}</span>

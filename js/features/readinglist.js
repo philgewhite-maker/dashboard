@@ -3,7 +3,7 @@
 // title + link + an unread flag, no bucket/due/context. The unread flag
 // IS the review queue, same as an unrouted Capture Inbox item already is.
 import { data, queueSave, blankReadingItem } from '../state.js';
-import { escapeHtml, scrollAndFlash, hydratePhotoBackgrounds } from '../utils.js';
+import { escapeHtml, affiliateLink, scrollAndFlash, hydratePhotoBackgrounds } from '../utils.js';
 
 // Called by captureOutcomes.js's 'reading' outcome -- the one place a
 // new item is ever created, so every entry point (an image marker, a
@@ -28,7 +28,7 @@ function rowHtml(item) {
 const photoId = (item.photoIds || [])[0];
 return `<div class="mail-row${item.read ? ' done' : ''}" data-reading-row="${item.id}">
 ${photoId ? `<span class="thumb-img" data-photo-bg="${escapeHtml(photoId)}" style="width:32px;height:32px;border-radius:6px;flex:0 0 auto;"></span>` : ''}
-<span class="mail-subject">${item.url ? `<a href="${escapeHtml(item.url)}" target="_blank" rel="noopener">${escapeHtml(item.title)}</a>` : escapeHtml(item.title)}</span>
+<span class="mail-subject">${item.url ? `<a href="${escapeHtml(affiliateLink(item.url))}" target="_blank" rel="noopener">${escapeHtml(item.title)}</a>` : escapeHtml(item.title)}</span>
 ${item.notes ? `<span class="settings-note" style="margin:0;">${escapeHtml(item.notes)}</span>` : ''}
 <button class="mini-task-btn${item.read ? ' done' : ''}" type="button" data-reading-toggle="${item.id}" title="${item.read ? 'Mark unread' : 'Mark read'}">${item.read ? '✓ read' : 'Mark read'}</button>
 <span class="del-x" data-reading-remove="${item.id}" title="Remove">&times;</span>

@@ -20,7 +20,7 @@
 // persisted on the task itself (t.priceCheck), dated, with a Refresh button
 // to re-run it later — not the old in-memory, un-dated Map this used to be.
 import { data, queueSave, SHOPPING_CONTEXTS } from '../state.js';
-import { escapeHtml, daysUntil, daysSince } from '../utils.js';
+import { escapeHtml, affiliateLink, daysUntil, daysSince } from '../utils.js';
 import { captureTask, revealTask } from './tasks.js';
 import { MissingKeyError, searchShoppingItem } from '../ai.js';
 import { initMicCapture } from './voicecapture.js';
@@ -106,7 +106,7 @@ if (!results.length) return '<div class="shop-search-results empty">No results f
 return `<div class="shop-search-results">
 ${recommendation ? `<div class="shop-recommendation">${escapeHtml(recommendation)}</div>` : ''}
 ${results.map((r) => `
-<a class="shop-search-hit" href="${escapeHtml(r.url)}" target="_blank" rel="noopener noreferrer"${isAmazonUrl(r.url) ? ` data-amazon-task="${escapeHtml(t.id)}"` : ''}>
+<a class="shop-search-hit" href="${escapeHtml(affiliateLink(r.url))}" target="_blank" rel="noopener noreferrer"${isAmazonUrl(r.url) ? ` data-amazon-task="${escapeHtml(t.id)}"` : ''}>
 <span class="shop-hit-retailer">${escapeHtml(r.retailer || 'Link')}</span>
 <span class="shop-hit-name">${escapeHtml(r.name || t.title)}</span>
 ${r.price ? `<span class="shop-hit-price">${escapeHtml(r.price)}</span>` : ''}

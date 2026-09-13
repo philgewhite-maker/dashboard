@@ -117,6 +117,24 @@ return String(str == null ? '' : str)
 .replace(/'/g, '&#39;');
 }
 
+// Amazon Associates tag -- run through EVERY Amazon link this app renders
+// (a shopping search result, a task captured from a shared Amazon link, a
+// Buy nudge, a reading-list item, an email link), not just the shopping
+// feature, so a click-through earns commission no matter which surface it
+// came from. No-op for a non-Amazon URL. Never overwrites a `tag` the URL
+// already carries -- a link shared with someone else's tag on it keeps
+// that tag rather than getting silently reassigned.
+const AMAZON_ASSOCIATES_TAG = 'dodaydash-21';
+function affiliateLink(url) {
+const s = String(url || '');
+if (!s) return s;
+let u;
+try { u = new URL(s); } catch (e) { return s; }
+if (!/^https?:$/.test(u.protocol) || !/amazon\./i.test(u.hostname)) return s;
+if (!u.searchParams.get('tag')) u.searchParams.set('tag', AMAZON_ASSOCIATES_TAG);
+return u.toString();
+}
+
 function initials(name) {
 return (name || '?').trim().charAt(0).toUpperCase();
 }
@@ -1137,7 +1155,7 @@ return classified.every((c) => c.isScreenshot) && looksLikeSameScreenshotPieces(
 
 export {
 todayStr, daysAgoStr, dateStrAdd, parseLooseDateTime, last7Dates, uid, daysSince, daysUntil, foldDiacritics,
-escapeHtml, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, buildFlagMatcher, applyFlagMatcher, knownCityMap, knownScalarValues, pickChipHtml, splitCsvLine, scrollAndFlash, bindForm,
+escapeHtml, affiliateLink, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, buildFlagMatcher, applyFlagMatcher, knownCityMap, knownScalarValues, pickChipHtml, splitCsvLine, scrollAndFlash, bindForm,
 findMentions, COUNTRY_NAME_TO_NATIONALITY,
 resizeImageToBlob, fileToBase64, loadImage, cropThumbnailToBlob,
 hashFile, captureDateOf, betterCaptureDate, dateFromFilename,
