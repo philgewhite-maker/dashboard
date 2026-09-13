@@ -1175,9 +1175,9 @@ return `Find where to buy "${item}" online in the UK.
 HARD REQUIREMENTS, in order:
 1. tesco.com and amazon.co.uk are BOTH MANDATORY -- Amazon must appear in your results every single time, never dropped even if a third retailer's results are cleaner or a multibuy variant is more interesting. If your first amazon.co.uk search comes up empty, try again (a plainer query, no site: prefix) before giving up -- do not simply omit Amazon.
 2. Run a SEPARATE, SITE-SCOPED search per retailer -- \`site:tesco.com ${item}\`, \`site:amazon.co.uk ${item}\`, and one more for a third well-known UK retailer that suits this item (e.g. a pharmacy for a medicine, a hardware/homeware site for a cleaning product) -- not one combined general search, which tends to surface price-comparison or .com pages instead of the actual UK retailer page.
-3. A search snippet frequently carries no price at all -- especially common for Amazon, where price is rendered dynamically and rarely appears in search-result text. Whenever a promising page turns up with no price in the snippet, FETCH that exact page (you have a fetch tool for this) and read the real price off it -- never report "no price shown" or drop a result just because the snippet itself lacked one.
+3. A search snippet frequently carries no price at all. For any retailer OTHER than Amazon, whenever a promising page turns up with no price in the snippet, FETCH that exact page (you have a fetch tool for this) and read the real price off it -- never report "no price shown" or drop a result just because the snippet itself lacked one. For amazon.co.uk specifically, DO NOT fetch the product page -- Amazon blocks this kind of automated fetch outright (it returns an error page, not the real one), so a fetch attempt there always fails and only wastes a tool call. Report the Amazon result with whatever price (if any) already appears in the search snippet itself, leave price blank otherwise, and move on -- getting the real Amazon price is handled by a separate mechanism outside this search.
 4. At most 2 results per retailer, even if more variants exist -- don't let one retailer's multiple product variants crowd Amazon or the third retailer out of the response.
-` + (link ? `5. Also check the exact price at this page, whichever retailer it's from: ${link}\n` : '')
+` + (link && !/amazon\./i.test(link) ? `5. Also check the exact price at this page, whichever retailer it's from: ${link}\n` : '')
 + 'For each result, note the retailer, the exact product name, the price if shown, the direct product page URL, and: '
 + 'for Tesco, any multibuy or Clubcard offer shown ("offer", e.g. "3 for 2", "Clubcard price £2.50" — blank if none); '
 + 'for Amazon, the Subscribe & Save price/discount if the page shows one ("subscribeSave", e.g. "£4.49 with 15% Subscribe & Save" — blank if not offered or not shown). '
@@ -1206,18 +1206,21 @@ async function searchShoppingItem(item, link) {
 // nothing usable for Amazon despite an obvious amazon.co.uk match,
 // most likely because the search defaulted toward .com/US results for
 // a query with no location signal at all.
-// web_fetch is NOT conditional on `link` -- confirmed live as the real
-// remaining gap: web_search alone found the right amazon.co.uk product
-// page, but a search SNIPPET routinely carries no price at all (Amazon
-// especially), and with no fetch tool available the model had no way to
-// go further and actually read one off the page. Always available now,
-// with enough max_uses to fetch each retailer's own found page, not just
-// a passed-in `link`.
+// web_fetch is NOT conditional on `link` -- confirmed live as a real gap
+// without it: web_search alone found the right retailer product page, but
+// a search SNIPPET routinely carries no price at all, and with no fetch
+// tool available the model had no way to go further and actually read one
+// off the page. Always available now, for Tesco/the third retailer (the
+// prompt above explicitly excludes Amazon from this -- confirmed live as
+// a dead end, Amazon blocks automated fetches outright, so a fetch there
+// never gets a price, it only burns a tool call and the max_tokens budget
+// chasing one; max_uses capped at 2 to match "at most one fetch per
+// non-Amazon retailer" now that Amazon is never a fetch target).
 const tools = [{
 type: 'web_search_20260209', name: 'web_search', max_uses: 4, allowed_callers: ['direct'],
 user_location: { type: 'approximate', country: 'GB' },
 }, {
-type: 'web_fetch_20260209', name: 'web_fetch', max_uses: 4, allowed_callers: ['direct'],
+type: 'web_fetch_20260209', name: 'web_fetch', max_uses: 2, allowed_callers: ['direct'],
 }];
 const { data: raw } = await callAnthropic(
 [{ type: 'text', text: shoppingSearchPrompt(item, link) }],

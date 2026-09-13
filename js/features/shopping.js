@@ -58,12 +58,42 @@ return days === 0 ? 'checked today' : days === 1 ? 'checked yesterday' : `checke
 // matter how the AI search prompt is worded. The price-scrape
 // bookmarklet (see Settings) is the workaround: it runs *inside* a real
 // Amazon tab, so it isn't subject to that block at all, and hands the
-// price back here via applyPriceScrape() below. This tag is how it
-// knows which task to write back to -- harmless to Amazon (client-side
-// only, never reaches their server), read only by the bookmarklet.
-function amazonLinkHref(url, taskId) {
-if (!/amazon\./i.test(url)) return url;
-return `${url}${url.includes('#') ? '&' : '#'}dashTask=${encodeURIComponent(taskId)}`;
+// price back here via applyPriceScrape() below.
+//
+// Originally passed the task id via a "#dashTask=..." URL fragment --
+// confirmed live as broken: Amazon's own page JS rewrites the address bar
+// via the History API about a second after load (observed landing on
+// "...?th=1", fragment gone), which happens well before anyone's had time
+// to click the bookmarklet. window.name survives that rewrite because it's
+// a same-document History API call, not a real navigation -- window.name
+// lives on the browsing context itself, untouched by anything short of an
+// actual cross-origin navigation. So the task id travels there instead,
+// set the moment the tab is opened (bindAmazonLinks below), read by the
+// bookmarklet regardless of whatever Amazon's own JS does to the URL
+// afterward.
+function isAmazonUrl(url) {
+return /amazon\./i.test(url || '');
+}
+
+// win.opener is nulled right after use -- same reasoning a plain
+// rel="noopener" would cover for a normal <a target="_blank">, just done
+// manually here because the window.name handoff needs the open() return
+// value (which "noopener" as a window-features flag would suppress).
+function bindAmazonLinks(el) {
+el.querySelectorAll('a[data-amazon-task]').forEach((a) => {
+a.addEventListener('click', (e) => {
+// Only a plain left-click is redirected through window.open -- a
+// modified click (ctrl/cmd/shift/middle-button "open in background
+// tab") is left to the browser's native handling, so that path still
+// works, it just won't carry the task id.
+if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+e.preventDefault();
+const win = window.open(a.href, '_blank');
+if (!win) return;
+try { win.name = `dashTask:${a.dataset.amazonTask}`; } catch (err) { /* cross-origin timing, ignore */ }
+try { win.opener = null; } catch (err) { /* ignore */ }
+});
+});
 }
 
 function searchResultsHtml(t) {
@@ -76,7 +106,7 @@ if (!results.length) return '<div class="shop-search-results empty">No results f
 return `<div class="shop-search-results">
 ${recommendation ? `<div class="shop-recommendation">${escapeHtml(recommendation)}</div>` : ''}
 ${results.map((r) => `
-<a class="shop-search-hit" href="${escapeHtml(amazonLinkHref(r.url, t.id))}" target="_blank" rel="noopener noreferrer">
+<a class="shop-search-hit" href="${escapeHtml(r.url)}" target="_blank" rel="noopener noreferrer"${isAmazonUrl(r.url) ? ` data-amazon-task="${escapeHtml(t.id)}"` : ''}>
 <span class="shop-hit-retailer">${escapeHtml(r.retailer || 'Link')}</span>
 <span class="shop-hit-name">${escapeHtml(r.name || t.title)}</span>
 ${r.price ? `<span class="shop-hit-price">${escapeHtml(r.price)}</span>` : ''}
@@ -138,6 +168,7 @@ revealTask(span.dataset.shopOpen);
 el.querySelectorAll('[data-shop-search]').forEach((btn) => {
 btn.addEventListener('click', () => runSearch(btn.dataset.shopSearch));
 });
+bindAmazonLinks(el);
 }
 
 async function runSearch(taskId) {
@@ -177,7 +208,7 @@ console.error('Auto price-check failed, item stays without one until Search pric
 }
 }
 
-// The other half of the price-scrape loop (see amazonLinkHref above): the
+// The other half of the price-scrape loop (see bindAmazonLinks above): the
 // bookmarklet reads a real price off amazon.co.uk in the user's own
 // browser, then hands it back here via query params on a redirect -- not
 // a fetch, since this is a static page with no backend to receive a POST.
