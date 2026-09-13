@@ -290,4 +290,7 @@ revealTask(task.id);
 });
 }
 
-export { initShareTarget, composeTask, takePendingShare, SHARE_ACTIONS, matchShareRule };
+// banner() is also reused by shopping.js's price-scrape intake — same
+// "dismissable, self-closing notice, optional action button" shape,
+// not worth a second copy just because that one isn't share-triggered.
+export { initShareTarget, composeTask, takePendingShare, SHARE_ACTIONS, matchShareRule, banner };

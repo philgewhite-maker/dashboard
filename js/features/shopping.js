@@ -24,6 +24,7 @@ import { escapeHtml, daysUntil, daysSince } from '../utils.js';
 import { captureTask, revealTask } from './tasks.js';
 import { MissingKeyError, searchShoppingItem } from '../ai.js';
 import { initMicCapture } from './voicecapture.js';
+import { banner } from './sharetarget.js';
 
 let showDone = false;
 // Only transient loading/error UI state now — a finished search writes to
@@ -51,6 +52,20 @@ const days = daysSince(String(iso || '').slice(0, 10));
 return days === 0 ? 'checked today' : days === 1 ? 'checked yesterday' : `checked ${days}d ago`;
 }
 
+// Amazon blocks server-side fetchers outright (confirmed live: a
+// non-browser fetch to amazon.co.uk gets HTTP 503, where a real browser
+// gets the real page) -- so an Amazon result routinely has no price, no
+// matter how the AI search prompt is worded. The price-scrape
+// bookmarklet (see Settings) is the workaround: it runs *inside* a real
+// Amazon tab, so it isn't subject to that block at all, and hands the
+// price back here via applyPriceScrape() below. This tag is how it
+// knows which task to write back to -- harmless to Amazon (client-side
+// only, never reaches their server), read only by the bookmarklet.
+function amazonLinkHref(url, taskId) {
+if (!/amazon\./i.test(url)) return url;
+return `${url}${url.includes('#') ? '&' : '#'}dashTask=${encodeURIComponent(taskId)}`;
+}
+
 function searchResultsHtml(t) {
 const s = searchState.get(t.id);
 if (s && s.status === 'loading') return '<div class="shop-search-results loading">Searching…</div>';
@@ -61,7 +76,7 @@ if (!results.length) return '<div class="shop-search-results empty">No results f
 return `<div class="shop-search-results">
 ${recommendation ? `<div class="shop-recommendation">${escapeHtml(recommendation)}</div>` : ''}
 ${results.map((r) => `
-<a class="shop-search-hit" href="${escapeHtml(r.url)}" target="_blank" rel="noopener noreferrer">
+<a class="shop-search-hit" href="${escapeHtml(amazonLinkHref(r.url, t.id))}" target="_blank" rel="noopener noreferrer">
 <span class="shop-hit-retailer">${escapeHtml(r.retailer || 'Link')}</span>
 <span class="shop-hit-name">${escapeHtml(r.name || t.title)}</span>
 ${r.price ? `<span class="shop-hit-price">${escapeHtml(r.price)}</span>` : ''}
@@ -162,7 +177,48 @@ console.error('Auto price-check failed, item stays without one until Search pric
 }
 }
 
+// The other half of the price-scrape loop (see amazonLinkHref above): the
+// bookmarklet reads a real price off amazon.co.uk in the user's own
+// browser, then hands it back here via query params on a redirect -- not
+// a fetch, since this is a static page with no backend to receive a POST.
+// Checked on every load, same reasoning as sharetarget.js's own
+// initShareTarget: the query string is easily lost (a restored session,
+// a bookmark), and stranding the scraped price with no way to retry it
+// would be worse than a redundant no-op check on every other load.
+function applyPriceScrape() {
+const params = new URLSearchParams(location.search);
+const taskId = params.get('priceScrapeTaskId');
+if (!taskId) return;
+// Strip regardless of what happens below -- a stale or tampered id
+// should never keep reapplying itself on every subsequent reload.
+history.replaceState(null, '', location.pathname + location.hash);
+const t = data.tasks.find((x) => x.id === taskId);
+const price = (params.get('price') || '').trim();
+if (!t || !price) return;
+const subscribeSave = (params.get('subscribeSave') || '').trim();
+const name = (params.get('name') || '').trim();
+const url = (params.get('url') || '').trim();
+if (!t.priceCheck) t.priceCheck = { checkedAt: '', results: [], recommendation: '' };
+let r = t.priceCheck.results.find((x) => /amazon/i.test(x.retailer || '') || /amazon\./i.test(x.url || ''));
+if (!r) {
+r = { retailer: 'Amazon', name: name || t.title, url: url || '', offer: '', subscribeSave: '', price: '' };
+t.priceCheck.results.push(r);
+}
+r.price = price;
+if (subscribeSave) r.subscribeSave = subscribeSave;
+if (url) r.url = url;
+if (name) r.name = name;
+t.priceCheck.checkedAt = new Date().toISOString();
+queueSave();
+render();
+banner(`Amazon price updated for "${t.title.slice(0, 60)}": ${price}`, async () => {
+const { switchTab } = await import('../tabs.js');
+switchTab('shopping');
+});
+}
+
 function initShopping() {
+applyPriceScrape();
 const select = document.getElementById('shop-context-input');
 const input = document.getElementById('shop-capture-input');
 const doneToggle = document.getElementById('shop-show-done-toggle');
