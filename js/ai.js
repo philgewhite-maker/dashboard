@@ -1160,7 +1160,8 @@ const SHOPPING_SEARCH_MAX_TOKENS = 2000;
 // a price from a shared link is never lost just because it's from
 // somewhere else.
 function shoppingSearchPrompt(item, link) {
-return `Find where to buy "${item}" online in the UK. Always check tesco.com and amazon.co.uk specifically, plus one more well-known retailer that suits this item (e.g. a pharmacy for a medicine, a hardware/homeware site for a cleaning product). `
+return `Find where to buy "${item}" online in the UK. Run a SEPARATE, SITE-SCOPED search for each of these -- e.g. \`site:tesco.com ${item}\`, \`site:amazon.co.uk ${item}\` -- rather than one general search, since a single combined query tends to surface price-comparison or .com results instead of the actual UK retailer page: `
++ 'always tesco.com and amazon.co.uk specifically, plus one more well-known UK retailer that suits this item (e.g. a pharmacy for a medicine, a hardware/homeware site for a cleaning product). '
 + (link ? `Also check the exact price at this page, whichever retailer it's from: ${link}\n` : '')
 + 'For each result, note the retailer, the exact product name, the price if shown, the direct product page URL, and: '
 + 'for Tesco, any multibuy or Clubcard offer shown ("offer", e.g. "3 for 2", "Clubcard price £2.50" — blank if none); '
@@ -1184,7 +1185,15 @@ async function searchShoppingItem(item, link) {
 // (code-execution-triggered) tool calling, which Haiku 4.5 doesn't
 // support, and rejects the request outright even though nothing here
 // ever uses code execution.
-const tools = [{ type: 'web_search_20260209', name: 'web_search', max_uses: 3, allowed_callers: ['direct'] }];
+// user_location biases results toward the UK -- confirmed live as a
+// real gap without it: a generic "Method Floor Cleaner" query returned
+// nothing usable for Amazon despite an obvious amazon.co.uk match,
+// most likely because the search defaulted toward .com/US results for
+// a query with no location signal at all.
+const tools = [{
+type: 'web_search_20260209', name: 'web_search', max_uses: 4, allowed_callers: ['direct'],
+user_location: { type: 'approximate', country: 'GB' },
+}];
 if (link) tools.push({ type: 'web_fetch_20260209', name: 'web_fetch', max_uses: 1, allowed_callers: ['direct'] });
 const { data: raw } = await callAnthropic(
 [{ type: 'text', text: shoppingSearchPrompt(item, link) }],
