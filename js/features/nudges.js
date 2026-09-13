@@ -389,6 +389,37 @@ signals: { kind: 'airbnb-greet', daysUntil: dIn },
 category: 'airbnb',
 });
 }
+// Key handoff reminders -- only meaningful once at least one keyring is
+// actually assigned to this reservation (data.airbnbKeyAssignments, see
+// airbnb.js's own drag-and-drop). Pre-checkin: still sitting with
+// you/concierge/etc. the day before -- worth checking how it's actually
+// reaching the guest. Post-checkout: still shows as with the guest days
+// after they've left -- it didn't come back yet, worth chasing before
+// it's forgotten. Both clear themselves once the key's own custodian
+// changes, same as every other nudge here resolving via its underlying
+// condition going false.
+const assignedKeys = data.airbnbKeyAssignments
+.filter((a) => a.reservationId === r.id)
+.map((a) => data.airbnbKeys.find((k) => k.id === a.keyId))
+.filter(Boolean);
+if (assignedKeys.length) {
+if (dIn >= 0 && dIn <= AIRBNB_GREET_LEAD_DAYS && assignedKeys.some((k) => k.custodian !== 'guest')) {
+pool.push({
+text: `${label}: how's ${r.guestName || 'the guest'} getting their key ${dIn === 0 ? 'today' : 'tomorrow'}?`,
+target: { type: 'airbnb', id: r.id },
+signals: { kind: 'airbnb-key-handoff', daysUntil: dIn },
+category: 'airbnb',
+});
+}
+if (dOut < 0 && -dOut <= AIRBNB_CLEAN_LEAD_DAYS && assignedKeys.some((k) => k.custodian === 'guest')) {
+pool.push({
+text: `${label}: where did the key go after checkout ${-dOut === 1 ? 'yesterday' : `${-dOut} days ago`}?`,
+target: { type: 'airbnb', id: r.id },
+signals: { kind: 'airbnb-key-reconcile', daysSince: -dOut },
+category: 'airbnb',
+});
+}
+}
 });
 }
 

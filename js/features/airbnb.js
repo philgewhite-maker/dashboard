@@ -6,8 +6,8 @@
 // reservation date ranges -- but never a guest's name, on any plan, for
 // any host; that's a genuine Airbnb privacy limit, which is why
 // guestName/notes below are always typed in by hand, never scraped.
-import { data, queueSave, blankAirbnbListing, blankAirbnbReservation, blankAirbnbKey, KEY_CUSTODIAN_TYPES } from '../state.js';
-import { escapeHtml, todayStr, dateStrAdd, scrollAndFlash } from '../utils.js';
+import { data, queueSave, blankAirbnbListing, blankAirbnbReservation, blankAirbnbKey, blankAirbnbKeyAssignment, KEY_CUSTODIAN_TYPES } from '../state.js';
+import { escapeHtml, todayStr, dateStrAdd } from '../utils.js';
 import { fetchIcs } from '../files.js';
 import { canAttemptGoogleAction, hasCalendarWrite } from '../sync/googleauth.js';
 import { listCalendars, createEvent, findEvents } from '../googlecalendar.js';
@@ -410,26 +410,6 @@ return match
 : `<span class="cal-badge cleaner-chip cleaner-chip-tbc">${label}: TBC</span>`;
 }
 
-// "with Concierge", "with Cleaner (Maria)", "with you" -- the physical
-// custodian, independent of who the key is ultimately FOR (see
-// keyChipsForReservationHtml below).
-function custodianLabel(k) {
-const type = k.custodian || 'me';
-const label = type === 'me' ? 'you' : type.charAt(0).toUpperCase() + type.slice(1);
-const needsName = type === 'cleaner' || type === 'workman' || type === 'other';
-return `with ${label}${needsName && k.custodianName ? ` (${k.custodianName})` : ''}`;
-}
-
-// A reservation showing which keyring(s) are earmarked for it -- CLAUDE.md's
-// own record-reference standard: a key shown away from its own row must
-// link back to it. Clicking scrolls to the key's row in the Keys section
-// further down this same panel (no switchTab needed, both live on Airbnb).
-function keyChipsForReservationHtml(r) {
-const keys = data.airbnbKeys.filter((k) => k.forReservationId === r.id);
-if (!keys.length) return '';
-return `<div class="cal-clean-group">${keys.map((k) => `<span class="cal-badge cleaner-chip" data-key-chip="${k.id}" style="cursor:pointer;" title="Jump to this key">&#128273; ${escapeHtml(k.label || 'Keyring')} &middot; ${escapeHtml(custodianLabel(k))}</span>`).join('')}</div>`;
-}
-
 function reservationRowHtml(r) {
 const listing = data.airbnbListings.find((l) => l.id === r.listingId);
 if (!listing) return '';
@@ -448,7 +428,7 @@ ${r.googleEventId
 <span class="sync-status" data-airbnb-push-status="${r.id}"></span>
 ${data.prefs.airbnbCalendarId ? `<div class="cal-clean-group">${cleanerChipHtml(r, 'checkin')}${cleanerChipHtml(r, 'checkout')}</div>` : ''}
 </div>
-${keyChipsForReservationHtml(r)}
+${reservationKeysHtml(r)}
 </div>`;
 }
 
@@ -494,9 +474,15 @@ const statusEl = el.querySelector(`[data-airbnb-push-status="${btn.dataset.airbn
 if (r && statusEl) pushReservation(r, statusEl);
 });
 });
-el.querySelectorAll('[data-key-chip]').forEach((chip) => {
-chip.addEventListener('click', () => {
-scrollAndFlash(`[data-airbnb-key-row="${CSS.escape(chip.dataset.keyChip)}"]`);
+bindKeyCards(el);
+el.querySelectorAll('[data-airbnb-key-drop]').forEach((zone) => {
+zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('over'); });
+zone.addEventListener('dragleave', () => zone.classList.remove('over'));
+zone.addEventListener('drop', (e) => {
+e.preventDefault();
+zone.classList.remove('over');
+const keyId = e.dataTransfer.getData('text/plain');
+assignKeyToReservation(keyId, zone.dataset.airbnbKeyDrop);
 });
 });
 }
@@ -506,17 +492,47 @@ scrollAndFlash(`[data-airbnb-key-row="${CSS.escape(chip.dataset.keyChip)}"]`);
 // Physical keyrings and who currently has them -- current custody only, no
 // handoff history (confirmed as sufficient). A keyring's static facts
 // (label, contents, which listings it opens) are set in Settings, same
-// split as Airbnb listings themselves (icsUrl/prefix/colour there,
-// guestName/notes here) -- this section only edits the custody fields:
-// who has it (custodian/custodianName) and who it's ultimately for
-// (forReservationId/forNote), which are deliberately separate questions --
-// a keyring routinely sits with the concierge FOR a guest who hasn't
-// collected it yet.
+// split as Airbnb listings themselves (icsUrl/prefix/colour there, custody
+// here) -- this section is drag-and-drop, mirroring planner.js's own
+// mechanics exactly (draggable="true" + dragstart -> dataTransfer
+// 'text/plain' + .dragging; a drop target gets dragover/dragleave/drop +
+// .over -- same CSS classes already in style.css, not new ones), because a
+// full row per keyring (the previous version) doesn't scale: a small
+// "holding pen" of compact cards for whatever's unassigned, dragged onto
+// whichever reservation it belongs to.
+//
+// custodian/custodianName live on the KEY (blankAirbnbKey, state.js) --
+// there's one physical object, in one place, no matter how many upcoming
+// reservations it's earmarked for. Earmarking is a separate, one-to-many
+// join (data.airbnbKeyAssignments, blankAirbnbKeyAssignment) -- dragging
+// the same key onto a second reservation adds a second assignment rather
+// than moving it. Among a key's own assignments, only the EARLIEST
+// (soonest checkin -- the current/imminent handoff) gets the real,
+// editable custodian control; any later one reads "Pending" instead, since
+// there's nothing real to say about custody for a stay that hasn't
+// started -- it becomes editable in its place once the earlier one's
+// assignment is removed.
 const KEY_NEEDS_NAME = new Set(['cleaner', 'workman', 'other']);
-// Sentinel for the "For" select's "type a note instead" option -- not a
-// real reservation id, so it can never collide with one (uid()'s own
-// alphabet never starts a real id with two leading underscores).
-const KEY_FOR_OTHER = '__other__';
+
+function assignmentsForKey(keyId) {
+return data.airbnbKeyAssignments.filter((a) => a.keyId === keyId);
+}
+function assignmentsForReservation(reservationId) {
+return data.airbnbKeyAssignments.filter((a) => a.reservationId === reservationId);
+}
+// A key's own assignments, earliest-checkin first -- [0] is "current".
+// Assignments whose reservation is gone are already dropped by state.js's
+// own migration guard, so every entry here has a real reservation.
+function sortedAssignmentsForKey(keyId) {
+return assignmentsForKey(keyId)
+.map((a) => ({ assignment: a, reservation: data.airbnbReservations.find((r) => r.id === a.reservationId) }))
+.filter((x) => x.reservation)
+.sort((a, b) => (a.reservation.checkin < b.reservation.checkin ? -1 : a.reservation.checkin > b.reservation.checkin ? 1 : 0));
+}
+function isCurrentAssignment(assignment) {
+const sorted = sortedAssignmentsForKey(assignment.keyId);
+return sorted.length > 0 && sorted[0].assignment.id === assignment.id;
+}
 
 function keyListingsLabel(k) {
 if (!k.listingIds.length) return 'General';
@@ -527,64 +543,107 @@ return l ? (l.label || l.prefix || 'Listing') : null;
 return labels.length ? labels.join(', ') : 'General';
 }
 
-function keyRowHtml(k) {
-const upcoming = data.airbnbReservations
-.filter((r) => r.checkout >= todayStr())
-.sort((a, b) => (a.checkin < b.checkin ? -1 : a.checkin > b.checkin ? 1 : 0));
-const forChoice = k.forReservationId ? k.forReservationId : (k.forNote ? KEY_FOR_OTHER : '');
-return `<div class="cal-row" data-airbnb-key-row="${k.id}">
-<div class="cal-head">
-<span class="cal-name">&#128273; ${escapeHtml(k.label || 'Keyring')}</span>
-<span class="cal-badge slate">${escapeHtml(keyListingsLabel(k))}</span>
-</div>
-${k.contents ? `<div class="settings-note" style="margin:0 0 6px;">${escapeHtml(k.contents)}</div>` : ''}
-<div class="cal-event-row">
-<select data-key-field="custodian" data-key-id="${k.id}">
+// Shared between a holding-pen card and a reservation's own key chip --
+// same set, same editing surface, everywhere (a key on a reservation could
+// just as easily be with you or the concierge as with the guest).
+function custodianControlHtml(k) {
+return `<select data-key-field="custodian" data-key-id="${k.id}">
 ${KEY_CUSTODIAN_TYPES.map((t) => `<option value="${t}"${t === k.custodian ? ' selected' : ''}>${t.charAt(0).toUpperCase() + t.slice(1)}</option>`).join('')}
 </select>
-<input type="text" autocomplete="off" class="tag-add-input" placeholder="Who" data-key-field="custodianName" data-key-id="${k.id}" value="${escapeHtml(k.custodianName)}" style="max-width:100px;"${KEY_NEEDS_NAME.has(k.custodian) ? '' : ' hidden'}>
-<select data-key-field="forReservationId" data-key-id="${k.id}">
-<option value="">For: general / none</option>
-${upcoming.map((r) => {
-const l = data.airbnbListings.find((x) => x.id === r.listingId);
-return `<option value="${r.id}"${r.id === forChoice ? ' selected' : ''}>For: ${escapeHtml(l ? (l.label || l.prefix || 'Listing') : 'Listing')} — ${escapeHtml(r.guestName || 'Guest')} (${formatAirbnbDate(r.checkin)}&ndash;${formatAirbnbDate(r.checkout)})</option>`;
-}).join('')}
-<option value="${KEY_FOR_OTHER}"${forChoice === KEY_FOR_OTHER ? ' selected' : ''}>For: other (note)</option>
-</select>
-<input type="text" autocomplete="off" class="tag-add-input" placeholder="For (note)" data-key-field="forNote" data-key-id="${k.id}" value="${escapeHtml(k.forNote)}" style="max-width:110px;"${forChoice === KEY_FOR_OTHER ? '' : ' hidden'}>
-<input type="text" autocomplete="off" class="tag-add-input" placeholder="Notes" data-key-field="notes" data-key-id="${k.id}" value="${escapeHtml(k.notes)}" style="max-width:140px;">
+<input type="text" autocomplete="off" class="tag-add-input" placeholder="Who" data-key-field="custodianName" data-key-id="${k.id}" value="${escapeHtml(k.custodianName)}" style="max-width:90px;"${KEY_NEEDS_NAME.has(k.custodian) ? '' : ' hidden'}>`;
+}
+
+// A holding-pen card -- an unassigned key (0 assignments). Draggable onto
+// any reservation's drop zone; the free-text note covers a non-Airbnb
+// custodian ("with the agent for repairs") without forcing that through a
+// reservation picker.
+function keyPoolCardHtml(k) {
+return `<div class="key-pool-card alloc-card" draggable="true" data-key-drag="${k.id}">
+<span class="cal-name">&#128273; ${escapeHtml(k.label || 'Keyring')}</span>
+<div class="cal-event-row">
+${custodianControlHtml(k)}
+<input type="text" autocomplete="off" class="tag-add-input" placeholder="Note (e.g. with agent)" data-key-field="notes" data-key-id="${k.id}" value="${escapeHtml(k.notes)}" style="max-width:140px;">
 </div>
 </div>`;
 }
 
-function bindAirbnbKeys(el) {
+// A key chip shown ON a reservation -- also draggable (onto a DIFFERENT
+// reservation, to earmark the same key there too; planner.js's own placed
+// entries stay draggable the same way, for moving between days).
+function keyChipHtml(assignment) {
+const k = data.airbnbKeys.find((x) => x.id === assignment.keyId);
+if (!k) return '';
+const current = isCurrentAssignment(assignment);
+return `<span class="key-chip" draggable="true" data-key-drag="${k.id}">
+<span class="cal-name">&#128273; ${escapeHtml(k.label || 'Keyring')}</span>
+${current ? custodianControlHtml(k) : '<span class="key-pending" title="Earmarked, but a nearer reservation has this key first">Pending</span>'}
+<span class="tag-x" data-unassign-key="${assignment.id}" title="Remove from this reservation">&times;</span>
+</span>`;
+}
+
+function reservationKeysHtml(r) {
+const chips = assignmentsForReservation(r.id).map(keyChipHtml).join('');
+return `<div class="key-drop-zone alloc-target" data-airbnb-key-drop="${r.id}">${chips}</div>`;
+}
+
+// Shared by both render passes below (a custodian/notes field can live in
+// the pool OR on a reservation chip) -- change handling and drag start are
+// identical either way, only where the card currently renders differs.
+function bindKeyCards(el) {
 el.querySelectorAll('[data-key-field]').forEach((input) => {
 input.addEventListener('change', () => {
 const key = data.airbnbKeys.find((k) => k.id === input.dataset.keyId);
 if (!key) return;
-const field = input.dataset.keyField;
-if (field === 'forReservationId') {
-if (input.value === KEY_FOR_OTHER) { key.forReservationId = ''; }
-else { key.forReservationId = input.value; key.forNote = ''; }
-} else {
-key[field] = input.value;
-}
+key[input.dataset.keyField] = input.value;
 queueSave();
 renderAirbnbKeys();
-// A custody/for change can add or remove a reservation's own key
-// chip (keyChipsForReservationHtml) -- keep both in sync.
+renderAirbnb();
+});
+});
+el.querySelectorAll('[data-key-drag]').forEach((card) => {
+card.addEventListener('dragstart', (e) => {
+e.dataTransfer.setData('text/plain', card.dataset.keyDrag);
+e.dataTransfer.effectAllowed = 'move';
+card.classList.add('dragging');
+});
+card.addEventListener('dragend', () => card.classList.remove('dragging'));
+});
+el.querySelectorAll('[data-unassign-key]').forEach((x) => {
+x.addEventListener('click', () => {
+data.airbnbKeyAssignments = data.airbnbKeyAssignments.filter((a) => a.id !== x.dataset.unassignKey);
+queueSave();
+renderAirbnbKeys();
 renderAirbnb();
 });
 });
 }
 
+// Adds the (key, reservation) assignment if it doesn't already exist --
+// dropping a key that's already on this reservation is a no-op, not a
+// duplicate.
+function assignKeyToReservation(keyId, reservationId) {
+if (!keyId || !reservationId) return;
+const key = data.airbnbKeys.find((k) => k.id === keyId);
+if (!key) return;
+const exists = data.airbnbKeyAssignments.some((a) => a.keyId === keyId && a.reservationId === reservationId);
+if (!exists) {
+data.airbnbKeyAssignments.push(blankAirbnbKeyAssignment({ keyId, reservationId }));
+queueSave();
+renderAirbnbKeys();
+renderAirbnb();
+}
+}
+
 function renderAirbnbKeys() {
 const el = document.getElementById('airbnb-keys-list');
 if (!el) return;
-el.innerHTML = data.airbnbKeys.length
-? data.airbnbKeys.map(keyRowHtml).join('')
-: '<div class="empty">No keyrings yet — add one in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#keys-settings">Settings</span>.</div>';
-bindAirbnbKeys(el);
+const unassigned = data.airbnbKeys.filter((k) => assignmentsForKey(k.id).length === 0);
+el.innerHTML = unassigned.length
+? unassigned.map(keyPoolCardHtml).join('')
+: (data.airbnbKeys.length
+? '<div class="empty">Every keyring is assigned to a reservation below.</div>'
+: '<div class="empty">No keyrings yet — add one in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#keys-settings">Settings</span>.</div>');
+bindKeyCards(el);
 }
 
 function initAirbnbKeys() {

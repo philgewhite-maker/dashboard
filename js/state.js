@@ -32,6 +32,7 @@ airbnbSyncStatus: {}, // listingId -> {ok, syncedAt, added, updated, removed, er
 airbnbCleanerEvents: [], // [{date, name}] -- last scan of "Cleaner - <Name>" events on the push-target calendar, see js/features/airbnb.js
 airbnbCleanerSyncStatus: null, // {ok, syncedAt, error} for the cleaner-event scan above
 airbnbKeys: [], // physical keyrings and their current custody -- see js/features/airbnb.js
+airbnbKeyAssignments: [], // {id, keyId, reservationId} -- a key dragged onto a reservation, see js/features/airbnb.js
 vouchers: [],
 businessIdeas: [],
 subscriptions: [],
@@ -504,16 +505,15 @@ createdAt: new Date().toISOString(),
 }
 
 // A physical keyring's current custody -- NOT a handoff log, just "who has
-// it right now" (confirmed as sufficient -- no history needed). Two
-// separate questions, not one: `custodian` is who's physically holding it
-// (you, concierge, a guest, or a short-term holder like a cleaner/workman),
-// `forReservationId`/`forNote` is who it's ultimately earmarked for, which
-// is often a DIFFERENT person -- a keyring routinely sits with the
-// concierge FOR a guest who hasn't arrived to collect it yet. `listingIds`
-// is an array, not a single id: one keyring's basics (building fob,
-// apartment door) commonly open several listings that are really the same
-// physical room split across Airbnb listings, and some keyrings (an
-// agent's spare) aren't tied to any listing at all -- left empty.
+// it right now" (confirmed as sufficient -- no history needed). `custodian`
+// is a property of the KEY itself -- there's one physical object, in one
+// place, no matter how many future reservations it's earmarked for (see
+// blankAirbnbKeyAssignment below for that separate, one-to-many
+// relationship). `listingIds` is an array, not a single id: one keyring's
+// basics (building fob, apartment door) commonly open several listings that
+// are really the same physical room split across Airbnb listings, and some
+// keyrings (an agent's spare) aren't tied to any listing at all -- left
+// empty.
 const KEY_CUSTODIAN_TYPES = ['me', 'concierge', 'guest', 'cleaner', 'workman', 'other'];
 function blankAirbnbKey(fields = {}) {
 return {
@@ -521,8 +521,25 @@ id: uid(),
 label: '', contents: '',
 listingIds: [],
 custodian: 'me', custodianName: '', // custodianName only meaningful for cleaner/workman/other
-forReservationId: '', forNote: '',
 notes: '',
+createdAt: new Date().toISOString(),
+...fields,
+};
+}
+
+// One (key, reservation) earmarking -- dragged onto a reservation on the
+// Airbnb panel. A key can have several of these at once (the same building
+// fob earmarked for two upcoming bookings); airbnb.js's own logic (not
+// stored here) treats only the EARLIEST-checkin one as "current" (the
+// key's own `custodian` is live/editable there) and any later one as
+// "Pending" (not editable -- there's nothing real to say about custody for
+// a stay that hasn't started). Same one-record-per-placement shape
+// blankPlannerEntry already uses for "this connection, on this day" rather
+// than a growing array field on the key itself.
+function blankAirbnbKeyAssignment(fields = {}) {
+return {
+id: uid(),
+keyId: '', reservationId: '',
 createdAt: new Date().toISOString(),
 ...fields,
 };
@@ -1065,9 +1082,15 @@ data.airbnbKeys.forEach((k) => {
 k.listingIds = k.listingIds.filter((id) => airbnbListingIds.has(id));
 });
 const airbnbReservationIds = new Set(data.airbnbReservations.map((r) => r.id));
-data.airbnbKeys.forEach((k) => {
-if (k.forReservationId && !airbnbReservationIds.has(k.forReservationId)) k.forReservationId = '';
-});
+if (!Array.isArray(data.airbnbKeyAssignments)) data.airbnbKeyAssignments = [];
+data.airbnbKeyAssignments = data.airbnbKeyAssignments.map((a) => ({ ...blankAirbnbKeyAssignment(), ...a, id: a.id || uid() }));
+// An assignment whose key or reservation is since gone has nothing left
+// to be about -- same orphan-drop reasoning the listing/reservation
+// filters above already use. Unlike a keyring's own listingIds (which
+// just drops the dangling reference and keeps the keyring), an
+// assignment IS the dangling reference -- there's nothing else to it.
+const airbnbKeyIds = new Set(data.airbnbKeys.map((k) => k.id));
+data.airbnbKeyAssignments = data.airbnbKeyAssignments.filter((a) => airbnbKeyIds.has(a.keyId) && airbnbReservationIds.has(a.reservationId));
 // Seed the mail search rows from the old fixed shape the first time only.
 // Keyed on the array's absence rather than its emptiness, so deleting every
 // row stays deleted instead of being helpfully repopulated next reload.
@@ -2036,7 +2059,7 @@ MAIL_SEARCH_KINDS, mailSearchLabel,
 TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureBatch, blankPendingImport, blankConnection, blankTelegramThread, blankReadingItem, blankCaptureDraft,
 blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS, LEG_DATE_FIELDS,
 blankPlannerEntry, blankPlannerActivity,
-blankAirbnbListing, blankAirbnbReservation, blankAirbnbKey, KEY_CUSTODIAN_TYPES, blankFinanceAccount,
+blankAirbnbListing, blankAirbnbReservation, blankAirbnbKey, blankAirbnbKeyAssignment, KEY_CUSTODIAN_TYPES, blankFinanceAccount,
 CONTACT_STATUS_LABELS, CONTACT_MATCH_MIN_STAGE,
 DEFAULT_RATING_CATEGORIES, slugifyField, DEFAULT_RECIPE_RATING_CATEGORIES,
 FLAG_FIELD_DEFS, DEFAULT_FLAG_RULES, computeFlags, valueColorForField, stripSharedSuffix, suggestedAction, suggestedQuestions, isTravelPaused, ACTIONS, distanceMiles, heightCm,

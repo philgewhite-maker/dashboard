@@ -2237,6 +2237,27 @@ padding:5px 7px;
 background:var(--card);
 color:var(--ink);
 }
+
+/* Keys (Airbnb panel, Overview tab) -- a compact drag-and-drop "holding
+   pen" of unassigned keyrings, dragged onto whichever reservation they
+   belong to -- built on the same .alloc-card/.alloc-target base
+   .planner-pool-card above already reuses, not a new mechanism. Confirmed
+   live: a full .cal-row per keyring (the previous version) didn't scale
+   past two or three, hence the smaller, side-by-side card here instead. */
+#airbnb-keys-list{display:flex;flex-wrap:wrap;gap:8px;}
+.key-pool-card{padding:6px 10px;min-width:160px;}
+.key-pool-card .cal-name{font-size:13px;}
+.key-drop-zone{display:flex;flex-wrap:wrap;gap:6px;min-height:24px;border-radius:7px;padding:2px;}
+.key-drop-zone.over{background:var(--teal-bg);outline:1px dashed var(--teal);}
+.key-chip{
+display:inline-flex;align-items:center;flex-wrap:wrap;gap:6px;
+padding:4px 8px;border-radius:7px;
+background:var(--card-alt,var(--card));
+cursor:grab;
+}
+.key-chip.dragging{opacity:.45;}
+.key-chip .cal-name{font-size:12px;font-weight:600;}
+.key-pending{font-size:11px;font-style:italic;color:var(--muted);}
 .planner-grid{
 display:grid;
 grid-template-columns:repeat(auto-fill, minmax(140px, 1fr));
