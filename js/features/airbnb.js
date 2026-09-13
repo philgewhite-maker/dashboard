@@ -483,6 +483,7 @@ return { filled: 0, error: err.message || String(err) };
 }
 
 let filled = 0;
+let romanizeFailed = 0;
 for (const m of sections[0]?.messages || []) {
 const subjectMatch = GUEST_NAME_SUBJECT_RE.exec(String(m.subject || '').trim());
 if (!subjectMatch) continue;
@@ -498,7 +499,16 @@ try {
 const { romanizeName } = await import('../ai.js');
 name = (await romanizeName(rawName)) || rawName;
 } catch (err) {
+// Falls back to the raw script rather than leaving the reservation
+// unfilled -- still findable, still better than nothing -- but this
+// used to fail SILENTLY (console.error only), so "why is this
+// showing the raw name" had no visible answer. Most likely cause:
+// the Anthropic key lives in device-LOCAL settings (never synced,
+// state.js's own LOCAL_SETTINGS_KEY comment), so a device that ran
+// Sync without ever having a key entered on IT specifically hits
+// MissingKeyError here even though another device has one set.
 console.error('Guest-name romanization failed, using the raw name:', err);
+romanizeFailed++;
 }
 }
 reservation.guestName = name;
@@ -508,7 +518,7 @@ reservation.notes = reservation.notes ? `${reservation.notes} · Booking name: $
 filled++;
 }
 if (filled) queueSave();
-return { filled };
+return { filled, romanizeFailed };
 }
 
 // ---- Google Calendar push -------------------------------------------------
@@ -626,9 +636,10 @@ const { renderPlanner } = await import('./planner.js');
 renderPlanner();
 const failed = data.airbnbListings.filter((l) => data.airbnbSyncStatus[l.id] && !data.airbnbSyncStatus[l.id].ok);
 if (!failed.length) {
-status.textContent = guestResult.filled
-? `Synced just now — filled in ${guestResult.filled} guest name${guestResult.filled === 1 ? '' : 's'} from email.`
-: 'Synced just now.';
+const guestNote = guestResult.filled
+? ` Filled in ${guestResult.filled} guest name${guestResult.filled === 1 ? '' : 's'} from email${guestResult.romanizeFailed ? ` (${guestResult.romanizeFailed} left in the original script — add an Anthropic key on THIS device in Settings to romanize ${guestResult.romanizeFailed === 1 ? 'it' : 'them'})` : ''}.`
+: '';
+status.textContent = `Synced just now.${guestNote}`;
 } else {
 // The actual error, right here -- not just a count pointing at devtools
 // most people never open. Every failed listing likely has the SAME
