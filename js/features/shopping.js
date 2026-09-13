@@ -57,43 +57,61 @@ return days === 0 ? 'checked today' : days === 1 ? 'checked yesterday' : `checke
 // gets the real page) -- so an Amazon result routinely has no price, no
 // matter how the AI search prompt is worded. The price-scrape
 // bookmarklet (see Settings) is the workaround: it runs *inside* a real
-// Amazon tab, so it isn't subject to that block at all, and hands the
-// price back here via applyPriceScrape() below.
+// Amazon tab, so it isn't subject to that block at all.
 //
-// Originally passed the task id via a "#dashTask=..." URL fragment --
-// confirmed live as broken: Amazon's own page JS rewrites the address bar
-// via the History API about a second after load (observed landing on
-// "...?th=1", fragment gone), which happens well before anyone's had time
-// to click the bookmarklet. window.name survives that rewrite because it's
-// a same-document History API call, not a real navigation -- window.name
-// lives on the browsing context itself, untouched by anything short of an
-// actual cross-origin navigation. So the task id travels there instead,
-// set the moment the tab is opened (bindAmazonLinks below), read by the
-// bookmarklet regardless of whatever Amazon's own JS does to the URL
-// afterward.
+// Two earlier ways of handing the scraped price back to this specific
+// task both failed in the wild, for two different reasons -- worth
+// recording so a third attempt doesn't repeat either mistake:
+// 1. A "#dashTask=<id>" URL fragment on the Amazon link: Amazon's own
+//    page JS rewrites the address bar via the History API about a
+//    second after load (observed landing on "...?th=1"), dropping the
+//    fragment before anyone's had time to click the bookmarklet.
+// 2. window.name, set on the popup the moment it's opened (in theory
+//    immune to #1, since a same-document History API call shouldn't
+//    touch it): confirmed live as unreliable too -- this app is an
+//    installed PWA, and an installed PWA navigating to an out-of-scope
+//    origin routinely hands off to a genuinely separate browser
+//    window/process rather than a same-context popup, which severs
+//    window.name right along with it.
+// Both depended on some property of the *browsing context* surviving
+// Amazon's own page and the platform's own navigation handling -- which
+// this app doesn't control and can't rely on. Clipboard sidesteps that
+// entirely: the bookmarklet copies the scraped price, "Paste price"
+// below reads it back on THIS specific result row. No shared browsing
+// context required at all, so nothing about how the Amazon tab/window
+// got opened matters.
 function isAmazonUrl(url) {
 return /amazon\./i.test(url || '');
 }
 
-// win.opener is nulled right after use -- same reasoning a plain
-// rel="noopener" would cover for a normal <a target="_blank">, just done
-// manually here because the window.name handoff needs the open() return
-// value (which "noopener" as a window-features flag would suppress).
-function bindAmazonLinks(el) {
-el.querySelectorAll('a[data-amazon-task]').forEach((a) => {
-a.addEventListener('click', (e) => {
-// Only a plain left-click is redirected through window.open -- a
-// modified click (ctrl/cmd/shift/middle-button "open in background
-// tab") is left to the browser's native handling, so that path still
-// works, it just won't carry the task id.
-if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-e.preventDefault();
-const win = window.open(a.href, '_blank');
-if (!win) return;
-try { win.name = `dashTask:${a.dataset.amazonTask}`; } catch (err) { /* cross-origin timing, ignore */ }
-try { win.opener = null; } catch (err) { /* ignore */ }
-});
-});
+const PASTE_PRICE_PREFIX = 'DASHPRICE:';
+
+async function pastePrice(taskId, idx) {
+const t = data.tasks.find((x) => x.id === taskId);
+const r = t && t.priceCheck && t.priceCheck.results[idx];
+if (!r) return;
+let text;
+try { text = await navigator.clipboard.readText(); } catch (err) {
+alert('Could not read the clipboard — your browser may be blocking clipboard access for this page. Copy the bookmarklet\'s result manually and try again.');
+return;
+}
+if (!text || !text.startsWith(PASTE_PRICE_PREFIX)) {
+alert('Clipboard doesn’t have a scraped price on it — run the bookmarklet on the Amazon page first, then come back and click Paste price.');
+return;
+}
+let payload;
+try { payload = JSON.parse(text.slice(PASTE_PRICE_PREFIX.length)); } catch (err) {
+alert('Could not read the copied price — try running the bookmarklet again.');
+return;
+}
+if (payload.price) r.price = payload.price;
+if (payload.subscribeSave) r.subscribeSave = payload.subscribeSave;
+if (payload.url) r.url = payload.url;
+if (payload.name) r.name = payload.name;
+t.priceCheck.checkedAt = new Date().toISOString();
+queueSave();
+render();
+banner(`Amazon price updated for "${t.title.slice(0, 60)}": ${payload.price || r.price}`);
 }
 
 function searchResultsHtml(t) {
@@ -105,14 +123,14 @@ const { results, recommendation, checkedAt } = t.priceCheck;
 if (!results.length) return '<div class="shop-search-results empty">No results found.</div>';
 return `<div class="shop-search-results">
 ${recommendation ? `<div class="shop-recommendation">${escapeHtml(recommendation)}</div>` : ''}
-${results.map((r) => `
-<a class="shop-search-hit" href="${escapeHtml(affiliateLink(r.url))}" target="_blank" rel="noopener noreferrer"${isAmazonUrl(r.url) ? ` data-amazon-task="${escapeHtml(t.id)}"` : ''}>
+${results.map((r, idx) => `
+<a class="shop-search-hit" href="${escapeHtml(affiliateLink(r.url))}" target="_blank" rel="noopener noreferrer">
 <span class="shop-hit-retailer">${escapeHtml(r.retailer || 'Link')}</span>
 <span class="shop-hit-name">${escapeHtml(r.name || t.title)}</span>
 ${r.price ? `<span class="shop-hit-price">${escapeHtml(r.price)}</span>` : ''}
 ${r.offer ? `<span class="shop-hit-offer">${escapeHtml(r.offer)}</span>` : ''}
 ${r.subscribeSave ? `<span class="shop-hit-offer">${escapeHtml(r.subscribeSave)}</span>` : ''}
-</a>`).join('')}
+</a>${isAmazonUrl(r.url) ? `<button class="sync-btn sm" type="button" data-shop-paste="${escapeHtml(t.id)}:${idx}" title="Paste the price copied by the Amazon bookmarklet">Paste price</button>` : ''}`).join('')}
 <div class="shop-also">${escapeHtml(checkedAgoLabel(checkedAt))}</div>
 </div>`;
 }
@@ -168,7 +186,12 @@ revealTask(span.dataset.shopOpen);
 el.querySelectorAll('[data-shop-search]').forEach((btn) => {
 btn.addEventListener('click', () => runSearch(btn.dataset.shopSearch));
 });
-bindAmazonLinks(el);
+el.querySelectorAll('[data-shop-paste]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const [taskId, idx] = btn.dataset.shopPaste.split(':');
+pastePrice(taskId, Number(idx));
+});
+});
 }
 
 async function runSearch(taskId) {
@@ -208,48 +231,7 @@ console.error('Auto price-check failed, item stays without one until Search pric
 }
 }
 
-// The other half of the price-scrape loop (see bindAmazonLinks above): the
-// bookmarklet reads a real price off amazon.co.uk in the user's own
-// browser, then hands it back here via query params on a redirect -- not
-// a fetch, since this is a static page with no backend to receive a POST.
-// Checked on every load, same reasoning as sharetarget.js's own
-// initShareTarget: the query string is easily lost (a restored session,
-// a bookmark), and stranding the scraped price with no way to retry it
-// would be worse than a redundant no-op check on every other load.
-function applyPriceScrape() {
-const params = new URLSearchParams(location.search);
-const taskId = params.get('priceScrapeTaskId');
-if (!taskId) return;
-// Strip regardless of what happens below -- a stale or tampered id
-// should never keep reapplying itself on every subsequent reload.
-history.replaceState(null, '', location.pathname + location.hash);
-const t = data.tasks.find((x) => x.id === taskId);
-const price = (params.get('price') || '').trim();
-if (!t || !price) return;
-const subscribeSave = (params.get('subscribeSave') || '').trim();
-const name = (params.get('name') || '').trim();
-const url = (params.get('url') || '').trim();
-if (!t.priceCheck) t.priceCheck = { checkedAt: '', results: [], recommendation: '' };
-let r = t.priceCheck.results.find((x) => /amazon/i.test(x.retailer || '') || /amazon\./i.test(x.url || ''));
-if (!r) {
-r = { retailer: 'Amazon', name: name || t.title, url: url || '', offer: '', subscribeSave: '', price: '' };
-t.priceCheck.results.push(r);
-}
-r.price = price;
-if (subscribeSave) r.subscribeSave = subscribeSave;
-if (url) r.url = url;
-if (name) r.name = name;
-t.priceCheck.checkedAt = new Date().toISOString();
-queueSave();
-render();
-banner(`Amazon price updated for "${t.title.slice(0, 60)}": ${price}`, async () => {
-const { switchTab } = await import('../tabs.js');
-switchTab('shopping');
-});
-}
-
 function initShopping() {
-applyPriceScrape();
 const select = document.getElementById('shop-context-input');
 const input = document.getElementById('shop-capture-input');
 const doneToggle = document.getElementById('shop-show-done-toggle');
