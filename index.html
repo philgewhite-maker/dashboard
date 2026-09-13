@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v316</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v317</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -319,9 +319,11 @@
 <input type="text" autocomplete="off" id="shop-capture-input" placeholder="What do you need?">
 <select id="shop-context-input" class="mini"></select>
 <button class="add-btn" id="shop-capture-btn" type="button">Add</button>
+<button class="add-btn" id="shop-capture-mic-btn" type="button" title="Record a voice instruction">&#127908;</button>
 </div>
+<div class="sync-status" id="shop-capture-status"></div>
 <div class="settings-note" style="margin:8px 0 0;">
-This is the same task system as the Tasks tab &mdash; a shopping item can be part of a bigger project too (tag it both DIY and Supermarket for "buy paint"), and opening it from a list below takes you to the full task, where it can be broken into subtasks, dated, or given a photo.
+This is the same task system as the Tasks tab &mdash; a shopping item can be part of a bigger project too (tag it both DIY and Supermarket for "buy paint"), and opening it from a list below takes you to the full task, where it can be broken into subtasks, dated, or given a photo. A Supermarket item also gets priced automatically at capture &mdash; Tesco, Amazon, and a third relevant retailer &mdash; whether typed here, spoken, shared as a link, or a photo marked S.
 </div>
 </section>
 
@@ -334,7 +336,7 @@ This is the same task system as the Tasks tab &mdash; a shopping item can be par
 </div>
 <div id="shopping-lists"></div>
 <div class="settings-note" style="margin:12px 0 0;">
-Not built: comparing retailer prices or adding to a basket in two clicks. That would need either a retailer API (rarely available to a personal script) or driving a real browser session against each site &mdash; neither fits a page with no backend of its own.
+Prices and offers come from an AI web search of each retailer, not a live basket &mdash; adding to a basket stays a manual click-through (the direct product link), since that needs an authenticated session against each retailer's own site.
 </div>
 </section>
 

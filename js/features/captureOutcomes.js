@@ -13,8 +13,13 @@
 // error" contract (see sharetarget.js), so an outcome never needs its
 // own bespoke failure path. `ctx` is the one normalised shape covering
 // both a link capture and an image capture: {title, notes, url,
-// photoIds, source}. An outcome only reads the fields it needs (recipe
-// only looks at `url`; task/reading use most of the rest).
+// photoIds, source, file}. An outcome only reads the fields it needs
+// (recipe only looks at `url`; task/reading use most of the rest).
+// `file` is optional and only ever set by captureinbox.js's own
+// image-marker call (the raw File is still in scope there, before it's
+// reduced to a stored photoId) -- for an outcome like `supermarket`
+// that may need to run AI vision on the actual bytes, not just carry a
+// reference to them.
 //
 // Every outcome here is `commitMode: 'direct'` -- it writes a real
 // record immediately, same as captureTask() already does, because Task/
@@ -114,6 +119,58 @@ due: dateStrAdd(todayStr(), 7),
 contexts: ['Super Like'],
 source: ctx.source || null,
 });
+},
+},
+// The "I need sudafed / pledge / method floor cleaner" capture: lands
+// on the Supermarket list (not a new record type -- same "a shopping
+// item is a task like any other" reasoning shopping.js's own top
+// comment already establishes), then automatically runs a price check
+// so the next time the app's opened there's already a link to buy it
+// from the right place -- see shopping.js's runAutoPriceCheck. Named
+// `supermarket` specifically, not the vaguer `shopping`: the other
+// three SHOPPING_CONTEXTS (Pharmacy, Black Friday, Aspirational
+// purchases) are a genuinely different "note it and reconsider in
+// months" pattern with no price-comparison urgency -- out of scope for
+// this quick-capture path on purpose.
+supermarket: {
+label: 'Supermarket item',
+commitMode: 'direct',
+successBanner: () => `Added to your Supermarket list — checking prices…`,
+run: async (ctx) => {
+const { captureTask } = await import('./tasks.js');
+let title = (ctx.title || '').trim();
+// Only the image-marker path ever sets ctx.file -- and whatever
+// title it carries there is always just a filename/generic fallback
+// (captureinbox.js has no real product name to offer), never a real
+// one, so ctx.file's presence alone is the signal to identify the
+// actual product. Text/voice/URL captures never set ctx.file and
+// skip this entirely -- their title is already the real thing.
+if (ctx.file) {
+try {
+const { identifyProduct } = await import('../ai.js');
+const identified = await identifyProduct(ctx.file);
+if (identified) title = identified;
+} catch (err) {
+console.error('Product identification failed, falling back to the filename:', err);
+}
+}
+const task = captureTask({
+title: title || ctx.url || 'Supermarket item',
+notes: ctx.notes || '',
+link: ctx.url || '',
+photoIds: ctx.photoIds || [],
+contexts: ['Supermarket'],
+source: ctx.source || null,
+});
+// Best-effort, never blocks the capture itself -- the task exists
+// either way; this is enrichment on top, same contract every other
+// auto-routed outcome above already follows.
+try {
+const { runAutoPriceCheck } = await import('./shopping.js');
+await runAutoPriceCheck(task);
+} catch (err) {
+console.error('Auto price-check failed, item stays without one until Search prices is used manually:', err);
+}
 },
 },
 };

@@ -321,7 +321,7 @@ const { matchCaptureRule, CAPTURE_OUTCOMES } = await import('./captureOutcomes.j
 const rule = matchCaptureRule(data, 'imageMarker', letter);
 if (rule) {
 const outcome = CAPTURE_OUTCOMES[rule.outcome];
-await outcome.run({ title: file.name || `Marked ${letter}`, notes: '', url: '', photoIds: [item.id], source: { kind: 'captureMarker', label: `Photo marked ${letter}`, url: '' } });
+await outcome.run({ title: file.name || `Marked ${letter}`, notes: '', url: '', photoIds: [item.id], file, source: { kind: 'captureMarker', label: `Photo marked ${letter}`, url: '' } });
 markerImports.push(`${file.name || 'that image'}: marked ${letter} — sent to ${outcome.label}.`);
 await deleteItemBytes(item);
 batch.items = batch.items.filter((it) => it.id !== item.id);

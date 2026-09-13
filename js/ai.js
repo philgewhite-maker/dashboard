@@ -1149,23 +1149,69 @@ reason: (data && data.reason) || '',
 // undercounts this purpose specifically.
 const SHOPPING_SEARCH_MODEL = 'claude-haiku-4-5-20251001';
 const SHOPPING_SEARCH_MAX_TOKENS = 2000;
-function shoppingSearchPrompt(item) {
-return `Search for where to buy "${item}" online in the UK, from a couple of well-known retailers that suit this item (e.g. a supermarket, Amazon, a relevant specialist). For each result, note the retailer, the exact product name, the price if shown, and the direct product page URL. `
-+ 'After searching, respond with ONLY a JSON array, no other text, no markdown fences, in this exact shape: '
-+ '[{"retailer":"","name":"","price":"","url":""}]. Only include results with a real product URL you actually found via search — never invent one. Best matches first, at most 6 results. If nothing useful turns up, return [].';
+// Anchored on the two retailers actually being weighed against each other
+// (a standing ~weekly Tesco order vs. Amazon's no-minimum one-off), plus one
+// more the model judges relevant -- a fixed third choice would suit some
+// items (a pharmacy item) and not others (a cleaning product), so this stays
+// as flexible as the search's own original "well-known retailers that suit
+// this item" framing, just anchored on the two fixed ones. `link`, when
+// given, is the exact page the item was captured from (any retailer, not
+// just Tesco/Amazon) -- fetched directly rather than re-found by search, so
+// a price from a shared link is never lost just because it's from
+// somewhere else.
+function shoppingSearchPrompt(item, link) {
+return `Find where to buy "${item}" online in the UK. Always check tesco.com and amazon.co.uk specifically, plus one more well-known retailer that suits this item (e.g. a pharmacy for a medicine, a hardware/homeware site for a cleaning product). `
++ (link ? `Also check the exact price at this page, whichever retailer it's from: ${link}\n` : '')
++ 'For each result, note the retailer, the exact product name, the price if shown, the direct product page URL, and: '
++ 'for Tesco, any multibuy or Clubcard offer shown ("offer", e.g. "3 for 2", "Clubcard price £2.50" — blank if none); '
++ 'for Amazon, the Subscribe & Save price/discount if the page shows one ("subscribeSave", e.g. "£4.49 with 15% Subscribe & Save" — blank if not offered or not shown). '
++ `Then write one short, honest sentence of advice ("recommendation") comparing them. Note: the user does a standing Tesco order roughly weekly with a ~£50 minimum — that minimum is NOT a reason to steer away from Tesco for one small item, since it just rides along in an order that's happening anyway; only mention it as neutral context ("this can go in your next Tesco order"), never as a downside. Lead the recommendation with actual price and any offers found; flag Subscribe & Save when this reads as something bought repeatedly (a cleaning product, a toiletry), not for a clear one-off. `
++ 'Respond with ONLY a JSON object, no other text, no markdown fences, in this exact shape: '
++ '{"results":[{"retailer":"","name":"","price":"","url":"","offer":"","subscribeSave":""}],"recommendation":""}. '
++ 'Only include results with a real product URL you actually found (via search, or the given page) — never invent one. Best matches first, at most 6 results. If nothing useful turns up, return {"results":[],"recommendation":""}.';
 }
-async function searchShoppingItem(item) {
+// Best-effort leading-price parse ("£4.99", "4.99", "£12" -> 4.99/12) for a
+// presentation-only sort — not a recommendation decision, that stays the
+// model's own sentence above. A price that doesn't parse sinks to the end
+// rather than being dropped, so an unparsed-but-real result still shows.
+function parsePriceForSort(price) {
+const m = /([\d]+(?:[.,]\d+)?)/.exec(String(price || ''));
+return m ? parseFloat(m[1].replace(',', '.')) : Infinity;
+}
+async function searchShoppingItem(item, link) {
+const tools = [{ type: 'web_search_20260209', name: 'web_search', max_uses: 3 }];
+if (link) tools.push({ type: 'web_fetch_20260209', name: 'web_fetch', max_uses: 1 });
 const { data: raw } = await callAnthropic(
-[{ type: 'text', text: shoppingSearchPrompt(item) }],
+[{ type: 'text', text: shoppingSearchPrompt(item, link) }],
 SHOPPING_SEARCH_MAX_TOKENS,
 SHOPPING_SEARCH_MODEL,
 'Shopping search',
-[{ type: 'web_search_20260209', name: 'web_search', max_uses: 3 }],
+tools,
 );
-const results = Array.isArray(raw) ? raw : [];
-return results.filter((r) => r && r.url).slice(0, 6).map((r) => ({
+const results = Array.isArray(raw && raw.results) ? raw.results : [];
+const sorted = results.filter((r) => r && r.url).slice(0, 6).map((r) => ({
 retailer: String(r.retailer || ''), name: String(r.name || ''), price: String(r.price || ''), url: String(r.url || ''),
-}));
+offer: String(r.offer || ''), subscribeSave: String(r.subscribeSave || ''),
+})).sort((a, b) => parsePriceForSort(a.price) - parsePriceForSort(b.price));
+return { results: sorted, recommendation: String((raw && raw.recommendation) || '') };
+}
+
+// ---- Product identification from a photo ----
+//
+// Only needed for the image-marker capture path (captureOutcomes.js's
+// 'supermarket' outcome) -- a marker-triggered capture has no real product
+// name yet, just a filename, and searching for that wouldn't find anything.
+// Text/voice/URL captures already have a real title and skip this entirely.
+// Cheap/fast tier, same as quickScanScreenshot's own reasoning: reading a
+// product off its packaging is straightforward recognition, not a task that
+// benefits from a bigger model.
+const IDENTIFY_PRODUCT_MODEL = 'claude-haiku-4-5-20251001';
+const IDENTIFY_PRODUCT_MAX_TOKENS = 200;
+async function identifyProduct(file) {
+const base64 = await fileToBase64(file);
+const prompt = 'This photo shows a household, grocery, or pharmacy product (or its packaging/label, possibly empty -- being photographed as a reminder to buy more). Identify the exact product name and brand as you\'d search for it online, e.g. "Method Floor Cleaner, Lavender" or "Sudafed Blocked Nose 12 tablets". Reply with ONLY a JSON object, no other text: {"name":""} -- empty string if you can\'t make out a specific product.';
+const { data } = await callVision(base64, file.type, prompt, IDENTIFY_PRODUCT_MAX_TOKENS, IDENTIFY_PRODUCT_MODEL, 'low');
+return String((data && data.name) || '').trim();
 }
 
 // ---- Translation ----
@@ -1560,7 +1606,7 @@ return { country: String((data && data.country) || '').trim() };
 export {
 MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot, quickScanScreenshot, scanForCaptureMarker,
 callTextJson, DEFAULT_MODEL, summarizeUsage, currentMonthKey, compareFaces,
-extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShoppingItem, translateText, romanizeName, parseCaptureIntent,
+extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShoppingItem, identifyProduct, translateText, romanizeName, parseCaptureIntent,
 identifyCountry, extractWellnessScreenshot,
 extractTripScreenshot, extractTripLegFromEmail,
 parseIngredients, assessIngredient, ALLERGEN_LIST, DIETARY_FLAGS, FODMAP_COMPONENTS, FODMAP_LEVELS,

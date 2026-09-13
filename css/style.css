@@ -2427,6 +2427,8 @@ white-space:nowrap;
 .shop-hit-retailer{font-weight:600;flex:0 0 auto;}
 .shop-hit-name{flex:1 1 auto;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .shop-hit-price{flex:0 0 auto;font-weight:600;}
+.shop-hit-offer{flex:0 0 auto;font-size:11px;padding:1px 6px;border-radius:5px;background:var(--sage-bg);color:var(--sage);}
+.shop-recommendation{font-size:12px;padding:4px 8px;color:var(--ink);font-style:italic;}
 .task-contexts{display:inline-flex;gap:4px;align-items:center;flex-wrap:wrap;}
 .task-context{
 display:inline-flex;

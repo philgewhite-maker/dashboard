@@ -105,6 +105,8 @@ shareUrlRules: [
 { id: 'seed-nytcooking', host: 'cooking.nytimes.com', path: '', action: 'recipe' },
 { id: 'seed-delicious', host: 'deliciousmagazine.co.uk', path: '', action: 'recipe' },
 { id: 'seed-tinder-share', host: 'go.tinder.com', path: '', action: 'superlike' },
+{ id: 'seed-tesco', host: 'tesco.com', path: '', action: 'supermarket' },
+{ id: 'seed-amazon', host: 'amazon.co.uk', path: '', action: 'supermarket' },
 ],
 // A second, explicit-intent way into the same outcomes shareUrlRules
 // routes to (js/features/captureOutcomes.js's CAPTURE_OUTCOMES) --
@@ -119,8 +121,14 @@ shareUrlRules: [
 captureRules: [
 { id: 'seed-marker-task', inputMethod: 'imageMarker', trigger: 'T', outcome: 'task' },
 { id: 'seed-marker-reading', inputMethod: 'imageMarker', trigger: 'R', outcome: 'reading' },
+{ id: 'seed-marker-supermarket', inputMethod: 'imageMarker', trigger: 'S', outcome: 'supermarket' },
 { id: 'seed-suffix-task', inputMethod: 'urlSuffix', trigger: 'T', outcome: 'task' },
 { id: 'seed-suffix-reading', inputMethod: 'urlSuffix', trigger: 'R', outcome: 'reading' },
+// Explicit-intent catch-all for a shared product link from anywhere
+// OTHER than tesco.com/amazon.co.uk (those two route automatically via
+// shareUrlRules above) -- domain rules can't enumerate every retailer,
+// so "#S" is how any of them reaches the Supermarket list.
+{ id: 'seed-suffix-supermarket', inputMethod: 'urlSuffix', trigger: 'S', outcome: 'supermarket' },
 ],
 };
 
@@ -244,6 +252,13 @@ attachments: [],
 source: null, // {kind:'mail'|'calendar'|'photo', label, url}
 createdAt: new Date().toISOString(),
 completedAt: '',
+// A Supermarket-context item's own price comparison (see ai.js's
+// searchShoppingItem, run automatically on capture -- shopping.js's
+// runAutoPriceCheck) -- null until checked, then
+// {checkedAt, results:[{retailer,name,price,url,offer,subscribeSave}], recommendation}.
+// Generic on Task (not a separate shopping-item shape) since a shopping
+// item IS a task, same reasoning every other field here already follows.
+priceCheck: null,
 ...fields,
 };
 }
@@ -1082,6 +1097,22 @@ maxEvents: Math.max(0, Number(s.maxEvents) || 0),
 // discarding ones already customised. The pre-per-row keys are deliberately
 // left in place rather than deleted — they're what the seeding above reads.
 data.prefs = { ...DEFAULT_PREFS, ...(data.prefs || {}) };
+// The spread above is shallow -- an ALREADY-PRESENT array key (shareUrlRules/
+// captureRules have both existed since v300/v310) keeps its own contents
+// wholesale, never gaining new entries from a later DEFAULT_PREFS. Confirmed
+// as a real gap live: the superlike Tinder rule and the Supermarket rules
+// added in later versions were silently never reaching a device that
+// already had synced prefs, despite shipping as seeded defaults. Same "add
+// what's missing by id, never touch what's already there" reconciliation
+// SHOPPING_CONTEXTS already does for taskContexts below -- a seed row
+// deliberately deleted will reappear next load, an accepted tradeoff
+// against a shipped feature silently not working on existing data.
+['shareUrlRules', 'captureRules'].forEach((key) => {
+const existingIds = new Set(data.prefs[key].map((r) => r.id));
+DEFAULT_PREFS[key].forEach((seed) => {
+if (!existingIds.has(seed.id)) data.prefs[key].push({ ...seed });
+});
+});
 // Calendar status used to hold a single {title, date}. Reshape those into
 // the events array the multi-event view expects, so previously synced
 // calendars keep showing their event instead of going blank until re-synced.

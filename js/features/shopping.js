@@ -10,15 +10,25 @@
 // search finds retailers, prices and product links for an item. Adding to a
 // basket stays a manual click-through: that needs an authenticated session
 // against each retailer's site, which doesn't fit a client-only static page.
+//
+// For a Supermarket-context item specifically, the price check now runs
+// AUTOMATICALLY the moment the item's captured (see runAutoPriceCheck,
+// called from every capture path — this file's own text box, and
+// captureOutcomes.js's `supermarket` outcome for voice/image/URL capture) —
+// the point being "share it, and next time you open the app there's already
+// a link to buy it from the right place," not a manual step. The result is
+// persisted on the task itself (t.priceCheck), dated, with a Refresh button
+// to re-run it later — not the old in-memory, un-dated Map this used to be.
 import { data, queueSave, SHOPPING_CONTEXTS } from '../state.js';
-import { escapeHtml, daysUntil } from '../utils.js';
+import { escapeHtml, daysUntil, daysSince } from '../utils.js';
 import { captureTask, revealTask } from './tasks.js';
 import { MissingKeyError, searchShoppingItem } from '../ai.js';
+import { initMicCapture } from './voicecapture.js';
 
 let showDone = false;
-// Search results are a working set for the current screen, not app data —
-// re-searching costs nothing structurally, so nothing here is persisted.
-const searchState = new Map(); // taskId -> { status: 'loading'|'done'|'error', results, message }
+// Only transient loading/error UI state now — a finished search writes to
+// the task's own t.priceCheck (persisted, dated) instead of living here.
+const searchState = new Map(); // taskId -> { status: 'loading'|'error', message }
 
 function dueBadge(t) {
 if (!t.due) return '';
@@ -36,18 +46,30 @@ const others = (t.contexts || []).filter((c) => c !== ctx);
 return others.length ? ` <span class="shop-also">also: ${escapeHtml(others.join(', '))}</span>` : '';
 }
 
+function checkedAgoLabel(iso) {
+const days = daysSince(String(iso || '').slice(0, 10));
+return days === 0 ? 'checked today' : days === 1 ? 'checked yesterday' : `checked ${days}d ago`;
+}
+
 function searchResultsHtml(t) {
 const s = searchState.get(t.id);
-if (!s) return '';
-if (s.status === 'loading') return '<div class="shop-search-results loading">Searching…</div>';
-if (s.status === 'error') return `<div class="shop-search-results error">${escapeHtml(s.message)}</div>`;
-if (s.results.length === 0) return '<div class="shop-search-results empty">No results found.</div>';
-return `<div class="shop-search-results">${s.results.map((r) => `
+if (s && s.status === 'loading') return '<div class="shop-search-results loading">Searching…</div>';
+if (s && s.status === 'error') return `<div class="shop-search-results error">${escapeHtml(s.message)}</div>`;
+if (!t.priceCheck) return '';
+const { results, recommendation, checkedAt } = t.priceCheck;
+if (!results.length) return '<div class="shop-search-results empty">No results found.</div>';
+return `<div class="shop-search-results">
+${recommendation ? `<div class="shop-recommendation">${escapeHtml(recommendation)}</div>` : ''}
+${results.map((r) => `
 <a class="shop-search-hit" href="${escapeHtml(r.url)}" target="_blank" rel="noopener noreferrer">
 <span class="shop-hit-retailer">${escapeHtml(r.retailer || 'Link')}</span>
 <span class="shop-hit-name">${escapeHtml(r.name || t.title)}</span>
 ${r.price ? `<span class="shop-hit-price">${escapeHtml(r.price)}</span>` : ''}
-</a>`).join('')}</div>`;
+${r.offer ? `<span class="shop-hit-offer">${escapeHtml(r.offer)}</span>` : ''}
+${r.subscribeSave ? `<span class="shop-hit-offer">${escapeHtml(r.subscribeSave)}</span>` : ''}
+</a>`).join('')}
+<div class="shop-also">${escapeHtml(checkedAgoLabel(checkedAt))}</div>
+</div>`;
 }
 
 function rowHtml(t, ctx) {
@@ -55,7 +77,7 @@ return `<div class="shop-row${t.bucket === 'done' ? ' done' : ''}">
 <input type="checkbox" class="task-check" data-shop-done="${t.id}" ${t.bucket === 'done' ? 'checked' : ''}>
 <span class="shop-title" data-shop-open="${t.id}">${escapeHtml(t.title || '(untitled)')}</span>
 ${dueBadge(t)}${otherContextsNote(t, ctx)}
-${t.bucket === 'done' ? '' : `<button class="sync-btn sm shop-search-btn" type="button" data-shop-search="${t.id}">Search prices</button>`}
+${t.bucket === 'done' ? '' : `<button class="sync-btn sm shop-search-btn" type="button" data-shop-search="${t.id}">${t.priceCheck ? 'Refresh' : 'Search prices'}</button>`}
 ${searchResultsHtml(t)}
 </div>`;
 }
@@ -109,8 +131,10 @@ if (!t) return;
 searchState.set(taskId, { status: 'loading' });
 render();
 try {
-const results = await searchShoppingItem(t.title);
-searchState.set(taskId, { status: 'done', results });
+const { results, recommendation } = await searchShoppingItem(t.title, t.link);
+t.priceCheck = { checkedAt: new Date().toISOString(), results, recommendation };
+searchState.delete(taskId);
+queueSave();
 } catch (err) {
 const message = err instanceof MissingKeyError ? 'Add an Anthropic API key in Settings first.' : (err.message || String(err));
 searchState.set(taskId, { status: 'error', message });
@@ -118,10 +142,31 @@ searchState.set(taskId, { status: 'error', message });
 render();
 }
 
+// The one place an automatic (not manually-clicked) price check runs —
+// called right after capture from BOTH this file's own text box below and
+// captureOutcomes.js's `supermarket` outcome (voice/image/URL), so every
+// entry point gets the identical "captured, and already priced" result.
+// Best-effort: a failure here is logged, not surfaced — the task is already
+// captured either way, this is enrichment on top, and Search prices/Refresh
+// is still sitting right there for a manual retry.
+async function runAutoPriceCheck(task) {
+try {
+const { results, recommendation } = await searchShoppingItem(task.title, task.link);
+task.priceCheck = { checkedAt: new Date().toISOString(), results, recommendation };
+queueSave();
+render();
+const { renderNudges } = await import('./nudges.js');
+renderNudges();
+} catch (err) {
+console.error('Auto price-check failed, item stays without one until Search prices is used manually:', err);
+}
+}
+
 function initShopping() {
 const select = document.getElementById('shop-context-input');
 const input = document.getElementById('shop-capture-input');
 const doneToggle = document.getElementById('shop-show-done-toggle');
+const status = document.getElementById('shop-capture-status');
 if (!select || !input) return;
 
 select.innerHTML = SHOPPING_CONTEXTS.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
@@ -131,12 +176,18 @@ const title = input.value.trim();
 if (!title) return;
 // Straight to "next", skipping Inbox triage — the context picked here
 // already answers the one question triage exists to ask.
-captureTask({ title, contexts: [select.value], bucket: 'next' });
+const task = captureTask({ title, contexts: [select.value], bucket: 'next' });
 input.value = '';
 render();
+// Only Supermarket has a Tesco/Amazon price comparison that makes
+// sense — Pharmacy/Black Friday/Aspirational purchases are a
+// different "note it and reconsider later" pattern (see
+// captureOutcomes.js's own naming note on the `supermarket` outcome).
+if (select.value === 'Supermarket') runAutoPriceCheck(task);
 };
 document.getElementById('shop-capture-btn').addEventListener('click', submit);
 input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); submit(); } });
+initMicCapture(document.getElementById('shop-capture-mic-btn'), input, status, submit);
 
 if (doneToggle) {
 doneToggle.addEventListener('change', (e) => { showDone = e.target.checked; render(); });
@@ -144,4 +195,4 @@ doneToggle.addEventListener('change', (e) => { showDone = e.target.checked; rend
 render();
 }
 
-export { initShopping, render as refreshShopping };
+export { initShopping, render as refreshShopping, runAutoPriceCheck };

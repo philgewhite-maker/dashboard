@@ -331,6 +331,28 @@ category: 'business',
 }
 });
 
+// A Supermarket item with a fresh price check is exactly what a nudge
+// should surface without you having to remember to look — the whole point
+// of auto-checking on capture (shopping.js's runAutoPriceCheck, called from
+// captureOutcomes.js's `supermarket` outcome and this file's own text
+// capture) is that the next time you open the app, there's already a link
+// ready. No lead-time window and no natural expiry, unlike most nudges
+// here — it persists until the item's ticked done, same as an overdue task
+// already does. `results` is price-sorted (searchShoppingItem's own doing),
+// so [0] is the cheapest found, not necessarily the AI's own recommendation
+// — good enough for a one-line nudge; the full reasoning is on the Shopping
+// tab itself.
+data.tasks.filter((t) => t.bucket !== 'done' && (t.contexts || []).includes('Supermarket') && t.priceCheck && t.priceCheck.results.length).forEach((t) => {
+const best = t.priceCheck.results[0];
+pool.push({
+text: `"${t.title}" — ${best.retailer || 'a retailer'}${best.price ? ` ${best.price}` : ''}. Ready to buy.`,
+target: { type: 'task', id: t.id },
+signals: { kind: 'supermarket-ready', daysSince: daysSince(String(t.priceCheck.checkedAt).slice(0, 10)) },
+category: 'task',
+buyUrl: best.url,
+});
+});
+
 buildHealthNudges(pool);
 buildAirbnbNudges(pool);
 
@@ -557,6 +579,7 @@ el.innerHTML = `<div class="nudge-list">${list.map((n, i) => {
 const quick = quickCompleteFor(n);
 return `<div class="nudge-item" data-nudge-idx="${i}" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
 <span>${escapeHtml(n.text)} &rarr;</span>
+${n.buyUrl ? `<a href="${escapeHtml(n.buyUrl)}" target="_blank" rel="noopener noreferrer" class="add-btn" data-nudge-buy="${i}" style="padding:4px 9px;font-size:11px;flex-shrink:0;">Buy &rarr;</a>` : ''}
 ${quick ? `<button type="button" class="add-btn" data-nudge-quick="${i}" style="padding:4px 9px;font-size:11px;flex-shrink:0;">${escapeHtml(quick.label)}</button>` : ''}
 </div>`;
 }).join('')}</div>`;
@@ -564,6 +587,14 @@ el.querySelectorAll('[data-nudge-idx]').forEach((item) => {
 item.addEventListener('click', () => {
 goToTarget(currentShown[parseInt(item.dataset.nudgeIdx, 10)].target);
 });
+});
+// A real navigable link, not a resolve-and-disappear quick action (unlike
+// quickCompleteFor's buttons below) — buying doesn't mark the task done,
+// that's still a manual tick once it's actually arrived, same as any other
+// shopping item. Only needs to stop the click reaching the item-level
+// listener above, which would otherwise ALSO navigate to the task.
+el.querySelectorAll('[data-nudge-buy]').forEach((link) => {
+link.addEventListener('click', (e) => e.stopPropagation());
 });
 // Bound AFTER the item-level click above, on the button itself -- and
 // stops the click there, so tapping "Contacted" resolves the nudge in

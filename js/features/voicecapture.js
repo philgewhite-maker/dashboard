@@ -221,8 +221,10 @@ setTimeout(() => scrollAndFlash(`[data-draft-card="${id}"]`), 60);
 // createCaptureDraft call. Feature-detected: silently hides the mic
 // button rather than erroring where the API doesn't exist (desktop
 // Safari/Firefox, mainly -- this app's real usage is Android Chrome).
-function initMicCapture(input, status, submit) {
-const micBtn = document.getElementById('quick-capture-mic-btn');
+// `micBtn` is the element itself, not an id -- reused as-is by
+// shopping.js for its own mic button (a different id), rather than this
+// function only ever knowing about the Smart capture panel's one.
+function initMicCapture(micBtn, input, status, submit) {
 if (!micBtn) return;
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 if (!SpeechRecognition) { micBtn.hidden = true; return; }
@@ -286,7 +288,7 @@ btn.disabled = false;
 };
 btn.addEventListener('click', submit);
 input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
-initMicCapture(input, status, submit);
+initMicCapture(document.getElementById('quick-capture-mic-btn'), input, status, submit);
 }
 
 function initVoiceCapture() {
@@ -294,4 +296,4 @@ renderCaptureDrafts();
 initQuickCapture();
 }
 
-export { initVoiceCapture, renderCaptureDrafts, createCaptureDraft, revealCaptureDraft, runCaptureSteps };
+export { initVoiceCapture, renderCaptureDrafts, createCaptureDraft, revealCaptureDraft, runCaptureSteps, initMicCapture };
