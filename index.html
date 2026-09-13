@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v313</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v314</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -171,6 +171,22 @@
 <div class="settings-note" style="margin:8px 0 10px;">Photos, CSVs, or anything else shared or picked in one go &mdash; grouped as a batch here until you decide where each one belongs. Mainly reached via Android's share sheet. A recognised Health CSV (Renpho scale export so far) skips the batch entirely and is imported straight into the Health tab.</div>
 <div class="sync-status" id="capture-inbox-status"></div>
 <div id="capture-inbox-list"></div>
+</section>
+
+<section class="panel wide" id="capture-drafts-panel" data-tab="tasks">
+<div class="panel-head">
+<h2><span class="dot rose"></span>Smart capture</h2>
+<span class="count-badge" id="capture-drafts-count"></span>
+</div>
+<div class="capture-row">
+<input type="text" autocomplete="off" id="quick-capture-input" placeholder="Type or speak an instruction&hellip;">
+<button class="add-btn" id="quick-capture-btn" type="button">Capture</button>
+<button class="add-btn" id="quick-capture-mic-btn" type="button" title="Record a voice instruction">&#127908;</button>
+</div>
+<div class="sync-status" id="quick-capture-status"></div>
+<div class="settings-note" style="margin:8px 0 10px;">A short instruction becomes a task or reading-list item; a longer one &mdash; &ldquo;create a trip to Mallorca 1st to 5th November and add Vora Bora to it in my planner&rdquo; &mdash; can create several linked records at once. Nothing is created until you Confirm a draft below. A shared voice clip lands here too, already transcribed.</div>
+<div class="sync-status" id="capture-drafts-status"></div>
+<div id="capture-drafts-list"></div>
 </section>
 
 <section class="panel wide" id="reading-list-panel" data-tab="tasks">

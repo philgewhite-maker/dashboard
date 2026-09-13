@@ -180,22 +180,23 @@ const title = (share.title || '').trim();
 const url = (share.url || '').trim();
 const text = (share.text || '').trim();
 const label = title || url || text.split('\n')[0].slice(0, 120) || `${share.files.length} shared file${share.files.length === 1 ? '' : 's'}`;
-const { batch, failed, healthImports, matchesImports, markerImports } = await addCaptureBatch({
+const { batch, failed, healthImports, matchesImports, markerImports, voiceImports } = await addCaptureBatch({
 label,
 notes: text && text !== label ? text : '',
 source: { kind: 'share', label: title || url || 'Shared from another app', url },
 files: share.files,
 });
 // A recognised Health CSV, a Bumble matches-list/full-profile screenshot
-// that yielded candidates, or a photo claimed by a capture marker is
-// fully consumed on the way in and never becomes a batch item -- if
-// that's everything that was shared, there's nothing left in Capture
-// Inbox to open.
+// that yielded candidates, a photo claimed by a capture marker, or a
+// voice clip that got transcribed is fully consumed on the way in and
+// never becomes a batch item -- if that's everything that was shared,
+// there's nothing left in Capture Inbox to open.
 const parts = [];
 if (batch.items.length) parts.push(`Captured ${batch.items.length} file${batch.items.length === 1 ? '' : 's'} to your Capture Inbox as "${label.slice(0, 60)}".`);
 if (matchesImports.length) parts.push(matchesImports.join(' '));
 if (healthImports.length) parts.push(healthImports.join(' '));
 if (markerImports.length) parts.push(markerImports.join(' '));
+if (voiceImports.length) parts.push(voiceImports.join(' '));
 if (failed.length) parts.push(`${failed.length} couldn't be captured — see Settings.`);
 const msg = parts.join(' ') || `Nothing from "${label.slice(0, 60)}" could be captured — see Settings.`;
 if (batch.items.length) {
@@ -214,10 +215,11 @@ banner(msg, async () => {
 const { switchTab } = await import('../tabs.js');
 switchTab('health');
 });
-} else if (markerImports.length) {
-// Both outcomes a marker can currently reach (task, reading list)
-// live on the Tasks tab -- always the right destination regardless
-// of which one actually fired.
+} else if (markerImports.length || voiceImports.length) {
+// Both outcomes a marker can currently reach (task, reading list), and
+// the Capture drafts a transcribed voice clip lands in, live on the
+// Tasks tab -- always the right destination regardless of which
+// actually fired.
 banner(msg, async () => {
 const { switchTab } = await import('../tabs.js');
 switchTab('tasks');

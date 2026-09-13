@@ -647,6 +647,33 @@ return false;
 }
 }
 
+// Same "don't trust the MIME type" problem, for a shared voice-memo clip
+// (see captureinbox.js's captureItemKind). Magic bytes for the common
+// audio containers: WAV (RIFF....WAVE), OGG/Opus (OggS), WebM/Matroska
+// audio (the EBML header MediaRecorder's own default output uses), MP3
+// (an ID3 tag, or a bare frame sync 0xFFEx-0xFFFx), and M4A/AAC (the same
+// ISO-BMFF "ftyp" box sniffsAsHeic/sniffsAsAvif above already parse, with
+// audio-specific brands).
+const M4A_BRANDS = ['M4A ', 'M4B ', 'isom', 'mp42', 'mp41'];
+async function sniffsAsAudio(file) {
+try {
+const head = new Uint8Array(await file.slice(0, 32).arrayBuffer());
+const asText = String.fromCharCode(...head.slice(0, 12));
+if (asText.startsWith('RIFF') && asText.slice(8, 12) === 'WAVE') return true;
+if (asText.startsWith('OggS')) return true;
+if (head[0] === 0x1A && head[1] === 0x45 && head[2] === 0xDF && head[3] === 0xA3) return true; // EBML/WebM
+if (asText.startsWith('ID3')) return true;
+if (head[0] === 0xFF && (head[1] & 0xE0) === 0xE0) return true; // bare MP3 frame sync
+if (String.fromCharCode(...head.slice(4, 8)) === 'ftyp') {
+const brand = String.fromCharCode(...head.slice(8, 12));
+return M4A_BRANDS.includes(brand);
+}
+return false;
+} catch (e) {
+return false;
+}
+}
+
 // heic-to (https://github.com/hoppergee/heic-to) wraps libheif compiled to
 // WASM. Loaded from CDN rather than bundled, since this project has no
 // build step — everything else here is a plain ES module import too. The
@@ -1114,6 +1141,6 @@ escapeHtml, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTra
 findMentions, COUNTRY_NAME_TO_NATIONALITY,
 resizeImageToBlob, fileToBase64, loadImage, cropThumbnailToBlob,
 hashFile, captureDateOf, betterCaptureDate, dateFromFilename,
-ensureBrowserReadableImage, setPhotoFallback, looksLikeHeic, sniffsAsHeic, sniffsAsRasterImage, sniffsAsAvif,
+ensureBrowserReadableImage, setPhotoFallback, looksLikeHeic, sniffsAsHeic, sniffsAsRasterImage, sniffsAsAvif, sniffsAsAudio,
 contentCropBounds, cropToContentBlob, classifyProfileUpload, looksLikeSameScreenshotPieces, screenshotsLookCombinable,
 };

@@ -290,6 +290,28 @@ read: false,
 };
 }
 
+// The persisted landing spot for a voice/text capture once parseCaptureIntent
+// (ai.js) has turned it into a small ordered plan -- see voicecapture.js.
+// Persisted rather than held in memory for the same reason data.pendingImports
+// is: a shared audio clip's transcription can finish while the app isn't in
+// the foreground to show a confirm dialog, and even a typed prompt deserves a
+// review step before it creates real records (a Trip + a Connection + several
+// Planner entries is a bigger blast radius than a single Task). `steps` is
+// the array parseCaptureIntent returned, unexecuted until the draft is
+// confirmed; the draft is removed from data.captureDrafts on confirm OR
+// discard, never left around with a status flag -- presence in the array IS
+// "still pending".
+function blankCaptureDraft(fields = {}) {
+return {
+id: uid(),
+rawText: '',
+steps: [], // [{type:'task'|'reading'|'trip'|'tripActivity'|'connection'|'placeConnection', ...}]
+source: null, // {kind:'quickcapture'|'voice'|'share', label, url}
+createdAt: new Date().toISOString(),
+...fields,
+};
+}
+
 // A screenshot-derived candidate list (Bumble/Tinder/Hinge matches list, or
 // a single full profile) waiting for the user to accept/merge/discard each
 // row -- see connections.js's queuePendingImport(). Persisted rather than
@@ -918,6 +940,8 @@ b.items = Array.isArray(b.items)
 data.captureInbox = data.captureInbox.filter((b) => b.items.length > 0);
 if (!Array.isArray(data.readingList)) data.readingList = [];
 data.readingList = data.readingList.map((r) => ({ ...blankReadingItem(), ...r, id: r.id || uid() }));
+if (!Array.isArray(data.captureDrafts)) data.captureDrafts = [];
+data.captureDrafts = data.captureDrafts.map((d) => ({ ...blankCaptureDraft(), ...d, id: d.id || uid(), steps: Array.isArray(d.steps) ? d.steps : [] }));
 if (!Array.isArray(data.pendingImports)) data.pendingImports = [];
 data.pendingImports = data.pendingImports.map((p) => ({ ...blankPendingImport(), ...p, id: p.id || uid(), candidates: Array.isArray(p.candidates) ? p.candidates : [] }));
 // A pending import with nothing left (every candidate already
@@ -1938,7 +1962,7 @@ setExternalUpdateHandler, setLocalChangeHandler, getLocalSettings, setLocalSetti
 isDormantStage, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness,
 exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, DEFAULT_PREFS,
 MAIL_SEARCH_KINDS, mailSearchLabel,
-TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureBatch, blankPendingImport, blankConnection, blankTelegramThread, blankReadingItem,
+TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureBatch, blankPendingImport, blankConnection, blankTelegramThread, blankReadingItem, blankCaptureDraft,
 blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS, LEG_DATE_FIELDS,
 blankPlannerEntry, blankPlannerActivity,
 blankAirbnbListing, blankAirbnbReservation, blankFinanceAccount,

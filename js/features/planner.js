@@ -819,4 +819,4 @@ setTimeout(() => el.classList.remove('flash-new'), 1800);
 }, 60);
 }
 
-export { renderPlanner, initPlanner, revealPlannerEntry, syncTripPeopleEntries };
+export { renderPlanner, initPlanner, revealPlannerEntry, syncTripPeopleEntries, placeEntry, addActivityToDay };

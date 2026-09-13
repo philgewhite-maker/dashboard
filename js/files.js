@@ -54,6 +54,20 @@ throw new Error(`Couldn't work out the ics-proxy URL from "${url}" — it should
 return { endpoint, secret };
 }
 
+// gemini-transcribe.php sits next to sync.php too, same reasoning as
+// filesEndpoint -- Claude has no audio-input content type (confirmed while
+// building this), so a shared voice-memo clip goes through the user's own
+// Gemini key instead, kept server-side same as notion.php's own token.
+async function geminiTranscribeEndpoint() {
+const { url, secret, configured } = await getConfig();
+if (!configured) throw new FilesNotConfiguredError();
+const endpoint = url.replace(/sync\.php(?=$|\?)/, 'gemini-transcribe.php');
+if (endpoint === url) {
+throw new Error(`Couldn't work out the gemini-transcribe URL from "${url}" — it should end in sync.php.`);
+}
+return { endpoint, secret };
+}
+
 const UPLOAD_TIMEOUT_MS = 120000; // uploads are far slower than a JSON save
 const DOWNLOAD_TIMEOUT_MS = 120000;
 
@@ -197,6 +211,32 @@ throw new Error(await errorFrom(res, `Couldn't fetch that calendar (HTTP ${res.s
 return res.text();
 }
 
+// Posts a shared audio clip's raw bytes to gemini-transcribe.php (which
+// forwards to Gemini with the server-held key and hands back just the
+// transcript) -- same raw-body-not-multipart choice uploadAttachment above
+// already makes, for the same reason: nothing else in the request. Audio
+// can run long, so this gets its own generous timeout rather than reusing
+// DOWNLOAD_TIMEOUT_MS.
+const TRANSCRIBE_TIMEOUT_MS = 180000;
+async function transcribeAudioFile(file) {
+const { endpoint, secret } = await geminiTranscribeEndpoint();
+const res = await withTimeout(TRANSCRIBE_TIMEOUT_MS, (signal) => fetch(endpoint, {
+method: 'POST',
+headers: {
+'X-Sync-Secret': secret,
+'Content-Type': file.type || 'application/octet-stream',
+},
+body: file,
+signal,
+}));
+if (!res.ok) {
+if (res.status === 401) throw new Error('The gemini-transcribe server rejected the secret — check gemini-transcribe.php uses the same one as sync.php.');
+throw new Error(await errorFrom(res, `Couldn't transcribe that clip (HTTP ${res.status}).`));
+}
+const { transcript } = await res.json();
+return String(transcript || '').trim();
+}
+
 // Deleting is best-effort on the server: if it fails, the attachment is
 // still removed from the task, because leaving a row the user just deleted
 // visible on screen is worse than leaving an orphaned file on disk.
@@ -265,5 +305,5 @@ return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 export {
 FilesNotConfiguredError,
 uploadAttachment, storePhoto, fetchAttachment, deleteAttachment, openAttachment, formatBytes,
-isServerPhotoId, serverPhotoUrl, fetchProxiedImage, fetchIcs,
+isServerPhotoId, serverPhotoUrl, fetchProxiedImage, fetchIcs, transcribeAudioFile,
 };

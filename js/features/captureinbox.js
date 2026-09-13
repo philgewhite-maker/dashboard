@@ -41,7 +41,7 @@
 // that can quietly grow apart.
 import { data, queueSave, blankCaptureBatch } from '../state.js';
 import { photoDelete } from '../db.js';
-import { todayStr, escapeHtml, hydratePhotoBackgrounds, resizeImageToBlob, scrollAndFlash, looksLikeHeic, sniffsAsHeic, sniffsAsRasterImage, sniffsAsAvif } from '../utils.js';
+import { todayStr, escapeHtml, hydratePhotoBackgrounds, resizeImageToBlob, scrollAndFlash, looksLikeHeic, sniffsAsHeic, sniffsAsRasterImage, sniffsAsAvif, sniffsAsAudio } from '../utils.js';
 import { storePhoto, uploadAttachment, deleteAttachment, fetchAttachment, openAttachment, formatBytes } from '../files.js';
 import { looksLikeRenphoCsv, parseRenphoCsv, mergeRenphoDaily, looksLikeHrvCsv } from './renpho.js';
 import { legTargetPickerHtml, bindLegTargetPicker, readLegTargetPicker, applyLegExtraction } from './travel.js';
@@ -74,6 +74,11 @@ if (await sniffsAsRasterImage(file)) return 'photo';
 // comment): AVIF already decodes natively, it just needs correct
 // classification, not HEIC-to-JPEG conversion.
 if (await sniffsAsAvif(file)) return 'photo';
+// A shared voice-memo clip (manifest.webmanifest now accepts audio/* as
+// a share target) -- same untrustworthy-MIME-type caution as the image
+// checks above, checked via file.type first since audio sharing is less
+// MIME-inconsistent in practice, with the magic-byte sniff as a fallback.
+if ((file.type || '').startsWith('audio/') || await sniffsAsAudio(file)) return 'audio';
 try {
 const head = await file.slice(0, 300).text();
 if (looksLikeRenphoCsv(head)) return 'renpho-csv';
@@ -199,9 +204,10 @@ const failed = [];
 const healthImports = [];
 const matchesImports = [];
 const markerImports = []; // messages for a photo auto-routed by captureRules (see Phase 2 below)
+const voiceImports = []; // messages for a transcribed audio clip (see Phase 2 below)
 let renphoImported = false;
 let wellnessImported = false;
-const autoRouteCandidates = []; // [{file, item}] -- photo items worth a slow AI pass, filled in Phase 1
+const autoRouteCandidates = []; // [{file, item}] -- photo/audio items worth a slow AI pass, filled in Phase 1
 
 // Phase 1: capture and durably store every file.
 for (const file of files) {
@@ -221,6 +227,8 @@ if (kind === 'photo') {
 const blob = await resizeImageToBlob(file, 1200, 0.85);
 const id = await storePhoto(blob);
 item = { id, name: file.name || 'photo', type: file.type || blob.type, size: blob.size, kind: 'photo' };
+} else if (kind === 'audio') {
+item = { ...(await uploadAttachment(file)), kind: 'audio' };
 } else {
 item = { ...(await uploadAttachment(file)), kind: 'attachment' };
 }
@@ -231,8 +239,9 @@ queueSave();
 // ones -- the capture-marker check below (no filename signal needed)
 // runs for anyone that Samsung Health/dating-app detection doesn't
 // claim, so an ordinary unhinted screenshot still gets one shot at
-// auto-routing before falling back to Capture Inbox.
-if (kind === 'photo') {
+// auto-routing before falling back to Capture Inbox. Every audio clip
+// is a candidate too, for the transcribe-and-draft attempt below.
+if (kind === 'photo' || kind === 'audio') {
 autoRouteCandidates.push({ file, item });
 }
 } catch (err) {
@@ -264,6 +273,7 @@ failed.push(`${file.name || 'file'}: ${err.message || err}`);
 const totalPhotoCount = batch.items.filter((it) => it.kind === 'photo').length;
 for (const { file, item } of autoRouteCandidates) {
 let handled = false;
+if (item.kind === 'photo') {
 if (looksLikeSamsungHealthScreenshot(file.name)) {
 try {
 const { extractAndMergeWellnessFile } = await import('./wellness.js');
@@ -323,6 +333,35 @@ queueSave();
 console.error('Capture-marker scan failed, photo stays in Capture Inbox for manual triage:', err);
 }
 }
+} else if (item.kind === 'audio') {
+// A shared voice-memo clip -- always attempted regardless of how many
+// other items are in the share (unlike the photo checks above, there's
+// no "which one is this about" ambiguity a second photo would create).
+// Claude has no audio-input content type, so this goes through Gemini
+// via gemini-transcribe.php (files.js) instead -- see that file's own
+// comment. The transcript lands in the SAME captureDrafts review queue
+// a typed or spoken-in-app instruction does (voicecapture.js), not
+// committed straight to a record -- the whole point of a shared clip is
+// the app might not be open again for a while.
+try {
+const { transcribeAudioFile } = await import('../files.js');
+const transcript = await transcribeAudioFile(file);
+if (transcript) {
+const { createCaptureDraft } = await import('./voicecapture.js');
+await createCaptureDraft(transcript, { kind: 'share', label: file.name || 'Shared voice clip', url: '' });
+voiceImports.push(`${file.name || 'that clip'}: transcribed — review it in Capture drafts.`);
+await deleteItemBytes(item);
+batch.items = batch.items.filter((it) => it.id !== item.id);
+removeBatchIfEmpty(batch);
+queueSave();
+} else {
+voiceImports.push(`${file.name || 'that clip'}: transcription came back empty — left in Capture Inbox.`);
+}
+} catch (err) {
+console.error('Audio transcription failed, clip stays in Capture Inbox for manual triage:', err);
+voiceImports.push(`${file.name || 'that clip'}: couldn't transcribe — ${err.message || err}`);
+}
+}
 }
 
 renderCaptureInbox();
@@ -334,7 +373,7 @@ if (wellnessImported) {
 const { renderWellnessDaily } = await import('./wellness.js');
 renderWellnessDaily();
 }
-return { batch, failed, healthImports, matchesImports, markerImports };
+return { batch, failed, healthImports, matchesImports, markerImports, voiceImports };
 }
 
 function removeBatchIfEmpty(batch) {

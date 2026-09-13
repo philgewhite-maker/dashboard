@@ -5,7 +5,7 @@
 // header — normal server-side calls don't need it, but a client-only app
 // with no backend does. See README for the tradeoffs.
 import { getLocalSettings, setLocalSetting } from './state.js';
-import { fileToBase64, loadImage, cropThumbnailToBlob, hashFile, captureDateOf, betterCaptureDate, ensureBrowserReadableImage } from './utils.js';
+import { fileToBase64, loadImage, cropThumbnailToBlob, hashFile, captureDateOf, betterCaptureDate, ensureBrowserReadableImage, todayStr } from './utils.js';
 import { parseCacheGet, parseCachePut } from './db.js';
 
 const API_URL = 'https://api.anthropic.com/v1/messages';
@@ -1214,6 +1214,46 @@ ROMANIZE_MAX_TOKENS, ROMANIZE_MODEL, 'Guest name romanization', null, 'low',
 return String((data && data.name) || '').trim();
 }
 
+// ---- Capture intent parsing (voice / one-shot text capture) ----
+//
+// Turns free text -- typed, or transcribed from live speech or a shared
+// audio clip -- into a small ordered list of steps against this app's real
+// record types, from a fixed, closed vocabulary the executor
+// (voicecapture.js) knows how to run. Structured extraction, not
+// open-ended tool use -- the step vocabulary is closed, so one JSON-
+// returning call is the right tier (same "nuanced reading, not deep
+// reasoning" tier PROFILE_MODEL's own comment describes). Sonnet 5, not
+// Haiku: resolving "1st November to 5th" against today's date, and
+// picking which existing trip "my Lisbon trip" means, takes more judgement
+// than a lookup.
+const CAPTURE_INTENT_MODEL = 'claude-sonnet-5';
+const CAPTURE_INTENT_MAX_TOKENS = 2000;
+function captureIntentPrompt(text, trips) {
+const tripList = trips.length
+? trips.map((t) => `- id ${t.id}: "${t.title}"${t.startDate ? ` (${t.startDate} to ${t.endDate || t.startDate})` : ''}`).join('\n')
+: '(none yet)';
+return `Today is ${todayStr()}. Turn this instruction into an ordered list of steps this app can execute. Instruction: ${JSON.stringify(text)}\n\n`
++ `Existing trips -- match a phrase like "my Lisbon trip" against these by name; use the real id if one clearly matches, or "__new__" with a newTripTitle if none does or the instruction explicitly says to create one:\n${tripList}\n\n`
++ 'Each step is one JSON object, one of these exact shapes -- omit fields you have nothing for rather than inventing a value:\n'
++ '{"type":"task","title":"...","notes":"...","due":"YYYY-MM-DD"}\n'
++ '{"type":"reading","title":"...","url":"...","notes":"..."}\n'
++ '{"type":"trip","title":"...","destinations":["..."],"startDate":"YYYY-MM-DD","endDate":"YYYY-MM-DD"}\n'
++ '{"type":"tripActivity","tripId":"<existing id, or __new__>","newTripTitle":"...","title":"...","date":"YYYY-MM-DD"}\n'
++ '{"type":"connection","name":"..."}\n'
++ '{"type":"placeConnection","tripId":"<existing id, or __new__>","newTripTitle":"...","startDate":"YYYY-MM-DD","endDate":"YYYY-MM-DD"} -- this step is ALWAYS placing whoever a preceding "connection" step in this same list just created, never an existing person you were not asked to create\n\n'
++ 'Resolve every relative or partial date against today\'s date and, for a range like "1st November to 5th", against the month already established earlier in the same instruction. If the instruction is one simple thing (a reminder, a link to read later), return just one step -- don\'t invent steps nothing in the text asked for.\n\n'
++ 'Reply with ONLY a JSON object, no other text, no markdown fences: {"steps":[{...}, ...]}';
+}
+async function parseCaptureIntent(text) {
+const { data: appData } = await import('./state.js');
+const trips = (appData.trips || []).map((t) => ({ id: t.id, title: t.title, startDate: t.startDate, endDate: t.endDate }));
+const { data } = await callAnthropic(
+[{ type: 'text', text: captureIntentPrompt(text, trips) }],
+CAPTURE_INTENT_MAX_TOKENS, CAPTURE_INTENT_MODEL, 'Capture intent parsing', null, 'low',
+);
+return { steps: Array.isArray(data && data.steps) ? data.steps : [] };
+}
+
 // ---- Wellness screenshot (Samsung Health) ----
 //
 // Reads one of four Samsung Health 7-day charts (Antioxidant index, AGEs
@@ -1520,7 +1560,7 @@ return { country: String((data && data.country) || '').trim() };
 export {
 MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot, quickScanScreenshot, scanForCaptureMarker,
 callTextJson, DEFAULT_MODEL, summarizeUsage, currentMonthKey, compareFaces,
-extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShoppingItem, translateText, romanizeName,
+extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShoppingItem, translateText, romanizeName, parseCaptureIntent,
 identifyCountry, extractWellnessScreenshot,
 extractTripScreenshot, extractTripLegFromEmail,
 parseIngredients, assessIngredient, ALLERGEN_LIST, DIETARY_FLAGS, FODMAP_COMPONENTS, FODMAP_LEVELS,
