@@ -6,8 +6,8 @@
 // reservation date ranges -- but never a guest's name, on any plan, for
 // any host; that's a genuine Airbnb privacy limit, which is why
 // guestName/notes below are always typed in by hand, never scraped.
-import { data, queueSave, blankAirbnbListing, blankAirbnbReservation } from '../state.js';
-import { escapeHtml, todayStr, dateStrAdd } from '../utils.js';
+import { data, queueSave, blankAirbnbListing, blankAirbnbReservation, blankAirbnbKey, KEY_CUSTODIAN_TYPES } from '../state.js';
+import { escapeHtml, todayStr, dateStrAdd, scrollAndFlash } from '../utils.js';
 import { fetchIcs } from '../files.js';
 import { canAttemptGoogleAction, hasCalendarWrite } from '../sync/googleauth.js';
 import { listCalendars, createEvent, findEvents } from '../googlecalendar.js';
@@ -238,6 +238,72 @@ queueSave();
 });
 }
 
+// ---- Settings: keyring config -----------------------------------------------
+//
+// A keyring's static facts (label, contents, which listings it opens) are
+// configured here, same split as Airbnb listings themselves -- current
+// CUSTODY (who has it, who it's for) is edited on the Airbnb panel itself
+// (renderAirbnbKeys, above), not here.
+function renderKeysSettings() {
+const el = document.getElementById('keys-settings');
+if (!el) return;
+if (data.airbnbKeys.length === 0) {
+el.innerHTML = '<div class="settings-note" style="margin:0;">No keyrings yet — add one below.</div>';
+return;
+}
+el.innerHTML = `<table class="limits-table">
+<thead><tr><th>Label</th><th>Contents</th><th>Opens</th><th></th></tr></thead>
+<tbody>${data.airbnbKeys.map((k) => `<tr>
+<td><input type="text" autocomplete="off" data-key-settings-field="label" data-key-settings-id="${k.id}" value="${escapeHtml(k.label)}" placeholder="e.g. Keyring 4"></td>
+<td><input type="text" autocomplete="off" data-key-settings-field="contents" data-key-settings-id="${k.id}" value="${escapeHtml(k.contents)}" placeholder="e.g. Building fob, apartment door"></td>
+<td>${data.airbnbListings.length
+? data.airbnbListings.map((l) => `<label style="display:inline-flex;align-items:center;gap:3px;margin-right:8px;white-space:nowrap;">
+<input type="checkbox" data-key-settings-listing="${k.id}" data-listing-id="${l.id}"${k.listingIds.includes(l.id) ? ' checked' : ''}>${escapeHtml(l.label || l.prefix || 'Listing')}
+</label>`).join('')
+: '<span class="settings-note" style="margin:0;">Add a listing first</span>'}
+</td>
+<td><span class="del-x" style="opacity:1;" data-del-key-settings="${k.id}">&times;</span></td>
+</tr>`).join('')}</tbody>
+</table>`;
+
+el.querySelectorAll('[data-key-settings-field]').forEach((input) => {
+input.addEventListener('change', () => {
+const key = data.airbnbKeys.find((k) => k.id === input.dataset.keySettingsId);
+if (!key) return;
+key[input.dataset.keySettingsField] = input.value.trim();
+queueSave();
+});
+});
+el.querySelectorAll('[data-key-settings-listing]').forEach((cb) => {
+cb.addEventListener('change', () => {
+const key = data.airbnbKeys.find((k) => k.id === cb.dataset.keySettingsListing);
+if (!key) return;
+const listingId = cb.dataset.listingId;
+if (cb.checked) { if (!key.listingIds.includes(listingId)) key.listingIds.push(listingId); }
+else { key.listingIds = key.listingIds.filter((id) => id !== listingId); }
+queueSave();
+});
+});
+el.querySelectorAll('[data-del-key-settings]').forEach((x) => {
+x.addEventListener('click', () => {
+data.airbnbKeys = data.airbnbKeys.filter((k) => k.id !== x.dataset.delKeySettings);
+renderKeysSettings();
+queueSave();
+});
+});
+}
+
+function initKeysSettingsForm() {
+const addBtn = document.getElementById('add-key-settings-btn');
+if (!addBtn) return;
+renderKeysSettings();
+addBtn.addEventListener('click', () => {
+data.airbnbKeys.push(blankAirbnbKey());
+renderKeysSettings();
+queueSave();
+});
+}
+
 // ---- Overview panel -------------------------------------------------------
 
 // Confirmed live: dropping the year made a genuine year-out date ("2
@@ -344,6 +410,26 @@ return match
 : `<span class="cal-badge cleaner-chip cleaner-chip-tbc">${label}: TBC</span>`;
 }
 
+// "with Concierge", "with Cleaner (Maria)", "with you" -- the physical
+// custodian, independent of who the key is ultimately FOR (see
+// keyChipsForReservationHtml below).
+function custodianLabel(k) {
+const type = k.custodian || 'me';
+const label = type === 'me' ? 'you' : type.charAt(0).toUpperCase() + type.slice(1);
+const needsName = type === 'cleaner' || type === 'workman' || type === 'other';
+return `with ${label}${needsName && k.custodianName ? ` (${k.custodianName})` : ''}`;
+}
+
+// A reservation showing which keyring(s) are earmarked for it -- CLAUDE.md's
+// own record-reference standard: a key shown away from its own row must
+// link back to it. Clicking scrolls to the key's row in the Keys section
+// further down this same panel (no switchTab needed, both live on Airbnb).
+function keyChipsForReservationHtml(r) {
+const keys = data.airbnbKeys.filter((k) => k.forReservationId === r.id);
+if (!keys.length) return '';
+return `<div class="cal-clean-group">${keys.map((k) => `<span class="cal-badge cleaner-chip" data-key-chip="${k.id}" style="cursor:pointer;" title="Jump to this key">&#128273; ${escapeHtml(k.label || 'Keyring')} &middot; ${escapeHtml(custodianLabel(k))}</span>`).join('')}</div>`;
+}
+
 function reservationRowHtml(r) {
 const listing = data.airbnbListings.find((l) => l.id === r.listingId);
 if (!listing) return '';
@@ -362,6 +448,7 @@ ${r.googleEventId
 <span class="sync-status" data-airbnb-push-status="${r.id}"></span>
 ${data.prefs.airbnbCalendarId ? `<div class="cal-clean-group">${cleanerChipHtml(r, 'checkin')}${cleanerChipHtml(r, 'checkout')}</div>` : ''}
 </div>
+${keyChipsForReservationHtml(r)}
 </div>`;
 }
 
@@ -407,6 +494,101 @@ const statusEl = el.querySelector(`[data-airbnb-push-status="${btn.dataset.airbn
 if (r && statusEl) pushReservation(r, statusEl);
 });
 });
+el.querySelectorAll('[data-key-chip]').forEach((chip) => {
+chip.addEventListener('click', () => {
+scrollAndFlash(`[data-airbnb-key-row="${CSS.escape(chip.dataset.keyChip)}"]`);
+});
+});
+}
+
+// ---- Key custody ------------------------------------------------------------
+//
+// Physical keyrings and who currently has them -- current custody only, no
+// handoff history (confirmed as sufficient). A keyring's static facts
+// (label, contents, which listings it opens) are set in Settings, same
+// split as Airbnb listings themselves (icsUrl/prefix/colour there,
+// guestName/notes here) -- this section only edits the custody fields:
+// who has it (custodian/custodianName) and who it's ultimately for
+// (forReservationId/forNote), which are deliberately separate questions --
+// a keyring routinely sits with the concierge FOR a guest who hasn't
+// collected it yet.
+const KEY_NEEDS_NAME = new Set(['cleaner', 'workman', 'other']);
+// Sentinel for the "For" select's "type a note instead" option -- not a
+// real reservation id, so it can never collide with one (uid()'s own
+// alphabet never starts a real id with two leading underscores).
+const KEY_FOR_OTHER = '__other__';
+
+function keyListingsLabel(k) {
+if (!k.listingIds.length) return 'General';
+const labels = k.listingIds.map((id) => {
+const l = data.airbnbListings.find((x) => x.id === id);
+return l ? (l.label || l.prefix || 'Listing') : null;
+}).filter(Boolean);
+return labels.length ? labels.join(', ') : 'General';
+}
+
+function keyRowHtml(k) {
+const upcoming = data.airbnbReservations
+.filter((r) => r.checkout >= todayStr())
+.sort((a, b) => (a.checkin < b.checkin ? -1 : a.checkin > b.checkin ? 1 : 0));
+const forChoice = k.forReservationId ? k.forReservationId : (k.forNote ? KEY_FOR_OTHER : '');
+return `<div class="cal-row" data-airbnb-key-row="${k.id}">
+<div class="cal-head">
+<span class="cal-name">&#128273; ${escapeHtml(k.label || 'Keyring')}</span>
+<span class="cal-badge slate">${escapeHtml(keyListingsLabel(k))}</span>
+</div>
+${k.contents ? `<div class="settings-note" style="margin:0 0 6px;">${escapeHtml(k.contents)}</div>` : ''}
+<div class="cal-event-row">
+<select data-key-field="custodian" data-key-id="${k.id}">
+${KEY_CUSTODIAN_TYPES.map((t) => `<option value="${t}"${t === k.custodian ? ' selected' : ''}>${t.charAt(0).toUpperCase() + t.slice(1)}</option>`).join('')}
+</select>
+<input type="text" autocomplete="off" class="tag-add-input" placeholder="Who" data-key-field="custodianName" data-key-id="${k.id}" value="${escapeHtml(k.custodianName)}" style="max-width:100px;"${KEY_NEEDS_NAME.has(k.custodian) ? '' : ' hidden'}>
+<select data-key-field="forReservationId" data-key-id="${k.id}">
+<option value="">For: general / none</option>
+${upcoming.map((r) => {
+const l = data.airbnbListings.find((x) => x.id === r.listingId);
+return `<option value="${r.id}"${r.id === forChoice ? ' selected' : ''}>For: ${escapeHtml(l ? (l.label || l.prefix || 'Listing') : 'Listing')} — ${escapeHtml(r.guestName || 'Guest')} (${formatAirbnbDate(r.checkin)}&ndash;${formatAirbnbDate(r.checkout)})</option>`;
+}).join('')}
+<option value="${KEY_FOR_OTHER}"${forChoice === KEY_FOR_OTHER ? ' selected' : ''}>For: other (note)</option>
+</select>
+<input type="text" autocomplete="off" class="tag-add-input" placeholder="For (note)" data-key-field="forNote" data-key-id="${k.id}" value="${escapeHtml(k.forNote)}" style="max-width:110px;"${forChoice === KEY_FOR_OTHER ? '' : ' hidden'}>
+<input type="text" autocomplete="off" class="tag-add-input" placeholder="Notes" data-key-field="notes" data-key-id="${k.id}" value="${escapeHtml(k.notes)}" style="max-width:140px;">
+</div>
+</div>`;
+}
+
+function bindAirbnbKeys(el) {
+el.querySelectorAll('[data-key-field]').forEach((input) => {
+input.addEventListener('change', () => {
+const key = data.airbnbKeys.find((k) => k.id === input.dataset.keyId);
+if (!key) return;
+const field = input.dataset.keyField;
+if (field === 'forReservationId') {
+if (input.value === KEY_FOR_OTHER) { key.forReservationId = ''; }
+else { key.forReservationId = input.value; key.forNote = ''; }
+} else {
+key[field] = input.value;
+}
+queueSave();
+renderAirbnbKeys();
+// A custody/for change can add or remove a reservation's own key
+// chip (keyChipsForReservationHtml) -- keep both in sync.
+renderAirbnb();
+});
+});
+}
+
+function renderAirbnbKeys() {
+const el = document.getElementById('airbnb-keys-list');
+if (!el) return;
+el.innerHTML = data.airbnbKeys.length
+? data.airbnbKeys.map(keyRowHtml).join('')
+: '<div class="empty">No keyrings yet — add one in <span class="inline-goto-link" data-goto-tab="settings">Settings</span>.</div>';
+bindAirbnbKeys(el);
+}
+
+function initAirbnbKeys() {
+renderAirbnbKeys();
 }
 
 // ---- Guest names via email --------------------------------------------------
@@ -673,4 +855,4 @@ queueSave();
 }
 }
 
-export { renderAirbnb, renderAirbnbListings, initAirbnbListingsForm, initAirbnbSync, airbnbSegmentsForDay };
+export { renderAirbnb, renderAirbnbListings, initAirbnbListingsForm, initAirbnbSync, airbnbSegmentsForDay, renderAirbnbKeys, initAirbnbKeys, initKeysSettingsForm };

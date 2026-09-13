@@ -31,6 +31,7 @@ airbnbReservations: [], // synced from each listing's ICS feed, see js/features/
 airbnbSyncStatus: {}, // listingId -> {ok, syncedAt, added, updated, removed, error}
 airbnbCleanerEvents: [], // [{date, name}] -- last scan of "Cleaner - <Name>" events on the push-target calendar, see js/features/airbnb.js
 airbnbCleanerSyncStatus: null, // {ok, syncedAt, error} for the cleaner-event scan above
+airbnbKeys: [], // physical keyrings and their current custody -- see js/features/airbnb.js
 vouchers: [],
 businessIdeas: [],
 subscriptions: [],
@@ -482,6 +483,31 @@ listingId: '', uid: '',
 checkin: '', checkout: '', // ISO yyyy-mm-dd, checkout is exclusive (the turnover day, not an occupied night)
 guestName: '', notes: '',
 googleEventId: '', googleCalendarId: '', // set once pushed -- see js/googlecalendar.js's findEvents()/createEvent()
+createdAt: new Date().toISOString(),
+...fields,
+};
+}
+
+// A physical keyring's current custody -- NOT a handoff log, just "who has
+// it right now" (confirmed as sufficient -- no history needed). Two
+// separate questions, not one: `custodian` is who's physically holding it
+// (you, concierge, a guest, or a short-term holder like a cleaner/workman),
+// `forReservationId`/`forNote` is who it's ultimately earmarked for, which
+// is often a DIFFERENT person -- a keyring routinely sits with the
+// concierge FOR a guest who hasn't arrived to collect it yet. `listingIds`
+// is an array, not a single id: one keyring's basics (building fob,
+// apartment door) commonly open several listings that are really the same
+// physical room split across Airbnb listings, and some keyrings (an
+// agent's spare) aren't tied to any listing at all -- left empty.
+const KEY_CUSTODIAN_TYPES = ['me', 'concierge', 'guest', 'cleaner', 'workman', 'other'];
+function blankAirbnbKey(fields = {}) {
+return {
+id: uid(),
+label: '', contents: '',
+listingIds: [],
+custodian: 'me', custodianName: '', // custodianName only meaningful for cleaner/workman/other
+forReservationId: '', forNote: '',
+notes: '',
 createdAt: new Date().toISOString(),
 ...fields,
 };
@@ -1013,6 +1039,20 @@ const airbnbListingIds = new Set(data.airbnbListings.map((l) => l.id));
 data.airbnbReservations = data.airbnbReservations.filter((r) => airbnbListingIds.has(r.listingId));
 if (!data.airbnbSyncStatus || typeof data.airbnbSyncStatus !== 'object' || Array.isArray(data.airbnbSyncStatus)) data.airbnbSyncStatus = {};
 if (!Array.isArray(data.airbnbCleanerEvents)) data.airbnbCleanerEvents = [];
+if (!Array.isArray(data.airbnbKeys)) data.airbnbKeys = [];
+data.airbnbKeys = data.airbnbKeys.map((k) => ({ ...blankAirbnbKey(), ...k, id: k.id || uid(), listingIds: Array.isArray(k.listingIds) ? k.listingIds : [] }));
+// A keyring's own listings can be deleted out from under it -- unlike a
+// reservation (which has nothing left to be ABOUT once its listing is
+// gone), the keyring itself still physically exists, so only the dangling
+// references are dropped, not the keyring. Same for a reservation it was
+// earmarked for -- the key just becomes unearmarked, not deleted.
+data.airbnbKeys.forEach((k) => {
+k.listingIds = k.listingIds.filter((id) => airbnbListingIds.has(id));
+});
+const airbnbReservationIds = new Set(data.airbnbReservations.map((r) => r.id));
+data.airbnbKeys.forEach((k) => {
+if (k.forReservationId && !airbnbReservationIds.has(k.forReservationId)) k.forReservationId = '';
+});
 // Seed the mail search rows from the old fixed shape the first time only.
 // Keyed on the array's absence rather than its emptiness, so deleting every
 // row stays deleted instead of being helpfully repopulated next reload.
@@ -1965,7 +2005,7 @@ MAIL_SEARCH_KINDS, mailSearchLabel,
 TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureBatch, blankPendingImport, blankConnection, blankTelegramThread, blankReadingItem, blankCaptureDraft,
 blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS, LEG_DATE_FIELDS,
 blankPlannerEntry, blankPlannerActivity,
-blankAirbnbListing, blankAirbnbReservation, blankFinanceAccount,
+blankAirbnbListing, blankAirbnbReservation, blankAirbnbKey, KEY_CUSTODIAN_TYPES, blankFinanceAccount,
 CONTACT_STATUS_LABELS, CONTACT_MATCH_MIN_STAGE,
 DEFAULT_RATING_CATEGORIES, slugifyField, DEFAULT_RECIPE_RATING_CATEGORIES,
 FLAG_FIELD_DEFS, DEFAULT_FLAG_RULES, computeFlags, valueColorForField, stripSharedSuffix, suggestedAction, suggestedQuestions, isTravelPaused, ACTIONS, distanceMiles, heightCm,
