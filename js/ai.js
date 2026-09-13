@@ -1179,8 +1179,13 @@ const m = /([\d]+(?:[.,]\d+)?)/.exec(String(price || ''));
 return m ? parseFloat(m[1].replace(',', '.')) : Infinity;
 }
 async function searchShoppingItem(item, link) {
-const tools = [{ type: 'web_search_20260209', name: 'web_search', max_uses: 3 }];
-if (link) tools.push({ type: 'web_fetch_20260209', name: 'web_fetch', max_uses: 1 });
+// allowed_callers: ["direct"] confirmed live as required here -- without
+// it the API assumes a server tool might be invoked via programmatic
+// (code-execution-triggered) tool calling, which Haiku 4.5 doesn't
+// support, and rejects the request outright even though nothing here
+// ever uses code execution.
+const tools = [{ type: 'web_search_20260209', name: 'web_search', max_uses: 3, allowed_callers: ['direct'] }];
+if (link) tools.push({ type: 'web_fetch_20260209', name: 'web_fetch', max_uses: 1, allowed_callers: ['direct'] });
 const { data: raw } = await callAnthropic(
 [{ type: 'text', text: shoppingSearchPrompt(item, link) }],
 SHOPPING_SEARCH_MAX_TOKENS,
