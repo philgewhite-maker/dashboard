@@ -2214,10 +2214,19 @@ gap:2px;
 .planner-pools{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:18px;}
 .planner-pool{flex:1;min-width:220px;}
 .planner-pool h3{font-size:14px;margin:0 0 8px;}
-.planner-pool-list{display:flex;flex-direction:column;gap:6px;}
+/* Wrapped chips again, not one-per-row -- confirmed live: with a genuinely
+   long pool (40+ priority connections), stacking one full row per card
+   read as "big and ugly" from sheer length, even with the select itself
+   now compact. This was originally switched to stacked full-width rows
+   (dcb3712) purely to give the OLD full-width select room without fighting
+   flex sizing -- with the select sized to its own content now, that reason
+   is gone, so a long pool can wrap into a dense grid again instead of a
+   long vertical list, the same data just taking far less scroll. */
+.planner-pool-list{display:flex;flex-wrap:wrap;gap:6px;}
 .planner-pool-card{
-display:flex;align-items:center;flex-wrap:wrap;gap:6px;
+display:flex;align-items:center;gap:6px;
 padding:5px 8px;font-size:13px;
+flex:0 1 auto;
 }
 /* The touch/no-drag fallback control -- drag stays the primary interface
    (confirmed working), this only needs to exist for whenever it isn't.
@@ -2236,6 +2245,15 @@ border-radius:6px;
 padding:3px 5px;
 background:var(--card);
 color:var(--ink);
+}
+/* "Show N more…" for a long pool (see planner.js's poolListHtml) -- a
+   plain text link, not a real button, so it doesn't compete visually
+   with the actual draggable cards above it. */
+.planner-pool-more{
+background:none;border:none;padding:2px 0;margin-top:2px;
+font-family:'Inter',sans-serif;font-size:12px;
+color:var(--muted);text-decoration:underline;text-decoration-style:dotted;
+cursor:pointer;width:100%;text-align:left;
 }
 
 /* Keys (Airbnb panel, Overview tab) -- a compact drag-and-drop "holding

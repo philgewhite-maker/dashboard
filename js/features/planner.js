@@ -16,12 +16,15 @@
 // dragged to a different day.
 //
 // Also mirrors tasks.js's OTHER half: HTML5 drag-and-drop never fires at
-// all on iOS Safari (confirmed -- Planner's grid was completely inert on
-// an iPhone until this existed), so every draggable card here also carries
-// a <select> that performs the identical placeEntry/moveEntry call a drop
-// would -- see plannerDaySelectOptionsHtml. Drag is a mouse enhancement;
-// the select is the real interface, same as tasks.js's own "File to…"
-// dropdowns next to its draggable Inbox cards.
+// all on iOS Safari specifically (confirmed -- Planner's grid was
+// completely inert on an iPhone until this existed). CORRECTION, also
+// confirmed live: this is NOT a general touch-vs-mouse gap -- Android
+// Chrome's own native drag-and-drop works fine over touch, so a select
+// shown unconditionally to every browser was dead weight for anyone not
+// actually on the one platform it exists for. IS_IOS below gates it to
+// iOS only; everyone else gets drag alone, same as a mouse user always
+// has. See plannerDaySelectOptionsHtml for the option list itself.
+const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 import { data, queueSave, blankPlannerEntry, blankPlannerActivity, isDormantStage, isTravelPaused, LEG_DATE_FIELDS } from '../state.js';
 import { escapeHtml, uid, todayStr, dateStrAdd, avatarHtml, hydratePhotoBackgrounds, bindForm, foldDiacritics, scrollAndFlash, parseLooseDateTime } from '../utils.js';
 import { isPriorityConnection, renderConnPicker, bindConnPickers, expandConnection } from './connections.js';
@@ -259,7 +262,7 @@ ${entry.endDate ? `<button type="button" class="planner-span-btn" data-planner-s
 ${entry.tripId ? `<span class="planner-entry-trip-link" data-planner-open-trip="${entry.tripId}" title="Open this trip on the Travel tab">&#9992;</span>` : ''}
 <span class="planner-entry-remove" data-planner-remove="${entry.id}" title="Remove">&times;</span>
 </div>
-<select class="planner-select" data-planner-move="${entry.id}" title="Move to a different day">${plannerDaySelectOptionsHtml({ date: entry.date, tripId: entry.tripId })}</select>
+${IS_IOS ? `<select class="planner-select" data-planner-move="${entry.id}" title="Move to a different day">${plannerDaySelectOptionsHtml({ date: entry.date, tripId: entry.tripId })}</select>` : ''}
 </div>`;
 }
 
@@ -339,13 +342,36 @@ const days = Array.from({ length: 14 }, (_, i) => dateStrAdd(todayStr(), i));
 return days.map((d) => plannerDayHtml(d)).join('');
 }
 
+// Confirmed live as a real problem: a long-lived priority pool (40+
+// connections for a heavy Tinder-import user) stacked one full row per
+// card reads as "big and ugly" regardless of how compact any one card
+// is -- there's just no getting 40 rows to look small. Same "show a
+// sane default, expand on request" idea as Nudges' own TOP_N, but a
+// plain click-to-expand rather than a curated pick, since every item
+// here is equally actionable (nothing here is worth silently ranking
+// above another). Session-only UI state, same as this file's own
+// plannerAddOpenKeys -- never persisted, resets on reload.
+const POOL_COLLAPSE_LIMIT = 8;
+const expandedPools = new Set(); // 'priority' | 'activities'
+function poolListHtml(cards, poolKey) {
+if (cards.length <= POOL_COLLAPSE_LIMIT || expandedPools.has(poolKey)) {
+const collapseBtn = cards.length > POOL_COLLAPSE_LIMIT
+? `<button type="button" class="planner-pool-more" data-planner-pool-more="${poolKey}">Show fewer</button>` : '';
+return cards.join('') + collapseBtn;
+}
+const remaining = cards.length - POOL_COLLAPSE_LIMIT;
+return cards.slice(0, POOL_COLLAPSE_LIMIT).join('')
++ `<button type="button" class="planner-pool-more" data-planner-pool-more="${poolKey}">Show ${remaining} more…</button>`;
+}
+
 function priorityPoolHtml() {
 const priority = data.connections.filter(isPriorityConnection);
 if (!priority.length) return '<div class="empty">No priority connections yet — pin someone (📌) below, on the <span class="inline-goto-link" data-goto-tab="dating">Dating tab</span>, or they\'ll appear automatically once things reach "Planning to meet" or later.</div>';
-return priority.map((c) => `<div class="planner-pool-card alloc-card" draggable="true" data-planner-drag="connection:${c.id}">
+const cards = priority.map((c) => `<div class="planner-pool-card alloc-card" draggable="true" data-planner-drag="connection:${c.id}">
 <span class="planner-entry-link" data-planner-open-connection="${c.id}">${avatarHtml(c.photoId, c.name, 'sm')}<span>${escapeHtml(c.name)}</span></span>
-<select class="planner-select" data-planner-place="connection:${c.id}"><option value="">Place on…</option>${plannerDaySelectOptionsHtml()}</select>
-</div>`).join('');
+${IS_IOS ? `<select class="planner-select" data-planner-place="connection:${c.id}"><option value="">Place on…</option>${plannerDaySelectOptionsHtml()}</select>` : ''}
+</div>`);
+return poolListHtml(cards, 'priority');
 }
 
 // The auto-priority filter (flag OR stage) is deliberately narrow -- this
@@ -368,11 +394,12 @@ renderPlanner();
 
 function activitiesPoolHtml() {
 if (!data.plannerActivities.length) return '<div class="empty">Nothing yet — add one below.</div>';
-return data.plannerActivities.map((a) => `<div class="planner-pool-card alloc-card" draggable="true" data-planner-drag="activity:${a.id}">
+const cards = data.plannerActivities.map((a) => `<div class="planner-pool-card alloc-card" draggable="true" data-planner-drag="activity:${a.id}">
 <span>${escapeHtml(a.title)}</span>
 <span class="tag-x" data-planner-del-activity="${a.id}" title="Remove from the list">&times;</span>
-<select class="planner-select" data-planner-place="activity:${a.id}"><option value="">Place on…</option>${plannerDaySelectOptionsHtml()}</select>
-</div>`).join('');
+${IS_IOS ? `<select class="planner-select" data-planner-place="activity:${a.id}"><option value="">Place on…</option>${plannerDaySelectOptionsHtml()}</select>` : ''}
+</div>`);
+return poolListHtml(cards, 'activities');
 }
 
 // A leg's date fields are free text (travel.js's legFieldRowHtml normalizes
@@ -438,7 +465,7 @@ const matches = connectionsAtDestinations(trip.destinations);
 const body = matches.length
 ? `<div class="planner-pool-list">${matches.map((c) => `<div class="planner-pool-card alloc-card" draggable="true" data-planner-drag="connection:${c.id}">
 <span class="planner-entry-link" data-planner-open-connection="${c.id}">${avatarHtml(c.photoId, c.name, 'sm')}<span>${escapeHtml(c.name)}</span></span>
-<select class="planner-select" data-planner-place="connection:${c.id}"><option value="">Place on…</option>${plannerDaySelectOptionsHtml()}</select>
+${IS_IOS ? `<select class="planner-select" data-planner-place="connection:${c.id}"><option value="">Place on…</option>${plannerDaySelectOptionsHtml()}</select>` : ''}
 </div>`).join('')}</div>`
 : `<div class="empty">No non-archived connections listed at ${escapeHtml(trip.destinations.join(', '))} yet.</div>`;
 return `<h4>Connections in ${escapeHtml(trip.destinations.join(', '))}</h4>${body}`;
@@ -538,6 +565,13 @@ bindPlannerEvents(panel);
 }
 
 function bindPlannerEvents(root) {
+root.querySelectorAll('[data-planner-pool-more]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const key = btn.dataset.plannerPoolMore;
+if (expandedPools.has(key)) expandedPools.delete(key); else expandedPools.add(key);
+renderPlanner();
+});
+});
 // The touch/no-drag fallback -- see plannerDaySelectOptionsHtml's own
 // comment. Parses the same "kind:refId" / "date|tripId" encodings the
 // drag payload and drop-zone dataset already use, then calls the exact

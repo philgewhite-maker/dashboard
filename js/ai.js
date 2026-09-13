@@ -1147,23 +1147,27 @@ reason: (data && data.reason) || '',
 // trip this app has to drive. Billed per-search on top of tokens — that
 // per-search fee isn't in PRICES_PER_MTOK, so the Settings usage estimate
 // undercounts this purpose specifically.
-const SHOPPING_SEARCH_MODEL = 'claude-haiku-4-5-20251001';
+// Upgraded from Haiku 4.5 -- confirmed live, repeatedly, as genuinely not
+// reliable enough for this: a multi-step tool-orchestration task with hard
+// constraints (site-scoped search per retailer, fetch-if-no-price, Amazon
+// mandatory regardless) is exactly the kind of thing a cheap/fast tier
+// under-follows. This runs rarely (one capture, one manual refresh), so
+// the small extra cost buys real reliability rather than another retry.
+const SHOPPING_SEARCH_MODEL = 'claude-sonnet-5';
 const SHOPPING_SEARCH_MAX_TOKENS = 2000;
-// Anchored on the two retailers actually being weighed against each other
-// (a standing ~weekly Tesco order vs. Amazon's no-minimum one-off), plus one
-// more the model judges relevant -- a fixed third choice would suit some
-// items (a pharmacy item) and not others (a cleaning product), so this stays
-// as flexible as the search's own original "well-known retailers that suit
-// this item" framing, just anchored on the two fixed ones. `link`, when
-// given, is the exact page the item was captured from (any retailer, not
-// just Tesco/Amazon) -- fetched directly rather than re-found by search, so
-// a price from a shared link is never lost just because it's from
-// somewhere else.
+// `link`, when given, is the exact page the item was captured from (any
+// retailer, not just Tesco/Amazon) -- fetched directly rather than
+// re-found by search, so a price from a shared link is never lost just
+// because it's from somewhere else.
 function shoppingSearchPrompt(item, link) {
-return `Find where to buy "${item}" online in the UK. Run a SEPARATE, SITE-SCOPED search for each of these -- e.g. \`site:tesco.com ${item}\`, \`site:amazon.co.uk ${item}\` -- rather than one general search, since a single combined query tends to surface price-comparison or .com results instead of the actual UK retailer page: `
-+ 'always tesco.com and amazon.co.uk specifically, plus one more well-known UK retailer that suits this item (e.g. a pharmacy for a medicine, a hardware/homeware site for a cleaning product). '
-+ (link ? `Also check the exact price at this page, whichever retailer it's from: ${link}\n` : '')
-+ 'Search snippets frequently don\'t show a price at all -- this is especially common for Amazon, where the price is rendered dynamically and rarely appears in the search result text itself. Whenever a promising product page turns up with no price in the snippet, FETCH that page directly (you have a fetch tool for exactly this) and read the real price off it before deciding whether to include it -- don\'t report "no price shown" or leave a result out just because the search snippet itself didn\'t have one. '
+return `Find where to buy "${item}" online in the UK.
+
+HARD REQUIREMENTS, in order:
+1. tesco.com and amazon.co.uk are BOTH MANDATORY -- Amazon must appear in your results every single time, never dropped even if a third retailer's results are cleaner or a multibuy variant is more interesting. If your first amazon.co.uk search comes up empty, try again (a plainer query, no site: prefix) before giving up -- do not simply omit Amazon.
+2. Run a SEPARATE, SITE-SCOPED search per retailer -- \`site:tesco.com ${item}\`, \`site:amazon.co.uk ${item}\`, and one more for a third well-known UK retailer that suits this item (e.g. a pharmacy for a medicine, a hardware/homeware site for a cleaning product) -- not one combined general search, which tends to surface price-comparison or .com pages instead of the actual UK retailer page.
+3. A search snippet frequently carries no price at all -- especially common for Amazon, where price is rendered dynamically and rarely appears in search-result text. Whenever a promising page turns up with no price in the snippet, FETCH that exact page (you have a fetch tool for this) and read the real price off it -- never report "no price shown" or drop a result just because the snippet itself lacked one.
+4. At most 2 results per retailer, even if more variants exist -- don't let one retailer's multiple product variants crowd Amazon or the third retailer out of the response.
+` + (link ? `5. Also check the exact price at this page, whichever retailer it's from: ${link}\n` : '')
 + 'For each result, note the retailer, the exact product name, the price if shown, the direct product page URL, and: '
 + 'for Tesco, any multibuy or Clubcard offer shown ("offer", e.g. "3 for 2", "Clubcard price £2.50" — blank if none); '
 + 'for Amazon, the Subscribe & Save price/discount if the page shows one ("subscribeSave", e.g. "£4.49 with 15% Subscribe & Save" — blank if not offered or not shown). '
