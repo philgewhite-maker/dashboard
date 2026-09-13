@@ -62,9 +62,29 @@ btn.addEventListener('click', () => switchTab(btn.dataset.tabBtn));
 // feature-specific to work. Delegated (one listener on the document, not
 // one per element) so it keeps working across every re-render of whatever
 // panel the link happens to live in, with nothing extra to wire up there.
+//
+// An optional `data-goto-target="<selector>"` alongside `data-goto-tab`
+// also opens whichever collapsed `<details class="settings-group">`
+// contains that element and scrolls/flashes it -- confirmed live as a real
+// dead end otherwise: Settings' own accordion sections are collapsed by
+// default, so "add one in Settings" landed on the tab with five closed
+// sections and no clue which one, for every such link pointing into
+// Settings, not just one. Safe to omit for a link that isn't going into
+// a collapsed section (a bare `data-goto-tab` alone still works exactly
+// as before).
 document.addEventListener('click', (e) => {
 const link = e.target.closest('[data-goto-tab]');
-if (link) switchTab(link.dataset.gotoTab);
+if (!link) return;
+switchTab(link.dataset.gotoTab);
+const targetSelector = link.dataset.gotoTarget;
+if (targetSelector) {
+setTimeout(() => {
+const target = document.querySelector(targetSelector);
+if (!target) return;
+target.closest('details.settings-group')?.setAttribute('open', '');
+scrollAndFlash(targetSelector);
+}, 60);
+}
 });
 // A task's `link` (or any pasted URL) can point at #<tab> to open the app
 // straight onto that tab — falls back to overview for a missing/unknown

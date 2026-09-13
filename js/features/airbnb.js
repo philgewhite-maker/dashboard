@@ -477,7 +477,7 @@ if (countEl) countEl.textContent = upcoming.length ? String(upcoming.length) : '
 const errorsHtml = airbnbSyncErrorsHtml();
 el.innerHTML = errorsHtml + (upcoming.length
 ? upcoming.map(reservationRowHtml).join('')
-: (errorsHtml ? '' : '<div class="empty">Nothing upcoming — add a listing in <span class="inline-goto-link" data-goto-tab="settings">Settings</span> and Sync.</div>'));
+: (errorsHtml ? '' : '<div class="empty">Nothing upcoming — add a listing in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#airbnb-listings">Settings</span> and Sync.</div>'));
 
 el.querySelectorAll('[data-airbnb-res-field]').forEach((input) => {
 input.addEventListener('change', () => {
@@ -583,7 +583,7 @@ const el = document.getElementById('airbnb-keys-list');
 if (!el) return;
 el.innerHTML = data.airbnbKeys.length
 ? data.airbnbKeys.map(keyRowHtml).join('')
-: '<div class="empty">No keyrings yet — add one in <span class="inline-goto-link" data-goto-tab="settings">Settings</span>.</div>';
+: '<div class="empty">No keyrings yet — add one in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#keys-settings">Settings</span>.</div>';
 bindAirbnbKeys(el);
 }
 
