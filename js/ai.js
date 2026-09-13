@@ -1163,6 +1163,7 @@ function shoppingSearchPrompt(item, link) {
 return `Find where to buy "${item}" online in the UK. Run a SEPARATE, SITE-SCOPED search for each of these -- e.g. \`site:tesco.com ${item}\`, \`site:amazon.co.uk ${item}\` -- rather than one general search, since a single combined query tends to surface price-comparison or .com results instead of the actual UK retailer page: `
 + 'always tesco.com and amazon.co.uk specifically, plus one more well-known UK retailer that suits this item (e.g. a pharmacy for a medicine, a hardware/homeware site for a cleaning product). '
 + (link ? `Also check the exact price at this page, whichever retailer it's from: ${link}\n` : '')
++ 'Search snippets frequently don\'t show a price at all -- this is especially common for Amazon, where the price is rendered dynamically and rarely appears in the search result text itself. Whenever a promising product page turns up with no price in the snippet, FETCH that page directly (you have a fetch tool for exactly this) and read the real price off it before deciding whether to include it -- don\'t report "no price shown" or leave a result out just because the search snippet itself didn\'t have one. '
 + 'For each result, note the retailer, the exact product name, the price if shown, the direct product page URL, and: '
 + 'for Tesco, any multibuy or Clubcard offer shown ("offer", e.g. "3 for 2", "Clubcard price £2.50" — blank if none); '
 + 'for Amazon, the Subscribe & Save price/discount if the page shows one ("subscribeSave", e.g. "£4.49 with 15% Subscribe & Save" — blank if not offered or not shown). '
@@ -1191,11 +1192,19 @@ async function searchShoppingItem(item, link) {
 // nothing usable for Amazon despite an obvious amazon.co.uk match,
 // most likely because the search defaulted toward .com/US results for
 // a query with no location signal at all.
+// web_fetch is NOT conditional on `link` -- confirmed live as the real
+// remaining gap: web_search alone found the right amazon.co.uk product
+// page, but a search SNIPPET routinely carries no price at all (Amazon
+// especially), and with no fetch tool available the model had no way to
+// go further and actually read one off the page. Always available now,
+// with enough max_uses to fetch each retailer's own found page, not just
+// a passed-in `link`.
 const tools = [{
 type: 'web_search_20260209', name: 'web_search', max_uses: 4, allowed_callers: ['direct'],
 user_location: { type: 'approximate', country: 'GB' },
+}, {
+type: 'web_fetch_20260209', name: 'web_fetch', max_uses: 4, allowed_callers: ['direct'],
 }];
-if (link) tools.push({ type: 'web_fetch_20260209', name: 'web_fetch', max_uses: 1, allowed_callers: ['direct'] });
 const { data: raw } = await callAnthropic(
 [{ type: 'text', text: shoppingSearchPrompt(item, link) }],
 SHOPPING_SEARCH_MAX_TOKENS,
