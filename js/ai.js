@@ -1154,7 +1154,17 @@ reason: (data && data.reason) || '',
 // under-follows. This runs rarely (one capture, one manual refresh), so
 // the small extra cost buys real reliability rather than another retry.
 const SHOPPING_SEARCH_MODEL = 'claude-sonnet-5';
-const SHOPPING_SEARCH_MAX_TOKENS = 2000;
+// Confirmed live: 2000 wasn't a comfortable margin, it was undersized outright
+// -- a real run hit stop_reason:'max_tokens' with NO text block at all after
+// 4 full rounds of thinking + tool calls (3 site-scoped searches, 2 fetches,
+// one more search), the budget exhausted before the model ever got to write
+// the closing JSON. This prompt's own hard requirements (a separate search
+// PER retailer, plus a fetch whenever a snippet has no price) make it a much
+// heavier multi-round tool-orchestration call than a single vision
+// extraction -- WELLNESS_MAX_TOKENS's 4000 wasn't enough headroom either by
+// the same math, so this is sized well past that, same "output tokens are
+// cheap, a failed import isn't" reasoning already applied there.
+const SHOPPING_SEARCH_MAX_TOKENS = 8000;
 // `link`, when given, is the exact page the item was captured from (any
 // retailer, not just Tesco/Amazon) -- fetched directly rather than
 // re-found by search, so a price from a shared link is never lost just
