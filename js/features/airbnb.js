@@ -543,14 +543,32 @@ return l ? (l.label || l.prefix || 'Listing') : null;
 return labels.length ? labels.join(', ') : 'General';
 }
 
-// Shared between a holding-pen card and a reservation's own key chip --
-// same set, same editing surface, everywhere (a key on a reservation could
-// just as easily be with you or the concierge as with the guest).
-function custodianControlHtml(k) {
-return `<select data-key-field="custodian" data-key-id="${k.id}">
-${KEY_CUSTODIAN_TYPES.map((t) => `<option value="${t}"${t === k.custodian ? ' selected' : ''}>${t.charAt(0).toUpperCase() + t.slice(1)}</option>`).join('')}
-</select>
-<input type="text" autocomplete="off" class="tag-add-input" placeholder="Who" data-key-field="custodianName" data-key-id="${k.id}" value="${escapeHtml(k.custodianName)}" style="max-width:90px;"${KEY_NEEDS_NAME.has(k.custodian) ? '' : ' hidden'}>`;
+// Contents/listings are static config (set in Settings, not here) -- shown
+// as a hover tooltip rather than taking up visible card space, per the
+// "still too big" correction below.
+function keyBadgeTitle(k) {
+return [k.contents, keyListingsLabel(k)].filter(Boolean).join(' — ');
+}
+
+// One letter per custodian, cycled with a single click -- planner.js's own
+// planner-status-dot (draft/firm, one click toggles) is the direct
+// precedent; this is the same idea over six states instead of two. Same
+// control used identically on a holding-pen card and a reservation's key
+// chip (correction from your review: no separate narrower toggle for a
+// reservation -- it could just as easily be with you or the concierge
+// there as with the guest).
+const KEY_CUSTODIAN_LETTERS = { me: 'M', concierge: 'C', guest: 'G', cleaner: 'L', workman: 'W', other: 'O' };
+function custodianToggleHtml(k) {
+const label = k.custodian.charAt(0).toUpperCase() + k.custodian.slice(1);
+const nameSuffix = KEY_NEEDS_NAME.has(k.custodian) && k.custodianName ? ` (${k.custodianName})` : '';
+return `<button type="button" class="key-custodian-toggle" data-key-toggle="${k.id}" title="${escapeHtml(label + nameSuffix)} — click to change">${KEY_CUSTODIAN_LETTERS[k.custodian] || '?'}</button>`;
+}
+// The name input only for cleaner/workman/other -- styled to read as plain
+// text until focused (same input.alloc-title pattern used elsewhere), not
+// a full form field, so it doesn't add visible bulk when it's not needed.
+function custodianNameInputHtml(k) {
+if (!KEY_NEEDS_NAME.has(k.custodian)) return '';
+return `<input type="text" autocomplete="off" class="key-name-input" placeholder="Who" data-key-field="custodianName" data-key-id="${k.id}" value="${escapeHtml(k.custodianName)}">`;
 }
 
 // A holding-pen card -- an unassigned key (0 assignments). Draggable onto
@@ -558,25 +576,27 @@ ${KEY_CUSTODIAN_TYPES.map((t) => `<option value="${t}"${t === k.custodian ? ' se
 // custodian ("with the agent for repairs") without forcing that through a
 // reservation picker.
 function keyPoolCardHtml(k) {
-return `<div class="key-pool-card alloc-card" draggable="true" data-key-drag="${k.id}">
-<span class="cal-name">&#128273; ${escapeHtml(k.label || 'Keyring')}</span>
-<div class="cal-event-row">
-${custodianControlHtml(k)}
-<input type="text" autocomplete="off" class="tag-add-input" placeholder="Note (e.g. with agent)" data-key-field="notes" data-key-id="${k.id}" value="${escapeHtml(k.notes)}" style="max-width:140px;">
-</div>
+return `<div class="key-pool-card" draggable="true" data-key-drag="${k.id}" title="${escapeHtml(keyBadgeTitle(k))}">
+<span class="key-label">&#128273; ${escapeHtml(k.label || 'Keyring')}</span>
+${custodianToggleHtml(k)}
+${custodianNameInputHtml(k)}
+<input type="text" autocomplete="off" class="key-note-input" placeholder="note" data-key-field="notes" data-key-id="${k.id}" value="${escapeHtml(k.notes)}">
 </div>`;
 }
 
 // A key chip shown ON a reservation -- also draggable (onto a DIFFERENT
 // reservation, to earmark the same key there too; planner.js's own placed
-// entries stay draggable the same way, for moving between days).
+// entries stay draggable the same way, for moving between days). Mostly
+// plain, ungapped surface to grab -- confirmed live as the actual reason
+// the old wide <select> version was hard to pick up and drag to a second
+// reservation, not a logic bug.
 function keyChipHtml(assignment) {
 const k = data.airbnbKeys.find((x) => x.id === assignment.keyId);
 if (!k) return '';
 const current = isCurrentAssignment(assignment);
-return `<span class="key-chip" draggable="true" data-key-drag="${k.id}">
-<span class="cal-name">&#128273; ${escapeHtml(k.label || 'Keyring')}</span>
-${current ? custodianControlHtml(k) : '<span class="key-pending" title="Earmarked, but a nearer reservation has this key first">Pending</span>'}
+return `<span class="key-chip" draggable="true" data-key-drag="${k.id}" title="${escapeHtml(keyBadgeTitle(k))}">
+<span class="key-label">&#128273; ${escapeHtml(k.label || 'Keyring')}</span>
+${current ? custodianToggleHtml(k) + custodianNameInputHtml(k) : '<span class="key-pending" title="Earmarked, but a nearer reservation has this key first">Pending</span>'}
 <span class="tag-x" data-unassign-key="${assignment.id}" title="Remove from this reservation">&times;</span>
 </span>`;
 }
@@ -595,6 +615,22 @@ input.addEventListener('change', () => {
 const key = data.airbnbKeys.find((k) => k.id === input.dataset.keyId);
 if (!key) return;
 key[input.dataset.keyField] = input.value;
+queueSave();
+renderAirbnbKeys();
+renderAirbnb();
+});
+});
+el.querySelectorAll('[data-key-toggle]').forEach((btn) => {
+btn.addEventListener('click', (e) => {
+e.stopPropagation();
+const key = data.airbnbKeys.find((k) => k.id === btn.dataset.keyToggle);
+if (!key) return;
+const idx = KEY_CUSTODIAN_TYPES.indexOf(key.custodian);
+const next = KEY_CUSTODIAN_TYPES[(idx + 1) % KEY_CUSTODIAN_TYPES.length];
+key.custodian = next;
+// Clears only when LEAVING the name-needing set -- cycling among
+// cleaner/workman/other keeps whatever name was already typed.
+if (!KEY_NEEDS_NAME.has(next)) key.custodianName = '';
 queueSave();
 renderAirbnbKeys();
 renderAirbnb();

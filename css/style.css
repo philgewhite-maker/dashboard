@@ -2240,23 +2240,49 @@ color:var(--ink);
 
 /* Keys (Airbnb panel, Overview tab) -- a compact drag-and-drop "holding
    pen" of unassigned keyrings, dragged onto whichever reservation they
-   belong to -- built on the same .alloc-card/.alloc-target base
-   .planner-pool-card above already reuses, not a new mechanism. Confirmed
-   live: a full .cal-row per keyring (the previous version) didn't scale
-   past two or three, hence the smaller, side-by-side card here instead. */
-#airbnb-keys-list{display:flex;flex-wrap:wrap;gap:8px;}
-.key-pool-card{padding:6px 10px;min-width:160px;}
-.key-pool-card .cal-name{font-size:13px;}
-.key-drop-zone{display:flex;flex-wrap:wrap;gap:6px;min-height:24px;border-radius:7px;padding:2px;}
-.key-drop-zone.over{background:var(--teal-bg);outline:1px dashed var(--teal);}
-.key-chip{
-display:inline-flex;align-items:center;flex-wrap:wrap;gap:6px;
-padding:4px 8px;border-radius:7px;
+   belong to. Confirmed live TWICE: a full .cal-row per keyring (v1) didn't
+   scale past two or three; a card built on .alloc-card with an embedded
+   <select> (v2) was still too big AND, because the select/inputs ate up
+   almost the whole card, there was barely any plain surface left to grab
+   for a drag -- confirmed as the actual reason an already-assigned key
+   couldn't be dragged onto a SECOND reservation, not a logic bug. This
+   version: one line, an icon-button letter-toggle (custodianToggleHtml,
+   airbnb.js -- same click-to-cycle idea as .planner-status-dot below, six
+   states instead of two) instead of a dropdown, contents/listings moved
+   to a hover title instead of visible text. */
+#airbnb-keys-list{display:flex;flex-wrap:wrap;gap:6px;}
+.key-pool-card,.key-chip{
+display:inline-flex;align-items:center;gap:4px;
+padding:3px 7px;border-radius:7px;
+border:1px solid var(--line);
 background:var(--card-alt,var(--card));
 cursor:grab;
+font-size:12px;
 }
-.key-chip.dragging{opacity:.45;}
-.key-chip .cal-name{font-size:12px;font-weight:600;}
+.key-pool-card.dragging,.key-chip.dragging{opacity:.45;}
+.key-label{font-weight:600;white-space:nowrap;}
+.key-custodian-toggle{
+width:20px;height:20px;flex:0 0 auto;
+border-radius:50%;border:1px solid var(--line);
+background:var(--paper);color:var(--ink);
+font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:700;
+padding:0;cursor:pointer;
+display:inline-flex;align-items:center;justify-content:center;
+}
+.key-custodian-toggle:hover{background:var(--sage-bg);}
+.key-name-input,.key-note-input{
+border:1px solid transparent;background:transparent;
+font-family:'Inter',sans-serif;font-size:11px;
+padding:1px 3px;border-radius:4px;
+width:52px;
+}
+.key-name-input{color:var(--ink);}
+.key-note-input{color:var(--muted);}
+.key-name-input:hover,.key-name-input:focus,.key-note-input:hover,.key-note-input:focus{
+border-color:var(--line);background:var(--paper);color:var(--ink);outline:none;
+}
+.key-drop-zone{display:flex;flex-wrap:wrap;gap:6px;min-height:24px;border-radius:7px;padding:2px;}
+.key-drop-zone.over{background:var(--teal-bg);outline:1px dashed var(--teal);}
 .key-pending{font-size:11px;font-style:italic;color:var(--muted);}
 .planner-grid{
 display:grid;
