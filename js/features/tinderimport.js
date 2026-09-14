@@ -29,7 +29,7 @@ import { storePhoto, fetchProxiedImage } from '../files.js';
 import { photoGet, photoUrl } from '../db.js';
 import { MissingKeyError, compareFaces, translateText, identifyCountry } from '../ai.js';
 import { findPhoneNumbers, findHandles, formatHandle } from '../contactscan.js';
-import { STAGE_RANK, CONN_STAGES, unionInto, connectionPickerHtml, bindConnPickers, setConnPickerValue, matchCandidates } from './connections.js';
+import { STAGE_RANK, CONN_STAGES, unionInto, connectionPickerHtml, bindConnPickers, setConnPickerValue, matchCandidates, connectionChipHtml, bindConnectionChips } from './connections.js';
 import { proposalsForPerson, languageFrequencies } from './tagcleanup.js';
 
 // True only if the extracted chat has a message from BOTH sides, not just
@@ -1366,6 +1366,15 @@ return [1, 2, 3, 4, 5].map((n) => `<svg class="star tinder-rating-star${n <= cur
 // so it keeps showing (and can keep being worked through) even while the
 // one-by-one queue below it is empty, mid-review, or being cleared.
 let bulkSubmitMessage = ''; // outlives the rows it refers to -- see renderBulk()'s empty-list branch
+// Connections a bulk submit saved but couldn't fetch every photo/video
+// for -- linked directly here (connectionChipHtml, same pattern as any
+// other record shown away from its own card) instead of folding into
+// bulkSubmitMessage's bare count, which left no way to tell WHICH of
+// e.g. 90 saved needed a look without re-importing everything. Also
+// visible later, permanently, via tinderPhotoRetryNeeded on the
+// connection's own card -- this list is just the immediate "here, right
+// now" pointer.
+let bulkSubmitIssueConns = [];
 
 function renderBulk() {
 const el = document.getElementById('tinder-bulk-review');
@@ -1375,7 +1384,10 @@ if (!bulkQueue.length) {
 // span the confirmation message would have been written into -- shown
 // here instead, in whatever's left of the card, so "Saved 2." doesn't
 // just vanish the instant the last row goes.
-el.innerHTML = bulkSubmitMessage ? `<div class="settings-note" style="margin:6px 0;">${escapeHtml(bulkSubmitMessage)}</div>` : '';
+const issueHtml = bulkSubmitIssueConns.length
+? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:6px;">${bulkSubmitIssueConns.map((c) => connectionChipHtml(c)).join('')}</div>`
+: '';
+el.innerHTML = bulkSubmitMessage ? `<div class="settings-note" style="margin:6px 0;">${escapeHtml(bulkSubmitMessage)}${issueHtml}</div>` : '';
 return;
 }
 const allSelected = bulkQueue.every((r) => r.selected);
@@ -1527,22 +1539,23 @@ const selected = bulkQueue.filter((r) => r.selected);
 if (!selected.length) return;
 submitBtn.disabled = true;
 let saved = 0;
-let photoIssues = 0;
+const issueConns = [];
 for (let i = 0; i < selected.length; i++) {
 if (bulkStatus) bulkStatus.textContent = `Saving ${i + 1} of ${selected.length}…`;
 const result = await applyPendingToConnection(selected[i].p);
-if (result.ok) { saved++; if (result.failed) photoIssues++; }
+if (result.ok) { saved++; if (result.failed) issueConns.push(result.conn); }
 }
 bulkQueue = bulkQueue.filter((r) => !selected.includes(r));
 Promise.all([import('./connections.js'), import('./overview.js')])
 .then(([c, o]) => { c.renderConnections(); o.renderOverview(); hydratePhotoBackgrounds(document.getElementById('conn-list') || document.body); });
-const message = `Saved ${saved}${photoIssues ? ` (${photoIssues} had a photo that needs a retry — open them individually)` : ''}.`;
+const message = `Saved ${saved}${issueConns.length ? ` (${issueConns.length} had a photo that needs a retry — flagged on their own card until re-scraped)` : ''}.`;
 if (bulkQueue.length) {
 renderBulk();
 const finalStatus = document.getElementById('tinder-bulk-status');
 if (finalStatus) finalStatus.textContent = message;
 } else {
 bulkSubmitMessage = message;
+bulkSubmitIssueConns = issueConns;
 renderBulk();
 }
 });
@@ -2159,6 +2172,19 @@ v.apply = false;
 }
 }
 
+// A failed photo/video is still visible on the connection's own card
+// (see connections.js's tinderPhotoRetryNeeded note), not just in
+// whatever save/bulk-submit message happened to be on screen at the
+// time -- a bulk import folded a single failure into a bare "N had a
+// photo that needs a retry" count with no way to tell WHICH of e.g. 90
+// saved that was without re-importing everything. Cleared on a later
+// clean pass (failed === 0) rather than only ever set: a re-scrape gets
+// fresh, unexpired signed URLs and the existing tinderPhotoKeys dedupe
+// means only whatever was actually missing lands as new, so a
+// successful re-scrape is itself the resolution, not a separate ack.
+if (failed) conn.tinderPhotoRetryNeeded = true;
+else if (toFetch.length + vidsToFetch.length) conn.tinderPhotoRetryNeeded = false;
+
 // Stage, City and overall rating are edited directly in the review card
 // (a suggested stage pre-fills the dropdown, but nothing here is silent —
 // whatever's showing when Save is clicked is what's applied), same as
@@ -2292,7 +2318,7 @@ if (!raws.length) { if (status) status.textContent = 'Nothing to import in that.
 recordImportRun('tinderSnippet', { scope: `${raws.length} profile${raws.length === 1 ? '' : 's'} read`, count: raws.length });
 renderTinderLastRun();
 const { bulk, review } = classifyRaws(raws);
-if (bulk.length) bulkSubmitMessage = '';
+if (bulk.length) { bulkSubmitMessage = ''; bulkSubmitIssueConns = []; }
 bulkQueue = bulkQueue.concat(bulk);
 queue = review.slice(1);
 if (review.length) loadFromRaw(review[0]);
@@ -2849,6 +2875,7 @@ else if (!errors.length && !unmatchedIds.length && status) status.textContent = 
 }
 
 function initTinderImport() {
+bindConnectionChips();
 renderTinderLastRun();
 const status = document.getElementById('dating-import-status');
 

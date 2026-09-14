@@ -1139,6 +1139,7 @@ ${visibleTagFields().filter((f) => f.field !== 'location').map((f) => `<label cl
 <label class="full">Ratings${averageRatingHtml(c)}<div class="ratings-block">${data.ratingCategories.map(({ field, label }) => ratingStars(label, field, c.id, (c.ratings && c.ratings[field]) || 0)).join('')}</div></label>
 <label class="full">Things to do<div>${todoListHtml(c)}</div></label>
 <div class="field-block full"><span class="field-label">Photos</span>${galleryHtml(c)}
+${c.tinderPhotoRetryNeeded ? `<div class="settings-note" style="color:var(--amber);margin:2px 0 0;">⚠ A photo or video didn't save on the last Tinder import — the link had likely expired by the time it was fetched. Re-scraping gets fresh links and only adds whatever's actually missing (already-saved photos are skipped as duplicates)${c.tinderMatchId ? ` — run <code>tinderReextract(["${escapeHtml(c.tinderMatchId)}"])</code> in the console snippet` : ''}.</div>` : ''}
 <label class="file-btn" for="parse-profile-${c.id}">📥 Add photos &amp; parse profile</label>
 <input type="file" id="parse-profile-${c.id}" accept="image/*" multiple style="display:none;" data-parse-profile="${c.id}">
 <span class="settings-note" id="parse-profile-status-${c.id}"></span>
