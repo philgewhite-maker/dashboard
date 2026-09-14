@@ -1429,6 +1429,13 @@ border:none;
 /* Mail */
 .mail-section{display:flex;flex-direction:column;}
 .mail-trip-picker{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 0 10px;}
+/* Same gotcha as .overview-chips/.conn-picker-panel/.planner-push-panel
+   above -- an author rule beats the UA default [hidden]{display:none} at
+   equal (0,1,0) specificity, so .mail-trip-picker{display:flex} above won
+   and every row's picker showed permanently regardless of the `hidden`
+   attribute mail.js's own toggle sets. Confirmed live as exactly the "every
+   email now has buttons for existing trip, new trip, where to..." report. */
+.mail-trip-picker[hidden]{display:none;}
 .mail-trip-picker select, .mail-trip-picker input{
 font-family:'Inter',sans-serif;
 font-size:12px;

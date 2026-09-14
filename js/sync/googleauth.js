@@ -80,9 +80,22 @@ callback: () => {}, // replaced per-call in requestToken()
 return tokenClient;
 }
 
+// Confirmed live as a real hang, desktop-only, same account that worked
+// fine on mobile: a silent (prompt:'') token refresh calls back via an
+// invisible iframe, and that iframe can just never call back at all --
+// no error, no success -- most likely where third-party storage for
+// accounts.google.com is partitioned or blocked, which desktop browsers
+// enforce far more consistently than mobile ones. Nothing is on screen
+// for the user to interact with either way, so a bounded wait plus a
+// clear error beats "Loading…" sitting there forever with no signal at
+// all. Interactive (prompt:'consent', a real popup someone's looking at)
+// gets no such bound -- cutting off an actual human mid-decision would
+// be actively wrong, not a safety net.
+const SILENT_TOKEN_TIMEOUT_MS = 8000;
+
 async function requestToken(prompt) {
 await refreshScopes();
-return new Promise((resolve, reject) => {
+const attempt = new Promise((resolve, reject) => {
 const client = ensureTokenClient();
 client.callback = (resp) => {
 if (resp.error) reject(new Error(`Google sign-in failed: ${resp.error}`));
@@ -91,6 +104,14 @@ else resolve(resp);
 client.error_callback = (err) => reject(new Error(err?.message || 'Google sign-in was cancelled or failed.'));
 client.requestAccessToken({ prompt });
 });
+if (prompt) return attempt;
+return Promise.race([
+attempt,
+new Promise((_, reject) => setTimeout(
+() => reject(new Error("Google's silent sign-in refresh didn't respond — try Sign In again, or check for anything (a privacy extension, a browser setting) blocking third-party cookies/storage for accounts.google.com.")),
+SILENT_TOKEN_TIMEOUT_MS,
+)),
+]);
 }
 
 async function getAccessToken(interactive) {
@@ -157,10 +178,32 @@ cachedToken = null;
 await setLocalSetting('googleConnected', false);
 }
 
+// Same reasoning as SILENT_TOKEN_TIMEOUT_MS above, one layer further in --
+// confirmed live, this can also hang on the actual API request itself
+// (Gmail search/metadata, Calendar, Contacts, Tasks, a single Drive photo
+// upload), not just the token step, with nothing thrown and nothing shown
+// beyond whatever "Loading…" the caller already had up. 20s matches this
+// codebase's own precedent for a bounded API call (selfhost.js's
+// REQUEST_TIMEOUT_MS is 15s for a comparable JSON round-trip) with a
+// little extra room for the heavier calls that go through here too (a
+// Drive photo upload, one at a time -- files.js's own 120s is for that
+// module's much larger multi-file transcription uploads specifically, not
+// a fit for a single small API call sitting on "Loading…").
+const GOOGLE_FETCH_TIMEOUT_MS = 20000;
+
 // Authenticated fetch helper for any Google API — Drive, Calendar, etc.
 async function googleFetch(url, options = {}, interactive) {
 const token = await getAccessToken(interactive);
-return fetch(url, { ...options, headers: { ...(options.headers || {}), Authorization: `Bearer ${token}` } });
+const controller = new AbortController();
+const timer = setTimeout(() => controller.abort(), GOOGLE_FETCH_TIMEOUT_MS);
+try {
+return await fetch(url, { ...options, headers: { ...(options.headers || {}), Authorization: `Bearer ${token}` }, signal: controller.signal });
+} catch (err) {
+if (err.name === 'AbortError') throw new Error(`Google didn't respond within ${GOOGLE_FETCH_TIMEOUT_MS / 1000}s — try again, or check for anything (a privacy extension, a network filter) that might be blocking requests to Google's API.`);
+throw err;
+} finally {
+clearTimeout(timer);
+}
 }
 
 // True when the current session was granted the Contacts write scope, so UI
