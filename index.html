@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v329</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v330</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -2057,7 +2057,16 @@ window.tinderSeedStale = (dateById, videoBacklogIds) => {
 // request that shaped this) -- whoever doesn't get refreshed today just
 // carries over and gets picked again next run, same as a normal missed day
 // costs nothing.
-async function staleSweepTail(n) {
+async function staleSweepTail(n, chunkSize) {
+  // Checkpoints its own file this often too, same reasoning as the primary
+  // run's own CHUNK_SIZE -- confirmed as a real gap: this used to hold
+  // everyone in memory and write ONE file only at the very end, so a big
+  // n (or a manual Ctrl+C, or a memory-related crash left running
+  // overnight) lost the ENTIRE stale-refresh batch, not just the last
+  // partial chunk the way the primary run was already protected. Defaults
+  // lower than the primary run's 25 -- a stale-refresh session is more
+  // likely to be a large, unattended, or manually-interrupted one.
+  const CHUNK_SIZE = chunkSize || 15;
   const staleMap = loadStaleMap();
   const ids = Object.keys(staleMap);
   if (!ids.length) return; // never seeded (e.g. an old copy of this snippet, pasted by hand) -- nothing to act on
@@ -2093,13 +2102,32 @@ async function staleSweepTail(n) {
     } catch (err) {
       console.warn(`Stale-refresh: extraction failed for ${row.name}: ${err.message} -- skipped.`);
     }
+    if (profiles.length >= CHUNK_SIZE) downloadChunk(profiles.splice(0, profiles.length), false, chunkState, 'tinder-stale-refresh');
     if (i < batch.length - 1) await randomDelay();
   }
+  // Whatever's left is the tail end that hasn't hit a CHUNK_SIZE checkpoint
+  // yet -- downloadChunk() itself no-ops on an empty list, so this is safe
+  // to call even when the loop above already flushed everything exactly on
+  // a chunk boundary.
   downloadChunk(profiles, false, chunkState, 'tinder-stale-refresh');
-  console.log(`Stale-refresh: ${chunkState.totalSaved} of ${batch.length} saved to its own file in Downloads -- paste in whenever, no rush; anyone skipped today just gets picked again another run.`);
+  console.log(`Stale-refresh: ${chunkState.totalSaved} of ${batch.length} saved across ${chunkState.chunkIndex} file${chunkState.chunkIndex === 1 ? '' : 's'} in Downloads -- paste in whenever, no rush; anyone skipped today just gets picked again another run.`);
 }
 
-console.log('Ready. Run tinderBulkImport() for the default 15, tinderBulkImport(30) for a custom size, or e.g. tinderBulkImport(250) left running overnight -- checkpoints to a file every 25. Or tinderCatchUp("2026-08-10") to re-check active conversations and new matches since a date -- good for a weekly pass. Or tinderFindUnmatched() to spot anyone missing from both lists since they were last indexed. Or tinderFindMissing() to spot the opposite -- matches in your sidebar the dashboard never stored (e.g. an early run scraped them before their panel loaded); it prints a ready tinderReextract([...]) call, and ignores this browser\'s skip-list. Or tinderReextract(["id1", "id2", ...]) to re-check a specific, already-known list of ids -- e.g. profiles a JSON cross-check flagged as suspiciously incomplete. Or tinderSeedDone([...ids]) to mark ids you already have elsewhere as done without opening them -- the dashboard\'s "Copy bulk-import snippet" button does this automatically, along with tinderSeedStale({...}, [...]) which both tinderBulkImport() and tinderCatchUp() use to also refresh a handful of your longest-untouched profiles after their main run (2nd arg: ids still owed a video-clip check from before that feature existed -- those go first), in their own separate file.');
+// Standalone entry point for a large, dedicated stale-refresh session --
+// e.g. tinderStaleRefresh(200) left running overnight -- rather than only
+// ever getting a small batch as a tail-add-on to tinderBulkImport()/
+// tinderCatchUp(). Matters for the exact overlap this was built to avoid:
+// the dashboard's own "who's most overdue" ranking only updates once a
+// stale-refresh file is actually pasted back in and saved, so invoking
+// the SMALL tail-add-on repeatedly in one sitting (25, then another 25,
+// before pasting either in) reselects the same longest-untouched people
+// every time rather than rotating through more of the list. One longer
+// call, its own frequent checkpoints protecting it, covers more ground
+// without that problem. n defaults to 25 (same as the tail-add-on's own
+// default); chunkSize defaults to 15.
+window.tinderStaleRefresh = (n, chunkSize) => staleSweepTail(n ?? 25, chunkSize ?? 15);
+
+console.log('Ready. Run tinderBulkImport() for the default 15, tinderBulkImport(30) for a custom size, or e.g. tinderBulkImport(250) left running overnight -- checkpoints to a file every 25. Or tinderCatchUp("2026-08-10") to re-check active conversations and new matches since a date -- good for a weekly pass. Or tinderFindUnmatched() to spot anyone missing from both lists since they were last indexed. Or tinderFindMissing() to spot the opposite -- matches in your sidebar the dashboard never stored (e.g. an early run scraped them before their panel loaded); it prints a ready tinderReextract([...]) call, and ignores this browser\'s skip-list. Or tinderReextract(["id1", "id2", ...]) to re-check a specific, already-known list of ids -- e.g. profiles a JSON cross-check flagged as suspiciously incomplete. Or tinderSeedDone([...ids]) to mark ids you already have elsewhere as done without opening them -- the dashboard\'s "Copy bulk-import snippet" button does this automatically, along with tinderSeedStale({...}, [...]) which both tinderBulkImport() and tinderCatchUp() use to also refresh a handful of your longest-untouched profiles after their main run (2nd arg: ids still owed a video-clip check from before that feature existed -- those go first), in their own separate file, checkpointed every 15. Or tinderStaleRefresh(200) to run a large, dedicated stale-refresh session on its own instead of only ever getting a small tail-add-on -- better than calling the small version repeatedly in one sitting, which just reselects the same people until a file is actually pasted back in; tinderStaleRefresh(200, 10) to also checkpoint more often than the default 15.');
 })();</pre>
 </details>
 </details>
