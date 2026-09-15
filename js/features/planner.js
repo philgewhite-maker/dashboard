@@ -27,7 +27,7 @@
 const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 import { data, queueSave, blankPlannerEntry, blankPlannerActivity, isDormantStage, isTravelPaused, LEG_DATE_FIELDS } from '../state.js';
 import { escapeHtml, uid, todayStr, dateStrAdd, avatarHtml, hydratePhotoBackgrounds, bindForm, foldDiacritics, scrollAndFlash, parseLooseDateTime } from '../utils.js';
-import { isPriorityConnection, renderConnPicker, bindConnPickers, expandConnection } from './connections.js';
+import { isPriorityConnection, renderConnPicker, bindConnPickers, expandConnection, connectionChipHtml, bindConnectionChips } from './connections.js';
 import { switchTab } from '../tabs.js';
 import { revealTrip } from './travel.js';
 import { airbnbSegmentsForDay } from './airbnb.js';
@@ -233,7 +233,7 @@ ${scope.days.map((d) => `<option value="${d}|${scope.tripId}"${selected && d ===
 }
 
 function plannerEntryHtml(entry) {
-let label, avatar = '', openAttr = '';
+let label, avatar = '', openAttr = '', activityConnChip = '';
 if (entry.kind === 'connection') {
 const c = data.connections.find((x) => x.id === entry.connectionId);
 if (!c) return ''; // the connection was deleted since this was placed
@@ -244,6 +244,15 @@ openAttr = ` data-planner-open-connection="${c.id}"`;
 const a = data.plannerActivities.find((x) => x.id === entry.activityId);
 if (!a) return ''; // the activity was removed from the pool since this was placed
 label = escapeHtml(a.title);
+// connectionId is optional on an activity (Mail's "+ date event" action
+// is the one place that sets it, js/features/mail.js) -- quietly omit
+// the chip if it's blank or points at a since-deleted connection, same
+// "nothing extra" rule the connection-kind/activity-kind branches above
+// already follow for a dangling reference.
+if (a.connectionId) {
+const linkedConn = data.connections.find((x) => x.id === a.connectionId);
+if (linkedConn) activityConnChip = connectionChipHtml(linkedConn);
+}
 }
 // Draft/firm used to be a wide text pill ("DRAFT"/"FIRM") -- confirmed
 // live to crowd the name off a phone's 2-column day grid. Replaced with
@@ -255,6 +264,7 @@ label = escapeHtml(a.title);
 // same line.
 return `<div class="planner-entry alloc-card status-${entry.status}" draggable="true" data-planner-entry="${entry.id}">
 <span class="planner-entry-link"${openAttr}>${avatar}<span class="planner-entry-label">${label}</span></span>
+${activityConnChip}
 <div class="planner-entry-controls">
 <button type="button" class="planner-status-dot status-${entry.status}" data-planner-toggle-status="${entry.id}" title="${entry.status === 'draft' ? 'Draft' : 'Firm'} — click to mark ${entry.status === 'draft' ? 'firm' : 'draft'}"></button>
 ${entry.endDate ? `<button type="button" class="planner-span-btn" data-planner-shrink="${entry.id}" title="Shrink by one day">&laquo;</button>` : ''}
@@ -394,11 +404,19 @@ renderPlanner();
 
 function activitiesPoolHtml() {
 if (!data.plannerActivities.length) return '<div class="empty">Nothing yet — add one below.</div>';
-const cards = data.plannerActivities.map((a) => `<div class="planner-pool-card alloc-card" draggable="true" data-planner-drag="activity:${a.id}">
+const cards = data.plannerActivities.map((a) => {
+// connectionId is optional -- set by Mail's "+ date event" action
+// (js/features/mail.js), blank for an idea added here directly. Same
+// quietly-omit-a-dangling-reference rule as plannerEntryHtml's own
+// activity branch.
+const conn = a.connectionId ? data.connections.find((x) => x.id === a.connectionId) : null;
+return `<div class="planner-pool-card alloc-card" draggable="true" data-planner-drag="activity:${a.id}">
 <span>${escapeHtml(a.title)}</span>
+${conn ? connectionChipHtml(conn) : ''}
 <span class="tag-x" data-planner-del-activity="${a.id}" title="Remove from the list">&times;</span>
 ${IS_IOS ? `<select class="planner-select" data-planner-place="activity:${a.id}"><option value="">Place on…</option>${plannerDaySelectOptionsHtml()}</select>` : ''}
-</div>`);
+</div>`;
+});
 return poolListHtml(cards, 'activities');
 }
 
@@ -817,6 +835,7 @@ renderPlanner();
 
 function initPlanner() {
 bindConnPickers();
+bindConnectionChips(); // for the optional connection chip on an activity card/entry, see plannerEntryHtml/activitiesPoolHtml
 bindForm('planner-activity-form', () => {
 const input = document.getElementById('planner-activity-input');
 if (!input) return;

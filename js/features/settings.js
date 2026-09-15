@@ -1,4 +1,4 @@
-import { data, queueSave, getLocalSettings, setLocalSetting, exportBackup, importBackup, MAIL_SEARCH_KINDS } from '../state.js';
+import { data, queueSave, getLocalSettings, setLocalSetting, exportBackup, importBackup, MAIL_SEARCH_KINDS, blankMailSearch, blankMailTopic } from '../state.js';
 import { renderAll } from '../render-all.js';
 import { escapeHtml, uid } from '../utils.js';
 import { renderCalendarLimits } from './calendars.js';
@@ -12,6 +12,7 @@ import { canAttemptGoogleAction, refreshScopes } from '../sync/googleauth.js';
 import { getRemoteInfo, getRemoteCounts, countsOf, pushToGoogleDrive, pullFromGoogleDrive } from '../sync/googledrive.js';
 import { phoneKey, emailKey, nameKey } from '../googlecontacts.js';
 import { CAPTURE_OUTCOMES } from './captureOutcomes.js';
+import { MAIL_ACTIONS } from './mailActions.js';
 
 // Spend is only ever an estimate: it's computed from the token counts the
 // API reports multiplied by list prices baked into ai.js, so it ignores
@@ -306,9 +307,16 @@ queueSave();
 });
 
 renderCalendarLimits();
+renderMailTopics();
+document.getElementById('add-mail-topic-btn').addEventListener('click', () => {
+data.mailTopics.push(blankMailTopic());
+renderMailTopics();
+renderMailSearches(); // new topic needs to show up in every search's <select>
+queueSave();
+});
 renderMailSearches();
 document.getElementById('add-mail-search-btn').addEventListener('click', () => {
-data.mailSearches.push({ id: uid(), kind: 'from', value: '', maxDays: 0, maxEvents: 0 });
+data.mailSearches.push(blankMailSearch({ kind: 'from' }));
 renderMailSearches();
 queueSave();
 });
@@ -438,6 +446,70 @@ queueSave();
 });
 }
 
+// One editable row per mail topic: a label, and up to 3 ticked "preferred"
+// actions from MAIL_ACTIONS (js/features/mailActions.js) -- what a mail
+// search's topicId (set in the Mail searches table below) actually buys
+// it. Same "table row = record, del-x per row, one generic change-
+// listener" shape as renderShareUrlRules/renderCaptureRules above.
+function renderMailTopics() {
+const el = document.getElementById('mail-topics');
+if (!el) return;
+if (data.mailTopics.length === 0) {
+el.innerHTML = '<div class="settings-note" style="margin:0;">No topics yet — every mail search renders on its own, same as before topics existed.</div>';
+return;
+}
+const actionKeys = Object.keys(MAIL_ACTIONS);
+el.innerHTML = `<table class="limits-table">
+<thead><tr><th>Topic</th><th>Preferred actions (up to 3)</th><th></th></tr></thead>
+<tbody>${data.mailTopics.map((t) => `<tr>
+<td><input type="text" autocomplete="off" data-topic-field="label" data-topic-id="${t.id}" value="${escapeHtml(t.label || '')}" placeholder="e.g. Travel"></td>
+<td>${actionKeys.map((k) => `<label style="display:inline-flex;align-items:center;gap:4px;margin-right:10px;font-size:12px;font-weight:400;">
+<input type="checkbox" data-topic-action="${k}" data-topic-id="${t.id}"${t.preferredActionIds.includes(k) ? ' checked' : ''}>
+${escapeHtml(MAIL_ACTIONS[k].label)}
+</label>`).join('')}</td>
+<td><span class="del-x" style="opacity:1;" data-del-topic="${t.id}">&times;</span></td>
+</tr>`).join('')}</tbody>
+</table>`;
+
+el.querySelectorAll('[data-topic-field]').forEach((input) => {
+input.addEventListener('change', () => {
+const topic = data.mailTopics.find((t) => t.id === input.dataset.topicId);
+if (!topic) return;
+topic[input.dataset.topicField] = input.value.trim();
+queueSave();
+renderMailSearches(); // topic <select> options show its label
+});
+});
+el.querySelectorAll('[data-topic-action]').forEach((cb) => {
+cb.addEventListener('change', () => {
+const topic = data.mailTopics.find((t) => t.id === cb.dataset.topicId);
+if (!topic) return;
+const actionId = cb.dataset.topicAction;
+if (cb.checked) {
+// Silently revert rather than a popup -- the box itself unticking
+// again is feedback enough for "no, that's the 3rd already".
+if (topic.preferredActionIds.length >= 3) { cb.checked = false; return; }
+topic.preferredActionIds.push(actionId);
+} else {
+topic.preferredActionIds = topic.preferredActionIds.filter((id) => id !== actionId);
+}
+queueSave();
+});
+});
+el.querySelectorAll('[data-del-topic]').forEach((x) => {
+x.addEventListener('click', () => {
+const id = x.dataset.delTopic;
+data.mailTopics = data.mailTopics.filter((t) => t.id !== id);
+// A search pointed at the deleted topic falls back to rendering on
+// its own, same as it would for a topic it was never assigned.
+data.mailSearches.forEach((s) => { if (s.topicId === id) s.topicId = ''; });
+renderMailTopics();
+renderMailSearches();
+queueSave();
+});
+});
+}
+
 // One editable row per mail search: what to look for, and its own caps.
 function renderMailSearches() {
 const el = document.getElementById('mail-searches');
@@ -447,7 +519,7 @@ el.innerHTML = '<div class="settings-note" style="margin:0;">No searches yet —
 return;
 }
 el.innerHTML = `<table class="limits-table">
-<thead><tr><th>Search</th><th></th><th>Max days</th><th>Max results</th><th></th></tr></thead>
+<thead><tr><th>Search</th><th></th><th>Topic</th><th>Max days</th><th>Max results</th><th></th></tr></thead>
 <tbody>${data.mailSearches.map((s) => {
 const needsValue = MAIL_SEARCH_KINDS.find((k) => k.kind === s.kind)?.needsValue;
 return `<tr>
@@ -455,13 +527,17 @@ return `<tr>
 ${MAIL_SEARCH_KINDS.map((k) => `<option value="${k.kind}"${k.kind === s.kind ? ' selected' : ''}>${escapeHtml(k.label)}</option>`).join('')}
 </select></td>
 <td><input type="text" autocomplete="off" data-search-field="value" data-search-id="${s.id}" value="${escapeHtml(s.value)}" placeholder="${needsValue ? 'e.g. a@gmail.com' : '—'}"${needsValue ? '' : ' disabled'}></td>
+<td><select data-search-field="topicId" data-search-id="${s.id}">
+<option value=""${s.topicId ? '' : ' selected'}>— none —</option>
+${data.mailTopics.map((t) => `<option value="${t.id}"${t.id === s.topicId ? ' selected' : ''}>${escapeHtml(t.label || 'Untitled topic')}</option>`).join('')}
+</select></td>
 <td><input type="number" min="0" max="365" data-search-field="maxDays" data-search-id="${s.id}" value="${s.maxDays || ''}" placeholder="any"></td>
 <td><input type="number" min="0" max="50" data-search-field="maxEvents" data-search-id="${s.id}" value="${s.maxEvents || ''}" placeholder="${data.prefs.mailResultCount}"></td>
 <td><span class="del-x" style="opacity:1;" data-del-search="${s.id}">&times;</span></td>
 </tr>`;
 }).join('')}</tbody>
 </table>
-<div class="settings-note" style="margin:6px 0 0;">Blank means no day limit, and the default result count. Applies next time you press "Refresh mail".</div>`;
+<div class="settings-note" style="margin:6px 0 0;">Blank means no day limit, and the default result count. Topic groups this search with any others sharing it in the Mail panel and picks its preferred action buttons (set topics above) — leave as "— none —" for a search to keep rendering on its own. Applies next time you press "Refresh mail".</div>`;
 
 el.querySelectorAll('[data-search-field]').forEach((input) => {
 input.addEventListener('change', () => {

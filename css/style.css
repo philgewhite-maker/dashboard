@@ -1428,15 +1428,21 @@ border:none;
 
 /* Mail */
 .mail-section{display:flex;flex-direction:column;}
-.mail-trip-picker{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 0 10px;}
+/* One per (action, message) pair, generalized from the trip-leg-only
+   .mail-trip-picker this used to be -- tripLeg/dateEvent (js/features/
+   mail.js, js/features/mailActions.js) each get their own instance per
+   row, toggled independently. */
+.mail-action-picker{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 0 10px;}
 /* Same gotcha as .overview-chips/.conn-picker-panel/.planner-push-panel
    above -- an author rule beats the UA default [hidden]{display:none} at
-   equal (0,1,0) specificity, so .mail-trip-picker{display:flex} above won
-   and every row's picker showed permanently regardless of the `hidden`
-   attribute mail.js's own toggle sets. Confirmed live as exactly the "every
-   email now has buttons for existing trip, new trip, where to..." report. */
-.mail-trip-picker[hidden]{display:none;}
-.mail-trip-picker select, .mail-trip-picker input{
+   equal (0,1,0) specificity, so .mail-action-picker{display:flex} above
+   would win and every row's picker would show permanently regardless of
+   the `hidden` attribute mail.js's own toggle sets. Confirmed live once
+   already under this class's previous name (.mail-trip-picker) as exactly
+   the "every email now has buttons for existing trip, new trip, where
+   to..." report -- carrying the fix forward under the new name. */
+.mail-action-picker[hidden]{display:none;}
+.mail-action-picker select, .mail-action-picker input{
 font-family:'Inter',sans-serif;
 font-size:12px;
 border:1px solid var(--line);
@@ -1445,6 +1451,25 @@ padding:5px 7px;
 background:var(--card);
 color:var(--ink);
 }
+.mail-other-actions{position:relative;display:inline-flex;}
+.mail-other-menu{
+position:absolute;
+top:100%;
+right:0;
+z-index:5;
+display:flex;
+flex-direction:column;
+gap:4px;
+margin-top:4px;
+padding:6px;
+background:var(--card);
+border:1px solid var(--line);
+border-radius:8px;
+box-shadow:0 4px 14px rgba(0,0,0,.08);
+}
+/* Same [hidden]-vs-author-rule gotcha as .mail-action-picker above --
+   paired from the start this time, not rediscovered as a fifth incident. */
+.mail-other-menu[hidden]{display:none;}
 .leg-target-picker{display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
 .leg-target-mode-row{display:flex;gap:4px;}
 .leg-target-mode-btn{

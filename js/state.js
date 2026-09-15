@@ -40,6 +40,7 @@ enhancementIdeas: [],
 financeAccounts: [], // bank/card accounts -- see js/features/financeaccounts.js, blankFinanceAccount() below
 switchOffers: [], // [{id, bank, offer, eligible, reasoning, suggestedFromAccountId, dismissed}] -- last bank-switch-offers scan, see js/features/switchoffers.js
 mailSearches: [],
+mailTopics: [], // {id, label, preferredActionIds} -- groups mail searches for display and picks which action buttons show, see js/features/mail.js
 tasks: [],
 taskContexts: [...DEFAULT_TASK_CONTEXTS],
 claudeAnswers: {},
@@ -157,6 +158,22 @@ case 'subject': return `Subject: ${value}`;
 case 'contains': return `Contains: “${value}”`;
 default: return value || 'Gmail query';
 }
+}
+
+// The one factory this array was missing -- every other list in this file
+// has one, this was just built inline (settings.js's "Add search" button, a
+// legacy-seed block in migrate()) until topicId needed a third call site.
+function blankMailSearch(fields = {}) {
+return { id: uid(), kind: 'starred', value: '', maxDays: 0, maxEvents: 0, topicId: '', createdAt: new Date().toISOString(), ...fields };
+}
+
+// A topic is purely a display grouping + a set of preferred action ids
+// (see MAIL_ACTIONS, js/features/mailActions.js) -- it doesn't change what
+// a search matches, only how its results are labelled and which action
+// buttons show on them. preferredActionIds is capped at 3 in Settings' own
+// UI, not enforced here -- mail.js reads it defensively (.slice(0, 3)).
+function blankMailTopic(fields = {}) {
+return { id: uid(), label: '', preferredActionIds: [], createdAt: new Date().toISOString(), ...fields };
 }
 
 // GTD buckets. `inbox` is deliberately first and unfiled — capture is meant
@@ -465,12 +482,18 @@ createdAt: new Date().toISOString(),
 
 // The reusable "things to do" pool (Picnic, Theatre show...) -- a short
 // user-curated list, same spirit as taskContexts/ratingCategories below,
-// not one-off GTD actions.
+// not one-off GTD actions. connectionId is optional -- '' for a plain
+// idea, set when the idea is already "for/with" someone specific (e.g.
+// Mail's "+ date event" action, js/features/mail.js). Not cleaned up on
+// connection delete, same as blankPlannerEntry's own connectionId just
+// above -- both are rendered defensively (look the connection up, show
+// nothing extra if it's gone) rather than migration-scrubbed.
 function blankPlannerActivity(fields = {}) {
 return {
 id: uid(),
 title: '',
 notes: '',
+connectionId: '',
 createdAt: new Date().toISOString(),
 ...fields,
 };
@@ -782,7 +805,7 @@ const DEFAULT_FLAG_RULES = [
 ];
 
 function blankData() {
-return { habits: [], goals: [], jobs: [], connections: [], calendars: [], calendarStatus: {}, vouchers: [], businessIdeas: [], subscriptions: [], enhancementIdeas: [], financeAccounts: [], switchOffers: [], mailSearches: [], tasks: [], taskContexts: [...DEFAULT_TASK_CONTEXTS],
+return { habits: [], goals: [], jobs: [], connections: [], calendars: [], calendarStatus: {}, vouchers: [], businessIdeas: [], subscriptions: [], enhancementIdeas: [], financeAccounts: [], switchOffers: [], mailSearches: [], mailTopics: [], tasks: [], taskContexts: [...DEFAULT_TASK_CONTEXTS],
 ratingCategories: DEFAULT_RATING_CATEGORIES.map((c) => ({ ...c })),
 recipes: [], recipeRatingCategories: DEFAULT_RECIPE_RATING_CATEGORIES.map((c) => ({ ...c })), ingredientReference: [], ingredientAliases: {},
 claudeAnswers: {},
@@ -1098,23 +1121,36 @@ if (!Array.isArray(data.mailSearches)) {
 const old = data.prefs || {};
 data.mailSearches = [];
 if ((Number(old.mailStarredLimit) || 0) > 0) {
-data.mailSearches.push({ id: uid(), kind: 'starred', value: '', maxDays: 0, maxEvents: Number(old.mailStarredLimit) });
+data.mailSearches.push(blankMailSearch({ kind: 'starred', maxEvents: Number(old.mailStarredLimit) }));
 }
 (Array.isArray(old.trackedSenders) ? old.trackedSenders : []).forEach((addr) => {
-data.mailSearches.push({
-id: uid(), kind: 'from', value: addr,
+data.mailSearches.push(blankMailSearch({
+kind: 'from', value: addr,
 maxDays: Number(old.mailSenderDays) || 0,
 maxEvents: Number(old.mailSenderLimit) || 0,
-});
+}));
 });
 }
 data.mailSearches = data.mailSearches.map((s) => ({
+...blankMailSearch(),
+...s,
 id: s.id || uid(),
 kind: MAIL_SEARCH_KINDS.some((k) => k.kind === s.kind) ? s.kind : 'query',
 value: String(s.value || ''),
 maxDays: Math.max(0, Number(s.maxDays) || 0),
 maxEvents: Math.max(0, Number(s.maxEvents) || 0),
+topicId: typeof s.topicId === 'string' ? s.topicId : '',
 }));
+// Topics are a first-class deletable record (Settings' own "Mail topics"
+// list, js/features/settings.js), unlike a planner activity's
+// connectionId above -- a stale topicId needs to collapse back to ''
+// ("Other" in mail.js's grouping) rather than being left dangling,
+// since a whole heading would otherwise silently vanish from the panel
+// for no visible reason.
+if (!Array.isArray(data.mailTopics)) data.mailTopics = [];
+data.mailTopics = data.mailTopics.map((t) => ({ ...blankMailTopic(), ...t, id: t.id || uid() }));
+const mailTopicIds = new Set(data.mailTopics.map((t) => t.id));
+data.mailSearches.forEach((s) => { if (s.topicId && !mailTopicIds.has(s.topicId)) s.topicId = ''; });
 
 // Fill in any pref added since this document was last written, without
 // discarding ones already customised. The pre-per-row keys are deliberately
@@ -2055,7 +2091,7 @@ data, sampleData, loadData, migrate, persist, queueSave, flushSave, setSaveStatu
 setExternalUpdateHandler, setLocalChangeHandler, getLocalSettings, setLocalSetting, computeStreak, reachOutThreshold,
 isDormantStage, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness,
 exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, DEFAULT_PREFS,
-MAIL_SEARCH_KINDS, mailSearchLabel,
+MAIL_SEARCH_KINDS, mailSearchLabel, blankMailSearch, blankMailTopic,
 TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureBatch, blankPendingImport, blankConnection, blankTelegramThread, blankReadingItem, blankCaptureDraft,
 blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS, LEG_DATE_FIELDS,
 blankPlannerEntry, blankPlannerActivity,

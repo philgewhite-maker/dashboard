@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v333</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v334</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -101,6 +101,7 @@
 <div class="panel-head">
 <h2><span class="dot rose"></span>Mail</h2>
 <span class="count-badge" id="mail-count"></span>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#mail-searches-block" title="Mail settings">&#9881;</span>
 </div>
 <div class="sync-row">
 <button class="sync-btn" id="sync-mail-btn" type="button">Refresh mail</button>
@@ -2831,9 +2832,16 @@ Same idea as Connections' ratings, a separate list (Taste/Health/Prep by default
 <div class="settings-note">Then use "Sync calendars" on the Overview tab to pull in each one's next upcoming event.</div>
 </div>
 
-<div class="settings-block">
+<div class="settings-block" id="mail-topics-block">
+<h3>Mail topics</h3>
+<div class="settings-note" style="margin:0 0 10px;">Groups mail searches together in the Mail panel and picks which action buttons show on their messages (up to 3 preferred; anything else sits under "Other actions"). A search with no topic renders on its own, same as today.</div>
+<div id="mail-topics"></div>
+<button class="add-btn" id="add-mail-topic-btn" type="button" style="margin-top:8px;">Add topic</button>
+</div>
+
+<div class="settings-block" id="mail-searches-block">
 <h3>Mail searches</h3>
-<div class="settings-note" style="margin:0 0 10px;">Each row becomes its own section in the Mail panel, with its own limits. Synced, so these follow you to your other devices.</div>
+<div class="settings-note" style="margin:0 0 10px;">Each row becomes its own section in the Mail panel (or joins a topic's shared section, above), with its own limits. Synced, so these follow you to your other devices. Uses Gmail's own search syntax — see Google's <a href="https://support.google.com/mail/answer/7190?hl=en-GB&amp;co=GENIE.Platform%3DAndroid" target="_blank" rel="noopener">search operators guide</a> for everything beyond a plain word or two (labels, OR, excluding a term with a leading -, quoted phrases...).</div>
 <div id="mail-searches"></div>
 <button class="add-btn" id="add-mail-search-btn" type="button" style="margin-top:8px;">Add search</button>
 </div>
