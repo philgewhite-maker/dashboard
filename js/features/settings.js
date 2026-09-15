@@ -537,7 +537,7 @@ ${data.mailTopics.map((t) => `<option value="${t.id}"${t.id === s.topicId ? ' se
 </tr>`;
 }).join('')}</tbody>
 </table>
-<div class="settings-note" style="margin:6px 0 0;">Blank means no day limit, and the default result count. Topic groups this search with any others sharing it in the Mail panel and picks its preferred action buttons (set topics above) — leave as "— none —" for a search to keep rendering on its own. Applies next time you press "Refresh mail".</div>`;
+<div class="settings-note" style="margin:6px 0 0;">Blank means no day limit, and the default result count. Topic groups this search with any others sharing it in the Mail panel and picks its preferred action buttons (set topics above) — leave as "— none —" for a search to keep rendering on its own. A message already turned into a task/trip leg/date event doesn't count against the max — it's tucked into a collapsed "already processed" list under the heading instead. Applies next time you press "Refresh mail".</div>`;
 
 el.querySelectorAll('[data-search-field]').forEach((input) => {
 input.addEventListener('change', () => {

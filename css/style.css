@@ -1428,6 +1428,20 @@ border:none;
 
 /* Mail */
 .mail-section{display:flex;flex-direction:column;}
+/* A native <details> -- its own open/collapsed state needs no
+   [hidden]-attribute handling the way the toggled action pickers below
+   do, the browser already owns that. Collapsed by default (no `open`
+   attribute in the markup), one per heading, holding whatever's already
+   been turned into a task/trip-leg/date-event so it doesn't crowd out
+   genuinely new messages above it. */
+.mail-processed{margin-top:4px;}
+.mail-processed summary{
+cursor:pointer;
+font-size:12px;
+color:var(--muted);
+padding:4px 0;
+}
+.mail-processed .mail-section{margin-top:2px;}
 /* One per (action, message) pair, generalized from the trip-leg-only
    .mail-trip-picker this used to be -- tripLeg/dateEvent (js/features/
    mail.js, js/features/mailActions.js) each get their own instance per

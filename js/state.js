@@ -494,6 +494,7 @@ id: uid(),
 title: '',
 notes: '',
 connectionId: '',
+source: null, // {kind:'mail', label, url} -- set by Mail's "+ date event" action, js/features/mail.js. Same shape/convention as blankTask's own source above, so the same "already turned into this" match-by-url logic works identically.
 createdAt: new Date().toISOString(),
 ...fields,
 };

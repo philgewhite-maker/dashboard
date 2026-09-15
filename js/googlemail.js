@@ -63,15 +63,24 @@ const runnable = (searches || [])
 
 const results = await Promise.all(runnable.map(async ({ search, query }) => {
 const limit = Math.max(1, Number(search.maxEvents) || Number(defaultCount) || 5);
-return { search, ids: await searchMessageIds(query, limit) };
+// Fetched generously above `limit` -- js/features/mail.js hides any
+// message already turned into a task/trip-leg/date-event in its own
+// collapsed section, without it counting against this search's
+// configured count. Gmail's own maxResults can't exclude specific ids
+// server-side, so the only way an already-processed message doesn't
+// silently crowd out a genuinely new one is fetching enough headroom
+// that filtering some out at render time still leaves `limit` worth of
+// actionable ones in the common case.
+const fetchLimit = Math.ceil(limit * 1.5) + 5;
+return { search, limit, ids: await searchMessageIds(query, fetchLimit) };
 }));
 
 const seen = new Set();
 const sections = [];
-for (const { search, ids } of results) {
+for (const { search, limit, ids } of results) {
 const unique = ids.filter((id) => !seen.has(id));
 unique.forEach((id) => seen.add(id));
-sections.push({ search, ids: unique });
+sections.push({ search, limit, ids: unique });
 }
 
 const allIds = sections.flatMap((s) => s.ids);
@@ -80,8 +89,9 @@ await Promise.all(allIds.map(async (id) => {
 try { summaries[id] = await getMessageSummary(id); } catch (e) { /* skip unreadable message */ }
 }));
 
-return sections.map(({ search, ids }) => ({
+return sections.map(({ search, limit, ids }) => ({
 search,
+limit,
 messages: ids.map((id) => summaries[id]).filter(Boolean)
 .sort((a, b) => new Date(b.date) - new Date(a.date)),
 }));

@@ -27,6 +27,31 @@ function existingTaskFor(m) {
 return data.tasks.find((t) => t.source && t.source.kind === 'mail' && t.source.url === m.link && t.bucket !== 'done');
 }
 
+// Same source-url matching as existingTaskFor, for the other two
+// committing actions -- applyLegExtraction (travel.js) already stores
+// `source` on the leg it creates, same shape/reasoning.
+function existingTripLegFor(m) {
+for (const trip of data.trips) {
+const leg = trip.legs.find((l) => l.source && l.source.kind === 'mail' && l.source.url === m.link);
+if (leg) return { trip, leg };
+}
+return null;
+}
+function existingDateEventFor(m) {
+return data.plannerActivities.find((a) => a.source && a.source.kind === 'mail' && a.source.url === m.link);
+}
+
+// A message this app has already turned into SOMETHING -- realistically a
+// given email becomes at most one of task/trip-leg/date-event, so "any of
+// the three" is what "nothing left to do here" actually means. Drives the
+// collapsed "already processed" bucket in sectionHtml/renderMail below,
+// not any individual action button's own state (those stay per-action,
+// e.g. a message already turned into a trip leg still shows a live
+// "+ task" if you also want one).
+function isMessageProcessed(m) {
+return !!(existingTaskFor(m) || existingTripLegFor(m) || existingDateEventFor(m));
+}
+
 // Shared shape for every "✨ Use AI" button (aiTask, dateEvent's own fill,
 // improveTask) -- read the full email body, run the named ai.js export on
 // it, report a MissingKeyError distinctly (same message every other
@@ -104,7 +129,7 @@ return `<div class="mail-action-picker" data-mail-action-picker="dateEvent:${esc
 ${connectionPickerHtml(`mail-date-event-conn-${m.id}`, 'Link a connection (optional)…')}
 <input type="text" class="settings-input" data-mail-date-event-title="${escapeHtml(m.id)}" value="${escapeHtml(m.subject)}" placeholder="Idea title">
 ${useAiButtonHtml('data-mail-date-event-fill', m)}
-<button class="todo-add-btn" type="button" data-mail-date-event-add="${escapeHtml(m.id)}" data-mail-snippet="${escapeHtml(m.snippet || '')}">Add idea</button>
+<button class="todo-add-btn" type="button" data-mail-date-event-add="${escapeHtml(m.id)}" data-mail-snippet="${escapeHtml(m.snippet || '')}" data-mail-url="${escapeHtml(m.link)}">Add idea</button>
 <span class="sync-status" data-mail-date-event-status="${escapeHtml(m.id)}"></span>
 </div>`;
 }
@@ -165,9 +190,25 @@ ${preferredIds.map((id) => actionTriggerHtml(id, m)).join('')}${otherHtml}
 ${pickersHtml}`;
 }
 
-function sectionHtml(title, messages, topic) {
+// `limit` is how many ACTIONABLE messages this heading should show before
+// the rest -- an already-processed one (isMessageProcessed above) never
+// counts against it, and always lands in the collapsed "already
+// processed" details instead of the normal list, regardless of how many
+// there are. Genuine actionable overflow past `limit` (more new messages
+// than the configured count, even after the extra buffer fetchMailSearches
+// asks for) is simply not shown, same as today's plain per-search cap.
+function sectionHtml(title, messages, topic, limit) {
 if (messages.length === 0) return '';
-return `<div class="overview-group"><h3>${escapeHtml(title)}</h3><div class="mail-section">${messages.map((m) => messageRowHtml(m, topic)).join('')}</div></div>`;
+const processed = messages.filter(isMessageProcessed);
+const actionable = messages.filter((m) => !isMessageProcessed(m)).slice(0, limit || messages.length);
+if (!actionable.length && !processed.length) return '';
+const actionableHtml = actionable.length ? `<div class="mail-section">${actionable.map((m) => messageRowHtml(m, topic)).join('')}</div>` : '';
+// A native <details> -- no custom hidden-attribute toggle needed, the
+// browser already handles its own open/collapsed state.
+const processedHtml = processed.length
+? `<details class="mail-processed"><summary>&#10003; ${processed.length} already processed</summary><div class="mail-section">${processed.map((m) => messageRowHtml(m, topic)).join('')}</div></details>`
+: '';
+return `<div class="overview-group"><h3>${escapeHtml(title)}</h3>${actionableHtml}${processedHtml}</div>`;
 }
 
 // A section heading says what the row searched for and, when it's limited to
@@ -181,34 +222,47 @@ return days > 0 ? `${label} — last ${days} day${days === 1 ? '' : 's'}` : labe
 
 function renderMail(sections) {
 const list = document.getElementById('mail-list');
-const total = sections.reduce((n, s) => n + s.messages.length, 0);
-document.getElementById('mail-count').textContent = `${total} shown`;
 
 // A topic-assigned search merges into one shared heading per topic
 // (dropping its own "last N days" sub-label -- a heading combining
 // several searches with different maxDays can't summarise that in one
-// number). A search with NO topic renders exactly as it always has, one
-// heading per search with its own sectionTitle -- so a panel with no
-// topics configured yet looks completely unchanged.
-const byTopic = new Map();
+// number). Its actionable cap is the SUM of every search feeding that
+// topic's own configured limit -- each search still gets to contribute
+// up to what it was set up for. A search with NO topic renders exactly
+// as it always has, one heading per search with its own sectionTitle --
+// so a panel with no topics configured yet looks completely unchanged.
+const byTopic = new Map(); // topicId -> { messages: [], limit: 0 }
 const untopicked = [];
 sections.forEach((s) => {
 if (s.search.topicId) {
-if (!byTopic.has(s.search.topicId)) byTopic.set(s.search.topicId, []);
-byTopic.get(s.search.topicId).push(...s.messages);
+if (!byTopic.has(s.search.topicId)) byTopic.set(s.search.topicId, { messages: [], limit: 0 });
+const bucket = byTopic.get(s.search.topicId);
+bucket.messages.push(...s.messages);
+bucket.limit += s.limit;
 } else {
 untopicked.push(s);
 }
 });
 const topicSections = data.mailTopics
 .filter((t) => byTopic.has(t.id))
-.map((t) => sectionHtml(t.label || 'Untitled topic', byTopic.get(t.id).sort((a, b) => new Date(b.date) - new Date(a.date)), t));
-const untopickedSections = untopicked.map((s) => sectionHtml(sectionTitle(s.search), s.messages, null));
+.map((t) => {
+const { messages, limit } = byTopic.get(t.id);
+return sectionHtml(t.label || 'Untitled topic', messages.sort((a, b) => new Date(b.date) - new Date(a.date)), t, limit);
+});
+const untopickedSections = untopicked.map((s) => sectionHtml(sectionTitle(s.search), s.messages, null, s.limit));
 
 const html = [...topicSections, ...untopickedSections].filter(Boolean).join('');
 list.innerHTML = html || (data.mailSearches.length === 0
 ? '<div class="empty">No mail searches set up — add some in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#mail-searches-block">Settings</span>.</div>'
 : '<div class="empty">Nothing matched your mail searches.</div>');
+
+// Reflects what's actually visible without expanding anything -- an
+// already-processed message tucked into a collapsed "already processed"
+// details doesn't count, same reasoning it doesn't count against a
+// section's own actionable cap above.
+const shown = list.querySelectorAll('.mail-section > .mail-row').length
+- list.querySelectorAll('.mail-processed .mail-row').length;
+document.getElementById('mail-count').textContent = `${shown} shown`;
 
 list.querySelectorAll('[data-goto-task]').forEach((btn) => {
 btn.addEventListener('click', async (e) => {
@@ -285,7 +339,10 @@ const say = (msg) => { if (status) status.textContent = msg; };
 const title = (titleInput?.value || '').trim();
 if (!title) { say('Give the idea a title first.'); return; }
 const connectionId = document.getElementById(`mail-date-event-conn-${id}`)?.value || '';
-const activity = blankPlannerActivity({ title, notes: btn.dataset.mailSnippet || '', connectionId });
+const activity = blankPlannerActivity({
+title, notes: btn.dataset.mailSnippet || '', connectionId,
+source: { kind: 'mail', label: title, url: btn.dataset.mailUrl },
+});
 data.plannerActivities.push(activity);
 // Only ever set by a successful "✨ Use AI" fill above -- absent (the
 // deterministic default never sets it) means stay an undated pool
