@@ -27,6 +27,24 @@ function existingTaskFor(m) {
 return data.tasks.find((t) => t.source && t.source.kind === 'mail' && t.source.url === m.link && t.bucket !== 'done');
 }
 
+// Shared shape for every "✨ Use AI" button (aiTask, dateEvent's own fill,
+// improveTask) -- read the full email body, run the named ai.js export on
+// it, report a MissingKeyError distinctly (same message every other
+// AI-assisted flow in this file already uses) instead of a raw error dump.
+// Returns null on any failure, having already reported it via `say`.
+async function runAiExtraction(extractFnName, id, subject, from, say) {
+say('Reading the email…');
+try {
+const [aiMod, body] = await Promise.all([import('../ai.js'), getMessageBody(id)]);
+say('Pulling out the details…');
+return await aiMod[extractFnName](subject, from, body);
+} catch (err) {
+console.error('Mail AI extraction failed:', err);
+say(err?.name === 'MissingKeyError' ? 'Add an Anthropic API key in Settings to use AI here.' : `Couldn't read that: ${err.message || err}`);
+return null;
+}
+}
+
 // The clickable control for one action on one message — a plain button for
 // 'task' (its own always-live ✓-already-captured swap, unchanged from
 // before this file had topics at all), a toggle for anything picker-kind
@@ -39,9 +57,15 @@ const existing = existingTaskFor(m);
 // Tasks are synced, so a task made on the desktop must be recognised
 // when the same mail is re-read on the phone. Matching on the source
 // URL rather than on anything session-local is what makes that work.
-return existing
-? `<button class="mini-task-btn done" type="button" data-goto-task="${escapeHtml(existing.id)}" title="Already captured — go to it">✓ task</button>`
-: `<button class="mini-task-btn" type="button" title="${escapeHtml(MAIL_ACTIONS.task.title)}"
+if (existing) {
+// "Improve" is deliberately NOT a MAIL_ACTIONS entry -- it only ever
+// makes sense once a task already exists for this message, so it
+// rides along with the ✓ state here rather than being a 4th
+// catalog entry that would need its own preferred/other placement.
+return `<button class="mini-task-btn done" type="button" data-goto-task="${escapeHtml(existing.id)}" title="Already captured — go to it">✓ task</button>
+<button class="mini-task-btn" type="button" title="Read the email and propose a better title/notes/due for this task" data-mail-action-toggle="improveTask:${escapeHtml(m.id)}">✨ Improve</button>`;
+}
+return `<button class="mini-task-btn" type="button" title="${escapeHtml(MAIL_ACTIONS.task.title)}"
 data-mail-task="${escapeHtml(m.id)}"
 data-mail-subject="${escapeHtml(m.subject)}"
 data-mail-from="${escapeHtml(displayName(m.from))}"
@@ -52,9 +76,20 @@ if (!action) return '';
 return `<button class="mini-task-btn" type="button" title="${escapeHtml(action.title)}" data-mail-action-toggle="${actionId}:${escapeHtml(m.id)}">${escapeHtml(action.label)}</button>`;
 }
 
+// A "✨ Use AI" button shared by every AI-assisted picker below -- same
+// subject/from dataset trip-leg's own extract button already carries, so
+// the click handler can read the email without needing the original `m`.
+function useAiButtonHtml(fillAttr, m) {
+return `<button class="mini-task-btn" type="button" ${fillAttr}="${escapeHtml(m.id)}"
+data-mail-subject="${escapeHtml(m.subject)}" data-mail-from="${escapeHtml(displayName(m.from))}">✨ Use AI</button>`;
+}
+
 // The revealed panel for one picker-kind action on one message — always
 // rendered (hidden) regardless of whether this action is preferred for the
 // row's topic, since it can also be reached from "Other actions".
+// `improveTask` is the one exception rendered outside MAIL_ACTIONS
+// entirely (see actionTriggerHtml's 'task' branch) -- included here too
+// since messageRowHtml appends it the same way.
 function actionPickerHtml(actionId, m) {
 if (actionId === 'tripLeg') {
 return `<div class="mail-action-picker" data-mail-action-picker="tripLeg:${escapeHtml(m.id)}" hidden>
@@ -68,8 +103,33 @@ if (actionId === 'dateEvent') {
 return `<div class="mail-action-picker" data-mail-action-picker="dateEvent:${escapeHtml(m.id)}" hidden>
 ${connectionPickerHtml(`mail-date-event-conn-${m.id}`, 'Link a connection (optional)…')}
 <input type="text" class="settings-input" data-mail-date-event-title="${escapeHtml(m.id)}" value="${escapeHtml(m.subject)}" placeholder="Idea title">
+${useAiButtonHtml('data-mail-date-event-fill', m)}
 <button class="todo-add-btn" type="button" data-mail-date-event-add="${escapeHtml(m.id)}" data-mail-snippet="${escapeHtml(m.snippet || '')}">Add idea</button>
 <span class="sync-status" data-mail-date-event-status="${escapeHtml(m.id)}"></span>
+</div>`;
+}
+if (actionId === 'aiTask') {
+// Prefilled with the SAME deterministic default plain "+ task"
+// produces -- "Use AI" is what replaces it, not the starting point.
+return `<div class="mail-action-picker" data-mail-action-picker="aiTask:${escapeHtml(m.id)}" hidden>
+<input type="text" class="settings-input" data-mail-ai-task-title="${escapeHtml(m.id)}" value="${escapeHtml(`Reply: ${m.subject}`)}" placeholder="Task title">
+<textarea class="settings-input" data-mail-ai-task-notes="${escapeHtml(m.id)}" rows="2" placeholder="Notes">${escapeHtml(`From ${displayName(m.from)}`)}</textarea>
+<input type="date" class="settings-input" data-mail-ai-task-due="${escapeHtml(m.id)}">
+${useAiButtonHtml('data-mail-ai-task-fill', m)}
+<button class="todo-add-btn" type="button" data-mail-ai-task-add="${escapeHtml(m.id)}" data-mail-url="${escapeHtml(m.link)}">Add task</button>
+<span class="sync-status" data-mail-ai-task-status="${escapeHtml(m.id)}"></span>
+</div>`;
+}
+if (actionId === 'improveTask') {
+const existing = existingTaskFor(m);
+if (!existing) return ''; // only ever offered alongside an already-captured task
+return `<div class="mail-action-picker" data-mail-action-picker="improveTask:${escapeHtml(m.id)}" hidden>
+<input type="text" class="settings-input" data-mail-improve-task-title="${escapeHtml(m.id)}" value="${escapeHtml(existing.title)}" placeholder="Task title">
+<textarea class="settings-input" data-mail-improve-task-notes="${escapeHtml(m.id)}" rows="2" placeholder="Notes">${escapeHtml(existing.notes)}</textarea>
+<input type="date" class="settings-input" data-mail-improve-task-due="${escapeHtml(m.id)}" value="${escapeHtml(existing.due || '')}">
+${useAiButtonHtml('data-mail-improve-task-fill', m)}
+<button class="todo-add-btn" type="button" data-mail-improve-task-apply="${escapeHtml(m.id)}" data-mail-improve-task-id="${escapeHtml(existing.id)}">Apply</button>
+<span class="sync-status" data-mail-improve-task-status="${escapeHtml(m.id)}"></span>
 </div>`;
 }
 return '';
@@ -92,7 +152,8 @@ const otherHtml = otherIds.length
 : '';
 const pickersHtml = Object.keys(MAIL_ACTIONS)
 .filter((id) => MAIL_ACTIONS[id].kind === 'picker')
-.map((id) => actionPickerHtml(id, m)).join('');
+.map((id) => actionPickerHtml(id, m)).join('')
++ (existingTaskFor(m) ? actionPickerHtml('improveTask', m) : '');
 return `<div class="mail-row">
 <a class="mail-link" href="${escapeHtml(affiliateLink(m.link))}" target="_blank" rel="noopener">
 <span class="mail-from">${escapeHtml(displayName(m.from))}</span>
@@ -190,6 +251,30 @@ if (!picker.hidden && actionId === 'tripLeg') bindLegTargetPicker(picker, id);
 });
 });
 
+list.querySelectorAll('[data-mail-date-event-fill]').forEach((btn) => {
+btn.addEventListener('click', async (e) => {
+e.preventDefault();
+const id = btn.dataset.mailDateEventFill;
+const status = list.querySelector(`[data-mail-date-event-status="${CSS.escape(id)}"]`);
+const say = (msg) => { if (status) status.textContent = msg; };
+btn.disabled = true;
+const result = await runAiExtraction('extractDateEventFromEmail', id, btn.dataset.mailSubject, btn.dataset.mailFrom, say);
+btn.disabled = false;
+if (!result) return;
+const titleInput = list.querySelector(`[data-mail-date-event-title="${CSS.escape(id)}"]`);
+const addBtn = list.querySelector(`[data-mail-date-event-add="${CSS.escape(id)}"]`);
+if (titleInput && result.title) titleInput.value = result.title;
+// Stashed on the Add button itself rather than a hidden input -- the
+// same place its deterministic default (data-mail-snippet) already
+// lives, and the only thing that reads either is the Add handler below.
+if (addBtn) {
+if (result.notes) addBtn.dataset.mailSnippet = result.notes;
+addBtn.dataset.mailDateEventDate = result.date || '';
+}
+say(result.date ? `Found a date: ${result.date}.` : 'No specific date found — will stay an undated idea.');
+});
+});
+
 list.querySelectorAll('[data-mail-date-event-add]').forEach((btn) => {
 btn.addEventListener('click', async (e) => {
 e.preventDefault();
@@ -200,16 +285,100 @@ const say = (msg) => { if (status) status.textContent = msg; };
 const title = (titleInput?.value || '').trim();
 if (!title) { say('Give the idea a title first.'); return; }
 const connectionId = document.getElementById(`mail-date-event-conn-${id}`)?.value || '';
-data.plannerActivities.push(blankPlannerActivity({ title, notes: btn.dataset.mailSnippet || '', connectionId }));
+const activity = blankPlannerActivity({ title, notes: btn.dataset.mailSnippet || '', connectionId });
+data.plannerActivities.push(activity);
+// Only ever set by a successful "✨ Use AI" fill above -- absent (the
+// deterministic default never sets it) means stay an undated pool
+// idea, same as today.
+const date = btn.dataset.mailDateEventDate;
+const planner = await import('./planner.js');
+if (date) planner.placeEntry('activity', activity.id, date, '');
 queueSave();
-say('Added to Planner’s Activities pool.');
+say(date ? `Added to Planner, placed on ${date}.` : 'Added to Planner’s Activities pool.');
 btn.disabled = true;
 // Planner renders itself only from its own actions -- without this, a
 // tab already open on Planner (or switched to right after, no reload)
 // wouldn't show the new idea until something else happened to trigger
 // a re-render, same cross-tab-refresh convention captureTask() callers
 // elsewhere already follow for Connections/Overview.
-(await import('./planner.js')).renderPlanner();
+planner.renderPlanner();
+});
+});
+
+list.querySelectorAll('[data-mail-ai-task-fill]').forEach((btn) => {
+btn.addEventListener('click', async (e) => {
+e.preventDefault();
+const id = btn.dataset.mailAiTaskFill;
+const status = list.querySelector(`[data-mail-ai-task-status="${CSS.escape(id)}"]`);
+const say = (msg) => { if (status) status.textContent = msg; };
+btn.disabled = true;
+const result = await runAiExtraction('extractTaskFromEmail', id, btn.dataset.mailSubject, btn.dataset.mailFrom, say);
+btn.disabled = false;
+if (!result) return;
+const titleInput = list.querySelector(`[data-mail-ai-task-title="${CSS.escape(id)}"]`);
+const notesInput = list.querySelector(`[data-mail-ai-task-notes="${CSS.escape(id)}"]`);
+const dueInput = list.querySelector(`[data-mail-ai-task-due="${CSS.escape(id)}"]`);
+if (titleInput && result.title) titleInput.value = result.title;
+if (notesInput && result.notes) notesInput.value = result.notes;
+if (dueInput) dueInput.value = result.due || '';
+say('Filled in — review, then Add task.');
+});
+});
+
+list.querySelectorAll('[data-mail-ai-task-add]').forEach((btn) => {
+btn.addEventListener('click', (e) => {
+e.preventDefault();
+const id = btn.dataset.mailAiTaskAdd;
+const title = (list.querySelector(`[data-mail-ai-task-title="${CSS.escape(id)}"]`)?.value || '').trim();
+const notes = list.querySelector(`[data-mail-ai-task-notes="${CSS.escape(id)}"]`)?.value || '';
+const due = list.querySelector(`[data-mail-ai-task-due="${CSS.escape(id)}"]`)?.value || '';
+const status = list.querySelector(`[data-mail-ai-task-status="${CSS.escape(id)}"]`);
+const say = (msg) => { if (status) status.textContent = msg; };
+if (!title) { say('Give the task a title first.'); return; }
+captureTask({ title, notes, due, source: { kind: 'mail', label: title, url: btn.dataset.mailUrl } });
+say('Task added.');
+btn.disabled = true;
+});
+});
+
+list.querySelectorAll('[data-mail-improve-task-fill]').forEach((btn) => {
+btn.addEventListener('click', async (e) => {
+e.preventDefault();
+const id = btn.dataset.mailImproveTaskFill;
+const status = list.querySelector(`[data-mail-improve-task-status="${CSS.escape(id)}"]`);
+const say = (msg) => { if (status) status.textContent = msg; };
+btn.disabled = true;
+const result = await runAiExtraction('extractTaskFromEmail', id, btn.dataset.mailSubject, btn.dataset.mailFrom, say);
+btn.disabled = false;
+if (!result) return;
+const titleInput = list.querySelector(`[data-mail-improve-task-title="${CSS.escape(id)}"]`);
+const notesInput = list.querySelector(`[data-mail-improve-task-notes="${CSS.escape(id)}"]`);
+const dueInput = list.querySelector(`[data-mail-improve-task-due="${CSS.escape(id)}"]`);
+if (titleInput && result.title) titleInput.value = result.title;
+if (notesInput && result.notes) notesInput.value = result.notes;
+if (dueInput && result.due) dueInput.value = result.due;
+say('Filled in — review, then Apply.');
+});
+});
+
+list.querySelectorAll('[data-mail-improve-task-apply]').forEach((btn) => {
+btn.addEventListener('click', async (e) => {
+e.preventDefault();
+const id = btn.dataset.mailImproveTaskApply;
+const taskId = btn.dataset.mailImproveTaskId;
+const status = list.querySelector(`[data-mail-improve-task-status="${CSS.escape(id)}"]`);
+const say = (msg) => { if (status) status.textContent = msg; };
+const task = data.tasks.find((t) => t.id === taskId);
+if (!task) { say('That task no longer exists.'); return; }
+const title = (list.querySelector(`[data-mail-improve-task-title="${CSS.escape(id)}"]`)?.value || '').trim();
+if (!title) { say('Give the task a title first.'); return; }
+task.title = title;
+task.notes = list.querySelector(`[data-mail-improve-task-notes="${CSS.escape(id)}"]`)?.value || '';
+task.due = list.querySelector(`[data-mail-improve-task-due="${CSS.escape(id)}"]`)?.value || '';
+queueSave();
+say('Task updated.');
+btn.disabled = true;
+(await import('./tasks.js')).renderTasks();
 });
 });
 

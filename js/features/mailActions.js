@@ -15,8 +15,9 @@
 // message's topic still shows under "Other actions".
 const MAIL_ACTIONS = {
 task: { label: '+ task', title: 'Capture as a task', kind: 'direct' },
+aiTask: { label: '✨ AI task', title: 'Read the email and propose a task — title, notes, due date', kind: 'picker' },
 tripLeg: { label: '+ trip leg', title: 'Pull flight/hotel/car-hire details from this email into a trip', kind: 'picker' },
-dateEvent: { label: '+ date event', title: 'Add this as a Planner idea, optionally linked to a connection', kind: 'picker' },
+dateEvent: { label: '+ date event', title: 'Add this as a Planner idea, optionally linked to a connection — can also read the email for a real date', kind: 'picker' },
 };
 
 export { MAIL_ACTIONS };

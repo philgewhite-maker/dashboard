@@ -1624,6 +1624,65 @@ const { data: raw } = await callTextJson(prompt, TRIP_MAX_TOKENS, TRIP_MODEL, 'T
 return shapeTripExtraction(raw);
 }
 
+// ---- Mail-action extraction: task / date event ----
+//
+// Both js/features/mail.js's "+ task"/"+ date event" buttons default to a
+// pure metadata read (subject/snippet, zero cost, zero AI) -- these two are
+// the explicit "✨ Use AI" opt-in for when a subject line genuinely isn't
+// enough (an invoice with the real deadline three paragraphs down, a
+// theatre confirmation whose actual date is only in the body). Same tier
+// as extractTripLegFromEmail above (Sonnet 5, 'low' effort) -- reading a
+// varied, real email body is the same class of problem, not the cheap/fast
+// recognition tasks elsewhere in this file.
+const MAIL_EXTRACT_MODEL = 'claude-sonnet-5';
+// Smaller than TRIP_MAX_TOKENS -- no passenger list, just a title/notes/
+// date shape -- but still real body text with real variety, not a fixed
+// little form.
+const MAIL_EXTRACT_MAX_TOKENS = 1000;
+
+// A relative deadline ("renew within 30 days", "by next Friday") is common
+// in exactly the kind of email this exists for -- todayStr() is what lets
+// the model resolve that into a real ISO date instead of leaving it out or
+// guessing wrong, same reasoning already established for instruction
+// parsing elsewhere in this file.
+async function extractTaskFromEmail(subject, from, bodyText) {
+const prompt = `Today is ${todayStr()}. This is an email that might need following up on as a task. Subject: "${subject || ''}". From: "${from || ''}".
+
+Email body:
+"""
+${String(bodyText || '').slice(0, 12000)}
+"""
+
+Propose a task for this: a short, specific title (not just the subject line restated -- say what actually needs doing, e.g. "Renew car insurance before it lapses" not "Your insurance"), a few lines of notes with whatever detail from the body is actually useful to have on hand (amounts, reference numbers, what's being asked), and a due date ONLY if the email states or clearly implies a real deadline (resolve a relative one like "within 30 days" against today's date) -- leave it blank if there's genuinely no deadline, never invent one.
+
+Reply with ONLY a JSON object, no other text, no markdown fences: {"title":"","notes":"","due":""} -- due is an ISO yyyy-mm-dd or "".`;
+const { data: raw } = await callTextJson(prompt, MAIL_EXTRACT_MAX_TOKENS, MAIL_EXTRACT_MODEL, 'Task email', 'low');
+return {
+title: String((raw && raw.title) || '').trim(),
+notes: String((raw && raw.notes) || '').trim(),
+due: String((raw && raw.due) || '').trim(),
+};
+}
+
+async function extractDateEventFromEmail(subject, from, bodyText) {
+const prompt = `Today is ${todayStr()}. This is an email that might describe something to do on a particular day -- a booking, an invitation, a show. Subject: "${subject || ''}". From: "${from || ''}".
+
+Email body:
+"""
+${String(bodyText || '').slice(0, 12000)}
+"""
+
+Propose an idea for this: a short, specific title (e.g. "Hamilton at the Victoria Palace", not the subject line restated), a few lines of notes with whatever's actually useful (venue, time, booking reference), and a date ONLY if the email states a real, specific date for the thing itself (resolve a relative one like "this Saturday" against today's date) -- leave it blank if there's no real date, or if this isn't really date-specific at all (a general offer, a newsletter).
+
+Reply with ONLY a JSON object, no other text, no markdown fences: {"title":"","notes":"","date":""} -- date is an ISO yyyy-mm-dd or "".`;
+const { data: raw } = await callTextJson(prompt, MAIL_EXTRACT_MAX_TOKENS, MAIL_EXTRACT_MODEL, 'Date event email', 'low');
+return {
+title: String((raw && raw.title) || '').trim(),
+notes: String((raw && raw.notes) || '').trim(),
+date: String((raw && raw.date) || '').trim(),
+};
+}
+
 // ---- Country lookup ----
 //
 // For a city, school or university name — often not in English, and
@@ -1649,7 +1708,7 @@ MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot, qui
 callTextJson, DEFAULT_MODEL, summarizeUsage, currentMonthKey, compareFaces,
 extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShoppingItem, identifyProduct, translateText, romanizeName, parseCaptureIntent,
 identifyCountry, extractWellnessScreenshot,
-extractTripScreenshot, extractTripLegFromEmail,
+extractTripScreenshot, extractTripLegFromEmail, extractTaskFromEmail, extractDateEventFromEmail,
 parseIngredients, assessIngredient, ALLERGEN_LIST, DIETARY_FLAGS, FODMAP_COMPONENTS, FODMAP_LEVELS,
 FODMAP_THRESHOLDS_G, OLIGO_CATEGORIES, fodmapLevelFromGrams, regenerateRecipeVariant, assessUnitWeight, assessUnitRatio,
 GLYCEMIC_LOAD_THRESHOLDS, glycemicLevelFromLoad,
