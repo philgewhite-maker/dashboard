@@ -1,4 +1,4 @@
-import { data, queueSave, mailSearchLabel, blankPlannerActivity } from '../state.js';
+import { data, queueSave, mailSearchLabel, blankPlannerActivity, blankMailDismissal } from '../state.js';
 import { escapeHtml, affiliateLink } from '../utils.js';
 import { canAttemptGoogleAction } from '../sync/googleauth.js';
 import { fetchMailSearches, getMessageBody } from '../googlemail.js';
@@ -40,16 +40,25 @@ return null;
 function existingDateEventFor(m) {
 return data.plannerActivities.find((a) => a.source && a.source.kind === 'mail' && a.source.url === m.link);
 }
+// A message explicitly binned (see the ✕ dismiss button in messageRowHtml)
+// without ever becoming a task/trip-leg/date-event -- keyed by url, same
+// identity every existingXFor above already matches on.
+function existingDismissalFor(m) {
+return data.mailDismissed.find((d) => d.url === m.link);
+}
 
-// A message this app has already turned into SOMETHING -- realistically a
-// given email becomes at most one of task/trip-leg/date-event, so "any of
-// the three" is what "nothing left to do here" actually means. Drives the
-// collapsed "already processed" bucket in sectionHtml/renderMail below,
-// not any individual action button's own state (those stay per-action,
-// e.g. a message already turned into a trip leg still shows a live
-// "+ task" if you also want one).
-function isMessageProcessed(m) {
-return !!(existingTaskFor(m) || existingTripLegFor(m) || existingDateEventFor(m));
+// 'dismissed' beats 'processed' beats 'open' -- realistically a given
+// email only ever reaches one of the two closed states, but a dismissal
+// is the more deliberate, more recent signal if both somehow apply.
+// Drives both the collapsed "already processed" bucket and (separately)
+// which messages disappear from Mail entirely in sectionHtml/renderMail
+// below -- not any individual action button's own state, which stays
+// per-action regardless (a message already turned into a trip leg still
+// shows a live "+ task" if you also want one).
+function messageStatus(m) {
+if (existingDismissalFor(m)) return 'dismissed';
+if (existingTaskFor(m) || existingTripLegFor(m) || existingDateEventFor(m)) return 'processed';
+return 'open';
 }
 
 // Shared shape for every "✨ Use AI" button (aiTask, dateEvent's own fill,
@@ -186,29 +195,103 @@ return `<div class="mail-row">
 <span class="mail-date">${escapeHtml(formatDate(m.date))}</span>
 </a>
 ${preferredIds.map((id) => actionTriggerHtml(id, m)).join('')}${otherHtml}
+<button class="mail-dismiss-btn" type="button" title="Dismiss — not turning this into anything, just stop showing it"
+data-mail-dismiss="${escapeHtml(m.id)}" data-mail-url="${escapeHtml(m.link)}" data-mail-subject="${escapeHtml(m.subject)}" data-mail-from="${escapeHtml(displayName(m.from))}">&times;</button>
 </div>
 ${pickersHtml}`;
 }
 
-// `limit` is how many ACTIONABLE messages this heading should show before
-// the rest -- an already-processed one (isMessageProcessed above) never
-// counts against it, and always lands in the collapsed "already
-// processed" details instead of the normal list, regardless of how many
-// there are. Genuine actionable overflow past `limit` (more new messages
-// than the configured count, even after the extra buffer fetchMailSearches
-// asks for) is simply not shown, same as today's plain per-search cap.
+// A digest row for a subject that appeared more than once (some senders
+// blast the identical subject repeatedly) -- one row + count instead of N
+// near-identical ones. `group` is every message sharing this subject,
+// already date-sorted (sectionHtml sorts before grouping), so group[0] is
+// the most recent. `visibleGroup` (open + processed, never dismissed --
+// nothing dismissed is ever individually re-shown here) expands under a
+// "Show all" toggle using the SAME messageRowHtml every other row uses,
+// so each one keeps its own full, independent set of action/dismiss
+// controls -- consolidation is purely a display grouping, never a
+// shortcut that acts on more than one message at once.
+function consolidatedRowHtml(group, byStatus, topic) {
+const latest = group[0];
+const parts = [];
+if (byStatus.open.length) parts.push(`${byStatus.open.length} open`);
+if (byStatus.processed.length) parts.push(`${byStatus.processed.length} actioned`);
+if (byStatus.dismissed.length) parts.push(`${byStatus.dismissed.length} binned`);
+const visibleGroup = [...byStatus.open, ...byStatus.processed];
+const toggleHtml = visibleGroup.length
+? `<button class="mini-task-btn" type="button" data-mail-group-toggle="${escapeHtml(latest.id)}">Show all</button>`
+: '';
+const detailHtml = visibleGroup.length
+? `<div class="mail-group-detail" data-mail-group-detail="${escapeHtml(latest.id)}" hidden>${visibleGroup.map((m) => messageRowHtml(m, topic)).join('')}</div>`
+: '';
+return `<div class="mail-row mail-row-group">
+<span class="mail-from">${escapeHtml(displayName(latest.from))}</span>
+<span class="mail-subject">${escapeHtml(latest.subject)} <span class="mail-group-count">&times;${group.length}</span></span>
+<span class="mail-group-breakdown">${escapeHtml(parts.join(' · '))}</span>
+${toggleHtml}
+</div>
+${detailHtml}`;
+}
+
+// `limit` is how many ACTIONABLE (open) messages this heading should show
+// before the rest -- a processed or dismissed one never counts against
+// it. A dismissed message is never rendered anywhere in Mail at all (see
+// Settings' "Mail bin" for that); a processed one lands in the collapsed
+// "already processed" details regardless of how many there are. Same
+// subject appearing more than once collapses to one row (consolidatedRowHtml)
+// wherever it lands -- the open/closed split happens first, by group, so
+// a group with even one open message still surfaces in the visible list.
+// Returns {html, openCount} -- openCount lets renderMail total up "N
+// shown" by actual open MESSAGE count, not by row (a consolidated row is
+// one row representing several).
 function sectionHtml(title, messages, topic, limit) {
-if (messages.length === 0) return '';
-const processed = messages.filter(isMessageProcessed);
-const actionable = messages.filter((m) => !isMessageProcessed(m)).slice(0, limit || messages.length);
-if (!actionable.length && !processed.length) return '';
-const actionableHtml = actionable.length ? `<div class="mail-section">${actionable.map((m) => messageRowHtml(m, topic)).join('')}</div>` : '';
+if (messages.length === 0) return { html: '', openCount: 0 };
+
+const groups = new Map(); // subject -> messages[], insertion order == messages' own date-desc order
+messages.forEach((m) => {
+const key = m.subject || '';
+if (!groups.has(key)) groups.set(key, []);
+groups.get(key).push(m);
+});
+
+const openRows = []; // [{html, openCount}], budget-capped below
+const closedRows = []; // fully-closed groups/singles, always all shown (collapsed)
+for (const group of groups.values()) {
+const byStatus = { open: [], processed: [], dismissed: [] };
+group.forEach((m) => byStatus[messageStatus(m)].push(m));
+if (byStatus.open.length) {
+openRows.push({
+html: group.length === 1 ? messageRowHtml(group[0], topic) : consolidatedRowHtml(group, byStatus, topic),
+openCount: byStatus.open.length,
+});
+continue;
+}
+// No open messages left in this subject -- fully closed. A dismissed-
+// only subject (byStatus.processed.length === 0 too) has nothing left
+// worth a summary line at all; skip it entirely rather than cluttering
+// "already processed" with something that was actually binned.
+if (!byStatus.processed.length) continue;
+closedRows.push(group.length === 1 ? messageRowHtml(group[0], topic) : consolidatedRowHtml(group, byStatus, topic));
+}
+
+let budget = limit || Infinity;
+const shownOpenHtml = [];
+let shownOpenCount = 0;
+for (const row of openRows) {
+if (budget <= 0) break;
+shownOpenHtml.push(row.html);
+shownOpenCount += row.openCount;
+budget -= row.openCount;
+}
+
+if (!shownOpenHtml.length && !closedRows.length) return { html: '', openCount: 0 };
+const actionableHtml = shownOpenHtml.length ? `<div class="mail-section">${shownOpenHtml.join('')}</div>` : '';
 // A native <details> -- no custom hidden-attribute toggle needed, the
 // browser already handles its own open/collapsed state.
-const processedHtml = processed.length
-? `<details class="mail-processed"><summary>&#10003; ${processed.length} already processed</summary><div class="mail-section">${processed.map((m) => messageRowHtml(m, topic)).join('')}</div></details>`
+const processedHtml = closedRows.length
+? `<details class="mail-processed"><summary>&#10003; ${closedRows.length} already processed</summary><div class="mail-section">${closedRows.join('')}</div></details>`
 : '';
-return `<div class="overview-group"><h3>${escapeHtml(title)}</h3>${actionableHtml}${processedHtml}</div>`;
+return { html: `<div class="overview-group"><h3>${escapeHtml(title)}</h3>${actionableHtml}${processedHtml}</div>`, openCount: shownOpenCount };
 }
 
 // A section heading says what the row searched for and, when it's limited to
@@ -251,18 +334,39 @@ return sectionHtml(t.label || 'Untitled topic', messages.sort((a, b) => new Date
 });
 const untopickedSections = untopicked.map((s) => sectionHtml(sectionTitle(s.search), s.messages, null, s.limit));
 
-const html = [...topicSections, ...untopickedSections].filter(Boolean).join('');
+const rendered = [...topicSections, ...untopickedSections].filter((r) => r.html);
+const html = rendered.map((r) => r.html).join('');
 list.innerHTML = html || (data.mailSearches.length === 0
 ? '<div class="empty">No mail searches set up — add some in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#mail-searches-block">Settings</span>.</div>'
 : '<div class="empty">Nothing matched your mail searches.</div>');
 
-// Reflects what's actually visible without expanding anything -- an
-// already-processed message tucked into a collapsed "already processed"
-// details doesn't count, same reasoning it doesn't count against a
-// section's own actionable cap above.
-const shown = list.querySelectorAll('.mail-section > .mail-row').length
-- list.querySelectorAll('.mail-processed .mail-row').length;
+// Counted from the actual openCount each section computed, not by
+// querying the DOM for .mail-row -- a consolidated row is one row
+// representing several open messages, which a DOM count would undercount.
+const shown = rendered.reduce((n, r) => n + r.openCount, 0);
 document.getElementById('mail-count').textContent = `${shown} shown`;
+
+list.querySelectorAll('[data-mail-group-toggle]').forEach((btn) => {
+btn.addEventListener('click', (e) => {
+e.preventDefault();
+const detail = list.querySelector(`[data-mail-group-detail="${CSS.escape(btn.dataset.mailGroupToggle)}"]`);
+if (detail) detail.hidden = !detail.hidden;
+});
+});
+
+list.querySelectorAll('[data-mail-dismiss]').forEach((btn) => {
+btn.addEventListener('click', (e) => {
+e.preventDefault();
+const url = btn.dataset.mailUrl;
+if (!data.mailDismissed.some((d) => d.url === url)) {
+data.mailDismissed.push(blankMailDismissal({ url, subject: btn.dataset.mailSubject, from: btn.dataset.mailFrom }));
+queueSave();
+}
+// Re-render from the same fetched data rather than re-fetching Gmail
+// -- dismissing is purely a local view change, nothing new to pull.
+renderMail(lastSections);
+});
+});
 
 list.querySelectorAll('[data-goto-task]').forEach((btn) => {
 btn.addEventListener('click', async (e) => {
@@ -474,6 +578,10 @@ btn.disabled = false;
 });
 }
 
+// The last fetched result, kept purely so a dismiss (a local view change,
+// nothing new from Gmail) can re-render without a full refetch.
+let lastSections = [];
+
 function initMail() {
 bindConnPickers(); // Mail can render (and its "+ date event" picker with it) before Dating/Planner ever do
 const btn = document.getElementById('sync-mail-btn');
@@ -486,7 +594,8 @@ return;
 btn.disabled = true;
 status.textContent = 'Loading…';
 try {
-renderMail(await fetchMailSearches(data.mailSearches, data.prefs.mailResultCount));
+lastSections = await fetchMailSearches(data.mailSearches, data.prefs.mailResultCount);
+renderMail(lastSections);
 status.textContent = `Updated ${new Date().toLocaleTimeString()}.`;
 } catch (err) {
 status.textContent = `Couldn't load mail: ${err.message || err}`;

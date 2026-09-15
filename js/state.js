@@ -41,6 +41,7 @@ financeAccounts: [], // bank/card accounts -- see js/features/financeaccounts.js
 switchOffers: [], // [{id, bank, offer, eligible, reasoning, suggestedFromAccountId, dismissed}] -- last bank-switch-offers scan, see js/features/switchoffers.js
 mailSearches: [],
 mailTopics: [], // {id, label, preferredActionIds} -- groups mail searches for display and picks which action buttons show, see js/features/mail.js
+mailDismissed: [], // {url, subject, from, dismissedAt} -- messages explicitly binned from Mail without becoming a task/trip leg/date event, see js/features/mail.js
 tasks: [],
 taskContexts: [...DEFAULT_TASK_CONTEXTS],
 claudeAnswers: {},
@@ -174,6 +175,21 @@ return { id: uid(), kind: 'starred', value: '', maxDays: 0, maxEvents: 0, topicI
 // UI, not enforced here -- mail.js reads it defensively (.slice(0, 3)).
 function blankMailTopic(fields = {}) {
 return { id: uid(), label: '', preferredActionIds: [], createdAt: new Date().toISOString(), ...fields };
+}
+
+// A message explicitly dismissed from the Mail panel without becoming
+// anything -- keyed by url (the same message-link identity existingTaskFor/
+// existingTripLegFor/existingDateEventFor already match on), not id, since
+// nothing ever looks one up by anything else. subject/from are kept
+// alongside purely so Settings' "Mail bin" list can show something
+// meaningful without re-fetching the message -- the url is what's actually
+// load-bearing. Never deleted by anything except the bin's own "Empty
+// bin" button; dismissing doesn't delete the real email, so there's
+// nothing to restore/undo -- see js/features/mail.js's own dismiss
+// handler for the dedupe-on-insert that keeps this from growing a
+// duplicate entry on every refresh.
+function blankMailDismissal(fields = {}) {
+return { url: '', subject: '', from: '', dismissedAt: new Date().toISOString(), ...fields };
 }
 
 // GTD buckets. `inbox` is deliberately first and unfiled — capture is meant
@@ -806,7 +822,7 @@ const DEFAULT_FLAG_RULES = [
 ];
 
 function blankData() {
-return { habits: [], goals: [], jobs: [], connections: [], calendars: [], calendarStatus: {}, vouchers: [], businessIdeas: [], subscriptions: [], enhancementIdeas: [], financeAccounts: [], switchOffers: [], mailSearches: [], mailTopics: [], tasks: [], taskContexts: [...DEFAULT_TASK_CONTEXTS],
+return { habits: [], goals: [], jobs: [], connections: [], calendars: [], calendarStatus: {}, vouchers: [], businessIdeas: [], subscriptions: [], enhancementIdeas: [], financeAccounts: [], switchOffers: [], mailSearches: [], mailTopics: [], mailDismissed: [], tasks: [], taskContexts: [...DEFAULT_TASK_CONTEXTS],
 ratingCategories: DEFAULT_RATING_CATEGORIES.map((c) => ({ ...c })),
 recipes: [], recipeRatingCategories: DEFAULT_RECIPE_RATING_CATEGORIES.map((c) => ({ ...c })), ingredientReference: [], ingredientAliases: {},
 claudeAnswers: {},
@@ -1152,6 +1168,8 @@ if (!Array.isArray(data.mailTopics)) data.mailTopics = [];
 data.mailTopics = data.mailTopics.map((t) => ({ ...blankMailTopic(), ...t, id: t.id || uid() }));
 const mailTopicIds = new Set(data.mailTopics.map((t) => t.id));
 data.mailSearches.forEach((s) => { if (s.topicId && !mailTopicIds.has(s.topicId)) s.topicId = ''; });
+if (!Array.isArray(data.mailDismissed)) data.mailDismissed = [];
+data.mailDismissed = data.mailDismissed.map((d) => ({ ...blankMailDismissal(), ...d }));
 
 // Fill in any pref added since this document was last written, without
 // discarding ones already customised. The pre-per-row keys are deliberately
@@ -2092,7 +2110,7 @@ data, sampleData, loadData, migrate, persist, queueSave, flushSave, setSaveStatu
 setExternalUpdateHandler, setLocalChangeHandler, getLocalSettings, setLocalSetting, computeStreak, reachOutThreshold,
 isDormantStage, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness,
 exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, DEFAULT_PREFS,
-MAIL_SEARCH_KINDS, mailSearchLabel, blankMailSearch, blankMailTopic,
+MAIL_SEARCH_KINDS, mailSearchLabel, blankMailSearch, blankMailTopic, blankMailDismissal,
 TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureBatch, blankPendingImport, blankConnection, blankTelegramThread, blankReadingItem, blankCaptureDraft,
 blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS, LEG_DATE_FIELDS,
 blankPlannerEntry, blankPlannerActivity,

@@ -321,6 +321,16 @@ renderMailSearches();
 queueSave();
 });
 
+renderMailBin();
+const emptyBinBtn = document.getElementById('empty-mail-bin-btn');
+if (emptyBinBtn) emptyBinBtn.addEventListener('click', () => {
+if (!data.mailDismissed.length) return;
+if (!confirm(`Empty the bin? This removes the record of ${data.mailDismissed.length} dismissed message${data.mailDismissed.length === 1 ? '' : 's'} -- next time you refresh Mail, any still within a search's own limits will show up again.`)) return;
+data.mailDismissed = [];
+renderMailBin();
+queueSave();
+});
+
 renderShareUrlRules();
 const addRuleBtn = document.getElementById('add-share-rule-btn');
 if (addRuleBtn) addRuleBtn.addEventListener('click', () => {
@@ -563,6 +573,29 @@ renderMailSearches();
 queueSave();
 });
 });
+}
+
+// Read-only -- no per-item restore (see the "Mail bin" settings-note: the
+// real email still exists, and a search's own window may have moved past
+// it by now anyway), just a record of what's already been looked at and
+// skipped. "Empty bin" (wired in initSettings) is the only way anything
+// leaves this list.
+function renderMailBin() {
+const el = document.getElementById('mail-bin');
+if (!el) return;
+if (!data.mailDismissed.length) {
+el.innerHTML = '<div class="settings-note" style="margin:0;">Nothing dismissed yet.</div>';
+return;
+}
+const rows = [...data.mailDismissed].sort((a, b) => new Date(b.dismissedAt) - new Date(a.dismissedAt));
+el.innerHTML = `<table class="limits-table">
+<thead><tr><th>Subject</th><th>From</th><th>Dismissed</th></tr></thead>
+<tbody>${rows.map((d) => `<tr>
+<td><a href="${escapeHtml(d.url)}" target="_blank" rel="noopener">${escapeHtml(d.subject || '(no subject)')}</a></td>
+<td>${escapeHtml(d.from || '')}</td>
+<td>${escapeHtml(new Date(d.dismissedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }))}</td>
+</tr>`).join('')}</tbody>
+</table>`;
 }
 
 // The URL/secret pair is saved as you type (debounced), but syncing only

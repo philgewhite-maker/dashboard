@@ -1484,6 +1484,28 @@ box-shadow:0 4px 14px rgba(0,0,0,.08);
 /* Same [hidden]-vs-author-rule gotcha as .mail-action-picker above --
    paired from the start this time, not rediscovered as a fifth incident. */
 .mail-other-menu[hidden]{display:none;}
+.mail-dismiss-btn{
+font-family:'Inter',sans-serif;
+font-size:14px;
+line-height:1;
+color:var(--muted);
+background:none;
+border:none;
+cursor:pointer;
+padding:2px 4px;
+margin-left:auto;
+}
+.mail-dismiss-btn:hover{color:var(--rose);}
+/* A digest row for a subject repeated several times -- same .mail-row
+   shape as a normal row, just without the link/action buttons a single
+   message gets (those live in the expanded individual rows instead). */
+.mail-row-group{gap:8px;}
+.mail-group-count{font-size:11px;color:var(--muted);font-weight:400;}
+.mail-group-breakdown{font-size:11px;color:var(--muted);}
+.mail-group-detail{display:flex;flex-direction:column;padding-left:12px;border-left:2px solid var(--line);margin:2px 0 6px;}
+/* Same [hidden]-vs-author-rule gotcha as every other toggled panel in
+   this file -- paired from the start. */
+.mail-group-detail[hidden]{display:none;}
 .leg-target-picker{display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
 .leg-target-mode-row{display:flex;gap:4px;}
 .leg-target-mode-btn{
