@@ -11,8 +11,8 @@
 // log into one row per day via healthparse.js, now that a real payload's
 // shape is confirmed.
 import { data, queueSave } from '../state.js';
-import { getConfig } from '../sync/selfhost.js';
-import { escapeHtml, todayStr } from '../utils.js';
+import { getConfig, NotConfiguredError } from '../sync/selfhost.js';
+import { escapeHtml, todayStr, SYNC_LINK_HTML } from '../utils.js';
 import { parseHealthPayloads } from './healthparse.js';
 import { tieredRowsForDisplay, flattenHealthDailyRow, isFullHistoryMode, setFullHistoryMode, isPeriodRow, periodLabel } from './healthrollup.js';
 import { HEALTH_METRICS, metricByKey, createHealthChart, isoDaysAgo } from './healthchart.js';
@@ -30,7 +30,7 @@ const PARSE_FETCH_LIMIT = 2000;
 // endpoint derived from it rather than entered separately per feature.
 async function healthEndpoint() {
 const { url, secret, configured } = await getConfig();
-if (!configured) throw new Error("Health sync needs live sync set up first — add your sync URL and secret in Settings.");
+if (!configured) throw new NotConfiguredError();
 const endpoint = url.replace(/sync\.php(?=$|\?)/, 'health.php');
 if (endpoint === url) {
 throw new Error(`Couldn't work out the health-data URL from "${url}" — it should end in sync.php.`);
@@ -216,7 +216,9 @@ btn.addEventListener('click', async () => {
 try {
 await parseAndStoreHealthData(status);
 } catch (err) {
-if (status) status.textContent = err.message || String(err);
+if (!status) { /* nothing to report into */ }
+else if (err instanceof NotConfiguredError) status.innerHTML = `Health sync needs live sync set up first — add your sync URL and secret in ${SYNC_LINK_HTML}.`;
+else status.textContent = err.message || String(err);
 }
 });
 }

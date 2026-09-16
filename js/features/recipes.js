@@ -4,10 +4,10 @@
 // idea), with an occasional nudge to actually cook one of them.
 import { data, queueSave, DEFAULT_RECIPE_RATING_CATEGORIES, DEFAULT_PREFS, slugifyField, averageRating, getLocalSettings, setLocalSetting } from '../state.js';
 import { photoDelete, photoGet, photoUrl } from '../db.js';
-import { escapeHtml, uid, todayStr, resizeImageToBlob, openLightbox, pickChipHtml, scrollAndFlash } from '../utils.js';
+import { escapeHtml, uid, todayStr, resizeImageToBlob, openLightbox, pickChipHtml, scrollAndFlash, MISSING_KEY_LINK_HTML, SYNC_LINK_HTML } from '../utils.js';
 import { MissingKeyError, extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, parseIngredients, assessIngredient, ALLERGEN_LIST, DIETARY_FLAGS, FODMAP_COMPONENTS, FODMAP_THRESHOLDS_G, OLIGO_CATEGORIES, fodmapLevelFromGrams, regenerateRecipeVariant, assessUnitWeight, assessUnitRatio, glycemicLevelFromLoad } from '../ai.js';
 import { storePhoto, uploadAttachment, deleteAttachment, openAttachment, formatBytes } from '../files.js';
-import { getConfig } from '../sync/selfhost.js';
+import { getConfig, NotConfiguredError } from '../sync/selfhost.js';
 
 // ---- web import: structured data first, AI as a fallback ----
 //
@@ -47,7 +47,7 @@ return null;
 
 async function recipeFetchEndpoint() {
 const { url, secret, configured } = await getConfig();
-if (!configured) throw new Error('Live sync needs to be set up first (Settings) before importing from a web page.');
+if (!configured) throw new NotConfiguredError();
 const endpoint = url.replace(/sync\.php(?=$|\?)/, 'recipe-fetch.php');
 if (endpoint === url) throw new Error(`Couldn't work out the recipe-fetch URL from "${url}" — it should end in sync.php.`);
 return { endpoint, secret };
@@ -160,9 +160,10 @@ queueSave();
 setStatus('');
 }
 
-function setStatus(msg) {
+function setStatus(msg, isHtml) {
 const el = document.getElementById('recipe-import-status');
-if (el) el.textContent = msg;
+if (!el) return;
+if (isHtml) el.innerHTML = msg; else el.textContent = msg;
 }
 
 function initCapture() {
@@ -184,7 +185,8 @@ pending = { ...extract, sourceKind: 'a photo', sourceFile: file };
 renderReview();
 setStatus('');
 } catch (err) {
-setStatus(err instanceof MissingKeyError ? 'Add an Anthropic API key in Settings first.' : `Couldn't read that: ${err.message || err}`);
+if (err instanceof MissingKeyError) setStatus(`Add an Anthropic API key in ${MISSING_KEY_LINK_HTML} first.`, true);
+else setStatus(`Couldn't read that: ${err.message || err}`);
 }
 });
 
@@ -199,7 +201,8 @@ pending = { ...extract, sourceKind: 'a PDF', sourceFile: file };
 renderReview();
 setStatus('');
 } catch (err) {
-setStatus(err instanceof MissingKeyError ? 'Add an Anthropic API key in Settings first.' : `Couldn't read that: ${err.message || err}`);
+if (err instanceof MissingKeyError) setStatus(`Add an Anthropic API key in ${MISSING_KEY_LINK_HTML} first.`, true);
+else setStatus(`Couldn't read that: ${err.message || err}`);
 }
 });
 
@@ -214,7 +217,9 @@ renderReview();
 setStatus('');
 urlInput.value = '';
 } catch (err) {
-setStatus(err instanceof MissingKeyError ? 'Add an Anthropic API key in Settings first.' : `Couldn't import that: ${err.message || err}`);
+if (err instanceof MissingKeyError) setStatus(`Add an Anthropic API key in ${MISSING_KEY_LINK_HTML} first.`, true);
+else if (err instanceof NotConfiguredError) setStatus(`Live sync needs to be set up first (${SYNC_LINK_HTML}) before importing from a web page.`, true);
+else setStatus(`Couldn't import that: ${err.message || err}`);
 }
 });
 
@@ -828,7 +833,7 @@ queueSave();
 unitMismatchErrors.set(errKey, `AI couldn't work out a figure for "${line.unit}" of "${entry.name}" -- enter one below, or fix the ingredient's own reference amount in Ingredient Reference.`);
 }
 } catch (err) {
-unitMismatchErrors.set(errKey, err instanceof MissingKeyError ? 'Add an Anthropic API key in Settings first, or enter the figure below yourself.' : `Couldn't look that up: ${err.message || err} -- enter one below.`);
+unitMismatchErrors.set(errKey, err instanceof MissingKeyError ? { missingKey: true } : `Couldn't look that up: ${err.message || err} -- enter one below.`);
 } finally {
 busyIngredientAction.delete(r.id);
 }
@@ -912,7 +917,7 @@ return `<div class="unit-mismatch-note">
 <button type="button" class="todo-add-btn" data-recipe-manual-unit-save="${recipeId}" data-manual-unit-idx="${lineIdx}" style="padding:2px 8px;">Save</button>
 </div>
 <div style="margin-top:4px;"><span class="inline-goto-link" data-recipe-edit-ref="${entry.id}">Edit "${escapeHtml(entry.name)}" in Ingredient Reference…</span></div>
-${err ? `<span class="unit-mismatch-error">${escapeHtml(err)}</span>` : ''}
+${err ? `<span class="unit-mismatch-error">${err.missingKey ? `Add an Anthropic API key in ${MISSING_KEY_LINK_HTML} first, or enter the figure below yourself.` : escapeHtml(err)}</span>` : ''}
 </div>`;
 }
 
@@ -953,7 +958,8 @@ applyStatedUnitHints(r);
 // ingredients rather than wait for a lookup fail later").
 if (r.ingredientData.some((line) => lineUnitMismatchEntry(line))) expandedIngredientData.add(r.id);
 } catch (err) {
-setStatus(err instanceof MissingKeyError ? 'Add an Anthropic API key in Settings first.' : `Couldn't analyse that: ${err.message || err}`);
+if (err instanceof MissingKeyError) setStatus(`Add an Anthropic API key in ${MISSING_KEY_LINK_HTML} first.`, true);
+else setStatus(`Couldn't analyse that: ${err.message || err}`);
 } finally {
 busyIngredientAction.delete(r.id);
 }
@@ -1039,7 +1045,8 @@ data.recipes.push(variant);
 expandedRecipe = variant.id;
 newVariantId = variant.id;
 } catch (err) {
-setStatus(err instanceof MissingKeyError ? 'Add an Anthropic API key in Settings first.' : `Couldn't regenerate that: ${err.message || err}`);
+if (err instanceof MissingKeyError) setStatus(`Add an Anthropic API key in ${MISSING_KEY_LINK_HTML} first.`, true);
+else setStatus(`Couldn't regenerate that: ${err.message || err}`);
 } finally {
 busyIngredientAction.delete(r.id);
 }
@@ -2662,7 +2669,8 @@ await runParseIngredients(r);
 // feeds into more analysis" ask this was built for.
 expandedIngredientData.add(r.id);
 } catch (err) {
-setStatus(err instanceof MissingKeyError ? 'Add an Anthropic API key in Settings first.' : `Couldn't parse that: ${err.message || err}`);
+if (err instanceof MissingKeyError) setStatus(`Add an Anthropic API key in ${MISSING_KEY_LINK_HTML} first.`, true);
+else setStatus(`Couldn't parse that: ${err.message || err}`);
 } finally {
 busyIngredientAction.delete(r.id);
 }
@@ -2830,7 +2838,8 @@ const subRecord = originalEntry && Array.isArray(originalEntry.subs)
 const substituteEntry = findReferenceEntry(subName, subForm);
 if (subRecord && substituteEntry) applySubstitutionRatioHint(subRecord, substituteEntry);
 } catch (err) {
-setStatus(err instanceof MissingKeyError ? 'Add an Anthropic API key in Settings first.' : `Couldn't assess that substitute: ${err.message || err}`);
+if (err instanceof MissingKeyError) setStatus(`Add an Anthropic API key in ${MISSING_KEY_LINK_HTML} first.`, true);
+else setStatus(`Couldn't assess that substitute: ${err.message || err}`);
 map.delete(idx); // revert -- a selection left pointing at an unresolved substitute would look identical to a fixed bug
 } finally {
 busyIngredientAction.delete(recipeId);

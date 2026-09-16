@@ -9,7 +9,7 @@
 // the same album costs nothing. That matters because reviewing an album is
 // something you do repeatedly as it grows.
 import { data, queueSave, blankTask, recordImportRun, importStatusLine, upsertIdentity, blankConnection } from '../state.js';
-import { escapeHtml, resizeImageToBlob } from '../utils.js';
+import { escapeHtml, resizeImageToBlob, MISSING_KEY_LINK_HTML } from '../utils.js';
 import { storePhoto } from '../files.js';
 import { MissingKeyError, quickScanScreenshot, extractProfileFromScreenshot } from '../ai.js';
 
@@ -88,9 +88,8 @@ if (!s.age && rich.age) s.age = rich.age;
 statusEl().textContent = rich.fromCache ? 'Loaded from cache — no charge.' : 'Parsed.';
 render();
 } catch (err) {
-statusEl().textContent = err instanceof MissingKeyError
-? 'Add an Anthropic API key in Settings first.'
-: `Parse failed: ${err.message || err}`;
+if (err instanceof MissingKeyError) statusEl().innerHTML = `Add an Anthropic API key in ${MISSING_KEY_LINK_HTML} first.`;
+else statusEl().textContent = `Parse failed: ${err.message || err}`;
 console.error('Rich parse failed:', err);
 }
 }
@@ -196,7 +195,7 @@ previewUrl: URL.createObjectURL(file),
 } catch (err) {
 console.error('Quick scan failed for', file.name, err);
 if (err instanceof MissingKeyError) {
-statusEl().textContent = 'Add an Anthropic API key in Settings first.';
+statusEl().innerHTML = `Add an Anthropic API key in ${MISSING_KEY_LINK_HTML} first.`;
 return;
 }
 }

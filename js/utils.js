@@ -165,6 +165,18 @@ return String(str == null ? '' : str)
 .replace(/'/g, '&#39;');
 }
 
+// A MissingKeyError (ai.js) is caught and reported in ~20 different files --
+// every one of them used to write "...in Settings." as dead plain text.
+// One shared, real link instead of 20 copies of the same markup string, so
+// the target id only has to be right in one place. Always safe to splice
+// into an innerHTML assignment as-is (fully static, no user input).
+const MISSING_KEY_LINK_HTML = '<span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#anthropic-key-input">Settings</span>';
+
+// Same idea, for the several features (Health, recipe web import, Notion)
+// that need self-hosted live sync configured first -- selfhost.js's own
+// NotConfiguredError carries the plain-text version of this message.
+const SYNC_LINK_HTML = '<span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#sync-url-input">Settings</span>';
+
 // Amazon Associates tag -- run through EVERY Amazon link this app renders
 // (a shopping search result, a task captured from a shared Amazon link, a
 // Buy nudge, a reading-list item, an email link), not just the shopping
@@ -1202,7 +1214,7 @@ return classified.every((c) => c.isScreenshot) && looksLikeSameScreenshotPieces(
 }
 
 export {
-todayStr, daysAgoStr, dateStrAdd, unfoldIcsLines, parseIcsProperty, icsDateTime, parseLooseDateTime, last7Dates, uid, daysSince, daysUntil, foldDiacritics,
+todayStr, daysAgoStr, dateStrAdd, unfoldIcsLines, parseIcsProperty, icsDateTime, parseLooseDateTime, last7Dates, uid, daysSince, daysUntil, foldDiacritics, MISSING_KEY_LINK_HTML, SYNC_LINK_HTML,
 escapeHtml, affiliateLink, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, buildFlagMatcher, applyFlagMatcher, knownCityMap, knownScalarValues, pickChipHtml, splitCsvLine, scrollAndFlash, bindForm,
 findMentions, COUNTRY_NAME_TO_NATIONALITY,
 resizeImageToBlob, fileToBase64, loadImage, cropThumbnailToBlob,

@@ -25,7 +25,7 @@
 // Matching by name happens ONCE, at import; what gets stored is the album
 // URL. So renaming an album later doesn't break an already-linked person.
 import { data, queueSave, TAG_FIELDS, recordImportRun, importStatusLine, blankConnection } from '../state.js';
-import { escapeHtml, todayStr, hydratePhotoBackgrounds } from '../utils.js';
+import { escapeHtml, todayStr, hydratePhotoBackgrounds, MISSING_KEY_LINK_HTML } from '../utils.js';
 import { nameKey, editDistance } from '../googlecontacts.js';
 import { photoGet } from '../db.js';
 import { fetchProxiedImage, storePhoto } from '../files.js';
@@ -199,7 +199,10 @@ if (row.aiVerdict) {
 const v = row.aiVerdict;
 const cls = v.same === true ? 'yes' : v.same === false ? 'no' : 'unsure';
 const label = v.same === true ? 'AI: looks like the same person' : v.same === false ? 'AI: these look like different people' : 'AI: unsure';
-return `<div class="album-ai-compare ${cls}">${escapeHtml(label)}${v.reason ? ` — ${escapeHtml(v.reason)}` : ''}</div>`;
+const reasonHtml = v.missingKey ? ` — Add an Anthropic API key in ${MISSING_KEY_LINK_HTML} first.`
+: v.needsPhotoSync ? ` — this connection's existing photo isn't on this device, run <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#photosync-body">Photo sync</span> first.`
+: (v.reason ? ` — ${escapeHtml(v.reason)}` : '');
+return `<div class="album-ai-compare ${cls}">${escapeHtml(label)}${reasonHtml}</div>`;
 }
 return `<button class="sync-btn sm" type="button" data-album-ai-compare="${i}">AI compare faces</button>`;
 }
@@ -213,11 +216,13 @@ const [existing, incoming] = await Promise.all([
 photoGet(conn.photoId),
 fetchProxiedImage(row.cover),
 ]);
-if (!existing) throw new Error("This connection's existing photo isn't on this device — run Photo sync in Settings first.");
+if (!existing) { row.aiVerdict = { same: null, needsPhotoSync: true }; render(); return; }
 row.aiVerdict = await compareFaces(existing, incoming);
 } catch (err) {
 console.error('Face comparison failed:', err);
-row.aiVerdict = { same: null, reason: err instanceof MissingKeyError ? 'Add an Anthropic API key in Settings first.' : (err.message || String(err)) };
+row.aiVerdict = err instanceof MissingKeyError
+? { same: null, missingKey: true }
+: { same: null, reason: err.message || String(err) };
 }
 render();
 }

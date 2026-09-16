@@ -1,5 +1,5 @@
 import { data, reachOutThreshold, isDormantStage, isTravelPaused, getLocalSettings, setLocalSetting } from '../state.js';
-import { escapeHtml, affiliateLink, scrollAndFlash, daysSince, daysUntil } from '../utils.js';
+import { escapeHtml, affiliateLink, scrollAndFlash, daysSince, daysUntil, MISSING_KEY_LINK_HTML } from '../utils.js';
 import { switchTab } from '../tabs.js';
 import { callTextJson, MissingKeyError } from '../ai.js';
 import { gapsFor } from './travel.js';
@@ -766,9 +766,10 @@ if (status) status.textContent = '';
 } catch (err) {
 if (myGen !== renderGen) return;
 console.error('Smart nudges failed, showing a random pick instead:', err);
-if (status) status.textContent = err instanceof MissingKeyError
-? 'Add an Anthropic API key in Settings to enable smart nudges.'
-: "Couldn't rank smartly — showing a random pick instead.";
+if (status) {
+if (err instanceof MissingKeyError) status.innerHTML = `Add an Anthropic API key in ${MISSING_KEY_LINK_HTML} to enable smart nudges.`;
+else status.textContent = "Couldn't rank smartly — showing a random pick instead.";
+}
 }
 }
 

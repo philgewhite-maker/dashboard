@@ -23,7 +23,7 @@
 // review regardless of how it got picked, so a wrong dropdown pick is just
 // as visible as a wrong auto-match was invisible before.
 import { data, queueSave, displayAge, computeFlags, distanceMiles, heightCm, FLAG_FIELD_DEFS, suggestedQuestions, TAG_FIELDS, stripSharedSuffix, recordImportRun, importStatusLine, upsertIdentity, tinderMatchIds, mergeChatLog, blankConnection } from '../state.js';
-import { escapeHtml, uid, todayStr, hydratePhotoBackgrounds, openLightbox, knownCityMap, knownScalarValues, pickChipHtml, COUNTRY_NAME_TO_NATIONALITY, avatarHtml, foldDiacritics } from '../utils.js';
+import { escapeHtml, uid, todayStr, hydratePhotoBackgrounds, openLightbox, knownCityMap, knownScalarValues, pickChipHtml, COUNTRY_NAME_TO_NATIONALITY, avatarHtml, foldDiacritics, MISSING_KEY_LINK_HTML } from '../utils.js';
 import { phoneKey } from '../googlecontacts.js';
 import { storePhoto, fetchProxiedImage } from '../files.js';
 import { photoGet, photoUrl } from '../db.js';
@@ -362,7 +362,7 @@ const existingPhotos = existingIds.length
 : '<div class="settings-note" style="margin:4px 0;">No photo on file for them.</div>';
 const verdict = pending.aiVerdicts[conn.id];
 const aiBlock = verdict === 'loading' ? '<div class="album-ai-compare loading">Comparing…</div>'
-: verdict ? `<div class="album-ai-compare ${verdict.same === true ? 'yes' : verdict.same === false ? 'no' : 'unsure'}">${escapeHtml(verdict.same === true ? 'AI: looks like the same person' : verdict.same === false ? 'AI: these look like different people' : 'AI: unsure')}${verdict.reason ? ` — ${escapeHtml(verdict.reason)}` : ''}</div>`
+: verdict ? `<div class="album-ai-compare ${verdict.same === true ? 'yes' : verdict.same === false ? 'no' : 'unsure'}">${escapeHtml(verdict.same === true ? 'AI: looks like the same person' : verdict.same === false ? 'AI: these look like different people' : 'AI: unsure')}${verdict.missingKey ? ` — Add an Anthropic API key in ${MISSING_KEY_LINK_HTML} first.` : verdict.needsPhotoSync ? ` — this connection's existing photo isn't on this device, run <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#photosync-body">Photo sync</span> first.` : (verdict.reason ? ` — ${escapeHtml(verdict.reason)}` : '')}</div>`
 : (conn.photoId && pending.photos[0] ? `<button class="sync-btn sm" type="button" data-tinder-ai-compare="${escapeHtml(conn.id)}">AI compare faces</button>` : '');
 const isChosen = pending.chosenId === conn.id;
 // Confirmed vs merely chosen are different states -- someone picked
@@ -434,11 +434,11 @@ const [existing, incomingBlob] = await Promise.all([
 photoGet(conn.photoId),
 fetchTinderPhoto(incoming.url),
 ]);
-if (!existing) throw new Error("This connection's existing photo isn't on this device — run Photo sync in Settings first.");
+if (!existing) { pending.aiVerdicts[connId] = { same: null, needsPhotoSync: true }; render(); return; }
 pending.aiVerdicts[connId] = await compareFaces(existing, incomingBlob);
 } catch (err) {
 console.error('Face comparison failed:', err);
-pending.aiVerdicts[connId] = { same: null, reason: err instanceof MissingKeyError ? 'Add an Anthropic API key in Settings first.' : (err.message || String(err)) };
+pending.aiVerdicts[connId] = err instanceof MissingKeyError ? { same: null, missingKey: true } : { same: null, reason: err.message || String(err) };
 }
 render();
 }
@@ -477,7 +477,7 @@ console.warn('On-device language detection unavailable, falling back to Anthropi
 pending.translations[i] = await translateText(text);
 } catch (err) {
 console.error('Translation failed:', err);
-pending.translations[i] = { error: err instanceof MissingKeyError ? 'Add an Anthropic API key in Settings first.' : (err.message || String(err)) };
+pending.translations[i] = err instanceof MissingKeyError ? { missingKey: true } : { error: err.message || String(err) };
 }
 render();
 }
@@ -489,7 +489,7 @@ try {
 pending.countries[i] = await identifyCountry(pending.fields[i].value);
 } catch (err) {
 console.error('Country lookup failed:', err);
-pending.countries[i] = { error: err instanceof MissingKeyError ? 'Add an Anthropic API key in Settings first.' : (err.message || String(err)) };
+pending.countries[i] = err instanceof MissingKeyError ? { missingKey: true } : { error: err.message || String(err) };
 }
 render();
 }
@@ -935,6 +935,7 @@ function translationResultHtml(i) {
 const t = pending.translations[i];
 if (!t) return '';
 if (t === 'loading') return `<div class="tinder-translate-result">Checking language…</div>`;
+if (t.missingKey) return `<div class="tinder-translate-result tinder-translate-error">Translate failed: add an Anthropic API key in ${MISSING_KEY_LINK_HTML} first.</div>`;
 if (t.error) return `<div class="tinder-translate-result tinder-translate-error">Translate failed: ${escapeHtml(t.error)}</div>`;
 if (t.alreadyEnglish) return `<div class="tinder-translate-result"><span class="tinder-engine-badge tinder-engine-free">Free, on-device</span> Already English — no Anthropic call made.</div>`;
 if (!t.language || !t.translation) return `<div class="tinder-translate-result tinder-translate-error">Couldn't tell what language this is.</div>`;
@@ -986,6 +987,7 @@ function countryResultHtml(f, i) {
 const c = pending.countries[i];
 if (!c) return '';
 if (c === 'loading') return `<div class="tinder-translate-result">Identifying country…</div>`;
+if (c.missingKey) return `<div class="tinder-translate-result tinder-translate-error">Country lookup failed: add an Anthropic API key in ${MISSING_KEY_LINK_HTML} first.</div>`;
 if (c.error) return `<div class="tinder-translate-result tinder-translate-error">Country lookup failed: ${escapeHtml(c.error)}</div>`;
 if (!c.country) return `<div class="tinder-translate-result tinder-translate-error">Couldn't identify a country.</div>`;
 // City's real value lives in the separate cityOverride chip list, not

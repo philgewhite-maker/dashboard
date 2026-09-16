@@ -4,7 +4,7 @@ import { photoDelete, photoUrl } from '../db.js';
 import { storePhoto, serverPhotoUrl } from '../files.js';
 import {
 uid, todayStr, daysSince, escapeHtml, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, buildFlagMatcher, applyFlagMatcher, knownCityMap, knownScalarValues, pickChipHtml, scrollAndFlash, bindForm, foldDiacritics,
-resizeImageToBlob, classifyProfileUpload, cropToContentBlob, contentCropBounds, loadImage,
+resizeImageToBlob, classifyProfileUpload, cropToContentBlob, contentCropBounds, loadImage, MISSING_KEY_LINK_HTML,
 } from '../utils.js';
 import { MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot } from '../ai.js';
 import { isSensitive, noCoverNote } from './photoalbums.js';
@@ -2011,7 +2011,7 @@ await fn();
 } catch (err) {
 console.error('Screenshot import failed:', err);
 if (err instanceof MissingKeyError) {
-statusEl.textContent = 'Add an Anthropic API key in Settings first.';
+statusEl.innerHTML = `Add an Anthropic API key in ${MISSING_KEY_LINK_HTML} first.`;
 } else {
 statusEl.textContent = `Couldn't read that screenshot: ${err.message || err}`;
 }
@@ -3393,9 +3393,12 @@ if (cand.stage === 'Chatting in app') existing.lastContact = todayStr();
 // the same progress/result text through its own UI instead.
 async function applyDirectProfileUpload(files, connId, { onStatus } = {}) {
 const conn = data.connections.find((c) => c.id === connId);
-const report = onStatus || ((msg) => {
+// `isHtml` lets the one MissingKeyError message below render a real
+// Settings link -- every other call stays plain text through here.
+const report = onStatus || ((msg, isHtml) => {
 const el = document.getElementById(`parse-profile-status-${connId}`);
-if (el) el.textContent = msg;
+if (!el) return;
+if (isHtml) el.innerHTML = msg; else el.textContent = msg;
 });
 if (!conn || !files.length) return;
 report(`Reading ${files.length} file${files.length === 1 ? '' : 's'}…`);
@@ -3439,7 +3442,8 @@ queueSave();
 report(message);
 } catch (err) {
 console.error('Direct profile upload failed:', err);
-report(err instanceof MissingKeyError ? 'Add an Anthropic API key in Settings first.' : `Couldn't read that: ${err.message || err}`);
+if (err instanceof MissingKeyError) report(`Add an Anthropic API key in ${MISSING_KEY_LINK_HTML} first.`, true);
+else report(`Couldn't read that: ${err.message || err}`);
 }
 }
 

@@ -20,6 +20,8 @@
 import { data, queueSave, blankConnection, blankTelegramThread, getLocalSettings, setLocalSetting } from '../state.js';
 import { escapeHtml, scrollAndFlash } from '../utils.js';
 
+const TELEGRAM_BOT_LINK_HTML = '<span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#telegrambot-url-input">Settings</span>';
+
 function familyConnections() {
 return data.connections.filter((c) => c.isFamily);
 }
@@ -47,7 +49,7 @@ secret: (settings.syncSecret || '').trim(),
 
 async function botRequest(method, query, body) {
 const { url, secret } = await botConfig();
-if (!url || !secret) throw new Error('Set the Telegram bot URL in Settings (Account & sync) first, and make sure your sync secret is entered.');
+if (!url || !secret) { const err = new Error('Set the Telegram bot URL in Settings first.'); err.name = 'TelegramBotNotConfiguredError'; throw err; }
 const res = await fetch(url + (query || ''), {
 method,
 headers: { 'Content-Type': 'application/json', 'X-Sync-Secret': secret },
@@ -211,13 +213,16 @@ return '<div class="settings-note">Add a family member below, then have them mes
 }
 const status = composerStatusMsg;
 composerStatusMsg = '';
+const statusHtml = status === 'needsBotUrl'
+? `Set the bot URL in ${TELEGRAM_BOT_LINK_HTML} first, and make sure your sync secret is entered.`
+: escapeHtml(status);
 return `<h3>Ask a question</h3>
 <select id="telegramfamily-person">${people.map((c) => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}</select>
 <select id="telegramfamily-context" style="margin-top:6px;">${contextOptionsHtml()}</select>
 <textarea id="telegramfamily-question" placeholder="e.g. Does this flight work for you?" rows="2" style="width:100%;margin-top:6px;box-sizing:border-box;font-family:'Inter',sans-serif;font-size:13px;border:1px solid var(--line);border-radius:7px;padding:7px 9px;background:var(--paper);color:var(--ink);resize:vertical;"></textarea>
 <div class="sync-row" style="margin-top:8px;">
 <button class="sync-btn" id="telegramfamily-send" type="button">Send</button>
-<span class="sync-status" id="telegramfamily-send-status">${escapeHtml(status)}</span>
+<span class="sync-status" id="telegramfamily-send-status">${statusHtml}</span>
 </div>`;
 }
 
@@ -293,7 +298,7 @@ await askQuestion(personId, question, context);
 composerStatusMsg = 'Sent.';
 renderTelegramFamily();
 } catch (err) {
-composerStatusMsg = err.message || String(err);
+composerStatusMsg = err.name === 'TelegramBotNotConfiguredError' ? 'needsBotUrl' : (err.message || String(err));
 console.error('Telegram send failed:', err);
 renderTelegramFamily();
 }

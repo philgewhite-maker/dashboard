@@ -7,7 +7,7 @@
 // any host; that's a genuine Airbnb privacy limit, which is why
 // guestName/notes below are always typed in by hand, never scraped.
 import { data, queueSave, blankAirbnbListing, blankAirbnbReservation, blankAirbnbKey, blankAirbnbKeyAssignment, KEY_CUSTODIAN_TYPES } from '../state.js';
-import { escapeHtml, todayStr, dateStrAdd, unfoldIcsLines, parseIcsProperty } from '../utils.js';
+import { escapeHtml, todayStr, dateStrAdd, unfoldIcsLines, parseIcsProperty, MISSING_KEY_LINK_HTML } from '../utils.js';
 import { fetchIcs } from '../files.js';
 import { canAttemptGoogleAction, hasCalendarWrite } from '../sync/googleauth.js';
 import { listCalendars, createEvent, findEvents } from '../googlecalendar.js';
@@ -791,8 +791,8 @@ async function pushReservation(reservation, statusEl) {
 const listing = data.airbnbListings.find((l) => l.id === reservation.listingId);
 if (!listing) return;
 if (reservation.googleEventId) { statusEl.textContent = 'Already pushed.'; return; }
-if (!(await canAttemptGoogleAction())) { statusEl.textContent = 'Sign in to Google in Settings first.'; return; }
-if (!hasCalendarWrite()) { statusEl.textContent = 'Turn on "Allow creating events in Google Calendar" in Settings, then sign out and back in.'; return; }
+if (!(await canAttemptGoogleAction())) { statusEl.textContent = 'Sign in to Google at the top of Overview first.'; return; }
+if (!hasCalendarWrite()) { statusEl.innerHTML = 'Turn on "Allow creating events in Google Calendar" in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#calendar-write-toggle">Settings</span>, then sign out and back in.'; return; }
 const calendarId = data.prefs.airbnbCalendarId;
 if (!calendarId) { statusEl.textContent = 'Pick which calendar to push to, next to Sync, first.'; return; }
 
@@ -851,11 +851,11 @@ const select = document.getElementById('airbnb-push-calendar');
 const status = document.getElementById('airbnb-sync-status');
 if (!select) return;
 if (!(await canAttemptGoogleAction())) {
-if (!silent && status) status.textContent = 'Sign in to Google (Settings) to enable "Push to…".';
+if (!silent && status) status.textContent = 'Sign in to Google at the top of Overview to enable "Push to…".';
 return;
 }
 if (!hasCalendarWrite()) {
-if (!silent && status) status.textContent = 'Turn on "Allow creating events in Google Calendar" in Settings, then sign out and back in, to enable "Push to…".';
+if (!silent && status) status.innerHTML = 'Turn on "Allow creating events in Google Calendar" in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#calendar-write-toggle">Settings</span>, then sign out and back in, to enable "Push to…".';
 return;
 }
 try {
@@ -874,7 +874,7 @@ const btn = document.getElementById('airbnb-sync-btn');
 const status = document.getElementById('airbnb-sync-status');
 if (!btn) return;
 btn.addEventListener('click', async () => {
-if (!data.airbnbListings.length) { status.textContent = 'Add a listing in Settings first.'; return; }
+if (!data.airbnbListings.length) { status.innerHTML = 'Add a listing in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#airbnb-listings">Settings</span> first.'; return; }
 btn.disabled = true;
 status.textContent = 'Syncing…';
 try {
@@ -892,9 +892,9 @@ renderPlanner();
 const failed = data.airbnbListings.filter((l) => data.airbnbSyncStatus[l.id] && !data.airbnbSyncStatus[l.id].ok);
 if (!failed.length) {
 const guestNote = guestResult.filled
-? ` Filled in ${guestResult.filled} guest name${guestResult.filled === 1 ? '' : 's'} from email${guestResult.romanizeFailed ? ` (${guestResult.romanizeFailed} left in the original script — add an Anthropic key on THIS device in Settings to romanize ${guestResult.romanizeFailed === 1 ? 'it' : 'them'})` : ''}.`
+? ` Filled in ${guestResult.filled} guest name${guestResult.filled === 1 ? '' : 's'} from email${guestResult.romanizeFailed ? ` (${guestResult.romanizeFailed} left in the original script — add an Anthropic key on THIS device in ${MISSING_KEY_LINK_HTML} to romanize ${guestResult.romanizeFailed === 1 ? 'it' : 'them'})` : ''}.`
 : '';
-status.textContent = `Synced just now.${guestNote}`;
+status.innerHTML = `Synced just now.${guestNote}`;
 } else {
 // The actual error, right here -- not just a count pointing at devtools
 // most people never open. Every failed listing likely has the SAME

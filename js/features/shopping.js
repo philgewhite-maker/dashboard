@@ -20,7 +20,7 @@
 // persisted on the task itself (t.priceCheck), dated, with a Refresh button
 // to re-run it later — not the old in-memory, un-dated Map this used to be.
 import { data, queueSave, SHOPPING_CONTEXTS } from '../state.js';
-import { escapeHtml, affiliateLink, daysUntil, daysSince } from '../utils.js';
+import { escapeHtml, affiliateLink, daysUntil, daysSince, MISSING_KEY_LINK_HTML } from '../utils.js';
 import { captureTask, revealTask } from './tasks.js';
 import { MissingKeyError, searchShoppingItem } from '../ai.js';
 import { initMicCapture } from './voicecapture.js';
@@ -117,7 +117,7 @@ banner(`Amazon price updated for "${t.title.slice(0, 60)}": ${payload.price || r
 function searchResultsHtml(t) {
 const s = searchState.get(t.id);
 if (s && s.status === 'loading') return '<div class="shop-search-results loading">Searching…</div>';
-if (s && s.status === 'error') return `<div class="shop-search-results error">${escapeHtml(s.message)}</div>`;
+if (s && s.status === 'error') return `<div class="shop-search-results error">${s.missingKey ? `Add an Anthropic API key in ${MISSING_KEY_LINK_HTML} first.` : escapeHtml(s.message)}</div>`;
 if (!t.priceCheck) return '';
 const { results, recommendation, checkedAt } = t.priceCheck;
 if (!results.length) return '<div class="shop-search-results empty">No results found.</div>';
@@ -205,8 +205,9 @@ t.priceCheck = { checkedAt: new Date().toISOString(), results, recommendation };
 searchState.delete(taskId);
 queueSave();
 } catch (err) {
-const message = err instanceof MissingKeyError ? 'Add an Anthropic API key in Settings first.' : (err.message || String(err));
-searchState.set(taskId, { status: 'error', message });
+searchState.set(taskId, err instanceof MissingKeyError
+? { status: 'error', missingKey: true }
+: { status: 'error', message: err.message || String(err) });
 }
 render();
 }

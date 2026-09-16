@@ -178,11 +178,11 @@ const btn = document.getElementById('sync-cal-btn');
 const status = document.getElementById('cal-sync-status');
 btn.addEventListener('click', async () => {
 if (data.calendars.length === 0) {
-status.textContent = 'Add a calendar to track in Settings first.';
+status.innerHTML = 'Add a calendar to track in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#calendar-form">Settings</span> first.';
 return;
 }
 if (!(await canAttemptGoogleAction())) {
-status.textContent = 'Sign in to Google in Settings first.';
+status.textContent = 'Sign in to Google at the top of Overview first.';
 return;
 }
 btn.disabled = true;

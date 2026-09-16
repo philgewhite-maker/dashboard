@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v341</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v342</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -74,6 +74,7 @@
 <div class="panel-head">
 <h2><span class="dot teal"></span>Next Up</h2>
 <span class="count-badge" id="calendars-count"></span>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#calendar-form" title="Calendar settings">&#9881;</span>
 </div>
 <div class="sync-row">
 <button class="sync-btn" id="sync-cal-btn" type="button">Sync calendars</button>
@@ -86,6 +87,8 @@
 <div class="panel-head">
 <h2><span class="dot blue"></span>Airbnb</h2>
 <span class="count-badge" id="airbnb-count"></span>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#airbnb-listings" title="Airbnb listings">&#9881;</span>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#keys-settings" title="Keys">&#128273;</span>
 </div>
 <div class="sync-row">
 <button class="sync-btn" id="airbnb-sync-btn" type="button">&#8635; Sync</button>
@@ -181,6 +184,7 @@
 <div class="panel-head">
 <h2><span class="dot rose"></span>Smart capture</h2>
 <span class="count-badge" id="capture-drafts-count"></span>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#capture-rules" title="Capture markers &amp; suffixes">&#9881;</span>
 </div>
 <div class="capture-row">
 <input type="text" autocomplete="off" id="quick-capture-input" placeholder="Type or speak an instruction&hellip;">
@@ -363,6 +367,7 @@ Prices and offers come from an AI web search of each retailer, not a live basket
 <section class="panel wide" id="recipe-overview-panel" data-tab="menu">
 <div class="panel-head">
 <h2><span class="dot sage"></span>Recipes Overview</h2>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#recipe-rating-categories-list" title="Recipe rating categories">&#9881;</span>
 </div>
 <div id="recipe-overview-content"></div>
 </section>
@@ -2181,9 +2186,10 @@ Telegram Desktop &rarr; Settings &rarr; Advanced &rarr; Export Telegram data &ra
 <section class="panel wide" id="telegramfamily-panel" data-tab="datingadmin">
 <div class="panel-head">
 <h2><span class="dot rose"></span>Family (Telegram bot)</h2>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#telegrambot-url-input" title="Telegram bot settings">&#9881;</span>
 </div>
 <div class="settings-note" style="margin:0 0 10px;">
-Family members are added here as ordinary connections (so they can be placed on a trip, same as anyone else) but kept out of the dating lists above. Set the bot's URL and token in Settings &mdash; Account &amp; sync &mdash; before this works. See server/telegram-bot.php.example.
+Family members are added here as ordinary connections (so they can be placed on a trip, same as anyone else) but kept out of the dating lists above. Set the bot's URL and token in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#telegrambot-url-input">Settings &mdash; Account &amp; sync</span> before this works. See server/telegram-bot.php.example.
 </div>
 <div id="telegramfamily-body"></div>
 </section>
@@ -2473,6 +2479,8 @@ Finds connections whose cover photo is missing or is really just the small place
 <div class="panel-head">
 <h2><span class="dot rose"></span>Connections</h2>
 <span class="count-badge" id="connections-count"></span>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#rating-categories-list" title="Rating categories &amp; flags">&#9881;</span>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#tag-cleanup" title="Tidy up tags">&#127991;</span>
 </div>
 <div class="sort-row">
 <!-- Options are rendered by connections.js (renderSortOptions), since the
@@ -2522,8 +2530,9 @@ Finds connections whose cover photo is missing or is really just the small place
 <section class="panel wide" id="health-panel" data-tab="health">
 <div class="panel-head">
 <h2><span class="dot sage"></span>Health</h2>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#health-sync-body" title="Health data settings">&#9881;</span>
 </div>
-<div class="settings-note" style="margin:0 0 10px;">One row per day, parsed from whatever your Health Connect bridge app has posted to <code>health.php</code> &mdash; steps, sleep, heart rate, distance, calories, weight, body fat, and exercise sessions. See Settings for the raw payload viewer and setup notes.</div>
+<div class="settings-note" style="margin:0 0 10px;">One row per day, parsed from whatever your Health Connect bridge app has posted to <code>health.php</code> &mdash; steps, sleep, heart rate, distance, calories, weight, body fat, and exercise sessions. See <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#health-sync-body">Settings</span> for the raw payload viewer and setup notes.</div>
 <div class="capture-row" style="margin-bottom:10px;">
 <button class="todo-add-btn" type="button" id="health-parse-btn">&#8635; Sync &amp; parse</button>
 <span class="sync-status" id="health-parse-status"></span>
@@ -2595,7 +2604,7 @@ Finds connections whose cover photo is missing or is really just the small place
 <div class="panel-head">
 <h2><span class="dot sage"></span>Planner</h2>
 </div>
-<div class="settings-note" style="margin:0 0 10px;">Drag a priority connection or a thing-to-do onto a day below to plan it. Mark each placement Draft or Firm; a trip with known dates gets its own mini planner further down, alongside whatever's already booked on the Travel tab.</div>
+<div class="settings-note" style="margin:0 0 10px;">Drag a priority connection or a thing-to-do onto a day below to plan it. Mark each placement Draft or Firm; a trip with known dates gets its own mini planner further down, alongside whatever's already booked on the <span class="inline-goto-link" data-goto-tab="travel">Travel tab</span>.</div>
 
 <div class="planner-pools">
 <div class="planner-pool">
@@ -2703,7 +2712,7 @@ Photos added before task attachments existed live only on the device that added 
 <div class="settings-block">
 <h3>Health data (Health Connect)</h3>
 <div class="settings-note" style="margin:0 0 8px;">
-A browser page has no way to read Health Connect directly &mdash; it's a native Android API with no web equivalent. Instead, a bridge app on your phone (e.g. <strong>HC Webhook</strong> / "Health Connect Webhook" from Google Play) posts whatever data you grant it to <code>health.php</code> on this same server. This panel is a raw viewer for inspecting exactly what's arrived &mdash; see the Health tab for the parsed daily rollup.
+A browser page has no way to read Health Connect directly &mdash; it's a native Android API with no web equivalent. Instead, a bridge app on your phone (e.g. <strong>HC Webhook</strong> / "Health Connect Webhook" from Google Play) posts whatever data you grant it to <code>health.php</code> on this same server. This panel is a raw viewer for inspecting exactly what's arrived &mdash; see the <span class="inline-goto-link" data-goto-tab="health">Health tab</span> for the parsed daily rollup.
 </div>
 <div class="settings-note" style="margin:0 0 8px;">
 <strong>Setup:</strong> copy <code>server/health.php.example</code> to <code>server/health.php</code>, set <code>$SECRET</code> to the <em>same</em> value as <code>sync.php</code>, upload next to it. In the bridge app, point its webhook target at that URL &mdash; append <code>?secret=&lt;your secret&gt;</code> to it if the app doesn't let you set a custom header.
@@ -2730,7 +2739,7 @@ A browser page has no way to read Health Connect directly &mdash; it's a native 
 
 <div class="settings-block">
 <h3>Telegram bot</h3>
-<div class="settings-note" style="margin:0 0 8px;">Lets family members be messaged and reply back into the app &mdash; see the Family panel on Dating admin. Set up server/telegram-bot.php.example (copy it, fill in a bot token from @BotFather and a webhook secret, upload, then register the webhook once — the file's own top comment has the exact steps).</div>
+<div class="settings-note" style="margin:0 0 8px;">Lets family members be messaged and reply back into the app &mdash; see the <span class="inline-goto-link" data-goto-tab="datingadmin">Family panel on Dating admin</span>. Set up server/telegram-bot.php.example (copy it, fill in a bot token from @BotFather and a webhook secret, upload, then register the webhook once — the file's own top comment has the exact steps).</div>
 <label for="telegrambot-url-input" style="font-size:13px;font-weight:500;display:block;margin-bottom:6px;">Bot URL</label>
 <input type="text" autocomplete="off" id="telegrambot-url-input" class="settings-input" placeholder="https://georgewhiteeuropean.co.uk/telegram-bot.php">
 <div class="settings-note">Uses the same secret as Live sync above.</div>
@@ -2811,6 +2820,10 @@ Same idea as Connections' ratings, a separate list (Taste/Health/Prep by default
 </div>
 <div class="tag-editor" id="recipe-rating-categories-list"></div>
 </div>
+</details>
+
+<details class="settings-group">
+<summary><span class="dot plum"></span>Calendar &amp; Planner</summary>
 
 <div class="settings-block">
 <h3>Calendar limits</h3>
@@ -2835,6 +2848,10 @@ Same idea as Connections' ratings, a separate list (Taste/Health/Prep by default
 </div>
 <div class="settings-note">Then use "Sync calendars" on the Overview tab to pull in each one's next upcoming event.</div>
 </div>
+</details>
+
+<details class="settings-group">
+<summary><span class="dot pink"></span>Mail</summary>
 
 <div class="settings-block" id="mail-topics-block">
 <h3>Mail topics</h3>
@@ -2856,6 +2873,10 @@ Same idea as Connections' ratings, a separate list (Taste/Health/Prep by default
 <div id="mail-bin"></div>
 <button class="sync-btn" id="empty-mail-bin-btn" type="button" style="margin-top:8px;">Empty bin</button>
 </div>
+</details>
+
+<details class="settings-group">
+<summary><span class="dot blue"></span>Travel</summary>
 
 <div class="settings-block">
 <h3>Airbnb listings</h3>
@@ -2870,6 +2891,10 @@ Same idea as Connections' ratings, a separate list (Taste/Health/Prep by default
 <div id="keys-settings"></div>
 <button class="add-btn" id="add-key-settings-btn" type="button" style="margin-top:8px;">Add keyring</button>
 </div>
+</details>
+
+<details class="settings-group">
+<summary><span class="dot red"></span>Capture &amp; Shopping</summary>
 
 <div class="settings-block">
 <h3>Shared-link auto-routing</h3>

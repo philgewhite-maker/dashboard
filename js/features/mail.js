@@ -1,5 +1,5 @@
 import { data, queueSave, mailSearchLabel, blankPlannerActivity, blankMailDismissal } from '../state.js';
-import { escapeHtml, affiliateLink, unfoldIcsLines, parseIcsProperty, icsDateTime } from '../utils.js';
+import { escapeHtml, affiliateLink, unfoldIcsLines, parseIcsProperty, icsDateTime, MISSING_KEY_LINK_HTML } from '../utils.js';
 import { canAttemptGoogleAction } from '../sync/googleauth.js';
 import { fetchMailSearches, getMessageDetail, fetchMessageAttachmentBytes } from '../googlemail.js';
 import { captureTask, taskChipHtml, bindTaskChips } from './tasks.js';
@@ -65,11 +65,15 @@ return 'open';
 // now runs its own ICS-first waterfall, see extractDateEventFromIcs below)
 // -- read the full email body, run the named ai.js export on it, report a
 // MissingKeyError distinctly (same message every other AI-assisted flow in
-// this file already uses) instead of a raw error dump. Returns null on any
-// failure, having already reported it via `say`. Also hands back the raw
+// this file already uses) instead of a raw error dump, as a REAL link to
+// where the key actually gets entered rather than dead "...in Settings"
+// text -- which is why this takes the status element itself, not just a
+// plain-text `say`, one of the two paths needs innerHTML. Returns null on
+// any failure, having already reported it. Also hands back the raw
 // attachment metadata getMessageDetail found (cheap -- no bytes fetched
 // yet), for a caller that wants to offer grabEmailAttachments below.
-async function runAiExtraction(extractFnName, id, subject, from, say) {
+async function runAiExtraction(extractFnName, id, subject, from, status) {
+const say = (msg) => { if (status) status.textContent = msg; };
 say('Reading the email…');
 try {
 const [aiMod, detail] = await Promise.all([import('../ai.js'), getMessageDetail(id)]);
@@ -78,7 +82,8 @@ const result = await aiMod[extractFnName](subject, from, detail.bodyText);
 return { result, attachments: detail.attachments };
 } catch (err) {
 console.error('Mail AI extraction failed:', err);
-say(err?.name === 'MissingKeyError' ? 'Add an Anthropic API key in Settings to use AI here.' : `Couldn't read that: ${err.message || err}`);
+if (err?.name === 'MissingKeyError') { if (status) status.innerHTML = `Add an Anthropic API key in ${MISSING_KEY_LINK_HTML} to use AI here.`; }
+else say(`Couldn't read that: ${err.message || err}`);
 return null;
 }
 }
@@ -563,7 +568,8 @@ source = 'email';
 }
 } catch (err) {
 console.error('Date-event extraction failed:', err);
-say(err?.name === 'MissingKeyError' ? 'Add an Anthropic API key in Settings to use AI here.' : `Couldn't read that: ${err.message || err}`);
+if (err?.name === 'MissingKeyError') { if (status) status.innerHTML = `Add an Anthropic API key in ${MISSING_KEY_LINK_HTML} to use AI here.`; }
+else say(`Couldn't read that: ${err.message || err}`);
 btn.disabled = false;
 return;
 }
@@ -645,7 +651,7 @@ const id = btn.dataset.mailAiTaskFill;
 const status = list.querySelector(`[data-mail-ai-task-status="${CSS.escape(id)}"]`);
 const say = (msg) => { if (status) status.textContent = msg; };
 btn.disabled = true;
-const extraction = await runAiExtraction('extractTaskFromEmail', id, btn.dataset.mailSubject, btn.dataset.mailFrom, say);
+const extraction = await runAiExtraction('extractTaskFromEmail', id, btn.dataset.mailSubject, btn.dataset.mailFrom, status);
 btn.disabled = false;
 if (!extraction) return;
 const { result, attachments } = extraction;
@@ -703,7 +709,7 @@ const id = btn.dataset.mailImproveTaskFill;
 const status = list.querySelector(`[data-mail-improve-task-status="${CSS.escape(id)}"]`);
 const say = (msg) => { if (status) status.textContent = msg; };
 btn.disabled = true;
-const extraction = await runAiExtraction('extractTaskFromEmail', id, btn.dataset.mailSubject, btn.dataset.mailFrom, say);
+const extraction = await runAiExtraction('extractTaskFromEmail', id, btn.dataset.mailSubject, btn.dataset.mailFrom, status);
 btn.disabled = false;
 if (!extraction) return;
 const { result } = extraction;
@@ -788,7 +794,8 @@ status.innerHTML = `Added ${filled} detail${filled === 1 ? '' : 's'} to ${tripCh
 }
 } catch (err) {
 console.error('Trip email extraction failed:', err);
-say(err?.name === 'MissingKeyError' ? 'Add an Anthropic API key in Settings to read trip details from email.' : `Couldn't read that: ${err.message || err}`);
+if (err?.name === 'MissingKeyError') { if (status) status.innerHTML = `Add an Anthropic API key in ${MISSING_KEY_LINK_HTML} to read trip details from email.`; }
+else say(`Couldn't read that: ${err.message || err}`);
 } finally {
 btn.disabled = false;
 }

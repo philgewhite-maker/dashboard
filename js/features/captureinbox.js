@@ -41,7 +41,7 @@
 // that can quietly grow apart.
 import { data, queueSave, blankCaptureBatch } from '../state.js';
 import { photoDelete } from '../db.js';
-import { todayStr, escapeHtml, hydratePhotoBackgrounds, resizeImageToBlob, scrollAndFlash, looksLikeHeic, sniffsAsHeic, sniffsAsRasterImage, sniffsAsAvif, sniffsAsAudio } from '../utils.js';
+import { todayStr, escapeHtml, hydratePhotoBackgrounds, resizeImageToBlob, scrollAndFlash, looksLikeHeic, sniffsAsHeic, sniffsAsRasterImage, sniffsAsAvif, sniffsAsAudio, MISSING_KEY_LINK_HTML } from '../utils.js';
 import { storePhoto, uploadAttachment, deleteAttachment, fetchAttachment, openAttachment, formatBytes } from '../files.js';
 import { looksLikeRenphoCsv, parseRenphoCsv, mergeRenphoDaily, looksLikeHrvCsv } from './renpho.js';
 import { legTargetPickerHtml, bindLegTargetPicker, readLegTargetPicker, applyLegExtraction, gapsFor, tripChipHtml, bindTripChips } from './travel.js';
@@ -589,7 +589,7 @@ const blob = await fetchAttachment(it.id);
 return new File([blob], it.name || 'photo', { type: it.type || blob.type });
 }));
 const { applyDirectProfileUpload } = await import('./connections.js');
-await applyDirectProfileUpload(files, connId, { onStatus: (msg) => { if (status) status.textContent = msg; } });
+await applyDirectProfileUpload(files, connId, { onStatus: (msg, isHtml) => { if (!status) return; if (isHtml) status.innerHTML = msg; else status.textContent = msg; } });
 // Only the ticked items were sent -- anything left unticked (someone
 // else's photos, a CSV, etc.) stays behind for separate triage.
 for (const it of chosen) { await deleteItemBytes(it); selectedIds.delete(it.id); }
@@ -648,11 +648,11 @@ try {
 const blob = await fetchAttachment(it.id);
 const file = new File([blob], it.name || 'photo', { type: it.type || blob.type });
 const { ok, message } = await extractAndMergeWellnessFile(file);
-messages.push(message);
+messages.push(escapeHtml(message));
 if (ok) done.push(it);
 } catch (err) {
 console.error('Wellness extraction failed:', err);
-messages.push(err?.name === 'MissingKeyError' ? 'Add an Anthropic API key in Settings to extract wellness data.' : `${it.name || 'that image'}: ${err.message || err}`);
+messages.push(err?.name === 'MissingKeyError' ? `Add an Anthropic API key in ${MISSING_KEY_LINK_HTML} to extract wellness data.` : escapeHtml(`${it.name || 'that image'}: ${err.message || err}`));
 }
 }
 for (const it of done) { await deleteItemBytes(it); selectedIds.delete(it.id); }
@@ -672,7 +672,7 @@ queueSave();
 // than only the page-level one -- the page-level line sits at the TOP of
 // the panel, well above a card that's scrolled into view, and confirmed
 // live as effectively invisible there when the card itself still exists.
-writeInboxStatus(root, batchId, messages.join(' '));
+writeInboxStatus(root, batchId, messages.join(' '), true);
 });
 });
 
@@ -762,14 +762,14 @@ done.push(...consumedItems);
 messages.push(`Combined ${consumedItems.length} screenshots into one profile${plainPhotos.length ? ` with ${plainPhotos.length} extra photo${plainPhotos.length === 1 ? '' : 's'}` : ''} — review in Dating admin.`);
 done.push(...consumedItems, ...plainPhotos.map((p) => p.it));
 } else if (result.kind === 'profile') {
-messages.push(`${consumedItems[0]?.name || 'that image'}: found a profile${plainPhotos.length ? ` with ${plainPhotos.length} extra photo${plainPhotos.length === 1 ? '' : 's'}` : ''} — didn't look related enough to the other screenshot(s) to combine, handling those separately — review in Dating admin.`);
+messages.push(`${escapeHtml(consumedItems[0]?.name || 'that image')}: found a profile${plainPhotos.length ? ` with ${plainPhotos.length} extra photo${plainPhotos.length === 1 ? '' : 's'}` : ''} — didn't look related enough to the other screenshot(s) to combine, handling those separately — review in Dating admin.`);
 done.push(...consumedItems, ...plainPhotos.map((p) => p.it));
 } else {
-messages.push(result.error?.name === 'MissingKeyError' ? 'Add an Anthropic API key in Settings to extract a dating screenshot.' : "Those screenshots didn't look like a matches list or profile.");
+messages.push(result.error?.name === 'MissingKeyError' ? `Add an Anthropic API key in ${MISSING_KEY_LINK_HTML} to extract a dating screenshot.` : "Those screenshots didn't look like a matches list or profile.");
 }
 } catch (err) {
 console.error('Dating screenshot extraction failed:', err);
-messages.push(err?.name === 'MissingKeyError' ? 'Add an Anthropic API key in Settings to extract a dating screenshot.' : `Reading those screenshots failed: ${err.message || err}`);
+messages.push(err?.name === 'MissingKeyError' ? `Add an Anthropic API key in ${MISSING_KEY_LINK_HTML} to extract a dating screenshot.` : escapeHtml(`Reading those screenshots failed: ${err.message || err}`));
 }
 } else if (screenshots.length === 1 && plainPhotos.length > 0) {
 const { it, file } = screenshots[0];
@@ -780,10 +780,10 @@ if (result.kind === 'matches') {
 // A matches list has several people -- no single obvious owner for
 // the other ticked photos, so only the list itself gets extracted;
 // the loose photos are left for a separate, unambiguous action.
-messages.push(`${it.name || 'that image'}: found ${result.candidates.length} ${result.candidates.length === 1 ? 'person' : 'people'} (a list, not one profile, so the other ticked photos weren't attached to anyone) — review in Dating admin.`);
+messages.push(`${escapeHtml(it.name || 'that image')}: found ${result.candidates.length} ${result.candidates.length === 1 ? 'person' : 'people'} (a list, not one profile, so the other ticked photos weren't attached to anyone) — review in Dating admin.`);
 done.push(it);
 } else if (result.kind === 'profile') {
-messages.push(`${it.name || 'that image'}: found a profile with ${plainPhotos.length} extra photo${plainPhotos.length === 1 ? '' : 's'} — review in Dating admin.`);
+messages.push(`${escapeHtml(it.name || 'that image')}: found a profile with ${plainPhotos.length} extra photo${plainPhotos.length === 1 ? '' : 's'} — review in Dating admin.`);
 done.push(it, ...plainPhotos.map((p) => p.it));
 } else {
 // result.error is set when the profile-stage extraction itself failed
@@ -791,11 +791,11 @@ done.push(it, ...plainPhotos.map((p) => p.it));
 // importProfileScreenshotFile/importProfileWithPhotosFile catch that
 // internally so it never reaches this try/catch's own catch block, so
 // it has to be read back off the result instead of assumed absent.
-messages.push(result.error?.name === 'MissingKeyError' ? 'Add an Anthropic API key in Settings to extract a dating screenshot.' : `${it.name || 'that image'}: didn't look like a matches list or profile.`);
+messages.push(result.error?.name === 'MissingKeyError' ? `Add an Anthropic API key in ${MISSING_KEY_LINK_HTML} to extract a dating screenshot.` : escapeHtml(`${it.name || 'that image'}: didn't look like a matches list or profile.`));
 }
 } catch (err) {
 console.error('Dating screenshot extraction failed:', err);
-messages.push(err?.name === 'MissingKeyError' ? 'Add an Anthropic API key in Settings to extract a dating screenshot.' : `${it.name || 'that image'}: ${err.message || err}`);
+messages.push(err?.name === 'MissingKeyError' ? `Add an Anthropic API key in ${MISSING_KEY_LINK_HTML} to extract a dating screenshot.` : escapeHtml(`${it.name || 'that image'}: ${err.message || err}`));
 }
 }
 
@@ -805,20 +805,20 @@ messages.push(err?.name === 'MissingKeyError' ? 'Add an Anthropic API key in Set
 const alreadyDoneIds = new Set(done.map((d) => d.id));
 for (const { it, file, isScreenshot } of withFiles) {
 if (alreadyDoneIds.has(it.id)) continue;
-if (!isScreenshot) { messages.push(`${it.name || 'that image'}: not a screenshot, skipped.`); continue; }
+if (!isScreenshot) { messages.push(`${escapeHtml(it.name || 'that image')}: not a screenshot, skipped.`); continue; }
 if (status) status.textContent = `Reading ${it.name || 'photo'}…`;
 try {
 const result = await extractDatingScreenshot(file, appHintFromFilename(file), [], status);
 if (result.kind) {
 const count = result.candidates ? result.candidates.length : 1;
-messages.push(`${it.name || 'that image'}: found ${count} ${count === 1 ? 'person' : 'people'} (${result.kind}) — review in Dating admin.`);
+messages.push(`${escapeHtml(it.name || 'that image')}: found ${count} ${count === 1 ? 'person' : 'people'} (${result.kind}) — review in Dating admin.`);
 done.push(it);
 } else {
-messages.push(result.error?.name === 'MissingKeyError' ? 'Add an Anthropic API key in Settings to extract a dating screenshot.' : `${it.name || 'that image'}: didn't look like a matches list or profile.`);
+messages.push(result.error?.name === 'MissingKeyError' ? `Add an Anthropic API key in ${MISSING_KEY_LINK_HTML} to extract a dating screenshot.` : escapeHtml(`${it.name || 'that image'}: didn't look like a matches list or profile.`));
 }
 } catch (err) {
 console.error('Dating screenshot extraction failed:', err);
-messages.push(err?.name === 'MissingKeyError' ? 'Add an Anthropic API key in Settings to extract a dating screenshot.' : `${it.name || 'that image'}: ${err.message || err}`);
+messages.push(err?.name === 'MissingKeyError' ? `Add an Anthropic API key in ${MISSING_KEY_LINK_HTML} to extract a dating screenshot.` : escapeHtml(`${it.name || 'that image'}: ${err.message || err}`));
 }
 }
 
@@ -830,7 +830,7 @@ queueSave();
 const message = messages.join(' ');
 const batchId = batch.id;
 renderCaptureInbox();
-writeInboxStatus(root, batchId, message);
+writeInboxStatus(root, batchId, message, true);
 });
 });
 
@@ -885,7 +885,7 @@ messages.push(`${escapeHtml(it.name || 'that image')}: added ${filled} detail${f
 done.push(it);
 } catch (err) {
 console.error('Trip screenshot extraction failed:', err);
-messages.push(err?.name === 'MissingKeyError' ? 'Add an Anthropic API key in Settings to extract trip details.' : `${escapeHtml(it.name || 'that image')}: ${escapeHtml(err.message || String(err))}`);
+messages.push(err?.name === 'MissingKeyError' ? `Add an Anthropic API key in ${MISSING_KEY_LINK_HTML} to extract trip details.` : `${escapeHtml(it.name || 'that image')}: ${escapeHtml(err.message || String(err))}`);
 }
 }
 for (const it of done) { await deleteItemBytes(it); selectedIds.delete(it.id); }

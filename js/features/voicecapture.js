@@ -15,7 +15,7 @@
 // createBlankConnection, placeEntry, addActivityToDay) -- never writing
 // into data.* directly itself.
 import { data, queueSave, blankCaptureDraft } from '../state.js';
-import { escapeHtml, scrollAndFlash, dateStrAdd, todayStr } from '../utils.js';
+import { escapeHtml, scrollAndFlash, dateStrAdd, todayStr, MISSING_KEY_LINK_HTML } from '../utils.js';
 
 // ---- Executing a confirmed draft's steps ---------------------------------
 
@@ -281,7 +281,10 @@ input.value = '';
 if (status) status.textContent = '';
 } catch (err) {
 console.error('Quick capture failed:', err);
-if (status) status.textContent = err?.name === 'MissingKeyError' ? 'Add an Anthropic API key in Settings first.' : `Couldn't parse that: ${err.message || err}`;
+if (status) {
+if (err?.name === 'MissingKeyError') status.innerHTML = `Add an Anthropic API key in ${MISSING_KEY_LINK_HTML} first.`;
+else status.textContent = `Couldn't parse that: ${err.message || err}`;
+}
 } finally {
 btn.disabled = false;
 }

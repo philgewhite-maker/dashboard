@@ -839,7 +839,7 @@ const panel = document.getElementById('planner-push-panel');
 status.textContent = '';
 const { canAttemptGoogleAction, hasCalendarWrite } = await import('../sync/googleauth.js');
 if (!(await canAttemptGoogleAction())) { status.textContent = 'Sign in to Google at the top of Overview first.'; return; }
-if (!hasCalendarWrite()) { status.textContent = 'Turn on "Allow creating events in Google Calendar" in Settings, then sign out and back in.'; return; }
+if (!hasCalendarWrite()) { status.innerHTML = 'Turn on "Allow creating events in Google Calendar" in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#calendar-write-toggle">Settings</span>, then sign out and back in.'; return; }
 const { listCalendars } = await import('../googlecalendar.js');
 const calSelect = document.getElementById('planner-push-calendar');
 try {
