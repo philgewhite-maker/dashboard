@@ -311,17 +311,26 @@ if (byStatus.open.length) parts.push(`${byStatus.open.length} open`);
 if (byStatus.processed.length) parts.push(`${byStatus.processed.length} actioned`);
 if (byStatus.dismissed.length) parts.push(`${byStatus.dismissed.length} binned`);
 const visibleGroup = [...byStatus.open, ...byStatus.processed];
+const expanded = expandedGroups.has(latest.id);
 const toggleHtml = visibleGroup.length
-? `<button class="mini-task-btn" type="button" data-mail-group-toggle="${escapeHtml(latest.id)}">Show all</button>`
+? `<button class="mini-task-btn" type="button" data-mail-group-toggle="${escapeHtml(latest.id)}">${expanded ? 'Hide' : 'Show'} all</button>`
+: '';
+// Bins every still-visible message in this group in one click -- the
+// literal ask: duplicate blasts of the identical subject are noise as a
+// GROUP, not one dismiss at a time. Uses the same dismiss mechanism each
+// row's own × already does (blankMailDismissal by url), just looped.
+const memberPayload = escapeHtml(JSON.stringify(visibleGroup.map((m) => ({ url: m.link, subject: m.subject, from: displayName(m.from) }))));
+const dismissAllHtml = visibleGroup.length > 1
+? `<button class="mini-task-btn" type="button" data-mail-group-dismiss-all="${escapeHtml(latest.id)}" data-mail-group-members="${memberPayload}" title="Bin every message in this group">Bin all ${visibleGroup.length}</button>`
 : '';
 const detailHtml = visibleGroup.length
-? `<div class="mail-group-detail" data-mail-group-detail="${escapeHtml(latest.id)}" hidden>${visibleGroup.map((m) => messageRowHtml(m, topic)).join('')}</div>`
+? `<div class="mail-group-detail" data-mail-group-detail="${escapeHtml(latest.id)}"${expanded ? '' : ' hidden'}>${visibleGroup.map((m) => messageRowHtml(m, topic)).join('')}</div>`
 : '';
 return `<div class="mail-row mail-row-group">
 <span class="mail-from">${escapeHtml(displayName(latest.from))}</span>
 <span class="mail-subject">${escapeHtml(latest.subject)} <span class="mail-group-count">&times;${group.length}</span></span>
 <span class="mail-group-breakdown">${escapeHtml(parts.join(' · '))}</span>
-${toggleHtml}
+${toggleHtml}${dismissAllHtml}
 </div>
 ${detailHtml}`;
 }
@@ -442,21 +451,46 @@ document.getElementById('mail-count').textContent = `${shown} shown`;
 list.querySelectorAll('[data-mail-group-toggle]').forEach((btn) => {
 btn.addEventListener('click', (e) => {
 e.preventDefault();
-const detail = list.querySelector(`[data-mail-group-detail="${CSS.escape(btn.dataset.mailGroupToggle)}"]`);
-if (detail) detail.hidden = !detail.hidden;
+const id = btn.dataset.mailGroupToggle;
+if (expandedGroups.has(id)) expandedGroups.delete(id); else expandedGroups.add(id);
+// Full re-render rather than just flipping `hidden` in place -- state
+// now lives in expandedGroups, so this stays correct even though a
+// dismiss inside the group re-renders the whole list anyway.
+renderMail(lastSections);
 });
 });
+
+// Both dismiss paths funnel through here -- a single row's × and the
+// group's own "Bin all" -- so a message is only ever binned once
+// (dismissedFor's url match already guards a re-run) and both save/render
+// exactly the same way.
+function dismissMessage({ url, subject, from }) {
+if (!data.mailDismissed.some((d) => d.url === url)) {
+data.mailDismissed.push(blankMailDismissal({ url, subject, from }));
+}
+}
 
 list.querySelectorAll('[data-mail-dismiss]').forEach((btn) => {
 btn.addEventListener('click', (e) => {
 e.preventDefault();
-const url = btn.dataset.mailUrl;
-if (!data.mailDismissed.some((d) => d.url === url)) {
-data.mailDismissed.push(blankMailDismissal({ url, subject: btn.dataset.mailSubject, from: btn.dataset.mailFrom }));
+dismissMessage({ url: btn.dataset.mailUrl, subject: btn.dataset.mailSubject, from: btn.dataset.mailFrom });
 queueSave();
-}
 // Re-render from the same fetched data rather than re-fetching Gmail
 // -- dismissing is purely a local view change, nothing new to pull.
+renderMail(lastSections);
+});
+});
+
+list.querySelectorAll('[data-mail-group-dismiss-all]').forEach((btn) => {
+btn.addEventListener('click', (e) => {
+e.preventDefault();
+let members = [];
+try { members = JSON.parse(btn.dataset.mailGroupMembers || '[]'); } catch (err) { /* stashed value always valid JSON */ }
+members.forEach(dismissMessage);
+queueSave();
+// The group itself is gone now (everything in it just got binned) --
+// no detail left to stay expanded for.
+expandedGroups.delete(btn.dataset.mailGroupDismissAll);
 renderMail(lastSections);
 });
 });
@@ -765,6 +799,15 @@ btn.disabled = false;
 // The last fetched result, kept purely so a dismiss (a local view change,
 // nothing new from Gmail) can re-render without a full refetch.
 let lastSections = [];
+
+// Which consolidated groups (consolidatedRowHtml, keyed by the group's
+// `latest.id`) are expanded -- every dismiss/action re-renders the whole
+// list (see lastSections above), so without this a group's "Show all"
+// silently re-collapsed on every single click inside it, confirmed
+// especially painful when dismissing several duplicates in a row one at a
+// time. Same persisted-across-render Set pattern as tasks.js's
+// expandedTasks / travel.js's expandedLegs.
+const expandedGroups = new Set();
 
 function initMail() {
 bindConnPickers(); // Mail can render (and its "+ date event" picker with it) before Dating/Planner ever do
