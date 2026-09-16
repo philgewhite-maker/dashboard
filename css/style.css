@@ -2437,6 +2437,34 @@ border-style:dashed;
    stuck reaching for a planner-specific class. */
 .conn-chip{display:inline-flex;align-items:center;gap:6px;min-width:0;cursor:pointer;}
 .conn-chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+/* The trip equivalent of .conn-chip (js/features/travel.js's tripChipHtml)
+   -- a small coloured pill rather than avatar+name, since a trip has no
+   photo. Same "reference chip usable inline in a sentence, not just a
+   list row" job .tinder-hint-chip/.tag-picker-chip already do elsewhere,
+   just under a trip-specific name so it reads as a trip at a glance. */
+.trip-chip{
+display:inline-flex;align-items:center;gap:4px;
+background:var(--rose-bg);color:var(--rose);
+border-radius:8px;padding:2px 8px;
+font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap;
+}
+.trip-chip:hover{background:var(--rose);color:#fff;}
+.task-chip{
+display:inline-flex;align-items:center;gap:4px;
+background:var(--teal-bg);color:var(--teal);
+border-radius:8px;padding:2px 8px;
+font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap;
+}
+.task-chip:hover{background:var(--teal);color:#fff;}
+.planner-chip{
+display:inline-flex;align-items:center;gap:4px;
+background:var(--blue-bg);color:var(--blue);
+border-radius:8px;padding:2px 8px;
+font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap;
+}
+.planner-chip:hover{background:var(--blue);color:#fff;}
+.leg-toggle{cursor:pointer;display:inline-flex;width:16px;justify-content:center;color:var(--muted);user-select:none;}
+.leg-toggle:hover{color:var(--ink);}
 .planner-entry-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .planner-entry-controls{flex:0 0 100%;display:flex;align-items:center;justify-content:flex-end;gap:8px;}
 .planner-status-dot{

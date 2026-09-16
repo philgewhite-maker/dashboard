@@ -44,7 +44,7 @@ import { photoDelete } from '../db.js';
 import { todayStr, escapeHtml, hydratePhotoBackgrounds, resizeImageToBlob, scrollAndFlash, looksLikeHeic, sniffsAsHeic, sniffsAsRasterImage, sniffsAsAvif, sniffsAsAudio } from '../utils.js';
 import { storePhoto, uploadAttachment, deleteAttachment, fetchAttachment, openAttachment, formatBytes } from '../files.js';
 import { looksLikeRenphoCsv, parseRenphoCsv, mergeRenphoDaily, looksLikeHrvCsv } from './renpho.js';
-import { legTargetPickerHtml, bindLegTargetPicker, readLegTargetPicker, applyLegExtraction } from './travel.js';
+import { legTargetPickerHtml, bindLegTargetPicker, readLegTargetPicker, applyLegExtraction, gapsFor, tripChipHtml, bindTripChips } from './travel.js';
 
 // Sniffs by content, not by filename/MIME type -- confirmed necessary live:
 // a real Renpho export shared from Android's share sheet didn't match a
@@ -387,11 +387,16 @@ if (!batch.items.length) data.captureInbox = data.captureInbox.filter((b) => b.i
 // panel which is easy to miss when the card is scrolled below it. Only
 // falls back to the page-level line when the batch itself is gone (every
 // item in it succeeded) and there's no card left to point the message at.
-function writeInboxStatus(root, batchId, message) {
+// `isHtml` is opt-in and only ever set by a caller that has already
+// escaped every piece of untrusted text itself (e.g. a filename) and is
+// only using real markup for a trusted, canonical record-reference chip
+// (tripChipHtml) -- every other caller passes plain text through
+// textContent as before.
+function writeInboxStatus(root, batchId, message, isHtml = false) {
 const cardStatus = root.querySelector(`[data-inbox-status="${batchId}"]`);
-if (cardStatus) { cardStatus.textContent = message; return; }
-const pageStatus = document.getElementById('capture-inbox-status');
-if (pageStatus) pageStatus.textContent = message;
+const target = cardStatus || document.getElementById('capture-inbox-status');
+if (!target) return;
+if (isHtml) target.innerHTML = message; else target.textContent = message;
 }
 
 // Best-effort delete of both copies -- server (if any) then the local
@@ -865,16 +870,22 @@ const blob = await fetchAttachment(it.id);
 const file = new File([blob], it.name || 'photo', { type: it.type || blob.type });
 const extraction = await extractTripScreenshot(file);
 if (!extraction.kind && Object.keys(extraction.fields).length === 0) {
-messages.push(`${it.name || 'that image'}: didn't look like travel logistics.`);
+messages.push(`${escapeHtml(it.name || 'that image')}: didn't look like travel logistics.`);
 continue;
 }
 const { trip, leg, filled } = await applyLegExtraction({ ...picked, tripId: sharedTripId, extraction, source: { kind: 'screenshot', label: it.name || '', url: '' } });
 sharedTripId = trip.id; // once a "+ New trip" is created, later items in this batch join the same trip
-messages.push(`${it.name || 'that image'}: added ${filled} field${filled === 1 ? '' : 's'} to "${trip.title}" — ${leg.kind}.`);
+bindTripChips();
+// Same quality-framing + link-back treatment as mail.js's own trip-leg
+// extraction message (dashboard/CLAUDE.md's record-reference standard) --
+// this is the same underlying action, screenshot rather than email.
+const gaps = gapsFor(leg);
+const completeness = gaps.length === 0 ? 'nothing required is missing' : `${gaps.length} required field${gaps.length === 1 ? '' : 's'} still missing`;
+messages.push(`${escapeHtml(it.name || 'that image')}: added ${filled} detail${filled === 1 ? '' : 's'} to ${tripChipHtml(trip)} — ${leg.kind} (${completeness}).`);
 done.push(it);
 } catch (err) {
 console.error('Trip screenshot extraction failed:', err);
-messages.push(err?.name === 'MissingKeyError' ? 'Add an Anthropic API key in Settings to extract trip details.' : `${it.name || 'that image'}: ${err.message || err}`);
+messages.push(err?.name === 'MissingKeyError' ? 'Add an Anthropic API key in Settings to extract trip details.' : `${escapeHtml(it.name || 'that image')}: ${escapeHtml(err.message || String(err))}`);
 }
 }
 for (const it of done) { await deleteItemBytes(it); selectedIds.delete(it.id); }
@@ -887,7 +898,7 @@ queueSave();
 // Same ordering fix as the wellness handler above -- must run AFTER
 // renderCaptureInbox(), and target the per-card status where it still
 // exists rather than only the easy-to-miss page-level line.
-writeInboxStatus(root, batchId, messages.join(' '));
+writeInboxStatus(root, batchId, messages.join(' '), true);
 });
 });
 

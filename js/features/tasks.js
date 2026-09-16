@@ -650,4 +650,25 @@ renderTasks();
 setTimeout(() => scrollAndFlash(`[data-task-row="${id}"], [data-alloc-card="${id}"]`), 60);
 }
 
-export { renderTasks, initTasks, captureTask, isDormant, setNotionPanel, revealTask };
+// The canonical task reference for a generated message or another feature's
+// row -- mirrors tripChipHtml/bindTripChips (travel.js) and
+// connectionChipHtml/bindConnectionChips (connections.js): same delegated
+// click pattern, same switchTab -> reveal -> scroll-and-flash shape.
+function taskChipHtml(task, extraHtml = '') {
+return `<span class="task-chip" data-open-task="${escapeHtml(task.id)}">&#9989; ${escapeHtml(task.title)}</span>${extraHtml}`;
+}
+let taskChipsBound = false;
+function bindTaskChips() {
+if (taskChipsBound) return;
+taskChipsBound = true;
+document.addEventListener('click', (e) => {
+const chip = e.target.closest('[data-open-task]');
+if (!chip) return;
+import('../tabs.js').then(({ switchTab }) => {
+switchTab('tasks');
+revealTask(chip.dataset.openTask);
+});
+});
+}
+
+export { renderTasks, initTasks, captureTask, isDormant, setNotionPanel, revealTask, taskChipHtml, bindTaskChips };

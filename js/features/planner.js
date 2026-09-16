@@ -89,6 +89,7 @@ kind, date, tripId,
 data.plannerEntries.push(entry);
 queueSave();
 renderPlanner();
+return entry;
 }
 
 // Also updates tripId to match wherever it was dropped -- an entry moved
@@ -872,4 +873,45 @@ setTimeout(() => el.classList.remove('flash-new'), 1800);
 }, 60);
 }
 
-export { renderPlanner, initPlanner, revealPlannerEntry, syncTripPeopleEntries, placeEntry, addActivityToDay };
+// Cross-tab jump target for a Planner "idea" (data.plannerActivities), e.g.
+// Mail's "+ date event" success message. An idea has no entry (data-planner-
+// entry) unless it's been placed on a day, so this checks for one first and
+// falls back to the undated pool card -- same two-state shape the record
+// itself has.
+function revealPlannerActivity(activityId) {
+renderPlanner();
+setTimeout(() => {
+const placed = data.plannerEntries.find((e) => e.kind === 'activity' && e.activityId === activityId);
+const el = placed
+? document.querySelector(`[data-planner-entry="${placed.id}"]`)
+: document.querySelector(`[data-planner-drag="activity:${activityId}"]`);
+if (el) {
+el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+el.classList.add('flash-new');
+setTimeout(() => el.classList.remove('flash-new'), 1800);
+}
+}, 60);
+}
+
+// The canonical Planner-idea reference for a generated message elsewhere
+// (e.g. Mail's "+ date event" success line) -- mirrors tripChipHtml
+// (travel.js) and taskChipHtml (tasks.js): same delegated click pattern,
+// landing on revealPlannerActivity's placed-entry-or-pool-card lookup.
+function plannerActivityChipHtml(activity, extraHtml = '') {
+return `<span class="planner-chip" data-open-planner-activity="${escapeHtml(activity.id)}">&#128197; ${escapeHtml(activity.title)}</span>${extraHtml}`;
+}
+let plannerActivityChipsBound = false;
+function bindPlannerActivityChips() {
+if (plannerActivityChipsBound) return;
+plannerActivityChipsBound = true;
+document.addEventListener('click', (e) => {
+const chip = e.target.closest('[data-open-planner-activity]');
+if (!chip) return;
+import('../tabs.js').then(({ switchTab }) => {
+switchTab('planner');
+revealPlannerActivity(chip.dataset.openPlannerActivity);
+});
+});
+}
+
+export { renderPlanner, initPlanner, revealPlannerEntry, revealPlannerActivity, plannerActivityChipHtml, bindPlannerActivityChips, syncTripPeopleEntries, placeEntry, addActivityToDay };

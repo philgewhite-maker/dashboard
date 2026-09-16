@@ -2,8 +2,8 @@ import { data, queueSave, mailSearchLabel, blankPlannerActivity, blankMailDismis
 import { escapeHtml, affiliateLink } from '../utils.js';
 import { canAttemptGoogleAction } from '../sync/googleauth.js';
 import { fetchMailSearches, getMessageBody } from '../googlemail.js';
-import { captureTask } from './tasks.js';
-import { legTargetPickerHtml, bindLegTargetPicker, readLegTargetPicker, applyLegExtraction } from './travel.js';
+import { captureTask, taskChipHtml, bindTaskChips } from './tasks.js';
+import { legTargetPickerHtml, bindLegTargetPicker, readLegTargetPicker, applyLegExtraction, tripChipHtml, bindTripChips, gapsFor } from './travel.js';
 import { connectionPickerHtml, bindConnPickers } from './connections.js';
 import { MAIL_ACTIONS } from './mailActions.js';
 
@@ -455,7 +455,8 @@ const date = btn.dataset.mailDateEventDate;
 const planner = await import('./planner.js');
 if (date) planner.placeEntry('activity', activity.id, date, '');
 queueSave();
-say(date ? `Added to Planner, placed on ${date}.` : 'Added to Planner’s Activities pool.');
+planner.bindPlannerActivityChips();
+if (status) status.innerHTML = date ? `Added ${planner.plannerActivityChipHtml(activity)}, placed on ${date}.` : `Added ${planner.plannerActivityChipHtml(activity)} to Planner’s Activities pool.`;
 btn.disabled = true;
 // Planner renders itself only from its own actions -- without this, a
 // tab already open on Planner (or switched to right after, no reload)
@@ -496,8 +497,9 @@ const due = list.querySelector(`[data-mail-ai-task-due="${CSS.escape(id)}"]`)?.v
 const status = list.querySelector(`[data-mail-ai-task-status="${CSS.escape(id)}"]`);
 const say = (msg) => { if (status) status.textContent = msg; };
 if (!title) { say('Give the task a title first.'); return; }
-captureTask({ title, notes, due, source: { kind: 'mail', label: title, url: btn.dataset.mailUrl } });
-say('Task added.');
+const task = captureTask({ title, notes, due, source: { kind: 'mail', label: title, url: btn.dataset.mailUrl } });
+bindTaskChips();
+if (status) status.innerHTML = `Added ${taskChipHtml(task)}.`;
 btn.disabled = true;
 });
 });
@@ -537,7 +539,8 @@ task.title = title;
 task.notes = list.querySelector(`[data-mail-improve-task-notes="${CSS.escape(id)}"]`)?.value || '';
 task.due = list.querySelector(`[data-mail-improve-task-due="${CSS.escape(id)}"]`)?.value || '';
 queueSave();
-say('Task updated.');
+bindTaskChips();
+if (status) status.innerHTML = `Updated ${taskChipHtml(task)}.`;
 btn.disabled = true;
 (await import('./tasks.js')).renderTasks();
 });
@@ -567,7 +570,19 @@ const { trip, leg, filled } = await applyLegExtraction({
 extraction,
 source: { kind: 'mail', label: btn.dataset.mailSubject, url: btn.dataset.mailUrl },
 });
-say(`Added ${filled} field${filled === 1 ? '' : 's'} to "${trip.title}" — ${leg.kind}.`);
+// "Added 6 fields" on its own means nothing -- 6 out of how many, and
+// were any of the missing ones actually required? gapsFor (travel.js,
+// the SAME check the trip's own gap-review UI uses) answers that
+// directly instead of leaving the reader to guess. Always link the
+// trip itself (tripChipHtml/bindTripChips, travel.js) rather than
+// naming it in plain text -- dashboard/CLAUDE.md's own record-
+// reference standard, which extends to messages like this one, not
+// just card/list/diagram surfaces.
+if (status) {
+const gaps = gapsFor(leg);
+const completeness = gaps.length === 0 ? 'nothing required is missing' : `${gaps.length} required field${gaps.length === 1 ? '' : 's'} still missing`;
+status.innerHTML = `Added ${filled} detail${filled === 1 ? '' : 's'} to ${tripChipHtml(trip)} — ${leg.kind} (${completeness}).`;
+}
 } catch (err) {
 console.error('Trip email extraction failed:', err);
 say(err?.name === 'MissingKeyError' ? 'Add an Anthropic API key in Settings to read trip details from email.' : `Couldn't read that: ${err.message || err}`);
@@ -584,6 +599,8 @@ let lastSections = [];
 
 function initMail() {
 bindConnPickers(); // Mail can render (and its "+ date event" picker with it) before Dating/Planner ever do
+bindTripChips(); // for the trip-leg success message's chip link, see the data-mail-trip-extract handler
+bindTaskChips(); // for the +task/AI-task/Improve-task success messages' chip links
 const btn = document.getElementById('sync-mail-btn');
 const status = document.getElementById('mail-sync-status');
 btn.addEventListener('click', async () => {

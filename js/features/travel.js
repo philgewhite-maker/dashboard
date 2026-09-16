@@ -7,7 +7,7 @@
 // detail has to live here rather than in Notion because the itinerary
 // export has to work fully offline.
 import { data, queueSave, blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS, LEG_DATE_FIELDS } from '../state.js';
-import { escapeHtml, uid, dateStrAdd, hydratePhotoBackgrounds, parseLooseDateTime, scrollAndFlash } from '../utils.js';
+import { escapeHtml, uid, dateStrAdd, daysAgoStr, hydratePhotoBackgrounds, parseLooseDateTime, scrollAndFlash } from '../utils.js';
 import { deleteAttachment, formatBytes, openAttachment } from '../files.js';
 
 function tripById(id) { return data.trips.find((t) => t.id === id); }
@@ -15,6 +15,24 @@ function legById(tripId, legId) {
 const trip = tripById(tripId);
 return trip ? trip.legs.find((l) => l.id === legId) : null;
 }
+
+// A finished trip stops being current business a week after it wraps up --
+// past that, it's clutter at the top of a list meant for what's coming, not
+// an archive. No endDate (still being planned, or an odd historical entry)
+// never counts as "past" -- there's nothing to measure the week against.
+function isPastTrip(trip) {
+return !!trip.endDate && trip.endDate < daysAgoStr(7);
+}
+
+// Which legs are expanded past their one-line summary -- a leg with every
+// field filled in doesn't need its whole card open just to be seen in the
+// list; collapsed is the default, same reasoning as tasks.js's own
+// expandedTasks (a leg card carries as much detail as a task's).
+const expandedLegs = new Set();
+
+// Mirrors tasks.js's showDone -- module state read by renderTravel and
+// flipped by the panel-head checkbox in initTravel.
+let showPastTrips = false;
 
 // Every field LEG_FIELD_DEFS says this kind needs, still blank, and not
 // explicitly waved off as not applicable -- the literal "prompt to fill in
@@ -232,6 +250,14 @@ leg.passengers.push({ id: uid(), name, seat: p.seat || '', baggage: p.baggage ||
 filled++;
 });
 if (!leg.label && extraction.label) leg.label = String(extraction.label).trim();
+// Detail that doesn't fit a fixed field (ticket type, a split-fare journey
+// routed via an intermediate stop, a booking PIN) -- appended rather than
+// overwritten since a manually-typed note may already be here, and never
+// duplicated if a re-read of the same email produces the same text again.
+if (extraction.notes && !leg.notes.includes(extraction.notes)) {
+leg.notes = leg.notes ? `${leg.notes}\n\n${extraction.notes}` : extraction.notes;
+filled++;
+}
 // A confirmation document was just successfully read, so the booking is
 // no longer merely planned -- never downgrades a status the user already
 // set by hand (there's no path from 'confirmed' back to anything lower
@@ -400,8 +426,10 @@ const sourceLabel = leg.source?.kind === 'mail' ? `Parsed from an email${leg.sou
 const sourceHtml = leg.source?.url
 ? `<a href="${escapeHtml(leg.source.url)}" target="_blank" rel="noopener">${escapeHtml(sourceLabel)}</a>`
 : escapeHtml(sourceLabel);
+const expanded = expandedLegs.has(leg.id);
 return `<div class="alloc-card" data-leg-card="${leg.id}" style="margin-top:8px;">
 <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+<span class="leg-toggle" data-leg-toggle="${leg.id}" title="${expanded ? 'Collapse' : 'Expand'} this leg">${expanded ? '&#9662;' : '&#9656;'}</span>
 <select data-leg-kind="${leg.id}" data-trip-id="${trip.id}">
 ${LEG_KINDS.map((k) => `<option value="${k}"${k === leg.kind ? ' selected' : ''}>${escapeHtml(LEG_KIND_LABELS[k])}</option>`).join('')}
 </select>
@@ -409,8 +437,10 @@ ${LEG_KINDS.map((k) => `<option value="${k}"${k === leg.kind ? ' selected' : ''}
 <select data-leg-status="${leg.id}" data-trip-id="${trip.id}">
 ${LEG_STATUSES.map((s) => `<option value="${s}"${s === leg.bookingStatus ? ' selected' : ''}>${escapeHtml(LEG_STATUS_LABELS[s])}</option>`).join('')}
 </select>
+<span class="settings-note" data-leg-toggle="${leg.id}" style="cursor:pointer;">${gaps.length ? `${gaps.length} still needed` : 'complete'}</span>
 <span class="del-x" data-leg-delete="${leg.id}" data-trip-id="${trip.id}" title="Delete this leg">&times;</span>
 </div>
+${expanded ? `
 <div class="details-grid" style="background:var(--slate-bg);">
 ${defs.map((f) => legFieldRowHtml(trip, leg, f)).join('')}
 </div>
@@ -428,8 +458,9 @@ ${leg.passengers.map((p) => passengerRowHtml(trip.id, leg, p)).join('')}
 </div>
 ${leg.attachments.length ? `<div style="margin-top:6px;">${leg.attachments.map((a) => `<div class="attach-row"><button class="attach-name" type="button" data-leg-attach-open="${leg.id}" data-trip-id="${trip.id}" data-attach-id="${escapeHtml(a.id)}">${escapeHtml(a.name || 'file')}</button><span class="attach-size">${escapeHtml(formatBytes(a.size))}</span></div>`).join('')}</div>` : ''}
 <textarea data-leg-notes="${leg.id}" data-trip-id="${trip.id}" placeholder="Notes" style="width:100%;margin-top:8px;min-height:44px;">${escapeHtml(leg.notes)}</textarea>
-<div class="settings-note" style="margin-top:4px;">${sourceHtml}${gaps.length ? ` · ${gaps.length} still needed` : ' · complete'}</div>
+<div class="settings-note" style="margin-top:4px;">${sourceHtml}</div>
 <button type="button" class="todo-add-btn" data-ask-telegram="trip" data-ask-telegram-trip="${trip.id}" data-ask-telegram-leg="${leg.id}" title="Ask a family member about this leg via Telegram" style="margin-top:6px;">Ask via Telegram</button>
+` : ''}
 </div>`;
 }
 
@@ -479,7 +510,17 @@ if (!el) return;
 const countEl = document.getElementById('travel-count');
 if (countEl) countEl.textContent = data.trips.length ? `${data.trips.length} trip${data.trips.length === 1 ? '' : 's'}` : '';
 const sorted = [...data.trips].sort((a, b) => (a.startDate || '9999').localeCompare(b.startDate || '9999') || a.createdAt.localeCompare(b.createdAt));
-el.innerHTML = sorted.length ? sorted.map(tripCardHtml).join('') : '<div class="empty">No trips yet. Add one below, or turn a "city-break" nudge or a booking email into one.</div>';
+const pastCount = sorted.filter(isPastTrip).length;
+const visible = showPastTrips ? sorted : sorted.filter((t) => !isPastTrip(t));
+const toggleLabel = document.getElementById('show-past-trips-label');
+const toggleText = document.getElementById('show-past-trips-text');
+if (toggleLabel) toggleLabel.hidden = pastCount === 0;
+if (toggleText) toggleText.textContent = `Show past trip${pastCount === 1 ? '' : 's'} (${pastCount})`;
+const toggleCheckbox = document.getElementById('show-past-trips-toggle');
+if (toggleCheckbox) toggleCheckbox.checked = showPastTrips;
+el.innerHTML = visible.length ? visible.map(tripCardHtml).join('')
+: pastCount ? '<div class="empty">Nothing upcoming — every trip is past. Tick "Show past trips" above to see them.</div>'
+: '<div class="empty">No trips yet. Add one below, or turn a "city-break" nudge or a booking email into one.</div>';
 bindTravel(el);
 // The "+ person" picker's row list needs the live Dating module, kept as
 // a dynamic import so this module never has to load connections.js (and
@@ -642,6 +683,13 @@ if (leg) { leg.label = input.value.trim(); queueSave(); }
 root.querySelectorAll('[data-leg-delete]').forEach((x) => {
 x.addEventListener('click', async () => { await deleteLeg(x.dataset.tripId, x.dataset.legDelete); renderTravel(); });
 });
+root.querySelectorAll('[data-leg-toggle]').forEach((el) => {
+el.addEventListener('click', () => {
+const id = el.dataset.legToggle;
+if (expandedLegs.has(id)) expandedLegs.delete(id); else expandedLegs.add(id);
+renderTravel();
+});
+});
 root.querySelectorAll('[data-leg-status]').forEach((sel) => {
 sel.addEventListener('change', () => { setLegStatus(sel.dataset.tripId, sel.dataset.legStatus, sel.value); });
 });
@@ -711,6 +759,10 @@ function initTravel() {
 const btn = document.getElementById('travel-new-trip-btn');
 const titleInput = document.getElementById('travel-new-trip-title');
 const destInput = document.getElementById('travel-new-trip-destination');
+document.getElementById('show-past-trips-toggle')?.addEventListener('change', (e) => {
+showPastTrips = e.target.checked;
+renderTravel();
+});
 if (!btn || !titleInput) return;
 btn.addEventListener('click', async () => {
 const title = titleInput.value.trim();
@@ -723,8 +775,38 @@ if (destInput) destInput.value = '';
 }
 
 function revealTrip(id) {
+// A chip/link pointing at a trip that's since dropped off the default
+// list (isPastTrip, 7+ days after it ended) must still land on it --
+// otherwise every trip reference eventually starts silently failing.
+const trip = tripById(id);
+if (trip && isPastTrip(trip)) showPastTrips = true;
 renderTravel();
 setTimeout(() => scrollAndFlash(`[data-trip-card="${id}"]`), 60);
+}
+
+// The canonical trip reference -- this record type had none until now
+// (dashboard/CLAUDE.md's own Record-reference standards only covered
+// connection/task/chip-value), confirmed live as a real gap: a trip-leg
+// success message named a trip in plain text with no way to click through
+// and check it. Mirrors connectionChipHtml/bindConnectionChips
+// (connections.js) exactly -- same delegated click pattern, same
+// switchTab → reveal → scroll-and-flash shape, just no avatar (a trip has
+// no photo) and a plane glyph instead.
+function tripChipHtml(trip, extraHtml = '') {
+return `<span class="trip-chip" data-open-trip="${escapeHtml(trip.id)}">&#9992; ${escapeHtml(trip.title)}</span>${extraHtml}`;
+}
+let tripChipsBound = false;
+function bindTripChips() {
+if (tripChipsBound) return;
+tripChipsBound = true;
+document.addEventListener('click', (e) => {
+const chip = e.target.closest('[data-open-trip]');
+if (!chip) return;
+import('../tabs.js').then(({ switchTab }) => {
+switchTab('travel');
+revealTrip(chip.dataset.openTrip);
+});
+});
 }
 
 // The literal offline itinerary: one self-contained HTML file, no external
@@ -791,4 +873,5 @@ setLegStatus, updateLegNotes, addPassenger, removePassenger, updatePassengerFiel
 addPerson, removePerson, gapsFor, tripIsComplete, tripGapCount, enrichLegFromExtraction,
 applyLegExtraction, tripOptionsHtml, legTargetPickerHtml, bindLegTargetPicker, readLegTargetPicker,
 generateItineraryHtml, renderTravel, initTravel, revealTrip, tripById, legById,
+tripChipHtml, bindTripChips,
 };

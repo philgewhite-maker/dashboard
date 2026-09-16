@@ -1551,7 +1551,12 @@ const TRIP_MAX_TOKENS = 1800;
 // serving a stale cached screenshot result. v2: added per-passenger
 // seat/baggage (previously a single leg-level "seat" field, which can't
 // represent more than one traveller) and a `company` field for transfer.
-const TRIP_SCHEMA_VERSION = 2;
+// v3: added free-text `notes` for detail that doesn't fit any fixed field
+// (ticket type, a split-fare journey routed via an intermediate station,
+// a booking PIN) -- confirmed a real gap live: a Stansted Express split-
+// fare-via-Harlow-Town transfer had exactly this kind of detail and the
+// old shape had nowhere to put it.
+const TRIP_SCHEMA_VERSION = 3;
 
 const LEG_KIND_SET = new Set(['flight', 'car_hire', 'accommodation', 'transfer', 'other']);
 
@@ -1569,9 +1574,12 @@ ${TRIP_FIELD_GUIDE}
 
 Separately, list EVERY named passenger/traveller/guest on this booking, each with whatever of these is printed for them specifically: their seat (e.g. "12A"), and their baggage/luggage allowance exactly as printed (e.g. "Checked Bag (20kg), Priority & 2 Cabin Bags"). Keep each name as printed, honorific included if shown (e.g. "Mr PHILIP WHITE"). A booking can have several passengers each with a DIFFERENT seat and baggage mix -- list all of them, don't collapse them into one.
 
+Also write a short "notes" string with any OTHER booking detail that's genuinely useful to have on hand but doesn't fit one of the fixed fields above -- ticket type/fare class, a journey routed via an intermediate stop or requiring a change (name the stop), a booking PIN or the instructions around it, fare conditions (refundable/changeable), or similar. Keep it to what's actually printed, a few short lines at most -- not a restatement of the fields you already extracted. Omit "notes" entirely (or leave it "") if there's nothing like this.
+
 Reply with ONLY a JSON object, no other text, no markdown fences. Example, for a 3-passenger Ryanair flight confirmation:
-{"kind":"flight","label":"Outbound: London Stansted to Zadar","suggestedTripTitle":"Zadar trip","fields":{"airline":"Ryanair","flightNumber":"FR8388","departAirport":"London (Stansted) - STN","departTime":"Sat 22 Aug 2026, 20:10","arriveAirport":"Zadar - ZAD","arriveTime":"23:30","confirmationRef":"VZIJXS"},"passengers":[{"name":"Mr PHILIP WHITE","seat":"12A","baggage":"Baby equipment, Checked Bag (20kg), Priority & 2 Cabin Bags"},{"name":"Mr LEWIS WHITE","seat":"12B","baggage":"Priority & 2 Cabin Bags"},{"name":"Ms ZARA WHITE","seat":"12C","baggage":"Priority & 2 Cabin Bags"}]}
-If nothing recognisable as travel logistics is present, reply {"kind":null,"label":null,"suggestedTripTitle":null,"fields":{},"passengers":[]}.`;
+{"kind":"flight","label":"Outbound: London Stansted to Zadar","suggestedTripTitle":"Zadar trip","fields":{"airline":"Ryanair","flightNumber":"FR8388","departAirport":"London (Stansted) - STN","departTime":"Sat 22 Aug 2026, 20:10","arriveAirport":"Zadar - ZAD","arriveTime":"23:30","confirmationRef":"VZIJXS"},"passengers":[{"name":"Mr PHILIP WHITE","seat":"12A","baggage":"Baby equipment, Checked Bag (20kg), Priority & 2 Cabin Bags"},{"name":"Mr LEWIS WHITE","seat":"12B","baggage":"Priority & 2 Cabin Bags"},{"name":"Ms ZARA WHITE","seat":"12C","baggage":"Priority & 2 Cabin Bags"}],"notes":""}
+Another example, for a split-fare train ticket: {"kind":"transfer","label":"Stansted Airport to London Liverpool Street","suggestedTripTitle":null,"fields":{"company":"Greater Anglia","mode":"train","from":"Stansted Airport","to":"London Liverpool Street","departTime":"Sun 30 Aug 2026, 23:58","confirmationRef":"1653717056324612"},"passengers":[],"notes":"Split-fare ticket, connects via Harlow Town (stay on the same train). PIN 5367 confirms identity by phone -- do not disclose."}
+If nothing recognisable as travel logistics is present, reply {"kind":null,"label":null,"suggestedTripTitle":null,"fields":{},"passengers":[],"notes":""}.`;
 }
 
 function shapeTripExtraction(raw) {
@@ -1586,6 +1594,7 @@ label: raw.label || null,
 suggestedTripTitle: raw.suggestedTripTitle || null,
 fields: (raw.fields && typeof raw.fields === 'object') ? raw.fields : {},
 passengers,
+notes: raw.notes ? String(raw.notes).trim() : '',
 };
 }
 
