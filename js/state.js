@@ -428,6 +428,7 @@ gapStatus: {},
 // with their own seat and bag mix). {id, name, seat, baggage}.
 passengers: [],
 notes: '',
+link: '', // the booking's own "Manage booking"/"View ticket" URL when the confirmation had one -- distinct from source.url (the email itself)
 source: null, // {kind:'mail'|'screenshot'|'manual', label, url}
 attachments: [],
 createdAt: new Date().toISOString(),
@@ -510,6 +511,10 @@ id: uid(),
 title: '',
 notes: '',
 connectionId: '',
+location: '', // venue/address, from Mail's ICS-or-AI date-event waterfall -- shown as hover text + an outbound map link (planner.js), never written out inline
+eventTime: '', // "HH:MM" as resolved by the same waterfall -- hover text only, this app has no hourly Planner view to place it against
+endTime: '', // "HH:MM", from a calendar invite's DTEND or the AI fallback -- same hover-only treatment as eventTime
+link: '', // the booking's own "Manage booking"/"View ticket" URL, when the email had one -- same field name and "Open reference ↗" rendering convention as blankTask's own link below
 source: null, // {kind:'mail', label, url} -- set by Mail's "+ date event" action, js/features/mail.js. Same shape/convention as blankTask's own source above, so the same "already turned into this" match-by-url logic works identically.
 createdAt: new Date().toISOString(),
 ...fields,

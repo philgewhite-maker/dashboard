@@ -2465,6 +2465,11 @@ font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap;
 .planner-chip:hover{background:var(--blue);color:#fff;}
 .leg-toggle{cursor:pointer;display:inline-flex;width:16px;justify-content:center;color:var(--muted);user-select:none;}
 .leg-toggle:hover{color:var(--ink);}
+/* The map-pin / reference-link glyphs next to a Planner idea's title
+   (planner.js's activityPinHtml/activityLinkHtml) -- venue/booking detail
+   deliberately never written out inline, just these two small targets. */
+.planner-pin-link{font-size:12px;text-decoration:none;opacity:.75;}
+.planner-pin-link:hover{opacity:1;}
 .planner-entry-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .planner-entry-controls{flex:0 0 100%;display:flex;align-items:center;justify-content:flex-end;gap:8px;}
 .planner-status-dot{

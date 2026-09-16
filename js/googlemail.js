@@ -134,11 +134,49 @@ async function getMessageBody(id) {
 const res = await googleFetch(`${GMAIL_API}/messages/${id}?format=full`);
 if (!res.ok) throw new Error(`Gmail message fetch failed: ${res.status}`);
 const json = await res.json();
-const plain = findBodyPart(json.payload, 'text/plain');
+return bodyTextFromPayload(json.payload);
+}
+
+function bodyTextFromPayload(payload) {
+const plain = findBodyPart(payload, 'text/plain');
 if (plain) return base64UrlDecode(plain);
-const html = findBodyPart(json.payload, 'text/html');
+const html = findBodyPart(payload, 'text/html');
 if (html) return stripHtml(base64UrlDecode(html));
 return '';
 }
 
-export { fetchMailSearches, buildQuery, getMessageBody };
+// Depth-first search for the first attachment part that looks like a
+// calendar invite -- a real .ics is usually mimeType 'text/calendar', but
+// some senders attach it as 'application/octet-stream' with just the
+// filename to go on, so both are checked. Returns {attachmentId} or null.
+function findIcsAttachmentPart(payload) {
+if (!payload) return null;
+const isIcs = payload.mimeType === 'text/calendar' || /\.ics$/i.test(payload.filename || '');
+if (isIcs && payload.body?.attachmentId) return { attachmentId: payload.body.attachmentId };
+for (const part of payload.parts || []) {
+const found = findIcsAttachmentPart(part);
+if (found) return found;
+}
+return null;
+}
+
+// Mail's "+ date event" action (js/features/mail.js) wants both the body
+// text (its AI fallback already reads) and, when present, the .ics
+// calendar invite most booking confirmations attach -- one format=full
+// fetch serves both, so the picker's extraction button never fetches the
+// same message twice. icsText is null when there's no calendar attachment.
+async function getMessageForDateEvent(id) {
+const res = await googleFetch(`${GMAIL_API}/messages/${id}?format=full`);
+if (!res.ok) throw new Error(`Gmail message fetch failed: ${res.status}`);
+const json = await res.json();
+const bodyText = bodyTextFromPayload(json.payload);
+const icsPart = findIcsAttachmentPart(json.payload);
+if (!icsPart) return { bodyText, icsText: null };
+const attRes = await googleFetch(`${GMAIL_API}/messages/${id}/attachments/${icsPart.attachmentId}`);
+if (!attRes.ok) return { bodyText, icsText: null }; // attachment fetch failing shouldn't block the AI fallback
+const attJson = await attRes.json();
+const icsText = attJson.data ? base64UrlDecode(attJson.data) : null;
+return { bodyText, icsText };
+}
+
+export { fetchMailSearches, buildQuery, getMessageBody, getMessageForDateEvent };

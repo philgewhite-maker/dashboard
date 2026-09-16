@@ -1,7 +1,7 @@
 import { data, queueSave, mailSearchLabel, blankPlannerActivity, blankMailDismissal } from '../state.js';
-import { escapeHtml, affiliateLink } from '../utils.js';
+import { escapeHtml, affiliateLink, unfoldIcsLines, parseIcsProperty, icsDateTime } from '../utils.js';
 import { canAttemptGoogleAction } from '../sync/googleauth.js';
-import { fetchMailSearches, getMessageBody } from '../googlemail.js';
+import { fetchMailSearches, getMessageBody, getMessageForDateEvent } from '../googlemail.js';
 import { captureTask, taskChipHtml, bindTaskChips } from './tasks.js';
 import { legTargetPickerHtml, bindLegTargetPicker, readLegTargetPicker, applyLegExtraction, tripChipHtml, bindTripChips, gapsFor } from './travel.js';
 import { connectionPickerHtml, bindConnPickers } from './connections.js';
@@ -61,11 +61,12 @@ if (existingTaskFor(m) || existingTripLegFor(m) || existingDateEventFor(m)) retu
 return 'open';
 }
 
-// Shared shape for every "✨ Use AI" button (aiTask, dateEvent's own fill,
-// improveTask) -- read the full email body, run the named ai.js export on
-// it, report a MissingKeyError distinctly (same message every other
-// AI-assisted flow in this file already uses) instead of a raw error dump.
-// Returns null on any failure, having already reported it via `say`.
+// Shared shape for every "✨ Use AI" button (aiTask, improveTask -- dateEvent
+// now runs its own ICS-first waterfall, see extractDateEventFromIcs below)
+// -- read the full email body, run the named ai.js export on it, report a
+// MissingKeyError distinctly (same message every other AI-assisted flow in
+// this file already uses) instead of a raw error dump. Returns null on any
+// failure, having already reported it via `say`.
 async function runAiExtraction(extractFnName, id, subject, from, say) {
 say('Reading the email…');
 try {
@@ -77,6 +78,53 @@ console.error('Mail AI extraction failed:', err);
 say(err?.name === 'MissingKeyError' ? 'Add an Anthropic API key in Settings to use AI here.' : `Couldn't read that: ${err.message || err}`);
 return null;
 }
+}
+
+// RFC5545 backslash-escapes commas/semicolons/newlines within a property
+// value (a LOCATION with a comma-separated address is the common case) --
+// confirmed live against the Abandoman venue ("Underbelly Boulevard, 6
+// Walker's Ct...") coming through with literal backslashes without this.
+function unescapeIcsValue(value) {
+return String(value || '').replace(/\\n/gi, '\n').replace(/\\([,;\\])/g, '$1');
+}
+
+// Deterministic half of dateEvent's "🪄 Extract details" waterfall -- a
+// calendar invite most booking confirmations attach already has the date,
+// time and venue structured, so this is tried before ever spending an AI
+// call (see the data-mail-date-event-extract handler below). Reuses the
+// same RFC5545 line-unfolding/property-splitting travel.js's Airbnb sync
+// depends on (js/utils.js), just reading a different set of properties --
+// a real calendar invite, not a date-only reservation block.
+function extractDateEventFromIcs(icsText) {
+const lines = unfoldIcsLines(icsText);
+let current = null;
+let event = null;
+lines.forEach((line) => {
+if (line === 'BEGIN:VEVENT') { current = {}; return; }
+if (line === 'END:VEVENT') { if (current && !event) event = current; current = null; return; }
+if (!current) return;
+const prop = parseIcsProperty(line);
+if (!prop) return;
+if (prop.name === 'SUMMARY') current.title = unescapeIcsValue(prop.value).trim();
+else if (prop.name === 'LOCATION') current.location = unescapeIcsValue(prop.value).trim();
+else if (prop.name === 'DESCRIPTION') current.notes = unescapeIcsValue(prop.value).trim();
+else if (prop.name === 'URL') current.link = prop.value.trim();
+else if (prop.name === 'DTSTART') current.start = icsDateTime(prop.value);
+else if (prop.name === 'DTEND') current.end = icsDateTime(prop.value);
+});
+if (!event) return null;
+return {
+title: event.title || '', date: event.start?.date || '', eventTime: event.start?.time || '',
+endTime: event.end?.time || '', location: event.location || '', notes: event.notes || '', link: event.link || '',
+};
+}
+
+// The quality gate for extractDateEventFromIcs's result -- title and a
+// start date are the two things the old subject-line default couldn't
+// give you; venue/time/link are worth keeping but not worth an AI
+// fallback over if they're missing.
+function icsDateEventIsGoodEnough(result) {
+return !!(result && result.title && result.date);
 }
 
 // The clickable control for one action on one message — a plain button for
@@ -129,7 +177,7 @@ if (actionId === 'tripLeg') {
 return `<div class="mail-action-picker" data-mail-action-picker="tripLeg:${escapeHtml(m.id)}" hidden>
 ${legTargetPickerHtml(m.id)}
 <button class="todo-add-btn" type="button" data-mail-trip-extract="${escapeHtml(m.id)}"
-data-mail-subject="${escapeHtml(m.subject)}" data-mail-from="${escapeHtml(displayName(m.from))}" data-mail-url="${escapeHtml(m.link)}">Read email &amp; add</button>
+data-mail-subject="${escapeHtml(m.subject)}" data-mail-from="${escapeHtml(displayName(m.from))}" data-mail-url="${escapeHtml(m.link)}">&#10024; Read email &amp; add</button>
 <span class="sync-status" data-mail-trip-status="${escapeHtml(m.id)}"></span>
 </div>`;
 }
@@ -137,7 +185,9 @@ if (actionId === 'dateEvent') {
 return `<div class="mail-action-picker" data-mail-action-picker="dateEvent:${escapeHtml(m.id)}" hidden>
 ${connectionPickerHtml(`mail-date-event-conn-${m.id}`, 'Link a connection (optional)…')}
 <input type="text" class="settings-input" data-mail-date-event-title="${escapeHtml(m.id)}" value="${escapeHtml(m.subject)}" placeholder="Idea title">
-${useAiButtonHtml('data-mail-date-event-fill', m)}
+<button class="mini-task-btn" type="button" data-mail-date-event-extract="${escapeHtml(m.id)}"
+data-mail-subject="${escapeHtml(m.subject)}" data-mail-from="${escapeHtml(displayName(m.from))}"
+title="Try the calendar invite first, then read the email if there isn't one">&#129497; Extract details</button>
 <button class="todo-add-btn" type="button" data-mail-date-event-add="${escapeHtml(m.id)}" data-mail-snippet="${escapeHtml(m.snippet || '')}" data-mail-url="${escapeHtml(m.link)}">Add idea</button>
 <span class="sync-status" data-mail-date-event-status="${escapeHtml(m.id)}"></span>
 </div>`;
@@ -409,27 +459,52 @@ if (!picker.hidden && actionId === 'tripLeg') bindLegTargetPicker(picker, id);
 });
 });
 
-list.querySelectorAll('[data-mail-date-event-fill]').forEach((btn) => {
+list.querySelectorAll('[data-mail-date-event-extract]').forEach((btn) => {
 btn.addEventListener('click', async (e) => {
 e.preventDefault();
-const id = btn.dataset.mailDateEventFill;
+const id = btn.dataset.mailDateEventExtract;
 const status = list.querySelector(`[data-mail-date-event-status="${CSS.escape(id)}"]`);
 const say = (msg) => { if (status) status.textContent = msg; };
 btn.disabled = true;
-const result = await runAiExtraction('extractDateEventFromEmail', id, btn.dataset.mailSubject, btn.dataset.mailFrom, say);
+say('Reading the email…');
+let result = null;
+let source = '';
+try {
+const { bodyText, icsText } = await getMessageForDateEvent(id);
+const icsResult = icsText ? extractDateEventFromIcs(icsText) : null;
+if (icsDateEventIsGoodEnough(icsResult)) {
+result = icsResult;
+source = 'calendar invite';
+} else {
+say('No usable calendar invite — reading the email…');
+const aiMod = await import('../ai.js');
+say('Pulling out the details…');
+result = await aiMod.extractDateEventFromEmail(btn.dataset.mailSubject, btn.dataset.mailFrom, bodyText);
+source = 'email';
+}
+} catch (err) {
+console.error('Date-event extraction failed:', err);
+say(err?.name === 'MissingKeyError' ? 'Add an Anthropic API key in Settings to use AI here.' : `Couldn't read that: ${err.message || err}`);
 btn.disabled = false;
-if (!result) return;
+return;
+}
+btn.disabled = false;
 const titleInput = list.querySelector(`[data-mail-date-event-title="${CSS.escape(id)}"]`);
 const addBtn = list.querySelector(`[data-mail-date-event-add="${CSS.escape(id)}"]`);
 if (titleInput && result.title) titleInput.value = result.title;
-// Stashed on the Add button itself rather than a hidden input -- the
+// Stashed on the Add button itself rather than hidden inputs -- the
 // same place its deterministic default (data-mail-snippet) already
-// lives, and the only thing that reads either is the Add handler below.
+// lives, and the only thing that reads any of these is the Add handler
+// below.
 if (addBtn) {
-if (result.notes) addBtn.dataset.mailSnippet = result.notes;
+addBtn.dataset.mailSnippet = result.notes || '';
 addBtn.dataset.mailDateEventDate = result.date || '';
+addBtn.dataset.mailDateEventLocation = result.location || '';
+addBtn.dataset.mailDateEventTime = result.eventTime || '';
+addBtn.dataset.mailDateEventEndTime = result.endTime || '';
+addBtn.dataset.mailLink = result.link || '';
 }
-say(result.date ? `Found a date: ${result.date}.` : 'No specific date found — will stay an undated idea.');
+say(result.date ? `Found a date via the ${source}: ${result.date}.` : `No specific date found via the ${source} — will stay an undated idea.`);
 });
 });
 
@@ -445,11 +520,15 @@ if (!title) { say('Give the idea a title first.'); return; }
 const connectionId = document.getElementById(`mail-date-event-conn-${id}`)?.value || '';
 const activity = blankPlannerActivity({
 title, notes: btn.dataset.mailSnippet || '', connectionId,
+location: btn.dataset.mailDateEventLocation || '',
+eventTime: btn.dataset.mailDateEventTime || '',
+endTime: btn.dataset.mailDateEventEndTime || '',
+link: btn.dataset.mailLink || '',
 source: { kind: 'mail', label: title, url: btn.dataset.mailUrl },
 });
 data.plannerActivities.push(activity);
-// Only ever set by a successful "✨ Use AI" fill above -- absent (the
-// deterministic default never sets it) means stay an undated pool
+// Only ever set by a successful "🪄 Extract details" run above -- absent
+// (the deterministic default never sets it) means stay an undated pool
 // idea, same as today.
 const date = btn.dataset.mailDateEventDate;
 const planner = await import('./planner.js');
@@ -480,9 +559,13 @@ if (!result) return;
 const titleInput = list.querySelector(`[data-mail-ai-task-title="${CSS.escape(id)}"]`);
 const notesInput = list.querySelector(`[data-mail-ai-task-notes="${CSS.escape(id)}"]`);
 const dueInput = list.querySelector(`[data-mail-ai-task-due="${CSS.escape(id)}"]`);
+const addBtn = list.querySelector(`[data-mail-ai-task-add="${CSS.escape(id)}"]`);
 if (titleInput && result.title) titleInput.value = result.title;
 if (notesInput && result.notes) notesInput.value = result.notes;
 if (dueInput) dueInput.value = result.due || '';
+// Stashed on the Add button, same place dateEvent's own extraction
+// result keeps its date -- only the commit handler below reads it.
+if (addBtn) addBtn.dataset.mailLink = result.link || '';
 say('Filled in — review, then Add task.');
 });
 });
@@ -497,7 +580,7 @@ const due = list.querySelector(`[data-mail-ai-task-due="${CSS.escape(id)}"]`)?.v
 const status = list.querySelector(`[data-mail-ai-task-status="${CSS.escape(id)}"]`);
 const say = (msg) => { if (status) status.textContent = msg; };
 if (!title) { say('Give the task a title first.'); return; }
-const task = captureTask({ title, notes, due, source: { kind: 'mail', label: title, url: btn.dataset.mailUrl } });
+const task = captureTask({ title, notes, due, link: btn.dataset.mailLink || '', source: { kind: 'mail', label: title, url: btn.dataset.mailUrl } });
 bindTaskChips();
 if (status) status.innerHTML = `Added ${taskChipHtml(task)}.`;
 btn.disabled = true;
@@ -517,9 +600,11 @@ if (!result) return;
 const titleInput = list.querySelector(`[data-mail-improve-task-title="${CSS.escape(id)}"]`);
 const notesInput = list.querySelector(`[data-mail-improve-task-notes="${CSS.escape(id)}"]`);
 const dueInput = list.querySelector(`[data-mail-improve-task-due="${CSS.escape(id)}"]`);
+const applyBtn = list.querySelector(`[data-mail-improve-task-apply="${CSS.escape(id)}"]`);
 if (titleInput && result.title) titleInput.value = result.title;
 if (notesInput && result.notes) notesInput.value = result.notes;
 if (dueInput && result.due) dueInput.value = result.due;
+if (applyBtn && result.link) applyBtn.dataset.mailLink = result.link;
 say('Filled in — review, then Apply.');
 });
 });
@@ -538,6 +623,9 @@ if (!title) { say('Give the task a title first.'); return; }
 task.title = title;
 task.notes = list.querySelector(`[data-mail-improve-task-notes="${CSS.escape(id)}"]`)?.value || '';
 task.due = list.querySelector(`[data-mail-improve-task-due="${CSS.escape(id)}"]`)?.value || '';
+// Never clobbers a reference link the task already has with a blank --
+// only ever fills one in if AI actually found one.
+if (btn.dataset.mailLink) task.link = btn.dataset.mailLink;
 queueSave();
 bindTaskChips();
 if (status) status.innerHTML = `Updated ${taskChipHtml(task)}.`;

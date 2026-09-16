@@ -13,11 +13,18 @@
 // to run it. A topic (js/state.js's blankMailTopic) points at up to 3 of
 // these ids as its preferred actions; anything not preferred for a given
 // message's topic still shows under "Other actions".
+// Icon convention across Mail's action buttons (this file and mail.js):
+// ✨ = this control ALWAYS calls AI when clicked. 🪄 = this control resolves
+// through a waterfall that tries something free/deterministic first and
+// only calls AI when that's not enough (dateEvent's own extract button,
+// mail.js). Since the icon carries the meaning, a label doesn't need to
+// also spell out "AI" (aiTask's tooltip still does, for anyone relying on
+// hover text rather than the glyph).
 const MAIL_ACTIONS = {
 task: { label: '+ task', title: 'Capture as a task', kind: 'direct' },
-aiTask: { label: '✨ AI task', title: 'Read the email and propose a task — title, notes, due date', kind: 'picker' },
+aiTask: { label: '✨ Task', title: 'Read the email and propose a task — title, notes, due date', kind: 'picker' },
 tripLeg: { label: '+ trip leg', title: 'Pull flight/hotel/car-hire details from this email into a trip', kind: 'picker' },
-dateEvent: { label: '+ date event', title: 'Add this as a Planner idea, optionally linked to a connection — can also read the email for a real date', kind: 'picker' },
+dateEvent: { label: '+ date event', title: 'Add this as a Planner idea, optionally linked to a connection — reads the calendar invite or the email for a real date and venue', kind: 'picker' },
 };
 
 export { MAIL_ACTIONS };

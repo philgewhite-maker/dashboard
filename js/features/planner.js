@@ -234,7 +234,7 @@ ${scope.days.map((d) => `<option value="${d}|${scope.tripId}"${selected && d ===
 }
 
 function plannerEntryHtml(entry) {
-let label, avatar = '', openAttr = '', activityConnChip = '';
+let label, avatar = '', openAttr = '', activityConnChip = '', detailTitle = '', pinHtml = '';
 if (entry.kind === 'connection') {
 const c = data.connections.find((x) => x.id === entry.connectionId);
 if (!c) return ''; // the connection was deleted since this was placed
@@ -254,6 +254,8 @@ if (a.connectionId) {
 const linkedConn = data.connections.find((x) => x.id === a.connectionId);
 if (linkedConn) activityConnChip = connectionChipHtml(linkedConn);
 }
+detailTitle = activityDetailTitle(a);
+pinHtml = activityPinHtml(a) + activityLinkHtml(a);
 }
 // Draft/firm used to be a wide text pill ("DRAFT"/"FIRM") -- confirmed
 // live to crowd the name off a phone's 2-column day grid. Replaced with
@@ -264,7 +266,7 @@ if (linkedConn) activityConnChip = connectionChipHtml(linkedConn);
 // onto their own row below the name instead of competing with it for the
 // same line.
 return `<div class="planner-entry alloc-card status-${entry.status}" draggable="true" data-planner-entry="${entry.id}">
-<span class="planner-entry-link"${openAttr}>${avatar}<span class="planner-entry-label">${label}</span></span>
+<span class="planner-entry-link"${openAttr}>${avatar}<span class="planner-entry-label"${detailTitle ? ` title="${escapeHtml(detailTitle)}"` : ''}>${label}</span>${pinHtml}</span>
 ${activityConnChip}
 <div class="planner-entry-controls">
 <button type="button" class="planner-status-dot status-${entry.status}" data-planner-toggle-status="${entry.id}" title="${entry.status === 'draft' ? 'Draft' : 'Firm'} — click to mark ${entry.status === 'draft' ? 'firm' : 'draft'}"></button>
@@ -403,6 +405,29 @@ if (picker) picker.value = '';
 renderPlanner();
 }
 
+// eventTime/location/endTime (js/state.js's blankPlannerActivity, filled by
+// Mail's ICS-or-AI date-event waterfall) are deliberately never written out
+// inline on a card -- a hover tooltip plus a small outbound map link
+// instead, shared by both places an activity's title renders below.
+function activityDetailTitle(a) {
+const bits = [];
+if (a.eventTime) bits.push(a.endTime ? `${a.eventTime}–${a.endTime}` : a.eventTime);
+if (a.location) bits.push(a.location);
+return bits.join(' · ');
+}
+function activityPinHtml(a) {
+if (!a.location) return '';
+return ` <a class="planner-pin-link" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(a.location)}" target="_blank" rel="noopener" title="${escapeHtml(a.location)}">&#128205;</a>`;
+}
+// The booking's own "Manage booking"/"View ticket" URL, when Mail's
+// extraction found one (js/state.js's blankPlannerActivity.link) -- same
+// small-glyph-next-to-the-title treatment as the map pin above, never
+// written out as a full URL on the card.
+function activityLinkHtml(a) {
+if (!a.link) return '';
+return ` <a class="planner-pin-link" href="${escapeHtml(a.link)}" target="_blank" rel="noopener" title="Open reference">&#128279;</a>`;
+}
+
 function activitiesPoolHtml() {
 if (!data.plannerActivities.length) return '<div class="empty">Nothing yet — add one below.</div>';
 const cards = data.plannerActivities.map((a) => {
@@ -411,8 +436,9 @@ const cards = data.plannerActivities.map((a) => {
 // quietly-omit-a-dangling-reference rule as plannerEntryHtml's own
 // activity branch.
 const conn = a.connectionId ? data.connections.find((x) => x.id === a.connectionId) : null;
+const detailTitle = activityDetailTitle(a);
 return `<div class="planner-pool-card alloc-card" draggable="true" data-planner-drag="activity:${a.id}">
-<span>${escapeHtml(a.title)}</span>
+<span${detailTitle ? ` title="${escapeHtml(detailTitle)}"` : ''}>${escapeHtml(a.title)}</span>${activityPinHtml(a)}${activityLinkHtml(a)}
 ${conn ? connectionChipHtml(conn) : ''}
 <span class="tag-x" data-planner-del-activity="${a.id}" title="Remove from the list">&times;</span>
 ${IS_IOS ? `<select class="planner-select" data-planner-place="activity:${a.id}"><option value="">Place on…</option>${plannerDaySelectOptionsHtml()}</select>` : ''}

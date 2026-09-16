@@ -258,6 +258,10 @@ if (extraction.notes && !leg.notes.includes(extraction.notes)) {
 leg.notes = leg.notes ? `${leg.notes}\n\n${extraction.notes}` : extraction.notes;
 filled++;
 }
+// A "Manage booking"/"View ticket" link the confirmation carried --
+// never overwrites one already there (manually added, or from an
+// earlier read of the same email).
+if (extraction.link && !leg.link) { leg.link = extraction.link; filled++; }
 // A confirmation document was just successfully read, so the booking is
 // no longer merely planned -- never downgrades a status the user already
 // set by hand (there's no path from 'confirmed' back to anything lower
@@ -458,7 +462,7 @@ ${leg.passengers.map((p) => passengerRowHtml(trip.id, leg, p)).join('')}
 </div>
 ${leg.attachments.length ? `<div style="margin-top:6px;">${leg.attachments.map((a) => `<div class="attach-row"><button class="attach-name" type="button" data-leg-attach-open="${leg.id}" data-trip-id="${trip.id}" data-attach-id="${escapeHtml(a.id)}">${escapeHtml(a.name || 'file')}</button><span class="attach-size">${escapeHtml(formatBytes(a.size))}</span></div>`).join('')}</div>` : ''}
 <textarea data-leg-notes="${leg.id}" data-trip-id="${trip.id}" placeholder="Notes" style="width:100%;margin-top:8px;min-height:44px;">${escapeHtml(leg.notes)}</textarea>
-<div class="settings-note" style="margin-top:4px;">${sourceHtml}</div>
+<div class="settings-note" style="margin-top:4px;">${sourceHtml}${leg.link ? ` &middot; <a href="${escapeHtml(leg.link)}" target="_blank" rel="noopener">Open reference &#8599;</a>` : ''}</div>
 <button type="button" class="todo-add-btn" data-ask-telegram="trip" data-ask-telegram-trip="${trip.id}" data-ask-telegram-leg="${leg.id}" title="Ask a family member about this leg via Telegram" style="margin-top:6px;">Ask via Telegram</button>
 ` : ''}
 </div>`;

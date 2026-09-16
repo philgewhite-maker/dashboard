@@ -24,6 +24,54 @@ dt.setUTCDate(dt.getUTCDate() + days);
 return dt.toISOString().slice(0, 10);
 }
 
+// ---- ICS (RFC5545) parsing primitives ------------------------------------
+// Shared by airbnb.js's calendar-feed sync and mail.js's date-event
+// extraction from a .ics attachment -- both read a real calendar export,
+// so both need the same line-unfolding and property-splitting, not two
+// near-identical copies.
+
+// Un-folds RFC5545 continuation lines (a line starting with a single space
+// or tab is a continuation of the previous line, joined with the leading
+// whitespace stripped) before splitting into logical lines -- a long
+// SUMMARY/DESCRIPTION line wraps this way in a real export, and left
+// un-joined would otherwise read as two malformed properties.
+function unfoldIcsLines(text) {
+const raw = String(text || '').replace(/\r\n/g, '\n').split('\n');
+const lines = [];
+raw.forEach((line) => {
+if ((line.startsWith(' ') || line.startsWith('\t')) && lines.length) {
+lines[lines.length - 1] += line.slice(1);
+} else if (line.trim()) {
+lines.push(line);
+}
+});
+return lines;
+}
+
+function parseIcsProperty(line) {
+const colon = line.indexOf(':');
+if (colon === -1) return null;
+const name = line.slice(0, colon).split(';')[0].toUpperCase();
+return { name, value: line.slice(colon + 1) };
+}
+
+// A DTSTART/DTEND value is either date-only ("VALUE=DATE:20260926", an
+// all-day block) or a full timestamp ("20260926T200000" local, or
+// "...Z" UTC) -- unlike airbnb.js's icsDateOnly (which only ever needs
+// the date half for a reservation range), this keeps the time-of-day
+// when one is present. No timezone-database conversion -- a `Z` or
+// `TZID`-qualified value is read at face value, the same admitted
+// simplification planner.js's legDatesFor already carries for trip-leg
+// dates, not a new gap.
+function icsDateTime(value) {
+const digits = String(value || '').replace(/Z$/, '').replace(/[^0-9T]/g, '');
+if (digits.length < 8) return null;
+const date = `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`;
+const timePart = digits.split('T')[1] || '';
+const time = timePart.length >= 4 ? `${timePart.slice(0, 2)}:${timePart.slice(2, 4)}` : '';
+return { date, time };
+}
+
 // Parses a loosely-formatted date(+time) string into fixed components,
 // tolerant of the shapes a trip leg's date fields actually hold (free
 // text -- travel.js's legFieldRowHtml, not a real date input; see its own
@@ -1154,7 +1202,7 @@ return classified.every((c) => c.isScreenshot) && looksLikeSameScreenshotPieces(
 }
 
 export {
-todayStr, daysAgoStr, dateStrAdd, parseLooseDateTime, last7Dates, uid, daysSince, daysUntil, foldDiacritics,
+todayStr, daysAgoStr, dateStrAdd, unfoldIcsLines, parseIcsProperty, icsDateTime, parseLooseDateTime, last7Dates, uid, daysSince, daysUntil, foldDiacritics,
 escapeHtml, affiliateLink, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, buildFlagMatcher, applyFlagMatcher, knownCityMap, knownScalarValues, pickChipHtml, splitCsvLine, scrollAndFlash, bindForm,
 findMentions, COUNTRY_NAME_TO_NATIONALITY,
 resizeImageToBlob, fileToBase64, loadImage, cropThumbnailToBlob,

@@ -7,7 +7,7 @@
 // any host; that's a genuine Airbnb privacy limit, which is why
 // guestName/notes below are always typed in by hand, never scraped.
 import { data, queueSave, blankAirbnbListing, blankAirbnbReservation, blankAirbnbKey, blankAirbnbKeyAssignment, KEY_CUSTODIAN_TYPES } from '../state.js';
-import { escapeHtml, todayStr, dateStrAdd } from '../utils.js';
+import { escapeHtml, todayStr, dateStrAdd, unfoldIcsLines, parseIcsProperty } from '../utils.js';
 import { fetchIcs } from '../files.js';
 import { canAttemptGoogleAction, hasCalendarWrite } from '../sync/googleauth.js';
 import { listCalendars, createEvent, findEvents } from '../googlecalendar.js';
@@ -19,24 +19,9 @@ import { listCalendars, createEvent, findEvents } from '../googlecalendar.js';
 const AIRBNB_COLOURS = ['blue', 'pink', 'sage', 'amber', 'slate', 'rose', 'teal', 'plum', 'red'];
 
 // ---- ICS parsing --------------------------------------------------------
-
-// Un-folds RFC5545 continuation lines (a line starting with a single space
-// or tab is a continuation of the previous line, joined with the leading
-// whitespace stripped) before splitting into logical lines -- a long
-// SUMMARY/DESCRIPTION line wraps this way in a real export, and left
-// un-joined would otherwise read as two malformed properties.
-function unfoldIcsLines(text) {
-const raw = String(text || '').replace(/\r\n/g, '\n').split('\n');
-const lines = [];
-raw.forEach((line) => {
-if ((line.startsWith(' ') || line.startsWith('\t')) && lines.length) {
-lines[lines.length - 1] += line.slice(1);
-} else if (line.trim()) {
-lines.push(line);
-}
-});
-return lines;
-}
+// unfoldIcsLines/parseIcsProperty are shared with mail.js's date-event
+// extraction (js/utils.js) -- only the Airbnb-specific date-only reading
+// (icsDateOnly) and reservation shape stay local to this file.
 
 // DTSTART/DTEND on an Airbnb reservation are date-only ("VALUE=DATE:
 // 20260910" -- an all-day block, not a timed event), but this also copes
@@ -46,13 +31,6 @@ function icsDateOnly(value) {
 const digits = String(value || '').replace(/[^0-9]/g, '');
 if (digits.length < 8) return '';
 return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`;
-}
-
-function parseIcsProperty(line) {
-const colon = line.indexOf(':');
-if (colon === -1) return null;
-const name = line.slice(0, colon).split(';')[0].toUpperCase();
-return { name, value: line.slice(colon + 1) };
 }
 
 // Not a real reservation -- confirmed live against a real feed, Airbnb

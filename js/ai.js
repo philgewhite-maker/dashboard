@@ -1556,9 +1556,22 @@ const TRIP_MAX_TOKENS = 1800;
 // a booking PIN) -- confirmed a real gap live: a Stansted Express split-
 // fare-via-Harlow-Town transfer had exactly this kind of detail and the
 // old shape had nowhere to put it.
-const TRIP_SCHEMA_VERSION = 3;
+// v4: added `link` -- a booking's own "Manage booking"/"View ticket" URL,
+// found real and worth keeping on a Sixt car-hire confirmation.
+const TRIP_SCHEMA_VERSION = 4;
 
 const LEG_KIND_SET = new Set(['flight', 'car_hire', 'accommodation', 'transfer', 'other']);
+
+// Shared by all three mail-extraction prompts (trip leg, task, date event)
+// -- a booking confirmation's own "Manage booking"/"View ticket"/"Track
+// order" link is real, useful reach-back to the outside world that a plain
+// mail-thread link doesn't give you, confirmed live wanted on a Sixt car-
+// hire confirmation. Deliberately NOT the generic unsubscribe/social/logo
+// links every marketing email also carries -- those are noise, not a
+// reference worth keeping.
+function actionLinkInstruction() {
+return `If the email contains a link to manage, view, track, cancel or check in to this specific booking/order (e.g. "Manage booking", "View your ticket", "Track your order"), include its exact URL as "link" -- never an unsubscribe link, a social/app-store icon link, or the sender's generic homepage. Leave "link" "" if there's nothing like that.`;
+}
 
 const TRIP_FIELD_GUIDE = `- flight: airline, flightNumber, departAirport, departTime (ISO date+time if both known, else just what's printed), arriveAirport, arriveTime, confirmationRef (booking reference / PNR)
 - car_hire: company, pickupLocation, pickupTime, dropoffLocation, dropoffTime, confirmationRef, carType
@@ -1576,10 +1589,13 @@ Separately, list EVERY named passenger/traveller/guest on this booking, each wit
 
 Also write a short "notes" string with any OTHER booking detail that's genuinely useful to have on hand but doesn't fit one of the fixed fields above -- ticket type/fare class, a journey routed via an intermediate stop or requiring a change (name the stop), a booking PIN or the instructions around it, fare conditions (refundable/changeable), or similar. Keep it to what's actually printed, a few short lines at most -- not a restatement of the fields you already extracted. Omit "notes" entirely (or leave it "") if there's nothing like this.
 
+${actionLinkInstruction()}
+
 Reply with ONLY a JSON object, no other text, no markdown fences. Example, for a 3-passenger Ryanair flight confirmation:
-{"kind":"flight","label":"Outbound: London Stansted to Zadar","suggestedTripTitle":"Zadar trip","fields":{"airline":"Ryanair","flightNumber":"FR8388","departAirport":"London (Stansted) - STN","departTime":"Sat 22 Aug 2026, 20:10","arriveAirport":"Zadar - ZAD","arriveTime":"23:30","confirmationRef":"VZIJXS"},"passengers":[{"name":"Mr PHILIP WHITE","seat":"12A","baggage":"Baby equipment, Checked Bag (20kg), Priority & 2 Cabin Bags"},{"name":"Mr LEWIS WHITE","seat":"12B","baggage":"Priority & 2 Cabin Bags"},{"name":"Ms ZARA WHITE","seat":"12C","baggage":"Priority & 2 Cabin Bags"}],"notes":""}
-Another example, for a split-fare train ticket: {"kind":"transfer","label":"Stansted Airport to London Liverpool Street","suggestedTripTitle":null,"fields":{"company":"Greater Anglia","mode":"train","from":"Stansted Airport","to":"London Liverpool Street","departTime":"Sun 30 Aug 2026, 23:58","confirmationRef":"1653717056324612"},"passengers":[],"notes":"Split-fare ticket, connects via Harlow Town (stay on the same train). PIN 5367 confirms identity by phone -- do not disclose."}
-If nothing recognisable as travel logistics is present, reply {"kind":null,"label":null,"suggestedTripTitle":null,"fields":{},"passengers":[],"notes":""}.`;
+{"kind":"flight","label":"Outbound: London Stansted to Zadar","suggestedTripTitle":"Zadar trip","fields":{"airline":"Ryanair","flightNumber":"FR8388","departAirport":"London (Stansted) - STN","departTime":"Sat 22 Aug 2026, 20:10","arriveAirport":"Zadar - ZAD","arriveTime":"23:30","confirmationRef":"VZIJXS"},"passengers":[{"name":"Mr PHILIP WHITE","seat":"12A","baggage":"Baby equipment, Checked Bag (20kg), Priority & 2 Cabin Bags"},{"name":"Mr LEWIS WHITE","seat":"12B","baggage":"Priority & 2 Cabin Bags"},{"name":"Ms ZARA WHITE","seat":"12C","baggage":"Priority & 2 Cabin Bags"}],"notes":"","link":""}
+Another example, for a split-fare train ticket: {"kind":"transfer","label":"Stansted Airport to London Liverpool Street","suggestedTripTitle":null,"fields":{"company":"Greater Anglia","mode":"train","from":"Stansted Airport","to":"London Liverpool Street","departTime":"Sun 30 Aug 2026, 23:58","confirmationRef":"1653717056324612"},"passengers":[],"notes":"Split-fare ticket, connects via Harlow Town (stay on the same train). PIN 5367 confirms identity by phone -- do not disclose.","link":""}
+A car-hire confirmation with a "Manage booking" link: {"kind":"car_hire","label":"Sixt car hire, Malaga Airport","suggestedTripTitle":null,"fields":{"company":"Sixt","pickupLocation":"Malaga Airport","confirmationRef":"AB123456"},"passengers":[],"notes":"","link":"https://click.e.sixt.com/?qs=..."}
+If nothing recognisable as travel logistics is present, reply {"kind":null,"label":null,"suggestedTripTitle":null,"fields":{},"passengers":[],"notes":"","link":""}.`;
 }
 
 function shapeTripExtraction(raw) {
@@ -1595,6 +1611,7 @@ suggestedTripTitle: raw.suggestedTripTitle || null,
 fields: (raw.fields && typeof raw.fields === 'object') ? raw.fields : {},
 passengers,
 notes: raw.notes ? String(raw.notes).trim() : '',
+link: raw.link ? String(raw.link).trim() : '',
 };
 }
 
@@ -1664,15 +1681,23 @@ ${String(bodyText || '').slice(0, 12000)}
 
 Propose a task for this: a short, specific title (not just the subject line restated -- say what actually needs doing, e.g. "Renew car insurance before it lapses" not "Your insurance"), a few lines of notes with whatever detail from the body is actually useful to have on hand (amounts, reference numbers, what's being asked), and a due date ONLY if the email states or clearly implies a real deadline (resolve a relative one like "within 30 days" against today's date) -- leave it blank if there's genuinely no deadline, never invent one.
 
-Reply with ONLY a JSON object, no other text, no markdown fences: {"title":"","notes":"","due":""} -- due is an ISO yyyy-mm-dd or "".`;
+${actionLinkInstruction()}
+
+Reply with ONLY a JSON object, no other text, no markdown fences: {"title":"","notes":"","due":"","link":""} -- due is an ISO yyyy-mm-dd or "".`;
 const { data: raw } = await callTextJson(prompt, MAIL_EXTRACT_MAX_TOKENS, MAIL_EXTRACT_MODEL, 'Task email', 'low');
 return {
 title: String((raw && raw.title) || '').trim(),
 notes: String((raw && raw.notes) || '').trim(),
 due: String((raw && raw.due) || '').trim(),
+link: String((raw && raw.link) || '').trim(),
 };
 }
 
+// This is the AI fallback in mail.js's ICS-first waterfall (js/features/
+// mail.js's extractDateEventFromIcs runs first and free -- this only runs
+// when there's no .ics attachment, or it didn't have a title+date) -- so
+// the shape matches what an ICS VEVENT gives: location/eventTime alongside
+// title/notes/date, not just notes, even though this path is reading prose.
 async function extractDateEventFromEmail(subject, from, bodyText) {
 const prompt = `Today is ${todayStr()}. This is an email that might describe something to do on a particular day -- a booking, an invitation, a show. Subject: "${subject || ''}". From: "${from || ''}".
 
@@ -1681,14 +1706,19 @@ Email body:
 ${String(bodyText || '').slice(0, 12000)}
 """
 
-Propose an idea for this: a short, specific title (e.g. "Hamilton at the Victoria Palace", not the subject line restated), a few lines of notes with whatever's actually useful (venue, time, booking reference), and a date ONLY if the email states a real, specific date for the thing itself (resolve a relative one like "this Saturday" against today's date) -- leave it blank if there's no real date, or if this isn't really date-specific at all (a general offer, a newsletter).
+Propose an idea for this: a short, specific title (e.g. "Hamilton at the Victoria Palace", not the subject line restated), a venue/location if one is stated, a time of day if one is stated, a few lines of notes with whatever else is actually useful (booking reference, quantity, collection instructions), and a date ONLY if the email states a real, specific date for the thing itself (resolve a relative one like "this Saturday" against today's date) -- leave date blank if there's no real date, or if this isn't really date-specific at all (a general offer, a newsletter).
 
-Reply with ONLY a JSON object, no other text, no markdown fences: {"title":"","notes":"","date":""} -- date is an ISO yyyy-mm-dd or "".`;
+${actionLinkInstruction()}
+
+Reply with ONLY a JSON object, no other text, no markdown fences: {"title":"","notes":"","date":"","location":"","eventTime":"","link":""} -- date is an ISO yyyy-mm-dd or "", eventTime is "HH:MM" (24-hour) or "".`;
 const { data: raw } = await callTextJson(prompt, MAIL_EXTRACT_MAX_TOKENS, MAIL_EXTRACT_MODEL, 'Date event email', 'low');
 return {
 title: String((raw && raw.title) || '').trim(),
 notes: String((raw && raw.notes) || '').trim(),
 date: String((raw && raw.date) || '').trim(),
+location: String((raw && raw.location) || '').trim(),
+eventTime: String((raw && raw.eventTime) || '').trim(),
+link: String((raw && raw.link) || '').trim(),
 };
 }
 
