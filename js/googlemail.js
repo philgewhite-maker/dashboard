@@ -98,14 +98,21 @@ messages: ids.map((id) => summaries[id]).filter(Boolean)
 }
 
 // Gmail's API uses URL-safe base64 (- and _ instead of + and /), often
-// without the trailing = padding a normal atob() needs.
-function base64UrlDecode(data) {
+// without the trailing = padding a normal atob() needs. Returns raw bytes --
+// base64UrlDecode below is the text-specific wrapper most callers actually
+// want (a message body, an .ics file); an image/PDF attachment needs the
+// bytes themselves, undecoded as text, so it gets this one directly.
+function base64UrlDecodeBytes(data) {
 const b64 = data.replace(/-/g, '+').replace(/_/g, '/');
 const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
 const binary = atob(padded);
 const bytes = new Uint8Array(binary.length);
 for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-return new TextDecoder('utf-8').decode(bytes);
+return bytes;
+}
+
+function base64UrlDecode(data) {
+return new TextDecoder('utf-8').decode(base64UrlDecodeBytes(data));
 }
 
 function stripHtml(html) {
@@ -125,18 +132,6 @@ if (found) return found;
 return null;
 }
 
-// Full message body, for AI extraction (trip logistics) rather than the
-// From/Subject/snippet metadata fetchMailSearches deals in -- a separate,
-// heavier call so the normal mail list stays cheap. Prefers the plain-text
-// part; falls back to stripping the HTML part, since some booking
-// confirmations are HTML-only.
-async function getMessageBody(id) {
-const res = await googleFetch(`${GMAIL_API}/messages/${id}?format=full`);
-if (!res.ok) throw new Error(`Gmail message fetch failed: ${res.status}`);
-const json = await res.json();
-return bodyTextFromPayload(json.payload);
-}
-
 function bodyTextFromPayload(payload) {
 const plain = findBodyPart(payload, 'text/plain');
 if (plain) return base64UrlDecode(plain);
@@ -145,38 +140,53 @@ if (html) return stripHtml(base64UrlDecode(html));
 return '';
 }
 
-// Depth-first search for the first attachment part that looks like a
-// calendar invite -- a real .ics is usually mimeType 'text/calendar', but
-// some senders attach it as 'application/octet-stream' with just the
-// filename to go on, so both are checked. Returns {attachmentId} or null.
-function findIcsAttachmentPart(payload) {
-if (!payload) return null;
-const isIcs = payload.mimeType === 'text/calendar' || /\.ics$/i.test(payload.filename || '');
-if (isIcs && payload.body?.attachmentId) return { attachmentId: payload.body.attachmentId };
-for (const part of payload.parts || []) {
-const found = findIcsAttachmentPart(part);
-if (found) return found;
+// Depth-first walk collecting every part that's a real attachment (inline
+// or not -- a boarding-pass QR is often inline, a "Manage booking" PDF
+// usually isn't, and this doesn't need to tell the two apart). `size` comes
+// free with the metadata (no attachment fetch needed to know it), which is
+// what lets js/features/mail.js's ticket-attachment heuristic filter before
+// ever spending a byte on a tiny tracking-pixel image.
+function findAttachmentParts(payload) {
+if (!payload) return [];
+const found = [];
+if (payload.body?.attachmentId) {
+found.push({ attachmentId: payload.body.attachmentId, filename: payload.filename || '', mimeType: payload.mimeType || '', size: payload.body.size || 0 });
 }
-return null;
+(payload.parts || []).forEach((part) => found.push(...findAttachmentParts(part)));
+return found;
 }
 
-// Mail's "+ date event" action (js/features/mail.js) wants both the body
-// text (its AI fallback already reads) and, when present, the .ics
-// calendar invite most booking confirmations attach -- one format=full
-// fetch serves both, so the picker's extraction button never fetches the
-// same message twice. icsText is null when there's no calendar attachment.
-async function getMessageForDateEvent(id) {
+// The one rich per-message fetch every mail.js extraction flow (task, trip
+// leg, date event) needs -- body text (for the AI fallback each already
+// reads), the .ics calendar invite's text when one is attached (date-
+// event's own ICS-first waterfall), and every attachment's metadata (so a
+// caller can decide which ones look like a ticket/QR and fetch just those
+// bytes via fetchMessageAttachmentBytes below). One format=full fetch
+// serves all three, rather than three separate fetches of the same message.
+async function getMessageDetail(id) {
 const res = await googleFetch(`${GMAIL_API}/messages/${id}?format=full`);
 if (!res.ok) throw new Error(`Gmail message fetch failed: ${res.status}`);
 const json = await res.json();
 const bodyText = bodyTextFromPayload(json.payload);
-const icsPart = findIcsAttachmentPart(json.payload);
-if (!icsPart) return { bodyText, icsText: null };
-const attRes = await googleFetch(`${GMAIL_API}/messages/${id}/attachments/${icsPart.attachmentId}`);
-if (!attRes.ok) return { bodyText, icsText: null }; // attachment fetch failing shouldn't block the AI fallback
-const attJson = await attRes.json();
-const icsText = attJson.data ? base64UrlDecode(attJson.data) : null;
-return { bodyText, icsText };
+const attachments = findAttachmentParts(json.payload);
+const icsPart = attachments.find((a) => a.mimeType === 'text/calendar' || /\.ics$/i.test(a.filename || ''));
+let icsText = null;
+if (icsPart) {
+try { icsText = new TextDecoder('utf-8').decode(await fetchMessageAttachmentBytes(id, icsPart.attachmentId)); }
+catch (err) { /* attachment fetch failing shouldn't block the AI fallback */ }
+}
+return { bodyText, icsText, attachments };
 }
 
-export { fetchMailSearches, buildQuery, getMessageBody, getMessageForDateEvent };
+// Raw bytes of one attachment, by the id findAttachmentParts/getMessageDetail
+// already found -- a second Gmail call, since format=full never inlines
+// attachment content itself, only its metadata.
+async function fetchMessageAttachmentBytes(id, attachmentId) {
+const res = await googleFetch(`${GMAIL_API}/messages/${id}/attachments/${attachmentId}`);
+if (!res.ok) throw new Error(`Gmail attachment fetch failed: ${res.status}`);
+const json = await res.json();
+if (!json.data) throw new Error('Attachment had no data.');
+return base64UrlDecodeBytes(json.data);
+}
+
+export { fetchMailSearches, buildQuery, getMessageDetail, fetchMessageAttachmentBytes };

@@ -515,6 +515,7 @@ location: '', // venue/address, from Mail's ICS-or-AI date-event waterfall -- sh
 eventTime: '', // "HH:MM" as resolved by the same waterfall -- hover text only, this app has no hourly Planner view to place it against
 endTime: '', // "HH:MM", from a calendar invite's DTEND or the AI fallback -- same hover-only treatment as eventTime
 link: '', // the booking's own "Manage booking"/"View ticket" URL, when the email had one -- same field name and "Open reference ↗" rendering convention as blankTask's own link below
+attachments: [], // {id, name, type, size} via files.js's uploadAttachment -- a QR/ticket image or PDF Mail's extraction grabbed from the email, same shape as blankTask.attachments/blankTripLeg.attachments
 source: null, // {kind:'mail', label, url} -- set by Mail's "+ date event" action, js/features/mail.js. Same shape/convention as blankTask's own source above, so the same "already turned into this" match-by-url logic works identically.
 createdAt: new Date().toISOString(),
 ...fields,

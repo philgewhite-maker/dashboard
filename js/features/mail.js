@@ -1,7 +1,7 @@
 import { data, queueSave, mailSearchLabel, blankPlannerActivity, blankMailDismissal } from '../state.js';
 import { escapeHtml, affiliateLink, unfoldIcsLines, parseIcsProperty, icsDateTime } from '../utils.js';
 import { canAttemptGoogleAction } from '../sync/googleauth.js';
-import { fetchMailSearches, getMessageBody, getMessageForDateEvent } from '../googlemail.js';
+import { fetchMailSearches, getMessageDetail, fetchMessageAttachmentBytes } from '../googlemail.js';
 import { captureTask, taskChipHtml, bindTaskChips } from './tasks.js';
 import { legTargetPickerHtml, bindLegTargetPicker, readLegTargetPicker, applyLegExtraction, tripChipHtml, bindTripChips, gapsFor } from './travel.js';
 import { connectionPickerHtml, bindConnPickers } from './connections.js';
@@ -66,18 +66,61 @@ return 'open';
 // -- read the full email body, run the named ai.js export on it, report a
 // MissingKeyError distinctly (same message every other AI-assisted flow in
 // this file already uses) instead of a raw error dump. Returns null on any
-// failure, having already reported it via `say`.
+// failure, having already reported it via `say`. Also hands back the raw
+// attachment metadata getMessageDetail found (cheap -- no bytes fetched
+// yet), for a caller that wants to offer grabEmailAttachments below.
 async function runAiExtraction(extractFnName, id, subject, from, say) {
 say('Reading the email…');
 try {
-const [aiMod, body] = await Promise.all([import('../ai.js'), getMessageBody(id)]);
+const [aiMod, detail] = await Promise.all([import('../ai.js'), getMessageDetail(id)]);
 say('Pulling out the details…');
-return await aiMod[extractFnName](subject, from, body);
+const result = await aiMod[extractFnName](subject, from, detail.bodyText);
+return { result, attachments: detail.attachments };
 } catch (err) {
 console.error('Mail AI extraction failed:', err);
 say(err?.name === 'MissingKeyError' ? 'Add an Anthropic API key in Settings to use AI here.' : `Couldn't read that: ${err.message || err}`);
 return null;
 }
+}
+
+// A real image (skipping tiny tracking-pixel/logo images) or a PDF -- the
+// two shapes a boarding pass, e-ticket or QR code realistically arrives as.
+// No actual QR decoding (would need a vendored library and still couldn't
+// help with a QR embedded inside a PDF) -- "attached image/PDF on an email
+// you're turning into a task/leg/event" is a good enough proxy, confirmed
+// as the wanted trade-off over precision.
+const TICKET_ATTACHMENT_MIN_IMAGE_BYTES = 2048;
+function looksLikeTicketAttachment(part) {
+const isPdf = part.mimeType === 'application/pdf' || /\.pdf$/i.test(part.filename || '');
+const isRealImage = (part.mimeType || '').startsWith('image/') && (part.size || 0) > TICKET_ATTACHMENT_MIN_IMAGE_BYTES;
+return isPdf || isRealImage;
+}
+
+// Fetches and uploads every attachment in `candidates` that passes the
+// heuristic above, via files.js's existing uploadAttachment -- the same
+// synced-attachment mechanism tasks/trip legs already show a file in.
+// Returns the uploaded metadata (same {id, name, type, size} shape
+// blankTask.attachments/blankTripLeg.attachments/blankPlannerActivity.
+// attachments all already expect) for the caller to push in. Never throws
+// -- an optional enrichment on top of the real capture, so a missing files
+// server (FilesNotConfiguredError) or one failed upload just means fewer
+// (or zero) attachments come back, not a blocked capture.
+async function grabEmailAttachments(id, candidates) {
+const picks = (candidates || []).filter(looksLikeTicketAttachment);
+if (!picks.length) return [];
+const { uploadAttachment } = await import('../files.js');
+const out = [];
+for (const part of picks) {
+try {
+const bytes = await fetchMessageAttachmentBytes(id, part.attachmentId);
+const file = new File([bytes], part.filename || 'attachment', { type: part.mimeType || 'application/octet-stream' });
+out.push(await uploadAttachment(file));
+} catch (err) {
+if (err?.name === 'FilesNotConfiguredError') break; // nothing else will succeed either
+console.error('Attachment grab failed:', err);
+}
+}
+return out;
 }
 
 // RFC5545 backslash-escapes commas/semicolons/newlines within a property
@@ -469,8 +512,10 @@ btn.disabled = true;
 say('Reading the email…');
 let result = null;
 let source = '';
+let attachments = [];
 try {
-const { bodyText, icsText } = await getMessageForDateEvent(id);
+const { bodyText, icsText, attachments: found } = await getMessageDetail(id);
+attachments = found;
 const icsResult = icsText ? extractDateEventFromIcs(icsText) : null;
 if (icsDateEventIsGoodEnough(icsResult)) {
 result = icsResult;
@@ -503,6 +548,7 @@ addBtn.dataset.mailDateEventLocation = result.location || '';
 addBtn.dataset.mailDateEventTime = result.eventTime || '';
 addBtn.dataset.mailDateEventEndTime = result.endTime || '';
 addBtn.dataset.mailLink = result.link || '';
+addBtn.dataset.mailAttachments = JSON.stringify(attachments || []);
 }
 say(result.date ? `Found a date via the ${source}: ${result.date}.` : `No specific date found via the ${source} — will stay an undated idea.`);
 });
@@ -535,7 +581,8 @@ const planner = await import('./planner.js');
 if (date) planner.placeEntry('activity', activity.id, date, '');
 queueSave();
 planner.bindPlannerActivityChips();
-if (status) status.innerHTML = date ? `Added ${planner.plannerActivityChipHtml(activity)}, placed on ${date}.` : `Added ${planner.plannerActivityChipHtml(activity)} to Planner’s Activities pool.`;
+const dateNote = date ? `, placed on ${date}` : ' to Planner’s Activities pool';
+if (status) status.innerHTML = `Added ${planner.plannerActivityChipHtml(activity)}${dateNote}.`;
 btn.disabled = true;
 // Planner renders itself only from its own actions -- without this, a
 // tab already open on Planner (or switched to right after, no reload)
@@ -543,6 +590,17 @@ btn.disabled = true;
 // a re-render, same cross-tab-refresh convention captureTask() callers
 // elsewhere already follow for Connections/Overview.
 planner.renderPlanner();
+// A ticket/QR image or PDF, if the email had one -- best effort, after
+// (never blocking) the idea itself already existing.
+let candidates = [];
+try { candidates = JSON.parse(btn.dataset.mailAttachments || '[]'); } catch (err) { /* stashed value always valid JSON */ }
+const grabbed = await grabEmailAttachments(id, candidates);
+if (grabbed.length) {
+activity.attachments.push(...grabbed);
+queueSave();
+if (status) status.innerHTML = `Added ${planner.plannerActivityChipHtml(activity)}${dateNote} (+ ${grabbed.length} attachment${grabbed.length === 1 ? '' : 's'}).`;
+planner.renderPlanner();
+}
 });
 });
 
@@ -553,9 +611,10 @@ const id = btn.dataset.mailAiTaskFill;
 const status = list.querySelector(`[data-mail-ai-task-status="${CSS.escape(id)}"]`);
 const say = (msg) => { if (status) status.textContent = msg; };
 btn.disabled = true;
-const result = await runAiExtraction('extractTaskFromEmail', id, btn.dataset.mailSubject, btn.dataset.mailFrom, say);
+const extraction = await runAiExtraction('extractTaskFromEmail', id, btn.dataset.mailSubject, btn.dataset.mailFrom, say);
 btn.disabled = false;
-if (!result) return;
+if (!extraction) return;
+const { result, attachments } = extraction;
 const titleInput = list.querySelector(`[data-mail-ai-task-title="${CSS.escape(id)}"]`);
 const notesInput = list.querySelector(`[data-mail-ai-task-notes="${CSS.escape(id)}"]`);
 const dueInput = list.querySelector(`[data-mail-ai-task-due="${CSS.escape(id)}"]`);
@@ -565,13 +624,18 @@ if (notesInput && result.notes) notesInput.value = result.notes;
 if (dueInput) dueInput.value = result.due || '';
 // Stashed on the Add button, same place dateEvent's own extraction
 // result keeps its date -- only the commit handler below reads it.
-if (addBtn) addBtn.dataset.mailLink = result.link || '';
+// Attachment metadata only (no bytes fetched yet) -- grabEmailAttachments
+// does the real fetch+upload, but only once you actually commit.
+if (addBtn) {
+addBtn.dataset.mailLink = result.link || '';
+addBtn.dataset.mailAttachments = JSON.stringify(attachments || []);
+}
 say('Filled in — review, then Add task.');
 });
 });
 
 list.querySelectorAll('[data-mail-ai-task-add]').forEach((btn) => {
-btn.addEventListener('click', (e) => {
+btn.addEventListener('click', async (e) => {
 e.preventDefault();
 const id = btn.dataset.mailAiTaskAdd;
 const title = (list.querySelector(`[data-mail-ai-task-title="${CSS.escape(id)}"]`)?.value || '').trim();
@@ -584,6 +648,17 @@ const task = captureTask({ title, notes, due, link: btn.dataset.mailLink || '', 
 bindTaskChips();
 if (status) status.innerHTML = `Added ${taskChipHtml(task)}.`;
 btn.disabled = true;
+// Ticket/QR image or PDF, if the email had one -- a best-effort add-on,
+// so it runs after (never blocking) the task itself already existing.
+let candidates = [];
+try { candidates = JSON.parse(btn.dataset.mailAttachments || '[]'); } catch (err) { /* stashed value always valid JSON */ }
+const grabbed = await grabEmailAttachments(id, candidates);
+if (grabbed.length) {
+task.attachments.push(...grabbed);
+queueSave();
+if (status) status.innerHTML = `Added ${taskChipHtml(task)} (+ ${grabbed.length} attachment${grabbed.length === 1 ? '' : 's'}).`;
+(await import('./tasks.js')).renderTasks();
+}
 });
 });
 
@@ -594,9 +669,10 @@ const id = btn.dataset.mailImproveTaskFill;
 const status = list.querySelector(`[data-mail-improve-task-status="${CSS.escape(id)}"]`);
 const say = (msg) => { if (status) status.textContent = msg; };
 btn.disabled = true;
-const result = await runAiExtraction('extractTaskFromEmail', id, btn.dataset.mailSubject, btn.dataset.mailFrom, say);
+const extraction = await runAiExtraction('extractTaskFromEmail', id, btn.dataset.mailSubject, btn.dataset.mailFrom, say);
 btn.disabled = false;
-if (!result) return;
+if (!extraction) return;
+const { result } = extraction;
 const titleInput = list.querySelector(`[data-mail-improve-task-title="${CSS.escape(id)}"]`);
 const notesInput = list.querySelector(`[data-mail-improve-task-notes="${CSS.escape(id)}"]`);
 const dueInput = list.querySelector(`[data-mail-improve-task-due="${CSS.escape(id)}"]`);
@@ -645,9 +721,9 @@ const say = (msg) => { if (status) status.textContent = msg; };
 btn.disabled = true;
 say('Reading the email…');
 try {
-const [{ extractTripLegFromEmail }, body] = await Promise.all([import('../ai.js'), getMessageBody(id)]);
+const [{ extractTripLegFromEmail }, detail] = await Promise.all([import('../ai.js'), getMessageDetail(id)]);
 say('Pulling out the details…');
-const extraction = await extractTripLegFromEmail(btn.dataset.mailSubject, btn.dataset.mailFrom, body);
+const extraction = await extractTripLegFromEmail(btn.dataset.mailSubject, btn.dataset.mailFrom, detail.bodyText);
 if (!extraction.kind && Object.keys(extraction.fields).length === 0) {
 say("Didn't recognise this as travel logistics.");
 return;
@@ -658,6 +734,10 @@ const { trip, leg, filled } = await applyLegExtraction({
 extraction,
 source: { kind: 'mail', label: btn.dataset.mailSubject, url: btn.dataset.mailUrl },
 });
+// A boarding pass/e-ticket QR or PDF, if the email had one -- best
+// effort, never blocks the leg itself already existing.
+const grabbed = await grabEmailAttachments(id, detail.attachments);
+if (grabbed.length) { leg.attachments.push(...grabbed); queueSave(); }
 // "Added 6 fields" on its own means nothing -- 6 out of how many, and
 // were any of the missing ones actually required? gapsFor (travel.js,
 // the SAME check the trip's own gap-review UI uses) answers that
@@ -669,7 +749,8 @@ source: { kind: 'mail', label: btn.dataset.mailSubject, url: btn.dataset.mailUrl
 if (status) {
 const gaps = gapsFor(leg);
 const completeness = gaps.length === 0 ? 'nothing required is missing' : `${gaps.length} required field${gaps.length === 1 ? '' : 's'} still missing`;
-status.innerHTML = `Added ${filled} detail${filled === 1 ? '' : 's'} to ${tripChipHtml(trip)} — ${leg.kind} (${completeness}).`;
+const attachNote = grabbed.length ? ` (+ ${grabbed.length} attachment${grabbed.length === 1 ? '' : 's'})` : '';
+status.innerHTML = `Added ${filled} detail${filled === 1 ? '' : 's'} to ${tripChipHtml(trip)} — ${leg.kind} (${completeness})${attachNote}.`;
 }
 } catch (err) {
 console.error('Trip email extraction failed:', err);

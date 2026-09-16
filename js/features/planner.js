@@ -255,7 +255,7 @@ const linkedConn = data.connections.find((x) => x.id === a.connectionId);
 if (linkedConn) activityConnChip = connectionChipHtml(linkedConn);
 }
 detailTitle = activityDetailTitle(a);
-pinHtml = activityPinHtml(a) + activityLinkHtml(a);
+pinHtml = activityPinHtml(a) + activityLinkHtml(a) + activityAttachHtml(a);
 }
 // Draft/firm used to be a wide text pill ("DRAFT"/"FIRM") -- confirmed
 // live to crowd the name off a phone's 2-column day grid. Replaced with
@@ -427,6 +427,17 @@ function activityLinkHtml(a) {
 if (!a.link) return '';
 return ` <a class="planner-pin-link" href="${escapeHtml(a.link)}" target="_blank" rel="noopener" title="Open reference">&#128279;</a>`;
 }
+// A QR/ticket image or PDF Mail's extraction grabbed from the email
+// (js/state.js's blankPlannerActivity.attachments, same shape/mechanism
+// tasks.js's attachmentsHtml and travel.js's legCardHtml already show) --
+// opens the first one directly rather than a full attach-row list, since
+// there's realistically ever one ticket per idea; the tooltip names all of
+// them for the rare case there's more.
+function activityAttachHtml(a) {
+if (!a.attachments || !a.attachments.length) return '';
+const names = a.attachments.map((f) => f.name || 'attachment').join(', ');
+return ` <span class="planner-pin-link" data-planner-attach-open="${escapeHtml(a.id)}" title="Open ${escapeHtml(names)}">&#128206;</span>`;
+}
 
 function activitiesPoolHtml() {
 if (!data.plannerActivities.length) return '<div class="empty">Nothing yet — add one below.</div>';
@@ -438,7 +449,7 @@ const cards = data.plannerActivities.map((a) => {
 const conn = a.connectionId ? data.connections.find((x) => x.id === a.connectionId) : null;
 const detailTitle = activityDetailTitle(a);
 return `<div class="planner-pool-card alloc-card" draggable="true" data-planner-drag="activity:${a.id}">
-<span${detailTitle ? ` title="${escapeHtml(detailTitle)}"` : ''}>${escapeHtml(a.title)}</span>${activityPinHtml(a)}${activityLinkHtml(a)}
+<span${detailTitle ? ` title="${escapeHtml(detailTitle)}"` : ''}>${escapeHtml(a.title)}</span>${activityPinHtml(a)}${activityLinkHtml(a)}${activityAttachHtml(a)}
 ${conn ? connectionChipHtml(conn) : ''}
 <span class="tag-x" data-planner-del-activity="${a.id}" title="Remove from the list">&times;</span>
 ${IS_IOS ? `<select class="planner-select" data-planner-place="activity:${a.id}"><option value="">Place on…</option>${plannerDaySelectOptionsHtml()}</select>` : ''}
@@ -728,6 +739,15 @@ chip.addEventListener('click', () => scrollAndFlash(`[data-planner-entry="${chip
 root.querySelectorAll('[data-planner-del-activity]').forEach((btn) => {
 btn.addEventListener('click', () => {
 if (confirm("Remove this from the things-to-do list? Any day it's already placed on loses it too.")) removeActivity(btn.dataset.plannerDelActivity);
+});
+});
+root.querySelectorAll('[data-planner-attach-open]').forEach((el) => {
+el.addEventListener('click', async () => {
+const a = data.plannerActivities.find((x) => x.id === el.dataset.plannerAttachOpen);
+const att = a?.attachments?.[0];
+if (!att) return;
+const { openAttachment } = await import('../files.js');
+openAttachment(att).catch((err) => console.error("Couldn't open that attachment:", err));
 });
 });
 // Same cross-tab jump already used by app.js's "Save & open profile" hash
