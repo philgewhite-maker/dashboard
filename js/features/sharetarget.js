@@ -12,7 +12,7 @@
 // before this runs, the payload is still in the cache next time.
 //
 // Only works from an installed PWA on Android. iOS has no share target.
-import { escapeHtml } from '../utils.js';
+import { escapeHtml, scrollAndFlash } from '../utils.js';
 import { data } from '../state.js';
 import { captureTask, revealTask } from './tasks.js';
 import { CAPTURE_OUTCOMES, matchCaptureRule } from './captureOutcomes.js';
@@ -316,6 +316,27 @@ if (composed.generic && !composed.notes && !composed.link && !share.files.length
 	const note = attempted
 		? `Shared with no readable content — the share attached ${share.fileAttemptCount === 1 ? 'a file' : `${share.fileAttemptCount} files`} (${(share.emptyFileNames || []).filter(Boolean).join(', ') || 'unnamed'}), but 0 bytes of it arrived here, so nothing could be captured. ${rawFacts}\n\n${rawBody}`
 		: `Shared with no title, text, link, or file at all. ${rawFacts}\n\n${rawBody}`;
+	// The exact signature of the platform-level failure chased at length on
+	// 18 Sept: Android/Chrome hands over a multipart envelope with a real
+	// boundary and ZERO parts in it (raw body is just the closing boundary,
+	// ~75 bytes). Everything app-side was eliminated as a cause -- the
+	// source app, this app's own code (unchanged since file shares
+	// demonstrably worked), the manifest's accept list, and a genuinely
+	// re-minted WebAPK (version code 2) -- and a plain link share through
+	// the same share_target still works, so only the files param is
+	// affected. Nothing here can conjure bytes the browser never sent, so
+	// rather than banking a useless "Shared item" task every time, point
+	// at the one intake path that doesn't involve the share sheet at all.
+	const emptyMultipart = /multipart\/form-data/i.test(share.requestContentType || '') && !(share.formFieldNames || []).length;
+	if (emptyMultipart) {
+		console.error('Share arrived as an empty multipart body, no parts:', note);
+		banner("Android didn't pass the file through — use Capture files instead.", async () => {
+			const { switchTab } = await import('../tabs.js');
+			switchTab('tasks');
+			scrollAndFlash('#capture-inbox-panel');
+		});
+		return;
+	}
 	composed = { ...composed, notes: note };
 }
 const link = composed.link;
