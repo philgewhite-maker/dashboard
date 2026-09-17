@@ -294,9 +294,12 @@ if (composed.generic && !composed.notes && !composed.link && !share.files.length
 	// (boundary line, a "files" part) is genuinely in there even though
 	// formData() parsed none of it out. On its own line since it can run
 	// to a few hundred characters, unlike the compact rawFacts line above.
+	// My own bug, first cut of this: byteLength null (the read failed)
+	// silently discarded whatever rawBodySnippet held -- which is exactly
+	// where sw.js puts the failure's own error message. Show it either way.
 	const rawBody = share.rawBodyByteLength != null
 		? `Raw body: ${share.rawBodyByteLength} bytes. First 400 as text: "${share.rawBodySnippet || ''}"`
-		: 'Raw body: not captured.';
+		: `Raw body: not captured. ${share.rawBodySnippet || '(no error recorded)'}`;
 	const note = attempted
 		? `Shared with no readable content — the share attached ${share.fileAttemptCount === 1 ? 'a file' : `${share.fileAttemptCount} files`} (${(share.emptyFileNames || []).filter(Boolean).join(', ') || 'unnamed'}), but 0 bytes of it arrived here, so nothing could be captured. ${rawFacts}\n\n${rawBody}`
 		: `Shared with no title, text, link, or file at all. ${rawFacts}\n\n${rawBody}`;
