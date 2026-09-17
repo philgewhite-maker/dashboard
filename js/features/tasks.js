@@ -15,7 +15,7 @@
 //    March should not be adding noise in January.
 import { data, queueSave, TASK_BUCKETS, blankTask } from '../state.js';
 import { photoDelete } from '../db.js';
-import { uid, todayStr, escapeHtml, affiliateLink, hydratePhotoBackgrounds, resizeImageToBlob, daysUntil, daysSince, scrollAndFlash } from '../utils.js';
+import { uid, todayStr, escapeHtml, affiliateLink, hydratePhotoBackgrounds, resizeImageToBlob, daysUntil, daysSince, scrollAndFlash, looksLikeUrl } from '../utils.js';
 import { uploadAttachment, storePhoto, deleteAttachment, openAttachment, formatBytes } from '../files.js';
 
 const BUCKET_LABEL = Object.fromEntries(TASK_BUCKETS.map((b) => [b.bucket, b.label]));
@@ -593,12 +593,17 @@ return task;
 function initTasks() {
 const input = document.getElementById('capture-input');
 const status = document.getElementById('capture-status');
+const resolveBtn = document.getElementById('capture-resolve-btn');
 
 const submit = () => {
 const title = input.value.trim();
 if (!title) return;
-captureTask({ title });
+// A pasted URL never resolved via the button still isn't lost -- same
+// free fallback every "🪄 Resolve title" input follows: the raw URL
+// becomes `link` regardless, only the title stays unresolved.
+captureTask({ title, link: looksLikeUrl(title) ? title : '' });
 input.value = '';
+if (resolveBtn) resolveBtn.hidden = true;
 status.textContent = 'Captured to Inbox.';
 setTimeout(() => { status.textContent = ''; }, 2000);
 };
@@ -606,6 +611,26 @@ document.getElementById('capture-btn').addEventListener('click', submit);
 input.addEventListener('keydown', (e) => {
 if (e.key === 'Enter') { e.preventDefault(); submit(); }
 });
+if (resolveBtn) {
+input.addEventListener('input', () => { resolveBtn.hidden = !looksLikeUrl(input.value); });
+resolveBtn.addEventListener('click', async () => {
+const url = input.value.trim();
+if (!looksLikeUrl(url)) return;
+resolveBtn.disabled = true;
+resolveBtn.textContent = 'Resolving…';
+try {
+const { resolveUrlTitle } = await import('../ai.js');
+const title = await resolveUrlTitle(url);
+if (title) input.value = title;
+} catch (err) {
+console.error('Resolving URL title failed:', err);
+} finally {
+resolveBtn.disabled = false;
+resolveBtn.textContent = '✨ Resolve title';
+resolveBtn.hidden = true;
+}
+});
+}
 
 document.getElementById('capture-photo-input').addEventListener('change', async (e) => {
 const files = Array.from(e.target.files);

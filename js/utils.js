@@ -147,6 +147,17 @@ const now = new Date(todayStr());
 return Math.round((evt - now) / 86400000);
 }
 
+// A pasted/typed value that's JUST a URL, nothing else around it -- the
+// signal every "add" input (Tasks, Shopping, Planner ideas, Job hunt)
+// uses to offer a "🪄 Resolve title" action instead of leaving a raw
+// link sitting as the record's whole title, confirmed live as a real
+// gap: an Amazon link pasted into Shopping's own capture input became
+// a task titled with the entire raw URL, and the link itself was never
+// even saved.
+function looksLikeUrl(text) {
+return /^https?:\/\/\S+$/i.test(String(text || '').trim());
+}
+
 // Escapes for both text content AND attribute values, which is what nearly
 // every caller here needs — this codebase builds HTML strings and drops
 // values into `attr="..."` constantly.
@@ -1214,7 +1225,7 @@ return classified.every((c) => c.isScreenshot) && looksLikeSameScreenshotPieces(
 }
 
 export {
-todayStr, daysAgoStr, dateStrAdd, unfoldIcsLines, parseIcsProperty, icsDateTime, parseLooseDateTime, last7Dates, uid, daysSince, daysUntil, foldDiacritics, MISSING_KEY_LINK_HTML, SYNC_LINK_HTML,
+todayStr, daysAgoStr, dateStrAdd, unfoldIcsLines, parseIcsProperty, icsDateTime, parseLooseDateTime, last7Dates, uid, daysSince, daysUntil, foldDiacritics, MISSING_KEY_LINK_HTML, SYNC_LINK_HTML, looksLikeUrl,
 escapeHtml, affiliateLink, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, buildFlagMatcher, applyFlagMatcher, knownCityMap, knownScalarValues, pickChipHtml, splitCsvLine, scrollAndFlash, bindForm,
 findMentions, COUNTRY_NAME_TO_NATIONALITY,
 resizeImageToBlob, fileToBase64, loadImage, cropThumbnailToBlob,

@@ -1,5 +1,5 @@
-import { data, queueSave } from '../state.js';
-import { uid, escapeHtml, bindForm } from '../utils.js';
+import { data, queueSave, blankJob } from '../state.js';
+import { escapeHtml, bindForm, looksLikeUrl, affiliateLink } from '../utils.js';
 
 const STAGES = ['Wishlist', 'Applied', 'Interview', 'Offer'];
 
@@ -21,6 +21,7 @@ ${items.map((j) => `
 <div>
 <div class="job-co">${escapeHtml(j.company)}</div>
 <div class="job-role">${escapeHtml(j.role)}</div>
+${j.link ? `<a class="task-link" href="${escapeHtml(affiliateLink(j.link))}" target="_blank" rel="noopener">Open reference &#8599;</a>` : ''}
 </div>
 <span class="del-x" style="opacity:1;" data-del-job="${j.id}">&times;</span>
 </div>
@@ -52,15 +53,54 @@ queueSave();
 }
 
 function initJobForm() {
-bindForm('job-form', () => {
 const coInput = document.getElementById('job-co-input');
 const roleInput = document.getElementById('job-role-input');
+const resolveBtn = document.getElementById('job-resolve-btn');
+
+// A pasted job-posting URL, in either field -- "🪄 Resolve title" (shown
+// the moment either field is JUST a URL) splits it into Company/Role via
+// AI; submitting without ever clicking it still saves the URL as `link`
+// on the created application, just with the raw URL left as whichever
+// field it was typed into (same free fallback every other quick-add
+// input with this button follows).
+function currentUrl() {
+if (looksLikeUrl(coInput.value)) return coInput.value.trim();
+if (looksLikeUrl(roleInput.value)) return roleInput.value.trim();
+return '';
+}
+if (resolveBtn) {
+const syncVisibility = () => { resolveBtn.hidden = !currentUrl(); };
+coInput.addEventListener('input', syncVisibility);
+roleInput.addEventListener('input', syncVisibility);
+resolveBtn.addEventListener('click', async () => {
+const url = currentUrl();
+if (!url) return;
+resolveBtn.disabled = true;
+resolveBtn.textContent = 'Resolving…';
+try {
+const { resolveJobPostingUrl } = await import('../ai.js');
+const { company, role } = await resolveJobPostingUrl(url);
+if (company) coInput.value = company;
+if (role) roleInput.value = role;
+} catch (err) {
+console.error('Resolving job posting URL failed:', err);
+} finally {
+resolveBtn.disabled = false;
+resolveBtn.textContent = '✨ Resolve title';
+resolveBtn.hidden = true;
+}
+});
+}
+
+bindForm('job-form', () => {
+const url = currentUrl();
 const company = coInput.value.trim();
 const role = roleInput.value.trim();
 if (!company || !role) return;
-data.jobs.push({ id: uid(), company, role, stage: 'Wishlist' });
+data.jobs.push(blankJob({ company, role, link: url }));
 coInput.value = '';
 roleInput.value = '';
+if (resolveBtn) resolveBtn.hidden = true;
 renderJobs();
 queueSave();
 });

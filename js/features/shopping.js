@@ -20,7 +20,7 @@
 // persisted on the task itself (t.priceCheck), dated, with a Refresh button
 // to re-run it later — not the old in-memory, un-dated Map this used to be.
 import { data, queueSave, SHOPPING_CONTEXTS } from '../state.js';
-import { escapeHtml, affiliateLink, daysUntil, daysSince, MISSING_KEY_LINK_HTML } from '../utils.js';
+import { escapeHtml, affiliateLink, daysUntil, daysSince, MISSING_KEY_LINK_HTML, looksLikeUrl } from '../utils.js';
 import { captureTask, revealTask } from './tasks.js';
 import { MissingKeyError, searchShoppingItem } from '../ai.js';
 import { initMicCapture } from './voicecapture.js';
@@ -237,6 +237,7 @@ const select = document.getElementById('shop-context-input');
 const input = document.getElementById('shop-capture-input');
 const doneToggle = document.getElementById('shop-show-done-toggle');
 const status = document.getElementById('shop-capture-status');
+const resolveBtn = document.getElementById('shop-resolve-btn');
 if (!select || !input) return;
 
 select.innerHTML = SHOPPING_CONTEXTS.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
@@ -245,9 +246,14 @@ const submit = () => {
 const title = input.value.trim();
 if (!title) return;
 // Straight to "next", skipping Inbox triage — the context picked here
-// already answers the one question triage exists to ask.
-const task = captureTask({ title, contexts: [select.value], bucket: 'next' });
+// already answers the one question triage exists to ask. A pasted
+// link never resolved via the button still isn't lost -- becomes
+// `link` regardless (and runAutoPriceCheck below already reads a
+// link's own Amazon ASIN directly, see ai.js's shoppingSearchPrompt),
+// only the title stays as the raw URL if you never clicked Resolve.
+const task = captureTask({ title, contexts: [select.value], bucket: 'next', link: looksLikeUrl(title) ? title : '' });
 input.value = '';
+if (resolveBtn) resolveBtn.hidden = true;
 render();
 // Only Supermarket has a Tesco/Amazon price comparison that makes
 // sense — Pharmacy/Black Friday/Aspirational purchases are a
@@ -258,6 +264,26 @@ if (select.value === 'Supermarket') runAutoPriceCheck(task);
 document.getElementById('shop-capture-btn').addEventListener('click', submit);
 input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); submit(); } });
 initMicCapture(document.getElementById('shop-capture-mic-btn'), input, status, submit);
+if (resolveBtn) {
+input.addEventListener('input', () => { resolveBtn.hidden = !looksLikeUrl(input.value); });
+resolveBtn.addEventListener('click', async () => {
+const url = input.value.trim();
+if (!looksLikeUrl(url)) return;
+resolveBtn.disabled = true;
+resolveBtn.textContent = 'Resolving…';
+try {
+const { resolveUrlTitle } = await import('../ai.js');
+const title = await resolveUrlTitle(url);
+if (title) input.value = title;
+} catch (err) {
+console.error('Resolving URL title failed:', err);
+} finally {
+resolveBtn.disabled = false;
+resolveBtn.textContent = '✨ Resolve title';
+resolveBtn.hidden = true;
+}
+});
+}
 
 if (doneToggle) {
 doneToggle.addEventListener('change', (e) => { showDone = e.target.checked; render(); });

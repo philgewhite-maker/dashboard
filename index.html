@@ -14,7 +14,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v345</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v346</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -146,6 +146,7 @@
 <div class="capture-row">
 <input type="text" autocomplete="off" id="capture-input" placeholder="What's on your mind? Enter to capture.">
 <button class="add-btn" id="capture-btn" type="button">Capture</button>
+<button type="button" class="mini-task-btn" id="capture-resolve-btn" title="Look up a real title for this pasted link" hidden>&#10024; Resolve title</button>
 <label class="file-btn" for="capture-photo-input">Photo / screenshot</label>
 <input type="file" id="capture-photo-input" accept="image/*" multiple style="display:none;">
 </div>
@@ -242,6 +243,7 @@
 <input type="text" autocomplete="off" id="job-co-input" placeholder="Company">
 <input type="text" autocomplete="off" id="job-role-input" placeholder="Role">
 <button class="add-btn" type="button">Add</button>
+<button type="button" class="mini-task-btn" id="job-resolve-btn" title="Look up the company &amp; role for this pasted job-posting link" hidden>&#10024; Resolve title</button>
 </div>
 </section>
 
@@ -325,6 +327,7 @@
 <input type="text" autocomplete="off" id="shop-capture-input" placeholder="What do you need?">
 <select id="shop-context-input" class="mini"></select>
 <button class="add-btn" id="shop-capture-btn" type="button">Add</button>
+<button type="button" class="mini-task-btn" id="shop-resolve-btn" title="Look up a real title for this pasted link" hidden>&#10024; Resolve title</button>
 <button class="add-btn" id="shop-capture-mic-btn" type="button" title="Record a voice instruction">&#127908;</button>
 </div>
 <div class="sync-status" id="shop-capture-status"></div>
@@ -2620,6 +2623,7 @@ Finds connections whose cover photo is missing or is really just the small place
 <div class="add-form" id="planner-activity-form" style="margin-top:8px;">
 <input type="text" autocomplete="off" id="planner-activity-input" placeholder="Add something, e.g. Picnic">
 <button class="todo-add-btn" type="button">+ Add</button>
+<button type="button" class="mini-task-btn" id="planner-activity-resolve-btn" title="Look up a real title for this pasted link" hidden>&#10024; Resolve title</button>
 </div>
 </div>
 </div>

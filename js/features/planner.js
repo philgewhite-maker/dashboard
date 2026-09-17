@@ -26,7 +26,7 @@
 // has. See plannerDaySelectOptionsHtml for the option list itself.
 const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 import { data, queueSave, blankPlannerEntry, blankPlannerActivity, isDormantStage, isTravelPaused, LEG_DATE_FIELDS } from '../state.js';
-import { escapeHtml, uid, todayStr, dateStrAdd, avatarHtml, hydratePhotoBackgrounds, bindForm, foldDiacritics, scrollAndFlash, parseLooseDateTime } from '../utils.js';
+import { escapeHtml, uid, todayStr, dateStrAdd, avatarHtml, hydratePhotoBackgrounds, bindForm, foldDiacritics, scrollAndFlash, parseLooseDateTime, looksLikeUrl } from '../utils.js';
 import { isPriorityConnection, renderConnPicker, bindConnPickers, expandConnection, connectionChipHtml, bindConnectionChips } from './connections.js';
 import { switchTab } from '../tabs.js';
 import { revealTrip } from './travel.js';
@@ -172,10 +172,10 @@ queueSave();
 renderPlanner();
 }
 
-function addActivity(title) {
+function addActivity(title, link = '') {
 const t = String(title || '').trim();
 if (!t) return;
-data.plannerActivities.push(blankPlannerActivity({ title: t }));
+data.plannerActivities.push(blankPlannerActivity({ title: t, link }));
 queueSave();
 renderPlanner();
 }
@@ -903,12 +903,35 @@ renderPlanner();
 function initPlanner() {
 bindConnPickers();
 bindConnectionChips(); // for the optional connection chip on an activity card/entry, see plannerEntryHtml/activitiesPoolHtml
+const activityInput = document.getElementById('planner-activity-input');
+const activityResolveBtn = document.getElementById('planner-activity-resolve-btn');
 bindForm('planner-activity-form', () => {
-const input = document.getElementById('planner-activity-input');
-if (!input) return;
-addActivity(input.value);
-input.value = '';
+if (!activityInput) return;
+const value = activityInput.value;
+addActivity(value, looksLikeUrl(value) ? value.trim() : '');
+activityInput.value = '';
+if (activityResolveBtn) activityResolveBtn.hidden = true;
 });
+if (activityInput && activityResolveBtn) {
+activityInput.addEventListener('input', () => { activityResolveBtn.hidden = !looksLikeUrl(activityInput.value); });
+activityResolveBtn.addEventListener('click', async () => {
+const url = activityInput.value.trim();
+if (!looksLikeUrl(url)) return;
+activityResolveBtn.disabled = true;
+activityResolveBtn.textContent = 'Resolving…';
+try {
+const { resolveUrlTitle } = await import('../ai.js');
+const title = await resolveUrlTitle(url);
+if (title) activityInput.value = title;
+} catch (err) {
+console.error('Resolving URL title failed:', err);
+} finally {
+activityResolveBtn.disabled = false;
+activityResolveBtn.textContent = '✨ Resolve title';
+activityResolveBtn.hidden = true;
+}
+});
+}
 const pushBtn = document.getElementById('planner-push-btn');
 const cancelBtn = document.getElementById('planner-push-cancel-btn');
 const confirmBtn = document.getElementById('planner-push-confirm-btn');

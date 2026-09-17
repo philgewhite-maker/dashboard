@@ -1165,6 +1165,16 @@ const SHOPPING_SEARCH_MODEL = 'claude-sonnet-5';
 // the same math, so this is sized well past that, same "output tokens are
 // cheap, a failed import isn't" reasoning already applied there.
 const SHOPPING_SEARCH_MAX_TOKENS = 8000;
+// The 10-character product id in an Amazon URL's own /dp/ or
+// /gp/product/ path segment -- a far more exact search term than a
+// product NAME (possibly AI-guessed via resolveUrlTitle below, possibly
+// just slightly different wording from Amazon's own listing title),
+// confirmed worth using directly rather than only via the resolved name.
+function asinFromUrl(url) {
+const m = /\/(?:dp|gp\/product)\/([A-Z0-9]{10})/i.exec(String(url || ''));
+return m ? m[1].toUpperCase() : null;
+}
+
 // `link`, when given, is the exact page the item was captured from (any
 // retailer, not just Tesco/Amazon) -- fetched directly rather than
 // re-found by search, so a price from a shared link is never lost just
@@ -1178,6 +1188,7 @@ HARD REQUIREMENTS, in order:
 3. A search snippet frequently carries no price at all. For any retailer OTHER than Amazon, whenever a promising page turns up with no price in the snippet, FETCH that exact page (you have a fetch tool for this) and read the real price off it -- never report "no price shown" or drop a result just because the snippet itself lacked one. For amazon.co.uk specifically, DO NOT fetch the product page -- Amazon blocks this kind of automated fetch outright (it returns an error page, not the real one), so a fetch attempt there always fails and only wastes a tool call. Report the Amazon result with whatever price (if any) already appears in the search snippet itself, leave price blank otherwise, and move on -- getting the real Amazon price is handled by a separate mechanism outside this search.
 4. At most 2 results per retailer, even if more variants exist -- don't let one retailer's multiple product variants crowd Amazon or the third retailer out of the response.
 ` + (link && !/amazon\./i.test(link) ? `5. Also check the exact price at this page, whichever retailer it's from: ${link}\n` : '')
++ (link && /amazon\./i.test(link) && asinFromUrl(link) ? `6. The exact Amazon product is ASIN ${asinFromUrl(link)} -- search \`site:amazon.co.uk ${asinFromUrl(link)}\` specifically, in addition to the name-based Amazon search in step 2, so the result is that exact listing and not a same-name variant. Still never fetch the Amazon page itself (see step 3).\n` : '')
 + 'For each result, note the retailer, the exact product name, the price if shown, the direct product page URL, and: '
 + 'for Tesco, any multibuy or Clubcard offer shown ("offer", e.g. "3 for 2", "Clubcard price £2.50" — blank if none); '
 + 'for Amazon, the Subscribe & Save price/discount if the page shows one ("subscribeSave", e.g. "£4.49 with 15% Subscribe & Save" — blank if not offered or not shown). '
@@ -1235,6 +1246,50 @@ retailer: String(r.retailer || ''), name: String(r.name || ''), price: String(r.
 offer: String(r.offer || ''), subscribeSave: String(r.subscribeSave || ''),
 })).sort((a, b) => parsePriceForSort(a.price) - parsePriceForSort(b.price));
 return { results: sorted, recommendation: String((raw && raw.recommendation) || '') };
+}
+
+// ---- Resolving a pasted URL into a real title ----
+//
+// The "🪄 Resolve title" action every quick-add input (Tasks, Shopping,
+// Planner ideas, Job hunt) offers when what got typed/pasted is just a
+// bare URL -- confirmed live as a real gap: an Amazon link pasted into
+// Shopping's own capture input became a task titled with the entire raw
+// URL, and the link itself was never even saved by that input at all.
+const RESOLVE_URL_MODEL = 'claude-sonnet-5';
+const RESOLVE_URL_MAX_TOKENS = 2000;
+
+// Same web_search/web_fetch pair, UK bias, and Amazon-fetch exclusion
+// searchShoppingItem already proved out live above -- reused as-is, not
+// a second lookup mechanism.
+function resolveUrlTools() {
+return [
+{ type: 'web_search_20260209', name: 'web_search', max_uses: 3, allowed_callers: ['direct'], user_location: { type: 'approximate', country: 'GB' } },
+{ type: 'web_fetch_20260209', name: 'web_fetch', max_uses: 2, allowed_callers: ['direct'] },
+];
+}
+
+async function resolveUrlTitle(url) {
+const prompt = `This URL was pasted somewhere a short, human-readable TITLE is needed instead of the raw link: "${url}"
+
+Use web_search to find out what this page/product/listing actually is (a retailer product page, an article, a listing, anything else). For an amazon.* URL specifically, do NOT use web_fetch on it -- Amazon blocks automated fetches outright, so it only wastes a tool call; the search result's own snippet almost always already has the product name. For any other domain, web_fetch the page itself if search alone doesn't give a clear enough title.
+
+Reply with ONLY a JSON object, no other text, no markdown fences: {"title":""} -- a short, specific title as you'd want to see it in a task list (e.g. "Sudafed Blocked Nose Spray, 15ml", not "Amazon.co.uk: Sudafed Blocked Nose Spray..."), or "" if you genuinely can't tell what it is.`;
+const { data } = await callAnthropic([{ type: 'text', text: prompt }], RESOLVE_URL_MAX_TOKENS, RESOLVE_URL_MODEL, 'Resolve URL title', resolveUrlTools());
+return String((data && data.title) || '').trim();
+}
+
+// Same idea as resolveUrlTitle, but for Job hunt's two separate fields --
+// a job posting's own page title is rarely just "Company — Role" cleanly,
+// so this asks for the two parts directly rather than splitting a title
+// string after the fact.
+async function resolveJobPostingUrl(url) {
+const prompt = `This URL is a job listing/posting, pasted somewhere that needs the hiring company and the role kept as two SEPARATE fields, not the raw link: "${url}"
+
+Use web_search (and web_fetch the page itself if the search result snippet doesn't already make both clear) to find out which company is hiring and for what role/job title.
+
+Reply with ONLY a JSON object, no other text, no markdown fences: {"company":"","role":""} -- leave either "" if you genuinely can't tell.`;
+const { data } = await callAnthropic([{ type: 'text', text: prompt }], RESOLVE_URL_MAX_TOKENS, RESOLVE_URL_MODEL, 'Resolve job posting URL', resolveUrlTools());
+return { company: String((data && data.company) || '').trim(), role: String((data && data.role) || '').trim() };
 }
 
 // ---- Product identification from a photo ----
@@ -1746,6 +1801,7 @@ export {
 MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot, quickScanScreenshot, scanForCaptureMarker,
 callTextJson, DEFAULT_MODEL, summarizeUsage, currentMonthKey, compareFaces,
 extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShoppingItem, identifyProduct, translateText, romanizeName, parseCaptureIntent,
+resolveUrlTitle, resolveJobPostingUrl,
 identifyCountry, extractWellnessScreenshot,
 extractTripScreenshot, extractTripLegFromEmail, extractTaskFromEmail, extractDateEventFromEmail,
 parseIngredients, assessIngredient, ALLERGEN_LIST, DIETARY_FLAGS, FODMAP_COMPONENTS, FODMAP_LEVELS,

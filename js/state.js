@@ -360,6 +360,15 @@ read: false,
 };
 }
 
+// A job application. Was built inline in jobs.js's own add-form handler
+// (data.jobs.push({id, company, role, stage})) -- given a real factory now,
+// same convention every other record type already has, so `link` (the
+// posting's own URL, when "🪄 Resolve title" split one into company+role)
+// has one consistent place to default from.
+function blankJob(fields = {}) {
+return { id: uid(), company: '', role: '', stage: 'Wishlist', link: '', ...fields };
+}
+
 // The persisted landing spot for a voice/text capture once parseCaptureIntent
 // (ai.js) has turned it into a small ordered plan -- see voicecapture.js.
 // Persisted rather than held in memory for the same reason data.pendingImports
@@ -945,6 +954,7 @@ function migrate() {
 if (!Array.isArray(data.habits)) data.habits = [];
 if (!Array.isArray(data.goals)) data.goals = [];
 if (!Array.isArray(data.jobs)) data.jobs = [];
+data.jobs = data.jobs.map((j) => ({ ...blankJob(), ...j, id: j.id || uid() }));
 if (!Array.isArray(data.connections)) data.connections = [];
 if (!Array.isArray(data.calendars)) data.calendars = [];
 // Tracked calendars have been through three shapes: {id,name,date} manual
@@ -2155,7 +2165,7 @@ setExternalUpdateHandler, setLocalChangeHandler, getLocalSettings, setLocalSetti
 isDormantStage, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness,
 exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, DEFAULT_PREFS,
 MAIL_SEARCH_KINDS, mailSearchLabel, blankMailSearch, blankMailTopic, blankMailDismissal,
-TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureBatch, blankPendingImport, blankConnection, blankTelegramThread, blankReadingItem, blankCaptureDraft,
+TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureBatch, blankPendingImport, blankConnection, blankTelegramThread, blankReadingItem, blankCaptureDraft, blankJob,
 blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS, LEG_DATE_FIELDS,
 blankPlannerEntry, blankPlannerActivity,
 blankAirbnbListing, blankAirbnbReservation, blankAirbnbKey, blankAirbnbKeyAssignment, KEY_CUSTODIAN_TYPES, blankFinanceAccount,
