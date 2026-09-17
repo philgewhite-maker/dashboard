@@ -250,9 +250,19 @@ let composed = composeTask(share);
 // leaving both as an identical blank "Shared item" task.
 if (composed.title === 'Shared item' && !composed.notes && !composed.link && !share.files.length) {
 	const attempted = share.fileAttemptCount > 0;
+	// Deliberately states only what was observed (a file was/wasn't
+	// attempted, how many bytes arrived) -- NOT a guess at why. A first
+	// cut of this note asserted "likely blocked by the source app,
+	// common for banking-app screenshots" and that turned out to
+	// contradict what the user could already see for themselves (the
+	// same screenshot shares fine, with an image, to WhatsApp and to
+	// Claude) -- so whatever's actually wrong is specific to THIS app's
+	// share handling, not a blanket "banking apps block sharing" claim.
+	// Leave the cause to whoever reads fileAttemptCount/emptyFileNames
+	// next time this fires, rather than asserting one.
 	const note = attempted
-		? `Shared with no readable content — the source app tried to attach ${share.fileAttemptCount === 1 ? 'a file' : `${share.fileAttemptCount} files`} (${(share.emptyFileNames || []).filter(Boolean).join(', ') || 'unnamed'}) but 0 bytes arrived, so nothing could be captured. Likely blocked by the source app (common for banking-app screenshots) — try saving the screenshot to Photos first, then share from there.`
-		: 'Shared with no title, text, link, or file at all — the source app sent nothing this dashboard could use.';
+		? `Shared with no readable content — the source app's share attached ${share.fileAttemptCount === 1 ? 'a file' : `${share.fileAttemptCount} files`} (${(share.emptyFileNames || []).filter(Boolean).join(', ') || 'unnamed'}), but 0 bytes of it arrived here, so nothing could be captured. Cause unconfirmed — worth trying again, or sharing from Photos/Gallery instead of directly from the source app, to see if that changes the result.`
+		: 'Shared with no title, text, link, or file at all — nothing usable arrived here from the source app.';
 	composed = { ...composed, notes: note };
 }
 const link = composed.link;
