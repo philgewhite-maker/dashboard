@@ -2,7 +2,7 @@
 // deletes every cache that isn't the current name, so raising the version is
 // what actually evicts a stale copy from a device that has been running the
 // app for a while.
-const CACHE_NAME = 'dashboard-v351';
+const CACHE_NAME = 'dashboard-v352';
 const CORE_ASSETS = [
 './',
 './index.html',
@@ -112,6 +112,31 @@ const shareUrl = (name) => new URL(name, self.registration.scope).href;
 // this. Not a diagnosis by themselves, just the facts to diagnose from.
 const requestContentType = request.headers.get('content-type') || '';
 const requestContentLength = request.headers.get('content-length') || '';
+// A real multipart Content-Type with a real boundary has now been
+// confirmed arriving here (live, twice -- from Gallery and directly
+// from MBNA, same result both times: ruling out the source app
+// entirely) while formData() still parses zero fields out of it. That
+// means either the body itself is empty despite the header claiming
+// otherwise, or formData() is failing to parse a body that IS there --
+// two different bugs, indistinguishable without seeing the actual
+// bytes. Cloned so this read doesn't consume the body formData() below
+// still needs -- Request/Response bodies can only be read once each,
+// clone() is what makes two independent reads possible.
+let rawBodyByteLength = null;
+let rawBodySnippet = '';
+try {
+const buf = await request.clone().arrayBuffer();
+rawBodyByteLength = buf.byteLength;
+// First 400 bytes as text is enough to show the multipart preamble --
+// boundary line, Content-Disposition headers, field names -- before
+// hitting a file part's actual binary bytes. Non-printable bytes
+// (the binary itself, once the snippet runs into it) are flattened to
+// "." rather than left as raw control characters, which JSON.stringify
+// would otherwise mangle or bloat via escaping.
+rawBodySnippet = new TextDecoder('utf-8', { fatal: false }).decode(buf.slice(0, 400)).replace(/[^\x20-\x7E\n]/g, '.');
+} catch (err) {
+rawBodySnippet = `(raw body read failed: ${err.message || err})`;
+}
 try {
 const form = await request.formData();
 const stamp = Date.now();
@@ -124,6 +149,8 @@ files: [],
 at: stamp,
 requestContentType,
 requestContentLength,
+rawBodyByteLength,
+rawBodySnippet,
 // Every field name formData() actually parsed out, regardless of
 // whether it's one this code reads (title/text/url/files) -- if the
 // source app sent the file under some other field name, or the
@@ -171,6 +198,7 @@ const cache = await caches.open(SHARE_CACHE);
 await cache.put(shareUrl('__share-meta'), new Response(JSON.stringify({
 title: '', text: '', url: '', files: [], at: Date.now(),
 requestContentType, requestContentLength, formFieldNames: [],
+rawBodyByteLength, rawBodySnippet,
 handlerError: String(err && err.message || err),
 }), { headers: { 'Content-Type': 'application/json' } }));
 } catch (err2) { /* even the fallback stash failed -- truly nothing left to record */ }
