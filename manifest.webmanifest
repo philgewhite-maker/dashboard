@@ -19,7 +19,7 @@
 "text": "text",
 "url": "url",
 "files": [
-{ "name": "files", "accept": ["image/*", "audio/*", "application/pdf", "text/plain", ".doc", ".docx", ".xls", ".xlsx", ".csv"] }
+{ "name": "files", "accept": ["image/*", "application/pdf", "text/plain", ".doc", ".docx", ".xls", ".xlsx", ".csv"] }
 ]
 }
 }
