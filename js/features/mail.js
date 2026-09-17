@@ -431,6 +431,70 @@ const days = Math.max(0, Number(search.maxDays) || 0);
 return days > 0 ? `${label} — last ${days} day${days === 1 ? '' : 's'}` : label;
 }
 
+// A "zxc" + trigger letter anywhere in the subject (e.g. "zxc D") --
+// space between the prefix and the letter on purpose, so ONE Mail search
+// for the bare word "zxc" catches every marker at once (Gmail's own
+// subject: search matches whole tokens, not substrings inside a longer
+// word -- "zxcD" glued together would each be a different word to
+// Gmail's tokenizer, defeating a single catch-all search). Case-
+// insensitive on the letter itself since a phone keyboard capitalizes
+// unpredictably; matchCaptureRule below still gets it uppercased,
+// matching imageMarker/urlSuffix's own always-uppercase trigger.
+const EMAIL_SUBJECT_MARKER = /\bzxc\s+([A-Za-z])\b/i;
+
+// Runs once per "Refresh mail" -- every OPEN message (skips anything
+// already actioned/dismissed/drafted, so a marker is only ever acted on
+// once) gets checked for a subject marker and, if one matches a
+// configured rule (data.prefs.captureRules, Settings' "Capture markers
+// & suffixes"), processed right away: a `commitMode:'direct'` outcome
+// (Task/Reading/Supermarket) is created immediately, same as the
+// existing image-marker/URL-suffix paths already do; a `commitMode:
+// 'draft'` outcome (Event/Trip leg -- captureOutcomes.js) has its
+// extraction run now but lands in the Smart Capture drafts queue
+// (data.captureDrafts) for review, never created outright -- the actual
+// AI/ICS work happens here so the draft card has something real to show,
+// but nothing is written until you confirm it. One bad message's
+// failure is logged and skipped, never blocks the rest.
+// Deliberately top-level (a sibling of renderMail/initMail, NOT nested
+// inside either) -- initMail's sync handler calls this directly, a
+// separate scope from renderMail's own self-rebinding body.
+async function processMailMarkers(sections) {
+const { matchCaptureRule, CAPTURE_OUTCOMES } = await import('./captureOutcomes.js');
+let direct = 0;
+let drafted = 0;
+for (const { messages } of sections) {
+for (const m of messages) {
+if (messageStatus(m) !== 'open') continue;
+const match = EMAIL_SUBJECT_MARKER.exec(m.subject || '');
+if (!match) continue;
+const rule = matchCaptureRule(data, 'emailSubject', match[1].toUpperCase());
+if (!rule) continue;
+const outcome = CAPTURE_OUTCOMES[rule.outcome];
+if (!outcome) continue;
+try {
+if (outcome.commitMode === 'draft') {
+const step = await outcome.buildStep({ mailMessageId: m.id, subject: m.subject, from: m.from, url: m.link });
+data.captureDrafts.unshift(blankCaptureDraft({
+rawText: m.subject, steps: [step],
+source: { kind: 'mail', label: m.subject, url: m.link },
+}));
+drafted++;
+} else {
+await outcome.run({ title: m.subject, url: m.link, source: { kind: 'mail', label: m.subject, url: m.link } });
+direct++;
+}
+} catch (err) {
+console.error(`Mail marker "${rule.trigger}" failed for "${m.subject}":`, err);
+}
+}
+}
+if (direct || drafted) queueSave();
+const parts = [];
+if (direct) parts.push(`${direct} auto-processed`);
+if (drafted) parts.push(`${drafted} queued for review`);
+return parts.join(', ');
+}
+
 function renderMail(sections) {
 const list = document.getElementById('mail-list');
 
@@ -485,67 +549,6 @@ if (expandedGroups.has(id)) expandedGroups.delete(id); else expandedGroups.add(i
 renderMail(lastSections);
 });
 });
-
-// A "zxc" + trigger letter anywhere in the subject (e.g. "zxc D") --
-// space between the prefix and the letter on purpose, so ONE Mail search
-// for the bare word "zxc" catches every marker at once (Gmail's own
-// subject: search matches whole tokens, not substrings inside a longer
-// word -- "zxcD" glued together would each be a different word to
-// Gmail's tokenizer, defeating a single catch-all search). Case-
-// insensitive on the letter itself since a phone keyboard capitalizes
-// unpredictably; matchCaptureRule below still gets it uppercased,
-// matching imageMarker/urlSuffix's own always-uppercase trigger.
-const EMAIL_SUBJECT_MARKER = /\bzxc\s+([A-Za-z])\b/i;
-
-// Runs once per "Refresh mail" -- every OPEN message (skips anything
-// already actioned/dismissed/drafted, so a marker is only ever acted on
-// once) gets checked for a subject marker and, if one matches a
-// configured rule (data.prefs.captureRules, Settings' "Capture markers
-// & suffixes"), processed right away: a `commitMode:'direct'` outcome
-// (Task/Reading/Supermarket) is created immediately, same as the
-// existing image-marker/URL-suffix paths already do; a `commitMode:
-// 'draft'` outcome (Event/Trip leg -- captureOutcomes.js) has its
-// extraction run now but lands in the Smart Capture drafts queue
-// (data.captureDrafts) for review, never created outright -- the actual
-// AI/ICS work happens here so the draft card has something real to show,
-// but nothing is written until you confirm it. One bad message's
-// failure is logged and skipped, never blocks the rest.
-async function processMailMarkers(sections) {
-const { matchCaptureRule, CAPTURE_OUTCOMES } = await import('./captureOutcomes.js');
-let direct = 0;
-let drafted = 0;
-for (const { messages } of sections) {
-for (const m of messages) {
-if (messageStatus(m) !== 'open') continue;
-const match = EMAIL_SUBJECT_MARKER.exec(m.subject || '');
-if (!match) continue;
-const rule = matchCaptureRule(data, 'emailSubject', match[1].toUpperCase());
-if (!rule) continue;
-const outcome = CAPTURE_OUTCOMES[rule.outcome];
-if (!outcome) continue;
-try {
-if (outcome.commitMode === 'draft') {
-const step = await outcome.buildStep({ mailMessageId: m.id, subject: m.subject, from: m.from, url: m.link });
-data.captureDrafts.unshift(blankCaptureDraft({
-rawText: m.subject, steps: [step],
-source: { kind: 'mail', label: m.subject, url: m.link },
-}));
-drafted++;
-} else {
-await outcome.run({ title: m.subject, url: m.link, source: { kind: 'mail', label: m.subject, url: m.link } });
-direct++;
-}
-} catch (err) {
-console.error(`Mail marker "${rule.trigger}" failed for "${m.subject}":`, err);
-}
-}
-}
-if (direct || drafted) queueSave();
-const parts = [];
-if (direct) parts.push(`${direct} auto-processed`);
-if (drafted) parts.push(`${drafted} queued for review`);
-return parts.join(', ');
-}
 
 // Both dismiss paths funnel through here -- a single row's × and the
 // group's own "Bin all" -- so a message is only ever binned once
