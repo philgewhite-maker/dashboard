@@ -249,34 +249,38 @@ return;
 // shareUrlRules' domain-based inference (recipe import, and whatever
 // else gets registered later) gets its turn.
 let composed = composeTask(share);
-// Nothing usable came through at all -- confirmed live (MBNA's banking
-// app): the source app's share intent can hand the OS a file reference
-// that Chrome then fails to actually read, landing here with title/
-// text/url/files all empty (composeTask's own timestamped "Shared
-// item, <when>" fallback title kicks in -- see its own comment) with
-// no way afterward to tell "the source app shared literally nothing"
-// apart from "it tried to share an image and the bytes got lost in
-// transit" -- a real difference. sw.js's handleShare records the
-// attempt count/names before its own size>0 filter drops them,
-// specifically so this note can tell them apart instead of leaving
-// both as an identical blank task. `composed.generic` is the flag for
-// "the fallback fired", not a string match against the title -- the
-// title text itself now carries a timestamp and varies share to share.
+// Nothing usable came through at all -- landing here with title/text/
+// url/files all empty (composeTask's own timestamped "Shared item,
+// <when>" fallback title kicks in -- see its own comment). Root cause
+// NOT established: confirmed live once that the OS share sheet can
+// stage a real image for this app as the target and still nothing
+// arrives here, which rules out "the source app never attached a
+// file" but doesn't yet say what actually goes wrong between the POST
+// and this code running -- see sw.js's handleShare for the raw
+// request-level facts (content-type/length, actual form field names)
+// recorded specifically to narrow that down, surfaced in the note
+// below rather than guessed at here. `composed.generic` is the flag
+// for "the fallback fired", not a string match against the title --
+// the title text itself now carries a timestamp and varies share to
+// share.
 if (composed.generic && !composed.notes && !composed.link && !share.files.length) {
 	const attempted = share.fileAttemptCount > 0;
-	// Deliberately states only what was observed (a file was/wasn't
-	// attempted, how many bytes arrived) -- NOT a guess at why. A first
-	// cut of this note asserted "likely blocked by the source app,
-	// common for banking-app screenshots" and that turned out to
-	// contradict what the user could already see for themselves (the
-	// same screenshot shares fine, with an image, to WhatsApp and to
-	// Claude) -- so whatever's actually wrong is specific to THIS app's
-	// share handling, not a blanket "banking apps block sharing" claim.
-	// Leave the cause to whoever reads fileAttemptCount/emptyFileNames
-	// next time this fires, rather than asserting one.
+	// Deliberately states only what was observed, never a guess at why.
+	// A first cut of this note asserted "likely blocked by the source
+	// app, common for banking-app screenshots" and that turned out to
+	// contradict what the user could see for themselves (the same
+	// screenshot shares fine, with an image, to WhatsApp and to Claude).
+	// A later attempt showed the OS share sheet staging a real 489KB
+	// image for this app as the target, yet NOTHING arrived here at
+	// all -- ruling out "the source app never attached a file" too, and
+	// pointing at this app's own share handling instead. Cause still
+	// not established -- these are raw facts (request content-type/
+	// length, which form field names actually parsed out, or a handler
+	// exception if one was thrown) for diagnosing FROM, not a diagnosis.
+	const rawFacts = `[ct: ${share.requestContentType || '(none)'} · len: ${share.requestContentLength || '(none)'} · fields: ${(share.formFieldNames || []).join(', ') || '(none)'}${share.handlerError ? ` · handler threw: ${share.handlerError}` : ''}]`;
 	const note = attempted
-		? `Shared with no readable content — the source app's share attached ${share.fileAttemptCount === 1 ? 'a file' : `${share.fileAttemptCount} files`} (${(share.emptyFileNames || []).filter(Boolean).join(', ') || 'unnamed'}), but 0 bytes of it arrived here, so nothing could be captured. Cause unconfirmed — worth trying again, or sharing from Photos/Gallery instead of directly from the source app, to see if that changes the result.`
-		: 'Shared with no title, text, link, or file at all — nothing usable arrived here from the source app.';
+		? `Shared with no readable content — the share attached ${share.fileAttemptCount === 1 ? 'a file' : `${share.fileAttemptCount} files`} (${(share.emptyFileNames || []).filter(Boolean).join(', ') || 'unnamed'}), but 0 bytes of it arrived here, so nothing could be captured. ${rawFacts}`
+		: `Shared with no title, text, link, or file at all. ${rawFacts}`;
 	composed = { ...composed, notes: note };
 }
 const link = composed.link;

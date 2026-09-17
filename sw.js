@@ -2,7 +2,7 @@
 // deletes every cache that isn't the current name, so raising the version is
 // what actually evicts a stale copy from a device that has been running the
 // app for a while.
-const CACHE_NAME = 'dashboard-v349';
+const CACHE_NAME = 'dashboard-v350';
 const CORE_ASSETS = [
 './',
 './index.html',
@@ -100,6 +100,18 @@ keys.filter((k) => k !== CACHE_NAME && k !== SHARE_CACHE).map((k) => caches.dele
 // to the app, which picks it up and turns it into a task.
 async function handleShare(request) {
 const shareUrl = (name) => new URL(name, self.registration.scope).href;
+// Read before formData() consumes the body -- these are raw facts about
+// what the network request itself looked like, kept separate from
+// anything formData() goes on to parse out of it. The point: if a real
+// file was staged in the OS share sheet (confirmed live once -- Android
+// showed "1 image, 489.60 KB" staged for this app) but form.getAll
+// ('files') below still comes back empty, these two numbers are what
+// distinguish "the POST body never actually carried the bytes" from "the
+// bytes arrived but formData() parsed them out wrong" -- two different
+// bugs with the same downstream symptom, not distinguishable without
+// this. Not a diagnosis by themselves, just the facts to diagnose from.
+const requestContentType = request.headers.get('content-type') || '';
+const requestContentLength = request.headers.get('content-length') || '';
 try {
 const form = await request.formData();
 const stamp = Date.now();
@@ -110,17 +122,25 @@ text: form.get('text') || '',
 url: form.get('url') || '',
 files: [],
 at: stamp,
+requestContentType,
+requestContentLength,
+// Every field name formData() actually parsed out, regardless of
+// whether it's one this code reads (title/text/url/files) -- if the
+// source app sent the file under some other field name, or the
+// manifest's declared "files" param name and what actually arrived
+// don't match for some reason, this is what would show it.
+formFieldNames: [...new Set([...form.keys()])],
 };
-// A file entry can arrive in the FormData but be unreadable (0 bytes) --
-// confirmed real, not hypothetical: some apps (banking apps in
-// particular) hand Android's share sheet a content:// reference the
-// browser then fails to actually read, so the "file" is present but
-// empty. Recording the attempt count here (before the size>0 filter
-// below drops it) is what lets sharetarget.js tell "nothing was shared"
+// A file entry can arrive in the FormData but be unreadable (0 bytes).
+// Recording the attempt count here (before the size>0 filter below
+// drops it) is what lets sharetarget.js tell "nothing was shared"
 // apart from "something was shared but couldn't be read" -- the two
 // look identical downstream otherwise, and the whole point is not
 // leaving a share that silently lost its content indistinguishable from
-// one that never had any.
+// one that never had any. (Which of these two is actually happening,
+// and why, isn't established yet -- see the comment above requestContent
+// Type for the live case that ruled out "the source app never attached
+// a file" as the explanation, without yet pinning down the real cause.)
 const fileAttempts = form.getAll('files').filter((f) => f && typeof f === 'object');
 meta.fileAttemptCount = fileAttempts.length;
 meta.emptyFileNames = fileAttempts.filter((f) => !(f.size > 0)).map((f) => f.name || '').filter(Boolean);
@@ -140,6 +160,20 @@ headers: { 'Content-Type': 'application/json' },
 // Redirect regardless: landing in the app with nothing captured is
 // recoverable, being left on a blank error page is not.
 console.error('Share handling failed:', err);
+// Best-effort: still stash SOMETHING so this doesn't vanish with no
+// task and no banner at all -- indistinguishable, until now, from the
+// share never having reached this handler in the first place. If
+// request.formData() itself is what threw (a real possibility --
+// that's the exact call whose output is currently unexplained), this
+// is the only record of the attempt that survives.
+try {
+const cache = await caches.open(SHARE_CACHE);
+await cache.put(shareUrl('__share-meta'), new Response(JSON.stringify({
+title: '', text: '', url: '', files: [], at: Date.now(),
+requestContentType, requestContentLength, formFieldNames: [],
+handlerError: String(err && err.message || err),
+}), { headers: { 'Content-Type': 'application/json' } }));
+} catch (err2) { /* even the fallback stash failed -- truly nothing left to record */ }
 }
 // 303 so the browser follows with a GET rather than re-POSTing.
 return Response.redirect(shareUrl('index.html?shared=1'), 303);
