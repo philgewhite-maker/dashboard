@@ -277,7 +277,17 @@ if (composed.generic && !composed.notes && !composed.link && !share.files.length
 	// not established -- these are raw facts (request content-type/
 	// length, which form field names actually parsed out, or a handler
 	// exception if one was thrown) for diagnosing FROM, not a diagnosis.
-	const rawFacts = `[ct: ${share.requestContentType || '(none)'} · len: ${share.requestContentLength || '(none)'} · fields: ${(share.formFieldNames || []).join(', ') || '(none)'}${share.handlerError ? ` · handler threw: ${share.handlerError}` : ''}]`;
+	// `at` (when sw.js actually stashed this) matters as much as the rest:
+	// this cache is deliberately never cleared on deploy (see sw.js's own
+	// SHARE_CACHE comment -- an interrupted share must survive an app
+	// update), so an old failed attempt's empty stash can sit there and
+	// only get read on some much-later page load, looking exactly like a
+	// fresh empty share when it isn't one. Confirmed as a live risk, not
+	// yet confirmed as what actually happened -- this timestamp is what
+	// would settle it next time, by comparing it to when the share was
+	// actually made.
+	const stashedAt = share.at ? new Date(share.at).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'unknown';
+	const rawFacts = `[stashed: ${stashedAt} · ct: ${share.requestContentType || '(none)'} · len: ${share.requestContentLength || '(none)'} · fields: ${(share.formFieldNames || []).join(', ') || '(none)'}${share.handlerError ? ` · handler threw: ${share.handlerError}` : ''}]`;
 	const note = attempted
 		? `Shared with no readable content — the share attached ${share.fileAttemptCount === 1 ? 'a file' : `${share.fileAttemptCount} files`} (${(share.emptyFileNames || []).filter(Boolean).join(', ') || 'unnamed'}), but 0 bytes of it arrived here, so nothing could be captured. ${rawFacts}`
 		: `Shared with no title, text, link, or file at all. ${rawFacts}`;
