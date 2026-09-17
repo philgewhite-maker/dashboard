@@ -549,22 +549,40 @@ createdAt: new Date().toISOString(),
 // css/style.css's --X custom properties + .dot.X classes), not a free
 // pick -- there's no colour-picker UI anywhere else to reuse either.
 function blankAirbnbListing(fields = {}) {
-return { id: uid(), label: '', icsUrl: '', prefix: '', colour: 'blue', ...fields };
+return {
+id: uid(), label: '', icsUrl: '', prefix: '', colour: 'blue',
+// A SECOND, distinct tag from `prefix` -- for a booking from outside
+// Airbnb entirely (a friend, another platform), typed by hand into a
+// Calendar event's title on the same shared calendar. Deliberately not
+// `prefix` itself: that one is what pushReservation (airbnb.js) already
+// searches for when adopting a REAL Airbnb reservation's own matching
+// event, and a hand-typed external booking sharing that prefix could get
+// wrongly adopted as if it were one. Blank = the external-booking scan
+// is off for this listing, same opt-in-by-filling-it-in convention
+// `prefix` itself already has.
+externalPrefix: '',
+...fields,
+};
 }
 
-// One reservation synced from a listing's ICS feed. `uid` is the feed's
-// OWN event UID (not this record's `id`) -- the stable key a re-sync
-// matches against so re-running Sync updates in place instead of piling
-// up duplicates. Airbnb's export never includes the guest's name (a
-// genuine privacy limit on their side, not a gap here), so guestName/
-// notes are always user-entered after the fact, never scraped.
+// One reservation, either synced from a listing's ICS feed (source:'ics',
+// `uid` is the feed's OWN event UID -- the stable key a re-sync matches
+// against so re-running Sync updates in place instead of piling up
+// duplicates) or scanned in from the shared Google Calendar by its
+// `externalPrefix` (source:'external', see airbnb.js's
+// syncExternalBookingsForListing -- no feed `uid` to key on there, so
+// `googleEventId` is the identity instead). Neither source's export ever
+// includes the guest's name (a genuine limit on Airbnb's side; a hand-
+// typed external event might, but this app doesn't try to parse it out),
+// so guestName/notes are always user-entered after the fact, never
+// scraped.
 function blankAirbnbReservation(fields = {}) {
 return {
 id: uid(),
-listingId: '', uid: '',
+listingId: '', uid: '', source: 'ics',
 checkin: '', checkout: '', // ISO yyyy-mm-dd, checkout is exclusive (the turnover day, not an occupied night)
 guestName: '', notes: '',
-googleEventId: '', googleCalendarId: '', // set once pushed -- see js/googlecalendar.js's findEvents()/createEvent()
+googleEventId: '', googleCalendarId: '', // set once pushed, OR always set for source:'external' -- see js/googlecalendar.js's findEvents()/createEvent()
 createdAt: new Date().toISOString(),
 ...fields,
 };

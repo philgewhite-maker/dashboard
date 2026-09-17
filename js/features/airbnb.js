@@ -135,6 +135,76 @@ console.error(`Airbnb sync failed for "${listing.label || listing.prefix || list
 queueSave();
 }
 
+// How far ahead a hand-typed external booking is expected to already be
+// visible on the shared calendar -- unlike the ICS feed sync above (no
+// artificial window needed, just "not checked out yet"), findEvents
+// requires a real timeMax.
+const EXTERNAL_SCAN_WINDOW_DAYS = 180;
+
+// A booking typed straight into the shared Google Calendar for a listing
+// that never touches Airbnb at all -- recognised by `externalPrefix`
+// appearing in the event's title, a deliberately different tag from the
+// listing's real `prefix` (see blankAirbnbListing's own comment, state.js)
+// so it's never mistaken for a real Airbnb reservation when one of THOSE
+// gets pushed. Keyed on the Calendar event's own id, not a feed uid --
+// there's no feed behind something that was never on Airbnb -- otherwise
+// the same re-sync-updates-in-place / gone-means-removed shape
+// syncAirbnbListing already uses above.
+async function syncExternalBookingsForListing(listing, calendarId) {
+if (!listing.externalPrefix) return { added: 0, updated: 0, removed: 0 };
+const today = todayStr();
+const items = await findEvents(calendarId, {
+timeMin: `${today}T00:00:00Z`,
+timeMax: `${dateStrAdd(today, EXTERNAL_SCAN_WINDOW_DAYS)}T00:00:00Z`,
+q: listing.externalPrefix,
+});
+// q is a broad free-text match across summary/description/etc (see
+// findEvents' own comment) -- re-check the prefix is actually IN THE
+// TITLE, same discipline pushReservation's own adoption step already
+// applies before trusting a search hit.
+const matching = items.filter((e) => (e.summary || '').includes(listing.externalPrefix));
+const existingByEventId = new Map(
+data.airbnbReservations.filter((r) => r.listingId === listing.id && r.source === 'external').map((r) => [r.googleEventId, r])
+);
+let added = 0, updated = 0;
+matching.forEach((e) => {
+const checkin = e.start?.date || (e.start?.dateTime || '').slice(0, 10);
+const checkout = e.end?.date || (e.end?.dateTime || '').slice(0, 10);
+if (!checkin || !checkout) return;
+const existing = existingByEventId.get(e.id);
+if (existing) {
+if (existing.checkin !== checkin || existing.checkout !== checkout) { existing.checkin = checkin; existing.checkout = checkout; updated++; }
+existingByEventId.delete(e.id);
+} else {
+data.airbnbReservations.push(blankAirbnbReservation({
+listingId: listing.id, checkin, checkout, source: 'external',
+googleEventId: e.id, googleCalendarId: calendarId,
+}));
+added++;
+}
+});
+// Whatever's left is a booking that's been deleted/renamed off the
+// calendar since the last scan -- same "gone means gone" reasoning
+// syncAirbnbListing's own cancelled-booking cleanup already follows.
+let removed = 0;
+existingByEventId.forEach((r) => { data.airbnbReservations = data.airbnbReservations.filter((x) => x.id !== r.id); removed++; });
+return { added, updated, removed };
+}
+
+// One pass over every listing that's opted in (externalPrefix set) --
+// silently a no-op if the shared calendar itself isn't configured yet,
+// same guard syncCleanerEvents already applies for the same reason.
+async function syncExternalBookings() {
+const calendarId = data.prefs.airbnbCalendarId;
+if (!calendarId) return;
+for (const listing of data.airbnbListings) {
+if (!listing.externalPrefix) continue;
+try { await syncExternalBookingsForListing(listing, calendarId); }
+catch (err) { console.error(`External-booking scan failed for "${listing.label || listing.prefix || listing.id}":`, err); }
+}
+queueSave();
+}
+
 // ---- Planner occupancy stripes ------------------------------------------
 
 // One segment per occupied LISTING, not per room -- a same-day changeover
@@ -172,11 +242,12 @@ el.innerHTML = '<div class="settings-note" style="margin:0;">No listings yet —
 return;
 }
 el.innerHTML = `<table class="limits-table">
-<thead><tr><th>Label</th><th>Calendar export URL</th><th title="Identifies the physical ROOM, not the listing — give two listings for the same room the same prefix. Once you rename any manually-entered Google Calendar events for a room to include its prefix, &quot;Push to Google Calendar&quot; recognises and adopts them instead of duplicating." style="cursor:help; text-decoration:underline dotted;">Prefix</th><th title="Identifies the physical ROOM, not the listing — give two listings for the same room the same colour." style="cursor:help; text-decoration:underline dotted;">Colour</th><th></th></tr></thead>
+<thead><tr><th>Label</th><th>Calendar export URL</th><th title="Identifies the physical ROOM, not the listing — give two listings for the same room the same prefix. Once you rename any manually-entered Google Calendar events for a room to include its prefix, &quot;Push to Google Calendar&quot; recognises and adopts them instead of duplicating." style="cursor:help; text-decoration:underline dotted;">Prefix</th><th title="A SECOND, different tag for a booking from outside Airbnb entirely (a friend, another platform) — type it into that Calendar event's title (e.g. &quot;ES-Lg — Jane Doe&quot;) and Sync pulls it in as a reservation on this listing. Deliberately not the same as Prefix — never mistaken for a real Airbnb booking when one of those gets pushed. Leave blank to skip this for a listing." style="cursor:help; text-decoration:underline dotted;">External prefix</th><th title="Identifies the physical ROOM, not the listing — give two listings for the same room the same colour." style="cursor:help; text-decoration:underline dotted;">Colour</th><th></th></tr></thead>
 <tbody>${data.airbnbListings.map((l) => `<tr>
 <td><input type="text" autocomplete="off" data-airbnb-listing-field="label" data-airbnb-listing-id="${l.id}" value="${escapeHtml(l.label)}" placeholder="e.g. Entire studio"></td>
 <td><input type="text" autocomplete="off" data-airbnb-listing-field="icsUrl" data-airbnb-listing-id="${l.id}" value="${escapeHtml(l.icsUrl)}" placeholder="https://www.airbnb..../calendar/ical/....ics"></td>
 <td><input type="text" autocomplete="off" data-airbnb-listing-field="prefix" data-airbnb-listing-id="${l.id}" value="${escapeHtml(l.prefix)}" placeholder="e.g. ES-L" style="width:70px;"></td>
+<td><input type="text" autocomplete="off" data-airbnb-listing-field="externalPrefix" data-airbnb-listing-id="${l.id}" value="${escapeHtml(l.externalPrefix)}" placeholder="e.g. ES-Lg" style="width:70px;"></td>
 <td><select data-airbnb-listing-field="colour" data-airbnb-listing-id="${l.id}">
 ${AIRBNB_COLOURS.map((c) => `<option value="${c}"${c === l.colour ? ' selected' : ''}>${c.charAt(0).toUpperCase()}${c.slice(1)}</option>`).join('')}
 </select></td>
@@ -400,7 +471,9 @@ return `<div class="cal-row" data-airbnb-row="${r.id}">
 <div class="cal-event-row">
 <input type="text" autocomplete="off" class="tag-add-input" placeholder="Guest name" data-airbnb-res-field="guestName" data-airbnb-res-id="${r.id}" value="${escapeHtml(r.guestName)}" style="max-width:130px;">
 <input type="text" autocomplete="off" class="tag-add-input" placeholder="Notes" data-airbnb-res-field="notes" data-airbnb-res-id="${r.id}" value="${escapeHtml(r.notes)}" style="max-width:160px;">
-${r.googleEventId
+${r.source === 'external'
+? '<span class="settings-note" style="margin:0;" title="Found on the shared calendar by its external prefix -- nothing to push, it\'s already there.">External &#10003;</span>'
+: r.googleEventId
 ? '<span class="settings-note" style="margin:0;">Pushed &#10003;</span>'
 : `<button class="sync-btn inline" type="button" data-airbnb-push="${r.id}" title="Push to Google Calendar">Push</button>`}
 <span class="sync-status" data-airbnb-push-status="${r.id}"></span>
@@ -880,6 +953,7 @@ status.textContent = 'Syncing…';
 try {
 await syncAllAirbnbListings();
 await syncCleanerEvents();
+await syncExternalBookings();
 const guestResult = await syncGuestNamesFromEmail();
 renderAirbnb();
 loadAirbnbCalendarOptions({ silent: true });
