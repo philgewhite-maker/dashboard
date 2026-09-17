@@ -2,7 +2,7 @@
 // deletes every cache that isn't the current name, so raising the version is
 // what actually evicts a stale copy from a device that has been running the
 // app for a while.
-const CACHE_NAME = 'dashboard-v353';
+const CACHE_NAME = 'dashboard-v354';
 const CORE_ASSETS = [
 './',
 './index.html',
@@ -98,8 +98,13 @@ keys.filter((k) => k !== CACHE_NAME && k !== SHARE_CACHE).map((k) => caches.dele
 // is served from GitHub Pages, which cannot handle a POST at all, so the
 // service worker *is* the endpoint: it stashes the payload, then redirects
 // to the app, which picks it up and turns it into a task.
-async function handleShare(request) {
+// Hoisted to module scope -- the fetch listener below needs it too, to
+// build the redirect Response it now sends immediately, before
+// handleShare has even started reading the shared file (see the fetch
+// listener's own comment on why that ordering changed).
 const shareUrl = (name) => new URL(name, self.registration.scope).href;
+
+async function handleShare(request) {
 // Read before formData() consumes the body -- these are raw facts about
 // what the network request itself looked like, kept separate from
 // anything formData() goes on to parse out of it. The point: if a real
@@ -203,8 +208,9 @@ handlerError: String(err && err.message || err),
 }), { headers: { 'Content-Type': 'application/json' } }));
 } catch (err2) { /* even the fallback stash failed -- truly nothing left to record */ }
 }
-// 303 so the browser follows with a GET rather than re-POSTing.
-return Response.redirect(shareUrl('index.html?shared=1'), 303);
+// No response returned here any more -- the fetch listener below now
+// sends the redirect itself, immediately, before calling this function.
+// See that listener's own comment for why.
 }
 
 // Network-first for same-origin app files (so edits show up quickly),
@@ -227,8 +233,28 @@ const url = new URL(event.request.url);
 if (url.origin !== self.location.origin) return;
 // Must come before the GET-only guard below — this is the one POST the
 // worker is expected to answer itself.
+//
+// Responds with the redirect IMMEDIATELY, before handleShare has read a
+// single byte of the shared file, and does the actual reading/stashing
+// afterward via waitUntil() instead of awaiting it first. This used to
+// be the other way round (await the full read, THEN redirect) and a
+// large image share consistently arrived with real headers/boundary but
+// a genuinely empty body -- confirmed live via raw byte inspection, not
+// a parsing bug. The leading theory: Android's content:// grant for the
+// shared file has its own short lifetime, and our handler taking even a
+// little time (cloning, hashing into Cache Storage) before responding
+// was enough for Android to tear it down before the bytes were actually
+// read -- this ordering (respond first, read second) is the standard
+// pattern other Web Share Target implementations use specifically to
+// avoid that. Unconfirmed as THE fix rather than A fix; the tradeoff is
+// a real one -- if the page loads and checks for a pending share before
+// the background write finishes, that first check finds nothing.
+// takePendingShare() already re-checks on every load (not just ?shared=1),
+// so nothing is lost permanently, and sharetarget.js's own initShareTarget
+// adds a short retry specifically for this race when ?shared=1 is present.
 if (event.request.method === 'POST' && url.pathname.endsWith('/share')) {
-event.respondWith(handleShare(event.request));
+event.respondWith(Response.redirect(shareUrl('index.html?shared=1'), 303));
+event.waitUntil(handleShare(event.request));
 return;
 }
 if (event.request.method !== 'GET') return;

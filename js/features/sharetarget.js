@@ -180,6 +180,19 @@ async function initShareTarget() {
 // stranded payload would then never be captured.
 let share;
 try { share = await takePendingShare(); } catch (e) { console.error('Share pickup failed:', e); return; }
+// sw.js's handleShare now responds with the redirect BEFORE it reads the
+// shared file (see its own comment for why) -- so the page this runs on
+// can load and check the share cache before that background write has
+// actually finished, finding nothing even though a share genuinely is on
+// its way. Only worth retrying when ?shared=1 marks this load as freshly
+// arriving from that redirect -- a normal load finding nothing pending is
+// the common case, not worth delaying.
+if (!share && new URLSearchParams(location.search).get('shared') === '1') {
+for (let i = 0; i < 6 && !share; i++) {
+await new Promise((r) => setTimeout(r, 300));
+try { share = await takePendingShare(); } catch (e) { console.error('Share pickup retry failed:', e); break; }
+}
+}
 if (!share) return;
 
 // A share carrying files goes to the Capture Inbox to be triaged --
