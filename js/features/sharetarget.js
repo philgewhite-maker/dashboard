@@ -128,7 +128,18 @@ let taskTitle = title;
 if (!taskTitle && text && !textIsUrl) taskTitle = text.split('\n')[0].slice(0, 120);
 if (!taskTitle && link) taskTitle = link;
 if (!taskTitle && share.files.length) taskTitle = share.files[0].name;
-if (!taskTitle) taskTitle = 'Shared item';
+// The generic fallback needs a timestamp -- without one, every share
+// this thin (nothing but this) lands in the Inbox titled identically
+// "Shared item" with no way to tell two of them apart at a glance.
+// Every other branch above already has something distinguishing (the
+// title/text/link/filename itself), so this is the only one that needs
+// it. `generic` (not a string match against the title) is what the
+// caller below actually checks -- keeps that check correct even though
+// the title text itself now varies share to share.
+const generic = !taskTitle;
+if (generic) {
+taskTitle = `Shared item, ${new Date().toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`;
+}
 
 // The link isn't repeated in the notes: it already has its own field on
 // the task (rendered as "Open reference") and is kept on `source`. An
@@ -141,6 +152,7 @@ return {
 title: taskTitle,
 notes,
 link,
+generic,
 source: { kind: 'share', label: title || link || 'Shared from another app', url: link },
 };
 }
@@ -240,15 +252,17 @@ let composed = composeTask(share);
 // Nothing usable came through at all -- confirmed live (MBNA's banking
 // app): the source app's share intent can hand the OS a file reference
 // that Chrome then fails to actually read, landing here with title/
-// text/url/files all empty (composeTask's own 'Shared item' fallback
-// title kicks in) with no way afterward to tell "the source app shared
-// literally nothing" apart from "it tried to share an image and the
-// bytes got lost in transit" -- a real difference (the second one
-// usually means "try again from Photos instead"). sw.js's handleShare
-// records the attempt count/names before its own size>0 filter drops
-// them, specifically so this note can tell them apart instead of
-// leaving both as an identical blank "Shared item" task.
-if (composed.title === 'Shared item' && !composed.notes && !composed.link && !share.files.length) {
+// text/url/files all empty (composeTask's own timestamped "Shared
+// item, <when>" fallback title kicks in -- see its own comment) with
+// no way afterward to tell "the source app shared literally nothing"
+// apart from "it tried to share an image and the bytes got lost in
+// transit" -- a real difference. sw.js's handleShare records the
+// attempt count/names before its own size>0 filter drops them,
+// specifically so this note can tell them apart instead of leaving
+// both as an identical blank task. `composed.generic` is the flag for
+// "the fallback fired", not a string match against the title -- the
+// title text itself now carries a timestamp and varies share to share.
+if (composed.generic && !composed.notes && !composed.link && !share.files.length) {
 	const attempted = share.fileAttemptCount > 0;
 	// Deliberately states only what was observed (a file was/wasn't
 	// attempted, how many bytes arrived) -- NOT a guess at why. A first
