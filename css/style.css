@@ -2065,6 +2065,21 @@ flex-shrink:0;
 }
 .mini-task-btn:hover{border-color:var(--amber);color:var(--amber);}
 .mini-task-btn:disabled{opacity:.6;cursor:default;border-color:var(--line);color:var(--muted);}
+/* A subject-marker draft already queued for this mail row -- see
+   mail.js's messageRowHtml, existingDraftFor. */
+.mail-draft-pending{
+font-family:'IBM Plex Mono',monospace;
+font-size:10px;
+border:1px solid var(--amber);
+border-radius:20px;
+padding:2px 8px;
+background:var(--amber-bg);
+color:var(--amber);
+cursor:pointer;
+white-space:nowrap;
+flex-shrink:0;
+}
+.mail-draft-pending:hover{background:var(--amber);color:#fff;}
 .mini-task-btn.done{border-color:var(--teal);color:var(--teal);}
 .mail-link{display:flex;gap:10px;align-items:baseline;flex:1;min-width:0;text-decoration:none;color:inherit;}
 

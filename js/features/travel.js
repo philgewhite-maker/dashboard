@@ -877,5 +877,5 @@ setLegStatus, updateLegNotes, addPassenger, removePassenger, updatePassengerFiel
 addPerson, removePerson, gapsFor, tripIsComplete, tripGapCount, enrichLegFromExtraction,
 applyLegExtraction, tripOptionsHtml, legTargetPickerHtml, bindLegTargetPicker, readLegTargetPicker,
 generateItineraryHtml, renderTravel, initTravel, revealTrip, tripById, legById,
-tripChipHtml, bindTripChips,
+tripChipHtml, bindTripChips, isPastTrip,
 };

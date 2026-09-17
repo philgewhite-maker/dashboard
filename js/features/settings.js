@@ -353,7 +353,18 @@ queueSave();
 const CAPTURE_INPUT_METHODS = [
 { value: 'imageMarker', label: 'Image marker' },
 { value: 'urlSuffix', label: 'URL suffix' },
+{ value: 'emailSubject', label: 'Email subject' },
 ];
+
+// ✨ = this outcome always calls AI when it runs; 🪄 = it tries something
+// free/deterministic first and only calls AI as a fallback; no icon = never
+// calls AI. Same convention js/features/mailActions.js established for
+// Mail's own action buttons -- reused here via CAPTURE_OUTCOMES' own
+// aiCost field so it's visible up front which marker costs money to use.
+function outcomeLabelWithCost(outcome) {
+const icon = outcome.aiCost === 'always' ? '✨ ' : outcome.aiCost === 'conditional' ? '🪄 ' : '';
+return icon + outcome.label;
+}
 
 // One editable row per explicit capture trigger. See captureOutcomes.js's
 // matchCaptureRule -- reads as "when [input method] shows [trigger],
@@ -372,7 +383,7 @@ ${CAPTURE_INPUT_METHODS.map((m) => `<option value="${m.value}"${m.value === r.in
 </select></td>
 <td><input type="text" autocomplete="off" maxlength="1" style="width:44px;text-align:center;text-transform:uppercase;" data-capture-rule-field="trigger" data-capture-rule-id="${r.id}" value="${escapeHtml(r.trigger || '')}" placeholder="T"></td>
 <td><select data-capture-rule-field="outcome" data-capture-rule-id="${r.id}">
-${outcomeKeys.map((k) => `<option value="${k}"${k === r.outcome ? ' selected' : ''}>${escapeHtml(CAPTURE_OUTCOMES[k].label)}</option>`).join('')}
+${outcomeKeys.map((k) => `<option value="${k}"${k === r.outcome ? ' selected' : ''}>${escapeHtml(outcomeLabelWithCost(CAPTURE_OUTCOMES[k]))}</option>`).join('')}
 </select></td>
 <td><span class="del-x" style="opacity:1;" data-del-capture-rule="${r.id}">&times;</span></td>
 </tr>`).join('');
@@ -380,7 +391,7 @@ el.innerHTML = `${rules.length ? `<table class="limits-table">
 <thead><tr><th>Input method</th><th>Trigger</th><th>Creates</th><th></th></tr></thead>
 <tbody>${rowsHtml}</tbody>
 </table>` : '<div class="settings-note" style="margin:0;">No triggers set — markers and suffixes are ignored.</div>'}
-<div class="settings-note" style="margin:6px 0 0;">Image marker: before sharing a photo, draw or highlight the trigger letter somewhere in it (any colour, any corner) — a lone photo with a recognised letter and no other signal (not a dating screenshot, not a health chart) is routed instead of landing in Capture Inbox. URL suffix: add "#" + the trigger letter to the end of a link before sharing it, e.g. "https://example.com/article#R" — this always wins over the domain rules above.</div>`;
+<div class="settings-note" style="margin:6px 0 0;">Image marker: before sharing a photo, draw or highlight the trigger letter somewhere in it (any colour, any corner) — a lone photo with a recognised letter and no other signal (not a dating screenshot, not a health chart) is routed instead of landing in Capture Inbox. URL suffix: add "#" + the trigger letter to the end of a link before sharing it, e.g. "https://example.com/article#R" — this always wins over the domain rules above. Email subject: put "zxc" + the trigger letter in the subject before forwarding/replying (e.g. "zxc D") — space between them, since Mail's own search needs a row that finds the whole word "zxc" for the message to ever reach this app (one row searching for "zxc" catches every marker at once); "Refresh mail" is what actually processes them. Event/Trip leg queue a reviewable draft (Tasks tab, Smart capture) rather than creating anything outright.</div>`;
 
 el.querySelectorAll('[data-capture-rule-field]').forEach((input) => {
 input.addEventListener('change', () => {

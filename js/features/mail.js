@@ -1,4 +1,4 @@
-import { data, queueSave, mailSearchLabel, blankPlannerActivity, blankMailDismissal } from '../state.js';
+import { data, queueSave, mailSearchLabel, blankMailDismissal, blankCaptureDraft } from '../state.js';
 import { escapeHtml, affiliateLink, unfoldIcsLines, parseIcsProperty, icsDateTime, MISSING_KEY_LINK_HTML } from '../utils.js';
 import { canAttemptGoogleAction } from '../sync/googleauth.js';
 import { fetchMailSearches, getMessageDetail, fetchMessageAttachmentBytes } from '../googlemail.js';
@@ -46,17 +46,25 @@ return data.plannerActivities.find((a) => a.source && a.source.kind === 'mail' &
 function existingDismissalFor(m) {
 return data.mailDismissed.find((d) => d.url === m.link);
 }
+// A "zxc D"/"zxc L" subject marker (processMailMarkers below) already
+// queued a reviewable draft for this message -- data.captureDrafts,
+// state.js -- but hasn't been confirmed yet. Same url-matching identity
+// as every other existingXFor here, just on the draft's own `source`
+// rather than a finished record's.
+function existingDraftFor(m) {
+return data.captureDrafts.find((d) => d.source && d.source.kind === 'mail' && d.source.url === m.link);
+}
 
-// 'dismissed' beats 'processed' beats 'open' -- realistically a given
-// email only ever reaches one of the two closed states, but a dismissal
-// is the more deliberate, more recent signal if both somehow apply.
-// Drives both the collapsed "already processed" bucket and (separately)
-// which messages disappear from Mail entirely in sectionHtml/renderMail
-// below -- not any individual action button's own state, which stays
-// per-action regardless (a message already turned into a trip leg still
-// shows a live "+ task" if you also want one).
+// 'dismissed' beats 'drafted' beats 'processed' beats 'open' -- a
+// dismissal is the most deliberate, most recent signal if more than one
+// somehow applies. Drives both the collapsed "already processed" bucket
+// and (separately) which messages disappear from Mail entirely in
+// sectionHtml/renderMail below -- not any individual action button's own
+// state, which stays per-action regardless (a message already turned
+// into a trip leg still shows a live "+ task" if you also want one).
 function messageStatus(m) {
 if (existingDismissalFor(m)) return 'dismissed';
+if (existingDraftFor(m)) return 'drafted';
 if (existingTaskFor(m) || existingTripLegFor(m) || existingDateEventFor(m)) return 'processed';
 return 'open';
 }
@@ -274,6 +282,16 @@ return '';
 // message from a search with no topic assigned, which shows every action
 // under "Other actions" (nothing preferred) rather than guessing.
 function messageRowHtml(m, topic) {
+// A "zxc D"/"zxc L" subject marker already queued a draft for this exact
+// message (processMailMarkers) -- offering the normal action buttons
+// too would risk a second, duplicate record once both are confirmed, so
+// this swaps them for a single link to the pending review instead, same
+// "don't offer to create a second one" reasoning existingTaskFor's own
+// "✓ task" swap already follows.
+const pendingDraft = existingDraftFor(m);
+const actionsHtml = pendingDraft
+? `<span class="mail-draft-pending" data-mail-goto-draft="${escapeHtml(pendingDraft.id)}" title="A marker already queued this for review">&#128221; Awaiting review</span>`
+: (() => {
 const preferredIds = ((topic && topic.preferredActionIds) || []).filter((id) => MAIL_ACTIONS[id]).slice(0, 3);
 const otherIds = Object.keys(MAIL_ACTIONS).filter((id) => !preferredIds.includes(id));
 const otherHtml = otherIds.length
@@ -282,7 +300,9 @@ const otherHtml = otherIds.length
 <span class="mail-other-menu" data-mail-other-menu="${escapeHtml(m.id)}" hidden>${otherIds.map((id) => actionTriggerHtml(id, m)).join('')}</span>
 </span>`
 : '';
-const pickersHtml = Object.keys(MAIL_ACTIONS)
+return `${preferredIds.map((id) => actionTriggerHtml(id, m)).join('')}${otherHtml}`;
+})();
+const pickersHtml = pendingDraft ? '' : Object.keys(MAIL_ACTIONS)
 .filter((id) => MAIL_ACTIONS[id].kind === 'picker')
 .map((id) => actionPickerHtml(id, m)).join('')
 + (existingTaskFor(m) ? actionPickerHtml('improveTask', m) : '');
@@ -292,7 +312,7 @@ return `<div class="mail-row">
 <span class="mail-subject">${escapeHtml(m.subject)}</span>
 <span class="mail-date">${escapeHtml(formatDate(m.date))}</span>
 </a>
-${preferredIds.map((id) => actionTriggerHtml(id, m)).join('')}${otherHtml}
+${actionsHtml}
 <button class="mail-dismiss-btn" type="button" title="Dismiss — not turning this into anything, just stop showing it"
 data-mail-dismiss="${escapeHtml(m.id)}" data-mail-url="${escapeHtml(m.link)}" data-mail-subject="${escapeHtml(m.subject)}" data-mail-from="${escapeHtml(displayName(m.from))}">&times;</button>
 </div>
@@ -313,9 +333,10 @@ function consolidatedRowHtml(group, byStatus, topic) {
 const latest = group[0];
 const parts = [];
 if (byStatus.open.length) parts.push(`${byStatus.open.length} open`);
+if (byStatus.drafted.length) parts.push(`${byStatus.drafted.length} awaiting review`);
 if (byStatus.processed.length) parts.push(`${byStatus.processed.length} actioned`);
 if (byStatus.dismissed.length) parts.push(`${byStatus.dismissed.length} binned`);
-const visibleGroup = [...byStatus.open, ...byStatus.processed];
+const visibleGroup = [...byStatus.open, ...byStatus.drafted, ...byStatus.processed];
 const expanded = expandedGroups.has(latest.id);
 const toggleHtml = visibleGroup.length
 ? `<button class="mini-task-btn" type="button" data-mail-group-toggle="${escapeHtml(latest.id)}">${expanded ? 'Hide' : 'Show'} all</button>`
@@ -364,7 +385,7 @@ groups.get(key).push(m);
 const openRows = []; // [{html, openCount}], budget-capped below
 const closedRows = []; // fully-closed groups/singles, always all shown (collapsed)
 for (const group of groups.values()) {
-const byStatus = { open: [], processed: [], dismissed: [] };
+const byStatus = { open: [], drafted: [], processed: [], dismissed: [] };
 group.forEach((m) => byStatus[messageStatus(m)].push(m));
 if (byStatus.open.length) {
 openRows.push({
@@ -374,10 +395,10 @@ openCount: byStatus.open.length,
 continue;
 }
 // No open messages left in this subject -- fully closed. A dismissed-
-// only subject (byStatus.processed.length === 0 too) has nothing left
+// only subject (nothing processed OR drafted either) has nothing left
 // worth a summary line at all; skip it entirely rather than cluttering
 // "already processed" with something that was actually binned.
-if (!byStatus.processed.length) continue;
+if (!byStatus.processed.length && !byStatus.drafted.length) continue;
 closedRows.push(group.length === 1 ? messageRowHtml(group[0], topic) : consolidatedRowHtml(group, byStatus, topic));
 }
 
@@ -465,6 +486,67 @@ renderMail(lastSections);
 });
 });
 
+// A "zxc" + trigger letter anywhere in the subject (e.g. "zxc D") --
+// space between the prefix and the letter on purpose, so ONE Mail search
+// for the bare word "zxc" catches every marker at once (Gmail's own
+// subject: search matches whole tokens, not substrings inside a longer
+// word -- "zxcD" glued together would each be a different word to
+// Gmail's tokenizer, defeating a single catch-all search). Case-
+// insensitive on the letter itself since a phone keyboard capitalizes
+// unpredictably; matchCaptureRule below still gets it uppercased,
+// matching imageMarker/urlSuffix's own always-uppercase trigger.
+const EMAIL_SUBJECT_MARKER = /\bzxc\s+([A-Za-z])\b/i;
+
+// Runs once per "Refresh mail" -- every OPEN message (skips anything
+// already actioned/dismissed/drafted, so a marker is only ever acted on
+// once) gets checked for a subject marker and, if one matches a
+// configured rule (data.prefs.captureRules, Settings' "Capture markers
+// & suffixes"), processed right away: a `commitMode:'direct'` outcome
+// (Task/Reading/Supermarket) is created immediately, same as the
+// existing image-marker/URL-suffix paths already do; a `commitMode:
+// 'draft'` outcome (Event/Trip leg -- captureOutcomes.js) has its
+// extraction run now but lands in the Smart Capture drafts queue
+// (data.captureDrafts) for review, never created outright -- the actual
+// AI/ICS work happens here so the draft card has something real to show,
+// but nothing is written until you confirm it. One bad message's
+// failure is logged and skipped, never blocks the rest.
+async function processMailMarkers(sections) {
+const { matchCaptureRule, CAPTURE_OUTCOMES } = await import('./captureOutcomes.js');
+let direct = 0;
+let drafted = 0;
+for (const { messages } of sections) {
+for (const m of messages) {
+if (messageStatus(m) !== 'open') continue;
+const match = EMAIL_SUBJECT_MARKER.exec(m.subject || '');
+if (!match) continue;
+const rule = matchCaptureRule(data, 'emailSubject', match[1].toUpperCase());
+if (!rule) continue;
+const outcome = CAPTURE_OUTCOMES[rule.outcome];
+if (!outcome) continue;
+try {
+if (outcome.commitMode === 'draft') {
+const step = await outcome.buildStep({ mailMessageId: m.id, subject: m.subject, from: m.from, url: m.link });
+data.captureDrafts.unshift(blankCaptureDraft({
+rawText: m.subject, steps: [step],
+source: { kind: 'mail', label: m.subject, url: m.link },
+}));
+drafted++;
+} else {
+await outcome.run({ title: m.subject, url: m.link, source: { kind: 'mail', label: m.subject, url: m.link } });
+direct++;
+}
+} catch (err) {
+console.error(`Mail marker "${rule.trigger}" failed for "${m.subject}":`, err);
+}
+}
+}
+if (direct || drafted) queueSave();
+const parts = [];
+if (direct) parts.push(`${direct} auto-processed`);
+if (drafted) parts.push(`${drafted} queued for review`);
+return parts.join(', ');
+}
+
 // Both dismiss paths funnel through here -- a single row's × and the
 // group's own "Bin all" -- so a message is only ever binned once
 // (dismissedFor's url match already guards a re-run) and both save/render
@@ -506,6 +588,14 @@ e.preventDefault();
 const [{ switchTab }, tasks] = await Promise.all([import('../tabs.js'), import('./tasks.js')]);
 switchTab('tasks');
 tasks.revealTask(btn.dataset.gotoTask);
+});
+});
+
+list.querySelectorAll('[data-mail-goto-draft]').forEach((el) => {
+el.addEventListener('click', async () => {
+const [{ switchTab }, voicecapture] = await Promise.all([import('../tabs.js'), import('./voicecapture.js')]);
+switchTab('tasks');
+voicecapture.revealCaptureDraft(el.dataset.mailGotoDraft);
 });
 });
 
@@ -604,32 +694,28 @@ const say = (msg) => { if (status) status.textContent = msg; };
 const title = (titleInput?.value || '').trim();
 if (!title) { say('Give the idea a title first.'); return; }
 const connectionId = document.getElementById(`mail-date-event-conn-${id}`)?.value || '';
-const activity = blankPlannerActivity({
-title, notes: btn.dataset.mailSnippet || '', connectionId,
-location: btn.dataset.mailDateEventLocation || '',
-eventTime: btn.dataset.mailDateEventTime || '',
-endTime: btn.dataset.mailDateEventEndTime || '',
-link: btn.dataset.mailLink || '',
-source: { kind: 'mail', label: title, url: btn.dataset.mailUrl },
-});
-data.plannerActivities.push(activity);
+const planner = await import('./planner.js');
 // Only ever set by a successful "🪄 Extract details" run above -- absent
 // (the deterministic default never sets it) means stay an undated pool
 // idea, same as today.
 const date = btn.dataset.mailDateEventDate;
-const planner = await import('./planner.js');
-if (date) planner.placeEntry('activity', activity.id, date, '');
-queueSave();
+const activity = planner.createDateEventFromExtraction({
+title, notes: btn.dataset.mailSnippet || '', date,
+location: btn.dataset.mailDateEventLocation || '',
+eventTime: btn.dataset.mailDateEventTime || '',
+endTime: btn.dataset.mailDateEventEndTime || '',
+link: btn.dataset.mailLink || '',
+}, { connectionId, source: { kind: 'mail', label: title, url: btn.dataset.mailUrl } });
 planner.bindPlannerActivityChips();
 const dateNote = date ? `, placed on ${date}` : ' to Planner’s Activities pool';
 if (status) status.innerHTML = `Added ${planner.plannerActivityChipHtml(activity)}${dateNote}.`;
 btn.disabled = true;
-// Planner renders itself only from its own actions -- without this, a
-// tab already open on Planner (or switched to right after, no reload)
-// wouldn't show the new idea until something else happened to trigger
-// a re-render, same cross-tab-refresh convention captureTask() callers
-// elsewhere already follow for Connections/Overview.
-planner.renderPlanner();
+// createDateEventFromExtraction already re-renders Planner itself --
+// without that, a tab already open on Planner (or switched to right
+// after, no reload) wouldn't show the new idea until something else
+// triggered a re-render, same cross-tab-refresh convention
+// captureTask() callers elsewhere already follow for Connections/
+// Overview.
 // A ticket/QR image or PDF, if the email had one -- best effort, after
 // (never blocking) the idea itself already existing.
 let candidates = [];
@@ -831,8 +917,9 @@ btn.disabled = true;
 status.textContent = 'Loading…';
 try {
 lastSections = await fetchMailSearches(data.mailSearches, data.prefs.mailResultCount);
+const markerNote = await processMailMarkers(lastSections);
 renderMail(lastSections);
-status.textContent = `Updated ${new Date().toLocaleTimeString()}.`;
+status.textContent = `Updated ${new Date().toLocaleTimeString()}.${markerNote ? ` (${markerNote})` : ''}`;
 } catch (err) {
 status.textContent = `Couldn't load mail: ${err.message || err}`;
 console.error('Mail refresh failed:', err);
@@ -842,4 +929,4 @@ btn.disabled = false;
 });
 }
 
-export { initMail };
+export { initMail, extractDateEventFromIcs, icsDateEventIsGoodEnough, grabEmailAttachments };

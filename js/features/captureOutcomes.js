@@ -52,6 +52,7 @@ const CAPTURE_OUTCOMES = {
 task: {
 label: 'Task',
 commitMode: 'direct',
+aiCost: 'none',
 successBanner: (host) => `Captured to your Inbox${host ? ` from ${host}` : ''}.`,
 run: async (ctx) => {
 const { captureTask } = await import('./tasks.js');
@@ -67,6 +68,7 @@ source: ctx.source || null,
 reading: {
 label: 'Reading list',
 commitMode: 'direct',
+aiCost: 'none',
 successBanner: (host) => `Added to your reading list${host ? ` from ${host}` : ''}.`,
 run: async (ctx) => {
 const { addToReadingList } = await import('./readinglist.js');
@@ -85,6 +87,7 @@ source: ctx.source || null,
 recipe: {
 label: 'Import as a recipe',
 commitMode: 'direct', // recipes.js's own pending+review form is the real gate before Save
+aiCost: 'conditional', // structured data on the page first, AI only as a fallback -- see importFromUrl (recipes.js)
 successBanner: (host) => `Read a recipe from ${host} — review and save it on the Menu tab.`,
 run: async (ctx) => {
 const { importSharedRecipeUrl } = await import('./recipes.js');
@@ -102,6 +105,7 @@ switchTab('menu');
 superlike: {
 label: 'Super Like candidate',
 commitMode: 'direct',
+aiCost: 'none',
 successBanner: () => `Added as a Super Like candidate — 7 days to use it.`,
 run: async (ctx) => {
 const { captureTask } = await import('./tasks.js');
@@ -135,6 +139,7 @@ source: ctx.source || null,
 supermarket: {
 label: 'Supermarket item',
 commitMode: 'direct',
+aiCost: 'conditional', // only the image-marker path's own product-ID call, see ctx.file below
 successBanner: () => `Added to your Supermarket list — checking prices…`,
 run: async (ctx) => {
 const { captureTask } = await import('./tasks.js');
@@ -171,6 +176,63 @@ await runAutoPriceCheck(task);
 } catch (err) {
 console.error('Auto price-check failed, item stays without one until Search prices is used manually:', err);
 }
+},
+},
+// Event and Trip leg are `commitMode: 'draft'` -- the first two entries
+// to actually use it (every entry above is 'direct', a one-click write,
+// per this file's own header comment). Which trip, or whether AI/ICS
+// extraction found anything usable at all, is a real decision the other
+// outcomes never have to make, so instead of a `run(ctx)` that writes
+// immediately, these have a `buildStep(ctx)` that does the (possibly
+// AI-costing) extraction work and returns a `steps`-shaped object --
+// unexecuted, exactly like voicecapture.js's own parseCaptureIntent
+// output -- for the caller to wrap in a data.captureDrafts entry and
+// queue for review. Only ever reached today via the `emailSubject`
+// captureRules input method (js/features/mail.js's processMailMarkers)
+// -- `ctx` needs a real Gmail message id (`mailMessageId`) to read a
+// body/ICS from, which an image-marker or URL-suffix capture has no way
+// to supply. The actual record creation, once a draft is confirmed,
+// lives in voicecapture.js's runStep (case 'dateEvent'/'tripLeg') --
+// this only ever builds the step, never writes anything itself.
+dateEvent: {
+label: 'Event',
+commitMode: 'draft',
+aiCost: 'conditional', // the .ics calendar invite first (free), AI only as a fallback
+buildStep: async (ctx) => {
+const mail = await import('./mail.js');
+const { getMessageDetail } = await import('../googlemail.js');
+const { bodyText, icsText } = await getMessageDetail(ctx.mailMessageId);
+const icsResult = icsText ? mail.extractDateEventFromIcs(icsText) : null;
+const result = mail.icsDateEventIsGoodEnough(icsResult) ? icsResult
+: await (await import('../ai.js')).extractDateEventFromEmail(ctx.subject, ctx.from, bodyText);
+return { type: 'dateEvent', ...result, mailUrl: ctx.url, mailSubject: ctx.subject };
+},
+},
+tripLeg: {
+label: 'Trip leg',
+commitMode: 'draft',
+aiCost: 'always',
+buildStep: async (ctx) => {
+const [{ extractTripLegFromEmail }, travel, { getMessageDetail }, { data }] = await Promise.all([
+import('../ai.js'), import('./travel.js'), import('../googlemail.js'), import('../state.js'),
+]);
+const { bodyText } = await getMessageDetail(ctx.mailMessageId);
+const extraction = await extractTripLegFromEmail(ctx.subject, ctx.from, bodyText);
+// Same "exactly one trip open, nothing to pick" shortcut
+// legTargetPickerHtml's own UI already uses -- a past trip is
+// excluded (isPastTrip), same reasoning the Travel tab's own
+// default view drops one 7+ days after it ends. Anything else
+// (zero, or more than one, open trip) defaults to creating a new
+// one -- an ambiguous auto-pick among several open trips would be
+// a worse guess than just asking via a new trip, reviewable/
+// discardable like every other field on this draft.
+const openTrips = data.trips.filter((t) => !travel.isPastTrip(t));
+return {
+type: 'tripLeg', extraction,
+tripId: openTrips.length === 1 ? openTrips[0].id : '__new__',
+newTripTitle: extraction.suggestedTripTitle || 'New trip',
+mailUrl: ctx.url, mailSubject: ctx.subject,
+};
 },
 },
 };

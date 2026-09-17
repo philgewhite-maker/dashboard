@@ -132,6 +132,26 @@ captureRules: [
 // shareUrlRules above) -- domain rules can't enumerate every retailer,
 // so "#S" is how any of them reaches the Supermarket list.
 { id: 'seed-suffix-supermarket', inputMethod: 'urlSuffix', trigger: 'S', outcome: 'supermarket' },
+// A third sense: a word ("zxc") + the trigger letter in an EMAIL
+// SUBJECT, read on Mail's own "Refresh mail" (js/features/mail.js's
+// processMailMarkers) rather than by a photo/URL share. "zxc" survives
+// Gmail's own search tokenizer where "#" silently doesn't (confirmed
+// live: subject:(#DATE#) quietly degraded to matching the bare word
+// "date") -- so a dedicated Mail search for the word "zxc" is what
+// actually gets a hard-to-filter forwarded/replied email into this
+// app at all; the trigger letter after it is what this app then does
+// with it. Event/Trip leg (below) are commitMode:'draft' -- they queue
+// a reviewable draft (data.captureDrafts) rather than creating
+// anything outright, since which trip or whether extraction found
+// anything usable is a real decision, unlike Task/Reading/Supermarket.
+{ id: 'seed-subject-event', inputMethod: 'emailSubject', trigger: 'D', outcome: 'dateEvent' },
+{ id: 'seed-subject-tripleg', inputMethod: 'emailSubject', trigger: 'L', outcome: 'tripLeg' },
+// Same T/R/S vocabulary as imageMarker/urlSuffix above, now reachable
+// from a subject line too -- "T always means task" regardless of
+// which of the three senses detects it.
+{ id: 'seed-subject-task', inputMethod: 'emailSubject', trigger: 'T', outcome: 'task' },
+{ id: 'seed-subject-reading', inputMethod: 'emailSubject', trigger: 'R', outcome: 'reading' },
+{ id: 'seed-subject-supermarket', inputMethod: 'emailSubject', trigger: 'S', outcome: 'supermarket' },
 ],
 };
 
@@ -356,7 +376,7 @@ return {
 id: uid(),
 rawText: '',
 steps: [], // [{type:'task'|'reading'|'trip'|'tripActivity'|'connection'|'placeConnection', ...}]
-source: null, // {kind:'quickcapture'|'voice'|'share', label, url}
+source: null, // {kind:'quickcapture'|'voice'|'share'|'mail', label, url}
 createdAt: new Date().toISOString(),
 ...fields,
 };

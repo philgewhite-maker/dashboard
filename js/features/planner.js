@@ -92,6 +92,26 @@ renderPlanner();
 return entry;
 }
 
+// Turns a date-event extraction result (Mail's ICS/AI waterfall shape --
+// {title, notes, date, location, eventTime, endTime, link}) into a real
+// Planner idea, placed on the day if one was found. Shared by mail.js's
+// own manual "Add idea" button and voicecapture.js's auto-drafted
+// 'dateEvent' step (js/features/captureOutcomes.js's emailSubject
+// marker), so there's exactly one place that knows how a resolved
+// extraction becomes a record, not two copies drifting apart.
+function createDateEventFromExtraction(result, { connectionId = '', source = null } = {}) {
+const activity = blankPlannerActivity({
+title: result.title || 'Untitled', notes: result.notes || '', connectionId,
+location: result.location || '', eventTime: result.eventTime || '', endTime: result.endTime || '',
+link: result.link || '', source,
+});
+data.plannerActivities.push(activity);
+if (result.date) placeEntry('activity', activity.id, result.date, '');
+queueSave();
+renderPlanner();
+return activity;
+}
+
 // Also updates tripId to match wherever it was dropped -- an entry moved
 // from the main grid into a trip's own mini-grid (or back) should belong
 // to that zone, not silently keep pointing at the old one.
@@ -960,4 +980,4 @@ revealPlannerActivity(chip.dataset.openPlannerActivity);
 });
 }
 
-export { renderPlanner, initPlanner, revealPlannerEntry, revealPlannerActivity, plannerActivityChipHtml, bindPlannerActivityChips, syncTripPeopleEntries, placeEntry, addActivityToDay };
+export { renderPlanner, initPlanner, revealPlannerEntry, revealPlannerActivity, plannerActivityChipHtml, bindPlannerActivityChips, syncTripPeopleEntries, placeEntry, addActivityToDay, createDateEventFromExtraction };

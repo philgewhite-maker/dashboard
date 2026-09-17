@@ -102,6 +102,27 @@ const { placeEntry } = await import('./planner.js');
 days.forEach((date) => placeEntry('connection', ctx.lastConnectionId, date, trip.id));
 return trip;
 }
+// Built by captureOutcomes.js's `dateEvent` outcome (buildStep) --
+// extraction already ran when the draft was queued (Mail's "zxc D"
+// subject marker, processMailMarkers), this just turns the resolved
+// result into a real record, same helper mail.js's own manual "Add
+// idea" button uses.
+case 'dateEvent': {
+const { createDateEventFromExtraction } = await import('./planner.js');
+return createDateEventFromExtraction(step, { source: { kind: 'mail', label: step.mailSubject, url: step.mailUrl } });
+}
+// Built by captureOutcomes.js's `tripLeg` outcome (buildStep) -- same
+// applyLegExtraction (travel.js) mail.js's own manual "Read email &
+// add" button already calls, just triggered from a confirmed draft
+// instead of a click.
+case 'tripLeg': {
+const { applyLegExtraction } = await import('./travel.js');
+const { trip } = await applyLegExtraction({
+tripId: step.tripId, newTripTitle: step.newTripTitle, kind: step.extraction.kind,
+extraction: step.extraction, source: { kind: 'mail', label: step.mailSubject, url: step.mailUrl },
+});
+return trip;
+}
 default:
 throw new Error(`Unrecognised step type "${step.type}".`);
 }
@@ -138,6 +159,8 @@ case 'trip': return `New trip "${step.title || '(untitled)'}"${step.startDate ? 
 case 'tripActivity': return `Add "${step.title || '(untitled)'}" to ${step.tripId === '__new__' ? (step.newTripTitle || 'the new trip') : 'the trip'}${step.date ? ` on ${step.date}` : ''}`;
 case 'connection': return `New contact: ${step.name || '(unnamed)'}`;
 case 'placeConnection': return `Place them in ${step.tripId === '__new__' ? (step.newTripTitle || 'the new trip') : 'the trip'}, ${step.startDate || '?'} to ${step.endDate || step.startDate || '?'}`;
+case 'dateEvent': return `Event: ${step.title || '(untitled)'}${step.date ? ` on ${step.date}` : ' — no date found, stays undated'}${step.location ? ` at ${step.location}` : ''}`;
+case 'tripLeg': return `Trip leg (${step.extraction?.kind || 'other'}) → ${step.tripId === '__new__' ? `new trip "${step.newTripTitle || 'New trip'}"` : 'the trip'}`;
 default: return `Unrecognised: ${step.type}`;
 }
 }
