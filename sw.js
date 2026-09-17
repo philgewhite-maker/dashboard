@@ -2,7 +2,7 @@
 // deletes every cache that isn't the current name, so raising the version is
 // what actually evicts a stale copy from a device that has been running the
 // app for a while.
-const CACHE_NAME = 'dashboard-v346';
+const CACHE_NAME = 'dashboard-v347';
 const CORE_ASSETS = [
 './',
 './index.html',
@@ -111,7 +111,20 @@ url: form.get('url') || '',
 files: [],
 at: stamp,
 };
-const shared = form.getAll('files').filter((f) => f && typeof f === 'object' && f.size > 0);
+// A file entry can arrive in the FormData but be unreadable (0 bytes) --
+// confirmed real, not hypothetical: some apps (banking apps in
+// particular) hand Android's share sheet a content:// reference the
+// browser then fails to actually read, so the "file" is present but
+// empty. Recording the attempt count here (before the size>0 filter
+// below drops it) is what lets sharetarget.js tell "nothing was shared"
+// apart from "something was shared but couldn't be read" -- the two
+// look identical downstream otherwise, and the whole point is not
+// leaving a share that silently lost its content indistinguishable from
+// one that never had any.
+const fileAttempts = form.getAll('files').filter((f) => f && typeof f === 'object');
+meta.fileAttemptCount = fileAttempts.length;
+meta.emptyFileNames = fileAttempts.filter((f) => !(f.size > 0)).map((f) => f.name || '').filter(Boolean);
+const shared = fileAttempts.filter((f) => f.size > 0);
 for (let i = 0; i < shared.length; i++) {
 const file = shared[i];
 const key = shareUrl(`__share-file-${stamp}-${i}`);

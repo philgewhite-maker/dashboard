@@ -237,6 +237,24 @@ return;
 // shareUrlRules' domain-based inference (recipe import, and whatever
 // else gets registered later) gets its turn.
 let composed = composeTask(share);
+// Nothing usable came through at all -- confirmed live (MBNA's banking
+// app): the source app's share intent can hand the OS a file reference
+// that Chrome then fails to actually read, landing here with title/
+// text/url/files all empty (composeTask's own 'Shared item' fallback
+// title kicks in) with no way afterward to tell "the source app shared
+// literally nothing" apart from "it tried to share an image and the
+// bytes got lost in transit" -- a real difference (the second one
+// usually means "try again from Photos instead"). sw.js's handleShare
+// records the attempt count/names before its own size>0 filter drops
+// them, specifically so this note can tell them apart instead of
+// leaving both as an identical blank "Shared item" task.
+if (composed.title === 'Shared item' && !composed.notes && !composed.link && !share.files.length) {
+	const attempted = share.fileAttemptCount > 0;
+	const note = attempted
+		? `Shared with no readable content — the source app tried to attach ${share.fileAttemptCount === 1 ? 'a file' : `${share.fileAttemptCount} files`} (${(share.emptyFileNames || []).filter(Boolean).join(', ') || 'unnamed'}) but 0 bytes arrived, so nothing could be captured. Likely blocked by the source app (common for banking-app screenshots) — try saving the screenshot to Photos first, then share from there.`
+		: 'Shared with no title, text, link, or file at all — the source app sent nothing this dashboard could use.';
+	composed = { ...composed, notes: note };
+}
 const link = composed.link;
 const suffixHit = link ? matchUrlSuffix(link) : null;
 if (suffixHit) {
