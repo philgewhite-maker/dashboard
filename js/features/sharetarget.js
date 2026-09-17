@@ -180,19 +180,6 @@ async function initShareTarget() {
 // stranded payload would then never be captured.
 let share;
 try { share = await takePendingShare(); } catch (e) { console.error('Share pickup failed:', e); return; }
-// sw.js's handleShare now responds with the redirect BEFORE it reads the
-// shared file (see its own comment for why) -- so the page this runs on
-// can load and check the share cache before that background write has
-// actually finished, finding nothing even though a share genuinely is on
-// its way. Only worth retrying when ?shared=1 marks this load as freshly
-// arriving from that redirect -- a normal load finding nothing pending is
-// the common case, not worth delaying.
-if (!share && new URLSearchParams(location.search).get('shared') === '1') {
-for (let i = 0; i < 6 && !share; i++) {
-await new Promise((r) => setTimeout(r, 300));
-try { share = await takePendingShare(); } catch (e) { console.error('Share pickup retry failed:', e); break; }
-}
-}
 if (!share) return;
 
 // A share carrying files goes to the Capture Inbox to be triaged --
@@ -301,21 +288,9 @@ if (composed.generic && !composed.notes && !composed.link && !share.files.length
 	// actually made.
 	const stashedAt = share.at ? new Date(share.at).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'unknown';
 	const rawFacts = `[stashed: ${stashedAt} · ct: ${share.requestContentType || '(none)'} · len: ${share.requestContentLength || '(none)'} · fields: ${(share.formFieldNames || []).join(', ') || '(none)'}${share.handlerError ? ` · handler threw: ${share.handlerError}` : ''}]`;
-	// The raw bytes sw.js read directly off the request, bypassing
-	// formData() entirely -- proves whether a real body arrived (byte
-	// count) and, from the snippet, whether the multipart structure
-	// (boundary line, a "files" part) is genuinely in there even though
-	// formData() parsed none of it out. On its own line since it can run
-	// to a few hundred characters, unlike the compact rawFacts line above.
-	// My own bug, first cut of this: byteLength null (the read failed)
-	// silently discarded whatever rawBodySnippet held -- which is exactly
-	// where sw.js puts the failure's own error message. Show it either way.
-	const rawBody = share.rawBodyByteLength != null
-		? `Raw body: ${share.rawBodyByteLength} bytes. First 400 as text: "${share.rawBodySnippet || ''}"`
-		: `Raw body: not captured. ${share.rawBodySnippet || '(no error recorded)'}`;
 	const note = attempted
-		? `Shared with no readable content — the share attached ${share.fileAttemptCount === 1 ? 'a file' : `${share.fileAttemptCount} files`} (${(share.emptyFileNames || []).filter(Boolean).join(', ') || 'unnamed'}), but 0 bytes of it arrived here, so nothing could be captured. ${rawFacts}\n\n${rawBody}`
-		: `Shared with no title, text, link, or file at all. ${rawFacts}\n\n${rawBody}`;
+		? `Shared with no readable content — the share attached ${share.fileAttemptCount === 1 ? 'a file' : `${share.fileAttemptCount} files`} (${(share.emptyFileNames || []).filter(Boolean).join(', ') || 'unnamed'}), but 0 bytes of it arrived here, so nothing could be captured. ${rawFacts}`
+		: `Shared with no title, text, link, or file at all. ${rawFacts}`;
 	// The exact signature of the platform-level failure chased at length on
 	// 18 Sept: Android/Chrome hands over a multipart envelope with a real
 	// boundary and ZERO parts in it (raw body is just the closing boundary,

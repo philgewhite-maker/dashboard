@@ -2,7 +2,7 @@
 // deletes every cache that isn't the current name, so raising the version is
 // what actually evicts a stale copy from a device that has been running the
 // app for a while.
-const CACHE_NAME = 'dashboard-v356';
+const CACHE_NAME = 'dashboard-v357';
 const CORE_ASSETS = [
 './',
 './index.html',
@@ -98,50 +98,21 @@ keys.filter((k) => k !== CACHE_NAME && k !== SHARE_CACHE).map((k) => caches.dele
 // is served from GitHub Pages, which cannot handle a POST at all, so the
 // service worker *is* the endpoint: it stashes the payload, then redirects
 // to the app, which picks it up and turns it into a task.
-// Hoisted to module scope -- the fetch listener below needs it too, to
-// build the redirect Response it now sends immediately, before
-// handleShare has even started reading the shared file (see the fetch
-// listener's own comment on why that ordering changed).
-const shareUrl = (name) => new URL(name, self.registration.scope).href;
-
 async function handleShare(request) {
-// Read before formData() consumes the body -- these are raw facts about
-// what the network request itself looked like, kept separate from
-// anything formData() goes on to parse out of it. The point: if a real
-// file was staged in the OS share sheet (confirmed live once -- Android
-// showed "1 image, 489.60 KB" staged for this app) but form.getAll
-// ('files') below still comes back empty, these two numbers are what
-// distinguish "the POST body never actually carried the bytes" from "the
-// bytes arrived but formData() parsed them out wrong" -- two different
-// bugs with the same downstream symptom, not distinguishable without
-// this. Not a diagnosis by themselves, just the facts to diagnose from.
+const shareUrl = (name) => new URL(name, self.registration.scope).href;
+// Cheap facts about the request itself, read before formData() consumes
+// the body. These are what let sharetarget.js recognise the known
+// Chrome/Android failure where a file share arrives as a multipart
+// envelope containing zero parts -- confirmed on 18 Sept as a browser
+// bug, not an app one (a plain link share through this same endpoint
+// works, every source app behaves identically, and Google's own Squoosh
+// PWA fails to receive a shared image on the same device). A whole-body
+// clone+read used to sit here too while that was being tracked down;
+// removed once the cause was established, since it doubled the memory
+// and latency of every genuine file share for a diagnostic no longer
+// needed.
 const requestContentType = request.headers.get('content-type') || '';
 const requestContentLength = request.headers.get('content-length') || '';
-// A real multipart Content-Type with a real boundary has now been
-// confirmed arriving here (live, twice -- from Gallery and directly
-// from MBNA, same result both times: ruling out the source app
-// entirely) while formData() still parses zero fields out of it. That
-// means either the body itself is empty despite the header claiming
-// otherwise, or formData() is failing to parse a body that IS there --
-// two different bugs, indistinguishable without seeing the actual
-// bytes. Cloned so this read doesn't consume the body formData() below
-// still needs -- Request/Response bodies can only be read once each,
-// clone() is what makes two independent reads possible.
-let rawBodyByteLength = null;
-let rawBodySnippet = '';
-try {
-const buf = await request.clone().arrayBuffer();
-rawBodyByteLength = buf.byteLength;
-// First 400 bytes as text is enough to show the multipart preamble --
-// boundary line, Content-Disposition headers, field names -- before
-// hitting a file part's actual binary bytes. Non-printable bytes
-// (the binary itself, once the snippet runs into it) are flattened to
-// "." rather than left as raw control characters, which JSON.stringify
-// would otherwise mangle or bloat via escaping.
-rawBodySnippet = new TextDecoder('utf-8', { fatal: false }).decode(buf.slice(0, 400)).replace(/[^\x20-\x7E\n]/g, '.');
-} catch (err) {
-rawBodySnippet = `(raw body read failed: ${err.message || err})`;
-}
 try {
 const form = await request.formData();
 const stamp = Date.now();
@@ -154,8 +125,6 @@ files: [],
 at: stamp,
 requestContentType,
 requestContentLength,
-rawBodyByteLength,
-rawBodySnippet,
 // Every field name formData() actually parsed out, regardless of
 // whether it's one this code reads (title/text/url/files) -- if the
 // source app sent the file under some other field name, or the
@@ -169,10 +138,7 @@ formFieldNames: [...new Set([...form.keys()])],
 // apart from "something was shared but couldn't be read" -- the two
 // look identical downstream otherwise, and the whole point is not
 // leaving a share that silently lost its content indistinguishable from
-// one that never had any. (Which of these two is actually happening,
-// and why, isn't established yet -- see the comment above requestContent
-// Type for the live case that ruled out "the source app never attached
-// a file" as the explanation, without yet pinning down the real cause.)
+// one that never had any.
 const fileAttempts = form.getAll('files').filter((f) => f && typeof f === 'object');
 meta.fileAttemptCount = fileAttempts.length;
 meta.emptyFileNames = fileAttempts.filter((f) => !(f.size > 0)).map((f) => f.name || '').filter(Boolean);
@@ -203,14 +169,12 @@ const cache = await caches.open(SHARE_CACHE);
 await cache.put(shareUrl('__share-meta'), new Response(JSON.stringify({
 title: '', text: '', url: '', files: [], at: Date.now(),
 requestContentType, requestContentLength, formFieldNames: [],
-rawBodyByteLength, rawBodySnippet,
 handlerError: String(err && err.message || err),
 }), { headers: { 'Content-Type': 'application/json' } }));
 } catch (err2) { /* even the fallback stash failed -- truly nothing left to record */ }
 }
-// No response returned here any more -- the fetch listener below now
-// sends the redirect itself, immediately, before calling this function.
-// See that listener's own comment for why.
+// 303 so the browser follows with a GET rather than re-POSTing.
+return Response.redirect(shareUrl('index.html?shared=1'), 303);
 }
 
 // Network-first for same-origin app files (so edits show up quickly),
@@ -234,27 +198,16 @@ if (url.origin !== self.location.origin) return;
 // Must come before the GET-only guard below — this is the one POST the
 // worker is expected to answer itself.
 //
-// Responds with the redirect IMMEDIATELY, before handleShare has read a
-// single byte of the shared file, and does the actual reading/stashing
-// afterward via waitUntil() instead of awaiting it first. This used to
-// be the other way round (await the full read, THEN redirect) and a
-// large image share consistently arrived with real headers/boundary but
-// a genuinely empty body -- confirmed live via raw byte inspection, not
-// a parsing bug. The leading theory: Android's content:// grant for the
-// shared file has its own short lifetime, and our handler taking even a
-// little time (cloning, hashing into Cache Storage) before responding
-// was enough for Android to tear it down before the bytes were actually
-// read -- this ordering (respond first, read second) is the standard
-// pattern other Web Share Target implementations use specifically to
-// avoid that. Unconfirmed as THE fix rather than A fix; the tradeoff is
-// a real one -- if the page loads and checks for a pending share before
-// the background write finishes, that first check finds nothing.
-// takePendingShare() already re-checks on every load (not just ?shared=1),
-// so nothing is lost permanently, and sharetarget.js's own initShareTarget
-// adds a short retry specifically for this race when ?shared=1 is present.
+// Awaits the full read before redirecting, so the payload is always
+// stashed by the time the page loads and looks for it. A respond-first/
+// read-in-waitUntil() variant was tried on 18 Sept against a theory that
+// Android was revoking the shared file's content:// grant while this
+// handler worked; it fixed nothing (the real cause is a browser-side
+// bug -- see handleShare's own comment) and made this path racy, so it
+// was reverted rather than left in on the strength of being a common
+// pattern elsewhere.
 if (event.request.method === 'POST' && url.pathname.endsWith('/share')) {
-event.respondWith(Response.redirect(shareUrl('index.html?shared=1'), 303));
-event.waitUntil(handleShare(event.request));
+event.respondWith(handleShare(event.request));
 return;
 }
 if (event.request.method !== 'GET') return;
