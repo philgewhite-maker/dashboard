@@ -11,7 +11,7 @@
 { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
 ],
 "share_target": {
-"action": "https://philgewhite-maker.github.io/dashboard/share",
+"action": "./share",
 "method": "POST",
 "enctype": "multipart/form-data",
 "params": {

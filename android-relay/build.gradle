@@ -1,0 +1,12 @@
+plugins {
+    id 'com.android.application' version '8.7.3' apply false
+}
+
+// Keep Gradle's thousands of intermediate files out of OneDrive -- only the
+// finished APK is copied back (see build.ps1).
+def localAppData = System.getenv('LOCALAPPDATA')
+if (localAppData) {
+    allprojects {
+        layout.buildDirectory = file("${localAppData}/dashboard-capture-build/${project.name}")
+    }
+}

@@ -105,6 +105,50 @@ await cache.delete(metaUrl()).catch(() => {});
 return { ...meta, files };
 }
 
+// Files handed over by the Dashboard Capture Android app (android-relay/),
+// which exists because Chrome's WebAPK share target on the user's phone
+// drops every file part (see handleShare in sw.js). The app uploads each
+// shared file to files.php as-is, plus a small JSON manifest listing them,
+// and opens the dashboard at ?relay=<manifest id> -- one opaque id in the
+// URL, so filenames and shared text never land in a server log. Returned in
+// the same shape takePendingShare() gives, so both paths go through the
+// identical Capture Inbox handling below. Throws on failure, leaving the
+// param in place so a reload retries.
+async function takeRelayShare() {
+const manifestId = new URLSearchParams(location.search).get('relay');
+if (!manifestId) return null;
+if (!/^[a-f0-9]{32}$/.test(manifestId)) { stripRelayParam(); return null; }
+const { fetchAttachment } = await import('../files.js');
+const manifest = JSON.parse(await (await fetchAttachment(manifestId)).text());
+const entries = manifest.files || [];
+const files = [];
+for (const f of entries) {
+const blob = await fetchAttachment(f.id);
+files.push(new File([blob], f.name || 'shared', { type: f.type || blob.type || 'application/octet-stream' }));
+}
+return { title: manifest.title || '', text: manifest.text || '', url: '', files, relayIds: [manifestId, ...entries.map((f) => f.id)] };
+}
+
+function stripRelayParam() {
+const u = new URL(location.href);
+u.searchParams.delete('relay');
+history.replaceState(null, '', u.pathname + u.search + u.hash);
+}
+
+// The relay's uploads are the raw originals; Capture Inbox has already
+// stored its own copies (a resized photo, a re-uploaded attachment) under
+// new ids, so the originals and the manifest are now just orphans --
+// on the server and in the local blob cache fetchAttachment seeded. Only
+// called when nothing failed to capture: an orphan beats a lost file.
+async function deleteRelayOriginals(ids) {
+const { deleteAttachment } = await import('../files.js');
+const { photoDelete } = await import('../db.js');
+for (const id of ids) {
+try { await deleteAttachment(id); } catch (e) { /* a stray server file is harmless */ }
+try { await photoDelete(id); } catch (e) { /* local cache miss */ }
+}
+}
+
 // Android apps are inconsistent about which field carries what: some put the
 // link in `url`, many put it in `text`, some send a title and nothing else.
 // So build the task from whatever actually arrived rather than trusting any
@@ -179,7 +223,15 @@ async function initShareTarget() {
 // query string is easily lost (a redirect, a restored session), and a
 // stranded payload would then never be captured.
 let share;
+try {
+share = await takeRelayShare();
+} catch (e) {
+console.error('Dashboard Capture pickup failed:', e);
+banner(`Couldn't pull in what Dashboard Capture sent — ${String(e.message || e).replace(/\.$/, '')}. Reload to try again.`);
+}
+if (!share) {
 try { share = await takePendingShare(); } catch (e) { console.error('Share pickup failed:', e); return; }
+}
 if (!share) return;
 
 // A share carrying files goes to the Capture Inbox to be triaged --
@@ -198,6 +250,11 @@ notes: text && text !== label ? text : '',
 source: { kind: 'share', label: title || url || 'Shared from another app', url },
 files: share.files,
 });
+if (share.relayIds) {
+// Stripped either way, so a reload can't import the same files twice.
+stripRelayParam();
+if (!failed.length) deleteRelayOriginals(share.relayIds);
+}
 // A recognised Health CSV, a Bumble matches-list/full-profile screenshot
 // that yielded candidates, a photo claimed by a capture marker, or a
 // voice clip that got transcribed is fully consumed on the way in and
@@ -305,7 +362,7 @@ if (composed.generic && !composed.notes && !composed.link && !share.files.length
 	const emptyMultipart = /multipart\/form-data/i.test(share.requestContentType || '') && !(share.formFieldNames || []).length;
 	if (emptyMultipart) {
 		console.error('Share arrived as an empty multipart body, no parts:', note);
-		banner("Android didn't pass the file through — use Capture files instead.", async () => {
+		banner("Android didn't pass the file through — share it to Dashboard Capture instead, or use Capture files.", async () => {
 			const { switchTab } = await import('../tabs.js');
 			switchTab('tasks');
 			scrollAndFlash('#capture-inbox-panel');

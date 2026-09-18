@@ -649,6 +649,22 @@ status.textContent = text;
 status.className = `sync-result${kind ? ' ' + kind : ''}`;
 };
 
+// Hands the pair to the Dashboard Capture Android app (android-relay/).
+// package= pins the intent to that one app, so nothing else registering
+// the same scheme can receive the secret; the app only prefills its form,
+// and saving there is a separate tap.
+document.getElementById('relay-setup-btn').addEventListener('click', () => {
+const url = urlInput.value.trim();
+const secret = secretInput.value.trim();
+if (!url || !secret) {
+say('Fill in the sync URL and secret first.', 'error');
+return;
+}
+const q = new URLSearchParams({ sync: url, secret, dashboard: new URL('index.html', location.href).href });
+say('Opening Dashboard Capture — check the server there and tap Save. (Only works on Android with the app installed.)');
+location.href = `intent://setup?${q}#Intent;scheme=dashboardcapture;package=com.philgewhite.dashboardcapture;end`;
+});
+
 testBtn.addEventListener('click', async () => {
 clearTimeout(saveTimer);
 const url = urlInput.value.trim();

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Amber, like the Capture Inbox panel's own dot, and distinct from the
+         Dashboard icon next to it in the share sheet. -->
+    <color name="icon_background">#C8791F</color>
+</resources>
