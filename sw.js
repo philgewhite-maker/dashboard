@@ -2,7 +2,7 @@
 // deletes every cache that isn't the current name, so raising the version is
 // what actually evicts a stale copy from a device that has been running the
 // app for a while.
-const CACHE_NAME = 'dashboard-v357';
+const CACHE_NAME = 'dashboard-v358';
 const CORE_ASSETS = [
 './',
 './index.html',
@@ -98,6 +98,17 @@ keys.filter((k) => k !== CACHE_NAME && k !== SHARE_CACHE).map((k) => caches.dele
 // is served from GitHub Pages, which cannot handle a POST at all, so the
 // service worker *is* the endpoint: it stashes the payload, then redirects
 // to the app, which picks it up and turns it into a task.
+//
+// The manifest deliberately spells that action out as a FULL absolute URL
+// rather than "./share" -- don't "tidy" it back to a relative one. JSON
+// can't hold a comment, so the reason lives here: Android's WebAPK builder
+// is reported to fail at binding a shared FILE STREAM to a relative action
+// during background updates, while still routing the POST and binding the
+// text params fine -- exactly the shape of the failure seen on 18 Sept
+// (multipart envelope arrives with a real boundary and zero parts, yet a
+// plain link share through the same endpoint works). Absolute costs
+// nothing here beyond hardcoding the Pages origin; if this app ever moves
+// to another domain, this is the line that has to move with it.
 async function handleShare(request) {
 const shareUrl = (name) => new URL(name, self.registration.scope).href;
 // Cheap facts about the request itself, read before formData() consumes
