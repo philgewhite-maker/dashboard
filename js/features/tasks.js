@@ -13,7 +13,7 @@
 // 2. `bringForward` hides a task from the active lists until its date. That
 //    is the point of a tickler: something you genuinely cannot act on until
 //    March should not be adding noise in January.
-import { data, queueSave, TASK_BUCKETS, blankTask } from '../state.js';
+import { data, queueSave, TASK_BUCKETS, SHOPPING_CONTEXTS, blankTask } from '../state.js';
 import { photoDelete } from '../db.js';
 import { uid, todayStr, escapeHtml, affiliateLink, hydratePhotoBackgrounds, resizeImageToBlob, daysUntil, daysSince, scrollAndFlash, looksLikeUrl } from '../utils.js';
 import { uploadAttachment, storePhoto, deleteAttachment, openAttachment, formatBytes } from '../files.js';
@@ -51,8 +51,16 @@ function isDormant(t) {
 return !!t.bringForward && daysUntil(t.bringForward) > 0;
 }
 
+// Shopping items are stored as tasks (see SHOPPING_CONTEXTS in state.js) but
+// have their own Shopping view, so "All" leaves them out rather than burying
+// the real to-dos under a grocery list. Picking a shopping context's chip
+// explicitly still shows them here.
+function isShoppingItem(t) {
+return (t.contexts || []).some((c) => SHOPPING_CONTEXTS.includes(c));
+}
+
 function matchesContext(t) {
-if (contextFilter === 'all') return true;
+if (contextFilter === 'all') return !isShoppingItem(t);
 if (contextFilter === 'none') return (t.contexts || []).length === 0;
 return (t.contexts || []).includes(contextFilter);
 }
@@ -269,7 +277,7 @@ ${items.map((t) => taskRowHtml(t, 0, childrenMap)).join('')}
 </div>`;
 }).filter(Boolean).join('');
 
-const dormant = data.tasks.filter((t) => t.bucket !== 'done' && isDormant(t));
+const dormant = data.tasks.filter((t) => t.bucket !== 'done' && isDormant(t) && matchesContext(t));
 const dormantHtml = dormant.length ? `<div class="task-section">
 <h3>Scheduled to surface <span class="task-section-count">${dormant.length}</span></h3>
 ${dormant.sort((a, b) => daysUntil(a.bringForward) - daysUntil(b.bringForward)).map((t) => taskRowHtml(t, 0, childrenMap)).join('')}
@@ -300,8 +308,8 @@ data.tasks.forEach((t) => {
 if (t.bucket === 'done' || t.bucket === 'inbox' || isDormant(t)) return;
 (t.contexts || []).forEach((c) => { counts[c] = (counts[c] || 0) + 1; });
 });
-const chip = (value, label, count) => `<button class="overview-chip${contextFilter === value ? ' active' : ''}" data-ctx-filter="${escapeHtml(value)}">${escapeHtml(label)}${count === undefined ? '' : ` (${count})`}</button>`;
-el.innerHTML = chip('all', 'All')
+const chip = (value, label, count, title = '') => `<button class="overview-chip${contextFilter === value ? ' active' : ''}" data-ctx-filter="${escapeHtml(value)}"${title ? ` title="${escapeHtml(title)}"` : ''}>${escapeHtml(label)}${count === undefined ? '' : ` (${count})`}</button>`;
+el.innerHTML = chip('all', 'All', undefined, 'Everything except shopping items, which have their own Shopping view. Pick a shopping context to see those here.')
 + data.taskContexts.map((c) => chip(c, c, counts[c] || 0)).join('')
 + chip('none', 'No context');
 el.querySelectorAll('[data-ctx-filter]').forEach((b) => {
