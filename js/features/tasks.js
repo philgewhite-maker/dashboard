@@ -51,16 +51,61 @@ function isDormant(t) {
 return !!t.bringForward && daysUntil(t.bringForward) > 0;
 }
 
-// Shopping items are stored as tasks (see SHOPPING_CONTEXTS in state.js) but
-// have their own Shopping view, so "All" leaves them out rather than burying
-// the real to-dos under a grocery list. Picking a shopping context's chip
-// explicitly still shows them here.
-function isShoppingItem(t) {
-return (t.contexts || []).some((c) => SHOPPING_CONTEXTS.includes(c));
+// Kinds of task that live in data.tasks but really belong to another
+// feature: shopping items (the Shopping view is a filter over tasks carrying
+// a SHOPPING_CONTEXTS context) and the project a Trip or a Business idea
+// creates. Kept off the main lists by default so they don't bury the real
+// to-dos -- each has an "Also show" toggle -- EXCEPT when anything in that
+// project is due within DUE_SOON_DAYS (overdue included): an action needed
+// this week belongs on the list you work from, whichever feature made it.
+// Judged by the ROOT task, so a trip's subtasks go wherever the trip goes.
+const OTHER_KINDS = [
+{ key: 'trip', label: 'Trips', test: (t) => t.source?.kind === 'trip' },
+{ key: 'idea', label: 'Business ideas', test: (t) => t.source?.kind === 'business idea' },
+{ key: 'shopping', label: 'Shopping', test: (t) => (t.contexts || []).some((c) => SHOPPING_CONTEXTS.includes(c)) },
+];
+const DUE_SOON_DAYS = 7;
+const shownKinds = new Set();
+
+function rootOf(t, byId) {
+const seen = new Set();
+let cur = t;
+while (cur.parentId && !seen.has(cur.id)) {
+seen.add(cur.id);
+const parent = byId.get(cur.parentId);
+if (!parent) break;
+cur = parent;
+}
+return cur;
+}
+
+function otherKindOf(t, byId) {
+const root = rootOf(t, byId);
+const hit = OTHER_KINDS.find((k) => k.test(root)) || OTHER_KINDS.find((k) => k.test(t));
+return hit ? hit.key : null;
+}
+
+// Built once per render rather than per row -- the due-soon check has to
+// look through every descendant, which per row would be O(n^2).
+function visibilityContext() {
+const byId = new Map(data.tasks.map((t) => [t.id, t]));
+const dueSoonRoots = new Set();
+data.tasks.forEach((t) => {
+if (t.bucket !== 'done' && t.due && daysUntil(t.due) <= DUE_SOON_DAYS) dueSoonRoots.add(rootOf(t, byId).id);
+});
+return { byId, dueSoonRoots };
+}
+
+function isListed(t, vis) {
+if (!matchesContext(t)) return false;
+// Picking a specific context is a deliberate filter: show whatever has it.
+if (contextFilter !== 'all' && contextFilter !== 'none') return true;
+const kind = otherKindOf(t, vis.byId);
+return !kind || shownKinds.has(kind) || vis.dueSoonRoots.has(rootOf(t, vis.byId).id);
 }
 
 function matchesContext(t) {
-if (contextFilter === 'all') return !isShoppingItem(t);
+if (contextFilter === 'all') return true;
 if (contextFilter === 'none') return (t.contexts || []).length === 0;
 return (t.contexts || []).includes(contextFilter);
 }
@@ -258,10 +303,11 @@ bindAllocation(el);
 function renderLists() {
 const el = document.getElementById('task-lists');
 const childrenMap = buildChildrenMap();
+const vis = visibilityContext();
 const active = data.tasks.filter((t) => t.bucket !== 'inbox' && t.parentId === null);
 const sections = TASK_BUCKETS.filter((b) => b.bucket !== 'inbox').map((b) => {
 if (b.bucket === 'done' && !showDone) return '';
-let items = active.filter((t) => t.bucket === b.bucket && matchesContext(t));
+let items = active.filter((t) => t.bucket === b.bucket && isListed(t, vis));
 // Dormant items live in their own section rather than cluttering the
 // list you actually work from.
 if (b.bucket !== 'done') items = items.filter((t) => !isDormant(t));
@@ -277,7 +323,7 @@ ${items.map((t) => taskRowHtml(t, 0, childrenMap)).join('')}
 </div>`;
 }).filter(Boolean).join('');
 
-const dormant = data.tasks.filter((t) => t.bucket !== 'done' && isDormant(t) && matchesContext(t));
+const dormant = data.tasks.filter((t) => t.bucket !== 'done' && isDormant(t) && isListed(t, vis));
 const dormantHtml = dormant.length ? `<div class="task-section">
 <h3>Scheduled to surface <span class="task-section-count">${dormant.length}</span></h3>
 ${dormant.sort((a, b) => daysUntil(a.bringForward) - daysUntil(b.bringForward)).map((t) => taskRowHtml(t, 0, childrenMap)).join('')}
@@ -309,12 +355,29 @@ if (t.bucket === 'done' || t.bucket === 'inbox' || isDormant(t)) return;
 (t.contexts || []).forEach((c) => { counts[c] = (counts[c] || 0) + 1; });
 });
 const chip = (value, label, count, title = '') => `<button class="overview-chip${contextFilter === value ? ' active' : ''}" data-ctx-filter="${escapeHtml(value)}"${title ? ` title="${escapeHtml(title)}"` : ''}>${escapeHtml(label)}${count === undefined ? '' : ` (${count})`}</button>`;
-el.innerHTML = chip('all', 'All', undefined, 'Everything except shopping items, which have their own Shopping view. Pick a shopping context to see those here.')
+const vis = visibilityContext();
+const kindCounts = {};
+data.tasks.forEach((t) => {
+if (t.parentId || t.bucket === 'done' || t.bucket === 'inbox') return;
+const kind = otherKindOf(t, vis.byId);
+if (kind) kindCounts[kind] = (kindCounts[kind] || 0) + 1;
+});
+const toggles = OTHER_KINDS.filter((k) => kindCounts[k.key]).map((k) => `<button class="overview-chip${shownKinds.has(k.key) ? ' active' : ''}" data-kind-toggle="${k.key}" title="${shownKinds.has(k.key) ? 'Showing' : 'Hidden'} in the lists below except anything due within ${DUE_SOON_DAYS} days — tap to ${shownKinds.has(k.key) ? 'hide' : 'show'} all">${escapeHtml(k.label)} (${kindCounts[k.key]})</button>`).join('');
+el.innerHTML = chip('all', 'All', undefined, `Everything except trips, business ideas and shopping, unless something in them is due within ${DUE_SOON_DAYS} days. Use "Also show" to include them all.`)
 + data.taskContexts.map((c) => chip(c, c, counts[c] || 0)).join('')
-+ chip('none', 'No context');
++ chip('none', 'No context')
++ (toggles ? `<span style="align-self:center;font-size:12px;opacity:0.75;margin-left:8px;">Also show:</span>${toggles}` : '');
 el.querySelectorAll('[data-ctx-filter]').forEach((b) => {
 b.addEventListener('click', () => {
 contextFilter = b.dataset.ctxFilter;
+renderContextFilter();
+renderLists();
+});
+});
+el.querySelectorAll('[data-kind-toggle]').forEach((b) => {
+b.addEventListener('click', () => {
+const key = b.dataset.kindToggle;
+if (shownKinds.has(key)) shownKinds.delete(key); else shownKinds.add(key);
 renderContextFilter();
 renderLists();
 });
@@ -678,6 +741,18 @@ if (t && t.bucket === 'done' && !showDone) {
 showDone = true;
 const toggle = document.getElementById('show-done-toggle');
 if (toggle) toggle.checked = true;
+}
+// Same failure mode for a task the filters hide: a trip or business idea
+// (hidden by default), or one outside the context chip currently picked.
+// The lists filter by top-level task, so it's the root that has to be listed.
+if (t && t.bucket !== 'inbox') {
+const vis = visibilityContext();
+const root = rootOf(t, vis.byId);
+if (!matchesContext(root)) contextFilter = 'all';
+if (!isListed(root, vis)) {
+const kind = otherKindOf(root, vis.byId);
+if (kind) shownKinds.add(kind);
+}
 }
 renderTasks();
 setTimeout(() => scrollAndFlash(`[data-task-row="${id}"], [data-alloc-card="${id}"]`), 60);
