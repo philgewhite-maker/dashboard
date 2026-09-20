@@ -132,6 +132,50 @@ return '';
 // it's by, when, and a picture. Books go to Open Library by ISBN, which
 // answers all four in one keyless call; everything else reads the page's
 // own og: tags out of the HTML the artwork fetch needed anyway.
+// Does this URL actually resolve to a picture? Cheap to ask in a browser
+// -- load it and see -- and it removes the guesswork entirely: a cover
+// is only ever stored once it has been seen to work.
+//
+// The size floor matters: Amazon answers an unknown product id with a
+// 1-pixel placeholder rather than a 404, which "did it load" alone would
+// happily accept.
+function probeImage(url, { minWidth = 50, timeoutMs = 6000 } = {}) {
+return new Promise((resolve) => {
+const img = new Image();
+let settled = false;
+const done = (ok) => { if (!settled) { settled = true; resolve(ok); } };
+img.onload = () => done(img.naturalWidth >= minWidth);
+img.onerror = () => done(false);
+img.referrerPolicy = 'no-referrer';
+img.src = url;
+setTimeout(() => done(false), timeoutMs);
+});
+}
+
+// In preference order, so the first that works wins rather than the first
+// that exists in theory.
+async function firstLoadableImage(urls, options) {
+for (const url of urls) {
+if (url && await probeImage(url, options)) return url;
+}
+return '';
+}
+
+// Covers for anything with an Amazon id, which is most books. Confirmed
+// live on "The Impossible Fortune", where Open Library has the book but
+// no cover: Amazon's own image host answers by ASIN, and Google Books'
+// content endpoint answers by ISBN without touching the API that
+// rate-limits (its keyless quota is exhausted and returns 429).
+function coverCandidates(externalIds, openLibraryCoverId) {
+const asin = externalIds.asin || '';
+const isbn = /^\d{9}[\dX]$/i.test(asin) ? asin : '';
+return [
+openLibraryCoverId ? `https://covers.openlibrary.org/b/id/${openLibraryCoverId}-M.jpg` : '',
+asin ? `https://m.media-amazon.com/images/P/${asin}.01.L.jpg` : '',
+isbn ? `https://books.google.com/books/content?vid=ISBN${isbn}&printsec=frontcover&img=1&zoom=2` : '',
+].filter(Boolean);
+}
+
 async function linkMetadata(link, externalIds = {}) {
 const isbn = externalIds.asin && /^\d{9}[\dX]$/i.test(externalIds.asin) ? externalIds.asin : '';
 let book = null;
@@ -145,12 +189,11 @@ book = {
 title: doc.title || '',
 creator: (doc.author_name || [])[0] || '',
 year: doc.first_publish_year ? String(doc.first_publish_year) : '',
-// ONLY a cover_i url, never one guessed from the ISBN.
-// Confirmed live on "The Impossible Fortune": Open Library
-// holds the book but no cover, and the by-ISBN URL 404s -- so
-// guessing it returned a broken image AND stopped the page's
-// own cover ever being tried. No cover here means keep looking.
-imageUrl: doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg` : '',
+// Open Library first when it has one, then Amazon's image host,
+// then Google Books -- each tried for real, so a catalogue
+// holding the book but no cover (the case that broke this) falls
+// through instead of storing a URL that 404s.
+imageUrl: await firstLoadableImage(coverCandidates(externalIds, doc.cover_i)),
 };
 }
 }
@@ -159,7 +202,11 @@ imageUrl: doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jp
 }
 }
 if (book && book.imageUrl) return book;
-if (!link) return book;
+// Not a book, but still something Amazon sells (a Blu-ray, a boxset):
+// the same image host answers for any product id. Held rather than
+// returned, so the page can still supply a title below.
+const amazonArt = !book && externalIds.asin ? await firstLoadableImage(coverCandidates(externalIds, '')) : '';
+if (!link) return book || (amazonArt ? { title: '', creator: '', year: '', imageUrl: amazonArt } : null);
 
 // Either this isn't a book, or the catalogue had no cover for it. The
 // page's own og: tags fill whichever half is still missing -- and if
@@ -172,6 +219,7 @@ const { fetchPageHtml } = await import('./files.js');
 html = await fetchPageHtml(link);
 } catch (err) {
 if (book) return book;
+if (amazonArt) return { title: '', creator: '', year: '', imageUrl: amazonArt };
 throw err;
 }
 const pageTitle = cleanPageTitle(ogValue(html, 'og:title') || '');
@@ -180,7 +228,9 @@ return {
 title: (book && book.title) || pageTitle,
 creator: (book && book.creator) || '',
 year: (book && book.year) || '',
-imageUrl: pageImage,
+// A cover already proven to load beats one merely advertised by the
+// page, which may be a logo or a placeholder.
+imageUrl: (book && book.imageUrl) || amazonArt || pageImage,
 };
 }
 
