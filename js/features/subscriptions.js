@@ -1,5 +1,5 @@
 import { data, queueSave } from '../state.js';
-import { uid, escapeHtml, bindForm, daysUntil } from '../utils.js';
+import { uid, escapeHtml, bindForm, daysUntil, scrollAndFlash } from '../utils.js';
 
 const FREQUENCIES = ['Monthly', 'Yearly', 'Weekly', 'Other'];
 
@@ -93,4 +93,14 @@ queueSave();
 });
 }
 
-export { renderSubscriptions, initSubscriptionForm };
+// The canonical way to land on one subscription from elsewhere -- the
+// Media tab's "you already pay for this" tick is the first such
+// reference, and per dashboard/CLAUDE.md a record shown outside its own
+// list has to lead back to the real row. Same shape as revealTask and
+// revealMediaItem.
+function revealSubscription(id) {
+renderSubscriptions();
+setTimeout(() => scrollAndFlash(`[data-subscription-row="${id}"]`), 60);
+}
+
+export { renderSubscriptions, initSubscriptionForm, revealSubscription };

@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v369</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v370</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -201,6 +201,8 @@
 <div class="panel-head">
 <h2><span class="dot amber"></span>Watch &amp; listen</h2>
 <span class="count-badge" id="media-count"></span>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="finances" data-goto-target="#subscriptions-panel" title="Subscriptions &mdash; the services checked against &ldquo;where to watch&rdquo;">&#128179;</span>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#ai-keys" title="TMDb API key, for film &amp; TV lookup">&#9881;</span>
 </div>
 <div class="capture-row">
 <input type="text" autocomplete="off" id="media-capture-input" placeholder="Film, series, album&hellip; or paste a link">
@@ -2942,7 +2944,7 @@ Same idea as Connections' ratings, a separate list (Taste/Health/Prep by default
 <details class="settings-group">
 <summary><span class="dot amber"></span>AI features</summary>
 
-<div class="settings-block">
+<div class="settings-block" id="ai-keys">
 <h3>AI features</h3>
 <label for="anthropic-key-input" style="font-size:13px;font-weight:500;display:block;margin-bottom:6px;">Anthropic API key (for photo/screenshot import)</label>
 <input type="password" autocomplete="new-password" id="anthropic-key-input" class="settings-input" placeholder="sk-ant-...">

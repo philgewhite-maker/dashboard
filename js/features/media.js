@@ -107,10 +107,20 @@ if (mediaChipsBound) return;
 mediaChipsBound = true;
 document.addEventListener('click', async (e) => {
 const chip = e.target.closest('[data-open-media]');
-if (!chip) return;
+if (chip) {
 const { switchTab } = await import('../tabs.js');
 switchTab('media');
 revealMediaItem(chip.dataset.openMedia);
+return;
+}
+// The "you already pay for this" tick, leading back to the real
+// subscription row on Finances.
+const sub = e.target.closest('[data-open-subscription]');
+if (sub) {
+const [{ switchTab }, subs] = await Promise.all([import('../tabs.js'), import('./subscriptions.js')]);
+switchTab('finances');
+subs.revealSubscription(sub.dataset.openSubscription);
+}
 });
 }
 
@@ -215,7 +225,9 @@ if (!onSubscription.length && !w.rent.length && !w.buy.length) {
 return `<span class="settings-note" style="margin:0;">Not streaming in ${escapeHtml(w.region)}</span>`;
 }
 const chips = [
-...yours.map((p) => `<span class="task-context" style="background:var(--sage-bg);color:var(--sage);font-weight:600;" title="You already subscribe to ${escapeHtml(p.sub.name)}">&#10003; ${escapeHtml(p.name)}</span>`),
+// Clickable, because this names a real subscription record: per
+// CLAUDE.md, a record shown outside its own list leads back to it.
+...yours.map((p) => `<span class="task-context" style="background:var(--sage-bg);color:var(--sage);font-weight:600;cursor:pointer;" data-open-subscription="${escapeHtml(p.sub.id)}" title="You already pay for ${escapeHtml(p.sub.name)} — open it">&#10003; ${escapeHtml(p.name)}</span>`),
 ...others.map((p) => `<span class="task-context" title="Streaming here, but not one of your subscriptions">${escapeHtml(p.name)}</span>`),
 ];
 if (!onSubscription.length) {
