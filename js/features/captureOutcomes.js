@@ -211,6 +211,8 @@ let title = (ctx.title || '').trim();
 let kind = ctx.url ? kindFromUrl(ctx.url) : 'other';
 let creator = '';
 let year = '';
+let externalIds = {};
+let link = ctx.url || '';
 if (ctx.file) {
 try {
 const { extractMediaScreenshot } = await import('../ai.js');
@@ -221,6 +223,19 @@ if (found.kind) kind = found.kind;
 creator = found.creator || '';
 year = found.year || '';
 }
+// A screenshot of a catalogue page usually shows its own URL or id
+// somewhere. Keeping that is the difference between "a film called
+// Heat" and "this exact film" -- identifyUrl turns a visible URL
+// into the same ids a shared link would have produced, and a bare
+// visible id (tt0468569) is stored under the catalogue that uses
+// that shape.
+const { identifyUrl } = await import('../catalogue.js');
+if (found.catalogueUrl) {
+const fromShot = identifyUrl(found.catalogueUrl);
+externalIds = { ...fromShot.ids };
+if (!link && Object.keys(fromShot.ids).length) link = found.catalogueUrl;
+}
+if (found.catalogueId && /^tt\d+$/i.test(found.catalogueId)) externalIds.imdb = found.catalogueId;
 } catch (err) {
 console.error('Media screenshot extraction failed, keeping whatever title the capture carried:', err);
 }
@@ -241,7 +256,8 @@ kind,
 title: title || ctx.url || 'Untitled',
 creator,
 year,
-link: ctx.url || '',
+link,
+externalIds,
 notes: ctx.notes || '',
 photoIds: ctx.photoIds || [],
 source: ctx.source || null,

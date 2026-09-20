@@ -367,6 +367,10 @@ title: '', url: '', notes: '',
 // itself is the content. Same dual shape Tasks already has
 // (link + photoIds), same id-space (storePhoto()).
 photoIds: [],
+// A book's cover, when the link was a catalogue one (an Amazon ISBN, a
+// Goodreads page) -- same field and same resolver a media item uses.
+imageUrl: '',
+externalIds: {},
 source: null, // {kind:'share'|'captureMarker'|'urlSuffix', label, url}
 addedAt: new Date().toISOString(),
 read: false,
@@ -394,9 +398,14 @@ status: 'wanted', // wanted | available | done | dropped
 link: '',
 notes: '',
 photoIds: [], // a poster/screenshot capture has no URL, same dual shape as a reading item
+imageUrl: '', // poster/cover, resolved from the catalogue the link came from (catalogue.js)
 source: null, // {kind, label, url}
 requestedBy: '', // who asked for it, when it arrived via Telegram
-externalIds: {}, // imdb/tmdb/musicbrainz, once anything resolves them
+// Which work this IS, per the catalogue it came from: {imdb:'tt0468569'},
+// {tmdb:'tv/1396'}, {spotify:'album/xxx'}... The id is what makes "is
+// this on Plex", "which release", "what's the poster" answerable later
+// without re-identifying a work from its title. See catalogue.js.
+externalIds: {},
 plexCheck: null, // {checkedAt, found, ratingKey}
 acquisition: null, // {state, client, hash, checkedAt}
 addedAt: new Date().toISOString(),
@@ -409,6 +418,7 @@ const MEDIA_KINDS = [
 { kind: 'tv', label: 'TV' },
 { kind: 'album', label: 'Album' },
 { kind: 'track', label: 'Track' },
+{ kind: 'artist', label: 'Artist' },
 { kind: 'podcast', label: 'Podcast' },
 { kind: 'other', label: 'Other' },
 ];

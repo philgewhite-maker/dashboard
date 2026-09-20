@@ -45,33 +45,18 @@ return { name: String(node.name || ''), ingredients, instructions, notes: '' };
 return null;
 }
 
-async function recipeFetchEndpoint() {
-const { url, secret, configured } = await getConfig();
-if (!configured) throw new NotConfiguredError();
-const endpoint = url.replace(/sync\.php(?=$|\?)/, 'recipe-fetch.php');
-if (endpoint === url) throw new Error(`Couldn't work out the recipe-fetch URL from "${url}" — it should end in sync.php.`);
-return { endpoint, secret };
-}
-
+// The endpoint call itself now lives in files.js as fetchPageHtml, beside
+// every other sibling-of-sync.php proxy -- cover art (catalogue.js) reads
+// og:image from the same fetch, and two copies of it would drift.
 async function fetchRecipeHtml(pageUrl) {
-const { endpoint, secret } = await recipeFetchEndpoint();
-const controller = new AbortController();
-const timer = setTimeout(() => controller.abort(), 20000);
-let res;
-try {
-res = await fetch(`${endpoint}?url=${encodeURIComponent(pageUrl)}`, { headers: { 'X-Sync-Secret': secret }, signal: controller.signal });
-} catch (err) {
-if (err.name === 'AbortError') throw new Error('The recipe site took too long to respond.');
-throw new Error(`Couldn't reach the recipe-fetch server: ${err.message}`);
-} finally {
-clearTimeout(timer);
-}
-if (!res.ok) {
-let detail = `HTTP ${res.status}`;
-try { detail = (await res.json()).error || detail; } catch (e) { /* not JSON */ }
-throw new Error(detail);
-}
-return res.text();
+// Checked here rather than left to files.js, which throws its own
+// FilesNotConfiguredError -- the import handler below branches on
+// NotConfiguredError to offer the Settings link, and would otherwise
+// degrade to a generic error for the one case it has good advice for.
+const { configured } = await getConfig();
+if (!configured) throw new NotConfiguredError();
+const { fetchPageHtml } = await import('../files.js');
+return fetchPageHtml(pageUrl);
 }
 
 async function importFromUrl(pageUrl) {

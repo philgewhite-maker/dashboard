@@ -68,6 +68,33 @@ throw new Error(`Couldn't work out the gemini-transcribe URL from "${url}" — i
 return { endpoint, secret };
 }
 
+// recipe-fetch.php sits next to sync.php too. Named for the Menu tab it
+// was built for, but what it does is generic and SSRF-guarded: fetch any
+// page's HTML server-side. Cover art reads og:image out of exactly the
+// same response (see catalogue.js), so neither needs a second proxy
+// deployed for the same job.
+async function pageFetchEndpoint() {
+const { url, secret, configured } = await getConfig();
+if (!configured) throw new FilesNotConfiguredError();
+const endpoint = url.replace(/sync\.php(?=$|\?)/, 'recipe-fetch.php');
+if (endpoint === url) {
+throw new Error(`Couldn't work out the page-fetch URL from "${url}" — it should end in sync.php.`);
+}
+return { endpoint, secret };
+}
+
+const PAGE_FETCH_TIMEOUT_MS = 20000;
+
+async function fetchPageHtml(pageUrl) {
+const { endpoint, secret } = await pageFetchEndpoint();
+const res = await withTimeout(PAGE_FETCH_TIMEOUT_MS, (signal) => fetch(`${endpoint}?url=${encodeURIComponent(pageUrl)}`, {
+headers: { 'X-Sync-Secret': secret },
+signal,
+}));
+if (!res.ok) throw new Error(await errorFrom(res, `Couldn't fetch that page (HTTP ${res.status}).`));
+return res.text();
+}
+
 const UPLOAD_TIMEOUT_MS = 120000; // uploads are far slower than a JSON save
 const DOWNLOAD_TIMEOUT_MS = 120000;
 
@@ -305,5 +332,5 @@ return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 export {
 FilesNotConfiguredError,
 uploadAttachment, storePhoto, fetchAttachment, deleteAttachment, openAttachment, formatBytes,
-isServerPhotoId, serverPhotoUrl, fetchProxiedImage, fetchIcs, transcribeAudioFile,
+isServerPhotoId, serverPhotoUrl, fetchProxiedImage, fetchIcs, transcribeAudioFile, fetchPageHtml,
 };

@@ -14,6 +14,7 @@
 // one place.
 import { data, queueSave, blankMediaItem, MEDIA_KINDS, MEDIA_STATUSES } from '../state.js';
 import { escapeHtml, affiliateLink, scrollAndFlash, hydratePhotoBackgrounds, looksLikeUrl } from '../utils.js';
+import { identifyUrl, catalogueLabel, artworkUrl } from '../catalogue.js';
 
 const KIND_LABEL = Object.fromEntries(MEDIA_KINDS.map((k) => [k.kind, k.label]));
 const STATUS_LABEL = Object.fromEntries(MEDIA_STATUSES.map((s) => [s.status, s.label]));
@@ -24,20 +25,23 @@ const OPEN_STATUSES = ['wanted', 'available'];
 let kindFilter = 'all';
 let showFinished = false;
 
-// Host -> kind, for a shared link. Only covers what the seeded
-// shareUrlRules (state.js) actually route here; anything else lands as
-// 'other' and is one tap to correct.
+// A link's kind, when the catalogue it came from proves one -- TMDb's
+// /tv/ path does, IMDb's /title/ doesn't (it covers both), so that falls
+// back to 'film' as the commoner case, one tap to correct. See
+// catalogue.js for why the id itself is kept rather than just the kind.
 function kindFromUrl(url) {
-let host = '';
-try { host = new URL(url).hostname.replace(/^www\./, '').toLowerCase(); } catch (e) { return 'other'; }
-if (/(^|\.)(spotify\.com|bandcamp\.com|discogs\.com)$/.test(host) || host === 'music.apple.com') return 'album';
-if (/(^|\.)(imdb\.com|letterboxd\.com|themoviedb\.org|trakt\.tv|rottentomatoes\.com)$/.test(host)) return 'film';
-return 'other';
+return identifyUrl(url).kind || 'other';
 }
 
-function addMediaItem({ kind, title, creator = '', year = '', link = '', notes = '', photoIds = [], source = null, requestedBy = '', status = 'wanted' }) {
+function addMediaItem({ kind, title, creator = '', year = '', link = '', notes = '', photoIds = [], source = null, requestedBy = '', status = 'wanted', externalIds = {}, imageUrl = '' }) {
+const fromUrl = link ? identifyUrl(link) : { ids: {}, kind: null };
 const item = blankMediaItem({
 kind: KIND_LABEL[kind] ? kind : (link ? kindFromUrl(link) : 'other'),
+// Ids passed in (read off a screenshot, say) win over ones parsed
+// from the link, but both are kept -- they're different catalogues,
+// not competing answers.
+externalIds: { ...fromUrl.ids, ...externalIds },
+imageUrl: imageUrl || '',
 title: (title || link || 'Untitled').trim(),
 creator: (creator || '').trim(),
 year: String(year || '').trim(),
@@ -51,7 +55,25 @@ requestedBy: (requestedBy || '').trim(),
 data.mediaItems.unshift(item); // newest first, same as the reading list
 queueSave();
 renderMedia();
+// Artwork is decoration, so it's fetched after the item exists rather
+// than delaying it: a poster that never arrives costs nothing, a
+// capture that waited on one would.
+if (!item.imageUrl && item.link) fillArtwork(item);
 return item;
+}
+
+async function fillArtwork(item) {
+try {
+const url = await artworkUrl(item.link, item.externalIds);
+if (!url) return;
+const live = data.mediaItems.find((m) => m.id === item.id);
+if (!live) return; // removed while the lookup was in flight
+live.imageUrl = url;
+queueSave();
+renderMedia();
+} catch (err) {
+console.error('Artwork lookup failed, item stays without a poster:', err);
+}
 }
 
 // The canonical way this record type appears anywhere OTHER than its own
@@ -88,9 +110,17 @@ setTimeout(() => scrollAndFlash(`[data-media-row="${id}"]`), 60);
 function rowHtml(item) {
 const photoId = (item.photoIds || [])[0];
 const byline = [item.creator, item.year].filter(Boolean).join(' · ');
+const catalogue = catalogueLabel(item.externalIds);
+// Poster first when there is one -- a shelf of covers is the point of
+// this list. A captured screenshot is the fallback picture, and a
+// broken remote image hides itself rather than leaving a torn icon.
+const art = item.imageUrl
+? `<img class="media-art" src="${escapeHtml(item.imageUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+: (photoId ? `<span class="thumb-img media-art" data-photo-bg="${escapeHtml(photoId)}"></span>` : '');
 return `<div class="mail-row${OPEN_STATUSES.includes(item.status) ? '' : ' done'}" data-media-row="${item.id}">
-${photoId ? `<span class="thumb-img" data-photo-bg="${escapeHtml(photoId)}" style="width:32px;height:32px;border-radius:6px;flex:0 0 auto;"></span>` : ''}
+${art}
 <span class="task-context">${escapeHtml(KIND_LABEL[item.kind] || item.kind)}</span>
+${catalogue ? `<span class="task-context" title="Identified on ${escapeHtml(catalogue)} — kept so this can be matched against Plex later">${escapeHtml(catalogue)}</span>` : ''}
 <span class="mail-subject">${item.link ? `<a href="${escapeHtml(affiliateLink(item.link))}" target="_blank" rel="noopener">${escapeHtml(item.title)}</a>` : escapeHtml(item.title)}</span>
 ${byline ? `<span class="settings-note" style="margin:0;">${escapeHtml(byline)}</span>` : ''}
 ${item.requestedBy ? `<span class="settings-note" style="margin:0;">asked by ${escapeHtml(item.requestedBy)}</span>` : ''}
@@ -116,6 +146,7 @@ list.innerHTML = items.length
 ? items.map(rowHtml).join('')
 : `<div class="empty">${data.mediaItems.length ? 'Nothing here with those filters.' : 'Nothing queued — add something above, share a link, or mark a screenshot M.'}</div>`;
 hydratePhotoBackgrounds(list);
+hideBrokenArt(list);
 
 list.querySelectorAll('[data-media-status]').forEach((sel) => {
 sel.addEventListener('change', () => {
@@ -134,6 +165,15 @@ data.mediaItems = data.mediaItems.filter((m) => m.id !== x.dataset.mediaRemove);
 queueSave();
 renderMedia();
 });
+});
+}
+
+// Remote art can 404 or be hotlink-blocked long after it was stored, and
+// a torn-image icon looks broken in a way "no picture" doesn't. Bound
+// rather than an inline onerror so no inline script is needed.
+function hideBrokenArt(root) {
+root.querySelectorAll('img.media-art').forEach((img) => {
+img.addEventListener('error', () => { img.style.display = 'none'; });
 });
 }
 

@@ -1531,6 +1531,18 @@ color:inherit;
 flex-wrap:wrap;
 }
 .mail-row:first-of-type{border-top:none;}
+/* Poster/cover art on a Media row. Portrait, since film and TV posters
+   are, and an album cover simply fills it squarely at the same height. */
+.media-art{
+width:44px;
+height:64px;
+flex:0 0 auto;
+border-radius:6px;
+object-fit:cover;
+background-color:var(--line);
+background-size:cover;
+background-position:center;
+}
 .mail-row:hover .mail-subject{color:var(--rose);}
 .mail-row{align-items:center;}
 .mail-from{

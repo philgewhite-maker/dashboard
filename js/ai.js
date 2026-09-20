@@ -1710,15 +1710,24 @@ if (cached) return { ...cached.result, fromCache: true };
 
 const base64 = await fileToBase64(file);
 const mediaType = normalizeImageMediaType(file.type || 'image/png');
+// A screenshot of an IMDb/TVDB/Letterboxd/Spotify page usually has the
+// catalogue's own id or URL visible somewhere -- the address bar, a
+// share sheet, the page furniture. That id is worth far more than the
+// title it sits next to (it's what makes "is this on Plex" answerable
+// without matching strings), so it's asked for explicitly rather than
+// left to be re-derived from the title later.
 const prompt = `This is a screenshot of something to watch or listen to -- a film or TV poster, a streaming app's title page, a music album page, or a review.
 
 Identify the ONE main title it is about. Reply with JSON only:
-{"kind":"film|tv|album|track|podcast|other","title":"","creator":"","year":""}
+{"kind":"film|tv|album|track|artist|podcast|other","title":"","creator":"","year":"","catalogue":"","catalogueUrl":"","catalogueId":""}
 
 - "title" is the work's own name, not the app's ("The Bear", not "Netflix").
 - "creator" is the director for a film, the showrunner or network for TV, the artist for music. "" if it isn't shown.
 - "year" is the release year as 4 digits, "" if it isn't shown.
-- If the screenshot shows a list of several titles rather than one, or you can't tell what it is, reply {"kind":"other","title":"","creator":"","year":""}.`;
+- "catalogue" is which site or app this is a screenshot OF, lowercase, if you can tell: imdb, thetvdb, tmdb, letterboxd, trakt, rottentomatoes, spotify, appleMusic, bandcamp, discogs, goodreads, netflix, iplayer, plex, other.
+- "catalogueUrl" is any URL visible anywhere in the image (an address bar, a share panel, printed on the page), copied exactly. "" if none is visible.
+- "catalogueId" is any visible catalogue identifier, such as an IMDb id like tt0468569. "" if none is visible.
+- If the screenshot shows a list of several titles rather than one, or you can't tell what it is, reply with empty strings and "other".`;
 const { data: raw } = await callAnthropic(
 [
 { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
@@ -1726,12 +1735,15 @@ const { data: raw } = await callAnthropic(
 ],
 600, TRIP_MODEL, 'Media screenshot', null, 'low',
 );
-const kinds = ['film', 'tv', 'album', 'track', 'podcast', 'other'];
+const kinds = ['film', 'tv', 'album', 'track', 'artist', 'podcast', 'other'];
 const result = {
 kind: kinds.includes(raw?.kind) ? raw.kind : 'other',
 title: String(raw?.title || '').trim(),
 creator: String(raw?.creator || '').trim(),
 year: String(raw?.year || '').trim(),
+catalogue: String(raw?.catalogue || '').trim(),
+catalogueUrl: String(raw?.catalogueUrl || '').trim(),
+catalogueId: String(raw?.catalogueId || '').trim(),
 };
 await parseCachePut(hash, cacheKind, { result });
 return { ...result, fromCache: false };
