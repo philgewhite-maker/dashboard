@@ -14,7 +14,7 @@
 // one place.
 import { data, queueSave, blankMediaItem, MEDIA_KINDS, MEDIA_STATUSES } from '../state.js';
 import { escapeHtml, affiliateLink, scrollAndFlash, hydratePhotoBackgrounds, looksLikeUrl } from '../utils.js';
-import { identifyUrl, catalogueLabel, artworkUrl, watchProviders, subscriptionFor } from '../catalogue.js';
+import { identifyUrl, catalogueLabel, watchProviders, subscriptionFor } from '../catalogue.js';
 
 const KIND_LABEL = Object.fromEntries(MEDIA_KINDS.map((k) => [k.kind, k.label]));
 const STATUS_LABEL = Object.fromEntries(MEDIA_STATUSES.map((s) => [s.status, s.label]));
@@ -100,8 +100,15 @@ if (meta.creator && !live.creator) live.creator = meta.creator;
 if (meta.year && !live.year) live.year = meta.year;
 queueSave();
 renderMedia();
+if (!meta.title && !meta.imageUrl) {
+setCaptureStatus(`Nothing found for that link — ${catalogueLabel(item.externalIds) || 'the page'} gave no title or cover.`);
+}
 } catch (err) {
+// Said out loud rather than only logged: a link that silently stays a
+// link, with no reason given, is exactly what made this hard to
+// diagnose the first time.
 console.error('Link lookup failed, item stays as pasted:', err);
+setCaptureStatus(`Couldn't look that link up: ${err.message || err}`);
 }
 }
 

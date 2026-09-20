@@ -134,32 +134,53 @@ return '';
 // own og: tags out of the HTML the artwork fetch needed anyway.
 async function linkMetadata(link, externalIds = {}) {
 const isbn = externalIds.asin && /^\d{9}[\dX]$/i.test(externalIds.asin) ? externalIds.asin : '';
+let book = null;
 if (isbn) {
 try {
 const res = await fetch(`https://openlibrary.org/search.json?limit=1&fields=title,author_name,first_publish_year,cover_i&q=isbn:${encodeURIComponent(isbn)}`);
 if (res.ok) {
 const doc = ((await res.json()).docs || [])[0];
 if (doc) {
-return {
+book = {
 title: doc.title || '',
 creator: (doc.author_name || [])[0] || '',
 year: doc.first_publish_year ? String(doc.first_publish_year) : '',
-imageUrl: doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg` : `https://covers.openlibrary.org/b/isbn/${isbn}-M.jpg?default=false`,
+// ONLY a cover_i url, never one guessed from the ISBN.
+// Confirmed live on "The Impossible Fortune": Open Library
+// holds the book but no cover, and the by-ISBN URL 404s -- so
+// guessing it returned a broken image AND stopped the page's
+// own cover ever being tried. No cover here means keep looking.
+imageUrl: doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg` : '',
 };
 }
 }
 } catch (err) {
-// Fall through to og: tags -- an Amazon page still has a title.
+// Fall through: the page itself still has a title and a picture.
 }
 }
-if (!link) return null;
+if (book && book.imageUrl) return book;
+if (!link) return book;
+
+// Either this isn't a book, or the catalogue had no cover for it. The
+// page's own og: tags fill whichever half is still missing -- and if
+// that fetch fails (no live sync, or a site that blocks automated
+// requests, Amazon being the known one), whatever the catalogue gave is
+// still better than nothing.
+let html = '';
+try {
 const { fetchPageHtml } = await import('./files.js');
-const html = await fetchPageHtml(link);
+html = await fetchPageHtml(link);
+} catch (err) {
+if (book) return book;
+throw err;
+}
+const pageTitle = cleanPageTitle(ogValue(html, 'og:title') || '');
+const pageImage = ogImageFrom(html, link);
 return {
-title: cleanPageTitle(ogValue(html, 'og:title') || ''),
-creator: '',
-year: '',
-imageUrl: ogImageFrom(html, link),
+title: (book && book.title) || pageTitle,
+creator: (book && book.creator) || '',
+year: (book && book.year) || '',
+imageUrl: pageImage,
 };
 }
 
