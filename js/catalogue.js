@@ -128,6 +128,63 @@ try { return new URL(m[1], pageUrl).href; } catch (e) { return m[1]; }
 return '';
 }
 
+// Everything a link can tell us without being asked twice: the title, who
+// it's by, when, and a picture. Books go to Open Library by ISBN, which
+// answers all four in one keyless call; everything else reads the page's
+// own og: tags out of the HTML the artwork fetch needed anyway.
+async function linkMetadata(link, externalIds = {}) {
+const isbn = externalIds.asin && /^\d{9}[\dX]$/i.test(externalIds.asin) ? externalIds.asin : '';
+if (isbn) {
+try {
+const res = await fetch(`https://openlibrary.org/search.json?limit=1&fields=title,author_name,first_publish_year,cover_i&q=isbn:${encodeURIComponent(isbn)}`);
+if (res.ok) {
+const doc = ((await res.json()).docs || [])[0];
+if (doc) {
+return {
+title: doc.title || '',
+creator: (doc.author_name || [])[0] || '',
+year: doc.first_publish_year ? String(doc.first_publish_year) : '',
+imageUrl: doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg` : `https://covers.openlibrary.org/b/isbn/${isbn}-M.jpg?default=false`,
+};
+}
+}
+} catch (err) {
+// Fall through to og: tags -- an Amazon page still has a title.
+}
+}
+if (!link) return null;
+const { fetchPageHtml } = await import('./files.js');
+const html = await fetchPageHtml(link);
+return {
+title: cleanPageTitle(ogValue(html, 'og:title') || ''),
+creator: '',
+year: '',
+imageUrl: ogImageFrom(html, link),
+};
+}
+
+// Page titles carry the site's own furniture ("... : Amazon.co.uk: Books",
+// "Watch X | Netflix"), which is noise in a list of titles.
+function cleanPageTitle(title) {
+return String(title || '')
+.split(/\s[|:]\s|\s[-–—]\s/)[0]
+.replace(/\s+/g, ' ')
+.trim()
+.slice(0, 120);
+}
+
+function ogValue(html, property) {
+const patterns = [
+new RegExp(`<meta[^>]+property=["']${property}["'][^>]*content=["']([^"']+)["']`, 'i'),
+new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]*property=["']${property}["']`, 'i'),
+];
+for (const re of patterns) {
+const m = String(html || '').match(re);
+if (m && m[1]) return m[1];
+}
+return '';
+}
+
 // ---- Where can I already watch it? ------------------------------------
 
 // TMDb's watch/providers is the documented, per-country answer to "what's
@@ -150,7 +207,27 @@ const res = await fetch(`https://api.themoviedb.org/3/${type}/${id}/watch/provid
 if (!res.ok) throw new Error(`TMDb providers lookup failed (HTTP ${res.status}).`);
 const body = await res.json();
 const here = (body.results || {})[region];
-const names = (list) => (list || []).map((p) => p.provider_name).filter(Boolean);
+// TMDb lists every resold variant of the same service: "Amazon Prime
+// Video", "Amazon Prime Video with Ads", "Apple TV Amazon Channel".
+// Shown raw, one film sprouts four near-identical chips, and an
+// add-on channel you don't have gets ticked because its name contains
+// a service you do. So variants collapse to the base service, and
+// "... Channel" resales are dropped: those are separate paid add-ons,
+// not the subscription they're named after.
+const names = (list) => {
+const seen = new Set();
+const out = [];
+for (const p of list || []) {
+const raw = p.provider_name || '';
+if (!raw || /\bchannel\b/i.test(raw)) continue;
+const base = raw.replace(/\s+with\s+ads$/i, '').trim();
+const key = base.toLowerCase();
+if (seen.has(key)) continue;
+seen.add(key);
+out.push(base);
+}
+return out;
+};
 return {
 checkedAt: new Date().toISOString(),
 region,
@@ -278,4 +355,4 @@ link: `https://musicbrainz.org/release-group/${g.id}`,
 })).filter((c) => c.title);
 }
 
-export { identifyUrl, catalogueLabel, artworkUrl, ogImageFrom, searchTitle, watchProviders, subscriptionFor, CATALOGUE_LABELS };
+export { identifyUrl, catalogueLabel, artworkUrl, linkMetadata, ogImageFrom, searchTitle, watchProviders, subscriptionFor, CATALOGUE_LABELS };

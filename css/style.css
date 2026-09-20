@@ -1531,6 +1531,13 @@ color:inherit;
 flex-wrap:wrap;
 }
 .mail-row:first-of-type{border-top:none;}
+/* A pasted link can be hundreds of characters with no spaces in it, which
+   otherwise pushes the row's controls off the panel entirely. */
+#media-list .mail-subject,
+#reading-list .mail-subject{
+overflow-wrap:anywhere;
+min-width:0;
+}
 /* Poster/cover art on a Media row. Portrait, since film and TV posters
    are, and an album cover simply fills it squarely at the same height. */
 .media-art{

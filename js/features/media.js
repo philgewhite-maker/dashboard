@@ -80,17 +80,28 @@ console.error('Streaming availability lookup failed:', err);
 }
 }
 
+// A pasted link arrives titled with the URL itself, which is useless in
+// a list of things to watch -- and pressing Add rather than Resolve
+// title used to leave it that way. So a link is enriched on arrival:
+// a book by its ISBN (title, author, year and cover in one free call),
+// anything else from the page's own og: tags, which is the same fetch
+// the artwork already needed.
 async function fillArtwork(item) {
 try {
-const url = await artworkUrl(item.link, item.externalIds);
-if (!url) return;
+const { linkMetadata } = await import('../catalogue.js');
+const meta = await linkMetadata(item.link, item.externalIds);
 const live = data.mediaItems.find((m) => m.id === item.id);
-if (!live) return; // removed while the lookup was in flight
-live.imageUrl = url;
+if (!live || !meta) return; // removed while the lookup was in flight
+if (meta.imageUrl && !live.imageUrl) live.imageUrl = meta.imageUrl;
+// Only ever replaces a title that's still the raw URL: anything the
+// user typed, or picked from the candidate list, stays.
+if (meta.title && looksLikeUrl(live.title)) live.title = meta.title;
+if (meta.creator && !live.creator) live.creator = meta.creator;
+if (meta.year && !live.year) live.year = meta.year;
 queueSave();
 renderMedia();
 } catch (err) {
-console.error('Artwork lookup failed, item stays without a poster:', err);
+console.error('Link lookup failed, item stays as pasted:', err);
 }
 }
 
@@ -135,6 +146,20 @@ renderMedia();
 setTimeout(() => scrollAndFlash(`[data-media-row="${id}"]`), 60);
 }
 
+// Until a link's real title arrives (or if it never does), show something
+// readable rather than 300 characters of Amazon tracking parameters.
+function displayTitle(item) {
+if (!looksLikeUrl(item.title)) return item.title;
+try {
+const u = new URL(item.title);
+const firstSegment = u.pathname.split('/').filter(Boolean)[0] || '';
+const pretty = `${u.hostname.replace(/^www\./, '')}${firstSegment ? `/${firstSegment}` : ''}`;
+return pretty.length > 70 ? `${pretty.slice(0, 70)}…` : pretty;
+} catch (e) {
+return item.title.slice(0, 70);
+}
+}
+
 function rowHtml(item) {
 const photoId = (item.photoIds || [])[0];
 const byline = [item.creator, item.year].filter(Boolean).join(' · ');
@@ -149,7 +174,7 @@ return `<div class="mail-row${OPEN_STATUSES.includes(item.status) ? '' : ' done'
 ${art}
 <span class="task-context">${escapeHtml(KIND_LABEL[item.kind] || item.kind)}</span>
 ${catalogue ? `<span class="task-context" title="Identified on ${escapeHtml(catalogue)} — kept so this can be matched against Plex later">${escapeHtml(catalogue)}</span>` : ''}
-<span class="mail-subject">${item.link ? `<a href="${escapeHtml(affiliateLink(item.link))}" target="_blank" rel="noopener">${escapeHtml(item.title)}</a>` : escapeHtml(item.title)}</span>
+<span class="mail-subject">${item.link ? `<a href="${escapeHtml(affiliateLink(item.link))}" target="_blank" rel="noopener">${escapeHtml(displayTitle(item))}</a>` : escapeHtml(displayTitle(item))}</span>
 ${byline ? `<span class="settings-note" style="margin:0;">${escapeHtml(byline)}</span>` : ''}
 ${item.requestedBy ? `<span class="settings-note" style="margin:0;">asked by ${escapeHtml(item.requestedBy)}</span>` : ''}
 ${whereToWatchHtml(item)}
@@ -179,6 +204,7 @@ list.innerHTML = items.length
 : `<div class="empty">${data.mediaItems.length ? 'Nothing here with those filters.' : 'Nothing queued — add something above, share a link, or mark a screenshot M.'}</div>`;
 hydratePhotoBackgrounds(list);
 hideBrokenArt(list);
+enrichPending();
 
 list.querySelectorAll('[data-media-status]').forEach((sel) => {
 sel.addEventListener('change', () => {
@@ -203,6 +229,22 @@ renderMedia();
 // Remote art can 404 or be hotlink-blocked long after it was stored, and
 // a torn-image icon looks broken in a way "no picture" doesn't. Bound
 // rather than an inline onerror so no inline script is needed.
+// Anything still showing a URL for a title, or missing its artwork, gets
+// one attempt at enrichment -- so rows added before this existed (or
+// while the server was unreachable) fix themselves on a later visit.
+// Attempts are remembered for the session so a page that can't be
+// enriched isn't re-fetched on every render, and only a few go at once.
+const enrichAttempted = new Set();
+function enrichPending() {
+data.mediaItems
+.filter((m) => m.link && (looksLikeUrl(m.title) || !m.imageUrl) && !enrichAttempted.has(m.id))
+.slice(0, 3)
+.forEach((m) => {
+enrichAttempted.add(m.id);
+fillArtwork(m);
+});
+}
+
 function hideBrokenArt(root) {
 root.querySelectorAll('img.media-art').forEach((img) => {
 img.addEventListener('error', () => { img.style.display = 'none'; });
