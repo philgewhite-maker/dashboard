@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v363</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v364</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -42,6 +42,7 @@
 <button class="tab-btn" type="button" data-tab-btn="health">Health</button>
 <button class="tab-btn" type="button" data-tab-btn="travel">Travel</button>
 <button class="tab-btn" type="button" data-tab-btn="planner">Planner</button>
+<button class="tab-btn" type="button" data-tab-btn="media">Media</button>
 <button class="tab-btn" type="button" data-tab-btn="settings">Settings</button>
 </div>
 
@@ -199,7 +200,23 @@
 <div id="capture-drafts-list"></div>
 </section>
 
-<section class="panel wide" id="reading-list-panel" data-tab="tasks">
+<section class="panel wide" id="media-panel" data-tab="media">
+<div class="panel-head">
+<h2><span class="dot amber"></span>Watch &amp; listen</h2>
+<span class="count-badge" id="media-count"></span>
+</div>
+<div class="capture-row">
+<input type="text" autocomplete="off" id="media-capture-input" placeholder="Film, series, album&hellip; or paste a link">
+<select id="media-capture-kind" class="mini"></select>
+<button class="add-btn" id="media-capture-btn" type="button">Add</button>
+<button type="button" class="mini-task-btn" id="media-resolve-btn" title="Look up a real title for this pasted link" hidden>&#10024; Resolve title</button>
+</div>
+<div class="settings-note" style="margin:8px 0 10px;">A shared link from IMDb, Letterboxd, Spotify and the like lands here on its own; so does a link ending <code>#M</code>, a screenshot marked <strong>M</strong>, or a Telegram request you accept. Later this is where &ldquo;is it already on Plex?&rdquo; and downloads will report in.</div>
+<div class="overview-chips" id="media-filter" style="margin-bottom:10px;"></div>
+<div id="media-list"></div>
+</section>
+
+<section class="panel wide" id="reading-list-panel" data-tab="media">
 <div class="panel-head">
 <h2><span class="dot teal"></span>Reading list</h2>
 <span class="count-badge" id="reading-list-count"></span>

@@ -14,6 +14,7 @@ import { renderOverview } from './features/overview.js';
 import { renderTasks } from './features/tasks.js';
 import { renderCaptureInbox } from './features/captureinbox.js';
 import { renderReadingList } from './features/readinglist.js';
+import { renderMedia } from './features/media.js';
 import { renderCaptureDrafts } from './features/voicecapture.js';
 // renderHealthDaily() (below) already triggers a chart refresh itself, same
 // as renderRenphoDaily()/renderWellnessDaily() do -- see health.js's own
@@ -46,6 +47,7 @@ renderEnhancementIdeas();
 renderTasks();
 renderCaptureInbox();
 renderReadingList();
+renderMedia();
 renderCaptureDrafts();
 renderHealthDaily();
 renderRenphoDaily();

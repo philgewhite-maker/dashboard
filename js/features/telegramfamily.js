@@ -254,6 +254,7 @@ ${t.question ? `<div class="alloc-notes">Asked: ${escapeHtml(t.question)}</div>`
 <div class="alloc-notes" style="font-weight:500;color:var(--ink);">${escapeHtml(t.replyText)}</div>
 <div class="alloc-controls">
 <button class="add-btn" type="button" data-telegramfamily-resolve="${t.id}">Mark resolved</button>
+<button class="add-btn" type="button" data-telegramfamily-media="${t.id}" title="Their message is a film/series/album they want — add it to the Media tab's list, crediting them">&#127916; Watch/listen list</button>
 </div>
 </div>`;
 }
@@ -364,6 +365,33 @@ t.status = 'resolved';
 t.resolvedAt = new Date().toISOString();
 queueSave();
 renderTelegramFamily();
+});
+});
+// "Watch Slow Horses" arriving from someone else is a media want with a
+// name attached. Deliberately a tap rather than automatic -- the same
+// review-before-commit rule every other inbound capture follows -- and
+// it resolves the thread in the same move, since the ask is now recorded
+// somewhere it won't be lost.
+root.querySelectorAll('[data-telegramfamily-media]').forEach((btn) => {
+btn.addEventListener('click', async () => {
+const t = data.telegramThreads.find((x) => x.id === btn.dataset.telegramfamilyMedia);
+if (!t) return;
+const conn = data.connections.find((c) => c.id === t.connectionId);
+const title = (t.replyText || '').trim().split('\n')[0].slice(0, 120);
+if (!title) return;
+const { addMediaItem, mediaChipHtml } = await import('./media.js');
+const item = addMediaItem({
+kind: 'other', // they rarely say which; one tap on the row fixes it
+title,
+requestedBy: conn ? conn.name : '',
+source: { kind: 'telegram', label: conn ? conn.name : 'Telegram', url: '' },
+});
+t.status = 'resolved';
+t.resolvedAt = new Date().toISOString();
+queueSave();
+renderTelegramFamily();
+const status = document.getElementById('telegramfamily-send-status');
+if (status) status.innerHTML = `Added ${mediaChipHtml(item)} to your watch/listen list.`;
 });
 });
 }

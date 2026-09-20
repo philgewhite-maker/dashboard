@@ -110,6 +110,17 @@ shareUrlRules: [
 { id: 'seed-tinder-share', host: 'go.tinder.com', path: '', action: 'superlike' },
 { id: 'seed-tesco', host: 'tesco.com', path: '', action: 'supermarket' },
 { id: 'seed-amazon', host: 'amazon.co.uk', path: '', action: 'supermarket' },
+// Film/TV and music sites: a shared link from any of these is
+// almost always "I want to watch/listen to this".
+{ id: 'seed-imdb', host: 'imdb.com', path: '', action: 'media' },
+{ id: 'seed-letterboxd', host: 'letterboxd.com', path: '', action: 'media' },
+{ id: 'seed-themoviedb', host: 'themoviedb.org', path: '', action: 'media' },
+{ id: 'seed-trakt', host: 'trakt.tv', path: '', action: 'media' },
+{ id: 'seed-rottentomatoes', host: 'rottentomatoes.com', path: '', action: 'media' },
+{ id: 'seed-spotify', host: 'open.spotify.com', path: '', action: 'media' },
+{ id: 'seed-bandcamp', host: 'bandcamp.com', path: '', action: 'media' },
+{ id: 'seed-discogs', host: 'discogs.com', path: '', action: 'media' },
+{ id: 'seed-applemusic', host: 'music.apple.com', path: '', action: 'media' },
 ],
 // A second, explicit-intent way into the same outcomes shareUrlRules
 // routes to (js/features/captureOutcomes.js's CAPTURE_OUTCOMES) --
@@ -125,6 +136,7 @@ captureRules: [
 { id: 'seed-marker-task', inputMethod: 'imageMarker', trigger: 'T', outcome: 'task' },
 { id: 'seed-marker-reading', inputMethod: 'imageMarker', trigger: 'R', outcome: 'reading' },
 { id: 'seed-marker-supermarket', inputMethod: 'imageMarker', trigger: 'S', outcome: 'supermarket' },
+{ id: 'seed-marker-media', inputMethod: 'imageMarker', trigger: 'M', outcome: 'media' },
 { id: 'seed-suffix-task', inputMethod: 'urlSuffix', trigger: 'T', outcome: 'task' },
 { id: 'seed-suffix-reading', inputMethod: 'urlSuffix', trigger: 'R', outcome: 'reading' },
 // Explicit-intent catch-all for a shared product link from anywhere
@@ -132,6 +144,7 @@ captureRules: [
 // shareUrlRules above) -- domain rules can't enumerate every retailer,
 // so "#S" is how any of them reaches the Supermarket list.
 { id: 'seed-suffix-supermarket', inputMethod: 'urlSuffix', trigger: 'S', outcome: 'supermarket' },
+{ id: 'seed-suffix-media', inputMethod: 'urlSuffix', trigger: 'M', outcome: 'media' },
 // A third sense: a word ("zxc") + the trigger letter in an EMAIL
 // SUBJECT, read on Mail's own "Refresh mail" (js/features/mail.js's
 // processMailMarkers) rather than by a photo/URL share. "zxc" survives
@@ -152,6 +165,7 @@ captureRules: [
 { id: 'seed-subject-task', inputMethod: 'emailSubject', trigger: 'T', outcome: 'task' },
 { id: 'seed-subject-reading', inputMethod: 'emailSubject', trigger: 'R', outcome: 'reading' },
 { id: 'seed-subject-supermarket', inputMethod: 'emailSubject', trigger: 'S', outcome: 'supermarket' },
+{ id: 'seed-subject-media', inputMethod: 'emailSubject', trigger: 'M', outcome: 'media' },
 ],
 };
 
@@ -359,6 +373,55 @@ read: false,
 ...fields,
 };
 }
+
+// Something to watch or listen to: a film, a series, an album. Sits on
+// the Media tab next to the reading list, which is the same "a want,
+// then a tick" idea for text.
+//
+// `plexCheck` and `acquisition` are deliberately null until something
+// fills them, exactly like a shopping task's `priceCheck` -- that's the
+// seam the home agent (a script on the NAS polling for commands, since
+// nothing public can reach the LAN) writes into later, with no
+// migration needed when it arrives.
+function blankMediaItem(fields = {}) {
+return {
+id: uid(),
+kind: 'film', // film | tv | album | track | podcast | other
+title: '',
+creator: '', // director, artist, showrunner -- whoever the item is "by"
+year: '',
+status: 'wanted', // wanted | available | done | dropped
+link: '',
+notes: '',
+photoIds: [], // a poster/screenshot capture has no URL, same dual shape as a reading item
+source: null, // {kind, label, url}
+requestedBy: '', // who asked for it, when it arrived via Telegram
+externalIds: {}, // imdb/tmdb/musicbrainz, once anything resolves them
+plexCheck: null, // {checkedAt, found, ratingKey}
+acquisition: null, // {state, client, hash, checkedAt}
+addedAt: new Date().toISOString(),
+...fields,
+};
+}
+
+const MEDIA_KINDS = [
+{ kind: 'film', label: 'Film' },
+{ kind: 'tv', label: 'TV' },
+{ kind: 'album', label: 'Album' },
+{ kind: 'track', label: 'Track' },
+{ kind: 'podcast', label: 'Podcast' },
+{ kind: 'other', label: 'Other' },
+];
+
+// `wanted` and `available` are both still to-watch; `done` and `dropped`
+// are both finished with. Kept as four so "I have it but haven't watched
+// it" is sayable -- the whole point of checking against Plex.
+const MEDIA_STATUSES = [
+{ status: 'wanted', label: 'Wanted' },
+{ status: 'available', label: 'Available' },
+{ status: 'done', label: 'Watched' },
+{ status: 'dropped', label: 'Dropped' },
+];
 
 // A job application. Was built inline in jobs.js's own add-form handler
 // (data.jobs.push({id, company, role, stage})) -- given a real factory now,
@@ -1092,6 +1155,8 @@ b.items = Array.isArray(b.items)
 data.captureInbox = data.captureInbox.filter((b) => b.items.length > 0);
 if (!Array.isArray(data.readingList)) data.readingList = [];
 data.readingList = data.readingList.map((r) => ({ ...blankReadingItem(), ...r, id: r.id || uid() }));
+if (!Array.isArray(data.mediaItems)) data.mediaItems = [];
+data.mediaItems = data.mediaItems.map((m) => ({ ...blankMediaItem(), ...m, id: m.id || uid(), photoIds: Array.isArray(m.photoIds) ? m.photoIds : [], externalIds: m.externalIds || {} }));
 if (!Array.isArray(data.captureDrafts)) data.captureDrafts = [];
 data.captureDrafts = data.captureDrafts.map((d) => ({ ...blankCaptureDraft(), ...d, id: d.id || uid(), steps: Array.isArray(d.steps) ? d.steps : [] }));
 if (!Array.isArray(data.pendingImports)) data.pendingImports = [];
@@ -2165,7 +2230,7 @@ setExternalUpdateHandler, setLocalChangeHandler, getLocalSettings, setLocalSetti
 isDormantStage, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness,
 exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, DEFAULT_PREFS,
 MAIL_SEARCH_KINDS, mailSearchLabel, blankMailSearch, blankMailTopic, blankMailDismissal,
-TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureBatch, blankPendingImport, blankConnection, blankTelegramThread, blankReadingItem, blankCaptureDraft, blankJob,
+TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureBatch, blankPendingImport, blankConnection, blankTelegramThread, blankReadingItem, blankCaptureDraft, blankJob, blankMediaItem, MEDIA_KINDS, MEDIA_STATUSES,
 blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS, LEG_DATE_FIELDS,
 blankPlannerEntry, blankPlannerActivity,
 blankAirbnbListing, blankAirbnbReservation, blankAirbnbKey, blankAirbnbKeyAssignment, KEY_CUSTODIAN_TYPES, blankFinanceAccount,

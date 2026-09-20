@@ -68,6 +68,13 @@ case 'reading': {
 const { addToReadingList } = await import('./readinglist.js');
 return addToReadingList({ title: step.title || step.url || 'Untitled', url: step.url || '', notes: step.notes || '' });
 }
+case 'media': {
+const { addMediaItem } = await import('./media.js');
+return addMediaItem({
+kind: step.kind || 'other', title: step.title || step.url || 'Untitled',
+creator: step.creator || '', year: step.year || '', link: step.url || '', notes: step.notes || '',
+});
+}
 case 'trip': {
 const { createTrip } = await import('./travel.js');
 const trip = await createTrip({ title: step.title || 'New trip', destinations: step.destinations || [] });
@@ -155,6 +162,7 @@ function stepSummary(step) {
 switch (step.type) {
 case 'task': return `Task: ${step.title || '(untitled)'}${step.due ? ` — due ${step.due}` : ''}`;
 case 'reading': return `Reading list: ${step.title || step.url || '(untitled)'}`;
+case 'media': return `Watch/listen: ${step.title || step.url || '(untitled)'}${step.creator ? ` — ${step.creator}` : ''}`;
 case 'trip': return `New trip "${step.title || '(untitled)'}"${step.startDate ? `, ${step.startDate} to ${step.endDate || step.startDate}` : ''}`;
 case 'tripActivity': return `Add "${step.title || '(untitled)'}" to ${step.tripId === '__new__' ? (step.newTripTitle || 'the new trip') : 'the trip'}${step.date ? ` on ${step.date}` : ''}`;
 case 'connection': return `New contact: ${step.name || '(unnamed)'}`;

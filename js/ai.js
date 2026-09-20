@@ -1379,6 +1379,7 @@ return `Today is ${todayStr()}. Turn this instruction into an ordered list of st
 + 'Each step is one JSON object, one of these exact shapes -- omit fields you have nothing for rather than inventing a value:\n'
 + '{"type":"task","title":"...","notes":"...","due":"YYYY-MM-DD"}\n'
 + '{"type":"reading","title":"...","url":"...","notes":"..."}\n'
++ '{"type":"media","kind":"film|tv|album|track|podcast|other","title":"...","creator":"...","year":"YYYY","url":"...","notes":"..."} -- something to watch or listen to ("watch The Bear", "get the new Sault album")\n'
 + '{"type":"trip","title":"...","destinations":["..."],"startDate":"YYYY-MM-DD","endDate":"YYYY-MM-DD"}\n'
 + '{"type":"tripActivity","tripId":"<existing id, or __new__>","newTripTitle":"...","title":"...","date":"YYYY-MM-DD"}\n'
 + '{"type":"connection","name":"..."}\n'
@@ -1692,6 +1693,50 @@ await parseCachePut(hash, cacheKind, { result });
 return { ...result, fromCache: false };
 }
 
+// A screenshot of something to watch or listen to: a poster, a Netflix
+// or iPlayer row, a Spotify/Bandcamp album page, a review. Same shape as
+// extractTripScreenshot above (vision call, hash-keyed parse cache, low
+// effort) -- the difference is only what it's looking for. Returns
+// {kind, title, creator, year}; an empty title means "couldn't tell",
+// and the caller keeps whatever title the capture already carried.
+const MEDIA_SCHEMA_VERSION = 1;
+
+async function extractMediaScreenshot(file) {
+file = await ensureBrowserReadableImage(file);
+const hash = await hashFile(file);
+const cacheKind = `media-v${MEDIA_SCHEMA_VERSION}`;
+const cached = await parseCacheGet(hash, cacheKind);
+if (cached) return { ...cached.result, fromCache: true };
+
+const base64 = await fileToBase64(file);
+const mediaType = normalizeImageMediaType(file.type || 'image/png');
+const prompt = `This is a screenshot of something to watch or listen to -- a film or TV poster, a streaming app's title page, a music album page, or a review.
+
+Identify the ONE main title it is about. Reply with JSON only:
+{"kind":"film|tv|album|track|podcast|other","title":"","creator":"","year":""}
+
+- "title" is the work's own name, not the app's ("The Bear", not "Netflix").
+- "creator" is the director for a film, the showrunner or network for TV, the artist for music. "" if it isn't shown.
+- "year" is the release year as 4 digits, "" if it isn't shown.
+- If the screenshot shows a list of several titles rather than one, or you can't tell what it is, reply {"kind":"other","title":"","creator":"","year":""}.`;
+const { data: raw } = await callAnthropic(
+[
+{ type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
+{ type: 'text', text: prompt },
+],
+600, TRIP_MODEL, 'Media screenshot', null, 'low',
+);
+const kinds = ['film', 'tv', 'album', 'track', 'podcast', 'other'];
+const result = {
+kind: kinds.includes(raw?.kind) ? raw.kind : 'other',
+title: String(raw?.title || '').trim(),
+creator: String(raw?.creator || '').trim(),
+year: String(raw?.year || '').trim(),
+};
+await parseCachePut(hash, cacheKind, { result });
+return { ...result, fromCache: false };
+}
+
 async function extractTripLegFromEmail(subject, from, bodyText) {
 const prompt = `This is an email that may be a travel booking confirmation. Subject: "${subject || ''}". From: "${from || ''}".
 
@@ -1803,7 +1848,7 @@ callTextJson, DEFAULT_MODEL, summarizeUsage, currentMonthKey, compareFaces,
 extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShoppingItem, identifyProduct, translateText, romanizeName, parseCaptureIntent,
 resolveUrlTitle, resolveJobPostingUrl,
 identifyCountry, extractWellnessScreenshot,
-extractTripScreenshot, extractTripLegFromEmail, extractTaskFromEmail, extractDateEventFromEmail,
+extractTripScreenshot, extractMediaScreenshot, extractTripLegFromEmail, extractTaskFromEmail, extractDateEventFromEmail,
 parseIngredients, assessIngredient, ALLERGEN_LIST, DIETARY_FLAGS, FODMAP_COMPONENTS, FODMAP_LEVELS,
 FODMAP_THRESHOLDS_G, OLIGO_CATEGORIES, fodmapLevelFromGrams, regenerateRecipeVariant, assessUnitWeight, assessUnitRatio,
 GLYCEMIC_LOAD_THRESHOLDS, glycemicLevelFromLoad,

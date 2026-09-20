@@ -398,7 +398,10 @@ try {
 await action.run({ title: composed.title, notes: composed.notes, url: composed.link, photoIds: [], source: composed.source });
 banner(action.successBanner(host), async () => {
 const { switchTab } = await import('../tabs.js');
-switchTab(outcomeKey === 'recipe' ? 'menu' : 'tasks');
+// Each outcome declares where its record lives (CAPTURE_OUTCOMES'
+// `tab`). This used to be a recipe-vs-everything-else ternary, which
+// sent a reading-list capture to Tasks.
+switchTab(action.tab || 'tasks');
 });
 return;
 } catch (err) {

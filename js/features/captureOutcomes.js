@@ -48,11 +48,18 @@ function nameFromTinderShareUrl(url) {
   return name && /[a-z]/i.test(name) ? name : null;
 }
 
+// `tab` is where a successful capture's "Open it" banner should land.
+// Held here rather than at the call site because only this registry
+// knows where an outcome's record actually lives -- sharetarget.js used
+// to hardcode a recipe-vs-everything-else ternary, which quietly sent
+// reading-list captures to Tasks even before the reading list moved to
+// the Media tab. A missing `tab` means "no particular destination".
 const CAPTURE_OUTCOMES = {
 task: {
 label: 'Task',
 commitMode: 'direct',
 aiCost: 'none',
+tab: 'tasks',
 successBanner: (host) => `Captured to your Inbox${host ? ` from ${host}` : ''}.`,
 run: async (ctx) => {
 const { captureTask } = await import('./tasks.js');
@@ -69,6 +76,7 @@ reading: {
 label: 'Reading list',
 commitMode: 'direct',
 aiCost: 'none',
+tab: 'media',
 successBanner: (host) => `Added to your reading list${host ? ` from ${host}` : ''}.`,
 run: async (ctx) => {
 const { addToReadingList } = await import('./readinglist.js');
@@ -88,6 +96,7 @@ recipe: {
 label: 'Import as a recipe',
 commitMode: 'direct', // recipes.js's own pending+review form is the real gate before Save
 aiCost: 'conditional', // structured data on the page first, AI only as a fallback -- see importFromUrl (recipes.js)
+tab: 'menu',
 successBanner: (host) => `Read a recipe from ${host} — review and save it on the Menu tab.`,
 run: async (ctx) => {
 const { importSharedRecipeUrl } = await import('./recipes.js');
@@ -106,6 +115,7 @@ superlike: {
 label: 'Super Like candidate',
 commitMode: 'direct',
 aiCost: 'none',
+tab: 'tasks',
 successBanner: () => `Added as a Super Like candidate — 7 days to use it.`,
 run: async (ctx) => {
 const { captureTask } = await import('./tasks.js');
@@ -140,6 +150,7 @@ supermarket: {
 label: 'Supermarket item',
 commitMode: 'direct',
 aiCost: 'conditional', // only the image-marker path's own product-ID call, see ctx.file below
+tab: 'shopping',
 successBanner: () => `Added to your Supermarket list — checking prices…`,
 run: async (ctx) => {
 const { captureTask } = await import('./tasks.js');
@@ -176,6 +187,65 @@ await runAutoPriceCheck(task);
 } catch (err) {
 console.error('Auto price-check failed, item stays without one until Search prices is used manually:', err);
 }
+},
+},
+// A film/series/album to watch or listen to. Two AI shapes, both
+// conditional and both already built for other outcomes: a shared LINK
+// whose title is still just the URL gets resolveUrlTitle (the same call
+// Tasks/Shopping's "Resolve title" uses), and a marked SCREENSHOT -- a
+// poster, a Netflix row, a Spotify album page -- gets
+// extractMediaScreenshot, which is extractTripScreenshot's shape
+// pointed at media instead of travel. Neither is reached by a capture
+// that already carries a real title (typed, spoken, or from Telegram),
+// same "ctx.file's presence is the signal" reasoning as `supermarket`.
+media: {
+label: 'Watch / listen',
+commitMode: 'direct',
+aiCost: 'conditional',
+tab: 'media',
+successBanner: (host) => `Added to your watch/listen list${host ? ` from ${host}` : ''}.`,
+run: async (ctx) => {
+const { addMediaItem, kindFromUrl } = await import('./media.js');
+const { looksLikeUrl } = await import('../utils.js');
+let title = (ctx.title || '').trim();
+let kind = ctx.url ? kindFromUrl(ctx.url) : 'other';
+let creator = '';
+let year = '';
+if (ctx.file) {
+try {
+const { extractMediaScreenshot } = await import('../ai.js');
+const found = await extractMediaScreenshot(ctx.file);
+if (found.title) {
+title = found.title;
+if (found.kind) kind = found.kind;
+creator = found.creator || '';
+year = found.year || '';
+}
+} catch (err) {
+console.error('Media screenshot extraction failed, keeping whatever title the capture carried:', err);
+}
+} else if (ctx.url && (!title || looksLikeUrl(title))) {
+// A shared link usually arrives titled with the URL itself, which
+// is useless in a list of films. Best-effort: the raw URL stays as
+// the title if this fails, exactly like the manual Resolve button.
+try {
+const { resolveUrlTitle } = await import('../ai.js');
+const resolved = await resolveUrlTitle(ctx.url);
+if (resolved) title = resolved;
+} catch (err) {
+console.error("Couldn't resolve that media link's title:", err);
+}
+}
+addMediaItem({
+kind,
+title: title || ctx.url || 'Untitled',
+creator,
+year,
+link: ctx.url || '',
+notes: ctx.notes || '',
+photoIds: ctx.photoIds || [],
+source: ctx.source || null,
+});
 },
 },
 // Event and Trip leg are `commitMode: 'draft'` -- the first two entries

@@ -5,7 +5,7 @@ import { callTextJson, MissingKeyError } from '../ai.js';
 import { gapsFor } from './travel.js';
 import { accountLabel } from './financeaccounts.js';
 
-const TARGET_TABS = { connection: 'dating', search: 'dating', habit: 'overview', goal: 'overview', job: 'jobhunt', voucher: 'finances', financeAccount: 'finances', switchOffers: 'finances', calendar: 'overview', business: 'business', task: 'tasks', health: 'health', trip: 'travel', 'trip-suggestion': 'travel', airbnb: 'overview' };
+const TARGET_TABS = { connection: 'dating', search: 'dating', habit: 'overview', goal: 'overview', job: 'jobhunt', voucher: 'finances', financeAccount: 'finances', switchOffers: 'finances', calendar: 'overview', business: 'business', task: 'tasks', health: 'health', trip: 'travel', 'trip-suggestion': 'travel', airbnb: 'overview', media: 'media' };
 // Lead time for the "trip's coming up and still has gaps" nudge -- same
 // 14-day window as NEW_MATCH_STAGES below, so a trip nudge doesn't start
 // nagging the moment it's created, only once it's genuinely close.
@@ -189,6 +189,22 @@ target: { type: 'job', id: j.id },
 signals: { kind: 'job-followup', stage: j.stage },
 category: 'job',
 });
+});
+
+// Someone else's request is the one media want with a social cost to
+// forgetting, so it's the only one that nudges. Your own list sitting
+// there unwatched is a list, not a problem.
+(data.mediaItems || []).forEach((m) => {
+if (m.status !== 'wanted' || !m.requestedBy) return;
+const waiting = daysSince(m.addedAt);
+if (waiting >= 14) {
+pool.push({
+text: `${m.requestedBy} asked for "${m.title}" ${waiting} days ago — still not sorted.`,
+target: { type: 'media', id: m.id },
+signals: { kind: 'media-requested', daysWaiting: waiting },
+category: 'media',
+});
+}
 });
 
 data.vouchers.forEach((v) => {
@@ -504,6 +520,11 @@ setTimeout(() => scrollAndFlash(`[data-goal-row="${target.id}"]`), 50);
 setTimeout(() => scrollAndFlash(`[data-job-row="${target.id}"]`), 50);
 } else if (target.type === 'voucher') {
 setTimeout(() => scrollAndFlash(`[data-voucher-row="${target.id}"]`), 50);
+} else if (target.type === 'media') {
+// revealMediaItem clears the list's own filters first when the item
+// is finished or filtered out, same as the 'connection' branch's
+// expandConnection does for a collapsed card.
+import('./media.js').then((m) => m.revealMediaItem(target.id));
 } else if (target.type === 'financeAccount') {
 // financeaccounts.js's own expandAccountRow() does the open-then-
 // scroll-and-flash itself (the account card is a <details>, unlike a
