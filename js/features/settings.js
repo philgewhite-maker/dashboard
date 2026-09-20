@@ -1,4 +1,4 @@
-import { data, queueSave, getLocalSettings, setLocalSetting, exportBackup, importBackup, MAIL_SEARCH_KINDS, blankMailSearch, blankMailTopic } from '../state.js';
+import { data, queueSave, getLocalSettings, setLocalSetting, exportBackup, importBackup, MAIL_SEARCH_KINDS, MEDIA_KINDS, blankMailSearch, blankMailTopic } from '../state.js';
 import { renderAll } from '../render-all.js';
 import { escapeHtml, uid } from '../utils.js';
 import { renderCalendarLimits } from './calendars.js';
@@ -342,6 +342,7 @@ queueSave();
 });
 
 renderShareUrlRules();
+renderMediaRoutes();
 const addRuleBtn = document.getElementById('add-share-rule-btn');
 if (addRuleBtn) addRuleBtn.addEventListener('click', () => {
 data.prefs.shareUrlRules = data.prefs.shareUrlRules || [];
@@ -473,6 +474,68 @@ x.addEventListener('click', () => {
 data.prefs.shareUrlRules = (data.prefs.shareUrlRules || []).filter((r) => r.id !== x.dataset.delShareRule);
 renderShareUrlRules();
 queueSave();
+});
+});
+}
+
+// One table per media kind: the ordered list of ways a want can be
+// satisfied. Mirrors renderShareUrlRules above -- same edit-in-place
+// table, same change-to-save, same delete cross -- rather than a second
+// style of rules editor.
+function renderMediaRoutes() {
+const el = document.getElementById('media-routes-editor');
+if (!el) return;
+const routes = data.prefs.mediaRoutes || {};
+const TYPES = [
+{ type: 'stream', label: 'Watch on a subscribed service' },
+{ type: 'buy', label: 'Buy (adds a shopping item)' },
+{ type: 'search', label: 'Search somewhere' },
+{ type: 'download', label: 'Request a download' },
+];
+el.innerHTML = MEDIA_KINDS.map((k) => {
+const list = routes[k.kind] || [];
+const rows = list.map((r) => `<tr>
+<td><input type="text" autocomplete="off" data-route-field="label" data-route-kind="${k.kind}" data-route-id="${r.id}" value="${escapeHtml(r.label || '')}" placeholder="What this offers"></td>
+<td><select data-route-field="type" data-route-kind="${k.kind}" data-route-id="${r.id}">
+${TYPES.map((t) => `<option value="${t.type}"${t.type === r.type ? ' selected' : ''}>${escapeHtml(t.label)}</option>`).join('')}
+</select></td>
+<td><input type="text" autocomplete="off" data-route-field="${r.type === 'download' ? 'profile' : r.type === 'buy' ? 'context' : 'urlTemplate'}" data-route-kind="${k.kind}" data-route-id="${r.id}" value="${escapeHtml(r.urlTemplate || r.profile || r.context || '')}" placeholder="${r.type === 'download' ? 'quality profile name' : r.type === 'buy' ? 'shopping context' : 'https://…/search?q={q}'}"></td>
+<td><span class="del-x" style="opacity:1;" data-del-route="${r.id}" data-route-kind="${k.kind}">&times;</span></td>
+</tr>`).join('');
+return `<h4 style="margin:12px 0 4px;font-size:14px;">${escapeHtml(k.label)}</h4>
+${list.length ? `<table class="limits-table">
+<thead><tr><th>Offers</th><th>Does what</th><th>Where / profile</th><th></th></tr></thead>
+<tbody>${rows}</tbody></table>` : '<div class="settings-note" style="margin:0;">No routes — the Get… button will say so.</div>'}
+<button class="todo-add-btn" type="button" data-add-route="${k.kind}">+ Add a route</button>`;
+}).join('');
+
+el.querySelectorAll('[data-route-field]').forEach((input) => {
+input.addEventListener('change', () => {
+const list = (data.prefs.mediaRoutes || {})[input.dataset.routeKind] || [];
+const route = list.find((r) => r.id === input.dataset.routeId);
+if (!route) return;
+route[input.dataset.routeField] = input.value.trim();
+queueSave();
+// A type change swaps which third column applies, so the table is
+// rebuilt rather than left showing the previous type's field.
+if (input.dataset.routeField === 'type') renderMediaRoutes();
+});
+});
+el.querySelectorAll('[data-del-route]').forEach((x) => {
+x.addEventListener('click', () => {
+const kind = x.dataset.routeKind;
+data.prefs.mediaRoutes[kind] = (data.prefs.mediaRoutes[kind] || []).filter((r) => r.id !== x.dataset.delRoute);
+queueSave();
+renderMediaRoutes();
+});
+});
+el.querySelectorAll('[data-add-route]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const kind = btn.dataset.addRoute;
+if (!Array.isArray(data.prefs.mediaRoutes[kind])) data.prefs.mediaRoutes[kind] = [];
+data.prefs.mediaRoutes[kind].push({ id: uid(), type: 'search', label: '', urlTemplate: '' });
+queueSave();
+renderMediaRoutes();
 });
 });
 }

@@ -189,6 +189,7 @@ ${item.plexCheck ? (item.plexCheck.found
 ? `<span class="task-context" style="background:var(--sage-bg);color:var(--sage);font-weight:600;" title="In your Plex library${item.plexCheck.matchedTitle ? ` as &quot;${escapeHtml(item.plexCheck.matchedTitle)}&quot;${item.plexCheck.matchedYear ? ` (${escapeHtml(item.plexCheck.matchedYear)})` : ''}` : ''}">&#10003; On Plex</span>`
 : `<span class="settings-note" style="margin:0;" title="Checked on ${escapeHtml(String(item.plexCheck.checkedAt).slice(0, 10))}">not on Plex</span>`) : ''}
 ${item.notes ? `<span class="settings-note" style="margin:0;">${escapeHtml(item.notes)}</span>` : ''}
+<button class="mini-task-btn" type="button" data-media-satisfy="${item.id}" title="How to get hold of it">Get&hellip;</button>
 <select class="mini" data-media-status="${item.id}">
 ${MEDIA_STATUSES.map((s) => `<option value="${s.status}"${s.status === item.status ? ' selected' : ''}>${escapeHtml(s.label)}</option>`).join('')}
 </select>
@@ -213,6 +214,12 @@ hydratePhotoBackgrounds(list);
 hideBrokenArt(list);
 enrichPending();
 
+list.querySelectorAll('[data-media-satisfy]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const item = data.mediaItems.find((m) => m.id === btn.dataset.mediaSatisfy);
+if (item) showRoutes(item);
+});
+});
 list.querySelectorAll('[data-media-status]').forEach((sel) => {
 sel.addEventListener('change', () => {
 const item = data.mediaItems.find((m) => m.id === sel.dataset.mediaStatus);
@@ -399,6 +406,119 @@ if (item) item.plexCheck = { checkedAt: new Date().toISOString(), found: false, 
 finish();
 });
 });
+}
+
+// ---- Satisfying a want ------------------------------------------------
+//
+// Routes come from prefs (state.js's mediaRoutes) and say only WHAT should
+// happen: stream it, buy it, search somewhere, request a download. What
+// counts as a good download -- codec, size, release group -- belongs in
+// Radarr/Sonarr's own quality profiles, so a route carries at most the
+// name of the profile to ask for.
+
+function fillTemplate(template, item) {
+const q = [item.title, item.creator].filter(Boolean).join(' ');
+return String(template || '')
+.replace(/\{title\}/g, encodeURIComponent(item.title || ''))
+.replace(/\{creator\}/g, encodeURIComponent(item.creator || ''))
+.replace(/\{year\}/g, encodeURIComponent(item.year || ''))
+.replace(/\{isbn\}/g, encodeURIComponent(item.externalIds?.asin || ''))
+.replace(/\{q\}/g, encodeURIComponent(q));
+}
+
+// A stream route only makes sense when it's actually streaming somewhere
+// you already pay for -- otherwise "watch it on a service you subscribe
+// to" is an instruction you can't follow.
+function subscribedProvider(item) {
+const flat = item.whereToWatch ? item.whereToWatch.flatrate : [];
+for (const name of flat || []) {
+const sub = subscriptionFor(name, data.subscriptions || []);
+if (sub) return { name, sub };
+}
+return null;
+}
+
+function routesFor(item) {
+const all = (data.prefs.mediaRoutes || {})[item.kind] || [];
+return all.filter((r) => (r.type === 'stream' ? !!subscribedProvider(item) : true));
+}
+
+async function runRoute(item, route) {
+if (route.type === 'stream') {
+const where = subscribedProvider(item);
+const url = (item.whereToWatch && item.whereToWatch.link) || item.link;
+if (url) window.open(url, '_blank', 'noopener');
+item.status = 'available';
+queueSave();
+renderMedia();
+return `Opened ${where ? where.name : 'where to watch'}.`;
+}
+if (route.type === 'search') {
+const url = fillTemplate(route.urlTemplate, item);
+if (!url) return 'That route has no search URL set — add one in Settings.';
+window.open(url, '_blank', 'noopener');
+return `Searched ${route.label}.`;
+}
+if (route.type === 'buy') {
+// Reuses the shopping list rather than inventing a second one: a
+// thing to buy is a task with a shopping context, which already gets
+// price checks and lives where the rest of the shopping does.
+const { captureTask } = await import('./tasks.js');
+const title = [item.title, item.creator].filter(Boolean).join(' — ');
+const task = captureTask({
+title,
+link: item.link || '',
+contexts: [route.context || 'Aspirational purchases'],
+bucket: 'next',
+source: { kind: 'media', label: item.title, url: item.link || '' },
+});
+const { taskChipHtml, bindTaskChips } = await import('./tasks.js');
+bindTaskChips();
+return `Added ${taskChipHtml(task)} to your shopping list.`;
+}
+if (route.type === 'download') {
+// The one route with nothing behind it yet: Radarr/Sonarr is where a
+// download request would go, and neither exists on the NAS so far.
+// Says so plainly rather than failing obscurely.
+return `Download requests need Radarr or Sonarr on the NAS${route.profile ? ` (profile "${route.profile}")` : ''} — not set up yet.`;
+}
+return 'Unknown route.';
+}
+
+function showRoutes(item) {
+const host = document.getElementById('media-candidates');
+if (!host) return;
+const routes = routesFor(item);
+if (!routes.length) {
+setCaptureStatus(`No routes set for ${KIND_LABEL[item.kind] || item.kind} — add some in Settings.`);
+return;
+}
+host.innerHTML = `<div class="alloc-card">
+<div class="alloc-title">How do you want "${escapeHtml(item.title)}"?</div>
+${routes.map((r) => `<div class="mail-row" data-route-run="${escapeHtml(r.id)}" style="cursor:pointer;">
+<span class="mail-subject">${escapeHtml(r.label)}</span>
+${r.type === 'download' && r.profile ? `<span class="settings-note" style="margin:0;">profile: ${escapeHtml(r.profile)}</span>` : ''}
+</div>`).join('')}
+<div class="alloc-controls">
+<span class="sync-status" data-route-status></span>
+<button class="del-x" type="button" data-route-cancel>Close</button>
+</div>
+</div>`;
+const status = host.querySelector('[data-route-status]');
+host.querySelectorAll('[data-route-run]').forEach((row) => {
+row.addEventListener('click', async () => {
+const route = routes.find((r) => r.id === row.dataset.routeRun);
+if (!route) return;
+try {
+const message = await runRoute(item, route);
+if (status) status.innerHTML = message;
+} catch (err) {
+console.error('Route failed:', err);
+if (status) status.textContent = `That didn't work: ${err.message || err}`;
+}
+});
+});
+host.querySelector('[data-route-cancel]').addEventListener('click', () => { host.innerHTML = ''; });
 }
 
 function setCaptureStatus(text) {

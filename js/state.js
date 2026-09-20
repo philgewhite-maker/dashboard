@@ -167,6 +167,42 @@ captureRules: [
 { id: 'seed-subject-supermarket', inputMethod: 'emailSubject', trigger: 'S', outcome: 'supermarket' },
 { id: 'seed-subject-media', inputMethod: 'emailSubject', trigger: 'M', outcome: 'media' },
 ],
+// How a want on the Media tab actually gets satisfied, per kind. An
+// ordered list, because the answer is usually "whichever of these
+// applies first": a film on a service you already pay for needs
+// nothing bought or downloaded, while the same film elsewhere does.
+//
+// Deliberately only INTENT lives here. What counts as a good file --
+// h265 over h264, no Dolby Vision, under a size per hour, a preferred
+// release group -- belongs in Radarr/Sonarr/Lidarr's own quality
+// profiles and custom formats, which exist to express exactly that.
+// A route carries at most the NAME of the profile to request, so the
+// *arr stays the one place those rules are written.
+//
+// `search` routes are just URL templates, and deliberately not a
+// curated list: fill in whichever source you use. Placeholders are
+// {title} {creator} {year} {isbn} {q}, each URL-encoded, where {q} is
+// title and creator together.
+mediaRoutes: {
+film: [
+{ id: 'seed-film-stream', type: 'stream', label: 'Watch on a service you subscribe to' },
+{ id: 'seed-film-download', type: 'download', label: 'Request a download', profile: '' },
+],
+tv: [
+{ id: 'seed-tv-stream', type: 'stream', label: 'Watch on a service you subscribe to' },
+{ id: 'seed-tv-download', type: 'download', label: 'Request a download', profile: '' },
+],
+book: [
+{ id: 'seed-book-buy', type: 'buy', label: 'Buy a copy', context: 'Aspirational purchases' },
+{ id: 'seed-book-openlibrary', type: 'search', label: 'Borrow on Internet Archive', urlTemplate: 'https://archive.org/search?query={q}' },
+{ id: 'seed-book-gutenberg', type: 'search', label: 'Project Gutenberg (out of copyright)', urlTemplate: 'https://www.gutenberg.org/ebooks/search/?query={q}' },
+],
+album: [
+{ id: 'seed-album-buy', type: 'buy', label: 'Buy it', context: 'Aspirational purchases' },
+{ id: 'seed-album-bandcamp', type: 'search', label: 'Find on Bandcamp', urlTemplate: 'https://bandcamp.com/search?q={q}' },
+],
+track: [], artist: [], podcast: [], other: [],
+},
 };
 
 // Each mail search is one row in Settings: a kind, its value, and its own
@@ -1320,6 +1356,17 @@ data.prefs = { ...DEFAULT_PREFS, ...(data.prefs || {}) };
 const existingIds = new Set(data.prefs[key].map((r) => r.id));
 DEFAULT_PREFS[key].forEach((seed) => {
 if (!existingIds.has(seed.id)) data.prefs[key].push({ ...seed });
+});
+});
+// Same reconciliation for the media routes, but per kind: a kind added
+// later (or a new seeded route for an existing one) still arrives on a
+// device that already has synced prefs.
+if (!data.prefs.mediaRoutes || typeof data.prefs.mediaRoutes !== 'object') data.prefs.mediaRoutes = {};
+Object.entries(DEFAULT_PREFS.mediaRoutes).forEach(([kind, seeds]) => {
+if (!Array.isArray(data.prefs.mediaRoutes[kind])) data.prefs.mediaRoutes[kind] = [];
+const existingIds = new Set(data.prefs.mediaRoutes[kind].map((r) => r.id));
+seeds.forEach((seed) => {
+if (!existingIds.has(seed.id)) data.prefs.mediaRoutes[kind].push({ ...seed });
 });
 });
 // Calendar status used to hold a single {title, date}. Reshape those into
