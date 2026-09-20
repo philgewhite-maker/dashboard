@@ -263,6 +263,36 @@ queueSave();
 });
 }
 
+// Shared by a task row's × and an Inbox card's Discard: same cleanup either
+// way -- subtasks, local photos, and server-side attachments, which would
+// otherwise be stranded with nothing pointing at them.
+async function confirmDeleteTask(id) {
+const t = taskById(id);
+if (!t) return;
+const kids = childrenOf(t.id);
+const msg = kids.length
+? `Delete "${t.title}" and its ${kids.length} subtask${kids.length === 1 ? '' : 's'}?`
+: `Delete "${t.title}"?`;
+if (!confirm(msg)) return;
+const doomed = [t.id, ...kids.map((k) => k.id)];
+for (const doomedId of doomed) {
+const task = taskById(doomedId);
+for (const pid of (task?.photoIds || [])) await photoDelete(pid);
+// Best-effort: a failure here must not block the delete.
+for (const a of (task?.attachments || [])) {
+try {
+await deleteAttachment(a.id);
+await photoDelete(a.id);
+} catch (err) {
+console.error(`Couldn't delete attachment "${a.name}" from the server:`, err);
+}
+}
+}
+data.tasks = data.tasks.filter((x) => !doomed.includes(x.id));
+renderTasks();
+queueSave();
+}
+
 // The allocation workspace: everything still in the Inbox, each with a
 // one-tap route to a bucket, plus drop zones for mouse users.
 function renderInbox() {
@@ -286,6 +316,7 @@ ${t.source ? `<div class="alloc-source">from ${escapeHtml(t.source.kind)}</div>`
 ${FILING_BUCKETS.map((b) => `<option value="${b.bucket}">${escapeHtml(b.label)}</option>`).join('')}
 </select>
 ${contextChipsHtml(t)}
+<button class="del-x" type="button" data-alloc-discard="${t.id}" title="Delete this outright, without filing it anywhere">Discard</button>
 </div>
 </div>`).join('')}
 </div>
@@ -394,6 +425,10 @@ fileTask(sel.dataset.allocBucket, sel.value);
 });
 bindContextControls(root);
 
+root.querySelectorAll('[data-alloc-discard]').forEach((btn) => {
+btn.addEventListener('click', () => confirmDeleteTask(btn.dataset.allocDiscard));
+});
+
 root.querySelectorAll('[data-alloc-card]').forEach((card) => {
 card.addEventListener('dragstart', (e) => {
 e.dataTransfer.setData('text/plain', card.dataset.allocCard);
@@ -499,34 +534,7 @@ queueSave();
 });
 
 root.querySelectorAll('[data-task-del]').forEach((x) => {
-x.addEventListener('click', async () => {
-const t = taskById(x.dataset.taskDel);
-if (!t) return;
-const kids = childrenOf(t.id);
-const msg = kids.length
-? `Delete "${t.title}" and its ${kids.length} subtask${kids.length === 1 ? '' : 's'}?`
-: `Delete "${t.title}"?`;
-if (!confirm(msg)) return;
-const doomed = [t.id, ...kids.map((k) => k.id)];
-for (const id of doomed) {
-const task = taskById(id);
-for (const pid of (task?.photoIds || [])) await photoDelete(pid);
-// Attachments live on the server, so deleting the task has to clean up
-// there too or the files are stranded with nothing left pointing at
-// them. Best-effort: a failure here must not block the delete.
-for (const a of (task?.attachments || [])) {
-try {
-await deleteAttachment(a.id);
-await photoDelete(a.id);
-} catch (err) {
-console.error(`Couldn't delete attachment "${a.name}" from the server:`, err);
-}
-}
-}
-data.tasks = data.tasks.filter((x2) => !doomed.includes(x2.id));
-renderTasks();
-queueSave();
-});
+x.addEventListener('click', () => confirmDeleteTask(x.dataset.taskDel));
 });
 
 root.querySelectorAll('[data-task-addsub]').forEach((btn) => {
