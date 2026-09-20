@@ -406,7 +406,8 @@ requestedBy: '', // who asked for it, when it arrived via Telegram
 // this on Plex", "which release", "what's the poster" answerable later
 // without re-identifying a work from its title. See catalogue.js.
 externalIds: {},
-plexCheck: null, // {checkedAt, found, ratingKey}
+plexCheck: null, // {checkedAt, found, ratingKey} -- filled by the home agent
+whereToWatch: null, // {checkedAt, region, flatrate[], rent[], buy[], link} from TMDb
 acquisition: null, // {state, client, hash, checkedAt}
 addedAt: new Date().toISOString(),
 ...fields,

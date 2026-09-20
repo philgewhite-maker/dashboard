@@ -128,6 +128,65 @@ try { return new URL(m[1], pageUrl).href; } catch (e) { return m[1]; }
 return '';
 }
 
+// ---- Where can I already watch it? ------------------------------------
+
+// TMDb's watch/providers is the documented, per-country answer to "what's
+// this streaming on", split into subscription (flatrate), rent and buy.
+// Plex Discover shows the same kind of thing, but only through an
+// undocumented endpoint needing a plex.tv account token, so this is the
+// one built on. Data is JustWatch's, and TMDb's terms ask that they're
+// credited wherever it's shown -- hence the attribution in the UI.
+//
+// Needs only the TMDb id already stored on the item, and runs in the
+// browser: nothing here depends on the home agent.
+async function watchProviders(externalIds = {}, region = 'GB') {
+const tmdb = externalIds.tmdb || '';
+const [type, id] = tmdb.split('/');
+if (!id || (type !== 'movie' && type !== 'tv')) return null;
+const { getLocalSettings } = await import('./state.js');
+const key = (await getLocalSettings()).tmdbApiKey;
+if (!key) return null;
+const res = await fetch(`https://api.themoviedb.org/3/${type}/${id}/watch/providers?api_key=${encodeURIComponent(key)}`);
+if (!res.ok) throw new Error(`TMDb providers lookup failed (HTTP ${res.status}).`);
+const body = await res.json();
+const here = (body.results || {})[region];
+const names = (list) => (list || []).map((p) => p.provider_name).filter(Boolean);
+return {
+checkedAt: new Date().toISOString(),
+region,
+flatrate: here ? names(here.flatrate) : [],
+rent: here ? names(here.rent) : [],
+buy: here ? names(here.buy) : [],
+link: here ? (here.link || '') : '',
+};
+}
+
+// Does a provider match something already being paid for? Compared by
+// name, loosely in both directions, because a subscription is typed by
+// hand ("Netflix", "Amazon Prime") while TMDb returns the service's
+// formal name ("Amazon Prime Video"). The alias list covers the few
+// where neither string contains the other.
+const PROVIDER_ALIASES = {
+'amazon prime video': ['prime', 'amazon'],
+'disney plus': ['disney+', 'disney'],
+'apple tv plus': ['apple tv+', 'appletv', 'apple'],
+'now tv': ['now', 'sky'],
+'bbc iplayer': ['bbc', 'tv licence'],
+'all 4': ['channel 4'],
+'itvx': ['itv'],
+};
+
+function subscriptionFor(providerName, subscriptions) {
+const p = String(providerName || '').toLowerCase().trim();
+if (!p) return null;
+const aliases = [p, ...(PROVIDER_ALIASES[p] || [])];
+return (subscriptions || []).find((s) => {
+const n = String(s.name || '').toLowerCase().trim();
+if (!n) return false;
+return aliases.some((a) => n.includes(a) || a.includes(n));
+}) || null;
+}
+
 // ---- Searching by title ----------------------------------------------
 
 // A typed title is ambiguous in a way a link never is: "Gladiator" is two
@@ -219,4 +278,4 @@ link: `https://musicbrainz.org/release-group/${g.id}`,
 })).filter((c) => c.title);
 }
 
-export { identifyUrl, catalogueLabel, artworkUrl, ogImageFrom, searchTitle, CATALOGUE_LABELS };
+export { identifyUrl, catalogueLabel, artworkUrl, ogImageFrom, searchTitle, watchProviders, subscriptionFor, CATALOGUE_LABELS };

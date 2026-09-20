@@ -14,7 +14,7 @@
 // one place.
 import { data, queueSave, blankMediaItem, MEDIA_KINDS, MEDIA_STATUSES } from '../state.js';
 import { escapeHtml, affiliateLink, scrollAndFlash, hydratePhotoBackgrounds, looksLikeUrl } from '../utils.js';
-import { identifyUrl, catalogueLabel, artworkUrl } from '../catalogue.js';
+import { identifyUrl, catalogueLabel, artworkUrl, watchProviders, subscriptionFor } from '../catalogue.js';
 
 const KIND_LABEL = Object.fromEntries(MEDIA_KINDS.map((k) => [k.kind, k.label]));
 const STATUS_LABEL = Object.fromEntries(MEDIA_STATUSES.map((s) => [s.status, s.label]));
@@ -59,7 +59,25 @@ renderMedia();
 // than delaying it: a poster that never arrives costs nothing, a
 // capture that waited on one would.
 if (!item.imageUrl && item.link) fillArtwork(item);
+// "Can I just watch this tonight?" is the first question about anything
+// on this list, and answering it costs one free API call -- so it's
+// asked on the way in rather than waiting to be requested.
+if (item.externalIds.tmdb) fillWhereToWatch(item);
 return item;
+}
+
+async function fillWhereToWatch(item) {
+try {
+const where = await watchProviders(item.externalIds);
+if (!where) return;
+const live = data.mediaItems.find((m) => m.id === item.id);
+if (!live) return;
+live.whereToWatch = where;
+queueSave();
+renderMedia();
+} catch (err) {
+console.error('Streaming availability lookup failed:', err);
+}
 }
 
 async function fillArtwork(item) {
@@ -124,6 +142,7 @@ ${catalogue ? `<span class="task-context" title="Identified on ${escapeHtml(cata
 <span class="mail-subject">${item.link ? `<a href="${escapeHtml(affiliateLink(item.link))}" target="_blank" rel="noopener">${escapeHtml(item.title)}</a>` : escapeHtml(item.title)}</span>
 ${byline ? `<span class="settings-note" style="margin:0;">${escapeHtml(byline)}</span>` : ''}
 ${item.requestedBy ? `<span class="settings-note" style="margin:0;">asked by ${escapeHtml(item.requestedBy)}</span>` : ''}
+${whereToWatchHtml(item)}
 ${item.notes ? `<span class="settings-note" style="margin:0;">${escapeHtml(item.notes)}</span>` : ''}
 <select class="mini" data-media-status="${item.id}">
 ${MEDIA_STATUSES.map((s) => `<option value="${s.status}"${s.status === item.status ? ' selected' : ''}>${escapeHtml(s.label)}</option>`).join('')}
@@ -175,6 +194,32 @@ function hideBrokenArt(root) {
 root.querySelectorAll('img.media-art').forEach((img) => {
 img.addEventListener('error', () => { img.style.display = 'none'; });
 });
+}
+
+// The point of this line is the difference between "streaming on
+// something you already pay for" and "streaming on something you'd have
+// to pay for", so a service you already subscribe to is called out and
+// listed first. Rent/buy is mentioned only when nothing includes it,
+// since "you could rent it" is noise next to "it's on Netflix".
+function whereToWatchHtml(item) {
+const w = item.whereToWatch;
+if (!w) return '';
+const subs = data.subscriptions || [];
+const onSubscription = w.flatrate.map((name) => ({ name, sub: subscriptionFor(name, subs) }));
+const yours = onSubscription.filter((p) => p.sub);
+const others = onSubscription.filter((p) => !p.sub);
+if (!onSubscription.length && !w.rent.length && !w.buy.length) {
+return `<span class="settings-note" style="margin:0;">Not streaming in ${escapeHtml(w.region)}</span>`;
+}
+const chips = [
+...yours.map((p) => `<span class="task-context" style="background:var(--sage-bg);color:var(--sage);font-weight:600;" title="You already subscribe to ${escapeHtml(p.sub.name)}">&#10003; ${escapeHtml(p.name)}</span>`),
+...others.map((p) => `<span class="task-context" title="Streaming here, but not one of your subscriptions">${escapeHtml(p.name)}</span>`),
+];
+if (!onSubscription.length) {
+const paid = [...new Set([...w.rent, ...w.buy])].slice(0, 3);
+chips.push(`<span class="settings-note" style="margin:0;">rent/buy: ${escapeHtml(paid.join(', '))}</span>`);
+}
+return chips.join('');
 }
 
 function setCaptureStatus(text) {
