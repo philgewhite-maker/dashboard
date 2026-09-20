@@ -296,8 +296,15 @@ micBtn.textContent = '⏹';
 });
 }
 
+// Shares the ONE capture box with tasks.js rather than owning a second
+// one. Two boxes both labelled "Capture", differing only in which code
+// path ran, exposed an implementation detail: from the typing end it's
+// the same act, so Enter still makes a task instantly and for free,
+// while this button (and the mic) read the same text as an instruction.
+// Same "free path by default, AI on a deliberate tap" convention as
+// Resolve title.
 function initQuickCapture() {
-const input = document.getElementById('quick-capture-input');
+const input = document.getElementById('capture-input');
 const btn = document.getElementById('quick-capture-btn');
 const status = document.getElementById('quick-capture-status');
 if (!input || !btn) return;
@@ -321,7 +328,9 @@ btn.disabled = false;
 }
 };
 btn.addEventListener('click', submit);
-input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+// Deliberately no Enter binding: Enter is tasks.js's free instant
+// capture on this same box. Binding it here too would fire both, and
+// spend an AI call on every ordinary task typed.
 initMicCapture(document.getElementById('quick-capture-mic-btn'), input, status, submit);
 }
 

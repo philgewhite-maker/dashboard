@@ -419,6 +419,7 @@ const MEDIA_KINDS = [
 { kind: 'album', label: 'Album' },
 { kind: 'track', label: 'Track' },
 { kind: 'artist', label: 'Artist' },
+{ kind: 'book', label: 'Book' },
 { kind: 'podcast', label: 'Podcast' },
 { kind: 'other', label: 'Other' },
 ];

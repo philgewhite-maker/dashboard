@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v365</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v366</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -149,10 +149,13 @@
 <input type="text" autocomplete="off" id="capture-input" placeholder="What's on your mind? Enter to capture.">
 <button class="add-btn" id="capture-btn" type="button">Capture</button>
 <button type="button" class="mini-task-btn" id="capture-resolve-btn" title="Look up a real title for this pasted link" hidden>&#10024; Resolve title</button>
+<button class="add-btn" id="quick-capture-btn" type="button" title="Read the same text as an instruction — it can create a trip, an event, a media want or several linked records at once, as a draft you confirm below">&#10024; Smart</button>
+<button class="add-btn" id="quick-capture-mic-btn" type="button" title="Record a voice instruction">&#127908;</button>
 <label class="file-btn" for="capture-photo-input">Photo / screenshot</label>
 <input type="file" id="capture-photo-input" accept="image/*" multiple style="display:none;">
 </div>
-<div class="settings-note" style="margin:8px 0 0;">Everything lands in the Inbox unfiled. Deciding where it belongs is the next step, not this one.</div>
+<div class="sync-status" id="quick-capture-status"></div>
+<div class="settings-note" style="margin:8px 0 0;">Enter captures it straight to the Inbox, free and instantly. <strong>&#10024; Smart</strong> or the mic reads the same text as an instruction instead &mdash; &ldquo;watch The Bear&rdquo;, or &ldquo;create a trip to Mallorca 1st to 5th November and add Vora Bora to it in my planner&rdquo; &mdash; and queues a draft below for you to confirm.</div>
 </section>
 
 <section class="panel wide" id="gtasks-panel" data-tab="tasks">
@@ -185,17 +188,11 @@
 
 <section class="panel wide" id="capture-drafts-panel" data-tab="tasks">
 <div class="panel-head">
-<h2><span class="dot rose"></span>Smart capture</h2>
+<h2><span class="dot rose"></span>Capture drafts</h2>
 <span class="count-badge" id="capture-drafts-count"></span>
 <span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#capture-rules" title="Capture markers &amp; suffixes">&#9881;</span>
 </div>
-<div class="capture-row">
-<input type="text" autocomplete="off" id="quick-capture-input" placeholder="Type or speak an instruction&hellip;">
-<button class="add-btn" id="quick-capture-btn" type="button">Capture</button>
-<button class="add-btn" id="quick-capture-mic-btn" type="button" title="Record a voice instruction">&#127908;</button>
-</div>
-<div class="sync-status" id="quick-capture-status"></div>
-<div class="settings-note" style="margin:8px 0 10px;">A short instruction becomes a task or reading-list item; a longer one &mdash; &ldquo;create a trip to Mallorca 1st to 5th November and add Vora Bora to it in my planner&rdquo; &mdash; can create several linked records at once. Nothing is created until you Confirm a draft below. A shared voice clip lands here too, already transcribed.</div>
+<div class="settings-note" style="margin:0 0 10px;">Nothing here is created until you Confirm it. Drafts arrive from <strong>&#10024; Smart</strong> or the mic in Capture above, and from a shared voice clip, already transcribed.</div>
 <div class="sync-status" id="capture-drafts-status"></div>
 <div id="capture-drafts-list"></div>
 </section>
@@ -212,6 +209,8 @@
 <button type="button" class="mini-task-btn" id="media-resolve-btn" title="Look up a real title for this pasted link" hidden>&#10024; Resolve title</button>
 </div>
 <div class="settings-note" style="margin:8px 0 10px;">A shared link from IMDb, Letterboxd, Spotify and the like lands here on its own; so does a link ending <code>#M</code>, a screenshot marked <strong>M</strong>, or a Telegram request you accept. Later this is where &ldquo;is it already on Plex?&rdquo; and downloads will report in.</div>
+<div class="sync-status" id="media-capture-status"></div>
+<div id="media-candidates"></div>
 <div class="overview-chips" id="media-filter" style="margin-bottom:10px;"></div>
 <div id="media-list"></div>
 </section>
@@ -2943,6 +2942,9 @@ Same idea as Connections' ratings, a separate list (Taste/Health/Prep by default
 <h3>AI features</h3>
 <label for="anthropic-key-input" style="font-size:13px;font-weight:500;display:block;margin-bottom:6px;">Anthropic API key (for photo/screenshot import)</label>
 <input type="password" autocomplete="new-password" id="anthropic-key-input" class="settings-input" placeholder="sk-ant-...">
+<label for="tmdb-key-input" style="font-size:13px;font-weight:500;display:block;margin:10px 0 6px;">TMDb API key (for film &amp; TV lookup on the Media tab)</label>
+<input type="password" autocomplete="new-password" id="tmdb-key-input" class="settings-input" placeholder="free from themoviedb.org &mdash; Settings &rarr; API">
+<div class="settings-note">Turns a typed title into the right film or series, with its poster, year and TMDb/IMDb ids. Books and music need no key. The same TMDb ids are what Radarr and Sonarr use, so they stay useful if the download side gets automated later.</div>
 <div class="settings-note">
 Stored only in this browser's local storage on this device — never synced, never sent anywhere except directly to api.anthropic.com. You'll need to enter it again on each device. Calls are billed to your own account (typically a fraction of a cent per screenshot).
 <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">Get a key &rarr;</a>

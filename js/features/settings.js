@@ -153,6 +153,16 @@ clearTimeout(saveTimer);
 saveTimer = setTimeout(() => setLocalSetting('anthropicApiKey', keyInput.value.trim()), 400);
 });
 
+const tmdbInput = document.getElementById('tmdb-key-input');
+if (tmdbInput) {
+tmdbInput.value = settings.tmdbApiKey || '';
+let tmdbTimer = null;
+tmdbInput.addEventListener('input', () => {
+clearTimeout(tmdbTimer);
+tmdbTimer = setTimeout(() => setLocalSetting('tmdbApiKey', tmdbInput.value.trim()), 400);
+});
+}
+
 const exportBtn = document.getElementById('export-btn');
 let exportHandledByPointer = false;
 exportBtn.addEventListener('pointerdown', (e) => {

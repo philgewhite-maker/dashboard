@@ -69,6 +69,7 @@ const CATALOGUE_LABELS = {
 imdb: 'IMDb', tmdb: 'TMDb', tvdb: 'TVDB', trakt: 'Trakt', letterboxd: 'Letterboxd',
 rottentomatoes: 'Rotten Tomatoes', spotify: 'Spotify', appleMusic: 'Apple Music',
 discogs: 'Discogs', bandcamp: 'Bandcamp', goodreads: 'Goodreads', youtube: 'YouTube', asin: 'Amazon',
+openlibrary: 'Open Library', musicbrainz: 'MusicBrainz',
 };
 
 function catalogueLabel(externalIds) {
@@ -127,4 +128,95 @@ try { return new URL(m[1], pageUrl).href; } catch (e) { return m[1]; }
 return '';
 }
 
-export { identifyUrl, catalogueLabel, artworkUrl, ogImageFrom, CATALOGUE_LABELS };
+// ---- Searching by title ----------------------------------------------
+
+// A typed title is ambiguous in a way a link never is: "Gladiator" is two
+// films, a series, a soundtrack and a novel. So a search returns
+// CANDIDATES for the user to choose between, and choosing one is what
+// supplies the id, the year and the artwork in a single step -- rather
+// than storing a bare string nothing can later match against Plex.
+//
+// Each source is picked for being usable from a browser: free, CORS-open,
+// and (except TMDb) needing no key at all.
+const TMDB_IMAGE = 'https://image.tmdb.org/t/p/w185';
+
+async function searchTitle(kind, query) {
+const q = String(query || '').trim();
+if (!q) return [];
+if (kind === 'book') return searchOpenLibrary(q);
+if (kind === 'album' || kind === 'track' || kind === 'artist') return searchMusicBrainz(q);
+if (kind === 'film' || kind === 'tv' || kind === 'other') return searchTmdb(q, kind);
+return []; // podcast has no free catalogue worth the code yet
+}
+
+// TMDb needs a free key, kept in local settings like the others. `multi`
+// rather than `movie`, so "Gladiator" can come back as both the film and
+// the series and the ambiguity is visible rather than guessed at.
+async function searchTmdb(q, kind) {
+const { getLocalSettings } = await import('./state.js');
+const key = (await getLocalSettings()).tmdbApiKey;
+if (!key) return [];
+const path = kind === 'film' ? 'movie' : kind === 'tv' ? 'tv' : 'multi';
+const res = await fetch(`https://api.themoviedb.org/3/search/${path}?api_key=${encodeURIComponent(key)}&query=${encodeURIComponent(q)}`);
+if (!res.ok) throw new Error(res.status === 401 ? 'TMDb rejected that API key.' : `TMDb search failed (HTTP ${res.status}).`);
+const body = await res.json();
+return (body.results || [])
+.filter((r) => (r.media_type || path) !== 'person')
+.slice(0, 8)
+.map((r) => {
+const type = r.media_type && r.media_type !== 'multi' ? r.media_type : path;
+const isTv = type === 'tv';
+const date = (isTv ? r.first_air_date : r.release_date) || '';
+return {
+kind: isTv ? 'tv' : 'film',
+title: (isTv ? r.name : r.title) || '',
+creator: '',
+year: date.slice(0, 4),
+notes: (r.overview || '').slice(0, 140),
+imageUrl: r.poster_path ? `${TMDB_IMAGE}${r.poster_path}` : '',
+externalIds: { tmdb: `${isTv ? 'tv' : 'movie'}/${r.id}` },
+link: `https://www.themoviedb.org/${isTv ? 'tv' : 'movie'}/${r.id}`,
+};
+})
+.filter((c) => c.title);
+}
+
+async function searchOpenLibrary(q) {
+const res = await fetch(`https://openlibrary.org/search.json?limit=8&fields=key,title,author_name,first_publish_year,cover_i,isbn&q=${encodeURIComponent(q)}`);
+if (!res.ok) throw new Error(`Open Library search failed (HTTP ${res.status}).`);
+const body = await res.json();
+return (body.docs || []).slice(0, 8).map((d) => {
+const isbn = (d.isbn || []).find((i) => /^\d{9}[\dX]$/i.test(i)) || '';
+return {
+kind: 'book',
+title: d.title || '',
+creator: (d.author_name || [])[0] || '',
+year: d.first_publish_year ? String(d.first_publish_year) : '',
+notes: '',
+imageUrl: d.cover_i ? `https://covers.openlibrary.org/b/id/${d.cover_i}-M.jpg` : '',
+externalIds: { openlibrary: String(d.key || '').replace('/works/', ''), ...(isbn ? { asin: isbn } : {}) },
+link: d.key ? `https://openlibrary.org${d.key}` : '',
+};
+}).filter((c) => c.title);
+}
+
+// Release GROUPS, not releases: "the album Untrue", not one of its
+// fourteen pressings. Cover Art Archive serves artwork for the same id,
+// so no second lookup is needed to know the URL.
+async function searchMusicBrainz(q) {
+const res = await fetch(`https://musicbrainz.org/ws/2/release-group?fmt=json&limit=8&query=${encodeURIComponent(q)}`);
+if (!res.ok) throw new Error(`MusicBrainz search failed (HTTP ${res.status}).`);
+const body = await res.json();
+return (body['release-groups'] || []).slice(0, 8).map((g) => ({
+kind: 'album',
+title: g.title || '',
+creator: (g['artist-credit'] || [])[0]?.name || '',
+year: String(g['first-release-date'] || '').slice(0, 4),
+notes: g['primary-type'] || '',
+imageUrl: `https://coverartarchive.org/release-group/${g.id}/front-250`,
+externalIds: { musicbrainz: `release-group/${g.id}` },
+link: `https://musicbrainz.org/release-group/${g.id}`,
+})).filter((c) => c.title);
+}
+
+export { identifyUrl, catalogueLabel, artworkUrl, ogImageFrom, searchTitle, CATALOGUE_LABELS };

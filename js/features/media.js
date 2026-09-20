@@ -177,6 +177,52 @@ img.addEventListener('error', () => { img.style.display = 'none'; });
 });
 }
 
+function setCaptureStatus(text) {
+const el = document.getElementById('media-capture-status');
+if (el) el.textContent = text || '';
+}
+
+// The disambiguation step. Deliberately a list of real covers rather than
+// a dropdown of strings: telling two films called Gladiator apart is
+// exactly what the poster and the year are for.
+function showCandidates(typed, kind, candidates) {
+const host = document.getElementById('media-candidates');
+if (!host) return;
+setCaptureStatus(`Which "${typed}"?`);
+host.innerHTML = `<div class="alloc-card">
+${candidates.map((c, i) => `<div class="mail-row" data-media-pick="${i}" style="cursor:pointer;">
+${c.imageUrl ? `<img class="media-art" src="${escapeHtml(c.imageUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}
+<span class="task-context">${escapeHtml(KIND_LABEL[c.kind] || c.kind)}</span>
+<span class="mail-subject">${escapeHtml(c.title)}${c.year ? ` (${escapeHtml(c.year)})` : ''}</span>
+${c.creator ? `<span class="settings-note" style="margin:0;">${escapeHtml(c.creator)}</span>` : ''}
+</div>`).join('')}
+<div class="alloc-controls">
+<button class="todo-add-btn" type="button" data-media-pick-none>None of these — add "${escapeHtml(typed)}" as typed</button>
+<button class="del-x" type="button" data-media-pick-cancel>Cancel</button>
+</div>
+</div>`;
+host.querySelectorAll('img.media-art').forEach((img) => {
+img.addEventListener('error', () => { img.style.display = 'none'; });
+});
+const close = () => { host.innerHTML = ''; setCaptureStatus(''); };
+host.querySelectorAll('[data-media-pick]').forEach((row) => {
+row.addEventListener('click', () => {
+const c = candidates[Number(row.dataset.mediaPick)];
+addMediaItem({ kind: c.kind, title: c.title, creator: c.creator, year: c.year, link: c.link, externalIds: c.externalIds, imageUrl: c.imageUrl });
+const input = document.getElementById('media-capture-input');
+if (input) input.value = '';
+close();
+});
+});
+host.querySelector('[data-media-pick-none]').addEventListener('click', () => {
+addMediaItem({ kind, title: typed });
+const input = document.getElementById('media-capture-input');
+if (input) input.value = '';
+close();
+});
+host.querySelector('[data-media-pick-cancel]').addEventListener('click', close);
+}
+
 function renderKindFilter() {
 const el = document.getElementById('media-filter');
 if (!el) return;
@@ -206,14 +252,49 @@ const resolveBtn = document.getElementById('media-resolve-btn');
 if (!input || !addBtn) return;
 kindSelect.innerHTML = MEDIA_KINDS.map((k) => `<option value="${k.kind}">${escapeHtml(k.label)}</option>`).join('');
 
-const submit = () => {
+// A typed title is ambiguous in a way a link isn't -- "Gladiator" is two
+// films, a series, a soundtrack and a novel -- so it goes to the
+// catalogue first and you pick which one you meant. Picking is what
+// supplies the poster, the year and the id; without it the row is a bare
+// string nothing can match against Plex later. A URL skips all this
+// (it already identifies one work), and so does a failed or empty
+// search: the item is still created exactly as typed.
+const submit = async () => {
 const title = input.value.trim();
 if (!title) return;
-// Same free fallback every other quick-add uses: a pasted URL is kept
-// as the link even when it was never resolved into a real title.
-addMediaItem({ kind: kindSelect.value, title, link: looksLikeUrl(title) ? title : '' });
+if (looksLikeUrl(title)) {
+addMediaItem({ kind: kindSelect.value, title, link: title });
 input.value = '';
 resolveBtn.hidden = true;
+return;
+}
+const kind = kindSelect.value;
+setCaptureStatus('Looking up…');
+let candidates = [];
+// Tracked as a flag rather than by reading the status text back: the
+// "Looking up…" already sitting there is itself truthy, which silently
+// swallowed the explanation of why nothing was found.
+let lookupFailed = false;
+try {
+const { searchTitle } = await import('../catalogue.js');
+candidates = await searchTitle(kind, title);
+} catch (err) {
+console.error('Title lookup failed, adding it as typed:', err);
+lookupFailed = true;
+setCaptureStatus(err.message || String(err));
+}
+if (!candidates.length) {
+addMediaItem({ kind, title });
+input.value = '';
+if (!lookupFailed) {
+const needsKey = kind === 'film' || kind === 'tv' || kind === 'other';
+setCaptureStatus(needsKey
+? 'Added as typed. A TMDb key in Settings finds the poster, year and id.'
+: 'Added as typed — nothing matched that title.');
+}
+return;
+}
+showCandidates(title, kind, candidates);
 };
 addBtn.addEventListener('click', submit);
 input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
