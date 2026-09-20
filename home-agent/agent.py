@@ -104,50 +104,62 @@ def verb_plex_libraries(_args):
 
 
 def verb_plex_search(args):
-    """Is this already in the library?
+    """What does the library have that might be this?
 
-    Plex's own search is fuzzy, which is right for a person typing and
-    wrong for an automated answer -- so the title must match exactly
-    (case- and punctuation-insensitively), and the year must agree when
-    both sides know it. A false "you already have this" is worse than a
-    false "you don't": it stops something being acquired at all.
+    Returns CANDIDATES rather than a verdict. Deciding "yes you own this"
+    here would mean either trusting Plex's fuzzy search (a wrong yes
+    quietly stops something being acquired at all) or demanding an exact
+    title and year -- which breaks on the ordinary cases: international
+    releases dated a year apart, "The" dropped from a title, a colon
+    where the catalogue has a dash. So the evidence comes back and the
+    dashboard auto-accepts only an unambiguous match, asking about
+    anything else.
     """
     title = str(args.get("title") or "").strip()
     if not title:
         raise ValueError("plex.search needs a title")
-    wanted_year = str(args.get("year") or "").strip()
     kind = str(args.get("kind") or "").strip()
     plex_types = {"film": "movie", "tv": "show"}
     want_type = plex_types.get(kind)
 
     body = plex("/search", {"query": title})
     container = body.get("MediaContainer", {})
-    candidates = []
+    raw = []
     for key in ("Metadata", "Video", "Directory"):
-        candidates.extend(container.get(key, []) or [])
+        raw.extend(container.get(key, []) or [])
 
     def normalise(value):
-        return "".join(ch for ch in str(value or "").lower() if ch.isalnum())
+        text = str(value or "").lower()
+        for article in ("the ", "a ", "an "):
+            if text.startswith(article):
+                text = text[len(article):]
+        return "".join(ch for ch in text if ch.isalnum())
 
     target = normalise(title)
-    for item in candidates:
-        if normalise(item.get("title")) != target:
-            continue
+    candidates = []
+    for item in raw:
         item_type = item.get("type")
-        if want_type and item_type not in (want_type, None):
+        if item_type not in ("movie", "show"):
             continue
-        item_year = str(item.get("year") or "")
-        if wanted_year and item_year and item_year != wanted_year:
+        if want_type and item_type != want_type:
             continue
-        return {
-            "found": True,
+        name = normalise(item.get("title"))
+        if not name:
+            continue
+        exact = name == target
+        if not exact and target not in name and name not in target:
+            continue  # Plex matched it on something else entirely (a cast member, say)
+        candidates.append({
             "ratingKey": item.get("ratingKey"),
             "title": item.get("title"),
-            "year": item_year,
+            "year": str(item.get("year") or ""),
             "type": item_type,
             "librarySectionTitle": item.get("librarySectionTitle"),
-        }
-    return {"found": False, "searched": len(candidates)}
+            "exactTitle": exact,
+        })
+
+    candidates.sort(key=lambda c: (not c["exactTitle"], c["title"]))
+    return {"candidates": candidates[:6], "searched": len(raw)}
 
 
 VERBS = {

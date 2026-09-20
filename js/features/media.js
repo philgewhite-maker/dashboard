@@ -144,7 +144,7 @@ ${byline ? `<span class="settings-note" style="margin:0;">${escapeHtml(byline)}<
 ${item.requestedBy ? `<span class="settings-note" style="margin:0;">asked by ${escapeHtml(item.requestedBy)}</span>` : ''}
 ${whereToWatchHtml(item)}
 ${item.plexCheck ? (item.plexCheck.found
-? '<span class="task-context" style="background:var(--sage-bg);color:var(--sage);font-weight:600;" title="Found in your Plex library">&#10003; On Plex</span>'
+? `<span class="task-context" style="background:var(--sage-bg);color:var(--sage);font-weight:600;" title="In your Plex library${item.plexCheck.matchedTitle ? ` as &quot;${escapeHtml(item.plexCheck.matchedTitle)}&quot;${item.plexCheck.matchedYear ? ` (${escapeHtml(item.plexCheck.matchedYear)})` : ''}` : ''}">&#10003; On Plex</span>`
 : `<span class="settings-note" style="margin:0;" title="Checked on ${escapeHtml(String(item.plexCheck.checkedAt).slice(0, 10))}">not on Plex</span>`) : ''}
 ${item.notes ? `<span class="settings-note" style="margin:0;">${escapeHtml(item.notes)}</span>` : ''}
 <select class="mini" data-media-status="${item.id}">
@@ -243,17 +243,23 @@ say(err.message || String(err));
 return;
 }
 let found = 0;
+const toConfirm = [];
 for (let i = 0; i < targets.length; i++) {
 const item = targets[i];
 say(`Checking ${i + 1} of ${targets.length} — ${item.title}…`);
 try {
-const result = await agent.run('plex.search', { title: item.title, year: item.year, kind: item.kind });
+const result = await agent.run('plex.search', { title: item.title, kind: item.kind });
 const live = data.mediaItems.find((m) => m.id === item.id);
 if (!live) continue;
-live.plexCheck = { checkedAt: new Date().toISOString(), found: !!result.found, ratingKey: result.ratingKey || '' };
-if (result.found) {
-live.status = 'available';
+const candidates = result.candidates || [];
+const sure = unambiguousMatch(item, candidates);
+if (sure) {
+markOnPlex(live, sure);
 found++;
+} else if (candidates.length) {
+toConfirm.push({ itemId: live.id, candidates });
+} else {
+live.plexCheck = { checkedAt: new Date().toISOString(), found: false, ratingKey: '' };
 }
 } catch (err) {
 console.error(`Plex check failed for "${item.title}":`, err);
@@ -265,7 +271,73 @@ return;
 }
 queueSave();
 renderMedia();
-say(`Checked ${targets.length} — ${found} already on Plex.`);
+const askAbout = toConfirm.length ? `, ${toConfirm.length} to confirm` : '';
+say(`Checked ${targets.length} — ${found} already on Plex${askAbout}.`);
+if (toConfirm.length) showPlexConfirmations(toConfirm);
+}
+
+// Accepted without asking only when there's exactly one exactly-titled
+// candidate and no year that actively disagrees. Everything else is a
+// question rather than a verdict: a year apart is ordinary for an
+// international release, and a near-title is exactly the case a person
+// should look at rather than a rule guess at.
+function unambiguousMatch(item, candidates) {
+const exact = (candidates || []).filter((c) => c.exactTitle);
+if (exact.length !== 1) return null;
+const only = exact[0];
+if (item.year && only.year && only.year !== item.year) return null;
+return only;
+}
+
+function markOnPlex(item, candidate) {
+item.plexCheck = {
+checkedAt: new Date().toISOString(),
+found: true,
+ratingKey: candidate.ratingKey || '',
+matchedTitle: candidate.title || '',
+matchedYear: candidate.year || '',
+};
+item.status = 'available';
+}
+
+// The "is this the same thing?" step, kept as a review rather than a
+// guess -- the same shape the dating imports use for candidates AI isn't
+// certain about. Held in memory only: re-running the check rebuilds it,
+// so there's nothing to persist or leave half-answered.
+function showPlexConfirmations(pending) {
+const host = document.getElementById('media-candidates');
+if (!host) return;
+host.innerHTML = pending.map((entry) => {
+const item = data.mediaItems.find((m) => m.id === entry.itemId);
+if (!item) return '';
+return `<div class="alloc-card" data-plex-confirm="${escapeHtml(entry.itemId)}">
+<div class="alloc-title">Is your "${escapeHtml(item.title)}"${item.year ? ` (${escapeHtml(item.year)})` : ''} one of these?</div>
+${entry.candidates.map((c, i) => `<div class="mail-row" data-plex-pick="${i}" style="cursor:pointer;">
+<span class="mail-subject">${escapeHtml(c.title)}${c.year ? ` (${escapeHtml(c.year)})` : ''}</span>
+${c.exactTitle && c.year && item.year && c.year !== item.year ? '<span class="settings-note" style="margin:0;">same title, different year</span>' : ''}
+<span class="settings-note" style="margin:0;">${escapeHtml(c.librarySectionTitle || c.type || '')}</span>
+</div>`).join('')}
+<div class="alloc-controls">
+<button class="todo-add-btn" type="button" data-plex-none>None of these — not on Plex</button>
+</div>
+</div>`;
+}).join('');
+host.querySelectorAll('[data-plex-confirm]').forEach((card) => {
+const entry = pending.find((p) => p.itemId === card.dataset.plexConfirm);
+const finish = () => { card.remove(); queueSave(); renderMedia(); };
+card.querySelectorAll('[data-plex-pick]').forEach((row) => {
+row.addEventListener('click', () => {
+const item = data.mediaItems.find((m) => m.id === entry.itemId);
+if (item) markOnPlex(item, entry.candidates[Number(row.dataset.plexPick)]);
+finish();
+});
+});
+card.querySelector('[data-plex-none]').addEventListener('click', () => {
+const item = data.mediaItems.find((m) => m.id === entry.itemId);
+if (item) item.plexCheck = { checkedAt: new Date().toISOString(), found: false, ratingKey: '' };
+finish();
+});
+});
 }
 
 function setCaptureStatus(text) {
@@ -426,4 +498,4 @@ resolveBtn.hidden = !looksLikeUrl(input.value);
 renderMedia();
 }
 
-export { initMedia, renderMedia, addMediaItem, mediaChipHtml, bindMediaChips, revealMediaItem, kindFromUrl };
+export { initMedia, renderMedia, addMediaItem, mediaChipHtml, bindMediaChips, revealMediaItem, kindFromUrl, unambiguousMatch, showPlexConfirmations };
