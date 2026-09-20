@@ -1,0 +1,83 @@
+# Radarr, Sonarr, Prowlarr and qBittorrent for the QNAP.
+#
+# The single most important thing here is that every container sees ONE
+# mount, /data, covering both the downloads and the library. Your share
+# \\QNAP210-79\Media is /share/Media on the NAS itself, so:
+#
+#   /share/Media/Video/Movies   ->  /data/Video/Movies    (Radarr library)
+#   /share/Media/Video/TV       ->  /data/Video/TV        (Sonarr library)
+#   /share/Media/downloads      ->  /data/downloads       (qBittorrent)
+#
+# Because those are all inside the same share, and therefore the same
+# filesystem, Radarr and Sonarr can HARDLINK a finished download into the
+# library: the import is instant and the file isn't stored twice, while
+# the torrent keeps seeding. Mounting downloads and media as two separate
+# volumes is the classic mistake -- everything still works, but every
+# import silently becomes a slow full copy and your disk fills twice over.
+#
+# qBittorrent runs here rather than on the PC for the same reason: a
+# download on another machine can't be hardlinked, only copied over SMB.
+#
+# Set PUID/PGID in .env first -- see SETUP.md.
+
+services:
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: prowlarr
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - ${CONFIG_ROOT}/prowlarr:/config
+    ports:
+      - 9696:9696
+    restart: unless-stopped
+
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    container_name: radarr
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - ${CONFIG_ROOT}/radarr:/config
+      - ${MEDIA_ROOT}:/data
+    ports:
+      - 7878:7878
+    restart: unless-stopped
+
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:latest
+    container_name: sonarr
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - ${CONFIG_ROOT}/sonarr:/config
+      - ${MEDIA_ROOT}:/data
+    ports:
+      - 8989:8989
+    restart: unless-stopped
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      # 8080 is QTS's own admin interface, so the web UI is published on
+      # 8090 instead. Inside the stack it stays 8080, which is what
+      # Radarr/Sonarr should be pointed at (host "qbittorrent", port 8080).
+      - WEBUI_PORT=8080
+    volumes:
+      - ${CONFIG_ROOT}/qbittorrent:/config
+      - ${MEDIA_ROOT}:/data
+    ports:
+      - 8090:8080
+      - 6881:6881
+      - 6881:6881/udp
+    restart: unless-stopped

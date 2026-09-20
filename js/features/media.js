@@ -185,6 +185,7 @@ ${catalogue ? `<span class="task-context" title="Identified on ${escapeHtml(cata
 ${byline ? `<span class="settings-note" style="margin:0;">${escapeHtml(byline)}</span>` : ''}
 ${item.requestedBy ? `<span class="settings-note" style="margin:0;">asked by ${escapeHtml(item.requestedBy)}</span>` : ''}
 ${whereToWatchHtml(item)}
+${item.acquisition && item.acquisition.state === 'requested' ? `<span class="task-context" title="Requested from ${escapeHtml(item.acquisition.client || 'the downloader')}">&#8681; downloading</span>` : ''}
 ${item.plexCheck ? (item.plexCheck.found
 ? `<span class="task-context" style="background:var(--sage-bg);color:var(--sage);font-weight:600;" title="In your Plex library${item.plexCheck.matchedTitle ? ` as &quot;${escapeHtml(item.plexCheck.matchedTitle)}&quot;${item.plexCheck.matchedYear ? ` (${escapeHtml(item.plexCheck.matchedYear)})` : ''}` : ''}">&#10003; On Plex</span>`
 : `<span class="settings-note" style="margin:0;" title="Checked on ${escapeHtml(String(item.plexCheck.checkedAt).slice(0, 10))}">not on Plex</span>`) : ''}
@@ -477,10 +478,31 @@ bindTaskChips();
 return `Added ${taskChipHtml(task)} to your shopping list.`;
 }
 if (route.type === 'download') {
-// The one route with nothing behind it yet: Radarr/Sonarr is where a
-// download request would go, and neither exists on the NAS so far.
-// Says so plainly rather than failing obscurely.
-return `Download requests need Radarr or Sonarr on the NAS${route.profile ? ` (profile "${route.profile}")` : ''} — not set up yet.`;
+// Goes to Radarr or Sonarr via the home agent. The profile NAME
+// travels, never the quality rules themselves -- those live in the
+// *arr, which is the only place they should be written.
+const agent = await import('../homeagent.js');
+const tmdb = (item.externalIds.tmdb || '').split('/');
+const result = await agent.run('arr.add', {
+kind: item.kind,
+title: item.title,
+profile: route.profile || '',
+tmdbId: tmdb[0] === 'movie' || tmdb[0] === 'tv' ? Number(tmdb[1]) : undefined,
+}, { timeoutMs: 180000 });
+if (result.added) {
+item.acquisition = { state: 'requested', client: result.service, id: result.id || '', checkedAt: new Date().toISOString() };
+item.status = 'available';
+queueSave();
+renderMedia();
+return `${result.service === 'sonarr' ? 'Sonarr' : 'Radarr'} is looking for "${escapeHtml(result.title || item.title)}".`;
+}
+if (result.already) {
+item.acquisition = { state: 'have', client: 'library', id: '', checkedAt: new Date().toISOString() };
+queueSave();
+renderMedia();
+return 'Already in the library.';
+}
+return result.reason || "That couldn't be added.";
 }
 return 'Unknown route.';
 }

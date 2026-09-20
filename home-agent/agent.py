@@ -30,6 +30,10 @@ SYNC_URL = os.environ.get("DASHBOARD_SYNC_URL", "").strip()
 SECRET = os.environ.get("DASHBOARD_SECRET", "").strip()
 PLEX_URL = os.environ.get("PLEX_URL", "http://localhost:32400").rstrip("/")
 PLEX_TOKEN = os.environ.get("PLEX_TOKEN", "").strip()
+RADARR_URL = os.environ.get("RADARR_URL", "").rstrip("/")
+RADARR_KEY = os.environ.get("RADARR_API_KEY", "").strip()
+SONARR_URL = os.environ.get("SONARR_URL", "").rstrip("/")
+SONARR_KEY = os.environ.get("SONARR_API_KEY", "").strip()
 POLL_SECONDS = int(os.environ.get("POLL_SECONDS", "45"))
 HTTP_TIMEOUT = int(os.environ.get("HTTP_TIMEOUT", "20"))
 
@@ -89,7 +93,12 @@ def plex(path, params=None):
 
 
 def verb_ping(_args):
-    return {"version": VERSION, "plexConfigured": bool(PLEX_TOKEN)}
+    return {
+        "version": VERSION,
+        "plexConfigured": bool(PLEX_TOKEN),
+        "radarrConfigured": bool(RADARR_URL and RADARR_KEY),
+        "sonarrConfigured": bool(SONARR_URL and SONARR_KEY),
+    }
 
 
 def verb_plex_libraries(_args):
@@ -162,10 +171,138 @@ def verb_plex_search(args):
     return {"candidates": candidates[:6], "searched": len(raw)}
 
 
+def arr(which, path, method="GET", body=None, params=None):
+    """Radarr and Sonarr speak the same API shape, so one helper covers both."""
+    base, key = (RADARR_URL, RADARR_KEY) if which == "radarr" else (SONARR_URL, SONARR_KEY)
+    if not base or not key:
+        raise RuntimeError(f"{which} isn't configured on this agent (see .env)")
+    query = urllib.parse.urlencode(params or {})
+    url = f"{base}/api/v3{path}" + (f"?{query}" if query else "")
+    return http_json(url, method=method, body=body, headers={"X-Api-Key": key})
+
+
+def _profile_id(which, wanted):
+    """Quality profiles are named in the dashboard but numbered in the API.
+
+    The dashboard deliberately sends a NAME ("F1", "Films"), because the
+    profile itself -- codecs, size limits, preferred release groups --
+    is defined in Radarr/Sonarr and shouldn't be duplicated anywhere
+    else. Unmatched or unspecified falls back to the first profile,
+    which is what a fresh install has anyway.
+    """
+    profiles = arr(which, "/qualityprofile")
+    if wanted:
+        for p in profiles:
+            if str(p.get("name", "")).strip().lower() == wanted.strip().lower():
+                return p["id"]
+    if not profiles:
+        raise RuntimeError(f"{which} has no quality profiles yet")
+    return profiles[0]["id"]
+
+
+def _root_folder(which):
+    folders = arr(which, "/rootfolder")
+    if not folders:
+        raise RuntimeError(f"{which} has no root folder set -- add one in its settings first")
+    return folders[0]["path"]
+
+
+def verb_arr_search(args):
+    """What does Radarr/Sonarr think this title is? Candidates, not a pick."""
+    which = "sonarr" if args.get("kind") == "tv" else "radarr"
+    term = str(args.get("title") or "").strip()
+    if not term:
+        raise ValueError("needs a title")
+    path = "/series/lookup" if which == "sonarr" else "/movie/lookup"
+    results = arr(which, path, params={"term": term})
+    out = []
+    for r in results[:6]:
+        out.append({
+            "title": r.get("title"),
+            "year": r.get("year"),
+            "tmdbId": r.get("tmdbId"),
+            "tvdbId": r.get("tvdbId"),
+            "imdbId": r.get("imdbId"),
+            "alreadyAdded": bool(r.get("id")),
+            "overview": (r.get("overview") or "")[:160],
+        })
+    return {"service": which, "candidates": out}
+
+
+def verb_arr_add(args):
+    """Add it and start searching.
+
+    Identified by tmdb/tvdb id where the dashboard has one, since that's
+    unambiguous in a way a title isn't; otherwise the first lookup hit
+    for the exact title given.
+    """
+    which = "sonarr" if args.get("kind") == "tv" else "radarr"
+    term = str(args.get("title") or "").strip()
+    tmdb_id = args.get("tmdbId")
+    tvdb_id = args.get("tvdbId")
+
+    lookup_term = f"tmdb:{tmdb_id}" if (which == "radarr" and tmdb_id) else (
+        f"tvdb:{tvdb_id}" if (which == "sonarr" and tvdb_id) else term)
+    path = "/series/lookup" if which == "sonarr" else "/movie/lookup"
+    results = arr(which, path, params={"term": lookup_term})
+    if not results:
+        return {"added": False, "reason": f"{which} found nothing for {lookup_term!r}"}
+    chosen = results[0]
+    if chosen.get("id"):
+        return {"added": False, "already": True, "title": chosen.get("title"), "reason": "already in the library"}
+
+    payload = dict(chosen)
+    payload["qualityProfileId"] = _profile_id(which, str(args.get("profile") or ""))
+    payload["rootFolderPath"] = _root_folder(which)
+    payload["monitored"] = True
+    if which == "sonarr":
+        payload["seasonFolder"] = True
+        payload["addOptions"] = {"searchForMissingEpisodes": True}
+    else:
+        payload["addOptions"] = {"searchForMovie": True}
+    created = arr(which, "/series" if which == "sonarr" else "/movie", method="POST", body=payload)
+    return {
+        "added": True,
+        "service": which,
+        "title": created.get("title"),
+        "year": created.get("year"),
+        "id": created.get("id"),
+    }
+
+
+def verb_arr_status(args):
+    """Where has it got to? Queue first, then whether the file exists."""
+    which = "sonarr" if args.get("kind") == "tv" else "radarr"
+    queue = arr(which, "/queue", params={"pageSize": 200})
+    records = queue.get("records", queue) if isinstance(queue, dict) else queue
+    wanted_id = args.get("id")
+    for record in records or []:
+        owner = record.get("movieId") or record.get("seriesId")
+        if wanted_id and owner != wanted_id:
+            continue
+        size = record.get("size") or 0
+        left = record.get("sizeleft") or 0
+        percent = round((1 - (left / size)) * 100) if size else 0
+        return {
+            "state": record.get("status"),
+            "percent": percent,
+            "title": record.get("title"),
+            "eta": record.get("timeleft"),
+        }
+    if wanted_id:
+        item = arr(which, f"/movie/{wanted_id}" if which == "radarr" else f"/series/{wanted_id}")
+        has_file = item.get("hasFile") if which == "radarr" else (item.get("statistics", {}) or {}).get("episodeFileCount", 0) > 0
+        return {"state": "downloaded" if has_file else "waiting", "title": item.get("title")}
+    return {"state": "unknown"}
+
+
 VERBS = {
     "agent.ping": verb_ping,
     "plex.libraries": verb_plex_libraries,
     "plex.search": verb_plex_search,
+    "arr.search": verb_arr_search,
+    "arr.add": verb_arr_add,
+    "arr.status": verb_arr_status,
 }
 
 
