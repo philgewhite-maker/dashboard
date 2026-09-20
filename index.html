@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v367</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v368</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -209,6 +209,10 @@
 <button type="button" class="mini-task-btn" id="media-resolve-btn" title="Look up a real title for this pasted link" hidden>&#10024; Resolve title</button>
 </div>
 <div class="settings-note" style="margin:8px 0 10px;">A shared link from IMDb, Letterboxd, Spotify and the like lands here on its own; so does a link ending <code>#M</code>, a screenshot marked <strong>M</strong>, or a Telegram request you accept. Where to watch is checked automatically for anything with a TMDb id, and a service you already subscribe to is ticked. Streaming data by JustWatch, via TMDb.</div>
+<div class="sync-row" style="margin-top:10px;">
+<button class="sync-btn" id="media-plex-check-btn" type="button" title="Ask the home agent whether each wanted film or series is already in your Plex library">Check Plex</button>
+<span class="sync-status" id="media-plex-status"></span>
+</div>
 <div class="sync-status" id="media-capture-status"></div>
 <div id="media-candidates"></div>
 <div class="overview-chips" id="media-filter" style="margin-bottom:10px;"></div>

@@ -1,0 +1,215 @@
+<?php
+declare(strict_types=1);
+
+/**
+ * A command queue between the dashboard and the home agent.
+ *
+ * The dashboard runs on GitHub Pages and this file runs on public hosting;
+ * neither can reach Plex, a NAS or a download client sitting behind your
+ * router. Rather than opening a port or running a VPN, the agent at home
+ * POLLS this file: it asks for work, does it on the LAN where it already
+ * has access, and posts the answer back. Nothing at home is ever exposed,
+ * and no credential for anything at home is ever stored here or in the
+ * browser — the agent holds those.
+ *
+ *   POST ?action=enqueue   {verb, args}      -> {id}
+ *   GET  ?action=pending                     -> {commands:[{id,verb,args}]}  (agent; claims them)
+ *   POST ?action=result&id=<id> {ok,result}  -> {ok:true}
+ *   GET  ?action=status&ids=a,b,c            -> {commands:[{id,status,result,error}]}
+ *   POST ?action=heartbeat {version}         -> {ok:true}   (agent, so the app can say it's alive)
+ *   GET  ?action=heartbeat                   -> {seenAt, version}
+ *
+ * Upload next to sync.php and set $SECRET to the SAME value. See
+ * home-agent/README for the agent itself.
+ */
+
+// ---- Configuration ---------------------------------------------------
+
+$SECRET = 'PUT-A-LONG-RANDOM-STRING-HERE';
+
+// Outside public_html, same reasoning as files.php: nothing here should
+// ever be fetchable over the web directly.
+$STATE_DIR = dirname(__DIR__) . '/dashboard-commands';
+
+// A command nobody collected within this long is stale — the agent was
+// probably off. Dropped rather than run late, because "check Plex" answered
+// three days after it was asked is worse than not answered at all.
+$MAX_AGE_SECONDS = 24 * 60 * 60;
+
+// Kept small: this is a work queue, not a log. Oldest are dropped first.
+$MAX_COMMANDS = 200;
+
+// The agent refuses anything not on its own allowlist too; this is the
+// cheap second lock, so a leaked secret can't queue arbitrary verbs.
+$ALLOWED_VERBS = ['agent.ping', 'plex.libraries', 'plex.search'];
+
+$ALLOWED_ORIGINS = [
+    'https://philgewhite-maker.github.io',
+    'http://localhost:8743',
+    'http://localhost:5173',
+];
+
+// ---- End of configuration --------------------------------------------
+
+$origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+if ($origin !== '' && in_array($origin, $ALLOWED_ORIGINS, true)) {
+    header('Access-Control-Allow-Origin: ' . $origin);
+    header('Vary: Origin');
+}
+header('Access-Control-Allow-Headers: Content-Type, X-Sync-Secret');
+header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+header('Access-Control-Max-Age: 86400');
+header('Cache-Control: no-store');
+header('X-Content-Type-Options: nosniff');
+header('Content-Type: application/json');
+
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
+    http_response_code(204);
+    exit;
+}
+
+function fail(int $code, string $message): void {
+    http_response_code($code);
+    echo json_encode(['error' => $message]);
+    exit;
+}
+
+$provided = $_SERVER['HTTP_X_SYNC_SECRET'] ?? '';
+if ($SECRET === '' || $SECRET === 'PUT-A-LONG-RANDOM-STRING-HERE') {
+    fail(500, 'Server not configured: set $SECRET in commands.php');
+}
+if (!is_string($provided) || !hash_equals($SECRET, $provided)) {
+    fail(401, 'Bad or missing sync secret');
+}
+
+if (!is_dir($STATE_DIR) && !mkdir($STATE_DIR, 0700, true) && !is_dir($STATE_DIR)) {
+    fail(500, 'Could not create the command directory — check permissions');
+}
+$QUEUE_FILE = $STATE_DIR . '/queue.json';
+$BEAT_FILE = $STATE_DIR . '/heartbeat.json';
+
+/**
+ * Every read-modify-write goes through here holding an exclusive lock, so
+ * the agent claiming work can't race the dashboard queueing more of it.
+ */
+function withQueue(string $file, callable $fn) {
+    $handle = fopen($file, 'c+');
+    if ($handle === false) fail(500, 'Could not open the queue');
+    try {
+        if (!flock($handle, LOCK_EX)) fail(500, 'Could not lock the queue');
+        $raw = stream_get_contents($handle);
+        $queue = $raw === '' ? [] : (json_decode($raw, true) ?: []);
+        [$queue, $response] = $fn($queue);
+        if ($queue !== null) {
+            ftruncate($handle, 0);
+            rewind($handle);
+            fwrite($handle, json_encode(array_values($queue)));
+            fflush($handle);
+        }
+        return $response;
+    } finally {
+        flock($handle, LOCK_UN);
+        fclose($handle);
+    }
+}
+
+function body(): array {
+    $raw = file_get_contents('php://input');
+    $parsed = $raw === false || $raw === '' ? null : json_decode($raw, true);
+    return is_array($parsed) ? $parsed : [];
+}
+
+$method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+$action = $_GET['action'] ?? '';
+
+if ($action === 'heartbeat') {
+    if ($method === 'POST') {
+        $in = body();
+        file_put_contents($BEAT_FILE, json_encode([
+            'seenAt' => gmdate('c'),
+            'version' => (string) ($in['version'] ?? ''),
+        ]));
+        echo json_encode(['ok' => true]);
+        exit;
+    }
+    echo is_file($BEAT_FILE) ? (string) file_get_contents($BEAT_FILE) : json_encode(['seenAt' => null]);
+    exit;
+}
+
+if ($action === 'enqueue' && $method === 'POST') {
+    $in = body();
+    $verb = (string) ($in['verb'] ?? '');
+    if (!in_array($verb, $ALLOWED_VERBS, true)) fail(400, 'Unknown verb');
+    $id = bin2hex(random_bytes(8));
+    withQueue($QUEUE_FILE, function (array $queue) use ($id, $verb, $in, $MAX_AGE_SECONDS, $MAX_COMMANDS) {
+        $now = time();
+        $queue = array_filter($queue, fn($c) => ($now - (int) ($c['createdAtTs'] ?? 0)) < $MAX_AGE_SECONDS);
+        $queue[] = [
+            'id' => $id,
+            'verb' => $verb,
+            'args' => is_array($in['args'] ?? null) ? $in['args'] : [],
+            'status' => 'pending',
+            'createdAt' => gmdate('c'),
+            'createdAtTs' => $now,
+            'result' => null,
+            'error' => null,
+        ];
+        if (count($queue) > $MAX_COMMANDS) $queue = array_slice($queue, -$MAX_COMMANDS);
+        return [$queue, ['id' => $id]];
+    });
+    echo json_encode(['id' => $id]);
+    exit;
+}
+
+if ($action === 'pending' && $method === 'GET') {
+    $claimed = withQueue($QUEUE_FILE, function (array $queue) {
+        $out = [];
+        foreach ($queue as $i => $c) {
+            if (($c['status'] ?? '') !== 'pending') continue;
+            $queue[$i]['status'] = 'claimed';
+            $queue[$i]['claimedAt'] = gmdate('c');
+            $out[] = ['id' => $c['id'], 'verb' => $c['verb'], 'args' => $c['args']];
+        }
+        return [$queue, $out];
+    });
+    echo json_encode(['commands' => $claimed]);
+    exit;
+}
+
+if ($action === 'result' && $method === 'POST') {
+    $id = (string) ($_GET['id'] ?? '');
+    $in = body();
+    withQueue($QUEUE_FILE, function (array $queue) use ($id, $in) {
+        foreach ($queue as $i => $c) {
+            if (($c['id'] ?? '') !== $id) continue;
+            $queue[$i]['status'] = !empty($in['ok']) ? 'done' : 'error';
+            $queue[$i]['result'] = $in['result'] ?? null;
+            $queue[$i]['error'] = isset($in['error']) ? (string) $in['error'] : null;
+            $queue[$i]['completedAt'] = gmdate('c');
+        }
+        return [$queue, null];
+    });
+    echo json_encode(['ok' => true]);
+    exit;
+}
+
+if ($action === 'status' && $method === 'GET') {
+    $ids = array_filter(explode(',', (string) ($_GET['ids'] ?? '')));
+    $found = withQueue($QUEUE_FILE, function (array $queue) use ($ids) {
+        $out = [];
+        foreach ($queue as $c) {
+            if (!in_array($c['id'] ?? '', $ids, true)) continue;
+            $out[] = [
+                'id' => $c['id'],
+                'status' => $c['status'],
+                'result' => $c['result'] ?? null,
+                'error' => $c['error'] ?? null,
+            ];
+        }
+        return [null, $out]; // read-only: the queue is not rewritten
+    });
+    echo json_encode(['commands' => $found]);
+    exit;
+}
+
+fail(400, 'Unknown action');

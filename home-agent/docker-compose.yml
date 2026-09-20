@@ -1,0 +1,18 @@
+services:
+  dashboard-agent:
+    build: .
+    container_name: dashboard-agent
+    # It polls outward and listens on nothing, so it needs no ports and no
+    # inbound rule anywhere.
+    env_file: .env
+    restart: unless-stopped
+    # Plex is usually on the same NAS. On Container Station, host
+    # networking is the simplest way for the container to reach
+    # http://localhost:32400; if you'd rather not, drop this line and set
+    # PLEX_URL to the NAS's own LAN address instead.
+    network_mode: host
+    logging:
+      driver: json-file
+      options:
+        max-size: "1m"
+        max-file: "3"

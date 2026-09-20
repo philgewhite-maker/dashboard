@@ -143,6 +143,9 @@ ${catalogue ? `<span class="task-context" title="Identified on ${escapeHtml(cata
 ${byline ? `<span class="settings-note" style="margin:0;">${escapeHtml(byline)}</span>` : ''}
 ${item.requestedBy ? `<span class="settings-note" style="margin:0;">asked by ${escapeHtml(item.requestedBy)}</span>` : ''}
 ${whereToWatchHtml(item)}
+${item.plexCheck ? (item.plexCheck.found
+? '<span class="task-context" style="background:var(--sage-bg);color:var(--sage);font-weight:600;" title="Found in your Plex library">&#10003; On Plex</span>'
+: `<span class="settings-note" style="margin:0;" title="Checked on ${escapeHtml(String(item.plexCheck.checkedAt).slice(0, 10))}">not on Plex</span>`) : ''}
 ${item.notes ? `<span class="settings-note" style="margin:0;">${escapeHtml(item.notes)}</span>` : ''}
 <select class="mini" data-media-status="${item.id}">
 ${MEDIA_STATUSES.map((s) => `<option value="${s.status}"${s.status === item.status ? ' selected' : ''}>${escapeHtml(s.label)}</option>`).join('')}
@@ -222,6 +225,49 @@ chips.push(`<span class="settings-note" style="margin:0;">rent/buy: ${escapeHtml
 return chips.join('');
 }
 
+// "Do I already have this?" -- the one question the dashboard genuinely
+// cannot answer by itself, since Plex is behind the router. Goes through
+// the home agent (js/homeagent.js), one command per item, and anything
+// found flips to Available so it stops looking like something to get.
+async function checkAgainstPlex() {
+const status = document.getElementById('media-plex-status');
+const say = (text) => { if (status) status.textContent = text; };
+const targets = data.mediaItems.filter((m) => m.status === 'wanted' && (m.kind === 'film' || m.kind === 'tv'));
+if (!targets.length) { say('Nothing wanted to check.'); return; }
+const agent = await import('../homeagent.js');
+try {
+const beat = await agent.agentHeartbeat();
+if (!beat) { say("No agent has checked in — is it running on the NAS?"); return; }
+} catch (err) {
+say(err.message || String(err));
+return;
+}
+let found = 0;
+for (let i = 0; i < targets.length; i++) {
+const item = targets[i];
+say(`Checking ${i + 1} of ${targets.length} — ${item.title}…`);
+try {
+const result = await agent.run('plex.search', { title: item.title, year: item.year, kind: item.kind });
+const live = data.mediaItems.find((m) => m.id === item.id);
+if (!live) continue;
+live.plexCheck = { checkedAt: new Date().toISOString(), found: !!result.found, ratingKey: result.ratingKey || '' };
+if (result.found) {
+live.status = 'available';
+found++;
+}
+} catch (err) {
+console.error(`Plex check failed for "${item.title}":`, err);
+say(`Stopped at "${item.title}": ${err.message || err}`);
+queueSave();
+renderMedia();
+return;
+}
+}
+queueSave();
+renderMedia();
+say(`Checked ${targets.length} — ${found} already on Plex.`);
+}
+
 function setCaptureStatus(text) {
 const el = document.getElementById('media-capture-status');
 if (el) el.textContent = text || '';
@@ -290,6 +336,13 @@ b.addEventListener('click', () => { showFinished = !showFinished; renderMedia();
 
 function initMedia() {
 bindMediaChips();
+const plexBtn = document.getElementById('media-plex-check-btn');
+if (plexBtn) {
+plexBtn.addEventListener('click', async () => {
+plexBtn.disabled = true;
+try { await checkAgainstPlex(); } finally { plexBtn.disabled = false; }
+});
+}
 const input = document.getElementById('media-capture-input');
 const kindSelect = document.getElementById('media-capture-kind');
 const addBtn = document.getElementById('media-capture-btn');
