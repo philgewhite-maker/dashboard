@@ -32,11 +32,31 @@ return partial ? partial.id : null;
 // calendar.events write scope (see hasCalendarWrite() in
 // sync/googleauth.js) -- callers are expected to check that before
 // offering the push button, same as Contacts write already does.
-async function createEvent(calendarId, { title, description, date, endDate }) {
+// With `startTime`/`endTime` (both "HH:MM") this creates a TIMED event
+// instead of an all-day one, which matters more than it looks: Google
+// treats an all-day event's end.date as EXCLUSIVE, so an all-day booking
+// ending on the 14th actually finishes at the close of the 13th and the
+// departure day vanishes from the calendar. A timed end is inclusive, so
+// "leaves at 11am on the 14th" says exactly that. Callers with a single
+// date (planner.js) pass no times and keep the all-day behaviour.
+// Split out from the request so the shape can be checked without a
+// Google sign-in, which is otherwise the only way to see what gets sent.
+function eventBody({ title, description, date, endDate, startTime, endTime, timeZone }) {
+const timed = !!(startTime && endTime);
+const zone = timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/London';
+return {
+summary: title,
+description,
+start: timed ? { dateTime: `${date}T${startTime}:00`, timeZone: zone } : { date },
+end: timed ? { dateTime: `${endDate || date}T${endTime}:00`, timeZone: zone } : { date: endDate || date },
+};
+}
+
+async function createEvent(calendarId, options) {
 const res = await googleFetch(`${EVENTS_API}/${encodeURIComponent(calendarId)}/events`, {
 method: 'POST',
 headers: { 'Content-Type': 'application/json' },
-body: JSON.stringify({ summary: title, description, start: { date }, end: { date: endDate || date } }),
+body: JSON.stringify(eventBody(options)),
 });
 if (!res.ok) throw new Error(`Couldn't create calendar event: ${res.status}`);
 return res.json();
@@ -123,4 +143,4 @@ status[name] = { found: false, events: [], error: err.message, syncedAt };
 return status;
 }
 
-export { syncCalendars, listCalendars, createEvent, findEvents };
+export { syncCalendars, listCalendars, createEvent, eventBody, findEvents };

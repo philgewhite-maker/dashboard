@@ -141,6 +141,16 @@ queueSave();
 // requires a real timeMax.
 const EXTERNAL_SCAN_WINDOW_DAYS = 180;
 
+// Airbnb's standard turnaround, and the reason a pushed booking is a timed
+// event rather than an all-day one. An all-day event's end date is
+// EXCLUSIVE in Google Calendar, so a checkout on the 14th used to finish
+// the event at the close of the 13th -- the departure day, the one the
+// cleaner actually needs, simply wasn't on the calendar. These also make
+// the changeover legible: a checkout at 11am and the next check-in at 3pm
+// show the four-hour gap rather than two blocks colliding on one day.
+const CHECKIN_TIME = '15:00';
+const CHECKOUT_TIME = '11:00';
+
 // A booking typed straight into the shared Google Calendar for a listing
 // that never touches Airbnb at all -- recognised by `externalPrefix`
 // appearing in the event's title, a deliberately different tag from the
@@ -892,7 +902,11 @@ statusEl.textContent = (matchStart !== reservation.checkin || matchEnd !== reser
 } else if (candidates.length > 1) {
 statusEl.textContent = `${candidates.length} existing events near these dates already mention "${listing.prefix}" — too ambiguous to adopt one automatically. Rename or remove the extras in Google Calendar, then push again.`;
 } else {
-const created = await createEvent(calendarId, { title, description, date: reservation.checkin, endDate: reservation.checkout });
+const created = await createEvent(calendarId, {
+title, description,
+date: reservation.checkin, endDate: reservation.checkout,
+startTime: CHECKIN_TIME, endTime: CHECKOUT_TIME,
+});
 reservation.googleEventId = created.id;
 reservation.googleCalendarId = calendarId;
 statusEl.textContent = 'Pushed.';
