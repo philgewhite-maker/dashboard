@@ -27,9 +27,15 @@ return (json.messages || []).map((m) => m.id);
 function gmailLink(headers, threadId, id) {
 const raw = headers['Message-ID'] || headers['Message-Id'] || headers['message-id'] || '';
 const rfcId = raw.trim().replace(/^</, '').replace(/>$/, '');
-return rfcId
-? `https://mail.google.com/mail/u/0/#search/rfc822msgid:${encodeURIComponent(rfcId)}`
-: `https://mail.google.com/mail/u/0/#all/${threadId || id}`;
+if (!rfcId) return `https://mail.google.com/mail/u/0/#all/${threadId || id}`;
+// The search goes in BOTH the query string and the fragment. Fragment
+// alone was confirmed live to land on the inbox -- and an inbox, rather
+// than an empty results page, says the fragment was discarded (probably
+// by the /u/0/ redirect) rather than the search finding nothing. A query
+// string survives a redirect; the fragment stays for the clients that
+// read it.
+const query = `rfc822msgid:${encodeURIComponent(rfcId)}`;
+return `https://mail.google.com/mail/u/0/?q=${query}#search/${query}`;
 }
 
 async function getMessageSummary(id) {
