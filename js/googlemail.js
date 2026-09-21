@@ -25,17 +25,17 @@ return (json.messages || []).map((m) => m.id);
 // id the mail itself carries, so it doesn't depend on Google's internal
 // id scheme at all.
 function gmailLink(headers, threadId, id) {
-const raw = headers['Message-ID'] || headers['Message-Id'] || headers['message-id'] || '';
-const rfcId = raw.trim().replace(/^</, '').replace(/>$/, '');
-if (!rfcId) return `https://mail.google.com/mail/u/0/#all/${threadId || id}`;
-// The search goes in BOTH the query string and the fragment. Fragment
-// alone was confirmed live to land on the inbox -- and an inbox, rather
-// than an empty results page, says the fragment was discarded (probably
-// by the /u/0/ redirect) rather than the search finding nothing. A query
-// string survives a redirect; the fragment stays for the clients that
-// read it.
-const query = `rfc822msgid:${encodeURIComponent(rfcId)}`;
-return `https://mail.google.com/mail/u/0/?q=${query}#search/${query}`;
+// The MESSAGE id, not the thread id. Both come back from the same API
+// response and it's easy to reach for the wrong one -- the first
+// version of this used threadId and always landed on the inbox.
+// `#all/` rather than `#inbox/` so an archived message still resolves.
+//
+// Still not certain this id space works at all: Gmail's own URLs use a
+// different permalink id (FMfcg...) that the API never returns, and a
+// thread id in this position is definitely ignored. If a message id is
+// ignored too, no URL we can build will open a specific message, and
+// the answer is to render it in the app instead.
+return `https://mail.google.com/mail/u/0/#all/${id}`;
 }
 
 async function getMessageSummary(id) {
