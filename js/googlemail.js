@@ -174,7 +174,22 @@ function findAttachmentParts(payload) {
 if (!payload) return [];
 const found = [];
 if (payload.body?.attachmentId) {
-found.push({ attachmentId: payload.body.attachmentId, filename: payload.filename || '', mimeType: payload.mimeType || '', size: payload.body.size || 0 });
+// Content-ID is what an inline image in the HTML body points at
+// (`<img src="cid:...">`) -- an e-ticket's QR code is almost always
+// one of these rather than a plain attachment, so without it the
+// reader can only list the file, never put it back where the sender
+// meant it to appear. Gmail wraps the value in angle brackets.
+const partHeaders = {};
+(payload.headers || []).forEach((h) => { partHeaders[h.name.toLowerCase()] = h.value; });
+const contentId = (partHeaders['content-id'] || '').replace(/^<|>$/g, '').trim();
+found.push({
+attachmentId: payload.body.attachmentId,
+filename: payload.filename || '',
+mimeType: payload.mimeType || '',
+size: payload.body.size || 0,
+contentId,
+inline: /^inline/i.test(partHeaders['content-disposition'] || '') || !!contentId,
+});
 }
 (payload.parts || []).forEach((part) => found.push(...findAttachmentParts(part)));
 return found;
@@ -208,7 +223,7 @@ try { icsText = new TextDecoder('utf-8').decode(await fetchMessageAttachmentByte
 catch (err) { /* attachment fetch failing shouldn't block the AI fallback */ }
 }
 return {
-bodyText, bodyHtml, icsText, attachments,
+id, bodyText, bodyHtml, icsText, attachments,
 from: headers.from || '', to: headers.to || '',
 subject: headers.subject || '', date: headers.date || '',
 };

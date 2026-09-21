@@ -3452,6 +3452,23 @@ font-size:13px;
 margin:0;
 }
 .mail-view-actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;}
+.mail-view-atts{display:flex;gap:6px;flex-wrap:wrap;}
+.mail-view-atts button{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.mail-view-previews{display:flex;gap:10px;flex-wrap:wrap;}
+/* An attached image is shown at a usable size rather than as a thumbnail:
+   the one that matters is a boarding-pass QR code, and a scanner needs it
+   big and square-on. Sits outside the body frame (see mailviewer.js). */
+.mail-view-preview{margin:0;flex:0 1 220px;display:flex;flex-direction:column;gap:4px;align-items:center;}
+.mail-view-preview img{
+width:100%;
+max-height:46vh;
+object-fit:contain;
+background:#fff;
+border:1px solid var(--line);
+border-radius:8px;
+padding:6px;
+}
+.mail-view-preview figcaption{text-align:center;word-break:break-word;}
 
 /* ---- Phone layout fixes, last on purpose ----
    These override rules defined further up the file, and a media query
