@@ -3408,3 +3408,23 @@ cursor:zoom-out;
 padding:24px;
 }
 .lightbox-img{width:100%;height:100%;border-radius:8px;background-size:contain;background-position:center;background-repeat:no-repeat;}
+
+/* ---- Phone layout fixes, last on purpose ----
+   These override rules defined further up the file, and a media query
+   adds no specificity of its own -- put this block anywhere earlier and
+   the later plain selector silently wins (which is exactly what happened
+   the first time). */
+@media (max-width:600px){
+/* A mail row's three columns don't fit side by side: .mail-link is
+   itself a non-wrapping flex row, so .mail-from's 120px minimum squeezed
+   the subject into a ~50px column that wrapped to six lines. The link
+   then stood taller than the buttons beside it and, because the row
+   centres its items, the buttons sat on top of the wrapped text. Giving
+   the link its own full-width line, wrapping inside it, puts the subject
+   back on real width and drops the buttons below. */
+.mail-row{align-items:flex-start;}
+.mail-link{flex:1 1 100%;flex-wrap:wrap;align-items:baseline;}
+.mail-from{min-width:0;flex:0 1 auto;}
+.mail-subject{flex:1 1 100%;}
+.mail-row-group .mail-subject{flex:1 1 100%;}
+}
