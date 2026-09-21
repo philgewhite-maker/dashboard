@@ -14,9 +14,27 @@ const json = await res.json();
 return (json.messages || []).map((m) => m.id);
 }
 
+// Gmail's web UI is asked for one specific message by its RFC822
+// Message-ID, not by the API's thread id.
+//
+// `#all/<threadId>` used to open the thread, and stopped: the API's
+// thread id is a hex string, while Gmail's own URLs now use a different
+// permalink id (FMfcg...), and an id it doesn't recognise simply drops
+// you in the inbox -- which is exactly the reported symptom. A
+// Message-ID search is the stable way to address one message: it's the
+// id the mail itself carries, so it doesn't depend on Google's internal
+// id scheme at all.
+function gmailLink(headers, threadId, id) {
+const raw = headers['Message-ID'] || headers['Message-Id'] || headers['message-id'] || '';
+const rfcId = raw.trim().replace(/^</, '').replace(/>$/, '');
+return rfcId
+? `https://mail.google.com/mail/u/0/#search/rfc822msgid:${encodeURIComponent(rfcId)}`
+: `https://mail.google.com/mail/u/0/#all/${threadId || id}`;
+}
+
 async function getMessageSummary(id) {
 const params = new URLSearchParams({ format: 'metadata' });
-['From', 'Subject', 'Date'].forEach((h) => params.append('metadataHeaders', h));
+['From', 'Subject', 'Date', 'Message-ID'].forEach((h) => params.append('metadataHeaders', h));
 const res = await googleFetch(`${GMAIL_API}/messages/${id}?${params}`);
 if (!res.ok) throw new Error(`Gmail message fetch failed: ${res.status}`);
 const json = await res.json();
@@ -29,7 +47,7 @@ from: headers.From || '(unknown sender)',
 subject: headers.Subject || '(no subject)',
 date: headers.Date || '',
 snippet: json.snippet || '',
-link: `https://mail.google.com/mail/u/0/#all/${json.threadId || id}`,
+link: gmailLink(headers, json.threadId, id),
 };
 }
 
@@ -189,4 +207,4 @@ if (!json.data) throw new Error('Attachment had no data.');
 return base64UrlDecodeBytes(json.data);
 }
 
-export { fetchMailSearches, buildQuery, getMessageDetail, fetchMessageAttachmentBytes };
+export { fetchMailSearches, buildQuery, getMessageDetail, fetchMessageAttachmentBytes, gmailLink };
