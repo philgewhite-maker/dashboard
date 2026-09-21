@@ -192,6 +192,14 @@ const res = await googleFetch(`${GMAIL_API}/messages/${id}?format=full`);
 if (!res.ok) throw new Error(`Gmail message fetch failed: ${res.status}`);
 const json = await res.json();
 const bodyText = bodyTextFromPayload(json.payload);
+// The HTML part as sent, for the in-app reader (mailviewer.js) to show
+// in a sandboxed frame. Separate from bodyText, which is deliberately
+// stripped to plain text for the AI extractions -- they want words, the
+// reader wants the layout the sender intended.
+const htmlPart = findBodyPart(json.payload, 'text/html');
+const bodyHtml = htmlPart ? base64UrlDecode(htmlPart) : '';
+const headers = {};
+(json.payload?.headers || []).forEach((h) => { headers[h.name.toLowerCase()] = h.value; });
 const attachments = findAttachmentParts(json.payload);
 const icsPart = attachments.find((a) => a.mimeType === 'text/calendar' || /\.ics$/i.test(a.filename || ''));
 let icsText = null;
@@ -199,7 +207,11 @@ if (icsPart) {
 try { icsText = new TextDecoder('utf-8').decode(await fetchMessageAttachmentBytes(id, icsPart.attachmentId)); }
 catch (err) { /* attachment fetch failing shouldn't block the AI fallback */ }
 }
-return { bodyText, icsText, attachments };
+return {
+bodyText, bodyHtml, icsText, attachments,
+from: headers.from || '', to: headers.to || '',
+subject: headers.subject || '', date: headers.date || '',
+};
 }
 
 // Raw bytes of one attachment, by the id findAttachmentParts/getMessageDetail

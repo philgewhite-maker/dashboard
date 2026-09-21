@@ -306,12 +306,17 @@ const pickersHtml = pendingDraft ? '' : Object.keys(MAIL_ACTIONS)
 .filter((id) => MAIL_ACTIONS[id].kind === 'picker')
 .map((id) => actionPickerHtml(id, m)).join('')
 + (existingTaskFor(m) ? actionPickerHtml('improveTask', m) : '');
+// Opens the message in the app rather than linking to Gmail: its web UI
+// ignores both ids the API gives us, so every such link landed on the
+// inbox (see mailviewer.js). The Gmail link survives as a small "↗" for
+// replying, where the inbox is at least the right account.
 return `<div class="mail-row">
-<a class="mail-link" href="${escapeHtml(affiliateLink(m.link))}" target="_blank" rel="noopener">
+<span class="mail-link" role="button" tabindex="0" data-mail-open="${escapeHtml(m.id)}" data-mail-open-subject="${escapeHtml(m.subject)}" style="cursor:pointer;">
 <span class="mail-from">${escapeHtml(displayName(m.from))}</span>
 <span class="mail-subject">${escapeHtml(m.subject)}</span>
 <span class="mail-date">${escapeHtml(formatDate(m.date))}</span>
-</a>
+</span>
+<a class="mini-task-btn" href="${escapeHtml(affiliateLink(m.link))}" target="_blank" rel="noopener" title="Open Gmail (to reply)">&#8599;</a>
 ${actionsHtml}
 <button class="mail-dismiss-btn" type="button" title="Dismiss — not turning this into anything, just stop showing it"
 data-mail-dismiss="${escapeHtml(m.id)}" data-mail-url="${escapeHtml(m.link)}" data-mail-subject="${escapeHtml(m.subject)}" data-mail-from="${escapeHtml(displayName(m.from))}">&times;</button>
@@ -559,6 +564,18 @@ if (!data.mailDismissed.some((d) => d.url === url)) {
 data.mailDismissed.push(blankMailDismissal({ url, subject, from }));
 }
 }
+
+list.querySelectorAll('[data-mail-open]').forEach((row) => {
+const open = async () => {
+const { openMessage } = await import('./mailviewer.js');
+openMessage(row.dataset.mailOpen, { subject: row.dataset.mailOpenSubject });
+};
+row.addEventListener('click', open);
+// It behaves like a button, so it answers to a keyboard like one.
+row.addEventListener('keydown', (e) => {
+if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+});
+});
 
 list.querySelectorAll('[data-mail-dismiss]').forEach((btn) => {
 btn.addEventListener('click', (e) => {
