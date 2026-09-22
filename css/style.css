@@ -3073,6 +3073,14 @@ color:inherit;
 .voucher-value-edit{font-size:12px;color:var(--plum);font-weight:500;width:74px;}
 .voucher-notes-edit{flex:2 1 200px;font-size:12px;color:var(--muted);width:100%;}
 .expiry-date-edit{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted);}
+/* Which finance account a subscription is paid from, or comes free
+   with (see accountLinkHtml in subscriptions.js). Sits inside
+   .voucher-id under the name/cost line rather than as its own column
+   in the row -- it belongs to the subscription's identity, and a
+   fourth column would leave nothing but slivers on a phone. */
+.subscription-account{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px;}
+.subscription-account select{font-size:11px;color:var(--muted);max-width:100%;min-width:0;}
+.subscription-free{font-size:11px;color:var(--sage);display:flex;align-items:center;gap:4px;white-space:nowrap;cursor:pointer;}
 @keyframes flashNew{
 0%{background:var(--sage-bg);}
 100%{background:transparent;}
@@ -3251,7 +3259,18 @@ transition:transform .1s ease;
    number getting its own full-width row below the badge -- confirmed
    live that extra row was the single biggest contributor to cards
    running too tall. */
-.flow-card-top-right{display:flex;flex-direction:column;align-items:flex-end;gap:1px;}
+.flow-card-top-right{display:flex;flex-direction:column;align-items:flex-end;gap:1px;flex:0 0 auto;}
+/* The account fee, beside the surplus it comes out of. It was first
+   put in the top row's empty middle to cost no height; measured at 0px
+   of usable width there on a 150px card once the badge and "CURRENT
+   ACCOUNT" had taken theirs, so it lives here instead. */
+.flow-card-fee{
+font-family:'IBM Plex Mono',monospace;
+font-size:9px;
+font-weight:600;
+color:var(--amber);
+white-space:nowrap;
+}
 .flow-card-type{
 font-family:'IBM Plex Mono',monospace;
 font-size:8px;
@@ -3270,7 +3289,12 @@ color:var(--muted);
 /* Surplus + DD count share one row (see flowCardHtml) instead of each
    getting its own line -- same "cards were too tall" fix as
    .flow-card-top-right above. */
-.flow-card-stats{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;}
+/* Row-gap deliberately near zero while the column gap stays at 8:
+   surplus + fee + DD measures ~145px against 122px of usable card
+   width, so a card carrying all three always wraps, and the only thing
+   left to control is what that wrap costs in height. At the old uniform
+   8px it added 19px; this makes it 12px. */
+.flow-card-stats{display:flex;align-items:center;justify-content:space-between;gap:1px 8px;flex-wrap:wrap;}
 /* "3 (1)" -- deal-linked count, then transferrable in brackets, see
    ddCountLabel() in financeaccounts.js. */
 .flow-card-dd{font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--muted);}

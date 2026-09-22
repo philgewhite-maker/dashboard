@@ -784,6 +784,27 @@ deal: '', dealEndDate: '',
 // in the UI (financeaccounts.js clears one when the other is set).
 dealOngoing: false,
 purpose: '',
+// What the account costs to hold. Stored as typed, with its own basis
+// beside it (accountFeeBasis: 'monthly' | 'annual') rather than
+// normalised to a monthly figure: "£240/yr" is what the statement and
+// the T&Cs actually say, and silently rewriting it as "£20/mo" loses
+// the number you'd go looking for when checking. The monthly
+// equivalent is derived where it's needed (monthlyFee() in
+// financeaccounts.js, which feeds the surplus maths).
+accountFee: '', accountFeeBasis: 'monthly',
+// Credit cards. The percentage of the balance the card demands each
+// month -- captured now for the balance-transfer comparison it's meant
+// to drive later (which card to move a balance to, and what the
+// monthly cost of holding it there works out as). creditLimit is the
+// other half of that: it caps how much could actually be moved onto
+// this card in the first place.
+minRepaymentPct: '', creditLimit: '',
+// The Direct Debit that clears this card, pointing at whichever of
+// your own bank accounts pays it. repaymentAmountType: 'full' |
+// 'minimum' | '' (not recorded yet) -- the distinction that decides
+// whether a 0% period is actually free or is quietly accruing a
+// balance, so it's a field of its own rather than a note.
+repaymentFromAccountId: '', repaymentAmountType: '',
 // [{id, beneficiary, amount, status, method, toAccountId}] -- every
 // regular outgoing, Direct Debits and anything else (standing orders,
 // card payments...), not just DDs specifically (was directDebits, DD-
@@ -1094,6 +1115,17 @@ if (!data.calendarStatus || typeof data.calendarStatus !== 'object' || Array.isA
 if (!Array.isArray(data.vouchers)) data.vouchers = [];
 if (!Array.isArray(data.businessIdeas)) data.businessIdeas = [];
 if (!Array.isArray(data.subscriptions)) data.subscriptions = [];
+// A subscription can hang off one of the tracked accounts, and that
+// link says one of two quite different things: it's PAID from that
+// account, or it comes free with it (Apple TV+ included with a Barclays
+// account). includedWithAccount is what separates them -- without it a
+// perk worth £8.99 and a bill for £8.99 would look identical, and the
+// whole point of recording it is knowing which you'd lose by closing
+// the account.
+data.subscriptions.forEach((s) => {
+if (s.accountId === undefined) s.accountId = '';
+if (s.includedWithAccount === undefined) s.includedWithAccount = false;
+});
 if (!Array.isArray(data.enhancementIdeas)) data.enhancementIdeas = [];
 if (!Array.isArray(data.financeAccounts)) data.financeAccounts = [];
 if (!Array.isArray(data.switchOffers)) data.switchOffers = [];
@@ -1151,6 +1183,15 @@ if (a.cassFromAccountId && !financeAccountIds.has(a.cassFromAccountId)) a.cassFr
 if (a.fundingFromAccountId && !financeAccountIds.has(a.fundingFromAccountId)) a.fundingFromAccountId = '';
 a.balanceTransfers = a.balanceTransfers.filter((bt) => financeAccountIds.has(bt.fromAccountId));
 a.outgoings.forEach((o) => { if (o.toAccountId && !financeAccountIds.has(o.toAccountId)) o.toAccountId = ''; });
+if (a.repaymentFromAccountId && !financeAccountIds.has(a.repaymentFromAccountId)) a.repaymentFromAccountId = '';
+});
+// Same rule for a subscription's account link: optional enrichment on
+// a record that stands alone without it, so it clears rather than
+// taking the subscription with it. includedWithAccount goes too --
+// "free with an account that no longer exists" isn't a fact worth
+// keeping, and left behind it would read as a perk you still have.
+data.subscriptions.forEach((s) => {
+if (s.accountId && !financeAccountIds.has(s.accountId)) { s.accountId = ''; s.includedWithAccount = false; }
 });
 }
 // Deal Expiries (name/type/date/notes only -- no account identity, no

@@ -8,6 +8,15 @@
 import { data, queueSave, blankFinanceAccount } from '../state.js';
 import { uid, escapeHtml, bindForm, daysUntil, scrollAndFlash } from '../utils.js';
 import { matchBankLogo } from '../bankLogos.js';
+// Subscriptions carry the account link (subscription.accountId), so
+// changing it here has to redraw their panel too -- both sit on the
+// Finances tab and are on screen together. Imported dynamically to keep
+// the dependency one-directional at load time; subscriptions.js knows
+// nothing about accounts.
+async function refreshSubscriptionsPanel() {
+const { renderSubscriptions } = await import('./subscriptions.js');
+renderSubscriptions();
+}
 
 const ACCOUNT_TYPES = ['Current account', 'Savings', 'Credit card', 'Mortgage', 'Loan', 'Other'];
 // A genuine DECISION, not a fact derivable from other fields -- "closed"
@@ -83,6 +92,189 @@ const dn = daysUntil(a.dealEndDate);
 if (dn < 0) return `<span class="expiry-badge expired">Deal expired</span>`;
 if (dn <= 60) return `<span class="expiry-badge soon">${dn === 0 ? 'Deal ends today' : `Deal: ${dn}d left`}</span>`;
 return `<span class="expiry-badge">Deal: ${dn}d left</span>`;
+}
+
+// ---- Account fee ----------------------------------------------------------
+
+const ACCOUNT_FEE_BASES = [
+{ value: 'monthly', label: 'Monthly' },
+{ value: 'annual', label: 'Annually' },
+];
+
+// A fee is entered in whichever terms the provider quotes it in -- "£15
+// a month" for a packaged current account, "£240 a year" for a premium
+// card -- and this is the single place that turns the annual case into
+// a comparable monthly figure. Anything doing ARITHMETIC with a fee
+// goes through here; anything DISPLAYING one uses feeText(), which
+// keeps the number exactly as it was typed.
+function monthlyFee(a) {
+const n = Number(a.accountFee);
+if (a.accountFee === '' || a.accountFee == null || !isFinite(n) || n <= 0) return 0;
+return a.accountFeeBasis === 'annual' ? n / 12 : n;
+}
+
+function feeText(a) {
+if (!monthlyFee(a)) return '';
+const n = Number(a.accountFee);
+return `£${n.toLocaleString('en-GB')}/${a.accountFeeBasis === 'annual' ? 'yr' : 'mo'}`;
+}
+
+// The tooltip carries the OTHER basis: an annual fee's monthly cost is
+// what you compare against a monthly one, and vice versa, so whichever
+// way it was entered the conversion is there rather than left as mental
+// arithmetic at the moment of comparing two accounts.
+function feeTitle(a) {
+const m = monthlyFee(a);
+if (!m) return '';
+return a.accountFeeBasis === 'annual'
+? `Account fee ${feeText(a)} — about £${(Math.round(m * 100) / 100).toLocaleString('en-GB')}/mo`
+: `Account fee ${feeText(a)} — £${(Math.round(m * 12 * 100) / 100).toLocaleString('en-GB')}/yr`;
+}
+
+// Amber rather than the neutral chip: a fee is money going out, and the
+// point of surfacing it in the collapsed list at all is that it should
+// catch the eye while scanning for what an account costs to hold.
+// Hidden once closed, same reasoning as surplusTag -- a fee you no
+// longer pay isn't a cost, and showing it would misread as one.
+function feeTag(a) {
+if (isClosed(a) || !monthlyFee(a)) return '';
+return `<span class="tag-chip tag-chip-amber" title="${escapeHtml(feeTitle(a))}">Fee ${escapeHtml(feeText(a))}</span>`;
+}
+
+// ---- Credit card repayment ------------------------------------------------
+
+function isCreditCard(a) {
+return a.accountType === 'Credit card';
+}
+
+// '' is a real, distinct third state -- "we haven't recorded how this
+// card gets paid" is different from either answer, and matters because
+// a 0% balance-transfer card paid only to the minimum is quietly
+// costing money while one paid in full isn't.
+const REPAYMENT_TYPES = [
+{ value: '', label: 'Not recorded' },
+{ value: 'full', label: 'Full balance' },
+{ value: 'minimum', label: 'Minimum only' },
+];
+const REPAYMENT_TYPE_LABEL = { full: 'in full', minimum: 'minimum only' };
+
+// Limit and minimum repayment % shown as one chip: they're the two
+// numbers a balance-transfer decision turns on together (how much can
+// move here, and what holding it costs each month), and splitting them
+// into two chips would put the same decision in two places.
+function cardTermsTag(a) {
+if (isClosed(a) || !isCreditCard(a)) return '';
+const limit = Number(a.creditLimit);
+const pct = Number(a.minRepaymentPct);
+const parts = [];
+const titleParts = [];
+if (a.creditLimit !== '' && isFinite(limit) && limit > 0) {
+parts.push(`£${limit.toLocaleString('en-GB')}`);
+titleParts.push(`Credit limit £${limit.toLocaleString('en-GB')}`);
+}
+if (a.minRepaymentPct !== '' && isFinite(pct) && pct > 0) {
+parts.push(`min ${pct}%`);
+// The pound figure the percentage implies at a full limit is the
+// worst case, and the one worth seeing before moving a balance here.
+titleParts.push(isFinite(limit) && limit > 0
+? `Minimum repayment ${pct}% — £${(Math.round(limit * pct) / 100).toLocaleString('en-GB')}/mo at the full limit`
+: `Minimum repayment ${pct}% of the balance`);
+}
+if (!parts.length) return '';
+return `<span class="tag-chip" title="${escapeHtml(titleParts.join(' • '))}">${escapeHtml(parts.join(' · '))}</span>`;
+}
+
+function repaymentAccount(a) {
+return a.repaymentFromAccountId ? data.financeAccounts.find((x) => x.id === a.repaymentFromAccountId) : null;
+}
+
+// Two facts in one chip because they're only meaningful together --
+// "paid in full" says nothing without knowing what pays it, and a named
+// account says nothing without knowing how much of the balance it
+// clears. The account name is a clickable reference back to its own row
+// (record-reference convention), same data-open-account-ref handler the
+// outgoings chips already use.
+function repaymentTag(a) {
+if (isClosed(a) || !isCreditCard(a)) return '';
+const from = repaymentAccount(a);
+const type = REPAYMENT_TYPE_LABEL[a.repaymentAmountType] || '';
+if (!from && !type) return '';
+const cls = a.repaymentAmountType === 'minimum' ? ' tag-chip-amber' : '';
+const typeText = type ? `DD ${type}` : 'DD amount not set';
+const fromLink = from
+? ` <span class="dd-to-account-link" data-open-account-ref="${escapeHtml(from.id)}" title="Paid from ${escapeHtml(accountLabel(from))}">&larr; ${escapeHtml(accountLabel(from))}</span>`
+: '';
+const title = from
+? `Paid by Direct Debit from ${accountLabel(from)}${type ? `, ${type}` : ''}`
+: `Direct Debit ${type}, but no paying account recorded`;
+return `<span class="tag-chip${cls}" title="${escapeHtml(title)}">${escapeHtml(typeText)}${fromLink}</span>`;
+}
+
+// ---- Linked subscriptions -------------------------------------------------
+
+// Subscriptions point AT an account (subscription.accountId), not the
+// other way round, so this is the reverse lookup -- same shape as
+// accountsFundedBy below. Kept as a lookup rather than a list stored on
+// the account so there's exactly one copy of the link to keep straight.
+function subscriptionsFor(a) {
+return data.subscriptions.filter((s) => s.accountId === a.id);
+}
+
+function subscriptionCostText(s) {
+const cost = String(s.cost || '').trim();
+if (!cost) return '';
+// A cost typed as a bare number gets a £; one already carrying its own
+// symbol or words ("£8.99", "$5", "free") is left exactly as typed.
+return /^[\d.,]+$/.test(cost) ? `£${cost}` : cost;
+}
+
+// Two counts, not one: "3 subscriptions" hides the only thing worth
+// knowing at a glance, which is how many of them you'd LOSE by closing
+// the account versus how many would simply move elsewhere.
+function subscriptionsTag(a) {
+const subs = subscriptionsFor(a);
+if (!subs.length) return '';
+const free = subs.filter((s) => s.includedWithAccount);
+const paid = subs.filter((s) => !s.includedWithAccount);
+const parts = [];
+if (free.length) parts.push(`${free.length} included: ${free.map((s) => s.name).join(', ')}`);
+if (paid.length) parts.push(`${paid.length} paid from here: ${paid.map((s) => `${s.name}${subscriptionCostText(s) ? ` (${subscriptionCostText(s)})` : ''}`).join(', ')}`);
+const text = free.length
+? `${subs.length} sub${subs.length === 1 ? '' : 's'} · ${free.length} free`
+: `${subs.length} sub${subs.length === 1 ? '' : 's'}`;
+const cls = free.length ? ' tag-chip-green' : '';
+return `<span class="tag-chip${cls}" title="${escapeHtml(parts.join(' • '))}">${escapeHtml(text)}</span>`;
+}
+
+// Each linked subscription as a chip that leads back to its own row in
+// the Subscriptions panel (record-reference convention), with the perk/
+// paid distinction carried in the chip itself rather than only in a
+// tooltip -- "free with this account" is the fact you'd want to see
+// before deciding to close it.
+function linkedSubscriptionsHtml(a) {
+const subs = subscriptionsFor(a);
+if (!subs.length) return '<span class="settings-note" style="margin:0;">None linked yet.</span>';
+return subs.map((s) => {
+const cost = subscriptionCostText(s);
+const label = s.includedWithAccount
+? `${s.name} · free with this account`
+: `${s.name}${cost ? ` · ${cost}${s.frequency ? `/${s.frequency === 'Yearly' ? 'yr' : s.frequency === 'Weekly' ? 'wk' : 'mo'}` : ''}` : ''}`;
+return `<span class="tag-chip${s.includedWithAccount ? ' tag-chip-green' : ''}">
+<span class="dd-status-toggle" data-open-subscription-ref="${escapeHtml(s.id)}" title="Open this subscription">${escapeHtml(label)}</span>
+<span class="tag-x" data-sub-unlink="${escapeHtml(s.id)}" title="Unlink from this account">&times;</span>
+</span>`;
+}).join('');
+}
+
+// Only subscriptions not already attached to some account -- moving one
+// between accounts is done from the subscription's own row, where both
+// the old and the new link are visible; offering every subscription
+// here would make it easy to silently steal one from another account.
+function unlinkedSubscriptionOptionsHtml() {
+const free = data.subscriptions.filter((s) => !s.accountId);
+if (!free.length) return '<option value="">No unlinked subscriptions</option>';
+return '<option value="">Link an existing subscription…</option>'
++ free.map((s) => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.name)}</option>`).join('');
 }
 
 function otherAccountOptionsHtml(excludeId, selectedId) {
@@ -265,11 +457,17 @@ relevant.forEach((o) => {
 if (o.amount === '' || o.amount == null || !isFinite(Number(o.amount))) { unset += 1; return; }
 out += Number(o.amount);
 });
-if (fundingIn === 0 && out === 0 && relevant.length === 0) return null;
+// The account fee is real money leaving the account every month and is
+// recorded nowhere else, so it belongs in this total. It's kept as its
+// own term rather than folded into `out` so the breakdown can name it:
+// if the same fee has ALSO been entered as a Direct Debit, both lines
+// show and the double-count is visible rather than buried.
+const fee = monthlyFee(a);
+if (fundingIn === 0 && out === 0 && fee === 0 && relevant.length === 0) return null;
 const fundedAccounts = accountsFundedBy(a);
 const fundingOut = fundedAccounts.reduce((sum, x) => sum + Number(x.fundingAmount), 0);
 const excludedOther = (a.outgoings || []).filter((o) => !REGULAR_OUTGOING_METHODS.includes(outgoingMethod(o))).length;
-return { net: fundingIn - out - fundingOut, fundingIn, externalIn, externalSource: a.fundingSource, externalVariable: a.fundingVariable, pushedIn, pushedInTotal, out, unset, excludedOther, fundingOut, fundedAccounts };
+return { net: fundingIn - out - fundingOut - fee, fundingIn, externalIn, externalSource: a.fundingSource, externalVariable: a.fundingVariable, pushedIn, pushedInTotal, out, unset, excludedOther, fundingOut, fundedAccounts, fee, feeText: feeText(a) };
 }
 
 function surplusSign(s) { return s.net < 0 ? '−' : '+'; }
@@ -284,6 +482,7 @@ if (s.pushedInTotal) inParts.push(`£${s.pushedInTotal.toLocaleString('en-GB')} 
 let title = inParts.length ? inParts.join(' + ') : '£0 in';
 if (s.out) title += ` − £${s.out.toLocaleString('en-GB')} Direct Debit/standing order`;
 if (s.fundingOut) title += ` − £${s.fundingOut.toLocaleString('en-GB')} funding ${s.fundedAccounts.length} other account${s.fundedAccounts.length === 1 ? '' : 's'} (${s.fundedAccounts.map((x) => accountLabel(x)).join(', ')})`;
+if (s.fee) title += ` − £${(Math.round(s.fee * 100) / 100).toLocaleString('en-GB')} account fee (${s.feeText})`;
 if (s.unset) title += `, ${s.unset} outgoing${s.unset === 1 ? '' : 's'} with no amount set (excluded)`;
 if (s.excludedOther) title += `, excludes ${s.excludedOther} card payment/other outgoing${s.excludedOther === 1 ? '' : 's'}`;
 return title;
@@ -330,6 +529,7 @@ if (s.pushedInTotal) inParts.push(`£${s.pushedInTotal.toLocaleString('en-GB')} 
 let text = `Net monthly: ${inParts.length ? inParts.join(' + ') : '£0 in'}`;
 if (s.out) text += ` − £${s.out.toLocaleString('en-GB')} Direct Debit/standing order`;
 if (s.fundingOut) text += ` − £${s.fundingOut.toLocaleString('en-GB')} funding ${s.fundedAccounts.length} other account${s.fundedAccounts.length === 1 ? '' : 's'} (${s.fundedAccounts.map((x) => accountLabel(x)).join(', ')})`;
+if (s.fee) text += ` − £${(Math.round(s.fee * 100) / 100).toLocaleString('en-GB')} account fee (${s.feeText})`;
 text += ` = £${Math.round(Math.abs(s.net)).toLocaleString('en-GB')}/mo ${suffix}.`;
 if (s.unset) text += ` ${s.unset} outgoing${s.unset === 1 ? '' : 's'} with no amount set aren't included.`;
 if (s.excludedOther) text += ` Excludes ${s.excludedOther} card payment/other outgoing${s.excludedOther === 1 ? '' : 's'} (not a fixed monthly figure).`;
@@ -424,6 +624,10 @@ ${accountBadgeHtml(a, 'sm')}
 ${stageTag}
 ${closedTag}
 ${dealBadgeHtml(a)}
+${feeTag(a)}
+${cardTermsTag(a)}
+${repaymentTag(a)}
+${subscriptionsTag(a)}
 ${surplusTag(a)}
 ${issuesTag}
 </summary>
@@ -449,6 +653,17 @@ ${issues.length ? `<ul class="suggested-questions" title="Deterministic prompts,
 <label>Deal ends<input type="date" data-field="dealEndDate" data-account-id="${a.id}" value="${escapeHtml(a.dealEndDate)}" ${a.dealOngoing ? 'disabled' : ''}></label>
 <label><input type="checkbox" data-field="dealOngoing" data-account-id="${a.id}" ${a.dealOngoing ? 'checked' : ''}> Ongoing (no end date)</label>
 </div>
+<div class="account-field-row">
+<label>Account fee (£)<input type="number" step="0.01" min="0" autocomplete="off" data-field="accountFee" data-account-id="${a.id}" value="${escapeHtml(a.accountFee)}" placeholder="e.g. 15"></label>
+<label>Charged<select data-field="accountFeeBasis" data-account-id="${a.id}">${ACCOUNT_FEE_BASES.map((b) => `<option value="${b.value}" ${b.value === a.accountFeeBasis ? 'selected' : ''}>${b.label}</option>`).join('')}</select></label>
+<span class="settings-note" style="align-self:end;margin:0 0 6px;">${monthlyFee(a) ? escapeHtml(feeTitle(a)) : 'Entered however the provider quotes it — the monthly equivalent is worked out for you.'}</span>
+</div>
+${isCreditCard(a) ? `<div class="account-field-row">
+<label>Credit limit (£)<input type="number" step="1" min="0" autocomplete="off" data-field="creditLimit" data-account-id="${a.id}" value="${escapeHtml(a.creditLimit)}" placeholder="e.g. 5000"></label>
+<label>Min repayment %<input type="number" step="0.1" min="0" max="100" autocomplete="off" data-field="minRepaymentPct" data-account-id="${a.id}" value="${escapeHtml(a.minRepaymentPct)}" placeholder="e.g. 2.5"></label>
+<label>Paid by Direct Debit from<select data-field="repaymentFromAccountId" data-account-id="${a.id}">${otherAccountOptionsHtml(a.id, a.repaymentFromAccountId)}</select></label>
+<label>Amount taken<select data-field="repaymentAmountType" data-account-id="${a.id}">${REPAYMENT_TYPES.map((r) => `<option value="${r.value}" ${r.value === a.repaymentAmountType ? 'selected' : ''}>${r.label}</option>`).join('')}</select></label>
+</div>` : ''}
 <label class="account-field-full">Purpose<input type="text" autocomplete="off" data-field="purpose" data-account-id="${a.id}" value="${escapeHtml(a.purpose)}" placeholder="e.g. Switch bonus farming, Emergency fund"></label>
 <div class="account-field-row">
 <label>Monthly funding in (£)<input type="number" step="0.01" min="0" autocomplete="off" data-field="fundingAmount" data-account-id="${a.id}" value="${escapeHtml(a.fundingAmount)}" placeholder="e.g. 1000"></label>
@@ -465,6 +680,15 @@ ${surplusDetailHtml(a)}
 <input type="text" autocomplete="off" class="tag-add-input" placeholder="Amount, e.g. £2,000" data-bt-amount="${a.id}" style="max-width:140px;">
 <input type="date" data-bt-date="${a.id}" title="When the transfer happened">
 <button class="sync-btn sm" type="button" data-bt-add="${a.id}">Add</button>
+</div>
+</div>
+<div class="account-field-full">
+<label style="display:block;margin-bottom:4px;">Linked subscriptions <span class="settings-note" style="display:inline;margin:0;">(paid from this account, or thrown in free with it — a perk you'd lose by closing it)</span></label>
+<div class="tag-editor">${linkedSubscriptionsHtml(a)}</div>
+<div class="sync-row" style="margin-top:6px;">
+<select data-sub-link-pick="${a.id}">${unlinkedSubscriptionOptionsHtml()}</select>
+<label style="font-size:12px;"><input type="checkbox" data-sub-link-free="${a.id}"> Free with this account</label>
+<button class="sync-btn sm" type="button" data-sub-link-add="${a.id}">Link</button>
 </div>
 </div>
 <div class="account-field-full">
@@ -1104,7 +1328,15 @@ const closed = isClosed(a);
 const closedNote = closed ? (cassToAccount(a) ? `Closed — CASS to ${cassToAccount(a).bank || accountLabel(cassToAccount(a))}` : 'Closed') : '';
 const surplus = flowCardSurplusHtml(a);
 const ddLine = dd ? `<div class="flow-card-dd" title="${escapeHtml(dd.title)}">DD ${escapeHtml(dd.text)}</div>` : '';
-const statsRow = (surplus || ddLine) ? `<div class="flow-card-stats">${surplus}${ddLine}</div>` : '';
+// The fee sits in the stats row with the surplus it's subtracted from,
+// not in the top row's empty middle: that middle was measured at 0px of
+// usable width once "CURRENT ACCOUNT" and the badge had taken their
+// share of a 150px card, so a fee placed there was silently clipped to
+// nothing.
+const feeLine = (!closed && monthlyFee(a))
+? `<span class="flow-card-fee" title="${escapeHtml(feeTitle(a))}">−${escapeHtml(feeText(a))}</span>`
+: '';
+const statsRow = (surplus || feeLine || ddLine) ? `<div class="flow-card-stats">${surplus}${feeLine}${ddLine}</div>` : '';
 return `<div class="flow-card ${escapeHtml(a.colour)}${closed ? ' flow-card-closed' : ''}" data-flow-node="${escapeHtml(a.id)}">
 <div class="flow-card-top">
 ${accountBadgeHtml(a, 'lg')}
@@ -1324,6 +1556,41 @@ renderFinanceAccounts();
 });
 list.querySelectorAll('[data-open-account-ref]').forEach((el) => {
 el.addEventListener('click', () => expandAccountRow(el.dataset.openAccountRef));
+});
+// Subscriptions live in their own panel on this same tab, so the chip
+// leads to the real row rather than re-editing a copy of it here
+// (record-reference convention). revealSubscription re-renders that
+// panel and flashes the row, same as every other cross-record link.
+list.querySelectorAll('[data-open-subscription-ref]').forEach((el) => {
+el.addEventListener('click', async () => {
+const { revealSubscription } = await import('./subscriptions.js');
+revealSubscription(el.dataset.openSubscriptionRef);
+});
+});
+list.querySelectorAll('[data-sub-link-add]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const id = btn.dataset.subLinkAdd;
+const pick = list.querySelector(`[data-sub-link-pick="${id}"]`);
+const free = list.querySelector(`[data-sub-link-free="${id}"]`);
+const s = data.subscriptions.find((x) => x.id === pick.value);
+if (!s) return;
+s.accountId = id;
+s.includedWithAccount = free.checked;
+queueSave();
+renderFinanceAccounts();
+refreshSubscriptionsPanel();
+});
+});
+list.querySelectorAll('[data-sub-unlink]').forEach((x) => {
+x.addEventListener('click', () => {
+const s = data.subscriptions.find((sub) => sub.id === x.dataset.subUnlink);
+if (!s) return;
+s.accountId = '';
+s.includedWithAccount = false;
+queueSave();
+renderFinanceAccounts();
+refreshSubscriptionsPanel();
+});
 });
 list.querySelectorAll('[data-bt-add]').forEach((btn) => {
 btn.addEventListener('click', () => {
