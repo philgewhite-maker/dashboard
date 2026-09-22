@@ -837,7 +837,11 @@ fundingVariable: false,
 // A card's own equivalent of a CASS switch -- but unlike CASS (one
 // switch opens the account), a card can receive several separate
 // balance transfers over its life, so this is a list, not a single
-// field: [{id, fromAccountId, amount, date}].
+// field: [{id, fromAccountId, amount, date, dealEndDate}]. Two dates,
+// deliberately: `date` is when the balance moved, `dealEndDate` is when
+// its 0% period expires -- and since each transfer onto the same card
+// can carry its own promotional length, that end date belongs to the
+// transfer, not to the card's own deal/dealEndDate fields.
 balanceTransfers: [],
 colour: 'blue', // fixed palette, see ACCOUNT_COLOURS in financeaccounts.js -- also the card's accent stripe when logoUrl is blank
 logoUrl: '', // pasted image URL (e.g. the provider's own Play Store listing icon) -- hotlinked, never downloaded/stored locally
@@ -1138,7 +1142,12 @@ data.financeAccounts.forEach((a) => {
 if (a.cassLinkedAccountId && !a.cassFromAccountId) a.cassFromAccountId = a.cassLinkedAccountId;
 delete a.cassLinkedAccountId;
 if (!Array.isArray(a.balanceTransfers)) a.balanceTransfers = [];
-a.balanceTransfers = a.balanceTransfers.map((bt) => ({ id: bt.id || uid(), fromAccountId: bt.fromAccountId || '', amount: bt.amount || '', date: bt.date || '' }));
+// dealEndDate added 2026-09-22 -- when this transfer's 0% period runs
+// out, which is a different date from `date` (when it happened) and the
+// one that actually matters: a transfer sitting past its promotional
+// end is accruing interest. Blank on everything already recorded, which
+// is honest -- it was never asked for before.
+a.balanceTransfers = a.balanceTransfers.map((bt) => ({ id: bt.id || uid(), fromAccountId: bt.fromAccountId || '', amount: bt.amount || '', date: bt.date || '', dealEndDate: bt.dealEndDate || '' }));
 // directDebits -> outgoings (2026-09-05) -- carries the array forward
 // under its new name (old field deleted, not left as dead data), and
 // each entry gains method (defaults 'Direct Debit', preserving what

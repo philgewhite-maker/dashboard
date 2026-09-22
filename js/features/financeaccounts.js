@@ -559,8 +559,56 @@ return (a.balanceTransfers || []).map((bt) => {
 const from = data.financeAccounts.find((x) => x.id === bt.fromAccountId);
 const dateStr = formatShortDate(bt.date);
 const label = `${bt.amount ? escapeHtml(bt.amount) : 'Amount not set'} from ${escapeHtml(from ? accountLabel(from) : 'a deleted account')}${dateStr ? ` · ${escapeHtml(dateStr)}` : ''}`;
-return `<span class="tag-chip">${label}<span class="tag-x" data-bt-remove="${escapeHtml(a.id)}:${escapeHtml(bt.id)}">&times;</span></span>`;
+// The 0% end date gets its own badge rather than being a third item in
+// the label: it's the only part of a transfer that can go wrong, and an
+// expired one needs to shout, not sit in a comma-separated list. The
+// chip around it stays neutral -- tinting it red as well put a red
+// badge on a red chip, where the badge read as an empty outline and
+// lost the very distinction it exists to draw. Same arrangement as the
+// account's own deal badge sitting in a neutral summary row.
+const expiry = btExpiryBadgeHtml(bt);
+return `<span class="tag-chip">${label}${expiry}<span class="tag-x" data-bt-remove="${escapeHtml(a.id)}:${escapeHtml(bt.id)}">&times;</span></span>`;
 }).join('');
+}
+
+function btExpired(bt) {
+return !!bt.dealEndDate && daysUntil(bt.dealEndDate) < 0;
+}
+
+// Same thresholds and wording as dealBadgeHtml uses for an account's own
+// deal -- one visual language for "a promotional rate is running out",
+// whether it's the account's or one transfer's.
+function btExpiryBadgeHtml(bt) {
+if (!bt.dealEndDate) return '';
+const dn = daysUntil(bt.dealEndDate);
+const ends = formatShortDate(bt.dealEndDate);
+if (dn < 0) return ` <span class="expiry-badge expired" title="0% ended ${escapeHtml(ends)} — this balance is accruing interest">0% ended</span>`;
+if (dn <= 60) return ` <span class="expiry-badge soon" title="0% ends ${escapeHtml(ends)}">${dn === 0 ? '0% ends today' : `0%: ${dn}d left`}</span>`;
+return ` <span class="expiry-badge" title="0% ends ${escapeHtml(ends)}">0%: ${dn}d left</span>`;
+}
+
+// The soonest 0% expiry across every transfer on the card -- what a
+// glance at the collapsed row should surface, since one expired
+// transfer among five is exactly the thing a per-transfer badge buried
+// inside the expanded detail would hide.
+function nextBtExpiry(a) {
+const dated = (a.balanceTransfers || []).filter((bt) => bt.dealEndDate);
+if (!dated.length) return null;
+return dated.reduce((soonest, bt) => (daysUntil(bt.dealEndDate) < daysUntil(soonest.dealEndDate) ? bt : soonest));
+}
+
+function btExpiryTag(a) {
+if (isClosed(a)) return '';
+const bt = nextBtExpiry(a);
+if (!bt) return '';
+const from = data.financeAccounts.find((x) => x.id === bt.fromAccountId);
+const dn = daysUntil(bt.dealEndDate);
+const which = `${bt.amount || 'Balance transfer'}${from ? ` from ${accountLabel(from)}` : ''}`;
+const total = (a.balanceTransfers || []).filter((x) => x.dealEndDate).length;
+const more = total > 1 ? ` (soonest of ${total})` : '';
+if (dn < 0) return `<span class="tag-chip tag-chip-red" title="${escapeHtml(`${which} — 0% ended ${formatShortDate(bt.dealEndDate)}${more}`)}">BT 0% ended</span>`;
+if (dn <= 60) return `<span class="tag-chip tag-chip-amber" title="${escapeHtml(`${which} — 0% ends ${formatShortDate(bt.dealEndDate)}${more}`)}">BT 0%: ${dn}d left</span>`;
+return '';
 }
 
 // The account (if any) this one was CASS'd OUT to -- the reverse
@@ -594,6 +642,13 @@ if (!a.dealEndDate && !a.dealOngoing) out.push('Has a deal but no end date set �
 out.push('No deal, purpose, or notes recorded — why is this kept open?');
 }
 if (!!a.fundingAmount !== !!(a.fundingFromAccountId || a.fundingSource)) out.push('Funding amount and source don\'t match — one is set without the other.');
+// Worth raising separately from the account's own deal end: a transfer
+// past its 0% is costing interest right now, and one with no end date
+// recorded can't be checked at all.
+const expiredBts = (a.balanceTransfers || []).filter(btExpired);
+if (expiredBts.length) out.push(`${expiredBts.length} balance transfer${expiredBts.length === 1 ? "'s 0% has" : "s' 0% have"} ended — still on this card, now accruing interest?`);
+const undatedBts = (a.balanceTransfers || []).filter((bt) => !bt.dealEndDate);
+if (undatedBts.length) out.push(`${undatedBts.length} balance transfer${undatedBts.length === 1 ? ' has' : 's have'} no 0% end date recorded — when does the promotional rate run out?`);
 const surplus = accountMonthlySurplus(a);
 if (surplus) {
 if (surplus.net < 0) out.push(`Outgoings (Direct Debit/standing order) exceed funding by £${Math.round(-surplus.net).toLocaleString('en-GB')}/mo — funding, DDs, or amounts may be out of date.`);
@@ -626,6 +681,7 @@ ${closedTag}
 ${dealBadgeHtml(a)}
 ${feeTag(a)}
 ${cardTermsTag(a)}
+${btExpiryTag(a)}
 ${repaymentTag(a)}
 ${subscriptionsTag(a)}
 ${surplusTag(a)}
@@ -673,12 +729,13 @@ ${a.fundingSourceOther ? `<label>Source name<input type="text" autocomplete="off
 </div>
 ${surplusDetailHtml(a)}
 <div class="account-field-full">
-<label style="display:block;margin-bottom:4px;">Balance transfers <span class="settings-note" style="display:inline;margin:0;">(a card's own equivalent of a CASS switch — there can be several, over time)</span></label>
+<label style="display:block;margin-bottom:4px;">Balance transfers <span class="settings-note" style="display:inline;margin:0;">(a card's own equivalent of a CASS switch — there can be several, over time, each with its own 0% end date)</span></label>
 <div class="tag-editor">${balanceTransfersHtml(a)}</div>
 <div class="sync-row" style="margin-top:6px;">
 <select data-bt-from="${a.id}">${otherAccountOptionsHtml(a.id, '')}</select>
 <input type="text" autocomplete="off" class="tag-add-input" placeholder="Amount, e.g. £2,000" data-bt-amount="${a.id}" style="max-width:140px;">
 <input type="date" data-bt-date="${a.id}" title="When the transfer happened">
+<input type="date" data-bt-deal-end="${a.id}" title="When this transfer's 0% period ends — each transfer onto the same card can have its own">
 <button class="sync-btn sm" type="button" data-bt-add="${a.id}">Add</button>
 </div>
 </div>
@@ -854,8 +911,12 @@ edges.push({ from: a.cassFromAccountId, to: a.id, kind: 'cass', label: dateStr ?
 data.financeAccounts.forEach((a) => {
 (a.balanceTransfers || []).forEach((bt) => {
 if (bt.fromAccountId && accountOk(bt.fromAccountId) && accountOk(a.id)) {
+// The 0% end shown as "→ <date>" rather than a second bare date:
+// two dates side by side with nothing between them would be
+// unreadable as "moved then, free until then".
 const dateStr = formatShortDate(bt.date);
-const label = [bt.amount || 'BT', dateStr].filter(Boolean).join(' · ');
+const endStr = bt.dealEndDate ? `${btExpired(bt) ? '0% ended ' : '0% to '}${formatShortDate(bt.dealEndDate)}` : '';
+const label = [bt.amount || 'BT', dateStr, endStr].filter(Boolean).join(' · ');
 edges.push({ from: bt.fromAccountId, to: a.id, kind: 'balance-transfer', label });
 }
 });
@@ -1598,15 +1659,17 @@ const id = btn.dataset.btAdd;
 const fromSelect = list.querySelector(`[data-bt-from="${id}"]`);
 const amountInput = list.querySelector(`[data-bt-amount="${id}"]`);
 const dateInput = list.querySelector(`[data-bt-date="${id}"]`);
+const dealEndInput = list.querySelector(`[data-bt-deal-end="${id}"]`);
 const fromAccountId = fromSelect.value;
 if (!fromAccountId) return;
 const a = data.financeAccounts.find((x) => x.id === id);
 if (!a) return;
 if (!Array.isArray(a.balanceTransfers)) a.balanceTransfers = [];
-a.balanceTransfers.push({ id: uid(), fromAccountId, amount: amountInput.value.trim(), date: dateInput.value });
+a.balanceTransfers.push({ id: uid(), fromAccountId, amount: amountInput.value.trim(), date: dateInput.value, dealEndDate: dealEndInput.value });
 fromSelect.value = '';
 amountInput.value = '';
 dateInput.value = '';
+dealEndInput.value = '';
 queueSave();
 renderFinanceAccounts();
 });
