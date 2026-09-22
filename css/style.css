@@ -2618,16 +2618,31 @@ white-space:nowrap;
 .shop-title{font-size:14px;font-weight:600;cursor:pointer;flex:1 1 auto;min-width:120px;}
 .shop-row.done .shop-title{text-decoration:line-through;color:var(--muted);}
 .shop-also{font-size:11px;color:var(--muted);}
-.shop-search-btn{width:auto;margin-top:0;flex:0 0 auto;}
-.shop-search-results{flex:1 1 100%;display:flex;flex-direction:column;gap:4px;margin-top:2px;}
+/* Both of these have to out-specify `.sync-btn.sm{width:100%}` (0,2,0) --
+   a single class doesn't, which is why "Search prices"/"Refresh" and
+   "Paste price" were rendering as full-width bars rather than buttons on
+   the row they belong to. */
+.sync-btn.sm.shop-search-btn,.sync-btn.sm.shop-paste-btn{width:auto;margin-top:0;flex:0 0 auto;}
+/* min-width:0 on both this and .shop-hit-name below: a flex item defaults
+   to min-width:auto, so a long Amazon product title refuses to shrink and
+   pushes the whole results block past the edge of the card (measured at
+   1221px inside an 899px card) instead of ellipsising as intended. */
+.shop-search-results{flex:1 1 100%;min-width:0;display:flex;flex-direction:column;gap:4px;margin-top:2px;}
+/* The Paste price button sits beside its hit rather than under it -- as a
+   direct child of the column above it stretched to the full width. */
+.shop-hit-row{display:flex;align-items:center;gap:6px;min-width:0;}
+.shop-hit-row .shop-search-hit{flex:1 1 auto;min-width:0;}
 .shop-search-results.loading,.shop-search-results.error,.shop-search-results.empty{font-size:12px;color:var(--muted);}
 .shop-search-results.error{color:var(--red);}
-.shop-search-hit{display:flex;align-items:baseline;gap:8px;font-size:12px;padding:4px 8px;border-radius:6px;background:var(--card-alt,var(--card));text-decoration:none;color:inherit;}
+.shop-search-hit{display:flex;align-items:baseline;flex-wrap:wrap;gap:8px;font-size:12px;padding:4px 8px;border-radius:6px;background:var(--card-alt,var(--card));text-decoration:none;color:inherit;}
 .shop-search-hit:hover{background:var(--sage-bg);}
 .shop-hit-retailer{font-weight:600;flex:0 0 auto;}
-.shop-hit-name{flex:1 1 auto;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.shop-hit-name{flex:1 1 auto;min-width:0;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .shop-hit-price{flex:0 0 auto;font-weight:600;}
-.shop-hit-offer{flex:0 0 auto;font-size:11px;padding:1px 6px;border-radius:5px;background:var(--sage-bg);color:var(--sage);}
+/* Shrinkable, unlike the retailer and price beside it: a supermarket
+   offer line ("Buy 1 get 2nd 1/2 price on selected healthcare") is long
+   enough to push the row off the side of a phone on its own. */
+.shop-hit-offer{flex:0 1 auto;min-width:0;font-size:11px;padding:1px 6px;border-radius:5px;background:var(--sage-bg);color:var(--sage);}
 .shop-recommendation{font-size:12px;padding:4px 8px;color:var(--ink);font-style:italic;}
 .task-contexts{display:inline-flex;gap:4px;align-items:center;flex-wrap:wrap;}
 .task-context{

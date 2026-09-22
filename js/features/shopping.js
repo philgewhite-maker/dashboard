@@ -124,13 +124,15 @@ if (!results.length) return '<div class="shop-search-results empty">No results f
 return `<div class="shop-search-results">
 ${recommendation ? `<div class="shop-recommendation">${escapeHtml(recommendation)}</div>` : ''}
 ${results.map((r, idx) => `
+<div class="shop-hit-row">
 <a class="shop-search-hit" href="${escapeHtml(affiliateLink(r.url))}" target="_blank" rel="noopener noreferrer">
 <span class="shop-hit-retailer">${escapeHtml(r.retailer || 'Link')}</span>
 <span class="shop-hit-name">${escapeHtml(r.name || t.title)}</span>
 ${r.price ? `<span class="shop-hit-price">${escapeHtml(r.price)}</span>` : ''}
 ${r.offer ? `<span class="shop-hit-offer">${escapeHtml(r.offer)}</span>` : ''}
 ${r.subscribeSave ? `<span class="shop-hit-offer">${escapeHtml(r.subscribeSave)}</span>` : ''}
-</a>${isAmazonUrl(r.url) ? `<button class="sync-btn sm" type="button" data-shop-paste="${escapeHtml(t.id)}:${idx}" title="Paste the price copied by the Amazon bookmarklet">Paste price</button>` : ''}`).join('')}
+</a>${isAmazonUrl(r.url) ? `<button class="sync-btn sm shop-paste-btn" type="button" data-shop-paste="${escapeHtml(t.id)}:${idx}" title="Paste the price copied by the Amazon bookmarklet">Paste price</button>` : ''}
+</div>`).join('')}
 <div class="shop-also">${escapeHtml(checkedAgoLabel(checkedAt))}</div>
 </div>`;
 }
