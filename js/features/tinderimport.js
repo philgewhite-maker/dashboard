@@ -117,9 +117,22 @@ function matchPerson(name) {
 return matchCandidates(name, 1)[0] || null;
 }
 
-function createConnectionFor(name) {
-const conn = blankConnection({ name, app: 'Tinder', lastContact: todayStr() });
+// `name` is what the connection gets called; `profileName` is what the app
+// called her. They're usually the same, and deliberately separate when
+// they aren't: plenty of profiles run under an alias, and the real name
+// only turns up in chat. Recording both means renaming her here doesn't
+// break the next import -- matchCandidates() searches name, profileName
+// and aliases alike -- and doesn't orphan photos stored under the app
+// name either, the same reasoning the screenshot importer's own
+// blankConnection call already follows.
+function createConnectionFor(name, profileName) {
+const appName = String(profileName || '').trim();
+const conn = blankConnection({
+name, app: 'Tinder', lastContact: todayStr(),
+profileName: appName && appName !== name ? appName : '',
+});
 data.connections.push(conn);
+if (appName) upsertIdentity(conn, { platform: 'Tinder', handle: appName });
 return conn;
 }
 
@@ -413,7 +426,10 @@ return `<div class="tinder-more-info-overlay" id="tinder-more-info">
 ${incomingGrid}
 <h3>Who is this?</h3>
 ${candidates.length ? candidates.map(candidateRowHtml).join('') : '<div class="settings-note" style="margin:4px 0;">No name-based candidates found.</div>'}
+<div class="sync-row" style="margin:4px 0;">
+<input type="text" autocomplete="off" class="tag-add-input" id="tinder-more-info-new-name" value="${escapeHtml(pending.name || '')}" placeholder="Real name" title="What to call her here. Defaults to the name on the profile — change it when that's an alias, and the profile name is kept so the next import still matches." style="max-width:150px;">
 <button class="sync-btn sm" type="button" id="tinder-more-info-newconn">+ New connection</button>
+</div>
 <div class="sync-row" style="margin-top:10px;">
 <button class="sync-btn" type="button" id="tinder-more-info-close">Close</button>
 </div>
@@ -983,6 +999,19 @@ if (!COUNTRY_LOOKUP_LABELS.has(f.label)) return '';
 return `<button type="button" class="sync-btn tinder-inline-btn" data-tinder-country="${i}">Country</button>`;
 }
 
+// "Poland" -> "Polish". Built once from the same table the flag-emoji
+// and bio-mention routes already use, so all three agree. An unknown
+// country falls back to its own name rather than dropping the answer:
+// a nationality written as the country is wrong, but recoverable by
+// editing the chip, and better than a button that silently does nothing.
+const NATIONALITY_BY_COUNTRY = new Map(
+Object.entries(COUNTRY_NAME_TO_NATIONALITY).map(([name, nat]) => [name.toLowerCase(), nat])
+);
+function nationalityForCountry(country) {
+const key = String(country || '').trim().toLowerCase();
+return NATIONALITY_BY_COUNTRY.get(key) || String(country || '').trim();
+}
+
 function countryResultHtml(f, i) {
 const c = pending.countries[i];
 if (!c) return '';
@@ -997,10 +1026,18 @@ if (!c.country) return `<div class="tinder-translate-result tinder-translate-err
 const alreadyAppended = f.label === 'City'
 ? pending.cityOverride.some((v) => v.toLowerCase() === c.country.toLowerCase())
 : f.value.toLowerCase().includes(c.country.toLowerCase());
-const alreadyNational = pending.nationalityOverride.some((n) => n.toLowerCase() === c.country.toLowerCase());
+// Nationality holds the ADJECTIVE -- "Polish", not "Poland" -- the same
+// value every other route into this field produces (a flag emoji, a
+// country named in the bio, the fill-in scan). This button was writing
+// the country name straight through, so identifying a Kraków school as
+// Poland filed her as "Poland" while the identical fact arriving via 🇵🇱
+// filed her as "Polish": two spellings of one nationality, which then
+// don't group together on the Connections overview.
+const nationality = nationalityForCountry(c.country);
+const alreadyNational = pending.nationalityOverride.some((n) => n.toLowerCase() === nationality.toLowerCase());
 return `<div class="tinder-translate-result">→ <strong>${escapeHtml(c.country)}</strong>`
 + (alreadyAppended ? '' : ` <button type="button" class="sync-btn tinder-inline-btn" data-tinder-country-append="${i}">+ append</button>`)
-+ (alreadyNational ? '' : ` <button type="button" class="sync-btn tinder-inline-btn" data-tinder-country-nationality="${i}">+ add nationality</button>`)
++ (alreadyNational ? '' : ` <button type="button" class="sync-btn tinder-inline-btn" data-tinder-country-nationality="${i}">+ add ${escapeHtml(nationality)}</button>`)
 + `</div>`;
 }
 
@@ -1660,6 +1697,7 @@ ${nextStepHtml()}
 <button class="add-btn tinder-save-btn${p.risky ? ' tinder-risky' : ''}" type="button" id="tinder-save"${canSave ? '' : ' disabled'} title="${escapeHtml(saveLabel)}">${escapeHtml(saveLabel)}</button>
 <button class="sync-btn" type="button" id="tinder-save-open"${canSave ? '' : ' disabled'} title="${escapeHtml(saveLabel)} & open profile">& open profile</button>
 <button class="sync-btn" type="button" id="tinder-skip">Skip</button>
+<input type="text" autocomplete="off" class="tag-add-input" id="tinder-new-name" value="${escapeHtml(p.name || '')}" placeholder="Real name" title="What to call her here. Defaults to the name on the profile — change it when that's an alias, and the profile name is kept so the next import still matches." style="max-width:120px;">
 <button class="sync-btn" type="button" id="tinder-newconn">+ New</button>
 <button class="sync-btn" type="button" id="tinder-more-info-open">More info</button>
 </div>
@@ -1735,7 +1773,8 @@ advanceQueue(`Skipped ${skippedName}.`);
 });
 const newBtn = document.getElementById('tinder-newconn');
 if (newBtn) newBtn.addEventListener('click', () => {
-const conn = createConnectionFor(pending.name || 'Unnamed');
+const typed = (document.getElementById('tinder-new-name')?.value || '').trim();
+const conn = createConnectionFor(typed || pending.name || 'Unnamed', pending.name);
 conn.createdJustNow = true; // not a persisted field — just marks this session's save as safe without a match confirmation
 pending.chosenId = conn.id;
 pending.matchConfirmed = true;
@@ -1748,7 +1787,8 @@ const moreInfoCloseBtn = document.getElementById('tinder-more-info-close');
 if (moreInfoCloseBtn) moreInfoCloseBtn.addEventListener('click', () => { pending.showMoreInfo = false; render(); });
 const moreInfoNewBtn = document.getElementById('tinder-more-info-newconn');
 if (moreInfoNewBtn) moreInfoNewBtn.addEventListener('click', () => {
-const conn = createConnectionFor(pending.name || 'Unnamed');
+const typed = (document.getElementById('tinder-more-info-new-name')?.value || '').trim();
+const conn = createConnectionFor(typed || pending.name || 'Unnamed', pending.name);
 conn.createdJustNow = true;
 pending.chosenId = conn.id;
 pending.matchConfirmed = true;
@@ -1824,7 +1864,7 @@ render();
 el.querySelectorAll('[data-tinder-country-nationality]').forEach((btn) => {
 btn.addEventListener('click', () => {
 const i = parseInt(btn.dataset.tinderCountryNationality, 10);
-addFieldValue('Nationality', pending.countries[i].country);
+addFieldValue('Nationality', nationalityForCountry(pending.countries[i].country));
 render();
 });
 });
