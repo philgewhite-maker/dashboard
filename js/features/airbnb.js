@@ -4,8 +4,10 @@
 // users, real account-ban risk for a reverse-engineered token). Airbnb's
 // own export is officially supported, needs no login token, and gives
 // reservation date ranges -- but never a guest's name, on any plan, for
-// any host; that's a genuine Airbnb privacy limit, which is why
-// guestName/notes below are always typed in by hand, never scraped.
+// any host; that's a genuine Airbnb privacy limit, which is why a
+// FEED-sourced reservation's guestName is only ever filled in after the
+// fact, by hand or from the booking email. A hand-typed external event
+// is the exception -- its title carries the name, and that's read off it.
 import { data, queueSave, blankAirbnbListing, blankAirbnbReservation, blankAirbnbKey, blankAirbnbKeyAssignment, KEY_CUSTODIAN_TYPES } from '../state.js';
 import { escapeHtml, todayStr, dateStrAdd, unfoldIcsLines, parseIcsProperty, MISSING_KEY_LINK_HTML } from '../utils.js';
 import { fetchIcs } from '../files.js';
@@ -173,6 +175,30 @@ const CHECKOUT_TIME = '11:00';
 // there's no feed behind something that was never on Airbnb -- otherwise
 // the same re-sync-updates-in-place / gone-means-removed shape
 // syncAirbnbListing already uses above.
+// What counts as "the bit before the name" in a hand-typed event title.
+// Every dash a keyboard, a phone, or an autocorrect can produce is in
+// here: the app's own pushed titles use an em dash, but nobody types one
+// by hand, and "Flatx - AC Contractors" with a plain hyphen has to work
+// exactly as well as "Flatx — AC Contractors". Colon, middle dot and
+// pipe are in for the same reason -- they're what people actually reach
+// for -- and the whole run is matched, so "Flatx -- AC" works too.
+const SEPARATOR_SOURCE = '[-‐‑‒–—―−:·|~]+';
+const LEADING_SEPARATOR_RE = new RegExp(`^\\s*${SEPARATOR_SOURCE}\\s*`);
+
+// The name a hand-typed external booking carries after its prefix --
+// "Flatx - AC Contractors" is the contractor, and it was being thrown
+// away: the reservation came through with the right dates and no name at
+// all, which on a trades calendar is most of the information.
+//
+// Returns '' when there's nothing after the prefix, which is a legitimate
+// state (a bare "Flatx" block), not a failure.
+function externalNameFromSummary(summary, prefix) {
+let rest = String(summary || '');
+const at = prefix ? rest.indexOf(prefix) : -1;
+if (at >= 0) rest = rest.slice(at + prefix.length);
+return rest.replace(LEADING_SEPARATOR_RE, '').trim();
+}
+
 // Google Calendar stores an all-day event's end.date as EXCLUSIVE: a
 // block covering the 28th alone comes back as 28 -> 29. A reservation's
 // `checkout` here is the last day it OCCUPIES -- airbnbSegmentsForDay
@@ -216,14 +242,23 @@ let added = 0, updated = 0;
 matching.forEach((e) => {
 const { checkin, checkout } = eventDayRange(e);
 if (!checkin || !checkout) return;
+const name = externalNameFromSummary(e.summary, listing.externalPrefix);
 const existing = existingByEventId.get(e.id);
 if (existing) {
-if (existing.checkin !== checkin || existing.checkout !== checkout) { existing.checkin = checkin; existing.checkout = checkout; updated++; }
+let changed = false;
+if (existing.checkin !== checkin || existing.checkout !== checkout) { existing.checkin = checkin; existing.checkout = checkout; changed = true; }
+// Filled only when blank, never overwritten -- the same rule
+// syncGuestNamesFromEmail already follows, and for the same reason:
+// a name typed into the dashboard is the more considered of the two
+// and shouldn't lose to whatever the calendar event happens to be
+// called this week.
+if (name && !existing.guestName) { existing.guestName = name; changed = true; }
+if (changed) updated++;
 existingByEventId.delete(e.id);
 } else {
 data.airbnbReservations.push(blankAirbnbReservation({
 listingId: listing.id, checkin, checkout, source: 'external',
-googleEventId: e.id, googleCalendarId: calendarId,
+guestName: name, googleEventId: e.id, googleCalendarId: calendarId,
 }));
 added++;
 }
@@ -287,7 +322,7 @@ el.innerHTML = '<div class="settings-note" style="margin:0;">No listings yet —
 return;
 }
 el.innerHTML = `<table class="limits-table">
-<thead><tr><th>Label</th><th title="An Airbnb listing's iCal export. Leave it blank for a booking calendar that was never on Airbnb — a plumber, a decorator, a cat sitter — and give it an External prefix instead, so its bookings come from events you type into the shared Google Calendar. Sync skips a listing with no URL rather than reporting it as a broken feed." style="cursor:help; text-decoration:underline dotted;">Calendar export URL</th><th title="Identifies the physical ROOM, not the listing — give two listings for the same room the same prefix. Once you rename any manually-entered Google Calendar events for a room to include its prefix, &quot;Push to Google Calendar&quot; recognises and adopts them instead of duplicating." style="cursor:help; text-decoration:underline dotted;">Prefix</th><th title="A SECOND, different tag for a booking from outside Airbnb entirely (a friend, another platform) — type it into that Calendar event's title (e.g. &quot;ES-Lg — Jane Doe&quot;) and Sync pulls it in as a reservation on this listing. Deliberately not the same as Prefix — never mistaken for a real Airbnb booking when one of those gets pushed. Leave blank to skip this for a listing." style="cursor:help; text-decoration:underline dotted;">External prefix</th><th title="Identifies the physical ROOM, not the listing — give two listings for the same room the same colour." style="cursor:help; text-decoration:underline dotted;">Colour</th><th></th></tr></thead>
+<thead><tr><th>Label</th><th title="An Airbnb listing's iCal export. Leave it blank for a booking calendar that was never on Airbnb — a plumber, a decorator, a cat sitter — and give it an External prefix instead, so its bookings come from events you type into the shared Google Calendar. Sync skips a listing with no URL rather than reporting it as a broken feed." style="cursor:help; text-decoration:underline dotted;">Calendar export URL</th><th title="Identifies the physical ROOM, not the listing — give two listings for the same room the same prefix. Once you rename any manually-entered Google Calendar events for a room to include its prefix, &quot;Push to Google Calendar&quot; recognises and adopts them instead of duplicating." style="cursor:help; text-decoration:underline dotted;">Prefix</th><th title="A SECOND, different tag for a booking from outside Airbnb entirely (a friend, another platform) — type it into that Calendar event's title (e.g. &quot;ES-Lg - Jane Doe&quot;) and Sync pulls it in as a reservation on this listing, taking whatever follows the prefix as the name. Any dash, colon or pipe works as the separator. Deliberately not the same as Prefix — never mistaken for a real Airbnb booking when one of those gets pushed. Leave blank to skip this for a listing." style="cursor:help; text-decoration:underline dotted;">External prefix</th><th title="Identifies the physical ROOM, not the listing — give two listings for the same room the same colour." style="cursor:help; text-decoration:underline dotted;">Colour</th><th></th></tr></thead>
 <tbody>${data.airbnbListings.map((l) => `<tr>
 <td><input type="text" autocomplete="off" data-airbnb-listing-field="label" data-airbnb-listing-id="${l.id}" value="${escapeHtml(l.label)}" placeholder="e.g. Entire studio"></td>
 <td><input type="text" autocomplete="off" data-airbnb-listing-field="icsUrl" data-airbnb-listing-id="${l.id}" value="${escapeHtml(l.icsUrl)}" placeholder="https://www.airbnb..../calendar/ical/....ics — or blank if not on Airbnb"></td>
@@ -421,7 +456,7 @@ return d.toLocaleDateString('en-GB', opts);
 const CLEANER_MATCH_WINDOW_DAYS = 4;
 
 function parseCleanerEventName(summary) {
-const m = /^cleaner\s*-\s*(.+)$/i.exec(String(summary || '').trim());
+const m = new RegExp(`^cleaner\\s*${SEPARATOR_SOURCE}\\s*(.+)$`, 'i').exec(String(summary || '').trim());
 return m ? m[1].trim() : null;
 }
 
@@ -1063,8 +1098,9 @@ queueSave();
 }
 }
 
-// eventDayRange is exported only so the exclusive-end correction can be
-// checked directly -- the off-by-one it fixes is invisible until a real
-// Google Calendar round-trip, which is exactly the kind of thing worth
-// being able to test without one. Nothing else imports it.
-export { renderAirbnb, renderAirbnbListings, initAirbnbListingsForm, initAirbnbSync, airbnbSegmentsForDay, renderAirbnbKeys, initAirbnbKeys, initKeysSettingsForm, eventDayRange };
+// The last three are exported only so they can be checked directly:
+// each turns a real Google Calendar event into something this file
+// stores, and each was wrong in a way that stayed invisible until a
+// round-trip through Google -- an end date a day out, a name silently
+// dropped, a title separator nobody types. Nothing else imports them.
+export { renderAirbnb, renderAirbnbListings, initAirbnbListingsForm, initAirbnbSync, airbnbSegmentsForDay, renderAirbnbKeys, initAirbnbKeys, initKeysSettingsForm, eventDayRange, externalNameFromSummary, parseCleanerEventName };

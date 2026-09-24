@@ -691,11 +691,14 @@ externalPrefix: '',
 // duplicates) or scanned in from the shared Google Calendar by its
 // `externalPrefix` (source:'external', see airbnb.js's
 // syncExternalBookingsForListing -- no feed `uid` to key on there, so
-// `googleEventId` is the identity instead). Neither source's export ever
-// includes the guest's name (a genuine limit on Airbnb's side; a hand-
-// typed external event might, but this app doesn't try to parse it out),
-// so guestName/notes are always user-entered after the fact, never
-// scraped.
+// `googleEventId` is the identity instead). An Airbnb ICS feed never
+// includes the guest's name, on any plan, for any host -- a genuine
+// limit on Airbnb's side -- so for source:'ics' the name is always
+// filled in afterwards, by hand or from the booking email. A hand-typed
+// external event DOES carry one ("Flatx - AC Contractors"), and that
+// part is now read off the title (externalNameFromSummary in
+// airbnb.js); it's never overwritten once set, so a name corrected here
+// outranks whatever the calendar event is called.
 function blankAirbnbReservation(fields = {}) {
 return {
 id: uid(),
