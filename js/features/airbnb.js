@@ -118,6 +118,19 @@ return { added, updated, removed };
 
 async function syncAllAirbnbListings() {
 for (const listing of data.airbnbListings) {
+// A listing with no feed URL isn't broken -- it's a booking calendar
+// that was never on Airbnb (the plumber, the decorator, the cat
+// sitter), tracked here purely so its bookings get the same occupancy
+// stripes, calendar push and nudges as a real listing. Its bookings
+// arrive through externalPrefix instead (syncExternalBookings below),
+// or are simply entered by hand. Fetching "" threw, and that error was
+// then shown on the Overview panel and in the sync status as if the
+// feed were misconfigured.
+//
+// Any status left over from before the URL was cleared goes too --
+// otherwise a stale error keeps being reported for a listing this pass
+// deliberately didn't touch.
+if (!listing.icsUrl) { delete data.airbnbSyncStatus[listing.id]; continue; }
 try {
 const result = await syncAirbnbListing(listing);
 data.airbnbSyncStatus[listing.id] = { ok: true, syncedAt: new Date().toISOString(), ...result };
@@ -252,10 +265,10 @@ el.innerHTML = '<div class="settings-note" style="margin:0;">No listings yet —
 return;
 }
 el.innerHTML = `<table class="limits-table">
-<thead><tr><th>Label</th><th>Calendar export URL</th><th title="Identifies the physical ROOM, not the listing — give two listings for the same room the same prefix. Once you rename any manually-entered Google Calendar events for a room to include its prefix, &quot;Push to Google Calendar&quot; recognises and adopts them instead of duplicating." style="cursor:help; text-decoration:underline dotted;">Prefix</th><th title="A SECOND, different tag for a booking from outside Airbnb entirely (a friend, another platform) — type it into that Calendar event's title (e.g. &quot;ES-Lg — Jane Doe&quot;) and Sync pulls it in as a reservation on this listing. Deliberately not the same as Prefix — never mistaken for a real Airbnb booking when one of those gets pushed. Leave blank to skip this for a listing." style="cursor:help; text-decoration:underline dotted;">External prefix</th><th title="Identifies the physical ROOM, not the listing — give two listings for the same room the same colour." style="cursor:help; text-decoration:underline dotted;">Colour</th><th></th></tr></thead>
+<thead><tr><th>Label</th><th title="An Airbnb listing's iCal export. Leave it blank for a booking calendar that was never on Airbnb — a plumber, a decorator, a cat sitter — and give it an External prefix instead, so its bookings come from events you type into the shared Google Calendar. Sync skips a listing with no URL rather than reporting it as a broken feed." style="cursor:help; text-decoration:underline dotted;">Calendar export URL</th><th title="Identifies the physical ROOM, not the listing — give two listings for the same room the same prefix. Once you rename any manually-entered Google Calendar events for a room to include its prefix, &quot;Push to Google Calendar&quot; recognises and adopts them instead of duplicating." style="cursor:help; text-decoration:underline dotted;">Prefix</th><th title="A SECOND, different tag for a booking from outside Airbnb entirely (a friend, another platform) — type it into that Calendar event's title (e.g. &quot;ES-Lg — Jane Doe&quot;) and Sync pulls it in as a reservation on this listing. Deliberately not the same as Prefix — never mistaken for a real Airbnb booking when one of those gets pushed. Leave blank to skip this for a listing." style="cursor:help; text-decoration:underline dotted;">External prefix</th><th title="Identifies the physical ROOM, not the listing — give two listings for the same room the same colour." style="cursor:help; text-decoration:underline dotted;">Colour</th><th></th></tr></thead>
 <tbody>${data.airbnbListings.map((l) => `<tr>
 <td><input type="text" autocomplete="off" data-airbnb-listing-field="label" data-airbnb-listing-id="${l.id}" value="${escapeHtml(l.label)}" placeholder="e.g. Entire studio"></td>
-<td><input type="text" autocomplete="off" data-airbnb-listing-field="icsUrl" data-airbnb-listing-id="${l.id}" value="${escapeHtml(l.icsUrl)}" placeholder="https://www.airbnb..../calendar/ical/....ics"></td>
+<td><input type="text" autocomplete="off" data-airbnb-listing-field="icsUrl" data-airbnb-listing-id="${l.id}" value="${escapeHtml(l.icsUrl)}" placeholder="https://www.airbnb..../calendar/ical/....ics — or blank if not on Airbnb"></td>
 <td><input type="text" autocomplete="off" data-airbnb-listing-field="prefix" data-airbnb-listing-id="${l.id}" value="${escapeHtml(l.prefix)}" placeholder="e.g. ES-L" style="width:70px;"></td>
 <td><input type="text" autocomplete="off" data-airbnb-listing-field="externalPrefix" data-airbnb-listing-id="${l.id}" value="${escapeHtml(l.externalPrefix)}" placeholder="e.g. ES-Lg" style="width:70px;"></td>
 <td><select data-airbnb-listing-field="colour" data-airbnb-listing-id="${l.id}">
@@ -472,11 +485,17 @@ return match
 function reservationRowHtml(r) {
 const listing = data.airbnbListings.find((l) => l.id === r.listingId);
 if (!listing) return '';
+// "0 nights" is right arithmetic and a useless label: a listing that
+// isn't on Airbnb at all (a plumber, a cat sitter -- see the Calendar
+// export URL note in the Settings table) is routinely booked for a
+// single day, and reading that as zero of anything makes a real booking
+// look like a data error.
 const nights = Math.round((new Date(`${r.checkout}T00:00:00`) - new Date(`${r.checkin}T00:00:00`)) / 86400000);
+const lengthLabel = nights <= 0 ? 'same day' : `${nights} night${nights === 1 ? '' : 's'}`;
 return `<div class="cal-row" data-airbnb-row="${r.id}">
 <div class="cal-head">
 <span class="cal-name"><span class="dot ${escapeHtml(listing.colour)}"></span>${escapeHtml(listing.label || listing.prefix || 'Listing')}</span>
-<span class="cal-badge ${escapeHtml(listing.colour)}">${formatAirbnbDate(r.checkin)} &rarr; ${formatAirbnbDate(r.checkout)} &middot; ${nights} night${nights === 1 ? '' : 's'}</span>
+<span class="cal-badge ${escapeHtml(listing.colour)}">${formatAirbnbDate(r.checkin)} &rarr; ${formatAirbnbDate(r.checkout)} &middot; ${lengthLabel}</span>
 </div>
 <div class="cal-event-row">
 <input type="text" autocomplete="off" class="tag-add-input" placeholder="Guest name" data-airbnb-res-field="guestName" data-airbnb-res-id="${r.id}" value="${escapeHtml(r.guestName)}" style="max-width:130px;">
@@ -990,7 +1009,11 @@ status.innerHTML = `Synced just now.${guestNote}`;
 // showing just the first one's real message is more useful than a
 // generic "N failed", not less informative.
 const first = data.airbnbSyncStatus[failed[0].id];
-status.textContent = `Synced, but ${failed.length} of ${data.airbnbListings.length} listing${failed.length === 1 ? '' : 's'} failed: ${first.error}`;
+// Counted against the listings that actually HAVE a feed, not every
+// listing -- a feed-less one was never attempted, so "1 of 4 failed"
+// when only two have feeds reads as a worse result than it is.
+const withFeeds = data.airbnbListings.filter((l) => l.icsUrl).length;
+status.textContent = `Synced, but ${failed.length} of ${withFeeds} listing${failed.length === 1 ? '' : 's'} with a feed failed: ${first.error}`;
 }
 } catch (err) {
 status.textContent = `Couldn't sync: ${err.message || err}`;
