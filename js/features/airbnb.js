@@ -173,6 +173,29 @@ const CHECKOUT_TIME = '11:00';
 // there's no feed behind something that was never on Airbnb -- otherwise
 // the same re-sync-updates-in-place / gone-means-removed shape
 // syncAirbnbListing already uses above.
+// Google Calendar stores an all-day event's end.date as EXCLUSIVE: a
+// block covering the 28th alone comes back as 28 -> 29. A reservation's
+// `checkout` here is the last day it OCCUPIES -- airbnbSegmentsForDay
+// paints checkin..checkout inclusive, and the push writes an 11am
+// checkout ON that day -- so reading end.date straight through added a
+// day at both ends of the feature: a hand-typed all-day 28th showed as
+// "28 Sept -> 29 Sept · 1 night" and painted two days of occupancy on
+// the planner.
+//
+// A TIMED event needs no adjustment: its end is a real moment on the
+// real last day, which is also why the push itself writes times rather
+// than an all-day block (see CHECKIN_TIME/CHECKOUT_TIME above).
+function eventDayRange(e) {
+const checkin = e.start?.date || (e.start?.dateTime || '').slice(0, 10);
+if (!e.end?.date) return { checkin, checkout: (e.end?.dateTime || '').slice(0, 10) };
+const inclusiveEnd = dateStrAdd(e.end.date, -1);
+// A zero-length all-day event (end.date === start.date) shouldn't be
+// able to produce a checkout BEFORE its checkin -- Google shouldn't
+// emit one, but a booking that reads as negative would be worse than
+// one read as same-day.
+return { checkin, checkout: inclusiveEnd < checkin ? checkin : inclusiveEnd };
+}
+
 async function syncExternalBookingsForListing(listing, calendarId) {
 if (!listing.externalPrefix) return { added: 0, updated: 0, removed: 0 };
 const today = todayStr();
@@ -191,8 +214,7 @@ data.airbnbReservations.filter((r) => r.listingId === listing.id && r.source ===
 );
 let added = 0, updated = 0;
 matching.forEach((e) => {
-const checkin = e.start?.date || (e.start?.dateTime || '').slice(0, 10);
-const checkout = e.end?.date || (e.end?.dateTime || '').slice(0, 10);
+const { checkin, checkout } = eventDayRange(e);
 if (!checkin || !checkout) return;
 const existing = existingByEventId.get(e.id);
 if (existing) {
@@ -913,8 +935,10 @@ if (candidates.length === 1) {
 const match = candidates[0];
 reservation.googleEventId = match.id;
 reservation.googleCalendarId = calendarId;
-const matchStart = match.start?.date || (match.start?.dateTime || '').slice(0, 10);
-const matchEnd = match.end?.date || (match.end?.dateTime || '').slice(0, 10);
+// Same exclusive-end correction as the external scan (eventDayRange),
+// so adopting a hand-typed ALL-DAY event doesn't report its dates as
+// differing purely because Google's end is a day past the last one.
+const { checkin: matchStart, checkout: matchEnd } = eventDayRange(match);
 statusEl.textContent = (matchStart !== reservation.checkin || matchEnd !== reservation.checkout)
 ? `Matched an existing "${match.summary}" event, but its dates differ (${matchStart} → ${matchEnd}) — left as-is, adjust it by hand if that's wrong.`
 : `Matched an existing "${match.summary}" event — adopted, nothing new created.`;
@@ -1039,4 +1063,8 @@ queueSave();
 }
 }
 
-export { renderAirbnb, renderAirbnbListings, initAirbnbListingsForm, initAirbnbSync, airbnbSegmentsForDay, renderAirbnbKeys, initAirbnbKeys, initKeysSettingsForm };
+// eventDayRange is exported only so the exclusive-end correction can be
+// checked directly -- the off-by-one it fixes is invisible until a real
+// Google Calendar round-trip, which is exactly the kind of thing worth
+// being able to test without one. Nothing else imports it.
+export { renderAirbnb, renderAirbnbListings, initAirbnbListingsForm, initAirbnbSync, airbnbSegmentsForDay, renderAirbnbKeys, initAirbnbKeys, initKeysSettingsForm, eventDayRange };
