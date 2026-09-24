@@ -140,5 +140,8 @@ all," in the cases large enough to actually risk it.
 Every shipped change: bump `sw.js`'s `CACHE_NAME` and `index.html`'s
 build-stamp together (same number), `git add` the specific changed
 files (never `git add -A` — this checkout also has unrelated untracked
-scratch content), commit ending `Co-Authored-By: Claude Sonnet 5
-<noreply@anthropic.com>`, `git push`.
+scratch content), commit ending `Co-Authored-By: Claude <model>
+<noreply@anthropic.com>` where `<model>` is whichever model actually
+wrote the commit, `git push`. This line used to name Sonnet 5
+specifically and went stale the moment a different model picked the work
+up — sign as who you are, don't copy the name out of this file.
