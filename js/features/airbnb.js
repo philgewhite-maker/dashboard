@@ -92,8 +92,16 @@ const today = todayStr();
 // event is ever turned into a stored record, not just hidden from a
 // display list downstream.
 const events = parseIcs(text).filter((e) => e.checkout >= today);
+// Feed-sourced reservations ONLY. This map's leftovers get deleted at
+// the end of the pass as cancelled bookings, and an external or manual
+// booking on the same listing has no feed `uid` to match on -- it would
+// sit in the map under the key '' and be swept every sync. Latent
+// wherever a listing has both a feed and an external prefix (a booking
+// from a friend on a real Airbnb listing, which the Settings tooltip
+// explicitly invites); certain the moment a booking can be typed in by
+// hand.
 const existingByUid = new Map(
-data.airbnbReservations.filter((r) => r.listingId === listing.id).map((r) => [r.uid, r])
+data.airbnbReservations.filter((r) => r.listingId === listing.id && (r.source || 'ics') === 'ics').map((r) => [r.uid, r])
 );
 let added = 0, updated = 0;
 events.forEach(({ uid: evUid, checkin, checkout }) => {
@@ -563,6 +571,7 @@ ${r.source === 'external'
 ? '<span class="settings-note" style="margin:0;">Pushed &#10003;</span>'
 : `<button class="sync-btn inline" type="button" data-airbnb-push="${r.id}" title="Push to Google Calendar">Push</button>`}
 <span class="sync-status" data-airbnb-push-status="${r.id}"></span>
+${r.source === 'manual' ? `<span class="del-x" style="opacity:1;" data-airbnb-res-del="${r.id}" title="Delete this booking — nothing else records it, so it won't come back on the next Sync">&times;</span>` : ''}
 ${data.prefs.airbnbCalendarId ? `<div class="cal-clean-group">${cleanerChipHtml(r, 'checkin')}${cleanerChipHtml(r, 'checkout')}</div>` : ''}
 </div>
 ${reservationKeysHtml(r)}
@@ -583,7 +592,66 @@ if (!failed.length) return '';
 return failed.map((l) => `<div class="cal-row"><div class="cal-event-row"><span class="cal-event empty-state">${escapeHtml(l.label || l.prefix || 'Listing')}: sync error — ${escapeHtml(data.airbnbSyncStatus[l.id].error)}</span></div></div>`).join('');
 }
 
+// ---- Manual bookings ------------------------------------------------------
+
+// A third source alongside 'ics' and 'external': typed straight in here,
+// backed by no calendar event at all. It exists because the other two
+// both route through something external -- an Airbnb feed, or an event
+// you have to go and create in Google Calendar first -- and "the plumber
+// is coming on the 25th" shouldn't need either. It can still be pushed
+// to Calendar afterwards like any feed booking, which is why it gets no
+// special casing in reservationRowHtml: no googleEventId means the Push
+// button shows, and that's exactly right.
+//
+// The ICS sync deliberately ignores this source (see syncAirbnbListing's
+// own filter) so a manual booking on a feed-backed listing survives.
+function renderAirbnbAddBooking() {
+const select = document.getElementById('airbnb-add-listing');
+if (!select) return;
+const previous = select.value;
+select.innerHTML = data.airbnbListings.length
+? data.airbnbListings.map((l) => `<option value="${escapeHtml(l.id)}">${escapeHtml(l.label || l.prefix || 'Listing')}</option>`).join('')
+: '<option value="">No listings yet</option>';
+if (previous && data.airbnbListings.some((l) => l.id === previous)) select.value = previous;
+}
+
+function initAirbnbAddBooking() {
+const btn = document.getElementById('airbnb-add-btn');
+if (!btn) return;
+renderAirbnbAddBooking();
+btn.addEventListener('click', () => {
+const select = document.getElementById('airbnb-add-listing');
+const nameInput = document.getElementById('airbnb-add-name');
+const fromInput = document.getElementById('airbnb-add-from');
+const toInput = document.getElementById('airbnb-add-to');
+const status = document.getElementById('airbnb-add-status');
+const listingId = select.value;
+const checkin = fromInput.value;
+if (!listingId) { status.innerHTML = 'Add a listing in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#airbnb-listings">Settings</span> first.'; return; }
+if (!checkin) { status.textContent = 'Pick a start date.'; return; }
+// A blank "to" means a single day, not a missing field -- the common
+// case on a trades calendar, and making it optional is the difference
+// between two taps and four.
+let checkout = toInput.value || checkin;
+if (checkout < checkin) { status.textContent = "The last day is before the first — check the dates."; return; }
+data.airbnbReservations.push(blankAirbnbReservation({
+listingId, checkin, checkout, source: 'manual', guestName: nameInput.value.trim(),
+}));
+nameInput.value = '';
+fromInput.value = '';
+toInput.value = '';
+status.textContent = 'Added.';
+queueSave();
+renderAirbnb();
+// The planner's occupancy stripes read straight from these
+// reservations, so they're stale the moment one is added -- same
+// dynamic import the sync path already uses to avoid an import cycle.
+import('./planner.js').then(({ renderPlanner }) => renderPlanner()).catch(() => {});
+});
+}
+
 function renderAirbnb() {
+renderAirbnbAddBooking();
 const el = document.getElementById('airbnb-list');
 const countEl = document.getElementById('airbnb-count');
 if (!el) return;
@@ -602,6 +670,17 @@ const r = data.airbnbReservations.find((x) => x.id === input.dataset.airbnbResId
 if (!r) return;
 r[input.dataset.airbnbResField] = input.value;
 queueSave();
+});
+});
+// Only manual bookings carry this -- a feed or external one is deleted
+// by removing it at its source, and deleting it here would just see it
+// reappear on the next Sync.
+el.querySelectorAll('[data-airbnb-res-del]').forEach((x) => {
+x.addEventListener('click', () => {
+data.airbnbReservations = data.airbnbReservations.filter((r) => r.id !== x.dataset.airbnbResDel);
+queueSave();
+renderAirbnb();
+import('./planner.js').then(({ renderPlanner }) => renderPlanner()).catch(() => {});
 });
 });
 el.querySelectorAll('[data-airbnb-push]').forEach((btn) => {
@@ -1103,4 +1182,4 @@ queueSave();
 // stores, and each was wrong in a way that stayed invisible until a
 // round-trip through Google -- an end date a day out, a name silently
 // dropped, a title separator nobody types. Nothing else imports them.
-export { renderAirbnb, renderAirbnbListings, initAirbnbListingsForm, initAirbnbSync, airbnbSegmentsForDay, renderAirbnbKeys, initAirbnbKeys, initKeysSettingsForm, eventDayRange, externalNameFromSummary, parseCleanerEventName };
+export { renderAirbnb, renderAirbnbListings, initAirbnbListingsForm, initAirbnbSync, airbnbSegmentsForDay, renderAirbnbKeys, initAirbnbKeys, initKeysSettingsForm, initAirbnbAddBooking, eventDayRange, externalNameFromSummary, parseCleanerEventName };

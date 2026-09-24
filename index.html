@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v389</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v390</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -98,6 +98,14 @@
 <span class="sync-status" id="airbnb-sync-status"></span>
 </div>
 <div id="airbnb-list"></div>
+<div class="sync-row" id="airbnb-add-booking" style="margin-top:8px;">
+<select id="airbnb-add-listing" title="Which listing this booking is for"></select>
+<input type="text" autocomplete="off" class="tag-add-input" id="airbnb-add-name" placeholder="Who, e.g. Plumber" style="max-width:150px;">
+<input type="date" id="airbnb-add-from" title="First day">
+<input type="date" id="airbnb-add-to" title="Last day — leave blank for a single day">
+<button class="sync-btn sm" type="button" id="airbnb-add-btn">Add booking</button>
+<span class="sync-status" id="airbnb-add-status"></span>
+</div>
 <h3 style="margin:18px 0 6px;font-size:14px;">&#128273; Keys</h3>
 <div id="airbnb-keys-list"></div>
 </section>
