@@ -2,7 +2,7 @@
 // deletes every cache that isn't the current name, so raising the version is
 // what actually evicts a stale copy from a device that has been running the
 // app for a while.
-const CACHE_NAME = 'dashboard-v391';
+const CACHE_NAME = 'dashboard-v392';
 const CORE_ASSETS = [
 './',
 './index.html',
@@ -37,6 +37,9 @@ const CORE_ASSETS = [
 './js/features/mail.js',
 './js/features/mailActions.js',
 './js/features/mailviewer.js',
+'./js/features/scheduled.js',
+'./js/bgsync.js',
+'./js/icsparse.js',
 './js/sync/config.js',
 './js/sync/googleauth.js',
 './js/sync/googledrive.js',
@@ -77,6 +80,29 @@ const CORE_ASSETS = [
 './js/googlemail.js',
 './manifest.webmanifest',
 ];
+
+// Chrome wakes this periodically once the app is installed and it decides
+// you use it enough -- roughly daily at best, on its own schedule, never
+// on demand. Treated as a bonus on top of js/features/scheduled.js's
+// run-on-open rather than a replacement: if it never fires, the same
+// syncs happen when the app is next opened.
+//
+// Only the two that need no Google sign-in run here, which is a hard
+// limit rather than a choice -- see js/bgsync.js's header.
+self.addEventListener('periodicsync', (event) => {
+if (event.tag !== 'dashboard-refresh') return;
+event.waitUntil((async () => {
+try {
+const { runBackgroundRefresh } = await import('./js/bgsync.js');
+const result = await runBackgroundRefresh();
+console.log('Background refresh:', result);
+} catch (err) {
+// Nothing is lost by a failed background run -- the same tasks are
+// still due next time the app is opened.
+console.error('Background refresh failed:', err);
+}
+})());
+});
 
 self.addEventListener('install', (event) => {
 event.waitUntil(

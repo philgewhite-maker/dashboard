@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v391</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v392</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -2716,6 +2716,12 @@ Finds connections whose cover photo is missing or is really just the small place
 <button class="sync-btn" id="relay-setup-btn" type="button">Set up Dashboard Capture</button>
 </div>
 <div class="settings-note">Android only. Dashboard Capture is a small companion app for sharing images and files in, since Chrome drops shared files on some phones. Install it, then tap this on the phone to hand it the URL and secret above &mdash; you confirm them in the app.</div>
+</div>
+
+<div class="settings-block">
+<h3>Scheduled syncs</h3>
+<div class="settings-note" style="margin:0 0 10px;">Presses the Sync buttons for you when you open the app, for anything that hasn't run recently. Health data and the Airbnb ICS feeds also refresh while the app is closed, if your browser allows it &mdash; Chrome grants that only to an installed app and picks the timing itself, roughly daily at best. The rest need you signed in to Google: that sign-in issues a one-hour token with no way to renew it unattended, so nothing can refresh Calendar, Mail, Contacts or Google Tasks without a page open.</div>
+<div id="scheduled-tasks"></div>
 </div>
 
 <div class="settings-block">

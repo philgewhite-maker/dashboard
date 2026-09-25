@@ -28,6 +28,7 @@ import { initTelegramImport } from './features/telegramimport.js';
 import { initPhotoSync } from './features/photosync.js';
 import { initHealthSync, initHealthDaily, initHealthChart } from './features/health.js';
 import { initAirbnbListingsForm, initAirbnbSync, initAirbnbAddBooking, initAirbnbKeys, initKeysSettingsForm } from './features/airbnb.js';
+import { initScheduled } from './features/scheduled.js';
 import { initLocationFillIns } from './features/tagcleanup.js';
 import { initPhotoQuality } from './features/photoquality.js';
 import { initShareTarget } from './features/sharetarget.js';
@@ -137,7 +138,9 @@ if (!('serviceWorker' in navigator)) return;
 // clean load, every time), and a listener attached after an event fires
 // never receives it. Register immediately if the page is already done
 // loading; only wait for `load` if it genuinely hasn't happened yet.
-const register = () => navigator.serviceWorker.register('./sw.js').catch(() => { /* offline support is best-effort */ });
+// type:'module' so the periodicsync handler can import() the background
+// refresh and its parsers -- a classic worker cannot use ES imports.
+const register = () => navigator.serviceWorker.register('./sw.js', { type: 'module' }).catch(() => { /* offline support is best-effort */ });
 if (document.readyState === 'complete') register();
 else window.addEventListener('load', register);
 }
@@ -203,6 +206,7 @@ initKeysSettingsForm();
 initAirbnbKeys();
 initAirbnbSync();
 initAirbnbAddBooking();
+initScheduled();
 initLocationFillIns();
 initPhotoQuality();
 initNudges();

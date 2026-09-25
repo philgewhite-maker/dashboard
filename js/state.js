@@ -41,6 +41,7 @@ financeAccounts: [], // bank/card accounts -- see js/features/financeaccounts.js
 switchOffers: [], // [{id, bank, offer, eligible, reasoning, suggestedFromAccountId, dismissed}] -- last bank-switch-offers scan, see js/features/switchoffers.js
 mailSearches: [],
 mailTopics: [], // {id, label, preferredActionIds} -- groups mail searches for display and picks which action buttons show, see js/features/mail.js
+scheduledRuns: {}, // {taskId: {at, trigger, skipped}} -- when each scheduled sync last ran, see js/features/scheduled.js. Synced deliberately: a sync run on the laptop doesn't need repeating on the phone.
 mailDismissed: [], // {url, subject, from, dismissedAt} -- messages explicitly binned from Mail without becoming a task/trip leg/date event, see js/features/mail.js
 tasks: [],
 taskContexts: [...DEFAULT_TASK_CONTEXTS],
@@ -67,6 +68,13 @@ calendarEventCount: 1,
 mailResultCount: 5,
 airbnbCalendarId: '', // which Google Calendar "Push to Google Calendar" targets -- picked once, remembered
 switchOffersCheckedAt: '', // ISO date of the last bank-switch-offers scan -- drives the 30-day nudge, see js/features/switchoffers.js
+// Which scheduled syncs are turned OFF, and how often the rest may run
+// (see js/features/scheduled.js). Stored as the exceptions rather than
+// the enabled list so a task added later is on by default -- the point
+// of the feature is not having to remember, which an opt-in list would
+// quietly undo every time a new sync appeared.
+scheduledOff: [],
+scheduledIntervalHours: 6,
 // Which diet-analysis sections actually matter to this household --
 // purely a UI declutter (see recipes.js's dietInterestOn): every
 // ingredient still gets fully assessed and cached regardless, so
@@ -1389,6 +1397,12 @@ data.mailTopics = data.mailTopics.map((t) => ({ ...blankMailTopic(), ...t, id: t
 const mailTopicIds = new Set(data.mailTopics.map((t) => t.id));
 data.mailSearches.forEach((s) => { if (s.topicId && !mailTopicIds.has(s.topicId)) s.topicId = ''; });
 if (!Array.isArray(data.mailDismissed)) data.mailDismissed = [];
+// The service worker's background refresh writes the document without
+// going through this file at all (js/bgsync.js), so a document that came
+// back from the server may carry reservations it created with only the
+// fields a feed can know. The blankAirbnbReservation spread further down
+// fills the rest in, and this just guarantees the container exists.
+if (!data.scheduledRuns || typeof data.scheduledRuns !== 'object' || Array.isArray(data.scheduledRuns)) data.scheduledRuns = {};
 data.mailDismissed = data.mailDismissed.map((d) => ({ ...blankMailDismissal(), ...d }));
 
 // Fill in any pref added since this document was last written, without

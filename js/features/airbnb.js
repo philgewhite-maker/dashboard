@@ -9,7 +9,8 @@
 // fact, by hand or from the booking email. A hand-typed external event
 // is the exception -- its title carries the name, and that's read off it.
 import { data, queueSave, blankAirbnbListing, blankAirbnbReservation, blankAirbnbKey, blankAirbnbKeyAssignment, KEY_CUSTODIAN_TYPES } from '../state.js';
-import { escapeHtml, todayStr, dateStrAdd, unfoldIcsLines, parseIcsProperty, MISSING_KEY_LINK_HTML } from '../utils.js';
+import { escapeHtml, todayStr, dateStrAdd, MISSING_KEY_LINK_HTML } from '../utils.js';
+import { parseIcsReservations } from '../icsparse.js';
 import { fetchIcs } from '../files.js';
 import { canAttemptGoogleAction, hasCalendarWrite } from '../sync/googleauth.js';
 import { listCalendars, createEvent, findEvents } from '../googlecalendar.js';
@@ -20,61 +21,14 @@ import { listCalendars, createEvent, findEvents } from '../googlecalendar.js';
 // else in the app to reuse instead.
 const AIRBNB_COLOURS = ['blue', 'pink', 'sage', 'amber', 'slate', 'rose', 'teal', 'plum', 'red'];
 
-// ---- ICS parsing --------------------------------------------------------
-// unfoldIcsLines/parseIcsProperty are shared with mail.js's date-event
-// extraction (js/utils.js) -- only the Airbnb-specific date-only reading
-// (icsDateOnly) and reservation shape stay local to this file.
-
-// DTSTART/DTEND on an Airbnb reservation are date-only ("VALUE=DATE:
-// 20260910" -- an all-day block, not a timed event), but this also copes
-// with a bare "20260910T000000Z" shape, taking only the date portion
-// either way.
-function icsDateOnly(value) {
-const digits = String(value || '').replace(/[^0-9]/g, '');
-if (digits.length < 8) return '';
-return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`;
-}
-
-// Not a real reservation -- confirmed live against a real feed, Airbnb
-// inserts one of these at the far edge of its own booking window (a year
-// out), no guest behind it at all. A host's own manual block on Airbnb's
-// calendar (unrelated to this feature, someone blocking dates for
-// maintenance/personal use) reads the same way -- no guest, just a "not
-// available" marker -- so this is dropped by SUMMARY text, always, not
-// just the one specific known case.
-function isNotAvailablePlaceholder(summary) {
-return /not available/i.test(summary || '');
-}
-
-// Airbnb's export is simple -- flat VEVENT blocks, no recurrence rules, no
-// timezone complexity. Returns {uid, checkin, checkout}[], silently
-// skipping any block missing a UID or a usable date pair (a
-// cancelled/malformed entry), or one of Airbnb's own "Not available"
-// placeholders (see isNotAvailablePlaceholder above), rather than failing
-// the whole sync over it.
-function parseIcs(text) {
-const lines = unfoldIcsLines(text);
-const events = [];
-let current = null;
-lines.forEach((line) => {
-if (line === 'BEGIN:VEVENT') { current = {}; return; }
-if (line === 'END:VEVENT') {
-if (current && current.uid && current.checkin && current.checkout && !isNotAvailablePlaceholder(current.summary)) events.push(current);
-current = null;
-return;
-}
-if (!current) return;
-const prop = parseIcsProperty(line);
-if (!prop) return;
-if (prop.name === 'UID') current.uid = prop.value.trim();
-else if (prop.name === 'DTSTART') current.checkin = icsDateOnly(prop.value);
-else if (prop.name === 'DTEND') current.checkout = icsDateOnly(prop.value);
-else if (prop.name === 'SUMMARY') current.summary = prop.value.trim();
-});
-return events;
-}
-
 // ---- Sync ---------------------------------------------------------------
+//
+// The feed parser itself lives in js/icsparse.js, which imports nothing.
+// It was moved out of this file so the service worker's background
+// refresh (js/bgsync.js) can read the same feeds with no page open -- a
+// worker has no `document`, and this file reaches most of the app. One
+// parser, used both ways, rather than a copy that drifts the first time a
+// real feed shows up something unexpected.
 
 // Merges one listing's feed into data.airbnbReservations, keyed on the
 // feed's OWN event uid (not this record's id) so re-running Sync updates
@@ -91,7 +45,7 @@ const today = todayStr();
 // separate append-only log exists for). Filtered here, before a past
 // event is ever turned into a stored record, not just hidden from a
 // display list downstream.
-const events = parseIcs(text).filter((e) => e.checkout >= today);
+const events = parseIcsReservations(text).filter((e) => e.checkout >= today);
 // Feed-sourced reservations ONLY. This map's leftovers get deleted at
 // the end of the pass as cancelled bookings, and an external or manual
 // booking on the same listing has no feed `uid` to match on -- it would

@@ -1,3 +1,4 @@
+import { unfoldIcsLines, parseIcsProperty } from './icsparse.js';
 import { photoUrl } from './db.js';
 
 function todayStr() { return new Date().toISOString().slice(0, 10); }
@@ -25,35 +26,11 @@ return dt.toISOString().slice(0, 10);
 }
 
 // ---- ICS (RFC5545) parsing primitives ------------------------------------
-// Shared by airbnb.js's calendar-feed sync and mail.js's date-event
-// extraction from a .ics attachment -- both read a real calendar export,
-// so both need the same line-unfolding and property-splitting, not two
-// near-identical copies.
-
-// Un-folds RFC5545 continuation lines (a line starting with a single space
-// or tab is a continuation of the previous line, joined with the leading
-// whitespace stripped) before splitting into logical lines -- a long
-// SUMMARY/DESCRIPTION line wraps this way in a real export, and left
-// un-joined would otherwise read as two malformed properties.
-function unfoldIcsLines(text) {
-const raw = String(text || '').replace(/\r\n/g, '\n').split('\n');
-const lines = [];
-raw.forEach((line) => {
-if ((line.startsWith(' ') || line.startsWith('\t')) && lines.length) {
-lines[lines.length - 1] += line.slice(1);
-} else if (line.trim()) {
-lines.push(line);
-}
-});
-return lines;
-}
-
-function parseIcsProperty(line) {
-const colon = line.indexOf(':');
-if (colon === -1) return null;
-const name = line.slice(0, colon).split(';')[0].toUpperCase();
-return { name, value: line.slice(colon + 1) };
-}
+// unfoldIcsLines/parseIcsProperty now live in js/icsparse.js and are
+// re-exported here so every existing caller keeps its import unchanged.
+// They moved because the service worker background refresh needs them and
+// cannot import this file -- utils.js is full of DOM helpers, and a worker
+// has no document. See icsparse.js's own header.
 
 // A DTSTART/DTEND value is either date-only ("VALUE=DATE:20260926", an
 // all-day block) or a full timestamp ("20260926T200000" local, or
