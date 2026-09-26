@@ -23,7 +23,7 @@ import { data, queueSave, SHOPPING_CONTEXTS, unheldInventory, whoFits } from '..
 import { escapeHtml, affiliateLink, daysUntil, daysSince, uid, todayStr, MISSING_KEY_LINK_HTML, looksLikeUrl } from '../utils.js';
 import { captureTask, revealTask } from './tasks.js';
 import { connectionChipHtml, bindConnectionChips, connectionPickerHtml, bindConnPickers, setConnPickerValue, sensitiveFieldsShown } from './connections.js';
-import { runStockCheck, stockCheckHtml, adapterFor } from './stockwatch.js';
+import { runStockCheck, stockCheckHtml, adapterFor, seedWatchSpec } from './stockwatch.js';
 import { MissingKeyError, searchShoppingItem } from '../ai.js';
 import { initMicCapture } from './voicecapture.js';
 import { banner } from './sharetarget.js';
@@ -207,15 +207,15 @@ close();
 // since "why has this never been checked" is otherwise unanswerable.
 function watchRowHtml(t) {
 if (!t.forConnectionId) return '';
-const urls = t.wantSpec?.urls || [];
+const urls = seedWatchSpec(t).urls || [];
 const supported = urls.filter((u) => adapterFor(u)).length;
 return `<button class="sync-btn sm shop-watch-btn" type="button" data-shop-watch-edit="${t.id}"
 title="${urls.length ? `${urls.length} page${urls.length === 1 ? '' : 's'} watched, ${supported} of them on a retailer with a parser` : 'No pages yet — paste the product URLs this want covers'}">${urls.length ? `👁 ${urls.length}` : '👁 add pages'}</button>`;
 }
 
 function watchEditorHtml(t) {
-const urls = t.wantSpec?.urls || [];
-const spec = t.wantSpec || {};
+const spec = seedWatchSpec(t);
+const urls = spec.urls || [];
 return `<div class="mail-view-card" style="max-width:520px;">
 <div class="mail-view-subject">Pages to watch</div>
 <div class="settings-note" style="margin:2px 0 8px;">One product page per line. Each is checked for the sizes recorded on her card, with its own price and discount code &mdash; codes differ between pieces of the same set, so they're never assumed.</div>

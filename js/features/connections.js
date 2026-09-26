@@ -627,6 +627,35 @@ return `<div class="identity-list">${rows}</div>
 <button class="todo-add-btn" type="button" data-size-add="${c.id}">+ Add a size</button>`;
 }
 
+// What's on order or being watched for her. The mirror of "Has": between
+// them her card answers both halves of the question, instead of the
+// wants living only on the Shopping tab where you'd have to know to go
+// looking. Each one leads back to the real shopping item (the
+// record-reference rule) rather than being editable here -- there's one
+// place a want is edited, and it isn't two places.
+function wantsListHtml(c) {
+const wants = data.tasks.filter((t) => t.forConnectionId === c.id && t.bucket !== 'done');
+if (!wants.length) return '<span class="settings-note" style="margin:0;">Nothing on the list for her.</span>';
+return wants.map((t) => {
+const suspended = t.wantState === 'suspended';
+// The check's own summary, not a re-derivation: whatever the stock
+// check last found, said in one line.
+const results = t.stockCheck?.results || [];
+const inStock = results.filter((r) => r.available.length);
+const cheapest = inStock.reduce((min, r) => (min == null || (r.net != null && r.net < min) ? r.net : min), null);
+const summary = !t.stockCheck
+? 'not checked yet'
+: inStock.length
+? `${inStock.length} in her size${cheapest != null ? ` from £${Number.isInteger(cheapest) ? cheapest : cheapest.toFixed(2)}` : ''}`
+: 'nothing in her size right now';
+return `<div class="identity-row">
+<span class="dd-status-toggle" data-want-open="${escapeHtml(t.id)}" title="Open this shopping item">${escapeHtml(t.title || '(untitled)')}</span>
+<span class="tag-chip${suspended ? ' tag-chip-amber' : ''}">${suspended ? 'Suspended' : 'Active'}</span>
+<span class="settings-note" style="margin:0;">${escapeHtml(summary)}</span>
+</div>`;
+}).join('');
+}
+
 function ownedListHtml(c) {
 const rows = whatSheHas(c.id).map((o) => {
 // An item that arrived through a shopping item leads back to it, per
@@ -1218,6 +1247,9 @@ ${visibleTagFields().filter((f) => f.field !== 'location').map((f) => `<label cl
 ${showSensitiveFields ? `<div class="field-block full sensitive-field"><span class="field-label">Sizes</span>
 <div class="settings-note" style="margin:0 0 4px;">Per retailer and category, because one retailer can size two garments quite differently. A want reads these at check time rather than storing its own copy, so a correction here fixes every want for her at once.</div>
 ${sizeListHtml(c)}</div>
+<div class="field-block full sensitive-field"><span class="field-label">Wants</span>
+<div class="settings-note" style="margin:0 0 4px;">Shopping items bought for her. Edited on the Shopping tab &mdash; click one to go there.</div>
+${wantsListHtml(c)}</div>
 <div class="field-block full sensitive-field"><span class="field-label">Has</span>
 <div class="settings-note" style="margin:0 0 4px;">What she already owns &mdash; add it whether or not it came through the shopping list.</div>
 ${ownedListHtml(c)}</div>` : ''}
@@ -1594,6 +1626,14 @@ el.addEventListener('click', () => {
 data.inventory = data.inventory.filter((o) => o.id !== el.dataset.ownedRemove);
 queueSave();
 renderConnections();
+});
+});
+// Same navigation the Shopping tab's own row click uses, so a want
+// opens the same way wherever it's clicked from.
+list.querySelectorAll('[data-want-open]').forEach((el) => {
+el.addEventListener('click', () => {
+switchTab('tasks');
+revealTask(el.dataset.wantOpen);
 });
 });
 list.querySelectorAll('[data-owned-open-task]').forEach((el) => {

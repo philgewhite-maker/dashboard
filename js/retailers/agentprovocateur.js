@@ -43,12 +43,35 @@ const HOST = 'agentprovocateur.com';
 // measured failure above, not guessed: bursts got 403s, ~4s apart did not.
 const CHECK_SPACING_MS = 4000;
 
-// The SKU lives in the URL's own first path segment ("apm0017410000-..."),
-// which is present on every product URL regardless of slug shape. Read
-// from there rather than JSON-LD, which a server fetch doesn't get.
+// The SKU lives in the URL's own first path segment, but there is more
+// than one shape: "apm0017410000-..." (APM + 10 digits) alongside
+// "ap11129651430-..." (AP + 11), found on a real Lorna URL. Both match;
+// only the APM form splits into style and colour codes, and skuParts
+// returns null for the other rather than inventing a split.
 function skuFromUrl(url) {
-const m = /\/?(apm\d{10})\b/i.exec(String(url || ''));
+const m = /\/(apm?\d{10,11})-/i.exec(String(url || ''));
 return m ? m[1].toUpperCase() : '';
+}
+
+// What a URL alone says, before anything is fetched -- used to pre-fill a
+// watch from the link pasted at capture, so the same URL isn't typed
+// twice. Best-effort and freely correctable: a starting point, not an
+// answer.
+function specFromUrl(url) {
+const base = String(url || '').split(/[#?]/)[0];
+const m = /\/apm?\d{10,11}-([a-z0-9-]+?)-\d+$/i.exec(base);
+const spec = { brand: 'Agent Provocateur', style: '', pieces: [] };
+if (!m) return spec;
+// "lorna-plunge-underwired-bra-in-dark-pink-cobalt" -> style "Lorna",
+// piece "Plunge Underwired Bra". The colour half is deliberately NOT
+// taken from the slug: it renders "Dark Pink/Cobalt" as
+// "dark-pink-cobalt", indistinguishable from a two-word colour, and the
+// page states it properly anyway.
+const words = m[1].split('-in-')[0].split('-').filter(Boolean);
+const titled = (a) => a.map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+if (words.length) spec.style = titled(words.slice(0, 1));
+if (words.length > 1) spec.pieces = [titled(words.slice(1))];
+return spec;
 }
 
 function matchesRetailer(url) {
@@ -228,4 +251,4 @@ byColour.set(colourCode, entry);
 return [...byColour.values()];
 }
 
-export { matchesRetailer, parseProductPage, parseSizeOption, parseBlock, skuParts, skuFromUrl, findColourways, HOST, CHECK_SPACING_MS };
+export { matchesRetailer, parseProductPage, parseSizeOption, parseBlock, skuParts, skuFromUrl, specFromUrl, findColourways, HOST, CHECK_SPACING_MS };

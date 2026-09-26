@@ -101,11 +101,39 @@ noSizesOnFile: sizes.length === 0,
 
 // ---- Running a check ------------------------------------------------------
 
+// A want captured by pasting a product URL already HAS that URL, in
+// t.link -- asking for it again in the watch editor was making you type
+// what you'd already given. Derived on read rather than written at
+// capture, so it also picks up a link added later, and so an explicitly
+// emptied list stays empty: `urls` existing at all, even as [], means
+// you've edited it and your answer wins.
+//
+// Shared with the editor deliberately. When this lived only in the UI, a
+// want seeded this way was never actually CHECKED -- activeWants below
+// looks for the same urls and found none until the editor had been
+// opened and saved once.
+function seedWatchSpec(t) {
+const spec = t.wantSpec || {};
+if (Array.isArray(spec.urls)) return spec;
+const link = String(t.link || '').trim();
+if (!link) return { ...spec, urls: [] };
+const adapter = adapterFor(link);
+const fromUrl = adapter && adapter.specFromUrl ? adapter.specFromUrl(link) : {};
+// Anything already typed into the want outranks what the URL implies.
+return {
+brand: spec.brand || fromUrl.brand || '',
+style: spec.style || fromUrl.style || '',
+pieces: (spec.pieces && spec.pieces.length) ? spec.pieces : (fromUrl.pieces || []),
+colours: spec.colours || [],
+urls: [link],
+};
+}
+
 function activeWants() {
 return data.tasks.filter((t) => t.forConnectionId
 && t.wantState !== 'suspended'
 && t.bucket !== 'done'
-&& (t.wantSpec?.urls || []).length);
+&& seedWatchSpec(t).urls.length);
 }
 
 // Every distinct URL across the wants being checked, so two wants
@@ -113,7 +141,7 @@ return data.tasks.filter((t) => t.forConnectionId
 // aggregation that makes this worth doing as one job instead of per-want.
 function urlsToCheck(wants) {
 const seen = new Set();
-wants.forEach((t) => (t.wantSpec.urls || []).forEach((u) => {
+wants.forEach((t) => (seedWatchSpec(t).urls || []).forEach((u) => {
 const url = String(u || '').trim();
 if (url) seen.add(url);
 }));
@@ -148,7 +176,7 @@ if (i < urls.length - 1) await sleep(gap);
 const now = new Date().toISOString();
 wants.forEach((t) => {
 const conn = data.connections.find((c) => c.id === t.forConnectionId);
-const spec = t.wantSpec || {};
+const spec = seedWatchSpec(t);
 const results = (spec.urls || [])
 .map((u) => pages.get(String(u || '').trim()))
 .filter(Boolean)
@@ -219,4 +247,4 @@ ${(errors || []).map((e) => `<div class="stock-line"><span class="settings-note"
 </div>`;
 }
 
-export { runStockCheck, stockCheckHtml, buyableNow, activeWants, wantedSizesFor, pageMatchesWant, resultFor, adapterFor };
+export { runStockCheck, stockCheckHtml, buyableNow, activeWants, seedWatchSpec, wantedSizesFor, pageMatchesWant, resultFor, adapterFor };
