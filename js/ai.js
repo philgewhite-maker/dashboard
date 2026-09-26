@@ -1165,6 +1165,12 @@ const SHOPPING_SEARCH_MODEL = 'claude-sonnet-5';
 // the same math, so this is sized well past that, same "output tokens are
 // cheap, a failed import isn't" reasoning already applied there.
 const SHOPPING_SEARCH_MAX_TOKENS = 8000;
+// See the note at the callAnthropic call below. max_tokens is only a
+// ceiling -- you pay for what's generated, not what's allowed -- so 8000
+// stays: it costs nothing when thinking is reined in, and is the
+// difference between a truncated run and a working one when a search
+// genuinely needs the rounds.
+const SHOPPING_SEARCH_EFFORT = 'medium';
 // The 10-character product id in an Amazon URL's own /dp/ or
 // /gp/product/ path segment -- a far more exact search term than a
 // product NAME (possibly AI-guessed via resolveUrlTitle below, possibly
@@ -1239,6 +1245,22 @@ SHOPPING_SEARCH_MAX_TOKENS,
 SHOPPING_SEARCH_MODEL,
 'Shopping search',
 tools,
+// The one caller that was still on Sonnet 5's DEFAULT effort, which is
+// 'high' -- "thinks on most requests and at greater length". That was
+// never a decision: the model was raised from Haiku for Amazon
+// reliability (13 Sept) and the effort argument simply wasn't passed,
+// so every search has been paying for long thinking on top of the
+// dearer model ever since. Raising SHOPPING_SEARCH_MAX_TOKENS to 8000
+// straight afterwards was treating the symptom -- the budget was being
+// eaten by thinking, not by the answer.
+//
+// 'medium' rather than the 'low' every other caller uses: those are
+// single-shot extractions, this is multi-round tool orchestration with
+// hard constraints (a search per retailer, a conditional fetch, Amazon
+// mandatory) -- exactly what the cheap tier was measured under-
+// following before. Medium keeps room to follow them without thinking
+// at length on a task that is mostly sequencing.
+SHOPPING_SEARCH_EFFORT,
 );
 const results = Array.isArray(raw && raw.results) ? raw.results : [];
 const sorted = results.filter((r) => r && r.url).slice(0, 6).map((r) => ({
