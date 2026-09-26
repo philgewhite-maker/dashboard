@@ -1201,6 +1201,18 @@ return n;
 }
 
 function migrate() {
+// FIRST, before anything else in here touches it. An existing document
+// predates this key entirely, and two passes below both reach for it --
+// the connection loop that carries the old per-person `owned` across,
+// and the orphan sweep that unassigns a deleted person's items. When
+// this guard sat further down with the other array defaults, both ran
+// against `undefined` and threw, which aborts migrate(), which aborts
+// loadData(), which leaves the whole app dead on launch with no data at
+// all. Shipped exactly that way in v393: every local test had already
+// seeded data.inventory by hand, and a brand-new document gets the key
+// from the blank-document factory, so only a REAL existing document hit
+// it -- which is to say, every real install and none of the tests.
+if (!Array.isArray(data.inventory)) data.inventory = [];
 if (!Array.isArray(data.habits)) data.habits = [];
 if (!Array.isArray(data.goals)) data.goals = [];
 if (!Array.isArray(data.jobs)) data.jobs = [];
