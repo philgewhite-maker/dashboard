@@ -1633,7 +1633,7 @@ renderConnections();
 list.querySelectorAll('[data-want-open]').forEach((el) => {
 el.addEventListener('click', () => {
 switchTab('tasks');
-revealTask(el.dataset.wantOpen);
+revealTask(el.dataset.wantOpen, { returnTo: 'dating' });
 });
 });
 list.querySelectorAll('[data-owned-open-task]').forEach((el) => {

@@ -503,8 +503,15 @@ queueSave();
 root.querySelectorAll('[data-task-expand]').forEach((el) => {
 el.addEventListener('click', () => {
 const id = el.dataset.taskExpand;
-if (expandedTasks.has(id)) expandedTasks.delete(id); else expandedTasks.add(id);
+const closing = expandedTasks.has(id);
+if (closing) expandedTasks.delete(id); else expandedTasks.add(id);
 renderLists();
+// Closing one you arrived at from another tab takes you back there.
+if (closing && returnTabFor.has(id)) {
+const tab = returnTabFor.get(id);
+returnTabFor.delete(id);
+import('../tabs.js').then(({ switchTab }) => switchTab(tab));
+}
 });
 });
 
@@ -680,13 +687,19 @@ const input = document.getElementById('capture-input');
 const status = document.getElementById('capture-status');
 const resolveBtn = document.getElementById('capture-resolve-btn');
 
+// The URL a resolved title came from. Without this, clicking "Resolve
+// title" REPLACED the pasted URL with a readable name and the link was
+// lost outright -- `link` below reads whatever text is left, which after
+// resolving is no longer a URL. So the one action whose whole purpose is
+// to make a link readable was the one that threw the link away.
+let resolved = null; // { url, title }
+
 const submit = () => {
 const title = input.value.trim();
 if (!title) return;
-// A pasted URL never resolved via the button still isn't lost -- same
-// free fallback every "🪄 Resolve title" input follows: the raw URL
-// becomes `link` regardless, only the title stays unresolved.
-captureTask({ title, link: looksLikeUrl(title) ? title : '' });
+// An unresolved URL still becomes the link, same as it always did.
+captureTask({ title, link: (resolved && title === resolved.title) ? resolved.url : (looksLikeUrl(title) ? title : '') });
+resolved = null;
 input.value = '';
 if (resolveBtn) resolveBtn.hidden = true;
 status.textContent = 'Captured to Inbox.';
@@ -697,7 +710,11 @@ input.addEventListener('keydown', (e) => {
 if (e.key === 'Enter') { e.preventDefault(); submit(); }
 });
 if (resolveBtn) {
-input.addEventListener('input', () => { resolveBtn.hidden = !looksLikeUrl(input.value); });
+input.addEventListener('input', () => {
+resolveBtn.hidden = !looksLikeUrl(input.value);
+// Typing over the resolved title abandons the URL it came from.
+if (resolved && input.value.trim() !== resolved.title) resolved = null;
+});
 resolveBtn.addEventListener('click', async () => {
 const url = input.value.trim();
 if (!looksLikeUrl(url)) return;
@@ -706,7 +723,7 @@ resolveBtn.textContent = 'Resolving…';
 try {
 const { resolveUrlTitle } = await import('../ai.js');
 const title = await resolveUrlTitle(url);
-if (title) input.value = title;
+if (title) { input.value = title; resolved = { url, title }; }
 } catch (err) {
 console.error('Resolving URL title failed:', err);
 } finally {
@@ -748,7 +765,16 @@ renderLists();
 // row that was already captured, or a Shopping item that's already ticked
 // off. A done task is hidden by the "Show done" filter by default, which
 // would otherwise make this silently fail to find anything to scroll to.
-function revealTask(id) {
+// Where to send you back to when you close a task you arrived at from
+// somewhere else. A shopping item lives on the Shopping tab but opens on
+// Tasks (that's where the full editor is), so closing it used to strand
+// you on Tasks -- a tab you never chose to be on, with your place in the
+// shopping list lost. Keyed per task, and cleared when it's used, so it
+// only ever affects the one you actually navigated to.
+const returnTabFor = new Map();
+
+function revealTask(id, { returnTo } = {}) {
+if (returnTo) returnTabFor.set(id, returnTo); else returnTabFor.delete(id);
 expandedTasks.add(id);
 const t = taskById(id);
 if (t && t.bucket === 'done' && !showDone) {

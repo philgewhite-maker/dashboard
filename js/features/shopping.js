@@ -333,7 +333,8 @@ el.querySelectorAll('[data-shop-open]').forEach((span) => {
 span.addEventListener('click', async () => {
 const { switchTab } = await import('../tabs.js');
 switchTab('tasks');
-revealTask(span.dataset.shopOpen);
+// Closing it brings you back here rather than leaving you on Tasks.
+revealTask(span.dataset.shopOpen, { returnTo: 'shopping' });
 });
 });
 el.querySelectorAll('[data-shop-search]').forEach((btn) => {
@@ -464,6 +465,17 @@ bindConnPickers(forMount);
 // The picker stores its choice in a hidden input keyed by that id.
 const forPicker = document.getElementById('shop-for-input');
 
+// "Resolve title" replaces the pasted URL in the box with a readable
+// name -- and the URL was then simply gone, because `link` below was
+// derived from whatever text remained, which is no longer a URL. So
+// resolving a title silently threw away the link it was resolved FROM:
+// no link on the task, and nothing for the stock watcher to check.
+//
+// Remembered here instead. Cleared the moment the text stops being the
+// resolved title, so typing something else over it doesn't attach a URL
+// that has nothing to do with what you ended up capturing.
+let resolved = null; // { url, title }
+
 const submit = () => {
 const title = input.value.trim();
 if (!title) return;
@@ -479,9 +491,10 @@ if (!title) return;
 const forConnectionId = forPicker ? forPicker.value : '';
 const task = captureTask({
 title, contexts: [select.value], bucket: 'next',
-link: looksLikeUrl(title) ? title : '',
+link: (resolved && title === resolved.title) ? resolved.url : (looksLikeUrl(title) ? title : ''),
 forConnectionId, wantState: 'active',
 });
+resolved = null;
 input.value = '';
 if (forPicker) setConnPickerValue('shop-for-input', '');
 if (resolveBtn) resolveBtn.hidden = true;
@@ -496,7 +509,11 @@ document.getElementById('shop-capture-btn').addEventListener('click', submit);
 input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); submit(); } });
 initMicCapture(document.getElementById('shop-capture-mic-btn'), input, status, submit);
 if (resolveBtn) {
-input.addEventListener('input', () => { resolveBtn.hidden = !looksLikeUrl(input.value); });
+input.addEventListener('input', () => {
+resolveBtn.hidden = !looksLikeUrl(input.value);
+// Typing over the resolved title abandons the URL it came from.
+if (resolved && input.value.trim() !== resolved.title) resolved = null;
+});
 resolveBtn.addEventListener('click', async () => {
 const url = input.value.trim();
 if (!looksLikeUrl(url)) return;
@@ -505,7 +522,7 @@ resolveBtn.textContent = 'Resolving…';
 try {
 const { resolveUrlTitle } = await import('../ai.js');
 const title = await resolveUrlTitle(url);
-if (title) input.value = title;
+if (title) { input.value = title; resolved = { url, title }; }
 } catch (err) {
 console.error('Resolving URL title failed:', err);
 } finally {
