@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v392</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v393</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -358,6 +358,7 @@
 <div class="capture-row">
 <input type="text" autocomplete="off" id="shop-capture-input" placeholder="What do you need?">
 <select id="shop-context-input" class="mini"></select>
+<span id="shop-for-mount" title="Who this is for. Leave as &quot;For me&quot; for your own shopping; pick someone and it becomes a want against her profile, using her recorded sizes."></span>
 <button class="add-btn" id="shop-capture-btn" type="button">Add</button>
 <button type="button" class="mini-task-btn" id="shop-resolve-btn" title="Look up a real title for this pasted link" hidden>&#10024; Resolve title</button>
 <button class="add-btn" id="shop-capture-mic-btn" type="button" title="Record a voice instruction">&#127908;</button>
@@ -379,6 +380,14 @@ This is the same task system as the Tasks tab &mdash; a shopping item can be par
 <div class="settings-note" style="margin:12px 0 0;">
 Prices and offers come from an AI web search of each retailer, not a live basket &mdash; adding to a basket stays a manual click-through (the direct product link), since that needs an authenticated session against each retailer's own site.
 </div>
+</section>
+
+<section class="panel wide" id="inventory-panel" data-tab="shopping">
+<div class="panel-head">
+<h2><span class="dot plum"></span>Inventory</h2>
+</div>
+<div class="settings-note" style="margin:0 0 8px;">Things you've bought that nobody has yet &mdash; including anything bought for someone you're no longer seeing. Matched against everyone's recorded sizes, so an item can find a person rather than the other way round.</div>
+<div id="inventory-list"></div>
 </section>
 
 <section class="panel wide" id="recipe-capture-panel" data-tab="menu">

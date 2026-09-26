@@ -2630,6 +2630,14 @@ white-space:nowrap;
 .shop-search-results{flex:1 1 100%;min-width:0;display:flex;flex-direction:column;gap:4px;margin-top:2px;}
 /* The Paste price button sits beside its hit rather than under it -- as a
    direct child of the column above it stretched to the full width. */
+/* A want that's suspended stays legible but visibly parked -- it's still
+   on the list on purpose, it just isn't being chased. Same muted
+   treatment a done row gets, without the strike-through, which would
+   wrongly read as "finished". */
+.shop-row-suspended{opacity:.6;}
+.shop-want-for{display:inline-flex;align-items:center;flex:0 0 auto;}
+.sync-btn.sm.shop-want-state{width:auto;margin-top:0;flex:0 0 auto;font-size:10px;padding:2px 7px;}
+.sync-btn.sm.shop-want-state.shop-want-suspended{border-color:var(--amber);color:var(--amber);}
 .shop-hit-row{display:flex;align-items:center;gap:6px;min-width:0;}
 .shop-hit-row .shop-search-hit{flex:1 1 auto;min-width:0;}
 .shop-search-results.loading,.shop-search-results.error,.shop-search-results.empty{font-size:12px;color:var(--muted);}
@@ -3528,3 +3536,10 @@ padding:6px;
 .mail-subject{flex:1 1 100%;}
 .mail-row-group .mail-subject{flex:1 1 100%;}
 }
+
+/* Inventory: an unassigned item and who it fits. The chips sit inline
+   with a Give button each, so acting on a match is one tap from seeing
+   it -- see renderInventory() in js/features/shopping.js. */
+.inv-fits{display:flex;gap:8px;flex-wrap:wrap;align-items:center;min-width:0;}
+.inv-fit{display:inline-flex;align-items:center;gap:4px;}
+.inv-fit .todo-add-btn{font-size:10px;padding:2px 7px;}

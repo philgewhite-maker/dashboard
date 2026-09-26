@@ -233,6 +233,9 @@ sensitiveToggle.checked = !!settings.showSensitiveFields;
 sensitiveToggle.addEventListener('change', async () => {
 await setLocalSetting('showSensitiveFields', sensitiveToggle.checked);
 setShowSensitiveFields(sensitiveToggle.checked);
+// The Shopping tab's inventory panel respects the same gate but
+// isn't part of renderAll, so it needs telling directly.
+import("./shopping.js").then((m) => m.renderInventory());
 renderAll();
 });
 

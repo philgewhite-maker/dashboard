@@ -19,9 +19,10 @@
 // a link to buy it from the right place," not a manual step. The result is
 // persisted on the task itself (t.priceCheck), dated, with a Refresh button
 // to re-run it later — not the old in-memory, un-dated Map this used to be.
-import { data, queueSave, SHOPPING_CONTEXTS } from '../state.js';
-import { escapeHtml, affiliateLink, daysUntil, daysSince, MISSING_KEY_LINK_HTML, looksLikeUrl } from '../utils.js';
+import { data, queueSave, SHOPPING_CONTEXTS, unheldInventory, whoFits } from '../state.js';
+import { escapeHtml, affiliateLink, daysUntil, daysSince, uid, todayStr, MISSING_KEY_LINK_HTML, looksLikeUrl } from '../utils.js';
 import { captureTask, revealTask } from './tasks.js';
+import { connectionChipHtml, bindConnectionChips, connectionPickerHtml, bindConnPickers, setConnPickerValue, sensitiveFieldsShown } from './connections.js';
 import { MissingKeyError, searchShoppingItem } from '../ai.js';
 import { initMicCapture } from './voicecapture.js';
 import { banner } from './sharetarget.js';
@@ -137,11 +138,74 @@ ${r.subscribeSave ? `<span class="shop-hit-offer">${escapeHtml(r.subscribeSave)}
 </div>`;
 }
 
+// Who this is for, and whether it's being actively chased. Both live on
+// the shopping row rather than behind "open the full task", because
+// "whose is this" is the thing you scan a gift list for, and suspending
+// something is a one-tap decision you make while looking at the list.
+//
+// The person is shown with connectionChipHtml, the one canonical way this
+// app refers to a connection anywhere outside Dating (CLAUDE.md), so it
+// leads back to her card -- where her sizes are.
+function wantRowHtml(t) {
+if (!t.forConnectionId) return '';
+const conn = data.connections.find((c) => c.id === t.forConnectionId);
+if (!conn) return '';
+const suspended = t.wantState === 'suspended';
+return `<span class="shop-want-for">${connectionChipHtml(conn)}</span>
+<button class="sync-btn sm shop-want-state${suspended ? ' shop-want-suspended' : ''}" type="button" data-shop-want-toggle="${t.id}"
+title="${suspended ? 'Suspended — kept on the list, but not checked for stock and never alerted on. Click to resume.' : 'Active — checked for stock whenever this retailer is checked. Click to suspend.'}">${suspended ? 'Suspended' : 'Active'}</button>`;
+}
+
+// The want -> has step. Prefilled from the want spec, but every field is
+// editable before it's saved, because what arrives isn't always what was
+// asked for -- the backup size, the second-choice colour. `fromTaskId`
+// records where it came from so the owned row can lead back.
+function offerToRecordOwned(t) {
+const conn = data.connections.find((c) => c.id === t.forConnectionId);
+if (!conn) return;
+const spec = t.wantSpec || {};
+const dialog = document.createElement('div');
+dialog.className = 'mail-view-backdrop';
+const field = (name, label, value, width) => `<label style="font-size:12px;display:block;margin-bottom:6px;">${label}<input type="text" autocomplete="off" class="tag-add-input" data-owned-new="${name}" value="${escapeHtml(value || '')}" style="width:${width || '100%'};display:block;"></label>`;
+dialog.innerHTML = `<div class="mail-view-card" style="max-width:420px;">
+<div class="mail-view-subject">Record this item?</div>
+<div class="settings-note" style="margin:2px 0 8px;">Goes into your inventory. Tick the box once it's actually with ${escapeHtml(conn.name || 'her')} &mdash; until then it stays yours, and stays searchable by size.</div>
+${field('brand', 'Brand', spec.brand)}
+${field('style', 'Style', spec.style)}
+${field('piece', 'Piece', (spec.pieces || [])[0])}
+${field('size', 'Size', '', '90px')}
+${field('colour', 'Colour', (spec.colours || [])[0], '140px')}
+<label style="font-size:12px;display:block;margin:8px 0;"><input type="checkbox" data-owned-given> Already given to ${escapeHtml(conn.name || 'her')}</label>
+<div class="mail-view-actions">
+<button class="sync-btn sm" type="button" data-owned-cancel>Not now</button>
+<button class="add-btn" type="button" data-owned-save>Add</button>
+</div>
+</div>`;
+document.body.appendChild(dialog);
+const close = () => dialog.remove();
+dialog.addEventListener('click', (e) => { if (e.target === dialog) close(); });
+dialog.querySelector('[data-owned-cancel]').addEventListener('click', close);
+dialog.querySelector('[data-owned-save]').addEventListener('click', () => {
+const val = (n) => dialog.querySelector(`[data-owned-new="${n}"]`).value.trim();
+data.inventory.push({
+id: uid(), brand: val('brand'), style: val('style'), piece: val('piece'),
+size: val('size'), colour: val('colour'),
+// Held by her only if the "Given to her" box is ticked. Bought but
+// not yet handed over is the honest default -- and it's the state
+// that leaves the item findable by size if the moment never comes.
+holderId: dialog.querySelector('[data-owned-given]').checked ? conn.id : '',
+acquiredAt: todayStr(), fromTaskId: t.id, notes: '',
+});
+queueSave();
+close();
+});
+}
+
 function rowHtml(t, ctx) {
-return `<div class="shop-row${t.bucket === 'done' ? ' done' : ''}">
+return `<div class="shop-row${t.bucket === 'done' ? ' done' : ''}${t.wantState === 'suspended' ? ' shop-row-suspended' : ''}">
 <input type="checkbox" class="task-check" data-shop-done="${t.id}" ${t.bucket === 'done' ? 'checked' : ''}>
 <span class="shop-title" data-shop-open="${t.id}">${escapeHtml(t.title || '(untitled)')}</span>
-${dueBadge(t)}${otherContextsNote(t, ctx)}
+${dueBadge(t)}${otherContextsNote(t, ctx)}${wantRowHtml(t)}
 ${t.bucket === 'done' ? '' : `<button class="sync-btn sm shop-search-btn" type="button" data-shop-search="${t.id}">${t.priceCheck ? 'Refresh' : 'Search prices'}</button>`}
 ${searchResultsHtml(t)}
 </div>`;
@@ -164,6 +228,9 @@ ${sorted.map((t) => rowHtml(t, ctx)).join('')}
 }
 
 function render() {
+// Kept in step with the list: completing a want can add an inventory
+// item, and giving one away removes it from the unassigned view.
+renderInventory();
 const el = document.getElementById('shopping-lists');
 if (!el) return;
 el.innerHTML = listsHtml();
@@ -176,8 +243,23 @@ if (cb.checked) { t.bucket = 'done'; t.completedAt = new Date().toISOString(); }
 else { t.bucket = 'next'; t.completedAt = ''; }
 render();
 queueSave();
+// Ticking off a want for someone is the moment it stops being a want
+// and starts being a thing she has. Offered rather than done silently:
+// "ordered" and "arrived" aren't the same event, and the size and
+// colour that actually shipped may not be the ones first wanted.
+if (cb.checked && t.forConnectionId) offerToRecordOwned(t);
 });
 });
+el.querySelectorAll('[data-shop-want-toggle]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const t = data.tasks.find((x) => x.id === btn.dataset.shopWantToggle);
+if (!t) return;
+t.wantState = t.wantState === 'suspended' ? 'active' : 'suspended';
+render();
+queueSave();
+});
+});
+bindConnectionChips(el);
 el.querySelectorAll('[data-shop-open]').forEach((span) => {
 span.addEventListener('click', async () => {
 const { switchTab } = await import('../tabs.js');
@@ -234,7 +316,64 @@ console.error('Auto price-check failed, item stays without one until Search pric
 }
 }
 
+// ---- Inventory ------------------------------------------------------------
+//
+// Things you've bought that nobody holds yet. The reason this is a panel
+// and not an archive: an unassigned item is a real garment in a real
+// size, and the useful question about it runs backwards from a want --
+// not "what does she want" but "who does this fit". whoFits() answers
+// that from everyone's recorded sizes, ranked so a same-retailer,
+// same-category, usual-size hit beats a bare number coincidence.
+function inventoryHtml() {
+const items = unheldInventory();
+if (!items.length) return '<div class="empty">Nothing unassigned — everything recorded is with someone.</div>';
+return items.map((o) => {
+const label = [o.brand, o.style, o.piece, o.size, o.colour].filter(Boolean).join(' · ') || '(unlabelled item)';
+const fits = whoFits(o);
+const fitsHtml = fits.length
+? fits.slice(0, 4).map(({ conn, how }) => `<span class="inv-fit" title="${escapeHtml(how)}">${connectionChipHtml(conn)}<button type="button" class="todo-add-btn" data-inv-assign="${escapeHtml(o.id)}:${escapeHtml(conn.id)}" title="Record that ${escapeHtml(conn.name || 'she')} now has this">Give</button></span>`).join('')
+: `<span class="settings-note" style="margin:0;">${o.size ? 'Nobody on file takes this size.' : 'No size recorded — add one and this can find a match.'}</span>`;
+return `<div class="shop-row">
+<span class="shop-title">${escapeHtml(label)}</span>
+<span class="inv-fits">${fitsHtml}</span>
+<span class="del-x" style="opacity:1;" data-inv-remove="${escapeHtml(o.id)}" title="Delete this item">&times;</span>
+</div>`;
+}).join('');
+}
+
+function renderInventory() {
+const el = document.getElementById('inventory-list');
+if (!el) return;
+// Behind the same device-local gate as the sizes it matches against --
+// showing "who fits this 36C bra" on an unlocked phone is exactly what
+// that gate is for. See SENSITIVE_BLOCKS in state.js.
+if (!sensitiveFieldsShown()) {
+el.innerHTML = '<div class="settings-note" style="margin:0;">Hidden on this device. Turn on sensitive fields in Settings to show it.</div>';
+return;
+}
+el.innerHTML = inventoryHtml();
+bindConnectionChips(el);
+el.querySelectorAll('[data-inv-assign]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const [itemId, connId] = btn.dataset.invAssign.split(':');
+const row = data.inventory.find((o) => o.id === itemId);
+if (!row) return;
+row.holderId = connId;
+queueSave();
+renderInventory();
+});
+});
+el.querySelectorAll('[data-inv-remove]').forEach((x) => {
+x.addEventListener('click', () => {
+data.inventory = data.inventory.filter((o) => o.id !== x.dataset.invRemove);
+queueSave();
+renderInventory();
+});
+});
+}
+
 function initShopping() {
+renderInventory();
 const select = document.getElementById('shop-context-input');
 const input = document.getElementById('shop-capture-input');
 const doneToggle = document.getElementById('shop-show-done-toggle');
@@ -243,6 +382,18 @@ const resolveBtn = document.getElementById('shop-resolve-btn');
 if (!select || !input) return;
 
 select.innerHTML = SHOPPING_CONTEXTS.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+
+// Reuses the app's one connection picker (connections.js) rather than a
+// bespoke <select> of names -- it already handles search, avatars and a
+// long list, and keeps this consistent with every other place you point
+// at a person.
+const forMount = document.getElementById('shop-for-mount');
+if (forMount) {
+forMount.innerHTML = connectionPickerHtml('shop-for-input', 'For me');
+bindConnPickers(forMount);
+}
+// The picker stores its choice in a hidden input keyed by that id.
+const forPicker = document.getElementById('shop-for-input');
 
 const submit = () => {
 const title = input.value.trim();
@@ -253,8 +404,17 @@ if (!title) return;
 // `link` regardless (and runAutoPriceCheck below already reads a
 // link's own Amazon ASIN directly, see ai.js's shoppingSearchPrompt),
 // only the title stays as the raw URL if you never clicked Resolve.
-const task = captureTask({ title, contexts: [select.value], bucket: 'next', link: looksLikeUrl(title) ? title : '' });
+// Blank is the normal case (your own shopping); picking someone turns
+// this into a want for her, which is what the stock checker reads her
+// sizes from.
+const forConnectionId = forPicker ? forPicker.value : '';
+const task = captureTask({
+title, contexts: [select.value], bucket: 'next',
+link: looksLikeUrl(title) ? title : '',
+forConnectionId, wantState: 'active',
+});
 input.value = '';
+if (forPicker) setConnPickerValue('shop-for-input', '');
 if (resolveBtn) resolveBtn.hidden = true;
 render();
 // Only Supermarket has a Tesco/Amazon price comparison that makes
@@ -293,4 +453,4 @@ doneToggle.addEventListener('change', (e) => { showDone = e.target.checked; rend
 render();
 }
 
-export { initShopping, render as refreshShopping, runAutoPriceCheck };
+export { initShopping, render as refreshShopping, runAutoPriceCheck, renderInventory };

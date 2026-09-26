@@ -41,6 +41,18 @@ financeAccounts: [], // bank/card accounts -- see js/features/financeaccounts.js
 switchOffers: [], // [{id, bank, offer, eligible, reasoning, suggestedFromAccountId, dismissed}] -- last bank-switch-offers scan, see js/features/switchoffers.js
 mailSearches: [],
 mailTopics: [], // {id, label, preferredActionIds} -- groups mail searches for display and picks which action buttons show, see js/features/mail.js
+// Physical things you've bought or that someone owns, in one list rather
+// than per-person, because an item outlives whoever it was bought for:
+// [{id, brand, style, piece, size, colour, holderId, acquiredAt, fromTaskId, notes}]
+//
+// `holderId` is a connection id when she has it, and '' when YOU do --
+// which is the interesting state, not an edge case. An unassigned item
+// is inventory: a real garment in a real size looking for someone it
+// fits, and that runs the match the opposite way round from a want (a
+// person looking for a thing). Ending a relationship sets holderId back
+// to '' rather than deleting anything, because the item still exists.
+// Behind the same sensitive gate as sizes -- see SENSITIVE_BLOCKS.
+inventory: [],
 scheduledRuns: {}, // {taskId: {at, trigger, skipped}} -- when each scheduled sync last ran, see js/features/scheduled.js. Synced deliberately: a sync run on the laptop doesn't need repeating on the phone.
 mailDismissed: [], // {url, subject, from, dismissedAt} -- messages explicitly binned from Mail without becoming a task/trip leg/date event, see js/features/mail.js
 tasks: [],
@@ -371,6 +383,20 @@ completedAt: '',
 // Generic on Task (not a separate shopping-item shape) since a shopping
 // item IS a task, same reasoning every other field here already follows.
 priceCheck: null,
+// A shopping item bought FOR one of your connections, and what exactly
+// would satisfy it. Kept on the task rather than as a separate "want"
+// record so it inherits everything a shopping item already has: price
+// checks, contexts, subtasks, done state.
+//
+// forConnectionId: whose want this is (blank = your own shopping).
+// wantSpec: {brand, style, pieces:[], colours:[]} -- note there are NO
+//   sizes here on purpose. Sizes are read from that person's own `sizes`
+//   list at check time, so correcting a size once fixes every want for
+//   her instead of leaving stale copies scattered across items.
+// wantState: 'active' | 'suspended' -- suspended keeps the record but
+//   stops it being checked or alerted on, for something you've cooled on
+//   without wanting to forget it.
+forConnectionId: '', wantSpec: null, wantState: 'active',
 ...fields,
 };
 }
@@ -862,6 +888,64 @@ createdAt: new Date().toISOString(),
 };
 }
 
+// Connection fields that are structured lists rather than tag chips, but
+// need the same device-local hiding TAG_FIELDS' `sensitive` flag gives.
+// Declared here beside TAG_FIELDS so the gate has ONE list to consult and
+// a new sensitive block can't be added somewhere the search/export code
+// never hears about it.
+const SENSITIVE_BLOCKS = ['sizes', 'inventory'];
+
+// The two directions the same data gets read in.
+//
+// whatSheHas: a person, looking at her things. The old per-connection
+// `owned` array, now a filter over one list.
+function whatSheHas(connId) {
+return data.inventory.filter((o) => o.holderId === connId);
+}
+
+// unheldInventory: your own drawer -- bought, never given, still real.
+function unheldInventory() {
+return data.inventory.filter((o) => !o.holderId);
+}
+
+// ...and the interesting one: given a thing in a real size, who does it
+// fit? This runs the match the opposite way round from a want, and is
+// the reason inventory is a first-class list rather than an archive.
+// Matches on size against any of that person's recorded sizes, preferring
+// an exact retailer+category hit but falling back to the bare size, since
+// a "36C" written down for one retailer is still a strong hint for
+// another. Returns [{conn, how}] so the UI can say WHY it matched rather
+// than presenting a bare list of names.
+function whoFits(item) {
+const size = String(item.size || '').trim().toLowerCase();
+if (!size) return [];
+const brand = String(item.brand || '').trim().toLowerCase();
+const piece = String(item.piece || '').trim().toLowerCase();
+const out = [];
+data.connections.forEach((c) => {
+let best = null;
+(c.sizes || []).forEach((s) => {
+const matchesUsual = String(s.usual || '').trim().toLowerCase() === size;
+const matchesBackup = String(s.backup || '').trim().toLowerCase() === size;
+if (!matchesUsual && !matchesBackup) return;
+const sameRetailer = brand && String(s.retailer || '').trim().toLowerCase() === brand;
+const samePiece = piece && String(s.category || '').trim().toLowerCase() === piece;
+// Ranked so an exact retailer+category+usual hit outranks a bare
+// size coincidence -- otherwise every 36C in the app looks equally
+// likely and the list is useless.
+const score = (sameRetailer ? 4 : 0) + (samePiece ? 2 : 0) + (matchesUsual ? 1 : 0);
+// The value that actually MATCHED, not whichever happens to be set --
+// printing her usual when the hit was on her backup reads as a
+// contradiction of the size you're looking at.
+const matchedValue = matchesUsual ? s.usual : s.backup;
+const how = `${s.retailer || 'somewhere'} ${s.category || ''} ${matchesUsual ? 'usual' : 'backup'} ${matchedValue}`.replace(/\s+/g, ' ').trim();
+if (!best || score > best.score) best = { score, how };
+});
+if (best) out.push({ conn: c, how: best.how, score: best.score });
+});
+return out.sort((a, b) => b.score - a.score);
+}
+
 const TAG_FIELDS = [
 // Other names the same person goes by — "Kat" is also "Katya" and
 // "Katerina". Used when matching Google Contacts, so any one of them can
@@ -948,6 +1032,25 @@ drinking: '', smoking: '',
 phone: '', email: '',
 contactStatus: '', contactResourceName: '', contactEtag: '', contactConflicts: [],
 contactMatchedBy: '', unmatchedAt: '',
+// What size she takes where, and what she already owns. Both sit behind
+// the same device-local `sensitive` gate as sexTags (see SENSITIVE_BLOCKS
+// below and showSensitiveFields in connections.js): this is a named real
+// person's clothing sizes and underwear drawer, synced to your own server
+// and rendered on a phone you unlock in public. The data syncs either
+// way -- the gate only decides whether it's on screen.
+//
+// sizes: [{id, retailer, category, usual, backup, notes}]
+//   `category` is not optional padding: Agent Provocateur runs bras
+//   32A-38F and thongs 1-6, so "her AP size" isn't one value. `backup`
+//   exists because vanity sizing means the second guess is worth keeping
+//   -- it's what you'd actually order if the first were gone.
+//   Deliberately generic: jeans at Levi's, shoes at Nike, same shape.
+sizes: [],
+// What she owns is NOT stored here -- see data.inventory. An item
+// outlives the relationship it was bought for (a set bought for someone
+// you've since stopped seeing is still a real 36C bra sitting in a
+// drawer), so "owned" is a property of the ITEM with a holder, not a
+// list hanging off a person. `whatSheHas(conn)` is the filter.
 likes: '', notes: '', chatLog: '', chatLogWhatsApp: '', chatLogTelegram: '',
 todos: [], ratings: {}, driveLink: '', photosAlbumUrl: '', photosPersonUrl: '',
 distance: '', matchedOn: '', tinderMatchId: '', tinderLastScrapedAt: '', attentionSnoozedUntil: '',
@@ -1246,7 +1349,28 @@ if (!Array.isArray(t.photoIds)) t.photoIds = [];
 t.attachments = Array.isArray(t.attachments)
 ? t.attachments.filter((a) => a && typeof a.id === 'string' && a.id)
 : [];
+if (t.wantState !== 'suspended') t.wantState = 'active';
+if (t.wantSpec && typeof t.wantSpec === 'object') {
+t.wantSpec = {
+brand: t.wantSpec.brand || '', style: t.wantSpec.style || '',
+pieces: Array.isArray(t.wantSpec.pieces) ? t.wantSpec.pieces : [],
+colours: Array.isArray(t.wantSpec.colours) ? t.wantSpec.colours : [],
+};
+} else t.wantSpec = null;
 });
+// A want pointing at a connection since deleted keeps the item but drops
+// the link -- the thing you wanted is still a thing you might buy, and
+// the alternative (deleting the shopping item along with the person) is
+// far more surprising than a want that has gone back to being your own.
+{
+const connIds = new Set(data.connections.map((c) => c.id));
+data.tasks.forEach((t) => { if (t.forConnectionId && !connIds.has(t.forConnectionId)) t.forConnectionId = ''; });
+// Deleting the person doesn't destroy the garment. It goes back to
+// being yours, unassigned -- which is exactly the state the whole
+// holderId design exists for, so this is the ordinary path, not a
+// recovery from an error.
+data.inventory.forEach((o) => { if (o.holderId && !connIds.has(o.holderId)) o.holderId = ''; });
+}
 // A subtask whose parent has been deleted would otherwise vanish from every
 // list — it renders under its parent, and there's no parent to render.
 // Promote it rather than silently orphaning it.
@@ -1403,6 +1527,12 @@ if (!Array.isArray(data.mailDismissed)) data.mailDismissed = [];
 // fields a feed can know. The blankAirbnbReservation spread further down
 // fills the rest in, and this just guarantees the container exists.
 if (!data.scheduledRuns || typeof data.scheduledRuns !== 'object' || Array.isArray(data.scheduledRuns)) data.scheduledRuns = {};
+if (!Array.isArray(data.inventory)) data.inventory = [];
+data.inventory = data.inventory.map((o) => ({
+id: o.id || uid(), brand: o.brand || '', style: o.style || '', piece: o.piece || '',
+size: o.size || '', colour: o.colour || '', holderId: o.holderId || '',
+acquiredAt: o.acquiredAt || '', fromTaskId: o.fromTaskId || '', notes: o.notes || '',
+}));
 data.mailDismissed = data.mailDismissed.map((d) => ({ ...blankMailDismissal(), ...d }));
 
 // Fill in any pref added since this document was last written, without
@@ -1482,6 +1612,19 @@ if (!String(c.notes || '').includes(line)) c.notes = c.notes ? `${c.notes}\n${li
 delete c.metInPerson;
 delete c.metInPersonDate;
 if (!Array.isArray(c.todos)) c.todos = [];
+// Normalised rather than just defaulted: both carry ids that the
+// editor keys its rows off, and an entry that arrived without one
+// (hand-edited backup, a future import) would otherwise be uneditable
+// and undeletable with no visible reason why.
+if (!Array.isArray(c.sizes)) c.sizes = [];
+c.sizes = c.sizes.map((s) => ({ id: s.id || uid(), retailer: s.retailer || '', category: s.category || '', usual: s.usual || '', backup: s.backup || '', notes: s.notes || '' }));
+// c.owned was the first shape this took, before it was clear an item
+// can outlive the relationship. Carried across to data.inventory with
+// this person as the holder rather than dropped, then removed.
+if (Array.isArray(c.owned) && c.owned.length) {
+c.owned.forEach((o) => data.inventory.push({ ...o, id: o.id || uid(), holderId: c.id }));
+}
+delete c.owned;
 if (!Array.isArray(c.tags)) c.tags = [];
 if (!Array.isArray(c.aliases)) c.aliases = [];
 if (!Array.isArray(c.dateLocations)) c.dateLocations = [];
@@ -2354,7 +2497,7 @@ export {
 data, sampleData, loadData, migrate, persist, queueSave, flushSave, setSaveStatusHandler,
 setExternalUpdateHandler, setLocalChangeHandler, getLocalSettings, setLocalSetting, computeStreak, reachOutThreshold,
 isDormantStage, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness,
-exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, DEFAULT_PREFS,
+exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, SENSITIVE_BLOCKS, whatSheHas, unheldInventory, whoFits, DEFAULT_PREFS,
 MAIL_SEARCH_KINDS, mailSearchLabel, blankMailSearch, blankMailTopic, blankMailDismissal,
 TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureBatch, blankPendingImport, blankConnection, blankTelegramThread, blankReadingItem, blankCaptureDraft, blankJob, blankMediaItem, MEDIA_KINDS, MEDIA_STATUSES,
 blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS, LEG_DATE_FIELDS,

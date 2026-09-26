@@ -1,4 +1,4 @@
-import { data, queueSave, reachOutThreshold, isDormantStage, isTravelPaused, getLocalSettings, setLocalSetting, TAG_FIELDS, CONTACT_STATUS_LABELS, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness, slugifyField, FLAG_FIELD_DEFS, DEFAULT_FLAG_RULES, computeFlags, valueColorForField, stripSharedSuffix, suggestedAction, suggestedQuestions, recordImportRun, importStatusLine, upsertIdentity, tinderMatchIds, mergeChatLog, blankConnection, blankPendingImport } from '../state.js';
+import { data, queueSave, whatSheHas, reachOutThreshold, isDormantStage, isTravelPaused, getLocalSettings, setLocalSetting, TAG_FIELDS, CONTACT_STATUS_LABELS, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness, slugifyField, FLAG_FIELD_DEFS, DEFAULT_FLAG_RULES, computeFlags, valueColorForField, stripSharedSuffix, suggestedAction, suggestedQuestions, recordImportRun, importStatusLine, upsertIdentity, tinderMatchIds, mergeChatLog, blankConnection, blankPendingImport } from '../state.js';
 import { captureTask, revealTask } from './tasks.js';
 import { photoDelete, photoUrl } from '../db.js';
 import { storePhoto, serverPhotoUrl } from '../files.js';
@@ -312,6 +312,10 @@ const settings = await getLocalSettings();
 showSensitiveFields = !!settings.showSensitiveFields;
 }
 function setShowSensitiveFields(v) { showSensitiveFields = !!v; }
+// Read-only accessor for the gate, so other features (the Shopping tab's
+// inventory panel) can respect it without importing the mutable flag or
+// keeping a second copy that drifts.
+function sensitiveFieldsShown() { return showSensitiveFields; }
 function visibleTagFields() {
 return TAG_FIELDS.filter((f) => showSensitiveFields || !f.sensitive);
 }
@@ -568,6 +572,61 @@ ${r.platform === 'WhatsApp' && c.phone ? `<span class="settings-note">(phone: ${
 </div>`).join('');
 return `<div class="identity-list">${rows}</div>
 <button class="todo-add-btn" type="button" data-identity-add="${c.id}">+ Add platform identity</button>`;
+}
+
+// ---- Sizes and what she owns ----------------------------------------------
+//
+// Both modelled on identityListHtml above (a row of fields, not a flat
+// chip) for the same reason: there's more than one column of meaning per
+// entry. Both sit behind showSensitiveFields -- see SENSITIVE_BLOCKS in
+// state.js for why.
+
+// Categories worth offering rather than making you think of one, kept
+// deliberately un-lingerie-specific: the same block answers "what size
+// jeans does she take at Levi's". Free text is still allowed, since no
+// fixed list survives contact with a real retailer's sizing.
+const SIZE_CATEGORIES = ['Bra', 'Brief', 'Thong', 'Knickers', 'Corset', 'Dress', 'Top', 'Jeans', 'Trousers', 'Shoes', 'Ring', 'Other'];
+
+function sizeListHtml(c) {
+const rows = (c.sizes || []).map((s) => `
+<div class="identity-row">
+<input type="text" autocomplete="off" placeholder="Retailer" list="size-retailers" data-size-field="retailer" data-size-id="${s.id}" data-conn="${c.id}" value="${escapeHtml(s.retailer)}">
+<input type="text" autocomplete="off" placeholder="Category" list="size-categories" data-size-field="category" data-size-id="${s.id}" data-conn="${c.id}" value="${escapeHtml(s.category)}" style="max-width:110px;">
+<input type="text" autocomplete="off" placeholder="Usual" data-size-field="usual" data-size-id="${s.id}" data-conn="${c.id}" value="${escapeHtml(s.usual)}" style="max-width:80px;">
+<input type="text" autocomplete="off" placeholder="Backup" title="What you'd order if the usual size were gone" data-size-field="backup" data-size-id="${s.id}" data-conn="${c.id}" value="${escapeHtml(s.backup)}" style="max-width:80px;">
+<span class="tag-x" data-size-remove="${c.id}" data-size-id="${s.id}">&times;</span>
+</div>`).join('');
+// Retailers already used anywhere become suggestions, so the second
+// person's "Agent Provocateur" matches the first's exactly -- a want is
+// matched to a size list by retailer name, and two spellings would
+// silently stop that working.
+const retailers = [...new Set(data.connections.flatMap((x) => (x.sizes || []).map((s) => s.retailer)).filter(Boolean))];
+return `<div class="identity-list">${rows}</div>
+<datalist id="size-retailers">${retailers.map((r) => `<option value="${escapeHtml(r)}"></option>`).join('')}</datalist>
+<datalist id="size-categories">${SIZE_CATEGORIES.map((s) => `<option value="${escapeHtml(s)}"></option>`).join('')}</datalist>
+<button class="todo-add-btn" type="button" data-size-add="${c.id}">+ Add a size</button>`;
+}
+
+function ownedListHtml(c) {
+const rows = whatSheHas(c.id).map((o) => {
+// An item that arrived through a shopping item leads back to it, per
+// the record-reference rule -- "where did this come from" is the first
+// thing you'd ask of a row you don't remember adding.
+const from = o.fromTaskId && data.tasks.find((t) => t.id === o.fromTaskId);
+return `
+<div class="identity-row">
+<input type="text" autocomplete="off" placeholder="Brand" data-owned-field="brand" data-owned-id="${o.id}" data-conn="${c.id}" value="${escapeHtml(o.brand)}" style="max-width:120px;">
+<input type="text" autocomplete="off" placeholder="Style" data-owned-field="style" data-owned-id="${o.id}" data-conn="${c.id}" value="${escapeHtml(o.style)}" style="max-width:110px;">
+<input type="text" autocomplete="off" placeholder="Piece" data-owned-field="piece" data-owned-id="${o.id}" data-conn="${c.id}" value="${escapeHtml(o.piece)}" style="max-width:100px;">
+<input type="text" autocomplete="off" placeholder="Size" data-owned-field="size" data-owned-id="${o.id}" data-conn="${c.id}" value="${escapeHtml(o.size)}" style="max-width:70px;">
+<input type="text" autocomplete="off" placeholder="Colour" data-owned-field="colour" data-owned-id="${o.id}" data-conn="${c.id}" value="${escapeHtml(o.colour)}" style="max-width:90px;">
+${from ? `<span class="dd-to-account-link" data-owned-open-task="${escapeHtml(from.id)}" title="Bought through this shopping item">&larr; ${escapeHtml((from.title || 'shopping item').slice(0, 24))}</span>` : ''}
+<button type="button" class="todo-add-btn" data-owned-unassign="${o.id}" title="She no longer has this — it goes back to your inventory, unassigned. Nothing is deleted.">Take back</button>
+<span class="tag-x" data-owned-remove="${o.id}" title="Delete this item entirely">&times;</span>
+</div>`;
+}).join('');
+return `<div class="identity-list">${rows}</div>
+<button class="todo-add-btn" type="button" data-owned-add="${c.id}">+ Add something she has</button>`;
 }
 
 function renderOverviewRef() {
@@ -1136,6 +1195,12 @@ ${c.travelStatus === 'travelling' ? `<label>Travelling until<input type="date" d
 ${notesFieldHtml}
 ${chatFieldHtml}
 ${visibleTagFields().filter((f) => f.field !== 'location').map((f) => `<label class="full${f.sensitive ? ' sensitive-field' : ''}">${escapeHtml(f.label)}<div class="tag-editor">${tagChips(c[f.field], c.id, f.field)}</div></label>`).join('')}
+${showSensitiveFields ? `<div class="field-block full sensitive-field"><span class="field-label">Sizes</span>
+<div class="settings-note" style="margin:0 0 4px;">Per retailer and category, because one retailer can size two garments quite differently. A want reads these at check time rather than storing its own copy, so a correction here fixes every want for her at once.</div>
+${sizeListHtml(c)}</div>
+<div class="field-block full sensitive-field"><span class="field-label">Has</span>
+<div class="settings-note" style="margin:0 0 4px;">What she already owns &mdash; add it whether or not it came through the shopping list.</div>
+${ownedListHtml(c)}</div>` : ''}
 <label class="full">Ratings${averageRatingHtml(c)}<div class="ratings-block">${data.ratingCategories.map(({ field, label }) => ratingStars(label, field, c.id, (c.ratings && c.ratings[field]) || 0)).join('')}</div></label>
 <label class="full">Things to do<div>${todoListHtml(c)}</div></label>
 <div class="field-block full"><span class="field-label">Photos</span>${galleryHtml(c)}
@@ -1417,6 +1482,78 @@ if (e.key === 'Enter') {
 e.preventDefault();
 list.querySelector(`[data-todo-add="${input.dataset.todoInput}"]`).click();
 }
+});
+});
+// Sizes and owned items: same shape of handler as the identity rows
+// below -- edit in place on change, add/remove re-render. Both re-render
+// on add/remove (not on edit) so typing isn't interrupted mid-field.
+list.querySelectorAll('[data-size-field]').forEach((el) => {
+el.addEventListener('change', () => {
+const conn = data.connections.find((x) => x.id === el.dataset.conn);
+const row = conn && (conn.sizes || []).find((s) => s.id === el.dataset.sizeId);
+if (!row) return;
+row[el.dataset.sizeField] = el.value.trim();
+queueSave();
+});
+});
+list.querySelectorAll('[data-size-add]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const conn = data.connections.find((x) => x.id === btn.dataset.sizeAdd);
+if (!conn) return;
+conn.sizes.push({ id: uid(), retailer: '', category: '', usual: '', backup: '', notes: '' });
+queueSave();
+renderConnections();
+});
+});
+list.querySelectorAll('[data-size-remove]').forEach((el) => {
+el.addEventListener('click', () => {
+const conn = data.connections.find((x) => x.id === el.dataset.sizeRemove);
+if (!conn) return;
+conn.sizes = conn.sizes.filter((s) => s.id !== el.dataset.sizeId);
+queueSave();
+renderConnections();
+});
+});
+list.querySelectorAll("[data-owned-field]").forEach((el) => {
+el.addEventListener("change", () => {
+const row = data.inventory.find((o) => o.id === el.dataset.ownedId);
+if (!row) return;
+row[el.dataset.ownedField] = el.value.trim();
+queueSave();
+});
+});
+list.querySelectorAll('[data-owned-add]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const conn = data.connections.find((x) => x.id === btn.dataset.ownedAdd);
+if (!conn) return;
+data.inventory.push({ id: uid(), brand: '', style: '', piece: '', size: '', colour: '', holderId: conn.id, acquiredAt: todayStr(), fromTaskId: '', notes: '' });
+queueSave();
+renderConnections();
+});
+});
+// "Take back" is the case this whole model exists for: the relationship
+// ended, the garment didn't. It becomes unassigned inventory, still
+// searchable by size for whoever it might fit next.
+list.querySelectorAll('[data-owned-unassign]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const row = data.inventory.find((o) => o.id === btn.dataset.ownedUnassign);
+if (!row) return;
+row.holderId = '';
+queueSave();
+renderConnections();
+});
+});
+list.querySelectorAll('[data-owned-remove]').forEach((el) => {
+el.addEventListener('click', () => {
+data.inventory = data.inventory.filter((o) => o.id !== el.dataset.ownedRemove);
+queueSave();
+renderConnections();
+});
+});
+list.querySelectorAll('[data-owned-open-task]').forEach((el) => {
+el.addEventListener('click', () => {
+switchTab('tasks');
+revealTask(el.dataset.ownedOpenTask);
 });
 });
 list.querySelectorAll('[data-identity-field]').forEach((el) => {
@@ -3490,7 +3627,7 @@ queueSave();
 
 export {
 renderConnections, initConnectionForm, expandConnection, CONN_STAGES,
-initSensitiveFields, setShowSensitiveFields, visibleTagFields,
+initSensitiveFields, setShowSensitiveFields, visibleTagFields, sensitiveFieldsShown,
 filterByEmptyField, filterBySearch, filterByIds, clearFilters,
 STAGE_RANK, setContactPicker, phoneWithFlagHtml, initRatingCategoriesSettings,
 initFlagRulesSettings, unionInto, initHideArchivedFaded,
