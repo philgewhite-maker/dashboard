@@ -23,6 +23,7 @@ import { data, queueSave, SHOPPING_CONTEXTS, unheldInventory, whoFits } from '..
 import { escapeHtml, affiliateLink, daysUntil, daysSince, uid, todayStr, MISSING_KEY_LINK_HTML, looksLikeUrl } from '../utils.js';
 import { captureTask, revealTask } from './tasks.js';
 import { connectionChipHtml, bindConnectionChips, connectionPickerHtml, bindConnPickers, setConnPickerValue, sensitiveFieldsShown } from './connections.js';
+import { runStockCheck, stockCheckHtml, adapterFor } from './stockwatch.js';
 import { MissingKeyError, searchShoppingItem } from '../ai.js';
 import { initMicCapture } from './voicecapture.js';
 import { banner } from './sharetarget.js';
@@ -201,13 +202,75 @@ close();
 });
 }
 
+// The pages a want points at. A want with none isn't broken -- it's just
+// not watchable yet, and saying so is more useful than a silent absence,
+// since "why has this never been checked" is otherwise unanswerable.
+function watchRowHtml(t) {
+if (!t.forConnectionId) return '';
+const urls = t.wantSpec?.urls || [];
+const supported = urls.filter((u) => adapterFor(u)).length;
+return `<button class="sync-btn sm shop-watch-btn" type="button" data-shop-watch-edit="${t.id}"
+title="${urls.length ? `${urls.length} page${urls.length === 1 ? '' : 's'} watched, ${supported} of them on a retailer with a parser` : 'No pages yet — paste the product URLs this want covers'}">${urls.length ? `👁 ${urls.length}` : '👁 add pages'}</button>`;
+}
+
+function watchEditorHtml(t) {
+const urls = t.wantSpec?.urls || [];
+const spec = t.wantSpec || {};
+return `<div class="mail-view-card" style="max-width:520px;">
+<div class="mail-view-subject">Pages to watch</div>
+<div class="settings-note" style="margin:2px 0 8px;">One product page per line. Each is checked for the sizes recorded on her card, with its own price and discount code &mdash; codes differ between pieces of the same set, so they're never assumed.</div>
+<textarea class="settings-input" data-watch-urls rows="5" placeholder="https://www.agentprovocateur.com/apm0017410000-jayce-thong-19692">${escapeHtml(urls.join('\n'))}</textarea>
+<div class="account-field-row" style="margin-top:8px;">
+<label>Brand<input type="text" autocomplete="off" data-watch-spec="brand" value="${escapeHtml(spec.brand || '')}"></label>
+<label>Style<input type="text" autocomplete="off" data-watch-spec="style" value="${escapeHtml(spec.style || '')}"></label>
+</div>
+<div class="account-field-row">
+<label>Pieces <span class="settings-note" style="display:inline;margin:0;">(comma separated, blank = any)</span><input type="text" autocomplete="off" data-watch-spec="pieces" value="${escapeHtml((spec.pieces || []).join(', '))}" placeholder="Bra, Thong"></label>
+<label>Colours <span class="settings-note" style="display:inline;margin:0;">(blank = any)</span><input type="text" autocomplete="off" data-watch-spec="colours" value="${escapeHtml((spec.colours || []).join(', '))}" placeholder="Navy, Cobalt"></label>
+</div>
+<div class="mail-view-actions">
+<button class="sync-btn sm" type="button" data-watch-cancel>Cancel</button>
+<button class="sync-btn sm" type="button" data-watch-check>Save &amp; check now</button>
+<button class="add-btn" type="button" data-watch-save>Save</button>
+</div>
+<div class="sync-status" data-watch-status></div>
+</div>`;
+}
+
+function openWatchEditor(t) {
+const dialog = document.createElement('div');
+dialog.className = 'mail-view-backdrop';
+dialog.innerHTML = watchEditorHtml(t);
+document.body.appendChild(dialog);
+const close = () => dialog.remove();
+dialog.addEventListener('click', (e) => { if (e.target === dialog) close(); });
+const save = () => {
+const lines = dialog.querySelector('[data-watch-urls]').value.split('\n').map((s) => s.trim()).filter(Boolean);
+const val = (n) => dialog.querySelector(`[data-watch-spec="${n}"]`).value.trim();
+const list = (n) => val(n).split(',').map((s) => s.trim()).filter(Boolean);
+t.wantSpec = { brand: val('brand'), style: val('style'), pieces: list('pieces'), colours: list('colours'), urls: lines };
+queueSave();
+};
+dialog.querySelector('[data-watch-cancel]').addEventListener('click', close);
+dialog.querySelector('[data-watch-save]').addEventListener('click', () => { save(); render(); close(); });
+dialog.querySelector('[data-watch-check]').addEventListener('click', async () => {
+save();
+const status = dialog.querySelector('[data-watch-status]');
+status.textContent = 'Checking…';
+const res = await runStockCheck({ onProgress: (m) => { status.textContent = m; } });
+status.textContent = res.error ? res.error : `Checked ${res.checked} page${res.checked === 1 ? '' : 's'}.`;
+render();
+setTimeout(close, res.error ? 4000 : 900);
+});
+}
+
 function rowHtml(t, ctx) {
 return `<div class="shop-row${t.bucket === 'done' ? ' done' : ''}${t.wantState === 'suspended' ? ' shop-row-suspended' : ''}">
 <input type="checkbox" class="task-check" data-shop-done="${t.id}" ${t.bucket === 'done' ? 'checked' : ''}>
 <span class="shop-title" data-shop-open="${t.id}">${escapeHtml(t.title || '(untitled)')}</span>
-${dueBadge(t)}${otherContextsNote(t, ctx)}${wantRowHtml(t)}
+${dueBadge(t)}${otherContextsNote(t, ctx)}${wantRowHtml(t)}${watchRowHtml(t)}
 ${t.bucket === 'done' ? '' : `<button class="sync-btn sm shop-search-btn" type="button" data-shop-search="${t.id}">${t.priceCheck ? 'Refresh' : 'Search prices'}</button>`}
-${searchResultsHtml(t)}
+${searchResultsHtml(t)}${stockCheckHtml(t)}
 </div>`;
 }
 
@@ -248,6 +311,12 @@ queueSave();
 // "ordered" and "arrived" aren't the same event, and the size and
 // colour that actually shipped may not be the ones first wanted.
 if (cb.checked && t.forConnectionId) offerToRecordOwned(t);
+});
+});
+el.querySelectorAll('[data-shop-watch-edit]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const t = data.tasks.find((x) => x.id === btn.dataset.shopWatchEdit);
+if (t) openWatchEditor(t);
 });
 });
 el.querySelectorAll('[data-shop-want-toggle]').forEach((btn) => {

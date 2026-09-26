@@ -3554,3 +3554,13 @@ padding:6px;
 .size-row-picks .field-label{flex:0 0 58px;}
 .size-row-values{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;}
 .size-row-values label{font-size:11px;color:var(--muted);display:flex;flex-direction:column;gap:2px;}
+
+/* Stock-watch results on a shopping row. An in-stock line is the whole
+   point of the check, so it gets the emphasis; a sold-out or
+   no-size-on-file line stays quiet. See stockwatch.js. */
+.stock-line{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;font-size:12px;padding:3px 8px;min-width:0;}
+.stock-line a{color:var(--plum);text-decoration:none;}
+.stock-line a:hover{text-decoration:underline;}
+.stock-line-in{background:var(--sage-bg);border-radius:6px;}
+.stock-sizes{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--sage);font-weight:600;}
+.sync-btn.sm.shop-watch-btn{width:auto;margin-top:0;flex:0 0 auto;font-size:10px;padding:2px 7px;}

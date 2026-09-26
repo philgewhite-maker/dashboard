@@ -33,6 +33,20 @@ id: 'airbnb', label: 'Airbnb calendars', buttonId: 'airbnb-sync-btn', needsGoogl
 note: 'The ICS feeds always run; the external-booking and cleaner scans need Google.',
 },
 {
+// The odd one out: a real function rather than a button, because
+// there's no single button that means "check every want" -- each want
+// has its own, and the whole point is doing them together so a page
+// two wants share is fetched once.
+id: 'stock', label: 'Stock watch', needsGoogle: false,
+note: 'Checks active wants against their product pages, in her sizes.',
+run: async () => {
+const { runStockCheck } = await import('./stockwatch.js');
+await runStockCheck();
+const { refreshShopping } = await import('./shopping.js');
+refreshShopping();
+},
+},
+{
 id: 'calendar', label: 'Calendars', buttonId: 'sync-cal-btn', needsGoogle: true,
 note: 'Upcoming events for each tracked calendar.',
 },
@@ -97,6 +111,15 @@ const signedIn = await canAttemptGoogleAction().catch(() => false);
 for (const task of SCHEDULED_TASKS) {
 if (!isEnabled(task) || !isDue(task)) continue;
 if (task.needsGoogle && !signedIn) continue;
+// A task is either a button to press or a function to call. The
+// button form is the common one (it reuses a sync's whole existing
+// path, status line included); a function is for work that has no
+// single button, like checking every want at once.
+if (task.run) {
+try { await task.run(); } catch (err) { console.error(`Scheduled "${task.id}" failed:`, err); }
+runs()[task.id] = { at: new Date().toISOString(), trigger };
+continue;
+}
 const btn = document.getElementById(task.buttonId);
 if (!btn) {
 runs()[task.id] = { at: new Date().toISOString(), trigger, skipped: 'no button' };
