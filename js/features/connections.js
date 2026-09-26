@@ -1,4 +1,4 @@
-import { data, queueSave, whatSheHas, reachOutThreshold, isDormantStage, isTravelPaused, getLocalSettings, setLocalSetting, TAG_FIELDS, CONTACT_STATUS_LABELS, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness, slugifyField, FLAG_FIELD_DEFS, DEFAULT_FLAG_RULES, computeFlags, valueColorForField, stripSharedSuffix, suggestedAction, suggestedQuestions, recordImportRun, importStatusLine, upsertIdentity, tinderMatchIds, mergeChatLog, blankConnection, blankPendingImport } from '../state.js';
+import { data, queueSave, whatSheHas, SIZE_GROUPS, reachOutThreshold, isDormantStage, isTravelPaused, getLocalSettings, setLocalSetting, TAG_FIELDS, CONTACT_STATUS_LABELS, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness, slugifyField, FLAG_FIELD_DEFS, DEFAULT_FLAG_RULES, computeFlags, valueColorForField, stripSharedSuffix, suggestedAction, suggestedQuestions, recordImportRun, importStatusLine, upsertIdentity, tinderMatchIds, mergeChatLog, blankConnection, blankPendingImport } from '../state.js';
 import { captureTask, revealTask } from './tasks.js';
 import { photoDelete, photoUrl } from '../db.js';
 import { storePhoto, serverPhotoUrl } from '../files.js';
@@ -581,29 +581,49 @@ return `<div class="identity-list">${rows}</div>
 // entry. Both sit behind showSensitiveFields -- see SENSITIVE_BLOCKS in
 // state.js for why.
 
-// Categories worth offering rather than making you think of one, kept
-// deliberately un-lingerie-specific: the same block answers "what size
-// jeans does she take at Levi's". Free text is still allowed, since no
-// fixed list survives contact with a real retailer's sizing.
-const SIZE_CATEGORIES = ['Bra', 'Brief', 'Thong', 'Knickers', 'Corset', 'Dress', 'Top', 'Jeans', 'Trousers', 'Shoes', 'Ring', 'Other'];
+// Every retailer already recorded against anyone, most-used first --
+// same idea as knownScalarValues(), but reading across a list-of-objects
+// field rather than a scalar one. This matters more than convenience:
+// a want is matched to a size by retailer NAME, so "Agent Provocateur"
+// typed once and "Agent provocateur" typed later would silently stop
+// matching. Picking a pill can't misspell it.
+function knownRetailers() {
+const counts = new Map();
+data.connections.forEach((c) => (c.sizes || []).forEach((s) => {
+const v = String(s.retailer || '').trim();
+if (!v) return;
+const key = v.toLowerCase();
+const e = counts.get(key) || { value: v, count: 0 };
+e.count += 1;
+counts.set(key, e);
+}));
+return [...counts.values()].sort((a, b) => b.count - a.count || a.value.localeCompare(b.value)).map((e) => e.value);
+}
 
+// Category offers the GROUPS, not individual garment names -- see
+// SIZE_GROUPS in state.js. Recording "Knickers" once covers thong,
+// brief, tanga and ouvert, which all share a size scale, and covers the
+// next design they invent without another row.
 function sizeListHtml(c) {
+const retailers = knownRetailers();
+const groups = SIZE_GROUPS.map((g) => g.group);
 const rows = (c.sizes || []).map((s) => `
-<div class="identity-row">
-<input type="text" autocomplete="off" placeholder="Retailer" list="size-retailers" data-size-field="retailer" data-size-id="${s.id}" data-conn="${c.id}" value="${escapeHtml(s.retailer)}">
-<input type="text" autocomplete="off" placeholder="Category" list="size-categories" data-size-field="category" data-size-id="${s.id}" data-conn="${c.id}" value="${escapeHtml(s.category)}" style="max-width:110px;">
-<input type="text" autocomplete="off" placeholder="Usual" data-size-field="usual" data-size-id="${s.id}" data-conn="${c.id}" value="${escapeHtml(s.usual)}" style="max-width:80px;">
-<input type="text" autocomplete="off" placeholder="Backup" title="What you'd order if the usual size were gone" data-size-field="backup" data-size-id="${s.id}" data-conn="${c.id}" value="${escapeHtml(s.backup)}" style="max-width:80px;">
+<div class="size-row">
+<div class="size-row-picks">
+<span class="field-label">Retailer</span>
+<span class="tag-editor" data-size-pick="${s.id}">${pickChipHtml('retailer', s.retailer, retailers)}</span>
+</div>
+<div class="size-row-picks">
+<span class="field-label" title="A group, not a single garment — one Knickers size covers thong, brief, tanga and ouvert, which all share a scale.">Fits</span>
+<span class="tag-editor" data-size-pick="${s.id}">${pickChipHtml('category', s.category, groups)}</span>
+</div>
+<div class="size-row-values">
+<label>Usual<input type="text" autocomplete="off" data-size-field="usual" data-size-id="${s.id}" data-conn="${c.id}" value="${escapeHtml(s.usual)}" style="max-width:80px;"></label>
+<label title="What you'd order if the usual size were gone">Backup<input type="text" autocomplete="off" data-size-field="backup" data-size-id="${s.id}" data-conn="${c.id}" value="${escapeHtml(s.backup)}" style="max-width:80px;"></label>
 <span class="tag-x" data-size-remove="${c.id}" data-size-id="${s.id}">&times;</span>
+</div>
 </div>`).join('');
-// Retailers already used anywhere become suggestions, so the second
-// person's "Agent Provocateur" matches the first's exactly -- a want is
-// matched to a size list by retailer name, and two spellings would
-// silently stop that working.
-const retailers = [...new Set(data.connections.flatMap((x) => (x.sizes || []).map((s) => s.retailer)).filter(Boolean))];
 return `<div class="identity-list">${rows}</div>
-<datalist id="size-retailers">${retailers.map((r) => `<option value="${escapeHtml(r)}"></option>`).join('')}</datalist>
-<datalist id="size-categories">${SIZE_CATEGORIES.map((s) => `<option value="${escapeHtml(s)}"></option>`).join('')}</datalist>
 <button class="todo-add-btn" type="button" data-size-add="${c.id}">+ Add a size</button>`;
 }
 
@@ -1494,6 +1514,32 @@ const row = conn && (conn.sizes || []).find((s) => s.id === el.dataset.sizeId);
 if (!row) return;
 row[el.dataset.sizeField] = el.value.trim();
 queueSave();
+});
+});
+// Same pick-chip pattern as Drinking/Smoking above, keyed by size-row
+// id rather than connection id since a card has several rows. Clicking
+// the active pill again clears it, which is how the other pickers behave.
+list.querySelectorAll('[data-size-pick] [data-pick-value]').forEach((pill) => {
+pill.addEventListener('click', () => {
+const rowId = pill.closest('[data-size-pick]').dataset.sizePick;
+const row = data.connections.flatMap((c) => c.sizes || []).find((s) => s.id === rowId);
+if (!row) return;
+const field = pill.dataset.pickField;
+row[field] = row[field] === pill.dataset.pickValue ? '' : pill.dataset.pickValue;
+queueSave();
+renderConnections();
+});
+});
+list.querySelectorAll('[data-size-pick] [data-pick-add]').forEach((input) => {
+input.addEventListener('change', () => {
+const value = input.value.trim();
+if (!value) return;
+const rowId = input.closest('[data-size-pick]').dataset.sizePick;
+const row = data.connections.flatMap((c) => c.sizes || []).find((s) => s.id === rowId);
+if (!row) return;
+row[input.dataset.pickAdd] = value;
+queueSave();
+renderConnections();
 });
 });
 list.querySelectorAll('[data-size-add]').forEach((btn) => {

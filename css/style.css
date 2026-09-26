@@ -3543,3 +3543,14 @@ padding:6px;
 .inv-fits{display:flex;gap:8px;flex-wrap:wrap;align-items:center;min-width:0;}
 .inv-fit{display:inline-flex;align-items:center;gap:4px;}
 .inv-fit .todo-add-btn{font-size:10px;padding:2px 7px;}
+
+/* A size row is two pick-chip pickers plus the two values, stacked
+   rather than laid out in one line -- the retailer and group pills wrap
+   to several lines each, which a single flex row can't hold legibly.
+   See sizeListHtml() in js/features/connections.js. */
+.size-row{border-top:1px solid var(--line);padding:8px 0;display:flex;flex-direction:column;gap:6px;}
+.size-row:first-child{border-top:none;}
+.size-row-picks{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;}
+.size-row-picks .field-label{flex:0 0 58px;}
+.size-row-values{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;}
+.size-row-values label{font-size:11px;color:var(--muted);display:flex;flex-direction:column;gap:2px;}

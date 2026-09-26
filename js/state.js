@@ -895,6 +895,46 @@ createdAt: new Date().toISOString(),
 // never hears about it.
 const SENSITIVE_BLOCKS = ['sizes', 'inventory'];
 
+// One size row should cover every design that shares a size scale. At
+// Agent Provocateur a thong, a brief, a tanga and an ouvert all run 1-6,
+// so recording a size per NAME means recording the same number four
+// times and missing the fifth design the moment they invent one.
+//
+// So `category` holds the GROUP, and a product's own piece name is mapped
+// onto a group when matching. `terms` are matched as substrings against a
+// lowercased piece name, which is why they're stems ('stocking' catches
+// "Stockings", 'brief' catches "Full Brief" and "Ouvert Brief").
+//
+// Order matters: the first group whose term appears wins, so anything
+// that could read as two groups is listed under the more specific one
+// first -- "Suspender Belt" must not be caught by Clothing's 'belt'.
+const SIZE_GROUPS = [
+{ group: 'Bra', terms: ['bra', 'bralet', 'balconette', 'plunge', 'underwired', 'soft cup', 'triangle', 'bustier'] },
+{ group: 'Suspender', terms: ['suspender', 'garter'] },
+{ group: 'Hosiery', terms: ['stocking', 'hold-up', 'holdup', 'tights', 'sock'] },
+{ group: 'Body', terms: ['bodysuit', 'body', 'corset', 'basque', 'teddy', 'playsuit', 'waspie'] },
+{ group: 'Knickers', terms: ['knicker', 'brief', 'thong', 'tanga', 'ouvert', 'g-string', 'gstring', 'short', 'hipster', 'panty', 'panties', 'culotte'] },
+{ group: 'Nightwear', terms: ['robe', 'kimono', 'gown', 'slip', 'chemise', 'pyjama', 'nightdress'] },
+{ group: 'Swimwear', terms: ['swim', 'bikini', 'one-piece'] },
+{ group: 'Clothing', terms: ['dress', 'top', 'skirt', 'trouser', 'jean', 'coat', 'jacket', 'shirt'] },
+{ group: 'Shoes', terms: ['shoe', 'boot', 'heel', 'slipper'] },
+{ group: 'Ring', terms: ['ring'] },
+];
+
+// The group a piece name belongs to, or '' when nothing matches -- which
+// is a real answer, not a failure: an unrecognised piece simply doesn't
+// group, and falls back to a bare size comparison.
+function sizeGroupFor(piece) {
+const p = String(piece || '').trim().toLowerCase();
+if (!p) return '';
+// An exact group name passes straight through, so a row already saved
+// as "Knickers" resolves to itself without needing a term for it.
+const exact = SIZE_GROUPS.find((g) => g.group.toLowerCase() === p);
+if (exact) return exact.group;
+const hit = SIZE_GROUPS.find((g) => g.terms.some((t) => p.includes(t)));
+return hit ? hit.group : '';
+}
+
 // The two directions the same data gets read in.
 //
 // whatSheHas: a person, looking at her things. The old per-connection
@@ -929,7 +969,15 @@ const matchesUsual = String(s.usual || '').trim().toLowerCase() === size;
 const matchesBackup = String(s.backup || '').trim().toLowerCase() === size;
 if (!matchesUsual && !matchesBackup) return;
 const sameRetailer = brand && String(s.retailer || '').trim().toLowerCase() === brand;
-const samePiece = piece && String(s.category || '').trim().toLowerCase() === piece;
+// Grouped, not compared by name: an item called "Ouvert Brief" has to
+// match a size recorded once as "Knickers". Falls back to an exact
+// name comparison when neither side groups, so an unrecognised piece
+// still works if it happens to be written the same way both times.
+const itemGroup = sizeGroupFor(item.piece);
+const sizeGroup = sizeGroupFor(s.category);
+const samePiece = (itemGroup && sizeGroup)
+? itemGroup === sizeGroup
+: !!piece && String(s.category || '').trim().toLowerCase() === piece;
 // Ranked so an exact retailer+category+usual hit outranks a bare
 // size coincidence -- otherwise every 36C in the app looks equally
 // likely and the list is useless.
@@ -2509,7 +2557,7 @@ export {
 data, sampleData, loadData, migrate, persist, queueSave, flushSave, setSaveStatusHandler,
 setExternalUpdateHandler, setLocalChangeHandler, getLocalSettings, setLocalSetting, computeStreak, reachOutThreshold,
 isDormantStage, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness,
-exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, SENSITIVE_BLOCKS, whatSheHas, unheldInventory, whoFits, DEFAULT_PREFS,
+exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, SENSITIVE_BLOCKS, whatSheHas, unheldInventory, whoFits, SIZE_GROUPS, sizeGroupFor, DEFAULT_PREFS,
 MAIL_SEARCH_KINDS, mailSearchLabel, blankMailSearch, blankMailTopic, blankMailDismissal,
 TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureBatch, blankPendingImport, blankConnection, blankTelegramThread, blankReadingItem, blankCaptureDraft, blankJob, blankMediaItem, MEDIA_KINDS, MEDIA_STATUSES,
 blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS, LEG_DATE_FIELDS,
