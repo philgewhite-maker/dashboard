@@ -3564,3 +3564,11 @@ padding:6px;
 .stock-line-in{background:var(--sage-bg);border-radius:6px;}
 .stock-sizes{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--sage);font-weight:600;}
 .sync-btn.sm.shop-watch-btn{width:auto;margin-top:0;flex:0 0 auto;font-size:10px;padding:2px 7px;}
+
+/* Inventory sets: the drawer grouped into what you'd actually give
+   someone, with who it would fit. See inventorySetsHtml in shopping.js. */
+.inv-sets{display:flex;flex-direction:column;gap:10px;margin-bottom:12px;}
+.inv-set{border:1px solid var(--line);border-radius:10px;padding:10px 12px;}
+.inv-set-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:2px;}
+.inv-fit-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:4px 0;min-width:0;}
+.inv-fit-row .todo-add-btn{font-size:10px;padding:2px 7px;}

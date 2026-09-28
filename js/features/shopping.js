@@ -19,7 +19,7 @@
 // a link to buy it from the right place," not a manual step. The result is
 // persisted on the task itself (t.priceCheck), dated, with a Refresh button
 // to re-run it later — not the old in-memory, un-dated Map this used to be.
-import { data, queueSave, SHOPPING_CONTEXTS, unheldInventory, whoFits } from '../state.js';
+import { data, queueSave, SHOPPING_CONTEXTS, unheldInventory, whoFits, inventorySets, whoFitsSet } from '../state.js';
 import { escapeHtml, affiliateLink, daysUntil, daysSince, uid, todayStr, MISSING_KEY_LINK_HTML, looksLikeUrl } from '../utils.js';
 import { captureTask, revealTask } from './tasks.js';
 import { connectionChipHtml, bindConnectionChips, connectionPickerHtml, bindConnPickers, setConnPickerValue, sensitiveFieldsShown } from './connections.js';
@@ -228,6 +228,11 @@ return `<div class="mail-view-card" style="max-width:520px;">
 <label>Pieces <span class="settings-note" style="display:inline;margin:0;">(comma separated, blank = any)</span><input type="text" autocomplete="off" data-watch-spec="pieces" value="${escapeHtml((spec.pieces || []).join(', '))}" placeholder="Bra, Thong"></label>
 <label>Colours <span class="settings-note" style="display:inline;margin:0;">(blank = any)</span><input type="text" autocomplete="off" data-watch-spec="colours" value="${escapeHtml((spec.colours || []).join(', '))}" placeholder="Navy, Cobalt"></label>
 </div>
+<div class="sync-row" style="margin-top:8px;">
+<button class="sync-btn sm" type="button" data-watch-colours>Find other colours</button>
+<span class="settings-note" style="margin:0;">Searches the retailer's listings for the same style in other colourways.</span>
+</div>
+<div data-watch-colour-results></div>
 <div class="mail-view-actions">
 <button class="sync-btn sm" type="button" data-watch-cancel>Cancel</button>
 <button class="sync-btn sm" type="button" data-watch-check>Save &amp; check now</button>
@@ -251,6 +256,59 @@ const list = (n) => val(n).split(',').map((s) => s.trim()).filter(Boolean);
 t.wantSpec = { brand: val('brand'), style: val('style'), pieces: list('pieces'), colours: list('colours'), urls: lines };
 queueSave();
 };
+// Other colourways of the same style. This is the only route to them:
+// a product page's colour swatches carry an RGB fill and nothing else
+// -- no name, no href -- so there's nothing a fetch can follow. Listing
+// pages are server-rendered and carry real URLs, which is why the
+// search goes there instead.
+const coloursBtn = dialog.querySelector('[data-watch-colours]');
+if (coloursBtn) coloursBtn.addEventListener('click', async () => {
+const box = dialog.querySelector('[data-watch-colour-results]');
+const first = (dialog.querySelector('[data-watch-urls]').value.split('\n')[0] || '').trim();
+const adapter = adapterFor(first);
+const style = dialog.querySelector('[data-watch-spec="style"]').value.trim();
+if (!adapter || !adapter.findColourways) { box.innerHTML = '<div class="settings-note">No colour search for that retailer yet.</div>'; return; }
+if (!style) { box.innerHTML = '<div class="settings-note">Set the style first — that\'s what the search matches on.</div>'; return; }
+coloursBtn.disabled = true;
+box.innerHTML = '<div class="settings-note">Searching listings…</div>';
+try {
+const { fetchPageHtml } = await import('../files.js');
+const origin = new URL(first).origin;
+const found = new Map();
+// Two listings, because neither is complete: a category page renders
+// a few hundred of a claimed several hundred products, so between
+// them they find more colourways than either alone.
+for (const path of ['/sale', '/lingerie']) {
+const html = await fetchPageHtml(origin + path);
+adapter.findColourways(html, style).forEach((c) => {
+if (!found.has(c.colourCode)) found.set(c.colourCode, c);
+});
+}
+const already = new Set(dialog.querySelector('[data-watch-urls]').value.split('\n').map((s) => s.trim()));
+const rows = [...found.values()].flatMap((c) => Object.values(c.pieces).map((p) => ({ colour: c.slugColour, code: c.colourCode, url: origin + p })))
+.filter((r) => !already.has(r.url));
+box.innerHTML = rows.length
+? `<div class="settings-note" style="margin:6px 0 2px;">${rows.length} more page${rows.length === 1 ? '' : 's'} found. Tick what to watch.</div>`
++ rows.map((r, i) => `<label style="display:block;font-size:12px;">
+<input type="checkbox" data-watch-found="${i}" value="${escapeHtml(r.url)}">
+${escapeHtml(r.colour ? r.colour.replace(/-/g, ' ') : `colour ${r.code}`)} — <span class="settings-note" style="display:inline;margin:0;">${escapeHtml(r.url.split('/').pop())}</span>
+</label>`).join('')
++ '<button class="sync-btn sm" type="button" data-watch-add-found style="margin-top:6px;">Add ticked</button>'
+: '<div class="settings-note">Nothing new found — the listings only render part of a category, so a colourway can be missing from both.</div>';
+const addBtn = box.querySelector('[data-watch-add-found]');
+if (addBtn) addBtn.addEventListener('click', () => {
+const picked = [...box.querySelectorAll('[data-watch-found]:checked')].map((c) => c.value);
+if (!picked.length) return;
+const area = dialog.querySelector('[data-watch-urls]');
+area.value = [...area.value.split('\n').map((s) => s.trim()).filter(Boolean), ...picked].join('\n');
+box.innerHTML = `<div class="settings-note">Added ${picked.length}. Save, or check now.</div>`;
+});
+} catch (err) {
+box.innerHTML = `<div class="settings-note">Couldn't search: ${escapeHtml(err.message || String(err))}</div>`;
+} finally {
+coloursBtn.disabled = false;
+}
+});
 dialog.querySelector('[data-watch-cancel]').addEventListener('click', close);
 dialog.querySelector('[data-watch-save]').addEventListener('click', () => { save(); render(); close(); });
 dialog.querySelector('[data-watch-check]').addEventListener('click', async () => {
@@ -394,6 +452,37 @@ console.error('Auto price-check failed, item stays without one until Search pric
 // not "what does she want" but "who does this fit". whoFits() answers
 // that from everyone's recorded sizes, ranked so a same-retailer,
 // same-category, usual-size hit beats a bare number coincidence.
+// Sets first, loose items after. A set is the thing you'd actually give
+// someone, and the question it raises is different from a single
+// garment's: a complete one asks WHO, an incomplete one asks WHAT ELSE
+// to buy and in whose size.
+function inventorySetsHtml() {
+const sets = inventorySets().filter((s) => s.items.length > 1 || s.complete);
+if (!sets.length) return '';
+return `<div class="inv-sets">${sets.map((set) => {
+const name = [set.brand, set.style, set.colour].filter(Boolean).join(' · ') || 'Unnamed set';
+const pieces = set.items.map((i) => `${escapeHtml(i.piece || '?')} ${escapeHtml(i.size || '')}`).join(', ');
+const fits = whoFitsSet(set);
+const head = set.complete
+? `<span class="tag-chip tag-chip-green">Complete set</span>`
+: `<span class="tag-chip tag-chip-amber">Needs ${escapeHtml(set.missing.join(' + '))}</span>`;
+const body = fits.length
+? fits.slice(0, 4).map((f) => `<div class="inv-fit-row">
+${connectionChipHtml(f.conn)}
+<span class="settings-note" style="margin:0;" title="${escapeHtml(f.reasons.join(' • '))}">${escapeHtml(f.interest)}</span>
+${f.needed.filter((n) => n.size).map((n) => `<span class="tag-chip">buy ${escapeHtml(n.group.toLowerCase())} in ${escapeHtml(n.size)}</span>`).join('')}
+${f.needed.filter((n) => !n.size).map((n) => `<span class="settings-note" style="margin:0;">no ${escapeHtml(n.group.toLowerCase())} size on file for her</span>`).join('')}
+<button type="button" class="todo-add-btn" data-inv-give-set="${escapeHtml(set.key)}:${escapeHtml(f.conn.id)}" title="Record that she now has all of it">Give set</button>
+</div>`).join('')
+: `<div class="settings-note" style="margin:0;">${set.items.length > 1 ? 'Nobody on file fits every piece.' : 'Nobody on file fits it.'}</div>`;
+return `<div class="inv-set">
+<div class="inv-set-head"><strong>${escapeHtml(name)}</strong> ${head}</div>
+<div class="settings-note" style="margin:0 0 4px;">${pieces}</div>
+${body}
+</div>`;
+}).join('')}</div>`;
+}
+
 function inventoryHtml() {
 const items = unheldInventory();
 if (!items.length) return '<div class="empty">Nothing unassigned — everything recorded is with someone.</div>';
@@ -421,8 +510,23 @@ if (!sensitiveFieldsShown()) {
 el.innerHTML = '<div class="settings-note" style="margin:0;">Hidden on this device. Turn on sensitive fields in Settings to show it.</div>';
 return;
 }
-el.innerHTML = inventoryHtml();
+el.innerHTML = inventorySetsHtml() + inventoryHtml();
 bindConnectionChips(el);
+// Giving a whole set is one action, not one per garment -- that's the
+// unit you'd actually hand over.
+el.querySelectorAll('[data-inv-give-set]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const [key, connId] = btn.dataset.invGiveSet.split(':');
+const set = inventorySets().find((s) => s.key === key);
+if (!set) return;
+set.items.forEach((item) => {
+const row = data.inventory.find((o) => o.id === item.id);
+if (row) row.holderId = connId;
+});
+queueSave();
+renderInventory();
+});
+});
 el.querySelectorAll('[data-inv-assign]').forEach((btn) => {
 btn.addEventListener('click', () => {
 const [itemId, connId] = btn.dataset.invAssign.split(':');

@@ -948,6 +948,78 @@ function unheldInventory() {
 return data.inventory.filter((o) => !o.holderId);
 }
 
+// A set is what you'd actually give someone, so the drawer is grouped by
+// brand + style + colour rather than listed as loose garments. "Complete"
+// means a bra AND knickers, the two that make a set; a suspender or
+// stockings are welcome extras and never the thing that's missing.
+const SET_CORE_GROUPS = ['Bra', 'Knickers'];
+
+function inventorySets() {
+const byKey = new Map();
+unheldInventory().forEach((item) => {
+const key = [item.brand, item.style, item.colour].map((s) => String(s || '').trim().toLowerCase()).join('|');
+const set = byKey.get(key) || { key, brand: item.brand, style: item.style, colour: item.colour, items: [] };
+set.items.push(item);
+byKey.set(key, set);
+});
+return [...byKey.values()].map((set) => {
+const groups = new Set(set.items.map((i) => sizeGroupFor(i.piece)).filter(Boolean));
+const missing = SET_CORE_GROUPS.filter((g) => !groups.has(g));
+return { ...set, groups: [...groups], missing, complete: missing.length === 0 };
+});
+}
+
+// Whether you'd plausibly still be giving this person lingerie. Not a
+// judgement the app should make silently, so it's surfaced as a note
+// beside the match rather than used to filter anyone out -- the ranking
+// puts the likely ones first and you decide.
+function interestNote(conn) {
+if (isDormantStage(conn.stage)) return `${conn.stage.toLowerCase()} — probably not`;
+const days = conn.lastContact ? daysSince(conn.lastContact) : null;
+if (days == null) return 'no contact recorded';
+if (days > 180) return `no contact in ${Math.round(days / 30)} months`;
+if (days > 60) return `last contact ${Math.round(days / 30)} months ago`;
+return 'in touch recently';
+}
+
+// Who could wear a whole set. Stricter than whoFits on one item: every
+// piece has to fit the SAME person, so this intersects rather than
+// unions -- a 36C bra with size 2 knickers suits nobody who takes a 4,
+// however well the bra fits.
+//
+// For an incomplete set it answers the other useful question instead:
+// who do the pieces you DO have fit, and what size would you need to buy
+// in the missing group to finish it for them.
+function whoFitsSet(set) {
+// Matched on the CORE pieces only. A suspender or stockings riding
+// along shouldn't veto an otherwise perfect set, and it did: a Lorna
+// bra that fit someone matched nobody because the suspender beside it
+// was a size nobody had on file. Extras are still listed, they just
+// don't get a vote. Falls back to every item when a set is nothing but
+// extras, so a lone pair of stockings can still find someone.
+const core = set.items.filter((i) => SET_CORE_GROUPS.includes(sizeGroupFor(i.piece)));
+const matchOn = core.length ? core : set.items;
+const perItem = matchOn.map((item) => ({ item, fits: new Map(whoFits(item).map((f) => [f.conn.id, f])) }));
+if (!perItem.length) return [];
+// Only people who fit every piece present.
+const common = perItem.reduce((acc, { fits }) => acc.filter((id) => fits.has(id)),
+[...perItem[0].fits.keys()]);
+return common.map((id) => {
+const conn = data.connections.find((c) => c.id === id);
+const reasons = perItem.map(({ item, fits }) => `${item.piece || 'piece'} ${item.size}: ${fits.get(id).how}`);
+// Worst piece decides the rank: a set is only as good a match as its
+// least convincing item.
+const score = Math.min(...perItem.map(({ fits }) => fits.get(id).score));
+// What you'd still need to buy, in her size, to finish it.
+const needed = set.missing.map((group) => {
+const row = (conn.sizes || []).find((s) => sizeGroupFor(s.category) === group
+&& String(s.retailer || '').trim().toLowerCase() === String(set.brand || '').trim().toLowerCase());
+return { group, size: row ? (row.usual || row.backup) : '' };
+});
+return { conn, reasons, score, needed, interest: interestNote(conn) };
+}).sort((a, b) => b.score - a.score);
+}
+
 // ...and the interesting one: given a thing in a real size, who does it
 // fit? This runs the match the opposite way round from a want, and is
 // the reason inventory is a first-class list rather than an archive.
@@ -2557,7 +2629,7 @@ export {
 data, sampleData, loadData, migrate, persist, queueSave, flushSave, setSaveStatusHandler,
 setExternalUpdateHandler, setLocalChangeHandler, getLocalSettings, setLocalSetting, computeStreak, reachOutThreshold,
 isDormantStage, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness,
-exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, SENSITIVE_BLOCKS, whatSheHas, unheldInventory, whoFits, SIZE_GROUPS, sizeGroupFor, DEFAULT_PREFS,
+exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, SENSITIVE_BLOCKS, whatSheHas, unheldInventory, whoFits, inventorySets, whoFitsSet, interestNote, SIZE_GROUPS, sizeGroupFor, DEFAULT_PREFS,
 MAIL_SEARCH_KINDS, mailSearchLabel, blankMailSearch, blankMailTopic, blankMailDismissal,
 TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureBatch, blankPendingImport, blankConnection, blankTelegramThread, blankReadingItem, blankCaptureDraft, blankJob, blankMediaItem, MEDIA_KINDS, MEDIA_STATUSES,
 blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS, LEG_DATE_FIELDS,

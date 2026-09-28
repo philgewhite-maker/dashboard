@@ -5,7 +5,7 @@ import { callTextJson, MissingKeyError } from '../ai.js';
 import { gapsFor } from './travel.js';
 import { accountLabel } from './financeaccounts.js';
 
-const TARGET_TABS = { connection: 'dating', search: 'dating', habit: 'overview', goal: 'overview', job: 'jobhunt', voucher: 'finances', financeAccount: 'finances', switchOffers: 'finances', calendar: 'overview', business: 'business', task: 'tasks', health: 'health', trip: 'travel', 'trip-suggestion': 'travel', airbnb: 'overview', media: 'media' };
+const TARGET_TABS = { connection: 'dating', search: 'dating', habit: 'overview', goal: 'overview', job: 'jobhunt', voucher: 'finances', financeAccount: 'finances', switchOffers: 'finances', calendar: 'overview', business: 'business', task: 'tasks', want: 'shopping', health: 'health', trip: 'travel', 'trip-suggestion': 'travel', airbnb: 'overview', media: 'media' };
 // Lead time for the "trip's coming up and still has gaps" nudge -- same
 // 14-day window as NEW_MATCH_STAGES below, so a trip nudge doesn't start
 // nagging the moment it's created, only once it's genuinely close.
@@ -371,8 +371,42 @@ buyUrl: best.url,
 
 buildHealthNudges(pool);
 buildAirbnbNudges(pool);
+buildStockNudges(pool);
 
 return pool;
+}
+
+// "You can buy this now." The stock check already knows what's available
+// in her size -- this is the only part that reaches you without opening
+// the Shopping tab and looking.
+//
+// Two shapes, because they're different news. Something newly buyable is
+// worth acting on; something down to its last one is worth acting on
+// SOON, and says so. A want whose check found nothing produces no nudge
+// at all -- absence of news isn't news.
+function buildStockNudges(pool) {
+data.tasks.forEach((t) => {
+if (!t.forConnectionId || t.wantState === 'suspended' || t.bucket === 'done') return;
+const results = (t.stockCheck?.results || []).filter((r) => r.available.length);
+if (!results.length) return;
+const conn = data.connections.find((c) => c.id === t.forConnectionId);
+const who = conn ? (conn.name || 'someone') : 'someone';
+// Cheapest first: if only one thing is worth saying, say the one
+// you'd most likely act on.
+const best = results.reduce((a, b) => ((b.net != null && (a.net == null || b.net < a.net)) ? b : a));
+const price = best.net != null ? ` — £${Number.isInteger(best.net) ? best.net : best.net.toFixed(2)}${best.code ? ` with ${best.code}` : ''}` : '';
+const sizes = best.available.map((s) => s.size).join('/');
+const lastOne = results.some((r) => r.available.some((s) => s.lastOne));
+const more = results.length > 1 ? ` (+${results.length - 1} more in her size)` : '';
+pool.push({
+text: lastOne
+? `${best.piece}${best.colour ? ` in ${best.colour}` : ''} is down to its last one in ${who}'s size ${sizes}${price}.`
+: `${best.piece}${best.colour ? ` in ${best.colour}` : ''} is in stock in ${who}'s size ${sizes}${price}${more}.`,
+target: { type: 'want', id: t.id },
+signals: { kind: 'stock-available', lastOne, count: results.length },
+category: 'shopping',
+});
+});
 }
 
 // Checkout -> "line up the clean" and check-in -> "greet the guest" --
@@ -520,6 +554,11 @@ setTimeout(() => scrollAndFlash(`[data-goal-row="${target.id}"]`), 50);
 setTimeout(() => scrollAndFlash(`[data-job-row="${target.id}"]`), 50);
 } else if (target.type === 'voucher') {
 setTimeout(() => scrollAndFlash(`[data-voucher-row="${target.id}"]`), 50);
+} else if (target.type === 'want') {
+// Lands on the shopping row itself rather than opening the task:
+// the stock result you're being nudged about is rendered there, so
+// that's where the nudge's own claim can actually be checked.
+setTimeout(() => scrollAndFlash(`[data-shop-open="${target.id}"]`), 80);
 } else if (target.type === 'media') {
 // revealMediaItem clears the list's own filters first when the item
 // is finished or filtered out, same as the 'connection' branch's
