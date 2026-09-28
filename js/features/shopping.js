@@ -278,11 +278,40 @@ const found = new Map();
 // Two listings, because neither is complete: a category page renders
 // a few hundred of a claimed several hundred products, so between
 // them they find more colourways than either alone.
-for (const path of ['/sale', '/lingerie']) {
-const html = await fetchPageHtml(origin + path);
+// Paced and retried, like the stock check already is. This fired both
+// listing fetches back to back, which is the exact burst AP was
+// measured returning 403s for -- the stock check spaces its fetches for
+// that reason and this didn't. A 403 also gets one retry after a longer
+// pause, since the measured failure was transient: the same URLs that
+// refused a burst answered fine a few seconds later.
+//
+// A listing failing isn't fatal on its own -- the two are searched
+// because neither is complete, so one of them working still finds
+// colourways. Only both failing is reported as a failure.
+const gap = adapter.CHECK_SPACING_MS || 4000;
+const failures = [];
+const paths = ['/sale', '/lingerie'];
+for (let i = 0; i < paths.length; i++) {
+if (i) await new Promise((r) => setTimeout(r, gap));
+let html = null;
+for (let attempt = 0; attempt < 2 && html == null; attempt++) {
+if (attempt) await new Promise((r) => setTimeout(r, gap * 2));
+try { html = await fetchPageHtml(origin + paths[i]); }
+catch (err) {
+if (attempt) failures.push(`${paths[i]}: ${err.message || err}`);
+}
+}
+if (html == null) continue;
 adapter.findColourways(html, style).forEach((c) => {
 if (!found.has(c.colourCode)) found.set(c.colourCode, c);
 });
+}
+if (!found.size && failures.length === paths.length) {
+// Said plainly, because the fix isn't in this app: a 403 here is the
+// retailer refusing the server your proxy runs on, not a bug you can
+// work around by trying again.
+box.innerHTML = `<div class="settings-note">The retailer refused both listing pages (${escapeHtml(failures[0].split(': ').pop())}). If that keeps happening it's blocking your web host's address rather than anything here — paste the other colours' URLs by hand above.</div>`;
+return;
 }
 const already = new Set(dialog.querySelector('[data-watch-urls]').value.split('\n').map((s) => s.trim()));
 const rows = [...found.values()].flatMap((c) => Object.values(c.pieces).map((p) => ({ colour: c.slugColour, code: c.colourCode, url: origin + p })))
