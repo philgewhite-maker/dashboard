@@ -3602,3 +3602,7 @@ padding:6px;
 .cashback-links{display:inline-flex;gap:6px;align-items:center;flex:0 0 auto;}
 .cashback-link{font-size:10px;padding:1px 6px;border-radius:5px;border:1px solid var(--line);color:var(--muted);text-decoration:none;white-space:nowrap;}
 .cashback-link:hover{border-color:var(--sage);color:var(--sage);}
+.cashback-link b{font-weight:700;color:var(--ink);}
+.cashback-age{margin-left:4px;opacity:.7;font-size:9px;}
+/* Due a refresh: still shown, still clickable, just visibly not fresh. */
+.cashback-link.cashback-due b{color:var(--muted);font-weight:600;}

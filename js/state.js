@@ -53,6 +53,7 @@ mailTopics: [], // {id, label, preferredActionIds} -- groups mail searches for d
 // to '' rather than deleting anything, because the item still exists.
 // Behind the same sensitive gate as sizes -- see SENSITIVE_BLOCKS.
 inventory: [],
+cashbackRates: {}, // {"provider|merchant-slug": {percent, upTo, text, at, url}} -- see js/cashback.js
 scheduledRuns: {}, // {taskId: {at, trigger, skipped}} -- when each scheduled sync last ran, see js/features/scheduled.js. Synced deliberately: a sync run on the laptop doesn't need repeating on the phone.
 mailDismissed: [], // {url, subject, from, dismissedAt} -- messages explicitly binned from Mail without becoming a task/trip leg/date event, see js/features/mail.js
 tasks: [],
@@ -1332,6 +1333,13 @@ function migrate() {
 // seeded data.inventory by hand, and a brand-new document gets the key
 // from the blank-document factory, so only a REAL existing document hit
 // it -- which is to say, every real install and none of the tests.
+// Last seen cashback rate per provider+merchant: {"quidco|tesco":
+// {percent, upTo, text, at, url}}. Cached rather than fetched on view
+// because reading one is a real page fetch through a route a retailer
+// may rate-limit -- and always shown WITH its date, since a rate that
+// moved last week is exactly the number that sends you to the wrong
+// provider. See js/cashback.js.
+if (!data.cashbackRates || typeof data.cashbackRates !== "object" || Array.isArray(data.cashbackRates)) data.cashbackRates = {};
 if (!Array.isArray(data.inventory)) data.inventory = [];
 if (!Array.isArray(data.habits)) data.habits = [];
 if (!Array.isArray(data.goals)) data.goals = [];

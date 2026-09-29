@@ -16,7 +16,7 @@
 import { data, queueSave, whoFits, sizeGroupFor } from '../state.js';
 import { escapeHtml } from '../utils.js';
 import { fetchPageHtml, FilesNotConfiguredError } from '../files.js';
-import { cashbackLinks } from '../cashback.js';
+import { cashbackLinks, merchantSlug, parseRate, rateFor, rateKey, ageLabel } from '../cashback.js';
 import * as agentProvocateur from '../retailers/agentprovocateur.js';
 
 // One adapter per retailer, tried in order. Adding a second retailer is
@@ -238,7 +238,12 @@ const results = (spec.urls || [])
 t.stockCheck = { checkedAt: now, results, errors: errors.filter((e) => (spec.urls || []).includes(e.url)) };
 });
 queueSave();
-return { checked: urls.length, wants: wants.length, errors: errors.length };
+// Rates last, so a stock answer never waits on them.
+let rates = null;
+try {
+  rates = await refreshCashbackRates([...pages.values()].map((p) => ({ retailer: p.retailer, url: p.url })), { onProgress });
+} catch (err) { /* a rate is a nicety; never let it fail a check */ }
+return { checked: urls.length, wants: wants.length, errors: errors.length, rates };
 }
 
 // ---- Reading a page pasted from your own browser --------------------------
@@ -325,8 +330,56 @@ return byRetailer;
 function cashbackHtml(source) {
 const links = cashbackLinks(source);
 if (!links.length) return '';
-return `<span class="cashback-links">${links.map((l) => `<a href="${escapeHtml(l.merchantUrl)}" target="_blank" rel="noopener noreferrer" class="cashback-link"
-title="Open ${escapeHtml(l.label)}'s ${escapeHtml(l.name)} page and click through from there, so the purchase is tracked. If it 404s, the retailer's slug differs — search ${escapeHtml(l.label)} instead.">${escapeHtml(l.label)}</a>`).join('')}</span>`;
+return `<span class="cashback-links">${links.map((l) => {
+const seen = rateFor(data.cashbackRates, l.id, merchantSlug(l.name));
+// A rate older than a month is shown as history, not as a rate: the
+// number is still interesting, but it has no business deciding which
+// provider you click today.
+const rate = seen && !seen.stale ? `${seen.upTo ? 'up to ' : ''}${seen.percent}%` : '';
+const age = seen ? ageLabel(seen.ageMs) : '';
+const title = seen
+? `${l.label}: ${seen.upTo ? 'up to ' : ''}${seen.percent}% when last checked, ${age}${seen.due ? ' — due a refresh' : ''}. Opens their ${l.name} page, where the live rate is shown; click through from there so the purchase is tracked.`
+: `Open ${l.label}'s ${l.name} page and click through from there, so the purchase is tracked. No rate checked yet.`;
+return `<a href="${escapeHtml(l.merchantUrl)}" target="_blank" rel="noopener noreferrer" class="cashback-link${seen && seen.due ? ' cashback-due' : ''}" title="${escapeHtml(title)}">${escapeHtml(l.label)}${rate ? ` <b>${escapeHtml(rate)}</b>` : ''}${age && rate ? `<span class="cashback-age">${escapeHtml(age)}</span>` : ''}</a>`;
+}).join('')}</span>`;
+}
+
+// Refreshed alongside a stock check rather than on its own schedule: the
+// check is already fetching and pacing against these same routes, and a
+// rate is only wanted next to a product you're looking at anyway.
+//
+// Only retailers you actually have something for, and only those whose
+// rate is older than a week. Both providers for each, since which one
+// wins changes with their promotions -- that's the whole point of
+// showing the number.
+async function refreshCashbackRates(retailers, { onProgress } = {}) {
+const wanted = [];
+retailers.forEach((source) => {
+cashbackLinks(source).forEach((l) => {
+const slug = merchantSlug(l.name);
+const seen = rateFor(data.cashbackRates, l.id, slug);
+if (seen && !seen.due) return;
+const key = rateKey(l.id, slug);
+if (!wanted.some((w) => w.key === key)) wanted.push({ key, url: l.merchantUrl, provider: l.id, name: l.name });
+});
+});
+if (!wanted.length) return { checked: 0 };
+if (onProgress) onProgress(`Checking ${wanted.length} cashback rate${wanted.length === 1 ? '' : 's'}…`);
+const { pages } = await fetchPages(wanted.map((w) => w.url));
+let found = 0;
+wanted.forEach((w) => {
+const html = pages.get(w.url);
+if (!html) return;
+const rate = parseRate(html, w.provider);
+// A page that came back but didn't yield a rate is left alone rather
+// than cached as "nothing": the markup may simply have moved, and
+// overwriting a good older number with a blank helps nobody.
+if (!rate) return;
+data.cashbackRates[w.key] = { ...rate, at: new Date().toISOString(), url: w.url };
+found += 1;
+});
+if (found) queueSave();
+return { checked: wanted.length, found };
 }
 
 function resultLineHtml(r) {
@@ -361,4 +414,4 @@ ${(errors || []).map((e) => `<div class="stock-line"><span class="settings-note"
 </div>`;
 }
 
-export { runStockCheck, stockCheckHtml, cashbackHtml, buyableNow, activeWants, seedWatchSpec, pasteStockFor, wantedSizesFor, pageMatchesWant, resultFor, adapterFor };
+export { runStockCheck, stockCheckHtml, cashbackHtml, refreshCashbackRates, buyableNow, activeWants, seedWatchSpec, pasteStockFor, wantedSizesFor, pageMatchesWant, resultFor, adapterFor };
