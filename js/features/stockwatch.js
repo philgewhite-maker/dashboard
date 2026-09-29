@@ -239,9 +239,25 @@ t.stockCheck = { checkedAt: now, results, errors: errors.filter((e) => (spec.url
 });
 queueSave();
 // Rates last, so a stock answer never waits on them.
+//
+// Fed from the URLs the wants POINT AT, not from the pages that came
+// back. Those are different things and the difference mattered: a
+// retailer that refuses the proxy returns no pages, so keying off the
+// fetched ones meant its rate never refreshed at all — and Agent
+// Provocateur, the one retailer this was built for, refuses the proxy.
+// A cashback rate is a fact about the shop, and worth having even on a
+// day its product pages couldn't be read.
 let rates = null;
 try {
-  rates = await refreshCashbackRates([...pages.values()].map((p) => ({ retailer: p.retailer, url: p.url })), { onProgress });
+// The BRAND recorded on the want, not just the URL. A hostname has
+// lost the word boundaries -- "agentprovocateur.com" slugs to
+// "agentprovocateur", where the provider's page is "agent-provocateur"
+// -- so the typed brand is the better source and the host only a
+// fallback for wants that never got one.
+rates = await refreshCashbackRates(
+wants.map((t) => ({ brand: seedWatchSpec(t).brand, url: (seedWatchSpec(t).urls || [])[0] })),
+{ onProgress },
+);
 } catch (err) { /* a rate is a nicety; never let it fail a check */ }
 return { checked: urls.length, wants: wants.length, errors: errors.length, rates };
 }
@@ -294,6 +310,14 @@ task.stockCheck = { checkedAt: new Date().toISOString(), results: [...prev, ...r
 const urls = [...new Set([...spec.urls, ...pastedUrls])];
 task.wantSpec = { ...spec, urls };
 queueSave();
+// The paste route is the one that works when a retailer refuses the
+// proxy, so it's the one most likely to be in use — and it wasn't
+// refreshing rates at all. Rates come from the provider's site, not the
+// retailer's, so this generally succeeds even when the product pages
+// had to come via the clipboard. Never allowed to fail the paste.
+// The pasted pages carry the retailer's proper name, which is what
+// slugs correctly; the URL alone would give "agentprovocateur".
+refreshCashbackRates(matching.map((p) => ({ brand: p.retailer, url: p.url }))).catch(() => {});
 return { results, skipped: pages.length - matching.length };
 }
 
