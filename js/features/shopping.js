@@ -23,7 +23,7 @@ import { data, queueSave, SHOPPING_CONTEXTS, unheldInventory, whoFits, inventory
 import { escapeHtml, affiliateLink, daysUntil, daysSince, uid, todayStr, MISSING_KEY_LINK_HTML, looksLikeUrl } from '../utils.js';
 import { captureTask, revealTask } from './tasks.js';
 import { connectionChipHtml, bindConnectionChips, connectionPickerHtml, bindConnPickers, setConnPickerValue, sensitiveFieldsShown } from './connections.js';
-import { runStockCheck, stockCheckHtml, adapterFor, seedWatchSpec } from './stockwatch.js';
+import { runStockCheck, stockCheckHtml, adapterFor, seedWatchSpec, pasteStockFor } from './stockwatch.js';
 import { MissingKeyError, searchShoppingItem } from '../ai.js';
 import { initMicCapture } from './voicecapture.js';
 import { banner } from './sharetarget.js';
@@ -232,6 +232,15 @@ return `<div class="mail-view-card" style="max-width:520px;">
 <button class="sync-btn sm" type="button" data-watch-colours>Find other colours</button>
 <span class="settings-note" style="margin:0;">Searches the retailer's listings for the same style in other colourways.</span>
 </div>
+<div class="settings-block" style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line);">
+<div class="settings-note" style="margin:0 0 6px;">If checking says <strong>403</strong>, the retailer is refusing your web host &mdash; it won't answer a server, only a browser. Read the page in yours instead: copy the snippet, open the product page, paste it in the address bar, then come back and paste the result.</div>
+<div class="sync-row">
+<button class="sync-btn sm" type="button" data-watch-copy-snippet title="Run it on one product page">Copy snippet</button>
+<button class="sync-btn sm" type="button" data-watch-copy-bulk title="Run it on a listing filtered to this style — reads every product and colourway in one go">Copy bulk snippet</button>
+<button class="sync-btn sm" type="button" data-watch-paste-stock>Paste stock</button>
+<span class="sync-status" data-watch-paste-status></span>
+</div>
+</div>
 <div data-watch-colour-results></div>
 <div class="mail-view-actions">
 <button class="sync-btn sm" type="button" data-watch-cancel>Cancel</button>
@@ -337,6 +346,52 @@ box.innerHTML = `<div class="settings-note">Couldn't search: ${escapeHtml(err.me
 } finally {
 coloursBtn.disabled = false;
 }
+});
+const snippetBtn = dialog.querySelector('[data-watch-copy-snippet]');
+if (snippetBtn) snippetBtn.addEventListener('click', async () => {
+const first = (dialog.querySelector('[data-watch-urls]').value.split('\n')[0] || '').trim();
+const adapter = adapterFor(first) || adapterFor('https://www.agentprovocateur.com/');
+const status = dialog.querySelector('[data-watch-paste-status]');
+if (!adapter || !adapter.bookmarkletSource) { status.textContent = 'No snippet for that retailer.'; return; }
+try {
+await navigator.clipboard.writeText(adapter.bookmarkletSource());
+status.textContent = 'Copied — paste it into the address bar on the product page.';
+} catch (err) {
+status.textContent = "Couldn't copy — your browser blocked clipboard access.";
+}
+});
+const bulkBtn = dialog.querySelector('[data-watch-copy-bulk]');
+if (bulkBtn) bulkBtn.addEventListener('click', async () => {
+const first = (dialog.querySelector('[data-watch-urls]').value.split('\n')[0] || '').trim();
+const adapter = adapterFor(first) || adapterFor('https://www.agentprovocateur.com/');
+const style = dialog.querySelector('[data-watch-spec="style"]').value.trim();
+const status = dialog.querySelector('[data-watch-paste-status]');
+if (!adapter || !adapter.bulkBookmarkletSource) { status.textContent = 'No bulk snippet for that retailer.'; return; }
+// The style is baked in at copy time rather than asked for on the page:
+// it's already recorded on the want, and a snippet that prompts is one
+// more thing to get wrong while standing in a browser tab.
+if (!style) { status.textContent = 'Set the style first — the bulk snippet filters on it.'; return; }
+try {
+await navigator.clipboard.writeText(adapter.bulkBookmarkletSource(style));
+status.textContent = `Copied. Run it on a listing showing ${style} — it reads every product and colourway.`;
+} catch (err) {
+status.textContent = "Couldn't copy — your browser blocked clipboard access.";
+}
+});
+const pasteBtn = dialog.querySelector('[data-watch-paste-stock]');
+if (pasteBtn) pasteBtn.addEventListener('click', async () => {
+const status = dialog.querySelector('[data-watch-paste-status]');
+status.textContent = 'Reading…';
+// Saved first, so a URL typed in this session isn't lost by the paste
+// writing over wantSpec underneath it.
+save();
+const res = await pasteStockFor(t);
+if (res.error) { status.textContent = res.error; return; }
+const inStock = res.results.filter((r) => r.available.length);
+status.textContent = res.results.length === 1
+? (inStock.length ? `${res.results[0].piece}: ${res.results[0].available.map((a) => a.size).join(', ')} in stock.` : `${res.results[0].piece}: nothing in her size.`)
+: `${res.results.length} products read, ${inStock.length} with something in her size${res.skipped ? `. ${res.skipped} skipped as outside this want.` : '.'}`;
+render();
 });
 dialog.querySelector('[data-watch-cancel]').addEventListener('click', close);
 dialog.querySelector('[data-watch-save]').addEventListener('click', () => { save(); render(); close(); });

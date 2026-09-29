@@ -148,10 +148,34 @@ const colourLine = [...doc.querySelectorAll('span, p, div')]
 .map((e) => (e.textContent || '').replace(/\s+/g, ' ').trim())
 .find((t) => /^colour:/i.test(t));
 const block = head ? parseBlock(head, doc) : { sizes: [], was: null, now: null, code: '', discountPct: 0, net: null };
-// The size select sits outside the heading block on the main product
-// (the heading holds name/price/offer only), so it's found separately.
+// The size select sits outside the heading block (the heading holds
+// name/price/offer only), so it's found separately -- and it must be
+// found CAREFULLY.
+//
+// A proxy-fetched page has one select, so taking the first worked. A
+// browser-fetched page carries the whole set: five selects, and on the
+// bra's own page the first in document order is a KNICKERS one. Taking
+// the first there reported sizes 1-6 as the bra's, which doesn't fail
+// loudly -- it quietly answers about the wrong garment, and a want for
+// a 34C would simply never match.
+//
+// The main product's select is the one whose price-bearing block also
+// names the h1. Verified on the bra and thong pages of the same set:
+// exactly one select matches, and it's the right one each time.
 if (!block.sizes.length) {
-const mainSelect = doc.querySelector('select');
+const name = h1 ? h1.textContent.trim() : '';
+const selects = [...doc.querySelectorAll('select')];
+const owned = name ? selects.find((sel) => {
+let n = sel, box = null;
+for (let d = 0; d < 8 && n; d++) {
+n = n.parentElement;
+if (n && /£\s?\d/.test(n.textContent || '')) { box = n; break; }
+}
+return box && (box.textContent || '').replace(/\s+/g, ' ').includes(name);
+}) : null;
+// Falls back to the first only when nothing names the product, which
+// is the single-select page the proxy returns.
+const mainSelect = owned || selects[0];
 if (mainSelect) block.sizes = [...mainSelect.options].map((o) => parseSizeOption(o.text)).filter(Boolean);
 }
 return {
@@ -251,4 +275,101 @@ byColour.set(colourCode, entry);
 return [...byColour.values()];
 }
 
-export { matchesRetailer, parseProductPage, parseSizeOption, parseBlock, skuParts, skuFromUrl, specFromUrl, findColourways, HOST, CHECK_SPACING_MS };
+// ---- Reading the page from YOUR browser instead ---------------------------
+//
+// The proxy route assumes the retailer will answer a request from your web
+// host. Agent Provocateur doesn't: every fetch from that address comes back
+// 403, product pages included, while the same URLs answer fine from a
+// normal browser. That isn't a header or a pacing problem to solve -- it's
+// the site refusing a datacentre IP, and nothing in this app changes it.
+//
+// So the page gets read where it already loads: your own browser. This
+// builds a snippet that parses the page you're looking at and copies the
+// result, which "Paste stock" then reads back -- exactly the mechanism the
+// Amazon price already uses (see pastePrice in shopping.js), and for the
+// same underlying reason.
+//
+// The snippet is BUILT FROM the functions above rather than being a second
+// copy of them: toString() serialises the real implementations into it, so
+// the bookmarklet can't drift from the parser the scheduled check uses.
+// A browser-loaded page also carries MORE than the proxy ever got -- the
+// whole "wear with" set and the JSON-LD -- so this route is the better one
+// even where the proxy works.
+const PASTE_STOCK_PREFIX = 'DASHSTOCK:';
+
+function bookmarkletSource() {
+const parts = [priceNumber, parseSizeOption, parseBlock, parseMain, parseSiblings, skuFromUrl, skuParts, parseProductPage]
+.map((fn) => fn.toString()).join('\n');
+// The body is percent-encoded rather than flattened to one line. These
+// functions carry `//` comments, and stripping newlines turned every one
+// of them into a comment that swallowed the rest of the line -- the
+// snippet parsed, ran, and returned nonsense. Encoding keeps the line
+// breaks intact inside a URL that's still a single line to paste.
+const body = `(function(){
+${parts}
+try{
+var p=parseProductPage(document.documentElement.outerHTML,location.href);
+var out=${JSON.stringify(PASTE_STOCK_PREFIX)}+JSON.stringify({url:p.url,retailer:p.retailer,sku:p.sku,colour:p.colour,name:p.name,piece:p.piece,was:p.was,now:p.now,code:p.code,discountPct:p.discountPct,net:p.net,sizes:p.sizes,alsoOnPage:p.alsoOnPage});
+navigator.clipboard.writeText(out).then(function(){
+alert('Copied '+p.piece+(p.colour?' in '+p.colour:'')+' — '+p.sizes.filter(function(s){return s.inStock;}).length+' sizes in stock. Now click "Paste stock" in the dashboard.');
+},function(){
+var t=document.createElement('textarea');t.value=out;document.body.appendChild(t);t.select();document.execCommand('copy');t.remove();
+alert('Copied (fallback). Now click "Paste stock" in the dashboard.');
+});
+}catch(e){alert('Could not read this page: '+e.message);}
+})();`;
+return `javascript:${encodeURIComponent(body)}`;
+}
+
+// The same idea, but for a whole style at once -- run on a LISTING page
+// (e.g. /sale#filters.range=Jayce) instead of one product.
+//
+// A listing card carries the product URL, the piece, both prices and that
+// product's own discount code, but NOT sizes -- checked on a real filtered
+// page. So the snippet reads the cards, then fetches each product page for
+// its sizes. Those fetches are same-origin, made by your browser from your
+// address, which is exactly why this works where the proxy gets a 403.
+//
+// Paced like every other run against this site, and reported as it goes,
+// because a dozen products at four seconds apart is a minute of waiting
+// and a silent page looks broken.
+function bulkBookmarkletSource(styleWord) {
+const parts = [priceNumber, parseSizeOption, parseBlock, parseMain, parseSiblings, skuFromUrl, skuParts, parseProductPage]
+.map((fn) => fn.toString()).join('\n');
+const body = `(function(){
+${parts}
+var STYLE=${JSON.stringify(String(styleWord || '').toLowerCase())};
+var GAP=${CHECK_SPACING_MS};
+var links=[].slice.call(document.querySelectorAll('a[href*="-"]')).map(function(a){return a.getAttribute('href');})
+.filter(function(h){return h&&/^\\/apm?\\d{10,11}-/i.test(h)&&(!STYLE||h.toLowerCase().indexOf(STYLE)>-1);});
+links=links.filter(function(h,i){return links.indexOf(h)===i;});
+if(!links.length){alert('No products matching "'+STYLE+'" on this page. Filter the listing to that style first.');return;}
+var note=document.createElement('div');
+note.style.cssText='position:fixed;z-index:99999;left:12px;bottom:12px;background:#1c1b19;color:#fff;padding:10px 14px;border-radius:8px;font:14px sans-serif';
+document.body.appendChild(note);
+var out=[],i=0;
+function step(){
+if(i>=links.length){
+note.remove();
+var payload=${JSON.stringify(PASTE_STOCK_PREFIX)}+JSON.stringify(out);
+navigator.clipboard.writeText(payload).then(function(){
+alert('Copied '+out.length+' products. Now click "Paste stock" in the dashboard.');
+},function(){
+var t=document.createElement('textarea');t.value=payload;document.body.appendChild(t);t.select();document.execCommand('copy');t.remove();
+alert('Copied '+out.length+' products (fallback). Now click "Paste stock".');
+});
+return;
+}
+var href=links[i];
+note.textContent='Reading '+(i+1)+' of '+links.length+'…';
+fetch(location.origin+href).then(function(r){return r.text();}).then(function(html){
+var p=parseProductPage(html,location.origin+href);
+out.push({url:p.url,retailer:p.retailer,sku:p.sku,colour:p.colour,name:p.name,piece:p.piece,was:p.was,now:p.now,code:p.code,discountPct:p.discountPct,net:p.net,sizes:p.sizes});
+}).catch(function(){}).then(function(){i++;setTimeout(step,GAP);});
+}
+step();
+})();`;
+return `javascript:${encodeURIComponent(body)}`;
+}
+
+export { matchesRetailer, parseProductPage, parseSizeOption, parseBlock, skuParts, skuFromUrl, specFromUrl, findColourways, bookmarkletSource, bulkBookmarkletSource, PASTE_STOCK_PREFIX, HOST, CHECK_SPACING_MS };

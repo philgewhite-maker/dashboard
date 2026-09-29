@@ -190,6 +190,57 @@ queueSave();
 return { checked: urls.length, wants: wants.length, errors: errors.length };
 }
 
+// ---- Reading a page pasted from your own browser --------------------------
+//
+// When a retailer refuses the proxy (Agent Provocateur 403s every request
+// from the web host, product pages included), the page still loads fine in
+// your browser. The adapter's bookmarklet parses it there and copies the
+// result; this reads it back and files it exactly as a fetched check would,
+// so everything downstream -- the row, the nudges, her card -- can't tell
+// the difference and needs no special case.
+async function pasteStockFor(task) {
+const spec = seedWatchSpec(task);
+const adapter = RETAILERS.find((r) => r.PASTE_STOCK_PREFIX);
+if (!adapter) return { error: 'No paste format for that retailer.' };
+let text;
+try { text = await navigator.clipboard.readText(); } catch (err) {
+return { error: "Couldn't read the clipboard — your browser may be blocking it for this page." };
+}
+if (!text || !text.startsWith(adapter.PASTE_STOCK_PREFIX)) {
+return { error: 'Nothing copied from a product page yet — run the snippet on the page first.' };
+}
+let parsed;
+try { parsed = JSON.parse(text.slice(adapter.PASTE_STOCK_PREFIX.length)); } catch (err) {
+return { error: 'That copied text was unreadable — run the snippet again.' };
+}
+// One product or a whole listing's worth. The bulk snippet copies an
+// array; the single-product one copies an object. Both land here, so
+// there's one paste button rather than two that look alike.
+const pages = Array.isArray(parsed) ? parsed : [parsed];
+const conn = data.connections.find((c) => c.id === task.forConnectionId);
+const matching = pages.filter((p) => pageMatchesWant(p, spec));
+if (!matching.length) {
+// Said rather than silently ignored: pasting the wrong page, or one
+// the want's colour/piece filters exclude, is an easy mistake and a
+// check that quietly did nothing would look like a bug.
+return pages.length === 1
+? { error: `That page is ${pages[0].piece}${pages[0].colour ? ` in ${pages[0].colour}` : ''}, which this want doesn't cover.` }
+: { error: `None of those ${pages.length} products match this want's pieces and colours.` };
+}
+const results = matching.map((p) => resultFor(p, conn, spec));
+const pastedUrls = new Set(results.map((r) => r.url));
+const prev = (task.stockCheck?.results || []).filter((r) => !pastedUrls.has(r.url));
+task.stockCheck = { checkedAt: new Date().toISOString(), results: [...prev, ...results], errors: [] };
+// Remember the pages, so a later proxy check (or another paste) knows
+// they're part of this want without being told twice. A bulk paste is
+// therefore also how you'd add every colourway at once -- which is the
+// job "Find other colours" does when the proxy isn't being refused.
+const urls = [...new Set([...spec.urls, ...pastedUrls])];
+task.wantSpec = { ...spec, urls };
+queueSave();
+return { results, skipped: pages.length - matching.length };
+}
+
 // ---- What it produces -----------------------------------------------------
 
 function money(n) {
@@ -247,4 +298,4 @@ ${(errors || []).map((e) => `<div class="stock-line"><span class="settings-note"
 </div>`;
 }
 
-export { runStockCheck, stockCheckHtml, buyableNow, activeWants, seedWatchSpec, wantedSizesFor, pageMatchesWant, resultFor, adapterFor };
+export { runStockCheck, stockCheckHtml, buyableNow, activeWants, seedWatchSpec, pasteStockFor, wantedSizesFor, pageMatchesWant, resultFor, adapterFor };
