@@ -3498,7 +3498,30 @@ font-family:'Inter',sans-serif;
 font-size:13px;
 margin:0;
 }
-.mail-view-actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;}
+/* The card is a flex COLUMN, so its children shrink to fit before the
+   card agrees to scroll -- which flattened the watch editor's 5-row
+   textarea to 6 pixels, an input you couldn't see, let alone type a URL
+   into. flex-shrink:0 makes the content keep its size and the card
+   scroll instead, which is what overflow:auto was there for. */
+.mail-view-card > *{flex-shrink:0;}
+.mail-view-card textarea{min-height:5.5em;resize:vertical;}
+/* Same specificity fight as the shopping rows: .sync-btn.sm sets
+   width:100%, so a dialog's action buttons stacked full-width instead of
+   sitting in a row. */
+.mail-view-actions .sync-btn.sm{width:auto;margin-top:0;}
+/* Pinned to the bottom of a card that scrolls. The card is capped at
+   90vh with overflow:auto, so anything added above these buttons pushes
+   them out of sight -- which is what happened when the colour search was
+   added to the watch editor: "Save & check now" was simply below the
+   fold with nothing to suggest it existed. Sticky keeps them reachable
+   however long the content above grows. */
+.mail-view-actions{
+display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;
+position:sticky;bottom:-14px;
+background:var(--card);
+padding:8px 0;
+margin-top:auto;
+}
 .mail-view-atts{display:flex;gap:6px;flex-wrap:wrap;}
 .mail-view-atts button{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .mail-view-previews{display:flex;gap:10px;flex-wrap:wrap;}
