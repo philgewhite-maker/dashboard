@@ -16,6 +16,7 @@
 import { data, queueSave, whoFits, sizeGroupFor } from '../state.js';
 import { escapeHtml } from '../utils.js';
 import { fetchPageHtml, FilesNotConfiguredError } from '../files.js';
+import { cashbackLinks } from '../cashback.js';
 import * as agentProvocateur from '../retailers/agentprovocateur.js';
 
 // One adapter per retailer, tried in order. Adding a second retailer is
@@ -317,6 +318,17 @@ byRetailer.set(key, list);
 return byRetailer;
 }
 
+// Put beside the product link, not somewhere in settings, because this
+// is only useful in the second before you click through to buy. Shown
+// even when a want is checked by the agent overnight -- the point is
+// that the purchase itself goes the right way round.
+function cashbackHtml(source) {
+const links = cashbackLinks(source);
+if (!links.length) return '';
+return `<span class="cashback-links">${links.map((l) => `<a href="${escapeHtml(l.merchantUrl)}" target="_blank" rel="noopener noreferrer" class="cashback-link"
+title="Open ${escapeHtml(l.label)}'s ${escapeHtml(l.name)} page and click through from there, so the purchase is tracked. If it 404s, the retailer's slug differs — search ${escapeHtml(l.label)} instead.">${escapeHtml(l.label)}</a>`).join('')}</span>`;
+}
+
 function resultLineHtml(r) {
 const price = r.net != null && r.net !== r.now
 ? `<strong>${escapeHtml(money(r.net))}</strong> <span class="settings-note" style="display:inline;margin:0;">was ${escapeHtml(money(r.was))}, ${escapeHtml(money(r.now))} before ${escapeHtml(r.code)}</span>`
@@ -329,6 +341,7 @@ const noSizes = r.noSizesOnFile
 return `<div class="stock-line${r.available.length ? ' stock-line-in' : ''}">
 <a href="${escapeHtml(r.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(r.piece)}${r.colour ? ` · ${escapeHtml(r.colour)}` : ''}</a>
 ${r.available.length ? `<span class="stock-sizes">${sizes}</span> ${price}` : `${goneNote}${noSizes}`}
+${r.available.length ? cashbackHtml({ retailer: r.retailer, url: r.url }) : ''}
 </div>`;
 }
 
@@ -348,4 +361,4 @@ ${(errors || []).map((e) => `<div class="stock-line"><span class="settings-note"
 </div>`;
 }
 
-export { runStockCheck, stockCheckHtml, buyableNow, activeWants, seedWatchSpec, pasteStockFor, wantedSizesFor, pageMatchesWant, resultFor, adapterFor };
+export { runStockCheck, stockCheckHtml, cashbackHtml, buyableNow, activeWants, seedWatchSpec, pasteStockFor, wantedSizesFor, pageMatchesWant, resultFor, adapterFor };

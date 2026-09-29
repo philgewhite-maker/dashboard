@@ -3595,3 +3595,10 @@ padding:6px;
 .inv-set-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:2px;}
 .inv-fit-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:4px 0;min-width:0;}
 .inv-fit-row .todo-add-btn{font-size:10px;padding:2px 7px;}
+
+/* Cashback routes, beside the product link at the moment of buying.
+   Deliberately quiet -- a reminder of the right door, not a promotion.
+   See js/cashback.js. */
+.cashback-links{display:inline-flex;gap:6px;align-items:center;flex:0 0 auto;}
+.cashback-link{font-size:10px;padding:1px 6px;border-radius:5px;border:1px solid var(--line);color:var(--muted);text-decoration:none;white-space:nowrap;}
+.cashback-link:hover{border-color:var(--sage);color:var(--sage);}

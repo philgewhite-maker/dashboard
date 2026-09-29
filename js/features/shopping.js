@@ -23,7 +23,7 @@ import { data, queueSave, SHOPPING_CONTEXTS, unheldInventory, whoFits, inventory
 import { escapeHtml, affiliateLink, daysUntil, daysSince, uid, todayStr, MISSING_KEY_LINK_HTML, looksLikeUrl } from '../utils.js';
 import { captureTask, revealTask } from './tasks.js';
 import { connectionChipHtml, bindConnectionChips, connectionPickerHtml, bindConnPickers, setConnPickerValue, sensitiveFieldsShown } from './connections.js';
-import { runStockCheck, stockCheckHtml, adapterFor, seedWatchSpec, pasteStockFor } from './stockwatch.js';
+import { runStockCheck, stockCheckHtml, adapterFor, seedWatchSpec, pasteStockFor, cashbackHtml } from './stockwatch.js';
 import { MissingKeyError, searchShoppingItem } from '../ai.js';
 import { initMicCapture } from './voicecapture.js';
 import { banner } from './sharetarget.js';
@@ -133,7 +133,7 @@ ${results.map((r, idx) => `
 ${r.price ? `<span class="shop-hit-price">${escapeHtml(r.price)}</span>` : ''}
 ${r.offer ? `<span class="shop-hit-offer">${escapeHtml(r.offer)}</span>` : ''}
 ${r.subscribeSave ? `<span class="shop-hit-offer">${escapeHtml(r.subscribeSave)}</span>` : ''}
-</a>${isAmazonUrl(r.url) ? `<button class="sync-btn sm shop-paste-btn" type="button" data-shop-paste="${escapeHtml(t.id)}:${idx}" title="Paste the price copied by the Amazon bookmarklet">Paste price</button>` : ''}
+</a>${cashbackHtml({ retailer: r.retailer, url: r.url })}${isAmazonUrl(r.url) ? `<button class="sync-btn sm shop-paste-btn" type="button" data-shop-paste="${escapeHtml(t.id)}:${idx}" title="Paste the price copied by the Amazon bookmarklet">Paste price</button>` : ''}
 </div>`).join('')}
 <div class="shop-also">${escapeHtml(checkedAgoLabel(checkedAt))}</div>
 </div>`;
