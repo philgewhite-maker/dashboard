@@ -148,30 +148,80 @@ if (url) seen.add(url);
 return [...seen];
 }
 
+// Fetching a page, by whichever route can actually reach it.
+//
+// The proxy is tried first: it's on all the time and needs nothing at
+// home running. When a retailer refuses it -- Agent Provocateur answers
+// every request from the web host with a 403, product pages included --
+// the home agent is asked instead, because it sits on a residential
+// connection and the site has no objection to that. The difference is
+// the address, not the request.
+//
+// One command carries every remaining URL rather than one each: the agent
+// paces its own fetches and a single round trip beats a dozen polls.
+async function fetchPages(urls, { onProgress } = {}) {
+const pages = new Map();
+const errors = [];
+const gap = spacingFor(RETAILERS);
+const refused = [];
+for (let i = 0; i < urls.length; i++) {
+const url = urls[i];
+if (onProgress) onProgress(`Checking ${i + 1} of ${urls.length}…`);
+try {
+pages.set(url, await fetchPageHtml(url));
+} catch (err) {
+if (err instanceof FilesNotConfiguredError) throw err;
+// A 403 is the retailer refusing this route, not a broken page --
+// worth retrying somewhere else rather than reporting as an error.
+if (/\b403\b/.test(err.message || '')) refused.push(url);
+else errors.push({ url, error: err.message || String(err) });
+}
+if (i < urls.length - 1) await new Promise((r) => setTimeout(r, gap));
+}
+if (refused.length) {
+if (onProgress) onProgress(`${refused.length} refused the server — asking the home agent…`);
+try {
+const { run } = await import('../homeagent.js');
+const res = await run('page.fetch', { urls: refused }, { timeoutMs: 20000 + refused.length * 8000 });
+(res?.pages || []).forEach((p) => {
+if (p.html) pages.set(p.url, p.html);
+else errors.push({ url: p.url, error: `${p.error || 'no page returned'} (via home agent)` });
+});
+} catch (err) {
+// Said plainly: this is the one case where the answer isn't "try
+// again", it's "nothing here can reach that site".
+refused.forEach((url) => errors.push({
+url,
+error: `The retailer refused your web host (403), and the home agent couldn't be reached either — ${err.message || err}`,
+}));
+}
+}
+return { pages, errors };
+}
+
 async function runStockCheck({ onProgress } = {}) {
 const wants = activeWants();
 if (!wants.length) return { checked: 0, wants: 0, skipped: 'nothing active to check' };
-const urls = urlsToCheck(wants);
-const gap = spacingFor(RETAILERS);
-const pages = new Map();
-const errors = [];
-for (let i = 0; i < urls.length; i++) {
-const url = urls[i];
-const adapter = adapterFor(url);
-if (!adapter) { errors.push({ url, error: 'No parser for that retailer yet.' }); continue; }
-if (onProgress) onProgress(`Checking ${i + 1} of ${urls.length}…`);
+const all = urlsToCheck(wants);
+// Anything with no parser is rejected before a single byte is fetched.
+const errors = all.filter((u) => !adapterFor(u)).map((url) => ({ url, error: 'No parser for that retailer yet.' }));
+const urls = all.filter((u) => adapterFor(u));
+let fetched;
 try {
-const html = await fetchPageHtml(url);
-pages.set(url, adapter.parseProductPage(html, url));
+fetched = await fetchPages(urls, { onProgress });
 } catch (err) {
 // A configuration problem is worth stopping for -- every remaining
-// fetch would fail the same way, and pacing through them would take
-// a minute to reach the same answer.
+// fetch would fail the same way, and pacing through them would take a
+// minute to reach the same answer.
 if (err instanceof FilesNotConfiguredError) return { error: err.message, checked: 0, wants: wants.length };
-errors.push({ url, error: err.message || String(err) });
+throw err;
 }
-if (i < urls.length - 1) await sleep(gap);
-}
+errors.push(...fetched.errors);
+const pages = new Map();
+fetched.pages.forEach((html, url) => {
+try { pages.set(url, adapterFor(url).parseProductPage(html, url)); }
+catch (err) { errors.push({ url, error: `Couldn't read that page: ${err.message || err}` }); }
+});
 
 const now = new Date().toISOString();
 wants.forEach((t) => {

@@ -296,8 +296,74 @@ def verb_arr_status(args):
     return {"state": "unknown"}
 
 
+# How much of a page to carry back. A product page runs ~200KB, and the
+# result travels agent -> commands.php -> dashboard, so this is a guard
+# against one enormous page filling the queue file rather than a limit
+# anything real should hit.
+PAGE_MAX_BYTES = 1024 * 1024
+
+# Browser-shaped headers. Not an attempt to disguise anything -- the point
+# is that some retailers serve a stripped page, or nothing at all, to a
+# request that looks like a script. What makes this work where the web
+# host fails isn't these headers, it's the address: this runs on your home
+# connection, and Agent Provocateur refuses the datacentre one outright
+# (measured: 403 on every request from the web host, 200 from a browser).
+PAGE_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-GB,en;q=0.9",
+}
+
+# Gap between pages in one batch. Agent Provocateur returns 403s for burst
+# traffic -- measured, five rapid fetches and two refused, the same URLs
+# fine a few seconds apart. Nothing is waiting on this, so it goes at the
+# pace the strictest site tolerates.
+PAGE_GAP_SECONDS = 4
+
+
+def verb_page_fetch(args):
+    """Fetch one or more pages from HOME and hand the HTML back.
+
+    Deliberately returns raw HTML rather than parsing anything. The
+    dashboard already has a tested parser for every site it reads, in
+    JavaScript; writing a second one here in Python would be two things to
+    keep in step and the Python one would be the one nobody notices
+    breaking. This verb's whole job is to be a pair of eyes on a
+    residential connection.
+    """
+    urls = args.get("urls") or ([args["url"]] if args.get("url") else [])
+    if not urls:
+        raise ValueError("page.fetch needs a url or urls")
+    pages = []
+    for index, url in enumerate(urls):
+        if not str(url).lower().startswith("https://"):
+            pages.append({"url": url, "error": "Only https URLs are fetched"})
+            continue
+        if index:
+            time.sleep(PAGE_GAP_SECONDS)
+        try:
+            request = urllib.request.Request(url, method="GET")
+            for key, value in PAGE_HEADERS.items():
+                request.add_header(key, value)
+            with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT, context=ssl.create_default_context()) as response:
+                raw = response.read(PAGE_MAX_BYTES)
+                charset = response.headers.get_content_charset() or "utf-8"
+            pages.append({"url": url, "status": 200, "html": raw.decode(charset, "replace")})
+        except urllib.error.HTTPError as err:
+            # Reported per URL, not raised: one refused page shouldn't cost
+            # you the eleven that worked.
+            pages.append({"url": url, "status": err.code, "error": f"HTTP {err.code}"})
+        except Exception as err:
+            pages.append({"url": url, "error": f"{type(err).__name__}: {err}"})
+    return {"pages": pages}
+
+
 VERBS = {
     "agent.ping": verb_ping,
+    "page.fetch": verb_page_fetch,
     "plex.libraries": verb_plex_libraries,
     "plex.search": verb_plex_search,
     "arr.search": verb_arr_search,
