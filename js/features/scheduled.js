@@ -47,6 +47,17 @@ refreshShopping();
 },
 },
 {
+// The other half of a standing want. TheTVDB adds a race weekend's
+// episodes when it adds them; nothing else notices, so this re-applies
+// each monitored series' filter and Sonarr picks up what's new.
+id: 'monitors', label: 'Series monitoring', needsGoogle: false,
+note: 'Re-applies each monitored series’ episode filter in Sonarr.',
+run: async () => {
+const { reconcileMonitors } = await import('./media.js');
+await reconcileMonitors();
+},
+},
+{
 id: 'calendar', label: 'Calendars', buttonId: 'sync-cal-btn', needsGoogle: true,
 note: 'Upcoming events for each tracked calendar.',
 },

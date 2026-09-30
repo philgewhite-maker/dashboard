@@ -240,6 +240,75 @@ imageUrl: (book && book.imageUrl) || amazonArt || pageImage,
 };
 }
 
+// What a TheTVDB series page says about the series itself, beyond its
+// name and picture: whether it's still running, and whether its episodes
+// come in SESSIONS.
+//
+// The second one is the interesting question. Some series put several
+// episodes out per event -- Formula 1 gives five a race weekend (three
+// practices, qualifying, the race), and MotoGP, WRC, UFC, snooker and
+// the rest are built the same way. Wanting such a series almost never
+// means wanting every episode, and Sonarr can't express "only the race":
+// it monitors by season or by "future episodes", never by title. So the
+// filter has to be decided here, and this is what notices the series
+// needs one.
+//
+// Detected from the DATA rather than a list of sports: a sessioned
+// series names its episodes "Venue (Session)", and the same handful of
+// session words repeat across hundreds of episodes. A drama with one
+// bracketed title somewhere doesn't qualify, because one is not a
+// pattern.
+const SESSION_TITLE_RE = /^\s*(.+?)\s*\(([^)]{2,24})\)\s*$/;
+const MIN_SESSIONED_EPISODES = 12;
+
+function tvdbSeriesInfo(html) {
+const text = String(html || '');
+// "Status" then "Continuing" or "Ended", as the page's own label/value
+// pair -- read by looking just past the label rather than for the word
+// anywhere, which would also match a synopsis.
+const statusMatch = /Status[\s\S]{0,120}?>\s*(Continuing|Ended|Upcoming)\s*</i.exec(text);
+return { status: statusMatch ? statusMatch[1] : '', ongoing: /continuing|upcoming/i.test(statusMatch ? statusMatch[1] : '') };
+}
+
+// The session vocabulary a series actually uses, counted. Given the HTML
+// of a season listing, returns [{session, count}] most-used first, plus
+// whether that's enough of a pattern to call it sessioned.
+function tvdbSessions(html) {
+const titles = [...String(html || '').matchAll(/\/episodes\/\d+"[^>]*>\s*([^<]{2,80}?)\s*</gi)].map((m) => m[1]);
+const counts = new Map();
+titles.forEach((t) => {
+const m = SESSION_TITLE_RE.exec(t);
+if (!m) return;
+const session = m[2].trim();
+counts.set(session.toLowerCase(), { session, count: (counts.get(session.toLowerCase())?.count || 0) + 1 });
+});
+const sessions = [...counts.values()].sort((a, b) => b.count - a.count);
+const matched = sessions.reduce((n, s) => n + s.count, 0);
+return {
+sessions,
+episodeCount: titles.length,
+// A real pattern, not one stray bracket: most titles follow it AND
+// there are enough of them to be a recurring event rather than a
+// miniseries with parenthetical names.
+sessioned: matched >= MIN_SESSIONED_EPISODES && matched > titles.length / 2,
+};
+}
+
+// The default filter for a sessioned series: the main event only.
+// Expressed as what to KEEP rather than what to drop, because the drop
+// list is open-ended (practice, qualifying, shootout, warm-up, media day)
+// while the thing you want is almost always "the race".
+//
+// Built from the sessions the series really uses, so a series that calls
+// it something else still gets a sensible starting point -- and it's
+// shown for editing rather than applied silently.
+function defaultSessionFilter(sessions) {
+const keep = (sessions || [])
+.map((s) => s.session)
+.filter((s) => /^(sprint\s+)?race$|^sprint$|^final$|^main event$/i.test(s.trim()));
+return keep.length ? keep : (sessions || []).slice(0, 1).map((s) => s.session);
+}
+
 // TheTVDB's poster, for the same reason the <title> fallback exists: the
 // site publishes no og:image, so a series page offered no picture at all.
 // Its artwork sits on a predictable host, and the POSTER path is the one
@@ -442,4 +511,4 @@ link: `https://musicbrainz.org/release-group/${g.id}`,
 })).filter((c) => c.title);
 }
 
-export { identifyUrl, catalogueLabel, artworkUrl, linkMetadata, ogImageFrom, searchTitle, watchProviders, subscriptionFor, CATALOGUE_LABELS };
+export { identifyUrl, catalogueLabel, artworkUrl, linkMetadata, ogImageFrom, searchTitle, watchProviders, subscriptionFor, tvdbSeriesInfo, tvdbSessions, defaultSessionFilter, CATALOGUE_LABELS };

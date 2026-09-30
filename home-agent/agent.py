@@ -17,6 +17,7 @@ Configuration is entirely environment variables (see .env.example).
 
 import json
 import os
+import re
 import ssl
 import sys
 import time
@@ -270,6 +271,68 @@ def verb_arr_add(args):
     }
 
 
+def verb_arr_monitor(args):
+    """Monitor only the episodes whose titles match, and search for those.
+
+    For a series where one event produces several episodes -- Formula 1
+    gives five a weekend, of which you want the race -- Sonarr has no way
+    to say so: it monitors by season or "future episodes", never by title.
+    So the dashboard decides which episodes count and this sets exactly
+    those, leaving every other episode unmonitored so Sonarr never goes
+    hunting a practice session.
+
+    Idempotent on purpose. It runs again every time the dashboard notices
+    new episodes, and re-sending the same set is how a newly published
+    race weekend gets picked up.
+    """
+    tvdb_id = args.get("tvdbId")
+    if not tvdb_id:
+        raise ValueError("arr.monitor needs a tvdbId")
+    include = re.compile(args.get("include") or r"\((sprint\s*)?race\)|\(sprint\)", re.I)
+    exclude_raw = args.get("exclude")
+    exclude = re.compile(exclude_raw, re.I) if exclude_raw else None
+
+    matches = [s for s in arr("sonarr", "/series") if str(s.get("tvdbId")) == str(tvdb_id)]
+    if not matches:
+        return {"monitored": 0, "reason": "That series isn't in Sonarr yet -- add it first."}
+    series = matches[0]
+
+    episodes = arr("sonarr", "/episode", params={"seriesId": series["id"]})
+    wanted, unwanted = [], []
+    for ep in episodes:
+        title = str(ep.get("title") or "")
+        keep = bool(include.search(title)) and not (exclude and exclude.search(title))
+        (wanted if keep else unwanted).append(ep)
+
+    # Both directions, every run: a title corrected upstream ("Sprint
+    # Shootout" renamed) should stop being monitored as well as start.
+    if unwanted:
+        arr("sonarr", "/episode/monitor", method="PUT",
+            body={"episodeIds": [e["id"] for e in unwanted], "monitored": False})
+    if wanted:
+        arr("sonarr", "/episode/monitor", method="PUT",
+            body={"episodeIds": [e["id"] for e in wanted], "monitored": True})
+
+    # Search only for the ones that are missing AND already aired --
+    # asking Sonarr to hunt a race that hasn't happened wastes indexer
+    # queries, and it'll pick them up on its own RSS sweep anyway.
+    today = time.strftime("%Y-%m-%d")
+    searchable = [e["id"] for e in wanted
+                  if not e.get("hasFile") and str(e.get("airDate") or "9999") <= today]
+    if searchable and args.get("search") is not False:
+        arr("sonarr", "/command", method="POST",
+            body={"name": "EpisodeSearch", "episodeIds": searchable[:200]})
+
+    return {
+        "series": series.get("title"),
+        "seriesId": series["id"],
+        "monitored": len(wanted),
+        "unmonitored": len(unwanted),
+        "searching": len(searchable),
+        "examples": [e.get("title") for e in wanted[-3:]],
+    }
+
+
 def verb_arr_status(args):
     """Where has it got to? Queue first, then whether the file exists."""
     which = "sonarr" if args.get("kind") == "tv" else "radarr"
@@ -368,6 +431,7 @@ VERBS = {
     "plex.search": verb_plex_search,
     "arr.search": verb_arr_search,
     "arr.add": verb_arr_add,
+    "arr.monitor": verb_arr_monitor,
     "arr.status": verb_arr_status,
 }
 

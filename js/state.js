@@ -479,6 +479,14 @@ requestedBy: '', // who asked for it, when it arrived via Telegram
 externalIds: {},
 plexCheck: null, // {checkedAt, found, ratingKey} -- filled by the home agent
 whereToWatch: null, // {checkedAt, region, flatrate[], rent[], buy[], link} from TMDb
+// Monitoring in Sonarr/Radarr, once you have said yes to it:
+// {service, tvdbId, filter:[session names], askedAt, enabledAt, lastRun}.
+// `filter` is the sessions worth keeping for a series that puts several
+// episodes out per event (Formula 1: the race, not the three practices)
+// -- Sonarr cannot express that itself, so the dashboard decides and the
+// agent applies it. Empty filter on a sessioned series would monitor
+// everything, which is the thing this exists to avoid.
+monitor: null,
 acquisition: null, // {state, client, hash, checkedAt}
 addedAt: new Date().toISOString(),
 ...fields,

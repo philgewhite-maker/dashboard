@@ -190,6 +190,7 @@ ${item.plexCheck ? (item.plexCheck.found
 ? `<span class="task-context" style="background:var(--sage-bg);color:var(--sage);font-weight:600;" title="In your Plex library${item.plexCheck.matchedTitle ? ` as &quot;${escapeHtml(item.plexCheck.matchedTitle)}&quot;${item.plexCheck.matchedYear ? ` (${escapeHtml(item.plexCheck.matchedYear)})` : ''}` : ''}">&#10003; On Plex</span>`
 : `<span class="settings-note" style="margin:0;" title="Checked on ${escapeHtml(String(item.plexCheck.checkedAt).slice(0, 10))}">not on Plex</span>`) : ''}
 ${item.notes ? `<span class="settings-note" style="margin:0;">${escapeHtml(item.notes)}</span>` : ''}
+${monitorHtml(item)}
 <button class="mini-task-btn" type="button" data-media-satisfy="${item.id}" title="How to get hold of it">Get&hellip;</button>
 <select class="mini" data-media-status="${item.id}">
 ${MEDIA_STATUSES.map((s) => `<option value="${s.status}"${s.status === item.status ? ' selected' : ''}>${escapeHtml(s.label)}</option>`).join('')}
@@ -215,6 +216,12 @@ hydratePhotoBackgrounds(list);
 hideBrokenArt(list);
 enrichPending();
 
+list.querySelectorAll("[data-media-monitor]").forEach((btn) => {
+btn.addEventListener("click", () => {
+const item = data.mediaItems.find((m) => m.id === btn.dataset.mediaMonitor);
+if (item) openMonitorDialog(item);
+});
+});
 list.querySelectorAll('[data-media-satisfy]').forEach((btn) => {
 btn.addEventListener('click', () => {
 const item = data.mediaItems.find((m) => m.id === btn.dataset.mediaSatisfy);
@@ -437,6 +444,175 @@ const sub = subscriptionFor(name, data.subscriptions || []);
 if (sub) return { name, sub };
 }
 return null;
+}
+
+// ---- Monitoring an ongoing series -----------------------------------------
+//
+// A series that's still running is a standing want rather than a one-off:
+// every new episode is another thing to fetch, forever. Sonarr is built
+// for exactly that and keys series by TVDB id, which is the id this app
+// already stores -- so "monitor it" is a short hop rather than a feature.
+//
+// Offered, never automatic. Turning on monitoring quietly is how a NAS
+// fills up, and everything else here proposes first (Tinder imports,
+// switch offers, want-to-has).
+function monitorHtml(item) {
+if (item.kind !== 'tv') return '';
+if (item.monitor && item.monitor.enabledAt) {
+const f = item.monitor.filter || [];
+const last = item.monitor.lastRun;
+return `<span class="task-context" style="background:var(--sage-bg);color:var(--sage);font-weight:600;"
+title="Monitored in Sonarr${f.length ? `, ${f.join(' / ')} only` : ', every episode'}${last ? ` — last reconciled ${escapeHtml(String(last).slice(0, 10))}` : ''}">&#9679; Monitored${f.length ? ` (${escapeHtml(f.join('/'))})` : ''}</span>
+<button class="mini-task-btn" type="button" data-media-monitor="${item.id}" title="Change what's monitored, or turn it off">Edit</button>`;
+}
+// Only worth asking for something still running and identified on TVDB
+// -- Sonarr needs that id, and a finished series is a one-off fetch
+// rather than a standing arrangement.
+if (!item.externalIds || !item.externalIds.tvdb) return '';
+if (item.monitor && item.monitor.declinedAt) return '';
+return `<button class="mini-task-btn" type="button" data-media-monitor="${item.id}" title="Have Sonarr watch for new episodes of this">Monitor&hellip;</button>`;
+}
+
+// The numeric TVDB id Sonarr needs. A stored id may be the slug form
+// ("series/formula-1") because that's what the URL carried, so the
+// series page is read for the numeric one when it isn't already known.
+// `html` is passed in when the caller already has the series page, which
+// it usually does -- fetching it twice for one dialog is a second trip
+// through the proxy for a page already in hand.
+async function tvdbNumericId(item, html) {
+const stored = String((item.externalIds || {}).tvdb || '');
+const direct = /^\d+$/.test(stored) ? stored : '';
+if (direct) return direct;
+if (!html) {
+const { fetchPageHtml } = await import('../files.js');
+html = await fetchPageHtml(item.link || `https://thetvdb.com/${stored}`);
+}
+const m = /artworks\.thetvdb\.com\/banners\/series\/(\d+)\//i.exec(html)
+|| /tvdb[_-]?id["'\s:=]+(\d{4,})/i.exec(html);
+return m ? m[1] : '';
+}
+
+async function openMonitorDialog(item) {
+const dialog = document.createElement('div');
+dialog.className = 'mail-view-backdrop';
+dialog.innerHTML = `<div class="mail-view-card" style="max-width:480px;">
+<div class="mail-view-subject">Monitor ${escapeHtml(displayTitle(item))}?</div>
+<div class="settings-note" style="margin:2px 0 8px;">Reading the series from TheTVDB&hellip;</div></div>`;
+document.body.appendChild(dialog);
+const close = () => dialog.remove();
+dialog.addEventListener('click', (e) => { if (e.target === dialog) close(); });
+
+let info = { ongoing: true, status: '' };
+let sessions = { sessions: [], sessioned: false, episodeCount: 0 };
+let tvdbId = '';
+try {
+const { fetchPageHtml } = await import('../files.js');
+const { tvdbSeriesInfo, tvdbSessions, defaultSessionFilter } = await import('../catalogue.js');
+const slug = String((item.externalIds || {}).tvdb || '').replace(/^series\//, '');
+const seriesHtml = await fetchPageHtml(item.link || `https://thetvdb.com/series/${slug}`);
+info = tvdbSeriesInfo(seriesHtml);
+tvdbId = await tvdbNumericId(item, seriesHtml);
+// The season listing is a separate, much larger page -- only fetched
+// because the episode TITLES are the whole basis for the filter.
+sessions = tvdbSessions(await fetchPageHtml(`https://thetvdb.com/series/${slug}/allseasons/official`));
+if (!dialog.isConnected) return;
+const suggested = sessions.sessioned ? defaultSessionFilter(sessions.sessions) : [];
+const current = item.monitor && item.monitor.filter ? item.monitor.filter : suggested;
+dialog.innerHTML = `<div class="mail-view-card" style="max-width:480px;">
+<div class="mail-view-subject">Monitor ${escapeHtml(displayTitle(item))}?</div>
+<div class="settings-note" style="margin:2px 0 8px;">
+${escapeHtml(info.status || 'Status unknown')}${sessions.episodeCount ? ` &middot; ${sessions.episodeCount} episodes on TheTVDB` : ''}${tvdbId ? ` &middot; TVDB ${escapeHtml(tvdbId)}` : ''}.
+Sonarr will watch for new episodes and fetch them.
+</div>
+${sessions.sessioned ? `<div class="settings-note" style="margin:0 0 4px;">This series puts out several episodes per event, so monitoring all of them would chase every practice session. Tick the ones worth keeping:</div>
+<div class="tag-editor" style="margin-bottom:8px;">${sessions.sessions.slice(0, 12).map((s) => `<label class="tag-chip" style="cursor:pointer;">
+<input type="checkbox" data-monitor-session="${escapeHtml(s.session)}"${current.some((c) => c.toLowerCase() === s.session.toLowerCase()) ? ' checked' : ''}> ${escapeHtml(s.session)} <span class="settings-note" style="display:inline;margin:0;">${s.count}</span>
+</label>`).join('')}</div>` : '<div class="settings-note" style="margin:0 0 8px;">Every episode will be monitored — this series has one per event.</div>'}
+${tvdbId ? '' : '<div class="settings-note" style="color:var(--amber);margin:0 0 8px;">Couldn\'t read the numeric TVDB id, which Sonarr needs. Monitoring can still be saved, but it won\'t apply until that\'s resolved.</div>'}
+<div class="mail-view-actions">
+<button class="sync-btn sm" type="button" data-monitor-cancel>Not now</button>
+${item.monitor && item.monitor.enabledAt ? '<button class="sync-btn sm" type="button" data-monitor-off>Stop monitoring</button>' : ''}
+<button class="add-btn" type="button" data-monitor-save>Monitor</button>
+</div>
+<div class="sync-status" data-monitor-status></div></div>`;
+} catch (err) {
+if (!dialog.isConnected) return;
+dialog.innerHTML = `<div class="mail-view-card" style="max-width:480px;">
+<div class="mail-view-subject">Couldn't read that series</div>
+<div class="settings-note">${escapeHtml(err.message || String(err))}</div>
+<div class="mail-view-actions"><button class="sync-btn sm" type="button" data-monitor-cancel>Close</button></div></div>`;
+}
+dialog.querySelector('[data-monitor-cancel]')?.addEventListener('click', () => {
+// Remembered, so the prompt stops asking about a series you've
+// already said no to -- without it, every render offers again.
+if (!item.monitor || !item.monitor.enabledAt) {
+item.monitor = { ...(item.monitor || {}), declinedAt: new Date().toISOString() };
+queueSave();
+renderMedia();
+}
+close();
+});
+dialog.querySelector('[data-monitor-off]')?.addEventListener('click', () => {
+item.monitor = null;
+queueSave();
+renderMedia();
+close();
+});
+dialog.querySelector('[data-monitor-save]')?.addEventListener('click', async () => {
+const filter = [...dialog.querySelectorAll('[data-monitor-session]:checked')].map((c) => c.dataset.monitorSession);
+item.monitor = {
+service: 'sonarr', tvdbId, filter,
+enabledAt: new Date().toISOString(), lastRun: '', declinedAt: '',
+};
+queueSave();
+renderMedia();
+const status = dialog.querySelector('[data-monitor-status]');
+status.textContent = 'Telling Sonarr…';
+const res = await applyMonitor(item);
+status.textContent = res.message;
+setTimeout(close, res.ok ? 1200 : 5000);
+});
+}
+
+// Hands the decision to Sonarr, via the home agent. Kept separate from
+// the dialog so the scheduled reconcile can call exactly the same thing
+// -- which is the whole point of a standing want: new episodes appear
+// without anyone opening a dialog.
+async function applyMonitor(item) {
+const m = item.monitor;
+if (!m || !m.tvdbId) return { ok: false, message: 'No TVDB id — nothing to tell Sonarr.' };
+try {
+const { run } = await import('../homeagent.js');
+// Added first if it isn't there; arr.add is a no-op when it is.
+await run('arr.add', { kind: 'tv', title: item.title, tvdbId: m.tvdbId }, { timeoutMs: 45000 });
+const res = await run('arr.monitor', {
+tvdbId: m.tvdbId,
+// The filter becomes a pattern matching "(Race)" and friends --
+// the session sits in brackets at the end of a TVDB episode title.
+include: m.filter && m.filter.length
+? `\\((${m.filter.map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\)\\s*$`
+: '.',
+}, { timeoutMs: 90000 });
+item.monitor = { ...m, lastRun: new Date().toISOString() };
+queueSave();
+renderMedia();
+return { ok: true, message: `Sonarr is watching ${res.monitored} episode${res.monitored === 1 ? '' : 's'}${res.searching ? `, searching ${res.searching}` : ''}.` };
+} catch (err) {
+return { ok: false, message: `Couldn't reach Sonarr: ${err.message || err}` };
+}
+}
+
+// Every monitored series, re-reconciled. Called from the scheduler: a
+// race weekend added to TheTVDB this week has to be turned on in Sonarr,
+// and nothing else notices that it appeared.
+async function reconcileMonitors() {
+const items = data.mediaItems.filter((m) => m.monitor && m.monitor.enabledAt && m.monitor.tvdbId);
+let done = 0;
+for (const item of items) {
+const res = await applyMonitor(item);
+if (res.ok) done += 1;
+}
+return { series: items.length, reconciled: done };
 }
 
 function routesFor(item) {
@@ -701,4 +877,4 @@ resolveBtn.hidden = !looksLikeUrl(input.value);
 renderMedia();
 }
 
-export { initMedia, renderMedia, addMediaItem, mediaChipHtml, bindMediaChips, revealMediaItem, kindFromUrl, unambiguousMatch, showPlexConfirmations };
+export { initMedia, renderMedia, addMediaItem, mediaChipHtml, bindMediaChips, revealMediaItem, kindFromUrl, unambiguousMatch, showPlexConfirmations, reconcileMonitors };
