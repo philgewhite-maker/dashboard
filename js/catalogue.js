@@ -222,8 +222,14 @@ if (book) return book;
 if (amazonArt) return { title: '', creator: '', year: '', imageUrl: amazonArt };
 throw err;
 }
-const pageTitle = cleanPageTitle(ogValue(html, 'og:title') || '');
-const pageImage = ogImageFrom(html, link);
+// og:title first, then the plain <title>. TheTVDB publishes NEITHER an
+// og:title nor an og:image -- which is why a TVDB link arrived tagged
+// but nameless and blank -- yet its <title> is a clean "Formula 1 -
+// TheTVDB.com" that cleanPageTitle already knows how to trim. Worth
+// having generally: a site with no Open Graph tags at all is common
+// enough, and its <title> is almost always better than nothing.
+const pageTitle = cleanPageTitle(ogValue(html, 'og:title') || (html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || '');
+const pageImage = ogImageFrom(html, link) || tvdbArtwork(html);
 return {
 title: (book && book.title) || pageTitle,
 creator: (book && book.creator) || '',
@@ -232,6 +238,16 @@ year: (book && book.year) || '',
 // page, which may be a logo or a placeholder.
 imageUrl: (book && book.imageUrl) || amazonArt || pageImage,
 };
+}
+
+// TheTVDB's poster, for the same reason the <title> fallback exists: the
+// site publishes no og:image, so a series page offered no picture at all.
+// Its artwork sits on a predictable host, and the POSTER path is the one
+// worth having -- the same page also carries actor photos and banners
+// from that host, and the first image on the page is usually an actor.
+function tvdbArtwork(html) {
+const m = /https?:\/\/artworks\.thetvdb\.com\/banners\/[^"'\s]*\/posters\/[^"'\s]+/i.exec(String(html || ''));
+return m ? m[0] : '';
 }
 
 // Page titles carry the site's own furniture ("... : Amazon.co.uk: Books",
