@@ -14,7 +14,7 @@
 // one place.
 import { data, queueSave, blankMediaItem, MEDIA_KINDS, MEDIA_STATUSES } from '../state.js';
 import { escapeHtml, affiliateLink, scrollAndFlash, hydratePhotoBackgrounds, looksLikeUrl } from '../utils.js';
-import { identifyUrl, catalogueLabel, watchProviders, subscriptionFor } from '../catalogue.js';
+import { identifyUrl, catalogueLabel, watchProviders, subscriptionFor, collapseProviders, shortProviderName } from '../catalogue.js';
 
 const KIND_LABEL = Object.fromEntries(MEDIA_KINDS.map((k) => [k.kind, k.label]));
 const STATUS_LABEL = Object.fromEntries(MEDIA_STATUSES.map((s) => [s.status, s.label]));
@@ -307,20 +307,32 @@ function whereToWatchHtml(item) {
 const w = item.whereToWatch;
 if (!w) return '';
 const subs = data.subscriptions || [];
-const onSubscription = w.flatrate.map((name) => ({ name, sub: subscriptionFor(name, subs) }));
+// Collapsed again on the way out, not just on the way in: a record
+// written before that logic existed still has both "Amazon Prime Video"
+// and "Amazon Prime Video with Ads" on it, and nothing re-checks an item
+// that already has an answer. See collapseProviders.
+const onSubscription = collapseProviders(w.flatrate).map((name) => ({ name, sub: subscriptionFor(name, subs) }));
 const yours = onSubscription.filter((p) => p.sub);
 const others = onSubscription.filter((p) => !p.sub);
 if (!onSubscription.length && !w.rent.length && !w.buy.length) {
 return `<span class="settings-note" style="margin:0;">Not streaming in ${escapeHtml(w.region)}</span>`;
 }
+// The ones you pay for come first and the rest are capped, because the
+// row's job is "can I just watch this" -- a list of six places that
+// would each want a card pushes the title and the buttons off the line.
+const MAX_OTHERS = 2;
+const extra = others.slice(MAX_OTHERS);
 const chips = [
 // Clickable, because this names a real subscription record: per
 // CLAUDE.md, a record shown outside its own list leads back to it.
-...yours.map((p) => `<span class="task-context" style="background:var(--sage-bg);color:var(--sage);font-weight:600;cursor:pointer;" data-open-subscription="${escapeHtml(p.sub.id)}" title="You already pay for ${escapeHtml(p.sub.name)} — open it">&#10003; ${escapeHtml(p.name)}</span>`),
-...others.map((p) => `<span class="task-context" title="Streaming here, but not one of your subscriptions">${escapeHtml(p.name)}</span>`),
+...yours.map((p) => `<span class="task-context" style="background:var(--sage-bg);color:var(--sage);font-weight:600;cursor:pointer;" data-open-subscription="${escapeHtml(p.sub.id)}" title="You already pay for ${escapeHtml(p.sub.name)} — open it">&#10003; ${escapeHtml(shortProviderName(p.name))}</span>`),
+...others.slice(0, MAX_OTHERS).map((p) => `<span class="task-context" title="Streaming here, but not one of your subscriptions">${escapeHtml(shortProviderName(p.name))}</span>`),
 ];
+if (extra.length) {
+chips.push(`<span class="task-context" title="Also streaming on ${escapeHtml(extra.map((p) => p.name).join(', '))} — none of them yours">+${extra.length}</span>`);
+}
 if (!onSubscription.length) {
-const paid = [...new Set([...w.rent, ...w.buy])].slice(0, 3);
+const paid = collapseProviders([...w.rent, ...w.buy]).slice(0, 3).map(shortProviderName);
 chips.push(`<span class="settings-note" style="margin:0;">rent/buy: ${escapeHtml(paid.join(', '))}</span>`);
 }
 return chips.join('');
@@ -463,8 +475,8 @@ return String(template || '')
 // you already pay for -- otherwise "watch it on a service you subscribe
 // to" is an instruction you can't follow.
 function subscribedProvider(item) {
-const flat = item.whereToWatch ? item.whereToWatch.flatrate : [];
-for (const name of flat || []) {
+const flat = collapseProviders(item.whereToWatch ? item.whereToWatch.flatrate : []);
+for (const name of flat) {
 const sub = subscriptionFor(name, data.subscriptions || []);
 if (sub) return { name, sub };
 }
@@ -880,7 +892,7 @@ if (url) window.open(url, '_blank', 'noopener');
 item.status = 'available';
 queueSave();
 renderMedia();
-return `Opened ${where ? where.name : 'where to watch'}.`;
+return `Opened ${where ? shortProviderName(where.name) : 'where to watch'}.`;
 }
 if (route.type === 'search') {
 const url = fillTemplate(route.urlTemplate, item);

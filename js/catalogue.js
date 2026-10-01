@@ -423,6 +423,57 @@ return '';
 
 // ---- Where can I already watch it? ------------------------------------
 
+// TMDb lists every resold variant of the same service: "Amazon Prime
+// Video", "Amazon Prime Video with Ads", "Apple TV Amazon Channel". Shown
+// raw, one film sprouts four near-identical chips, and an add-on channel
+// you don't have gets ticked because its name contains a service you do.
+//
+// Collapsing happens in TWO places on purpose, and this is the shared
+// function so they can't drift. Writing-time collapse alone wasn't
+// enough: it was added four commits after the field shipped, so every
+// item checked in between still has "Amazon Prime Video" AND "Amazon
+// Prime Video with Ads" stored on it, and nothing recomputes a record
+// that already has an answer. Collapsing on the way out as well means a
+// row can't show the pair whenever it was written.
+//
+// '' means "drop this one": a "... Channel" is a separate paid add-on,
+// not the subscription it's named after.
+function canonicalProvider(raw) {
+const name = String(typeof raw === 'string' ? raw : (raw && raw.provider_name) || '').trim();
+if (!name || /\bchannel\b/i.test(name)) return '';
+return name.replace(/\s+with\s+ads$/i, '').trim();
+}
+
+function collapseProviders(list) {
+const seen = new Set();
+const out = [];
+for (const entry of list || []) {
+const name = canonicalProvider(entry);
+if (!name || seen.has(name.toLowerCase())) continue;
+seen.add(name.toLowerCase());
+out.push(name);
+}
+return out;
+}
+
+// Display only -- the formal name is what subscriptionFor matches on, and
+// shortening before that would break the alias list. A row carrying four
+// of these is mostly the word "Video".
+const PROVIDER_SHORT = {
+'amazon prime video': 'Prime Video',
+'apple tv plus': 'Apple TV+',
+'disney plus': 'Disney+',
+'paramount plus': 'Paramount+',
+'bbc iplayer': 'iPlayer',
+'sky go': 'Sky',
+'now tv': 'NOW',
+};
+
+function shortProviderName(name) {
+const key = String(name || '').trim().toLowerCase();
+return PROVIDER_SHORT[key] || String(name || '').replace(/\s+Plus$/i, '+').trim();
+}
+
 // TMDb's watch/providers is the documented, per-country answer to "what's
 // this streaming on", split into subscription (flatrate), rent and buy.
 // Plex Discover shows the same kind of thing, but only through an
@@ -443,33 +494,13 @@ const res = await fetch(`https://api.themoviedb.org/3/${type}/${id}/watch/provid
 if (!res.ok) throw new Error(`TMDb providers lookup failed (HTTP ${res.status}).`);
 const body = await res.json();
 const here = (body.results || {})[region];
-// TMDb lists every resold variant of the same service: "Amazon Prime
-// Video", "Amazon Prime Video with Ads", "Apple TV Amazon Channel".
-// Shown raw, one film sprouts four near-identical chips, and an
-// add-on channel you don't have gets ticked because its name contains
-// a service you do. So variants collapse to the base service, and
-// "... Channel" resales are dropped: those are separate paid add-ons,
-// not the subscription they're named after.
-const names = (list) => {
-const seen = new Set();
-const out = [];
-for (const p of list || []) {
-const raw = p.provider_name || '';
-if (!raw || /\bchannel\b/i.test(raw)) continue;
-const base = raw.replace(/\s+with\s+ads$/i, '').trim();
-const key = base.toLowerCase();
-if (seen.has(key)) continue;
-seen.add(key);
-out.push(base);
-}
-return out;
-};
+
 return {
 checkedAt: new Date().toISOString(),
 region,
-flatrate: here ? names(here.flatrate) : [],
-rent: here ? names(here.rent) : [],
-buy: here ? names(here.buy) : [],
+flatrate: here ? collapseProviders(here.flatrate) : [],
+rent: here ? collapseProviders(here.rent) : [],
+buy: here ? collapseProviders(here.buy) : [],
 link: here ? (here.link || '') : '',
 };
 }
@@ -591,4 +622,4 @@ link: `https://musicbrainz.org/release-group/${g.id}`,
 })).filter((c) => c.title);
 }
 
-export { identifyUrl, catalogueLabel, artworkUrl, linkMetadata, ogImageFrom, searchTitle, watchProviders, subscriptionFor, tvdbSeriesInfo, tvdbSessions, tvdbSeasonNumbers, tvdbIdViaTmdb, defaultSessionFilter, CATALOGUE_LABELS };
+export { identifyUrl, catalogueLabel, artworkUrl, linkMetadata, ogImageFrom, searchTitle, watchProviders, subscriptionFor, collapseProviders, shortProviderName, tvdbSeriesInfo, tvdbSessions, tvdbSeasonNumbers, tvdbIdViaTmdb, defaultSessionFilter, CATALOGUE_LABELS };
