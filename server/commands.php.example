@@ -104,7 +104,13 @@ function withQueue(string $file, callable $fn) {
         if (!flock($handle, LOCK_EX)) fail(500, 'Could not lock the queue');
         $raw = stream_get_contents($handle);
         $queue = $raw === '' ? [] : (json_decode($raw, true) ?: []);
-        [$queue, $response] = $fn($queue);
+        // list() rather than the [$a, $b] short form, and a closure rather
+        // than an arrow function below: this file is the only one that used
+        // PHP 7.4 syntax, and on hosting older than that it was a PARSE
+        // error -- so it returned 500 to everything, including the OPTIONS
+        // preflight, before a single header() ran. Every other endpoint
+        // here stays within PHP 7.0, and so does this one now.
+        list($queue, $response) = $fn($queue);
         if ($queue !== null) {
             ftruncate($handle, 0);
             rewind($handle);
@@ -148,7 +154,9 @@ if ($action === 'enqueue' && $method === 'POST') {
     $id = bin2hex(random_bytes(8));
     withQueue($QUEUE_FILE, function (array $queue) use ($id, $verb, $in, $MAX_AGE_SECONDS, $MAX_COMMANDS) {
         $now = time();
-        $queue = array_filter($queue, fn($c) => ($now - (int) ($c['createdAtTs'] ?? 0)) < $MAX_AGE_SECONDS);
+        $queue = array_filter($queue, function ($c) use ($now, $MAX_AGE_SECONDS) {
+            return ($now - (int) ($c['createdAtTs'] ?? 0)) < $MAX_AGE_SECONDS;
+        });
         $queue[] = [
             'id' => $id,
             'verb' => $verb,
