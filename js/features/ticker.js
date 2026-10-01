@@ -346,19 +346,39 @@ const monthly = t.mode === 'month';
 const pick = (hit) => (monthly ? hit.prevMonth : hit.prevDay);
 const tiles = [];
 
-if (c.fx) {
+// A feed that failed says so in its own slot. Two of the four need the
+// proxy, so "DBK is missing" and "the proxy isn't updated" look
+// identical from the outside unless the tile admits which.
+const broken = (name, label) => {
+const hit = c[name];
+if (!hit || !hit.error || hit.value !== undefined) return false;
+tiles.push(tile(label, '<span class="tick-flat">·</span>',
+'<span class="tick-down">failed</span>', `${label}: ${hit.error}`));
+return true;
+};
+
+if (c.fx && c.fx.value !== undefined) {
 tiles.push(tile('GBP/EUR', c.fx.value ? c.fx.value.toFixed(4) : '—',
 changeHtml(c.fx.value, pick(c.fx)),
 `ECB fixing for ${c.fx.date}, via Frankfurter.`,
 { href: SOURCE.fx }));
-}
-if (c.dbk) {
+} else broken('fx', 'GBP/EUR');
+
+if (c.dbk && c.dbk.value !== undefined) {
 tiles.push(tile('DBK', c.dbk.value ? `€${c.dbk.value.toFixed(2)}` : '—',
 changeHtml(c.dbk.value, pick(c.dbk)),
 'Deutsche Bank, XETRA, via Yahoo Finance.',
 { href: SOURCE.dbk }));
+} else broken('dbk', 'DBK');
+
+// With no share count there was nothing to click, and the editor was
+// only reachable BY clicking -- so a fresh document could never be given
+// a number. The tile shows up asking for one instead.
+if (c.fx && c.dbk && c.dbk.value !== undefined && !t.shares) {
+tiles.push(tile('Holding', '<span class="tick-flat">set shares</span>', '',
+'No DBK share count yet. Click to enter how many you hold.', { edit: true }));
 }
-if (c.fx && c.dbk && t.shares) {
+if (c.fx && c.dbk && c.dbk.value !== undefined && t.shares) {
 // Shares are priced in euros and you think in pounds, so the holding
 // is converted at today's rate rather than at what it cost.
 const gbp = (t.shares * c.dbk.value) / c.fx.value;
@@ -370,15 +390,15 @@ changeHtml(gbp, prevGbp),
 + ' Click to set the count.',
 { edit: true }));
 }
-if (c.sonia) {
+if (c.sonia && c.sonia.value !== undefined) {
 tiles.push(tile('2y SONIA', `${c.sonia.value.toFixed(3)}%`,
 // A swap rate moves in basis points, so a percentage change of a
 // percentage reads as nonsense -- this one shows the points.
 changeHtml(c.sonia.value, monthly ? c.sonia.prevMonth : c.sonia.prevDay, { points: true }),
 `2-year SONIA swap, Chatham Financial${c.sonia.via === 'agent' ? ', via the home agent' : ''}. A month ago ${c.sonia.prevMonth}%, a year ago ${c.sonia.prevYear}%.`,
 { href: SOURCE.sonia }));
-}
-if (c.weather) {
+} else broken('sonia', '2y SONIA');
+if (c.weather && c.weather.max !== undefined) {
 // Two pictures rather than a word: the afternoon and the evening are
 // often different days as far as a coat is concerned.
 const day = weatherIcon(c.weather.dayCode ?? c.weather.code);
@@ -390,7 +410,7 @@ tiles.push(tile('London', `${Math.round(c.weather.max)}° / ${Math.round(c.weath
 + `evening ${weatherWord(c.weather.nightCode ?? c.weather.code).toLowerCase()}, `
 + `${c.weather.rain}% chance of rain.`,
 { href: SOURCE.weather }));
-}
+} else broken('weather', 'London');
 
 el.innerHTML = tiles.length
 ? `${tiles.join('')}<button class="tick-toggle" type="button" id="ticker-mode" title="Switch between change since yesterday and since a month ago">${monthly ? 'month' : 'day'}</button>`
@@ -424,7 +444,20 @@ async function refreshTicker({ force = false } = {}) {
 if (force) data.tickerCache = {};
 const jobs = [['fx', fetchFx], ['dbk', fetchDbk], ['weather', fetchWeather], ['sonia', fetchSonia]];
 await Promise.all(jobs.map(async ([name, fn]) => {
-try { await fn(); } catch (err) { console.error(`Ticker: ${name} failed:`, err); }
+try {
+await fn();
+// Any previous failure is cleared by a success, so a tile that has
+// started working stops apologising for yesterday.
+if (cache()[name]) delete cache()[name].error;
+} catch (err) {
+console.error(`Ticker: ${name} failed:`, err);
+// A tile that simply vanishes is the worst of both worlds: you can
+// see something is missing but not what, and the console is not
+// where you were looking. The message is kept and shown.
+const existing = cache()[name] || {};
+cache()[name] = { ...existing, error: err.message || String(err), erroredAt: new Date().toISOString() };
+queueSave();
+}
 }));
 try { await accrueShares(); } catch (err) { console.error('Ticker: share accrual failed:', err); }
 renderTicker();
