@@ -243,6 +243,7 @@ document.getElementById('refresh-usage-btn').addEventListener('click', renderUsa
 await renderUsage();
 
 initDriveBackup();
+initPairing();
 }
 
 // The Notion proxy URL and database id, and a test that proves all three
@@ -772,6 +773,211 @@ testBtn.disabled = false;
 });
 }
 
+
+// ---- Devices --------------------------------------------------------------
+
+function pairAgoText(iso) {
+if (!iso) return 'never';
+const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+if (mins < 2) return 'just now';
+if (mins < 60) return `${mins} min ago`;
+const hours = Math.round(mins / 60);
+if (hours < 48) return `${hours}h ago`;
+return `${Math.round(hours / 24)}d ago`;
+}
+
+async function renderDevices(message = '') {
+const box = document.getElementById('pair-devices');
+const status = document.getElementById('pair-status');
+if (!box) return;
+if (status && message) status.textContent = message;
+let res;
+try {
+const pairing = await import('../pairing.js');
+res = await pairing.listDevices();
+} catch (err) {
+box.innerHTML = '';
+if (status) status.textContent = err.message || String(err);
+return;
+}
+if (status && !message) status.textContent = '';
+const settings = await getLocalSettings();
+const mine = settings.deviceId || '';
+const live = (res.devices || []).filter((d) => !d.revoked);
+const rows = (res.devices || []).map((d) => {
+const here = d.id === mine;
+return `<tr${d.revoked ? ' style="opacity:.55;"' : ''}>
+<td>${escapeHtml(d.label || 'A device')}${here ? ' <span class="settings-note" style="display:inline;margin:0;">(this one)</span>' : ''}</td>
+<td>${escapeHtml(d.revoked ? 'revoked' : pairAgoText(d.lastSeen))}</td>
+<td>${d.revoked ? '' : `<button class="sync-btn sm" type="button" data-revoke-device="${escapeHtml(d.id)}">${here ? 'Sign this device out' : 'Revoke'}</button>`}</td>
+</tr>`;
+}).join('');
+// Whether the shared secret is still a way in is the whole question this
+// feature exists to answer, so it is stated rather than left to infer
+// from a list of devices.
+const secretLine = res.masterSecretAllowed
+? `<div class="settings-note" style="margin:6px 0 0;">The shared secret still works${live.length ? ' — once every device you use is listed above, set <code>$DASH_ALLOW_MASTER_SECRET = false</code> in auth.php and any old copy of it stops being a way in' : ''}.</div>`
+: '<div class="settings-note" style="margin:6px 0 0;color:var(--sage);">The shared secret has been retired — only the devices above can get in.</div>';
+box.innerHTML = `${rows
+? `<table class="limits-table"><thead><tr><th>Device</th><th>Last used</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
+: '<div class="settings-note" style="margin:0;">No devices paired yet — everything is still using the shared secret.</div>'}
+${secretLine}
+${(res.devices || []).some((d) => d.revoked) ? '<div class="sync-row" style="margin-top:6px;"><button class="sync-btn sm" type="button" id="pair-forget-btn">Clear revoked rows</button></div>' : ''}`;
+
+box.querySelectorAll('[data-revoke-device]').forEach((btn) => {
+btn.addEventListener('click', async () => {
+const id = btn.dataset.revokeDevice;
+const self = id === mine;
+// Revoking the device you are sitting at cuts off your own data,
+// which is a reasonable thing to want and a terrible thing to do by
+// accident on a list of similar-looking rows.
+if (self && !confirm('This is the device you are using. It will stop syncing immediately and will need a new code to pair again. Continue?')) return;
+btn.disabled = true;
+try {
+const pairing = await import('../pairing.js');
+await pairing.revokeDevice(id);
+if (self) {
+await setLocalSetting('syncSecret', '');
+await setLocalSetting('deviceId', '');
+const secretInput = document.getElementById('sync-secret-input');
+if (secretInput) secretInput.value = '';
+// Nothing left to ask the server WITH, so re-listing here would
+// replace "signed out" with "bad or missing sync secret" -- which is
+// true, and reads like a failure rather than the thing you just did.
+box.innerHTML = '';
+if (status) status.textContent = 'Signed out. Pair this device again with a fresh code from another one.';
+return;
+}
+await renderDevices('Revoked.');
+} catch (err) {
+if (status) status.textContent = err.message || String(err);
+btn.disabled = false;
+}
+});
+});
+box.querySelector('#pair-forget-btn')?.addEventListener('click', async () => {
+const pairing = await import('../pairing.js');
+await pairing.forgetRevoked();
+renderDevices('Cleared.');
+});
+}
+
+function initPairing() {
+const startBtn = document.getElementById('pair-start-btn');
+if (!startBtn) return; // not in this build's DOM
+const codeBox = document.getElementById('pair-code-box');
+const status = document.getElementById('pair-status');
+let countdown = null;
+
+startBtn.addEventListener('click', async () => {
+clearInterval(countdown);
+startBtn.disabled = true;
+status.textContent = 'Asking the server for a code…';
+try {
+const pairing = await import('../pairing.js');
+const res = await pairing.startPairing();
+const settings = await getLocalSettings();
+const link = pairing.pairingLink(settings.syncUrl, res.code);
+const expires = new Date(res.expiresAt).getTime();
+codeBox.hidden = false;
+codeBox.innerHTML = `<div class="settings-note" style="margin:10px 0 4px;">On the other device, open this link — or go to its Settings and type the code.</div>
+<div style="font-size:26px;font-weight:600;letter-spacing:3px;font-family:monospace;">${escapeHtml(res.code)}</div>
+<div class="sync-row" style="margin-top:6px;">
+<button class="sync-btn sm" type="button" id="pair-copy-link">Copy link</button>
+<span class="sync-status" id="pair-countdown"></span>
+</div>
+<div class="settings-note" style="margin:6px 0 0;">Safe to message to yourself: it works once and then expires. The link carries the sync URL too, which isn't secret.</div>`;
+// A visible clock, because "it expires in ten minutes" is useless
+// once you've walked to the other room and forgotten when you started.
+const tick = () => {
+const el = document.getElementById('pair-countdown');
+if (!el) return;
+const left = Math.max(0, Math.round((expires - Date.now()) / 1000));
+if (!left) {
+el.textContent = 'Expired — press Add a device for a new one.';
+clearInterval(countdown);
+return;
+}
+el.textContent = `Expires in ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+};
+tick();
+countdown = setInterval(tick, 1000);
+codeBox.querySelector('#pair-copy-link').addEventListener('click', async () => {
+try {
+await navigator.clipboard.writeText(link);
+status.textContent = 'Link copied.';
+} catch (err) {
+// Clipboard access is refused often enough — insecure context, a
+// permission, an embedded webview — that failing silently would
+// just look broken. Showing the link is the usable fallback.
+status.textContent = link;
+}
+});
+status.textContent = '';
+await renderDevices();
+} catch (err) {
+status.textContent = err.message || String(err);
+} finally {
+startBtn.disabled = false;
+}
+});
+
+document.getElementById('pair-refresh-btn')?.addEventListener('click', () => renderDevices('Checking…'));
+
+const redeemBtn = document.getElementById('pair-redeem-btn');
+redeemBtn?.addEventListener('click', async () => {
+const urlEl = document.getElementById('pair-redeem-url');
+const codeEl = document.getElementById('pair-redeem-code');
+const labelEl = document.getElementById('pair-redeem-label');
+const say = (t) => { const el = document.getElementById('pair-redeem-status'); if (el) el.textContent = t; };
+const url = urlEl.value.trim();
+const code = codeEl.value.trim();
+if (!url || !code) { say('Both the sync URL and the code are needed.'); return; }
+redeemBtn.disabled = true;
+say('Pairing…');
+try {
+const pairing = await import('../pairing.js');
+const res = await pairing.redeemPairing(url, code, labelEl.value.trim() || pairing.guessLabel());
+const urlInput = document.getElementById('sync-url-input');
+const secretInput = document.getElementById('sync-secret-input');
+if (urlInput) urlInput.value = url;
+if (secretInput) secretInput.value = res.token;
+codeEl.value = '';
+say(`Paired as "${res.label}". This device has its own token now.`);
+await restartAutoSync();
+await renderDevices();
+} catch (err) {
+say(err.message || String(err));
+} finally {
+redeemBtn.disabled = false;
+}
+});
+
+// A link opened on the new device fills the boxes in, leaving only the
+// name to confirm. Deliberately NOT automatic: redeeming writes a
+// credential and replaces this device's sync settings, which is not
+// something a URL someone sent you should be able to do on its own.
+(async () => {
+const pairing = await import('../pairing.js');
+const found = pairing.takePendingPairing();
+if (!found) return;
+// Taken out of the address bar straight away, so the code isn't left
+// in history, in a bookmark, or in whatever the next screenshot shows.
+history.replaceState(null, '', `${location.pathname}${location.search}#settings`);
+const codeEl = document.getElementById('pair-redeem-code');
+const details = codeEl?.closest('details');
+if (details) details.open = true;
+const urlEl = document.getElementById('pair-redeem-url');
+const labelEl = document.getElementById('pair-redeem-label');
+if (urlEl) urlEl.value = found.url;
+if (codeEl) codeEl.value = found.code;
+if (labelEl && !labelEl.value) labelEl.value = pairing.guessLabel();
+const el = document.getElementById('pair-redeem-status');
+if (el) el.textContent = 'Code read from the link — check the name, then press Pair this device.';
+})().catch((err) => console.error('Pairing link:', err));
+
+renderDevices();
+}
 function summarizeCounts(d) {
 return `${d.connections.length} connection${d.connections.length === 1 ? '' : 's'}, ${d.habits.length} habit${d.habits.length === 1 ? '' : 's'}, ${d.goals.length} goal${d.goals.length === 1 ? '' : 's'}, ${d.jobs.length} job${d.jobs.length === 1 ? '' : 's'}, ${d.vouchers.length} voucher${d.vouchers.length === 1 ? '' : 's'}, ${d.businessIdeas.length} idea${d.businessIdeas.length === 1 ? '' : 's'}`;
 }

@@ -96,6 +96,15 @@ scrollAndFlash(targetSelector);
 // give a connection its own real URL) also expands and scrolls to that
 // connection once the tab's switched to.
 const validTabs = new Set([...document.querySelectorAll('[data-tab-btn]')].map((b) => b.dataset.tabBtn));
+// A pairing link is #pair=..., which is not a tab. Taken here because the
+// next line replaces the hash, and by the time Settings is wired the code
+// would already be gone -- it has to be read before the router rewrites
+// the URL, not after.
+const pairing = /^#pair=/.test(location.hash) ? location.hash : '';
+if (pairing) {
+sessionStorage.setItem('pendingPairing', pairing);
+switchTab('settings');
+} else {
 const [fromHash, connId] = location.hash.slice(1).split(':');
 switchTab(validTabs.has(fromHash) ? fromHash : 'overview');
 if (connId) {
@@ -103,6 +112,7 @@ import('./features/connections.js').then((m) => {
 m.expandConnection(connId);
 setTimeout(() => scrollAndFlash(`[data-conn-row="${connId}"]`), 80);
 });
+}
 }
 }
 

@@ -74,10 +74,15 @@ function fail(int $code, string $message): void {
 }
 
 $provided = $_SERVER['HTTP_X_SYNC_SECRET'] ?? '';
-if ($SECRET === '' || $SECRET === 'PUT-A-LONG-RANDOM-STRING-HERE') {
-    fail(500, 'Server not configured: set $SECRET in files.php');
+require_once __DIR__ . '/auth.php';
+if (!dash_secret_configured($SECRET)) {
+    fail(500, 'Server not configured: set $DASH_MASTER_SECRET in auth.php');
 }
-if (!is_string($provided) || !hash_equals($SECRET, $provided)) {
+// Accepts this file's $SECRET or any per-device token issued by pair.php
+// -- see auth.php for why a device carrying its own token is worth the
+// extra file. Backwards compatible: with no devices paired, this behaves
+// exactly as the old hash_equals check did.
+if (!dash_authorise((string) $provided, $SECRET)['ok']) {
     fail(401, 'Bad or missing sync secret');
 }
 

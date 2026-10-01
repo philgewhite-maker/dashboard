@@ -1,0 +1,194 @@
+<?php
+/**
+ * Shared authorisation for every dashboard endpoint.
+ *
+ * WHY THIS EXISTS
+ *
+ * Until now there was one secret, pasted into nine server files and typed
+ * into every device. That has two costs that only show up later:
+ *
+ *   1. Getting it onto a new device means sending it through something
+ *      that keeps a copy -- a chat to yourself, an email draft, clipboard
+ *      history, a screenshot. The credential outlives the moment it was
+ *      needed, in a place nobody is watching.
+ *   2. One string authenticates everything, so losing a laptop means
+ *      rotating a secret that lives in nine files and five devices. In
+ *      practice that means never rotating it.
+ *
+ * So a device can now carry its OWN token instead. Tokens are issued by
+ * pair.php in exchange for a one-time code that expires in minutes, which
+ * is the whole point: the thing that travels between devices is useless
+ * by the time anyone could find it in a chat log.
+ *
+ * BACKWARDS COMPATIBLE ON PURPOSE. The master secret in each endpoint
+ * keeps working, so uploading these files in any order never locks you
+ * out, and devices paired the old way carry on until you migrate them.
+ * Turn $ALLOW_MASTER_SECRET off once every device has its own token --
+ * that is the step that actually retires the shared secret, and it is
+ * deliberately yours to take rather than something a file upload does to
+ * you.
+ *
+ * Tokens are stored HASHED. A readable copy of this file's data tells an
+ * attacker nothing it can replay, the same reason /etc/shadow holds
+ * hashes rather than passwords. That also means a lost token cannot be
+ * recovered, only revoked and reissued -- which is the correct trade.
+ */
+
+// ---- Configuration ---------------------------------------------------
+
+// THE master secret, in one place. Until now it was pasted into nine
+// separate files, which is why it had never been rotated: changing it
+// meant nine uploads and five devices, and a half-finished rotation
+// leaves some endpoints answering and others not.
+//
+// Set it here and leave every other file's $SECRET on its placeholder --
+// each endpoint falls back to this one. A file that still carries a real
+// secret of its own keeps using it, so an existing deployment doesn't
+// change behaviour until you blank it out.
+//
+// Generate one with: openssl rand -hex 32
+$DASH_MASTER_SECRET = 'PUT-A-LONG-RANDOM-STRING-HERE';
+
+// Where the device registry lives. Same convention as sync.php's
+// $DATA_FILE: one directory ABOVE this script, which on cPanel means
+// outside public_html, so it isn't web-reachable even if .htaccess is
+// ever lost. It holds hashes and labels, no replayable secrets, but
+// there is no reason to serve it.
+$DASH_DEVICES_FILE = dirname(__DIR__) . '/dashboard-devices.json';
+
+// Set to false once every device has been re-paired and carries its own
+// token. After that the master secret in each endpoint file no longer
+// authenticates anything, and a copy of it found in an old chat is inert.
+// Leave it true until then, or you will lock yourself out of the server
+// that issues the replacements.
+$DASH_ALLOW_MASTER_SECRET = true;
+
+// ---- End of configuration --------------------------------------------
+
+/** A secret that is actually set, rather than left on its placeholder. */
+function dash_is_real_secret(?string $secret): bool {
+    return is_string($secret) && $secret !== '' && strpos($secret, 'PUT-') !== 0;
+}
+
+/**
+ * Which secret an endpoint should use: its own if it still carries one,
+ * otherwise the shared one above. The per-file value becomes an override
+ * nothing needs to use, so the endpoints can be uploaded untouched.
+ */
+function dash_master_secret(?string $local = null): string {
+    global $DASH_MASTER_SECRET;
+    if (dash_is_real_secret($local)) return (string) $local;
+    return dash_is_real_secret($DASH_MASTER_SECRET) ? (string) $DASH_MASTER_SECRET : '';
+}
+
+/**
+ * For each endpoint's "server not configured" guard, which must now pass
+ * when the secret lives in auth.php rather than in that file.
+ */
+function dash_secret_configured(?string $local = null): bool {
+    return dash_master_secret($local) !== '';
+}
+
+/**
+ * Read the device registry. Returns the empty shape rather than failing,
+ * so an endpoint still works on a server where nothing has been paired.
+ */
+function dash_devices_read(string $file): array {
+    $empty = ['devices' => [], 'pending' => [], 'failures' => []];
+    if (!is_file($file)) return $empty;
+    $raw = file_get_contents($file);
+    if ($raw === false || $raw === '') return $empty;
+    $parsed = json_decode($raw, true);
+    if (!is_array($parsed)) return $empty;
+    return [
+        'devices' => is_array($parsed['devices'] ?? null) ? $parsed['devices'] : [],
+        'pending' => is_array($parsed['pending'] ?? null) ? $parsed['pending'] : [],
+        'failures' => is_array($parsed['failures'] ?? null) ? $parsed['failures'] : [],
+    ];
+}
+
+/**
+ * Write the registry atomically: temp file then rename, the same way
+ * sync.php writes the document. rename() is atomic, so a reader can never
+ * catch a half-written file, and a crash mid-write leaves the previous
+ * version intact rather than a truncated one.
+ */
+function dash_devices_write(string $file, array $store): bool {
+    $tmp = $file . '.tmp';
+    $json = json_encode($store, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+    if ($json === false) return false;
+    if (file_put_contents($tmp, $json, LOCK_EX) === false) return false;
+    @chmod($tmp, 0600);
+    return rename($tmp, $file);
+}
+
+/** Constant-time lookup of a presented token among the live devices. */
+function dash_find_device(array $devices, string $provided): ?array {
+    $hash = hash('sha256', $provided);
+    $found = null;
+    // Every row is compared even after a match, so the time taken says
+    // nothing about WHICH device matched or how early in the list it sat.
+    foreach ($devices as $device) {
+        $stored = (string) ($device['hash'] ?? '');
+        if ($stored !== '' && hash_equals($stored, $hash) && empty($device['revoked'])) {
+            $found = $device;
+        }
+    }
+    return $found;
+}
+
+/**
+ * Note that a device was used, for the "last seen" column in Settings --
+ * the one thing that makes a device list worth having, since a row you
+ * don't recognise is only alarming if you can see it is still active.
+ *
+ * Throttled to once every ten minutes per device, and skipped entirely if
+ * the lock is already held: sync polls often, and a registry write per
+ * request would be pure IO for a timestamp nobody reads at that
+ * resolution. LOCK_NB rather than waiting, because a missed timestamp is
+ * worth less than a blocked request.
+ */
+function dash_touch_device(string $file, string $id): void {
+    $lock = @fopen($file . '.lock', 'c');
+    if ($lock === false) return;
+    if (!flock($lock, LOCK_EX | LOCK_NB)) { fclose($lock); return; }
+    $store = dash_devices_read($file);
+    $now = time();
+    $changed = false;
+    foreach ($store['devices'] as &$device) {
+        if (($device['id'] ?? '') !== $id) continue;
+        $last = strtotime((string) ($device['lastSeen'] ?? '')) ?: 0;
+        if ($now - $last >= 600) { $device['lastSeen'] = gmdate('c', $now); $changed = true; }
+        break;
+    }
+    unset($device);
+    if ($changed) dash_devices_write($file, $store);
+    flock($lock, LOCK_UN);
+    fclose($lock);
+}
+
+/**
+ * The one call every endpoint makes. Returns ['ok'=>bool, 'via'=>string,
+ * 'label'=>string] -- `via` is reported so a log or an error can say
+ * whether a request arrived on the shared secret or a device's own token,
+ * which is the difference between "working" and "migrated".
+ */
+function dash_authorise(string $provided, ?string $localSecret = null): array {
+    global $DASH_DEVICES_FILE, $DASH_ALLOW_MASTER_SECRET;
+    if ($provided === '') return ['ok' => false, 'via' => 'none', 'label' => ''];
+
+    $masterSecret = dash_master_secret($localSecret);
+
+    // hash_equals compares in constant time, so a wrong secret can't be
+    // recovered by timing how long the rejection takes.
+    if ($DASH_ALLOW_MASTER_SECRET && $masterSecret !== '' && hash_equals($masterSecret, $provided)) {
+        return ['ok' => true, 'via' => 'master', 'label' => 'shared secret'];
+    }
+
+    $store = dash_devices_read($DASH_DEVICES_FILE);
+    $device = dash_find_device($store['devices'], $provided);
+    if ($device === null) return ['ok' => false, 'via' => 'none', 'label' => ''];
+
+    dash_touch_device($DASH_DEVICES_FILE, (string) $device['id']);
+    return ['ok' => true, 'via' => 'device', 'label' => (string) ($device['label'] ?? 'a device')];
+}

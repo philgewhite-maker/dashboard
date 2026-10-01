@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v414</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v415</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -2722,11 +2722,34 @@ Finds connections whose cover photo is missing or is really just the small place
 <button class="sync-btn" id="sync-test-btn" type="button">Test &amp; start syncing</button>
 </div>
 <div class="sync-result" id="sync-test-status"></div>
-<div class="settings-note">Stored only on this device, never exported in a backup and never committed to the repo. Enter the same pair on each device you use.</div>
+<div class="settings-note">Stored only on this device, never exported in a backup and never committed to the repo. On a second device, use Devices below rather than retyping this &mdash; sending a secret to yourself leaves it in the chat forever.</div>
 <div class="sync-row" style="margin-top:10px;">
 <button class="sync-btn" id="relay-setup-btn" type="button">Set up Dashboard Capture</button>
 </div>
 <div class="settings-note">Android only. Dashboard Capture is a small companion app for sharing images and files in, since Chrome drops shared files on some phones. Install it, then tap this on the phone to hand it the URL and secret above &mdash; you confirm them in the app.</div>
+</div>
+
+<div class="settings-block">
+<h3>Devices</h3>
+<div class="settings-note" style="margin:0 0 10px;">Each device can carry its own token instead of the shared secret, so one can be cut off without re-pairing the rest. Add a device here and nothing long-lived travels: the code expires in ten minutes and works once, which makes it safe to send however is convenient. Needs <code>pair.php</code> and <code>auth.php</code> on the server.</div>
+<div class="sync-row">
+<button class="sync-btn" id="pair-start-btn" type="button">Add a device&hellip;</button>
+<button class="sync-btn sm" id="pair-refresh-btn" type="button">Refresh list</button>
+<span class="sync-status" id="pair-status"></span>
+</div>
+<div id="pair-code-box" hidden></div>
+<div id="pair-devices" style="margin-top:10px;"></div>
+<details style="margin-top:12px;">
+<summary class="settings-note" style="cursor:pointer;">This device hasn&rsquo;t been paired yet &mdash; enter a code</summary>
+<div class="settings-note" style="margin:8px 0;">Open the pairing link on this device instead if you can; it fills both boxes in. Otherwise copy the sync URL from a paired device and type the code.</div>
+<input type="text" autocomplete="off" id="pair-redeem-url" class="settings-input" placeholder="https://your-host/sync.php">
+<input type="text" autocomplete="off" id="pair-redeem-code" class="settings-input" style="margin-top:8px;" placeholder="ABCD-EFGH">
+<input type="text" autocomplete="off" id="pair-redeem-label" class="settings-input" style="margin-top:8px;" placeholder="What to call this device">
+<div class="sync-row" style="margin-top:8px;">
+<button class="sync-btn" id="pair-redeem-btn" type="button">Pair this device</button>
+<span class="sync-status" id="pair-redeem-status"></span>
+</div>
+</details>
 </div>
 
 <div class="settings-block">

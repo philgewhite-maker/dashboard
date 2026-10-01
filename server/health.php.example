@@ -74,15 +74,20 @@ function fail(int $code, string $message): void {
     exit;
 }
 
-if ($SECRET === '' || $SECRET === 'PUT-A-LONG-RANDOM-STRING-HERE') {
-    fail(500, 'Server not configured: set $SECRET in health.php');
+require_once __DIR__ . '/auth.php';
+if (!dash_secret_configured($SECRET)) {
+    fail(500, 'Server not configured: set $DASH_MASTER_SECRET in auth.php');
 }
 // A webhook-posting app may not let you set a custom header at all, so the
 // secret is accepted as a query string token too, not just the header the
 // dashboard itself uses. hash_equals compares in constant time either way,
 // so a wrong guess can't be narrowed down by how long the rejection takes.
 $provided = $_SERVER['HTTP_X_SYNC_SECRET'] ?? ($_GET['secret'] ?? '');
-if (!is_string($provided) || !hash_equals($SECRET, $provided)) {
+// Accepts this file's $SECRET or any per-device token issued by pair.php
+// -- see auth.php for why a device carrying its own token is worth the
+// extra file. Backwards compatible: with no devices paired, this behaves
+// exactly as the old hash_equals check did.
+if (!dash_authorise((string) $provided, $SECRET)['ok']) {
     fail(401, 'Bad or missing secret');
 }
 

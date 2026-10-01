@@ -1,0 +1,286 @@
+<?php
+/**
+ * Device pairing: issue a per-device token in exchange for a one-time code.
+ *
+ * THE PROBLEM THIS SOLVES
+ *
+ * Typing the shared secret into a new phone or laptop means first getting
+ * it there, and every way of doing that keeps a copy: a message to
+ * yourself, an email draft, clipboard history, a photo of a screen. The
+ * credential ends up sitting in a chat log for years, which is where it
+ * will still be when the laptop is sold.
+ *
+ * So nothing long-lived travels any more. An already-paired device asks
+ * for a code; the code is eight characters, good for one use and ten
+ * minutes, and worthless after either. The new device redeems it and the
+ * SERVER hands over a token the new device alone holds. Paste the code
+ * into whatever chat app you like -- by the time anyone finds it, it has
+ * already expired.
+ *
+ * Codes and tokens are both stored hashed (see auth.php). A code you
+ * cannot read back is a code nobody else can read either, and the cost --
+ * no way to re-display a code you've lost -- is one more tap on "Add a
+ * device".
+ */
+
+// ---- Configuration ---------------------------------------------------
+
+// An optional per-file override. Leave it on the placeholder and
+// auth.php's $DASH_MASTER_SECRET is used instead -- having the secret in
+// one entry rather than ten is most of why auth.php exists.
+//
+// Either way it only authorises MINTING a code and managing devices. It
+// is not what a paired device carries.
+$SECRET = 'PUT-A-LONG-RANDOM-STRING-HERE';
+
+// A browser will only let the dashboard call this endpoint from an origin
+// listed here. Same list as every other endpoint.
+$ALLOWED_ORIGINS = [
+    'https://philgewhite-maker.github.io',
+    'http://localhost:8743',
+];
+
+// How long a code is good for. Short on purpose: the window only has to
+// cover walking to the other device.
+$CODE_TTL_SECONDS = 600;
+
+// A wrong code is cheap to try, so they are counted. Eight characters
+// from a 31-letter alphabet is about 8.5e11 combinations, which no
+// attacker is grinding through in ten minutes -- but a cap means they
+// cannot try at all rather than merely failing, and it turns a quiet
+// attack into a visible lockout.
+$MAX_FAILURES_PER_HOUR = 12;
+
+// ---- End of configuration --------------------------------------------
+
+require_once __DIR__ . '/auth.php';
+
+$origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+if ($origin !== '' && in_array($origin, $ALLOWED_ORIGINS, true)) {
+    header('Access-Control-Allow-Origin: ' . $origin);
+    // Responses differ per origin, so caches must not reuse one for another.
+    header('Vary: Origin');
+}
+header('Access-Control-Allow-Headers: Content-Type, X-Sync-Secret');
+header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+header('Access-Control-Max-Age: 86400');
+header('Content-Type: application/json');
+header('Cache-Control: no-store');
+
+// CORS preflight: must answer before the auth check, since the browser
+// sends it without the secret header.
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
+    http_response_code(204);
+    exit;
+}
+
+function fail(int $code, string $message): void {
+    http_response_code($code);
+    echo json_encode(['error' => $message]);
+    exit;
+}
+
+/**
+ * Letters that cannot be confused when read off one screen and typed into
+ * another: no I, L, O, 0 or 1. A code is only ever entered by hand, so
+ * ambiguity here is a support problem, not a theoretical one.
+ */
+const DASH_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+
+function dash_make_code(): string {
+    $alphabet = DASH_CODE_ALPHABET;
+    $out = '';
+    for ($i = 0; $i < 8; $i++) {
+        // random_int is the cryptographically secure one. rand()/mt_rand()
+        // are predictable from a few outputs, which for a credential is
+        // the same as having no code at all.
+        $out .= $alphabet[random_int(0, strlen($alphabet) - 1)];
+    }
+    return $out;
+}
+
+/** Codes are shown as ABCD-EFGH but accepted however they arrive. */
+function dash_normalise_code(string $raw): string {
+    return strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $raw) ?? '');
+}
+
+function dash_locked(string $file) {
+    $lock = fopen($file . '.lock', 'c');
+    if ($lock === false) fail(500, 'Could not open lock file — check directory permissions');
+    flock($lock, LOCK_EX);
+    return $lock;
+}
+
+function dash_unlock($lock): void {
+    flock($lock, LOCK_UN);
+    fclose($lock);
+}
+
+/** Drops expired codes and stale failure counts on every write. */
+function dash_prune(array $store): array {
+    $now = time();
+    $store['pending'] = array_values(array_filter(
+        $store['pending'],
+        function ($p) use ($now) { return (int) ($p['expires'] ?? 0) > $now; }
+    ));
+    $store['failures'] = array_values(array_filter(
+        $store['failures'],
+        function ($t) use ($now) { return (int) $t > $now - 3600; }
+    ));
+    return $store;
+}
+
+$action = $_GET['action'] ?? '';
+$body = json_decode(file_get_contents('php://input') ?: '', true);
+if (!is_array($body)) $body = [];
+$auth = dash_authorise((string) ($_SERVER['HTTP_X_SYNC_SECRET'] ?? ''), $SECRET);
+
+// ---- Redeem: the only action that does NOT need an existing credential,
+// because the whole point is that the device asking has none yet. The code
+// is the credential, which is why it is single-use and short-lived.
+if ($action === 'redeem') {
+    $code = dash_normalise_code((string) ($body['code'] ?? ''));
+    $label = trim((string) ($body['label'] ?? ''));
+    if ($label === '') $label = 'A device';
+    if (strlen($label) > 60) $label = substr($label, 0, 60);
+    if ($code === '') fail(400, 'No code given');
+
+    $lock = dash_locked($DASH_DEVICES_FILE);
+    $store = dash_prune(dash_devices_read($DASH_DEVICES_FILE));
+
+    if (count($store['failures']) >= $MAX_FAILURES_PER_HOUR) {
+        dash_devices_write($DASH_DEVICES_FILE, $store);
+        dash_unlock($lock);
+        fail(429, 'Too many wrong codes. Wait an hour, then start a new pairing.');
+    }
+
+    $hash = hash('sha256', $code);
+    $matched = null;
+    foreach ($store['pending'] as $i => $pending) {
+        if (hash_equals((string) ($pending['hash'] ?? ''), $hash)) { $matched = $i; break; }
+    }
+    if ($matched === null) {
+        $store['failures'][] = time();
+        dash_devices_write($DASH_DEVICES_FILE, $store);
+        dash_unlock($lock);
+        fail(401, 'That code is wrong or has expired.');
+    }
+
+    // Burned before the token is minted, not after: a code that survives
+    // its own redemption is a code that can be replayed.
+    array_splice($store['pending'], $matched, 1);
+
+    $token = bin2hex(random_bytes(32));
+    $device = [
+        'id' => bin2hex(random_bytes(8)),
+        'hash' => hash('sha256', $token),
+        'label' => $label,
+        'created' => gmdate('c'),
+        'lastSeen' => gmdate('c'),
+        'revoked' => null,
+    ];
+    $store['devices'][] = $device;
+    if (!dash_devices_write($DASH_DEVICES_FILE, $store)) {
+        dash_unlock($lock);
+        fail(500, 'Could not save the device — check directory permissions');
+    }
+    dash_unlock($lock);
+
+    // The only time this token is ever readable. It is stored hashed, so
+    // there is no second chance to fetch it -- a lost token is re-paired,
+    // not recovered.
+    echo json_encode(['token' => $token, 'id' => $device['id'], 'label' => $device['label']]);
+    exit;
+}
+
+// ---- Everything below needs an existing credential ---------------------
+if (!$auth['ok']) fail(401, 'Bad or missing sync secret');
+
+if ($action === 'start') {
+    $lock = dash_locked($DASH_DEVICES_FILE);
+    $store = dash_prune(dash_devices_read($DASH_DEVICES_FILE));
+    // One live code at a time. Two outstanding codes is two chances for
+    // one to be forgotten somewhere, and nobody pairs two devices in the
+    // same ten minutes.
+    $store['pending'] = [];
+    $code = dash_make_code();
+    $expires = time() + $CODE_TTL_SECONDS;
+    $store['pending'][] = ['hash' => hash('sha256', $code), 'expires' => $expires];
+    if (!dash_devices_write($DASH_DEVICES_FILE, $store)) {
+        dash_unlock($lock);
+        fail(500, 'Could not save the code — check directory permissions');
+    }
+    dash_unlock($lock);
+    echo json_encode([
+        'code' => substr($code, 0, 4) . '-' . substr($code, 4),
+        'expiresAt' => gmdate('c', $expires),
+        'seconds' => $CODE_TTL_SECONDS,
+    ]);
+    exit;
+}
+
+if ($action === 'devices') {
+    $store = dash_devices_read($DASH_DEVICES_FILE);
+    // Hashes never leave the server: the list is for recognising devices,
+    // and a hash tells you nothing a label doesn't.
+    $devices = array_map(function ($d) {
+        return [
+            'id' => $d['id'] ?? '',
+            'label' => $d['label'] ?? '',
+            'created' => $d['created'] ?? null,
+            'lastSeen' => $d['lastSeen'] ?? null,
+            'revoked' => $d['revoked'] ?? null,
+        ];
+    }, $store['devices']);
+    echo json_encode([
+        'devices' => $devices,
+        // So Settings can say whether the shared secret is still a way in.
+        'masterSecretAllowed' => (bool) $DASH_ALLOW_MASTER_SECRET,
+        'via' => $auth['via'],
+    ]);
+    exit;
+}
+
+if ($action === 'revoke') {
+    $id = (string) ($body['id'] ?? '');
+    if ($id === '') fail(400, 'No device id given');
+    $lock = dash_locked($DASH_DEVICES_FILE);
+    $store = dash_devices_read($DASH_DEVICES_FILE);
+    $hit = false;
+    foreach ($store['devices'] as &$device) {
+        if (($device['id'] ?? '') !== $id) continue;
+        // Revoked rather than deleted, so the list still shows that a
+        // device existed and when it was cut off. A row that vanishes
+        // leaves you wondering whether you imagined it.
+        $device['revoked'] = gmdate('c');
+        $device['hash'] = '';
+        $hit = true;
+        break;
+    }
+    unset($device);
+    if (!$hit) { dash_unlock($lock); fail(404, 'No such device'); }
+    if (!dash_devices_write($DASH_DEVICES_FILE, $store)) {
+        dash_unlock($lock);
+        fail(500, 'Could not save — check directory permissions');
+    }
+    dash_unlock($lock);
+    echo json_encode(['ok' => true]);
+    exit;
+}
+
+if ($action === 'forget') {
+    // Clears revoked rows once you've seen them, so the list doesn't grow
+    // a tail of every device you've ever owned.
+    $lock = dash_locked($DASH_DEVICES_FILE);
+    $store = dash_devices_read($DASH_DEVICES_FILE);
+    $store['devices'] = array_values(array_filter(
+        $store['devices'],
+        function ($d) { return empty($d['revoked']); }
+    ));
+    dash_devices_write($DASH_DEVICES_FILE, $store);
+    dash_unlock($lock);
+    echo json_encode(['ok' => true]);
+    exit;
+}
+
+fail(400, 'Unknown action — use start, redeem, devices, revoke or forget');
