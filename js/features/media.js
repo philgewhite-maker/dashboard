@@ -14,7 +14,7 @@
 // one place.
 import { data, queueSave, blankMediaItem, MEDIA_KINDS, MEDIA_STATUSES } from '../state.js';
 import { escapeHtml, affiliateLink, scrollAndFlash, hydratePhotoBackgrounds, looksLikeUrl } from '../utils.js';
-import { identifyUrl, catalogueLabel, watchProviders, subscriptionFor, collapseProviders, shortProviderName } from '../catalogue.js';
+import { identifyUrl, catalogueLabel, CATALOGUE_LABELS, watchProviders, subscriptionFor, collapseProviders, shortProviderName } from '../catalogue.js';
 
 const KIND_LABEL = Object.fromEntries(MEDIA_KINDS.map((k) => [k.kind, k.label]));
 const STATUS_LABEL = Object.fromEntries(MEDIA_STATUSES.map((s) => [s.status, s.label]));
@@ -167,10 +167,49 @@ return item.title.slice(0, 70);
 }
 }
 
+// Which catalogues are worth OFFERING on an item that doesn't have them
+// yet. Only the ones that do work: TMDb drives where-to-watch and the
+// poster, TVDB is how Sonarr finds a series. IMDb earns its place by
+// being the id most often to hand when neither of those resolves.
+const OFFERED_IDS = { film: ['tmdb', 'imdb'], tv: ['tmdb', 'tvdb', 'imdb'] };
+
+// Every id this item carries, as one cluster of chips.
+//
+// The id itself stays in the tooltip rather than on the row: "TVDB
+// 387219" is six characters of signal and nine of noise, and the number
+// matters at the moment you're checking or fixing it, not while you're
+// scanning a list. Clicking any chip opens the editor on that field.
+//
+// A missing-but-useful catalogue still gets a chip, outlined rather than
+// filled -- otherwise an item with no TVDB id has nowhere to click, and
+// "why is there no Monitor button" has no visible answer.
+function idChipsHtml(item) {
+const ids = item.externalIds || {};
+const have = Object.keys(ids).filter((k) => ids[k]);
+if (item.tvdbId && !have.includes('tvdb')) have.push('tvdb');
+// Only ONE kind of gap is worth a chip of its own: a series with no
+// TVDB id, because that's the visible answer to "where did the Monitor
+// button go". A chip per missing catalogue made the row LONGER than the
+// duplicated one this was meant to shorten.
+const offered = [];
+if (item.kind === 'tv' && !have.includes('tvdb')) offered.push('tvdb');
+const chip = (key, known) => {
+const label = CATALOGUE_LABELS[key] || key;
+const value = key === 'tvdb' ? (item.tvdbId || ids.tvdb || '') : (ids[key] || '');
+return `<span class="task-context media-id-chip${known ? '' : ' unset'}" data-media-id="${item.id}" data-media-id-key="${escapeHtml(key)}"
+title="${known ? `${escapeHtml(label)} ${escapeHtml(String(value))} — click to change` : `No ${escapeHtml(label)} id — click to add one`}">${escapeHtml(label)}${known ? '' : ' +'}</span>`;
+};
+// Nothing identified at all still needs a door in, or the dialog is
+// unreachable on exactly the items that most need it.
+if (!have.length && !offered.length) {
+return `<span class="task-context media-id-chip unset" data-media-id="${item.id}" data-media-id-key="" title="Not identified on any catalogue — click to add an id">id +</span>`;
+}
+return [...have.map((k) => chip(k, true)), ...offered.map((k) => chip(k, false))].join('');
+}
+
 function rowHtml(item) {
 const photoId = (item.photoIds || [])[0];
 const byline = [item.creator, item.year].filter(Boolean).join(' · ');
-const catalogue = catalogueLabel(item.externalIds);
 // Poster first when there is one -- a shelf of covers is the point of
 // this list. A captured screenshot is the fallback picture, and a
 // broken remote image hides itself rather than leaving a torn icon.
@@ -180,22 +219,24 @@ const art = item.imageUrl
 return `<div class="mail-row${OPEN_STATUSES.includes(item.status) ? '' : ' done'}" data-media-row="${item.id}">
 ${art}
 <span class="task-context">${escapeHtml(KIND_LABEL[item.kind] || item.kind)}</span>
-${catalogue ? `<span class="task-context" title="Identified on ${escapeHtml(catalogue)} — kept so this can be matched against Plex later">${escapeHtml(catalogue)}</span>` : ''}
 <span class="mail-subject">${item.link ? `<a href="${escapeHtml(affiliateLink(item.link))}" target="_blank" rel="noopener">${escapeHtml(displayTitle(item))}</a>` : escapeHtml(displayTitle(item))}</span>
 ${byline ? `<span class="settings-note" style="margin:0;">${escapeHtml(byline)}</span>` : ''}
 ${item.requestedBy ? `<span class="settings-note" style="margin:0;">asked by ${escapeHtml(item.requestedBy)}</span>` : ''}
+${idChipsHtml(item)}
 ${whereToWatchHtml(item)}
 ${item.acquisition && item.acquisition.state === 'requested' ? `<span class="task-context" title="Requested from ${escapeHtml(item.acquisition.client || 'the downloader')}">&#8681; downloading</span>` : ''}
 ${item.plexCheck ? (item.plexCheck.found
 ? `<span class="task-context" style="background:var(--sage-bg);color:var(--sage);font-weight:600;" title="In your Plex library${item.plexCheck.matchedTitle ? ` as &quot;${escapeHtml(item.plexCheck.matchedTitle)}&quot;${item.plexCheck.matchedYear ? ` (${escapeHtml(item.plexCheck.matchedYear)})` : ''}` : ''}">&#10003; On Plex</span>`
 : `<span class="settings-note" style="margin:0;" title="Checked on ${escapeHtml(String(item.plexCheck.checkedAt).slice(0, 10))}">not on Plex</span>`) : ''}
 ${item.notes ? `<span class="settings-note" style="margin:0;">${escapeHtml(item.notes)}</span>` : ''}
+<span class="media-row-actions">
 ${monitorHtml(item)}
 <button class="mini-task-btn" type="button" data-media-satisfy="${item.id}" title="How to get hold of it">Get&hellip;</button>
 <select class="mini" data-media-status="${item.id}">
 ${MEDIA_STATUSES.map((s) => `<option value="${s.status}"${s.status === item.status ? ' selected' : ''}>${escapeHtml(s.label)}</option>`).join('')}
 </select>
 <span class="del-x" data-media-remove="${item.id}" title="Remove">&times;</span>
+</span>
 </div>`;
 }
 
@@ -222,10 +263,10 @@ const item = data.mediaItems.find((m) => m.id === btn.dataset.mediaMonitor);
 if (item) openMonitorDialog(item);
 });
 });
-list.querySelectorAll('[data-media-tvdb]').forEach((btn) => {
-btn.addEventListener('click', () => {
-const item = data.mediaItems.find((m) => m.id === btn.dataset.mediaTvdb);
-if (item) openTvdbIdDialog(item);
+list.querySelectorAll('[data-media-id]').forEach((chip) => {
+chip.addEventListener('click', () => {
+const item = data.mediaItems.find((m) => m.id === chip.dataset.mediaId);
+if (item) openIdsDialog(item, chip.dataset.mediaIdKey);
 });
 });
 list.querySelectorAll('[data-media-satisfy]').forEach((btn) => {
@@ -510,9 +551,10 @@ const ids = item.externalIds || {};
 // Offered when SOME exact route to a TVDB id exists -- the id itself is
 // resolved when the dialog opens, because resolving every row's id on
 // every render would be a TMDb call per paint.
+// Setting the id lives on the TVDB chip with the other identifiers, not
+// here: this is an action, that's what the thing IS.
 const resolvable = item.tvdbId || ids.tvdb || ids.tmdb || ids.imdb;
-return `${resolvable ? `<button class="mini-task-btn" type="button" data-media-monitor="${item.id}" title="Have Sonarr watch for new episodes of this">Monitor&hellip;</button>` : ''}
-<button class="mini-task-btn" type="button" data-media-tvdb="${item.id}" title="${item.tvdbId ? `TVDB ${escapeHtml(String(item.tvdbId))} — change or clear it` : 'Tell Sonarr which series this is'}">TVDB${item.tvdbId ? ` ${escapeHtml(String(item.tvdbId))}` : '&hellip;'}</button>`;
+return resolvable ? `<button class="mini-task-btn" type="button" data-media-monitor="${item.id}" title="Have Sonarr watch for new episodes of this">Monitor&hellip;</button>` : '';
 }
 
 // The TVDB slug, when the item was identified on TheTVDB itself. Only
@@ -614,76 +656,135 @@ status.innerHTML = `${found} of ${todo.length} resolved. Still unknown: ${missed
 }
 }
 
-// The manual route, for the cases no exact id reaches: a series TMDb
-// doesn't cross-reference, or one that was typed in rather than looked
-// up. TheTVDB's search can't be read for you (see tvdbIdViaTmdb), so
-// this opens it prefilled and takes back whatever you found -- a pasted
-// URL or the bare number, since the id is visible in both.
-function openTvdbIdDialog(item) {
+// What each catalogue is FOR, and where to go looking when you haven't
+// got the id -- the dialog says both, because "paste a TVDB id" is not
+// a useful instruction on its own.
+const ID_HELP = {
+tmdb: { what: 'Drives where-to-watch and the poster.', hint: 'themoviedb.org address, or tv/1396', search: (t) => `https://www.themoviedb.org/search?query=${encodeURIComponent(t)}` },
+tvdb: { what: 'How Sonarr finds a series.', hint: 'thetvdb.com address, or 387219', search: (t) => `https://thetvdb.com/search?query=${encodeURIComponent(t)}` },
+imdb: { what: 'Resolves to a TMDb id when nothing else does.', hint: 'imdb.com address, or tt0903747', search: (t) => `https://www.imdb.com/find/?q=${encodeURIComponent(t)}` },
+};
+
+// One dialog for every identifier on an item, opened from whichever chip
+// was clicked. One rather than one-per-provider because they're the same
+// question asked three ways, and because pasting a TMDb URL into the
+// TVDB box should be recognised rather than rejected -- identifyUrl
+// already knows which catalogue a URL belongs to, so a paste lands in
+// the right field whichever one you opened.
+function openIdsDialog(item, focusKey = '') {
+const ids = item.externalIds || {};
+const keys = [...new Set([
+...Object.keys(ids).filter((k) => ids[k] && ID_HELP[k]),
+...(item.tvdbId ? ['tvdb'] : []),
+...(OFFERED_IDS[item.kind] || []),
+...(focusKey ? [focusKey] : []),
+])];
+// A catalogue with no editor entry (Spotify, Goodreads...) is shown as
+// read-only rather than hidden: it still explains where the item came
+// from, and quietly dropping it from a dialog called "Identifiers"
+// would be a lie.
+const readOnly = Object.keys(ids).filter((k) => ids[k] && !keys.includes(k));
+
+const valueFor = (k) => (k === 'tvdb' ? (item.tvdbId || ids.tvdb || '') : (ids[k] || ''));
 const dialog = document.createElement('div');
 dialog.className = 'mail-view-backdrop';
-const search = `https://thetvdb.com/search?query=${encodeURIComponent(item.title || '')}`;
-dialog.innerHTML = `<div class="mail-view-card" style="max-width:460px;">
-<div class="mail-view-subject">TVDB id for ${escapeHtml(displayTitle(item))}</div>
-<div class="settings-note" style="margin:2px 0 8px;">Sonarr finds a series by its TVDB id. Paste the thetvdb.com address or just the number.</div>
-<input type="text" id="tvdb-id-input" placeholder="https://thetvdb.com/series/… or 387219" value="${escapeHtml(String(item.tvdbId || ''))}" style="width:100%;">
-<div class="settings-note" style="margin:6px 0 0;"><a href="${escapeHtml(search)}" target="_blank" rel="noopener">Search TheTVDB for &ldquo;${escapeHtml(item.title || '')}&rdquo;</a> &mdash; the id is the number in the page&rsquo;s own address bar once you open the series.</div>
+dialog.innerHTML = `<div class="mail-view-card" style="max-width:480px;">
+<div class="mail-view-subject">Identifiers for ${escapeHtml(displayTitle(item))}</div>
+<div class="settings-note" style="margin:2px 0 10px;">Paste an address or the bare id. An address from any of these catalogues lands in its own box, whichever one you type it into.</div>
+${keys.map((k) => `<label style="display:block;margin-bottom:8px;">
+<span style="font-size:12px;font-weight:600;">${escapeHtml(CATALOGUE_LABELS[k] || k)}</span>
+<span class="settings-note" style="display:inline;margin:0 0 0 4px;">${escapeHtml(ID_HELP[k]?.what || '')}</span>
+<input type="text" data-id-field="${escapeHtml(k)}" value="${escapeHtml(String(valueFor(k)))}" placeholder="${escapeHtml(ID_HELP[k]?.hint || '')}" style="width:100%;">
+${ID_HELP[k] ? `<a class="settings-note" style="display:inline-block;margin:2px 0 0;" href="${escapeHtml(ID_HELP[k].search(item.title || ''))}" target="_blank" rel="noopener">Search ${escapeHtml(CATALOGUE_LABELS[k] || k)}</a>` : ''}
+</label>`).join('')}
+${readOnly.length ? `<div class="settings-note" style="margin:0 0 8px;">Also identified on ${escapeHtml(readOnly.map((k) => `${CATALOGUE_LABELS[k] || k} ${ids[k]}`).join(', '))}.</div>` : ''}
 <div class="mail-view-actions">
-<button class="sync-btn sm" type="button" data-tvdb-cancel>Cancel</button>
-${item.tvdbId ? '<button class="sync-btn sm" type="button" data-tvdb-clear>Forget it</button>' : ''}
-<button class="add-btn" type="button" data-tvdb-save>Save</button>
+<button class="sync-btn sm" type="button" data-ids-cancel>Cancel</button>
+<button class="add-btn" type="button" data-ids-save>Save</button>
 </div>
-<div class="sync-status" data-tvdb-status></div></div>`;
+<div class="sync-status" data-ids-status></div></div>`;
 document.body.appendChild(dialog);
 const close = () => dialog.remove();
 dialog.addEventListener('click', (e) => { if (e.target === dialog) close(); });
-dialog.querySelector('[data-tvdb-cancel]').addEventListener('click', close);
-dialog.querySelector('[data-tvdb-clear]')?.addEventListener('click', () => {
-item.tvdbId = '';
-queueSave();
-renderMedia();
-close();
-});
-dialog.querySelector('[data-tvdb-save]').addEventListener('click', async () => {
-const raw = (dialog.querySelector('#tvdb-id-input').value || '').trim();
-// A TVDB URL may be the numeric /dereferrer/ form or the slug form, and
-// the slug form carries no number at all -- so the slug is stored as
-// the catalogue reference it is, and the number is resolved from the
-// page the way a shared TVDB link already is.
-// An all-digit slug is the number, not a slug -- thetvdb.com/series/387219
-// is a 404 page, and treating it as a slug would send the resolver off to
-// read it.
-const num = /^(\d+)$/.exec(raw)
-|| /\/dereferrer\/series\/(\d+)/i.exec(raw)
-|| /[?&]id=(\d+)/.exec(raw)
-|| /thetvdb\.com\/series\/(\d+)\/?$/i.exec(raw);
-const slug = /thetvdb\.com\/series\/([a-z0-9-]*[a-z][a-z0-9-]*)/i.exec(raw);
-const note = dialog.querySelector('[data-tvdb-status]');
+dialog.querySelector('[data-ids-cancel]').addEventListener('click', close);
+const focus = dialog.querySelector(`[data-id-field="${focusKey}"]`) || dialog.querySelector('[data-id-field]');
+focus?.focus();
+
+dialog.querySelector('[data-ids-save]').addEventListener('click', async () => {
+const note = dialog.querySelector('[data-ids-status]');
+const next = { ...ids };
+let tvdbRaw = null;
+let resolveTvdb = false;
+// A value that moved to a different box needs saying, and a dialog that
+// vanishes on save says nothing -- so that one case lingers long enough
+// to be read.
+let rehomed = false;
+
+for (const field of dialog.querySelectorAll('[data-id-field]')) {
+const key = field.dataset.idField;
+const raw = (field.value || '').trim();
+if (raw === String(valueFor(key))) continue;
+if (!raw) { // cleared
+if (key === 'tvdb') { tvdbRaw = ''; } else { delete next[key]; }
+continue;
+}
+// A pasted URL is identified by the catalogue it actually belongs to,
+// not by the box it was typed into.
+const found = identifyUrl(raw).ids;
+const foundKey = Object.keys(found)[0];
+if (foundKey) {
+if (foundKey === 'tvdb') tvdbRaw = raw; else next[foundKey] = found[foundKey];
+if (foundKey !== key) { note.textContent = `That's a ${CATALOGUE_LABELS[foundKey] || foundKey} address — saved as ${CATALOGUE_LABELS[foundKey] || foundKey}, not ${CATALOGUE_LABELS[key] || key}.`; rehomed = true; }
+continue;
+}
+if (key === 'tvdb') { tvdbRaw = raw; continue; }
+// Not a URL and not a known shape: stored as typed. TMDb ids are
+// "tv/1396" rather than a bare number, so a bare number gets the
+// item's own kind rather than being guessed at.
+next[key] = key === 'tmdb' && /^\d+$/.test(raw) ? `${item.kind === 'tv' ? 'tv' : 'movie'}/${raw}` : raw;
+}
+
+if (tvdbRaw !== null) {
+// Same three URL shapes the TVDB-only dialog took, kept because the
+// slug form carries no number and thetvdb.com/series/<digits> is a
+// 404 page rather than a slug.
+const num = /^(\d+)$/.exec(tvdbRaw)
+|| /\/dereferrer\/series\/(\d+)/i.exec(tvdbRaw)
+|| /[?&]id=(\d+)/.exec(tvdbRaw)
+|| /thetvdb\.com\/series\/(\d+)\/?$/i.exec(tvdbRaw);
+const slug = /thetvdb\.com\/series\/([a-z0-9-]*[a-z][a-z0-9-]*)/i.exec(tvdbRaw);
 if (num) {
 item.tvdbId = num[1];
 } else if (slug) {
-item.externalIds = { ...(item.externalIds || {}), tvdb: `series/${slug[1]}` };
+next.tvdb = `series/${slug[1]}`;
 if (!item.link) item.link = `https://thetvdb.com/series/${slug[1]}`;
 item.tvdbId = '';
+resolveTvdb = true;
+} else if (tvdbRaw === '') {
+item.tvdbId = '';
+delete next.tvdb;
+} else {
+note.textContent = "That isn't a TVDB address or id.";
+return;
+}
+}
+
+item.externalIds = next;
 queueSave();
-// Resolved here rather than left for later, so the row comes back
-// reading "TVDB 387219" instead of an unchanged "TVDB…" that gives no
+renderMedia();
+if (!resolveTvdb) { setTimeout(close, rehomed ? 2200 : 0); return; }
+// The slug form carries no number, so it's read off the page here --
+// otherwise the chip comes back looking exactly as it did and gives no
 // sign the paste landed.
-if (note) note.textContent = 'Reading the number off that page…';
+note.textContent = 'Reading the number off that page…';
 try {
 const res = await resolveTvdbId(item);
-if (!res.id) { if (note) note.textContent = `Saved the link, but ${res.why}.`; renderMedia(); return; }
+renderMedia();
+if (!res.id) { note.textContent = `Saved the link, but ${res.why}.`; return; }
 } catch (err) {
-if (note) note.textContent = `Saved the link, but couldn't read the id: ${err.message || err}`;
-renderMedia();
+note.textContent = `Saved the link, but couldn't read the id: ${err.message || err}`;
 return;
 }
-} else {
-if (note) note.textContent = "That isn't a TVDB address or id.";
-return;
-}
-queueSave();
-renderMedia();
 close();
 });
 }
@@ -800,7 +901,7 @@ dialog.innerHTML = `<div class="mail-view-card" style="max-width:480px;">
 // asking again, and a lookup that timed out would otherwise silence the
 // offer forever on the strength of a slow page.
 dialog.querySelector('[data-monitor-close]')?.addEventListener('click', close);
-dialog.querySelector('[data-monitor-setid]')?.addEventListener('click', () => { close(); openTvdbIdDialog(item); });
+dialog.querySelector('[data-monitor-setid]')?.addEventListener('click', () => { close(); openIdsDialog(item, "tvdb"); });
 dialog.querySelector('[data-monitor-cancel]')?.addEventListener('click', () => {
 // Remembered, so the prompt stops asking about a series you've
 // already said no to -- without it, every render offers again.

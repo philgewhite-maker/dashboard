@@ -1538,6 +1538,30 @@ flex-wrap:wrap;
 overflow-wrap:anywhere;
 min-width:0;
 }
+/* Actions sit to the right of whatever the row happens to describe.
+   margin-left:auto rather than a fixed column because .mail-row wraps:
+   on a narrow screen the actions drop to their own line and the auto
+   margin simply has nothing left to push against, which is the wanted
+   behaviour rather than a fallback. */
+#media-list .media-row-actions{
+display:inline-flex;
+align-items:center;
+gap:8px;
+margin-left:auto;
+flex-shrink:0;
+}
+/* An identifier chip carries its value in the tooltip, so the chip reads
+   as a label and the row stays scannable. The "unset" form is an empty
+   outline: it marks a catalogue this item COULD have and doesn't, which
+   is the difference between "no Monitor button because it isn't a
+   series" and "no Monitor button because nobody has told it which
+   series". */
+#media-list .media-id-chip{cursor:pointer;}
+#media-list .media-id-chip.unset{
+background:transparent;
+color:var(--muted);
+border:1px dashed var(--line);
+}
 /* Poster/cover art on a Media row. Portrait, since film and TV posters
    are, and an album cover simply fills it squarely at the same height. */
 .media-art{
