@@ -69,6 +69,10 @@ const secret = String(settings.syncSecret || '').trim();
 if (!url || !secret) return null;
 return {
 secret,
+// Empty when the document isn't encrypted, which is also what a device
+// that has lost its key looks like -- runBackgroundRefresh tells the
+// two apart by whether what came back is an envelope.
+key: String(settings.syncKey || '').trim(),
 sync: url,
 health: url.replace(/sync\.php(?=$|\?)/, 'health.php'),
 icsProxy: url.replace(/sync\.php(?=$|\?)/, 'ics-proxy.php'),
@@ -157,7 +161,19 @@ if (!ep) return { skipped: 'not configured' };
 const pull = await fetch(ep.sync, { headers: { 'X-Sync-Secret': ep.secret } });
 if (!pull.ok) throw new Error(`sync.php returned ${pull.status}`);
 const remote = await pull.json();
-const doc = remote.data;
+const { seal, open, isEnvelope } = await import('./cryptobox.js');
+const sealed = isEnvelope(remote.data);
+// No key for an encrypted document means this run does nothing at all --
+// and in particular does not fall through to "no document yet" and then
+// write a fresh plaintext one over the top. Background work gets the
+// same refusal the foreground does, where nobody is watching to undo it.
+if (sealed && !ep.key) return { skipped: 'encrypted, no key on this device' };
+let doc;
+try {
+doc = sealed ? await open(ep.key, remote.data) : remote.data;
+} catch (err) {
+return { skipped: 'encrypted, key does not fit' };
+}
 if (!doc || typeof doc !== 'object') return { skipped: 'no document yet' };
 if (!Array.isArray(doc.airbnbReservations)) doc.airbnbReservations = [];
 
@@ -179,7 +195,10 @@ if (!changed) return { ...results, wrote: false };
 const push = await fetch(ep.sync, {
 method: 'POST',
 headers: { 'Content-Type': 'application/json', 'X-Sync-Secret': ep.secret },
-body: JSON.stringify({ rev: remote.rev, data: doc }),
+// Goes back the way it came: sealed if it arrived sealed. Writing the
+// plaintext back would silently undo the encryption from a code path
+// that runs while the app is closed.
+body: JSON.stringify({ rev: remote.rev, data: sealed ? await seal(ep.key, doc) : doc }),
 });
 if (!push.ok) {
 // 409 is the stale-rev refusal, and is not an error worth shouting

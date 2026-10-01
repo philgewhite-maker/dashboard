@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v415</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v416</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -2727,6 +2727,26 @@ Finds connections whose cover photo is missing or is really just the small place
 <button class="sync-btn" id="relay-setup-btn" type="button">Set up Dashboard Capture</button>
 </div>
 <div class="settings-note">Android only. Dashboard Capture is a small companion app for sharing images and files in, since Chrome drops shared files on some phones. Install it, then tap this on the phone to hand it the URL and secret above &mdash; you confirm them in the app.</div>
+</div>
+
+<div class="settings-block">
+<h3>Encryption</h3>
+<div class="settings-note" style="margin:0 0 10px;">Without this your document sits on the server as readable JSON &mdash; outside <code>public_html</code> and over https, which keeps out the internet but not your host, their backups or anyone holding a credential. With it on, the server stores ciphertext it cannot read and <code>sync.php</code> needs no changes, because it never looks inside the document anyway. <strong>Attachments, the health log and the Telegram log are separate stores and stay plain.</strong></div>
+<div class="settings-note" style="margin:0 0 10px;color:var(--amber);">The server never sees the key, so it cannot reissue it. Lose it from every device and the document is gone, not just locked. Save the recovery key somewhere before you rely on this.</div>
+<div class="sync-row">
+<button class="sync-btn" id="encrypt-on-btn" type="button">Turn on encryption</button>
+<button class="sync-btn sm" id="encrypt-show-key-btn" type="button">Show recovery key</button>
+<span class="sync-status" id="encrypt-status"></span>
+</div>
+<div id="encrypt-key-box" hidden></div>
+<details style="margin-top:10px;">
+<summary class="settings-note" style="cursor:pointer;">This device can&rsquo;t read the encrypted copy &mdash; paste the recovery key</summary>
+<input type="text" autocomplete="off" id="encrypt-key-input" class="settings-input" style="margin-top:8px;" placeholder="44 characters from your password manager">
+<div class="sync-row" style="margin-top:8px;">
+<button class="sync-btn" id="encrypt-adopt-btn" type="button">Use this key</button>
+<span class="sync-status" id="encrypt-adopt-status"></span>
+</div>
+</details>
 </div>
 
 <div class="settings-block">

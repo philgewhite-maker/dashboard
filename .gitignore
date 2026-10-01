@@ -31,3 +31,8 @@ telegram-inbox.jsonl
 # Scratch folder for pasting real screenshots/photos in for debugging --
 # never belongs in a public repo.
 Debug/
+# gemini-transcribe.php holds the same shared secret PLUS a Gemini API key.
+# It was tracked by mistake while every other secret-carrying file was not:
+# the key was still a placeholder so nothing leaked, but one fill-in-and-commit
+# would have published it. Same rule as the rest now.
+server/gemini-transcribe.php

@@ -64,8 +64,14 @@ function forgetRevoked() { return call('forget', { body: {} }); }
 // which server to ask -- and the URL isn't the secret, the code is, so
 // carrying it costs nothing. Base64 so the whole thing is one string to
 // copy rather than two fields to transcribe.
-function pairingLink(syncUrl, code) {
-const payload = btoa(JSON.stringify({ u: syncUrl, c: code }))
+// The encryption key rides along when there is one, and this is the only
+// place it ever travels. It is safe HERE and nowhere else for one
+// mechanical reason: everything after the # is never sent to a server,
+// so the key stays between the two browsers even though the link looks
+// like a URL. The same fact is why the code must still expire -- a link
+// pasted into a chat is readable by whoever can read that chat.
+function pairingLink(syncUrl, code, key = '') {
+const payload = btoa(JSON.stringify({ u: syncUrl, c: code, ...(key ? { k: key } : {}) }))
 .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 return `${new URL('index.html', location.href).href}#pair=${payload}`;
 }
@@ -90,7 +96,7 @@ try {
 const json = atob(m[1].replace(/-/g, '+').replace(/_/g, '/'));
 const payload = JSON.parse(json);
 if (!payload || !payload.c) return null;
-return { url: String(payload.u || ''), code: String(payload.c) };
+return { url: String(payload.u || ''), code: String(payload.c), key: String(payload.k || '') };
 } catch (e) {
 return null;
 }
@@ -112,9 +118,16 @@ if (/Linux/i.test(ua)) return 'Linux PC';
 return 'A device';
 }
 
-async function redeemPairing(syncUrl, code, label) {
+async function redeemPairing(syncUrl, code, label, key = '') {
 const res = await call('redeem', { url: syncUrl, secret: '', body: { code, label } });
 if (!res.token) throw new Error('The server did not return a token.');
+// Adopted before the sync settings are written, so the first pull this
+// device makes can already read an encrypted document rather than
+// failing once and looking broken.
+if (key) {
+const crypt = await import('./synccrypto.js');
+await crypt.adoptKey(key);
+}
 // The token goes in the same box the shared secret used to, and is sent
 // in the same header, so nothing else in the app has to know that
 // anything changed.

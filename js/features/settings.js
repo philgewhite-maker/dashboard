@@ -244,6 +244,7 @@ await renderUsage();
 
 initDriveBackup();
 initPairing();
+initEncryption();
 }
 
 // The Notion proxy URL and database id, and a test that proves all three
@@ -862,7 +863,114 @@ renderDevices('Cleared.');
 });
 }
 
+
+// ---- Encryption -----------------------------------------------------------
+
+async function renderEncryption(message = '') {
+const status = document.getElementById('encrypt-status');
+const onBtn = document.getElementById('encrypt-on-btn');
+if (!status || !onBtn) return;
+const crypt = await import('../synccrypto.js');
+const on = await crypt.isEncrypted();
+const keyed = await crypt.hasKey();
+onBtn.textContent = on ? 'Encryption is on' : 'Turn on encryption';
+onBtn.disabled = on;
+// Three states, not two, and the middle one is the one that matters:
+// "on but this device can't read it" is what a device looks like after
+// pairing by typed code, and it needs the recovery key rather than
+// reassurance.
+status.textContent = message || (on
+? (keyed ? 'On — the server holds ciphertext it cannot read.' : 'On, but this device has no key. Paste the recovery key below.')
+: 'Off — the document is stored as readable JSON.');
+}
+
+function initEncryption() {
+const onBtn = document.getElementById('encrypt-on-btn');
+if (!onBtn) return; // not in this build's DOM
+const keyBox = document.getElementById('encrypt-key-box');
+
+const showKey = async (intro) => {
+const crypt = await import('../synccrypto.js');
+const key = await crypt.exportKey();
+if (!key) { keyBox.hidden = true; return; }
+keyBox.hidden = false;
+keyBox.innerHTML = `<div class="settings-note" style="margin:10px 0 4px;">${escapeHtml(intro)}</div>
+<div style="font-family:monospace;font-size:15px;word-break:break-all;user-select:all;">${escapeHtml(crypt.formatKey(key))}</div>
+<div class="sync-row" style="margin-top:6px;">
+<button class="sync-btn sm" type="button" id="encrypt-copy-key">Copy</button>
+<button class="sync-btn sm" type="button" id="encrypt-hide-key">Hide</button>
+</div>
+<div class="settings-note" style="margin:6px 0 0;">Put it in your password manager. It is the only copy that does not live on a device you own, and nothing can reissue it.</div>`;
+keyBox.querySelector('#encrypt-copy-key').addEventListener('click', async () => {
+try {
+await navigator.clipboard.writeText(key);
+renderEncryption('Recovery key copied.');
+} catch (err) {
+// Clipboard access is refused often enough that failing silently
+// would just look broken; the key is already on screen to select.
+renderEncryption('Couldn\'t reach the clipboard — select the key above instead.');
+}
+});
+keyBox.querySelector('#encrypt-hide-key').addEventListener('click', () => { keyBox.hidden = true; });
+};
+
+onBtn.addEventListener('click', async () => {
+const crypt = await import('../synccrypto.js');
+if (await crypt.isEncrypted()) return;
+// Said plainly and once, because this is the only irreversible thing
+// in the app: there is no reset link for a key the server never had.
+if (!confirm('Turn on encryption?\n\nThe server will no longer be able to read your data — and neither will any device without the key. There is no way to recover it if you lose every copy.\n\nThe next screen shows the recovery key. Save it before closing.')) return;
+onBtn.disabled = true;
+try {
+await crypt.generateKey();
+await showKey('Your recovery key — save this NOW:');
+// Pushed straight away rather than waiting for the next edit, so the
+// readable copy on the server is replaced now and not at some
+// unpredictable later moment.
+const { push } = await import('../sync/autosync.js');
+await push({ force: true });
+await renderEncryption('On. The copy on the server has been replaced with ciphertext.');
+} catch (err) {
+await renderEncryption(err.message || String(err));
+} finally {
+onBtn.disabled = false;
+}
+});
+
+document.getElementById('encrypt-show-key-btn')?.addEventListener('click', async () => {
+const crypt = await import('../synccrypto.js');
+if (!(await crypt.hasKey())) { renderEncryption('No key on this device yet.'); return; }
+showKey('Recovery key:');
+});
+
+document.getElementById('encrypt-adopt-btn')?.addEventListener('click', async () => {
+const input = document.getElementById('encrypt-key-input');
+const say = (t) => { const el = document.getElementById('encrypt-adopt-status'); if (el) el.textContent = t; };
+const raw = (input.value || '').trim();
+if (!raw) { say('Paste the recovery key first.'); return; }
+try {
+const crypt = await import('../synccrypto.js');
+await crypt.adoptKey(raw);
+input.value = '';
+// Proved against the real document rather than just accepted: a key
+// of the right LENGTH that doesn't open anything is the failure most
+// worth catching here, while the person is still looking at it.
+const { pullRemote } = await import('../sync/selfhost.js');
+await pullRemote();
+say('Key accepted — this device can read the server copy now.');
+await renderEncryption();
+} catch (err) {
+say(err.message || String(err));
+}
+});
+
+renderEncryption();
+}
 function initPairing() {
+// Held from the pairing link until Pair is pressed, rather than written
+// to settings on arrival: a link someone sent you should not install a
+// key on this device before you have agreed to anything.
+let pendingKey = '';
 const startBtn = document.getElementById('pair-start-btn');
 if (!startBtn) return; // not in this build's DOM
 const codeBox = document.getElementById('pair-code-box');
@@ -877,7 +985,11 @@ try {
 const pairing = await import('../pairing.js');
 const res = await pairing.startPairing();
 const settings = await getLocalSettings();
-const link = pairing.pairingLink(settings.syncUrl, res.code);
+const crypt = await import('../synccrypto.js');
+// The key travels only in the link's fragment, which browsers never send
+// to a server -- so a device paired by TYPED code gets a token but no key,
+// and the Encryption block above tells it to paste the recovery key.
+const link = pairing.pairingLink(settings.syncUrl, res.code, await crypt.exportKey());
 const expires = new Date(res.expiresAt).getTime();
 codeBox.hidden = false;
 codeBox.innerHTML = `<div class="settings-note" style="margin:10px 0 4px;">On the other device, open this link — or go to its Settings and type the code.</div>
@@ -937,13 +1049,14 @@ redeemBtn.disabled = true;
 say('Pairing…');
 try {
 const pairing = await import('../pairing.js');
-const res = await pairing.redeemPairing(url, code, labelEl.value.trim() || pairing.guessLabel());
+const res = await pairing.redeemPairing(url, code, labelEl.value.trim() || pairing.guessLabel(), pendingKey);
 const urlInput = document.getElementById('sync-url-input');
 const secretInput = document.getElementById('sync-secret-input');
 if (urlInput) urlInput.value = url;
 if (secretInput) secretInput.value = res.token;
 codeEl.value = '';
-say(`Paired as "${res.label}". This device has its own token now.`);
+say(`Paired as "${res.label}". This device has its own token${pendingKey ? ' and the encryption key' : ''} now.`);
+pendingKey = '';
 await restartAutoSync();
 await renderDevices();
 } catch (err) {
@@ -972,6 +1085,7 @@ const labelEl = document.getElementById('pair-redeem-label');
 if (urlEl) urlEl.value = found.url;
 if (codeEl) codeEl.value = found.code;
 if (labelEl && !labelEl.value) labelEl.value = pairing.guessLabel();
+pendingKey = found.key || '';
 const el = document.getElementById('pair-redeem-status');
 if (el) el.textContent = 'Code read from the link — check the name, then press Pair this device.';
 })().catch((err) => console.error('Pairing link:', err));

@@ -80,7 +80,10 @@ throw new Error(`Couldn't reach the sync server — check the URL, that it's htt
 clearTimeout(timer);
 
 if (res.status === 409) {
-throw new ConflictError(await res.json());
+// The 409 body carries the newer document, which the caller adopts —
+// so it needs unsealing exactly like a pull. Missed, this is the path
+// that writes an envelope into the app as if it were the data.
+throw new ConflictError(await unseal(await res.json()));
 }
 if (!res.ok) {
 let detail = `HTTP ${res.status}`;
@@ -91,17 +94,49 @@ throw new Error(`Sync server error: ${detail}`);
 return res.json();
 }
 
+// Encryption sits at these two functions and nowhere else: they are the
+// only places a document crosses between this app and the network, so
+// putting it here means nothing else — autosync, Settings, the conflict
+// path — has to know the document is ever ciphertext. See synccrypto.js.
+async function unseal(payload) {
+if (!payload || payload.data === null || payload.data === undefined) return payload;
+const crypt = await import('../synccrypto.js');
+if (!crypt.isEnvelope(payload.data)) return payload;
+// Seeing ciphertext is how a device learns the rule, rather than from a
+// setting it might not have been told about. Set BEFORE the decrypt can
+// throw, so a device that cannot read the document still knows not to
+// push plaintext over it.
+await crypt.setEncrypted(true);
+return { ...payload, data: await crypt.decryptDocument(payload.data) };
+}
+
 // Returns {rev, updatedAt, data}. `data` is null when the server has never
 // been written to, which the caller treats as "seed me from this device".
+// Throws LockedError if the server's copy is encrypted and this device
+// hasn't got the key — deliberately a throw rather than a null, because
+// every caller treats null as "seed me", and seeding over an encrypted
+// document would destroy it.
 async function pullRemote() {
-return request('GET');
+return unseal(await request('GET'));
 }
 
 // Writes `data`, but only if the server is still at the revision we last
 // saw. Throws ConflictError (carrying the newer document) if not.
 async function pushRemote(data) {
+const crypt = await import('../synccrypto.js');
+let payload = data;
+if (await crypt.isEncrypted()) {
+// Refusing is the whole safety property. A device that has lost its
+// key would otherwise quietly replace an encrypted document with a
+// plaintext one — readable by the host again, and unreadable by every
+// other device.
+if (!(await crypt.hasKey())) {
+throw new crypt.LockedError('This device has no encryption key, so it won\'t overwrite the encrypted copy on the server. Paste the recovery key in Settings.');
+}
+payload = await crypt.encryptDocument(data);
+}
 const rev = await getKnownRev();
-const result = await request('POST', { rev, data });
+const result = await request('POST', { rev, data: payload });
 await setKnownRev(result.rev);
 return result;
 }
