@@ -805,6 +805,17 @@ if (status && !message) status.textContent = '';
 const settings = await getLocalSettings();
 const mine = settings.deviceId || '';
 const live = (res.devices || []).filter((d) => !d.revoked);
+// The redeem box said "this device hasn't been paired yet" whatever the
+// truth was, so a paired device read as both paired and not paired at
+// once -- its own row said "(this one)" directly above it. The box still
+// has a use once paired (re-pairing after a revoke), so it is reworded
+// rather than hidden.
+const summary = document.getElementById('pair-redeem-summary');
+if (summary) {
+summary.textContent = mine
+? 'Re-pair this device with a new code'
+: 'This device hasn’t been paired yet — enter a code';
+}
 const rows = (res.devices || []).map((d) => {
 const here = d.id === mine;
 return `<tr${d.revoked ? ' style="opacity:.55;"' : ''}>
