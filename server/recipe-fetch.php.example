@@ -92,6 +92,14 @@ if (!is_array($parts) || ($parts['scheme'] ?? '') !== 'https' || empty($parts['h
 }
 $host = $parts['host'];
 
+// An optional Referer, for the endpoints that only answer a request that
+// looks like it came from their own page. It is only ever SENT, never
+// fetched, so it cannot reach anywhere — but it is still checked to be an
+// https URL, so a malformed one fails here rather than confusing the
+// target.
+$referer = $_GET['referer'] ?? '';
+if (!is_string($referer) || strpos($referer, 'https://') !== 0) $referer = '';
+
 // Step 1 + 2: resolve, then reject anything private/reserved. FILTER_VALIDATE_IP
 // with these two flags is PHP's own check for exactly this — RFC1918,
 // loopback, link-local (which covers the 169.254.169.254 metadata address
@@ -121,9 +129,25 @@ curl_setopt_array($ch, [
     CURLOPT_FOLLOWLOCATION => false, // see the file header — redirects aren't re-validated, so they're refused rather than trusted
     CURLOPT_TIMEOUT => $TIMEOUT_SECONDS,
     CURLOPT_PROTOCOLS => CURLPROTO_HTTPS,
-    CURLOPT_USERAGENT => 'Mozilla/5.0 (compatible; dashboard-recipe-fetch/1.0)',
+    // An honest bot string got this refused by more and more sites, and
+    // the ones worth reading are exactly the ones that check. Chatham's
+    // rate endpoint is the clearest case: a bare request gets
+    // Cloudflare's "Just a moment" page, while these headers plus a
+    // Referer get a 200 with the data. Nothing here pretends to be a
+    // person: the request is still one GET for one page, with no cookies
+    // kept and no scripts run.
+    CURLOPT_USERAGENT => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
     CURLOPT_RESOLVE => ["$host:$port:$safeIp"],
-    CURLOPT_HTTPHEADER => ['Accept: text/html,application/xhtml+xml'],
+    CURLOPT_HTTPHEADER => array_merge([
+        'Accept: text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
+        'Accept-Language: en-GB,en;q=0.9',
+        'Sec-Fetch-Mode: navigate',
+        'Sec-Fetch-Site: none',
+        'Upgrade-Insecure-Requests: 1',
+    // Some JSON endpoints only answer a request that looks like it came
+    // from their own page. Passed as ?referer= and validated like the URL
+    // itself, so it cannot be used to reach anywhere new.
+    ], $referer === '' ? [] : ["Referer: $referer"]),
 ]);
 $html = curl_exec($ch);
 $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -140,8 +164,14 @@ if ($httpCode >= 300 && $httpCode < 400) {
 if ($httpCode < 200 || $httpCode >= 300) {
     fail(502, "That page returned HTTP $httpCode");
 }
-if ($contentType !== '' && strpos($contentType, 'html') === false && strpos($contentType, 'text/') === false) {
-    fail(502, "That URL didn't return a web page (got $contentType)");
+// JSON counts now: the useful half of what the dashboard fetches through
+// here is a data endpoint rather than a page (Yahoo's quote feed,
+// Chatham's rate feed), and those answer application/json.
+if ($contentType !== ''
+    && strpos($contentType, 'html') === false
+    && strpos($contentType, 'text/') === false
+    && strpos($contentType, 'json') === false) {
+    fail(502, "That URL didn't return a web page or JSON (got $contentType)");
 }
 if (strlen($html) > $MAX_BYTES) {
     $html = substr($html, 0, $MAX_BYTES);

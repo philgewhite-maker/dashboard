@@ -3630,3 +3630,46 @@ padding:6px;
 .cashback-age{margin-left:4px;opacity:.7;font-size:9px;}
 /* Due a refresh: still shown, still clickable, just visibly not fresh. */
 .cashback-link.cashback-due b{color:var(--muted);font-weight:600;}
+
+/* The Overview ticker: five figures that would otherwise be five tabs.
+   Scrolls sideways in its own box rather than wrapping, because a strip
+   that reflows to three lines on a phone stops being a glance. */
+.ticker{
+display:flex;
+gap:8px;
+align-items:stretch;
+overflow-x:auto;
+padding:2px 0 8px;
+margin-bottom:4px;
+scrollbar-width:thin;
+}
+.ticker:empty{display:none;}
+.tick{
+display:flex;
+flex-direction:column;
+gap:1px;
+flex:0 0 auto;
+padding:6px 10px;
+border:1px solid var(--line);
+border-radius:8px;
+background:var(--card);
+min-width:84px;
+}
+.tick-label{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);}
+.tick-value{font-size:15px;font-weight:600;font-variant-numeric:tabular-nums;}
+.tick-up{font-size:11px;color:var(--sage);font-variant-numeric:tabular-nums;}
+.tick-down{font-size:11px;color:var(--red);font-variant-numeric:tabular-nums;}
+.tick-flat{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;}
+.tick-toggle{
+flex:0 0 auto;
+align-self:center;
+font-family:'Inter',sans-serif;
+font-size:11px;
+background:var(--card);
+color:var(--muted);
+border:1px solid var(--line);
+border-radius:20px;
+padding:3px 10px;
+cursor:pointer;
+}
+.tick-toggle:hover{color:var(--ink);border-color:var(--muted);}

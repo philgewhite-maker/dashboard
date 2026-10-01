@@ -1282,6 +1282,17 @@ reachOutStageDays: {},
 // below) -- name -> {lastRunAt, scope, count}. Same shape/spirit as
 // calendarStatus above, just for the various dating-import panels.
 importStatus: {},
+// The Overview strip -- see js/features/ticker.js. `shares` is the DBK
+// holding today; the scheme buys another £250-worth on the first
+// business day of each month, at the price it cost FIVE YEARS EARLIER,
+// which is the day those shares were actually paid for. `sharesAt` is
+// the last purchase already counted, so opening the app twice in a day
+// doesn't buy twice.
+ticker: { shares: 0, sharesAt: '', monthlyGbp: 250, vestYears: 5, mode: 'day' },
+// Last answer from each feed with the time it arrived. Synced rather
+// than device-local, so a phone opened at a bad moment shows the
+// laptop's morning figures instead of blanks, and says how old they are.
+tickerCache: {},
 prefs: { ...DEFAULT_PREFS } };
 }
 
@@ -1339,6 +1350,12 @@ return n;
 }
 
 function migrate() {
+// Same rule as the inventory guard below, learned the same way: a key
+// added after the fact is absent on every existing document, so it gets
+// its default before anything can read it.
+if (!data.ticker || typeof data.ticker !== 'object') data.ticker = blankData().ticker;
+else data.ticker = { ...blankData().ticker, ...data.ticker };
+if (!data.tickerCache || typeof data.tickerCache !== 'object') data.tickerCache = {};
 // FIRST, before anything else in here touches it. An existing document
 // predates this key entirely, and two passes below both reach for it --
 // the connection loop that carries the old per-person `owned` across,

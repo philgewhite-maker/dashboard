@@ -48,6 +48,7 @@ import { serverPhotoUrl } from './files.js';
 // tasks.js, which keeps that dependency pointing one way.
 import './features/notionplan.js';
 import { initNudges } from './features/nudges.js';
+import { initTicker } from './features/ticker.js';
 import { initSettings } from './features/settings.js';
 import { initGoogleAccount } from './features/googleaccount.js';
 import { initMail } from './features/mail.js';
@@ -220,6 +221,7 @@ initScheduled();
 initLocationFillIns();
 initPhotoQuality();
 initNudges();
+initTicker();
 await initSettings();
 registerServiceWorker();
 // After the panels are wired, so the captured task renders into a live UI.

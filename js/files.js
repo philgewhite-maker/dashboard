@@ -85,9 +85,13 @@ return { endpoint, secret };
 
 const PAGE_FETCH_TIMEOUT_MS = 20000;
 
-async function fetchPageHtml(pageUrl) {
+// `referer` is for the few data endpoints that only answer a request
+// looking like it came from their own page -- Chatham's rate feed is the
+// one that needs it. The proxy only ever SENDS it; it never fetches it.
+async function fetchPageHtml(pageUrl, { referer = '' } = {}) {
 const { endpoint, secret } = await pageFetchEndpoint();
-const res = await withTimeout(PAGE_FETCH_TIMEOUT_MS, (signal) => fetch(`${endpoint}?url=${encodeURIComponent(pageUrl)}`, {
+const query = `url=${encodeURIComponent(pageUrl)}${referer ? `&referer=${encodeURIComponent(referer)}` : ''}`;
+const res = await withTimeout(PAGE_FETCH_TIMEOUT_MS, (signal) => fetch(`${endpoint}?${query}`, {
 headers: { 'X-Sync-Secret': secret },
 signal,
 }));
