@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v418</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v419</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -28,6 +28,7 @@
 </div>
 <div class="date" id="today-date"></div>
 </header>
+<div id="ticker" class="ticker"></div>
 
 <div class="tab-bar" id="tab-bar">
 <button class="tab-btn active" type="button" data-tab-btn="overview">Overview</button>
@@ -47,7 +48,6 @@
 </div>
 
 <div class="board">
-<div id="ticker" class="ticker" data-tab="overview"></div>
 <section class="panel wide" id="questions-panel" data-tab="overview" style="display:none;">
 <div class="panel-head">
 <h2><span class="dot amber"></span>Questions from Claude</h2>

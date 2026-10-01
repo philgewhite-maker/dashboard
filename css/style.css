@@ -3631,45 +3631,63 @@ padding:6px;
 /* Due a refresh: still shown, still clickable, just visibly not fresh. */
 .cashback-link.cashback-due b{color:var(--muted);font-weight:600;}
 
-/* The Overview ticker: five figures that would otherwise be five tabs.
-   Scrolls sideways in its own box rather than wrapping, because a strip
-   that reflows to three lines on a phone stops being a glance. */
+
+/* The ticker: one line between the header and the tabs, sized to be read
+   in passing rather than looked at. No borders or cards — those turned
+   five small numbers into five full-width blocks stacked down the page,
+   because .board is a three-column grid and the strip became a cell in
+   it. It lives outside the board now, and its height is one line of text
+   plus the rule under it. */
 .ticker{
 display:flex;
-gap:8px;
-align-items:stretch;
+align-items:center;
+gap:14px;
 overflow-x:auto;
-padding:2px 0 8px;
-margin-bottom:4px;
-scrollbar-width:thin;
+scrollbar-width:none;
+padding:0 0 10px;
+margin:-6px 0 12px;
+font-size:12px;
+line-height:1.3;
+white-space:nowrap;
+border-bottom:1px solid var(--line);
 }
-.ticker:empty{display:none;}
+.ticker::-webkit-scrollbar{display:none;}
+.ticker:empty{display:none;border-bottom:none;padding:0;margin:0;}
 .tick{
-display:flex;
-flex-direction:column;
-gap:1px;
+display:inline-flex;
+align-items:baseline;
+gap:5px;
 flex:0 0 auto;
-padding:6px 10px;
-border:1px solid var(--line);
-border-radius:8px;
-background:var(--card);
-min-width:84px;
+color:inherit;
+text-decoration:none;
 }
-.tick-label{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);}
-.tick-value{font-size:15px;font-weight:600;font-variant-numeric:tabular-nums;}
-.tick-up{font-size:11px;color:var(--sage);font-variant-numeric:tabular-nums;}
-.tick-down{font-size:11px;color:var(--red);font-variant-numeric:tabular-nums;}
-.tick-flat{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;}
+.tick-label{color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-size:10px;}
+.tick-value{font-weight:600;font-variant-numeric:tabular-nums;}
+.tick-up{color:var(--sage);font-variant-numeric:tabular-nums;}
+.tick-down{color:var(--red);font-variant-numeric:tabular-nums;}
+.tick-flat{color:var(--muted);font-variant-numeric:tabular-nums;}
+/* Only the links get the hover, so the two that aren't links don't look
+   like they do nothing when clicked. */
+a.tick:hover .tick-value,.tick[data-ticker-edit]:hover .tick-value{text-decoration:underline;}
+.tick[data-ticker-edit]{cursor:pointer;}
+.tick-wx{display:inline-flex;align-items:center;gap:3px;vertical-align:-2px;}
+.tick-wx svg{width:15px;height:15px;display:block;}
 .tick-toggle{
 flex:0 0 auto;
-align-self:center;
+margin-left:auto;
 font-family:'Inter',sans-serif;
-font-size:11px;
-background:var(--card);
+font-size:10px;
+text-transform:uppercase;
+letter-spacing:.05em;
+background:none;
 color:var(--muted);
 border:1px solid var(--line);
 border-radius:20px;
-padding:3px 10px;
+padding:1px 8px;
 cursor:pointer;
 }
 .tick-toggle:hover{color:var(--ink);border-color:var(--muted);}
+@media (max-width:700px){
+.ticker{gap:11px;font-size:11px;}
+.tick-toggle{margin-left:8px;}
+}

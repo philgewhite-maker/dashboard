@@ -98,31 +98,78 @@ prevMonth: known.length ? known[0] : null,
 });
 }
 
+// WMO codes grouped to the handful of pictures worth drawing, with a
+// word kept for the tooltip and for anyone reading with a screen reader.
 const WMO = [
-[[0], 'Clear'], [[1], 'Mostly clear'], [[2], 'Part cloud'], [[3], 'Cloudy'],
-[[45, 48], 'Fog'], [[51, 53, 55, 56, 57], 'Drizzle'],
-[[61, 63, 65, 66, 67], 'Rain'], [[71, 73, 75, 77], 'Snow'],
-[[80, 81, 82], 'Showers'], [[85, 86], 'Snow showers'],
-[[95, 96, 99], 'Thunder'],
+[[0], 'Clear', 'clear'], [[1], 'Mostly clear', 'clear'],
+[[2], 'Part cloud', 'part'], [[3], 'Cloudy', 'cloud'],
+[[45, 48], 'Fog', 'fog'],
+[[51, 53, 55, 56, 57], 'Drizzle', 'drizzle'],
+[[61, 63, 65, 66, 67], 'Rain', 'rain'],
+[[71, 73, 75, 77, 85, 86], 'Snow', 'snow'],
+[[80, 81, 82], 'Showers', 'showers'],
+[[95, 96, 99], 'Thunder', 'thunder'],
 ];
 
 function weatherWord(code) {
 const hit = WMO.find(([codes]) => codes.includes(code));
 return hit ? hit[1] : '—';
 }
+function weatherShape(code) {
+const hit = WMO.find(([codes]) => codes.includes(code));
+return hit ? hit[2] : 'cloud';
+}
 
+// Drawn rather than fetched: an icon font or a sprite sheet would be a
+// network dependency and a licence for five small pictures. `night` only
+// changes the clear and part-cloud shapes -- rain at midnight looks like
+// rain at noon.
+function weatherIcon(code, { night = false } = {}) {
+const shape = weatherShape(code);
+const S = (inner) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="${escapeHtml(weatherWord(code))}">${inner}</svg>`;
+const sun = '<circle cx="12" cy="12" r="4.2"/><path d="M12 2.6v2M12 19.4v2M2.6 12h2M19.4 12h2M5.4 5.4l1.4 1.4M17.2 17.2l1.4 1.4M18.6 5.4l-1.4 1.4M6.8 17.2l-1.4 1.4"/>';
+const moon = '<path d="M20 14.5A8.2 8.2 0 0 1 9.5 4 8.3 8.3 0 1 0 20 14.5Z"/>';
+const cloud = '<path d="M7 19h10.2a3.8 3.8 0 0 0 .3-7.6 5.6 5.6 0 0 0-10.8-1.2A4 4 0 0 0 7 19Z"/>';
+const smallBody = night
+? '<path d="M15.5 9.6A4.6 4.6 0 0 1 9.6 3.7 4.7 4.7 0 1 0 15.5 9.6Z"/>'
+: '<circle cx="8.4" cy="7.4" r="3"/><path d="M8.4 1.9v1.6M8.4 11.3v1.6M2.9 7.4h1.6M12.3 7.4h1.6M4.5 3.5l1.1 1.1M11.2 10.2l1.1 1.1M12.3 3.5l-1.1 1.1M5.6 10.2l-1.1 1.1"/>';
+switch (shape) {
+case 'clear': return S(night ? moon : sun);
+case 'part': return S(`${smallBody}<path d="M9 20h8.4a3.3 3.3 0 0 0 .2-6.6 4.9 4.9 0 0 0-9.3-1A3.5 3.5 0 0 0 9 20Z"/>`);
+case 'fog': return S('<path d="M4 10h16M4 14h16M6 18h12"/>');
+case 'drizzle': return S(`${cloud}<path d="M9.5 21.4v.6M14.5 21.4v.6"/>`);
+case 'rain': return S(`${cloud}<path d="M9 21l-.8 2M13 21l-.8 2M17 21l-.8 2"/>`);
+case 'showers': return S(`${smallBody}<path d="M9 17.5h8a3.2 3.2 0 0 0 .2-6.4 4.8 4.8 0 0 0-9-1A3.4 3.4 0 0 0 9 17.5Z"/><path d="M10 19.5l-.7 2M15 19.5l-.7 2"/>`);
+case 'snow': return S(`${cloud}<path d="M9.5 21.5h.01M13 22.5h.01M16.5 21.5h.01"/>`);
+case 'thunder': return S(`${cloud}<path d="M13 20l-2.6 3.4h3L11 26"/>`);
+default: return S(cloud);
+}
+}
+
+// Daily for the high and low, hourly for the two pictures: the daily
+// weather_code is one summary for the whole day, which cannot say that a
+// bright afternoon turns to rain by nine.
 async function fetchWeather() {
 const cached = fresh('weather');
 if (cached) return cached;
 const url = 'https://api.open-meteo.com/v1/forecast?latitude=51.5074&longitude=-0.1278'
 + '&daily=temperature_2m_max,temperature_2m_min,weather_code,precipitation_probability_max'
-+ '&forecast_days=1&timezone=Europe%2FLondon';
++ '&hourly=weather_code&forecast_days=1&timezone=Europe%2FLondon';
 const body = await (await fetch(url)).json();
 const d = body.daily || {};
+const hours = (body.hourly || {}).time || [];
+const codes = (body.hourly || {}).weather_code || [];
+const at = (hh) => {
+const i = hours.findIndex((h) => h.slice(11, 13) === hh);
+return i >= 0 ? codes[i] : null;
+};
 return store('weather', {
 max: (d.temperature_2m_max || [])[0],
 min: (d.temperature_2m_min || [])[0],
 code: (d.weather_code || [])[0],
+dayCode: at('14') ?? (d.weather_code || [])[0],
+nightCode: at('22') ?? (d.weather_code || [])[0],
 rain: (d.precipitation_probability_max || [])[0],
 });
 }
@@ -266,13 +313,29 @@ const cls = diff > 0 ? 'tick-up' : diff < 0 ? 'tick-down' : 'tick-flat';
 return `<span class="${cls}">${escapeHtml(shown)}</span>`;
 }
 
-function tile(label, value, change, title) {
-return `<div class="tick" title="${escapeHtml(title || '')}">
-<span class="tick-label">${escapeHtml(label)}</span>
+// A link where there's a page worth landing on, a plain span where there
+// isn't -- a tile that looks clickable and does nothing is worse than one
+// that doesn't invite the click.
+function tile(label, value, change, title, { href = '', edit = false } = {}) {
+const attrs = `class="tick" title="${escapeHtml(title || '')}"`;
+const inner = `<span class="tick-label">${escapeHtml(label)}</span>
 <span class="tick-value">${value}</span>
-${change || ''}
-</div>`;
+${change || ''}`;
+if (href) return `<a ${attrs} href="${escapeHtml(href)}" target="_blank" rel="noopener">${inner}</a>`;
+return `<span ${attrs}${edit ? ' data-ticker-edit="1"' : ''}>${inner}</span>`;
 }
+
+
+
+// Where each figure came from, for the click-through. Frankfurter and
+// Open-Meteo are the feeds, but neither is somewhere you'd want to land —
+// these are the pages a person would actually read.
+const SOURCE = {
+fx: 'https://www.xe.com/currencycharts/?from=GBP&to=EUR',
+dbk: 'https://finance.yahoo.com/quote/DBK.DE',
+sonia: 'https://cf.com/rates/europe/sonia-swaps/historical-rates',
+weather: 'https://www.bbc.co.uk/weather/2643743',
+};
 
 function renderTicker() {
 const el = document.getElementById('ticker');
@@ -281,18 +344,19 @@ const t = data.ticker;
 const c = cache();
 const monthly = t.mode === 'month';
 const pick = (hit) => (monthly ? hit.prevMonth : hit.prevDay);
-
 const tiles = [];
 
 if (c.fx) {
 tiles.push(tile('GBP/EUR', c.fx.value ? c.fx.value.toFixed(4) : '—',
 changeHtml(c.fx.value, pick(c.fx)),
-`ECB fixing for ${c.fx.date}. Frankfurter.`));
+`ECB fixing for ${c.fx.date}, via Frankfurter.`,
+{ href: SOURCE.fx }));
 }
 if (c.dbk) {
 tiles.push(tile('DBK', c.dbk.value ? `€${c.dbk.value.toFixed(2)}` : '—',
 changeHtml(c.dbk.value, pick(c.dbk)),
-'Deutsche Bank, XETRA. Yahoo Finance.'));
+'Deutsche Bank, XETRA, via Yahoo Finance.',
+{ href: SOURCE.dbk }));
 }
 if (c.fx && c.dbk && t.shares) {
 // Shares are priced in euros and you think in pounds, so the holding
@@ -303,38 +367,42 @@ tiles.push(tile('Holding', `£${Math.round(gbp).toLocaleString('en-GB')}`,
 changeHtml(gbp, prevGbp),
 `${t.shares.toFixed(2)} DBK shares at €${c.dbk.value.toFixed(2)}, converted at ${c.fx.value.toFixed(4)}.`
 + (t.lastBuy ? ` Last added ${t.lastBuy.shares.toFixed(2)} on ${t.lastBuy.on}, priced at €${t.lastBuy.price.toFixed(2)} (${t.lastBuy.paidOn}).` : '')
-+ ' Click to edit the count.'));
++ ' Click to set the count.',
+{ edit: true }));
 }
 if (c.sonia) {
 tiles.push(tile('2y SONIA', `${c.sonia.value.toFixed(3)}%`,
 // A swap rate moves in basis points, so a percentage change of a
 // percentage reads as nonsense -- this one shows the points.
 changeHtml(c.sonia.value, monthly ? c.sonia.prevMonth : c.sonia.prevDay, { points: true }),
-`2-year SONIA swap, Chatham Financial${c.sonia.via === 'agent' ? ', via the home agent' : ''}. A month ago: ${c.sonia.prevMonth}%.`));
+`2-year SONIA swap, Chatham Financial${c.sonia.via === 'agent' ? ', via the home agent' : ''}. A month ago ${c.sonia.prevMonth}%, a year ago ${c.sonia.prevYear}%.`,
+{ href: SOURCE.sonia }));
 }
 if (c.weather) {
+// Two pictures rather than a word: the afternoon and the evening are
+// often different days as far as a coat is concerned.
+const day = weatherIcon(c.weather.dayCode ?? c.weather.code);
+const night = weatherIcon(c.weather.nightCode ?? c.weather.code, { night: true });
 tiles.push(tile('London', `${Math.round(c.weather.max)}° / ${Math.round(c.weather.min)}°`,
-`<span class="tick-flat">${escapeHtml(weatherWord(c.weather.code))}${c.weather.rain >= 20 ? ` ${c.weather.rain}%` : ''}</span>`,
-`Today's high and low. ${weatherWord(c.weather.code)}, ${c.weather.rain}% chance of rain.`));
+`<span class="tick-flat tick-wx">${day}${night}${c.weather.rain >= 20 ? ` ${c.weather.rain}%` : ''}</span>`,
+`High ${Math.round(c.weather.max)}°, low ${Math.round(c.weather.min)}°. `
++ `Afternoon ${weatherWord(c.weather.dayCode ?? c.weather.code).toLowerCase()}, `
++ `evening ${weatherWord(c.weather.nightCode ?? c.weather.code).toLowerCase()}, `
++ `${c.weather.rain}% chance of rain.`,
+{ href: SOURCE.weather }));
 }
 
 el.innerHTML = tiles.length
-? `${tiles.join('')}
-<button class="tick-toggle" type="button" id="ticker-mode" title="Switch between change since yesterday and since a month ago">${monthly ? 'month' : 'day'}</button>`
-: '<span class="settings-note" style="margin:0;">Fetching…</span>';
+? `${tiles.join('')}<button class="tick-toggle" type="button" id="ticker-mode" title="Switch between change since yesterday and since a month ago">${monthly ? 'month' : 'day'}</button>`
+: '';
 
 el.querySelector('#ticker-mode')?.addEventListener('click', () => {
 data.ticker.mode = monthly ? 'day' : 'month';
 queueSave();
 renderTicker();
 });
-el.querySelectorAll('.tick').forEach((node) => {
-if (!/^Holding/.test(node.textContent)) return;
-node.style.cursor = 'pointer';
-node.addEventListener('click', editShares);
-});
+el.querySelector('[data-ticker-edit]')?.addEventListener('click', editShares);
 }
-
 function editShares() {
 const t = data.ticker;
 const now = prompt(`DBK shares held.\n\nThe scheme adds £${t.monthlyGbp} on the first business day of each month, priced as at five years earlier. Set the number here after a dividend or a sale.`, String(t.shares));
