@@ -504,24 +504,43 @@ dialog.addEventListener('click', (e) => { if (e.target === dialog) close(); });
 
 let info = { ongoing: true, status: '' };
 let sessions = { sessions: [], sessioned: false, episodeCount: 0 };
+let seasonLabel = '';
 let tvdbId = '';
 try {
 const { fetchPageHtml } = await import('../files.js');
-const { tvdbSeriesInfo, tvdbSessions, defaultSessionFilter } = await import('../catalogue.js');
+const { tvdbSeriesInfo, tvdbSessions, tvdbSeasonNumbers, defaultSessionFilter } = await import('../catalogue.js');
 const slug = String((item.externalIds || {}).tvdb || '').replace(/^series\//, '');
 const seriesHtml = await fetchPageHtml(item.link || `https://thetvdb.com/series/${slug}`);
 info = tvdbSeriesInfo(seriesHtml);
 tvdbId = await tvdbNumericId(item, seriesHtml);
-// The season listing is a separate, much larger page -- only fetched
-// because the episode TITLES are the whole basis for the filter.
+// Episode titles are the whole basis for the filter, and they live on
+// a season listing rather than the series page. The LATEST season, not
+// all of them: see tvdbSeasonNumbers for why "all seasons" can't be
+// fetched at all for a series this long. The latest can be thin --
+// asked in January, a new season might hold two episodes -- so fall
+// back a season when it hasn't enough titles to read a pattern from.
+const seasons = tvdbSeasonNumbers(seriesHtml);
+for (const n of seasons.slice(0, 2)) {
+sessions = tvdbSessions(await fetchPageHtml(`https://thetvdb.com/series/${slug}/seasons/official/${n}`));
+if (!dialog.isConnected) return;
+seasonLabel = `season ${n}`;
+if (sessions.sessioned) break;
+}
+// No season links at all means an unfamiliar page layout, and guessing
+// "not sessioned" there would quietly monitor every practice session.
+// The whole listing is the honest fallback; it only fails for the
+// enormous series, and those always list their seasons.
+if (!seasons.length) {
 sessions = tvdbSessions(await fetchPageHtml(`https://thetvdb.com/series/${slug}/allseasons/official`));
+seasonLabel = 'all seasons';
+}
 if (!dialog.isConnected) return;
 const suggested = sessions.sessioned ? defaultSessionFilter(sessions.sessions) : [];
 const current = item.monitor && item.monitor.filter ? item.monitor.filter : suggested;
 dialog.innerHTML = `<div class="mail-view-card" style="max-width:480px;">
 <div class="mail-view-subject">Monitor ${escapeHtml(displayTitle(item))}?</div>
 <div class="settings-note" style="margin:2px 0 8px;">
-${escapeHtml(info.status || 'Status unknown')}${sessions.episodeCount ? ` &middot; ${sessions.episodeCount} episodes on TheTVDB` : ''}${tvdbId ? ` &middot; TVDB ${escapeHtml(tvdbId)}` : ''}.
+${escapeHtml(info.status || 'Status unknown')}${sessions.episodeCount ? ` &middot; ${sessions.episodeCount} episodes in ${escapeHtml(seasonLabel)}` : ''}${tvdbId ? ` &middot; TVDB ${escapeHtml(tvdbId)}` : ''}.
 Sonarr will watch for new episodes and fetch them.
 </div>
 ${sessions.sessioned ? `<div class="settings-note" style="margin:0 0 4px;">This series puts out several episodes per event, so monitoring all of them would chase every practice session. Tick the ones worth keeping:</div>
@@ -540,8 +559,13 @@ if (!dialog.isConnected) return;
 dialog.innerHTML = `<div class="mail-view-card" style="max-width:480px;">
 <div class="mail-view-subject">Couldn't read that series</div>
 <div class="settings-note">${escapeHtml(err.message || String(err))}</div>
-<div class="mail-view-actions"><button class="sync-btn sm" type="button" data-monitor-cancel>Close</button></div></div>`;
+<div class="mail-view-actions"><button class="sync-btn sm" type="button" data-monitor-close>Close</button></div></div>`;
 }
+// Dismissing a dialog that FAILED to load isn't a decision, so it gets
+// its own button: the one below remembers a "no thanks" to stop the row
+// asking again, and a lookup that timed out would otherwise silence the
+// offer forever on the strength of a slow page.
+dialog.querySelector('[data-monitor-close]')?.addEventListener('click', close);
 dialog.querySelector('[data-monitor-cancel]')?.addEventListener('click', () => {
 // Remembered, so the prompt stops asking about a series you've
 // already said no to -- without it, every render offers again.

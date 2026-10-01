@@ -270,6 +270,26 @@ const statusMatch = /Status[\s\S]{0,120}?>\s*(Continuing|Ended|Upcoming)\s*</i.e
 return { status: statusMatch ? statusMatch[1] : '', ongoing: /continuing|upcoming/i.test(statusMatch ? statusMatch[1] : '') };
 }
 
+// The series' seasons, newest first, read off the season links its own
+// page carries.
+//
+// This exists because the "all seasons" listing is unusable for exactly
+// the series that most needs a filter: Formula 1's runs to 2,667
+// episodes and 3MB, and TheTVDB takes twelve seconds to START sending
+// it -- past the page proxy's ten-second timeout, so the lookup died
+// with nothing received at all. One season is 173KB and arrives in
+// 1.3s, and one season is plenty to read the session vocabulary from,
+// since a race year repeats it twenty-odd times. It's the BETTER sample
+// too: current naming rather than an average over a decade of renames.
+//
+// Numeric sort because F1's seasons are years while a drama's are
+// 1, 2, 3 -- either way the largest is the most recent.
+function tvdbSeasonNumbers(html) {
+const found = new Set();
+for (const m of String(html || '').matchAll(/\/seasons\/official\/(\d{1,4})\b/gi)) found.add(m[1]);
+return [...found].sort((a, b) => Number(b) - Number(a));
+}
+
 // The session vocabulary a series actually uses, counted. Given the HTML
 // of a season listing, returns [{session, count}] most-used first, plus
 // whether that's enough of a pattern to call it sessioned.
@@ -511,4 +531,4 @@ link: `https://musicbrainz.org/release-group/${g.id}`,
 })).filter((c) => c.title);
 }
 
-export { identifyUrl, catalogueLabel, artworkUrl, linkMetadata, ogImageFrom, searchTitle, watchProviders, subscriptionFor, tvdbSeriesInfo, tvdbSessions, defaultSessionFilter, CATALOGUE_LABELS };
+export { identifyUrl, catalogueLabel, artworkUrl, linkMetadata, ogImageFrom, searchTitle, watchProviders, subscriptionFor, tvdbSeriesInfo, tvdbSessions, tvdbSeasonNumbers, defaultSessionFilter, CATALOGUE_LABELS };
