@@ -222,6 +222,12 @@ const item = data.mediaItems.find((m) => m.id === btn.dataset.mediaMonitor);
 if (item) openMonitorDialog(item);
 });
 });
+list.querySelectorAll('[data-media-tvdb]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const item = data.mediaItems.find((m) => m.id === btn.dataset.mediaTvdb);
+if (item) openTvdbIdDialog(item);
+});
+});
 list.querySelectorAll('[data-media-satisfy]').forEach((btn) => {
 btn.addEventListener('click', () => {
 const item = data.mediaItems.find((m) => m.id === btn.dataset.mediaSatisfy);
@@ -257,6 +263,11 @@ renderMedia();
 // Attempts are remembered for the session so a page that can't be
 // enriched isn't re-fetched on every render, and only a few go at once.
 const enrichAttempted = new Set();
+// Separate from enrichAttempted because the two ask different questions
+// of different items -- artwork for anything with a link, a TVDB id for
+// a series with a catalogue id -- and sharing one set would let whichever
+// ran first silence the other.
+const tvdbAttempted = new Set();
 function enrichPending() {
 data.mediaItems
 .filter((m) => m.link && (looksLikeUrl(m.title) || !m.imageUrl) && !enrichAttempted.has(m.id))
@@ -265,6 +276,20 @@ data.mediaItems
 enrichAttempted.add(m.id);
 fillArtwork(m);
 });
+// A new series gets its TVDB id on the way in, so the Monitor button
+// is ready the moment you think to press it rather than resolving
+// while you wait. Quiet on failure: this is a background nicety, and
+// the panel's own button reports properly when it matters. One id
+// per render keeps a long list from firing a burst at TMDb.
+const needsId = data.mediaItems.find((m) => m.kind === 'tv'
+&& OPEN_STATUSES.includes(m.status)
+&& !/^\d+$/.test(String(m.tvdbId || ''))
+&& ((m.externalIds || {}).tmdb || (m.externalIds || {}).imdb || (m.externalIds || {}).tvdb)
+&& !tvdbAttempted.has(m.id));
+if (needsId) {
+tvdbAttempted.add(needsId.id);
+resolveTvdbId(needsId).then((res) => { if (res.id) renderMedia(); }).catch(() => {});
+}
 }
 
 function hideBrokenArt(root) {
@@ -465,31 +490,190 @@ return `<span class="task-context" style="background:var(--sage-bg);color:var(--
 title="Monitored in Sonarr${f.length ? `, ${f.join(' / ')} only` : ', every episode'}${last ? ` — last reconciled ${escapeHtml(String(last).slice(0, 10))}` : ''}">&#9679; Monitored${f.length ? ` (${escapeHtml(f.join('/'))})` : ''}</span>
 <button class="mini-task-btn" type="button" data-media-monitor="${item.id}" title="Change what's monitored, or turn it off">Edit</button>`;
 }
-// Only worth asking for something still running and identified on TVDB
-// -- Sonarr needs that id, and a finished series is a one-off fetch
-// rather than a standing arrangement.
-if (!item.externalIds || !item.externalIds.tvdb) return '';
+// Only series: Sonarr takes TV, and a film is a one-off fetch rather
+// than a standing arrangement.
+if (item.kind !== 'tv') return '';
 if (item.monitor && item.monitor.declinedAt) return '';
-return `<button class="mini-task-btn" type="button" data-media-monitor="${item.id}" title="Have Sonarr watch for new episodes of this">Monitor&hellip;</button>`;
+const ids = item.externalIds || {};
+// Offered when SOME exact route to a TVDB id exists -- the id itself is
+// resolved when the dialog opens, because resolving every row's id on
+// every render would be a TMDb call per paint.
+const resolvable = item.tvdbId || ids.tvdb || ids.tmdb || ids.imdb;
+return `${resolvable ? `<button class="mini-task-btn" type="button" data-media-monitor="${item.id}" title="Have Sonarr watch for new episodes of this">Monitor&hellip;</button>` : ''}
+<button class="mini-task-btn" type="button" data-media-tvdb="${item.id}" title="${item.tvdbId ? `TVDB ${escapeHtml(String(item.tvdbId))} — change or clear it` : 'Tell Sonarr which series this is'}">TVDB${item.tvdbId ? ` ${escapeHtml(String(item.tvdbId))}` : '&hellip;'}</button>`;
 }
 
-// The numeric TVDB id Sonarr needs. A stored id may be the slug form
-// ("series/formula-1") because that's what the URL carried, so the
-// series page is read for the numeric one when it isn't already known.
-// `html` is passed in when the caller already has the series page, which
-// it usually does -- fetching it twice for one dialog is a second trip
-// through the proxy for a page already in hand.
-async function tvdbNumericId(item, html) {
+// The TVDB slug, when the item was identified on TheTVDB itself. Only
+// that gives the site's own pages, which is where a series' status and
+// its episode titles come from.
+function tvdbSlug(item) {
 const stored = String((item.externalIds || {}).tvdb || '');
-const direct = /^\d+$/.test(stored) ? stored : '';
-if (direct) return direct;
+return /^\d+$/.test(stored) ? '' : stored.replace(/^series\//, '');
+}
+
+// The numeric TVDB id Sonarr needs, found by whichever route the item
+// gives us, cheapest first. Resolved once and remembered on the record,
+// because every route costs either a proxy fetch or a TMDb call and the
+// answer never changes.
+//
+// Deliberately NOT a title search. A title is a guess ("The Office" is
+// nine series), and a wrong id has Sonarr fetching someone else's show
+// into your library -- that one is the manual button's job, where you
+// can see what you're agreeing to. Everything here is an exact id
+// following another exact id.
+//
+// `html` is passed in when the caller already has the series page, which
+// the monitor dialog does -- fetching it twice is a second trip through
+// the proxy for a page already in hand.
+async function resolveTvdbId(item, html) {
+const known = String(item.tvdbId || '');
+if (/^\d+$/.test(known)) return { id: known, via: 'saved' };
+
+const stored = String((item.externalIds || {}).tvdb || '');
+if (/^\d+$/.test(stored)) return save(item, stored, 'TVDB link');
+
+const slug = tvdbSlug(item);
+if (slug) {
 if (!html) {
 const { fetchPageHtml } = await import('../files.js');
-html = await fetchPageHtml(item.link || `https://thetvdb.com/${stored}`);
+html = await fetchPageHtml(item.link || `https://thetvdb.com/series/${slug}`);
 }
-const m = /artworks\.thetvdb\.com\/banners\/series\/(\d+)\//i.exec(html)
-|| /tvdb[_-]?id["'\s:=]+(\d{4,})/i.exec(html);
-return m ? m[1] : '';
+const m = /artworks\.thetvdb\.com\/banners\/series\/(\d+)\//i.exec(html || '')
+|| /tvdb[_-]?id["'\s:=]+(\d{4,})/i.exec(html || '');
+if (m) return save(item, m[1], 'TVDB page');
+}
+
+// The route that covers the existing list: almost everything here came
+// from TMDb search or a shared IMDb link, neither of which carries a
+// TVDB reference at all.
+const { tvdbIdViaTmdb } = await import('../catalogue.js');
+const hit = await tvdbIdViaTmdb(item.externalIds || {});
+if (hit) return save(item, hit.id, hit.via);
+// A reason, not just a blank. "Still unknown" with nothing after it
+// sends you looking for a bug when the answer is "this show has no
+// TVDB entry" or "you never gave it a link".
+const ids = item.externalIds || {};
+return { id: '', via: '',
+why: slug ? "TheTVDB's page carried no id"
+: (ids.tmdb || ids.imdb) ? "TMDb doesn't cross-reference it to TheTVDB"
+: 'nothing to look it up by' };
+}
+
+function save(item, id, via) {
+item.tvdbId = String(id);
+queueSave();
+return { id: String(id), via };
+}
+
+// Fills in the ids for everything still wanted, so the Monitor button
+// appears on shows added before any of this existed. Only the exact
+// routes run, so nothing is guessed; whatever's left over keeps its
+// "Link TVDB" button and a reason.
+async function backfillTvdbIds() {
+const status = document.getElementById('media-tvdb-status');
+const say = (t) => { if (status) status.textContent = t; };
+const todo = data.mediaItems.filter((m) => m.kind === 'tv'
+&& OPEN_STATUSES.includes(m.status)
+&& !/^\d+$/.test(String(m.tvdbId || '')));
+if (!todo.length) { say('Every series already has a TVDB id.'); return; }
+let found = 0;
+const missed = [];
+for (const item of todo) {
+say(`Looking up ${found + missed.length + 1} of ${todo.length}…`);
+try {
+const res = await resolveTvdbId(item);
+if (res.id) found += 1;
+else missed.push({ item, why: res.why });
+} catch (err) {
+missed.push({ item, why: err.message || String(err) });
+}
+}
+renderMedia();
+if (!missed.length) { say(`${found} of ${todo.length} resolved.`); return; }
+// Each unresolved series is named as a chip rather than as text, so you
+// can click straight to the row whose TVDB button needs pressing --
+// a list of bare titles makes you go find them yourself.
+if (status) {
+status.innerHTML = `${found} of ${todo.length} resolved. Still unknown: ${missed
+.map((m) => `${mediaChipHtml(m.item)} <span class="settings-note" style="display:inline;margin:0;">${escapeHtml(String(m.why).replace(/\.$/, ''))}</span>`)
+.join(' ')}`;
+// bindMediaChips() is already delegated at the document, so these chips
+// work without rebinding.
+}
+}
+
+// The manual route, for the cases no exact id reaches: a series TMDb
+// doesn't cross-reference, or one that was typed in rather than looked
+// up. TheTVDB's search can't be read for you (see tvdbIdViaTmdb), so
+// this opens it prefilled and takes back whatever you found -- a pasted
+// URL or the bare number, since the id is visible in both.
+function openTvdbIdDialog(item) {
+const dialog = document.createElement('div');
+dialog.className = 'mail-view-backdrop';
+const search = `https://thetvdb.com/search?query=${encodeURIComponent(item.title || '')}`;
+dialog.innerHTML = `<div class="mail-view-card" style="max-width:460px;">
+<div class="mail-view-subject">TVDB id for ${escapeHtml(displayTitle(item))}</div>
+<div class="settings-note" style="margin:2px 0 8px;">Sonarr finds a series by its TVDB id. Paste the thetvdb.com address or just the number.</div>
+<input type="text" id="tvdb-id-input" placeholder="https://thetvdb.com/series/… or 387219" value="${escapeHtml(String(item.tvdbId || ''))}" style="width:100%;">
+<div class="settings-note" style="margin:6px 0 0;"><a href="${escapeHtml(search)}" target="_blank" rel="noopener">Search TheTVDB for &ldquo;${escapeHtml(item.title || '')}&rdquo;</a> &mdash; the id is the number in the page&rsquo;s own address bar once you open the series.</div>
+<div class="mail-view-actions">
+<button class="sync-btn sm" type="button" data-tvdb-cancel>Cancel</button>
+${item.tvdbId ? '<button class="sync-btn sm" type="button" data-tvdb-clear>Forget it</button>' : ''}
+<button class="add-btn" type="button" data-tvdb-save>Save</button>
+</div>
+<div class="sync-status" data-tvdb-status></div></div>`;
+document.body.appendChild(dialog);
+const close = () => dialog.remove();
+dialog.addEventListener('click', (e) => { if (e.target === dialog) close(); });
+dialog.querySelector('[data-tvdb-cancel]').addEventListener('click', close);
+dialog.querySelector('[data-tvdb-clear]')?.addEventListener('click', () => {
+item.tvdbId = '';
+queueSave();
+renderMedia();
+close();
+});
+dialog.querySelector('[data-tvdb-save]').addEventListener('click', async () => {
+const raw = (dialog.querySelector('#tvdb-id-input').value || '').trim();
+// A TVDB URL may be the numeric /dereferrer/ form or the slug form, and
+// the slug form carries no number at all -- so the slug is stored as
+// the catalogue reference it is, and the number is resolved from the
+// page the way a shared TVDB link already is.
+// An all-digit slug is the number, not a slug -- thetvdb.com/series/387219
+// is a 404 page, and treating it as a slug would send the resolver off to
+// read it.
+const num = /^(\d+)$/.exec(raw)
+|| /\/dereferrer\/series\/(\d+)/i.exec(raw)
+|| /[?&]id=(\d+)/.exec(raw)
+|| /thetvdb\.com\/series\/(\d+)\/?$/i.exec(raw);
+const slug = /thetvdb\.com\/series\/([a-z0-9-]*[a-z][a-z0-9-]*)/i.exec(raw);
+const note = dialog.querySelector('[data-tvdb-status]');
+if (num) {
+item.tvdbId = num[1];
+} else if (slug) {
+item.externalIds = { ...(item.externalIds || {}), tvdb: `series/${slug[1]}` };
+if (!item.link) item.link = `https://thetvdb.com/series/${slug[1]}`;
+item.tvdbId = '';
+queueSave();
+// Resolved here rather than left for later, so the row comes back
+// reading "TVDB 387219" instead of an unchanged "TVDB…" that gives no
+// sign the paste landed.
+if (note) note.textContent = 'Reading the number off that page…';
+try {
+const res = await resolveTvdbId(item);
+if (!res.id) { if (note) note.textContent = `Saved the link, but ${res.why}.`; renderMedia(); return; }
+} catch (err) {
+if (note) note.textContent = `Saved the link, but couldn't read the id: ${err.message || err}`;
+renderMedia();
+return;
+}
+} else {
+if (note) note.textContent = "That isn't a TVDB address or id.";
+return;
+}
+queueSave();
+renderMedia();
+close();
+});
 }
 
 async function openMonitorDialog(item) {
@@ -506,13 +690,41 @@ let info = { ongoing: true, status: '' };
 let sessions = { sessions: [], sessioned: false, episodeCount: 0 };
 let seasonLabel = '';
 let tvdbId = '';
+let idVia = '';
+let slugRead = false;
+let idWhy = '';
 try {
 const { fetchPageHtml } = await import('../files.js');
 const { tvdbSeriesInfo, tvdbSessions, tvdbSeasonNumbers, defaultSessionFilter } = await import('../catalogue.js');
-const slug = String((item.externalIds || {}).tvdb || '').replace(/^series\//, '');
-const seriesHtml = await fetchPageHtml(item.link || `https://thetvdb.com/series/${slug}`);
+// TheTVDB's own pages are only reachable by slug, which only an item
+// identified on TheTVDB has. Everything else resolves to a bare number
+// via TMDb -- enough for Sonarr, which is all monitoring needs. What
+// goes missing is the status line and the session filter, and a series
+// with one episode per event has nothing to filter anyway.
+const slug = tvdbSlug(item);
+// Whether TheTVDB's own pages were actually read, which is what the
+// status line and the filter depend on -- distinct from "no filter
+// needed", and the dialog says which.
+slugRead = !!slug;
+let seriesHtml = '';
+if (slug) {
+seriesHtml = await fetchPageHtml(item.link || `https://thetvdb.com/series/${slug}`);
 info = tvdbSeriesInfo(seriesHtml);
-tvdbId = await tvdbNumericId(item, seriesHtml);
+}
+// Non-fatal on purpose. Failing to find the id is the case most in
+// need of the "set it by hand" button below, and letting the throw
+// reach the outer catch replaces the whole dialog with an error and a
+// Close -- taking that button away exactly when it's wanted.
+try {
+const resolved = await resolveTvdbId(item, seriesHtml);
+tvdbId = resolved.id;
+idVia = resolved.via;
+idWhy = resolved.why || '';
+} catch (err) {
+idWhy = err.message || String(err);
+}
+if (!dialog.isConnected) return;
+if (slug) {
 // Episode titles are the whole basis for the filter, and they live on
 // a season listing rather than the series page. The LATEST season, not
 // all of them: see tvdbSeasonNumbers for why "all seasons" can't be
@@ -534,20 +746,30 @@ if (!seasons.length) {
 sessions = tvdbSessions(await fetchPageHtml(`https://thetvdb.com/series/${slug}/allseasons/official`));
 seasonLabel = 'all seasons';
 }
+}
 if (!dialog.isConnected) return;
 const suggested = sessions.sessioned ? defaultSessionFilter(sessions.sessions) : [];
 const current = item.monitor && item.monitor.filter ? item.monitor.filter : suggested;
+// Only what was actually established. "Status unknown" is worth saying
+// when TheTVDB's page was read and didn't say, and misleading when it
+// was never read at all.
+const facts = [
+info.status || (slugRead ? 'Status unknown' : ''),
+sessions.episodeCount ? `${sessions.episodeCount} episodes in ${escapeHtml(seasonLabel)}` : '',
+tvdbId ? `TVDB ${escapeHtml(tvdbId)}${idVia && idVia !== 'saved' ? ` via ${escapeHtml(idVia)}` : ''}` : '',
+].filter(Boolean);
 dialog.innerHTML = `<div class="mail-view-card" style="max-width:480px;">
 <div class="mail-view-subject">Monitor ${escapeHtml(displayTitle(item))}?</div>
 <div class="settings-note" style="margin:2px 0 8px;">
-${escapeHtml(info.status || 'Status unknown')}${sessions.episodeCount ? ` &middot; ${sessions.episodeCount} episodes in ${escapeHtml(seasonLabel)}` : ''}${tvdbId ? ` &middot; TVDB ${escapeHtml(tvdbId)}` : ''}.
+${facts.length ? `${facts.join(' &middot; ')}.` : ''}
 Sonarr will watch for new episodes and fetch them.
 </div>
 ${sessions.sessioned ? `<div class="settings-note" style="margin:0 0 4px;">This series puts out several episodes per event, so monitoring all of them would chase every practice session. Tick the ones worth keeping:</div>
 <div class="tag-editor" style="margin-bottom:8px;">${sessions.sessions.slice(0, 12).map((s) => `<label class="tag-chip" style="cursor:pointer;">
 <input type="checkbox" data-monitor-session="${escapeHtml(s.session)}"${current.some((c) => c.toLowerCase() === s.session.toLowerCase()) ? ' checked' : ''}> ${escapeHtml(s.session)} <span class="settings-note" style="display:inline;margin:0;">${s.count}</span>
-</label>`).join('')}</div>` : '<div class="settings-note" style="margin:0 0 8px;">Every episode will be monitored — this series has one per event.</div>'}
-${tvdbId ? '' : '<div class="settings-note" style="color:var(--amber);margin:0 0 8px;">Couldn\'t read the numeric TVDB id, which Sonarr needs. Monitoring can still be saved, but it won\'t apply until that\'s resolved.</div>'}
+</label>`).join('')}</div>` : `<div class="settings-note" style="margin:0 0 8px;">Every episode will be monitored${slugRead ? ' — this series puts out one per event' : ", which is right unless it's a sport with practice sessions to skip. Those are filtered from its TheTVDB page, which needs a thetvdb.com link on this item"}.</div>`}
+${tvdbId ? '' : `<div class="settings-note" style="color:var(--amber);margin:0 0 8px;">No TVDB id found, which is what Sonarr looks a series up by${idWhy ? ` — ${escapeHtml(idWhy.replace(/\.$/, ''))}` : ''}. Monitoring can be saved now, but nothing reaches Sonarr until the id is set.
+<button class="mini-task-btn" type="button" data-monitor-setid style="margin-left:4px;">Set it by hand&hellip;</button></div>`}
 <div class="mail-view-actions">
 <button class="sync-btn sm" type="button" data-monitor-cancel>Not now</button>
 ${item.monitor && item.monitor.enabledAt ? '<button class="sync-btn sm" type="button" data-monitor-off>Stop monitoring</button>' : ''}
@@ -566,6 +788,7 @@ dialog.innerHTML = `<div class="mail-view-card" style="max-width:480px;">
 // asking again, and a lookup that timed out would otherwise silence the
 // offer forever on the strength of a slow page.
 dialog.querySelector('[data-monitor-close]')?.addEventListener('click', close);
+dialog.querySelector('[data-monitor-setid]')?.addEventListener('click', () => { close(); openTvdbIdDialog(item); });
 dialog.querySelector('[data-monitor-cancel]')?.addEventListener('click', () => {
 // Remembered, so the prompt stops asking about a series you've
 // already said no to -- without it, every render offers again.
@@ -604,13 +827,18 @@ setTimeout(close, res.ok ? 1200 : 5000);
 // without anyone opening a dialog.
 async function applyMonitor(item) {
 const m = item.monitor;
-if (!m || !m.tvdbId) return { ok: false, message: 'No TVDB id — nothing to tell Sonarr.' };
+// The record's resolved id wins over the one the monitor snapshotted at
+// save time: setting the id by hand afterwards is exactly how a series
+// that couldn't be resolved gets fixed, and reading the stale snapshot
+// would leave it permanently unreachable.
+const tvdbId = String(item.tvdbId || (m && m.tvdbId) || '');
+if (!m || !tvdbId) return { ok: false, message: 'No TVDB id — nothing to tell Sonarr.' };
 try {
 const { run } = await import('../homeagent.js');
 // Added first if it isn't there; arr.add is a no-op when it is.
-await run('arr.add', { kind: 'tv', title: item.title, tvdbId: m.tvdbId }, { timeoutMs: 45000 });
+await run('arr.add', { kind: 'tv', title: item.title, tvdbId }, { timeoutMs: 45000 });
 const res = await run('arr.monitor', {
-tvdbId: m.tvdbId,
+tvdbId,
 // The filter becomes a pattern matching "(Race)" and friends --
 // the session sits in brackets at the end of a TVDB episode title.
 include: m.filter && m.filter.length
@@ -630,7 +858,7 @@ return { ok: false, message: `Couldn't reach Sonarr: ${err.message || err}` };
 // race weekend added to TheTVDB this week has to be turned on in Sonarr,
 // and nothing else notices that it appeared.
 async function reconcileMonitors() {
-const items = data.mediaItems.filter((m) => m.monitor && m.monitor.enabledAt && m.monitor.tvdbId);
+const items = data.mediaItems.filter((m) => m.monitor && m.monitor.enabledAt && (m.tvdbId || m.monitor.tvdbId));
 let done = 0;
 for (const item of items) {
 const res = await applyMonitor(item);
@@ -816,6 +1044,13 @@ if (plexBtn) {
 plexBtn.addEventListener('click', async () => {
 plexBtn.disabled = true;
 try { await checkAgainstPlex(); } finally { plexBtn.disabled = false; }
+});
+}
+const tvdbBtn = document.getElementById('media-tvdb-btn');
+if (tvdbBtn) {
+tvdbBtn.addEventListener('click', async () => {
+tvdbBtn.disabled = true;
+try { await backfillTvdbIds(); } finally { tvdbBtn.disabled = false; }
 });
 }
 const input = document.getElementById('media-capture-input');

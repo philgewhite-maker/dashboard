@@ -477,6 +477,15 @@ requestedBy: '', // who asked for it, when it arrived via Telegram
 // this on Plex", "which release", "what's the poster" answerable later
 // without re-identifying a work from its title. See catalogue.js.
 externalIds: {},
+// The numeric TVDB id, kept separately from `externalIds.tvdb` because
+// they aren't the same thing: externalIds holds the catalogue REFERENCE
+// the URL carried, which for TheTVDB is a slug ("series/formula-1"),
+// while this is the number Sonarr looks a series up by. Resolved once
+// from whatever route the item offers -- a TVDB page, or TMDb's
+// cross-ids for a show that arrived from TMDb or IMDb -- and then just
+// read, since it never changes. Settable by hand for the series no
+// exact route reaches.
+tvdbId: '',
 plexCheck: null, // {checkedAt, found, ratingKey} -- filled by the home agent
 whereToWatch: null, // {checkedAt, region, flatrate[], rent[], buy[], link} from TMDb
 // Monitoring in Sonarr/Radarr, once you have said yes to it:

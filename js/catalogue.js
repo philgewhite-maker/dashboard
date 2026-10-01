@@ -290,6 +290,66 @@ for (const m of String(html || '').matchAll(/\/seasons\/official\/(\d{1,4})\b/gi
 return [...found].sort((a, b) => Number(b) - Number(a));
 }
 
+// The TVDB id for a series TMDb already knows about.
+//
+// Sonarr keys everything by TVDB id, but almost nothing in this app
+// arrives with one: TV shows come from TMDb search or a shared IMDb
+// link, and only a thetvdb.com URL carries a TVDB reference at all. TMDb
+// publishes the cross-ids for the same series, so one call turns a show
+// that's been sitting in the list for months into one Sonarr can find.
+//
+// Scraping TheTVDB's own search instead was tried and abandoned: its
+// /search page returns a 16KB shell and renders results client-side, so
+// there is nothing in the HTML to read (confirmed live -- two /series/
+// links on the page, both "/series/create").
+//
+// Returns {id, via} or null. `via` is reported in the UI because the
+// IMDb route takes an extra hop and a wrong answer there is worth being
+// able to see the provenance of.
+async function tvdbIdViaTmdb(externalIds = {}) {
+let tmdbTvId = '';
+let via = '';
+const stored = String(externalIds.tmdb || '');
+const [type, id] = stored.split('/');
+// A film has no TVDB series id, and asking for one would silently
+// return the wrong kind of answer, so only /tv/ counts.
+if (type === 'tv' && id) { tmdbTvId = id; via = 'TMDb'; }
+if (!tmdbTvId && !externalIds.imdb) return null;
+
+// Checked only once there is something to look up, and LOUDLY: a silent
+// null here reads as "this show just can't be resolved", and the real
+// answer -- a missing key, one Settings field away -- would never
+// surface. (Search elsewhere in this file stays quiet about a missing
+// key because it has a visible empty result; this doesn't.)
+const { getLocalSettings } = await import('./state.js');
+const key = (await getLocalSettings()).tmdbApiKey;
+if (!key) throw new Error('No TMDb API key in Settings — that is the route from a TMDb or IMDb id to a TVDB one.');
+const q = `api_key=${encodeURIComponent(key)}`;
+
+if (!tmdbTvId && externalIds.imdb) {
+// IMDb ids cover films and series alike, so /find is asked which it
+// is rather than assumed; tv_results being empty means this is a film
+// and there is nothing here to resolve.
+const res = await fetch(`https://api.themoviedb.org/3/find/${encodeURIComponent(externalIds.imdb)}?${q}&external_source=imdb_id`);
+if (!res.ok) throw new Error(res.status === 401 ? 'TMDb rejected that API key.' : `TMDb lookup failed (HTTP ${res.status}).`);
+const body = await res.json();
+const hit = (body.tv_results || [])[0];
+if (!hit) return null;
+tmdbTvId = String(hit.id);
+via = 'IMDb → TMDb';
+}
+if (!tmdbTvId) return null;
+
+const res = await fetch(`https://api.themoviedb.org/3/tv/${encodeURIComponent(tmdbTvId)}/external_ids?${q}`);
+if (!res.ok) throw new Error(res.status === 401 ? 'TMDb rejected that API key.' : `TMDb cross-ids failed (HTTP ${res.status}).`);
+const body = await res.json();
+const tvdb = body.tvdb_id;
+// TMDb returns null for a series TheTVDB doesn't carry, which is a real
+// answer rather than an error -- some TMDb-only shows genuinely have no
+// TVDB entry, and Sonarr can't take them.
+return tvdb ? { id: String(tvdb), via } : null;
+}
+
 // The session vocabulary a series actually uses, counted. Given the HTML
 // of a season listing, returns [{session, count}] most-used first, plus
 // whether that's enough of a pattern to call it sessioned.
@@ -531,4 +591,4 @@ link: `https://musicbrainz.org/release-group/${g.id}`,
 })).filter((c) => c.title);
 }
 
-export { identifyUrl, catalogueLabel, artworkUrl, linkMetadata, ogImageFrom, searchTitle, watchProviders, subscriptionFor, tvdbSeriesInfo, tvdbSessions, tvdbSeasonNumbers, defaultSessionFilter, CATALOGUE_LABELS };
+export { identifyUrl, catalogueLabel, artworkUrl, linkMetadata, ogImageFrom, searchTitle, watchProviders, subscriptionFor, tvdbSeriesInfo, tvdbSessions, tvdbSeasonNumbers, tvdbIdViaTmdb, defaultSessionFilter, CATALOGUE_LABELS };
