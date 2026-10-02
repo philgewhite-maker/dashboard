@@ -38,7 +38,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-VERSION = "1.5"
+VERSION = "1.6"
 
 SYNC_URL = os.environ.get("DASHBOARD_SYNC_URL", "").strip()
 SECRET = os.environ.get("DASHBOARD_SECRET", "").strip()
@@ -414,6 +414,35 @@ BROWSER_TOKEN = os.environ.get("BROWSER_TOKEN", "").strip()
 # "Wear with" block to hydrate is slower than any plain fetch here, and
 # this verb exists for exactly the pages that are slow for that reason.
 BROWSER_TIMEOUT_MS = int(os.environ.get("BROWSER_TIMEOUT_MS", "45000"))
+# First real-world result (docker logs dashboard-browser): Cloudflare
+# served Agent Provocateur's page as an interactive managed challenge to
+# a plain Puppeteer session -- every URL in the trace was
+# challenges.cloudflare.com, never agentprovocateur.com, and
+# networkidle2 resolved on the CHALLENGE page rather than the one
+# wanted. Unintuitive but confirmed, not guessed: an impersonated TLS
+# fingerprint (curl_cffi, page.fetch) was LESS detectable than genuine
+# automated Chrome, because Puppeteer/CDP leave signals of their own
+# (navigator.webdriver=true chief among them) that curl_cffi's plain
+# HTTP request never had to begin with.
+#
+# browserless ships @zorilla/puppeteer-extra-plugin-stealth as a real
+# runtime dependency (confirmed in its package.json, not a devDependency
+# excluded from the published image) and launches through it whenever
+# the request's `launch` option sets stealth: true -- confirmed from its
+# own source (src/browsers/browsers.cdp.ts, src/browsers/index.ts),
+# which is the standard, well-understood answer to exactly this
+# symptom: a managed challenge firing on the automation signals a
+# vanilla Puppeteer session carries, not on anything about the TLS
+# connection itself.
+#
+# On by default, because the whole reason this container exists is to
+# get past a block like the one just measured -- an operator who has
+# gone to the trouble of standing up a browser wants it trying its best
+# shot, not failing quietly for a reason this explains and a flag
+# already fixes. Still switchable without a rebuild, the same as
+# PAGE_IMPERSONATE, in case stealth's fingerprint changes ever trip some
+# OTHER site up in a way a browser WITHOUT it would not.
+BROWSER_STEALTH = os.environ.get("BROWSER_STEALTH", "true").strip().lower() not in ("false", "0", "no", "")
 
 
 # Browser-grade fetching, when the image has it.
@@ -565,9 +594,19 @@ def verb_page_render(args):
         if index:
             time.sleep(PAGE_GAP_SECONDS)
         try:
-            endpoint = f"{BROWSER_URL}/content"
+            # `launch` is browserless's own query param for Puppeteer launch
+            # options -- JSON text, confirmed from its source
+            # (src/browsers/index.ts reads req.parsed.searchParams.get
+            # ("launch") and JSON.parses it) rather than anything in the
+            # POST body, which is reserved for url/gotoOptions/etc.
+            query = {}
             if BROWSER_TOKEN:
-                endpoint += f"?token={urllib.parse.quote(BROWSER_TOKEN)}"
+                query["token"] = BROWSER_TOKEN
+            if BROWSER_STEALTH:
+                query["launch"] = json.dumps({"stealth": True})
+            endpoint = f"{BROWSER_URL}/content"
+            if query:
+                endpoint += f"?{urllib.parse.urlencode(query)}"
             # waitUntil networkidle2 rather than the default "load": the
             # set is added to the DOM after the load event fires, and the
             # whole reason for this verb is the part that arrives late.
@@ -628,7 +667,7 @@ def main():
     # back, and the symptom of its absence is a page that looks fine but
     # is missing most of itself.
     log(f"page.fetch: impersonating {IMPERSONATE} (curl_cffi)" if PAGE_SESSION else "page.fetch: urllib only -- curl_cffi not installed, some sites will send a reduced page")
-    log(f"page.render: browser at {BROWSER_URL}" if BROWSER_URL else "page.render: not configured -- set BROWSER_URL in .env to use it")
+    log((f"page.render: browser at {BROWSER_URL}, stealth {'on' if BROWSER_STEALTH else 'off'}") if BROWSER_URL else "page.render: not configured -- set BROWSER_URL in .env to use it")
     last_beat = 0.0
     while True:
         try:
