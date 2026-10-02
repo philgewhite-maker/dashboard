@@ -184,6 +184,12 @@ return box && (box.textContent || '').replace(/\s+/g, ' ').includes(name);
 // Falls back to the first only when nothing names the product, which
 // is the single-select page the proxy returns.
 const mainSelect = owned || selects[0];
+// Kept so parseSiblings can skip THIS element rather than guessing from
+// a name. On the page the proxy returns there is no JSON-LD and no h1,
+// so the name is empty and every name-based test silently matched
+// nothing -- which is how the main product came back as its own set
+// piece twice over.
+block.mainSelect = mainSelect;
 if (mainSelect) block.sizes = [...mainSelect.options].map((o) => parseSizeOption(o.text)).filter(Boolean);
 }
 return {
@@ -211,7 +217,7 @@ url: (ld && ld.url) || '',
 // did -- the parameter was unused and the main product listed itself as
 // one of its own set pieces ("+ Lorna Plunge Underwired Bra" under the
 // Lorna Plunge Underwired Bra).
-function parseSiblings(doc, mainName) {
+function parseSiblings(doc, mainName, mainSelect) {
 // Not an exact match: the page titles the main product with its colour
 // ("Andiee Plunge Underwired Bra in Black/Baby Pink") while its own set
 // block names it without ("Andiee Plunge Underwired Bra"). Comparing
@@ -222,6 +228,10 @@ const setKey = (s) => String(s || '').trim().toLowerCase().split(/\s+in\s+/)[0].
 const mainKey = setKey(mainName);
 const out = [];
 doc.querySelectorAll('select').forEach((select) => {
+// The surest test, and the only one that works on the page the proxy
+// returns: that page has no h1 and no JSON-LD, so the main product's
+// NAME is empty there and every name-based check matched nothing.
+if (mainSelect && select === mainSelect) return;
 let node = select, box = null;
 for (let d = 0; d < 8 && node; d++) {
 node = node.parentElement;
@@ -268,7 +278,7 @@ code: main.code,
 discountPct: main.discountPct,
 net: main.net,
 sizes: main.sizes,
-alsoOnPage: parseSiblings(doc, main.name),
+alsoOnPage: parseSiblings(doc, main.name, main.mainSelect),
 };
 }
 
