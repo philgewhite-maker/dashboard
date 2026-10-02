@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v421</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v422</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -2746,7 +2746,7 @@ Finds connections whose cover photo is missing or is really just the small place
 <span class="sync-status" id="ticker-add-status"></span>
 </div>
 <div class="settings-note" style="margin:8px 0 0;">A currency pair is a code like <code>USD</code> or <code>JPY</code> &mdash; always against GBP. A share is a Yahoo Finance symbol: <code>DBK.DE</code>, <code>AAPL</code>, <code>GC=F</code> for gold, <code>BTC-GBP</code> for bitcoin.</div>
-<div class="settings-note" style="margin:6px 0 0;"><strong>Trips add themselves.</strong> A destination on a trip that starts within ten days gets its own weather tile, and its currency gets an FX tile, both marked in teal with a &#9992; back to the trip. They disappear when the trip ends.</div>
+<div class="settings-note" style="margin:6px 0 0;"><strong>Trips add themselves.</strong> A destination on a trip that starts within four weeks gets its own weather tile, and its currency gets an FX tile, both marked in teal with a &#9992; back to the trip. They disappear when the trip ends.</div>
 </div>
 <h3>Encryption</h3>
 <div class="settings-note" style="margin:0 0 10px;">Without this your document sits on the server as readable JSON &mdash; outside <code>public_html</code> and over https, which keeps out the internet but not your host, their backups or anyone holding a credential. With it on, the server stores ciphertext it cannot read and <code>sync.php</code> needs no changes, because it never looks inside the document anyway. <strong>Attachments, the health log and the Telegram log are separate stores and stay plain.</strong></div>

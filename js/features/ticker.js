@@ -294,7 +294,10 @@ return cache()[key];
 // that earns its keep without being asked: a trip to Lisbon next week
 // puts Lisbon's weather and GBP/EUR on the strip by itself, and takes
 // them off again when you get home.
-const TRIP_LEAD_DAYS = 10;
+// Four weeks, not the ten days this started at: the rate you'll change
+// money at and the weather you'll pack for are both things you look at
+// while booking, not on the way to the airport.
+const TRIP_LEAD_DAYS = 28;
 
 function upcomingDestinations() {
 const today = iso(new Date());
