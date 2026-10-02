@@ -23,7 +23,7 @@ import { data, queueSave, SHOPPING_CONTEXTS, unheldInventory, whoFits, inventory
 import { escapeHtml, affiliateLink, daysUntil, daysSince, uid, todayStr, MISSING_KEY_LINK_HTML, looksLikeUrl } from '../utils.js';
 import { captureTask, revealTask } from './tasks.js';
 import { connectionChipHtml, bindConnectionChips, connectionPickerHtml, bindConnPickers, setConnPickerValue, sensitiveFieldsShown } from './connections.js';
-import { runStockCheck, stockCheckHtml, adapterFor, seedWatchSpec, pasteStockFor, cashbackHtml } from './stockwatch.js';
+import { runStockCheck, stockCheckHtml, adapterFor, seedWatchSpec, pasteStockFor, cashbackHtml, fetchPages } from './stockwatch.js';
 import { MissingKeyError, searchShoppingItem } from '../ai.js';
 import { initMicCapture } from './voicecapture.js';
 import { banner } from './sharetarget.js';
@@ -281,45 +281,39 @@ if (!style) { box.innerHTML = '<div class="settings-note">Set the style first �
 coloursBtn.disabled = true;
 box.innerHTML = '<div class="settings-note">Searching listings…</div>';
 try {
-const { fetchPageHtml } = await import('../files.js');
 const origin = new URL(first).origin;
 const found = new Map();
 // Two listings, because neither is complete: a category page renders
 // a few hundred of a claimed several hundred products, so between
 // them they find more colourways than either alone.
-// Paced and retried, like the stock check already is. This fired both
-// listing fetches back to back, which is the exact burst AP was
-// measured returning 403s for -- the stock check spaces its fetches for
-// that reason and this didn't. A 403 also gets one retry after a longer
-// pause, since the measured failure was transient: the same URLs that
-// refused a burst answered fine a few seconds later.
+//
+// Fetched through the same fetchPages() the stock check and the
+// cashback rates use, rather than a second bespoke retry loop -- this
+// used to fetch both listings back to back through the web host
+// alone, retry that same blocked route twice, and give up with "paste
+// the URLs by hand" even though the home-agent fallback (and, for a
+// retailer flagged NEEDS_BROWSER_FOR_FULL_PAGE, the browser) were
+// sitting right there already solving exactly this for product
+// pages. Pacing, the known-refuser shortcut and the home-agent
+// escalation all come free from reusing it.
 //
 // A listing failing isn't fatal on its own -- the two are searched
 // because neither is complete, so one of them working still finds
 // colourways. Only both failing is reported as a failure.
-const gap = adapter.CHECK_SPACING_MS || 4000;
-const failures = [];
 const paths = ['/sale', '/lingerie'];
-for (let i = 0; i < paths.length; i++) {
-if (i) await new Promise((r) => setTimeout(r, gap));
-let html = null;
-for (let attempt = 0; attempt < 2 && html == null; attempt++) {
-if (attempt) await new Promise((r) => setTimeout(r, gap * 2));
-try { html = await fetchPageHtml(origin + paths[i]); }
-catch (err) {
-if (attempt) failures.push(`${paths[i]}: ${err.message || err}`);
-}
-}
-if (html == null) continue;
+const { pages, errors } = await fetchPages(paths.map((p) => origin + p));
+paths.forEach((p) => {
+const html = pages.get(origin + p);
+if (!html) return;
 adapter.findColourways(html, style).forEach((c) => {
 if (!found.has(c.colourCode)) found.set(c.colourCode, c);
 });
-}
-if (!found.size && failures.length === paths.length) {
-// Said plainly, because the fix isn't in this app: a 403 here is the
-// retailer refusing the server your proxy runs on, not a bug you can
-// work around by trying again.
-box.innerHTML = `<div class="settings-note">The retailer refused both listing pages (${escapeHtml(failures[0].split(': ').pop())}). If that keeps happening it's blocking your web host's address rather than anything here — paste the other colours' URLs by hand above.</div>`;
+});
+if (!found.size && errors.length === paths.length) {
+// Said plainly, because the fix isn't always in this app: this is
+// what's left after the proxy, the known-refuser shortcut and the
+// home agent all failed to get either listing page.
+box.innerHTML = `<div class="settings-note">Couldn't read either listing page (${escapeHtml(errors[0].error || 'unknown error')}). Paste the other colours' URLs by hand above.</div>`;
 return;
 }
 const already = new Set(dialog.querySelector('[data-watch-urls]').value.split('\n').map((s) => s.trim()));
