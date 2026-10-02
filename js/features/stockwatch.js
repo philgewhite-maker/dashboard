@@ -593,4 +593,4 @@ ${(errors || []).map((e) => `<div class="stock-line"><span class="settings-note"
 </div>`;
 }
 
-export { runStockCheck, stockCheckHtml, cashbackHtml, refreshCashbackRates, buyableNow, activeWants, seedWatchSpec, pasteStockFor, wantedSizesFor, pageMatchesWant, resultFor, adapterFor, fetchPages };
+export { runStockCheck, stockCheckHtml, cashbackHtml, refreshCashbackRates, buyableNow, activeWants, seedWatchSpec, pasteStockFor, wantedSizesFor, pageMatchesWant, resultFor, adapterFor, fetchPages, money };

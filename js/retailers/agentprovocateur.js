@@ -336,30 +336,89 @@ alsoOnPage: parseSiblings(doc, main.name, main.mainSelect),
 // to clicking the filter in-app, not from the URL -- so that's not a
 // shortcut to a complete, pre-filtered list either.) This remains
 // best-effort, same as before: more pages checked would find more.
+// One <product> card, read into its real fields -- shared by every
+// listing-page reader below so the card markup is only understood once.
+// Was `a[href^="/ap"]`, which missed any product whose URL doesn't start
+// with the usual SKU prefix -- confirmed live: Paige's own card links to
+// "/paige-full-cup-underwired-bra-in-pink-9161", no "ap" in sight. A
+// <product> card has exactly one real link (the image and the piece name
+// both point at it; the wishlist toggle is a custom element, not an
+// <a>), so the plain first href is the right one regardless of shape.
+function parseListingCard(card) {
+const href = card.querySelector('a[href]')?.getAttribute('href') || '';
+const range = (card.querySelector('.fw-bold')?.textContent || '').trim();
+const piece = (card.querySelector('[cy-basketprod]')?.textContent || '').trim();
+if (!href || !piece) return null;
+// Resolved to absolute here, once, rather than left for every caller to
+// remember: a card's href is written relative ("/apm...-black-14748"),
+// and a relative URL saved as-is onto a want (as this used to) has no
+// base to resolve against later -- confirmed live, it was happening.
+// `new URL` against a plain string has no document to inherit a base
+// from, so the origin has to be given explicitly.
+const url = new URL(href, `https://www.${HOST}`).href;
+// The colour isn't its own field anywhere on the card -- only the image
+// alt text spells it out, as "{range} {piece} {colour} | Agent
+// Provocateur". Stripping the range and piece text (already read above,
+// so this can't drift from them) off the front leaves the colour,
+// however many words it is ("Black", "Dark Pink/Cobalt").
+const alt = (card.querySelector('img[alt]')?.getAttribute('alt') || '').replace(/\s*\|\s*Agent Provocateur\s*$/i, '').trim();
+let colour = alt;
+if (range && colour.toLowerCase().startsWith(range.toLowerCase())) colour = colour.slice(range.length).trim();
+if (piece && colour.toLowerCase().startsWith(piece.toLowerCase())) colour = colour.slice(piece.length).trim();
+// Two <price> tags on a reduced card (struck-through was, then now);
+// one on a full-price card. The LAST one is always the real one to pay.
+const prices = [...card.querySelectorAll('price')].map((p) => priceNumber(p.textContent)).filter((n) => n != null);
+const now = prices.length ? prices[prices.length - 1] : null;
+const was = prices.length > 1 ? prices[0] : now;
+const discountPct = (was != null && now != null && was > now) ? Math.round((1 - now / was) * 100) : 0;
+return { url, range, piece, colour, was, now, discountPct };
+}
+
 function findRangeItems(listingHtml, rangeName) {
 const want = String(rangeName || '').trim().toLowerCase();
 const doc = new DOMParser().parseFromString(String(listingHtml || ''), 'text/html');
 const seen = new Set();
 const items = [];
 doc.querySelectorAll('product').forEach((card) => {
-const link = card.querySelector('a[href^="/ap"]');
-const url = link && link.getAttribute('href');
-if (!url || seen.has(url)) return;
-const range = (card.querySelector('.fw-bold')?.textContent || '').trim();
-const piece = (card.querySelector('[cy-basketprod]')?.textContent || '').trim();
-if (want && range.toLowerCase() !== want) return;
-if (!piece) return;
-seen.add(url);
-// The colour isn't its own field anywhere on the card -- only the
-// image alt text spells it out, as "{range} {piece} {colour} | Agent
-// Provocateur". Stripping the range and piece text (already read
-// above, so this can't drift from them) off the front leaves the
-// colour, however many words it is ("Black", "Dark Pink/Cobalt").
-const alt = (card.querySelector('img[alt]')?.getAttribute('alt') || '').replace(/\s*\|\s*Agent Provocateur\s*$/i, '').trim();
-let colour = alt;
-if (range && colour.toLowerCase().startsWith(range.toLowerCase())) colour = colour.slice(range.length).trim();
-if (piece && colour.toLowerCase().startsWith(piece.toLowerCase())) colour = colour.slice(piece.length).trim();
-items.push({ url, range, piece, colour });
+const item = parseListingCard(card);
+if (!item || seen.has(item.url)) return;
+if (want && item.range.toLowerCase() !== want) return;
+seen.add(item.url);
+items.push(item);
+});
+return items;
+}
+
+// Every card on a size+type filtered, sorted listing page -- /lingerie's
+// own `filters.prod_type_desc`, `filters.filter_size` and `sort` hash
+// params, confirmed live to genuinely filter and sort (NOT the page's
+// own "NN items" counter, which stays at the section's unfiltered total
+// regardless and is not the signal to trust -- confirmed by comparing
+// the actual GRID content between a filtered and unfiltered fetch, which
+// differed completely, while the counter read identically both times).
+// Used for "what's in her size, cheapest/biggest-discount first" rather
+// than one named range -- every range is wanted here, so there's no
+// range filter, unlike findRangeItems above.
+//
+// /lingerie rather than /sale/sale-bras: confirmed it already includes
+// sale stock, so one fetch covers both instead of needing a second
+// request purely for the sale section.
+function listingUrl({ prodType, sizes = [], sort = 'price' }) {
+const parts = [`filters.prod_type_desc=${encodeURIComponent(prodType)}`];
+if (sizes.length) parts.push(`filters.filter_size=${sizes.map(encodeURIComponent).join(',')}`);
+parts.push(`sort=${encodeURIComponent(sort)}`);
+return `https://www.${HOST}/lingerie#${parts.join('&')}`;
+}
+
+function listingItems(listingHtml) {
+const doc = new DOMParser().parseFromString(String(listingHtml || ''), 'text/html');
+const seen = new Set();
+const items = [];
+doc.querySelectorAll('product').forEach((card) => {
+const item = parseListingCard(card);
+if (!item || seen.has(item.url)) return;
+seen.add(item.url);
+items.push(item);
 });
 return items;
 }
@@ -461,4 +520,4 @@ step();
 return `javascript:${encodeURIComponent(body)}`;
 }
 
-export { matchesRetailer, RETAILER, parseProductPage, parseSizeOption, parseBlock, skuParts, skuFromUrl, specFromUrl, findRangeItems, bookmarkletSource, bulkBookmarkletSource, PASTE_STOCK_PREFIX, HOST, CHECK_SPACING_MS, NEEDS_BROWSER_FOR_FULL_PAGE };
+export { matchesRetailer, RETAILER, parseProductPage, parseSizeOption, parseBlock, skuParts, skuFromUrl, specFromUrl, findRangeItems, listingUrl, listingItems, bookmarkletSource, bulkBookmarkletSource, PASTE_STOCK_PREFIX, HOST, CHECK_SPACING_MS, NEEDS_BROWSER_FOR_FULL_PAGE };

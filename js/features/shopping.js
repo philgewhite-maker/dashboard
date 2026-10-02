@@ -595,8 +595,13 @@ if (!sensitiveFieldsShown()) {
 el.innerHTML = '<div class="settings-note" style="margin:0;">Hidden on this device. Turn on sensitive fields in Settings to show it.</div>';
 return;
 }
-el.innerHTML = inventorySetsHtml() + inventoryHtml();
+el.innerHTML = `<div class="sync-row" style="margin-bottom:8px;"><button class="sync-btn sm" type="button" data-find-set-for-her>Find a set for her…</button><span class="settings-note" style="margin:0;">Searches the retailer for a bra and matching knickers in her size, under a budget.</span></div>` + inventorySetsHtml() + inventoryHtml();
 bindConnectionChips(el);
+const findSetBtn = el.querySelector('[data-find-set-for-her]');
+if (findSetBtn) findSetBtn.addEventListener('click', async () => {
+const { openSetFinderDialog } = await import('./setfinder.js');
+openSetFinderDialog();
+});
 // Giving a whole set is one action, not one per garment -- that's the
 // unit you'd actually hand over.
 el.querySelectorAll('[data-inv-give-set]').forEach((btn) => {
