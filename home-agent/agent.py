@@ -25,7 +25,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-VERSION = "1.0"
+VERSION = "1.1"
 
 SYNC_URL = os.environ.get("DASHBOARD_SYNC_URL", "").strip()
 SECRET = os.environ.get("DASHBOARD_SECRET", "").strip()
@@ -387,6 +387,50 @@ PAGE_HEADERS = {
 PAGE_GAP_SECONDS = 4
 
 
+# Browser-grade fetching, when the image has it.
+#
+# Headers were never the whole story. Agent Provocateur serves 194KB with
+# the entire product set to a browser and 15KB with only the main garment
+# to urllib, at the same URL, in the same minute, from this same
+# connection — and a full Chrome header set, a cookie jar and a second
+# request changed nothing. What a browser also brings is its TLS
+# handshake and HTTP/2, and that is what curl_cffi reproduces.
+#
+# Optional on purpose: if the import fails the agent still runs and
+# page.fetch behaves exactly as it did before, because an agent that
+# won't start is worse than one that fetches a smaller page.
+try:
+    from curl_cffi import requests as curl_requests
+    IMPERSONATE = "chrome"
+except Exception:  # noqa: BLE001 - any import failure means "use urllib"
+    curl_requests = None
+    IMPERSONATE = ""
+
+
+def fetch_one(url):
+    """Returns (status, text). Raises for anything that isn't an HTTP reply."""
+    if curl_requests is not None:
+        res = curl_requests.get(
+            url,
+            impersonate=IMPERSONATE,
+            timeout=HTTP_TIMEOUT,
+            headers={"Accept-Language": PAGE_HEADERS["Accept-Language"]},
+            allow_redirects=True,
+        )
+        # .text decodes using the response's own charset, and curl_cffi
+        # handles br/zstd that urllib cannot, which is itself part of
+        # looking like a browser.
+        return res.status_code, res.text[:PAGE_MAX_BYTES]
+
+    request = urllib.request.Request(url, method="GET")
+    for key, value in PAGE_HEADERS.items():
+        request.add_header(key, value)
+    with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT, context=ssl.create_default_context()) as response:
+        raw = response.read(PAGE_MAX_BYTES)
+        charset = response.headers.get_content_charset() or "utf-8"
+    return 200, raw.decode(charset, "replace")
+
+
 def verb_page_fetch(args):
     """Fetch one or more pages from HOME and hand the HTML back.
 
@@ -408,13 +452,14 @@ def verb_page_fetch(args):
         if index:
             time.sleep(PAGE_GAP_SECONDS)
         try:
-            request = urllib.request.Request(url, method="GET")
-            for key, value in PAGE_HEADERS.items():
-                request.add_header(key, value)
-            with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT, context=ssl.create_default_context()) as response:
-                raw = response.read(PAGE_MAX_BYTES)
-                charset = response.headers.get_content_charset() or "utf-8"
-            pages.append({"url": url, "status": 200, "html": raw.decode(charset, "replace")})
+            status, text = fetch_one(url)
+            if status >= 400:
+                # curl_cffi returns a status rather than raising, so a
+                # refusal is reported the same way urllib's HTTPError is
+                # below instead of being handed back as a page.
+                pages.append({"url": url, "status": status, "error": f"HTTP {status}"})
+                continue
+            pages.append({"url": url, "status": status, "html": text})
         except urllib.error.HTTPError as err:
             # Reported per URL, not raised: one refused page shouldn't cost
             # you the eleven that worked.
@@ -449,6 +494,10 @@ def handle(command):
 
 def main():
     log(f"Agent {VERSION} starting, polling {COMMANDS_URL} every {POLL_SECONDS}s")
+    # Said at startup because it decides what some sites will even send
+    # back, and the symptom of its absence is a page that looks fine but
+    # is missing most of itself.
+    log("page.fetch: browser impersonation ON (curl_cffi)" if curl_requests else "page.fetch: urllib only -- curl_cffi not installed, some sites will send a reduced page")
     last_beat = 0.0
     while True:
         try:
