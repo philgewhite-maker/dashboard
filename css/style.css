@@ -3746,3 +3746,4 @@ padding:1px 6px;border-radius:20px;vertical-align:1px;
 background:var(--sage-bg);color:var(--sage);
 }
 .letting-kind.adjustment{background:var(--slate-bg);color:var(--slate);}
+.letting-kind.earned{background:var(--amber-bg);color:var(--amber);}

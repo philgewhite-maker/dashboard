@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v437</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v438</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -309,13 +309,14 @@
 <select id="letting-add-kind" class="mini" title="A payment is money that actually reached you. An adjustment moves the balance without any money changing hands — writing some off, or correcting a figure.">
 <option value="payment">Payment</option>
 <option value="adjustment">Adjustment</option>
+<option value="earned">Earned (historic)</option>
 </select>
-<input type="number" step="0.01" id="letting-add-amount" class="settings-input" style="max-width:130px;" placeholder="Amount">
+<input type="number" step="0.01" id="letting-add-amount" class="settings-input" style="max-width:130px;" placeholder="Amount" title="For Payment and Adjustment this is what the balance moves by. For Earned (historic) it is the GROSS takings, and their share is applied.">
 <input type="text" id="letting-add-note" class="settings-input" style="max-width:220px;" placeholder="What it was for">
 <button class="sync-btn sm" id="letting-add-btn" type="button">Add</button>
 <span class="sync-status" id="letting-add-status"></span>
 </div>
-<div class="settings-note" style="margin:6px 0 0;">Either way a <strong>negative</strong> amount reduces what they owe and a positive increases it <div class="settings-note" style="margin:6px 0 0;">A payment to you is a <strong>negative</strong> amount; a correction upwards is positive. To wipe a balance, add the negative of it.</div>mdash; to wipe a balance, add the negative of it. The choice is only about what happened: a <strong>payment</strong> is money that reached you, an <strong>adjustment</strong> moves the balance without any. Months later that difference is the whole story, and the amount alone cannot tell you.</div>
+<div class="settings-note" style="margin:6px 0 0;"><strong>Earned (historic)</strong> is for what a listing took before you started tracking it here: enter the <em>gross</em> figure and their share is applied, the same way a stay would. For the other two, a <strong>negative</strong> amount reduces what they owe and a positive increases it <div class="settings-note" style="margin:6px 0 0;">A payment to you is a <strong>negative</strong> amount; a correction upwards is positive. To wipe a balance, add the negative of it.</div>mdash; to wipe a balance, add the negative of it. The choice is only about what happened: a <strong>payment</strong> is money that reached you, an <strong>adjustment</strong> moves the balance without any. Months later that difference is the whole story, and the amount alone cannot tell you.</div>
 </section>
 <section class="panel wide" id="switch-offers-panel" data-tab="finances">
 <div class="panel-head">

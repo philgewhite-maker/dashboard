@@ -34,6 +34,15 @@ const listing = (data.airbnbListings || []).find((l) => ownerKeyFor(l) === key);
 return (listing && listing.ownerLabel) || key;
 }
 
+// Their share, taken from whichever listing they own. Falls back to 50
+// rather than refusing: the number is on the listing, and a historic
+// figure may well be entered before the listing is set up.
+function sharePctFor(key) {
+const listing = (data.airbnbListings || []).find((l) => ownerKeyFor(l) === key);
+const pct = listing ? Number(listing.sharePct) : NaN;
+return Number.isFinite(pct) ? pct : 50;
+}
+
 function entriesFor(key) {
 return (data.lettingLedger || []).filter((e) => e.ownerKey === key);
 }
@@ -157,7 +166,20 @@ renderLetting();
 function initLetting() {
 const addBtn = document.getElementById('letting-add-btn');
 if (!addBtn) return; // not in this build's DOM
+// "Amount" means two different things depending on the kind, and
+// getting it wrong is a silent factor of two — so the box says which
+// one it wants rather than leaving you to remember.
+const kindEl = document.getElementById('letting-add-kind');
+const amountEl = document.getElementById('letting-add-amount');
+const setHint = () => {
+if (!kindEl || !amountEl) return;
+amountEl.placeholder = kindEl.value === 'earned' ? 'Gross takings' : 'Amount';
+};
+kindEl?.addEventListener('change', setHint);
+setHint();
 addBtn.addEventListener('click', () => {
+// The placeholder changes with the kind, because "Amount" means two
+// different things here and getting it wrong is a silent factor of two.
 const who = document.getElementById('letting-add-owner');
 const amount = Number(document.getElementById('letting-add-amount').value);
 const note = (document.getElementById('letting-add-note').value || '').trim();
@@ -170,13 +192,26 @@ if (!Number.isFinite(amount) || !amount) { say('Give an amount — negative for 
 // false history, and the balance alone can never tell the two apart
 // afterwards.
 const kind = (document.getElementById('letting-add-kind') || {}).value || 'payment';
+// "Earned" takes the GROSS figure and applies their share, so seeding
+// what a listing took before any of this existed works exactly like a
+// stay does. Entering the owed half directly is what Adjustment is for;
+// having both means you can use whichever number you actually have to
+// hand, rather than doing the arithmetic yourself and leaving a row that
+// doesn't say what it came from.
+const pct = sharePctFor(who.value);
+const signed = kind === 'earned'
+? Math.round(amount * (pct / 100) * 100) / 100
+: Math.round(amount * 100) / 100;
+if (!signed) { say('That works out as nothing — check the amount.'); return; }
 data.lettingLedger.push({
 id: uid(),
 ownerKey: who.value,
 kind,
-amount: Math.round(amount * 100) / 100,
+amount: signed,
 date: today(),
-note: note || (kind === 'payment' ? (amount < 0 ? 'Paid' : 'Owed more') : 'Adjustment'),
+note: note || (kind === 'earned'
+? `${pct}% of ${money(amount)} — earned before tracking`
+: kind === 'payment' ? (amount < 0 ? 'Paid' : 'Owed more') : 'Adjustment'),
 });
 queueSave();
 document.getElementById('letting-add-amount').value = '';
@@ -197,4 +232,4 @@ sel.innerHTML = `<option value="">Who…</option>${owners().map((k) => `<option 
 if (keep) sel.value = keep;
 }
 
-export { accrueLettings, renderLetting, initLetting, totalOwed, balanceFor, owners, ownerNameFor, ownerKeyFor, money };
+export { accrueLettings, renderLetting, initLetting, totalOwed, balanceFor, owners, ownerNameFor, ownerKeyFor, sharePctFor, money };
