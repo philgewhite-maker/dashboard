@@ -457,8 +457,14 @@ fileTask(e.dataTransfer.getData('text/plain'), zone.dataset.dropBucket);
 // either source would under-list real candidates.
 function projectCandidates(excludeId) {
 const childrenMap = buildChildrenMap();
+// Reversed: data.tasks is append-order (oldest first), and the project
+// you just created a minute ago to hold a batch of captures is almost
+// always the one you want filing INTO next, not whichever came first
+// ever -- so newest sits at the top of the list and as the select's
+// own default, rather than making every filing re-pick it by hand.
 return data.tasks.filter((t) => t.id !== excludeId && t.bucket !== 'done'
-&& (t.bucket === 'project' || (childrenMap.get(t.id) || []).length > 0));
+&& (t.bucket === 'project' || (childrenMap.get(t.id) || []).length > 0))
+.reverse();
 }
 
 // Filing to the "Projects" bucket used to mean one thing only: tag THIS
@@ -477,9 +483,15 @@ const dialog = document.createElement('div');
 dialog.className = 'mail-view-backdrop';
 dialog.innerHTML = `<div class="mail-view-card" style="max-width:420px;">
 <div class="mail-view-subject">File "${escapeHtml(t.title || '(untitled)')}" to Projects</div>
-<label style="display:block;margin:8px 0;"><input type="radio" name="project-file-mode" value="new" checked> Make this itself a new project</label>
-<label style="display:block;margin:8px 0;${candidates.length ? '' : 'opacity:0.5;'}"><input type="radio" name="project-file-mode" value="existing" ${candidates.length ? '' : 'disabled'}> Add it to an existing project</label>
-<select data-project-pick ${candidates.length ? '' : 'disabled'} style="width:100%;margin-top:4px;" ${candidates.length ? '' : 'hidden'}>
+<label class="pending-option">
+<input type="radio" name="project-file-mode" value="new" checked>
+<span class="pending-option-info">Make this itself a new project</span>
+</label>
+<label class="pending-option"${candidates.length ? '' : ' style="opacity:0.5;"'}>
+<input type="radio" name="project-file-mode" value="existing" ${candidates.length ? '' : 'disabled'}>
+<span class="pending-option-info">Add it to an existing project</span>
+</label>
+<select data-project-pick class="settings-input" ${candidates.length ? '' : 'disabled'} style="margin-top:2px;" ${candidates.length ? '' : 'hidden'}>
 ${candidates.map((p) => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.title || '(untitled)')}</option>`).join('')}
 </select>
 ${candidates.length ? '' : '<div class="settings-note" style="margin:4px 0 0;">No existing projects yet -- file one as new first.</div>'}
