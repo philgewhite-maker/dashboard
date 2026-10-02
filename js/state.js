@@ -934,25 +934,47 @@ const SENSITIVE_BLOCKS = ['sizes', 'inventory'];
 // times and missing the fifth design the moment they invent one.
 //
 // So `category` holds the GROUP, and a product's own piece name is mapped
-// onto a group when matching. `terms` are matched as substrings against a
-// lowercased piece name, which is why they're stems ('stocking' catches
-// "Stockings", 'brief' catches "Full Brief" and "Ouvert Brief").
+// onto a group when matching. `terms` are matched as whole words (plus an
+// easy trailing 's' for a plural) against a piece name, which is why
+// they're stems ('stocking' catches "Stockings", 'brief' catches "Full
+// Brief" and "Ouvert Brief") -- but WHOLE words, not substrings: this used
+// to be a plain .includes(), and 'bra' is the first three letters of
+// "Brazilian". Confirmed live against Agent Provocateur's own piece
+// names, not hypothetical: "Brazilian Brief" and "Brazilian Full Brief"
+// were both landing in Bra, matching her bra size against a knickers want
+// instead of her knickers size -- silently wrong, not a crash, so it
+// would never have surfaced on its own.
 //
 // Order matters: the first group whose term appears wins, so anything
 // that could read as two groups is listed under the more specific one
 // first -- "Suspender Belt" must not be caught by Clothing's 'belt'.
+// Swimwear is listed before Bra for the same reason, not alphabetically:
+// 'triangle' is a real Bra term (a triangle-cup bra style), but it's also
+// a real AP category name on its own, "Bikini Triangle Tie Tops" -- a
+// swim top, confirmed from AP's own filter list, with nothing bra-shaped
+// about its sizing. Checking Swimwear's 'bikini' first catches that
+// case before Bra's 'triangle' ever gets a look.
 const SIZE_GROUPS = [
+{ group: 'Swimwear', terms: ['swim', 'bikini', 'one-piece'] },
 { group: 'Bra', terms: ['bra', 'bralet', 'balconette', 'plunge', 'underwired', 'soft cup', 'triangle', 'bustier'] },
 { group: 'Suspender', terms: ['suspender', 'garter'] },
-{ group: 'Hosiery', terms: ['stocking', 'hold-up', 'holdup', 'tights', 'sock'] },
+{ group: 'Hosiery', terms: ['stocking', 'hold-up', 'holdup', 'hold up', 'tights', 'sock'] },
 { group: 'Body', terms: ['bodysuit', 'body', 'corset', 'basque', 'teddy', 'playsuit', 'waspie'] },
-{ group: 'Knickers', terms: ['knicker', 'brief', 'thong', 'tanga', 'ouvert', 'g-string', 'gstring', 'short', 'hipster', 'panty', 'panties', 'culotte'] },
+{ group: 'Knickers', terms: ['knicker', 'brief', 'thong', 'tanga', 'ouvert', 'g-string', 'gstring', 'short', 'hipster', 'panty', 'panties', 'culotte', 'brazilian'] },
 { group: 'Nightwear', terms: ['robe', 'kimono', 'gown', 'slip', 'chemise', 'pyjama', 'nightdress'] },
-{ group: 'Swimwear', terms: ['swim', 'bikini', 'one-piece'] },
 { group: 'Clothing', terms: ['dress', 'top', 'skirt', 'trouser', 'jean', 'coat', 'jacket', 'shirt'] },
 { group: 'Shoes', terms: ['shoe', 'boot', 'heel', 'slipper'] },
 { group: 'Ring', terms: ['ring'] },
 ];
+
+function escapeRegExp(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+// Built once rather than per call: one whole-word (optional trailing 's')
+// regex per group, checked in SIZE_GROUPS' own order.
+const SIZE_GROUP_MATCHERS = SIZE_GROUPS.map((g) => ({
+group: g.group,
+re: new RegExp(`\\b(?:${g.terms.map(escapeRegExp).join('|')})s?\\b`, 'i'),
+}));
 
 // The group a piece name belongs to, or '' when nothing matches -- which
 // is a real answer, not a failure: an unrecognised piece simply doesn't
@@ -964,7 +986,7 @@ if (!p) return '';
 // as "Knickers" resolves to itself without needing a term for it.
 const exact = SIZE_GROUPS.find((g) => g.group.toLowerCase() === p);
 if (exact) return exact.group;
-const hit = SIZE_GROUPS.find((g) => g.terms.some((t) => p.includes(t)));
+const hit = SIZE_GROUP_MATCHERS.find((g) => g.re.test(p));
 return hit ? hit.group : '';
 }
 
