@@ -398,6 +398,16 @@ priceCheck: null,
 //   stops it being checked or alerted on, for something you've cooled on
 //   without wanting to forget it.
 forConnectionId: '', wantSpec: null, wantState: 'active',
+// The last "Find other colours" search run for this want, null until
+// one's been run -- same reasoning and shape as connections.setSearch
+// (setfinder.js): this is a paced, multi-page search that can take a
+// while, and used to live only in the editor dialog's own closure.
+// Confirmed live, repeatedly ("it's happened to me many times"): losing
+// that dialog -- a stray backdrop click, a tab switch, a reload -- lost
+// the whole search with nothing to show for the wait. Written here and
+// queueSave()d at every stage instead, so reopening the editor -- even
+// after a reload -- reads back exactly where it left off.
+colourSearch: null,
 ...fields,
 };
 }

@@ -213,6 +213,87 @@ return `<button class="sync-btn sm shop-watch-btn" type="button" data-shop-watch
 title="${urls.length ? `${urls.length} page${urls.length === 1 ? '' : 's'} watched, ${supported} of them on a retailer with a parser` : 'No pages yet — paste the product URLs this want covers'}">${urls.length ? `👁 ${urls.length}` : '👁 add pages'}</button>`;
 }
 
+// ---- "Find other colours" search, persisted (see blankTask's colourSearch) --
+
+// Compared with, not just stored as-is: the want's own URLs often carry
+// extras a listing card never will -- a #selection.size=... fragment,
+// confirmed live as the actual cause of a bra appearing twice after "Add
+// ticked". The fragment-carrying original and the fragment-free listing
+// result for the exact same product compared as different strings, so
+// the "already have this" check missed it and added a near-duplicate.
+// Stripped on both sides before comparing, so that can't happen again.
+function stripFragment(url) {
+return String(url || '').split('#')[0];
+}
+
+async function findColourways(taskId, { onProgress } = {}) {
+const t = data.tasks.find((x) => x.id === taskId);
+if (!t) return { error: 'No such task.' };
+const spec = seedWatchSpec(t);
+const first = (spec.urls || [])[0] || '';
+const adapter = adapterFor(first);
+const style = (spec.style || '').trim();
+if (!adapter || !adapter.findRangeItems) return { error: 'No colour search for that retailer yet.' };
+if (!style) return { error: "Set the style first — that's what the search matches on." };
+if (onProgress) onProgress('Searching listings…');
+const origin = new URL(first).origin;
+const found = new Map();
+// Two listings, because neither is complete: a category page renders a
+// few hundred of a claimed several hundred products, so between them
+// they find more colourways than either alone. Fetched through
+// fetchPages() -- pacing, the known-refuser shortcut and the home-agent
+// escalation all come free from reusing it, same as the stock check.
+const paths = ['/sale', '/lingerie'];
+const { pages, errors } = await fetchPages(paths.map((p) => origin + p));
+paths.forEach((p) => {
+const html = pages.get(origin + p);
+if (!html) return;
+adapter.findRangeItems(html, style).forEach((item) => {
+if (!found.has(item.url)) found.set(item.url, item);
+});
+});
+if (!found.size && errors.length === paths.length) {
+return { error: `Couldn't read either listing page (${errors[0]?.error || 'unknown error'}).` };
+}
+const already = new Set((spec.urls || []).map(stripFragment));
+const rows = [...found.values()].filter((r) => !already.has(stripFragment(r.url)));
+const colours = [...new Set(rows.map((r) => r.colour).filter(Boolean))];
+const pieces = [...new Set(rows.map((r) => r.piece).filter(Boolean))];
+return { rows, colours, pieces };
+}
+
+// Dialogs currently open, keyed by task id, so a running search can push
+// a live update into one if it's still open -- same pattern and same
+// reasoning as setfinder.js's liveDialogs. Does nothing if the dialog
+// isn't open; the result is already saved to t.colourSearch either way.
+const liveColourDialogs = new Map();
+
+function runColourSearch(taskId) {
+const t = data.tasks.find((x) => x.id === taskId);
+if (!t) return;
+t.colourSearch = {
+status: 'running', progress: '', error: null,
+startedAt: new Date().toISOString(), finishedAt: null,
+rows: [], colours: [], pieces: [], addedUrls: [],
+};
+queueSave();
+const refresh = () => liveColourDialogs.get(taskId)?.();
+refresh();
+findColourways(taskId, {
+onProgress: (m) => { t.colourSearch.progress = m; queueSave(); refresh(); },
+}).then((res) => {
+if (res.error) Object.assign(t.colourSearch, { status: 'error', error: res.error });
+else Object.assign(t.colourSearch, { status: 'done', rows: res.rows, colours: res.colours, pieces: res.pieces });
+t.colourSearch.finishedAt = new Date().toISOString();
+queueSave();
+refresh();
+}).catch((err) => {
+Object.assign(t.colourSearch, { status: 'error', error: err.message || String(err), finishedAt: new Date().toISOString() });
+queueSave();
+refresh();
+});
+}
+
 function watchEditorHtml(t) {
 const spec = seedWatchSpec(t);
 const urls = spec.urls || [];
@@ -256,7 +337,7 @@ const dialog = document.createElement('div');
 dialog.className = 'mail-view-backdrop';
 dialog.innerHTML = watchEditorHtml(t);
 document.body.appendChild(dialog);
-const close = () => dialog.remove();
+const close = () => { liveColourDialogs.delete(t.id); dialog.remove(); };
 dialog.addEventListener('click', (e) => { if (e.target === dialog) close(); });
 const save = () => {
 const lines = dialog.querySelector('[data-watch-urls]').value.split('\n').map((s) => s.trim()).filter(Boolean);
@@ -270,64 +351,35 @@ queueSave();
 // not a substring match that would also pull in a genuinely different
 // range sharing the same word (see findRangeItems in agentprovocateur.js
 // for why, and how the page is actually read).
-const coloursBtn = dialog.querySelector('[data-watch-colours]');
-if (coloursBtn) coloursBtn.addEventListener('click', async () => {
+//
+// The search itself runs detached from this dialog (runColourSearch,
+// writing to t.colourSearch) rather than inline here -- reopening this
+// editor, even after a reload, has to show whatever the last search
+// found, not start blank. renderColourResults is both the initial paint
+// and the live-update callback pushed into while this dialog stays open.
 const box = dialog.querySelector('[data-watch-colour-results]');
-const first = (dialog.querySelector('[data-watch-urls]').value.split('\n')[0] || '').trim();
-const adapter = adapterFor(first);
-const style = dialog.querySelector('[data-watch-spec="style"]').value.trim();
-if (!adapter || !adapter.findRangeItems) { box.innerHTML = '<div class="settings-note">No colour search for that retailer yet.</div>'; return; }
-if (!style) { box.innerHTML = '<div class="settings-note">Set the style first — that\'s what the search matches on.</div>'; return; }
-coloursBtn.disabled = true;
-box.innerHTML = '<div class="settings-note">Searching listings…</div>';
-try {
-const origin = new URL(first).origin;
-const found = new Map();
-// Two listings, because neither is complete: a category page renders
-// a few hundred of a claimed several hundred products, so between
-// them they find more colourways than either alone.
-//
-// Fetched through the same fetchPages() the stock check and the
-// cashback rates use, rather than a second bespoke retry loop -- this
-// used to fetch both listings back to back through the web host
-// alone, retry that same blocked route twice, and give up with "paste
-// the URLs by hand" even though the home-agent fallback (and, for a
-// retailer flagged NEEDS_BROWSER_FOR_FULL_PAGE, the browser) were
-// sitting right there already solving exactly this for product
-// pages. Pacing, the known-refuser shortcut and the home-agent
-// escalation all come free from reusing it.
-//
-// A listing failing isn't fatal on its own -- the two are searched
-// because neither is complete, so one of them working still finds
-// colourways. Only both failing is reported as a failure.
-const paths = ['/sale', '/lingerie'];
-const { pages, errors } = await fetchPages(paths.map((p) => origin + p));
-paths.forEach((p) => {
-const html = pages.get(origin + p);
-if (!html) return;
-adapter.findRangeItems(html, style).forEach((item) => {
-if (!found.has(item.url)) found.set(item.url, item);
-});
-});
-if (!found.size && errors.length === paths.length) {
-// Said plainly, because the fix isn't always in this app: this is
-// what's left after the proxy, the known-refuser shortcut and the
-// home agent all failed to get either listing page.
-box.innerHTML = `<div class="settings-note">Couldn't read either listing page (${escapeHtml(errors[0].error || 'unknown error')}). Paste the other colours' URLs by hand above.</div>`;
-return;
-}
-const already = new Set(dialog.querySelector('[data-watch-urls]').value.split('\n').map((s) => s.trim()));
-const rows = [...found.values()].filter((r) => !already.has(r.url));
+const coloursBtn = dialog.querySelector('[data-watch-colours]');
+const renderColourResults = () => {
+const search = t.colourSearch;
+if (coloursBtn) coloursBtn.disabled = search?.status === 'running';
+if (!search) { box.innerHTML = ''; return; }
+if (search.status === 'running') { box.innerHTML = `<div class="settings-note">${escapeHtml(search.progress || 'Searching…')}</div>`; return; }
+if (search.status === 'error') { box.innerHTML = `<div class="settings-note">${escapeHtml(search.error)}</div>`; return; }
+const added = new Set(search.addedUrls || []);
+// Also excludes anything already in the want's own URL list by now
+// (stripping the fragment on both sides -- see stripFragment's own
+// comment) -- the want can have grown since this search ran, e.g. a
+// previous "Add ticked" in the same session.
+const existing = new Set((seedWatchSpec(t).urls || []).map(stripFragment));
+const rows = search.rows.filter((r) => !added.has(r.url) && !existing.has(stripFragment(r.url)));
 // Reported as two separate facts rather than one list, per how the
 // range actually works: every piece doesn't come in every colour, so
 // "4 colours, 6 items" found across the range is real information a
 // flat list of (piece, colour) rows hides -- you can see at a glance
 // whether a colour you want exists at all before checking whether
 // THIS piece happens to come in it.
-const colours = [...new Set(rows.map((r) => r.colour).filter(Boolean))];
-const pieces = [...new Set(rows.map((r) => r.piece).filter(Boolean))];
 box.innerHTML = rows.length
-? `<div class="settings-note" style="margin:6px 0 2px;">${colours.length} colour${colours.length === 1 ? '' : 's'} (${escapeHtml(colours.join(', '))}), ${pieces.length} item${pieces.length === 1 ? '' : 's'} (${escapeHtml(pieces.join(', '))}) found. Tick what to watch.</div>`
+? `<div class="settings-note" style="margin:6px 0 2px;">${search.colours.length} colour${search.colours.length === 1 ? '' : 's'} (${escapeHtml(search.colours.join(', '))}), ${search.pieces.length} item${search.pieces.length === 1 ? '' : 's'} (${escapeHtml(search.pieces.join(', '))}) found. Tick what to watch.</div>`
 + rows.map((r, i) => `<label style="display:block;font-size:12px;">
 <input type="checkbox" data-watch-found="${i}" value="${escapeHtml(r.url)}">
 ${escapeHtml(r.piece)}${r.colour ? ` — ${escapeHtml(r.colour)}` : ''}
@@ -339,14 +391,26 @@ if (addBtn) addBtn.addEventListener('click', () => {
 const picked = [...box.querySelectorAll('[data-watch-found]:checked')].map((c) => c.value);
 if (!picked.length) return;
 const area = dialog.querySelector('[data-watch-urls]');
-area.value = [...area.value.split('\n').map((s) => s.trim()).filter(Boolean), ...picked].join('\n');
-box.innerHTML = `<div class="settings-note">Added ${picked.length}. Save, or check now.</div>`;
+const current = area.value.split('\n').map((s) => s.trim()).filter(Boolean);
+const merged = [...current, ...picked];
+area.value = merged.join('\n');
+// Persisted immediately rather than left for the editor's separate
+// Save button -- "Add ticked" is a real action worth keeping on its
+// own if the window is lost right after, same reasoning the search
+// itself is now persisted for.
+t.wantSpec = { ...seedWatchSpec(t), urls: merged };
+search.addedUrls = [...(search.addedUrls || []), ...picked];
+queueSave();
+renderColourResults();
 });
-} catch (err) {
-box.innerHTML = `<div class="settings-note">Couldn't search: ${escapeHtml(err.message || String(err))}</div>`;
-} finally {
-coloursBtn.disabled = false;
-}
+};
+liveColourDialogs.set(t.id, renderColourResults);
+renderColourResults();
+if (coloursBtn) coloursBtn.addEventListener('click', () => {
+// The style typed into this editor might not be saved onto the want
+// yet -- the search reads it via seedWatchSpec(t), so it has to be.
+save();
+runColourSearch(t.id);
 });
 const snippetBtn = dialog.querySelector('[data-watch-copy-snippet]');
 if (snippetBtn) snippetBtn.addEventListener('click', async () => {
