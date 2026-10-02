@@ -1401,6 +1401,22 @@ else data.ticker = { ...blankData().ticker, ...data.ticker };
 // one is a document that predates the list -- those get the defaults
 // rather than a blank strip they never asked for.
 if (!Array.isArray(data.ticker.items)) data.ticker.items = blankData().ticker.items;
+// A document from before the letting tile existed already has a
+// non-empty items array, so the guard above never runs for it -- adding
+// 'letting' to blankData()'s default list only reaches a brand-new
+// document, never an existing one. Backfilled once here instead, by
+// kind rather than id (so it still lands if some other tile's id was
+// hand-edited) -- and `tickerLettingSeeded` makes it a ONE-TIME add
+// rather than something that re-adds itself every load: without that
+// flag, deliberately removing the tile in Settings would never stick,
+// because the next migrate() would see it missing and put it straight
+// back.
+if (!data.ticker.tickerLettingSeeded) {
+data.ticker.tickerLettingSeeded = true;
+if (!data.ticker.items.some((i) => i && i.kind === 'letting')) {
+data.ticker.items.push({ id: 'letting', kind: 'letting' });
+}
+}
 if (!data.tickerCache || typeof data.tickerCache !== 'object') data.tickerCache = {};
 if (!data.proxyRefusals || typeof data.proxyRefusals !== 'object') data.proxyRefusals = {};
 if (!Array.isArray(data.lettingLedger)) data.lettingLedger = [];
