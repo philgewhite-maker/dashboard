@@ -205,7 +205,14 @@ url: (ld && ld.url) || '',
 // carries no reliable offer line of its own, and inheriting the main
 // product's code is the exact mistake this module exists to avoid. A
 // sibling worth pricing gets fetched by its own URL.
-function parseSiblings(doc, mainSku) {
+// `mainName` rather than the SKU it used to take: the sweep below finds
+// blocks by walking every <select> on the page, and a block carries a
+// NAME, not a SKU, so a SKU could never have excluded anything. It never
+// did -- the parameter was unused and the main product listed itself as
+// one of its own set pieces ("+ Lorna Plunge Underwired Bra" under the
+// Lorna Plunge Underwired Bra).
+function parseSiblings(doc, mainName) {
+const mainKey = String(mainName || '').trim().toLowerCase();
 const out = [];
 doc.querySelectorAll('select').forEach((select) => {
 let node = select, box = null;
@@ -218,9 +225,10 @@ const text = (box.textContent || '').replace(/\s+/g, ' ').trim();
 const name = text.split('£')[0].trim();
 if (!name) return;
 const block = parseBlock(box, doc);
-// The main product's own block comes back through this sweep too;
-// it's already parsed properly by parseMain, so it's dropped here.
+// The main product's own block comes back through this sweep too, and
+// is dropped by NAME here -- it is already parsed properly by parseMain.
 if (!block.sizes.length) return;
+if (mainKey && name.trim().toLowerCase() === mainKey) return;
 out.push({ name, ...block, code: '', discountPct: 0, net: block.now, pricedFrom: 'set page' });
 });
 return out;
@@ -250,7 +258,7 @@ code: main.code,
 discountPct: main.discountPct,
 net: main.net,
 sizes: main.sizes,
-alsoOnPage: parseSiblings(doc, main.sku),
+alsoOnPage: parseSiblings(doc, main.name),
 };
 }
 
