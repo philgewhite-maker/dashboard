@@ -145,3 +145,42 @@ scratch content), commit ending `Co-Authored-By: Claude <model>
 wrote the commit, `git push`. This line used to name Sonnet 5
 specifically and went stale the moment a different model picked the work
 up — sign as who you are, don't copy the name out of this file.
+
+## Deploys that span machines
+
+Three machines are in play — this PC, the web host, the QNAP — and the
+commands for each are not interchangeable. Every confusion in this
+project's deploys has come from a step that LOOKED like it worked:
+
+- A `cd /share/...` run in the Code tab's Run button, which executes on
+  the PC and resolves against C:.
+- `docker compose up -d --build` rebuilding from files that were never
+  copied to the NAS, so it cheerfully rebuilt the old image in 2s.
+- A `git pull` in a folder that isn't a checkout, silenced by a
+  `2>/dev/null` I had added myself.
+- A commit whose `git add` quietly staged only the new files, so the
+  live site stayed a version behind while the hash looked fine.
+- The service worker serving cached JS, so a fix was "not working" when
+  it was never loaded.
+
+So for any change touching the web host, the NAS or the agent:
+
+**Say which machine each command runs on**, before the command. "On the
+NAS, over SSH" / "On your PC" / "In the browser console". A fenced block
+with no owner will be run wherever the Run button points.
+
+**List the files to copy, by source and destination path**, before the
+command that consumes them. `docker compose up --build` reads whatever
+is in that folder; it does not fetch anything.
+
+**Never silence an error in a step the user runs.** No `2>/dev/null`,
+no `|| true`. A step that fails silently is worse than one that stops.
+
+**Give a check that proves the NEW thing is live**, not that something
+ran: a version string the code prints, a build stamp, a string only the
+new file contains. "It started" and "it started with your change in it"
+are different claims, and only the second is worth making.
+
+**Verify a deploy from outside** where it's reachable — curl the live
+URL, don't trust the local tree or the commit. `git log` says what was
+committed, not what is being served.
