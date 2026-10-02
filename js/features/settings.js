@@ -1031,7 +1031,42 @@ box.innerHTML = `<div class="settings-note" style="margin:0 0 8px;">Whole docume
 <td style="text-align:right;font-variant-numeric:tabular-nums;">${r.doneCount === null ? '—' : `${r.doneCount}${r.doneBytes ? ` · ${human(r.doneBytes)}` : ''}`}</td>
 </tr>`).join('')}</tbody>
 </table>
-<div class="settings-note" style="margin:8px 0 0;">&ldquo;Finished&rdquo; means done or dropped tasks and media, dismissed mail and switch offers, spent capture drafts, and trips and stays whose end date has passed. Everything else is counted as live.</div>`;
+<div class="settings-note" style="margin:8px 0 0;">&ldquo;Finished&rdquo; means done or dropped tasks and media, dismissed mail and switch offers, spent capture drafts, and trips and stays whose end date has passed. Everything else is counted as live.</div>
+${fieldBreakdownHtml('connections', total)}`;
+}
+
+// One level down, for whichever section dominates. The top table said
+// connections was 85% of the document; it could not say whether that is
+// 528 people or three fields holding whole chat transcripts. Those have
+// completely different answers — the first is an architecture problem,
+// the second is a line of code — so the drill-down is what decides it.
+function fieldBreakdownHtml(section, docTotal) {
+const list = data[section];
+if (!Array.isArray(list) || list.length < 2) return '';
+const totals = new Map();
+list.forEach((record) => {
+Object.keys(record || {}).forEach((field) => {
+totals.set(field, (totals.get(field) || 0) + bytesOf(record[field]));
+});
+});
+const rows = [...totals.entries()]
+.map(([field, size]) => ({ field, size, per: Math.round(size / list.length) }))
+.filter((r) => r.size > 256)
+.sort((a, b) => b.size - a.size)
+.slice(0, 12);
+if (!rows.length) return '';
+const sectionBytes = bytesOf(list);
+return `<div class="settings-note" style="margin:14px 0 6px;"><strong>Inside ${escapeHtml(section)}</strong> — ${list.length} records, ${human(sectionBytes)} in total, by field.</div>
+<table class="limits-table">
+<thead><tr><th>Field</th><th style="text-align:right;">Size</th><th style="text-align:right;">Of section</th><th style="text-align:right;">Of document</th><th style="text-align:right;">Average each</th></tr></thead>
+<tbody>${rows.map((r) => `<tr>
+<td>${escapeHtml(r.field)}</td>
+<td style="text-align:right;font-variant-numeric:tabular-nums;">${escapeHtml(human(r.size))}</td>
+<td style="text-align:right;font-variant-numeric:tabular-nums;">${sectionBytes ? Math.round((r.size / sectionBytes) * 100) : 0}%</td>
+<td style="text-align:right;font-variant-numeric:tabular-nums;">${docTotal ? Math.round((r.size / docTotal) * 100) : 0}%</td>
+<td style="text-align:right;font-variant-numeric:tabular-nums;">${escapeHtml(human(r.per))}</td>
+</tr>`).join('')}</tbody>
+</table>`;
 }
 
 function initDocSize() {
