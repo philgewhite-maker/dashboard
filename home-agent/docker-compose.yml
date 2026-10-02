@@ -16,3 +16,55 @@ services:
       options:
         max-size: "1m"
         max-file: "3"
+
+  # A real browser, for the pages that will not answer anything else.
+  #
+  # Agent Provocateur serves 194,677 bytes with the whole product set to a
+  # browser and 73,705 with only the main garment to everything short of
+  # one: plain urllib, a full Chrome header set, Chrome's TLS and HTTP/2
+  # fingerprint via curl_cffi, a persistent session, and every
+  # impersonation target the library offers. The short version even
+  # carries AP's own "we don't support this browser" notice -- what's
+  # missing is added by JavaScript after the page loads, which nothing
+  # short of running the page supplies.
+  #
+  # Off by default: this service only starts if you bring it up (`docker
+  # compose up -d` picks up any service with no profile, so it DOES start
+  # alongside the agent once this file is in place -- it costs nothing
+  # sitting idle between requests, just the ~300MB Chromium takes at rest).
+  # page.fetch, Quidco, Amazon and everything else work exactly as they do
+  # today with this absent; nothing depends on it existing.
+  #
+  # A SEPARATE container rather than Playwright inside the agent image:
+  # the agent stays a few MB, this is swappable and restartable on its
+  # own, and a browser is the part most likely to need replacing. It
+  # publishes to 127.0.0.1 only -- the agent reaches it over
+  # network_mode: host, and nothing outside the NAS can reach port 3000
+  # at all, which is why BROWSER_TOKEN only needs to match itself rather
+  # than being a real secret.
+  #
+  # ghcr.io/browserless/chromium:latest is a multi-arch manifest (amd64 +
+  # arm64, confirmed from the project's own build workflow), so this pulls
+  # the right image whichever kind of QNAP this is -- nothing to pick here.
+  browser:
+    image: ghcr.io/browserless/chromium:latest
+    container_name: dashboard-browser
+    restart: unless-stopped
+    ports:
+      - 127.0.0.1:3000:3000
+    environment:
+      # Matches BROWSER_TOKEN in .env -- see the note above on why this
+      # isn't a secret from anywhere but the NAS's own other containers.
+      - TOKEN=${BROWSER_TOKEN}
+      # One page at a time: this serves one agent asking for one product
+      # page every few minutes, and CONCURRENT / MAX_CONCURRENT_SESSIONS
+      # are the same setting under two names (confirmed from source) --
+      # set once here rather than twice to the same value.
+      - CONCURRENT=1
+      - TIMEOUT=45000
+    shm_size: 1gb
+    logging:
+      driver: json-file
+      options:
+        max-size: "1m"
+        max-file: "3"

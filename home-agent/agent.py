@@ -9,8 +9,21 @@ PHP proxies sit on public hosting, so neither can reach anything behind
 the router. Polling outward means no port forwarding, no VPN, and no Plex
 token anywhere except this machine.
 
-Standard library only, so the container is just `python:3-alpine` with
-this file copied in -- nothing to install, nothing to keep patched.
+Mostly standard library, with two optional layers added as each site
+needed them rather than up front. Neither import is required: if it is
+missing, that feature degrades to a plainer answer instead of the agent
+failing to start.
+
+  curl_cffi    page.fetch looks like Chrome at the TLS/HTTP2 level, not
+               just in its headers -- some sites serve a reduced page to
+               anything that doesn't. Falls back to urllib.
+  browser      page.render, for the sites that serve a reduced page to
+               EVERY plain request including curl_cffi's, because the
+               part that's missing is added by JavaScript after load.
+               A separate container (docker-compose.yml's `browser`
+               service) rather than Playwright in this image, so the few
+               hundred MB of Chromium stay optional and restartable on
+               their own.
 
 Configuration is entirely environment variables (see .env.example).
 """
@@ -25,7 +38,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-VERSION = "1.4"
+VERSION = "1.5"
 
 SYNC_URL = os.environ.get("DASHBOARD_SYNC_URL", "").strip()
 SECRET = os.environ.get("DASHBOARD_SECRET", "").strip()
@@ -386,6 +399,22 @@ PAGE_HEADERS = {
 # pace the strictest site tolerates.
 PAGE_GAP_SECONDS = 4
 
+# The browser container (docker-compose.yml's `browser` service), for
+# pages a plain request never gets whole no matter how it's dressed up.
+# Confirmed against browserless's own source, not guessed: POST
+# {BROWSER_URL}/content with {"url", "gotoOptions"} returns the page's
+# HTML as plain text after Chrome has run it, gotoOptions passing
+# straight through to Puppeteer's page.goto() (so "waitUntil" and
+# "timeout" are Puppeteer's own values). Empty by default -- page.render
+# fails with a clear "not configured" message rather than page.fetch's
+# URL silently trying to reach http://:3000.
+BROWSER_URL = os.environ.get("BROWSER_URL", "").rstrip("/")
+BROWSER_TOKEN = os.environ.get("BROWSER_TOKEN", "").strip()
+# Generous: a cold Chromium launch plus a page that waits for its own
+# "Wear with" block to hydrate is slower than any plain fetch here, and
+# this verb exists for exactly the pages that are slow for that reason.
+BROWSER_TIMEOUT_MS = int(os.environ.get("BROWSER_TIMEOUT_MS", "45000"))
+
 
 # Browser-grade fetching, when the image has it.
 #
@@ -500,9 +529,79 @@ def verb_page_fetch(args):
     return {"pages": pages}
 
 
+def verb_page_render(args):
+    """Fetch pages through a real browser and hand back the rendered HTML.
+
+    The expensive option, for the sites that answer nothing else. Agent
+    Provocateur serves 194,677 bytes with the whole product set to a
+    browser and 73,705 with only the main garment to everything short of
+    one -- plain urllib, a full Chrome header set, Chrome's TLS and
+    HTTP/2 fingerprint, a persistent session, every impersonation target
+    curl_cffi offers. Its short version even carries AP's own "we don't
+    support this browser" notice, and the "Wear with" set itself is added
+    by JavaScript after the document loads, so nothing short of running
+    the page gets the rest.
+
+    Separate from page.fetch rather than replacing it: starting a browser
+    costs seconds and a few hundred MB where a plain request costs
+    neither, so most pages should never reach this. The CALLER says
+    which do -- it is not tried as a fallback from page.fetch, because
+    that would make every refused page slow rather than just the ones
+    that need it.
+    """
+    if not BROWSER_URL:
+        raise RuntimeError(
+            "page.render needs the browser container: set BROWSER_URL (and BROWSER_TOKEN) "
+            "in .env, then `docker compose up -d` to bring the `browser` service up"
+        )
+    urls = args.get("urls") or ([args["url"]] if args.get("url") else [])
+    if not urls:
+        raise ValueError("page.render needs a url or urls")
+    pages = []
+    for index, url in enumerate(urls):
+        if not str(url).lower().startswith("https://"):
+            pages.append({"url": url, "error": "Only https URLs are rendered"})
+            continue
+        if index:
+            time.sleep(PAGE_GAP_SECONDS)
+        try:
+            endpoint = f"{BROWSER_URL}/content"
+            if BROWSER_TOKEN:
+                endpoint += f"?token={urllib.parse.quote(BROWSER_TOKEN)}"
+            # waitUntil networkidle2 rather than the default "load": the
+            # set is added to the DOM after the load event fires, and the
+            # whole reason for this verb is the part that arrives late.
+            # Puppeteer's own values, passed straight through by
+            # browserless -- see BROWSER_URL's comment above.
+            body = json.dumps({
+                "url": url,
+                "gotoOptions": {"waitUntil": "networkidle2", "timeout": BROWSER_TIMEOUT_MS},
+            }).encode("utf-8")
+            request = urllib.request.Request(endpoint, data=body, method="POST")
+            request.add_header("Content-Type", "application/json")
+            # A little longer than the browser's own timeout, so a page
+            # that gives up cleanly at BROWSER_TIMEOUT_MS is the error
+            # that surfaces rather than this socket cutting it off first.
+            with urllib.request.urlopen(request, timeout=BROWSER_TIMEOUT_MS / 1000 + 15) as response:
+                html = response.read(PAGE_MAX_BYTES).decode("utf-8", "replace")
+            log(f"page.render {url[-40:]} -> {len(html)} bytes")
+            pages.append({"url": url, "status": 200, "html": html})
+        except urllib.error.HTTPError as err:
+            detail = ""
+            try:
+                detail = err.read(500).decode("utf-8", "replace")
+            except Exception:  # noqa: BLE001 - the status code is the useful part either way
+                pass
+            pages.append({"url": url, "status": err.code, "error": f"browser returned HTTP {err.code} {detail}".strip()})
+        except Exception as err:
+            pages.append({"url": url, "error": f"{type(err).__name__}: {err}"})
+    return {"pages": pages}
+
+
 VERBS = {
     "agent.ping": verb_ping,
     "page.fetch": verb_page_fetch,
+    "page.render": verb_page_render,
     "plex.libraries": verb_plex_libraries,
     "plex.search": verb_plex_search,
     "arr.search": verb_arr_search,
@@ -529,6 +628,7 @@ def main():
     # back, and the symptom of its absence is a page that looks fine but
     # is missing most of itself.
     log(f"page.fetch: impersonating {IMPERSONATE} (curl_cffi)" if PAGE_SESSION else "page.fetch: urllib only -- curl_cffi not installed, some sites will send a reduced page")
+    log(f"page.render: browser at {BROWSER_URL}" if BROWSER_URL else "page.render: not configured -- set BROWSER_URL in .env to use it")
     last_beat = 0.0
     while True:
         try:
