@@ -89,7 +89,28 @@ if (!row) return; // this retailer doesn't offer that size at all
 if (row.inStock) available.push({ size, which, lastOne: row.lastOne });
 else gone.push({ size, which });
 });
+// The rest of the set. An Agent Provocateur bra page lists the matching
+// knickers, thong and suspender with their own size selects, and the
+// parser has been reading them into `alsoOnPage` all along -- this is
+// where they stop being discarded. Her knicker size is a different size
+// in a different group from her bra size, so each sibling is matched on
+// its own name rather than the page's.
+const alsoAvailable = [];
+(page.alsoOnPage || []).forEach((sib) => {
+const wanted = wantedSizesFor(conn, { piece: sib.name, retailer: page.retailer });
+if (!wanted.length) return;
+const got = [];
+wanted.forEach(({ size, which }) => {
+const row = (sib.sizes || []).find((s) => String(s.size).toLowerCase() === String(size).toLowerCase());
+if (row && row.inStock) got.push({ size, which, lastOne: row.lastOne });
+});
+// Only what's actually available: a sold-out sibling is noise on a line
+// whose job is "can this be bought as a set right now".
+if (got.length) alsoAvailable.push({ name: sib.name, available: got, now: sib.now, was: sib.was, net: sib.net });
+});
+
 return {
+alsoAvailable,
 // Carried through, not dropped. Without it the stock line had no
 // retailer name and cashbackHtml fell back to the hostname --
 // "agentprovocateur", which slugs differently from the
@@ -477,7 +498,21 @@ return `<div class="stock-line${r.available.length ? ' stock-line-in' : ''}">
 <a href="${escapeHtml(r.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(r.piece)}${r.colour ? ` · ${escapeHtml(r.colour)}` : ''}</a>
 ${r.available.length ? `<span class="stock-sizes">${sizes}</span> ${price}` : `${goneNote}${noSizes}`}
 ${r.available.length ? cashbackHtml({ retailer: r.retailer, url: r.url }) : ''}
+${setHtml(r)}
 </div>`;
+}
+
+// The rest of the set, in her sizes, under the piece that was wanted.
+// Shown only when the main piece is available: "the thong is in" is not
+// useful on its own when the bra it matches is sold out, and this line is
+// answering "can I buy this as a set".
+function setHtml(r) {
+if (!r.available.length || !(r.alsoAvailable || []).length) return '';
+return `<div class="stock-set">${r.alsoAvailable.map((s) => {
+const sizes = s.available.map((a) => `${escapeHtml(a.size)}${a.which === 'backup' ? ' (backup)' : ''}${a.lastOne ? ' — last one' : ''}`).join(', ');
+const price = s.net != null && s.net !== s.now ? money(s.net) : money(s.now);
+return `<span class="stock-set-item">+ ${escapeHtml(s.name)} <span class="stock-sizes">${sizes}</span> ${escapeHtml(price)}</span>`;
+}).join('')}</div>`;
 }
 
 // Shown on the shopping row itself, the same way priceCheck's results

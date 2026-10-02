@@ -3714,3 +3714,18 @@ cursor:pointer;
 .ticker{gap:8px;font-size:11px;}
 .tick-run{gap:14px;padding-right:14px;}
 }
+
+/* The rest of a set, under the piece that was wanted. Indented and quiet:
+   it answers "and the matching knickers?" without competing with the line
+   that answers "is her bra in stock?". */
+.stock-set{
+display:flex;
+flex-wrap:wrap;
+gap:4px 12px;
+padding:2px 0 0 14px;
+font-size:12px;
+color:var(--muted);
+flex-basis:100%;
+}
+.stock-set-item{display:inline-flex;align-items:baseline;gap:5px;}
+.stock-set .stock-sizes{color:var(--ink);}
