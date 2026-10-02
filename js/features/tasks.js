@@ -448,10 +448,86 @@ fileTask(e.dataTransfer.getData('text/plain'), zone.dataset.dropBucket);
 });
 }
 
+// Every task worth offering as "an existing project to add this to" --
+// anything already tagged bucket:'project' (the GTD outcome-needing-
+// several-actions sense) OR anything that already has children, since a
+// task doesn't need the 'project' label to already be acting as a
+// parent (the AI-capture "project" step, voicecapture.js, creates one
+// without ever setting that bucket). Union, not either alone -- missing
+// either source would under-list real candidates.
+function projectCandidates(excludeId) {
+const childrenMap = buildChildrenMap();
+return data.tasks.filter((t) => t.id !== excludeId && t.bucket !== 'done'
+&& (t.bucket === 'project' || (childrenMap.get(t.id) || []).length > 0));
+}
+
+// Filing to the "Projects" bucket used to mean one thing only: tag THIS
+// task bucket:'project', no link to anything. That's "this IS a new
+// project" -- it said nothing about "this belongs to one that already
+// exists", which is what a multi-task capture actually needs and had no
+// way to express. Confirmed live: 8 tasks from one Smart-capture
+// instruction landed in Inbox with no project to file them under at
+// all, because the only filing options were "tag as a new project" or
+// an ordinary bucket -- "add to an existing project" wasn't a choice.
+function openProjectFileDialog(taskId) {
+const t = taskById(taskId);
+if (!t) return;
+const candidates = projectCandidates(taskId);
+const dialog = document.createElement('div');
+dialog.className = 'mail-view-backdrop';
+dialog.innerHTML = `<div class="mail-view-card" style="max-width:420px;">
+<div class="mail-view-subject">File "${escapeHtml(t.title || '(untitled)')}" to Projects</div>
+<label style="display:block;margin:8px 0;"><input type="radio" name="project-file-mode" value="new" checked> Make this itself a new project</label>
+<label style="display:block;margin:8px 0;${candidates.length ? '' : 'opacity:0.5;'}"><input type="radio" name="project-file-mode" value="existing" ${candidates.length ? '' : 'disabled'}> Add it to an existing project</label>
+<select data-project-pick ${candidates.length ? '' : 'disabled'} style="width:100%;margin-top:4px;" ${candidates.length ? '' : 'hidden'}>
+${candidates.map((p) => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.title || '(untitled)')}</option>`).join('')}
+</select>
+${candidates.length ? '' : '<div class="settings-note" style="margin:4px 0 0;">No existing projects yet -- file one as new first.</div>'}
+<div class="mail-view-actions">
+<button class="sync-btn sm" type="button" data-project-file-cancel>Cancel</button>
+<button class="add-btn" type="button" data-project-file-confirm>File it</button>
+</div>
+</div>`;
+document.body.appendChild(dialog);
+const close = () => dialog.remove();
+dialog.addEventListener('click', (e) => { if (e.target === dialog) close(); });
+dialog.querySelector('[data-project-file-cancel]').addEventListener('click', close);
+const select = dialog.querySelector('[data-project-pick]');
+dialog.querySelectorAll('input[name="project-file-mode"]').forEach((r) => {
+r.addEventListener('change', () => { select.hidden = r.value !== 'existing' || !candidates.length; });
+});
+dialog.querySelector('[data-project-file-confirm]').addEventListener('click', () => {
+const mode = dialog.querySelector('input[name="project-file-mode"]:checked')?.value;
+if (mode === 'existing' && candidates.length) {
+t.parentId = select.value;
+// A child's OWN bucket is its actionable status, not "project" --
+// matches the "+ Subtask" button's existing convention (line ~554),
+// same reasoning: it's now one action inside the project, not the
+// project-level outcome itself.
+t.bucket = 'next';
+} else {
+t.bucket = 'project';
+t.parentId = null;
+}
+renderTasks();
+queueSave();
+close();
+});
+}
+
 function fileTask(taskId, bucket) {
 if (!bucket) return;
 const t = taskById(taskId);
 if (!t) return;
+if (bucket === 'project') {
+// Reset synchronously, not left to renderTasks(): that only runs on
+// Confirm, so a Cancel would otherwise leave the select showing
+// "Projects" with no value CHANGE left to fire next time it's picked.
+const sel = document.querySelector(`[data-alloc-bucket="${CSS.escape(taskId)}"]`);
+if (sel) sel.value = '';
+openProjectFileDialog(taskId);
+return;
+}
 t.bucket = bucket;
 renderTasks();
 queueSave();
