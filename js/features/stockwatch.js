@@ -258,7 +258,15 @@ rates = await refreshCashbackRates(
 wants.map((t) => ({ brand: seedWatchSpec(t).brand, url: (seedWatchSpec(t).urls || [])[0] })),
 { onProgress },
 );
-} catch (err) { /* a rate is a nicety; never let it fail a check */ }
+} catch (err) {
+// A rate is a nicety, so this never fails the stock check -- but
+// swallowing the reason entirely meant two blank rates looked
+// identical to two rates that are genuinely zero, with nothing
+// anywhere saying which. Reported, then carried on from.
+console.error('Cashback rates failed:', err);
+rates = { error: err.message || String(err) };
+if (onProgress) onProgress(`Stock checked. Cashback rates couldn't be read: ${err.message || err}`);
+}
 return { checked: urls.length, wants: wants.length, errors: errors.length, rates };
 }
 
@@ -393,12 +401,14 @@ const { pages } = await fetchPages(wanted.map((w) => w.url));
 let found = 0;
 wanted.forEach((w) => {
 const html = pages.get(w.url);
-if (!html) return;
+if (!html) { console.warn(`Cashback: ${w.name} page never came back`, w.url); return; }
 const rate = parseRate(html, w.provider);
 // A page that came back but didn't yield a rate is left alone rather
 // than cached as "nothing": the markup may simply have moved, and
-// overwriting a good older number with a blank helps nobody.
-if (!rate) return;
+// overwriting a good older number with a blank helps nobody. It is
+// still worth saying, because "the page loaded and I couldn't read it"
+// and "the page never loaded" need different fixes.
+if (!rate) { console.warn(`Cashback: ${w.name} page loaded but no rate found in it`, w.url); return; }
 data.cashbackRates[w.key] = { ...rate, at: new Date().toISOString(), url: w.url };
 found += 1;
 });
