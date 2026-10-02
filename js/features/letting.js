@@ -51,6 +51,14 @@ function balanceFor(key) {
 return entriesFor(key).reduce((n, e) => n + (Number(e.amount) || 0), 0);
 }
 
+// What the listing has taken, as opposed to what is owed on it. Two
+// different questions — "how is the flat doing" and "what do they owe me"
+// — and keeping the gross as a field is what makes the first answerable
+// at all.
+function grossFor(key) {
+return entriesFor(key).reduce((n, e) => n + (Number(e.gross) || 0), 0);
+}
+
 // Every owner who has a listing or a ledger entry, so somebody who has
 // paid up and has no listing this season doesn't vanish mid-settlement.
 function owners() {
@@ -58,6 +66,10 @@ const keys = new Set();
 (data.airbnbListings || []).forEach((l) => { const k = ownerKeyFor(l); if (k) keys.add(k); });
 (data.lettingLedger || []).forEach((e) => { if (e.ownerKey) keys.add(e.ownerKey); });
 return [...keys];
+}
+
+function totalGross() {
+return owners().reduce((n, k) => n + grossFor(k), 0);
 }
 
 function totalOwed() {
@@ -91,8 +103,16 @@ id: uid(),
 ownerKey: key,
 kind: 'accrual',
 amount,
+// The gross and the rate are kept as FIELDS, not just inside the note.
+// A note is a sentence for you to read; a number you might ever want to
+// total has to survive without being parsed back out of English.
+gross: income,
+pct,
 date: r.checkout,
-note: `${pct}% of ${money(income)} — ${listing.label || 'listing'}${r.guestName ? `, ${r.guestName}` : ''}`,
+// The gross is on the entry as a field, so the note is free to be what
+// it should be: which stay it was. No more repeating a number that now
+// renders beside it.
+note: `${listing.label || 'listing'}${r.guestName ? `, ${r.guestName}` : ''}`,
 reservationId: r.id,
 listingId: r.listingId,
 });
@@ -123,6 +143,16 @@ if (!keys.length) {
 el.innerHTML = '<div class="settings-note" style="margin:0;">No listing has an owner yet — set one on the Travel tab’s Airbnb settings, then enter what each stay earned.</div>';
 return;
 }
+// The two totals the Finances panel exists to show: what the listings
+// have taken, and what of that is still owed to you. The second is not
+// derivable from the first — payments and write-offs move it — which is
+// the whole reason both are kept.
+const badge = document.getElementById('letting-total');
+if (badge) {
+badge.textContent = totalGross()
+? `${money(totalOwed())} owed of ${money(totalGross())} taken`
+: `${money(totalOwed())} owed`;
+}
 el.innerHTML = keys.map((key) => {
 const rows = entriesFor(key).slice().sort((a, b) => String(b.date).localeCompare(String(a.date)));
 const bal = balanceFor(key);
@@ -131,10 +161,15 @@ return `<div class="letting-owner">
 <span class="letting-name">${escapeHtml(ownerNameFor(key))}</span>
 <span class="letting-balance${bal > 0 ? ' owes' : bal < 0 ? ' credit' : ''}">${escapeHtml(money(bal))}</span>
 <span class="settings-note" style="margin:0;">${bal > 0 ? 'owed to you' : bal < 0 ? 'in credit' : 'settled'}</span>
+${grossFor(key) ? `<span class="settings-note" style="margin:0 0 0 auto;">${escapeHtml(money(grossFor(key)))} taken</span>` : ''}
 </div>
 ${rows.length ? `<table class="limits-table"><tbody>${rows.map((e) => `<tr>
 <td style="white-space:nowrap;">${escapeHtml(e.date || '')}</td>
-<td>${escapeHtml(e.note || e.kind)}${e.kind && e.kind !== 'accrual' ? ` <span class="letting-kind ${escapeHtml(e.kind)}">${escapeHtml(e.kind)}</span>` : ''}</td>
+<td>${escapeHtml(e.note || e.kind)}${e.kind && e.kind !== 'accrual' ? ` <span class="letting-kind ${escapeHtml(e.kind)}">${escapeHtml(e.kind)}</span>` : ''}${
+// Shown from the FIELD rather than left inside the note, because your
+// own note replaces the default one — type "Bathilde" and the £419 it
+// was half of disappeared from the record entirely.
+e.gross ? ` <span class="letting-gross">${escapeHtml(`${e.pct ?? 50}% of ${money(e.gross)}`)}</span>` : ''}</td>
 <td style="text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;">${escapeHtml(money(e.amount))}</td>
 <td style="width:1%;"><span class="del-x" data-letting-del="${escapeHtml(e.id)}" title="Remove this entry">&times;</span></td>
 </tr>`).join('')}</tbody></table>` : '<div class="settings-note" style="margin:4px 0 0;">Nothing yet.</div>'}
@@ -208,9 +243,13 @@ id: uid(),
 ownerKey: who.value,
 kind,
 amount: signed,
+// Only "earned" has a gross behind it — a payment or an adjustment IS
+// its own figure. Recorded the same way as an accrual's so the two
+// sources of earnings add up together.
+...(kind === 'earned' ? { gross: Math.round(amount * 100) / 100, pct } : {}),
 date: today(),
 note: note || (kind === 'earned'
-? `${pct}% of ${money(amount)} — earned before tracking`
+? `Earned before tracking`
 : kind === 'payment' ? (amount < 0 ? 'Paid' : 'Owed more') : 'Adjustment'),
 });
 queueSave();
@@ -232,4 +271,4 @@ sel.innerHTML = `<option value="">Who…</option>${owners().map((k) => `<option 
 if (keep) sel.value = keep;
 }
 
-export { accrueLettings, renderLetting, initLetting, totalOwed, balanceFor, owners, ownerNameFor, ownerKeyFor, sharePctFor, money };
+export { accrueLettings, renderLetting, initLetting, totalOwed, totalGross, balanceFor, grossFor, owners, ownerNameFor, ownerKeyFor, sharePctFor, money };

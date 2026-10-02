@@ -3747,3 +3747,7 @@ background:var(--sage-bg);color:var(--sage);
 }
 .letting-kind.adjustment{background:var(--slate-bg);color:var(--slate);}
 .letting-kind.earned{background:var(--amber-bg);color:var(--amber);}
+/* The gross behind a share, shown beside whatever you called the entry
+   rather than inside it — a note you type replaces the default one, and
+   the figure it was half of should not go with it. */
+.letting-gross{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;}
