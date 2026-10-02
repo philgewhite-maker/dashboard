@@ -3729,3 +3729,20 @@ flex-basis:100%;
 }
 .stock-set-item{display:inline-flex;align-items:baseline;gap:5px;}
 .stock-set .stock-sizes{color:var(--ink);}
+
+/* Letting ledger. A payment and an adjustment net off identically, so
+   the only thing separating them later is this tag — money that reached
+   you versus a balance you moved. */
+.letting-owner{padding:8px 0;border-top:1px solid var(--line);}
+.letting-owner:first-child{border-top:none;}
+.letting-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;}
+.letting-name{font-weight:600;}
+.letting-balance{font-variant-numeric:tabular-nums;font-weight:600;}
+.letting-balance.owes{color:var(--amber);}
+.letting-balance.credit{color:var(--sage);}
+.letting-kind{
+font-size:10px;text-transform:uppercase;letter-spacing:.05em;
+padding:1px 6px;border-radius:20px;vertical-align:1px;
+background:var(--sage-bg);color:var(--sage);
+}
+.letting-kind.adjustment{background:var(--slate-bg);color:var(--slate);}

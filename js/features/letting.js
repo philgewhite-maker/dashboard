@@ -102,6 +102,11 @@ return `${v < 0 ? '-' : ''}£${Math.abs(v).toLocaleString('en-GB', { minimumFrac
 // ---- Rendering ------------------------------------------------------------
 
 function renderLetting() {
+// The picker is refreshed here rather than only at startup: assigning an
+// owner to a listing happens on another tab, and until this ran again
+// the dropdown had no one to choose and the Add button silently did
+// nothing.
+renderOwnerPicker();
 const el = document.getElementById('letting-list');
 if (!el) return;
 const keys = owners();
@@ -120,7 +125,7 @@ return `<div class="letting-owner">
 </div>
 ${rows.length ? `<table class="limits-table"><tbody>${rows.map((e) => `<tr>
 <td style="white-space:nowrap;">${escapeHtml(e.date || '')}</td>
-<td>${escapeHtml(e.note || e.kind)}</td>
+<td>${escapeHtml(e.note || e.kind)}${e.kind && e.kind !== 'accrual' ? ` <span class="letting-kind ${escapeHtml(e.kind)}">${escapeHtml(e.kind)}</span>` : ''}</td>
 <td style="text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;">${escapeHtml(money(e.amount))}</td>
 <td style="width:1%;"><span class="del-x" data-letting-del="${escapeHtml(e.id)}" title="Remove this entry">&times;</span></td>
 </tr>`).join('')}</tbody></table>` : '<div class="settings-note" style="margin:4px 0 0;">Nothing yet.</div>'}
@@ -160,13 +165,18 @@ const status = document.getElementById('letting-add-status');
 const say = (t) => { if (status) status.textContent = t; };
 if (!who.value) { say('Pick who it is for.'); return; }
 if (!Number.isFinite(amount) || !amount) { say('Give an amount — negative for a payment to you.'); return; }
+// Chosen, not inferred from the sign. A negative used to mean "paid",
+// which recorded writing £50 off as £50 received — right arithmetic,
+// false history, and the balance alone can never tell the two apart
+// afterwards.
+const kind = (document.getElementById('letting-add-kind') || {}).value || 'payment';
 data.lettingLedger.push({
 id: uid(),
 ownerKey: who.value,
-kind: amount < 0 ? 'payment' : 'adjustment',
+kind,
 amount: Math.round(amount * 100) / 100,
 date: today(),
-note: note || (amount < 0 ? 'Paid' : 'Adjustment'),
+note: note || (kind === 'payment' ? (amount < 0 ? 'Paid' : 'Owed more') : 'Adjustment'),
 });
 queueSave();
 document.getElementById('letting-add-amount').value = '';
