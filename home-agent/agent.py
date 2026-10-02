@@ -25,7 +25,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-VERSION = "1.3"
+VERSION = "1.4"
 
 SYNC_URL = os.environ.get("DASHBOARD_SYNC_URL", "").strip()
 SECRET = os.environ.get("DASHBOARD_SECRET", "").strip()
@@ -401,7 +401,12 @@ PAGE_GAP_SECONDS = 4
 # won't start is worse than one that fetches a smaller page.
 try:
     from curl_cffi import requests as curl_requests
-    IMPERSONATE = "chrome"
+    # Which browser to look like. Switchable from .env because AP serves a
+    # reduced page to a browser it does not recognise -- it even ships an
+    # "we do not support this browser" block in the short version -- and
+    # the library default may be several Chrome versions behind what the
+    # site expects. Trying another is then a restart, not a rebuild.
+    IMPERSONATE = os.environ.get("PAGE_IMPERSONATE", "chrome").strip() or "chrome"
     # One session for the life of the agent, so cookies persist between
     # fetches the way a browser keeps them between page loads.
     PAGE_SESSION = curl_requests.Session(impersonate=IMPERSONATE)
@@ -481,6 +486,10 @@ def verb_page_fetch(args):
                 # below instead of being handed back as a page.
                 pages.append({"url": url, "status": status, "error": f"HTTP {status}"})
                 continue
+            # Size is logged because it is the whole question on sites that
+            # serve a reduced page: "ok" told you nothing, and 73KB versus
+            # 194KB is the difference between a product and a product set.
+            log(f"page.fetch {url[-40:]} -> {status}, {len(text)} bytes")
             pages.append({"url": url, "status": status, "html": text})
         except urllib.error.HTTPError as err:
             # Reported per URL, not raised: one refused page shouldn't cost
@@ -519,7 +528,7 @@ def main():
     # Said at startup because it decides what some sites will even send
     # back, and the symptom of its absence is a page that looks fine but
     # is missing most of itself.
-    log("page.fetch: browser impersonation ON (curl_cffi)" if curl_requests else "page.fetch: urllib only -- curl_cffi not installed, some sites will send a reduced page")
+    log(f"page.fetch: impersonating {IMPERSONATE} (curl_cffi)" if PAGE_SESSION else "page.fetch: urllib only -- curl_cffi not installed, some sites will send a reduced page")
     last_beat = 0.0
     while True:
         try:
