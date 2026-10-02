@@ -162,8 +162,21 @@ project's deploys has come from a step that LOOKED like it worked:
   live site stayed a version behind while the hash looked fine.
 - The service worker serving cached JS, so a fix was "not working" when
   it was never loaded.
+- A console snippet's `import('/js/homeagent.js')` (root-absolute),
+  handed to the user to paste into the live site's console -- confirmed
+  live, repeatedly: the local preview serves from `/`, so an absolute
+  import path resolves and works there, but GitHub Pages serves this
+  repo under its OWN path (`https://philgewhite-maker.github.io/
+  dashboard/...`, not `.../...`), so the same snippet 404s on the one
+  place it was actually meant to run.
 
 So for any change touching the web host, the NAS or the agent:
+
+**A console snippet meant for the live site imports with a RELATIVE
+path** (`import('./js/homeagent.js')`), never root-absolute
+(`import('/js/homeagent.js')`) -- the local preview can't tell the two
+apart, so this only ever surfaces on the real deployed site, in front
+of the user, which is the worst place to find out.
 
 **Say which machine each command runs on**, before the command. "On the
 NAS, over SSH" / "On your PC" / "In the browser console". A fenced block
