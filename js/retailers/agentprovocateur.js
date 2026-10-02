@@ -295,33 +295,73 @@ alsoOnPage: parseSiblings(doc, main.name, main.mainSelect),
 };
 }
 
-// Every Jayce-style colourway, discovered from a category listing page.
-// This is the only way to find a style's other colours: the swatches on a
-// product page carry an RGB fill and nothing else -- no name, no href, no
-// data attribute -- and clicking one is an Angular handler, so there is
-// nothing a server-side fetch can follow. Listing pages, by contrast, are
-// server-rendered and carry real URLs.
+// Every item in a range, discovered from a category listing page: every
+// piece, in every colour the listing happens to show, whether or not THIS
+// want's piece comes in that colour. This is the only way to find a
+// style's other colours at all -- the swatches on a product page carry an
+// RGB fill and nothing else, no name, no href, no data attribute, and
+// clicking one is an Angular handler a server-side fetch can't follow.
 //
-// Best-effort by design: a listing renders a few hundred of a claimed
-// several hundred products, so this finds colourways rather than
-// guaranteeing all of them. Grouped by the SKU's colour code, which is
-// present whether or not the slug names a colour.
-function findColourways(listingHtml, styleWord) {
-const word = String(styleWord || '').toLowerCase();
-const urls = [...new Set((String(listingHtml || '').match(/\/apm\d{10}-[a-z0-9-]+/gi) || []))]
-.filter((u) => !word || u.toLowerCase().includes(word));
-const byColour = new Map();
-urls.forEach((u) => {
-const m = /^\/apm(\d{4})(\d{6})-(.+?)-(\d+)$/i.exec(u);
-if (!m) return;
-const [, style, colourCode, rest] = m;
-const slugColour = (/-in-([a-z-]+)$/.exec(rest) || [])[1] || '';
-const entry = byColour.get(colourCode) || { colourCode, slugColour: '', pieces: {} };
-if (slugColour) entry.slugColour = slugColour;
-entry.pieces[style] = u;
-byColour.set(colourCode, entry);
+// A listing card, by contrast, is a real element with real text --
+// confirmed from the live markup, not assumed:
+//   <product>...<span class="...fw-bold...">Lorna Lace</span>...
+//     <a href="/apm0281001000-lorna-plunge-underwired-bra-in-black-14748">
+//       <span cy-basketprod>Plunge Underwired Bra</span></a>...</product>
+// -- a bold RANGE-name span, a PIECE-name span, and the real href,
+// independent of each other and of the URL. That independence matters: the
+// URL for that exact card is "lorna-plunge-...", no "lace" in it at all,
+// even though the range span and the image alt both say "Lorna Lace" --
+// AP's own slug generator silently drops words the display name keeps. A
+// style word matched against the URL, which is what this used to do,
+// therefore can't tell "Lorna" from "Lorna Lace" OR "Lorna Party" (both
+// real, different ranges -- AP's own search box expands "Lorna" to all of
+// Lorna/Lorna Dotty/Lorna Heart/Lorna Lace/Lorna Party/Lorna Rainbow) --
+// confirmed live: the results mixed in a genuine "Lorna Lace" product
+// under a plain "Lorna" search. Matching the range SPAN against the typed
+// style instead, exact and case-insensitive, is the fix: it's the one
+// field here that's never abbreviated.
+//
+// Also fixes a second, unrelated miss: the old regex only matched
+// "/apm"-prefixed URLs. Newer SKUs are plain "/ap" (no m) -- confirmed
+// live, "/ap11129651430-lorna-...-dark-pink-cobalt-..." -- so that colour
+// was silently never found. Reading real <a href> elements has no such
+// prefix assumption.
+//
+// What this does NOT fix: coverage. A listing still only renders what's
+// loaded before the fetch completes -- confirmed live, scrolling the same
+// page from ~6 cards to 100 pulled in colourways and even whole OTHER
+// ranges that weren't there on first paint, which is lazy-loading, not a
+// filter. (A `#filters.range=` hash in the URL was tried and confirmed to
+// do nothing on a fresh navigation -- the app only applies it in response
+// to clicking the filter in-app, not from the URL -- so that's not a
+// shortcut to a complete, pre-filtered list either.) This remains
+// best-effort, same as before: more pages checked would find more.
+function findRangeItems(listingHtml, rangeName) {
+const want = String(rangeName || '').trim().toLowerCase();
+const doc = new DOMParser().parseFromString(String(listingHtml || ''), 'text/html');
+const seen = new Set();
+const items = [];
+doc.querySelectorAll('product').forEach((card) => {
+const link = card.querySelector('a[href^="/ap"]');
+const url = link && link.getAttribute('href');
+if (!url || seen.has(url)) return;
+const range = (card.querySelector('.fw-bold')?.textContent || '').trim();
+const piece = (card.querySelector('[cy-basketprod]')?.textContent || '').trim();
+if (want && range.toLowerCase() !== want) return;
+if (!piece) return;
+seen.add(url);
+// The colour isn't its own field anywhere on the card -- only the
+// image alt text spells it out, as "{range} {piece} {colour} | Agent
+// Provocateur". Stripping the range and piece text (already read
+// above, so this can't drift from them) off the front leaves the
+// colour, however many words it is ("Black", "Dark Pink/Cobalt").
+const alt = (card.querySelector('img[alt]')?.getAttribute('alt') || '').replace(/\s*\|\s*Agent Provocateur\s*$/i, '').trim();
+let colour = alt;
+if (range && colour.toLowerCase().startsWith(range.toLowerCase())) colour = colour.slice(range.length).trim();
+if (piece && colour.toLowerCase().startsWith(piece.toLowerCase())) colour = colour.slice(piece.length).trim();
+items.push({ url, range, piece, colour });
 });
-return [...byColour.values()];
+return items;
 }
 
 // ---- Reading the page from YOUR browser instead ---------------------------
@@ -421,4 +461,4 @@ step();
 return `javascript:${encodeURIComponent(body)}`;
 }
 
-export { matchesRetailer, RETAILER, parseProductPage, parseSizeOption, parseBlock, skuParts, skuFromUrl, specFromUrl, findColourways, bookmarkletSource, bulkBookmarkletSource, PASTE_STOCK_PREFIX, HOST, CHECK_SPACING_MS, NEEDS_BROWSER_FOR_FULL_PAGE };
+export { matchesRetailer, RETAILER, parseProductPage, parseSizeOption, parseBlock, skuParts, skuFromUrl, specFromUrl, findRangeItems, bookmarkletSource, bulkBookmarkletSource, PASTE_STOCK_PREFIX, HOST, CHECK_SPACING_MS, NEEDS_BROWSER_FOR_FULL_PAGE };

@@ -230,7 +230,7 @@ return `<div class="mail-view-card" style="max-width:520px;">
 </div>
 <div class="sync-row" style="margin-top:8px;">
 <button class="sync-btn sm" type="button" data-watch-colours>Find other colours</button>
-<span class="settings-note" style="margin:0;">Searches the retailer's listings for the same style in other colourways.</span>
+<span class="settings-note" style="margin:0;">Searches the retailer's listings for every item and colour in this style's range.</span>
 </div>
 <div class="settings-block" style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line);">
 <div class="settings-note" style="margin:0 0 6px;">If checking says <strong>403</strong>, the retailer is refusing your web host &mdash; it won't answer a server, only a browser. Read the page in yours instead: copy the snippet, open the product page, paste it in the address bar, then come back and paste the result.</div>
@@ -265,18 +265,18 @@ const list = (n) => val(n).split(',').map((s) => s.trim()).filter(Boolean);
 t.wantSpec = { brand: val('brand'), style: val('style'), pieces: list('pieces'), colours: list('colours'), urls: lines };
 queueSave();
 };
-// Other colourways of the same style. This is the only route to them:
-// a product page's colour swatches carry an RGB fill and nothing else
-// -- no name, no href -- so there's nothing a fetch can follow. Listing
-// pages are server-rendered and carry real URLs, which is why the
-// search goes there instead.
+// Every item in this want's range, exact match against the typed style
+// -- not just other colours of the one piece already being watched, and
+// not a substring match that would also pull in a genuinely different
+// range sharing the same word (see findRangeItems in agentprovocateur.js
+// for why, and how the page is actually read).
 const coloursBtn = dialog.querySelector('[data-watch-colours]');
 if (coloursBtn) coloursBtn.addEventListener('click', async () => {
 const box = dialog.querySelector('[data-watch-colour-results]');
 const first = (dialog.querySelector('[data-watch-urls]').value.split('\n')[0] || '').trim();
 const adapter = adapterFor(first);
 const style = dialog.querySelector('[data-watch-spec="style"]').value.trim();
-if (!adapter || !adapter.findColourways) { box.innerHTML = '<div class="settings-note">No colour search for that retailer yet.</div>'; return; }
+if (!adapter || !adapter.findRangeItems) { box.innerHTML = '<div class="settings-note">No colour search for that retailer yet.</div>'; return; }
 if (!style) { box.innerHTML = '<div class="settings-note">Set the style first — that\'s what the search matches on.</div>'; return; }
 coloursBtn.disabled = true;
 box.innerHTML = '<div class="settings-note">Searching listings…</div>';
@@ -305,8 +305,8 @@ const { pages, errors } = await fetchPages(paths.map((p) => origin + p));
 paths.forEach((p) => {
 const html = pages.get(origin + p);
 if (!html) return;
-adapter.findColourways(html, style).forEach((c) => {
-if (!found.has(c.colourCode)) found.set(c.colourCode, c);
+adapter.findRangeItems(html, style).forEach((item) => {
+if (!found.has(item.url)) found.set(item.url, item);
 });
 });
 if (!found.size && errors.length === paths.length) {
@@ -317,16 +317,23 @@ box.innerHTML = `<div class="settings-note">Couldn't read either listing page ($
 return;
 }
 const already = new Set(dialog.querySelector('[data-watch-urls]').value.split('\n').map((s) => s.trim()));
-const rows = [...found.values()].flatMap((c) => Object.values(c.pieces).map((p) => ({ colour: c.slugColour, code: c.colourCode, url: origin + p })))
-.filter((r) => !already.has(r.url));
+const rows = [...found.values()].filter((r) => !already.has(r.url));
+// Reported as two separate facts rather than one list, per how the
+// range actually works: every piece doesn't come in every colour, so
+// "4 colours, 6 items" found across the range is real information a
+// flat list of (piece, colour) rows hides -- you can see at a glance
+// whether a colour you want exists at all before checking whether
+// THIS piece happens to come in it.
+const colours = [...new Set(rows.map((r) => r.colour).filter(Boolean))];
+const pieces = [...new Set(rows.map((r) => r.piece).filter(Boolean))];
 box.innerHTML = rows.length
-? `<div class="settings-note" style="margin:6px 0 2px;">${rows.length} more page${rows.length === 1 ? '' : 's'} found. Tick what to watch.</div>`
+? `<div class="settings-note" style="margin:6px 0 2px;">${colours.length} colour${colours.length === 1 ? '' : 's'} (${escapeHtml(colours.join(', '))}), ${pieces.length} item${pieces.length === 1 ? '' : 's'} (${escapeHtml(pieces.join(', '))}) found. Tick what to watch.</div>`
 + rows.map((r, i) => `<label style="display:block;font-size:12px;">
 <input type="checkbox" data-watch-found="${i}" value="${escapeHtml(r.url)}">
-${escapeHtml(r.colour ? r.colour.replace(/-/g, ' ') : `colour ${r.code}`)} — <span class="settings-note" style="display:inline;margin:0;">${escapeHtml(r.url.split('/').pop())}</span>
+${escapeHtml(r.piece)}${r.colour ? ` — ${escapeHtml(r.colour)}` : ''}
 </label>`).join('')
 + '<button class="sync-btn sm" type="button" data-watch-add-found style="margin-top:6px;">Add ticked</button>'
-: '<div class="settings-note">Nothing new found — the listings only render part of a category, so a colourway can be missing from both.</div>';
+: '<div class="settings-note">Nothing new found — the listings only render part of a category, so an item can be missing from both.</div>';
 const addBtn = box.querySelector('[data-watch-add-found]');
 if (addBtn) addBtn.addEventListener('click', () => {
 const picked = [...box.querySelectorAll('[data-watch-found]:checked')].map((c) => c.value);
