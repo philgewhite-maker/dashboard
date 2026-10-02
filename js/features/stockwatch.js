@@ -228,11 +228,56 @@ async function fetchPages(urls, { onProgress } = {}) {
 const pages = new Map();
 const errors = [];
 const gap = spacingFor(RETAILERS);
+
+// Some retailers' product pages never arrive whole from a plain
+// request, however it's dressed up -- see
+// agentprovocateur.js's NEEDS_BROWSER_FOR_FULL_PAGE. For those, a real
+// browser is tried FIRST, before the proxy or page.fetch are asked at
+// all: we already know what page.fetch would return for this host, so
+// asking it first and detecting the short page after the fact would
+// mean paying for a request that was never going to help.
+//
+// Wrapped so that ANY failure -- the browser container not configured
+// (home-agent/agent.py's page.render raises a RuntimeError for that,
+// which surfaces here as one thrown Error for the whole call), the
+// container unreachable, a page that times out inside it -- falls
+// straight through to the existing pipeline below, unchanged. Until
+// BROWSER_URL is set in the agent's .env, this is a no-op that costs
+// one request which fails fast (the agent checks BROWSER_URL before
+// touching the network), not a new way for a check to break.
+const rendered = new Set();
+const wantsRender = urls.filter((u) => adapterFor(u)?.NEEDS_BROWSER_FOR_FULL_PAGE);
+if (wantsRender.length) {
+if (onProgress) onProgress(`Asking the home agent to render ${wantsRender.length} page${wantsRender.length === 1 ? '' : 's'} in a browser, for the full set…`);
+try {
+const { run } = await import('../homeagent.js');
+// Generous, on the same reasoning page.fetch's own timeout uses --
+// a cold Chromium launch plus a page that waits for its own
+// JavaScript-added content is slower than anything else this file
+// does, and this verb exists for exactly the pages that are slow
+// for that reason.
+const res = await run('page.render', { urls: wantsRender }, { timeoutMs: 75000 + wantsRender.length * 50000 });
+(res?.pages || []).forEach((p) => {
+if (p.html) { pages.set(p.url, p.html); rendered.add(p.url); }
+// A per-page failure inside an otherwise-successful render call is
+// left for the normal pipeline below rather than recorded as an
+// error here -- the plain fetch is a perfectly good fallback for
+// one page that timed out in the browser while others succeeded.
+});
+} catch (err) {
+// The whole-call failure case: not configured, or the home agent
+// itself couldn't be reached. Nothing recorded here either, for the
+// same reason -- every one of these URLs still gets a fair try
+// through the existing pipeline immediately below.
+}
+}
+const stillNeeded = urls.filter((u) => !rendered.has(u));
+
 // Straight to the agent for hosts already known to refuse, so the only
 // requests made to the server are ones that might work.
-const refused = urls.filter(knownRefuser);
+const refused = stillNeeded.filter(knownRefuser);
 const skippedCount = refused.length;
-const worthTrying = urls.filter((u) => !knownRefuser(u));
+const worthTrying = stillNeeded.filter((u) => !knownRefuser(u));
 for (let i = 0; i < worthTrying.length; i++) {
 const url = worthTrying[i];
 if (onProgress) onProgress(`Checking ${i + 1} of ${worthTrying.length}…`);

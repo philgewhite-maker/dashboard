@@ -47,6 +47,19 @@ const HOST = 'agentprovocateur.com';
 // under one key and read under another: fetched fine, displayed never,
 // and no error anywhere to say so.
 const RETAILER = 'Agent Provocateur';
+// A plain request -- proxy or home agent, with or without a browser's
+// TLS fingerprint -- plateaus at 73,705 bytes and one size select,
+// against 194,677 bytes and five in a real browser. Measured across
+// every request shape tried (see home-agent/agent.py's page.fetch
+// history), not assumed: the "Wear with" set is added by JavaScript
+// after the page loads, which nothing but running the page supplies.
+// Read by stockwatch.js to prefer page.render for this retailer's
+// product pages when the home agent's browser container is up, and to
+// fall back to the plain fetch exactly as before when it isn't --
+// named here because it's a fact ABOUT this retailer, the same reason
+// RETAILER and HOST live in this file rather than in the generic
+// fetch pipeline.
+const NEEDS_BROWSER_FOR_FULL_PAGE = true;
 // Gap between fetches when checking several products. Chosen from the
 // measured failure above, not guessed: bursts got 403s, ~4s apart did not.
 const CHECK_SPACING_MS = 4000;
@@ -408,4 +421,4 @@ step();
 return `javascript:${encodeURIComponent(body)}`;
 }
 
-export { matchesRetailer, RETAILER, parseProductPage, parseSizeOption, parseBlock, skuParts, skuFromUrl, specFromUrl, findColourways, bookmarkletSource, bulkBookmarkletSource, PASTE_STOCK_PREFIX, HOST, CHECK_SPACING_MS };
+export { matchesRetailer, RETAILER, parseProductPage, parseSizeOption, parseBlock, skuParts, skuFromUrl, specFromUrl, findColourways, bookmarkletSource, bulkBookmarkletSource, PASTE_STOCK_PREFIX, HOST, CHECK_SPACING_MS, NEEDS_BROWSER_FOR_FULL_PAGE };
