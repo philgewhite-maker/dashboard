@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v433</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v434</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -297,6 +297,22 @@
 </div>
 </section>
 
+<section class="panel wide" id="letting-panel" data-tab="finances">
+<div class="panel-head">
+<h2><span class="dot sage"></span>Letting income</h2>
+<span class="count-badge" id="letting-total"></span>
+</div>
+<div class="settings-note" style="margin:0 0 10px;">Each listing has an owner and a share. Enter what a stay earned on the Travel tab and their share becomes a debt on the day the guests leave &mdash; nothing accrues from a booking that hasn&rsquo;t happened yet. Entries are listed rather than netted off, so a balance can always be traced back.</div>
+<div id="letting-list"></div>
+<div class="sync-row" style="margin-top:12px;">
+<select id="letting-add-owner" class="mini"></select>
+<input type="number" step="0.01" id="letting-add-amount" class="settings-input" style="max-width:130px;" placeholder="Amount">
+<input type="text" id="letting-add-note" class="settings-input" style="max-width:220px;" placeholder="What it was for">
+<button class="sync-btn sm" id="letting-add-btn" type="button">Add</button>
+<span class="sync-status" id="letting-add-status"></span>
+</div>
+<div class="settings-note" style="margin:6px 0 0;">A payment to you is a <strong>negative</strong> amount; a correction upwards is positive. To wipe a balance, add the negative of it.</div>
+</section>
 <section class="panel wide" id="switch-offers-panel" data-tab="finances">
 <div class="panel-head">
 <h2><span class="dot plum"></span>Switch opportunities</h2>

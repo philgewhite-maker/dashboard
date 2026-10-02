@@ -49,6 +49,7 @@ import { serverPhotoUrl } from './files.js';
 import './features/notionplan.js';
 import { initNudges } from './features/nudges.js';
 import { initTicker } from './features/ticker.js';
+import { initLetting, accrueLettings } from './features/letting.js';
 import { initSettings } from './features/settings.js';
 import { initGoogleAccount } from './features/googleaccount.js';
 import { initMail } from './features/mail.js';
@@ -222,6 +223,10 @@ initLocationFillIns();
 initPhotoQuality();
 initNudges();
 initTicker();
+// Before the panel renders, so a stay that ended while the app was shut
+// shows as owed the first time you look rather than the second.
+accrueLettings();
+initLetting();
 await initSettings();
 registerServiceWorker();
 // After the panels are wired, so the captured task renders into a live UI.

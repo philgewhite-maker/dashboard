@@ -284,7 +284,7 @@ el.innerHTML = '<div class="settings-note" style="margin:0;">No listings yet —
 return;
 }
 el.innerHTML = `<table class="limits-table">
-<thead><tr><th>Label</th><th title="An Airbnb listing's iCal export. Leave it blank for a booking calendar that was never on Airbnb — a plumber, a decorator, a cat sitter — and give it an External prefix instead, so its bookings come from events you type into the shared Google Calendar. Sync skips a listing with no URL rather than reporting it as a broken feed." style="cursor:help; text-decoration:underline dotted;">Calendar export URL</th><th title="Identifies the physical ROOM, not the listing — give two listings for the same room the same prefix. Once you rename any manually-entered Google Calendar events for a room to include its prefix, &quot;Push to Google Calendar&quot; recognises and adopts them instead of duplicating." style="cursor:help; text-decoration:underline dotted;">Prefix</th><th title="A SECOND, different tag for a booking from outside Airbnb entirely (a friend, another platform) — type it into that Calendar event's title (e.g. &quot;ES-Lg - Jane Doe&quot;) and Sync pulls it in as a reservation on this listing, taking whatever follows the prefix as the name. Any dash, colon or pipe works as the separator. Deliberately not the same as Prefix — never mistaken for a real Airbnb booking when one of those gets pushed. Leave blank to skip this for a listing." style="cursor:help; text-decoration:underline dotted;">External prefix</th><th title="Identifies the physical ROOM, not the listing — give two listings for the same room the same colour." style="cursor:help; text-decoration:underline dotted;">Colour</th><th></th></tr></thead>
+<thead><tr><th>Label</th><th title="An Airbnb listing's iCal export. Leave it blank for a booking calendar that was never on Airbnb — a plumber, a decorator, a cat sitter — and give it an External prefix instead, so its bookings come from events you type into the shared Google Calendar. Sync skips a listing with no URL rather than reporting it as a broken feed." style="cursor:help; text-decoration:underline dotted;">Calendar export URL</th><th title="Identifies the physical ROOM, not the listing — give two listings for the same room the same prefix. Once you rename any manually-entered Google Calendar events for a room to include its prefix, &quot;Push to Google Calendar&quot; recognises and adopts them instead of duplicating." style="cursor:help; text-decoration:underline dotted;">Prefix</th><th title="A SECOND, different tag for a booking from outside Airbnb entirely (a friend, another platform) — type it into that Calendar event's title (e.g. &quot;ES-Lg - Jane Doe&quot;) and Sync pulls it in as a reservation on this listing, taking whatever follows the prefix as the name. Any dash, colon or pipe works as the separator. Deliberately not the same as Prefix — never mistaken for a real Airbnb booking when one of those gets pushed. Leave blank to skip this for a listing." style="cursor:help; text-decoration:underline dotted;">External prefix</th><th title="Identifies the physical ROOM, not the listing — give two listings for the same room the same colour." style="cursor:help; text-decoration:underline dotted;">Colour</th><th title="Whose listing this is. Their share of what each stay earns becomes a debt on the day the guests leave — see Letting income on the Finances tab." style="cursor:help; text-decoration:underline dotted;">Owner</th><th title="What they owe you of this listing's takings." style="cursor:help; text-decoration:underline dotted;">Share %</th><th></th></tr></thead>
 <tbody>${data.airbnbListings.map((l) => `<tr>
 <td><input type="text" autocomplete="off" data-airbnb-listing-field="label" data-airbnb-listing-id="${l.id}" value="${escapeHtml(l.label)}" placeholder="e.g. Entire studio"></td>
 <td><input type="text" autocomplete="off" data-airbnb-listing-field="icsUrl" data-airbnb-listing-id="${l.id}" value="${escapeHtml(l.icsUrl)}" placeholder="https://www.airbnb..../calendar/ical/....ics — or blank if not on Airbnb"></td>
@@ -293,6 +293,12 @@ el.innerHTML = `<table class="limits-table">
 <td><select data-airbnb-listing-field="colour" data-airbnb-listing-id="${l.id}">
 ${AIRBNB_COLOURS.map((c) => `<option value="${c}"${c === l.colour ? ' selected' : ''}>${c.charAt(0).toUpperCase()}${c.slice(1)}</option>`).join('')}
 </select></td>
+<td><select data-airbnb-listing-field="ownerConnectionId" data-airbnb-listing-id="${l.id}" style="max-width:150px;">
+<option value="">Nobody</option>
+${(data.connections || []).slice().sort((a, b) => String(a.name).localeCompare(String(b.name))).map((c) => `<option value="${escapeHtml(c.id)}"${c.id === l.ownerConnectionId ? ' selected' : ''}>${escapeHtml(c.name || 'Unnamed')}</option>`).join('')}
+</select>
+<input type="text" autocomplete="off" data-airbnb-listing-field="ownerLabel" data-airbnb-listing-id="${l.id}" value="${escapeHtml(l.ownerLabel || '')}" placeholder="or a name" style="width:100px;margin-top:3px;" title="Use this when the owner isn't a connection — a child, say. The dropdown wins if both are set."></td>
+<td><input type="number" min="0" max="100" step="1" data-airbnb-listing-field="sharePct" data-airbnb-listing-id="${l.id}" value="${escapeHtml(String(l.sharePct ?? 50))}" style="width:60px;"></td>
 <td><span class="del-x" style="opacity:1;" data-del-airbnb-listing="${l.id}">&times;</span></td>
 </tr>`).join('')}</tbody>
 </table>`;
@@ -519,6 +525,7 @@ return `<div class="cal-row" data-airbnb-row="${r.id}">
 <div class="cal-event-row">
 <input type="text" autocomplete="off" class="tag-add-input" placeholder="Guest name" data-airbnb-res-field="guestName" data-airbnb-res-id="${r.id}" value="${escapeHtml(r.guestName)}" style="max-width:130px;">
 <input type="text" autocomplete="off" class="tag-add-input" placeholder="Notes" data-airbnb-res-field="notes" data-airbnb-res-id="${r.id}" value="${escapeHtml(r.notes)}" style="max-width:160px;">
+<input type="number" step="0.01" min="0" class="tag-add-input" placeholder="Income £" data-airbnb-res-field="income" data-airbnb-res-id="${r.id}" value="${r.income ?? ''}" style="max-width:95px;" title="What this stay earned. The owner's share becomes a debt on the checkout date — see Letting income on Finances.">
 ${r.source === 'external'
 ? '<span class="settings-note" style="margin:0;" title="Found on the shared calendar by its external prefix -- nothing to push, it\'s already there.">External &#10003;</span>'
 : r.googleEventId
@@ -622,8 +629,19 @@ el.querySelectorAll('[data-airbnb-res-field]').forEach((input) => {
 input.addEventListener('change', () => {
 const r = data.airbnbReservations.find((x) => x.id === input.dataset.airbnbResId);
 if (!r) return;
-r[input.dataset.airbnbResField] = input.value;
+const field = input.dataset.airbnbResField;
+// Income is money, not text: stored as a number so the ledger can add
+// it up, and a cleared box means "not known" rather than zero.
+r[field] = field === 'income'
+? (input.value.trim() === '' ? null : Number(input.value))
+: input.value;
 queueSave();
+// Entering it on a stay that has already ended should charge it now
+// rather than at the next app open -- that gap is exactly when you'd
+// go to Finances to check the figure.
+if (field === 'income') {
+import('./letting.js').then((m) => { m.accrueLettings(); m.renderLetting(); });
+}
 });
 });
 // Only manual bookings carry this -- a feed or external one is deleted

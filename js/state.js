@@ -733,6 +733,15 @@ id: uid(), label: '', icsUrl: '', prefix: '', colour: 'blue',
 // is off for this listing, same opt-in-by-filling-it-in convention
 // `prefix` itself already has.
 externalPrefix: '',
+// Who owns this listing and what they owe me of what it earns. The
+// kids have one each; income is entered per stay and half of it
+// becomes a debt on the day the guests leave. ownerConnectionId is a
+// real connection so the ledger can link back to the person (the
+// record-reference rule), with ownerLabel only as a fallback for
+// someone not on the Dating tab.
+ownerConnectionId: '',
+ownerLabel: '',
+sharePct: 50,
 ...fields,
 };
 }
@@ -757,6 +766,12 @@ id: uid(),
 listingId: '', uid: '', source: 'ics',
 checkin: '', checkout: '', // ISO yyyy-mm-dd, checkout is exclusive (the turnover day, not an occupied night)
 guestName: '', notes: '',
+// What the stay earned, typed in by you, and the date it was turned
+// into a ledger entry. `accruedAt` is what stops a stay being charged
+// twice: the accrual runs on every app open and skips anything it has
+// already written.
+income: null,
+accruedAt: '',
 googleEventId: '', googleCalendarId: '', // set once pushed, OR always set for source:'external' -- see js/googlecalendar.js's findEvents()/createEvent()
 createdAt: new Date().toISOString(),
 ...fields,
@@ -1299,6 +1314,7 @@ items: [
 { id: 'q-dbk', kind: 'quote', symbol: 'DBK.DE', label: 'DBK' },
 { id: 'holding', kind: 'holding' },
 { id: 'sonia', kind: 'sonia' },
+{ id: 'letting', kind: 'letting' },
 { id: 'wx-london', kind: 'weather', city: 'London', lat: 51.5074, lon: -0.1278, tz: 'Europe/London' },
 ],
 },
@@ -1312,6 +1328,13 @@ tickerCache: {},
 // after a fortnight, since a block is someone else's policy. See
 // fetchPages() in js/features/stockwatch.js.
 proxyRefusals: {},
+// What each kid owes for their listing's takings, as a running list
+// rather than a balance: a balance alone cannot be audited, and the
+// question "where did that figure come from" is the one you will
+// actually ask. Entries are {id, ownerKey, kind, amount, date, note,
+// reservationId, listingId}; a POSITIVE amount increases what they owe
+// and a payment is negative. See js/features/letting.js.
+lettingLedger: [],
 prefs: { ...DEFAULT_PREFS } };
 }
 
@@ -1380,6 +1403,7 @@ else data.ticker = { ...blankData().ticker, ...data.ticker };
 if (!Array.isArray(data.ticker.items)) data.ticker.items = blankData().ticker.items;
 if (!data.tickerCache || typeof data.tickerCache !== 'object') data.tickerCache = {};
 if (!data.proxyRefusals || typeof data.proxyRefusals !== 'object') data.proxyRefusals = {};
+if (!Array.isArray(data.lettingLedger)) data.lettingLedger = [];
 // FIRST, before anything else in here touches it. An existing document
 // predates this key entirely, and two passes below both reach for it --
 // the connection loop that carries the old per-person `owned` across,

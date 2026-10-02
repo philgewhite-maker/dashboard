@@ -26,6 +26,7 @@
 // travelItems().
 import { data, queueSave } from '../state.js';
 import { escapeHtml, uid } from '../utils.js';
+import * as letting from './letting.js';
 
 // A feed is re-fetched when its cached answer is older than this. FX and
 // the swap rate are published once a day, so the floor is about not
@@ -482,6 +483,15 @@ const hit = c[keyFor(item)];
 const pick = (h) => (monthly ? h.prevMonth : h.prevDay);
 const t = data.ticker;
 
+if (item.kind === 'letting') {
+// Derived from the ledger every time rather than cached: it changes
+// when you add a payment, not when a feed refreshes.
+const { totalOwed, owners, balanceFor, ownerNameFor, money } = letting;
+const total = totalOwed();
+if (!owners().length) return '';
+return tile('Owed', escapeHtml(money(total)), '',
+`${owners().map((k) => `${ownerNameFor(k)} ${money(balanceFor(k))}`).join(' · ')}. Letting income owed to you — Finances tab.`);
+}
 if (item.kind === 'holding') {
 const fxHit = c[keyFor({ kind: 'fx', base: HOME, quote: 'EUR' })];
 const dbkHit = c[keyFor({ kind: 'quote', symbol: t.holdingSymbol || 'DBK.DE' })];
@@ -548,6 +558,7 @@ case 'fx': return `${item.base || HOME}/${item.quote}`;
 case 'quote': return item.label || item.symbol;
 case 'weather': return item.city;
 case 'sonia': return '2y SONIA';
+case 'letting': return 'Owed';
 case 'holding': return 'Holding';
 default: return item.kind;
 }
