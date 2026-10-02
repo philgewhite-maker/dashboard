@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v449</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v450</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -2823,6 +2823,12 @@ Finds connections whose cover photo is missing or is really just the small place
 <h3>Scheduled syncs</h3>
 <div class="settings-note" style="margin:0 0 10px;">Presses the Sync buttons for you when you open the app, for anything that hasn't run recently. Health data and the Airbnb ICS feeds also refresh while the app is closed, if your browser allows it &mdash; Chrome grants that only to an installed app and picks the timing itself, roughly daily at best. The rest need you signed in to Google: that sign-in issues a one-hour token with no way to renew it unattended, so nothing can refresh Calendar, Mail, Contacts or Google Tasks without a page open.</div>
 <div id="scheduled-tasks"></div>
+</div>
+
+<div class="settings-block">
+<h3>Site health</h3>
+<div class="settings-note" style="margin:0 0 10px;">A standing check that the live sites this app's scheduled tasks and features depend on still answer the way the code assumes &mdash; a page redesign or a new anti-bot block can otherwise fail silently, returning something plausible-looking instead of an error. Each implemented check runs about once a week on its own (bundled into the "Site health checks" scheduled task above); "Not implemented" marks a known candidate with no automated check built yet.</div>
+<div id="site-health-table"></div>
 </div>
 
 <div class="settings-block">

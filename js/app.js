@@ -219,6 +219,7 @@ initAirbnbKeys();
 initAirbnbSync();
 initAirbnbAddBooking();
 initScheduled();
+import('./features/sitehealth.js').then(({ renderSiteHealth }) => renderSiteHealth());
 initLocationFillIns();
 initPhotoQuality();
 initNudges();

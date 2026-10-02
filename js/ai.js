@@ -1399,7 +1399,8 @@ const tripList = trips.length
 return `Today is ${todayStr()}. Turn this instruction into an ordered list of steps this app can execute. Instruction: ${JSON.stringify(text)}\n\n`
 + `Existing trips -- match a phrase like "my Lisbon trip" against these by name; use the real id if one clearly matches, or "__new__" with a newTripTitle if none does or the instruction explicitly says to create one:\n${tripList}\n\n`
 + 'Each step is one JSON object, one of these exact shapes -- omit fields you have nothing for rather than inventing a value:\n'
-+ '{"type":"task","title":"...","notes":"...","due":"YYYY-MM-DD"}\n'
++ '{"type":"project","title":"..."} -- ONLY when the instruction explicitly asks for a project/group of tasks (e.g. "create a project for X with tasks..."), not for an ordinary multi-item capture. Comes FIRST, before the tasks that belong to it.\n'
++ '{"type":"task","title":"...","notes":"...","due":"YYYY-MM-DD","partOfProject":true} -- set partOfProject ONLY when this task belongs under a "project" step earlier in THIS SAME list (it attaches to that one, not to any pre-existing project); omit it entirely for a standalone task, including when the instruction is just several unrelated things to remember\n'
 + '{"type":"reading","title":"...","url":"...","notes":"..."}\n'
 + '{"type":"media","kind":"film|tv|album|track|podcast|other","title":"...","creator":"...","year":"YYYY","url":"...","notes":"..."} -- something to watch or listen to ("watch The Bear", "get the new Sault album")\n'
 + '{"type":"trip","title":"...","destinations":["..."],"startDate":"YYYY-MM-DD","endDate":"YYYY-MM-DD"}\n'

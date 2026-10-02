@@ -60,9 +60,25 @@ return trip;
 
 async function runStep(step, ctx) {
 switch (step.type) {
+// A project is just a task that others get filed under (see tasks.js's
+// "Part of" picker -- there's no separate project record type). Made
+// here rather than assumed from a bare "task" step with children,
+// because that ambiguity is exactly what broke this before: several
+// "task" steps for one instruction came out as flat siblings with
+// nothing grouping them, confirmed live by the user running a real
+// multi-task capture and getting no project at all out the other end.
+case 'project': {
+const { captureTask } = await import('./tasks.js');
+const project = captureTask({ title: step.title || 'New project', bucket: 'next' });
+ctx.lastProjectId = project.id;
+return project;
+}
 case 'task': {
 const { captureTask } = await import('./tasks.js');
-return captureTask({ title: step.title || 'Captured item', notes: step.notes || '', due: step.due || '' });
+return captureTask({
+title: step.title || 'Captured item', notes: step.notes || '', due: step.due || '',
+parentId: step.partOfProject ? (ctx.lastProjectId || null) : null,
+});
 }
 case 'reading': {
 const { addToReadingList } = await import('./readinglist.js');
@@ -160,7 +176,8 @@ return results;
 
 function stepSummary(step) {
 switch (step.type) {
-case 'task': return `Task: ${step.title || '(untitled)'}${step.due ? ` — due ${step.due}` : ''}`;
+case 'project': return `New project: ${step.title || '(untitled)'}`;
+case 'task': return `Task${step.partOfProject ? ' (in the project above)' : ''}: ${step.title || '(untitled)'}${step.due ? ` — due ${step.due}` : ''}`;
 case 'reading': return `Reading list: ${step.title || step.url || '(untitled)'}`;
 case 'media': return `Watch/listen: ${step.title || step.url || '(untitled)'}${step.creator ? ` — ${step.creator}` : ''}`;
 case 'trip': return `New trip "${step.title || '(untitled)'}"${step.startDate ? `, ${step.startDate} to ${step.endDate || step.startDate}` : ''}`;

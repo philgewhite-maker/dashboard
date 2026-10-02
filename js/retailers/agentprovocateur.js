@@ -455,9 +455,20 @@ return [...hit];
 // /lingerie rather than /sale/sale-bras: confirmed it already includes
 // sale stock, so one fetch covers both instead of needing a second
 // request purely for the sale section.
-function listingUrl({ prodType, sizes = [], sort = 'price' }) {
+// `colours` takes literal AP colour names ("Black", "Bronze", ...), not
+// bucket labels -- a caller filtering by bucket resolves that to names
+// first (see bucketsForColour's own COLOUR_BUCKETS map, read in reverse).
+// filters.colour_filter was the one key out of six tried that genuinely
+// filters, confirmed live by pasting a real URL into a real phone
+// browser and watching the result narrow -- see the colour comment
+// above for the five that didn't. Still not re-verified from an
+// automated session (every automated attempt at this site's filters has
+// failed to reproduce even ones later confirmed genuine), so sitehealth.js
+// carries the standing check that proves it on every real run instead.
+function listingUrl({ prodType, sizes = [], colours = [], sort = 'price' }) {
 const parts = [`filters.prod_type_desc=${encodeURIComponent(prodType)}`];
 if (sizes.length) parts.push(`filters.filter_size=${sizes.map(encodeURIComponent).join(',')}`);
+if (colours.length) parts.push(`filters.colour_filter=${colours.map(encodeURIComponent).join(',')}`);
 parts.push(`sort=${encodeURIComponent(sort)}`);
 return `https://www.${HOST}/lingerie#${parts.join('&')}`;
 }

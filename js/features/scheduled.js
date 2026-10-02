@@ -58,6 +58,19 @@ await reconcileMonitors();
 },
 },
 {
+// Also a function rather than a button, for the same reason 'stock' is:
+// this is several independent checks bundled as one. Runs at ordinary
+// app-open cadence, same as everything else here, but each check inside
+// gates its OWN staleness to about a week -- see sitehealth.js -- so
+// this firing far more often than that doesn't re-run anything early.
+id: 'site-health', label: 'Site health checks', needsGoogle: false,
+note: 'Confirms the NAS-browser fetches other scheduled tasks and features depend on haven’t silently broken (a site redesign, a new anti-bot block). See Settings → Site health for the full list and current status.',
+run: async () => {
+const { runAllChecks } = await import('./sitehealth.js');
+await runAllChecks();
+},
+},
+{
 id: 'calendar', label: 'Calendars', buttonId: 'sync-cal-btn', needsGoogle: true,
 note: 'Upcoming events for each tracked calendar.',
 },

@@ -530,20 +530,32 @@ if (!wanted.length) return { checked: 0 };
 if (onProgress) onProgress(`Checking ${wanted.length} cashback rate${wanted.length === 1 ? '' : 's'}…`);
 const { pages } = await fetchPages(wanted.map((w) => w.url));
 let found = 0;
+// Per-provider, not aggregate -- Quidco and TopCashback each have their
+// own site-health row (sitehealth.js), and only the providers actually
+// due a check this run (see the `seen.due` filter above) get reported,
+// so a run that only needed to check one doesn't overwrite the other's
+// still-current status with a false "no data".
+const providerOk = new Map();
 wanted.forEach((w) => {
 const html = pages.get(w.url);
-if (!html) { console.warn(`Cashback: ${w.name} page never came back`, w.url); return; }
+if (!html) { console.warn(`Cashback: ${w.name} page never came back`, w.url); providerOk.set(w.provider, { ok: false, detail: `${w.name}: page never came back` }); return; }
 const rate = parseRate(html, w.provider);
 // A page that came back but didn't yield a rate is left alone rather
 // than cached as "nothing": the markup may simply have moved, and
 // overwriting a good older number with a blank helps nobody. It is
 // still worth saying, because "the page loaded and I couldn't read it"
 // and "the page never loaded" need different fixes.
-if (!rate) { console.warn(`Cashback: ${w.name} page loaded but no rate found in it`, w.url); return; }
+if (!rate) { console.warn(`Cashback: ${w.name} page loaded but no rate found in it`, w.url); providerOk.set(w.provider, { ok: false, detail: `${w.name}: page loaded but no rate found in it -- the markup likely moved` }); return; }
 data.cashbackRates[w.key] = { ...rate, at: new Date().toISOString(), url: w.url };
 found += 1;
+providerOk.set(w.provider, { ok: true, detail: `${w.name}: ${rate.text || `${rate.percent}%`}` });
 });
 if (found) queueSave();
+if (providerOk.size) {
+import('./sitehealth.js').then(({ reportCheck }) => {
+providerOk.forEach((r, provider) => reportCheck(`cashback-${provider}`, r.ok, r.detail));
+});
+}
 return { checked: wanted.length, found };
 }
 
