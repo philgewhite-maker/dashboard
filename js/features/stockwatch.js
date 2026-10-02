@@ -231,6 +231,7 @@ const gap = spacingFor(RETAILERS);
 // Straight to the agent for hosts already known to refuse, so the only
 // requests made to the server are ones that might work.
 const refused = urls.filter(knownRefuser);
+const skippedCount = refused.length;
 const worthTrying = urls.filter((u) => !knownRefuser(u));
 for (let i = 0; i < worthTrying.length; i++) {
 const url = worthTrying[i];
@@ -249,7 +250,17 @@ else errors.push({ url, error: err.message || String(err) });
 if (i < worthTrying.length - 1) await new Promise((r) => setTimeout(r, gap));
 }
 if (refused.length) {
-if (onProgress) onProgress(`${refused.length} refused the server — asking the home agent…`);
+// Said accurately: this fired "N refused the server" even for URLs the
+// server was never asked about, which reads as N fresh failures every
+// time and made the refusal memory look broken when it was working.
+if (onProgress) {
+const fresh = refused.length - skippedCount;
+onProgress(skippedCount && !fresh
+? `${skippedCount} known to refuse the server — straight to the home agent…`
+: fresh && skippedCount
+? `${fresh} refused the server, ${skippedCount} known to — asking the home agent…`
+: `${fresh} refused the server — asking the home agent…`);
+}
 try {
 const { run } = await import('../homeagent.js');
 const res = await run('page.fetch', { urls: refused }, { timeoutMs: 20000 + refused.length * 8000 });
