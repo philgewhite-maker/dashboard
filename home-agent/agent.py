@@ -25,7 +25,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-VERSION = "1.2"
+VERSION = "1.3"
 
 SYNC_URL = os.environ.get("DASHBOARD_SYNC_URL", "").strip()
 SECRET = os.environ.get("DASHBOARD_SECRET", "").strip()
@@ -404,7 +404,7 @@ try:
     IMPERSONATE = "chrome"
     # One session for the life of the agent, so cookies persist between
     # fetches the way a browser keeps them between page loads.
-    PAGE_SESSION = curl_requests.Session()
+    PAGE_SESSION = curl_requests.Session(impersonate=IMPERSONATE)
 except Exception:  # noqa: BLE001 - any import failure means "use urllib"
     curl_requests = None
     IMPERSONATE = ""
@@ -413,16 +413,15 @@ except Exception:  # noqa: BLE001 - any import failure means "use urllib"
 
 def fetch_one(url):
     """Returns (status, text). Raises for anything that isn't an HTTP reply."""
-    if curl_requests is not None:
+    if PAGE_SESSION is not None:
         # impersonate= sets Chrome's TLS and HTTP/2 fingerprint and its
         # default headers, which are an XHR's. The 194KB response was a
         # browser NAVIGATION, and these are what a navigation sends that a
         # fetch() does not. Measured in between: fingerprint alone took
         # the page from 15KB to 73KB, so this is the rest of the same
         # gap rather than a guess at a different one.
-        res = curl_requests.get(
+        res = PAGE_SESSION.get(
             url,
-            impersonate=IMPERSONATE,
             timeout=HTTP_TIMEOUT,
             headers={
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
@@ -438,7 +437,6 @@ def fetch_one(url):
             # request is presented on the next one. Cloudflare issues
             # those after a fingerprint check passes, and the page served
             # with one is not always the page served without.
-            session=PAGE_SESSION,
             allow_redirects=True,
         )
         # .text decodes using the response's own charset, and curl_cffi
