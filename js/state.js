@@ -1306,6 +1306,12 @@ items: [
 // than device-local, so a phone opened at a bad moment shows the
 // laptop's morning figures instead of blanks, and says how old they are.
 tickerCache: {},
+// Hosts that refused the web host with a 403 -- {host: {at}}. Remembered
+// so a check goes straight to the home agent for them instead of
+// spending a doomed request and its spacing on every URL first. Re-tried
+// after a fortnight, since a block is someone else's policy. See
+// fetchPages() in js/features/stockwatch.js.
+proxyRefusals: {},
 prefs: { ...DEFAULT_PREFS } };
 }
 
@@ -1373,6 +1379,7 @@ else data.ticker = { ...blankData().ticker, ...data.ticker };
 // rather than a blank strip they never asked for.
 if (!Array.isArray(data.ticker.items)) data.ticker.items = blankData().ticker.items;
 if (!data.tickerCache || typeof data.tickerCache !== 'object') data.tickerCache = {};
+if (!data.proxyRefusals || typeof data.proxyRefusals !== 'object') data.proxyRefusals = {};
 // FIRST, before anything else in here touches it. An existing document
 // predates this key entirely, and two passes below both reach for it --
 // the connection loop that carries the old per-person `owned` across,

@@ -167,24 +167,65 @@ return [...seen];
 //
 // One command carries every remaining URL rather than one each: the agent
 // paces its own fetches and a single round trip beats a dozen polls.
+// A host that refused the web host is remembered, because that refusal
+// is about the SERVER'S ADDRESS and so applies to every page on that
+// site, every time. Agent Provocateur refuses it outright: without this,
+// every check spends a doomed request plus the 4-second spacing on each
+// URL before the agent is asked at all.
+//
+// Re-probed after a fortnight rather than trusted forever: a block is
+// someone else's policy and can be lifted, and finding that out costs
+// one request a fortnight.
+const REFUSAL_MEMORY_MS = 14 * 24 * 3600 * 1000;
+
+function hostOf(url) {
+try { return new URL(url).hostname.replace(/^www\./, ''); } catch (e) { return ''; }
+}
+
+function knownRefuser(url) {
+const seen = (data.proxyRefusals || {})[hostOf(url)];
+return !!seen && Date.now() - new Date(seen.at).getTime() < REFUSAL_MEMORY_MS;
+}
+
+function rememberRefusal(url) {
+if (!data.proxyRefusals || typeof data.proxyRefusals !== 'object') data.proxyRefusals = {};
+const host = hostOf(url);
+if (!host) return;
+data.proxyRefusals[host] = { at: new Date().toISOString() };
+queueSave();
+}
+
+function forgetRefusal(url) {
+const host = hostOf(url);
+if (host && data.proxyRefusals && data.proxyRefusals[host]) {
+delete data.proxyRefusals[host];
+queueSave();
+}
+}
+
 async function fetchPages(urls, { onProgress } = {}) {
 const pages = new Map();
 const errors = [];
 const gap = spacingFor(RETAILERS);
-const refused = [];
-for (let i = 0; i < urls.length; i++) {
-const url = urls[i];
-if (onProgress) onProgress(`Checking ${i + 1} of ${urls.length}…`);
+// Straight to the agent for hosts already known to refuse, so the only
+// requests made to the server are ones that might work.
+const refused = urls.filter(knownRefuser);
+const worthTrying = urls.filter((u) => !knownRefuser(u));
+for (let i = 0; i < worthTrying.length; i++) {
+const url = worthTrying[i];
+if (onProgress) onProgress(`Checking ${i + 1} of ${worthTrying.length}…`);
 try {
 pages.set(url, await fetchPageHtml(url));
+// It worked, so whatever was remembered about this host is wrong now.
+forgetRefusal(url);
 } catch (err) {
 if (err instanceof FilesNotConfiguredError) throw err;
 // A 403 is the retailer refusing this route, not a broken page --
 // worth retrying somewhere else rather than reporting as an error.
-if (/\b403\b/.test(err.message || '')) refused.push(url);
+if (/\b403\b/.test(err.message || '')) { refused.push(url); rememberRefusal(url); }
 else errors.push({ url, error: err.message || String(err) });
 }
-if (i < urls.length - 1) await new Promise((r) => setTimeout(r, gap));
+if (i < worthTrying.length - 1) await new Promise((r) => setTimeout(r, gap));
 }
 if (refused.length) {
 if (onProgress) onProgress(`${refused.length} refused the server — asking the home agent…`);
