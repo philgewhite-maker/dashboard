@@ -212,7 +212,14 @@ url: (ld && ld.url) || '',
 // one of its own set pieces ("+ Lorna Plunge Underwired Bra" under the
 // Lorna Plunge Underwired Bra).
 function parseSiblings(doc, mainName) {
-const mainKey = String(mainName || '').trim().toLowerCase();
+// Not an exact match: the page titles the main product with its colour
+// ("Andiee Plunge Underwired Bra in Black/Baby Pink") while its own set
+// block names it without ("Andiee Plunge Underwired Bra"). Comparing
+// the two literally let the bra list itself a second time. The colour
+// suffix is dropped and a prefix counts as the same garment, since AP
+// never names two pieces in one set where one starts with the other.
+const setKey = (s) => String(s || '').trim().toLowerCase().split(/\s+in\s+/)[0].replace(/\s+/g, ' ').trim();
+const mainKey = setKey(mainName);
 const out = [];
 doc.querySelectorAll('select').forEach((select) => {
 let node = select, box = null;
@@ -228,7 +235,10 @@ const block = parseBlock(box, doc);
 // The main product's own block comes back through this sweep too, and
 // is dropped by NAME here -- it is already parsed properly by parseMain.
 if (!block.sizes.length) return;
-if (mainKey && name.trim().toLowerCase() === mainKey) return;
+if (mainKey) {
+const k = setKey(name);
+if (k === mainKey || k.startsWith(mainKey) || mainKey.startsWith(k)) return;
+}
 out.push({ name, ...block, code: '', discountPct: 0, net: block.now, pricedFrom: 'set page' });
 });
 return out;
