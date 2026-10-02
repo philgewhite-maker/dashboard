@@ -90,6 +90,13 @@ if (row.inStock) available.push({ size, which, lastOne: row.lastOne });
 else gone.push({ size, which });
 });
 return {
+// Carried through, not dropped. Without it the stock line had no
+// retailer name and cashbackHtml fell back to the hostname --
+// "agentprovocateur", which slugs differently from the
+// "agent-provocateur" the rate was stored under. The rate was fetched,
+// stored and shown correctly on the shopping row, and was blank here,
+// on the same screen, for the same shop.
+retailer: page.retailer,
 url: page.url, piece: page.piece, colour: page.colour, sku: page.sku,
 was: page.was, now: page.now, code: page.code, discountPct: page.discountPct, net: page.net,
 available, gone,

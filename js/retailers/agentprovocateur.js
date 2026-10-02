@@ -39,6 +39,14 @@
 //     ("...-jayce-thong-19692", which is Navy). The colour is read from
 //     the page's own "Colour: X" line instead, which works for both.
 const HOST = 'agentprovocateur.com';
+// The retailer's proper name, exported so every path that needs to name
+// this shop gets the SAME string. It used to live only inside the parsed
+// result, so anything running BEFORE a page was fetched -- the cashback
+// refresh -- fell back to the hostname and got "agentprovocateur", which
+// slugs differently from "agent-provocateur". The rate was then stored
+// under one key and read under another: fetched fine, displayed never,
+// and no error anywhere to say so.
+const RETAILER = 'Agent Provocateur';
 // Gap between fetches when checking several products. Chosen from the
 // measured failure above, not guessed: bursts got 403s, ~4s apart did not.
 const CHECK_SPACING_MS = 4000;
@@ -230,7 +238,7 @@ const main = parseMain(doc);
 const sku = skuFromUrl(url) || main.sku;
 return {
 url: url || main.url,
-retailer: 'Agent Provocateur',
+retailer: RETAILER,
 sku,
 skuParts: skuParts(sku),
 colour: main.colour,
@@ -372,4 +380,4 @@ step();
 return `javascript:${encodeURIComponent(body)}`;
 }
 
-export { matchesRetailer, parseProductPage, parseSizeOption, parseBlock, skuParts, skuFromUrl, specFromUrl, findColourways, bookmarkletSource, bulkBookmarkletSource, PASTE_STOCK_PREFIX, HOST, CHECK_SPACING_MS };
+export { matchesRetailer, RETAILER, parseProductPage, parseSizeOption, parseBlock, skuParts, skuFromUrl, specFromUrl, findColourways, bookmarkletSource, bulkBookmarkletSource, PASTE_STOCK_PREFIX, HOST, CHECK_SPACING_MS };
