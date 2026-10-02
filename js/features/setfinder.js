@@ -156,9 +156,9 @@ return `<div><strong>Within budget</strong>${within}</div>${discounted}`;
 }
 
 function setFinderDialogHtml() {
-return `<div class="mail-view-content">
-<h3 style="margin-top:0;">Find a set</h3>
-<div class="settings-note" style="margin:0 0 8px;">Searches Agent Provocateur bras in her recorded size, cheapest first, and checks each one's matching knickers before showing it — a set requires both.</div>
+return `<div class="mail-view-card" style="max-width:520px;">
+<div class="mail-view-subject">Find a set</div>
+<div class="settings-note" style="margin:2px 0 8px;">Searches Agent Provocateur bras in her recorded size, cheapest first, and checks each one's matching knickers before showing it — a set requires both.</div>
 <div class="account-field-row">
 <div>Her${connectionPickerHtml('setfinder-conn', 'Choose a connection…')}</div>
 <label>Bra budget £<input type="number" min="1" step="1" class="settings-input" data-setfinder-budget value="150"></label>
