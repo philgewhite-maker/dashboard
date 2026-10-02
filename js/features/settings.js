@@ -246,6 +246,7 @@ initDriveBackup();
 initPairing();
 initEncryption();
 initTickerSettings();
+initDocSize();
 }
 
 // The Notion proxy URL and database id, and a test that proves all three
@@ -957,6 +958,87 @@ const t = await import('../features/ticker.js');
 await t.refreshTicker();
 }
 
+
+// ---- What the document is made of -----------------------------------------
+//
+// Every save re-uploads the whole document and, since v416, re-encrypts
+// it first. Whether that matters depends entirely on what the thing is
+// made of, which nobody had ever measured -- so the question "should
+// finished records move to a separate archive?" was being answered by
+// instinct. This turns it into a reading.
+//
+// The second column is the one that decides it: how much of each section
+// is records that are FINISHED. A section that is large but all live is
+// not an archiving problem, and a section that is small but entirely
+// finished is not worth a second document either.
+
+function bytesOf(value) {
+try { return new Blob([JSON.stringify(value ?? null)]).size; } catch (e) { return 0; }
+}
+
+function human(n) {
+if (n < 1024) return `${n} B`;
+if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+return `${(n / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+// What counts as "finished" per section -- deliberately per-type rather
+// than a generic `done` flag, because each of these decided its own
+// wording long before this readout existed.
+const FINISHED = {
+tasks: (t) => t.bucket === 'done',
+mediaItems: (m) => m.status === 'done' || m.status === 'dropped',
+readingList: (r) => r.status === 'done' || r.status === 'dropped',
+mailDismissed: () => true,
+captureDrafts: () => true,
+captureBatches: () => true,
+switchOffers: (o) => !!o.dismissed,
+airbnbReservations: (r) => (r.checkOut || r.end || '') && (r.checkOut || r.end) < new Date().toISOString().slice(0, 10),
+trips: (t) => (t.endDate || '') && t.endDate < new Date().toISOString().slice(0, 10),
+};
+
+function renderDocSize() {
+const box = document.getElementById('doc-size');
+if (!box) return;
+const total = bytesOf(data);
+const rows = Object.keys(data)
+.map((key) => {
+const value = data[key];
+const size = bytesOf(value);
+const list = Array.isArray(value) ? value : null;
+const test = FINISHED[key];
+const done = list && test ? list.filter((r) => { try { return test(r); } catch (e) { return false; } }) : null;
+return {
+key, size,
+count: list ? list.length : null,
+doneCount: done ? done.length : null,
+doneBytes: done && done.length ? bytesOf(done) : 0,
+};
+})
+.filter((r) => r.size > 64)
+.sort((a, b) => b.size - a.size)
+.slice(0, 14);
+
+const reclaimable = rows.reduce((n, r) => n + r.doneBytes, 0);
+box.innerHTML = `<div class="settings-note" style="margin:0 0 8px;">Whole document: <strong>${human(total)}</strong>, re-encrypted and re-uploaded on every save. Of that, <strong>${human(reclaimable)}</strong> (${total ? Math.round((reclaimable / total) * 100) : 0}%) is records that are finished.</div>
+<table class="limits-table">
+<thead><tr><th>Section</th><th style="text-align:right;">Size</th><th style="text-align:right;">Share</th><th style="text-align:right;">Records</th><th style="text-align:right;">Finished</th></tr></thead>
+<tbody>${rows.map((r) => `<tr>
+<td>${escapeHtml(r.key)}</td>
+<td style="text-align:right;font-variant-numeric:tabular-nums;">${escapeHtml(human(r.size))}</td>
+<td style="text-align:right;font-variant-numeric:tabular-nums;">${total ? Math.round((r.size / total) * 100) : 0}%</td>
+<td style="text-align:right;font-variant-numeric:tabular-nums;">${r.count === null ? '—' : r.count}</td>
+<td style="text-align:right;font-variant-numeric:tabular-nums;">${r.doneCount === null ? '—' : `${r.doneCount}${r.doneBytes ? ` · ${human(r.doneBytes)}` : ''}`}</td>
+</tr>`).join('')}</tbody>
+</table>
+<div class="settings-note" style="margin:8px 0 0;">&ldquo;Finished&rdquo; means done or dropped tasks and media, dismissed mail and switch offers, spent capture drafts, and trips and stays whose end date has passed. Everything else is counted as live.</div>`;
+}
+
+function initDocSize() {
+const btn = document.getElementById('doc-size-btn');
+if (!btn) return; // not in this build's DOM
+btn.addEventListener('click', renderDocSize);
+}
 function initTickerSettings() {
 const addBtn = document.getElementById('ticker-add-btn');
 if (!addBtn) return; // not in this build's DOM

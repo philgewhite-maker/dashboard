@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v422</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v423</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -2732,6 +2732,14 @@ Finds connections whose cover photo is missing or is really just the small place
 
 <div class="settings-block">
 <div class="settings-block">
+<div class="settings-block">
+<h3>Document size</h3>
+<div class="settings-note" style="margin:0 0 10px;">Every save re-uploads the whole document, and since encryption was turned on it re-encrypts it first. This says what the thing is actually made of, and how much of it is records that are finished &mdash; which is the question behind &ldquo;should old stuff move to a separate archive?&rdquo;</div>
+<div class="sync-row">
+<button class="sync-btn" id="doc-size-btn" type="button">Measure</button>
+</div>
+<div id="doc-size" style="margin-top:10px;"></div>
+</div>
 <h3>Overview ticker</h3>
 <div class="settings-note" style="margin:0 0 10px;">The strip across the top of Overview. It rotates on its own when it doesn&rsquo;t fit, and stops while you hover or tap it. Weather and currencies need nothing; share prices and the swap rate go through <code>recipe-fetch.php</code>.</div>
 <div id="ticker-items"></div>
