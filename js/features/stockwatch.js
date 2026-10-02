@@ -451,7 +451,7 @@ const rate = seen && !seen.stale ? `${seen.upTo ? 'up to ' : ''}${seen.percent}%
 const age = seen ? ageLabel(seen.ageMs) : '';
 const title = seen
 ? `${l.label}: ${seen.upTo ? 'up to ' : ''}${seen.percent}% when last checked, ${age}${seen.due ? ' — due a refresh' : ''}. Opens their ${l.name} page, where the live rate is shown; click through from there so the purchase is tracked.`
-: `Open ${l.label}'s ${l.name} page and click through from there, so the purchase is tracked. No rate checked yet.`;
+: `Open ${l.label}'s ${l.name} page and click through from there, so the purchase is tracked. ${l.fetchable ? 'No rate checked yet.' : 'Their rate cannot be read from here — Cloudflare blocks every automated request — so it is only shown on their own page.'}`;
 return `<a href="${escapeHtml(l.merchantUrl)}" target="_blank" rel="noopener noreferrer" class="cashback-link${seen && seen.due ? ' cashback-due' : ''}" title="${escapeHtml(title)}">${escapeHtml(l.label)}${rate ? ` <b>${escapeHtml(rate)}</b>` : ''}${age && rate ? `<span class="cashback-age">${escapeHtml(age)}</span>` : ''}</a>`;
 }).join('')}</span>`;
 }
@@ -468,6 +468,10 @@ async function refreshCashbackRates(retailers, { onProgress } = {}) {
 const wanted = [];
 retailers.forEach((source) => {
 cashbackLinks(source).forEach((l) => {
+// A provider whose page cannot be fetched at all is not asked for one --
+// see fetchable in js/cashback.js. Its link still shows; only the number
+// beside it is missing.
+if (!l.fetchable) return;
 const slug = merchantSlug(l.name);
 const seen = rateFor(data.cashbackRates, l.id, slug);
 if (seen && !seen.due) return;

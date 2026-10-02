@@ -21,6 +21,19 @@ const PROVIDERS = [
 {
 id: 'quidco',
 label: 'Quidco',
+// Its rate cannot be read by anything here, so nothing tries. Measured
+// rather than assumed: a full browser header set -- User-Agent,
+// Accept, Accept-Language, all four Sec-Fetch-*, Sec-CH-UA,
+// Upgrade-Insecure-Requests -- from a home connection still gets
+// "Just a moment..." and HTTP 403. That is a Cloudflare JS challenge,
+// not a header check, so the web host and the home agent fail it
+// identically and no amount of request shaping helps.
+//
+// The LINK is the part that matters anyway: clicking through is what
+// tracks the purchase, and their page shows the live rate when you get
+// there. Only the number alongside it is missing, and a request per
+// check that could never succeed is worse than an absent figure.
+fetchable: false,
 merchant: (slug) => `https://www.quidco.com/${slug}/`,
 // Quidco's search bounces to a login when signed out. That's fine as
 // a fallback -- it's your own browser, where you are signed in.
@@ -75,6 +88,7 @@ if (!name) return [];
 const slug = merchantSlug(name);
 if (!slug) return [];
 return PROVIDERS.map((p) => ({
+fetchable: p.fetchable !== false,
 id: p.id,
 label: p.label,
 name,
