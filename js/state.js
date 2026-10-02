@@ -1221,6 +1221,19 @@ contactMatchedBy: '', unmatchedAt: '',
 //   -- it's what you'd actually order if the first were gone.
 //   Deliberately generic: jeans at Levi's, shoes at Nike, same shape.
 sizes: [],
+// The last catalogue search run for her (setfinder.js's "Find a set"),
+// null until one's been run. Written directly to `data` and queueSave()d
+// at every progress step rather than kept in the dialog's own local
+// state -- a search can take minutes (several paced product-page
+// fetches through the home agent), and the dialog closing, a tab
+// switch, or the service worker reloading the page used to mean losing
+// it outright with nothing to show for the wait. Persisting here means
+// reopening the dialog -- even after a reload -- shows exactly where it
+// left off. Doesn't survive the BROWSER TAB closing entirely, same
+// limit as every other home-agent operation: the agent still finishes
+// its own work either way, but nothing in a closed tab is left running
+// to collect the next stage from it.
+setSearch: null,
 // What she owns is NOT stored here -- see data.inventory. An item
 // outlives the relationship it was bought for (a set bought for someone
 // you've since stopped seeing is still a real 36C bra sitting in a

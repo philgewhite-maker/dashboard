@@ -389,6 +389,58 @@ items.push(item);
 return items;
 }
 
+// Every colour value AP's own filter panel offers, read straight off its
+// markup -- name and swatch hex, 18 of them, Black through Yellow. No
+// URL key confirmed for filtering on it server-side: five plausible
+// hash keys (filter_colour, colour_desc, filters.colour, filter_color,
+// a plain colour=) were each tried live and every one came back as the
+// unfiltered default list -- unlike prod_type_desc and filter_size,
+// which were confirmed the same way and genuinely work. So colour is
+// filtered CLIENT-SIDE instead, bucketed from the colour text this file
+// already reads off each card (see parseListingCard) -- no dependency
+// on guessing a key right, and no second live round-trip needed either.
+// Leopard, Multicolour and Neutral are swatch IMAGES on the real site,
+// not a flat hex, so they're bucketed by name below rather than colour
+// math.
+const COLOURS = [
+{ name: 'Black', hex: '#000000' }, { name: 'Blue', hex: '#6ca4e8' },
+{ name: 'Burgundy', hex: '#761c3c' }, { name: 'Brown', hex: '#633838' },
+{ name: 'Bronze', hex: '#bd8248' }, { name: 'Champagne', hex: '#fad6a5' },
+{ name: 'Green', hex: '#96d5a2' }, { name: 'Leopard', hex: null },
+{ name: 'Multicolour', hex: null }, { name: 'Navy', hex: '#354376' },
+{ name: 'Neutral', hex: null }, { name: 'Orange', hex: '#ff7f50' },
+{ name: 'Pink', hex: '#ed84b1' }, { name: 'Purple', hex: '#630460' },
+{ name: 'Red', hex: '#ca3131' }, { name: 'Silver', hex: '#c0c0c0' },
+{ name: 'White', hex: '#ffffff' }, { name: 'Yellow', hex: '#ffd856' },
+];
+
+// AP's own 18 collapsed to the 4 broad buckets a quick filter actually
+// wants -- "roughly which end of the wardrobe is this" rather than the
+// exact shade. Hand-assigned rather than computed from the hex (HSL
+// lightness alone would call Burgundy "dark" and group it with Black,
+// which isn't what anyone searching for "neutral" vs "bright" means).
+const COLOUR_BUCKETS = {
+Black: 'Black',
+White: 'Neutral', Silver: 'Neutral', Champagne: 'Neutral', Bronze: 'Neutral', Brown: 'Neutral', Neutral: 'Neutral',
+Blue: 'Bright', Burgundy: 'Bright', Green: 'Bright', Navy: 'Bright', Orange: 'Bright', Pink: 'Bright', Purple: 'Bright', Red: 'Bright', Yellow: 'Bright',
+Leopard: 'Other', Multicolour: 'Other',
+};
+
+// A product's own colour text is free-form and often two-tone ("Dark
+// Pink/Cobalt", "Navy/Black" -- confirmed live, see parseListingCard),
+// never one of the 18 canonical names outright. So this matches by
+// SUBSTRING against each canonical name and returns every bucket that
+// hits, rather than picking one -- a two-tone piece can genuinely read
+// as both, and that's more useful than an arbitrary first-match pick.
+function bucketsForColour(colourText) {
+const text = String(colourText || '').toLowerCase();
+const hit = new Set();
+Object.keys(COLOUR_BUCKETS).forEach((name) => {
+if (text.includes(name.toLowerCase())) hit.add(COLOUR_BUCKETS[name]);
+});
+return [...hit];
+}
+
 // Every card on a size+type filtered, sorted listing page -- /lingerie's
 // own `filters.prod_type_desc`, `filters.filter_size` and `sort` hash
 // params, confirmed live to genuinely filter and sort (NOT the page's
@@ -520,4 +572,4 @@ step();
 return `javascript:${encodeURIComponent(body)}`;
 }
 
-export { matchesRetailer, RETAILER, parseProductPage, parseSizeOption, parseBlock, skuParts, skuFromUrl, specFromUrl, findRangeItems, listingUrl, listingItems, bookmarkletSource, bulkBookmarkletSource, PASTE_STOCK_PREFIX, HOST, CHECK_SPACING_MS, NEEDS_BROWSER_FOR_FULL_PAGE };
+export { matchesRetailer, RETAILER, parseProductPage, parseSizeOption, parseBlock, skuParts, skuFromUrl, specFromUrl, findRangeItems, listingUrl, listingItems, COLOURS, bucketsForColour, bookmarkletSource, bulkBookmarkletSource, PASTE_STOCK_PREFIX, HOST, CHECK_SPACING_MS, NEEDS_BROWSER_FOR_FULL_PAGE };
