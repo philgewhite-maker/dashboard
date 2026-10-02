@@ -41,6 +41,13 @@ const ACCOUNT_COLOURS = ['blue', 'pink', 'sage', 'amber', 'slate', 'rose', 'teal
 // DOM, not read back from it.
 const expandedAccounts = new Set();
 
+// Which types show in the list below -- all of them by default, so a
+// fresh load looks exactly like it always did. A Set rather than
+// tasks.js's single-value contextFilter: "show Credit card AND
+// Mortgage" is a real, asked-for case, not just "show one type at a
+// time".
+let accountTypeFilter = new Set(ACCOUNT_TYPES);
+
 function isClosed(a) {
 return !!(a.closeDate && a.closeDate <= new Date().toISOString().slice(0, 10));
 }
@@ -1478,12 +1485,60 @@ return `${toggle}<div class="flow-diagram" id="account-flow-diagram">
 
 // ---- Render + bind ---------------------------------------------------------
 
+// "All" plus one chip per type, same shape as tasks.js's context-filter
+// row (overview-chips/overview-chip) rather than a new pattern -- this
+// is the same job, a quick narrow-down over a flat list, just on a
+// different field.
+function accountTypeChipsHtml() {
+const allOn = accountTypeFilter.size === ACCOUNT_TYPES.length;
+const chip = (active, label) => `<button type="button" class="overview-chip${active ? ' active' : ''}" data-account-type-chip="${escapeHtml(label)}">${escapeHtml(label)}</button>`;
+return `<div class="overview-chips" style="margin:0 0 10px;">
+${chip(allOn, 'All')}
+${ACCOUNT_TYPES.map((t) => chip(!allOn && accountTypeFilter.has(t), t)).join('')}
+</div>`;
+}
+
+function bindAccountTypeChips(root) {
+root.querySelectorAll('[data-account-type-chip]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const label = btn.dataset.accountTypeChip;
+if (label === 'All') {
+accountTypeFilter = new Set(ACCOUNT_TYPES);
+} else if (accountTypeFilter.size === ACCOUNT_TYPES.length) {
+// Coming from "All": the first specific pick narrows to just that
+// one type, rather than toggling it OFF from a full set (which
+// would read as "everything except this" -- the opposite of what
+// clicking one type out of "All" means).
+accountTypeFilter = new Set([label]);
+} else if (accountTypeFilter.has(label)) {
+accountTypeFilter.delete(label);
+// Never land on an empty filter silently -- that's "All" again,
+// not a 0-result dead end nothing on screen explains.
+if (!accountTypeFilter.size) accountTypeFilter = new Set(ACCOUNT_TYPES);
+} else {
+accountTypeFilter.add(label);
+}
+renderFinanceAccounts();
+});
+});
+}
+
 function renderFinanceAccounts() {
 const list = document.getElementById('accounts-list');
 const flowMount = document.getElementById('accounts-flow-mount');
 const countEl = document.getElementById('accounts-count');
+const chipsMount = document.getElementById('accounts-type-filter');
 if (!list) return;
-if (countEl) countEl.textContent = data.financeAccounts.length + (data.financeAccounts.length === 1 ? ' account' : ' accounts');
+const shown = data.financeAccounts.filter((a) => accountTypeFilter.has(a.accountType));
+if (countEl) {
+countEl.textContent = shown.length === data.financeAccounts.length
+? data.financeAccounts.length + (data.financeAccounts.length === 1 ? ' account' : ' accounts')
+: `${shown.length} of ${data.financeAccounts.length} accounts`;
+}
+if (chipsMount) {
+chipsMount.innerHTML = accountTypeChipsHtml();
+bindAccountTypeChips(chipsMount);
+}
 if (flowMount) {
 flowMount.innerHTML = flowDiagramHtml();
 bindLogoFallbacks(flowMount);
@@ -1504,9 +1559,11 @@ renderFinanceAccounts();
 });
 });
 }
-list.innerHTML = data.financeAccounts.length
-? data.financeAccounts.map(accountCardHtml).join('')
-: '<div class="empty">No accounts tracked yet. Add one below.</div>';
+list.innerHTML = shown.length
+? shown.map(accountCardHtml).join('')
+: (data.financeAccounts.length
+? '<div class="empty">No accounts match that filter.</div>'
+: '<div class="empty">No accounts tracked yet. Add one below.</div>');
 bindLogoFallbacks(list);
 
 list.querySelectorAll('details.account-card').forEach((el) => {
