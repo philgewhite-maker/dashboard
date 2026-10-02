@@ -163,7 +163,7 @@ return `<div class="letting-owner">
 <span class="settings-note" style="margin:0;">${bal > 0 ? 'owed to you' : bal < 0 ? 'in credit' : 'settled'}</span>
 ${grossFor(key) ? `<span class="settings-note" style="margin:0 0 0 auto;">${escapeHtml(money(grossFor(key)))} taken</span>` : ''}
 </div>
-${rows.length ? `<table class="limits-table"><tbody>${rows.map((e) => `<tr>
+${rows.length ? `<div class="letting-scroll"><table class="limits-table"><tbody>${rows.map((e) => `<tr>
 <td style="white-space:nowrap;">${escapeHtml(e.date || '')}</td>
 <td>${escapeHtml(e.note || e.kind)}${e.kind && e.kind !== 'accrual' ? ` <span class="letting-kind ${escapeHtml(e.kind)}">${escapeHtml(e.kind)}</span>` : ''}${
 // Shown from the FIELD rather than left inside the note, because your
@@ -172,7 +172,7 @@ ${rows.length ? `<table class="limits-table"><tbody>${rows.map((e) => `<tr>
 e.gross ? ` <span class="letting-gross">${escapeHtml(`${e.pct ?? 50}% of ${money(e.gross)}`)}</span>` : ''}</td>
 <td style="text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;">${escapeHtml(money(e.amount))}</td>
 <td style="width:1%;"><span class="del-x" data-letting-del="${escapeHtml(e.id)}" title="Remove this entry">&times;</span></td>
-</tr>`).join('')}</tbody></table>` : '<div class="settings-note" style="margin:4px 0 0;">Nothing yet.</div>'}
+</tr>`).join('')}</tbody></table></div>` : '<div class="settings-note" style="margin:4px 0 0;">Nothing yet.</div>'}
 </div>`;
 }).join('');
 

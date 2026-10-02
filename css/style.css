@@ -3751,3 +3751,31 @@ background:var(--sage-bg);color:var(--sage);
    rather than inside it — a note you type replaces the default one, and
    the figure it was half of should not go with it. */
 .letting-gross{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;}
+
+/* The add-a-transaction row on a phone. It wraps already, but its inputs
+   carry max-widths set for a desktop column and a flex item will not
+   shrink below its content, so the widest of them pushed the row past
+   the panel. Each one gets a floor of zero and a share of the line
+   instead of a fixed size. */
+@media (max-width:700px){
+#letting-panel .sync-row{gap:6px;}
+#letting-panel .settings-input,
+#letting-panel select{
+min-width:0;
+flex:1 1 7rem;
+max-width:none;
+}
+#letting-panel .sync-btn{flex:0 0 auto;}
+/* The note and the gross stack rather than fighting for one line. */
+#letting-list .letting-gross{display:block;}
+#letting-list td{padding-left:4px;padding-right:4px;}
+}
+/* A long note must wrap inside its cell rather than widening the table —
+   the same min-width:auto trap, one level down. */
+#letting-list td{overflow-wrap:anywhere;}
+#letting-list table{table-layout:auto;width:100%;}
+/* The ledger scrolls inside the panel rather than widening the page. The
+   date and the amount must not wrap — a date broken across two lines is
+   unreadable — so on a narrow screen the table is simply wider than the
+   panel, and this is where that is allowed to be true. */
+.letting-scroll{overflow-x:auto;}
