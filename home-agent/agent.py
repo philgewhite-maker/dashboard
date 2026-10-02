@@ -38,7 +38,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-VERSION = "1.6"
+VERSION = "1.7"
 
 SYNC_URL = os.environ.get("DASHBOARD_SYNC_URL", "").strip()
 SECRET = os.environ.get("DASHBOARD_SECRET", "").strip()
@@ -50,6 +50,17 @@ SONARR_URL = os.environ.get("SONARR_URL", "").rstrip("/")
 SONARR_KEY = os.environ.get("SONARR_API_KEY", "").strip()
 POLL_SECONDS = int(os.environ.get("POLL_SECONDS", "15"))
 HTTP_TIMEOUT = int(os.environ.get("HTTP_TIMEOUT", "20"))
+
+# A second, fully separate channel -- claude-test.php, not commands.php --
+# so Claude's own development testing never shares a secret, a queue, or
+# any code path with the real dashboard's command queue. Its own file has
+# no verb concept at all (see claude-test.php.example): the only thing
+# ever polled from here is a URL to render, and the only thing ever sent
+# back is that page's HTML or an error. Blank (the default) means this
+# channel is simply never polled -- costs nothing, same as BROWSER_URL
+# being blank costs nothing.
+CLAUDE_TEST_URL = os.environ.get("CLAUDE_TEST_URL", "").strip().rstrip("/")
+CLAUDE_TEST_SECRET = os.environ.get("CLAUDE_TEST_SECRET", "").strip()
 
 if not SYNC_URL or not SECRET:
     sys.exit("Set DASHBOARD_SYNC_URL and DASHBOARD_SECRET (see .env.example)")
@@ -86,6 +97,36 @@ def dashboard(path_and_query, method="GET", body=None):
         body=body,
         headers={"X-Sync-Secret": SECRET},
     )
+
+
+def claude_test(path_and_query, method="GET", body=None):
+    separator = "&" if "?" in CLAUDE_TEST_URL else "?"
+    return http_json(
+        f"{CLAUDE_TEST_URL}{separator}{path_and_query}",
+        method=method,
+        body=body,
+        headers={"X-Claude-Test-Secret": CLAUDE_TEST_SECRET},
+    )
+
+
+def poll_claude_test():
+    """One sweep of the dedicated test channel, if configured. Deliberately
+    NOT routed through handle()/VERBS: this calls _render_one_page()
+    directly, so there is no dispatch table here for a compromised secret
+    to pick a different verb from -- rendering a page is the only thing
+    this code path is physically able to do.
+    """
+    if not CLAUDE_TEST_URL or not CLAUDE_TEST_SECRET:
+        return
+    jobs = claude_test("action=pending").get("jobs", [])
+    for job in jobs:
+        html, error = _render_one_page(job.get("url", ""))
+        log(f"claude-test {job.get('url', '')[-40:]} -> {'ok' if html else error}")
+        claude_test(
+            f"action=result&id={urllib.parse.quote(job.get('id', ''))}",
+            method="POST",
+            body={"ok": html is not None, "html": html, "error": error},
+        )
 
 
 def plex(path, params=None):
@@ -558,6 +599,61 @@ def verb_page_fetch(args):
     return {"pages": pages}
 
 
+def _render_one_page(url):
+    """The actual browserless round-trip for one URL -- factored out so
+    both verb_page_render (the real queue, several urls, paced) and the
+    claude-test poll loop (one url per call, already paced by POLL_SECONDS
+    between loop iterations) share the exact same rendering code rather
+    than one drifting from the other. Returns (html, error): exactly one
+    is None.
+    """
+    if not BROWSER_URL:
+        return None, "the browser container isn't configured -- set BROWSER_URL in .env"
+    if not str(url).lower().startswith("https://"):
+        return None, "Only https URLs are rendered"
+    try:
+        # `launch` is browserless's own query param for Puppeteer launch
+        # options -- JSON text, confirmed from its source
+        # (src/browsers/index.ts reads req.parsed.searchParams.get
+        # ("launch") and JSON.parses it) rather than anything in the
+        # POST body, which is reserved for url/gotoOptions/etc.
+        query = {}
+        if BROWSER_TOKEN:
+            query["token"] = BROWSER_TOKEN
+        if BROWSER_STEALTH:
+            query["launch"] = json.dumps({"stealth": True})
+        endpoint = f"{BROWSER_URL}/content"
+        if query:
+            endpoint += f"?{urllib.parse.urlencode(query)}"
+        # waitUntil networkidle2 rather than the default "load": the set
+        # is added to the DOM after the load event fires, and the whole
+        # reason this exists is the part that arrives late. Puppeteer's
+        # own values, passed straight through by browserless -- see
+        # BROWSER_URL's comment above.
+        body = json.dumps({
+            "url": url,
+            "gotoOptions": {"waitUntil": "networkidle2", "timeout": BROWSER_TIMEOUT_MS},
+        }).encode("utf-8")
+        request = urllib.request.Request(endpoint, data=body, method="POST")
+        request.add_header("Content-Type", "application/json")
+        # A little longer than the browser's own timeout, so a page that
+        # gives up cleanly at BROWSER_TIMEOUT_MS is the error that
+        # surfaces rather than this socket cutting it off first.
+        with urllib.request.urlopen(request, timeout=BROWSER_TIMEOUT_MS / 1000 + 15) as response:
+            html = response.read(PAGE_MAX_BYTES).decode("utf-8", "replace")
+        log(f"page.render {url[-40:]} -> {len(html)} bytes")
+        return html, None
+    except urllib.error.HTTPError as err:
+        detail = ""
+        try:
+            detail = err.read(500).decode("utf-8", "replace")
+        except Exception:  # noqa: BLE001 - the status code is the useful part either way
+            pass
+        return None, f"browser returned HTTP {err.code} {detail}".strip()
+    except Exception as err:
+        return None, f"{type(err).__name__}: {err}"
+
+
 def verb_page_render(args):
     """Fetch pages through a real browser and hand back the rendered HTML.
 
@@ -588,52 +684,13 @@ def verb_page_render(args):
         raise ValueError("page.render needs a url or urls")
     pages = []
     for index, url in enumerate(urls):
-        if not str(url).lower().startswith("https://"):
-            pages.append({"url": url, "error": "Only https URLs are rendered"})
-            continue
         if index:
             time.sleep(PAGE_GAP_SECONDS)
-        try:
-            # `launch` is browserless's own query param for Puppeteer launch
-            # options -- JSON text, confirmed from its source
-            # (src/browsers/index.ts reads req.parsed.searchParams.get
-            # ("launch") and JSON.parses it) rather than anything in the
-            # POST body, which is reserved for url/gotoOptions/etc.
-            query = {}
-            if BROWSER_TOKEN:
-                query["token"] = BROWSER_TOKEN
-            if BROWSER_STEALTH:
-                query["launch"] = json.dumps({"stealth": True})
-            endpoint = f"{BROWSER_URL}/content"
-            if query:
-                endpoint += f"?{urllib.parse.urlencode(query)}"
-            # waitUntil networkidle2 rather than the default "load": the
-            # set is added to the DOM after the load event fires, and the
-            # whole reason for this verb is the part that arrives late.
-            # Puppeteer's own values, passed straight through by
-            # browserless -- see BROWSER_URL's comment above.
-            body = json.dumps({
-                "url": url,
-                "gotoOptions": {"waitUntil": "networkidle2", "timeout": BROWSER_TIMEOUT_MS},
-            }).encode("utf-8")
-            request = urllib.request.Request(endpoint, data=body, method="POST")
-            request.add_header("Content-Type", "application/json")
-            # A little longer than the browser's own timeout, so a page
-            # that gives up cleanly at BROWSER_TIMEOUT_MS is the error
-            # that surfaces rather than this socket cutting it off first.
-            with urllib.request.urlopen(request, timeout=BROWSER_TIMEOUT_MS / 1000 + 15) as response:
-                html = response.read(PAGE_MAX_BYTES).decode("utf-8", "replace")
-            log(f"page.render {url[-40:]} -> {len(html)} bytes")
+        html, error = _render_one_page(url)
+        if error:
+            pages.append({"url": url, "error": error})
+        else:
             pages.append({"url": url, "status": 200, "html": html})
-        except urllib.error.HTTPError as err:
-            detail = ""
-            try:
-                detail = err.read(500).decode("utf-8", "replace")
-            except Exception:  # noqa: BLE001 - the status code is the useful part either way
-                pass
-            pages.append({"url": url, "status": err.code, "error": f"browser returned HTTP {err.code} {detail}".strip()})
-        except Exception as err:
-            pages.append({"url": url, "error": f"{type(err).__name__}: {err}"})
     return {"pages": pages}
 
 
@@ -668,6 +725,7 @@ def main():
     # is missing most of itself.
     log(f"page.fetch: impersonating {IMPERSONATE} (curl_cffi)" if PAGE_SESSION else "page.fetch: urllib only -- curl_cffi not installed, some sites will send a reduced page")
     log((f"page.render: browser at {BROWSER_URL}, stealth {'on' if BROWSER_STEALTH else 'off'}") if BROWSER_URL else "page.render: not configured -- set BROWSER_URL in .env to use it")
+    log(f"claude-test channel: polling {CLAUDE_TEST_URL}" if CLAUDE_TEST_URL else "claude-test channel: not configured -- blank unless Claude's own dev environment needs page.render access")
     last_beat = 0.0
     while True:
         try:
@@ -691,6 +749,15 @@ def main():
             log(f"HTTP {err.code} talking to the dashboard: {err.reason}")
         except Exception as err:
             log(f"{type(err).__name__}: {err}")
+
+        # Its own try/except, same reasoning as one bad command never
+        # stopping the loop above: a claude-test outage (wrong secret,
+        # file not yet uploaded, whatever) must never block the REAL
+        # dashboard's own polling.
+        try:
+            poll_claude_test()
+        except Exception as err:
+            log(f"claude-test: {type(err).__name__}: {err}")
         time.sleep(POLL_SECONDS)
 
 

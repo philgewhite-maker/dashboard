@@ -1,0 +1,211 @@
+<?php
+declare(strict_types=1);
+
+/**
+ * A dedicated, isolated command channel for Claude's own development
+ * testing against live sites -- NOT the real dashboard's queue (see
+ * commands.php for that).
+ *
+ * Deliberately a separate FILE rather than a scoped secret inside
+ * commands.php: this has no verb concept at all, no device-token table,
+ * no shared code with the real auth/pairing system, and its own queue
+ * file on disk. The wire protocol can only ever express ONE operation --
+ * "render this URL, give me back the HTML" -- so there is nothing here
+ * to restrict beyond what the protocol itself allows, and a bug in this
+ * file cannot touch the real queue's data because it never reads or
+ * writes it. Revoking access is deleting this file or clearing its
+ * $SECRET; it cannot affect, and is not entangled with, any real paired
+ * device, any real queued command, or Plex/*arr.
+ *
+ *   POST ?action=enqueue {url}           -> {id}
+ *   GET  ?action=pending                  -> {jobs:[{id,url}]}  (agent; claims them)
+ *   POST ?action=result&id=<id> {ok,html,error} -> {ok:true}    (agent)
+ *   GET  ?action=status&id=<id>           -> {id,url,status,html,error}
+ *
+ * Upload next to commands.php, as claude-test.php (drop the .example).
+ * Set $SECRET to a FRESH random value -- never reuse commands.php's
+ * $SECRET or a paired device's token; the whole point of a separate file
+ * is that this credential can leak, be shared with a sandboxed dev
+ * environment, or be revoked, independently of every other one. Then
+ * set CLAUDE_TEST_URL/CLAUDE_TEST_SECRET in the agent's .env to match --
+ * see home-agent/.env.example.
+ */
+
+// ---- Configuration ---------------------------------------------------
+
+$SECRET = 'PUT-A-DIFFERENT-LONG-RANDOM-STRING-HERE';
+
+// A sibling of commands.php's own state dir, never inside it -- same
+// reasoning as everywhere else here: no shared storage, no shared code.
+$STATE_DIR = dirname(__DIR__) . '/dashboard-claude-test';
+
+// An hour, not a day: this is a live test run while someone's watching,
+// not a queue meant to hold work for later. A job nobody collected in an
+// hour was probably asked by a session that's already gone.
+$MAX_AGE_SECONDS = 60 * 60;
+
+// Small on purpose -- this is a trickle of manual test requests, not
+// real traffic.
+$MAX_JOBS = 20;
+
+$ALLOWED_ORIGINS = [
+    'https://philgewhite-maker.github.io',
+    'http://localhost:8743',
+    'http://localhost:5173',
+];
+
+// ---- End of configuration --------------------------------------------
+
+$origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+if ($origin !== '' && in_array($origin, $ALLOWED_ORIGINS, true)) {
+    header('Access-Control-Allow-Origin: ' . $origin);
+    header('Vary: Origin');
+}
+header('Access-Control-Allow-Headers: Content-Type, X-Claude-Test-Secret');
+header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+header('Access-Control-Max-Age: 86400');
+header('Cache-Control: no-store');
+header('X-Content-Type-Options: nosniff');
+header('Content-Type: application/json');
+
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
+    http_response_code(204);
+    exit;
+}
+
+function fail(int $code, string $message): void {
+    http_response_code($code);
+    echo json_encode(['error' => $message]);
+    exit;
+}
+
+if ($SECRET === 'PUT-A-DIFFERENT-LONG-RANDOM-STRING-HERE' || $SECRET === '') {
+    fail(500, 'Server not configured: set $SECRET in claude-test.php');
+}
+$provided = $_SERVER['HTTP_X_CLAUDE_TEST_SECRET'] ?? '';
+if (!hash_equals($SECRET, (string) $provided)) {
+    fail(401, 'Bad or missing secret');
+}
+
+if (!is_dir($STATE_DIR) && !mkdir($STATE_DIR, 0700, true) && !is_dir($STATE_DIR)) {
+    fail(500, 'Could not create the state directory — check permissions');
+}
+$QUEUE_FILE = $STATE_DIR . '/queue.json';
+
+/**
+ * Every read-modify-write goes through here holding an exclusive lock,
+ * same reasoning as commands.php's own withQueue -- the agent claiming a
+ * job can't race a new one being enqueued.
+ */
+function withQueue(string $file, callable $fn) {
+    $handle = fopen($file, 'c+');
+    if ($handle === false) fail(500, 'Could not open the queue');
+    try {
+        if (!flock($handle, LOCK_EX)) fail(500, 'Could not lock the queue');
+        $raw = stream_get_contents($handle);
+        $queue = $raw === '' ? [] : (json_decode($raw, true) ?: []);
+        // list() rather than short-array destructuring, matching
+        // commands.php's own choice: a parse error on older hosting
+        // returns 500 to everything, including the OPTIONS preflight,
+        // before a single header() runs.
+        list($queue, $response) = $fn($queue);
+        if ($queue !== null) {
+            ftruncate($handle, 0);
+            rewind($handle);
+            fwrite($handle, json_encode(array_values($queue)));
+            fflush($handle);
+        }
+        return $response;
+    } finally {
+        flock($handle, LOCK_UN);
+        fclose($handle);
+    }
+}
+
+function body(): array {
+    $raw = file_get_contents('php://input');
+    $parsed = $raw === false || $raw === '' ? null : json_decode($raw, true);
+    return is_array($parsed) ? $parsed : [];
+}
+
+$method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+$action = $_GET['action'] ?? '';
+
+if ($action === 'enqueue' && $method === 'POST') {
+    $in = body();
+    $url = (string) ($in['url'] ?? '');
+    // The one input this protocol accepts, validated the same way the
+    // agent's own page.render double-checks it -- https only, and a
+    // sane length so this can't become a place to stash arbitrary data.
+    if (!preg_match('~^https://~i', $url)) fail(400, 'url must start with https://');
+    if (strlen($url) > 2000) fail(400, 'url is too long');
+    $id = bin2hex(random_bytes(8));
+    withQueue($QUEUE_FILE, function (array $queue) use ($id, $url, $MAX_AGE_SECONDS, $MAX_JOBS) {
+        $now = time();
+        $queue = array_filter($queue, function ($j) use ($now, $MAX_AGE_SECONDS) {
+            return ($now - (int) ($j['createdAtTs'] ?? 0)) < $MAX_AGE_SECONDS;
+        });
+        $queue[] = [
+            'id' => $id,
+            'url' => $url,
+            'status' => 'pending',
+            'createdAt' => gmdate('c'),
+            'createdAtTs' => $now,
+            'html' => null,
+            'error' => null,
+        ];
+        if (count($queue) > $MAX_JOBS) $queue = array_slice($queue, -$MAX_JOBS);
+        return [$queue, null];
+    });
+    echo json_encode(['id' => $id]);
+    exit;
+}
+
+if ($action === 'pending' && $method === 'GET') {
+    $claimed = withQueue($QUEUE_FILE, function (array $queue) {
+        $out = [];
+        foreach ($queue as $i => $j) {
+            if (($j['status'] ?? '') !== 'pending') continue;
+            $queue[$i]['status'] = 'claimed';
+            $out[] = ['id' => $j['id'], 'url' => $j['url']];
+        }
+        return [$queue, $out];
+    });
+    echo json_encode(['jobs' => $claimed]);
+    exit;
+}
+
+if ($action === 'result' && $method === 'POST') {
+    $id = (string) ($_GET['id'] ?? '');
+    $in = body();
+    withQueue($QUEUE_FILE, function (array $queue) use ($id, $in) {
+        foreach ($queue as $i => $j) {
+            if (($j['id'] ?? '') !== $id) continue;
+            $queue[$i]['status'] = !empty($in['ok']) ? 'done' : 'error';
+            $queue[$i]['html'] = $in['html'] ?? null;
+            $queue[$i]['error'] = isset($in['error']) ? (string) $in['error'] : null;
+            $queue[$i]['completedAt'] = gmdate('c');
+        }
+        return [$queue, null];
+    });
+    echo json_encode(['ok' => true]);
+    exit;
+}
+
+if ($action === 'status' && $method === 'GET') {
+    $id = (string) ($_GET['id'] ?? '');
+    $found = withQueue($QUEUE_FILE, function (array $queue) use ($id) {
+        foreach ($queue as $j) {
+            if (($j['id'] ?? '') === $id) return [null, $j]; // read-only: the queue is not rewritten
+        }
+        return [null, null];
+    });
+    if ($found === null) {
+        echo json_encode(['status' => 'unknown']);
+    } else {
+        echo json_encode($found);
+    }
+    exit;
+}
+
+fail(400, 'Unknown action');

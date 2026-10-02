@@ -36,3 +36,9 @@ Debug/
 # the key was still a placeholder so nothing leaked, but one fill-in-and-commit
 # would have published it. Same rule as the rest now.
 server/gemini-transcribe.php
+# claude-test.php holds its own separate secret (deliberately never the
+# same as any of the above -- see the .example's own comment). Same rule.
+server/claude-test.php
+# This session's own copy of that secret, for curling claude-test.php
+# directly from here -- never committed, never pasted into chat.
+.claude/nas-test.env
