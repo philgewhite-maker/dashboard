@@ -35,7 +35,7 @@ RADARR_URL = os.environ.get("RADARR_URL", "").rstrip("/")
 RADARR_KEY = os.environ.get("RADARR_API_KEY", "").strip()
 SONARR_URL = os.environ.get("SONARR_URL", "").rstrip("/")
 SONARR_KEY = os.environ.get("SONARR_API_KEY", "").strip()
-POLL_SECONDS = int(os.environ.get("POLL_SECONDS", "45"))
+POLL_SECONDS = int(os.environ.get("POLL_SECONDS", "15"))
 HTTP_TIMEOUT = int(os.environ.get("HTTP_TIMEOUT", "20"))
 
 if not SYNC_URL or not SECRET:

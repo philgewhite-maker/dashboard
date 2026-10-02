@@ -30,6 +30,18 @@ const REQUEST_TIMEOUT_MS = 15000;
 // those is just impatience; anything more is a hung UI.
 const RESULT_TIMEOUT_MS = 150000;
 const RESULT_POLL_MS = 3000;
+// Every wait starts with the time the job spends sitting in the queue
+// before the agent even looks at it, which is up to one poll interval and
+// has nothing to do with how long the work takes. Without this a caller
+// has to know the agent's cadence to pick a timeout, and the stock check
+// got it wrong: it waited 28 seconds for one page against a 45-second
+// poll, so it ALWAYS gave up first -- and reported "is it running at
+// home?" about an agent that was running, collected the job seconds
+// later, and logged `page.fetch -> ok`.
+//
+// 60s covers the 45s default with slack. A faster POLL_SECONDS makes
+// everything feel quicker; it never makes this wrong.
+const COLLECT_ALLOWANCE_MS = 60000;
 
 async function request(path, options = {}) {
 const { endpoint, secret } = await commandsEndpoint();
@@ -68,7 +80,9 @@ return id;
 }
 
 async function resultFor(id, { timeoutMs = RESULT_TIMEOUT_MS } = {}) {
-const deadline = Date.now() + timeoutMs;
+// The caller's timeout is for the WORK; the allowance is for the wait
+// before it starts.
+const deadline = Date.now() + COLLECT_ALLOWANCE_MS + timeoutMs;
 while (Date.now() < deadline) {
 const { commands } = await request(`action=status&ids=${encodeURIComponent(id)}`);
 const found = (commands || [])[0];
@@ -76,7 +90,11 @@ if (found && found.status === 'done') return found.result;
 if (found && found.status === 'error') throw new Error(found.error || 'The agent reported a failure.');
 await new Promise((r) => setTimeout(r, RESULT_POLL_MS));
 }
-throw new Error("The agent didn't answer — is it running at home?");
+// Named separately from "can't reach the queue": the queue answered
+// fine, so the agent is either stopped, or slower than this wait. Its
+// own log says which, and saying so beats sending you to check a
+// container that was running all along.
+throw new Error("The agent didn't pick that up in time — check `docker logs dashboard-agent`; if it shows the job succeeded, lower POLL_SECONDS in its .env.");
 }
 
 // The common case: ask, wait, get the answer.
