@@ -130,12 +130,17 @@ ${rows.length ? `<table class="limits-table"><tbody>${rows.map((e) => `<tr>
 el.querySelectorAll('[data-letting-del]').forEach((x) => {
 x.addEventListener('click', () => {
 const entry = (data.lettingLedger || []).find((e) => e.id === x.dataset.lettingDel);
-// An accrual is deleted along with its claim on the stay, so the
-// next sweep can recreate it. Otherwise removing a mistake would
-// leave the stay marked as charged and the money quietly lost.
+// Deleting an accrual clears the stay's income as well as its
+// already-charged stamp, so the deletion STAYS deleted. Clearing the
+// stamp alone just meant the next sweep rebuilt the identical row,
+// which made the × look broken; leaving the stamp instead would mark
+// the stay charged with nothing to show for it, and the money would
+// be unrecoverable. Clearing both puts the stay back to "earned
+// something, you haven't said how much" — type a figure in and it
+// charges again, leave it and it never does.
 if (entry && entry.reservationId) {
 const r = (data.airbnbReservations || []).find((v) => v.id === entry.reservationId);
-if (r) r.accruedAt = '';
+if (r) { r.accruedAt = ''; r.income = null; }
 }
 data.lettingLedger = (data.lettingLedger || []).filter((e) => e.id !== x.dataset.lettingDel);
 queueSave();
