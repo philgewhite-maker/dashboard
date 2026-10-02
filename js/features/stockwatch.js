@@ -16,7 +16,7 @@
 import { data, queueSave, whoFits, sizeGroupFor } from '../state.js';
 import { escapeHtml } from '../utils.js';
 import { fetchPageHtml, FilesNotConfiguredError } from '../files.js';
-import { cashbackLinks, merchantSlug, parseRate, rateFor, rateKey, ageLabel } from '../cashback.js';
+import { cashbackLinks, cashbackNeedsBrowser, merchantSlug, parseRate, rateFor, rateKey, ageLabel } from '../cashback.js';
 import * as agentProvocateur from '../retailers/agentprovocateur.js';
 
 // One adapter per retailer, tried in order. Adding a second retailer is
@@ -229,13 +229,15 @@ const pages = new Map();
 const errors = [];
 const gap = spacingFor(RETAILERS);
 
-// Some retailers' product pages never arrive whole from a plain
-// request, however it's dressed up -- see
-// agentprovocateur.js's NEEDS_BROWSER_FOR_FULL_PAGE. For those, a real
-// browser is tried FIRST, before the proxy or page.fetch are asked at
-// all: we already know what page.fetch would return for this host, so
-// asking it first and detecting the short page after the fact would
-// mean paying for a request that was never going to help.
+// Some pages never arrive whole from a plain request, however it's
+// dressed up -- a retailer's product page (see agentprovocateur.js's
+// NEEDS_BROWSER_FOR_FULL_PAGE) or a cashback provider's merchant page
+// behind a Cloudflare challenge (see cashback.js's needsBrowser). For
+// those, a real browser is tried FIRST, before the proxy or page.fetch
+// are asked at all: we already know what page.fetch would return for
+// this host, so asking it first and detecting the short page (or the
+// challenge page) after the fact would mean paying for a request that
+// was never going to help.
 //
 // Wrapped so that ANY failure -- the browser container not configured
 // (home-agent/agent.py's page.render raises a RuntimeError for that,
@@ -246,7 +248,7 @@ const gap = spacingFor(RETAILERS);
 // one request which fails fast (the agent checks BROWSER_URL before
 // touching the network), not a new way for a check to break.
 const rendered = new Set();
-const wantsRender = urls.filter((u) => adapterFor(u)?.NEEDS_BROWSER_FOR_FULL_PAGE);
+const wantsRender = urls.filter((u) => adapterFor(u)?.NEEDS_BROWSER_FOR_FULL_PAGE || cashbackNeedsBrowser(u));
 if (wantsRender.length) {
 if (onProgress) onProgress(`Asking the home agent to render ${wantsRender.length} page${wantsRender.length === 1 ? '' : 's'} in a browser, for the full set…`);
 try {

@@ -21,19 +21,19 @@ const PROVIDERS = [
 {
 id: 'quidco',
 label: 'Quidco',
-// Its rate cannot be read by anything here, so nothing tries. Measured
-// rather than assumed: a full browser header set -- User-Agent,
-// Accept, Accept-Language, all four Sec-Fetch-*, Sec-CH-UA,
-// Upgrade-Insecure-Requests -- from a home connection still gets
-// "Just a moment..." and HTTP 403. That is a Cloudflare JS challenge,
-// not a header check, so the web host and the home agent fail it
-// identically and no amount of request shaping helps.
+// Was unfetchable: a full browser header set -- User-Agent, Accept,
+// Accept-Language, all four Sec-Fetch-*, Sec-CH-UA, Upgrade-Insecure-
+// Requests -- from a home connection still got "Just a moment..." and
+// HTTP 403, a Cloudflare JS CHALLENGE rather than a header check, which
+// the web host and a plain home-agent request failed identically.
 //
-// The LINK is the part that matters anyway: clicking through is what
-// tracks the purchase, and their page shows the live rate when you get
-// there. Only the number alongside it is missing, and a request per
-// check that could never succeed is worse than an absent figure.
-fetchable: false,
+// Fixed by the same route that got Agent Provocateur's set pieces: a
+// real headless browser (home-agent's page.render, stealth launch mode
+// -- see agent.py) rather than any shaped request, since the challenge
+// targets automation signals a request can't fake either way. Routed
+// there by host in stockwatch.js's fetchPages(), not by an adapter --
+// this is a cashback page, not a product page.
+needsBrowser: true,
 merchant: (slug) => `https://www.quidco.com/${slug}/`,
 // Quidco's search bounces to a login when signed out. That's fine as
 // a fallback -- it's your own browser, where you are signed in.
@@ -78,6 +78,16 @@ return core.replace(/([a-z])([A-Z])/g, '$1 $2');
 } catch (err) {
 return '';
 }
+}
+
+// Hostnames whose page only ever arrives whole through a real browser --
+// see needsBrowser on the provider above. Read generically by stockwatch.js's
+// fetchPages() the same way it reads a retailer adapter's own
+// NEEDS_BROWSER_FOR_FULL_PAGE flag, so a cashback page gets routed to
+// page.render without fetchPages needing to know what cashback.js is.
+function cashbackNeedsBrowser(url) {
+const host = (() => { try { return new URL(url).hostname.replace(/^www\./, ''); } catch (err) { return ''; } })();
+return PROVIDERS.some((p) => p.needsBrowser && host === new URL(p.merchant('x')).hostname.replace(/^www\./, ''));
 }
 
 // [{id, label, merchantUrl, searchUrl}] for a retailer, or [] when there
@@ -162,4 +172,4 @@ if (days < 14) return `${days}d ago`;
 return `${Math.round(days / 7)}w ago`;
 }
 
-export { cashbackLinks, merchantSlug, retailerFrom, parseRate, rateFor, rateKey, ageLabel, RATE_MAX_AGE_MS, PROVIDERS };
+export { cashbackLinks, cashbackNeedsBrowser, merchantSlug, retailerFrom, parseRate, rateFor, rateKey, ageLabel, RATE_MAX_AGE_MS, PROVIDERS };
