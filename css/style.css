@@ -3632,6 +3632,7 @@ padding:6px;
 .cashback-link.cashback-due b{color:var(--muted);font-weight:600;}
 
 
+
 /* The ticker: one line between the header and the tabs, sized to be read
    in passing rather than looked at. No borders or cards — those turned
    five small numbers into five full-width blocks stacked down the page,
@@ -3641,18 +3642,34 @@ padding:6px;
 .ticker{
 display:flex;
 align-items:center;
-gap:14px;
-overflow-x:auto;
-scrollbar-width:none;
+gap:10px;
 padding:0 0 10px;
 margin:-6px 0 12px;
 font-size:12px;
 line-height:1.3;
-white-space:nowrap;
 border-bottom:1px solid var(--line);
 }
-.ticker::-webkit-scrollbar{display:none;}
 .ticker:empty{display:none;border-bottom:none;padding:0;margin:0;}
+/* The viewport clips; the track inside it is what moves. Without the
+   clip the duplicated second copy would simply widen the page. */
+.tick-viewport{flex:1 1 auto;min-width:0;overflow-x:auto;scrollbar-width:none;}
+.tick-viewport::-webkit-scrollbar{display:none;}
+.tick-track{display:flex;width:max-content;}
+.tick-run{display:flex;align-items:center;gap:18px;padding-right:18px;white-space:nowrap;}
+/* The second copy is only drawn while rolling — otherwise a strip that
+   fits would show everything twice. */
+.ticker:not(.is-rolling) .tick-run+.tick-run{display:none;}
+.ticker.is-rolling .tick-viewport{overflow:hidden;}
+.ticker.is-rolling .tick-track{animation:tick-roll linear infinite;}
+/* Stops while you are reading it or reaching for a link. */
+.ticker.is-rolling:hover .tick-track,
+.ticker.is-rolling:focus-within .tick-track{animation-play-state:paused;}
+@keyframes tick-roll{from{transform:translateX(0);}to{transform:translateX(var(--roll-distance,-100%));}}
+@media (prefers-reduced-motion:reduce){
+.ticker.is-rolling .tick-track{animation:none;}
+.ticker.is-rolling .tick-viewport{overflow-x:auto;}
+}
+.tick-pair{display:inline-flex;align-items:baseline;gap:4px;flex:0 0 auto;}
 .tick{
 display:inline-flex;
 align-items:baseline;
@@ -3670,16 +3687,22 @@ text-decoration:none;
    like they do nothing when clicked. */
 a.tick:hover .tick-value,.tick[data-ticker-edit]:hover .tick-value{text-decoration:underline;}
 .tick[data-ticker-edit]{cursor:pointer;}
+/* A tile the strip added itself because of a trip. */
+.tick-auto .tick-label{color:var(--teal);}
+.tick-trip{
+background:none;border:none;padding:0;cursor:pointer;
+color:var(--teal);font-size:11px;line-height:1;align-self:center;
+}
+.tick-trip:hover{color:var(--ink);}
 .tick-wx{display:inline-flex;align-items:center;gap:3px;vertical-align:-2px;}
 .tick-wx svg{width:15px;height:15px;display:block;}
 .tick-toggle{
 flex:0 0 auto;
-margin-left:auto;
 font-family:'Inter',sans-serif;
 font-size:10px;
 text-transform:uppercase;
 letter-spacing:.05em;
-background:none;
+background:var(--paper);
 color:var(--muted);
 border:1px solid var(--line);
 border-radius:20px;
@@ -3688,6 +3711,6 @@ cursor:pointer;
 }
 .tick-toggle:hover{color:var(--ink);border-color:var(--muted);}
 @media (max-width:700px){
-.ticker{gap:11px;font-size:11px;}
-.tick-toggle{margin-left:8px;}
+.ticker{gap:8px;font-size:11px;}
+.tick-run{gap:14px;padding-right:14px;}
 }

@@ -133,6 +133,14 @@ function dash_prune(array $store): array {
 $action = $_GET['action'] ?? '';
 $body = json_decode(file_get_contents('php://input') ?: '', true);
 if (!is_array($body)) $body = [];
+// A JSON body is the normal case, but this endpoint is also called by
+// hand from a shell, and PowerShell 5.1 mangles embedded quotes when it
+// passes arguments to a native exe -- so a perfectly reasonable curl line
+// arrives with its JSON stripped of quotes and decodes to nothing, and
+// the only symptom is "No code given". Query and form parameters are
+// accepted too, so the command that fails is the one that never had to
+// exist.
+$body = array_merge($_GET, is_array($_POST) ? $_POST : [], $body);
 $auth = dash_authorise((string) ($_SERVER['HTTP_X_SYNC_SECRET'] ?? ''), $SECRET);
 
 // ---- Redeem: the only action that does NOT need an existing credential,

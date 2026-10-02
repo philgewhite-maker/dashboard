@@ -245,6 +245,7 @@ await renderUsage();
 initDriveBackup();
 initPairing();
 initEncryption();
+initTickerSettings();
 }
 
 // The Notion proxy URL and database id, and a test that proves all three
@@ -895,6 +896,117 @@ status.textContent = message || (on
 : 'Off — the document is stored as readable JSON.');
 }
 
+
+// ---- Overview ticker ------------------------------------------------------
+
+function renderTickerItems() {
+const box = document.getElementById('ticker-items');
+if (!box) return;
+const items = data.ticker.items || [];
+if (!items.length) {
+box.innerHTML = '<div class="settings-note" style="margin:0;">Nothing on the strip — it stays hidden until you add something.</div>';
+return;
+}
+box.innerHTML = `<table class="limits-table"><thead><tr><th>Shows</th><th>What</th><th></th></tr></thead><tbody>${
+items.map((item, i) => `<tr>
+<td>${escapeHtml(TICKER_KIND[item.kind] || item.kind)}</td>
+<td>${escapeHtml(tickerLabel(item))}</td>
+<td style="white-space:nowrap;">
+<button class="sync-btn sm" type="button" data-ticker-up="${i}"${i === 0 ? ' disabled' : ''} title="Move earlier">&uarr;</button>
+<button class="sync-btn sm" type="button" data-ticker-down="${i}"${i === items.length - 1 ? ' disabled' : ''} title="Move later">&darr;</button>
+<span class="del-x" data-ticker-del="${i}" title="Remove">&times;</span>
+</td>
+</tr>`).join('')}</tbody></table>`;
+
+const move = (from, to) => {
+const list = data.ticker.items;
+if (to < 0 || to >= list.length) return;
+// Order on the strip is the order here, so the two must not drift:
+// a splice pair rather than a sort key nobody else knows about.
+const [row] = list.splice(from, 1);
+list.splice(to, 0, row);
+queueSave();
+renderTickerItems();
+refreshStrip();
+};
+box.querySelectorAll('[data-ticker-up]').forEach((b) => b.addEventListener('click', () => move(Number(b.dataset.tickerUp), Number(b.dataset.tickerUp) - 1)));
+box.querySelectorAll('[data-ticker-down]').forEach((b) => b.addEventListener('click', () => move(Number(b.dataset.tickerDown), Number(b.dataset.tickerDown) + 1)));
+box.querySelectorAll('[data-ticker-del]').forEach((b) => b.addEventListener('click', () => {
+data.ticker.items.splice(Number(b.dataset.tickerDel), 1);
+queueSave();
+renderTickerItems();
+refreshStrip();
+}));
+}
+
+const TICKER_KIND = { fx: 'Currency', quote: 'Share', weather: 'Weather', sonia: 'Swap rate', holding: 'Holding' };
+
+function tickerLabel(item) {
+switch (item.kind) {
+case 'fx': return `${item.base || 'GBP'} / ${item.quote}`;
+case 'quote': return `${item.label || item.symbol} (${item.symbol})`;
+case 'weather': return item.city;
+case 'sonia': return '2-year SONIA, from Chatham';
+case 'holding': return `${data.ticker.shares || 0} shares, valued in GBP`;
+default: return item.kind;
+}
+}
+
+async function refreshStrip() {
+const t = await import('../features/ticker.js');
+await t.refreshTicker();
+}
+
+function initTickerSettings() {
+const addBtn = document.getElementById('ticker-add-btn');
+if (!addBtn) return; // not in this build's DOM
+const kindEl = document.getElementById('ticker-add-kind');
+const valueEl = document.getElementById('ticker-add-value');
+const say = (text) => { const el = document.getElementById('ticker-add-status'); if (el) el.textContent = text; };
+
+// The placeholder is the only hint about what each kind wants, so it
+// changes with the kind rather than describing one of the three.
+const PLACEHOLDER = { weather: 'Lisbon', fx: 'USD', quote: 'AAPL' };
+kindEl.addEventListener('change', () => { valueEl.placeholder = PLACEHOLDER[kindEl.value] || ''; });
+
+addBtn.addEventListener('click', async () => {
+const kind = kindEl.value;
+const raw = (valueEl.value || '').trim();
+if (!raw) { say('Type something to add first.'); return; }
+addBtn.disabled = true;
+say('Checking…');
+try {
+const ticker = await import('../features/ticker.js');
+let item;
+if (kind === 'weather') {
+// Resolved now rather than at render time, so a city that doesn't
+// exist fails HERE, where you can see it and fix the spelling.
+const geo = await ticker.geocode(raw);
+item = { id: uid(), kind: 'weather', city: geo.city, lat: geo.lat, lon: geo.lon, tz: geo.tz };
+say(`Added ${geo.city}, ${geo.country}.`);
+} else if (kind === 'fx') {
+const code = raw.toUpperCase().replace(/[^A-Z]/g, '');
+if (code.length !== 3) { say('A currency is a three-letter code, like USD.'); addBtn.disabled = false; return; }
+item = { id: uid(), kind: 'fx', base: 'GBP', quote: code };
+say(`Added GBP/${code}.`);
+} else {
+item = { id: uid(), kind: 'quote', symbol: raw.toUpperCase(), label: raw.toUpperCase().split('.')[0] };
+say(`Added ${item.symbol}. If it shows as failed, the symbol isn't one Yahoo knows.`);
+}
+data.ticker.items = [...(data.ticker.items || []), item];
+queueSave();
+valueEl.value = '';
+renderTickerItems();
+await refreshStrip();
+} catch (err) {
+say(err.message || String(err));
+} finally {
+addBtn.disabled = false;
+}
+});
+
+renderTickerItems();
+}
 function initEncryption() {
 const onBtn = document.getElementById('encrypt-on-btn');
 if (!onBtn) return; // not in this build's DOM

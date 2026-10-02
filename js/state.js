@@ -1288,7 +1288,20 @@ importStatus: {},
 // which is the day those shares were actually paid for. `sharesAt` is
 // the last purchase already counted, so opening the app twice in a day
 // doesn't buy twice.
-ticker: { shares: 0, sharesAt: '', monthlyGbp: 250, vestYears: 5, mode: 'day' },
+// `items` is what the strip shows, in order, edited in Settings.
+// Whatever your travel implies is added on top and taken away again
+// when you're home -- see travelItems() in ticker.js.
+ticker: {
+shares: 0, sharesAt: '', monthlyGbp: 250, vestYears: 5, mode: 'day',
+holdingSymbol: 'DBK.DE',
+items: [
+{ id: 'fx-eur', kind: 'fx', base: 'GBP', quote: 'EUR' },
+{ id: 'q-dbk', kind: 'quote', symbol: 'DBK.DE', label: 'DBK' },
+{ id: 'holding', kind: 'holding' },
+{ id: 'sonia', kind: 'sonia' },
+{ id: 'wx-london', kind: 'weather', city: 'London', lat: 51.5074, lon: -0.1278, tz: 'Europe/London' },
+],
+},
 // Last answer from each feed with the time it arrived. Synced rather
 // than device-local, so a phone opened at a bad moment shows the
 // laptop's morning figures instead of blanks, and says how old they are.
@@ -1355,6 +1368,10 @@ function migrate() {
 // its default before anything can read it.
 if (!data.ticker || typeof data.ticker !== 'object') data.ticker = blankData().ticker;
 else data.ticker = { ...blankData().ticker, ...data.ticker };
+// An empty list is a legitimate choice (hide the strip), but a MISSING
+// one is a document that predates the list -- those get the defaults
+// rather than a blank strip they never asked for.
+if (!Array.isArray(data.ticker.items)) data.ticker.items = blankData().ticker.items;
 if (!data.tickerCache || typeof data.tickerCache !== 'object') data.tickerCache = {};
 // FIRST, before anything else in here touches it. An existing document
 // predates this key entirely, and two passes below both reach for it --
