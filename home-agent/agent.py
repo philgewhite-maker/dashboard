@@ -38,7 +38,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-VERSION = "1.8"
+VERSION = "1.9"
 
 SYNC_URL = os.environ.get("DASHBOARD_SYNC_URL", "").strip()
 SECRET = os.environ.get("DASHBOARD_SECRET", "").strip()
@@ -769,8 +769,23 @@ def verb_page_colour_variants(args):
     request.add_header("Content-Type", "application/json")
     # Generous: a goto plus N clicks, each with its own 700ms settle wait,
     # can run well past the goto's own timeout alone.
-    with urllib.request.urlopen(request, timeout=BROWSER_TIMEOUT_MS / 1000 + 30) as response:
-        raw = response.read(PAGE_MAX_BYTES).decode("utf-8", "replace")
+    try:
+        with urllib.request.urlopen(request, timeout=BROWSER_TIMEOUT_MS / 1000 + 30) as response:
+            raw = response.read(PAGE_MAX_BYTES).decode("utf-8", "replace")
+    except urllib.error.HTTPError as err:
+        # Without this, a 400 from browserless (a bad `code` string, an
+        # unexpected context shape, anything it validates before running)
+        # surfaced as bare "HTTP Error 400: Bad Request" with no way to
+        # tell what was actually wrong -- confirmed live, that's exactly
+        # what came back the first time this verb was tried for real.
+        # browserless's own response body says why; read it rather than
+        # guess at a rewrite blind.
+        detail = ""
+        try:
+            detail = err.read(1000).decode("utf-8", "replace")
+        except Exception:  # noqa: BLE001 - the status code is the useful part either way
+            pass
+        raise RuntimeError(f"browserless returned HTTP {err.code}: {detail or '(no body)'}") from err
     parsed = json.loads(raw)
     log(f"page.colourVariants {url[-40:]} -> {len(parsed.get('results', []))} variants")
     return parsed
