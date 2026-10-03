@@ -20,7 +20,7 @@
 // persisted on the task itself (t.priceCheck), dated, with a Refresh button
 // to re-run it later — not the old in-memory, un-dated Map this used to be.
 import { data, queueSave, SHOPPING_CONTEXTS, unheldInventory, whoFits, inventorySets, whoFitsSet, blankInventoryItem } from '../state.js';
-import { escapeHtml, affiliateLink, daysUntil, daysSince, todayStr, MISSING_KEY_LINK_HTML, looksLikeUrl, bindBackdropClose } from '../utils.js';
+import { escapeHtml, affiliateLink, daysUntil, daysSince, todayStr, MISSING_KEY_LINK_HTML, looksLikeUrl, bindBackdropClose, pickChipHtml, knownScalarValues } from '../utils.js';
 import { captureTask, revealTask } from './tasks.js';
 import { connectionChipHtml, bindConnectionChips, connectionPickerHtml, bindConnPickers, setConnPickerValue, sensitiveFieldsShown } from './connections.js';
 import { runStockCheck, stockCheckHtml, adapterFor, seedWatchSpec, pasteStockFor, cashbackHtml, fetchPages } from './stockwatch.js';
@@ -173,6 +173,26 @@ title="${suspended ? 'Suspended — kept on the list, but not checked for stock 
 // check already trusts -- at the cost of a real request through the
 // home agent, which is why it's a second, separate button rather than
 // always run.
+// A pick-chip row per field (pickChipHtml's own shape, utils.js) built
+// from what's already on file across the WHOLE inventory, not just a
+// fixed-list field like Drinking/Smoking -- brand/style/piece/size/
+// colour all repeat heavily in practice (the same few retailers, the
+// same handful of sizes), so most of the time this add form should be
+// clicking, not typing. Kept as its own small local version rather than
+// reusing pickChipHtml() directly: that function bakes its own add-input
+// in under a `data-pick-add` attribute, and this dialog's existing
+// val()/setVal() (and the Fill-from-link/Fetch-exact-colour autofill
+// that already targets them) are built around `data-inv-new` -- a pill
+// click here just writes into that SAME input rather than introducing a
+// second attribute convention and a second source of truth to keep read
+// in step with the first.
+function chipFieldHtml(label, field, values) {
+const chips = values.map((v) => `<span class="pick-chip" data-inv-pick-field="${escapeHtml(field)}" data-inv-pick-value="${escapeHtml(v)}">${escapeHtml(v)}</span>`).join('');
+return `<label style="font-size:12px;display:block;margin-bottom:6px;">${label}
+${chips ? `<div class="tag-editor" style="margin:2px 0 4px;">${chips}</div>` : ''}
+<input type="text" autocomplete="off" class="tag-add-input" data-inv-new="${field}" style="width:100%;display:block;"></label>`;
+}
+
 function openAddInventoryDialog() {
 const dialog = document.createElement('div');
 dialog.className = 'mail-view-backdrop';
@@ -185,13 +205,11 @@ dialog.innerHTML = `<div class="mail-view-card" style="max-width:420px;">
 <button class="sync-btn sm" type="button" data-inv-fetch-details>Fetch exact colour&hellip;</button>
 <span class="sync-status" data-inv-fetch-status></span>
 </div>
-<label style="font-size:12px;display:block;margin-bottom:6px;">Brand<input type="text" autocomplete="off" class="tag-add-input" data-inv-new="brand" style="width:100%;display:block;"></label>
-<label style="font-size:12px;display:block;margin-bottom:6px;">Style<input type="text" autocomplete="off" class="tag-add-input" data-inv-new="style" style="width:100%;display:block;"></label>
-<label style="font-size:12px;display:block;margin-bottom:6px;">Piece<input type="text" autocomplete="off" class="tag-add-input" data-inv-new="piece" style="width:100%;display:block;"></label>
-<div class="account-field-row">
-<label>Size<input type="text" autocomplete="off" class="tag-add-input" data-inv-new="size"></label>
-<label>Colour<input type="text" autocomplete="off" class="tag-add-input" data-inv-new="colour"></label>
-</div>
+${chipFieldHtml('Brand', 'brand', knownScalarValues(data.inventory, 'brand'))}
+${chipFieldHtml('Style', 'style', knownScalarValues(data.inventory, 'style'))}
+${chipFieldHtml('Piece', 'piece', knownScalarValues(data.inventory, 'piece'))}
+${chipFieldHtml('Size', 'size', knownScalarValues(data.inventory, 'size'))}
+${chipFieldHtml('Colour', 'colour', knownScalarValues(data.inventory, 'colour'))}
 <div style="margin:8px 0;">Already with${connectionPickerHtml('inv-new-holder', "Nobody yet — it's in your own drawer")}</div>
 <label style="font-size:12px;display:block;margin:0 0 8px;">Notes<textarea rows="2" data-inv-new="notes" style="width:100%;"></textarea></label>
 <div class="mail-view-actions">
@@ -207,6 +225,13 @@ dialog.querySelector('[data-inv-new-cancel]').addEventListener('click', close);
 
 const val = (n) => dialog.querySelector(`[data-inv-new="${n}"]`).value.trim();
 const setVal = (n, v) => { if (v) dialog.querySelector(`[data-inv-new="${n}"]`).value = v; };
+dialog.querySelectorAll('[data-inv-pick-value]').forEach((chip) => {
+chip.addEventListener('click', () => {
+const field = chip.dataset.invPickField;
+dialog.querySelectorAll(`[data-inv-pick-field="${field}"]`).forEach((c) => c.classList.toggle('active', c === chip));
+setVal(field, chip.dataset.invPickValue);
+});
+});
 const linkInput = dialog.querySelector('[data-inv-new-link]');
 const status = dialog.querySelector('[data-inv-fetch-status]');
 
@@ -970,9 +995,9 @@ el.innerHTML = '<div class="settings-note" style="margin:0;">Hidden on this devi
 return;
 }
 el.innerHTML = `<div class="sync-row" style="margin-bottom:8px;flex-wrap:wrap;">
-<button class="sync-btn sm" type="button" data-inv-add-item>+ Add item</button>
-<button class="sync-btn sm" type="button" data-find-set-for-her>Find a set for her…</button>
-<button class="sync-btn sm" type="button" data-inv-recheck-fits title="Who fits is worked out fresh every time this panel renders, but nothing re-renders it just because a connection changed elsewhere -- click after adding someone new or updating a size">&#8635; Recheck fits</button>
+<button class="sync-btn sm inv-inline-btn" type="button" data-inv-add-item>+ Add item</button>
+<button class="sync-btn sm inv-inline-btn" type="button" data-find-set-for-her>Find a set for her…</button>
+<button class="sync-btn sm inv-inline-btn" type="button" data-inv-recheck-fits title="Who fits is worked out fresh every time this panel renders, but nothing re-renders it just because a connection changed elsewhere -- click after adding someone new or updating a size">&#8635; Recheck fits</button>
 <span class="settings-note" style="margin:0;">Searches the retailer for a bra and matching knickers in her size, under a budget.</span>
 </div>` + inventorySetsHtml() + inventoryHtml();
 bindConnectionChips(el);

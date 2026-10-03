@@ -3540,6 +3540,7 @@ color:inherit;
    file's comment on .sync-btn.sm{width:100%}) -- these sit inline in a
    flex row and were stretching to fill it instead. */
 .sync-btn.sm.book-inline-btn{width:auto;margin-top:0;flex:0 0 auto;}
+.sync-btn.sm.inv-inline-btn{width:auto;margin-top:0;flex:0 0 auto;}
 .colour-hover-preview{
 position:fixed;
 display:none;
