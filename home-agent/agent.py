@@ -38,7 +38,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-VERSION = "1.7"
+VERSION = "1.8"
 
 SYNC_URL = os.environ.get("DASHBOARD_SYNC_URL", "").strip()
 SECRET = os.environ.get("DASHBOARD_SECRET", "").strip()
@@ -694,10 +694,93 @@ def verb_page_render(args):
     return {"pages": pages}
 
 
+# Hardcoded, not accepted from the queue -- this verb can only ever do
+# the one specific thing it's named for. Runs inside browserless's own
+# /function endpoint (confirmed real and open-source from its own test
+# suite, src/routes/chromium/tests/function.spec.ts: POST /function with
+# {code, context}, code a module default-exporting async ({page,
+# context}) => {...}, context passed straight through). Clicking a
+# colour swatch on a real Agent Provocateur product page updates BOTH
+# the "Colour: X" label and the page's own URL -- the site's own Angular
+# router does this client-side, confirmed live against a real product
+# page -- so reading those after each click gets the true colourway list
+# and the true per-colour URL directly, rather than inferring either
+# from a listing's best-effort coverage or guessing from a URL slug (see
+# jsonLdCatalogItems/slugColourGuess in the dashboard's agentprovocateur.js
+# for the real gaps that left open).
+#
+# The [data-swiper-slide-index] button selector is the real, confirmed
+# markup -- fetched live and inspected, not assumed from the listing
+# card's own (different) swatch wrapper: each colour swatch sits inside
+# a swiper carousel slide, itself inside a plain <button>, which is what
+# actually receives the click.
+COLOUR_SWATCH_FUNCTION = """
+export default async function ({ page, context }) {
+  await page.goto(context.url, { waitUntil: "networkidle2", timeout: context.timeoutMs || 45000 });
+  const results = [];
+  const count = await page.$$eval('[data-swiper-slide-index] button', (els) => els.length).catch(() => 0);
+  for (let i = 0; i < count; i++) {
+    // Re-queried every iteration, not reused from before the click --
+    // Angular re-renders the carousel on a colour change, which detaches
+    // the old button elements and would throw on a stale handle.
+    const buttons = await page.$$('[data-swiper-slide-index] button');
+    if (!buttons[i]) continue;
+    await buttons[i].click();
+    await new Promise((r) => setTimeout(r, 700));
+    const colour = await page.evaluate(() => {
+      const el = [...document.querySelectorAll('span')].find((s) => /^Colour:/i.test((s.textContent || '').trim()));
+      return el ? el.textContent.replace(/^Colour:\\s*/i, '').trim() : '';
+    });
+    results.push({ colour, url: page.url() });
+  }
+  return { data: JSON.stringify({ results }), type: "application/json" };
+}
+"""
+
+
+def verb_page_colour_variants(args):
+    """Click through a product's own colour swatches and report the real
+    colour name and URL each one resolves to.
+
+    Needs the SAME browser container as page.render -- this is a second
+    thing that container can do, not a second container.
+    """
+    if not BROWSER_URL:
+        raise RuntimeError(
+            "page.colourVariants needs the browser container: set BROWSER_URL (and BROWSER_TOKEN) "
+            "in .env, then `docker compose up -d` to bring the `browser` service up"
+        )
+    url = args.get("url")
+    if not url or not str(url).lower().startswith("https://"):
+        raise ValueError("page.colourVariants needs a https url")
+    query = {}
+    if BROWSER_TOKEN:
+        query["token"] = BROWSER_TOKEN
+    if BROWSER_STEALTH:
+        query["launch"] = json.dumps({"stealth": True})
+    endpoint = f"{BROWSER_URL}/function"
+    if query:
+        endpoint += f"?{urllib.parse.urlencode(query)}"
+    body = json.dumps({
+        "code": COLOUR_SWATCH_FUNCTION,
+        "context": {"url": url, "timeoutMs": BROWSER_TIMEOUT_MS},
+    }).encode("utf-8")
+    request = urllib.request.Request(endpoint, data=body, method="POST")
+    request.add_header("Content-Type", "application/json")
+    # Generous: a goto plus N clicks, each with its own 700ms settle wait,
+    # can run well past the goto's own timeout alone.
+    with urllib.request.urlopen(request, timeout=BROWSER_TIMEOUT_MS / 1000 + 30) as response:
+        raw = response.read(PAGE_MAX_BYTES).decode("utf-8", "replace")
+    parsed = json.loads(raw)
+    log(f"page.colourVariants {url[-40:]} -> {len(parsed.get('results', []))} variants")
+    return parsed
+
+
 VERBS = {
     "agent.ping": verb_ping,
     "page.fetch": verb_page_fetch,
     "page.render": verb_page_render,
+    "page.colourVariants": verb_page_colour_variants,
     "plex.libraries": verb_plex_libraries,
     "plex.search": verb_plex_search,
     "arr.search": verb_arr_search,
