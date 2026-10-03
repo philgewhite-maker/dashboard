@@ -15,7 +15,7 @@
 //    March should not be adding noise in January.
 import { data, queueSave, TASK_BUCKETS, SHOPPING_CONTEXTS, blankTask } from '../state.js';
 import { photoDelete } from '../db.js';
-import { uid, todayStr, escapeHtml, affiliateLink, hydratePhotoBackgrounds, resizeImageToBlob, daysUntil, daysSince, scrollAndFlash, looksLikeUrl } from '../utils.js';
+import { uid, todayStr, escapeHtml, affiliateLink, hydratePhotoBackgrounds, resizeImageToBlob, daysUntil, daysSince, scrollAndFlash, looksLikeUrl, bindBackdropClose } from '../utils.js';
 import { uploadAttachment, storePhoto, deleteAttachment, openAttachment, formatBytes } from '../files.js';
 
 const BUCKET_LABEL = Object.fromEntries(TASK_BUCKETS.map((b) => [b.bucket, b.label]));
@@ -502,7 +502,7 @@ ${candidates.length ? '' : '<div class="settings-note" style="margin:4px 0 0;">N
 </div>`;
 document.body.appendChild(dialog);
 const close = () => dialog.remove();
-dialog.addEventListener('click', (e) => { if (e.target === dialog) close(); });
+bindBackdropClose(dialog, close);
 dialog.querySelector('[data-project-file-cancel]').addEventListener('click', close);
 const select = dialog.querySelector('[data-project-pick]');
 dialog.querySelectorAll('input[name="project-file-mode"]').forEach((r) => {

@@ -3,7 +3,7 @@ import { captureTask, revealTask } from './tasks.js';
 import { photoDelete, photoUrl } from '../db.js';
 import { storePhoto, serverPhotoUrl } from '../files.js';
 import {
-uid, todayStr, daysSince, escapeHtml, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, buildFlagMatcher, applyFlagMatcher, knownCityMap, knownScalarValues, pickChipHtml, scrollAndFlash, bindForm, foldDiacritics,
+uid, todayStr, daysSince, escapeHtml, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, buildFlagMatcher, applyFlagMatcher, knownCityMap, knownScalarValues, pickChipHtml, scrollAndFlash, bindForm, foldDiacritics, bindBackdropClose,
 resizeImageToBlob, classifyProfileUpload, cropToContentBlob, contentCropBounds, loadImage, MISSING_KEY_LINK_HTML,
 } from '../utils.js';
 import { MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot } from '../ai.js';
@@ -1935,7 +1935,7 @@ return `<button type="button" class="tag-picker-chip${color ? ' tag-picker-' + c
 <button class="add-btn" type="button" id="tag-picker-save">Save</button>
 </div>
 </div>`;
-box.addEventListener('click', (e) => { if (e.target === box) closeTagColorPicker(); });
+bindBackdropClose(box, closeTagColorPicker);
 document.getElementById('tag-picker-close').addEventListener('click', closeTagColorPicker);
 document.getElementById('tag-picker-cancel').addEventListener('click', closeTagColorPicker);
 box.querySelectorAll('[data-tag-picker-key]').forEach((chip) => {

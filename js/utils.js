@@ -599,6 +599,29 @@ el.classList.add('flash-new');
 setTimeout(() => el.classList.remove('flash-new'), 1800);
 }
 
+// Closes a backdrop-style dialog on a genuine click OUTSIDE its content,
+// but not on a text-selection drag that merely STARTED inside the
+// dialog and slipped past its own edge before the mouse button lifted --
+// confirmed live as a real, repeated data-loss bug (reported directly: a
+// part-filled form lost by dragging to select text, the drag ending
+// over the backdrop). A 'click' event's own target resolves to the
+// common ancestor of where the mouse went DOWN and where it came UP, so
+// that drag produces a click whose target is the backdrop itself, same
+// as it would be for an actual outside click -- the backdrop's own
+// click handler couldn't tell the two apart. This can: it only closes
+// when BOTH the mousedown AND the resulting click targeted the backdrop
+// directly, which a drag that started inside the dialog never does.
+// Every backdrop-dismiss dialog in the app used the same one-line
+// `addEventListener('click', (e) => { if (e.target === dialog) close() })`
+// copy, so fixed once here rather than patched 13 times over.
+function bindBackdropClose(backdrop, close) {
+let downOnBackdrop = false;
+backdrop.addEventListener('mousedown', (e) => { downOnBackdrop = e.target === backdrop; });
+backdrop.addEventListener('click', (e) => {
+if (e.target === backdrop && downOnBackdrop) close();
+});
+}
+
 // Binds an add-panel's button directly (no <form> submit) — some mobile
 // browsers swallow the first tap after a keyboard closes, so pointerdown
 // (fires the instant a finger touches the screen) is paired with click as
@@ -1203,7 +1226,7 @@ return classified.every((c) => c.isScreenshot) && looksLikeSameScreenshotPieces(
 
 export {
 todayStr, daysAgoStr, dateStrAdd, unfoldIcsLines, parseIcsProperty, icsDateTime, parseLooseDateTime, last7Dates, uid, daysSince, daysUntil, foldDiacritics, MISSING_KEY_LINK_HTML, SYNC_LINK_HTML, looksLikeUrl,
-escapeHtml, affiliateLink, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, buildFlagMatcher, applyFlagMatcher, knownCityMap, knownScalarValues, pickChipHtml, splitCsvLine, scrollAndFlash, bindForm,
+escapeHtml, affiliateLink, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, buildFlagMatcher, applyFlagMatcher, knownCityMap, knownScalarValues, pickChipHtml, splitCsvLine, scrollAndFlash, bindForm, bindBackdropClose,
 findMentions, COUNTRY_NAME_TO_NATIONALITY,
 resizeImageToBlob, fileToBase64, loadImage, cropThumbnailToBlob,
 hashFile, captureDateOf, betterCaptureDate, dateFromFilename,

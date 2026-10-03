@@ -10,7 +10,7 @@
 // inventory): blank is "at your home", set is "given permanently to
 // that connection" -- same question, same answer shape.
 import { data, queueSave, blankBookItem, currentAge } from '../state.js';
-import { escapeHtml, affiliateLink, scrollAndFlash, hydratePhotoBackgrounds, splitCsvLine, todayStr, MISSING_KEY_LINK_HTML } from '../utils.js';
+import { escapeHtml, affiliateLink, scrollAndFlash, hydratePhotoBackgrounds, splitCsvLine, todayStr, MISSING_KEY_LINK_HTML, bindBackdropClose } from '../utils.js';
 import { connectionChipHtml, bindConnectionChips, connectionPickerHtml, bindConnPickers, setConnPickerValue } from './connections.js';
 import { searchTitle } from '../catalogue.js';
 import { MissingKeyError, resolveBookDetails, resolveSeriesBooks } from '../ai.js';
@@ -384,7 +384,7 @@ document.body.appendChild(dialog);
 bindConnPickers();
 if (b.holderId) setConnPickerValue('book-new-holder', b.holderId);
 const close = () => dialog.remove();
-dialog.addEventListener('click', (e) => { if (e.target === dialog) close(); });
+bindBackdropClose(dialog, close);
 dialog.querySelector('[data-book-new-cancel]').addEventListener('click', close);
 
 let picked = { imageUrl: b.imageUrl || '', externalIds: b.externalIds || {}, link: b.link || '' };
@@ -810,7 +810,7 @@ document.body.appendChild(dialog);
 bindConnPickers();
 if (book.holderId) setConnPickerValue('book-holder-pick', book.holderId);
 const close = () => dialog.remove();
-dialog.addEventListener('click', (e) => { if (e.target === dialog) close(); });
+bindBackdropClose(dialog, close);
 dialog.querySelector('[data-holder-cancel]').addEventListener('click', close);
 dialog.querySelector('[data-holder-save]').addEventListener('click', () => {
 book.holderId = document.getElementById('book-holder-pick')?.value || '';

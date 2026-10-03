@@ -21,7 +21,7 @@
 // a boarding pass's QR code arrives as an inline attachment, and blocking
 // it bought no privacy while making the one thing you opened the mail for
 // invisible.
-import { escapeHtml } from '../utils.js';
+import { escapeHtml, bindBackdropClose } from '../utils.js';
 import { formatBytes } from '../files.js';
 
 let dialog = null;
@@ -252,7 +252,7 @@ async function openMessage(id, { subject } = {}) {
 close();
 dialog = document.createElement('div');
 dialog.className = 'mail-view-backdrop';
-dialog.addEventListener('click', (e) => { if (e.target === dialog) close(); });
+bindBackdropClose(dialog, close);
 dialog.innerHTML = `<div class="mail-view-card"><div class="mail-view-subject">${escapeHtml(subject || 'Loading…')}</div><div class="settings-note">Fetching the message…</div></div>`;
 document.body.appendChild(dialog);
 document.addEventListener('keydown', onKey);
@@ -279,7 +279,7 @@ function showDetail(detail) {
 if (!dialog) {
 dialog = document.createElement('div');
 dialog.className = 'mail-view-backdrop';
-dialog.addEventListener('click', (e) => { if (e.target === dialog) close(); });
+bindBackdropClose(dialog, close);
 document.body.appendChild(dialog);
 document.addEventListener('keydown', onKey);
 }

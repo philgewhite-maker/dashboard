@@ -13,7 +13,7 @@
 // request, a voice instruction), so shape normalisation lives in exactly
 // one place.
 import { data, queueSave, blankMediaItem, MEDIA_KINDS, MEDIA_STATUSES } from '../state.js';
-import { escapeHtml, affiliateLink, scrollAndFlash, hydratePhotoBackgrounds, looksLikeUrl } from '../utils.js';
+import { escapeHtml, affiliateLink, scrollAndFlash, hydratePhotoBackgrounds, looksLikeUrl, bindBackdropClose } from '../utils.js';
 import { identifyUrl, catalogueLabel, CATALOGUE_LABELS, watchProviders, subscriptionFor, collapseProviders, shortProviderName } from '../catalogue.js';
 
 const KIND_LABEL = Object.fromEntries(MEDIA_KINDS.map((k) => [k.kind, k.label]));
@@ -730,7 +730,7 @@ ${readOnly.length ? `<div class="settings-note" style="margin:0 0 8px;">Also ide
 <div class="sync-status" data-ids-status></div></div>`;
 document.body.appendChild(dialog);
 const close = () => dialog.remove();
-dialog.addEventListener('click', (e) => { if (e.target === dialog) close(); });
+bindBackdropClose(dialog, close);
 dialog.querySelector('[data-ids-cancel]').addEventListener('click', close);
 const focus = dialog.querySelector(`[data-id-field="${focusKey}"]`) || dialog.querySelector('[data-id-field]');
 focus?.focus();
@@ -822,7 +822,7 @@ dialog.innerHTML = `<div class="mail-view-card" style="max-width:480px;">
 <div class="settings-note" style="margin:2px 0 8px;">Reading the series from TheTVDB&hellip;</div></div>`;
 document.body.appendChild(dialog);
 const close = () => dialog.remove();
-dialog.addEventListener('click', (e) => { if (e.target === dialog) close(); });
+bindBackdropClose(dialog, close);
 
 let info = { ongoing: true, status: '' };
 let sessions = { sessions: [], sessioned: false, episodeCount: 0 };

@@ -42,7 +42,7 @@
 // agent finishes its own work regardless, but nothing is left running in
 // a closed tab to start the NEXT fetch once one stage's result is back.
 import { data, queueSave, sizeGroupFor } from '../state.js';
-import { escapeHtml } from '../utils.js';
+import { escapeHtml, bindBackdropClose } from '../utils.js';
 import { captureTask } from './tasks.js';
 import { connectionPickerHtml, bindConnPickers } from './connections.js';
 import { fetchPages, wantedSizesFor, resultFor, money } from './stockwatch.js';
@@ -260,7 +260,7 @@ if (boundConnId) liveDialogs.delete(boundConnId);
 clearInterval(pickerPoll);
 dialog.remove();
 };
-dialog.addEventListener('click', (e) => { if (e.target === dialog) close(); });
+bindBackdropClose(dialog, close);
 dialog.querySelector('[data-setfinder-close]').addEventListener('click', close);
 bindConnPickers();
 

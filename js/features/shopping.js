@@ -20,7 +20,7 @@
 // persisted on the task itself (t.priceCheck), dated, with a Refresh button
 // to re-run it later — not the old in-memory, un-dated Map this used to be.
 import { data, queueSave, SHOPPING_CONTEXTS, unheldInventory, whoFits, inventorySets, whoFitsSet, blankInventoryItem } from '../state.js';
-import { escapeHtml, affiliateLink, daysUntil, daysSince, todayStr, MISSING_KEY_LINK_HTML, looksLikeUrl } from '../utils.js';
+import { escapeHtml, affiliateLink, daysUntil, daysSince, todayStr, MISSING_KEY_LINK_HTML, looksLikeUrl, bindBackdropClose } from '../utils.js';
 import { captureTask, revealTask } from './tasks.js';
 import { connectionChipHtml, bindConnectionChips, connectionPickerHtml, bindConnPickers, setConnPickerValue, sensitiveFieldsShown } from './connections.js';
 import { runStockCheck, stockCheckHtml, adapterFor, seedWatchSpec, pasteStockFor, cashbackHtml, fetchPages } from './stockwatch.js';
@@ -202,7 +202,7 @@ dialog.innerHTML = `<div class="mail-view-card" style="max-width:420px;">
 document.body.appendChild(dialog);
 bindConnPickers();
 const close = () => dialog.remove();
-dialog.addEventListener('click', (e) => { if (e.target === dialog) close(); });
+bindBackdropClose(dialog, close);
 dialog.querySelector('[data-inv-new-cancel]').addEventListener('click', close);
 
 const val = (n) => dialog.querySelector(`[data-inv-new="${n}"]`).value.trim();
@@ -284,7 +284,7 @@ ${field('colour', 'Colour', (spec.colours || [])[0], '140px')}
 </div>`;
 document.body.appendChild(dialog);
 const close = () => dialog.remove();
-dialog.addEventListener('click', (e) => { if (e.target === dialog) close(); });
+bindBackdropClose(dialog, close);
 dialog.querySelector('[data-owned-cancel]').addEventListener('click', close);
 dialog.querySelector('[data-owned-save]').addEventListener('click', () => {
 const val = (n) => dialog.querySelector(`[data-owned-new="${n}"]`).value.trim();
@@ -601,7 +601,7 @@ dialog.className = 'mail-view-backdrop';
 dialog.innerHTML = watchEditorHtml(t);
 document.body.appendChild(dialog);
 const close = () => { liveColourDialogs.delete(t.id); if (colourPreviewEl) colourPreviewEl.style.display = 'none'; dialog.remove(); };
-dialog.addEventListener('click', (e) => { if (e.target === dialog) close(); });
+bindBackdropClose(dialog, close);
 const save = () => {
 const lines = dialog.querySelector('[data-watch-urls]').value.split('\n').map((s) => s.trim()).filter(Boolean);
 const val = (n) => dialog.querySelector(`[data-watch-spec="${n}"]`).value.trim();

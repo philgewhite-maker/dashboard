@@ -21,7 +21,7 @@
 // not built out here as empty placeholder sections that would look
 // broken rather than deliberately deferred.
 import { data, queueSave, currentAge, blankConnection } from '../state.js';
-import { escapeHtml, avatarHtml, hydratePhotoBackgrounds } from '../utils.js';
+import { escapeHtml, avatarHtml, hydratePhotoBackgrounds, bindBackdropClose } from '../utils.js';
 import { initBooks, renderBooks } from './books.js';
 
 function kidCardHtml(c) {
@@ -49,7 +49,7 @@ dialog.innerHTML = `<div class="mail-view-card" style="max-width:360px;">
 </div>`;
 document.body.appendChild(dialog);
 const close = () => dialog.remove();
-dialog.addEventListener('click', (e) => { if (e.target === dialog) close(); });
+bindBackdropClose(dialog, close);
 dialog.querySelector('[data-kid-cancel]').addEventListener('click', close);
 dialog.querySelector('[data-kid-save]').addEventListener('click', () => {
 const name = dialog.querySelector('[data-kid-field="name"]').value.trim();
