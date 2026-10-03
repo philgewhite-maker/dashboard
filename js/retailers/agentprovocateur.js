@@ -80,7 +80,17 @@ return m ? m[1].toUpperCase() : '';
 // answer.
 function specFromUrl(url) {
 const base = String(url || '').split(/[#?]/)[0];
-const m = /\/apm?\d{10,11}-([a-z0-9-]+?)-\d+$/i.exec(base);
+// The SKU-prefixed slug ("apm0017410000-jayce-thong-19692") is one real
+// shape; AP also serves plain ones with no SKU segment at all
+// ("lorna-full-brief-in-sand-9206", "lorna-ouvert-258" -- both seen live
+// this session, the second via page.colourVariants's own real results).
+// Confirmed live as a real bug: the prefix used to be required, so a
+// plain-slug URL matched nothing at all and silently fell through to
+// the empty style/pieces default -- only brand (hardcoded either way)
+// ever filled in. The prefix is optional here instead of a second,
+// separate regex, since the descriptive words after it are read
+// identically either way.
+const m = /\/(?:apm?\d{10,11}-)?([a-z0-9-]+?)-\d+$/i.exec(base);
 const spec = { brand: 'Agent Provocateur', style: '', pieces: [] };
 if (!m) return spec;
 // "lorna-plunge-underwired-bra-in-dark-pink-cobalt" -> style "Lorna",
