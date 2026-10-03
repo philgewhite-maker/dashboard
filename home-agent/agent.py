@@ -38,7 +38,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-VERSION = "1.10"
+VERSION = "1.11"
 
 SYNC_URL = os.environ.get("DASHBOARD_SYNC_URL", "").strip()
 SECRET = os.environ.get("DASHBOARD_SECRET", "").strip()
@@ -737,7 +737,7 @@ export default async function ({ page, context }) {
     await new Promise((r) => setTimeout(r, 700));
     const colour = await page.evaluate(() => {
       const el = [...document.querySelectorAll('span')].find((s) => /^Colour:/i.test((s.textContent || '').trim()));
-      return el ? el.textContent.replace(/^Colour:\\s*/i, '').trim() : '';
+      return el ? el.textContent.trim() : '';
     });
     results.push({ colour, url: page.url() });
   }
@@ -795,8 +795,25 @@ def verb_page_colour_variants(args):
             pass
         raise RuntimeError(f"browserless returned HTTP {err.code}: {detail or '(no body)'}") from err
     parsed = json.loads(raw)
-    log(f"page.colourVariants {url[-40:]} -> {len(parsed.get('results', []))} variants")
-    return parsed
+    # browserless's /function response for a JSON-typed return is the
+    # {data, type} wrapper itself, NOT just the bare `data` payload --
+    # confirmed live: the real response was {"data": "<json string>",
+    # "type": "application/json"}, so `data` needs a SECOND json.loads
+    # to reach the {results:[...]} this function actually returned.
+    if isinstance(parsed, dict) and isinstance(parsed.get("data"), str):
+        try:
+            parsed = json.loads(parsed["data"])
+        except (TypeError, ValueError):
+            pass
+    results = parsed.get("results", []) if isinstance(parsed, dict) else []
+    # Stripped here rather than inside the JS string above -- confirmed
+    # live that a regex round-tripped through this Python string, into
+    # JSON, into V8, left "Colour:  " on the front of every value
+    # untouched, and this is far easier to get right and verify directly.
+    for item in results:
+        item["colour"] = re.sub(r"^colour:\s*", "", str(item.get("colour") or ""), flags=re.IGNORECASE).strip()
+    log(f"page.colourVariants {url[-40:]} -> {len(results)} variants")
+    return {"results": results}
 
 
 VERBS = {
