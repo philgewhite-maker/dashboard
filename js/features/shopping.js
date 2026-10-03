@@ -928,20 +928,31 @@ ${body}
 }).join('')}</div>`;
 }
 
+// Brand/style/piece/size/colour editable inline, exactly like a held
+// item already is on its owner's own card (connections.js's
+// ownedListHtml/data-owned-field) -- the same record, so the same
+// editing convention, not a second one invented for this list.
+// Confirmed live as a real gap: nothing here was editable at all before
+// this, only Give and delete.
 function inventoryHtml() {
 const items = unheldInventory();
 if (!items.length) return '<div class="empty">Nothing unassigned — everything recorded is with someone.</div>';
+const field = (o, name, placeholder, width) => `<input type="text" autocomplete="off" placeholder="${placeholder}" data-inv-field="${name}" data-inv-id="${escapeHtml(o.id)}" value="${escapeHtml(o[name] || '')}" style="max-width:${width};">`;
 return items.map((o) => {
-const label = [o.brand, o.style, o.piece, o.size, o.colour].filter(Boolean).join(' · ') || '(unlabelled item)';
 const fits = whoFits(o);
 const fitsHtml = fits.length
 ? fits.slice(0, 4).map(({ conn, how }) => `<span class="inv-fit" title="${escapeHtml(how)}">${connectionChipHtml(conn)}<button type="button" class="todo-add-btn" data-inv-assign="${escapeHtml(o.id)}:${escapeHtml(conn.id)}" title="Record that ${escapeHtml(conn.name || 'she')} now has this">Give</button></span>`).join('')
 : `<span class="settings-note" style="margin:0;">${o.size ? 'Nobody on file takes this size.' : 'No size recorded — add one and this can find a match.'}</span>`;
-const titleHtml = o.link
-? `<a class="shop-title" href="${escapeHtml(affiliateLink(o.link))}" target="_blank" rel="noopener noreferrer" title="Open the product page this was bought from">${escapeHtml(label)}</a>`
-: `<span class="shop-title">${escapeHtml(label)}</span>`;
-return `<div class="shop-row">
-${titleHtml}
+const linkHtml = o.link
+? `<a class="inv-link" href="${escapeHtml(affiliateLink(o.link))}" target="_blank" rel="noopener noreferrer" title="Open the product page this was bought from">&#128279;</a>`
+: '';
+return `<div class="shop-row inv-row">
+${field(o, 'brand', 'Brand', '110px')}
+${field(o, 'style', 'Style', '100px')}
+${field(o, 'piece', 'Piece', '110px')}
+${field(o, 'size', 'Size', '60px')}
+${field(o, 'colour', 'Colour', '90px')}
+${linkHtml}
 <span class="inv-fits">${fitsHtml}</span>
 <span class="del-x" style="opacity:1;" data-inv-remove="${escapeHtml(o.id)}" title="Delete this item">&times;</span>
 </div>`;
@@ -961,6 +972,7 @@ return;
 el.innerHTML = `<div class="sync-row" style="margin-bottom:8px;flex-wrap:wrap;">
 <button class="sync-btn sm" type="button" data-inv-add-item>+ Add item</button>
 <button class="sync-btn sm" type="button" data-find-set-for-her>Find a set for her…</button>
+<button class="sync-btn sm" type="button" data-inv-recheck-fits title="Who fits is worked out fresh every time this panel renders, but nothing re-renders it just because a connection changed elsewhere -- click after adding someone new or updating a size">&#8635; Recheck fits</button>
 <span class="settings-note" style="margin:0;">Searches the retailer for a bra and matching knickers in her size, under a budget.</span>
 </div>` + inventorySetsHtml() + inventoryHtml();
 bindConnectionChips(el);
@@ -971,6 +983,16 @@ if (findSetBtn) findSetBtn.addEventListener('click', async () => {
 const { openSetFinderDialog } = await import('./setfinder.js');
 openSetFinderDialog();
 });
+// whoFits()/whoFitsSet() are already computed fresh on every call --
+// nothing here is cached or saved -- but nothing triggers THIS panel's
+// own re-render just because a connection was added or a size changed
+// somewhere else (connections.js calls renderConnections(), not this).
+// An already-open Inventory panel can sit showing stale suggestions
+// until something inside it happens to re-render -- confirmed live as
+// a real gap, not hypothetical, so this is a direct, one-click fix
+// rather than trying to wire a cross-module render trigger for it.
+const recheckBtn = el.querySelector('[data-inv-recheck-fits]');
+if (recheckBtn) recheckBtn.addEventListener('click', () => renderInventory());
 // Giving a whole set is one action, not one per garment -- that's the
 // unit you'd actually hand over.
 el.querySelectorAll('[data-inv-give-set]').forEach((btn) => {
@@ -983,6 +1005,20 @@ const row = data.inventory.find((o) => o.id === item.id);
 if (row) row.holderId = connId;
 });
 queueSave();
+renderInventory();
+});
+});
+el.querySelectorAll('[data-inv-field]').forEach((input) => {
+input.addEventListener('change', () => {
+const row = data.inventory.find((o) => o.id === input.dataset.invId);
+if (!row) return;
+row[input.dataset.invField] = input.value.trim();
+queueSave();
+// Re-rendered, unlike ownedListHtml's otherwise-identical handler --
+// this list's whole point is whoFits()'s per-row suggestions, and
+// those are keyed on exactly these fields (size above all). Leaving
+// them stale after an edit would undercut the one thing this panel
+// is for.
 renderInventory();
 });
 });

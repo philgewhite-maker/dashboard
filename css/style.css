@@ -2646,7 +2646,15 @@ white-space:nowrap;
 .shop-list h3{margin:0 0 6px;font-size:13px;}
 .shop-row{display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--line);flex-wrap:wrap;}
 .shop-row:first-of-type{border-top:none;}
-.shop-title{font-size:14px;font-weight:600;cursor:pointer;flex:1 1 auto;min-width:120px;}
+/* Matches .mail-subject's own size (Media/Books/every other tab's
+   equivalent row title) -- this used to run a point size larger AND
+   bold, which reads as oddly large repeated down a whole list even
+   though no single row looks wrong on its own; confirmed live as
+   exactly what the user meant by "font seems large in this panel". */
+.shop-title{font-size:13px;cursor:pointer;flex:1 1 auto;min-width:120px;}
+/* Explicit rather than relying on inheritance -- a plain <input> doesn't
+   automatically pick up the page's own font the way other text does. */
+.inv-row input[type="text"]{font-family:inherit;font-size:12px;border:1px solid var(--line);border-radius:6px;padding:3px 6px;background:transparent;color:var(--ink);}
 .shop-row.done .shop-title{text-decoration:line-through;color:var(--muted);}
 .shop-also{font-size:11px;color:var(--muted);}
 /* Both of these have to out-specify `.sync-btn.sm{width:100%}` (0,2,0) --
