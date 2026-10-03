@@ -3491,28 +3491,38 @@ padding:24px;
 .family-kids-strip{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0;}
 .book-group{border-top:1px solid var(--line);}
 .book-group:first-of-type{border-top:none;}
-/* The book row inside .book-group is the real, always-visible row (the
-   series' next/first book) -- same markup a standalone book uses, so it
-   never has none of ITS OWN border/padding. Confirmed live as a real
-   alignment bug: a leading chevron column used to push this row's image
-   and title to the right of where a standalone row's started, so the
-   list read as raggedly, randomly indented. The chevron now belongs to
-   the expander line BELOW the row instead, indented to start under the
-   title rather than added as a column in front of the image. */
 .book-group > .mail-row{border-top:none;}
-.book-group-expander{margin-top:-4px;}
-.book-group-summary,
-.book-group-summary-static{
+/* Image/placeholder sized identically so a book with no cover doesn't
+   shift its title left of a book that has one -- confirmed live as a
+   real alignment bug of its own, separate from the stacking one below. */
+.media-art-placeholder{width:44px;flex:0 0 auto;}
+/* The stacked variant (a series' representative row): image stays
+   top-aligned, and the title + "#N in X series" line sit in a column
+   beside it rather than the second line being a block-level sibling
+   added below the whole row -- confirmed live that the sibling version
+   grew the row taller than the cover image instead of fitting inside
+   its height. Nothing forces the column to exactly the image's height;
+   two short lines are shorter than 64px on their own, so the row's
+   overall height still ends up set by the (taller) image, same effect
+   without pinning a number that would drift the moment type size does. */
+.book-row-stacked{align-items:flex-start;}
+.book-row-stack{display:flex;flex-direction:column;gap:4px;flex:1 1 auto;min-width:0;}
+.book-row-line{display:flex;align-items:center;flex-wrap:wrap;gap:10px;}
+.book-group-subrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.book-group-toggle{
 display:flex;
 align-items:center;
 gap:8px;
-padding:0 0 8px calc(44px + 10px); /* .media-art's own width + .mail-row's gap, so this lines up under the title, not the image */
-list-style:none;
+font:inherit;
+background:none;
+border:none;
+padding:0;
+cursor:pointer;
+color:inherit;
 }
-.book-group-summary{cursor:pointer;}
-.book-group-summary::-webkit-details-marker{display:none;}
-.book-group-summary::before{content:'\25B8';display:inline-block;flex:0 0 auto;color:var(--muted);transition:transform .15s;}
-.book-group-expander[open] > .book-group-summary::before{transform:rotate(90deg);}
+.book-group-toggle.static{cursor:default;}
+.book-group-chevron{display:inline-block;color:var(--muted);transition:transform .15s;}
+.book-group-toggle.open .book-group-chevron{transform:rotate(90deg);}
 .book-group-label strong{color:var(--ink);font-weight:600;}
 .book-group-items{padding-left:14px;}
 .book-group-items .mail-row{border-top:1px solid var(--line);}

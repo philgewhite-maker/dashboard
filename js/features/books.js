@@ -34,6 +34,14 @@ return Number.isFinite(n) ? n : Infinity; // no order -> sorts last within its s
 let sortMode = 'series'; // 'series' | 'age' | 'author'
 let readFilter = 'all'; // 'all' | 'unread' | 'read'
 let inFlightOnly = false; // series with some, but not all, entries read
+// Which series (by name) currently show their "rest of series" list --
+// a plain Set rather than native <details>/<summary>, since the toggle
+// control needed to sit INSIDE the same flex column as the title (so it
+// fits within the cover image's height instead of adding a row below
+// it), and a <summary> can't be relocated like that without fighting
+// its own built-in click/toggle semantics (already confirmed live once,
+// see the stopPropagation history below).
+let expandedSeries = new Set();
 
 // One entry per distinct `series` value; a blank series is its own
 // group of one, same as a standalone book really is one. Sorted by the
@@ -141,13 +149,12 @@ revealBookItem(chip.dataset.openBook);
 function revealBookItem(id) {
 const book = data.books.find((b) => b.id === id);
 if (!book) return;
+// Only the group's own representative book renders unconditionally --
+// anything else in its series only exists in the DOM once that
+// series' "rest of series" list is expanded (expandedSeries below).
+if (book.series) expandedSeries.add(book.series.trim());
 renderBooks();
-setTimeout(() => {
-const row = document.querySelector(`[data-book-row="${id}"]`);
-const details = row?.closest('details');
-if (details) details.open = true;
-scrollAndFlash(`[data-book-row="${id}"]`);
-}, 60);
+setTimeout(() => scrollAndFlash(`[data-book-row="${id}"]`), 60);
 }
 
 // ---- CSV import ---------------------------------------------------------
@@ -569,16 +576,22 @@ function starsHtml(book) {
 return [1, 2, 3, 4, 5].map((n) => `<svg class="star priority-star ${book.score && n <= book.score ? 'filled' : ''}" data-book-score="${book.id}" data-star="${n}" viewBox="0 0 20 20" fill="currentColor"><path d="M10 1l2.6 5.9 6.4.6-4.8 4.3 1.4 6.2L10 14.9 4.4 18l1.4-6.2L1 7.5l6.4-.6z"/></svg>`).join('');
 }
 
-function bookRowHtml(book, extraHtml = '') {
+// `subRowHtml`, when given, renders as a second line stacked under the
+// title -- used only for a series' representative row (the "Part of X
+// series" control). Without it, everything (title plus every field)
+// stays one single flex-wrapped line, same as always. Either way the
+// cover slot is always reserved at the same width, real image or not --
+// confirmed live as a second real alignment bug: a book with no cover
+// had its title start flush against the row's left edge, out of step
+// with every row that had one.
+function bookRowHtml(book, subRowHtml = '') {
 const art = book.imageUrl
 ? `<img class="media-art" src="${escapeHtml(book.imageUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
-: '';
+: '<span class="media-art-placeholder" aria-hidden="true"></span>';
 const holder = book.holderId ? data.connections.find((c) => c.id === book.holderId) : null;
 const byline = [book.author, book.format].filter(Boolean).join(' · ');
-return `<div class="mail-row" data-book-row="${book.id}">
-${art}
+const mainLine = `
 <span class="mail-subject">${book.link ? `<a href="${escapeHtml(affiliateLink(book.link))}" target="_blank" rel="noopener">${escapeHtml(book.title)}</a>` : escapeHtml(book.title)}</span>
-${book.seriesOrder ? `<span class="task-context">#${escapeHtml(book.seriesOrder)}</span>` : ''}
 ${byline ? `<span class="settings-note" style="margin:0;">${escapeHtml(byline)}</span>` : ''}
 ${(book.genres || []).map((g) => `<span class="tag-chip">${escapeHtml(g)}</span>`).join('')}
 ${(book.minAge || book.maxAge) ? `<span class="settings-note" style="margin:0;">${escapeHtml(book.minAge || '?')}&ndash;${escapeHtml(book.maxAge || '?')} yrs</span>` : ''}
@@ -588,8 +601,14 @@ ${holder ? connectionChipHtml(holder) : `<span class="settings-note" style="marg
 <button type="button" class="sync-btn sm book-inline-btn" data-book-holder="${book.id}">Give&hellip;</button>
 <button type="button" class="sync-btn sm book-inline-btn" data-book-edit="${book.id}">Edit</button>
 ${book.fromMediaId ? `<span class="settings-note book-from-media" data-book-from-media="${escapeHtml(book.fromMediaId)}" style="margin:0;cursor:pointer;">from Media</span>` : ''}
-${extraHtml}
-<span class="del-x" data-book-remove="${book.id}" title="Delete this book">&times;</span>
+<span class="del-x" data-book-remove="${book.id}" title="Delete this book">&times;</span>`;
+if (!subRowHtml) return `<div class="mail-row" data-book-row="${book.id}">${art}${mainLine}</div>`;
+return `<div class="mail-row book-row-stacked" data-book-row="${book.id}">
+${art}
+<div class="book-row-stack">
+<div class="book-row-line">${mainLine}</div>
+${subRowHtml}
+</div>
 </div>`;
 }
 
@@ -603,27 +622,46 @@ function groupHtml(g) {
 if (!g.series) return bookRowHtml(g.items[0]);
 // The book row itself is ALWAYS the next (or, once finished, first)
 // book's own full row, rendered exactly like a standalone row -- same
-// left edge, same image, same right-aligned order/author/age, nothing
-// shifted over by a leading chevron column (confirmed live: that's
-// what made the list look raggedly indented, series rows starting
-// further right than standalone ones). The series-only bits -- which
-// series, how many held, find the rest -- live on their OWN line
-// underneath, indented to start under the title rather than the image.
-// Author/age on the row itself still come off the actual book shown,
-// not the series as a label, since those can shift across a long run
-// (a co-writer joins, the target age climbs).
+// left edge, same image, same right-aligned author/age. The series-only
+// bits -- which series, its order, how many held, find the rest -- live
+// on a second line stacked under the title (bookRowHtml's subRowHtml),
+// inside the SAME flex item as the title rather than a block-level
+// sibling after the whole row -- confirmed live that the sibling
+// version added its own full row of extra height below the cover image
+// instead of fitting inside it. The order number lives ONLY in that
+// line now ("#1 in X series") -- a separate "#1" chip up on the title
+// line duplicated it for a series book and was dead noise (sometimes
+// literally "#N/A") on one with no series at all, so it's gone from the
+// row itself entirely. Author/age on the row still come off the actual
+// book shown, not the series as a label, since those can shift across a
+// long run (a co-writer joins,
+// the target age climbs).
 const rep = g.allRead ? g.items[0] : g.next;
 const rest = g.items.filter((b) => b.id !== rep.id);
-const subRow = `<span class="settings-note book-group-label" style="margin:0;">Part of <strong>${escapeHtml(g.series)}</strong> series</span>
+const open = expandedSeries.has(g.series);
+// A real order ("1", "2"...) reads as "#1 in X series"; a CSV import
+// that used a literal "N/A" for an unordered entry (Oxford Reading
+// Tree's own levels, say) is exactly as uninformative as having none at
+// all, so it's treated the same as blank -- "In X series" -- rather
+// than printed verbatim as "#N/A".
+const hasOrder = rep.seriesOrder && !/^n\/?a$/i.test(rep.seriesOrder.trim());
+const seriesLabel = `${hasOrder ? `#${escapeHtml(rep.seriesOrder)} in` : 'In'} <strong>${escapeHtml(g.series)}</strong> series`;
+const toggle = rest.length
+? `<button type="button" class="book-group-toggle${open ? ' open' : ''}" data-book-group-toggle="${escapeHtml(g.series)}">
+<span class="book-group-chevron" aria-hidden="true">&#9656;</span>
+<span class="settings-note book-group-label" style="margin:0;">${seriesLabel}</span>
 <span class="task-context">${g.items.length} held</span>
-<button type="button" class="sync-btn sm book-inline-btn" data-book-find-rest="${escapeHtml(g.series)}" data-book-find-author="${escapeHtml(g.items[0].author)}">Find the rest&hellip;</button>`;
+</button>`
 // Nothing else owned from this series yet -- still worth offering
-// "Find the rest", but there's nothing to expand TO, so no chevron/
-// toggle, just the plain line.
-const expander = rest.length
-? `<details class="book-group-expander"><summary class="book-group-summary">${subRow}</summary><div class="book-group-items">${rest.map((b) => bookRowHtml(b)).join('')}</div></details>`
-: `<div class="book-group-summary book-group-summary-static">${subRow}</div>`;
-return `<div class="book-group">${bookRowHtml(rep)}${expander}</div>`;
+// "Find the rest", but there's nothing to expand TO, so no chevron
+// or click behaviour, just the plain label.
+: `<span class="book-group-toggle static">
+<span class="settings-note book-group-label" style="margin:0;">${seriesLabel}</span>
+<span class="task-context">${g.items.length} held</span>
+</span>`;
+const subRowHtml = `<div class="book-group-subrow">${toggle}<button type="button" class="sync-btn sm book-inline-btn" data-book-find-rest="${escapeHtml(g.series)}" data-book-find-author="${escapeHtml(g.items[0].author)}">Find the rest&hellip;</button></div>`;
+const itemsHtml = (rest.length && open) ? `<div class="book-group-items">${rest.map((b) => bookRowHtml(b)).join('')}</div>` : '';
+return `<div class="book-group">${bookRowHtml(rep, subRowHtml)}${itemsHtml}</div>`;
 }
 
 async function renderNextToRead() {
@@ -687,20 +725,19 @@ el.innerHTML = groups.length
 hydratePhotoBackgrounds(el);
 bindConnectionChips(el);
 
-// "Find the rest…" sits inside the expander's own <summary>, whose
-// native behaviour is "clicking anywhere in me toggles the <details>".
-// stopPropagation on the button's OWN click, not preventDefault from a
-// delegated listener up on the summary -- confirmed live earlier that
-// preventDefault from up there cancels the SAME event's default action
-// everywhere it was still pending, which broke a checkbox that used to
-// live in this same summary (its tick stopped registering at all).
-// stopPropagation at the element itself avoids that: it stops the click
-// going any further up to the summary without touching the element's
-// own default action. Kept generic (any interactive element in a
-// summary line, not just this one button) since the next thing added
-// here will have the exact same problem.
-el.querySelectorAll('.book-group-summary input, .book-group-summary button, .book-group-summary a, .book-group-summary svg, .book-group-summary .conn-chip').forEach((node) => {
-node.addEventListener('click', (e) => e.stopPropagation());
+// A plain button with its own click handler, not a native <details>/
+// <summary> -- deliberately, after an earlier version built on summary
+// ran into real trouble twice (preventDefault from a delegated summary
+// listener cancelled a nested checkbox's own tick; summary's own box
+// model couldn't be relocated to sit inside the cover image's height).
+// expandedSeries persists across renders so a tick or an edit elsewhere
+// in the row doesn't collapse it back.
+el.querySelectorAll('[data-book-group-toggle]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const key = btn.dataset.bookGroupToggle;
+if (expandedSeries.has(key)) expandedSeries.delete(key); else expandedSeries.add(key);
+renderBooks();
+});
 });
 
 el.querySelectorAll('[data-book-read]').forEach((cb) => {
