@@ -1012,6 +1012,30 @@ holderId: '', acquiredAt: '', fromTaskId: '', notes: '', link: '',
 };
 }
 
+// A physical book on the Family tab's shelf. `holderId` deliberately
+// means exactly what it means on blankInventoryItem above -- blank is
+// "at your home", set is "given permanently to that connection" -- the
+// same question ("who has this physical thing"), so it gets the same
+// answer shape rather than a second, parallel meaning to learn.
+// Read/score are GLOBAL, not per child (confirmed with the user): one
+// shared status, not three.
+function blankBookItem(fields = {}) {
+return {
+id: uid(),
+title: '', author: '',
+series: '', seriesOrder: '', // '' not 0 -- "no order" has to be distinguishable from "order zero"
+minAge: '', maxAge: '', // either bound may be blank -- no constraint on that side
+genres: [], format: '', // chip tags + free text (hardback/paperback/board book)
+read: false, readAt: '', score: null,
+holderId: '',
+imageUrl: '', externalIds: {}, link: '', // same shape as blankMediaItem, so catalogue.js's lookups (linkMetadata/searchTitle) work unchanged
+notes: '',
+fromMediaId: '', // set when this flowed in from a Media want of kind 'book'
+addedAt: new Date().toISOString(),
+...fields,
+};
+}
+
 // The two directions the same data gets read in.
 //
 // whatSheHas: a person, looking at her things. The old per-connection
@@ -1692,6 +1716,8 @@ if (!Array.isArray(data.readingList)) data.readingList = [];
 data.readingList = data.readingList.map((r) => ({ ...blankReadingItem(), ...r, id: r.id || uid() }));
 if (!Array.isArray(data.mediaItems)) data.mediaItems = [];
 data.mediaItems = data.mediaItems.map((m) => ({ ...blankMediaItem(), ...m, id: m.id || uid(), photoIds: Array.isArray(m.photoIds) ? m.photoIds : [], externalIds: m.externalIds || {} }));
+if (!Array.isArray(data.books)) data.books = [];
+data.books = data.books.map((b) => ({ ...blankBookItem(), ...b, id: b.id || uid(), genres: Array.isArray(b.genres) ? b.genres : [], externalIds: b.externalIds || {} }));
 if (!Array.isArray(data.captureDrafts)) data.captureDrafts = [];
 data.captureDrafts = data.captureDrafts.map((d) => ({ ...blankCaptureDraft(), ...d, id: d.id || uid(), steps: Array.isArray(d.steps) ? d.steps : [] }));
 if (!Array.isArray(data.pendingImports)) data.pendingImports = [];
@@ -2806,7 +2832,7 @@ export {
 data, sampleData, loadData, migrate, persist, queueSave, flushSave, setSaveStatusHandler,
 setExternalUpdateHandler, setLocalChangeHandler, getLocalSettings, setLocalSetting, computeStreak, reachOutThreshold,
 isDormantStage, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness,
-exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, SENSITIVE_BLOCKS, whatSheHas, unheldInventory, whoFits, inventorySets, whoFitsSet, interestNote, SIZE_GROUPS, sizeGroupFor, DEFAULT_PREFS, blankInventoryItem,
+exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, SENSITIVE_BLOCKS, whatSheHas, unheldInventory, whoFits, inventorySets, whoFitsSet, interestNote, SIZE_GROUPS, sizeGroupFor, DEFAULT_PREFS, blankInventoryItem, blankBookItem,
 MAIL_SEARCH_KINDS, mailSearchLabel, blankMailSearch, blankMailTopic, blankMailDismissal,
 TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureBatch, blankPendingImport, blankConnection, blankTelegramThread, blankReadingItem, blankCaptureDraft, blankJob, blankMediaItem, MEDIA_KINDS, MEDIA_STATUSES,
 blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS, LEG_DATE_FIELDS,

@@ -1314,6 +1314,48 @@ const { data } = await callAnthropic([{ type: 'text', text: prompt }], RESOLVE_U
 return { company: String((data && data.company) || '').trim(), role: String((data && data.role) || '').trim() };
 }
 
+// Same idea as resolveUrlTitle again, for the one part of a book record
+// no free, keyless catalogue carries: Open Library's search (catalogue.js
+// searchTitle/searchOpenLibrary) answers title/author/year/cover from an
+// ISBN instantly, but has no series, series order or reading-age fields
+// at all -- the things you'd actually go and google. Best-effort, every
+// field left blank rather than guessed when genuinely unclear; the
+// caller shows them as editable suggestions, never saves them silently.
+async function resolveBookDetails(title, author) {
+const who = author ? ` by ${author}` : '';
+const prompt = `This is a children's book: "${title}"${who}.
+
+Use web_search to find out: (1) which SERIES it belongs to, if any, and its position/order within that series (a bare number, e.g. "3" for the third book -- omit if it's a standalone book or you can't find a clear series order); (2) the publisher-recommended reading age range, as a MINIMUM and MAXIMUM age in whole years (e.g. a "5-7 years" label means min 5, max 7).
+
+Reply with ONLY a JSON object, no other text, no markdown fences: {"series":"","seriesOrder":"","minAge":"","maxAge":""} -- leave any field "" you can't find a clear answer for. Never guess an age range from the book's general reputation alone; only report one if a retailer or publisher actually states it.`;
+const { data } = await callAnthropic([{ type: 'text', text: prompt }], RESOLVE_URL_MAX_TOKENS, RESOLVE_URL_MODEL, 'Resolve book details', resolveUrlTools());
+return {
+series: String((data && data.series) || '').trim(),
+seriesOrder: String((data && data.seriesOrder) || '').trim(),
+minAge: String((data && data.minAge) || '').trim(),
+maxAge: String((data && data.maxAge) || '').trim(),
+};
+}
+
+// The "find the rest of the range" ask for a book series -- same shape
+// as agentprovocateur.js's own findRangeItems/jsonLdRangeItems existing
+// for exactly this reason on the shopping side ("you added one Lorna
+// item, here's the rest of the Lorna range to choose from"), except
+// there's no retailer catalogue to scrape for a book series, so this
+// asks the model to find the list instead. Best-effort: an empty array
+// means genuinely nothing found, not an error.
+async function resolveSeriesBooks(series, author) {
+const who = author ? ` by ${author}` : '';
+const prompt = `List every book in the "${series}"${who} series, in reading/publication order.
+
+Use web_search to find the complete, correct list.
+
+Reply with ONLY a JSON object, no other text, no markdown fences: {"books":[{"title":"","seriesOrder":""}]} -- seriesOrder is a bare number as a string ("1","2"...). Omit any book you can't confirm is actually part of this series. Empty "books":[] if you can't find a reliable list at all.`;
+const { data } = await callAnthropic([{ type: 'text', text: prompt }], RESOLVE_URL_MAX_TOKENS, RESOLVE_URL_MODEL, 'Resolve series books', resolveUrlTools());
+const books = Array.isArray(data && data.books) ? data.books : [];
+return books.map((b) => ({ title: String(b.title || '').trim(), seriesOrder: String(b.seriesOrder || '').trim() })).filter((b) => b.title);
+}
+
 // ---- Product identification from a photo ----
 //
 // Only needed for the image-marker capture path (captureOutcomes.js's
@@ -1881,7 +1923,7 @@ export {
 MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot, quickScanScreenshot, scanForCaptureMarker,
 callTextJson, DEFAULT_MODEL, summarizeUsage, currentMonthKey, compareFaces,
 extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShoppingItem, identifyProduct, translateText, romanizeName, parseCaptureIntent,
-resolveUrlTitle, resolveJobPostingUrl,
+resolveUrlTitle, resolveJobPostingUrl, resolveBookDetails, resolveSeriesBooks,
 identifyCountry, extractWellnessScreenshot,
 extractTripScreenshot, extractMediaScreenshot, extractTripLegFromEmail, extractTaskFromEmail, extractDateEventFromEmail,
 parseIngredients, assessIngredient, ALLERGEN_LIST, DIETARY_FLAGS, FODMAP_COMPONENTS, FODMAP_LEVELS,

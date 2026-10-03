@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v461</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v462</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -44,6 +44,7 @@
 <button class="tab-btn" type="button" data-tab-btn="travel">Travel</button>
 <button class="tab-btn" type="button" data-tab-btn="planner">Planner</button>
 <button class="tab-btn" type="button" data-tab-btn="media">Media</button>
+<button class="tab-btn" type="button" data-tab-btn="family">Family</button>
 <button class="tab-btn" type="button" data-tab-btn="settings">Settings</button>
 </div>
 
@@ -239,6 +240,35 @@
 <span class="count-badge" id="reading-list-count"></span>
 </div>
 <div id="reading-list"></div>
+</section>
+
+<section class="panel wide" id="family-panel" data-tab="family">
+<div class="panel-head">
+<h2><span class="dot teal"></span>Family</h2>
+</div>
+<div id="family-kids-strip" class="family-kids-strip"></div>
+<div class="settings-note" style="margin:8px 0;">Tasks, travel, media and Airbnb by person are future work — Books is the first piece.</div>
+</section>
+
+<section class="panel wide" id="books-panel" data-tab="family">
+<div class="panel-head">
+<h2><span class="dot amber"></span>Books</h2>
+</div>
+<div class="sync-row" style="margin-bottom:8px;flex-wrap:wrap;">
+<button class="sync-btn" id="books-add-btn" type="button">+ Add a book</button>
+<label class="file-btn" for="books-csv-input">Upload a CSV</label>
+<input type="file" id="books-csv-input" accept=".csv,text/csv" style="display:none;">
+<span class="sync-status" id="books-csv-status"></span>
+</div>
+<div class="settings-note" style="margin:0 0 10px;">CSV header row: Title, Author, Series, Series Order, Min Reading Age, Max Reading Age.</div>
+<div id="books-csv-review"></div>
+<div id="books-series-find"></div>
+<div class="panel-head" style="margin-top:4px;">
+<h3 style="margin:0;font-size:13px;">Next to read</h3>
+</div>
+<div class="overview-chips" id="books-next-picker" style="margin-bottom:6px;"></div>
+<div id="books-next-list" style="margin-bottom:14px;"></div>
+<div id="books-list"></div>
 </section>
 
 <section class="panel wide" id="inbox-panel" data-tab="tasks">

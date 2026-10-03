@@ -207,6 +207,21 @@ return `<span class="task-context media-id-chip unset" data-media-id="${item.id}
 return [...have.map((k) => chip(k, true)), ...offered.map((k) => chip(k, false))].join('');
 }
 
+// A book-kind want's path onto the Family tab's shelf -- addBookFromMediaItem
+// (books.js) carries title/creator/imageUrl/link across, same shape
+// shopping.js's offerToRecordOwned already uses for AP wants. Once it's
+// flowed across, the record-reference rule applies going the OTHER way
+// too: this row names a real Books record now, so it links to it rather
+// than just offering the button a second time. data-open-book works here
+// with no import at all -- books.js's bindBookChips() is bound globally
+// on document once the app starts, same as every other chip handler.
+function bookLinkHtml(item) {
+if (item.kind !== 'book') return '';
+const book = (data.books || []).find((b) => b.fromMediaId === item.id);
+if (book) return `<span class="task-chip" data-open-book="${escapeHtml(book.id)}">&#128214; On your shelf</span>`;
+return `<button class="mini-task-btn" type="button" data-media-add-book="${item.id}" title="Add this to your physical Books inventory on the Family tab">&#128214; Add to Books</button>`;
+}
+
 function rowHtml(item) {
 const photoId = (item.photoIds || [])[0];
 const byline = [item.creator, item.year].filter(Boolean).join(' · ');
@@ -229,6 +244,7 @@ ${item.plexCheck ? (item.plexCheck.found
 ? `<span class="task-context" style="background:var(--sage-bg);color:var(--sage);font-weight:600;" title="In your Plex library${item.plexCheck.matchedTitle ? ` as &quot;${escapeHtml(item.plexCheck.matchedTitle)}&quot;${item.plexCheck.matchedYear ? ` (${escapeHtml(item.plexCheck.matchedYear)})` : ''}` : ''}">&#10003; On Plex</span>`
 : `<span class="settings-note" style="margin:0;" title="Checked on ${escapeHtml(String(item.plexCheck.checkedAt).slice(0, 10))}">not on Plex</span>`) : ''}
 ${item.notes ? `<span class="settings-note" style="margin:0;">${escapeHtml(item.notes)}</span>` : ''}
+${bookLinkHtml(item)}
 <span class="media-row-actions">
 ${monitorHtml(item)}
 <button class="mini-task-btn" type="button" data-media-satisfy="${item.id}" title="How to get hold of it">Get&hellip;</button>
@@ -281,6 +297,15 @@ const item = data.mediaItems.find((m) => m.id === sel.dataset.mediaStatus);
 if (!item) return;
 item.status = sel.value;
 queueSave();
+renderMedia();
+});
+});
+list.querySelectorAll('[data-media-add-book]').forEach((btn) => {
+btn.addEventListener('click', async () => {
+const item = data.mediaItems.find((m) => m.id === btn.dataset.mediaAddBook);
+if (!item) return;
+const { addBookFromMediaItem } = await import('./books.js');
+addBookFromMediaItem(item);
 renderMedia();
 });
 });
