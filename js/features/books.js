@@ -178,8 +178,33 @@ if (status) status.textContent = addedMsg;
 // missing them gets looked up automatically, same as media.js fills
 // artwork in after an item already exists rather than delaying it.
 enrichMissingDetails(added.filter((b) => !b.series && !b.minAge && !b.maxAge), status, addedMsg);
+enrichMissingCovers(added);
 });
 document.getElementById('books-csv-cancel').addEventListener('click', () => { csvRows = []; renderCsvReview(); });
+}
+
+// A cover for anything added with no imageUrl -- CSV import never had
+// one in the first place (confirmed live as a real gap: every CSV-
+// imported book showed no thumbnail at all, since only the manual-add
+// lookup and a Media flow-in ever filled imageUrl). Open Library's
+// title search is free and keyless, so this runs unconditionally and
+// silently, same as media.js's own fillArtwork -- a cover is decoration,
+// worth having automatically, not worth a status line of its own or a
+// dependency on an Anthropic key the series/age lookup needs.
+async function enrichMissingCovers(books) {
+for (const book of books) {
+if (book.imageUrl) continue;
+try {
+const candidates = await searchTitle('book', `${book.title} ${book.author}`.trim());
+const live = data.books.find((b) => b.id === book.id);
+if (!live || live.imageUrl || !candidates.length) continue;
+live.imageUrl = candidates[0].imageUrl || '';
+if (!Object.keys(live.externalIds || {}).length) live.externalIds = candidates[0].externalIds || {};
+if (live.imageUrl) { queueSave(); renderBooks(); }
+} catch (err) {
+console.error('Cover lookup failed, left blank:', err);
+}
+}
 }
 
 // Runs resolveBookDetails for each book in turn (sequential, not
@@ -232,57 +257,74 @@ if (status) status.textContent = `Couldn't read that file: ${err.message || err}
 }
 }
 
-// ---- Manual add / lookup ------------------------------------------------
+// ---- Manual add / lookup / edit ------------------------------------------
 //
-// Two tiers: searchTitle('book', q) is free, keyless and instant (Open
-// Library), and gives title/author/year/cover/ISBN -- but carries no
-// series, series order or reading age at all, which is what
-// resolveBookDetails (ai.js, a real web search) fills in. Run
+// One dialog for both add and edit: `existingBook` present means edit
+// (fields pre-filled, Save updates in place, title/lookup row hidden --
+// re-identifying which book this is doesn't make sense once it already
+// exists); absent means add (blank fields, the lookup row shown). Every
+// field the row itself can show is editable here, including Genres and
+// Format, which had a place in the data model but no UI at all until
+// now -- a real gap, not a deferred feature.
+//
+// Two lookup tiers when adding: searchTitle('book', q) is free, keyless
+// and instant (Open Library), and gives title/author/year/cover/ISBN --
+// but carries no series, series order or reading age at all, which is
+// what resolveBookDetails (ai.js, a real web search) fills in. Run
 // AUTOMATICALLY once a title (and ideally author) is confirmed -- by
 // picking a candidate, or by leaving the title field having typed one
 // by hand -- rather than waiting on a manual "look up" click: the next
 // step was obvious, so it's taken, the same way runAutoPriceCheck
 // (shopping.js) prices a shopping capture without being asked. A button
 // stays only as an explicit retry.
-function openAddBookDialog() {
+function openBookDialog(existingBook) {
+const b = existingBook || {};
 const dialog = document.createElement('div');
 dialog.className = 'mail-view-backdrop';
 dialog.innerHTML = `<div class="mail-view-card" style="max-width:440px;">
-<div class="mail-view-subject">Add a book</div>
-<div class="capture-row" style="margin-bottom:8px;">
+<div class="mail-view-subject">${existingBook ? 'Edit book' : 'Add a book'}</div>
+${existingBook ? '' : `<div class="capture-row" style="margin-bottom:8px;">
 <input type="text" autocomplete="off" class="tag-add-input" data-book-search placeholder="Type a title&hellip;" style="flex:1;">
-<button class="sync-btn sm" type="button" data-book-lookup>Look up</button>
+<button class="sync-btn sm book-inline-btn" type="button" data-book-lookup>Look up</button>
 </div>
-<div data-book-candidates></div>
-<label style="font-size:12px;display:block;margin-bottom:6px;">Title<input type="text" autocomplete="off" class="tag-add-input" data-book-new="title" style="width:100%;display:block;"></label>
-<label style="font-size:12px;display:block;margin-bottom:6px;">Author<input type="text" autocomplete="off" class="tag-add-input" data-book-new="author" style="width:100%;display:block;"></label>
+<div data-book-candidates></div>`}
+<label style="font-size:12px;display:block;margin-bottom:6px;">Title<input type="text" autocomplete="off" class="tag-add-input" data-book-new="title" value="${escapeHtml(b.title || '')}" style="width:100%;display:block;"></label>
+<label style="font-size:12px;display:block;margin-bottom:6px;">Author<input type="text" autocomplete="off" class="tag-add-input" data-book-new="author" value="${escapeHtml(b.author || '')}" style="width:100%;display:block;"></label>
 <div class="account-field-row">
-<label>Series<input type="text" autocomplete="off" class="tag-add-input" data-book-new="series"></label>
-<label>Order<input type="text" autocomplete="off" class="tag-add-input" data-book-new="seriesOrder" style="width:60px;"></label>
+<label>Series<input type="text" autocomplete="off" class="tag-add-input" data-book-new="series" value="${escapeHtml(b.series || '')}"></label>
+<label>Order<input type="text" autocomplete="off" class="tag-add-input" data-book-new="seriesOrder" value="${escapeHtml(b.seriesOrder || '')}" style="width:60px;"></label>
 </div>
 <div class="account-field-row">
-<label>Min age<input type="text" autocomplete="off" class="tag-add-input" data-book-new="minAge" style="width:60px;"></label>
-<label>Max age<input type="text" autocomplete="off" class="tag-add-input" data-book-new="maxAge" style="width:60px;"></label>
+<label>Min age<input type="text" autocomplete="off" class="tag-add-input" data-book-new="minAge" value="${escapeHtml(b.minAge || '')}" style="width:60px;"></label>
+<label>Max age<input type="text" autocomplete="off" class="tag-add-input" data-book-new="maxAge" value="${escapeHtml(b.maxAge || '')}" style="width:60px;"></label>
+</div>
+<div class="account-field-row">
+<label>Genres <span class="settings-note" style="display:inline;margin:0;">(comma separated)</span><input type="text" autocomplete="off" class="tag-add-input" data-book-new="genres" value="${escapeHtml((b.genres || []).join(', '))}"></label>
+<label>Format<input type="text" autocomplete="off" class="tag-add-input" data-book-new="format" value="${escapeHtml(b.format || '')}" placeholder="Paperback" style="width:100px;"></label>
 </div>
 <div class="sync-row" style="margin:0 0 8px;">
-<button class="sync-btn sm" type="button" data-book-fill-ai>&#10024; Look up series &amp; age again</button>
+<button class="sync-btn sm book-inline-btn" type="button" data-book-fill-ai>&#10024; Look up series &amp; age${existingBook ? '' : ' again'}</button>
 <span class="sync-status" data-book-fill-status></span>
 </div>
 <div style="margin:8px 0;">Who has it?${connectionPickerHtml('book-new-holder', "Nobody yet — it's at your home")}</div>
-<label style="font-size:12px;display:block;margin:0 0 8px;">Notes<textarea rows="2" data-book-new="notes" style="width:100%;"></textarea></label>
+<label style="font-size:12px;display:block;margin:0 0 8px;">Notes<textarea rows="2" data-book-new="notes" style="width:100%;">${escapeHtml(b.notes || '')}</textarea></label>
 <div class="mail-view-actions">
 <button class="sync-btn sm" type="button" data-book-new-cancel>Cancel</button>
-<button class="add-btn" type="button" data-book-new-save>Add</button>
+<button class="add-btn" type="button" data-book-new-save>${existingBook ? 'Save' : 'Add'}</button>
 </div>
 </div>`;
 document.body.appendChild(dialog);
 bindConnPickers();
+if (b.holderId) setConnPickerValue('book-new-holder', b.holderId);
 const close = () => dialog.remove();
 dialog.addEventListener('click', (e) => { if (e.target === dialog) close(); });
 dialog.querySelector('[data-book-new-cancel]').addEventListener('click', close);
 
-let picked = { imageUrl: '', externalIds: {}, link: '' };
-let aiFillDone = false; // so leaving/re-entering the title field doesn't re-fire once an answer's already in
+let picked = { imageUrl: b.imageUrl || '', externalIds: b.externalIds || {}, link: b.link || '' };
+// Pre-filled fields on an edit shouldn't trigger an unasked-for
+// re-lookup the moment the title field is merely clicked into and out
+// of -- only a genuinely NEW title typed while editing should.
+let aiFillDone = !!existingBook;
 const val = (n) => dialog.querySelector(`[data-book-new="${n}"]`).value.trim();
 const setVal = (n, v) => { if (v) dialog.querySelector(`[data-book-new="${n}"]`).value = v; };
 const status = dialog.querySelector('[data-book-fill-status]');
@@ -331,8 +373,11 @@ runAiFill();
 host.innerHTML = `<div class="settings-note">${err instanceof MissingKeyError ? `Add an Anthropic API key in ${MISSING_KEY_LINK_HTML} first.` : escapeHtml(err.message || String(err))}</div>`;
 }
 };
-dialog.querySelector('[data-book-lookup]').addEventListener('click', runLookup);
+const lookupBtn = dialog.querySelector('[data-book-lookup]');
+if (lookupBtn) {
+lookupBtn.addEventListener('click', runLookup);
 dialog.querySelector('[data-book-search]').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); runLookup(); } });
+}
 // Typed by hand rather than looked up -- the title field losing focus
 // is the "I've finished typing this" signal, same idea as the blur-
 // driven lookups elsewhere in this app, so the AI fill still runs
@@ -343,16 +388,28 @@ dialog.querySelector('[data-book-fill-ai]').addEventListener('click', () => { ai
 
 dialog.querySelector('[data-book-new-save]').addEventListener('click', () => {
 if (!val('title')) return;
-const book = blankBookItem({
+const fields = {
 title: val('title'), author: val('author'), series: val('series'), seriesOrder: val('seriesOrder'),
 minAge: val('minAge'), maxAge: val('maxAge'), notes: val('notes'),
+genres: val('genres').split(',').map((s) => s.trim()).filter(Boolean), format: val('format'),
 holderId: dialog.querySelector('#book-new-holder')?.value || '',
 imageUrl: picked.imageUrl, externalIds: picked.externalIds, link: picked.link,
-});
+};
+if (existingBook) {
+Object.assign(existingBook, fields);
+queueSave();
+renderBooks();
+close();
+return;
+}
+const book = blankBookItem(fields);
 data.books.push(book);
 queueSave();
 renderBooks();
 close();
+// Typed by hand with no candidate ever picked -- the same gap CSV
+// import had until it was caught, so the fix applies here too.
+if (!book.imageUrl) enrichMissingCovers([book]);
 // A series is now known -- offering to find the rest of it is the
 // same "you added one, here's the rest of the range" step shopping's
 // AP colour search already offers, not a second thing to remember to
@@ -438,9 +495,11 @@ externalIds: item.externalIds, link: item.link, fromMediaId: item.id,
 data.books.push(book);
 queueSave();
 renderBooks();
-// The obvious next step (series/age) again taken automatically rather
-// than left for a second visit to Family.
+// The obvious next step (series/age, and a cover if the Media want
+// never had one either) again taken automatically rather than left
+// for a second visit to Family.
 if (!book.series) enrichMissingDetails([book], null);
+if (!book.imageUrl) enrichMissingCovers([book]);
 return book;
 }
 
@@ -455,15 +514,19 @@ const art = book.imageUrl
 ? `<img class="media-art" src="${escapeHtml(book.imageUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
 : '';
 const holder = book.holderId ? data.connections.find((c) => c.id === book.holderId) : null;
+const byline = [book.author, book.format].filter(Boolean).join(' · ');
 return `<div class="mail-row" data-book-row="${book.id}">
 ${art}
 <span class="mail-subject">${book.link ? `<a href="${escapeHtml(affiliateLink(book.link))}" target="_blank" rel="noopener">${escapeHtml(book.title)}</a>` : escapeHtml(book.title)}</span>
 ${book.seriesOrder ? `<span class="task-context">#${escapeHtml(book.seriesOrder)}</span>` : ''}
+${byline ? `<span class="settings-note" style="margin:0;">${escapeHtml(byline)}</span>` : ''}
+${(book.genres || []).map((g) => `<span class="tag-chip">${escapeHtml(g)}</span>`).join('')}
 ${(book.minAge || book.maxAge) ? `<span class="settings-note" style="margin:0;">${escapeHtml(book.minAge || '?')}&ndash;${escapeHtml(book.maxAge || '?')} yrs</span>` : ''}
 <label style="display:flex;align-items:center;gap:4px;font-size:12px;"><input type="checkbox" data-book-read="${book.id}" ${book.read ? 'checked' : ''}> Read</label>
 <span class="book-stars">${starsHtml(book)}</span>
 ${holder ? connectionChipHtml(holder) : `<span class="settings-note" style="margin:0;">at your home</span>`}
-<button type="button" class="sync-btn sm" data-book-holder="${book.id}">Give&hellip;</button>
+<button type="button" class="sync-btn sm book-inline-btn" data-book-holder="${book.id}">Give&hellip;</button>
+<button type="button" class="sync-btn sm book-inline-btn" data-book-edit="${book.id}">Edit</button>
 ${book.fromMediaId ? `<span class="settings-note book-from-media" data-book-from-media="${escapeHtml(book.fromMediaId)}" style="margin:0;cursor:pointer;">from Media</span>` : ''}
 <span class="del-x" data-book-remove="${book.id}" title="Delete this book">&times;</span>
 </div>`;
@@ -475,7 +538,7 @@ return `<details class="book-group">
 <summary class="book-group-summary">
 ${g.series ? `<span class="mail-subject">${escapeHtml(g.series)}</span><span class="settings-note" style="margin:0;">next: ${escapeHtml(nextLabel)}</span>` : `<span class="mail-subject">${escapeHtml(g.items[0].title)}</span>`}
 <span class="task-context">${g.items.length} held</span>
-${g.series ? `<button type="button" class="sync-btn sm" data-book-find-rest="${escapeHtml(g.series)}" data-book-find-author="${escapeHtml(g.items[0].author)}">Find the rest&hellip;</button>` : ''}
+${g.series ? `<button type="button" class="sync-btn sm book-inline-btn" data-book-find-rest="${escapeHtml(g.series)}" data-book-find-author="${escapeHtml(g.items[0].author)}">Find the rest&hellip;</button>` : ''}
 </summary>
 <div class="book-group-items">${g.items.map(bookRowHtml).join('')}</div>
 </details>`;
@@ -547,6 +610,12 @@ renderBooks();
 el.querySelectorAll('[data-book-holder]').forEach((btn) => {
 btn.addEventListener('click', () => openHolderDialog(btn.dataset.bookHolder));
 });
+el.querySelectorAll('[data-book-edit]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const book = data.books.find((b) => b.id === btn.dataset.bookEdit);
+if (book) openBookDialog(book);
+});
+});
 el.querySelectorAll('[data-book-find-rest]').forEach((btn) => {
 btn.addEventListener('click', (e) => {
 e.preventDefault(); // this sits inside a <summary> -- without this the click also toggles the <details> open/closed
@@ -598,7 +667,21 @@ close();
 function initBooks() {
 bindBookChips();
 const addBtn = document.getElementById('books-add-btn');
-if (addBtn) addBtn.addEventListener('click', () => openAddBookDialog());
+if (addBtn) addBtn.addEventListener('click', () => openBookDialog());
+// A one-time catch-up for books already on the shelf before covers were
+// ever fetched for CSV rows -- the gap enrichMissingCovers above now
+// closes for anything added from here on, but doesn't reach back to fix
+// what's already there without being asked.
+const coversBtn = document.getElementById('books-find-covers-btn');
+if (coversBtn) coversBtn.addEventListener('click', async () => {
+coversBtn.disabled = true;
+const status = document.getElementById('books-csv-status');
+const missing = data.books.filter((b) => !b.imageUrl);
+if (status) status.textContent = `Looking up covers for ${missing.length} book${missing.length === 1 ? '' : 's'}…`;
+await enrichMissingCovers(missing);
+if (status) status.textContent = `Done — ${missing.filter((b) => data.books.find((x) => x.id === b.id)?.imageUrl).length} of ${missing.length} found.`;
+coversBtn.disabled = false;
+});
 const fileInput = document.getElementById('books-csv-input');
 if (fileInput) fileInput.addEventListener('change', (e) => {
 const file = e.target.files[0];

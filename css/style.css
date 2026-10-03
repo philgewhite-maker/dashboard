@@ -3500,6 +3500,10 @@ list-style:none;
 .book-group-items .mail-row{border-top:1px solid var(--line);}
 .book-group-items .mail-row:first-of-type{border-top:none;}
 .book-stars{display:flex;gap:2px;}
+/* Same specificity fight as shopping's own inline row buttons (see that
+   file's comment on .sync-btn.sm{width:100%}) -- these sit inline in a
+   flex row and were stretching to fill it instead. */
+.sync-btn.sm.book-inline-btn{width:auto;margin-top:0;flex:0 0 auto;}
 .colour-hover-preview{
 position:fixed;
 display:none;
