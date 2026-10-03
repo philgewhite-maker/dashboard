@@ -38,7 +38,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-VERSION = "1.11"
+VERSION = "1.12"
 
 SYNC_URL = os.environ.get("DASHBOARD_SYNC_URL", "").strip()
 SECRET = os.environ.get("DASHBOARD_SECRET", "").strip()
@@ -714,9 +714,18 @@ def verb_page_render(args):
 # card's own (different) swatch wrapper: each colour swatch sits inside
 # a swiper carousel slide, itself inside a plain <button>, which is what
 # actually receives the click.
+// Timed in-page, not just wrapped by the agent's own wall clock -- the
+// agent's own urlopen() call spans goto AND every click already, so it
+// can only ever say "the whole thing took Ns," never which part of it
+// did. Measuring goto and the click loop separately, from inside the
+// same page context doing the work, is the only way to actually answer
+// "what costs the time" instead of estimating it from the constants.
 COLOUR_SWATCH_FUNCTION = """
 export default async function ({ page, context }) {
+  const t0 = Date.now();
   await page.goto(context.url, { waitUntil: "networkidle2", timeout: context.timeoutMs || 45000 });
+  const gotoMs = Date.now() - t0;
+  const t1 = Date.now();
   const results = [];
   const count = await page.$$eval('[data-swiper-slide-index] button', (els) => els.length).catch(() => 0);
   for (let i = 0; i < count; i++) {
@@ -741,7 +750,8 @@ export default async function ({ page, context }) {
     });
     results.push({ colour, url: page.url() });
   }
-  return { data: JSON.stringify({ results }), type: "application/json" };
+  const clicksMs = Date.now() - t1;
+  return { data: JSON.stringify({ results, timings: { gotoMs, clicksMs, swatchCount: count } }), type: "application/json" };
 }
 """
 
@@ -777,6 +787,7 @@ def verb_page_colour_variants(args):
     request.add_header("Content-Type", "application/json")
     # Generous: a goto plus N clicks, each with its own 700ms settle wait,
     # can run well past the goto's own timeout alone.
+    request_started = time.time()
     try:
         with urllib.request.urlopen(request, timeout=BROWSER_TIMEOUT_MS / 1000 + 30) as response:
             raw = response.read(PAGE_MAX_BYTES).decode("utf-8", "replace")
@@ -812,7 +823,19 @@ def verb_page_colour_variants(args):
     # untouched, and this is far easier to get right and verify directly.
     for item in results:
         item["colour"] = re.sub(r"^colour:\s*", "", str(item.get("colour") or ""), flags=re.IGNORECASE).strip()
-    log(f"page.colourVariants {url[-40:]} -> {len(results)} variants")
+    # requestMs vs (gotoMs + clicksMs) splits the round trip the only way
+    # that actually answers "what costs the time": requestMs is this
+    # Python process's own wall clock around the whole HTTP call, so
+    # requestMs minus the in-page timings is browserless's own queueing/
+    # launch overhead -- time neither the goto nor a click accounts for,
+    # and previously invisible entirely.
+    request_ms = round((time.time() - request_started) * 1000)
+    timings = parsed.get("timings", {}) if isinstance(parsed, dict) else {}
+    log(
+        f"page.colourVariants {url[-40:]} -> {len(results)} variants "
+        f"(requestMs={request_ms} gotoMs={timings.get('gotoMs')} clicksMs={timings.get('clicksMs')} "
+        f"swatchCount={timings.get('swatchCount')})"
+    )
     return {"results": results}
 
 
