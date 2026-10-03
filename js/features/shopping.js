@@ -260,12 +260,23 @@ if (!html) return;
 // its own (see slugColourGuess's own comment on why that's a guess).
 const ldItems = adapter.jsonLdRangeItems ? adapter.jsonLdRangeItems(html, style) : [];
 if (ldItems.length) {
+// A <product> card's colour (read off its image alt text) is reliable;
+// a slug guess isn't -- confirmed live, AP's own slugs sometimes drop
+// the "-in-" marker that guess depends on entirely ("...-suspender-
+// red-red-35107", no "-in-" anywhere), so there's no boundary left to
+// find the colour words from at all for that product. Built once per
+// page and consulted first; slugColourGuess is the fallback, not the
+// other way round.
+const cardColours = new Map();
+if (adapter.listingItems) {
+adapter.listingItems(html).forEach((c) => { if (c.colour) cardColours.set(c.url, c.colour); });
+}
 ldItems.forEach((item) => {
 if (found.has(item.url)) return;
 found.set(item.url, {
 url: item.url, range: item.range,
 piece: item.name.slice(item.range.length).trim(),
-colour: adapter.slugColourGuess ? adapter.slugColourGuess(item.url) : '',
+colour: cardColours.get(item.url) || (adapter.slugColourGuess ? adapter.slugColourGuess(item.url) : ''),
 price: item.price, inStock: item.inStock,
 });
 });
@@ -401,11 +412,28 @@ const rows = search.rows.filter((r) => !added.has(r.url) && !existing.has(stripF
 // flat list of (piece, colour) rows hides -- you can see at a glance
 // whether a colour you want exists at all before checking whether
 // THIS piece happens to come in it.
+// A colour-less row reads as "Suspender", and the colour isn't always
+// recoverable at all (see findColourways' own comment on why) -- two
+// different suspenders both blank then look IDENTICAL, with no way to
+// tell them apart or know ticking one over the other matters. Confirmed
+// live: two real, different Lorna suspenders came back this way. Rows
+// that collide on their visible label get a short suffix from their own
+// URL's trailing id (unique per product, confirmed from real SKUs) so
+// there's always something to tell them apart by, even unlabelled.
+const labelOf = (r) => `${r.piece}${r.colour ? ` — ${r.colour}` : ''}`;
+const labelCounts = new Map();
+rows.forEach((r) => { const l = labelOf(r); labelCounts.set(l, (labelCounts.get(l) || 0) + 1); });
+const rowLabel = (r) => {
+const base = labelOf(r);
+if ((labelCounts.get(base) || 0) < 2) return base;
+const idMatch = /-(\d+)$/.exec(stripFragment(r.url));
+return idMatch ? `${base} (#${idMatch[1]})` : base;
+};
 box.innerHTML = rows.length
 ? `<div class="settings-note" style="margin:6px 0 2px;">${search.colours.length} colour${search.colours.length === 1 ? '' : 's'} (${escapeHtml(search.colours.join(', '))}), ${search.pieces.length} item${search.pieces.length === 1 ? '' : 's'} (${escapeHtml(search.pieces.join(', '))}) found. Tick what to watch.</div>`
 + rows.map((r, i) => `<label style="display:block;font-size:12px;">
 <input type="checkbox" data-watch-found="${i}" value="${escapeHtml(r.url)}">
-${escapeHtml(r.piece)}${r.colour ? ` — ${escapeHtml(r.colour)}` : ''}
+${escapeHtml(rowLabel(r))}
 </label>`).join('')
 + '<button class="sync-btn sm" type="button" data-watch-add-found style="margin-top:6px;">Add ticked</button>'
 : '<div class="settings-note">Nothing new found — the listings only render part of a category, so an item can be missing from both.</div>';
