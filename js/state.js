@@ -1100,22 +1100,51 @@ function whoFitsSet(set) {
 // extras, so a lone pair of stockings can still find someone.
 const core = set.items.filter((i) => SET_CORE_GROUPS.includes(sizeGroupFor(i.piece)));
 const matchOn = core.length ? core : set.items;
-const perItem = matchOn.map((item) => ({ item, fits: new Map(whoFits(item).map((f) => [f.conn.id, f])) }));
-if (!perItem.length) return [];
-// Only people who fit every piece present.
-const common = perItem.reduce((acc, { fits }) => acc.filter((id) => fits.has(id)),
-[...perItem[0].fits.keys()]);
+// Items that share a size GROUP are ALTERNATIVES for that one slot, not
+// separate pieces that must both fit the same person -- confirmed live
+// as a real bug, reported directly: a Brief (size 3) and an Ouvert
+// (size 2) are both "Knickers", so the old per-item intersection
+// required someone's single recorded Knickers size to equal 3 AND 2 at
+// once, which is impossible, and NOBODY ever matched even though a
+// 34C+2 person fits the Bra+Ouvert pair and a 34C+3 person fits
+// Bra+Brief. Grouped here instead; a person matches a group by fitting
+// ANY one item in it. A piece sizeGroupFor can't place keyed on its own
+// id, so it never falsely "alternates" with an unrelated ungrouped item.
+const byGroup = new Map();
+matchOn.forEach((item) => {
+const group = sizeGroupFor(item.piece) || `__item_${item.id}`;
+if (!byGroup.has(group)) byGroup.set(group, []);
+byGroup.get(group).push(item);
+});
+const perGroup = [...byGroup.values()].map((items) => {
+// Best-scoring match per person across this group's alternatives, so
+// fitting one of two options counts once, at its strongest reason --
+// not whichever alternative happened to be checked last.
+const fits = new Map();
+items.forEach((item) => {
+whoFits(item).forEach((f) => {
+const existing = fits.get(f.conn.id);
+if (!existing || f.score > existing.score) fits.set(f.conn.id, { ...f, item });
+});
+});
+return { fits };
+});
+if (!perGroup.length) return [];
+// Only people who fit every GROUP present (each via at least one of
+// its alternatives).
+const common = perGroup.reduce((acc, { fits }) => acc.filter((id) => fits.has(id)),
+[...perGroup[0].fits.keys()]);
 return common.map((id) => {
 const conn = data.connections.find((c) => c.id === id);
-const reasons = perItem.map(({ item, fits }) => `${item.piece || 'piece'} ${item.size}: ${fits.get(id).how}`);
-// Worst piece decides the rank: a set is only as good a match as its
-// least convincing item.
-const score = Math.min(...perItem.map(({ fits }) => fits.get(id).score));
+const reasons = perGroup.map(({ fits }) => { const f = fits.get(id); return `${f.item.piece || 'piece'} ${f.item.size}: ${f.how}`; });
+// Worst group decides the rank: a set is only as good a match as its
+// least convincing piece.
+const score = Math.min(...perGroup.map(({ fits }) => fits.get(id).score));
 // What you'd still need to buy, in her size, to finish it.
 const needed = set.missing.map((group) => {
 const row = (conn.sizes || []).find((s) => sizeGroupFor(s.category) === group
 && String(s.retailer || '').trim().toLowerCase() === String(set.brand || '').trim().toLowerCase());
-return { group, size: row ? (row.usual || row.backup) : '' };
+return { group, size: row ? (row.usual || row.backup || row.backup2) : '' };
 });
 return { conn, reasons, score, needed, interest: interestNote(conn) };
 }).sort((a, b) => b.score - a.score);
@@ -1140,7 +1169,8 @@ let best = null;
 (c.sizes || []).forEach((s) => {
 const matchesUsual = String(s.usual || '').trim().toLowerCase() === size;
 const matchesBackup = String(s.backup || '').trim().toLowerCase() === size;
-if (!matchesUsual && !matchesBackup) return;
+const matchesBackup2 = String(s.backup2 || '').trim().toLowerCase() === size;
+if (!matchesUsual && !matchesBackup && !matchesBackup2) return;
 const sameRetailer = brand && String(s.retailer || '').trim().toLowerCase() === brand;
 // Grouped, not compared by name: an item called "Ouvert Brief" has to
 // match a size recorded once as "Knickers". Falls back to an exact
@@ -1156,9 +1186,9 @@ const samePiece = (itemGroup && sizeGroup)
 // likely and the list is useless.
 const score = (sameRetailer ? 4 : 0) + (samePiece ? 2 : 0) + (matchesUsual ? 1 : 0);
 // The value that actually MATCHED, not whichever happens to be set --
-// printing her usual when the hit was on her backup reads as a
+// printing her usual when the hit was on a backup reads as a
 // contradiction of the size you're looking at.
-const matchedValue = matchesUsual ? s.usual : s.backup;
+const matchedValue = matchesUsual ? s.usual : (matchesBackup ? s.backup : s.backup2);
 const how = `${s.retailer || 'somewhere'} ${s.category || ''} ${matchesUsual ? 'usual' : 'backup'} ${matchedValue}`.replace(/\s+/g, ' ').trim();
 if (!best || score > best.score) best = { score, how };
 });
@@ -1952,7 +1982,7 @@ if (!Array.isArray(c.todos)) c.todos = [];
 // (hand-edited backup, a future import) would otherwise be uneditable
 // and undeletable with no visible reason why.
 if (!Array.isArray(c.sizes)) c.sizes = [];
-c.sizes = c.sizes.map((s) => ({ id: s.id || uid(), retailer: s.retailer || '', category: s.category || '', usual: s.usual || '', backup: s.backup || '', notes: s.notes || '' }));
+c.sizes = c.sizes.map((s) => ({ id: s.id || uid(), retailer: s.retailer || '', category: s.category || '', usual: s.usual || '', backup: s.backup || '', backup2: s.backup2 || '', notes: s.notes || '' }));
 // c.owned was the first shape this took, before it was clear an item
 // can outlive the relationship. Carried across to data.inventory with
 // this person as the holder rather than dropped, then removed.

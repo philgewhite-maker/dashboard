@@ -620,6 +620,7 @@ const rows = (c.sizes || []).map((s) => `
 <div class="size-row-values">
 <label>Usual<input type="text" autocomplete="off" data-size-field="usual" data-size-id="${s.id}" data-conn="${c.id}" value="${escapeHtml(s.usual)}" style="max-width:80px;"></label>
 <label title="What you'd order if the usual size were gone">Backup<input type="text" autocomplete="off" data-size-field="backup" data-size-id="${s.id}" data-conn="${c.id}" value="${escapeHtml(s.backup)}" style="max-width:80px;"></label>
+<label title="A second fallback, checked after Backup">Backup 2<input type="text" autocomplete="off" data-size-field="backup2" data-size-id="${s.id}" data-conn="${c.id}" value="${escapeHtml(s.backup2)}" style="max-width:80px;"></label>
 <span class="tag-x" data-size-remove="${c.id}" data-size-id="${s.id}">&times;</span>
 </div>
 </div>`).join('');
@@ -1578,7 +1579,7 @@ list.querySelectorAll('[data-size-add]').forEach((btn) => {
 btn.addEventListener('click', () => {
 const conn = data.connections.find((x) => x.id === btn.dataset.sizeAdd);
 if (!conn) return;
-conn.sizes.push({ id: uid(), retailer: '', category: '', usual: '', backup: '', notes: '' });
+conn.sizes.push({ id: uid(), retailer: '', category: '', usual: '', backup: '', backup2: '', notes: '' });
 queueSave();
 renderConnections();
 });

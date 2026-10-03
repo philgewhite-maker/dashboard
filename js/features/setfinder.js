@@ -187,7 +187,7 @@ refresh();
 const COLOUR_BUCKET_OPTIONS = ['Black', 'Neutral', 'Bright', 'Other'];
 
 function sizesLabel(available) {
-return available.map((a) => `${a.size}${a.which === 'backup' ? ' (backup)' : ''}${a.lastOne ? ' — last one' : ''}`).join(', ');
+return available.map((a) => `${a.size}${a.which === 'backup2' ? ' (backup 2)' : a.which === 'backup' ? ' (backup)' : ''}${a.lastOne ? ' — last one' : ''}`).join(', ');
 }
 
 function rowHtml(r, added) {

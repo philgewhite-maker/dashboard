@@ -54,6 +54,7 @@ const sameGroup = group && sizeGroupFor(s.category) === group;
 if (!sameGroup) return;
 if (s.usual) out.push({ size: s.usual, which: 'usual' });
 if (s.backup) out.push({ size: s.backup, which: 'backup' });
+if (s.backup2) out.push({ size: s.backup2, which: 'backup2' });
 });
 return out;
 }
@@ -563,7 +564,7 @@ function resultLineHtml(r) {
 const price = r.net != null && r.net !== r.now
 ? `<strong>${escapeHtml(money(r.net))}</strong> <span class="settings-note" style="display:inline;margin:0;">was ${escapeHtml(money(r.was))}, ${escapeHtml(money(r.now))} before ${escapeHtml(r.code)}</span>`
 : `<strong>${escapeHtml(money(r.now))}</strong>${r.was ? ` <span class="settings-note" style="display:inline;margin:0;">was ${escapeHtml(money(r.was))}</span>` : ''}`;
-const sizes = r.available.map((a) => `${escapeHtml(a.size)}${a.which === 'backup' ? ' (backup)' : ''}${a.lastOne ? ' — last one' : ''}`).join(', ');
+const sizes = r.available.map((a) => `${escapeHtml(a.size)}${a.which === 'backup2' ? ' (backup 2)' : a.which === 'backup' ? ' (backup)' : ''}${a.lastOne ? ' — last one' : ''}`).join(', ');
 const goneNote = !r.available.length && r.gone.length
 ? `<span class="settings-note" style="display:inline;margin:0;">${escapeHtml(r.gone.map((g) => g.size).join(', '))} sold out</span>` : '';
 const noSizes = r.noSizesOnFile
@@ -583,7 +584,7 @@ ${setHtml(r)}
 function setHtml(r) {
 if (!r.available.length || !(r.alsoAvailable || []).length) return '';
 return `<div class="stock-set">${r.alsoAvailable.map((s) => {
-const sizes = s.available.map((a) => `${escapeHtml(a.size)}${a.which === 'backup' ? ' (backup)' : ''}${a.lastOne ? ' — last one' : ''}`).join(', ');
+const sizes = s.available.map((a) => `${escapeHtml(a.size)}${a.which === 'backup2' ? ' (backup 2)' : a.which === 'backup' ? ' (backup)' : ''}${a.lastOne ? ' — last one' : ''}`).join(', ');
 const price = s.net != null && s.net !== s.now ? money(s.net) : money(s.now);
 return `<span class="stock-set-item">+ ${escapeHtml(s.name)} <span class="stock-sizes">${sizes}</span> ${escapeHtml(price)}</span>`;
 }).join('')}</div>`;
