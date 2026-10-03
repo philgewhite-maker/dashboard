@@ -38,7 +38,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-VERSION = "1.9"
+VERSION = "1.10"
 
 SYNC_URL = os.environ.get("DASHBOARD_SYNC_URL", "").strip()
 SECRET = os.environ.get("DASHBOARD_SECRET", "").strip()
@@ -725,7 +725,15 @@ export default async function ({ page, context }) {
     // the old button elements and would throw on a stale handle.
     const buttons = await page.$$('[data-swiper-slide-index] button');
     if (!buttons[i]) continue;
-    await buttons[i].click();
+    // A native in-page click, not Puppeteer's own simulated mouse click --
+    // confirmed live, the real one failed with "Node is either not
+    // clickable or not an Element" for exactly the reason a swiper
+    // carousel would cause it: a slide past the first is positioned
+    // off-screen by CSS transform until the carousel itself scrolls, so
+    // it has no real on-screen point for a simulated click to land on.
+    // el.click() runs inside the page and needs no position at all --
+    // Angular's own click listener fires identically either way.
+    await page.evaluate((el) => el.click(), buttons[i]);
     await new Promise((r) => setTimeout(r, 700));
     const colour = await page.evaluate(() => {
       const el = [...document.querySelectorAll('span')].find((s) => /^Colour:/i.test((s.textContent || '').trim()));
