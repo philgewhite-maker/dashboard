@@ -601,21 +601,29 @@ function groupHtml(g) {
 // reason -- a plain row shows it all at once, same as a series' own
 // detail rows already do, so there's nothing left to collapse.
 if (!g.series) return bookRowHtml(g.items[0]);
-// The summary IS the next (or, once the series is finished, the
-// first) book's own full row -- not a sparse line with just a name and
-// a "next:" label. Expanding shows the REST of the series, with this
-// one excluded, rather than repeating it. Author/age shift sometimes
-// across a long series (a co-writer joins, the target age climbs), so
-// this reads them straight off the actual book being shown, not off
-// the series as a label.
+// The book row itself is ALWAYS the next (or, once finished, first)
+// book's own full row, rendered exactly like a standalone row -- same
+// left edge, same image, same right-aligned order/author/age, nothing
+// shifted over by a leading chevron column (confirmed live: that's
+// what made the list look raggedly indented, series rows starting
+// further right than standalone ones). The series-only bits -- which
+// series, how many held, find the rest -- live on their OWN line
+// underneath, indented to start under the title rather than the image.
+// Author/age on the row itself still come off the actual book shown,
+// not the series as a label, since those can shift across a long run
+// (a co-writer joins, the target age climbs).
 const rep = g.allRead ? g.items[0] : g.next;
 const rest = g.items.filter((b) => b.id !== rep.id);
-const extra = `<span class="task-context">${g.items.length} held</span>
+const subRow = `<span class="settings-note book-group-label" style="margin:0;">Part of <strong>${escapeHtml(g.series)}</strong> series</span>
+<span class="task-context">${g.items.length} held</span>
 <button type="button" class="sync-btn sm book-inline-btn" data-book-find-rest="${escapeHtml(g.series)}" data-book-find-author="${escapeHtml(g.items[0].author)}">Find the rest&hellip;</button>`;
-return `<details class="book-group">
-<summary class="book-group-summary">${bookRowHtml(rep, extra)}</summary>
-${rest.length ? `<div class="book-group-items">${rest.map((b) => bookRowHtml(b)).join('')}</div>` : ''}
-</details>`;
+// Nothing else owned from this series yet -- still worth offering
+// "Find the rest", but there's nothing to expand TO, so no chevron/
+// toggle, just the plain line.
+const expander = rest.length
+? `<details class="book-group-expander"><summary class="book-group-summary">${subRow}</summary><div class="book-group-items">${rest.map((b) => bookRowHtml(b)).join('')}</div></details>`
+: `<div class="book-group-summary book-group-summary-static">${subRow}</div>`;
+return `<div class="book-group">${bookRowHtml(rep)}${expander}</div>`;
 }
 
 async function renderNextToRead() {
@@ -679,17 +687,18 @@ el.innerHTML = groups.length
 hydratePhotoBackgrounds(el);
 bindConnectionChips(el);
 
-// The series summary now contains a real, fully-interactive book row
-// (checkbox, stars, buttons, links) rather than inert text -- every one
-// of those sits inside a <summary>, whose native behaviour is "clicking
-// anywhere in me toggles the <details>". stopPropagation on each
-// interactive element's OWN click, not preventDefault from a delegated
-// listener up on the summary -- confirmed live that preventDefault from
-// up there cancels the SAME event's default action everywhere it was
-// still pending, including the checkbox's own native toggle (a tick
-// stopped registering at all). stopPropagation called at the element
-// itself stops the click going any further up to the summary without
-// touching that element's own default action.
+// "Find the rest…" sits inside the expander's own <summary>, whose
+// native behaviour is "clicking anywhere in me toggles the <details>".
+// stopPropagation on the button's OWN click, not preventDefault from a
+// delegated listener up on the summary -- confirmed live earlier that
+// preventDefault from up there cancels the SAME event's default action
+// everywhere it was still pending, which broke a checkbox that used to
+// live in this same summary (its tick stopped registering at all).
+// stopPropagation at the element itself avoids that: it stops the click
+// going any further up to the summary without touching the element's
+// own default action. Kept generic (any interactive element in a
+// summary line, not just this one button) since the next thing added
+// here will have the exact same problem.
 el.querySelectorAll('.book-group-summary input, .book-group-summary button, .book-group-summary a, .book-group-summary svg, .book-group-summary .conn-chip').forEach((node) => {
 node.addEventListener('click', (e) => e.stopPropagation());
 });
