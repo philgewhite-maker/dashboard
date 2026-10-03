@@ -248,9 +248,32 @@ const { pages, errors } = await fetchPages(paths.map((p) => origin + p));
 paths.forEach((p) => {
 const html = pages.get(origin + p);
 if (!html) return;
+// The JSON-LD catalogue AP embeds on every listing page is tried
+// first -- EVERY product on the page, not the lazy-loaded slice of
+// <product> cards findRangeItems reads. Confirmed live: a real search
+// for "Lorna" found 11 items this way against 5 the card scrape saw
+// from the identical fetch, including a colourway (Baby Pink/Blue)
+// the card scrape had never once surfaced. Falls back to the card
+// scrape only when a page's catalogue is empty (not every page
+// carries one) -- which still reads colour/piece more precisely when
+// a catalogue IS present, since the catalogue has no colour field of
+// its own (see slugColourGuess's own comment on why that's a guess).
+const ldItems = adapter.jsonLdRangeItems ? adapter.jsonLdRangeItems(html, style) : [];
+if (ldItems.length) {
+ldItems.forEach((item) => {
+if (found.has(item.url)) return;
+found.set(item.url, {
+url: item.url, range: item.range,
+piece: item.name.slice(item.range.length).trim(),
+colour: adapter.slugColourGuess ? adapter.slugColourGuess(item.url) : '',
+price: item.price, inStock: item.inStock,
+});
+});
+} else {
 adapter.findRangeItems(html, style).forEach((item) => {
 if (!found.has(item.url)) found.set(item.url, item);
 });
+}
 });
 if (!found.size && errors.length === paths.length) {
 return { error: `Couldn't read either listing page (${errors[0]?.error || 'unknown error'}).` };

@@ -486,6 +486,89 @@ items.push(item);
 return items;
 }
 
+// A listing page's REAL catalogue, not the lazy-loaded slice of it the
+// <product> cards above ever show. AP embeds a <script
+// type="application/ld+json"> block (a BreadcrumbList, oddly -- not the
+// textbook schema.org type for this, but that's what's there) listing
+// EVERY product on the page up front: confirmed live, /sale alone
+// carries 962 of them against the ~24 <product> cards a single fetch
+// renders. Each entry already carries a real price and stock
+// availability too, so this also answers "is it in stock at all" with
+// no per-product fetch -- though not broken down by size, which still
+// needs the product page itself (see resultFor in stockwatch.js).
+//
+// No separate range/piece fields here, unlike a <product> card -- just
+// one `name` string ("Lorna Plunge Underwired Bra"). Splitting it
+// relies on AP's range names almost always being a single word, checked
+// against the real data rather than assumed: of 680 distinct names
+// across one /sale fetch, only two multi-word cases actually mattered,
+// "Yara 1" (a bare trailing variant number, not part of the name -- see
+// rangeFromName, which drops it for free by not treating a bare number
+// as a qualifier) and "Lorna Lace" (a genuine sub-range, same family
+// confirmed earlier via AP's own search-box redirect: Lorna/Lorna Dotty/
+// Lorna Heart/Lorna Lace/Lorna Party/Lorna Rainbow). MULTI_WORD_RANGES
+// below is that short, confirmed list, not a general solver -- a future
+// range this doesn't cover falls back to its first word, same as today.
+const MULTI_WORD_RANGE_QUALIFIERS = {
+Lorna: ['Dotty', 'Heart', 'Lace', 'Party', 'Rainbow'],
+};
+
+function rangeFromName(name) {
+const words = String(name || '').trim().split(/\s+/);
+const first = words[0] || '';
+const second = words[1] || '';
+if (MULTI_WORD_RANGE_QUALIFIERS[first]?.includes(second)) return `${first} ${second}`;
+return first;
+}
+
+function jsonLdCatalogItems(listingHtml) {
+const doc = new DOMParser().parseFromString(String(listingHtml || ''), 'text/html');
+const items = [];
+const seen = new Set();
+doc.querySelectorAll('script[type="application/ld+json"]').forEach((script) => {
+let parsed;
+try { parsed = JSON.parse(script.textContent || ''); } catch (err) { return; }
+const entries = Array.isArray(parsed?.itemListElement) ? parsed.itemListElement : [];
+entries.forEach((entry) => {
+const p = entry?.item;
+if (!p || p['@type'] !== 'Product' || !p.url || seen.has(p.url)) return;
+seen.add(p.url);
+const name = String(p.name || '').trim();
+items.push({
+url: p.url,
+range: rangeFromName(name),
+name,
+price: p.offers?.price != null ? Number(p.offers.price) : null,
+inStock: typeof p.offers?.availability === 'string' ? p.offers.availability.endsWith('InStock') : null,
+});
+});
+});
+return items;
+}
+
+// Every item in a range from the JSON-LD catalogue -- the complete-
+// coverage counterpart to findRangeItems (which reads <product> cards
+// and is kept as a fallback, since it also carries colour/piece as
+// separate, reliable fields the catalogue's bare `name` doesn't).
+// Exact match against the typed style, same reasoning as findRangeItems:
+// a substring match can't tell "Lorna" from "Lorna Lace".
+function jsonLdRangeItems(listingHtml, rangeName) {
+const want = String(rangeName || '').trim().toLowerCase();
+return jsonLdCatalogItems(listingHtml).filter((item) => !want || item.range.toLowerCase() === want);
+}
+
+// Best-effort only, never used for matching -- the catalogue has no
+// colour field of its own, so this is a guess from the URL slug's own
+// "-in-{colour}-{sku}" tail, same imprecision findRangeItems' comment
+// already documents about slugs generally (a word can go missing). Fine
+// for a display label; never trusted the way a card's alt-text-derived
+// colour is.
+function slugColourGuess(url) {
+const path = (() => { try { return new URL(url).pathname; } catch (err) { return String(url || ''); } })();
+const m = /-in-([a-z0-9-]+?)-\d+$/i.exec(path);
+return m ? m[1].replace(/-/g, ' ') : '';
+}
+
 // ---- Reading the page from YOUR browser instead ---------------------------
 //
 // The proxy route assumes the retailer will answer a request from your web
@@ -583,4 +666,4 @@ step();
 return `javascript:${encodeURIComponent(body)}`;
 }
 
-export { matchesRetailer, RETAILER, parseProductPage, parseSizeOption, parseBlock, skuParts, skuFromUrl, specFromUrl, findRangeItems, listingUrl, listingItems, COLOURS, bucketsForColour, bookmarkletSource, bulkBookmarkletSource, PASTE_STOCK_PREFIX, HOST, CHECK_SPACING_MS, NEEDS_BROWSER_FOR_FULL_PAGE };
+export { matchesRetailer, RETAILER, parseProductPage, parseSizeOption, parseBlock, skuParts, skuFromUrl, specFromUrl, findRangeItems, listingUrl, listingItems, jsonLdCatalogItems, jsonLdRangeItems, rangeFromName, slugColourGuess, COLOURS, bucketsForColour, bookmarkletSource, bulkBookmarkletSource, PASTE_STOCK_PREFIX, HOST, CHECK_SPACING_MS, NEEDS_BROWSER_FOR_FULL_PAGE };
