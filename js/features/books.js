@@ -28,8 +28,19 @@ const n = parseInt(b.seriesOrder, 10);
 return Number.isFinite(n) ? n : Infinity; // no order -> sorts last within its series
 }
 
+// Table-level sort/filter state, independent of each other -- 'next 3
+// to read' below has its own separate, unrelated ranking and doesn't
+// read any of this.
+let sortMode = 'series'; // 'series' | 'age' | 'author'
+let readFilter = 'all'; // 'all' | 'unread' | 'read'
+let inFlightOnly = false; // series with some, but not all, entries read
+
 // One entry per distinct `series` value; a blank series is its own
-// group of one, same as a standalone book really is one.
+// group of one, same as a standalone book really is one. Sorted by the
+// NEXT unread book's own age/author when sorting by those -- same
+// reasoning the summary row shows the next book's details rather than
+// the series' own first entry: that's the book the sort is actually
+// meant to surface.
 function bookGroups() {
 const groups = new Map();
 data.books.forEach((b) => {
@@ -37,11 +48,40 @@ const key = b.series.trim() || `__standalone__${b.id}`;
 if (!groups.has(key)) groups.set(key, { series: b.series.trim(), items: [] });
 groups.get(key).items.push(b);
 });
-return [...groups.values()].map((g) => {
+const built = [...groups.values()].map((g) => {
 const items = [...g.items].sort((a, b) => orderNum(a) - orderNum(b) || a.title.localeCompare(b.title));
 const next = items.find((b) => !b.read);
 return { ...g, items, next, allRead: !next };
-}).sort((a, b) => (a.series || a.items[0].title).localeCompare(b.series || b.items[0].title));
+});
+const byName = (a, b) => (a.series || a.items[0].title).localeCompare(b.series || b.items[0].title);
+if (sortMode === 'age') {
+const ageVal = (g) => { const b = g.allRead ? g.items[0] : g.next; const v = b.minAge !== '' ? Number(b.minAge) : NaN; return Number.isFinite(v) ? v : Infinity; };
+return built.sort((a, b) => ageVal(a) - ageVal(b) || byName(a, b));
+}
+if (sortMode === 'author') {
+const authorVal = (g) => ((g.allRead ? g.items[0] : g.next).author || '').trim();
+return built.sort((a, b) => authorVal(a).localeCompare(authorVal(b)) || byName(a, b));
+}
+return built.sort(byName);
+}
+
+// Filtered/sorted view actually shown in the table -- kept separate
+// from bookGroups() itself so "held"/"next" always reflect the real,
+// unfiltered shelf (see groupHtml's own reasoning) while readFilter only
+// changes which detail ROWS are visible inside a kept group, and
+// inFlightOnly drops whole groups. Both read off the true, unfiltered
+// grouping first -- "in-flight" inherently needs to see both read and
+// unread entries in the same group to tell a started series from a
+// finished or untouched one, which filtering rows first would hide.
+function visibleGroups() {
+let groups = bookGroups();
+if (inFlightOnly) groups = groups.filter((g) => g.series && !g.allRead && g.items.some((b) => b.read));
+if (readFilter !== 'all') {
+groups = groups
+.map((g) => ({ ...g, items: g.items.filter((b) => (readFilter === 'read' ? b.read : !b.read)) }))
+.filter((g) => g.items.length);
+}
+return groups;
 }
 
 // ---- "Next 3 to read" -------------------------------------------------
@@ -183,27 +223,47 @@ enrichMissingCovers(added);
 document.getElementById('books-csv-cancel').addEventListener('click', () => { csvRows = []; renderCsvReview(); });
 }
 
-// A cover for anything added with no imageUrl -- CSV import never had
-// one in the first place (confirmed live as a real gap: every CSV-
-// imported book showed no thumbnail at all, since only the manual-add
-// lookup and a Media flow-in ever filled imageUrl). Open Library's
-// title search is free and keyless, so this runs unconditionally and
-// silently, same as media.js's own fillArtwork -- a cover is decoration,
-// worth having automatically, not worth a status line of its own or a
-// dependency on an Anthropic key the series/age lookup needs.
+// No catalogue link found for this book -- same "no better link exists,
+// construct a search URL" fallback Overview's own weather link already
+// uses (a plain Google search for the city). A title that LOOKS like a
+// link (see the .mail-subject hover-colour fix above) should actually
+// go somewhere rather than just stop looking like one; Google Books is
+// closer to the mark than a bare web search for an actual book.
+function bookSearchFallbackLink(book) {
+const q = [book.title, book.author].filter(Boolean).join(' ');
+return `https://www.google.com/search?tbm=bks&q=${encodeURIComponent(q)}`;
+}
+
+// A cover (and a real link) for anything added without them -- CSV
+// import never had either in the first place (confirmed live as a real
+// gap: every CSV-imported book showed no thumbnail and no working
+// title link, since only the manual-add lookup and a Media flow-in ever
+// filled imageUrl/link). Open Library's title search is free and
+// keyless, so this runs unconditionally and mostly silently, same as
+// media.js's own fillArtwork -- a cover is decoration, worth having
+// automatically, not worth a status line of its own or a dependency on
+// an Anthropic key the series/age lookup needs. The link always ends up
+// set, even on a lookup failure or a miss -- falling back to a search
+// link rather than leaving the title dead.
 async function enrichMissingCovers(books) {
 for (const book of books) {
-if (book.imageUrl) continue;
+if (book.imageUrl && book.link) continue;
+const live = data.books.find((b) => b.id === book.id);
+if (!live) continue;
 try {
 const candidates = await searchTitle('book', `${book.title} ${book.author}`.trim());
-const live = data.books.find((b) => b.id === book.id);
-if (!live || live.imageUrl || !candidates.length) continue;
-live.imageUrl = candidates[0].imageUrl || '';
-if (!Object.keys(live.externalIds || {}).length) live.externalIds = candidates[0].externalIds || {};
-if (live.imageUrl) { queueSave(); renderBooks(); }
-} catch (err) {
-console.error('Cover lookup failed, left blank:', err);
+const hit = candidates[0];
+if (hit) {
+if (!live.imageUrl && hit.imageUrl) live.imageUrl = hit.imageUrl;
+if (!live.link && hit.link) live.link = hit.link;
+if (!Object.keys(live.externalIds || {}).length && hit.externalIds) live.externalIds = hit.externalIds;
 }
+} catch (err) {
+console.error('Cover lookup failed:', err);
+}
+if (!live.link) live.link = bookSearchFallbackLink(live);
+queueSave();
+renderBooks();
 }
 }
 
@@ -533,12 +593,30 @@ ${book.fromMediaId ? `<span class="settings-note book-from-media" data-book-from
 }
 
 function groupHtml(g) {
+// A standalone book is never really a "group" -- bookGroups() keys a
+// blank series uniquely per book, so it's always exactly one item.
+// Splitting one row into a collapsed summary plus a detail row behind
+// a click hid everything (author, age, read/score/holder) for no
+// reason -- a plain row shows it all at once, same as a series' own
+// detail rows already do, so there's nothing left to collapse.
+if (!g.series) return bookRowHtml(g.items[0]);
 const nextLabel = g.allRead ? 'All read' : g.next.title;
+// Author and age range for the summary come off the NEXT book
+// specifically, not the series as a whole -- later entries in a long
+// series sometimes shift author (a co-writer) or target age (it gets
+// harder as it goes), and the next book is the one this row's decision
+// actually hinges on.
+const byline = g.allRead ? g.items[0].author : [g.next.author, g.next.format].filter(Boolean).join(' · ');
+const ageBook = g.allRead ? null : g.next;
+const ageLabel = ageBook && (ageBook.minAge || ageBook.maxAge) ? `${ageBook.minAge || '?'}–${ageBook.maxAge || '?'} yrs` : '';
 return `<details class="book-group">
 <summary class="book-group-summary">
-${g.series ? `<span class="mail-subject">${escapeHtml(g.series)}</span><span class="settings-note" style="margin:0;">next: ${escapeHtml(nextLabel)}</span>` : `<span class="mail-subject">${escapeHtml(g.items[0].title)}</span>`}
+<span class="mail-subject">${escapeHtml(g.series)}</span>
+<span class="settings-note" style="margin:0;">next: ${escapeHtml(nextLabel)}</span>
+${byline ? `<span class="settings-note" style="margin:0;">${escapeHtml(byline)}</span>` : ''}
+${ageLabel ? `<span class="settings-note" style="margin:0;">${escapeHtml(ageLabel)}</span>` : ''}
 <span class="task-context">${g.items.length} held</span>
-${g.series ? `<button type="button" class="sync-btn sm book-inline-btn" data-book-find-rest="${escapeHtml(g.series)}" data-book-find-author="${escapeHtml(g.items[0].author)}">Find the rest&hellip;</button>` : ''}
+<button type="button" class="sync-btn sm book-inline-btn" data-book-find-rest="${escapeHtml(g.series)}" data-book-find-author="${escapeHtml(g.items[0].author)}">Find the rest&hellip;</button>
 </summary>
 <div class="book-group-items">${g.items.map(bookRowHtml).join('')}</div>
 </details>`;
@@ -571,13 +649,37 @@ bindBookChips();
 }
 }
 
+function booksControlsHtml() {
+if (!data.books.length) return '';
+const sortChip = (v, label) => `<button type="button" class="overview-chip${sortMode === v ? ' active' : ''}" data-books-sort="${v}">${label}</button>`;
+const readChip = (v, label) => `<button type="button" class="overview-chip${readFilter === v ? ' active' : ''}" data-books-read-filter="${v}">${label}</button>`;
+return `<div class="overview-chips" style="margin-bottom:8px;">
+<span class="settings-note" style="margin:0;">Sort:</span>
+${sortChip('series', 'Series')}${sortChip('age', 'Min age')}${sortChip('author', 'Author')}
+<span class="settings-note" style="margin:0 0 0 8px;">Show:</span>
+${readChip('all', 'All')}${readChip('unread', 'Unread')}${readChip('read', 'Read')}
+<button type="button" class="overview-chip${inFlightOnly ? ' active' : ''}" data-books-in-flight="1">In-flight series only</button>
+</div>`;
+}
+
 function renderBooks() {
 const el = document.getElementById('books-list');
 if (!el) return;
 renderNextToRead();
 
-const groups = bookGroups();
-el.innerHTML = groups.length ? groups.map(groupHtml).join('') : '<div class="empty">Nothing on the shelf yet — upload a CSV or add one by hand above.</div>';
+const controls = document.getElementById('books-controls');
+if (controls) {
+controls.innerHTML = booksControlsHtml();
+controls.querySelectorAll('[data-books-sort]').forEach((b) => b.addEventListener('click', () => { sortMode = b.dataset.booksSort; renderBooks(); }));
+controls.querySelectorAll('[data-books-read-filter]').forEach((b) => b.addEventListener('click', () => { readFilter = b.dataset.booksReadFilter; renderBooks(); }));
+const inFlightBtn = controls.querySelector('[data-books-in-flight]');
+if (inFlightBtn) inFlightBtn.addEventListener('click', () => { inFlightOnly = !inFlightOnly; renderBooks(); });
+}
+
+const groups = visibleGroups();
+el.innerHTML = groups.length
+? groups.map(groupHtml).join('')
+: `<div class="empty">${data.books.length ? 'Nothing matches that filter.' : 'Nothing on the shelf yet — upload a CSV or add one by hand above.'}</div>`;
 hydratePhotoBackgrounds(el);
 bindConnectionChips(el);
 
@@ -676,10 +778,10 @@ const coversBtn = document.getElementById('books-find-covers-btn');
 if (coversBtn) coversBtn.addEventListener('click', async () => {
 coversBtn.disabled = true;
 const status = document.getElementById('books-csv-status');
-const missing = data.books.filter((b) => !b.imageUrl);
-if (status) status.textContent = `Looking up covers for ${missing.length} book${missing.length === 1 ? '' : 's'}…`;
+const missing = data.books.filter((b) => !b.imageUrl || !b.link);
+if (status) status.textContent = `Looking up covers & links for ${missing.length} book${missing.length === 1 ? '' : 's'}…`;
 await enrichMissingCovers(missing);
-if (status) status.textContent = `Done — ${missing.filter((b) => data.books.find((x) => x.id === b.id)?.imageUrl).length} of ${missing.length} found.`;
+if (status) status.textContent = `Done — ${missing.filter((b) => data.books.find((x) => x.id === b.id)?.imageUrl).length} of ${missing.length} found a cover.`;
 coversBtn.disabled = false;
 });
 const fileInput = document.getElementById('books-csv-input');

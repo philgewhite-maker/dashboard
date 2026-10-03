@@ -1574,7 +1574,14 @@ background-color:var(--line);
 background-size:cover;
 background-position:center;
 }
-.mail-row:hover .mail-subject{color:var(--rose);}
+/* Only an actual link inside .mail-subject gets the hover colour -- it
+   used to apply to the bare text too (Books, Media, Shopping inventory
+   all conditionally render .mail-subject as an <a> only when a link
+   exists), so a title with no link still looked clickable on hover and
+   went nowhere when clicked. A row deliberately made clickable some
+   other way (showCandidates()'s picker rows, media.js's route rows)
+   sets its own cursor:pointer and isn't relying on this rule anyway. */
+.mail-row:hover .mail-subject a{color:var(--rose);}
 .mail-row{align-items:center;}
 .mail-from{
 font-size:13px;

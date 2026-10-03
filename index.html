@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v463</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v464</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -258,7 +258,7 @@
 <button class="sync-btn" id="books-add-btn" type="button">+ Add a book</button>
 <label class="file-btn" for="books-csv-input">Upload a CSV</label>
 <input type="file" id="books-csv-input" accept=".csv,text/csv" style="display:none;">
-<button class="sync-btn" id="books-find-covers-btn" type="button" title="Look up a cover image for every book that doesn't have one yet">Find missing covers</button>
+<button class="sync-btn" id="books-find-covers-btn" type="button" title="Look up a cover image and a working link for every book that's missing one">Find missing covers &amp; links</button>
 <span class="sync-status" id="books-csv-status"></span>
 </div>
 <div class="settings-note" style="margin:0 0 10px;">CSV header row: Title, Author, Series, Series Order, Min Reading Age, Max Reading Age.</div>
@@ -269,6 +269,7 @@
 </div>
 <div class="overview-chips" id="books-next-picker" style="margin-bottom:6px;"></div>
 <div id="books-next-list" style="margin-bottom:14px;"></div>
+<div id="books-controls"></div>
 <div id="books-list"></div>
 </section>
 
