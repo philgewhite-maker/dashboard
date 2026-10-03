@@ -331,6 +331,54 @@ function stripFragment(url) {
 return String(url || '').split('#')[0];
 }
 
+// Matches a browser-confirmed colour name against a fast-pass one --
+// exact after trimming/casing. The browser reads AP's own "Colour: X"
+// label verbatim; a fast-pass colour is read off a <product> card's alt
+// text, which is the same label AP uses for that colour everywhere.
+function sameColour(a, b) {
+return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+}
+
+// Reconciles one piece's fast-pass rows against a real click-through of
+// its colour swatches -- the three outcomes the user asked for by name:
+// a fast colour the browser also saw ('agreed'), a fast colour the
+// browser didn't ('fast-only' -- possibly pulled off the swatches since,
+// still shown rather than dropped), and a browser colour with no
+// fast-pass match at all ('browser-only' -- a real colourway the
+// catalogue/card scrape never surfaced, added as a new row). A blank
+// fast-pass row can't be named from a name match, but when the COUNT of
+// blanks exactly equals the count of leftover browser colours, pairing
+// them in the order each was found is a reasonable bet -- flagged
+// 'assumed' rather than presented as a plain match, since it's a count
+// coincidence, not a name match.
+function mergePieceColours(pieceRows, browserColours) {
+const remaining = browserColours.map((b) => ({ ...b }));
+const blank = [];
+pieceRows.forEach((row) => {
+if (!row.colour) { blank.push(row); return; }
+const i = remaining.findIndex((b) => sameColour(b.colour, row.colour));
+if (i === -1) { row.colourSource = 'fast-only'; return; }
+row.colourSource = 'agreed';
+row.browserUrl = remaining[i].url;
+remaining.splice(i, 1);
+});
+if (blank.length && blank.length === remaining.length) {
+blank.forEach((row, i) => {
+row.colour = remaining[i].colour;
+row.colourSource = 'assumed';
+row.browserUrl = remaining[i].url;
+});
+remaining.length = 0;
+} else {
+blank.forEach((row) => { row.colourSource = 'unresolved'; });
+}
+const extra = remaining.map((b) => ({
+url: b.url, range: pieceRows[0]?.range, piece: pieceRows[0]?.piece,
+colour: b.colour, price: null, inStock: null, colourSource: 'browser-only',
+}));
+return [...pieceRows, ...extra];
+}
+
 async function findColourways(taskId, { onProgress } = {}) {
 const t = data.tasks.find((x) => x.id === taskId);
 if (!t) return { error: 'No such task.' };
@@ -394,8 +442,36 @@ if (!found.has(item.url)) found.set(item.url, item);
 if (!found.size && errors.length === paths.length) {
 return { error: `Couldn't read either listing page (${errors[0]?.error || 'unknown error'}).` };
 }
+// Real browser fallback, for any piece the fast pass left a blank
+// colour on. One session per PIECE, not per blank row: clicking through
+// one product's swatches reveals every colourway of that piece in a
+// single pass (confirmed live via page.colourVariants), so a second row
+// of the same piece needs no session of its own.
+const byPiece = new Map();
+[...found.values()].forEach((r) => {
+if (!byPiece.has(r.piece)) byPiece.set(r.piece, []);
+byPiece.get(r.piece).push(r);
+});
+const flagged = [...byPiece.entries()].filter(([, rs]) => rs.some((r) => !r.colour));
+if (flagged.length) {
+const { run, AgentNotConfiguredError } = await import('../homeagent.js');
+for (let i = 0; i < flagged.length; i++) {
+const [piece, pieceRows] = flagged[i];
+if (onProgress) onProgress(`Checking real colours for "${piece}" (${i + 1} of ${flagged.length})…`);
+try {
+const res = await run('page.colourVariants', { url: pieceRows[0].url }, { timeoutMs: 90000 });
+byPiece.set(piece, mergePieceColours(pieceRows, res.results || []));
+} catch (err) {
+// Not fatal -- this piece just keeps whatever the fast pass found,
+// blanks and all. An unconfigured agent means every remaining
+// piece will fail the exact same way, so stop asking rather than
+// wait out N more timeouts for nothing.
+if (err instanceof AgentNotConfiguredError) break;
+}
+}
+}
 const already = new Set((spec.urls || []).map(stripFragment));
-const rows = [...found.values()].filter((r) => !already.has(stripFragment(r.url)));
+const rows = [...byPiece.values()].flat().filter((r) => !already.has(stripFragment(r.url)));
 const colours = [...new Set(rows.map((r) => r.colour).filter(Boolean))];
 const pieces = [...new Set(rows.map((r) => r.piece).filter(Boolean))];
 return { rows, colours, pieces };
@@ -528,20 +604,35 @@ const rows = search.rows.filter((r) => !added.has(r.url) && !existing.has(stripF
 const labelOf = (r) => `${r.piece}${r.colour ? ` — ${r.colour}` : ''}`;
 const labelCounts = new Map();
 rows.forEach((r) => { const l = labelOf(r); labelCounts.set(l, (labelCounts.get(l) || 0) + 1); });
+// What the browser click-through actually told us about this row, per
+// the user's own "best of" ask: agreed (both sources named the same
+// colour) gets no note, since that's the strongest case and the common
+// one; the other three are flagged so a fast-pass colour the browser
+// didn't confirm, a count-based guess, and a genuinely new colourway
+// the catalogue never listed all read differently.
+const SOURCE_NOTE = { 'fast-only': ' — not seen live', assumed: ' — assumed match', 'browser-only': ' — confirmed live, new' };
 const rowLabel = (r) => {
 const base = labelOf(r);
-if ((labelCounts.get(base) || 0) < 2) return base;
+const withId = (labelCounts.get(base) || 0) < 2 ? base : (() => {
 const idMatch = /-(\d+)$/.exec(stripFragment(r.url));
 return idMatch ? `${base} (#${idMatch[1]})` : base;
+})();
+return withId + (SOURCE_NOTE[r.colourSource] || '');
 };
 box.innerHTML = rows.length
 ? `<div class="settings-note" style="margin:6px 0 2px;">${search.colours.length} colour${search.colours.length === 1 ? '' : 's'} (${escapeHtml(search.colours.join(', '))}), ${search.pieces.length} item${search.pieces.length === 1 ? '' : 's'} (${escapeHtml(search.pieces.join(', '))}) found. Tick what to watch.</div>`
 + rows.map((r, i) => `<label style="display:block;font-size:12px;">
 <input type="checkbox" data-watch-found="${i}" value="${escapeHtml(r.url)}">
-${escapeHtml(rowLabel(r))}
+<a href="${escapeHtml(affiliateLink(r.url))}" target="_blank" rel="noopener noreferrer" data-watch-row-link>${escapeHtml(rowLabel(r))}</a>
 </label>`).join('')
 + '<button class="sync-btn sm" type="button" data-watch-add-found style="margin-top:6px;">Add ticked</button>'
 : '<div class="settings-note">Nothing new found — the listings only render part of a category, so an item can be missing from both.</div>';
+// Without this, clicking the link also toggles the checkbox it shares a
+// <label> with -- the label's own implicit behaviour, not anything this
+// code asks for.
+box.querySelectorAll('[data-watch-row-link]').forEach((a) => {
+a.addEventListener('click', (e) => e.stopPropagation());
+});
 const addBtn = box.querySelector('[data-watch-add-found]');
 if (addBtn) addBtn.addEventListener('click', () => {
 const picked = [...box.querySelectorAll('[data-watch-found]:checked')].map((c) => c.value);
