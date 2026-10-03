@@ -714,12 +714,12 @@ def verb_page_render(args):
 # card's own (different) swatch wrapper: each colour swatch sits inside
 # a swiper carousel slide, itself inside a plain <button>, which is what
 # actually receives the click.
-// Timed in-page, not just wrapped by the agent's own wall clock -- the
-// agent's own urlopen() call spans goto AND every click already, so it
-// can only ever say "the whole thing took Ns," never which part of it
-// did. Measuring goto and the click loop separately, from inside the
-// same page context doing the work, is the only way to actually answer
-// "what costs the time" instead of estimating it from the constants.
+# Timed in-page, not just wrapped by the agent's own wall clock -- the
+# agent's own urlopen() call spans goto AND every click already, so it
+# can only ever say "the whole thing took Ns," never which part of it
+# did. Measuring goto and the click loop separately, from inside the
+# same page context doing the work, is the only way to actually answer
+# "what costs the time" instead of estimating it from the constants.
 COLOUR_SWATCH_FUNCTION = """
 export default async function ({ page, context }) {
   const t0 = Date.now();
