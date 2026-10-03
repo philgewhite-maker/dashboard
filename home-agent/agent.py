@@ -748,7 +748,15 @@ export default async function ({ page, context }) {
       const el = [...document.querySelectorAll('span')].find((s) => /^Colour:/i.test((s.textContent || '').trim()));
       return el ? el.textContent.trim() : '';
     });
-    results.push({ colour, url: page.url() });
+    // Best-effort only, unlike the colour text above -- og:image is a
+    // near-universal convention, but whether AP's Angular app actually
+    // rewrites it on a client-side route change (rather than only on a
+    // fresh server-rendered load) hasn't been confirmed live the way the
+    // "Colour:" label was. If this comes back blank or stale across a
+    // real colour change, that's the next thing to check against the
+    // real page, not a reason to have guessed a narrower selector here.
+    const image = await page.evaluate(() => document.querySelector('meta[property="og:image"]')?.content || '');
+    results.push({ colour, url: page.url(), image });
   }
   const clicksMs = Date.now() - t1;
   return { data: JSON.stringify({ results, timings: { gotoMs, clicksMs, swatchCount: count } }), type: "application/json" };

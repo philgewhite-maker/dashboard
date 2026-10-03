@@ -3481,6 +3481,18 @@ padding:24px;
 .lightbox-img{width:100%;height:100%;border-radius:8px;background-size:contain;background-position:center;background-repeat:no-repeat;}
 
 /* ---- Reading one email in the app (mailviewer.js) ---- */
+.colour-hover-preview{
+position:fixed;
+display:none;
+max-width:180px;
+max-height:180px;
+border:1px solid var(--line);
+border-radius:6px;
+box-shadow:0 4px 16px rgba(0,0,0,0.3);
+z-index:200;
+pointer-events:none;
+background:var(--card);
+}
 .mail-view-backdrop{
 position:fixed;
 inset:0;

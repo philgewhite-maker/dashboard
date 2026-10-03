@@ -340,33 +340,52 @@ return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCa
 }
 
 // Reconciles one piece's fast-pass rows against a real click-through of
-// its colour swatches -- the three outcomes the user asked for by name:
-// a fast colour the browser also saw ('agreed'), a fast colour the
-// browser didn't ('fast-only' -- possibly pulled off the swatches since,
-// still shown rather than dropped), and a browser colour with no
-// fast-pass match at all ('browser-only' -- a real colourway the
-// catalogue/card scrape never surfaced, added as a new row). A blank
-// fast-pass row can't be named from a name match, but when the COUNT of
+// its colour swatches. Matched by URL FIRST, not colour text -- each
+// swatch click navigates to the site's own canonical page for that
+// exact colourway, the same URL the fast pass's own catalogue/card
+// scrape already carries, so it's a far more reliable key than the
+// colour TEXT the two sources format differently. Confirmed live: a
+// card's alt text reads "white red", the real on-page label reads
+// "White/Red" -- same colour, never going to compare equal as strings,
+// where their shared URL already does. Name matching is kept only as a
+// fallback for the rare case a URL doesn't line up (a redirect, a
+// tracking param).
+//
+// The three outcomes the user asked for by name: a fast row the browser
+// also reached ('agreed'), a fast colour the browser didn't
+// ('fast-only' -- possibly pulled off the swatches since, still shown
+// rather than dropped), and a browser colour matching no fast row at
+// all ('browser-only' -- a real colourway the catalogue/card scrape
+// never surfaced, added as a new row). A still-blank fast row with no
+// URL match either can't be named outright, but when the COUNT of those
 // blanks exactly equals the count of leftover browser colours, pairing
 // them in the order each was found is a reasonable bet -- flagged
 // 'assumed' rather than presented as a plain match, since it's a count
-// coincidence, not a name match.
+// coincidence, not a name or url match.
 function mergePieceColours(pieceRows, browserColours) {
 const remaining = browserColours.map((b) => ({ ...b }));
 const blank = [];
 pieceRows.forEach((row) => {
-if (!row.colour) { blank.push(row); return; }
-const i = remaining.findIndex((b) => sameColour(b.colour, row.colour));
-if (i === -1) { row.colourSource = 'fast-only'; return; }
+const byUrl = remaining.findIndex((b) => stripFragment(b.url).toLowerCase() === stripFragment(row.url).toLowerCase());
+if (byUrl !== -1) {
+row.colour = remaining[byUrl].colour || row.colour;
+row.image = row.image || remaining[byUrl].image || '';
 row.colourSource = 'agreed';
-row.browserUrl = remaining[i].url;
-remaining.splice(i, 1);
+remaining.splice(byUrl, 1);
+return;
+}
+if (!row.colour) { blank.push(row); return; }
+const byName = remaining.findIndex((b) => sameColour(b.colour, row.colour));
+if (byName === -1) { row.colourSource = 'fast-only'; return; }
+row.colourSource = 'agreed';
+row.image = row.image || remaining[byName].image || '';
+remaining.splice(byName, 1);
 });
 if (blank.length && blank.length === remaining.length) {
 blank.forEach((row, i) => {
 row.colour = remaining[i].colour;
+row.image = remaining[i].image || '';
 row.colourSource = 'assumed';
-row.browserUrl = remaining[i].url;
 });
 remaining.length = 0;
 } else {
@@ -374,7 +393,7 @@ blank.forEach((row) => { row.colourSource = 'unresolved'; });
 }
 const extra = remaining.map((b) => ({
 url: b.url, range: pieceRows[0]?.range, piece: pieceRows[0]?.piece,
-colour: b.colour, price: null, inStock: null, colourSource: 'browser-only',
+colour: b.colour, image: b.image || '', price: null, inStock: null, colourSource: 'browser-only',
 }));
 return [...pieceRows, ...extra];
 }
@@ -430,7 +449,7 @@ found.set(item.url, {
 url: item.url, range: item.range,
 piece: item.name.slice(item.range.length).trim(),
 colour: cardColours.get(item.url) || (adapter.slugColourGuess ? adapter.slugColourGuess(item.url) : ''),
-price: item.price, inStock: item.inStock,
+image: item.image || '', price: item.price, inStock: item.inStock,
 });
 });
 } else {
@@ -547,12 +566,41 @@ return `<div class="mail-view-card" style="max-width:520px;">
 </div>`;
 }
 
+// One shared preview element, created once and reused across every
+// "Find other colours" dialog -- a hover-to-view image for a result row,
+// per the user's own ask, rather than a thumbnail inline on every row
+// (160 characters of range text already runs tight in this list).
+// Positioned by mousemove, not CSS :hover alone, so it tracks the
+// cursor regardless of where in a long, scrolled list the row sits.
+let colourPreviewEl = null;
+function bindColourHoverPreview(box) {
+const preview = colourPreviewEl || (colourPreviewEl = (() => {
+const img = document.createElement('img');
+img.className = 'colour-hover-preview';
+document.body.appendChild(img);
+return img;
+})());
+const move = (e) => {
+preview.style.left = `${e.clientX + 16}px`;
+preview.style.top = `${e.clientY + 16}px`;
+};
+box.querySelectorAll('[data-watch-row-link][data-img]').forEach((a) => {
+a.addEventListener('mouseenter', (e) => {
+preview.src = a.dataset.img;
+preview.style.display = 'block';
+move(e);
+});
+a.addEventListener('mousemove', move);
+a.addEventListener('mouseleave', () => { preview.style.display = 'none'; });
+});
+}
+
 function openWatchEditor(t) {
 const dialog = document.createElement('div');
 dialog.className = 'mail-view-backdrop';
 dialog.innerHTML = watchEditorHtml(t);
 document.body.appendChild(dialog);
-const close = () => { liveColourDialogs.delete(t.id); dialog.remove(); };
+const close = () => { liveColourDialogs.delete(t.id); if (colourPreviewEl) colourPreviewEl.style.display = 'none'; dialog.remove(); };
 dialog.addEventListener('click', (e) => { if (e.target === dialog) close(); });
 const save = () => {
 const lines = dialog.querySelector('[data-watch-urls]').value.split('\n').map((s) => s.trim()).filter(Boolean);
@@ -623,7 +671,7 @@ box.innerHTML = rows.length
 ? `<div class="settings-note" style="margin:6px 0 2px;">${search.colours.length} colour${search.colours.length === 1 ? '' : 's'} (${escapeHtml(search.colours.join(', '))}), ${search.pieces.length} item${search.pieces.length === 1 ? '' : 's'} (${escapeHtml(search.pieces.join(', '))}) found. Tick what to watch.</div>`
 + rows.map((r, i) => `<label style="display:block;font-size:12px;">
 <input type="checkbox" data-watch-found="${i}" value="${escapeHtml(r.url)}">
-<a href="${escapeHtml(affiliateLink(r.url))}" target="_blank" rel="noopener noreferrer" data-watch-row-link>${escapeHtml(rowLabel(r))}</a>
+<a href="${escapeHtml(affiliateLink(r.url))}" target="_blank" rel="noopener noreferrer" data-watch-row-link${r.image ? ` data-img="${escapeHtml(r.image)}"` : ''}>${escapeHtml(rowLabel(r))}</a>
 </label>`).join('')
 + '<button class="sync-btn sm" type="button" data-watch-add-found style="margin-top:6px;">Add ticked</button>'
 : '<div class="settings-note">Nothing new found — the listings only render part of a category, so an item can be missing from both.</div>';
@@ -633,6 +681,7 @@ box.innerHTML = rows.length
 box.querySelectorAll('[data-watch-row-link]').forEach((a) => {
 a.addEventListener('click', (e) => e.stopPropagation());
 });
+bindColourHoverPreview(box);
 const addBtn = box.querySelector('[data-watch-add-found]');
 if (addBtn) addBtn.addEventListener('click', () => {
 const picked = [...box.querySelectorAll('[data-watch-found]:checked')].map((c) => c.value);

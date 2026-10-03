@@ -538,6 +538,7 @@ items.push({
 url: p.url,
 range: rangeFromName(name),
 name,
+image: typeof p.image === 'string' ? p.image : '',
 price: p.offers?.price != null ? Number(p.offers.price) : null,
 inStock: typeof p.offers?.availability === 'string' ? p.offers.availability.endsWith('InStock') : null,
 });
