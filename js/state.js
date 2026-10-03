@@ -1000,6 +1000,18 @@ const hit = SIZE_GROUP_MATCHERS.find((g) => g.re.test(p));
 return hit ? hit.group : '';
 }
 
+// A thing you've actually bought, matched against sizes rather than
+// filed against one person -- see whatSheHas/unheldInventory just below.
+// `link` is the product page it came from, if there was one to paste;
+// blank for anything added by hand (a gift, something secondhand).
+function blankInventoryItem(fields = {}) {
+return {
+id: uid(), brand: '', style: '', piece: '', size: '', colour: '',
+holderId: '', acquiredAt: '', fromTaskId: '', notes: '', link: '',
+...fields,
+};
+}
+
 // The two directions the same data gets read in.
 //
 // whatSheHas: a person, looking at her things. The old per-connection
@@ -1815,6 +1827,13 @@ data.inventory = data.inventory.map((o) => ({
 id: o.id || uid(), brand: o.brand || '', style: o.style || '', piece: o.piece || '',
 size: o.size || '', colour: o.colour || '', holderId: o.holderId || '',
 acquiredAt: o.acquiredAt || '', fromTaskId: o.fromTaskId || '', notes: o.notes || '',
+// The product page this was bought from, if there was one to paste --
+// blank for anything added by hand (a gift, something secondhand).
+// Added once a manual "Add to inventory" form existed to actually ask
+// for it; a want's own link (t.link) was never carried across when
+// offerToRecordOwned turned a done want into an inventory row, so an
+// item recorded that way has this blank too unless re-added.
+link: o.link || '',
 }));
 data.mailDismissed = data.mailDismissed.map((d) => ({ ...blankMailDismissal(), ...d }));
 
@@ -2780,7 +2799,7 @@ export {
 data, sampleData, loadData, migrate, persist, queueSave, flushSave, setSaveStatusHandler,
 setExternalUpdateHandler, setLocalChangeHandler, getLocalSettings, setLocalSetting, computeStreak, reachOutThreshold,
 isDormantStage, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness,
-exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, SENSITIVE_BLOCKS, whatSheHas, unheldInventory, whoFits, inventorySets, whoFitsSet, interestNote, SIZE_GROUPS, sizeGroupFor, DEFAULT_PREFS,
+exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, SENSITIVE_BLOCKS, whatSheHas, unheldInventory, whoFits, inventorySets, whoFitsSet, interestNote, SIZE_GROUPS, sizeGroupFor, DEFAULT_PREFS, blankInventoryItem,
 MAIL_SEARCH_KINDS, mailSearchLabel, blankMailSearch, blankMailTopic, blankMailDismissal,
 TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureBatch, blankPendingImport, blankConnection, blankTelegramThread, blankReadingItem, blankCaptureDraft, blankJob, blankMediaItem, MEDIA_KINDS, MEDIA_STATUSES,
 blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS, LEG_DATE_FIELDS,

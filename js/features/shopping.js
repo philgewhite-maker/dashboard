@@ -19,8 +19,8 @@
 // a link to buy it from the right place," not a manual step. The result is
 // persisted on the task itself (t.priceCheck), dated, with a Refresh button
 // to re-run it later — not the old in-memory, un-dated Map this used to be.
-import { data, queueSave, SHOPPING_CONTEXTS, unheldInventory, whoFits, inventorySets, whoFitsSet } from '../state.js';
-import { escapeHtml, affiliateLink, daysUntil, daysSince, uid, todayStr, MISSING_KEY_LINK_HTML, looksLikeUrl } from '../utils.js';
+import { data, queueSave, SHOPPING_CONTEXTS, unheldInventory, whoFits, inventorySets, whoFitsSet, blankInventoryItem } from '../state.js';
+import { escapeHtml, affiliateLink, daysUntil, daysSince, todayStr, MISSING_KEY_LINK_HTML, looksLikeUrl } from '../utils.js';
 import { captureTask, revealTask } from './tasks.js';
 import { connectionChipHtml, bindConnectionChips, connectionPickerHtml, bindConnPickers, setConnPickerValue, sensitiveFieldsShown } from './connections.js';
 import { runStockCheck, stockCheckHtml, adapterFor, seedWatchSpec, pasteStockFor, cashbackHtml, fetchPages } from './stockwatch.js';
@@ -157,6 +157,106 @@ return `<span class="shop-want-for">${connectionChipHtml(conn)}</span>
 title="${suspended ? 'Suspended — kept on the list, but not checked for stock and never alerted on. Click to resume.' : 'Active — checked for stock whenever this retailer is checked. Click to suspend.'}">${suspended ? 'Suspended' : 'Active'}</button>`;
 }
 
+// Recording something already owned that never went through a want at
+// all -- the other way an item reaches data.inventory, alongside
+// offerToRecordOwned's "mark a want done" path below. A pasted link is
+// never required: Brand/Style/Piece/Colour/Size stay plain text either
+// way, since not everything owned has a surviving product page to paste
+// (a gift, something bought secondhand).
+//
+// Two tiers of auto-fill from a link, not one, because they cost
+// different things. "Fill from link" reads the URL's own slug --
+// instant, no network -- but confirmed repeatedly this session that a
+// slug is unreliable for colour, and sometimes for the piece name too.
+// "Fetch exact colour" instead fetches the real product page and reads
+// what it actually states -- the same parseProductPage path the stock
+// check already trusts -- at the cost of a real request through the
+// home agent, which is why it's a second, separate button rather than
+// always run.
+function openAddInventoryDialog() {
+const dialog = document.createElement('div');
+dialog.className = 'mail-view-backdrop';
+dialog.innerHTML = `<div class="mail-view-card" style="max-width:420px;">
+<div class="mail-view-subject">Add to inventory</div>
+<div class="settings-note" style="margin:2px 0 8px;">Something you already own. Paste the product page if there is one &mdash; it can fill in the details, including its exact colour &mdash; or just type them by hand.</div>
+<label style="font-size:12px;display:block;margin-bottom:6px;">Product link <span class="settings-note" style="display:inline;margin:0;">(optional)</span><input type="text" autocomplete="off" class="tag-add-input" data-inv-new-link style="width:100%;display:block;" placeholder="https://www.agentprovocateur.com/..."></label>
+<div class="sync-row" style="margin:0 0 8px;flex-wrap:wrap;">
+<button class="sync-btn sm" type="button" data-inv-fill-link>Fill from link</button>
+<button class="sync-btn sm" type="button" data-inv-fetch-details>Fetch exact colour&hellip;</button>
+<span class="sync-status" data-inv-fetch-status></span>
+</div>
+<label style="font-size:12px;display:block;margin-bottom:6px;">Brand<input type="text" autocomplete="off" class="tag-add-input" data-inv-new="brand" style="width:100%;display:block;"></label>
+<label style="font-size:12px;display:block;margin-bottom:6px;">Style<input type="text" autocomplete="off" class="tag-add-input" data-inv-new="style" style="width:100%;display:block;"></label>
+<label style="font-size:12px;display:block;margin-bottom:6px;">Piece<input type="text" autocomplete="off" class="tag-add-input" data-inv-new="piece" style="width:100%;display:block;"></label>
+<div class="account-field-row">
+<label>Size<input type="text" autocomplete="off" class="tag-add-input" data-inv-new="size"></label>
+<label>Colour<input type="text" autocomplete="off" class="tag-add-input" data-inv-new="colour"></label>
+</div>
+<div style="margin:8px 0;">Already with${connectionPickerHtml('inv-new-holder', "Nobody yet — it's in your own drawer")}</div>
+<label style="font-size:12px;display:block;margin:0 0 8px;">Notes<textarea rows="2" data-inv-new="notes" style="width:100%;"></textarea></label>
+<div class="mail-view-actions">
+<button class="sync-btn sm" type="button" data-inv-new-cancel>Cancel</button>
+<button class="add-btn" type="button" data-inv-new-save>Add</button>
+</div>
+</div>`;
+document.body.appendChild(dialog);
+bindConnPickers();
+const close = () => dialog.remove();
+dialog.addEventListener('click', (e) => { if (e.target === dialog) close(); });
+dialog.querySelector('[data-inv-new-cancel]').addEventListener('click', close);
+
+const val = (n) => dialog.querySelector(`[data-inv-new="${n}"]`).value.trim();
+const setVal = (n, v) => { if (v) dialog.querySelector(`[data-inv-new="${n}"]`).value = v; };
+const linkInput = dialog.querySelector('[data-inv-new-link]');
+const status = dialog.querySelector('[data-inv-fetch-status]');
+
+dialog.querySelector('[data-inv-fill-link]').addEventListener('click', () => {
+const link = linkInput.value.trim();
+const adapter = adapterFor(link);
+if (!adapter || !adapter.specFromUrl) { status.textContent = 'No parser for that link.'; return; }
+const spec = adapter.specFromUrl(link);
+setVal('brand', spec.brand);
+setVal('style', spec.style);
+setVal('piece', (spec.pieces || [])[0]);
+status.textContent = 'Filled in from the link itself — colour still needs typing, or try "Fetch exact colour".';
+});
+
+dialog.querySelector('[data-inv-fetch-details]').addEventListener('click', async () => {
+const link = linkInput.value.trim();
+const adapter = adapterFor(link);
+if (!adapter || !adapter.parseProductPage) { status.textContent = 'No parser for that link.'; return; }
+status.textContent = 'Fetching…';
+try {
+const { pages, errors } = await fetchPages([link]);
+const html = pages.get(link);
+if (!html) { status.textContent = errors[0]?.error || "Couldn't read that page."; return; }
+const page = adapter.parseProductPage(html, link);
+setVal('brand', adapter.RETAILER || '');
+// The page's own name carries the style as its first word(s) -- same
+// reasoning agentprovocateur.js's rangeFromName already relies on for
+// the JSON-LD catalogue, reused here rather than re-guessed.
+if (page.name && adapter.rangeFromName) setVal('style', adapter.rangeFromName(page.name));
+setVal('piece', page.piece);
+setVal('colour', page.colour);
+status.textContent = 'Filled in from the real page.';
+} catch (err) {
+status.textContent = err.message || String(err);
+}
+});
+
+dialog.querySelector('[data-inv-new-save]').addEventListener('click', () => {
+data.inventory.push(blankInventoryItem({
+brand: val('brand'), style: val('style'), piece: val('piece'),
+size: val('size'), colour: val('colour'), notes: val('notes'),
+holderId: dialog.querySelector('#inv-new-holder')?.value || '',
+acquiredAt: todayStr(), link: linkInput.value.trim(),
+}));
+queueSave();
+renderInventory();
+close();
+});
+}
+
 // The want -> has step. Prefilled from the want spec, but every field is
 // editable before it's saved, because what arrives isn't always what was
 // asked for -- the backup size, the second-choice colour. `fromTaskId`
@@ -188,15 +288,20 @@ dialog.addEventListener('click', (e) => { if (e.target === dialog) close(); });
 dialog.querySelector('[data-owned-cancel]').addEventListener('click', close);
 dialog.querySelector('[data-owned-save]').addEventListener('click', () => {
 const val = (n) => dialog.querySelector(`[data-owned-new="${n}"]`).value.trim();
-data.inventory.push({
-id: uid(), brand: val('brand'), style: val('style'), piece: val('piece'),
+data.inventory.push(blankInventoryItem({
+brand: val('brand'), style: val('style'), piece: val('piece'),
 size: val('size'), colour: val('colour'),
 // Held by her only if the "Given to her" box is ticked. Bought but
 // not yet handed over is the honest default -- and it's the state
 // that leaves the item findable by size if the moment never comes.
 holderId: dialog.querySelector('[data-owned-given]').checked ? conn.id : '',
-acquiredAt: todayStr(), fromTaskId: t.id, notes: '',
-});
+acquiredAt: todayStr(), fromTaskId: t.id,
+// The want's own product page, carried across -- this never happened
+// before `link` existed on an inventory row at all, so a want with a
+// real product page attached still lost that trail the moment it
+// turned into an owned item.
+link: t.link || '',
+}));
 queueSave();
 close();
 });
@@ -692,8 +797,11 @@ const fits = whoFits(o);
 const fitsHtml = fits.length
 ? fits.slice(0, 4).map(({ conn, how }) => `<span class="inv-fit" title="${escapeHtml(how)}">${connectionChipHtml(conn)}<button type="button" class="todo-add-btn" data-inv-assign="${escapeHtml(o.id)}:${escapeHtml(conn.id)}" title="Record that ${escapeHtml(conn.name || 'she')} now has this">Give</button></span>`).join('')
 : `<span class="settings-note" style="margin:0;">${o.size ? 'Nobody on file takes this size.' : 'No size recorded — add one and this can find a match.'}</span>`;
+const titleHtml = o.link
+? `<a class="shop-title" href="${escapeHtml(affiliateLink(o.link))}" target="_blank" rel="noopener noreferrer" title="Open the product page this was bought from">${escapeHtml(label)}</a>`
+: `<span class="shop-title">${escapeHtml(label)}</span>`;
 return `<div class="shop-row">
-<span class="shop-title">${escapeHtml(label)}</span>
+${titleHtml}
 <span class="inv-fits">${fitsHtml}</span>
 <span class="del-x" style="opacity:1;" data-inv-remove="${escapeHtml(o.id)}" title="Delete this item">&times;</span>
 </div>`;
@@ -710,8 +818,14 @@ if (!sensitiveFieldsShown()) {
 el.innerHTML = '<div class="settings-note" style="margin:0;">Hidden on this device. Turn on sensitive fields in Settings to show it.</div>';
 return;
 }
-el.innerHTML = `<div class="sync-row" style="margin-bottom:8px;"><button class="sync-btn sm" type="button" data-find-set-for-her>Find a set for her…</button><span class="settings-note" style="margin:0;">Searches the retailer for a bra and matching knickers in her size, under a budget.</span></div>` + inventorySetsHtml() + inventoryHtml();
+el.innerHTML = `<div class="sync-row" style="margin-bottom:8px;flex-wrap:wrap;">
+<button class="sync-btn sm" type="button" data-inv-add-item>+ Add item</button>
+<button class="sync-btn sm" type="button" data-find-set-for-her>Find a set for her…</button>
+<span class="settings-note" style="margin:0;">Searches the retailer for a bra and matching knickers in her size, under a budget.</span>
+</div>` + inventorySetsHtml() + inventoryHtml();
 bindConnectionChips(el);
+const addItemBtn = el.querySelector('[data-inv-add-item]');
+if (addItemBtn) addItemBtn.addEventListener('click', () => openAddInventoryDialog());
 const findSetBtn = el.querySelector('[data-find-set-for-her]');
 if (findSetBtn) findSetBtn.addEventListener('click', async () => {
 const { openSetFinderDialog } = await import('./setfinder.js');
