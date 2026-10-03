@@ -1650,6 +1650,13 @@ t.wantSpec = {
 brand: t.wantSpec.brand || '', style: t.wantSpec.style || '',
 pieces: Array.isArray(t.wantSpec.pieces) ? t.wantSpec.pieces : [],
 colours: Array.isArray(t.wantSpec.colours) ? t.wantSpec.colours : [],
+// Confirmed live as a real data-loss bug: this reconstruction used to
+// stop at colours, silently dropping `urls` (the "Pages to watch"
+// list itself) on every single migrate() call, including the one
+// that runs on every normal load -- so opening the app after adding
+// watched pages wiped them from memory, and the very next save
+// overwrote the good stored copy with the now-empty list.
+urls: Array.isArray(t.wantSpec.urls) ? t.wantSpec.urls : [],
 };
 } else t.wantSpec = null;
 });
