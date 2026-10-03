@@ -3491,18 +3491,24 @@ padding:24px;
 .family-kids-strip{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0;}
 .book-group{border-top:1px solid var(--line);}
 .book-group:first-of-type{border-top:none;}
+/* The summary's content is a real .mail-row now (the series' next/first
+   book, shown in full rather than a sparse name+label line) -- the
+   summary itself just adds the chevron and the click-to-expand
+   behaviour, so its own flex row holds the chevron plus that nested
+   row, and the nested row keeps no border/padding of its own (the
+   summary supplies both). */
 .book-group-summary{
 display:flex;
 align-items:center;
-gap:10px;
-flex-wrap:wrap;
-padding:8px 0;
+gap:8px;
+padding:0;
 cursor:pointer;
 list-style:none;
 }
 .book-group-summary::-webkit-details-marker{display:none;}
-.book-group-summary::before{content:'\25B8';display:inline-block;color:var(--muted);transition:transform .15s;}
+.book-group-summary::before{content:'\25B8';display:inline-block;flex:0 0 auto;color:var(--muted);transition:transform .15s;}
 .book-group[open] > .book-group-summary::before{transform:rotate(90deg);}
+.book-group-summary .mail-row{flex:1 1 auto;border-top:none;padding:8px 0;}
 .book-group-items{padding-left:14px;}
 .book-group-items .mail-row{border-top:1px solid var(--line);}
 .book-group-items .mail-row:first-of-type{border-top:none;}

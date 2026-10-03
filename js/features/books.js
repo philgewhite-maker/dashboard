@@ -569,7 +569,7 @@ function starsHtml(book) {
 return [1, 2, 3, 4, 5].map((n) => `<svg class="star priority-star ${book.score && n <= book.score ? 'filled' : ''}" data-book-score="${book.id}" data-star="${n}" viewBox="0 0 20 20" fill="currentColor"><path d="M10 1l2.6 5.9 6.4.6-4.8 4.3 1.4 6.2L10 14.9 4.4 18l1.4-6.2L1 7.5l6.4-.6z"/></svg>`).join('');
 }
 
-function bookRowHtml(book) {
+function bookRowHtml(book, extraHtml = '') {
 const art = book.imageUrl
 ? `<img class="media-art" src="${escapeHtml(book.imageUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
 : '';
@@ -588,6 +588,7 @@ ${holder ? connectionChipHtml(holder) : `<span class="settings-note" style="marg
 <button type="button" class="sync-btn sm book-inline-btn" data-book-holder="${book.id}">Give&hellip;</button>
 <button type="button" class="sync-btn sm book-inline-btn" data-book-edit="${book.id}">Edit</button>
 ${book.fromMediaId ? `<span class="settings-note book-from-media" data-book-from-media="${escapeHtml(book.fromMediaId)}" style="margin:0;cursor:pointer;">from Media</span>` : ''}
+${extraHtml}
 <span class="del-x" data-book-remove="${book.id}" title="Delete this book">&times;</span>
 </div>`;
 }
@@ -600,25 +601,20 @@ function groupHtml(g) {
 // reason -- a plain row shows it all at once, same as a series' own
 // detail rows already do, so there's nothing left to collapse.
 if (!g.series) return bookRowHtml(g.items[0]);
-const nextLabel = g.allRead ? 'All read' : g.next.title;
-// Author and age range for the summary come off the NEXT book
-// specifically, not the series as a whole -- later entries in a long
-// series sometimes shift author (a co-writer) or target age (it gets
-// harder as it goes), and the next book is the one this row's decision
-// actually hinges on.
-const byline = g.allRead ? g.items[0].author : [g.next.author, g.next.format].filter(Boolean).join(' · ');
-const ageBook = g.allRead ? null : g.next;
-const ageLabel = ageBook && (ageBook.minAge || ageBook.maxAge) ? `${ageBook.minAge || '?'}–${ageBook.maxAge || '?'} yrs` : '';
+// The summary IS the next (or, once the series is finished, the
+// first) book's own full row -- not a sparse line with just a name and
+// a "next:" label. Expanding shows the REST of the series, with this
+// one excluded, rather than repeating it. Author/age shift sometimes
+// across a long series (a co-writer joins, the target age climbs), so
+// this reads them straight off the actual book being shown, not off
+// the series as a label.
+const rep = g.allRead ? g.items[0] : g.next;
+const rest = g.items.filter((b) => b.id !== rep.id);
+const extra = `<span class="task-context">${g.items.length} held</span>
+<button type="button" class="sync-btn sm book-inline-btn" data-book-find-rest="${escapeHtml(g.series)}" data-book-find-author="${escapeHtml(g.items[0].author)}">Find the rest&hellip;</button>`;
 return `<details class="book-group">
-<summary class="book-group-summary">
-<span class="mail-subject">${escapeHtml(g.series)}</span>
-<span class="settings-note" style="margin:0;">next: ${escapeHtml(nextLabel)}</span>
-${byline ? `<span class="settings-note" style="margin:0;">${escapeHtml(byline)}</span>` : ''}
-${ageLabel ? `<span class="settings-note" style="margin:0;">${escapeHtml(ageLabel)}</span>` : ''}
-<span class="task-context">${g.items.length} held</span>
-<button type="button" class="sync-btn sm book-inline-btn" data-book-find-rest="${escapeHtml(g.series)}" data-book-find-author="${escapeHtml(g.items[0].author)}">Find the rest&hellip;</button>
-</summary>
-<div class="book-group-items">${g.items.map(bookRowHtml).join('')}</div>
+<summary class="book-group-summary">${bookRowHtml(rep, extra)}</summary>
+${rest.length ? `<div class="book-group-items">${rest.map((b) => bookRowHtml(b)).join('')}</div>` : ''}
 </details>`;
 }
 
@@ -683,6 +679,21 @@ el.innerHTML = groups.length
 hydratePhotoBackgrounds(el);
 bindConnectionChips(el);
 
+// The series summary now contains a real, fully-interactive book row
+// (checkbox, stars, buttons, links) rather than inert text -- every one
+// of those sits inside a <summary>, whose native behaviour is "clicking
+// anywhere in me toggles the <details>". stopPropagation on each
+// interactive element's OWN click, not preventDefault from a delegated
+// listener up on the summary -- confirmed live that preventDefault from
+// up there cancels the SAME event's default action everywhere it was
+// still pending, including the checkbox's own native toggle (a tick
+// stopped registering at all). stopPropagation called at the element
+// itself stops the click going any further up to the summary without
+// touching that element's own default action.
+el.querySelectorAll('.book-group-summary input, .book-group-summary button, .book-group-summary a, .book-group-summary svg, .book-group-summary .conn-chip').forEach((node) => {
+node.addEventListener('click', (e) => e.stopPropagation());
+});
+
 el.querySelectorAll('[data-book-read]').forEach((cb) => {
 cb.addEventListener('change', () => {
 const book = data.books.find((b) => b.id === cb.dataset.bookRead);
@@ -719,10 +730,7 @@ if (book) openBookDialog(book);
 });
 });
 el.querySelectorAll('[data-book-find-rest]').forEach((btn) => {
-btn.addEventListener('click', (e) => {
-e.preventDefault(); // this sits inside a <summary> -- without this the click also toggles the <details> open/closed
-findRestOfSeries(btn.dataset.bookFindRest, btn.dataset.bookFindAuthor);
-});
+btn.addEventListener('click', () => findRestOfSeries(btn.dataset.bookFindRest, btn.dataset.bookFindAuthor));
 });
 // The record-reference rule applies to a field that names ANOTHER
 // record too, not just a row in a list -- fromMediaId is exactly that,
