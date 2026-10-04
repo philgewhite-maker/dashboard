@@ -46,6 +46,15 @@ switchOffers: [], // [{id, bank, offer, eligible, reasoning, suggestedFromAccoun
 // {at, source: 'manual'|'auto', offers: [{bank, offer}]} -- see
 // js/features/switchoffers.js's recordHistorySnapshot.
 switchOffersHistory: [],
+// A separate question from switchOffers above: not "what new switch
+// bonus am I eligible for", but "is one of my OWN current accounts
+// bringing so little ongoing benefit that moving it is worth
+// considering" -- see js/features/switchoffers.js's checkAccountValue
+// and js/ai.js's analyseOngoingAccountValue. {id, currentBank,
+// currentAccountName, currentBenefitSummary, suggestedProvider,
+// suggestedPerkSummary, cassSupported, futureEligibilityNote,
+// recommendation, dismissed}.
+accountValueReviews: [],
 mailSearches: [],
 mailTopics: [], // {id, label, preferredActionIds} -- groups mail searches for display and picks which action buttons show, see js/features/mail.js
 // Physical things you've bought or that someone owns, in one list rather
@@ -1661,6 +1670,7 @@ if (!Array.isArray(data.enhancementIdeas)) data.enhancementIdeas = [];
 if (!Array.isArray(data.financeAccounts)) data.financeAccounts = [];
 if (!Array.isArray(data.switchOffers)) data.switchOffers = [];
 if (!Array.isArray(data.switchOffersHistory)) data.switchOffersHistory = [];
+if (!Array.isArray(data.accountValueReviews)) data.accountValueReviews = [];
 data.financeAccounts = data.financeAccounts.map((a) => ({ ...blankFinanceAccount(), ...a, id: a.id || uid() }));
 // cassLinkedAccountId -> cassFromAccountId rename (2026-09-05) -- carry
 // forward anyone's already-entered link rather than silently dropping

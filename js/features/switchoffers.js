@@ -82,24 +82,31 @@ return String(text || '').replace(/\s+/g, ' ').trim().slice(0, PAGE_TEXT_CAP);
 // SWITCH_MAX_TOKENS entirely (stop_reason: 'max_tokens', no answer at
 // all), on a page several times bigger and noisier than anyone pastes by
 // hand.
-function stripHtmlNoise(html) {
+function parseAndStripDoc(html) {
 const doc = new DOMParser().parseFromString(String(html || ''), 'text/html');
 doc.querySelectorAll('script, style, noscript, svg, nav, footer, header, aside, form, iframe, button, select, label').forEach((el) => el.remove());
-// MSE_SWITCH_URL ends in #switch -- confirmed live (fetched the real
-// page via the claude-test channel, home-agent/agent.py's poll_claude_test):
-// id="switch" sits on the <h2>Top bonuses for switching bank</h2>
-// heading ITSELF, not a wrapping container, so the actual offers table
-// that follows it is a run of SIBLING elements, not descendants -- the
-// heading's own textContent alone is ~30 characters. This walks forward
-// through next-siblings instead, stopping at the next same-level <h2>
-// (confirmed live: that's exactly where the next, unrelated section
-// starts -- "Don't want to switch? Top accounts for ongoing cashback"),
-// which gets the real offers section (~30,000 characters on the page
-// fetched during testing) without the dozen other unrelated comparisons
-// the rest of this page covers. Falls back to the full page text if the
-// id is missing entirely (a future redesign moves or renames it) or
-// yields barely anything, same safety net as before this was confirmed.
-const anchor = doc.getElementById('switch');
+return doc;
+}
+
+// Confirmed live (fetched the real page via the claude-test channel,
+// home-agent/agent.py's poll_claude_test): MSE_SWITCH_URL's own #switch
+// anchor, and the #cashback section right after it ("Don't want to
+// switch? Top accounts for ongoing cashback & perks" --
+// analyseOngoingAccountValue's own input, js/ai.js), BOTH sit on the
+// section's <h2> heading ITSELF, not a wrapping container -- the real
+// content that follows is a run of SIBLING elements, not descendants, so
+// reading the heading's own textContent alone captures only its ~30
+// characters. This walks forward through next-siblings instead, stopping
+// at the next same-level <h2>, confirmed live to be exactly where the
+// next, unrelated section starts either way (~13,700 characters for
+// #switch, ~5,700 for #cashback, on the page fetched during testing) --
+// a fraction of the ~328,000-character full page, without the dozen
+// other unrelated comparisons it also covers. Falls back to the full
+// page text if the id is missing entirely (a future redesign moves or
+// renames it) or yields barely anything, same safety net as before this
+// was confirmed.
+function extractSection(doc, anchorId) {
+const anchor = doc.getElementById(anchorId);
 let scoped = '';
 if (anchor) {
 const parts = [anchor.textContent || ''];
@@ -112,6 +119,10 @@ scoped = parts.join(' ').trim();
 }
 const text = scoped.length > 500 ? scoped : (doc.body?.textContent || '');
 return text.replace(/\s+/g, ' ').trim();
+}
+
+function stripHtmlNoise(html) {
+return extractSection(parseAndStripDoc(html), 'switch');
 }
 
 // Oldest-first, capped -- see data.switchOffersHistory's own comment in
@@ -281,6 +292,81 @@ revealTask(el.dataset.openTaskRef);
 });
 }
 
+// ---- Ongoing account value (is one of MY OWN accounts worth keeping?) ----
+//
+// A genuinely different question from the switch-offers scan above: not
+// "what new bonus am I eligible for", but "is an account I already HAVE
+// bringing so little ongoing benefit that moving it is worth
+// considering" -- weighing the account's own tracked deal/fee against
+// MSE's "ongoing cashback & perks" section (the #cashback section right
+// after #switch on the same page), the SWITCH section's own exclusion
+// wording (closing an account now can HELP a future switch bonus from
+// that bank, not just risk losing one), and whether the alternative is
+// even a CASS participant (a great perk account that can't be left via
+// the Current Account Switch Service later is a one-way door). See
+// js/ai.js's analyseOngoingAccountValue for the actual reasoning prompt.
+//
+// Its own deliberate action, not folded into the switch-offers check
+// automatically -- a second real AI call with its own web searches,
+// same "costs money, make it a click" reasoning as every other
+// AI-assisted step in this app. Does its OWN page.render fetch rather
+// than reusing a cached copy from the switch-offers check, so this
+// works standalone and never shows a stale page just because the other
+// check happened to run first.
+function accountValueRowHtml(r) {
+const cassLabel = { yes: 'CASS participant', no: 'CASS dead end', unsure: 'CASS status unsure' }[r.cassSupported];
+const cassClass = { yes: 'tag-chip-green', no: 'tag-chip-amber' }[r.cassSupported] || '';
+return `<div class="switch-offer-row" data-account-value="${escapeHtml(r.id)}">
+<div class="switch-offer-head">
+<span class="switch-offer-bank">${escapeHtml(r.currentBank)}${r.currentAccountName ? ` — ${escapeHtml(r.currentAccountName)}` : ''}</span>
+<span class="del-x" style="opacity:1;margin-left:auto;" data-account-value-dismiss="${escapeHtml(r.id)}" title="Dismiss">&times;</span>
+</div>
+${r.currentBenefitSummary ? `<div class="switch-offer-offer">Currently: ${escapeHtml(r.currentBenefitSummary)}</div>` : ''}
+<div class="switch-offer-offer">Consider: <strong>${escapeHtml(r.suggestedProvider)}</strong>${r.suggestedPerkSummary ? ` — ${escapeHtml(r.suggestedPerkSummary)}` : ''} <span class="tag-chip ${cassClass}">${cassLabel}</span></div>
+${r.futureEligibilityNote ? `<div class="switch-offer-reasoning">${escapeHtml(r.futureEligibilityNote)}</div>` : ''}
+<div class="switch-offer-reasoning">${escapeHtml(r.recommendation)}</div>
+</div>`;
+}
+
+function renderAccountValueReviews() {
+const list = document.getElementById('account-value-list');
+if (!list) return;
+const visible = (data.accountValueReviews || []).filter((r) => !r.dismissed);
+list.innerHTML = visible.length
+? visible.map(accountValueRowHtml).join('')
+: '<div class="empty">Nothing flagged yet — click "Review ongoing accounts" below.</div>';
+list.querySelectorAll('[data-account-value-dismiss]').forEach((x) => {
+x.addEventListener('click', () => {
+const r = data.accountValueReviews.find((entry) => entry.id === x.dataset.accountValueDismiss);
+if (r) r.dismissed = true;
+queueSave();
+renderAccountValueReviews();
+});
+});
+}
+
+async function checkAccountValue() {
+const { pages } = await run('page.render', { url: MSE_SWITCH_URL });
+const page = pages?.[0];
+if (!page || !page.html) throw new Error(page?.error || 'the page never came back');
+const doc = parseAndStripDoc(page.html);
+const cashbackText = cleanPastedText(extractSection(doc, 'cashback'));
+const switchText = cleanPastedText(extractSection(doc, 'switch'));
+const ownAccounts = data.financeAccounts
+.filter((a) => a.accountType === 'Current account' && !a.closeDate)
+.map((a) => ({
+bank: a.bank, name: a.name, stage: a.stage, openDate: a.openDate,
+deal: a.deal, dealOngoing: a.dealOngoing, dealEndDate: a.dealEndDate,
+accountFee: a.accountFee, accountFeeBasis: a.accountFeeBasis, purpose: a.purpose,
+}));
+const { analyseOngoingAccountValue } = await import('../ai.js');
+const reviews = await analyseOngoingAccountValue(cashbackText, switchText, ownAccounts);
+data.accountValueReviews = reviews.map((r) => ({ id: uid(), dismissed: false, ...r }));
+queueSave();
+renderAccountValueReviews();
+return reviews;
+}
+
 function initSwitchOffers() {
 const btn = document.getElementById('switch-offers-scan-btn');
 const textarea = document.getElementById('switch-offers-paste');
@@ -333,7 +419,29 @@ homeAgentBtn.disabled = false;
 }
 });
 }
+const accountValueBtn = document.getElementById('account-value-check-btn');
+const accountValueStatusEl = document.getElementById('account-value-check-status');
+const sayAccountValue = (m) => { if (accountValueStatusEl) accountValueStatusEl.textContent = m; };
+if (accountValueBtn) {
+accountValueBtn.addEventListener('click', async () => {
+accountValueBtn.disabled = true;
+sayAccountValue('Fetching the page via the home agent…');
+try {
+sayAccountValue('Weighing your accounts against it (this includes a web search, so it can take a minute)…');
+const reviews = await checkAccountValue();
+sayAccountValue(reviews.length ? `Found ${reviews.length} account${reviews.length === 1 ? '' : 's'} worth a look.` : 'Nothing worth flagging — your current accounts already look fine against this.');
+} catch (err) {
+sayAccountValue(err instanceof AgentNotConfiguredError ? 'Set up live sync (Settings) to use the home agent.'
+: err instanceof MissingKeyError ? err.message
+: `Couldn't check: ${err.message || err}`);
+console.error('Account value check failed:', err);
+} finally {
+accountValueBtn.disabled = false;
+}
+});
+}
 renderSwitchOffers();
+renderAccountValueReviews();
 }
 
 export { renderSwitchOffers, initSwitchOffers, runAutomaticSwitchCheck };

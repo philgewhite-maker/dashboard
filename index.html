@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v478</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v479</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -368,6 +368,16 @@
 </div>
 <div class="settings-note" id="switch-offers-checked-status" style="margin:6px 0 10px;"></div>
 <div id="switch-offers-list"></div>
+
+<div class="panel-head" style="margin-top:16px;">
+<h3 style="margin:0;">Ongoing account value</h3>
+</div>
+<div class="settings-note" style="margin:0 0 10px;">Checks each of your own open current accounts against MSE's "ongoing cashback &amp; perks" section (same page, same fetch) &mdash; not a new switch bonus, but whether an account you already hold is worth keeping. Weighs the account's own recorded deal/fee, whether closing it now would help or hurt a FUTURE switch bonus from that bank (some offers exclude anyone who's held an account there "since" a date &mdash; staying put can be what's blocking a future bonus, not protecting one), and whether the alternative even supports the <a href="https://www.currentaccountswitch.co.uk/banks-building-societies/" target="_blank" rel="noopener">Current Account Switch Service</a> for leaving it again later.</div>
+<div class="sync-row" style="margin-bottom:8px;">
+<button class="sync-btn" id="account-value-check-btn" type="button">&#128161; Review ongoing accounts</button>
+<span class="sync-status" id="account-value-check-status"></span>
+</div>
+<div id="account-value-list"></div>
 </section>
 
 <section class="panel wide" id="vouchers-panel" data-tab="finances">
