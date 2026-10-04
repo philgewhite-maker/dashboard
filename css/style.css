@@ -1141,7 +1141,7 @@ cursor:pointer;
 .pending-option:has(input:checked){
 background:var(--card);
 }
-.pending-option input[type=radio]{flex-shrink:0;}
+.pending-option input[type=radio],.pending-option input[type=checkbox]{flex-shrink:0;}
 .pending-option-info{
 display:flex;
 flex-direction:column;

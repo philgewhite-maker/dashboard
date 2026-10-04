@@ -20,7 +20,7 @@
 // persisted on the task itself (t.priceCheck), dated, with a Refresh button
 // to re-run it later — not the old in-memory, un-dated Map this used to be.
 import { data, queueSave, SHOPPING_CONTEXTS, unheldInventory, whoFits, inventorySets, whoFitsSet, blankInventoryItem } from '../state.js';
-import { escapeHtml, affiliateLink, daysUntil, daysSince, todayStr, MISSING_KEY_LINK_HTML, looksLikeUrl, bindBackdropClose, pickChipHtml, knownScalarValues } from '../utils.js';
+import { escapeHtml, affiliateLink, daysUntil, daysSince, todayStr, MISSING_KEY_LINK_HTML, looksLikeUrl, bindBackdropClose, pickChipHtml, knownScalarValues, hydratePhotoBackgrounds } from '../utils.js';
 import { captureTask, revealTask } from './tasks.js';
 import { connectionChipHtml, bindConnectionChips, connectionPickerHtml, bindConnPickers, setConnPickerValue, sensitiveFieldsShown } from './connections.js';
 import { runStockCheck, stockCheckHtml, adapterFor, seedWatchSpec, pasteStockFor, cashbackHtml, fetchPages } from './stockwatch.js';
@@ -857,6 +857,15 @@ queueSave();
 });
 });
 bindConnectionChips(el);
+// avatarHtml() only ever renders a [data-photo-bg] placeholder --
+// hydratePhotoBackgrounds() is the separate, async step that actually
+// fills in the real photo (utils.js's own doc comment on avatarHtml
+// says so directly). This file never called it at all, on either
+// connectionChipHtml() call site -- confirmed live as a real gap, not
+// just the one reported: every connection chip in this whole file,
+// "who this want is for" here and every inventory fit-match below, has
+// only ever shown initials, never a real photo.
+hydratePhotoBackgrounds(el);
 el.querySelectorAll('[data-shop-open]').forEach((span) => {
 span.addEventListener('click', async () => {
 const { switchTab } = await import('../tabs.js');
@@ -1001,6 +1010,7 @@ el.innerHTML = `<div class="sync-row" style="margin-bottom:8px;flex-wrap:wrap;">
 <span class="settings-note" style="margin:0;">Searches the retailer for a bra and matching knickers in her size, under a budget.</span>
 </div>` + inventorySetsHtml() + inventoryHtml();
 bindConnectionChips(el);
+hydratePhotoBackgrounds(el);
 const addItemBtn = el.querySelector('[data-inv-add-item]');
 if (addItemBtn) addItemBtn.addEventListener('click', () => openAddInventoryDialog());
 const findSetBtn = el.querySelector('[data-find-set-for-her]');

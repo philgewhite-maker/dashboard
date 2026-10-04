@@ -633,6 +633,11 @@ notes: '',
 link: '', // the booking's own "Manage booking"/"View ticket" URL when the confirmation had one -- distinct from source.url (the email itself)
 source: null, // {kind:'mail'|'screenshot'|'manual', label, url}
 attachments: [],
+// Same role as blankPlannerActivity's own pair just above -- set once
+// this leg has been checked/pushed against a real Google Calendar event,
+// so a second click adopts rather than duplicates.
+googleEventId: '',
+googleCalendarId: '',
 createdAt: new Date().toISOString(),
 ...fields,
 };
@@ -719,6 +724,32 @@ endTime: '', // "HH:MM", from a calendar invite's DTEND or the AI fallback -- sa
 link: '', // the booking's own "Manage booking"/"View ticket" URL, when the email had one -- same field name and "Open reference ↗" rendering convention as blankTask's own link below
 attachments: [], // {id, name, type, size} via files.js's uploadAttachment -- a QR/ticket image or PDF Mail's extraction grabbed from the email, same shape as blankTask.attachments/blankTripLeg.attachments
 source: null, // {kind:'mail', label, url} -- set by Mail's "+ date event" action, js/features/mail.js. Same shape/convention as blankTask's own source above, so the same "already turned into this" match-by-url logic works identically.
+// The trip-itinerary ADAPTER (js/features/travel.js's tripCardHtml), not
+// a leg -- '' keeps this on Planner's own grid exactly as before; set,
+// it ALSO shows up inline in that trip's itinerary, sorted in among its
+// real legs, without becoming one (no gapStatus/LEG_FIELD_DEFS machinery
+// -- a single-shape event doesn't need it). Unrelated to
+// blankPlannerEntry's OWN tripId just above (that one is which drag-grid
+// zone a day-placement sits in; this one is which trip an event belongs
+// to for itinerary purposes -- the same field name on two different
+// records, not the same concept).
+tripId: '',
+// Same shape as blankTripLeg's own passengers/bookingStatus below, so
+// the shared "is this booked, who's going" treatment reads identically
+// on either record type -- baggage is simply left blank for an event.
+// No per-kind gap-tracking (LEG_FIELD_DEFS/gapStatus): that's genuinely
+// tied to a leg's 5 different booking-logistics kinds, which a single-
+// shape event has no equivalent of.
+passengers: [], // {id, name, seat, baggage}
+confirmationRef: '',
+bookingStatus: 'unbooked', // LEG_STATUSES's own vocabulary (state.js), reused not redefined
+// Set once this event has been checked/pushed against a real Google
+// Calendar event (planner.js's "Check/update calendar" card action, the
+// same search-first adopt-or-create airbnb.js's own push already uses)
+// -- lets a second click adopt the same event instead of creating a
+// duplicate, same role reservation.googleEventId plays for Airbnb.
+googleEventId: '',
+googleCalendarId: '',
 createdAt: new Date().toISOString(),
 ...fields,
 };

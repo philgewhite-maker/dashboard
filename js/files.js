@@ -11,7 +11,7 @@
 // attachment still opens offline.
 import { getConfig } from './sync/selfhost.js';
 import { photoPut, photoGet } from './db.js';
-import { uid } from './utils.js';
+import { uid, openLightbox } from './utils.js';
 
 class FilesNotConfiguredError extends Error {
 constructor() {
@@ -281,13 +281,29 @@ signal,
 if (!res.ok) throw new Error(await errorFrom(res, `Couldn't delete the attachment (HTTP ${res.status}).`));
 }
 
-// Kicks off a browser download using the real filename and type, which the
-// endpoint deliberately doesn't serve directly (it forces a generic
-// octet-stream download to make stored HTML/SVG unrunnable on that origin).
+// For most types, kicks off a browser download using the real filename and
+// type, which the endpoint deliberately doesn't serve directly (it forces
+// a generic octet-stream download to make stored HTML/SVG unrunnable on
+// that origin). An IMAGE attachment is the one exception -- a QR/ticket
+// screenshot grabbed off an email (mail.js's grabEmailAttachments) is
+// something you actually want to look AT, not save, so it opens inline via
+// the same openLightbox every photo elsewhere in the app already uses
+// instead of forcing a download. A PDF still downloads as before --
+// opening a ticket PDF in the OS viewer is already the normal action
+// there, and inline PDF rendering would reopen the exact octet-stream
+// tradeoff this function exists for.
 async function openAttachment(meta) {
 const blob = await fetchAttachment(meta.id);
 const typed = meta.type ? new Blob([blob], { type: meta.type }) : blob;
 const url = URL.createObjectURL(typed);
+if ((meta.type || '').startsWith('image/')) {
+openLightbox(url);
+// The lightbox renders the url as a CSS background-image, which needs
+// it to stay alive -- revoked on the same long delay the download path
+// below already uses, not immediately.
+setTimeout(() => URL.revokeObjectURL(url), 60000);
+return;
+}
 const a = document.createElement('a');
 a.href = url;
 a.download = meta.name || 'attachment';

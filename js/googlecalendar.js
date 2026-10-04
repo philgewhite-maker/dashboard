@@ -32,23 +32,47 @@ return partial ? partial.id : null;
 // calendar.events write scope (see hasCalendarWrite() in
 // sync/googleauth.js) -- callers are expected to check that before
 // offering the push button, same as Contacts write already does.
-// With `startTime`/`endTime` (both "HH:MM") this creates a TIMED event
-// instead of an all-day one, which matters more than it looks: Google
-// treats an all-day event's end.date as EXCLUSIVE, so an all-day booking
-// ending on the 14th actually finishes at the close of the 13th and the
-// departure day vanishes from the calendar. A timed end is inclusive, so
-// "leaves at 11am on the 14th" says exactly that. Callers with a single
-// date (planner.js) pass no times and keep the all-day behaviour.
+// With `startTime` (a "HH:MM") this creates a TIMED event instead of an
+// all-day one, which matters more than it looks: Google treats an all-day
+// event's end.date as EXCLUSIVE, so an all-day booking ending on the 14th
+// actually finishes at the close of the 13th and the departure day
+// vanishes from the calendar. A timed end is inclusive, so "leaves at 11am
+// on the 14th" says exactly that. Callers with a single date and no time
+// at all (e.g. a Date Event whose email never stated one) pass no
+// startTime and keep the all-day behaviour -- but a KNOWN startTime alone
+// is enough to go timed, `endTime` missing just means defaulting one hour
+// on rather than falling back to all-day (confirmed live: a Planner push
+// used to always go all-day even when eventTime was known, which is the
+// exact "don't make it all-day if we know the specific time" bug this
+// guards against).
 // Split out from the request so the shape can be checked without a
 // Google sign-in, which is otherwise the only way to see what gets sent.
+// One hour on from `hhmm`, bumping `dateStr` to the next day when that
+// crosses midnight -- a show starting at 23:30 with no stated end time
+// must not end up with an end BEFORE its own start on the same calendar
+// date, which a naive wrap-the-clock-only version produces.
+function addOneHourAcrossMidnight(hhmm, dateStr) {
+const [h, m] = hhmm.split(':').map(Number);
+const total = h * 60 + m + 60;
+const wrapped = total % (24 * 60);
+const endTime = `${String(Math.floor(wrapped / 60)).padStart(2, '0')}:${String(wrapped % 60).padStart(2, '0')}`;
+if (total < 24 * 60) return { endTime, endDate: dateStr };
+const [y, mo, d] = dateStr.split('-').map(Number);
+const next = new Date(Date.UTC(y, mo - 1, d + 1));
+const endDate = `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, '0')}-${String(next.getUTCDate()).padStart(2, '0')}`;
+return { endTime, endDate };
+}
 function eventBody({ title, description, date, endDate, startTime, endTime, timeZone }) {
-const timed = !!(startTime && endTime);
+const timed = !!startTime;
 const zone = timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/London';
+let resolvedEndDate = endDate || date;
+let resolvedEndTime = endTime;
+if (timed && !endTime) ({ endTime: resolvedEndTime, endDate: resolvedEndDate } = addOneHourAcrossMidnight(startTime, resolvedEndDate));
 return {
 summary: title,
 description,
 start: timed ? { dateTime: `${date}T${startTime}:00`, timeZone: zone } : { date },
-end: timed ? { dateTime: `${endDate || date}T${endTime}:00`, timeZone: zone } : { date: endDate || date },
+end: timed ? { dateTime: `${resolvedEndDate}T${resolvedEndTime}:00`, timeZone: zone } : { date: endDate || date },
 };
 }
 

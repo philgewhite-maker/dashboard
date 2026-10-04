@@ -1694,6 +1694,20 @@ function actionLinkInstruction() {
 return `If the email contains a link to manage, view, track, cancel or check in to this specific booking/order (e.g. "Manage booking", "View your ticket", "Track your order"), include its exact URL as "link" -- never an unsubscribe link, a social/app-store icon link, or the sender's generic homepage. Leave "link" "" if there's nothing like that.`;
 }
 
+// Shared by the same three mail-extraction prompts as actionLinkInstruction
+// above -- the Mail tab's "Complex…" action (js/features/mail.js) is for the
+// rare email the normal one-click extraction gets wrong (an order covering
+// more than one separate thing, an easy-to-miscategorise booking), and lets
+// the user say in their own words what this actually is and what they want
+// out of it; this is how that free text actually reaches the model, placed
+// right after the email body so it reframes how the rest of the prompt gets
+// read rather than arriving as an afterthought. Blank (the overwhelming
+// majority of extractions, which never go through Complex) adds nothing to
+// the prompt at all.
+function guidanceInstruction(guidance) {
+return guidance ? `\n\nThe user looked at this email and told you this about it -- treat it as more reliable than your own read of the body: "${guidance}"\n` : '';
+}
+
 const TRIP_FIELD_GUIDE = `- flight: airline, flightNumber, departAirport, departTime (ISO date+time if both known, else just what's printed), arriveAirport, arriveTime, confirmationRef (booking reference / PNR)
 - car_hire: company, pickupLocation, pickupTime, dropoffLocation, dropoffTime, confirmationRef, carType
 - accommodation: name, address, checkIn, checkOut, confirmationRef, contactPhone
@@ -1814,14 +1828,14 @@ await parseCachePut(hash, cacheKind, { result });
 return { ...result, fromCache: false };
 }
 
-async function extractTripLegFromEmail(subject, from, bodyText) {
+async function extractTripLegFromEmail(subject, from, bodyText, guidance = '') {
 const prompt = `This is an email that may be a travel booking confirmation. Subject: "${subject || ''}". From: "${from || ''}".
 
 Email body:
 """
 ${String(bodyText || '').slice(0, 12000)}
 """
-
+${guidanceInstruction(guidance)}
 ${tripExtractionInstructions()}`;
 const { data: raw } = await callTextJson(prompt, TRIP_MAX_TOKENS, TRIP_MODEL, 'Trip email', 'low');
 return shapeTripExtraction(raw);
@@ -1848,14 +1862,14 @@ const MAIL_EXTRACT_MAX_TOKENS = 1000;
 // the model resolve that into a real ISO date instead of leaving it out or
 // guessing wrong, same reasoning already established for instruction
 // parsing elsewhere in this file.
-async function extractTaskFromEmail(subject, from, bodyText) {
+async function extractTaskFromEmail(subject, from, bodyText, guidance = '') {
 const prompt = `Today is ${todayStr()}. This is an email that might need following up on as a task. Subject: "${subject || ''}". From: "${from || ''}".
 
 Email body:
 """
 ${String(bodyText || '').slice(0, 12000)}
 """
-
+${guidanceInstruction(guidance)}
 Propose a task for this: a short, specific title (not just the subject line restated -- say what actually needs doing, e.g. "Renew car insurance before it lapses" not "Your insurance"), a few lines of notes with whatever detail from the body is actually useful to have on hand (amounts, reference numbers, what's being asked), and a due date ONLY if the email states or clearly implies a real deadline (resolve a relative one like "within 30 days" against today's date) -- leave it blank if there's genuinely no deadline, never invent one.
 
 ${actionLinkInstruction()}
@@ -1875,27 +1889,40 @@ link: String((raw && raw.link) || '').trim(),
 // when there's no .ics attachment, or it didn't have a title+date) -- so
 // the shape matches what an ICS VEVENT gives: location/eventTime alongside
 // title/notes/date, not just notes, even though this path is reading prose.
-async function extractDateEventFromEmail(subject, from, bodyText) {
+//
+// Returns {events: [...]}, one entry per separate date-specific thing the
+// email actually describes -- a single order confirmation can cover more
+// than one (e.g. two different gigs' tickets in one purchase), and the old
+// single-object shape silently kept only whichever the model mentioned
+// first. attachmentHints carries filenames the email body text itself
+// states belong to that one entry (mail.js's grabEmailAttachments matches
+// on these when present, falling back to attaching everything to every
+// event when the email doesn't actually spell out the mapping).
+async function extractDateEventFromEmail(subject, from, bodyText, guidance = '') {
 const prompt = `Today is ${todayStr()}. This is an email that might describe something to do on a particular day -- a booking, an invitation, a show. Subject: "${subject || ''}". From: "${from || ''}".
 
 Email body:
 """
 ${String(bodyText || '').slice(0, 12000)}
 """
-
-Propose an idea for this: a short, specific title (e.g. "Hamilton at the Victoria Palace", not the subject line restated), a venue/location if one is stated, a time of day if one is stated, a few lines of notes with whatever else is actually useful (booking reference, quantity, collection instructions), and a date ONLY if the email states a real, specific date for the thing itself (resolve a relative one like "this Saturday" against today's date) -- leave date blank if there's no real date, or if this isn't really date-specific at all (a general offer, a newsletter).
+${guidanceInstruction(guidance)}
+Propose an idea for each separate date-specific thing this email actually describes -- usually just one, but an order confirmation can cover more than one (e.g. tickets for two different shows bought together); return one entry per thing, don't collapse them into one. For each: a short, specific title (e.g. "Hamilton at the Victoria Palace", not the subject line restated), a venue/location if one is stated, a time of day if one is stated, a few lines of notes with whatever else is actually useful (booking reference, quantity, collection instructions), a date ONLY if the email states a real, specific date for the thing itself (resolve a relative one like "this Saturday" against today's date) -- leave date blank if there's no real date, or if this isn't really date-specific at all (a general offer, a newsletter) -- and attachmentHints: filenames the email body explicitly says belong to THIS entry (e.g. "Tickets: 123-1.pdf, 123-2.pdf" under this thing's own heading) -- leave it an empty list when the email doesn't state that mapping, never guess one. If nothing in the email is really date-specific, return an empty events list.
 
 ${actionLinkInstruction()}
 
-Reply with ONLY a JSON object, no other text, no markdown fences: {"title":"","notes":"","date":"","location":"","eventTime":"","link":""} -- date is an ISO yyyy-mm-dd or "", eventTime is "HH:MM" (24-hour) or "".`;
+Reply with ONLY a JSON object, no other text, no markdown fences: {"events":[{"title":"","notes":"","date":"","location":"","eventTime":"","link":"","attachmentHints":[]}]} -- date is an ISO yyyy-mm-dd or "", eventTime is "HH:MM" (24-hour) or "".`;
 const { data: raw } = await callTextJson(prompt, MAIL_EXTRACT_MAX_TOKENS, MAIL_EXTRACT_MODEL, 'Date event email', 'low');
+const events = Array.isArray(raw && raw.events) ? raw.events : [];
 return {
-title: String((raw && raw.title) || '').trim(),
-notes: String((raw && raw.notes) || '').trim(),
-date: String((raw && raw.date) || '').trim(),
-location: String((raw && raw.location) || '').trim(),
-eventTime: String((raw && raw.eventTime) || '').trim(),
-link: String((raw && raw.link) || '').trim(),
+events: events.map((e) => ({
+title: String((e && e.title) || '').trim(),
+notes: String((e && e.notes) || '').trim(),
+date: String((e && e.date) || '').trim(),
+location: String((e && e.location) || '').trim(),
+eventTime: String((e && e.eventTime) || '').trim(),
+link: String((e && e.link) || '').trim(),
+attachmentHints: Array.isArray(e && e.attachmentHints) ? e.attachmentHints.map((h) => String(h || '').trim()).filter(Boolean) : [],
+})),
 };
 }
 

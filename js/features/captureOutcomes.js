@@ -288,9 +288,20 @@ buildStep: async (ctx) => {
 const mail = await import('./mail.js');
 const { getMessageDetail } = await import('../googlemail.js');
 const { bodyText, icsText } = await getMessageDetail(ctx.mailMessageId);
-const icsResult = icsText ? mail.extractDateEventFromIcs(icsText) : null;
-const result = mail.icsDateEventIsGoodEnough(icsResult) ? icsResult
-: await (await import('../ai.js')).extractDateEventFromEmail(ctx.subject, ctx.from, bodyText);
+// Both waterfall halves can now return more than one event (an email
+// covering several separate things) -- this marker-driven auto-draft
+// only ever reviews ONE step at a time, same as before this existed,
+// so it takes the first usable one rather than extending to multiple
+// drafts; the mail tab's own "+ date event" picker is where the real
+// multi-event review lives (js/features/mail.js).
+const icsEvents = icsText ? mail.extractDateEventFromIcs(icsText).filter(mail.icsDateEventIsGoodEnough) : [];
+let result;
+if (icsEvents.length) {
+result = icsEvents[0];
+} else {
+const { events } = await (await import('../ai.js')).extractDateEventFromEmail(ctx.subject, ctx.from, bodyText);
+result = events[0] || { title: '', notes: '', date: '', location: '', eventTime: '', endTime: '', link: '' };
+}
 return { type: 'dateEvent', ...result, mailUrl: ctx.url, mailSubject: ctx.subject };
 },
 },

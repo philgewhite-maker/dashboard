@@ -11,6 +11,31 @@ import { escapeHtml, uid, dateStrAdd, daysAgoStr, hydratePhotoBackgrounds, parse
 import { deleteAttachment, formatBytes, openAttachment } from '../files.js';
 
 function tripById(id) { return data.trips.find((t) => t.id === id); }
+
+// A leg's earliest known date, for sorting the itinerary merge below --
+// legs aren't stored in date order (trip.legs is just add-order), and
+// their date fields are free text per-kind (LEG_DATE_FIELDS), so this
+// reuses the same loose parser the mini-grid day-matching already
+// depends on. No date found at all sorts last, same convention
+// dateEventSortKey (just below) uses for an undated Date Event.
+function legPrimaryDate(leg) {
+const fields = LEG_DATE_FIELDS[leg.kind] || [];
+for (const f of fields) {
+const parsed = parseLooseDateTime(leg.fields[f]);
+if (parsed) return parsed;
+}
+return null;
+}
+function legSortKey(leg) {
+const parsed = legPrimaryDate(leg);
+return parsed ? `${parsed.date}T${parsed.time || '00:00'}` : '9999-99-99T99:99';
+}
+function legHasDate(leg) { return !!legPrimaryDate(leg); }
+function dateEventSortKey(a) {
+const entry = data.plannerEntries.find((e) => e.kind === 'activity' && e.activityId === a.id);
+if (!entry) return '9999-99-99T99:99';
+return `${entry.date}T${a.eventTime || '00:00'}`;
+}
 function legById(tripId, legId) {
 const trip = tripById(tripId);
 return trip ? trip.legs.find((l) => l.id === legId) : null;
@@ -464,7 +489,40 @@ ${leg.attachments.length ? `<div style="margin-top:6px;">${leg.attachments.map((
 <textarea data-leg-notes="${leg.id}" data-trip-id="${trip.id}" placeholder="Notes" style="width:100%;margin-top:8px;min-height:44px;">${escapeHtml(leg.notes)}</textarea>
 <div class="settings-note" style="margin-top:4px;">${sourceHtml}${leg.link ? ` &middot; <a href="${escapeHtml(leg.link)}" target="_blank" rel="noopener">Open reference &#8599;</a>` : ''}</div>
 <button type="button" class="todo-add-btn" data-ask-telegram="trip" data-ask-telegram-trip="${trip.id}" data-ask-telegram-leg="${leg.id}" title="Ask a family member about this leg via Telegram" style="margin-top:6px;">Ask via Telegram</button>
+${legHasDate(leg) ? `<div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;">
+<select class="settings-input" data-leg-cal="${leg.id}" data-trip-id="${trip.id}" style="max-width:220px;"><option value="">Loading your calendars…</option></select>
+<button type="button" class="todo-add-btn" data-leg-check-cal="${leg.id}" data-trip-id="${trip.id}">&#128197; Check/update calendar</button>
+<span class="sync-status" data-leg-cal-status="${leg.id}">${leg.googleEventId ? 'Already linked to your calendar.' : ''}</span>
+</div>` : ''}
 ` : ''}
+</div>`;
+}
+
+// The trip-itinerary ADAPTER (not a leg -- see state.js's own comment on
+// blankPlannerActivity.tripId): a lightweight, mostly read-only row for a
+// Date Event linked to this trip, sitting chronologically among the real
+// legs below. Deliberately NOT a second full editor for the same record --
+// that already lives on Planner's own Date Events section (Phase 5), and
+// duplicating passenger/status/attachment editing here would just be two
+// places that could drift out of sync with each other. "Edit in Planner"
+// jumps straight to the real card instead.
+function dateEventAsLegRowHtml(trip, a) {
+const conn = a.connectionId ? data.connections.find((x) => x.id === a.connectionId) : null;
+const entry = data.plannerEntries.find((e) => e.kind === 'activity' && e.activityId === a.id);
+const detail = [entry?.date, a.eventTime, a.location].filter(Boolean).join(' · ');
+// Same mount-now-upgrade-once-connections.js-loads shape as personChipHtml
+// just above -- this file stays lazy-loadable, so the real avatar+name
+// chip only replaces this plain-text placeholder once renderTravel()'s
+// own dynamic import of connections.js resolves (see its existing
+// [data-person-chip-mount] upgrade, extended just below it).
+const connHtml = conn ? ` <span data-dateevent-conn-chip-mount="${escapeHtml(a.id)}">${escapeHtml(conn.name)}</span>` : '';
+return `<div class="alloc-card" data-dateevent-leg-row="${escapeHtml(a.id)}" style="margin-top:8px;">
+<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+<span class="field-label" style="margin:0;">&#128197; ${escapeHtml(a.title)}</span>${connHtml}
+<span class="settings-note" style="margin:0;">${escapeHtml(detail)}</span>
+<span class="settings-note" style="margin:0;">${escapeHtml(LEG_STATUS_LABELS[a.bookingStatus] || a.bookingStatus)}</span>
+<button type="button" class="todo-add-btn" data-dateevent-goto-planner="${escapeHtml(a.id)}" style="padding:3px 8px;">Edit in Planner</button>
+</div>
 </div>`;
 }
 
@@ -498,7 +556,19 @@ ${trip.people.map((p) => personChipHtml(trip.id, p)).join('')}
 <button class="todo-add-btn" type="button" data-trip-add-person="${trip.id}">Add</button>
 </div>
 <div class="settings-note" style="margin-top:6px;">${trip.legs.length === 0 ? 'No legs yet.' : complete ? 'Itinerary complete.' : `${gapCount} thing${gapCount === 1 ? '' : 's'} still need confirming.`}</div>
-${trip.legs.map((l) => legCardHtml(trip, l)).join('')}
+${(() => {
+// One chronological itinerary: real legs plus any Date Event linked to
+// this trip (blankPlannerActivity.tripId, the adapter -- see state.js's
+// own comment), sorted by whichever date each actually has. Legs aren't
+// stored in date order to begin with, so this is the first point either
+// kind gets sorted at all, not just where the two get interleaved.
+const linkedActivities = data.plannerActivities.filter((a) => a.tripId === trip.id);
+const rows = [
+...trip.legs.map((l) => ({ key: legSortKey(l), html: legCardHtml(trip, l) })),
+...linkedActivities.map((a) => ({ key: dateEventSortKey(a), html: dateEventAsLegRowHtml(trip, a) })),
+].sort((x, y) => x.key.localeCompare(y.key));
+return rows.map((r) => r.html).join('');
+})()}
 <div class="alloc-controls" style="margin-top:8px;">
 <select data-trip-add-leg-kind="${trip.id}">${LEG_KINDS.map((k) => `<option value="${k}">${escapeHtml(LEG_KIND_LABELS[k])}</option>`).join('')}</select>
 <button class="todo-add-btn" type="button" data-trip-add-leg="${trip.id}">+ Add leg</button>
@@ -526,6 +596,20 @@ el.innerHTML = visible.length ? visible.map(tripCardHtml).join('')
 : pastCount ? '<div class="empty">Nothing upcoming — every trip is past. Tick "Show past trips" above to see them.</div>'
 : '<div class="empty">No trips yet. Add one below, or turn a "city-break" nudge or a booking email into one.</div>';
 bindTravel(el);
+// Lazy-populate each expanded leg's own calendar select, same load-once
+// idiom planner.js's Date Events section and mail.js's "Check calendar"
+// action already use -- checked for a real sign-in FIRST
+// (canAttemptGoogleAction never itself prompts), since calling
+// listCalendars() straight away when signed out pops a real Google
+// sign-in window the instant a leg with a date is expanded.
+el.querySelectorAll('[data-leg-cal]').forEach((select) => {
+import('../sync/googleauth.js').then(({ canAttemptGoogleAction }) => canAttemptGoogleAction()).then((signedIn) => {
+if (!signedIn) { select.innerHTML = '<option value="">Sign in to Google at the top of Overview first</option>'; return; }
+return import('../googlecalendar.js').then(({ listCalendars }) => listCalendars()).then((cals) => {
+select.innerHTML = cals.length ? cals.map((c) => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.summary)}</option>`).join('') : '<option value="">No calendars found</option>';
+});
+}).catch(() => { select.innerHTML = '<option value="">Couldn\'t load calendars</option>'; });
+});
 // The "+ person" picker's row list needs the live Dating module, kept as
 // a dynamic import so this module never has to load connections.js (and
 // everything it pulls in) up front for a tab most sessions won't touch --
@@ -548,6 +632,13 @@ const personId = mount.dataset.personChipMount;
 let person = null;
 for (const trip of data.trips) { person = trip.people.find((p) => p.id === personId); if (person) break; }
 const conn = person?.connectionId ? data.connections.find((c) => c.id === person.connectionId) : null;
+if (conn) mount.outerHTML = connectionChipHtml(conn);
+});
+// Same upgrade, for a Date Event's own connection chip
+// (dateEventAsLegRowHtml, just below the legs it's merged in among).
+el.querySelectorAll('[data-dateevent-conn-chip-mount]').forEach((mount) => {
+const activity = data.plannerActivities.find((a) => a.id === mount.dataset.dateeventConnChipMount);
+const conn = activity?.connectionId ? data.connections.find((c) => c.id === activity.connectionId) : null;
 if (conn) mount.outerHTML = connectionChipHtml(conn);
 });
 hydratePhotoBackgrounds(el);
@@ -735,6 +826,71 @@ btn.addEventListener('click', () => {
 const leg = legById(btn.dataset.tripId, btn.dataset.legAttachOpen);
 const att = leg?.attachments.find((a) => a.id === btn.dataset.attachId);
 if (att) openAttachment(att).catch((err) => console.error("Couldn't open that attachment:", err));
+});
+});
+// A Date Event merged into this trip's itinerary (dateEventAsLegRowHtml)
+// isn't edited here -- jumps to the real card on Planner's own Date
+// Events section instead (its revealPlannerActivity, which expands and
+// scrolls to it).
+root.querySelectorAll('[data-dateevent-goto-planner]').forEach((btn) => {
+btn.addEventListener('click', async () => {
+const [{ switchTab }, planner] = await Promise.all([import('../tabs.js'), import('./planner.js')]);
+switchTab('planner');
+planner.revealPlannerActivity(btn.dataset.dateeventGotoPlanner);
+});
+});
+// Same search-first adopt-or-create dedup as airbnb.js's own push and
+// planner.js's Date Events section -- independent per leg, since a trip
+// can have some legs already on the real calendar and some not.
+root.querySelectorAll('[data-leg-check-cal]').forEach((btn) => {
+btn.addEventListener('click', async (e) => {
+e.preventDefault();
+const tripId = btn.dataset.tripId;
+const legId = btn.dataset.legCheckCal;
+const leg = legById(tripId, legId);
+if (!leg) return;
+const statusEl = root.querySelector(`[data-leg-cal-status="${CSS.escape(legId)}"]`);
+const say = (msg) => { if (statusEl) statusEl.textContent = msg; };
+const parsed = legPrimaryDate(leg);
+if (!parsed) { say('No date known on this leg yet — nothing to search against.'); return; }
+const calendarId = root.querySelector(`[data-leg-cal="${CSS.escape(legId)}"]`)?.value || '';
+if (!calendarId) { say('Pick a calendar first.'); return; }
+const { canAttemptGoogleAction, hasCalendarWrite } = await import('../sync/googleauth.js');
+if (!(await canAttemptGoogleAction())) { say('Sign in to Google at the top of Overview first.'); return; }
+if (!hasCalendarWrite()) { statusEl.innerHTML = 'Turn on "Allow creating events in Google Calendar" in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#calendar-write-toggle">Settings</span>, then sign out and back in.'; return; }
+const title = leg.label || LEG_KIND_LABELS[leg.kind];
+btn.disabled = true;
+say('Checking…');
+try {
+const { findEvents, createEvent } = await import('../googlecalendar.js');
+if (leg.googleEventId && leg.googleCalendarId === calendarId) {
+say('Already linked — nothing new created.');
+btn.disabled = false;
+return;
+}
+const candidates = await findEvents(calendarId, {
+timeMin: `${dateStrAdd(parsed.date, -1)}T00:00:00Z`, timeMax: `${dateStrAdd(parsed.date, 2)}T00:00:00Z`, q: title,
+});
+if (candidates.length === 1) {
+leg.googleEventId = candidates[0].id;
+leg.googleCalendarId = calendarId;
+say(`Matched an existing "${candidates[0].summary}" — adopted, nothing new created.`);
+} else if (candidates.length > 1) {
+say(`${candidates.length} existing events near ${parsed.date} already match "${title}" — too ambiguous to adopt automatically.`);
+} else {
+const created = await createEvent(calendarId, {
+title, description: leg.notes || '', date: parsed.date, startTime: parsed.time || '',
+});
+leg.googleEventId = created.id;
+leg.googleCalendarId = calendarId;
+say('Pushed to your calendar.');
+}
+queueSave();
+} catch (err) {
+console.error('Leg calendar check failed:', err);
+say(`Couldn't check the calendar: ${err.message || err}`);
+}
+btn.disabled = false;
 });
 });
 root.querySelectorAll('[data-trip-download]').forEach((btn) => {

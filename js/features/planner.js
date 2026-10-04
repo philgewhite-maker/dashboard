@@ -25,12 +25,13 @@
 // iOS only; everyone else gets drag alone, same as a mouse user always
 // has. See plannerDaySelectOptionsHtml for the option list itself.
 const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-import { data, queueSave, blankPlannerEntry, blankPlannerActivity, isDormantStage, isTravelPaused, LEG_DATE_FIELDS } from '../state.js';
+import { data, queueSave, blankPlannerEntry, blankPlannerActivity, isDormantStage, isTravelPaused, LEG_DATE_FIELDS, LEG_STATUSES, LEG_STATUS_LABELS } from '../state.js';
 import { escapeHtml, uid, todayStr, dateStrAdd, avatarHtml, hydratePhotoBackgrounds, bindForm, foldDiacritics, scrollAndFlash, parseLooseDateTime, looksLikeUrl } from '../utils.js';
 import { isPriorityConnection, renderConnPicker, bindConnPickers, expandConnection, connectionChipHtml, bindConnectionChips } from './connections.js';
 import { switchTab } from '../tabs.js';
 import { revealTrip } from './travel.js';
 import { airbnbSegmentsForDay } from './airbnb.js';
+import { formatBytes } from '../files.js';
 
 // The 14-day grid (and a long trip's mini-grid) routinely runs well past
 // the fold, but native HTML5 drag-and-drop does NOT auto-scroll the page
@@ -92,14 +93,11 @@ renderPlanner();
 return entry;
 }
 
-// Turns a date-event extraction result (Mail's ICS/AI waterfall shape --
-// {title, notes, date, location, eventTime, endTime, link}) into a real
-// Planner idea, placed on the day if one was found. Shared by mail.js's
-// own manual "Add idea" button and voicecapture.js's auto-drafted
-// 'dateEvent' step (js/features/captureOutcomes.js's emailSubject
-// marker), so there's exactly one place that knows how a resolved
-// extraction becomes a record, not two copies drifting apart.
-function createDateEventFromExtraction(result, { connectionId = '', source = null } = {}) {
+// Shared body of createDateEventFromExtraction/createDateEventsFromExtractions
+// below -- builds and pushes the record and places it on its day, but
+// leaves the save/render to the caller so the plural path can do both once
+// for the whole batch instead of once per event.
+function buildDateEventActivity(result, { connectionId = '', source = null } = {}) {
 const activity = blankPlannerActivity({
 title: result.title || 'Untitled', notes: result.notes || '', connectionId,
 location: result.location || '', eventTime: result.eventTime || '', endTime: result.endTime || '',
@@ -107,9 +105,37 @@ link: result.link || '', source,
 });
 data.plannerActivities.push(activity);
 if (result.date) placeEntry('activity', activity.id, result.date, '');
+return activity;
+}
+
+// Turns a date-event extraction result (Mail's ICS/AI waterfall shape --
+// {title, notes, date, location, eventTime, endTime, link}) into a real
+// Planner idea, placed on the day if one was found. Shared by mail.js's
+// own manual "Add idea" button and voicecapture.js's auto-drafted
+// 'dateEvent' step (js/features/captureOutcomes.js's emailSubject
+// marker), so there's exactly one place that knows how a resolved
+// extraction becomes a record, not two copies drifting apart.
+function createDateEventFromExtraction(result, opts = {}) {
+const activity = buildDateEventActivity(result, opts);
 queueSave();
 renderPlanner();
 return activity;
+}
+
+// Plural sibling of createDateEventFromExtraction above, for a single
+// email that turned out to describe more than one separate date-specific
+// thing (Mail's multi-event ICS/AI waterfall, js/features/mail.js) --
+// creates one record per result, each with its own source label (falling
+// back to the shared `source`'s label when a result has no title of its
+// own), and saves/re-renders once for the whole batch rather than once
+// per event.
+function createDateEventsFromExtractions(results, { connectionId = '', source = null } = {}) {
+const activities = results.map((result) => buildDateEventActivity(result, {
+connectionId, source: source ? { ...source, label: result.title || source.label } : null,
+}));
+queueSave();
+renderPlanner();
+return activities;
 }
 
 // Also updates tripId to match wherever it was dropped -- an entry moved
@@ -386,6 +412,10 @@ return days.map((d) => plannerDayHtml(d)).join('');
 // plannerAddOpenKeys -- never persisted, resets on reload.
 const POOL_COLLAPSE_LIMIT = 8;
 const expandedPools = new Set(); // 'priority' | 'activities'
+// Which Date Event cards (below, the full-width section) are expanded to
+// their detail view -- same session-only Set idiom as expandedPools just
+// above and travel.js's own expandedLegs.
+const expandedDateEvents = new Set();
 function poolListHtml(cards, poolKey) {
 if (cards.length <= POOL_COLLAPSE_LIMIT || expandedPools.has(poolKey)) {
 const collapseBtn = cards.length > POOL_COLLAPSE_LIMIT
@@ -476,6 +506,123 @@ ${IS_IOS ? `<select class="planner-select" data-planner-place="activity:${a.id}"
 </div>`;
 });
 return poolListHtml(cards, 'activities');
+}
+
+// ---- A real home for Date Events (Phase 5) ----
+//
+// activitiesPoolHtml above stays exactly as it is for its own job -- a
+// compact drag source for placing an idea on the grid. This is a
+// separate, full-width section with real room: passengers, confirmation
+// ref, booking status, the attachment gallery, and its own sort/filter
+// chips -- the exact treatment books.js's own booksControlsHtml already
+// established, copied directly rather than reinvented.
+let dateEventsSort = 'date'; // 'date' | 'title'
+let dateEventsFilter = 'all'; // 'all' | 'events' | 'dates'
+
+// A "date" is an Event that happens to be with a connection -- derived
+// from connectionId's existing presence/meaning rather than a second
+// field that could drift out of sync with it. If this proves too blunt
+// in practice (an event merely tagged with a connection, not a romantic
+// one) that's a real, separate follow-up, not guessed at now.
+function isDateEvent(a) { return !!a.connectionId; }
+
+// The entry (if any) that places this activity on a day -- an activity
+// can exist with none yet (an undated idea), which sorts/shows last
+// rather than erroring.
+function entryForActivity(a) {
+return data.plannerEntries.find((e) => e.kind === 'activity' && e.activityId === a.id) || null;
+}
+
+function dateEventsControlsHtml() {
+if (!data.plannerActivities.length) return '';
+const sortChip = (v, label) => `<button type="button" class="overview-chip${dateEventsSort === v ? ' active' : ''}" data-dateevents-sort="${v}">${label}</button>`;
+const filterChip = (v, label) => `<button type="button" class="overview-chip${dateEventsFilter === v ? ' active' : ''}" data-dateevents-filter="${v}">${label}</button>`;
+return `<div class="overview-chips" style="margin-bottom:8px;">
+<span class="settings-note" style="margin:0;">Sort:</span>
+${sortChip('date', 'Date')}${sortChip('title', 'Title')}
+<span class="settings-note" style="margin:0 0 0 10px;">Show:</span>
+${filterChip('all', 'All')}${filterChip('events', 'Events')}${filterChip('dates', 'Dates')}
+</div>`;
+}
+
+function visibleDateEvents() {
+let list = [...data.plannerActivities];
+if (dateEventsFilter === 'events') list = list.filter((a) => !isDateEvent(a));
+else if (dateEventsFilter === 'dates') list = list.filter(isDateEvent);
+if (dateEventsSort === 'title') {
+list.sort((a, b) => a.title.localeCompare(b.title));
+} else {
+const dateFor = (a) => entryForActivity(a)?.date || '9999-99-99';
+list.sort((a, b) => dateFor(a).localeCompare(dateFor(b)) || a.title.localeCompare(b.title));
+}
+return list;
+}
+
+// Same shape/dataset-per-field idiom as travel.js's own passengerRowHtml,
+// keyed by activityId alone rather than tripId+legId -- a Date Event
+// isn't nested under a trip the way a leg is nested under one.
+function dateEventPassengerRowHtml(a, p) {
+return `<div class="attach-row" data-de-passenger-row="${p.id}">
+<input type="text" data-de-passenger-field="name" data-de-passenger-id="${p.id}" data-activity-id="${a.id}" value="${escapeHtml(p.name)}" placeholder="Name" style="flex:1;min-width:100px;">
+<input type="text" data-de-passenger-field="seat" data-de-passenger-id="${p.id}" data-activity-id="${a.id}" value="${escapeHtml(p.seat)}" placeholder="Seat" style="width:56px;">
+<span class="tag-x" data-de-passenger-remove="${p.id}" data-activity-id="${a.id}" title="Remove">&times;</span>
+</div>`;
+}
+
+function dateEventCardHtml(a) {
+const expanded = expandedDateEvents.has(a.id);
+const conn = a.connectionId ? data.connections.find((x) => x.id === a.connectionId) : null;
+const entry = entryForActivity(a);
+const detailTitle = activityDetailTitle(a);
+return `<div class="alloc-card" data-dateevent-card="${a.id}" style="margin-top:8px;">
+<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+<span class="leg-toggle" data-dateevent-toggle="${a.id}" title="${expanded ? 'Collapse' : 'Expand'}">${expanded ? '&#9662;' : '&#9656;'}</span>
+<input type="text" data-dateevent-title="${a.id}" value="${escapeHtml(a.title)}" placeholder="Title" style="flex:1;min-width:120px;font-weight:600;">
+<select data-dateevent-status="${a.id}">
+${LEG_STATUSES.map((s) => `<option value="${s}"${s === a.bookingStatus ? ' selected' : ''}>${escapeHtml(LEG_STATUS_LABELS[s])}</option>`).join('')}
+</select>
+${conn ? connectionChipHtml(conn) : ''}
+<span class="settings-note" style="margin:0;">${entry ? escapeHtml(entry.date) : 'Undated'}${detailTitle ? ` &middot; ${escapeHtml(detailTitle)}` : ''}</span>
+<span class="del-x" data-dateevent-delete="${a.id}" title="Delete">&times;</span>
+</div>
+${expanded ? `
+<div class="details-grid" style="background:var(--slate-bg);">
+<div class="field-block"><span class="field-label">Confirmation ref</span><input type="text" data-dateevent-confref="${a.id}" value="${escapeHtml(a.confirmationRef)}" placeholder="If known"></div>
+<div class="field-block"><span class="field-label">Location</span><input type="text" data-dateevent-location="${a.id}" value="${escapeHtml(a.location)}" placeholder="Venue/address"></div>
+<div class="field-block"><span class="field-label">Time</span><input type="text" data-dateevent-eventtime="${a.id}" value="${escapeHtml(a.eventTime)}" placeholder="HH:MM"></div>
+<div class="field-block"><span class="field-label">Part of a trip?</span>
+<select data-dateevent-trip="${a.id}">
+<option value="">Not part of a trip</option>
+${data.trips.map((t) => `<option value="${escapeHtml(t.id)}"${t.id === a.tripId ? ' selected' : ''}>${escapeHtml(t.title || 'Untitled trip')}</option>`).join('')}
+</select>
+</div>
+</div>
+<div style="margin-top:8px;">
+<span class="field-label">Passengers</span>
+<div style="display:flex;flex-direction:column;gap:4px;margin-top:4px;">
+${a.passengers.map((p) => dateEventPassengerRowHtml(a, p)).join('')}
+</div>
+<div class="attach-row">
+<input type="text" class="tag-add-input" data-de-passenger-add-name="${a.id}" placeholder="+ passenger name">
+<input type="text" class="tag-add-input" data-de-passenger-add-seat="${a.id}" placeholder="Seat" style="width:56px;">
+<button class="todo-add-btn" type="button" data-de-passenger-add="${a.id}">Add</button>
+</div>
+</div>
+${a.attachments.length ? `<div style="margin-top:6px;">${a.attachments.map((f) => `<div class="attach-row"><button class="attach-name" type="button" data-dateevent-attach-open="${a.id}" data-attach-id="${escapeHtml(f.id)}">${escapeHtml(f.name || 'file')}</button><span class="attach-size">${escapeHtml(formatBytes(f.size))}</span></div>`).join('')}</div>` : ''}
+<textarea data-dateevent-notes="${a.id}" placeholder="Notes" style="width:100%;margin-top:8px;min-height:44px;">${escapeHtml(a.notes)}</textarea>
+<div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;">
+<select class="settings-input" data-dateevent-cal="${a.id}" style="max-width:220px;"><option value="">Loading your calendars…</option></select>
+<button type="button" class="todo-add-btn" data-dateevent-check-cal="${a.id}">&#128197; Check/update calendar</button>
+<span class="sync-status" data-dateevent-cal-status="${a.id}">${a.googleEventId ? 'Already linked to your calendar.' : ''}</span>
+</div>
+` : ''}
+</div>`;
+}
+
+function dateEventsSectionHtml() {
+const list = visibleDateEvents();
+if (!list.length) return data.plannerActivities.length ? '<div class="empty">Nothing matches this filter.</div>' : '<div class="empty">No Date Events yet — add one above, or capture one from an email in Mail.</div>';
+return list.map(dateEventCardHtml).join('');
 }
 
 // A leg's date fields are free text (travel.js's legFieldRowHtml normalizes
@@ -612,6 +759,31 @@ priorityEl.innerHTML = priorityPoolHtml();
 renderConnPicker('planner-add-connection-picker', 'Add someone else&hellip;', '');
 activitiesEl.innerHTML = activitiesPoolHtml();
 gridEl.innerHTML = mainGridHtml();
+const dateEventsControlsEl = document.getElementById('planner-dateevents-controls');
+const dateEventsListEl = document.getElementById('planner-dateevents-list');
+if (dateEventsControlsEl) dateEventsControlsEl.innerHTML = dateEventsControlsHtml();
+if (dateEventsListEl) {
+dateEventsListEl.innerHTML = dateEventsSectionHtml();
+bindConnectionChips(); // for each expanded Date Event's optional connection chip
+// Lazy-populate each expanded card's own calendar select, same
+// load-once-on-open idiom mail.js's "Check calendar" action already
+// uses -- only the EXPANDED cards render this select at all, so this
+// never fires for a collapsed one. Checked for a real sign-in FIRST
+// (canAttemptGoogleAction never itself prompts) -- confirmed live that
+// skipping this check and calling listCalendars() straight away pops a
+// real Google sign-in window the instant a card is expanded, with no
+// click of the user's own aimed at Google at all, exactly the
+// unwanted-popup case googleauth.js's own getAccessToken comment warns
+// against.
+dateEventsListEl.querySelectorAll('[data-dateevent-cal]').forEach((select) => {
+import('../sync/googleauth.js').then(({ canAttemptGoogleAction }) => canAttemptGoogleAction()).then((signedIn) => {
+if (!signedIn) { select.innerHTML = '<option value="">Sign in to Google at the top of Overview first</option>'; return; }
+return import('../googlecalendar.js').then(({ listCalendars }) => listCalendars()).then((cals) => {
+select.innerHTML = cals.length ? cals.map((c) => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.summary)}</option>`).join('') : '<option value="">No calendars found</option>';
+});
+}).catch(() => { select.innerHTML = '<option value="">Couldn\'t load calendars</option>'; });
+});
+}
 // Same "this is about what's coming up, not history" reasoning as the
 // Airbnb sync's own past-reservation exclusion -- a trip that's already
 // finished (a real end date, already before today) has nothing left to
@@ -801,6 +973,162 @@ e.stopPropagation();
 switchTab(el.dataset.gotoTab);
 });
 });
+
+// ---- Date Events section (Phase 5) ----
+root.querySelectorAll('[data-dateevents-sort]').forEach((btn) => {
+btn.addEventListener('click', () => { dateEventsSort = btn.dataset.dateeventsSort; renderPlanner(); });
+});
+root.querySelectorAll('[data-dateevents-filter]').forEach((btn) => {
+btn.addEventListener('click', () => { dateEventsFilter = btn.dataset.dateeventsFilter; renderPlanner(); });
+});
+root.querySelectorAll('[data-dateevent-toggle]').forEach((el) => {
+el.addEventListener('click', () => {
+const id = el.dataset.dateeventToggle;
+if (expandedDateEvents.has(id)) expandedDateEvents.delete(id); else expandedDateEvents.add(id);
+renderPlanner();
+});
+});
+root.querySelectorAll('[data-dateevent-title]').forEach((input) => {
+input.addEventListener('change', () => {
+const a = data.plannerActivities.find((x) => x.id === input.dataset.dateeventTitle);
+if (a) { a.title = input.value.trim() || 'Untitled'; queueSave(); }
+renderPlanner();
+});
+});
+root.querySelectorAll('[data-dateevent-status]').forEach((sel) => {
+sel.addEventListener('change', () => {
+const a = data.plannerActivities.find((x) => x.id === sel.dataset.dateeventStatus);
+if (a && LEG_STATUSES.includes(sel.value)) { a.bookingStatus = sel.value; queueSave(); }
+});
+});
+root.querySelectorAll('[data-dateevent-confref]').forEach((input) => {
+input.addEventListener('change', () => {
+const a = data.plannerActivities.find((x) => x.id === input.dataset.dateeventConfref);
+if (a) { a.confirmationRef = input.value.trim(); queueSave(); }
+});
+});
+root.querySelectorAll('[data-dateevent-location]').forEach((input) => {
+input.addEventListener('change', () => {
+const a = data.plannerActivities.find((x) => x.id === input.dataset.dateeventLocation);
+if (a) { a.location = input.value.trim(); queueSave(); }
+renderPlanner();
+});
+});
+root.querySelectorAll('[data-dateevent-trip]').forEach((sel) => {
+sel.addEventListener('change', () => {
+const a = data.plannerActivities.find((x) => x.id === sel.dataset.dateeventTrip);
+if (a) { a.tripId = sel.value; queueSave(); }
+});
+});
+root.querySelectorAll('[data-dateevent-eventtime]').forEach((input) => {
+input.addEventListener('change', () => {
+const a = data.plannerActivities.find((x) => x.id === input.dataset.dateeventEventtime);
+if (a) { a.eventTime = input.value.trim(); queueSave(); }
+renderPlanner();
+});
+});
+root.querySelectorAll('[data-dateevent-notes]').forEach((ta) => {
+ta.addEventListener('change', () => {
+const a = data.plannerActivities.find((x) => x.id === ta.dataset.dateeventNotes);
+if (a) { a.notes = ta.value; queueSave(); }
+});
+});
+root.querySelectorAll('[data-dateevent-delete]').forEach((x) => {
+x.addEventListener('click', () => {
+const id = x.dataset.dateeventDelete;
+data.plannerActivities = data.plannerActivities.filter((a) => a.id !== id);
+data.plannerEntries = data.plannerEntries.filter((e) => !(e.kind === 'activity' && e.activityId === id));
+queueSave();
+renderPlanner();
+});
+});
+root.querySelectorAll('[data-de-passenger-field]').forEach((input) => {
+input.addEventListener('change', () => {
+const a = data.plannerActivities.find((x) => x.id === input.dataset.activityId);
+const p = a?.passengers.find((x) => x.id === input.dataset.dePassengerId);
+if (p) { p[input.dataset.dePassengerField] = input.value.trim(); queueSave(); }
+});
+});
+root.querySelectorAll('[data-de-passenger-remove]').forEach((x) => {
+x.addEventListener('click', () => {
+const a = data.plannerActivities.find((y) => y.id === x.dataset.activityId);
+if (a) { a.passengers = a.passengers.filter((p) => p.id !== x.dataset.dePassengerRemove); queueSave(); }
+renderPlanner();
+});
+});
+root.querySelectorAll('[data-de-passenger-add]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const id = btn.dataset.dePassengerAdd;
+const a = data.plannerActivities.find((x) => x.id === id);
+if (!a) return;
+const nameInput = root.querySelector(`[data-de-passenger-add-name="${CSS.escape(id)}"]`);
+const seatInput = root.querySelector(`[data-de-passenger-add-seat="${CSS.escape(id)}"]`);
+if (!nameInput || !nameInput.value.trim()) return;
+a.passengers.push({ id: uid(), name: nameInput.value.trim(), seat: (seatInput?.value || '').trim(), baggage: '' });
+queueSave();
+renderPlanner();
+});
+});
+root.querySelectorAll('[data-dateevent-attach-open]').forEach((btn) => {
+btn.addEventListener('click', async () => {
+const a = data.plannerActivities.find((x) => x.id === btn.dataset.dateeventAttachOpen);
+const att = a?.attachments.find((f) => f.id === btn.dataset.attachId);
+if (att) {
+const { openAttachment } = await import('../files.js');
+openAttachment(att).catch((err) => console.error("Couldn't open that attachment:", err));
+}
+});
+});
+root.querySelectorAll('[data-dateevent-check-cal]').forEach((btn) => {
+btn.addEventListener('click', async (e) => {
+e.preventDefault();
+const id = btn.dataset.dateeventCheckCal;
+const activity = data.plannerActivities.find((a) => a.id === id);
+if (!activity) return;
+const statusEl = root.querySelector(`[data-dateevent-cal-status="${CSS.escape(id)}"]`);
+const say = (msg) => { if (statusEl) statusEl.textContent = msg; };
+const entry = entryForActivity(activity);
+if (!entry) { say('Place this on a day first — nothing to search a date against yet.'); return; }
+const calendarId = root.querySelector(`[data-dateevent-cal="${CSS.escape(id)}"]`)?.value || '';
+if (!calendarId) { say('Pick a calendar first.'); return; }
+const { canAttemptGoogleAction, hasCalendarWrite } = await import('../sync/googleauth.js');
+if (!(await canAttemptGoogleAction())) { say('Sign in to Google at the top of Overview first.'); return; }
+if (!hasCalendarWrite()) { statusEl.innerHTML = 'Turn on "Allow creating events in Google Calendar" in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#calendar-write-toggle">Settings</span>, then sign out and back in.'; return; }
+btn.disabled = true;
+say('Checking…');
+try {
+const { findEvents, createEvent } = await import('../googlecalendar.js');
+if (activity.googleEventId && activity.googleCalendarId === calendarId) {
+say('Already linked — nothing new created.');
+btn.disabled = false;
+return;
+}
+const candidates = await findEvents(calendarId, {
+timeMin: `${dateStrAdd(entry.date, -1)}T00:00:00Z`, timeMax: `${dateStrAdd(entry.endDate || entry.date, 2)}T00:00:00Z`, q: activity.title,
+});
+if (candidates.length === 1) {
+activity.googleEventId = candidates[0].id;
+activity.googleCalendarId = calendarId;
+say(`Matched an existing "${candidates[0].summary}" — adopted, nothing new created.`);
+} else if (candidates.length > 1) {
+say(`${candidates.length} existing events near ${entry.date} already match "${activity.title}" — too ambiguous to adopt automatically.`);
+} else {
+const created = await createEvent(calendarId, {
+title: activity.title, description: [activity.location, activity.notes].filter(Boolean).join(' — '),
+date: entry.date, endDate: entry.endDate || '', startTime: activity.eventTime || '', endTime: activity.endTime || '',
+});
+activity.googleEventId = created.id;
+activity.googleCalendarId = calendarId;
+say('Pushed to your calendar.');
+}
+queueSave();
+} catch (err) {
+console.error('Date event calendar check failed:', err);
+say(`Couldn't check the calendar: ${err.message || err}`);
+}
+btn.disabled = false;
+});
+});
 }
 
 // ---- Push to Google Calendar ----
@@ -886,8 +1214,16 @@ let pushed = 0, failed = 0;
 for (const id of checked) {
 const entry = data.plannerEntries.find((e) => e.id === id);
 if (!entry) continue;
+// A connection-kind entry has no activity, hence no eventTime, and stays
+// all-day exactly as before -- only an activity-kind entry can carry a
+// real time of day (blankPlannerActivity.eventTime/endTime).
+const activity = entry.kind === 'activity' ? data.plannerActivities.find((a) => a.id === entry.activityId) : null;
 try {
-await createEvent(calendarId, { title: calendarTitleFor(entry), description: calendarDescriptionFor(entry), date: entry.date });
+await createEvent(calendarId, {
+title: calendarTitleFor(entry), description: calendarDescriptionFor(entry),
+date: entry.date, endDate: entry.endDate || '',
+startTime: activity?.eventTime || '', endTime: activity?.endTime || '',
+});
 entry.calendarPushed = true;
 pushed++;
 } catch (err) {
@@ -963,17 +1299,18 @@ setTimeout(() => el.classList.remove('flash-new'), 1800);
 }
 
 // Cross-tab jump target for a Planner "idea" (data.plannerActivities), e.g.
-// Mail's "+ date event" success message. An idea has no entry (data-planner-
-// entry) unless it's been placed on a day, so this checks for one first and
-// falls back to the undated pool card -- same two-state shape the record
-// itself has.
+// Mail's "+ date event" success message, or a trip itinerary row's own
+// "Edit in Planner" link (travel.js's dateEventAsLegRowHtml). The Date
+// Events section (below the small pool) is where real editing actually
+// happens now, so this expands the real card there and lands on IT --
+// falling back to the small pool card only if that section's own container
+// isn't in this build's DOM at all.
 function revealPlannerActivity(activityId) {
+expandedDateEvents.add(activityId);
 renderPlanner();
 setTimeout(() => {
-const placed = data.plannerEntries.find((e) => e.kind === 'activity' && e.activityId === activityId);
-const el = placed
-? document.querySelector(`[data-planner-entry="${placed.id}"]`)
-: document.querySelector(`[data-planner-drag="activity:${activityId}"]`);
+const el = document.querySelector(`[data-dateevent-card="${activityId}"]`)
+|| document.querySelector(`[data-planner-drag="activity:${activityId}"]`);
 if (el) {
 el.scrollIntoView({ behavior: 'smooth', block: 'center' });
 el.classList.add('flash-new');
@@ -1003,4 +1340,4 @@ revealPlannerActivity(chip.dataset.openPlannerActivity);
 });
 }
 
-export { renderPlanner, initPlanner, revealPlannerEntry, revealPlannerActivity, plannerActivityChipHtml, bindPlannerActivityChips, syncTripPeopleEntries, placeEntry, addActivityToDay, createDateEventFromExtraction };
+export { renderPlanner, initPlanner, revealPlannerEntry, revealPlannerActivity, plannerActivityChipHtml, bindPlannerActivityChips, syncTripPeopleEntries, placeEntry, addActivityToDay, createDateEventFromExtraction, createDateEventsFromExtractions };

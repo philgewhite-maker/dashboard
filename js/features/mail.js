@@ -1,6 +1,6 @@
 import { data, queueSave, mailSearchLabel, blankMailDismissal, blankCaptureDraft } from '../state.js';
-import { escapeHtml, affiliateLink, unfoldIcsLines, parseIcsProperty, icsDateTime, MISSING_KEY_LINK_HTML } from '../utils.js';
-import { canAttemptGoogleAction } from '../sync/googleauth.js';
+import { escapeHtml, affiliateLink, unfoldIcsLines, parseIcsProperty, icsDateTime, dateStrAdd, MISSING_KEY_LINK_HTML } from '../utils.js';
+import { canAttemptGoogleAction, hasCalendarWrite } from '../sync/googleauth.js';
 import { fetchMailSearches, getMessageDetail, fetchMessageAttachmentBytes } from '../googlemail.js';
 import { captureTask, taskChipHtml, bindTaskChips } from './tasks.js';
 import { legTargetPickerHtml, bindLegTargetPicker, readLegTargetPicker, applyLegExtraction, tripChipHtml, bindTripChips, gapsFor } from './travel.js';
@@ -118,8 +118,22 @@ return isPdf || isRealImage;
 // -- an optional enrichment on top of the real capture, so a missing files
 // server (FilesNotConfiguredError) or one failed upload just means fewer
 // (or zero) attachments come back, not a blocked capture.
-async function grabEmailAttachments(id, candidates) {
-const picks = (candidates || []).filter(looksLikeTicketAttachment);
+//
+// `attachmentHints` (filenames, from the AI extraction's own per-event
+// field -- see extractDateEventFromEmail in ai.js) narrows the ticket-
+// shaped candidates down to just the ones the email body said belong to
+// THIS event, for a multi-event email with several tickets attached.
+// Falls back to every ticket-shaped candidate when hints are empty or
+// none of them actually matched a real attachment -- an unmatched hint
+// (a typo, a filename the model paraphrased) should still leave today's
+// "attach everything" behaviour intact rather than silently attaching
+// nothing.
+async function grabEmailAttachments(id, candidates, attachmentHints = []) {
+let picks = (candidates || []).filter(looksLikeTicketAttachment);
+if (attachmentHints && attachmentHints.length) {
+const hinted = picks.filter((p) => attachmentHints.some((h) => h && p.filename && p.filename.toLowerCase() === h.toLowerCase()));
+if (hinted.length) picks = hinted;
+}
 if (!picks.length) return [];
 const { uploadAttachment } = await import('../files.js');
 const out = [];
@@ -151,36 +165,71 @@ return String(value || '').replace(/\\n/gi, '\n').replace(/\\([,;\\])/g, '$1');
 // same RFC5545 line-unfolding/property-splitting travel.js's Airbnb sync
 // depends on (js/utils.js), just reading a different set of properties --
 // a real calendar invite, not a date-only reservation block.
+//
+// Returns an array, one entry per VEVENT -- a real invite for an order
+// covering several separate things (e.g. two different gigs' tickets
+// bought together) repeats each VEVENT once per ticket, same UID every
+// time, so this dedupes by UID rather than just keeping the first block
+// found. A single-event invite still comes back as a one-item array, so
+// every caller handles one shape.
 function extractDateEventFromIcs(icsText) {
 const lines = unfoldIcsLines(icsText);
 let current = null;
-let event = null;
+const events = [];
+const seenUids = new Set();
 lines.forEach((line) => {
 if (line === 'BEGIN:VEVENT') { current = {}; return; }
-if (line === 'END:VEVENT') { if (current && !event) event = current; current = null; return; }
+if (line === 'END:VEVENT') {
+if (current) {
+const uid = current.uid || '';
+if (!uid || !seenUids.has(uid)) {
+if (uid) seenUids.add(uid);
+events.push(current);
+}
+}
+current = null;
+return;
+}
 if (!current) return;
 const prop = parseIcsProperty(line);
 if (!prop) return;
-if (prop.name === 'SUMMARY') current.title = unescapeIcsValue(prop.value).trim();
+if (prop.name === 'UID') current.uid = prop.value.trim();
+else if (prop.name === 'SUMMARY') current.title = unescapeIcsValue(prop.value).trim();
 else if (prop.name === 'LOCATION') current.location = unescapeIcsValue(prop.value).trim();
 else if (prop.name === 'DESCRIPTION') current.notes = unescapeIcsValue(prop.value).trim();
 else if (prop.name === 'URL') current.link = prop.value.trim();
 else if (prop.name === 'DTSTART') current.start = icsDateTime(prop.value);
 else if (prop.name === 'DTEND') current.end = icsDateTime(prop.value);
 });
-if (!event) return null;
-return {
+return events.map((event) => ({
 title: event.title || '', date: event.start?.date || '', eventTime: event.start?.time || '',
 endTime: event.end?.time || '', location: event.location || '', notes: event.notes || '', link: event.link || '',
-};
+}));
 }
 
-// The quality gate for extractDateEventFromIcs's result -- title and a
+// The quality gate for one extractDateEventFromIcs result -- title and a
 // start date are the two things the old subject-line default couldn't
 // give you; venue/time/link are worth keeping but not worth an AI
 // fallback over if they're missing.
 function icsDateEventIsGoodEnough(result) {
 return !!(result && result.title && result.date);
+}
+
+// One checked-by-default row in the dateEvent picker's multi-event review
+// list (data-mail-date-event-list above) -- same .pending-option shape
+// manualimport.js/books.js's own review screens already use, just a
+// checkbox instead of a radio since more than one can be ticked at once.
+// The whole extraction result rides along as a JSON blob in the hidden
+// input's value, the same "stash it on the element, the Add handler reads
+// it back" convention the single-event path already uses on the Add
+// button's own dataset.
+function dateEventRowHtml(ev) {
+const when = ev.date ? `${ev.date}${ev.eventTime ? ` ${ev.eventTime}` : ''}` : 'no date found';
+return `<label class="pending-option">
+<input type="checkbox" checked data-mail-date-event-row-check>
+<input type="hidden" data-mail-date-event-row-data value='${escapeHtml(JSON.stringify(ev))}'>
+<span class="pending-option-info"><strong>${escapeHtml(ev.title || 'Untitled')}</strong><span class="compare-caption">${escapeHtml(when)}</span></span>
+</label>`;
 }
 
 // The clickable control for one action on one message — a plain button for
@@ -244,6 +293,7 @@ ${connectionPickerHtml(`mail-date-event-conn-${m.id}`, 'Link a connection (optio
 <button class="mini-task-btn" type="button" data-mail-date-event-extract="${escapeHtml(m.id)}"
 data-mail-subject="${escapeHtml(m.subject)}" data-mail-from="${escapeHtml(displayName(m.from))}"
 title="Try the calendar invite first, then read the email if there isn't one">&#129497; Extract details</button>
+<div class="pending-options" data-mail-date-event-list="${escapeHtml(m.id)}" hidden></div>
 <button class="todo-add-btn" type="button" data-mail-date-event-add="${escapeHtml(m.id)}" data-mail-snippet="${escapeHtml(m.snippet || '')}" data-mail-url="${escapeHtml(m.link)}">Add idea</button>
 <span class="sync-status" data-mail-date-event-status="${escapeHtml(m.id)}"></span>
 </div>`;
@@ -258,6 +308,39 @@ return `<div class="mail-action-picker" data-mail-action-picker="aiTask:${escape
 ${useAiButtonHtml('data-mail-ai-task-fill', m)}
 <button class="todo-add-btn" type="button" data-mail-ai-task-add="${escapeHtml(m.id)}" data-mail-url="${escapeHtml(m.link)}">Add task</button>
 <span class="sync-status" data-mail-ai-task-status="${escapeHtml(m.id)}"></span>
+</div>`;
+}
+if (actionId === 'complex') {
+// For the rare email where the one-click actions above guess wrong --
+// an order covering more than one separate thing, something easy to
+// miscategorise. (a)/(b) are free text, appended to whichever target's
+// OWN existing extraction function as guidance (ai.js's
+// guidanceInstruction, shared identically by all three) -- this dialog
+// doesn't reimplement extraction, it just chooses which existing one
+// to call and hands it the hint. The per-target extras below
+// (connection picker / trip-target picker) are the SAME ones dateEvent/
+// tripLeg's own pickers already use, just swapped by the target select
+// rather than living in three separate dialogs.
+return `<div class="mail-action-picker" data-mail-action-picker="complex:${escapeHtml(m.id)}" hidden>
+<textarea class="settings-input" data-mail-complex-what="${escapeHtml(m.id)}" rows="2" placeholder="What is this email actually? e.g. &quot;An order confirmation covering 2 separate concerts&quot;"></textarea>
+<textarea class="settings-input" data-mail-complex-outcome="${escapeHtml(m.id)}" rows="2" placeholder="What do you want out of it? e.g. &quot;2 date events, each with its own 2 tickets attached&quot;"></textarea>
+<select class="settings-input" data-mail-complex-target="${escapeHtml(m.id)}">
+<option value="dateEvent">Date event(s)</option>
+<option value="tripLeg">Trip leg</option>
+<option value="task">Task</option>
+</select>
+<div data-mail-complex-dateevent="${escapeHtml(m.id)}">${connectionPickerHtml(`mail-complex-conn-${m.id}`, 'Link a connection (optional)…')}</div>
+<div data-mail-complex-tripleg="${escapeHtml(m.id)}" hidden>${legTargetPickerHtml(`mail-complex-leg-${m.id}`)}</div>
+<button class="todo-add-btn" type="button" data-mail-complex-submit="${escapeHtml(m.id)}"
+data-mail-subject="${escapeHtml(m.subject)}" data-mail-from="${escapeHtml(displayName(m.from))}" data-mail-url="${escapeHtml(m.link)}">&#129497; Extract &amp; create</button>
+<span class="sync-status" data-mail-complex-status="${escapeHtml(m.id)}"></span>
+</div>`;
+}
+if (actionId === 'checkCalendar') {
+return `<div class="mail-action-picker" data-mail-action-picker="checkCalendar:${escapeHtml(m.id)}" hidden>
+<select class="settings-input" data-mail-check-cal="${escapeHtml(m.id)}"><option value="">Loading your calendars…</option></select>
+<button class="todo-add-btn" type="button" data-mail-check-cal-submit="${escapeHtml(m.id)}">&#128197; Check/update calendar</button>
+<span class="sync-status" data-mail-check-cal-status="${escapeHtml(m.id)}"></span>
 </div>`;
 }
 if (actionId === 'improveTask') {
@@ -648,6 +731,174 @@ const picker = list.querySelector(`[data-mail-action-picker="${CSS.escape(action
 if (!picker) return;
 picker.hidden = !picker.hidden;
 if (!picker.hidden && actionId === 'tripLeg') bindLegTargetPicker(picker, id);
+if (!picker.hidden && actionId === 'complex') bindLegTargetPicker(picker, `mail-complex-leg-${id}`);
+if (!picker.hidden && actionId === 'checkCalendar') {
+const select = picker.querySelector(`[data-mail-check-cal="${CSS.escape(id)}"]`);
+if (select && !select.dataset.loaded) {
+select.dataset.loaded = '1';
+// Checked for a real sign-in FIRST -- canAttemptGoogleAction never
+// itself prompts, but calling listCalendars() straight away when
+// signed out pops a real Google sign-in window the instant this
+// picker opens, with no click of the user's own aimed at Google at
+// all (confirmed live on the same pattern in planner.js).
+canAttemptGoogleAction().then((signedIn) => {
+if (!signedIn) { select.innerHTML = '<option value="">Sign in to Google at the top of Overview first</option>'; return; }
+return import('../googlecalendar.js').then(({ listCalendars }) => listCalendars()).then((cals) => {
+select.innerHTML = cals.length ? cals.map((c) => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.summary)}</option>`).join('') : '<option value="">No calendars found</option>';
+});
+}).catch(() => { select.innerHTML = '<option value="">Couldn\'t load calendars</option>'; });
+}
+}
+});
+});
+
+list.querySelectorAll('[data-mail-complex-target]').forEach((sel) => {
+sel.addEventListener('change', () => {
+const id = sel.dataset.mailComplexTarget;
+const dateEventExtra = list.querySelector(`[data-mail-complex-dateevent="${CSS.escape(id)}"]`);
+const tripLegExtra = list.querySelector(`[data-mail-complex-tripleg="${CSS.escape(id)}"]`);
+if (dateEventExtra) dateEventExtra.hidden = sel.value !== 'dateEvent';
+if (tripLegExtra) tripLegExtra.hidden = sel.value !== 'tripLeg';
+});
+});
+
+list.querySelectorAll('[data-mail-complex-submit]').forEach((btn) => {
+btn.addEventListener('click', async (e) => {
+e.preventDefault();
+const id = btn.dataset.mailComplexSubmit;
+const status = list.querySelector(`[data-mail-complex-status="${CSS.escape(id)}"]`);
+const say = (msg) => { if (status) status.textContent = msg; };
+const what = (list.querySelector(`[data-mail-complex-what="${CSS.escape(id)}"]`)?.value || '').trim();
+const outcome = (list.querySelector(`[data-mail-complex-outcome="${CSS.escape(id)}"]`)?.value || '').trim();
+const guidance = [what && `This email is: ${what}.`, outcome && `What I want out of it: ${outcome}.`].filter(Boolean).join(' ');
+const target = list.querySelector(`[data-mail-complex-target="${CSS.escape(id)}"]`)?.value || 'dateEvent';
+btn.disabled = true;
+say('Reading the email…');
+try {
+const [aiMod, { bodyText, icsText, attachments }] = await Promise.all([import('../ai.js'), getMessageDetail(id)]);
+if (target === 'task') {
+say('Pulling out the details…');
+const result = await aiMod.extractTaskFromEmail(btn.dataset.mailSubject, btn.dataset.mailFrom, bodyText, guidance);
+const task = captureTask({
+title: result.title || btn.dataset.mailSubject, notes: result.notes || '', due: result.due || '', link: result.link || '',
+source: { kind: 'mail', label: result.title || btn.dataset.mailSubject, url: btn.dataset.mailUrl },
+});
+bindTaskChips();
+say('');
+if (status) status.innerHTML = `Added ${taskChipHtml(task)}.`;
+const grabbed = await grabEmailAttachments(id, attachments);
+if (grabbed.length) {
+task.attachments.push(...grabbed);
+queueSave();
+if (status) status.innerHTML = `Added ${taskChipHtml(task)} (+ ${grabbed.length} attachment${grabbed.length === 1 ? '' : 's'}).`;
+(await import('./tasks.js')).renderTasks();
+}
+} else if (target === 'tripLeg') {
+say('Pulling out the details…');
+const extraction = await aiMod.extractTripLegFromEmail(btn.dataset.mailSubject, btn.dataset.mailFrom, bodyText, guidance);
+if (!extraction.kind && Object.keys(extraction.fields).length === 0) {
+say("Didn't recognise this as travel logistics — try a different target, or add more in the guidance fields above.");
+btn.disabled = false;
+return;
+}
+const picker = list.querySelector(`[data-mail-action-picker="complex:${CSS.escape(id)}"]`);
+const picked = readLegTargetPicker(picker, `mail-complex-leg-${id}`);
+const { trip, leg, filled } = await applyLegExtraction({
+...picked, extraction, source: { kind: 'mail', label: btn.dataset.mailSubject, url: btn.dataset.mailUrl },
+});
+bindTripChips();
+const grabbed = await grabEmailAttachments(id, attachments);
+if (grabbed.length) { leg.attachments.push(...grabbed); queueSave(); }
+if (status) {
+const gaps = gapsFor(leg);
+const completeness = gaps.length === 0 ? 'nothing required is missing' : `${gaps.length} required field${gaps.length === 1 ? '' : 's'} still missing`;
+const attachNote = grabbed.length ? ` (+ ${grabbed.length} attachment${grabbed.length === 1 ? '' : 's'})` : '';
+status.innerHTML = `Added ${filled} detail${filled === 1 ? '' : 's'} to ${tripChipHtml(trip)} — ${leg.kind} (${completeness})${attachNote}.`;
+}
+} else {
+const icsEvents = icsText ? extractDateEventFromIcs(icsText).filter(icsDateEventIsGoodEnough) : [];
+let results = icsEvents;
+let source = 'calendar invite';
+if (!results.length) {
+say('No usable calendar invite — reading the email…');
+const { events } = await aiMod.extractDateEventFromEmail(btn.dataset.mailSubject, btn.dataset.mailFrom, bodyText, guidance);
+results = events.length ? events : [{ title: btn.dataset.mailSubject, notes: '', date: '', location: '', eventTime: '', endTime: '', link: '', attachmentHints: [] }];
+source = 'email';
+}
+const connectionId = document.getElementById(`mail-complex-conn-${id}`)?.value || '';
+const planner = await import('./planner.js');
+const activities = planner.createDateEventsFromExtractions(results, {
+connectionId, source: { kind: 'mail', label: btn.dataset.mailSubject, url: btn.dataset.mailUrl },
+});
+planner.bindPlannerActivityChips();
+const chipsHtml = activities.map((a) => planner.plannerActivityChipHtml(a)).join(', ');
+if (status) status.innerHTML = `Added ${chipsHtml} via the ${source}.`;
+let grabbedTotal = 0;
+for (let i = 0; i < activities.length; i++) {
+const grabbed = await grabEmailAttachments(id, attachments, results[i]?.attachmentHints || []);
+if (grabbed.length) { activities[i].attachments.push(...grabbed); grabbedTotal += grabbed.length; }
+}
+if (grabbedTotal) {
+queueSave();
+if (status) status.innerHTML = `Added ${chipsHtml} via the ${source} (+ ${grabbedTotal} attachment${grabbedTotal === 1 ? '' : 's'} total).`;
+planner.renderPlanner();
+}
+}
+} catch (err) {
+console.error('Complex capture failed:', err);
+if (err?.name === 'MissingKeyError') { if (status) status.innerHTML = `Add an Anthropic API key in ${MISSING_KEY_LINK_HTML} to use AI here.`; }
+else say(`Couldn't read that: ${err.message || err}`);
+btn.disabled = false;
+return;
+}
+btn.disabled = false;
+});
+});
+
+list.querySelectorAll('[data-mail-check-cal-submit]').forEach((btn) => {
+btn.addEventListener('click', async (e) => {
+e.preventDefault();
+const id = btn.dataset.mailCheckCalSubmit;
+const status = list.querySelector(`[data-mail-check-cal-status="${CSS.escape(id)}"]`);
+const say = (msg) => { if (status) status.textContent = msg; };
+if (!(await canAttemptGoogleAction())) { say('Sign in to Google at the top of Overview first.'); return; }
+if (!hasCalendarWrite()) { if (status) status.innerHTML = 'Turn on "Allow creating events in Google Calendar" in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#calendar-write-toggle">Settings</span>, then sign out and back in.'; return; }
+const calendarId = list.querySelector(`[data-mail-check-cal="${CSS.escape(id)}"]`)?.value || '';
+if (!calendarId) { say('Pick a calendar first.'); return; }
+btn.disabled = true;
+say('Reading the email…');
+try {
+const { icsText } = await getMessageDetail(id);
+if (!icsText) { say('No calendar invite found on this email.'); btn.disabled = false; return; }
+const events = extractDateEventFromIcs(icsText).filter(icsDateEventIsGoodEnough);
+if (!events.length) { say('Found a calendar invite, but could not read a usable title/date from it.'); btn.disabled = false; return; }
+say('Checking your calendar…');
+const { findEvents, createEvent } = await import('../googlecalendar.js');
+const notes = [];
+for (const ev of events) {
+// +/-1 day window around the event's own date, same generous-but-
+// bounded search Airbnb's own dedup uses around a reservation's dates.
+const candidates = await findEvents(calendarId, {
+timeMin: `${dateStrAdd(ev.date, -1)}T00:00:00Z`, timeMax: `${dateStrAdd(ev.date, 2)}T00:00:00Z`, q: ev.title,
+});
+if (candidates.length === 1) {
+notes.push(`Matched an existing "${candidates[0].summary}" — left as-is.`);
+} else if (candidates.length > 1) {
+notes.push(`${candidates.length} existing events near ${ev.date} already match "${ev.title}" — too ambiguous to adopt automatically.`);
+} else {
+await createEvent(calendarId, {
+title: ev.title, description: [ev.location, ev.notes].filter(Boolean).join(' — '),
+date: ev.date, startTime: ev.eventTime || '', endTime: ev.endTime || '',
+});
+notes.push(`Pushed "${ev.title}" (${ev.date}).`);
+}
+}
+say(notes.join(' '));
+} catch (err) {
+console.error('Calendar check failed:', err);
+say(`Couldn't check the calendar: ${err.message || err}`);
+}
+btn.disabled = false;
 });
 });
 
@@ -656,24 +907,26 @@ btn.addEventListener('click', async (e) => {
 e.preventDefault();
 const id = btn.dataset.mailDateEventExtract;
 const status = list.querySelector(`[data-mail-date-event-status="${CSS.escape(id)}"]`);
+const listEl = list.querySelector(`[data-mail-date-event-list="${CSS.escape(id)}"]`);
 const say = (msg) => { if (status) status.textContent = msg; };
 btn.disabled = true;
 say('Reading the email…');
-let result = null;
+let results = [];
 let source = '';
 let attachments = [];
 try {
 const { bodyText, icsText, attachments: found } = await getMessageDetail(id);
 attachments = found;
-const icsResult = icsText ? extractDateEventFromIcs(icsText) : null;
-if (icsDateEventIsGoodEnough(icsResult)) {
-result = icsResult;
+const icsEvents = icsText ? extractDateEventFromIcs(icsText).filter(icsDateEventIsGoodEnough) : [];
+if (icsEvents.length) {
+results = icsEvents;
 source = 'calendar invite';
 } else {
 say('No usable calendar invite — reading the email…');
 const aiMod = await import('../ai.js');
 say('Pulling out the details…');
-result = await aiMod.extractDateEventFromEmail(btn.dataset.mailSubject, btn.dataset.mailFrom, bodyText);
+const { events } = await aiMod.extractDateEventFromEmail(btn.dataset.mailSubject, btn.dataset.mailFrom, bodyText);
+results = events.length ? events : [{ title: '', notes: '', date: '', location: '', eventTime: '', endTime: '', link: '', attachmentHints: [] }];
 source = 'email';
 }
 } catch (err) {
@@ -686,6 +939,21 @@ return;
 btn.disabled = false;
 const titleInput = list.querySelector(`[data-mail-date-event-title="${CSS.escape(id)}"]`);
 const addBtn = list.querySelector(`[data-mail-date-event-add="${CSS.escape(id)}"]`);
+if (results.length > 1) {
+// More than one separate thing in this email (e.g. two gigs' tickets
+// bought together) -- review-and-tick instead of the single title/date
+// pair, same shape manualimport.js/books.js's own review lists use.
+if (listEl) {
+listEl.innerHTML = results.map(dateEventRowHtml).join('');
+listEl.hidden = false;
+listEl.dataset.mailDateEventAttachments = JSON.stringify(attachments || []);
+}
+const dateCount = results.filter((r) => r.date).length;
+say(`Found ${results.length} separate things via the ${source} (${dateCount} with a date) — tick which to add.`);
+return;
+}
+if (listEl) { listEl.hidden = true; listEl.innerHTML = ''; }
+const result = results[0];
 if (titleInput && result.title) titleInput.value = result.title;
 // Stashed on the Add button itself rather than hidden inputs -- the
 // same place its deterministic default (data-mail-snippet) already
@@ -710,11 +978,43 @@ e.preventDefault();
 const id = btn.dataset.mailDateEventAdd;
 const titleInput = list.querySelector(`[data-mail-date-event-title="${CSS.escape(id)}"]`);
 const status = list.querySelector(`[data-mail-date-event-status="${CSS.escape(id)}"]`);
+const listEl = list.querySelector(`[data-mail-date-event-list="${CSS.escape(id)}"]`);
 const say = (msg) => { if (status) status.textContent = msg; };
-const title = (titleInput?.value || '').trim();
-if (!title) { say('Give the idea a title first.'); return; }
 const connectionId = document.getElementById(`mail-date-event-conn-${id}`)?.value || '';
 const planner = await import('./planner.js');
+const tickedChecks = listEl && !listEl.hidden ? [...listEl.querySelectorAll('[data-mail-date-event-row-check]:checked')] : [];
+if (tickedChecks.length) {
+// The multi-event path: one or more ticked rows from the review list
+// above, each carrying its own full extraction result (including its
+// own attachmentHints) in its sibling hidden input.
+const results = tickedChecks.map((check) => {
+const dataInput = check.closest('label')?.querySelector('[data-mail-date-event-row-data]');
+try { return JSON.parse(dataInput?.value || '{}'); } catch (err) { return {}; }
+});
+const title = (titleInput?.value || '').trim() || 'Untitled';
+const activities = planner.createDateEventsFromExtractions(results, {
+connectionId, source: { kind: 'mail', label: title, url: btn.dataset.mailUrl },
+});
+planner.bindPlannerActivityChips();
+const chipsHtml = activities.map((a) => planner.plannerActivityChipHtml(a)).join(', ');
+if (status) status.innerHTML = `Added ${chipsHtml}.`;
+btn.disabled = true;
+let candidates = [];
+try { candidates = JSON.parse(listEl.dataset.mailDateEventAttachments || '[]'); } catch (err) { /* stashed value always valid JSON */ }
+let grabbedTotal = 0;
+for (let i = 0; i < activities.length; i++) {
+const grabbed = await grabEmailAttachments(id, candidates, results[i]?.attachmentHints || []);
+if (grabbed.length) { activities[i].attachments.push(...grabbed); grabbedTotal += grabbed.length; }
+}
+if (grabbedTotal) {
+queueSave();
+if (status) status.innerHTML = `Added ${chipsHtml} (+ ${grabbedTotal} attachment${grabbedTotal === 1 ? '' : 's'} total).`;
+planner.renderPlanner();
+}
+return;
+}
+const title = (titleInput?.value || '').trim();
+if (!title) { say('Give the idea a title first.'); return; }
 // Only ever set by a successful "🪄 Extract details" run above -- absent
 // (the deterministic default never sets it) means stay an undated pool
 // idea, same as today.
