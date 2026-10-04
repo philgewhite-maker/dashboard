@@ -61,6 +61,15 @@ throw new Error(detail);
 return res.json();
 } catch (err) {
 if (err.name === 'AbortError') throw new Error("The command server didn't respond.");
+// A bare "Failed to fetch" (Chrome) / "NetworkError..." (Firefox) is the
+// browser's own generic wording for "the request never even reached the
+// server" -- DNS, no internet, a CORS block, the host being down -- and
+// surfaces identically whether it's your own connection or commands.php
+// itself that's the problem. Named here rather than left as the raw
+// browser string, which every caller otherwise has to re-explain from
+// scratch (confirmed live as a real support dead-end: "Failed to fetch"
+// told nobody anything about where to even start looking).
+if (err instanceof TypeError) throw new Error(`Couldn't reach the command queue (${endpoint}) at all -- check your internet connection, and that the sync URL in Settings is still correct.`);
 throw err;
 } finally {
 clearTimeout(timer);

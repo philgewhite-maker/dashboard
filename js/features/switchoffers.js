@@ -52,10 +52,14 @@ const SWITCH_MODEL = 'claude-sonnet-5';
 // counts against max_tokens same as the real answer. At 3000 the whole
 // budget went to thinking and the call hit stop_reason:'max_tokens' with
 // NO text block at all -- same failure ai.js's own WELLNESS_MAX_TOKENS
-// comment documents. Sized generously to leave real room after thinking,
-// same "output tokens are cheap, a failed check isn't" reasoning as that
-// constant and notionplan.js's PLAN_MAX_TOKENS.
-const SWITCH_MAX_TOKENS = 8000;
+// comment documents. Confirmed AGAIN at 8000 once the home-agent fetch
+// path existed (stripHtmlNoise below, feeding a far bigger page dump
+// than anyone ever pastes by hand) -- raised further, and stripHtmlNoise
+// itself now tries to cut the input down too, since a bigger budget
+// alone just delays the same failure on a big enough page. Same "output
+// tokens are cheap, a failed check isn't" reasoning as that constant and
+// notionplan.js's PLAN_MAX_TOKENS.
+const SWITCH_MAX_TOKENS = 16000;
 // A generous flat cap -- a pasted selection is normally just the
 // switching section, but this guards against pasting the whole page
 // (or several) without needing fragile section-anchor slicing.
@@ -68,15 +72,32 @@ return String(text || '').replace(/\s+/g, ' ').trim().slice(0, PAGE_TEXT_CAP);
 // The home-agent path hands back raw HTML (page.render's whole job is
 // giving you what a browser sees, not picked-over text), where the paste
 // path already hands back clean text a human selected by hand. Strips
-// <script>/<style> OUT before reading textContent -- a plain .textContent
-// walk (as googlemail.js's own stripHtml does, fine for an email body)
-// would otherwise pull a modern page's analytics/CSS source in as text,
-// which cleanPastedText's own whitespace-collapse can't tell apart from
-// real content and would burn real token budget on in the AI call below.
+// script/style/chrome OUT before reading textContent -- a plain
+// .textContent walk (as googlemail.js's own stripHtml does, fine for an
+// email body) would otherwise pull a modern page's analytics/CSS source,
+// nav/cookie-banner/form chrome in as text, which cleanPastedText's own
+// whitespace-collapse can't tell apart from real content and would burn
+// real token budget in the AI call below -- confirmed live as a real
+// failure, not just a theoretical one: the full page text blew through
+// SWITCH_MAX_TOKENS entirely (stop_reason: 'max_tokens', no answer at
+// all), on a page several times bigger and noisier than anyone pastes by
+// hand.
 function stripHtmlNoise(html) {
 const doc = new DOMParser().parseFromString(String(html || ''), 'text/html');
-doc.querySelectorAll('script, style, noscript, svg, nav, footer').forEach((el) => el.remove());
-return (doc.body?.textContent || '').replace(/\s+/g, ' ').trim();
+doc.querySelectorAll('script, style, noscript, svg, nav, footer, header, aside, form, iframe, button, select, label').forEach((el) => el.remove());
+// MSE_SWITCH_URL ends in #switch -- if the rendered page has a real
+// element at that id, scoping to just it (rather than the whole page,
+// which also covers a dozen other unrelated comparisons) cuts the input
+// down to roughly what a human would have selected by hand. NOT
+// confirmed against the real rendered markup (nothing here can render
+// it to check), hence the fallback: if that scope turns out to be empty
+// or tiny -- a bare anchor with no real content under it, or the id not
+// existing at all -- the full page text is used instead, same as
+// before this existed.
+const anchor = doc.getElementById('switch');
+const scoped = anchor ? (anchor.textContent || '').trim() : '';
+const text = scoped.length > 500 ? scoped : (doc.body?.textContent || '');
+return text.replace(/\s+/g, ' ').trim();
 }
 
 // Oldest-first, capped -- see data.switchOffersHistory's own comment in
