@@ -252,16 +252,43 @@ const two = (body.Rates || []).find((r) => Number(r.LengthInMonths) === 24);
 if (!two) throw new Error('No 2-year tenor in that response');
 // Chatham's field names are from its own page's point of view, so
 // "PreviousDay" is the CURRENT rate and there is nothing to compute a
-// DAILY move from -- we keep that ourselves, carrying the last value
-// across whenever the calendar date changes. The day column is blank
-// until the strip has seen two days, which is honest; the alternative
-// was labelling a month-old rate as yesterday's.
-const previous = cache().sonia;
+// DAILY move from -- we keep that ourselves, carrying our own small
+// rolling history of what we actually fetched, keyed by OUR calendar
+// date, not Chatham's own PreviousDay/Month/Year fields (those stay
+// exactly what they say -- a day/month/year back from THEIR last
+// snapshot, used only for the monthly/yearly toggle below).
 const value = Number(two.PreviousDay);
-const sameDay = previous && previous.at && previous.at.slice(0, 10) === new Date().toISOString().slice(0, 10);
+const today = new Date().toISOString().slice(0, 10);
+const prior = cache().sonia;
+const history = Array.isArray(prior?.history) ? prior.history.slice() : [];
+if (history.length && history[history.length - 1].date === today) {
+history[history.length - 1].value = value; // same-day refetch -- update in place, don't grow the list
+} else {
+history.push({ date: today, value });
+if (history.length > 6) history.shift(); // only ever needs to reach back a couple of days
+}
+// Reported live: unauthenticated, Chatham's own feed appears to serve
+// a snapshot that's at least a day staler than it looks -- the symptom
+// this was built to fix is that the daily change ALWAYS read exactly
+// 0%, because yesterday's fetch and today's fetch were both reading
+// the same underlying stale number. Walking back through OUR OWN
+// history (not Chatham's) for the most recent day that's actually
+// DIFFERENT from today's value, rather than hardcoding "exactly one
+// day further back", is what makes this self-correcting if the real
+// staleness turns out to span more than one extra day -- it reaches
+// back however far it actually needs to. Falls back to the oldest day
+// on file if every one we have is still identical, an honest "no
+// change detected yet" rather than a guess.
+const priorDays = history.filter((h) => h.date !== today);
+let prevDay = null;
+for (let i = priorDays.length - 1; i >= 0; i--) {
+if (priorDays[i].value !== value) { prevDay = priorDays[i].value; break; }
+}
+if (prevDay === null && priorDays.length) prevDay = priorDays[0].value;
 return store('sonia', {
 value,
-prevDay: sameDay ? (previous.prevDay ?? null) : (previous && previous.value !== undefined ? previous.value : null),
+prevDay,
+history,
 prevMonth: Number(two.PreviousMonth),
 prevYear: Number(two.PreviousYear),
 via,
