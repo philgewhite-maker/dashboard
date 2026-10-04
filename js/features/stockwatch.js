@@ -16,7 +16,7 @@
 import { data, queueSave, whoFits, sizeGroupFor } from '../state.js';
 import { escapeHtml } from '../utils.js';
 import { fetchPageHtml, FilesNotConfiguredError } from '../files.js';
-import { cashbackLinks, cashbackNeedsBrowser, merchantSlug, parseRate, rateFor, rateKey, ageLabel } from '../cashback.js';
+import { cashbackLinks, cashbackNeedsBrowser, merchantSlug, retailerFrom, parseRate, rateFor, rateKey, ageLabel, LIVE_RATE_MAX_AGE_MS } from '../cashback.js';
 import * as agentProvocateur from '../retailers/agentprovocateur.js';
 
 // One adapter per retailer, tried in order. Adding a second retailer is
@@ -382,10 +382,9 @@ try {
 // "agentprovocateur", where the provider's page is "agent-provocateur"
 // -- so the typed brand is the better source and the host only a
 // fallback for wants that never got one.
-rates = await refreshCashbackRates(
-wants.map((t) => ({ brand: seedWatchSpec(t).brand, url: (seedWatchSpec(t).urls || [])[0] })),
-{ onProgress },
-);
+const sources = wants.map((t) => ({ brand: seedWatchSpec(t).brand, url: (seedWatchSpec(t).urls || [])[0] }));
+registerCashbackTracked(sources);
+rates = await refreshCashbackRates(sources, { onProgress });
 } catch (err) {
 // A rate is a nicety, so this never fails the stock check -- but
 // swallowing the reason entirely meant two blank rates looked
@@ -453,7 +452,11 @@ queueSave();
 // had to come via the clipboard. Never allowed to fail the paste.
 // The pasted pages carry the retailer's proper name, which is what
 // slugs correctly; the URL alone would give "agentprovocateur".
-refreshCashbackRates(matching.map((p) => ({ brand: p.retailer, url: p.url }))).catch(() => {});
+{
+const sources = matching.map((p) => ({ brand: p.retailer, url: p.url }));
+registerCashbackTracked(sources);
+refreshCashbackRates(sources, { forceLive: true }).catch(() => {});
+}
 return { results, skipped: pages.length - matching.length };
 }
 
@@ -504,15 +507,38 @@ return `<a href="${escapeHtml(l.merchantUrl)}" target="_blank" rel="noopener nor
 }).join('')}</span>`;
 }
 
+// Grows data.cashbackTracked on its own, from whatever a price search
+// actually turned up (shopping.js's Tesco/Amazon/+1 search, a pasted
+// Agent Provocateur stock check) -- never hand-edited. This is what lets
+// the weekly sweep (scheduled.js's 'cashback-sweep' task) know which
+// retailers to check at all; a retailer never searched here never gets
+// a cashback check, one searched even once stays checked from then on.
+function registerCashbackTracked(sources) {
+let changed = false;
+(sources || []).forEach((source) => {
+const name = retailerFrom(source);
+if (!name) return;
+const slug = merchantSlug(name);
+if (!slug || data.cashbackTracked[slug]) return;
+data.cashbackTracked[slug] = { name, addedAt: new Date().toISOString() };
+changed = true;
+});
+if (changed) queueSave();
+}
+
 // Refreshed alongside a stock check rather than on its own schedule: the
 // check is already fetching and pacing against these same routes, and a
 // rate is only wanted next to a product you're looking at anyway.
 //
 // Only retailers you actually have something for, and only those whose
-// rate is older than a week. Both providers for each, since which one
-// wins changes with their promotions -- that's the whole point of
-// showing the number.
-async function refreshCashbackRates(retailers, { onProgress } = {}) {
+// rate is older than a week -- UNLESS `forceLive`, for a search running
+// right now against a product you might buy in the next few minutes,
+// which uses the much shorter LIVE_RATE_MAX_AGE_MS instead (an hour) so a
+// live enquiry never shows a cache that's merely "not yet due" by the
+// background sweep's week-long standard. Both providers for each, since
+// which one wins changes with their promotions -- that's the whole point
+// of showing the number.
+async function refreshCashbackRates(retailers, { onProgress, forceLive = false } = {}) {
 const wanted = [];
 retailers.forEach((source) => {
 cashbackLinks(source).forEach((l) => {
@@ -522,7 +548,8 @@ cashbackLinks(source).forEach((l) => {
 if (!l.fetchable) return;
 const slug = merchantSlug(l.name);
 const seen = rateFor(data.cashbackRates, l.id, slug);
-if (seen && !seen.due) return;
+const due = seen ? (forceLive ? seen.ageMs > LIVE_RATE_MAX_AGE_MS : seen.due) : true;
+if (seen && !due) return;
 const key = rateKey(l.id, slug);
 if (!wanted.some((w) => w.key === key)) wanted.push({ key, url: l.merchantUrl, provider: l.id, name: l.name });
 });
@@ -606,4 +633,4 @@ ${(errors || []).map((e) => `<div class="stock-line"><span class="settings-note"
 </div>`;
 }
 
-export { runStockCheck, stockCheckHtml, cashbackHtml, refreshCashbackRates, buyableNow, activeWants, seedWatchSpec, pasteStockFor, wantedSizesFor, pageMatchesWant, resultFor, adapterFor, fetchPages, money };
+export { runStockCheck, stockCheckHtml, cashbackHtml, refreshCashbackRates, registerCashbackTracked, buyableNow, activeWants, seedWatchSpec, pasteStockFor, wantedSizesFor, pageMatchesWant, resultFor, adapterFor, fetchPages, money };

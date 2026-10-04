@@ -52,8 +52,8 @@ run: null, reportedExternally: true,
 },
 {
 id: 'mse-bank-switch', label: 'MoneySavingExpert — bank switch offers', site: 'moneysavingexpert.com',
-note: 'Nudged manually today ("worth a look: check for new bank switch offers" -- nudges.js) with no automated fetch behind it yet. A real candidate for this list once one exists.',
-run: null,
+note: 'Reported by runAutomaticSwitchCheck() / the "Check via home agent" button (switchoffers.js) whenever the home-agent page.render fetch runs -- nothing runs from here, this only shows the last result. Same shape as the two cashback checks above.',
+run: null, reportedExternally: true,
 },
 ];
 

@@ -1270,6 +1270,82 @@ offer: String(r.offer || ''), subscribeSave: String(r.subscribeSave || ''),
 return { results: sorted, recommendation: String((raw && raw.recommendation) || '') };
 }
 
+// Same web_search+web_fetch tool shape as searchShoppingItem above, for a
+// genuinely different question: not "where's this cheapest" across
+// Tesco/Amazon, but "does this designer item turn up anywhere OUTSIDE the
+// brand's own site" -- a set-completion search (setfinder.js) only ever
+// checks Agent Provocateur's own storefront, but a discontinued or
+// clearance piece routinely resurfaces on eBay, or in a department
+// store's own designer lingerie section, neither of which the brand's own
+// site would ever mention.
+function broaderRetailSearchPrompt(query) {
+return `Find where else "${query}" might be available to buy online in the UK, OUTSIDE the brand's own website -- specifically check eBay UK (ebay.co.uk) and well-known UK department stores that sometimes stock designer lingerie (e.g. House of Fraser, Selfridges, John Lewis, Harvey Nichols, Debenhams).
+
+HARD REQUIREMENTS:
+1. Run a SEPARATE, SITE-SCOPED search for ebay.co.uk, and at least one more for a department store likely to carry this brand -- not one combined general search, which tends to surface price-comparison pages instead of a real listing.
+2. For an eBay result specifically, note the LISTING CONDITION exactly as the listing itself states it ("New with tags", "New without tags", "Used", "Pre-owned", etc.) in a "condition" field -- never guess or infer one, leave it blank if the listing genuinely doesn't say.
+3. A search snippet frequently carries no price. Whenever a promising page turns up with no price in the snippet, FETCH that exact page and read the real price off it.
+4. At most 3 results per site.
+
+For each result, note the site/retailer, the exact listing title, the price if shown, the condition (eBay only, "" elsewhere), and the direct URL.
+Respond with ONLY a JSON object, no other text, no markdown fences: {"results":[{"retailer":"","name":"","price":"","condition":"","url":""}]}.
+Only include results with a real URL you actually found via search or a fetch -- never invent one. If nothing useful turns up anywhere, return {"results":[]}.`;
+}
+async function searchAgentProvocateurElsewhere(query) {
+const tools = [{
+type: 'web_search_20260209', name: 'web_search', max_uses: 4, allowed_callers: ['direct'],
+user_location: { type: 'approximate', country: 'GB' },
+}, {
+type: 'web_fetch_20260209', name: 'web_fetch', max_uses: 2, allowed_callers: ['direct'],
+}];
+const { data: raw } = await callAnthropic(
+[{ type: 'text', text: broaderRetailSearchPrompt(query) }],
+SHOPPING_SEARCH_MAX_TOKENS, SHOPPING_SEARCH_MODEL, 'Broader AP search', tools, SHOPPING_SEARCH_EFFORT,
+);
+const results = Array.isArray(raw && raw.results) ? raw.results : [];
+return results.filter((r) => r && r.url).slice(0, 8).map((r) => ({
+retailer: String(r.retailer || ''), name: String(r.name || ''), price: String(r.price || ''),
+condition: String(r.condition || ''), url: String(r.url || ''),
+})).sort((a, b) => parsePriceForSort(a.price) - parsePriceForSort(b.price));
+}
+
+// A different question again: not "where can I buy this", but "what do
+// CURRENT eBay listings for this style/piece suggest it would sell for" --
+// used to estimate resale value for something already owned (shopping.js's
+// inventory panel). Deliberately ignores colour/size (per the user's own
+// framing: resale value tracks the style and piece, not the specific
+// colourway or size someone happens to own) and never fetches a listing
+// page -- eBay's own search RESULTS page already shows the price for
+// every listing, so there's nothing a fetch would add that a careful
+// search doesn't already have, unlike the "snippet has no price" problem
+// the other two searches above exist to work around.
+function ebayResaleSearchPrompt(query) {
+return `Search eBay UK (ebay.co.uk) for "${query}" and report what CURRENT listings suggest this would sell for secondhand -- this is a resale-value estimate for something already owned, not a purchase search.
+
+1. Search ebay.co.uk for the item. Note the price and condition ("New with tags", "New without tags", "Used", "Pre-owned", etc. -- exactly as each listing states it, never guessed) for every genuinely matching listing you find, up to 8.
+2. Colour and exact size don't matter here -- a listing for the same style/piece in a different colour or size is still a valid comparable for resale value, so don't filter those out.
+3. Never fetch a listing page -- eBay's own search results already show price and condition for each one.
+
+Respond with ONLY a JSON object, no other text, no markdown fences: {"listings":[{"name":"","price":"","condition":"","url":""}],"estimate":""} -- "estimate" is one short sentence giving a realistic resale price range based on what you found (e.g. "Similar pieces are going for £18-£28 secondhand on eBay"), or "" if nothing comparable turned up at all.`;
+}
+async function searchEbayResaleEstimate(query) {
+const tools = [{
+type: 'web_search_20260209', name: 'web_search', max_uses: 2, allowed_callers: ['direct'],
+user_location: { type: 'approximate', country: 'GB' },
+}];
+const { data: raw } = await callAnthropic(
+[{ type: 'text', text: ebayResaleSearchPrompt(query) }],
+SHOPPING_SEARCH_MAX_TOKENS, SHOPPING_SEARCH_MODEL, 'eBay resale estimate', tools, SHOPPING_SEARCH_EFFORT,
+);
+const listings = Array.isArray(raw && raw.listings) ? raw.listings : [];
+return {
+listings: listings.filter((l) => l && l.url).slice(0, 8).map((l) => ({
+name: String(l.name || ''), price: String(l.price || ''), condition: String(l.condition || ''), url: String(l.url || ''),
+})).sort((a, b) => parsePriceForSort(a.price) - parsePriceForSort(b.price)),
+estimate: String((raw && raw.estimate) || ''),
+};
+}
+
 // ---- Resolving a pasted URL into a real title ----
 //
 // The "🪄 Resolve title" action every quick-add input (Tasks, Shopping,
@@ -1949,7 +2025,7 @@ return { country: String((data && data.country) || '').trim() };
 export {
 MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot, quickScanScreenshot, scanForCaptureMarker,
 callTextJson, DEFAULT_MODEL, summarizeUsage, currentMonthKey, compareFaces,
-extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShoppingItem, identifyProduct, translateText, romanizeName, parseCaptureIntent,
+extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShoppingItem, searchAgentProvocateurElsewhere, searchEbayResaleEstimate, identifyProduct, translateText, romanizeName, parseCaptureIntent,
 resolveUrlTitle, resolveJobPostingUrl, resolveBookDetails, resolveSeriesBooks,
 identifyCountry, extractWellnessScreenshot,
 extractTripScreenshot, extractMediaScreenshot, extractTripLegFromEmail, extractTaskFromEmail, extractDateEventFromEmail,

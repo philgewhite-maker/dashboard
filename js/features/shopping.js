@@ -23,7 +23,7 @@ import { data, queueSave, SHOPPING_CONTEXTS, unheldInventory, whoFits, inventory
 import { escapeHtml, affiliateLink, daysUntil, daysSince, todayStr, MISSING_KEY_LINK_HTML, looksLikeUrl, bindBackdropClose, pickChipHtml, knownScalarValues, hydratePhotoBackgrounds } from '../utils.js';
 import { captureTask, revealTask } from './tasks.js';
 import { connectionChipHtml, bindConnectionChips, connectionPickerHtml, bindConnPickers, setConnPickerValue, sensitiveFieldsShown } from './connections.js';
-import { runStockCheck, stockCheckHtml, adapterFor, seedWatchSpec, pasteStockFor, cashbackHtml, fetchPages } from './stockwatch.js';
+import { runStockCheck, stockCheckHtml, adapterFor, seedWatchSpec, pasteStockFor, cashbackHtml, fetchPages, registerCashbackTracked, refreshCashbackRates, money } from './stockwatch.js';
 import { MissingKeyError, searchShoppingItem } from '../ai.js';
 import { initMicCapture } from './voicecapture.js';
 import { banner } from './sharetarget.js';
@@ -191,6 +191,102 @@ const chips = values.map((v) => `<span class="pick-chip" data-inv-pick-field="${
 return `<label style="font-size:12px;display:block;margin-bottom:6px;">${label}
 ${chips ? `<div class="tag-editor" style="margin:2px 0 4px;">${chips}</div>` : ''}
 <input type="text" autocomplete="off" class="tag-add-input" data-inv-new="${field}" style="width:100%;display:block;"></label>`;
+}
+
+// Sweeps everything Agent Provocateur-related into one list -- a want's
+// own stock check, a set-completion search's rows, and owned inventory --
+// into one shape: what triggered it, who it's for, and the price
+// including whatever discount code the retailer's own page quoted (`net`/
+// `code` already come straight from agentprovocateur.js's parseBlock, via
+// stockwatch.js's resultFor -- nothing new to compute, just to gather).
+// stockwatch.js's RETAILERS is Agent-Provocateur-only today (see its own
+// header), so a want with a stockCheck IS an AP want -- no extra brand
+// filter needed there.
+function agentProReportRows() {
+const rows = [];
+data.tasks.forEach((t) => {
+if (!t.stockCheck || !t.stockCheck.results || !t.stockCheck.results.length) return;
+t.stockCheck.results.forEach((r) => {
+rows.push({
+trigger: 'Want', triggerDetail: t.title,
+connectionId: t.forConnectionId || '',
+label: [r.piece, r.colour].filter(Boolean).join(' · ') || t.title,
+now: r.now, was: r.was, net: r.net, code: r.code,
+url: r.url, checkedAt: t.stockCheck.checkedAt,
+});
+});
+});
+data.connections.forEach((conn) => {
+const s = conn.setSearch;
+if (!s) return;
+[...(s.within || []), ...(s.discounted || [])].forEach((row) => {
+rows.push({
+trigger: 'Set search', triggerDetail: `Budget £${s.budget}`,
+connectionId: conn.id,
+label: [row.braPiece, row.colour].filter(Boolean).join(' · ') || 'Set',
+now: row.bra?.now, was: row.bra?.was, net: row.net, code: row.bra?.code,
+url: row.bra?.url, checkedAt: s.finishedAt || s.startedAt,
+});
+});
+});
+data.inventory.forEach((item) => {
+if ((item.brand || '').trim().toLowerCase() !== 'agent provocateur') return;
+rows.push({
+trigger: 'Owned', triggerDetail: 'In inventory',
+connectionId: item.holderId || '',
+label: [item.style, item.piece, item.colour].filter(Boolean).join(' · '),
+now: null, was: null, net: null, code: '',
+url: item.link, checkedAt: item.acquiredAt,
+});
+});
+return rows;
+}
+
+function agentProReportRowHtml(row) {
+const conn = row.connectionId ? data.connections.find((c) => c.id === row.connectionId) : null;
+const priceHtml = row.net != null
+? `<strong>${escapeHtml(money(row.net))}</strong>${row.code ? ` <span class="settings-note" style="display:inline;margin:0;">with ${escapeHtml(row.code)}${row.now != null && row.now !== row.net ? ` (was ${escapeHtml(money(row.now))})` : ''}</span>` : ''}`
+: row.now != null ? `<strong>${escapeHtml(money(row.now))}</strong>` : '<span class="settings-note" style="margin:0;">Owned — no price</span>';
+return `<div class="shop-row" style="align-items:center;">
+<span style="flex:1;min-width:0;">${row.url ? `<a href="${escapeHtml(affiliateLink(row.url))}" target="_blank" rel="noopener">${escapeHtml(row.label || 'Item')}</a>` : escapeHtml(row.label || 'Item')}</span>
+<span class="settings-note" style="margin:0;min-width:110px;">${escapeHtml(row.trigger)}${row.triggerDetail ? ` &middot; ${escapeHtml(row.triggerDetail)}` : ''}</span>
+${conn ? connectionChipHtml(conn) : '<span class="settings-note" style="margin:0;">Unassigned</span>'}
+<span style="min-width:120px;text-align:right;">${priceHtml}</span>
+</div>`;
+}
+
+// Priced rows cheapest-net-first, owned/no-price rows last -- this is a
+// shopping list, so "what should I buy" sorts above "what I already have".
+function agentProReportHtml() {
+const rows = agentProReportRows();
+if (!rows.length) return '<div class="empty">Nothing to show yet — run a want check or a set search first.</div>';
+const sorted = [...rows].sort((a, b) => {
+const av = a.net ?? a.now, bv = b.net ?? b.now;
+if (av == null && bv == null) return 0;
+if (av == null) return 1;
+if (bv == null) return -1;
+return av - bv;
+});
+return sorted.map(agentProReportRowHtml).join('');
+}
+
+function openAgentProReportDialog() {
+const dialog = document.createElement('div');
+dialog.className = 'mail-view-backdrop';
+dialog.innerHTML = `<div class="mail-view-card" style="max-width:560px;">
+<div class="mail-view-subject">Agent Provocateur — full report</div>
+<div class="settings-note" style="margin:2px 0 8px;">Every want, set-completion search and owned piece for this retailer, in one list — trigger, who for, and price including any discount code found on the page.</div>
+<div>${agentProReportHtml()}</div>
+<div class="mail-view-actions">
+<button class="sync-btn sm" type="button" data-apreport-close>Close</button>
+</div>
+</div>`;
+document.body.appendChild(dialog);
+bindConnectionChips(dialog);
+hydratePhotoBackgrounds(dialog);
+const close = () => dialog.remove();
+bindBackdropClose(dialog, close);
+dialog.querySelector('[data-apreport-close]').addEventListener('click', close);
 }
 
 function openAddInventoryDialog() {
@@ -885,6 +981,22 @@ pastePrice(taskId, Number(idx));
 });
 }
 
+// Every retailer a price search actually returned a result for joins
+// data.cashbackTracked (stockwatch.js's registerCashbackTracked) so the
+// weekly cashback sweep (scheduled.js) picks it up from now on, AND gets
+// its own rate checked right now with forceLive -- a search run THIS
+// second, about something you might buy in the next few minutes, should
+// never show a cashback number that's merely "not yet due" by the
+// background sweep's week-long standard. Best-effort and fire-and-forget:
+// a cashback rate is a nicety layered on top of the price search, never a
+// reason to hold up or fail it.
+function trackAndRefreshCashback(results) {
+if (!results || !results.length) return;
+const sources = results.map((r) => ({ brand: r.retailer, url: r.url }));
+registerCashbackTracked(sources);
+refreshCashbackRates(sources, { forceLive: true }).then((r) => { if (r && r.checked) render(); }).catch(() => {});
+}
+
 async function runSearch(taskId) {
 const t = data.tasks.find((x) => x.id === taskId);
 if (!t) return;
@@ -895,6 +1007,7 @@ const { results, recommendation } = await searchShoppingItem(t.title, t.link);
 t.priceCheck = { checkedAt: new Date().toISOString(), results, recommendation };
 searchState.delete(taskId);
 queueSave();
+trackAndRefreshCashback(results);
 } catch (err) {
 searchState.set(taskId, err instanceof MissingKeyError
 ? { status: 'error', missingKey: true }
@@ -916,6 +1029,7 @@ const { results, recommendation } = await searchShoppingItem(task.title, task.li
 task.priceCheck = { checkedAt: new Date().toISOString(), results, recommendation };
 queueSave();
 render();
+trackAndRefreshCashback(results);
 const { renderNudges } = await import('./nudges.js');
 renderNudges();
 } catch (err) {
@@ -968,6 +1082,24 @@ ${body}
 // editing convention, not a second one invented for this list.
 // Confirmed live as a real gap: nothing here was editable at all before
 // this, only Give and delete.
+// Colour/size deliberately ignored -- resale value tracks the style and
+// piece, not the exact colourway or size someone happens to own (the
+// user's own framing), so two items differing only by colour share one
+// cached estimate under data.ebayResaleEstimates rather than paying for
+// the same eBay search twice.
+function resaleKey(o) { return `${(o.style || '').trim().toLowerCase()}|${(o.piece || '').trim().toLowerCase()}`; }
+
+function resaleValueHtml(o) {
+if (!o.style && !o.piece) return '';
+const key = resaleKey(o);
+const cached = data.ebayResaleEstimates[key];
+if (!cached) return `<button type="button" class="todo-add-btn" data-inv-resale="${escapeHtml(o.id)}" title="Search eBay for this style/piece (any colour/size) and estimate resale value">&#128176; Resale value?</button>`;
+if (cached.status === 'running') return `<span class="settings-note" style="margin:0;">Checking eBay…</span>`;
+if (cached.status === 'error') return `<span class="settings-note" style="margin:0;">${escapeHtml(cached.error)}</span> <button type="button" class="todo-add-btn" data-inv-resale="${escapeHtml(o.id)}">Retry</button>`;
+const names = (cached.listings || []).map((l) => `${l.name}${l.condition ? ` (${l.condition})` : ''} — ${l.price}`).join('\n');
+return `<span class="settings-note" title="${escapeHtml(names)}" style="margin:0;">${escapeHtml(cached.estimate || 'No comparable eBay listings found.')}</span> <button type="button" class="todo-add-btn" data-inv-resale="${escapeHtml(o.id)}" title="Re-check">&#8635;</button>`;
+}
+
 function inventoryHtml() {
 const items = unheldInventory();
 if (!items.length) return '<div class="empty">Nothing unassigned — everything recorded is with someone.</div>';
@@ -988,9 +1120,35 @@ ${field(o, 'size', 'Size', '60px')}
 ${field(o, 'colour', 'Colour', '90px')}
 ${linkHtml}
 <span class="inv-fits">${fitsHtml}</span>
+${resaleValueHtml(o)}
 <span class="del-x" style="opacity:1;" data-inv-remove="${escapeHtml(o.id)}" title="Delete this item">&times;</span>
 </div>`;
 }).join('');
+}
+
+// Shared cache key means this only ever actually searches once per
+// style/piece even if several inventory rows (different colours/sizes)
+// show the same button -- clicking any one of them fills the estimate
+// for all of them, via the shared data.ebayResaleEstimates entry.
+function checkEbayResaleValue(itemId) {
+const item = data.inventory.find((i) => i.id === itemId);
+if (!item) return;
+const key = resaleKey(item);
+data.ebayResaleEstimates[key] = { status: 'running' };
+queueSave();
+renderInventory();
+(async () => {
+try {
+const { searchEbayResaleEstimate } = await import('../ai.js');
+const query = [item.brand, item.style, item.piece].filter(Boolean).join(' ');
+const { listings, estimate } = await searchEbayResaleEstimate(query);
+data.ebayResaleEstimates[key] = { status: 'done', listings, estimate, checkedAt: new Date().toISOString() };
+} catch (err) {
+data.ebayResaleEstimates[key] = { status: 'error', error: err.message || String(err), checkedAt: new Date().toISOString() };
+}
+queueSave();
+renderInventory();
+})();
 }
 
 function renderInventory() {
@@ -1007,12 +1165,15 @@ el.innerHTML = `<div class="sync-row" style="margin-bottom:8px;flex-wrap:wrap;">
 <button class="sync-btn sm inv-inline-btn" type="button" data-inv-add-item>+ Add item</button>
 <button class="sync-btn sm inv-inline-btn" type="button" data-find-set-for-her>Find a set for her…</button>
 <button class="sync-btn sm inv-inline-btn" type="button" data-inv-recheck-fits title="Who fits is worked out fresh every time this panel renders, but nothing re-renders it just because a connection changed elsewhere -- click after adding someone new or updating a size">&#8635; Recheck fits</button>
+<button class="sync-btn sm inv-inline-btn" type="button" data-ap-report title="Every want, set-completion search and owned piece for this retailer, in one list">&#128203; Full AP report</button>
 <span class="settings-note" style="margin:0;">Searches the retailer for a bra and matching knickers in her size, under a budget.</span>
 </div>` + inventorySetsHtml() + inventoryHtml();
 bindConnectionChips(el);
 hydratePhotoBackgrounds(el);
 const addItemBtn = el.querySelector('[data-inv-add-item]');
 if (addItemBtn) addItemBtn.addEventListener('click', () => openAddInventoryDialog());
+const apReportBtn = el.querySelector('[data-ap-report]');
+if (apReportBtn) apReportBtn.addEventListener('click', () => openAgentProReportDialog());
 const findSetBtn = el.querySelector('[data-find-set-for-her]');
 if (findSetBtn) findSetBtn.addEventListener('click', async () => {
 const { openSetFinderDialog } = await import('./setfinder.js');
@@ -1073,6 +1234,9 @@ data.inventory = data.inventory.filter((o) => o.id !== x.dataset.invRemove);
 queueSave();
 renderInventory();
 });
+});
+el.querySelectorAll('[data-inv-resale]').forEach((btn) => {
+btn.addEventListener('click', () => checkEbayResaleValue(btn.dataset.invResale));
 });
 }
 

@@ -182,6 +182,40 @@ refresh();
 });
 }
 
+// Up to 3 of the range names the native search actually found (bra
+// ranges, not the knickers/extras within them), or -- when it found
+// nothing at all -- a generic query for her own recorded size, so this
+// is still useful on exactly the search that came up empty, which is
+// when checking elsewhere matters most.
+function searchSetElsewhere(connId) {
+const conn = data.connections.find((c) => c.id === connId);
+if (!conn || !conn.setSearch) return;
+conn.setSearch.elsewhere = { status: 'running', results: [], checkedAt: null, error: null };
+queueSave();
+const refresh = () => liveDialogs.get(connId)?.();
+refresh();
+(async () => {
+try {
+const { searchAgentProvocateurElsewhere } = await import('../ai.js');
+const ranges = [...new Set([...(conn.setSearch.within || []), ...(conn.setSearch.discounted || [])].map((r) => r.range).filter(Boolean))].slice(0, 3);
+const queries = ranges.length ? ranges.map((r) => `Agent Provocateur ${r} bra`) : (() => {
+const sizes = [...new Set(wantedSizesFor(conn, { piece: 'Bra', retailer: agentProvocateur.RETAILER }).map((s) => s.size))];
+return sizes.length ? [`Agent Provocateur bra size ${sizes.join('/')}`] : ['Agent Provocateur bra'];
+})();
+const results = [];
+for (const q of queries) {
+const found = await searchAgentProvocateurElsewhere(q);
+found.forEach((r) => results.push(r));
+}
+conn.setSearch.elsewhere = { status: 'done', results, checkedAt: new Date().toISOString(), error: null };
+} catch (err) {
+conn.setSearch.elsewhere = { status: 'error', results: [], checkedAt: new Date().toISOString(), error: err.message || String(err) };
+}
+queueSave();
+refresh();
+})();
+}
+
 // ---- Dialog -----------------------------------------------------------
 
 const COLOUR_BUCKET_OPTIONS = ['Black', 'Neutral', 'Bright', 'Other'];
@@ -209,6 +243,29 @@ ${extrasHtml}
 </div>`;
 }
 
+// A discontinued or clearance range the brand's own listing no longer
+// carries routinely resurfaces on eBay, or in a department store's own
+// designer lingerie section -- neither of which findSets above ever
+// checks, since it only ever reads Agent Provocateur's own site. This is
+// a separate, deliberate action (not bundled into every search) since it
+// spends a real AI web-search call -- same "costs money, make it a
+// click" reasoning as every other AI-assisted step in this app.
+function elsewhereRowHtml(r) {
+return `<div class="settings-note" style="margin:4px 0;padding-top:4px;border-top:1px solid var(--line);">
+<a href="${escapeHtml(r.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(r.name || r.retailer)}</a>
+— ${escapeHtml(r.retailer)}${r.price ? `, <strong>${escapeHtml(r.price)}</strong>` : ''}${r.condition ? ` <span class="tag-chip">${escapeHtml(r.condition)}</span>` : ''}
+</div>`;
+}
+function elsewhereHtml(search) {
+const e = search.elsewhere;
+if (!e) return `<div style="margin-top:10px;"><button class="sync-btn sm" type="button" data-setfinder-elsewhere>&#128269; Also check eBay &amp; department stores</button></div>`;
+if (e.status === 'running') return `<div style="margin-top:10px;" class="settings-note">Checking eBay and department stores…</div>`;
+if (e.status === 'error') return `<div style="margin-top:10px;" class="settings-note">Couldn't check elsewhere: ${escapeHtml(e.error)} <button class="sync-btn sm" type="button" data-setfinder-elsewhere>Retry</button></div>`;
+return `<div style="margin-top:10px;"><strong>Elsewhere</strong> <button class="sync-btn sm" type="button" data-setfinder-elsewhere title="Re-check">&#8635;</button>
+${e.results.length ? e.results.map(elsewhereRowHtml).join('') : '<div class="settings-note" style="margin:4px 0;">Nothing found on eBay or in a department store right now.</div>'}
+</div>`;
+}
+
 function resultsHtml(search) {
 if (search.status === 'error') return `<div class="settings-note" style="margin:0;">${escapeHtml(search.error)}</div>`;
 const added = new Set(search.addedUrls || []);
@@ -217,7 +274,8 @@ const within = search.within.length
 : (search.status === 'running' ? '' : '<div class="settings-note" style="margin:0;">Nothing in budget with a matching knickers piece found.</div>');
 const discounted = search.discounted.length
 ? `<div style="margin-top:10px;"><strong>Biggest discounts over budget</strong>${search.discounted.map((r) => rowHtml(r, added.has(r.bra.url))).join('')}</div>` : '';
-return `<div><strong>Within budget</strong>${within}</div>${discounted}`;
+const elsewhere = search.status === 'done' ? elsewhereHtml(search) : '';
+return `<div><strong>Within budget</strong>${within}</div>${discounted}${elsewhere}`;
 }
 
 function statusLine(search) {
@@ -314,6 +372,9 @@ close();
 switchTab('tasks');
 revealTask(task.id);
 });
+});
+resultsEl.querySelectorAll('[data-setfinder-elsewhere]').forEach((btn) => {
+btn.addEventListener('click', () => { if (boundConnId) searchSetElsewhere(boundConnId); });
 });
 };
 

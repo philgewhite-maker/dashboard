@@ -39,6 +39,13 @@ subscriptions: [],
 enhancementIdeas: [],
 financeAccounts: [], // bank/card accounts -- see js/features/financeaccounts.js, blankFinanceAccount() below
 switchOffers: [], // [{id, bank, offer, eligible, reasoning, suggestedFromAccountId, dismissed}] -- last bank-switch-offers scan, see js/features/switchoffers.js
+// Every past scan's raw extracted offers, oldest first, capped -- so the
+// terms/bonuses MSE's page actually quoted over time are on file for real
+// trend-watching (which bank's bonus crept up, how often a given bank's
+// offer reappears) rather than only ever having the latest snapshot.
+// {at, source: 'manual'|'auto', offers: [{bank, offer}]} -- see
+// js/features/switchoffers.js's recordHistorySnapshot.
+switchOffersHistory: [],
 mailSearches: [],
 mailTopics: [], // {id, label, preferredActionIds} -- groups mail searches for display and picks which action buttons show, see js/features/mail.js
 // Physical things you've bought or that someone owns, in one list rather
@@ -54,6 +61,22 @@ mailTopics: [], // {id, label, preferredActionIds} -- groups mail searches for d
 // Behind the same sensitive gate as sizes -- see SENSITIVE_BLOCKS.
 inventory: [],
 cashbackRates: {}, // {"provider|merchant-slug": {percent, upTo, text, at, url}} -- see js/cashback.js
+// Every retailer a price search (shopping.js's Tesco/Amazon/+1 search, or
+// an Agent Provocateur want) has ever actually returned a result for --
+// grows on its own, never hand-edited. {"merchant-slug": {name, addedAt}}.
+// This is the list the weekly cashback sweep (js/features/scheduled.js's
+// 'cashback-sweep' task) walks, so a retailer you've never searched never
+// gets checked, and one you search even once stays checked from then on.
+cashbackTracked: {},
+// What an owned inventory piece might fetch secondhand, from a live eBay
+// search -- keyed by "style|piece" lowercased (colour/size deliberately
+// ignored, per the user's own framing: resale value tracks the style and
+// piece, not the exact colourway or size someone happens to own), so two
+// items that only differ by colour share one estimate rather than paying
+// for the same search twice. {listings:[{name,price,condition,url}],
+// estimate, checkedAt}. See js/features/shopping.js's resaleKey/
+// checkEbayResaleValue.
+ebayResaleEstimates: {},
 scheduledRuns: {}, // {taskId: {at, trigger, skipped}} -- when each scheduled sync last ran, see js/features/scheduled.js. Synced deliberately: a sync run on the laptop doesn't need repeating on the phone.
 mailDismissed: [], // {url, subject, from, dismissedAt} -- messages explicitly binned from Mail without becoming a task/trip leg/date event, see js/features/mail.js
 tasks: [],
@@ -1580,6 +1603,8 @@ if (!Array.isArray(data.lettingLedger)) data.lettingLedger = [];
 // moved last week is exactly the number that sends you to the wrong
 // provider. See js/cashback.js.
 if (!data.cashbackRates || typeof data.cashbackRates !== "object" || Array.isArray(data.cashbackRates)) data.cashbackRates = {};
+if (!data.cashbackTracked || typeof data.cashbackTracked !== "object" || Array.isArray(data.cashbackTracked)) data.cashbackTracked = {};
+if (!data.ebayResaleEstimates || typeof data.ebayResaleEstimates !== "object" || Array.isArray(data.ebayResaleEstimates)) data.ebayResaleEstimates = {};
 if (!Array.isArray(data.inventory)) data.inventory = [];
 if (!Array.isArray(data.habits)) data.habits = [];
 if (!Array.isArray(data.goals)) data.goals = [];
@@ -1627,6 +1652,7 @@ if (s.includedWithAccount === undefined) s.includedWithAccount = false;
 if (!Array.isArray(data.enhancementIdeas)) data.enhancementIdeas = [];
 if (!Array.isArray(data.financeAccounts)) data.financeAccounts = [];
 if (!Array.isArray(data.switchOffers)) data.switchOffers = [];
+if (!Array.isArray(data.switchOffersHistory)) data.switchOffersHistory = [];
 data.financeAccounts = data.financeAccounts.map((a) => ({ ...blankFinanceAccount(), ...a, id: a.id || uid() }));
 // cassLinkedAccountId -> cassFromAccountId rename (2026-09-05) -- carry
 // forward anyone's already-entered link rather than silently dropping

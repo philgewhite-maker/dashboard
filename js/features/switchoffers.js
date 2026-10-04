@@ -12,23 +12,32 @@
 // Cloudflare Bot Management and 403s the proxy's request even after
 // swapping in a full real-browser User-Agent + headers -- an IP/ASN
 // reputation block, not a header one, which no amount of header-tuning
-// fixes. Deliberately NOT chasing this further (TLS fingerprint
-// spoofing, rotating through other services) -- that crosses from
-// "personal convenience automation" into actively defeating a site's
-// anti-bot measures, which its own terms almost certainly prohibit.
-// Instead: open the page in your own browser (never blocked -- it's a
-// real browsing session), copy its text, paste it in below. Same
-// eligibility-reasoning call either way -- only how the page text
-// arrives changed. Same "scan -> human-reviewed list, never auto-apply"
-// shape every other data-quality feature in this app already uses
-// (Photo Quality, the duplicate finder, tag cleanup's location
-// fill-ins) -- this is a real financial decision, so the feature only
-// ever proposes.
+// fixes. Deliberately NOT chasing THAT further (TLS fingerprint
+// spoofing, rotating through other services FROM THE WEB HOST) -- that
+// crosses from "personal convenience automation" into actively
+// defeating a site's anti-bot measures, which its own terms almost
+// certainly prohibit.
+//
+// What this now does instead is a genuinely different thing, not a
+// sneakier version of the rejected one: the home agent's own real
+// headless browser, running from your own home connection -- the exact
+// same route js/cashback.js already uses for Quidco (which sits behind
+// the identical Cloudflare JS challenge and renders fine through it).
+// That's a real browsing session on a residential IP, the same shape a
+// human opening the page themselves is, not a spoofed/rotated identity
+// pretending to be one -- so it doesn't revisit the judgement call
+// above. If that's ever down (the browser container not running, no
+// live sync configured), pasting the page's own text by hand is still
+// here as the fallback it always was. Same "scan -> human-reviewed
+// list, never auto-apply" shape either way -- only how the page text
+// arrives changed. This is a real financial decision, so the feature
+// only ever proposes.
 import { data, queueSave } from '../state.js';
-import { escapeHtml, uid, todayStr } from '../utils.js';
+import { escapeHtml, uid, todayStr, daysSince } from '../utils.js';
 import { callTextJson, MissingKeyError } from '../ai.js';
 import { accountLabel, expandAccountRow, formatShortDate } from './financeaccounts.js';
 import { captureTask, revealTask } from './tasks.js';
+import { run, AgentNotConfiguredError } from '../homeagent.js';
 
 const MSE_SWITCH_URL = 'https://www.moneysavingexpert.com/banking/compare-best-bank-accounts/#switch';
 
@@ -54,6 +63,78 @@ const PAGE_TEXT_CAP = 80000;
 
 function cleanPastedText(text) {
 return String(text || '').replace(/\s+/g, ' ').trim().slice(0, PAGE_TEXT_CAP);
+}
+
+// The home-agent path hands back raw HTML (page.render's whole job is
+// giving you what a browser sees, not picked-over text), where the paste
+// path already hands back clean text a human selected by hand. Strips
+// <script>/<style> OUT before reading textContent -- a plain .textContent
+// walk (as googlemail.js's own stripHtml does, fine for an email body)
+// would otherwise pull a modern page's analytics/CSS source in as text,
+// which cleanPastedText's own whitespace-collapse can't tell apart from
+// real content and would burn real token budget on in the AI call below.
+function stripHtmlNoise(html) {
+const doc = new DOMParser().parseFromString(String(html || ''), 'text/html');
+doc.querySelectorAll('script, style, noscript, svg, nav, footer').forEach((el) => el.remove());
+return (doc.body?.textContent || '').replace(/\s+/g, ' ').trim();
+}
+
+// Oldest-first, capped -- see data.switchOffersHistory's own comment in
+// state.js. Every scan appends one, manual or automatic alike, so the
+// log reflects every time this was actually checked, not just the
+// automated ones.
+const HISTORY_CAP = 104; // ~2 years of weekly snapshots
+function recordHistorySnapshot(opportunities, source) {
+data.switchOffersHistory.push({
+at: new Date().toISOString(), source,
+offers: opportunities.map((o) => ({ bank: o.bank, offer: o.offer })),
+});
+if (data.switchOffersHistory.length > HISTORY_CAP) data.switchOffersHistory = data.switchOffersHistory.slice(-HISTORY_CAP);
+}
+
+// Shared by the manual paste button, the new home-agent button, and the
+// weekly automatic check -- one place that turns a scan's result into
+// the same saved state and history entry regardless of how the page text
+// arrived.
+async function applyScan(rawText, source) {
+const opportunities = await scanSwitchOffers(rawText);
+data.switchOffers = opportunities;
+data.prefs.switchOffersCheckedAt = todayStr();
+recordHistorySnapshot(opportunities, source);
+queueSave();
+return opportunities;
+}
+
+// At least weekly, same "runs at ordinary app-open cadence far more
+// often than the real threshold, so the threshold lives inside the job
+// itself" shape as scheduled.js's own cashback sweep -- this is what
+// actually enforces "weekly" rather than the scheduler's own (much
+// shorter) global interval.
+const AUTO_RECHECK_DAYS = 7;
+
+// Called by scheduled.js's 'switch-offers' task and by sitehealth.js's
+// already-reserved 'mse-bank-switch' slot. Silent no-op when the home
+// agent isn't configured or down -- this is a nicety on top of the
+// manual flow, never a reason to nag on every app open when it can't
+// run. Returns null when it didn't run (not due, or couldn't reach the
+// agent) so callers can tell "nothing to report" from "ran and found 0".
+async function runAutomaticSwitchCheck() {
+const last = data.prefs.switchOffersCheckedAt;
+if (last && daysSince(last) < AUTO_RECHECK_DAYS) return null;
+try {
+const { pages } = await run('page.render', { url: MSE_SWITCH_URL });
+const page = pages?.[0];
+if (!page || !page.html) throw new Error(page?.error || 'the page never came back');
+const opportunities = await applyScan(stripHtmlNoise(page.html), 'auto');
+renderSwitchOffers();
+import('./sitehealth.js').then(({ reportCheck }) => reportCheck('mse-bank-switch', true, `${opportunities.length} offer${opportunities.length === 1 ? '' : 's'} found`));
+return { ok: true, count: opportunities.length };
+} catch (err) {
+if (err instanceof AgentNotConfiguredError) return null; // no live sync set up -- not an error, just can't run yet
+console.error('Automatic switch-offers check failed:', err);
+import('./sitehealth.js').then(({ reportCheck }) => reportCheck('mse-bank-switch', false, err.message || String(err)));
+return { ok: false, detail: err.message || String(err) };
+}
 }
 
 async function scanSwitchOffers(rawText) {
@@ -177,10 +258,8 @@ if (!text) { say('Paste the page text first.'); return; }
 btn.disabled = true;
 say('Reading the offers…');
 try {
-data.switchOffers = await scanSwitchOffers(text);
-data.prefs.switchOffersCheckedAt = todayStr();
-queueSave();
-say(data.switchOffers.length ? `Found ${data.switchOffers.length} offer${data.switchOffers.length === 1 ? '' : 's'}.` : 'No current switch offers found in that text.');
+const opportunities = await applyScan(text, 'manual');
+say(opportunities.length ? `Found ${opportunities.length} offer${opportunities.length === 1 ? '' : 's'}.` : 'No current switch offers found in that text.');
 textarea.value = '';
 renderSwitchOffers();
 } catch (err) {
@@ -190,7 +269,36 @@ console.error('Switch-offers scan failed:', err);
 btn.disabled = false;
 }
 });
+const homeAgentBtn = document.getElementById('switch-offers-homeagent-btn');
+const homeAgentStatusEl = document.getElementById('switch-offers-homeagent-status');
+const sayHomeAgent = (m) => { if (homeAgentStatusEl) homeAgentStatusEl.textContent = m; };
+if (homeAgentBtn) {
+homeAgentBtn.addEventListener('click', async () => {
+homeAgentBtn.disabled = true;
+sayHomeAgent('Fetching the page via the home agent…');
+try {
+const { pages } = await run('page.render', { url: MSE_SWITCH_URL });
+const page = pages?.[0];
+if (!page || !page.html) throw new Error(page?.error || 'the page never came back');
+import('./sitehealth.js').then(({ reportCheck }) => reportCheck('mse-bank-switch', true, 'page fetched'));
+sayHomeAgent('Reading the offers…');
+const opportunities = await applyScan(stripHtmlNoise(page.html), 'manual');
+sayHomeAgent(opportunities.length ? `Found ${opportunities.length} offer${opportunities.length === 1 ? '' : 's'}.` : 'No current switch offers found on the page.');
+renderSwitchOffers();
+} catch (err) {
+sayHomeAgent(err instanceof AgentNotConfiguredError ? 'Set up live sync (Settings) to use the home agent, or paste the page text below instead.'
+: err instanceof MissingKeyError ? err.message
+: `Couldn't fetch via the home agent: ${err.message || err}`);
+console.error('Switch-offers home-agent fetch failed:', err);
+if (!(err instanceof AgentNotConfiguredError)) {
+import('./sitehealth.js').then(({ reportCheck }) => reportCheck('mse-bank-switch', false, err.message || String(err)));
+}
+} finally {
+homeAgentBtn.disabled = false;
+}
+});
+}
 renderSwitchOffers();
 }
 
-export { renderSwitchOffers, initSwitchOffers };
+export { renderSwitchOffers, initSwitchOffers, runAutomaticSwitchCheck };

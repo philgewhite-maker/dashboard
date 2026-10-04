@@ -155,6 +155,15 @@ const RATE_MAX_AGE_MS = 7 * 24 * 3600 * 1000;
 // month-old number has no business influencing which link you click.
 const RATE_STALE_MS = 30 * 24 * 3600 * 1000;
 
+// The OTHER threshold -- for a search you're running right now, about a
+// product you might buy in the next few minutes, a week-old cached rate
+// (RATE_MAX_AGE_MS, above) is exactly the kind of staleness that shouldn't
+// survive a live look. An hour is generous enough that re-running the same
+// search twice in a row doesn't double-fetch, but short enough that
+// "checked this morning" never passes for "checked just now". See
+// stockwatch.js's refreshCashbackRates `forceLive` option.
+const LIVE_RATE_MAX_AGE_MS = 60 * 60 * 1000;
+
 function rateKey(providerId, slug) { return `${providerId}|${slug}`; }
 
 function rateFor(store, providerId, slug) {
@@ -172,4 +181,4 @@ if (days < 14) return `${days}d ago`;
 return `${Math.round(days / 7)}w ago`;
 }
 
-export { cashbackLinks, cashbackNeedsBrowser, merchantSlug, retailerFrom, parseRate, rateFor, rateKey, ageLabel, RATE_MAX_AGE_MS, PROVIDERS };
+export { cashbackLinks, cashbackNeedsBrowser, merchantSlug, retailerFrom, parseRate, rateFor, rateKey, ageLabel, RATE_MAX_AGE_MS, LIVE_RATE_MAX_AGE_MS, PROVIDERS };

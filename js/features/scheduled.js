@@ -71,6 +71,39 @@ await runAllChecks();
 },
 },
 {
+// Walks data.cashbackTracked -- every retailer a shopping search or an
+// Agent Provocateur want has EVER actually returned a result for (grown
+// automatically, see stockwatch.js's registerCashbackTracked), never a
+// fixed list maintained by hand. refreshCashbackRates' own per-slug
+// `due` gate (RATE_MAX_AGE_MS, js/cashback.js -- a week) is what actually
+// enforces "at least weekly" here, same as this file's own DEFAULT_
+// INTERVAL_HOURS comment already relies on for 'stock' -- this task
+// firing at ordinary app-open cadence (far more often than weekly) costs
+// nothing extra, since almost every slug will still not be due.
+id: 'cashback-sweep', label: 'Cashback rates', needsGoogle: false,
+note: 'Refreshes Quidco/TopCashback rates for every retailer a shopping search has ever turned up, at least weekly.',
+run: async () => {
+const sources = Object.values(data.cashbackTracked).map((t) => ({ brand: t.name }));
+if (!sources.length) return;
+const { refreshCashbackRates } = await import('./stockwatch.js');
+await refreshCashbackRates(sources);
+},
+},
+{
+// Own weekly threshold lives INSIDE runAutomaticSwitchCheck (see
+// switchoffers.js's AUTO_RECHECK_DAYS), same shape as 'cashback-sweep'
+// just above -- this firing at ordinary app-open cadence costs nothing
+// extra when it isn't yet due. Silently does nothing when the home
+// agent isn't configured (AgentNotConfiguredError, caught inside), so
+// this never nags about setup the way a real failure should.
+id: 'switch-offers', label: 'Bank switch offers', needsGoogle: false,
+note: 'Fetches MoneySavingExpert\'s switch-offers page via the home agent and re-checks your eligibility, at least weekly.',
+run: async () => {
+const { runAutomaticSwitchCheck } = await import('./switchoffers.js');
+await runAutomaticSwitchCheck();
+},
+},
+{
 id: 'calendar', label: 'Calendars', buttonId: 'sync-cal-btn', needsGoogle: true,
 note: 'Upcoming events for each tracked calendar.',
 },
