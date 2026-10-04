@@ -85,17 +85,31 @@ return String(text || '').replace(/\s+/g, ' ').trim().slice(0, PAGE_TEXT_CAP);
 function stripHtmlNoise(html) {
 const doc = new DOMParser().parseFromString(String(html || ''), 'text/html');
 doc.querySelectorAll('script, style, noscript, svg, nav, footer, header, aside, form, iframe, button, select, label').forEach((el) => el.remove());
-// MSE_SWITCH_URL ends in #switch -- if the rendered page has a real
-// element at that id, scoping to just it (rather than the whole page,
-// which also covers a dozen other unrelated comparisons) cuts the input
-// down to roughly what a human would have selected by hand. NOT
-// confirmed against the real rendered markup (nothing here can render
-// it to check), hence the fallback: if that scope turns out to be empty
-// or tiny -- a bare anchor with no real content under it, or the id not
-// existing at all -- the full page text is used instead, same as
-// before this existed.
+// MSE_SWITCH_URL ends in #switch -- confirmed live (fetched the real
+// page via the claude-test channel, home-agent/agent.py's poll_claude_test):
+// id="switch" sits on the <h2>Top bonuses for switching bank</h2>
+// heading ITSELF, not a wrapping container, so the actual offers table
+// that follows it is a run of SIBLING elements, not descendants -- the
+// heading's own textContent alone is ~30 characters. This walks forward
+// through next-siblings instead, stopping at the next same-level <h2>
+// (confirmed live: that's exactly where the next, unrelated section
+// starts -- "Don't want to switch? Top accounts for ongoing cashback"),
+// which gets the real offers section (~30,000 characters on the page
+// fetched during testing) without the dozen other unrelated comparisons
+// the rest of this page covers. Falls back to the full page text if the
+// id is missing entirely (a future redesign moves or renames it) or
+// yields barely anything, same safety net as before this was confirmed.
 const anchor = doc.getElementById('switch');
-const scoped = anchor ? (anchor.textContent || '').trim() : '';
+let scoped = '';
+if (anchor) {
+const parts = [anchor.textContent || ''];
+let node = anchor.nextElementSibling;
+while (node && !/^H[1-2]$/i.test(node.tagName)) {
+parts.push(node.textContent || '');
+node = node.nextElementSibling;
+}
+scoped = parts.join(' ').trim();
+}
 const text = scoped.length > 500 ? scoped : (doc.body?.textContent || '');
 return text.replace(/\s+/g, ' ').trim();
 }
