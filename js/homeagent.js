@@ -92,18 +92,30 @@ async function resultFor(id, { timeoutMs = RESULT_TIMEOUT_MS } = {}) {
 // The caller's timeout is for the WORK; the allowance is for the wait
 // before it starts.
 const deadline = Date.now() + COLLECT_ALLOWANCE_MS + timeoutMs;
+let lastStatus = null;
 while (Date.now() < deadline) {
 const { commands } = await request(`action=status&ids=${encodeURIComponent(id)}`);
 const found = (commands || [])[0];
 if (found && found.status === 'done') return found.result;
 if (found && found.status === 'error') throw new Error(found.error || 'The agent reported a failure.');
+if (found) lastStatus = found.status;
 await new Promise((r) => setTimeout(r, RESULT_POLL_MS));
 }
-// Named separately from "can't reach the queue": the queue answered
-// fine, so the agent is either stopped, or slower than this wait. Its
-// own log says which, and saying so beats sending you to check a
-// container that was running all along.
-throw new Error("The agent didn't pick that up in time — check `docker logs dashboard-agent`; if it shows the job succeeded, lower POLL_SECONDS in its .env.");
+// Two genuinely different situations, confirmed live as actually
+// different (not just a guess at two possible causes): 'claimed' means
+// the agent DID pick this up and was actively working when this gave up
+// -- commonly because it was still paying down an earlier batch of page
+// fetches (a set search, a stock-check sweep -- each one paced seconds
+// apart, so several of them queued together can easily run past this
+// wait on their own). The job usually finishes moments later regardless
+// -- lowering POLL_SECONDS wouldn't help here at all, since the agent
+// was never idle. Only a genuinely 'pending' (or never-seen) status
+// means the agent hasn't even looked at the queue, which IS what
+// POLL_SECONDS governs.
+if (lastStatus === 'claimed') {
+throw new Error("The agent picked this up but hadn't finished by the time this gave up — most likely it was still working through an earlier batch of fetches (it does one at a time). It'll probably finish on its own moments later; try again shortly, or check `docker logs dashboard-agent` to see what it's doing.");
+}
+throw new Error("The agent never picked that up — check `docker logs dashboard-agent`; if it shows the job succeeded anyway, lower POLL_SECONDS in its .env.");
 }
 
 // The common case: ask, wait, get the answer.
