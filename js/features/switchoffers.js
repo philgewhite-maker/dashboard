@@ -38,6 +38,7 @@ import { callTextJson, MissingKeyError } from '../ai.js';
 import { accountLabel, expandAccountRow, formatShortDate } from './financeaccounts.js';
 import { captureTask, revealTask } from './tasks.js';
 import { run, AgentNotConfiguredError } from '../homeagent.js';
+import { money } from './letting.js';
 
 const MSE_SWITCH_URL = 'https://www.moneysavingexpert.com/banking/compare-best-bank-accounts/#switch';
 
@@ -256,9 +257,36 @@ ${account ? `<span class="dd-to-account-link" data-open-account-ref="${escapeHtm
 </div>`;
 }
 
+// Every real switch bonus (any status -- this is the total money a
+// switch has brought in, not just what's still pending), totalled by
+// the year its account was opened. A bonus has no date field of its
+// own, but the year you actually did the switch is what "per year"
+// means here, and openDate already carries that. An account with no
+// openDate yet has nothing to total by, so it's left out rather than
+// guessed at.
+function switchBonusYearTotals() {
+const totals = {};
+for (const a of data.financeAccounts || []) {
+const year = (a.openDate || '').slice(0, 4);
+if (!year) continue;
+for (const sb of a.switchBonuses || []) {
+const amount = Number(sb.amount) || 0;
+if (!amount) continue;
+totals[year] = (totals[year] || 0) + amount;
+}
+}
+return Object.keys(totals).sort().map((year) => ({ year, total: totals[year] }));
+}
+
+function switchBonusYearTotalHtml() {
+return switchBonusYearTotals().map((y) => `${y.year} ${money(y.total)}`).join(' &middot; ');
+}
+
 function renderSwitchOffers() {
 const list = document.getElementById('switch-offers-list');
 const statusEl = document.getElementById('switch-offers-checked-status');
+const yearTotalEl = document.getElementById('switch-bonus-year-total');
+if (yearTotalEl) yearTotalEl.innerHTML = switchBonusYearTotalHtml();
 if (!list) return;
 const visible = (data.switchOffers || []).filter((o) => !o.dismissed);
 list.innerHTML = visible.length

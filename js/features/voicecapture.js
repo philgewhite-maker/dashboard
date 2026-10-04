@@ -75,9 +75,16 @@ return project;
 }
 case 'task': {
 const { captureTask } = await import('./tasks.js');
+const parentId = step.partOfProject ? (ctx.lastProjectId || null) : null;
 return captureTask({
 title: step.title || 'Captured item', notes: step.notes || '', due: step.due || '',
-parentId: step.partOfProject ? (ctx.lastProjectId || null) : null,
+parentId,
+// A task filed under a project is already filed, not awaiting triage --
+// matches the "File into project" picker's own convention (tasks.js),
+// which sets 'next' for the same reason. Without this it defaulted to
+// blankTask's 'inbox' and showed up both in the Inbox AND under the
+// project at once.
+bucket: parentId ? 'next' : undefined,
 });
 }
 case 'reading': {

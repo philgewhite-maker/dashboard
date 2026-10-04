@@ -258,6 +258,7 @@ display:flex;
 align-items:center;
 gap:9px;
 }
+.panel-head-total{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;}
 .dot{width:9px;height:9px;border-radius:50%;display:inline-block;}
 .dot.sage{background:var(--sage);}
 .dot.slate{background:var(--slate);}
@@ -3760,8 +3761,9 @@ text-decoration:none;
 .tick-flat{color:var(--muted);font-variant-numeric:tabular-nums;}
 /* Only the links get the hover, so the two that aren't links don't look
    like they do nothing when clicked. */
-a.tick:hover .tick-value,.tick[data-ticker-edit]:hover .tick-value{text-decoration:underline;}
-.tick[data-ticker-edit]{cursor:pointer;}
+a.tick:hover .tick-value,.tick[data-ticker-edit]:hover .tick-value,.tick[data-ticker-account]:hover .tick-value{text-decoration:underline;}
+.tick[data-ticker-edit],.tick[data-ticker-account]{cursor:pointer;}
+.tick-bank-logo{width:14px;height:14px;border-radius:3px;object-fit:cover;display:inline-block;vertical-align:-2px;margin-right:2px;}
 /* A tile the strip added itself because of a trip. */
 .tick-auto .tick-label{color:var(--teal);}
 .tick-trip{

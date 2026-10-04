@@ -1788,6 +1788,11 @@ amountInput.value = '';
 statusSelect.value = SWITCH_BONUS_STATUSES[0];
 queueSave();
 renderFinanceAccounts();
+// The Switch opportunities panel's own per-year bonus total reads
+// these same records -- dynamic import, not a top-level one, to avoid
+// a circular import with switchoffers.js (which already imports FROM
+// this file at the top level).
+import('./switchoffers.js').then((m) => m.renderSwitchOffers());
 });
 });
 list.querySelectorAll('[data-switchbonus-remove]').forEach((x) => {
@@ -1798,6 +1803,7 @@ if (!a) return;
 a.switchBonuses = (a.switchBonuses || []).filter((sb) => sb.id !== sbId);
 queueSave();
 renderFinanceAccounts();
+import('./switchoffers.js').then((m) => m.renderSwitchOffers());
 });
 });
 list.querySelectorAll('[data-colour-pick]').forEach((sw) => {

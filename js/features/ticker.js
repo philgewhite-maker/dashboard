@@ -27,6 +27,7 @@
 import { data, queueSave } from '../state.js';
 import { escapeHtml, uid } from '../utils.js';
 import * as letting from './letting.js';
+import { matchBankLogo } from '../bankLogos.js';
 
 // A feed is re-fetched when its cached answer is older than this. FX and
 // the swap rate are published once a day, so the floor is about not
@@ -67,6 +68,7 @@ case 'fx': return `fx:${item.base || HOME}:${item.quote}`;
 case 'quote': return `quote:${item.symbol}`;
 case 'weather': return `wx:${Number(item.lat).toFixed(2)},${Number(item.lon).toFixed(2)}`;
 case 'sonia': return 'sonia';
+case 'cass': return `cass:${item.accountId}:${item.bonusId}`;
 default: return item.kind;
 }
 }
@@ -377,13 +379,35 @@ tripId: dest.tripId, note: `${geo.country} — ${dest.trip}`,
 return items;
 }
 
+// A switch bonus still "Working on" shows up here on its own -- computed
+// live from the finance accounts each render, the same way travelItems()
+// derives its tiles, rather than something added to data.ticker.items by
+// hand: the set changes as a bonus is met or paid, not something you'd
+// curate in Settings. Stops the moment the status moves on, same as a
+// trip tile disappearing once you're home.
+function cassBonusItems() {
+const items = [];
+for (const a of data.financeAccounts || []) {
+for (const sb of a.switchBonuses || []) {
+if (sb.status !== 'Working on') continue;
+items.push({
+id: `auto-cass-${sb.id}`, kind: 'cass', auto: true,
+accountId: a.id, bonusId: sb.id,
+bank: a.bank || '', logoUrl: a.logoUrl || matchBankLogo(a.bank) || '',
+amount: Number(sb.amount) || 0, description: sb.description || '',
+});
+}
+}
+return items;
+}
+
 // Your own list plus the travel ones, with duplicates dropped: a trip to
 // Dublin shouldn't give you a second GBP/EUR tile next to the one you
 // already keep.
 function activeItems() {
 const mine = (data.ticker.items || []).filter((i) => !i.hidden);
 const seen = new Set(mine.map(keyFor));
-const extra = travelItems().filter((i) => !seen.has(keyFor(i)));
+const extra = [...travelItems(), ...cassBonusItems()].filter((i) => !seen.has(keyFor(i)));
 return [...mine, ...extra];
 }
 
@@ -483,7 +507,7 @@ return `<span class="${cls}">${escapeHtml(shown)}</span>`;
 // A link where there's a page worth landing on, a plain span where there
 // isn't -- a tile that looks clickable and does nothing is worse than one
 // that doesn't invite the click.
-function tile(label, value, change, title, { href = '', edit = false, auto = false, tripId = '' } = {}) {
+function tile(label, value, change, title, { href = '', edit = false, auto = false, tripId = '', accountId = '' } = {}) {
 const attrs = `class="tick${auto ? ' tick-auto' : ''}" title="${escapeHtml(title || '')}"`;
 const inner = `<span class="tick-label">${escapeHtml(label)}</span>
 <span class="tick-value">${value}</span>
@@ -493,8 +517,13 @@ ${change || ''}`;
 const plane = tripId
 ? `<button class="tick-trip" type="button" data-open-trip="${escapeHtml(tripId)}" title="Open the trip this is here for">&#9992;</button>`
 : '';
+// A CASS bonus names a real finance account (CLAUDE.md's record-
+// reference rule), so it has to link back the same way the trip plane
+// does -- the whole tile is the target here rather than a second icon,
+// since there's no separate "forecast" the tile would otherwise open.
+const extraAttr = edit ? ' data-ticker-edit="1"' : accountId ? ` data-ticker-account="${escapeHtml(accountId)}"` : '';
 if (href) return `<span class="tick-pair">${plane}<a ${attrs} href="${escapeHtml(href)}" target="_blank" rel="noopener">${inner}</a></span>`;
-return `<span class="tick-pair">${plane}<span ${attrs}${edit ? ' data-ticker-edit="1"' : ''}>${inner}</span></span>`;
+return `<span class="tick-pair">${plane}<span ${attrs}${extraAttr}>${inner}</span></span>`;
 }
 
 const SOURCE = {
@@ -518,6 +547,12 @@ const total = totalOwed();
 if (!owners().length) return '';
 return tile('Owed', escapeHtml(money(total)), '',
 `${owners().map((k) => `${ownerNameFor(k)} ${money(balanceFor(k))}`).join(' · ')}. Letting income owed to you — Finances tab.`);
+}
+if (item.kind === 'cass') {
+const logo = item.logoUrl ? `<img class="tick-bank-logo" src="${escapeHtml(item.logoUrl)}" alt="" onerror="this.remove()">` : '';
+return tile('CASS', `${logo}${letting.money(item.amount)}`, '',
+`${item.bank}${item.description ? ` — ${item.description}` : ''}. Switch bonus still being worked on — click to open the account.`,
+{ auto: true, accountId: item.accountId });
 }
 if (item.kind === 'holding') {
 const fxHit = c[keyFor({ kind: 'fx', base: HOME, quote: 'EUR' })];
@@ -587,6 +622,7 @@ case 'weather': return item.city;
 case 'sonia': return '2y SONIA';
 case 'letting': return 'Owed';
 case 'holding': return 'Holding';
+case 'cass': return 'CASS';
 default: return item.kind;
 }
 }
@@ -619,6 +655,15 @@ btn.addEventListener('click', async () => {
 const [{ switchTab }, travel] = await Promise.all([import('../tabs.js'), import('./travel.js')]);
 switchTab('travel');
 travel.revealTrip(btn.dataset.openTrip);
+});
+});
+// Same reveal shape, for a CASS tile's own account -- the finance
+// accounts panel's existing expand+scroll+flash, not a second one.
+el.querySelectorAll('[data-ticker-account]').forEach((span) => {
+span.addEventListener('click', async () => {
+const [{ switchTab }, financeaccounts] = await Promise.all([import('../tabs.js'), import('./financeaccounts.js')]);
+switchTab('finances');
+financeaccounts.expandAccountRow(span.dataset.tickerAccount);
 });
 });
 startRolling(el);
