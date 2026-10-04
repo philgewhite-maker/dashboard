@@ -185,7 +185,7 @@ if (!taxYears.length) return '';
 const { ratePct, allowance } = taxSettingsFor(key);
 const noSettings = !ratePct && !allowance;
 return `<div class="letting-tax" style="margin-top:8px;">
-<div class="settings-note" style="margin:0 0 4px;"><strong>By tax year</strong>${noSettings ? ' — no rate/allowance set for them yet in Settings &rarr; Travel &rarr; Letting tax (showing revenue only).' : ` (${ratePct}% over ${escapeHtml(money(allowance))} allowance)`}</div>
+<div class="settings-note" style="margin:0 0 4px;"><strong>By tax year</strong>${noSettings ? ' — no rate/allowance set for them yet in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#letting-tax-settings">Settings</span> (showing revenue only).' : ` (${ratePct}% over ${escapeHtml(money(allowance))} allowance)`}</div>
 <table class="limits-table"><tbody>
 <tr><th>Tax year</th><th style="text-align:right;">Revenue</th><th style="text-align:right;">Excess</th><th style="text-align:right;">Tax due</th><th style="text-align:right;">Net</th></tr>
 ${taxYears.map((t) => `<tr>
