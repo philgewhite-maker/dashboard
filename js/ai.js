@@ -1349,18 +1349,19 @@ estimate: String((raw && raw.estimate) || ''),
 // A genuinely different question from scanSwitchOffers (switchoffers.js):
 // not "what NEW switch bonus am I eligible for", but "is one of my OWN
 // existing current accounts bringing so little ongoing benefit that
-// moving it is worth considering" -- weighing three things against each
-// other, not just the best headline perk:
-// 1. What the account I already have is actually worth (its own tracked
-//    deal/fee, not a guess).
-// 2. Whether closing it now helps or HURTS a future switch bonus from
-//    that same bank -- most offers exclude anyone who's held an account
-//    there "since" some date, so staying put can itself be the thing
-//    blocking a future bonus, not protecting one.
-// 3. Whether the alternative is a CASS participant at all -- a great
-//    ongoing-cashback account that CAN'T be left via the Current Account
-//    Switch Service later is a one-way door, worth knowing about before
-//    moving in, not after.
+// moving it is worth considering" -- weighing two things that actually
+// need READING AND JUDGING free text (the account's own recorded deal
+// against what's on offer elsewhere, and a bank's own switch-exclusion
+// wording), NOT a third thing that doesn't: whether the alternative is a
+// Current Account Switch Service (CASS) participant. That one has a
+// real, authoritative, machine-readable answer -- the actual participant
+// list at currentaccountswitch.co.uk/banks-building-societies/ -- so
+// switchoffers.js's checkAccountValue fetches and name-matches against
+// it directly (cassParticipants/isCassParticipant) rather than asking
+// the model to search the web and guess at something that's just a
+// lookup. Confirmed live: a web-search tool here was overkill AND less
+// reliable than the real list for a question the real list already
+// answers exactly.
 // cashbackText/switchText are the two sections of the SAME MSE page
 // (switchoffers.js's extractSection, anchored at "cashback" and "switch"
 // respectively) -- one fetch already covers both, so this is always
@@ -1385,32 +1386,26 @@ ${JSON.stringify(ownAccounts)}
 For each of my own accounts, decide whether it's bringing meaningfully LESS ongoing benefit than something listed in the cashback/perks section above (weigh its own recorded deal/dealOngoing/accountFee against the account fee, if any, that account actually charges). Skip any account that's already clearly a good deal, or where there's too little information to judge -- only report ones genuinely worth a second look.
 
 For each one worth reporting:
-1. Name a SPECIFIC alternative from the cashback/perks section above, with its real perk as stated there.
+1. Name a SPECIFIC alternative from the cashback/perks section above, with its real perk as stated there, and the alternative's own provider name on its own (e.g. "Chase", not "Chase current account") so it can be matched against a participant list afterwards.
 2. Check the SWITCH BONUSES section for my CURRENT bank's own switch-bonus wording (e.g. "no account since 1 Jan 2023", "no previous bonus ever"). If closing my current account would help me qualify for a FUTURE switch bonus from that same bank later, say so explicitly -- staying put can itself be what's blocking it, not protecting it. If the exclusion is permanent ("never held one") rather than date-based, say that instead -- leaving and coming back wouldn't help.
-3. Use a web search to check whether the ALTERNATIVE's own provider is a participant of the Current Account Switch Service (CASS) -- see https://www.currentaccountswitch.co.uk/banks-building-societies/ for the real participant list. Report "yes", "no", or "unsure" plainly -- a great ongoing-perks account that ISN'T a CASS participant is a one-way door (you can move money in, but can't switch it away again later through the normal service), which matters as much as the perk itself.
 
 Reply with ONLY a JSON object, no other text, no markdown fences:
-{"reviews":[{"currentBank":"","currentAccountName":"","currentBenefitSummary":"","suggestedProvider":"","suggestedPerkSummary":"","cassSupported":"yes|no|unsure","futureEligibilityNote":"","recommendation":""}]}
-"recommendation" is one or two honest sentences weighing all three factors together -- never just "switch to X", say why, including any CASS or future-eligibility caveat that actually matters. If nothing is worth flagging, reply {"reviews":[]}.`;
+{"reviews":[{"currentBank":"","currentAccountName":"","currentBenefitSummary":"","suggestedProvider":"","suggestedPerkSummary":"","futureEligibilityNote":"","recommendation":""}]}
+"recommendation" is one or two honest sentences weighing both factors together -- never just "switch to X", say why, including any future-eligibility caveat that actually matters. If nothing is worth flagging, reply {"reviews":[]}.`;
 }
 // Sized the same as switchoffers.js's own SWITCH_MAX_TOKENS, for the same
-// reason confirmed live there: two whole page sections plus a web search
-// is a lot for the model to think through at default (high) effort
-// before it ever gets to the JSON answer, and a thinking-exhausted call
-// returns no answer at all (stop_reason: 'max_tokens') rather than a
-// short one.
+// reason confirmed live there: two whole page sections is a lot for the
+// model to think through at default (high) effort before it ever gets to
+// the JSON answer, and a thinking-exhausted call returns no answer at
+// all (stop_reason: 'max_tokens') rather than a short one.
 const ACCOUNT_VALUE_MAX_TOKENS = 16000;
 async function analyseOngoingAccountValue(cashbackText, switchText, ownAccounts) {
-const tools = [{
-type: 'web_search_20260209', name: 'web_search', max_uses: 4, allowed_callers: ['direct'],
-user_location: { type: 'approximate', country: 'GB' },
-}];
-const { data: raw } = await callAnthropic(
-[{ type: 'text', text: accountValueReviewPrompt(cashbackText, switchText, ownAccounts) }],
-ACCOUNT_VALUE_MAX_TOKENS, SHOPPING_SEARCH_MODEL, 'Ongoing account value review', tools,
+const { data: raw } = await callTextJson(
+accountValueReviewPrompt(cashbackText, switchText, ownAccounts),
+ACCOUNT_VALUE_MAX_TOKENS, SHOPPING_SEARCH_MODEL, 'Ongoing account value review',
 // Same reasoning as switchoffers.js's own SWITCH_MODEL comment --
-// interpreting exclusion wording and weighing three factors against
-// each other deserves a real reasoning pass, not the cheap tier.
+// interpreting exclusion wording deserves a real reasoning pass, not
+// the cheap tier.
 undefined,
 );
 const reviews = Array.isArray(raw && raw.reviews) ? raw.reviews : [];
@@ -1418,7 +1413,6 @@ return reviews.map((r) => ({
 currentBank: String(r?.currentBank || ''), currentAccountName: String(r?.currentAccountName || ''),
 currentBenefitSummary: String(r?.currentBenefitSummary || ''),
 suggestedProvider: String(r?.suggestedProvider || ''), suggestedPerkSummary: String(r?.suggestedPerkSummary || ''),
-cassSupported: ['yes', 'no', 'unsure'].includes(r?.cassSupported) ? r.cassSupported : 'unsure',
 futureEligibilityNote: String(r?.futureEligibilityNote || ''),
 recommendation: String(r?.recommendation || ''),
 }));

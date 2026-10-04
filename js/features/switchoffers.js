@@ -304,15 +304,18 @@ revealTask(el.dataset.openTaskRef);
 // that bank, not just risk losing one), and whether the alternative is
 // even a CASS participant (a great perk account that can't be left via
 // the Current Account Switch Service later is a one-way door). See
-// js/ai.js's analyseOngoingAccountValue for the actual reasoning prompt.
+// js/ai.js's analyseOngoingAccountValue for the free-text reasoning
+// (the first two), and cassParticipants/isCassParticipant just below for
+// the third -- that one has a real, published, exact answer (the CASS
+// site's own participant list), so it's looked up directly rather than
+// asked of an AI web search.
 //
 // Its own deliberate action, not folded into the switch-offers check
-// automatically -- a second real AI call with its own web searches,
-// same "costs money, make it a click" reasoning as every other
-// AI-assisted step in this app. Does its OWN page.render fetch rather
-// than reusing a cached copy from the switch-offers check, so this
-// works standalone and never shows a stale page just because the other
-// check happened to run first.
+// automatically -- a second real AI call, same "costs money, make it a
+// click" reasoning as every other AI-assisted step in this app. Does
+// its OWN page.render fetch rather than reusing a cached copy from the
+// switch-offers check, so this works standalone and never shows a stale
+// page just because the other check happened to run first.
 function accountValueRowHtml(r) {
 const cassLabel = { yes: 'CASS participant', no: 'CASS dead end', unsure: 'CASS status unsure' }[r.cassSupported];
 const cassClass = { yes: 'tag-chip-green', no: 'tag-chip-amber' }[r.cassSupported] || '';
@@ -345,6 +348,65 @@ renderAccountValueReviews();
 });
 }
 
+const CASS_LIST_URL = 'https://www.currentaccountswitch.co.uk/banks-building-societies/';
+// Months, not days -- the set of banks/building societies in CASS barely
+// changes (confirmed live: 51 participants, each a stable institution,
+// not a rotating promotion), so re-fetching it every single account-value
+// check would be a home-agent round trip for a list that's essentially
+// always the same answer. Re-fetched automatically once this goes stale.
+const CASS_LIST_MAX_AGE_DAYS = 90;
+
+// "Bank of", "Building Society", "plc", "Ltd", bracketed codicils --
+// confirmed live against the REAL participant list (fetched via the
+// claude-test channel): each entry's own data-value attribute is already
+// a clean lowercased name ("santander", "hsbc uk bank plc", "aib (ni)"),
+// so this only needs to strip the same handful of filler terms a human
+// would ignore when eyeballing the list themselves, not fuzzy/AI matching.
+function normalizeBankName(name) {
+return String(name || '')
+.toLowerCase()
+.replace(/\([^)]*\)/g, ' ')
+.replace(/\b(bank of|building society|bank|plc|ltd|limited|co\.?|&|group|holdings)\b/g, ' ')
+.replace(/[^a-z0-9]+/g, ' ')
+.trim()
+.replace(/\s+/g, ' ');
+}
+
+// Confirmed live against the real page: each participant is
+// `<div class="accordion__item banks-and-building-societies__accordion-item" data-value="...">`
+// -- the attribute IS the clean name, no scraping of visible text (or its
+// Personal:/Business: contact-detail noise) needed at all.
+async function fetchCassParticipants() {
+const { pages } = await run('page.render', { url: CASS_LIST_URL });
+const page = pages?.[0];
+if (!page || !page.html) throw new Error(page?.error || 'the CASS participant list page never came back');
+const doc = new DOMParser().parseFromString(page.html, 'text/html');
+const list = [...doc.querySelectorAll('.accordion__item.banks-and-building-societies__accordion-item')]
+.map((el) => el.getAttribute('data-value'))
+.filter(Boolean);
+if (!list.length) throw new Error("couldn't read the CASS participant list -- the page's own markup may have changed");
+data.cassParticipants = { list, fetchedAt: new Date().toISOString() };
+queueSave();
+return list;
+}
+
+async function cassParticipants() {
+const cached = data.cassParticipants;
+if (cached?.list?.length && cached.fetchedAt && daysSince(cached.fetchedAt) < CASS_LIST_MAX_AGE_DAYS) return cached.list;
+return fetchCassParticipants();
+}
+
+// 'unsure' only when the AI gave no provider name to check at all --
+// everything else is a real yes/no against the real list, not a guess.
+function isCassParticipant(providerName, participants) {
+const target = normalizeBankName(providerName);
+if (!target) return 'unsure';
+return participants.some((p) => {
+const norm = normalizeBankName(p);
+return norm && (norm === target || norm.includes(target) || target.includes(norm));
+}) ? 'yes' : 'no';
+}
+
 async function checkAccountValue() {
 const { pages } = await run('page.render', { url: MSE_SWITCH_URL });
 const page = pages?.[0];
@@ -359,9 +421,12 @@ bank: a.bank, name: a.name, stage: a.stage, openDate: a.openDate,
 deal: a.deal, dealOngoing: a.dealOngoing, dealEndDate: a.dealEndDate,
 accountFee: a.accountFee, accountFeeBasis: a.accountFeeBasis, purpose: a.purpose,
 }));
-const { analyseOngoingAccountValue } = await import('../ai.js');
+const [{ analyseOngoingAccountValue }, participants] = await Promise.all([import('../ai.js'), cassParticipants()]);
 const reviews = await analyseOngoingAccountValue(cashbackText, switchText, ownAccounts);
-data.accountValueReviews = reviews.map((r) => ({ id: uid(), dismissed: false, ...r }));
+data.accountValueReviews = reviews.map((r) => ({
+id: uid(), dismissed: false, ...r,
+cassSupported: isCassParticipant(r.suggestedProvider, participants),
+}));
 queueSave();
 renderAccountValueReviews();
 return reviews;

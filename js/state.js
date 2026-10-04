@@ -55,6 +55,13 @@ switchOffersHistory: [],
 // suggestedPerkSummary, cassSupported, futureEligibilityNote,
 // recommendation, dismissed}.
 accountValueReviews: [],
+// The real, authoritative Current Account Switch Service participant
+// list (currentaccountswitch.co.uk/banks-building-societies/) -- fetched
+// and cached rather than asked of an AI web search, since this question
+// has one exact right answer already published, not something to guess
+// at. {list: ["santander", "hsbc uk bank plc", ...], fetchedAt}. See
+// js/features/switchoffers.js's cassParticipants/isCassParticipant.
+cassParticipants: { list: [], fetchedAt: '' },
 mailSearches: [],
 mailTopics: [], // {id, label, preferredActionIds} -- groups mail searches for display and picks which action buttons show, see js/features/mail.js
 // Physical things you've bought or that someone owns, in one list rather
@@ -1671,6 +1678,7 @@ if (!Array.isArray(data.financeAccounts)) data.financeAccounts = [];
 if (!Array.isArray(data.switchOffers)) data.switchOffers = [];
 if (!Array.isArray(data.switchOffersHistory)) data.switchOffersHistory = [];
 if (!Array.isArray(data.accountValueReviews)) data.accountValueReviews = [];
+if (!data.cassParticipants || typeof data.cassParticipants !== "object" || !Array.isArray(data.cassParticipants.list)) data.cassParticipants = { list: [], fetchedAt: '' };
 data.financeAccounts = data.financeAccounts.map((a) => ({ ...blankFinanceAccount(), ...a, id: a.id || uid() }));
 // cassLinkedAccountId -> cassFromAccountId rename (2026-09-05) -- carry
 // forward anyone's already-entered link rather than silently dropping
