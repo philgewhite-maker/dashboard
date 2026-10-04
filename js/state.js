@@ -941,6 +941,18 @@ deal: '', dealEndDate: '',
 // "just haven't recorded it yet". Mutually exclusive with dealEndDate
 // in the UI (financeaccounts.js clears one when the other is set).
 dealOngoing: false,
+// Separate from the plain `deal` text field above: a switch bonus
+// routinely pays out in SEVERAL pieces now (£X on switching, then £Y/
+// month for N months conditional on ongoing debit-card use or Direct
+// Debits), each met and paid at a different time, so this is a list --
+// [{id, description, amount, status}], status one of
+// SWITCH_BONUS_STATUSES below. This is also the authoritative "was a
+// bonus actually paid here" record js/features/switchoffers.js's
+// scanSwitchOffers reads -- closing the exact gap an AI guess at
+// eligibility (from account history alone) can't: your own account
+// history says you HELD an account somewhere, not whether you actually
+// claimed its bonus.
+switchBonuses: [],
 purpose: '',
 // What the account costs to hold. Stored as typed, with its own basis
 // beside it (accountFeeBasis: 'monthly' | 'annual') rather than

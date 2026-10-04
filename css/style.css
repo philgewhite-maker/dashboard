@@ -3100,6 +3100,9 @@ color:var(--plum);
 }
 .expiry-badge.soon{background:var(--amber-bg);color:var(--amber);}
 .expiry-badge.expired{background:var(--red);color:#fff;}
+/* Same green convention as .tag-chip-green -- for a switch bonus actually
+   paid, not a deal running out (see switchBonusesHtml, financeaccounts.js). */
+.expiry-badge.done{background:var(--sage-bg);color:var(--sage);}
 
 /* Inline-editable voucher/subscription/deal row fields — look like plain
 text until hovered or focused, so a row stays scannable but every field is

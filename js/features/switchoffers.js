@@ -187,6 +187,13 @@ async function scanSwitchOffers(rawText) {
 const pageText = cleanPastedText(rawText);
 const ownAccounts = data.financeAccounts.map((a) => ({
 bank: a.bank, name: a.name, openDate: a.openDate, closeDate: a.closeDate, stage: a.stage,
+// The authoritative "did a bonus actually get paid here" record --
+// confirmed live as a real gap otherwise: holding an account that
+// falls within an offer's own exclusion window is only ever
+// "plausible" evidence a past bonus was claimed, never proof either
+// way, which is exactly the uncertainty this closes when a bonus is
+// actually on file.
+switchBonuses: (a.switchBonuses || []).map((sb) => ({ description: sb.description, amount: sb.amount, status: sb.status })),
 }));
 const prompt = `Below is text pasted from MoneySavingExpert's bank switch offers page, followed by my own bank account history (including closed accounts).
 
@@ -196,10 +203,10 @@ ${pageText}
 MY ACCOUNT HISTORY (JSON):
 ${JSON.stringify(ownAccounts)}
 
-Extract every current switch/incentive offer mentioned for opening a NEW account. For each one, decide whether I appear eligible based on my account history -- read each offer's own stated exclusions carefully (e.g. "no account on [date]" is different from "never held one"), and if any of my OPEN accounts with stage "CASS-ready" could plausibly be the one I switch FROM, name it. If genuinely unsure, say so rather than guessing either way.
+Extract every current switch/incentive offer mentioned for opening a NEW account. For each one, decide whether I appear eligible based on my account history -- read each offer's own stated exclusions carefully (e.g. "no account on [date]" is different from "never held one"). An account's own switchBonuses array, when it has one, is DEFINITIVE: a "Paid" entry means a bonus from that bank was genuinely claimed (don't hedge as "plausible" when you have this); no entries at all, or only "Working on"/"Met" ones, means none has been paid out yet regardless of how long the account was held. If any of my OPEN accounts (no closeDate) with stage "CASS-ready" could plausibly be the one I switch FROM, name it -- never a closed one, which can't be switched from at all. If genuinely unsure, say so rather than guessing either way.
 
 Return ONLY a JSON object, no other text, no markdown fences:
-{"opportunities": [{"bank": "...", "offer": "e.g. £240 to switch", "eligible": "yes" | "no" | "unsure", "reasoning": "one or two sentences, specific to my own history", "suggestedFromBank": "one of my own CASS-ready accounts' bank name, or null"}]}`;
+{"opportunities": [{"bank": "...", "offer": "e.g. £240 to switch", "eligible": "yes" | "no" | "unsure", "reasoning": "one or two sentences, specific to my own history", "suggestedFromBank": "one of my own OPEN CASS-ready accounts' bank name, or null"}]}`;
 
 const { data: parsed } = await callTextJson(prompt, SWITCH_MAX_TOKENS, SWITCH_MODEL, 'Switch offers');
 const opportunities = Array.isArray(parsed?.opportunities) ? parsed.opportunities : [];
@@ -209,7 +216,12 @@ bank: String(o.bank || ''),
 offer: String(o.offer || ''),
 eligible: ['yes', 'no', 'unsure'].includes(o.eligible) ? o.eligible : 'unsure',
 reasoning: String(o.reasoning || ''),
-suggestedFromAccountId: (data.financeAccounts.find((a) => a.stage === 'CASS-ready' && a.bank === o.suggestedFromBank) || {}).id || '',
+// Never a CLOSED account, regardless of what the model named or what
+// stage still says -- confirmed live as a real gap: a "CASS-ready"
+// account that was since closed (its CASS switch already happened,
+// stage just never got reset afterwards) was being suggested as a
+// switch-FROM source months after it stopped being one.
+suggestedFromAccountId: (data.financeAccounts.find((a) => a.stage === 'CASS-ready' && !a.closeDate && a.bank === o.suggestedFromBank) || {}).id || '',
 dismissed: false,
 taskId: '', // set once "Create task" is clicked -- see switchOfferActionHtml
 }));
@@ -419,6 +431,10 @@ const ownAccounts = data.financeAccounts
 .map((a) => ({
 bank: a.bank, name: a.name, stage: a.stage, openDate: a.openDate,
 deal: a.deal, dealOngoing: a.dealOngoing, dealEndDate: a.dealEndDate,
+// Same authoritative "was a bonus actually paid here" record as
+// scanSwitchOffers' own ownAccounts above -- the futureEligibilityNote
+// this feeds needs it for the identical reason.
+switchBonuses: (a.switchBonuses || []).map((sb) => ({ description: sb.description, amount: sb.amount, status: sb.status })),
 accountFee: a.accountFee, accountFeeBasis: a.accountFeeBasis, purpose: a.purpose,
 }));
 const [{ analyseOngoingAccountValue }, participants] = await Promise.all([import('../ai.js'), cassParticipants()]);

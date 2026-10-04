@@ -108,6 +108,13 @@ const ACCOUNT_FEE_BASES = [
 { value: 'annual', label: 'Annually' },
 ];
 
+// A switch bonus's own progress, not the account's -- "Working on" (met
+// its own conditions? still checking), "Met" (conditions satisfied,
+// payout not seen yet), "Paid" (actually landed). Same 3-state shape as
+// a task's own bucket, just for a bonus component.
+const SWITCH_BONUS_STATUSES = ['Working on', 'Met', 'Paid'];
+const SWITCH_BONUS_STATUS_BADGE_CLASS = { Paid: 'done', Met: 'soon' }; // 'Working on' stays the plain default badge
+
 // A fee is entered in whichever terms the provider quotes it in -- "£15
 // a month" for a packaged current account, "£240 a year" for a premium
 // card -- and this is the single place that turns the annual case into
@@ -561,6 +568,18 @@ return d.toLocaleDateString('en-GB', opts);
 // each rendered as "£X from <account>" rather than a bare amount, since
 // which OTHER account it came from is exactly the fact a bare list of
 // amounts would lose.
+// Same nested-badge shape as a balance transfer's own 0%-expiry badge
+// just below (one chip per entry, a small coloured badge inside it for
+// its own state) -- not a second full tag-chip, which read as two
+// stacked pills rather than one row with a status on it.
+function switchBonusesHtml(a) {
+return (a.switchBonuses || []).map((sb) => {
+const label = [sb.description, sb.amount ? `£${sb.amount}` : ''].filter(Boolean).join(' — ') || 'Bonus';
+const badgeClass = SWITCH_BONUS_STATUS_BADGE_CLASS[sb.status] || '';
+return `<span class="tag-chip">${escapeHtml(label)} <span class="expiry-badge ${badgeClass}">${escapeHtml(sb.status)}</span><span class="tag-x" data-switchbonus-remove="${escapeHtml(a.id)}:${escapeHtml(sb.id)}">&times;</span></span>`;
+}).join('');
+}
+
 function balanceTransfersHtml(a) {
 return (a.balanceTransfers || []).map((bt) => {
 const from = data.financeAccounts.find((x) => x.id === bt.fromAccountId);
@@ -715,6 +734,16 @@ ${issues.length ? `<ul class="suggested-questions" title="Deterministic prompts,
 <label>Deal / incentive<input type="text" autocomplete="off" data-field="deal" data-account-id="${a.id}" value="${escapeHtml(a.deal)}" placeholder="e.g. £200 switch bonus, 0% BT 30mo"></label>
 <label>Deal ends<input type="date" data-field="dealEndDate" data-account-id="${a.id}" value="${escapeHtml(a.dealEndDate)}" ${a.dealOngoing ? 'disabled' : ''}></label>
 <label><input type="checkbox" data-field="dealOngoing" data-account-id="${a.id}" ${a.dealOngoing ? 'checked' : ''}> Ongoing (no end date)</label>
+</div>
+<div class="account-field-full">
+<label style="display:block;margin-bottom:4px;">Switch bonus <span class="settings-note" style="display:inline;margin:0;">(often paid in pieces now -- £X on switching, then £Y/month for N months on top -- track each separately)</span></label>
+<div class="tag-editor">${switchBonusesHtml(a)}</div>
+<div class="sync-row" style="margin-top:6px;">
+<input type="text" autocomplete="off" class="tag-add-input" placeholder="e.g. £200 on switching" data-switchbonus-desc="${a.id}" style="max-width:180px;">
+<input type="text" autocomplete="off" class="tag-add-input" placeholder="Amount, e.g. 200" data-switchbonus-amount="${a.id}" style="max-width:110px;">
+<select data-switchbonus-status="${a.id}">${SWITCH_BONUS_STATUSES.map((s) => `<option value="${s}">${s}</option>`).join('')}</select>
+<button class="sync-btn sm" type="button" data-switchbonus-add="${a.id}">Add</button>
+</div>
 </div>
 <div class="account-field-row">
 <label>Account fee (£)<input type="number" step="0.01" min="0" autocomplete="off" data-field="accountFee" data-account-id="${a.id}" value="${escapeHtml(a.accountFee)}" placeholder="e.g. 15"></label>
@@ -1737,6 +1766,36 @@ const [id, btId] = x.dataset.btRemove.split(':');
 const a = data.financeAccounts.find((acc) => acc.id === id);
 if (!a) return;
 a.balanceTransfers = (a.balanceTransfers || []).filter((bt) => bt.id !== btId);
+queueSave();
+renderFinanceAccounts();
+});
+});
+list.querySelectorAll('[data-switchbonus-add]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const id = btn.dataset.switchbonusAdd;
+const descInput = list.querySelector(`[data-switchbonus-desc="${id}"]`);
+const amountInput = list.querySelector(`[data-switchbonus-amount="${id}"]`);
+const statusSelect = list.querySelector(`[data-switchbonus-status="${id}"]`);
+const a = data.financeAccounts.find((acc) => acc.id === id);
+if (!a) return;
+const description = descInput.value.trim();
+const amount = amountInput.value.trim();
+if (!description && !amount) return;
+if (!Array.isArray(a.switchBonuses)) a.switchBonuses = [];
+a.switchBonuses.push({ id: uid(), description, amount, status: statusSelect.value || SWITCH_BONUS_STATUSES[0] });
+descInput.value = '';
+amountInput.value = '';
+statusSelect.value = SWITCH_BONUS_STATUSES[0];
+queueSave();
+renderFinanceAccounts();
+});
+});
+list.querySelectorAll('[data-switchbonus-remove]').forEach((x) => {
+x.addEventListener('click', () => {
+const [id, sbId] = x.dataset.switchbonusRemove.split(':');
+const a = data.financeAccounts.find((acc) => acc.id === id);
+if (!a) return;
+a.switchBonuses = (a.switchBonuses || []).filter((sb) => sb.id !== sbId);
 queueSave();
 renderFinanceAccounts();
 });
