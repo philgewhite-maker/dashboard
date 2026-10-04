@@ -128,14 +128,86 @@ const v = Number(n) || 0;
 return `${v < 0 ? '-' : ''}£${Math.abs(v).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+// ---- Tax by tax year --------------------------------------------------
+//
+// A stay's `date` defaults to its checkout (accrueLettings, above), but
+// what actually matters for tax is the day Airbnb PAYS OUT, which can
+// land on the other side of the 6 April boundary from checkout -- hence
+// the date being editable in the ledger table below, retrospectively,
+// once the real payout date is known.
+//
+// UK tax year: 6 April to 5 April. A date on or after 6 April belongs to
+// the tax year starting that same calendar year; a date in Jan/Feb/Mar
+// or the first 5 days of April belongs to the one that started the
+// PREVIOUS calendar year. Fixed by HMRC -- not a setting to capture,
+// unlike the per-owner rate/allowance below.
+function taxYearFor(dateStr) {
+if (!dateStr) return '';
+const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(dateStr);
+if (!m) return '';
+const [, yStr, moStr, dStr] = m;
+const y = Number(yStr), mo = Number(moStr), d = Number(dStr);
+const startYear = (mo > 4 || (mo === 4 && d >= 6)) ? y : y - 1;
+return `${startYear}/${String(startYear + 1).slice(2)}`;
+}
+
+function taxSettingsFor(key) {
+const t = (data.prefs.lettingTaxByOwner || {})[key];
+return { ratePct: Number(t?.ratePct) || 0, allowance: Number(t?.allowance) || 0 };
+}
+
+// Only entries that are real INCOME (accrual/earned, both of which carry
+// a `gross` field) count toward revenue -- a payment or adjustment moves
+// the balance without being new money earned, and would double-count
+// against the same stay's accrual if included here too.
+function taxYearSummaryFor(key) {
+const { ratePct, allowance } = taxSettingsFor(key);
+const byYear = new Map();
+entriesFor(key).forEach((e) => {
+if (!e.gross || !e.date) return;
+const ty = taxYearFor(e.date);
+if (!ty) return;
+byYear.set(ty, (byYear.get(ty) || 0) + Number(e.gross));
+});
+return [...byYear.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([taxYear, revenueRaw]) => {
+const revenue = Math.round(revenueRaw * 100) / 100;
+const excess = Math.max(0, Math.round((revenue - allowance) * 100) / 100);
+const tax = Math.round(excess * (ratePct / 100) * 100) / 100;
+return { taxYear, revenue, allowance, excess, ratePct, tax, net: Math.round((revenue - tax) * 100) / 100 };
+});
+}
+
+// Replaces the single lifetime "£x taken" figure with one row per tax
+// year it was actually earned in -- grouped by each entry's own `date`
+// (editable above), not by when the ledger row happened to be created.
+function taxYearSummaryHtml(key, taxYears) {
+if (!taxYears.length) return '';
+const { ratePct, allowance } = taxSettingsFor(key);
+const noSettings = !ratePct && !allowance;
+return `<div class="letting-tax" style="margin-top:8px;">
+<div class="settings-note" style="margin:0 0 4px;"><strong>By tax year</strong>${noSettings ? ' — no rate/allowance set for them yet in Settings &rarr; Travel &rarr; Letting tax (showing revenue only).' : ` (${ratePct}% over ${escapeHtml(money(allowance))} allowance)`}</div>
+<table class="limits-table"><tbody>
+<tr><th>Tax year</th><th style="text-align:right;">Revenue</th><th style="text-align:right;">Excess</th><th style="text-align:right;">Tax due</th><th style="text-align:right;">Net</th></tr>
+${taxYears.map((t) => `<tr>
+<td>${escapeHtml(t.taxYear)}</td>
+<td style="text-align:right;font-variant-numeric:tabular-nums;">${escapeHtml(money(t.revenue))}</td>
+<td style="text-align:right;font-variant-numeric:tabular-nums;">${escapeHtml(money(t.excess))}</td>
+<td style="text-align:right;font-variant-numeric:tabular-nums;">${escapeHtml(money(t.tax))}</td>
+<td style="text-align:right;font-variant-numeric:tabular-nums;font-weight:600;">${escapeHtml(money(t.net))}</td>
+</tr>`).join('')}
+</tbody></table>
+</div>`;
+}
+
 // ---- Rendering ------------------------------------------------------------
 
 function renderLetting() {
-// The picker is refreshed here rather than only at startup: assigning an
-// owner to a listing happens on another tab, and until this ran again
-// the dropdown had no one to choose and the Add button silently did
-// nothing.
+// The picker (and the tax-settings rows) are refreshed here rather than
+// only at startup: assigning an owner to a listing happens on another
+// tab, and until this ran again the dropdown had no one to choose and
+// the Add button silently did nothing.
 renderOwnerPicker();
+renderLettingTaxSettings();
 const el = document.getElementById('letting-list');
 if (!el) return;
 const keys = owners();
@@ -156,6 +228,7 @@ badge.textContent = totalGross()
 el.innerHTML = keys.map((key) => {
 const rows = entriesFor(key).slice().sort((a, b) => String(b.date).localeCompare(String(a.date)));
 const bal = balanceFor(key);
+const taxYears = taxYearSummaryFor(key);
 return `<div class="letting-owner">
 <div class="letting-head">
 <span class="letting-name">${escapeHtml(ownerNameFor(key))}</span>
@@ -164,7 +237,7 @@ return `<div class="letting-owner">
 ${grossFor(key) ? `<span class="settings-note" style="margin:0 0 0 auto;">${escapeHtml(money(grossFor(key)))} taken</span>` : ''}
 </div>
 ${rows.length ? `<div class="letting-scroll"><table class="limits-table"><tbody>${rows.map((e) => `<tr>
-<td style="white-space:nowrap;">${escapeHtml(e.date || '')}</td>
+<td style="white-space:nowrap;"><input type="date" class="settings-input" style="max-width:130px;" data-letting-date="${escapeHtml(e.id)}" value="${escapeHtml(e.date || '')}" title="Edit retrospectively to the real Airbnb payout date, if it differs from checkout -- this is what tax-year grouping below uses."></td>
 <td>${escapeHtml(e.note || e.kind)}${e.kind && e.kind !== 'accrual' ? ` <span class="letting-kind ${escapeHtml(e.kind)}">${escapeHtml(e.kind)}</span>` : ''}${
 // Shown from the FIELD rather than left inside the note, because your
 // own note replaces the default one — type "Bathilde" and the £419 it
@@ -173,9 +246,19 @@ e.gross ? ` <span class="letting-gross">${escapeHtml(`${e.pct ?? 50}% of ${money
 <td style="text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;">${escapeHtml(money(e.amount))}</td>
 <td style="width:1%;"><span class="del-x" data-letting-del="${escapeHtml(e.id)}" title="Remove this entry">&times;</span></td>
 </tr>`).join('')}</tbody></table></div>` : '<div class="settings-note" style="margin:4px 0 0;">Nothing yet.</div>'}
+${taxYearSummaryHtml(key, taxYears)}
 </div>`;
 }).join('');
 
+el.querySelectorAll('[data-letting-date]').forEach((input) => {
+input.addEventListener('change', () => {
+const entry = (data.lettingLedger || []).find((e) => e.id === input.dataset.lettingDate);
+if (!entry || !input.value) return;
+entry.date = input.value;
+queueSave();
+renderLetting();
+});
+});
 el.querySelectorAll('[data-letting-del]').forEach((x) => {
 x.addEventListener('click', () => {
 const entry = (data.lettingLedger || []).find((e) => e.id === x.dataset.lettingDel);
@@ -260,7 +343,84 @@ renderOwnerPicker();
 renderLetting();
 });
 renderOwnerPicker();
+initLettingTaxSettings();
 renderLetting();
+}
+
+// ---- Tax settings (Settings -> Travel) --------------------------------
+
+function lettingTaxRowHtml(key) {
+const { ratePct, allowance } = taxSettingsFor(key);
+return `<div class="sync-row" data-letting-tax-row="${escapeHtml(key)}" style="margin-bottom:4px;">
+<span style="flex:1;min-width:0;">${escapeHtml(ownerNameFor(key))}</span>
+<label style="font-size:12px;display:flex;align-items:center;gap:4px;">Rate <input type="number" min="0" max="100" step="1" class="settings-input" style="max-width:60px;" data-letting-tax-rate="${escapeHtml(key)}" value="${ratePct || ''}">%</label>
+<label style="font-size:12px;display:flex;align-items:center;gap:4px;">Allowance £<input type="number" min="0" step="1" class="settings-input" style="max-width:90px;" data-letting-tax-allowance="${escapeHtml(key)}" value="${allowance || ''}"></label>
+<span class="del-x" data-letting-tax-remove="${escapeHtml(key)}" title="Remove this row">&times;</span>
+</div>`;
+}
+
+// Every current owner, PLUS anyone already given a rate/allowance even if
+// they don't (yet) own a listing -- so a rate can be set up ahead of
+// someone ever appearing in owners() themselves, via the free-text Add
+// row below.
+function lettingTaxKeys() {
+return [...new Set([...owners(), ...Object.keys(data.prefs.lettingTaxByOwner || {})])];
+}
+
+function renderLettingTaxSettings() {
+const el = document.getElementById('letting-tax-settings');
+if (!el) return;
+const keys = lettingTaxKeys();
+el.innerHTML = keys.length
+? keys.map(lettingTaxRowHtml).join('')
+: '<div class="settings-note" style="margin:0;">No letting owners yet — add one below, or set an Airbnb listing owner first.</div>';
+el.querySelectorAll('[data-letting-tax-rate]').forEach((input) => {
+input.addEventListener('change', () => {
+const key = input.dataset.lettingTaxRate;
+const t = data.prefs.lettingTaxByOwner[key] || (data.prefs.lettingTaxByOwner[key] = {});
+t.ratePct = Number(input.value) || 0;
+queueSave();
+renderLetting();
+});
+});
+el.querySelectorAll('[data-letting-tax-allowance]').forEach((input) => {
+input.addEventListener('change', () => {
+const key = input.dataset.lettingTaxAllowance;
+const t = data.prefs.lettingTaxByOwner[key] || (data.prefs.lettingTaxByOwner[key] = {});
+t.allowance = Number(input.value) || 0;
+queueSave();
+renderLetting();
+});
+});
+el.querySelectorAll('[data-letting-tax-remove]').forEach((x) => {
+x.addEventListener('click', () => {
+delete data.prefs.lettingTaxByOwner[x.dataset.lettingTaxRemove];
+queueSave();
+renderLettingTaxSettings();
+renderLetting();
+});
+});
+}
+
+function initLettingTaxSettings() {
+const addBtn = document.getElementById('letting-tax-add-btn');
+const nameInput = document.getElementById('letting-tax-add-name');
+if (addBtn && nameInput) {
+addBtn.addEventListener('click', () => {
+const name = nameInput.value.trim();
+if (!name) return;
+// Same lowercased-typed-name key convention as ownerKeyFor's own
+// fallback (airbnb.js's ownerLabel) -- so this row lines up with that
+// same person's real owner key the moment they're given a listing,
+// rather than needing to be re-entered.
+const key = name.toLowerCase();
+if (!data.prefs.lettingTaxByOwner[key]) data.prefs.lettingTaxByOwner[key] = { ratePct: 0, allowance: 0 };
+queueSave();
+nameInput.value = '';
+renderLettingTaxSettings();
+});
+}
+renderLettingTaxSettings();
 }
 
 function renderOwnerPicker() {

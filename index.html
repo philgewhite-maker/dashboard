@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v474</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v475</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -3086,6 +3086,16 @@ Same idea as Connections' ratings, a separate list (Taste/Health/Prep by default
 <div class="settings-note" style="margin:0 0 10px;">One row per physical keyring &mdash; who currently has it, and who it's for, are set on the Airbnb panel (Overview tab); set what it is and which listing(s) it opens here.</div>
 <div id="keys-settings"></div>
 <button class="add-btn" id="add-key-settings-btn" type="button" style="margin-top:8px;">Add keyring</button>
+</div>
+
+<div class="settings-block">
+<h3>Letting tax</h3>
+<div class="settings-note" style="margin:0 0 10px;">UK tax years run 6 April to 5 April &mdash; fixed, not a setting. The Letting income panel groups each owner's gross income by that boundary (using each ledger entry's own date, editable there once you know the real Airbnb payout date) and tests it against their own allowance below; anything over it is taxed at their own rate.</div>
+<div id="letting-tax-settings"></div>
+<div class="sync-row" style="margin-top:8px;">
+<input type="text" id="letting-tax-add-name" class="settings-input" style="max-width:160px;" placeholder="Name, e.g. Phil">
+<button class="sync-btn sm" id="letting-tax-add-btn" type="button">Add</button>
+</div>
 </div>
 </details>
 

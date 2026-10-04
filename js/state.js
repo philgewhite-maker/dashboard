@@ -104,6 +104,14 @@ calendarEventCount: 1,
 mailResultCount: 5,
 airbnbCalendarId: '', // which Google Calendar "Push to Google Calendar" targets -- picked once, remembered
 switchOffersCheckedAt: '', // ISO date of the last bank-switch-offers scan -- drives the 30-day nudge, see js/features/switchoffers.js
+// Per letting-income owner (same ownerKey as js/features/letting.js's
+// own ownerKeyFor -- a connection id, or a lowercased typed name for
+// someone with no listing of their own yet), what UK tax would apply to
+// THEIR gross letting income: {ratePct, allowance}. Tax years run 6
+// April to 5 April (taxYearFor, letting.js) -- fixed by HMRC, not
+// something to store a setting for, so only rate/allowance are kept
+// here. {"lewis": {ratePct: 20, allowance: 1000}, ...}.
+lettingTaxByOwner: {},
 // Which scheduled syncs are turned OFF, and how often the rest may run
 // (see js/features/scheduled.js). Stored as the exceptions rather than
 // the enabled list so a task added later is on by default -- the point
