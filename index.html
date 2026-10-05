@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v484</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v485</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -3040,6 +3040,13 @@ Same idea as Connections' ratings, a separate list (Taste/Health/Prep by default
 <label>Default max events, when a calendar's is blank<input type="number" min="1" max="50" id="pref-cal-count"></label>
 <label>Default max results, when a mail search's is blank<input type="number" min="1" max="50" id="pref-mail-count"></label>
 </div>
+</div>
+
+<div class="settings-block" id="packing-modules-block">
+<h3>Packing modules</h3>
+<div class="settings-note" style="margin:0 0 10px;">The library a trip's own packing list is generated from &mdash; an always-included Core kit, modules that switch on by who's coming, a leg type (car hire) or an accommodation's stay type, and manual ones (Beach, Cold weather&hellip;) you toggle per trip. Edit or delete any of these, including the built-in ones &mdash; a deleted built-in module won't come back on its own.</div>
+<div id="packing-modules"></div>
+<button class="add-btn" id="packing-module-add-btn" type="button" style="margin-top:8px;">Add module</button>
 </div>
 
 <div class="settings-block">

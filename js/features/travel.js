@@ -6,7 +6,7 @@
 // notionplan.js already uses for a project task ↔ its Notion page. The
 // detail has to live here rather than in Notion because the itinerary
 // export has to work fully offline.
-import { data, queueSave, blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS, LEG_DATE_FIELDS } from '../state.js';
+import { data, queueSave, blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS, LEG_DATE_FIELDS, STAY_TYPE_SUGGESTIONS } from '../state.js';
 import { escapeHtml, uid, dateStrAdd, daysAgoStr, hydratePhotoBackgrounds, parseLooseDateTime, scrollAndFlash } from '../utils.js';
 import { deleteAttachment, formatBytes, openAttachment } from '../files.js';
 
@@ -421,6 +421,21 @@ return `<button type="button" class="conn-picker-row" data-conn-picker-value="__
 </button>`;
 }
 
+// A <datalist> per leg field that wants the expandable-dropdown
+// treatment (suggested values you can still type past) -- same shape as
+// connections.js's tagDatalistsHtml() for Nationality/Interests. Only
+// stayType uses this today; seeded with the canonical suggestions plus
+// whatever's already been typed across every leg, so it grows with use.
+function legFieldDatalistsHtml() {
+const typed = new Set();
+data.trips.forEach((t) => t.legs.forEach((l) => {
+const v = (l.fields.stayType || '').trim();
+if (v) typed.add(v);
+}));
+const values = [...new Set([...STAY_TYPE_SUGGESTIONS, ...typed])];
+return `<datalist id="taglist-leg-stayType">${values.map((v) => `<option value="${escapeHtml(v)}"></option>`).join('')}</datalist>`;
+}
+
 function legFieldRowHtml(trip, leg, field) {
 const value = leg.fields[field] || '';
 const label = LEG_FIELD_LABELS[field] || field;
@@ -431,9 +446,13 @@ return `<div class="field-block"><span class="field-label">${escapeHtml(label)}<
 <span class="settings-note" style="display:flex;align-items:center;gap:6px;">N/A <span class="tag-x" data-leg-reopen-gap="${leg.id}" data-trip-id="${trip.id}" data-field="${field}" title="This does have a value after all">&times;</span></span></div>`;
 }
 const isOpenGap = !soft && !String(value).trim();
+// Not plain free text: stayType gets the datalist-backed expandable
+// dropdown (connections.js's Nationality/Interest pattern), since it's
+// really a pick from a known-but-growing set, not an open description.
+const listAttr = field === 'stayType' ? ' list="taglist-leg-stayType"' : '';
 return `<div class="field-block"><span class="field-label">${escapeHtml(label)}${isOpenGap ? ' ⚠' : ''}</span>
 <div style="display:flex;gap:4px;">
-<input type="text" data-leg-field="${field}" data-leg-id="${leg.id}" data-trip-id="${trip.id}" value="${escapeHtml(value)}" placeholder="${isOpenGap ? 'Still needed' : soft ? 'If known' : ''}">
+<input type="text" data-leg-field="${field}" data-leg-id="${leg.id}" data-trip-id="${trip.id}" value="${escapeHtml(value)}" placeholder="${isOpenGap ? 'Still needed' : soft ? 'If known' : ''}"${listAttr}>
 ${isOpenGap ? `<button class="todo-add-btn" type="button" data-leg-confirm-na="${leg.id}" data-trip-id="${trip.id}" data-field="${field}" title="Doesn't apply to this leg">N/A</button>` : ''}
 </div></div>`;
 }
@@ -556,6 +575,7 @@ ${trip.people.map((p) => personChipHtml(trip.id, p)).join('')}
 <button class="todo-add-btn" type="button" data-trip-add-person="${trip.id}">Add</button>
 </div>
 <div class="settings-note" style="margin-top:6px;">${trip.legs.length === 0 ? 'No legs yet.' : complete ? 'Itinerary complete.' : `${gapCount} thing${gapCount === 1 ? '' : 's'} still need confirming.`}</div>
+<div data-packing-mount="${trip.id}"></div>
 ${(() => {
 // One chronological itinerary: real legs plus any Date Event linked to
 // this trip (blankPlannerActivity.tripId, the adapter -- see state.js's
@@ -592,9 +612,10 @@ if (toggleLabel) toggleLabel.hidden = pastCount === 0;
 if (toggleText) toggleText.textContent = `Show past trip${pastCount === 1 ? '' : 's'} (${pastCount})`;
 const toggleCheckbox = document.getElementById('show-past-trips-toggle');
 if (toggleCheckbox) toggleCheckbox.checked = showPastTrips;
-el.innerHTML = visible.length ? visible.map(tripCardHtml).join('')
+el.innerHTML = (visible.length ? visible.map(tripCardHtml).join('')
 : pastCount ? '<div class="empty">Nothing upcoming — every trip is past. Tick "Show past trips" above to see them.</div>'
-: '<div class="empty">No trips yet. Add one below, or turn a "city-break" nudge or a booking email into one.</div>';
+: '<div class="empty">No trips yet. Add one below, or turn a "city-break" nudge or a booking email into one.</div>')
++ legFieldDatalistsHtml();
 bindTravel(el);
 // Lazy-populate each expanded leg's own calendar select, same load-once
 // idiom planner.js's Date Events section and mail.js's "Check calendar"
@@ -610,6 +631,23 @@ select.innerHTML = cals.length ? cals.map((c) => `<option value="${escapeHtml(c.
 });
 }).catch(() => { select.innerHTML = '<option value="">Couldn\'t load calendars</option>'; });
 });
+// Packing, same lazy-loaded mount-then-fill shape as the person picker
+// just below -- most sessions open Travel without ever touching
+// packing.js's own module-library logic, so it stays out of this tab's
+// up-front load.
+if (el.querySelector('[data-packing-mount]')) {
+import('./packing.js').then(({ packingSectionHtml, bindPacking, generatePackingItems }) => {
+el.querySelectorAll('[data-packing-mount]').forEach((mount) => {
+const trip = tripById(mount.dataset.packingMount);
+// First time this trip's packing section has ever rendered -- generate
+// straight away so a new trip shows its default modules without
+// requiring a manual "Refresh" click first.
+if (trip && !trip.packing.generatedAt) generatePackingItems(trip);
+mount.outerHTML = packingSectionHtml(trip);
+});
+bindPacking(el);
+});
+}
 // The "+ person" picker's row list needs the live Dating module, kept as
 // a dynamic import so this module never has to load connections.js (and
 // everything it pulls in) up front for a tab most sessions won't touch --
@@ -1033,5 +1071,5 @@ setLegStatus, updateLegNotes, addPassenger, removePassenger, updatePassengerFiel
 addPerson, removePerson, gapsFor, tripIsComplete, tripGapCount, enrichLegFromExtraction,
 applyLegExtraction, tripOptionsHtml, legTargetPickerHtml, bindLegTargetPicker, readLegTargetPicker,
 generateItineraryHtml, renderTravel, initTravel, revealTrip, tripById, legById,
-tripChipHtml, bindTripChips, isPastTrip,
+tripChipHtml, bindTripChips, isPastTrip, RELATION_LABELS, LEG_KIND_LABELS,
 };

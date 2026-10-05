@@ -2,6 +2,7 @@ import { data, queueSave, getLocalSettings, setLocalSetting, exportBackup, impor
 import { renderAll } from '../render-all.js';
 import { escapeHtml, uid } from '../utils.js';
 import { renderCalendarLimits } from './calendars.js';
+import { renderPackingModules, bindPackingModules } from './packing.js';
 import { renderTagCleanup } from './tagcleanup.js';
 import { testConnection, resolveDataSourceId } from '../notion.js';
 import { summarizeUsage, currentMonthKey } from '../ai.js';
@@ -324,6 +325,8 @@ queueSave();
 });
 
 renderCalendarLimits();
+renderPackingModules();
+bindPackingModules();
 renderMailTopics();
 document.getElementById('add-mail-topic-btn').addEventListener('click', () => {
 data.mailTopics.push(blankMailTopic());

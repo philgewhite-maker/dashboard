@@ -648,6 +648,7 @@ destinations: [], // multi-value, same reasoning as blankConnection's location -
 startDate: '', endDate: '', // best-known bounds; refined as legs fill in
 people: [], // {id, name, relation:'self'|'partner'|'child'|'other', connectionId}
 legs: [],
+packing: blankTripPacking(),
 createdAt: new Date().toISOString(),
 ...fields,
 };
@@ -693,6 +694,114 @@ createdAt: new Date().toISOString(),
 const LEG_STATUSES = ['unbooked', 'booked', 'confirmed'];
 const LEG_STATUS_LABELS = { unbooked: 'Not booked yet', booked: 'Booked', confirmed: 'Confirmed' };
 
+// ---- Packing modules (js/features/packing.js owns the generation logic) --
+//
+// A module is a reusable, editable template -- built-in ones ship seeded
+// (DEFAULT_PACKING_MODULES below), the user's own custom ones sit
+// alongside them in the same data.packingModules list, no second shape.
+// A library item inside a module.
+function blankPackingItem(fields = {}) {
+return { id: uid(), label: '', qty: 1, qtyByTier: null, ...fields };
+}
+// qtyByTier, when set, is {weekend, week, extended} -- three EXPLICIT
+// numbers, not a per-day formula. The "5-4-3-2-1" rule is a flat table (a
+// 4-day and a 7-day trip pack the identical numbers), which a ratio can't
+// represent, and "cap at 7 days' worth" falls out for free since
+// `extended` is simply authored equal to `week`. `null` in a tier slot
+// means "match the trip's day count 1:1" (the weekend one-outfit-per-day
+// rule), resolved in itemQtyForTrip rather than baked in as a fixed
+// number that would be wrong for a 2-day vs 3-day trip.
+function blankPackingModule(fields = {}) {
+return {
+id: uid(), name: '', group: '', builtIn: false,
+// 'always' | 'relation' (value:'partner'|'child', matches trip.people)
+// | 'legKind' (value: one of LEG_KINDS, matches trip.legs)
+// | 'stayType' (value: comma-separated lowercase keyword(s), matched
+// as a substring of an accommodation leg's own stayType field -- see
+// STAY_TYPE_SUGGESTIONS above) | 'manual' (never auto-applied --
+// surfaced as a per-trip toggle instead).
+trigger: { type: 'manual', value: '' },
+items: [],
+...fields,
+};
+}
+function blankTripPacking(fields = {}) {
+return { items: [], moduleState: {}, removedSourceItemIds: [], generatedAt: '', ...fields };
+}
+// One entry in a trip's own generated+editable packing list. `sourceItemId`
+// ties it back to the library item that generated it (blank for a custom,
+// user-typed item); `moduleId` likewise back to the module, for grouping
+// the checklist by section in the UI.
+function blankPackingListItem(fields = {}) {
+return {
+id: uid(), moduleId: '', sourceItemId: '', label: '', qty: 1,
+checked: false, custom: false, linkedTaskId: '', linkedBookId: '',
+...fields,
+};
+}
+const PACKING_DURATION_TIERS = [
+{ id: 'weekend', maxDays: 3 }, { id: 'week', maxDays: 7 }, { id: 'extended', maxDays: Infinity },
+];
+function packingDurationTier(days) {
+return (PACKING_DURATION_TIERS.find((t) => days <= t.maxDays) || PACKING_DURATION_TIERS[PACKING_DURATION_TIERS.length - 1]).id;
+}
+// Seeded once into data.packingModules (migrate(), below) -- fully
+// editable/deletable afterward, same as any other record. The "Vacation
+// club" module is named generically rather than tied to one brand; its
+// trigger keyword is also one of the two the Self-catering module
+// matches on, so a stayType containing "vacation club" triggers BOTH --
+// a vacation club is a special case of self-catering, declared via a
+// shared keyword rather than a second code path.
+const DEFAULT_PACKING_MODULES = [
+{ id: 'core-essentials', builtIn: true, name: 'Essentials', group: 'Core', trigger: { type: 'always', value: '' }, items: [
+{ id: 'passport', label: 'Passport', qty: 1 }, { id: 'wallet', label: 'Wallet / cards', qty: 1 },
+{ id: 'keys', label: 'Keys', qty: 1 }, { id: 'phone', label: 'Phone', qty: 1 },
+{ id: 'charger', label: 'Charger', qty: 1 }, { id: 'meds', label: 'Medication', qty: 1 },
+{ id: 'water-bottle', label: 'Water bottle', qty: 1 },
+] },
+{ id: 'core-clothing', builtIn: true, name: 'Clothing', group: 'Core', trigger: { type: 'always', value: '' }, items: [
+{ id: 'socks', label: 'Socks', qtyByTier: { weekend: null, week: 5, extended: 5 } },
+{ id: 'tops', label: 'Tops', qtyByTier: { weekend: null, week: 4, extended: 4 } },
+{ id: 'bottoms', label: 'Bottoms', qtyByTier: { weekend: null, week: 3, extended: 3 } },
+{ id: 'shoes', label: 'Shoes (pairs)', qtyByTier: { weekend: 1, week: 2, extended: 2 } },
+{ id: 'jacket', label: 'Jacket', qtyByTier: { weekend: 1, week: 1, extended: 1 } },
+{ id: 'laundry-note', label: 'Plan a laundry day', qtyByTier: { weekend: 0, week: 0, extended: 1 } },
+] },
+{ id: 'companion-partner', builtIn: true, name: 'Partner', group: 'Companion', trigger: { type: 'relation', value: 'partner' }, items: [
+{ id: 'partner-outfit', label: 'A dressier outfit', qty: 1 }, { id: 'partner-speaker', label: 'Portable speaker', qty: 1 },
+{ id: 'partner-games', label: 'Cards / travel games', qty: 1 },
+] },
+{ id: 'companion-kids', builtIn: true, name: 'Kids', group: 'Companion', trigger: { type: 'relation', value: 'child' }, items: [
+{ id: 'kid-documents', label: "Child's own ID/passport", qty: 1 }, { id: 'kid-entertainment', label: 'Tablet / books / toys', qty: 1 },
+{ id: 'kid-snacks', label: 'Snacks', qtyByTier: { weekend: 2, week: 5, extended: 7 } },
+{ id: 'kid-diapers', label: 'Diapers', qtyByTier: { weekend: 10, week: 30, extended: 42 } },
+] },
+{ id: 'leg-car-hire', builtIn: true, name: 'Car hire', group: 'Logistics', trigger: { type: 'legKind', value: 'car_hire' }, items: [
+{ id: 'driving-licence', label: 'Driving licence', qty: 1 }, { id: 'phone-mount', label: 'Phone mount', qty: 1 },
+{ id: 'car-charger', label: 'Car charger cable', qty: 1 }, { id: 'rental-voucher', label: 'Rental voucher/confirmation', qty: 1 },
+] },
+{ id: 'stay-self-catering', builtIn: true, name: 'Self-catering', group: 'Logistics', trigger: { type: 'stayType', value: 'self-cater,vacation club' }, items: [
+{ id: 'washing-up', label: 'Travel washing-up liquid + sponge', qty: 1 }, { id: 'tea-bags', label: 'Teabags / basics', qty: 1 },
+{ id: 'shopping-bag', label: 'Reusable shopping bag', qty: 1 }, { id: 'grocery-shop-note', label: 'Order a grocery delivery for arrival', qty: 1 },
+] },
+{ id: 'stay-vacation-club', builtIn: true, name: 'Vacation club', group: 'Logistics', trigger: { type: 'stayType', value: 'vacation club' }, items: [
+{ id: 'pool-stuff', label: 'Swimwear + pool towel', qty: 1 }, { id: 'laundry-pods', label: 'Laundry pods (on-site laundry)', qty: 1 },
+{ id: 'resort-id', label: 'Membership/resort ID', qty: 1 },
+] },
+{ id: 'dest-beach', builtIn: true, name: 'Beach', group: 'Destination', trigger: { type: 'manual', value: '' }, items: [
+{ id: 'swimwear', label: 'Swimwear', qty: 1 }, { id: 'sunscreen', label: 'Sunscreen', qty: 1 },
+{ id: 'beach-towel', label: 'Beach towel', qty: 1 }, { id: 'flipflops', label: 'Flip-flops', qty: 1 },
+] },
+{ id: 'dest-cold', builtIn: true, name: 'Cold weather', group: 'Destination', trigger: { type: 'manual', value: '' }, items: [
+{ id: 'thermals', label: 'Thermal layers', qty: 1 }, { id: 'gloves', label: 'Gloves', qty: 1 },
+{ id: 'hat', label: 'Warm hat', qty: 1 }, { id: 'boots', label: 'Winter boots', qty: 1 },
+] },
+{ id: 'dest-active', builtIn: true, name: 'Active / adventure', group: 'Destination', trigger: { type: 'manual', value: '' }, items: [
+{ id: 'hiking-boots', label: 'Hiking boots', qty: 1 }, { id: 'first-aid', label: 'Small first-aid kit', qty: 1 },
+{ id: 'water-bladder', label: 'Water bladder / extra bottle', qty: 1 },
+] },
+];
+
 // The single source of truth for what counts as "complete" per leg kind --
 // drives both the entry form and gap detection. Fields in LEG_SOFT_FIELDS
 // are filled in when known but never block completeness. `company` on
@@ -702,18 +811,28 @@ const LEG_STATUS_LABELS = { unbooked: 'Not booked yet', booked: 'Booked', confir
 const LEG_FIELD_DEFS = {
 flight: ['airline', 'flightNumber', 'departAirport', 'departTime', 'arriveAirport', 'arriveTime', 'confirmationRef'],
 car_hire: ['company', 'pickupLocation', 'pickupTime', 'dropoffLocation', 'dropoffTime', 'confirmationRef', 'carType'],
-accommodation: ['name', 'address', 'checkIn', 'checkOut', 'confirmationRef', 'contactPhone'],
+accommodation: ['name', 'address', 'checkIn', 'checkOut', 'confirmationRef', 'contactPhone', 'stayType'],
 transfer: ['company', 'mode', 'from', 'to', 'departTime', 'confirmationRef'],
 other: ['description', 'when', 'confirmationRef'],
 };
-const LEG_SOFT_FIELDS = new Set(['carType', 'contactPhone']);
+// stayType is soft (filled in when known, never a gap) -- it's new on a
+// record type that already has real history, so retrofitting it can't
+// start flagging every existing accommodation leg as incomplete.
+const LEG_SOFT_FIELDS = new Set(['carType', 'contactPhone', 'stayType']);
+// Suggested, not enforced -- travel.js renders the stayType field with a
+// <datalist> seeded from this list (same expandable-dropdown pattern as
+// connections.js's Nationality/Interest fields), but any typed value is
+// accepted. packing.js's 'stayType'-triggered modules match a keyword as
+// a lowercase substring of whatever ends up here, so "Vacation club
+// apartment" still matches "vacation club".
+const STAY_TYPE_SUGGESTIONS = ['Hotel', 'Self-catering', 'Vacation club'];
 const LEG_FIELD_LABELS = {
 airline: 'Airline', flightNumber: 'Flight number', departAirport: 'Departure airport', departTime: 'Departure time',
 arriveAirport: 'Arrival airport', arriveTime: 'Arrival time', confirmationRef: 'Confirmation ref',
 company: 'Company', pickupLocation: 'Pickup location', pickupTime: 'Pickup time', dropoffLocation: 'Drop-off location',
 dropoffTime: 'Drop-off time', carType: 'Car type', name: 'Name', address: 'Address', checkIn: 'Check-in',
 checkOut: 'Check-out', contactPhone: 'Contact phone', mode: 'Mode', from: 'From', to: 'To',
-description: 'Description', when: 'When',
+description: 'Description', when: 'When', stayType: 'Stay type',
 };
 // Which of a leg's own fields actually hold a date (as opposed to a place,
 // reference number, etc.) -- shared by travel.js (normalizes these to a
@@ -1889,7 +2008,26 @@ passengers: Array.isArray(l.passengers)
 : [],
 }))
 : [];
+if (!t.packing || typeof t.packing !== 'object') t.packing = blankTripPacking();
+t.packing.items = Array.isArray(t.packing.items)
+? t.packing.items.map((i) => ({ ...blankPackingListItem(), ...i, id: i.id || uid() })) : [];
+t.packing.moduleState = (t.packing.moduleState && typeof t.packing.moduleState === 'object') ? t.packing.moduleState : {};
+t.packing.removedSourceItemIds = Array.isArray(t.packing.removedSourceItemIds) ? t.packing.removedSourceItemIds : [];
 });
+// Packing module library: array guard, then a ONE-TIME seed -- same
+// shape as data.ticker.tickerLettingSeeded. A deliberate deletion of a
+// built-in module must stick, not get silently restored on reload.
+if (!Array.isArray(data.packingModules)) data.packingModules = [];
+if (!data.packingModulesSeeded) {
+data.packingModulesSeeded = true;
+DEFAULT_PACKING_MODULES.forEach((m) => {
+if (!data.packingModules.some((x) => x.builtIn && x.id === m.id)) data.packingModules.push(m);
+});
+}
+data.packingModules = data.packingModules.map((m) => ({
+...blankPackingModule(), ...m, id: m.id || uid(),
+items: (m.items || []).map((i) => ({ ...blankPackingItem(), ...i, id: i.id || uid() })),
+}));
 // A trip whose project task was deleted has nothing left routing it into
 // the normal Tasks workflow -- same "promote or drop" instinct as the
 // orphaned-subtask guard just above, but a trip has no meaningful "promote"
@@ -2960,7 +3098,8 @@ isDormantStage, currentAge, displayAge, photoCoverage, photoLinkLabels, averageR
 exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, SENSITIVE_BLOCKS, whatSheHas, unheldInventory, whoFits, inventorySets, whoFitsSet, interestNote, SIZE_GROUPS, sizeGroupFor, DEFAULT_PREFS, blankInventoryItem, blankBookItem,
 MAIL_SEARCH_KINDS, mailSearchLabel, blankMailSearch, blankMailTopic, blankMailDismissal,
 TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureBatch, blankPendingImport, blankConnection, blankTelegramThread, blankReadingItem, blankCaptureDraft, blankJob, blankMediaItem, MEDIA_KINDS, MEDIA_STATUSES,
-blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS, LEG_DATE_FIELDS,
+blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS, LEG_DATE_FIELDS, STAY_TYPE_SUGGESTIONS,
+blankPackingItem, blankPackingModule, blankTripPacking, blankPackingListItem, PACKING_DURATION_TIERS, packingDurationTier, DEFAULT_PACKING_MODULES,
 blankPlannerEntry, blankPlannerActivity,
 blankAirbnbListing, blankAirbnbReservation, blankAirbnbKey, blankAirbnbKeyAssignment, KEY_CUSTODIAN_TYPES, blankFinanceAccount,
 CONTACT_STATUS_LABELS, CONTACT_MATCH_MIN_STAGE,

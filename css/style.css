@@ -1873,6 +1873,14 @@ text-transform:uppercase;
 letter-spacing:.03em;
 color:var(--muted);
 }
+.packing-group-head{
+font-size:10px;
+text-transform:uppercase;
+letter-spacing:.03em;
+color:var(--muted);
+margin:10px 0 3px;
+}
+.packing-group-head:first-child{margin-top:4px;}
 .phone-row{display:flex;gap:6px;}
 .phone-row input{flex:1;min-width:0;}
 .dial-code{
