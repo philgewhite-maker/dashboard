@@ -148,11 +148,10 @@ linkHtml = task ? taskChipHtml(task, `<span class="tag-x" data-packing-unlink="$
 } else if (item.linkedBookId) {
 const book = data.books.find((b) => b.id === item.linkedBookId);
 linkHtml = book ? bookChipHtml(book, `<span class="tag-x" data-packing-unlink="${trip.id}" data-item-id="${item.id}" title="Unlink">&times;</span>`) : '';
-} else {
-linkHtml = `<button type="button" class="todo-add-btn" data-packing-link-task="${trip.id}" data-item-id="${item.id}" style="padding:1px 6px;font-size:10px;">+ Task</button>`
-+ `<button type="button" class="todo-add-btn" data-packing-link-shopping="${trip.id}" data-item-id="${item.id}" style="padding:1px 6px;font-size:10px;">+ Shopping</button>`
-+ `<button type="button" class="todo-add-btn" data-packing-link-book="${trip.id}" data-item-id="${item.id}" style="padding:1px 6px;font-size:10px;">+ Book</button>`;
 }
+// An unlinked item shows no per-row link controls -- that was three
+// buttons on every single row. Linking instead happens through the one
+// shared item+kind picker below the list (linkRowHtml).
 return `<div class="todo-item ${item.checked ? 'done' : ''}" data-packing-item-row="${item.id}">
 <input type="checkbox" ${item.checked ? 'checked' : ''} data-packing-item-toggle="${trip.id}" data-item-id="${item.id}">
 <span>${escapeHtml(item.label)}</span>
@@ -176,35 +175,77 @@ const label = mod ? (mod.group || mod.name) : 'Custom';
 if (!groups.has(label)) groups.set(label, []);
 groups.get(label).push(item);
 });
-if (!groups.size) return '<div class="settings-note">Nothing generated yet -- hit Refresh.</div>';
+if (!groups.size) return '';
 return [...groups.entries()].map(([label, items]) => `
 <div class="packing-group-head">${escapeHtml(label)}</div>
 <div class="todo-list">${items.map((item) => packingItemRowHtml(trip, item)).join('')}</div>`).join('');
 }
 
+// One shared row to link ANY item to a Task/Shopping task/Book, instead
+// of three buttons repeated on every single row. Only items without a
+// link yet are offered -- relink by unlinking first (the chip's own x).
+function linkRowHtml(trip) {
+const unlinked = trip.packing.items.filter((i) => !i.linkedTaskId && !i.linkedBookId);
+if (!unlinked.length) return '';
+return `<div class="sync-row" style="margin-top:8px;">
+<select data-packing-link-item="${trip.id}">
+<option value="">Link an item&hellip;</option>
+${unlinked.map((i) => `<option value="${i.id}">${escapeHtml(i.label)}</option>`).join('')}
+</select>
+<select data-packing-link-kind="${trip.id}">
+<option value="task">to a Task</option>
+<option value="shopping">to Shopping</option>
+<option value="book">to a Book</option>
+</select>
+<button class="sync-btn sm" type="button" data-packing-link-go="${trip.id}">Link</button>
+</div>`;
+}
+
+// Nothing is generated for a trip until this button is pressed -- a brand
+// new trip has no packing list at all, by design (the point this got
+// pushed back on: a list is wanted once things are actually booked, not
+// the moment a trip exists). The same button doubles as the top-up
+// action afterward, since generatePackingItems is already a safe
+// additive merge either way -- only its label changes.
 function packingSectionHtml(trip) {
+const hasItems = trip.packing.items.length > 0;
 const { checked, total } = packingSummary(trip);
 return `<div class="packing-section" data-packing-section="${trip.id}" style="margin-top:12px;">
 <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;">
-<h3 style="margin:0;font-size:14px;">Packing <span class="settings-note" style="display:inline;">${total ? `${checked} of ${total} packed` : ''}</span></h3>
-<button class="todo-add-btn" type="button" data-packing-refresh="${trip.id}">Refresh</button>
+<h3 style="margin:0;font-size:14px;">Packing${hasItems ? ` <span class="settings-note" style="display:inline;">${checked} of ${total} packed</span>` : ''}</h3>
+<button class="todo-add-btn" type="button" data-packing-generate="${trip.id}">${hasItems ? 'Refresh' : 'Generate packing list'}</button>
 </div>
 ${manualModuleTogglesHtml(trip)}
+${hasItems ? `<details data-packing-details>
+<summary class="settings-note" style="cursor:pointer;">Show packing list</summary>
 ${packingGroupsHtml(trip)}
 <div class="attach-row" style="margin-top:6px;">
 <input type="text" class="tag-add-input" data-packing-add-input="${trip.id}" placeholder="+ custom item">
 <input type="number" min="1" class="tag-add-input" style="width:46px;" value="1" data-packing-add-qty="${trip.id}">
 <button class="todo-add-btn" type="button" data-packing-add-btn="${trip.id}">Add</button>
 </div>
+${linkRowHtml(trip)}
+</details>` : ''}
 ${!trip.startDate ? '<div class="settings-note" style="margin-top:4px;">Add trip dates above for an accurate packing list.</div>' : ''}
 </div>`;
 }
 
-function rerenderPacking(trip) {
+// Collapsed by default (a plain <details> with no `open` attribute) --
+// but a rerender triggered from something the user did INSIDE the open
+// list (checking an item, editing a qty...) would otherwise snap it shut
+// on every click, since outerHTML replacement throws away the live DOM
+// state. Reads the current open/closed state first and restores it,
+// unless forceOpen asks to show the result of an explicit action (the
+// Generate/Refresh button) regardless of what it was before.
+function rerenderPacking(trip, { forceOpen = false } = {}) {
 const el = document.querySelector(`[data-packing-section="${trip.id}"]`);
 if (!el) return;
+const wasOpen = forceOpen || !!el.querySelector('[data-packing-details]')?.open;
 el.outerHTML = packingSectionHtml(trip);
-bindPackingSection(document.querySelector(`[data-packing-section="${trip.id}"]`));
+const fresh = document.querySelector(`[data-packing-section="${trip.id}"]`);
+const details = fresh?.querySelector('[data-packing-details]');
+if (details && wasOpen) details.open = true;
+bindPackingSection(fresh);
 }
 
 function bindPackingSection(section) {
@@ -212,9 +253,13 @@ if (!section) return;
 const tripId = section.dataset.packingSection;
 const trip = tripById(tripId);
 if (!trip) return;
-section.querySelector('[data-packing-refresh]')?.addEventListener('click', () => { generatePackingItems(trip); rerenderPacking(trip); });
+section.querySelector('[data-packing-generate]')?.addEventListener('click', () => { generatePackingItems(trip); rerenderPacking(trip, { forceOpen: true }); });
+// Toggling a module just records the choice -- it does NOT regenerate on
+// its own, so picking Beach before ever generating doesn't quietly
+// create a list you never asked for. The next Generate/Refresh click
+// picks up whatever's toggled on at that point.
 section.querySelectorAll('[data-packing-module-toggle]').forEach((chip) => {
-chip.addEventListener('click', () => { toggleManualModule(trip, chip.dataset.moduleId); generatePackingItems(trip); rerenderPacking(trip); });
+chip.addEventListener('click', () => { toggleManualModule(trip, chip.dataset.moduleId); rerenderPacking(trip); });
 });
 section.querySelectorAll('[data-packing-item-toggle]').forEach((cb) => {
 cb.addEventListener('change', () => { togglePackingItemChecked(trip, cb.dataset.itemId); rerenderPacking(trip); });
@@ -225,14 +270,15 @@ input.addEventListener('change', () => { updatePackingItemQty(trip, input.datase
 section.querySelectorAll('[data-packing-item-remove]').forEach((x) => {
 x.addEventListener('click', () => { removePackingItem(trip, x.dataset.itemId); rerenderPacking(trip); });
 });
-section.querySelectorAll('[data-packing-link-task]').forEach((btn) => {
-btn.addEventListener('click', () => { linkPackingItemToTask(trip, btn.dataset.itemId); rerenderPacking(trip); });
-});
-section.querySelectorAll('[data-packing-link-shopping]').forEach((btn) => {
-btn.addEventListener('click', () => { linkPackingItemToTask(trip, btn.dataset.itemId, { shopping: true }); rerenderPacking(trip); });
-});
-section.querySelectorAll('[data-packing-link-book]').forEach((btn) => {
-btn.addEventListener('click', () => { linkPackingItemToBook(trip, btn.dataset.itemId); rerenderPacking(trip); });
+section.querySelector('[data-packing-link-go]')?.addEventListener('click', () => {
+const itemSel = section.querySelector('[data-packing-link-item]');
+const kindSel = section.querySelector('[data-packing-link-kind]');
+const itemId = itemSel?.value;
+if (!itemId) return;
+const kind = kindSel?.value;
+if (kind === 'book') linkPackingItemToBook(trip, itemId);
+else linkPackingItemToTask(trip, itemId, { shopping: kind === 'shopping' });
+rerenderPacking(trip);
 });
 section.querySelectorAll('[data-packing-unlink]').forEach((x) => {
 x.addEventListener('click', () => { unlinkPackingItem(trip, x.dataset.itemId); rerenderPacking(trip); });

@@ -636,14 +636,11 @@ select.innerHTML = cals.length ? cals.map((c) => `<option value="${escapeHtml(c.
 // packing.js's own module-library logic, so it stays out of this tab's
 // up-front load.
 if (el.querySelector('[data-packing-mount]')) {
-import('./packing.js').then(({ packingSectionHtml, bindPacking, generatePackingItems }) => {
+import('./packing.js').then(({ packingSectionHtml, bindPacking }) => {
 el.querySelectorAll('[data-packing-mount]').forEach((mount) => {
-const trip = tripById(mount.dataset.packingMount);
-// First time this trip's packing section has ever rendered -- generate
-// straight away so a new trip shows its default modules without
-// requiring a manual "Refresh" click first.
-if (trip && !trip.packing.generatedAt) generatePackingItems(trip);
-mount.outerHTML = packingSectionHtml(trip);
+// Nothing generated until "Generate packing list" is pressed -- a new
+// trip carries no packing list at all by default, see packing.js.
+mount.outerHTML = packingSectionHtml(tripById(mount.dataset.packingMount));
 });
 bindPacking(el);
 });
