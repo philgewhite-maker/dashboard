@@ -590,9 +590,16 @@ return tile('CASS', `${logo}${letting.money(item.amount)}`, '',
 }
 if (item.kind === 'sitehealth') {
 const { check, row } = item.worst;
-return tile('Checks', `${item.count} failing`, '',
-`${check.label}: ${row.detail || 'failing'}${item.count > 1 ? ` (and ${item.count - 1} other check${item.count === 2 ? '' : 's'})` : ''}. Click to open Settings → Site health.`,
-{ auto: true, gotoTab: 'settings', gotoTarget: '#site-health-table' });
+// Naming the check directly in the tile's own value, not just its
+// title tooltip -- a tooltip needs a hover or a long-press, neither
+// reliable on a phone, which is exactly where "where IS the failing
+// check" turned out to be unanswerable from the ticker alone. Jumps
+// straight to that check's own row (site-health-row-<id>, added to
+// sitehealth.js's table for this), not just the table in general, so
+// even with several failing you land on the one actually named here.
+return tile('Checks', escapeHtml(item.count === 1 ? check.label : `${item.count} failing`), '',
+`${check.label}: ${row.detail || 'failing'}${item.count > 1 ? ` (and ${item.count - 1} other check${item.count === 2 ? '' : 's'} -- this names the longest-broken one)` : ''}. Click to open it.`,
+{ auto: true, gotoTab: 'settings', gotoTarget: `#site-health-row-${check.id}` });
 }
 if (item.kind === 'holding') {
 const fxHit = c[keyFor({ kind: 'fx', base: HOME, quote: 'EUR' })];

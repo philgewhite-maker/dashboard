@@ -220,7 +220,7 @@ const el = document.getElementById('site-health-table');
 if (!el) return;
 el.innerHTML = `<table class="limits-table">
 <thead><tr><th>Check</th><th>Status</th><th></th></tr></thead>
-<tbody>${CHECKS.map((c) => `<tr>
+<tbody>${CHECKS.map((c) => `<tr id="site-health-row-${escapeHtmlLocal(c.id)}">
 <td>${escapeHtmlLocal(c.label)}<div class="settings-note" style="margin:0;">${escapeHtmlLocal(c.note)}</div></td>
 <td>${statusHtml(c)}</td>
 <td>${c.run ? `<button class="sync-btn sm" type="button" data-health-run="${escapeHtmlLocal(c.id)}">Run now</button>` : ''}</td>
