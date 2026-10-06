@@ -889,6 +889,14 @@ renderAirbnbKeys();
 const GUEST_NAME_SUBJECT_RE = /^Reservation confirmed\s*[-–—]\s*(.+?)\s+arrives\s+(.+)$/i;
 const GUEST_NAME_QUERY = 'subject:"Reservation confirmed" subject:"arrives"';
 const GUEST_NAME_SEARCH_LIMIT = 25;
+// The same email's payout breakdown -- "Host payout / Total Stay Price /
+// £400.00 / Host service fee (3.0% + VAT) / -£14.40 / You earn / £385.60"
+// -- "You earn" is the one line that's already the net figure, so no
+// fee subtraction needs doing here. A loose gap between the words and
+// the amount (rather than requiring them adjacent) since stripHtml
+// turns Airbnb's own table layout into plain text with whatever
+// whitespace/line breaks happened to fall between the two.
+const PAYOUT_RE = /you\s*earn[\s\S]{0,60}?£\s*([\d,]+\.\d{2})/i;
 const MONTH_NAMES = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 
 // The subject carries a day+month with no year ("23 Sept" or "Sept 23"
@@ -933,11 +941,16 @@ return candidates.length === 1 ? candidates[0] : null;
 // translateText. The original script is kept in notes (appended, not
 // overwriting anything already there) so the romanization can be
 // double-checked against it rather than trusted blind.
+//
+// The payout ("You earn £X.XX") rides along on the SAME email, but isn't
+// in the subject -- the search above only fetches metadata (cheap, fine
+// for 25 messages at once), so a matched reservation gets ONE extra
+// format=full fetch for its own body, not all of them up front.
 async function syncGuestNamesFromEmail() {
 const pending = data.airbnbReservations.filter((r) => !r.guestName && r.checkout >= todayStr());
 if (!pending.length || !(await canAttemptGoogleAction())) return { filled: 0 };
 
-const { fetchMailSearches } = await import('../googlemail.js');
+const { fetchMailSearches, getMessageDetail } = await import('../googlemail.js');
 const search = { kind: 'query', value: GUEST_NAME_QUERY, maxDays: 0, maxEvents: GUEST_NAME_SEARCH_LIMIT };
 let sections;
 try {
@@ -949,6 +962,7 @@ return { filled: 0, error: err.message || String(err) };
 
 let filled = 0;
 let romanizeFailed = 0;
+let incomeFilled = 0;
 for (const m of sections[0]?.messages || []) {
 const subjectMatch = GUEST_NAME_SUBJECT_RE.exec(String(m.subject || '').trim());
 if (!subjectMatch) continue;
@@ -980,10 +994,24 @@ reservation.guestName = name;
 if (name !== rawName) {
 reservation.notes = reservation.notes ? `${reservation.notes} · Booking name: ${rawName}` : `Booking name: ${rawName}`;
 }
+if (reservation.income == null) {
+try {
+const detail = await getMessageDetail(m.id);
+const payoutMatch = PAYOUT_RE.exec(detail.bodyText || '');
+if (payoutMatch) {
+reservation.income = Number(payoutMatch[1].replace(/,/g, ''));
+incomeFilled++;
+}
+} catch (err) {
+// Never blocks the name fill this function exists for -- the payout
+// is a bonus extraction on top of it, typeable by hand same as always.
+console.error('Payout extraction failed, leaving income blank:', err);
+}
+}
 filled++;
 }
 if (filled) queueSave();
-return { filled, romanizeFailed };
+return { filled, romanizeFailed, incomeFilled };
 }
 
 // ---- Google Calendar push -------------------------------------------------
@@ -1109,7 +1137,7 @@ renderPlanner();
 const failed = data.airbnbListings.filter((l) => data.airbnbSyncStatus[l.id] && !data.airbnbSyncStatus[l.id].ok);
 if (!failed.length) {
 const guestNote = guestResult.filled
-? ` Filled in ${guestResult.filled} guest name${guestResult.filled === 1 ? '' : 's'} from email${guestResult.romanizeFailed ? ` (${guestResult.romanizeFailed} left in the original script — add an Anthropic key on THIS device in ${MISSING_KEY_LINK_HTML} to romanize ${guestResult.romanizeFailed === 1 ? 'it' : 'them'})` : ''}.`
+? ` Filled in ${guestResult.filled} guest name${guestResult.filled === 1 ? '' : 's'} from email${guestResult.romanizeFailed ? ` (${guestResult.romanizeFailed} left in the original script — add an Anthropic key on THIS device in ${MISSING_KEY_LINK_HTML} to romanize ${guestResult.romanizeFailed === 1 ? 'it' : 'them'})` : ''}${guestResult.incomeFilled ? `, ${guestResult.incomeFilled} with the payout too` : ''}.`
 : '';
 status.innerHTML = `Synced just now.${guestNote}`;
 } else {

@@ -973,10 +973,12 @@ id: uid(),
 listingId: '', uid: '', source: 'ics',
 checkin: '', checkout: '', // ISO yyyy-mm-dd, checkout is exclusive (the turnover day, not an occupied night)
 guestName: '', notes: '',
-// What the stay earned, typed in by you, and the date it was turned
-// into a ledger entry. `accruedAt` is what stops a stay being charged
-// twice: the accrual runs on every app open and skips anything it has
-// already written.
+// What the stay earned -- filled in from the same "Reservation
+// confirmed" email syncGuestNamesFromEmail() already reads for the
+// guest name (airbnb.js), or typed in by hand when that doesn't find
+// it. Never overwrites a value already there. `accruedAt` is what
+// stops a stay being charged twice: the accrual runs on every app open
+// and skips anything it has already written.
 income: null,
 accruedAt: '',
 googleEventId: '', googleCalendarId: '', // set once pushed, OR always set for source:'external' -- see js/googlecalendar.js's findEvents()/createEvent()
