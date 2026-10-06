@@ -417,6 +417,7 @@ return String(name || '')
 // -- the attribute IS the clean name, no scraping of visible text (or its
 // Personal:/Business: contact-detail noise) needed at all.
 async function fetchCassParticipants() {
+try {
 const { pages } = await run('page.render', { url: CASS_LIST_URL });
 const page = pages?.[0];
 if (!page || !page.html) throw new Error(page?.error || 'the CASS participant list page never came back');
@@ -427,7 +428,17 @@ const list = [...doc.querySelectorAll('.accordion__item.banks-and-building-socie
 if (!list.length) throw new Error("couldn't read the CASS participant list -- the page's own markup may have changed");
 data.cassParticipants = { list, fetchedAt: new Date().toISOString() };
 queueSave();
+import('./sitehealth.js').then(({ reportCheck }) => reportCheck('cass-participant-list', true, `${list.length} participants found`));
 return list;
+} catch (err) {
+// Live sync just not being set up yet isn't a site-health failure --
+// same exclusion runAutomaticSwitchCheck already makes for the
+// identical reason, just below.
+if (!(err instanceof AgentNotConfiguredError)) {
+import('./sitehealth.js').then(({ reportCheck }) => reportCheck('cass-participant-list', false, err.message || String(err)));
+}
+throw err;
+}
 }
 
 async function cassParticipants() {
@@ -454,6 +465,14 @@ if (!page || !page.html) throw new Error(page?.error || 'the page never came bac
 const doc = parseAndStripDoc(page.html);
 const cashbackText = cleanPastedText(extractSection(doc, 'cashback'));
 const switchText = cleanPastedText(extractSection(doc, 'switch'));
+// The real #cashback section runs to several thousand characters
+// (confirmed live) -- anything near-empty means the sibling-walk
+// extraction found the anchor but not real content under it, i.e. the
+// page's own markup around #cashback moved. A SEPARATE anchor from
+// #switch (which mse-bank-switch already watches), so the two can break
+// independently of each other.
+import('./sitehealth.js').then(({ reportCheck }) => reportCheck('mse-cashback-section', cashbackText.length >= 200,
+cashbackText.length >= 200 ? `${cashbackText.length} characters extracted` : `only ${cashbackText.length} characters -- the #cashback section's markup may have changed`));
 const ownAccounts = data.financeAccounts
 .filter((a) => a.accountType === 'Current account' && !a.closeDate)
 .map((a) => ({

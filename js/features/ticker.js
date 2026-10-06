@@ -28,6 +28,7 @@ import { data, queueSave } from '../state.js';
 import { escapeHtml, uid } from '../utils.js';
 import * as letting from './letting.js';
 import { matchBankLogo } from '../bankLogos.js';
+import { CHECKS as SITE_HEALTH_CHECKS, reportCheck as reportSiteHealth } from './sitehealth.js';
 
 // A feed is re-fetched when its cached answer is older than this. FX and
 // the swap rate are published once a day, so the floor is about not
@@ -69,6 +70,7 @@ case 'quote': return `quote:${item.symbol}`;
 case 'weather': return `wx:${Number(item.lat).toFixed(2)},${Number(item.lon).toFixed(2)}`;
 case 'sonia': return 'sonia';
 case 'cass': return `cass:${item.accountId}:${item.bonusId}`;
+case 'sitehealth': return 'sitehealth';
 default: return item.kind;
 }
 }
@@ -131,13 +133,19 @@ async function fetchQuote(item) {
 const key = keyFor(item);
 const cached = fresh(key);
 if (cached) return cached;
-const raw = await viaProxy(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(item.symbol)}?range=1mo&interval=1d`);
+// events=div costs nothing extra for an ordinary quote tile (just unused
+// JSON) and is what lets the Holding tile below flag "ex-div" for a
+// couple of weeks after a real payout -- range stays 1mo, unchanged,
+// since prevMonth below depends on the array covering exactly that.
+const raw = await viaProxy(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(item.symbol)}?range=1mo&interval=1d&events=div`);
 const body = JSON.parse(raw);
 const result = ((body.chart || {}).result || [])[0];
 if (!result) throw new Error(`Yahoo returned no data for ${item.symbol}`);
 const meta = result.meta || {};
 const closes = (((result.indicators || {}).quote || [])[0] || {}).close || [];
 const known = closes.filter((c) => typeof c === 'number');
+const dividends = Object.values((result.events || {}).dividends || {});
+const lastDividendAt = dividends.length ? iso(new Date(Math.max(...dividends.map((d) => d.date * 1000)))) : null;
 return store(key, {
 value: meta.regularMarketPrice,
 currency: meta.currency || '',
@@ -145,6 +153,7 @@ currency: meta.currency || '',
 // previous DAY is the second-to-last point in the series itself.
 prevDay: known.length > 1 ? known[known.length - 2] : meta.chartPreviousClose ?? null,
 prevMonth: known.length ? known[0] : null,
+lastDividendAt,
 });
 }
 const WMO = [
@@ -401,13 +410,30 @@ amount: Number(sb.amount) || 0, description: sb.description || '',
 return items;
 }
 
+// A single escalation tile, present only while at least one site-health
+// check is actually failing -- not a tile per check (a bad day for three
+// checks at once shouldn't crowd out everything else on the strip), and
+// gone the moment every check is passing again, same as a CASS tile
+// disappearing once its bonus is no longer "Working on". "Worst" is
+// whichever's been broken longest, since that's the one most worth
+// looking at first.
+function siteHealthFailureItems() {
+const health = data.siteHealth || {};
+const failing = SITE_HEALTH_CHECKS
+.map((c) => ({ check: c, row: health[c.id] }))
+.filter((x) => x.row && x.row.ok === false)
+.sort((a, b) => (a.row.brokenSince || '').localeCompare(b.row.brokenSince || ''));
+if (!failing.length) return [];
+return [{ id: 'auto-sitehealth', kind: 'sitehealth', auto: true, count: failing.length, worst: failing[0] }];
+}
+
 // Your own list plus the travel ones, with duplicates dropped: a trip to
 // Dublin shouldn't give you a second GBP/EUR tile next to the one you
 // already keep.
 function activeItems() {
 const mine = (data.ticker.items || []).filter((i) => !i.hidden);
 const seen = new Set(mine.map(keyFor));
-const extra = [...travelItems(), ...cassBonusItems()].filter((i) => !seen.has(keyFor(i)));
+const extra = [...travelItems(), ...cassBonusItems(), ...siteHealthFailureItems()].filter((i) => !seen.has(keyFor(i)));
 return [...mine, ...extra];
 }
 
@@ -507,7 +533,7 @@ return `<span class="${cls}">${escapeHtml(shown)}</span>`;
 // A link where there's a page worth landing on, a plain span where there
 // isn't -- a tile that looks clickable and does nothing is worse than one
 // that doesn't invite the click.
-function tile(label, value, change, title, { href = '', edit = false, auto = false, tripId = '', accountId = '' } = {}) {
+function tile(label, value, change, title, { href = '', edit = false, auto = false, tripId = '', accountId = '', gotoTab = '', gotoTarget = '' } = {}) {
 const attrs = `class="tick${auto ? ' tick-auto' : ''}" title="${escapeHtml(title || '')}"`;
 const inner = `<span class="tick-label">${escapeHtml(label)}</span>
 <span class="tick-value">${value}</span>
@@ -521,7 +547,15 @@ const plane = tripId
 // reference rule), so it has to link back the same way the trip plane
 // does -- the whole tile is the target here rather than a second icon,
 // since there's no separate "forecast" the tile would otherwise open.
-const extraAttr = edit ? ' data-ticker-edit="1"' : accountId ? ` data-ticker-account="${escapeHtml(accountId)}"` : '';
+// gotoTab/gotoTarget is the simpler, generic form of the same idea --
+// app.js's own document-level `[data-goto-tab]` handler already does
+// switchTab + open-the-settings-group + scrollAndFlash for free, so a
+// tile pointing into Settings (site health, anything added later) needs
+// no bespoke click handler of its own the way accountId still has.
+const extraAttr = edit ? ' data-ticker-edit="1"'
+: accountId ? ` data-ticker-account="${escapeHtml(accountId)}"`
+: gotoTab ? ` data-goto-tab="${escapeHtml(gotoTab)}"${gotoTarget ? ` data-goto-target="${escapeHtml(gotoTarget)}"` : ''}`
+: '';
 if (href) return `<span class="tick-pair">${plane}<a ${attrs} href="${escapeHtml(href)}" target="_blank" rel="noopener">${inner}</a></span>`;
 return `<span class="tick-pair">${plane}<span ${attrs}${extraAttr}>${inner}</span></span>`;
 }
@@ -554,6 +588,12 @@ return tile('CASS', `${logo}${letting.money(item.amount)}`, '',
 `${item.bank}${item.description ? ` — ${item.description}` : ''}. Switch bonus still being worked on — click to open the account.`,
 { auto: true, accountId: item.accountId });
 }
+if (item.kind === 'sitehealth') {
+const { check, row } = item.worst;
+return tile('Checks', `${item.count} failing`, '',
+`${check.label}: ${row.detail || 'failing'}${item.count > 1 ? ` (and ${item.count - 1} other check${item.count === 2 ? '' : 's'})` : ''}. Click to open Settings → Site health.`,
+{ auto: true, gotoTab: 'settings', gotoTarget: '#site-health-table' });
+}
 if (item.kind === 'holding') {
 const fxHit = c[keyFor({ kind: 'fx', base: HOME, quote: 'EUR' })];
 const dbkHit = c[keyFor({ kind: 'quote', symbol: t.holdingSymbol || 'DBK.DE' })];
@@ -567,10 +607,19 @@ return tile('Holding', '<span class="tick-flat">set shares</span>', '',
 }
 const gbp = (t.shares * dbkHit.value) / fxHit.value;
 const prev = pick(dbkHit) && pick(fxHit) ? (t.shares * pick(dbkHit)) / pick(fxHit) : null;
-return tile('Holding', `£${Math.round(gbp).toLocaleString('en-GB')}`, changeHtml(gbp, prev),
+// Flagged for 14 days after a real payout, or until you next edit the
+// count (editShares() stamps exDivClearedAt then) -- whichever comes
+// first. The per-share price drops by roughly the dividend amount on
+// that date, so without this a holding that's actually fine reads as a
+// sudden loss.
+const daysSinceDiv = dbkHit.lastDividendAt ? (Date.now() - new Date(dbkHit.lastDividendAt).getTime()) / 86400000 : Infinity;
+const cleared = t.exDivClearedAt && dbkHit.lastDividendAt && new Date(t.exDivClearedAt) >= new Date(dbkHit.lastDividendAt);
+const exDiv = daysSinceDiv <= 14 && !cleared;
+return tile('Holding', `£${Math.round(gbp).toLocaleString('en-GB')}${exDiv ? ' ex-div' : ''}`, changeHtml(gbp, prev),
 `${t.shares.toFixed(2)} shares at ${dbkHit.value.toFixed(2)}, converted at ${fxHit.value.toFixed(4)}.`
 + (t.lastBuy ? ` Last added ${t.lastBuy.shares.toFixed(2)} on ${t.lastBuy.on}, priced at €${t.lastBuy.price.toFixed(2)} (${t.lastBuy.paidOn}).` : '')
-+ ' Click to set the count.', { edit: true });
++ (exDiv ? ` Went ex-dividend ${dbkHit.lastDividendAt} -- the price drop is the payout, not a loss.` : '')
++ ' Click to set the count or the monthly amount.', { edit: true });
 }
 
 // A feed that failed says so in its own slot. Several of these need the
@@ -623,6 +672,7 @@ case 'sonia': return '2y SONIA';
 case 'letting': return 'Owed';
 case 'holding': return 'Holding';
 case 'cass': return 'CASS';
+case 'sitehealth': return 'Checks';
 default: return item.kind;
 }
 }
@@ -648,7 +698,12 @@ data.ticker.mode = monthly ? 'day' : 'month';
 queueSave();
 renderTicker();
 });
-el.querySelector('[data-ticker-edit]')?.addEventListener('click', editShares);
+// querySelectorAll, not querySelector -- the track is rendered TWICE
+// (the second .tick-run copy just below, for the seamless scroll loop),
+// so a singular query only ever bound the first copy and left clicks on
+// the second one doing nothing, depending on which copy a click landed
+// on.
+el.querySelectorAll('[data-ticker-edit]').forEach((span) => span.addEventListener('click', editShares));
 // Reuses Travel's own reveal rather than a second way of showing a trip.
 el.querySelectorAll('[data-open-trip]').forEach((btn) => {
 btn.addEventListener('click', async () => {
@@ -703,6 +758,15 @@ t.shares = n;
 // Counted from today, so entering a corrected number doesn't replay
 // purchases that number already includes.
 t.sharesAt = iso(new Date());
+// Editing the count is itself the "I've seen this" action the ex-div
+// flag exists to prompt -- clears it immediately rather than making the
+// 14 days run regardless of whether you've already acted on it.
+t.exDivClearedAt = new Date().toISOString();
+const monthlyNow = prompt('Monthly contribution (£), added on the first business day of each month:', String(t.monthlyGbp));
+if (monthlyNow !== null) {
+const m = Number(monthlyNow);
+if (Number.isFinite(m) && m >= 0) t.monthlyGbp = m;
+}
 queueSave();
 renderTicker();
 }
@@ -726,6 +790,11 @@ try { await geocode(d.place); } catch (err) { console.error('Ticker: geocode fai
 const jobs = activeItems().filter((i) => i.kind !== 'holding');
 await Promise.all(jobs.map(async (item) => {
 const key = keyFor(item);
+// Both ride on an undocumented third-party endpoint with no stability
+// contract (see sitehealth.js's own note on each) -- reported here,
+// at their one real trigger, rather than a second canary fetch asking
+// the same question again.
+const healthCheckId = item.kind === 'sonia' ? 'sonia-swap-feed' : item.kind === 'quote' ? 'yahoo-finance-quote' : '';
 try {
 if (item.kind === 'fx') await fetchFx(item);
 else if (item.kind === 'quote') await fetchQuote(item);
@@ -734,6 +803,7 @@ else if (item.kind === 'sonia') await fetchSonia();
 // Any previous failure is cleared by a success, so a tile that has
 // started working stops apologising for yesterday.
 if (cache()[key]) delete cache()[key].error;
+if (healthCheckId) reportSiteHealth(healthCheckId, true, `${labelFor(item)} refreshed OK`);
 } catch (err) {
 console.error(`Ticker: ${key} failed:`, err);
 // A tile that simply vanishes is the worst of both worlds: you can
@@ -742,6 +812,7 @@ console.error(`Ticker: ${key} failed:`, err);
 const existing = cache()[key] || {};
 cache()[key] = { ...existing, error: err.message || String(err), erroredAt: new Date().toISOString() };
 queueSave();
+if (healthCheckId) reportSiteHealth(healthCheckId, false, err.message || String(err));
 }
 }));
 try { await accrueShares(); } catch (err) { console.error('Ticker: share accrual failed:', err); }

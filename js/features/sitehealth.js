@@ -55,6 +55,39 @@ id: 'mse-bank-switch', label: 'MoneySavingExpert — bank switch offers', site: 
 note: 'Reported by runAutomaticSwitchCheck() / the "Check via home agent" button (switchoffers.js) whenever the home-agent page.render fetch runs -- nothing runs from here, this only shows the last result. Same shape as the two cashback checks above.',
 run: null, reportedExternally: true,
 },
+{
+id: 'health-sync', label: 'Life Dashboard — health sync', site: 'health.php (your own server)',
+note: 'Checks that the bridge app on your phone has actually posted something recently, not just that health.php answers -- a stale feed still returns 200 OK on every GET, which is exactly how the Sept 16 gap went unnoticed for weeks. Also reported straight from Settings → Health data and the Health tab\'s "Sync & parse" (health.js) whenever either actually runs, so this reflects the real last-known state rather than waiting for its own weekly sweep.',
+run: runHealthSyncCheck,
+},
+// Four more below, added on a deliberate sweep for "things this app
+// depends on staying the same shape that we don't control" -- each one
+// a page/endpoint this codebase has already been burned by going quiet
+// (see this file's own header), just not yet given a place to report
+// in. All four are reportedExternally: each already has a real trigger
+// of its own (the ticker refreshing, a Switch-opportunities button),
+// so this wires INTO that existing fetch rather than adding a second
+// one that would just be asking the same question twice.
+{
+id: 'sonia-swap-feed', label: 'Chatham — 2y SONIA swap feed', site: 'cf.com (Chatham Financial)',
+note: 'Reported by fetchSonia() (ticker.js) on every ticker refresh -- an undocumented JSON endpoint behind Cloudflare, parsed by picking out the 24-month tenor by name; either the tenor list or the field names changing would silently break the Overview tile otherwise.',
+run: null, reportedExternally: true,
+},
+{
+id: 'yahoo-finance-quote', label: 'Yahoo Finance — chart endpoint', site: 'query1.finance.yahoo.com',
+note: 'Reported by fetchQuote() (ticker.js) whenever a share/commodity ticker tile refreshes -- an unofficial endpoint (no public contract) also used for the DBK share-scheme pricing. Yahoo has changed this shape before with no notice.',
+run: null, reportedExternally: true,
+},
+{
+id: 'cass-participant-list', label: 'Current Account Switch Service — participant list', site: 'currentaccountswitch.co.uk',
+note: 'Reported by fetchCassParticipants() (switchoffers.js) whenever the cached list goes stale (every 90 days) and gets re-fetched. Deterministic name-matching against this list is what the user explicitly asked for instead of an AI guess, so a change to this page\'s own markup (the .accordion__item class, its data-value attribute) would quietly make every CASS-eligibility answer wrong rather than fail loudly.',
+run: null, reportedExternally: true,
+},
+{
+id: 'mse-cashback-section', label: 'MoneySavingExpert — ongoing cashback section', site: 'moneysavingexpert.com',
+note: 'Reported by checkAccountValue() (switchoffers.js, the "Ongoing account value" check) whenever it runs -- a SEPARATE page anchor (#cashback) from the one mse-bank-switch already watches (#switch), extracted the same sibling-walk way, so the two sections can break independently of each other.',
+run: null, reportedExternally: true,
+},
 ];
 
 function store() {
@@ -121,6 +154,43 @@ throw new Error(`${offColour.length} of ${items.length} results weren't black (e
 return `${items.length} black bras found, all genuinely black.`;
 }
 
+// ---- The health-sync staleness canary ------------------------------------
+//
+// Life Dashboard syncs several times a day in ordinary use, so a gap this
+// long means it's genuinely stopped, not just waiting for its next run --
+// generous enough that the weekly sweep (the fallback for whenever
+// Settings/Health hasn't been opened) doesn't fire a false alarm on an
+// ordinary quiet day, tight enough to catch a real outage long before the
+// next person-driven check would.
+const HEALTH_SYNC_STALE_MS = 36 * 3600000;
+
+// Every top-level key healthparse.js actually knows how to read -- kept
+// here too (not just there) so a payload arriving with none of them can
+// be caught as its own failure mode, distinct from "nothing arrived at
+// all": the bridge app could rename its own fields in an update and every
+// sync would still land a 200 at health.php, just carrying something
+// parseHealthPayloads silently has nothing to do with.
+const HEALTH_PAYLOAD_KEYS = ['steps', 'distance', 'total_calories', 'sleep', 'heart_rate', 'oxygen_saturation', 'weight', 'body_fat', 'exercise'];
+
+// Pure (no fetch of its own) so health.js's "Sync & parse" can reuse it
+// against entries it already fetched, instead of this check fetching a
+// second time for the same answer.
+function healthSyncDetail(entries) {
+if (!entries.length) throw new Error("Nothing received yet from the bridge app.");
+const age = Date.now() - new Date(entries[0].receivedAt).getTime();
+if (age > HEALTH_SYNC_STALE_MS) throw new Error(`Last entry received ${agoLabel(entries[0].receivedAt)} -- the bridge app may have stopped sending.`);
+const payload = entries[0].payload;
+if (!payload || typeof payload !== 'object' || !HEALTH_PAYLOAD_KEYS.some((k) => Array.isArray(payload[k]))) {
+throw new Error('The latest entry arrived, but carries none of the field names this app knows how to parse -- the bridge app may have changed its payload shape.');
+}
+return `Last entry received ${agoLabel(entries[0].receivedAt)}.`;
+}
+
+async function runHealthSyncCheck() {
+const { fetchHealthEntries } = await import('./health.js');
+return healthSyncDetail(await fetchHealthEntries(1));
+}
+
 // ---- Settings panel -----------------------------------------------------
 
 function escapeHtmlLocal(s) {
@@ -166,4 +236,4 @@ renderSiteHealth();
 });
 }
 
-export { CHECKS, reportCheck, runCheck, runAllChecks, renderSiteHealth };
+export { CHECKS, reportCheck, runCheck, runAllChecks, renderSiteHealth, healthSyncDetail };

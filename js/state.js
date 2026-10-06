@@ -1629,6 +1629,10 @@ importStatus: {},
 ticker: {
 shares: 0, sharesAt: '', monthlyGbp: 250, vestYears: 5, mode: 'day',
 holdingSymbol: 'DBK.DE',
+// Set whenever editShares() (ticker.js) saves a new share count --
+// suppresses the Holding tile's "ex-div" flag once you've acted on it,
+// so it doesn't keep showing for the full 14 days regardless.
+exDivClearedAt: '',
 items: [
 { id: 'fx-eur', kind: 'fx', base: 'GBP', quote: 'EUR' },
 { id: 'q-dbk', kind: 'quote', symbol: 'DBK.DE', label: 'DBK' },

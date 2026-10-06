@@ -178,7 +178,23 @@ renderHealthChart();
 // pulling what's new since the last parse.
 async function parseAndStoreHealthData(statusEl) {
 if (statusEl) statusEl.textContent = 'Fetching…';
-const entries = await fetchHealthEntries(PARSE_FETCH_LIMIT);
+// Same freshness check sitehealth.js's own weekly sweep runs, reported
+// here too so a staleness gap (see its own comment -- a stale feed still
+// answers every GET with 200 OK) is caught the moment anyone actually
+// looks at the Health tab, not only on that sweep's own cadence.
+const { reportCheck, healthSyncDetail } = await import('./sitehealth.js');
+let entries;
+try {
+entries = await fetchHealthEntries(PARSE_FETCH_LIMIT);
+} catch (err) {
+reportCheck('health-sync', false, err.message || String(err));
+throw err;
+}
+try {
+reportCheck('health-sync', true, healthSyncDetail(entries));
+} catch (staleErr) {
+reportCheck('health-sync', false, staleErr.message || String(staleErr));
+}
 data.healthDaily = parseHealthPayloads(entries);
 queueSave();
 renderHealthDaily();
