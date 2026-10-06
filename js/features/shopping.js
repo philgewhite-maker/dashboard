@@ -1158,7 +1158,7 @@ if (!el) return;
 // showing "who fits this 36C bra" on an unlocked phone is exactly what
 // that gate is for. See SENSITIVE_BLOCKS in state.js.
 if (!sensitiveFieldsShown()) {
-el.innerHTML = '<div class="settings-note" style="margin:0;">Hidden on this device. Turn on sensitive fields in Settings to show it.</div>';
+el.innerHTML = '<div class="settings-note" style="margin:0;">Hidden on this device. Turn on sensitive fields in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#sensitive-fields-toggle">Settings</span> to show it.</div>';
 return;
 }
 el.innerHTML = `<div class="sync-row" style="margin-bottom:8px;flex-wrap:wrap;">

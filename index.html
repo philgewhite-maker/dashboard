@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v488</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v489</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -2773,11 +2773,27 @@ Finds connections whose cover photo is missing or is really just the small place
 <h2><span class="dot plum"></span>Settings</h2>
 </div>
 
-<details class="settings-group">
+<div class="settings-pill-row">
+<span class="pick-chip" data-goto-tab="settings" data-goto-target="#settings-group-account">Account &amp; sync</span>
+<span class="pick-chip" data-goto-tab="settings" data-goto-target="#settings-group-privacy">Privacy</span>
+<span class="pick-chip" data-goto-tab="settings" data-goto-target="#settings-group-features">Feature preferences</span>
+<span class="pick-chip" data-goto-tab="settings" data-goto-target="#settings-group-calendar">Calendar &amp; Planner</span>
+<span class="pick-chip" data-goto-tab="settings" data-goto-target="#settings-group-mail">Mail</span>
+<span class="pick-chip" data-goto-tab="settings" data-goto-target="#settings-group-finances">Finances</span>
+<span class="pick-chip" data-goto-tab="settings" data-goto-target="#settings-group-capture">Capture &amp; Shopping</span>
+<span class="pick-chip" data-goto-tab="settings" data-goto-target="#settings-group-ai">AI features</span>
+<span class="pick-chip" data-goto-tab="settings" data-goto-target="#settings-group-advanced">Advanced</span>
+</div>
+
+<details class="settings-group" id="settings-group-account">
 <summary><span class="dot teal"></span>Account &amp; sync</summary>
 
+<details class="settings-subgroup">
+<summary>Google</summary>
+
+<details class="settings-item">
+<summary><h3>Google account</h3></summary>
 <div class="settings-block">
-<h3>Google account</h3>
 <div class="settings-note" style="margin:0 0 8px;">Sign in/out button lives in the header, since it's needed often.</div>
 <div class="settings-note" id="sync-account"></div>
 <div class="settings-note" id="sync-status"></div>
@@ -2787,9 +2803,52 @@ Finds connections whose cover photo is missing or is really just the small place
 </div>
 <div class="settings-note" id="drive-sync-status"></div>
 </div>
+</details>
 
+<details class="settings-item">
+<summary><h3>Google Contacts</h3></summary>
 <div class="settings-block">
-<h3>Live sync (your own server)</h3>
+<div class="settings-note" style="margin:0 0 8px;">Matching reads your contacts. Writing back is a separate, much broader permission — it can change and clear fields in your real address book — so it's off unless you turn it on here.</div>
+<label class="settings-note" style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0;">
+<input type="checkbox" id="contacts-write-toggle">
+Allow writing back to Google Contacts (e.g. saving a birthday)
+</label>
+<div class="settings-note" id="contacts-write-note"></div>
+</div>
+</details>
+
+<details class="settings-item">
+<summary><h3>Google Calendar</h3></summary>
+<div class="settings-block">
+<div class="settings-note" style="margin:0 0 8px;">Calendars are read to show upcoming events. Creating events (the Planner tab's "Push to Google Calendar" step) is a separate permission — so it's off unless you turn it on here.</div>
+<label class="settings-note" style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0;">
+<input type="checkbox" id="calendar-write-toggle">
+Allow creating events in Google Calendar (Planner tab)
+</label>
+<div class="settings-note" id="calendar-write-note"></div>
+</div>
+</details>
+
+<details class="settings-item">
+<summary><h3>Photo sync</h3></summary>
+<div class="settings-block">
+<div class="settings-note" style="margin:0 0 8px;">
+Photos added before task attachments existed live only on the device that added them &mdash; their ids sync, but the images don't, so a connection imported on the desktop shows initials instead of a face on the phone. This uploads them to your own server (the same one as live sync and attachments) so they appear everywhere. Safe to re-run, and safe to stop partway.
+</div>
+<div id="photosync-body"></div>
+<div class="sync-row" style="margin-top:8px;">
+<button class="sync-btn" id="photosync-refresh" type="button">Re-check</button>
+</div>
+</div>
+</details>
+</details>
+
+<details class="settings-subgroup">
+<summary>Self-hosted sync</summary>
+
+<details class="settings-item">
+<summary><h3>Live sync (your own server)</h3></summary>
+<div class="settings-block">
 <div class="settings-note" style="margin:0 0 8px;">Saves changes to your own hosting automatically, a couple of seconds after you stop typing, and picks up changes from your other devices. No sign-in, so nothing expires. Leave both boxes empty to stay on manual Google Drive push/pull above.</div>
 <label for="sync-url-input" style="font-size:13px;font-weight:500;display:block;margin-bottom:6px;">Sync URL</label>
 <input type="text" autocomplete="off" id="sync-url-input" class="settings-input" placeholder="https://georgewhiteeuropean.co.uk/sync.php">
@@ -2805,18 +2864,155 @@ Finds connections whose cover photo is missing or is really just the small place
 </div>
 <div class="settings-note">Android only. Dashboard Capture is a small companion app for sharing images and files in, since Chrome drops shared files on some phones. Install it, then tap this on the phone to hand it the URL and secret above &mdash; you confirm them in the app.</div>
 </div>
+</details>
 
+<details class="settings-item">
+<summary><h3>Devices</h3></summary>
 <div class="settings-block">
+<div class="settings-note" style="margin:0 0 10px;">Each device can carry its own token instead of the shared secret, so one can be cut off without re-pairing the rest. Add a device here and nothing long-lived travels: the code expires in ten minutes and works once, which makes it safe to send however is convenient. Needs <code>pair.php</code> and <code>auth.php</code> on the server.</div>
+<div class="sync-row">
+<button class="sync-btn" id="pair-start-btn" type="button">Add a device&hellip;</button>
+<button class="sync-btn sm" id="pair-refresh-btn" type="button">Refresh list</button>
+<span class="sync-status" id="pair-status"></span>
+</div>
+<div id="pair-code-box" hidden></div>
+<div id="pair-devices" style="margin-top:10px;"></div>
+<details class="settings-subgroup" style="margin-top:12px;">
+<summary id="pair-redeem-summary">Enter a pairing code on this device</summary>
+<div class="settings-note" style="margin:8px 0;">Open the pairing link on this device instead if you can; it fills both boxes in. Otherwise copy the sync URL from a paired device and type the code.</div>
+<input type="text" autocomplete="off" id="pair-redeem-url" class="settings-input" placeholder="https://your-host/sync.php">
+<input type="text" autocomplete="off" id="pair-redeem-code" class="settings-input" style="margin-top:8px;" placeholder="ABCD-EFGH">
+<input type="text" autocomplete="off" id="pair-redeem-label" class="settings-input" style="margin-top:8px;" placeholder="What to call this device">
+<div class="sync-row" style="margin-top:8px;">
+<button class="sync-btn" id="pair-redeem-btn" type="button">Pair this device</button>
+<span class="sync-status" id="pair-redeem-status"></span>
+</div>
+</details>
+</div>
+</details>
+
+<details class="settings-item">
+<summary><h3>Scheduled syncs</h3></summary>
 <div class="settings-block">
+<div class="settings-note" style="margin:0 0 10px;">Presses the Sync buttons for you when you open the app, for anything that hasn't run recently. Health data and the Airbnb ICS feeds also refresh while the app is closed, if your browser allows it &mdash; Chrome grants that only to an installed app and picks the timing itself, roughly daily at best. The rest need you signed in to Google: that sign-in issues a one-hour token with no way to renew it unattended, so nothing can refresh Calendar, Mail, Contacts or Google Tasks without a page open.</div>
+<div id="scheduled-tasks"></div>
+</div>
+</details>
+
+<details class="settings-item">
+<summary><h3>Backup</h3></summary>
 <div class="settings-block">
-<h3>Document size</h3>
+<div class="backup-row">
+<button class="log-btn" id="export-btn" type="button">Export backup</button>
+<label class="file-btn" for="import-backup-input">Import backup</label>
+<input type="file" id="import-backup-input" accept="application/json" style="display:none;">
+<span class="settings-note" id="backup-status" style="margin:0;"></span>
+</div>
+</div>
+</details>
+</details>
+
+<details class="settings-subgroup">
+<summary>Security</summary>
+
+<details class="settings-item">
+<summary><h3>Encryption</h3></summary>
+<div class="settings-block">
+<div class="settings-note" style="margin:0 0 10px;">Without this your document sits on the server as readable JSON &mdash; outside <code>public_html</code> and over https, which keeps out the internet but not your host, their backups or anyone holding a credential. With it on, the server stores ciphertext it cannot read and <code>sync.php</code> needs no changes, because it never looks inside the document anyway. <strong>Attachments, the health log and the Telegram log are separate stores and stay plain.</strong></div>
+<div class="settings-note" style="margin:0 0 10px;color:var(--amber);">The server never sees the key, so it cannot reissue it. Lose it from every device and the document is gone, not just locked. Save the recovery key somewhere before you rely on this.</div>
+<div class="sync-row">
+<button class="sync-btn" id="encrypt-on-btn" type="button">Turn on encryption</button>
+<button class="sync-btn sm" id="encrypt-show-key-btn" type="button">Show recovery key</button>
+<span class="sync-status" id="encrypt-status"></span>
+</div>
+<div id="encrypt-key-box" hidden></div>
+<details class="settings-subgroup" style="margin-top:10px;">
+<summary>This device can&rsquo;t read the encrypted copy &mdash; paste the recovery key</summary>
+<input type="text" autocomplete="off" id="encrypt-key-input" class="settings-input" style="margin-top:8px;" placeholder="44 characters from your password manager">
+<div class="sync-row" style="margin-top:8px;">
+<button class="sync-btn" id="encrypt-adopt-btn" type="button">Use this key</button>
+<span class="sync-status" id="encrypt-adopt-status"></span>
+</div>
+</details>
+</div>
+</details>
+</details>
+
+<details class="settings-subgroup">
+<summary>Diagnostics</summary>
+
+<details class="settings-item">
+<summary><h3>Document size</h3></summary>
+<div class="settings-block">
 <div class="settings-note" style="margin:0 0 10px;">Every save re-uploads the whole document, and since encryption was turned on it re-encrypts it first. This says what the thing is actually made of, and how much of it is records that are finished &mdash; which is the question behind &ldquo;should old stuff move to a separate archive?&rdquo;</div>
 <div class="sync-row">
 <button class="sync-btn" id="doc-size-btn" type="button">Measure</button>
 </div>
 <div id="doc-size" style="margin-top:10px;"></div>
 </div>
-<h3>Overview ticker</h3>
+</details>
+
+<details class="settings-item">
+<summary><h3>Site health</h3></summary>
+<div class="settings-block">
+<div class="settings-note" style="margin:0 0 10px;">A standing check that the live sites this app's scheduled tasks and features depend on still answer the way the code assumes &mdash; a page redesign or a new anti-bot block can otherwise fail silently, returning something plausible-looking instead of an error. Each implemented check runs about once a week on its own (bundled into the "Site health checks" scheduled task above); "Not implemented" marks a known candidate with no automated check built yet.</div>
+<div id="site-health-table"></div>
+</div>
+</details>
+</details>
+
+<details class="settings-subgroup">
+<summary>Other data sources</summary>
+
+<details class="settings-item">
+<summary><h3>Health data (Health Connect)</h3></summary>
+<div class="settings-block">
+<div class="settings-note" style="margin:0 0 8px;">
+A browser page has no way to read Health Connect directly &mdash; it's a native Android API with no web equivalent. Instead, a bridge app on your phone (e.g. <strong>HC Webhook</strong> / "Health Connect Webhook" from Google Play) posts whatever data you grant it to <code>health.php</code> on this same server. This panel is a raw viewer for inspecting exactly what's arrived &mdash; see the <span class="inline-goto-link" data-goto-tab="health">Health tab</span> for the parsed daily rollup.
+</div>
+<div class="settings-note" style="margin:0 0 8px;">
+<strong>Setup:</strong> copy <code>server/health.php.example</code> to <code>server/health.php</code>, set <code>$SECRET</code> to the <em>same</em> value as <code>sync.php</code>, upload next to it. In the bridge app, point its webhook target at that URL &mdash; append <code>?secret=&lt;your secret&gt;</code> to it if the app doesn't let you set a custom header.
+</div>
+<div id="health-sync-body"></div>
+<div class="sync-row" style="margin-top:8px;">
+<button class="sync-btn" id="health-sync-refresh" type="button">Check for data</button>
+</div>
+</div>
+</details>
+
+<details class="settings-item">
+<summary><h3>Notion</h3></summary>
+<div class="settings-block">
+<div class="settings-note" style="margin:0 0 8px;">Notion blocks direct browser access, so calls go through <code>notion.php</code> on your own host — which also keeps your Notion token off this device entirely. See README, "Notion".</div>
+<label for="notion-url-input" style="font-size:13px;font-weight:500;display:block;margin-bottom:6px;">Proxy URL</label>
+<input type="text" autocomplete="off" id="notion-url-input" class="settings-input" placeholder="https://georgewhiteeuropean.co.uk/notion.php">
+<label for="notion-db-input" style="font-size:13px;font-weight:500;display:block;margin:10px 0 6px;">Projects database ID</label>
+<input type="text" autocomplete="off" id="notion-db-input" class="settings-input" placeholder="32 characters from the database URL">
+<div class="sync-row" style="margin-top:10px;">
+<button class="sync-btn" id="notion-test-btn" type="button">Test connection</button>
+</div>
+<div class="sync-result" id="notion-test-status"></div>
+<div class="settings-note">Uses the same secret as Live sync above.</div>
+</div>
+</details>
+
+<details class="settings-item">
+<summary><h3>Telegram bot</h3></summary>
+<div class="settings-block">
+<div class="settings-note" style="margin:0 0 8px;">Lets family members be messaged and reply back into the app &mdash; see the <span class="inline-goto-link" data-goto-tab="datingadmin">Family panel on Dating admin</span>. Set up server/telegram-bot.php.example (copy it, fill in a bot token from @BotFather and a webhook secret, upload, then register the webhook once — the file's own top comment has the exact steps).</div>
+<label for="telegrambot-url-input" style="font-size:13px;font-weight:500;display:block;margin-bottom:6px;">Bot URL</label>
+<input type="text" autocomplete="off" id="telegrambot-url-input" class="settings-input" placeholder="https://georgewhiteeuropean.co.uk/telegram-bot.php">
+<div class="settings-note">Uses the same secret as Live sync above.</div>
+</div>
+</details>
+</details>
+
+<details class="settings-subgroup">
+<summary>Display</summary>
+
+<details class="settings-item">
+<summary><h3>Overview ticker</h3></summary>
+<div class="settings-block">
 <div class="settings-note" style="margin:0 0 10px;">The strip across the top of Overview. It rotates on its own when it doesn&rsquo;t fit, and stops while you hover or tap it. Weather and currencies need nothing; share prices and the swap rate go through <code>recipe-fetch.php</code>.</div>
 <div id="ticker-items"></div>
 <div class="sync-row" style="margin-top:10px;">
@@ -2832,143 +3028,16 @@ Finds connections whose cover photo is missing or is really just the small place
 <div class="settings-note" style="margin:8px 0 0;">A currency pair is a code like <code>USD</code> or <code>JPY</code> &mdash; always against GBP. A share is a Yahoo Finance symbol: <code>DBK.DE</code>, <code>AAPL</code>, <code>GC=F</code> for gold, <code>BTC-GBP</code> for bitcoin.</div>
 <div class="settings-note" style="margin:6px 0 0;"><strong>Trips add themselves.</strong> A destination on a trip that starts within four weeks gets its own weather tile, and its currency gets an FX tile, both marked in teal with a &#9992; back to the trip. They disappear when the trip ends.</div>
 </div>
-<h3>Encryption</h3>
-<div class="settings-note" style="margin:0 0 10px;">Without this your document sits on the server as readable JSON &mdash; outside <code>public_html</code> and over https, which keeps out the internet but not your host, their backups or anyone holding a credential. With it on, the server stores ciphertext it cannot read and <code>sync.php</code> needs no changes, because it never looks inside the document anyway. <strong>Attachments, the health log and the Telegram log are separate stores and stay plain.</strong></div>
-<div class="settings-note" style="margin:0 0 10px;color:var(--amber);">The server never sees the key, so it cannot reissue it. Lose it from every device and the document is gone, not just locked. Save the recovery key somewhere before you rely on this.</div>
-<div class="sync-row">
-<button class="sync-btn" id="encrypt-on-btn" type="button">Turn on encryption</button>
-<button class="sync-btn sm" id="encrypt-show-key-btn" type="button">Show recovery key</button>
-<span class="sync-status" id="encrypt-status"></span>
-</div>
-<div id="encrypt-key-box" hidden></div>
-<details style="margin-top:10px;">
-<summary class="settings-note" style="cursor:pointer;">This device can&rsquo;t read the encrypted copy &mdash; paste the recovery key</summary>
-<input type="text" autocomplete="off" id="encrypt-key-input" class="settings-input" style="margin-top:8px;" placeholder="44 characters from your password manager">
-<div class="sync-row" style="margin-top:8px;">
-<button class="sync-btn" id="encrypt-adopt-btn" type="button">Use this key</button>
-<span class="sync-status" id="encrypt-adopt-status"></span>
-</div>
 </details>
-</div>
-
-<div class="settings-block">
-<h3>Devices</h3>
-<div class="settings-note" style="margin:0 0 10px;">Each device can carry its own token instead of the shared secret, so one can be cut off without re-pairing the rest. Add a device here and nothing long-lived travels: the code expires in ten minutes and works once, which makes it safe to send however is convenient. Needs <code>pair.php</code> and <code>auth.php</code> on the server.</div>
-<div class="sync-row">
-<button class="sync-btn" id="pair-start-btn" type="button">Add a device&hellip;</button>
-<button class="sync-btn sm" id="pair-refresh-btn" type="button">Refresh list</button>
-<span class="sync-status" id="pair-status"></span>
-</div>
-<div id="pair-code-box" hidden></div>
-<div id="pair-devices" style="margin-top:10px;"></div>
-<details style="margin-top:12px;">
-<summary class="settings-note" style="cursor:pointer;" id="pair-redeem-summary">Enter a pairing code on this device</summary>
-<div class="settings-note" style="margin:8px 0;">Open the pairing link on this device instead if you can; it fills both boxes in. Otherwise copy the sync URL from a paired device and type the code.</div>
-<input type="text" autocomplete="off" id="pair-redeem-url" class="settings-input" placeholder="https://your-host/sync.php">
-<input type="text" autocomplete="off" id="pair-redeem-code" class="settings-input" style="margin-top:8px;" placeholder="ABCD-EFGH">
-<input type="text" autocomplete="off" id="pair-redeem-label" class="settings-input" style="margin-top:8px;" placeholder="What to call this device">
-<div class="sync-row" style="margin-top:8px;">
-<button class="sync-btn" id="pair-redeem-btn" type="button">Pair this device</button>
-<span class="sync-status" id="pair-redeem-status"></span>
-</div>
 </details>
-</div>
-
-<div class="settings-block">
-<h3>Scheduled syncs</h3>
-<div class="settings-note" style="margin:0 0 10px;">Presses the Sync buttons for you when you open the app, for anything that hasn't run recently. Health data and the Airbnb ICS feeds also refresh while the app is closed, if your browser allows it &mdash; Chrome grants that only to an installed app and picks the timing itself, roughly daily at best. The rest need you signed in to Google: that sign-in issues a one-hour token with no way to renew it unattended, so nothing can refresh Calendar, Mail, Contacts or Google Tasks without a page open.</div>
-<div id="scheduled-tasks"></div>
-</div>
-
-<div class="settings-block">
-<h3>Site health</h3>
-<div class="settings-note" style="margin:0 0 10px;">A standing check that the live sites this app's scheduled tasks and features depend on still answer the way the code assumes &mdash; a page redesign or a new anti-bot block can otherwise fail silently, returning something plausible-looking instead of an error. Each implemented check runs about once a week on its own (bundled into the "Site health checks" scheduled task above); "Not implemented" marks a known candidate with no automated check built yet.</div>
-<div id="site-health-table"></div>
-</div>
-
-<div class="settings-block">
-<h3>Google Contacts</h3>
-<div class="settings-note" style="margin:0 0 8px;">Matching reads your contacts. Writing back is a separate, much broader permission — it can change and clear fields in your real address book — so it's off unless you turn it on here.</div>
-<label class="settings-note" style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0;">
-<input type="checkbox" id="contacts-write-toggle">
-Allow writing back to Google Contacts (e.g. saving a birthday)
-</label>
-<div class="settings-note" id="contacts-write-note"></div>
-</div>
-
-<div class="settings-block">
-<h3>Google Calendar</h3>
-<div class="settings-note" style="margin:0 0 8px;">Calendars are read to show upcoming events. Creating events (the Planner tab's "Push to Google Calendar" step) is a separate permission — so it's off unless you turn it on here.</div>
-<label class="settings-note" style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0;">
-<input type="checkbox" id="calendar-write-toggle">
-Allow creating events in Google Calendar (Planner tab)
-</label>
-<div class="settings-note" id="calendar-write-note"></div>
-</div>
-
-<div class="settings-block">
-<h3>Photo sync</h3>
-<div class="settings-note" style="margin:0 0 8px;">
-Photos added before task attachments existed live only on the device that added them &mdash; their ids sync, but the images don't, so a connection imported on the desktop shows initials instead of a face on the phone. This uploads them to your own server (the same one as live sync and attachments) so they appear everywhere. Safe to re-run, and safe to stop partway.
-</div>
-<div id="photosync-body"></div>
-<div class="sync-row" style="margin-top:8px;">
-<button class="sync-btn" id="photosync-refresh" type="button">Re-check</button>
-</div>
-</div>
-
-<div class="settings-block">
-<h3>Health data (Health Connect)</h3>
-<div class="settings-note" style="margin:0 0 8px;">
-A browser page has no way to read Health Connect directly &mdash; it's a native Android API with no web equivalent. Instead, a bridge app on your phone (e.g. <strong>HC Webhook</strong> / "Health Connect Webhook" from Google Play) posts whatever data you grant it to <code>health.php</code> on this same server. This panel is a raw viewer for inspecting exactly what's arrived &mdash; see the <span class="inline-goto-link" data-goto-tab="health">Health tab</span> for the parsed daily rollup.
-</div>
-<div class="settings-note" style="margin:0 0 8px;">
-<strong>Setup:</strong> copy <code>server/health.php.example</code> to <code>server/health.php</code>, set <code>$SECRET</code> to the <em>same</em> value as <code>sync.php</code>, upload next to it. In the bridge app, point its webhook target at that URL &mdash; append <code>?secret=&lt;your secret&gt;</code> to it if the app doesn't let you set a custom header.
-</div>
-<div id="health-sync-body"></div>
-<div class="sync-row" style="margin-top:8px;">
-<button class="sync-btn" id="health-sync-refresh" type="button">Check for data</button>
-</div>
-</div>
-
-<div class="settings-block">
-<h3>Notion</h3>
-<div class="settings-note" style="margin:0 0 8px;">Notion blocks direct browser access, so calls go through <code>notion.php</code> on your own host — which also keeps your Notion token off this device entirely. See README, "Notion".</div>
-<label for="notion-url-input" style="font-size:13px;font-weight:500;display:block;margin-bottom:6px;">Proxy URL</label>
-<input type="text" autocomplete="off" id="notion-url-input" class="settings-input" placeholder="https://georgewhiteeuropean.co.uk/notion.php">
-<label for="notion-db-input" style="font-size:13px;font-weight:500;display:block;margin:10px 0 6px;">Projects database ID</label>
-<input type="text" autocomplete="off" id="notion-db-input" class="settings-input" placeholder="32 characters from the database URL">
-<div class="sync-row" style="margin-top:10px;">
-<button class="sync-btn" id="notion-test-btn" type="button">Test connection</button>
-</div>
-<div class="sync-result" id="notion-test-status"></div>
-<div class="settings-note">Uses the same secret as Live sync above.</div>
-</div>
-
-<div class="settings-block">
-<h3>Telegram bot</h3>
-<div class="settings-note" style="margin:0 0 8px;">Lets family members be messaged and reply back into the app &mdash; see the <span class="inline-goto-link" data-goto-tab="datingadmin">Family panel on Dating admin</span>. Set up server/telegram-bot.php.example (copy it, fill in a bot token from @BotFather and a webhook secret, upload, then register the webhook once — the file's own top comment has the exact steps).</div>
-<label for="telegrambot-url-input" style="font-size:13px;font-weight:500;display:block;margin-bottom:6px;">Bot URL</label>
-<input type="text" autocomplete="off" id="telegrambot-url-input" class="settings-input" placeholder="https://georgewhiteeuropean.co.uk/telegram-bot.php">
-<div class="settings-note">Uses the same secret as Live sync above.</div>
-</div>
-
-<div class="settings-block">
-<h3>Backup</h3>
-<div class="backup-row">
-<button class="log-btn" id="export-btn" type="button">Export backup</button>
-<label class="file-btn" for="import-backup-input">Import backup</label>
-<input type="file" id="import-backup-input" accept="application/json" style="display:none;">
-<span class="settings-note" id="backup-status" style="margin:0;"></span>
-</div>
-</div>
 </details>
 
-<details class="settings-group">
+<details class="settings-group" id="settings-group-privacy">
 <summary><span class="dot slate"></span>Privacy</summary>
 
+<details class="settings-item">
+<summary><h3>My info</h3></summary>
 <div class="settings-block">
-<h3>My info</h3>
 <div class="settings-note" style="margin:0 0 8px;">
 Kept so your own details can be filtered OUT of what a Tinder import or Google Contacts match saves onto a connection &mdash; a phone number you typed in chat to arrange a date is checked against yours before it's ever offered as <em>theirs</em>, and a connection can't get auto-linked to your own contact card. City is also offered as an addable suggestion on the Tinder import form when a match is within a short distance of you.
 </div>
@@ -2983,17 +3052,21 @@ Kept so your own details can be filtered OUT of what a Tinder import or Google C
 <label class="settings-note" style="display:block;margin:0 0 4px;">Address</label>
 <input type="text" autocomplete="off" id="my-address-input" placeholder="e.g. 12 Example St, London">
 </div>
+</details>
 
+<details class="settings-item">
+<summary><h3>Check connections for your own info</h3></summary>
 <div class="settings-block">
-<h3>Check connections for your own info</h3>
 <div class="settings-note" style="margin:0 0 8px;">
 Compares every connection's phone/email/address/aliases against what you entered above, in case an import or a Google Contacts auto-link ever attributed your own details to a match. Clearing a field also resets that connection's contact link, so a re-sync looks for the real match instead of re-applying the same wrong one.
 </div>
 <div id="self-info-check"></div>
 </div>
+</details>
 
+<details class="settings-item">
+<summary><h3>Private fields</h3></summary>
 <div class="settings-block">
-<h3>Private fields</h3>
 <label class="settings-note" style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0;">
 <input type="checkbox" id="sensitive-fields-toggle">
 Show private fields: "Sex", Sizes, Wants, Has &mdash; and the Inventory panel on Shopping
@@ -3001,56 +3074,68 @@ Show private fields: "Sex", Sizes, Wants, Has &mdash; and the Inventory panel on
 <div class="settings-note">Off by default, which is why those sections don't appear until you turn this on. It only controls what's shown on this device &mdash; anything already recorded stays saved and still syncs; it just isn't displayed, grouped, or searchable while hidden.</div>
 </div>
 </details>
+</details>
 
-<details class="settings-group">
+<details class="settings-group" id="settings-group-features">
 <summary><span class="dot sage"></span>Feature preferences</summary>
 
+<details class="settings-item">
+<summary><h3>Connections — rating categories</h3></summary>
 <div class="settings-block">
-<h3>Connections — rating categories</h3>
 <div class="settings-note" style="margin:0 0 8px;">
 The detailed star ratings shown on every connection. Removing one clears every rating already given under it &mdash; there's no way back from that, so it asks first.
 </div>
 <div class="tag-editor" id="rating-categories-list"></div>
 </div>
+</details>
 
+<details class="settings-item">
+<summary><h3>Connections — red/amber/green flags</h3></summary>
 <div class="settings-block">
-<h3>Connections — red/amber/green flags</h3>
 <div class="settings-note" style="margin:0 0 8px;">
 One rule per field &mdash; a numeric threshold (Distance, Age) or a comma-separated list of values for each colour (everything else). A connection's dot shows the worst colour among every rule that matched. Seeded with a starting set based on values actually mentioned so far &mdash; edit or delete freely.
 </div>
 <div id="flag-rules-list"></div>
 </div>
+</details>
 
+<details class="settings-item">
+<summary><h3>Menu — recipe rating categories</h3></summary>
 <div class="settings-block">
-<h3>Menu — recipe rating categories</h3>
 <div class="settings-note" style="margin:0 0 8px;">
 Same idea as Connections' ratings, a separate list (Taste/Health/Prep by default). Removing one clears every rating already given under it, so it asks first.
 </div>
 <div class="tag-editor" id="recipe-rating-categories-list"></div>
 </div>
 </details>
+</details>
 
-<details class="settings-group">
+<details class="settings-group" id="settings-group-calendar">
 <summary><span class="dot plum"></span>Calendar &amp; Planner</summary>
 
+<details class="settings-item">
+<summary><h3>Calendar limits</h3></summary>
 <div class="settings-block">
-<h3>Calendar limits</h3>
 <div id="calendar-limits"></div>
 <div class="pref-grid" style="margin-top:10px;">
 <label>Default max events, when a calendar's is blank<input type="number" min="1" max="50" id="pref-cal-count"></label>
 <label>Default max results, when a mail search's is blank<input type="number" min="1" max="50" id="pref-mail-count"></label>
 </div>
 </div>
+</details>
 
-<div class="settings-block" id="packing-modules-block">
-<h3>Packing modules</h3>
+<details class="settings-item" id="packing-modules-block">
+<summary><h3>Packing modules</h3></summary>
+<div class="settings-block">
 <div class="settings-note" style="margin:0 0 10px;">The library a trip's own packing list is generated from &mdash; an always-included Core kit, modules that switch on by who's coming, a leg type (car hire) or an accommodation's stay type, and manual ones (Beach, Cold weather&hellip;) you toggle per trip. Edit or delete any of these, including the built-in ones &mdash; a deleted built-in module won't come back on its own.</div>
 <div id="packing-modules"></div>
 <button class="add-btn" id="packing-module-add-btn" type="button" style="margin-top:8px;">Add module</button>
 </div>
+</details>
 
+<details class="settings-item">
+<summary><h3>Track a new calendar</h3></summary>
 <div class="settings-block">
-<h3>Track a new calendar</h3>
 <div class="sync-row" style="margin-top:0;">
 <button class="sync-btn" id="load-cal-list-btn" type="button">Load my calendars</button>
 <span class="sync-status" id="cal-list-status"></span>
@@ -3064,51 +3149,63 @@ Same idea as Connections' ratings, a separate list (Taste/Health/Prep by default
 <div class="settings-note">Then use "Sync calendars" on the Overview tab to pull in each one's next upcoming event.</div>
 </div>
 </details>
+</details>
 
-<details class="settings-group">
+<details class="settings-group" id="settings-group-mail">
 <summary><span class="dot pink"></span>Mail</summary>
 
-<div class="settings-block" id="mail-topics-block">
-<h3>Mail topics</h3>
+<details class="settings-item" id="mail-topics-block">
+<summary><h3>Mail topics</h3></summary>
+<div class="settings-block">
 <div class="settings-note" style="margin:0 0 10px;">Groups mail searches together in the Mail panel and picks which action buttons show on their messages (up to 3 preferred; anything else sits under "Other actions"). A search with no topic renders on its own, same as today.</div>
 <div id="mail-topics"></div>
 <button class="add-btn" id="add-mail-topic-btn" type="button" style="margin-top:8px;">Add topic</button>
 </div>
+</details>
 
-<div class="settings-block" id="mail-searches-block">
-<h3>Mail searches</h3>
+<details class="settings-item" id="mail-searches-block">
+<summary><h3>Mail searches</h3></summary>
+<div class="settings-block">
 <div class="settings-note" style="margin:0 0 10px;">Each row becomes its own section in the Mail panel (or joins a topic's shared section, above), with its own limits. Synced, so these follow you to your other devices. Uses Gmail's own search syntax — see Google's <a href="https://support.google.com/mail/answer/7190?hl=en-GB&amp;co=GENIE.Platform%3DAndroid" target="_blank" rel="noopener">search operators guide</a> for everything beyond a plain word or two (labels, OR, excluding a term with a leading -, quoted phrases...).</div>
 <div id="mail-searches"></div>
 <button class="add-btn" id="add-mail-search-btn" type="button" style="margin-top:8px;">Add search</button>
 </div>
+</details>
 
-<div class="settings-block" id="mail-bin-block">
-<h3>Mail bin</h3>
+<details class="settings-item" id="mail-bin-block">
+<summary><h3>Mail bin</h3></summary>
+<div class="settings-block">
 <div class="settings-note" style="margin:0 0 10px;">Messages dismissed from the Mail panel (the &times; on a row) without becoming a task, trip leg, or date event. Not restorable — you still have the real email, and it may have fallen outside a search's own limits by now — this is just a record of what you've already looked at and decided to skip.</div>
 <div id="mail-bin"></div>
 <button class="sync-btn" id="empty-mail-bin-btn" type="button" style="margin-top:8px;">Empty bin</button>
 </div>
 </details>
+</details>
 
-<details class="settings-group">
+<details class="settings-group" id="settings-group-finances">
 <summary><span class="dot blue"></span>Finances</summary>
 
+<details class="settings-item">
+<summary><h3>Airbnb listings</h3></summary>
 <div class="settings-block">
-<h3>Airbnb listings</h3>
 <div class="settings-note" style="margin:0 0 10px;">One row per listing you host or co-host. Find each one's export URL on Airbnb: Calendar &rarr; Availability &rarr; Connect calendars &rarr; Export calendar. Prefix and colour identify the physical room (two listings for the same room should share a colour); Sync on the Overview tab pulls reservation dates in, never guest names &mdash; Airbnb's export doesn't include those on any plan, so add a name per reservation there yourself.</div>
 <div id="airbnb-listings"></div>
 <button class="add-btn" id="add-airbnb-listing-btn" type="button" style="margin-top:8px;">Add listing</button>
 </div>
+</details>
 
+<details class="settings-item">
+<summary><h3>Keys</h3></summary>
 <div class="settings-block">
-<h3>Keys</h3>
 <div class="settings-note" style="margin:0 0 10px;">One row per physical keyring &mdash; who currently has it, and who it's for, are set on the Airbnb panel (Overview tab); set what it is and which listing(s) it opens here.</div>
 <div id="keys-settings"></div>
 <button class="add-btn" id="add-key-settings-btn" type="button" style="margin-top:8px;">Add keyring</button>
 </div>
+</details>
 
+<details class="settings-item">
+<summary><h3>Letting tax</h3></summary>
 <div class="settings-block">
-<h3>Letting tax</h3>
 <div class="settings-note" style="margin:0 0 10px;">UK tax years run 6 April to 5 April &mdash; fixed, not a setting. The Letting income panel groups each owner's gross income by that boundary (using each ledger entry's own date, editable there once you know the real Airbnb payout date) and tests it against their own allowance below; anything over it is taxed at their own rate.</div>
 <div id="letting-tax-settings"></div>
 <div class="sync-row" style="margin-top:8px;">
@@ -3117,70 +3214,100 @@ Same idea as Connections' ratings, a separate list (Taste/Health/Prep by default
 </div>
 </div>
 </details>
+</details>
 
-<details class="settings-group">
+<details class="settings-group" id="settings-group-capture">
 <summary><span class="dot red"></span>Capture &amp; Shopping</summary>
 
+<details class="settings-item">
+<summary><h3>Shared-link auto-routing</h3></summary>
 <div class="settings-block">
-<h3>Shared-link auto-routing</h3>
 <div class="settings-note" style="margin:0 0 10px;">When you share a web link to the Dashboard, a matching rule here opens it straight into the right flow (e.g. a recipe site &rarr; the recipe importer) instead of just filing a task. Seeded with a few recipe sites &mdash; edit freely.</div>
 <div id="share-url-rules"></div>
 <button class="add-btn" id="add-share-rule-btn" type="button" style="margin-top:8px;">Add rule</button>
 </div>
+</details>
 
+<details class="settings-item">
+<summary><h3>Capture markers &amp; suffixes</h3></summary>
 <div class="settings-block">
-<h3>Capture markers &amp; suffixes</h3>
 <div id="capture-rules"></div>
 <button class="add-btn" id="add-capture-rule-btn" type="button" style="margin-top:8px;">Add trigger</button>
 </div>
+</details>
 
-<div class="settings-block" id="media-routes">
-<h3>Getting hold of media</h3>
+<details class="settings-item" id="media-routes">
+<summary><h3>Getting hold of media</h3></summary>
+<div class="settings-block">
 <div class="settings-note" style="margin:0 0 8px;">What the <strong>Get&hellip;</strong> button offers on the Media tab, per kind, in order. Only intent lives here &mdash; what counts as a good download (codec, size, release group) belongs in Radarr/Sonarr's own quality profiles, so a download route carries just the profile name to ask for.</div>
 <div class="settings-note" style="margin:0 0 8px;">A <em>search</em> route is your own URL, so point it wherever you actually look &mdash; your Prowlarr searches every indexer you've set up at once. Placeholders: <code>{title}</code> <code>{creator}</code> <code>{year}</code> <code>{isbn}</code> <code>{q}</code> (title and creator together).</div>
 <div id="media-routes-editor"></div>
 </div>
 </details>
+</details>
 
-<details class="settings-group">
+<details class="settings-group" id="settings-group-ai">
 <summary><span class="dot amber"></span>AI features</summary>
 
-<div class="settings-block" id="ai-keys">
-<h3>AI features</h3>
-<label for="anthropic-key-input" style="font-size:13px;font-weight:500;display:block;margin-bottom:6px;">Anthropic API key (for photo/screenshot import)</label>
+<details class="settings-item">
+<summary><h3>Anthropic API key</h3></summary>
+<div class="settings-block">
+<div class="settings-note" style="margin:0 0 8px;">For photo/screenshot import, and Smart nudges below.</div>
+<label for="anthropic-key-input" style="font-size:13px;font-weight:500;display:block;margin-bottom:6px;">Anthropic API key</label>
 <input type="password" autocomplete="new-password" id="anthropic-key-input" class="settings-input" placeholder="sk-ant-...">
-<label for="tmdb-key-input" style="font-size:13px;font-weight:500;display:block;margin:10px 0 6px;">TMDb API key (for film &amp; TV lookup on the Media tab)</label>
-<input type="password" autocomplete="new-password" id="tmdb-key-input" class="settings-input" placeholder="free from themoviedb.org &mdash; Settings &rarr; API">
-<div class="settings-note">Turns a typed title into the right film or series, with its poster, year and TMDb/IMDb ids. Books and music need no key. The same TMDb ids are what Radarr and Sonarr use, so they stay useful if the download side gets automated later.</div>
 <div class="settings-note">
 Stored only in this browser's local storage on this device — never synced, never sent anywhere except directly to api.anthropic.com. You'll need to enter it again on each device. Calls are billed to your own account (typically a fraction of a cent per screenshot).
 <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">Get a key &rarr;</a>
 </div>
-<label class="settings-note" style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:10px;">
+</div>
+</details>
+
+<details class="settings-item" id="ai-keys">
+<summary><h3>TMDb API key</h3></summary>
+<div class="settings-block">
+<div class="settings-note" style="margin:0 0 8px;">For film &amp; TV lookup on the Media tab.</div>
+<label for="tmdb-key-input" style="font-size:13px;font-weight:500;display:block;margin-bottom:6px;">TMDb API key</label>
+<input type="password" autocomplete="new-password" id="tmdb-key-input" class="settings-input" placeholder="free from themoviedb.org &mdash; Settings &rarr; API">
+<div class="settings-note">Turns a typed title into the right film or series, with its poster, year and TMDb/IMDb ids. Books and music need no key. The same TMDb ids are what Radarr and Sonarr use, so they stay useful if the download side gets automated later.</div>
+</div>
+</details>
+
+<details class="settings-item">
+<summary><h3>Smart nudges</h3></summary>
+<div class="settings-block">
+<label class="settings-note" style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0;">
 <input type="checkbox" id="smart-nudges-toggle">
-Smart nudges — let Claude pick what's most urgent, important, and overdue, instead of a random pick (uses the API key above)
+Let Claude pick what's most urgent, important, and overdue, instead of a random pick (uses the Anthropic API key above)
 </label>
-<div class="sync-row" style="margin-top:12px;">
+</div>
+</details>
+
+<details class="settings-item">
+<summary><h3>API usage</h3></summary>
+<div class="settings-block">
+<div class="sync-row">
 <span class="settings-note" style="margin:0;font-weight:500;">API usage this month</span>
 <button class="sync-btn" id="refresh-usage-btn" type="button">Refresh</button>
 </div>
 <div id="usage-summary"></div>
 </div>
 </details>
+</details>
 
-<details class="settings-group">
+<details class="settings-group" id="settings-group-advanced">
 <summary><span class="dot rose"></span>Advanced</summary>
 
+<details class="settings-item">
+<summary><h3>Tidy up tags</h3></summary>
 <div class="settings-block">
-<details>
-<summary style="cursor:pointer;"><h3 style="display:inline;">Tidy up tags</h3></summary>
-<div class="settings-note" style="margin:8px 0 10px;">Every tag value in use, with how many connections have it. Values differing only by capitalisation or spacing are flagged for one-click merging; anything else can be renamed or merged by hand. Changes apply across all connections.</div>
+<div class="settings-note" style="margin:0 0 10px;">Every tag value in use, with how many connections have it. Values differing only by capitalisation or spacing are flagged for one-click merging; anything else can be renamed or merged by hand. Changes apply across all connections.</div>
 <div id="tag-cleanup"></div>
-</details>
 </div>
+</details>
 
+<details class="settings-item">
+<summary><h3>Enhancement ideas <span class="count-badge" id="enhancements-count"></span></h3></summary>
 <div class="settings-block">
-<h3>Enhancement ideas <span class="count-badge" id="enhancements-count"></span></h3>
 <div class="settings-note" style="margin:0 0 8px;">Ideas for this dashboard itself, to come back to later.</div>
 <div id="enhancements-list"></div>
 <div class="add-form" id="enhancement-form" style="flex-direction:column;align-items:stretch;">
@@ -3189,6 +3316,7 @@ Smart nudges — let Claude pick what's most urgent, important, and overdue, ins
 <button class="add-btn" type="button" style="align-self:flex-start;">Add idea</button>
 </div>
 </div>
+</details>
 </details>
 </section>
 </div>

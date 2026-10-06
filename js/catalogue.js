@@ -12,6 +12,14 @@
 // to configure. Artwork below is the one part that needs the network,
 // and it degrades to "no picture" rather than failing a capture.
 
+// Thrown (not just a generic Error) so a caller can distinguish "no key
+// set" from any other TMDb failure and render a real link into Settings
+// instead of just echoing the message as text -- mirrors ai.js's own
+// MissingKeyError for the Anthropic key, same reasoning.
+class MissingTmdbKeyError extends Error {
+constructor() { super('No TMDb API key set. Add one in Settings.'); this.name = 'MissingTmdbKeyError'; }
+}
+
 // Each entry: a matcher against a normalised hostname, and what to pull
 // out of the URL. `kind` is what this catalogue proves the item is --
 // TMDb's /tv/ path is proof, IMDb's /title/ is not (it covers both), so
@@ -323,7 +331,7 @@ if (!tmdbTvId && !externalIds.imdb) return null;
 // key because it has a visible empty result; this doesn't.)
 const { getLocalSettings } = await import('./state.js');
 const key = (await getLocalSettings()).tmdbApiKey;
-if (!key) throw new Error('No TMDb API key in Settings — that is the route from a TMDb or IMDb id to a TVDB one.');
+if (!key) throw new MissingTmdbKeyError();
 const q = `api_key=${encodeURIComponent(key)}`;
 
 if (!tmdbTvId && externalIds.imdb) {
@@ -622,4 +630,4 @@ link: `https://musicbrainz.org/release-group/${g.id}`,
 })).filter((c) => c.title);
 }
 
-export { identifyUrl, catalogueLabel, artworkUrl, linkMetadata, ogImageFrom, searchTitle, watchProviders, subscriptionFor, collapseProviders, shortProviderName, tvdbSeriesInfo, tvdbSessions, tvdbSeasonNumbers, tvdbIdViaTmdb, defaultSessionFilter, CATALOGUE_LABELS };
+export { identifyUrl, catalogueLabel, artworkUrl, linkMetadata, ogImageFrom, searchTitle, watchProviders, subscriptionFor, collapseProviders, shortProviderName, tvdbSeriesInfo, tvdbSessions, tvdbSeasonNumbers, tvdbIdViaTmdb, defaultSessionFilter, CATALOGUE_LABELS, MissingTmdbKeyError };

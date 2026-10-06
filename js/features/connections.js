@@ -2757,7 +2757,7 @@ try {
 candidate = await extractProfileFromScreenshot(file, appHint);
 } catch (err) {
 console.error('Profile screenshot import failed:', err);
-if (statusEl) statusEl.textContent = err instanceof MissingKeyError ? err.message : `Couldn't read that screenshot: ${err.message || err}`;
+if (statusEl) statusEl.innerHTML = err instanceof MissingKeyError ? `Add an Anthropic API key in ${MISSING_KEY_LINK_HTML} first.` : escapeHtml(`Couldn't read that screenshot: ${err.message || err}`);
 // Surfaced to the caller (not just written to statusEl and dropped) --
 // extractDatingScreenshot needs to tell "genuinely didn't look like
 // either shape" apart from "couldn't even attempt it" so it can show
@@ -2792,7 +2792,7 @@ try {
 candidate = await extractProfileFromScreenshot(file, appHint);
 } catch (err) {
 console.error('Profile screenshot import failed:', err);
-if (statusEl) statusEl.textContent = err instanceof MissingKeyError ? err.message : `Couldn't read that screenshot: ${err.message || err}`;
+if (statusEl) statusEl.innerHTML = err instanceof MissingKeyError ? `Add an Anthropic API key in ${MISSING_KEY_LINK_HTML} first.` : escapeHtml(`Couldn't read that screenshot: ${err.message || err}`);
 return { candidate: null, error: err };
 }
 const sourceLabel = screenshotSourceLabel(file);

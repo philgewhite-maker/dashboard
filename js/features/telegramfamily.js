@@ -18,9 +18,7 @@
 // follow-up. Both are natural additions once this has been used for
 // real; the `context` on every thread is the seam they'd hook into.
 import { data, queueSave, blankConnection, blankTelegramThread, getLocalSettings, setLocalSetting } from '../state.js';
-import { escapeHtml, scrollAndFlash } from '../utils.js';
-
-const TELEGRAM_BOT_LINK_HTML = '<span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#telegrambot-url-input">Settings</span>';
+import { escapeHtml, scrollAndFlash, TELEGRAM_BOT_LINK_HTML } from '../utils.js';
 
 function familyConnections() {
 return data.connections.filter((c) => c.isFamily);

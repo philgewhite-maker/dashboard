@@ -33,7 +33,7 @@
 // arrives changed. This is a real financial decision, so the feature
 // only ever proposes.
 import { data, queueSave } from '../state.js';
-import { escapeHtml, uid, todayStr, daysSince } from '../utils.js';
+import { escapeHtml, uid, todayStr, daysSince, SYNC_LINK_HTML } from '../utils.js';
 import { callTextJson, MissingKeyError } from '../ai.js';
 import { accountLabel, expandAccountRow, formatShortDate } from './financeaccounts.js';
 import { captureTask, revealTask } from './tasks.js';
@@ -520,7 +520,7 @@ btn.disabled = false;
 });
 const homeAgentBtn = document.getElementById('switch-offers-homeagent-btn');
 const homeAgentStatusEl = document.getElementById('switch-offers-homeagent-status');
-const sayHomeAgent = (m) => { if (homeAgentStatusEl) homeAgentStatusEl.textContent = m; };
+const sayHomeAgent = (m) => { if (homeAgentStatusEl) homeAgentStatusEl.innerHTML = m; };
 if (homeAgentBtn) {
 homeAgentBtn.addEventListener('click', async () => {
 homeAgentBtn.disabled = true;
@@ -535,9 +535,9 @@ const opportunities = await applyScan(stripHtmlNoise(page.html), 'manual');
 sayHomeAgent(opportunities.length ? `Found ${opportunities.length} offer${opportunities.length === 1 ? '' : 's'}.` : 'No current switch offers found on the page.');
 renderSwitchOffers();
 } catch (err) {
-sayHomeAgent(err instanceof AgentNotConfiguredError ? 'Set up live sync (Settings) to use the home agent, or paste the page text below instead.'
+sayHomeAgent(err instanceof AgentNotConfiguredError ? `Set up live sync in ${SYNC_LINK_HTML} to use the home agent, or paste the page text below instead.`
 : err instanceof MissingKeyError ? err.message
-: `Couldn't fetch via the home agent: ${err.message || err}`);
+: `Couldn't fetch via the home agent: ${escapeHtml(err.message || String(err))}`);
 console.error('Switch-offers home-agent fetch failed:', err);
 if (!(err instanceof AgentNotConfiguredError)) {
 import('./sitehealth.js').then(({ reportCheck }) => reportCheck('mse-bank-switch', false, err.message || String(err)));
@@ -549,7 +549,7 @@ homeAgentBtn.disabled = false;
 }
 const accountValueBtn = document.getElementById('account-value-check-btn');
 const accountValueStatusEl = document.getElementById('account-value-check-status');
-const sayAccountValue = (m) => { if (accountValueStatusEl) accountValueStatusEl.textContent = m; };
+const sayAccountValue = (m) => { if (accountValueStatusEl) accountValueStatusEl.innerHTML = m; };
 if (accountValueBtn) {
 accountValueBtn.addEventListener('click', async () => {
 accountValueBtn.disabled = true;
@@ -559,9 +559,9 @@ sayAccountValue('Weighing your accounts against it (this includes a web search, 
 const reviews = await checkAccountValue();
 sayAccountValue(reviews.length ? `Found ${reviews.length} account${reviews.length === 1 ? '' : 's'} worth a look.` : 'Nothing worth flagging — your current accounts already look fine against this.');
 } catch (err) {
-sayAccountValue(err instanceof AgentNotConfiguredError ? 'Set up live sync (Settings) to use the home agent.'
+sayAccountValue(err instanceof AgentNotConfiguredError ? `Set up live sync in ${SYNC_LINK_HTML} to use the home agent.`
 : err instanceof MissingKeyError ? err.message
-: `Couldn't check: ${err.message || err}`);
+: `Couldn't check: ${escapeHtml(err.message || String(err))}`);
 console.error('Account value check failed:', err);
 } finally {
 accountValueBtn.disabled = false;

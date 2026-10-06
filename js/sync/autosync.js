@@ -10,6 +10,7 @@
 import { data, replaceData, exportBackup, setLocalChangeHandler } from '../state.js';
 import { renderAll } from '../render-all.js';
 import { ConflictError, NotConfiguredError, isConfigured, pullRemote, pushRemote, setKnownRev, getKnownRev } from './selfhost.js';
+import { LockedError } from '../synccrypto.js';
 
 const PUSH_DEBOUNCE_MS = 2500;
 // Only fires while the tab is visible (see the visibilitychange handler), so
@@ -21,12 +22,24 @@ let pollTimer = null;
 let busy = false;
 let statusEl = null;
 
-function setStatus(text, kind) {
+// `html` defaults off -- this is the one status line shown on EVERY tab
+// (the global page header), fed by plain strings from several call sites
+// (some built from raw err.message/server text), so blanket-switching to
+// innerHTML would be fragile. Only a call site that KNOWS it's passing
+// safe, deliberately-authored markup (the LockedError branches below)
+// opts in.
+function setStatus(text, kind, { html = false } = {}) {
 if (!statusEl) statusEl = document.getElementById('live-sync-status');
 if (!statusEl) return;
-statusEl.textContent = text;
+if (html) statusEl.innerHTML = text; else statusEl.textContent = text;
 statusEl.className = `live-sync-status${kind ? ' ' + kind : ''}`;
 }
+
+// A locked document (this device has no key, or the wrong one) names a
+// real next step -- the recovery-key paste field in Settings -- so it
+// gets a link rather than joining the generic plain-text error path
+// every other failure here uses.
+const LOCKED_STATUS_HTML = 'This device can\'t read the encrypted copy. If you have the recovery key, paste it in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#encrypt-key-input">Settings</span>.';
 
 // Does this device hold anything worth preserving? A brand-new install
 // carries the sample habits and goals, so this errs towards "yes" and an
@@ -82,8 +95,12 @@ setStatus(firstAdoption
 setStatus('Up to date', 'ok');
 }
 } catch (err) {
+if (err instanceof LockedError) {
+setStatus(LOCKED_STATUS_HTML, 'error', { html: true });
+} else {
 const msg = describeError(err);
 if (msg) setStatus(msg, 'error');
+}
 console.error('Live sync pull failed:', err);
 } finally {
 busy = false;
@@ -107,6 +124,9 @@ if (err instanceof ConflictError) {
 console.warn('Live sync conflict — adopting the server copy.', err.remote);
 await adoptRemote(err.remote, { backupFirst: true });
 setStatus('Another device had newer data — took theirs, saved yours to Downloads', 'error');
+} else if (err instanceof LockedError) {
+setStatus(LOCKED_STATUS_HTML, 'error', { html: true });
+console.error('Live sync push failed:', err);
 } else {
 const msg = describeError(err);
 if (msg) setStatus(msg, 'error');

@@ -165,6 +165,15 @@ const MISSING_KEY_LINK_HTML = '<span class="inline-goto-link" data-goto-tab="set
 // NotConfiguredError carries the plain-text version of this message.
 const SYNC_LINK_HTML = '<span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#sync-url-input">Settings</span>';
 
+// For notion.js's own NotionNotConfiguredError -- a different field than
+// SYNC_LINK_HTML above (the Notion proxy URL/database id, not the sync
+// URL/secret), even though Notion reuses the sync secret under the hood.
+const NOTION_LINK_HTML = '<span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#notion-url-input">Settings</span>';
+
+// Lets family members be messaged and reply back into the app (Family
+// panel, Dating admin tab) -- telegramfamily.js's own setup message.
+const TELEGRAM_BOT_LINK_HTML = '<span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#telegrambot-url-input">Settings</span>';
+
 // Amazon Associates tag -- run through EVERY Amazon link this app renders
 // (a shopping search result, a task captured from a shared Amazon link, a
 // Buy nudge, a reading-list item, an email link), not just the shopping
@@ -1225,7 +1234,7 @@ return classified.every((c) => c.isScreenshot) && looksLikeSameScreenshotPieces(
 }
 
 export {
-todayStr, daysAgoStr, dateStrAdd, unfoldIcsLines, parseIcsProperty, icsDateTime, parseLooseDateTime, last7Dates, uid, daysSince, daysUntil, foldDiacritics, MISSING_KEY_LINK_HTML, SYNC_LINK_HTML, looksLikeUrl,
+todayStr, daysAgoStr, dateStrAdd, unfoldIcsLines, parseIcsProperty, icsDateTime, parseLooseDateTime, last7Dates, uid, daysSince, daysUntil, foldDiacritics, MISSING_KEY_LINK_HTML, SYNC_LINK_HTML, NOTION_LINK_HTML, TELEGRAM_BOT_LINK_HTML, looksLikeUrl,
 escapeHtml, affiliateLink, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, buildFlagMatcher, applyFlagMatcher, knownCityMap, knownScalarValues, pickChipHtml, splitCsvLine, scrollAndFlash, bindForm, bindBackdropClose,
 findMentions, COUNTRY_NAME_TO_NATIONALITY,
 resizeImageToBlob, fileToBase64, loadImage, cropThumbnailToBlob,

@@ -3417,12 +3417,18 @@ color:var(--ink);
 .settings-group summary::-webkit-details-marker{display:none;}
 .settings-group summary::after{content:'▾';margin-left:auto;font-size:12px;color:var(--muted);}
 .settings-group[open] summary::after{content:'▴';}
-.settings-group .settings-block:first-of-type{padding-top:2px;}
-.settings-group .settings-block:last-of-type{margin-bottom:0;padding-bottom:18px;}
+.settings-group .settings-item:first-of-type{padding-top:2px;}
+.settings-group .settings-item:last-of-type{margin-bottom:0;padding-bottom:18px;}
 /* <details> alone wasn't enough to keep this app's cascade from still
    laying out closed content (confirmed once already, see .tinder-edit-
-   details above) -- force it explicitly rather than trust the browser. */
-.settings-group:not([open]) .settings-block{display:none;}
+   details above) -- force it explicitly rather than trust the browser.
+   One rule per collapse tier: a closed group hides its sub-groups AND
+   items (a sub-group-less group goes straight from .settings-group to
+   .settings-item), a closed sub-group hides its own items. */
+.settings-group:not([open]) .settings-subgroup,
+.settings-group:not([open]) .settings-item{display:none;}
+.settings-subgroup:not([open]) .settings-item{display:none;}
+.settings-item:not([open]) .settings-block{display:none;}
 .settings-block{margin-bottom:22px;}
 .settings-block h3{
 font-family:'IBM Plex Mono',monospace;
@@ -3433,6 +3439,55 @@ color:var(--muted);
 margin:0 0 8px;
 }
 .settings-note{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.5;}
+
+/* Sub-group tier: only inside the few groups big/miscellaneous enough to
+   need a middle layer (Account & sync). */
+.settings-subgroup{margin-bottom:14px;}
+.settings-subgroup summary{
+cursor:pointer;
+list-style:none;
+display:flex;
+align-items:center;
+gap:7px;
+font-family:'IBM Plex Mono',monospace;
+font-size:12px;
+font-weight:500;
+text-transform:uppercase;
+letter-spacing:.03em;
+color:var(--ink);
+padding:8px 0;
+}
+.settings-subgroup summary::-webkit-details-marker{display:none;}
+.settings-subgroup summary::after{content:'▾';margin-left:auto;font-size:11px;color:var(--muted);}
+.settings-subgroup[open] summary::after{content:'▴';}
+
+/* Individual-setting tier: every setting is its own <details>, collapsed
+   by default -- the h3 moves into the summary (styled here, not via the
+   old .settings-block h3 rule, since it's no longer a descendant of
+   .settings-block once collapsed this way). .settings-block itself stays
+   exactly as it was elsewhere in the app (recipes.js, shopping.js,
+   telegramfamily.js all reuse it with no h3 and no collapse-by-default
+   intent) -- deliberately NOT the collapsible unit, just nested one level
+   inside .settings-item now, Settings-only. */
+.settings-item{border-top:1px solid var(--line);}
+.settings-item:first-of-type{border-top:none;}
+.settings-item summary{cursor:pointer;list-style:none;padding:10px 0;}
+.settings-item summary::-webkit-details-marker{display:none;}
+.settings-item summary h3{margin:0;display:inline;}
+.settings-item summary::after{content:'▾';margin-left:8px;font-size:10px;color:var(--muted);}
+.settings-item[open] summary::after{content:'▴';}
+
+.settings-pill-row{
+position:sticky;
+top:var(--tabbar-h,0px);
+z-index:4;
+display:flex;
+flex-wrap:wrap;
+gap:6px;
+background:var(--paper);
+padding:8px 0;
+margin-bottom:10px;
+}
 input[type=password], input[type=text].settings-input{
 font-family:'IBM Plex Mono',monospace;
 font-size:13px;
@@ -3779,7 +3834,14 @@ background:none;border:none;padding:0;cursor:pointer;
 color:var(--teal);font-size:11px;line-height:1;align-self:center;
 }
 .tick-trip:hover{color:var(--ink);}
-.tick-wx{display:inline-flex;align-items:center;gap:3px;vertical-align:-2px;}
+/* align-self:center opts this out of .tick's own align-items:baseline --
+   confirmed live the icons (15px tall) were otherwise taller than the
+   label/value text next to them, and baseline alignment used their
+   bottom edge as a synthesized baseline, dragging the whole row's text
+   down by roughly half that height difference relative to every other
+   tile. The old vertical-align:-2px here did nothing -- vertical-align
+   has no effect on a flex item, only on inline/inline-block boxes. */
+.tick-wx{display:inline-flex;align-items:center;gap:3px;align-self:center;}
 .tick-wx svg{width:15px;height:15px;display:block;}
 .tick-toggle{
 flex:0 0 auto;

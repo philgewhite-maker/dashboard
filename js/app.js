@@ -56,10 +56,27 @@ import { initGoogleAccount } from './features/googleaccount.js';
 import { initMail } from './features/mail.js';
 import { initAutoSync } from './sync/autosync.js';
 
+// The Settings pill row (settings.js) sticks itself just below the main
+// tab bar -- but the tab bar's own height isn't fixed, it `flex-wrap`s
+// into 1-4 lines depending on viewport width, so a hardcoded sticky
+// `top:` offset would overlap it at some widths and leave a gap at
+// others. Measured here instead and exposed as a CSS custom property,
+// kept current on load, on resize (a rotation or a window resize can
+// change how many lines the bar wraps to), and on every tabshown (a tab
+// button's own width can change -- e.g. `.active` styling -- which can
+// shift the wrap).
+function updateTabBarHeightVar() {
+const bar = document.querySelector('.tab-bar');
+if (bar) document.documentElement.style.setProperty('--tabbar-h', `${bar.offsetHeight}px`);
+}
+
 function initTabs() {
 document.querySelectorAll('[data-tab-btn]').forEach((btn) => {
 btn.addEventListener('click', () => switchTab(btn.dataset.tabBtn));
 });
+updateTabBarHeightVar();
+window.addEventListener('resize', updateTabBarHeightVar);
+document.addEventListener('tabshown', updateTabBarHeightVar);
 // One shared, document-level binding for "go to the X tab" text mentions
 // anywhere in the app (`<span class="inline-goto-link" data-goto-tab="...">`)
 // -- bound ONCE here rather than re-bound per feature file on every one of
@@ -69,14 +86,19 @@ btn.addEventListener('click', () => switchTab(btn.dataset.tabBtn));
 // panel the link happens to live in, with nothing extra to wire up there.
 //
 // An optional `data-goto-target="<selector>"` alongside `data-goto-tab`
-// also opens whichever collapsed `<details class="settings-group">`
-// contains that element and scrolls/flashes it -- confirmed live as a real
-// dead end otherwise: Settings' own accordion sections are collapsed by
-// default, so "add one in Settings" landed on the tab with five closed
-// sections and no clue which one, for every such link pointing into
-// Settings, not just one. Safe to omit for a link that isn't going into
-// a collapsed section (a bare `data-goto-tab` alone still works exactly
-// as before).
+// also opens every collapsed `<details>` ancestor of that element and
+// scrolls/flashes it -- confirmed live as a real dead end otherwise:
+// Settings' own accordion sections are collapsed by default, so "add one
+// in Settings" landed on the tab with five closed sections and no clue
+// which one, for every such link pointing into Settings, not just one.
+// Walks up through EVERY <details> ancestor, not just the nearest -- once
+// Settings grew a second and third collapse tier (group -> sub-group ->
+// individual setting), a target can sit three <details> deep, and this
+// has to open all of them or the deepest ones stay hidden. Agnostic to
+// class name and depth on purpose, so a future tier never needs this
+// touched again. Safe to omit for a link that isn't going into a
+// collapsed section (a bare `data-goto-tab` alone still works exactly as
+// before).
 document.addEventListener('click', (e) => {
 const link = e.target.closest('[data-goto-tab]');
 if (!link) return;
@@ -86,7 +108,11 @@ if (targetSelector) {
 setTimeout(() => {
 const target = document.querySelector(targetSelector);
 if (!target) return;
-target.closest('details.settings-group')?.setAttribute('open', '');
+let node = target.closest('details');
+while (node) {
+node.setAttribute('open', '');
+node = node.parentElement?.closest('details') ?? null;
+}
 scrollAndFlash(targetSelector);
 }, 60);
 }

@@ -10,7 +10,7 @@
 // out to Notion, actionable items flow back — because duplicating the detail
 // in both places is how two-system setups rot.
 import { data, queueSave, blankTask } from '../state.js';
-import { escapeHtml } from '../utils.js';
+import { escapeHtml, NOTION_LINK_HTML } from '../utils.js';
 import { callTextJson, MissingKeyError } from '../ai.js';
 import { setNotionPanel } from './tasks.js';
 import {
@@ -145,19 +145,19 @@ btn.addEventListener('click', async () => {
 const task = data.tasks.find((t) => t.id === btn.dataset.notionPlan);
 if (!task) return;
 const status = root.querySelector(`[data-notion-status="${CSS.escape(task.id)}"]`);
-const say = (m) => { if (status) status.textContent = m; };
+const say = (m) => { if (status) status.innerHTML = m; };
 btn.disabled = true;
 try {
 const result = await expandTaskIntoNotion(task, say);
 say(`Wrote ${result.sections} sections to Notion and added ${result.added} next action${result.added === 1 ? '' : 's'}.`);
 if (result.questions.length) {
-say(`${result.sections} sections written, ${result.added} actions added. It needs a decision on: ${result.questions[0]}`);
+say(`${result.sections} sections written, ${result.added} actions added. It needs a decision on: ${escapeHtml(result.questions[0])}`);
 }
 if (rerender) rerender();
 } catch (err) {
-say(err instanceof NotionNotConfiguredError || err instanceof MissingKeyError
-? err.message
-: `Failed: ${err.message || err}`);
+say(err instanceof NotionNotConfiguredError ? `Notion isn't set up yet — add the proxy URL and pick a database in ${NOTION_LINK_HTML}.`
+: err instanceof MissingKeyError ? err.message
+: `Failed: ${escapeHtml(err.message || String(err))}`);
 console.error('Notion plan failed:', err);
 } finally {
 btn.disabled = false;

@@ -14,7 +14,7 @@
 // one place.
 import { data, queueSave, blankMediaItem, MEDIA_KINDS, MEDIA_STATUSES } from '../state.js';
 import { escapeHtml, affiliateLink, scrollAndFlash, hydratePhotoBackgrounds, looksLikeUrl, bindBackdropClose } from '../utils.js';
-import { identifyUrl, catalogueLabel, CATALOGUE_LABELS, watchProviders, subscriptionFor, collapseProviders, shortProviderName } from '../catalogue.js';
+import { identifyUrl, catalogueLabel, CATALOGUE_LABELS, watchProviders, subscriptionFor, collapseProviders, shortProviderName, MissingTmdbKeyError } from '../catalogue.js';
 
 const KIND_LABEL = Object.fromEntries(MEDIA_KINDS.map((k) => [k.kind, k.label]));
 const STATUS_LABEL = Object.fromEntries(MEDIA_STATUSES.map((s) => [s.status, s.label]));
@@ -664,17 +664,20 @@ const res = await resolveTvdbId(item);
 if (res.id) found += 1;
 else missed.push({ item, why: res.why });
 } catch (err) {
-missed.push({ item, why: err.message || String(err) });
+missed.push({ item, missingTmdbKey: err instanceof MissingTmdbKeyError, why: err.message || String(err) });
 }
 }
 renderMedia();
 if (!missed.length) { say(`${found} of ${todo.length} resolved.`); return; }
 // Each unresolved series is named as a chip rather than as text, so you
 // can click straight to the row whose TVDB button needs pressing --
-// a list of bare titles makes you go find them yourself.
+// a list of bare titles makes you go find them yourself. A missing TMDb
+// key gets a real link into Settings instead of its message echoed as
+// plain text -- same "render a link, not just the error" rule as
+// MISSING_KEY_LINK_HTML's own consumers elsewhere.
 if (status) {
 status.innerHTML = `${found} of ${todo.length} resolved. Still unknown: ${missed
-.map((m) => `${mediaChipHtml(m.item)} <span class="settings-note" style="display:inline;margin:0;">${escapeHtml(String(m.why).replace(/\.$/, ''))}</span>`)
+.map((m) => `${mediaChipHtml(m.item)} <span class="settings-note" style="display:inline;margin:0;">${m.missingTmdbKey ? 'No TMDb API key set. Add one in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#ai-keys">Settings</span>.' : escapeHtml(String(m.why).replace(/\.$/, ''))}</span>`)
 .join(' ')}`;
 // bindMediaChips() is already delegated at the document, so these chips
 // work without rebinding.
@@ -1022,7 +1025,7 @@ return `Opened ${where ? shortProviderName(where.name) : 'where to watch'}.`;
 }
 if (route.type === 'search') {
 const url = fillTemplate(route.urlTemplate, item);
-if (!url) return 'That route has no search URL set — add one in Settings.';
+if (!url) return 'That route has no search URL set — add one in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#media-routes">Settings</span>.';
 window.open(url, '_blank', 'noopener');
 return `Searched ${route.label}.`;
 }
