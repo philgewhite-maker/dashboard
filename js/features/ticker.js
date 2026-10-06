@@ -25,7 +25,7 @@
 // on the strip by itself and takes them off when you're home. See
 // travelItems().
 import { data, queueSave } from '../state.js';
-import { escapeHtml, uid } from '../utils.js';
+import { escapeHtml, uid, bindBackdropClose } from '../utils.js';
 import * as letting from './letting.js';
 import { matchBankLogo } from '../bankLogos.js';
 import { CHECKS as SITE_HEALTH_CHECKS, reportCheck as reportSiteHealth } from './sitehealth.js';
@@ -748,27 +748,50 @@ track.style.animationDuration = `${Math.max(20, runWidth / ROLL_PX_PER_SEC)}s`;
 });
 }
 
+// A real dialog, not two chained prompt() calls -- confirmed live that a
+// second prompt() fired right after the first one resolves doesn't
+// reliably show (browsers throttle/suppress back-to-back dialogs from
+// the same handler), which left the monthly figure unreachable in
+// practice even though the code asked for it. Same backdrop-card shape
+// every other small dialog in this app already uses (e.g. tasks.js's
+// "file to Projects" dialog), not a new pattern.
 function editShares() {
 const t = data.ticker;
-const now = prompt(`Shares held in ${t.holdingSymbol || 'DBK.DE'}.\n\nThe scheme adds £${t.monthlyGbp} on the first business day of each month, priced as at five years earlier. Set the number here after a dividend or a sale.`, String(t.shares));
-if (now === null) return;
-const n = Number(now);
-if (!Number.isFinite(n) || n < 0) return;
+const dialog = document.createElement('div');
+dialog.className = 'mail-view-backdrop';
+dialog.innerHTML = `<div class="mail-view-card" style="max-width:340px;">
+<div class="mail-view-subject">Holding — ${escapeHtml(t.holdingSymbol || 'DBK.DE')}</div>
+<label class="settings-note" style="display:block;margin:0 0 3px;">Shares held</label>
+<input type="number" step="any" min="0" id="holding-edit-shares" class="settings-input" value="${t.shares}" style="width:100%;">
+<label class="settings-note" style="display:block;margin:10px 0 3px;">Monthly contribution (£), added on the first business day of each month, priced as at five years earlier</label>
+<input type="number" step="any" min="0" id="holding-edit-monthly" class="settings-input" value="${t.monthlyGbp}" style="width:100%;">
+<div class="mail-view-actions">
+<button class="sync-btn sm" type="button" data-holding-cancel>Cancel</button>
+<button class="add-btn" type="button" data-holding-save>Save</button>
+</div>
+</div>`;
+document.body.appendChild(dialog);
+const close = () => dialog.remove();
+bindBackdropClose(dialog, close);
+dialog.querySelector('[data-holding-cancel]').addEventListener('click', close);
+dialog.querySelector('[data-holding-save]').addEventListener('click', () => {
+const n = Number(dialog.querySelector('#holding-edit-shares').value);
+const m = Number(dialog.querySelector('#holding-edit-monthly').value);
+if (Number.isFinite(n) && n >= 0) {
 t.shares = n;
 // Counted from today, so entering a corrected number doesn't replay
 // purchases that number already includes.
 t.sharesAt = iso(new Date());
 // Editing the count is itself the "I've seen this" action the ex-div
-// flag exists to prompt -- clears it immediately rather than making the
-// 14 days run regardless of whether you've already acted on it.
+// flag exists to prompt -- clears it immediately rather than making
+// the 14 days run regardless of whether you've already acted on it.
 t.exDivClearedAt = new Date().toISOString();
-const monthlyNow = prompt('Monthly contribution (£), added on the first business day of each month:', String(t.monthlyGbp));
-if (monthlyNow !== null) {
-const m = Number(monthlyNow);
-if (Number.isFinite(m) && m >= 0) t.monthlyGbp = m;
 }
+if (Number.isFinite(m) && m >= 0) t.monthlyGbp = m;
 queueSave();
 renderTicker();
+close();
+});
 }
 
 // Each feed is independent: one failing should cost you that tile, not the
