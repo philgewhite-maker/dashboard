@@ -493,16 +493,25 @@ while (ym <= endYm) { months.push(ym); ym = addMonths(ym, 1); }
 return months;
 }
 
-// "My share" only halves what's actually shared -- a listing with a real
-// owner (Lewis, Zara) owes them sharePct of its takings, so my own cut is
-// the rest; a listing with no owner at all is entirely mine already, so
-// nothing is owed away and the toggle should leave it at 100%. Confirmed
-// live: the first version of this toggle applied a blanket 50% to every
-// bar, which was wrong for exactly the no-owner (my own) listing.
+// Confirmed against the real listings (Settings -> Travel -> Airbnb
+// listings): sharePct means two different things depending on WHO the
+// Owner column names. For Lewis/Zara it's THEIR cut, so my own share is
+// the remainder (100-sharePct) -- the case the first version of this
+// toggle got right. For "En-suite - Phil" / "Flat", the Owner is Phil
+// himself with sharePct 100, meaning the OWNER (me) gets 100% -- under
+// the remainder formula that read as 0%, exactly backwards, which is
+// what got reported. A listing with no owner at all is entirely mine
+// too, same as before. Either way the actual number always comes straight
+// off listing.sharePct -- nothing here is a hardcoded percentage, only
+// WHICH formula (direct vs remainder) applies depends on whose name is
+// on the Owner column.
 function myShareMult(listing) {
-if (!ownerKeyFor(listing)) return 1;
+const key = ownerKeyFor(listing);
+if (!key) return 1;
 const pct = Number(listing.sharePct);
-return Math.max(0, 1 - (Number.isFinite(pct) ? pct : 50) / 100);
+const sharePct = Number.isFinite(pct) ? pct : 50;
+const iAmTheOwner = /^phil$/i.test(String(ownerNameFor(key) || '').trim());
+return Math.max(0, Math.min(1, (iAmTheOwner ? sharePct : 100 - sharePct) / 100));
 }
 
 // A stay spanning a month boundary splits its income by NIGHTS in each
@@ -593,9 +602,10 @@ function money0(n) { return `£${Math.round(n).toLocaleString('en-GB')}`; }
 function renderLettingChartLegend(listings) {
 const el = document.getElementById('letting-chart-legend');
 if (!el) return;
-el.innerHTML = listings.length
-? listings.map((l) => `<span class="letting-chart-legend-item"><span class="dot ${escapeHtml(l.colour || 'slate')}"></span>${escapeHtml(l.label || 'Listing')}</span>`).join('')
-: '<span class="settings-note" style="margin:0;">No income recorded yet.</span>';
+if (!listings.length) { el.innerHTML = '<span class="settings-note" style="margin:0;">No income recorded yet.</span>'; return; }
+const avgSwatch = '<span class="letting-chart-legend-line" aria-hidden="true"></span>';
+el.innerHTML = listings.map((l) => `<span class="letting-chart-legend-item"><span class="dot ${escapeHtml(l.colour || 'slate')}"></span>${escapeHtml(l.label || 'Listing')}</span>`).join('')
++ `<span class="letting-chart-legend-item">${avgSwatch}3-month avg</span>`;
 }
 
 let lettingChartShareOnly = false; // not persisted -- Total is the more informative number to land on
@@ -615,11 +625,14 @@ const ctx = canvas.getContext('2d');
 ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 ctx.clearRect(0, 0, width, height);
 
-// Target lines stay a flat 50% when toggled (per the original ask); bars
-// use each listing's OWN share multiplier instead (see myShareMult) --
-// a blanket 50% was wrong for a no-owner listing, which keeps 100%.
-const targetMult = lettingChartShareOnly ? 0.5 : 1;
 const shareMult = (l) => lettingChartShareOnly ? myShareMult(l) : 1;
+// The targets are fixed aspirational figures (£2,700 / £1,700 total),
+// not derived from any listing -- "my share" of them is simply half,
+// exactly as specified, regardless of how the actual listings split.
+// Only the BARS use the per-listing config (myShareMult) -- there's a
+// real sharePct/Owner behind each one of those; there's nothing behind
+// a flat target number to derive a blended percentage FROM.
+const targetMult = lettingChartShareOnly ? 0.5 : 1;
 const lineColor = resolveColor('--line');
 const muted = resolveColor('--muted');
 const ink = resolveColor('--ink');
@@ -702,6 +715,38 @@ ctx.fillRect(plot.x + i * bw, plot.y, bw, plot.h);
 ctx.globalAlpha = 1;
 }
 });
+
+// 3-month rolling average -- a trailing mean of monthTotals, using
+// however many of the up-to-3 preceding months actually fall in the
+// window (the first couple of months have no 2-3 predecessors to
+// average, same "use what's there" rule a rolling average anywhere else
+// in this app would follow). Solid ink, not dashed -- it's an observed
+// trend read off the bars themselves, not a fixed reference like the two
+// target lines, and small dots at each point make it readable even
+// where it overlaps a target line's own dashes.
+ctx.save();
+ctx.strokeStyle = ink;
+ctx.globalAlpha = 0.55;
+ctx.lineWidth = 1.75;
+ctx.beginPath();
+months.forEach((ym, i) => {
+const windowVals = monthTotals.slice(Math.max(0, i - 2), i + 1);
+const avg = windowVals.reduce((s, v) => s + v, 0) / windowVals.length;
+const x = plot.x + (i + 0.5) * bw;
+const y = scaleY(avg);
+if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+});
+ctx.stroke();
+ctx.globalAlpha = 1;
+ctx.fillStyle = ink;
+months.forEach((ym, i) => {
+const windowVals = monthTotals.slice(Math.max(0, i - 2), i + 1);
+const avg = windowVals.reduce((s, v) => s + v, 0) / windowVals.length;
+ctx.beginPath();
+ctx.arc(plot.x + (i + 0.5) * bw, scaleY(avg), 1.6, 0, Math.PI * 2);
+ctx.fill();
+});
+ctx.restore();
 
 // Target lines drawn over the bars, dashed, each labelled at its own
 // height so the two don't need a shared legend entry.
