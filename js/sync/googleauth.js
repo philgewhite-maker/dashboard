@@ -125,7 +125,28 @@ SILENT_TOKEN_TIMEOUT_MS,
 
 async function getAccessToken(interactive) {
 if (cachedToken && cachedToken.expiresAt > Date.now() + 30000) return cachedToken.accessToken;
-const resp = await requestToken(interactive ? 'consent' : '');
+let resp;
+try {
+resp = await requestToken(interactive ? 'consent' : '');
+} catch (err) {
+// A silent refresh that hung/got blocked (third-party storage for
+// accounts.google.com partitioned or blocked -- see requestToken's own
+// comment) is worth ONE retry as a real interactive popup, but only
+// when the browser still considers this call within a trusted user
+// gesture (navigator.userActivation.isActive) -- the same condition
+// that lets a popup through at all. Outside that window (page load's
+// own tryReconnectSilently, or a scheduled task auto-running because
+// the app was just opened, not clicked) this must stay exactly as
+// silent as before: attempting a popup there would either do nothing
+// (blocked anyway) or surface a "popup blocked" browser indicator for
+// something that's supposed to be invisible, so it's skipped rather
+// than gambled on. If the interactive attempt ALSO fails (activation
+// can lapse during the silent attempt's own wait), the original
+// failure still surfaces as a normal error for the caller to show.
+const canEscalate = !interactive && typeof navigator !== 'undefined' && navigator.userActivation?.isActive;
+if (!canEscalate) throw err;
+resp = await requestToken('consent');
+}
 cachedToken = { accessToken: resp.access_token, expiresAt: Date.now() + (resp.expires_in || 3600) * 1000 };
 await setLocalSetting('googleConnected', true);
 return cachedToken.accessToken;
