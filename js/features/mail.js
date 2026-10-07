@@ -352,12 +352,24 @@ if (actionId === 'addRule') {
 // a deliberate edit, not the starting point. Blank from/blank subject
 // both filter nothing on that field (see mailRules.js's matchMailRule).
 const outcomeOptions = Object.keys(CAPTURE_OUTCOMES).map((k) => `<option value="${k}">${escapeHtml(outcomeLabelWithCost(CAPTURE_OUTCOMES[k]))}</option>`).join('');
+// Label and Subject both default to the same text (the email's own
+// subject) -- confirmed live as genuinely confusing with only a
+// placeholder to go on (placeholders vanish once a field is filled,
+// and two identical-looking prefilled fields with no caption are
+// indistinguishable at a glance). Explicit labels, same four field
+// names as the Settings table below (Label / From contains / Subject
+// contains / Creates), so this picker and that table read as the same
+// thing in two places rather than needing to be puzzled out separately.
 return `<div class="mail-action-picker" data-mail-action-picker="addRule:${escapeHtml(m.id)}" hidden>
-<input type="text" class="settings-input" data-mail-rule-label="${escapeHtml(m.id)}" value="${escapeHtml(m.subject)}" placeholder="Rule label">
-<input type="text" class="settings-input" data-mail-rule-from="${escapeHtml(m.id)}" value="${escapeHtml(m.from)}" placeholder="From contains…">
-<input type="text" class="settings-input" data-mail-rule-subject="${escapeHtml(m.id)}" value="${escapeHtml(m.subject)}" placeholder="Subject contains…">
+<label class="settings-note" style="display:block;margin:4px 0 2px;font-weight:600;">Label</label>
+<input type="text" class="settings-input" data-mail-rule-label="${escapeHtml(m.id)}" value="${escapeHtml(m.subject)}" placeholder="What to call this rule">
+<label class="settings-note" style="display:block;margin:6px 0 2px;font-weight:600;">From contains</label>
+<input type="text" class="settings-input" data-mail-rule-from="${escapeHtml(m.id)}" value="${escapeHtml(m.from)}" placeholder="Blank matches any sender">
+<label class="settings-note" style="display:block;margin:6px 0 2px;font-weight:600;">Subject contains</label>
+<input type="text" class="settings-input" data-mail-rule-subject="${escapeHtml(m.id)}" value="${escapeHtml(m.subject)}" placeholder="Blank matches any subject">
+<label class="settings-note" style="display:block;margin:6px 0 2px;font-weight:600;">Creates</label>
 <select class="settings-input" data-mail-rule-outcome="${escapeHtml(m.id)}">${outcomeOptions}</select>
-<button class="todo-add-btn" type="button" data-mail-rule-create="${escapeHtml(m.id)}">+ Create &amp; run</button>
+<button class="todo-add-btn" type="button" style="margin-top:8px;" data-mail-rule-create="${escapeHtml(m.id)}">+ Create &amp; run</button>
 <span class="sync-status" data-mail-rule-status="${escapeHtml(m.id)}"></span>
 </div>`;
 }
