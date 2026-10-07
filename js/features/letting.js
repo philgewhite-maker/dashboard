@@ -441,7 +441,11 @@ renderLettingTaxSettings();
 const DAY_MS = 24 * 60 * 60 * 1000;
 const LETTING_CHART_MONTHS_BACK = 14; // + the current month itself = 15
 const LETTING_CHART_MONTHS_FORWARD = 6;
-const LETTING_CHART_NOW_INDEX = LETTING_CHART_MONTHS_BACK; // index of the current month in the window
+// An "Earned (historic)" ledger row dated further back than the default
+// window is allowed to widen it -- see lettingChartData() -- but only up
+// to this many EXTRA months, so a typo'd date can't silently blow the
+// chart out to hundreds of bars.
+const LETTING_CHART_MAX_EXTRA_MONTHS_BACK = 24;
 
 // £2,700pcm / £1,700pcm are flat targets regardless of days-in-month --
 // "per calendar month" means the same number every month, not pro-rated
@@ -475,12 +479,28 @@ const [y, m] = ym.split('-').map(Number);
 return new Date(y, m - 1, 1).toLocaleDateString('en-GB', { month: 'short', year: '2-digit' });
 }
 
-function lettingChartMonths() {
+function currentMonthYm() {
 const now = new Date();
-const current = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function monthRange(startYm, endYm) {
 const months = [];
-for (let i = -LETTING_CHART_MONTHS_BACK; i <= LETTING_CHART_MONTHS_FORWARD; i++) months.push(addMonths(current, i));
+let ym = startYm;
+while (ym <= endYm) { months.push(ym); ym = addMonths(ym, 1); }
 return months;
+}
+
+// "My share" only halves what's actually shared -- a listing with a real
+// owner (Lewis, Zara) owes them sharePct of its takings, so my own cut is
+// the rest; a listing with no owner at all is entirely mine already, so
+// nothing is owed away and the toggle should leave it at 100%. Confirmed
+// live: the first version of this toggle applied a blanket 50% to every
+// bar, which was wrong for exactly the no-owner (my own) listing.
+function myShareMult(listing) {
+if (!ownerKeyFor(listing)) return 1;
+const pct = Number(listing.sharePct);
+return Math.max(0, 1 - (Number.isFinite(pct) ? pct : 50) / 100);
 }
 
 // A stay spanning a month boundary splits its income by NIGHTS in each
@@ -508,30 +528,60 @@ return { counts, total };
 // the fact (income corrected, dates fixed) is reflected immediately with
 // nothing to go stale.
 function lettingChartData() {
-const months = lettingChartMonths();
-const monthSet = new Set(months);
+const current = currentMonthYm();
+const baseStart = addMonths(current, -LETTING_CHART_MONTHS_BACK);
+const endYm = addMonths(current, LETTING_CHART_MONTHS_FORWARD);
+const baseMonthSet = new Set(monthRange(baseStart, endYm));
+
 const listings = (data.airbnbListings || []).slice();
 const perListingByMonth = new Map();
 listings.forEach((l) => perListingByMonth.set(l.id, new Map()));
+const addAmount = (listingId, ym, amount) => {
+const byMonth = perListingByMonth.get(listingId);
+if (byMonth) byMonth.set(ym, (byMonth.get(ym) || 0) + amount);
+};
+
 (data.airbnbReservations || []).forEach((r) => {
 const income = Number(r.income);
 if (!Number.isFinite(income) || income <= 0) return;
 if (!r.checkin || !r.checkout || r.checkout <= r.checkin) return;
-const byMonth = perListingByMonth.get(r.listingId);
-if (!byMonth) return; // listing deleted, or never assigned -- nothing to attribute this to
+if (!perListingByMonth.has(r.listingId)) return; // listing deleted, or never assigned -- nothing to attribute this to
 const { counts, total } = nightsByMonth(r.checkin, r.checkout);
 if (!total) return;
-counts.forEach((nights, ym) => {
-if (!monthSet.has(ym)) return; // outside the rolling window -- not plotted
-byMonth.set(ym, (byMonth.get(ym) || 0) + income * (nights / total));
+counts.forEach((nights, ym) => { if (baseMonthSet.has(ym)) addAmount(r.listingId, ym, income * (nights / total)); });
 });
+
+// "Earned (historic)" ledger rows -- pre-tracking income typed in by
+// hand (initLetting()'s add-row, kind 'earned'). Deliberately excludes
+// 'accrual' (already counted above, since every accrual mirrors a
+// reservation's own income) and 'payment'/'adjustment' (balance moves,
+// not income). A hand-added row carries no listingId, only an ownerKey,
+// so it's attributed to whichever listing that owner currently has --
+// same one-owner-one-listing assumption balanceFor/grossFor already
+// make elsewhere in this file. Allowed to widen the window backward
+// (capped) so a figure logged for an earlier month isn't silently
+// dropped off the left edge just because it predates the default span.
+let startYm = baseStart;
+const backFloor = addMonths(baseStart, -LETTING_CHART_MAX_EXTRA_MONTHS_BACK);
+(data.lettingLedger || []).forEach((e) => {
+if (e.kind !== 'earned' || !e.gross || !e.date) return;
+const listing = listings.find((l) => ownerKeyFor(l) === e.ownerKey);
+if (!listing) return;
+const ym = e.date.slice(0, 7);
+if (ym > endYm) return; // a future-dated "historic" entry makes no sense -- ignore rather than extend forward
+const clamped = ym < backFloor ? backFloor : ym;
+if (clamped < startYm) startYm = clamped;
+addAmount(listing.id, clamped, Number(e.gross));
 });
+
+const months = monthRange(startYm, endYm);
+const nowIndex = months.indexOf(current);
 // Only listings that actually earned something in this window plot a
 // legend entry and a stack segment -- "the 3 lets" in practice, but not
 // hardcoded to 3, so a 4th listing (or one retired with no recent income)
 // is handled correctly either way.
 const activeListings = listings.filter((l) => [...(perListingByMonth.get(l.id) || new Map()).values()].some((v) => v > 0.004));
-return { months, listings: activeListings, perListingByMonth };
+return { months, listings: activeListings, perListingByMonth, nowIndex };
 }
 
 function money0(n) { return `£${Math.round(n).toLocaleString('en-GB')}`; }
@@ -546,10 +596,10 @@ el.innerHTML = listings.length
 
 let lettingChartShareOnly = false; // not persisted -- Total is the more informative number to land on
 let lettingChartHoverIndex = null;
-let lettingChartLastPlot = null; // {plot, bw, months, perListingByMonth, mult} for the pointermove handler below
+let lettingChartLastPlot = null; // {plot, bw, months} for the pointermove handler below
 
 function drawLettingChart(canvas, chartData) {
-const { months, listings, perListingByMonth } = chartData;
+const { months, listings, perListingByMonth, nowIndex } = chartData;
 const dpr = window.devicePixelRatio || 1;
 const rect = canvas.getBoundingClientRect();
 const width = Math.max(1, Math.round(rect.width));
@@ -561,7 +611,11 @@ const ctx = canvas.getContext('2d');
 ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 ctx.clearRect(0, 0, width, height);
 
-const mult = lettingChartShareOnly ? 0.5 : 1;
+// Target lines stay a flat 50% when toggled (per the original ask); bars
+// use each listing's OWN share multiplier instead (see myShareMult) --
+// a blanket 50% was wrong for a no-owner listing, which keeps 100%.
+const targetMult = lettingChartShareOnly ? 0.5 : 1;
+const shareMult = (l) => lettingChartShareOnly ? myShareMult(l) : 1;
 const lineColor = resolveColor('--line');
 const muted = resolveColor('--muted');
 const ink = resolveColor('--ink');
@@ -571,8 +625,8 @@ const paper = resolveColor('--paper');
 const padLeft = 46, padRight = 10, padTop = 16, padBottom = 20;
 const plot = { x: padLeft, y: padTop, w: Math.max(10, width - padLeft - padRight), h: Math.max(10, height - padTop - padBottom) };
 
-const monthTotals = months.map((ym) => listings.reduce((n, l) => n + (perListingByMonth.get(l.id).get(ym) || 0), 0) * mult);
-const targets = LETTING_TARGETS.map((t) => ({ ...t, amount: t.amount * mult }));
+const monthTotals = months.map((ym) => listings.reduce((n, l) => n + (perListingByMonth.get(l.id).get(ym) || 0) * shareMult(l), 0));
+const targets = LETTING_TARGETS.map((t) => ({ ...t, amount: t.amount * targetMult }));
 const maxVal = Math.max(...monthTotals, ...targets.map((t) => t.amount), 1) * 1.1;
 const scaleY = (v) => plot.y + plot.h - (v / maxVal) * plot.h;
 
@@ -595,13 +649,17 @@ const barW = Math.max(3, bw * 0.62);
 
 // A faint divider between the rolling-past span and the forward one, so
 // "where is now" reads at a glance rather than needing the axis labels.
-const nowX = plot.x + (LETTING_CHART_NOW_INDEX + 1) * bw;
+// nowIndex can land anywhere once a historic entry has widened the
+// window backward, so it's read from chartData rather than assumed fixed.
+if (nowIndex >= 0) {
+const nowX = plot.x + (nowIndex + 1) * bw;
 ctx.save();
 ctx.strokeStyle = muted;
 ctx.setLineDash([2, 3]);
 ctx.lineWidth = 1;
 ctx.beginPath(); ctx.moveTo(nowX, plot.y); ctx.lineTo(nowX, plot.y + plot.h); ctx.stroke();
 ctx.restore();
+}
 
 // Stacked bars -- each segment inset by 1px top/bottom for the 2px surface
 // gap between fills (see the dataviz skill's mark spec), topmost segment
@@ -609,7 +667,7 @@ ctx.restore();
 months.forEach((ym, i) => {
 const cx = plot.x + (i + 0.5) * bw;
 let cumulative = 0;
-const segs = listings.map((l) => ({ l, raw: (perListingByMonth.get(l.id).get(ym) || 0) * mult })).filter((s) => s.raw > 0.004);
+const segs = listings.map((l) => ({ l, raw: (perListingByMonth.get(l.id).get(ym) || 0) * shareMult(l) })).filter((s) => s.raw > 0.004);
 segs.forEach((s, segIdx) => {
 const yBottom = scaleY(cumulative);
 const yTop = scaleY(cumulative + s.raw);
@@ -675,22 +733,24 @@ ctx.textBaseline = 'top';
 const maxLabels = Math.max(3, Math.min(n, Math.floor(plot.w / 34)));
 const tickIndices = new Set();
 for (let k = 0; k < maxLabels; k++) tickIndices.add(Math.round((k / (maxLabels - 1)) * (n - 1)));
-let nearestToNow = [...tickIndices].reduce((a, b) => Math.abs(b - LETTING_CHART_NOW_INDEX) < Math.abs(a - LETTING_CHART_NOW_INDEX) ? b : a);
+if (nowIndex >= 0) {
+let nearestToNow = [...tickIndices].reduce((a, b) => Math.abs(b - nowIndex) < Math.abs(a - nowIndex) ? b : a);
 tickIndices.delete(nearestToNow);
-tickIndices.add(LETTING_CHART_NOW_INDEX);
+tickIndices.add(nowIndex);
+}
 months.forEach((ym, i) => {
 if (!tickIndices.has(i)) return;
 ctx.fillText(monthLabel(ym), plot.x + (i + 0.5) * bw, plot.y + plot.h + 4);
 });
 
-lettingChartLastPlot = { plot, bw, months, perListingByMonth, mult };
+lettingChartLastPlot = { plot, bw, months };
 
 // Hover tooltip -- per-listing breakdown for the highlighted month, since
 // a short segment's inline label may have been skipped above for lack of
 // room.
 if (lettingChartHoverIndex != null && months[lettingChartHoverIndex]) {
 const ym = months[lettingChartHoverIndex];
-const rows = listings.map((l) => ({ l, raw: (perListingByMonth.get(l.id).get(ym) || 0) * mult })).filter((s) => s.raw > 0.004);
+const rows = listings.map((l) => ({ l, raw: (perListingByMonth.get(l.id).get(ym) || 0) * shareMult(l) })).filter((s) => s.raw > 0.004);
 const total = rows.reduce((s, r) => s + r.raw, 0);
 const lines = [monthLabel(ym), ...rows.map((r) => `${r.l.label || 'Listing'}: ${money0(r.raw)}`), `Total: ${money0(total)}`];
 ctx.font = "10px 'Inter', sans-serif";
