@@ -40,6 +40,16 @@ complex: { label: '🪄 Complex…', title: 'Tell it what this email actually is
 // an extra fetch per row, so whether there's actually an invite is
 // discovered when this is opened, not before.
 checkCalendar: { label: '📅 Check calendar', title: "Parse any calendar invite on this email and make sure it's reflected on your real Google Calendar", kind: 'picker' },
+// Creates a data.mailRules row (js/state.js's blankMailRule) matching
+// THIS message's own from/subject, runs it on this message immediately,
+// then auto-runs on every future "Refresh mail" too -- the sender/
+// subject-match sibling of the marker/suffix system (data.prefs.
+// captureRules) already used for images, shared URLs, and email subject
+// markers. Deliberately excluded from a topic's own preferredActionIds
+// choices in Settings (js/features/settings.js's renderMailTopics) --
+// "create a rule" isn't a sensible thing to promote to a topic's own
+// quick-action row, it still shows in every message's "Other actions".
+addRule: { label: '+ rule', title: 'Auto-run an action for every future email from this sender/subject, starting with this one', kind: 'picker' },
 };
 
 export { MAIL_ACTIONS };

@@ -1,4 +1,4 @@
-import { data, queueSave, getLocalSettings, setLocalSetting, exportBackup, importBackup, MAIL_SEARCH_KINDS, MEDIA_KINDS, blankMailSearch, blankMailTopic } from '../state.js';
+import { data, queueSave, getLocalSettings, setLocalSetting, exportBackup, importBackup, MAIL_SEARCH_KINDS, MEDIA_KINDS, blankMailSearch, blankMailTopic, blankMailRule } from '../state.js';
 import { renderAll } from '../render-all.js';
 import { escapeHtml, uid } from '../utils.js';
 import { renderCalendarLimits } from './calendars.js';
@@ -12,7 +12,7 @@ import { restartAutoSync } from '../sync/autosync.js';
 import { canAttemptGoogleAction, refreshScopes } from '../sync/googleauth.js';
 import { getRemoteInfo, getRemoteCounts, countsOf, pushToGoogleDrive, pullFromGoogleDrive } from '../sync/googledrive.js';
 import { phoneKey, emailKey, nameKey } from '../googlecontacts.js';
-import { CAPTURE_OUTCOMES } from './captureOutcomes.js';
+import { CAPTURE_OUTCOMES, outcomeLabelWithCost } from './captureOutcomes.js';
 import { MAIL_ACTIONS } from './mailActions.js';
 
 // Spend is only ever an estimate: it's computed from the token counts the
@@ -229,6 +229,20 @@ calendarWriteNote.textContent = calendarWrite.checked
 : 'Sign out and back in to drop the write permission.';
 });
 
+// Same shape again -- lets "Pull from Google Tasks" clean up after
+// itself (delete a task once it's safely captured here) instead of
+// leaving a stray duplicate in Google Tasks forever.
+const tasksWrite = document.getElementById('tasks-write-toggle');
+const tasksWriteNote = document.getElementById('tasks-write-note');
+tasksWrite.checked = !!settings.tasksWriteEnabled;
+tasksWrite.addEventListener('change', async () => {
+await setLocalSetting('tasksWriteEnabled', tasksWrite.checked);
+await refreshScopes();
+tasksWriteNote.textContent = tasksWrite.checked
+? 'Sign out and back in to grant the write permission — Google won\'t widen a token that\'s already been issued.'
+: 'Sign out and back in to drop the write permission.';
+});
+
 const sensitiveToggle = document.getElementById('sensitive-fields-toggle');
 sensitiveToggle.checked = !!settings.showSensitiveFields;
 sensitiveToggle.addEventListener('change', async () => {
@@ -341,6 +355,14 @@ renderMailSearches();
 queueSave();
 });
 
+renderMailRules();
+const addMailRuleBtn = document.getElementById('add-mail-rule-btn');
+if (addMailRuleBtn) addMailRuleBtn.addEventListener('click', () => {
+data.mailRules.push(blankMailRule());
+renderMailRules();
+queueSave();
+});
+
 renderMailBin();
 const emptyBinBtn = document.getElementById('empty-mail-bin-btn');
 if (emptyBinBtn) emptyBinBtn.addEventListener('click', () => {
@@ -378,15 +400,6 @@ const CAPTURE_INPUT_METHODS = [
 ];
 
 // ✨ = this outcome always calls AI when it runs; 🪄 = it tries something
-// free/deterministic first and only calls AI as a fallback; no icon = never
-// calls AI. Same convention js/features/mailActions.js established for
-// Mail's own action buttons -- reused here via CAPTURE_OUTCOMES' own
-// aiCost field so it's visible up front which marker costs money to use.
-function outcomeLabelWithCost(outcome) {
-const icon = outcome.aiCost === 'always' ? '✨ ' : outcome.aiCost === 'conditional' ? '🪄 ' : '';
-return icon + outcome.label;
-}
-
 // One editable row per explicit capture trigger. See captureOutcomes.js's
 // matchCaptureRule -- reads as "when [input method] shows [trigger],
 // create a [outcome]." A bare letter, not a "#letter" or a colour: the
@@ -562,7 +575,10 @@ if (data.mailTopics.length === 0) {
 el.innerHTML = '<div class="settings-note" style="margin:0;">No topics yet — every mail search renders on its own, same as before topics existed.</div>';
 return;
 }
-const actionKeys = Object.keys(MAIL_ACTIONS);
+// 'addRule' is deliberately excluded here -- "create a rule" isn't a
+// sensible thing to promote to a topic's own quick-action row; it still
+// shows in every message's "Other actions" regardless (mail.js).
+const actionKeys = Object.keys(MAIL_ACTIONS).filter((k) => k !== 'addRule');
 el.innerHTML = `<table class="limits-table">
 <thead><tr><th>Topic</th><th>Preferred actions (up to 3)</th><th></th></tr></thead>
 <tbody>${data.mailTopics.map((t) => `<tr>
@@ -664,6 +680,52 @@ el.querySelectorAll('[data-del-search]').forEach((x) => {
 x.addEventListener('click', () => {
 data.mailSearches = data.mailSearches.filter((s) => s.id !== x.dataset.delSearch);
 renderMailSearches();
+queueSave();
+});
+});
+}
+
+// One editable row per mail rule (js/state.js's blankMailRule) -- same
+// shape as renderCaptureRules above, but matched on from/subject
+// substrings rather than a marker/suffix trigger. Normally created from
+// a real email via the Mail panel's own "Add rule" action (mail.js); this
+// table is for loosening/retiring one afterward without having to find
+// that email again.
+function renderMailRules() {
+const el = document.getElementById('mail-rules');
+if (!el) return;
+if (data.mailRules.length === 0) {
+el.innerHTML = '<div class="settings-note" style="margin:0;">No rules yet — create one from a real email via Mail\'s own "⋯ Other actions" → "+ rule".</div>';
+return;
+}
+const outcomeKeys = Object.keys(CAPTURE_OUTCOMES);
+const rowsHtml = data.mailRules.map((r) => `<tr>
+<td><input type="text" autocomplete="off" data-mailrule-field="label" data-mailrule-id="${r.id}" value="${escapeHtml(r.label || '')}" placeholder="Label"></td>
+<td><input type="text" autocomplete="off" data-mailrule-field="from" data-mailrule-id="${r.id}" value="${escapeHtml(r.from || '')}" placeholder="From contains…"></td>
+<td><input type="text" autocomplete="off" data-mailrule-field="subject" data-mailrule-id="${r.id}" value="${escapeHtml(r.subject || '')}" placeholder="Subject contains…"></td>
+<td><select data-mailrule-field="outcome" data-mailrule-id="${r.id}">
+${outcomeKeys.map((k) => `<option value="${k}"${k === r.outcome ? ' selected' : ''}>${escapeHtml(outcomeLabelWithCost(CAPTURE_OUTCOMES[k]))}</option>`).join('')}
+</select></td>
+<td><span class="del-x" style="opacity:1;" data-del-mailrule="${r.id}">&times;</span></td>
+</tr>`).join('');
+el.innerHTML = `<table class="limits-table">
+<thead><tr><th>Label</th><th>From contains</th><th>Subject contains</th><th>Creates</th><th></th></tr></thead>
+<tbody>${rowsHtml}</tbody>
+</table>
+<div class="settings-note" style="margin:6px 0 0;">Runs automatically on every "Refresh mail" against every open (not yet processed) message — both From and Subject must match when both are set; leave one blank to match on the other alone. Event/Trip leg queue a reviewable draft (Tasks tab, Smart capture) rather than creating anything outright.</div>`;
+
+el.querySelectorAll('[data-mailrule-field]').forEach((input) => {
+input.addEventListener('change', () => {
+const rule = data.mailRules.find((r) => r.id === input.dataset.mailruleId);
+if (!rule) return;
+rule[input.dataset.mailruleField] = input.value;
+queueSave();
+});
+});
+el.querySelectorAll('[data-del-mailrule]').forEach((x) => {
+x.addEventListener('click', () => {
+data.mailRules = data.mailRules.filter((r) => r.id !== x.dataset.delMailrule);
+renderMailRules();
 queueSave();
 });
 });

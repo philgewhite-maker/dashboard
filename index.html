@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v500</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v501</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -177,7 +177,7 @@
 <button class="sync-btn" id="gtasks-capture-all-btn" type="button">Capture all shown</button>
 <span class="sync-status" id="gtasks-status"></span>
 </div>
-<div class="settings-note" style="margin:0 0 10px;">For anywhere Google Tasks is reachable but this dashboard isn't &mdash; a work web filter, a quick voice-add on a phone. One-way: pulling something in never changes it in Google Tasks, and re-loading won't offer the same item twice. Use &ldquo;Capture all shown&rdquo; once to migrate an existing list in; use &ldquo;Load&rdquo; day to day to catch what's new.</div>
+<div class="settings-note" style="margin:0 0 10px;">For anywhere Google Tasks is reachable but this dashboard isn't &mdash; a work web filter, a quick voice-add on a phone. Only pulls from a Google Tasks list whose name matches one of your <span class="inline-goto-link" data-goto-tab="tasks" data-goto-target="#task-contexts-panel">Contexts</span> exactly (e.g. a list called &ldquo;Home&rdquo;), and tags the captured task with that Context. Re-loading won't offer the same item twice. By default pulling something in never changes Google Tasks &mdash; turn on <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#tasks-write-toggle">deleting from Google Tasks</span> in Settings to have a capture remove it there too.</div>
 <div id="gtasks-list"></div>
 </section>
 
@@ -2764,6 +2764,18 @@ Allow creating events in Google Calendar (Planner tab)
 </details>
 
 <details class="settings-item">
+<summary><h3>Google Tasks</h3></summary>
+<div class="settings-block">
+<div class="settings-note" style="margin:0 0 8px;">"Pull from Google Tasks" (Tasks tab) always reads. Deleting a Google Task once it's safely captured here — so it doesn't sit duplicated in both places — needs a separate, broader permission, off unless you turn it on here.</div>
+<label class="settings-note" style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0;">
+<input type="checkbox" id="tasks-write-toggle">
+Allow deleting from Google Tasks once captured here
+</label>
+<div class="settings-note" id="tasks-write-note"></div>
+</div>
+</details>
+
+<details class="settings-item">
 <summary><h3>Photo sync</h3></summary>
 <div class="settings-block">
 <div class="settings-note" style="margin:0 0 8px;">
@@ -3064,6 +3076,15 @@ Same idea as Connections' ratings, a separate list (Taste/Health/Prep by default
 <div class="settings-note" style="margin:0 0 10px;">Each row becomes its own section in the Mail panel (or joins a topic's shared section, above), with its own limits. Synced, so these follow you to your other devices. Uses Gmail's own search syntax — see Google's <a href="https://support.google.com/mail/answer/7190?hl=en-GB&amp;co=GENIE.Platform%3DAndroid" target="_blank" rel="noopener">search operators guide</a> for everything beyond a plain word or two (labels, OR, excluding a term with a leading -, quoted phrases...).</div>
 <div id="mail-searches"></div>
 <button class="add-btn" id="add-mail-search-btn" type="button" style="margin-top:8px;">Add search</button>
+</div>
+</details>
+
+<details class="settings-item" id="mail-rules-block">
+<summary><h3>Mail rules</h3></summary>
+<div class="settings-block">
+<div class="settings-note" style="margin:0 0 10px;">Auto-runs an action for every future email matching a sender/subject, the moment it's seen on a "Refresh mail" &mdash; the sender/subject-match sibling of <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#capture-rules">Capture markers &amp; suffixes</span>. Normally created from a real email via Mail's own "&#8943; Other actions" &rarr; "+ rule"; this table is for loosening or retiring one afterward.</div>
+<div id="mail-rules"></div>
+<button class="add-btn" id="add-mail-rule-btn" type="button" style="margin-top:8px;">Add rule</button>
 </div>
 </details>
 

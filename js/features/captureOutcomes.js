@@ -345,4 +345,17 @@ const rules = (data.prefs && data.prefs.captureRules) || [];
 return rules.find((r) => r.inputMethod === inputMethod && r.trigger === trigger && CAPTURE_OUTCOMES[r.outcome]) || null;
 }
 
-export { CAPTURE_OUTCOMES, matchCaptureRule };
+// ✨ = this outcome ALWAYS calls AI. 🪄 = it tries something free/
+// deterministic first and only calls AI as a fallback. No icon = never
+// calls AI. Same convention js/features/mailActions.js established for
+// Mail's own action buttons, driven straight off CAPTURE_OUTCOMES' own
+// `aiCost` field so it's visible up front which trigger/rule costs money
+// to use -- shared by every outcome <select> in the app (Settings'
+// capture-rules/shareUrlRules tables, Mail's own "Add rule" picker)
+// rather than each keeping its own copy.
+function outcomeLabelWithCost(outcome) {
+const icon = outcome.aiCost === 'always' ? '✨ ' : outcome.aiCost === 'conditional' ? '🪄 ' : '';
+return icon + outcome.label;
+}
+
+export { CAPTURE_OUTCOMES, matchCaptureRule, outcomeLabelWithCost };

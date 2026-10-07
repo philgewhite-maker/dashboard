@@ -33,6 +33,12 @@ const CONTACTS_WRITE_SCOPE = 'https://www.googleapis.com/auth/contacts';
 // creating events is a heavier permission than just reading them.
 const CALENDAR_WRITE_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
 
+// Same again for deleting a Google Task once it's safely captured into the
+// dashboard (js/features/googletasksfeed.js) -- Google has no narrower
+// "delete only" scope for Tasks, so this is the full read/write scope,
+// replacing tasks.readonly rather than adding to it.
+const TASKS_WRITE_SCOPE = 'https://www.googleapis.com/auth/tasks';
+
 let scopesForSession = BASE_SCOPES.join(' ');
 
 async function refreshScopes() {
@@ -42,6 +48,9 @@ let scopes = settings.contactsWriteEnabled
 : BASE_SCOPES;
 if (settings.calendarWriteEnabled) {
 scopes = scopes.filter((s) => s !== 'https://www.googleapis.com/auth/calendar.readonly').concat(CALENDAR_WRITE_SCOPE);
+}
+if (settings.tasksWriteEnabled) {
+scopes = scopes.filter((s) => s !== 'https://www.googleapis.com/auth/tasks.readonly').concat(TASKS_WRITE_SCOPE);
 }
 const next = scopes.join(' ');
 if (next !== scopesForSession) {
@@ -206,19 +215,35 @@ clearTimeout(timer);
 }
 }
 
+// Exact-token membership, not a substring check -- scopesForSession is a
+// space-joined string, and a plain .includes(CONTACTS_WRITE_SCOPE) was
+// confirmed live to false-positive even with write OFF, because
+// '.../auth/contacts.readonly' literally contains '.../auth/contacts' as
+// a prefix (same trap TASKS_WRITE_SCOPE/'tasks.readonly' falls into).
+// CALENDAR_WRITE_SCOPE happened not to share a prefix with its own
+// readonly scope, which is exactly why this went unnoticed until now.
+function hasScope(scope) {
+return scopesForSession.split(' ').includes(scope);
+}
+
 // True when the current session was granted the Contacts write scope, so UI
 // that writes can hide itself rather than failing at the API with a 403.
 function hasContactsWrite() {
-return scopesForSession.includes(CONTACTS_WRITE_SCOPE);
+return hasScope(CONTACTS_WRITE_SCOPE);
 }
 
 // Same check for the Calendar write scope -- see CALENDAR_WRITE_SCOPE above.
 function hasCalendarWrite() {
-return scopesForSession.includes(CALENDAR_WRITE_SCOPE);
+return hasScope(CALENDAR_WRITE_SCOPE);
+}
+
+// Same check for the Tasks write scope -- see TASKS_WRITE_SCOPE above.
+function hasTasksWrite() {
+return hasScope(TASKS_WRITE_SCOPE);
 }
 
 export {
 NotConfiguredError,
 isSignedIn, wasConnectedBefore, canAttemptGoogleAction, tryReconnectSilently, signIn, signOut,
-googleFetch, refreshScopes, hasContactsWrite, hasCalendarWrite,
+googleFetch, refreshScopes, hasContactsWrite, hasCalendarWrite, hasTasksWrite,
 };

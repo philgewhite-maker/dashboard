@@ -1,4 +1,4 @@
-import { data, queueSave, mailSearchLabel, blankMailDismissal, blankCaptureDraft } from '../state.js';
+import { data, queueSave, mailSearchLabel, blankMailDismissal, blankMailRule } from '../state.js';
 import { escapeHtml, affiliateLink, unfoldIcsLines, parseIcsProperty, icsDateTime, dateStrAdd, MISSING_KEY_LINK_HTML } from '../utils.js';
 import { canAttemptGoogleAction, hasCalendarWrite } from '../sync/googleauth.js';
 import { fetchMailSearches, getMessageDetail, fetchMessageAttachmentBytes } from '../googlemail.js';
@@ -6,6 +6,8 @@ import { captureTask, taskChipHtml, bindTaskChips } from './tasks.js';
 import { legTargetPickerHtml, bindLegTargetPicker, readLegTargetPicker, applyLegExtraction, tripChipHtml, bindTripChips, gapsFor } from './travel.js';
 import { connectionPickerHtml, bindConnPickers } from './connections.js';
 import { MAIL_ACTIONS } from './mailActions.js';
+import { runOutcomeOnMessage, processMailRules } from './mailRules.js';
+import { CAPTURE_OUTCOMES, outcomeLabelWithCost, matchCaptureRule } from './captureOutcomes.js';
 
 // "Tamara White" <tamara.anna.white@gmail.com> -> "Tamara White"; falls
 // back to the raw email if there's no display name on the header.
@@ -343,6 +345,22 @@ return `<div class="mail-action-picker" data-mail-action-picker="checkCalendar:$
 <span class="sync-status" data-mail-check-cal-status="${escapeHtml(m.id)}"></span>
 </div>`;
 }
+if (actionId === 'addRule') {
+// Defaults to THIS message's own from/subject verbatim -- untouched,
+// the rule only matches an identical sender+subject pair again (a
+// recurring digest); loosening either field to a shorter substring is
+// a deliberate edit, not the starting point. Blank from/blank subject
+// both filter nothing on that field (see mailRules.js's matchMailRule).
+const outcomeOptions = Object.keys(CAPTURE_OUTCOMES).map((k) => `<option value="${k}">${escapeHtml(outcomeLabelWithCost(CAPTURE_OUTCOMES[k]))}</option>`).join('');
+return `<div class="mail-action-picker" data-mail-action-picker="addRule:${escapeHtml(m.id)}" hidden>
+<input type="text" class="settings-input" data-mail-rule-label="${escapeHtml(m.id)}" value="${escapeHtml(m.subject)}" placeholder="Rule label">
+<input type="text" class="settings-input" data-mail-rule-from="${escapeHtml(m.id)}" value="${escapeHtml(m.from)}" placeholder="From contains…">
+<input type="text" class="settings-input" data-mail-rule-subject="${escapeHtml(m.id)}" value="${escapeHtml(m.subject)}" placeholder="Subject contains…">
+<select class="settings-input" data-mail-rule-outcome="${escapeHtml(m.id)}">${outcomeOptions}</select>
+<button class="todo-add-btn" type="button" data-mail-rule-create="${escapeHtml(m.id)}">+ Create &amp; run</button>
+<span class="sync-status" data-mail-rule-status="${escapeHtml(m.id)}"></span>
+</div>`;
+}
 if (actionId === 'improveTask') {
 const existing = existingTaskFor(m);
 if (!existing) return ''; // only ever offered alongside an already-captured task
@@ -547,7 +565,6 @@ const EMAIL_SUBJECT_MARKER = /\bzxc\s+([A-Za-z])\b/i;
 // inside either) -- initMail's sync handler calls this directly, a
 // separate scope from renderMail's own self-rebinding body.
 async function processMailMarkers(sections) {
-const { matchCaptureRule, CAPTURE_OUTCOMES } = await import('./captureOutcomes.js');
 let direct = 0;
 let drafted = 0;
 for (const { messages } of sections) {
@@ -557,20 +574,9 @@ const match = EMAIL_SUBJECT_MARKER.exec(m.subject || '');
 if (!match) continue;
 const rule = matchCaptureRule(data, 'emailSubject', match[1].toUpperCase());
 if (!rule) continue;
-const outcome = CAPTURE_OUTCOMES[rule.outcome];
-if (!outcome) continue;
 try {
-if (outcome.commitMode === 'draft') {
-const step = await outcome.buildStep({ mailMessageId: m.id, subject: m.subject, from: m.from, url: m.link });
-data.captureDrafts.unshift(blankCaptureDraft({
-rawText: m.subject, steps: [step],
-source: { kind: 'mail', label: m.subject, url: m.link },
-}));
-drafted++;
-} else {
-await outcome.run({ title: m.subject, url: m.link, source: { kind: 'mail', label: m.subject, url: m.link } });
-direct++;
-}
+const result = await runOutcomeOnMessage(rule.outcome, m);
+if (result === 'draft') drafted++; else if (result === 'direct') direct++;
 } catch (err) {
 console.error(`Mail marker "${rule.trigger}" failed for "${m.subject}":`, err);
 }
@@ -748,6 +754,39 @@ select.innerHTML = cals.length ? cals.map((c) => `<option value="${escapeHtml(c.
 });
 }).catch(() => { select.innerHTML = '<option value="">Couldn\'t load calendars</option>'; });
 }
+}
+});
+});
+
+list.querySelectorAll('[data-mail-rule-create]').forEach((btn) => {
+btn.addEventListener('click', async (e) => {
+e.preventDefault();
+const id = btn.dataset.mailRuleCreate;
+const status = list.querySelector(`[data-mail-rule-status="${CSS.escape(id)}"]`);
+const say = (msg) => { if (status) status.textContent = msg; };
+const m = lastSections.flatMap((s) => s.messages).find((mm) => mm.id === id);
+if (!m) { say("Couldn't find that message — try refreshing."); return; }
+const from = (list.querySelector(`[data-mail-rule-from="${CSS.escape(id)}"]`)?.value || '').trim();
+const subject = (list.querySelector(`[data-mail-rule-subject="${CSS.escape(id)}"]`)?.value || '').trim();
+if (!from && !subject) { say('Set at least a sender or subject to match on.'); return; }
+const label = (list.querySelector(`[data-mail-rule-label="${CSS.escape(id)}"]`)?.value || '').trim() || m.subject;
+const outcome = list.querySelector(`[data-mail-rule-outcome="${CSS.escape(id)}"]`)?.value || 'task';
+btn.disabled = true;
+say('Saving rule and running it on this email…');
+data.mailRules.push(blankMailRule({ label, from, subject, outcome }));
+queueSave();
+try {
+const result = await runOutcomeOnMessage(outcome, m);
+renderMail(lastSections);
+// Picker is gone after the re-render above (a fresh, collapsed one),
+// so the status note from here on would have nowhere to land --
+// nothing further to say that the row's own new state doesn't
+// already show (✓ task, a drafted card, etc).
+if (result == null) console.error(`Mail rule saved, but outcome "${outcome}" no longer exists.`);
+} catch (err) {
+say(`Rule saved, but running it on this email failed: ${err.message || err}`);
+console.error('Mail rule run failed:', err);
+btn.disabled = false;
 }
 });
 });
@@ -1238,8 +1277,10 @@ status.textContent = 'Loading…';
 try {
 lastSections = await fetchMailSearches(data.mailSearches, data.prefs.mailResultCount);
 const markerNote = await processMailMarkers(lastSections);
+const ruleNote = await processMailRules(lastSections, messageStatus);
 renderMail(lastSections);
-status.textContent = `Updated ${new Date().toLocaleTimeString()}.${markerNote ? ` (${markerNote})` : ''}`;
+const note = [markerNote, ruleNote].filter(Boolean).join(', ');
+status.textContent = `Updated ${new Date().toLocaleTimeString()}.${note ? ` (${note})` : ''}`;
 } catch (err) {
 status.textContent = `Couldn't load mail: ${err.message || err}`;
 console.error('Mail refresh failed:', err);

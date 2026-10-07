@@ -64,6 +64,11 @@ accountValueReviews: [],
 cassParticipants: { list: [], fetchedAt: '' },
 mailSearches: [],
 mailTopics: [], // {id, label, preferredActionIds} -- groups mail searches for display and picks which action buttons show, see js/features/mail.js
+// Auto-run capture rules, created from a specific email via the Mail
+// panel's own "Add rule" action (js/features/mail.js) -- the sender/
+// subject-match sibling of data.prefs.captureRules' marker/suffix
+// triggers. {id, label, from, subject, outcome} -- see blankMailRule.
+mailRules: [],
 // Physical things you've bought or that someone owns, in one list rather
 // than per-person, because an item outlives whoever it was bought for:
 // [{id, brand, style, piece, size, colour, holderId, acquiredAt, fromTaskId, notes}]
@@ -326,6 +331,20 @@ return { id: uid(), kind: 'starred', value: '', maxDays: 0, maxEvents: 0, topicI
 // UI, not enforced here -- mail.js reads it defensively (.slice(0, 3)).
 function blankMailTopic(fields = {}) {
 return { id: uid(), label: '', preferredActionIds: [], createdAt: new Date().toISOString(), ...fields };
+}
+
+// A mail rule's from/subject are plain substring filters (case-
+// insensitive, matched against the message's own from/subject) -- not a
+// Gmail query like MAIL_SEARCH_KINDS' own 'from'/'subject' kinds, since a
+// rule only ever evaluates against messages already fetched by the
+// existing searches, never builds a query of its own. Empty means "don't
+// filter on this field"; both empty would match everything, so Settings'
+// own table and the "Add rule" picker both require at least one to be
+// set. `outcome` is a CAPTURE_OUTCOMES key (js/features/
+// captureOutcomes.js) -- running a rule means calling into that same
+// registry, same as an email subject marker already does.
+function blankMailRule(fields = {}) {
+return { id: uid(), label: '', from: '', subject: '', outcome: 'task', createdAt: new Date().toISOString(), ...fields };
 }
 
 // A message explicitly dismissed from the Mail panel without becoming
@@ -1613,7 +1632,7 @@ const DEFAULT_FLAG_RULES = [
 ];
 
 function blankData() {
-return { habits: [], goals: [], jobs: [], connections: [], calendars: [], calendarStatus: {}, vouchers: [], businessIdeas: [], subscriptions: [], enhancementIdeas: [], financeAccounts: [], switchOffers: [], mailSearches: [], mailTopics: [], mailDismissed: [], tasks: [], taskContexts: [...DEFAULT_TASK_CONTEXTS],
+return { habits: [], goals: [], jobs: [], connections: [], calendars: [], calendarStatus: {}, vouchers: [], businessIdeas: [], subscriptions: [], enhancementIdeas: [], financeAccounts: [], switchOffers: [], mailSearches: [], mailTopics: [], mailRules: [], mailDismissed: [], tasks: [], taskContexts: [...DEFAULT_TASK_CONTEXTS],
 ratingCategories: DEFAULT_RATING_CATEGORIES.map((c) => ({ ...c })),
 recipes: [], recipeRatingCategories: DEFAULT_RECIPE_RATING_CATEGORIES.map((c) => ({ ...c })), ingredientReference: [], ingredientAliases: {},
 claudeAnswers: {},
@@ -2130,6 +2149,8 @@ if (!Array.isArray(data.mailTopics)) data.mailTopics = [];
 data.mailTopics = data.mailTopics.map((t) => ({ ...blankMailTopic(), ...t, id: t.id || uid() }));
 const mailTopicIds = new Set(data.mailTopics.map((t) => t.id));
 data.mailSearches.forEach((s) => { if (s.topicId && !mailTopicIds.has(s.topicId)) s.topicId = ''; });
+if (!Array.isArray(data.mailRules)) data.mailRules = [];
+data.mailRules = data.mailRules.map((r) => ({ ...blankMailRule(), ...r, id: r.id || uid() }));
 if (!Array.isArray(data.mailDismissed)) data.mailDismissed = [];
 // The service worker's background refresh writes the document without
 // going through this file at all (js/bgsync.js), so a document that came
@@ -3115,7 +3136,7 @@ data, sampleData, loadData, migrate, persist, queueSave, flushSave, setSaveStatu
 setExternalUpdateHandler, setLocalChangeHandler, getLocalSettings, setLocalSetting, computeStreak, reachOutThreshold,
 isDormantStage, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness,
 exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, SENSITIVE_BLOCKS, whatSheHas, unheldInventory, whoFits, inventorySets, whoFitsSet, interestNote, SIZE_GROUPS, sizeGroupFor, DEFAULT_PREFS, blankInventoryItem, blankBookItem,
-MAIL_SEARCH_KINDS, mailSearchLabel, blankMailSearch, blankMailTopic, blankMailDismissal,
+MAIL_SEARCH_KINDS, mailSearchLabel, blankMailSearch, blankMailTopic, blankMailRule, blankMailDismissal,
 TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureBatch, blankPendingImport, blankConnection, blankTelegramThread, blankReadingItem, blankCaptureDraft, blankJob, blankMediaItem, MEDIA_KINDS, MEDIA_STATUSES,
 blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS, LEG_DATE_FIELDS, STAY_TYPE_SUGGESTIONS,
 blankPackingItem, blankPackingModule, blankTripPacking, blankPackingListItem, PACKING_DURATION_TIERS, packingDurationTier, DEFAULT_PACKING_MODULES,
