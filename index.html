@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v497</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v498</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -353,11 +353,12 @@
 <div class="letting-chart-wrap">
 <div class="panel-head" style="margin:14px 0 6px;">
 <h2 style="font-size:13px;">Income by month</h2>
-<label class="settings-note" style="display:flex;align-items:center;gap:6px;cursor:pointer;margin:0 0 0 auto;" title="Each bar uses that listing's own Owner/Share % from its Airbnb settings -- 100% for a listing owned by me, the configured share for Lewis/Zara's. The two target lines are a fixed aspirational figure, not tied to any listing, so they're simply halved.">
-<input type="checkbox" id="letting-chart-share-toggle"> My share
-</label>
 </div>
-<div class="settings-note" style="margin:0 0 6px;">15 months back, 6 forward. A stay spanning a month end has its income split across both by nights, so no month looks lumpy just because a booking happened to straddle it.</div>
+<div class="settings-note" style="margin:0 0 6px;">15 months back, 6 forward. A stay spanning a month end has its income split across both by nights, so no month looks lumpy just because a booking happened to straddle it. Tick/untick below to choose which of Mine, Lewis', Zara's (or any combination) show in the stack -- each listing's own Owner/Share % decides which bucket its income lands in, not a blanket percentage.</div>
+<div class="sync-row" style="margin:0 0 8px;gap:12px;">
+<label style="font-size:11px;color:var(--muted);display:flex;align-items:center;gap:4px;">Aggressive £<input type="number" id="letting-chart-target-aggressive" class="settings-input" style="max-width:80px;" min="0" step="10"></label>
+<label style="font-size:11px;color:var(--muted);display:flex;align-items:center;gap:4px;">Normal £<input type="number" id="letting-chart-target-normal" class="settings-input" style="max-width:80px;" min="0" step="10"></label>
+</div>
 <div class="letting-chart-legend" id="letting-chart-legend"></div>
 <div class="chart-canvas-wrap">
 <canvas id="letting-chart-canvas"></canvas>

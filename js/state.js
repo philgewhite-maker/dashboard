@@ -128,6 +128,11 @@ switchOffersCheckedAt: '', // ISO date of the last bank-switch-offers scan -- dr
 // something to store a setting for, so only rate/allowance are kept
 // here. {"lewis": {ratePct: 20, allowance: 1000}, ...}.
 lettingTaxByOwner: {},
+// The two monthly targets drawn as reference lines on the letting-income
+// chart (js/features/letting.js) -- user-editable rather than hardcoded,
+// since an aspirational figure like this is exactly the kind of thing
+// that changes over time and shouldn't need a code change to adjust.
+lettingChartTargets: { aggressive: 2700, normal: 1700 },
 // Which scheduled syncs are turned OFF, and how often the rest may run
 // (see js/features/scheduled.js). Stored as the exceptions rather than
 // the enabled list so a task added later is on by default -- the point

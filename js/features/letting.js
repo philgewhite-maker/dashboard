@@ -449,13 +449,19 @@ const LETTING_CHART_MONTHS_FORWARD = 6;
 // shouldn't quietly drift as "today" moves forward.
 const LETTING_CHART_HISTORIC_FLOOR = '2026-01';
 
-// £2,700pcm / £1,700pcm are flat targets regardless of days-in-month --
-// "per calendar month" means the same number every month, not pro-rated
-// for a 28 vs 31 day month.
+// Two flat monthly targets, regardless of days-in-month -- "per calendar
+// month" means the same number every month, not pro-rated for a 28 vs 31
+// day month. Amounts are user-editable (data.prefs.lettingChartTargets,
+// #letting-chart-target-aggressive/-normal below) rather than hardcoded,
+// since an aspirational figure like this is exactly the kind of thing
+// that changes over time.
 const LETTING_TARGETS = [
-{ key: 'aggressive', amount: 2700, label: 'Aggressive', colorVar: '--red' },
-{ key: 'normal', amount: 1700, label: 'Normal', colorVar: '--slate' },
+{ key: 'aggressive', label: 'Aggressive', colorVar: '--red' },
+{ key: 'normal', label: 'Normal', colorVar: '--slate' },
 ];
+// The bucket every listing's OWNER's own cut, plus Phil's balance from
+// every other owner's listing, lands in -- see splitContribution().
+const LETTING_CHART_MINE_KEY = '__mine__';
 
 // Mirrors .dot.X{background:var(--Y)} in style.css exactly (green is the
 // one name that maps to a DIFFERENT var, --sage) -- a listing's `colour`
@@ -493,25 +499,50 @@ while (ym <= endYm) { months.push(ym); ym = addMonths(ym, 1); }
 return months;
 }
 
-// Confirmed against the real listings (Settings -> Travel -> Airbnb
-// listings): sharePct means two different things depending on WHO the
-// Owner column names. For Lewis/Zara it's THEIR cut, so my own share is
-// the remainder (100-sharePct) -- the case the first version of this
-// toggle got right. For "En-suite - Phil" / "Flat", the Owner is Phil
-// himself with sharePct 100, meaning the OWNER (me) gets 100% -- under
-// the remainder formula that read as 0%, exactly backwards, which is
-// what got reported. A listing with no owner at all is entirely mine
-// too, same as before. Either way the actual number always comes straight
-// off listing.sharePct -- nothing here is a hardcoded percentage, only
-// WHICH formula (direct vs remainder) applies depends on whose name is
-// on the Owner column.
-function myShareMult(listing) {
+// A listing's Owner is either me (an unowned listing counts as mine too)
+// or someone else (Lewis, Zara) with their own sharePct cut -- confirmed
+// against the real listings (Settings -> Travel -> Airbnb listings):
+// "En-suite - Phil" / "Flat" both have Owner "Phil", sharePct 100
+// (the owner -- me -- keeps it all); "En-suite - Lewis" / "Double -
+// Zara" have sharePct 50 (THEIR cut). So every pound a listing earns
+// splits into at most two buckets: the owner's own cut (Lewis'/Zara's,
+// nothing for a listing that's mine already) and MY balance -- what's
+// left once their cut is taken, which is the whole amount for a listing
+// I own outright. This is what the chart's multi-select picks between
+// (Mine / Lewis' / Zara's / ...), not a single blanket percentage.
+function isMyOwnListing(listing) {
 const key = ownerKeyFor(listing);
-if (!key) return 1;
+return !key || /^phil$/i.test(String(ownerNameFor(key) || '').trim());
+}
+function splitContribution(listing, amount) {
+if (isMyOwnListing(listing)) return [{ group: LETTING_CHART_MINE_KEY, amount }];
 const pct = Number(listing.sharePct);
-const sharePct = Number.isFinite(pct) ? pct : 50;
-const iAmTheOwner = /^phil$/i.test(String(ownerNameFor(key) || '').trim());
-return Math.max(0, Math.min(1, (iAmTheOwner ? sharePct : 100 - sharePct) / 100));
+const sharePct = Math.max(0, Math.min(100, Number.isFinite(pct) ? pct : 50));
+const ownCut = amount * (sharePct / 100);
+const balance = amount - ownCut;
+const out = [{ group: ownerKeyFor(listing), amount: ownCut }];
+if (balance > 0) out.push({ group: LETTING_CHART_MINE_KEY, amount: balance });
+return out;
+}
+
+// Every group that could show a bar segment: "Mine" always exists (even
+// with nothing in it yet), plus one per other real owner found across
+// the listings -- built fresh each render so a newly-added owner shows
+// up without needing its own setup step. Each group's colour comes from
+// one of its own listings (the first found), so the chart's colours stay
+// tied to the same per-listing `colour` field used everywhere else in
+// this app rather than a separately-assigned palette.
+function lettingChartGroups() {
+const listings = data.airbnbListings || [];
+const groups = new Map();
+const mineListing = listings.find(isMyOwnListing);
+groups.set(LETTING_CHART_MINE_KEY, { key: LETTING_CHART_MINE_KEY, label: 'Mine', colour: (mineListing && mineListing.colour) || 'slate' });
+listings.forEach((l) => {
+if (isMyOwnListing(l)) return;
+const key = ownerKeyFor(l);
+if (!groups.has(key)) groups.set(key, { key, label: `${ownerNameFor(key)}'s`, colour: l.colour || 'slate' });
+});
+return groups;
 }
 
 // A stay spanning a month boundary splits its income by NIGHTS in each
@@ -533,33 +564,45 @@ total += 1;
 return { counts, total };
 }
 
-// One Map per listing, ym -> allocated income, built fresh from
-// data.airbnbReservations every render -- same "derive it, don't store it"
-// rule the owed/gross totals above already follow, so a stay edited after
-// the fact (income corrected, dates fixed) is reflected immediately with
-// nothing to go stale.
+// One Map per group (Mine / Lewis' / Zara's / ...), ym -> allocated
+// income, built fresh from data.airbnbReservations every render -- same
+// "derive it, don't store it" rule the owed/gross totals above already
+// follow, so a stay edited after the fact (income corrected, dates
+// fixed) is reflected immediately with nothing to go stale. Each
+// reservation/ledger amount is split via splitContribution() BEFORE being
+// added, so e.g. Lewis' listing's income always lands partly in his own
+// group and partly in Mine, regardless of which groups the multi-select
+// currently has ticked -- the split itself isn't a display filter, it's
+// just where the money actually goes.
 function lettingChartData() {
 const current = currentMonthYm();
 const baseStart = addMonths(current, -LETTING_CHART_MONTHS_BACK);
 const endYm = addMonths(current, LETTING_CHART_MONTHS_FORWARD);
 const baseMonthSet = new Set(monthRange(baseStart, endYm));
 
-const listings = (data.airbnbListings || []).slice();
-const perListingByMonth = new Map();
-listings.forEach((l) => perListingByMonth.set(l.id, new Map()));
-const addAmount = (listingId, ym, amount) => {
-const byMonth = perListingByMonth.get(listingId);
+const groupMeta = lettingChartGroups();
+const perGroupByMonth = new Map();
+groupMeta.forEach((g) => perGroupByMonth.set(g.key, new Map()));
+const addAmount = (groupKey, ym, amount) => {
+const byMonth = perGroupByMonth.get(groupKey);
 if (byMonth) byMonth.set(ym, (byMonth.get(ym) || 0) + amount);
 };
+
+const listings = data.airbnbListings || [];
+const listingById = new Map(listings.map((l) => [l.id, l]));
 
 (data.airbnbReservations || []).forEach((r) => {
 const income = Number(r.income);
 if (!Number.isFinite(income) || income <= 0) return;
 if (!r.checkin || !r.checkout || r.checkout <= r.checkin) return;
-if (!perListingByMonth.has(r.listingId)) return; // listing deleted, or never assigned -- nothing to attribute this to
+const listing = listingById.get(r.listingId);
+if (!listing) return; // listing deleted, or never assigned -- nothing to attribute this to
 const { counts, total } = nightsByMonth(r.checkin, r.checkout);
 if (!total) return;
-counts.forEach((nights, ym) => { if (baseMonthSet.has(ym)) addAmount(r.listingId, ym, income * (nights / total)); });
+counts.forEach((nights, ym) => {
+if (!baseMonthSet.has(ym)) return;
+splitContribution(listing, income * (nights / total)).forEach((c) => addAmount(c.group, ym, c.amount));
+});
 });
 
 // "Earned (historic)" ledger rows -- pre-tracking income typed in by
@@ -584,36 +627,62 @@ const ym = e.date.slice(0, 7);
 if (ym > endYm) return; // a future-dated "historic" entry makes no sense -- ignore rather than extend forward
 if (ym < LETTING_CHART_HISTORIC_FLOOR) return; // older than the chart is willing to show
 if (ym < startYm) startYm = ym;
-addAmount(listing.id, ym, Number(e.gross));
+splitContribution(listing, Number(e.gross)).forEach((c) => addAmount(c.group, ym, c.amount));
 });
 
 const months = monthRange(startYm, endYm);
 const nowIndex = months.indexOf(current);
-// Only listings that actually earned something in this window plot a
-// legend entry and a stack segment -- "the 3 lets" in practice, but not
-// hardcoded to 3, so a 4th listing (or one retired with no recent income)
-// is handled correctly either way.
-const activeListings = listings.filter((l) => [...(perListingByMonth.get(l.id) || new Map()).values()].some((v) => v > 0.004));
-return { months, listings: activeListings, perListingByMonth, nowIndex };
+// Only a group that actually has something in this window plots a
+// picker row and a stack segment -- "Mine, Lewis', Zara's" in practice,
+// but not hardcoded to those names, so a 4th owner (or one retired with
+// no recent income) is handled correctly either way.
+const activeGroups = [...groupMeta.values()].filter((g) => [...(perGroupByMonth.get(g.key) || new Map()).values()].some((v) => v > 0.004));
+return { months, groups: activeGroups, perGroupByMonth, nowIndex };
 }
 
 function money0(n) { return `£${Math.round(n).toLocaleString('en-GB')}`; }
 
-function renderLettingChartLegend(listings) {
-const el = document.getElementById('letting-chart-legend');
-if (!el) return;
-if (!listings.length) { el.innerHTML = '<span class="settings-note" style="margin:0;">No income recorded yet.</span>'; return; }
-const avgSwatch = '<span class="letting-chart-legend-line" aria-hidden="true"></span>';
-el.innerHTML = listings.map((l) => `<span class="letting-chart-legend-item"><span class="dot ${escapeHtml(l.colour || 'slate')}"></span>${escapeHtml(l.label || 'Listing')}</span>`).join('')
-+ `<span class="letting-chart-legend-item">${avgSwatch}3-month avg</span>`;
+// Doubles as the multi-select: each row is a checkbox (which group to
+// show), not just a colour key. `lettingChartSelectedGroups` tracks which
+// are currently ticked; `lettingChartKnownGroupKeys` tracks which the
+// picker has ever offered, so a group seen for the first time defaults
+// to ticked (shown) without clobbering a choice the user already made on
+// one they've seen before.
+let lettingChartSelectedGroups = new Set();
+let lettingChartKnownGroupKeys = new Set();
+function syncLettingChartSelection(groups) {
+groups.forEach((g) => {
+if (lettingChartKnownGroupKeys.has(g.key)) return;
+lettingChartKnownGroupKeys.add(g.key);
+lettingChartSelectedGroups.add(g.key);
+});
 }
 
-let lettingChartShareOnly = false; // not persisted -- Total is the more informative number to land on
+function renderLettingChartGroupPicker(groups) {
+const el = document.getElementById('letting-chart-legend');
+if (!el) return;
+if (!groups.length) { el.innerHTML = '<span class="settings-note" style="margin:0;">No income recorded yet.</span>'; return; }
+const avgSwatch = '<span class="letting-chart-legend-line" aria-hidden="true"></span>';
+el.innerHTML = groups.map((g) => `<label class="letting-chart-legend-item" style="cursor:pointer;">
+<input type="checkbox" data-letting-chart-group="${escapeHtml(g.key)}"${lettingChartSelectedGroups.has(g.key) ? ' checked' : ''}>
+<span class="dot ${escapeHtml(g.colour || 'slate')}"></span>${escapeHtml(g.label)}
+</label>`).join('')
++ `<span class="letting-chart-legend-item">${avgSwatch}3-month avg</span>`;
+el.querySelectorAll('[data-letting-chart-group]').forEach((cb) => {
+cb.addEventListener('change', () => {
+const key = cb.dataset.lettingChartGroup;
+if (cb.checked) lettingChartSelectedGroups.add(key); else lettingChartSelectedGroups.delete(key);
+renderLettingChart();
+});
+});
+}
+
 let lettingChartHoverIndex = null;
 let lettingChartLastPlot = null; // {plot, bw, months} for the pointermove handler below
 
 function drawLettingChart(canvas, chartData) {
-const { months, listings, perListingByMonth, nowIndex } = chartData;
+const { months, groups: allGroups, perGroupByMonth, nowIndex } = chartData;
+const groups = allGroups.filter((g) => lettingChartSelectedGroups.has(g.key));
 const dpr = window.devicePixelRatio || 1;
 const rect = canvas.getBoundingClientRect();
 const width = Math.max(1, Math.round(rect.width));
@@ -625,14 +694,6 @@ const ctx = canvas.getContext('2d');
 ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 ctx.clearRect(0, 0, width, height);
 
-const shareMult = (l) => lettingChartShareOnly ? myShareMult(l) : 1;
-// The targets are fixed aspirational figures (£2,700 / £1,700 total),
-// not derived from any listing -- "my share" of them is simply half,
-// exactly as specified, regardless of how the actual listings split.
-// Only the BARS use the per-listing config (myShareMult) -- there's a
-// real sharePct/Owner behind each one of those; there's nothing behind
-// a flat target number to derive a blended percentage FROM.
-const targetMult = lettingChartShareOnly ? 0.5 : 1;
 const lineColor = resolveColor('--line');
 const muted = resolveColor('--muted');
 const ink = resolveColor('--ink');
@@ -642,8 +703,12 @@ const paper = resolveColor('--paper');
 const padLeft = 46, padRight = 10, padTop = 16, padBottom = 20;
 const plot = { x: padLeft, y: padTop, w: Math.max(10, width - padLeft - padRight), h: Math.max(10, height - padTop - padBottom) };
 
-const monthTotals = months.map((ym) => listings.reduce((n, l) => n + (perListingByMonth.get(l.id).get(ym) || 0) * shareMult(l), 0));
-const targets = LETTING_TARGETS.map((t) => ({ ...t, amount: t.amount * targetMult }));
+const monthTotals = months.map((ym) => groups.reduce((n, g) => n + (perGroupByMonth.get(g.key).get(ym) || 0), 0));
+// Fixed, user-editable amounts (data.prefs.lettingChartTargets) -- not
+// tied to the multi-select at all, since they're a standing target for
+// the whole operation, not scaled to whichever subset is on screen.
+const targetAmounts = data.prefs.lettingChartTargets || {};
+const targets = LETTING_TARGETS.map((t) => ({ ...t, amount: Number(targetAmounts[t.key]) || 0 }));
 const maxVal = Math.max(...monthTotals, ...targets.map((t) => t.amount), 1) * 1.1;
 const scaleY = (v) => plot.y + plot.h - (v / maxVal) * plot.h;
 
@@ -684,14 +749,14 @@ ctx.restore();
 months.forEach((ym, i) => {
 const cx = plot.x + (i + 0.5) * bw;
 let cumulative = 0;
-const segs = listings.map((l) => ({ l, raw: (perListingByMonth.get(l.id).get(ym) || 0) * shareMult(l) })).filter((s) => s.raw > 0.004);
+const segs = groups.map((g) => ({ g, raw: perGroupByMonth.get(g.key).get(ym) || 0 })).filter((s) => s.raw > 0.004);
 segs.forEach((s, segIdx) => {
 const yBottom = scaleY(cumulative);
 const yTop = scaleY(cumulative + s.raw);
 const inset = Math.min(1, (yBottom - yTop) / 4);
 const top = yTop + inset, bottom = yBottom - inset;
 const h = Math.max(1, bottom - top);
-ctx.fillStyle = resolveColor(listingColorVar(s.l.colour));
+ctx.fillStyle = resolveColor(listingColorVar(s.g.colour));
 if (segIdx === segs.length - 1 && typeof ctx.roundRect === 'function') {
 ctx.beginPath();
 ctx.roundRect(cx - barW / 2, top, barW, h, [4, 4, 0, 0]);
@@ -794,14 +859,14 @@ ctx.fillText(monthLabel(ym), plot.x + (i + 0.5) * bw, plot.y + plot.h + 4);
 
 lettingChartLastPlot = { plot, bw, months };
 
-// Hover tooltip -- per-listing breakdown for the highlighted month, since
+// Hover tooltip -- per-group breakdown for the highlighted month, since
 // a short segment's inline label may have been skipped above for lack of
 // room.
 if (lettingChartHoverIndex != null && months[lettingChartHoverIndex]) {
 const ym = months[lettingChartHoverIndex];
-const rows = listings.map((l) => ({ l, raw: (perListingByMonth.get(l.id).get(ym) || 0) * shareMult(l) })).filter((s) => s.raw > 0.004);
+const rows = groups.map((g) => ({ g, raw: perGroupByMonth.get(g.key).get(ym) || 0 })).filter((s) => s.raw > 0.004);
 const total = rows.reduce((s, r) => s + r.raw, 0);
-const lines = [monthLabel(ym), ...rows.map((r) => `${r.l.label || 'Listing'}: ${money0(r.raw)}`), `Total: ${money0(total)}`];
+const lines = [monthLabel(ym), ...rows.map((r) => `${r.g.label}: ${money0(r.raw)}`), `Total: ${money0(total)}`];
 ctx.font = "10px 'Inter', sans-serif";
 const boxW = Math.max(...lines.map((l) => ctx.measureText(l).width)) + 16;
 const boxH = lines.length * 14 + 10;
@@ -823,17 +888,34 @@ function renderLettingChart() {
 const canvas = document.getElementById('letting-chart-canvas');
 if (!canvas) return;
 const chartData = lettingChartData();
-renderLettingChartLegend(chartData.listings);
+syncLettingChartSelection(chartData.groups);
+renderLettingChartGroupPicker(chartData.groups);
 drawLettingChart(canvas, chartData);
+}
+
+// Target-amount inputs (#letting-chart-target-aggressive/-normal) write
+// straight to data.prefs.lettingChartTargets and re-render -- same
+// pattern as every other settings-input in this file (e.g. the tax
+// rate/allowance inputs below).
+function initLettingChartTargetInputs() {
+LETTING_TARGETS.forEach((t) => {
+const input = document.getElementById(`letting-chart-target-${t.key}`);
+if (!input) return;
+const current = data.prefs.lettingChartTargets || (data.prefs.lettingChartTargets = {});
+input.value = Number.isFinite(Number(current[t.key])) ? current[t.key] : '';
+input.addEventListener('change', () => {
+const v = Number(input.value);
+current[t.key] = Number.isFinite(v) && v >= 0 ? v : 0;
+queueSave();
+renderLettingChart();
+});
+});
 }
 
 function initLettingChart() {
 const canvas = document.getElementById('letting-chart-canvas');
 if (!canvas) return;
-const toggle = document.getElementById('letting-chart-share-toggle');
-if (toggle) {
-toggle.addEventListener('change', () => { lettingChartShareOnly = toggle.checked; renderLettingChart(); });
-}
+initLettingChartTargetInputs();
 canvas.addEventListener('pointermove', (evt) => {
 if (!lettingChartLastPlot) return;
 const r = canvas.getBoundingClientRect();
