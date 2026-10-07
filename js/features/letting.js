@@ -442,10 +442,12 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const LETTING_CHART_MONTHS_BACK = 14; // + the current month itself = 15
 const LETTING_CHART_MONTHS_FORWARD = 6;
 // An "Earned (historic)" ledger row dated further back than the default
-// window is allowed to widen it -- see lettingChartData() -- but only up
-// to this many EXTRA months, so a typo'd date can't silently blow the
-// chart out to hundreds of bars.
-const LETTING_CHART_MAX_EXTRA_MONTHS_BACK = 24;
+// window is allowed to widen it -- see lettingChartData() -- but never
+// past this floor. Fixed to a real calendar month rather than "N months
+// before whatever today happens to be": this is the actual earliest
+// pre-tracking figure worth showing, not a rolling lookback, so it
+// shouldn't quietly drift as "today" moves forward.
+const LETTING_CHART_HISTORIC_FLOOR = '2026-01';
 
 // £2,700pcm / £1,700pcm are flat targets regardless of days-in-month --
 // "per calendar month" means the same number every month, not pro-rated
@@ -558,20 +560,22 @@ counts.forEach((nights, ym) => { if (baseMonthSet.has(ym)) addAmount(r.listingId
 // not income). A hand-added row carries no listingId, only an ownerKey,
 // so it's attributed to whichever listing that owner currently has --
 // same one-owner-one-listing assumption balanceFor/grossFor already
-// make elsewhere in this file. Allowed to widen the window backward
-// (capped) so a figure logged for an earlier month isn't silently
-// dropped off the left edge just because it predates the default span.
+// make elsewhere in this file. Allowed to widen the window backward so a
+// figure logged for an earlier month isn't silently dropped off the left
+// edge just because it predates the default span -- but never earlier
+// than LETTING_CHART_HISTORIC_FLOOR; anything before that is excluded
+// entirely rather than bunched into the floor month, which would
+// misrepresent which month it was actually earned in.
 let startYm = baseStart;
-const backFloor = addMonths(baseStart, -LETTING_CHART_MAX_EXTRA_MONTHS_BACK);
 (data.lettingLedger || []).forEach((e) => {
 if (e.kind !== 'earned' || !e.gross || !e.date) return;
 const listing = listings.find((l) => ownerKeyFor(l) === e.ownerKey);
 if (!listing) return;
 const ym = e.date.slice(0, 7);
 if (ym > endYm) return; // a future-dated "historic" entry makes no sense -- ignore rather than extend forward
-const clamped = ym < backFloor ? backFloor : ym;
-if (clamped < startYm) startYm = clamped;
-addAmount(listing.id, clamped, Number(e.gross));
+if (ym < LETTING_CHART_HISTORIC_FLOOR) return; // older than the chart is willing to show
+if (ym < startYm) startYm = ym;
+addAmount(listing.id, ym, Number(e.gross));
 });
 
 const months = monthRange(startYm, endYm);
