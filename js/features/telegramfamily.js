@@ -414,8 +414,18 @@ pendingContextValue = kind === 'trip'
 ? `task|${btn.dataset.askTelegramTask}|`
 : '';
 import('../tabs.js').then(({ switchTab }) => {
-switchTab('datingadmin');
-setTimeout(() => { renderTelegramFamily(); scrollAndFlash('#telegramfamily-panel'); }, 60);
+switchTab('settings');
+// Family moved into Settings -> Connections admin, collapsed by
+// default at both tiers -- same ancestor-walk-open app.js's own
+// [data-goto-tab]/[data-goto-target] handler uses, needed here too
+// since this is a programmatic switchTab() call, not a clickable link.
+setTimeout(() => {
+renderTelegramFamily();
+const target = document.getElementById('telegramfamily-panel');
+let node = target ? target.closest('details') : null;
+while (node) { node.setAttribute('open', ''); node = node.parentElement?.closest('details') ?? null; }
+scrollAndFlash('#telegramfamily-panel');
+}, 60);
 });
 });
 }

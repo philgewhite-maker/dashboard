@@ -447,7 +447,7 @@ return `<button type="button" class="cover-pin${isCover ? ' is-cover' : ''}" dat
 
 function albumListHtml(c) {
 const albums = c.photoAlbums || [];
-if (!albums.length) return '<div class="album-empty">None linked — name an album "' + escapeHtml(c.name) + '_" in Google Photos, then <span class="inline-goto-link" data-goto-albums="1">import it on the Dating admin tab</span>.</div>';
+if (!albums.length) return '<div class="album-empty">None linked — name an album "' + escapeHtml(c.name) + '_" in Google Photos, then <span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#import-connections-item">import it</span>.</div>';
 return `<div class="album-strip">${albums.map((a, i) => `<div class="album-card sm${isSensitive(a) ? ' album-sensitive' : ''}">
 <a class="album-thumb" href="${escapeHtml(a.url)}" target="_blank" rel="noopener" title="${escapeHtml(a.title || a.url)}">
 ${a.coverPhotoId ? `<span class="thumb-img" data-photo-bg="${escapeHtml(a.coverPhotoId)}"></span>`
@@ -1726,18 +1726,6 @@ renderConnections();
 queueSave();
 });
 });
-// "None linked — ... import it on the Dating admin tab" (albumListHtml)
-// used to just say where to go in plain text -- now actually takes you
-// there, same switchTab+scrollAndFlash shape every other cross-tab
-// reference in this app already uses.
-list.querySelectorAll('[data-goto-albums]').forEach((el) => {
-el.addEventListener('click', (e) => {
-e.preventDefault();
-e.stopPropagation();
-switchTab('datingadmin');
-scrollAndFlash('#albums-panel');
-});
-});
 // Wired identically for both Notes and Chat history previews -- a city or
 // nationality mentioned mid-conversation is exactly as worth a click-to-add
 // as one mentioned in Notes, and this was the one place that treatment
@@ -2926,49 +2914,16 @@ await withImportStatus(status, () => importMatchesListFile(file, screenshotAppHi
 e.target.value = '';
 });
 
-document.getElementById('import-profile-input').addEventListener('change', async (e) => {
-const files = Array.from(e.target.files);
-if (files.length === 0) return;
-const appHint = screenshotAppHint(files);
-// The checkbox is a FORCE-combine override, not a required pre-condition
-// -- this file input's change event fires the instant the OS picker
-// closes, before any further clicks, so a box ticked AFTER selecting
-// files never takes effect for that run (confirmed real: "Found 1
-// profile (1 unreadable)" is the non-combine path's own message
-// template, proving that's what ran despite the box being ticked).
-// When it isn't ticked (or was ticked too late to matter), fall back to
-// screenshotsLookCombinable -- the exact same shared decision the push
-// side (Capture Inbox's extractDatingScreenshot) calls, not a separately
-// re-derived version of it -- so combining doesn't depend on click order
-// at all for the common case.
-let combine = files.length > 1 && document.getElementById('import-profile-combine').checked;
-if (files.length > 1 && !combine) {
-const { screenshotsLookCombinable } = await import('../utils.js');
-combine = await screenshotsLookCombinable(files);
-}
-if (combine) {
-// Several native-resolution pieces of ONE profile (see
-// extractProfileFromScreenshot) -- one merged candidate, not one per
-// file the way the default multi-select below works.
-status.textContent = `Reading ${files.length} pieces of one profile…`;
-await withImportStatus(status, async () => {
-const { candidate } = await importProfileScreenshotFile(files, appHint, null);
-status.textContent = candidate ? 'Found a profile — review below:' : "Couldn't read those screenshots — see console.";
-});
-e.target.value = '';
-return;
-}
-status.textContent = `Reading ${files.length} profile screenshot${files.length === 1 ? '' : 's'}…`;
-await withImportStatus(status, async () => {
-let done = 0, failed = 0;
-for (const f of files) {
-const { candidate } = await importProfileScreenshotFile(f, appHint, null);
-if (candidate) done++; else failed++;
-}
-status.textContent = `Found ${done} profile${done === 1 ? '' : 's'}${failed ? ` (${failed} unreadable — see console)` : ''}${done ? ' — review below:' : '.'}`;
-});
-e.target.value = '';
-});
+// The old "Import profile screenshot(s) + parse" multi-file input lived
+// here, auto-parsing every file immediately with no review step. It's
+// gone -- that case (including the "selected files are one profile, in
+// pieces" combine checkbox) is now handled by photoscan.js's "Scan
+// screenshots" control instead, which routes a combinable multi-file
+// pick through this same importProfileScreenshotFile() but sends
+// anything else through its own cheap-pass review list first. See
+// photoscan.js's initPhotoScan()/handleIncomingFiles() for the combine
+// check -- identical screenshotsLookCombinable()-backed logic, just
+// relocated so the review-first behaviour actually applies to it.
 
 // Delegated once, on the (never-destroyed) list container itself -- every
 // renderPendingImports() call rebuilds its innerHTML, but confirm/discard
@@ -3721,6 +3676,6 @@ initFlagRulesSettings, unionInto, initHideArchivedFaded,
 logContactNow, setTodoDone,
 connectionPickerHtml, connectionPickerNewRowHtml, bindConnPickers, renderConnPicker, setConnPickerValue, applyDirectProfileUpload, applyProfileFieldsToConnection,
 importMatchesListFile, importProfileScreenshotFile, importProfileWithPhotosFile, extractDatingScreenshot, renderPendingImports,
-createBlankConnection, appHintFromFilename, isPriorityConnection,
+createBlankConnection, appHintFromFilename, isPriorityConnection, screenshotAppHint,
 matchCandidates, mergeConnectionInto, connectionChipHtml, bindConnectionChips,
 };

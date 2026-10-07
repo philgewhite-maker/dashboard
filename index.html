@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v493</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v494</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -34,8 +34,7 @@
 <button class="tab-btn active" type="button" data-tab-btn="overview">Overview</button>
 <button class="tab-btn" type="button" data-tab-btn="tasks">Tasks</button>
 <button class="tab-btn" type="button" data-tab-btn="jobhunt">Job Hunt</button>
-<button class="tab-btn" type="button" data-tab-btn="dating">Dating</button>
-<button class="tab-btn" type="button" data-tab-btn="datingadmin">Dating admin</button>
+<button class="tab-btn" type="button" data-tab-btn="dating">Contacts</button>
 <button class="tab-btn" type="button" data-tab-btn="finances">Finances</button>
 <button class="tab-btn" type="button" data-tab-btn="shopping">Shopping</button>
 <button class="tab-btn" type="button" data-tab-btn="menu">Menu</button>
@@ -351,6 +350,19 @@
 <span class="sync-status" id="letting-add-status"></span>
 </div>
 <div class="settings-note" style="margin:6px 0 0;"><strong>Earned (historic)</strong> is for what a listing took before you started tracking it here: enter the <em>gross</em> figure and their share is applied, the same way a stay would. For the other two, a <strong>negative</strong> amount reduces what they owe and a positive increases it <div class="settings-note" style="margin:6px 0 0;">A payment to you is a <strong>negative</strong> amount; a correction upwards is positive. To wipe a balance, add the negative of it.</div>mdash; to wipe a balance, add the negative of it. The choice is only about what happened: a <strong>payment</strong> is money that reached you, an <strong>adjustment</strong> moves the balance without any. Months later that difference is the whole story, and the amount alone cannot tell you.</div>
+<div class="letting-chart-wrap">
+<div class="panel-head" style="margin:14px 0 6px;">
+<h2 style="font-size:13px;">Income by month</h2>
+<label class="settings-note" style="display:flex;align-items:center;gap:6px;cursor:pointer;margin:0 0 0 auto;" title="Halves every bar and both target lines -- a quick 50/50 approximation, not each listing's own configured share.">
+<input type="checkbox" id="letting-chart-share-toggle"> My share (50%)
+</label>
+</div>
+<div class="settings-note" style="margin:0 0 6px;">15 months back, 6 forward. A stay spanning a month end has its income split across both by nights, so no month looks lumpy just because a booking happened to straddle it.</div>
+<div class="letting-chart-legend" id="letting-chart-legend"></div>
+<div class="chart-canvas-wrap">
+<canvas id="letting-chart-canvas"></canvas>
+</div>
+</div>
 </section>
 <section class="panel wide" id="switch-offers-panel" data-tab="finances">
 <div class="panel-head">
@@ -527,63 +539,55 @@ Prices and offers come from an AI web search of each retailer, not a live basket
 <div id="overview-content"></div>
 </section>
 
-<section class="panel wide" id="import-panel" data-tab="datingadmin">
+<section class="panel wide" id="connections-panel" data-tab="dating">
 <div class="panel-head">
-<h2><span class="dot rose"></span>Import &amp; add photos</h2>
+<h2><span class="dot rose"></span>Connections</h2>
+<span class="count-badge" id="connections-count"></span>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#rating-categories-list" title="Rating categories &amp; flags">&#9881;</span>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#tag-cleanup" title="Tidy up tags">&#127991;</span>
 </div>
-<div class="import-box">
-<div class="import-row">
-<select id="import-app-input" title="Only needed when the filename doesn't already say which app -- Bumble/Tinder/Hinge screenshots are detected from their filename automatically.">
-<option value="">Auto-detect from filename&hellip;</option>
+<div class="sort-row">
+<!-- Options are rendered by connections.js (renderSortOptions), since the
+     rating-category ones depend on the configurable list in Settings. -->
+<select id="conn-sort-primary" class="mini"></select>
+<select id="conn-sort-secondary" class="mini"></select>
+</div>
+<input type="text" autocomplete="off" class="conn-search" id="conn-search" placeholder="Search by name or tag (e.g. sporty, sober)...">
+<button class="overview-chip" type="button" id="conn-needs-attention-btn">Needs attention</button>
+<button class="overview-chip" type="button" id="conn-thin-profiles-btn" title="One photo or fewer, none of age/height/job/education filled in -- usually a matches-list-only import that never got fleshed out">Thin profiles</button>
+<button class="overview-chip" type="button" id="conn-priority-btn" title="Pinned (📌), or Planning to meet or later">Priority</button>
+<button class="overview-chip" type="button" id="conn-show-archived-btn" title="Archived and Faded are hidden from the list by default -- searching by name still finds them either way">Show archived &amp; faded</button>
+<button class="mini-task-btn" type="button" id="conn-attention-task-btn" hidden></button>
+<button class="overview-chip" type="button" id="conn-reachout-settings-btn">⏱ Reach-out timing</button>
+<button class="overview-chip" type="button" id="conn-backlog-review-btn" title="Move every non-dormant connection 180+ days since last contact into the &quot;Backlog review&quot; stage">📥 Backlog review 180+</button>
+<div class="reachout-settings" id="conn-reachout-settings" hidden>
+<p class="settings-note">Days since last contact before the "Reach out" badge can appear, per stage. Leave blank to use the default (priority-scaled, or 2 days for Planning to meet/call). A stuck stage full of old matches you don't want nagging you — set it high.</p>
+<div id="conn-reachout-settings-rows"></div>
+</div>
+<div id="connections-list"></div>
+<div class="add-form" id="connection-form">
+<input type="text" autocomplete="off" id="conn-name-input" placeholder="Name or nickname">
+<select id="conn-app-input">
 <option>Bumble</option>
 <option>Tinder</option>
 <option>Hinge</option>
+<option>Real life</option>
 <option>Other</option>
 </select>
-<label class="file-btn" for="import-file-input" id="import-file-label">Import matches list</label>
-<input type="file" id="import-file-input" accept="image/*" style="display:none;">
-<label class="file-btn" for="import-profile-input" id="import-profile-label">Import profile screenshot(s) + parse</label>
-<input type="file" id="import-profile-input" accept="image/*" multiple style="display:none;">
-<label class="settings-note" style="display:flex;align-items:center;gap:6px;margin:0;cursor:pointer;" title="Tick this when the selected files are several native-resolution pieces of ONE profile (e.g. captured in halves to avoid a phone's scroll-capture tool downscaling one very long stitched screenshot), not separate people. Leave unticked (default) to import each selected file as its own person, as before.">
-<input type="checkbox" id="import-profile-combine"> Selected files are one profile, in pieces
-</label>
-</div>
-<div class="import-row">
-<div id="photo-target-input-mount"></div>
-<label class="file-btn" for="photo-only-input" id="photo-only-label">Add photos, no parsing (free)</label>
-<input type="file" id="photo-only-input" accept="image/*" multiple style="display:none;">
-</div>
-<div class="import-status" id="import-status"></div>
-<div class="settings-note import-last-run" id="import-file-last-run"></div>
-<div class="settings-note import-last-run" id="import-profile-last-run"></div>
-<div class="candidate-list" id="candidate-list"></div>
+<button class="add-btn" type="button">Add match</button>
 </div>
 </section>
 
-<section class="panel wide" id="merge-panel" data-tab="datingadmin">
+<section class="panel wide" id="import-match-panel" data-tab="dating">
 <div class="panel-head">
-<h2><span class="dot rose"></span>Merge duplicates</h2>
+<h2><span class="dot plum"></span>Add &amp; import</h2>
 </div>
-<div class="settings-note">Moved here from each connection's own card — two flat pickers instead of a full "everyone else" dropdown repeated on every card.</div>
-<div class="merge-row">
-<div id="merge-target-input-mount"></div>
-<div id="merge-source-input-mount"></div>
-<button class="todo-add-btn" type="button" id="merge-admin-btn">Merge</button>
-</div>
-<div class="settings-note" id="merge-admin-status"></div>
-<div class="sync-row" style="margin-top:10px;">
-<button class="sync-btn sm" type="button" id="dup-find-btn">Find possible duplicates</button>
-</div>
-<div class="settings-note">Checks every pair for a shared Tinder match ID, a shared photo, or a similar name backed up by a matching age or city — never merges anything on its own, just points out who's worth a closer look.</div>
-<div id="dup-find-results"></div>
-</section>
 
-<section class="panel wide" id="tinder-panel" data-tab="datingadmin">
-<div class="panel-head">
-<h2><span class="dot plum"></span>Import connections</h2>
-</div>
+<details class="settings-item" id="import-connections-item">
+<summary><h3>Import connections</h3></summary>
+<div class="settings-block">
 <div class="settings-note" style="margin:0 0 10px;">
-Paste or upload data from any of the sources below — the format's detected automatically, so there's one box for all of them (see "Import data" further down). Open an entry here for the exact steps to get that source's data in the first place.
+Paste or upload data from any of the sources below — the format's detected automatically, so there's one box for all of them, plus a folder-picker and a match button for the two sources that can't share it (see each one's own caption). Open an entry here for the exact steps to get that source's data in the first place.
 </div>
 <div class="settings-note" style="margin:0 0 4px;font-weight:600;">Where do I get this from?</div>
 <details style="margin:0 0 8px;">
@@ -2258,7 +2262,7 @@ console.log('Ready. Run tinderBulkImport() for the default 15, tinderBulkImport(
 <details style="margin:0 0 8px;">
 <summary style="cursor:pointer;color:var(--muted);font-size:13px;">WhatsApp chat &mdash; export from the app</summary>
 <div class="settings-note" style="margin:6px 0 10px;">
-Export a chat from WhatsApp (open the chat &rarr; &#8942; &rarr; More &rarr; Export chat, with or without media). Either export works &mdash; the no-media one is lighter but drops photo/video captions. Photos/videos themselves go through the screenshot scanner further down, not here. Several .txt files at once (e.g. WhatsApp's own "WhatsApp Chat with X.txt" naming) switches to a bulk review list, same as the Telegram importer.
+Export a chat from WhatsApp (open the chat &rarr; &#8942; &rarr; More &rarr; Export chat, with or without media). Either export works &mdash; the no-media one is lighter but drops photo/video captions. Photos/videos themselves go through the screenshot scanner in "Add &amp; scan photos" below, not here. Several .txt files at once (e.g. WhatsApp's own "WhatsApp Chat with X.txt" naming) switches to a bulk review list, same as the Telegram importer.
 </div>
 </details>
 <details style="margin:0 0 10px;">
@@ -2267,84 +2271,9 @@ Export a chat from WhatsApp (open the chat &rarr; &#8942; &rarr; More &rarr; Exp
 Header row: <code>Name,City,Language,Nationality,Connected,Tags,Sex,Stage,Milestones,Notes,Date Locations,Date Events,Stars</code> &mdash; a comma-separated cell (e.g. multiple Tags) becomes multiple chips. Matches against existing connections by name; anything confidently matched merges in (nothing already on file gets overwritten), anything new or ambiguous is yours to confirm before importing.
 </div>
 </details>
-<div class="settings-note" style="margin:0 0 4px;font-weight:600;">Import data</div>
-<textarea id="dating-import-paste" rows="4" style="width:100%;font-family:monospace;font-size:12px;" placeholder="Paste JSON from Tinder, a WhatsApp .txt export, or connections CSV text — format is detected automatically"></textarea>
-<div class="sync-row" style="margin-top:8px;">
-<button class="sync-btn" id="dating-import-read-btn" type="button">Read</button>
-<label class="file-btn" for="dating-import-file-input">Or upload file(s)&hellip;</label>
-<input type="file" id="dating-import-file-input" accept=".json,application/json,.txt,text/plain,.csv,text/csv" multiple style="display:none;">
-<span class="sync-status" id="dating-import-status"></span>
-</div>
-<div class="settings-note import-last-run" id="tinder-last-run"></div>
-<div id="tinder-bulk-review"></div>
-<div id="tinder-review"></div>
-<div id="manual-import-review"></div>
-<div class="settings-note import-last-run" id="whatsapp-last-run"></div>
-<div id="whatsapp-review"></div>
-<div id="whatsapp-bulk-review"></div>
-</section>
-
-<section class="panel wide" id="telegram-panel" data-tab="datingadmin">
-<div class="panel-head">
-<h2><span class="dot slate"></span>Import Telegram chats</h2>
-</div>
-<div class="settings-note" style="margin:0 0 10px;">
-Telegram Desktop &rarr; Settings &rarr; Advanced &rarr; Export Telegram data &rarr; pick JSON or HTML, chats included. Point this at the exported folder (the one containing <span class="mono" style="font-family:monospace;">lists</span> and <span class="mono" style="font-family:monospace;">chats</span>) &mdash; it reads every chat plus your phone contacts locally, matches them against existing connections, and lets you pick which to bring in. Nothing leaves this device.
-</div>
-<div class="sync-row">
-<label class="file-btn" for="telegram-folder-input">Pick the export folder</label>
-<input type="file" id="telegram-folder-input" webkitdirectory multiple style="display:none;">
-<span class="sync-status" id="telegram-status"></span>
-</div>
-<div class="settings-note import-last-run" id="telegram-last-run"></div>
-<div id="telegram-review"></div>
-</section>
-
-<section class="panel wide" id="telegramfamily-panel" data-tab="datingadmin">
-<div class="panel-head">
-<h2><span class="dot rose"></span>Family (Telegram bot)</h2>
-<span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#telegrambot-url-input" title="Telegram bot settings">&#9881;</span>
-</div>
-<div class="settings-note" style="margin:0 0 10px;">
-Family members are added here as ordinary connections (so they can be placed on a trip, same as anyone else) but kept out of the dating lists above. Set the bot's URL and token in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#telegrambot-url-input">Settings &mdash; Account &amp; sync</span> before this works. See server/telegram-bot.php.example.
-</div>
-<div id="telegramfamily-body"></div>
-</section>
-
-<section class="panel wide" id="photoscan-panel" data-tab="datingadmin">
-<div class="panel-head">
-<h2><span class="dot amber"></span>Scan a batch of screenshots</h2>
-<span class="count-badge" id="scan-summary"></span>
-</div>
-<div class="sync-row">
-<label class="file-btn" for="scan-input">Pick screenshots to scan</label>
-<input type="file" id="scan-input" accept="image/*" multiple style="display:none;">
-<button class="sync-btn" id="scan-clear-btn" type="button">Clear</button>
-<span class="sync-status" id="scan-status"></span>
-</div>
-<div class="settings-note import-last-run" id="photoscan-last-run"></div>
-<div class="settings-note" style="margin:0 0 10px;">Pick files, <strong>drag them onto this panel</strong>, or copy an image anywhere (in Google Photos: right-click &rarr; Copy image) and press <strong>Ctrl+V</strong>. A cheap first pass reads just a name, age and whether the screenshot looks detailed &mdash; pennies for a whole album. Full parse only the ones worth it. Anything scanned before is free.</div>
-<div id="scan-results"></div>
-</section>
-
-<section class="panel wide" id="contacts-panel" data-tab="datingadmin">
-<div class="panel-head">
-<h2><span class="dot teal"></span>Google Contacts match</h2>
-<span class="count-badge" id="contacts-count"></span>
-</div>
-<div class="sync-row">
-<button class="sync-btn" id="sync-contacts-btn" type="button">Match contacts</button>
-<span class="sync-status" id="contacts-sync-status"></span>
-</div>
-<div id="contact-review"></div>
-</section>
-
-<section class="panel wide" id="albums-panel" data-tab="datingadmin">
-<div class="panel-head">
-<h2><span class="dot slate"></span>Google Photos albums</h2>
-<span class="count-badge" id="albums-count"></span>
-</div>
-<div class="settings-note" style="margin:0 0 10px;">
+<details style="margin:0 0 10px;">
+<summary style="cursor:pointer;color:var(--muted);font-size:13px;">Google Photos albums &mdash; paste JSON copied from photos.google.com</summary>
+<div class="settings-note" style="margin:6px 0 10px;">
 Name albums <strong>Name_Location_Date_Other</strong>, leaving any slot empty if it doesn't apply:
 <code>Kat_</code> (default album), <code>Kat_Lisbon</code>, <code>Kat_x</code> (private),
 <code>Alena__2026_Birthday</code> (no location &mdash; note the double underscore).
@@ -2354,7 +2283,7 @@ can't be filed as a place. The trailing underscore keeps <code>Kat_</code> from 
 <br><br>
 Google has no API for albums, so run the snippet below in the browser console
 (F12 &rarr; Console) on <a href="https://photos.google.com/albums" target="_blank" rel="noopener">photos.google.com/albums</a>,
-then paste the result here. Run it on <a href="https://photos.google.com/people" target="_blank" rel="noopener">/people</a>
+then paste the result into "Import data" below. Run it on <a href="https://photos.google.com/people" target="_blank" rel="noopener">/people</a>
 too and it also lists faces Google knows about that have no album yet.
 Album links are permanent, unlike the face-group links tried previously.
 </div>
@@ -2542,94 +2471,100 @@ Album links are permanent, unlike the face-group links tried previously.
   if (!copied) console.log(json);
 })();</pre>
 </details>
-<textarea id="albums-input" rows="4" style="width:100%;font-family:monospace;font-size:12px;" placeholder="Paste the copied JSON here"></textarea>
-<div class="sync-row" style="margin-top:8px;">
-<button class="sync-btn" id="albums-match-btn" type="button">Match to connections</button>
-<label class="file-btn" for="albums-file-input">Or upload saved .json file</label>
-<input type="file" id="albums-file-input" accept="application/json" style="display:none;">
-<button class="sync-btn" id="albums-clear-btn" type="button">Clear</button>
 <span class="sync-status" id="albums-status"></span>
+</details>
+<div class="settings-note" style="margin:0 0 4px;font-weight:600;">Import data</div>
+<textarea id="dating-import-paste" rows="4" style="width:100%;font-family:monospace;font-size:12px;" placeholder="Paste JSON from Tinder, Google Photos albums, a WhatsApp .txt export, or connections CSV text — format is detected automatically"></textarea>
+<div class="sync-row" style="margin-top:8px;">
+<button class="sync-btn" id="dating-import-read-btn" type="button">Read</button>
+<label class="file-btn" for="dating-import-file-input">Or upload file(s)&hellip;</label>
+<input type="file" id="dating-import-file-input" accept=".json,application/json,.txt,text/plain,.csv,text/csv" multiple style="display:none;">
+<span class="sync-status" id="dating-import-status"></span>
 </div>
+<div class="settings-note import-last-run" id="tinder-last-run"></div>
+<div id="tinder-bulk-review"></div>
+<div id="tinder-review"></div>
+<div id="manual-import-review"></div>
+<div class="settings-note import-last-run" id="whatsapp-last-run"></div>
+<div id="whatsapp-review"></div>
+<div id="whatsapp-bulk-review"></div>
 <div class="settings-note import-last-run" id="albums-last-run"></div>
+<span class="count-badge" id="albums-count"></span>
 <div id="albums-results"></div>
-</section>
 
-<section class="panel wide" id="cleanup-panel" data-tab="datingadmin">
-<div class="panel-head">
-<h2><span class="dot sage"></span>Data Clean up</h2>
+<div class="settings-note" style="margin:16px 0 4px;font-weight:600;">Import a Telegram export folder</div>
+<div class="settings-note" style="margin:0 0 8px;">
+Needs the WHOLE exported folder tree (hundreds of files, not a single JSON) &mdash; can't share the box above for that reason alone, not because the data is any different in kind. Telegram Desktop &rarr; Settings &rarr; Advanced &rarr; Export Telegram data &rarr; pick JSON or HTML, chats included. Point this at the exported folder (the one containing <span class="mono" style="font-family:monospace;">lists</span> and <span class="mono" style="font-family:monospace;">chats</span>) &mdash; it reads every chat plus your phone contacts locally, matches them against existing connections, and lets you pick which to bring in. Nothing leaves this device.
 </div>
-<div class="settings-note" style="margin:0 0 10px;">
-Mostly still a planning space &mdash; a place to keep thinking about what this section should do before committing to a design. Ideas so far, roughly in the order they'd probably get built:
+<div class="sync-row">
+<label class="file-btn" for="telegram-folder-input">Pick the export folder</label>
+<input type="file" id="telegram-folder-input" webkitdirectory multiple style="display:none;">
+<span class="sync-status" id="telegram-status"></span>
 </div>
-<div class="tinder-fields" style="margin:0 0 10px;">
-<div class="tinder-field-row">✅ <strong>Re-run a saved batch through today's import logic.</strong> Built &mdash; the "Or upload a saved .json file" option above the paste box in Tinder import replays a <code>tinder-batch-*.json</code> file (the bulk snippet's own download safety-net, or any older saved batch) through whatever the CURRENT dashboard code does with it, so a parsing/routing fix made after that batch was scraped still applies. Only covers dashboard-side fixes, not console-snippet-side ones like icon classification &mdash; those need an actual re-scrape (SCRIPT_VERSION handles that).</div>
-<div class="tinder-field-row"><strong>Check for dropped matches.</strong> Compare every connection's stored Tinder match id against a fresh scrape of the current sidebar; flag anyone no longer in Tinder's own match list &mdash; unmatched, or removed on their end. The match id is already being captured and stored (<code>tinderMatchId</code>); what's missing is the actual comparison snippet and a report screen.</div>
-<div class="tinder-field-row">✅ <strong>Check data completeness &mdash; as questions to ask, not just gaps.</strong> Built &mdash; each connection card on the Dating tab shows a short list of deterministic prompts (stale/still-alive check, missing City, missing kids-plan once there's an actual chat log, an interest never turned into a date). The "Needs attention (N)" button above the Connections list filters down to just those; "+ task" next to it captures one standing task linking back here, findable again after it's marked Done (a genuinely recurring nudge, not a one-off).</div>
-<div class="tinder-field-row">✅ <strong>Propose City/Nationality fill-ins from what's already known.</strong> Built &mdash; see below.</div>
-<div class="tinder-field-row"><strong>Targeted incremental re-runs.</strong> "Re-check just City for anyone missing it," "re-capture photos for anyone with none" &mdash; would need a way to filter by WHAT'S missing, not just re-run everyone.</div>
-<div class="tinder-field-row"><strong>Archive non-interacted profiles.</strong> A match sitting at Superswiped/Matched for a long time with no chat and no stage progression is realistically dead. Flag (never auto-apply) candidates for Faded/Archived, the mirror image of the Nudges change that surfaces the BEST new matches &mdash; this would surface the ones worth giving up on.</div>
-<div class="tinder-field-row"><strong>(more ideas welcome)</strong> &mdash; whatever else turns out to matter once the above exist and get used for a while.</div>
-</div>
+<div class="settings-note import-last-run" id="telegram-last-run"></div>
+<div id="telegram-review"></div>
 
+<div class="settings-note" style="margin:16px 0 4px;font-weight:600;">Match Google Contacts</div>
+<div class="settings-note" style="margin:0 0 8px;">Just a button &mdash; no file or paste, just checks your Google Contacts against what's already here.</div>
+<div class="sync-row">
+<button class="sync-btn" id="sync-contacts-btn" type="button">Match contacts</button>
+<span class="count-badge" id="contacts-count"></span>
+<span class="sync-status" id="contacts-sync-status"></span>
+</div>
+<div id="contact-review"></div>
+</div>
+</details>
+
+<details class="settings-item" id="photoscan-panel">
+<summary><h3>Add &amp; scan photos</h3></summary>
 <div class="settings-block">
-<h3>City/Nationality fill-ins</h3>
-<div class="settings-note" style="margin:0 0 10px;">For anyone not obviously based in London, checks their Education/Job/Notes/Likes text for a city or nationality word already known from your OWN data, plus a language they speak that's also a nationality word (French, German, Italian...) &mdash; but only when it's the clear rarest of the languages they speak (checked against how rare it is across your own connections); a tie, or nothing rare enough, proposes nothing rather than guessing between several. Ranked by how many independent signals agree &mdash; a repeated mention, or Distance confirming they're not just nearby, ranks higher; a genuinely ambiguous case (two different cities mentioned, no clear winner) is dropped rather than shown. Keyword matching only, no outside lookups &mdash; things worth checking with them, not facts. Never applied without a click.</div>
-<div class="sync-row" style="margin-top:0;">
-<button class="sync-btn" id="location-fillins-scan-btn" type="button">Scan</button>
-</div>
-<div id="location-fillins"></div>
-</div>
-
-<div class="settings-block">
-<h3>Photo quality</h3>
-<div class="settings-note" style="margin:0 0 10px;">
-Finds connections whose cover photo is missing or is really just the small placeholder cropped out of a Bumble/WhatsApp matches-list or chat header, and proposes a better one from data already on file &mdash; first a higher-res photo already saved for that same connection, then (failing that) the cover of any linked Photos album for that name. Never applied without a click.
-</div>
-<div class="sync-row" style="margin-top:0;">
-<button class="sync-btn" id="photo-quality-scan-btn" type="button">Scan</button>
-</div>
-<div id="photo-quality-results"></div>
-</div>
-</section>
-
-<section class="panel wide" id="connections-panel" data-tab="dating">
-<div class="panel-head">
-<h2><span class="dot rose"></span>Connections</h2>
-<span class="count-badge" id="connections-count"></span>
-<span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#rating-categories-list" title="Rating categories &amp; flags">&#9881;</span>
-<span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#tag-cleanup" title="Tidy up tags">&#127991;</span>
-</div>
-<div class="sort-row">
-<!-- Options are rendered by connections.js (renderSortOptions), since the
-     rating-category ones depend on the configurable list in Settings. -->
-<select id="conn-sort-primary" class="mini"></select>
-<select id="conn-sort-secondary" class="mini"></select>
-</div>
-<input type="text" autocomplete="off" class="conn-search" id="conn-search" placeholder="Search by name or tag (e.g. sporty, sober)...">
-<button class="overview-chip" type="button" id="conn-needs-attention-btn">Needs attention</button>
-<button class="overview-chip" type="button" id="conn-thin-profiles-btn" title="One photo or fewer, none of age/height/job/education filled in -- usually a matches-list-only import that never got fleshed out">Thin profiles</button>
-<button class="overview-chip" type="button" id="conn-priority-btn" title="Pinned (📌), or Planning to meet or later">Priority</button>
-<button class="overview-chip" type="button" id="conn-show-archived-btn" title="Archived and Faded are hidden from the list by default -- searching by name still finds them either way">Show archived &amp; faded</button>
-<button class="mini-task-btn" type="button" id="conn-attention-task-btn" hidden></button>
-<button class="overview-chip" type="button" id="conn-reachout-settings-btn">⏱ Reach-out timing</button>
-<button class="overview-chip" type="button" id="conn-backlog-review-btn" title="Move every non-dormant connection 180+ days since last contact into the &quot;Backlog review&quot; stage">📥 Backlog review 180+</button>
-<div class="reachout-settings" id="conn-reachout-settings" hidden>
-<p class="settings-note">Days since last contact before the "Reach out" badge can appear, per stage. Leave blank to use the default (priority-scaled, or 2 days for Planning to meet/call). A stuck stage full of old matches you don't want nagging you — set it high.</p>
-<div id="conn-reachout-settings-rows"></div>
-</div>
-<div id="connections-list"></div>
-<div class="add-form" id="connection-form">
-<input type="text" autocomplete="off" id="conn-name-input" placeholder="Name or nickname">
-<select id="conn-app-input">
+<div class="sync-row">
+<select id="import-app-input" title="Only needed when the filename doesn't already say which app -- Bumble/Tinder/Hinge screenshots are detected from their filename automatically.">
+<option value="">Auto-detect from filename&hellip;</option>
 <option>Bumble</option>
 <option>Tinder</option>
 <option>Hinge</option>
-<option>Real life</option>
 <option>Other</option>
 </select>
-<button class="add-btn" type="button">Add match</button>
 </div>
+
+<div class="settings-note" style="margin:12px 0 4px;font-weight:600;">Add photos to an existing connection</div>
+<div class="settings-note" style="margin:0 0 6px;">No parsing, no cost &mdash; just attaches the photo(s) you pick to whichever connection you choose. Any number of files.</div>
+<div class="import-row">
+<div id="photo-target-input-mount"></div>
+<label class="file-btn" for="photo-only-input" id="photo-only-label">Pick photo(s), no parsing (free)</label>
+<input type="file" id="photo-only-input" accept="image/*" multiple style="display:none;">
+</div>
+
+<div class="settings-note" style="margin:16px 0 4px;font-weight:600;">Scan screenshots</div>
+<div class="settings-note" style="margin:0 0 6px;">Pick any number of profile screenshots, <strong>drag them onto this panel</strong>, or copy an image anywhere (in Google Photos: right-click &rarr; Copy image) and press <strong>Ctrl+V</strong>. A cheap first pass reads just a name, age and whether the screenshot looks detailed &mdash; pennies for a whole album. Full parse only the ones worth it, picked one at a time from the results list below. Anything scanned before is free.</div>
+<label class="settings-note" style="display:flex;align-items:center;gap:6px;margin:0 0 8px;cursor:pointer;" title="Tick this when the files you're about to pick are several native-resolution pieces of ONE profile (e.g. captured in halves to avoid a phone's scroll-capture tool downscaling one very long stitched screenshot), not separate people. Those go straight to a full parse as one combined profile instead of the per-image cheap pass below.">
+<input type="checkbox" id="import-profile-combine"> Selected files are one profile, in pieces (skips the cheap pass, parses them together)
+</label>
+<div class="sync-row">
+<label class="file-btn" for="scan-input">Pick screenshots to scan</label>
+<input type="file" id="scan-input" accept="image/*" multiple style="display:none;">
+<button class="sync-btn" id="scan-clear-btn" type="button">Clear</button>
+<span class="count-badge" id="scan-summary"></span>
+<span class="sync-status" id="scan-status"></span>
+</div>
+<div class="settings-note import-last-run" id="photoscan-last-run"></div>
+<div class="settings-note import-last-run" id="import-profile-last-run"></div>
+<div id="scan-results"></div>
+
+<div class="settings-note" style="margin:16px 0 4px;font-weight:600;">Import a match-list screenshot</div>
+<div class="settings-note" style="margin:0 0 6px;">ONE screenshot of a whole matches grid (several people in one image, e.g. Bumble/Tinder/Hinge's own list view) &mdash; a different parse to "Scan screenshots" above, which expects one person per image. Extracts several candidates at once for you to review below.</div>
+<div class="import-row">
+<label class="file-btn" for="import-file-input" id="import-file-label">Import matches list</label>
+<input type="file" id="import-file-input" accept="image/*" style="display:none;">
+</div>
+<div class="import-status" id="import-status"></div>
+<div class="settings-note import-last-run" id="import-file-last-run"></div>
+<div class="candidate-list" id="candidate-list"></div>
+</div>
+</details>
 </section>
+
 
 <section class="panel wide" id="business-panel" data-tab="business">
 <div class="panel-head">
@@ -2782,6 +2717,8 @@ Finds connections whose cover photo is missing or is really just the small place
 <span class="pick-chip" data-goto-tab="settings" data-goto-target="#settings-group-finances">Finances</span>
 <span class="pick-chip" data-goto-tab="settings" data-goto-target="#settings-group-capture">Capture &amp; Shopping</span>
 <span class="pick-chip" data-goto-tab="settings" data-goto-target="#settings-group-ai">AI features</span>
+<span class="pick-chip" data-goto-tab="settings" data-goto-target="#settings-group-monitoring">Monitoring</span>
+<span class="pick-chip" data-goto-tab="settings" data-goto-target="#settings-group-connections-admin">Connections admin</span>
 <span class="pick-chip" data-goto-tab="settings" data-goto-target="#settings-group-advanced">Advanced</span>
 </div>
 
@@ -2939,46 +2876,7 @@ Photos added before task attachments existed live only on the device that added 
 </details>
 
 <details class="settings-subgroup">
-<summary>Diagnostics</summary>
-
-<details class="settings-item">
-<summary><h3>Document size</h3></summary>
-<div class="settings-block">
-<div class="settings-note" style="margin:0 0 10px;">Every save re-uploads the whole document, and since encryption was turned on it re-encrypts it first. This says what the thing is actually made of, and how much of it is records that are finished &mdash; which is the question behind &ldquo;should old stuff move to a separate archive?&rdquo;</div>
-<div class="sync-row">
-<button class="sync-btn" id="doc-size-btn" type="button">Measure</button>
-</div>
-<div id="doc-size" style="margin-top:10px;"></div>
-</div>
-</details>
-
-<details class="settings-item">
-<summary><h3>Site health</h3></summary>
-<div class="settings-block">
-<div class="settings-note" style="margin:0 0 10px;">A standing check that the live sites this app's scheduled tasks and features depend on still answer the way the code assumes &mdash; a page redesign or a new anti-bot block can otherwise fail silently, returning something plausible-looking instead of an error. Each implemented check runs about once a week on its own (bundled into the "Site health checks" scheduled task above); "Not implemented" marks a known candidate with no automated check built yet.</div>
-<div id="site-health-table"></div>
-</div>
-</details>
-</details>
-
-<details class="settings-subgroup">
 <summary>Other data sources</summary>
-
-<details class="settings-item">
-<summary><h3>Health data (Health Connect)</h3></summary>
-<div class="settings-block">
-<div class="settings-note" style="margin:0 0 8px;">
-A browser page has no way to read Health Connect directly &mdash; it's a native Android API with no web equivalent. Instead, a bridge app on your phone (e.g. <strong>HC Webhook</strong> / "Health Connect Webhook" from Google Play) posts whatever data you grant it to <code>health.php</code> on this same server. This panel is a raw viewer for inspecting exactly what's arrived &mdash; see the <span class="inline-goto-link" data-goto-tab="health">Health tab</span> for the parsed daily rollup.
-</div>
-<div class="settings-note" style="margin:0 0 8px;">
-<strong>Setup:</strong> copy <code>server/health.php.example</code> to <code>server/health.php</code>, set <code>$SECRET</code> to the <em>same</em> value as <code>sync.php</code>, upload next to it. In the bridge app, point its webhook target at that URL &mdash; append <code>?secret=&lt;your secret&gt;</code> to it if the app doesn't let you set a custom header.
-</div>
-<div id="health-sync-body"></div>
-<div class="sync-row" style="margin-top:8px;">
-<button class="sync-btn" id="health-sync-refresh" type="button">Check for data</button>
-</div>
-</div>
-</details>
 
 <details class="settings-item">
 <summary><h3>Notion</h3></summary>
@@ -2999,7 +2897,7 @@ A browser page has no way to read Health Connect directly &mdash; it's a native 
 <details class="settings-item">
 <summary><h3>Telegram bot</h3></summary>
 <div class="settings-block">
-<div class="settings-note" style="margin:0 0 8px;">Lets family members be messaged and reply back into the app &mdash; see the <span class="inline-goto-link" data-goto-tab="datingadmin">Family panel on Dating admin</span>. Set up server/telegram-bot.php.example (copy it, fill in a bot token from @BotFather and a webhook secret, upload, then register the webhook once — the file's own top comment has the exact steps).</div>
+<div class="settings-note" style="margin:0 0 8px;">Lets family members be messaged and reply back into the app &mdash; see the <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#telegramfamily-panel">Family panel</span>, under Connections admin. Set up server/telegram-bot.php.example (copy it, fill in a bot token from @BotFather and a webhook secret, upload, then register the webhook once — the file's own top comment has the exact steps).</div>
 <label for="telegrambot-url-input" style="font-size:13px;font-weight:500;display:block;margin-bottom:6px;">Bot URL</label>
 <input type="text" autocomplete="off" id="telegrambot-url-input" class="settings-input" placeholder="https://georgewhiteeuropean.co.uk/telegram-bot.php">
 <div class="settings-note">Uses the same secret as Live sync above.</div>
@@ -3281,6 +3179,45 @@ Let Claude pick what's most urgent, important, and overdue, instead of a random 
 </label>
 </div>
 </details>
+</details>
+
+<details class="settings-group" id="settings-group-monitoring">
+<summary><span class="dot teal"></span>Monitoring</summary>
+
+<details class="settings-item">
+<summary><h3>Document size</h3></summary>
+<div class="settings-block">
+<div class="settings-note" style="margin:0 0 10px;">Every save re-uploads the whole document, and since encryption was turned on it re-encrypts it first. This says what the thing is actually made of, and how much of it is records that are finished &mdash; which is the question behind &ldquo;should old stuff move to a separate archive?&rdquo;</div>
+<div class="sync-row">
+<button class="sync-btn" id="doc-size-btn" type="button">Measure</button>
+</div>
+<div id="doc-size" style="margin-top:10px;"></div>
+</div>
+</details>
+
+<details class="settings-item">
+<summary><h3>Site health</h3></summary>
+<div class="settings-block">
+<div class="settings-note" style="margin:0 0 10px;">A standing check that the live sites this app's scheduled tasks and features depend on still answer the way the code assumes &mdash; a page redesign or a new anti-bot block can otherwise fail silently, returning something plausible-looking instead of an error. Each implemented check runs about once a week on its own (bundled into the "Site health checks" scheduled task above); "Not implemented" marks a known candidate with no automated check built yet.</div>
+<div id="site-health-table"></div>
+</div>
+</details>
+
+<details class="settings-item">
+<summary><h3>Health data (Health Connect)</h3></summary>
+<div class="settings-block">
+<div class="settings-note" style="margin:0 0 8px;">
+A browser page has no way to read Health Connect directly &mdash; it's a native Android API with no web equivalent. Instead, a bridge app on your phone (e.g. <strong>HC Webhook</strong> / "Health Connect Webhook" from Google Play) posts whatever data you grant it to <code>health.php</code> on this same server. This panel is a raw viewer for inspecting exactly what's arrived &mdash; see the <span class="inline-goto-link" data-goto-tab="health">Health tab</span> for the parsed daily rollup.
+</div>
+<div class="settings-note" style="margin:0 0 8px;">
+<strong>Setup:</strong> copy <code>server/health.php.example</code> to <code>server/health.php</code>, set <code>$SECRET</code> to the <em>same</em> value as <code>sync.php</code>, upload next to it. In the bridge app, point its webhook target at that URL &mdash; append <code>?secret=&lt;your secret&gt;</code> to it if the app doesn't let you set a custom header.
+</div>
+<div id="health-sync-body"></div>
+<div class="sync-row" style="margin-top:8px;">
+<button class="sync-btn" id="health-sync-refresh" type="button">Check for data</button>
+</div>
+</div>
+</details>
 
 <details class="settings-item">
 <summary><h3>API usage</h3></summary>
@@ -3290,6 +3227,76 @@ Let Claude pick what's most urgent, important, and overdue, instead of a random 
 <button class="sync-btn" id="refresh-usage-btn" type="button">Refresh</button>
 </div>
 <div id="usage-summary"></div>
+</div>
+</details>
+</details>
+
+<details class="settings-group" id="settings-group-connections-admin">
+<summary><span class="dot rose"></span>Connections admin</summary>
+
+<details class="settings-item">
+<summary><h3>Merge duplicates</h3></summary>
+<div class="settings-block">
+<div class="settings-note">Moved here from each connection's own card — two flat pickers instead of a full "everyone else" dropdown repeated on every card.</div>
+<div class="merge-row">
+<div id="merge-target-input-mount"></div>
+<div id="merge-source-input-mount"></div>
+<button class="todo-add-btn" type="button" id="merge-admin-btn">Merge</button>
+</div>
+<div class="settings-note" id="merge-admin-status"></div>
+<div class="sync-row" style="margin-top:10px;">
+<button class="sync-btn sm" type="button" id="dup-find-btn">Find possible duplicates</button>
+</div>
+<div class="settings-note">Checks every pair for a shared Tinder match ID, a shared photo, or a similar name backed up by a matching age or city — never merges anything on its own, just points out who's worth a closer look.</div>
+<div id="dup-find-results"></div>
+</div>
+</details>
+
+<details class="settings-item" id="telegramfamily-panel">
+<summary><h3>Family (Telegram bot)</h3></summary>
+<div class="settings-block">
+<div class="settings-note" style="margin:0 0 10px;">
+Family members are added here as ordinary connections (so they can be placed on a trip, same as anyone else) but kept out of the dating lists above. Set the bot's URL and token in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#telegrambot-url-input">Settings &mdash; Account &amp; sync</span> before this works. See server/telegram-bot.php.example.
+</div>
+<div id="telegramfamily-body"></div>
+</div>
+</details>
+
+<details class="settings-item">
+<summary><h3>Data Clean up</h3></summary>
+<div class="settings-block">
+<div class="settings-note" style="margin:0 0 10px;">
+Mostly still a planning space &mdash; a place to keep thinking about what this section should do before committing to a design. Ideas so far, roughly in the order they'd probably get built:
+</div>
+<div class="tinder-fields" style="margin:0 0 10px;">
+<div class="tinder-field-row">✅ <strong>Re-run a saved batch through today's import logic.</strong> Built &mdash; the "Or upload a saved .json file" option above the paste box in Tinder import replays a <code>tinder-batch-*.json</code> file (the bulk snippet's own download safety-net, or any older saved batch) through whatever the CURRENT dashboard code does with it, so a parsing/routing fix made after that batch was scraped still applies. Only covers dashboard-side fixes, not console-snippet-side ones like icon classification &mdash; those need an actual re-scrape (SCRIPT_VERSION handles that).</div>
+<div class="tinder-field-row"><strong>Check for dropped matches.</strong> Compare every connection's stored Tinder match id against a fresh scrape of the current sidebar; flag anyone no longer in Tinder's own match list &mdash; unmatched, or removed on their end. The match id is already being captured and stored (<code>tinderMatchId</code>); what's missing is the actual comparison snippet and a report screen.</div>
+<div class="tinder-field-row">✅ <strong>Check data completeness &mdash; as questions to ask, not just gaps.</strong> Built &mdash; each connection card on the Dating tab shows a short list of deterministic prompts (stale/still-alive check, missing City, missing kids-plan once there's an actual chat log, an interest never turned into a date). The "Needs attention (N)" button above the Connections list filters down to just those; "+ task" next to it captures one standing task linking back here, findable again after it's marked Done (a genuinely recurring nudge, not a one-off).</div>
+<div class="tinder-field-row">✅ <strong>Propose City/Nationality fill-ins from what's already known.</strong> Built &mdash; see below.</div>
+<div class="tinder-field-row"><strong>Targeted incremental re-runs.</strong> "Re-check just City for anyone missing it," "re-capture photos for anyone with none" &mdash; would need a way to filter by WHAT'S missing, not just re-run everyone.</div>
+<div class="tinder-field-row"><strong>Archive non-interacted profiles.</strong> A match sitting at Superswiped/Matched for a long time with no chat and no stage progression is realistically dead. Flag (never auto-apply) candidates for Faded/Archived, the mirror image of the Nudges change that surfaces the BEST new matches &mdash; this would surface the ones worth giving up on.</div>
+<div class="tinder-field-row"><strong>(more ideas welcome)</strong> &mdash; whatever else turns out to matter once the above exist and get used for a while.</div>
+</div>
+
+<div class="settings-block">
+<h3>City/Nationality fill-ins</h3>
+<div class="settings-note" style="margin:0 0 10px;">For anyone not obviously based in London, checks their Education/Job/Notes/Likes text for a city or nationality word already known from your OWN data, plus a language they speak that's also a nationality word (French, German, Italian...) &mdash; but only when it's the clear rarest of the languages they speak (checked against how rare it is across your own connections); a tie, or nothing rare enough, proposes nothing rather than guessing between several. Ranked by how many independent signals agree &mdash; a repeated mention, or Distance confirming they're not just nearby, ranks higher; a genuinely ambiguous case (two different cities mentioned, no clear winner) is dropped rather than shown. Keyword matching only, no outside lookups &mdash; things worth checking with them, not facts. Never applied without a click.</div>
+<div class="sync-row" style="margin-top:0;">
+<button class="sync-btn" id="location-fillins-scan-btn" type="button">Scan</button>
+</div>
+<div id="location-fillins"></div>
+</div>
+
+<div class="settings-block">
+<h3>Photo quality</h3>
+<div class="settings-note" style="margin:0 0 10px;">
+Finds connections whose cover photo is missing or is really just the small placeholder cropped out of a Bumble/WhatsApp matches-list or chat header, and proposes a better one from data already on file &mdash; first a higher-res photo already saved for that same connection, then (failing that) the cover of any linked Photos album for that name. Never applied without a click.
+</div>
+<div class="sync-row" style="margin-top:0;">
+<button class="sync-btn" id="photo-quality-scan-btn" type="button">Scan</button>
+</div>
+<div id="photo-quality-results"></div>
+</div>
 </div>
 </details>
 </details>

@@ -444,33 +444,23 @@ renderAlbumsLastRun();
 render();
 }
 
-function initPhotoAlbums() {
-const box = document.getElementById('albums-input');
-if (!box) return;
-const status = document.getElementById('albums-status');
-renderAlbumsLastRun();
-
-document.getElementById('albums-match-btn').addEventListener('click', () => runAlbumsMatch(box.value, status));
-
-const fileInput = document.getElementById('albums-file-input');
-if (fileInput) {
-fileInput.addEventListener('change', async () => {
-const file = fileInput.files[0];
-fileInput.value = '';
-if (!file) return;
-const text = await file.text();
-box.value = text;
-runAlbumsMatch(text, status);
-});
+// Entry point called by the shared Dating-admin import router
+// (manualimport.js's routeDatingImportText/initDatingImport) once it's
+// detected a paste/file as albums-JSON-shaped -- same shape
+// handleWhatsAppText (whatsappimport.js) wraps its own panel's logic in,
+// reading its own status element rather than being handed one.
+function handleAlbumsText(text) {
+runAlbumsMatch(text, document.getElementById('albums-status'));
 }
 
-document.getElementById('albums-clear-btn').addEventListener('click', () => {
-box.value = '';
-rows = []; unparsed = []; peopleSeen = [];
-status.textContent = '';
-render();
-});
+function initPhotoAlbums() {
+renderAlbumsLastRun();
 
+// The dedicated paste box + match/file/clear buttons this used to have
+// are gone -- Albums now joins the shared "Import connections" paste/
+// upload box as a 4th auto-detected source (detectDatingImportKind's
+// 'albums' branch, manualimport.js). Only the snippet-copy button and
+// the results/status/last-run display survive here.
 const copyBtn = document.getElementById('albums-copy-snippet');
 if (copyBtn) {
 copyBtn.addEventListener('click', async () => {
@@ -479,11 +469,12 @@ await navigator.clipboard.writeText(document.getElementById('albums-snippet').te
 copyBtn.textContent = 'Copied';
 setTimeout(() => { copyBtn.textContent = 'Copy snippet'; }, 2000);
 } catch (e) {
-status.textContent = 'Copy failed — select the snippet and copy it manually.';
+const status = document.getElementById('albums-status');
+if (status) status.textContent = 'Copy failed — select the snippet and copy it manually.';
 }
 });
 }
 render();
 }
 
-export { initPhotoAlbums, parseAlbumTitle, captionFor, matchPerson, parseInput, isSensitive, noCoverNote };
+export { initPhotoAlbums, parseAlbumTitle, captionFor, matchPerson, parseInput, isSensitive, noCoverNote, handleAlbumsText };

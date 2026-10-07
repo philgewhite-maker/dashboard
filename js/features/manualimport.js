@@ -19,6 +19,7 @@ import { escapeHtml, splitCsvLine, hydratePhotoBackgrounds, avatarHtml } from '.
 import { CONN_STAGES, matchCandidates, mergeConnectionInto, connectionPickerHtml, bindConnPickers, renderConnections } from './connections.js';
 import { handleTinderText, handleTinderFiles } from './tinderimport.js';
 import { handleWhatsAppText, handleWhatsAppFiles, detectSenders } from './whatsappimport.js';
+import { handleAlbumsText } from './photoalbums.js';
 
 function splitList(s) {
 return String(s || '').split(',').map((v) => v.trim()).filter(Boolean);
@@ -249,6 +250,14 @@ renderManualImport();
 // and the screenshot panels (an AI classification, not a signature) are
 // deliberately NOT covered here -- see the consolidation plan's own
 // reasoning for why those stay their own thing.
+//
+// Google Photos albums (photoalbums.js's own parseInput shape: a bare
+// array, or {albums:[...], people:[...]}) joins as a 4th branch -- a
+// genuinely distinct JSON shape from Tinder's (profiles/unmatched/
+// name+fields+photos), checked inside the same parsed-JSON try so a
+// bare top-level array (never produced by any Tinder snippet -- see
+// parseBatch's own comment enumerating its exact 3 shapes, none of
+// which is a bare array) falls through to here rather than 'unknown'.
 function detectDatingImportKind(text) {
 const trimmed = String(text || '').trim();
 if (!trimmed) return 'unknown';
@@ -256,6 +265,7 @@ if (trimmed[0] === '{' || trimmed[0] === '[') {
 try {
 const raw = JSON.parse(trimmed);
 if (Array.isArray(raw.profiles) || raw.unmatched !== undefined || (raw.name !== undefined && raw.fields !== undefined && raw.photos !== undefined)) return 'tinder';
+if (Array.isArray(raw) || Array.isArray(raw.albums)) return 'albums';
 } catch (e) { /* not valid JSON -- fall through to the other checks below */ }
 }
 if (looksLikeManualConnectionsCsv(trimmed.split(/\r?\n/)[0])) return 'manual-csv';
@@ -268,7 +278,8 @@ const kind = detectDatingImportKind(text);
 if (kind === 'tinder') handleTinderText(text);
 else if (kind === 'manual-csv') handleManualCsvText(text);
 else if (kind === 'whatsapp') handleWhatsAppText(text);
-else if (status) status.textContent = "Couldn't tell what this is — paste/upload the console JSON, a WhatsApp .txt export, or the connections CSV.";
+else if (kind === 'albums') handleAlbumsText(text);
+else if (status) status.textContent = "Couldn't tell what this is — paste/upload the console JSON, a Google Photos albums export, a WhatsApp .txt export, or the connections CSV.";
 }
 
 function initDatingImport() {
@@ -310,6 +321,7 @@ const kind = detectDatingImportKind(text);
 if (kind === 'tinder') tinderFiles.push(file);
 else if (kind === 'manual-csv') handleManualCsvText(text);
 else if (kind === 'whatsapp') whatsappFiles.push(file);
+else if (kind === 'albums') handleAlbumsText(text);
 else if (status) status.textContent = (status.textContent ? status.textContent + ' ' : '') + `Couldn't tell what "${file.name}" is.`;
 }
 if (tinderFiles.length) await handleTinderFiles(tinderFiles);

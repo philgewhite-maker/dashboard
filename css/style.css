@@ -3468,7 +3468,10 @@ padding:8px 0;
    exactly as it was elsewhere in the app (recipes.js, shopping.js,
    telegramfamily.js all reuse it with no h3 and no collapse-by-default
    intent) -- deliberately NOT the collapsible unit, just nested one level
-   inside .settings-item now, Settings-only. */
+   inside .settings-item now. Also reused outside Settings, on the Contacts
+   tab's merged import panels -- the collapse mechanics are generic, only
+   .settings-group:not([open])'s force-hide rule above is Settings-specific
+   (no enclosing .settings-group there, so nothing needs it). */
 .settings-item{border-top:1px solid var(--line);}
 .settings-item:first-of-type{border-top:none;}
 .settings-item summary{cursor:pointer;list-style:none;padding:10px 0;}
@@ -3935,3 +3938,6 @@ max-width:none;
    unreadable — so on a narrow screen the table is simply wider than the
    panel, and this is where that is allowed to be true. */
 .letting-scroll{overflow-x:auto;}
+#letting-chart-canvas{width:100%;height:100%;display:block;touch-action:none;}
+.letting-chart-legend{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:8px;}
+.letting-chart-legend-item{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--muted);}

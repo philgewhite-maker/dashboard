@@ -164,6 +164,43 @@ Promise.all([import('./connections.js'), import('./overview.js')])
 render();
 }
 
+// A multi-file pick/drop/paste first checks whether these look like
+// several native-resolution pieces of ONE profile (captured in halves to
+// avoid a phone's scroll-capture tool downscaling one long stitched
+// screenshot) -- the exact case index.html's "Import connections" panel
+// used to have its own dedicated multi-file input for, which auto-parsed
+// immediately with no review step. That input is gone; this control
+// absorbs it, but ONLY for the combine case does it skip straight to a
+// full parse (reviewing pieces of one profile individually would be
+// nonsensical -- each piece alone is partial). Anything else, combine or
+// not, single file or many, goes through the cheap-pass review list
+// below instead -- the deliberate review-first change for what used to
+// be the OLD "profile screenshot(s) + parse" auto-parse case.
+// `combineCheckbox` mirrors the force-combine checkbox's own semantics
+// from that old control: a box ticked before the files are picked wins;
+// otherwise screenshotsLookCombinable() decides, same shared heuristic
+// Capture Inbox's own push-side extractDatingScreenshot() (connections.js)
+// already uses, not a separately re-derived copy of it.
+async function handleIncomingFiles(files, { replace = false } = {}) {
+if (files.length > 1) {
+const combineCheckbox = document.getElementById('import-profile-combine');
+let combine = !!(combineCheckbox && combineCheckbox.checked);
+if (!combine) {
+const { screenshotsLookCombinable } = await import('../utils.js');
+combine = await screenshotsLookCombinable(files);
+}
+if (combine) {
+const { importProfileScreenshotFile, screenshotAppHint } = await import('./connections.js');
+const appHint = screenshotAppHint(files);
+statusEl().textContent = `Reading ${files.length} pieces of one profile…`;
+const { candidate } = await importProfileScreenshotFile(files, appHint, statusEl());
+statusEl().textContent = candidate ? 'Found a profile — review below:' : "Couldn't read those screenshots — see console.";
+return;
+}
+}
+await scanFiles(files, { replace });
+}
+
 // Scans a batch, appending to whatever is already on screen. Appending
 // rather than replacing is what lets you build a batch up by pasting one
 // image at a time, which is how the Google Photos route works.
@@ -234,7 +271,7 @@ renderPhotoScanLastRun();
 input.addEventListener('change', async (e) => {
 const files = Array.from(e.target.files);
 e.target.value = '';
-await scanFiles(files, { replace: true });
+await handleIncomingFiles(files, { replace: true });
 });
 
 // --- Drag files onto the panel ---
@@ -251,7 +288,7 @@ depth = 0;
 over(false);
 const files = Array.from(e.dataTransfer.files || []);
 if (files.length === 0) { statusEl().textContent = droppedWithoutFiles(e.dataTransfer); return; }
-await scanFiles(files);
+await handleIncomingFiles(files);
 });
 }
 
@@ -265,7 +302,7 @@ if (tag === 'INPUT' || tag === 'TEXTAREA' || (document.activeElement || {}).isCo
 const files = Array.from(e.clipboardData ? e.clipboardData.files : []);
 if (files.length === 0) return;
 e.preventDefault();
-await scanFiles(files);
+await handleIncomingFiles(files);
 });
 
 const clearBtn = document.getElementById('scan-clear-btn');

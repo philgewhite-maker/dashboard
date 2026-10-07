@@ -277,7 +277,7 @@ revealCaptureBatch(batch.id);
 } else if (matchesImports.length) {
 banner(msg, async () => {
 const { switchTab } = await import('../tabs.js');
-switchTab('datingadmin');
+switchTab('dating');
 });
 } else if (healthImports.length) {
 banner(msg, async () => {
