@@ -129,10 +129,18 @@ switchOffersCheckedAt: '', // ISO date of the last bank-switch-offers scan -- dr
 // here. {"lewis": {ratePct: 20, allowance: 1000}, ...}.
 lettingTaxByOwner: {},
 // The two monthly targets drawn as reference lines on the letting-income
-// chart (js/features/letting.js) -- user-editable rather than hardcoded,
-// since an aspirational figure like this is exactly the kind of thing
-// that changes over time and shouldn't need a code change to adjust.
-lettingChartTargets: { aggressive: 2700, normal: 1700 },
+// chart (js/features/letting.js) -- per owner-group (keyed by letting.js's
+// own group key: '__mine__', or an ownerKey for Lewis/Zara), and additive
+// across whichever groups the chart's multi-select currently has ticked.
+// {"__mine__": {aggressive: 2700, normal: 1700}, "<ownerKey>": {...}}.
+// User-editable rather than hardcoded, since an aspirational figure like
+// this is exactly the kind of thing that changes over time. Starts empty
+// -- letting.js's lettingChartTargetsFor() supplies Mine's original
+// 2700/1700 as a fallback default only until something is actually set,
+// and migrates the old single flat {aggressive,normal} shape (before
+// targets were per-person) into here under '__mine__' the first time it
+// runs into one.
+lettingChartTargets: {},
 // Which scheduled syncs are turned OFF, and how often the rest may run
 // (see js/features/scheduled.js). Stored as the exceptions rather than
 // the enabled list so a task added later is on by default -- the point

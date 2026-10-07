@@ -449,12 +449,12 @@ const LETTING_CHART_MONTHS_FORWARD = 6;
 // shouldn't quietly drift as "today" moves forward.
 const LETTING_CHART_HISTORIC_FLOOR = '2026-01';
 
-// Two flat monthly targets, regardless of days-in-month -- "per calendar
-// month" means the same number every month, not pro-rated for a 28 vs 31
-// day month. Amounts are user-editable (data.prefs.lettingChartTargets,
-// #letting-chart-target-aggressive/-normal below) rather than hardcoded,
-// since an aspirational figure like this is exactly the kind of thing
-// that changes over time.
+// Two flat monthly targets per owner-group, regardless of days-in-month
+// -- "per calendar month" means the same number every month, not
+// pro-rated for a 28 vs 31 day month. Amounts are user-editable (see
+// lettingChartTargetsFor() and the inputs renderLettingChartGroupPicker()
+// builds per row) and additive across whichever groups are ticked,
+// rather than one hardcoded shared pair.
 const LETTING_TARGETS = [
 { key: 'aggressive', label: 'Aggressive', colorVar: '--red' },
 { key: 'normal', label: 'Normal', colorVar: '--slate' },
@@ -642,6 +642,26 @@ return { months, groups: activeGroups, perGroupByMonth, nowIndex };
 
 function money0(n) { return `£${Math.round(n).toLocaleString('en-GB')}`; }
 
+// Reads (and, the first time, migrates) a group's own Aggressive/Normal
+// targets. The old shape -- a single flat {aggressive,normal} pair for
+// the whole chart, before targets were per-person -- is folded into Mine
+// the first time this runs into one, since that pair was always really
+// describing what I alone was aiming for. Mine falls back to the
+// original 2700/1700 until something is actually set; every other group
+// falls back to 0/0 -- there's no sensible default for a kid's own target
+// to guess at.
+function lettingChartTargetsFor(groupKey) {
+const all = data.prefs.lettingChartTargets || (data.prefs.lettingChartTargets = {});
+if (Number.isFinite(all.aggressive) || Number.isFinite(all.normal)) {
+all[LETTING_CHART_MINE_KEY] = { aggressive: Number(all.aggressive) || 0, normal: Number(all.normal) || 0, ...(all[LETTING_CHART_MINE_KEY] || {}) };
+delete all.aggressive;
+delete all.normal;
+queueSave();
+}
+if (all[groupKey]) return all[groupKey];
+return groupKey === LETTING_CHART_MINE_KEY ? { aggressive: 2700, normal: 1700 } : { aggressive: 0, normal: 0 };
+}
+
 // Doubles as the multi-select: each row is a checkbox (which group to
 // show), not just a colour key. `lettingChartSelectedGroups` tracks which
 // are currently ticked; `lettingChartKnownGroupKeys` tracks which the
@@ -658,20 +678,45 @@ lettingChartSelectedGroups.add(g.key);
 });
 }
 
+// Each row is the checkbox that includes/excludes this group from the
+// stack, plus that group's OWN Aggressive/Normal target -- additive
+// across whichever rows are ticked (drawLettingChart sums lettingChart
+// TargetsFor() over the same filtered `groups` list the stack itself
+// uses), not a single shared pair any more.
 function renderLettingChartGroupPicker(groups) {
 const el = document.getElementById('letting-chart-legend');
 if (!el) return;
 if (!groups.length) { el.innerHTML = '<span class="settings-note" style="margin:0;">No income recorded yet.</span>'; return; }
 const avgSwatch = '<span class="letting-chart-legend-line" aria-hidden="true"></span>';
-el.innerHTML = groups.map((g) => `<label class="letting-chart-legend-item" style="cursor:pointer;">
+el.innerHTML = groups.map((g) => {
+const t = lettingChartTargetsFor(g.key);
+return `<div class="letting-chart-group-row">
+<label class="letting-chart-legend-item" style="cursor:pointer;">
 <input type="checkbox" data-letting-chart-group="${escapeHtml(g.key)}"${lettingChartSelectedGroups.has(g.key) ? ' checked' : ''}>
 <span class="dot ${escapeHtml(g.colour || 'slate')}"></span>${escapeHtml(g.label)}
-</label>`).join('')
+</label>
+<span class="letting-chart-group-targets">
+<label>Agg £<input type="number" min="0" step="10" class="settings-input" data-letting-chart-target="${escapeHtml(g.key)}:aggressive" value="${t.aggressive || ''}"></label>
+<label>Normal £<input type="number" min="0" step="10" class="settings-input" data-letting-chart-target="${escapeHtml(g.key)}:normal" value="${t.normal || ''}"></label>
+</span>
+</div>`;
+}).join('')
 + `<span class="letting-chart-legend-item">${avgSwatch}3-month avg</span>`;
 el.querySelectorAll('[data-letting-chart-group]').forEach((cb) => {
 cb.addEventListener('change', () => {
 const key = cb.dataset.lettingChartGroup;
 if (cb.checked) lettingChartSelectedGroups.add(key); else lettingChartSelectedGroups.delete(key);
+renderLettingChart();
+});
+});
+el.querySelectorAll('[data-letting-chart-target]').forEach((input) => {
+input.addEventListener('change', () => {
+const [key, field] = input.dataset.lettingChartTarget.split(':');
+const all = data.prefs.lettingChartTargets || (data.prefs.lettingChartTargets = {});
+const entry = all[key] || (all[key] = { aggressive: 0, normal: 0 });
+const v = Number(input.value);
+entry[field] = Number.isFinite(v) && v >= 0 ? v : 0;
+queueSave();
 renderLettingChart();
 });
 });
@@ -704,11 +749,12 @@ const padLeft = 46, padRight = 10, padTop = 16, padBottom = 20;
 const plot = { x: padLeft, y: padTop, w: Math.max(10, width - padLeft - padRight), h: Math.max(10, height - padTop - padBottom) };
 
 const monthTotals = months.map((ym) => groups.reduce((n, g) => n + (perGroupByMonth.get(g.key).get(ym) || 0), 0));
-// Fixed, user-editable amounts (data.prefs.lettingChartTargets) -- not
-// tied to the multi-select at all, since they're a standing target for
-// the whole operation, not scaled to whichever subset is on screen.
-const targetAmounts = data.prefs.lettingChartTargets || {};
-const targets = LETTING_TARGETS.map((t) => ({ ...t, amount: Number(targetAmounts[t.key]) || 0 }));
+// Each visible group's own target, summed -- additive across whichever
+// rows are ticked, same `groups` (already filtered by selection) the
+// stack itself sums over, so the two stay comparable: tick just Lewis'
+// and the lines show only his target, tick everyone and they show the
+// combined one.
+const targets = LETTING_TARGETS.map((t) => ({ ...t, amount: groups.reduce((n, g) => n + (Number(lettingChartTargetsFor(g.key)[t.key]) || 0), 0) }));
 const maxVal = Math.max(...monthTotals, ...targets.map((t) => t.amount), 1) * 1.1;
 const scaleY = (v) => plot.y + plot.h - (v / maxVal) * plot.h;
 
@@ -893,29 +939,9 @@ renderLettingChartGroupPicker(chartData.groups);
 drawLettingChart(canvas, chartData);
 }
 
-// Target-amount inputs (#letting-chart-target-aggressive/-normal) write
-// straight to data.prefs.lettingChartTargets and re-render -- same
-// pattern as every other settings-input in this file (e.g. the tax
-// rate/allowance inputs below).
-function initLettingChartTargetInputs() {
-LETTING_TARGETS.forEach((t) => {
-const input = document.getElementById(`letting-chart-target-${t.key}`);
-if (!input) return;
-const current = data.prefs.lettingChartTargets || (data.prefs.lettingChartTargets = {});
-input.value = Number.isFinite(Number(current[t.key])) ? current[t.key] : '';
-input.addEventListener('change', () => {
-const v = Number(input.value);
-current[t.key] = Number.isFinite(v) && v >= 0 ? v : 0;
-queueSave();
-renderLettingChart();
-});
-});
-}
-
 function initLettingChart() {
 const canvas = document.getElementById('letting-chart-canvas');
 if (!canvas) return;
-initLettingChartTargetInputs();
 canvas.addEventListener('pointermove', (evt) => {
 if (!lettingChartLastPlot) return;
 const r = canvas.getBoundingClientRect();
