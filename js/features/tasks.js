@@ -87,17 +87,31 @@ return hit ? hit.key : null;
 
 // Built once per render rather than per row -- the due-soon check has to
 // look through every descendant, which per row would be O(n^2).
+//
+// contextMatchRoots does the same walk-up-to-root-and-mark trick as
+// dueSoonRoots, for the same reason: renderLists() only ever filters
+// ROOT tasks (parentId === null), with matching descendants shown nested
+// underneath via taskRowHtml's own recursion. Without this, a subtask
+// carrying the picked context but whose PARENT doesn't would never be
+// reachable at all -- its root fails matchesContext and never gets past
+// the first line of isListed, so the subtask never gets its own chance
+// to render either. Confirmed live as the exact "Office (2)" pill vs. an
+// empty list bug: renderContextFilter()'s own count loops over every
+// task regardless of parentId, so it keeps counting a subtask the list
+// below has no path to ever show.
 function visibilityContext() {
 const byId = new Map(data.tasks.map((t) => [t.id, t]));
 const dueSoonRoots = new Set();
+const contextMatchRoots = new Set();
 data.tasks.forEach((t) => {
 if (t.bucket !== 'done' && t.due && daysUntil(t.due) <= DUE_SOON_DAYS) dueSoonRoots.add(rootOf(t, byId).id);
+if (contextFilter !== 'all' && contextFilter !== 'none' && (t.contexts || []).includes(contextFilter)) contextMatchRoots.add(rootOf(t, byId).id);
 });
-return { byId, dueSoonRoots };
+return { byId, dueSoonRoots, contextMatchRoots };
 }
 
 function isListed(t, vis) {
-if (!matchesContext(t)) return false;
+if (!matchesContext(t) && !vis.contextMatchRoots.has(t.id)) return false;
 // Picking a specific context is a deliberate filter: show whatever has it.
 if (contextFilter !== 'all' && contextFilter !== 'none') return true;
 const kind = otherKindOf(t, vis.byId);
