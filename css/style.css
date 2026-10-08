@@ -1544,7 +1544,7 @@ min-width:0;
    on a narrow screen the actions drop to their own line and the auto
    margin simply has nothing left to push against, which is the wanted
    behaviour rather than a fallback. */
-#media-list .media-row-actions{
+#media-list .media-row-actions, #media-recs-list .media-row-actions{
 display:inline-flex;
 align-items:center;
 gap:8px;

@@ -295,19 +295,32 @@ return chips.join('');
 // the same relative position regardless of content length.
 function candRowHtml(c) {
 const art = c.imageUrl ? `<img class="media-art" src="${escapeHtml(c.imageUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : '';
-const byline = [c.creator, c.year].filter(Boolean).join(' · ');
-const genreChips = (c.genres || []).map((g) => `<span class="task-context">${escapeHtml(g)}</span>`).join('');
+const titleHtml = c.link ? `<a href="${escapeHtml(c.link)}" target="_blank" rel="noopener">${escapeHtml(c.title)}</a>` : escapeHtml(c.title);
 const ratingBadge = c.rating ? `<span class="settings-note" style="margin:0;">&#9733; ${c.rating.toFixed(1)}</span>` : '';
+const genreChips = (c.genres || []).map((g) => `<span class="task-context">${escapeHtml(g)}</span>`).join('');
 const aiBadge = c.aiPick ? `<span class="task-context" style="background:var(--lilac-bg,#efe7ff);color:var(--lilac,#7c4dff);font-weight:600;" title="Flagged by the optional AI top-up pass">&#10024; AI pick</span>` : '';
 const canWatchlist = (c.kind === 'film' || c.kind === 'tv') && c.externalIds && c.externalIds.tmdb;
+// Title (Year) ★Rating together on the header line, same order the
+// main Watch & listen list reads left to right, with actions pushed to
+// the right of that SAME line (#media-recs-list now shares the main
+// list's own margin-left:auto rule, style.css) -- confirmed live as a
+// real inconsistency: year/rating used to sit far right of their own
+// row while the main list keeps them right next to the title, and
+// actions lived on the "via" line here instead of lining up with the
+// main list's own right-aligned row of buttons.
 return `<div class="mail-row" data-rec-row="${c.id}" style="align-items:flex-start;flex-wrap:wrap;">
 ${art}
 <div style="display:flex;flex-direction:column;gap:5px;flex:1;min-width:220px;">
 <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
 <span class="task-context">${escapeHtml(KIND_LABEL[c.kind] || c.kind)}</span>
-<span class="mail-subject">${c.link ? `<a href="${escapeHtml(c.link)}" target="_blank" rel="noopener">${escapeHtml(c.title)}</a>` : escapeHtml(c.title)}</span>
-${byline ? `<span class="settings-note" style="margin:0;">${escapeHtml(byline)}</span>` : ''}
+<span class="mail-subject">${titleHtml}${c.year ? ` (${escapeHtml(c.year)})` : ''}</span>
 ${ratingBadge}
+${c.creator ? `<span class="settings-note" style="margin:0;">${escapeHtml(c.creator)}</span>` : ''}
+<span class="media-row-actions">
+<button class="mini-task-btn" type="button" data-rec-add="${c.id}">+ Add as want</button>
+${canWatchlist ? `<button class="mini-task-btn" type="button" data-rec-watchlist="${c.id}" title="Add straight to your Plex Watchlist">&#128065; Watchlist</button>` : ''}
+<span class="del-x" data-rec-dismiss="${c.id}" title="Not interested">&times;</span>
+</span>
 </div>
 <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
 ${genreChips}${providerChipsHtml(c)}${aiBadge}
@@ -315,11 +328,6 @@ ${genreChips}${providerChipsHtml(c)}${aiBadge}
 ${c.reason ? `<div class="settings-note" style="margin:0;">${escapeHtml(c.reason)}</div>` : ''}
 <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
 <span class="settings-note" style="margin:0;">via ${c.sourceUrl ? `<a href="${escapeHtml(c.sourceUrl)}" target="_blank" rel="noopener">${escapeHtml(c.sourceLabel || c.sourceUrl)}</a>` : escapeHtml(c.sourceLabel)}</span>
-<span class="media-row-actions">
-<button class="mini-task-btn" type="button" data-rec-add="${c.id}">+ Add as want</button>
-${canWatchlist ? `<button class="mini-task-btn" type="button" data-rec-watchlist="${c.id}" title="Add straight to your Plex Watchlist">&#128065; Watchlist</button>` : ''}
-<span class="del-x" data-rec-dismiss="${c.id}" title="Not interested">&times;</span>
-</span>
 </div>
 </div>
 </div>`;
