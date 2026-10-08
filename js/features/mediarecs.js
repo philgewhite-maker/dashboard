@@ -40,10 +40,19 @@ function isSourceDue(source, force) {
 return force || daysSince(source.lastCheckedAt) >= (CADENCE_DAYS[source.cadence] || CADENCE_DAYS.monthly);
 }
 
-function isAlreadyKnown(title, kind) {
+// Title only, NOT title+kind -- confirmed live as the real cause of a
+// growing pile of duplicates: the same real title ("Cold Storage") got
+// extracted once as kind 'other' (a vague mention, before extraction
+// quality improved) and once as kind 'film' (the real thing, full
+// details) from two different source reads, and since the two kinds
+// differed the kind+title key never considered them the same candidate.
+// A title collision across genuinely different works of different kinds
+// is rare enough in practice that this is the right tradeoff for a
+// personal recommendations queue.
+function isAlreadyKnown(title) {
 const t = title.trim().toLowerCase();
-return data.mediaItems.some((m) => m.kind === kind && m.title.trim().toLowerCase() === t)
-|| data.mediaRecCandidates.some((c) => c.kind === kind && c.title.trim().toLowerCase() === t);
+return data.mediaItems.some((m) => m.title.trim().toLowerCase() === t)
+|| data.mediaRecCandidates.some((c) => c.title.trim().toLowerCase() === t);
 }
 
 // Updates every status element in the DOM, not just one -- the Settings
@@ -198,10 +207,10 @@ const raw = rawBatches.flat();
 // spending a TMDb lookup on each copy.
 const seen = new Set();
 const deduped = raw.filter((it) => {
-const key = `${it.kind}::${it.title.trim().toLowerCase()}`;
+const key = it.title.trim().toLowerCase();
 if (seen.has(key)) return false;
 seen.add(key);
-return !isAlreadyKnown(it.title, it.kind);
+return !isAlreadyKnown(it.title);
 });
 
 setStatus(`Checking ${deduped.length} candidate${deduped.length === 1 ? '' : 's'} against your catalogue…`);
@@ -245,7 +254,39 @@ setStatus(`${parts.join(' — ')}.`);
 renderMediaRecs();
 }
 
+// Cleans up duplicates already sitting in data.mediaRecCandidates from
+// before isAlreadyKnown stopped comparing by kind+title -- confirmed
+// live, 97 pending candidates included the same real title more than
+// once (one extraction guessed kind 'other' off a vague mention, a
+// later one correctly found it as 'film' with full details). Keeps the
+// one with a resolved catalogue id, or failing that the higher score,
+// and dismisses the rest -- not deleted, so isAlreadyKnown still blocks
+// them from reappearing. Idempotent and cheap, so it runs on every
+// render rather than needing a one-off "clean up now" button: once a
+// title has no duplicates left, it finds nothing to do.
+function dedupeCandidates() {
+const keepers = new Map(); // normalised title -> the candidate currently kept
+let changed = false;
+const weight = (c) => (c.externalIds && c.externalIds.tmdb ? 100 : 0) + (c.score || 0);
+for (const c of data.mediaRecCandidates) {
+if (c.status !== 'pending') continue;
+const key = c.title.trim().toLowerCase();
+const existing = keepers.get(key);
+if (!existing) { keepers.set(key, c); continue; }
+changed = true;
+if (weight(c) > weight(existing)) {
+existing.status = 'dismissed';
+keepers.set(key, c);
+} else {
+c.status = 'dismissed';
+}
+}
+if (changed) queueSave();
+return changed;
+}
+
 function pendingSorted() {
+dedupeCandidates();
 return (data.mediaRecCandidates || []).filter((c) => c.status === 'pending').sort((a, b) => b.score - a.score);
 }
 
