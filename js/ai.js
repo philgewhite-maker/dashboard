@@ -2141,6 +2141,29 @@ reason: String((it && it.reason) || '').trim(),
 })).filter((it) => it.title);
 }
 
+// Some recommendation sources (mediarecs.js's "jump-off" sources) publish
+// the actual dated article at a URL that changes every week/month, reached
+// only via an evergreen landing page that links out to whichever one is
+// current (e.g. a Guardian "best shows to stream" index linking to that
+// week's own /2026/jan/09/-dated piece). This finds that link rather than
+// extracting recommendations from the landing page itself, which is
+// usually just a stub pointing at the real thing.
+const FIND_LATEST_MAX_TOKENS = 600;
+async function findLatestArticleUrl(html, guidance = '') {
+const prompt = `This is the HTML of a "landing" or index page that links out to the CURRENT (most recent) edition of a recurring article -- e.g. this week's or this month's "what to watch" piece. The actual recommendations live on that linked page, not here.
+
+HTML:
+"""
+${String(html || '').slice(0, 20000)}
+"""
+${guidanceInstruction(guidance)}
+Find the single link to the most recent/current edition -- usually the first or most prominent such link, often with a date in its own URL. Give the href exactly as it appears in the HTML (relative or absolute, don't resolve it).
+
+Reply with ONLY a JSON object, no other text, no markdown fences: {"href":""} -- "" if no such link is findable.`;
+const { data } = await callTextJson(prompt, FIND_LATEST_MAX_TOKENS, MAIL_EXTRACT_MODEL, 'Find latest recommendations article', 'low');
+return String((data && data.href) || '').trim();
+}
+
 // The "optional AI top-up" half of mediarecs.js's ranking. Deliberately
 // narrow: it picks AMONG the candidates the deterministic pass already
 // resolved from real source pages (by index -- never asked for a title,
@@ -2199,7 +2222,7 @@ callTextJson, DEFAULT_MODEL, summarizeUsage, currentMonthKey, compareFaces,
 extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShoppingItem, searchAgentProvocateurElsewhere, searchEbayResaleEstimate, analyseOngoingAccountValue, identifyProduct, translateText, romanizeName, parseCaptureIntent,
 resolveUrlTitle, resolveJobPostingUrl, resolveBookDetails, resolveSeriesBooks,
 identifyCountry, extractWellnessScreenshot,
-extractTripScreenshot, extractMediaScreenshot, extractTripLegFromEmail, extractTaskFromEmail, extractDateEventFromEmail, extractMediaRecommendations, rankMediaCandidates,
+extractTripScreenshot, extractMediaScreenshot, extractTripLegFromEmail, extractTaskFromEmail, extractDateEventFromEmail, extractMediaRecommendations, rankMediaCandidates, findLatestArticleUrl,
 parseIngredients, assessIngredient, ALLERGEN_LIST, DIETARY_FLAGS, FODMAP_COMPONENTS, FODMAP_LEVELS,
 FODMAP_THRESHOLDS_G, OLIGO_CATEGORIES, fodmapLevelFromGrams, regenerateRecipeVariant, assessUnitWeight, assessUnitRatio,
 GLYCEMIC_LOAD_THRESHOLDS, glycemicLevelFromLoad,

@@ -21,7 +21,12 @@ import { data, queueSave, blankMediaRecCandidate } from '../state.js';
 import { escapeHtml } from '../utils.js';
 import { searchTitle, watchProviders, subscriptionFor, collapseProviders, shortProviderName } from '../catalogue.js';
 
-const RECHECK_DAYS = 28;
+// Per-SOURCE now, not one global gate -- a weekly "best new this week"
+// page and a monthly "best of the year" page on the same list can't share
+// one recheck interval without either nagging the monthly one or starving
+// the weekly one. See state.js's blankMediaRecSource for where each
+// source's own cadence/lastCheckedAt live.
+const CADENCE_DAYS = { weekly: 7, monthly: 28 };
 const MAX_PER_SOURCE = 25; // generous cap on one page's own extraction, not a UI limit
 
 function daysSince(iso) {
@@ -29,8 +34,8 @@ if (!iso) return Infinity;
 return (Date.now() - new Date(iso).getTime()) / 86400000;
 }
 
-function isDue(force) {
-return force || daysSince(data.prefs.mediaRecsLastRun) >= RECHECK_DAYS;
+function isSourceDue(source, force) {
+return force || daysSince(source.lastCheckedAt) >= (CADENCE_DAYS[source.cadence] || CADENCE_DAYS.monthly);
 }
 
 function isAlreadyKnown(title, kind) {
@@ -45,12 +50,36 @@ if (!statusEl) statusEl = document.getElementById('media-recs-check-status');
 if (statusEl) statusEl.textContent = text || '';
 }
 
+// A "jump-off" source's own URL is an evergreen index page (this.guardian.
+// com/.../the-seven-best-shows-to-stream-this-week), not the actual dated
+// article -- so the real page has to be found first. Falls back to
+// reading the landing page itself if that fails (better than nothing, and
+// it's what used to happen before this existed), with the failure visible
+// in the status line rather than silently swallowed.
+async function resolveSourceUrl(source) {
+if (!source.jumpOff) return { url: source.url, note: '' };
+const { fetchPageHtml } = await import('../files.js');
+const { findLatestArticleUrl } = await import('../ai.js');
+const landingHtml = await fetchPageHtml(source.url);
+const href = await findLatestArticleUrl(landingHtml, `Landing page for "${source.label || source.url}".`);
+if (!href) return { url: source.url, note: `couldn't find this ${source.cadence === 'weekly' ? "week's" : "month's"} article link, read the landing page itself instead` };
+try {
+return { url: new URL(href, source.url).href, note: '' };
+} catch (err) {
+return { url: source.url, note: `found a link but couldn't resolve it (${href}), read the landing page itself instead` };
+}
+}
+
 async function fetchOneSource(source) {
 const { fetchPageHtml } = await import('../files.js');
 const { extractMediaRecommendations } = await import('../ai.js');
-const html = await fetchPageHtml(source.url);
+const { url: targetUrl, note } = await resolveSourceUrl(source);
+const html = await fetchPageHtml(targetUrl);
 const items = await extractMediaRecommendations(html, `From "${source.label || source.url}", a ${source.kind} source.`);
-return items.slice(0, MAX_PER_SOURCE).map((it) => ({ ...it, sourceLabel: source.label || source.url, sourceUrl: source.url }));
+// Attribution points at the real dated article once resolved, not the
+// evergreen landing page -- "via" should take you to the actual piece
+// these titles came from.
+return { items: items.slice(0, MAX_PER_SOURCE).map((it) => ({ ...it, sourceLabel: source.label || source.url, sourceUrl: targetUrl })), note };
 }
 
 // Can-watch-tonight beats genre match beats rating beats "it's new" -- in
@@ -120,18 +149,25 @@ return cand;
 }
 
 async function runMediaRecsCheck({ force = false } = {}) {
-if (!isDue(force)) { setStatus(`Already checked within the last ${RECHECK_DAYS} days.`); return; }
-const sources = data.mediaRecSources || [];
-if (!sources.length) { setStatus('Add a source page below first.'); return; }
+const all = data.mediaRecSources || [];
+if (!all.length) { setStatus('Add a source page below first.'); return; }
+const sources = all.filter((s) => isSourceDue(s, force));
+if (!sources.length) { setStatus('Nothing due yet -- each source is checked on its own weekly/monthly schedule (Settings).'); return; }
 const prefs = data.prefs.mediaPreferences || {};
 setStatus(`Reading ${sources.length} source${sources.length === 1 ? '' : 's'}…`);
 const rawBatches = [];
 for (const source of sources) {
 try {
-rawBatches.push(await fetchOneSource(source));
+const { items, note } = await fetchOneSource(source);
+rawBatches.push(items);
+source.lastCheckedAt = new Date().toISOString();
+if (note) setStatus(`"${source.label || source.url}" -- ${note}.`);
 } catch (err) {
 console.error(`Recommendations source failed (${source.label || source.url}):`, err);
 setStatus(`"${source.label || source.url}" failed: ${err.message || err} — continuing with the rest.`);
+// Not marked checked -- a transient failure (site hiccup, proxy
+// timeout) should retry next time the scheduled task fires rather
+// than waiting out a full week/month.
 }
 }
 const raw = rawBatches.flat();

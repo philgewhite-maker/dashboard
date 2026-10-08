@@ -626,7 +626,19 @@ const MEDIA_STATUSES = [
 // `kind` is bookkeeping only (shown in Settings, never branches logic):
 // every source is fetched and parsed exactly the same way.
 function blankMediaRecSource(fields = {}) {
-return { id: uid(), label: '', url: '', kind: 'new', ...fields };
+return {
+id: uid(), label: '', url: '', kind: 'new',
+cadence: 'monthly', // 'weekly' | 'monthly' -- how often THIS source is re-checked, see mediarecs.js's CADENCE_DAYS
+lastCheckedAt: '', // ISO date -- per-source, since a weekly source and a monthly one on the same list can't share one gate
+// Some sites publish the real dated article at a URL that changes every
+// week/month (e.g. theguardian.com/.../2026/jan/09/the-seven-best-...),
+// reached only via an evergreen "landing" URL that links out to whichever
+// one is current. Ticking this tells mediarecs.js to read the landing
+// page first, find that current article's link, and extract from THAT
+// page instead of the landing page itself.
+jumpOff: false,
+...fields,
+};
 }
 
 // One title mediarecs.js found on a source page and resolved against

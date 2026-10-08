@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v510</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v511</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -235,7 +235,7 @@
 <div id="media-candidates"></div>
 <details class="settings-item" open style="margin:10px 0;">
 <summary>Recommendations to review <span class="count-badge" id="media-recs-count"></span></summary>
-<div class="settings-note" style="margin:6px 0;">Found automatically from your source pages (Settings &rarr; Media recommendations, about once a month) — ranked by genre/rating fit and whether you can already watch it on something you pay for. "+ Add as want" is an ordinary add; where-to-watch and Plex checks run on it exactly as they would from anywhere else.</div>
+<div class="settings-note" style="margin:6px 0;">Found automatically from your source pages (Settings &rarr; Media recommendations, each on its own weekly or monthly schedule) — ranked by genre/rating fit and whether you can already watch it on something you pay for. "+ Add as want" is an ordinary add; where-to-watch and Plex checks run on it exactly as they would from anywhere else.</div>
 <div id="media-recs-list"></div>
 </details>
 <details class="settings-item" style="margin:10px 0;">
@@ -3189,7 +3189,7 @@ Same idea as Connections' ratings, a separate list (Taste/Health/Prep by default
 <details class="settings-item" id="media-recs-block">
 <summary><h3>Media recommendations</h3></summary>
 <div class="settings-block">
-<div class="settings-note" style="margin:0 0 10px;">About once a month, each source page below is read and checked for real recommendations, resolved against TMDb for a genre/rating, scored against your preferences, and queued for review on the Media tab (wherever "Watch &amp; listen" shows the paste-box). A floor rating only excludes something that actually HAS a TMDb rating &mdash; it never excludes a book or album TMDb has no opinion on.</div>
+<div class="settings-note" style="margin:0 0 10px;">Each source page below is read on its own schedule (weekly or monthly) and checked for real recommendations, resolved against TMDb for a genre/rating, scored against your preferences, and queued for review on the Media tab (wherever "Watch &amp; listen" shows the paste-box). A floor rating only excludes something that actually HAS a TMDb rating &mdash; it never excludes a book or album TMDb has no opinion on. Tick <strong>finds dated article</strong> for a source whose own URL is an evergreen index page linking out to the current dated edition (e.g. a "best shows to stream this week" landing page) rather than the article itself — that page is read first to find this week's/month's real link before anything is extracted.</div>
 <div id="media-rec-sources"></div>
 <button class="add-btn" id="add-media-rec-source-btn" type="button" style="margin-top:8px;">Add source page</button>
 <div class="settings-note" style="margin:14px 0 4px;font-weight:600;">Preferred genres</div>
@@ -3432,7 +3432,7 @@ Finds connections whose cover photo is missing or is really just the small place
 <div class="settings-block">
 <p class="settings-note" style="margin:0 0 10px;"><strong>Adding something:</strong> type a title (searched against TMDb/Open Library/MusicBrainz so you can pick the right film, series, book or album rather than storing a bare string), paste a link from IMDb/Letterboxd/Spotify and the like, or share one from your phone &mdash; a link ending <code>#M</code> or a screenshot marked <strong>M</strong> works too.</p>
 <p class="settings-note" style="margin:0 0 10px;"><strong>Where to watch:</strong> checked automatically once an item has a TMDb id. A service you already pay for (set up under Finances &rarr; Subscriptions) shows first with a green tick; everything else is listed plainer, with rent/buy mentioned only when nothing's included free. "Check Plex" asks your home agent whether a wanted film or series is already in your library.</p>
-<p class="settings-note" style="margin:0;"><strong>Recommendations:</strong> about once a month, the source pages you list in Settings &rarr; Media recommendations are read for real suggestions, resolved against TMDb for a genre and rating, and ranked against your own preferred genres/rating floor &mdash; reviewed here before anything's added. "+ Add as want" is an ordinary add (same pipeline as above); "&#128065; Watchlist" sends it straight to your account-level Plex Watchlist instead.</p>
+<p class="settings-note" style="margin:0;"><strong>Recommendations:</strong> the source pages you list in Settings &rarr; Media recommendations are each read on their own weekly or monthly schedule, checked for real suggestions, resolved against TMDb for a genre and rating, and ranked against your own preferred genres/rating floor &mdash; reviewed here before anything's added. A source whose own URL is an evergreen "best this week" index page (rather than the dated article itself) can be marked as one in Settings, so the current edition is found first. "+ Add as want" is an ordinary add (same pipeline as above); "&#128065; Watchlist" sends it straight to your account-level Plex Watchlist instead.</p>
 </div>
 </details>
 

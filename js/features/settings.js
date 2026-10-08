@@ -769,7 +769,7 @@ queueSave();
 // same row-table pattern as renderMailRules above, `kind` is bookkeeping
 // only (shown here, never branches the fetch/extract logic).
 const MEDIA_REC_SOURCE_KINDS = [
-{ kind: 'new', label: 'New this month' },
+{ kind: 'new', label: 'New releases' },
 { kind: 'critics', label: 'Critics roundup' },
 { kind: 'retrospective', label: 'Retrospective / best-of' },
 ];
@@ -781,23 +781,34 @@ if (!data.mediaRecSources.length) {
 el.innerHTML = '<div class="settings-note" style="margin:0;">No source pages yet — add one below.</div>';
 return;
 }
+const lastChecked = (s) => s.lastCheckedAt
+? new Date(s.lastCheckedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+: 'never';
 const rowsHtml = data.mediaRecSources.map((s) => `<tr>
 <td><input type="text" autocomplete="off" data-recsrc-field="label" data-recsrc-id="${s.id}" value="${escapeHtml(s.label || '')}" placeholder="Label"></td>
 <td><input type="text" autocomplete="off" data-recsrc-field="url" data-recsrc-id="${s.id}" value="${escapeHtml(s.url || '')}" placeholder="https://…"></td>
 <td><select data-recsrc-field="kind" data-recsrc-id="${s.id}">
 ${MEDIA_REC_SOURCE_KINDS.map((k) => `<option value="${k.kind}"${k.kind === s.kind ? ' selected' : ''}>${escapeHtml(k.label)}</option>`).join('')}
 </select></td>
+<td><select data-recsrc-field="cadence" data-recsrc-id="${s.id}">
+<option value="weekly"${s.cadence === 'weekly' ? ' selected' : ''}>Weekly</option>
+<option value="monthly"${s.cadence === 'monthly' ? ' selected' : ''}>Monthly</option>
+</select></td>
+<td><label class="settings-note" style="display:flex;align-items:center;gap:4px;white-space:nowrap;margin:0;" title="Tick when this URL is an evergreen index page that links out to the actual dated article (e.g. 'this week's best shows'), rather than the article itself.">
+<input type="checkbox" data-recsrc-field="jumpOff" data-recsrc-id="${s.id}"${s.jumpOff ? ' checked' : ''}> finds dated article
+</label></td>
+<td><span class="settings-note" style="margin:0;white-space:nowrap;" title="Last checked">${escapeHtml(lastChecked(s))}</span></td>
 <td><span class="del-x" style="opacity:1;" data-del-recsrc="${s.id}">&times;</span></td>
 </tr>`).join('');
 el.innerHTML = `<table class="limits-table">
-<thead><tr><th>Label</th><th>URL</th><th>Kind</th><th></th></tr></thead>
+<thead><tr><th>Label</th><th>URL</th><th>Kind</th><th>Cadence</th><th>Jump-off page</th><th>Last checked</th><th></th></tr></thead>
 <tbody>${rowsHtml}</tbody>
 </table>`;
 el.querySelectorAll('[data-recsrc-field]').forEach((input) => {
 input.addEventListener('change', () => {
 const src = data.mediaRecSources.find((s) => s.id === input.dataset.recsrcId);
 if (!src) return;
-src[input.dataset.recsrcField] = input.value;
+src[input.dataset.recsrcField] = input.type === 'checkbox' ? input.checked : input.value;
 queueSave();
 });
 });
