@@ -38,7 +38,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-VERSION = "1.12"
+VERSION = "1.13"
 
 SYNC_URL = os.environ.get("DASHBOARD_SYNC_URL", "").strip()
 SECRET = os.environ.get("DASHBOARD_SECRET", "").strip()
@@ -139,6 +139,31 @@ def plex(path, params=None):
     return http_json(url, headers={"Accept": "application/json"})
 
 
+# plex.tv's cloud Discover/Watchlist service -- NOT the local Plex Media
+# Server above. The Watchlist a Plex app shows is account-level, synced
+# through plex.tv, so it lives here even though PLEX_URL never does.
+# Same token works on both.
+#
+# Unverified against a live account as of writing (no Plex login
+# available in this environment, see the dashboard session's own notes)
+# -- this follows the shape community Plex tooling (python-plexapi's
+# MyPlexAccount.addToWatchlist) has used for years, but it is an
+# UNDOCUMENTED API and could change under us. If this verb starts
+# failing, check discover.provider.plex.tv's actual response shape
+# first rather than assuming the dashboard side broke.
+PLEX_DISCOVER = "https://discover.provider.plex.tv"
+
+
+def plex_discover(path, params=None, method="GET"):
+    if not PLEX_TOKEN:
+        raise RuntimeError("PLEX_TOKEN is not set, so Plex can't be queried")
+    query = dict(params or {})
+    query["X-Plex-Token"] = PLEX_TOKEN
+    query["X-Plex-Client-Identifier"] = "dashboard-home-agent"
+    url = f"{PLEX_DISCOVER}{path}?{urllib.parse.urlencode(query)}"
+    return http_json(url, method=method, headers={"Accept": "application/json"})
+
+
 # ---- Verbs ------------------------------------------------------------
 #
 # An allowlist, not a dispatcher over arbitrary names: this agent runs
@@ -224,6 +249,61 @@ def verb_plex_search(args):
 
     candidates.sort(key=lambda c: (not c["exactTitle"], c["title"]))
     return {"candidates": candidates[:6], "searched": len(raw)}
+
+
+def verb_plex_watchlist_add(args):
+    """Adds a title to the account-level Plex Watchlist (plex.tv, synced
+    to every Plex app you're signed into) -- distinct from plex.search
+    above, which only ever looks at the local library. Same discipline:
+    a title is matched, never trusted blindly, and ambiguity is reported
+    rather than guessed at. Unlike plex.search's local library search,
+    there is no "ask the dashboard to disambiguate" step here yet -- an
+    ambiguous match just fails with the candidates listed in the reason,
+    since a wrong add to someone's actual watchlist is a worse outcome
+    than a wrong "on Plex" tick on a dashboard-only row.
+    """
+    title = str(args.get("title") or "").strip()
+    if not title:
+        raise ValueError("plex.watchlistAdd needs a title")
+    kind = str(args.get("kind") or "").strip()
+    year = str(args.get("year") or "").strip()
+    search_types = {"film": "movies", "tv": "tv"}.get(kind, "movies,tv")
+
+    body = plex_discover("/library/search", {"query": title, "searchTypes": search_types, "limit": 10})
+    raw = []
+    for group in body.get("MediaContainer", {}).get("SearchResults", []) or []:
+        raw.extend(group.get("SearchResult", []) or [])
+
+    def normalise(value):
+        text = str(value or "").lower()
+        for article in ("the ", "a ", "an "):
+            if text.startswith(article):
+                text = text[len(article):]
+        return "".join(ch for ch in text if ch.isalnum())
+
+    target = normalise(title)
+    matches = []
+    for entry in raw:
+        item = entry.get("Metadata") or entry
+        name = normalise(item.get("title"))
+        if not name or (target not in name and name not in target):
+            continue
+        if year and str(item.get("year") or "") and str(item.get("year")) != year:
+            continue
+        matches.append(item)
+
+    if not matches:
+        return {"added": False, "reason": f"No Plex Discover match for {title!r}"}
+    if len(matches) > 1 and not year:
+        return {
+            "added": False,
+            "reason": f"{len(matches)} ambiguous matches for {title!r} -- no year given to narrow it down",
+            "candidates": [{"title": m.get("title"), "year": m.get("year")} for m in matches[:6]],
+        }
+    chosen = matches[0]
+    rating_key = chosen.get("ratingKey")
+    plex_discover("/actions/addToWatchlist", {"ratingKey": rating_key}, method="PUT")
+    return {"added": True, "title": chosen.get("title"), "year": chosen.get("year"), "ratingKey": rating_key}
 
 
 def arr(which, path, method="GET", body=None, params=None):
@@ -854,6 +934,7 @@ VERBS = {
     "page.colourVariants": verb_page_colour_variants,
     "plex.libraries": verb_plex_libraries,
     "plex.search": verb_plex_search,
+    "plex.watchlistAdd": verb_plex_watchlist_add,
     "arr.search": verb_arr_search,
     "arr.add": verb_arr_add,
     "arr.monitor": verb_arr_monitor,

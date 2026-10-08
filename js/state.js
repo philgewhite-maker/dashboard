@@ -146,6 +146,15 @@ lettingTaxByOwner: {},
 // targets were per-person) into here under '__mine__' the first time it
 // runs into one.
 lettingChartTargets: {},
+// What the monthly recommendations check (js/features/mediarecs.js) scores
+// candidates against -- `genres` are TMDb genre NAMES (catalogue.js's
+// TMDB_GENRES), `minRating` is a TMDb vote_average floor (0-10, 0 = no
+// floor) applied only to candidates that HAVE a rating (an album/book
+// with no TMDb rating is never excluded by a floor meant for film/TV).
+// `aiTopUp` opts into an extra AI pass over the deterministic ranking --
+// see mediarecs.js's own header for what that pass does and doesn't do.
+mediaPreferences: { genres: [], minRating: 0, aiTopUp: false },
+mediaRecsLastRun: '', // ISO date -- the monthly gate in js/features/mediarecs.js
 // Which scheduled syncs are turned OFF, and how often the rest may run
 // (see js/features/scheduled.js). Stored as the exceptions rather than
 // the enabled list so a task added later is on by default -- the point
@@ -611,6 +620,35 @@ const MEDIA_STATUSES = [
 { status: 'done', label: 'Watched' },
 { status: 'dropped', label: 'Dropped' },
 ];
+
+// Where js/features/mediarecs.js's monthly check reads its pages from --
+// a "new this month" feed, a critics roundup, a best-of-all-time list.
+// `kind` is bookkeeping only (shown in Settings, never branches logic):
+// every source is fetched and parsed exactly the same way.
+function blankMediaRecSource(fields = {}) {
+return { id: uid(), label: '', url: '', kind: 'new', ...fields };
+}
+
+// One title mediarecs.js found on a source page and resolved against
+// TMDb, before you've decided whether you want it. Kept as its own
+// record (not pushed straight into data.mediaItems) because most of
+// what a source page mentions in passing was never a real recommendation
+// -- this is the review queue, addMediaItem() only ever runs once you
+// pick "+ Add as want".
+function blankMediaRecCandidate(fields = {}) {
+return {
+id: uid(),
+title: '', kind: 'film', year: '', creator: '', reason: '',
+genres: [], rating: 0, // TMDb vote_average (0-10), genre NAMES already resolved
+externalIds: {}, imageUrl: '', link: '',
+onSubscription: [], // provider names already matched to a data.subscriptions row
+score: 0, aiPick: false,
+sourceLabel: '', sourceUrl: '',
+status: 'pending', // pending | added | dismissed
+foundAt: new Date().toISOString(),
+...fields,
+};
+}
 
 // A job application. Was built inline in jobs.js's own add-form handler
 // (data.jobs.push({id, company, role, stage})) -- given a real factory now,
@@ -2008,6 +2046,10 @@ if (!Array.isArray(data.readingList)) data.readingList = [];
 data.readingList = data.readingList.map((r) => ({ ...blankReadingItem(), ...r, id: r.id || uid() }));
 if (!Array.isArray(data.mediaItems)) data.mediaItems = [];
 data.mediaItems = data.mediaItems.map((m) => ({ ...blankMediaItem(), ...m, id: m.id || uid(), photoIds: Array.isArray(m.photoIds) ? m.photoIds : [], externalIds: m.externalIds || {} }));
+if (!Array.isArray(data.mediaRecSources)) data.mediaRecSources = [];
+data.mediaRecSources = data.mediaRecSources.map((s) => ({ ...blankMediaRecSource(), ...s, id: s.id || uid() }));
+if (!Array.isArray(data.mediaRecCandidates)) data.mediaRecCandidates = [];
+data.mediaRecCandidates = data.mediaRecCandidates.map((c) => ({ ...blankMediaRecCandidate(), ...c, id: c.id || uid(), genres: Array.isArray(c.genres) ? c.genres : [], externalIds: c.externalIds || {}, onSubscription: Array.isArray(c.onSubscription) ? c.onSubscription : [] }));
 if (!Array.isArray(data.books)) data.books = [];
 data.books = data.books.map((b) => ({ ...blankBookItem(), ...b, id: b.id || uid(), genres: Array.isArray(b.genres) ? b.genres : [], externalIds: b.externalIds || {} }));
 if (!Array.isArray(data.captureDrafts)) data.captureDrafts = [];
@@ -3147,7 +3189,7 @@ setExternalUpdateHandler, setLocalChangeHandler, getLocalSettings, setLocalSetti
 isDormantStage, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness,
 exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, SENSITIVE_BLOCKS, whatSheHas, unheldInventory, whoFits, inventorySets, whoFitsSet, interestNote, SIZE_GROUPS, sizeGroupFor, DEFAULT_PREFS, blankInventoryItem, blankBookItem,
 MAIL_SEARCH_KINDS, mailSearchLabel, blankMailSearch, blankMailTopic, blankMailRule, blankMailDismissal,
-TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureBatch, blankPendingImport, blankConnection, blankTelegramThread, blankReadingItem, blankCaptureDraft, blankJob, blankMediaItem, MEDIA_KINDS, MEDIA_STATUSES,
+TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureBatch, blankPendingImport, blankConnection, blankTelegramThread, blankReadingItem, blankCaptureDraft, blankJob, blankMediaItem, MEDIA_KINDS, MEDIA_STATUSES, blankMediaRecSource, blankMediaRecCandidate,
 blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS, LEG_DATE_FIELDS, STAY_TYPE_SUGGESTIONS,
 blankPackingItem, blankPackingModule, blankTripPacking, blankPackingListItem, PACKING_DURATION_TIERS, packingDurationTier, DEFAULT_PACKING_MODULES,
 blankPlannerEntry, blankPlannerActivity,

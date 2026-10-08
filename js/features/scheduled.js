@@ -47,6 +47,19 @@ refreshShopping();
 },
 },
 {
+// A function, not a button, since this is a monthly check with its
+// own internal staleness gate (mediarecs.js's own RECHECK_DAYS) rather
+// than something re-run at this file's ordinary (hours-scale) cadence
+// -- opening the app daily triggers this task daily, but mediarecs.js
+// itself quietly no-ops every time except roughly once a month.
+id: 'media-recs', label: 'Media recommendations', needsGoogle: false,
+note: 'Reads your configured source pages (Settings → Media recommendations) about once a month and ranks what\'s worth watching.',
+run: async () => {
+const { runMediaRecsCheck } = await import('./mediarecs.js');
+await runMediaRecsCheck();
+},
+},
+{
 // The other half of a standing want. TheTVDB adds a race weekend's
 // episodes when it adds them; nothing else notices, so this re-applies
 // each monitored series' filter and Sonarr picks up what's new.

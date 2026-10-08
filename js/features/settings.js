@@ -1,4 +1,6 @@
-import { data, queueSave, getLocalSettings, setLocalSetting, exportBackup, importBackup, MAIL_SEARCH_KINDS, MEDIA_KINDS, blankMailSearch, blankMailTopic, blankMailRule } from '../state.js';
+import { data, queueSave, getLocalSettings, setLocalSetting, exportBackup, importBackup, MAIL_SEARCH_KINDS, MEDIA_KINDS, blankMailSearch, blankMailTopic, blankMailRule, blankMediaRecSource } from '../state.js';
+import { TMDB_GENRES } from '../catalogue.js';
+import { runMediaRecsCheck } from './mediarecs.js';
 import { renderAll } from '../render-all.js';
 import { escapeHtml, uid } from '../utils.js';
 import { renderCalendarLimits } from './calendars.js';
@@ -362,6 +364,38 @@ data.mailRules.push(blankMailRule());
 renderMailRules();
 queueSave();
 });
+
+renderMediaRecSources();
+const addRecSrcBtn = document.getElementById('add-media-rec-source-btn');
+if (addRecSrcBtn) addRecSrcBtn.addEventListener('click', () => {
+data.mediaRecSources.push(blankMediaRecSource());
+renderMediaRecSources();
+queueSave();
+});
+renderMediaRecPrefs();
+const minRatingInput = document.getElementById('media-rec-min-rating');
+if (minRatingInput) {
+minRatingInput.value = data.prefs.mediaPreferences.minRating || '';
+minRatingInput.addEventListener('change', () => {
+data.prefs.mediaPreferences.minRating = Number(minRatingInput.value) || 0;
+queueSave();
+});
+}
+const aiTopUpInput = document.getElementById('media-rec-ai-topup');
+if (aiTopUpInput) {
+aiTopUpInput.checked = !!data.prefs.mediaPreferences.aiTopUp;
+aiTopUpInput.addEventListener('change', () => {
+data.prefs.mediaPreferences.aiTopUp = aiTopUpInput.checked;
+queueSave();
+});
+}
+const recsCheckBtn = document.getElementById('media-recs-check-now-btn');
+if (recsCheckBtn) {
+recsCheckBtn.addEventListener('click', async () => {
+recsCheckBtn.disabled = true;
+try { await runMediaRecsCheck({ force: true }); } finally { recsCheckBtn.disabled = false; }
+});
+}
 
 renderMailBin();
 const emptyBinBtn = document.getElementById('empty-mail-bin-btn');
@@ -727,6 +761,68 @@ x.addEventListener('click', () => {
 data.mailRules = data.mailRules.filter((r) => r.id !== x.dataset.delMailrule);
 renderMailRules();
 queueSave();
+});
+});
+}
+
+// The page list js/features/mediarecs.js's monthly check reads from --
+// same row-table pattern as renderMailRules above, `kind` is bookkeeping
+// only (shown here, never branches the fetch/extract logic).
+const MEDIA_REC_SOURCE_KINDS = [
+{ kind: 'new', label: 'New this month' },
+{ kind: 'critics', label: 'Critics roundup' },
+{ kind: 'retrospective', label: 'Retrospective / best-of' },
+];
+
+function renderMediaRecSources() {
+const el = document.getElementById('media-rec-sources');
+if (!el) return;
+if (!data.mediaRecSources.length) {
+el.innerHTML = '<div class="settings-note" style="margin:0;">No source pages yet — add one below.</div>';
+return;
+}
+const rowsHtml = data.mediaRecSources.map((s) => `<tr>
+<td><input type="text" autocomplete="off" data-recsrc-field="label" data-recsrc-id="${s.id}" value="${escapeHtml(s.label || '')}" placeholder="Label"></td>
+<td><input type="text" autocomplete="off" data-recsrc-field="url" data-recsrc-id="${s.id}" value="${escapeHtml(s.url || '')}" placeholder="https://…"></td>
+<td><select data-recsrc-field="kind" data-recsrc-id="${s.id}">
+${MEDIA_REC_SOURCE_KINDS.map((k) => `<option value="${k.kind}"${k.kind === s.kind ? ' selected' : ''}>${escapeHtml(k.label)}</option>`).join('')}
+</select></td>
+<td><span class="del-x" style="opacity:1;" data-del-recsrc="${s.id}">&times;</span></td>
+</tr>`).join('');
+el.innerHTML = `<table class="limits-table">
+<thead><tr><th>Label</th><th>URL</th><th>Kind</th><th></th></tr></thead>
+<tbody>${rowsHtml}</tbody>
+</table>`;
+el.querySelectorAll('[data-recsrc-field]').forEach((input) => {
+input.addEventListener('change', () => {
+const src = data.mediaRecSources.find((s) => s.id === input.dataset.recsrcId);
+if (!src) return;
+src[input.dataset.recsrcField] = input.value;
+queueSave();
+});
+});
+el.querySelectorAll('[data-del-recsrc]').forEach((x) => {
+x.addEventListener('click', () => {
+data.mediaRecSources = data.mediaRecSources.filter((s) => s.id !== x.dataset.delRecsrc);
+renderMediaRecSources();
+queueSave();
+});
+});
+}
+
+const MEDIA_REC_GENRE_NAMES = [...new Set(Object.values(TMDB_GENRES))].sort();
+
+function renderMediaRecPrefs() {
+const el = document.getElementById('media-rec-genres');
+if (!el) return;
+const prefs = data.prefs.mediaPreferences;
+el.innerHTML = MEDIA_REC_GENRE_NAMES.map((g) => `<button type="button" class="overview-chip${prefs.genres.includes(g) ? ' active' : ''}" data-recgenre="${escapeHtml(g)}">${escapeHtml(g)}</button>`).join('');
+el.querySelectorAll('[data-recgenre]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const g = btn.dataset.recgenre;
+prefs.genres = prefs.genres.includes(g) ? prefs.genres.filter((x) => x !== g) : [...prefs.genres, g];
+queueSave();
+renderMediaRecPrefs();
 });
 });
 }

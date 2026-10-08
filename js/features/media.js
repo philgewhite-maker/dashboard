@@ -247,6 +247,8 @@ ${item.notes ? `<span class="settings-note" style="margin:0;">${escapeHtml(item.
 ${bookLinkHtml(item)}
 <span class="media-row-actions">
 ${monitorHtml(item)}
+${(item.kind === 'film' || item.kind === 'tv') && item.externalIds && item.externalIds.tmdb
+? `<button class="mini-task-btn" type="button" data-media-watchlist="${item.id}" title="Add straight to your Plex Watchlist">&#128065; Watchlist</button>` : ''}
 <button class="mini-task-btn" type="button" data-media-satisfy="${item.id}" title="How to get hold of it">Get&hellip;</button>
 <select class="mini" data-media-status="${item.id}">
 ${MEDIA_STATUSES.map((s) => `<option value="${s.status}"${s.status === item.status ? ' selected' : ''}>${escapeHtml(s.label)}</option>`).join('')}
@@ -254,6 +256,16 @@ ${MEDIA_STATUSES.map((s) => `<option value="${s.status}"${s.status === item.stat
 <span class="del-x" data-media-remove="${item.id}" title="Remove">&times;</span>
 </span>
 </div>`;
+}
+
+// "Can I just watch this tonight?" bubbled to the top of the list it's
+// most useful in, same question whereToWatchHtml's own green tick
+// already answers per-row -- this just decides ORDER from the same
+// data rather than adding a second source of truth for it.
+function isWatchableNow(item) {
+const w = item.whereToWatch;
+if (!w) return false;
+return collapseProviders(w.flatrate).some((name) => subscriptionFor(name, data.subscriptions || []));
 }
 
 function renderMedia() {
@@ -266,6 +278,14 @@ if (count) count.textContent = data.mediaItems.length ? `${open.length} to go of
 renderKindFilter();
 let items = data.mediaItems.filter((m) => showFinished || OPEN_STATUSES.includes(m.status));
 if (kindFilter !== 'all') items = items.filter((m) => m.kind === kindFilter);
+// Stable sort: only watchable-now-vs-not moves anything, so the
+// newest-first order everything else already relies on survives
+// within each of those two groups unchanged.
+items = items.map((item, i) => ({ item, i })).sort((a, b) => {
+if (!OPEN_STATUSES.includes(a.item.status) || !OPEN_STATUSES.includes(b.item.status)) return a.i - b.i;
+const diff = Number(isWatchableNow(b.item)) - Number(isWatchableNow(a.item));
+return diff !== 0 ? diff : a.i - b.i;
+}).map((x) => x.item);
 list.innerHTML = items.length
 ? items.map(rowHtml).join('')
 : `<div class="empty">${data.mediaItems.length ? 'Nothing here with those filters.' : 'Nothing queued — add something above, share a link, or mark a screenshot M.'}</div>`;
@@ -283,6 +303,12 @@ list.querySelectorAll('[data-media-id]').forEach((chip) => {
 chip.addEventListener('click', () => {
 const item = data.mediaItems.find((m) => m.id === chip.dataset.mediaId);
 if (item) openIdsDialog(item, chip.dataset.mediaIdKey);
+});
+});
+list.querySelectorAll('[data-media-watchlist]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const item = data.mediaItems.find((m) => m.id === btn.dataset.mediaWatchlist);
+if (item) addToWatchlist(item, btn);
 });
 });
 list.querySelectorAll('[data-media-satisfy]').forEach((btn) => {
@@ -453,6 +479,29 @@ renderMedia();
 const askAbout = toConfirm.length ? `, ${toConfirm.length} to confirm` : '';
 say(`Checked ${targets.length} — ${found} already on Plex${askAbout}.`);
 if (toConfirm.length) showPlexConfirmations(toConfirm);
+}
+
+// The account-level Plex Watchlist (plex.tv, synced to every Plex app)
+// -- distinct from checkAgainstPlex above, which only ever asks "is this
+// already in the local library". Same home agent, a different verb
+// (home-agent/agent.py's verb_plex_watchlist_add) since the Watchlist
+// lives on plex.tv's own servers, not the NAS.
+async function addToWatchlist(item, btn) {
+if (btn) { btn.disabled = true; btn.textContent = 'Adding…'; }
+try {
+const agent = await import('../homeagent.js');
+const result = await agent.run('plex.watchlistAdd', { title: item.title, kind: item.kind, year: item.year });
+if (result.added) {
+if (btn) btn.textContent = '✓ On Watchlist';
+} else {
+if (btn) { btn.disabled = false; btn.textContent = '👁 Watchlist'; }
+alert(result.reason || "Couldn't add to the Watchlist.");
+}
+} catch (err) {
+console.error(`Watchlist add failed for "${item.title}":`, err);
+if (btn) { btn.disabled = false; btn.textContent = '👁 Watchlist'; }
+alert(err.message || String(err));
+}
 }
 
 // Accepted without asking only when there's exactly one exactly-titled

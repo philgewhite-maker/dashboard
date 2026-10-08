@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v506</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v507</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -212,6 +212,7 @@
 <span class="count-badge" id="media-count"></span>
 <span class="inline-goto-link panel-settings-link" data-goto-tab="finances" data-goto-target="#subscriptions-panel" title="Subscriptions &mdash; the services checked against &ldquo;where to watch&rdquo;">&#128179;</span>
 <span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#media-routes" title="How to get hold of things — what Get&hellip; offers per kind">&#128230;</span>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#media-recs-block" title="Monthly recommendation source pages, preferred genres, rating floor">&#128269;</span>
 <span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#ai-keys" title="TMDb API key, for film &amp; TV lookup">&#9881;</span>
 </div>
 <div class="capture-row">
@@ -229,9 +230,14 @@
 </div>
 <div class="sync-status" id="media-capture-status"></div>
 <div id="media-candidates"></div>
+<details class="settings-item" open style="margin:10px 0;">
+<summary>Recommendations to review <span class="count-badge" id="media-recs-count"></span></summary>
+<div class="settings-note" style="margin:6px 0;">Found automatically from your source pages (Settings &rarr; Media recommendations, about once a month) — ranked by genre/rating fit and whether you can already watch it on something you pay for. "+ Add as want" is an ordinary add; where-to-watch and Plex checks run on it exactly as they would from anywhere else.</div>
+<div id="media-recs-list"></div>
+</details>
 <details class="settings-item" style="margin:10px 0;">
-<summary>Find new things to watch/listen to</summary>
-<div class="settings-note" style="margin:6px 0;">Paste a "new this month" article, best-of list or genre roundup — it's read for real titles, checked against what's already on your list, and anything you tick is added as a want. Where to stream it from is then checked automatically, same as any other add.</div>
+<summary>Paste a list by hand</summary>
+<div class="settings-note" style="margin:6px 0;">For a page you'd rather not add as a standing monthly source. Paste a "new this month" article, best-of list or genre roundup — it's read for real titles, checked against what's already on your list, and anything you tick is added as a want. Where to stream it from is then checked automatically, same as any other add.</div>
 <textarea id="media-recs-input" rows="4" style="width:100%;" placeholder="Paste the article or list text here&hellip;"></textarea>
 <button class="add-btn" id="media-recs-btn" type="button" style="margin-top:6px;">Find recommendations</button>
 </details>
@@ -3172,6 +3178,29 @@ Same idea as Connections' ratings, a separate list (Taste/Health/Prep by default
 <div class="settings-note" style="margin:0 0 8px;">What the <strong>Get&hellip;</strong> button offers on the Media tab, per kind, in order. Only intent lives here &mdash; what counts as a good download (codec, size, release group) belongs in Radarr/Sonarr's own quality profiles, so a download route carries just the profile name to ask for.</div>
 <div class="settings-note" style="margin:0 0 8px;">A <em>search</em> route is your own URL, so point it wherever you actually look &mdash; your Prowlarr searches every indexer you've set up at once. Placeholders: <code>{title}</code> <code>{creator}</code> <code>{year}</code> <code>{isbn}</code> <code>{q}</code> (title and creator together).</div>
 <div id="media-routes-editor"></div>
+</div>
+</details>
+
+<details class="settings-item" id="media-recs-block">
+<summary><h3>Media recommendations</h3></summary>
+<div class="settings-block">
+<div class="settings-note" style="margin:0 0 10px;">About once a month, each source page below is read and checked for real recommendations, resolved against TMDb for a genre/rating, scored against your preferences, and queued for review on the Media tab (wherever "Watch &amp; listen" shows the paste-box). A floor rating only excludes something that actually HAS a TMDb rating &mdash; it never excludes a book or album TMDb has no opinion on.</div>
+<div id="media-rec-sources"></div>
+<button class="add-btn" id="add-media-rec-source-btn" type="button" style="margin-top:8px;">Add source page</button>
+<div class="settings-note" style="margin:14px 0 4px;font-weight:600;">Preferred genres</div>
+<div class="overview-chips" id="media-rec-genres"></div>
+<div class="sync-row" style="margin-top:10px;">
+<label for="media-rec-min-rating" style="font-size:13px;">Minimum rating (0&ndash;10, 0 = no floor)</label>
+<input type="number" min="0" max="10" step="0.5" id="media-rec-min-rating" class="settings-input" style="max-width:80px;">
+</div>
+<label class="settings-note" style="display:flex;align-items:center;gap:6px;margin-top:10px;">
+<input type="checkbox" id="media-rec-ai-topup">
+Optional AI top-up &mdash; after the deterministic ranking, let Claude flag a few candidates worth a second look (a director/artist whose other work tends to land well, an unusual genre pairing) for reasons a genre+rating score can't see. Never adds a title outside what was already found on your source pages.
+</label>
+<div class="sync-row" style="margin-top:12px;">
+<button class="sync-btn" id="media-recs-check-now-btn" type="button">Check now</button>
+<span class="sync-status" id="media-recs-check-status"></span>
+</div>
 </div>
 </details>
 </details>

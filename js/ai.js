@@ -2076,22 +2076,25 @@ attachmentHints: Array.isArray(e && e.attachmentHints) ? e.attachmentHints.map((
 
 // Pasted "new this month" article/list text -> candidate watch/listen
 // items, same extraction shape as the mail pulls above (one prompt, one
-// JSON reply) but fed from a paste box on the Media tab rather than an
-// email body -- see media.js's recommendations panel. Deliberately
-// returns plain candidates, not media.js records: title/kind/year/
-// creator feed straight into the EXISTING addMediaItem()/catalogue
-// lookup/Plex-check/whereToWatch pipeline (dashboard/CLAUDE.md -- reuse
-// the one canonical path for a record type, don't build a second one).
-const MEDIA_RECS_MAX_TOKENS = 2000;
+// JSON reply) but fed from a paste box on the Media tab, or HTML a page
+// proxy already fetched (js/features/mediarecs.js's monthly check) --
+// see media.js's recommendations panel. Deliberately returns plain
+// candidates, not media.js records: title/kind/year/creator feed
+// straight into the EXISTING addMediaItem()/catalogue lookup/Plex-check/
+// whereToWatch pipeline (dashboard/CLAUDE.md -- reuse the one canonical
+// path for a record type, don't build a second one). Works directly on
+// raw HTML too, same as extractRecipeFromHtml above -- Claude reads the
+// structure fine without it being stripped first.
+const MEDIA_RECS_MAX_TOKENS = 2500;
 async function extractMediaRecommendations(text, guidance = '') {
-const prompt = `This is pasted text from an article or list recommending films, TV series, albums or books to watch/listen to (e.g. "New on Apple TV+ this month", a best-of list, a genre roundup).
+const prompt = `This is text (possibly raw HTML) from an article or list recommending films, TV series, albums or books to watch/listen to (e.g. "New on Apple TV+ this month", a best-of list, a genre roundup, an all-time-best ranking).
 
 Text:
 """
-${String(text || '').slice(0, 16000)}
+${String(text || '').slice(0, 20000)}
 """
 ${guidanceInstruction(guidance)}
-List every distinct title actually recommended (not every title merely mentioned in passing). For each: its exact title, a kind (one of film, tv, album, track, artist, book, podcast, other), a year if stated, a creator/director/artist/author if stated, and a short reason (why it's recommended -- genre, rating, one-line pitch from the text). Skip anything too vague to be a real title.
+List every distinct title actually recommended (not every title merely mentioned in passing, and not nav/footer/ad junk if this is HTML). For each: its exact title, a kind (one of film, tv, album, track, artist, book, podcast, other), a year if stated, a creator/director/artist/author if stated, and a short reason (why it's recommended -- genre, rating, one-line pitch from the text). Skip anything too vague to be a real title.
 
 Reply with ONLY a JSON object, no other text, no markdown fences: {"items":[{"title":"","kind":"film","year":"","creator":"","reason":""}]}`;
 const { data: raw } = await callTextJson(prompt, MEDIA_RECS_MAX_TOKENS, MAIL_EXTRACT_MODEL, 'Media recommendations', 'low');
@@ -2104,6 +2107,37 @@ year: String((it && it.year) || '').trim(),
 creator: String((it && it.creator) || '').trim(),
 reason: String((it && it.reason) || '').trim(),
 })).filter((it) => it.title);
+}
+
+// The "optional AI top-up" half of mediarecs.js's ranking. Deliberately
+// narrow: it picks AMONG the candidates the deterministic pass already
+// resolved from real source pages (by index -- never asked for a title,
+// so it cannot hallucinate a new one into the list) and explains why in
+// a few words, the qualitative judgement a genre+rating formula can't
+// make ("you rated two Villeneuve films highly", "this director's style
+// mirrors something already watched"). Returns indexes to flag as
+// aiPick, not a reordering -- mediarecs.js keeps its own deterministic
+// sort and only layers the flag/note on top, so a flaky or empty AI
+// reply degrades to "no AI picks this run", never a scrambled list.
+const MEDIA_RANK_MAX_TOKENS = 800;
+async function rankMediaCandidates(candidates, preferences = {}) {
+if (!candidates.length) return [];
+const list = candidates.map((c, i) => `${i}. ${c.title}${c.year ? ` (${c.year})` : ''} [${c.kind}]${c.genres?.length ? ` — ${c.genres.join(', ')}` : ''}${c.rating ? `, rated ${c.rating}/10` : ''}${c.reason ? ` — "${c.reason}"` : ''}`).join('\n');
+const prefBits = [];
+if (preferences.genres?.length) prefBits.push(`Preferred genres: ${preferences.genres.join(', ')}.`);
+if (preferences.minRating) prefBits.push(`Minimum rating normally wanted: ${preferences.minRating}/10.`);
+const prompt = `Here is a ranked list of film/TV/album/book recommendations already scored by genre match and rating. ${prefBits.join(' ')}
+
+${list}
+
+Pick up to 3 of these (by their number) that are especially worth a second look for reasons a simple genre+rating score would miss -- a director/artist/author whose other work tends to land well, an unusual pairing of genres, something that reads as a stronger fit than its score alone suggests. Don't pick something just because it's already top of the list. If nothing stands out beyond the existing ranking, return an empty list.
+
+Reply with ONLY a JSON object, no other text, no markdown fences: {"picks":[{"index":0,"note":""}]} -- index must be one of the numbers above, note is under 15 words.`;
+const { data: raw } = await callTextJson(prompt, MEDIA_RANK_MAX_TOKENS, MAIL_EXTRACT_MODEL, 'Media recommendation top-up', 'low');
+const picks = Array.isArray(raw && raw.picks) ? raw.picks : [];
+return picks
+.map((p) => ({ index: Number(p && p.index), note: String((p && p.note) || '').trim() }))
+.filter((p) => Number.isInteger(p.index) && p.index >= 0 && p.index < candidates.length);
 }
 
 // ---- Country lookup ----
@@ -2132,7 +2166,7 @@ callTextJson, DEFAULT_MODEL, summarizeUsage, currentMonthKey, compareFaces,
 extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShoppingItem, searchAgentProvocateurElsewhere, searchEbayResaleEstimate, analyseOngoingAccountValue, identifyProduct, translateText, romanizeName, parseCaptureIntent,
 resolveUrlTitle, resolveJobPostingUrl, resolveBookDetails, resolveSeriesBooks,
 identifyCountry, extractWellnessScreenshot,
-extractTripScreenshot, extractMediaScreenshot, extractTripLegFromEmail, extractTaskFromEmail, extractDateEventFromEmail, extractMediaRecommendations,
+extractTripScreenshot, extractMediaScreenshot, extractTripLegFromEmail, extractTaskFromEmail, extractDateEventFromEmail, extractMediaRecommendations, rankMediaCandidates,
 parseIngredients, assessIngredient, ALLERGEN_LIST, DIETARY_FLAGS, FODMAP_COMPONENTS, FODMAP_LEVELS,
 FODMAP_THRESHOLDS_G, OLIGO_CATEGORIES, fodmapLevelFromGrams, regenerateRecipeVariant, assessUnitWeight, assessUnitRatio,
 GLYCEMIC_LOAD_THRESHOLDS, glycemicLevelFromLoad,

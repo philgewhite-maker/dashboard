@@ -551,6 +551,24 @@ return aliases.some((a) => n.includes(a) || a.includes(n));
 // and (except TMDb) needing no key at all.
 const TMDB_IMAGE = 'https://image.tmdb.org/t/p/w185';
 
+// TMDb's genre id -> name, movie and TV lists merged into one map (the
+// handful of ids they don't share, e.g. TV's 10759 "Action & Adventure"
+// vs film's own 28/12, coexist fine as separate entries). Fixed and
+// published by TMDb, not worth a second network call just to resolve a
+// label mediarecs.js already gets for free alongside every search result.
+const TMDB_GENRES = {
+28: 'Action', 12: 'Adventure', 16: 'Animation', 35: 'Comedy', 80: 'Crime',
+99: 'Documentary', 18: 'Drama', 10751: 'Family', 14: 'Fantasy', 36: 'History',
+27: 'Horror', 10402: 'Music', 9648: 'Mystery', 10749: 'Romance',
+878: 'Science Fiction', 10770: 'TV Movie', 53: 'Thriller', 10752: 'War',
+37: 'Western', 10759: 'Action & Adventure', 10762: 'Kids', 10763: 'News',
+10764: 'Reality', 10765: 'Sci-Fi & Fantasy', 10766: 'Soap', 10767: 'Talk',
+10768: 'War & Politics',
+};
+function genreNames(ids) {
+return (ids || []).map((id) => TMDB_GENRES[id]).filter(Boolean);
+}
+
 async function searchTitle(kind, query) {
 const q = String(query || '').trim();
 if (!q) return [];
@@ -587,6 +605,11 @@ notes: (r.overview || '').slice(0, 140),
 imageUrl: r.poster_path ? `${TMDB_IMAGE}${r.poster_path}` : '',
 externalIds: { tmdb: `${isTv ? 'tv' : 'movie'}/${r.id}` },
 link: `https://www.themoviedb.org/${isTv ? 'tv' : 'movie'}/${r.id}`,
+// Not used by the ordinary add-a-title flow -- only by mediarecs.js's
+// ranking, which is why these two are the one addition to an otherwise
+// unchanged, long-stable search result shape.
+genres: genreNames(r.genre_ids),
+rating: r.vote_average || 0,
 };
 })
 .filter((c) => c.title);
@@ -630,4 +653,4 @@ link: `https://musicbrainz.org/release-group/${g.id}`,
 })).filter((c) => c.title);
 }
 
-export { identifyUrl, catalogueLabel, artworkUrl, linkMetadata, ogImageFrom, searchTitle, watchProviders, subscriptionFor, collapseProviders, shortProviderName, tvdbSeriesInfo, tvdbSessions, tvdbSeasonNumbers, tvdbIdViaTmdb, defaultSessionFilter, CATALOGUE_LABELS, MissingTmdbKeyError };
+export { identifyUrl, catalogueLabel, artworkUrl, linkMetadata, ogImageFrom, searchTitle, watchProviders, subscriptionFor, collapseProviders, shortProviderName, tvdbSeriesInfo, tvdbSessions, tvdbSeasonNumbers, tvdbIdViaTmdb, defaultSessionFilter, CATALOGUE_LABELS, MissingTmdbKeyError, TMDB_GENRES, genreNames };
