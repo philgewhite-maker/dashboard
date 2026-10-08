@@ -207,12 +207,42 @@ if (hours < 48) return `${hours}h ago`;
 return `${Math.round(hours / 24)}d ago`;
 }
 
-function statusHtml(check) {
-if (!check.run && !check.reportedExternally) return '<span class="tag-chip">Not implemented</span>';
-const row = store()[check.id];
+// Shared by both the fixed CHECKS rows below and the dynamic ones --
+// pulled out from statusHtml(check) so a row keyed on an id that isn't
+// in CHECKS at all (a user-configured media recommendation source) can
+// render exactly the same way, from reportCheck() calls it never needed
+// a CHECKS entry to receive.
+function statusHtmlForId(id, implemented) {
+if (!implemented) return '<span class="tag-chip">Not implemented</span>';
+const row = store()[id];
 if (!row) return '<span class="tag-chip">No run yet</span>';
 if (row.ok) return `<span class="tag-chip tag-chip-green">Last ran OK</span> <span class="settings-note" style="display:inline;margin:0;">${escapeHtmlLocal(agoLabel(row.lastRunAt))}</span>`;
 return `<span class="tag-chip tag-chip-red">Broken since ${escapeHtmlLocal(agoLabel(row.brokenSince))}</span> <span class="settings-note" style="display:inline;margin:0;">${escapeHtmlLocal(row.detail)}</span>`;
+}
+
+function statusHtml(check) {
+return statusHtmlForId(check.id, !!(check.run || check.reportedExternally));
+}
+
+// data.mediaRecSources is user-configured (added/renamed/removed from
+// Settings), not a fixed list known at code-authorship time the way
+// every CHECKS entry above is -- so these rows are generated fresh on
+// every render rather than living in CHECKS itself. Reported into by
+// js/features/mediarecs.js's own fetch loop (reportCheck, same as every
+// reportedExternally check above), which is exactly the signal this
+// file exists for: confirmed live, JustWatch and IMDb's "most popular"
+// pages are JS-rendered and return nothing to this app's plain-HTML
+// fetcher -- a real, persistent breakage of exactly the kind every
+// other canary here watches for, not a one-off.
+function mediaRecSourceRowsHtml() {
+return (data.mediaRecSources || []).map((s) => {
+const id = `media-rec-source-${s.id}`;
+return `<tr id="site-health-row-${escapeHtmlLocal(id)}">
+<td>${escapeHtmlLocal(s.label || s.url)}<div class="settings-note" style="margin:0;">Media recommendation source (${escapeHtmlLocal(s.cadence)}) -- reported whenever its own check runs, on its schedule or "Check now" (Media tab/Settings).</div></td>
+<td>${statusHtmlForId(id, true)}</td>
+<td></td>
+</tr>`;
+}).join('');
 }
 
 function renderSiteHealth() {
@@ -224,7 +254,7 @@ el.innerHTML = `<table class="limits-table">
 <td>${escapeHtmlLocal(c.label)}<div class="settings-note" style="margin:0;">${escapeHtmlLocal(c.note)}</div></td>
 <td>${statusHtml(c)}</td>
 <td>${c.run ? `<button class="sync-btn sm" type="button" data-health-run="${escapeHtmlLocal(c.id)}">Run now</button>` : ''}</td>
-</tr>`).join('')}</tbody>
+</tr>`).join('')}${mediaRecSourceRowsHtml()}</tbody>
 </table>`;
 el.querySelectorAll('[data-health-run]').forEach((btn) => {
 btn.addEventListener('click', async () => {

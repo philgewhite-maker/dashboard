@@ -65,6 +65,23 @@ function setStatus(text) {
 document.querySelectorAll('[data-media-recs-status]').forEach((el) => { el.textContent = text || ''; });
 }
 
+// Feeds the user's own source-pages into Settings' existing Site health
+// table (sitehealth.js) -- the same "does this fetch still work" canary
+// mechanism every other scheduled scrape already reports into, since a
+// source that's JS-rendered and genuinely never returns anything (found
+// live: JustWatch, IMDb) is exactly the kind of persistent, silent
+// breakage that table exists to surface. Dynamically imported since
+// sitehealth.js has no reason to know about mediarecs.js otherwise, and
+// failing to report is never worth breaking the actual check over.
+async function reportSourceHealth(source, ok, detail) {
+try {
+const { reportCheck } = await import('./sitehealth.js');
+reportCheck(`media-rec-source-${source.id}`, ok, detail);
+} catch (err) {
+console.error('Site health report failed (non-fatal):', err);
+}
+}
+
 // A "jump-off" source's own URL is an evergreen index page (this.guardian.
 // com/.../the-seven-best-shows-to-stream-this-week), not the actual dated
 // article -- so the real page has to be found first. Falls back to
@@ -191,11 +208,17 @@ setStatus(`Reading source ${i + 1} of ${sources.length} (${source.label || sourc
 try {
 const { items, note } = await fetchOneSource(source);
 rawBatches.push(items);
-if (!items.length) emptySources.push(source.label || source.url);
+if (!items.length) {
+emptySources.push(source.label || source.url);
+reportSourceHealth(source, false, 'Returned nothing readable -- likely a page that needs JavaScript to show its content.');
+} else {
+reportSourceHealth(source, true, `${items.length} title${items.length === 1 ? '' : 's'} found.`);
+}
 source.lastCheckedAt = new Date().toISOString();
 if (note) sourceNotes.push(`"${source.label || source.url}" — ${note}`);
 } catch (err) {
 console.error(`Recommendations source failed (${source.label || source.url}):`, err);
+reportSourceHealth(source, false, err.message || String(err));
 sourceFailures.push(`"${source.label || source.url}" — ${err.message || err}`);
 // Not marked checked -- a transient failure (site hiccup, proxy
 // timeout) should retry next time the scheduled task fires rather
