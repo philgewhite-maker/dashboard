@@ -2127,7 +2127,18 @@ attachmentHints: Array.isArray(e && e.attachmentHints) ? e.attachmentHints.map((
 // one. 150K comfortably covers a page that size in full; extractRecipe
 // FromHtml's own 60K (ai.js, above) is the right order of magnitude for
 // a single recipe, not a 25-item list page.
-const MEDIA_RECS_MAX_TOKENS = 2500;
+//
+// The OUTPUT budget needed the same rethink once the input one grew:
+// confirmed live, a RadioTimes page hit stop_reason:'max_tokens' at the
+// old 2500 here -- reading 150K characters now genuinely finds more
+// real titles than a short article did, and each one costs real JSON
+// (title/kind/year/creator/reason). The response is a single top-level
+// OBJECT ({"items":[...]}), not an array, so extractJson's own
+// salvageArrayPrefix repair (which only handles a cut-off array) can't
+// recover anything from a truncated reply here -- a hit on this ceiling
+// loses the WHOLE source's results, not just its last few items, so the
+// budget needs real headroom rather than a tight estimate.
+const MEDIA_RECS_MAX_TOKENS = 8000;
 async function extractMediaRecommendations(text, guidance = '') {
 const prompt = `This is text (possibly raw HTML) from an article or list recommending films, TV series, albums or books to watch/listen to (e.g. "New on Apple TV+ this month", a best-of list, a genre roundup, an all-time-best ranking).
 

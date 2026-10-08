@@ -160,24 +160,34 @@ if (!all.length) { setStatus('Add a source page below first.'); return; }
 const sources = all.filter((s) => isSourceDue(s, force));
 if (!sources.length) { setStatus('Nothing due yet -- each source is checked on its own weekly/monthly schedule (Settings).'); return; }
 const prefs = data.prefs.mediaPreferences || {};
-setStatus(`Reading ${sources.length} source${sources.length === 1 ? '' : 's'}…`);
-const rawBatches = [];
 // Tracked so the final status line can actually answer "is there a cap,
 // or is this genuinely all that qualified" instead of leaving a small
 // result count unexplained -- confirmed live need: a JS-rendered page
 // (JustWatch, IMDb) returns little or nothing to a plain HTML fetch, and
 // without this that looked identical to "nothing met your filters".
+// All of it (notes, failures) is collected and only ever shown in the
+// FINAL status line, never as an intermediate setStatus() call mid-loop
+// -- confirmed live as a real problem: a per-source note or failure
+// shown while the loop was still running got overwritten by the very
+// next source's own status line a moment later, so a genuinely useful
+// warning ("couldn't find this week's article", "cut off at the token
+// limit") was gone before it could be read, noticed only by chance.
+const rawBatches = [];
 const emptySources = [];
-for (const source of sources) {
+const sourceNotes = [];
+const sourceFailures = [];
+for (let i = 0; i < sources.length; i++) {
+const source = sources[i];
+setStatus(`Reading source ${i + 1} of ${sources.length} (${source.label || source.url})…`);
 try {
 const { items, note } = await fetchOneSource(source);
 rawBatches.push(items);
 if (!items.length) emptySources.push(source.label || source.url);
 source.lastCheckedAt = new Date().toISOString();
-if (note) setStatus(`"${source.label || source.url}" -- ${note}.`);
+if (note) sourceNotes.push(`"${source.label || source.url}" — ${note}`);
 } catch (err) {
 console.error(`Recommendations source failed (${source.label || source.url}):`, err);
-setStatus(`"${source.label || source.url}" failed: ${err.message || err} — continuing with the rest.`);
+sourceFailures.push(`"${source.label || source.url}" — ${err.message || err}`);
 // Not marked checked -- a transient failure (site hiccup, proxy
 // timeout) should retry next time the scheduled task fires rather
 // than waiting out a full week/month.
@@ -229,6 +239,8 @@ if (emptySources.length) parts.push(`${emptySources.length} returned nothing rea
 parts.push(`${deduped.length} new after removing duplicates/already-known`);
 if (droppedByRating) parts.push(`${droppedByRating} below your ${prefs.minRating}/10 floor`);
 parts.push(`${resolved.length} ready to review`);
+if (sourceFailures.length) parts.push(`FAILED: ${sourceFailures.join('; ')}`);
+if (sourceNotes.length) parts.push(sourceNotes.join('; '));
 setStatus(`${parts.join(' — ')}.`);
 renderMediaRecs();
 }
