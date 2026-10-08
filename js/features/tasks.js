@@ -15,7 +15,7 @@
 //    March should not be adding noise in January.
 import { data, queueSave, TASK_BUCKETS, SHOPPING_CONTEXTS, blankTask } from '../state.js';
 import { photoDelete } from '../db.js';
-import { uid, todayStr, escapeHtml, affiliateLink, hydratePhotoBackgrounds, resizeImageToBlob, daysUntil, daysSince, scrollAndFlash, looksLikeUrl, bindBackdropClose } from '../utils.js';
+import { uid, todayStr, escapeHtml, affiliateLink, hydratePhotoBackgrounds, resizeImageToBlob, daysUntil, daysSince, scrollAndFlash, looksLikeUrl, prettyUrl, bindBackdropClose } from '../utils.js';
 import { uploadAttachment, storePhoto, deleteAttachment, openAttachment, formatBytes } from '../files.js';
 
 const BUCKET_LABEL = Object.fromEntries(TASK_BUCKETS.map((b) => [b.bucket, b.label]));
@@ -150,6 +150,17 @@ if (isDormant(t)) return `<span class="task-badge dormant">back ${escapeHtml(t.b
 return '';
 }
 
+// A share with no title of its own falls back to its raw link
+// (sharetarget.js's composeTask) -- shown here as something readable
+// rather than 300 characters of URL, same as media.js's own displayTitle
+// does for the identical case. The REAL link still opens from "Open
+// reference" once expanded (taskDetailHtml) or the Inbox card's own
+// Open link (renderInbox) -- this only ever affects what text is shown.
+function displayTaskTitle(t) {
+const title = t.title || '(untitled)';
+return looksLikeUrl(title) ? prettyUrl(title) : title;
+}
+
 function taskRowHtml(t, depth = 0, childrenMap) {
 const kids = childrenMap ? (childrenMap.get(t.id) || []) : childrenOf(t.id);
 const openDetail = expandedTasks.has(t.id);
@@ -157,7 +168,7 @@ const doneKids = kids.filter((k) => k.bucket === 'done').length;
 return `<div class="task-row${t.bucket === 'done' ? ' done' : ''}${isDormant(t) ? ' dormant' : ''}" data-task-row="${t.id}" style="--depth:${depth};">
 <div class="task-main">
 <input type="checkbox" class="task-check" data-task-done="${t.id}" ${t.bucket === 'done' ? 'checked' : ''}>
-<span class="task-title" data-task-expand="${t.id}">${escapeHtml(t.title || '(untitled)')}</span>
+<span class="task-title" data-task-expand="${t.id}">${escapeHtml(displayTaskTitle(t))}</span>
 ${kids.length ? `<span class="task-kidcount">${doneKids}/${kids.length}</span>` : ''}
 ${dateBadgeHtml(t)}
 ${contextChipsHtml(t)}
@@ -309,6 +320,27 @@ queueSave();
 
 // The allocation workspace: everything still in the Inbox, each with a
 // one-tap route to a bucket, plus drop zones for mouse users.
+// Inbox cards file straight from here with no expand step, unlike
+// taskRowHtml's row (one tap from taskDetailHtml's own createdAt/source/
+// Open-reference) -- so this is the only place a just-captured, not-yet-
+// triaged item's provenance is visible at all. Confirmed gap: a bare-
+// link share with no title showed nothing here to go on except "from
+// share" and the same raw URL already shown (badly) as the title -- no
+// when, no clue what page it actually was, until after it had already
+// been filed and expanded.
+function inboxMetaHtml(t) {
+const bits = [];
+if (t.createdAt) {
+const d = new Date(t.createdAt);
+if (!isNaN(d)) bits.push(escapeHtml(d.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })));
+}
+if (t.source) {
+const label = t.source.label && t.source.label !== t.title ? t.source.label : t.source.kind;
+bits.push(t.source.url ? `<a href="${escapeHtml(affiliateLink(t.source.url))}" target="_blank" rel="noopener">${escapeHtml(label)}</a>` : escapeHtml(label));
+}
+return bits.length ? `<div class="alloc-source">${bits.join(' · ')}</div>` : '';
+}
+
 function renderInbox() {
 const el = document.getElementById('task-inbox');
 const inbox = data.tasks.filter((t) => t.bucket === 'inbox');
@@ -319,20 +351,24 @@ return;
 }
 el.innerHTML = `<div class="alloc-grid">
 <div class="alloc-cards">
-${inbox.map((t) => `<div class="alloc-card" draggable="true" data-alloc-card="${t.id}">
-<div class="alloc-title">${escapeHtml(t.title || '(untitled)')}</div>
+${inbox.map((t) => { const titleIsUrl = looksLikeUrl(t.title); return `<div class="alloc-card" draggable="true" data-alloc-card="${t.id}">
+<div class="alloc-title">${titleIsUrl
+? `<a href="${escapeHtml(affiliateLink(t.title))}" target="_blank" rel="noopener">${escapeHtml(prettyUrl(t.title))} &#8599;</a>`
+: escapeHtml(t.title || '(untitled)')}</div>
 ${t.notes ? `<div class="alloc-notes">${escapeHtml(t.notes)}</div>` : ''}
 ${(t.photoIds || []).length ? `<div class="alloc-photo"><span class="thumb-img" data-photo-bg="${escapeHtml(t.photoIds[0])}"></span></div>` : ''}
-${t.source ? `<div class="alloc-source">from ${escapeHtml(t.source.kind)}</div>` : ''}
+${!titleIsUrl && t.link ? `<a class="task-link" href="${escapeHtml(affiliateLink(t.link))}" target="_blank" rel="noopener">Open reference &#8599;</a>` : ''}
+${inboxMetaHtml(t)}
 <div class="alloc-controls">
 <select data-alloc-bucket="${t.id}">
 <option value="">File to…</option>
 ${FILING_BUCKETS.map((b) => `<option value="${b.bucket}">${escapeHtml(b.label)}</option>`).join('')}
 </select>
 ${contextChipsHtml(t)}
+${titleIsUrl ? `<button class="mini-task-btn" type="button" data-alloc-resolve="${t.id}" title="Try to look up a real title for this link">&#10024; Resolve title</button>` : ''}
 <button class="del-x" type="button" data-alloc-discard="${t.id}" title="Delete this outright, without filing it anywhere">Discard</button>
 </div>
-</div>`).join('')}
+</div>`; }).join('')}
 </div>
 <div class="alloc-targets">
 ${FILING_BUCKETS.map((b) => `<div class="alloc-target" data-drop-bucket="${b.bucket}">
@@ -441,6 +477,25 @@ bindContextControls(root);
 
 root.querySelectorAll('[data-alloc-discard]').forEach((btn) => {
 btn.addEventListener('click', () => confirmDeleteTask(btn.dataset.allocDiscard));
+});
+root.querySelectorAll('[data-alloc-resolve]').forEach((btn) => {
+btn.addEventListener('click', async () => {
+const t = taskById(btn.dataset.allocResolve);
+if (!t) return;
+btn.disabled = true;
+btn.textContent = 'Looking…';
+try {
+const { resolveUrlTitle } = await import('../ai.js');
+const title = await resolveUrlTitle(t.link || t.title);
+if (title) { t.title = title; queueSave(); }
+else { btn.textContent = 'Nothing found'; return; }
+} catch (err) {
+console.error("Couldn't resolve title:", err);
+btn.textContent = "Couldn't look it up";
+return;
+}
+renderInbox();
+});
 });
 
 root.querySelectorAll('[data-alloc-card]').forEach((card) => {

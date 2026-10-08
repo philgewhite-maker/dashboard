@@ -13,7 +13,7 @@
 // request, a voice instruction), so shape normalisation lives in exactly
 // one place.
 import { data, queueSave, blankMediaItem, MEDIA_KINDS, MEDIA_STATUSES } from '../state.js';
-import { escapeHtml, affiliateLink, scrollAndFlash, hydratePhotoBackgrounds, looksLikeUrl, bindBackdropClose } from '../utils.js';
+import { escapeHtml, affiliateLink, scrollAndFlash, hydratePhotoBackgrounds, looksLikeUrl, prettyUrl, bindBackdropClose } from '../utils.js';
 import { identifyUrl, catalogueLabel, CATALOGUE_LABELS, watchProviders, subscriptionFor, collapseProviders, shortProviderName, MissingTmdbKeyError } from '../catalogue.js';
 
 const KIND_LABEL = Object.fromEntries(MEDIA_KINDS.map((k) => [k.kind, k.label]));
@@ -154,17 +154,12 @@ setTimeout(() => scrollAndFlash(`[data-media-row="${id}"]`), 60);
 }
 
 // Until a link's real title arrives (or if it never does), show something
-// readable rather than 300 characters of Amazon tracking parameters.
+// readable rather than 300 characters of Amazon tracking parameters --
+// utils.js's prettyUrl (tasks.js's Inbox cards need the identical thing
+// for a share with no title of its own).
 function displayTitle(item) {
 if (!looksLikeUrl(item.title)) return item.title;
-try {
-const u = new URL(item.title);
-const firstSegment = u.pathname.split('/').filter(Boolean)[0] || '';
-const pretty = `${u.hostname.replace(/^www\./, '')}${firstSegment ? `/${firstSegment}` : ''}`;
-return pretty.length > 70 ? `${pretty.slice(0, 70)}…` : pretty;
-} catch (e) {
-return item.title.slice(0, 70);
-}
+return prettyUrl(item.title, 70);
 }
 
 // Which catalogues are worth OFFERING on an item that doesn't have them

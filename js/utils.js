@@ -135,6 +135,22 @@ function looksLikeUrl(text) {
 return /^https?:\/\/\S+$/i.test(String(text || '').trim());
 }
 
+// Something readable rather than 300 characters of tracking parameters,
+// for anywhere a URL ends up standing in for a title it never actually
+// had (a share with no page title, a link pasted as-is). Originally
+// media.js's own displayTitle, pulled out here once tasks.js needed the
+// identical logic for a share-created Inbox task titled by its raw link.
+function prettyUrl(url, maxLen = 60) {
+try {
+const u = new URL(url);
+const firstSegment = u.pathname.split('/').filter(Boolean)[0] || '';
+const pretty = `${u.hostname.replace(/^www\./, '')}${firstSegment ? `/${firstSegment}` : ''}`;
+return pretty.length > maxLen ? `${pretty.slice(0, maxLen)}…` : pretty;
+} catch (e) {
+return String(url || '').slice(0, maxLen);
+}
+}
+
 // Escapes for both text content AND attribute values, which is what nearly
 // every caller here needs — this codebase builds HTML strings and drops
 // values into `attr="..."` constantly.
@@ -1234,7 +1250,7 @@ return classified.every((c) => c.isScreenshot) && looksLikeSameScreenshotPieces(
 }
 
 export {
-todayStr, daysAgoStr, dateStrAdd, unfoldIcsLines, parseIcsProperty, icsDateTime, parseLooseDateTime, last7Dates, uid, daysSince, daysUntil, foldDiacritics, MISSING_KEY_LINK_HTML, SYNC_LINK_HTML, NOTION_LINK_HTML, TELEGRAM_BOT_LINK_HTML, looksLikeUrl,
+todayStr, daysAgoStr, dateStrAdd, unfoldIcsLines, parseIcsProperty, icsDateTime, parseLooseDateTime, last7Dates, uid, daysSince, daysUntil, foldDiacritics, MISSING_KEY_LINK_HTML, SYNC_LINK_HTML, NOTION_LINK_HTML, TELEGRAM_BOT_LINK_HTML, looksLikeUrl, prettyUrl,
 escapeHtml, affiliateLink, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, buildFlagMatcher, applyFlagMatcher, knownCityMap, knownScalarValues, pickChipHtml, splitCsvLine, scrollAndFlash, bindForm, bindBackdropClose,
 findMentions, COUNTRY_NAME_TO_NATIONALITY,
 resizeImageToBlob, fileToBase64, loadImage, cropThumbnailToBlob,
