@@ -653,7 +653,8 @@ id: uid(),
 title: '', kind: 'film', year: '', creator: '', reason: '',
 genres: [], rating: 0, // TMDb vote_average (0-10), genre NAMES already resolved
 externalIds: {}, imageUrl: '', link: '',
-onSubscription: [], // provider names already matched to a data.subscriptions row
+providers: [], // every streaming provider TMDb lists for it (collapseProviders'd names), not just ones you pay for
+onSubscription: [], // the subset of `providers` already matched to a data.subscriptions row
 score: 0, aiPick: false,
 sourceLabel: '', sourceUrl: '',
 status: 'pending', // pending | added | dismissed
@@ -2061,7 +2062,7 @@ data.mediaItems = data.mediaItems.map((m) => ({ ...blankMediaItem(), ...m, id: m
 if (!Array.isArray(data.mediaRecSources)) data.mediaRecSources = [];
 data.mediaRecSources = data.mediaRecSources.map((s) => ({ ...blankMediaRecSource(), ...s, id: s.id || uid() }));
 if (!Array.isArray(data.mediaRecCandidates)) data.mediaRecCandidates = [];
-data.mediaRecCandidates = data.mediaRecCandidates.map((c) => ({ ...blankMediaRecCandidate(), ...c, id: c.id || uid(), genres: Array.isArray(c.genres) ? c.genres : [], externalIds: c.externalIds || {}, onSubscription: Array.isArray(c.onSubscription) ? c.onSubscription : [] }));
+data.mediaRecCandidates = data.mediaRecCandidates.map((c) => ({ ...blankMediaRecCandidate(), ...c, id: c.id || uid(), genres: Array.isArray(c.genres) ? c.genres : [], externalIds: c.externalIds || {}, providers: Array.isArray(c.providers) ? c.providers : [], onSubscription: Array.isArray(c.onSubscription) ? c.onSubscription : [] }));
 if (!Array.isArray(data.books)) data.books = [];
 data.books = data.books.map((b) => ({ ...blankBookItem(), ...b, id: b.id || uid(), genres: Array.isArray(b.genres) ? b.genres : [], externalIds: b.externalIds || {} }));
 if (!Array.isArray(data.captureDrafts)) data.captureDrafts = [];

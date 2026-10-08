@@ -116,15 +116,14 @@ const rating = (matched && matched.rating) || 0;
 // actually known.
 if (prefs.minRating && rating && rating < prefs.minRating) return null;
 
+let providers = [];
 let onSubscription = [];
 if (matched && matched.externalIds && matched.externalIds.tmdb) {
 try {
 const where = await watchProviders(matched.externalIds);
 if (where) {
-onSubscription = collapseProviders(where.flatrate)
-.map((name) => ({ name, sub: subscriptionFor(name, data.subscriptions || []) }))
-.filter((p) => p.sub)
-.map((p) => p.name);
+providers = collapseProviders(where.flatrate);
+onSubscription = providers.filter((name) => subscriptionFor(name, data.subscriptions || []));
 }
 } catch (err) {
 console.error(`Streaming availability lookup failed for "${raw.title}":`, err);
@@ -139,6 +138,7 @@ creator: raw.creator || (matched && matched.creator) || '',
 reason: raw.reason,
 genres,
 rating,
+providers,
 onSubscription,
 externalIds: (matched && matched.externalIds) || {},
 imageUrl: (matched && matched.imageUrl) || '',
@@ -233,30 +233,67 @@ function pendingSorted() {
 return (data.mediaRecCandidates || []).filter((c) => c.status === 'pending').sort((a, b) => b.score - a.score);
 }
 
+// Every provider TMDb lists, not just the one(s) you pay for -- "on
+// Netflix" is still useful to know even when it isn't a subscription you
+// have, same reasoning media.js's own whereToWatchHtml already follows
+// for the main Watch & listen list. Capped the same way that one is
+// (two unpaid providers shown, the rest folded into a "+N"), since a
+// title streaming on eight services would otherwise push everything
+// else on the row out of view.
+function providerChipsHtml(c) {
+const providers = c.providers || [];
+if (!providers.length) return '';
+const subscribed = new Set((c.onSubscription || []).map((n) => n.toLowerCase()));
+const yours = providers.filter((name) => subscribed.has(name.toLowerCase()));
+const others = providers.filter((name) => !subscribed.has(name.toLowerCase()));
+const MAX_OTHERS = 2;
+const extra = others.slice(MAX_OTHERS);
+const chips = [
+...yours.map((name) => `<span class="task-context" style="background:var(--sage-bg);color:var(--sage);font-weight:600;" title="You already pay for ${escapeHtml(name)}">&#10003; ${escapeHtml(shortProviderName(name))}</span>`),
+...others.slice(0, MAX_OTHERS).map((name) => `<span class="task-context" title="Streaming here, not one of your subscriptions">${escapeHtml(shortProviderName(name))}</span>`),
+];
+if (extra.length) chips.push(`<span class="task-context" title="Also on ${escapeHtml(extra.join(', '))}">+${extra.length}</span>`);
+return chips.join('');
+}
+
+// Grouped into its own flex column rather than one flat row of siblings
+// -- confirmed live as a real readability problem: with everything
+// (thumb, title, rating, genres, providers, reason, source, buttons) in
+// one flex-wrap pool, which line each piece landed on shifted row to
+// row depending on exactly how long the title/reason/genre list for
+// THAT candidate happened to be, so the same kind of information sat in
+// a different place on every card. Each inner div is its own wrap
+// group now, so the header/stats/reason/actions lines are always in
+// the same relative position regardless of content length.
 function candRowHtml(c) {
 const art = c.imageUrl ? `<img class="media-art" src="${escapeHtml(c.imageUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : '';
 const byline = [c.creator, c.year].filter(Boolean).join(' · ');
 const genreChips = (c.genres || []).map((g) => `<span class="task-context">${escapeHtml(g)}</span>`).join('');
-const subChips = (c.onSubscription || []).map((name) => `<span class="task-context" style="background:var(--sage-bg);color:var(--sage);font-weight:600;" title="You already pay for ${escapeHtml(name)}">&#10003; ${escapeHtml(shortProviderName(name))}</span>`).join('');
 const ratingBadge = c.rating ? `<span class="settings-note" style="margin:0;">&#9733; ${c.rating.toFixed(1)}</span>` : '';
 const aiBadge = c.aiPick ? `<span class="task-context" style="background:var(--lilac-bg,#efe7ff);color:var(--lilac,#7c4dff);font-weight:600;" title="Flagged by the optional AI top-up pass">&#10024; AI pick</span>` : '';
 const canWatchlist = (c.kind === 'film' || c.kind === 'tv') && c.externalIds && c.externalIds.tmdb;
-return `<div class="mail-row" data-rec-row="${c.id}" style="align-items:flex-start;">
+return `<div class="mail-row" data-rec-row="${c.id}" style="align-items:flex-start;flex-wrap:wrap;">
 ${art}
+<div style="display:flex;flex-direction:column;gap:5px;flex:1;min-width:220px;">
+<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
 <span class="task-context">${escapeHtml(KIND_LABEL[c.kind] || c.kind)}</span>
 <span class="mail-subject">${c.link ? `<a href="${escapeHtml(c.link)}" target="_blank" rel="noopener">${escapeHtml(c.title)}</a>` : escapeHtml(c.title)}</span>
 ${byline ? `<span class="settings-note" style="margin:0;">${escapeHtml(byline)}</span>` : ''}
 ${ratingBadge}
-${genreChips}
-${subChips}
-${aiBadge}
-${c.reason ? `<span class="settings-note" style="margin:0;">${escapeHtml(c.reason)}</span>` : ''}
+</div>
+<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+${genreChips}${providerChipsHtml(c)}${aiBadge}
+</div>
+${c.reason ? `<div class="settings-note" style="margin:0;">${escapeHtml(c.reason)}</div>` : ''}
+<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
 <span class="settings-note" style="margin:0;">via ${c.sourceUrl ? `<a href="${escapeHtml(c.sourceUrl)}" target="_blank" rel="noopener">${escapeHtml(c.sourceLabel || c.sourceUrl)}</a>` : escapeHtml(c.sourceLabel)}</span>
 <span class="media-row-actions">
 <button class="mini-task-btn" type="button" data-rec-add="${c.id}">+ Add as want</button>
 ${canWatchlist ? `<button class="mini-task-btn" type="button" data-rec-watchlist="${c.id}" title="Add straight to your Plex Watchlist">&#128065; Watchlist</button>` : ''}
 <span class="del-x" data-rec-dismiss="${c.id}" title="Not interested">&times;</span>
 </span>
+</div>
+</div>
 </div>`;
 }
 
