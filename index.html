@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v505</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v506</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -229,6 +229,12 @@
 </div>
 <div class="sync-status" id="media-capture-status"></div>
 <div id="media-candidates"></div>
+<details class="settings-item" style="margin:10px 0;">
+<summary>Find new things to watch/listen to</summary>
+<div class="settings-note" style="margin:6px 0;">Paste a "new this month" article, best-of list or genre roundup — it's read for real titles, checked against what's already on your list, and anything you tick is added as a want. Where to stream it from is then checked automatically, same as any other add.</div>
+<textarea id="media-recs-input" rows="4" style="width:100%;" placeholder="Paste the article or list text here&hellip;"></textarea>
+<button class="add-btn" id="media-recs-btn" type="button" style="margin-top:6px;">Find recommendations</button>
+</details>
 <div class="overview-chips" id="media-filter" style="margin-bottom:10px;"></div>
 <div id="media-list"></div>
 </section>

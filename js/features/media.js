@@ -1158,6 +1158,65 @@ close();
 host.querySelector('[data-media-pick-cancel]').addEventListener('click', close);
 }
 
+// Pasted "new this month"/best-of article text -> candidate wants,
+// screened against the existing list before anything is added. Feeds
+// the SAME addMediaItem()/catalogue-lookup/Plex-check/whereToWatch
+// pipeline every other capture path already uses (dashboard/CLAUDE.md --
+// one canonical path per record type) -- this is only a new way in, the
+// "steer me to where to stream it" half already exists via
+// item.whereToWatch once an item has a TMDb id.
+function isDuplicateMediaItem(cand) {
+const t = cand.title.trim().toLowerCase();
+return data.mediaItems.some((m) => m.kind === cand.kind && m.title.trim().toLowerCase() === t);
+}
+
+function renderMediaRecCandidates(items) {
+const host = document.getElementById('media-candidates');
+if (!host) return;
+if (!items.length) { setCaptureStatus('Nothing recognisable as a title in that text.'); return; }
+setCaptureStatus(`Found ${items.length} — review before adding.`);
+host.innerHTML = `<div class="alloc-card">
+${items.map((it, i) => {
+const dup = isDuplicateMediaItem(it);
+return `<div class="mail-row" style="align-items:flex-start;">
+<input type="checkbox" data-media-rec-pick="${i}" ${dup ? '' : 'checked'}>
+<span class="task-context">${escapeHtml(KIND_LABEL[it.kind] || it.kind)}</span>
+<span class="mail-subject">${escapeHtml(it.title)}${it.year ? ` (${escapeHtml(it.year)})` : ''}${dup ? ' <em>— already on your list</em>' : ''}</span>
+${it.creator ? `<span class="settings-note" style="margin:0;">${escapeHtml(it.creator)}</span>` : ''}
+${it.reason ? `<span class="settings-note" style="margin:0;">${escapeHtml(it.reason)}</span>` : ''}
+</div>`;
+}).join('')}
+<div class="alloc-controls">
+<button class="todo-add-btn" type="button" data-media-recs-add>+ Add checked, as wants</button>
+<button class="del-x" type="button" data-media-recs-cancel>Cancel</button>
+</div>
+</div>`;
+host.querySelector('[data-media-recs-add]').addEventListener('click', () => {
+let added = 0;
+host.querySelectorAll('[data-media-rec-pick]:checked').forEach((cb) => {
+const it = items[Number(cb.dataset.mediaRecPick)];
+addMediaItem({ kind: it.kind, title: it.title, creator: it.creator, year: it.year, notes: it.reason, status: 'wanted', source: { kind: 'recommendation', label: it.reason || 'Pasted recommendation' } });
+added++;
+});
+host.innerHTML = '';
+setCaptureStatus(added ? `Added ${added} to your wants.` : 'Nothing was checked.');
+});
+host.querySelector('[data-media-recs-cancel]').addEventListener('click', () => { host.innerHTML = ''; setCaptureStatus(''); });
+}
+
+async function importMediaRecommendations(text) {
+if (!text || !text.trim()) return;
+setCaptureStatus('Reading…');
+try {
+const { extractMediaRecommendations } = await import('../ai.js');
+const items = await extractMediaRecommendations(text);
+renderMediaRecCandidates(items);
+} catch (err) {
+console.error('Recommendations extraction failed:', err);
+setCaptureStatus(err.message || String(err));
+}
+}
+
 function renderKindFilter() {
 const el = document.getElementById('media-filter');
 if (!el) return;
@@ -1180,6 +1239,19 @@ b.addEventListener('click', () => { showFinished = !showFinished; renderMedia();
 
 function initMedia() {
 bindMediaChips();
+const recsInput = document.getElementById('media-recs-input');
+const recsBtn = document.getElementById('media-recs-btn');
+if (recsInput && recsBtn) {
+recsBtn.addEventListener('click', async () => {
+recsBtn.disabled = true;
+try {
+await importMediaRecommendations(recsInput.value);
+recsInput.value = '';
+} finally {
+recsBtn.disabled = false;
+}
+});
+}
 const plexBtn = document.getElementById('media-plex-check-btn');
 if (plexBtn) {
 plexBtn.addEventListener('click', async () => {

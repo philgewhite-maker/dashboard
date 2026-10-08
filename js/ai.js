@@ -2074,6 +2074,38 @@ attachmentHints: Array.isArray(e && e.attachmentHints) ? e.attachmentHints.map((
 };
 }
 
+// Pasted "new this month" article/list text -> candidate watch/listen
+// items, same extraction shape as the mail pulls above (one prompt, one
+// JSON reply) but fed from a paste box on the Media tab rather than an
+// email body -- see media.js's recommendations panel. Deliberately
+// returns plain candidates, not media.js records: title/kind/year/
+// creator feed straight into the EXISTING addMediaItem()/catalogue
+// lookup/Plex-check/whereToWatch pipeline (dashboard/CLAUDE.md -- reuse
+// the one canonical path for a record type, don't build a second one).
+const MEDIA_RECS_MAX_TOKENS = 2000;
+async function extractMediaRecommendations(text, guidance = '') {
+const prompt = `This is pasted text from an article or list recommending films, TV series, albums or books to watch/listen to (e.g. "New on Apple TV+ this month", a best-of list, a genre roundup).
+
+Text:
+"""
+${String(text || '').slice(0, 16000)}
+"""
+${guidanceInstruction(guidance)}
+List every distinct title actually recommended (not every title merely mentioned in passing). For each: its exact title, a kind (one of film, tv, album, track, artist, book, podcast, other), a year if stated, a creator/director/artist/author if stated, and a short reason (why it's recommended -- genre, rating, one-line pitch from the text). Skip anything too vague to be a real title.
+
+Reply with ONLY a JSON object, no other text, no markdown fences: {"items":[{"title":"","kind":"film","year":"","creator":"","reason":""}]}`;
+const { data: raw } = await callTextJson(prompt, MEDIA_RECS_MAX_TOKENS, MAIL_EXTRACT_MODEL, 'Media recommendations', 'low');
+const items = Array.isArray(raw && raw.items) ? raw.items : [];
+const validKinds = new Set(['film', 'tv', 'album', 'track', 'artist', 'book', 'podcast', 'other']);
+return items.map((it) => ({
+title: String((it && it.title) || '').trim(),
+kind: validKinds.has(it && it.kind) ? it.kind : 'other',
+year: String((it && it.year) || '').trim(),
+creator: String((it && it.creator) || '').trim(),
+reason: String((it && it.reason) || '').trim(),
+})).filter((it) => it.title);
+}
+
 // ---- Country lookup ----
 //
 // For a city, school or university name — often not in English, and
@@ -2100,7 +2132,7 @@ callTextJson, DEFAULT_MODEL, summarizeUsage, currentMonthKey, compareFaces,
 extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShoppingItem, searchAgentProvocateurElsewhere, searchEbayResaleEstimate, analyseOngoingAccountValue, identifyProduct, translateText, romanizeName, parseCaptureIntent,
 resolveUrlTitle, resolveJobPostingUrl, resolveBookDetails, resolveSeriesBooks,
 identifyCountry, extractWellnessScreenshot,
-extractTripScreenshot, extractMediaScreenshot, extractTripLegFromEmail, extractTaskFromEmail, extractDateEventFromEmail,
+extractTripScreenshot, extractMediaScreenshot, extractTripLegFromEmail, extractTaskFromEmail, extractDateEventFromEmail, extractMediaRecommendations,
 parseIngredients, assessIngredient, ALLERGEN_LIST, DIETARY_FLAGS, FODMAP_COMPONENTS, FODMAP_LEVELS,
 FODMAP_THRESHOLDS_G, OLIGO_CATEGORIES, fodmapLevelFromGrams, regenerateRecipeVariant, assessUnitWeight, assessUnitRatio,
 GLYCEMIC_LOAD_THRESHOLDS, glycemicLevelFromLoad,
