@@ -52,7 +52,7 @@ await setLocalSetting('syncKnownRev', Number(rev) || 0);
 // definite failure you can act on beats an indefinite wait.
 const REQUEST_TIMEOUT_MS = 15000;
 
-async function request(method, body) {
+async function requestOnce(method, body) {
 const { url, secret, configured } = await getConfig();
 if (!configured) throw new NotConfiguredError();
 
@@ -92,6 +92,42 @@ if (res.status === 401) throw new Error(`Sync server rejected the secret — che
 throw new Error(`Sync server error: ${detail}`);
 }
 return res.json();
+}
+
+// A response body truncated mid-transfer (confirmed live: "Unterminated
+// string in JSON..." on an otherwise-OK response, for a large document --
+// most plausibly a hosting resource limit or a flaky connection cutting
+// the response short, not anything wrong with the document itself) is
+// worth one retry, a fresh request from scratch since a Response body can
+// only be read once. Retrying a POST here is safe even if the first
+// attempt's WRITE actually went through server-side and only the reply
+// got cut off: the rev it sends is unchanged, so the server either
+// accepts it again (nothing to accept twice -- same rev means nothing
+// else wrote in between) or, if it really did already advance, correctly
+// 409s into the existing adopt-the-newer-copy path -- never a double
+// write. Anything else (a real network failure, a 401, a genuine server
+// error) is deterministic and retrying it would just fail the same way,
+// so only a JSON.parse-shaped SyntaxError gets the second attempt.
+async function request(method, body) {
+try {
+return await requestOnce(method, body);
+} catch (err) {
+if (!(err instanceof SyntaxError)) throw err;
+console.warn('Sync response failed to parse -- retrying once:', err);
+try {
+return await requestOnce(method, body);
+} catch (err2) {
+if (!(err2 instanceof SyntaxError)) throw err2;
+// Still cut short on a second, independent request -- not a one-off
+// blip, so say what's actually worth checking instead of surfacing
+// the raw "Unterminated string in JSON..." text, which says nothing
+// about WHY. A large document is the most likely cause (Settings ->
+// Monitoring -> Document size shows how big it actually is); a host
+// cutting off a slow/large PHP response (memory_limit,
+// max_execution_time) is the next thing to check there.
+throw new Error('Sync server cut off its reply twice in a row -- likely your hosting\'s PHP memory/time limits struggling with a large document (check Document size in Settings) rather than a one-off network blip.');
+}
+}
 }
 
 // Encryption sits at these two functions and nowhere else: they are the
