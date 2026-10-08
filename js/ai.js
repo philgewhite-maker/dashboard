@@ -19,6 +19,16 @@ const DEFAULT_MODEL = 'claude-opus-5';
 const PRICES_PER_MTOK = {
 'claude-opus-5': { input: 5, output: 25 },
 'claude-sonnet-5': { input: 3, output: 15 },
+// Haiku 5.5 actually has two rate cards (low tier up to a 100K-token
+// prompt, a higher one above it) -- this table has no notion of a
+// per-request tier, and every call this app makes to it is a small,
+// single-shot prompt nowhere near that threshold, so the low-tier rate
+// is the one that will actually apply in practice. Flag this comment for
+// a second look if a Haiku call here ever grows a genuinely long prompt.
+'claude-haiku-5-5': { input: 0.1, output: 0.5 },
+// Kept, not replaced -- past months' usage log (settings.apiUsage) still
+// has real entries keyed on the old model string, and those need pricing
+// too even though nothing calls this model going forward.
 'claude-haiku-4-5': { input: 1, output: 5 },
 'claude-haiku-4-5-20251001': { input: 1, output: 5 },
 };
@@ -205,6 +215,13 @@ console.warn('Response was truncated at max_tokens — the JSON may be incomplet
 const text = tools
 ? (result.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n')
 : ((result.content || []).find((b) => b.type === 'text') || {}).text;
+// Only Haiku 5.5 among the models this file calls can decline like this
+// (an ordinary HTTP 200, no error) -- a bare "No text in response" would
+// have been genuinely misleading here, since nothing actually broke.
+if (!text && result.stop_reason === 'refusal') {
+const category = (result.stop_details && result.stop_details.category) || 'unspecified';
+throw new Error(`Claude declined this request (${category}) rather than erroring — try different wording or content.`);
+}
 if (!text) {
 // A bare "No text in response" told a user nothing actionable when this
 // fired for real (a wellness screenshot that should have parsed fine) --
@@ -470,8 +487,14 @@ return { candidates, truncated };
 //
 // Cached by a hash of the image bytes, so re-reviewing the same album never
 // bills twice for the same photo.
-const QUICK_SCAN_MODEL = 'claude-haiku-4-5-20251001';
-const QUICK_SCAN_MAX_TOKENS = 400;
+const QUICK_SCAN_MODEL = 'claude-haiku-5-5';
+// Was 400 under Haiku 4.5, which never thought unless asked. Haiku 5.5
+// thinks adaptively by default and that counts against max_tokens, so a
+// cap this tight risked the exact failure model-migration.md warns about
+// -- a response cut off mid-thought before any JSON text. 'low' effort
+// (added below) keeps actual spend close to before; this is headroom,
+// not an expected cost increase.
+const QUICK_SCAN_MAX_TOKENS = 600;
 
 async function quickScanScreenshot(file, app) {
 file = await ensureBrowserReadableImage(file);
@@ -505,6 +528,8 @@ const { data: raw } = await callAnthropic(
 QUICK_SCAN_MAX_TOKENS,
 QUICK_SCAN_MODEL,
 'Photo quick scan',
+null,
+'low',
 );
 const result = {
 name: raw.name || '',
@@ -543,6 +568,8 @@ const { data: raw } = await callAnthropic(
 QUICK_SCAN_MAX_TOKENS,
 QUICK_SCAN_MODEL,
 'Capture-marker scan',
+null,
+'low',
 );
 const letter = String(raw.letter || '').trim().toUpperCase().slice(0, 1);
 const result = { letter: /^[A-Z]$/.test(letter) ? letter : '' };
@@ -1124,8 +1151,10 @@ return normaliseRegenerateVariant(raw, ingredients, instructions);
 // exact name matches (they don't need it) or wired to auto-apply anything;
 // it only ever informs a human decision already in progress, same as every
 // other AI-assisted match in this app.
-const FACE_COMPARE_MODEL = 'claude-haiku-4-5-20251001';
-const FACE_COMPARE_MAX_TOKENS = 200;
+const FACE_COMPARE_MODEL = 'claude-haiku-5-5';
+// Was 200 under Haiku 4.5 -- same headroom-for-adaptive-thinking reason
+// as QUICK_SCAN_MAX_TOKENS above.
+const FACE_COMPARE_MAX_TOKENS = 400;
 async function compareFaces(blobA, blobB) {
 const [base64A, base64B] = await Promise.all([fileToBase64(blobA), fileToBase64(blobB)]);
 const prompt = 'Image 1 is a photo already saved for a tracked person. Image 2 is a photo from a Google Photos album being considered for the same person. Do these two images show the same person? Reply with ONLY a JSON object, no other text: {"same": true, "reason": "one short sentence"} — using true, false, or the string "unsure" for "same". Say "unsure" rather than guessing if the photos differ too much in angle, lighting or quality to tell, or if either image doesn\'t clearly show a face.';
@@ -1133,7 +1162,7 @@ const { data } = await callAnthropic([
 { type: 'image', source: { type: 'base64', media_type: normalizeImageMediaType(blobA.type), data: base64A } },
 { type: 'image', source: { type: 'base64', media_type: normalizeImageMediaType(blobB.type), data: base64B } },
 { type: 'text', text: prompt },
-], FACE_COMPARE_MAX_TOKENS, FACE_COMPARE_MODEL, 'Face comparison');
+], FACE_COMPARE_MAX_TOKENS, FACE_COMPARE_MODEL, 'Face comparison', null, 'low');
 return {
 same: data && data.same === true ? true : data && data.same === false ? false : null,
 reason: (data && data.reason) || '',
@@ -1513,8 +1542,9 @@ return books.map((b) => ({ title: String(b.title || '').trim(), seriesOrder: Str
 // Cheap/fast tier, same as quickScanScreenshot's own reasoning: reading a
 // product off its packaging is straightforward recognition, not a task that
 // benefits from a bigger model.
-const IDENTIFY_PRODUCT_MODEL = 'claude-haiku-4-5-20251001';
-const IDENTIFY_PRODUCT_MAX_TOKENS = 200;
+const IDENTIFY_PRODUCT_MODEL = 'claude-haiku-5-5';
+// Was 200 under Haiku 4.5 -- same headroom reason as QUICK_SCAN_MAX_TOKENS.
+const IDENTIFY_PRODUCT_MAX_TOKENS = 400;
 async function identifyProduct(file) {
 const base64 = await fileToBase64(file);
 const prompt = 'This photo shows a household, grocery, or pharmacy product (or its packaging/label, possibly empty -- being photographed as a reminder to buy more). Identify the exact product name and brand as you\'d search for it online, e.g. "Method Floor Cleaner, Lavender" or "Sudafed Blocked Nose 12 tablets". Reply with ONLY a JSON object, no other text: {"name":""} -- empty string if you can\'t make out a specific product.';
@@ -1529,8 +1559,9 @@ return String((data && data.name) || '').trim();
 // that's confirmed the text isn't already English, so a cheap/fast model
 // is the right call here rather than whatever vision model Settings has
 // configured for photo work.
-const TRANSLATE_MODEL = 'claude-haiku-4-5-20251001';
-const TRANSLATE_MAX_TOKENS = 800;
+const TRANSLATE_MODEL = 'claude-haiku-5-5';
+// Was 800 under Haiku 4.5 -- same headroom reason as QUICK_SCAN_MAX_TOKENS.
+const TRANSLATE_MAX_TOKENS = 1200;
 function translatePrompt(text) {
 return `Detect the language of this dating-profile text and translate it into natural English. Text: ${JSON.stringify(text)}\n\n`
 + 'Reply with ONLY a JSON object, no other text, no markdown fences: {"language":"Spanish","translation":"..."} — "language" is the English name of the detected language (e.g. "Spanish", "Russian"), or "English" if it\'s already English (in which case "translation" can just repeat the original text).';
@@ -1538,7 +1569,7 @@ return `Detect the language of this dating-profile text and translate it into na
 async function translateText(text) {
 const { data } = await callAnthropic(
 [{ type: 'text', text: translatePrompt(text) }],
-TRANSLATE_MAX_TOKENS, TRANSLATE_MODEL, 'Translation',
+TRANSLATE_MAX_TOKENS, TRANSLATE_MODEL, 'Translation', null, 'low',
 );
 return {
 language: String((data && data.language) || '').trim(),
@@ -1554,8 +1585,9 @@ translation: String((data && data.translation) || '').trim(),
 // Latin-alphabet form. Distinct, narrower prompt from translatePrompt
 // above rather than a reuse of its dating-profile-specific wording.
 // Same cheap/fast tier: this is a lookup, not reasoning.
-const ROMANIZE_MODEL = 'claude-haiku-4-5-20251001';
-const ROMANIZE_MAX_TOKENS = 200;
+const ROMANIZE_MODEL = 'claude-haiku-5-5';
+// Was 200 under Haiku 4.5 -- same headroom reason as QUICK_SCAN_MAX_TOKENS.
+const ROMANIZE_MAX_TOKENS = 400;
 function romanizeNamePrompt(name) {
 return `Give the standard English-readable (Latin-alphabet) form of this person's name, as it would normally be written in English -- given name first if that's the usual convention for the name's origin, standard romanization for a non-Latin script (e.g. Korean "은영 박" -> "Eunyoung Park"). Name: ${JSON.stringify(name)}\n\n`
 + 'Reply with ONLY a JSON object, no other text, no markdown fences: {"name":"Eunyoung Park"}';
@@ -2146,8 +2178,9 @@ return picks
 // sometimes already transliterated out of Cyrillic — so the country isn't
 // obvious just from the text alone the way it would be for a well-known
 // English place name.
-const COUNTRY_MODEL = 'claude-haiku-4-5-20251001';
-const COUNTRY_MAX_TOKENS = 200;
+const COUNTRY_MODEL = 'claude-haiku-5-5';
+// Was 200 under Haiku 4.5 -- same headroom reason as QUICK_SCAN_MAX_TOKENS.
+const COUNTRY_MAX_TOKENS = 400;
 function countryPrompt(place) {
 return `What country is this place in: ${JSON.stringify(place)}? It may be a city, school or university name, possibly not in English or already transliterated out of another script.\n\n`
 + 'Reply with ONLY a JSON object, no other text, no markdown fences: {"country":"Italy"} — the country\'s common English name. If you genuinely can\'t tell, use {"country":""}.';
@@ -2155,7 +2188,7 @@ return `What country is this place in: ${JSON.stringify(place)}? It may be a cit
 async function identifyCountry(place) {
 const { data } = await callAnthropic(
 [{ type: 'text', text: countryPrompt(place) }],
-COUNTRY_MAX_TOKENS, COUNTRY_MODEL, 'Country lookup',
+COUNTRY_MAX_TOKENS, COUNTRY_MODEL, 'Country lookup', null, 'low',
 );
 return { country: String((data && data.country) || '').trim() };
 }

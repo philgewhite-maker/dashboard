@@ -15,7 +15,13 @@ const AIRBNB_GREET_LEAD_DAYS = 1; // "guest arriving" reminder, this many days b
 const TOP_N = 6;
 // Cheap, fast model for a ranking task — no need for the vision model the
 // user may have set for screenshot import.
-const RANK_MODEL = 'claude-haiku-4-5-20251001';
+const RANK_MODEL = 'claude-haiku-5-5';
+// 300 was fine under Haiku 4.5, which never thought unless asked. Haiku
+// 5.5 thinks adaptively by default and that counts against max_tokens --
+// 300 was tight enough to risk a thinking-only response with no ranking
+// JSON at all. 'low' effort (added at the call site below) keeps actual
+// spend close to before; this is headroom, not an expected cost rise.
+const RANK_MAX_TOKENS = 500;
 let currentPool = [];
 let currentShown = [];
 let renderGen = 0; // guards a slow AI response from clobbering a newer render
@@ -779,7 +785,7 @@ const items = candidates.map((n, i) => ({ i, text: n.text, category: n.category 
 const prompt = `You're picking which reminders to surface on someone's personal dashboard home screen. Below is a JSON array of candidate reminders, each with an index "i", the reminder text, a "category" (dating, task, health, business, habit, goal, job, voucher, calendar, creative), and signal fields explaining why it might matter: daysSince/daysUntil (age or time to a deadline), priority (1-5, how much they personally rated that person/goal), progress (% complete, lower means more room to matter), priorStreak (a habit streak that just broke — bigger is a bigger loss), stage/kind (further context). Choose the ${TOP_N} most worth showing RIGHT NOW. Balance genuine time pressure (something expiring or happening soon), importance (high priority/rating items), and neglect (things aged the longest) — don't just pick the single biggest number in one field. Also actively prefer a MIX of categories over filling most slots from one — a panel that's nothing but "reach out to so-and-so" reads as naggy and one-note even when each one is individually justified. Only repeat a category if the pool genuinely has nothing else worth surfacing. Avoid picking near-duplicate items about the same person or thing. Respond with ONLY a JSON array of the chosen "i" values, most important first, e.g. [3,0,7,1]. No other text.
 
 ${JSON.stringify(items)}`;
-const { data: order } = await callTextJson(prompt, 300, RANK_MODEL, 'Smart nudges');
+const { data: order } = await callTextJson(prompt, RANK_MAX_TOKENS, RANK_MODEL, 'Smart nudges', 'low');
 if (!Array.isArray(order)) throw new Error('Unexpected response shape from ranking call');
 const picked = order.filter((i) => Number.isInteger(i) && i >= 0 && i < candidates.length).map((i) => candidates[i]);
 return picked.slice(0, TOP_N);
