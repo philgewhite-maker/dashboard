@@ -256,12 +256,24 @@ return (data.mediaRecCandidates || []).filter((c) => c.status === 'pending').sor
 // (two unpaid providers shown, the rest folded into a "+N"), since a
 // title streaming on eight services would otherwise push everything
 // else on the row out of view.
+//
+// Both which-provider-is-"yours" AND the provider list itself are
+// recomputed HERE, live, every render -- not read from c.onSubscription/
+// c.providers as stored. Confirmed live as a real gap, the same one
+// whereToWatchHtml never has (it already computes this fresh from
+// data.subscriptions on every render): a candidate's subscription match
+// was baked in once at the moment it was found, so renaming a
+// subscription afterward (or TMDb returning "Netflix" and "Netflix
+// Standard" as if they were two different services, before
+// canonicalProvider's own fix) stayed wrong on an already-stored
+// candidate until it was found again from scratch. Re-collapsing
+// providers here as well as matching subscriptions live means both
+// problems correct themselves on the very next render, no re-run needed.
 function providerChipsHtml(c) {
-const providers = c.providers || [];
+const providers = collapseProviders(c.providers || []);
 if (!providers.length) return '';
-const subscribed = new Set((c.onSubscription || []).map((n) => n.toLowerCase()));
-const yours = providers.filter((name) => subscribed.has(name.toLowerCase()));
-const others = providers.filter((name) => !subscribed.has(name.toLowerCase()));
+const yours = providers.filter((name) => subscriptionFor(name, data.subscriptions || []));
+const others = providers.filter((name) => !subscriptionFor(name, data.subscriptions || []));
 const MAX_OTHERS = 2;
 const extra = others.slice(MAX_OTHERS);
 const chips = [

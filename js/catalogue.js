@@ -446,10 +446,26 @@ return '';
 //
 // '' means "drop this one": a "... Channel" is a separate paid add-on,
 // not the subscription it's named after.
+// Confirmed live, twice: TMDb's UK watch/providers answer for one title
+// carried both "Netflix" and "Netflix Standard"; for another, "Paramount+",
+// "Paramount Plus Premium" AND a third bundle variant, as three separate
+// entries. One service, several names for the same tier/bundle
+// distinctions JustWatch tracks but this app has no use for on a chip.
+// Order matters here: strip a trailing "with <anything>" bundle/add-on
+// qualifier first (with Ads, with Showtime, with Live TV, ...), THEN a
+// trailing tier word ("Netflix Standard with Ads" only reaches "Standard"
+// once "with Ads" is already gone), and normalise a trailing "+" to the
+// spelled-out "Plus" PROVIDER_ALIASES' own keys already use ("apple tv
+// plus", "disney plus") LAST, so a "+" exposed only after the with-strip
+// (e.g. "Paramount+ with Showtime" -> "Paramount+") still normalises.
 function canonicalProvider(raw) {
 const name = String(typeof raw === 'string' ? raw : (raw && raw.provider_name) || '').trim();
 if (!name || /\bchannel\b/i.test(name)) return '';
-return name.replace(/\s+with\s+ads$/i, '').trim();
+return name
+.replace(/\s+with\s+.+$/i, '')
+.replace(/\s+(standard|premium|basic|mobile|essential)$/i, '')
+.replace(/\+$/, ' Plus')
+.trim();
 }
 
 function collapseProviders(list) {
@@ -522,6 +538,14 @@ const PROVIDER_ALIASES = {
 'amazon prime video': ['prime', 'amazon'],
 'disney plus': ['disney+', 'disney'],
 'apple tv plus': ['apple tv+', 'appletv', 'apple'],
+// TMDb/JustWatch returns the plain AVOD storefront "Apple TV" and the
+// subscription "Apple TV Plus" as two distinct provider names -- a
+// title whose flatrate entry came back as the bare one needs its own
+// alias entry, not just a substring match against "apple tv plus"
+// (which a no-space "AppleTv"-style subscription name doesn't hit
+// either direction). Confirmed live: a real candidate's flatrate
+// provider was exactly "Apple TV", no "Plus".
+'apple tv': ['appletv'],
 'now tv': ['now', 'sky'],
 'bbc iplayer': ['bbc', 'tv licence'],
 'all 4': ['channel 4'],
@@ -533,7 +557,14 @@ const p = String(providerName || '').toLowerCase().trim();
 if (!p) return null;
 const aliases = [p, ...(PROVIDER_ALIASES[p] || [])];
 return (subscriptions || []).find((s) => {
-const n = String(s.name || '').toLowerCase().trim();
+// canonicalProvider already normalises a trailing "+" to " plus" on
+// the TMDb side (so p/aliases are already spelled out) -- the
+// subscription's own typed name needs the same normalisation, or a
+// sub typed as "Paramount+" (a completely natural way to type it)
+// never matches the canonical "paramount plus" at all. Confirmed
+// live as a real gap once canonicalProvider started normalising its
+// own side and this one didn't follow.
+const n = String(s.name || '').toLowerCase().trim().replace(/\+$/, ' plus');
 if (!n) return false;
 return aliases.some((a) => n.includes(a) || a.includes(n));
 }) || null;
