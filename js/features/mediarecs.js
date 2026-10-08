@@ -17,9 +17,11 @@
 // and media.js's addMediaItem -- "+ Add as want" on a candidate is a
 // completely ordinary add, so Plex-check/whereToWatch pick it up exactly
 // as they do for anything else added any other way.
-import { data, queueSave, blankMediaRecCandidate } from '../state.js';
+import { data, queueSave, blankMediaRecCandidate, MEDIA_KINDS } from '../state.js';
 import { escapeHtml } from '../utils.js';
 import { searchTitle, watchProviders, subscriptionFor, collapseProviders, shortProviderName } from '../catalogue.js';
+
+const KIND_LABEL = Object.fromEntries(MEDIA_KINDS.map((k) => [k.kind, k.label]));
 
 // Per-SOURCE now, not one global gate -- a weekly "best new this week"
 // page and a monthly "best of the year" page on the same list can't share
@@ -156,10 +158,17 @@ if (!sources.length) { setStatus('Nothing due yet -- each source is checked on i
 const prefs = data.prefs.mediaPreferences || {};
 setStatus(`Reading ${sources.length} source${sources.length === 1 ? '' : 's'}…`);
 const rawBatches = [];
+// Tracked so the final status line can actually answer "is there a cap,
+// or is this genuinely all that qualified" instead of leaving a small
+// result count unexplained -- confirmed live need: a JS-rendered page
+// (JustWatch, IMDb) returns little or nothing to a plain HTML fetch, and
+// without this that looked identical to "nothing met your filters".
+const emptySources = [];
 for (const source of sources) {
 try {
 const { items, note } = await fetchOneSource(source);
 rawBatches.push(items);
+if (!items.length) emptySources.push(source.label || source.url);
 source.lastCheckedAt = new Date().toISOString();
 if (note) setStatus(`"${source.label || source.url}" -- ${note}.`);
 } catch (err) {
@@ -183,9 +192,10 @@ return !isAlreadyKnown(it.title, it.kind);
 
 setStatus(`Checking ${deduped.length} candidate${deduped.length === 1 ? '' : 's'} against your catalogue…`);
 const resolved = [];
+let droppedByRating = 0;
 for (const it of deduped) {
 const cand = await resolveCandidate(it, prefs);
-if (cand) resolved.push(cand);
+if (cand) resolved.push(cand); else droppedByRating++;
 }
 resolved.sort((a, b) => b.score - a.score);
 
@@ -206,7 +216,16 @@ console.error('AI top-up pass failed (deterministic ranking stands):', err);
 data.mediaRecCandidates.push(...resolved);
 data.prefs.mediaRecsLastRun = new Date().toISOString();
 queueSave();
-setStatus(`Found ${resolved.length} new recommendation${resolved.length === 1 ? '' : 's'} from ${sources.length} source${sources.length === 1 ? '' : 's'}.`);
+// Spelled out end to end -- raw found, where nothing came back, how many
+// were already known, how many the rating floor dropped -- rather than a
+// single number that reads the same whether nothing qualified or every
+// source quietly failed.
+const parts = [`Found ${raw.length} title${raw.length === 1 ? '' : 's'} across ${sources.length} source${sources.length === 1 ? '' : 's'}`];
+if (emptySources.length) parts.push(`${emptySources.length} returned nothing readable (${emptySources.slice(0, 3).join(', ')}${emptySources.length > 3 ? ', …' : ''}) -- likely a page that needs JavaScript to show its content, which this fetcher can't run`);
+parts.push(`${deduped.length} new after removing duplicates/already-known`);
+if (droppedByRating) parts.push(`${droppedByRating} below your ${prefs.minRating}/10 floor`);
+parts.push(`${resolved.length} ready to review`);
+setStatus(`${parts.join(' — ')}.`);
 renderMediaRecs();
 }
 
@@ -224,7 +243,7 @@ const aiBadge = c.aiPick ? `<span class="task-context" style="background:var(--l
 const canWatchlist = (c.kind === 'film' || c.kind === 'tv') && c.externalIds && c.externalIds.tmdb;
 return `<div class="mail-row" data-rec-row="${c.id}" style="align-items:flex-start;">
 ${art}
-<span class="task-context">${escapeHtml(c.kind)}</span>
+<span class="task-context">${escapeHtml(KIND_LABEL[c.kind] || c.kind)}</span>
 <span class="mail-subject">${c.link ? `<a href="${escapeHtml(c.link)}" target="_blank" rel="noopener">${escapeHtml(c.title)}</a>` : escapeHtml(c.title)}</span>
 ${byline ? `<span class="settings-note" style="margin:0;">${escapeHtml(byline)}</span>` : ''}
 ${ratingBadge}

@@ -2126,7 +2126,7 @@ Text:
 ${String(text || '').slice(0, 20000)}
 """
 ${guidanceInstruction(guidance)}
-List every distinct title actually recommended (not every title merely mentioned in passing, and not nav/footer/ad junk if this is HTML). For each: its exact title, a kind (one of film, tv, album, track, artist, book, podcast, other), a year if stated, a creator/director/artist/author if stated, and a short reason (why it's recommended -- genre, rating, one-line pitch from the text). Skip anything too vague to be a real title.
+List every distinct title actually recommended (not every title merely mentioned in passing, and not nav/footer/ad junk if this is HTML). For each: its exact title, a kind (one of film, tv, album, track, artist, book, podcast, other), a year if stated, a creator/director/artist/author if stated, and a short reason (why it's recommended -- genre, rating, one-line pitch from the text). If the source text doesn't actually say enough to give a real reason, leave reason as "" -- never describe the extraction itself (e.g. don't write "details cut off" or "not enough information given"), only report what's genuinely there. Skip anything too vague to be a real title.
 
 Reply with ONLY a JSON object, no other text, no markdown fences: {"items":[{"title":"","kind":"film","year":"","creator":"","reason":""}]}`;
 const { data: raw } = await callTextJson(prompt, MEDIA_RECS_MAX_TOKENS, MAIL_EXTRACT_MODEL, 'Media recommendations', 'low');
