@@ -46,10 +46,14 @@ return data.mediaItems.some((m) => m.kind === kind && m.title.trim().toLowerCase
 || data.mediaRecCandidates.some((c) => c.kind === kind && c.title.trim().toLowerCase() === t);
 }
 
-let statusEl = null;
+// Updates every status element in the DOM, not just one -- the Settings
+// panel and the Media tab's own "Check recommendations" button each have
+// their own (Settings' is still open while a run started there finishes;
+// the Media-tab one is what's actually visible if you started it from
+// there instead), and whichever one you're looking at should show the
+// same progress.
 function setStatus(text) {
-if (!statusEl) statusEl = document.getElementById('media-recs-check-status');
-if (statusEl) statusEl.textContent = text || '';
+document.querySelectorAll('[data-media-recs-status]').forEach((el) => { el.textContent = text || ''; });
 }
 
 // A "jump-off" source's own URL is an evergreen index page (this.guardian.
@@ -359,12 +363,20 @@ alert(err.message || String(err));
 }
 }
 
-// The "Check now" button itself lives in Settings (settings.js wires it,
-// alongside the source-pages table and preferences it sits next to) --
-// this only renders the review list on the Media tab, wherever the last
-// check (scheduled or manual) left it.
+// Settings (settings.js) wires its own "Check now", alongside the
+// source-pages table and preferences it sits next to. This is the SAME
+// action offered a second place -- the Media tab's own sync-row, next
+// to Check Plex/Link TVDB ids -- so running it doesn't need a trip to
+// Settings first; both call the identical runMediaRecsCheck({force:true}).
 function initMediaRecs() {
 renderMediaRecs();
+const btn = document.getElementById('media-recs-checknow-btn');
+if (btn) {
+btn.addEventListener('click', async () => {
+btn.disabled = true;
+try { await runMediaRecsCheck({ force: true }); } finally { btn.disabled = false; }
+});
+}
 }
 
 export { initMediaRecs, renderMediaRecs, runMediaRecsCheck, addRecCandidate, watchlistRecCandidate };

@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v514</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v515</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -230,6 +230,8 @@
 <span class="sync-status" id="media-plex-status"></span>
 <button class="sync-btn" id="media-tvdb-btn" type="button" title="Find the TVDB id for every series still wanted, so Sonarr can be told to watch them">Link TVDB ids</button>
 <span class="sync-status" id="media-tvdb-status"></span>
+<button class="sync-btn" id="media-recs-checknow-btn" type="button" title="Read every recommendation source page now, instead of waiting for its own weekly/monthly schedule">Check recommendations</button>
+<span class="sync-status" data-media-recs-status></span>
 </div>
 <div class="sync-status" id="media-capture-status"></div>
 <div id="media-candidates"></div>
@@ -3204,7 +3206,7 @@ Optional AI top-up &mdash; after the deterministic ranking, let Claude flag a fe
 </label>
 <div class="sync-row" style="margin-top:12px;">
 <button class="sync-btn" id="media-recs-check-now-btn" type="button">Check now</button>
-<span class="sync-status" id="media-recs-check-status"></span>
+<span class="sync-status" id="media-recs-check-status" data-media-recs-status></span>
 </div>
 </div>
 </details>
