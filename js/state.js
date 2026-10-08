@@ -1706,12 +1706,22 @@ let onExternalUpdate = () => {};
 // why this exists.
 let knownRev = 0;
 
-// Fired after a local save that actually changed something, so the live-sync
-// layer knows there's something to upload. Deliberately NOT fired when the
-// save came from applying a remote document — that would bounce the same
-// data straight back to the server and, with two devices, never settle.
-let onLocalChange = () => {};
-function setLocalChangeHandler(fn) { onLocalChange = fn; }
+// Fired after a local save that actually changed something, so any
+// live-sync layer knows there's something to upload. Deliberately NOT
+// fired when the save came from applying a remote document — that would
+// bounce the same data straight back to the server and, with two
+// devices, never settle.
+//
+// A LIST of handlers, not one -- autosync.js's whole-document push and
+// connectionsync.js's additive per-record push both need to hear about
+// every local change independently. A single assignment here (the
+// shape this used to be) would have the second caller silently clobber
+// the first's registration, since whichever of initAutoSync()/
+// initConnectionSync() runs later would overwrite the other's handler --
+// confirmed as a real near-miss while building the per-record sync.
+const onLocalChangeHandlers = [];
+function setLocalChangeHandler(fn) { onLocalChangeHandlers.push(fn); }
+function fireLocalChange() { onLocalChangeHandlers.forEach((fn) => fn()); }
 
 function setSaveStatusHandler(fn) { onSaveStatus = fn; }
 // Called when persist() finds newer data on disk than this session knew
@@ -2637,7 +2647,7 @@ knownRev = onDiskRev + 1;
 await kvSet(DATA_KEY, data);
 await kvSet(REV_KEY, knownRev);
 onSaveStatus('ok');
-if (opts.notify !== false) onLocalChange();
+if (opts.notify !== false) fireLocalChange();
 } catch (e) {
 onSaveStatus('error');
 }

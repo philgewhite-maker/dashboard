@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v504</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v505</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -2809,6 +2809,14 @@ Photos added before task attachments existed live only on the device that added 
 <button class="sync-btn" id="relay-setup-btn" type="button">Set up Dashboard Capture</button>
 </div>
 <div class="settings-note">Android only. Dashboard Capture is a small companion app for sharing images and files in, since Chrome drops shared files on some phones. Install it, then tap this on the phone to hand it the URL and secret above &mdash; you confirm them in the app.</div>
+</div>
+</details>
+
+<details class="settings-item">
+<summary><h3>Connection sync (per-record)</h3></summary>
+<div class="settings-block">
+<div class="settings-note" style="margin:0 0 10px;">Live sync above re-uploads the whole document on every save. With several devices, the NAS, and Dashboard Capture all writing, that's a growing truncation/conflict risk for what's usually the biggest part of it &mdash; so Connections specifically ALSO sync one record at a time, additively (the whole-document sync above keeps covering everything, including Connections, exactly as before). Needs <code>server/sync-connections.php</code> uploaded next to <code>sync.php</code> &mdash; nothing else to configure, it reuses the URL/secret above. Inactive until that file is there.</div>
+<div class="settings-note" id="conn-sync-status"></div>
 </div>
 </details>
 

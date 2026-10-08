@@ -55,6 +55,7 @@ import { initSettings } from './features/settings.js';
 import { initGoogleAccount } from './features/googleaccount.js';
 import { initMail } from './features/mail.js';
 import { initAutoSync } from './sync/autosync.js';
+import { initConnectionSync } from './sync/connectionsync.js';
 
 // The Settings pill row (settings.js) sticks itself just below the main
 // tab bar -- but the tab bar's own height isn't fixed, it `flex-wrap`s
@@ -264,6 +265,11 @@ initShareTarget();
 // Last, and deliberately not awaited: it does network I/O, and nothing else
 // on the page should wait on a slow or unreachable server to become usable.
 initAutoSync();
+// Additive per-record sync for Connections specifically -- see
+// connectionsync.js's own header. Runs alongside initAutoSync() above,
+// not instead of it; silently inactive until server/sync-connections.php
+// is uploaded next to sync.php.
+initConnectionSync();
 }
 
 main();
