@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v508</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v509</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -45,6 +45,7 @@
 <button class="tab-btn" type="button" data-tab-btn="media">Media</button>
 <button class="tab-btn" type="button" data-tab-btn="family">Family</button>
 <button class="tab-btn" type="button" data-tab-btn="settings">Settings</button>
+<button class="tab-btn" type="button" data-tab-btn="guide">Guide</button>
 </div>
 
 <div class="board">
@@ -117,6 +118,7 @@
 <span class="count-badge" id="mail-count"></span>
 <span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#mail-searches-block" title="Mail settings">&#9881;</span>
 <span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#mail-bin-block" title="Mail bin — dismissed messages">&#128465;</span>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-mail" title="Guide — searches, topics, markers, mail rules">&#128214;</span>
 </div>
 <div class="sync-row">
 <button class="sync-btn" id="sync-mail-btn" type="button">Refresh mail</button>
@@ -213,6 +215,7 @@
 <span class="inline-goto-link panel-settings-link" data-goto-tab="finances" data-goto-target="#subscriptions-panel" title="Subscriptions &mdash; the services checked against &ldquo;where to watch&rdquo;">&#128179;</span>
 <span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#media-routes" title="How to get hold of things — what Get&hellip; offers per kind">&#128230;</span>
 <span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#media-recs-block" title="Monthly recommendation source pages, preferred genres, rating floor">&#128269;</span>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-media" title="Guide — adding wants, where to watch, Plex, recommendations">&#128214;</span>
 <span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#ai-keys" title="TMDb API key, for film &amp; TV lookup">&#9881;</span>
 </div>
 <div class="capture-row">
@@ -288,6 +291,7 @@
 <div class="panel-head">
 <h2><span class="dot rose"></span>Inbox &mdash; file these</h2>
 <span class="count-badge" id="inbox-count"></span>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-inbox" title="Guide — capture, filing, contexts, buckets">&#128214;</span>
 </div>
 <div id="task-inbox"></div>
 </section>
@@ -2715,6 +2719,7 @@ Needs the WHOLE exported folder tree (hundreds of files, not a single JSON) &mda
 <section class="panel wide" id="settings-panel" data-tab="settings">
 <div class="panel-head">
 <h2><span class="dot plum"></span>Settings</h2>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-settings-basics" title="Guide — how Settings is organised, sync setup, backups">&#128214;</span>
 </div>
 
 <div class="settings-pill-row">
@@ -3385,6 +3390,67 @@ Finds connections whose cover photo is missing or is really just the small place
 </div>
 </div>
 </details>
+</details>
+</section>
+
+<section class="panel wide" id="guide-panel" data-tab="guide">
+<div class="panel-head">
+<h2><span class="dot sage"></span>Guide</h2>
+</div>
+<div class="settings-note" style="margin:0 0 14px;">How things work, section by section &mdash; the &#128214; next to a panel's own settings link jumps straight here. A work in progress: only a few panels are written up so far, the rest are listed at the bottom.</div>
+
+<div class="settings-pill-row">
+<span class="pick-chip" data-goto-tab="guide" data-goto-target="#guide-inbox">Tasks &amp; Inbox</span>
+<span class="pick-chip" data-goto-tab="guide" data-goto-target="#guide-mail">Mail</span>
+<span class="pick-chip" data-goto-tab="guide" data-goto-target="#guide-media">Media</span>
+<span class="pick-chip" data-goto-tab="guide" data-goto-target="#guide-settings-basics">Settings basics</span>
+</div>
+
+<details class="settings-item" id="guide-inbox">
+<summary><h3>Tasks &amp; Inbox</h3></summary>
+<div class="settings-block">
+<p class="settings-note" style="margin:0 0 10px;">Follows GTD: everything you capture lands in the <strong>Inbox</strong> first, unfiled and un-prioritised, so capturing never has to wait on deciding what something is. Filing it &mdash; giving it a list and a context &mdash; is a separate, later step.</p>
+<p class="settings-note" style="margin:0 0 10px;"><strong>Capturing:</strong> the box at the top of Tasks takes a plain typed line (<strong>Capture</strong> &mdash; instant, no AI involved) or an instruction (<strong>&#10024; Smart</strong> or the mic) &mdash; "watch The Bear", or "create a trip to Mallorca 1st to 5th November and add Vera Bora to it in my planner" &mdash; which Claude turns into the right record(s) and queues as a draft for you to confirm rather than creating them outright. A shared photo or screenshot goes through <strong>Photo / screenshot</strong>, or arrives automatically via Android's share sheet.</p>
+<p class="settings-note" style="margin:0 0 10px;"><strong>Reading an Inbox card:</strong> each one shows when it arrived and, when it came from somewhere (a share, an email, a photo), a clickable source label. A share with no real title of its own (common for a plain "share as link" with nothing but the URL) shows a shortened, clickable version of the link instead of the raw address &mdash; tap <strong>&#10024; Resolve title</strong> to ask AI to look up a proper one. That only works for a page it can actually search or fetch; an authenticated link (a private OneNote page, a Google Doc you haven't shared publicly) will usually come back empty, same as it would if you searched for it yourself.</p>
+<p class="settings-note" style="margin:0 0 10px;"><strong>Filing:</strong> pick a list from the card's own dropdown, or drag it onto one of the four GTD buckets on the right &mdash; <em>Next actions</em> (doable now, in some context), <em>Projects</em> (an outcome needing more than one action &mdash; can hold its own subtasks), <em>Waiting for</em> (blocked on someone else), or <em>Someday</em> (not now, not forgotten). Add a context chip (Home, Office, DIY, ...) for where or with what it can actually be done &mdash; edited on the Contexts panel next to Lists.</p>
+<p class="settings-note" style="margin:0;"><strong>Bring forward:</strong> set a future date on a task and it goes dormant &mdash; hidden from your active lists until that date arrives, then it surfaces on its own.</p>
+</div>
+</details>
+
+<details class="settings-item" id="guide-mail">
+<summary><h3>Mail</h3></summary>
+<div class="settings-block">
+<p class="settings-note" style="margin:0 0 10px;"><strong>Searches &amp; topics:</strong> each row in Settings &rarr; Mail searches is its own section in the Mail panel, using Gmail's own search syntax. Group several together as a <strong>topic</strong> to share one section and pick which action buttons show by default (anything else still reaches via "&#8943; Other actions").</p>
+<p class="settings-note" style="margin:0 0 10px;"><strong>Markers:</strong> a subject line containing a word like <code>zxc T</code> auto-creates the matching record (task, reading item, trip leg, date event&hellip;) the next time you refresh mail &mdash; the same letter vocabulary as the image-marker and shared-link-suffix capture methods elsewhere in the app.</p>
+<p class="settings-note" style="margin:0 0 10px;"><strong>Mail rules:</strong> a standing version of the same idea, scoped to a sender and/or subject rather than a one-off marker. Create one from any real message via "&#8943; Other actions" &rarr; "+ rule" &mdash; it runs immediately on that email, then automatically on every future message matching it. Loosen or retire a rule afterward in Settings &rarr; Mail rules.</p>
+<p class="settings-note" style="margin:0;"><strong>Mail bin:</strong> messages dismissed with a row's &times; &mdash; not restorable (you still have the real email), just a record of what's already been looked at and skipped.</p>
+</div>
+</details>
+
+<details class="settings-item" id="guide-media">
+<summary><h3>Media &mdash; Watch &amp; listen</h3></summary>
+<div class="settings-block">
+<p class="settings-note" style="margin:0 0 10px;"><strong>Adding something:</strong> type a title (searched against TMDb/Open Library/MusicBrainz so you can pick the right film, series, book or album rather than storing a bare string), paste a link from IMDb/Letterboxd/Spotify and the like, or share one from your phone &mdash; a link ending <code>#M</code> or a screenshot marked <strong>M</strong> works too.</p>
+<p class="settings-note" style="margin:0 0 10px;"><strong>Where to watch:</strong> checked automatically once an item has a TMDb id. A service you already pay for (set up under Finances &rarr; Subscriptions) shows first with a green tick; everything else is listed plainer, with rent/buy mentioned only when nothing's included free. "Check Plex" asks your home agent whether a wanted film or series is already in your library.</p>
+<p class="settings-note" style="margin:0;"><strong>Recommendations:</strong> about once a month, the source pages you list in Settings &rarr; Media recommendations are read for real suggestions, resolved against TMDb for a genre and rating, and ranked against your own preferred genres/rating floor &mdash; reviewed here before anything's added. "+ Add as want" is an ordinary add (same pipeline as above); "&#128065; Watchlist" sends it straight to your account-level Plex Watchlist instead.</p>
+</div>
+</details>
+
+<details class="settings-item" id="guide-settings-basics">
+<summary><h3>Settings basics</h3></summary>
+<div class="settings-block">
+<p class="settings-note" style="margin:0 0 10px;">Settings is organised in three tiers, all collapsible: a coloured <strong>group</strong> (Account &amp; sync, Mail, AI features...) holds several <strong>items</strong>, and the odd item holds its own sub-groups below that &mdash; so only what you're actually looking at needs to be open. The pill row at the top of the Settings tab jumps straight to a group.</p>
+<p class="settings-note" style="margin:0 0 10px;"><strong>Sync:</strong> Account &amp; sync is where your data gets between devices &mdash; a self-hosted server (your own URL + secret, the main path this app is built around) or a Google Drive backup. Connections additionally gets its own lighter per-record sync once that's set up, running alongside the whole-document sync rather than instead of it.</p>
+<p class="settings-note" style="margin:0 0 10px;"><strong>API keys:</strong> a TMDb key (free) powers film/TV/catalogue lookups across Media and the recommendations check; an Anthropic key powers every AI feature &mdash; Smart capture, photo/screenshot import, title resolution, and the rest. Both live under AI features, stored only on this device.</p>
+<p class="settings-note" style="margin:0;"><strong>Backups:</strong> Advanced &rarr; export/import a complete copy of your data as a file, independent of whichever sync method you're using.</p>
+</div>
+</details>
+
+<details class="settings-item">
+<summary><h3>More sections &mdash; not written up yet</h3></summary>
+<div class="settings-block">
+<div class="settings-note" style="margin:0;">Overview, Job Hunt, Contacts, Finances, Shopping, Menu, Business, Health, Travel, Planner, Family. Ask and I'll write one up the same way as the sections above.</div>
+</div>
 </details>
 </section>
 </div>
