@@ -29,7 +29,7 @@ const KIND_LABEL = Object.fromEntries(MEDIA_KINDS.map((k) => [k.kind, k.label]))
 // the weekly one. See state.js's blankMediaRecSource for where each
 // source's own cadence/lastCheckedAt live.
 const CADENCE_DAYS = { weekly: 7, monthly: 28 };
-const MAX_PER_SOURCE = 25; // generous cap on one page's own extraction, not a UI limit
+const MAX_PER_SOURCE = 40; // generous cap on one page's own extraction, not a UI limit
 
 function daysSince(iso) {
 if (!iso) return Infinity;

@@ -2117,13 +2117,23 @@ attachmentHints: Array.isArray(e && e.attachmentHints) ? e.attachmentHints.map((
 // path for a record type, don't build a second one). Works directly on
 // raw HTML too, same as extractRecipeFromHtml above -- Claude reads the
 // structure fine without it being stripped first.
+// Confirmed live: a Rotten Tomatoes "25 most popular" page is 126K
+// characters, and every single title on it -- the whole list, not just
+// the tail end -- starts past character 46K, well beyond the old 20K
+// cutoff. Nav/header/ad boilerplate on a real editorial page routinely
+// runs tens of thousands of characters before the actual list starts,
+// so a budget sized for "a short article" silently saw nothing at all
+// on a page shaped like this -- not a filtering problem, an extraction
+// one. 150K comfortably covers a page that size in full; extractRecipe
+// FromHtml's own 60K (ai.js, above) is the right order of magnitude for
+// a single recipe, not a 25-item list page.
 const MEDIA_RECS_MAX_TOKENS = 2500;
 async function extractMediaRecommendations(text, guidance = '') {
 const prompt = `This is text (possibly raw HTML) from an article or list recommending films, TV series, albums or books to watch/listen to (e.g. "New on Apple TV+ this month", a best-of list, a genre roundup, an all-time-best ranking).
 
 Text:
 """
-${String(text || '').slice(0, 20000)}
+${String(text || '').slice(0, 150000)}
 """
 ${guidanceInstruction(guidance)}
 List every distinct title actually recommended (not every title merely mentioned in passing, and not nav/footer/ad junk if this is HTML). For each: its exact title, a kind (one of film, tv, album, track, artist, book, podcast, other), a year if stated, a creator/director/artist/author if stated, and a short reason (why it's recommended -- genre, rating, one-line pitch from the text). If the source text doesn't actually say enough to give a real reason, leave reason as "" -- never describe the extraction itself (e.g. don't write "details cut off" or "not enough information given"), only report what's genuinely there. Skip anything too vague to be a real title.
@@ -2154,7 +2164,7 @@ const prompt = `This is the HTML of a "landing" or index page that links out to 
 
 HTML:
 """
-${String(html || '').slice(0, 20000)}
+${String(html || '').slice(0, 60000)}
 """
 ${guidanceInstruction(guidance)}
 Find the single link to the most recent/current edition -- usually the first or most prominent such link, often with a date in its own URL. Give the href exactly as it appears in the HTML (relative or absolute, don't resolve it).
