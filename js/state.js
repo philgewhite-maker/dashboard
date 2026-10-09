@@ -637,6 +637,15 @@ lastCheckedAt: '', // ISO date -- per-source, since a weekly source and a monthl
 // page first, find that current article's link, and extract from THAT
 // page instead of the landing page itself.
 jumpOff: false,
+// Some sites (confirmed live: IMDb, JustWatch) add their actual listing
+// with client-side JS after the page loads -- a plain HTML fetch gets
+// the app shell and nothing else. Ticking this routes the fetch through
+// the NAS home agent's page.render verb (a real headless browser,
+// already used elsewhere -- stockwatch.js's Agent Provocateur/cashback
+// pages) instead of the ordinary SSRF-guarded proxy. Needs the agent's
+// optional `browser` docker service running; falls back to the plain
+// fetch on any failure there rather than failing the whole source.
+needsBrowser: false,
 ...fields,
 };
 }

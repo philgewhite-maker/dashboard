@@ -82,6 +82,29 @@ console.error('Site health report failed (non-fatal):', err);
 }
 }
 
+// Routes through the NAS agent's page.render (a real headless browser)
+// when a source is marked as needing one, same pattern stockwatch.js's
+// own wantsRender already uses for Agent Provocateur/cashback pages --
+// tried first, since we already know what a plain fetch returns for a
+// JS-rendered page. Falls straight through to the ordinary proxy on ANY
+// failure (agent unreachable, browser container not running, the page
+// timing out in it): until the optional `browser` service is actually
+// up, needsBrowser costs one fast-failing request, not a broken source.
+async function fetchSourceHtml(url, source) {
+if (source.needsBrowser) {
+try {
+const { run } = await import('../homeagent.js');
+const res = await run('page.render', { urls: [url] }, { timeoutMs: 75000 });
+const page = (res && res.pages || []).find((p) => p.url === url);
+if (page && page.html) return page.html;
+} catch (err) {
+console.error(`page.render failed for "${url}", falling back to a plain fetch:`, err);
+}
+}
+const { fetchPageHtml } = await import('../files.js');
+return fetchPageHtml(url);
+}
+
 // A "jump-off" source's own URL is an evergreen index page (this.guardian.
 // com/.../the-seven-best-shows-to-stream-this-week), not the actual dated
 // article -- so the real page has to be found first. Falls back to
@@ -90,9 +113,8 @@ console.error('Site health report failed (non-fatal):', err);
 // in the status line rather than silently swallowed.
 async function resolveSourceUrl(source) {
 if (!source.jumpOff) return { url: source.url, note: '' };
-const { fetchPageHtml } = await import('../files.js');
 const { findLatestArticleUrl } = await import('../ai.js');
-const landingHtml = await fetchPageHtml(source.url);
+const landingHtml = await fetchSourceHtml(source.url, source);
 // stripHtmlForExtraction keeps every <a href> intact -- the one thing
 // this particular lookup actually needs from markup -- while dropping
 // everything else that doesn't help it find the link.
@@ -106,10 +128,9 @@ return { url: source.url, note: `found a link but couldn't resolve it (${href}),
 }
 
 async function fetchOneSource(source) {
-const { fetchPageHtml } = await import('../files.js');
 const { extractMediaRecommendations } = await import('../ai.js');
 const { url: targetUrl, note } = await resolveSourceUrl(source);
-const html = await fetchPageHtml(targetUrl);
+const html = await fetchSourceHtml(targetUrl, source);
 const items = await extractMediaRecommendations(stripHtmlForExtraction(html), `From "${source.label || source.url}", a ${source.kind} source.`);
 // Attribution points at the real dated article once resolved, not the
 // evergreen landing page -- "via" should take you to the actual piece

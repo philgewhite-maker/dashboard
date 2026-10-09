@@ -797,11 +797,14 @@ ${MEDIA_REC_SOURCE_KINDS.map((k) => `<option value="${k.kind}"${k.kind === s.kin
 <td><label class="settings-note" style="display:flex;align-items:center;gap:4px;white-space:nowrap;margin:0;" title="Tick when this URL is an evergreen index page that links out to the actual dated article (e.g. 'this week's best shows'), rather than the article itself.">
 <input type="checkbox" data-recsrc-field="jumpOff" data-recsrc-id="${s.id}"${s.jumpOff ? ' checked' : ''}> finds dated article
 </label></td>
+<td><label class="settings-note" style="display:flex;align-items:center;gap:4px;white-space:nowrap;margin:0;" title="Tick when this page adds its real content with JavaScript after loading (confirmed: IMDb, JustWatch) -- a plain fetch only ever sees the empty app shell. Routes through the NAS home agent's own browser instead; needs its optional 'browser' docker service running.">
+<input type="checkbox" data-recsrc-field="needsBrowser" data-recsrc-id="${s.id}"${s.needsBrowser ? ' checked' : ''}> needs a real browser
+</label></td>
 <td><span class="settings-note" style="margin:0;white-space:nowrap;" title="Last checked">${escapeHtml(lastChecked(s))}</span></td>
 <td><span class="del-x" style="opacity:1;" data-del-recsrc="${s.id}">&times;</span></td>
 </tr>`).join('');
 el.innerHTML = `<table class="limits-table">
-<thead><tr><th>Label</th><th>URL</th><th>Kind</th><th>Cadence</th><th>Jump-off page</th><th>Last checked</th><th></th></tr></thead>
+<thead><tr><th>Label</th><th>URL</th><th>Kind</th><th>Cadence</th><th>Jump-off page</th><th>Needs browser</th><th>Last checked</th><th></th></tr></thead>
 <tbody>${rowsHtml}</tbody>
 </table>`;
 el.querySelectorAll('[data-recsrc-field]').forEach((input) => {
