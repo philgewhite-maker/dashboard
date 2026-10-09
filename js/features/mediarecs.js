@@ -143,7 +143,57 @@ return { url: source.url, note: notes.join('; ') };
 }
 }
 
-async function fetchOneSource(source) {
+// Which MEDIA_KINDS value an IMDb titleType maps to -- the Apify Actor's
+// searchTitles mode returns "Movie"/"TV Series"/"TV Mini Series"/etc,
+// not this app's own film/tv vocabulary.
+function imdbKindFor(titleType) {
+const t = String(titleType || '').toLowerCase();
+if (t.includes('movie')) return 'film';
+if (t.includes('tv') || t.includes('series') || t.includes('mini')) return 'tv';
+return 'other';
+}
+
+// IMDb's own data via a third-party Apify Actor (logiover/imdb-scraper,
+// IMDb's web GraphQL, no browser) instead of page.render -- confirmed
+// live that page.render against imdb.com returns AWS WAF's CAPTCHA-grade
+// "Human Verification" challenge every time, byte-for-byte identical
+// (same 9516 bytes, same gokuProps blob) across different IMDb URLs and
+// minutes apart, which rules out a wait-time or stealth-setting fix: no
+// amount of patience gets past a real CAPTCHA challenge. Talking to
+// IMDb's data API directly sidesteps the WAF guarding the HTML frontend
+// entirely, rather than trying to get past it.
+//
+// Not an equivalent to a specific editorial page -- IMDb's own "staff
+// picks"/"most anticipated" curation has no API behind it -- this is a
+// popularity-sorted search instead, the closest available
+// approximation, which is why this skips resolveSourceUrl/
+// fetchSourceHtml/extractMediaRecommendations entirely: there's no URL
+// to resolve and no raw text to extract from.
+//
+// The rating floor is applied HERE, in the search filter itself, not
+// just left to resolveCandidate's own floor-drop later -- no point
+// paying Apify for results that would only get discarded afterward.
+async function fetchImdbApiSource(source, prefs) {
+const { run } = await import('../homeagent.js');
+const args = { titleTypes: ['movie', 'tvSeries'], sortBy: 'POPULARITY', maxResults: MAX_PER_SOURCE };
+if (prefs.minRating) args.minRating = prefs.minRating;
+const res = await run('imdb.search', args, { timeoutMs: 60000 });
+const items = ((res && res.items) || []).filter((it) => it && it.title).map((it) => ({
+title: String(it.title),
+kind: imdbKindFor(it.titleType),
+year: it.year ? String(it.year) : '',
+creator: '',
+reason: it.aggregateRating ? `${Number(it.aggregateRating).toFixed(1)}/10 on IMDb, popular right now` : 'Popular on IMDb right now',
+}));
+const note = items.length ? '' : `IMDb search API returned nothing${prefs.minRating ? ` above your ${prefs.minRating}/10 floor` : ''}`;
+return { items, note };
+}
+
+async function fetchOneSource(source, prefs) {
+if (source.fetchMode === 'imdbApi') {
+const { items, note } = await fetchImdbApiSource(source, prefs);
+return { items: items.slice(0, MAX_PER_SOURCE).map((it) => ({ ...it, sourceLabel: source.label || source.url, sourceUrl: source.url })), note, htmlLength: 0 };
+}
 const { extractMediaRecommendations } = await import('../ai.js');
 const { url: targetUrl, note: resolveNote } = await resolveSourceUrl(source);
 const { html, note: fetchNote } = await fetchSourceHtml(targetUrl, source);
@@ -288,7 +338,7 @@ for (let i = 0; i < sources.length; i++) {
 const source = sources[i];
 setStatus(`Reading source ${i + 1} of ${sources.length} (${source.label || source.url})…`);
 try {
-const { items, note, htmlLength } = await fetchOneSource(source);
+const { items, note, htmlLength } = await fetchOneSource(source, prefs);
 rawBatches.push(items);
 const sizeHint = htmlLength < 10000
 ? `only got ${htmlLength} bytes back -- likely a bot-block or consent page even through the real browser`

@@ -178,6 +178,7 @@ def verb_ping(_args):
         "plexConfigured": bool(PLEX_TOKEN),
         "radarrConfigured": bool(RADARR_URL and RADARR_KEY),
         "sonarrConfigured": bool(SONARR_URL and SONARR_KEY),
+        "apifyConfigured": bool(APIFY_API_TOKEN),
     }
 
 
@@ -566,6 +567,23 @@ BROWSER_TIMEOUT_MS = int(os.environ.get("BROWSER_TIMEOUT_MS", "45000"))
 BROWSER_STEALTH = os.environ.get("BROWSER_STEALTH", "true").strip().lower() not in ("false", "0", "no", "")
 
 
+# imdb.search: a third-party Apify Actor (IMDb's own web GraphQL, no
+# browser), reached for because page.render against imdb.com returns AWS
+# WAF's CAPTCHA-grade "Human Verification" challenge every time --
+# confirmed live as byte-for-byte identical (9516 bytes, same gokuProps
+# blob) across different IMDb URLs and minutes apart, which is the
+# signature of a static challenge page, not a timeout: no amount of
+# patience or stealth gets past an actual CAPTCHA. Talking to IMDb's data
+# API directly sidesteps the WAF guarding the HTML frontend rather than
+# trying to beat it. Unofficial and community-maintained -- IMDb's
+# GraphQL responses carry a licensing disclaimer restricting non-private
+# use, which is why this stays scoped to this dashboard's own personal
+# recommendations feature. Blank by default, same as BROWSER_URL: imdb.
+# search then fails with a clear "not configured" message instead of
+# silently trying an empty token.
+APIFY_API_TOKEN = os.environ.get("APIFY_API_TOKEN", "").strip()
+
+
 # Browser-grade fetching, when the image has it.
 #
 # Headers were never the whole story. Agent Provocateur serves 194KB with
@@ -786,6 +804,36 @@ def verb_page_render(args):
     return {"pages": pages}
 
 
+APIFY_IMDB_ACTOR = "logiover~imdb-scraper"
+
+
+def verb_imdb_search(args):
+    """IMDb's own GraphQL via Apify, confirmed working where page.render
+    against imdb.com cannot be -- see APIFY_API_TOKEN's own comment for
+    why. run-sync-get-dataset-items runs the Actor and waits for its
+    output in one call, so the caller gets real results back directly
+    rather than polling a separate run-status endpoint.
+    """
+    if not APIFY_API_TOKEN:
+        raise RuntimeError(
+            "imdb.search needs the Apify integration: set APIFY_API_TOKEN in .env "
+            "(see home-agent/.env.example)"
+        )
+    body = {
+        "mode": "searchTitles",
+        "titleTypes": args.get("titleTypes") or ["movie", "tvSeries"],
+        "sortBy": args.get("sortBy") or "POPULARITY",
+        "maxResults": int(args.get("maxResults") or 20),
+    }
+    if args.get("minRating"):
+        body["minRating"] = args["minRating"]
+    url = f"https://api.apify.com/v2/acts/{APIFY_IMDB_ACTOR}/run-sync-get-dataset-items?token={APIFY_API_TOKEN}"
+    # Longer than HTTP_TIMEOUT's own default: run-sync waits out the
+    # Actor's cold start plus its own query, not just a plain request.
+    items = http_json(url, method="POST", body=body, timeout=90)
+    return {"items": items if isinstance(items, list) else []}
+
+
 # Hardcoded, not accepted from the queue -- this verb can only ever do
 # the one specific thing it's named for. Runs inside browserless's own
 # /function endpoint (confirmed real and open-source from its own test
@@ -944,6 +992,7 @@ VERBS = {
     "page.fetch": verb_page_fetch,
     "page.render": verb_page_render,
     "page.colourVariants": verb_page_colour_variants,
+    "imdb.search": verb_imdb_search,
     "plex.libraries": verb_plex_libraries,
     "plex.search": verb_plex_search,
     "plex.watchlistAdd": verb_plex_watchlist_add,

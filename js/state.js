@@ -646,6 +646,20 @@ jumpOff: false,
 // optional `browser` docker service running; falls back to the plain
 // fetch on any failure there rather than failing the whole source.
 needsBrowser: false,
+// 'html' (default): fetch/render the URL above and let the AI extract
+// titles from it, same as every other source. 'imdbApi': skip the URL
+// entirely and pull titles from IMDb's own GraphQL via a third-party
+// Apify Actor instead (see mediarecs.js's fetchImdbApiSource) -- built
+// specifically because page.render against imdb.com returns AWS WAF's
+// CAPTCHA-grade "Human Verification" challenge every time, confirmed
+// live as byte-for-byte identical across different IMDb URLs and
+// different minutes apart, which rules out a wait-time fix: no amount
+// of patience gets past that. Talking to IMDb's own data API directly
+// sidesteps the WAF in front of the HTML frontend altogether. Not an
+// editorial-curation equivalent (IMDb's own "staff picks" page has no
+// API equivalent) -- this gives popularity/rating-filtered search
+// results instead, the closest available approximation.
+fetchMode: 'html',
 ...fields,
 };
 }

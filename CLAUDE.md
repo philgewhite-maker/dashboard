@@ -135,6 +135,43 @@ not signal, and the point is catching "invented a 5th variant instead
 of reusing X," or "built a new reference surface with no link back at
 all," in the cases large enough to actually risk it.
 
+## Testing a live-site scraper directly — don't just build diagnostics and hand them back
+
+`server/claude-test.php.example` (deployed as `claude-test.php` next to
+`commands.php` on the web host) is a dedicated, isolated channel for
+testing `page.render`/`page.fetch` against a real URL myself, without
+routing through the user or the real dashboard queue. It has no verb
+concept — the wire protocol can only ever do one thing, render a URL
+and hand back the HTML:
+
+```
+POST {CLAUDE_TEST_URL}?action=enqueue   {"url": "https://..."}  -> {id}
+GET  {CLAUDE_TEST_URL}?action=pending                            -> {jobs:[{id,url}]}   (the NAS agent polls this)
+POST {CLAUDE_TEST_URL}?action=result&id=<id>  {ok,html,error}    (the NAS agent posts this)
+GET  {CLAUDE_TEST_URL}?action=status&id=<id>                     -> {id,url,status,html,error}
+```
+
+All requests need header `X-Claude-Test-Secret: <CLAUDE_TEST_SECRET>`.
+**Both values are already on disk, readable right now, at
+`C:\Users\philg\OneDrive\Claude\.claude\nas-test.env`** — one directory
+above this checkout (`dashboard`'s parent), NOT inside
+`home-agent/.env` (that file only holds a `.example` with blanks in
+this checkout). Read that file directly, then use curl: enqueue, poll
+`status` every few seconds until it's `done`/`error`, read the real
+HTML back. Do not ask the user for these values or claim they're
+unavailable — this exact lookup has already been done before; check
+the file first. This is a completely separate queue/secret from the
+real dashboard (`commands.php`/`DASHBOARD_SECRET`) and from Plex/*arr
+— nothing here can touch either.
+
+**Use this instead of asking the user to relay `docker logs`, paste
+page content, or manually test a URL**, whenever the question is "what
+does this specific page actually render as" — that's exactly what this
+channel exists for. I have repeatedly forgotten this channel exists and
+defaulted to building a passive diagnostic (a byte-count note, a log
+line) for the user to run and report back, when I could have queried
+the real page myself in the same turn.
+
 ## Deploy ritual
 
 Every shipped change: bump `sw.js`'s `CACHE_NAME` and `index.html`'s

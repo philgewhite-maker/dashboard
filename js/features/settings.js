@@ -786,7 +786,11 @@ const lastChecked = (s) => s.lastCheckedAt
 : 'never';
 const rowsHtml = data.mediaRecSources.map((s) => `<tr>
 <td><input type="text" autocomplete="off" data-recsrc-field="label" data-recsrc-id="${s.id}" value="${escapeHtml(s.label || '')}" placeholder="Label"></td>
-<td><input type="text" autocomplete="off" data-recsrc-field="url" data-recsrc-id="${s.id}" value="${escapeHtml(s.url || '')}" placeholder="https://…"></td>
+<td><input type="text" autocomplete="off" data-recsrc-field="url" data-recsrc-id="${s.id}" value="${escapeHtml(s.url || '')}" placeholder="https://…"${s.fetchMode === 'imdbApi' ? ' disabled title="Not used in IMDb search API mode"' : ''}></td>
+<td><select data-recsrc-field="fetchMode" data-recsrc-id="${s.id}" title="How this source is fetched. 'IMDb search API' skips the URL above entirely and pulls popular/highly-rated titles from IMDb's own data via Apify -- built because IMDb's own pages return an unbeatable bot-check no matter how this is fetched.">
+<option value="html"${s.fetchMode !== 'imdbApi' ? ' selected' : ''}>Fetch page</option>
+<option value="imdbApi"${s.fetchMode === 'imdbApi' ? ' selected' : ''}>IMDb search API</option>
+</select></td>
 <td><select data-recsrc-field="kind" data-recsrc-id="${s.id}">
 ${MEDIA_REC_SOURCE_KINDS.map((k) => `<option value="${k.kind}"${k.kind === s.kind ? ' selected' : ''}>${escapeHtml(k.label)}</option>`).join('')}
 </select></td>
@@ -804,7 +808,7 @@ ${MEDIA_REC_SOURCE_KINDS.map((k) => `<option value="${k.kind}"${k.kind === s.kin
 <td><span class="del-x" style="opacity:1;" data-del-recsrc="${s.id}">&times;</span></td>
 </tr>`).join('');
 el.innerHTML = `<table class="limits-table">
-<thead><tr><th>Label</th><th>URL</th><th>Kind</th><th>Cadence</th><th>Jump-off page</th><th>Needs browser</th><th>Last checked</th><th></th></tr></thead>
+<thead><tr><th>Label</th><th>URL</th><th>Fetch via</th><th>Kind</th><th>Cadence</th><th>Jump-off page</th><th>Needs browser</th><th>Last checked</th><th></th></tr></thead>
 <tbody>${rowsHtml}</tbody>
 </table>`;
 el.querySelectorAll('[data-recsrc-field]').forEach((input) => {
