@@ -722,6 +722,18 @@ def _render_one_page(url):
         with urllib.request.urlopen(request, timeout=BROWSER_TIMEOUT_MS / 1000 + 15) as response:
             html = response.read(PAGE_MAX_BYTES).decode("utf-8", "replace")
         log(f"page.render {url[-40:]} -> {len(html)} bytes")
+        # A suspiciously small, consistently-sized render (confirmed live:
+        # two different IMDb URLs both came back at exactly 9516 bytes,
+        # repeatedly, minutes apart) is the signature of a static bot-
+        # check/consent page rather than a timing issue -- a genuine
+        # timeout or slow render would vary in size or fail outright, not
+        # return the identical byte count every time. Logging a snippet
+        # here (title tag + first visible text) rather than theorising
+        # further about what a browser log can't show.
+        if len(html) < 20000:
+            snippet = re.sub(r"<[^>]+>", " ", html)
+            snippet = re.sub(r"\s+", " ", snippet).strip()[:300]
+            log(f"page.render {url[-40:]} small response, text preview: {snippet!r}")
         return html, None
     except urllib.error.HTTPError as err:
         detail = ""

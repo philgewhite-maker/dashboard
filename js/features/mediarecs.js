@@ -290,11 +290,11 @@ setStatus(`Reading source ${i + 1} of ${sources.length} (${source.label || sourc
 try {
 const { items, note, htmlLength } = await fetchOneSource(source);
 rawBatches.push(items);
-if (!items.length) {
-emptySources.push(source.label || source.url);
 const sizeHint = htmlLength < 10000
 ? `only got ${htmlLength} bytes back -- likely a bot-block or consent page even through the real browser`
 : `got ${htmlLength} bytes back but found nothing to extract from them`;
+if (!items.length) {
+emptySources.push(source.label || source.url);
 reportSourceHealth(source, false, note || sizeHint);
 } else {
 reportSourceHealth(source, true, `${items.length} title${items.length === 1 ? '' : 's'} found.`);
