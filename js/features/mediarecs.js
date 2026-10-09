@@ -151,8 +151,14 @@ const items = await extractMediaRecommendations(stripHtmlForExtraction(html), `F
 // Attribution points at the real dated article once resolved, not the
 // evergreen landing page -- "via" should take you to the actual piece
 // these titles came from.
+// When a page renders fine (no fetchNote) but extraction still finds
+// nothing, the raw byte count is the only way to tell "the browser got
+// a bot-block/consent page" (a few KB) apart from "it got real content
+// but the extraction prompt missed it" (normal page size) -- confirmed
+// live need: IMDb's needsBrowser sources returned 0 items with no note
+// at all, which looked identical to a genuinely clean "nothing new".
 const note = [resolveNote, fetchNote].filter(Boolean).join('; ');
-return { items: items.slice(0, MAX_PER_SOURCE).map((it) => ({ ...it, sourceLabel: source.label || source.url, sourceUrl: targetUrl })), note };
+return { items: items.slice(0, MAX_PER_SOURCE).map((it) => ({ ...it, sourceLabel: source.label || source.url, sourceUrl: targetUrl })), note, htmlLength: (html || '').length };
 }
 
 // Can-watch-tonight beats genre match beats rating beats "it's new" -- in
@@ -202,7 +208,7 @@ const rating = (matched && matched.rating) || 0;
 // A floor meant for film/TV ratings must never silently exclude a book
 // or album TMDb has no opinion on -- only enforced when a rating is
 // actually known.
-if (prefs.minRating && rating && rating < prefs.minRating) return null;
+if (prefs.minRating && rating && rating < prefs.minRating) return { cand: null, reason: 'rating' };
 
 let providers = [];
 let onSubscription = [];
@@ -253,7 +259,7 @@ sourceLabel: raw.sourceLabel,
 sourceUrl: raw.sourceUrl,
 });
 cand.score = scoreCandidate(cand, prefs);
-return cand;
+return { cand, reason: '' };
 }
 
 async function runMediaRecsCheck({ force = false } = {}) {
@@ -282,16 +288,20 @@ for (let i = 0; i < sources.length; i++) {
 const source = sources[i];
 setStatus(`Reading source ${i + 1} of ${sources.length} (${source.label || source.url})…`);
 try {
-const { items, note } = await fetchOneSource(source);
+const { items, note, htmlLength } = await fetchOneSource(source);
 rawBatches.push(items);
 if (!items.length) {
 emptySources.push(source.label || source.url);
-reportSourceHealth(source, false, note || 'Returned nothing readable -- likely a page that needs JavaScript to show its content.');
+const sizeHint = htmlLength < 10000
+? `only got ${htmlLength} bytes back -- likely a bot-block or consent page even through the real browser`
+: `got ${htmlLength} bytes back but found nothing to extract from them`;
+reportSourceHealth(source, false, note || sizeHint);
 } else {
 reportSourceHealth(source, true, `${items.length} title${items.length === 1 ? '' : 's'} found.`);
 }
 source.lastCheckedAt = new Date().toISOString();
 if (note) sourceNotes.push(`"${source.label || source.url}" — ${note}`);
+else if (!items.length) sourceNotes.push(`"${source.label || source.url}" — ${sizeHint}`);
 } catch (err) {
 console.error(`Recommendations source failed (${source.label || source.url}):`, err);
 reportSourceHealth(source, false, err.message || String(err));
@@ -316,7 +326,7 @@ setStatus(`Checking ${deduped.length} candidate${deduped.length === 1 ? '' : 's'
 const resolved = [];
 let droppedByRating = 0;
 for (const it of deduped) {
-const cand = await resolveCandidate(it, prefs);
+const { cand } = await resolveCandidate(it, prefs);
 if (cand) resolved.push(cand); else droppedByRating++;
 }
 resolved.sort((a, b) => b.score - a.score);
@@ -389,9 +399,32 @@ if (changed) queueSave();
 return changed;
 }
 
+// How many pending items outside your preferred genres are allowed to
+// show at once -- a cap, not an exclusion. Confirmed live complaint:
+// genre was only ever a scoring nudge (+1.5/match, capped at +3), so a
+// high-rated documentary on a subscribed service easily outscored a
+// lower-rated genre match and the queue read as "flooded" with
+// documentaries/drama despite neither being ticked. The fix drops
+// nothing -- a capped-out item just stays pending and resurfaces on a
+// later render once something ahead of it gets actioned, same
+// self-healing shape as dedupeCandidates() below.
+const NON_PREFERRED_GENRE_CAP = 3;
+
 function pendingSorted() {
 dedupeCandidates();
-return (data.mediaRecCandidates || []).filter((c) => c.status === 'pending').sort((a, b) => b.score - a.score);
+const pending = (data.mediaRecCandidates || []).filter((c) => c.status === 'pending').sort((a, b) => b.score - a.score);
+const prefGenres = ((data.prefs.mediaPreferences || {}).genres || []).map((g) => g.toLowerCase());
+if (!prefGenres.length) return pending;
+let nonPreferredShown = 0;
+return pending.filter((c) => {
+// No genre data at all (unmatched title, or a kind TMDb has no
+// opinion on) -- nothing to judge it against, so it always counts
+// as a match, same caution the rating floor already takes.
+const matches = !c.genres.length || c.genres.some((g) => prefGenres.includes(g.toLowerCase()));
+if (matches) return true;
+if (nonPreferredShown < NON_PREFERRED_GENRE_CAP) { nonPreferredShown++; return true; }
+return false;
+});
 }
 
 // Every provider TMDb lists, not just the one(s) you pay for -- "on
