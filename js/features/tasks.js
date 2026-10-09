@@ -30,6 +30,25 @@ const expandedTasks = new Set();
 function taskById(id) { return data.tasks.find((t) => t.id === id); }
 function childrenOf(id) { return data.tasks.filter((t) => t.parentId === id); }
 
+// The one place a task's bucket flips to/from 'done' -- both this file's
+// own checkbox handler (bindTaskRows) and Planner's quick-close checkbox
+// (planner.js) call this, so there's exactly one copy of the logic, not
+// two that could drift. Caller is responsible for its own re-render(s)
+// and queueSave().
+function toggleTaskDone(id, done) {
+const t = taskById(id);
+if (!t) return;
+if (done) {
+t.bucket = 'done';
+t.completedAt = new Date().toISOString();
+} else {
+// Un-ticking has to land somewhere sensible; "next action" is the
+// most likely thing you meant, and it's one tap to move it on.
+t.bucket = 'next';
+t.completedAt = '';
+}
+}
+
 // One pass over the whole array instead of one filter() PER NODE -- the
 // recursive tree render below used to call childrenOf() (a full data.tasks
 // scan) once for every task in the tree, which is O(n) work times O(n)
@@ -49,6 +68,24 @@ return map;
 // lists you work from.
 function isDormant(t) {
 return !!t.bringForward && daysUntil(t.bringForward) > 0;
+}
+
+// Who shows up in Planner's draggable "priority tasks" pool -- mirrors
+// isPriorityConnection's shape (connections.js): explicit flags OR a
+// derived condition, rather than either alone. Reuses DUE_SOON_DAYS
+// (below) rather than a second copy of "7". Recurses into every
+// descendant, not just direct children, for "parent of such a task" --
+// same no-depth-limit spirit as this file's own tree rendering. Excludes
+// done/dormant tasks even if flagged urgent/important: a dormant task
+// shouldn't clutter the pool just because it's also pinned.
+function isPriorityTask(t, childrenMap, seen = new Set()) {
+if (t.bucket === 'done' || isDormant(t) || seen.has(t.id)) return false;
+seen.add(t.id);
+const dueSoon = !!t.due && daysUntil(t.due) <= DUE_SOON_DAYS;
+const startingSoon = !!t.startDate && daysUntil(t.startDate) <= 2;
+if (t.urgent || t.important || dueSoon || startingSoon) return true;
+const kids = childrenMap ? (childrenMap.get(t.id) || []) : childrenOf(t.id);
+return kids.some((k) => isPriorityTask(k, childrenMap, seen));
 }
 
 // Kinds of task that live in data.tasks but really belong to another
@@ -126,8 +163,11 @@ return (t.contexts || []).includes(contextFilter);
 
 // ---- rendering pieces ----
 
-function contextChipsHtml(t) {
-const chips = (t.contexts || []).map((c) => `<span class="task-context">${escapeHtml(c)}<span class="tag-x" data-ctx-remove="${t.id}" data-ctx-name="${escapeHtml(c)}">&times;</span></span>`).join('');
+// readOnly drops the remove-x/add-select controls -- for a display-only
+// surface like Planner's task cards, which show context but don't edit it.
+function contextChipsHtml(t, { readOnly = false } = {}) {
+const chips = (t.contexts || []).map((c) => `<span class="task-context">${escapeHtml(c)}${readOnly ? '' : `<span class="tag-x" data-ctx-remove="${t.id}" data-ctx-name="${escapeHtml(c)}">&times;</span>`}</span>`).join('');
+if (readOnly) return chips ? `<span class="task-contexts">${chips}</span>` : '';
 const available = data.taskContexts.filter((c) => !(t.contexts || []).includes(c));
 const adder = available.length
 ? `<select class="task-ctx-add" data-ctx-add="${t.id}">
@@ -136,6 +176,16 @@ ${available.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</optio
 </select>`
 : '';
 return `<span class="task-contexts">${chips}${adder}</span>`;
+}
+
+// n/m completion count for a task's direct+indirect children -- factored
+// out so Planner's task cards call the exact same thing taskRowHtml does
+// below, rather than re-deriving the count a second way.
+function childCountHtml(t, childrenMap) {
+const kids = childrenMap ? (childrenMap.get(t.id) || []) : childrenOf(t.id);
+if (!kids.length) return '';
+const doneKids = kids.filter((k) => k.bucket === 'done').length;
+return `<span class="task-kidcount">${doneKids}/${kids.length}</span>`;
 }
 
 function dateBadgeHtml(t) {
@@ -164,12 +214,11 @@ return looksLikeUrl(title) ? prettyUrl(title) : title;
 function taskRowHtml(t, depth = 0, childrenMap) {
 const kids = childrenMap ? (childrenMap.get(t.id) || []) : childrenOf(t.id);
 const openDetail = expandedTasks.has(t.id);
-const doneKids = kids.filter((k) => k.bucket === 'done').length;
 return `<div class="task-row${t.bucket === 'done' ? ' done' : ''}${isDormant(t) ? ' dormant' : ''}" data-task-row="${t.id}" style="--depth:${depth};">
 <div class="task-main">
 <input type="checkbox" class="task-check" data-task-done="${t.id}" ${t.bucket === 'done' ? 'checked' : ''}>
 <span class="task-title" data-task-expand="${t.id}">${escapeHtml(displayTaskTitle(t))}</span>
-${kids.length ? `<span class="task-kidcount">${doneKids}/${kids.length}</span>` : ''}
+${childCountHtml(t, childrenMap)}
 ${dateBadgeHtml(t)}
 ${contextChipsHtml(t)}
 <span class="del-x" style="opacity:1;" data-task-del="${t.id}">&times;</span>
@@ -641,17 +690,7 @@ notionPanel.bind(root, renderTasks);
 
 root.querySelectorAll('[data-task-done]').forEach((cb) => {
 cb.addEventListener('change', () => {
-const t = taskById(cb.dataset.taskDone);
-if (!t) return;
-if (cb.checked) {
-t.bucket = 'done';
-t.completedAt = new Date().toISOString();
-} else {
-// Un-ticking has to land somewhere sensible; "next action" is the
-// most likely thing you meant, and it's one tap to move it on.
-t.bucket = 'next';
-t.completedAt = '';
-}
+toggleTaskDone(cb.dataset.taskDone, cb.checked);
 renderTasks();
 queueSave();
 });
@@ -976,4 +1015,4 @@ revealTask(chip.dataset.openTask);
 });
 }
 
-export { renderTasks, initTasks, captureTask, isDormant, setNotionPanel, revealTask, taskChipHtml, bindTaskChips };
+export { renderTasks, initTasks, captureTask, isDormant, setNotionPanel, revealTask, taskChipHtml, bindTaskChips, isPriorityTask, buildChildrenMap, childCountHtml, contextChipsHtml, dateBadgeHtml, toggleTaskDone, displayTaskTitle, taskById };

@@ -1,10 +1,18 @@
-// The Planner tab: a 14-day grid of drop-target day boxes, fed by two
-// draggable pools (priority connections, a reusable "things to do" list),
-// each placement markable draft or firm. Trips already in data.trips get
-// their own mini version of the same grid further down the page, scoped to
-// that trip's own known dates, with its existing legs (flights/
-// accommodation/etc.) shown read-only for context. See
-// js/state.js's blankPlannerEntry/blankPlannerActivity for the data shapes.
+// The Planner tab: a rolling-horizon grid of drop-target day boxes, fed by
+// three draggable pools (priority connections, priority TASKS, a reusable
+// "things to do" list), each placement markable draft or firm. Trips
+// already in data.trips get their own mini version of the same grid
+// further down the page, scoped to that trip's own known dates, with its
+// existing legs (flights/accommodation/etc.) shown read-only for context.
+// See js/state.js's blankPlannerEntry/blankPlannerActivity for the data
+// shapes.
+//
+// A plannerEntry with kind:'task' is the one exception to "Planner
+// entries are deliberately lightweight, not real tasks" -- its taskId
+// points at a REAL data.tasks record, rendered/completed via tasks.js's
+// own dateBadgeHtml/revealTask/childCountHtml/contextChipsHtml/
+// toggleTaskDone, never a re-derived copy. See CLAUDE.md's record-
+// reference standards and taskEntryCardHtml below.
 //
 // Drag-and-drop mechanics deliberately mirror tasks.js's bindAllocation
 // (the Tasks tab's Inbox allocation workspace) rather than inventing a new
@@ -12,8 +20,9 @@
 // payload, .dragging/.over CSS classes already defined in style.css for
 // that feature and reused here unchanged. Extended for this tab's several
 // drag sources by tagging the payload's kind: "connection:<id>",
-// "activity:<id>", or "entry:<entryId>" for an already-placed card being
-// dragged to a different day.
+// "activity:<id>", "task:<id>", or "entry:<entryId>" for an already-placed
+// card being dragged to a different day OR reordered within the same day
+// (see reorderEntry).
 //
 // Also mirrors tasks.js's OTHER half: HTML5 drag-and-drop never fires at
 // all on iOS Safari specifically (confirmed -- Planner's grid was
@@ -28,6 +37,7 @@ const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platfo
 import { data, queueSave, blankPlannerEntry, blankPlannerActivity, isDormantStage, isTravelPaused, LEG_DATE_FIELDS, LEG_STATUSES, LEG_STATUS_LABELS } from '../state.js';
 import { escapeHtml, uid, todayStr, dateStrAdd, avatarHtml, hydratePhotoBackgrounds, bindForm, foldDiacritics, scrollAndFlash, parseLooseDateTime, looksLikeUrl } from '../utils.js';
 import { isPriorityConnection, renderConnPicker, bindConnPickers, expandConnection, connectionChipHtml, bindConnectionChips } from './connections.js';
+import { isPriorityTask, buildChildrenMap, childCountHtml, contextChipsHtml, dateBadgeHtml, toggleTaskDone, displayTaskTitle, taskById, captureTask, renderTasks, revealTask } from './tasks.js';
 import { switchTab } from '../tabs.js';
 import { revealTrip } from './travel.js';
 import { airbnbSegmentsForDay } from './airbnb.js';
@@ -44,12 +54,19 @@ import { formatBytes } from '../files.js';
 // per-render -- never scrolls the page during some unrelated drag
 // elsewhere in the app (e.g. the Tasks tab's own allocation drag).
 let plannerDragActive = false;
-// Which day box(es) currently show their inline "+" add-input (see
-// plannerDayHtml/addActivityToDay) -- keyed "date|tripId" since the main
+// Which day box(es) currently show their inline "+" add area (see
+// plannerDayHtml/dayAddAreaHtml) -- keyed "date|tripId" since the main
 // grid and a trip's own mini-grid can both have a box for the same date.
-// UI-only/session-only, same as every other "is this expanded" Set in
+// Value is the currently-selected DAY_ADD_KINDS key for that box (defaults
+// to 'activity' on open, preserving the one-click add-an-activity flow).
+// UI-only/session-only, same as every other "is this expanded" Set/Map in
 // the app; never persisted.
-const plannerAddOpenKeys = new Set();
+const plannerAddOpenKeys = new Map();
+// Which EMPTY day boxes have been manually expanded past their default
+// collapsed row (see plannerDayHtml) -- same session-only idiom as
+// plannerAddOpenKeys above. A day that's no longer empty renders expanded
+// regardless, so this only ever matters for a day that's STILL empty.
+const expandedPlannerDays = new Set();
 const PLANNER_SCROLL_EDGE = 90;
 const PLANNER_SCROLL_MAX_SPEED = 24;
 function autoScrollDuringPlannerDrag(e) {
@@ -79,13 +96,20 @@ return dateStr >= entry.date && dateStr <= (entry.endDate || entry.date);
 }
 
 function entriesForDay(date, tripId = '') {
-return data.plannerEntries.filter((e) => entryCoversDay(e, date) && (e.tripId || '') === (tripId || ''));
+return data.plannerEntries.filter((e) => entryCoversDay(e, date) && (e.tripId || '') === (tripId || ''))
+.sort((a, b) => a.order - b.order);
 }
 
+// The one place a placeable KIND registers which field on blankPlannerEntry
+// it points through -- a future kind (e.g. a recipe/menu item) is a
+// one-line addition here, not a change to placeEntry itself.
+const KIND_REF_FIELD = { connection: 'connectionId', activity: 'activityId', task: 'taskId' };
+
 function placeEntry(kind, refId, date, tripId = '') {
+const order = entriesForDay(date, tripId).length; // append to the end of this day's own order
 const entry = blankPlannerEntry({
-kind, date, tripId,
-[kind === 'connection' ? 'connectionId' : 'activityId']: refId,
+kind, date, tripId, order,
+[KIND_REF_FIELD[kind]]: refId,
 });
 data.plannerEntries.push(entry);
 queueSave();
@@ -164,8 +188,60 @@ entry.endDate = dateStrAdd(entry.endDate, delta);
 }
 entry.date = date;
 entry.tripId = tripId;
+entry.order = entriesForDay(date, tripId).filter((e) => e.id !== entryId).length; // append, same convention placeEntry uses
 queueSave();
 renderPlanner();
+}
+
+// Drop-between-two-cards, within the SAME existing drag/drop scheme
+// (data-planner-entry's own dragstart already sets "entry:<id>") rather
+// than a third pattern -- each already-rendered card ALSO becomes a drop
+// target (see bindPlannerEvents), computing before/after from the
+// cursor's position relative to the card's own midpoint. `order` is one
+// value per entry, not per occurrence day, so a multi-day span's
+// ordering can look arbitrary on a SECOND day it covers -- acceptable;
+// only connection/activity spans are ever multi-day, task entries always
+// single-day.
+function reorderEntry(draggedId, targetId, { before, date, tripId }) {
+const dragged = data.plannerEntries.find((e) => e.id === draggedId);
+if (!dragged || draggedId === targetId) return;
+if (dragged.endDate) {
+const delta = daysBetween(dragged.date, date);
+dragged.endDate = dateStrAdd(dragged.endDate, delta);
+}
+dragged.date = date;
+dragged.tripId = tripId;
+const list = entriesForDay(date, tripId).filter((e) => e.id !== draggedId);
+const targetIdx = list.findIndex((e) => e.id === targetId);
+const insertAt = targetIdx < 0 ? list.length : (before ? targetIdx : targetIdx + 1);
+list.splice(insertAt, 0, dragged);
+list.forEach((e, i) => { e.order = i; });
+queueSave();
+renderPlanner();
+}
+
+// A task-kind entry whose date is in the past, found on reopen, just gets
+// silently reassigned to today -- no "rolled over from X" marker, no
+// separate UI state (confirmed decision). A completed or since-deleted
+// task is left exactly where it is: dateBadgeHtml already shows nothing
+// for a done task either way, and there's nothing left to roll for a
+// deleted one. Called once from app.js, BEFORE renderAll() (renderPlanner
+// is part of it) -- see app.js's own call site for why that ordering
+// matters here specifically, unlike letting.js's accrueLettings.
+function rolloverTaskEntries() {
+const today = todayStr();
+let changed = false;
+data.plannerEntries.forEach((e) => {
+if (e.kind !== 'task' || e.date >= today) return;
+const t = taskById(e.taskId);
+if (!t || t.bucket === 'done') return;
+const delta = daysBetween(e.date, today);
+if (e.endDate) e.endDate = dateStrAdd(e.endDate, delta);
+e.date = today;
+e.order = entriesForDay(today, e.tripId).filter((x) => x.id !== e.id).length; // append, same convention moveEntry/placeEntry use
+changed = true;
+});
+if (changed) queueSave();
 }
 
 // The »/« buttons on a placed entry -- delta +1 extends the span one day
@@ -218,7 +294,8 @@ const t = String(title || '').trim();
 if (!t) return;
 const activity = blankPlannerActivity({ title: t });
 data.plannerActivities.push(activity);
-data.plannerEntries.push(blankPlannerEntry({ kind: 'activity', date, tripId, activityId: activity.id }));
+const order = entriesForDay(date, tripId).length; // append to the end, same convention placeEntry uses
+data.plannerEntries.push(blankPlannerEntry({ kind: 'activity', date, tripId, activityId: activity.id, order }));
 queueSave();
 renderPlanner();
 }
@@ -238,6 +315,39 @@ const d = new Date(`${dateStr}T00:00:00`);
 return isNaN(d) ? dateStr : d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
+// The main grid's rolling window -- was a flat 14, hardcoded separately
+// in both this file's own mainGridHtml and plannerDayTargets below (a
+// classic "two copies of the same fact" risk). Shortened to 10 per the
+// user's own ask, with data.plannerExtraDays (addPlannerExtraDay/
+// removePlannerExtraDay below) as the escape hatch for anything further
+// out that's worth seeing right now.
+const MAIN_HORIZON_DAYS = 10;
+
+// The main grid's day list: the rolling MAIN_HORIZON_DAYS-day window plus
+// any manually-added day beyond it -- the single source of truth for
+// BOTH the visual grid (mainGridHtml) and the <select> fallback's option
+// list (plannerDayTargets), so the two can never offer a different set
+// of days to place something onto.
+function mainGridDays() {
+const today = todayStr();
+const horizonEnd = dateStrAdd(today, MAIN_HORIZON_DAYS - 1);
+const base = Array.from({ length: MAIN_HORIZON_DAYS }, (_, i) => dateStrAdd(today, i));
+const extra = (data.plannerExtraDays || []).filter((d) => d > horizonEnd).sort();
+return [...base, ...extra];
+}
+
+function addPlannerExtraDay(dateStr) {
+if (!dateStr || data.plannerExtraDays.includes(dateStr)) return;
+data.plannerExtraDays.push(dateStr);
+queueSave();
+renderPlanner();
+}
+function removePlannerExtraDay(dateStr) {
+data.plannerExtraDays = data.plannerExtraDays.filter((d) => d !== dateStr);
+queueSave();
+renderPlanner();
+}
+
 // Every "day box" the grid currently renders, as {tripId, label, days[]}
 // groups -- the single source of truth behind BOTH the visual grid
 // (mainGridHtml/tripPanelHtml, built independently below) and the
@@ -246,7 +356,7 @@ return isNaN(d) ? dateStr : d.toLocaleDateString('en-GB', { weekday: 'short', da
 // Trip filtering/ordering mirrors renderPlanner's own sortedTrips exactly
 // -- a finished or undated trip has no day boxes to target either way.
 function plannerDayTargets() {
-const targets = [{ tripId: '', label: 'Main planner', days: Array.from({ length: 14 }, (_, i) => dateStrAdd(todayStr(), i)) }];
+const targets = [{ tripId: '', label: 'Main planner', days: mainGridDays() }];
 const today = todayStr();
 [...data.trips]
 .filter((t) => { const { end } = tripRangeFor(t); return !end || end >= today; })
@@ -279,7 +389,39 @@ ${scope.days.map((d) => `<option value="${d}|${scope.tripId}"${selected && d ===
 </optgroup>`).join('');
 }
 
-function plannerEntryHtml(entry) {
+// Urgent wins the one glyph slot over important when a task is somehow
+// both -- same "cost zero row width" reasoning the draft/firm redesign
+// below already used to justify a dot+arrows layout over a text pill.
+function taskFlagIconHtml(t) {
+if (!t.urgent && !t.important) return '';
+const title = t.urgent && t.important ? 'Urgent & important' : t.urgent ? 'Urgent' : 'Important';
+return `<span class="planner-task-flag" title="${title}">${t.urgent ? '🔥' : '⭐'}</span>`;
+}
+
+// A real data.tasks record placed on a day -- rendered/completed via
+// tasks.js's own helpers (dateBadgeHtml/childCountHtml/contextChipsHtml/
+// toggleTaskDone/revealTask), never a re-derived copy. Two rows: row 1 is
+// the "act on this" row (checkbox, title+link, flag, unschedule), row 2
+// is the "context" row (days-to-go badge, child count, read-only context
+// chips) -- mirrors the existing split between a connection/activity
+// card's own link row and controls row just below.
+function taskEntryCardHtml(entry, childrenMap) {
+const t = taskById(entry.taskId);
+if (!t) return ''; // the task was deleted since this was placed
+return `<div class="planner-entry alloc-card status-${entry.status} planner-task-card${t.bucket === 'done' ? ' done' : ''}" draggable="true" data-planner-entry="${entry.id}">
+<div class="planner-task-top">
+<input type="checkbox" class="task-check" data-planner-task-done="${t.id}" ${t.bucket === 'done' ? 'checked' : ''}>
+<span class="planner-entry-link planner-entry-label" data-planner-open-task="${t.id}" title="Open on the Tasks tab">${escapeHtml(displayTaskTitle(t))}</span>
+${taskFlagIconHtml(t)}
+<span class="planner-entry-remove" data-planner-remove="${entry.id}" title="Unschedule (keeps the task itself)">&times;</span>
+</div>
+<div class="planner-task-meta">${dateBadgeHtml(t)}${childCountHtml(t, childrenMap)}${contextChipsHtml(t, { readOnly: true })}</div>
+${IS_IOS ? `<select class="planner-select" data-planner-move="${entry.id}" title="Move to a different day">${plannerDaySelectOptionsHtml({ date: entry.date, tripId: entry.tripId })}</select>` : ''}
+</div>`;
+}
+
+function plannerEntryHtml(entry, childrenMap) {
+if (entry.kind === 'task') return taskEntryCardHtml(entry, childrenMap);
 let label, avatar = '', openAttr = '', activityConnChip = '', detailTitle = '', pinHtml = '';
 if (entry.kind === 'connection') {
 const c = data.connections.find((x) => x.id === entry.connectionId);
@@ -345,6 +487,10 @@ if (entry.kind === 'connection') {
 const c = data.connections.find((x) => x.id === entry.connectionId);
 return c ? c.name : null;
 }
+if (entry.kind === 'task') {
+const t = taskById(entry.taskId);
+return t ? displayTaskTitle(t) : null;
+}
 const a = data.plannerActivities.find((x) => x.id === entry.activityId);
 return a ? a.title : null;
 }
@@ -382,23 +528,72 @@ return `<span class="planner-mirror-chip" data-planner-goto-entry="${e.id}" titl
 return chips ? `<div class="planner-mirror-chips">${chips}</div>` : '';
 }
 
-function plannerDayHtml(dateStr, tripId = '', legChipsHtml = '') {
+// Kinds the day-box "+" control can add directly -- a future kind (menu
+// items/recipes, out of scope for now) is a one-line addition here plus
+// one new branch in dayAddControlHtml, not a rewrite of either.
+const DAY_ADD_KINDS = [
+{ key: 'activity', label: 'Quick to-do' },
+{ key: 'task', label: 'Task' },
+{ key: 'connection', label: 'Person' },
+];
+
+function dayAddControlHtml(dateStr, tripId, kind) {
+if (kind === 'task') {
+const placed = placedTaskIds();
+const candidates = data.tasks.filter((t) => t.bucket !== 'done' && !placed.has(t.id)).slice().reverse();
+return `<select class="planner-select" data-planner-add-task-pick="${dateStr}" data-planner-add-trip="${tripId}"><option value="">Pick an existing task…</option>${candidates.map((t) => `<option value="${t.id}">${escapeHtml(displayTaskTitle(t))}</option>`).join('')}</select>
+<input type="text" autocomplete="off" class="planner-day-add-input" placeholder="…or type a new task & press Enter" data-planner-add-newtask="${dateStr}" data-planner-add-trip="${tripId}">`;
+}
+if (kind === 'connection') {
+const placedHere = new Set(entriesForDay(dateStr, tripId).filter((e) => e.kind === 'connection').map((e) => e.connectionId));
+const candidates = data.connections.filter((c) => !isDormantStage(c.stage) && !placedHere.has(c.id));
+return `<select class="planner-select" data-planner-add-conn-pick="${dateStr}" data-planner-add-trip="${tripId}"><option value="">Pick someone…</option>${candidates.map((c) => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}</select>`;
+}
+// kind === 'activity' -- today's exact existing behaviour, unchanged
+return `<input type="text" autocomplete="off" class="planner-day-add-input" placeholder="Add & press Enter…" data-planner-add-input="${dateStr}" data-planner-add-trip="${tripId}">`;
+}
+
+function dayAddAreaHtml(dateStr, tripId, kind) {
+return `<div class="planner-day-add">
+<select class="planner-day-add-kind" data-planner-add-kind="${dateStr}" data-planner-add-trip="${tripId}">
+${DAY_ADD_KINDS.map((k) => `<option value="${k.key}"${k.key === kind ? ' selected' : ''}>${escapeHtml(k.label)}</option>`).join('')}
+</select>
+${dayAddControlHtml(dateStr, tripId, kind)}
+</div>`;
+}
+
+function plannerDayHtml(dateStr, tripId = '', legChipsHtml = '', childrenMap, isExtra = false) {
 const entries = entriesForDay(dateStr, tripId);
-const addKey = `${dateStr}|${tripId}`;
-const addOpen = plannerAddOpenKeys.has(addKey);
+const key = `${dateStr}|${tripId}`;
+const isToday = dateStr === todayStr() && !tripId;
+const unfiledCount = isToday ? data.tasks.filter((t) => t.bucket === 'inbox').length : 0;
+const removable = isExtra && dateStr < todayStr() && entries.length === 0 && !legChipsHtml;
+const removeX = removable ? `<span class="tag-x" data-planner-remove-extraday="${dateStr}" title="Remove this day">&times;</span>` : '';
+const isEmpty = entries.length === 0 && !legChipsHtml && !unfiledCount;
+const expanded = !isEmpty || expandedPlannerDays.has(key);
+
+if (!expanded) {
+return `<div class="planner-day planner-day-collapsed alloc-target" data-planner-day="${dateStr}" data-planner-trip="${tripId}">
+<span class="planner-day-collapsed-label" data-planner-day-toggle="${key}">${formatDayLabel(dateStr)}</span>${removeX}
+</div>`;
+}
+
+const addKind = plannerAddOpenKeys.get(key);
 return `<div class="planner-day alloc-target" data-planner-day="${dateStr}" data-planner-trip="${tripId}">
-<div class="planner-day-label">${formatDayLabel(dateStr)}<button type="button" class="planner-day-add-toggle" data-planner-add-toggle="${dateStr}" data-planner-add-trip="${tripId}" title="Add something for this day">+</button></div>
+<div class="planner-day-label"${isEmpty ? ` data-planner-day-toggle="${key}"` : ''}>${formatDayLabel(dateStr)}${removeX}<button type="button" class="planner-day-add-toggle" data-planner-add-toggle="${dateStr}" data-planner-add-trip="${tripId}" title="Add something for this day">+</button></div>
+${unfiledCount ? `<div class="planner-unfiled-banner" data-goto-tab="tasks" title="Go file them">${unfiledCount} unfiled task${unfiledCount === 1 ? '' : 's'}</div>` : ''}
 ${legChipsHtml}
 ${plannerMirrorChipsHtml(dateStr, tripId)}
-<div class="planner-day-entries">${entries.map(plannerEntryHtml).join('')}</div>
-${addOpen ? `<input type="text" autocomplete="off" class="planner-day-add-input" placeholder="Add & press Enter…" data-planner-add-input="${dateStr}" data-planner-add-trip="${tripId}">` : ''}
+<div class="planner-day-entries">${entries.map((e) => plannerEntryHtml(e, childrenMap)).join('')}</div>
+${addKind ? dayAddAreaHtml(dateStr, tripId, addKind) : ''}
 ${airbnbStripeHtml(dateStr)}
 </div>`;
 }
 
-function mainGridHtml() {
-const days = Array.from({ length: 14 }, (_, i) => dateStrAdd(todayStr(), i));
-return days.map((d) => plannerDayHtml(d)).join('');
+function mainGridHtml(childrenMap) {
+const days = mainGridDays();
+const base = new Set(Array.from({ length: MAIN_HORIZON_DAYS }, (_, i) => dateStrAdd(todayStr(), i)));
+return days.map((d) => plannerDayHtml(d, '', '', childrenMap, !base.has(d))).join('');
 }
 
 // Confirmed live as a real problem: a long-lived priority pool (40+
@@ -435,6 +630,26 @@ const cards = priority.map((c) => `<div class="planner-pool-card alloc-card" dra
 ${IS_IOS ? `<select class="planner-select" data-planner-place="connection:${c.id}"><option value="">Place on…</option>${plannerDaySelectOptionsHtml()}</select>` : ''}
 </div>`);
 return poolListHtml(cards, 'priority');
+}
+
+// Every task already placed somewhere (any day, any trip) as a
+// kind:'task' entry -- the pool only ever offers an UNPLACED priority
+// task, so dragging one off the pool doesn't leave a ghost duplicate
+// still sitting there.
+function placedTaskIds() {
+return new Set(data.plannerEntries.filter((e) => e.kind === 'task').map((e) => e.taskId));
+}
+
+function priorityTaskPoolHtml(childrenMap) {
+const placed = placedTaskIds();
+const priority = data.tasks.filter((t) => !placed.has(t.id) && isPriorityTask(t, childrenMap));
+if (!priority.length) return '<div class="empty">Nothing urgent, important, due within 7d, or starting within 2d right now.</div>';
+const cards = priority.map((t) => `<div class="planner-pool-card alloc-card" draggable="true" data-planner-drag="task:${t.id}">
+<span class="planner-entry-link" data-planner-open-task="${t.id}">${taskFlagIconHtml(t)}<span>${escapeHtml(displayTaskTitle(t))}</span></span>
+${dateBadgeHtml(t)}${childCountHtml(t, childrenMap)}
+${IS_IOS ? `<select class="planner-select" data-planner-place="task:${t.id}"><option value="">Place on…</option>${plannerDaySelectOptionsHtml()}</select>` : ''}
+</div>`);
+return poolListHtml(cards, 'tasks');
 }
 
 // The auto-priority filter (flag OR stage) is deliberately narrow -- this
@@ -699,7 +914,7 @@ function tripLabel(trip) {
 return trip.title || trip.destinations.join(', ') || 'Trip';
 }
 
-function tripPanelHtml(trip) {
+function tripPanelHtml(trip, childrenMap) {
 const { start, end } = tripRangeFor(trip);
 if (!start || !end || start > end) return ''; // nothing dated yet -- nothing to lay a grid out against
 const days = [];
@@ -710,7 +925,7 @@ let cur = start;
 for (let i = 0; i < 60 && cur <= end; i++) { days.push(cur); cur = dateStrAdd(cur, 1); }
 return `<div class="planner-trip-panel">
 <h3 class="planner-trip-title-link" data-planner-open-trip="${trip.id}" title="Open this trip on the Travel tab">${escapeHtml(tripLabel(trip))}</h3>
-<div class="planner-grid planner-grid-trip">${days.map((d) => plannerDayHtml(d, trip.id, legChipsForDay(trip, d))).join('')}</div>
+<div class="planner-grid planner-grid-trip">${days.map((d) => plannerDayHtml(d, trip.id, legChipsForDay(trip, d), childrenMap)).join('')}</div>
 ${destinationConnectionsPoolHtml(trip)}
 </div>`;
 }
@@ -751,14 +966,17 @@ if (changed) queueSave();
 function renderPlanner() {
 const panel = document.getElementById('planner-panel');
 if (!panel) return; // tab not in this build's DOM
+const childrenMap = buildChildrenMap();
 const priorityEl = document.getElementById('planner-priority-pool');
+const taskPoolEl = document.getElementById('planner-task-pool');
 const activitiesEl = document.getElementById('planner-activities-pool');
 const gridEl = document.getElementById('planner-main-grid');
 const tripsEl = document.getElementById('planner-trips');
 priorityEl.innerHTML = priorityPoolHtml();
+if (taskPoolEl) taskPoolEl.innerHTML = priorityTaskPoolHtml(childrenMap);
 renderConnPicker('planner-add-connection-picker', 'Add someone else&hellip;', '');
 activitiesEl.innerHTML = activitiesPoolHtml();
-gridEl.innerHTML = mainGridHtml();
+gridEl.innerHTML = mainGridHtml(childrenMap);
 const dateEventsControlsEl = document.getElementById('planner-dateevents-controls');
 const dateEventsListEl = document.getElementById('planner-dateevents-list');
 if (dateEventsControlsEl) dateEventsControlsEl.innerHTML = dateEventsControlsHtml();
@@ -804,7 +1022,7 @@ return as.localeCompare(bs) || a.createdAt.localeCompare(b.createdAt);
 // the very next time this tab renders, it catches up. Cheap and
 // idempotent when there's nothing new to add.
 sortedTrips.forEach(syncTripPeopleEntries);
-const tripPanels = sortedTrips.map(tripPanelHtml).filter(Boolean).join('');
+const tripPanels = sortedTrips.map((trip) => tripPanelHtml(trip, childrenMap)).filter(Boolean).join('');
 tripsEl.innerHTML = tripPanels || '<div class="empty">No trips with known dates yet — add dates on the <span class="inline-goto-link" data-goto-tab="travel">Travel tab</span> and they\'ll show up here.</div>';
 hydratePhotoBackgrounds(priorityEl);
 hydratePhotoBackgrounds(gridEl);
@@ -858,6 +1076,29 @@ card.classList.add('dragging');
 plannerDragActive = true;
 });
 card.addEventListener('dragend', () => { card.classList.remove('dragging'); plannerDragActive = false; });
+// Drop-between-two-cards (within-day reordering) -- only intercepts an
+// already-placed entry: a pool-card payload dropped on a card's edge
+// still bubbles up to the day zone's own drop handler below and places
+// normally, so today's placement behaviour is untouched.
+card.addEventListener('dragover', (e) => {
+if (!e.dataTransfer.types.includes('text/plain')) return;
+e.preventDefault();
+e.stopPropagation(); // keep the day box's own 'over' highlight from double-firing underneath
+const before = (e.clientY - card.getBoundingClientRect().top) < card.offsetHeight / 2;
+card.classList.toggle('drop-before', before);
+card.classList.toggle('drop-after', !before);
+});
+card.addEventListener('dragleave', () => card.classList.remove('drop-before', 'drop-after'));
+card.addEventListener('drop', (e) => {
+const payload = e.dataTransfer.getData('text/plain');
+if (!payload.startsWith('entry:')) return; // not an already-placed card -- let it bubble to the day zone
+e.preventDefault();
+e.stopPropagation();
+const before = card.classList.contains('drop-before');
+card.classList.remove('drop-before', 'drop-after');
+const zone = card.closest('[data-planner-day]');
+reorderEntry(payload.slice('entry:'.length), card.dataset.plannerEntry, { before, date: zone.dataset.plannerDay, tripId: zone.dataset.plannerTrip || '' });
+});
 });
 root.querySelectorAll('[data-planner-day]').forEach((zone) => {
 zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('over'); });
@@ -873,18 +1114,53 @@ const refId = payload.slice(sep + 1);
 const date = zone.dataset.plannerDay;
 const tripId = zone.dataset.plannerTrip || '';
 if (kind === 'entry') moveEntry(refId, date, tripId);
-else if (kind === 'connection' || kind === 'activity') placeEntry(kind, refId, date, tripId);
+else if (kind === 'connection' || kind === 'activity' || kind === 'task') placeEntry(kind, refId, date, tripId);
 });
 });
 root.querySelectorAll('[data-planner-add-toggle]').forEach((btn) => {
 btn.addEventListener('click', () => {
 const key = `${btn.dataset.plannerAddToggle}|${btn.dataset.plannerAddTrip}`;
-if (plannerAddOpenKeys.has(key)) plannerAddOpenKeys.delete(key); else plannerAddOpenKeys.add(key);
+if (plannerAddOpenKeys.has(key)) plannerAddOpenKeys.delete(key); else plannerAddOpenKeys.set(key, 'activity');
 renderPlanner();
 if (plannerAddOpenKeys.has(key)) {
 const input = document.querySelector(`[data-planner-add-input="${btn.dataset.plannerAddToggle}"][data-planner-add-trip="${btn.dataset.plannerAddTrip}"]`);
 if (input) input.focus();
 }
+});
+});
+root.querySelectorAll('[data-planner-add-kind]').forEach((sel) => {
+sel.addEventListener('change', () => {
+const key = `${sel.dataset.plannerAddKind}|${sel.dataset.plannerAddTrip}`;
+plannerAddOpenKeys.set(key, sel.value);
+renderPlanner();
+});
+});
+root.querySelectorAll('[data-planner-add-task-pick]').forEach((sel) => {
+sel.addEventListener('change', () => {
+if (!sel.value) return;
+const key = `${sel.dataset.plannerAddTaskPick}|${sel.dataset.plannerAddTrip}`;
+plannerAddOpenKeys.delete(key); // close the add-form on success, same convention addActivityToDay already follows
+placeEntry('task', sel.value, sel.dataset.plannerAddTaskPick, sel.dataset.plannerAddTrip);
+});
+});
+root.querySelectorAll('[data-planner-add-newtask]').forEach((input) => {
+input.addEventListener('keydown', (e) => {
+if (e.key !== 'Enter' || !input.value.trim()) return;
+e.preventDefault();
+const key = `${input.dataset.plannerAddNewtask}|${input.dataset.plannerAddTrip}`;
+plannerAddOpenKeys.delete(key);
+// Straight to 'next', not 'inbox' -- scheduling it onto a day IS the
+// triage step, it shouldn't also need filing separately afterwards.
+const task = captureTask({ title: input.value.trim(), bucket: 'next' });
+placeEntry('task', task.id, input.dataset.plannerAddNewtask, input.dataset.plannerAddTrip);
+});
+});
+root.querySelectorAll('[data-planner-add-conn-pick]').forEach((sel) => {
+sel.addEventListener('change', () => {
+if (!sel.value) return;
+const key = `${sel.dataset.plannerAddConnPick}|${sel.dataset.plannerAddTrip}`;
+plannerAddOpenKeys.delete(key);
+placeEntry('connection', sel.value, sel.dataset.plannerAddConnPick, sel.dataset.plannerAddTrip);
 });
 });
 root.querySelectorAll('[data-planner-add-input]').forEach((input) => {
@@ -953,6 +1229,40 @@ const id = el.dataset.plannerOpenConnection;
 switchTab('dating');
 expandConnection(id);
 setTimeout(() => scrollAndFlash(`[data-conn-row="${id}"]`), 80);
+});
+});
+// CLAUDE.md's task record-reference standard, verbatim: switchTab('tasks')
+// -> revealTask(id). revealTask's own returnTo param means closing the
+// expanded detail there lands back on Planner.
+root.querySelectorAll('[data-planner-open-task]').forEach((el) => {
+el.addEventListener('click', (e) => {
+e.stopPropagation();
+switchTab('tasks');
+revealTask(el.dataset.plannerOpenTask, { returnTo: 'planner' });
+});
+});
+// Quick-close -- calls the SAME toggleTaskDone the Tasks tab's own
+// checkbox calls (tasks.js), so there's exactly one copy of the bucket-
+// flip logic. Keeps both tabs' DOM in sync immediately rather than only
+// on next full reload.
+root.querySelectorAll('[data-planner-task-done]').forEach((cb) => {
+cb.addEventListener('change', (e) => {
+e.stopPropagation();
+toggleTaskDone(cb.dataset.plannerTaskDone, cb.checked);
+queueSave();
+renderTasks();
+renderPlanner();
+});
+});
+root.querySelectorAll('[data-planner-remove-extraday]').forEach((x) => {
+x.addEventListener('click', (e) => { e.stopPropagation(); removePlannerExtraDay(x.dataset.plannerRemoveExtraday); });
+});
+root.querySelectorAll('[data-planner-day-toggle]').forEach((el) => {
+el.addEventListener('click', (e) => {
+e.stopPropagation();
+const key = el.dataset.plannerDayToggle;
+if (expandedPlannerDays.has(key)) expandedPlannerDays.delete(key); else expandedPlannerDays.add(key);
+renderPlanner();
 });
 });
 root.querySelectorAll('[data-planner-open-trip]').forEach((el) => {
@@ -1146,6 +1456,13 @@ if (entry.kind === 'activity') {
 const a = data.plannerActivities.find((x) => x.id === entry.activityId);
 return a ? a.title : 'Personal plans';
 }
+// A task's own title is fine to push as the event TITLE -- it's yours,
+// not a connection's name, so none of the privacy reasoning above
+// (never surface who a date is with) applies here.
+if (entry.kind === 'task') {
+const t = taskById(entry.taskId);
+return t ? displayTaskTitle(t) : 'Personal plans';
+}
 const sibling = data.plannerEntries.find((e) => e.kind === 'activity' && e.date === entry.date && (e.tripId || '') === (entry.tripId || ''));
 if (sibling) {
 const a = data.plannerActivities.find((x) => x.id === sibling.activityId);
@@ -1158,6 +1475,10 @@ function plannerEntrySummaryLabel(entry) {
 if (entry.kind === 'connection') {
 const c = data.connections.find((x) => x.id === entry.connectionId);
 return c ? c.name : '(deleted connection)';
+}
+if (entry.kind === 'task') {
+const t = taskById(entry.taskId);
+return t ? displayTaskTitle(t) : '(deleted task)';
 }
 const a = data.plannerActivities.find((x) => x.id === entry.activityId);
 return a ? a.title : '(removed activity)';
@@ -1239,6 +1560,16 @@ renderPlanner();
 function initPlanner() {
 bindConnPickers();
 bindConnectionChips(); // for the optional connection chip on an activity card/entry, see plannerEntryHtml/activitiesPoolHtml
+const addDayBtn = document.getElementById('planner-add-day-btn');
+const addDayInput = document.getElementById('planner-add-day-input');
+if (addDayBtn && addDayInput) {
+addDayBtn.addEventListener('click', () => { addDayInput.style.display = ''; addDayInput.showPicker?.(); addDayInput.focus(); });
+addDayInput.addEventListener('change', () => {
+if (addDayInput.value) addPlannerExtraDay(addDayInput.value);
+addDayInput.value = '';
+addDayInput.style.display = 'none';
+});
+}
 const activityInput = document.getElementById('planner-activity-input');
 const activityResolveBtn = document.getElementById('planner-activity-resolve-btn');
 bindForm('planner-activity-form', () => {
@@ -1340,4 +1671,4 @@ revealPlannerActivity(chip.dataset.openPlannerActivity);
 });
 }
 
-export { renderPlanner, initPlanner, revealPlannerEntry, revealPlannerActivity, plannerActivityChipHtml, bindPlannerActivityChips, syncTripPeopleEntries, placeEntry, addActivityToDay, createDateEventFromExtraction, createDateEventsFromExtractions };
+export { renderPlanner, initPlanner, revealPlannerEntry, revealPlannerActivity, plannerActivityChipHtml, bindPlannerActivityChips, syncTripPeopleEntries, placeEntry, addActivityToDay, createDateEventFromExtraction, createDateEventsFromExtractions, rolloverTaskEntries, addPlannerExtraDay, removePlannerExtraDay };

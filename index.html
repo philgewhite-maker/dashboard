@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v529</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v530</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -2682,6 +2682,10 @@ Needs the WHOLE exported folder tree (hundreds of files, not a single JSON) &mda
 </div>
 </div>
 <div class="planner-pool">
+<h3>Priority tasks</h3>
+<div class="planner-pool-list" id="planner-task-pool"></div>
+</div>
+<div class="planner-pool">
 <h3>Things to do</h3>
 <div class="planner-pool-list" id="planner-activities-pool"></div>
 <div class="add-form" id="planner-activity-form" style="margin-top:8px;">
@@ -2692,6 +2696,10 @@ Needs the WHOLE exported folder tree (hundreds of files, not a single JSON) &mda
 </div>
 </div>
 
+<div class="planner-grid-controls" style="margin:6px 0;">
+<button type="button" class="todo-add-btn" id="planner-add-day-btn">+ Add a specific day</button>
+<input type="date" id="planner-add-day-input" style="display:none;">
+</div>
 <div class="planner-grid" id="planner-main-grid"></div>
 
 <div class="planner-dateevents-section" style="margin-top:16px;">

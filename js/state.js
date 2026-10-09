@@ -496,6 +496,17 @@ forConnectionId: '', wantSpec: null, wantState: 'active',
 // queueSave()d at every stage instead, so reopening the editor -- even
 // after a reload -- reads back exactly where it left off.
 colourSearch: null,
+// Manually pinned priority, same spirit as blankConnection's
+// priorityFlag -- feeds isPriorityTask (tasks.js) alongside the due/
+// startDate-derived conditions, so a task can earn a spot in Planner's
+// priority pool either by being flagged OR by its own dates, not only one.
+urgent: false,
+important: false,
+// ISO date -- when work can/should begin, distinct from `due` (when it
+// must be DONE by). Lets isPriorityTask surface something starting soon
+// even with no due date at all (e.g. a trip-prep task with no hard
+// deadline but a clear "can't start before X").
+startDate: '',
 ...fields,
 };
 }
@@ -959,24 +970,35 @@ transfer: ['departTime'],
 other: ['when'],
 };
 
-// One dated placement of a connection or an activity into a day box --
-// either the main 14-day grid (tripId: '') or a specific trip's own
-// mini-planner (tripId set). Deliberately NOT reusing data.tasks: a
-// placement isn't a GTD action with contexts/bucket/due-date semantics,
-// it's "this person/activity, this day, draft or firm" -- closer in shape
-// to a trip leg's passengers list than to anything in tasks.js.
+// One dated placement of a connection, an activity, or a real task into a
+// day box -- either the main rolling-horizon grid (tripId: '') or a
+// specific trip's own mini-planner (tripId set). For 'connection'/
+// 'activity', deliberately NOT reusing data.tasks: a placement isn't a
+// GTD action with contexts/bucket/due-date semantics, it's "this person/
+// activity, this day, draft or firm" -- closer in shape to a trip leg's
+// passengers list than to anything in tasks.js. 'task' is the one
+// exception, added for Planner's priority-task pool: taskId points at a
+// REAL data.tasks record, and it's rendered/completed via tasks.js's own
+// dateBadgeHtml/revealTask/childCountHtml/contextChipsHtml/toggleTaskDone
+// -- see CLAUDE.md's record-reference standards for why this one kind
+// doesn't get its own shadow copy of those fields.
 function blankPlannerEntry(fields = {}) {
 return {
 id: uid(),
 date: '', // ISO yyyy-mm-dd -- the day box this sits in (its span's START, once endDate is set)
 endDate: '', // '' means single-day (today's behaviour); set means this entry also covers every day through endDate inclusive -- see planner.js's entryCoversDay
 tripId: '', // '' for the main grid, else the trip this entry belongs to
-kind: 'connection', // 'connection' | 'activity'
+kind: 'connection', // 'connection' | 'activity' | 'task'
 connectionId: '', // set when kind === 'connection'
 activityId: '', // set when kind === 'activity'
+taskId: '', // set when kind === 'task' -- a real data.tasks id, not a copy
 status: 'draft', // 'draft' | 'firm'
 notes: '',
 calendarPushed: false, // true once pushed -- lets the push UI show what's already gone out
+// Manual position within this date+tripId's own list, renumbered 0..n-1
+// on every reorder (see planner.js's reorderEntry) -- small lists, so
+// full renumbering per change is simpler than a fractional scheme.
+order: 0,
 createdAt: new Date().toISOString(),
 ...fields,
 };
@@ -2175,6 +2197,15 @@ data.plannerEntries = data.plannerEntries.map((e) => ({ ...blankPlannerEntry(), 
 // "nothing left to route it" reasoning as the trip filter itself.
 const plannerTripIds = new Set(data.trips.map((t) => t.id));
 data.plannerEntries = data.plannerEntries.filter((e) => !e.tripId || plannerTripIds.has(e.tripId));
+// Same reasoning, for a task-kind entry whose task was since deleted --
+// nothing left to render, nothing left to complete.
+const plannerTaskIds = new Set(data.tasks.map((t) => t.id));
+data.plannerEntries = data.plannerEntries.filter((e) => e.kind !== 'task' || plannerTaskIds.has(e.taskId));
+// Manually-added days beyond Planner's rolling horizon (see planner.js's
+// MAIN_HORIZON_DAYS) -- deduped, format-checked so a corrupt value can't
+// crash dateStrAdd/Date parsing downstream.
+if (!Array.isArray(data.plannerExtraDays)) data.plannerExtraDays = [];
+data.plannerExtraDays = [...new Set(data.plannerExtraDays.filter((d) => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)))];
 if (!Array.isArray(data.airbnbListings)) data.airbnbListings = [];
 data.airbnbListings = data.airbnbListings.map((l) => ({ ...blankAirbnbListing(), ...l, id: l.id || uid() }));
 if (!Array.isArray(data.airbnbReservations)) data.airbnbReservations = [];

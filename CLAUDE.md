@@ -90,10 +90,18 @@ message, per the general rule above.
 
 **A task**: title + due badge (reuse `tasks.js`'s `dateBadgeHtml` shape,
 don't reimplement it) + a link running `switchTab('tasks')` →
-`revealTask(id)`. NOT the same as a connection's own `todos` list or
-Planner's `plannerActivities`/`plannerEntries` — those are deliberately
-lighter, never created via `captureTask`, no due/bucket/source fields;
-don't force them to look like real tasks.
+`revealTask(id)`. A connection's own `todos` list and Planner's
+`plannerActivities`/`plannerEntries` with `kind: 'connection'` or
+`kind: 'activity'` remain deliberately lighter — never created via
+`captureTask`, no due/bucket/source fields; don't force those to look
+like real tasks. **Exception, as of this writing**: a `plannerEntry`
+with `kind: 'task'` is NOT lightweight — its `taskId` points at a real
+`data.tasks` record, and it renders via the SAME `dateBadgeHtml`/
+`revealTask`/`childCountHtml`/`contextChipsHtml(…, {readOnly:true})`/
+`toggleTaskDone` helpers every other task surface uses (see
+`js/features/planner.js`'s `taskEntryCardHtml`). Ticking it done flips
+the real task's `bucket`, visible on the Tasks tab too — this is the one
+planner-entry kind that is a real task, not a lighter shadow of one.
 
 **A known value found inside free text**, offered as "click to add to a
 field": the shared detector `buildFlagMatcher`/`applyFlagMatcher`

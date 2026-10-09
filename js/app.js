@@ -39,7 +39,7 @@ import { initMediaRecs } from './features/mediarecs.js';
 import { initFamily } from './features/family.js';
 import { initVoiceCapture } from './features/voicecapture.js';
 import { initTravel } from './features/travel.js';
-import { initPlanner } from './features/planner.js';
+import { initPlanner, rolloverTaskEntries } from './features/planner.js';
 import { initTelegramFamily } from './features/telegramfamily.js';
 // Photos whose bytes aren't on this device are fetched from your own host.
 // Registered rather than imported: the implementation reaches state.js, and
@@ -195,6 +195,11 @@ initSaveFlush();
 // server-held photo as missing.
 setPhotoFallback(serverPhotoUrl);
 await loadData();
+// Before renderAll(), not after (unlike accrueLettings below) -- renderAll
+// DOES render Planner, so a rolled-over task needs to already be on
+// today's date by the first paint, not fixed up a moment later in a
+// visible correction flash.
+rolloverTaskEntries();
 // Both read device-local display preferences that renderAll() depends on
 // (which tag fields are visible, which overview sections are folded), so
 // they have to land before the first paint or it renders once wrong.
