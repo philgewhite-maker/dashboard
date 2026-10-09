@@ -88,21 +88,32 @@ console.error('Site health report failed (non-fatal):', err);
 // tried first, since we already know what a plain fetch returns for a
 // JS-rendered page. Falls straight through to the ordinary proxy on ANY
 // failure (agent unreachable, browser container not running, the page
-// timing out in it): until the optional `browser` service is actually
-// up, needsBrowser costs one fast-failing request, not a broken source.
+// timing out in it) -- but unlike a bare try/catch that swallows WHY,
+// this returns a note the caller can surface. Confirmed live as a real
+// diagnosis gap: a silent fallback here looked EXACTLY like needsBrowser
+// doing nothing at all, when the actual cause (agent.py's own
+// verb_page_render: "page.render needs the browser container: set
+// BROWSER_URL... then docker compose up -d") was sitting in the
+// console the whole time, never reaching the status line a real user
+// actually reads.
 async function fetchSourceHtml(url, source) {
 if (source.needsBrowser) {
 try {
 const { run } = await import('../homeagent.js');
 const res = await run('page.render', { urls: [url] }, { timeoutMs: 75000 });
 const page = (res && res.pages || []).find((p) => p.url === url);
-if (page && page.html) return page.html;
+if (page && page.html) return { html: page.html, note: '' };
+const reason = (page && page.error) || 'page.render returned no content for this page';
+const { fetchPageHtml } = await import('../files.js');
+return { html: await fetchPageHtml(url), note: `needs-a-real-browser fetch failed (${reason}) -- used a plain fetch instead` };
 } catch (err) {
 console.error(`page.render failed for "${url}", falling back to a plain fetch:`, err);
+const { fetchPageHtml } = await import('../files.js');
+return { html: await fetchPageHtml(url), note: `needs-a-real-browser fetch failed (${err.message || err}) -- used a plain fetch instead` };
 }
 }
 const { fetchPageHtml } = await import('../files.js');
-return fetchPageHtml(url);
+return { html: await fetchPageHtml(url), note: '' };
 }
 
 // A "jump-off" source's own URL is an evergreen index page (this.guardian.
@@ -114,27 +125,33 @@ return fetchPageHtml(url);
 async function resolveSourceUrl(source) {
 if (!source.jumpOff) return { url: source.url, note: '' };
 const { findLatestArticleUrl } = await import('../ai.js');
-const landingHtml = await fetchSourceHtml(source.url, source);
+const { html: landingHtml, note: fetchNote } = await fetchSourceHtml(source.url, source);
+const notes = [fetchNote].filter(Boolean);
 // stripHtmlForExtraction keeps every <a href> intact -- the one thing
 // this particular lookup actually needs from markup -- while dropping
 // everything else that doesn't help it find the link.
 const href = await findLatestArticleUrl(stripHtmlForExtraction(landingHtml), `Landing page for "${source.label || source.url}".`);
-if (!href) return { url: source.url, note: `couldn't find this ${source.cadence === 'weekly' ? "week's" : "month's"} article link, read the landing page itself instead` };
+if (!href) {
+notes.push(`couldn't find this ${source.cadence === 'weekly' ? "week's" : "month's"} article link, read the landing page itself instead`);
+return { url: source.url, note: notes.join('; ') };
+}
 try {
-return { url: new URL(href, source.url).href, note: '' };
+return { url: new URL(href, source.url).href, note: notes.join('; ') };
 } catch (err) {
-return { url: source.url, note: `found a link but couldn't resolve it (${href}), read the landing page itself instead` };
+notes.push(`found a link but couldn't resolve it (${href}), read the landing page itself instead`);
+return { url: source.url, note: notes.join('; ') };
 }
 }
 
 async function fetchOneSource(source) {
 const { extractMediaRecommendations } = await import('../ai.js');
-const { url: targetUrl, note } = await resolveSourceUrl(source);
-const html = await fetchSourceHtml(targetUrl, source);
+const { url: targetUrl, note: resolveNote } = await resolveSourceUrl(source);
+const { html, note: fetchNote } = await fetchSourceHtml(targetUrl, source);
 const items = await extractMediaRecommendations(stripHtmlForExtraction(html), `From "${source.label || source.url}", a ${source.kind} source.`);
 // Attribution points at the real dated article once resolved, not the
 // evergreen landing page -- "via" should take you to the actual piece
 // these titles came from.
+const note = [resolveNote, fetchNote].filter(Boolean).join('; ');
 return { items: items.slice(0, MAX_PER_SOURCE).map((it) => ({ ...it, sourceLabel: source.label || source.url, sourceUrl: targetUrl })), note };
 }
 
@@ -234,7 +251,7 @@ const { items, note } = await fetchOneSource(source);
 rawBatches.push(items);
 if (!items.length) {
 emptySources.push(source.label || source.url);
-reportSourceHealth(source, false, 'Returned nothing readable -- likely a page that needs JavaScript to show its content.');
+reportSourceHealth(source, false, note || 'Returned nothing readable -- likely a page that needs JavaScript to show its content.');
 } else {
 reportSourceHealth(source, true, `${items.length} title${items.length === 1 ? '' : 's'} found.`);
 }
