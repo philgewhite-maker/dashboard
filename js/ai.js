@@ -2129,16 +2129,19 @@ attachmentHints: Array.isArray(e && e.attachmentHints) ? e.attachmentHints.map((
 // a single recipe, not a 25-item list page.
 //
 // The OUTPUT budget needed the same rethink once the input one grew:
-// confirmed live, a RadioTimes page hit stop_reason:'max_tokens' at the
-// old 2500 here -- reading 150K characters now genuinely finds more
-// real titles than a short article did, and each one costs real JSON
-// (title/kind/year/creator/reason). The response is a single top-level
-// OBJECT ({"items":[...]}), not an array, so extractJson's own
-// salvageArrayPrefix repair (which only handles a cut-off array) can't
-// recover anything from a truncated reply here -- a hit on this ceiling
-// loses the WHOLE source's results, not just its last few items, so the
-// budget needs real headroom rather than a tight estimate.
-const MEDIA_RECS_MAX_TOKENS = 8000;
+// confirmed live TWICE now -- a RadioTimes page at the old 2500, then a
+// Rotten Tomatoes "best new movies" page at 8000 -- stop_reason:
+// 'max_tokens' before the JSON finished. A response shaped as a
+// top-level OBJECT ({"items":[...]}) can't be partially recovered by
+// extractJson's own salvageArrayPrefix repair (which only handles a
+// cut-off ARRAY), so hitting the ceiling used to lose the WHOLE source's
+// results, not just its last few items -- confirmed, "Best New Movies
+// Ranked by Tomatometer" failed outright rather than returning however
+// many titles it got through. Reply format changed below to a bare
+// array for exactly this reason: salvage now recovers everything found
+// before the cutoff instead of nothing. The raised ceiling is headroom
+// on top of that, not the only defence.
+const MEDIA_RECS_MAX_TOKENS = 12000;
 // Deliberately its own constant, not MAIL_EXTRACT_MODEL -- this is
 // closed-schema structured extraction (title/kind/year/creator/reason
 // from text, nothing resembling date resolution or picking-which-trip
@@ -2166,9 +2169,14 @@ List every distinct title actually recommended (not every title merely mentioned
 
 title MUST be the exact, real title of the work, spelled as it would appear in a streaming catalogue or film database -- never a paraphrased description standing in for a title you don't actually know. "Australian MMA drama" and "teen romcom about a nerd and a prom queen" are NOT titles. A long page often drifts past its own curated list into other sections (related-article teasers, cross-promotion for other pieces) where a title is never actually stated, only described -- skip those entirely rather than inventing a label for them. If you are not looking at the real title as text, leave it out.
 
-Reply with ONLY a JSON object, no other text, no markdown fences: {"items":[{"title":"","kind":"film","year":"","creator":"","reason":""}]}`;
+Reply with ONLY a JSON array, no other text, no markdown fences, no wrapping object: [{"title":"","kind":"film","year":"","creator":"","reason":""}]`;
 const { data: raw } = await callTextJson(prompt, MEDIA_RECS_MAX_TOKENS, MEDIA_RECS_MODEL, 'Media recommendations', 'low');
-const items = Array.isArray(raw && raw.items) ? raw.items : [];
+// A bare array at the top level (not {"items":[...]}) ON PURPOSE -- see
+// MEDIA_RECS_MAX_TOKENS's own comment: this is what lets a truncated
+// reply salvage every complete item found before the cutoff instead of
+// losing the whole source. The .items fallback is only for a model that
+// ignores the instruction and wraps anyway.
+const items = Array.isArray(raw) ? raw : (Array.isArray(raw && raw.items) ? raw.items : []);
 const validKinds = new Set(['film', 'tv', 'album', 'track', 'artist', 'book', 'podcast', 'other']);
 return items.map((it) => ({
 title: String((it && it.title) || '').trim(),
