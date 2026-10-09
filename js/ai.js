@@ -2139,6 +2139,21 @@ attachmentHints: Array.isArray(e && e.attachmentHints) ? e.attachmentHints.map((
 // loses the WHOLE source's results, not just its last few items, so the
 // budget needs real headroom rather than a tight estimate.
 const MEDIA_RECS_MAX_TOKENS = 8000;
+// Deliberately its own constant, not MAIL_EXTRACT_MODEL -- this is
+// closed-schema structured extraction (title/kind/year/creator/reason
+// from text, nothing resembling date resolution or picking-which-trip
+// judgment), not the "varied real body, genuine judgement" tier
+// MAIL_EXTRACT_MODEL's own comment describes. Confirmed live: 28 calls
+// at Sonnet cost $2.68 for 795K input tokens before the HTML got
+// stripped down -- for a task this mechanical, worth the same test as
+// every other Haiku-candidate call this session, and simple extraction
+// is a much easier bar to clear than CAPTURE_INTENT_MODEL/SHOPPING_
+// SEARCH_MODEL's own reasoning-heavy jobs. rankMediaCandidates (the
+// optional AI top-up, below) stays on MAIL_EXTRACT_MODEL deliberately --
+// its whole point is qualitative judgement a cheap model is the wrong
+// tool for, and it runs once per full check, not once per source, so
+// its own cost contribution here was never the problem.
+const MEDIA_RECS_MODEL = 'claude-haiku-5-5';
 async function extractMediaRecommendations(text, guidance = '') {
 const prompt = `This is text (possibly raw HTML) from an article or list recommending films, TV series, albums or books to watch/listen to (e.g. "New on Apple TV+ this month", a best-of list, a genre roundup, an all-time-best ranking).
 
@@ -2152,7 +2167,7 @@ List every distinct title actually recommended (not every title merely mentioned
 title MUST be the exact, real title of the work, spelled as it would appear in a streaming catalogue or film database -- never a paraphrased description standing in for a title you don't actually know. "Australian MMA drama" and "teen romcom about a nerd and a prom queen" are NOT titles. A long page often drifts past its own curated list into other sections (related-article teasers, cross-promotion for other pieces) where a title is never actually stated, only described -- skip those entirely rather than inventing a label for them. If you are not looking at the real title as text, leave it out.
 
 Reply with ONLY a JSON object, no other text, no markdown fences: {"items":[{"title":"","kind":"film","year":"","creator":"","reason":""}]}`;
-const { data: raw } = await callTextJson(prompt, MEDIA_RECS_MAX_TOKENS, MAIL_EXTRACT_MODEL, 'Media recommendations', 'low');
+const { data: raw } = await callTextJson(prompt, MEDIA_RECS_MAX_TOKENS, MEDIA_RECS_MODEL, 'Media recommendations', 'low');
 const items = Array.isArray(raw && raw.items) ? raw.items : [];
 const validKinds = new Set(['film', 'tv', 'album', 'track', 'artist', 'book', 'podcast', 'other']);
 return items.map((it) => ({
@@ -2171,7 +2186,11 @@ reason: String((it && it.reason) || '').trim(),
 // week's own /2026/jan/09/-dated piece). This finds that link rather than
 // extracting recommendations from the landing page itself, which is
 // usually just a stub pointing at the real thing.
-const FIND_LATEST_MAX_TOKENS = 600;
+// Was 600 under an always-silent-unless-asked model; same adaptive-
+// thinking headroom reasoning as every Haiku migration this session --
+// this is a "find one link" lookup, simpler even than the extraction
+// above, so MEDIA_RECS_MODEL applies here too.
+const FIND_LATEST_MAX_TOKENS = 1200;
 async function findLatestArticleUrl(html, guidance = '') {
 const prompt = `This is the HTML of a "landing" or index page that links out to the CURRENT (most recent) edition of a recurring article -- e.g. this week's or this month's "what to watch" piece. The actual recommendations live on that linked page, not here.
 
@@ -2183,7 +2202,7 @@ ${guidanceInstruction(guidance)}
 Find the single link to the most recent/current edition -- usually the first or most prominent such link, often with a date in its own URL. Give the href exactly as it appears in the HTML (relative or absolute, don't resolve it).
 
 Reply with ONLY a JSON object, no other text, no markdown fences: {"href":""} -- "" if no such link is findable.`;
-const { data } = await callTextJson(prompt, FIND_LATEST_MAX_TOKENS, MAIL_EXTRACT_MODEL, 'Find latest recommendations article', 'low');
+const { data } = await callTextJson(prompt, FIND_LATEST_MAX_TOKENS, MEDIA_RECS_MODEL, 'Find latest recommendations article', 'low');
 return String((data && data.href) || '').trim();
 }
 

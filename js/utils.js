@@ -151,6 +151,33 @@ return String(url || '').slice(0, maxLen);
 }
 }
 
+// Cuts a fetched page's own weight before it ever reaches an AI call --
+// confirmed live as real money: a real editorial page's raw HTML is
+// mostly <script>/<style>/tracking payloads and utility-class soup, not
+// the text an extraction prompt actually needs. This app runs entirely
+// client-side, so DOMParser is just sitting there to use rather than
+// hand-rolling a regex stripper. Removes script/style/svg/link/iframe/
+// head entirely, then strips every attribute except an anchor's own
+// href (the one thing a caller here -- findLatestArticleUrl's jump-off
+// link search -- actually needs from markup rather than from text).
+// Best-effort: a parse failure just returns the original HTML rather
+// than blocking the extraction it was only ever meant to cheapen.
+function stripHtmlForExtraction(html) {
+try {
+const doc = new DOMParser().parseFromString(String(html || ''), 'text/html');
+doc.querySelectorAll('script, style, noscript, svg, link, iframe, template, head').forEach((el) => el.remove());
+doc.querySelectorAll('*').forEach((el) => {
+const href = el.tagName === 'A' ? el.getAttribute('href') : null;
+[...el.attributes].forEach((attr) => el.removeAttribute(attr.name));
+if (href) el.setAttribute('href', href);
+});
+const root = doc.body || doc.documentElement;
+return root ? root.innerHTML.replace(/\s+/g, ' ').trim() : String(html || '');
+} catch (e) {
+return String(html || '');
+}
+}
+
 // Escapes for both text content AND attribute values, which is what nearly
 // every caller here needs — this codebase builds HTML strings and drops
 // values into `attr="..."` constantly.
@@ -1250,7 +1277,7 @@ return classified.every((c) => c.isScreenshot) && looksLikeSameScreenshotPieces(
 }
 
 export {
-todayStr, daysAgoStr, dateStrAdd, unfoldIcsLines, parseIcsProperty, icsDateTime, parseLooseDateTime, last7Dates, uid, daysSince, daysUntil, foldDiacritics, MISSING_KEY_LINK_HTML, SYNC_LINK_HTML, NOTION_LINK_HTML, TELEGRAM_BOT_LINK_HTML, looksLikeUrl, prettyUrl,
+todayStr, daysAgoStr, dateStrAdd, unfoldIcsLines, parseIcsProperty, icsDateTime, parseLooseDateTime, last7Dates, uid, daysSince, daysUntil, foldDiacritics, MISSING_KEY_LINK_HTML, SYNC_LINK_HTML, NOTION_LINK_HTML, TELEGRAM_BOT_LINK_HTML, looksLikeUrl, prettyUrl, stripHtmlForExtraction,
 escapeHtml, affiliateLink, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, buildFlagMatcher, applyFlagMatcher, knownCityMap, knownScalarValues, pickChipHtml, splitCsvLine, scrollAndFlash, bindForm, bindBackdropClose,
 findMentions, COUNTRY_NAME_TO_NATIONALITY,
 resizeImageToBlob, fileToBase64, loadImage, cropThumbnailToBlob,

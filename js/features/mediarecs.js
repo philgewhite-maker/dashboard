@@ -18,7 +18,7 @@
 // completely ordinary add, so Plex-check/whereToWatch pick it up exactly
 // as they do for anything else added any other way.
 import { data, queueSave, blankMediaRecCandidate, MEDIA_KINDS } from '../state.js';
-import { escapeHtml } from '../utils.js';
+import { escapeHtml, stripHtmlForExtraction } from '../utils.js';
 import { searchTitle, watchProviders, subscriptionFor, collapseProviders, shortProviderName } from '../catalogue.js';
 
 const KIND_LABEL = Object.fromEntries(MEDIA_KINDS.map((k) => [k.kind, k.label]));
@@ -93,7 +93,10 @@ if (!source.jumpOff) return { url: source.url, note: '' };
 const { fetchPageHtml } = await import('../files.js');
 const { findLatestArticleUrl } = await import('../ai.js');
 const landingHtml = await fetchPageHtml(source.url);
-const href = await findLatestArticleUrl(landingHtml, `Landing page for "${source.label || source.url}".`);
+// stripHtmlForExtraction keeps every <a href> intact -- the one thing
+// this particular lookup actually needs from markup -- while dropping
+// everything else that doesn't help it find the link.
+const href = await findLatestArticleUrl(stripHtmlForExtraction(landingHtml), `Landing page for "${source.label || source.url}".`);
 if (!href) return { url: source.url, note: `couldn't find this ${source.cadence === 'weekly' ? "week's" : "month's"} article link, read the landing page itself instead` };
 try {
 return { url: new URL(href, source.url).href, note: '' };
@@ -107,7 +110,7 @@ const { fetchPageHtml } = await import('../files.js');
 const { extractMediaRecommendations } = await import('../ai.js');
 const { url: targetUrl, note } = await resolveSourceUrl(source);
 const html = await fetchPageHtml(targetUrl);
-const items = await extractMediaRecommendations(html, `From "${source.label || source.url}", a ${source.kind} source.`);
+const items = await extractMediaRecommendations(stripHtmlForExtraction(html), `From "${source.label || source.url}", a ${source.kind} source.`);
 // Attribution points at the real dated article once resolved, not the
 // evergreen landing page -- "via" should take you to the actual piece
 // these titles came from.
