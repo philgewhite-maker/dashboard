@@ -201,8 +201,24 @@ console.error(`Streaming availability lookup failed for "${raw.title}":`, err);
 }
 }
 
+// Once TMDb has genuinely matched it, use ITS title -- not the raw
+// extracted one -- as the stored candidate's title. Confirmed live as
+// the actual cause of "MobLand" and "MobLand Season 2" (or "American
+// Horror Story" and "American Horror Story: 13") sitting side by side
+// as if they were different shows: the same show, extracted slightly
+// differently across two source passes, with no season-suffix pattern
+// general enough to safely strip (a show can genuinely be titled with a
+// trailing number, e.g. "Stranger Things 4", so regex-stripping "Season
+// N" fixes some real cases and risks mangling others). TMDb's own title
+// is the one canonical name for the SERIES regardless of which season
+// prompted the mention -- which is also the right level for Plex/Sonarr
+// to operate at, a want for a season rather than the show being exactly
+// the confusion this avoids -- so once both extractions resolve to the
+// same TMDb entry, they already share one title and the existing
+// dedupeCandidates() cleanup (runs on every render) collapses them on
+// its own, nothing further to add there.
 const cand = blankMediaRecCandidate({
-title: raw.title,
+title: (matched && matched.title) || raw.title,
 kind,
 year: raw.year || (matched && matched.year) || '',
 creator: raw.creator || (matched && matched.creator) || '',
