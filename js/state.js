@@ -660,6 +660,12 @@ function blankMediaRecCandidate(fields = {}) {
 return {
 id: uid(),
 title: '', kind: 'film', year: '', creator: '', reason: '',
+// When the title is canonicalised to TMDb's own name (e.g. "MobLand
+// Season 2" -> "MobLand"), what the raw extraction said beyond that --
+// "Season 2" -- goes here rather than silently vanishing, so an
+// existing show recommended again shows WHY (a new season), not just
+// that it's being suggested a second time. See mediarecs.js's seasonNote.
+seasonNote: '',
 genres: [], rating: 0, // TMDb vote_average (0-10), genre NAMES already resolved
 externalIds: {}, imageUrl: '', link: '',
 providers: [], // every streaming provider TMDb lists for it (collapseProviders'd names), not just ones you pay for

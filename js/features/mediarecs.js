@@ -171,6 +171,23 @@ if (yr && yr >= new Date().getFullYear() - 1) score += 0.5;
 return Math.round(score * 10) / 10;
 }
 
+// What the raw extracted title said beyond TMDb's own canonical name,
+// when it looks like a season/series qualifier ("Season 2", "Series 6",
+// a bare trailing "13") -- the part resolveCandidate's own title
+// canonicalisation below would otherwise silently drop. Deliberately
+// narrow: only fires on a pattern that actually looks like a season
+// reference, not on "(South Asian adaptation)" or "(prison drama)"
+// -- those are the separate invented-pseudo-title problem, not a real
+// difference worth calling out.
+function seasonNote(rawTitle, canonicalTitle) {
+const prefix = canonicalTitle.trim();
+if (!rawTitle.toLowerCase().startsWith(prefix.toLowerCase())) return '';
+const suffix = rawTitle.slice(prefix.length).trim().replace(/^[:\-–]\s*/, '');
+if (/^(season|series)\s+\w+$/i.test(suffix)) return suffix;
+if (/^\d+$/.test(suffix)) return `Season ${suffix}`;
+return '';
+}
+
 async function resolveCandidate(raw, prefs) {
 const kind = raw.kind;
 let matched = null;
@@ -217,12 +234,14 @@ console.error(`Streaming availability lookup failed for "${raw.title}":`, err);
 // same TMDb entry, they already share one title and the existing
 // dedupeCandidates() cleanup (runs on every render) collapses them on
 // its own, nothing further to add there.
+const canonicalTitle = (matched && matched.title) || raw.title;
 const cand = blankMediaRecCandidate({
-title: (matched && matched.title) || raw.title,
+title: canonicalTitle,
 kind,
 year: raw.year || (matched && matched.year) || '',
 creator: raw.creator || (matched && matched.creator) || '',
 reason: raw.reason,
+seasonNote: matched ? seasonNote(raw.title, canonicalTitle) : '',
 genres,
 rating,
 providers,
@@ -347,7 +366,12 @@ renderMediaRecs();
 function dedupeCandidates() {
 const keepers = new Map(); // normalised title -> the candidate currently kept
 let changed = false;
-const weight = (c) => (c.externalIds && c.externalIds.tmdb ? 100 : 0) + (c.score || 0);
+// seasonNote weighted above the raw score (but below having a
+// catalogue id at all) -- two duplicates of the same now-canonically-
+// titled show can otherwise tie on everything else, and which one
+// survives decides whether "why is this being recommended again" (a
+// new season) stays visible or quietly vanishes with the dismissed copy.
+const weight = (c) => (c.externalIds && c.externalIds.tmdb ? 100 : 0) + (c.seasonNote ? 10 : 0) + (c.score || 0);
 for (const c of data.mediaRecCandidates) {
 if (c.status !== 'pending') continue;
 const key = c.title.trim().toLowerCase();
@@ -420,6 +444,13 @@ const titleHtml = c.link ? `<a href="${escapeHtml(c.link)}" target="_blank" rel=
 const ratingBadge = c.rating ? `<span class="settings-note" style="margin:0;">&#9733; ${c.rating.toFixed(1)}</span>` : '';
 const genreChips = (c.genres || []).map((g) => `<span class="task-context">${escapeHtml(g)}</span>`).join('');
 const aiBadge = c.aiPick ? `<span class="task-context" style="background:var(--lilac-bg,#efe7ff);color:var(--lilac,#7c4dff);font-weight:600;" title="Flagged by the optional AI top-up pass">&#10024; AI pick</span>` : '';
+// A proper chip, not just text folded into the reason -- confirmed live
+// that mattered: once the title canonicalises to TMDb's own name (so
+// "MobLand" and "MobLand Season 2" collapse into one candidate instead
+// of two), the "why is an existing show being recommended again" signal
+// needs to stay visible at a glance, not buried at the start of a
+// sentence you have to read to notice.
+const seasonBadge = c.seasonNote ? `<span class="task-context" style="background:var(--amber-bg,#fef3c7);color:var(--amber,#b45309);font-weight:600;" title="The source mentioned this as a new season, not the show from scratch">&#127909; New: ${escapeHtml(c.seasonNote)}</span>` : '';
 const canWatchlist = (c.kind === 'film' || c.kind === 'tv') && c.externalIds && c.externalIds.tmdb;
 // Title (Year) ★Rating together on the header line, same order the
 // main Watch & listen list reads left to right, with actions pushed to
@@ -436,6 +467,7 @@ ${art}
 <span class="task-context">${escapeHtml(KIND_LABEL[c.kind] || c.kind)}</span>
 <span class="mail-subject">${titleHtml}${c.year ? ` (${escapeHtml(c.year)})` : ''}</span>
 ${ratingBadge}
+${seasonBadge}
 ${c.creator ? `<span class="settings-note" style="margin:0;">${escapeHtml(c.creator)}</span>` : ''}
 <span class="media-row-actions">
 <button class="mini-task-btn" type="button" data-rec-add="${c.id}">+ Add as want</button>
