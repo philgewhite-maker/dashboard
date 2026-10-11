@@ -179,9 +179,16 @@ return { changed: false };
 // leave nothing to actually review or push on that very first check.
 // AI only ever runs here, never in the weekly no-op gate above.
 const { extractSchoolCalendar } = await import('../ai.js');
-const extracted = await extractSchoolCalendar(text, `${site.label}'s term-dates page.`);
+const extracted = await extractSchoolCalendar(text, site.guidance || `${site.label}'s term-dates page.`);
 const holidays = await holidaysForSite(site, extracted);
 const periods = computeNotAtSchoolPeriods({ ...extracted, holidays });
+// A re-check (force, or next year's genuine change) supersedes this
+// site's own prior entry rather than stacking a second one alongside
+// it -- but only when nothing in that prior entry was actually pushed
+// to a calendar yet; one with real pushed events stays, since that's a
+// record of something that actually happened, not just a stale guess.
+data.schoolCalendarUpdates = (data.schoolCalendarUpdates || [])
+.filter((u) => u.siteKey !== site.key || u.periods.some((p) => p.pushed));
 data.schoolCalendarUpdates.push({
 id: uid(), siteKey: site.key, label: site.label, url: site.url,
 foundAt: nowIso,
@@ -232,7 +239,7 @@ return `<div class="sync-row" style="margin:4px 0;flex-wrap:wrap;">
 <span style="font-variant-numeric:tabular-nums;">${escapeHtml(period.start)} &rarr; ${escapeHtml(period.end)}</span>
 ${period.pushed
 ? '<span class="settings-note" style="margin:0;">Pushed &#10003;</span>'
-: `<button class="sync-btn sm" type="button" data-school-push="${update.id}:${period.id}">Push</button>`}
+: `<button class="sync-btn sm inline" type="button" data-school-push="${update.id}:${period.id}">Push</button>`}
 </div>`;
 }
 

@@ -1169,8 +1169,22 @@ const KEY_CUSTODIAN_TYPES = ['me', 'concierge', 'guest', 'cleaner', 'workman', '
 // else names an external, deterministic (non-AI) feed.
 const SCHOOL_CALENDAR_SITES = [
 { key: 'charlotte', label: "Charlotte — British School Zagreb", url: 'https://www.britishschool-zagreb.hr/school-calendar', holidaySource: 'nager:HR' },
-{ key: 'zara', label: "Zara — UNBC", url: 'https://www.unbc.ca/calendar/undergraduate/semester-dates', holidaySource: 'own-page' },
-{ key: 'lewis', label: "Lewis — University of Leeds", url: 'https://www.leeds.ac.uk/term-dates', holidaySource: 'govuk:england-and-wales' },
+// UNBC's own "Academic Dates" table lists, per semester: Orientation Day,
+// First Day of Classes, Fees Due, Add/Drop Date, Withdrawal Date, Last
+// Day of Classes, First Day of Exams, Last Day of Exams -- confirmed
+// live the generic prompt alone picked "Last Day of Classes" as the
+// term end, which leaves exams (when Zara is still genuinely at uni,
+// not free) marked as a break. Spelled out explicitly per the user's
+// own correction rather than left to the model to infer from the table.
+{ key: 'zara', label: "Zara — UNBC", url: 'https://www.unbc.ca/calendar/undergraduate/semester-dates', holidaySource: 'own-page',
+guidance: "UNBC's \"Academic Dates\" table lists, per semester: Orientation Day, First Day of Classes, Fees Due, Add/Drop Date, Withdrawal Date, Last Day of Classes, First Day of Exams, Last Day of Exams. Use \"First Day of Classes\" through \"Last Day of Exams\" as each semester's termRange -- NOT \"Last Day of Classes\": exams are still part of the enrolled period, not free time. Ignore the Orientation/Fees Due/Add-Drop/Withdrawal rows entirely -- they are not start/end boundaries." },
+// Leeds' own page lists BOTH a "Terms" section (Autumn/Spring/Summer --
+// the actual student term dates, matching the page's own URL/title) and
+// a separate "Semesters"+"Examinations" breakdown of the SAME academic
+// year from a different angle -- confirmed live the generic prompt,
+// faced with two competing structures on one page, extracted neither.
+{ key: 'lewis', label: "Lewis — University of Leeds", url: 'https://www.leeds.ac.uk/term-dates', holidaySource: 'govuk:england-and-wales',
+guidance: "This page lists both a \"Terms\" section (Autumn/Spring/Summer -- the real student term dates) and a separate \"Semesters\"/\"Examinations\" breakdown of the SAME academic year, from a different angle. Use the \"Terms\" section's three ranges as termRanges. Ignore \"Semesters\" and \"Examinations\" entirely -- they'd double up or mis-split the same dates." },
 ];
 function blankAirbnbKey(fields = {}) {
 return {
