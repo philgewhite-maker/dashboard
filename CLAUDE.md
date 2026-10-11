@@ -53,6 +53,22 @@ or "2 required fields still missing" beats "6 fields" every time. Build
 one if none exists yet, the same way a missing chip pattern gets built
 once and reused.
 
+**Same rule for a plain UI location, not just a record.** Text that
+tells the user to go look somewhere else in the app — "see Settings",
+"add one in Settings → X", "check Site health" — must be a real link,
+never bare prose naming a tab or section. The mechanism already exists
+and is used ~30 times over: `<span class="inline-goto-link"
+data-goto-tab="settings" data-goto-target="#some-id">Settings</span>`,
+bound once, document-wide, in `js/app.js` — it switches tab, opens every
+collapsed `<details>` ancestor of the target (Settings' accordions are
+closed by default), and scrolls/flashes it into view. Confirmed live:
+`schoolcalendar.js`'s own empty-state placeholder said "See Settings →
+Site health for per-site status" as bare text, no link at all, written
+in the SAME session the pattern above was already being applied to
+other record types — don't let "this is just a location, not a tracked
+record" be the reason this gets skipped, the user should never have to
+go hunting for a destination you already know the selector for.
+
 Whenever a data record (connection, task, trip) is referenced somewhere
 OTHER than its own main card/list, or a chip-shaped VALUE (City, Tag,
 Nationality...) is shown away from its owning connection's card, use the
@@ -110,6 +126,26 @@ field": the shared detector `buildFlagMatcher`/`applyFlagMatcher`
 fourth bespoke copy (as of this writing, `connections.js`,
 `tinderimport.js`, `whatsappimport.js`, and `telegramimport.js` each
 have their own copy — a real consolidation opportunity, not yet done).
+
+## CSS gotchas
+
+**`.sync-btn.sm` is `width:100%`** (`css/style.css`) — right for a
+button stacked alone in a narrow card, wrong for one sitting inline in
+a row next to a select/input/other button, where it stretches to fill
+the whole row. Confirmed live on **at least nine** separate buttons now
+(Airbnb push, shopping's "Search prices"/"Refresh"/"Paste price"/
+"Want" state, book/inventory inline actions, mail-view dialog actions,
+stock watch, and — the one that prompted this note —
+`school-calendar-check-btn`, which rendered full-page-width in a row
+with its calendar picker). **Add the `inline` class
+(`.sync-btn.sm.inline{width:auto;margin-top:0;flex:0 0 auto;}`,
+already defined) to any NEW `.sync-btn.sm` the moment it sits inline in
+a row** — don't wait to confirm it live and add a tenth bespoke
+override selector afterwards; check this BEFORE writing the markup, the
+same way the record-reference tables above get checked before writing
+a render function. If a button is genuinely alone/stacked in its own
+card, the bare `.sm` (no `inline`) is correct and intentional — don't
+add `inline` reflexively to every one.
 
 ## When adding a brand-new file/feature
 

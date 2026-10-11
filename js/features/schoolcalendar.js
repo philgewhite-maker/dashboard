@@ -159,7 +159,7 @@ return mergePeriods([...breakPeriods, ...holidayPeriods]);
 
 // ---- Running the check -------------------------------------------------
 
-async function checkSite(site) {
+async function checkSite(site, { force = false } = {}) {
 const text = await fetchSiteText(site);
 const hash = hashText(text);
 const checks = checksStore();
@@ -167,7 +167,7 @@ const st = checks[site.key] || {};
 const nowIso = new Date().toISOString();
 const year = Number(todayStr().slice(0, 4));
 const firstRun = !st.baselineHash;
-if (!firstRun && st.baselineHash === hash) {
+if (!force && !firstRun && st.baselineHash === hash) {
 checks[site.key] = { ...st, lastCheckedAt: nowIso };
 queueSave();
 return { changed: false };
@@ -192,12 +192,12 @@ queueSave();
 return { changed: true, firstRun, periods };
 }
 
-async function runSchoolCalendarCheck() {
+async function runSchoolCalendarCheck({ force = false } = {}) {
 for (const site of SCHOOL_CALENDAR_SITES) {
-if (!isDueForSite(site)) continue;
+if (!force && !isDueForSite(site)) continue;
 const { reportCheck } = await import('./sitehealth.js');
 try {
-const result = await checkSite(site);
+const result = await checkSite(site, { force });
 const detail = result.changed
 ? `${result.firstRun ? 'First run' : 'Update found'} -- ${result.periods.length} period(s), see the Family tab.`
 : 'No change.';
@@ -210,16 +210,18 @@ reportCheck(`school-calendar-${site.key}`, false, err.message || String(err));
 renderSchoolCalendar();
 }
 
-// Forces every site past its own interval gate -- same "delete the
-// recorded run" idea scheduled.js's own "Run due tasks now" button
-// already uses, adapted to this module's own per-site state instead of
-// scheduled.js's global one.
+// "Check now" is a rare, explicit, human-triggered click, not the
+// automatic weekly background run -- so it bypasses BOTH of that run's
+// gates, not just the interval one: isDueForSite's own-year "already
+// found" lock (confirmed live as the actual cause of "Check now" ->
+// nothing: a stale foundYear from an earlier run, before this fix
+// existed, meant isDueForSite always skipped the site, so checkSite was
+// never even called) AND the content-hash short-circuit inside
+// checkSite (otherwise a genuinely-unchanged site would still show
+// nothing on a manual click, which defeats the entire point of a button
+// whose job is "show me the current state right now").
 async function forceSchoolCalendarCheck() {
-const checks = checksStore();
-SCHOOL_CALENDAR_SITES.forEach((site) => {
-if (checks[site.key]) checks[site.key] = { ...checks[site.key], lastCheckedAt: '' };
-});
-await runSchoolCalendarCheck();
+await runSchoolCalendarCheck({ force: true });
 }
 
 // ---- Dashboard rendering (Family tab) ----------------------------------
@@ -250,7 +252,7 @@ if (!el) return;
 const updates = data.schoolCalendarUpdates || [];
 el.innerHTML = updates.length
 ? updates.map(updateHtml).join('')
-: '<div class="settings-note" style="margin:0;">No changes detected yet -- checked weekly from 1 May each year, no AI involved unless one actually is. See Settings → Site health for per-site status.</div>';
+: '<div class="settings-note" style="margin:0;">No changes detected yet -- checked weekly from 1 May each year, no AI involved unless one actually is. Per-site status: <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#site-health-row-school-calendar-charlotte">Site health</span>.</div>';
 el.querySelectorAll('[data-school-push]').forEach((btn) => {
 btn.addEventListener('click', () => {
 const sep = btn.dataset.schoolPush.indexOf(':');
