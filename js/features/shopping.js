@@ -19,7 +19,7 @@
 // a link to buy it from the right place," not a manual step. The result is
 // persisted on the task itself (t.priceCheck), dated, with a Refresh button
 // to re-run it later — not the old in-memory, un-dated Map this used to be.
-import { data, queueSave, SHOPPING_CONTEXTS, unheldInventory, whoFits, inventorySets, whoFitsSet, blankInventoryItem } from '../state.js';
+import { data, queueSave, SHOPPING_CONTEXTS, unheldInventory, whoFits, inventorySets, whoFitsSet, blankInventoryItem, SET_CORE_GROUPS } from '../state.js';
 import { escapeHtml, affiliateLink, daysUntil, daysSince, todayStr, MISSING_KEY_LINK_HTML, looksLikeUrl, bindBackdropClose, pickChipHtml, knownScalarValues, hydratePhotoBackgrounds } from '../utils.js';
 import { captureTask, revealTask } from './tasks.js';
 import { connectionChipHtml, bindConnectionChips, connectionPickerHtml, bindConnPickers, setConnPickerValue, sensitiveFieldsShown } from './connections.js';
@@ -1049,8 +1049,19 @@ console.error('Auto price-check failed, item stays without one until Search pric
 // someone, and the question it raises is different from a single
 // garment's: a complete one asks WHO, an incomplete one asks WHAT ELSE
 // to buy and in whose size.
+//
+// A lone Bra or lone Knickers is exactly as much "a set, missing its
+// other half" as a pair with nothing in it is "complete" -- confirmed
+// live as a real gap, reported directly: every standalone core piece
+// (no sibling bought yet in that brand/style/colour) was silently
+// absent from this whole section, so "Needs Knickers" never showed for
+// the single most common case, a bra bought alone. Shown for ANY set
+// with at least one CORE piece, complete or not; only a lone extra (a
+// suspender, stockings, a ring -- nothing Bra/Knickers-shaped at all)
+// stays excluded, since that was never the start of a tracked pairing
+// to flag as incomplete.
 function inventorySetsHtml() {
-const sets = inventorySets().filter((s) => s.items.length > 1 || s.complete);
+const sets = inventorySets().filter((s) => s.groups.some((g) => SET_CORE_GROUPS.includes(g)));
 if (!sets.length) return '';
 return `<div class="inv-sets">${sets.map((set) => {
 const name = [set.brand, set.style, set.colour].filter(Boolean).join(' · ') || 'Unnamed set';
