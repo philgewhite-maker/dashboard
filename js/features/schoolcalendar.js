@@ -192,6 +192,13 @@ data.schoolCalendarUpdates = (data.schoolCalendarUpdates || [])
 data.schoolCalendarUpdates.push({
 id: uid(), siteKey: site.key, label: site.label, url: site.url,
 foundAt: nowIso,
+// Shown in the Family tab panel, not just logged -- both so the user
+// can sanity-check what the AI actually read as "the terms" before
+// trusting the computed periods below it, and because three rounds of
+// "still wrong" couldn't be diagnosed any further from the computed
+// output alone (no way to tell an empty extraction from a term span
+// that just didn't produce any additional not-at-school period).
+termRanges: extracted.termRanges,
 periods: periods.map((p) => ({ id: uid(), ...p, pushed: false, googleEventId: '', googleCalendarId: '' })),
 });
 checks[site.key] = { baselineHash: hash, lastCheckedAt: nowIso, foundYear: year };
@@ -243,12 +250,25 @@ ${period.pushed
 </div>`;
 }
 
+function termRangesLineHtml(update) {
+const ranges = update.termRanges || [];
+// Shown plainly, not tucked in a details/debug block -- it's as much
+// "does this look right before I push it" context for the user as it
+// is a way to tell an AI miss apart from a term that genuinely has no
+// further not-at-school period in it.
+const text = ranges.length
+? ranges.map((r) => `${escapeHtml(r.start)} &rarr; ${escapeHtml(r.end)}`).join(' &nbsp;&middot;&nbsp; ')
+: 'none found -- the page may need its own extraction guidance adjusted (js/state.js SCHOOL_CALENDAR_SITES)';
+return `<div class="settings-note" style="margin:2px 0 6px;">Term dates read: ${text}</div>`;
+}
+
 function updateHtml(update) {
 return `<div class="cal-row" data-school-update="${update.id}">
 <div class="cal-head">
 <span class="cal-name">${escapeHtml(update.label)}</span>
 <a href="${escapeHtml(update.url)}" target="_blank" rel="noopener" class="settings-note" style="margin:0;">View page</a>
 </div>
+${termRangesLineHtml(update)}
 ${update.periods.map((p) => periodRowHtml(update, p)).join('')}
 </div>`;
 }
