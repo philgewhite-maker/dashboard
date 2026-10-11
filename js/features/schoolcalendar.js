@@ -187,9 +187,20 @@ const inTerm = (dateStr) => termRanges.some((r) => dateStr >= r.start && dateStr
 // Only a holiday that falls DURING term time and ISN'T already inside a
 // break is worth its own entry -- one during the summer break, say, is
 // already fully covered and would just be a redundant duplicate.
+// Weekend-extended same as breaks -- a Friday holiday and the following
+// Monday holiday (Good Friday/Easter Monday, say) are two single dates
+// three days apart, but the weekend between them is non-school time
+// regardless, so without this they'd show as two separate 1-day pushes
+// either side of a weekend mergePeriods has no reason to bridge. This
+// is the app's own job, not the AI's -- ai.js's own holidays
+// instruction already says each one is a single stated date; widening
+// it into a real multi-day block happens here, deterministically.
 const holidayPeriods = (extracted.holidays || [])
 .filter((h) => h.date && inTerm(h.date) && !isWeekend(h.date) && !covered(h.date))
-.map((h) => ({ label: h.label || 'Public holiday', start: h.date, end: h.date }));
+.map((h) => {
+const ext = extendToWeekends(h.date, h.date);
+return { label: h.label || 'Public holiday', start: ext.start, end: ext.end };
+});
 const closed = mergePeriods([...breakPeriods, ...gapPeriods, ...holidayPeriods]);
 // The run of terms has to end somewhere, but next year's own first
 // day isn't known yet -- rather than silently stopping at the last
@@ -238,6 +249,7 @@ data.schoolCalendarUpdates = (data.schoolCalendarUpdates || [])
 .filter((u) => u.siteKey !== site.key || u.periods.some((p) => p.pushed));
 data.schoolCalendarUpdates.push({
 id: uid(), siteKey: site.key, label: site.label, url: site.url,
+calendarPrefix: site.calendarPrefix || site.label,
 foundAt: nowIso,
 // Shown in the Family tab panel, not just logged -- both so the user
 // can sanity-check what the AI actually read as "the terms" before
@@ -355,10 +367,9 @@ const { createEvent } = await import('../googlecalendar.js');
 // comment), which is the only sensible all-day shape for "starts here,
 // end not yet known" -- a fake far-future end date would misrepresent
 // it as a real, bounded break.
+const prefix = update.calendarPrefix || update.label;
 const created = await createEvent(calendarId, {
-title: period.end
-? `${update.label} — not at school (${period.label})`
-: `${update.label} — ${period.label}`,
+title: `${prefix}: ${period.label}`,
 description: `Source: ${update.url}`,
 date: period.start,
 // All-day events' end is EXCLUSIVE (googlecalendar.js's own
