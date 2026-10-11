@@ -605,21 +605,22 @@ splitContribution(listing, income * (nights / total)).forEach((c) => addAmount(c
 // not income). A hand-added row carries no listingId, only an ownerKey,
 // so it's attributed to whichever listing that owner currently has --
 // same one-owner-one-listing assumption balanceFor/grossFor already
-// make elsewhere in this file. Allowed to widen the window backward so a
-// figure logged for an earlier month isn't silently dropped off the left
-// edge just because it predates the default span.
-let startYm = baseStart;
+// make elsewhere in this file. baseStart (the normal rolling-15-month
+// start) is a real floor here, not just a default -- a historic entry
+// older than that is excluded rather than widening the chart back to
+// meet it, so the window stays a fixed 15 months regardless of how far
+// back the ledger goes.
 (data.lettingLedger || []).forEach((e) => {
 if (e.kind !== 'earned' || !e.gross || !e.date) return;
 const listing = listings.find((l) => ownerKeyFor(l) === e.ownerKey);
 if (!listing) return;
 const ym = e.date.slice(0, 7);
 if (ym > endYm) return; // a future-dated "historic" entry makes no sense -- ignore rather than extend forward
-if (ym < startYm) startYm = ym;
+if (ym < baseStart) return; // older than the rolling window -- excluded, not widened in to meet it
 splitContribution(listing, Number(e.gross)).forEach((c) => addAmount(c.group, ym, c.amount));
 });
 
-const months = monthRange(startYm, endYm);
+const months = monthRange(baseStart, endYm);
 const nowIndex = months.indexOf(current);
 // Only a group that actually has something in this window plots a
 // picker row and a stack segment -- "Mine, Lewis', Zara's" in practice,
