@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v535</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v536</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -264,6 +264,19 @@
 </div>
 <div id="family-kids-strip" class="family-kids-strip"></div>
 <div class="settings-note" style="margin:8px 0;">Tasks, travel, media and Airbnb by person are future work — Books is the first piece.</div>
+</section>
+
+<section class="panel wide" id="school-calendar-panel" data-tab="family">
+<div class="panel-head">
+<h2><span class="dot sage"></span>School &amp; uni calendars</h2>
+</div>
+<div class="settings-note" style="margin:0 0 8px;">Checks Charlotte/Zara/Lewis's term-date pages weekly from 1 May each year, no AI, until that year's update is found. When one is, it shows here with a link to the page and the days they're not at school/uni (weekends and public holidays included) — ready to push to Google Calendar.</div>
+<div class="sync-row">
+<select id="school-calendar-picker" title="Which Google Calendar &quot;Push&quot; sends to"><option value="">Push to&hellip;</option></select>
+<button class="sync-btn sm" id="school-calendar-check-btn" type="button">Check now</button>
+<span class="sync-status" id="school-calendar-status"></span>
+</div>
+<div id="school-calendar-list"></div>
 </section>
 
 <section class="panel wide" id="books-panel" data-tab="family">

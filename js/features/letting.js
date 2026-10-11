@@ -73,7 +73,13 @@ return owners().reduce((n, k) => n + grossFor(k), 0);
 }
 
 function totalOwed() {
-return owners().reduce((n, k) => n + balanceFor(k), 0);
+// Excludes a self-resolving key -- unlike totalGross() just above,
+// which deliberately still counts a self-owned listing's income
+// toward "taken" (it's real income), a balance owed TO yourself is
+// meaningless and must never silently inflate this figure with no
+// visible row (renderLetting's own row list is filtered the same way)
+// to explain where it came from.
+return owners().filter((k) => !isMyOwnKey(k)).reduce((n, k) => n + balanceFor(k), 0);
 }
 
 // ---- Accrual --------------------------------------------------------------
@@ -94,10 +100,20 @@ if (!r.checkout || r.checkout > today()) return;
 const listing = listings.find((l) => l.id === r.listingId);
 const key = ownerKeyFor(listing);
 if (!key) return; // no owner set yet; left alone rather than guessed at
+// A listing whose owner resolves to YOU -- confirmed live: typing
+// "Phil" as the owner label (rather than leaving it blank) produced a
+// ledger row claiming you owed yourself £1,000, which is meaningless
+// -- the money's already yours, there's no debt to track. Same self-
+// check isMyOwnListing already applies for the chart (splitContribution
+// folds it into "Mine" there); this is the ledger's own copy of that
+// rule. Still accrued at zero -- gross is recorded (so "X taken"
+// totals stay accurate) and accruedAt gets set (so this doesn't sit
+// retried forever) -- only the owed AMOUNT is forced to zero.
+const mine = isMyOwnListing(listing);
 const share = Number(listing.sharePct);
-const pct = Number.isFinite(share) ? share : 50;
+const pct = mine ? 0 : (Number.isFinite(share) ? share : 50);
 const amount = Math.round(income * (pct / 100) * 100) / 100;
-if (!amount) return;
+if (!amount && !mine) return;
 data.lettingLedger.push({
 id: uid(),
 ownerKey: key,
@@ -223,7 +239,12 @@ renderLettingTaxSettings();
 renderLettingChart();
 const el = document.getElementById('letting-list');
 if (!el) return;
-const keys = owners();
+// Confirmed live: a listing owned by (literally) yourself produced a
+// "Phil £1,000.00 owed to you" row -- meaningless, since that money's
+// already yours. accrueLettings() no longer creates a real debt for
+// this case going forward; this filter also hides any such row
+// already sitting in older data, defensively.
+const keys = owners().filter((k) => !isMyOwnKey(k));
 if (!keys.length) {
 el.innerHTML = '<div class="settings-note" style="margin:0;">No listing has an owner yet — set one on the Travel tab’s Airbnb settings, then enter what each stay earned.</div>';
 return;
@@ -537,9 +558,15 @@ return months;
 // left once their cut is taken, which is the whole amount for a listing
 // I own outright. This is what the chart's multi-select picks between
 // (Mine / Lewis' / Zara's / ...), not a single blanket percentage.
-function isMyOwnListing(listing) {
-const key = ownerKeyFor(listing);
+// A blank key (no owner set) or one that resolves to your own name --
+// either way, nobody else is actually owed anything. Key-level so both
+// a listing (via ownerKeyFor) and a raw ownerKey from the ledger/owner
+// picker can use the same one check.
+function isMyOwnKey(key) {
 return !key || /^phil$/i.test(String(ownerNameFor(key) || '').trim());
+}
+function isMyOwnListing(listing) {
+return isMyOwnKey(ownerKeyFor(listing));
 }
 function splitContribution(listing, amount) {
 if (isMyOwnListing(listing)) return [{ group: LETTING_CHART_MINE_KEY, amount }];
@@ -1097,7 +1124,10 @@ function renderOwnerPicker() {
 const sel = document.getElementById('letting-add-owner');
 if (!sel) return;
 const keep = sel.value;
-sel.innerHTML = `<option value="">Who…</option>${owners().map((k) => `<option value="${escapeHtml(k)}">${escapeHtml(ownerNameFor(k))}</option>`).join('')}`;
+// Same self-exclusion as renderLetting()'s row list -- logging a
+// manual earned/payment/adjustment FOR yourself is meaningless, same
+// reasoning accrueLettings() now applies automatically.
+sel.innerHTML = `<option value="">Who…</option>${owners().filter((k) => !isMyOwnKey(k)).map((k) => `<option value="${escapeHtml(k)}">${escapeHtml(ownerNameFor(k))}</option>`).join('')}`;
 if (keep) sel.value = keep;
 }
 

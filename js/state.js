@@ -33,6 +33,7 @@ airbnbCleanerEvents: [], // [{date, name}] -- last scan of "Cleaner - <Name>" ev
 airbnbCleanerSyncStatus: null, // {ok, syncedAt, error} for the cleaner-event scan above
 airbnbKeys: [], // physical keyrings and their current custody -- see js/features/airbnb.js
 airbnbKeyAssignments: [], // {id, keyId, reservationId} -- a key dragged onto a reservation, see js/features/airbnb.js
+schoolCalendarUpdates: [], // one entry per detected term-date change, see js/features/schoolcalendar.js
 vouchers: [],
 businessIdeas: [],
 subscriptions: [],
@@ -155,6 +156,15 @@ lettingChartTargets: {},
 // see mediarecs.js's own header for what that pass does and doesn't do.
 mediaPreferences: { genres: [], minRating: 0, aiTopUp: false },
 mediaRecsLastRun: '', // ISO date -- the monthly gate in js/features/mediarecs.js
+// Per-site gate for the school/uni term-date watch (js/features/
+// schoolcalendar.js): {key: {lastCheckedAt, baselineHash, foundYear}}.
+// baselineHash is a cheap content digest (no AI -- the whole point is a
+// weekly check that costs nothing when nothing changed), compared
+// year over year; foundYear records which year's change was last
+// surfaced, so the watch naturally resumes once the calendar rolls
+// past the next 1 May.
+schoolCalendarChecks: {},
+schoolCalendarId: '', // which Google Calendar the Family tab's "Push" buttons target -- same picked-once-remembered pattern as airbnbCalendarId above
 // Which scheduled syncs are turned OFF, and how often the rest may run
 // (see js/features/scheduled.js). Stored as the exceptions rather than
 // the enabled list so a task added later is on by default -- the point
@@ -1149,6 +1159,19 @@ createdAt: new Date().toISOString(),
 // keyrings (an agent's spare) aren't tied to any listing at all -- left
 // empty.
 const KEY_CUSTODIAN_TYPES = ['me', 'concierge', 'guest', 'cleaner', 'workman', 'other'];
+
+// Fixed, hand-maintained -- a 4th school/university is a code change
+// (a new row here), not something a settings UI needs to manage, same
+// spirit as OTHER_KINDS in tasks.js. holidaySource says where
+// js/features/schoolcalendar.js gets that site's public holidays from,
+// since the three pages don't all publish their own: 'own-page' means
+// the site's own text already lists them (UNBC does, for BC); anything
+// else names an external, deterministic (non-AI) feed.
+const SCHOOL_CALENDAR_SITES = [
+{ key: 'charlotte', label: "Charlotte — British School Zagreb", url: 'https://www.britishschool-zagreb.hr/school-calendar', holidaySource: 'nager:HR' },
+{ key: 'zara', label: "Zara — UNBC", url: 'https://www.unbc.ca/calendar/undergraduate/semester-dates', holidaySource: 'own-page' },
+{ key: 'lewis', label: "Lewis — University of Leeds", url: 'https://www.leeds.ac.uk/term-dates', holidaySource: 'govuk:england-and-wales' },
+];
 function blankAirbnbKey(fields = {}) {
 return {
 id: uid(),
@@ -2254,6 +2277,7 @@ data.airbnbKeyAssignments = data.airbnbKeyAssignments.map((a) => ({ ...blankAirb
 // assignment IS the dangling reference -- there's nothing else to it.
 const airbnbKeyIds = new Set(data.airbnbKeys.map((k) => k.id));
 data.airbnbKeyAssignments = data.airbnbKeyAssignments.filter((a) => airbnbKeyIds.has(a.keyId) && airbnbReservationIds.has(a.reservationId));
+if (!Array.isArray(data.schoolCalendarUpdates)) data.schoolCalendarUpdates = [];
 // Seed the mail search rows from the old fixed shape the first time only.
 // Keyed on the array's absence rather than its emptiness, so deleting every
 // row stays deleted instead of being helpfully repopulated next reload.
@@ -3283,7 +3307,7 @@ TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureB
 blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS, LEG_DATE_FIELDS, STAY_TYPE_SUGGESTIONS,
 blankPackingItem, blankPackingModule, blankTripPacking, blankPackingListItem, PACKING_DURATION_TIERS, packingDurationTier, DEFAULT_PACKING_MODULES,
 blankPlannerEntry, blankPlannerActivity,
-blankAirbnbListing, blankAirbnbReservation, blankAirbnbKey, blankAirbnbKeyAssignment, KEY_CUSTODIAN_TYPES, blankFinanceAccount,
+blankAirbnbListing, blankAirbnbReservation, blankAirbnbKey, blankAirbnbKeyAssignment, KEY_CUSTODIAN_TYPES, blankFinanceAccount, SCHOOL_CALENDAR_SITES,
 CONTACT_STATUS_LABELS, CONTACT_MATCH_MIN_STAGE,
 DEFAULT_RATING_CATEGORIES, slugifyField, DEFAULT_RECIPE_RATING_CATEGORIES,
 FLAG_FIELD_DEFS, DEFAULT_FLAG_RULES, computeFlags, valueColorForField, stripSharedSuffix, suggestedAction, suggestedQuestions, isTravelPaused, ACTIONS, distanceMiles, heightCm,

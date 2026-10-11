@@ -23,6 +23,7 @@
 import { data, queueSave, currentAge, blankConnection } from '../state.js';
 import { escapeHtml, avatarHtml, hydratePhotoBackgrounds, bindBackdropClose } from '../utils.js';
 import { initBooks, renderBooks } from './books.js';
+import { initSchoolCalendar, renderSchoolCalendar } from './schoolcalendar.js';
 
 function kidCardHtml(c) {
 const age = currentAge(c);
@@ -85,10 +86,12 @@ const addBtn = document.getElementById('family-add-kid-btn');
 if (addBtn) addBtn.addEventListener('click', () => openKidDialog(null));
 }
 renderBooks();
+renderSchoolCalendar();
 }
 
 function initFamily() {
 initBooks();
+initSchoolCalendar();
 renderFamily();
 }
 

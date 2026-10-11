@@ -117,6 +117,20 @@ await runAutomaticSwitchCheck();
 },
 },
 {
+// Own weekly/1-May-to-found gate lives INSIDE runSchoolCalendarCheck
+// (schoolcalendar.js), same shape as 'media-recs' above -- this firing
+// at ordinary app-open cadence costs nothing extra when it isn't due.
+// The check itself is deliberately AI-free (a content hash, compared
+// year over year); AI only ever runs in the rare case a real change
+// is found, not on every one of these no-op calls.
+id: 'school-calendar', label: 'School/uni calendar watch', needsGoogle: false,
+note: 'Checks Charlotte/Zara/Lewis\'s term-date pages weekly (1 May – found each year) for a real change. See the Family tab for anything found.',
+run: async () => {
+const { runSchoolCalendarCheck } = await import('./schoolcalendar.js');
+await runSchoolCalendarCheck();
+},
+},
+{
 id: 'calendar', label: 'Calendars', buttonId: 'sync-cal-btn', needsGoogle: true,
 note: 'Upcoming events for each tracked calendar.',
 },

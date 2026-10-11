@@ -88,6 +88,31 @@ id: 'mse-cashback-section', label: 'MoneySavingExpert — ongoing cashback secti
 note: 'Reported by checkAccountValue() (switchoffers.js, the "Ongoing account value" check) whenever it runs -- a SEPARATE page anchor (#cashback) from the one mse-bank-switch already watches (#switch), extracted the same sibling-walk way, so the two sections can break independently of each other.',
 run: null, reportedExternally: true,
 },
+// Three fixed sites (state.js's SCHOOL_CALENDAR_SITES), not a dynamic
+// list -- a 4th child/school is a code change, so plain static entries
+// here are the right shape, same as every other hand-maintained check
+// above rather than mediarecs.js's own generated-rows exception (built
+// for a genuinely user-configurable, variable-length source list,
+// which this isn't). Reported by runSchoolCalendarCheck() (schoolcalendar.js)
+// whenever its own weekly/May-window gate actually lets a check run --
+// this row doubles as the "did that opportunistic app-open trigger
+// actually keep happening" signal the user asked for, since a gap here
+// reads as stale the same way health-sync's own staleness check does.
+{
+id: 'school-calendar-charlotte', label: 'British School Zagreb — term dates', site: 'britishschool-zagreb.hr',
+note: 'Weekly (1 May -- found each year) content-hash check, no AI; reports in from schoolcalendar.js whenever it actually runs, not from a run() here.',
+run: null, reportedExternally: true,
+},
+{
+id: 'school-calendar-zara', label: 'UNBC — semester dates', site: 'unbc.ca',
+note: 'Same weekly/May-window hash check as the other two school-calendar rows, reported from schoolcalendar.js.',
+run: null, reportedExternally: true,
+},
+{
+id: 'school-calendar-lewis', label: 'University of Leeds — term dates', site: 'leeds.ac.uk',
+note: 'Same weekly/May-window hash check as the other two school-calendar rows, reported from schoolcalendar.js.',
+run: null, reportedExternally: true,
+},
 ];
 
 function store() {

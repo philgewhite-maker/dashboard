@@ -2245,6 +2245,50 @@ return picks
 .filter((p) => Number.isInteger(p.index) && p.index >= 0 && p.index < candidates.length);
 }
 
+// ---- School/university term-date extraction ----
+//
+// Runs rarely (js/features/schoolcalendar.js gates this behind a plain
+// content-hash check, deliberately AI-free, that only fires once a
+// real yearly change is detected -- a few calls total per year, not a
+// per-check cost). On MAIL_EXTRACT_MODEL rather than a Haiku tier
+// deliberately: the output feeds real Google Calendar events the user
+// will trust, and the three source pages are genuinely varied (loose
+// prose with typos, a clean HTML table, prose plus a closures list) --
+// exactly the "real body text, real variety, genuine judgement" case
+// MAIL_EXTRACT_MODEL's own siblings already use it for, not the
+// closed-schema mechanical extraction the Haiku tier is for.
+const SCHOOL_CALENDAR_MAX_TOKENS = 3000;
+async function extractSchoolCalendar(text, guidance = '') {
+const prompt = `This is text from a school or university's term-dates / academic-calendar page.
+
+Text:
+"""
+${String(text || '').slice(0, 60000)}
+"""
+${guidanceInstruction(guidance)}
+Extract three things, as ISO yyyy-mm-dd dates:
+
+1. termRanges -- every term/semester's own start and end date (the span pupils/students are actually enrolled for, not including holidays either side).
+2. breaks -- every named break, holiday or closure period WITHIN or between those terms (half-term, mid-semester break, Christmas/winter break, Easter/spring break, summer break, a stated closure range) -- each with a short label taken from the page's own wording.
+3. holidays -- any individual public/statutory holiday dates the page explicitly lists by name (e.g. a university's own "Holidays/Closures" table) -- leave this empty if the page doesn't list any itself, don't infer or guess at national holidays that aren't actually written on the page.
+
+Only extract dates that are actually stated on the page. Never infer a date from a pattern or guess at what "probably" follows -- leave a range out entirely if its start or end isn't clearly given.
+
+Reply with ONLY a JSON object, no other text, no markdown fences: {"termRanges":[{"start":"","end":""}],"breaks":[{"label":"","start":"","end":""}],"holidays":[{"label":"","date":""}]}`;
+const { data } = await callTextJson(prompt, SCHOOL_CALENDAR_MAX_TOKENS, MAIL_EXTRACT_MODEL, 'School calendar extraction', 'low');
+const isoDate = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || '').trim()) ? String(v).trim() : '';
+const termRanges = (Array.isArray(data && data.termRanges) ? data.termRanges : [])
+.map((r) => ({ start: isoDate(r && r.start), end: isoDate(r && r.end) }))
+.filter((r) => r.start && r.end);
+const breaks = (Array.isArray(data && data.breaks) ? data.breaks : [])
+.map((b) => ({ label: String((b && b.label) || '').trim() || 'Break', start: isoDate(b && b.start), end: isoDate(b && b.end) }))
+.filter((b) => b.start && b.end);
+const holidays = (Array.isArray(data && data.holidays) ? data.holidays : [])
+.map((h) => ({ label: String((h && h.label) || '').trim() || 'Holiday', date: isoDate(h && h.date) }))
+.filter((h) => h.date);
+return { termRanges, breaks, holidays };
+}
+
 // ---- Country lookup ----
 //
 // For a city, school or university name — often not in English, and
@@ -2272,7 +2316,7 @@ callTextJson, DEFAULT_MODEL, summarizeUsage, currentMonthKey, compareFaces,
 extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShoppingItem, searchAgentProvocateurElsewhere, searchEbayResaleEstimate, analyseOngoingAccountValue, identifyProduct, translateText, romanizeName, parseCaptureIntent,
 resolveUrlTitle, resolveJobPostingUrl, resolveBookDetails, resolveSeriesBooks,
 identifyCountry, extractWellnessScreenshot,
-extractTripScreenshot, extractMediaScreenshot, extractTripLegFromEmail, extractTaskFromEmail, extractDateEventFromEmail, extractMediaRecommendations, rankMediaCandidates, findLatestArticleUrl,
+extractTripScreenshot, extractMediaScreenshot, extractTripLegFromEmail, extractTaskFromEmail, extractDateEventFromEmail, extractMediaRecommendations, rankMediaCandidates, findLatestArticleUrl, extractSchoolCalendar,
 parseIngredients, assessIngredient, ALLERGEN_LIST, DIETARY_FLAGS, FODMAP_COMPONENTS, FODMAP_LEVELS,
 FODMAP_THRESHOLDS_G, OLIGO_CATEGORIES, fodmapLevelFromGrams, regenerateRecipeVariant, assessUnitWeight, assessUnitRatio,
 GLYCEMIC_LOAD_THRESHOLDS, glycemicLevelFromLoad,
