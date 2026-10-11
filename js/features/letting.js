@@ -239,12 +239,15 @@ renderLettingTaxSettings();
 renderLettingChart();
 const el = document.getElementById('letting-list');
 if (!el) return;
-// Confirmed live: a listing owned by (literally) yourself produced a
-// "Phil £1,000.00 owed to you" row -- meaningless, since that money's
-// already yours. accrueLettings() no longer creates a real debt for
-// this case going forward; this filter also hides any such row
-// already sitting in older data, defensively.
-const keys = owners().filter((k) => !isMyOwnKey(k));
+// A self-owned listing's income still belongs here -- the entries, the
+// gross, the tax-year summary are all real and worth keeping visible.
+// Confirmed live this needs to stay the FULL owner list: an earlier
+// version of this fix excluded self entirely and took the income
+// entries with it, which is not what was wanted -- only the "owed to
+// you" FRAMING is meaningless for yourself, not the record of the
+// income itself. See the per-row rendering below for where that
+// framing is actually suppressed.
+const keys = owners();
 if (!keys.length) {
 el.innerHTML = '<div class="settings-note" style="margin:0;">No listing has an owner yet — set one on the Travel tab’s Airbnb settings, then enter what each stay earned.</div>';
 return;
@@ -262,13 +265,20 @@ badge.textContent = totalGross()
 el.innerHTML = keys.map((key) => {
 const rows = entriesFor(key).slice().sort((a, b) => String(b.date).localeCompare(String(a.date)));
 const bal = balanceFor(key);
+const mine = isMyOwnKey(key);
 const taxYears = taxYearSummaryFor(key);
 return `<div class="letting-owner">
 <div class="letting-head">
 <span class="letting-name">${escapeHtml(ownerNameFor(key))}</span>
-<span class="letting-balance${bal > 0 ? ' owes' : bal < 0 ? ' credit' : ''}">${escapeHtml(money(bal))}</span>
-<span class="settings-note" style="margin:0;">${bal > 0 ? 'owed to you' : bal < 0 ? 'in credit' : 'settled'}</span>
-${grossFor(key) ? `<span class="settings-note" style="margin:0 0 0 auto;">${escapeHtml(money(grossFor(key)))} taken</span>` : ''}
+${mine
+// No "owed to you" framing for yourself -- that money's already
+// yours, there's nothing to owe. Still shows the gross taken,
+// same as everyone else's row, just without a balance that would
+// otherwise always read as a meaningless "£0.00 settled".
+? ''
+: `<span class="letting-balance${bal > 0 ? ' owes' : bal < 0 ? ' credit' : ''}">${escapeHtml(money(bal))}</span>
+<span class="settings-note" style="margin:0;">${bal > 0 ? 'owed to you' : bal < 0 ? 'in credit' : 'settled'}</span>`}
+${grossFor(key) ? `<span class="settings-note" style="margin:${mine ? '0' : '0 0 0 auto'};">${escapeHtml(money(grossFor(key)))} taken</span>` : ''}
 </div>
 ${rows.length ? `<div class="letting-scroll"><table class="limits-table"><tbody>${rows.map((e) => `<tr>
 <td style="white-space:nowrap;"><input type="date" class="settings-input" style="max-width:130px;" data-letting-date="${escapeHtml(e.id)}" value="${escapeHtml(e.date || '')}" title="Edit retrospectively to the real Airbnb payout date, if it differs from checkout -- this is what tax-year grouping below uses.">${e.kind === 'earned' ? `<input type="date" class="settings-input" style="max-width:130px;margin-top:3px;" data-letting-start-date="${escapeHtml(e.id)}" value="${escapeHtml(e.startDate || '')}" title="Optional -- only if this booking ran longer than one month. When set, the chart above splits the gross across every month from here to the date on the left (same pro-rata-by-night split a real reservation's own checkin/checkout already gets), instead of landing as one spike in a single month.">` : ''}</td>
@@ -374,11 +384,15 @@ const kind = (document.getElementById('letting-add-kind') || {}).value || 'payme
 // having both means you can use whichever number you actually have to
 // hand, rather than doing the arithmetic yourself and leaving a row that
 // doesn't say what it came from.
-const pct = sharePctFor(who.value);
+// Zero for yourself -- the whole gross is already yours, nothing to
+// split off as owed, same rule accrueLettings() applies automatically
+// for a self-owned listing's real stays.
+const mine = isMyOwnKey(who.value);
+const pct = mine ? 0 : sharePctFor(who.value);
 const signed = kind === 'earned'
 ? Math.round(amount * (pct / 100) * 100) / 100
 : Math.round(amount * 100) / 100;
-if (!signed) { say('That works out as nothing — check the amount.'); return; }
+if (!signed && !(kind === 'earned' && mine)) { say('That works out as nothing — check the amount.'); return; }
 data.lettingLedger.push({
 id: uid(),
 ownerKey: who.value,
@@ -1124,11 +1138,12 @@ function renderOwnerPicker() {
 const sel = document.getElementById('letting-add-owner');
 if (!sel) return;
 const keep = sel.value;
-// Same self-exclusion as renderLetting()'s row list -- logging a
-// manual earned/payment/adjustment FOR yourself is meaningless, same
-// reasoning accrueLettings() now applies automatically.
-sel.innerHTML = `<option value="">Who…</option>${owners().filter((k) => !isMyOwnKey(k)).map((k) => `<option value="${escapeHtml(k)}">${escapeHtml(ownerNameFor(k))}</option>`).join('')}`;
+// Includes yourself -- logging a historic "Earned" figure for your
+// own listing (pre-tracking income) is a legitimate real use; see the
+// add-button handler below for where that's correctly recorded at
+// zero owed rather than split like a real third party's share.
+sel.innerHTML = `<option value="">Who…</option>${owners().map((k) => `<option value="${escapeHtml(k)}">${escapeHtml(ownerNameFor(k))}</option>`).join('')}`;
 if (keep) sel.value = keep;
 }
 
-export { accrueLettings, renderLetting, initLetting, totalOwed, totalGross, balanceFor, grossFor, owners, ownerNameFor, ownerKeyFor, sharePctFor, money };
+export { accrueLettings, renderLetting, initLetting, totalOwed, totalGross, balanceFor, grossFor, owners, ownerNameFor, ownerKeyFor, sharePctFor, money, isMyOwnKey };

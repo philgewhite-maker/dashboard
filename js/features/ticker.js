@@ -576,11 +576,17 @@ const t = data.ticker;
 if (item.kind === 'letting') {
 // Derived from the ledger every time rather than cached: it changes
 // when you add a payment, not when a feed refreshes.
-const { totalOwed, owners, balanceFor, ownerNameFor, money } = letting;
+const { totalOwed, owners, balanceFor, ownerNameFor, money, isMyOwnKey } = letting;
 const total = totalOwed();
-if (!owners().length) return '';
+// Same self-exclusion totalOwed() itself already applies -- a self-
+// owned listing's own balance is never actually owed to anyone, so it
+// has no business in this "who owes you" breakdown either (confirmed
+// live: this line was still listing "Phil £1,000.00" alongside the
+// correct headline total).
+const owed = owners().filter((k) => !isMyOwnKey(k));
+if (!owed.length) return '';
 return tile('Owed', escapeHtml(money(total)), '',
-`${owners().map((k) => `${ownerNameFor(k)} ${money(balanceFor(k))}`).join(' · ')}. Letting income owed to you — Finances tab.`);
+`${owed.map((k) => `${ownerNameFor(k)} ${money(balanceFor(k))}`).join(' · ')}. Letting income owed to you — Finances tab.`);
 }
 if (item.kind === 'cass') {
 const logo = item.logoUrl ? `<img class="tick-bank-logo" src="${escapeHtml(item.logoUrl)}" alt="" onerror="this.remove()">` : '';

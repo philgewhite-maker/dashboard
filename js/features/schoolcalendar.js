@@ -166,21 +166,18 @@ const checks = checksStore();
 const st = checks[site.key] || {};
 const nowIso = new Date().toISOString();
 const year = Number(todayStr().slice(0, 4));
-if (!st.baselineHash) {
-// First run ever (or first since the floor was last reset) -- this
-// becomes the baseline, not a "found" update. This is what running
-// the check once, right now, seeds for each site.
-checks[site.key] = { ...st, baselineHash: hash, lastCheckedAt: nowIso };
-queueSave();
-return { changed: false, seeded: true };
-}
-if (st.baselineHash === hash) {
+const firstRun = !st.baselineHash;
+if (!firstRun && st.baselineHash === hash) {
 checks[site.key] = { ...st, lastCheckedAt: nowIso };
 queueSave();
 return { changed: false };
 }
-// Changed -- the rare path. AI only ever runs here, not in the weekly
-// gate above.
+// Either a genuine year-over-year change, OR the very first run ever
+// (nothing to compare against yet) -- confirmed live this needs to
+// extract on first run too, not just silently seed a hash: with
+// nothing else to show, "run it now as the baseline" would otherwise
+// leave nothing to actually review or push on that very first check.
+// AI only ever runs here, never in the weekly no-op gate above.
 const { extractSchoolCalendar } = await import('../ai.js');
 const extracted = await extractSchoolCalendar(text, `${site.label}'s term-dates page.`);
 const holidays = await holidaysForSite(site, extracted);
@@ -192,7 +189,7 @@ periods: periods.map((p) => ({ id: uid(), ...p, pushed: false, googleEventId: ''
 });
 checks[site.key] = { baselineHash: hash, lastCheckedAt: nowIso, foundYear: year };
 queueSave();
-return { changed: true, periods };
+return { changed: true, firstRun, periods };
 }
 
 async function runSchoolCalendarCheck() {
@@ -202,8 +199,8 @@ const { reportCheck } = await import('./sitehealth.js');
 try {
 const result = await checkSite(site);
 const detail = result.changed
-? `Update found -- ${result.periods.length} period(s), see the Family tab.`
-: result.seeded ? 'Baseline captured.' : 'No change.';
+? `${result.firstRun ? 'First run' : 'Update found'} -- ${result.periods.length} period(s), see the Family tab.`
+: 'No change.';
 reportCheck(`school-calendar-${site.key}`, true, detail);
 } catch (err) {
 console.error(`School calendar check failed (${site.label}):`, err);
