@@ -24,7 +24,7 @@
 // implies: a trip to Lisbon next week puts Lisbon's weather and GBP/EUR
 // on the strip by itself and takes them off when you're home. See
 // travelItems().
-import { data, queueSave } from '../state.js';
+import { data, queueSave, inventorySets, SET_CORE_GROUPS } from '../state.js';
 import { escapeHtml, uid, bindBackdropClose } from '../utils.js';
 import * as letting from './letting.js';
 import { matchBankLogo } from '../bankLogos.js';
@@ -427,13 +427,44 @@ if (!failing.length) return [];
 return [{ id: 'auto-sitehealth', kind: 'sitehealth', auto: true, count: failing.length, worst: failing[0] }];
 }
 
+// Lazy, not a top-level import -- connections.js is a heavy module this
+// file would otherwise force onto every single page load (the ticker
+// renders before any tab is even chosen), the same cost travel.js's own
+// person-picker deliberately avoids by loading it on demand instead.
+// Starts null (tile stays off, the privacy-safe default) and is filled
+// in once, then re-renders so the tile can appear retroactively.
+let sensitiveFieldsShownFn = null;
+function loadSensitiveFieldsGate() {
+if (sensitiveFieldsShownFn) return;
+import('./connections.js').then(({ sensitiveFieldsShown }) => {
+sensitiveFieldsShownFn = sensitiveFieldsShown;
+renderTicker();
+});
+}
+
+// A single escalation tile for every owned bra/knickers piece still
+// missing its other half -- same "one tile, not one per thing" shape as
+// the site-health tile above, and gone the moment nothing's incomplete.
+// Gated behind the same device-local "sensitive fields" toggle the
+// Inventory panel itself already is (shopping.js's renderInventory) --
+// the ticker is always on screen, unlike a tab you have to choose to
+// open, so showing a lingerie-gap count here on an unlocked phone would
+// undercut the exact thing that gate exists for.
+function incompleteSetItems() {
+loadSensitiveFieldsGate();
+if (!sensitiveFieldsShownFn || !sensitiveFieldsShownFn()) return [];
+const incomplete = inventorySets().filter((s) => !s.complete && s.groups.some((g) => SET_CORE_GROUPS.includes(g)));
+if (!incomplete.length) return [];
+return [{ id: 'auto-inv-incomplete', kind: 'inv-incomplete', auto: true, count: incomplete.length, sets: incomplete }];
+}
+
 // Your own list plus the travel ones, with duplicates dropped: a trip to
 // Dublin shouldn't give you a second GBP/EUR tile next to the one you
 // already keep.
 function activeItems() {
 const mine = (data.ticker.items || []).filter((i) => !i.hidden);
 const seen = new Set(mine.map(keyFor));
-const extra = [...travelItems(), ...cassBonusItems(), ...siteHealthFailureItems()].filter((i) => !seen.has(keyFor(i)));
+const extra = [...travelItems(), ...cassBonusItems(), ...siteHealthFailureItems(), ...incompleteSetItems()].filter((i) => !seen.has(keyFor(i)));
 return [...mine, ...extra];
 }
 
@@ -593,6 +624,12 @@ const logo = item.logoUrl ? `<img class="tick-bank-logo" src="${escapeHtml(item.
 return tile('CASS', `${logo}${letting.money(item.amount)}`, '',
 `${item.bank}${item.description ? ` — ${item.description}` : ''}. Switch bonus still being worked on — click to open the account.`,
 { auto: true, accountId: item.accountId });
+}
+if (item.kind === 'inv-incomplete') {
+const names = item.sets.map((s) => [s.brand, s.style, s.colour].filter(Boolean).join(' ') || 'Unnamed set');
+return tile('Stock', item.count === 1 ? '1 set' : `${item.count} sets`, '',
+`Missing a piece: ${names.join(' · ')}. Inventory — Shopping tab.`,
+{ auto: true, gotoTab: 'shopping', gotoTarget: '#inventory-list' });
 }
 if (item.kind === 'sitehealth') {
 const { check, row } = item.worst;

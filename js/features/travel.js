@@ -575,6 +575,7 @@ ${trip.people.map((p) => personChipHtml(trip.id, p)).join('')}
 <button class="todo-add-btn" type="button" data-trip-add-person="${trip.id}">Add</button>
 </div>
 <div class="settings-note" style="margin-top:6px;">${trip.legs.length === 0 ? 'No legs yet.' : complete ? 'Itinerary complete.' : `${gapCount} thing${gapCount === 1 ? '' : 's'} still need confirming.`}</div>
+${trip.taskId ? `<div style="margin-top:4px;" data-trip-task-mount="${trip.id}"></div>` : ''}
 <div data-packing-mount="${trip.id}"></div>
 ${(() => {
 // One chronological itinerary: real legs plus any Date Event linked to
@@ -631,6 +632,23 @@ select.innerHTML = cals.length ? cals.map((c) => `<option value="${escapeHtml(c.
 });
 }).catch(() => { select.innerHTML = '<option value="">Couldn\'t load calendars</option>'; });
 });
+// The trip's own linked project task (createTrip's "Trip: <title>"),
+// shown via the canonical taskChipHtml/bindTaskChips pattern rather
+// than a bespoke link -- per CLAUDE.md, anywhere a task is referenced
+// outside its own card. Confirmed live as a real gap, reported
+// directly: the task already existed and already held the trip's own
+// sub-tasks, but nothing on the trip card itself pointed back at it.
+if (el.querySelector('[data-trip-task-mount]')) {
+import('./tasks.js').then(({ taskChipHtml, bindTaskChips, taskById }) => {
+bindTaskChips();
+el.querySelectorAll('[data-trip-task-mount]').forEach((mount) => {
+const trip = tripById(mount.dataset.tripTaskMount);
+const task = trip && trip.taskId ? taskById(trip.taskId) : null;
+if (task) mount.innerHTML = taskChipHtml(task);
+else mount.remove();
+});
+});
+}
 // Packing, same lazy-loaded mount-then-fill shape as the person picker
 // just below -- most sessions open Travel without ever touching
 // packing.js's own module-library logic, so it stays out of this tab's

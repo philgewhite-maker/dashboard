@@ -36,7 +36,16 @@ const WEEK_MS = 7 * 24 * 3600000;
 const CHECKS = [
 {
 id: 'ap-colours', label: 'Agent Provocateur — colour filter', site: 'agentprovocateur.com',
-note: 'Re-runs the exact filters.colour_filter=Black query the set finder uses and confirms every result that comes back is genuinely black. Catches the filter silently reverting to the unfiltered list, the way 5 other guessed keys already did before the real one was found this session.',
+// Confirmed live this note overstated the stakes: setfinder.js (the
+// only thing that ever searches AP by colour) does NOT trust this URL
+// filter -- it already re-filters every result client-side via
+// bucketsForColour, specifically because this exact key was one of six
+// guessed before the real one was found. So a failure here is real
+// (AP's own filter has since degraded -- confirmed live, a "Lorna"
+// range item in "Dark Pink/Cobalt" came back under filters.colour_filter
+// =Black) but zero-impact in practice, not a silent correctness risk --
+// kept as a canary on the SITE, not a guarantee the app still needs.
+note: 'Re-runs filters.colour_filter=Black against a real listing and confirms every result is genuinely black. Nothing in this app actually trusts this filter any more -- setfinder.js already re-filters client-side regardless -- so a failure here means AP\'s own filter has degraded, not that a search could return the wrong colour.',
 weekly: true,
 run: runApColoursCheck,
 },
@@ -174,7 +183,7 @@ const items = agentProvocateur.listingItems(html);
 if (!items.length) throw new Error('the filtered listing came back with nothing in it');
 const offColour = items.filter((i) => !agentProvocateur.bucketsForColour(i.colour).includes('Black'));
 if (offColour.length) {
-throw new Error(`${offColour.length} of ${items.length} results weren't black (e.g. "${offColour[0].colour}") -- the colour filter likely stopped working`);
+throw new Error(`${offColour.length} of ${items.length} results weren't black (e.g. "${offColour[0].colour}") -- AP's own colour filter has degraded (no app feature actually relies on it, see this check's own note)`);
 }
 return `${items.length} black bras found, all genuinely black.`;
 }
