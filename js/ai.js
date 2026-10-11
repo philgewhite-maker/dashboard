@@ -2300,6 +2300,8 @@ Extract three things, as ISO yyyy-mm-dd dates:
 
 Only extract dates that are actually stated on the page. Never infer a date from a pattern or guess at what "probably" follows -- leave a range out entirely if its start or end isn't clearly given.
 
+A real page can still have its own typo -- most often a year left over from copy-pasting the previous year's version, on just one date out of many. If a term's own stated start/end year conflicts with other dates clearly given for that SAME term elsewhere on the page (a break inside it, an "end of term"/"last day of school" date, the next term's own start), treat the single outlier as the likely typo, not the several consistent ones, and use whichever year keeps that term's own dates -- and its position relative to the terms before and after it -- in proper order. An explicit "last day of school"/"end of year" date, when the page states one, is the authoritative end boundary for the final term of the year, even if a term heading nearby gives a conflicting end date of its own.
+
 Reply with ONLY a JSON object, no other text, no markdown fences: {"termRanges":[{"start":"","end":""}],"breaks":[{"label":"","start":"","end":""}],"holidays":[{"label":"","date":""}]}`;
 const { data } = await callTextJson(prompt, SCHOOL_CALENDAR_MAX_TOKENS, MAIL_EXTRACT_MODEL, 'School calendar extraction');
 const isoDate = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || '').trim()) ? String(v).trim() : '';
