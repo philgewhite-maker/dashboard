@@ -1083,6 +1083,14 @@ externalPrefix: '',
 ownerConnectionId: '',
 ownerLabel: '',
 sharePct: 50,
+// Off for a listing that isn't actually a guest-facing let -- a
+// catch-up "Flat" used to log contractor/maintenance visits (see
+// airbnb.js's manual "Add booking" row) rather than a real room.
+// Default true so every EXISTING listing keeps showing cleaner chips
+// and the checkout clean nudge exactly as before; only a listing this
+// gets turned off for skips both (airbnb.js's reservationRowHtml,
+// nudges.js's buildAirbnbNudges).
+needsCleaning: true,
 ...fields,
 };
 }

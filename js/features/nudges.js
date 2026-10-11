@@ -428,7 +428,7 @@ const listing = data.airbnbListings.find((l) => l.id === r.listingId);
 if (!listing) return;
 const label = listing.label || listing.prefix || 'A listing';
 const dOut = daysUntil(r.checkout);
-if (dOut >= 0 && dOut <= AIRBNB_CLEAN_LEAD_DAYS) {
+if (listing.needsCleaning && dOut >= 0 && dOut <= AIRBNB_CLEAN_LEAD_DAYS) {
 pool.push({
 text: `${label}: checkout ${dOut === 0 ? 'today' : `in ${dOut} day${dOut === 1 ? '' : 's'}`} — line up the clean.`,
 target: { type: 'airbnb', id: r.id },

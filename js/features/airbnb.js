@@ -21,6 +21,27 @@ import { listCalendars, createEvent, findEvents } from '../googlecalendar.js';
 // else in the app to reuse instead.
 const AIRBNB_COLOURS = ['blue', 'pink', 'sage', 'amber', 'slate', 'rose', 'teal', 'plum', 'red'];
 
+// Native HTML5 drag-and-drop does NOT auto-scroll the page as the cursor
+// nears the viewport edge -- confirmed as the reported bug: dragging a
+// key toward a reservation below the fold on mobile just has the cursor
+// stall there with no way to reach it. Ported verbatim from planner.js's
+// own autoScrollDuringPlannerDrag/plannerDragActive (which solved the
+// identical problem for its day-grid), kept airbnb-local rather than
+// shared so the two features' drag states can never interfere with each
+// other's unrelated drags.
+let keysDragActive = false;
+const AIRBNB_SCROLL_EDGE = 90;
+const AIRBNB_SCROLL_MAX_SPEED = 24;
+function autoScrollDuringKeyDrag(e) {
+if (!keysDragActive) return;
+const y = e.clientY;
+if (y < AIRBNB_SCROLL_EDGE) {
+window.scrollBy(0, -Math.ceil(((AIRBNB_SCROLL_EDGE - y) / AIRBNB_SCROLL_EDGE) * AIRBNB_SCROLL_MAX_SPEED));
+} else if (y > window.innerHeight - AIRBNB_SCROLL_EDGE) {
+window.scrollBy(0, Math.ceil(((y - (window.innerHeight - AIRBNB_SCROLL_EDGE)) / AIRBNB_SCROLL_EDGE) * AIRBNB_SCROLL_MAX_SPEED));
+}
+}
+
 // ---- Sync ---------------------------------------------------------------
 //
 // The feed parser itself lives in js/icsparse.js, which imports nothing.
@@ -284,7 +305,7 @@ el.innerHTML = '<div class="settings-note" style="margin:0;">No listings yet —
 return;
 }
 el.innerHTML = `<table class="limits-table">
-<thead><tr><th>Label</th><th title="An Airbnb listing's iCal export. Leave it blank for a booking calendar that was never on Airbnb — a plumber, a decorator, a cat sitter — and give it an External prefix instead, so its bookings come from events you type into the shared Google Calendar. Sync skips a listing with no URL rather than reporting it as a broken feed." style="cursor:help; text-decoration:underline dotted;">Calendar export URL</th><th title="Identifies the physical ROOM, not the listing — give two listings for the same room the same prefix. Once you rename any manually-entered Google Calendar events for a room to include its prefix, &quot;Push to Google Calendar&quot; recognises and adopts them instead of duplicating." style="cursor:help; text-decoration:underline dotted;">Prefix</th><th title="A SECOND, different tag for a booking from outside Airbnb entirely (a friend, another platform) — type it into that Calendar event's title (e.g. &quot;ES-Lg - Jane Doe&quot;) and Sync pulls it in as a reservation on this listing, taking whatever follows the prefix as the name. Any dash, colon or pipe works as the separator. Deliberately not the same as Prefix — never mistaken for a real Airbnb booking when one of those gets pushed. Leave blank to skip this for a listing." style="cursor:help; text-decoration:underline dotted;">External prefix</th><th title="Identifies the physical ROOM, not the listing — give two listings for the same room the same colour." style="cursor:help; text-decoration:underline dotted;">Colour</th><th title="Whose listing this is. Their share of what each stay earns becomes a debt on the day the guests leave — see Letting income on the Finances tab." style="cursor:help; text-decoration:underline dotted;">Owner</th><th title="What they owe you of this listing's takings." style="cursor:help; text-decoration:underline dotted;">Share %</th><th></th></tr></thead>
+<thead><tr><th>Label</th><th title="An Airbnb listing's iCal export. Leave it blank for a booking calendar that was never on Airbnb — a plumber, a decorator, a cat sitter — and give it an External prefix instead, so its bookings come from events you type into the shared Google Calendar. Sync skips a listing with no URL rather than reporting it as a broken feed." style="cursor:help; text-decoration:underline dotted;">Calendar export URL</th><th title="Identifies the physical ROOM, not the listing — give two listings for the same room the same prefix. Once you rename any manually-entered Google Calendar events for a room to include its prefix, &quot;Push to Google Calendar&quot; recognises and adopts them instead of duplicating." style="cursor:help; text-decoration:underline dotted;">Prefix</th><th title="A SECOND, different tag for a booking from outside Airbnb entirely (a friend, another platform) — type it into that Calendar event's title (e.g. &quot;ES-Lg - Jane Doe&quot;) and Sync pulls it in as a reservation on this listing, taking whatever follows the prefix as the name. Any dash, colon or pipe works as the separator. Deliberately not the same as Prefix — never mistaken for a real Airbnb booking when one of those gets pushed. Leave blank to skip this for a listing." style="cursor:help; text-decoration:underline dotted;">External prefix</th><th title="Identifies the physical ROOM, not the listing — give two listings for the same room the same colour." style="cursor:help; text-decoration:underline dotted;">Colour</th><th title="Whose listing this is. Their share of what each stay earns becomes a debt on the day the guests leave — see Letting income on the Finances tab." style="cursor:help; text-decoration:underline dotted;">Owner</th><th title="What they owe you of this listing's takings." style="cursor:help; text-decoration:underline dotted;">Share %</th><th title="Off for a space that isn't actually a guest-facing let -- a catch-all &quot;Flat&quot; used to log contractor/maintenance visits rather than a real room. Turning it off hides the Check-in/out clean chips for this listing's bookings and stops the checkout-clean nudge, since neither makes sense for a space nobody's actually staying in." style="cursor:help; text-decoration:underline dotted;">Needs cleaning</th><th></th></tr></thead>
 <tbody>${data.airbnbListings.map((l) => `<tr>
 <td><input type="text" autocomplete="off" data-airbnb-listing-field="label" data-airbnb-listing-id="${l.id}" value="${escapeHtml(l.label)}" placeholder="e.g. Entire studio"></td>
 <td><input type="text" autocomplete="off" data-airbnb-listing-field="icsUrl" data-airbnb-listing-id="${l.id}" value="${escapeHtml(l.icsUrl)}" placeholder="https://www.airbnb..../calendar/ical/....ics — or blank if not on Airbnb"></td>
@@ -299,6 +320,7 @@ ${(data.connections || []).slice().sort((a, b) => String(a.name).localeCompare(S
 </select>
 <input type="text" autocomplete="off" data-airbnb-listing-field="ownerLabel" data-airbnb-listing-id="${l.id}" value="${escapeHtml(l.ownerLabel || '')}" placeholder="or a name" style="width:100px;margin-top:3px;" title="Use this when the owner isn't a connection — a child, say. The dropdown wins if both are set."></td>
 <td><input type="number" min="0" max="100" step="1" data-airbnb-listing-field="sharePct" data-airbnb-listing-id="${l.id}" value="${escapeHtml(String(l.sharePct ?? 50))}" style="width:60px;"></td>
+<td style="text-align:center;"><input type="checkbox" data-airbnb-listing-field="needsCleaning" data-airbnb-listing-id="${l.id}"${l.needsCleaning ? ' checked' : ''}></td>
 <td><span class="del-x" style="opacity:1;" data-del-airbnb-listing="${l.id}">&times;</span></td>
 </tr>`).join('')}</tbody>
 </table>`;
@@ -307,8 +329,9 @@ el.querySelectorAll('[data-airbnb-listing-field]').forEach((input) => {
 input.addEventListener('change', () => {
 const listing = data.airbnbListings.find((l) => l.id === input.dataset.airbnbListingId);
 if (!listing) return;
-listing[input.dataset.airbnbListingField] = input.value.trim();
+listing[input.dataset.airbnbListingField] = input.type === 'checkbox' ? input.checked : input.value.trim();
 queueSave();
+if (input.dataset.airbnbListingField === 'needsCleaning') renderAirbnb();
 });
 });
 el.querySelectorAll('[data-del-airbnb-listing]').forEach((x) => {
@@ -499,12 +522,58 @@ if (!best) return null;
 return otherStayOverlaps(sameListing, reservation.checkout, best.date) ? null : best;
 }
 
+// Which "TBC" chips currently show their inline name/date capture form,
+// keyed "${reservationId}:${edge}" -- session-only, same idiom as every
+// other "is this expanded" Set in the app (e.g. planner.js's
+// plannerAddOpenKeys).
+const openCleanerForms = new Set();
+
 function cleanerChipHtml(reservation, edge) {
 const match = findCleanerMatch(reservation, edge);
 const label = edge === 'checkin' ? 'Check-in clean' : 'Check-out clean';
-return match
-? `<span class="cal-badge cleaner-chip">${label}: ${formatAirbnbDate(match.date)} &middot; ${escapeHtml(match.name)}</span>`
-: `<span class="cal-badge cleaner-chip cleaner-chip-tbc">${label}: TBC</span>`;
+if (match) return `<span class="cal-badge cleaner-chip">${label}: ${formatAirbnbDate(match.date)} &middot; ${escapeHtml(match.name)}</span>`;
+const key = `${reservation.id}:${edge}`;
+if (!openCleanerForms.has(key)) {
+return `<span class="cal-badge cleaner-chip cleaner-chip-tbc" data-airbnb-cleaner-toggle="${key}" title="Click to add who's doing this clean and when">${label}: TBC</span>`;
+}
+// Prefilled to the stay's own boundary -- the common case -- but still
+// editable, since the actual clean can land a day either side of it.
+const prefillDate = edge === 'checkin' ? reservation.checkin : reservation.checkout;
+return `<span class="cal-badge cleaner-chip-form">
+${label}:
+<input type="text" autocomplete="off" class="tag-add-input" placeholder="Who" data-airbnb-cleaner-name="${key}" style="max-width:90px;">
+<input type="date" class="tag-add-input" data-airbnb-cleaner-date="${key}" value="${escapeHtml(prefillDate)}" style="max-width:130px;">
+<button class="sync-btn sm" type="button" data-airbnb-cleaner-add="${key}">Add</button>
+<span class="tag-x" data-airbnb-cleaner-cancel="${key}" title="Cancel">&times;</span>
+<span class="sync-status" data-airbnb-cleaner-status="${key}"></span>
+</span>`;
+}
+
+// Mirrors pushReservation's exact gating (signed in -> write scope ->
+// push calendar configured), then writes the SAME "Cleaner - <Name>"
+// title format syncCleanerEvents' own parseCleanerEventName already
+// expects to read back -- so a cleaner added here is found by a later
+// full Sync exactly as if it had been typed into Google Calendar by
+// hand, and also updated locally right away so the chip flips to
+// matched on the very next render without waiting for one.
+async function addCleanerEvent(reservation, edge, name, date, statusEl) {
+const trimmedName = String(name || '').trim();
+if (!trimmedName) { statusEl.textContent = 'Name first.'; return; }
+if (!date) { statusEl.textContent = 'Pick a date.'; return; }
+if (!(await canAttemptGoogleAction())) { statusEl.textContent = 'Sign in to Google at the top of Overview first.'; return; }
+if (!hasCalendarWrite()) { statusEl.innerHTML = 'Turn on "Allow creating events in Google Calendar" in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#calendar-write-toggle">Settings</span>, then sign out and back in.'; return; }
+const calendarId = data.prefs.airbnbCalendarId;
+if (!calendarId) { statusEl.textContent = 'Pick which calendar to push to, next to Sync, first.'; return; }
+statusEl.textContent = 'Adding…';
+try {
+await createEvent(calendarId, { title: `Cleaner - ${trimmedName}`, date });
+data.airbnbCleanerEvents = [...(data.airbnbCleanerEvents || []), { date, name: trimmedName }];
+openCleanerForms.delete(`${reservation.id}:${edge}`);
+queueSave();
+renderAirbnb();
+} catch (err) {
+statusEl.textContent = `Couldn't add: ${err.message || err}`;
+}
 }
 
 function reservationRowHtml(r) {
@@ -533,7 +602,7 @@ ${r.source === 'external'
 : `<button class="sync-btn inline" type="button" data-airbnb-push="${r.id}" title="Push to Google Calendar">Push</button>`}
 <span class="sync-status" data-airbnb-push-status="${r.id}"></span>
 ${r.source === 'manual' ? `<span class="del-x" style="opacity:1;" data-airbnb-res-del="${r.id}" title="Delete this booking — nothing else records it, so it won't come back on the next Sync">&times;</span>` : ''}
-${data.prefs.airbnbCalendarId ? `<div class="cal-clean-group">${cleanerChipHtml(r, 'checkin')}${cleanerChipHtml(r, 'checkout')}</div>` : ''}
+${data.prefs.airbnbCalendarId && listing.needsCleaning ? `<div class="cal-clean-group">${cleanerChipHtml(r, 'checkin')}${cleanerChipHtml(r, 'checkout')}</div>` : ''}
 </div>
 ${reservationKeysHtml(r)}
 </div>`;
@@ -660,6 +729,32 @@ btn.addEventListener('click', () => {
 const r = data.airbnbReservations.find((x) => x.id === btn.dataset.airbnbPush);
 const statusEl = el.querySelector(`[data-airbnb-push-status="${btn.dataset.airbnbPush}"]`);
 if (r && statusEl) pushReservation(r, statusEl);
+});
+});
+el.querySelectorAll('[data-airbnb-cleaner-toggle]').forEach((chip) => {
+chip.addEventListener('click', () => {
+openCleanerForms.add(chip.dataset.airbnbCleanerToggle);
+renderAirbnb();
+});
+});
+el.querySelectorAll('[data-airbnb-cleaner-cancel]').forEach((x) => {
+x.addEventListener('click', () => {
+openCleanerForms.delete(x.dataset.airbnbCleanerCancel);
+renderAirbnb();
+});
+});
+el.querySelectorAll('[data-airbnb-cleaner-add]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const key = btn.dataset.airbnbCleanerAdd;
+const sep = key.lastIndexOf(':');
+const reservation = data.airbnbReservations.find((r) => r.id === key.slice(0, sep));
+const edge = key.slice(sep + 1);
+const nameInput = el.querySelector(`[data-airbnb-cleaner-name="${key}"]`);
+const dateInput = el.querySelector(`[data-airbnb-cleaner-date="${key}"]`);
+const statusEl = el.querySelector(`[data-airbnb-cleaner-status="${key}"]`);
+if (reservation && nameInput && dateInput && statusEl) {
+addCleanerEvent(reservation, edge, nameInput.value, dateInput.value, statusEl);
+}
 });
 });
 bindKeyCards(el);
@@ -829,8 +924,9 @@ card.addEventListener('dragstart', (e) => {
 e.dataTransfer.setData('text/plain', card.dataset.keyDrag);
 e.dataTransfer.effectAllowed = 'move';
 card.classList.add('dragging');
+keysDragActive = true;
 });
-card.addEventListener('dragend', () => card.classList.remove('dragging'));
+card.addEventListener('dragend', () => { card.classList.remove('dragging'); keysDragActive = false; });
 });
 el.querySelectorAll('[data-unassign-key]').forEach((x) => {
 x.addEventListener('click', () => {
@@ -872,6 +968,10 @@ bindKeyCards(el);
 
 function initAirbnbKeys() {
 renderAirbnbKeys();
+// Bound once here, not inside renderAirbnb()/bindKeyCards (which re-run
+// every render and would stack duplicate listeners) -- same "init once"
+// placement planner.js uses for its own equivalent listener.
+document.addEventListener('dragover', autoScrollDuringKeyDrag);
 }
 
 // ---- Guest names via email --------------------------------------------------
