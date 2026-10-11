@@ -141,20 +141,67 @@ merged.push({ ...p });
 return merged;
 }
 
+// Collapses touching/overlapping termRanges into one continuous
+// "enrolled" span each -- the same operation mergePeriods does, kept
+// separate because this one feeds computeTermGaps below rather than
+// the final period list, and termRanges (unlike breaks/holidays) carry
+// no label worth preserving on a merge.
+function mergedTermSpans(termRanges) {
+const plain = (termRanges || []).map((r) => ({ start: r.start, end: r.end, label: '' }));
+return mergePeriods(plain);
+}
+
+// The time BETWEEN two consecutive terms is not-at-school whether or
+// not the page itself named it as a break -- confirmed live as a real
+// gap, not just a defensive fallback: Lewis's own page names only its
+// office closures (far narrower than the actual student gap between
+// terms), and UNBC's page states a "Winter Break" window that starts
+// three days after the real last exam. Computed purely from the
+// extracted term boundaries, so a page whose named breaks already
+// cover the full gap just produces an exact duplicate that mergePeriods
+// (in the caller) collapses away for free.
+function computeTermGaps(spans) {
+const gaps = [];
+for (let i = 1; i < spans.length; i++) {
+const start = dateStrAdd(spans[i - 1].end, 1);
+const end = dateStrAdd(spans[i].start, -1);
+if (start <= end) gaps.push({ label: 'Break', start, end });
+}
+return gaps;
+}
+
 function computeNotAtSchoolPeriods(extracted) {
 const breakPeriods = extracted.breaks.map((b) => {
 const ext = extendToWeekends(b.start, b.end);
 return { label: b.label, start: ext.start, end: ext.end };
 });
-const covered = (dateStr) => breakPeriods.some((p) => dateStr >= p.start && dateStr <= p.end);
-const inTerm = (dateStr) => extracted.termRanges.some((r) => dateStr >= r.start && dateStr <= r.end);
+const termRanges = extracted.termRanges || [];
+const spans = mergedTermSpans(termRanges);
+// Gaps are computed from the term boundaries themselves, not run
+// through extendToWeekends -- a gap's own start/end already sit
+// exactly one day past the real last/next term day, so extending it
+// further out would eat into real term time instead of a weekend.
+const gapPeriods = computeTermGaps(spans);
+const covered = (dateStr) => [...breakPeriods, ...gapPeriods].some((p) => dateStr >= p.start && dateStr <= p.end);
+const inTerm = (dateStr) => termRanges.some((r) => dateStr >= r.start && dateStr <= r.end);
 // Only a holiday that falls DURING term time and ISN'T already inside a
 // break is worth its own entry -- one during the summer break, say, is
 // already fully covered and would just be a redundant duplicate.
 const holidayPeriods = (extracted.holidays || [])
 .filter((h) => h.date && inTerm(h.date) && !isWeekend(h.date) && !covered(h.date))
 .map((h) => ({ label: h.label || 'Public holiday', start: h.date, end: h.date }));
-return mergePeriods([...breakPeriods, ...holidayPeriods]);
+const closed = mergePeriods([...breakPeriods, ...gapPeriods, ...holidayPeriods]);
+// The run of terms has to end somewhere, but next year's own first
+// day isn't known yet -- rather than silently stopping at the last
+// term's own end date (which reads as "nothing after this," not "we
+// don't know yet"), this adds an explicit, open-ended marker the user
+// can push now and update once the school/uni publishes next year's
+// dates. No `end` -- periodRowHtml and the push handler both treat a
+// blank end as "TBC", not a date to compute with.
+const openEnded = spans.length
+? [{ label: 'First day of summer break, end TBC', start: dateStrAdd(spans[spans.length - 1].end, 1), end: '' }]
+: [];
+return [...closed, ...openEnded];
 }
 
 // ---- Running the check -------------------------------------------------
@@ -243,7 +290,7 @@ await runSchoolCalendarCheck({ force: true });
 function periodRowHtml(update, period) {
 return `<div class="sync-row" style="margin:4px 0;flex-wrap:wrap;">
 <span class="settings-note" style="margin:0;min-width:140px;">${escapeHtml(period.label)}</span>
-<span style="font-variant-numeric:tabular-nums;">${escapeHtml(period.start)} &rarr; ${escapeHtml(period.end)}</span>
+<span style="font-variant-numeric:tabular-nums;">${escapeHtml(period.start)} &rarr; ${period.end ? escapeHtml(period.end) : 'end TBC'}</span>
 ${period.pushed
 ? '<span class="settings-note" style="margin:0;">Pushed &#10003;</span>'
 : `<button class="sync-btn sm inline" type="button" data-school-push="${update.id}:${period.id}">Push</button>`}
@@ -301,15 +348,24 @@ if (!calendarId) { say('Pick a calendar above first.'); return; }
 say('Pushing…');
 try {
 const { createEvent } = await import('../googlecalendar.js');
+// An open-ended period (no period.end -- the run after the last known
+// term, before next year's dates are published) pushes as a single-day
+// marker on its start date instead of a range: omitting endDate makes
+// createEvent default end to date itself (see its own eventBody
+// comment), which is the only sensible all-day shape for "starts here,
+// end not yet known" -- a fake far-future end date would misrepresent
+// it as a real, bounded break.
 const created = await createEvent(calendarId, {
-title: `${update.label} — not at school (${period.label})`,
+title: period.end
+? `${update.label} — not at school (${period.label})`
+: `${update.label} — ${period.label}`,
 description: `Source: ${update.url}`,
 date: period.start,
 // All-day events' end is EXCLUSIVE (googlecalendar.js's own
 // createEvent comment) -- period.end is the last INCLUSIVE day off,
 // so it needs bumping one day forward, same convention every other
 // all-day push in this app already follows.
-endDate: dateStrAdd(period.end, 1),
+...(period.end ? { endDate: dateStrAdd(period.end, 1) } : {}),
 });
 period.pushed = true;
 period.googleEventId = created.id;
