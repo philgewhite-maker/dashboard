@@ -441,13 +441,6 @@ renderLettingTaxSettings();
 const DAY_MS = 24 * 60 * 60 * 1000;
 const LETTING_CHART_MONTHS_BACK = 14; // + the current month itself = 15
 const LETTING_CHART_MONTHS_FORWARD = 6;
-// An "Earned (historic)" ledger row dated further back than the default
-// window is allowed to widen it -- see lettingChartData() -- but never
-// past this floor. Fixed to a real calendar month rather than "N months
-// before whatever today happens to be": this is the actual earliest
-// pre-tracking figure worth showing, not a rolling lookback, so it
-// shouldn't quietly drift as "today" moves forward.
-const LETTING_CHART_HISTORIC_FLOOR = '2026-01';
 
 // Two flat monthly targets per owner-group, regardless of days-in-month
 // -- "per calendar month" means the same number every month, not
@@ -614,10 +607,7 @@ splitContribution(listing, income * (nights / total)).forEach((c) => addAmount(c
 // same one-owner-one-listing assumption balanceFor/grossFor already
 // make elsewhere in this file. Allowed to widen the window backward so a
 // figure logged for an earlier month isn't silently dropped off the left
-// edge just because it predates the default span -- but never earlier
-// than LETTING_CHART_HISTORIC_FLOOR; anything before that is excluded
-// entirely rather than bunched into the floor month, which would
-// misrepresent which month it was actually earned in.
+// edge just because it predates the default span.
 let startYm = baseStart;
 (data.lettingLedger || []).forEach((e) => {
 if (e.kind !== 'earned' || !e.gross || !e.date) return;
@@ -625,7 +615,6 @@ const listing = listings.find((l) => ownerKeyFor(l) === e.ownerKey);
 if (!listing) return;
 const ym = e.date.slice(0, 7);
 if (ym > endYm) return; // a future-dated "historic" entry makes no sense -- ignore rather than extend forward
-if (ym < LETTING_CHART_HISTORIC_FLOOR) return; // older than the chart is willing to show
 if (ym < startYm) startYm = ym;
 splitContribution(listing, Number(e.gross)).forEach((c) => addAmount(c.group, ym, c.amount));
 });
@@ -725,6 +714,18 @@ renderLettingChart();
 let lettingChartHoverIndex = null;
 let lettingChartLastPlot = null; // {plot, bw, months} for the pointermove handler below
 
+// Nearest "nice" round number at or above roughStep -- 1/2/5 scaled to
+// roughStep's own order of magnitude (...100, 200, 500, 1000, 2000,
+// 5000...), so the axis always steps in round numbers regardless of
+// what the underlying data's max happens to be.
+function niceLettingAxisStep(roughStep) {
+if (roughStep <= 0) return 100;
+const magnitude = Math.pow(10, Math.floor(Math.log10(roughStep)));
+const residual = roughStep / magnitude;
+const niceResidual = residual <= 1 ? 1 : residual <= 2 ? 2 : residual <= 5 ? 5 : 10;
+return niceResidual * magnitude;
+}
+
 function drawLettingChart(canvas, chartData) {
 const { months, groups: allGroups, perGroupByMonth, nowIndex } = chartData;
 const groups = allGroups.filter((g) => lettingChartSelectedGroups.has(g.key));
@@ -755,21 +756,33 @@ const monthTotals = months.map((ym) => groups.reduce((n, g) => n + (perGroupByMo
 // and the lines show only his target, tick everyone and they show the
 // combined one.
 const targets = LETTING_TARGETS.map((t) => ({ ...t, amount: groups.reduce((n, g) => n + (Number(lettingChartTargetsFor(g.key)[t.key]) || 0), 0) }));
-const maxVal = Math.max(...monthTotals, ...targets.map((t) => t.amount), 1) * 1.1;
+const rawMax = Math.max(...monthTotals, ...targets.map((t) => t.amount), 1);
+// A round step (500, 1000, 2000, 5000...) rather than an arbitrary
+// fraction of whatever the data's own max happens to be -- a classic
+// 1-2-5 "nice numbers" sequence scaled to the data's own order of
+// magnitude, same idea any charting library's own axis uses.
+const axisStep = niceLettingAxisStep(rawMax / 4);
+// floor()+1, not ceil(): guarantees at least one full step of headroom
+// above the highest bar/target even when rawMax is itself an exact
+// multiple of axisStep (ceil alone would let the top bar touch the very
+// top gridline with nothing above it).
+const axisSteps = Math.floor(rawMax / axisStep) + 1;
+const maxVal = axisSteps * axisStep;
 const scaleY = (v) => plot.y + plot.h - (v / maxVal) * plot.h;
 
-// Gridlines + Y labels.
+// Gridlines + Y labels, one per round step.
 ctx.strokeStyle = lineColor;
 ctx.lineWidth = 1;
 ctx.fillStyle = muted;
 ctx.font = "10px 'Inter', sans-serif";
 ctx.textAlign = 'right';
 ctx.textBaseline = 'middle';
-[0, 0.25, 0.5, 0.75, 1].forEach((f) => {
-const y = scaleY(maxVal * f);
+for (let i = 0; i <= axisSteps; i++) {
+const v = i * axisStep;
+const y = scaleY(v);
 ctx.beginPath(); ctx.moveTo(plot.x, y); ctx.lineTo(plot.x + plot.w, y); ctx.stroke();
-ctx.fillText(money0(maxVal * f), plot.x - 6, y);
-});
+ctx.fillText(money0(v), plot.x - 6, y);
+}
 
 const n = months.length;
 const bw = plot.w / n;
