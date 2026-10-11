@@ -595,6 +595,10 @@ return `<div class="cal-row" data-airbnb-row="${r.id}">
 <input type="text" autocomplete="off" class="tag-add-input" placeholder="Guest name" data-airbnb-res-field="guestName" data-airbnb-res-id="${r.id}" value="${escapeHtml(r.guestName)}" style="max-width:130px;">
 <input type="text" autocomplete="off" class="tag-add-input" placeholder="Notes" data-airbnb-res-field="notes" data-airbnb-res-id="${r.id}" value="${escapeHtml(r.notes)}" style="max-width:160px;">
 <input type="number" step="0.01" min="0" class="tag-add-input" placeholder="Income £" data-airbnb-res-field="income" data-airbnb-res-id="${r.id}" value="${r.income ?? ''}" style="max-width:95px;" title="What this stay earned. The owner's share becomes a debt on the checkout date — see Letting income on Finances.">
+<select data-airbnb-res-field="platform" data-airbnb-res-id="${r.id}" title="Which platform this stay's income came through -- the Letting income chart on Finances breaks solid (Airbnb) out from striped (Other).">
+<option value="airbnb"${r.platform !== 'other' ? ' selected' : ''}>Airbnb</option>
+<option value="other"${r.platform === 'other' ? ' selected' : ''}>Other</option>
+</select>
 ${r.source === 'external'
 ? '<span class="settings-note" style="margin:0;" title="Found on the shared calendar by its external prefix -- nothing to push, it\'s already there.">External &#10003;</span>'
 : r.googleEventId

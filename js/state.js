@@ -1123,6 +1123,15 @@ guestName: '', notes: '',
 // and skips anything it has already written.
 income: null,
 accruedAt: '',
+// Which platform this stay's income actually came through -- 'airbnb' |
+// 'other'. Independent of `source` (which says how the RESERVATION got
+// into this app, not who paid for it): a manually-added booking can
+// still genuinely be an Airbnb stay logged by hand, and an ICS-synced
+// one is always Airbnb by definition. Default 'airbnb' so every
+// existing/typical reservation is unaffected; the letting income
+// chart (letting.js) draws 'other' as a striped fill of the same
+// listing colour rather than solid.
+platform: 'airbnb',
 googleEventId: '', googleCalendarId: '', // set once pushed, OR always set for source:'external' -- see js/googlecalendar.js's findEvents()/createEvent()
 createdAt: new Date().toISOString(),
 ...fields,

@@ -108,6 +108,10 @@ amount,
 // total has to survive without being parsed back out of English.
 gross: income,
 pct,
+// Copied at accrual time, same as gross/pct -- the ledger row is the
+// thing taxYearSummaryFor() and the chart actually read, not the
+// reservation, so this needs to be a field here too, not just on `r`.
+platform: r.platform === 'other' ? 'other' : 'airbnb',
 date: r.checkout,
 // The gross is on the entry as a field, so the note is free to be what
 // it should be: which stay it was. No more repeating a number that now
@@ -162,18 +166,24 @@ return { ratePct: Number(t?.ratePct) || 0, allowance: Number(t?.allowance) || 0 
 // against the same stay's accrual if included here too.
 function taxYearSummaryFor(key) {
 const { ratePct, allowance } = taxSettingsFor(key);
-const byYear = new Map();
+const byYear = new Map(); // ty -> { total, airbnb, other }
 entriesFor(key).forEach((e) => {
 if (!e.gross || !e.date) return;
 const ty = taxYearFor(e.date);
 if (!ty) return;
-byYear.set(ty, (byYear.get(ty) || 0) + Number(e.gross));
+const bucket = byYear.get(ty) || { total: 0, airbnb: 0, other: 0 };
+bucket.total += Number(e.gross);
+bucket[e.platform === 'other' ? 'other' : 'airbnb'] += Number(e.gross);
+byYear.set(ty, bucket);
 });
-return [...byYear.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([taxYear, revenueRaw]) => {
-const revenue = Math.round(revenueRaw * 100) / 100;
+return [...byYear.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([taxYear, bucket]) => {
+const revenue = Math.round(bucket.total * 100) / 100;
 const excess = Math.max(0, Math.round((revenue - allowance) * 100) / 100);
 const tax = Math.round(excess * (ratePct / 100) * 100) / 100;
-return { taxYear, revenue, allowance, excess, ratePct, tax, net: Math.round((revenue - tax) * 100) / 100 };
+return {
+taxYear, revenue, allowance, excess, ratePct, tax, net: Math.round((revenue - tax) * 100) / 100,
+airbnb: Math.round(bucket.airbnb * 100) / 100, other: Math.round(bucket.other * 100) / 100,
+};
 });
 }
 
@@ -189,7 +199,7 @@ return `<div class="letting-tax" style="margin-top:8px;">
 <table class="limits-table"><tbody>
 <tr><th>Tax year</th><th style="text-align:right;">Revenue</th><th style="text-align:right;">Excess</th><th style="text-align:right;">Tax due</th><th style="text-align:right;">Net</th></tr>
 ${taxYears.map((t) => `<tr>
-<td>${escapeHtml(t.taxYear)}</td>
+<td>${escapeHtml(t.taxYear)}${t.airbnb > 0.004 && t.other > 0.004 ? `<div class="settings-note" style="margin:2px 0 0;font-size:10px;">Airbnb ${escapeHtml(money(t.airbnb))} &middot; Other ${escapeHtml(money(t.other))}</div>` : ''}</td>
 <td style="text-align:right;font-variant-numeric:tabular-nums;">${escapeHtml(money(t.revenue))}</td>
 <td style="text-align:right;font-variant-numeric:tabular-nums;">${escapeHtml(money(t.excess))}</td>
 <td style="text-align:right;font-variant-numeric:tabular-nums;">${escapeHtml(money(t.tax))}</td>
@@ -245,7 +255,10 @@ ${rows.length ? `<div class="letting-scroll"><table class="limits-table"><tbody>
 // Shown from the FIELD rather than left inside the note, because your
 // own note replaces the default one — type "Bathilde" and the £419 it
 // was half of disappeared from the record entirely.
-e.gross ? ` <span class="letting-gross">${escapeHtml(`${e.pct ?? 50}% of ${money(e.gross)}`)}</span>` : ''}</td>
+e.gross ? ` <span class="letting-gross">${escapeHtml(`${e.pct ?? 50}% of ${money(e.gross)}`)}</span>` : ''}${e.kind === 'earned' ? ` <select data-letting-platform="${escapeHtml(e.id)}" title="Which platform this was actually earned through -- the chart above draws Other as a striped fill instead of solid.">
+<option value="airbnb"${e.platform !== 'other' ? ' selected' : ''}>Airbnb</option>
+<option value="other"${e.platform === 'other' ? ' selected' : ''}>Other</option>
+</select>` : ''}</td>
 <td style="text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;">${escapeHtml(money(e.amount))}</td>
 <td style="width:1%;"><span class="del-x" data-letting-del="${escapeHtml(e.id)}" title="Remove this entry">&times;</span></td>
 </tr>`).join('')}</tbody></table></div>` : '<div class="settings-note" style="margin:4px 0 0;">Nothing yet.</div>'}
@@ -270,6 +283,15 @@ input.addEventListener('change', () => {
 const entry = (data.lettingLedger || []).find((e) => e.id === input.dataset.lettingStartDate);
 if (!entry) return;
 entry.startDate = input.value;
+queueSave();
+renderLetting();
+});
+});
+el.querySelectorAll('[data-letting-platform]').forEach((sel) => {
+sel.addEventListener('change', () => {
+const entry = (data.lettingLedger || []).find((e) => e.id === sel.dataset.lettingPlatform);
+if (!entry) return;
+entry.platform = sel.value;
 queueSave();
 renderLetting();
 });
@@ -592,6 +614,20 @@ const addAmount = (groupKey, ym, amount) => {
 const byMonth = perGroupByMonth.get(groupKey);
 if (byMonth) byMonth.set(ym, (byMonth.get(ym) || 0) + amount);
 };
+// Parallel to perGroupByMonth, split further by platform -- which
+// listing.colour draws solid vs striped (drawLettingChart) and what the
+// hover tooltip's per-group sub-line shows. Kept separate from
+// perGroupByMonth itself (rather than changing that map's value shape)
+// so the axis/rolling-average/total math above is untouched.
+const perGroupByMonthPlatform = new Map();
+groupMeta.forEach((g) => perGroupByMonthPlatform.set(g.key, new Map()));
+const addAmountPlatform = (groupKey, ym, platform, amount) => {
+const byMonth = perGroupByMonthPlatform.get(groupKey);
+if (!byMonth) return;
+const bucket = byMonth.get(ym) || { airbnb: 0, other: 0 };
+bucket[platform === 'other' ? 'other' : 'airbnb'] += amount;
+byMonth.set(ym, bucket);
+};
 
 const listings = data.airbnbListings || [];
 const listingById = new Map(listings.map((l) => [l.id, l]));
@@ -604,9 +640,10 @@ const listing = listingById.get(r.listingId);
 if (!listing) return; // listing deleted, or never assigned -- nothing to attribute this to
 const { counts, total } = nightsByMonth(r.checkin, r.checkout);
 if (!total) return;
+const platform = r.platform === 'other' ? 'other' : 'airbnb';
 counts.forEach((nights, ym) => {
 if (!baseMonthSet.has(ym)) return;
-splitContribution(listing, income * (nights / total)).forEach((c) => addAmount(c.group, ym, c.amount));
+splitContribution(listing, income * (nights / total)).forEach((c) => { addAmount(c.group, ym, c.amount); addAmountPlatform(c.group, ym, platform, c.amount); });
 });
 });
 
@@ -632,19 +669,20 @@ if (!listing) return;
 // reservation's own checkin/checkout (nightsByMonth) -- otherwise the
 // whole gross lands as one spike in a single month, which is what was
 // blowing the chart's own scale for a multi-month let.
+const platform = e.platform === 'other' ? 'other' : 'airbnb';
 if (e.startDate && e.startDate < e.date) {
 const { counts, total } = nightsByMonth(e.startDate, e.date);
 if (!total) return;
 counts.forEach((nights, ym) => {
 if (!baseMonthSet.has(ym)) return;
-splitContribution(listing, Number(e.gross) * (nights / total)).forEach((c) => addAmount(c.group, ym, c.amount));
+splitContribution(listing, Number(e.gross) * (nights / total)).forEach((c) => { addAmount(c.group, ym, c.amount); addAmountPlatform(c.group, ym, platform, c.amount); });
 });
 return;
 }
 const ym = e.date.slice(0, 7);
 if (ym > endYm) return; // a future-dated "historic" entry makes no sense -- ignore rather than extend forward
 if (ym < baseStart) return; // older than the rolling window -- excluded, not widened in to meet it
-splitContribution(listing, Number(e.gross)).forEach((c) => addAmount(c.group, ym, c.amount));
+splitContribution(listing, Number(e.gross)).forEach((c) => { addAmount(c.group, ym, c.amount); addAmountPlatform(c.group, ym, platform, c.amount); });
 });
 
 const months = monthRange(baseStart, endYm);
@@ -654,7 +692,7 @@ const nowIndex = months.indexOf(current);
 // but not hardcoded to those names, so a 4th owner (or one retired with
 // no recent income) is handled correctly either way.
 const activeGroups = [...groupMeta.values()].filter((g) => [...(perGroupByMonth.get(g.key) || new Map()).values()].some((v) => v > 0.004));
-return { months, groups: activeGroups, perGroupByMonth, nowIndex };
+return { months, groups: activeGroups, perGroupByMonth, perGroupByMonthPlatform, nowIndex };
 }
 
 function money0(n) { return `£${Math.round(n).toLocaleString('en-GB')}`; }
@@ -755,8 +793,37 @@ return niceResidual * magnitude;
 }
 
 function drawLettingChart(canvas, chartData) {
-const { months, groups: allGroups, perGroupByMonth, nowIndex } = chartData;
+const { months, groups: allGroups, perGroupByMonth, perGroupByMonthPlatform, nowIndex } = chartData;
 const groups = allGroups.filter((g) => lettingChartSelectedGroups.has(g.key));
+// One 45-degree-hatch pattern per colour, built fresh each draw (colours
+// can change with the theme, and a redraw already happens on every
+// render/resize/hover, so there's nothing stale to cache across calls).
+// Three parallel diagonals offset by a full tile width is the standard
+// trick for a seamless repeat -- without it, the hatch visibly seams at
+// every tile boundary.
+const stripeCache = new Map();
+function stripePatternFor(color) {
+if (stripeCache.has(color)) return stripeCache.get(color);
+const size = 8;
+const tile = document.createElement('canvas');
+tile.width = size; tile.height = size;
+const tctx = tile.getContext('2d');
+tctx.fillStyle = color;
+tctx.globalAlpha = 0.22;
+tctx.fillRect(0, 0, size, size);
+tctx.globalAlpha = 1;
+tctx.strokeStyle = color;
+tctx.lineWidth = 2.2;
+[-size, 0, size].forEach((o) => {
+tctx.beginPath();
+tctx.moveTo(o, size);
+tctx.lineTo(o + size, 0);
+tctx.stroke();
+});
+const pattern = ctx.createPattern(tile, 'repeat');
+stripeCache.set(color, pattern);
+return pattern;
+}
 const dpr = window.devicePixelRatio || 1;
 const rect = canvas.getBoundingClientRect();
 const width = Math.max(1, Math.round(rect.width));
@@ -836,15 +903,24 @@ ctx.restore();
 months.forEach((ym, i) => {
 const cx = plot.x + (i + 0.5) * bw;
 let cumulative = 0;
-const segs = groups.map((g) => ({ g, raw: perGroupByMonth.get(g.key).get(ym) || 0 })).filter((s) => s.raw > 0.004);
+const segs = groups.map((g) => ({ g, raw: perGroupByMonth.get(g.key).get(ym) || 0, platform: perGroupByMonthPlatform.get(g.key).get(ym) || { airbnb: 0, other: 0 } })).filter((s) => s.raw > 0.004);
 segs.forEach((s, segIdx) => {
+const color = resolveColor(listingColorVar(s.g.colour));
+// Solid (Airbnb) drawn below, striped (Other) above, within this
+// group's own slice of the stack -- falls back to one solid part if
+// platform data is missing entirely (shouldn't happen once every
+// contributor sets `platform`, but a safe default beats a blank gap).
+const rawParts = [{ amt: s.platform.airbnb, striped: false }, { amt: s.platform.other, striped: true }].filter((p) => p.amt > 0.004);
+const parts = rawParts.length ? rawParts : [{ amt: s.raw, striped: false }];
+parts.forEach((p, pIdx) => {
 const yBottom = scaleY(cumulative);
-const yTop = scaleY(cumulative + s.raw);
+const yTop = scaleY(cumulative + p.amt);
 const inset = Math.min(1, (yBottom - yTop) / 4);
 const top = yTop + inset, bottom = yBottom - inset;
 const h = Math.max(1, bottom - top);
-ctx.fillStyle = resolveColor(listingColorVar(s.g.colour));
-if (segIdx === segs.length - 1 && typeof ctx.roundRect === 'function') {
+ctx.fillStyle = p.striped ? stripePatternFor(color) : color;
+const isTopOfWholeStack = segIdx === segs.length - 1 && pIdx === parts.length - 1;
+if (isTopOfWholeStack && typeof ctx.roundRect === 'function') {
 ctx.beginPath();
 ctx.roundRect(cx - barW / 2, top, barW, h, [4, 4, 0, 0]);
 ctx.fill();
@@ -856,9 +932,10 @@ ctx.fillStyle = card;
 ctx.font = "600 9px 'Inter', sans-serif";
 ctx.textAlign = 'center';
 ctx.textBaseline = 'middle';
-ctx.fillText(money0(s.raw), cx, (top + bottom) / 2);
+ctx.fillText(money0(p.amt), cx, (top + bottom) / 2);
 }
-cumulative += s.raw;
+cumulative += p.amt;
+});
 });
 if (i === lettingChartHoverIndex) {
 ctx.fillStyle = ink;
@@ -951,14 +1028,24 @@ lettingChartLastPlot = { plot, bw, months };
 // room.
 if (lettingChartHoverIndex != null && months[lettingChartHoverIndex]) {
 const ym = months[lettingChartHoverIndex];
-const rows = groups.map((g) => ({ g, raw: perGroupByMonth.get(g.key).get(ym) || 0 })).filter((s) => s.raw > 0.004);
+const rows = groups.map((g) => ({ g, raw: perGroupByMonth.get(g.key).get(ym) || 0, platform: perGroupByMonthPlatform.get(g.key).get(ym) || { airbnb: 0, other: 0 } })).filter((s) => s.raw > 0.004);
 const total = rows.reduce((s, r) => s + r.raw, 0);
 // Same trailing-mean window the chart's own rolling-average line (above)
 // already plots -- shown as a number here too, since the line alone
 // doesn't say its exact value.
 const avgWindow = monthTotals.slice(Math.max(0, lettingChartHoverIndex - 2), lettingChartHoverIndex + 1);
 const avg = avgWindow.reduce((s, v) => s + v, 0) / avgWindow.length;
-const lines = [monthLabel(ym), ...rows.map((r) => `${r.g.label}: ${money0(r.raw)}`), `Total: ${money0(total)}`, `3-month avg: ${money0(avg)}`];
+const lines = [monthLabel(ym)];
+rows.forEach((r) => {
+lines.push(`${r.g.label}: ${money0(r.raw)}`);
+// Only when a group actually mixes both this month -- a group that's
+// entirely one platform already says so via its label alone, nothing
+// to break out.
+if (r.platform.airbnb > 0.004 && r.platform.other > 0.004) {
+lines.push(`  Airbnb ${money0(r.platform.airbnb)} · Other ${money0(r.platform.other)}`);
+}
+});
+lines.push(`Total: ${money0(total)}`, `3-month avg: ${money0(avg)}`);
 ctx.font = "10px 'Inter', sans-serif";
 const boxW = Math.max(...lines.map((l) => ctx.measureText(l).width)) + 16;
 const boxH = lines.length * 14 + 10;
