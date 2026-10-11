@@ -2257,7 +2257,33 @@ return picks
 // exactly the "real body text, real variety, genuine judgement" case
 // MAIL_EXTRACT_MODEL's own siblings already use it for, not the
 // closed-schema mechanical extraction the Haiku tier is for.
-const SCHOOL_CALENDAR_MAX_TOKENS = 3000;
+// Generous on purpose, and effort left at its Sonnet-5 default ('high',
+// thinking enabled) rather than passed as 'low' -- confirmed live this
+// was the actual cause of empty termRanges on two of the three sites:
+// 'low' effort is right for plain mechanical extraction (see
+// WELLNESS_MAX_TOKENS's own comment) but wrong here, where picking the
+// right termRanges genuinely requires judgement (UNBC's table has
+// separate "Last Day of Classes"/"Last Day of Exams" columns; Leeds
+// lists both a "Terms" section and an unrelated "Semesters" breakdown
+// of the same year) -- exactly the ambiguity 'low' effort skips
+// thinking through, while breaks/holidays (no ambiguity to resolve)
+// still came out fine. Thinking tokens count against maxTokens the same
+// as the JSON reply, so this needs real headroom past the 3000 that was
+// enough for a no-thinking call -- same "output tokens are cheap, a
+// wrong result isn't" sizing PROFILE_MAX_TOKENS/WELLNESS_MAX_TOKENS
+// already apply, and this runs only a handful of times a year.
+const SCHOOL_CALENDAR_MAX_TOKENS = 8000;
+// Not guidanceInstruction() -- that helper's own wording ("The user
+// looked at this email and told you this about it") is email-specific
+// and would call a term-dates webpage an email. Kept as its own small
+// wrapper rather than genericising the shared one, since that one's
+// exact framing ("more reliable than your own read of the body") is
+// deliberate for mail extraction's actual use case (a human correcting
+// a misread), not this one (a structural note about where on the page
+// to look).
+function schoolCalendarGuidanceInstruction(guidance) {
+return guidance ? `\n\nNote about this specific page's structure, from whoever set this check up: ${guidance}\n` : '';
+}
 async function extractSchoolCalendar(text, guidance = '') {
 const prompt = `This is text from a school or university's term-dates / academic-calendar page.
 
@@ -2265,17 +2291,17 @@ Text:
 """
 ${String(text || '').slice(0, 60000)}
 """
-${guidanceInstruction(guidance)}
+${schoolCalendarGuidanceInstruction(guidance)}
 Extract three things, as ISO yyyy-mm-dd dates:
 
-1. termRanges -- every term/semester's own start and end date (the span pupils/students are actually enrolled for, not including holidays either side).
-2. breaks -- every named break, holiday or closure period WITHIN or between those terms (half-term, mid-semester break, Christmas/winter break, Easter/spring break, summer break, a stated closure range) -- each with a short label taken from the page's own wording.
-3. holidays -- any individual public/statutory holiday dates the page explicitly lists by name (e.g. a university's own "Holidays/Closures" table) -- leave this empty if the page doesn't list any itself, don't infer or guess at national holidays that aren't actually written on the page.
+1. termRanges -- every term/semester's own start and end date (the span pupils/students are actually enrolled for, not including holidays either side). This is the most important field -- work to populate it even when the page also lists closures or individual holidays separately; a page that names its own terms/semesters almost always states clear start and end dates for them, so an empty termRanges list should be rare, not the default. If the page lists more than one date structure for the same year (e.g. both "Terms" and "Semesters", or a table with several date columns per term), use whichever the guidance above says to, or otherwise whichever one most directly answers "when is a student actually enrolled," end to end.
+2. breaks -- every named break, holiday or closure period WITHIN or between those terms (half-term, mid-semester break, Christmas/winter break, Easter/spring break, summer break, a stated closure range) -- each with a short label taken from the page's own wording, and start/end dates taken only from what the page itself states for that exact label. Don't turn a single calendar-table entry into a multi-day break just because it's near a weekend or "reads like" a long weekend -- if the page gives it one date, it belongs in holidays (below) instead, not here with an invented end date.
+3. holidays -- any individual public/statutory holiday dates the page explicitly lists by name (e.g. a university's own "Holidays/Closures" table), as a single date each -- leave this empty if the page doesn't list any itself, don't infer or guess at national holidays that aren't actually written on the page.
 
 Only extract dates that are actually stated on the page. Never infer a date from a pattern or guess at what "probably" follows -- leave a range out entirely if its start or end isn't clearly given.
 
 Reply with ONLY a JSON object, no other text, no markdown fences: {"termRanges":[{"start":"","end":""}],"breaks":[{"label":"","start":"","end":""}],"holidays":[{"label":"","date":""}]}`;
-const { data } = await callTextJson(prompt, SCHOOL_CALENDAR_MAX_TOKENS, MAIL_EXTRACT_MODEL, 'School calendar extraction', 'low');
+const { data } = await callTextJson(prompt, SCHOOL_CALENDAR_MAX_TOKENS, MAIL_EXTRACT_MODEL, 'School calendar extraction');
 const isoDate = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || '').trim()) ? String(v).trim() : '';
 const termRanges = (Array.isArray(data && data.termRanges) ? data.termRanges : [])
 .map((r) => ({ start: isoDate(r && r.start), end: isoDate(r && r.end) }))
