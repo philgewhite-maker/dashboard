@@ -240,7 +240,7 @@ return `<div class="letting-owner">
 ${grossFor(key) ? `<span class="settings-note" style="margin:0 0 0 auto;">${escapeHtml(money(grossFor(key)))} taken</span>` : ''}
 </div>
 ${rows.length ? `<div class="letting-scroll"><table class="limits-table"><tbody>${rows.map((e) => `<tr>
-<td style="white-space:nowrap;"><input type="date" class="settings-input" style="max-width:130px;" data-letting-date="${escapeHtml(e.id)}" value="${escapeHtml(e.date || '')}" title="Edit retrospectively to the real Airbnb payout date, if it differs from checkout -- this is what tax-year grouping below uses."></td>
+<td style="white-space:nowrap;"><input type="date" class="settings-input" style="max-width:130px;" data-letting-date="${escapeHtml(e.id)}" value="${escapeHtml(e.date || '')}" title="Edit retrospectively to the real Airbnb payout date, if it differs from checkout -- this is what tax-year grouping below uses.">${e.kind === 'earned' ? `<input type="date" class="settings-input" style="max-width:130px;margin-top:3px;" data-letting-start-date="${escapeHtml(e.id)}" value="${escapeHtml(e.startDate || '')}" title="Optional -- only if this booking ran longer than one month. When set, the chart above splits the gross across every month from here to the date on the left (same pro-rata-by-night split a real reservation's own checkin/checkout already gets), instead of landing as one spike in a single month.">` : ''}</td>
 <td>${escapeHtml(e.note || e.kind)}${e.kind && e.kind !== 'accrual' ? ` <span class="letting-kind ${escapeHtml(e.kind)}">${escapeHtml(e.kind)}</span>` : ''}${
 // Shown from the FIELD rather than left inside the note, because your
 // own note replaces the default one — type "Bathilde" and the £419 it
@@ -258,6 +258,18 @@ input.addEventListener('change', () => {
 const entry = (data.lettingLedger || []).find((e) => e.id === input.dataset.lettingDate);
 if (!entry || !input.value) return;
 entry.date = input.value;
+queueSave();
+renderLetting();
+});
+});
+// Empty is a valid value here (clearing it back to a single-month
+// entry), unlike the payout date above which can't be blanked -- so no
+// `!input.value` guard.
+el.querySelectorAll('[data-letting-start-date]').forEach((input) => {
+input.addEventListener('change', () => {
+const entry = (data.lettingLedger || []).find((e) => e.id === input.dataset.lettingStartDate);
+if (!entry) return;
+entry.startDate = input.value;
 queueSave();
 renderLetting();
 });
@@ -614,6 +626,21 @@ splitContribution(listing, income * (nights / total)).forEach((c) => addAmount(c
 if (e.kind !== 'earned' || !e.gross || !e.date) return;
 const listing = listings.find((l) => ownerKeyFor(l) === e.ownerKey);
 if (!listing) return;
+// Optional startDate (letting-add-start-date input above): a historic
+// booking that actually ran longer than one month gets split pro-rata
+// by night across every month it spans, exactly like a real
+// reservation's own checkin/checkout (nightsByMonth) -- otherwise the
+// whole gross lands as one spike in a single month, which is what was
+// blowing the chart's own scale for a multi-month let.
+if (e.startDate && e.startDate < e.date) {
+const { counts, total } = nightsByMonth(e.startDate, e.date);
+if (!total) return;
+counts.forEach((nights, ym) => {
+if (!baseMonthSet.has(ym)) return;
+splitContribution(listing, Number(e.gross) * (nights / total)).forEach((c) => addAmount(c.group, ym, c.amount));
+});
+return;
+}
 const ym = e.date.slice(0, 7);
 if (ym > endYm) return; // a future-dated "historic" entry makes no sense -- ignore rather than extend forward
 if (ym < baseStart) return; // older than the rolling window -- excluded, not widened in to meet it
@@ -926,7 +953,12 @@ if (lettingChartHoverIndex != null && months[lettingChartHoverIndex]) {
 const ym = months[lettingChartHoverIndex];
 const rows = groups.map((g) => ({ g, raw: perGroupByMonth.get(g.key).get(ym) || 0 })).filter((s) => s.raw > 0.004);
 const total = rows.reduce((s, r) => s + r.raw, 0);
-const lines = [monthLabel(ym), ...rows.map((r) => `${r.g.label}: ${money0(r.raw)}`), `Total: ${money0(total)}`];
+// Same trailing-mean window the chart's own rolling-average line (above)
+// already plots -- shown as a number here too, since the line alone
+// doesn't say its exact value.
+const avgWindow = monthTotals.slice(Math.max(0, lettingChartHoverIndex - 2), lettingChartHoverIndex + 1);
+const avg = avgWindow.reduce((s, v) => s + v, 0) / avgWindow.length;
+const lines = [monthLabel(ym), ...rows.map((r) => `${r.g.label}: ${money0(r.raw)}`), `Total: ${money0(total)}`, `3-month avg: ${money0(avg)}`];
 ctx.font = "10px 'Inter', sans-serif";
 const boxW = Math.max(...lines.map((l) => ctx.measureText(l).width)) + 16;
 const boxH = lines.length * 14 + 10;
