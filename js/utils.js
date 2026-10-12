@@ -196,6 +196,27 @@ return String(str == null ? '' : str)
 .replace(/'/g, '&#39;');
 }
 
+// For plain text that may carry a stray HTML entity even though it was
+// never real markup -- confirmed live: an Eventim calendar (.ics)
+// invite's own LOCATION value literally contained "Vereinigtes
+// K&ouml;nigreich" as six raw characters, not a real "ö", a bug on
+// THEIR calendar-export side (building the field from an HTML template
+// without decoding it first). ICS escaping (unescapeIcsValue, mail.js)
+// only undoes RFC5545's own backslash escapes and has no reason to know
+// about HTML entities at all, so this was passed straight through into
+// a Date Event's location, then correctly re-escaped by escapeHtml()
+// at render time -- '&' to '&amp;' -- which is what actually produced
+// the visible "K&amp;ouml;nigreich" garble. The DOM's own parser does
+// the decoding correctly for every named/numeric entity there is, via
+// a detached element that's never inserted into the page -- decoding
+// text, not executing it.
+function decodeHtmlEntities(str) {
+if (!str || !/&[a-zA-Z#][a-zA-Z0-9]*;/.test(str)) return str; // no entity-shaped substring -- skip the DOM round-trip
+const el = document.createElement('textarea');
+el.innerHTML = str;
+return el.value;
+}
+
 // A MissingKeyError (ai.js) is caught and reported in ~20 different files --
 // every one of them used to write "...in Settings." as dead plain text.
 // One shared, real link instead of 20 copies of the same markup string, so
@@ -1278,7 +1299,7 @@ return classified.every((c) => c.isScreenshot) && looksLikeSameScreenshotPieces(
 
 export {
 todayStr, daysAgoStr, dateStrAdd, unfoldIcsLines, parseIcsProperty, icsDateTime, parseLooseDateTime, last7Dates, uid, daysSince, daysUntil, foldDiacritics, MISSING_KEY_LINK_HTML, SYNC_LINK_HTML, NOTION_LINK_HTML, TELEGRAM_BOT_LINK_HTML, looksLikeUrl, prettyUrl, stripHtmlForExtraction,
-escapeHtml, affiliateLink, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, buildFlagMatcher, applyFlagMatcher, knownCityMap, knownScalarValues, pickChipHtml, splitCsvLine, scrollAndFlash, bindForm, bindBackdropClose,
+escapeHtml, decodeHtmlEntities, affiliateLink, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, buildFlagMatcher, applyFlagMatcher, knownCityMap, knownScalarValues, pickChipHtml, splitCsvLine, scrollAndFlash, bindForm, bindBackdropClose,
 findMentions, COUNTRY_NAME_TO_NATIONALITY,
 resizeImageToBlob, fileToBase64, loadImage, cropThumbnailToBlob,
 hashFile, captureDateOf, betterCaptureDate, dateFromFilename,

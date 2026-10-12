@@ -1,5 +1,5 @@
 import { data, queueSave, mailSearchLabel, blankMailDismissal, blankMailRule } from '../state.js';
-import { escapeHtml, affiliateLink, unfoldIcsLines, parseIcsProperty, icsDateTime, dateStrAdd, MISSING_KEY_LINK_HTML } from '../utils.js';
+import { escapeHtml, decodeHtmlEntities, affiliateLink, unfoldIcsLines, parseIcsProperty, icsDateTime, dateStrAdd, MISSING_KEY_LINK_HTML } from '../utils.js';
 import { canAttemptGoogleAction, hasCalendarWrite } from '../sync/googleauth.js';
 import { fetchMailSearches, getMessageDetail, fetchMessageAttachmentBytes } from '../googlemail.js';
 import { captureTask, taskChipHtml, bindTaskChips } from './tasks.js';
@@ -156,8 +156,15 @@ return out;
 // value (a LOCATION with a comma-separated address is the common case) --
 // confirmed live against the Abandoman venue ("Underbelly Boulevard, 6
 // Walker's Ct...") coming through with literal backslashes without this.
+// decodeHtmlEntities is a separate, unrelated pass -- confirmed live
+// against an Eventim calendar invite whose LOCATION value literally
+// contained "Vereinigtes K&ouml;nigreich" as raw text (their own
+// calendar-export bug, not an ICS escaping question at all), which
+// rendered as the garbled "K&amp;ouml;nigreich" once escapeHtml() ran
+// on it at display time. Harmless no-op on a value with no entity-
+// shaped substring, so it's safe to run on every value through here.
 function unescapeIcsValue(value) {
-return String(value || '').replace(/\\n/gi, '\n').replace(/\\([,;\\])/g, '$1');
+return decodeHtmlEntities(String(value || '').replace(/\\n/gi, '\n').replace(/\\([,;\\])/g, '$1'));
 }
 
 // Deterministic half of dateEvent's "🪄 Extract details" waterfall -- a

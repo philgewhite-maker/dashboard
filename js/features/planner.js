@@ -677,7 +677,14 @@ renderPlanner();
 function activityDetailTitle(a) {
 const bits = [];
 if (a.eventTime) bits.push(a.endTime ? `${a.eventTime}–${a.endTime}` : a.eventTime);
-if (a.location) bits.push(a.location);
+// Just the venue, not the whole address -- confirmed live this was
+// otherwise showing "Electric Ballroom, London, Vereinigtes
+// Königreich" on a day-grid card/pool card/Date Events summary line,
+// where city+country is clutter, not information (you already know
+// which city your own trip/date is in). The full address is still
+// there in full, unshortened, in the expanded Location field below --
+// this only shortens the AT-A-GLANCE line.
+if (a.location) bits.push(a.location.split(',')[0].trim());
 return bits.join(' · ');
 }
 function activityPinHtml(a) {

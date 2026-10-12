@@ -327,7 +327,7 @@ ${rows.length ? `<div class="letting-scroll"><table class="limits-table"><tbody>
 // Shown from the FIELD rather than left inside the note, because your
 // own note replaces the default one — type "Bathilde" and the £419 it
 // was half of disappeared from the record entirely.
-e.gross ? ` <span class="letting-gross">${escapeHtml(`${e.pct ?? 50}% of ${money(e.gross)}`)}</span>` : ''}${e.kind === 'earned' ? ` <select data-letting-platform="${escapeHtml(e.id)}" title="Which platform this was actually earned through -- the chart above draws Other as a striped fill instead of solid.">
+e.gross ? ` <span class="letting-gross">${escapeHtml(`${e.pct ?? 50}% of ${money(e.gross)}`)}</span>` : ''}${(e.kind === 'earned' || e.kind === 'cancellation') ? ` <select data-letting-platform="${escapeHtml(e.id)}" title="Which platform this actually happened through -- the chart above draws Other as a striped fill instead of solid.">
 <option value="airbnb"${e.platform !== 'other' ? ' selected' : ''}>Airbnb</option>
 <option value="other"${e.platform === 'other' ? ' selected' : ''}>Other</option>
 </select>` : ''}</td>
@@ -449,6 +449,7 @@ amount: signed,
 date: today(),
 note: note || (kind === 'earned'
 ? `Earned before tracking`
+: kind === 'cancellation' ? 'Cancellation'
 : kind === 'payment' ? (amount < 0 ? 'Paid' : 'Owed more') : 'Adjustment'),
 });
 queueSave();

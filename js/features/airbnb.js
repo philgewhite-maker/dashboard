@@ -1215,7 +1215,10 @@ platform: 'airbnb',
 // the check-in date"), not today -- so this lands in the right tax
 // year/chart month even when Sync runs well after the fact.
 date: dateStrAdd(checkin, 1),
-note: `${listing.label || 'listing'} — cancellation payout${guestName ? ` (${guestName})` : ''}`,
+// Just the guest name -- the 'cancellation' kind badge already says
+// what this is, same as an 'earned' row's note is just the payer's
+// name with no "earned" repeated in the text itself.
+note: guestName || listing.label || 'Cancellation payout',
 });
 seen.add(m.id);
 posted++;
