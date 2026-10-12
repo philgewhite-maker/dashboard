@@ -9,7 +9,7 @@
 // fact, by hand or from the booking email. A hand-typed external event
 // is the exception -- its title carries the name, and that's read off it.
 import { data, queueSave, blankAirbnbListing, blankAirbnbReservation, blankAirbnbKey, blankAirbnbKeyAssignment, KEY_CUSTODIAN_TYPES } from '../state.js';
-import { escapeHtml, todayStr, dateStrAdd, MISSING_KEY_LINK_HTML } from '../utils.js';
+import { escapeHtml, todayStr, dateStrAdd, uid, MISSING_KEY_LINK_HTML } from '../utils.js';
 import { parseIcsReservations } from '../icsparse.js';
 import { fetchIcs } from '../files.js';
 import { canAttemptGoogleAction, hasCalendarWrite } from '../sync/googleauth.js';
@@ -1037,6 +1037,117 @@ return d.getDate() === day && d.getMonth() + 1 === month;
 return candidates.length === 1 ? candidates[0] : null;
 }
 
+// ---- Cancellation payout extraction ------------------------------------
+//
+// A cancelled reservation is GONE from data.airbnbReservations by the
+// next ICS sync (syncAllAirbnbListings' own "whatever's left in
+// existingByUid... gone" cleanup) -- so this has to run BEFORE that
+// sync, while the record this cancellation is ABOUT still exists to be
+// matched against and read a listing/owner/guest name off. Posted
+// straight to lettingLedger as its own 'cancellation' kind, bypassing
+// accrueLettings() entirely: that function only ever fires at checkout,
+// and a cancelled stay's checkout may never be reached by a reservation
+// record that's about to vanish from the feed.
+//
+// Airbnb's own email: subject "Cancelled: Reservation <CODE> for
+// <D>–<D> <Month>", body "...your payout has been updated to £X.XX" --
+// the REVISED, post-cancellation-policy payout, not the original
+// booking's full price. The code isn't matched against anything (no
+// field on a reservation carries it -- the ICS feed's own UID is an
+// opaque Airbnb-internal string, never confirmed to equal this code);
+// the date range is what's matched, same day+month-any-year approach
+// matchReservationForArrival above already uses.
+const CANCELLATION_SUBJECT_RE = /^Cancelled:\s*Reservation\s+(\S+)\s+for\s+(\d{1,2})\s*[–—-]\s*(\d{1,2})\s+([a-z]+)$/i;
+const CANCELLATION_QUERY = 'subject:"Cancelled: Reservation"';
+const CANCELLATION_SEARCH_LIMIT = 25;
+// Loose gap between the words and the amount, same tolerance PAYOUT_RE
+// above uses for stripped-HTML whitespace.
+const CANCELLATION_PAYOUT_RE = /payout\s*has\s*been\s*updated\s*to[\s\S]{0,20}?£\s*([\d,]+\.\d{2})/i;
+
+// Both checkin AND checkout matched (not just checkin, the way arrival
+// matching above only needs) -- more signal to disambiguate with, and
+// available here since the subject states the whole range, not just
+// one date. More than one match is genuinely ambiguous -- skipped, same
+// discipline as matchReservationForArrival.
+function matchReservationForCancellation(startDay, endDay, month) {
+const candidates = data.airbnbReservations.filter((r) => {
+const inD = new Date(`${r.checkin}T00:00:00`);
+const outD = new Date(`${r.checkout}T00:00:00`);
+return inD.getDate() === startDay && inD.getMonth() + 1 === month
+&& outD.getDate() === endDay && outD.getMonth() + 1 === month;
+});
+return candidates.length === 1 ? candidates[0] : null;
+}
+
+// Dedup is by Gmail message id (data.prefs.airbnbCancellationsSeen), not
+// by anything on the reservation -- the reservation itself is about to
+// be deleted by the ICS sync that runs right after this, so there's no
+// surviving field to mark "already processed" the way guestName does
+// for syncGuestNamesFromEmail. Marked seen as soon as the SUBJECT
+// parses (a cancellation email this function recognises at all), even
+// if the reservation match or payout extraction then fails -- a miss
+// there will keep missing the same way on every future Sync, and
+// retrying it on every click would just waste a Gmail fetch for nothing
+// new.
+async function syncCancellationsFromEmail() {
+if (!(await canAttemptGoogleAction())) return { posted: 0 };
+if (!Array.isArray(data.prefs.airbnbCancellationsSeen)) data.prefs.airbnbCancellationsSeen = [];
+const seen = new Set(data.prefs.airbnbCancellationsSeen);
+
+const { fetchMailSearches, getMessageDetail } = await import('../googlemail.js');
+const search = { kind: 'query', value: CANCELLATION_QUERY, maxDays: 0, maxEvents: CANCELLATION_SEARCH_LIMIT };
+let sections;
+try {
+sections = await fetchMailSearches([search], CANCELLATION_SEARCH_LIMIT);
+} catch (err) {
+console.error('Cancellation email search failed:', err);
+return { posted: 0, error: err.message || String(err) };
+}
+
+const { ownerKeyFor, isMyOwnKey } = await import('./letting.js');
+let posted = 0;
+let unmatched = 0;
+for (const m of sections[0]?.messages || []) {
+if (seen.has(m.id)) continue;
+const subjectMatch = CANCELLATION_SUBJECT_RE.exec(String(m.subject || '').trim());
+if (!subjectMatch) continue;
+seen.add(m.id);
+const monthIdx = MONTH_NAMES.indexOf(subjectMatch[4].slice(0, 3).toLowerCase());
+if (monthIdx === -1) continue;
+const reservation = matchReservationForCancellation(Number(subjectMatch[2]), Number(subjectMatch[3]), monthIdx + 1);
+if (!reservation) { unmatched++; continue; }
+const listing = data.airbnbListings.find((l) => l.id === reservation.listingId);
+if (!listing) continue;
+const ownerKey = ownerKeyFor(listing);
+if (!ownerKey) continue;
+try {
+const detail = await getMessageDetail(m.id);
+const payoutMatch = CANCELLATION_PAYOUT_RE.exec(detail.bodyText || '');
+if (!payoutMatch) { unmatched++; continue; }
+const payout = Number(payoutMatch[1].replace(/,/g, ''));
+const mine = isMyOwnKey(ownerKey);
+const share = Number(listing.sharePct);
+const pct = mine ? 0 : (Number.isFinite(share) ? share : 50);
+const amount = Math.round(payout * (pct / 100) * 100) / 100;
+data.lettingLedger.push({
+id: uid(), ownerKey, kind: 'cancellation', amount, gross: payout, pct,
+platform: 'airbnb',
+// Matches the email's own stated timing ("released 24 hours after
+// the check-in date"), not today -- so this lands in the right tax
+// year/chart month even when Sync runs well after the fact.
+date: dateStrAdd(reservation.checkin, 1),
+note: `${listing.label || 'listing'} — cancellation payout${reservation.guestName ? ` (${reservation.guestName})` : ''}`,
+});
+posted++;
+} catch (err) {
+console.error('Cancellation payout extraction failed:', err);
+}
+}
+data.prefs.airbnbCancellationsSeen = [...seen];
+if (posted || unmatched) queueSave();
+return { posted, unmatched };
+}
+
 // Runs the search and fills in whatever it can match; never touches a
 // reservation that already has a name. A non-Latin name (the common case
 // this exists for) is romanized via ai.js -- only when actually needed,
@@ -1226,6 +1337,11 @@ if (!data.airbnbListings.length) { status.innerHTML = 'Add a listing in <span cl
 btn.disabled = true;
 status.textContent = 'Syncing…';
 try {
+// Must run BEFORE syncAllAirbnbListings -- that's the step that drops
+// a cancelled reservation from data.airbnbReservations entirely (it's
+// no longer in the feed), so this needs the record to still exist to
+// match a cancellation email against it.
+const cancelResult = await syncCancellationsFromEmail();
 await syncAllAirbnbListings();
 await syncCleanerEvents();
 await syncExternalBookings();
@@ -1243,7 +1359,10 @@ if (!failed.length) {
 const guestNote = guestResult.filled
 ? ` Filled in ${guestResult.filled} guest name${guestResult.filled === 1 ? '' : 's'} from email${guestResult.romanizeFailed ? ` (${guestResult.romanizeFailed} left in the original script — add an Anthropic key on THIS device in ${MISSING_KEY_LINK_HTML} to romanize ${guestResult.romanizeFailed === 1 ? 'it' : 'them'})` : ''}${guestResult.incomeFilled ? `, ${guestResult.incomeFilled} with the payout too` : ''}.`
 : '';
-status.innerHTML = `Synced just now.${guestNote}`;
+const cancelNote = cancelResult.posted
+? ` Posted ${cancelResult.posted} cancellation payout${cancelResult.posted === 1 ? '' : 's'} to <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#letting-panel">Letting income</span>.`
+: '';
+status.innerHTML = `Synced just now.${guestNote}${cancelNote}`;
 } else {
 // The actual error, right here -- not just a count pointing at devtools
 // most people never open. Every failed listing likely has the SAME

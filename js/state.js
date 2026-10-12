@@ -133,6 +133,14 @@ const DEFAULT_PREFS = {
 calendarEventCount: 1,
 mailResultCount: 5,
 airbnbCalendarId: '', // which Google Calendar "Push to Google Calendar" targets -- picked once, remembered
+// Gmail message ids already turned into a lettingLedger cancellation
+// entry (js/features/airbnb.js's syncCancellationsFromEmail) -- needed
+// because the reservation record ITSELF is gone by the next ICS sync
+// (a cancelled booking simply isn't in the feed any more), so there's
+// no field on a surviving record to mark "already processed" the way
+// guestName does for syncGuestNamesFromEmail. A flat id list, not an
+// object -- there's no per-id state to track beyond "seen or not".
+airbnbCancellationsSeen: [],
 switchOffersCheckedAt: '', // ISO date of the last bank-switch-offers scan -- drives the 30-day nudge, see js/features/switchoffers.js
 // Per letting-income owner (same ownerKey as js/features/letting.js's
 // own ownerKeyFor -- a connection id, or a lowercased typed name for

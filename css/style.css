@@ -3953,6 +3953,7 @@ background:var(--sage-bg);color:var(--sage);
 .letting-kind.adjustment{background:var(--slate-bg);color:var(--slate);}
 .letting-kind.earned{background:var(--amber-bg);color:var(--amber);}
 .letting-kind.upcoming{background:var(--teal-bg);color:var(--teal);}
+.letting-kind.cancellation{background:var(--rose-bg);color:var(--rose);}
 /* The Upcoming subtable is a preview, not part of the ledger it sits
    under -- a faint top rule marks it as a separate block, same purpose
    the tax-year summary's own border already serves just below it. */
