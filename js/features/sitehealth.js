@@ -50,6 +50,17 @@ weekly: true,
 run: runApColoursCheck,
 },
 {
+// One aggregate id, not a per-set row -- unlike mediaRecSources (a
+// user-configured standing list, see mediaRecSourceRowsHtml below),
+// incomplete sets already have a home elsewhere (the Inventory card
+// itself, the "Stock · N sets" ticker tile) and are a strictly-
+// shrinking list, not a fixed catalogue worth a row each. This just
+// answers "is the fetch mechanism itself still working."
+id: 'set-completion-search', label: 'Agent Provocateur / eBay — set completion search', site: 'agentprovocateur.com, ebay.co.uk',
+note: 'Reported by runSetCompletionSearch() (setcompletion.js) whenever its own per-set backoff gate lets a check actually run -- nothing runs from here, this only shows the last run\'s summary.',
+run: null, reportedExternally: true,
+},
+{
 id: 'cashback-quidco', label: 'Quidco — cashback rate', site: 'quidco.com',
 note: 'Reported by refreshCashbackRates() (stockwatch.js) whenever a stock check refreshes rates -- nothing runs from here, this only shows the last result.',
 run: null, reportedExternally: true,

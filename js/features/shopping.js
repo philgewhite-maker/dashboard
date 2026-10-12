@@ -1060,6 +1060,26 @@ console.error('Auto price-check failed, item stays without one until Search pric
 // suspender, stockings, a ring -- nothing Bra/Knickers-shaped at all)
 // stays excluded, since that was never the start of a tracked pairing
 // to flag as incomplete.
+// A set's own found-missing-piece, if the weekly search (setcompletion.js)
+// has one -- only ever present for an incomplete set (pruneStaleEntries
+// drops it the moment the set completes), so this is safe to call
+// unconditionally for every set here, complete or not.
+function setCompletionFindHtml(set) {
+const find = (data.setCompletionFinds || []).find((f) => f.setKey === set.key && !f.dismissed);
+if (!find) return '';
+const sourceLabel = find.source === 'ebay' ? 'eBay' : 'Agent Provocateur';
+const days = daysSince(find.foundAt);
+const ago = days <= 0 ? 'today' : days === 1 ? '1 day ago' : `${days} days ago`;
+return `<div class="inv-fit-row">
+<a href="${escapeHtml(find.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(find.name || `${find.missingGroup} found`)}</a>
+<span class="tag-chip ${find.source === 'ebay' ? 'tag-chip-amber' : 'tag-chip-green'}">${escapeHtml(sourceLabel)}</span>
+${find.price ? `<strong>${escapeHtml(find.price)}</strong>` : ''}
+${find.condition ? `<span class="tag-chip">${escapeHtml(find.condition)}</span>` : ''}
+<span class="settings-note" style="margin:0;">found ${ago}</span>
+<button type="button" class="todo-add-btn" data-set-completion-dismiss="${escapeHtml(find.id)}">Dismiss</button>
+</div>`;
+}
+
 function inventorySetsHtml() {
 const sets = inventorySets().filter((s) => s.groups.some((g) => SET_CORE_GROUPS.includes(g)));
 if (!sets.length) return '';
@@ -1082,6 +1102,7 @@ ${f.needed.filter((n) => !n.size).map((n) => `<span class="settings-note" style=
 return `<div class="inv-set">
 <div class="inv-set-head"><strong>${escapeHtml(name)}</strong> ${head}</div>
 <div class="settings-note" style="margin:0 0 4px;">${pieces}</div>
+${setCompletionFindHtml(set)}
 ${body}
 </div>`;
 }).join('')}</div>`;
@@ -1172,12 +1193,25 @@ if (!sensitiveFieldsShown()) {
 el.innerHTML = '<div class="settings-note" style="margin:0;">Hidden on this device. Turn on sensitive fields in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#sensitive-fields-toggle">Settings</span> to show it.</div>';
 return;
 }
+const bounds = data.prefs.setCompletionSizeBounds || {};
+const cupOptions = ['AA', 'A', 'B', 'C', 'D', 'DD', 'E', 'F', 'FF', 'G', 'GG', 'H', 'HH', 'J', 'JJ', 'K'];
+const cupSelect = (name, value) => `<select data-set-completion-bound="${name}" style="max-width:60px;">${cupOptions.map((c) => `<option value="${c}"${c === value ? ' selected' : ''}>${c}</option>`).join('')}</select>`;
 el.innerHTML = `<div class="sync-row" style="margin-bottom:8px;flex-wrap:wrap;">
 <button class="sync-btn sm inv-inline-btn" type="button" data-inv-add-item>+ Add item</button>
 <button class="sync-btn sm inv-inline-btn" type="button" data-find-set-for-her>Find a set for her…</button>
 <button class="sync-btn sm inv-inline-btn" type="button" data-inv-recheck-fits title="Who fits is worked out fresh every time this panel renders, but nothing re-renders it just because a connection changed elsewhere -- click after adding someone new or updating a size">&#8635; Recheck fits</button>
 <button class="sync-btn sm inv-inline-btn" type="button" data-ap-report title="Every want, set-completion search and owned piece for this retailer, in one list">&#128203; Full AP report</button>
 <span class="settings-note" style="margin:0;">Searches the retailer for a bra and matching knickers in her size, under a budget.</span>
+</div>
+<div class="sync-row" style="margin-bottom:8px;flex-wrap:wrap;">
+<button class="sync-btn sm inv-inline-btn" type="button" data-set-completion-check-now title="Bypasses each set's own backoff timer and checks up to 3 due sets now">&#8635; Check for missing pieces now</button>
+<span class="sync-status" data-set-completion-status></span>
+</div>
+<div class="sync-row" style="margin-bottom:8px;flex-wrap:wrap;align-items:center;">
+<span class="settings-note" style="margin:0;">Only search within:</span>
+<label style="font-size:12px;">Bra band <input type="number" data-set-completion-bound="braBandMin" value="${escapeHtml(String(bounds.braBandMin ?? ''))}" style="max-width:55px;">&ndash;<input type="number" data-set-completion-bound="braBandMax" value="${escapeHtml(String(bounds.braBandMax ?? ''))}" style="max-width:55px;"></label>
+<label style="font-size:12px;">Bra cup ${cupSelect('braCupMin', bounds.braCupMin)}&ndash;${cupSelect('braCupMax', bounds.braCupMax)}</label>
+<label style="font-size:12px;">Knicker size <input type="number" data-set-completion-bound="knickersMin" value="${escapeHtml(String(bounds.knickersMin ?? ''))}" style="max-width:55px;">&ndash;<input type="number" data-set-completion-bound="knickersMax" value="${escapeHtml(String(bounds.knickersMax ?? ''))}" style="max-width:55px;"></label>
 </div>` + inventorySetsHtml() + inventoryHtml();
 bindConnectionChips(el);
 hydratePhotoBackgrounds(el);
@@ -1189,6 +1223,32 @@ const findSetBtn = el.querySelector('[data-find-set-for-her]');
 if (findSetBtn) findSetBtn.addEventListener('click', async () => {
 const { openSetFinderDialog } = await import('./setfinder.js');
 openSetFinderDialog();
+});
+const checkNowBtn = el.querySelector('[data-set-completion-check-now]');
+if (checkNowBtn) checkNowBtn.addEventListener('click', async () => {
+const status = el.querySelector('[data-set-completion-status]');
+checkNowBtn.disabled = true;
+if (status) status.textContent = 'Checking…';
+const { forceSetCompletionSearch } = await import('./setcompletion.js');
+// forceSetCompletionSearch() re-renders Inventory itself on completion
+// (setcompletion.js's own last step), so this button's disabled/
+// "Checking…" state is just immediate feedback before that re-render
+// replaces the whole panel -- no second render needed here.
+await forceSetCompletionSearch();
+});
+el.querySelectorAll('[data-set-completion-dismiss]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const f = (data.setCompletionFinds || []).find((x) => x.id === btn.dataset.setCompletionDismiss);
+if (f) { f.dismissed = true; queueSave(); renderInventory(); }
+});
+});
+el.querySelectorAll('[data-set-completion-bound]').forEach((input) => {
+input.addEventListener('change', () => {
+const key = input.dataset.setCompletionBound;
+const isNumeric = key !== 'braCupMin' && key !== 'braCupMax';
+data.prefs.setCompletionSizeBounds[key] = isNumeric ? Number(input.value) : input.value;
+queueSave();
+});
 });
 // whoFits()/whoFitsSet() are already computed fresh on every call --
 // nothing here is cached or saved -- but nothing triggers THIS panel's

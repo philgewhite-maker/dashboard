@@ -34,6 +34,14 @@ airbnbCleanerSyncStatus: null, // {ok, syncedAt, error} for the cleaner-event sc
 airbnbKeys: [], // physical keyrings and their current custody -- see js/features/airbnb.js
 airbnbKeyAssignments: [], // {id, keyId, reservationId} -- a key dragged onto a reservation, see js/features/airbnb.js
 schoolCalendarUpdates: [], // one entry per detected term-date change, see js/features/schoolcalendar.js
+// One entry per incomplete owned set a search has actually found a
+// candidate for -- AP or eBay -- see js/features/setcompletion.js.
+// Superseded (replaced), never stacked, per set key: a later search
+// refreshes price/stock for the same set rather than piling up repeat
+// finds for something not yet bought. Removed once the set completes
+// (incompleteCoreSets() no longer lists it) -- same moment
+// setCompletionSearches' own entry for that key is pruned.
+setCompletionFinds: [],
 vouchers: [],
 businessIdeas: [],
 subscriptions: [],
@@ -165,6 +173,24 @@ mediaRecsLastRun: '', // ISO date -- the monthly gate in js/features/mediarecs.j
 // past the next 1 May.
 schoolCalendarChecks: {},
 schoolCalendarId: '', // which Google Calendar the Family tab's "Push" buttons target -- same picked-once-remembered pattern as airbnbCalendarId above
+// Per-set backoff gate for the weekly set-completion search
+// (js/features/setcompletion.js) -- keyed by inventorySets()' own key
+// (brand|style|colour, lowercased, same convention that function
+// already uses). `attempts` drives the backoff schedule (weekly for
+// the first 4, then monthly, then quarterly, then twice-yearly
+// forever -- see intervalForAttempt in setcompletion.js);
+// `lastCheckedAt` is when this set was last actually searched (AP, and
+// eBay once attempts warrant it). Pruned of any key no longer present
+// in incompleteCoreSets() every run, so this can't grow unboundedly
+// with stale entries for sets since completed or deleted.
+setCompletionSearches: {},
+// Min/max bounds the weekly search won't look outside of -- an
+// unbounded size match is actively misleading (a 32A or an F cup is
+// both unlikely to be useful and disproportionately likely to be the
+// one leftover size still in stock). Consulted only by
+// setcompletion.js, edited directly in the Inventory panel rather than
+// a separate Settings section since nothing else ever reads it.
+setCompletionSizeBounds: { braBandMin: 32, braBandMax: 36, braCupMin: 'B', braCupMax: 'D', knickersMin: 2, knickersMax: 4 },
 // Which scheduled syncs are turned OFF, and how often the rest may run
 // (see js/features/scheduled.js). Stored as the exceptions rather than
 // the enabled list so a task added later is on by default -- the point
@@ -1411,6 +1437,21 @@ holderId: '', acquiredAt: '', fromTaskId: '', notes: '', link: '',
 };
 }
 
+// One search result for one incomplete set's missing piece -- see
+// js/features/setcompletion.js. `source` distinguishes an Agent
+// Provocateur find (price/stock, no `condition`) from an eBay fallback
+// one (`condition` as the listing states it, price is whatever eBay
+// showed, not necessarily final/inc. postage).
+function blankSetCompletionFind(fields = {}) {
+return {
+id: uid(), setKey: '', brand: '', style: '', colour: '', missingGroup: '',
+source: 'agentprovocateur', // 'agentprovocateur' | 'ebay'
+name: '', price: '', url: '', condition: '',
+foundAt: new Date().toISOString(), dismissed: false,
+...fields,
+};
+}
+
 // A physical book on the Family tab's shelf. `holderId` deliberately
 // means exactly what it means on blankInventoryItem above -- blank is
 // "at your home", set is "given permanently to that connection" -- the
@@ -1467,6 +1508,16 @@ const groups = new Set(set.items.map((i) => sizeGroupFor(i.piece)).filter(Boolea
 const missing = SET_CORE_GROUPS.filter((g) => !groups.has(g));
 return { ...set, groups: [...groups], missing, complete: missing.length === 0 };
 });
+}
+
+// The sets both the Inventory card (shopping.js's inventorySetsHtml)
+// AND the weekly set-completion search (setcompletion.js) care about:
+// incomplete, with at least one CORE piece already owned -- a lone
+// extra (stockings, a ring) was never the start of a tracked pairing,
+// so it stays excluded. Shared here so both features filter identically
+// instead of each carrying its own copy of the same predicate.
+function incompleteCoreSets() {
+return inventorySets().filter((s) => !s.complete && s.groups.some((g) => SET_CORE_GROUPS.includes(g)));
 }
 
 // Whether you'd plausibly still be giving this person lingerie. Not a
@@ -2292,6 +2343,8 @@ data.airbnbKeyAssignments = data.airbnbKeyAssignments.map((a) => ({ ...blankAirb
 const airbnbKeyIds = new Set(data.airbnbKeys.map((k) => k.id));
 data.airbnbKeyAssignments = data.airbnbKeyAssignments.filter((a) => airbnbKeyIds.has(a.keyId) && airbnbReservationIds.has(a.reservationId));
 if (!Array.isArray(data.schoolCalendarUpdates)) data.schoolCalendarUpdates = [];
+if (!Array.isArray(data.setCompletionFinds)) data.setCompletionFinds = [];
+data.setCompletionFinds = data.setCompletionFinds.map((f) => ({ ...blankSetCompletionFind(), ...f }));
 // Seed the mail search rows from the old fixed shape the first time only.
 // Keyed on the array's absence rather than its emptiness, so deleting every
 // row stays deleted instead of being helpfully repopulated next reload.
@@ -3315,7 +3368,7 @@ export {
 data, sampleData, loadData, migrate, persist, queueSave, flushSave, setSaveStatusHandler,
 setExternalUpdateHandler, setLocalChangeHandler, getLocalSettings, setLocalSetting, computeStreak, reachOutThreshold,
 isDormantStage, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness,
-exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, SENSITIVE_BLOCKS, whatSheHas, unheldInventory, whoFits, inventorySets, whoFitsSet, interestNote, SIZE_GROUPS, sizeGroupFor, SET_CORE_GROUPS, DEFAULT_PREFS, blankInventoryItem, blankBookItem,
+exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, SENSITIVE_BLOCKS, whatSheHas, unheldInventory, whoFits, inventorySets, incompleteCoreSets, whoFitsSet, interestNote, SIZE_GROUPS, sizeGroupFor, SET_CORE_GROUPS, DEFAULT_PREFS, blankInventoryItem, blankSetCompletionFind, blankBookItem,
 MAIL_SEARCH_KINDS, mailSearchLabel, blankMailSearch, blankMailTopic, blankMailRule, blankMailDismissal,
 TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureBatch, blankPendingImport, blankConnection, blankTelegramThread, blankReadingItem, blankCaptureDraft, blankJob, blankMediaItem, MEDIA_KINDS, MEDIA_STATUSES, blankMediaRecSource, blankMediaRecCandidate,
 blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS, LEG_DATE_FIELDS, STAY_TYPE_SUGGESTIONS,

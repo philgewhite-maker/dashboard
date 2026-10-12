@@ -1375,6 +1375,41 @@ estimate: String((raw && raw.estimate) || ''),
 };
 }
 
+// A genuinely different question from searchEbayResaleEstimate just
+// above: that one is "what would this style/piece sell for, any colour/
+// size" (a resale estimate, colour/size deliberately ignored); this is
+// "does THIS EXACT missing piece of a specific owned set exist on eBay
+// right now" (setcompletion.js's eBay fallback) -- colour and size are
+// hard constraints here, not noise to average over, since the whole
+// point is completing one particular set, not any set in that range.
+function ebayMissingPieceSearchPrompt(query, colour, boundsText) {
+return `Search eBay UK (ebay.co.uk) for "${query}" in the EXACT colour "${colour}" -- this is one specific missing piece of a lingerie set, not a general resale estimate.
+
+HARD REQUIREMENTS:
+1. The colour must match "${colour}" exactly (or an unambiguous synonym/shade the listing itself states) -- do not report a listing in a different colour just because it's the same style.
+2. The size must fall within this range: ${boundsText}. Read the size from the listing's own title/description; skip anything outside this range or where the size can't be determined.
+3. At most 3 results, best (closest match, then cheapest) first.
+4. Note condition exactly as the listing states it ("New with tags", "New without tags", "Used", etc.) -- never guess.
+5. Never fetch a listing page -- eBay's own search results already show price and condition for each one.
+
+Respond with ONLY a JSON object, no other text, no markdown fences: {"results":[{"name":"","price":"","condition":"","url":""}]}. Only include a result with a real URL you actually found via search. If nothing matches both the colour and size range, return {"results":[]}.`;
+}
+async function searchEbayForMissingSetPiece(query, colour, boundsText) {
+const tools = [{
+type: 'web_search_20260209', name: 'web_search', max_uses: 2, allowed_callers: ['direct'],
+user_location: { type: 'approximate', country: 'GB' },
+}];
+const { data: raw } = await callAnthropic(
+[{ type: 'text', text: ebayMissingPieceSearchPrompt(query, colour, boundsText) }],
+SHOPPING_SEARCH_MAX_TOKENS, SHOPPING_SEARCH_MODEL, 'eBay missing-piece search', tools, SHOPPING_SEARCH_EFFORT,
+);
+const results = Array.isArray(raw && raw.results) ? raw.results : [];
+const first = results.find((r) => r && r.url);
+return first ? {
+name: String(first.name || ''), price: String(first.price || ''), condition: String(first.condition || ''), url: String(first.url || ''),
+} : null;
+}
+
 // A genuinely different question from scanSwitchOffers (switchoffers.js):
 // not "what NEW switch bonus am I eligible for", but "is one of my OWN
 // existing current accounts bringing so little ongoing benefit that
@@ -2341,7 +2376,7 @@ return { country: String((data && data.country) || '').trim() };
 export {
 MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot, quickScanScreenshot, scanForCaptureMarker,
 callTextJson, DEFAULT_MODEL, summarizeUsage, currentMonthKey, compareFaces,
-extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShoppingItem, searchAgentProvocateurElsewhere, searchEbayResaleEstimate, analyseOngoingAccountValue, identifyProduct, translateText, romanizeName, parseCaptureIntent,
+extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShoppingItem, searchAgentProvocateurElsewhere, searchEbayResaleEstimate, searchEbayForMissingSetPiece, analyseOngoingAccountValue, identifyProduct, translateText, romanizeName, parseCaptureIntent,
 resolveUrlTitle, resolveJobPostingUrl, resolveBookDetails, resolveSeriesBooks,
 identifyCountry, extractWellnessScreenshot,
 extractTripScreenshot, extractMediaScreenshot, extractTripLegFromEmail, extractTaskFromEmail, extractDateEventFromEmail, extractMediaRecommendations, rankMediaCandidates, findLatestArticleUrl, extractSchoolCalendar,
