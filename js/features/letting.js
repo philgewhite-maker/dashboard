@@ -148,6 +148,45 @@ const v = Number(n) || 0;
 return `${v < 0 ? '-' : ''}£${Math.abs(v).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+// ---- Upcoming (not yet accrued) ----------------------------------------
+//
+// A preview, not a record: a future stay that hasn't checked out yet
+// never gets a lettingLedger entry at all (accrueLettings only accrues
+// past checkouts), so this reads straight off data.airbnbReservations
+// instead -- nothing here can ever feed balanceFor/grossFor/totalOwed,
+// by construction, which is exactly "doesn't break the earnings totals".
+function upcomingReservationsFor(key) {
+const listingIds = new Set((data.airbnbListings || []).filter((l) => ownerKeyFor(l) === key).map((l) => l.id));
+return (data.airbnbReservations || [])
+.filter((r) => listingIds.has(r.listingId) && !r.accruedAt && r.checkout && r.checkout > today())
+.sort((a, b) => String(a.checkout).localeCompare(String(b.checkout)));
+}
+
+// Same pro-rata share accrueLettings() will actually post once this
+// stay checks out -- a genuine preview of what's coming, not just a
+// bare list of bookings, so it reads consistently with the Earned rows
+// right above it.
+function upcomingTableHtml(key) {
+const rows = upcomingReservationsFor(key);
+if (!rows.length) return '';
+const mine = isMyOwnKey(key);
+return `<div class="letting-upcoming">
+<div class="settings-note" style="margin:8px 0 2px;"><strong>Upcoming</strong> — not yet earned, a preview only</div>
+<div class="letting-scroll"><table class="limits-table"><tbody>${rows.map((r) => {
+const listing = (data.airbnbListings || []).find((l) => l.id === r.listingId);
+const share = Number(listing && listing.sharePct);
+const pct = mine ? 0 : (Number.isFinite(share) ? share : 50);
+const income = Number(r.income) || 0;
+const amount = Math.round(income * (pct / 100) * 100) / 100;
+return `<tr>
+<td style="white-space:nowrap;">${escapeHtml(r.checkin || '?')} &rarr; ${escapeHtml(r.checkout)}</td>
+<td>${escapeHtml(`${(listing && listing.label) || 'listing'}${r.guestName ? `, ${r.guestName}` : ''}`)} <span class="letting-kind upcoming">upcoming</span>${income ? ` <span class="letting-gross">${escapeHtml(`${pct}% of ${money(income)}`)}</span>` : ''}</td>
+<td style="text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;">${income ? escapeHtml(money(amount)) : ''}</td>
+</tr>`;
+}).join('')}</tbody></table></div>
+</div>`;
+}
+
 // ---- Tax by tax year --------------------------------------------------
 //
 // A stay's `date` defaults to its checkout (accrueLettings, above), but
@@ -293,6 +332,7 @@ e.gross ? ` <span class="letting-gross">${escapeHtml(`${e.pct ?? 50}% of ${money
 <td style="text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;">${escapeHtml(money(e.amount))}</td>
 <td style="width:1%;"><span class="del-x" data-letting-del="${escapeHtml(e.id)}" title="Remove this entry">&times;</span></td>
 </tr>`).join('')}</tbody></table></div>` : '<div class="settings-note" style="margin:4px 0 0;">Nothing yet.</div>'}
+${upcomingTableHtml(key)}
 ${taxYearSummaryHtml(key, taxYears)}
 </div>`;
 }).join('');

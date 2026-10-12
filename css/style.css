@@ -1700,8 +1700,14 @@ white-space:nowrap;
 /* .cal-event-row .cal-badge{margin-left:auto} below (existing rule, used
    by calendars.js's own "Today" badge) would otherwise also apply to
    EACH cleaner chip individually, pushing them apart from each other
-   instead of the pair sitting together at the row's right edge. */
-.cal-clean-group .cal-badge{margin-left:0;}
+   instead of the pair sitting together at the row's right edge --
+   confirmed live as a real bug, not just a hypothetical: both selectors
+   are equal specificity (0,2,0), so the one later in the file wins
+   regardless of which one "should" -- .cal-event-row .cal-badge sits
+   much later, so this override was silently losing. Three classes, not
+   two, so this wins on specificity instead of depending on staying
+   below the rule it overrides. */
+.cal-event-row .cal-clean-group .cal-badge{margin-left:0;}
 /* Cleaner chips can't safely reuse any of the room-colour fills above --
    all 9 are already claimed by AIRBNB_COLOURS, so any one of them could
    collide with whichever colour the listing badge just above happens to
@@ -3938,6 +3944,11 @@ background:var(--sage-bg);color:var(--sage);
 }
 .letting-kind.adjustment{background:var(--slate-bg);color:var(--slate);}
 .letting-kind.earned{background:var(--amber-bg);color:var(--amber);}
+.letting-kind.upcoming{background:var(--teal-bg);color:var(--teal);}
+/* The Upcoming subtable is a preview, not part of the ledger it sits
+   under -- a faint top rule marks it as a separate block, same purpose
+   the tax-year summary's own border already serves just below it. */
+.letting-upcoming{border-top:1px dashed var(--line);padding-top:4px;margin-top:6px;}
 /* The gross behind a share, shown beside whatever you called the entry
    rather than inside it — a note you type replaces the default one, and
    the figure it was half of should not go with it. */
