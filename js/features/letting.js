@@ -100,20 +100,23 @@ if (!r.checkout || r.checkout > today()) return;
 const listing = listings.find((l) => l.id === r.listingId);
 const key = ownerKeyFor(listing);
 if (!key) return; // no owner set yet; left alone rather than guessed at
-// A listing whose owner resolves to YOU -- confirmed live: typing
-// "Phil" as the owner label (rather than leaving it blank) produced a
-// ledger row claiming you owed yourself £1,000, which is meaningless
-// -- the money's already yours, there's no debt to track. Same self-
-// check isMyOwnListing already applies for the chart (splitContribution
-// folds it into "Mine" there); this is the ledger's own copy of that
-// rule. Still accrued at zero -- gross is recorded (so "X taken"
-// totals stay accurate) and accruedAt gets set (so this doesn't sit
-// retried forever) -- only the owed AMOUNT is forced to zero.
-const mine = isMyOwnListing(listing);
+// A self-owned listing isn't special-cased here -- its OWN sharePct
+// already reflects your real cut (100, for one you keep in full, per
+// Settings -> Travel -> Airbnb listings), so this is the same
+// arithmetic as any other owner's and the row correctly shows what
+// you actually earned. Confirmed live: an earlier version of this
+// forced the per-row amount to zero for a self-resolving owner too,
+// which went further than the actual bug (a listing owner typed as
+// "Phil" producing a ledger row claiming you owed yourself £1,000) --
+// that's an AGGREGATE-level problem, and totalOwed()/the ticker's
+// Owed tile/the per-owner balance badge all already exclude a self-
+// resolving key independently (isMyOwnKey), regardless of what this
+// row's own amount holds. Zeroing the row too just discarded real
+// "what did this stay actually bring in" data for no reason.
 const share = Number(listing.sharePct);
-const pct = mine ? 0 : (Number.isFinite(share) ? share : 50);
+const pct = Number.isFinite(share) ? share : 50;
 const amount = Math.round(income * (pct / 100) * 100) / 100;
-if (!amount && !mine) return;
+if (!amount) return;
 data.lettingLedger.push({
 id: uid(),
 ownerKey: key,
@@ -169,13 +172,12 @@ return (data.airbnbReservations || [])
 function upcomingTableHtml(key) {
 const rows = upcomingReservationsFor(key);
 if (!rows.length) return '';
-const mine = isMyOwnKey(key);
 return `<div class="letting-upcoming">
 <div class="settings-note" style="margin:8px 0 2px;"><strong>Upcoming</strong> — not yet earned, a preview only</div>
 <div class="letting-scroll"><table class="limits-table"><tbody>${rows.map((r) => {
 const listing = (data.airbnbListings || []).find((l) => l.id === r.listingId);
 const share = Number(listing && listing.sharePct);
-const pct = mine ? 0 : (Number.isFinite(share) ? share : 50);
+const pct = Number.isFinite(share) ? share : 50;
 const income = Number(r.income) || 0;
 const amount = Math.round(income * (pct / 100) * 100) / 100;
 return `<tr>
@@ -424,15 +426,17 @@ const kind = (document.getElementById('letting-add-kind') || {}).value || 'payme
 // having both means you can use whichever number you actually have to
 // hand, rather than doing the arithmetic yourself and leaving a row that
 // doesn't say what it came from.
-// Zero for yourself -- the whole gross is already yours, nothing to
-// split off as owed, same rule accrueLettings() applies automatically
-// for a self-owned listing's real stays.
-const mine = isMyOwnKey(who.value);
-const pct = mine ? 0 : sharePctFor(who.value);
+// Not special-cased for yourself -- sharePctFor() already reads the
+// real cut straight off the listing (100 for one you keep in full),
+// same arithmetic accrueLettings() uses for a real stay. Nothing here
+// claims a debt to yourself: totalOwed()/the ticker's Owed tile/the
+// per-owner balance badge exclude a self-resolving key independently
+// of this row's own amount.
+const pct = sharePctFor(who.value);
 const signed = kind === 'earned'
 ? Math.round(amount * (pct / 100) * 100) / 100
 : Math.round(amount * 100) / 100;
-if (!signed && !(kind === 'earned' && mine)) { say('That works out as nothing — check the amount.'); return; }
+if (!signed) { say('That works out as nothing — check the amount.'); return; }
 data.lettingLedger.push({
 id: uid(),
 ownerKey: who.value,
@@ -1180,8 +1184,8 @@ if (!sel) return;
 const keep = sel.value;
 // Includes yourself -- logging a historic "Earned" figure for your
 // own listing (pre-tracking income) is a legitimate real use; see the
-// add-button handler below for where that's correctly recorded at
-// zero owed rather than split like a real third party's share.
+// add-button handler below, which uses the same sharePctFor() a real
+// stay's accrual uses, no self-exception.
 sel.innerHTML = `<option value="">Who…</option>${owners().map((k) => `<option value="${escapeHtml(k)}">${escapeHtml(ownerNameFor(k))}</option>`).join('')}`;
 if (keep) sel.value = keep;
 }

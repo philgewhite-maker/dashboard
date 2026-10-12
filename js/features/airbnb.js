@@ -1039,56 +1039,106 @@ return candidates.length === 1 ? candidates[0] : null;
 
 // ---- Cancellation payout extraction ------------------------------------
 //
-// A cancelled reservation is GONE from data.airbnbReservations by the
-// next ICS sync (syncAllAirbnbListings' own "whatever's left in
-// existingByUid... gone" cleanup) -- so this has to run BEFORE that
-// sync, while the record this cancellation is ABOUT still exists to be
-// matched against and read a listing/owner/guest name off. Posted
-// straight to lettingLedger as its own 'cancellation' kind, bypassing
-// accrueLettings() entirely: that function only ever fires at checkout,
-// and a cancelled stay's checkout may never be reached by a reservation
-// record that's about to vanish from the feed.
+// Posted straight to lettingLedger as its own 'cancellation' kind,
+// bypassing accrueLettings() entirely: that function only ever fires at
+// checkout, and a cancelled stay's checkout may never be reached by a
+// reservation record that's about to vanish from the feed.
+//
+// Self-contained from the email alone, NOT dependent on a surviving
+// reservation record -- confirmed real need, not a hypothetical one:
+// the first real cancellation this feature saw (HMEDC2S4QB, 14-25 Oct)
+// went unposted because the reservation it needed was already gone by
+// the time Sync ran. Two separate things can delete it first: the ICS
+// sync right after this one in initAirbnbSync (syncAllAirbnbListings'
+// own "whatever's left in existingByUid... gone" cleanup), or Chrome's
+// own periodic background sync (bgsync.js's refreshAirbnbFeeds, which
+// has no Gmail access at all and can fire while the app is closed) --
+// either can win the race overnight, well before any Sync click. The
+// listing is resolved instead by matching the email's own stated
+// "Listing #<id>" against the numeric id embedded in each listing's
+// icsUrl (confirmed against all three real listings: Airbnb's feed URL
+// is always .../calendar/ical/<id>.ics?...); the guest name comes
+// straight off "your guest X had to cancel" in the body. The old
+// date-range match against a live reservation (matchReservationFor
+// Cancellation) is kept only as a fallback for a listing whose icsUrl
+// doesn't carry its id for some reason -- no longer load-bearing for
+// the normal case.
 //
 // Airbnb's own email: subject "Cancelled: Reservation <CODE> for
-// <D>–<D> <Month>", body "...your payout has been updated to £X.XX" --
-// the REVISED, post-cancellation-policy payout, not the original
-// booking's full price. The code isn't matched against anything (no
-// field on a reservation carries it -- the ICS feed's own UID is an
-// opaque Airbnb-internal string, never confirmed to equal this code);
-// the date range is what's matched, same day+month-any-year approach
-// matchReservationForArrival above already uses.
-const CANCELLATION_SUBJECT_RE = /^Cancelled:\s*Reservation\s+(\S+)\s+for\s+(\d{1,2})\s*[–—-]\s*(\d{1,2})\s+([a-z]+)$/i;
+// <D>[ <Month>]–<D> <Month>[ <Year>]" -- confirmed against ten real
+// cancellation emails spanning several months that (a) the year is
+// sometimes present and sometimes not, and (b) a stay crossing a month
+// boundary ("23 Sept – 13 Oct") states BOTH months, not just one -- 3
+// of those 10 do this. A single trailing month, assumed to cover both
+// days, silently failed to match (no fallback, no "seen" marked, just
+// dropped) on every one of those 3 until caught here; the start
+// month is now its own optional group, defaulting to the end month
+// when the stay doesn't cross a boundary. Body: "...your payout has
+// been updated to £X.XX" (the REVISED, post-cancellation-policy
+// payout, not the original booking's full price), "Listing #<id>",
+// "your guest <Name> had to cancel".
+const CANCELLATION_SUBJECT_RE = /^Cancelled:\s*Reservation\s+(\S+)\s+for\s+(\d{1,2})(?:\s+([a-z]+))?\s*[–—-]\s*(\d{1,2})\s+([a-z]+)(?:\s+(\d{4}))?$/i;
 const CANCELLATION_QUERY = 'subject:"Cancelled: Reservation"';
 const CANCELLATION_SEARCH_LIMIT = 25;
 // Loose gap between the words and the amount, same tolerance PAYOUT_RE
 // above uses for stripped-HTML whitespace.
 const CANCELLATION_PAYOUT_RE = /payout\s*has\s*been\s*updated\s*to[\s\S]{0,20}?£\s*([\d,]+\.\d{2})/i;
+const CANCELLATION_LISTING_ID_RE = /Listing\s*#\s*(\d+)/i;
+const CANCELLATION_GUEST_RE = /your\s+guest\s+(.+?)\s+had\s+to\s+cancel/i;
 
-// Both checkin AND checkout matched (not just checkin, the way arrival
-// matching above only needs) -- more signal to disambiguate with, and
-// available here since the subject states the whole range, not just
-// one date. More than one match is genuinely ambiguous -- skipped, same
-// discipline as matchReservationForArrival.
-function matchReservationForCancellation(startDay, endDay, month) {
+// The digits immediately before ".ics" in an Airbnb feed URL ARE the
+// listing's public id -- confirmed against all three real listings
+// (Settings -> Travel -> Airbnb listings), each shaped
+// .../calendar/ical/<id>.ics?t=<token>.
+function airbnbIdFromIcsUrl(url) {
+const m = /(\d{6,})\.ics/i.exec(String(url || ''));
+return m ? m[1] : '';
+}
+function listingByAirbnbId(airbnbId) {
+if (!airbnbId) return null;
+return (data.airbnbListings || []).find((l) => airbnbIdFromIcsUrl(l.icsUrl) === airbnbId) || null;
+}
+
+// Fallback only -- see this section's header comment for why the id
+// match above is primary now. Both checkin AND checkout matched (not
+// just checkin, the way arrival matching above only needs), with their
+// OWN months (a stay can cross a month boundary), since the subject
+// states the whole range here. More than one match is genuinely
+// ambiguous -- skipped, same discipline as matchReservationForArrival.
+function matchReservationForCancellation(startDay, startMonth, endDay, endMonth) {
 const candidates = data.airbnbReservations.filter((r) => {
 const inD = new Date(`${r.checkin}T00:00:00`);
 const outD = new Date(`${r.checkout}T00:00:00`);
-return inD.getDate() === startDay && inD.getMonth() + 1 === month
-&& outD.getDate() === endDay && outD.getMonth() + 1 === month;
+return inD.getDate() === startDay && inD.getMonth() + 1 === startMonth
+&& outD.getDate() === endDay && outD.getMonth() + 1 === endMonth;
 });
 return candidates.length === 1 ? candidates[0] : null;
 }
 
-// Dedup is by Gmail message id (data.prefs.airbnbCancellationsSeen), not
-// by anything on the reservation -- the reservation itself is about to
-// be deleted by the ICS sync that runs right after this, so there's no
-// surviving field to mark "already processed" the way guestName does
-// for syncGuestNamesFromEmail. Marked seen as soon as the SUBJECT
-// parses (a cancellation email this function recognises at all), even
-// if the reservation match or payout extraction then fails -- a miss
-// there will keep missing the same way on every future Sync, and
-// retrying it on every click would just waste a Gmail fetch for nothing
-// new.
+// Only needed when the subject itself has no year AND no reservation
+// survived to read a real checkin year off. Picks whichever of last/
+// this/next year actually lands closest to the email's OWN date header
+// -- an anchor Airbnb itself stamped on the message, not a guess, same
+// spirit as this file's everywhere-else "never guess a year" rule, just
+// anchored to the email instead of a reservation.
+function inferCancellationYear(day, month, emailDate) {
+const anchor = new Date(emailDate);
+if (isNaN(anchor)) return new Date().getFullYear();
+let best = anchor.getFullYear();
+let bestDiff = Infinity;
+[best - 1, best, best + 1].forEach((y) => {
+const diff = Math.abs(new Date(y, month - 1, day) - anchor);
+if (diff < bestDiff) { bestDiff = diff; best = y; }
+});
+return best;
+}
+
+// Dedup is by Gmail message id (data.prefs.airbnbCancellationsSeen).
+// Marked seen once the subject's own fields are read AND either a
+// listing was found or genuinely couldn't be -- not any earlier, now
+// that reading the email is unavoidable anyway (the id match needs the
+// body) and a fetch failure specifically is worth retrying rather than
+// silently eating one Gmail message forever.
 async function syncCancellationsFromEmail() {
 if (!(await canAttemptGoogleAction())) return { posted: 0 };
 if (!Array.isArray(data.prefs.airbnbCancellationsSeen)) data.prefs.airbnbCancellationsSeen = [];
@@ -1104,30 +1154,59 @@ console.error('Cancellation email search failed:', err);
 return { posted: 0, error: err.message || String(err) };
 }
 
-const { ownerKeyFor, isMyOwnKey } = await import('./letting.js');
+const { ownerKeyFor } = await import('./letting.js');
 let posted = 0;
 let unmatched = 0;
 for (const m of sections[0]?.messages || []) {
 if (seen.has(m.id)) continue;
 const subjectMatch = CANCELLATION_SUBJECT_RE.exec(String(m.subject || '').trim());
 if (!subjectMatch) continue;
-seen.add(m.id);
-const monthIdx = MONTH_NAMES.indexOf(subjectMatch[4].slice(0, 3).toLowerCase());
-if (monthIdx === -1) continue;
-const reservation = matchReservationForCancellation(Number(subjectMatch[2]), Number(subjectMatch[3]), monthIdx + 1);
-if (!reservation) { unmatched++; continue; }
-const listing = data.airbnbListings.find((l) => l.id === reservation.listingId);
-if (!listing) continue;
-const ownerKey = ownerKeyFor(listing);
-if (!ownerKey) continue;
+const endMonthIdx = MONTH_NAMES.indexOf(subjectMatch[5].slice(0, 3).toLowerCase());
+if (endMonthIdx === -1) { seen.add(m.id); continue; }
+// The start month is its own group only when the stay crosses a
+// month boundary -- otherwise it's absent and shares the end month.
+const startMonthIdx = subjectMatch[3] ? MONTH_NAMES.indexOf(subjectMatch[3].slice(0, 3).toLowerCase()) : endMonthIdx;
+if (startMonthIdx === -1) { seen.add(m.id); continue; }
+const startDay = Number(subjectMatch[2]);
+const endDay = Number(subjectMatch[4]);
+const subjectYear = subjectMatch[6] ? Number(subjectMatch[6]) : null;
+
+let detail;
 try {
-const detail = await getMessageDetail(m.id);
-const payoutMatch = CANCELLATION_PAYOUT_RE.exec(detail.bodyText || '');
-if (!payoutMatch) { unmatched++; continue; }
+detail = await getMessageDetail(m.id);
+} catch (err) {
+console.error('Cancellation email fetch failed:', err);
+unmatched++;
+continue; // not marked seen -- a fetch failure is worth retrying
+}
+const bodyText = detail.bodyText || '';
+const payoutMatch = CANCELLATION_PAYOUT_RE.exec(bodyText);
+if (!payoutMatch) { seen.add(m.id); unmatched++; continue; }
 const payout = Number(payoutMatch[1].replace(/,/g, ''));
-const mine = isMyOwnKey(ownerKey);
+
+const idMatch = CANCELLATION_LISTING_ID_RE.exec(bodyText);
+let listing = idMatch ? listingByAirbnbId(idMatch[1]) : null;
+let reservation = null;
+if (!listing) {
+reservation = matchReservationForCancellation(startDay, startMonthIdx + 1, endDay, endMonthIdx + 1);
+if (reservation) listing = data.airbnbListings.find((l) => l.id === reservation.listingId);
+}
+if (!listing) { seen.add(m.id); unmatched++; continue; }
+const ownerKey = ownerKeyFor(listing);
+if (!ownerKey) { seen.add(m.id); continue; }
+
+const guestMatch = CANCELLATION_GUEST_RE.exec(bodyText);
+const guestName = (guestMatch && guestMatch[1].trim()) || (reservation && reservation.guestName) || '';
+// A subject year, when present, is stated after the END date -- if the
+// stay also crosses a YEAR boundary (Dec checkin, Jan checkout), the
+// checkin itself is one year earlier.
+const checkinYear = subjectYear
+? (startMonthIdx > endMonthIdx ? subjectYear - 1 : subjectYear)
+: (reservation ? new Date(`${reservation.checkin}T00:00:00`).getFullYear() : inferCancellationYear(startDay, startMonthIdx + 1, detail.date || m.date));
+const checkin = `${checkinYear}-${String(startMonthIdx + 1).padStart(2, '0')}-${String(startDay).padStart(2, '0')}`;
+
 const share = Number(listing.sharePct);
-const pct = mine ? 0 : (Number.isFinite(share) ? share : 50);
+const pct = Number.isFinite(share) ? share : 50;
 const amount = Math.round(payout * (pct / 100) * 100) / 100;
 data.lettingLedger.push({
 id: uid(), ownerKey, kind: 'cancellation', amount, gross: payout, pct,
@@ -1135,13 +1214,11 @@ platform: 'airbnb',
 // Matches the email's own stated timing ("released 24 hours after
 // the check-in date"), not today -- so this lands in the right tax
 // year/chart month even when Sync runs well after the fact.
-date: dateStrAdd(reservation.checkin, 1),
-note: `${listing.label || 'listing'} — cancellation payout${reservation.guestName ? ` (${reservation.guestName})` : ''}`,
+date: dateStrAdd(checkin, 1),
+note: `${listing.label || 'listing'} — cancellation payout${guestName ? ` (${guestName})` : ''}`,
 });
+seen.add(m.id);
 posted++;
-} catch (err) {
-console.error('Cancellation payout extraction failed:', err);
-}
 }
 data.prefs.airbnbCancellationsSeen = [...seen];
 if (posted || unmatched) queueSave();
