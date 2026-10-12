@@ -17,11 +17,18 @@ const TOP_N = 6;
 // user may have set for screenshot import.
 const RANK_MODEL = 'claude-haiku-5-5';
 // 300 was fine under Haiku 4.5, which never thought unless asked. Haiku
-// 5.5 thinks adaptively by default and that counts against max_tokens --
-// 300 was tight enough to risk a thinking-only response with no ranking
-// JSON at all. 'low' effort (added at the call site below) keeps actual
-// spend close to before; this is headroom, not an expected cost rise.
-const RANK_MAX_TOKENS = 500;
+// 5.5 thinks adaptively by default and that counts against max_tokens.
+// 'low' effort (passed at the call site below) does NOT reliably
+// suppress it -- confirmed live, not assumed: a real failed response
+// here (reported directly as "Couldn't rank smartly") showed
+// stop_reason:"max_tokens" with the ENTIRE 500-token budget spent on a
+// thinking block and nothing left for the actual ranking JSON, despite
+// 'low' already being set. Same lesson independently confirmed
+// elsewhere this session (school-calendar extraction). Sized with real
+// headroom past a thinking pass now, not just past the bare JSON --
+// still a cheap Haiku-tier call a handful of times a session, so the
+// extra ceiling costs nothing in the case that doesn't need it.
+const RANK_MAX_TOKENS = 3000;
 let currentPool = [];
 let currentShown = [];
 let renderGen = 0; // guards a slow AI response from clobbering a newer render
