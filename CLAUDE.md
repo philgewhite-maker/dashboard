@@ -147,6 +147,40 @@ a render function. If a button is genuinely alone/stacked in its own
 card, the bare `.sm` (no `inline`) is correct and intentional — don't
 add `inline` reflexively to every one.
 
+**A full codebase sweep for this ran once** (confirmed live: ~25 missed
+instances found and fixed across `js/features/*.js` and `index.html` in
+one pass, after this exact bug recurred three separate times in one
+session despite being documented). The check that actually finds them:
+read the button's real layout context, not just its class list — a
+`.sync-btn.sm` sitting in a plain `.sync-row`/flex row alongside ANY
+sibling (an input, a select, another button, a status span) needs
+`.inline`; one that's the only interactive child of a stacked/block
+container (`.album-card`, `.tinder-candidate-row`, a lone `<td>`, a
+dialog's own last row) is correct bare. `.mail-view-actions .sync-btn.sm`
+already has its own scoped `width:auto` reset — don't add `.inline`
+there too, it's redundant, not wrong, but a sign the context wasn't
+actually checked.
+
+**This bug class has two other, less common relatives** — both hit for
+real this session, neither catchable by grepping for a class name:
+- **Equal-specificity CSS ties.** Two selectors of the same specificity
+  (e.g. `.cal-event-row .cal-badge` and `.cal-clean-group .cal-badge`,
+  both 0,2,0) don't resolve by which one "should" win — the one later
+  in the file wins, full stop, regardless of comments explaining intent
+  above the one that loses. Writing an override that needs to beat an
+  existing rule: either give it one more class (cheap, robust, doesn't
+  depend on file position) or put it unambiguously after the rule it
+  overrides — never rely on "it's defined first, that must mean it
+  wins."
+- **Flex `align-items` defaulting to `stretch`.** A flex row (`.sync-row`
+  and friends) with no `align-items` set will stretch every child to
+  match the TALLEST one on its line — invisible when all children are
+  the same shape, a real visual bug the moment one child can be taller
+  than its siblings (a form with several inputs that might wrap, next
+  to a plain one-line badge). Set `align-items:flex-start` on any new
+  flex row where that's even plausible, not just where it's already
+  been seen to happen.
+
 ## When adding a brand-new file/feature
 
 Before writing the first render function, ask: does this show a
