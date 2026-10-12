@@ -1696,7 +1696,15 @@ white-space:nowrap;
    name/notes/Push) rather than its own row -- a dedicated 3rd row read
    as too much vertical weight on desktop, and .cal-event-row already
    wraps on narrow viewports, so this still stacks sanely on mobile. */
-.cal-clean-group{display:flex;gap:6px;flex-wrap:wrap;margin-left:auto;}
+/* align-items:flex-start -- confirmed live as a real, separate bug from
+   the margin-left one above: flex's own default (stretch) was making
+   a TBC badge sitting next to the OTHER edge's open add-cleaner form
+   (name input + date input + Add + cancel, often tall enough to wrap)
+   stretch to match that form's full height, roughly 50% taller than
+   its own natural size (35px vs 24px, measured) -- the "2x button
+   size" look. Each chip now sizes to its own content regardless of
+   how tall its sibling happens to be. */
+.cal-clean-group{display:flex;gap:6px;flex-wrap:wrap;align-items:flex-start;margin-left:auto;}
 /* .cal-event-row .cal-badge{margin-left:auto} below (existing rule, used
    by calendars.js's own "Today" badge) would otherwise also apply to
    EACH cleaner chip individually, pushing them apart from each other
