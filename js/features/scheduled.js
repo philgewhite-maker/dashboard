@@ -287,7 +287,7 @@ return `<tr>
 <div class="sync-row" style="margin-top:8px;">
 <label style="font-size:12px;">Run at most every
 <input type="number" min="1" max="168" id="scheduled-interval" value="${escapeHtml(String(intervalHours()))}" style="width:60px;"> hours</label>
-<button class="sync-btn sm" type="button" id="scheduled-run-now">Run due tasks now</button>
+<button class="sync-btn sm inline" type="button" id="scheduled-run-now">Run due tasks now</button>
 <span class="sync-status" id="scheduled-status"></span>
 </div>`;
 

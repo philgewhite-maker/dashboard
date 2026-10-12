@@ -1909,7 +1909,7 @@ const { field, values, colors } = tagPickerState;
 const def = FLAG_FIELD_DEFS.find((d) => d.field === field);
 const anyShared = values.some((v) => v.wasShared);
 box.innerHTML = `<div class="cook-sheet">
-<div class="cook-head"><h2>${escapeHtml(def.label)} colours</h2><button class="sync-btn sm" type="button" id="tag-picker-close">&times;</button></div>
+<div class="cook-head"><h2>${escapeHtml(def.label)} colours</h2><button class="sync-btn sm inline" type="button" id="tag-picker-close">&times;</button></div>
 <div class="cook-body">
 ${values.length ? `<div class="settings-note" style="margin:0 0 10px;">Click a tag to cycle green &rarr; amber &rarr; red &rarr; none. Sorted by how often it comes up.${anyShared ? " Shared interests (Tinder's own marker) start green." : ''}</div>
 <div class="tag-picker-grid">${values.map((v) => {
@@ -1968,7 +1968,7 @@ const inputs = def.kind === 'number'
 : `<input type="text" autocomplete="off" data-flag-list="green" data-flag-rule="${rule.id}" value="${escapeHtml((rule.green || []).join(', '))}" placeholder="Green values, comma separated">`
 + `<input type="text" autocomplete="off" data-flag-list="amber" data-flag-rule="${rule.id}" value="${escapeHtml((rule.amber || []).join(', '))}" placeholder="Amber values, comma separated">`
 + `<input type="text" autocomplete="off" data-flag-list="red" data-flag-rule="${rule.id}" value="${escapeHtml((rule.red || []).join(', '))}" placeholder="Red values, comma separated">`
-+ `<button type="button" class="sync-btn sm" data-tag-picker-open="${escapeHtml(rule.field)}">Pick tags&hellip;</button>`;
++ `<button type="button" class="sync-btn sm inline" data-tag-picker-open="${escapeHtml(rule.field)}">Pick tags&hellip;</button>`;
 return `<div class="flag-rule-row">
 <strong>${escapeHtml(def.label)}</strong>
 ${inputs}
@@ -1988,7 +1988,7 @@ function render() {
 if (!Array.isArray(data.flagRules)) data.flagRules = [];
 const addOptions = FLAG_FIELD_DEFS.map((d) => `<option value="${escapeHtml(d.field)}">${escapeHtml(d.label)}</option>`).join('');
 el.innerHTML = data.flagRules.map(flagRuleRowHtml).join('')
-+ `<div class="flag-rule-row"><select id="new-flag-rule-field">${addOptions}</select><button class="sync-btn sm" type="button" id="add-flag-rule-btn">+ Add rule</button></div>`;
++ `<div class="flag-rule-row"><select id="new-flag-rule-field">${addOptions}</select><button class="sync-btn sm inline" type="button" id="add-flag-rule-btn">+ Add rule</button></div>`;
 
 el.querySelectorAll('[data-del-flag-rule]').forEach((x) => {
 x.addEventListener('click', () => {
@@ -3364,8 +3364,8 @@ return `<div class="tinder-candidate-row">
 <div class="album-caption dup-pair-names">${sideHtml(a)} <span class="compare-arrow">&harr;</span> ${sideHtml(b)}</div>
 <div class="tinder-field-note">${reasons.map(escapeHtml).join(' &middot; ')}</div>
 <div class="sync-row" style="margin-top:6px;">
-<button class="sync-btn sm" type="button" data-dup-compare="${escapeHtml(dupPairKey(a, b))}">Compare</button>
-<button class="sync-btn sm" type="button" data-dup-dismiss="${escapeHtml(dupPairKey(a, b))}">Not a duplicate</button>
+<button class="sync-btn sm inline" type="button" data-dup-compare="${escapeHtml(dupPairKey(a, b))}">Compare</button>
+<button class="sync-btn sm inline" type="button" data-dup-dismiss="${escapeHtml(dupPairKey(a, b))}">Not a duplicate</button>
 </div>
 </div>`;
 }

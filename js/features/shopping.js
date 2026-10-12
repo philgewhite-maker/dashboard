@@ -297,8 +297,8 @@ dialog.innerHTML = `<div class="mail-view-card" style="max-width:420px;">
 <div class="settings-note" style="margin:2px 0 8px;">Something you already own. Paste the product page if there is one &mdash; it can fill in the details, including its exact colour &mdash; or just type them by hand.</div>
 <label style="font-size:12px;display:block;margin-bottom:6px;">Product link <span class="settings-note" style="display:inline;margin:0;">(optional)</span><input type="text" autocomplete="off" class="tag-add-input" data-inv-new-link style="width:100%;display:block;" placeholder="https://www.agentprovocateur.com/..."></label>
 <div class="sync-row" style="margin:0 0 8px;flex-wrap:wrap;">
-<button class="sync-btn sm" type="button" data-inv-fill-link>Fill from link</button>
-<button class="sync-btn sm" type="button" data-inv-fetch-details>Fetch exact colour&hellip;</button>
+<button class="sync-btn sm inline" type="button" data-inv-fill-link>Fill from link</button>
+<button class="sync-btn sm inline" type="button" data-inv-fetch-details>Fetch exact colour&hellip;</button>
 <span class="sync-status" data-inv-fetch-status></span>
 </div>
 ${chipFieldHtml('Brand', 'brand', knownScalarValues(data.inventory, 'brand'))}
@@ -671,9 +671,9 @@ return `<div class="mail-view-card" style="max-width:520px;">
 <div class="settings-block" style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line);">
 <div class="settings-note" style="margin:0 0 6px;">If checking says <strong>403</strong>, the retailer is refusing your web host &mdash; it won't answer a server, only a browser. Read the page in yours instead: copy the snippet, open the product page, paste it in the address bar, then come back and paste the result.</div>
 <div class="sync-row">
-<button class="sync-btn sm" type="button" data-watch-copy-snippet title="Run it on one product page">Copy snippet</button>
-<button class="sync-btn sm" type="button" data-watch-copy-bulk title="Run it on a listing filtered to this style — reads every product and colourway in one go">Copy bulk snippet</button>
-<button class="sync-btn sm" type="button" data-watch-paste-stock>Paste stock</button>
+<button class="sync-btn sm inline" type="button" data-watch-copy-snippet title="Run it on one product page">Copy snippet</button>
+<button class="sync-btn sm inline" type="button" data-watch-copy-bulk title="Run it on a listing filtered to this style — reads every product and colourway in one go">Copy bulk snippet</button>
+<button class="sync-btn sm inline" type="button" data-watch-paste-stock>Paste stock</button>
 <span class="sync-status" data-watch-paste-status></span>
 </div>
 </div>

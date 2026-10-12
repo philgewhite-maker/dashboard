@@ -197,7 +197,7 @@ ${unlinked.map((i) => `<option value="${i.id}">${escapeHtml(i.label)}</option>`)
 <option value="shopping">to Shopping</option>
 <option value="book">to a Book</option>
 </select>
-<button class="sync-btn sm" type="button" data-packing-link-go="${trip.id}">Link</button>
+<button class="sync-btn sm inline" type="button" data-packing-link-go="${trip.id}">Link</button>
 </div>`;
 }
 
@@ -338,7 +338,7 @@ ${triggerValueControlHtml(m)}
 <div class="sync-row" style="margin-top:6px;">
 <input type="text" class="tag-add-input" placeholder="Item name" data-packing-lib-item-label="${m.id}">
 <input type="number" min="1" class="tag-add-input" style="width:60px;" placeholder="Qty" value="1" data-packing-lib-item-qty="${m.id}">
-<button class="sync-btn sm" type="button" data-packing-lib-item-add="${m.id}">Add item</button>
+<button class="sync-btn sm inline" type="button" data-packing-lib-item-add="${m.id}">Add item</button>
 </div>
 </div>`;
 }

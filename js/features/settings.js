@@ -94,7 +94,7 @@ return;
 }
 el.innerHTML = hits.map(({ conn, fields }) => `<div class="cleanup-section" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
 <span><strong>${escapeHtml(conn.name)}</strong> &mdash; ${fields.map(escapeHtml).join(', ')}</span>
-<button class="sync-btn sm" type="button" data-clear-selfinfo="${escapeHtml(conn.id)}" data-clear-fields="${escapeHtml(fields.join(','))}">Clear</button>
+<button class="sync-btn sm inline" type="button" data-clear-selfinfo="${escapeHtml(conn.id)}" data-clear-fields="${escapeHtml(fields.join(','))}">Clear</button>
 </div>`).join('');
 el.querySelectorAll('[data-clear-selfinfo]').forEach((btn) => {
 btn.addEventListener('click', () => {
@@ -1092,8 +1092,8 @@ items.map((item, i) => `<tr>
 <td>${escapeHtml(TICKER_KIND[item.kind] || item.kind)}</td>
 <td>${escapeHtml(tickerLabel(item))}</td>
 <td style="white-space:nowrap;">
-<button class="sync-btn sm" type="button" data-ticker-up="${i}"${i === 0 ? ' disabled' : ''} title="Move earlier">&uarr;</button>
-<button class="sync-btn sm" type="button" data-ticker-down="${i}"${i === items.length - 1 ? ' disabled' : ''} title="Move later">&darr;</button>
+<button class="sync-btn sm inline" type="button" data-ticker-up="${i}"${i === 0 ? ' disabled' : ''} title="Move earlier">&uarr;</button>
+<button class="sync-btn sm inline" type="button" data-ticker-down="${i}"${i === items.length - 1 ? ' disabled' : ''} title="Move later">&darr;</button>
 <span class="del-x" data-ticker-del="${i}" title="Remove">&times;</span>
 </td>
 </tr>`).join('')}</tbody></table>`;
@@ -1316,8 +1316,8 @@ keyBox.hidden = false;
 keyBox.innerHTML = `<div class="settings-note" style="margin:10px 0 4px;">${escapeHtml(intro)}</div>
 <div style="font-family:monospace;font-size:15px;word-break:break-all;user-select:all;">${escapeHtml(crypt.formatKey(key))}</div>
 <div class="sync-row" style="margin-top:6px;">
-<button class="sync-btn sm" type="button" id="encrypt-copy-key">Copy</button>
-<button class="sync-btn sm" type="button" id="encrypt-hide-key">Hide</button>
+<button class="sync-btn sm inline" type="button" id="encrypt-copy-key">Copy</button>
+<button class="sync-btn sm inline" type="button" id="encrypt-hide-key">Hide</button>
 </div>
 <div class="settings-note" style="margin:6px 0 0;">Put it in your password manager. It is the only copy that does not live on a device you own, and nothing can reissue it.</div>`;
 keyBox.querySelector('#encrypt-copy-key').addEventListener('click', async () => {
@@ -1414,7 +1414,7 @@ codeBox.hidden = false;
 codeBox.innerHTML = `<div class="settings-note" style="margin:10px 0 4px;">On the other device, open this link — or go to its Settings and type the code.</div>
 <div style="font-size:26px;font-weight:600;letter-spacing:3px;font-family:monospace;">${escapeHtml(res.code)}</div>
 <div class="sync-row" style="margin-top:6px;">
-<button class="sync-btn sm" type="button" id="pair-copy-link">Copy link</button>
+<button class="sync-btn sm inline" type="button" id="pair-copy-link">Copy link</button>
 <span class="sync-status" id="pair-countdown"></span>
 </div>
 <div class="settings-note" style="margin:6px 0 0;">Safe to message to yourself: it works once and then expires. The link carries the sync URL too, which isn't secret.</div>`;

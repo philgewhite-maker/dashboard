@@ -236,9 +236,9 @@ return `<div class="setfinder-row" style="border-top:1px solid var(--line);paddi
 ${knickersHtml}
 ${extrasHtml}
 <div class="sync-row" style="margin-top:4px;">
-<a class="sync-btn sm" href="${escapeHtml(r.bra.url)}" target="_blank" rel="noopener noreferrer">View</a>
-<button class="sync-btn sm" type="button" data-setfinder-add="${escapeHtml(r.bra.url)}" ${added ? 'disabled' : ''}>${added ? 'Added' : 'Add as want'}</button>
-<button class="sync-btn sm" type="button" data-setfinder-add-edit="${escapeHtml(r.bra.url)}" title="Create the want, then open it in Tasks to set a context, file it under a project, add a due date etc.">Add &amp; edit…</button>
+<a class="sync-btn sm inline" href="${escapeHtml(r.bra.url)}" target="_blank" rel="noopener noreferrer">View</a>
+<button class="sync-btn sm inline" type="button" data-setfinder-add="${escapeHtml(r.bra.url)}" ${added ? 'disabled' : ''}>${added ? 'Added' : 'Add as want'}</button>
+<button class="sync-btn sm inline" type="button" data-setfinder-add-edit="${escapeHtml(r.bra.url)}" title="Create the want, then open it in Tasks to set a context, file it under a project, add a due date etc.">Add &amp; edit…</button>
 </div>
 </div>`;
 }
@@ -260,8 +260,8 @@ function elsewhereHtml(search) {
 const e = search.elsewhere;
 if (!e) return `<div style="margin-top:10px;"><button class="sync-btn sm" type="button" data-setfinder-elsewhere>&#128269; Also check eBay &amp; department stores</button></div>`;
 if (e.status === 'running') return `<div style="margin-top:10px;" class="settings-note">Checking eBay and department stores…</div>`;
-if (e.status === 'error') return `<div style="margin-top:10px;" class="settings-note">Couldn't check elsewhere: ${escapeHtml(e.error)} <button class="sync-btn sm" type="button" data-setfinder-elsewhere>Retry</button></div>`;
-return `<div style="margin-top:10px;"><strong>Elsewhere</strong> <button class="sync-btn sm" type="button" data-setfinder-elsewhere title="Re-check">&#8635;</button>
+if (e.status === 'error') return `<div style="margin-top:10px;" class="settings-note">Couldn't check elsewhere: ${escapeHtml(e.error)} <button class="sync-btn sm inline" type="button" data-setfinder-elsewhere>Retry</button></div>`;
+return `<div style="margin-top:10px;"><strong>Elsewhere</strong> <button class="sync-btn sm inline" type="button" data-setfinder-elsewhere title="Re-check">&#8635;</button>
 ${e.results.length ? e.results.map(elsewhereRowHtml).join('') : '<div class="settings-note" style="margin:4px 0;">Nothing found on eBay or in a department store right now.</div>'}
 </div>`;
 }

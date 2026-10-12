@@ -428,7 +428,7 @@ ${incomingGrid}
 ${candidates.length ? candidates.map(candidateRowHtml).join('') : '<div class="settings-note" style="margin:4px 0;">No name-based candidates found.</div>'}
 <div class="sync-row" style="margin:4px 0;">
 <input type="text" autocomplete="off" class="tag-add-input" id="tinder-more-info-new-name" value="${escapeHtml(pending.name || '')}" placeholder="Real name" title="What to call her here. Defaults to the name on the profile — change it when that's an alias, and the profile name is kept so the next import still matches." style="max-width:150px;">
-<button class="sync-btn sm" type="button" id="tinder-more-info-newconn">+ New connection</button>
+<button class="sync-btn sm inline" type="button" id="tinder-more-info-newconn">+ New connection</button>
 </div>
 <div class="sync-row" style="margin-top:10px;">
 <button class="sync-btn" type="button" id="tinder-more-info-close">Close</button>

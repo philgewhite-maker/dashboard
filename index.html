@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v550</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v551</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -106,7 +106,7 @@
 <input type="text" autocomplete="off" class="tag-add-input" id="airbnb-add-name" placeholder="Who, e.g. Plumber" style="max-width:150px;">
 <input type="date" id="airbnb-add-from" title="First day">
 <input type="date" id="airbnb-add-to" title="Last day — leave blank for a single day">
-<button class="sync-btn sm" type="button" id="airbnb-add-btn">Add booking</button>
+<button class="sync-btn sm inline" type="button" id="airbnb-add-btn">Add booking</button>
 <span class="sync-status" id="airbnb-add-status"></span>
 </div>
 <h3 style="margin:18px 0 6px;font-size:14px;">&#128273; Keys</h3>
@@ -378,7 +378,7 @@
 </select>
 <input type="number" step="0.01" id="letting-add-amount" class="settings-input" style="max-width:130px;" placeholder="Amount" title="For Payment and Adjustment this is what the balance moves by. For Earned (historic) it is the GROSS takings, and their share is applied.">
 <input type="text" id="letting-add-note" class="settings-input" style="max-width:220px;" placeholder="What it was for">
-<button class="sync-btn sm" id="letting-add-btn" type="button">Add</button>
+<button class="sync-btn sm inline" id="letting-add-btn" type="button">Add</button>
 <span class="sync-status" id="letting-add-status"></span>
 </div>
 <div class="settings-note" style="margin:6px 0 0;"><strong>Earned (historic)</strong> is for what a listing took before you started tracking it here: enter the <em>gross</em> figure and their share is applied, the same way a stay would. For the other two, a <strong>negative</strong> amount reduces what they owe and a positive increases it <div class="settings-note" style="margin:6px 0 0;">A payment to you is a <strong>negative</strong> amount; a correction upwards is positive. To wipe a balance, add the negative of it.</div>mdash; to wipe a balance, add the negative of it. The choice is only about what happened: a <strong>payment</strong> is money that reached you, an <strong>adjustment</strong> moves the balance without any. Months later that difference is the whole story, and the amount alone cannot tell you.</div>
@@ -2867,7 +2867,7 @@ Photos added before task attachments existed live only on the device that added 
 <div class="settings-note" style="margin:0 0 10px;">Each device can carry its own token instead of the shared secret, so one can be cut off without re-pairing the rest. Add a device here and nothing long-lived travels: the code expires in ten minutes and works once, which makes it safe to send however is convenient. Needs <code>pair.php</code> and <code>auth.php</code> on the server.</div>
 <div class="sync-row">
 <button class="sync-btn" id="pair-start-btn" type="button">Add a device&hellip;</button>
-<button class="sync-btn sm" id="pair-refresh-btn" type="button">Refresh list</button>
+<button class="sync-btn sm inline" id="pair-refresh-btn" type="button">Refresh list</button>
 <span class="sync-status" id="pair-status"></span>
 </div>
 <div id="pair-code-box" hidden></div>
@@ -2917,7 +2917,7 @@ Photos added before task attachments existed live only on the device that added 
 <div class="settings-note" style="margin:0 0 10px;color:var(--amber);">The server never sees the key, so it cannot reissue it. Lose it from every device and the document is gone, not just locked. Save the recovery key somewhere before you rely on this.</div>
 <div class="sync-row">
 <button class="sync-btn" id="encrypt-on-btn" type="button">Turn on encryption</button>
-<button class="sync-btn sm" id="encrypt-show-key-btn" type="button">Show recovery key</button>
+<button class="sync-btn sm inline" id="encrypt-show-key-btn" type="button">Show recovery key</button>
 <span class="sync-status" id="encrypt-status"></span>
 </div>
 <div id="encrypt-key-box" hidden></div>
@@ -2978,7 +2978,7 @@ Photos added before task attachments existed live only on the device that added 
 <option value="quote">Share or commodity</option>
 </select>
 <input type="text" id="ticker-add-value" class="settings-input" style="max-width:260px;" placeholder="Lisbon">
-<button class="sync-btn sm" id="ticker-add-btn" type="button">Add</button>
+<button class="sync-btn sm inline" id="ticker-add-btn" type="button">Add</button>
 <span class="sync-status" id="ticker-add-status"></span>
 </div>
 <div class="settings-note" style="margin:8px 0 0;">A currency pair is a code like <code>USD</code> or <code>JPY</code> &mdash; always against GBP. A share is a Yahoo Finance symbol: <code>DBK.DE</code>, <code>AAPL</code>, <code>GC=F</code> for gold, <code>BTC-GBP</code> for bitcoin.</div>
@@ -3175,7 +3175,7 @@ Same idea as Connections' ratings, a separate list (Taste/Health/Prep by default
 <div id="letting-tax-settings"></div>
 <div class="sync-row" style="margin-top:8px;">
 <input type="text" id="letting-tax-add-name" class="settings-input" style="max-width:160px;" placeholder="Name, e.g. Phil">
-<button class="sync-btn sm" id="letting-tax-add-btn" type="button">Add</button>
+<button class="sync-btn sm inline" id="letting-tax-add-btn" type="button">Add</button>
 </div>
 </div>
 </details>

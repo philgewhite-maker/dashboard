@@ -742,7 +742,7 @@ ${issues.length ? `<ul class="suggested-questions" title="Deterministic prompts,
 <input type="text" autocomplete="off" class="tag-add-input" placeholder="e.g. £200 on switching" data-switchbonus-desc="${a.id}" style="max-width:180px;">
 <input type="text" autocomplete="off" class="tag-add-input" placeholder="Amount, e.g. 200" data-switchbonus-amount="${a.id}" style="max-width:110px;">
 <select data-switchbonus-status="${a.id}">${SWITCH_BONUS_STATUSES.map((s) => `<option value="${s}">${s}</option>`).join('')}</select>
-<button class="sync-btn sm" type="button" data-switchbonus-add="${a.id}">Add</button>
+<button class="sync-btn sm inline" type="button" data-switchbonus-add="${a.id}">Add</button>
 </div>
 </div>
 <div class="account-field-row">
@@ -772,7 +772,7 @@ ${surplusDetailHtml(a)}
 <input type="text" autocomplete="off" class="tag-add-input" placeholder="Amount, e.g. £2,000" data-bt-amount="${a.id}" style="max-width:140px;">
 <input type="date" data-bt-date="${a.id}" title="When the transfer happened">
 <input type="date" data-bt-deal-end="${a.id}" title="When this transfer's 0% period ends — each transfer onto the same card can have its own">
-<button class="sync-btn sm" type="button" data-bt-add="${a.id}">Add</button>
+<button class="sync-btn sm inline" type="button" data-bt-add="${a.id}">Add</button>
 </div>
 </div>
 <div class="account-field-full">
@@ -781,7 +781,7 @@ ${surplusDetailHtml(a)}
 <div class="sync-row" style="margin-top:6px;">
 <select data-sub-link-pick="${a.id}">${unlinkedSubscriptionOptionsHtml()}</select>
 <label style="font-size:12px;"><input type="checkbox" data-sub-link-free="${a.id}"> Free with this account</label>
-<button class="sync-btn sm" type="button" data-sub-link-add="${a.id}">Link</button>
+<button class="sync-btn sm inline" type="button" data-sub-link-add="${a.id}">Link</button>
 </div>
 </div>
 <div class="account-field-full">
@@ -792,7 +792,7 @@ ${surplusDetailHtml(a)}
 <input type="number" step="0.01" min="0" autocomplete="off" class="tag-add-input" placeholder="£/mo, e.g. 9.99" data-dd-amount="${a.id}" style="max-width:120px;">
 <select data-dd-method="${a.id}" title="How it's paid">${OUTGOING_METHODS.map((m) => `<option value="${m}">${m}</option>`).join('')}</select>
 <select data-dd-to-account="${a.id}" title="Pays into one of your own accounts instead of a third party -- e.g. a mortgage overpayment, or a Standing Order funding another tracked account (shows in the Ongoing diagram either way)">${otherAccountOptionsHtml(a.id, '')}</select>
-<button class="sync-btn sm" type="button" data-dd-add="${a.id}">Add</button>
+<button class="sync-btn sm inline" type="button" data-dd-add="${a.id}">Add</button>
 </div>
 </div>
 <div class="account-field-row">
