@@ -44,7 +44,7 @@ import { initTelegramFamily } from './features/telegramfamily.js';
 // Photos whose bytes aren't on this device are fetched from your own host.
 // Registered rather than imported: the implementation reaches state.js, and
 // state.js imports utils.js, so importing it back would be a cycle.
-import { setPhotoFallback, scrollAndFlash } from './utils.js';
+import { setPhotoFallback, scrollAndFlash, setPanelCollapsed } from './utils.js';
 import { serverPhotoUrl } from './files.js';
 // Imported for its side effect: it registers the Notion controls with
 // tasks.js, which keeps that dependency pointing one way.
@@ -72,7 +72,41 @@ const bar = document.querySelector('.tab-bar');
 if (bar) document.documentElement.style.setProperty('--tabbar-h', `${bar.offsetHeight}px`);
 }
 
+// Every top-level panel gets a collapse toggle, added here once rather
+// than per-feature -- all 46 of them share the exact same `.panel-head`-
+// as-first-child shape (confirmed against index.html), so one generic
+// pass covers all of them with no per-panel code to write or maintain.
+// `.panel-head` itself is static markup in every panel (a feature's own
+// render function only ever touches a count/list INSIDE it, never
+// replaces the head wholesale), so the toggle inserted here survives
+// every later re-render without needing to be re-added.
+function initPanelCollapse() {
+document.querySelectorAll('section.panel[id]').forEach((panel) => {
+const head = panel.querySelector(':scope > .panel-head');
+if (!head || head.querySelector(':scope > .panel-collapse-toggle')) return;
+const toggle = document.createElement('span');
+toggle.className = 'panel-collapse-toggle';
+toggle.title = 'Collapse/expand this panel';
+toggle.innerHTML = '&#9662;';
+head.insertBefore(toggle, head.firstChild);
+let collapsed = false;
+try { collapsed = localStorage.getItem(`panelCollapsed:${panel.id}`) === '1'; } catch (e) { /* ignore -- stays open */ }
+if (collapsed) setPanelCollapsed(panel, true);
+});
+// One delegated listener for all 46, same convention as the goto-link
+// handler just below -- survives every re-render with nothing extra to
+// wire up per panel.
+document.addEventListener('click', (e) => {
+const toggle = e.target.closest('.panel-collapse-toggle');
+if (!toggle) return;
+const panel = toggle.closest('section.panel[id]');
+if (!panel) return;
+setPanelCollapsed(panel, !panel.classList.contains('panel-collapsed'));
+});
+}
+
 function initTabs() {
+initPanelCollapse();
 document.querySelectorAll('[data-tab-btn]').forEach((btn) => {
 btn.addEventListener('click', () => switchTab(btn.dataset.tabBtn));
 });

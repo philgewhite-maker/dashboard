@@ -259,6 +259,17 @@ align-items:center;
 gap:9px;
 }
 .panel-head-total{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;}
+/* Same visual treatment as .leg-toggle (planner.js's own expand/collapse
+   chevron) -- kept as its own class rather than reused directly, since
+   every other repeated-shape class in this file is named for its own
+   feature, not shared across unrelated ones. */
+.panel-collapse-toggle{cursor:pointer;display:inline-flex;width:16px;justify-content:center;color:var(--muted);user-select:none;flex:0 0 auto;}
+.panel-collapse-toggle:hover{color:var(--ink);}
+/* Hides every direct child of a collapsed panel except its own .panel-head
+   -- the header stays, so the toggle itself (and the title/count/settings
+   links beside it) are always reachable to expand again. */
+section.panel.panel-collapsed{padding-bottom:22px;}
+section.panel.panel-collapsed > *:not(.panel-head){display:none;}
 .dot{width:9px;height:9px;border-radius:50%;display:inline-block;}
 .dot.sage{background:var(--sage);}
 .dot.slate{background:var(--slate);}

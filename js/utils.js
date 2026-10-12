@@ -664,9 +664,31 @@ box.addEventListener('click', () => box.remove());
 document.body.appendChild(box);
 }
 
+// Shared by app.js's panel-collapse-toggle click handler and by
+// scrollAndFlash's own auto-expand below, so the glyph swap and the
+// localStorage key can't drift out of sync between the two. Device-local
+// (not data.prefs) -- collapse state is a pure per-device UI convenience,
+// same reasoning LOCAL_SETTINGS_KEY elsewhere in this app already applies
+// to things that shouldn't sync.
+function setPanelCollapsed(panel, collapsed) {
+if (!panel) return;
+panel.classList.toggle('panel-collapsed', collapsed);
+const toggle = panel.querySelector(':scope > .panel-head > .panel-collapse-toggle');
+if (toggle) toggle.innerHTML = collapsed ? '&#9656;' : '&#9662;';
+try { localStorage.setItem(`panelCollapsed:${panel.id}`, collapsed ? '1' : '0'); } catch (e) { /* private browsing etc -- still works for this load */ }
+}
+
 function scrollAndFlash(selector) {
 const el = document.querySelector(selector);
 if (!el) return;
+// A collapsed panel (css/style.css's .panel-collapsed) hides every
+// child but its own header -- scrolling to something inside one would
+// otherwise silently do nothing, since a `display:none` element has no
+// box to scroll to. Same "don't land somewhere there's nothing to see"
+// reasoning app.js's own goto-link handler already applies to a
+// collapsed <details> ancestor.
+const panel = el.closest('section.panel.panel-collapsed');
+if (panel) setPanelCollapsed(panel, false);
 el.scrollIntoView({ behavior: 'smooth', block: 'center' });
 el.classList.add('flash-new');
 setTimeout(() => el.classList.remove('flash-new'), 1800);
@@ -1299,7 +1321,7 @@ return classified.every((c) => c.isScreenshot) && looksLikeSameScreenshotPieces(
 
 export {
 todayStr, daysAgoStr, dateStrAdd, unfoldIcsLines, parseIcsProperty, icsDateTime, parseLooseDateTime, last7Dates, uid, daysSince, daysUntil, foldDiacritics, MISSING_KEY_LINK_HTML, SYNC_LINK_HTML, NOTION_LINK_HTML, TELEGRAM_BOT_LINK_HTML, looksLikeUrl, prettyUrl, stripHtmlForExtraction,
-escapeHtml, decodeHtmlEntities, affiliateLink, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, buildFlagMatcher, applyFlagMatcher, knownCityMap, knownScalarValues, pickChipHtml, splitCsvLine, scrollAndFlash, bindForm, bindBackdropClose,
+escapeHtml, decodeHtmlEntities, setPanelCollapsed, affiliateLink, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, buildFlagMatcher, applyFlagMatcher, knownCityMap, knownScalarValues, pickChipHtml, splitCsvLine, scrollAndFlash, bindForm, bindBackdropClose,
 findMentions, COUNTRY_NAME_TO_NATIONALITY,
 resizeImageToBlob, fileToBase64, loadImage, cropThumbnailToBlob,
 hashFile, captureDateOf, betterCaptureDate, dateFromFilename,
