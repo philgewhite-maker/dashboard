@@ -732,20 +732,26 @@ splitContribution(listing, income * (nights / total)).forEach((c) => { addAmount
 });
 });
 
-// "Earned (historic)" ledger rows -- pre-tracking income typed in by
-// hand (initLetting()'s add-row, kind 'earned'). Deliberately excludes
-// 'accrual' (already counted above, since every accrual mirrors a
-// reservation's own income) and 'payment'/'adjustment' (balance moves,
-// not income). A hand-added row carries no listingId, only an ownerKey,
-// so it's attributed to whichever listing that owner currently has --
-// same one-owner-one-listing assumption balanceFor/grossFor already
-// make elsewhere in this file. baseStart (the normal rolling-15-month
+// "Earned (historic)" and "cancellation" ledger rows -- real income
+// that has no entry in data.airbnbReservations for the loop above to
+// count: 'earned' is pre-tracking income typed in by hand (initLetting
+// ()'s add-row), 'cancellation' is a payout whose reservation record is
+// gone by the time it posts (syncCancellationsFromEmail -- the ICS sync
+// deletes a cancelled reservation outright, there's nothing left for
+// the loop above to find). Deliberately excludes 'accrual' (already
+// counted above, since every accrual mirrors a reservation's own
+// income still present in airbnbReservations) and 'payment'/
+// 'adjustment' (balance moves, not income). A hand-added or
+// cancellation row carries no listingId, only an ownerKey, so it's
+// attributed to whichever listing that owner currently has -- same
+// one-owner-one-listing assumption balanceFor/grossFor already make
+// elsewhere in this file. baseStart (the normal rolling-15-month
 // start) is a real floor here, not just a default -- a historic entry
 // older than that is excluded rather than widening the chart back to
 // meet it, so the window stays a fixed 15 months regardless of how far
 // back the ledger goes.
 (data.lettingLedger || []).forEach((e) => {
-if (e.kind !== 'earned' || !e.gross || !e.date) return;
+if ((e.kind !== 'earned' && e.kind !== 'cancellation') || !e.gross || !e.date) return;
 const listing = listings.find((l) => ownerKeyFor(l) === e.ownerKey);
 if (!listing) return;
 // Optional startDate (letting-add-start-date input above): a historic
