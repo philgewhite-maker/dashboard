@@ -543,7 +543,7 @@ return `<span class="cal-badge cleaner-chip-form">
 ${label}:
 <input type="text" autocomplete="off" class="tag-add-input" placeholder="Who" data-airbnb-cleaner-name="${key}" style="max-width:90px;">
 <input type="date" class="tag-add-input" data-airbnb-cleaner-date="${key}" value="${escapeHtml(prefillDate)}" style="max-width:130px;">
-<button class="sync-btn sm" type="button" data-airbnb-cleaner-add="${key}">Add</button>
+<button class="sync-btn sm inline" type="button" data-airbnb-cleaner-add="${key}">Add</button>
 <span class="tag-x" data-airbnb-cleaner-cancel="${key}" title="Cancel">&times;</span>
 <span class="sync-status" data-airbnb-cleaner-status="${key}"></span>
 </span>`;
