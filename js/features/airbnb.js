@@ -13,7 +13,7 @@ import { escapeHtml, todayStr, dateStrAdd, uid, MISSING_KEY_LINK_HTML } from '..
 import { parseIcsReservations } from '../icsparse.js';
 import { fetchIcs } from '../files.js';
 import { canAttemptGoogleAction, hasCalendarWrite } from '../sync/googleauth.js';
-import { listCalendars, createEvent, findEvents } from '../googlecalendar.js';
+import { listCalendars, createEvent, findEvents, getEvent } from '../googlecalendar.js';
 
 // Same fixed palette every other coloured chip in the app already uses
 // (css/style.css's --X custom properties + .dot.X), plus blue/pink added
@@ -1384,6 +1384,39 @@ statusEl.textContent = `Couldn't push: ${err.message || err}`;
 }
 }
 
+// "Pushed ✓" used to mean only "a create call once succeeded" -- reported
+// directly as misleading once a booking's own event had genuinely
+// vanished from Calendar (deleted by hand, or any other reason outside
+// this app) while the dashboard kept showing Pushed forever, since
+// nothing ever checked back. Re-verifies every upcoming pushed
+// reservation's event still actually exists on each real Sync, and
+// reverts it to "needs pushing" (clearing googleEventId/
+// googleCalendarId, so pushReservation's own `if (reservation.
+// googleEventId) return` no longer blocks a re-push) if it's gone.
+// Scoped to upcoming reservations only (checkout >= today) -- a past
+// stay's event disappearing changes nothing worth re-pushing for.
+async function verifyPushedEvents() {
+const candidates = data.airbnbReservations.filter((r) => r.googleEventId && r.googleCalendarId && r.checkout >= todayStr());
+let missing = 0;
+for (const r of candidates) {
+try {
+const event = await getEvent(r.googleCalendarId, r.googleEventId);
+if (!event || event.status === 'cancelled') {
+r.googleEventId = '';
+r.googleCalendarId = '';
+missing++;
+}
+} catch (err) {
+// A real fetch failure (network, auth) says nothing about whether
+// the event still exists -- left alone rather than wrongly
+// un-pushing a booking just because this one check failed.
+console.error(`Verifying the calendar event for reservation ${r.id} failed:`, err);
+}
+}
+if (missing) queueSave();
+return { checked: candidates.length, missing };
+}
+
 // Populates the calendar picker from the real Google Calendar list.
 // Confirmed live: calling this once at page load (the original design
 // here) silently did nothing most of the time -- Google's silent
@@ -1437,6 +1470,10 @@ try {
 // match a cancellation email against it.
 const cancelResult = await syncCancellationsFromEmail();
 await syncAllAirbnbListings();
+// After the ICS sync, not before -- a reservation the feed just
+// removed as genuinely cancelled is gone from data.airbnbReservations
+// by now, so there's nothing left here to waste a calendar lookup on.
+const verifyResult = await verifyPushedEvents();
 await syncCleanerEvents();
 await syncExternalBookings();
 const guestResult = await syncGuestNamesFromEmail();
@@ -1456,7 +1493,10 @@ const guestNote = guestResult.filled
 const cancelNote = cancelResult.posted
 ? ` Posted ${cancelResult.posted} cancellation payout${cancelResult.posted === 1 ? '' : 's'} to <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#letting-panel">Letting income</span>.`
 : '';
-status.innerHTML = `Synced just now.${guestNote}${cancelNote}`;
+const verifyNote = verifyResult.missing
+? ` ${verifyResult.missing} calendar event${verifyResult.missing === 1 ? ' had' : 's had'} vanished from Calendar — marked as needing a push again.`
+: '';
+status.innerHTML = `Synced just now.${guestNote}${cancelNote}${verifyNote}`;
 } else {
 // The actual error, right here -- not just a count pointing at devtools
 // most people never open. Every failed listing likely has the SAME

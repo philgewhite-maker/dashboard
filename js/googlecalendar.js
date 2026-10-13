@@ -108,6 +108,22 @@ const json = await res.json();
 return json.items || [];
 }
 
+// A single event by id -- unlike findEvents' search-by-text above, this
+// checks whether a SPECIFIC previously-pushed event still genuinely
+// exists (airbnb.js's verifyPushedEvents, built after a reported case of
+// "Pushed ✓" staying shown long after the real event had vanished from
+// Calendar, with nothing in this app ever checking back). Returns null
+// for a real 404/410 (deleted) specifically, so a caller can tell
+// "confirmed gone" apart from any other failure (network, auth, a bad
+// calendar id) -- which should leave whatever it was checking alone, not
+// wrongly treat it as deleted over a transient error.
+async function getEvent(calendarId, eventId) {
+const res = await googleFetch(`${EVENTS_API}/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}?fields=id,status`);
+if (res.status === 404 || res.status === 410) return null;
+if (!res.ok) throw new Error(`Couldn't check calendar event: ${res.status}`);
+return res.json();
+}
+
 async function getUpcomingEvents(calendarId, count, daysAhead) {
 const params = new URLSearchParams({
 timeMin: new Date().toISOString(),
@@ -167,4 +183,4 @@ status[name] = { found: false, events: [], error: err.message, syncedAt };
 return status;
 }
 
-export { syncCalendars, listCalendars, createEvent, eventBody, findEvents };
+export { syncCalendars, listCalendars, createEvent, eventBody, findEvents, getEvent };
