@@ -4005,7 +4005,11 @@ max-width:none;
    unreadable — so on a narrow screen the table is simply wider than the
    panel, and this is where that is allowed to be true. */
 .letting-scroll{overflow-x:auto;}
-#letting-chart-canvas,#night-rate-chart-canvas{width:100%;height:100%;display:block;touch-action:none;}
+#letting-chart-canvas,#night-rate-chart-canvas,#night-rate-occupancy-canvas{width:100%;height:100%;display:block;touch-action:none;}
+.chart-canvas-wrap.compact{height:110px;}
+.chart-mode-toggle{display:flex;gap:6px;margin:0 0 8px;}
+.chart-mode-btn{font:inherit;font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--muted);cursor:pointer;}
+.chart-mode-btn.active{background:var(--ink);color:var(--paper);border-color:var(--ink);}
 .letting-chart-legend{display:flex;flex-direction:column;gap:6px;margin-bottom:8px;}
 .letting-chart-legend-item{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--muted);}
 .letting-chart-legend-line{width:12px;height:0;border-top:1.75px solid var(--ink);opacity:.55;flex:none;}

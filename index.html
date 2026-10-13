@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v570</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v571</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -405,10 +405,22 @@
 <div class="panel-head" style="margin:14px 0 6px;">
 <h2 style="font-size:13px;">Average night rate by listing</h2>
 </div>
-<div class="settings-note" style="margin:0 0 6px;">Gross minus the cleaning cost above (charged once, plus again per full week of the stay), divided by nights -- one line per listing, not stacked, since an average isn't something to add up across listings the way income is. Tick/untick below to choose which lines show.</div>
+<div class="settings-note" style="margin:0 0 6px;">Gross minus the cleaning cost above (charged once, plus again per full week of the stay), divided by nights, spread across every month a longer stay actually covers. Average: one line per listing. High/Low/Avg: one candle per ROOM per month (a room shared by two listings, like the En-Suite, counts as one) -- the vertical wick spans the cheapest to priciest stay that month, the tick marks the weighted average. Tick/untick below to choose which show.</div>
+<div class="chart-mode-toggle" id="night-rate-mode-toggle">
+<button type="button" class="chart-mode-btn active" data-night-rate-mode="average">Average</button>
+<button type="button" class="chart-mode-btn" data-night-rate-mode="candles">High / Low / Avg</button>
+</div>
 <div class="letting-chart-legend" id="night-rate-chart-legend"></div>
 <div class="chart-canvas-wrap">
 <canvas id="night-rate-chart-canvas"></canvas>
+</div>
+<div class="panel-head" style="margin:14px 0 6px;">
+<h2 style="font-size:13px;">Occupancy by room</h2>
+</div>
+<div class="settings-note" style="margin:0 0 6px;">Nights actually booked (including upcoming stays) as a share of the month -- a room shared by two listings, like the En-Suite, counts as occupied on a night either one has a guest, never more than 100%.</div>
+<div class="letting-chart-legend" id="night-rate-occupancy-legend" style="flex-direction:row;flex-wrap:wrap;"></div>
+<div class="chart-canvas-wrap compact">
+<canvas id="night-rate-occupancy-canvas"></canvas>
 </div>
 </div>
 </section>

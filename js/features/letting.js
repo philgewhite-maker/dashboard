@@ -1336,6 +1336,139 @@ nightRateSelectedListings.add(l.key);
 });
 }
 
+// A stay that actually spans more than one month should carry its rate
+// into EVERY month it covers, not land as a single spike in whichever
+// month its `date` field happens to be -- the same nightsByMonth
+// pro-rata the income chart above already applies to a reservation's
+// gross, applied here to a stay's NIGHTS (its weight in each month's
+// average) instead. The rate itself stays one number for the whole
+// stay either way (nightRateFromGrossNights divides by the whole
+// stay's own nights up front) -- what moves per month is only how much
+// weight that stay contributes once more than one stay shares a month.
+// An accrual's real checkin/checkout lives on its reservation, if
+// still on file; an "earned" (historic, hand-typed) row has its own
+// optional startDate for the same purpose. Neither present -- nothing
+// to spread across, so it stays a single-month point, same as before.
+function nightsByMonthForEntry(e) {
+if (e.kind === 'accrual' && e.reservationId) {
+const r = (data.airbnbReservations || []).find((x) => x.id === e.reservationId);
+if (r && r.checkin && r.checkout && r.checkout > r.checkin) return nightsByMonth(r.checkin, r.checkout);
+}
+if (e.kind === 'earned' && e.startDate && e.date && e.startDate < e.date) {
+return nightsByMonth(e.startDate, e.date);
+}
+const ym = (e.date || '').slice(0, 7);
+if (!ym || !e.nights) return { counts: new Map(), total: 0 };
+return { counts: new Map([[ym, e.nights]]), total: e.nights };
+}
+
+// A "Room" is two or more listings sharing a `colour` -- the same
+// physical let presented as separate listings (see blankAirbnbListing's
+// own comment on `colour`, state.js). Occupancy and the candle view
+// below both answer "is the ROOM full/what did the room go for", not
+// "is listing A full while listing B sits idle" -- not a real
+// distinction for the same physical space.
+function nightRateRooms() {
+const listings = data.airbnbListings || [];
+const byColour = new Map();
+listings.forEach((l) => {
+const colour = l.colour || 'slate';
+if (!byColour.has(colour)) byColour.set(colour, { key: colour, colour, labels: [], listingIds: [] });
+const g = byColour.get(colour);
+g.listingIds.push(l.id);
+g.labels.push(l.label || l.prefix || 'Listing');
+});
+return [...byColour.values()].map((g) => ({ key: g.key, colour: g.colour, listingIds: g.listingIds, label: roomLabelFromListingLabels(g.labels) }));
+}
+
+// "En-Suite - Phil" + "En-Suite - Lewis" -> "En-Suite" -- the shared
+// prefix before the " - Name" the two listings' own labels already
+// follow. Falls back to joining every label when they don't share one
+// (nothing real to shorten to) rather than guessing which one "wins".
+function roomLabelFromListingLabels(labels) {
+if (labels.length <= 1) return labels[0] || 'Room';
+const stripped = labels.map((l) => l.split(/\s+-\s+/)[0].trim());
+return stripped.every((s) => s === stripped[0]) ? stripped[0] : labels.join(' / ');
+}
+
+// High/low/avg per room per month -- the candle view. High and low are
+// a STAY's own flat rate (the whole-stay figure, same one the average
+// view plots), not a per-month-split rate -- a single stay spanning two
+// months contributes the SAME rate as its own high and low in both,
+// and only distinct stays sharing a room/month produce a real spread.
+function nightRateRoomStats(months, baseStart, endYm, rooms) {
+const listingToRoom = new Map();
+rooms.forEach((room) => room.listingIds.forEach((id) => listingToRoom.set(id, room.key)));
+const perRoomByMonth = new Map();
+rooms.forEach((room) => perRoomByMonth.set(room.key, new Map()));
+(data.lettingLedger || []).forEach((e) => {
+const rate = nightRateFor(e);
+const roomKey = listingToRoom.get(e.listingId);
+if (rate == null || !roomKey) return;
+const { counts, total } = nightsByMonthForEntry(e);
+if (!total) return;
+const byMonth = perRoomByMonth.get(roomKey);
+counts.forEach((nights, ym) => {
+if (ym < baseStart || ym > endYm) return;
+const bucket = byMonth.get(ym) || { net: 0, nights: 0, high: null, low: null };
+bucket.net += rate * nights;
+bucket.nights += nights;
+bucket.high = bucket.high == null ? rate : Math.max(bucket.high, rate);
+bucket.low = bucket.low == null ? rate : Math.min(bucket.low, rate);
+byMonth.set(ym, bucket);
+});
+});
+return rooms.map((room) => ({
+room,
+statsByMonth: months.map((ym) => {
+const b = perRoomByMonth.get(room.key).get(ym);
+if (!b || b.nights <= 0) return null;
+return { avg: b.net / b.nights, high: b.high, low: b.low };
+}),
+}));
+}
+
+// One room can only actually be occupied by one of its own listings on
+// any given night (it's the same physical space) -- a Set of occupied
+// ISO dates per room, not a per-listing sum, is what keeps two listings
+// for the same room from ever reading as more than 100% occupied.
+// Reads straight off data.airbnbReservations (not the ledger), so an
+// upcoming booked-but-not-yet-accrued stay still counts.
+function nightRateOccupancyData(months, baseStart, endYm, rooms) {
+const listingToRoom = new Map();
+rooms.forEach((room) => room.listingIds.forEach((id) => listingToRoom.set(id, room.key)));
+const occupiedDays = new Map();
+const perRoomMonthCount = new Map();
+rooms.forEach((room) => { occupiedDays.set(room.key, new Set()); perRoomMonthCount.set(room.key, new Map()); });
+(data.airbnbReservations || []).forEach((r) => {
+const roomKey = listingToRoom.get(r.listingId);
+if (!roomKey || !r.checkin || !r.checkout || r.checkout <= r.checkin) return;
+const seenDays = occupiedDays.get(roomKey);
+const start = new Date(`${r.checkin}T00:00:00`);
+const end = new Date(`${r.checkout}T00:00:00`);
+for (let t = start.getTime(); t < end.getTime(); t += DAY_MS) {
+const d = new Date(t);
+const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+if (ym < baseStart || ym > endYm) continue;
+const dateKey = `${ym}-${String(d.getDate()).padStart(2, '0')}`;
+if (seenDays.has(dateKey)) continue; // already counted via another listing of this same room on this day
+seenDays.add(dateKey);
+const byMonth = perRoomMonthCount.get(roomKey);
+byMonth.set(ym, (byMonth.get(ym) || 0) + 1);
+}
+});
+const daysInMonth = (ym) => { const [y, m] = ym.split('-').map(Number); return new Date(y, m, 0).getDate(); };
+return rooms.map((room) => ({
+room,
+pctByMonth: months.map((ym) => {
+const dim = daysInMonth(ym);
+if (!dim) return null;
+const occ = perRoomMonthCount.get(room.key).get(ym) || 0;
+return occ / dim;
+}),
+}));
+}
+
 function nightRateChartData() {
 const current = currentMonthYm();
 const baseStart = addMonths(current, -LETTING_CHART_MONTHS_BACK);
@@ -1344,22 +1477,24 @@ const months = monthRange(baseStart, endYm);
 const listings = nightRateListings();
 const perListingByMonth = new Map();
 listings.forEach((l) => perListingByMonth.set(l.key, new Map()));
-// Attributed to the ledger entry's own `date` (checkout, for an
-// accrual) whole, not pro-rated across months the way the income
-// chart splits a stay's gross -- a night rate is a per-stay figure,
-// not something that means anything split by the night.
 (data.lettingLedger || []).forEach((e) => {
 const rate = nightRateFor(e);
 if (rate == null || !e.listingId || !perListingByMonth.has(e.listingId)) return;
-const ym = (e.date || '').slice(0, 7);
-if (ym < baseStart || ym > endYm) return;
+const { counts, total } = nightsByMonthForEntry(e);
+if (!total) return;
 const byMonth = perListingByMonth.get(e.listingId);
+counts.forEach((nights, ym) => {
+if (ym < baseStart || ym > endYm) return;
 const bucket = byMonth.get(ym) || { net: 0, nights: 0 };
-bucket.net += rate * e.nights;
-bucket.nights += e.nights;
+bucket.net += rate * nights;
+bucket.nights += nights;
 byMonth.set(ym, bucket);
 });
-return { months, listings, perListingByMonth, nowIndex: months.indexOf(current) };
+});
+const rooms = nightRateRooms();
+const roomStats = nightRateRoomStats(months, baseStart, endYm, rooms);
+const occupancy = nightRateOccupancyData(months, baseStart, endYm, rooms);
+return { months, listings, perListingByMonth, rooms, roomStats, occupancy, nowIndex: months.indexOf(current) };
 }
 
 function renderNightRateChartLegend(listings) {
@@ -1381,6 +1516,45 @@ renderNightRateChart();
 
 let nightRateChartHoverIndex = null;
 let nightRateChartLastPlot = null;
+// 'average' (one line per listing, the original view) or 'candles'
+// (high/low/avg per ROOM per month -- asked for directly: a single
+// average line hides how wide a room's own rates actually ranged in a
+// given month, which candles show at a glance the way a line can't).
+let nightRateChartMode = 'average';
+let nightRateSelectedRooms = new Set();
+let nightRateKnownRoomKeys = new Set();
+function syncNightRateRoomSelection(rooms) {
+rooms.forEach((r) => {
+if (nightRateKnownRoomKeys.has(r.key)) return;
+nightRateKnownRoomKeys.add(r.key);
+nightRateSelectedRooms.add(r.key);
+});
+}
+function renderNightRateRoomLegend(rooms) {
+const el = document.getElementById('night-rate-chart-legend');
+if (!el) return;
+if (!rooms.length) { el.innerHTML = '<span class="settings-note" style="margin:0;">No listings set up yet.</span>'; return; }
+el.innerHTML = rooms.map((r) => `<label class="letting-chart-legend-item" style="cursor:pointer;">
+<input type="checkbox" data-night-rate-room="${escapeHtml(r.key)}"${nightRateSelectedRooms.has(r.key) ? ' checked' : ''}>
+<span class="dot ${escapeHtml(r.colour)}"></span>${escapeHtml(r.label)}
+</label>`).join('');
+el.querySelectorAll('[data-night-rate-room]').forEach((cb) => {
+cb.addEventListener('change', () => {
+const key = cb.dataset.nightRateRoom;
+if (cb.checked) nightRateSelectedRooms.add(key); else nightRateSelectedRooms.delete(key);
+renderNightRateChart();
+});
+});
+}
+
+let nightRateOccupancyHoverIndex = null;
+let nightRateOccupancyLastPlot = null;
+function renderNightRateOccupancyLegend(occupancy) {
+const el = document.getElementById('night-rate-occupancy-legend');
+if (!el) return;
+if (!occupancy.length) { el.innerHTML = '<span class="settings-note" style="margin:0;">No listings set up yet.</span>'; return; }
+el.innerHTML = occupancy.map((s) => `<span class="letting-chart-legend-item"><span class="dot ${escapeHtml(s.room.colour)}"></span>${escapeHtml(s.room.label)}</span>`).join('');
+}
 
 function drawNightRateChart(canvas, chartData) {
 const { months, listings: allListings, perListingByMonth, nowIndex } = chartData;
@@ -1535,13 +1709,283 @@ lines.forEach((ln, i) => ctx.fillText(ln, boxX + 8, boxY + 12 + i * 14));
 }
 }
 
+// High/low/avg per room, one candle per room per month -- the mirror
+// of drawNightRateChart's per-listing lines above, grouped side by side
+// within each month's column (same spacing approach as the occupancy
+// bars below) rather than overlapping, so two rooms' candles in the
+// same month never sit on top of each other.
+function drawNightRateCandleChart(canvas, chartData) {
+const { months, roomStats, nowIndex } = chartData;
+const rooms = roomStats.filter((s) => nightRateSelectedRooms.has(s.room.key));
+const dpr = window.devicePixelRatio || 1;
+const rect = canvas.getBoundingClientRect();
+const width = Math.max(1, Math.round(rect.width));
+const height = Math.max(1, Math.round(rect.height));
+if (!width || !height) return;
+canvas.width = Math.round(width * dpr);
+canvas.height = Math.round(height * dpr);
+const ctx = canvas.getContext('2d');
+ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+ctx.clearRect(0, 0, width, height);
+
+const lineColor = resolveColor('--line');
+const muted = resolveColor('--muted');
+const ink = resolveColor('--ink');
+const paper = resolveColor('--paper');
+
+const padLeft = 46, padRight = 10, padTop = 16, padBottom = 20;
+const plot = { x: padLeft, y: padTop, w: Math.max(10, width - padLeft - padRight), h: Math.max(10, height - padTop - padBottom) };
+
+const allValues = rooms.flatMap((s) => s.statsByMonth.filter(Boolean).flatMap((st) => [st.high, st.low]));
+const rawMax = Math.max(...allValues, 1);
+const rawMin = Math.min(...allValues, 0);
+const axisStep = niceLettingAxisStep((rawMax - Math.min(0, rawMin)) / 4);
+const axisTop = (Math.floor(rawMax / axisStep) + 1) * axisStep;
+const axisBottom = rawMin < 0 ? -(Math.floor(-rawMin / axisStep) + 1) * axisStep : 0;
+const span = axisTop - axisBottom || 1;
+const scaleY = (v) => plot.y + plot.h - ((v - axisBottom) / span) * plot.h;
+
+ctx.strokeStyle = lineColor;
+ctx.lineWidth = 1;
+ctx.fillStyle = muted;
+ctx.font = "10px 'Inter', sans-serif";
+ctx.textAlign = 'right';
+ctx.textBaseline = 'middle';
+for (let v = axisBottom; v <= axisTop + 0.001; v += axisStep) {
+const y = scaleY(v);
+ctx.beginPath(); ctx.moveTo(plot.x, y); ctx.lineTo(plot.x + plot.w, y); ctx.stroke();
+ctx.fillText(money0(v), plot.x - 6, y);
+}
+if (axisBottom < 0) {
+ctx.strokeStyle = muted;
+ctx.lineWidth = 1.5;
+const y0 = scaleY(0);
+ctx.beginPath(); ctx.moveTo(plot.x, y0); ctx.lineTo(plot.x + plot.w, y0); ctx.stroke();
+}
+
+const n = months.length;
+const bw = plot.w / n;
+
+if (nowIndex >= 0) {
+const nowX = plot.x + (nowIndex + 1) * bw;
+ctx.save();
+ctx.strokeStyle = muted;
+ctx.setLineDash([2, 3]);
+ctx.lineWidth = 1;
+ctx.beginPath(); ctx.moveTo(nowX, plot.y); ctx.lineTo(nowX, plot.y + plot.h); ctx.stroke();
+ctx.restore();
+}
+
+if (nightRateChartHoverIndex != null) {
+ctx.fillStyle = ink;
+ctx.globalAlpha = 0.05;
+ctx.fillRect(plot.x + nightRateChartHoverIndex * bw, plot.y, bw, plot.h);
+ctx.globalAlpha = 1;
+}
+
+// A vertical high-low wick (2px, the same line weight the average
+// view's own lines use) plus a short horizontal tick at the weighted
+// average -- not open/close candlesticks (there's no "open" for a
+// night rate), just the three numbers that matter here.
+const roomCount = Math.max(1, rooms.length);
+const groupPad = 4;
+const gap = 2;
+const slot = (bw - groupPad * 2 - gap * (roomCount - 1)) / roomCount;
+const wickW = Math.max(2, Math.min(10, slot));
+rooms.forEach((s, ri) => {
+const color = resolveColor(listingColorVar(s.room.colour));
+s.statsByMonth.forEach((st, i) => {
+if (!st) return;
+const cx = plot.x + i * bw + groupPad + ri * (slot + gap) + slot / 2;
+const yHigh = scaleY(st.high);
+const yLow = scaleY(st.low);
+const yAvg = scaleY(st.avg);
+ctx.strokeStyle = color;
+ctx.lineWidth = 2;
+ctx.beginPath(); ctx.moveTo(cx, yHigh); ctx.lineTo(cx, Math.max(yHigh, yLow)); ctx.stroke();
+if (yLow !== yHigh) { ctx.beginPath(); ctx.moveTo(cx, yHigh); ctx.lineTo(cx, yLow); ctx.stroke(); }
+ctx.fillStyle = color;
+ctx.fillRect(cx - wickW / 2, yAvg - 1.5, wickW, 3);
+});
+});
+
+ctx.fillStyle = muted;
+ctx.font = "10px 'Inter', sans-serif";
+ctx.textAlign = 'center';
+ctx.textBaseline = 'top';
+const maxLabels = Math.max(3, Math.min(n, Math.floor(plot.w / 34)));
+const tickIndices = new Set();
+for (let k = 0; k < maxLabels; k++) tickIndices.add(Math.round((k / (maxLabels - 1)) * (n - 1)));
+if (nowIndex >= 0) {
+let nearestToNow = [...tickIndices].reduce((a, b) => Math.abs(b - nowIndex) < Math.abs(a - nowIndex) ? b : a);
+tickIndices.delete(nearestToNow);
+tickIndices.add(nowIndex);
+}
+months.forEach((ym, i) => {
+if (!tickIndices.has(i)) return;
+ctx.fillText(monthLabel(ym), plot.x + (i + 0.5) * bw, plot.y + plot.h + 4);
+});
+
+nightRateChartLastPlot = { plot, bw, months };
+
+if (nightRateChartHoverIndex != null && months[nightRateChartHoverIndex]) {
+const rows = rooms.map((s) => ({ label: s.room.label, st: s.statsByMonth[nightRateChartHoverIndex] })).filter((r) => r.st);
+if (rows.length) {
+const lines = [monthLabel(months[nightRateChartHoverIndex]), ...rows.map((r) => `${r.label}: ${money0(r.st.low)}–${money0(r.st.high)}, avg ${money0(r.st.avg)}`)];
+ctx.font = "10px 'Inter', sans-serif";
+const boxW = Math.max(...lines.map((ln) => ctx.measureText(ln).width)) + 16;
+const boxH = lines.length * 14 + 10;
+const cx = plot.x + (nightRateChartHoverIndex + 0.5) * bw;
+const boxX = Math.min(Math.max(cx - boxW / 2, plot.x), plot.x + plot.w - boxW);
+const boxY = plot.y + 2;
+ctx.fillStyle = paper;
+ctx.strokeStyle = lineColor;
+ctx.fillRect(boxX, boxY, boxW, boxH);
+ctx.strokeRect(boxX, boxY, boxW, boxH);
+ctx.fillStyle = ink;
+ctx.textAlign = 'left';
+ctx.textBaseline = 'alphabetic';
+lines.forEach((ln, i) => ctx.fillText(ln, boxX + 8, boxY + 12 + i * 14));
+}
+}
+}
+
+// A fixed 0-100% scale below the rate chart, one grouped bar per room
+// per month -- bounded by definition, so there's no "nice step" to
+// compute the way the rate axis above needs. Reads straight off
+// data.airbnbReservations via nightRateOccupancyData, independent of
+// whichever rate-chart mode is showing above it.
+function drawNightRateOccupancyChart(canvas, chartData) {
+const { months, occupancy, nowIndex } = chartData;
+const dpr = window.devicePixelRatio || 1;
+const rect = canvas.getBoundingClientRect();
+const width = Math.max(1, Math.round(rect.width));
+const height = Math.max(1, Math.round(rect.height));
+if (!width || !height) return;
+canvas.width = Math.round(width * dpr);
+canvas.height = Math.round(height * dpr);
+const ctx = canvas.getContext('2d');
+ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+ctx.clearRect(0, 0, width, height);
+
+const lineColor = resolveColor('--line');
+const muted = resolveColor('--muted');
+const ink = resolveColor('--ink');
+const paper = resolveColor('--paper');
+
+const padLeft = 46, padRight = 10, padTop = 10, padBottom = 20;
+const plot = { x: padLeft, y: padTop, w: Math.max(10, width - padLeft - padRight), h: Math.max(10, height - padTop - padBottom) };
+
+ctx.strokeStyle = lineColor;
+ctx.lineWidth = 1;
+ctx.fillStyle = muted;
+ctx.font = "10px 'Inter', sans-serif";
+ctx.textAlign = 'right';
+ctx.textBaseline = 'middle';
+[0, 0.5, 1].forEach((t) => {
+const y = plot.y + plot.h - t * plot.h;
+ctx.beginPath(); ctx.moveTo(plot.x, y); ctx.lineTo(plot.x + plot.w, y); ctx.stroke();
+ctx.fillText(`${Math.round(t * 100)}%`, plot.x - 6, y);
+});
+
+const n = months.length;
+const bw = plot.w / n;
+
+if (nowIndex >= 0) {
+const nowX = plot.x + (nowIndex + 1) * bw;
+ctx.save();
+ctx.strokeStyle = muted;
+ctx.setLineDash([2, 3]);
+ctx.lineWidth = 1;
+ctx.beginPath(); ctx.moveTo(nowX, plot.y); ctx.lineTo(nowX, plot.y + plot.h); ctx.stroke();
+ctx.restore();
+}
+
+if (nightRateOccupancyHoverIndex != null) {
+ctx.fillStyle = ink;
+ctx.globalAlpha = 0.05;
+ctx.fillRect(plot.x + nightRateOccupancyHoverIndex * bw, plot.y, bw, plot.h);
+ctx.globalAlpha = 1;
+}
+
+// Grouped, not stacked -- two rooms both full doesn't mean "200%", it
+// means two separate 100%s -- with a 2px surface gap between adjacent
+// rooms' bars, same spacer the candles above use.
+const roomCount = Math.max(1, occupancy.length);
+const groupPad = 4;
+const gap = 2;
+const barW = Math.max(2, (bw - groupPad * 2 - gap * (roomCount - 1)) / roomCount);
+occupancy.forEach((s, ri) => {
+const color = resolveColor(listingColorVar(s.room.colour));
+ctx.fillStyle = color;
+s.pctByMonth.forEach((pct, i) => {
+if (pct == null) return;
+const h = Math.max(0, Math.min(1, pct)) * plot.h;
+const x = plot.x + i * bw + groupPad + ri * (barW + gap);
+const y = plot.y + plot.h - h;
+ctx.fillRect(x, y, barW, h);
+});
+});
+
+ctx.fillStyle = muted;
+ctx.font = "10px 'Inter', sans-serif";
+ctx.textAlign = 'center';
+ctx.textBaseline = 'top';
+const maxLabels = Math.max(3, Math.min(n, Math.floor(plot.w / 34)));
+const tickIndices = new Set();
+for (let k = 0; k < maxLabels; k++) tickIndices.add(Math.round((k / (maxLabels - 1)) * (n - 1)));
+if (nowIndex >= 0) {
+let nearestToNow = [...tickIndices].reduce((a, b) => Math.abs(b - nowIndex) < Math.abs(a - nowIndex) ? b : a);
+tickIndices.delete(nearestToNow);
+tickIndices.add(nowIndex);
+}
+months.forEach((ym, i) => {
+if (!tickIndices.has(i)) return;
+ctx.fillText(monthLabel(ym), plot.x + (i + 0.5) * bw, plot.y + plot.h + 4);
+});
+
+nightRateOccupancyLastPlot = { plot, bw, months };
+
+if (nightRateOccupancyHoverIndex != null && months[nightRateOccupancyHoverIndex]) {
+const rows = occupancy.map((s) => ({ label: s.room.label, v: s.pctByMonth[nightRateOccupancyHoverIndex] })).filter((r) => r.v != null);
+if (rows.length) {
+const lines = [monthLabel(months[nightRateOccupancyHoverIndex]), ...rows.map((r) => `${r.label}: ${Math.round(r.v * 100)}%`)];
+ctx.font = "10px 'Inter', sans-serif";
+const boxW = Math.max(...lines.map((ln) => ctx.measureText(ln).width)) + 16;
+const boxH = lines.length * 14 + 10;
+const cx = plot.x + (nightRateOccupancyHoverIndex + 0.5) * bw;
+const boxX = Math.min(Math.max(cx - boxW / 2, plot.x), plot.x + plot.w - boxW);
+const boxY = plot.y + 2;
+ctx.fillStyle = paper;
+ctx.strokeStyle = lineColor;
+ctx.fillRect(boxX, boxY, boxW, boxH);
+ctx.strokeRect(boxX, boxY, boxW, boxH);
+ctx.fillStyle = ink;
+ctx.textAlign = 'left';
+ctx.textBaseline = 'alphabetic';
+lines.forEach((ln, i) => ctx.fillText(ln, boxX + 8, boxY + 12 + i * 14));
+}
+}
+}
+
 function renderNightRateChart() {
 const canvas = document.getElementById('night-rate-chart-canvas');
 if (!canvas) return;
 const chartData = nightRateChartData();
 syncNightRateSelection(chartData.listings);
+syncNightRateRoomSelection(chartData.roomStats.map((s) => s.room));
+if (nightRateChartMode === 'candles') {
+renderNightRateRoomLegend(chartData.roomStats.map((s) => s.room));
+drawNightRateCandleChart(canvas, chartData);
+} else {
 renderNightRateChartLegend(chartData.listings);
 drawNightRateChart(canvas, chartData);
+}
+const occCanvas = document.getElementById('night-rate-occupancy-canvas');
+if (occCanvas) {
+renderNightRateOccupancyLegend(chartData.occupancy);
+drawNightRateOccupancyChart(occCanvas, chartData);
+}
 }
 
 function initNightRateChart() {
@@ -1557,6 +2001,27 @@ nightRateChartHoverIndex = (i >= 0 && i < months.length) ? i : null;
 renderNightRateChart();
 });
 canvas.addEventListener('pointerleave', () => { nightRateChartHoverIndex = null; renderNightRateChart(); });
+document.querySelectorAll('[data-night-rate-mode]').forEach((btn) => {
+btn.addEventListener('click', () => {
+nightRateChartMode = btn.dataset.nightRateMode;
+document.querySelectorAll('[data-night-rate-mode]').forEach((b) => b.classList.toggle('active', b === btn));
+nightRateChartHoverIndex = null;
+renderNightRateChart();
+});
+});
+const occCanvas = document.getElementById('night-rate-occupancy-canvas');
+if (occCanvas) {
+occCanvas.addEventListener('pointermove', (evt) => {
+if (!nightRateOccupancyLastPlot) return;
+const r = occCanvas.getBoundingClientRect();
+const x = evt.clientX - r.left;
+const { plot, bw, months } = nightRateOccupancyLastPlot;
+const i = Math.floor((x - plot.x) / bw);
+nightRateOccupancyHoverIndex = (i >= 0 && i < months.length) ? i : null;
+renderNightRateChart();
+});
+occCanvas.addEventListener('pointerleave', () => { nightRateOccupancyHoverIndex = null; renderNightRateChart(); });
+}
 document.addEventListener('tabshown', (e) => { if (e.detail?.tab === 'finances') renderNightRateChart(); });
 window.addEventListener('resize', renderNightRateChart);
 renderNightRateChart();
