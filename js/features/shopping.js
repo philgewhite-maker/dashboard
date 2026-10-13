@@ -1231,10 +1231,16 @@ checkNowBtn.disabled = true;
 if (status) status.textContent = 'Checking…';
 const { forceSetCompletionSearch } = await import('./setcompletion.js');
 // forceSetCompletionSearch() re-renders Inventory itself on completion
-// (setcompletion.js's own last step), so this button's disabled/
-// "Checking…" state is just immediate feedback before that re-render
-// replaces the whole panel -- no second render needed here.
-await forceSetCompletionSearch();
+// (setcompletion.js's own last step) -- that REPLACES this button and
+// status span with fresh ones, so `status` above is a detached node by
+// the time the summary is known; reported directly as "how do I know
+// if this worked" when the old code just let "Checking…" vanish into
+// the re-render with nothing after it. The summary has to be written
+// onto a freshly queried status span, found in the live document, not
+// this closure's own stale reference.
+const summary = await forceSetCompletionSearch();
+const freshStatus = document.querySelector('[data-set-completion-status]');
+if (freshStatus && summary) freshStatus.textContent = summary;
 });
 el.querySelectorAll('[data-set-completion-dismiss]').forEach((btn) => {
 btn.addEventListener('click', () => {

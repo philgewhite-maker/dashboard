@@ -173,7 +173,7 @@ const sets = setsToCheck({ force });
 const { reportCheck } = await import('./sitehealth.js');
 if (!sets.length) {
 reportCheck('set-completion-search', true, 'Nothing due.');
-return;
+return 'Nothing was due to check yet.';
 }
 const bounds = data.prefs.setCompletionSizeBounds;
 const listingCache = new Map();
@@ -221,9 +221,11 @@ errorCount++;
 }
 }
 queueSave();
-reportCheck('set-completion-search', true, `Checked ${checkedCount} set(s), ${foundCount} found.${errorCount ? ` (${errorCount} error(s))` : ''}`);
+const summary = `Checked ${checkedCount} set(s), ${foundCount} found.${errorCount ? ` (${errorCount} error(s))` : ''}`;
+reportCheck('set-completion-search', true, summary);
 const { renderInventory } = await import('./shopping.js');
 renderInventory();
+return summary;
 }
 
 // "Check now" bypasses isDueForSet entirely (setsToCheck's own `force`
@@ -231,7 +233,7 @@ renderInventory();
 // established -- a manual click should always check something, not
 // silently no-op because nothing's technically due yet.
 async function forceSetCompletionSearch() {
-await runSetCompletionSearch({ force: true });
+return runSetCompletionSearch({ force: true });
 }
 
 export { runSetCompletionSearch, forceSetCompletionSearch, parseBraSize, sizeInBounds, confirmCandidate, intervalForAttempt };
