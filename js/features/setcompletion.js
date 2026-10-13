@@ -316,6 +316,45 @@ return runSetCompletionSearch({ force: true });
 // attempts/lastCheckedAt -- that bookkeeping belongs to the automatic
 // weekly cycle above; a one-off manual check shouldn't reset or advance
 // it.
+// Shared by both force functions below AND by the two description
+// functions further down -- a size range described in plain English,
+// the same text either search actually uses as its own hard
+// requirement (the eBay URL's own Band/Cup Size or Size params, the
+// department-store prompt's own "must fall within this range" line).
+function boundsTextFor(missingGroup, bounds) {
+return missingGroup === 'Bra'
+? `band ${bounds.braBandMin}-${bounds.braBandMax}, cup ${bounds.braCupMin}-${bounds.braCupMax}`
+: `size ${bounds.knickersMin}-${bounds.knickersMax}`;
+}
+
+// What the "Search eBay now"/"Search other retailers" buttons' own
+// status text shows WHILE running -- confirmed directly as not useful
+// when it only named the brand/style/colour and not what was actually
+// about to be searched: eBay's own structured Colour filter only
+// accepts ebay.simpleColour(set.colour) (see that function's own
+// comment), not the full raw value, so showing the raw colour there
+// claimed something the search wasn't actually doing. The retailer
+// search is different -- an AI prompt that's told the FULL colour text
+// is a hard requirement verbatim -- so that one shows the real raw
+// value, because that genuinely is what's sent. Both include the size
+// bounds too, the other half of "is this searching for the wrong
+// thing" that colour alone doesn't answer.
+function ebaySearchDescription(setKey) {
+const set = incompleteCoreSets().find((s) => s.key === setKey);
+if (!set) return 'it';
+const missingGroup = set.missing[0];
+const bounds = data.prefs.setCompletionSizeBounds;
+const colour = ebay.simpleColour(set.colour);
+return `${[set.brand, set.style, missingGroup].filter(Boolean).join(' ')}${colour ? `, ${colour}` : ''} (${boundsTextFor(missingGroup, bounds)})`;
+}
+function retailerSearchDescription(setKey) {
+const set = incompleteCoreSets().find((s) => s.key === setKey);
+if (!set) return 'it';
+const missingGroup = set.missing[0];
+const bounds = data.prefs.setCompletionSizeBounds;
+return `${[set.brand, set.style, missingGroup].filter(Boolean).join(' ')}${set.colour ? `, ${set.colour}` : ''} (${boundsTextFor(missingGroup, bounds)})`;
+}
+
 async function forceEbaySearchForSet(setKey) {
 const set = incompleteCoreSets().find((s) => s.key === setKey);
 if (!set) return 'That set is no longer incomplete.';
@@ -341,9 +380,7 @@ const missingGroup = set.missing[0];
 if (!missingGroup) return 'Nothing missing on that set.';
 const bounds = data.prefs.setCompletionSizeBounds;
 const query = `${set.brand} ${set.style} ${missingGroup}`.trim();
-const boundsText = missingGroup === 'Bra'
-? `band ${bounds.braBandMin}-${bounds.braBandMax}, cup ${bounds.braCupMin}-${bounds.braCupMax}`
-: `size ${bounds.knickersMin}-${bounds.knickersMax}`;
+const boundsText = boundsTextFor(missingGroup, bounds);
 let result = null;
 try {
 const { searchDepartmentStoresForMissingSetPiece } = await import('../ai.js');
@@ -362,5 +399,5 @@ return result ? `Found at ${result.retailer || 'a retailer'}: ${result.name}.` :
 
 export {
 runSetCompletionSearch, forceSetCompletionSearch, forceEbaySearchForSet, forceRetailerSearchForSet,
-parseBraSize, sizeInBounds, confirmCandidate, intervalForAttempt,
+parseBraSize, sizeInBounds, confirmCandidate, intervalForAttempt, ebaySearchDescription, retailerSearchDescription,
 };

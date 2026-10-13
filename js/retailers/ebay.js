@@ -171,4 +171,4 @@ const lower = String(title || '').toLowerCase();
 return words.some((w) => new RegExp(`\\b${w.toLowerCase()}\\b`).test(lower));
 }
 
-export { braListingUrl, knickersListingUrl, listingItems, titleMatchesColour, priceNumber, BRA_CATEGORY, KNICKERS_CATEGORY };
+export { braListingUrl, knickersListingUrl, listingItems, titleMatchesColour, priceNumber, simpleColour, BRA_CATEGORY, KNICKERS_CATEGORY };

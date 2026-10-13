@@ -19,7 +19,7 @@
 // a link to buy it from the right place," not a manual step. The result is
 // persisted on the task itself (t.priceCheck), dated, with a Refresh button
 // to re-run it later — not the old in-memory, un-dated Map this used to be.
-import { data, queueSave, SHOPPING_CONTEXTS, unheldInventory, whoFits, inventorySets, incompleteCoreSets, whoFitsSet, blankInventoryItem, SET_CORE_GROUPS } from '../state.js';
+import { data, queueSave, SHOPPING_CONTEXTS, unheldInventory, whoFits, inventorySets, whoFitsSet, blankInventoryItem, SET_CORE_GROUPS } from '../state.js';
 import { escapeHtml, affiliateLink, daysUntil, daysSince, todayStr, MISSING_KEY_LINK_HTML, looksLikeUrl, bindBackdropClose, pickChipHtml, knownScalarValues, hydratePhotoBackgrounds } from '../utils.js';
 import { captureTask, revealTask } from './tasks.js';
 import { connectionChipHtml, bindConnectionChips, connectionPickerHtml, bindConnPickers, setConnPickerValue, sensitiveFieldsShown } from './connections.js';
@@ -1073,7 +1073,7 @@ const ago = days <= 0 ? 'today' : days === 1 ? '1 day ago' : `${days} days ago`;
 return `<div class="inv-fit-row">
 <a href="${escapeHtml(find.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(find.name || `${find.missingGroup} found`)}</a>
 <span class="tag-chip ${find.source === 'ebay' ? 'tag-chip-amber' : find.source === 'retailer' ? 'tag-chip-blue' : 'tag-chip-green'}">${escapeHtml(sourceLabel)}</span>
-${find.price ? `<strong>${escapeHtml(find.price)}</strong>` : ''}
+${find.price ? `<span class="chip-price">${escapeHtml(find.price)}</span>` : ''}
 ${find.condition ? `<span class="tag-chip">${escapeHtml(find.condition)}</span>` : ''}
 <span class="settings-note" style="margin:0;">found ${ago}</span>
 <button type="button" class="todo-add-btn" data-set-completion-dismiss="${escapeHtml(find.id)}">Dismiss</button>
@@ -1373,25 +1373,22 @@ if (freshStatus && summary) freshStatus.textContent = summary;
 // straight into one.
 const freshForceStatusFor = (key) => [...document.querySelectorAll('[data-set-completion-force-status]')].find((s) => s.dataset.setCompletionForceStatus === key);
 // "Searching eBay…" alone doesn't say what for -- confirmed directly as
-// not useful, since the missing piece/colour is exactly what you'd want
-// to double-check the search is actually chasing before it comes back.
-// Built from the same set the search itself reads (incompleteCoreSets),
-// not the ledger/inventory item -- a set's own brand/style/colour are
-// what tryEbayFallback/searchDepartmentStoresForMissingSetPiece build
-// their own query from.
-function searchDescriptionForSet(key) {
-const set = incompleteCoreSets().find((s) => s.key === key);
-if (!set) return 'it';
-const missingGroup = set.missing[0];
-return [set.brand, set.style, missingGroup, set.colour].filter(Boolean).join(' ');
-}
+// not useful, since the missing piece/colour/size range is exactly what
+// you'd want to double-check the search is actually chasing before it
+// comes back. The description text comes from setcompletion.js itself
+// (ebaySearchDescription/retailerSearchDescription), not rebuilt here --
+// that module is what actually knows what each search really sends (the
+// eBay one resolves the owned item's colour down to the single simple
+// value eBay's own filter accepts, which can differ from the raw text;
+// the retailer one sends the raw text verbatim to the AI prompt instead,
+// so its description shows that).
 el.querySelectorAll('[data-set-completion-force-ebay]').forEach((btn) => {
 btn.addEventListener('click', async () => {
 const key = btn.dataset.setCompletionForceEbay;
 const status = freshForceStatusFor(key);
 btn.disabled = true;
-if (status) status.textContent = `Searching eBay for ${searchDescriptionForSet(key)}…`;
-const { forceEbaySearchForSet } = await import('./setcompletion.js');
+const { forceEbaySearchForSet, ebaySearchDescription } = await import('./setcompletion.js');
+if (status) status.textContent = `Searching eBay for ${ebaySearchDescription(key)}…`;
 // Same stale-reference reasoning as the Check-now button above --
 // forceEbaySearchForSet() re-renders Inventory itself, so the
 // summary has to land on a freshly re-queried status span.
@@ -1405,8 +1402,8 @@ btn.addEventListener('click', async () => {
 const key = btn.dataset.setCompletionForceRetailer;
 const status = freshForceStatusFor(key);
 btn.disabled = true;
-if (status) status.textContent = `Searching other retailers for ${searchDescriptionForSet(key)}…`;
-const { forceRetailerSearchForSet } = await import('./setcompletion.js');
+const { forceRetailerSearchForSet, retailerSearchDescription } = await import('./setcompletion.js');
+if (status) status.textContent = `Searching other retailers for ${retailerSearchDescription(key)}…`;
 const summary = await forceRetailerSearchForSet(key);
 const freshStatus = freshForceStatusFor(key);
 if (freshStatus && summary) freshStatus.textContent = summary;
