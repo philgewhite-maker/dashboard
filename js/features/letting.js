@@ -405,7 +405,10 @@ const nightRateHtml = nightRate != null
 ? ` <span class="letting-gross" title="${escapeHtml(`${e.nights} night${e.nights === 1 ? '' : 's'}, after cleaning cost`)}">${escapeHtml(`${money(nightRate)}/night`)}</span>`
 : '';
 return `<tr>
-<td style="white-space:nowrap;"><input type="date" class="settings-input" style="max-width:130px;" data-letting-date="${escapeHtml(e.id)}" value="${escapeHtml(e.date || '')}" title="Edit retrospectively to the real Airbnb payout date, if it differs from checkout -- this is what tax-year grouping below uses.">${e.kind === 'earned' ? `<input type="date" class="settings-input" style="max-width:130px;margin-top:3px;" data-letting-start-date="${escapeHtml(e.id)}" value="${escapeHtml(e.startDate || '')}" title="Optional -- only if this booking ran longer than one month. When set, the chart above splits the gross across every month from here to the date on the left (same pro-rata-by-night split a real reservation's own checkin/checkout already gets), instead of landing as one spike in a single month.">` : ''}${(e.kind === 'accrual' || e.kind === 'earned') ? `<input type="number" min="0" step="1" class="settings-input" style="max-width:70px;margin-top:3px;" data-letting-nights="${escapeHtml(e.id)}" value="${e.nights || ''}" placeholder="Nights" title="Nights this stay covered -- used for the average night rate. Filled in automatically when the reservation was still on file at accrual time; type it in for an older row that's missing it.">` : ''}</td>
+<td style="white-space:nowrap;"><input type="date" class="settings-input" style="max-width:130px;" data-letting-date="${escapeHtml(e.id)}" value="${escapeHtml(e.date || '')}" title="Edit retrospectively to the real Airbnb payout date, if it differs from checkout -- this is what tax-year grouping below uses.">${e.kind === 'earned' ? `<input type="date" class="settings-input" style="max-width:130px;margin-top:3px;" data-letting-start-date="${escapeHtml(e.id)}" value="${escapeHtml(e.startDate || '')}" title="Optional -- only if this booking ran longer than one month. When set, the chart above splits the gross across every month from here to the date on the left (same pro-rata-by-night split a real reservation's own checkin/checkout already gets), instead of landing as one spike in a single month.">` : ''}${(e.kind === 'accrual' || e.kind === 'earned') ? `<input type="number" min="0" step="1" class="settings-input" style="max-width:70px;margin-top:3px;" data-letting-nights="${escapeHtml(e.id)}" value="${e.nights || ''}" placeholder="Nights" title="Nights this stay covered -- used for the average night rate. Filled in automatically when the reservation was still on file at accrual time; type it in for an older row that's missing it.">` : ''}${(e.kind === 'earned' && !e.listingId) ? `<select class="settings-input" style="max-width:150px;margin-top:3px;" data-letting-listing="${escapeHtml(e.id)}" title="Which listing this stay was for -- a manually-added row has no listing on it yet, so it's left out of the average night-rate chart above (which groups by listing) until this is set.">
+<option value="">Listing…</option>
+${(data.airbnbListings || []).map((l) => `<option value="${escapeHtml(l.id)}">${escapeHtml(l.label || l.prefix || 'Listing')}</option>`).join('')}
+</select>` : ''}</td>
 <td>${escapeHtml(e.note || e.kind)}${e.kind && e.kind !== 'accrual' ? ` <span class="letting-kind ${escapeHtml(e.kind)}">${escapeHtml(e.kind)}</span>` : ''}${
 // Shown from the FIELD rather than left inside the note, because your
 // own note replaces the default one — type "Bathilde" and the £419 it
@@ -454,6 +457,15 @@ const entry = (data.lettingLedger || []).find((e) => e.id === input.dataset.lett
 if (!entry) return;
 const n = Number(input.value);
 entry.nights = Number.isFinite(n) && n > 0 ? Math.round(n) : 0;
+queueSave();
+renderLetting();
+});
+});
+el.querySelectorAll('[data-letting-listing]').forEach((sel) => {
+sel.addEventListener('change', () => {
+const entry = (data.lettingLedger || []).find((e) => e.id === sel.dataset.lettingListing);
+if (!entry) return;
+entry.listingId = sel.value || undefined;
 queueSave();
 renderLetting();
 });
