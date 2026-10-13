@@ -20,7 +20,7 @@
 // persisted on the task itself (t.priceCheck), dated, with a Refresh button
 // to re-run it later — not the old in-memory, un-dated Map this used to be.
 import { data, queueSave, SHOPPING_CONTEXTS, unheldInventory, whoFits, inventorySets, whoFitsSet, blankInventoryItem, SET_CORE_GROUPS } from '../state.js';
-import { escapeHtml, affiliateLink, daysUntil, daysSince, todayStr, MISSING_KEY_LINK_HTML, looksLikeUrl, bindBackdropClose, pickChipHtml, knownScalarValues, hydratePhotoBackgrounds } from '../utils.js';
+import { escapeHtml, affiliateLink, daysUntil, daysSince, todayStr, MISSING_KEY_LINK_HTML, looksLikeUrl, bindBackdropClose, pickChipHtml, knownScalarValues, hydratePhotoBackgrounds, resizeImageToBlob, openLightbox } from '../utils.js';
 import { captureTask, revealTask } from './tasks.js';
 import { connectionChipHtml, bindConnectionChips, connectionPickerHtml, bindConnPickers, setConnPickerValue, sensitiveFieldsShown } from './connections.js';
 import { runStockCheck, stockCheckHtml, adapterFor, seedWatchSpec, pasteStockFor, cashbackHtml, fetchPages, registerCashbackTracked, refreshCashbackRates, money } from './stockwatch.js';
@@ -1142,6 +1142,29 @@ const names = (cached.listings || []).map((l) => `${l.name}${l.condition ? ` (${
 return `<span class="settings-note" title="${escapeHtml(names)}" style="margin:0;">${escapeHtml(cached.estimate || 'No comparable eBay listings found.')}</span> <button type="button" class="todo-add-btn" data-inv-resale="${escapeHtml(o.id)}" title="Re-check">&#8635;</button>`;
 }
 
+// A real photo of the owned piece -- useful to eyeball against a
+// partial-match search result (e.g. a found eBay listing, or a product
+// page you've found yourself) rather than going on the typed
+// brand/style/colour fields alone. Click the thumbnail to view it full-
+// size; the camera icon re-picks/retakes one, the link icon saves one
+// FROM a given URL instead (the product's own page -- its og:image is
+// read off the fetched HTML, see catalogue.js's ogImageFrom -- or a
+// direct image link). Either way the bytes are saved via the same
+// storePhoto()/photoPut() every other photo in this app already goes
+// through, not just a link to the source, so it survives that page
+// changing or disappearing.
+function invPhotoHtml(o) {
+const thumb = o.photoId
+? `<div class="avatar sm inv-photo" data-photo-bg="${escapeHtml(o.photoId)}" data-inv-photo-view="${escapeHtml(o.id)}" title="View photo" style="cursor:pointer;"></div>`
+: `<div class="avatar sm inv-photo-empty" title="No photo yet"></div>`;
+return `<span class="inv-photo-wrap">
+${thumb}
+<label class="todo-add-btn" for="inv-photo-file-${escapeHtml(o.id)}" title="Take or choose a photo" style="cursor:pointer;">&#128247;</label>
+<input type="file" id="inv-photo-file-${escapeHtml(o.id)}" accept="image/*" style="display:none;" data-inv-photo-file="${escapeHtml(o.id)}">
+<button type="button" class="todo-add-btn" data-inv-photo-url="${escapeHtml(o.id)}" title="Save a photo from a URL -- the product's own page, or a direct image link">&#128279;</button>
+</span>`;
+}
+
 function inventoryHtml() {
 const items = unheldInventory();
 if (!items.length) return '<div class="empty">Nothing unassigned — everything recorded is with someone.</div>';
@@ -1155,6 +1178,7 @@ const linkHtml = o.link
 ? `<a class="inv-link" href="${escapeHtml(affiliateLink(o.link))}" target="_blank" rel="noopener noreferrer" title="Open the product page this was bought from">&#128279;</a>`
 : '';
 return `<div class="shop-row inv-row">
+${invPhotoHtml(o)}
 ${field(o, 'brand', 'Brand', '110px')}
 ${field(o, 'style', 'Style', '100px')}
 ${field(o, 'piece', 'Piece', '110px')}
@@ -1482,6 +1506,89 @@ renderInventory();
 el.querySelectorAll('[data-inv-resale]').forEach((btn) => {
 btn.addEventListener('click', () => checkEbayResaleValue(btn.dataset.invResale));
 });
+el.querySelectorAll('[data-inv-photo-view]').forEach((thumb) => {
+thumb.addEventListener('click', async () => {
+const row = data.inventory.find((o) => o.id === thumb.dataset.invPhotoView);
+if (!row || !row.photoId) return;
+const { photoUrl } = await import('../db.js');
+const url = await photoUrl(row.photoId);
+if (url) openLightbox(url);
+});
+});
+el.querySelectorAll('[data-inv-photo-file]').forEach((input) => {
+input.addEventListener('change', async () => {
+const itemId = input.dataset.invPhotoFile;
+const row = data.inventory.find((o) => o.id === itemId);
+const file = input.files && input.files[0];
+input.value = '';
+if (!row || !file) return;
+try {
+const blob = await resizeImageToBlob(file, 900, 0.85);
+const { storePhoto } = await import('../files.js');
+row.photoId = await storePhoto(blob);
+queueSave();
+renderInventory();
+} catch (err) {
+console.error('Inventory photo save failed:', err);
+}
+});
+});
+el.querySelectorAll('[data-inv-photo-url]').forEach((btn) => {
+btn.addEventListener('click', async () => {
+const itemId = btn.dataset.invPhotoUrl;
+const row = data.inventory.find((o) => o.id === itemId);
+if (!row) return;
+const input = (window.prompt('Image URL, or the product’s own page (its picture is read off the page automatically):') || '').trim();
+if (!input) return;
+btn.disabled = true;
+try {
+row.photoId = await saveInventoryPhotoFromUrl(input);
+queueSave();
+} catch (err) {
+console.error('Inventory photo-from-URL save failed:', err);
+window.alert(err.message || String(err));
+} finally {
+btn.disabled = false;
+renderInventory();
+}
+});
+});
+}
+
+// Given either a direct image URL or a product page URL, returns the
+// real image bytes. Tries it AS a direct image first (cheapest, and the
+// common shape for a URL copied via "Copy image address") -- the proxy
+// fetches ANY URL server-side regardless of what it actually is, so the
+// real tell isn't whether that fetch "succeeds" but whether what came
+// back is actually an image (its own Content-Type, carried onto the
+// Blob). Only once that's NOT an image does this fall back to treating
+// it as a page and reading its own og:image/twitter:image instead
+// (catalogue.js's ogImageFrom, the exact mechanism cover art already
+// uses) -- confirmed live against the real AP product page: its own
+// recipe-fetch.php-style fetch succeeds fine for a non-image URL too,
+// it just returns HTML text, so "didn't error" can't be the signal.
+async function fetchInventoryImageBlob(inputUrl) {
+const { fetchProxiedImage, fetchPageHtml } = await import('../files.js');
+let blob = null;
+try {
+const direct = await fetchProxiedImage(inputUrl);
+if (direct.type && direct.type.startsWith('image/')) blob = direct;
+} catch (err) { /* not fetchable as a direct image -- try it as a page below */ }
+if (!blob) {
+const html = await fetchPageHtml(inputUrl);
+const { ogImageFrom } = await import('../catalogue.js');
+const og = ogImageFrom(html, inputUrl);
+if (!og) throw new Error("Couldn't find a picture at that URL or on that page -- try right-clicking the picture itself and copying its direct image address instead.");
+blob = await fetchProxiedImage(og);
+}
+return blob;
+}
+
+async function saveInventoryPhotoFromUrl(inputUrl) {
+const { storePhoto } = await import('../files.js');
+const blob = await fetchInventoryImageBlob(inputUrl);
+const resized = await resizeImageToBlob(blob, 900, 0.85);
+return storePhoto(resized);
 }
 
 function initShopping() {

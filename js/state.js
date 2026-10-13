@@ -1460,6 +1460,14 @@ function blankInventoryItem(fields = {}) {
 return {
 id: uid(), brand: '', style: '', piece: '', size: '', colour: '',
 holderId: '', acquiredAt: '', fromTaskId: '', notes: '', link: '',
+// A real photo of the owned piece -- useful to eyeball against a
+// partial-match search result (same mechanism every other photo in
+// this app uses: js/db.js's photo store, via js/files.js's
+// storePhoto()/fetchProxiedImage()). Either taken/picked on-device or
+// saved FROM a given URL (the product's own page, or a direct image
+// link) -- saved, not just linked to, so it survives the source page
+// disappearing or changing.
+photoId: '',
 ...fields,
 };
 }
@@ -2461,6 +2469,7 @@ acquiredAt: o.acquiredAt || '', fromTaskId: o.fromTaskId || '', notes: o.notes |
 // offerToRecordOwned turned a done want into an inventory row, so an
 // item recorded that way has this blank too unless re-added.
 link: o.link || '',
+photoId: o.photoId || '',
 }));
 data.mailDismissed = data.mailDismissed.map((d) => ({ ...blankMailDismissal(), ...d }));
 

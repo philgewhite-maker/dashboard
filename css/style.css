@@ -3838,6 +3838,14 @@ padding:6px;
 .inv-fit-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:4px 0;min-width:0;}
 .inv-fit-row .todo-add-btn{font-size:10px;padding:2px 7px;}
 
+/* An owned item's own photo -- a rounded square, not .avatar's circle
+   (a product shot reads oddly cropped to a circle the way a face
+   doesn't). See invPhotoHtml, shopping.js. */
+.inv-photo-wrap{display:inline-flex;align-items:center;gap:3px;}
+.inv-photo{border-radius:6px;}
+.inv-photo-empty{border-radius:6px;background:var(--card);border:1px dashed var(--line);}
+.inv-photo-wrap .todo-add-btn{font-size:11px;padding:2px 6px;}
+
 /* Cashback routes, beside the product link at the moment of buying.
    Deliberately quiet -- a reminder of the right door, not a promotion.
    See js/cashback.js. */
