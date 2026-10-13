@@ -1205,6 +1205,20 @@ const checkinYear = subjectYear
 : (reservation ? new Date(`${reservation.checkin}T00:00:00`).getFullYear() : inferCancellationYear(startDay, startMonthIdx + 1, detail.date || m.date));
 const checkin = `${checkinYear}-${String(startMonthIdx + 1).padStart(2, '0')}-${String(startDay).padStart(2, '0')}`;
 
+// A content-level guard, not just the message-id `seen` set above --
+// confirmed live as a real gap: a cancellation posted once by hand
+// (console snippet, bypassing `seen` entirely) got posted a SECOND
+// time automatically once this function's own id-based listing match
+// no longer needed the reservation to survive. The same race is
+// possible between two devices syncing close together too, each
+// reading `seen` before the other's write has synced back. Skips a
+// cancellation payout that's already recorded for this owner, this
+// release date and this gross amount -- cheap, and a genuine second
+// cancellation on the exact same date for the exact same payout is
+// not a real scenario this app needs to support.
+const releaseDate = dateStrAdd(checkin, 1);
+const alreadyRecorded = data.lettingLedger.some((e) => e.kind === 'cancellation' && e.ownerKey === ownerKey && e.date === releaseDate && Math.abs((Number(e.gross) || 0) - payout) < 0.01);
+if (alreadyRecorded) { seen.add(m.id); continue; }
 const share = Number(listing.sharePct);
 const pct = Number.isFinite(share) ? share : 50;
 const amount = Math.round(payout * (pct / 100) * 100) / 100;
@@ -1214,7 +1228,7 @@ platform: 'airbnb',
 // Matches the email's own stated timing ("released 24 hours after
 // the check-in date"), not today -- so this lands in the right tax
 // year/chart month even when Sync runs well after the fact.
-date: dateStrAdd(checkin, 1),
+date: releaseDate,
 // Just the guest name -- the 'cancellation' kind badge already says
 // what this is, same as an 'earned' row's note is just the payer's
 // name with no "earned" repeated in the text itself.
