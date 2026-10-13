@@ -1398,45 +1398,69 @@ statusEl.textContent = `Couldn't push: ${err.message || err}`;
 // vanished from Calendar (deleted by hand, or any other reason outside
 // this app) while the dashboard kept showing Pushed forever, since
 // nothing ever checked back. Re-verifies every upcoming pushed
-// reservation's event still actually exists AND is still genuinely
-// ABOUT that reservation, on each real Sync, reverting it to "needs
+// reservation's event still actually exists, and reverts it to "needs
 // pushing" (clearing googleEventId/googleCalendarId, so
 // pushReservation's own `if (reservation.googleEventId) return` no
-// longer blocks a re-push) if either isn't true.
+// longer blocks a re-push) if it doesn't.
 //
-// The second check (dates still match) is not hypothetical -- confirmed
-// live as the real cause of a reported case ("Pushed ✓" with no
-// matching event anywhere on the real calendar): pushReservation's own
-// adoption step once matched a DIFFERENT, already-pushed booking on the
-// same listing whose dates fell inside this one's own +-2 day search
-// window (an ordinary case for back-to-back guests), silently linking
-// two different reservations to ONE calendar event. That event
-// genuinely exists and isn't cancelled, so the "still exists" check
-// alone says nothing is wrong -- only comparing the event's own dates
-// against the reservation's own dates catches it. Scoped to upcoming
-// reservations only (checkout >= today) -- a past stay's event
-// disappearing or having drifted changes nothing worth re-pushing for.
+// Also catches a real, confirmed-live conflict: pushReservation's own
+// adoption step once matched a DIFFERENT, already-pushed booking's
+// event (same listing, dates inside this one's own +-2 day search
+// window -- an ordinary case for back-to-back guests), silently
+// linking two different reservations to ONE event. That's detected for
+// free, with no network call, by simply noticing two reservations
+// claiming the SAME googleEventId -- unambiguous, since an id can only
+// really belong to one of them.
+//
+// Deliberately does NOT clear a UNIQUELY-claimed event just because its
+// dates no longer match the reservation's own -- confirmed live as a
+// real false positive otherwise, on an entirely different legitimate
+// case: an all-day event's end date is exclusive on Calendar but
+// eventDayRange() (correctly, for display) corrects that back to an
+// INCLUSIVE last night, while a reservation's own `checkout` field
+// stays exclusive -- comparing the two directly is comparing different
+// conventions and is off by a day for every genuinely-correct all-day
+// pushed/adopted event, not just a wrong one. A booking's dates can
+// also legitimately change after it was pushed (an ICS-synced
+// extension) with nobody re-pushing yet -- the event is still truly
+// ITS OWN, just stale, and this app has no way to update an existing
+// event's dates, so the right move is leaving the link alone, not
+// abandoning it and letting a re-push create a duplicate beside it.
+// Scoped to upcoming reservations only (checkout >= today) -- a past
+// stay's event disappearing or drifting changes nothing worth
+// re-pushing for.
 async function verifyPushedEvents() {
 const candidates = data.airbnbReservations.filter((r) => r.googleEventId && r.googleCalendarId && r.checkout >= todayStr());
+const byEventId = new Map();
+candidates.forEach((r) => {
+if (!byEventId.has(r.googleEventId)) byEventId.set(r.googleEventId, []);
+byEventId.get(r.googleEventId).push(r);
+});
 let missing = 0;
-for (const r of candidates) {
+for (const [eventId, group] of byEventId) {
+let event;
 try {
-const event = await getEvent(r.googleCalendarId, r.googleEventId);
-const gone = !event || event.status === 'cancelled';
-const mismatched = !gone && (() => {
-const { checkin: matchStart, checkout: matchEnd } = eventDayRange(event);
-return matchStart !== r.checkin || matchEnd !== r.checkout;
-})();
-if (gone || mismatched) {
-r.googleEventId = '';
-r.googleCalendarId = '';
-missing++;
-}
+event = await getEvent(group[0].googleCalendarId, eventId);
 } catch (err) {
 // A real fetch failure (network, auth) says nothing about whether
 // the event still exists -- left alone rather than wrongly
 // un-pushing a booking just because this one check failed.
-console.error(`Verifying the calendar event for reservation ${r.id} failed:`, err);
+console.error(`Verifying the calendar event ${eventId} failed:`, err);
+continue;
+}
+const gone = !event || event.status === 'cancelled';
+if (group.length > 1) {
+// A real conflict: clear it for every reservation except the one
+// (if any) whose own dates actually match the event's real ones.
+const range = gone ? null : eventDayRange(event);
+group.forEach((r) => {
+const keeps = !gone && range.checkin === r.checkin && range.checkout === r.checkout;
+if (!keeps) { r.googleEventId = ''; r.googleCalendarId = ''; missing++; }
+});
+} else if (gone) {
+group[0].googleEventId = '';
+group[0].googleCalendarId = '';
+missing++;
 }
 }
 if (missing) queueSave();
