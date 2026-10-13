@@ -1453,8 +1453,13 @@ holderId: '', acquiredAt: '', fromTaskId: '', notes: '', link: '',
 function blankSetCompletionFind(fields = {}) {
 return {
 id: uid(), setKey: '', brand: '', style: '', colour: '', missingGroup: '',
-source: 'agentprovocateur', // 'agentprovocateur' | 'ebay'
+source: 'agentprovocateur', // 'agentprovocateur' | 'ebay' | 'retailer'
 name: '', price: '', url: '', condition: '',
+// Only ever set for source:'retailer' (ai.js's
+// searchDepartmentStoresForMissingSetPiece) -- the specific department
+// store/retailer the AI search actually found it at, since that search
+// (unlike the AP/eBay ones) isn't scoped to one known site.
+retailer: '',
 foundAt: new Date().toISOString(), dismissed: false,
 ...fields,
 };

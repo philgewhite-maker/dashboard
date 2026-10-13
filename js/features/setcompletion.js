@@ -236,4 +236,58 @@ async function forceSetCompletionSearch() {
 return runSetCompletionSearch({ force: true });
 }
 
-export { runSetCompletionSearch, forceSetCompletionSearch, parseBraSize, sizeInBounds, confirmCandidate, intervalForAttempt };
+// Manual overrides for the two buttons on each incomplete set's own
+// card (shopping.js) -- reported directly as wanted, rather than
+// waiting for EBAY_FALLBACK_AFTER_ATTEMPTS or a weekly backoff to let
+// either search actually run. Deliberately don't touch searchesStore()'s
+// attempts/lastCheckedAt -- that bookkeeping belongs to the automatic
+// weekly cycle above; a one-off manual check shouldn't reset or advance
+// it.
+async function forceEbaySearchForSet(setKey) {
+const set = incompleteCoreSets().find((s) => s.key === setKey);
+if (!set) return 'That set is no longer incomplete.';
+const missingGroup = set.missing[0];
+if (!missingGroup) return 'Nothing missing on that set.';
+const bounds = data.prefs.setCompletionSizeBounds;
+const result = await tryEbayFallback(set, missingGroup, bounds);
+if (result) { upsertFind(set, missingGroup, { source: 'ebay', ...result }); queueSave(); }
+const { renderInventory } = await import('./shopping.js');
+renderInventory();
+return result ? `Found on eBay: ${result.name}.` : 'Nothing found on eBay matching the colour and size.';
+}
+
+// Same shape, a different search -- ai.js's
+// searchDepartmentStoresForMissingSetPiece, UK department stores and
+// other retailers, new stock rather than resale (see that function's
+// own comment for why it's a separate search from eBay above, not a
+// second attempt at the same one).
+async function forceRetailerSearchForSet(setKey) {
+const set = incompleteCoreSets().find((s) => s.key === setKey);
+if (!set) return 'That set is no longer incomplete.';
+const missingGroup = set.missing[0];
+if (!missingGroup) return 'Nothing missing on that set.';
+const bounds = data.prefs.setCompletionSizeBounds;
+const query = `${set.brand} ${set.style} ${missingGroup}`.trim();
+const boundsText = missingGroup === 'Bra'
+? `band ${bounds.braBandMin}-${bounds.braBandMax}, cup ${bounds.braCupMin}-${bounds.braCupMax}`
+: `size ${bounds.knickersMin}-${bounds.knickersMax}`;
+let result = null;
+try {
+const { searchDepartmentStoresForMissingSetPiece } = await import('../ai.js');
+result = await searchDepartmentStoresForMissingSetPiece(query, set.colour, boundsText);
+} catch (err) {
+console.error(`Retailer search failed for ${set.key}:`, err);
+const { renderInventory } = await import('./shopping.js');
+renderInventory();
+return 'Search failed -- see console.';
+}
+if (result) { upsertFind(set, missingGroup, { source: 'retailer', ...result }); queueSave(); }
+const { renderInventory } = await import('./shopping.js');
+renderInventory();
+return result ? `Found at ${result.retailer || 'a retailer'}: ${result.name}.` : 'Nothing found at other retailers matching the colour and size.';
+}
+
+export {
+runSetCompletionSearch, forceSetCompletionSearch, forceEbaySearchForSet, forceRetailerSearchForSet,
+parseBraSize, sizeInBounds, confirmCandidate, intervalForAttempt,
+};

@@ -1067,12 +1067,12 @@ console.error('Auto price-check failed, item stays without one until Search pric
 function setCompletionFindHtml(set) {
 const find = (data.setCompletionFinds || []).find((f) => f.setKey === set.key && !f.dismissed);
 if (!find) return '';
-const sourceLabel = find.source === 'ebay' ? 'eBay' : 'Agent Provocateur';
+const sourceLabel = find.source === 'ebay' ? 'eBay' : find.source === 'retailer' ? (find.retailer || 'Another retailer') : 'Agent Provocateur';
 const days = daysSince(find.foundAt);
 const ago = days <= 0 ? 'today' : days === 1 ? '1 day ago' : `${days} days ago`;
 return `<div class="inv-fit-row">
 <a href="${escapeHtml(find.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(find.name || `${find.missingGroup} found`)}</a>
-<span class="tag-chip ${find.source === 'ebay' ? 'tag-chip-amber' : 'tag-chip-green'}">${escapeHtml(sourceLabel)}</span>
+<span class="tag-chip ${find.source === 'ebay' ? 'tag-chip-amber' : find.source === 'retailer' ? 'tag-chip-blue' : 'tag-chip-green'}">${escapeHtml(sourceLabel)}</span>
 ${find.price ? `<strong>${escapeHtml(find.price)}</strong>` : ''}
 ${find.condition ? `<span class="tag-chip">${escapeHtml(find.condition)}</span>` : ''}
 <span class="settings-note" style="margin:0;">found ${ago}</span>
@@ -1099,10 +1099,20 @@ ${f.needed.filter((n) => !n.size).map((n) => `<span class="settings-note" style=
 <button type="button" class="todo-add-btn" data-inv-give-set="${escapeHtml(set.key)}:${escapeHtml(f.conn.id)}" title="Record that she now has all of it">Give set</button>
 </div>`).join('')
 : `<div class="settings-note" style="margin:0;">${set.items.length > 1 ? 'Nobody on file fits every piece.' : 'Nobody on file fits it.'}</div>`;
+// Manual overrides for the automatic weekly AP search/eBay-after-4-
+// attempts cycle above -- reported directly as wanted: "I want to know
+// right now", not wait on backoff. Only on an incomplete set -- a
+// complete one has nothing to search for.
+const forceSearchRow = set.complete ? '' : `<div class="sync-row" style="margin:4px 0;flex-wrap:wrap;">
+<button class="sync-btn sm inline" type="button" data-set-completion-force-ebay="${escapeHtml(set.key)}">Search eBay now</button>
+<button class="sync-btn sm inline" type="button" data-set-completion-force-retailer="${escapeHtml(set.key)}">Search other retailers</button>
+<span class="sync-status" data-set-completion-force-status="${escapeHtml(set.key)}"></span>
+</div>`;
 return `<div class="inv-set">
 <div class="inv-set-head"><strong>${escapeHtml(name)}</strong> ${head}</div>
 <div class="settings-note" style="margin:0 0 4px;">${pieces}</div>
 ${setCompletionFindHtml(set)}
+${forceSearchRow}
 ${body}
 </div>`;
 }).join('')}</div>`;
@@ -1241,6 +1251,39 @@ const { forceSetCompletionSearch } = await import('./setcompletion.js');
 const summary = await forceSetCompletionSearch();
 const freshStatus = document.querySelector('[data-set-completion-status]');
 if (freshStatus && summary) freshStatus.textContent = summary;
+});
+// One status span per set, shared by both buttons below (whichever ran
+// last shows its own result) -- matched by set key via dataset, not a
+// CSS attribute-value selector, since a set key (e.g. "agent
+// provocateur|lorna|black") isn't guaranteed quote/escape-safe to drop
+// straight into one.
+const freshForceStatusFor = (key) => [...document.querySelectorAll('[data-set-completion-force-status]')].find((s) => s.dataset.setCompletionForceStatus === key);
+el.querySelectorAll('[data-set-completion-force-ebay]').forEach((btn) => {
+btn.addEventListener('click', async () => {
+const key = btn.dataset.setCompletionForceEbay;
+const status = freshForceStatusFor(key);
+btn.disabled = true;
+if (status) status.textContent = 'Searching eBay…';
+const { forceEbaySearchForSet } = await import('./setcompletion.js');
+// Same stale-reference reasoning as the Check-now button above --
+// forceEbaySearchForSet() re-renders Inventory itself, so the
+// summary has to land on a freshly re-queried status span.
+const summary = await forceEbaySearchForSet(key);
+const freshStatus = freshForceStatusFor(key);
+if (freshStatus && summary) freshStatus.textContent = summary;
+});
+});
+el.querySelectorAll('[data-set-completion-force-retailer]').forEach((btn) => {
+btn.addEventListener('click', async () => {
+const key = btn.dataset.setCompletionForceRetailer;
+const status = freshForceStatusFor(key);
+btn.disabled = true;
+if (status) status.textContent = 'Searching other retailers…';
+const { forceRetailerSearchForSet } = await import('./setcompletion.js');
+const summary = await forceRetailerSearchForSet(key);
+const freshStatus = freshForceStatusFor(key);
+if (freshStatus && summary) freshStatus.textContent = summary;
+});
 });
 el.querySelectorAll('[data-set-completion-dismiss]').forEach((btn) => {
 btn.addEventListener('click', () => {

@@ -1252,6 +1252,10 @@ font-size:11px;
 .tag-chip.tag-chip-transferrable{border-style:dashed;font-style:italic;}
 .tag-chip.tag-chip-green{background:var(--sage-bg);border-color:var(--sage);color:var(--sage);}
 .tag-chip.tag-chip-amber{background:var(--amber-bg);border-color:var(--amber);color:var(--amber);}
+/* A set-completion find's source chip: green AP, amber eBay (both
+   above), blue for a department-store/other-retailer find -- its own
+   colour since it's a genuinely third source, not a shade of either. */
+.tag-chip.tag-chip-blue{background:var(--blue-bg);border-color:var(--blue);color:var(--blue);}
 /* Solid fill, not a tint mixed with --card -- this chip sits inside
    .details-grid's pink background, and a translucent-feeling red-on-white
    tint nearly disappeared against it. A solid var(--red) fill (same

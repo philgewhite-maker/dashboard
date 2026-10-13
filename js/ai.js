@@ -1410,6 +1410,50 @@ name: String(first.name || ''), price: String(first.price || ''), condition: Str
 } : null;
 }
 
+// A genuinely different question from searchEbayForMissingSetPiece just
+// above: that one is eBay-only, secondhand; this is "does a UK
+// department store still stock this exact missing piece new" -- reuses
+// the same store list and per-site-scoped-search/fetch-when-no-price
+// reasoning searchAgentProvocateurElsewhere already established for a
+// LOOSER, no-colour/size-lock version of "where else can this be
+// bought" (setfinder.js's general want search); this one keeps the
+// SAME colour/size hard requirements searchEbayForMissingSetPiece
+// uses, since completing one particular set is still the point, not
+// "anything similar in the range". eBay and other resale/marketplace
+// sites are explicitly excluded, so this stays a genuinely separate
+// search from the eBay button beside it in the UI, not a second
+// attempt at the same one.
+function departmentStoreMissingPieceSearchPrompt(query, colour, boundsText) {
+return `Find "${query}" in stock NEW at a UK department store or other retailer -- specifically check well-known UK stores that sometimes stock designer lingerie (e.g. House of Fraser, Selfridges, John Lewis, Harvey Nichols, Debenhams). Do NOT check eBay, Vinted, Depop or any other resale/marketplace site -- that's a separate search.
+
+HARD REQUIREMENTS:
+1. The colour must match "${colour}" exactly (or an unambiguous synonym/shade the listing itself states) -- do not report a listing in a different colour just because it's the same style.
+2. The size must fall within this range: ${boundsText}. Read the size from the listing's own title/description; skip anything outside this range or where the size can't be determined.
+3. Run a SEPARATE, SITE-SCOPED search per store rather than one combined general search, which tends to surface price-comparison pages instead of a real listing.
+4. A search snippet frequently carries no price. Whenever a promising page turns up with no price in the snippet, FETCH that exact page and read the real price and size availability off it.
+5. At most 3 results, best (closest match, then cheapest) first.
+
+For each result, note the retailer, the exact listing title, the price, and the direct URL.
+Respond with ONLY a JSON object, no other text, no markdown fences: {"results":[{"retailer":"","name":"","price":"","url":""}]}. Only include a result with a real URL you actually found via search or a fetch -- never invent one. If nothing matches both the colour and size range at any store, return {"results":[]}.`;
+}
+async function searchDepartmentStoresForMissingSetPiece(query, colour, boundsText) {
+const tools = [{
+type: 'web_search_20260209', name: 'web_search', max_uses: 4, allowed_callers: ['direct'],
+user_location: { type: 'approximate', country: 'GB' },
+}, {
+type: 'web_fetch_20260209', name: 'web_fetch', max_uses: 2, allowed_callers: ['direct'],
+}];
+const { data: raw } = await callAnthropic(
+[{ type: 'text', text: departmentStoreMissingPieceSearchPrompt(query, colour, boundsText) }],
+SHOPPING_SEARCH_MAX_TOKENS, SHOPPING_SEARCH_MODEL, 'Department-store missing-piece search', tools, SHOPPING_SEARCH_EFFORT,
+);
+const results = Array.isArray(raw && raw.results) ? raw.results : [];
+const first = results.find((r) => r && r.url);
+return first ? {
+name: String(first.name || ''), retailer: String(first.retailer || ''), price: String(first.price || ''), url: String(first.url || ''),
+} : null;
+}
+
 // A genuinely different question from scanSwitchOffers (switchoffers.js):
 // not "what NEW switch bonus am I eligible for", but "is one of my OWN
 // existing current accounts bringing so little ongoing benefit that
@@ -2376,7 +2420,7 @@ return { country: String((data && data.country) || '').trim() };
 export {
 MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot, quickScanScreenshot, scanForCaptureMarker,
 callTextJson, DEFAULT_MODEL, summarizeUsage, currentMonthKey, compareFaces,
-extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShoppingItem, searchAgentProvocateurElsewhere, searchEbayResaleEstimate, searchEbayForMissingSetPiece, analyseOngoingAccountValue, identifyProduct, translateText, romanizeName, parseCaptureIntent,
+extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShoppingItem, searchAgentProvocateurElsewhere, searchEbayResaleEstimate, searchEbayForMissingSetPiece, searchDepartmentStoresForMissingSetPiece, analyseOngoingAccountValue, identifyProduct, translateText, romanizeName, parseCaptureIntent,
 resolveUrlTitle, resolveJobPostingUrl, resolveBookDetails, resolveSeriesBooks,
 identifyCountry, extractWellnessScreenshot,
 extractTripScreenshot, extractMediaScreenshot, extractTripLegFromEmail, extractTaskFromEmail, extractDateEventFromEmail, extractMediaRecommendations, rankMediaCandidates, findLatestArticleUrl, extractSchoolCalendar,
