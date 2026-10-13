@@ -4,12 +4,15 @@
 // decided and shown. Same shape as schoolcalendar.js: a per-item
 // staleness gate inside run() rather than scheduled.js's own hours-scale
 // outer gate, so firing at ordinary app-open cadence costs nothing when
-// nothing's due. AI (the eBay fallback) only ever runs once a set's own
-// Agent Provocateur attempts have already backed off to monthly+ --
-// this is NOT a per-run AI call, it's rare by construction.
+// nothing's due. The eBay fallback (retailers/ebay.js) only runs once a
+// set's own Agent Provocateur attempts have already backed off to
+// monthly+ (see EBAY_FALLBACK_AFTER_ATTEMPTS) -- rare by construction,
+// though cheap regardless since, like the AP search above, it's a real
+// fetch against eBay's own structured search filters, not an AI call.
 import { data, queueSave, incompleteCoreSets, blankSetCompletionFind } from '../state.js';
 import { daysSince } from '../utils.js';
 import * as agentProvocateur from '../retailers/agentprovocateur.js';
+import * as ebay from '../retailers/ebay.js';
 import { fetchPages, pageMatchesWant, money } from './stockwatch.js';
 
 // AP has already backed off to monthly+ by the time this triggers (see
@@ -120,7 +123,14 @@ const maxIdx = CUP_ORDER.indexOf(bounds.braCupMax);
 if (cupIdx === -1 || minIdx === -1 || maxIdx === -1) return false;
 return parsed.band >= bounds.braBandMin && parsed.band <= bounds.braBandMax && cupIdx >= minIdx && cupIdx <= maxIdx;
 }
-const n = Number(String(sizeStr || '').trim());
+const raw = String(sizeStr || '').trim().toUpperCase();
+// A size can be tagged with AP's own number OR a generic S/M/L --
+// confirmed live against real eBay listings pairing both on the SAME
+// item ("SIZE 2 SMALL UK 8", "SIZE AP3 MEDIUM"). Approximate (a letter
+// spans more than one AP number), fine for a search a person still
+// reviews by hand before buying anything.
+const LETTER_SIZE = { S: 2, M: 3, L: 5 };
+const n = raw in LETTER_SIZE ? LETTER_SIZE[raw] : Number(raw);
 if (!Number.isFinite(n)) return false;
 return n >= bounds.knickersMin && n <= bounds.knickersMax;
 }
@@ -138,19 +148,29 @@ return page;
 }
 
 // Only reached once AP has already struck out enough times to be worth
-// the cost (see EBAY_FALLBACK_AFTER_ATTEMPTS) -- colour and the size
-// bounds are both stated as hard requirements in the prompt, since
-// searchEbayResaleEstimate's own prompt deliberately does the opposite
-// (resale estimates don't care about colour/size; completing one
-// specific set does).
+// the cost (see EBAY_FALLBACK_AFTER_ATTEMPTS). A real fetch against
+// eBay's own search filters (retailers/ebay.js), not an AI web search --
+// confirmed live those filters genuinely narrow by band/cup/colour
+// (bras) and size/colour (knickers), so there's no need to ask a model
+// to go looking. Still re-checked client-side (colour AND size) rather
+// than trusted blind -- eBay's own Colour filter leaks occasionally,
+// confirmed live, same discipline this file already applies to Agent
+// Provocateur's own results above.
 async function tryEbayFallback(set, missingGroup, bounds) {
-const { searchEbayForMissingSetPiece } = await import('../ai.js');
-const query = `${set.brand} ${set.style} ${missingGroup}`.trim();
-const boundsText = missingGroup === 'Bra'
-? `band ${bounds.braBandMin}-${bounds.braBandMax}, cup ${bounds.braCupMin}-${bounds.braCupMax}`
-: `size ${bounds.knickersMin}-${bounds.knickersMax}`;
+const keywords = `${set.brand} ${set.style}`.trim();
+const url = missingGroup === 'Bra'
+? ebay.braListingUrl({ keywords, colour: set.colour, bounds })
+: ebay.knickersListingUrl({ keywords, colour: set.colour, bounds });
 try {
-return await searchEbayForMissingSetPiece(query, set.colour, boundsText);
+const { pages } = await fetchPages([url]);
+const html = pages.get(url);
+if (!html) return null;
+const best = ebay.listingItems(html)
+.filter((item) => ebay.titleMatchesColour(item.title, set.colour))
+.filter((item) => sizeInBounds(missingGroup, item.size, bounds))
+.sort((a, b) => (a.price ?? Infinity) - (b.price ?? Infinity))[0];
+if (!best) return null;
+return { name: best.title, price: best.price != null ? money(best.price) : '', condition: best.condition, url: best.url };
 } catch (err) {
 console.error(`eBay fallback search failed for ${set.key}:`, err);
 return null;

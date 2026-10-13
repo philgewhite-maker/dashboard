@@ -1377,52 +1377,19 @@ estimate: String((raw && raw.estimate) || ''),
 
 // A genuinely different question from searchEbayResaleEstimate just
 // above: that one is "what would this style/piece sell for, any colour/
-// size" (a resale estimate, colour/size deliberately ignored); this is
-// "does THIS EXACT missing piece of a specific owned set exist on eBay
-// right now" (setcompletion.js's eBay fallback) -- colour and size are
-// hard constraints here, not noise to average over, since the whole
-// point is completing one particular set, not any set in that range.
-function ebayMissingPieceSearchPrompt(query, colour, boundsText) {
-return `Search eBay UK (ebay.co.uk) for "${query}" in the EXACT colour "${colour}" -- this is one specific missing piece of a lingerie set, not a general resale estimate.
-
-HARD REQUIREMENTS:
-1. The colour must match "${colour}" exactly (or an unambiguous synonym/shade the listing itself states) -- do not report a listing in a different colour just because it's the same style.
-2. The size must fall within this range: ${boundsText}. Read the size from the listing's own title/description; skip anything outside this range or where the size can't be determined.
-3. At most 3 results, best (closest match, then cheapest) first.
-4. Note condition exactly as the listing states it ("New with tags", "New without tags", "Used", etc.) -- never guess.
-5. Never fetch a listing page -- eBay's own search results already show price and condition for each one.
-
-Respond with ONLY a JSON object, no other text, no markdown fences: {"results":[{"name":"","price":"","condition":"","url":""}]}. Only include a result with a real URL you actually found via search. If nothing matches both the colour and size range, return {"results":[]}.`;
-}
-async function searchEbayForMissingSetPiece(query, colour, boundsText) {
-const tools = [{
-type: 'web_search_20260209', name: 'web_search', max_uses: 2, allowed_callers: ['direct'],
-user_location: { type: 'approximate', country: 'GB' },
-}];
-const { data: raw } = await callAnthropic(
-[{ type: 'text', text: ebayMissingPieceSearchPrompt(query, colour, boundsText) }],
-SHOPPING_SEARCH_MAX_TOKENS, SHOPPING_SEARCH_MODEL, 'eBay missing-piece search', tools, SHOPPING_SEARCH_EFFORT,
-);
-const results = Array.isArray(raw && raw.results) ? raw.results : [];
-const first = results.find((r) => r && r.url);
-return first ? {
-name: String(first.name || ''), price: String(first.price || ''), condition: String(first.condition || ''), url: String(first.url || ''),
-} : null;
-}
-
-// A genuinely different question from searchEbayForMissingSetPiece just
-// above: that one is eBay-only, secondhand; this is "does a UK
-// department store still stock this exact missing piece new" -- reuses
-// the same store list and per-site-scoped-search/fetch-when-no-price
-// reasoning searchAgentProvocateurElsewhere already established for a
-// LOOSER, no-colour/size-lock version of "where else can this be
-// bought" (setfinder.js's general want search); this one keeps the
-// SAME colour/size hard requirements searchEbayForMissingSetPiece
-// uses, since completing one particular set is still the point, not
-// "anything similar in the range". eBay and other resale/marketplace
-// sites are explicitly excluded, so this stays a genuinely separate
-// search from the eBay button beside it in the UI, not a second
-// attempt at the same one.
+// size" (a resale estimate, colour/size deliberately ignored); the
+// exact-missing-piece eBay search (setcompletion.js's eBay fallback,
+// "Search eBay now" in Inventory) used to live here too, but is now a
+// real fetch against eBay's own structured search filters
+// (retailers/ebay.js) rather than an AI web search -- confirmed live
+// those filters genuinely narrow by band/cup/colour (bras) and size/
+// colour (knickers), so there's no need to ask a model to go looking.
+// This one (department stores, not eBay) keeps the same colour/size
+// hard-requirement shape that search used, since completing one
+// particular set is still the point, not "anything similar in the
+// range" -- but AI stays the right tool here, unlike eBay: there's no
+// one well-understood site with known filters to fetch directly, just
+// "somewhere among several possible UK stores".
 function departmentStoreMissingPieceSearchPrompt(query, colour, boundsText) {
 return `Find "${query}" in stock NEW at a UK department store or other retailer -- specifically check well-known UK stores that sometimes stock designer lingerie (e.g. House of Fraser, Selfridges, John Lewis, Harvey Nichols, Debenhams). Do NOT check eBay, Vinted, Depop or any other resale/marketplace site -- that's a separate search.
 
@@ -2420,7 +2387,7 @@ return { country: String((data && data.country) || '').trim() };
 export {
 MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot, quickScanScreenshot, scanForCaptureMarker,
 callTextJson, DEFAULT_MODEL, summarizeUsage, currentMonthKey, compareFaces,
-extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShoppingItem, searchAgentProvocateurElsewhere, searchEbayResaleEstimate, searchEbayForMissingSetPiece, searchDepartmentStoresForMissingSetPiece, analyseOngoingAccountValue, identifyProduct, translateText, romanizeName, parseCaptureIntent,
+extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShoppingItem, searchAgentProvocateurElsewhere, searchEbayResaleEstimate, searchDepartmentStoresForMissingSetPiece, analyseOngoingAccountValue, identifyProduct, translateText, romanizeName, parseCaptureIntent,
 resolveUrlTitle, resolveJobPostingUrl, resolveBookDetails, resolveSeriesBooks,
 identifyCountry, extractWellnessScreenshot,
 extractTripScreenshot, extractMediaScreenshot, extractTripLegFromEmail, extractTaskFromEmail, extractDateEventFromEmail, extractMediaRecommendations, rankMediaCandidates, findLatestArticleUrl, extractSchoolCalendar,
