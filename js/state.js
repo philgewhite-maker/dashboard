@@ -192,6 +192,13 @@ schoolCalendarId: '', // which Google Calendar the Family tab's "Push" buttons t
 // in incompleteCoreSets() every run, so this can't grow unboundedly
 // with stale entries for sets since completed or deleted.
 setCompletionSearches: {},
+// {resaleKey (style|piece, see shopping.js): {lastCheckedAt}} -- a
+// flat monthly refresh, not an attempt-based backoff like
+// setCompletionSearches above: a resale estimate never "gives up",
+// prices just drift slowly, so a steady interval is the right shape,
+// not a taper. Keyed by the SAME resaleKey data.ebayResaleEstimates
+// itself already uses, so the two stay about the same item.
+resaleEstimateChecks: {},
 // Min/max bounds the weekly search won't look outside of -- an
 // unbounded size match is actively misleading (a 32A or an F cup is
 // both unlikely to be useful and disproportionately likely to be the

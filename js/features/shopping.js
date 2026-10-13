@@ -1193,6 +1193,104 @@ renderInventory();
 })();
 }
 
+// ---- Periodic resale-value sweep ---------------------------------------
+//
+// A manual, per-item "Resale value?" click has existed for a while; this
+// is the same idea set-completion search already established (weekly-
+// then-slower for THAT feature) applied here, asked for directly: run
+// it periodically across everything, not just on click. Deliberately a
+// flat interval, not setcompletion.js's own attempt-based taper -- a
+// resale estimate never "gives up" the way an exact missing-piece
+// search can, prices just drift, so a steady monthly refresh is the
+// right shape, not a backoff schedule.
+const RESALE_RECHECK_DAYS = 30;
+// Same AI-call-pacing reasoning MAX_SETS_PER_RUN (setcompletion.js)
+// already uses -- bounds one run's worth of real AI searches regardless
+// of how many distinct styles/pieces are owned.
+const MAX_RESALE_CHECKS_PER_RUN = 3;
+
+function resaleChecksStore() {
+if (!data.prefs.resaleEstimateChecks || typeof data.prefs.resaleEstimateChecks !== 'object') data.prefs.resaleEstimateChecks = {};
+return data.prefs.resaleEstimateChecks;
+}
+
+// One entry per DISTINCT resaleKey, not one per raw inventory row --
+// several items can share a style/piece (different colours/sizes) and
+// already share one cached estimate; checking each of those separately
+// would just pay for the same eBay search several times over.
+function distinctResaleCandidates() {
+const seen = new Map();
+unheldInventory().forEach((o) => {
+if (!o.style && !o.piece) return;
+const key = resaleKey(o);
+if (!seen.has(key)) seen.set(key, o);
+});
+return [...seen.entries()].map(([key, item]) => ({ key, item }));
+}
+
+function isResaleDue(key) {
+const st = resaleChecksStore()[key];
+if (!st || !st.lastCheckedAt) return true;
+return daysSince(st.lastCheckedAt) >= RESALE_RECHECK_DAYS;
+}
+
+// Coarser than scheduled.js's/sitehealth.js's own agoLabel (hours/
+// days) -- this feature's own minimum interval is a month, so an
+// hour-granular label would just be noise.
+function agoLabelDays(days) {
+if (days == null) return 'never checked before';
+if (days < 1) return 'checked today';
+if (days < 14) return `${days} day${days === 1 ? '' : 's'} ago`;
+if (days < 60) { const w = Math.round(days / 7); return `${w} week${w === 1 ? '' : 's'} ago`; }
+const m = Math.round(days / 30);
+return `${m} month${m === 1 ? '' : 's'} ago`;
+}
+
+async function runResaleEstimateSweep({ force = false } = {}) {
+const all = distinctResaleCandidates();
+const due = all.filter((c) => force || isResaleDue(c.key));
+const store = resaleChecksStore();
+const batch = due
+.sort((a, b) => (store[a.key]?.lastCheckedAt || '').localeCompare(store[b.key]?.lastCheckedAt || ''))
+.slice(0, MAX_RESALE_CHECKS_PER_RUN);
+const { reportCheck } = await import('./sitehealth.js');
+if (!batch.length) {
+reportCheck('resale-estimate-sweep', true, 'Nothing due.');
+return 'Nothing was due to check yet.';
+}
+const oldestPreviousCheckedAt = store[batch[0].key]?.lastCheckedAt;
+let checked = 0;
+let errorCount = 0;
+const { searchEbayResaleEstimate } = await import('../ai.js');
+for (const { key, item } of batch) {
+checked++;
+data.ebayResaleEstimates[key] = { status: 'running' };
+try {
+const query = [item.brand, item.style, item.piece].filter(Boolean).join(' ');
+const { listings, estimate } = await searchEbayResaleEstimate(query);
+data.ebayResaleEstimates[key] = { status: 'done', listings, estimate, checkedAt: new Date().toISOString() };
+} catch (err) {
+data.ebayResaleEstimates[key] = { status: 'error', error: err.message || String(err), checkedAt: new Date().toISOString() };
+errorCount++;
+}
+store[key] = { lastCheckedAt: new Date().toISOString() };
+}
+queueSave();
+renderInventory();
+const oldestLabel = agoLabelDays(oldestPreviousCheckedAt ? daysSince(oldestPreviousCheckedAt) : null);
+const summary = `Checked ${checked} of ${due.length} due item(s).${errorCount ? ` (${errorCount} error${errorCount === 1 ? '' : 's'})` : ''} Oldest: ${oldestLabel}.`;
+reportCheck('resale-estimate-sweep', true, summary);
+return summary;
+}
+
+// "Check now" bypasses isResaleDue entirely, same two-gates-not-one
+// shape forceSchoolCalendarCheck/forceSetCompletionSearch already
+// establish -- a manual click should always check something, not
+// silently no-op because nothing's technically due yet.
+async function forceResaleEstimateSweep() {
+return runResaleEstimateSweep({ force: true });
+}
+
 function renderInventory() {
 const el = document.getElementById('inventory-list');
 if (!el) return;
@@ -1216,6 +1314,10 @@ el.innerHTML = `<div class="sync-row" style="margin-bottom:8px;flex-wrap:wrap;">
 <div class="sync-row" style="margin-bottom:8px;flex-wrap:wrap;">
 <button class="sync-btn sm inv-inline-btn" type="button" data-set-completion-check-now title="Bypasses each set's own backoff timer and checks up to 3 due sets now">&#8635; Check for missing pieces now</button>
 <span class="sync-status" data-set-completion-status></span>
+</div>
+<div class="sync-row" style="margin-bottom:8px;flex-wrap:wrap;">
+<button class="sync-btn sm inv-inline-btn" type="button" data-resale-check-now title="Bypasses the monthly refresh and re-checks up to 3 due items now">&#8635; Check resale values now</button>
+<span class="sync-status" data-resale-check-status></span>
 </div>
 <div class="sync-row" style="margin-bottom:8px;flex-wrap:wrap;align-items:center;">
 <span class="settings-note" style="margin:0;">Only search within:</span>
@@ -1250,6 +1352,18 @@ const { forceSetCompletionSearch } = await import('./setcompletion.js');
 // this closure's own stale reference.
 const summary = await forceSetCompletionSearch();
 const freshStatus = document.querySelector('[data-set-completion-status]');
+if (freshStatus && summary) freshStatus.textContent = summary;
+});
+const resaleCheckBtn = el.querySelector('[data-resale-check-now]');
+if (resaleCheckBtn) resaleCheckBtn.addEventListener('click', async () => {
+const status = el.querySelector('[data-resale-check-status]');
+resaleCheckBtn.disabled = true;
+if (status) status.textContent = 'Checking…';
+// Same stale-reference reasoning as Check-now above --
+// forceResaleEstimateSweep() re-renders Inventory itself, so the
+// summary has to land on a freshly re-queried status span.
+const summary = await forceResaleEstimateSweep();
+const freshStatus = document.querySelector('[data-resale-check-status]');
 if (freshStatus && summary) freshStatus.textContent = summary;
 });
 // One status span per set, shared by both buttons below (whichever ran
@@ -1457,4 +1571,4 @@ doneToggle.addEventListener('change', (e) => { showDone = e.target.checked; rend
 render();
 }
 
-export { initShopping, render as refreshShopping, runAutoPriceCheck, renderInventory };
+export { initShopping, render as refreshShopping, runAutoPriceCheck, renderInventory, runResaleEstimateSweep, forceResaleEstimateSweep };

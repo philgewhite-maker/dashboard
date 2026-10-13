@@ -64,6 +64,11 @@ note: 'Reported by runSetCompletionSearch() (setcompletion.js) whenever its own 
 run: null, reportedExternally: true,
 },
 {
+id: 'resale-estimate-sweep', label: 'eBay — resale value refresh', site: 'ebay.co.uk',
+note: 'Reported by runResaleEstimateSweep() (shopping.js) whenever its own monthly-per-style gate lets a check actually run -- nothing runs from here, this only shows the last run\'s summary.',
+run: null, reportedExternally: true,
+},
+{
 id: 'cashback-quidco', label: 'Quidco — cashback rate', site: 'quidco.com',
 note: 'Reported by refreshCashbackRates() (stockwatch.js) whenever a stock check refreshes rates -- nothing runs from here, this only shows the last result.',
 run: null, reportedExternally: true,

@@ -134,14 +134,28 @@ await runSchoolCalendarCheck();
 // Own per-set backoff gate lives INSIDE runSetCompletionSearch
 // (setcompletion.js), same shape as 'school-calendar' above -- this
 // firing at ordinary app-open cadence costs nothing extra when
-// nothing's due. AI (an eBay search) only ever runs once a set's own
-// Agent Provocateur attempts have already backed off to monthly+,
-// not on every one of these no-op calls.
+// nothing's due. The eBay fallback (a real fetch against eBay's own
+// search filters, not AI -- see retailers/ebay.js) only ever runs once
+// a set's own Agent Provocateur attempts have already backed off to
+// monthly+, not on every one of these no-op calls.
 id: 'set-completion-search', label: 'Lingerie set completion search', needsGoogle: false,
 note: 'Weekly at first, slowing per set over time -- searches Agent Provocateur, then eBay, for the exact missing Bra/Knickers of each incomplete owned set. See Shopping → Inventory.',
 run: async () => {
 const { runSetCompletionSearch } = await import('./setcompletion.js');
 await runSetCompletionSearch();
+},
+},
+{
+// Same shape again -- own per-set/per-style staleness gate lives
+// INSIDE runResaleEstimateSweep (shopping.js), a flat monthly refresh
+// rather than set-completion's own taper (see that function's own
+// comment for why). Asked for directly, alongside the manual
+// per-item "Resale value?" button that already existed.
+id: 'resale-estimate-sweep', label: 'Lingerie resale value refresh', needsGoogle: false,
+note: 'Monthly, across everything currently unassigned -- re-checks what each owned style/piece would fetch secondhand on eBay. See Shopping → Inventory.',
+run: async () => {
+const { runResaleEstimateSweep } = await import('./shopping.js');
+await runResaleEstimateSweep();
 },
 },
 {

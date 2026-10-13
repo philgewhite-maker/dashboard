@@ -187,16 +187,68 @@ setKey: set.key, brand: set.brand, style: set.style, colour: set.colour, missing
 }));
 }
 
+// Days since a backoff-store ISO timestamp into "2 weeks ago"/"3 months
+// ago" -- deliberately coarser than sitehealth.js's/scheduled.js's own
+// agoLabel (hours/days), since this feature's own minimum interval is
+// a week, not minutes -- an hour-granular label would just be noise
+// here.
+function agoLabelDays(days) {
+if (days == null) return 'never checked before';
+if (days < 1) return 'checked today';
+if (days < 14) return `${days} day${days === 1 ? '' : 's'} ago`;
+if (days < 60) { const w = Math.round(days / 7); return `${w} week${w === 1 ? '' : 's'} ago`; }
+const m = Math.round(days / 30);
+return `${m} month${m === 1 ? '' : 's'} ago`;
+}
+
 async function runSetCompletionSearch({ force = false } = {}) {
 pruneStaleEntries();
+// The DUE count (not just how many actually get checked this run,
+// bounded by MAX_SETS_PER_RUN) is what makes "3 of 6" a meaningful
+// number -- reported directly as wanted, since "checked 3 sets" alone
+// says nothing about how much was left waiting.
+const dueCount = force
+? incompleteCoreSets().filter((s) => s.missing[0]).length
+: incompleteCoreSets().filter((s) => s.missing[0] && isDueForSet(s)).length;
 const sets = setsToCheck({ force });
 const { reportCheck } = await import('./sitehealth.js');
 if (!sets.length) {
 reportCheck('set-completion-search', true, 'Nothing due.');
 return 'Nothing was due to check yet.';
 }
+// setsToCheck() already sorts oldest-checked-first before slicing, so
+// sets[0] is the oldest one being processed this run -- its PRIOR
+// lastCheckedAt (captured now, before the loop below overwrites it)
+// is how long it had actually been waiting.
+const oldestPreviousCheckedAt = searchesStore()[sets[0].key]?.lastCheckedAt;
 const bounds = data.prefs.setCompletionSizeBounds;
 const listingCache = new Map();
+
+// eBay is a different site with no shared pacing requirement against
+// Agent Provocateur's own (confirmed live: several concurrent eBay
+// fetches through the same NAS pipeline all came back clean), so every
+// set that's already eligible for the eBay fallback has its search
+// started HERE, up front, rather than only after that set's own AP
+// attempt this run has already failed -- letting it run alongside AP's
+// own paced sequence below instead of strictly after it. Reported
+// directly as wanted ("interleave to not timeout on AP"), though the
+// real saving is modest: eBay only runs for sets already past
+// EBAY_FALLBACK_AFTER_ATTEMPTS, rarely more than one or two in a
+// three-set run. Starting it early costs nothing on a set that
+// resolves via AP anyway -- the result is just never read.
+const ebayPromises = new Map();
+sets.forEach((set) => {
+const missingGroup = set.missing[0];
+if (!missingGroup) return;
+const priorAttempts = (searchesStore()[set.key]?.attempts) || 0;
+if (priorAttempts + 1 >= EBAY_FALLBACK_AFTER_ATTEMPTS) {
+ebayPromises.set(set.key, tryEbayFallback(set, missingGroup, bounds).catch((err) => {
+console.error(`eBay fallback search failed for ${set.key}:`, err);
+return null;
+}));
+}
+});
+
 let foundCount = 0;
 let checkedCount = 0;
 let errorCount = 0;
@@ -227,8 +279,8 @@ price: money(matchPage.net != null ? matchPage.net : matchPage.now),
 url: matchPage.url || '',
 });
 foundCount++;
-} else if (attempts >= EBAY_FALLBACK_AFTER_ATTEMPTS) {
-const ebayResult = await tryEbayFallback(set, missingGroup, bounds);
+} else if (ebayPromises.has(set.key)) {
+const ebayResult = await ebayPromises.get(set.key);
 if (ebayResult) {
 upsertFind(set, missingGroup, { source: 'ebay', ...ebayResult });
 foundCount++;
@@ -241,7 +293,8 @@ errorCount++;
 }
 }
 queueSave();
-const summary = `Checked ${checkedCount} set(s), ${foundCount} found.${errorCount ? ` (${errorCount} error(s))` : ''}`;
+const oldestLabel = agoLabelDays(oldestPreviousCheckedAt ? daysSince(oldestPreviousCheckedAt) : null);
+const summary = `Checked ${checkedCount} of ${dueCount} due set(s), ${foundCount} found.${errorCount ? ` (${errorCount} error(s))` : ''} Oldest: ${oldestLabel}.`;
 reportCheck('set-completion-search', true, summary);
 const { renderInventory } = await import('./shopping.js');
 renderInventory();
