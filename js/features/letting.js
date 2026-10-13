@@ -162,20 +162,28 @@ return `${v < 0 ? '-' : ''}£${Math.abs(v).toLocaleString('en-GB', { minimumFrac
 
 // The user's own formula: gross minus one cleaning cost up front, minus
 // another for every full 7 days of the stay (a longer stay needs a
-// mid-stay clean too), divided by nights. Only meaningful for a row
-// that's actually a real stay with occupied nights -- an 'accrual'
-// (set by accrueLettings) or an 'earned' historic one (set by the
-// manual-add handler, only when enough dates were given to derive
-// nights from); a cancellation never had a guest in it, and a plain
-// payment/adjustment isn't a stay at all.
-function nightRateFor(e) {
-if (!e.nights || e.nights <= 0) return null;
-if (e.kind !== 'accrual' && e.kind !== 'earned') return null;
+// mid-stay clean too), divided by nights. A blacked-out family period
+// has no income attached at all -- that alone is what keeps it out of
+// this (and everything else money-shaped here): `gross` of 0 or less
+// returns null just like having no nights does, no separate "is this a
+// real booking" flag needed.
+function nightRateFromGrossNights(gross, nights) {
+if (!nights || nights <= 0) return null;
+if (!(Number(gross) > 0)) return null;
 const configured = Number(data.prefs.airbnbCleaningCost);
 const cleaningCost = Number.isFinite(configured) ? configured : 50;
-const cleanings = 1 + Math.floor(e.nights / 7);
-const net = (Number(e.gross) || 0) - cleanings * cleaningCost;
-return net / e.nights;
+const cleanings = 1 + Math.floor(nights / 7);
+const net = Number(gross) - cleanings * cleaningCost;
+return net / nights;
+}
+// Only meaningful for a ledger row that's actually a real stay with
+// occupied nights -- an 'accrual' (set by accrueLettings) or an
+// 'earned' historic one (set by the manual-add handler, only when
+// enough dates were given to derive nights from); a cancellation never
+// had a guest in it, and a plain payment/adjustment isn't a stay at all.
+function nightRateFor(e) {
+if (e.kind !== 'accrual' && e.kind !== 'earned') return null;
+return nightRateFromGrossNights(e.gross, e.nights);
 }
 
 // Weighted by nights, not a plain average of each row's own rate -- a
@@ -238,9 +246,19 @@ const share = Number(listing && listing.sharePct);
 const pct = Number.isFinite(share) ? share : 50;
 const income = Number(r.income) || 0;
 const amount = Math.round(income * (pct / 100) * 100) / 100;
+// Computed straight off the reservation's own dates -- an upcoming
+// stay has no ledger row yet to carry a stored `nights`. A blacked-
+// out family period (no income typed in) falls out of this for free:
+// nightRateFromGrossNights returns null the moment gross isn't
+// positive, same gate the gross/amount columns already use.
+const nights = r.checkin && r.checkout ? Math.round((new Date(`${r.checkout}T00:00:00`) - new Date(`${r.checkin}T00:00:00`)) / 86400000) : 0;
+const nightRate = nightRateFromGrossNights(income, nights);
+const nightRateHtml = nightRate != null
+? ` <span class="letting-gross" title="${escapeHtml(`${nights} night${nights === 1 ? '' : 's'}, after cleaning cost`)}">${escapeHtml(`${money(nightRate)}/night`)}</span>`
+: '';
 return `<tr>
 <td style="white-space:nowrap;">${escapeHtml(r.checkin || '?')} &rarr; ${escapeHtml(r.checkout)}</td>
-<td>${escapeHtml(`${(listing && listing.label) || 'listing'}${r.guestName ? `, ${r.guestName}` : ''}`)} <span class="letting-kind upcoming">upcoming</span>${income ? ` <span class="letting-gross">${escapeHtml(`${pct}% of ${money(income)}`)}</span>` : ''}</td>
+<td>${escapeHtml(`${(listing && listing.label) || 'listing'}${r.guestName ? `, ${r.guestName}` : ''}`)} <span class="letting-kind upcoming">upcoming</span>${income ? ` <span class="letting-gross">${escapeHtml(`${pct}% of ${money(income)}`)}</span>` : ''}${nightRateHtml}</td>
 <td style="text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;">${income ? escapeHtml(money(amount)) : ''}</td>
 </tr>`;
 }).join('')}</tbody></table></div>
@@ -387,7 +405,7 @@ const nightRateHtml = nightRate != null
 ? ` <span class="letting-gross" title="${escapeHtml(`${e.nights} night${e.nights === 1 ? '' : 's'}, after cleaning cost`)}">${escapeHtml(`${money(nightRate)}/night`)}</span>`
 : '';
 return `<tr>
-<td style="white-space:nowrap;"><input type="date" class="settings-input" style="max-width:130px;" data-letting-date="${escapeHtml(e.id)}" value="${escapeHtml(e.date || '')}" title="Edit retrospectively to the real Airbnb payout date, if it differs from checkout -- this is what tax-year grouping below uses.">${e.kind === 'earned' ? `<input type="date" class="settings-input" style="max-width:130px;margin-top:3px;" data-letting-start-date="${escapeHtml(e.id)}" value="${escapeHtml(e.startDate || '')}" title="Optional -- only if this booking ran longer than one month. When set, the chart above splits the gross across every month from here to the date on the left (same pro-rata-by-night split a real reservation's own checkin/checkout already gets), instead of landing as one spike in a single month.">` : ''}</td>
+<td style="white-space:nowrap;"><input type="date" class="settings-input" style="max-width:130px;" data-letting-date="${escapeHtml(e.id)}" value="${escapeHtml(e.date || '')}" title="Edit retrospectively to the real Airbnb payout date, if it differs from checkout -- this is what tax-year grouping below uses.">${e.kind === 'earned' ? `<input type="date" class="settings-input" style="max-width:130px;margin-top:3px;" data-letting-start-date="${escapeHtml(e.id)}" value="${escapeHtml(e.startDate || '')}" title="Optional -- only if this booking ran longer than one month. When set, the chart above splits the gross across every month from here to the date on the left (same pro-rata-by-night split a real reservation's own checkin/checkout already gets), instead of landing as one spike in a single month.">` : ''}${(e.kind === 'accrual' || e.kind === 'earned') ? `<input type="number" min="0" step="1" class="settings-input" style="max-width:70px;margin-top:3px;" data-letting-nights="${escapeHtml(e.id)}" value="${e.nights || ''}" placeholder="Nights" title="Nights this stay covered -- used for the average night rate. Filled in automatically when the reservation was still on file at accrual time; type it in for an older row that's missing it.">` : ''}</td>
 <td>${escapeHtml(e.note || e.kind)}${e.kind && e.kind !== 'accrual' ? ` <span class="letting-kind ${escapeHtml(e.kind)}">${escapeHtml(e.kind)}</span>` : ''}${
 // Shown from the FIELD rather than left inside the note, because your
 // own note replaces the default one — type "Bathilde" and the £419 it
@@ -422,6 +440,20 @@ input.addEventListener('change', () => {
 const entry = (data.lettingLedger || []).find((e) => e.id === input.dataset.lettingStartDate);
 if (!entry) return;
 entry.startDate = input.value;
+queueSave();
+renderLetting();
+});
+});
+// Reported directly as needed for every older row the backfill
+// couldn't reach (its own reservation already pruned by the time this
+// shipped) -- typed in by hand instead. Empty is valid (clears it back
+// to "no rate shown"), same as the start-date field above.
+el.querySelectorAll('[data-letting-nights]').forEach((input) => {
+input.addEventListener('change', () => {
+const entry = (data.lettingLedger || []).find((e) => e.id === input.dataset.lettingNights);
+if (!entry) return;
+const n = Number(input.value);
+entry.nights = Number.isFinite(n) && n > 0 ? Math.round(n) : 0;
 queueSave();
 renderLetting();
 });
