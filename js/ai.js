@@ -1349,13 +1349,14 @@ condition: String(r.condition || ''), url: String(r.url || ''),
 // search doesn't already have, unlike the "snippet has no price" problem
 // the other two searches above exist to work around.
 function ebayResaleSearchPrompt(query) {
-return `Search eBay UK (ebay.co.uk) for "${query}" and report what CURRENT listings suggest this would sell for secondhand -- this is a resale-value estimate for something already owned, not a purchase search.
+return `Search eBay UK (ebay.co.uk) for "${query}" and report what CURRENT listings suggest this would sell for -- this is a resale-value estimate for something already owned, not a purchase search.
 
 1. Search ebay.co.uk for the item. Note the price and condition ("New with tags", "New without tags", "Used", "Pre-owned", etc. -- exactly as each listing states it, never guessed) for every genuinely matching listing you find, up to 8.
 2. Colour and exact size don't matter here -- a listing for the same style/piece in a different colour or size is still a valid comparable for resale value, so don't filter those out.
 3. Never fetch a listing page -- eBay's own search results already show price and condition for each one.
+4. The "estimate" you give MUST be based on "New with tags" (BNWT) listings specifically, NOT "Used"/"Pre-owned"/"New without tags" ones -- the owned item is unworn with tags still on, so a Used listing's price is not a comparable for it and would understate what it's actually worth. If you found any BNWT listings, base "estimate" only on those (say so, e.g. "BNWT pieces are going for £28-£38 on eBay") and ignore the non-BNWT ones for the purpose of that figure. Only fall back to the other conditions, and say so explicitly in "estimate" (e.g. "No BNWT listings found; used ones go for £12-£18"), if truly nothing BNWT turned up at all. Still report every listing you found in "listings" regardless of condition, for reference.
 
-Respond with ONLY a JSON object, no other text, no markdown fences: {"listings":[{"name":"","price":"","condition":"","url":""}],"estimate":""} -- "estimate" is one short sentence giving a realistic resale price range based on what you found (e.g. "Similar pieces are going for £18-£28 secondhand on eBay"), or "" if nothing comparable turned up at all.`;
+Respond with ONLY a JSON object, no other text, no markdown fences: {"listings":[{"name":"","price":"","condition":"","url":""}],"estimate":""} -- "estimate" is one short sentence giving a realistic resale price range per the BNWT rule above, or "" if nothing comparable turned up at all.`;
 }
 async function searchEbayResaleEstimate(query) {
 const tools = [{

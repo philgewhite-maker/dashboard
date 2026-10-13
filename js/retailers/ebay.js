@@ -75,6 +75,25 @@ const encodedKey = encodeURIComponent(key).replace(/%/g, '%25');
 return `${encodedKey}=${values.map(encodeURIComponent).join('%7C')}`;
 }
 
+// eBay's own Colour aspect filter wants a single SIMPLE value ("Black",
+// "Pink"...), not a compound one -- a set's own colour field can be
+// "Black/Gold" (two colours in the one piece), and passing that whole
+// string straight through as the filter VALUE doesn't match any of
+// eBay's enumerated colour values, so the request comes back
+// unfiltered -- the same "guessed/unmatched structured value" failure
+// class as the Band Size/Cup Size double-encoding above, confirmed the
+// same way: by checking what the filter actually does, not assuming a
+// compound string "obviously" works. Only splits on real compound
+// separators (/, comma, &, "and") -- a genuine space-separated colour
+// name ("Rose Gold") is left whole. titleMatchesColour below still
+// re-checks every word of the FULL compound value against the title,
+// so a two-coloured piece isn't short-changed by the client-side
+// check -- only the structured filter itself has no way to ask for
+// "either of these two", so it gets just the first.
+function simpleColour(colour) {
+return String(colour || '').split(/\s*[/,&+]\s*|\s+and\s+/i)[0].trim();
+}
+
 function braListingUrl({ keywords, colour, bounds }) {
 const bands = bandsInRange(bounds.braBandMin, bounds.braBandMax);
 const cups = cupsInRange(bounds.braCupMin, bounds.braCupMax);
@@ -82,7 +101,7 @@ const sizes = [];
 bands.forEach((b) => cups.forEach((c) => sizes.push(`${b}${c}`)));
 const params = new URLSearchParams({ _nkw: keywords, _sacat: BRA_CATEGORY, _dcat: BRA_CATEGORY });
 if (sizes.length) params.set('Size', sizes.join('|'));
-if (colour) params.set('Colour', colour);
+if (colour) params.set('Colour', simpleColour(colour));
 const extra = [doubleEncodedParam('Band Size', bands), doubleEncodedParam('Cup Size', cups)].filter(Boolean).join('&');
 return `https://www.${HOST}/sch/${BRA_CATEGORY}/i.html?${params.toString()}${extra ? `&${extra}` : ''}`;
 }
@@ -96,7 +115,7 @@ for (let n = lo; n <= hi; n++) numbers.push(String(n));
 const sizes = [...numbers, ...knickerSizeLetters(bounds.knickersMin, bounds.knickersMax)];
 const params = new URLSearchParams({ _nkw: keywords, _sacat: KNICKERS_CATEGORY, _dcat: KNICKERS_CATEGORY });
 if (sizes.length) params.set('Size', sizes.join('|'));
-if (colour) params.set('Colour', colour);
+if (colour) params.set('Colour', simpleColour(colour));
 return `https://www.${HOST}/sch/i.html?${params.toString()}`;
 }
 

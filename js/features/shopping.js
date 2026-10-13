@@ -19,7 +19,7 @@
 // a link to buy it from the right place," not a manual step. The result is
 // persisted on the task itself (t.priceCheck), dated, with a Refresh button
 // to re-run it later — not the old in-memory, un-dated Map this used to be.
-import { data, queueSave, SHOPPING_CONTEXTS, unheldInventory, whoFits, inventorySets, whoFitsSet, blankInventoryItem, SET_CORE_GROUPS } from '../state.js';
+import { data, queueSave, SHOPPING_CONTEXTS, unheldInventory, whoFits, inventorySets, incompleteCoreSets, whoFitsSet, blankInventoryItem, SET_CORE_GROUPS } from '../state.js';
 import { escapeHtml, affiliateLink, daysUntil, daysSince, todayStr, MISSING_KEY_LINK_HTML, looksLikeUrl, bindBackdropClose, pickChipHtml, knownScalarValues, hydratePhotoBackgrounds } from '../utils.js';
 import { captureTask, revealTask } from './tasks.js';
 import { connectionChipHtml, bindConnectionChips, connectionPickerHtml, bindConnPickers, setConnPickerValue, sensitiveFieldsShown } from './connections.js';
@@ -1372,12 +1372,25 @@ if (freshStatus && summary) freshStatus.textContent = summary;
 // provocateur|lorna|black") isn't guaranteed quote/escape-safe to drop
 // straight into one.
 const freshForceStatusFor = (key) => [...document.querySelectorAll('[data-set-completion-force-status]')].find((s) => s.dataset.setCompletionForceStatus === key);
+// "Searching eBay…" alone doesn't say what for -- confirmed directly as
+// not useful, since the missing piece/colour is exactly what you'd want
+// to double-check the search is actually chasing before it comes back.
+// Built from the same set the search itself reads (incompleteCoreSets),
+// not the ledger/inventory item -- a set's own brand/style/colour are
+// what tryEbayFallback/searchDepartmentStoresForMissingSetPiece build
+// their own query from.
+function searchDescriptionForSet(key) {
+const set = incompleteCoreSets().find((s) => s.key === key);
+if (!set) return 'it';
+const missingGroup = set.missing[0];
+return [set.brand, set.style, missingGroup, set.colour].filter(Boolean).join(' ');
+}
 el.querySelectorAll('[data-set-completion-force-ebay]').forEach((btn) => {
 btn.addEventListener('click', async () => {
 const key = btn.dataset.setCompletionForceEbay;
 const status = freshForceStatusFor(key);
 btn.disabled = true;
-if (status) status.textContent = 'Searching eBay…';
+if (status) status.textContent = `Searching eBay for ${searchDescriptionForSet(key)}…`;
 const { forceEbaySearchForSet } = await import('./setcompletion.js');
 // Same stale-reference reasoning as the Check-now button above --
 // forceEbaySearchForSet() re-renders Inventory itself, so the
@@ -1392,7 +1405,7 @@ btn.addEventListener('click', async () => {
 const key = btn.dataset.setCompletionForceRetailer;
 const status = freshForceStatusFor(key);
 btn.disabled = true;
-if (status) status.textContent = 'Searching other retailers…';
+if (status) status.textContent = `Searching other retailers for ${searchDescriptionForSet(key)}…`;
 const { forceRetailerSearchForSet } = await import('./setcompletion.js');
 const summary = await forceRetailerSearchForSet(key);
 const freshStatus = freshForceStatusFor(key);
