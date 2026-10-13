@@ -34,21 +34,24 @@ import { data, queueSave } from '../state.js';
 const WEEK_MS = 7 * 24 * 3600000;
 
 const CHECKS = [
-{
-id: 'ap-colours', label: 'Agent Provocateur — colour filter', site: 'agentprovocateur.com',
-// Confirmed live this note overstated the stakes: setfinder.js (the
-// only thing that ever searches AP by colour) does NOT trust this URL
-// filter -- it already re-filters every result client-side via
-// bucketsForColour, specifically because this exact key was one of six
-// guessed before the real one was found. So a failure here is real
-// (AP's own filter has since degraded -- confirmed live, a "Lorna"
-// range item in "Dark Pink/Cobalt" came back under filters.colour_filter
-// =Black) but zero-impact in practice, not a silent correctness risk --
-// kept as a canary on the SITE, not a guarantee the app still needs.
-note: 'Re-runs filters.colour_filter=Black against a real listing and confirms every result is genuinely black. Nothing in this app actually trusts this filter any more -- setfinder.js already re-filters client-side regardless -- so a failure here means AP\'s own filter has degraded, not that a search could return the wrong colour.',
-weekly: true,
-run: runApColoursCheck,
-},
+// A former 'ap-colours' check lived here: re-ran filters.colour_filter=
+// Black against a real listing and failed unless every result was
+// genuinely black. Dropped (not rebaselined) after live investigation
+// (13 Oct) showed the "failure" was always-true, normal AP behaviour
+// for a server-side fetch, not a one-off degradation: the filter is
+// enforced per-RANGE, not per-card, so a range with a black variant
+// (e.g. "Lorna") also returns its other colourways ("Dark Pink/
+// Cobalt") in the raw HTML -- a real browser's own Angular JS prunes
+// those after load, which a plain fetch never runs. Confirmed this
+// check could never pass this way, forever, with nothing in the app
+// actually at risk either way: setfinder.js already re-filters every
+// result client-side via bucketsForColour, specifically because this
+// URL key was never trusted blind in the first place (see its own
+// comment in retailers/agentprovocateur.js). A check that can only
+// ever report "broken" is worse than no check -- rebaselining it to
+// "every off-colour result's RANGE also has a black variant among the
+// results" was considered and rejected: real complexity for a canary
+// whose only job was watching a filter nothing here depends on.
 {
 // One aggregate id, not a per-set row -- unlike mediaRecSources (a
 // user-configured standing list, see mediaRecSourceRowsHtml below),
@@ -179,24 +182,6 @@ const last = s[check.id]?.lastRunAt;
 if (last && Date.now() - new Date(last).getTime() < WEEK_MS) continue;
 await runCheck(check.id);
 }
-}
-
-// ---- The AP colour-filter canary -------------------------------------
-
-async function runApColoursCheck() {
-const { fetchPages } = await import('./stockwatch.js');
-const agentProvocateur = await import('../retailers/agentprovocateur.js');
-const url = agentProvocateur.listingUrl({ prodType: 'Bras', colours: ['Black'], sort: 'price' });
-const { pages, errors } = await fetchPages([url]);
-const html = pages.get(url);
-if (!html) throw new Error(errors[0]?.error || "the page didn't come back");
-const items = agentProvocateur.listingItems(html);
-if (!items.length) throw new Error('the filtered listing came back with nothing in it');
-const offColour = items.filter((i) => !agentProvocateur.bucketsForColour(i.colour).includes('Black'));
-if (offColour.length) {
-throw new Error(`${offColour.length} of ${items.length} results weren't black (e.g. "${offColour[0].colour}") -- AP's own colour filter has degraded (no app feature actually relies on it, see this check's own note)`);
-}
-return `${items.length} black bras found, all genuinely black.`;
 }
 
 // ---- The health-sync staleness canary ------------------------------------
