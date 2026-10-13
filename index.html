@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v566</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v567</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -383,6 +383,9 @@
 <span class="sync-status" id="letting-add-status"></span>
 </div>
 <div class="settings-note" style="margin:6px 0 0;"><strong>Earned (historic)</strong> is for what a listing took before you started tracking it here: enter the <em>gross</em> figure and their share is applied, the same way a stay would. For the other three, a <strong>negative</strong> amount reduces what they owe and a positive increases it &mdash; to wipe a balance, add the negative of it. The choice is only about what happened: a <strong>payment</strong> is money that reached you, an <strong>adjustment</strong> moves the balance without any, a <strong>cancellation</strong> is a payout for a stay that never happened. Months later that difference is the whole story, and the amount alone cannot tell you.</div>
+<div class="sync-row" style="margin-top:8px;align-items:center;">
+<label style="font-size:12px;" title="What one clean costs -- charged once up front against every stay's gross, plus another for every full 7 days (a longer stay needs a mid-stay clean too), before dividing by nights for the average night rate below.">Cleaning cost £<input type="number" min="0" step="1" id="letting-cleaning-cost" class="settings-input" style="max-width:70px;"></label>
+</div>
 <div class="letting-chart-wrap">
 <div class="panel-head" style="margin:14px 0 6px;">
 <h2 style="font-size:13px;">Income by month</h2>
@@ -391,6 +394,16 @@
 <div class="letting-chart-legend" id="letting-chart-legend"></div>
 <div class="chart-canvas-wrap">
 <canvas id="letting-chart-canvas"></canvas>
+</div>
+</div>
+<div class="letting-chart-wrap">
+<div class="panel-head" style="margin:14px 0 6px;">
+<h2 style="font-size:13px;">Average night rate by listing</h2>
+</div>
+<div class="settings-note" style="margin:0 0 6px;">Gross minus the cleaning cost above (charged once, plus again per full week of the stay), divided by nights -- one line per listing, not stacked, since an average isn't something to add up across listings the way income is. Tick/untick below to choose which lines show.</div>
+<div class="letting-chart-legend" id="night-rate-chart-legend"></div>
+<div class="chart-canvas-wrap">
+<canvas id="night-rate-chart-canvas"></canvas>
 </div>
 </div>
 </section>

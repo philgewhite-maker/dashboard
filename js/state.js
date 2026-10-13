@@ -163,6 +163,14 @@ lettingTaxByOwner: {},
 // targets were per-person) into here under '__mine__' the first time it
 // runs into one.
 lettingChartTargets: {},
+// What one clean costs -- consulted only by the average-night-rate
+// calculation (letting.js's nightRateFor): gross income minus one
+// cleaning cost up front, minus another for every full 7 days of the
+// stay (a longer stay needs a mid-stay clean), divided by nights.
+// Edited inline in the Letting income panel rather than a separate
+// Settings section, same reasoning setCompletionSizeBounds already
+// uses -- nothing else reads it.
+airbnbCleaningCost: 50,
 // What the monthly recommendations check (js/features/mediarecs.js) scores
 // candidates against -- `genres` are TMDb genre NAMES (catalogue.js's
 // TMDB_GENRES), `minRating` is a TMDb vote_average floor (0-10, 0 = no
@@ -2340,6 +2348,23 @@ data.airbnbReservations = data.airbnbReservations.map((r) => ({ ...blankAirbnbRe
 // planner-entries filter just above.
 const airbnbListingIds = new Set(data.airbnbListings.map((l) => l.id));
 data.airbnbReservations = data.airbnbReservations.filter((r) => airbnbListingIds.has(r.listingId));
+// Backfills `nights` onto an older accrual row that predates the
+// average-night-rate feature (letting.js's nightRateFor) -- derived
+// from its own reservation's checkin/checkout while that record still
+// resolves, not rewriting anything already stored, just adding a field
+// that could always have been computed from data already on the
+// ledger entry. A row whose reservation has since been pruned (the ICS
+// sync drops one once it's past and gone from the feed) simply never
+// gets a rate shown, same as any other field that can't be recovered
+// after the fact.
+const reservationsById = new Map(data.airbnbReservations.map((r) => [r.id, r]));
+data.lettingLedger.forEach((e) => {
+if (e.kind !== 'accrual' || e.nights || !e.reservationId) return;
+const r = reservationsById.get(e.reservationId);
+if (!r || !r.checkin || !r.checkout) return;
+const n = Math.round((new Date(`${r.checkout}T00:00:00`) - new Date(`${r.checkin}T00:00:00`)) / 86400000);
+if (n > 0) e.nights = n;
+});
 if (!data.airbnbSyncStatus || typeof data.airbnbSyncStatus !== 'object' || Array.isArray(data.airbnbSyncStatus)) data.airbnbSyncStatus = {};
 if (!Array.isArray(data.airbnbCleanerEvents)) data.airbnbCleanerEvents = [];
 if (!Array.isArray(data.airbnbKeys)) data.airbnbKeys = [];

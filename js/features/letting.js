@@ -117,6 +117,14 @@ const share = Number(listing.sharePct);
 const pct = Number.isFinite(share) ? share : 50;
 const amount = Math.round(income * (pct / 100) * 100) / 100;
 if (!amount) return;
+// Nights, same inclusive-both-ends arithmetic the reservation's own
+// checkin/checkout convention already uses elsewhere -- stored as a
+// field here (not recomputed from the reservation later) for the same
+// reason gross/pct/platform already are: the reservation this points
+// at can be pruned (a cancelled one, or one the ICS feed's own window
+// has simply aged out of), and the figure this feeds -- average
+// night rate, nightRateFor() below -- needs to survive that.
+const nights = Math.round((new Date(`${r.checkout}T00:00:00`) - new Date(`${r.checkin}T00:00:00`)) / 86400000);
 data.lettingLedger.push({
 id: uid(),
 ownerKey: key,
@@ -127,6 +135,7 @@ amount,
 // total has to survive without being parsed back out of English.
 gross: income,
 pct,
+nights,
 // Copied at accrual time, same as gross/pct -- the ledger row is the
 // thing taxYearSummaryFor() and the chart actually read, not the
 // reservation, so this needs to be a field here too, not just on `r`.
@@ -149,6 +158,55 @@ return { added };
 function money(n) {
 const v = Number(n) || 0;
 return `${v < 0 ? '-' : ''}£${Math.abs(v).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+// The user's own formula: gross minus one cleaning cost up front, minus
+// another for every full 7 days of the stay (a longer stay needs a
+// mid-stay clean too), divided by nights. Only meaningful for a row
+// that's actually a real stay with occupied nights -- an 'accrual'
+// (set by accrueLettings) or an 'earned' historic one (set by the
+// manual-add handler, only when enough dates were given to derive
+// nights from); a cancellation never had a guest in it, and a plain
+// payment/adjustment isn't a stay at all.
+function nightRateFor(e) {
+if (!e.nights || e.nights <= 0) return null;
+if (e.kind !== 'accrual' && e.kind !== 'earned') return null;
+const configured = Number(data.prefs.airbnbCleaningCost);
+const cleaningCost = Number.isFinite(configured) ? configured : 50;
+const cleanings = 1 + Math.floor(e.nights / 7);
+const net = (Number(e.gross) || 0) - cleanings * cleaningCost;
+return net / e.nights;
+}
+
+// Weighted by nights, not a plain average of each row's own rate -- a
+// 2-night stay and a 20-night stay don't deserve equal weight in "the
+// average", same reasoning any other per-unit average in this app
+// would use. Broken down by LISTING, not just owner -- an owner can
+// have more than one listing (confirmed real: "En-suite - Phil" and
+// "Flat" are both Phil's), different properties with their own rates,
+// not one blended number.
+function nightRateSummaryForOwner(key) {
+const byListing = new Map();
+entriesFor(key).forEach((e) => {
+const rate = nightRateFor(e);
+if (rate == null) return;
+const listing = (data.airbnbListings || []).find((l) => l.id === e.listingId);
+const g = byListing.get(e.listingId) || { listingId: e.listingId, label: (listing && listing.label) || 'Unknown listing', netTotal: 0, nightsTotal: 0, count: 0 };
+g.netTotal += rate * e.nights; // rate * nights recovers the net this row contributed, without redoing the cleaning-cost arithmetic a second time
+g.nightsTotal += e.nights;
+g.count += 1;
+byListing.set(e.listingId, g);
+});
+return [...byListing.values()].map((g) => ({ ...g, avgRate: g.nightsTotal > 0 ? g.netTotal / g.nightsTotal : null }));
+}
+function nightRateSummaryHtml(key) {
+const summary = nightRateSummaryForOwner(key).filter((g) => g.avgRate != null);
+if (!summary.length) return '';
+const parts = summary.map((g) => `${escapeHtml(g.label)} ${escapeHtml(money(g.avgRate))}/night (${g.count})`).join(' · ');
+// No auto-margin of its own -- the "taken" badge right before it
+// already pushed the row to the far edge (for a non-mine owner); this
+// one just follows on immediately after it, same flex row.
+return `<span class="settings-note" style="margin:0;" title="Average night rate, weighted by nights, after the configured cleaning cost -- number in brackets is how many stays it's averaged over.">${parts}</span>`;
 }
 
 // ---- Upcoming (not yet accrued) ----------------------------------------
@@ -278,6 +336,7 @@ renderLettingTaxSettings();
 // Independent of whether any owner is set yet -- the chart reads income
 // straight off the listings/reservations, not the owed-ledger below it.
 renderLettingChart();
+renderNightRateChart();
 const el = document.getElementById('letting-list');
 if (!el) return;
 // A self-owned listing's income still belongs here -- the entries, the
@@ -320,20 +379,27 @@ ${mine
 : `<span class="letting-balance${bal > 0 ? ' owes' : bal < 0 ? ' credit' : ''}">${escapeHtml(money(bal))}</span>
 <span class="settings-note" style="margin:0;">${bal > 0 ? 'owed to you' : bal < 0 ? 'in credit' : 'settled'}</span>`}
 ${grossFor(key) ? `<span class="settings-note" style="margin:${mine ? '0' : '0 0 0 auto'};">${escapeHtml(money(grossFor(key)))} taken</span>` : ''}
+${nightRateSummaryHtml(key)}
 </div>
-${rows.length ? `<div class="letting-scroll"><table class="limits-table"><tbody>${rows.map((e) => `<tr>
+${rows.length ? `<div class="letting-scroll"><table class="limits-table"><tbody>${rows.map((e) => {
+const nightRate = nightRateFor(e);
+const nightRateHtml = nightRate != null
+? ` <span class="letting-gross" title="${escapeHtml(`${e.nights} night${e.nights === 1 ? '' : 's'}, after cleaning cost`)}">${escapeHtml(`${money(nightRate)}/night`)}</span>`
+: '';
+return `<tr>
 <td style="white-space:nowrap;"><input type="date" class="settings-input" style="max-width:130px;" data-letting-date="${escapeHtml(e.id)}" value="${escapeHtml(e.date || '')}" title="Edit retrospectively to the real Airbnb payout date, if it differs from checkout -- this is what tax-year grouping below uses.">${e.kind === 'earned' ? `<input type="date" class="settings-input" style="max-width:130px;margin-top:3px;" data-letting-start-date="${escapeHtml(e.id)}" value="${escapeHtml(e.startDate || '')}" title="Optional -- only if this booking ran longer than one month. When set, the chart above splits the gross across every month from here to the date on the left (same pro-rata-by-night split a real reservation's own checkin/checkout already gets), instead of landing as one spike in a single month.">` : ''}</td>
 <td>${escapeHtml(e.note || e.kind)}${e.kind && e.kind !== 'accrual' ? ` <span class="letting-kind ${escapeHtml(e.kind)}">${escapeHtml(e.kind)}</span>` : ''}${
 // Shown from the FIELD rather than left inside the note, because your
 // own note replaces the default one — type "Bathilde" and the £419 it
 // was half of disappeared from the record entirely.
-e.gross ? ` <span class="letting-gross">${escapeHtml(`${e.pct ?? 50}% of ${money(e.gross)}`)}</span>` : ''}${(e.kind === 'earned' || e.kind === 'cancellation') ? ` <select data-letting-platform="${escapeHtml(e.id)}" title="Which platform this actually happened through -- the chart above draws Other as a striped fill instead of solid.">
+e.gross ? ` <span class="letting-gross">${escapeHtml(`${e.pct ?? 50}% of ${money(e.gross)}`)}</span>` : ''}${nightRateHtml}${(e.kind === 'earned' || e.kind === 'cancellation') ? ` <select data-letting-platform="${escapeHtml(e.id)}" title="Which platform this actually happened through -- the chart above draws Other as a striped fill instead of solid.">
 <option value="airbnb"${e.platform !== 'other' ? ' selected' : ''}>Airbnb</option>
 <option value="other"${e.platform === 'other' ? ' selected' : ''}>Other</option>
 </select>` : ''}</td>
 <td style="text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;">${escapeHtml(money(e.amount))}</td>
 <td style="width:1%;"><span class="del-x" data-letting-del="${escapeHtml(e.id)}" title="Remove this entry">&times;</span></td>
-</tr>`).join('')}</tbody></table></div>` : '<div class="settings-note" style="margin:4px 0 0;">Nothing yet.</div>'}
+</tr>`;
+}).join('')}</tbody></table></div>` : '<div class="settings-note" style="margin:4px 0 0;">Nothing yet.</div>'}
 ${upcomingTableHtml(key)}
 ${taxYearSummaryHtml(key, taxYears)}
 </div>`;
@@ -459,9 +525,20 @@ say(`Added ${money(amount)} for ${ownerNameFor(who.value)}.`);
 renderOwnerPicker();
 renderLetting();
 });
+const cleaningCostInput = document.getElementById('letting-cleaning-cost');
+if (cleaningCostInput) {
+cleaningCostInput.value = Number.isFinite(Number(data.prefs.airbnbCleaningCost)) ? data.prefs.airbnbCleaningCost : 50;
+cleaningCostInput.addEventListener('change', () => {
+const v = Number(cleaningCostInput.value);
+data.prefs.airbnbCleaningCost = Number.isFinite(v) && v >= 0 ? v : 50;
+queueSave();
+renderLetting();
+});
+}
 renderOwnerPicker();
 initLettingTaxSettings();
 initLettingChart();
+initNightRateChart();
 renderLetting();
 }
 
@@ -1183,6 +1260,262 @@ canvas.addEventListener('pointerleave', () => { lettingChartHoverIndex = null; r
 document.addEventListener('tabshown', (e) => { if (e.detail?.tab === 'finances') renderLettingChart(); });
 window.addEventListener('resize', renderLettingChart);
 renderLettingChart();
+}
+
+// ---- Average night rate by listing (a SEPARATE chart from income above) ---
+//
+// One series per real LISTING, not the income chart's own owner/Mine-
+// merged groups -- a night rate is a property of the listing itself,
+// and "Mine" would wrongly blend two different properties' rates into
+// one meaningless number the moment there's more than one self-owned
+// listing (there already is: "En-suite - Phil" and "Flat"). Lines, not
+// stacked bars -- summing several listings' average rates together
+// isn't a real number the way summing their income is, so this is
+// deliberately a different chart shape from the one above, sharing
+// only the month-axis plumbing (addMonths/monthRange/monthLabel/
+// niceLettingAxisStep) rather than drawLettingChart itself.
+function nightRateListings() {
+return (data.airbnbListings || []).map((l) => ({ key: l.id, label: l.label || l.prefix || 'Listing', colour: l.colour || 'slate' }));
+}
+
+// Same "seen before defaults to ticked" shape lettingChartSelectedGroups
+// above already uses, kept as its own pair of sets since the two charts'
+// group keys (listing id here, owner/Mine key there) are a different
+// universe entirely.
+let nightRateSelectedListings = new Set();
+let nightRateKnownListingKeys = new Set();
+function syncNightRateSelection(listings) {
+listings.forEach((l) => {
+if (nightRateKnownListingKeys.has(l.key)) return;
+nightRateKnownListingKeys.add(l.key);
+nightRateSelectedListings.add(l.key);
+});
+}
+
+function nightRateChartData() {
+const current = currentMonthYm();
+const baseStart = addMonths(current, -LETTING_CHART_MONTHS_BACK);
+const endYm = addMonths(current, LETTING_CHART_MONTHS_FORWARD);
+const months = monthRange(baseStart, endYm);
+const listings = nightRateListings();
+const perListingByMonth = new Map();
+listings.forEach((l) => perListingByMonth.set(l.key, new Map()));
+// Attributed to the ledger entry's own `date` (checkout, for an
+// accrual) whole, not pro-rated across months the way the income
+// chart splits a stay's gross -- a night rate is a per-stay figure,
+// not something that means anything split by the night.
+(data.lettingLedger || []).forEach((e) => {
+const rate = nightRateFor(e);
+if (rate == null || !e.listingId || !perListingByMonth.has(e.listingId)) return;
+const ym = (e.date || '').slice(0, 7);
+if (ym < baseStart || ym > endYm) return;
+const byMonth = perListingByMonth.get(e.listingId);
+const bucket = byMonth.get(ym) || { net: 0, nights: 0 };
+bucket.net += rate * e.nights;
+bucket.nights += e.nights;
+byMonth.set(ym, bucket);
+});
+return { months, listings, perListingByMonth, nowIndex: months.indexOf(current) };
+}
+
+function renderNightRateChartLegend(listings) {
+const el = document.getElementById('night-rate-chart-legend');
+if (!el) return;
+if (!listings.length) { el.innerHTML = '<span class="settings-note" style="margin:0;">No listings set up yet.</span>'; return; }
+el.innerHTML = listings.map((l) => `<label class="letting-chart-legend-item" style="cursor:pointer;">
+<input type="checkbox" data-night-rate-listing="${escapeHtml(l.key)}"${nightRateSelectedListings.has(l.key) ? ' checked' : ''}>
+<span class="dot ${escapeHtml(l.colour)}"></span>${escapeHtml(l.label)}
+</label>`).join('');
+el.querySelectorAll('[data-night-rate-listing]').forEach((cb) => {
+cb.addEventListener('change', () => {
+const key = cb.dataset.nightRateListing;
+if (cb.checked) nightRateSelectedListings.add(key); else nightRateSelectedListings.delete(key);
+renderNightRateChart();
+});
+});
+}
+
+let nightRateChartHoverIndex = null;
+let nightRateChartLastPlot = null;
+
+function drawNightRateChart(canvas, chartData) {
+const { months, listings: allListings, perListingByMonth, nowIndex } = chartData;
+const listings = allListings.filter((l) => nightRateSelectedListings.has(l.key));
+const dpr = window.devicePixelRatio || 1;
+const rect = canvas.getBoundingClientRect();
+const width = Math.max(1, Math.round(rect.width));
+const height = Math.max(1, Math.round(rect.height));
+if (!width || !height) return; // canvas is on a hidden tab -- nothing to measure yet
+canvas.width = Math.round(width * dpr);
+canvas.height = Math.round(height * dpr);
+const ctx = canvas.getContext('2d');
+ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+ctx.clearRect(0, 0, width, height);
+
+const lineColor = resolveColor('--line');
+const muted = resolveColor('--muted');
+const ink = resolveColor('--ink');
+const paper = resolveColor('--paper');
+
+const padLeft = 46, padRight = 10, padTop = 16, padBottom = 20;
+const plot = { x: padLeft, y: padTop, w: Math.max(10, width - padLeft - padRight), h: Math.max(10, height - padTop - padBottom) };
+
+// Per-listing, per-month rate -- null where there's no stay that month,
+// which is what lets the line below break instead of implying a flat
+// rate across a gap it has no data for.
+const series = listings.map((l) => ({
+l,
+rates: months.map((ym) => {
+const bucket = perListingByMonth.get(l.key).get(ym);
+return bucket && bucket.nights > 0 ? bucket.net / bucket.nights : null;
+}),
+}));
+const allRates = series.flatMap((s) => s.rates).filter((v) => v != null);
+const rawMax = Math.max(...allRates, 1);
+const rawMin = Math.min(...allRates, 0);
+const axisStep = niceLettingAxisStep((rawMax - Math.min(0, rawMin)) / 4);
+const axisTop = (Math.floor(rawMax / axisStep) + 1) * axisStep;
+const axisBottom = rawMin < 0 ? -(Math.floor(-rawMin / axisStep) + 1) * axisStep : 0;
+const span = axisTop - axisBottom || 1;
+const scaleY = (v) => plot.y + plot.h - ((v - axisBottom) / span) * plot.h;
+
+ctx.strokeStyle = lineColor;
+ctx.lineWidth = 1;
+ctx.fillStyle = muted;
+ctx.font = "10px 'Inter', sans-serif";
+ctx.textAlign = 'right';
+ctx.textBaseline = 'middle';
+for (let v = axisBottom; v <= axisTop + 0.001; v += axisStep) {
+const y = scaleY(v);
+ctx.beginPath(); ctx.moveTo(plot.x, y); ctx.lineTo(plot.x + plot.w, y); ctx.stroke();
+ctx.fillText(money0(v), plot.x - 6, y);
+}
+// Zero line drawn a touch heavier, since a negative night rate (the
+// cleaning cost exceeding the stay's gross) is the one value on this
+// chart worth a reader noticing at a glance.
+if (axisBottom < 0) {
+ctx.strokeStyle = muted;
+ctx.lineWidth = 1.5;
+const y0 = scaleY(0);
+ctx.beginPath(); ctx.moveTo(plot.x, y0); ctx.lineTo(plot.x + plot.w, y0); ctx.stroke();
+}
+
+const n = months.length;
+const bw = plot.w / n;
+
+if (nowIndex >= 0) {
+const nowX = plot.x + (nowIndex + 1) * bw;
+ctx.save();
+ctx.strokeStyle = muted;
+ctx.setLineDash([2, 3]);
+ctx.lineWidth = 1;
+ctx.beginPath(); ctx.moveTo(nowX, plot.y); ctx.lineTo(nowX, plot.y + plot.h); ctx.stroke();
+ctx.restore();
+}
+
+if (nightRateChartHoverIndex != null) {
+ctx.fillStyle = ink;
+ctx.globalAlpha = 0.05;
+ctx.fillRect(plot.x + nightRateChartHoverIndex * bw, plot.y, bw, plot.h);
+ctx.globalAlpha = 1;
+}
+
+// One 2px line per listing (the dataviz mark spec for a line series),
+// broken at any month with no stay rather than interpolated across it,
+// and a >=7px marker at every real data point -- a gap in the data is
+// a real gap, not a rate that happened to sit between two known ones.
+series.forEach(({ l, rates }) => {
+const color = resolveColor(listingColorVar(l.colour));
+ctx.strokeStyle = color;
+ctx.lineWidth = 2;
+ctx.beginPath();
+let drawing = false;
+rates.forEach((v, i) => {
+if (v == null) { drawing = false; return; }
+const x = plot.x + (i + 0.5) * bw;
+const y = scaleY(v);
+if (!drawing) { ctx.moveTo(x, y); drawing = true; } else { ctx.lineTo(x, y); }
+});
+ctx.stroke();
+ctx.fillStyle = color;
+rates.forEach((v, i) => {
+if (v == null) return;
+const x = plot.x + (i + 0.5) * bw;
+const y = scaleY(v);
+ctx.beginPath();
+ctx.arc(x, y, 3.5, 0, Math.PI * 2);
+ctx.fill();
+});
+});
+
+ctx.fillStyle = muted;
+ctx.font = "10px 'Inter', sans-serif";
+ctx.textAlign = 'center';
+ctx.textBaseline = 'top';
+const maxLabels = Math.max(3, Math.min(n, Math.floor(plot.w / 34)));
+const tickIndices = new Set();
+for (let k = 0; k < maxLabels; k++) tickIndices.add(Math.round((k / (maxLabels - 1)) * (n - 1)));
+if (nowIndex >= 0) {
+let nearestToNow = [...tickIndices].reduce((a, b) => Math.abs(b - nowIndex) < Math.abs(a - nowIndex) ? b : a);
+tickIndices.delete(nearestToNow);
+tickIndices.add(nowIndex);
+}
+months.forEach((ym, i) => {
+if (!tickIndices.has(i)) return;
+ctx.fillText(monthLabel(ym), plot.x + (i + 0.5) * bw, plot.y + plot.h + 4);
+});
+
+nightRateChartLastPlot = { plot, bw, months };
+
+// Hover tooltip -- only the listings that actually have a rate for the
+// hovered month, since most months won't have every listing occupied.
+if (nightRateChartHoverIndex != null && months[nightRateChartHoverIndex]) {
+const rows = series.map((s) => ({ l: s.l, v: s.rates[nightRateChartHoverIndex] })).filter((r) => r.v != null);
+if (rows.length) {
+const lines = [monthLabel(months[nightRateChartHoverIndex]), ...rows.map((r) => `${r.l.label}: ${money0(r.v)}/night`)];
+ctx.font = "10px 'Inter', sans-serif";
+const boxW = Math.max(...lines.map((ln) => ctx.measureText(ln).width)) + 16;
+const boxH = lines.length * 14 + 10;
+const cx = plot.x + (nightRateChartHoverIndex + 0.5) * bw;
+const boxX = Math.min(Math.max(cx - boxW / 2, plot.x), plot.x + plot.w - boxW);
+const boxY = plot.y + 2;
+ctx.fillStyle = paper;
+ctx.strokeStyle = lineColor;
+ctx.fillRect(boxX, boxY, boxW, boxH);
+ctx.strokeRect(boxX, boxY, boxW, boxH);
+ctx.fillStyle = ink;
+ctx.textAlign = 'left';
+ctx.textBaseline = 'alphabetic';
+lines.forEach((ln, i) => ctx.fillText(ln, boxX + 8, boxY + 12 + i * 14));
+}
+}
+}
+
+function renderNightRateChart() {
+const canvas = document.getElementById('night-rate-chart-canvas');
+if (!canvas) return;
+const chartData = nightRateChartData();
+syncNightRateSelection(chartData.listings);
+renderNightRateChartLegend(chartData.listings);
+drawNightRateChart(canvas, chartData);
+}
+
+function initNightRateChart() {
+const canvas = document.getElementById('night-rate-chart-canvas');
+if (!canvas) return;
+canvas.addEventListener('pointermove', (evt) => {
+if (!nightRateChartLastPlot) return;
+const r = canvas.getBoundingClientRect();
+const x = evt.clientX - r.left;
+const { plot, bw, months } = nightRateChartLastPlot;
+const i = Math.floor((x - plot.x) / bw);
+nightRateChartHoverIndex = (i >= 0 && i < months.length) ? i : null;
+renderNightRateChart();
+});
+canvas.addEventListener('pointerleave', () => { nightRateChartHoverIndex = null; renderNightRateChart(); });
+document.addEventListener('tabshown', (e) => { if (e.detail?.tab === 'finances') renderNightRateChart(); });
+window.addEventListener('resize', renderNightRateChart);
+renderNightRateChart();
 }
 
 function renderOwnerPicker() {
