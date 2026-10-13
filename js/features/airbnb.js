@@ -1354,17 +1354,24 @@ timeMax: `${dateStrAdd(reservation.checkout, 2)}T00:00:00Z`,
 q: listing.prefix,
 })
 : [];
-if (candidates.length === 1) {
-const match = candidates[0];
+// Same exclusive-end correction as the external scan (eventDayRange),
+// so a hand-typed ALL-DAY event's dates compare fairly against
+// Google's own exclusive end.
+const match = candidates.length === 1 ? candidates[0] : null;
+const matchRange = match ? eventDayRange(match) : null;
+// Adopted only on an EXACT date match -- confirmed live as a real bug,
+// not a hypothetical one: adopting the one same-prefix candidate
+// REGARDLESS of how much its dates differed once silently linked a
+// DIFFERENT, already-pushed booking's event to this reservation (two
+// back-to-back guests on the same listing, the later one's event
+// falling inside the earlier reservation's own +-2 day search window)
+// -- "Pushed ✓" kept showing for a reservation whose real event, on
+// Calendar, belonged to someone else's stay entirely. A near-miss is
+// surfaced in the create branch below instead of acted on blind.
+if (match && matchRange.checkin === reservation.checkin && matchRange.checkout === reservation.checkout) {
 reservation.googleEventId = match.id;
 reservation.googleCalendarId = calendarId;
-// Same exclusive-end correction as the external scan (eventDayRange),
-// so adopting a hand-typed ALL-DAY event doesn't report its dates as
-// differing purely because Google's end is a day past the last one.
-const { checkin: matchStart, checkout: matchEnd } = eventDayRange(match);
-statusEl.textContent = (matchStart !== reservation.checkin || matchEnd !== reservation.checkout)
-? `Matched an existing "${match.summary}" event, but its dates differ (${matchStart} → ${matchEnd}) — left as-is, adjust it by hand if that's wrong.`
-: `Matched an existing "${match.summary}" event — adopted, nothing new created.`;
+statusEl.textContent = `Matched an existing "${match.summary}" event — adopted, nothing new created.`;
 } else if (candidates.length > 1) {
 statusEl.textContent = `${candidates.length} existing events near these dates already mention "${listing.prefix}" — too ambiguous to adopt one automatically. Rename or remove the extras in Google Calendar, then push again.`;
 } else {
@@ -1375,7 +1382,9 @@ startTime: CHECKIN_TIME, endTime: CHECKOUT_TIME,
 });
 reservation.googleEventId = created.id;
 reservation.googleCalendarId = calendarId;
-statusEl.textContent = 'Pushed.';
+statusEl.textContent = match
+? `Pushed as a new event — a nearby "${match.summary}" (${matchRange.checkin} → ${matchRange.checkout}) mentions "${listing.prefix}" too but its dates don't match this stay, so it wasn't adopted.`
+: 'Pushed.';
 }
 queueSave();
 renderAirbnb();
@@ -1389,19 +1398,36 @@ statusEl.textContent = `Couldn't push: ${err.message || err}`;
 // vanished from Calendar (deleted by hand, or any other reason outside
 // this app) while the dashboard kept showing Pushed forever, since
 // nothing ever checked back. Re-verifies every upcoming pushed
-// reservation's event still actually exists on each real Sync, and
-// reverts it to "needs pushing" (clearing googleEventId/
-// googleCalendarId, so pushReservation's own `if (reservation.
-// googleEventId) return` no longer blocks a re-push) if it's gone.
-// Scoped to upcoming reservations only (checkout >= today) -- a past
-// stay's event disappearing changes nothing worth re-pushing for.
+// reservation's event still actually exists AND is still genuinely
+// ABOUT that reservation, on each real Sync, reverting it to "needs
+// pushing" (clearing googleEventId/googleCalendarId, so
+// pushReservation's own `if (reservation.googleEventId) return` no
+// longer blocks a re-push) if either isn't true.
+//
+// The second check (dates still match) is not hypothetical -- confirmed
+// live as the real cause of a reported case ("Pushed ✓" with no
+// matching event anywhere on the real calendar): pushReservation's own
+// adoption step once matched a DIFFERENT, already-pushed booking on the
+// same listing whose dates fell inside this one's own +-2 day search
+// window (an ordinary case for back-to-back guests), silently linking
+// two different reservations to ONE calendar event. That event
+// genuinely exists and isn't cancelled, so the "still exists" check
+// alone says nothing is wrong -- only comparing the event's own dates
+// against the reservation's own dates catches it. Scoped to upcoming
+// reservations only (checkout >= today) -- a past stay's event
+// disappearing or having drifted changes nothing worth re-pushing for.
 async function verifyPushedEvents() {
 const candidates = data.airbnbReservations.filter((r) => r.googleEventId && r.googleCalendarId && r.checkout >= todayStr());
 let missing = 0;
 for (const r of candidates) {
 try {
 const event = await getEvent(r.googleCalendarId, r.googleEventId);
-if (!event || event.status === 'cancelled') {
+const gone = !event || event.status === 'cancelled';
+const mismatched = !gone && (() => {
+const { checkin: matchStart, checkout: matchEnd } = eventDayRange(event);
+return matchStart !== r.checkin || matchEnd !== r.checkout;
+})();
+if (gone || mismatched) {
 r.googleEventId = '';
 r.googleCalendarId = '';
 missing++;
@@ -1494,7 +1520,7 @@ const cancelNote = cancelResult.posted
 ? ` Posted ${cancelResult.posted} cancellation payout${cancelResult.posted === 1 ? '' : 's'} to <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#letting-panel">Letting income</span>.`
 : '';
 const verifyNote = verifyResult.missing
-? ` ${verifyResult.missing} calendar event${verifyResult.missing === 1 ? ' had' : 's had'} vanished from Calendar — marked as needing a push again.`
+? ` ${verifyResult.missing} booking${verifyResult.missing === 1 ? "'s calendar event wasn't" : "s' calendar events weren't"} actually there any more — marked as needing a push again.`
 : '';
 status.innerHTML = `Synced just now.${guestNote}${cancelNote}${verifyNote}`;
 } else {

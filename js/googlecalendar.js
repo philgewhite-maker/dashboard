@@ -118,7 +118,7 @@ return json.items || [];
 // calendar id) -- which should leave whatever it was checking alone, not
 // wrongly treat it as deleted over a transient error.
 async function getEvent(calendarId, eventId) {
-const res = await googleFetch(`${EVENTS_API}/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}?fields=id,status`);
+const res = await googleFetch(`${EVENTS_API}/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}?fields=id,status,summary,start,end`);
 if (res.status === 404 || res.status === 410) return null;
 if (!res.ok) throw new Error(`Couldn't check calendar event: ${res.status}`);
 return res.json();
