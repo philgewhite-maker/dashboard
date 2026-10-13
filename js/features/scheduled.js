@@ -159,6 +159,20 @@ await runResaleEstimateSweep();
 },
 },
 {
+// Own per-listing/date-range dedup gate lives INSIDE
+// runAirbnbRateReview (airbnbrates.js), a flat ~quarterly refresh --
+// same shape as the two above. Asked for directly: look up to 13
+// months out (a ticket on-sale or fixture list can land that far
+// ahead), one task with a subtask per proposed date range, the first
+// run proposing more than usual since nothing's suggested yet.
+id: 'airbnb-rate-review', label: 'Airbnb rate review', needsGoogle: false,
+note: 'Roughly quarterly -- proposes rate-uplift date ranges for real upcoming London events, as a task with one subtask per proposal. See Overview → Airbnb.',
+run: async () => {
+const { runAirbnbRateReview } = await import('./airbnbrates.js');
+await runAirbnbRateReview();
+},
+},
+{
 id: 'calendar', label: 'Calendars', buttonId: 'sync-cal-btn', needsGoogle: true,
 note: 'Upcoming events for each tracked calendar.',
 },

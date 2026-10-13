@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v568</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v569</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -99,6 +99,11 @@
 <button class="sync-btn" id="airbnb-sync-btn" type="button">&#8635; Sync</button>
 <select id="airbnb-push-calendar" title="Which Google Calendar &quot;Push to Google Calendar&quot; sends to"><option value="">Push to&hellip;</option></select>
 <span class="sync-status" id="airbnb-sync-status"></span>
+</div>
+<div class="sync-row" style="margin-top:8px;">
+<button class="sync-btn sm inline" id="airbnb-rate-review-btn" type="button" title="Searches for real upcoming London events (concerts, England matches, Wimbledon, NYE...) over the next 13 months and proposes rate-uplift date ranges -- one task with a subtask per proposal, roughly quarterly.">&#128181; Rate review now</button>
+<span class="sync-status" id="airbnb-rate-review-status"></span>
+<span class="inline-goto-link" data-goto-tab="tasks" data-goto-target="#tasks-panel" title="See proposals in Tasks">Tasks</span>
 </div>
 <div id="airbnb-list"></div>
 <div class="sync-row" id="airbnb-add-booking" style="margin-top:8px;">

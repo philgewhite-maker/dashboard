@@ -1421,6 +1421,63 @@ name: String(first.name || ''), retailer: String(first.retailer || ''), price: S
 } : null;
 }
 
+// Quarterly Airbnb rate-adjustment proposals (js/features/airbnbrates.js)
+// -- real, confirmed demand-driving London dates (concerts, England
+// matches, Wimbledon, NYE, bank holidays...) over a long look-ahead
+// window, since a ticket on-sale date or a fixture list can land many
+// months before the date itself. A genuine web-search question, not
+// something to answer from training data alone -- a 13-month-out event
+// calendar is exactly the kind of thing that's wrong unless actually
+// looked up. `alreadyProposed` is sent back to the model explicitly (on
+// top of the caller's own after-the-fact dedup) so a repeat suggestion
+// is avoided at the source, not just filtered out afterwards.
+const RATE_REVIEW_MODEL = 'claude-sonnet-5';
+const RATE_REVIEW_MAX_TOKENS = 8000;
+const RATE_REVIEW_EFFORT = 'medium';
+function airbnbRateReviewPrompt({ listings, windowStart, windowEnd, alreadyProposed, count }) {
+return `You're helping a London host review short-let pricing for ${listings.length} premium room listing(s) (£150+/night normally) near London Bridge, SE1 4GT -- an easy journey to most central London venues.
+
+Find up to ${count} specific date ranges, between ${windowStart} and ${windowEnd}, where real demand in London would justify a price increase above the normal rate: major concerts/gigs at venues a visitor would travel in for (The O2, Wembley Stadium/Arena, Tottenham Hotspur Stadium, Emirates Stadium, large London arenas/stadiums generally), England international matches, Wimbledon, other major sporting finals held in or near London, New Year's Eve, and any other genuinely demand-driving event or bank holiday weekend you can CONFIRM with a real search.
+
+LISTINGS (each proposal must name exactly one of these, spelled exactly as given):
+${listings.map((l) => `- ${l.label}`).join('\n')}
+
+ALREADY PROPOSED in an earlier review -- do not suggest any of these again, even a nearby or slightly different date range for the same event:
+${alreadyProposed.length ? alreadyProposed.map((p) => `- ${p.reason}, ${p.startDate} to ${p.endDate}`).join('\n') : '(none yet -- this is the first review)'}
+
+HARD REQUIREMENTS:
+1. Every date range needs a REAL, SEARCH-CONFIRMED reason with an actual date -- if you can't confirm a specific date for an event, leave it out rather than guess one.
+2. State the uplift as EITHER a percentage OR a flat £ amount above the normal rate (whichever reads more naturally for that event) -- set the other to null.
+3. Suggest a minimum-stay in nights where a host would normally want one around a big event (most hosts ask for 2-3+ nights rather than letting a single peak night go alone) -- or null if no change is needed.
+4. Spread proposals across the listings and across the date window rather than clustering everything in one month, where the real events genuinely allow it.
+5. At most ${count} proposals, best (most confident, highest real demand) first.
+
+Respond with ONLY a JSON object, no other text, no markdown fences: {"proposals":[{"listing":"","startDate":"YYYY-MM-DD","endDate":"YYYY-MM-DD","reason":"","upliftPct":null,"upliftAmount":null,"minStayNights":null,"notes":""}]}. "listing" must exactly match one of the listing names given above. Use upliftPct OR upliftAmount, never both non-null. If you can't confirm anything real for a slot, return fewer than ${count} rather than padding with a guess.`;
+}
+async function generateAirbnbRateReview({ listings, windowStart, windowEnd, alreadyProposed, count }) {
+const tools = [{
+type: 'web_search_20260209', name: 'web_search', max_uses: 8, allowed_callers: ['direct'],
+user_location: { type: 'approximate', country: 'GB' },
+}, {
+type: 'web_fetch_20260209', name: 'web_fetch', max_uses: 4, allowed_callers: ['direct'],
+}];
+const { data: raw } = await callAnthropic(
+[{ type: 'text', text: airbnbRateReviewPrompt({ listings, windowStart, windowEnd, alreadyProposed, count }) }],
+RATE_REVIEW_MAX_TOKENS, RATE_REVIEW_MODEL, 'Airbnb rate review', tools, RATE_REVIEW_EFFORT,
+);
+const proposals = Array.isArray(raw && raw.proposals) ? raw.proposals : [];
+return proposals
+.filter((p) => p && p.listing && p.startDate && p.endDate && p.reason)
+.slice(0, count)
+.map((p) => ({
+listing: String(p.listing), startDate: String(p.startDate), endDate: String(p.endDate), reason: String(p.reason),
+upliftPct: p.upliftPct != null && Number.isFinite(Number(p.upliftPct)) ? Number(p.upliftPct) : null,
+upliftAmount: p.upliftAmount != null && Number.isFinite(Number(p.upliftAmount)) ? Number(p.upliftAmount) : null,
+minStayNights: p.minStayNights != null && Number.isFinite(Number(p.minStayNights)) ? Number(p.minStayNights) : null,
+notes: String(p.notes || ''),
+}));
+}
+
 // A genuinely different question from scanSwitchOffers (switchoffers.js):
 // not "what NEW switch bonus am I eligible for", but "is one of my OWN
 // existing current accounts bringing so little ongoing benefit that
@@ -2387,7 +2444,7 @@ return { country: String((data && data.country) || '').trim() };
 export {
 MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot, quickScanScreenshot, scanForCaptureMarker,
 callTextJson, DEFAULT_MODEL, summarizeUsage, currentMonthKey, compareFaces,
-extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShoppingItem, searchAgentProvocateurElsewhere, searchEbayResaleEstimate, searchDepartmentStoresForMissingSetPiece, analyseOngoingAccountValue, identifyProduct, translateText, romanizeName, parseCaptureIntent,
+extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShoppingItem, searchAgentProvocateurElsewhere, searchEbayResaleEstimate, searchDepartmentStoresForMissingSetPiece, generateAirbnbRateReview, analyseOngoingAccountValue, identifyProduct, translateText, romanizeName, parseCaptureIntent,
 resolveUrlTitle, resolveJobPostingUrl, resolveBookDetails, resolveSeriesBooks,
 identifyCountry, extractWellnessScreenshot,
 extractTripScreenshot, extractMediaScreenshot, extractTripLegFromEmail, extractTaskFromEmail, extractDateEventFromEmail, extractMediaRecommendations, rankMediaCandidates, findLatestArticleUrl, extractSchoolCalendar,

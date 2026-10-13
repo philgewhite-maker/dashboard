@@ -69,6 +69,11 @@ note: 'Reported by runResaleEstimateSweep() (shopping.js) whenever its own month
 run: null, reportedExternally: true,
 },
 {
+id: 'airbnb-rate-review', label: 'Airbnb rate review (web search)', site: 'various — real event sources',
+note: 'Reported by runAirbnbRateReview() (airbnbrates.js) whenever its own ~quarterly gate lets a check actually run -- nothing runs from here, this only shows the last run\'s summary.',
+run: null, reportedExternally: true,
+},
+{
 id: 'cashback-quidco', label: 'Quidco — cashback rate', site: 'quidco.com',
 note: 'Reported by refreshCashbackRates() (stockwatch.js) whenever a stock check refreshes rates -- nothing runs from here, this only shows the last result.',
 run: null, reportedExternally: true,

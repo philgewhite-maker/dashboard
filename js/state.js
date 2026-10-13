@@ -171,6 +171,10 @@ lettingChartTargets: {},
 // Settings section, same reasoning setCompletionSizeBounds already
 // uses -- nothing else reads it.
 airbnbCleaningCost: 50,
+// {lastRunAt} -- gates js/features/airbnbrates.js's own quarterly
+// cadence, same shape setCompletionSearches/resaleEstimateChecks
+// already use for their own recheck gates.
+airbnbRateReviewChecks: {},
 // What the monthly recommendations check (js/features/mediarecs.js) scores
 // candidates against -- `genres` are TMDb genre NAMES (catalogue.js's
 // TMDB_GENRES), `minRating` is a TMDb vote_average floor (0-10, 0 = no
@@ -1928,6 +1932,14 @@ proxyRefusals: {},
 // reservationId, listingId}; a POSITIVE amount increases what they owe
 // and a payment is negative. See js/features/letting.js.
 lettingLedger: [],
+// Every date-range rate-uplift proposal a quarterly review
+// (js/features/airbnbrates.js) has ever generated -- {id, listingId,
+// startDate, endDate, reason, upliftPct, upliftAmount, minStayNights,
+// notes, proposedAt, taskId, subtaskId}. This, not the linked task's
+// own survival, is the authoritative "don't suggest this again" record
+// -- a task can be deleted later without that silently reopening the
+// same event to be re-proposed.
+airbnbRateProposals: [],
 prefs: { ...DEFAULT_PREFS } };
 }
 
@@ -2023,6 +2035,7 @@ data.ticker.items.push({ id: 'letting', kind: 'letting' });
 if (!data.tickerCache || typeof data.tickerCache !== 'object') data.tickerCache = {};
 if (!data.proxyRefusals || typeof data.proxyRefusals !== 'object') data.proxyRefusals = {};
 if (!Array.isArray(data.lettingLedger)) data.lettingLedger = [];
+if (!Array.isArray(data.airbnbRateProposals)) data.airbnbRateProposals = [];
 // FIRST, before anything else in here touches it. An existing document
 // predates this key entirely, and two passes below both reach for it --
 // the connection loop that carries the old per-person `owned` across,
