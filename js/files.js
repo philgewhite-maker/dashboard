@@ -43,6 +43,25 @@ throw new Error(`Couldn't work out the image-proxy URL from "${url}" — it shou
 return { endpoint, secret };
 }
 
+// product-image-proxy.php sits next to sync.php too. A separate file from
+// image-proxy.php on purpose -- that one is locked to a small host
+// allowlist (Google Photos, Tinder) for ITS job; a product photo can come
+// from any retailer's own CDN, so this one carries recipe-fetch.php's own
+// any-host SSRF defence instead (see that endpoint's own header) but
+// returns real image bytes rather than refusing anything that isn't
+// html/json -- confirmed live, that refusal is exactly what a direct
+// product-image URL hit when it went through pageFetchEndpoint/
+// fetchProxiedImage instead.
+async function productImageProxyEndpoint() {
+const { url, secret, configured } = await getConfig();
+if (!configured) throw new FilesNotConfiguredError();
+const endpoint = url.replace(/sync\.php(?=$|\?)/, 'product-image-proxy.php');
+if (endpoint === url) {
+throw new Error(`Couldn't work out the product-image-proxy URL from "${url}" — it should end in sync.php.`);
+}
+return { endpoint, secret };
+}
+
 // ics-proxy.php sits next to sync.php too, same reasoning as filesEndpoint.
 async function icsProxyEndpoint() {
 const { url, secret, configured } = await getConfig();
@@ -223,6 +242,25 @@ proxiedImageCache.set(url, blob);
 return blob;
 }
 
+// Same job as fetchProxiedImage, different proxy: any public https host
+// rather than the small Google-Photos/Tinder allowlist that one is
+// locked to -- for a product photo (Shopping -> Inventory), which can
+// come from any retailer's own CDN. See product-image-proxy.php's own
+// header for why this needed a second server endpoint rather than
+// reusing either existing one.
+async function fetchProductImage(url) {
+const { endpoint, secret } = await productImageProxyEndpoint();
+const res = await withTimeout(DOWNLOAD_TIMEOUT_MS, (signal) => fetch(`${endpoint}?url=${encodeURIComponent(url)}`, {
+headers: { 'X-Sync-Secret': secret },
+signal,
+}));
+if (!res.ok) {
+if (res.status === 401) throw new Error('The product-image-proxy server rejected the secret — check product-image-proxy.php uses the same one as sync.php.');
+throw new Error(await errorFrom(res, `Couldn't fetch that image (HTTP ${res.status}).`));
+}
+return res.blob();
+}
+
 // Fetches an Airbnb (or other) calendar-export feed's raw text via
 // ics-proxy.php -- same CORS problem as fetchProxiedImage above, different
 // content. Deliberately NOT cached like fetchProxiedImage is: a photo's
@@ -352,5 +390,5 @@ return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 export {
 FilesNotConfiguredError,
 uploadAttachment, storePhoto, fetchAttachment, deleteAttachment, openAttachment, formatBytes,
-isServerPhotoId, serverPhotoUrl, fetchProxiedImage, fetchIcs, transcribeAudioFile, fetchPageHtml,
+isServerPhotoId, serverPhotoUrl, fetchProxiedImage, fetchProductImage, fetchIcs, transcribeAudioFile, fetchPageHtml,
 };

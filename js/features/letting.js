@@ -813,6 +813,25 @@ total += 1;
 return { counts, total };
 }
 
+// `date` minus `nights` days -- the checkin a historic "earned" row
+// WOULD have had, derivable from fields already on the row without
+// needing its own optional startDate input filled in too. Used as a
+// fallback date range for month-splitting wherever startDate is blank,
+// instead of lumping the whole gross into date's own single month.
+// Confirmed live as a real gap, reported directly: a real 20-night stay
+// (23 Sept -> 13 Oct) with nights recorded but no startDate typed in
+// landed entirely in October on the income chart, with nothing at all
+// in September -- "not fully reflected" is exactly what that looks
+// like, and it's purely because startDate happened to be the ONLY way
+// this function knew to split across months, despite nights already
+// saying the stay couldn't have fit in one.
+function impliedStartDate(dateStr, nights) {
+if (!dateStr || !(nights > 0)) return '';
+const d = new Date(`${dateStr}T00:00:00`);
+d.setDate(d.getDate() - nights);
+return d.toISOString().slice(0, 10);
+}
+
 // One Map per group (Mine / Lewis' / Zara's / ...), ym -> allocated
 // income, built fresh from data.airbnbReservations every render -- same
 // "derive it, don't store it" rule the owed/gross totals above already
@@ -891,15 +910,22 @@ splitContribution(listing, income * (nights / total)).forEach((c) => { addAmount
 if ((e.kind !== 'earned' && e.kind !== 'cancellation') || !e.gross || !e.date) return;
 const listing = listings.find((l) => ownerKeyFor(l) === e.ownerKey);
 if (!listing) return;
-// Optional startDate (letting-add-start-date input above): a historic
-// booking that actually ran longer than one month gets split pro-rata
-// by night across every month it spans, exactly like a real
-// reservation's own checkin/checkout (nightsByMonth) -- otherwise the
-// whole gross lands as one spike in a single month, which is what was
-// blowing the chart's own scale for a multi-month let.
+// A historic booking that actually ran longer than one month gets
+// split pro-rata by night across every month it spans, exactly like a
+// real reservation's own checkin/checkout (nightsByMonth) -- otherwise
+// the whole gross lands as one spike in a single month, which is what
+// was blowing the chart's own scale for a multi-month let. The
+// explicit startDate (letting-add-start-date input above) wins when
+// set, since it can account for a gap the simple "date minus nights"
+// arithmetic below can't (dates that weren't actually contiguous); the
+// derived one is the fallback the moment nights alone already implies
+// more than a single month, not something the user has to additionally
+// type in just to get the same split their own nights figure already
+// describes.
 const platform = e.platform === 'other' ? 'other' : 'airbnb';
-if (e.startDate && e.startDate < e.date) {
-const { counts, total } = nightsByMonth(e.startDate, e.date);
+const splitStart = (e.startDate && e.startDate < e.date) ? e.startDate : impliedStartDate(e.date, e.nights);
+if (splitStart && splitStart < e.date) {
+const { counts, total } = nightsByMonth(splitStart, e.date);
 if (!total) return;
 counts.forEach((nights, ym) => {
 if (!baseMonthSet.has(ym)) return;
@@ -1076,7 +1102,7 @@ const paper = resolveColor('--paper');
 // worth seeing most. Confirmed directly as a real problem from a
 // screenshot, not a style nitpick -- the tooltip now always renders in
 // this reserved band (see boxY below), never over real chart content.
-const padLeft = 46, padRight = 10, padTop = 90, padBottom = 20;
+const padLeft = 46, padRight = 10, padTop = 62, padBottom = 20;
 const plot = { x: padLeft, y: padTop, w: Math.max(10, width - padLeft - padRight), h: Math.max(10, height - padTop - padBottom) };
 
 const monthTotals = months.map((ym) => groups.reduce((n, g) => n + (perGroupByMonth.get(g.key).get(ym) || 0), 0));
@@ -1270,7 +1296,10 @@ const total = rows.reduce((s, r) => s + r.raw, 0);
 // doesn't say its exact value.
 const avgWindow = monthTotals.slice(Math.max(0, lettingChartHoverIndex - 2), lettingChartHoverIndex + 1);
 const avg = avgWindow.reduce((s, v) => s + v, 0) / avgWindow.length;
-const lines = [monthLabel(ym)];
+// Month, total and the 3-month average folded onto one line -- each
+// used to get its own row ("Total: X" / "3-month avg: Y"), 2 rows of
+// height for numbers that read fine packed beside the month itself.
+const lines = [`${monthLabel(ym)} — ${money0(total)} · 3m avg ${money0(avg)}`];
 rows.forEach((r) => {
 lines.push(`${r.g.label}: ${money0(r.raw)}`);
 // Only when a group actually mixes both this month -- a group that's
@@ -1280,7 +1309,6 @@ if (r.platform.airbnb > 0.004 && r.platform.other > 0.004) {
 lines.push(`  Airbnb ${money0(r.platform.airbnb)} · Other ${money0(r.platform.other)}`);
 }
 });
-lines.push(`Total: ${money0(total)}`, `3-month avg: ${money0(avg)}`);
 ctx.font = "10px 'Inter', sans-serif";
 const boxW = Math.max(...lines.map((l) => ctx.measureText(l).width)) + 16;
 const boxH = lines.length * 14 + 10;
@@ -1372,15 +1400,23 @@ nightRateSelectedListings.add(l.key);
 // weight that stay contributes once more than one stay shares a month.
 // An accrual's real checkin/checkout lives on its reservation, if
 // still on file; an "earned" (historic, hand-typed) row has its own
-// optional startDate for the same purpose. Neither present -- nothing
-// to spread across, so it stays a single-month point, same as before.
+// optional startDate for the same purpose, which wins when set (it can
+// account for a real gap the "date minus nights" arithmetic below
+// can't). Below that, `nights` alone already says how far back the
+// stay must have started -- date minus nights -- so that's used rather
+// than lumping into a single month just because neither of the above
+// was available. Confirmed live as a real gap: a 20-night stay with no
+// reservation left on file and no startDate typed in showed its whole
+// rate bunched into one month on the chart, nothing in the other one
+// it actually spanned.
 function nightsByMonthForEntry(e) {
 if (e.kind === 'accrual' && e.reservationId) {
 const r = (data.airbnbReservations || []).find((x) => x.id === e.reservationId);
 if (r && r.checkin && r.checkout && r.checkout > r.checkin) return nightsByMonth(r.checkin, r.checkout);
 }
-if (e.kind === 'earned' && e.startDate && e.date && e.startDate < e.date) {
-return nightsByMonth(e.startDate, e.date);
+const splitStart = (e.kind === 'earned' && e.startDate && e.date && e.startDate < e.date) ? e.startDate : impliedStartDate(e.date, e.nights);
+if (splitStart && e.date && splitStart < e.date) {
+return nightsByMonth(splitStart, e.date);
 }
 const ym = (e.date || '').slice(0, 7);
 if (!ym || !e.nights) return { counts: new Map(), total: 0 };
@@ -1735,15 +1771,34 @@ ctx.fillText(`${Math.round(avg)}n`, cx, occPlot.y + labelPad - 1);
 }
 
 // Occupancy's own hover lines, appended to whichever rate-mode tooltip
-// is already being built -- one combined box, not two.
+// is already being built -- one combined box, not two. A 0% month is
+// skipped entirely rather than printed -- "no stay this month" isn't
+// worth a line of its own once it's the common case for an off-season
+// month, and every line here costs real vertical space reserved above
+// the chart for it (see padTop).
 function occupancyTooltipLines(occupancy, hoverIndex) {
 if (hoverIndex == null) return [];
 return occupancy.map((s) => {
 const pct = s.pctByMonth[hoverIndex];
-if (pct == null) return null;
+if (!pct) return null;
 const avg = s.avgDurationByMonth ? s.avgDurationByMonth[hoverIndex] : null;
-return `${s.room.label}: ${Math.round(pct * 100)}% occupied${avg != null ? `, avg stay ${avg.toFixed(1)}n` : ''}`;
+return `${s.room.label}: ${Math.round(pct * 100)}% occ${avg != null ? `, avg ${avg.toFixed(1)}n` : ''}`;
 }).filter(Boolean);
+}
+
+// One line per room, rate AND occupancy together -- used by the candle
+// view below, the one place both are already grouped by the same ROOM
+// (the average/per-listing view's rate rows and the per-room occupancy
+// rows are genuinely different groupings -- see nightRateRooms -- so
+// those stay as two separate blocks instead of being force-merged into
+// something that doesn't actually correspond 1:1).
+function roomCombinedTooltipLine(label, st, pct, avgDur) {
+const parts = [];
+if (st) parts.push(`${money0(st.low)}–${money0(st.high)} avg ${money0(st.avg)}/n`);
+if (pct) parts.push(`${Math.round(pct * 100)}% occ`);
+if (avgDur != null) parts.push(`avg ${avgDur.toFixed(1)}n`);
+if (!parts.length) return null;
+return `${label}: ${parts.join(' · ')}`;
 }
 
 function drawNightRateChart(canvas, chartData) {
@@ -1768,7 +1823,7 @@ const paper = resolveColor('--paper');
 // padTop reserves a fixed header band for the hover tooltip, same
 // reasoning as the income chart above -- it used to sit at plot.y+2,
 // right on top of the tallest bars/candles near the hovered month.
-const padLeft = 46, padRight = 10, padTop = 90, padBottom = 20;
+const padLeft = 46, padRight = 10, padTop = 62, padBottom = 20;
 const totalH = Math.max(10, height - padTop - padBottom);
 const occGap = 14;
 const occH = Math.round(totalH * NIGHT_RATE_OCCUPANCY_SHARE);
@@ -1893,7 +1948,7 @@ if (nightRateChartHoverIndex != null && months[nightRateChartHoverIndex]) {
 const rows = series.map((s) => ({ l: s.l, v: s.rates[nightRateChartHoverIndex] })).filter((r) => r.v != null);
 const occLines = occupancyTooltipLines(occupancy, nightRateChartHoverIndex);
 if (rows.length || occLines.length) {
-const lines = [monthLabel(months[nightRateChartHoverIndex]), ...rows.map((r) => `${r.l.label}: ${money0(r.v)}/night`), ...occLines];
+const lines = [monthLabel(months[nightRateChartHoverIndex]), ...rows.map((r) => `${r.l.label}: ${money0(r.v)}/n`), ...occLines];
 ctx.font = "10px 'Inter', sans-serif";
 const boxW = Math.max(...lines.map((ln) => ctx.measureText(ln).width)) + 16;
 const boxH = lines.length * 14 + 10;
@@ -1942,7 +1997,7 @@ const paper = resolveColor('--paper');
 // padTop reserves a fixed header band for the hover tooltip, same
 // reasoning as the income chart above -- it used to sit at plot.y+2,
 // right on top of the tallest bars/candles near the hovered month.
-const padLeft = 46, padRight = 10, padTop = 90, padBottom = 20;
+const padLeft = 46, padRight = 10, padTop = 62, padBottom = 20;
 const totalH = Math.max(10, height - padTop - padBottom);
 const occGap = 14;
 const occH = Math.round(totalH * NIGHT_RATE_OCCUPANCY_SHARE);
@@ -2046,10 +2101,17 @@ ctx.fillText(monthLabel(ym), plot.x + (i + 0.5) * bw, occPlot.y + occPlot.h + 4)
 nightRateChartLastPlot = { plot, bw, months };
 
 if (nightRateChartHoverIndex != null && months[nightRateChartHoverIndex]) {
-const rows = rooms.map((s) => ({ label: s.room.label, st: s.statsByMonth[nightRateChartHoverIndex] })).filter((r) => r.st);
-const occLines = occupancyTooltipLines(occupancy, nightRateChartHoverIndex);
-if (rows.length || occLines.length) {
-const lines = [monthLabel(months[nightRateChartHoverIndex]), ...rows.map((r) => `${r.label}: ${money0(r.st.low)}–${money0(r.st.high)}, avg ${money0(r.st.avg)}`), ...occLines];
+// One line per room -- rate and occupancy together, since the candle
+// view is the one place both are already grouped by the same room.
+const roomLines = rooms.map((s) => {
+const st = s.statsByMonth[nightRateChartHoverIndex];
+const occEntry = occupancy.find((o) => o.room.key === s.room.key);
+const pct = occEntry ? occEntry.pctByMonth[nightRateChartHoverIndex] : null;
+const avgDur = occEntry && occEntry.avgDurationByMonth ? occEntry.avgDurationByMonth[nightRateChartHoverIndex] : null;
+return roomCombinedTooltipLine(s.room.label, st, pct, avgDur);
+}).filter(Boolean);
+if (roomLines.length) {
+const lines = [monthLabel(months[nightRateChartHoverIndex]), ...roomLines];
 ctx.font = "10px 'Inter', sans-serif";
 const boxW = Math.max(...lines.map((ln) => ctx.measureText(ln).width)) + 16;
 const boxH = lines.length * 14 + 10;

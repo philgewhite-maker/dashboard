@@ -1,0 +1,159 @@
+<?php
+declare(strict_types=1);
+
+/**
+ * Fetches a PRODUCT image from any public https host and hands back the
+ * raw bytes -- for Shopping -> Inventory's "save a photo from a URL"
+ * (js/features/shopping.js's fetchInventoryImageBlob), which needs an
+ * arbitrary retailer's own CDN (Agent Provocateur, eBay, a department
+ * store...), not a small known set of hosts.
+ *
+ * Neither existing proxy fits this job:
+ *   - image-proxy.php is deliberately locked to a hard-coded host
+ *     allowlist (Google Photos, Tinder's CDN) -- right for what it was
+ *     built for (photo comparison against those two specific sources),
+ *     wrong here: an inventory photo can come from literally any shop.
+ *   - recipe-fetch.php accepts any host, but explicitly REFUSES
+ *     anything that isn't html/json (see its own line "That URL didn't
+ *     return a web page or JSON") -- confirmed live, this is the exact
+ *     error a real product-image URL hit, since recipe-fetch.php's job
+ *     is reading PAGE TEXT, not image bytes, and a product photo is
+ *     neither.
+ *
+ * So this is the third shape: recipe-fetch.php's own any-host SSRF
+ * defence (resolve -> reject private/reserved -> pin the request to the
+ * exact IP checked, so DNS can't rebind between the check and the
+ * fetch -- see that file's own header for why the order matters),
+ * combined with image-proxy.php's own binary-passthrough response
+ * (real bytes, real Content-Type), but accepting an IMAGE content type
+ * instead of rejecting one.
+ *
+ *   GET ?url=<any https product-image URL>   -> the image bytes
+ *
+ * Upload next to sync.php, files.php, image-proxy.php and
+ * recipe-fetch.php (cPanel -> File Manager); set $SECRET to the SAME
+ * value as those, or leave it on the placeholder to fall back to
+ * auth.php's shared $DASH_MASTER_SECRET like the others already do.
+ */
+
+// ---- Configuration ---------------------------------------------------
+
+$SECRET = 'PUT-A-LONG-RANDOM-STRING-HERE';
+$MAX_BYTES = 8 * 1024 * 1024;
+$TIMEOUT_SECONDS = 10;
+
+$ALLOWED_ORIGINS = [
+    'https://philgewhite-maker.github.io',
+    'http://localhost:8743',
+    'http://localhost:5173',
+];
+
+// ---- End of configuration --------------------------------------------
+
+$origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+if ($origin !== '' && in_array($origin, $ALLOWED_ORIGINS, true)) {
+    header('Access-Control-Allow-Origin: ' . $origin);
+    header('Vary: Origin');
+}
+header('Access-Control-Allow-Headers: X-Sync-Secret');
+header('Access-Control-Allow-Methods: GET, OPTIONS');
+header('Access-Control-Max-Age: 86400');
+header('Cache-Control: no-store');
+header('X-Content-Type-Options: nosniff');
+
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
+    http_response_code(204);
+    exit;
+}
+
+function fail(int $code, string $message): void {
+    http_response_code($code);
+    header('Content-Type: application/json');
+    echo json_encode(['error' => $message]);
+    exit;
+}
+
+$provided = $_SERVER['HTTP_X_SYNC_SECRET'] ?? '';
+require_once __DIR__ . '/auth.php';
+if (!dash_secret_configured($SECRET)) {
+    fail(500, 'Server not configured: set $DASH_MASTER_SECRET in auth.php');
+}
+if (!dash_authorise((string) $provided, $SECRET)['ok']) {
+    fail(401, 'Bad or missing sync secret');
+}
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'GET') {
+    fail(405, 'Use GET');
+}
+if (!function_exists('curl_init')) {
+    fail(500, "PHP's curl extension isn't enabled — ask your host to turn it on");
+}
+
+$url = $_GET['url'] ?? '';
+$parts = is_string($url) ? parse_url($url) : false;
+if (!is_array($parts) || ($parts['scheme'] ?? '') !== 'https' || empty($parts['host'])) {
+    fail(400, 'Give a full https:// URL');
+}
+$host = $parts['host'];
+
+// Resolve, reject private/reserved, pin the request to the exact IP just
+// checked -- the same three steps, same order, same reasoning as
+// recipe-fetch.php. A different file because the two endpoints answer a
+// genuinely different content shape, not because the safety logic itself
+// should ever drift between copies.
+$ips = @gethostbynamel($host);
+if ($ips === false || count($ips) === 0) {
+    fail(400, "Could not resolve $host");
+}
+$safeIp = null;
+foreach ($ips as $ip) {
+    if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) !== false) {
+        $safeIp = $ip;
+        break;
+    }
+}
+if ($safeIp === null) {
+    fail(400, 'That host resolves to a private or internal address');
+}
+
+$port = $parts['port'] ?? 443;
+$ch = curl_init($url);
+curl_setopt_array($ch, [
+    CURLOPT_RETURNTRANSFER => true,
+    // A redirect isn't re-validated against the private/reserved check, so
+    // it's refused rather than trusted -- same call recipe-fetch.php makes,
+    // for the same reason. A product CDN link is not expected to redirect
+    // anywhere; if one genuinely does, fetch the URL it redirects to
+    // directly instead.
+    CURLOPT_FOLLOWLOCATION => false,
+    CURLOPT_TIMEOUT => $TIMEOUT_SECONDS,
+    CURLOPT_MAXFILESIZE => $MAX_BYTES,
+    CURLOPT_PROTOCOLS => CURLPROTO_HTTPS,
+    CURLOPT_USERAGENT => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    CURLOPT_RESOLVE => ["$host:$port:$safeIp"],
+    CURLOPT_HTTPHEADER => ['Accept: image/*,*/*;q=0.8'],
+]);
+$bytes = curl_exec($ch);
+$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+$contentType = curl_getinfo($ch, CURLINFO_CONTENT_TYPE) ?: '';
+$err = curl_error($ch);
+curl_close($ch);
+
+if ($bytes === false) {
+    fail(502, "Could not fetch the image: $err");
+}
+if ($httpCode >= 300 && $httpCode < 400) {
+    fail(502, "That URL redirected (HTTP $httpCode) — try the URL it redirects to directly");
+}
+if ($httpCode < 200 || $httpCode >= 300) {
+    fail(502, "The source returned HTTP $httpCode for that image");
+}
+if (strlen($bytes) > $MAX_BYTES) {
+    fail(502, 'Image exceeded the size limit');
+}
+if (strpos($contentType, 'image/') !== 0) {
+    fail(502, "That URL did not return an image (got $contentType)");
+}
+
+header('Content-Type: ' . $contentType);
+header('Content-Length: ' . (string) strlen($bytes));
+echo $bytes;

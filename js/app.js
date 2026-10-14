@@ -84,12 +84,23 @@ if (bar) document.documentElement.style.setProperty('--tabbar-h', `${bar.offsetH
 function initPanelCollapse() {
 document.querySelectorAll('section.panel[id]').forEach((panel) => {
 const head = panel.querySelector(':scope > .panel-head');
-if (!head || head.querySelector(':scope > .panel-collapse-toggle')) return;
+if (!head || head.querySelector('.panel-collapse-toggle')) return;
 const toggle = document.createElement('span');
 toggle.className = 'panel-collapse-toggle';
 toggle.title = 'Collapse/expand this panel';
 toggle.innerHTML = '&#9662;';
-head.insertBefore(toggle, head.firstChild);
+// Prepended INTO the h2, not as a third sibling of .panel-head itself --
+// .panel-head is `justify-content:space-between`, built for exactly two
+// items (the title on the left, .panel-head-total on the right). A
+// third top-level child (this toggle) got caught in that same spread,
+// landing the title dead-centre with the toggle and total pinned to
+// the far edges instead of the toggle sitting next to its own title --
+// confirmed live from a screenshot, worst on a collapsed panel where
+// the header is the only thing left to look at. The h2 is already its
+// own flex row with a gap (for its dot + text), so the toggle joins
+// that group and .panel-head is back to its real two items.
+const h2 = head.querySelector(':scope > h2') || head;
+h2.insertBefore(toggle, h2.firstChild);
 let collapsed = false;
 try { collapsed = localStorage.getItem(`panelCollapsed:${panel.id}`) === '1'; } catch (e) { /* ignore -- stays open */ }
 if (collapsed) setPanelCollapsed(panel, true);

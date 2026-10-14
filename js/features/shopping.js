@@ -1557,21 +1557,28 @@ renderInventory();
 
 // Given either a direct image URL or a product page URL, returns the
 // real image bytes. Tries it AS a direct image first (cheapest, and the
-// common shape for a URL copied via "Copy image address") -- the proxy
-// fetches ANY URL server-side regardless of what it actually is, so the
-// real tell isn't whether that fetch "succeeds" but whether what came
-// back is actually an image (its own Content-Type, carried onto the
-// Blob). Only once that's NOT an image does this fall back to treating
-// it as a page and reading its own og:image/twitter:image instead
-// (catalogue.js's ogImageFrom, the exact mechanism cover art already
-// uses) -- confirmed live against the real AP product page: its own
-// recipe-fetch.php-style fetch succeeds fine for a non-image URL too,
-// it just returns HTML text, so "didn't error" can't be the signal.
+// common shape for a URL copied via "Copy image address"), via
+// fetchProductImage -- NOT fetchProxiedImage, which is hard-locked to a
+// small Google-Photos/Tinder host allowlist for its own original job and
+// 400s outright for literally any other host, a product-photo CDN very
+// much included. fetchProductImage (product-image-proxy.php) accepts
+// any public https host, the same SSRF-safe way fetchPageHtml's own
+// recipe-fetch.php already does for page text. Confirmed live: an actual
+// retailer image URL hit exactly this -- the OLD code here fell through
+// to fetchPageHtml on the (wrong) assumption the direct-image attempt had
+// failed because the URL "wasn't an image", when it had actually failed
+// because the HOST wasn't on an allowlist meant for a different feature
+// entirely; fetchPageHtml then correctly refused the real image bytes it
+// got back, since reading page text was never its job either. Only once
+// fetchProductImage itself confirms the URL ISN'T an image does this fall
+// back to treating it as a page and reading its own og:image/
+// twitter:image instead (catalogue.js's ogImageFrom, the exact mechanism
+// cover art already uses).
 async function fetchInventoryImageBlob(inputUrl) {
-const { fetchProxiedImage, fetchPageHtml } = await import('../files.js');
+const { fetchProductImage, fetchPageHtml } = await import('../files.js');
 let blob = null;
 try {
-const direct = await fetchProxiedImage(inputUrl);
+const direct = await fetchProductImage(inputUrl);
 if (direct.type && direct.type.startsWith('image/')) blob = direct;
 } catch (err) { /* not fetchable as a direct image -- try it as a page below */ }
 if (!blob) {
@@ -1579,7 +1586,7 @@ const html = await fetchPageHtml(inputUrl);
 const { ogImageFrom } = await import('../catalogue.js');
 const og = ogImageFrom(html, inputUrl);
 if (!og) throw new Error("Couldn't find a picture at that URL or on that page -- try right-clicking the picture itself and copying its direct image address instead.");
-blob = await fetchProxiedImage(og);
+blob = await fetchProductImage(og);
 }
 return blob;
 }
