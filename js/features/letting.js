@@ -1416,22 +1416,56 @@ const stripped = labels.map((l) => l.split(/\s+-\s+/)[0].trim());
 return stripped.every((s) => s === stripped[0]) ? stripped[0] : labels.join(' / ');
 }
 
+// Every real "this stay happened/will happen at this rate" contribution,
+// per listing, spread across the months it covers -- from TWO sources:
+// the ledger (a past, accrued stay) and an UPCOMING reservation that
+// already has a real income figure but hasn't checked out yet, so it
+// has no ledger row at all (accrueLettings only ever posts once a stay
+// is both past AND priced -- see its own comment). Without this second
+// source, every future month was blank on both the average and candle
+// views no matter how many future bookings already had a known price --
+// confirmed directly as a real gap: the chart's own x-axis runs 6
+// months forward (LETTING_CHART_MONTHS_FORWARD), but nothing from those
+// months ever had a chance to land on it. A reservation already accrued
+// is skipped here -- its ledger row already covers it, counting it
+// again here would double its weight in the average.
+function nightRateContributions() {
+const out = []; // { listingId, rate, counts: Map<ym, nights> }
+(data.lettingLedger || []).forEach((e) => {
+const rate = nightRateFor(e);
+if (rate == null || !e.listingId) return;
+const { counts, total } = nightsByMonthForEntry(e);
+if (!total) return;
+out.push({ listingId: e.listingId, rate, counts });
+});
+(data.airbnbReservations || []).forEach((r) => {
+if (r.accruedAt) return; // already counted via its own ledger row, above
+const income = Number(r.income);
+if (!Number.isFinite(income) || income <= 0) return;
+if (!r.checkin || !r.checkout || r.checkout <= r.checkin) return;
+const wholeNights = Math.round((new Date(`${r.checkout}T00:00:00`) - new Date(`${r.checkin}T00:00:00`)) / DAY_MS);
+const rate = nightRateFromGrossNights(income, wholeNights);
+if (rate == null) return;
+const { counts, total } = nightsByMonth(r.checkin, r.checkout);
+if (!total) return;
+out.push({ listingId: r.listingId, rate, counts });
+});
+return out;
+}
+
 // High/low/avg per room per month -- the candle view. High and low are
 // a STAY's own flat rate (the whole-stay figure, same one the average
 // view plots), not a per-month-split rate -- a single stay spanning two
 // months contributes the SAME rate as its own high and low in both,
 // and only distinct stays sharing a room/month produce a real spread.
-function nightRateRoomStats(months, baseStart, endYm, rooms) {
+function nightRateRoomStats(months, baseStart, endYm, rooms, contributions) {
 const listingToRoom = new Map();
 rooms.forEach((room) => room.listingIds.forEach((id) => listingToRoom.set(id, room.key)));
 const perRoomByMonth = new Map();
 rooms.forEach((room) => perRoomByMonth.set(room.key, new Map()));
-(data.lettingLedger || []).forEach((e) => {
-const rate = nightRateFor(e);
-const roomKey = listingToRoom.get(e.listingId);
-if (rate == null || !roomKey) return;
-const { counts, total } = nightsByMonthForEntry(e);
-if (!total) return;
+contributions.forEach(({ listingId, rate, counts }) => {
+const roomKey = listingToRoom.get(listingId);
+if (!roomKey) return;
 const byMonth = perRoomByMonth.get(roomKey);
 counts.forEach((nights, ym) => {
 if (ym < baseStart || ym > endYm) return;
@@ -1554,12 +1588,10 @@ const months = monthRange(baseStart, endYm);
 const listings = nightRateListings();
 const perListingByMonth = new Map();
 listings.forEach((l) => perListingByMonth.set(l.key, new Map()));
-(data.lettingLedger || []).forEach((e) => {
-const rate = nightRateFor(e);
-if (rate == null || !e.listingId || !perListingByMonth.has(e.listingId)) return;
-const { counts, total } = nightsByMonthForEntry(e);
-if (!total) return;
-const byMonth = perListingByMonth.get(e.listingId);
+const contributions = nightRateContributions();
+contributions.forEach(({ listingId, rate, counts }) => {
+if (!perListingByMonth.has(listingId)) return;
+const byMonth = perListingByMonth.get(listingId);
 counts.forEach((nights, ym) => {
 if (ym < baseStart || ym > endYm) return;
 const bucket = byMonth.get(ym) || { net: 0, nights: 0 };
@@ -1569,7 +1601,7 @@ byMonth.set(ym, bucket);
 });
 });
 const rooms = nightRateRooms();
-const roomStats = nightRateRoomStats(months, baseStart, endYm, rooms);
+const roomStats = nightRateRoomStats(months, baseStart, endYm, rooms, contributions);
 const occupancy = nightRateOccupancyData(months, baseStart, endYm, rooms);
 return { months, listings, perListingByMonth, rooms, roomStats, occupancy, nowIndex: months.indexOf(current) };
 }
