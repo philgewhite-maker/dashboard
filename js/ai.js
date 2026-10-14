@@ -1436,24 +1436,28 @@ const RATE_REVIEW_MODEL = 'claude-sonnet-5';
 const RATE_REVIEW_MAX_TOKENS = 8000;
 const RATE_REVIEW_EFFORT = 'medium';
 function airbnbRateReviewPrompt({ listings, windowStart, windowEnd, alreadyProposed, count }) {
-return `You're helping a London host review short-let pricing for ${listings.length} premium room listing(s) (£150+/night normally) near London Bridge, SE1 4GT -- an easy journey to most central London venues.
+return `You're helping a London host review short-let pricing for ${listings.length} premium room listing(s) (£150+/night normally) near London Bridge, SE1 4GT.
 
 Find up to ${count} specific date ranges, between ${windowStart} and ${windowEnd}, where real demand in London would justify a price increase above the normal rate: major concerts/gigs at venues a visitor would travel in for (The O2, Wembley Stadium/Arena, Tottenham Hotspur Stadium, Emirates Stadium, large London arenas/stadiums generally), England international matches, Wimbledon, other major sporting finals held in or near London, New Year's Eve, and any other genuinely demand-driving event or bank holiday weekend you can CONFIRM with a real search.
 
-LISTINGS (each proposal must name exactly one of these, spelled exactly as given):
+LISTINGS (every listing is the same kind of premium room in the same location -- pick whichever one(s) a proposal applies to, but don't try to invent a DIFFERENT reason per listing just for variety; the room TYPE (en-suite, double, whole flat...) isn't what drives the uplift here, the event and the location are):
 ${listings.map((l) => `- ${l.label}`).join('\n')}
 
 ALREADY PROPOSED in an earlier review -- do not suggest any of these again, even a nearby or slightly different date range for the same event:
 ${alreadyProposed.length ? alreadyProposed.map((p) => `- ${p.reason}, ${p.startDate} to ${p.endDate}`).join('\n') : '(none yet -- this is the first review)'}
 
+The real point of each proposal is the WHY behind the SIZE of the uplift -- not just "there's an event", but why THIS much, for THIS listing's actual location. A reader should be able to tell a small bump from a big one and see the reasoning, not just the number. In "notes", cover:
+1. What makes the demand big or small -- the event's own real scale (a stadium's capacity, whether it's a one-off or a short residency, how far fans typically travel for it, how it compares to a similar past event if you can find one) -- not an assumed "big event = big uplift".
+2. The actual journey from SE1 4GT to the venue/area -- which line, how many stops or minutes -- since that's what makes THIS location relevant to THAT event specifically, not a generic "London is handy for everything".
+3. Any real, search-confirmed data point backing the number -- a reported price surge for the same or a similar past event, a sell-out/high-demand signal, typical hotel/short-let pricing behaviour around it -- cited plainly, never invented. If you can't find a supporting data point, say the uplift is a judgement call based on (1) and (2) alone rather than implying evidence that isn't there.
+
 HARD REQUIREMENTS:
 1. Every date range needs a REAL, SEARCH-CONFIRMED reason with an actual date -- if you can't confirm a specific date for an event, leave it out rather than guess one.
 2. State the uplift as EITHER a percentage OR a flat £ amount above the normal rate (whichever reads more naturally for that event) -- set the other to null.
 3. Suggest a minimum-stay in nights where a host would normally want one around a big event (most hosts ask for 2-3+ nights rather than letting a single peak night go alone) -- or null if no change is needed.
-4. Spread proposals across the listings and across the date window rather than clustering everything in one month, where the real events genuinely allow it.
-5. At most ${count} proposals, best (most confident, highest real demand) first.
+4. At most ${count} proposals, best (most confident, highest real demand) first, spread across the date window rather than clustering in one month where the real events genuinely allow it.
 
-Respond with ONLY a JSON object, no other text, no markdown fences: {"proposals":[{"listing":"","startDate":"YYYY-MM-DD","endDate":"YYYY-MM-DD","reason":"","upliftPct":null,"upliftAmount":null,"minStayNights":null,"notes":""}]}. "listing" must exactly match one of the listing names given above. Use upliftPct OR upliftAmount, never both non-null. If you can't confirm anything real for a slot, return fewer than ${count} rather than padding with a guess.`;
+Respond with ONLY a JSON object, no other text, no markdown fences: {"proposals":[{"listing":"","startDate":"YYYY-MM-DD","endDate":"YYYY-MM-DD","reason":"","upliftPct":null,"upliftAmount":null,"minStayNights":null,"notes":""}]}. "reason" is a short label for the event itself (e.g. "Oasis at Wembley Stadium"); "notes" is where the WHY above goes, in full. "listing" must exactly match one of the listing names given above. Use upliftPct OR upliftAmount, never both non-null. If you can't confirm anything real for a slot, return fewer than ${count} rather than padding with a guess.`;
 }
 async function generateAirbnbRateReview({ listings, windowStart, windowEnd, alreadyProposed, count }) {
 const tools = [{

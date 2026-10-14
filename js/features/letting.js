@@ -217,48 +217,63 @@ const parts = summary.map((g) => `${escapeHtml(g.label)} ${escapeHtml(money(g.av
 return `<span class="settings-note" style="margin:0;" title="Average night rate, weighted by nights, after the configured cleaning cost -- number in brackets is how many stays it's averaged over.">${parts}</span>`;
 }
 
-// ---- Upcoming (not yet accrued) ----------------------------------------
+// ---- Upcoming / awaiting payout (not yet accrued) ----------------------
 //
-// A preview, not a record: a future stay that hasn't checked out yet
-// never gets a lettingLedger entry at all (accrueLettings only accrues
-// past checkouts), so this reads straight off data.airbnbReservations
+// A preview, not a record: neither a future stay nor a past one still
+// waiting on its income figure ever gets a lettingLedger entry
+// (accrueLettings only accrues a past checkout that ALSO already has an
+// income > 0), so this reads straight off data.airbnbReservations
 // instead -- nothing here can ever feed balanceFor/grossFor/totalOwed,
 // by construction, which is exactly "doesn't break the earnings totals".
+//
+// Originally future-only -- confirmed live as a real gap, reported
+// directly: a stay that's already checked out but has no income typed
+// in yet (Airbnb's payout email hasn't landed, or it just hasn't been
+// entered) fell out of BOTH this list and the real ledger at once, so
+// it was invisible everywhere, including the average night-rate chart
+// -- which is correct (there's no gross to compute a rate from yet),
+// but with nothing on screen to explain why, it just looked like a
+// silent gap instead of "waiting on a number". Now includes a past
+// checkout too, as long as it's still unaccrued.
 function upcomingReservationsFor(key) {
 const listingIds = new Set((data.airbnbListings || []).filter((l) => ownerKeyFor(l) === key).map((l) => l.id));
 return (data.airbnbReservations || [])
-.filter((r) => listingIds.has(r.listingId) && !r.accruedAt && r.checkout && r.checkout > today())
+.filter((r) => listingIds.has(r.listingId) && !r.accruedAt && r.checkout)
 .sort((a, b) => String(a.checkout).localeCompare(String(b.checkout)));
 }
 
 // Same pro-rata share accrueLettings() will actually post once this
-// stay checks out -- a genuine preview of what's coming, not just a
-// bare list of bookings, so it reads consistently with the Earned rows
-// right above it.
+// stay has both checked out AND has a real income figure -- a genuine
+// preview of what's coming/owed, not just a bare list of bookings, so
+// it reads consistently with the Earned rows right above it.
 function upcomingTableHtml(key) {
 const rows = upcomingReservationsFor(key);
 if (!rows.length) return '';
 return `<div class="letting-upcoming">
-<div class="settings-note" style="margin:8px 0 2px;"><strong>Upcoming</strong> — not yet earned, a preview only</div>
+<div class="settings-note" style="margin:8px 0 2px;"><strong>Upcoming / awaiting payout</strong> — not yet earned, a preview only. A past-checkout row with no amount is just waiting on its income figure -- add it on <span class="inline-goto-link" data-goto-tab="overview" data-goto-target="#airbnb-panel">Airbnb</span>'s own reservation row and it'll flow through here and onto the chart above automatically.</div>
 <div class="letting-scroll"><table class="limits-table"><tbody>${rows.map((r) => {
 const listing = (data.airbnbListings || []).find((l) => l.id === r.listingId);
 const share = Number(listing && listing.sharePct);
 const pct = Number.isFinite(share) ? share : 50;
 const income = Number(r.income) || 0;
 const amount = Math.round(income * (pct / 100) * 100) / 100;
-// Computed straight off the reservation's own dates -- an upcoming
-// stay has no ledger row yet to carry a stored `nights`. A blacked-
-// out family period (no income typed in) falls out of this for free:
+const isPast = r.checkout && r.checkout <= today();
+// Computed straight off the reservation's own dates -- a row here has
+// no ledger row yet to carry a stored `nights`. A blacked-out family
+// period (no income typed in) falls out of this for free:
 // nightRateFromGrossNights returns null the moment gross isn't
-// positive, same gate the gross/amount columns already use.
+// positive, same gate the gross/amount columns already use -- and so
+// does a past stay still waiting on its income figure, for the same
+// reason, not a bug: there's genuinely no gross to divide yet.
 const nights = r.checkin && r.checkout ? Math.round((new Date(`${r.checkout}T00:00:00`) - new Date(`${r.checkin}T00:00:00`)) / 86400000) : 0;
 const nightRate = nightRateFromGrossNights(income, nights);
 const nightRateHtml = nightRate != null
 ? ` <span class="letting-gross" title="${escapeHtml(`${nights} night${nights === 1 ? '' : 's'}, after cleaning cost`)}">${escapeHtml(`${money(nightRate)}/night`)}</span>`
 : '';
+const statusLabel = isPast ? 'awaiting payout' : 'upcoming';
 return `<tr>
 <td style="white-space:nowrap;">${escapeHtml(r.checkin || '?')} &rarr; ${escapeHtml(r.checkout)}</td>
-<td>${escapeHtml(`${(listing && listing.label) || 'listing'}${r.guestName ? `, ${r.guestName}` : ''}`)} <span class="letting-kind upcoming">upcoming</span>${income ? ` <span class="letting-gross">${escapeHtml(`${pct}% of ${money(income)}`)}</span>` : ''}${nightRateHtml}</td>
+<td>${escapeHtml(`${(listing && listing.label) || 'listing'}${r.guestName ? `, ${r.guestName}` : ''}`)} <span class="letting-kind upcoming">${escapeHtml(statusLabel)}</span>${income ? ` <span class="letting-gross">${escapeHtml(`${pct}% of ${money(income)}`)}</span>` : ''}${nightRateHtml}</td>
 <td style="text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;">${income ? escapeHtml(money(amount)) : ''}</td>
 </tr>`;
 }).join('')}</tbody></table></div>
@@ -1054,7 +1069,14 @@ const ink = resolveColor('--ink');
 const card = resolveColor('--card');
 const paper = resolveColor('--paper');
 
-const padLeft = 46, padRight = 10, padTop = 16, padBottom = 20;
+// padTop reserves a fixed header band ABOVE the plotted bars for the
+// hover tooltip to live in -- it used to sit at plot.y+2 (the very top
+// of the bars themselves), so a tall bar near the hovered month
+// routinely sat right under it, which is exactly the part of the chart
+// worth seeing most. Confirmed directly as a real problem from a
+// screenshot, not a style nitpick -- the tooltip now always renders in
+// this reserved band (see boxY below), never over real chart content.
+const padLeft = 46, padRight = 10, padTop = 90, padBottom = 20;
 const plot = { x: padLeft, y: padTop, w: Math.max(10, width - padLeft - padRight), h: Math.max(10, height - padTop - padBottom) };
 
 const monthTotals = months.map((ym) => groups.reduce((n, g) => n + (perGroupByMonth.get(g.key).get(ym) || 0), 0));
@@ -1264,7 +1286,10 @@ const boxW = Math.max(...lines.map((l) => ctx.measureText(l).width)) + 16;
 const boxH = lines.length * 14 + 10;
 const cx = plot.x + (lettingChartHoverIndex + 0.5) * bw;
 const boxX = Math.min(Math.max(cx - boxW / 2, plot.x), plot.x + plot.w - boxW);
-const boxY = plot.y + 2;
+// Pinned near the very top of the canvas, inside padTop's reserved
+// header band -- not plot.y (the top of the bars themselves), which is
+// what used to put this right on top of the tallest ones.
+const boxY = 4;
 ctx.fillStyle = paper;
 ctx.strokeStyle = lineColor;
 ctx.fillRect(boxX, boxY, boxW, boxH);
@@ -1708,7 +1733,10 @@ const muted = resolveColor('--muted');
 const ink = resolveColor('--ink');
 const paper = resolveColor('--paper');
 
-const padLeft = 46, padRight = 10, padTop = 16, padBottom = 20;
+// padTop reserves a fixed header band for the hover tooltip, same
+// reasoning as the income chart above -- it used to sit at plot.y+2,
+// right on top of the tallest bars/candles near the hovered month.
+const padLeft = 46, padRight = 10, padTop = 90, padBottom = 20;
 const totalH = Math.max(10, height - padTop - padBottom);
 const occGap = 14;
 const occH = Math.round(totalH * NIGHT_RATE_OCCUPANCY_SHARE);
@@ -1839,7 +1867,10 @@ const boxW = Math.max(...lines.map((ln) => ctx.measureText(ln).width)) + 16;
 const boxH = lines.length * 14 + 10;
 const cx = plot.x + (nightRateChartHoverIndex + 0.5) * bw;
 const boxX = Math.min(Math.max(cx - boxW / 2, plot.x), plot.x + plot.w - boxW);
-const boxY = plot.y + 2;
+// Pinned near the very top of the canvas, inside padTop's reserved
+// header band -- not plot.y (the top of the bars themselves), which is
+// what used to put this right on top of the tallest ones.
+const boxY = 4;
 ctx.fillStyle = paper;
 ctx.strokeStyle = lineColor;
 ctx.fillRect(boxX, boxY, boxW, boxH);
@@ -1876,7 +1907,10 @@ const muted = resolveColor('--muted');
 const ink = resolveColor('--ink');
 const paper = resolveColor('--paper');
 
-const padLeft = 46, padRight = 10, padTop = 16, padBottom = 20;
+// padTop reserves a fixed header band for the hover tooltip, same
+// reasoning as the income chart above -- it used to sit at plot.y+2,
+// right on top of the tallest bars/candles near the hovered month.
+const padLeft = 46, padRight = 10, padTop = 90, padBottom = 20;
 const totalH = Math.max(10, height - padTop - padBottom);
 const occGap = 14;
 const occH = Math.round(totalH * NIGHT_RATE_OCCUPANCY_SHARE);
@@ -1989,7 +2023,10 @@ const boxW = Math.max(...lines.map((ln) => ctx.measureText(ln).width)) + 16;
 const boxH = lines.length * 14 + 10;
 const cx = plot.x + (nightRateChartHoverIndex + 0.5) * bw;
 const boxX = Math.min(Math.max(cx - boxW / 2, plot.x), plot.x + plot.w - boxW);
-const boxY = plot.y + 2;
+// Pinned near the very top of the canvas, inside padTop's reserved
+// header band -- not plot.y (the top of the bars themselves), which is
+// what used to put this right on top of the tallest ones.
+const boxY = 4;
 ctx.fillStyle = paper;
 ctx.strokeStyle = lineColor;
 ctx.fillRect(boxX, boxY, boxW, boxH);
