@@ -75,7 +75,7 @@ if ($origin !== '' && in_array($origin, $ALLOWED_ORIGINS, true)) {
     header('Access-Control-Allow-Origin: ' . $origin);
     header('Vary: Origin');
 }
-header('Access-Control-Allow-Headers: Content-Type, X-Sync-Secret');
+header('Access-Control-Allow-Headers: Content-Type, X-Sync-Secret, X-Chat-Id, X-File-Name, X-Caption');
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
 header('Access-Control-Max-Age: 86400');
 header('Content-Type: application/json');
@@ -176,6 +176,56 @@ if ($method === 'POST' && $action === 'send') {
     $decoded = $result !== false ? json_decode($result, true) : null;
     if (!is_array($decoded) || empty($decoded['ok'])) {
         fail(502, 'Telegram rejected the message: ' . ($decoded['description'] ?? 'no response'));
+    }
+    echo json_encode(['ok' => true]);
+    exit;
+}
+
+// ---- Us -> Telegram: send a FILE (the letting report PDF) -------------
+// Same job as ?action=send above, different payload shape: Telegram's own
+// sendDocument needs a real multipart upload, which JSON can't carry
+// without a big base64 blow-up, so this takes the file as the raw POST
+// body instead -- the same convention files.php's own uploadAttachment
+// already uses (raw bytes + metadata in headers), not a new one invented
+// here. CURLFile writes the bytes to a temp file first since PHP's curl
+// multipart support needs a real file path, not an in-memory string.
+if ($method === 'POST' && $action === 'sendDocument') {
+    if ($BOT_TOKEN === '' || $BOT_TOKEN === 'PUT-YOUR-BOTFATHER-TOKEN-HERE') {
+        fail(500, 'Server not configured: set $BOT_TOKEN in telegram-bot.php');
+    }
+    if (!function_exists('curl_init')) {
+        fail(500, "PHP's curl extension isn't enabled — ask your host to turn it on");
+    }
+    // rawurldecode, not the raw header -- the client encodeURIComponent()s
+    // these (files.php's own X-File-Name does the exact same round trip),
+    // since a raw header value has to stay ASCII-safe.
+    $chatId = $_SERVER['HTTP_X_CHAT_ID'] ?? '';
+    $filename = rawurldecode((string) ($_SERVER['HTTP_X_FILE_NAME'] ?? 'report.pdf'));
+    $caption = rawurldecode((string) ($_SERVER['HTTP_X_CAPTION'] ?? ''));
+    $bytes = file_get_contents('php://input');
+    if ($chatId === '' || $bytes === false || $bytes === '') {
+        fail(400, 'Expected a chat id (X-Chat-Id) and the file as the raw request body');
+    }
+    $tmp = tempnam(sys_get_temp_dir(), 'tgdoc');
+    file_put_contents($tmp, $bytes);
+    $ch = curl_init("https://api.telegram.org/bot{$BOT_TOKEN}/sendDocument");
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 30,
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => [
+            'chat_id' => $chatId,
+            'caption' => $caption,
+            'document' => new CURLFile($tmp, 'application/pdf', $filename),
+        ],
+    ]);
+    $result = curl_exec($ch);
+    $err = curl_error($ch);
+    curl_close($ch);
+    @unlink($tmp);
+    $decoded = $result !== false ? json_decode($result, true) : null;
+    if (!is_array($decoded) || empty($decoded['ok'])) {
+        fail(502, 'Telegram rejected the document: ' . ($decoded['description'] ?? $err ?: 'no response'));
     }
     echo json_encode(['ok' => true]);
     exit;

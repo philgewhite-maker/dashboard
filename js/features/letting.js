@@ -34,13 +34,46 @@ const listing = (data.airbnbListings || []).find((l) => ownerKeyFor(l) === key);
 return (listing && listing.ownerLabel) || key;
 }
 
-// Their share, taken from whichever listing they own. Falls back to 50
-// rather than refusing: the number is on the listing, and a historic
-// figure may well be entered before the listing is set up.
+// The share rule in effect ON a given date -- the LATEST rule whose
+// fromDate has already arrived by then. A stay's split is decided by
+// whatever arrangement applied when it happened/was paid out, not by
+// today's rule -- a historic figure has to keep reflecting the OLD
+// split even after the rule later changes, which is the whole reason
+// this is a resolver rather than one flat field. Falls back to the
+// listing's own plain sharePct when there's no shareRules entry yet
+// (the common, never-changed case) -- so a listing on a flat split
+// never needs a rule added just to keep working.
+function shareRuleAt(listing, dateStr) {
+if (!listing) return { pct: 50, capAmount: null };
+const rules = (listing.shareRules || []).filter((r) => r.fromDate && r.fromDate <= dateStr).sort((a, b) => b.fromDate.localeCompare(a.fromDate));
+if (rules[0]) {
+const pct = Number(rules[0].pct);
+const cap = Number(rules[0].capAmount);
+return { pct: Number.isFinite(pct) ? pct : 50, capAmount: Number.isFinite(cap) ? cap : null };
+}
+const pct = Number(listing.sharePct);
+return { pct: Number.isFinite(pct) ? pct : 50, capAmount: null };
+}
+
+// Applies both the percentage AND the cap in one place -- "the smaller
+// of 50% or £800/month" means Math.min(gross * pct/100, capAmount),
+// not just the raw percentage -- so every caller gets the real owed
+// figure without re-deriving the cap logic itself.
+function splitAmountFor(listing, gross, dateStr) {
+const rule = shareRuleAt(listing, dateStr);
+const uncapped = Number(gross) * (rule.pct / 100);
+return rule.capAmount != null ? Math.min(uncapped, rule.capAmount) : uncapped;
+}
+
+// Their share, taken from whichever listing they own, as of today --
+// used by the manual add-row's own pct display and anywhere else that
+// genuinely means "the CURRENT rate", not a specific past date's.
+// Falls back to 50 rather than refusing: the number is on the listing,
+// and a historic figure may well be entered before the listing is set
+// up.
 function sharePctFor(key) {
 const listing = (data.airbnbListings || []).find((l) => ownerKeyFor(l) === key);
-const pct = listing ? Number(listing.sharePct) : NaN;
-return Number.isFinite(pct) ? pct : 50;
+return shareRuleAt(listing, today()).pct;
 }
 
 function entriesFor(key) {
@@ -113,9 +146,12 @@ if (!key) return; // no owner set yet; left alone rather than guessed at
 // resolving key independently (isMyOwnKey), regardless of what this
 // row's own amount holds. Zeroing the row too just discarded real
 // "what did this stay actually bring in" data for no reason.
-const share = Number(listing.sharePct);
-const pct = Number.isFinite(share) ? share : 50;
-const amount = Math.round(income * (pct / 100) * 100) / 100;
+// Resolved as of checkout -- the date the money's actually earned on,
+// and the same date this row's own `pct` field (below) needs to match
+// so a later report can show which rule produced this figure.
+const rule = shareRuleAt(listing, r.checkout);
+const pct = rule.pct;
+const amount = Math.round(splitAmountFor(listing, income, r.checkout) * 100) / 100;
 if (!amount) return;
 // Nights, same inclusive-both-ends arithmetic the reservation's own
 // checkin/checkout convention already uses elsewhere -- stored as a
@@ -253,10 +289,13 @@ return `<div class="letting-upcoming">
 <div class="settings-note" style="margin:8px 0 2px;"><strong>Upcoming / awaiting payout</strong> — not yet earned, a preview only. A past-checkout row with no amount is just waiting on its income figure -- add it on <span class="inline-goto-link" data-goto-tab="overview" data-goto-target="#airbnb-panel">Airbnb</span>'s own reservation row and it'll flow through here and onto the chart above automatically.</div>
 <div class="letting-scroll"><table class="limits-table"><tbody>${rows.map((r) => {
 const listing = (data.airbnbListings || []).find((l) => l.id === r.listingId);
-const share = Number(listing && listing.sharePct);
-const pct = Number.isFinite(share) ? share : 50;
+// Resolved as of the stay's own checkout, even if that's still in the
+// future -- a preview should already reflect whichever rule will
+// actually be in force by then (a booking after a scheduled rate
+// change previews under the NEW rule, not today's).
+const pct = shareRuleAt(listing, r.checkout).pct;
 const income = Number(r.income) || 0;
-const amount = Math.round(income * (pct / 100) * 100) / 100;
+const amount = Math.round(splitAmountFor(listing, income, r.checkout) * 100) / 100;
 const isPast = r.checkout && r.checkout <= today();
 // Computed straight off the reservation's own dates -- a row here has
 // no ledger row yet to carry a stored `nights`. A blacked-out family
@@ -414,6 +453,11 @@ ${mine
 ${grossFor(key) ? `<span class="settings-note" style="margin:${mine ? '0' : '0 0 0 auto'};">${escapeHtml(money(grossFor(key)))} taken</span>` : ''}
 ${nightRateSummaryHtml(key)}
 </div>
+${mine ? '' : `<div class="sync-row" style="margin:4px 0 8px;flex-wrap:wrap;align-items:center;">
+<input type="month" class="settings-input" data-report-period="${escapeHtml(key)}" style="max-width:130px;" title="The month this report covers -- defaults to last month.">
+<button class="sync-btn sm inline" type="button" data-report-generate="${escapeHtml(key)}">&#128196; Generate report</button>
+<span class="sync-status" data-report-status="${escapeHtml(key)}"></span>
+</div>`}
 ${rows.length ? `<div class="letting-scroll"><table class="limits-table"><tbody>${rows.map((e) => {
 const nightRate = nightRateFor(e);
 const nightRateHtml = nightRate != null
@@ -440,6 +484,75 @@ ${upcomingTableHtml(key)}
 ${taxYearSummaryHtml(key, taxYears)}
 </div>`;
 }).join('');
+
+el.querySelectorAll('[data-report-generate]').forEach((btn) => {
+btn.addEventListener('click', async () => {
+const key = btn.dataset.reportGenerate;
+const status = el.querySelector(`[data-report-status="${CSS.escape(key)}"]`);
+const periodInput = el.querySelector(`[data-report-period="${CSS.escape(key)}"]`);
+const say = (t) => { if (status) status.textContent = t; };
+btn.disabled = true;
+say('Building…');
+try {
+const report = await import('./lettingreport.js');
+let period = report.defaultPeriod();
+// <input type="month"> gives "YYYY-MM" -- the whole of that
+// calendar month, same convention defaultPeriod() itself uses.
+if (periodInput && periodInput.value) {
+const [y, m] = periodInput.value.split('-').map(Number);
+// isoDate, not .toISOString() -- that converts through UTC first,
+// which silently shifted the date by a day under BST. Confirmed
+// live: picking "2026-09" downloaded a report filed under 2026-08.
+const start = report.isoDate(new Date(y, m - 1, 1));
+const end = report.isoDate(new Date(y, m, 0));
+period = { start, end };
+}
+const blob = await report.buildReportPdf(key, period);
+const filename = report.reportFilename(key, period.start);
+report.downloadBlob(blob, filename);
+say(`Downloaded ${filename}. `);
+// Appended rather than replacing the status text above, so the
+// download confirmation stays visible once these are added.
+if (status) {
+const emailBtn = document.createElement('button');
+emailBtn.type = 'button'; emailBtn.className = 'todo-add-btn';
+emailBtn.textContent = 'Open email draft';
+emailBtn.addEventListener('click', () => report.openEmailDraft(key, period.start, period.end));
+status.appendChild(emailBtn);
+// Telegram only when `key` resolves to a real connection WITH a
+// linked chat id -- ownerKeyFor() returns the connection's own id
+// when the owner was set via the dropdown (not the free-text
+// fallback), and reachability (having actually DM'd the bot at
+// least once) is the same precondition telegramfamily.js's own
+// askQuestion already requires.
+const ownerConn = (data.connections || []).find((c) => c.id === key);
+if (ownerConn && ownerConn.telegramChatId) {
+const tgBtn = document.createElement('button');
+tgBtn.type = 'button'; tgBtn.className = 'todo-add-btn';
+tgBtn.textContent = 'Send via Telegram';
+tgBtn.addEventListener('click', async () => {
+tgBtn.disabled = true;
+try {
+const { sendDocument } = await import('./telegramfamily.js');
+await sendDocument(ownerConn.telegramChatId, blob, filename, `Letting report, ${period.start} to ${period.end}`);
+say('Sent via Telegram.');
+} catch (err) {
+say(`Couldn't send via Telegram: ${err.message || err}`);
+} finally {
+tgBtn.disabled = false;
+}
+});
+status.appendChild(tgBtn);
+}
+}
+} catch (err) {
+console.error('Letting report failed:', err);
+say(`Couldn't build the report: ${err.message || err}`);
+} finally {
+btn.disabled = false;
+}
+});
+});
 
 el.querySelectorAll('[data-letting-date]').forEach((input) => {
 input.addEventListener('change', () => {
@@ -564,11 +677,6 @@ const kind = (document.getElementById('letting-add-kind') || {}).value || 'payme
 // claims a debt to yourself: totalOwed()/the ticker's Owed tile/the
 // per-owner balance badge exclude a self-resolving key independently
 // of this row's own amount.
-const pct = sharePctFor(who.value);
-const signed = kind === 'earned'
-? Math.round(amount * (pct / 100) * 100) / 100
-: Math.round(amount * 100) / 100;
-if (!signed) { say('That works out as nothing — check the amount.'); return; }
 // Nights/start-date, for "Earned" -- filled in here now rather than
 // needing a second visit to the row below afterward. Asked for
 // directly: nights feeds the average night rate and the income
@@ -578,6 +686,14 @@ if (!signed) { say('That works out as nothing — check the amount.'); return; }
 const nightsVal = kind === 'earned' ? Number(document.getElementById('letting-add-nights')?.value) : null;
 const startDateVal = kind === 'earned' ? (document.getElementById('letting-add-start-date')?.value || '') : '';
 const dateVal = document.getElementById('letting-add-date')?.value || today();
+// Resolved as of the row's OWN date, not today's -- a backdated
+// "Earned" entry should use whichever rule actually applied then.
+const whoListing = (data.airbnbListings || []).find((l) => ownerKeyFor(l) === who.value);
+const pct = shareRuleAt(whoListing, dateVal).pct;
+const signed = kind === 'earned'
+? Math.round(splitAmountFor(whoListing, amount, dateVal) * 100) / 100
+: Math.round(amount * 100) / 100;
+if (!signed) { say('That works out as nothing — check the amount.'); return; }
 data.lettingLedger.push({
 id: uid(),
 ownerKey: who.value,
@@ -786,11 +902,9 @@ return !key || /^phil$/i.test(String(ownerNameFor(key) || '').trim());
 function isMyOwnListing(listing) {
 return isMyOwnKey(ownerKeyFor(listing));
 }
-function splitContribution(listing, amount) {
+function splitContribution(listing, amount, dateStr) {
 if (isMyOwnListing(listing)) return [{ group: LETTING_CHART_MINE_KEY, amount }];
-const pct = Number(listing.sharePct);
-const sharePct = Math.max(0, Math.min(100, Number.isFinite(pct) ? pct : 50));
-const ownCut = amount * (sharePct / 100);
+const ownCut = splitAmountFor(listing, amount, dateStr);
 const balance = amount - ownCut;
 const out = [{ group: ownerKeyFor(listing), amount: ownCut }];
 if (balance > 0) out.push({ group: LETTING_CHART_MINE_KEY, amount: balance });
@@ -908,7 +1022,7 @@ if (!total) return;
 const platform = r.platform === 'other' ? 'other' : 'airbnb';
 counts.forEach((nights, ym) => {
 if (!baseMonthSet.has(ym)) return;
-splitContribution(listing, income * (nights / total)).forEach((c) => { addAmount(c.group, ym, c.amount); addAmountPlatform(c.group, ym, platform, c.amount); });
+splitContribution(listing, income * (nights / total), r.checkout).forEach((c) => { addAmount(c.group, ym, c.amount); addAmountPlatform(c.group, ym, platform, c.amount); });
 });
 });
 
@@ -965,14 +1079,14 @@ const { counts, total } = nightsByMonth(splitStart, e.date);
 if (!total) return;
 counts.forEach((nights, ym) => {
 if (!baseMonthSet.has(ym)) return;
-splitContribution(listing, Number(e.gross) * (nights / total)).forEach((c) => { addAmount(c.group, ym, c.amount); addAmountPlatform(c.group, ym, platform, c.amount); });
+splitContribution(listing, Number(e.gross) * (nights / total), e.date).forEach((c) => { addAmount(c.group, ym, c.amount); addAmountPlatform(c.group, ym, platform, c.amount); });
 });
 return;
 }
 const ym = e.date.slice(0, 7);
 if (ym > endYm) return; // a future-dated "historic" entry makes no sense -- ignore rather than extend forward
 if (ym < baseStart) return; // older than the rolling window -- excluded, not widened in to meet it
-splitContribution(listing, Number(e.gross)).forEach((c) => { addAmount(c.group, ym, c.amount); addAmountPlatform(c.group, ym, platform, c.amount); });
+splitContribution(listing, Number(e.gross), e.date).forEach((c) => { addAmount(c.group, ym, c.amount); addAmountPlatform(c.group, ym, platform, c.amount); });
 });
 
 const months = monthRange(baseStart, endYm);
@@ -1956,7 +2070,14 @@ ctx.fill();
 });
 });
 
-drawOccupancySubplot(ctx, occPlot, months, occupancy, nightRateChartHoverIndex, nowIndex, bw, { lineColor, muted, ink });
+// Occupancy is per ROOM, this view's own selection is per LISTING --
+// a room counts as "shown" if at least one of its own listings is
+// currently ticked, same relationship nightRateRooms() already
+// establishes between the two. Confirmed live as a real gap: ticking/
+// unticking a listing above changed the rate lines but left every
+// room's occupancy bars showing regardless.
+const occupancyShown = occupancy.filter((o) => o.room.listingIds.some((id) => nightRateSelectedListings.has(id)));
+drawOccupancySubplot(ctx, occPlot, months, occupancyShown, nightRateChartHoverIndex, nowIndex, bw, { lineColor, muted, ink });
 
 ctx.fillStyle = muted;
 ctx.font = "10px 'Inter', sans-serif";
@@ -1982,7 +2103,7 @@ nightRateChartLastPlot = { plot, bw, months };
 // combined box rather than two.
 if (nightRateChartHoverIndex != null && months[nightRateChartHoverIndex]) {
 const rows = series.map((s) => ({ l: s.l, v: s.rates[nightRateChartHoverIndex] })).filter((r) => r.v != null);
-const occLines = occupancyTooltipLines(occupancy, nightRateChartHoverIndex);
+const occLines = occupancyTooltipLines(occupancyShown, nightRateChartHoverIndex);
 if (rows.length || occLines.length) {
 const lines = [monthLabel(months[nightRateChartHoverIndex]), ...rows.map((r) => `${r.l.label}: ${money0(r.v)}/n`), ...occLines];
 ctx.font = "10px 'Inter', sans-serif";
@@ -2115,7 +2236,13 @@ ctx.fillRect(cx - wickW / 2, yAvg - 1.5, wickW, 3);
 });
 });
 
-drawOccupancySubplot(ctx, occPlot, months, occupancy, nightRateChartHoverIndex, nowIndex, bw, { lineColor, muted, ink });
+// This view's own selection is already per-ROOM (nightRateSelectedRooms),
+// the same grouping occupancy itself uses -- a direct key match, unlike
+// the average view's per-listing selection just above. Confirmed live
+// as the same real gap: ticking/unticking a room's candle left every
+// room's occupancy bars showing regardless.
+const occupancyShown = occupancy.filter((o) => nightRateSelectedRooms.has(o.room.key));
+drawOccupancySubplot(ctx, occPlot, months, occupancyShown, nightRateChartHoverIndex, nowIndex, bw, { lineColor, muted, ink });
 
 ctx.fillStyle = muted;
 ctx.font = "10px 'Inter', sans-serif";
@@ -2223,4 +2350,7 @@ sel.innerHTML = `<option value="">Who…</option>${owners().map((k) => `<option 
 if (keep) sel.value = keep;
 }
 
-export { accrueLettings, renderLetting, initLetting, totalOwed, totalGross, balanceFor, grossFor, owners, ownerNameFor, ownerKeyFor, sharePctFor, money, isMyOwnKey };
+export {
+accrueLettings, renderLetting, initLetting, totalOwed, totalGross, balanceFor, grossFor, owners, ownerNameFor, ownerKeyFor, sharePctFor, shareRuleAt, splitAmountFor, money, isMyOwnKey,
+entriesFor, nightRateFor, money0, monthRange, monthLabel, addMonths, today,
+};

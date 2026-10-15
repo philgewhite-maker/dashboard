@@ -297,6 +297,33 @@ return { colour: listing.colour, title: `${listing.label || listing.prefix}${r.g
 
 // ---- Settings: listing config --------------------------------------------
 
+// A scheduled future change to the plain Share % above -- [{id,
+// fromDate, pct, capAmount}], resolved by letting.js's shareRuleAt()
+// as "the latest rule whose date has arrived". A rule whose fromDate
+// is already past is shown read-only (no × to remove it) -- it's part
+// of real history by then (a report may already reference it), not
+// something to quietly edit away. capAmount is optional: "the smaller
+// of X% or £Y" when set, just the percentage when blank.
+function rateHistoryHtml(l) {
+const rules = (l.shareRules || []).slice().sort((a, b) => String(a.fromDate).localeCompare(String(b.fromDate)));
+const todayStr = new Date().toISOString().slice(0, 10);
+const rows = rules.map((r) => {
+const isPast = r.fromDate <= todayStr;
+const capText = r.capAmount != null && r.capAmount !== '' ? `, cap £${escapeHtml(String(r.capAmount))}` : '';
+return `<div class="settings-note" style="margin:2px 0 0;white-space:nowrap;">${escapeHtml(r.fromDate)}: ${escapeHtml(String(r.pct))}%${capText}${isPast ? '' : ` <span class="del-x" data-del-rate-rule="${escapeHtml(l.id)}:${escapeHtml(r.id)}" title="Remove this scheduled change">&times;</span>`}</div>`;
+}).join('');
+return `${rows}
+<details style="margin-top:3px;">
+<summary class="settings-note" style="margin:0;cursor:pointer;">+ schedule a change</summary>
+<div style="margin-top:3px;display:flex;gap:3px;flex-wrap:wrap;">
+<input type="date" data-rate-rule-date="${escapeHtml(l.id)}" style="width:125px;" title="The date this rule takes over -- the plain Share % (or an earlier scheduled rule) applies right up until this date.">
+<input type="number" min="0" max="100" step="1" data-rate-rule-pct="${escapeHtml(l.id)}" placeholder="%" style="width:50px;">
+<input type="number" min="0" step="1" data-rate-rule-cap="${escapeHtml(l.id)}" placeholder="Cap £ (optional)" style="width:100px;">
+<button type="button" class="todo-add-btn" data-rate-rule-add="${escapeHtml(l.id)}">Add</button>
+</div>
+</details>`;
+}
+
 function renderAirbnbListings() {
 const el = document.getElementById('airbnb-listings');
 if (!el) return;
@@ -319,7 +346,10 @@ ${AIRBNB_COLOURS.map((c) => `<option value="${c}"${c === l.colour ? ' selected' 
 ${(data.connections || []).slice().sort((a, b) => String(a.name).localeCompare(String(b.name))).map((c) => `<option value="${escapeHtml(c.id)}"${c.id === l.ownerConnectionId ? ' selected' : ''}>${escapeHtml(c.name || 'Unnamed')}</option>`).join('')}
 </select>
 <input type="text" autocomplete="off" data-airbnb-listing-field="ownerLabel" data-airbnb-listing-id="${l.id}" value="${escapeHtml(l.ownerLabel || '')}" placeholder="or a name" style="width:100px;margin-top:3px;" title="Use this when the owner isn't a connection — a child, say. The dropdown wins if both are set."></td>
-<td><input type="number" min="0" max="100" step="1" data-airbnb-listing-field="sharePct" data-airbnb-listing-id="${l.id}" value="${escapeHtml(String(l.sharePct ?? 50))}" style="width:60px;"></td>
+<td>
+<input type="number" min="0" max="100" step="1" data-airbnb-listing-field="sharePct" data-airbnb-listing-id="${l.id}" value="${escapeHtml(String(l.sharePct ?? 50))}" style="width:60px;" title="The CURRENT rate, used until a scheduled rule below takes over. See Finances → Letting income's own split logic for how a scheduled rule overrides this once its date arrives.">
+${rateHistoryHtml(l)}
+</td>
 <td style="text-align:center;"><input type="checkbox" data-airbnb-listing-field="needsCleaning" data-airbnb-listing-id="${l.id}"${l.needsCleaning ? ' checked' : ''}></td>
 <td><span class="del-x" style="opacity:1;" data-del-airbnb-listing="${l.id}">&times;</span></td>
 </tr>`).join('')}</tbody>
@@ -343,6 +373,33 @@ delete data.airbnbSyncStatus[id];
 renderAirbnbListings();
 renderAirbnb();
 queueSave();
+});
+});
+el.querySelectorAll('[data-rate-rule-add]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const listing = data.airbnbListings.find((l) => l.id === btn.dataset.rateRuleAdd);
+if (!listing) return;
+const dateInput = el.querySelector(`[data-rate-rule-date="${CSS.escape(btn.dataset.rateRuleAdd)}"]`);
+const pctInput = el.querySelector(`[data-rate-rule-pct="${CSS.escape(btn.dataset.rateRuleAdd)}"]`);
+const capInput = el.querySelector(`[data-rate-rule-cap="${CSS.escape(btn.dataset.rateRuleAdd)}"]`);
+const fromDate = dateInput?.value || '';
+const pct = Number(pctInput?.value);
+const cap = capInput?.value ? Number(capInput.value) : null;
+if (!fromDate || !Number.isFinite(pct)) return;
+if (!Array.isArray(listing.shareRules)) listing.shareRules = [];
+listing.shareRules.push({ id: uid(), fromDate, pct, capAmount: Number.isFinite(cap) ? cap : null });
+queueSave();
+renderAirbnbListings();
+});
+});
+el.querySelectorAll('[data-del-rate-rule]').forEach((x) => {
+x.addEventListener('click', () => {
+const [listingId, ruleId] = x.dataset.delRateRule.split(':');
+const listing = data.airbnbListings.find((l) => l.id === listingId);
+if (!listing) return;
+listing.shareRules = (listing.shareRules || []).filter((r) => r.id !== ruleId);
+queueSave();
+renderAirbnbListings();
 });
 });
 }

@@ -1146,6 +1146,16 @@ externalPrefix: '',
 ownerConnectionId: '',
 ownerLabel: '',
 sharePct: 50,
+// A share arrangement isn't necessarily permanent -- [{id, fromDate,
+// pct, capAmount}], sorted by fromDate, resolved by letting.js's
+// shareRuleAt() as "the latest rule whose fromDate has arrived". Left
+// empty for a listing on a flat, never-changed split (the common
+// case): shareRuleAt() falls back to the plain sharePct above when
+// there's no rule on record yet, so this only needs populating the
+// moment an owner's actual arrangement starts changing over time.
+// capAmount is optional -- null means percentage only, a number means
+// "whichever is smaller" (a cap on top of the percentage).
+shareRules: [],
 // Off for a listing that isn't actually a guest-facing let -- a
 // catch-up "Flat" used to log contractor/maintenance visits (see
 // airbnb.js's manual "Add booking" row) rather than a real room.

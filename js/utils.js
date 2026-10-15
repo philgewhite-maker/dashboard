@@ -873,6 +873,20 @@ if (!heicToModule) heicToModule = import(/* webpackIgnore: true */ HEIC_TO_URL);
 return heicToModule;
 }
 
+// jsPDF, for the Letting income owner report (lettingreport.js) --
+// loaded via jsDelivr's own `+esm` resolver rather than the library's
+// own UMD build, so it's a real `import()`-able ES module (a named
+// `jsPDF` export) instead of a global `window.jspdf` this no-build-step
+// app would otherwise have to rely on. Same lazy, cached-promise
+// pattern as loadHeicTo() above -- the ~450KB download only ever
+// happens once per device, the moment a report is first generated.
+const JSPDF_URL = 'https://cdn.jsdelivr.net/npm/jspdf@2.5.2/+esm';
+let jsPdfModule = null;
+function loadJsPdf() {
+if (!jsPdfModule) jsPdfModule = import(/* webpackIgnore: true */ JSPDF_URL);
+return jsPdfModule;
+}
+
 // Converts a HEIC/HEIF file to a real JPEG File in the browser — nothing
 // leaves the device. Every image-consuming flow (photo capture, the AI
 // screenshot parsers) should run its input through this first, since a HEIC
@@ -1323,7 +1337,7 @@ export {
 todayStr, daysAgoStr, dateStrAdd, unfoldIcsLines, parseIcsProperty, icsDateTime, parseLooseDateTime, last7Dates, uid, daysSince, daysUntil, foldDiacritics, MISSING_KEY_LINK_HTML, SYNC_LINK_HTML, NOTION_LINK_HTML, TELEGRAM_BOT_LINK_HTML, looksLikeUrl, prettyUrl, stripHtmlForExtraction,
 escapeHtml, decodeHtmlEntities, setPanelCollapsed, affiliateLink, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, buildFlagMatcher, applyFlagMatcher, knownCityMap, knownScalarValues, pickChipHtml, splitCsvLine, scrollAndFlash, bindForm, bindBackdropClose,
 findMentions, COUNTRY_NAME_TO_NATIONALITY,
-resizeImageToBlob, fileToBase64, loadImage, cropThumbnailToBlob,
+resizeImageToBlob, fileToBase64, loadImage, cropThumbnailToBlob, loadJsPdf,
 hashFile, captureDateOf, betterCaptureDate, dateFromFilename,
 ensureBrowserReadableImage, setPhotoFallback, looksLikeHeic, sniffsAsHeic, sniffsAsRasterImage, sniffsAsAvif, sniffsAsAudio,
 contentCropBounds, cropToContentBlob, classifyProfileUpload, looksLikeSameScreenshotPieces, screenshotsLookCombinable,

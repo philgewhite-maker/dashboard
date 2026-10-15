@@ -61,6 +61,36 @@ throw new Error(detail);
 return res.json();
 }
 
+// Sends a FILE (the letting report PDF) to a chat id directly -- not
+// through botRequest above, which always JSON.stringify's its body;
+// Telegram's own sendDocument needs a real file upload, so this posts
+// the raw bytes instead, with the recipient/filename/caption carried
+// in headers (server/telegram-bot.php.example's own ?action=
+// sendDocument reads them back out the same way). No telegramThreads
+// entry recorded here -- a report isn't a question awaiting a reply,
+// unlike askQuestion below.
+async function sendDocument(chatId, blob, filename, caption) {
+const { url, secret } = await botConfig();
+if (!url || !secret) { const err = new Error('Set the Telegram bot URL in Settings first.'); err.name = 'TelegramBotNotConfiguredError'; throw err; }
+const res = await fetch(`${url}?action=sendDocument`, {
+method: 'POST',
+headers: {
+'X-Sync-Secret': secret,
+'X-Chat-Id': String(chatId),
+'X-File-Name': encodeURIComponent(filename || 'report.pdf'),
+'X-Caption': encodeURIComponent(caption || ''),
+'Content-Type': 'application/octet-stream',
+},
+body: blob,
+});
+if (!res.ok) {
+let detail = `HTTP ${res.status}`;
+try { detail = (await res.json()).error || detail; } catch (e) { /* not JSON, keep the status */ }
+throw new Error(detail);
+}
+return res.json();
+}
+
 // Sends `question` to `connectionId` over Telegram and records a new
 // 'sent' thread against `context` ({kind:'trip'|'task'|'general', tripId,
 // legId, taskId}) so the reply, once it arrives, can be matched back to
@@ -449,4 +479,4 @@ await pollTelegramInbox();
 startPolling();
 }
 
-export { initTelegramFamily, renderTelegramFamily, askQuestion, pollTelegramInbox };
+export { initTelegramFamily, renderTelegramFamily, askQuestion, pollTelegramInbox, sendDocument };
