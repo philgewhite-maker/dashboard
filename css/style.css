@@ -247,6 +247,8 @@ section.panel.drop-target *{pointer-events:none;}
 display:flex;
 align-items:center;
 justify-content:space-between;
+flex-wrap:wrap;
+row-gap:4px;
 margin-bottom:18px;
 }
 .panel-head h2{
@@ -257,8 +259,19 @@ margin:0;
 display:flex;
 align-items:center;
 gap:9px;
+min-width:0;
 }
-.panel-head-total{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;}
+/* On a narrow phone a long title already wraps to two lines (h2 has no
+   nowrap of its own) -- without flex-wrap above, .panel-head-total had
+   nowhere to go but collide with that now-taller title instead of
+   dropping to its own line beneath it. margin-left:auto keeps it
+   pinned to the right edge either way, on the title's own row when
+   there's room or alone on the next one when there isn't. Confirmed
+   live from a phone screenshot ("Switch opportunities" wrapping into
+   its own total's text) -- the same two ingredients (a title that can
+   wrap, a total that can't) recur on every panel that has one, so this
+   is fixed at the shared rule, not per panel. */
+.panel-head-total{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;margin-left:auto;}
 /* Same visual treatment as .leg-toggle (planner.js's own expand/collapse
    chevron) -- kept as its own class rather than reused directly, since
    every other repeated-shape class in this file is named for its own

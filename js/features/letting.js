@@ -524,12 +524,19 @@ if (!addBtn) return; // not in this build's DOM
 // one it wants rather than leaving you to remember.
 const kindEl = document.getElementById('letting-add-kind');
 const amountEl = document.getElementById('letting-add-amount');
+const earnedFieldsEl = document.getElementById('letting-add-earned-fields');
 const setHint = () => {
 if (!kindEl || !amountEl) return;
 amountEl.placeholder = kindEl.value === 'earned' ? 'Gross takings' : 'Amount';
+// Nights/start-date only mean anything for a real stay -- asked for
+// directly, so a historic "Earned" row doesn't need a second visit to
+// the row below just to fill them in.
+if (earnedFieldsEl) earnedFieldsEl.style.display = kindEl.value === 'earned' ? '' : 'none';
 };
 kindEl?.addEventListener('change', setHint);
 setHint();
+const dateEl = document.getElementById('letting-add-date');
+if (dateEl && !dateEl.value) dateEl.value = today();
 addBtn.addEventListener('click', () => {
 // The placeholder changes with the kind, because "Amount" means two
 // different things here and getting it wrong is a silent factor of two.
@@ -562,6 +569,15 @@ const signed = kind === 'earned'
 ? Math.round(amount * (pct / 100) * 100) / 100
 : Math.round(amount * 100) / 100;
 if (!signed) { say('That works out as nothing — check the amount.'); return; }
+// Nights/start-date, for "Earned" -- filled in here now rather than
+// needing a second visit to the row below afterward. Asked for
+// directly: nights feeds the average night rate and the income
+// chart's own month-split the moment it's more than one month's worth
+// (see impliedStartDate); start-date only needed on top of that for a
+// stay with a real gap the "date minus nights" arithmetic can't infer.
+const nightsVal = kind === 'earned' ? Number(document.getElementById('letting-add-nights')?.value) : null;
+const startDateVal = kind === 'earned' ? (document.getElementById('letting-add-start-date')?.value || '') : '';
+const dateVal = document.getElementById('letting-add-date')?.value || today();
 data.lettingLedger.push({
 id: uid(),
 ownerKey: who.value,
@@ -571,7 +587,9 @@ amount: signed,
 // its own figure. Recorded the same way as an accrual's so the two
 // sources of earnings add up together.
 ...(kind === 'earned' ? { gross: Math.round(amount * 100) / 100, pct } : {}),
-date: today(),
+...(kind === 'earned' && Number.isFinite(nightsVal) && nightsVal > 0 ? { nights: Math.round(nightsVal) } : {}),
+...(kind === 'earned' && startDateVal ? { startDate: startDateVal } : {}),
+date: dateVal,
 note: note || (kind === 'earned'
 ? `Earned before tracking`
 : kind === 'cancellation' ? 'Cancellation'
@@ -580,6 +598,11 @@ note: note || (kind === 'earned'
 queueSave();
 document.getElementById('letting-add-amount').value = '';
 document.getElementById('letting-add-note').value = '';
+const nightsEl = document.getElementById('letting-add-nights');
+const startEl = document.getElementById('letting-add-start-date');
+if (nightsEl) nightsEl.value = '';
+if (startEl) startEl.value = '';
+if (dateEl) dateEl.value = today();
 say(`Added ${money(amount)} for ${ownerNameFor(who.value)}.`);
 renderOwnerPicker();
 renderLetting();
@@ -872,6 +895,7 @@ byMonth.set(ym, bucket);
 
 const listings = data.airbnbListings || [];
 const listingById = new Map(listings.map((l) => [l.id, l]));
+const reservationIds = new Set((data.airbnbReservations || []).map((r) => r.id));
 
 (data.airbnbReservations || []).forEach((r) => {
 const income = Number(r.income);
@@ -894,21 +918,33 @@ splitContribution(listing, income * (nights / total)).forEach((c) => { addAmount
 // ()'s add-row), 'cancellation' is a payout whose reservation record is
 // gone by the time it posts (syncCancellationsFromEmail -- the ICS sync
 // deletes a cancelled reservation outright, there's nothing left for
-// the loop above to find). Deliberately excludes 'accrual' (already
-// counted above, since every accrual mirrors a reservation's own
-// income still present in airbnbReservations) and 'payment'/
-// 'adjustment' (balance moves, not income). A hand-added or
-// cancellation row carries no listingId, only an ownerKey, so it's
-// attributed to whichever listing that owner currently has -- same
-// one-owner-one-listing assumption balanceFor/grossFor already make
-// elsewhere in this file. baseStart (the normal rolling-15-month
-// start) is a real floor here, not just a default -- a historic entry
-// older than that is excluded rather than widening the chart back to
-// meet it, so the window stays a fixed 15 months regardless of how far
-// back the ledger goes.
+// the loop above to find).
+//
+// 'accrual' rows join this loop too, but ONLY when their OWN
+// reservationId no longer resolves to a real reservation -- confirmed
+// live as a real gap, with real data: a genuine, fully-accrued 20-night
+// stay's reservation had since been pruned (the ICS feed's own rolling
+// window ages a past stay out of it eventually), leaving a perfectly
+// real ledger row -- gross, nights, date all intact, the money genuinely
+// owed -- with NOTHING in data.airbnbReservations left for the loop
+// above to find it by. The old assumption ("every accrual mirrors a
+// reservation's own income still present") was true until the
+// reservation itself stopped being guaranteed to survive. An accrual
+// whose reservation IS still on file is correctly left to the loop
+// above (counting it again here would double it) -- reservationIds is
+// exactly that still-on-file check. 'payment'/'adjustment' stay
+// excluded either way (balance moves, not income). A row with no
+// listingId (a hand-added "earned" one) falls back to whichever
+// listing that owner currently has -- same one-owner-one-listing
+// assumption balanceFor/grossFor already make elsewhere in this file.
+// baseStart (the normal rolling-15-month start) is a real floor here,
+// not just a default -- a historic entry older than that is excluded
+// rather than widening the chart back to meet it, so the window stays
+// a fixed 15 months regardless of how far back the ledger goes.
 (data.lettingLedger || []).forEach((e) => {
-if ((e.kind !== 'earned' && e.kind !== 'cancellation') || !e.gross || !e.date) return;
-const listing = listings.find((l) => ownerKeyFor(l) === e.ownerKey);
+const isOrphanedAccrual = e.kind === 'accrual' && e.reservationId && !reservationIds.has(e.reservationId);
+if ((e.kind !== 'earned' && e.kind !== 'cancellation' && !isOrphanedAccrual) || !e.gross || !e.date) return;
+const listing = (e.listingId && listingById.get(e.listingId)) || listings.find((l) => ownerKeyFor(l) === e.ownerKey);
 if (!listing) return;
 // A historic booking that actually ran longer than one month gets
 // split pro-rata by night across every month it spans, exactly like a
