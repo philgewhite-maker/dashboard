@@ -44,21 +44,61 @@ return (data.airbnbListings || []).filter((l) => ownerKeyFor(l) === key);
 
 const STAY_KINDS = new Set(['accrual', 'earned', 'cancellation']);
 
+// A payment's sign says which way the money moved (see the manual
+// add-row's own placeholder text: "negative for a payment to you") --
+// split into the two directions here rather than netted into one
+// figure, since "paid to owner" and "paid to me" are different things
+// a reader needs to see separately, not infer from a single number's
+// sign.
+function paymentSplit(entries) {
+const payments = entries.filter((e) => e.kind === 'payment');
+const paidToOwner = -payments.filter((e) => e.amount < 0).reduce((n, e) => n + (Number(e.amount) || 0), 0);
+const paidToMe = payments.filter((e) => e.amount > 0).reduce((n, e) => n + (Number(e.amount) || 0), 0);
+return { paidToOwner, paidToMe };
+}
+
 function periodSummary(key, start, end) {
 const entries = entriesFor(key).filter((e) => e.date && e.date >= start && e.date <= end);
 const stays = entries.filter((e) => STAY_KINDS.has(e.kind));
 const grossIncome = stays.reduce((n, e) => n + (Number(e.gross) || 0), 0);
 const shareEarned = stays.reduce((n, e) => n + (Number(e.amount) || 0), 0);
-// A payment's own amount is negative (money moving TO the owner, see
-// blankLedger's own sign convention) -- shown here as a plain positive
-// "already paid" figure.
-const paymentsMade = -entries.filter((e) => e.kind === 'payment').reduce((n, e) => n + (Number(e.amount) || 0), 0);
+const { paidToOwner, paidToMe } = paymentSplit(entries);
 const adjustments = entries.filter((e) => e.kind === 'adjustment').reduce((n, e) => n + (Number(e.amount) || 0), 0);
 // The period's own net effect on the balance -- every entry dated in
 // the period, whatever kind -- answers "owed FROM the period" directly,
 // distinct from the all-time running total (balanceFor, below).
 const netFromPeriod = entries.reduce((n, e) => n + (Number(e.amount) || 0), 0);
-return { entries, stays, grossIncome, shareEarned, paymentsMade, adjustments, netFromPeriod, stayCount: stays.length };
+return { entries, stays, grossIncome, shareEarned, paidToOwner, paidToMe, adjustments, netFromPeriod, stayCount: stays.length };
+}
+
+// A human label for a transaction line when the entry itself has no
+// `note` -- mirrors the exact fallback text the manual add-row already
+// writes onto a new entry (letting.js), so a listed transaction never
+// says something different from what that same row would show if you
+// went and added it by hand.
+function kindLabel(e) {
+if (e.note) return e.note;
+if (e.kind === 'earned') return 'Earned before tracking';
+if (e.kind === 'cancellation') return 'Cancellation';
+if (e.kind === 'payment') return Number(e.amount) < 0 ? 'Paid' : 'Owed more';
+if (e.kind === 'adjustment') return 'Adjustment';
+return e.kind || '';
+}
+
+// The bank-statement view: a balance carried in from before the period
+// (every dated entry earlier than `start`), then one line per
+// transaction actually inside [start, end] with a running balance after
+// each -- including payment entries in BOTH directions, not just the
+// "paid to owner" one periodSummary's own aggregate singles out.
+function statementFor(key, start, end) {
+const all = entriesFor(key).filter((e) => e.date).slice().sort((a, b) => a.date.localeCompare(b.date));
+const openingBalance = all.filter((e) => e.date < start).reduce((n, e) => n + (Number(e.amount) || 0), 0);
+let running = openingBalance;
+const transactions = all.filter((e) => e.date >= start && e.date <= end).map((e) => {
+running += Number(e.amount) || 0;
+return { date: e.date, description: kindLabel(e), kind: e.kind, amount: Number(e.amount) || 0, balance: running };
+});
+return { openingBalance, closingBalance: running, transactions };
 }
 
 // Every rate rule that was EVER active during the period, across all
@@ -194,8 +234,19 @@ async function buildReportPdf(key, { start, end } = defaultPeriod()) {
 const { jsPDF } = await loadJsPdf();
 const doc = new jsPDF({ unit: 'pt', format: 'a4' });
 const pageW = doc.internal.pageSize.getWidth();
+const pageH = doc.internal.pageSize.getHeight();
+const bottom = pageH - 40;
 let y = 48;
 const left = 48;
+
+// Starts a fresh page and resets y whenever the next chunk (height
+// `needed`) wouldn't fit above `bottom` -- the transaction table is
+// unbounded in length (a whole period's worth of stays/payments), so
+// this is the one thing in the file that can't assume everything fits
+// on page one the way the fixed-size summary/chart sections do.
+const ensureSpace = (needed) => {
+if (y + needed > bottom) { doc.addPage(); y = 48; }
+};
 
 doc.setFont('helvetica', 'bold'); doc.setFontSize(18);
 doc.text(`${ownerNameFor(key)} — letting report`, left, y); y += 20;
@@ -204,6 +255,7 @@ doc.text(`Period: ${start} to ${end}   ·   Generated ${today()}`, left, y); y +
 doc.setTextColor(0);
 
 const summary = periodSummary(key, start, end);
+const statement = statementFor(key, start, end);
 const owedNow = balanceFor(key);
 doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
 doc.text('Summary', left, y); y += 16;
@@ -211,13 +263,15 @@ doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
 const lines = [
 [`Gross income (${summary.stayCount} stay${summary.stayCount === 1 ? '' : 's'})`, money(summary.grossIncome)],
 ['Your share earned this period', money(summary.shareEarned)],
-['Already paid this period', money(summary.paymentsMade)],
+['Paid to ' + ownerNameFor(key) + ' this period', money(summary.paidToOwner)],
+...(summary.paidToMe ? [['Paid to you this period', money(summary.paidToMe)]] : []),
+...(summary.adjustments ? [['Adjustments this period', money(summary.adjustments)]] : []),
 ['Owed from this period', money(summary.netFromPeriod)],
 ['Owed in total (today)', money(owedNow)],
 ];
 lines.forEach(([label, value]) => {
 doc.text(label, left, y);
-doc.text(value, left + 260, y, { align: 'left' });
+doc.text(value, left + 280, y, { align: 'left' });
 y += 15;
 });
 y += 10;
@@ -235,19 +289,76 @@ y += 13;
 y += 10;
 }
 
+// Statement -- opening balance, every transaction between the two
+// dates (stays, payments in both directions, adjustments, cancellations),
+// closing balance. Bank-statement shape: date / description / amount /
+// running balance.
+const col = { date: left, desc: left + 60, amount: left + 330, balance: left + 400 };
+const printTableHeader = () => {
+doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(100);
+doc.text('Date', col.date, y);
+doc.text('Description', col.desc, y);
+doc.text('Amount', col.amount, y);
+doc.text('Balance', col.balance, y);
+y += 4;
+doc.setDrawColor(200);
+doc.line(left, y, pageW - left, y);
+y += 12;
+doc.setTextColor(0);
+};
+ensureSpace(60);
+doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
+doc.text('Statement', left, y); y += 16;
+doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(100);
+doc.text(`Opening balance (owed by ${ownerNameFor(key)} before ${start})`, left, y);
+doc.text(money(statement.openingBalance), col.balance, y);
+y += 16;
+doc.setTextColor(0);
+printTableHeader();
+doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+if (!statement.transactions.length) {
+doc.setTextColor(140);
+doc.text('No transactions in this period.', col.date, y);
+y += 13;
+doc.setTextColor(0);
+} else {
+statement.transactions.forEach((t) => {
+const before = y;
+ensureSpace(13);
+if (y !== before) { doc.setFont('helvetica', 'normal'); doc.setFontSize(9); printTableHeader(); }
+doc.text(t.date, col.date, y);
+doc.text(t.description, col.desc, y, { maxWidth: col.amount - col.desc - 10 });
+doc.text(money(t.amount), col.amount, y);
+doc.text(money(t.balance), col.balance, y);
+y += 13;
+});
+}
+y += 4;
+doc.setDrawColor(200);
+ensureSpace(38);
+doc.line(left, y, pageW - left, y);
+y += 14;
+doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
+doc.text(`Closing balance (owed by ${ownerNameFor(key)} at ${end})`, left, y);
+doc.text(money(statement.closingBalance), col.balance, y);
+y += 24;
+
 // Charts -- 6 months back from the period's own end, same "a few
 // months of context either side" shape the live charts default to,
 // scaled down to fit two side by side on the page.
 const months = monthRange(addMonths(end.slice(0, 7), -5), end.slice(0, 7));
 const chartW = 500, chartH = 220;
+const chartImgH = (pageW - left * 2) * (chartH / chartW);
+ensureSpace(chartImgH + 30);
 const canvas1 = document.createElement('canvas');
 canvas1.width = chartW; canvas1.height = chartH;
 drawIncomeBarChart(canvas1, key, months);
 doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
 doc.text('Income by month (your share)', left, y); y += 10;
-doc.addImage(canvas1.toDataURL('image/png'), 'PNG', left, y, (pageW - left * 2), (pageW - left * 2) * (chartH / chartW));
-y += (pageW - left * 2) * (chartH / chartW) + 20;
+doc.addImage(canvas1.toDataURL('image/png'), 'PNG', left, y, (pageW - left * 2), chartImgH);
+y += chartImgH + 20;
 
+ensureSpace(chartImgH + 30);
 const canvas2 = document.createElement('canvas');
 canvas2.width = chartW; canvas2.height = chartH;
 drawRateLineChart(canvas2, key, months);
@@ -286,4 +397,4 @@ const body = encodeURIComponent(`Hi ${ownerNameFor(key)},\n\nAttached is the let
 window.open(`mailto:?subject=${subject}&body=${body}`, '_blank');
 }
 
-export { buildReportPdf, downloadBlob, reportFilename, openEmailDraft, defaultPeriod, periodSummary, isoDate };
+export { buildReportPdf, downloadBlob, reportFilename, openEmailDraft, defaultPeriod, periodSummary, statementFor, isoDate };
