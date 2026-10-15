@@ -1,10 +1,9 @@
-// A periodic PDF report per Airbnb listing-owner (Lewis/Zara) --
-// what came in, what's been paid, what's still owed in total and from
-// the period, the rate-history rules that applied, and the two
-// listing charts filtered to just THEIR listings. Asked for directly:
-// "what income came in, payments already made, and what they still
-// owe in total and from the period... include the charts, filtered
-// for them."
+// A periodic PDF report per Airbnb listing-owner (Lewis/Zara) -- written
+// FOR THEM to read, not for Phil: what Airbnb paid in, what's theirs to
+// keep, what's being held for Dad, every transaction between two dates,
+// and the same two charts the live dashboard shows, scoped to just their
+// own listings and matching its own colours/groupings as closely as a
+// static PDF reasonably can.
 //
 // Presentation + layout only -- every real number comes from
 // letting.js's own exported aggregation (entriesFor, shareRuleAt,
@@ -15,7 +14,7 @@
 import { data } from '../state.js';
 import { loadJsPdf } from '../utils.js';
 import {
-ownerKeyFor, ownerNameFor, entriesFor, nightRateFor, balanceFor, money, money0, monthRange, monthLabel, addMonths, today, shareRuleAt,
+ownerKeyFor, ownerNameFor, entriesFor, nightRateFor, balanceFor, money, money0, monthRange, monthLabel, addMonths, today, isMyOwnListing, resolveColor, listingColorVar,
 } from './letting.js';
 
 // Reads a LOCAL-calendar date straight off the Date object's own
@@ -44,31 +43,43 @@ return (data.airbnbListings || []).filter((l) => ownerKeyFor(l) === key);
 
 const STAY_KINDS = new Set(['accrual', 'earned', 'cancellation']);
 
-// A payment's sign says which way the money moved (see the manual
-// add-row's own placeholder text: "negative for a payment to you") --
-// split into the two directions here rather than netted into one
-// figure, since "paid to owner" and "paid to me" are different things
-// a reader needs to see separately, not infer from a single number's
-// sign.
+// A ledger entry's own `amount` field is ALWAYS Dad's cut -- the slice
+// of a stay's gross that this owner is holding for him (kind 'accrual'/
+// 'earned'/'cancellation'), or a direct movement of that same running
+// balance (kind 'payment'/'adjustment'). Confirmed directly against the
+// manual add-row's own placeholder text ("negative for a payment to
+// you" -- "you" being Phil, the one typing it in) and against live
+// feedback on this report's first draft, which had this backwards: a
+// NEGATIVE payment is the owner paying DAD (reduces what's held for
+// him), a POSITIVE one is the reverse -- Dad handing the owner money
+// directly, which is why its own fallback note already reads "Owed
+// more" rather than "Paid".
 function paymentSplit(entries) {
 const payments = entries.filter((e) => e.kind === 'payment');
-const paidToOwner = -payments.filter((e) => e.amount < 0).reduce((n, e) => n + (Number(e.amount) || 0), 0);
-const paidToMe = payments.filter((e) => e.amount > 0).reduce((n, e) => n + (Number(e.amount) || 0), 0);
-return { paidToOwner, paidToMe };
+const paidToDad = -payments.filter((e) => e.amount < 0).reduce((n, e) => n + (Number(e.amount) || 0), 0);
+const receivedFromDad = payments.filter((e) => e.amount > 0).reduce((n, e) => n + (Number(e.amount) || 0), 0);
+return { paidToDad, receivedFromDad };
 }
 
 function periodSummary(key, start, end) {
 const entries = entriesFor(key).filter((e) => e.date && e.date >= start && e.date <= end);
 const stays = entries.filter((e) => STAY_KINDS.has(e.kind));
-const grossIncome = stays.reduce((n, e) => n + (Number(e.gross) || 0), 0);
-const shareEarned = stays.reduce((n, e) => n + (Number(e.amount) || 0), 0);
-const { paidToOwner, paidToMe } = paymentSplit(entries);
+// The WHOLE Airbnb payment for each stay -- what guests actually paid,
+// before any split.
+const airbnbIncome = stays.reduce((n, e) => n + (Number(e.gross) || 0), 0);
+// Dad's cut of that, the same figure accrueLettings() wrote onto each
+// entry's own `amount` field.
+const dadsShare = stays.reduce((n, e) => n + (Number(e.amount) || 0), 0);
+// What's left -- the owner's own money to keep, no further tracking
+// needed on it.
+const yourShare = airbnbIncome - dadsShare;
+const { paidToDad, receivedFromDad } = paymentSplit(entries);
 const adjustments = entries.filter((e) => e.kind === 'adjustment').reduce((n, e) => n + (Number(e.amount) || 0), 0);
-// The period's own net effect on the balance -- every entry dated in
-// the period, whatever kind -- answers "owed FROM the period" directly,
-// distinct from the all-time running total (balanceFor, below).
-const netFromPeriod = entries.reduce((n, e) => n + (Number(e.amount) || 0), 0);
-return { entries, stays, grossIncome, shareEarned, paidToOwner, paidToMe, adjustments, netFromPeriod, stayCount: stays.length };
+// The period's own net effect on the balance held for Dad -- every
+// entry dated in the period, whatever kind -- distinct from the
+// all-time running total (balanceFor, below).
+const netHeldFromPeriod = entries.reduce((n, e) => n + (Number(e.amount) || 0), 0);
+return { entries, stays, airbnbIncome, yourShare, dadsShare, paidToDad, receivedFromDad, adjustments, netHeldFromPeriod, stayCount: stays.length };
 }
 
 // A human label for a transaction line when the entry itself has no
@@ -80,25 +91,43 @@ function kindLabel(e) {
 if (e.note) return e.note;
 if (e.kind === 'earned') return 'Earned before tracking';
 if (e.kind === 'cancellation') return 'Cancellation';
-if (e.kind === 'payment') return Number(e.amount) < 0 ? 'Paid' : 'Owed more';
+if (e.kind === 'payment') return Number(e.amount) < 0 ? 'Paid to Dad' : 'Received from Dad';
 if (e.kind === 'adjustment') return 'Adjustment';
 return e.kind || '';
 }
 
-// The bank-statement view: a balance carried in from before the period
-// (every dated entry earlier than `start`), then one line per
-// transaction actually inside [start, end] with a running balance after
-// each -- including payment entries in BOTH directions, not just the
-// "paid to owner" one periodSummary's own aggregate singles out.
+// The bank-statement view read by the owner: a balance carried in from
+// before the period (every dated entry earlier than `start`), then one
+// line per transaction actually inside [start, end] -- split into the
+// SAME columns the summary above totals (the whole Airbnb payment, the
+// owner's own kept share, Dad's share) plus a running "held for Dad"
+// balance -- not just the amount netted into that balance, so a
+// payment in EITHER direction shows as its own line rather than only
+// ever surfacing inside one aggregate figure.
 function statementFor(key, start, end) {
 const all = entriesFor(key).filter((e) => e.date).slice().sort((a, b) => a.date.localeCompare(b.date));
 const openingBalance = all.filter((e) => e.date < start).reduce((n, e) => n + (Number(e.amount) || 0), 0);
 let running = openingBalance;
 const transactions = all.filter((e) => e.date >= start && e.date <= end).map((e) => {
-running += Number(e.amount) || 0;
-return { date: e.date, description: kindLabel(e), kind: e.kind, amount: Number(e.amount) || 0, balance: running };
+const isStay = STAY_KINDS.has(e.kind);
+const dadsShare = Number(e.amount) || 0;
+running += dadsShare;
+return {
+date: e.date,
+description: kindLabel(e),
+kind: e.kind,
+airbnbPayment: isStay ? (Number(e.gross) || 0) : null,
+yourShare: isStay ? (Number(e.gross) || 0) - dadsShare : null,
+dadsShare,
+heldForDad: running,
+};
 });
-return { openingBalance, closingBalance: running, transactions };
+const totals = transactions.reduce((t, r) => ({
+airbnbPayment: t.airbnbPayment + (r.airbnbPayment || 0),
+yourShare: t.yourShare + (r.yourShare || 0),
+dadsShare: t.dadsShare + r.dadsShare,
+}), { airbnbPayment: 0, yourShare: 0, dadsShare: 0 });
+return { openingBalance, closingBalance: running, transactions, totals };
 }
 
 // Every rate rule that was EVER active during the period, across all
@@ -122,27 +151,50 @@ rows.push({ listing: listing.label || 'Listing', fromDate: rule.fromDate || '(al
 return rows;
 }
 
-// A simple, self-contained bar chart -- income by month, this owner's
-// share only. Deliberately NOT a reuse of letting.js's own interactive
-// drawLettingChart: that one carries live, mutable, page-global
-// selection state (lettingChartSelectedGroups) this report must never
-// touch or be affected by, and has hover/legend machinery a static PDF
-// page has no use for. Pure function: canvas in, this owner's own
-// monthly totals out.
+// The two colours this owner's bar segments should use -- their OWN
+// listing colour, and Dad's own listing colour -- resolved the exact
+// same way the live dashboard's stacked income chart resolves them
+// (listingColorVar + resolveColor against the real CSS vars), so a
+// report's bars read as the same two colours the dashboard already
+// uses for "Mine" vs this owner's own group, not a palette invented
+// just for the PDF.
+function reportColours(key) {
+const listings = data.airbnbListings || [];
+const mineListing = listings.find((l) => isMyOwnListing(l));
+const ownListing = listingsFor(key)[0];
+return {
+yours: resolveColor(listingColorVar((ownListing && ownListing.colour) || 'slate')),
+dads: resolveColor(listingColorVar((mineListing && mineListing.colour) || 'slate')),
+};
+}
+
+// Income by month, stacked -- the owner's own kept share and Dad's
+// share of the SAME gross, one bar per month, same shape as the live
+// dashboard's own per-owner stacked income chart (lettingChartData/
+// drawLettingChart) but deliberately not a reuse of that function
+// itself: it carries live, mutable, page-global selection state
+// (lettingChartSelectedGroups) and hover/legend/target machinery a
+// static PDF page has no use for. Pure function: canvas in, this
+// owner's own monthly split out, in the dashboard's own two colours.
 function drawIncomeBarChart(canvas, key, months) {
 const width = canvas.width, height = canvas.height;
 const ctx = canvas.getContext('2d');
 ctx.clearRect(0, 0, width, height);
+const colours = reportColours(key);
 const entries = entriesFor(key).filter((e) => STAY_KINDS.has(e.kind) && e.date);
 const byMonth = new Map();
-months.forEach((ym) => byMonth.set(ym, 0));
+months.forEach((ym) => byMonth.set(ym, { yours: 0, dads: 0 }));
 entries.forEach((e) => {
 const ym = e.date.slice(0, 7);
-if (byMonth.has(ym)) byMonth.set(ym, byMonth.get(ym) + (Number(e.amount) || 0));
+const bucket = byMonth.get(ym);
+if (!bucket) return;
+const dadsShare = Number(e.amount) || 0;
+bucket.dads += dadsShare;
+bucket.yours += (Number(e.gross) || 0) - dadsShare;
 });
-const values = months.map((ym) => byMonth.get(ym) || 0);
-const max = Math.max(...values, 1);
-const padLeft = 50, padBottom = 24, padTop = 14, padRight = 10;
+const values = months.map((ym) => byMonth.get(ym));
+const max = Math.max(...values.map((v) => v.yours + v.dads), 1);
+const padLeft = 50, padBottom = 32, padTop = 14, padRight = 10;
 const plotW = width - padLeft - padRight, plotH = height - padTop - padBottom;
 ctx.strokeStyle = '#ccc';
 ctx.fillStyle = '#333';
@@ -155,22 +207,35 @@ ctx.beginPath(); ctx.moveTo(padLeft, y); ctx.lineTo(width - padRight, y); ctx.st
 ctx.fillText(money0(max * t), padLeft - 6, y);
 });
 const bw = plotW / months.length;
-ctx.fillStyle = '#2a6f6f';
 values.forEach((v, i) => {
-const h = (v / max) * plotH;
-ctx.fillRect(padLeft + i * bw + bw * 0.15, padTop + plotH - h, bw * 0.7, h);
+const x = padLeft + i * bw + bw * 0.15, w = bw * 0.7;
+const yoursH = (v.yours / max) * plotH;
+const dadsH = (v.dads / max) * plotH;
+ctx.fillStyle = colours.yours;
+ctx.fillRect(x, padTop + plotH - yoursH, w, yoursH);
+ctx.fillStyle = colours.dads;
+ctx.fillRect(x, padTop + plotH - yoursH - dadsH, w, dadsH);
 });
 ctx.fillStyle = '#555';
 ctx.textAlign = 'center';
 ctx.textBaseline = 'top';
 months.forEach((ym, i) => ctx.fillText(monthLabel(ym), padLeft + (i + 0.5) * bw, padTop + plotH + 6));
+// Legend -- two swatches, since the two colours alone don't say which
+// is which.
+const legendY = height - 10;
+ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.font = '10px sans-serif';
+ctx.fillStyle = colours.yours; ctx.fillRect(padLeft, legendY - 4, 9, 9);
+ctx.fillStyle = '#333'; ctx.fillText('Your share', padLeft + 13, legendY);
+ctx.fillStyle = colours.dads; ctx.fillRect(padLeft + 90, legendY - 4, 9, 9);
+ctx.fillStyle = '#333'; ctx.fillText("Dad's share", padLeft + 103, legendY);
 }
 
 // Same pattern, average night rate across this owner's own listings
 // (nights-weighted, same "divide the sum of net by the sum of nights"
 // arithmetic the live chart's own nightRateFor/accrual math already
 // establishes) -- a line, not a bar, since a rate isn't something to
-// stack.
+// stack, and there's no Dad/owner split to show on a RATE in the first
+// place (it's the same number either way this gets sliced).
 function drawRateLineChart(canvas, key, months) {
 const width = canvas.width, height = canvas.height;
 const ctx = canvas.getContext('2d');
@@ -229,7 +294,9 @@ months.forEach((ym, i) => ctx.fillText(monthLabel(ym), padLeft + (i + 0.5) * bw,
 // The full PDF, built page-by-page with jsPDF's own text/line/image
 // primitives rather than a print-stylesheet screenshot -- keeps real
 // control over pagination and file size instead of rasterising an
-// entire HTML page.
+// entire HTML page. Addressed to the owner throughout ("you" = them,
+// "Dad" = Phil) -- this document is theirs to read, not a copy of
+// Phil's own dashboard view of the same numbers.
 async function buildReportPdf(key, { start, end } = defaultPeriod()) {
 const { jsPDF } = await loadJsPdf();
 const doc = new jsPDF({ unit: 'pt', format: 'a4' });
@@ -238,6 +305,7 @@ const pageH = doc.internal.pageSize.getHeight();
 const bottom = pageH - 40;
 let y = 48;
 const left = 48;
+const name = ownerNameFor(key);
 
 // Starts a fresh page and resets y whenever the next chunk (height
 // `needed`) wouldn't fit above `bottom` -- the transaction table is
@@ -249,25 +317,26 @@ if (y + needed > bottom) { doc.addPage(); y = 48; }
 };
 
 doc.setFont('helvetica', 'bold'); doc.setFontSize(18);
-doc.text(`${ownerNameFor(key)} — letting report`, left, y); y += 20;
+doc.text(`${name} — letting report`, left, y); y += 20;
 doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(100);
 doc.text(`Period: ${start} to ${end}   ·   Generated ${today()}`, left, y); y += 24;
 doc.setTextColor(0);
 
 const summary = periodSummary(key, start, end);
 const statement = statementFor(key, start, end);
-const owedNow = balanceFor(key);
+const heldNow = balanceFor(key);
 doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
 doc.text('Summary', left, y); y += 16;
 doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
 const lines = [
-[`Gross income (${summary.stayCount} stay${summary.stayCount === 1 ? '' : 's'})`, money(summary.grossIncome)],
-['Your share earned this period', money(summary.shareEarned)],
-['Paid to ' + ownerNameFor(key) + ' this period', money(summary.paidToOwner)],
-...(summary.paidToMe ? [['Paid to you this period', money(summary.paidToMe)]] : []),
+[`Airbnb income (${summary.stayCount} stay${summary.stayCount === 1 ? '' : 's'})`, money(summary.airbnbIncome)],
+['Your share (kept)', money(summary.yourShare)],
+["Dad's share (this period)", money(summary.dadsShare)],
+...(summary.paidToDad ? [['Paid to Dad this period', money(summary.paidToDad)]] : []),
+...(summary.receivedFromDad ? [['Received from Dad this period', money(summary.receivedFromDad)]] : []),
 ...(summary.adjustments ? [['Adjustments this period', money(summary.adjustments)]] : []),
-['Owed from this period', money(summary.netFromPeriod)],
-['Owed in total (today)', money(owedNow)],
+['Held for Dad — from this period', money(summary.netHeldFromPeriod)],
+['Held for Dad — total today', money(heldNow)],
 ];
 lines.forEach(([label, value]) => {
 doc.text(label, left, y);
@@ -283,7 +352,7 @@ doc.text('Rate history during this period', left, y); y += 16;
 doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
 rateRows.forEach((r) => {
 const capText = r.capAmount != null ? `, cap ${money(r.capAmount)}` : '';
-doc.text(`${r.listing}: ${r.pct}%${capText} — ${r.fromDate} to ${r.toDate}`, left, y);
+doc.text(`${r.listing}: ${r.pct}% to Dad${capText} — ${r.fromDate} to ${r.toDate}`, left, y);
 y += 13;
 });
 y += 10;
@@ -291,31 +360,34 @@ y += 10;
 
 // Statement -- opening balance, every transaction between the two
 // dates (stays, payments in both directions, adjustments, cancellations),
-// closing balance. Bank-statement shape: date / description / amount /
-// running balance.
-const col = { date: left, desc: left + 60, amount: left + 330, balance: left + 400 };
+// closing balance. Bank-statement shape, one column per figure the
+// summary above already totals: date / description / the whole Airbnb
+// payment / your own share / Dad's share / running balance held for him.
+const col = { date: left, desc: left + 54, airbnb: left + 190, yours: left + 260, dads: left + 330, held: left + 400 };
 const printTableHeader = () => {
-doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(100);
+doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(100);
 doc.text('Date', col.date, y);
 doc.text('Description', col.desc, y);
-doc.text('Amount', col.amount, y);
-doc.text('Balance', col.balance, y);
+doc.text('Airbnb', col.airbnb, y);
+doc.text('Your share', col.yours, y);
+doc.text("Dad's share", col.dads, y);
+doc.text('Held for Dad', col.held, y);
 y += 4;
 doc.setDrawColor(200);
 doc.line(left, y, pageW - left, y);
-y += 12;
+y += 11;
 doc.setTextColor(0);
 };
 ensureSpace(60);
 doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
 doc.text('Statement', left, y); y += 16;
 doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(100);
-doc.text(`Opening balance (owed by ${ownerNameFor(key)} before ${start})`, left, y);
-doc.text(money(statement.openingBalance), col.balance, y);
+doc.text(`Held for Dad, carried in from before ${start}`, left, y);
+doc.text(money(statement.openingBalance), col.held, y);
 y += 16;
 doc.setTextColor(0);
 printTableHeader();
-doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
 if (!statement.transactions.length) {
 doc.setTextColor(140);
 doc.text('No transactions in this period.', col.date, y);
@@ -325,40 +397,48 @@ doc.setTextColor(0);
 statement.transactions.forEach((t) => {
 const before = y;
 ensureSpace(13);
-if (y !== before) { doc.setFont('helvetica', 'normal'); doc.setFontSize(9); printTableHeader(); }
+if (y !== before) { doc.setFont('helvetica', 'normal'); doc.setFontSize(8); printTableHeader(); }
 doc.text(t.date, col.date, y);
-doc.text(t.description, col.desc, y, { maxWidth: col.amount - col.desc - 10 });
-doc.text(money(t.amount), col.amount, y);
-doc.text(money(t.balance), col.balance, y);
-y += 13;
+doc.text(t.description, col.desc, y, { maxWidth: col.airbnb - col.desc - 8 });
+if (t.airbnbPayment != null) doc.text(money(t.airbnbPayment), col.airbnb, y);
+if (t.yourShare != null) doc.text(money(t.yourShare), col.yours, y);
+doc.text(money(t.dadsShare), col.dads, y);
+doc.text(money(t.heldForDad), col.held, y);
+y += 12;
 });
 }
-y += 4;
+y += 3;
 doc.setDrawColor(200);
-ensureSpace(38);
+ensureSpace(50);
 doc.line(left, y, pageW - left, y);
-y += 14;
-doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
-doc.text(`Closing balance (owed by ${ownerNameFor(key)} at ${end})`, left, y);
-doc.text(money(statement.closingBalance), col.balance, y);
+y += 12;
+doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
+doc.text('Total this period', col.desc, y);
+doc.text(money(statement.totals.airbnbPayment), col.airbnb, y);
+doc.text(money(statement.totals.yourShare), col.yours, y);
+doc.text(money(statement.totals.dadsShare), col.dads, y);
+y += 16;
+doc.setFontSize(10);
+doc.text(`Held for Dad, as at ${end}`, left, y);
+doc.text(money(statement.closingBalance), col.held, y);
 y += 24;
 
 // Charts -- 6 months back from the period's own end, same "a few
 // months of context either side" shape the live charts default to,
-// scaled down to fit two side by side on the page.
+// scaled down to fit on the page, in the dashboard's own colours.
 const months = monthRange(addMonths(end.slice(0, 7), -5), end.slice(0, 7));
-const chartW = 500, chartH = 220;
+const chartW = 500, chartH = 230;
 const chartImgH = (pageW - left * 2) * (chartH / chartW);
 ensureSpace(chartImgH + 30);
 const canvas1 = document.createElement('canvas');
 canvas1.width = chartW; canvas1.height = chartH;
 drawIncomeBarChart(canvas1, key, months);
 doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
-doc.text('Income by month (your share)', left, y); y += 10;
+doc.text('Income by month', left, y); y += 10;
 doc.addImage(canvas1.toDataURL('image/png'), 'PNG', left, y, (pageW - left * 2), chartImgH);
 y += chartImgH + 20;
 
-ensureSpace(chartImgH + 30);
+ensureSpace(chartImgH + 30 - 10);
 const canvas2 = document.createElement('canvas');
 canvas2.width = chartW; canvas2.height = chartH;
 drawRateLineChart(canvas2, key, months);
@@ -393,7 +473,7 @@ return `letting-report-${name}-${start.slice(0, 7)}.pdf`;
 // downloaded) is real and manual; the UI that calls this says so.
 function openEmailDraft(key, start, end) {
 const subject = encodeURIComponent(`Letting report — ${ownerNameFor(key)} — ${start} to ${end}`);
-const body = encodeURIComponent(`Hi ${ownerNameFor(key)},\n\nAttached is the letting report for ${start} to ${end}.\n\n(Don't forget to attach the PDF that just downloaded.)`);
+const body = encodeURIComponent(`Hi ${ownerNameFor(key)},\n\nAttached is your letting report for ${start} to ${end}.\n\n(Don't forget to attach the PDF that just downloaded.)`);
 window.open(`mailto:?subject=${subject}&body=${body}`, '_blank');
 }
 
