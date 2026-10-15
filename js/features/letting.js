@@ -434,6 +434,13 @@ badge.textContent = totalGross()
 ? `${money(totalOwed())} owed of ${money(totalGross())} taken`
 : `${money(totalOwed())} owed`;
 }
+// Which accruals still have a live reservation backing them -- an
+// orphaned one (the ICS feed's own rolling window aged the real
+// reservation out, or it was genuinely cancelled) has no real
+// checkin/checkout left anywhere BUT this row, so it needs the same
+// explicit start-date capture an "Earned" row already gets, not just
+// the ones typed in by hand from the start.
+const reservationIds = new Set((data.airbnbReservations || []).map((r) => r.id));
 el.innerHTML = keys.map((key) => {
 const rows = entriesFor(key).slice().sort((a, b) => String(b.date).localeCompare(String(a.date)));
 const bal = balanceFor(key);
@@ -463,8 +470,10 @@ const nightRate = nightRateFor(e);
 const nightRateHtml = nightRate != null
 ? ` <span class="letting-gross" title="${escapeHtml(`${e.nights} night${e.nights === 1 ? '' : 's'}, after cleaning cost`)}">${escapeHtml(`${money(nightRate)}/night`)}</span>`
 : '';
+const isOrphanedAccrual = e.kind === 'accrual' && (!e.reservationId || !reservationIds.has(e.reservationId));
+const showStartDate = e.kind === 'earned' || isOrphanedAccrual;
 return `<tr>
-<td style="white-space:nowrap;"><input type="date" class="settings-input" style="max-width:130px;" data-letting-date="${escapeHtml(e.id)}" value="${escapeHtml(e.date || '')}" title="Edit retrospectively to the real Airbnb payout date, if it differs from checkout -- this is what tax-year grouping below uses.">${e.kind === 'earned' ? `<input type="date" class="settings-input" style="max-width:130px;margin-top:3px;" data-letting-start-date="${escapeHtml(e.id)}" value="${escapeHtml(e.startDate || '')}" title="Optional -- only if this booking ran longer than one month. When set, the chart above splits the gross across every month from here to the date on the left (same pro-rata-by-night split a real reservation's own checkin/checkout already gets), instead of landing as one spike in a single month.">` : ''}${(e.kind === 'accrual' || e.kind === 'earned') ? `<input type="number" min="0" step="1" class="settings-input" style="max-width:70px;margin-top:3px;" data-letting-nights="${escapeHtml(e.id)}" value="${e.nights || ''}" placeholder="Nights" title="Nights this stay covered -- used for the average night rate. Filled in automatically when the reservation was still on file at accrual time; type it in for an older row that's missing it.">` : ''}${(e.kind === 'earned' && !e.listingId) ? `<select class="settings-input" style="max-width:150px;margin-top:3px;" data-letting-listing="${escapeHtml(e.id)}" title="Which listing this stay was for -- a manually-added row has no listing on it yet, so it's left out of the average night-rate chart above (which groups by listing) until this is set.">
+<td style="white-space:nowrap;"><input type="date" class="settings-input" style="max-width:130px;" data-letting-date="${escapeHtml(e.id)}" value="${escapeHtml(e.date || '')}" title="The payout/accrual date -- used for statements and tax-year grouping only. Edit it to the real Airbnb payout date if that differs from checkout; it has no effect on occupancy or the nightly rate below, which both come from check-in/nights instead.">${showStartDate ? `<input type="date" class="settings-input" style="max-width:130px;margin-top:3px;" data-letting-start-date="${escapeHtml(e.id)}" value="${escapeHtml(e.startDate || '')}" title="The real check-in date for this stay -- what occupancy and the average night rate are actually based on, kept separate from the payout date on the left. Leave blank and nights get guessed backward from the payout date instead, which is wrong whenever the payout didn't land on the real checkout.">` : ''}${(e.kind === 'accrual' || e.kind === 'earned') ? `<input type="number" min="0" step="1" class="settings-input" style="max-width:70px;margin-top:3px;" data-letting-nights="${escapeHtml(e.id)}" value="${e.nights || ''}" placeholder="Nights" title="Nights this stay covered -- used for the average night rate. Filled in automatically when the reservation was still on file at accrual time; type it in for an older row that's missing it.">` : ''}${(e.kind === 'earned' && !e.listingId) ? `<select class="settings-input" style="max-width:150px;margin-top:3px;" data-letting-listing="${escapeHtml(e.id)}" title="Which listing this stay was for -- a manually-added row has no listing on it yet, so it's left out of the average night-rate chart above (which groups by listing) until this is set.">
 <option value="">Listing…</option>
 ${(data.airbnbListings || []).map((l) => `<option value="${escapeHtml(l.id)}">${escapeHtml(l.label || l.prefix || 'Listing')}</option>`).join('')}
 </select>` : ''}</td>
@@ -638,6 +647,7 @@ if (!addBtn) return; // not in this build's DOM
 const kindEl = document.getElementById('letting-add-kind');
 const amountEl = document.getElementById('letting-add-amount');
 const earnedFieldsEl = document.getElementById('letting-add-earned-fields');
+const platformFieldEl = document.getElementById('letting-add-platform-field');
 const setHint = () => {
 if (!kindEl || !amountEl) return;
 amountEl.placeholder = kindEl.value === 'earned' ? 'Gross takings' : 'Amount';
@@ -645,6 +655,12 @@ amountEl.placeholder = kindEl.value === 'earned' ? 'Gross takings' : 'Amount';
 // directly, so a historic "Earned" row doesn't need a second visit to
 // the row below just to fill them in.
 if (earnedFieldsEl) earnedFieldsEl.style.display = kindEl.value === 'earned' ? '' : 'none';
+// Platform matters for the same two kinds the per-row edit view
+// already lets you set it on afterward (earned/cancellation) -- a
+// cancellation payout has no nights (nothing was occupied), but it
+// still happened on some platform, so it gets this field without the
+// nights/start-date ones above.
+if (platformFieldEl) platformFieldEl.style.display = (kindEl.value === 'earned' || kindEl.value === 'cancellation') ? '' : 'none';
 };
 kindEl?.addEventListener('change', setHint);
 setHint();
@@ -685,6 +701,11 @@ const kind = (document.getElementById('letting-add-kind') || {}).value || 'payme
 // stay with a real gap the "date minus nights" arithmetic can't infer.
 const nightsVal = kind === 'earned' ? Number(document.getElementById('letting-add-nights')?.value) : null;
 const startDateVal = kind === 'earned' ? (document.getElementById('letting-add-start-date')?.value || '') : '';
+// Same two kinds the platform field above shows for -- stored so the
+// income chart draws Other as a striped fill instead of solid, same as
+// an accrual's own platform already does. Missing until now: a
+// manually-added row had no way to say Other at all.
+const platformVal = (kind === 'earned' || kind === 'cancellation') ? (document.getElementById('letting-add-platform')?.value || 'airbnb') : '';
 const dateVal = document.getElementById('letting-add-date')?.value || today();
 // Resolved as of the row's OWN date, not today's -- a backdated
 // "Earned" entry should use whichever rule actually applied then.
@@ -705,6 +726,7 @@ amount: signed,
 ...(kind === 'earned' ? { gross: Math.round(amount * 100) / 100, pct } : {}),
 ...(kind === 'earned' && Number.isFinite(nightsVal) && nightsVal > 0 ? { nights: Math.round(nightsVal) } : {}),
 ...(kind === 'earned' && startDateVal ? { startDate: startDateVal } : {}),
+...(platformVal ? { platform: platformVal } : {}),
 date: dateVal,
 note: note || (kind === 'earned'
 ? `Earned before tracking`
@@ -950,6 +972,21 @@ total += 1;
 return { counts, total };
 }
 
+// Reads a LOCAL-calendar date straight off the Date object's own
+// getters, never .toISOString() (which converts through UTC first and
+// silently shifts the date by a day under BST) -- the two helpers
+// below both do day arithmetic on a local-midnight Date and need to
+// read the result back out safely.
+function isoDate(d) {
+return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function addDaysIso(dateStr, days) {
+const d = new Date(`${dateStr}T00:00:00`);
+d.setDate(d.getDate() + days);
+return isoDate(d);
+}
+
 // `date` minus `nights` days -- the checkin a historic "earned" row
 // WOULD have had, derivable from fields already on the row without
 // needing its own optional startDate input filled in too. Used as a
@@ -961,12 +998,15 @@ return { counts, total };
 // in September -- "not fully reflected" is exactly what that looks
 // like, and it's purely because startDate happened to be the ONLY way
 // this function knew to split across months, despite nights already
-// saying the stay couldn't have fit in one.
+// saying the stay couldn't have fit in one. Only a GUESS, and only as
+// good as the assumption that `date` itself lands on the real checkout
+// -- see nightsByMonthForEntry, which prefers a real startDate+nights
+// pair over this the moment one exists, precisely because the payout
+// date can legitimately land any time during a stay now, not just on
+// its last day.
 function impliedStartDate(dateStr, nights) {
 if (!dateStr || !(nights > 0)) return '';
-const d = new Date(`${dateStr}T00:00:00`);
-d.setDate(d.getDate() - nights);
-return d.toISOString().slice(0, 10);
+return addDaysIso(dateStr, -nights);
 }
 
 // One Map per group (Mine / Lewis' / Zara's / ...), ym -> allocated
@@ -1064,18 +1104,21 @@ if (!listing) return;
 // split pro-rata by night across every month it spans, exactly like a
 // real reservation's own checkin/checkout (nightsByMonth) -- otherwise
 // the whole gross lands as one spike in a single month, which is what
-// was blowing the chart's own scale for a multi-month let. The
-// explicit startDate (letting-add-start-date input above) wins when
-// set, since it can account for a gap the simple "date minus nights"
-// arithmetic below can't (dates that weren't actually contiguous); the
-// derived one is the fallback the moment nights alone already implies
-// more than a single month, not something the user has to additionally
-// type in just to get the same split their own nights figure already
-// describes.
+// was blowing the chart's own scale for a multi-month let. A real
+// startDate+nights pair (letting-add-start-date/-nights inputs above)
+// wins when both are set, counted FORWARD from check-in rather than
+// bounded by `date` -- `date` is the payout/accrual date, which can
+// legitimately land any time during the stay, not just on its last
+// day, so it must never be the thing deciding where the stay's own
+// nights actually fall. Falling back to "date minus nights" only when
+// there's no real startDate to use instead -- a guess, not a certainty,
+// but still better than lumping the whole gross into date's own single
+// month just because neither of the above was available.
 const platform = e.platform === 'other' ? 'other' : 'airbnb';
-const splitStart = (e.startDate && e.startDate < e.date) ? e.startDate : impliedStartDate(e.date, e.nights);
-if (splitStart && splitStart < e.date) {
-const { counts, total } = nightsByMonth(splitStart, e.date);
+const splitStart = (e.startDate && e.nights > 0) ? e.startDate : impliedStartDate(e.date, e.nights);
+const splitEnd = (e.startDate && e.nights > 0) ? addDaysIso(e.startDate, e.nights) : e.date;
+if (splitStart && splitEnd && splitStart < splitEnd) {
+const { counts, total } = nightsByMonth(splitStart, splitEnd);
 if (!total) return;
 counts.forEach((nights, ym) => {
 if (!baseMonthSet.has(ym)) return;
@@ -1564,9 +1607,27 @@ if (e.kind === 'accrual' && e.reservationId) {
 const r = (data.airbnbReservations || []).find((x) => x.id === e.reservationId);
 if (r && r.checkin && r.checkout && r.checkout > r.checkin) return nightsByMonth(r.checkin, r.checkout);
 }
-const splitStart = (e.kind === 'earned' && e.startDate && e.date && e.startDate < e.date) ? e.startDate : impliedStartDate(e.date, e.nights);
-if (splitStart && e.date && splitStart < e.date) {
-return nightsByMonth(splitStart, e.date);
+// A real startDate+nights pair fixes the whole window on its own --
+// counted FORWARD from check-in, never bounded by `date`. `date` is
+// the payout/accrual date, which can legitimately land any time during
+// (or even after) the stay now, not just on its last day -- using it
+// as the other end of the range here would silently truncate or shift
+// a stay the moment payout timing stops lining up with checkout. Not
+// just an "earned" row either: an orphaned accrual can carry an
+// explicit startDate too (the per-row edit view offers it the same
+// way), and it's a real checkin either way.
+if (e.startDate && e.nights > 0) {
+return nightsByMonth(e.startDate, addDaysIso(e.startDate, e.nights));
+}
+// Nothing but the payout date and a nights count -- the best guess
+// left, and only as good as assuming payout landed on the real
+// checkout. Confirmed live as a real gap when this guess wasn't made
+// at all: a 20-night stay with no reservation on file and no startDate
+// typed in showed its whole rate bunched into one month on the chart,
+// nothing in the other one it actually spanned.
+const implied = impliedStartDate(e.date, e.nights);
+if (implied && e.date && implied < e.date) {
+return nightsByMonth(implied, e.date);
 }
 const ym = (e.date || '').slice(0, 7);
 if (!ym || !e.nights) return { counts: new Map(), total: 0 };
@@ -2352,5 +2413,5 @@ if (keep) sel.value = keep;
 
 export {
 accrueLettings, renderLetting, initLetting, totalOwed, totalGross, balanceFor, grossFor, owners, ownerNameFor, ownerKeyFor, sharePctFor, shareRuleAt, splitAmountFor, money, isMyOwnKey, isMyOwnListing,
-entriesFor, nightRateFor, money0, monthRange, monthLabel, addMonths, today, resolveColor, listingColorVar,
+entriesFor, nightRateFor, money0, monthRange, monthLabel, addMonths, today, resolveColor, listingColorVar, nightsByMonthForEntry,
 };

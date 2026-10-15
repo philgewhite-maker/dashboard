@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v581</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v582</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -383,10 +383,16 @@
 <option value="earned">Earned (historic)</option>
 </select>
 <input type="number" step="0.01" id="letting-add-amount" class="settings-input" style="max-width:130px;" placeholder="Amount" title="For Payment, Adjustment and Cancellation this is what the balance moves by, either sign. For Earned (historic) it is the GROSS takings, and their share is applied.">
-<input type="date" id="letting-add-date" class="settings-input" style="max-width:130px;" title="The payout/accrual date -- defaults to today, edit directly rather than fixing it up on the row afterward.">
+<input type="date" id="letting-add-date" class="settings-input" style="max-width:130px;" title="The payout/accrual date -- defaults to today, edit directly rather than fixing it up on the row afterward. Used for statements and tax-year grouping only, not for occupancy or the nightly rate -- those come from check-in/nights below instead.">
 <span id="letting-add-earned-fields" style="display:none;">
 <input type="number" min="0" step="1" id="letting-add-nights" class="settings-input" style="max-width:70px;" placeholder="Nights" title="Nights this stay covered, if known now -- used for the average night rate and to split the gross across months on the chart. Can still be edited on the row afterward.">
-<input type="date" id="letting-add-start-date" class="settings-input" style="max-width:130px;" title="Optional -- only if this booking ran longer than one month. Splits the gross pro-rata by night from here to the date above, instead of landing as one spike in a single month.">
+<input type="date" id="letting-add-start-date" class="settings-input" style="max-width:130px;" title="The real check-in date -- recommended whenever you know it, since it's what occupancy and the average night rate are actually based on. Leave it blank and nights get guessed backward from the payout date above instead, which is wrong whenever the payout didn't land on the real checkout.">
+</span>
+<span id="letting-add-platform-field" style="display:none;">
+<select id="letting-add-platform" class="mini" title="Which platform this actually happened through -- the chart above draws Other as a striped fill instead of solid.">
+<option value="airbnb">Airbnb</option>
+<option value="other">Other</option>
+</select>
 </span>
 <input type="text" id="letting-add-note" class="settings-input" style="max-width:220px;" placeholder="What it was for">
 <button class="sync-btn sm inline" id="letting-add-btn" type="button">Add</button>
