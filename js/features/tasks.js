@@ -273,6 +273,101 @@ ${rows}
 </div>`;
 }
 
+// "Part of" used to be a plain <select> listing EVERY other task's title
+// as an <option> -- reported directly as "the widest ever dropdown...
+// contains EVERYTHING unfiltered": a native <select>'s own open-dropdown
+// width is set by its longest option, and with potentially hundreds of
+// tasks as candidates (no search, no limit) that's exactly what it became.
+// Same trigger+search-panel shape connections.js's own connectionPickerHtml
+// already established for "pick one of a potentially large list" -- see
+// the CSS comment (style.css) for why this is a SEPARATE set of classes
+// rather than a reuse of .conn-picker's.
+function taskPickerRowHtml(task) {
+return `<button type="button" class="task-picker-row" data-task-picker-value="${escapeHtml(task.id)}" data-task-picker-search="${escapeHtml((task.title || '').toLowerCase())}">
+<span>${escapeHtml(task.title || '(untitled)')}</span>
+</button>`;
+}
+
+function taskPickerListHtml(forTaskId) {
+// Same exclusion the old <select> already applied: not itself, and not
+// anything already filed under it (which would make it its own ancestor).
+const candidates = data.tasks.filter((o) => o.id !== forTaskId && o.parentId !== forTaskId);
+const nothingRow = '<button type="button" class="task-picker-row" data-task-picker-value="" data-task-picker-search="">\n<span>— nothing —</span>\n</button>';
+return nothingRow + candidates.map(taskPickerRowHtml).join('');
+}
+
+function taskPickerHtml(t) {
+const current = t.parentId ? taskById(t.parentId) : null;
+const label = current ? escapeHtml(current.title || '(untitled)') : '— nothing —';
+// The hidden input carries the SAME data-task-field/data-task-id pair the
+// old <select> did -- bindTaskRows()'s existing [data-task-field] change
+// handler (cycle guard, renderTasks, queueSave) picks it up unchanged,
+// nothing about that wiring needed to move.
+return `<div class="task-picker" data-task-picker-for="${escapeHtml(t.id)}">
+<input type="hidden" data-task-field="parentId" data-task-id="${escapeHtml(t.id)}" value="${escapeHtml(t.parentId || '')}">
+<button type="button" class="task-picker-trigger" data-task-picker-trigger><span>${label}</span></button>
+<div class="task-picker-panel" hidden>
+<input type="text" class="task-picker-search" placeholder="Search…" autocomplete="off">
+<div class="task-picker-list" data-task-picker-list>${taskPickerListHtml(t.id)}</div>
+</div>
+</div>`;
+}
+
+// Delegated once on document -- every task-picker is rebuilt wholesale on
+// every render (bindTaskRows re-binds [data-task-field] each time, same as
+// it always did), so binding individual elements would mean re-binding
+// after every single render, same reasoning bindTaskChips/bindConnPickers
+// already settled on. Selecting a row only sets the hidden input's value
+// and dispatches 'change' -- the existing handler does the cycle-guard,
+// re-render and save, so the fresh re-render already shows the right
+// label and a closed panel; nothing else needs updating here.
+let taskPickersBound = false;
+function bindTaskPickers() {
+if (taskPickersBound) return;
+taskPickersBound = true;
+document.addEventListener('click', (e) => {
+const trigger = e.target.closest('[data-task-picker-trigger]');
+if (trigger) {
+const wrap = trigger.closest('.task-picker');
+const panel = wrap.querySelector('.task-picker-panel');
+const wasOpen = !panel.hidden;
+document.querySelectorAll('.task-picker-panel').forEach((p) => { p.hidden = true; });
+panel.hidden = wasOpen;
+if (!panel.hidden) {
+const search = panel.querySelector('.task-picker-search');
+search.value = '';
+panel.querySelectorAll('.task-picker-row').forEach((r) => { r.hidden = false; });
+search.focus();
+}
+return;
+}
+const row = e.target.closest('.task-picker-row');
+if (row) {
+const wrap = row.closest('.task-picker');
+const hidden = wrap.querySelector('input[type="hidden"]');
+hidden.value = row.dataset.taskPickerValue || '';
+hidden.dispatchEvent(new Event('change', { bubbles: true }));
+return;
+}
+if (!e.target.closest('.task-picker-panel')) {
+document.querySelectorAll('.task-picker-panel').forEach((p) => { p.hidden = true; });
+}
+});
+document.addEventListener('input', (e) => {
+if (!e.target.classList.contains('task-picker-search')) return;
+const query = e.target.value.toLowerCase().trim();
+const list = e.target.closest('.task-picker-panel').querySelector('.task-picker-list');
+list.querySelectorAll('.task-picker-row').forEach((r) => {
+r.hidden = query.length > 0 && !r.dataset.taskPickerSearch.includes(query);
+});
+});
+document.addEventListener('keydown', (e) => {
+if (e.key !== 'Escape') return;
+const openPanel = document.querySelector('.task-picker-panel:not([hidden])');
+if (openPanel) openPanel.hidden = true;
+});
+}
+
 function taskDetailHtml(t) {
 const photos = (t.photoIds || []).map((id, i) => `<div class="gallery-thumb"><span class="thumb-img" data-photo-bg="${escapeHtml(id)}"></span><span class="tag-x" data-task-photo-remove="${t.id}" data-photo-idx="${i}">&times;</span></div>`).join('');
 return `<div class="task-detail">
@@ -284,10 +379,7 @@ ${TASK_BUCKETS.map((b) => `<option value="${b.bucket}"${b.bucket === t.bucket ? 
 </select></label>
 <label>Due<input type="date" data-task-field="due" data-task-id="${t.id}" value="${escapeHtml(t.due || '')}"></label>
 <label>Bring forward<input type="date" data-task-field="bringForward" data-task-id="${t.id}" value="${escapeHtml(t.bringForward || '')}"></label>
-<label>Part of<select data-task-field="parentId" data-task-id="${t.id}">
-<option value="">— nothing —</option>
-${data.tasks.filter((o) => o.id !== t.id && o.parentId !== t.id).map((o) => `<option value="${o.id}"${o.id === t.parentId ? ' selected' : ''}>${escapeHtml(o.title || '(untitled)')}</option>`).join('')}
-</select></label>
+<label>Part of${taskPickerHtml(t)}</label>
 </div>
 <label class="full">Reference link (OneNote, doc, anything)<input type="text" autocomplete="off" placeholder="https://…" data-task-field="link" data-task-id="${t.id}" value="${escapeHtml(t.link || '')}"></label>
 ${t.link ? `<a class="task-link" href="${escapeHtml(affiliateLink(t.link))}" target="_blank" rel="noopener">Open reference &#8599;</a>` : ''}
@@ -955,6 +1047,8 @@ document.getElementById('show-done-toggle').addEventListener('change', (e) => {
 showDone = e.target.checked;
 renderLists();
 });
+
+bindTaskPickers();
 }
 
 // Opens a task's detail and scrolls to it — used when arriving from a mail

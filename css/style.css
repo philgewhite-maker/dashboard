@@ -1219,6 +1219,47 @@ cursor:pointer;text-align:left;width:100%;
 .conn-picker-row-info{display:flex;flex-direction:column;gap:1px;overflow:hidden;}
 .conn-picker-row-info strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .conn-picker-plus{background:var(--rose-bg);color:var(--rose);font-weight:700;font-size:16px;}
+
+/* Same trigger+search-panel shape as .conn-picker* above, for Tasks' own
+   "Part of" field -- but a SEPARATE set of classes, not a reuse of these
+   ones. bindConnPickers()'s delegated listeners (connections.js) key off
+   .conn-picker-row/.conn-picker-search/[data-conn-picker-trigger] by class/
+   attribute alone, with no per-feature scoping -- sharing those names here
+   would route every click on a task-picker row through connections.js's
+   own handler instead (an undefined hidden-input lookup, a real crash),
+   not just duplicate styling for its own sake. */
+.task-picker{position:relative;display:inline-flex;min-width:0;vertical-align:middle;width:100%;}
+.task-picker-trigger{
+display:flex;align-items:center;gap:6px;width:100%;
+font-family:'Inter',sans-serif;font-size:13px;
+border:1px solid var(--line);border-radius:7px;
+padding:6px 9px;background:var(--paper);color:var(--ink);
+cursor:pointer;text-align:left;
+}
+.task-picker-trigger span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.task-picker-panel{
+position:absolute;top:100%;left:0;z-index:20;
+margin-top:4px;width:260px;max-width:80vw;
+background:var(--card);border:1px solid var(--line);border-radius:9px;
+box-shadow:0 8px 24px rgba(0,0,0,.18);padding:6px;
+display:flex;flex-direction:column;gap:6px;
+}
+.task-picker-panel[hidden]{display:none;}
+.task-picker-search{
+font-family:'Inter',sans-serif;font-size:13px;
+border:1px solid var(--line);border-radius:6px;
+padding:6px 8px;background:var(--paper);color:var(--ink);
+}
+.task-picker-list{display:flex;flex-direction:column;gap:1px;max-height:260px;overflow-y:auto;}
+.task-picker-row{
+display:flex;align-items:center;gap:8px;
+padding:5px 6px;border-radius:6px;border:none;background:none;
+font-family:'Inter',sans-serif;font-size:13px;color:var(--ink);
+cursor:pointer;text-align:left;width:100%;
+}
+.task-picker-row:hover{background:var(--rose-bg);}
+.task-picker-row[hidden]{display:none;}
+.task-picker-row span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .decision-pick{
 font-family:'Inter',sans-serif;
 font-size:12px;
