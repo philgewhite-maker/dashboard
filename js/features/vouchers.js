@@ -175,13 +175,20 @@ return `${reading.unit === '£' ? '£' : ''}${reading.balance.toLocaleString('en
 }
 
 function readingSummaryText(reading) {
-const parts = [reading.label];
+const parts = [reading.detail ? `${reading.label}: ${reading.detail}` : reading.label];
 const value = readingValueText(reading);
 if (value) parts.push(value);
 parts.push(`on ${reading.date}`);
 if (reading.expiryDate) parts.push(`expires ${reading.expiryDate}`);
 if (reading.reference) parts.push(`ref ${reading.reference}`);
 return parts.join(' — ');
+}
+
+// A name worth showing in the Vouchers list -- "Quidco: Agent
+// Provocateur" reads far better than "Quidco: Cashback confirmed"
+// repeated identically for every single retailer.
+function voucherNameFor(program, reading) {
+return reading.detail ? `${program.name} — ${reading.detail}` : `${program.name} — ${reading.label}`;
 }
 
 // One row per (programId, label) group needing a balance-vs-voucher
@@ -242,10 +249,21 @@ ${data.vouchers.map((v) => `<option value="${escapeHtml(v.id)}">${escapeHtml(v.n
 <span class="pending-option-info">Not a voucher &mdash; skip this one</span>
 </label>
 </div>
-${siblings.length ? `<label class="pending-option" style="margin-top:6px;">
-<input type="checkbox" data-review-apply-all="${escapeHtml(rid)}" checked>
-<span class="pending-option-info">Also apply this to the other ${siblings.length} unresolved "${escapeHtml(reading.label)}" reading${siblings.length === 1 ? '' : 's'} below &mdash; tick off if some of these are genuinely separate, not the same one reported again</span>
-</label>` : ''}
+${siblings.length ? (() => {
+// Same real value+unit across every sibling reads as "one thing
+// reported again" (Hertz's free-day emails, which carry no amount
+// at all) -- safe to default merging them on. ANY differing value
+// (Quidco: a different retailer's cashback each time, confirmed
+// live as a real case -- one single day produced 4 separate real
+// amounts) means these are genuinely separate events, so the
+// default flips to NOT merging them, rather than risking silently
+// folding distinct money into one voucher.
+const sameValue = siblings.every((s) => s.reading.balance === reading.balance && s.reading.unit === reading.unit);
+return `<label class="pending-option" style="margin-top:6px;">
+<input type="checkbox" data-review-apply-all="${escapeHtml(rid)}" ${sameValue ? 'checked' : ''}>
+<span class="pending-option-info">Also apply this to the other ${siblings.length} unresolved "${escapeHtml(reading.label)}" reading${siblings.length === 1 ? '' : 's'} below ${sameValue ? '&mdash; tick off if some of these are genuinely separate, not the same one reported again' : '&mdash; these have DIFFERENT amounts, so this is probably wrong; only tick if they really are the same one reported again'}</span>
+</label>`;
+})() : ''}
 <div class="sync-row" style="margin-top:6px;">
 <button type="button" class="sync-btn sm inline" data-review-confirm="${escapeHtml(rid)}">Confirm</button>
 </div>
@@ -281,7 +299,7 @@ const targetId = decision === 'pick' ? pickedId : decision.startsWith('update:')
 if (targetId) { applyUpdateToVoucher(reading, program, targetId); return; }
 // decision === 'new' -- provider is the real program name (exact, no
 // matching needed) and logoUrl comes free from it too, when seeded.
-const voucher = blankVoucher({ name: `${program.name} — ${reading.label}`, value: readingValueText(reading), expiry: reading.expiryDate || '', notes: `From ${program.name} scan, ${reading.date}.`, reference: reading.reference || '', sourceLoyaltyReadingIds: [reading.id], provider: program.name, logoUrl: matchBrandLogo(program.name) || '' });
+const voucher = blankVoucher({ name: voucherNameFor(program, reading), value: readingValueText(reading), expiry: reading.expiryDate || '', notes: `From ${program.name} scan, ${reading.date}.`, reference: reading.reference || '', sourceLoyaltyReadingIds: [reading.id], provider: program.name, logoUrl: matchBrandLogo(program.name) || '' });
 data.vouchers.push(voucher);
 markVoucherLinked(reading.id, voucher.id);
 }
@@ -298,7 +316,7 @@ function applyVoucherLinkToGroup(reading, program, decision, pickedId, allReadin
 if (decision === 'skip') { allReadings.forEach((r) => markVoucherSkipped(r.id)); return; }
 let targetId = decision === 'pick' ? pickedId : decision.startsWith('update:') ? decision.slice(7) : '';
 if (!targetId) {
-const voucher = blankVoucher({ name: `${program.name} — ${reading.label}`, provider: program.name, logoUrl: matchBrandLogo(program.name) || '' });
+const voucher = blankVoucher({ name: voucherNameFor(program, reading), provider: program.name, logoUrl: matchBrandLogo(program.name) || '' });
 data.vouchers.push(voucher);
 targetId = voucher.id;
 }

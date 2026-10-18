@@ -1034,6 +1034,12 @@ reference: '',
 // reviewed, stays a plain reading.
 voucherLinkStatus: '',
 voucherId: '',
+// A free-text elaboration shown alongside `label`, never used for
+// grouping/matching (unlike reference) -- e.g. Quidco's retailer name
+// ("Agent Provocateur"). Lets many readings share one stable `label`
+// ("Cashback confirmed", classified/reviewed once) while still
+// showing which real transaction each one actually was.
+detail: '',
 ...fields,
 };
 }
@@ -1069,6 +1075,18 @@ senderAddresses: ['loyalty@emails.hertz.com'], builtIn: true },
 senderAddresses: ['sixt.one@e.sixt.co.uk'], builtIn: true },
 { id: 'loyalty-miles-and-more', name: 'Miles & More', extractorKey: 'miles-and-more',
 senderAddresses: ['newsletter@mailing.milesandmore.com'], contentFilter: 'subject:"mileage balance"', builtIn: true },
+];
+
+// Same "can't append to an already-seeded array" reasoning as V2 above
+// -- its own one-time flag is loyaltyProgramsSeededV3. Quidco isn't a
+// running balance at all -- every confirmed email is its own real,
+// separate cashback amount (confirmed live: one single day produced 4
+// separate confirmations, each a different real amount) -- so unlike
+// every other program here, its one label is pre-classified 'voucher'
+// below rather than asked about, since the answer is already known.
+const DEFAULT_LOYALTY_PROGRAMS_V3 = [
+{ id: 'loyalty-quidco', name: 'Quidco', extractorKey: 'quidco',
+senderAddresses: ['quidco@info.quidco.com'], contentFilter: '"Your cashback has been confirmed"', builtIn: true },
 ];
 
 function pruneMarriottAvailability(store, today = todayStr()) {
@@ -2661,15 +2679,21 @@ DEFAULT_LOYALTY_PROGRAMS_V2.forEach((p) => {
 if (!data.loyaltyPrograms.some((x) => x.id === p.id)) data.loyaltyPrograms.push(blankLoyaltyProgram(p));
 });
 }
+if (!data.loyaltyProgramsSeededV3) {
+data.loyaltyProgramsSeededV3 = true;
+DEFAULT_LOYALTY_PROGRAMS_V3.forEach((p) => {
+if (!data.loyaltyPrograms.some((x) => x.id === p.id)) data.loyaltyPrograms.push(blankLoyaltyProgram(p));
+});
+}
 // Backfills contentFilter onto a program that already existed before
 // that field did -- the ordinary `{...blankLoyaltyProgram(), ...p}`
 // merge above only fills in a key p doesn't have AT ALL with the
 // blank default (''), it can't retroactively apply a SPECIFIC value
-// from DEFAULT_LOYALTY_PROGRAMS/_V2 to an already-seeded program.
+// from DEFAULT_LOYALTY_PROGRAMS/_V2/_V3 to an already-seeded program.
 // One-time (never overwrites a value the user's own edit set).
 if (!data.loyaltyContentFiltersSeeded) {
 data.loyaltyContentFiltersSeeded = true;
-[...DEFAULT_LOYALTY_PROGRAMS, ...DEFAULT_LOYALTY_PROGRAMS_V2].forEach((seed) => {
+[...DEFAULT_LOYALTY_PROGRAMS, ...DEFAULT_LOYALTY_PROGRAMS_V2, ...DEFAULT_LOYALTY_PROGRAMS_V3].forEach((seed) => {
 if (!seed.contentFilter) return;
 const existing = data.loyaltyPrograms.find((p) => p.id === seed.id);
 if (existing && !existing.contentFilter) existing.contentFilter = seed.contentFilter;
@@ -2679,15 +2703,19 @@ if (existing && !existing.contentFilter) existing.contentFilter = seed.contentFi
 // icons (js/brandLogos.js) -- never overwrites a logoUrl the user
 // pasted in by hand, and never touches a user-added program (those
 // get matched live when added/edited, see vouchers.js's/
-// loyaltybalances.js's own matchBrandLogo() calls).
-if (!data.loyaltyLogosSeeded) {
-data.loyaltyLogosSeeded = true;
+// loyaltybalances.js's own matchBrandLogo() calls). Deliberately NOT
+// gated behind a one-time flag (confirmed live as a real gap: Quidco,
+// added after the original one-time pass already shipped and ran,
+// would otherwise never get a logo at all, since there's no UI to
+// manually set one for a built-in program) -- every call here is
+// already a no-op for a program that already has any logoUrl, so
+// running it on every load costs nothing and self-heals the next
+// built-in program added the same way.
 data.loyaltyPrograms.forEach((p) => {
 if (p.logoUrl) return;
 const match = matchBrandLogo(p.name);
 if (match) p.logoUrl = match;
 });
-}
 if (!Array.isArray(data.loyaltyBalances)) data.loyaltyBalances = [];
 data.loyaltyBalances = data.loyaltyBalances.map((b) => ({ ...blankLoyaltyBalance(), ...b, id: b.id || uid() }));
 // A balance row whose program was deleted entirely (not just
@@ -2701,6 +2729,13 @@ data.loyaltyBalances = data.loyaltyBalances.filter((b) => loyaltyProgramIds.has(
 // and surfaces in the Vouchers panel's review queue until it is.
 if (!Array.isArray(data.loyaltyLabelKinds)) data.loyaltyLabelKinds = [];
 data.loyaltyLabelKinds = data.loyaltyLabelKinds.filter((k) => k && k.programId && k.label && (k.kind === 'balance' || k.kind === 'voucher'));
+// Quidco's one label is pre-classified 'voucher' rather than asked
+// about -- every confirmed cashback is a genuinely separate amount by
+// design, never a running balance, so there's no real question to put
+// to the user here (see DEFAULT_LOYALTY_PROGRAMS_V3's own comment).
+if (!data.loyaltyLabelKinds.some((k) => k.programId === 'loyalty-quidco' && k.label === 'Cashback confirmed')) {
+data.loyaltyLabelKinds.push({ programId: 'loyalty-quidco', label: 'Cashback confirmed', kind: 'voucher' });
+}
 // Manually-added days beyond Planner's rolling horizon (see planner.js's
 // MAIN_HORIZON_DAYS) -- deduped, format-checked so a corrupt value can't
 // crash dateStrAdd/Date parsing downstream.

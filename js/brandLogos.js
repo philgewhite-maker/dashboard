@@ -36,6 +36,7 @@ const BRAND_LOGOS = [
 { names: ['Miles & More', 'Miles and More'], logoUrl: iconUrl('xxOFyyrIEh4SFSidEekBEGkUYyCqL0lFnzryRib1BtXFO1ntNg4F_PLdySnCOk2X08-SY3vR8JEZWaLhPbnQ') },
 { names: ['Airbnb'], logoUrl: iconUrl('PDPmzZUDSmFa33PmzoZ_OWLeIbj23UtGFE9fXVEVjfuyMGvPygT-v9N7bFsJwc8PojCmw72i8Xn45qHElm8b') },
 { names: ['Mastercard'], logoUrl: iconUrl('hXzjxehVU5aOtGvIvcwVOgUsqQv16U0vIVJRhIz4HUtBcn1-Lu229OXmmSVdRv6Y3taFWj4CBD5lhSeovmnXdA') },
+{ names: ['Quidco'], logoUrl: iconUrl('7qUaKxz8H2MfUs0ytJVXFtgfkcaxf4FCu1_dJj1dTadJ6avFF6hUcB5LMP4Myeq5NQ3ybvyGf4WBsND8mlTZDw') },
 ];
 
 // Exact match (case-insensitive) first, then a partial/substring match

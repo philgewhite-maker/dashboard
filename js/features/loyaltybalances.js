@@ -251,6 +251,32 @@ if (qualMatch) metrics.push({ label: 'Qualifying points', balance: Number(qualMa
 return { membershipNumber: '', tier: '', date, metrics };
 }
 
+// Real example (this connector's own plaintext render of a real fetched
+// email, 2026-05-21): "Retailer name:\nAgent Provocateur Date:\nThu 15
+// January, 2026\nTotal amount: £616.00\nCashback earned:\n+£9.86" --
+// retailer and "Date:" run together with only a space in THIS render,
+// but the regex never assumes even that much (non-greedy `.+?` up to
+// the next literal label, same discipline as every other extractor
+// here) since this app's own bare stripHtml() may flatten the real
+// HTML table with no separator at all. Each confirmed email is its own
+// real, separate cashback amount -- never a running balance -- so
+// `label` stays one fixed string ('Cashback confirmed', pre-classified
+// 'voucher' in state.js's migrate()) and the retailer name goes into
+// `detail` instead, which doesn't fragment the one-time classification
+// the way folding it into `label` would.
+function extractQuidco(bodyText) {
+const text = String(bodyText || '');
+const cashMatch = text.match(/Cashback earned:\s*\+?£([\d.,]+)/i);
+if (!cashMatch) return null;
+const retailerDateMatch = text.match(/Retailer name:\s*(.+?)\s*Date:\s*\w*\s*(\d{1,2})\s+([A-Za-z]+),?\s+(\d{4})/i);
+const retailer = retailerDateMatch ? retailerDateMatch[1].trim() : '';
+const date = retailerDateMatch ? parseDMonYyyy(retailerDateMatch[2], retailerDateMatch[3], retailerDateMatch[4]) : '';
+return {
+membershipNumber: '', tier: '', date,
+metrics: [{ label: 'Cashback confirmed', balance: Number(cashMatch[1].replace(/,/g, '')), unit: '£', detail: retailer }],
+};
+}
+
 const EXTRACTORS = {
 'ba': extractBritishAirways,
 'marriott-bonvoy': extractMarriottBonvoy,
@@ -261,6 +287,7 @@ const EXTRACTORS = {
 'hertz': extractHertz,
 'sixt': extractSixt,
 'miles-and-more': extractMilesAndMore,
+'quidco': extractQuidco,
 };
 
 // ---- Scan engine ----------------------------------------------------------
@@ -399,6 +426,7 @@ programId: program.id, label: metric.label, date,
 balance: metric.balance, unit: metric.unit || '',
 tier: result.tier || '', expiryDate: metric.expiryDate || '',
 sourceMessageId: msg.id, reference: metric.reference || '',
+detail: metric.detail || '',
 }));
 });
 }
@@ -588,7 +616,7 @@ return `<div class="loyalty-reading" data-loyalty-reading="${escapeHtml(r.id)}">
 ${r.unit && r.unit !== '£' ? `<span class="loyalty-reading-unit">${escapeHtml(r.unit)}</span>` : ''}
 </div>
 </div>
-<div class="loyalty-reading-notes">${r.sourceMessageId === 'manual' ? 'Entered by hand' : ''}</div>
+<div class="loyalty-reading-notes">${escapeHtml(r.detail || (r.sourceMessageId === 'manual' ? 'Entered by hand' : ''))}</div>
 <div class="loyalty-reading-date">
 <span class="loyalty-reading-asof">as of ${escapeHtml(r.date)}</span>
 ${r.expiryDate ? `<span class="expiry-badge">expires ${escapeHtml(r.expiryDate)}</span>` : ''}
@@ -785,7 +813,7 @@ renderLoyaltyBalances();
 export {
 renderLoyaltyBalances, initLoyaltyBalances, runLoyaltyBalanceScan,
 extractBritishAirways, extractMarriottBonvoy, extractVirginFlyingClub, extractBoots, extractTescoClubcard, extractBaVoucher,
-extractHertz, extractSixt, extractMilesAndMore,
+extractHertz, extractSixt, extractMilesAndMore, extractQuidco,
 latestBalancesFor, travelStripPrograms,
 labelKindFor, setLabelKind, pendingClassifications, pendingVoucherLinks, markVoucherLinked, markVoucherSkipped,
 };
