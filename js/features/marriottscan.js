@@ -239,6 +239,13 @@
 //     the widget every time, does every account's console use this
 //     exact "Owner Contracts" label) is not. Watch the console the
 //     first time, same as any other version bump here.
+//   - v15: also downloads the JSON export as a real .json file
+//     (downloadJson(), same Blob + <a download> pattern as
+//     downloadCsv()), not just set on window.__marriottAvailabilityExport
+//     -- reported directly: copying it out of the console and pasting
+//     into the Travel tab's textarea was clumsy for an object this
+//     size. Upload the .json file via the panel's own file input
+//     instead; the copy()+paste route still works if preferred.
 //
 // If Marriott changes their page layout, the selectors below will stop
 // matching -- that's expected eventually, not a bug in this script. Run
@@ -250,12 +257,12 @@
 
 import { todayStr } from '../utils.js';
 
-const SCAN_SCRIPT_VERSION = 'v14';
+const SCAN_SCRIPT_VERSION = 'v15';
 
 // ---- Everything below this line must be self-contained -- see the
 // HARD CONSTRAINT note at the top of this file. ------------------------
 async function marriottAvailabilityScan(CONFIG) {
-  const SCRIPT_VERSION = 'v14'; // kept as a literal, not a reference to the outer const -- toString() drops the closure
+  const SCRIPT_VERSION = 'v15'; // kept as a literal, not a reference to the outer const -- toString() drops the closure
   const NIGHT_COUNTS = CONFIG.nightCounts;
   const GUESTS = CONFIG.guests; // required field -- the search silently fails its own validation without it (confirmed live)
   const MONTHS_TO_SCAN = CONFIG.monthsToScan; // TOTAL distinct months read, INCLUDING the one currently selected on the search form -- e.g. starting on November, 3 covers Nov/Dec/Jan
@@ -825,6 +832,22 @@ async function marriottAvailabilityScan(CONFIG) {
     setTimeout(() => URL.revokeObjectURL(url), 2000);
   }
 
+  // Same Blob + synthetic <a download> pattern as downloadCsv just
+  // above -- a real file to upload via the Travel tab's own file input
+  // beats copy(window.__marriottAvailabilityExport) + pasting into a
+  // textarea, which is clumsy for an object this size.
+  function downloadJson(obj, filename) {
+    const blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
+
   consoleCapture.restore(); // never leave console.log altered past this run
 
   let pointsBalance = null;
@@ -852,7 +875,8 @@ async function marriottAvailabilityScan(CONFIG) {
     apiCaptures: consoleCapture.captured,
     results,
   };
-  console.log(`Downloaded marriott-availability-${stamp}.csv. Full structured results also kept at window.__marriottAvailability if you need them in that shape instead. For the dashboard's Travel tab import, run copy(window.__marriottAvailabilityExport) and paste THAT in instead -- it also records exactly which months were scanned, your points balance, and any owner-contract data the site's own console revealed, none of which the CSV alone can.`);
+  downloadJson(window.__marriottAvailabilityExport, `marriott-availability-${stamp}.json`);
+  console.log(`Downloaded marriott-availability-${stamp}.csv AND marriott-availability-${stamp}.json. For the dashboard's Travel tab import, upload the .json file directly (Travel -> Marriott availability -> 2 . Import results -> "Or upload file(s)...") -- it carries exactly which months were scanned, your points balance, and any owner-contract data the site's own console revealed, none of which the CSV alone can. The old copy(window.__marriottAvailabilityExport) + paste route still works too if you'd rather not save the file.`);
 }
 // ---- End of the self-contained scan function. ------------------------
 
