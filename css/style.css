@@ -2305,6 +2305,25 @@ color:var(--ink);
 .loyalty-reading-date{flex:0 0 auto;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);white-space:nowrap;}
 .loyalty-reading-actions{flex:0 0 auto;margin-left:auto;display:flex;align-items:center;gap:8px;}
 
+/* The per-program Settings toggle used to be its own full-width
+   .settings-item row below every reading (border-top, 10px vertical
+   padding, an h3-styled label) -- reported directly as over-large.
+   Scoped to [data-loyalty-program] rather than touching the shared
+   .account-card/.settings-item classes (financeaccounts.js's own
+   account cards use a completely different details/summary structure
+   built around those same class names). Only the <summary> trigger is
+   pulled out of flow -- .settings-block, the OTHER child of the same
+   <details>, is untouched and still renders at its normal position
+   below the reading rows when open, so the toggle stays pinned at the
+   top-right throughout while its panel opens underneath as before. */
+.account-card[data-loyalty-program]{position:relative;}
+.account-card[data-loyalty-program] .account-summary{padding-right:68px;}
+.account-card[data-loyalty-program] .loyalty-settings-item{border-top:none;}
+.account-card[data-loyalty-program] .loyalty-settings-summary{
+position:absolute;top:0;right:0;padding:2px 0 2px 10px;
+}
+.account-card[data-loyalty-program] .loyalty-settings-summary h3{font-size:10px;}
+
 .health-history-toggle-row{
 display:flex;
 flex-direction:column;

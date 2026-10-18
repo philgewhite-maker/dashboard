@@ -609,9 +609,9 @@ ${methodBadgeHtml(program)}
 ${!program.active ? '<span class="candidate-tag">inactive</span>' : ''}
 </div>
 ${rows || '<div class="empty">No readings yet — run a scan, or Check now below.</div>'}
-<details class="settings-item" style="margin-top:6px;">
-<summary><h3>Settings</h3></summary>
-<div class="settings-block">
+<details class="settings-item loyalty-settings-item">
+<summary class="loyalty-settings-summary"><h3>Settings</h3></summary>
+<div class="settings-block" style="margin-top:6px;">
 <label><input type="checkbox" ${program.showOnTravel ? 'checked' : ''} data-loyalty-show-travel="${escapeHtml(program.id)}"> Show on Travel tab</label>
 <label><input type="checkbox" ${program.active ? 'checked' : ''} data-loyalty-active="${escapeHtml(program.id)}"> Active</label>
 <div class="sync-row" style="margin-top:6px;">

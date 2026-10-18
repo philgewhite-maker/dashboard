@@ -1,6 +1,6 @@
 import { kvGet, kvSet, photoDelete } from './db.js';
 import { uid, todayStr, daysAgoStr, last7Dates, daysSince, daysUntil } from './utils.js';
-import { matchBrandLogo } from './brandLogos.js';
+import { matchBrandLogo, matchBrandEntry } from './brandLogos.js';
 
 const DATA_KEY = 'app-data';
 const REV_KEY = 'app-data-rev'; // separate from DATA_KEY so it never leaks into backup exports
@@ -2349,6 +2349,25 @@ data.vouchers = data.vouchers.map((v) => ({
 id: v.id || uid(),
 sourceLoyaltyReadingIds: Array.isArray(v.sourceLoyaltyReadingIds) ? v.sourceLoyaltyReadingIds : [],
 }));
+// One-time: a voucher that predates the provider field entirely (e.g.
+// one simply named "Airbnb") never gets a chance to auto-match a logo,
+// since the live matcher only ever fires off the provider FIELD, never
+// the name -- confirmed live as a real gap ("Airbnb logo didn't feed
+// through") for exactly this kind of pre-existing voucher. One-time
+// only: tries each voucher's own NAME against the same brand list,
+// and only fills in provider/logoUrl where both are still blank, so a
+// deliberately-cleared field or a provider the user already set by
+// hand is never touched.
+if (!data.voucherProviderBackfilled) {
+data.voucherProviderBackfilled = true;
+data.vouchers.forEach((v) => {
+if (v.provider || v.logoUrl) return;
+const entry = matchBrandEntry(v.name);
+if (!entry) return;
+v.provider = entry.names[0];
+v.logoUrl = entry.logoUrl;
+});
+}
 if (!Array.isArray(data.businessIdeas)) data.businessIdeas = [];
 if (!Array.isArray(data.subscriptions)) data.subscriptions = [];
 // A subscription can hang off one of the tracked accounts, and that

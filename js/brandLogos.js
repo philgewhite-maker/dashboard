@@ -43,13 +43,16 @@ const BRAND_LOGOS = [
 // and googlecalendar.js's resolveCalendarId(), so "Marriott" matches
 // "Marriott Bonvoy" via the substring fallback and a program's own full
 // name still matches its own alias exactly.
-function matchBrandLogo(name) {
+function matchBrandEntry(name) {
 const q = String(name || '').trim().toLowerCase();
 if (!q) return null;
 const exact = BRAND_LOGOS.find((entry) => entry.names.some((n) => n.toLowerCase() === q));
-if (exact) return exact.logoUrl;
+if (exact) return exact;
 const partial = BRAND_LOGOS.find((entry) => entry.names.some((n) => q.includes(n.toLowerCase()) || n.toLowerCase().includes(q)));
-return partial ? partial.logoUrl : null;
+return partial || null;
+}
+function matchBrandLogo(name) {
+return matchBrandEntry(name)?.logoUrl || null;
 }
 
-export { BRAND_LOGOS, matchBrandLogo };
+export { BRAND_LOGOS, matchBrandLogo, matchBrandEntry };
