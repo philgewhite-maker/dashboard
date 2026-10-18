@@ -156,6 +156,72 @@ return { membershipNumber: '', tier: '', date: '', metrics: [{ label: 'eVoucher 
 return null;
 }
 
+// Real example (plain text, with Hertz's own zero-width non-joiner
+// characters around the number stripped before matching -- confirmed
+// live, the raw text reads "Member Number: ‌53899031‌"):
+// "Philip\n Loyalty Tier: Five Star\n Member Number: 53899031". No
+// points balance ever appears in this template -- it's a "you earned
+// a free day" trigger, not a statement -- so this records tier/
+// membership only (balance: null), rather than inventing a number.
+function extractHertz(bodyText) {
+const text = String(bodyText || '').replace(/[​‌‍﻿]/g, '');
+const tierMatch = text.match(/Loyalty Tier:\s*([A-Za-z ]+)/i);
+const numberMatch = text.match(/Member Number:\s*(\d+)/i) || text.match(/#(\d{6,10})\b/);
+if (!tierMatch && !numberMatch) return null;
+return {
+membershipNumber: numberMatch ? numberMatch[1] : '', tier: tierMatch ? tierMatch[1].trim() : '', date: '',
+metrics: [{ label: 'Status', balance: null, unit: '', expiryDate: '' }],
+};
+}
+
+// Real example -- a one-off WELCOME email (confirmed live: "Thank you
+// for joining SIXT ONE!"), so this will likely only ever match this
+// single message, not something a fresh one shows up for every month
+// -- "Member ID:SXT65175029" (no space after the colon) with the tier
+// split across lines as "you're\nSilver,\n Philip!". No points figure
+// anywhere in it -- confirmed live, this account genuinely has none
+// accrued yet, not a missed match.
+function extractSixt(bodyText) {
+const text = String(bodyText || '');
+const idMatch = text.match(/Member ID:\s*([\w-]+)/i);
+const tierMatch = text.match(/you.re\s*\n?\s*([A-Za-z]+)\s*,/i);
+if (!idMatch && !tierMatch) return null;
+return {
+membershipNumber: idMatch ? idMatch[1] : '', tier: tierMatch ? tierMatch[1].trim() : '', date: '',
+metrics: [{ label: 'Status', balance: null, unit: '', expiryDate: '' }],
+};
+}
+
+// A real architectural gap, not a regex problem -- confirmed live:
+// this sender's own text/plain MIME part is just a one-line "view in
+// browser" link, and js/googlemail.js's bodyTextFromPayload() prefers
+// text/plain whenever ANY part exists, so it never falls through to
+// stripHtml() here at all. Even stripHtml() wouldn't help regardless
+// -- the Points/Qualifying Points figures are rendered as IMAGE ALT
+// TEXT (`alt="20 Points"`), which textContent never sees (an
+// attribute, not a text node), confirmed from the real HTML the user
+// pasted directly. This extractor reads bodyHtml instead --
+// getMessageDetail() already fetches it for the in-app mail reader,
+// just unused by every other extractor here. Real example confirmed
+// live: `alt="20 Points"`, `alt="20 Qualifying Points"`, a genuine
+// plain-text "Miles" / "750" table-cell pair, and "Account balance
+// from: 08-10-2026" (a real as-of date, DD-MM-YYYY).
+function extractMilesAndMore(bodyText, subject, bodyHtml) {
+const html = String(bodyHtml || '');
+if (!html) return null;
+const pointsMatch = html.match(/alt="(\d[\d,]*)\s*Points"/i);
+const qualMatch = html.match(/alt="(\d[\d,]*)\s*Qualifying Points"/i);
+const milesMatch = html.match(/>Miles<[\s\S]{0,400}?>([\d,]+)</i);
+const dateMatch = html.match(/Account balance from:\s*(\d{2})-(\d{2})-(\d{4})/i);
+if (!pointsMatch && !qualMatch && !milesMatch) return null;
+const date = dateMatch ? `${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}` : '';
+const metrics = [];
+if (milesMatch) metrics.push({ label: 'Miles', balance: Number(milesMatch[1].replace(/,/g, '')), unit: 'miles' });
+if (pointsMatch) metrics.push({ label: 'Points', balance: Number(pointsMatch[1].replace(/,/g, '')), unit: 'points' });
+if (qualMatch) metrics.push({ label: 'Qualifying points', balance: Number(qualMatch[1].replace(/,/g, '')), unit: 'points' });
+return { membershipNumber: '', tier: '', date, metrics };
+}
+
 const EXTRACTORS = {
 'ba': extractBritishAirways,
 'marriott-bonvoy': extractMarriottBonvoy,
@@ -163,6 +229,9 @@ const EXTRACTORS = {
 'boots': extractBoots,
 'tesco-clubcard': extractTescoClubcard,
 'ba-evoucher': extractBaVoucher,
+'hertz': extractHertz,
+'sixt': extractSixt,
+'miles-and-more': extractMilesAndMore,
 };
 
 // ---- Scan engine ----------------------------------------------------------
@@ -213,7 +282,7 @@ try { detail = await getMessageDetail(msg.id); } catch (err) { continue; } // tr
 seen.add(msg.id);
 
 const extractor = EXTRACTORS[program.extractorKey];
-let result = extractor ? extractor(detail.bodyText, detail.subject) : null;
+let result = extractor ? extractor(detail.bodyText, detail.subject, detail.bodyHtml) : null;
 let method = extractor ? 'deterministic' : '';
 
 if (!result && !extractor) {
@@ -462,5 +531,6 @@ renderLoyaltyBalances();
 export {
 renderLoyaltyBalances, initLoyaltyBalances, runLoyaltyBalanceScan,
 extractBritishAirways, extractMarriottBonvoy, extractVirginFlyingClub, extractBoots, extractTescoClubcard, extractBaVoucher,
+extractHertz, extractSixt, extractMilesAndMore,
 latestBalancesFor, travelStripPrograms,
 };

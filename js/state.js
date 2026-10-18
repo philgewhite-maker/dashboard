@@ -1028,6 +1028,20 @@ senderAddresses: ['no-reply@mail.boots.com'], builtIn: true },
 senderAddresses: ['BA.CustSvcs@email.ba.com'], builtIn: true },
 ];
 
+// Added after the original 6 -- kept as a separate list + its own
+// one-time seed flag (loyaltyProgramsSeededV2 in migrate()) rather
+// than appended to DEFAULT_LOYALTY_PROGRAMS above, since
+// loyaltyProgramsSeeded has already run for an existing document and
+// would never re-fire to add these to it.
+const DEFAULT_LOYALTY_PROGRAMS_V2 = [
+{ id: 'loyalty-hertz', name: 'Hertz Gold Plus Rewards', extractorKey: 'hertz',
+senderAddresses: ['loyalty@emails.hertz.com'], builtIn: true },
+{ id: 'loyalty-sixt', name: 'SIXT ONE', extractorKey: 'sixt',
+senderAddresses: ['sixt.one@e.sixt.co.uk'], builtIn: true },
+{ id: 'loyalty-miles-and-more', name: 'Miles & More', extractorKey: 'miles-and-more',
+senderAddresses: ['newsletter@mailing.milesandmore.com'], builtIn: true },
+];
+
 function pruneMarriottAvailability(store, today = todayStr()) {
 if (!store || typeof store !== 'object') return;
 const monthFloor = today.slice(0, 7);
@@ -2554,6 +2568,12 @@ data.loyaltyPrograms = data.loyaltyPrograms.map((p) => ({ ...blankLoyaltyProgram
 if (!data.loyaltyProgramsSeeded) {
 data.loyaltyProgramsSeeded = true;
 DEFAULT_LOYALTY_PROGRAMS.forEach((p) => {
+if (!data.loyaltyPrograms.some((x) => x.id === p.id)) data.loyaltyPrograms.push(blankLoyaltyProgram(p));
+});
+}
+if (!data.loyaltyProgramsSeededV2) {
+data.loyaltyProgramsSeededV2 = true;
+DEFAULT_LOYALTY_PROGRAMS_V2.forEach((p) => {
 if (!data.loyaltyPrograms.some((x) => x.id === p.id)) data.loyaltyPrograms.push(blankLoyaltyProgram(p));
 });
 }
