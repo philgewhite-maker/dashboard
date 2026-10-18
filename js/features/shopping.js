@@ -306,6 +306,7 @@ ${chipFieldHtml('Style', 'style', knownScalarValues(data.inventory, 'style'))}
 ${chipFieldHtml('Piece', 'piece', knownScalarValues(data.inventory, 'piece'))}
 ${chipFieldHtml('Size', 'size', knownScalarValues(data.inventory, 'size'))}
 ${chipFieldHtml('Colour', 'colour', knownScalarValues(data.inventory, 'colour'))}
+<label style="font-size:12px;display:block;margin:0 0 8px;">Order number <span class="settings-note" style="display:inline;margin:0;">(optional &mdash; lets a kept item be matched back to its order later, e.g. for a returns form)</span><input type="text" autocomplete="off" data-inv-new="orderNumber" style="width:100%;display:block;"></label>
 <div class="sync-row" style="margin:8px 0;align-items:center;">
 <div class="avatar sm inv-photo-empty" data-inv-new-photo-thumb title="No photo yet"></div>
 <label class="todo-add-btn" for="inv-new-photo-file" title="Take or choose a photo" style="cursor:pointer;">&#128247;</label>
@@ -434,7 +435,7 @@ brand: val('brand'), style: val('style'), piece: val('piece'),
 size: val('size'), colour: val('colour'), notes: val('notes'),
 holderId: dialog.querySelector('#inv-new-holder')?.value || '',
 acquiredAt: todayStr(), link: linkInput.value.trim(),
-photoId: draftPhotoId,
+photoId: draftPhotoId, orderNumber: val('orderNumber'),
 }));
 queueSave();
 renderInventory();
@@ -1230,9 +1231,16 @@ ${thumb}
 }
 
 function inventoryHtml() {
-const items = unheldInventory();
-if (!items.length) return '<div class="empty">Nothing unassigned — everything recorded is with someone.</div>';
+const unsorted = unheldInventory();
+if (!unsorted.length) return '<div class="empty">Nothing unassigned — everything recorded is with someone.</div>';
 const field = (o, name, placeholder, width) => `<input type="text" autocomplete="off" placeholder="${placeholder}" data-inv-field="${name}" data-inv-id="${escapeHtml(o.id)}" value="${escapeHtml(o[name] || '')}" style="max-width:${width};">`;
+// Blank orderNumber sorts first (most items have none at all), then
+// items sharing a real order number cluster together -- stable sort
+// keeps everything else in its existing relative order. Lets both a
+// human eyeball "what else was in this order" and a future Claude-in-
+// Chrome AP-returns session (see the dashboard plan file) read a
+// single order's kept items as one contiguous block.
+const items = [...unsorted].sort((a, b) => (a.orderNumber || '').localeCompare(b.orderNumber || ''));
 return items.map((o) => {
 const fits = whoFits(o);
 const fitsHtml = fits.length
@@ -1248,6 +1256,7 @@ ${field(o, 'style', 'Style', '100px')}
 ${field(o, 'piece', 'Piece', '110px')}
 ${field(o, 'size', 'Size', '60px')}
 ${field(o, 'colour', 'Colour', '90px')}
+${field(o, 'orderNumber', 'Order #', '90px')}
 ${linkHtml}
 <span class="inv-fits">${fitsHtml}</span>
 ${resaleValueHtml(o)}

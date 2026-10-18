@@ -1089,6 +1089,16 @@ const DEFAULT_LOYALTY_PROGRAMS_V3 = [
 senderAddresses: ['quidco@info.quidco.com'], contentFilter: '"Your cashback has been confirmed"', builtIn: true },
 ];
 
+// V3 already shipped and ran -- same "can't append to an already-
+// seeded array" reasoning as every V-number before it, own flag
+// loyaltyProgramsSeededV4. TopCashback is the same shape as Quidco:
+// never a running balance, each payable-cashback email is pre-
+// classified 'voucher' below rather than asked about.
+const DEFAULT_LOYALTY_PROGRAMS_V4 = [
+{ id: 'loyalty-topcashback', name: 'TopCashback', extractorKey: 'topcashback',
+senderAddresses: ['notification@topcashback.co.uk'], contentFilter: '"payable cashback"', builtIn: true },
+];
+
 function pruneMarriottAvailability(store, today = todayStr()) {
 if (!store || typeof store !== 'object') return;
 const monthFloor = today.slice(0, 7);
@@ -1709,6 +1719,14 @@ function blankInventoryItem(fields = {}) {
 return {
 id: uid(), brand: '', style: '', piece: '', size: '', colour: '',
 holderId: '', acquiredAt: '', fromTaskId: '', notes: '', link: '',
+// Typed by hand -- no retailer order-confirmation email reading exists
+// yet to auto-fill this. Every row that has one IS, by definition, a
+// KEPT item from that order (an item only ever gets added here if
+// it's being kept, never a "pending return" placeholder) -- a future
+// Claude-in-Chrome returns-form session reads this to work out, by
+// elimination, which of the real form's line items are NOT a kept
+// item and so should be ticked to return.
+orderNumber: '',
 // A real photo of the owned piece -- useful to eyeball against a
 // partial-match search result (same mechanism every other photo in
 // this app uses: js/db.js's photo store, via js/files.js's
@@ -2685,6 +2703,12 @@ DEFAULT_LOYALTY_PROGRAMS_V3.forEach((p) => {
 if (!data.loyaltyPrograms.some((x) => x.id === p.id)) data.loyaltyPrograms.push(blankLoyaltyProgram(p));
 });
 }
+if (!data.loyaltyProgramsSeededV4) {
+data.loyaltyProgramsSeededV4 = true;
+DEFAULT_LOYALTY_PROGRAMS_V4.forEach((p) => {
+if (!data.loyaltyPrograms.some((x) => x.id === p.id)) data.loyaltyPrograms.push(blankLoyaltyProgram(p));
+});
+}
 // Backfills contentFilter onto a program that already existed before
 // that field did -- the ordinary `{...blankLoyaltyProgram(), ...p}`
 // merge above only fills in a key p doesn't have AT ALL with the
@@ -2693,7 +2717,7 @@ if (!data.loyaltyPrograms.some((x) => x.id === p.id)) data.loyaltyPrograms.push(
 // One-time (never overwrites a value the user's own edit set).
 if (!data.loyaltyContentFiltersSeeded) {
 data.loyaltyContentFiltersSeeded = true;
-[...DEFAULT_LOYALTY_PROGRAMS, ...DEFAULT_LOYALTY_PROGRAMS_V2, ...DEFAULT_LOYALTY_PROGRAMS_V3].forEach((seed) => {
+[...DEFAULT_LOYALTY_PROGRAMS, ...DEFAULT_LOYALTY_PROGRAMS_V2, ...DEFAULT_LOYALTY_PROGRAMS_V3, ...DEFAULT_LOYALTY_PROGRAMS_V4].forEach((seed) => {
 if (!seed.contentFilter) return;
 const existing = data.loyaltyPrograms.find((p) => p.id === seed.id);
 if (existing && !existing.contentFilter) existing.contentFilter = seed.contentFilter;
@@ -2735,6 +2759,10 @@ data.loyaltyLabelKinds = data.loyaltyLabelKinds.filter((k) => k && k.programId &
 // to the user here (see DEFAULT_LOYALTY_PROGRAMS_V3's own comment).
 if (!data.loyaltyLabelKinds.some((k) => k.programId === 'loyalty-quidco' && k.label === 'Cashback confirmed')) {
 data.loyaltyLabelKinds.push({ programId: 'loyalty-quidco', label: 'Cashback confirmed', kind: 'voucher' });
+}
+// Same reasoning, TopCashback -- see DEFAULT_LOYALTY_PROGRAMS_V4.
+if (!data.loyaltyLabelKinds.some((k) => k.programId === 'loyalty-topcashback' && k.label === 'Cashback confirmed')) {
+data.loyaltyLabelKinds.push({ programId: 'loyalty-topcashback', label: 'Cashback confirmed', kind: 'voucher' });
 }
 // Manually-added days beyond Planner's rolling horizon (see planner.js's
 // MAIN_HORIZON_DAYS) -- deduped, format-checked so a corrupt value can't
@@ -2851,6 +2879,7 @@ acquiredAt: o.acquiredAt || '', fromTaskId: o.fromTaskId || '', notes: o.notes |
 // item recorded that way has this blank too unless re-added.
 link: o.link || '',
 photoId: o.photoId || '',
+orderNumber: o.orderNumber || '',
 }));
 data.mailDismissed = data.mailDismissed.map((d) => ({ ...blankMailDismissal(), ...d }));
 

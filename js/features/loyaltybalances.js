@@ -277,6 +277,40 @@ metrics: [{ label: 'Cashback confirmed', balance: Number(cashMatch[1].replace(/,
 };
 }
 
+// Real example (two real fetched emails, confirmed live): the pasted
+// Gmail view shows a clean "eBay\nCashback amount: £3.46" line, but
+// the REAL underlying text is nothing like that -- confirmed via the
+// Gmail connector: "...topcashback.co.uk/ebay/reviews/Cashback
+// amount: £3.46Loved your experience?...Leave a review for eBay »
+// (http://www.topcashback.co.uk/ebay/reviews/)...". The retailer name
+// is NOT adjacent to the amount at all -- it only exists, as real
+// readable text, in a "Leave a review for X »" prompt further down.
+// This is exactly the "what you see in the Gmail app isn't what the
+// real HTML flattens to" trap this file has hit before (BA, Marriott,
+// Virgin) -- never trust a pasted example without verifying the real
+// fetched body first. A second real example confirmed the same shape
+// with a different retailer and amount (Santander, £20.00) -- both
+// single-retailer emails, matched 1:1 below; a genuinely
+// multi-retailer email (the intro text says "a summary of what's been
+// updated", plural) isn't confirmed either way, so counts are only
+// paired when they actually match -- otherwise the amount is kept
+// with no retailer guessed, rather than risking a wrong pairing.
+// TopCashback's own wording ("you might've already spotted it...just
+// in case") suggests the SAME payable amount can be re-notified -- the
+// existing same-value "apply to all" default in vouchers.js already
+// handles that correctly with no TopCashback-specific code needed.
+function extractTopCashback(bodyText) {
+const text = String(bodyText || '');
+const amounts = [...text.matchAll(/Cashback amount:\s*£([\d.,]+)/gi)].map((m) => Number(m[1].replace(/,/g, '')));
+if (!amounts.length) return null;
+const retailers = [...text.matchAll(/Leave a review for\s+(.+?)\s*»/gi)].map((m) => m[1].trim());
+const pairable = retailers.length === amounts.length;
+return {
+membershipNumber: '', tier: '', date: '',
+metrics: amounts.map((balance, i) => ({ label: 'Cashback confirmed', balance, unit: '£', detail: pairable ? retailers[i] : '' })),
+};
+}
+
 const EXTRACTORS = {
 'ba': extractBritishAirways,
 'marriott-bonvoy': extractMarriottBonvoy,
@@ -288,6 +322,7 @@ const EXTRACTORS = {
 'sixt': extractSixt,
 'miles-and-more': extractMilesAndMore,
 'quidco': extractQuidco,
+'topcashback': extractTopCashback,
 };
 
 // ---- Scan engine ----------------------------------------------------------
@@ -813,7 +848,7 @@ renderLoyaltyBalances();
 export {
 renderLoyaltyBalances, initLoyaltyBalances, runLoyaltyBalanceScan,
 extractBritishAirways, extractMarriottBonvoy, extractVirginFlyingClub, extractBoots, extractTescoClubcard, extractBaVoucher,
-extractHertz, extractSixt, extractMilesAndMore, extractQuidco,
+extractHertz, extractSixt, extractMilesAndMore, extractQuidco, extractTopCashback,
 latestBalancesFor, travelStripPrograms,
 labelKindFor, setLabelKind, pendingClassifications, pendingVoucherLinks, markVoucherLinked, markVoucherSkipped,
 };
