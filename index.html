@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v585</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v586</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -497,6 +497,24 @@
 <input type="date" id="subscription-renewal-input">
 <input type="text" autocomplete="off" id="subscription-notes-input" placeholder="Notes (optional)">
 <button class="add-btn" type="button">Add</button>
+</div>
+</section>
+
+<section class="panel wide" id="loyalty-balances-panel" data-tab="finances">
+<div class="panel-head">
+<h2><span class="dot plum"></span>Loyalty balances</h2>
+<span class="count-badge" id="loyalty-balances-count"></span>
+</div>
+<div class="settings-note" style="margin:0 0 10px;">Reads known loyalty-program emails (British Airways, Marriott Bonvoy, Virgin Flying Club, Tesco Clubcard, Boots Advantage Card) for a real balance, about once a month per program — never a fixed statement, so some months may show nothing new.</div>
+<div class="sync-row">
+<button class="sync-btn" type="button" id="loyalty-checknow-all-btn">Check all now</button>
+<span class="sync-status" id="loyalty-scan-status"></span>
+</div>
+<div id="loyalty-balances-list"></div>
+<div class="add-form" id="loyalty-add-form">
+<input type="text" autocomplete="off" id="loyalty-add-name" placeholder="Program name, e.g. Hertz Gold Plus Rewards">
+<input type="text" autocomplete="off" id="loyalty-add-sender" placeholder="Sender address(es), comma separated">
+<button class="add-btn" type="button" id="loyalty-add-btn">Add</button>
 </div>
 </section>
 
@@ -2707,6 +2725,7 @@ Needs the WHOLE exported folder tree (hundreds of files, not a single JSON) &mda
 <input type="checkbox" id="show-past-trips-toggle"> <span id="show-past-trips-text">Show past trips</span>
 </label>
 </div>
+<div id="travel-loyalty-strip"></div>
 <div class="settings-note" style="margin:0 0 10px;">A trip is a project you can also work from the Tasks tab &mdash; add flights, car hire, accommodation and transfers here, enrich them from a booking email (Mail's &quot;+ trip leg&quot;) or a screenshot (Capture Inbox's &quot;Extract into a trip leg&quot;), and download a self-contained offline itinerary once it's ready. Anything still open is flagged &#9888; rather than left blank &mdash; fill it in or mark it N/A.</div>
 <div class="capture-row" style="margin-bottom:14px;">
 <input type="text" autocomplete="off" id="travel-new-trip-title" placeholder="Trip name, e.g. Lisbon long weekend">

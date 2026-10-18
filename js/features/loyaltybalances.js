@@ -1,0 +1,438 @@
+// Loyalty/rewards balances -- a monthly Gmail scan that reads each
+// tracked program's own marketing/account emails for a real embedded
+// balance, instead of the user retyping figures by hand every time.
+//
+// Every regex below was written against a REAL email body fetched
+// live during this feature's own design, not guessed from a generic
+// template -- see the plan file's own changelog for the exact
+// examples. Two load-bearing facts that shaped every extractor:
+//   - None of British Airways/Marriott Bonvoy/Virgin/Tesco/Boots sends
+//     a dedicated "your balance" statement -- the real figure is
+//     embedded inside an ordinary marketing email's own personalised
+//     header/footer block, firing on THAT email's own irregular
+//     schedule, not a fixed monthly cadence. A scan coming back empty
+//     some months is expected, not a bug.
+//   - This app's own stripHtml() (js/googlemail.js) is bare
+//     `textContent` -- it inserts NO separator between adjacent table
+//     cells or <br>-separated lines. A label and the NEXT field's
+//     value routinely run together with zero whitespace (confirmed
+//     live: British Airways' own template reads "...AVIOS750 TIER
+//     POINTS5,864..." -- "750" is the tier-points VALUE stuck directly
+//     onto the AVIOS label text, not part of the Avios figure). Every
+//     regex here uses `\s*` (zero-or-more), never assumes a real gap.
+import { data, queueSave, blankLoyaltyProgram, blankLoyaltyBalance } from '../state.js';
+import { escapeHtml, uid, daysSince, todayStr } from '../utils.js';
+import { fetchMailSearches, getMessageDetail } from '../googlemail.js';
+
+// How often a program is actually re-checked, independent of this
+// file being invoked daily by js/features/scheduled.js's own (much
+// shorter) global interval -- same split as mediarecs.js's own
+// CADENCE_DAYS/isSourceDue.
+const CADENCE_DAYS = 28;
+
+// ---- Per-provider extractors --------------------------------------------
+// Each takes (bodyText, subject) and returns either null (nothing
+// recognised -- the caller counts this as "unmatched", not an error)
+// or { membershipNumber, tier, date, metrics: [{label, balance, unit,
+// expiryDate}] }. `date` is only set when the email itself states a
+// precise as-of date (Marriott does); otherwise the caller falls back
+// to the email's own Date header.
+
+// Real example: "BLUE\nMEMBERSHIP 10975336\n188,672\nAVIOS750\nTIER
+// POINTS5,864\nLIFETIME TIER POINTS". Each stat tile is VALUE then
+// LABEL, but the next tile's value runs on with no separator -- so
+// "750" (tier points) is stuck to the end of the "AVIOS" label, and
+// "5,864" (lifetime tier points) to the end of "TIER POINTS".
+function extractBritishAirways(bodyText) {
+const text = String(bodyText || '');
+const main = text.match(/([\d,]+)\s*AVIOS([\d,]+)\s*TIER POINTS([\d,]+)\s*LIFETIME TIER POINTS/i);
+if (!main) return null;
+const memberMatch = text.match(/([A-Z][A-Z ]{2,30}?)\s*MEMBERSHIP\s+(\d{5,12})(?!\d)/);
+return {
+membershipNumber: memberMatch ? memberMatch[2] : '',
+tier: memberMatch ? memberMatch[1].trim() : '',
+date: '',
+metrics: [
+{ label: 'Avios', balance: Number(main[1].replace(/,/g, '')), unit: 'Avios' },
+{ label: 'Tier points', balance: Number(main[2].replace(/,/g, '')), unit: 'points' },
+{ label: 'Lifetime tier points', balance: Number(main[3].replace(/,/g, '')), unit: 'points' },
+],
+};
+}
+
+// Real example: "...| 46,089 points | Platinum Elite | | | XXXXX5970
+// |...| 18 nights this year as of 09/10/2026 |". The `.{0,30}?`
+// non-greedy gap bridges whatever this account's own stripHtml()
+// render puts between the number and the tier word -- a literal "|",
+// a run of spaces, or nothing at all.
+function extractMarriottBonvoy(bodyText) {
+const text = String(bodyText || '');
+const main = text.match(/([\d,]+)\s*points\b.{0,30}?(Platinum Elite|Titanium Elite|Gold Elite|Silver Elite|Ambassador|Member)/is);
+if (!main) return null;
+const memberMatch = text.match(/(X{3,}\d+)/);
+const asOf = text.match(/nights this year as of\s*(\d{2})\/(\d{2})\/(\d{4})/i);
+return {
+membershipNumber: memberMatch ? memberMatch[1] : '',
+tier: main[2],
+date: asOf ? `${asOf[3]}-${asOf[2]}-${asOf[1]}` : '',
+metrics: [{ label: 'Bonvoy points', balance: Number(main[1].replace(/,/g, '')), unit: 'points' }],
+};
+}
+
+// Real example: "Membership tier: Red<br>Membership number:
+// 1054957491<br>Virgin Points: 87,896<sup>&#8225;</sup><br>Member
+// since: 7 Aug 2013" -- textContent drops every <br>, so this is read
+// as one run-together string; `\s*` after each colon covers both the
+// gapless and gapped case.
+function extractVirginFlyingClub(bodyText) {
+const text = String(bodyText || '');
+const main = text.match(/Membership tier:\s*(\w+)\s*Membership number:\s*(\d+)\s*Virgin Points:\s*([\d,]+)/i);
+if (!main) return null;
+return {
+membershipNumber: main[2],
+tier: main[1],
+date: '',
+metrics: [{ label: 'Virgin Points', balance: Number(main[3].replace(/,/g, '')), unit: 'points' }],
+};
+}
+
+// Real example: "Your Advantage Card balance:### £9.00 worth of
+// points" + "Advantage Card number: XXXX633035600012205193".
+function extractBoots(bodyText) {
+const text = String(bodyText || '');
+const balMatch = text.match(/Advantage Card balance:?\s*#*\s*£([\d.,]+)\s*worth of points/i);
+if (!balMatch) return null;
+const numMatch = text.match(/Advantage Card number:\s*(\S+)/i);
+return {
+membershipNumber: numMatch ? numMatch[1] : '',
+tier: '',
+date: '',
+metrics: [{ label: 'Advantage Card points', balance: Number(balMatch[1].replace(/,/g, '')), unit: '£ worth of points' }],
+};
+}
+
+// Real example: "Ooooohyeah, you have 389 Clubcard Points". A second,
+// real Tesco template renders its balance as an image with no number
+// in the text at all -- this correctly returns null for that one; it
+// genuinely has nothing to extract, not a bug.
+function extractTescoClubcard(bodyText) {
+const text = String(bodyText || '');
+const m = text.match(/you have\s*([\d,]+)\s*Clubcard Points/i);
+if (!m) return null;
+return { membershipNumber: '', tier: '', date: '', metrics: [{ label: 'Clubcard points', balance: Number(m[1].replace(/,/g, '')), unit: 'points' }] };
+}
+
+// Real examples: "Your British Airways eVoucher" (issued) and "Your
+// British Airways eVoucher has been used" -- event-shaped (one row
+// per voucher issued/used), not a running balance.
+function extractBaVoucher(bodyText, subject) {
+const text = String(bodyText || '');
+const refMatch = text.match(/eVoucher:\s*([\w-]+)/i);
+const amountMatch = text.match(/£([\d.,]+)/);
+if (!refMatch && !amountMatch) return null;
+const used = /has been used/i.test(subject || '') || /has been used/i.test(text);
+return {
+membershipNumber: '', tier: '', date: '',
+metrics: [{ label: used ? 'eVoucher used' : 'eVoucher issued', balance: amountMatch ? Number(amountMatch[1].replace(/,/g, '')) : null, unit: '£', expiryDate: '' }],
+};
+}
+
+const EXTRACTORS = {
+'ba': extractBritishAirways,
+'marriott-bonvoy': extractMarriottBonvoy,
+'virgin-flying-club': extractVirginFlyingClub,
+'boots': extractBoots,
+'tesco-clubcard': extractTescoClubcard,
+'ba-evoucher': extractBaVoucher,
+};
+
+// ---- Scan engine ----------------------------------------------------------
+
+function isProgramDue(program, force) {
+return !!force || !program.lastCheckedAt || daysSince(program.lastCheckedAt) >= CADENCE_DAYS;
+}
+
+function dateFromHeader(dateHeader) {
+const d = new Date(dateHeader);
+return Number.isNaN(d.getTime()) ? todayStr() : d.toISOString().slice(0, 10);
+}
+
+// One program: search, fetch any new messages, extract, store. Never
+// throws -- a single bad message or a failed AI call is logged and
+// skipped so it can't take the rest of the scan down with it.
+async function scanOneProgram(program, { force } = {}) {
+if (!program.active || !program.senderAddresses.length) return null;
+if (!isProgramDue(program, force)) return { programId: program.id, skipped: true };
+
+const query = `from:(${program.senderAddresses.join(' OR ')})`;
+let messages = [];
+try {
+const [section] = await fetchMailSearches([{ kind: 'query', value: query, maxDays: 60, maxEvents: 10 }]);
+messages = section?.messages || [];
+} catch (err) {
+return { programId: program.id, programName: program.name, error: err.message };
+}
+
+const seen = new Set(program.seenMessageIds || []);
+let matched = 0;
+let unmatched = 0;
+const newRows = [];
+
+for (const msg of messages) {
+if (seen.has(msg.id)) continue;
+let detail;
+try { detail = await getMessageDetail(msg.id); } catch (err) { continue; } // transient fetch failure -- try again next scan, don't mark seen
+seen.add(msg.id);
+
+const extractor = EXTRACTORS[program.extractorKey];
+let result = extractor ? extractor(detail.bodyText, detail.subject) : null;
+let method = extractor ? 'deterministic' : '';
+
+if (!result && !extractor) {
+try {
+const { extractLoyaltyBalanceWithAI } = await import('../ai.js');
+const ai = await extractLoyaltyBalanceWithAI(program.name, detail.bodyText);
+program.aiCallCount = (program.aiCallCount || 0) + 1;
+program.lastAiCallAt = new Date().toISOString();
+method = 'ai';
+if (Number.isFinite(ai.balance)) {
+result = { membershipNumber: ai.membershipNumber, tier: ai.tier, date: '', metrics: [{ label: 'Balance', balance: ai.balance, unit: ai.unit, expiryDate: ai.expiryDate }] };
+}
+} catch (err) { /* AI fallback failing shouldn't block the rest of the scan */ }
+}
+
+if (!result) { unmatched++; continue; }
+matched++;
+if (method) program.extractionMethod = method;
+if (result.membershipNumber && !program.membershipNumber) program.membershipNumber = result.membershipNumber;
+const date = result.date || dateFromHeader(detail.date);
+result.metrics.forEach((metric) => {
+newRows.push(blankLoyaltyBalance({
+programId: program.id, label: metric.label, date,
+balance: metric.balance, unit: metric.unit || '',
+tier: result.tier || '', expiryDate: metric.expiryDate || '',
+sourceMessageId: msg.id,
+}));
+});
+}
+
+program.seenMessageIds = [...seen];
+program.lastCheckedAt = new Date().toISOString();
+if (newRows.length) data.loyaltyBalances.push(...newRows);
+return { programId: program.id, programName: program.name, matched, unmatched, newRows: newRows.length };
+}
+
+async function runLoyaltyBalanceScan({ force } = {}) {
+const results = [];
+for (const program of data.loyaltyPrograms) {
+const result = await scanOneProgram(program, { force });
+if (result) results.push(result);
+}
+queueSave();
+return results;
+}
+
+// Never a bare count, per this project's own standing convention --
+// names which programs/labels/dates actually changed.
+function summariseResults(results) {
+const lines = [];
+results.forEach((r) => {
+if (!r || r.skipped) return;
+if (r.error) { lines.push(`${r.programName || r.programId}: scan failed — ${r.error}`); return; }
+if (!r.newRows) return;
+lines.push(`${r.programName} — found ${r.newRows} new reading${r.newRows === 1 ? '' : 's'}${r.unmatched ? ` (${r.unmatched} email${r.unmatched === 1 ? '' : 's'} not recognised)` : ''}.`);
+});
+return lines.length ? lines.join(' ') : 'Nothing new — every active program was either already checked this month or had no new matching email.';
+}
+
+// ---- Travel-strip / ticker helper -----------------------------------------
+// Programs flagged showOnTravel, each with its latest reading per
+// label -- shared by the Travel-tab summary strip and the Overview
+// ticker's rotating 'loyalty' tile, so there's exactly one place that
+// decides "what counts as the latest figure."
+function latestBalancesFor(program) {
+const rows = data.loyaltyBalances.filter((b) => b.programId === program.id);
+const byLabel = new Map();
+rows.forEach((r) => {
+const prev = byLabel.get(r.label);
+if (!prev || r.date > prev.date) byLabel.set(r.label, r);
+});
+return [...byLabel.values()].sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function travelStripPrograms() {
+return data.loyaltyPrograms
+.filter((p) => p.showOnTravel)
+.map((p) => ({ program: p, readings: latestBalancesFor(p) }))
+.filter((x) => x.readings.length);
+}
+
+// ---- Rendering --------------------------------------------------------
+
+// Per-program "Check now" status text, outside the saved data (purely
+// ephemeral UI feedback) -- a full renderLoyaltyBalances() rebuilds
+// the whole card list's innerHTML, which would otherwise wipe the
+// status span the instant it's set (confirmed live: the message
+// appeared then vanished immediately). Same "module-level message
+// variable survives its own re-render" idiom as manualimport.js's
+// manualImportMessage, just keyed per program since several cards can
+// each have their own independent status.
+const lastCheckMessages = new Map();
+
+function methodBadgeHtml(program) {
+if (program.extractionMethod === 'ai') return `<span class="tag-chip tag-chip-amber" title="Costs an AI call each scan — come back and ask for a deterministic extractor once you're confident this one's worth keeping.">AI-parsed (${program.aiCallCount || 0}x)</span>`;
+if (program.extractionMethod === 'deterministic') return `<span class="tag-chip" title="A real pattern match, no AI call — free and exact.">Deterministic</span>`;
+return '';
+}
+
+function programCardHtml(program) {
+const readings = latestBalancesFor(program);
+const rows = readings.map((r) => `<div class="loyalty-reading">
+<strong>${escapeHtml(r.label)}</strong>
+<span class="loyalty-reading-value">${r.balance != null ? escapeHtml(r.unit === '£' || r.unit === '£ worth of points' ? `£${r.balance.toLocaleString('en-GB')}` : r.balance.toLocaleString('en-GB')) : '—'} ${escapeHtml(r.unit && r.unit !== '£' ? r.unit : '')}</span>
+<span class="settings-note">as of ${escapeHtml(r.date)}${r.expiryDate ? ` · expires ${escapeHtml(r.expiryDate)}` : ''}</span>
+</div>`).join('');
+const tier = readings.find((r) => r.tier)?.tier || '';
+return `<div class="account-card" data-loyalty-program="${escapeHtml(program.id)}">
+<div class="account-summary" style="cursor:default;">
+<strong>${escapeHtml(program.name)}</strong>
+${tier ? `<span class="tag-chip tag-chip-blue">${escapeHtml(tier)}</span>` : ''}
+${methodBadgeHtml(program)}
+${!program.active ? '<span class="candidate-tag">inactive</span>' : ''}
+</div>
+${rows || '<div class="empty">No readings yet — run a scan, or Check now below.</div>'}
+<details class="settings-item" style="margin-top:6px;">
+<summary><h3>Settings</h3></summary>
+<div class="settings-block">
+<label><input type="checkbox" ${program.showOnTravel ? 'checked' : ''} data-loyalty-show-travel="${escapeHtml(program.id)}"> Show on Travel tab</label>
+<label><input type="checkbox" ${program.active ? 'checked' : ''} data-loyalty-active="${escapeHtml(program.id)}"> Active</label>
+<div class="sync-row" style="margin-top:6px;">
+<input type="text" value="${escapeHtml((program.senderAddresses || []).join(', '))}" placeholder="Sender address(es), comma separated" data-loyalty-senders="${escapeHtml(program.id)}" style="flex:1 1 260px;">
+</div>
+<div class="sync-row">
+<input type="text" value="${escapeHtml(program.membershipNumber)}" placeholder="Membership number (optional)" data-loyalty-member="${escapeHtml(program.id)}" style="flex:1 1 200px;">
+<button type="button" class="sync-btn sm inline" data-loyalty-check-now="${escapeHtml(program.id)}">Check now</button>
+${!program.builtIn ? `<button type="button" class="sync-btn sm inline" data-loyalty-remove="${escapeHtml(program.id)}">Remove</button>` : ''}
+</div>
+<div class="settings-note" id="loyalty-status-${escapeHtml(program.id)}">${escapeHtml(lastCheckMessages.get(program.id) || '')}</div>
+</div>
+</details>
+</div>`;
+}
+
+function renderLoyaltyBalances() {
+const panel = document.getElementById('loyalty-balances-panel');
+if (!panel) return;
+const list = document.getElementById('loyalty-balances-list');
+if (list) list.innerHTML = data.loyaltyPrograms.map(programCardHtml).join('');
+const countEl = document.getElementById('loyalty-balances-count');
+if (countEl) {
+const n = data.loyaltyPrograms.filter((p) => p.active).length;
+countEl.textContent = n ? `${n} program${n === 1 ? '' : 's'}` : '';
+}
+renderTravelStrip();
+bindLoyaltyBalances(panel);
+}
+
+function renderTravelStrip() {
+const mount = document.getElementById('travel-loyalty-strip');
+if (!mount) return;
+const entries = travelStripPrograms();
+if (!entries.length) { mount.innerHTML = ''; return; }
+mount.innerHTML = `<div class="sync-row" style="align-items:flex-start;flex-wrap:wrap;">${entries.map(({ program, readings }) =>
+readings.map((r) => `<span class="tag-chip" title="${escapeHtml(program.name)} — as of ${escapeHtml(r.date)}">${escapeHtml(program.name)}: ${r.balance != null ? escapeHtml(r.balance.toLocaleString('en-GB')) : '—'} ${escapeHtml(r.unit)}</span>`).join('')
+).join('')}</div>`;
+}
+
+function bindLoyaltyBalances(panel) {
+if (panel.dataset.loyaltyBound) return;
+panel.dataset.loyaltyBound = '1';
+panel.addEventListener('change', (e) => {
+const showTravel = e.target.closest('[data-loyalty-show-travel]');
+if (showTravel) {
+const program = data.loyaltyPrograms.find((p) => p.id === showTravel.dataset.loyaltyShowTravel);
+if (program) { program.showOnTravel = showTravel.checked; queueSave(); renderLoyaltyBalances(); }
+return;
+}
+const activeToggle = e.target.closest('[data-loyalty-active]');
+if (activeToggle) {
+const program = data.loyaltyPrograms.find((p) => p.id === activeToggle.dataset.loyaltyActive);
+if (program) { program.active = activeToggle.checked; queueSave(); renderLoyaltyBalances(); }
+return;
+}
+const sendersInput = e.target.closest('[data-loyalty-senders]');
+if (sendersInput) {
+const program = data.loyaltyPrograms.find((p) => p.id === sendersInput.dataset.loyaltySenders);
+if (program) { program.senderAddresses = sendersInput.value.split(',').map((s) => s.trim()).filter(Boolean); queueSave(); }
+return;
+}
+const memberInput = e.target.closest('[data-loyalty-member]');
+if (memberInput) {
+const program = data.loyaltyPrograms.find((p) => p.id === memberInput.dataset.loyaltyMember);
+if (program) { program.membershipNumber = memberInput.value.trim(); queueSave(); }
+}
+});
+panel.addEventListener('click', async (e) => {
+const checkBtn = e.target.closest('[data-loyalty-check-now]');
+if (checkBtn) {
+const programId = checkBtn.dataset.loyaltyCheckNow;
+const program = data.loyaltyPrograms.find((p) => p.id === programId);
+const statusEl = document.getElementById(`loyalty-status-${programId}`);
+if (!program) return;
+checkBtn.disabled = true;
+lastCheckMessages.set(programId, 'Checking…');
+if (statusEl) statusEl.textContent = 'Checking…';
+const result = await scanOneProgram(program, { force: true });
+queueSave();
+lastCheckMessages.set(programId, summariseResults([result]));
+renderLoyaltyBalances();
+return;
+}
+const removeBtn = e.target.closest('[data-loyalty-remove]');
+if (removeBtn) {
+const programId = removeBtn.dataset.loyaltyRemove;
+if (!confirm('Remove this loyalty program and its stored readings?')) return;
+data.loyaltyPrograms = data.loyaltyPrograms.filter((p) => p.id !== programId);
+data.loyaltyBalances = data.loyaltyBalances.filter((b) => b.programId !== programId);
+queueSave();
+renderLoyaltyBalances();
+}
+});
+}
+
+function initLoyaltyBalances() {
+const panel = document.getElementById('loyalty-balances-panel');
+if (!panel) return;
+
+const form = document.getElementById('loyalty-add-form');
+const addBtn = document.getElementById('loyalty-add-btn');
+addBtn?.addEventListener('click', () => {
+const nameInput = document.getElementById('loyalty-add-name');
+const senderInput = document.getElementById('loyalty-add-sender');
+const name = nameInput.value.trim();
+const senders = senderInput.value.split(',').map((s) => s.trim()).filter(Boolean);
+if (!name || !senders.length) return;
+data.loyaltyPrograms.push(blankLoyaltyProgram({ id: uid(), name, senderAddresses: senders, extractorKey: '' }));
+queueSave();
+nameInput.value = '';
+senderInput.value = '';
+renderLoyaltyBalances();
+});
+
+document.getElementById('loyalty-checknow-all-btn')?.addEventListener('click', async (e) => {
+e.target.disabled = true;
+const results = await runLoyaltyBalanceScan({ force: true });
+const statusEl = document.getElementById('loyalty-scan-status');
+if (statusEl) statusEl.textContent = summariseResults(results);
+e.target.disabled = false;
+renderLoyaltyBalances();
+});
+
+renderLoyaltyBalances();
+}
+
+export {
+renderLoyaltyBalances, initLoyaltyBalances, runLoyaltyBalanceScan,
+extractBritishAirways, extractMarriottBonvoy, extractVirginFlyingClub, extractBoots, extractTescoClubcard, extractBaVoucher,
+latestBalancesFor, travelStripPrograms,
+};

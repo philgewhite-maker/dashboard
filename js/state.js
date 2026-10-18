@@ -964,6 +964,70 @@ apiCaptures: {},
 // file (setCompletionSearches, scheduledRuns), just applied to a nested
 // shape instead of a flat one. Mutates in place; called from migrate()
 // and after every import.
+// One tracked loyalty/rewards program -- see js/features/
+// loyaltybalances.js for the monthly Gmail scan and extractors that
+// populate blankLoyaltyBalance rows below. senderAddresses narrows
+// the Gmail search; membershipNumber is filled in automatically the
+// first time an extractor finds one in a real email, not required up
+// front. `builtIn` marks the 6 programs seeded below (never deleted,
+// only deactivated) vs. one the user adds themselves via "+ Add
+// program" -- a program with no real regex extractor still gets a
+// usable one via the AI fallback (see extractionMethod).
+function blankLoyaltyProgram(fields = {}) {
+return {
+id: uid(), name: '', extractorKey: '', senderAddresses: [],
+membershipNumber: '', lastCheckedAt: '', active: true,
+showOnTravel: false, builtIn: false,
+// '' = not yet run; 'deterministic' = a real regex in EXTRACTORS
+// matched; 'ai' = no deterministic extractor exists for this
+// extractorKey, so the AI fallback ran instead. aiCallCount is the
+// honest cost signal shown on the card -- a running count, not a
+// guessed £ figure this app has no way to actually know.
+extractionMethod: '', aiCallCount: 0, lastAiCallAt: '',
+// Gmail message ids already processed this scan or a past one,
+// regardless of whether anything was extracted -- same
+// "remembered so a doomed re-check isn't repeated" reasoning as
+// data.prefs.airbnbCancellationsSeen, just scoped per program
+// instead of shared. Without this, a message whose template never
+// matches (or whose AI fallback came back empty) gets re-fetched,
+// and for the AI path re-billed, on every single scan forever.
+seenMessageIds: [],
+...fields,
+};
+}
+
+// One snapshot finding from one scanned email. `label` distinguishes
+// several metrics from the SAME scan/program (Avios vs Tier points vs
+// Lifetime tier points, say) -- deliberately separate rows rather
+// than one flexible-fields bag, so grouping by (programId, label) is
+// a plain filter and a future chart has a clean series key.
+function blankLoyaltyBalance(fields = {}) {
+return {
+id: uid(), programId: '', label: '', date: '', balance: null,
+unit: '', tier: '', expiryDate: '', sourceMessageId: '',
+...fields,
+};
+}
+
+// Seeded once (same one-time-add idiom as DEFAULT_PACKING_MODULES/
+// tickerLettingSeeded) -- every sender address and regex key here was
+// confirmed against a REAL fetched email during this feature's own
+// design, not guessed.
+const DEFAULT_LOYALTY_PROGRAMS = [
+{ id: 'loyalty-ba', name: 'British Airways Executive Club', extractorKey: 'ba',
+senderAddresses: ['TheBritishAirwaysClub@crm.ba.com'], builtIn: true },
+{ id: 'loyalty-marriott', name: 'Marriott Bonvoy', extractorKey: 'marriott-bonvoy',
+senderAddresses: ['marriottbonvoy@email-marriott.com'], builtIn: true },
+{ id: 'loyalty-virgin', name: 'Virgin Flying Club', extractorKey: 'virgin-flying-club',
+senderAddresses: ['flyingclub@emails.virginatlantic.com'], builtIn: true },
+{ id: 'loyalty-tesco', name: 'Tesco Clubcard', extractorKey: 'tesco-clubcard',
+senderAddresses: ['no-reply@emails.tesco.com'], builtIn: true },
+{ id: 'loyalty-boots', name: 'Boots Advantage Card', extractorKey: 'boots',
+senderAddresses: ['no-reply@mail.boots.com'], builtIn: true },
+{ id: 'loyalty-ba-evoucher', name: 'British Airways eVoucher', extractorKey: 'ba-evoucher',
+senderAddresses: ['BA.CustSvcs@email.ba.com'], builtIn: true },
+];
+
 function pruneMarriottAvailability(store, today = todayStr()) {
 if (!store || typeof store !== 'object') return;
 const monthFloor = today.slice(0, 7);
@@ -2019,6 +2083,7 @@ items: [
 { id: 'holding', kind: 'holding' },
 { id: 'sonia', kind: 'sonia' },
 { id: 'letting', kind: 'letting' },
+{ id: 'loyalty', kind: 'loyalty' },
 { id: 'wx-london', kind: 'weather', city: 'London', lat: 51.5074, lon: -0.1278, tz: 'Europe/London' },
 ],
 },
@@ -2137,6 +2202,17 @@ if (!data.ticker.tickerLettingSeeded) {
 data.ticker.tickerLettingSeeded = true;
 if (!data.ticker.items.some((i) => i && i.kind === 'letting')) {
 data.ticker.items.push({ id: 'letting', kind: 'letting' });
+}
+}
+// Same one-time-add idiom as tickerLettingSeeded just above -- the
+// loyalty tile only shows anything once a program is flagged
+// showOnTravel (js/features/loyaltybalances.js), so adding it here
+// unconditionally is safe: an untouched set of programs just means
+// this tile renders nothing, same as any other tile with no data yet.
+if (!data.ticker.tickerLoyaltySeeded) {
+data.ticker.tickerLoyaltySeeded = true;
+if (!data.ticker.items.some((i) => i && i.kind === 'loyalty')) {
+data.ticker.items.push({ id: 'loyalty', kind: 'loyalty' });
 }
 }
 if (!data.tickerCache || typeof data.tickerCache !== 'object') data.tickerCache = {};
@@ -2467,6 +2543,27 @@ if (!data.marriottAvailability.coverage || typeof data.marriottAvailability.cove
 if (!data.marriottAvailability.apiCaptures || typeof data.marriottAvailability.apiCaptures !== 'object') data.marriottAvailability.apiCaptures = {};
 }
 pruneMarriottAvailability(data.marriottAvailability);
+// Loyalty balances -- array guards, then the same one-time built-in
+// seed idiom as DEFAULT_PACKING_MODULES/tickerLettingSeeded. A program
+// the user deactivates or a built-in they delete must stay gone; only
+// a genuinely missing built-in (matched by id, not by position) gets
+// re-added, so a hand-edited sender address or a renamed program is
+// never silently overwritten.
+if (!Array.isArray(data.loyaltyPrograms)) data.loyaltyPrograms = [];
+data.loyaltyPrograms = data.loyaltyPrograms.map((p) => ({ ...blankLoyaltyProgram(), ...p, id: p.id || uid(), senderAddresses: Array.isArray(p.senderAddresses) ? p.senderAddresses : [], seenMessageIds: Array.isArray(p.seenMessageIds) ? p.seenMessageIds : [] }));
+if (!data.loyaltyProgramsSeeded) {
+data.loyaltyProgramsSeeded = true;
+DEFAULT_LOYALTY_PROGRAMS.forEach((p) => {
+if (!data.loyaltyPrograms.some((x) => x.id === p.id)) data.loyaltyPrograms.push(blankLoyaltyProgram(p));
+});
+}
+if (!Array.isArray(data.loyaltyBalances)) data.loyaltyBalances = [];
+data.loyaltyBalances = data.loyaltyBalances.map((b) => ({ ...blankLoyaltyBalance(), ...b, id: b.id || uid() }));
+// A balance row whose program was deleted entirely (not just
+// deactivated) has nowhere left to render -- same "nothing left to
+// route it to" reasoning as the trip/planner-entry orphan guards above.
+const loyaltyProgramIds = new Set(data.loyaltyPrograms.map((p) => p.id));
+data.loyaltyBalances = data.loyaltyBalances.filter((b) => loyaltyProgramIds.has(b.programId));
 // Manually-added days beyond Planner's rolling horizon (see planner.js's
 // MAIN_HORIZON_DAYS) -- deduped, format-checked so a corrupt value can't
 // crash dateStrAdd/Date parsing downstream.
@@ -3553,6 +3650,7 @@ TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureB
 blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS, LEG_DATE_FIELDS, STAY_TYPE_SUGGESTIONS,
 blankPackingItem, blankPackingModule, blankTripPacking, blankPackingListItem, PACKING_DURATION_TIERS, packingDurationTier, DEFAULT_PACKING_MODULES,
 blankMarriottAvailability, pruneMarriottAvailability,
+blankLoyaltyProgram, blankLoyaltyBalance,
 blankPlannerEntry, blankPlannerActivity,
 blankAirbnbListing, blankAirbnbReservation, blankAirbnbKey, blankAirbnbKeyAssignment, KEY_CUSTODIAN_TYPES, blankFinanceAccount, SCHOOL_CALENDAR_SITES,
 CONTACT_STATUS_LABELS, CONTACT_MATCH_MIN_STAGE,

@@ -27,6 +27,7 @@
 import { data, queueSave, inventorySets, SET_CORE_GROUPS } from '../state.js';
 import { escapeHtml, uid, bindBackdropClose } from '../utils.js';
 import * as letting from './letting.js';
+import { travelStripPrograms } from './loyaltybalances.js';
 import { matchBankLogo } from '../bankLogos.js';
 import { CHECKS as SITE_HEALTH_CHECKS, reportCheck as reportSiteHealth } from './sitehealth.js';
 
@@ -619,6 +620,22 @@ if (!owed.length) return '';
 return tile('Owed', escapeHtml(money(total)), '',
 `${owed.map((k) => `${ownerNameFor(k)} ${money(balanceFor(k))}`).join(' · ')}. Letting income owed to you — Finances tab.`);
 }
+if (item.kind === 'loyalty') {
+// One tile, rotating through whichever programs are flagged
+// showOnTravel (js/features/loyaltybalances.js's own Finance-tab
+// config) -- picked by time-bucketing rather than a dedicated timer,
+// since this file has no recurring re-render loop of its own to hang
+// one off; whichever program this resolves to next just shows next
+// time anything else causes renderTicker() to run again.
+const entries = travelStripPrograms();
+const flat = entries.flatMap(({ program, readings }) => readings.map((r) => ({ program, r })));
+if (!flat.length) return '';
+const idx = Math.floor(Date.now() / (10 * 60 * 1000)) % flat.length;
+const { program, r } = flat[idx];
+const valueText = r.balance != null ? r.balance.toLocaleString('en-GB') : '—';
+return tile(escapeHtml(program.name), `${escapeHtml(valueText)}${r.unit ? ` ${escapeHtml(r.unit)}` : ''}`, '',
+`${escapeHtml(program.name)}: ${escapeHtml(r.label)} ${escapeHtml(valueText)} ${escapeHtml(r.unit)} as of ${escapeHtml(r.date)}. Loyalty balances — Finances tab.`);
+}
 if (item.kind === 'cass') {
 const logo = item.logoUrl ? `<img class="tick-bank-logo" src="${escapeHtml(item.logoUrl)}" alt="" onerror="this.remove()">` : '';
 return tile('CASS', `${logo}${letting.money(item.amount)}`, '',
@@ -720,6 +737,7 @@ case 'quote': return item.label || item.symbol;
 case 'weather': return item.city;
 case 'sonia': return '2y SONIA';
 case 'letting': return 'Owed';
+case 'loyalty': return 'Loyalty balances';
 case 'holding': return 'Holding';
 case 'cass': return 'CASS';
 case 'sitehealth': return 'Checks';

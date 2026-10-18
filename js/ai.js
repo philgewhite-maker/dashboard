@@ -2150,6 +2150,35 @@ const MAIL_EXTRACT_MAX_TOKENS = 1000;
 // the model resolve that into a real ISO date instead of leaving it out or
 // guessing wrong, same reasoning already established for instruction
 // parsing elsewhere in this file.
+// AI fallback for a loyalty program added without a hand-written
+// regex extractor (js/features/loyaltybalances.js) -- only called
+// when no deterministic extractor exists for that program, since
+// every built-in program (BA, Marriott Bonvoy, Virgin, Tesco, Boots)
+// already has a real, confirmed-against-a-live-email regex and never
+// reaches this function. Same shape as extractTaskFromEmail just
+// below: one plain-text prompt, one JSON reply, every field coerced
+// defensively since the model's own tolerant JSON parser can still
+// hand back a missing or wrongly-typed field.
+async function extractLoyaltyBalanceWithAI(programName, bodyText) {
+const prompt = `This is a marketing or account-update email from the loyalty program "${programName}". Look for the member's own current balance (points/miles), membership tier/status, and expiry date if stated -- not a promotional bonus amount, not a "boost" or "earn more" figure, the account's OWN current standing.
+
+Email body:
+"""
+${String(bodyText || '').slice(0, 12000)}
+"""
+
+Reply with ONLY a JSON object, no other text, no markdown fences: {"balance":"","unit":"","tier":"","expiryDate":"","membershipNumber":""} -- balance is the number only (no commas/units), expiryDate is an ISO yyyy-mm-dd or "", leave any field "" if it genuinely isn't in this email.`;
+const { data: raw } = await callTextJson(prompt, MAIL_EXTRACT_MAX_TOKENS, MAIL_EXTRACT_MODEL, 'Loyalty balance email (AI fallback)', 'low');
+const balanceNum = Number(String((raw && raw.balance) || '').replace(/,/g, ''));
+return {
+balance: Number.isFinite(balanceNum) ? balanceNum : null,
+unit: String((raw && raw.unit) || '').trim(),
+tier: String((raw && raw.tier) || '').trim(),
+expiryDate: String((raw && raw.expiryDate) || '').trim(),
+membershipNumber: String((raw && raw.membershipNumber) || '').trim(),
+};
+}
+
 async function extractTaskFromEmail(subject, from, bodyText, guidance = '') {
 const prompt = `Today is ${todayStr()}. This is an email that might need following up on as a task. Subject: "${subject || ''}". From: "${from || ''}".
 
@@ -2452,7 +2481,7 @@ callTextJson, DEFAULT_MODEL, summarizeUsage, currentMonthKey, compareFaces,
 extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShoppingItem, searchAgentProvocateurElsewhere, searchEbayResaleEstimate, searchDepartmentStoresForMissingSetPiece, generateAirbnbRateReview, analyseOngoingAccountValue, identifyProduct, translateText, romanizeName, parseCaptureIntent,
 resolveUrlTitle, resolveJobPostingUrl, resolveBookDetails, resolveSeriesBooks,
 identifyCountry, extractWellnessScreenshot,
-extractTripScreenshot, extractMediaScreenshot, extractTripLegFromEmail, extractTaskFromEmail, extractDateEventFromEmail, extractMediaRecommendations, rankMediaCandidates, findLatestArticleUrl, extractSchoolCalendar,
+extractTripScreenshot, extractMediaScreenshot, extractTripLegFromEmail, extractTaskFromEmail, extractDateEventFromEmail, extractMediaRecommendations, rankMediaCandidates, findLatestArticleUrl, extractSchoolCalendar, extractLoyaltyBalanceWithAI,
 parseIngredients, assessIngredient, ALLERGEN_LIST, DIETARY_FLAGS, FODMAP_COMPONENTS, FODMAP_LEVELS,
 FODMAP_THRESHOLDS_G, OLIGO_CATEGORIES, fodmapLevelFromGrams, regenerateRecipeVariant, assessUnitWeight, assessUnitRatio,
 GLYCEMIC_LOAD_THRESHOLDS, glycemicLevelFromLoad,

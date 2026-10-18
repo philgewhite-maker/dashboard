@@ -180,6 +180,21 @@ note: 'Upcoming events for each tracked calendar.',
 id: 'mail', label: 'Mail', buttonId: 'sync-mail-btn', needsGoogle: true,
 note: 'Re-runs your configured Gmail searches.',
 },
+{
+// A function, not a button, same reasoning as media-recs just above --
+// each loyalty program keeps its own ~28-day cadence gate inside
+// loyaltybalances.js, so this file's own (hours-scale) interval just
+// decides when it's even ATTEMPTED, not when it actually does anything.
+// needsGoogle: true because it searches Gmail -- confirmed this can
+// only ever fire from here on app-open/tab-return, never from
+// bgsync.js's periodicsync (no signed-in page there to get a token).
+id: 'loyalty-balances', label: 'Loyalty balance scan', needsGoogle: true,
+note: 'Reads known loyalty-program emails (British Airways, Marriott Bonvoy, Virgin, Tesco Clubcard, Boots) about once a month for a real balance.',
+run: async () => {
+const { runLoyaltyBalanceScan } = await import('./loyaltybalances.js');
+await runLoyaltyBalanceScan();
+},
+},
 ];
 
 function runs() {

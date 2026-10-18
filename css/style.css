@@ -2288,6 +2288,11 @@ color:var(--ink);
 .mvc-detail-row td{white-space:normal;font-size:12px;padding:8px 10px;}
 .mvc-date-line{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:3px 0;}
 
+/* Loyalty balances (js/features/loyaltybalances.js) -- one reading row
+   per tracked label (Avios, Tier points, ...) inside an .account-card. */
+.loyalty-reading{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;padding:3px 0;font-size:13px;}
+.loyalty-reading-value{font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums;color:var(--ink);}
+
 .health-history-toggle-row{
 display:flex;
 flex-direction:column;
