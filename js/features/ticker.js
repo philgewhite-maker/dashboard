@@ -47,6 +47,30 @@ import { CHECKS as SITE_HEALTH_CHECKS, reportCheck as reportSiteHealth } from '.
 const LOYALTY_TICKER_BUCKET_MS = 20 * 1000;
 const loyaltyTickerPhaseOffset = Math.floor(Math.random() * 97); // a prime, so it doesn't resonate with small flat.length values
 
+// Single source of truth for "which program/reading is showing right
+// now" -- shared by tileFor's `kind: 'loyalty'` branch and the drive
+// interval in initTicker() below, so the two can never disagree about
+// whether the bucket has actually changed.
+function currentLoyaltyPick() {
+const entries = travelStripPrograms();
+const flat = entries.flatMap(({ program, readings }) => readings.map((r) => ({ program, r })));
+if (!flat.length) return null;
+const idx = (Math.floor(Date.now() / LOYALTY_TICKER_BUCKET_MS) + loyaltyTickerPhaseOffset) % flat.length;
+return flat[idx];
+}
+// A stable identity for whatever currentLoyaltyPick() currently returns
+// -- the arrays it builds are fresh objects every call, so comparing by
+// reference would never match twice in a row even with no real change.
+function loyaltyPickKey() {
+const pick = currentLoyaltyPick();
+return pick ? `${pick.program.id}|${pick.r.id}` : null;
+}
+// Tracks what the ticker last actually rendered, updated inside
+// renderTicker() itself (below) so it stays correct no matter what
+// triggered that render -- the drive interval in initTicker() only
+// needs to compare against this, never guess at timing.
+let lastLoyaltyPickKey = null;
+
 // A feed is re-fetched when its cached answer is older than this. FX and
 // the swap rate are published once a day, so the floor is about not
 // hammering them on every tab switch rather than about freshness.
@@ -639,22 +663,10 @@ return tile('Owed', escapeHtml(money(total)), '',
 if (item.kind === 'loyalty') {
 // One tile, rotating through whichever programs are flagged
 // showOnTravel (js/features/loyaltybalances.js's own Finance-tab
-// config). Reported directly as a real gap: this file had no
-// recurring re-render loop at all, so the rotation only ever
-// advanced when something ELSE happened to call renderTicker() --
-// loyaltyTickerInterval below (see initTicker()) now drives it
-// directly. loyaltyTickerPhaseOffset is seeded once per page load
-// (Math.random(), not synced) so different sessions don't all land
-// on the same program at the same real-world moment -- the "start
-// from a random position" ask. If this still only ever shows one
-// program, the more likely explanation is that only one program
-// actually has "Show on Travel tab" ticked on the Finance tab --
-// worth checking there first.
-const entries = travelStripPrograms();
-const flat = entries.flatMap(({ program, readings }) => readings.map((r) => ({ program, r })));
-if (!flat.length) return '';
-const idx = (Math.floor(Date.now() / LOYALTY_TICKER_BUCKET_MS) + loyaltyTickerPhaseOffset) % flat.length;
-const { program, r } = flat[idx];
+// config) -- see currentLoyaltyPick() for the shared selection logic.
+const pick = currentLoyaltyPick();
+if (!pick) return '';
+const { program, r } = pick;
 const valueText = r.balance != null ? r.balance.toLocaleString('en-GB') : '—';
 return tile(escapeHtml(program.name), `${escapeHtml(valueText)}${r.unit ? ` ${escapeHtml(r.unit)}` : ''}`, '',
 `${escapeHtml(program.name)}: ${escapeHtml(r.label)} ${escapeHtml(valueText)} ${escapeHtml(r.unit)} as of ${escapeHtml(r.date)}. Loyalty balances — Finances tab.`);
@@ -771,6 +783,7 @@ default: return item.kind;
 function renderTicker() {
 const el = document.getElementById('ticker');
 if (!el) return;
+lastLoyaltyPickKey = loyaltyPickKey();
 const monthly = data.ticker.mode === 'month';
 const tiles = activeItems().map((i) => tileFor(i, monthly)).filter(Boolean);
 if (!tiles.length) { el.innerHTML = ''; el.classList.remove('is-rolling'); return; }
@@ -943,11 +956,22 @@ setTimeout(() => refreshTicker(), 3000);
 // 'loyalty'` branch) -- confirmed live as a real gap: without this,
 // NOTHING in this file ever re-rendered the ticker on its own, so the
 // rotation only advanced on whatever other event happened to trigger
-// a re-render, which could easily never land on a new bucket. A plain
-// re-render, not refreshTicker() -- no network calls, just redraws
-// from already-cached/local data, so running it this often costs
-// nothing.
-setInterval(() => renderTicker(), LOYALTY_TICKER_BUCKET_MS / 2);
+// a re-render, which could easily never land on a new bucket.
+//
+// Checks every 2s (cheap, local-only, no network) but only actually
+// calls renderTicker() when loyaltyPickKey() has genuinely changed --
+// confirmed live as a real regression from the first version of this
+// fix, which called renderTicker() unconditionally every 10s: that
+// rebuilds the WHOLE ticker's DOM (renderTicker's own innerHTML
+// rewrite) and restarts its CSS scroll animation every time, even on
+// the 9 out of 10 ticks where the loyalty bucket hadn't actually
+// changed -- the marquee never got to finish a single lap (its own
+// minimum duration is 20s, longer than the 10s restart interval),
+// which read as "scrolls for a few seconds then jumps back."
+setInterval(() => {
+if (loyaltyPickKey() === lastLoyaltyPickKey) return;
+renderTicker();
+}, 2000);
 // The strip's width decides whether it rolls, so a rotated phone or a
 // resized window has to be re-measured.
 let t = null;
