@@ -63,21 +63,14 @@ setTimeout(() => scrollAndFlash(`[data-loyalty-reading="${id}"]`), 60);
 });
 }
 
-function renderVouchers() {
-renderVoucherReview();
-const list = document.getElementById('vouchers-list');
-document.getElementById('vouchers-count').textContent = data.vouchers.length + (data.vouchers.length === 1 ? ' item' : ' items');
-if (data.vouchers.length === 0) {
-list.innerHTML = '<div class="empty">Nothing tracked yet. Add one below.</div>' + providerDatalistHtml();
-return;
+// Ties expiry-urgency sorting (vouchers and, now, provider groups) to
+// one definition -- blank expiry sorts last, same as "no date" always
+// has throughout this app.
+function expiryRank(v) {
+return v.expiry ? daysUntil(v.expiry) : Infinity;
 }
-const sorted = [...data.vouchers].sort((a, b) => {
-const da = a.expiry ? daysUntil(a.expiry) : Infinity;
-const db = b.expiry ? daysUntil(b.expiry) : Infinity;
-return da - db;
-});
 
-list.innerHTML = sorted.map((v) => {
+function voucherRowHtml(v) {
 let badgeHtml = '';
 if (v.expiry) {
 const dn = daysUntil(v.expiry);
@@ -115,7 +108,59 @@ ${(v.sourceLoyaltyReadingIds || []).length ? `<span class="tag-chip" data-open-l
 <span class="del-x" style="opacity:1;" data-del-voucher="${v.id}">&times;</span>
 </div>
 </div>`;
-}).join('') + providerDatalistHtml();
+}
+
+// Groups by provider so e.g. "British Airways" or "TopCashback" reads
+// as one stripe with its vouchers nested inside, rather than scattered
+// across the flat list -- reuses .account-card/.account-summary (the
+// same wrapper financeaccounts.js's own accounts and loyaltybalances.js's
+// own programs already use) rather than inventing a new grouped-list
+// pattern. A voucher with no provider stays its own standalone row, not
+// folded into a fake "no provider" group. Each group (and each
+// standalone row) sorts into the SAME list by its own soonest expiry,
+// so the whole list still reads most-urgent-first overall, just with
+// same-provider vouchers clustered together instead of interleaved.
+function groupedVouchersHtml(vouchers) {
+const sorted = [...vouchers].sort((a, b) => expiryRank(a) - expiryRank(b));
+const groups = new Map();
+const blocks = [];
+sorted.forEach((v) => {
+const provider = (v.provider || '').trim();
+if (!provider) { blocks.push({ soonest: expiryRank(v), html: voucherRowHtml(v) }); return; }
+if (!groups.has(provider)) {
+const block = { soonest: expiryRank(v), members: [v] };
+groups.set(provider, block);
+blocks.push(block);
+} else {
+groups.get(provider).members.push(v);
+}
+});
+blocks.sort((a, b) => a.soonest - b.soonest);
+return blocks.map((b) => {
+if (b.html) return b.html; // standalone, no-provider row
+const provider = b.members[0].provider.trim();
+const logoUrl = b.members.find((v) => v.logoUrl)?.logoUrl || '';
+const initials = provider.slice(0, 2).toUpperCase();
+return `<div class="account-card voucher-group">
+<div class="account-summary" style="cursor:default;">
+${logoBadgeHtml(logoUrl, initials, 'plum')}
+<strong>${escapeHtml(provider)}</strong>
+<span class="settings-note" style="margin:0;">${b.members.length} voucher${b.members.length === 1 ? '' : 's'}</span>
+</div>
+${b.members.map(voucherRowHtml).join('')}
+</div>`;
+}).join('');
+}
+
+function renderVouchers() {
+renderVoucherReview();
+const list = document.getElementById('vouchers-list');
+document.getElementById('vouchers-count').textContent = data.vouchers.length + (data.vouchers.length === 1 ? ' item' : ' items');
+if (data.vouchers.length === 0) {
+list.innerHTML = '<div class="empty">Nothing tracked yet. Add one below.</div>' + providerDatalistHtml();
+return;
+}
+list.innerHTML = groupedVouchersHtml(data.vouchers) + providerDatalistHtml();
 
 list.querySelectorAll('[data-field][data-voucher-id]').forEach((el) => {
 el.addEventListener('change', () => {
