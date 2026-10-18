@@ -2268,6 +2268,26 @@ color:var(--ink);
 .health-row-summary td{font-style:italic;color:var(--muted);}
 .health-row-summary td:first-child{color:var(--ink);}
 
+/* Marriott availability pivot (js/features/marriottavailability.js) --
+   nights-groups x resort-rows x month-columns, built on .health-table's
+   own base. .mvc-month's own specificity (0,2,0) beats .health-table
+   td's (0,1,1), so the centering below actually wins. */
+.mvc-balance{display:flex;align-items:baseline;gap:8px;margin:0 0 10px;flex-wrap:wrap;}
+.mvc-balance-num{font-family:'IBM Plex Mono',monospace;font-size:20px;font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums;}
+.mvc-pivot .mvc-month{text-align:center;padding:4px 6px;}
+.mvc-pivot .mvc-resort{white-space:normal;min-width:160px;position:sticky;left:0;background:var(--card);z-index:1;}
+.mvc-cell{font:inherit;font-variant-numeric:tabular-nums;min-width:38px;border:1px solid transparent;border-radius:6px;background:none;cursor:pointer;padding:3px 6px;color:var(--ink);}
+.mvc-cell small{display:block;font-size:9px;color:var(--muted);font-weight:400;}
+.mvc-cell.mvc-open{background:var(--teal-bg);color:var(--teal);}
+.mvc-cell.mvc-outside{font-style:italic;background:var(--teal-bg);color:var(--teal);}
+.mvc-cell[aria-expanded="true"]{border-color:var(--teal);}
+.mvc-cell.mvc-none{color:var(--muted);}
+.mvc-cell.mvc-unscanned{opacity:.4;cursor:default;}
+.mvc-nights-head td{background:var(--paper);font-weight:600;}
+.mvc-nights-toggle{background:none;border:0;font:inherit;font-weight:600;cursor:pointer;color:var(--ink);padding:0;margin-right:8px;}
+.mvc-detail-row td{white-space:normal;font-size:12px;padding:8px 10px;}
+.mvc-date-line{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:3px 0;}
+
 .health-history-toggle-row{
 display:flex;
 flex-direction:column;

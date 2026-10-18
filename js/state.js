@@ -361,6 +361,12 @@ album: [
 ],
 track: [], artist: [], podcast: [], other: [],
 },
+// What the Travel tab's "Copy scan script" button (js/features/
+// marriottavailability.js) bakes into the generated Marriott
+// availability scan snippet -- edited from the dashboard instead of
+// hand-editing the script file. `roomTypes: null` means auto-detect
+// every room type a resort's own filter offers.
+marriottScanConfig: { nightCounts: [2, 3, 4, 5, 7], guests: 2, monthsToScan: 3, roomTypes: null, speedMultiplier: 1.6 },
 };
 
 // Each mail search is one row in Settings: a kind, its value, and its own
@@ -913,6 +919,80 @@ items: [],
 }
 function blankTripPacking(fields = {}) {
 return { items: [], moduleState: {}, removedSourceItemIds: [], generatedAt: '', ...fields };
+}
+
+// Imported Marriott Vacation Club "Book with Points" availability --
+// see js/features/marriottavailability.js. A nested date-map rather than
+// flat rows, because this document is already large and every byte here
+// is one more synced byte (roughly a quarter the size of an equivalent
+// flat-row shape at the kind of volume a real multi-month scan produces).
+function blankMarriottAvailability(fields = {}) {
+return {
+// nights (string) -> resort -> roomType -> { 'YYYY-MM-DD': points|null }.
+// An EMPTY roomType object is meaningful -- that room type WAS scanned
+// and found nothing ("(none available)") -- so containers are kept
+// even when empty, never deleted just for being empty.
+dates: {},
+// `${nights}|${YYYY-MM}` -> ISO timestamp of the import that last
+// covered that slice. Separates "scanned, nothing open" from "never
+// scanned", and is what the pivot's hover/"as of" text reads from.
+coverage: {},
+lastImport: null, // {at, fileName, source, scriptVersion, dateCount, replacedCount, nightCounts:[], months:[]}
+// {balance, asOf} -- only ever set from the JSON export's own
+// best-effort page read (see marriottscan.js's readPointsBalance()),
+// never from the CSV, which carries no balance info at all. null until
+// a JSON import actually finds one. Always OVERWRITTEN wholesale by the
+// next import that carries one (a point-in-time reading, not a slice
+// to merge), never merged like the dates/coverage maps above.
+pointsBalance: null,
+...fields,
+};
+}
+
+// Drops anything no longer worth keeping: a check-in date already in the
+// past, and any coverage record for a month that's already over -- same
+// "today's data only" instinct as several other prune functions in this
+// file (setCompletionSearches, scheduledRuns), just applied to a nested
+// shape instead of a flat one. Mutates in place; called from migrate()
+// and after every import.
+function pruneMarriottAvailability(store, today = todayStr()) {
+if (!store || typeof store !== 'object') return;
+const monthFloor = today.slice(0, 7);
+Object.keys(store.coverage || {}).forEach((key) => {
+const month = key.split('|')[1];
+if (month && month < monthFloor) delete store.coverage[key];
+});
+Object.keys(store.dates || {}).forEach((nights) => {
+const byResort = store.dates[nights] || {};
+Object.keys(byResort).forEach((resort) => {
+const byRoomType = byResort[resort] || {};
+Object.keys(byRoomType).forEach((roomType) => {
+const byDate = byRoomType[roomType] || {};
+Object.keys(byDate).forEach((date) => { if (date < today) delete byDate[date]; });
+});
+});
+// A resort whose every room type is now empty (its last date just
+// aged out above) is only still meaningful while THIS nights value has
+// some coverage left -- that's what "scanned, nothing available" is
+// relative to. Once no coverage at all remains for this nights value,
+// an empty resort here isn't "none available" any more, it's just a
+// leftover shell from an import whose window has fully passed -- drop
+// it, or it would pollute the pivot's resort list forever (confirmed
+// in testing: an aged-out date left its resort behind permanently
+// otherwise).
+const hasCoverage = Object.keys(store.coverage || {}).some((k) => k.startsWith(`${nights}|`));
+if (!hasCoverage) {
+Object.keys(byResort).forEach((resort) => {
+const empty = Object.values(byResort[resort] || {}).every((byDate) => Object.keys(byDate).length === 0);
+if (empty) delete byResort[resort];
+});
+}
+// Drop this nights bucket entirely once nothing covers it and it holds
+// no dates at all -- otherwise an empty shell lingers forever once its
+// last date/coverage entry ages out.
+const hasDates = Object.values(byResort).some((byRoomType) => Object.values(byRoomType).some((byDate) => Object.keys(byDate).length > 0));
+if (!hasCoverage && !hasDates) delete store.dates[nights];
+});
 }
 // One entry in a trip's own generated+editable packing list. `sourceItemId`
 // ties it back to the library item that generated it (blank for a custom,
@@ -2365,6 +2445,18 @@ data.plannerEntries = data.plannerEntries.filter((e) => !e.tripId || plannerTrip
 // nothing left to render, nothing left to complete.
 const plannerTaskIds = new Set(data.tasks.map((t) => t.id));
 data.plannerEntries = data.plannerEntries.filter((e) => e.kind !== 'task' || plannerTaskIds.has(e.taskId));
+// Marriott availability import -- shape-guarded then defaulted, same
+// "not an object/array -> replace, otherwise merge over the blank
+// shape" pattern as data.ticker above, so a field added to
+// blankMarriottAvailability() later doesn't need its own migration.
+if (!data.marriottAvailability || typeof data.marriottAvailability !== 'object' || Array.isArray(data.marriottAvailability)) {
+data.marriottAvailability = blankMarriottAvailability();
+} else {
+data.marriottAvailability = { ...blankMarriottAvailability(), ...data.marriottAvailability };
+if (!data.marriottAvailability.dates || typeof data.marriottAvailability.dates !== 'object') data.marriottAvailability.dates = {};
+if (!data.marriottAvailability.coverage || typeof data.marriottAvailability.coverage !== 'object') data.marriottAvailability.coverage = {};
+}
+pruneMarriottAvailability(data.marriottAvailability);
 // Manually-added days beyond Planner's rolling horizon (see planner.js's
 // MAIN_HORIZON_DAYS) -- deduped, format-checked so a corrupt value can't
 // crash dateStrAdd/Date parsing downstream.
@@ -3450,6 +3542,7 @@ MAIL_SEARCH_KINDS, mailSearchLabel, blankMailSearch, blankMailTopic, blankMailRu
 TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureBatch, blankPendingImport, blankConnection, blankTelegramThread, blankReadingItem, blankCaptureDraft, blankJob, blankMediaItem, MEDIA_KINDS, MEDIA_STATUSES, blankMediaRecSource, blankMediaRecCandidate,
 blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS, LEG_DATE_FIELDS, STAY_TYPE_SUGGESTIONS,
 blankPackingItem, blankPackingModule, blankTripPacking, blankPackingListItem, PACKING_DURATION_TIERS, packingDurationTier, DEFAULT_PACKING_MODULES,
+blankMarriottAvailability, pruneMarriottAvailability,
 blankPlannerEntry, blankPlannerActivity,
 blankAirbnbListing, blankAirbnbReservation, blankAirbnbKey, blankAirbnbKeyAssignment, KEY_CUSTODIAN_TYPES, blankFinanceAccount, SCHOOL_CALENDAR_SITES,
 CONTACT_STATUS_LABELS, CONTACT_MATCH_MIN_STAGE,

@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v583</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v584</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -2714,6 +2714,60 @@ Needs the WHOLE exported folder tree (hundreds of files, not a single JSON) &mda
 <button class="todo-add-btn" type="button" id="travel-new-trip-btn">+ New trip</button>
 </div>
 <div id="travel-list"></div>
+</section>
+
+<section class="panel wide" id="mvc-availability-panel" data-tab="travel">
+<div class="panel-head">
+<h2><span class="dot teal"></span>Marriott availability</h2>
+<span class="count-badge" id="mvc-count"></span>
+</div>
+<div id="mvc-balance-mount"></div>
+<div class="settings-note" style="margin:0 0 10px;">Summarises a scan of <a href="https://owners.marriottvacationclub.com/" target="_blank" rel="noopener">owners.marriottvacationclub.com</a>'s "Book with Points" search &mdash; the dashboard can't run that scan itself (it's a DevTools console script against a 3rd-party site), so this configures the script and imports what it produces.</div>
+
+<details class="settings-item" id="mvc-config">
+<summary><h3>1 &middot; Scan settings</h3></summary>
+<div class="settings-block">
+<div class="sync-row" style="align-items:flex-start;">
+<label>Nights<br><input type="text" id="mvc-cfg-nights" style="width:140px;" placeholder="2, 3, 4, 5, 7"></label>
+<label>Guests<br><input type="number" id="mvc-cfg-guests" min="1" max="12" style="width:70px;"></label>
+<label>Months to scan<br><input type="number" id="mvc-cfg-months" min="1" max="12" style="width:70px;"></label>
+<label>Speed multiplier<br><input type="number" id="mvc-cfg-speed" min="0.5" max="5" step="0.1" style="width:70px;"></label>
+</div>
+<div class="settings-note" style="margin:2px 0 8px;">"Months to scan" counts from whatever month is selected on Marriott's own search form when you paste the script &mdash; including that month. Turn the speed multiplier up if a run reports stale "0 resorts" on a slow connection.</div>
+<div class="sync-row" style="align-items:flex-start;">
+<label><input type="radio" name="mvc-cfg-rt-mode" id="mvc-cfg-rt-auto"> Auto-detect every room type</label>
+<label><input type="radio" name="mvc-cfg-rt-mode" id="mvc-cfg-rt-only"> Only these:</label>
+<input type="text" id="mvc-cfg-roomtypes" style="width:220px;" placeholder="2 Bedroom, 3 Bedroom">
+</div>
+<div id="mvc-rt-suggestions" style="display:flex;gap:6px;flex-wrap:wrap;margin:4px 0;"></div>
+<div class="settings-note" id="mvc-cfg-estimate" style="margin:4px 0 10px;"></div>
+<div class="sync-row">
+<button class="sync-btn" type="button" id="mvc-copy-btn">Copy scan script</button>
+<span class="sync-status" id="mvc-copy-status"></span>
+</div>
+<details style="margin:8px 0 0;">
+<summary style="cursor:pointer;color:var(--muted);font-size:13px;">Show the generated script</summary>
+<pre id="mvc-snippet-preview" style="white-space:pre-wrap;font-size:12px;background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:10px;margin:8px 0;"></pre>
+</details>
+</div>
+</details>
+
+<details class="settings-item" id="mvc-import">
+<summary><h3>2 &middot; Import results</h3></summary>
+<div class="settings-block">
+<textarea id="mvc-import-paste" rows="4" style="width:100%;font-family:monospace;font-size:12px;" placeholder="Paste the JSON export (copy(window.__marriottAvailabilityExport) after a scan), the bare window.__marriottAvailability object, or the downloaded CSV text"></textarea>
+<div class="sync-row" style="margin-top:8px;">
+<button class="sync-btn" id="mvc-import-read-btn" type="button">Read</button>
+<label class="file-btn" for="mvc-import-file-input">Or upload file(s)&hellip;</label>
+<input type="file" id="mvc-import-file-input" accept=".json,application/json,.csv,text/csv" multiple style="display:none;">
+<button class="sync-btn sm inline" type="button" id="mvc-clear-btn">Clear imported data</button>
+<span class="sync-status" id="mvc-import-status"></span>
+</div>
+<div class="settings-note" id="mvc-last-import" style="margin-top:6px;"></div>
+</div>
+</details>
+
+<div id="mvc-pivot"></div>
 </section>
 
 <section class="panel wide" id="planner-panel" data-tab="planner">
