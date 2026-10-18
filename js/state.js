@@ -1016,6 +1016,19 @@ function blankLoyaltyBalance(fields = {}) {
 return {
 id: uid(), programId: '', label: '', date: '', balance: null,
 unit: '', tier: '', expiryDate: '', sourceMessageId: '',
+// A voucher/booking reference the extractor found in the email, if
+// any (e.g. BA's eVoucher number) -- '' when the label has none. The
+// primary key loyaltybalances.js's voucher-linking review uses to
+// tell two same-program vouchers apart, so a second unrelated
+// eVoucher never gets silently merged into the first.
+reference: '',
+// '' = not yet resolved (either its (programId, label) pair has never
+// been classified balance-vs-voucher -- see data.loyaltyLabelKinds --
+// or it's classified 'voucher' and not yet linked); 'linked' =
+// created/updated a data.vouchers row (see voucherId); 'skipped' =
+// reviewed, stays a plain reading.
+voucherLinkStatus: '',
+voucherId: '',
 ...fields,
 };
 }
@@ -2295,6 +2308,15 @@ return true;
 });
 if (!data.calendarStatus || typeof data.calendarStatus !== 'object' || Array.isArray(data.calendarStatus)) data.calendarStatus = {};
 if (!Array.isArray(data.vouchers)) data.vouchers = [];
+// reference/sourceLoyaltyReadingIds added for the loyalty-balances
+// voucher-linking review -- backfilled here since vouchers.js builds
+// its rows inline rather than through a blank*() factory.
+data.vouchers = data.vouchers.map((v) => ({
+reference: '', sourceLoyaltyReadingIds: [],
+...v,
+id: v.id || uid(),
+sourceLoyaltyReadingIds: Array.isArray(v.sourceLoyaltyReadingIds) ? v.sourceLoyaltyReadingIds : [],
+}));
 if (!Array.isArray(data.businessIdeas)) data.businessIdeas = [];
 if (!Array.isArray(data.subscriptions)) data.subscriptions = [];
 // A subscription can hang off one of the tracked accounts, and that
@@ -2609,6 +2631,12 @@ data.loyaltyBalances = data.loyaltyBalances.map((b) => ({ ...blankLoyaltyBalance
 // route it to" reasoning as the trip/planner-entry orphan guards above.
 const loyaltyProgramIds = new Set(data.loyaltyPrograms.map((p) => p.id));
 data.loyaltyBalances = data.loyaltyBalances.filter((b) => loyaltyProgramIds.has(b.programId));
+// One entry per (programId, label) pair the user has told us is a
+// running balance or a voucher-shaped event -- see loyaltybalances.js's
+// labelKindFor(). A pair with no entry here has never been classified
+// and surfaces in the Vouchers panel's review queue until it is.
+if (!Array.isArray(data.loyaltyLabelKinds)) data.loyaltyLabelKinds = [];
+data.loyaltyLabelKinds = data.loyaltyLabelKinds.filter((k) => k && k.programId && k.label && (k.kind === 'balance' || k.kind === 'voucher'));
 // Manually-added days beyond Planner's rolling horizon (see planner.js's
 // MAIN_HORIZON_DAYS) -- deduped, format-checked so a corrupt value can't
 // crash dateStrAdd/Date parsing downstream.

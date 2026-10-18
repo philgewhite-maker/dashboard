@@ -2637,6 +2637,13 @@ border-radius:8px;padding:2px 8px;
 font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap;
 }
 .trip-chip:hover{background:var(--rose);color:#fff;}
+.voucher-chip{
+display:inline-flex;align-items:center;gap:4px;
+background:var(--plum-bg);color:var(--plum);
+border-radius:8px;padding:2px 8px;
+font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap;
+}
+.voucher-chip:hover{background:var(--plum);color:#fff;}
 .task-chip{
 display:inline-flex;align-items:center;gap:4px;
 background:var(--teal-bg);color:var(--teal);

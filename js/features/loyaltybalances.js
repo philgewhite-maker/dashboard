@@ -23,6 +23,7 @@
 import { data, queueSave, blankLoyaltyProgram, blankLoyaltyBalance } from '../state.js';
 import { escapeHtml, uid, daysSince, todayStr } from '../utils.js';
 import { fetchMailSearches, getMessageDetail } from '../googlemail.js';
+import { voucherChipHtml } from './vouchers.js';
 
 // How often a program is actually re-checked, independent of this
 // file being invoked daily by js/features/scheduled.js's own (much
@@ -160,12 +161,17 @@ const issued = text.match(/Number:\s*([\w-]+)[\s\S]{0,150}?Value:\s*GBP\s*([\d.,
 if (issued) {
 return {
 membershipNumber: '', tier: '', date: '',
-metrics: [{ label: 'eVoucher issued', balance: Number(issued[2].replace(/,/g, '')), unit: '£', expiryDate: parseDMonYyyy(issued[3], issued[4], issued[5]) }],
+// The voucher's own number (e.g. "125-4262603242") -- captured as
+// `reference` so the Vouchers-panel linking review can tell two
+// DIFFERENT eVouchers apart (a second one from an unrelated flight
+// delay must never get matched against the first just because they
+// share a program) rather than matching on program name alone.
+metrics: [{ label: 'eVoucher issued', balance: Number(issued[2].replace(/,/g, '')), unit: '£', expiryDate: parseDMonYyyy(issued[3], issued[4], issued[5]), reference: issued[1] }],
 };
 }
 const used = text.match(/eVoucher:\s*([\w-]+)[\s\S]{0,60}?has been used/i);
 if (used) {
-return { membershipNumber: '', tier: '', date: '', metrics: [{ label: 'eVoucher used', balance: null, unit: '£', expiryDate: '' }] };
+return { membershipNumber: '', tier: '', date: '', metrics: [{ label: 'eVoucher used', balance: null, unit: '£', expiryDate: '', reference: used[1] }] };
 }
 return null;
 }
@@ -391,7 +397,7 @@ newRows.push(blankLoyaltyBalance({
 programId: program.id, label: metric.label, date,
 balance: metric.balance, unit: metric.unit || '',
 tier: result.tier || '', expiryDate: metric.expiryDate || '',
-sourceMessageId: msg.id,
+sourceMessageId: msg.id, reference: metric.reference || '',
 }));
 });
 }
@@ -475,6 +481,57 @@ return data.loyaltyPrograms
 .filter((x) => x.readings.length);
 }
 
+function voucherChipHtmlFor(voucherId) {
+const voucher = data.vouchers.find((v) => v.id === voucherId);
+return voucher ? voucherChipHtml(voucher) : '';
+}
+
+// ---- Voucher classification + linking (Vouchers & Credits panel) --------
+// Whether a (programId, label) pair is a running balance or a voucher-
+// shaped event (BA eVoucher, Hertz's "free day earned") is a decision
+// the USER makes once, not something baked into extractor code -- a
+// program added later via "+ Add program" may have no deterministic
+// extractor at all (just the AI fallback), which has no branch to hard-
+// code a flag onto. Cached in data.loyaltyLabelKinds so the 50+ plain
+// Avios readings per scan are classified once, ever, and never surface
+// in the review queue again after that.
+function labelKindFor(programId, label) {
+const row = data.loyaltyLabelKinds.find((k) => k.programId === programId && k.label === label);
+return row ? row.kind : undefined;
+}
+function setLabelKind(programId, label, kind) {
+const row = data.loyaltyLabelKinds.find((k) => k.programId === programId && k.label === label);
+if (row) row.kind = kind;
+else data.loyaltyLabelKinds.push({ programId, label, kind });
+queueSave();
+}
+
+// Readings still needing a human decision: either their (programId,
+// label) pair has never been classified at all, or it's already
+// classified 'voucher' and this specific reading hasn't been linked or
+// skipped yet. Every classified 'balance' reading -- the bulk of what a
+// scan produces -- is excluded, so this stays a handful of rows, never
+// the full balance history.
+function pendingVoucherReviews() {
+return data.loyaltyBalances
+.map((reading) => ({ reading, program: data.loyaltyPrograms.find((p) => p.id === reading.programId), kind: labelKindFor(reading.programId, reading.label) }))
+.filter((x) => x.program && (x.kind === undefined || (x.kind === 'voucher' && !x.reading.voucherLinkStatus)));
+}
+
+function markVoucherLinked(readingId, voucherId) {
+const reading = data.loyaltyBalances.find((b) => b.id === readingId);
+if (!reading) return;
+reading.voucherLinkStatus = 'linked';
+reading.voucherId = voucherId;
+queueSave();
+}
+function markVoucherSkipped(readingId) {
+const reading = data.loyaltyBalances.find((b) => b.id === readingId);
+if (!reading) return;
+reading.voucherLinkStatus = 'skipped';
+queueSave();
+}
+
 // ---- Rendering --------------------------------------------------------
 
 // Per-program "Check now" status text, outside the saved data (purely
@@ -495,10 +552,11 @@ return '';
 
 function programCardHtml(program) {
 const readings = latestBalancesFor(program);
-const rows = readings.map((r) => `<div class="loyalty-reading">
+const rows = readings.map((r) => `<div class="loyalty-reading" data-loyalty-reading="${escapeHtml(r.id)}">
 <strong>${escapeHtml(r.label)}</strong>
 <span class="loyalty-reading-value">${r.balance != null ? escapeHtml(r.unit === '£' || r.unit === '£ worth of points' ? `£${r.balance.toLocaleString('en-GB')}` : r.balance.toLocaleString('en-GB')) : '—'} ${escapeHtml(r.unit && r.unit !== '£' ? r.unit : '')}</span>
 <span class="settings-note">as of ${escapeHtml(r.date)}${r.expiryDate ? ` · expires ${escapeHtml(r.expiryDate)}` : ''}${r.sourceMessageId === 'manual' ? ' · entered by hand' : ''}</span>
+${r.voucherId ? voucherChipHtmlFor(r.voucherId) : ''}
 </div>`).join('');
 const tier = readings.find((r) => r.tier)?.tier || '';
 return `<div class="account-card" data-loyalty-program="${escapeHtml(program.id)}">
@@ -618,6 +676,11 @@ data.loyaltyBalances.push(blankLoyaltyBalance({
 programId, label, date: todayStr(), balance: balanceNum,
 unit: (unitInput?.value || '').trim(), tier: '', expiryDate: '', sourceMessageId: 'manual',
 }));
+// A hand-entered reading always carries a real number via this form --
+// definitionally a balance, not a voucher event -- so it's classified
+// immediately rather than sitting in the Vouchers review queue for no
+// reason.
+setLabelKind(programId, label, 'balance');
 queueSave();
 renderLoyaltyBalances();
 return;
@@ -682,4 +745,5 @@ renderLoyaltyBalances, initLoyaltyBalances, runLoyaltyBalanceScan,
 extractBritishAirways, extractMarriottBonvoy, extractVirginFlyingClub, extractBoots, extractTescoClubcard, extractBaVoucher,
 extractHertz, extractSixt, extractMilesAndMore,
 latestBalancesFor, travelStripPrograms,
+labelKindFor, setLabelKind, pendingVoucherReviews, markVoucherLinked, markVoucherSkipped,
 };
