@@ -304,17 +304,18 @@ return { programId: program.id, programName: program.name, error: err.message };
 const seen = new Set(program.seenMessageIds || []);
 let matched = 0;
 let unmatched = 0;
+let alreadySeen = 0;
 const newRows = [];
 
 for (const msg of messages) {
-if (seen.has(msg.id)) continue;
+if (seen.has(msg.id)) { alreadySeen++; continue; }
 let detail;
 try { detail = await withRetryOn403(() => getMessageDetail(msg.id)); } catch (err) { continue; } // transient fetch failure -- try again next scan, don't mark seen
-seen.add(msg.id);
 
 const extractor = EXTRACTORS[program.extractorKey];
 let result = extractor ? extractor(detail.bodyText, detail.subject, detail.bodyHtml) : null;
 let method = extractor ? 'deterministic' : '';
+let usedAi = false;
 
 if (!result && !extractor) {
 try {
@@ -323,11 +324,24 @@ const ai = await extractLoyaltyBalanceWithAI(program.name, detail.bodyText);
 program.aiCallCount = (program.aiCallCount || 0) + 1;
 program.lastAiCallAt = new Date().toISOString();
 method = 'ai';
+usedAi = true;
 if (Number.isFinite(ai.balance)) {
 result = { membershipNumber: ai.membershipNumber, tier: ai.tier, date: '', metrics: [{ label: 'Balance', balance: ai.balance, unit: ai.unit, expiryDate: ai.expiryDate }] };
 }
 } catch (err) { /* AI fallback failing shouldn't block the rest of the scan */ }
 }
+
+// Only mark "seen" when the message matched, or when a real AI call
+// already ran against it (re-billing the same stubborn message every
+// scan would be worse than never finishing it). A deterministic
+// extractor that didn't match stays UNSEEN on purpose -- confirmed
+// live as a real bug: the BA eVoucher "issued" email was marked seen
+// by the OLD extractor (which only recognised the "used" format), so
+// fixing that extractor afterward had nothing left to re-process; the
+// user kept seeing only the "used" voucher no matter how the regex
+// was improved. Regex checks are free, so retrying an unmatched one
+// every scan costs nothing.
+if (result || usedAi) seen.add(msg.id);
 
 if (!result) { unmatched++; continue; }
 matched++;
@@ -335,6 +349,14 @@ if (method) program.extractionMethod = method;
 if (result.membershipNumber && !program.membershipNumber) program.membershipNumber = result.membershipNumber;
 const date = result.date || dateFromHeader(detail.date);
 result.metrics.forEach((metric) => {
+// Guards against a real duplicate if this exact (program, message,
+// label) was already recorded by an earlier scan -- what makes
+// "Forget processed emails" (below) safe to offer: without this, re-
+// scanning a message whose id was manually cleared from
+// seenMessageIds would re-create a second identical reading instead
+// of just reaching the one case that's actually new.
+const alreadyRecorded = data.loyaltyBalances.some((b) => b.programId === program.id && b.sourceMessageId === msg.id && b.label === metric.label);
+if (alreadyRecorded) return;
 newRows.push(blankLoyaltyBalance({
 programId: program.id, label: metric.label, date,
 balance: metric.balance, unit: metric.unit || '',
@@ -347,7 +369,7 @@ sourceMessageId: msg.id,
 program.seenMessageIds = [...seen];
 program.lastCheckedAt = new Date().toISOString();
 if (newRows.length) data.loyaltyBalances.push(...newRows);
-return { programId: program.id, programName: program.name, matched, unmatched, newRows: newRows.length };
+return { programId: program.id, programName: program.name, matched, unmatched, newRows: newRows.length, messagesFound: messages.length, alreadySeen };
 }
 
 async function runLoyaltyBalanceScan({ force } = {}) {
@@ -379,7 +401,21 @@ if (!r) return;
 if (r.skipped) { lines.push(`${r.programName || r.programId}: already checked this month (use Check now to force it).`); return; }
 if (r.error) { lines.push(`${r.programName || r.programId}: scan failed — ${r.error}`); return; }
 if (!r.newRows) {
-lines.push(`${r.programName}: nothing new${r.unmatched ? ` (${r.unmatched} email${r.unmatched === 1 ? '' : 's'} checked, none recognised)` : ' (no matching emails found)'}.`);
+// Three genuinely different states, confirmed live as worth telling
+// apart: the search found nothing at all (maybe the wrong sender, or
+// genuinely nothing in 400 days); it found the SAME emails as a
+// previous successful scan and correctly skipped them (expected,
+// not a problem); or it found emails but none of them matched the
+// extractor (worth knowing, possibly a template that's changed).
+// These used to collapse into one "nothing new" line that read the
+// same whether a program's search had ever actually worked or not.
+if (!r.messagesFound) {
+lines.push(`${r.programName}: no matching emails found in the last 400 days.`);
+} else if (r.alreadySeen && !r.unmatched) {
+lines.push(`${r.programName}: up to date — ${r.alreadySeen} matching email${r.alreadySeen === 1 ? '' : 's'} found, already processed from an earlier scan.`);
+} else {
+lines.push(`${r.programName}: ${r.messagesFound} email${r.messagesFound === 1 ? '' : 's'} found, none recognised${r.alreadySeen ? ` (${r.alreadySeen} already processed)` : ''}.`);
+}
 return;
 }
 lines.push(`${r.programName} — found ${r.newRows} new reading${r.newRows === 1 ? '' : 's'}${r.unmatched ? ` (${r.unmatched} email${r.unmatched === 1 ? '' : 's'} not recognised)` : ''}.`);
@@ -454,6 +490,7 @@ ${rows || '<div class="empty">No readings yet — run a scan, or Check now below
 <div class="sync-row">
 <input type="text" value="${escapeHtml(program.membershipNumber)}" placeholder="Membership number (optional)" data-loyalty-member="${escapeHtml(program.id)}" style="flex:1 1 200px;">
 <button type="button" class="sync-btn sm inline" data-loyalty-check-now="${escapeHtml(program.id)}">Check now</button>
+<button type="button" class="sync-btn sm inline" data-loyalty-forget="${escapeHtml(program.id)}" title="Clears this program's record of which emails it's already looked at, so the next check re-examines everything in the last 400 days -- safe to use (a message already recorded won't be duplicated), useful after an extractor fix so a previously-unrecognised email gets a fresh try.">Forget processed emails</button>
 ${!program.builtIn ? `<button type="button" class="sync-btn sm inline" data-loyalty-remove="${escapeHtml(program.id)}">Remove</button>` : ''}
 </div>
 <div class="settings-note" id="loyalty-status-${escapeHtml(program.id)}">${escapeHtml(lastCheckMessages.get(program.id) || '')}</div>
@@ -552,6 +589,18 @@ programId, label, date: todayStr(), balance: balanceNum,
 unit: (unitInput?.value || '').trim(), tier: '', expiryDate: '', sourceMessageId: 'manual',
 }));
 queueSave();
+renderLoyaltyBalances();
+return;
+}
+const forgetBtn = e.target.closest('[data-loyalty-forget]');
+if (forgetBtn) {
+const programId = forgetBtn.dataset.loyaltyForget;
+const program = data.loyaltyPrograms.find((p) => p.id === programId);
+if (!program) return;
+if (!confirm(`Forget which ${program.name} emails have already been checked? The next scan will re-examine everything in the last 400 days (already-recorded readings won't be duplicated).`)) return;
+program.seenMessageIds = [];
+queueSave();
+lastCheckMessages.set(programId, 'Forgotten — next check (or "Check now") will re-examine everything in the last 400 days.');
 renderLoyaltyBalances();
 return;
 }
