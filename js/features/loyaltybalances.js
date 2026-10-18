@@ -122,19 +122,38 @@ if (!m) return null;
 return { membershipNumber: '', tier: '', date: '', metrics: [{ label: 'Clubcard points', balance: Number(m[1].replace(/,/g, '')), unit: 'points' }] };
 }
 
-// Real examples: "Your British Airways eVoucher" (issued) and "Your
-// British Airways eVoucher has been used" -- event-shaped (one row
-// per voucher issued/used), not a running balance.
-function extractBaVoucher(bodyText, subject) {
+const MONTH_NAMES = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+function parseDMonYyyy(day, mon, year) {
+const idx = MONTH_NAMES.indexOf(String(mon).slice(0, 3).toLowerCase());
+if (idx < 0) return '';
+return `${year}-${String(idx + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+// Two genuinely different real BA eVoucher templates, confirmed from
+// two real fetched emails sent the SAME day (one replaced the other):
+// an ISSUED voucher has a clean "Redeem your eVoucher" block --
+// "Number: 125-4262603242\nName: White\nEmail Address: ...\nValue:
+// GBP 401.45\nExpiry: 22 Nov 2026" (real value AND expiry, genuinely
+// the richer of the two) -- checked FIRST since it's the one worth
+// having. A USED voucher has no value/expiry at all, just "the
+// British Airways eVoucher: 125-4252052359, ... has been used" --
+// confirmed live: my first version only matched THIS shape (a bare
+// "eVoucher:" + "£" check), silently missing the issued one entirely
+// because its real format uses "Number:"/"Value: GBP" instead.
+function extractBaVoucher(bodyText) {
 const text = String(bodyText || '');
-const refMatch = text.match(/eVoucher:\s*([\w-]+)/i);
-const amountMatch = text.match(/£([\d.,]+)/);
-if (!refMatch && !amountMatch) return null;
-const used = /has been used/i.test(subject || '') || /has been used/i.test(text);
+const issued = text.match(/Number:\s*([\w-]+)[\s\S]{0,150}?Value:\s*GBP\s*([\d.,]+)[\s\S]{0,60}?Expiry:\s*(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})/i);
+if (issued) {
 return {
 membershipNumber: '', tier: '', date: '',
-metrics: [{ label: used ? 'eVoucher used' : 'eVoucher issued', balance: amountMatch ? Number(amountMatch[1].replace(/,/g, '')) : null, unit: '£', expiryDate: '' }],
+metrics: [{ label: 'eVoucher issued', balance: Number(issued[2].replace(/,/g, '')), unit: '£', expiryDate: parseDMonYyyy(issued[3], issued[4], issued[5]) }],
 };
+}
+const used = text.match(/eVoucher:\s*([\w-]+)[\s\S]{0,60}?has been used/i);
+if (used) {
+return { membershipNumber: '', tier: '', date: '', metrics: [{ label: 'eVoucher used', balance: null, unit: '£', expiryDate: '' }] };
+}
+return null;
 }
 
 const EXTRACTORS = {
@@ -167,7 +186,16 @@ if (!isProgramDue(program, force)) return { programId: program.id, skipped: true
 const query = `from:(${program.senderAddresses.join(' OR ')})`;
 let messages = [];
 try {
-const [section] = await fetchMailSearches([{ kind: 'query', value: query, maxDays: 60, maxEvents: 10 }]);
+// 400 days, not 60 -- confirmed live as a real bug: Boots' own
+// "account balance" email (used to write this feature's own Boots
+// extractor) was ~6 months old, Tesco's ~75 days, both already
+// outside a 60-day window, so Gmail's own `newer_than:` cut them
+// before the extractor ever ran -- this looked exactly like a failed
+// regex match but wasn't one. seenMessageIds-based dedup (not a
+// sliding "since last check" cursor) means a wide window costs
+// nothing on repeat scans -- an already-processed message is skipped
+// instantly regardless of how far back the search reaches.
+const [section] = await fetchMailSearches([{ kind: 'query', value: query, maxDays: 400, maxEvents: 15 }]);
 messages = section?.messages || [];
 } catch (err) {
 return { programId: program.id, programName: program.name, error: err.message };
