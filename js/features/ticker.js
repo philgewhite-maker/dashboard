@@ -31,6 +31,22 @@ import { travelStripPrograms } from './loyaltybalances.js';
 import { matchBankLogo } from '../bankLogos.js';
 import { CHECKS as SITE_HEALTH_CHECKS, reportCheck as reportSiteHealth } from './sitehealth.js';
 
+// How often the loyalty tile's own rotation advances (see tileFor's
+// `kind: 'loyalty'` branch) -- reported directly as too slow at 2
+// minutes (an earlier pass from 10 minutes, already too long on its
+// own); short enough now that a normal Overview glance sees it change
+// at least once. Random, not synced, so one browser tab's own
+// rotation doesn't march in lockstep with another device open to the
+// same account. Each tick IS guaranteed to show a different program
+// than the one before it whenever more than one is available --
+// consecutive integers taken mod N (N = how many are in rotation) are
+// never equal, which is exactly what `(bucket index) % flat.length`
+// below already does; the earlier complaint was purely that the
+// bucket was too wide to ever observe that in a normal viewing
+// session, not that the same one could repeat back-to-back.
+const LOYALTY_TICKER_BUCKET_MS = 20 * 1000;
+const loyaltyTickerPhaseOffset = Math.floor(Math.random() * 97); // a prime, so it doesn't resonate with small flat.length values
+
 // A feed is re-fetched when its cached answer is older than this. FX and
 // the swap rate are published once a day, so the floor is about not
 // hammering them on every tab switch rather than about freshness.
@@ -623,14 +639,21 @@ return tile('Owed', escapeHtml(money(total)), '',
 if (item.kind === 'loyalty') {
 // One tile, rotating through whichever programs are flagged
 // showOnTravel (js/features/loyaltybalances.js's own Finance-tab
-// config) -- picked by time-bucketing rather than a dedicated timer,
-// since this file has no recurring re-render loop of its own to hang
-// one off; whichever program this resolves to next just shows next
-// time anything else causes renderTicker() to run again.
+// config). Reported directly as a real gap: this file had no
+// recurring re-render loop at all, so the rotation only ever
+// advanced when something ELSE happened to call renderTicker() --
+// loyaltyTickerInterval below (see initTicker()) now drives it
+// directly. loyaltyTickerPhaseOffset is seeded once per page load
+// (Math.random(), not synced) so different sessions don't all land
+// on the same program at the same real-world moment -- the "start
+// from a random position" ask. If this still only ever shows one
+// program, the more likely explanation is that only one program
+// actually has "Show on Travel tab" ticked on the Finance tab --
+// worth checking there first.
 const entries = travelStripPrograms();
 const flat = entries.flatMap(({ program, readings }) => readings.map((r) => ({ program, r })));
 if (!flat.length) return '';
-const idx = Math.floor(Date.now() / (10 * 60 * 1000)) % flat.length;
+const idx = (Math.floor(Date.now() / LOYALTY_TICKER_BUCKET_MS) + loyaltyTickerPhaseOffset) % flat.length;
 const { program, r } = flat[idx];
 const valueText = r.balance != null ? r.balance.toLocaleString('en-GB') : '—';
 return tile(escapeHtml(program.name), `${escapeHtml(valueText)}${r.unit ? ` ${escapeHtml(r.unit)}` : ''}`, '',
@@ -916,6 +939,15 @@ renderTicker();
 // After first paint and the initial document pull, like the scheduled
 // syncs: a fetch into a half-loaded app just fails and caches nothing.
 setTimeout(() => refreshTicker(), 3000);
+// Drives the loyalty tile's own rotation (see tileFor's `kind:
+// 'loyalty'` branch) -- confirmed live as a real gap: without this,
+// NOTHING in this file ever re-rendered the ticker on its own, so the
+// rotation only advanced on whatever other event happened to trigger
+// a re-render, which could easily never land on a new bucket. A plain
+// re-render, not refreshTicker() -- no network calls, just redraws
+// from already-cached/local data, so running it this often costs
+// nothing.
+setInterval(() => renderTicker(), LOYALTY_TICKER_BUCKET_MS / 2);
 // The strip's width decides whether it rolls, so a rotated phone or a
 // resized window has to be re-measured.
 let t = null;
