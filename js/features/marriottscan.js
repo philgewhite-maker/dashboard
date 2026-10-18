@@ -207,6 +207,38 @@
 //     nothing" apart from "never scanned", which the CSV alone can't
 //     say (a month with nothing open leaves no row at all, not a marked
 //     one).
+//   - v14: replaces v13's unconfirmed header/nav balance guess with two
+//     mechanisms CONFIRMED from real markup/console output the user
+//     captured directly from the live site (not reasoned/guessed):
+//       1. Clicking an available day opens a ".points-search" widget
+//          with "Current Balance:"/"Potential Balance:" rows (confirmed
+//          from a real pasted DOM snippet) -- tryCaptureBalanceWidget()
+//          clicks exactly ONE enabled day, ONCE per whole run (never
+//          repeated per resort/month), reads the widget, and leaves it
+//          at that; the stray day-selection this leaves behind has no
+//          lasting effect because the very next step for that resort is
+//          either the room-type filter pass (unaffected by which day is
+//          selected) or "Back to search results", and v12's per-month
+//          full-search architecture already resets everything fresh on
+//          the next (nights, month) iteration regardless.
+//       2. The site's OWN console logging already prints lines like
+//          "Owner Contracts - response body: {...}" for its internal
+//          API calls (confirmed from a real captured console line,
+//          including real contract data -- resort, points per year,
+//          status). installConsoleCapture() wraps console.log for the
+//          duration of the run and grabs the JSON out of any line
+//          matching "<label> - response body: <json>", keyed by
+//          whatever label the site itself used -- genuinely generic, not
+//          hardcoded to "Owner Contracts", so a Bonvoy-shaped response
+//          logged the same way is picked up for free if one appears.
+//          console.log itself is restored before this function returns,
+//          so nothing about the page's own behaviour is left altered.
+//     NEITHER mechanism has been re-run end-to-end by me against the
+//     live site after this change -- the DATA SHAPES are confirmed from
+//     real evidence, but the INTEGRATION (does the click reliably open
+//     the widget every time, does every account's console use this
+//     exact "Owner Contracts" label) is not. Watch the console the
+//     first time, same as any other version bump here.
 //
 // If Marriott changes their page layout, the selectors below will stop
 // matching -- that's expected eventually, not a bug in this script. Run
@@ -218,12 +250,12 @@
 
 import { todayStr } from '../utils.js';
 
-const SCAN_SCRIPT_VERSION = 'v13';
+const SCAN_SCRIPT_VERSION = 'v14';
 
 // ---- Everything below this line must be self-contained -- see the
 // HARD CONSTRAINT note at the top of this file. ------------------------
 async function marriottAvailabilityScan(CONFIG) {
-  const SCRIPT_VERSION = 'v13'; // kept as a literal, not a reference to the outer const -- toString() drops the closure
+  const SCRIPT_VERSION = 'v14'; // kept as a literal, not a reference to the outer const -- toString() drops the closure
   const NIGHT_COUNTS = CONFIG.nightCounts;
   const GUESTS = CONFIG.guests; // required field -- the search silently fails its own validation without it (confirmed live)
   const MONTHS_TO_SCAN = CONFIG.monthsToScan; // TOTAL distinct months read, INCLUDING the one currently selected on the search form -- e.g. starting on November, 3 covers Nov/Dec/Jan
@@ -493,13 +525,12 @@ async function marriottAvailabilityScan(CONFIG) {
     return null;
   }
 
-  // Best-effort account points balance, read once up front -- NOT yet
-  // confirmed live against a real account (see the v13 changelog entry
-  // above for why). Deliberately scoped to header/nav/account-ish
-  // elements only, never the plain page body, since the calendar and
-  // results area are full of unrelated per-day "Points starting at: N"
-  // figures that an unscoped search would pick up instead.
-  function readPointsBalance() {
+  // LAST-RESORT fallback only -- see tryCaptureBalanceWidget() below for
+  // the confirmed mechanism. Kept because it's free (passive, no click)
+  // and doesn't hurt to try, but it was never confirmed against a real
+  // account and the widget below is a real, DOM-confirmed source, so
+  // the widget always wins when it's available.
+  function readPointsBalanceFromHeader() {
     const scopes = [...document.querySelectorAll('header, nav, [class*="account" i], [class*="balance" i]')];
     for (const scope of scopes) {
       const text = scope.textContent || '';
@@ -510,14 +541,71 @@ async function marriottAvailabilityScan(CONFIG) {
     return null;
   }
 
+  // Confirmed from a real pasted DOM snippet: clicking an available day
+  // opens a `.points-search` block with "Current Balance:"/"Potential
+  // Balance:" rows (Potential = current + whatever's available to
+  // borrow). Called exactly ONCE for the whole run (see the
+  // balanceWidgetChecked guard at the call site) -- clicking a day is a
+  // real interaction, not a passive read, so this is deliberately not
+  // repeated per resort/month. See the v14 changelog entry at the top
+  // of this file for why the day-selection side effect this leaves
+  // behind doesn't matter for anything that happens afterward.
+  async function tryCaptureBalanceWidget() {
+    const dayBtn = document.querySelector('td.week-day button.day.enabled');
+    if (!dayBtn) return null;
+    dayBtn.click();
+    await sleep(800);
+    const widget = document.querySelector('.points-search');
+    if (!widget) return null;
+    const rows = [...widget.querySelectorAll('.points-searchdetails')];
+    const readRow = (label) => {
+      const row = rows.find((r) => (r.querySelector('.points-key')?.textContent || '').trim().toLowerCase().startsWith(label.toLowerCase()));
+      const text = row?.querySelector('.points-text')?.textContent || '';
+      const n = Number(text.replace(/[^\d]/g, ''));
+      return Number.isFinite(n) ? n : null;
+    };
+    const current = readRow('Current Balance');
+    const potential = readRow('Potential Balance');
+    if (current == null && potential == null) return null;
+    return { current, potential };
+  }
+
+  // Confirmed from a real captured console line ("Owner Contracts -
+  // response body: {...}", including real contract fields -- resort,
+  // points per year, status): the site's OWN code already logs its
+  // internal API responses this way. Wrapping console.log for the
+  // duration of this run and pattern-matching "<label> - response
+  // body: <json>" catches whatever the site happens to log under
+  // WHATEVER label it uses -- not hardcoded to "Owner Contracts", so a
+  // Bonvoy-shaped response logged the same way is captured for free if
+  // one shows up. Restored (installConsoleCapture().restore()) before
+  // this function returns, so console.log's own behaviour is never
+  // left altered.
+  function installConsoleCapture() {
+    const captured = {};
+    const original = console.log.bind(console);
+    console.log = (...args) => {
+      try {
+        const first = args[0];
+        if (typeof first === 'string') {
+          const m = first.match(/^(.*?)\s*-\s*response body:\s*([\s\S]*)$/);
+          if (m) {
+            const label = m[1].trim();
+            const payloadText = m[2] && m[2].trim() ? m[2] : (typeof args[1] === 'string' ? args[1] : JSON.stringify(args[1]));
+            try { captured[label] = JSON.parse(payloadText); } catch (e2) { /* not JSON -- not every "- response body:" line will be, skip it */ }
+          }
+        }
+      } catch (e) { /* capturing must never break the page's own real logging */ }
+      return original(...args);
+    };
+    return { captured, restore: () => { console.log = original; } };
+  }
+
   const results = {}; // { nights: { resortName: { roomType: [{date, points}] } } }
   const monthsScannedSet = new Set();
-  const pointsBalance = readPointsBalance();
-  if (pointsBalance != null) {
-    console.log(`Points balance read from the page header: ${pointsBalance} -- this is a BEST-EFFORT read, not yet confirmed against a real account. Check it before trusting it.`);
-  } else {
-    console.log('Could not find a points balance anywhere in the page header/nav (best-effort only, may just mean this layout puts it somewhere else) -- the dashboard import will show "not found this scan" rather than guess a number.');
-  }
+  const consoleCapture = installConsoleCapture();
+  let balanceWidgetChecked = false;
+  let widgetBalance = null;
 
   // Whatever month is selected on the search form right now -- the fixed
   // starting point every (nights, month-offset) combination below is
@@ -577,6 +665,7 @@ async function marriottAvailabilityScan(CONFIG) {
         nightsInput = document.querySelector('input[placeholder="# of Nights"]');
         if (!nightsInput) {
           console.error('Still could not find the # of Nights field after attempting recovery -- stopping here. Reload the search page and re-run.');
+          consoleCapture.restore(); // this is an early exit -- never leave console.log patched on the way out
           return;
         }
         console.log('Recovered -- back on the search form.');
@@ -647,6 +736,15 @@ async function marriottAvailabilityScan(CONFIG) {
         try {
           btn.click();
           await sleep(WAIT_AFTER_CHECK_AVAILABILITY_MS);
+
+          // Once only, on whichever resort/month happens to be first --
+          // see tryCaptureBalanceWidget()'s own comment for why a single
+          // day-click here is safe to leave unreverted.
+          if (!balanceWidgetChecked) {
+            balanceWidgetChecked = true;
+            try { widgetBalance = await tryCaptureBalanceWidget(); } catch (e) { console.warn('Points balance widget read failed, continuing without it:', e.message); }
+            if (widgetBalance) console.log(`Points balance (from the ".points-search" widget): current ${widgetBalance.current}, potential ${widgetBalance.potential}.`);
+          }
 
           await openRoomTypeFilterPanel();
           const options = readRoomTypeOptions();
@@ -727,6 +825,16 @@ async function marriottAvailabilityScan(CONFIG) {
     setTimeout(() => URL.revokeObjectURL(url), 2000);
   }
 
+  consoleCapture.restore(); // never leave console.log altered past this run
+
+  let pointsBalance = null;
+  if (widgetBalance) {
+    pointsBalance = { balance: widgetBalance.current, potentialBalance: widgetBalance.potential, asOf: new Date().toISOString().slice(0, 10), source: 'widget' };
+  } else {
+    const headerGuess = readPointsBalanceFromHeader();
+    if (headerGuess != null) pointsBalance = { balance: headerGuess, potentialBalance: null, asOf: new Date().toISOString().slice(0, 10), source: 'header-guess' };
+  }
+
   const stamp = new Date().toISOString().slice(0, 10);
   downloadCsv(flatRows, `marriott-availability-${stamp}.csv`);
   window.__marriottAvailability = results;
@@ -736,10 +844,15 @@ async function marriottAvailabilityScan(CONFIG) {
     scannedAt: new Date().toISOString(),
     config: CONFIG,
     monthsScanned: [...monthsScannedSet].sort(),
-    pointsBalance: pointsBalance != null ? { balance: pointsBalance, asOf: new Date().toISOString().slice(0, 10) } : null,
+    pointsBalance,
+    // Whatever the site's own console logging happened to reveal this
+    // run, keyed by whatever label it used (e.g. "Owner Contracts") --
+    // see installConsoleCapture()'s comment. Genuinely may be empty if
+    // this account's console doesn't log the same way.
+    apiCaptures: consoleCapture.captured,
     results,
   };
-  console.log(`Downloaded marriott-availability-${stamp}.csv. Full structured results also kept at window.__marriottAvailability if you need them in that shape instead. For the dashboard's Travel tab import, run copy(window.__marriottAvailabilityExport) and paste THAT in instead -- it also records exactly which months were scanned, which the CSV alone can't.`);
+  console.log(`Downloaded marriott-availability-${stamp}.csv. Full structured results also kept at window.__marriottAvailability if you need them in that shape instead. For the dashboard's Travel tab import, run copy(window.__marriottAvailabilityExport) and paste THAT in instead -- it also records exactly which months were scanned, your points balance, and any owner-contract data the site's own console revealed, none of which the CSV alone can.`);
 }
 // ---- End of the self-contained scan function. ------------------------
 

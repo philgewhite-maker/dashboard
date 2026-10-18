@@ -26,6 +26,18 @@ import { data, queueSave, blankMarriottAvailability, pruneMarriottAvailability }
 import { escapeHtml, splitCsvLine, todayStr, dateStrAdd } from '../utils.js';
 import { createTrip, tripChipHtml, bindTripChips } from './travel.js';
 
+// Whether the "Only these:" radio is selected, tracked SEPARATELY from
+// cfg.roomTypes (null vs an array) -- null also means "typed nothing
+// yet" while "Only these" is picked but the text field is still empty,
+// and deriving the radio's checked state from cfg.roomTypes on every
+// render collapsed that case back to "Auto-detect" the instant the
+// radio was clicked (confirmed live: the radio visually refused to
+// stay selected). null here means "not yet initialised from the saved
+// config" -- set once on the first fillConfigForm() call, then left
+// alone so the user's own radio clicks are never overridden by a
+// re-render.
+let mvcRoomTypeOnlyMode = null;
+
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const DEFAULT_SCAN_CONFIG = { nightCounts: [2, 3, 4, 5, 7], guests: 2, monthsToScan: 3, roomTypes: null, speedMultiplier: 1.6 };
@@ -161,7 +173,7 @@ return 'unknown';
 function parseMarriottCsv(text) {
 const lines = String(text || '').replace(/^﻿/, '').split(/\r?\n/).filter((l) => l.trim());
 const skipped = { badDate: 0, past: 0 };
-if (!lines.length) return { entries: [], months: null, scriptVersion: '', scannedAt: '', pointsBalance: null, skipped };
+if (!lines.length) return { entries: [], months: null, scriptVersion: '', scannedAt: '', pointsBalance: null, apiCaptures: null, skipped };
 const header = splitCsvLine(lines[0]).map((h) => h.trim());
 const col = (label) => header.findIndex((h) => h.toLowerCase() === label.toLowerCase());
 const idx = { nights: col('nights'), resort: col('resort'), roomType: col('roomType'), date: col('date'), points: col('points') };
@@ -181,7 +193,7 @@ if (rawDate < today) { skipped.past++; return; }
 const points = Number(get(idx.points).replace(/,/g, ''));
 entries.push({ nights, resort, roomType, date: rawDate, points: Number.isFinite(points) ? points : null });
 });
-return { entries, months: null, scriptVersion: '', scannedAt: '', pointsBalance: null, skipped };
+return { entries, months: null, scriptVersion: '', scannedAt: '', pointsBalance: null, apiCaptures: null, skipped };
 }
 
 function flattenResults(results) {
@@ -220,6 +232,7 @@ months: isExport && Array.isArray(raw.monthsScanned) ? raw.monthsScanned : null,
 scriptVersion: isExport ? String(raw.scriptVersion || '') : '',
 scannedAt: isExport ? String(raw.scannedAt || '') : '',
 pointsBalance: isExport && raw.pointsBalance && Number.isFinite(raw.pointsBalance.balance) ? raw.pointsBalance : null,
+apiCaptures: isExport && raw.apiCaptures && typeof raw.apiCaptures === 'object' ? raw.apiCaptures : null,
 skipped,
 };
 }
@@ -281,6 +294,7 @@ if (e.date) { store.dates[e.nights][e.resort][e.roomType][e.date] = e.points; da
 nightsInImport.forEach((nights) => months.forEach((month) => { store.coverage[`${nights}|${month}`] = now; }));
 
 if (parsed.pointsBalance) store.pointsBalance = parsed.pointsBalance; // a point-in-time reading -- overwritten wholesale, never merged
+if (parsed.apiCaptures) store.apiCaptures = parsed.apiCaptures; // same reasoning -- whatever the console captured THIS run replaces last run's
 
 store.lastImport = {
 at: now, fileName: meta.fileName || '', source: meta.source || 'paste',
@@ -319,6 +333,7 @@ if (result.skipped.past) skipParts.push(`${result.skipped.past} past date${resul
 if (skipParts.length) message += ` Skipped ${skipParts.join(', ')}.`;
 if (kind === 'csv') message += ' Months inferred from the dates found — paste the JSON export instead for exact scanned-month coverage.';
 if (parsed.pointsBalance) message += ` Points balance updated: ${parsed.pointsBalance.balance.toLocaleString('en-GB')} as of ${parsed.pointsBalance.asOf}.`;
+if (parsed.apiCaptures && ownerContractsFromCaptures(parsed.apiCaptures).length) message += ` Found ${ownerContractsFromCaptures(parsed.apiCaptures).length} owner contract${ownerContractsFromCaptures(parsed.apiCaptures).length === 1 ? '' : 's'} in the site's own console output.`;
 return { ok: true, message };
 }
 
@@ -394,12 +409,43 @@ const expandedMvcCells = new Set(); // `${nights}|${resort}|${month}` -- extends
 const collapsedMvcNights = new Set();
 let mvcRoomTypeFilter = '';
 
+// Matched by SHAPE (an array of objects carrying contractNumber/
+// contractPoints/ownershipDetails), not by a hardcoded label -- the
+// site's own console line happened to say "Owner Contracts" when this
+// was confirmed, but that label isn't guaranteed to stay fixed, and
+// apiCaptures is deliberately freeform (see marriottscan.js's
+// installConsoleCapture()).
+function ownerContractsFromCaptures(apiCaptures) {
+if (!apiCaptures || typeof apiCaptures !== 'object') return [];
+for (const value of Object.values(apiCaptures)) {
+const arr = Array.isArray(value?.data) ? value.data : (Array.isArray(value) ? value : null);
+if (!arr) continue;
+if (arr.some((c) => c && typeof c === 'object' && ('contractNumber' in c || 'contractPoints' in c))) return arr;
+}
+return [];
+}
+
+function contractsHtml(store) {
+const contracts = ownerContractsFromCaptures(store.apiCaptures);
+if (!contracts.length) return '';
+const rows = contracts.map((c) => {
+const resort = c.ownershipDetails?.resortName || c.resortName || 'Contract';
+const points = Number.isFinite(Number(c.contractPoints)) ? `${Number(c.contractPoints).toLocaleString('en-GB')} points/year` : '';
+const bits = [points, c.contractStatus, c.contractNumber].filter(Boolean);
+return `<div class="settings-note" style="margin:0;">${escapeHtml(resort)}${bits.length ? ` &mdash; ${bits.map(escapeHtml).join(' · ')}` : ''}</div>`;
+}).join('');
+return `<div class="mvc-contracts" style="margin:4px 0 10px;">${rows}</div>`;
+}
+
 function pointsBalanceHtml(store) {
 const pb = store.pointsBalance;
+const contractsBlock = contractsHtml(store);
 if (!pb || !Number.isFinite(pb.balance)) {
-return `<div class="settings-note" style="margin:0 0 10px;">No points balance read yet &mdash; only ever comes from the JSON export (<code>copy(window.__marriottAvailabilityExport)</code> after a scan), and even then it's a best-effort page read, not yet confirmed live &mdash; the CSV never carries it at all.</div>`;
+return `<div class="settings-note" style="margin:0 0 10px;">No points balance read yet &mdash; only ever comes from the JSON export (<code>copy(window.__marriottAvailabilityExport)</code> after a scan). The CSV never carries it.</div>${contractsBlock}`;
 }
-return `<div class="mvc-balance"><span class="mvc-balance-num">${pb.balance.toLocaleString('en-GB')}</span><span>points</span><span class="settings-note">as of ${escapeHtml(pb.asOf)} &mdash; best-effort page read, not yet confirmed live</span></div>`;
+const sourceNote = pb.source === 'header-guess' ? ' &mdash; best-effort page-header read, not yet confirmed live' : '';
+const potentialHtml = Number.isFinite(pb.potentialBalance) ? ` <span class="settings-note">(potential: ${pb.potentialBalance.toLocaleString('en-GB')})</span>` : '';
+return `<div class="mvc-balance"><span class="mvc-balance-num">${pb.balance.toLocaleString('en-GB')}</span><span>points</span>${potentialHtml}<span class="settings-note">as of ${escapeHtml(pb.asOf)}${sourceNote}</span></div>${contractsBlock}`;
 }
 
 function dateLineHtml(nights, resort, d) {
@@ -490,7 +536,8 @@ if (speedInput && document.activeElement !== speedInput) speedInput.value = cfg.
 const rtAutoRadio = document.getElementById('mvc-cfg-rt-auto');
 const rtOnlyRadio = document.getElementById('mvc-cfg-rt-only');
 const rtInput = document.getElementById('mvc-cfg-roomtypes');
-if (rtAutoRadio && rtOnlyRadio) { if (cfg.roomTypes) rtOnlyRadio.checked = true; else rtAutoRadio.checked = true; }
+if (mvcRoomTypeOnlyMode === null) mvcRoomTypeOnlyMode = !!cfg.roomTypes; // seed once from the saved config, never again -- see the flag's own comment
+if (rtAutoRadio && rtOnlyRadio) { rtOnlyRadio.checked = mvcRoomTypeOnlyMode; rtAutoRadio.checked = !mvcRoomTypeOnlyMode; }
 if (rtInput && document.activeElement !== rtInput) rtInput.value = cfg.roomTypes ? cfg.roomTypes.join(', ') : '';
 const suggestEl = document.getElementById('mvc-rt-suggestions');
 if (suggestEl) {
@@ -568,6 +615,7 @@ if (suggestChip) {
 const rtOnlyRadio = document.getElementById('mvc-cfg-rt-only');
 const rtInput = document.getElementById('mvc-cfg-roomtypes');
 if (!rtInput || !rtOnlyRadio) return;
+mvcRoomTypeOnlyMode = true;
 rtOnlyRadio.checked = true;
 const current = rtInput.value.split(',').map((t) => t.trim()).filter(Boolean);
 if (!current.includes(suggestChip.dataset.mvcRtSuggest)) current.push(suggestChip.dataset.mvcRtSuggest);
@@ -598,18 +646,24 @@ document.getElementById('mvc-cfg-speed')?.addEventListener('change', (e) => { sa
 const rtInput = document.getElementById('mvc-cfg-roomtypes');
 const rtAutoRadio = document.getElementById('mvc-cfg-rt-auto');
 const rtOnlyRadio = document.getElementById('mvc-cfg-rt-only');
+// Only saves/re-renders when "Only these" is the ACTUAL current choice
+// -- an empty text field is a legitimate mid-edit state (the radio is
+// picked, nothing typed yet), not a reason to fall back to null and
+// re-derive the radio as "Auto-detect" again.
 const applyRoomTypeMode = () => {
-if (rtOnlyRadio?.checked) {
 const types = (rtInput?.value || '').split(',').map((t) => t.trim()).filter(Boolean);
 saveScanConfig({ roomTypes: types.length ? types : null });
-} else {
-saveScanConfig({ roomTypes: null });
-}
 fillConfigForm();
 };
-rtAutoRadio?.addEventListener('change', applyRoomTypeMode);
-rtOnlyRadio?.addEventListener('change', applyRoomTypeMode);
-rtInput?.addEventListener('change', applyRoomTypeMode);
+// The real bug this fixes (confirmed live: "Only these" refused to
+// stay selected) was mvcRoomTypeOnlyMode being derived from
+// cfg.roomTypes on every render -- see its own comment above. The
+// `if (!radio.checked) return` guard here is just cheap defensive
+// insurance against either handler ever firing while its own radio
+// isn't actually the checked one, not itself the fix.
+rtAutoRadio?.addEventListener('change', () => { if (!rtAutoRadio.checked) return; mvcRoomTypeOnlyMode = false; saveScanConfig({ roomTypes: null }); fillConfigForm(); });
+rtOnlyRadio?.addEventListener('change', () => { if (!rtOnlyRadio.checked) return; mvcRoomTypeOnlyMode = true; applyRoomTypeMode(); });
+rtInput?.addEventListener('change', () => { if (mvcRoomTypeOnlyMode) applyRoomTypeMode(); });
 
 const copyBtn = document.getElementById('mvc-copy-btn');
 copyBtn?.addEventListener('click', async () => {

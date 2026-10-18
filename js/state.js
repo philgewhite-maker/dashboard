@@ -938,13 +938,22 @@ dates: {},
 // scanned", and is what the pivot's hover/"as of" text reads from.
 coverage: {},
 lastImport: null, // {at, fileName, source, scriptVersion, dateCount, replacedCount, nightCounts:[], months:[]}
-// {balance, asOf} -- only ever set from the JSON export's own
-// best-effort page read (see marriottscan.js's readPointsBalance()),
-// never from the CSV, which carries no balance info at all. null until
-// a JSON import actually finds one. Always OVERWRITTEN wholesale by the
+// {balance, potentialBalance, asOf, source} -- only ever set from the
+// JSON export (never the CSV, which carries no balance info at all).
+// `source` is 'widget' (the confirmed ".points-search" DOM read) or
+// 'header-guess' (an unconfirmed fallback) -- see marriottscan.js's
+// tryCaptureBalanceWidget()/readPointsBalanceFromHeader(). null until a
+// JSON import actually finds one. Always OVERWRITTEN wholesale by the
 // next import that carries one (a point-in-time reading, not a slice
 // to merge), never merged like the dates/coverage maps above.
 pointsBalance: null,
+// Whatever the scan script's console-log capture happened to pick up
+// from the site's OWN internal API logging that run (owner contracts,
+// and potentially Bonvoy data if the site ever logs it the same way)
+// -- see marriottscan.js's installConsoleCapture(). Keyed by whatever
+// label the site itself used, genuinely freeform. Overwritten wholesale
+// per import, same reasoning as pointsBalance above.
+apiCaptures: {},
 ...fields,
 };
 }
@@ -2455,6 +2464,7 @@ data.marriottAvailability = blankMarriottAvailability();
 data.marriottAvailability = { ...blankMarriottAvailability(), ...data.marriottAvailability };
 if (!data.marriottAvailability.dates || typeof data.marriottAvailability.dates !== 'object') data.marriottAvailability.dates = {};
 if (!data.marriottAvailability.coverage || typeof data.marriottAvailability.coverage !== 'object') data.marriottAvailability.coverage = {};
+if (!data.marriottAvailability.apiCaptures || typeof data.marriottAvailability.apiCaptures !== 'object') data.marriottAvailability.apiCaptures = {};
 }
 pruneMarriottAvailability(data.marriottAvailability);
 // Manually-added days beyond Planner's rolling horizon (see planner.js's
