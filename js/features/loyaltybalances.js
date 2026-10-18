@@ -295,7 +295,17 @@ try {
 // sliding "since last check" cursor) means a wide window costs
 // nothing on repeat scans -- an already-processed message is skipped
 // instantly regardless of how far back the search reaches.
-const [section] = await withRetryOn403(() => fetchMailSearches([{ kind: 'query', value: query, maxDays: 400, maxEvents: 15 }]));
+// maxEvents feeds fetchMailSearches' own headroom math (ceil(n*1.5)+5)
+// -- 15 gave a hard cap of exactly 28 message ids per search, most
+// recent first. Confirmed live as a real problem, not just theory: a
+// program sending frequent pure-marketing mail (Virgin especially,
+// per this feature's own research) can push its rarer, genuinely
+// useful template (an occasional account-summary email, not every
+// send) past the 28 most recent before the extractor ever sees it --
+// "28 emails found, none recognised" is exactly what that looks like.
+// Raised to 40 (fetch cap ~65) to cut the odds of that; seenMessageIds
+// dedup means a wider net costs nothing extra on repeat scans.
+const [section] = await withRetryOn403(() => fetchMailSearches([{ kind: 'query', value: query, maxDays: 400, maxEvents: 40 }]));
 messages = section?.messages || [];
 } catch (err) {
 return { programId: program.id, programName: program.name, error: err.message };
