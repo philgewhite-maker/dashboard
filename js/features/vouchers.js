@@ -1,6 +1,6 @@
 import { data, queueSave } from '../state.js';
 import { uid, escapeHtml, bindForm, daysUntil, scrollAndFlash } from '../utils.js';
-import { pendingVoucherReviews, setLabelKind, markVoucherLinked, markVoucherSkipped } from './loyaltybalances.js';
+import { pendingClassifications, pendingVoucherLinks, setLabelKind, markVoucherLinked, markVoucherSkipped } from './loyaltybalances.js';
 
 const VOUCHER_TYPES = ['Voucher', 'Credit', 'Cheque', 'Refund', 'Other'];
 
@@ -81,6 +81,7 @@ ${VOUCHER_TYPES.map((t) => `<option value="${t}" ${t === v.type ? 'selected' : '
 </div>
 </div>
 <input type="text" autocomplete="off" class="voucher-edit voucher-notes-edit" data-field="notes" data-voucher-id="${v.id}" value="${escapeHtml(v.notes || '')}" placeholder="Notes">
+<input type="text" autocomplete="off" class="voucher-edit voucher-reference-edit" data-field="reference" data-voucher-id="${v.id}" value="${escapeHtml(v.reference || '')}" placeholder="Reference (optional)" title="A voucher/booking reference, if it has one -- the loyalty-scan review matches on this to offer a confident 'Update' instead of risking a merge with an unrelated voucher.">
 <div class="voucher-expiry">
 <input type="date" class="voucher-edit expiry-date-edit" data-field="expiry" data-voucher-id="${v.id}" value="${escapeHtml(v.expiry || '')}">
 ${badgeHtml}
@@ -139,25 +140,41 @@ function readingSummaryText(reading) {
 const parts = [reading.label];
 const value = readingValueText(reading);
 if (value) parts.push(value);
+parts.push(`on ${reading.date}`);
 if (reading.expiryDate) parts.push(`expires ${reading.expiryDate}`);
 if (reading.reference) parts.push(`ref ${reading.reference}`);
 return parts.join(' — ');
 }
 
-function voucherReviewRowHtml(item) {
-const { reading, program, kind } = item;
-const rid = reading.id;
-const groupName = `voucher-review-${rid}`;
-const header = `<div class="pending-new-info"><div><strong>${escapeHtml(program.name)}</strong> — ${escapeHtml(readingSummaryText(reading))}</div>`;
-if (kind === undefined) {
-return `<div class="candidate-row" data-review-id="${escapeHtml(rid)}">
-${header}<div style="font-size:11px;color:var(--muted);">New kind of reading — is this a running balance, or a voucher/credit event?</div></div>
+// One row per (programId, label) group needing a balance-vs-voucher
+// decision -- see pendingClassifications() for why this is deduped
+// rather than one row per historical reading. Shows up to 3 recent
+// sample readings (with dates) for context.
+function classifyRowHtml(group) {
+const key = `${group.programId}|${group.label}`;
+const groupName = `voucher-classify-${escapeHtml(key)}`;
+const samplesHtml = group.samples.map((r) => `<div style="font-size:11px;color:var(--muted);">${escapeHtml(r.date)} — ${escapeHtml(readingValueText(r) || '—')}</div>`).join('');
+const moreCount = group.total - group.samples.length;
+const moreNote = moreCount > 0 ? `<div style="font-size:11px;color:var(--muted);">+ ${moreCount} earlier reading${moreCount === 1 ? '' : 's'}</div>` : '';
+return `<div class="candidate-row" data-classify-key="${escapeHtml(key)}">
+<div class="pending-new-info">
+<div><strong>${escapeHtml(group.program.name)}</strong> — ${escapeHtml(group.label)}</div>
+${samplesHtml}
+${moreNote}
+<div style="font-size:11px;color:var(--muted);margin-top:4px;">New kind of reading — is this a running balance, or a voucher/credit event?</div>
+</div>
 <div class="pending-options">
-<label class="pending-option"><input type="radio" name="${groupName}" value="balance" data-review-classify="${escapeHtml(rid)}"><span class="pending-option-info">Running balance (points, miles, tier status…)</span></label>
-<label class="pending-option"><input type="radio" name="${groupName}" value="voucher" data-review-classify="${escapeHtml(rid)}"><span class="pending-option-info">Voucher / credit event</span></label>
+<label class="pending-option"><input type="radio" name="${groupName}" value="balance" data-classify-key-radio="${escapeHtml(key)}" data-classify-program="${escapeHtml(group.programId)}" data-classify-label="${escapeHtml(group.label)}"><span class="pending-option-info">Running balance (points, miles, tier status…)</span></label>
+<label class="pending-option"><input type="radio" name="${groupName}" value="voucher" data-classify-key-radio="${escapeHtml(key)}" data-classify-program="${escapeHtml(group.programId)}" data-classify-label="${escapeHtml(group.label)}"><span class="pending-option-info">Voucher / credit event</span></label>
 </div>
 </div>`;
 }
+
+function voucherLinkRowHtml(item, siblings) {
+const { reading, program } = item;
+const rid = reading.id;
+const groupName = `voucher-review-${rid}`;
+const header = `<div class="pending-new-info"><div><strong>${escapeHtml(program.name)}</strong> — ${escapeHtml(readingSummaryText(reading))}</div>`;
 const { byReference, byNameOnly } = matchVouchersForReading(reading, program);
 const hasReferenceMatch = byReference.length > 0;
 const matchOptions = [
@@ -187,17 +204,22 @@ ${data.vouchers.map((v) => `<option value="${escapeHtml(v.id)}">${escapeHtml(v.n
 <span class="pending-option-info">Not a voucher &mdash; skip this one</span>
 </label>
 </div>
+${siblings.length ? `<label class="pending-option" style="margin-top:6px;">
+<input type="checkbox" data-review-apply-all="${escapeHtml(rid)}" checked>
+<span class="pending-option-info">Also apply this to the other ${siblings.length} unresolved "${escapeHtml(reading.label)}" reading${siblings.length === 1 ? '' : 's'} below &mdash; tick off if some of these are genuinely separate, not the same one reported again</span>
+</label>` : ''}
 <div class="sync-row" style="margin-top:6px;">
 <button type="button" class="sync-btn sm inline" data-review-confirm="${escapeHtml(rid)}">Confirm</button>
 </div>
 </div>`;
 }
 
-function applyVoucherLink(reading, program, decision, pickedId) {
-if (decision === 'skip') { markVoucherSkipped(reading.id); return; }
-const targetId = decision === 'pick' ? pickedId : decision.startsWith('update:') ? decision.slice(7) : '';
-if (targetId) {
-const voucher = data.vouchers.find((v) => v.id === targetId);
+// Resolves ONE voucher-shaped reading against an existing/new voucher
+// -- the targeted voucher's value/expiry/reference/notes/source-id list
+// all come from THIS reading. Used both for a single confirm and, once
+// per sibling, for the "apply to all matching" bulk path below.
+function applyUpdateToVoucher(reading, program, voucherId) {
+const voucher = data.vouchers.find((v) => v.id === voucherId);
 if (!voucher) return;
 const value = readingValueText(reading);
 if (value) voucher.value = value;
@@ -207,29 +229,58 @@ const note = `Updated from ${program.name} scan (${reading.date}): ${readingSumm
 voucher.notes = voucher.notes ? `${voucher.notes} | ${note}` : note;
 voucher.sourceLoyaltyReadingIds = [...(voucher.sourceLoyaltyReadingIds || []), reading.id];
 markVoucherLinked(reading.id, voucher.id);
-return;
 }
+
+function applyVoucherLink(reading, program, decision, pickedId) {
+if (decision === 'skip') { markVoucherSkipped(reading.id); return; }
+const targetId = decision === 'pick' ? pickedId : decision.startsWith('update:') ? decision.slice(7) : '';
+if (targetId) { applyUpdateToVoucher(reading, program, targetId); return; }
 // decision === 'new'
 const voucher = { id: uid(), name: `${program.name} — ${reading.label}`, type: 'Voucher', value: readingValueText(reading), expiry: reading.expiryDate || '', notes: `From ${program.name} scan, ${reading.date}.`, reference: reading.reference || '', sourceLoyaltyReadingIds: [reading.id] };
 data.vouchers.push(voucher);
 markVoucherLinked(reading.id, voucher.id);
 }
 
+// "Apply to all": confirmed live as a real need -- Hertz's "free day
+// earned" email gets re-sent for the SAME one day, repeatedly, not a
+// fresh day each time, so a label with many pending siblings is more
+// often one real thing reported many times than many real things. A
+// 'new' decision still creates exactly ONE voucher (from the row that
+// was actually confirmed); every sibling, including that row, is then
+// folded into it via applyUpdateToVoucher, so N duplicate readings
+// collapse into one voucher with an N-line history, not N vouchers.
+function applyVoucherLinkToGroup(reading, program, decision, pickedId, allReadings) {
+if (decision === 'skip') { allReadings.forEach((r) => markVoucherSkipped(r.id)); return; }
+let targetId = decision === 'pick' ? pickedId : decision.startsWith('update:') ? decision.slice(7) : '';
+if (!targetId) {
+const voucher = { id: uid(), name: `${program.name} — ${reading.label}`, type: 'Voucher', value: '', expiry: '', notes: '', reference: '', sourceLoyaltyReadingIds: [] };
+data.vouchers.push(voucher);
+targetId = voucher.id;
+}
+allReadings.forEach((r) => applyUpdateToVoucher(r, program, targetId));
+}
+
 function renderVoucherReview() {
 const mount = document.getElementById('voucher-review-section');
 if (!mount) return;
-const items = pendingVoucherReviews();
-if (!items.length) { mount.innerHTML = ''; return; }
+const classifications = pendingClassifications();
+const links = pendingVoucherLinks();
+const total = classifications.length + links.length;
+if (!total) { mount.innerHTML = ''; return; }
+// Siblings: OTHER still-pending readings sharing this exact (program,
+// label) pair, excluding the row's own reading -- feeds the "apply to
+// all" checkbox/count on each row.
+const siblingsFor = (item) => links.filter((x) => x.reading.id !== item.reading.id && x.reading.programId === item.reading.programId && x.reading.label === item.reading.label);
 mount.innerHTML = `<div class="album-card" style="margin-bottom:10px;">
-<div class="album-caption"><strong>${items.length} reading${items.length === 1 ? '' : 's'}</strong> from loyalty scans need${items.length === 1 ? 's' : ''} a quick decision.</div>
-${items.map(voucherReviewRowHtml).join('')}
+<div class="album-caption"><strong>${total} item${total === 1 ? '' : 's'}</strong> from loyalty scans need${total === 1 ? 's' : ''} a quick decision.</div>
+${classifications.map(classifyRowHtml).join('')}
+${links.map((item) => voucherLinkRowHtml(item, siblingsFor(item))).join('')}
 </div>`;
 
-mount.querySelectorAll('[data-review-classify]').forEach((el) => {
+mount.querySelectorAll('[data-classify-key-radio]').forEach((el) => {
 el.addEventListener('change', () => {
-const item = items.find((x) => x.reading.id === el.dataset.reviewClassify);
-if (!item || !el.checked) return;
-setLabelKind(item.reading.programId, item.reading.label, el.value);
+if (!el.checked) return;
+setLabelKind(el.dataset.classifyProgram, el.dataset.classifyLabel, el.value);
 renderVoucherReview();
 });
 });
@@ -242,12 +293,21 @@ if (picker) picker.hidden = el.value !== 'pick';
 mount.querySelectorAll('[data-review-confirm]').forEach((el) => {
 el.addEventListener('click', () => {
 const rid = el.dataset.reviewConfirm;
-const item = items.find((x) => x.reading.id === rid);
+const item = links.find((x) => x.reading.id === rid);
 if (!item) return;
 const decision = mount.querySelector(`input[name="voucher-review-${rid}"]:checked`)?.value || 'new';
 const pickedId = decision === 'pick' ? (mount.querySelector(`[data-review-pick-select="${rid}"]`)?.value || '') : '';
 if (decision === 'pick' && !pickedId) return; // nothing chosen yet -- Confirm does nothing until it is
+const applyAll = mount.querySelector(`[data-review-apply-all="${rid}"]`)?.checked;
+if (applyAll) {
+// Oldest-first so the voucher's final value/expiry reflects the
+// MOST RECENT reading (each pass in applyUpdateToVoucher overwrites
+// the one before it) while the notes history still reads in order.
+const group = [...siblingsFor(item), item].map((x) => x.reading).sort((a, b) => a.date.localeCompare(b.date));
+applyVoucherLinkToGroup(item.reading, item.program, decision, pickedId, group);
+} else {
 applyVoucherLink(item.reading, item.program, decision, pickedId);
+}
 queueSave();
 renderVouchers(); // re-renders the review section too (its own first line)
 });

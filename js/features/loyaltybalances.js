@@ -506,16 +506,37 @@ else data.loyaltyLabelKinds.push({ programId, label, kind });
 queueSave();
 }
 
-// Readings still needing a human decision: either their (programId,
-// label) pair has never been classified at all, or it's already
-// classified 'voucher' and this specific reading hasn't been linked or
-// skipped yet. Every classified 'balance' reading -- the bulk of what a
-// scan produces -- is excluded, so this stays a handful of rows, never
-// the full balance history.
-function pendingVoucherReviews() {
+// Grouped by (programId, label), one row per label still needing a
+// balance-vs-voucher decision -- NOT one per historical reading.
+// Reported directly as a real bug: a label scanned monthly for years
+// (BA's Avios, say) showed the identical question once per past
+// reading, 164 rows deep on a first-ever open of this feature. Shows
+// up to the 3 most recent readings (with their dates) so the decision
+// isn't made blind, and how many more exist beyond that.
+function pendingClassifications() {
+const groups = new Map();
+data.loyaltyBalances.forEach((reading) => {
+if (labelKindFor(reading.programId, reading.label) !== undefined) return;
+const program = data.loyaltyPrograms.find((p) => p.id === reading.programId);
+if (!program) return;
+const key = `${reading.programId}|${reading.label}`;
+if (!groups.has(key)) groups.set(key, { programId: reading.programId, program, label: reading.label, readings: [] });
+groups.get(key).readings.push(reading);
+});
+return [...groups.values()].map((g) => {
+const sorted = [...g.readings].sort((a, b) => b.date.localeCompare(a.date));
+return { programId: g.programId, program: g.program, label: g.label, samples: sorted.slice(0, 3), total: sorted.length };
+});
+}
+
+// One row per READING here, deliberately not deduped by label -- unlike
+// classification, each voucher-shaped reading (an eVoucher issued, a
+// free day earned) is its own genuine event that may need its own
+// add/update/skip decision, not a repeat of the same question.
+function pendingVoucherLinks() {
 return data.loyaltyBalances
-.map((reading) => ({ reading, program: data.loyaltyPrograms.find((p) => p.id === reading.programId), kind: labelKindFor(reading.programId, reading.label) }))
-.filter((x) => x.program && (x.kind === undefined || (x.kind === 'voucher' && !x.reading.voucherLinkStatus)));
+.map((reading) => ({ reading, program: data.loyaltyPrograms.find((p) => p.id === reading.programId) }))
+.filter((x) => x.program && labelKindFor(x.reading.programId, x.reading.label) === 'voucher' && !x.reading.voucherLinkStatus);
 }
 
 function markVoucherLinked(readingId, voucherId) {
@@ -552,12 +573,30 @@ return '';
 
 function programCardHtml(program) {
 const readings = latestBalancesFor(program);
-const rows = readings.map((r) => `<div class="loyalty-reading" data-loyalty-reading="${escapeHtml(r.id)}">
-<strong>${escapeHtml(r.label)}</strong>
-<span class="loyalty-reading-value">${r.balance != null ? escapeHtml(r.unit === '£' || r.unit === '£ worth of points' ? `£${r.balance.toLocaleString('en-GB')}` : r.balance.toLocaleString('en-GB')) : '—'} ${escapeHtml(r.unit && r.unit !== '£' ? r.unit : '')}</span>
-<span class="settings-note">as of ${escapeHtml(r.date)}${r.expiryDate ? ` · expires ${escapeHtml(r.expiryDate)}` : ''}${r.sourceMessageId === 'manual' ? ' · entered by hand' : ''}</span>
+// Same row anatomy as .voucher-row (vouchers.js) -- an id/meta column,
+// a wide middle column, a right-aligned date, and an actions column --
+// reported directly as wanting visual parity between the two panels,
+// now that readings can link into real voucher records.
+const rows = readings.map((r) => {
+const valueText = r.balance != null ? (r.unit === '£' || r.unit === '£ worth of points' ? `£${r.balance.toLocaleString('en-GB')}` : r.balance.toLocaleString('en-GB')) : '—';
+return `<div class="loyalty-reading" data-loyalty-reading="${escapeHtml(r.id)}">
+<div class="loyalty-reading-id">
+<span class="loyalty-reading-label">${escapeHtml(r.label)}</span>
+<div class="loyalty-reading-meta">
+<span class="loyalty-reading-value">${escapeHtml(valueText)}</span>
+${r.unit && r.unit !== '£' ? `<span class="loyalty-reading-unit">${escapeHtml(r.unit)}</span>` : ''}
+</div>
+</div>
+<div class="loyalty-reading-notes">${r.sourceMessageId === 'manual' ? 'Entered by hand' : ''}</div>
+<div class="loyalty-reading-date">
+<span class="loyalty-reading-asof">as of ${escapeHtml(r.date)}</span>
+${r.expiryDate ? `<span class="expiry-badge">expires ${escapeHtml(r.expiryDate)}</span>` : ''}
+</div>
+<div class="loyalty-reading-actions">
 ${r.voucherId ? voucherChipHtmlFor(r.voucherId) : ''}
-</div>`).join('');
+</div>
+</div>`;
+}).join('');
 const tier = readings.find((r) => r.tier)?.tier || '';
 return `<div class="account-card" data-loyalty-program="${escapeHtml(program.id)}">
 <div class="account-summary" style="cursor:default;">
@@ -745,5 +784,5 @@ renderLoyaltyBalances, initLoyaltyBalances, runLoyaltyBalanceScan,
 extractBritishAirways, extractMarriottBonvoy, extractVirginFlyingClub, extractBoots, extractTescoClubcard, extractBaVoucher,
 extractHertz, extractSixt, extractMilesAndMore,
 latestBalancesFor, travelStripPrograms,
-labelKindFor, setLabelKind, pendingVoucherReviews, markVoucherLinked, markVoucherSkipped,
+labelKindFor, setLabelKind, pendingClassifications, pendingVoucherLinks, markVoucherLinked, markVoucherSkipped,
 };
