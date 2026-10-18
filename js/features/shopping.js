@@ -306,6 +306,13 @@ ${chipFieldHtml('Style', 'style', knownScalarValues(data.inventory, 'style'))}
 ${chipFieldHtml('Piece', 'piece', knownScalarValues(data.inventory, 'piece'))}
 ${chipFieldHtml('Size', 'size', knownScalarValues(data.inventory, 'size'))}
 ${chipFieldHtml('Colour', 'colour', knownScalarValues(data.inventory, 'colour'))}
+<div class="sync-row" style="margin:8px 0;align-items:center;">
+<div class="avatar sm inv-photo-empty" data-inv-new-photo-thumb title="No photo yet"></div>
+<label class="todo-add-btn" for="inv-new-photo-file" title="Take or choose a photo" style="cursor:pointer;">&#128247;</label>
+<input type="file" id="inv-new-photo-file" accept="image/*" style="display:none;" data-inv-new-photo-file>
+<button type="button" class="todo-add-btn" data-inv-new-photo-url title="Save a photo from a URL -- the product's own page, or a direct image link">&#128279;</button>
+<span class="settings-note" data-inv-new-photo-status style="margin:0;">Picked up automatically from the product link's own picture, if it has one.</span>
+</div>
 <div style="margin:8px 0;">Already with${connectionPickerHtml('inv-new-holder', "Nobody yet — it's in your own drawer")}</div>
 <label style="font-size:12px;display:block;margin:0 0 8px;">Notes<textarea rows="2" data-inv-new="notes" style="width:100%;"></textarea></label>
 <div class="mail-view-actions">
@@ -315,6 +322,7 @@ ${chipFieldHtml('Colour', 'colour', knownScalarValues(data.inventory, 'colour'))
 </div>`;
 document.body.appendChild(dialog);
 bindConnPickers();
+hydratePhotoBackgrounds(dialog);
 const close = () => dialog.remove();
 bindBackdropClose(dialog, close);
 dialog.querySelector('[data-inv-new-cancel]').addEventListener('click', close);
@@ -330,6 +338,46 @@ setVal(field, chip.dataset.invPickValue);
 });
 const linkInput = dialog.querySelector('[data-inv-new-link]');
 const status = dialog.querySelector('[data-inv-fetch-status]');
+
+// Held in dialog scope, not on a row, since there's no data.inventory
+// item to attach a photoId to until Add is actually clicked -- the
+// photo itself is still stored for real via storePhoto() the moment
+// it's picked/fetched (same as the saved-row flow), only the ID
+// waits here for the save below.
+let draftPhotoId = '';
+const photoThumb = dialog.querySelector('[data-inv-new-photo-thumb]');
+const photoStatus = dialog.querySelector('[data-inv-new-photo-status]');
+function setDraftPhoto(photoId, message) {
+draftPhotoId = photoId;
+photoThumb.classList.toggle('inv-photo-empty', !photoId);
+photoThumb.classList.toggle('inv-photo', !!photoId);
+if (photoId) photoThumb.dataset.photoBg = photoId; else delete photoThumb.dataset.photoBg;
+if (message) photoStatus.textContent = message;
+hydratePhotoBackgrounds(dialog);
+}
+
+dialog.querySelector('[data-inv-new-photo-file]').addEventListener('change', async (e) => {
+const file = e.target.files && e.target.files[0];
+e.target.value = '';
+if (!file) return;
+try {
+const blob = await resizeImageToBlob(file, 900, 0.85);
+const { storePhoto } = await import('../files.js');
+setDraftPhoto(await storePhoto(blob), 'Photo added.');
+} catch (err) {
+photoStatus.textContent = err.message || String(err);
+}
+});
+dialog.querySelector('[data-inv-new-photo-url]').addEventListener('click', async () => {
+const input = (window.prompt('Image URL, or the product’s own page (its picture is read off the page automatically):', linkInput.value.trim()) || '').trim();
+if (!input) return;
+photoStatus.textContent = 'Fetching…';
+try {
+setDraftPhoto(await saveInventoryPhotoFromUrl(input), 'Photo added.');
+} catch (err) {
+photoStatus.textContent = err.message || String(err);
+}
+});
 
 dialog.querySelector('[data-inv-fill-link]').addEventListener('click', () => {
 const link = linkInput.value.trim();
@@ -360,6 +408,21 @@ if (page.name && adapter.rangeFromName) setVal('style', adapter.rangeFromName(pa
 setVal('piece', page.piece);
 setVal('colour', page.colour);
 status.textContent = 'Filled in from the real page.';
+// The photo path the user asked for: this page's own HTML was just
+// fetched for its colour -- its picture comes from the SAME fetch
+// (og:image) rather than asking the page to be fetched again, and
+// only when nothing's been picked/fetched for the photo already.
+if (!draftPhotoId) {
+try {
+const { ogImageFrom } = await import('../catalogue.js');
+const { fetchProductImage, storePhoto: store } = await import('../files.js');
+const og = ogImageFrom(html, link);
+if (og) {
+const blob = await resizeImageToBlob(await fetchProductImage(og), 900, 0.85);
+setDraftPhoto(await store(blob), 'Photo picked up from the product page.');
+}
+} catch (err) { /* no picture on the page, or it couldn't be read -- the manual buttons still work */ }
+}
 } catch (err) {
 status.textContent = err.message || String(err);
 }
@@ -371,6 +434,7 @@ brand: val('brand'), style: val('style'), piece: val('piece'),
 size: val('size'), colour: val('colour'), notes: val('notes'),
 holderId: dialog.querySelector('#inv-new-holder')?.value || '',
 acquiredAt: todayStr(), link: linkInput.value.trim(),
+photoId: draftPhotoId,
 }));
 queueSave();
 renderInventory();
