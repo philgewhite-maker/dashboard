@@ -163,14 +163,22 @@ return null;
 // points balance ever appears in this template -- it's a "you earned
 // a free day" trigger, not a statement -- so this records tier/
 // membership only (balance: null), rather than inventing a number.
-function extractHertz(bodyText) {
+function extractHertz(bodyText, subject) {
 const text = String(bodyText || '').replace(/[​‌‍﻿]/g, '');
 const tierMatch = text.match(/Loyalty Tier:\s*([A-Za-z ]+)/i);
 const numberMatch = text.match(/Member Number:\s*(\d+)/i) || text.match(/#(\d{6,10})\b/);
 if (!tierMatch && !numberMatch) return null;
+// Reported directly: this email IS the actual event ("Congrats! You
+// earned a FREE day!"), not a generic status ping -- a bare "Status"
+// label made every one of these look like an identical, repeated
+// non-event instead of the real thing it's recording. No points
+// balance is ever given a number here, hence balance:null -- see
+// state.js's blankLoyaltyProgram and the UI's own manual-entry
+// control for tracking an actual points figure by hand.
+const earnedFreeDay = /earned a free day|free rental day/i.test(`${subject || ''} ${text}`);
 return {
 membershipNumber: numberMatch ? numberMatch[1] : '', tier: tierMatch ? tierMatch[1].trim() : '', date: '',
-metrics: [{ label: 'Status', balance: null, unit: '', expiryDate: '' }],
+metrics: [{ label: earnedFreeDay ? 'Free day earned' : 'Status', balance: null, unit: '', expiryDate: '' }],
 };
 }
 
@@ -245,12 +253,35 @@ const d = new Date(dateHeader);
 return Number.isNaN(d.getTime()) ? todayStr() : d.toISOString().slice(0, 10);
 }
 
+// Reported directly: running all 9 programs back-to-back hit Gmail API
+// 403s on the LAST two (Sixt, Miles & More) while everything earlier
+// succeeded -- consistent with a short-lived rate-limit burst from
+// firing a search + several message fetches per program with no
+// pacing at all, not a per-program problem. Retries ONLY a 403 (a
+// genuine error, e.g. a bad query, fails immediately rather than
+// wasting 1.5s pretending a retry might help); two more attempts
+// after the first, spaced out, is usually enough for a transient
+// quota burst to clear.
+async function withRetryOn403(fn) {
+let lastErr;
+for (let attempt = 0; attempt < 3; attempt++) {
+try {
+return await fn();
+} catch (err) {
+lastErr = err;
+if (!/\b403\b/.test(String(err?.message || ''))) throw err;
+await new Promise((r) => setTimeout(r, 1500));
+}
+}
+throw lastErr;
+}
+
 // One program: search, fetch any new messages, extract, store. Never
 // throws -- a single bad message or a failed AI call is logged and
 // skipped so it can't take the rest of the scan down with it.
 async function scanOneProgram(program, { force } = {}) {
 if (!program.active || !program.senderAddresses.length) return null;
-if (!isProgramDue(program, force)) return { programId: program.id, skipped: true };
+if (!isProgramDue(program, force)) return { programId: program.id, programName: program.name, skipped: true };
 
 const query = `from:(${program.senderAddresses.join(' OR ')})`;
 let messages = [];
@@ -264,7 +295,7 @@ try {
 // sliding "since last check" cursor) means a wide window costs
 // nothing on repeat scans -- an already-processed message is skipped
 // instantly regardless of how far back the search reaches.
-const [section] = await fetchMailSearches([{ kind: 'query', value: query, maxDays: 400, maxEvents: 15 }]);
+const [section] = await withRetryOn403(() => fetchMailSearches([{ kind: 'query', value: query, maxDays: 400, maxEvents: 15 }]));
 messages = section?.messages || [];
 } catch (err) {
 return { programId: program.id, programName: program.name, error: err.message };
@@ -278,7 +309,7 @@ const newRows = [];
 for (const msg of messages) {
 if (seen.has(msg.id)) continue;
 let detail;
-try { detail = await getMessageDetail(msg.id); } catch (err) { continue; } // transient fetch failure -- try again next scan, don't mark seen
+try { detail = await withRetryOn403(() => getMessageDetail(msg.id)); } catch (err) { continue; } // transient fetch failure -- try again next scan, don't mark seen
 seen.add(msg.id);
 
 const extractor = EXTRACTORS[program.extractorKey];
@@ -324,22 +355,36 @@ const results = [];
 for (const program of data.loyaltyPrograms) {
 const result = await scanOneProgram(program, { force });
 if (result) results.push(result);
+// A small gap between programs, not just the 403 retry above --
+// spreads out the burst of searches + message fetches across 9
+// programs instead of firing them in a tight loop, which is the more
+// likely reason a 403 only showed up on the LAST couple of programs.
+await new Promise((r) => setTimeout(r, 300));
 }
 queueSave();
 return results;
 }
 
 // Never a bare count, per this project's own standing convention --
-// names which programs/labels/dates actually changed.
+// names which programs/labels/dates actually changed. Reported
+// directly as a real gap: a program that scanned fine but found
+// nothing new used to be silently dropped from this message entirely
+// (the old `if (!r.newRows) return;`), which read as "this program
+// wasn't checked at all" rather than "checked, nothing new" -- every
+// result now gets its own line, no matter how uneventful.
 function summariseResults(results) {
 const lines = [];
 results.forEach((r) => {
-if (!r || r.skipped) return;
+if (!r) return;
+if (r.skipped) { lines.push(`${r.programName || r.programId}: already checked this month (use Check now to force it).`); return; }
 if (r.error) { lines.push(`${r.programName || r.programId}: scan failed — ${r.error}`); return; }
-if (!r.newRows) return;
+if (!r.newRows) {
+lines.push(`${r.programName}: nothing new${r.unmatched ? ` (${r.unmatched} email${r.unmatched === 1 ? '' : 's'} checked, none recognised)` : ' (no matching emails found)'}.`);
+return;
+}
 lines.push(`${r.programName} — found ${r.newRows} new reading${r.newRows === 1 ? '' : 's'}${r.unmatched ? ` (${r.unmatched} email${r.unmatched === 1 ? '' : 's'} not recognised)` : ''}.`);
 });
-return lines.length ? lines.join(' ') : 'Nothing new — every active program was either already checked this month or had no new matching email.';
+return lines.length ? lines.join(' ') : 'Nothing checked — no active programs with a sender address configured.';
 }
 
 // ---- Travel-strip / ticker helper -----------------------------------------
@@ -387,7 +432,7 @@ const readings = latestBalancesFor(program);
 const rows = readings.map((r) => `<div class="loyalty-reading">
 <strong>${escapeHtml(r.label)}</strong>
 <span class="loyalty-reading-value">${r.balance != null ? escapeHtml(r.unit === '£' || r.unit === '£ worth of points' ? `£${r.balance.toLocaleString('en-GB')}` : r.balance.toLocaleString('en-GB')) : '—'} ${escapeHtml(r.unit && r.unit !== '£' ? r.unit : '')}</span>
-<span class="settings-note">as of ${escapeHtml(r.date)}${r.expiryDate ? ` · expires ${escapeHtml(r.expiryDate)}` : ''}</span>
+<span class="settings-note">as of ${escapeHtml(r.date)}${r.expiryDate ? ` · expires ${escapeHtml(r.expiryDate)}` : ''}${r.sourceMessageId === 'manual' ? ' · entered by hand' : ''}</span>
 </div>`).join('');
 const tier = readings.find((r) => r.tier)?.tier || '';
 return `<div class="account-card" data-loyalty-program="${escapeHtml(program.id)}">
@@ -412,6 +457,13 @@ ${rows || '<div class="empty">No readings yet — run a scan, or Check now below
 ${!program.builtIn ? `<button type="button" class="sync-btn sm inline" data-loyalty-remove="${escapeHtml(program.id)}">Remove</button>` : ''}
 </div>
 <div class="settings-note" id="loyalty-status-${escapeHtml(program.id)}">${escapeHtml(lastCheckMessages.get(program.id) || '')}</div>
+<div class="settings-note" style="margin:8px 0 2px;font-weight:600;">Record a reading by hand</div>
+<div class="sync-row" style="align-items:flex-start;">
+<input type="text" placeholder="Label, e.g. Gold Plus points" data-loyalty-manual-label="${escapeHtml(program.id)}" style="flex:1 1 160px;">
+<input type="text" placeholder="Balance" data-loyalty-manual-balance="${escapeHtml(program.id)}" style="flex:0 1 90px;">
+<input type="text" placeholder="Unit (optional)" data-loyalty-manual-unit="${escapeHtml(program.id)}" style="flex:0 1 110px;">
+<button type="button" class="sync-btn sm inline" data-loyalty-manual-add="${escapeHtml(program.id)}">Record</button>
+</div>
 </div>
 </details>
 </div>`;
@@ -482,6 +534,24 @@ if (statusEl) statusEl.textContent = 'Checking…';
 const result = await scanOneProgram(program, { force: true });
 queueSave();
 lastCheckMessages.set(programId, summariseResults([result]));
+renderLoyaltyBalances();
+return;
+}
+const manualAddBtn = e.target.closest('[data-loyalty-manual-add]');
+if (manualAddBtn) {
+const programId = manualAddBtn.dataset.loyaltyManualAdd;
+const card = manualAddBtn.closest('[data-loyalty-program]');
+const labelInput = card?.querySelector('[data-loyalty-manual-label]');
+const balanceInput = card?.querySelector('[data-loyalty-manual-balance]');
+const unitInput = card?.querySelector('[data-loyalty-manual-unit]');
+const label = (labelInput?.value || '').trim();
+const balanceNum = Number((balanceInput?.value || '').replace(/,/g, '').trim());
+if (!label || !Number.isFinite(balanceNum)) return;
+data.loyaltyBalances.push(blankLoyaltyBalance({
+programId, label, date: todayStr(), balance: balanceNum,
+unit: (unitInput?.value || '').trim(), tier: '', expiryDate: '', sourceMessageId: 'manual',
+}));
+queueSave();
 renderLoyaltyBalances();
 return;
 }
