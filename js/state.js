@@ -1,5 +1,6 @@
 import { kvGet, kvSet, photoDelete } from './db.js';
 import { uid, todayStr, daysAgoStr, last7Dates, daysSince, daysUntil } from './utils.js';
+import { matchBrandLogo } from './brandLogos.js';
 
 const DATA_KEY = 'app-data';
 const REV_KEY = 'app-data-rev'; // separate from DATA_KEY so it never leaks into backup exports
@@ -1003,6 +1004,10 @@ seenMessageIds: [],
 // reliable phrase -- never required, purely a precision/efficiency
 // aid on top of the sender match.
 contentFilter: '',
+// Hotlinked logo image, same shape/mechanism as a Finance account's
+// own logoUrl (js/bankLogos.js) -- auto-matched against the program's
+// own name via js/brandLogos.js's matchBrandLogo(), or pasted by hand.
+logoUrl: '',
 ...fields,
 };
 }
@@ -1580,6 +1585,31 @@ colour: 'blue', // fixed palette, see ACCOUNT_COLOURS in financeaccounts.js -- a
 logoUrl: '', // pasted image URL (e.g. the provider's own Play Store listing icon) -- hotlinked, never downloaded/stored locally
 notes: '',
 createdAt: new Date().toISOString(),
+...fields,
+};
+}
+
+// js/features/vouchers.js built every voucher inline (no factory) until
+// `provider`/`logoUrl` made that a 4th/5th site needing the same two
+// fields added by hand -- exactly the bug class this project has hit
+// before. provider/logoUrl mirror blankFinanceAccount's own logoUrl
+// mechanism: provider is free text (datalist-suggested, see
+// vouchers.js's PROVIDER_SUGGESTIONS) auto-matched against
+// js/brandLogos.js's BRAND_LOGOS to fill logoUrl, or either can be
+// typed/pasted by hand. A voucher created from a loyalty-scan reading
+// (vouchers.js's applyVoucherLink/applyVoucherLinkToGroup) sets both
+// automatically from the real program name -- no matching needed there.
+function blankVoucher(fields = {}) {
+return {
+id: uid(), name: '', type: 'Voucher', value: '', expiry: '', notes: '',
+// The voucher/booking reference, if known -- see loyaltybalances.js's
+// voucher-linking review, which matches on this first.
+reference: '',
+// loyaltyBalances row ids that created/updated this voucher -- the
+// record-reference back-link to whichever readings fed it.
+sourceLoyaltyReadingIds: [],
+provider: '',
+logoUrl: '',
 ...fields,
 };
 }
@@ -2308,11 +2338,13 @@ return true;
 });
 if (!data.calendarStatus || typeof data.calendarStatus !== 'object' || Array.isArray(data.calendarStatus)) data.calendarStatus = {};
 if (!Array.isArray(data.vouchers)) data.vouchers = [];
-// reference/sourceLoyaltyReadingIds added for the loyalty-balances
-// voucher-linking review -- backfilled here since vouchers.js builds
-// its rows inline rather than through a blank*() factory.
+// Backfills every field blankVoucher() now defines (reference/
+// sourceLoyaltyReadingIds/provider/logoUrl) onto a voucher saved before
+// any of them existed -- now goes through the real factory instead of
+// a hand-listed default object, so a FUTURE field added to
+// blankVoucher() is backfilled here for free too.
 data.vouchers = data.vouchers.map((v) => ({
-reference: '', sourceLoyaltyReadingIds: [],
+...blankVoucher(),
 ...v,
 id: v.id || uid(),
 sourceLoyaltyReadingIds: Array.isArray(v.sourceLoyaltyReadingIds) ? v.sourceLoyaltyReadingIds : [],
@@ -2622,6 +2654,19 @@ data.loyaltyContentFiltersSeeded = true;
 if (!seed.contentFilter) return;
 const existing = data.loyaltyPrograms.find((p) => p.id === seed.id);
 if (existing && !existing.contentFilter) existing.contentFilter = seed.contentFilter;
+});
+}
+// Same one-time backfill idiom, for the 9 built-ins' real Play Store
+// icons (js/brandLogos.js) -- never overwrites a logoUrl the user
+// pasted in by hand, and never touches a user-added program (those
+// get matched live when added/edited, see vouchers.js's/
+// loyaltybalances.js's own matchBrandLogo() calls).
+if (!data.loyaltyLogosSeeded) {
+data.loyaltyLogosSeeded = true;
+data.loyaltyPrograms.forEach((p) => {
+if (p.logoUrl) return;
+const match = matchBrandLogo(p.name);
+if (match) p.logoUrl = match;
 });
 }
 if (!Array.isArray(data.loyaltyBalances)) data.loyaltyBalances = [];
@@ -3723,7 +3768,7 @@ TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureB
 blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS, LEG_DATE_FIELDS, STAY_TYPE_SUGGESTIONS,
 blankPackingItem, blankPackingModule, blankTripPacking, blankPackingListItem, PACKING_DURATION_TIERS, packingDurationTier, DEFAULT_PACKING_MODULES,
 blankMarriottAvailability, pruneMarriottAvailability,
-blankLoyaltyProgram, blankLoyaltyBalance,
+blankLoyaltyProgram, blankLoyaltyBalance, blankVoucher,
 blankPlannerEntry, blankPlannerActivity,
 blankAirbnbListing, blankAirbnbReservation, blankAirbnbKey, blankAirbnbKeyAssignment, KEY_CUSTODIAN_TYPES, blankFinanceAccount, SCHOOL_CALENDAR_SITES,
 CONTACT_STATUS_LABELS, CONTACT_MATCH_MIN_STAGE,

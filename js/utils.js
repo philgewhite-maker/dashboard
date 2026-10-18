@@ -196,6 +196,36 @@ return String(str == null ? '' : str)
 .replace(/'/g, '&#39;');
 }
 
+// A real logo image (hotlinked, never downloaded/stored locally) with a
+// coloured-initials fallback -- originally financeaccounts.js's own
+// accountBadgeHtml/bindLogoFallbacks, promoted here once a second and
+// third feature (Vouchers, Loyalty balances) wanted the identical
+// pattern rather than each growing its own copy. `extraClasses` carries
+// whatever the caller's own `.account-badge` modifier needs (a colour,
+// a size class) -- this function doesn't know or care what those mean.
+function logoBadgeHtml(logoUrl, initials, extraClasses = '') {
+const cls = `account-badge ${extraClasses}`.trim();
+if (logoUrl) {
+return `<span class="${cls} account-badge-logo"><img src="${escapeHtml(logoUrl)}" alt="" data-badge-img="1"><span class="account-badge-fallback" data-badge-fallback hidden>${escapeHtml(initials)}</span></span>`;
+}
+return `<span class="${cls}">${escapeHtml(initials)}</span>`;
+}
+// `img[error]` doesn't bubble, so the fallback-reveal has to be bound
+// per-image after insertion -- call this after every render that might
+// contain a logoBadgeHtml() output.
+function bindLogoFallbacks(root) {
+root?.querySelectorAll('img[data-badge-img]').forEach((img) => {
+img.addEventListener('error', () => {
+// closest() has to run BEFORE remove() -- once detached, the img has
+// no parent left to walk up from and the lookup silently finds
+// nothing, leaving the fallback stuck hidden behind a blank badge.
+const badge = img.closest('.account-badge');
+img.remove();
+badge?.querySelector('[data-badge-fallback]')?.removeAttribute('hidden');
+}, { once: true });
+});
+}
+
 // For plain text that may carry a stray HTML entity even though it was
 // never real markup -- confirmed live: an Eventim calendar (.ics)
 // invite's own LOCATION value literally contained "Vereinigtes
@@ -1335,7 +1365,7 @@ return classified.every((c) => c.isScreenshot) && looksLikeSameScreenshotPieces(
 
 export {
 todayStr, daysAgoStr, dateStrAdd, unfoldIcsLines, parseIcsProperty, icsDateTime, parseLooseDateTime, last7Dates, uid, daysSince, daysUntil, foldDiacritics, MISSING_KEY_LINK_HTML, SYNC_LINK_HTML, NOTION_LINK_HTML, TELEGRAM_BOT_LINK_HTML, looksLikeUrl, prettyUrl, stripHtmlForExtraction,
-escapeHtml, decodeHtmlEntities, setPanelCollapsed, affiliateLink, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, buildFlagMatcher, applyFlagMatcher, knownCityMap, knownScalarValues, pickChipHtml, splitCsvLine, scrollAndFlash, bindForm, bindBackdropClose,
+escapeHtml, decodeHtmlEntities, setPanelCollapsed, affiliateLink, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, buildFlagMatcher, applyFlagMatcher, knownCityMap, knownScalarValues, pickChipHtml, splitCsvLine, scrollAndFlash, bindForm, bindBackdropClose, logoBadgeHtml, bindLogoFallbacks,
 findMentions, COUNTRY_NAME_TO_NATIONALITY,
 resizeImageToBlob, fileToBase64, loadImage, cropThumbnailToBlob, loadJsPdf,
 hashFile, captureDateOf, betterCaptureDate, dateFromFilename,

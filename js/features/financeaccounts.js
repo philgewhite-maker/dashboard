@@ -6,7 +6,7 @@
 // actually connect them -- the connectivity itself was the ask, not
 // just capturing more fields.
 import { data, queueSave, blankFinanceAccount } from '../state.js';
-import { uid, escapeHtml, bindForm, daysUntil, scrollAndFlash } from '../utils.js';
+import { uid, escapeHtml, bindForm, daysUntil, scrollAndFlash, logoBadgeHtml, bindLogoFallbacks } from '../utils.js';
 import { matchBankLogo } from '../bankLogos.js';
 // Subscriptions carry the account link (subscription.accountId), so
 // changing it here has to redraw their panel too -- both sit on the
@@ -61,28 +61,12 @@ return (a.bank || a.name || '?').trim().slice(0, 2).toUpperCase();
 // Prefers a pasted logo image (e.g. the provider's own Play Store
 // listing icon, hotlinked -- never downloaded/stored locally, see
 // blankFinanceAccount's own comment) over the coloured-initials
-// fallback. `img[error]` doesn't bubble, so the fallback-reveal has to
-// be bound per-image after insertion -- see bindLogoFallbacks() below,
-// called after every render.
+// fallback -- now a thin wrapper around utils.js's shared
+// logoBadgeHtml/bindLogoFallbacks (promoted there once Vouchers and
+// Loyalty balances wanted the identical pattern; behaviour here is
+// unchanged).
 function accountBadgeHtml(a, sizeClass) {
-const cls = `account-badge ${escapeHtml(a.colour)} ${sizeClass || ''}`;
-const initials = escapeHtml(accountInitials(a));
-if (a.logoUrl) {
-return `<span class="${cls} account-badge-logo"><img src="${escapeHtml(a.logoUrl)}" alt="" data-badge-img="1"><span class="account-badge-fallback" data-badge-fallback hidden>${initials}</span></span>`;
-}
-return `<span class="${cls}">${initials}</span>`;
-}
-function bindLogoFallbacks(root) {
-root?.querySelectorAll('img[data-badge-img]').forEach((img) => {
-img.addEventListener('error', () => {
-// closest() has to run BEFORE remove() -- once detached, the img has
-// no parent left to walk up from and the lookup silently finds
-// nothing, leaving the fallback stuck hidden behind a blank badge.
-const badge = img.closest('.account-badge');
-img.remove();
-badge?.querySelector('[data-badge-fallback]')?.removeAttribute('hidden');
-}, { once: true });
-});
+return logoBadgeHtml(a.logoUrl, accountInitials(a), `${a.colour} ${sizeClass || ''}`);
 }
 
 // Same expiry-badge classes vouchers.js/subscriptions.js/the old

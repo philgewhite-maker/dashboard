@@ -21,9 +21,10 @@
 //     onto the AVIOS label text, not part of the Avios figure). Every
 //     regex here uses `\s*` (zero-or-more), never assumes a real gap.
 import { data, queueSave, blankLoyaltyProgram, blankLoyaltyBalance } from '../state.js';
-import { escapeHtml, uid, daysSince, todayStr } from '../utils.js';
+import { escapeHtml, uid, daysSince, todayStr, logoBadgeHtml, bindLogoFallbacks } from '../utils.js';
 import { fetchMailSearches, getMessageDetail } from '../googlemail.js';
 import { voucherChipHtml } from './vouchers.js';
+import { matchBrandLogo } from '../brandLogos.js';
 
 // How often a program is actually re-checked, independent of this
 // file being invoked daily by js/features/scheduled.js's own (much
@@ -598,8 +599,10 @@ ${r.voucherId ? voucherChipHtmlFor(r.voucherId) : ''}
 </div>`;
 }).join('');
 const tier = readings.find((r) => r.tier)?.tier || '';
+const programInitials = (program.name || '?').trim().slice(0, 2).toUpperCase();
 return `<div class="account-card" data-loyalty-program="${escapeHtml(program.id)}">
 <div class="account-summary" style="cursor:default;">
+${logoBadgeHtml(program.logoUrl, programInitials, 'plum')}
 <strong>${escapeHtml(program.name)}</strong>
 ${tier ? `<span class="tag-chip tag-chip-blue">${escapeHtml(tier)}</span>` : ''}
 ${methodBadgeHtml(program)}
@@ -637,7 +640,7 @@ function renderLoyaltyBalances() {
 const panel = document.getElementById('loyalty-balances-panel');
 if (!panel) return;
 const list = document.getElementById('loyalty-balances-list');
-if (list) list.innerHTML = data.loyaltyPrograms.map(programCardHtml).join('');
+if (list) { list.innerHTML = data.loyaltyPrograms.map(programCardHtml).join(''); bindLogoFallbacks(list); }
 const countEl = document.getElementById('loyalty-balances-count');
 if (countEl) {
 const n = data.loyaltyPrograms.filter((p) => p.active).length;
@@ -760,7 +763,7 @@ const senderInput = document.getElementById('loyalty-add-sender');
 const name = nameInput.value.trim();
 const senders = senderInput.value.split(',').map((s) => s.trim()).filter(Boolean);
 if (!name || !senders.length) return;
-data.loyaltyPrograms.push(blankLoyaltyProgram({ id: uid(), name, senderAddresses: senders, extractorKey: '' }));
+data.loyaltyPrograms.push(blankLoyaltyProgram({ id: uid(), name, senderAddresses: senders, extractorKey: '', logoUrl: matchBrandLogo(name) || '' }));
 queueSave();
 nameInput.value = '';
 senderInput.value = '';

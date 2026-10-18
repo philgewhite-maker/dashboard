@@ -1,8 +1,27 @@
-import { data, queueSave } from '../state.js';
-import { uid, escapeHtml, bindForm, daysUntil, scrollAndFlash } from '../utils.js';
+import { data, queueSave, blankVoucher } from '../state.js';
+import { escapeHtml, bindForm, daysUntil, scrollAndFlash, logoBadgeHtml, bindLogoFallbacks } from '../utils.js';
 import { pendingClassifications, pendingVoucherLinks, setLabelKind, markVoucherLinked, markVoucherSkipped } from './loyaltybalances.js';
+import { matchBrandLogo } from '../brandLogos.js';
 
 const VOUCHER_TYPES = ['Voucher', 'Credit', 'Cheque', 'Refund', 'Other'];
+
+// Starter suggestions for the provider datalist, unioned at render time
+// with every provider value already saved across data.vouchers (and
+// every loyalty program's own name) -- same "seed list UNION values
+// already typed" convention as connections.js's existingTagValues()/
+// MILESTONE_SUGGESTIONS, so a one-off typed provider becomes a future
+// suggestion rather than needing to be retyped identically forever.
+const PROVIDER_SUGGESTIONS = ['British Airways', 'Marriott Bonvoy', 'Virgin Atlantic', 'Tesco', 'Boots', 'Hertz', 'Sixt', 'Miles & More', 'Airbnb', 'Mastercard'];
+function existingProviderValues() {
+const seen = new Map();
+PROVIDER_SUGGESTIONS.forEach((n) => seen.set(n.toLowerCase(), n));
+data.loyaltyPrograms.forEach((p) => { if (p.name) seen.set(p.name.toLowerCase(), p.name); });
+data.vouchers.forEach((v) => { if (v.provider) seen.set(v.provider.toLowerCase(), v.provider); });
+return [...seen.values()].sort((a, b) => a.localeCompare(b));
+}
+function providerDatalistHtml() {
+return `<datalist id="taglist-voucher-provider">${existingProviderValues().map((n) => `<option value="${escapeHtml(n)}">`).join('')}</datalist>`;
+}
 
 // The canonical voucher reference -- this record type had none until
 // now (dashboard/CLAUDE.md's own Record-reference standards table
@@ -49,7 +68,7 @@ renderVoucherReview();
 const list = document.getElementById('vouchers-list');
 document.getElementById('vouchers-count').textContent = data.vouchers.length + (data.vouchers.length === 1 ? ' item' : ' items');
 if (data.vouchers.length === 0) {
-list.innerHTML = '<div class="empty">Nothing tracked yet. Add one below.</div>';
+list.innerHTML = '<div class="empty">Nothing tracked yet. Add one below.</div>' + providerDatalistHtml();
 return;
 }
 const sorted = [...data.vouchers].sort((a, b) => {
@@ -70,8 +89,11 @@ badgeHtml = `<span class="expiry-badge soon">${dn === 0 ? 'Expires today' : dn +
 badgeHtml = `<span class="expiry-badge">${dn}d left</span>`;
 }
 }
+const vInitials = (v.provider || v.name || '?').trim().slice(0, 2).toUpperCase();
 return `<div class="voucher-row" data-voucher-row="${v.id}">
-<div class="voucher-id">
+<div class="voucher-id" style="display:flex;gap:8px;align-items:flex-start;">
+${logoBadgeHtml(v.logoUrl, vInitials, 'plum')}
+<div style="flex:1 1 auto;min-width:0;">
 <input type="text" autocomplete="off" class="voucher-edit voucher-name-edit" data-field="name" data-voucher-id="${v.id}" value="${escapeHtml(v.name)}">
 <div class="voucher-meta">
 <select class="voucher-edit voucher-type-edit" data-field="type" data-voucher-id="${v.id}">
@@ -80,7 +102,9 @@ ${VOUCHER_TYPES.map((t) => `<option value="${t}" ${t === v.type ? 'selected' : '
 <input type="text" autocomplete="off" class="voucher-edit voucher-value-edit" data-field="value" data-voucher-id="${v.id}" value="${escapeHtml(v.value || '')}" placeholder="Value">
 </div>
 </div>
+</div>
 <input type="text" autocomplete="off" class="voucher-edit voucher-notes-edit" data-field="notes" data-voucher-id="${v.id}" value="${escapeHtml(v.notes || '')}" placeholder="Notes">
+<input type="text" autocomplete="off" class="voucher-edit voucher-provider-edit" list="taglist-voucher-provider" data-field="provider" data-provider-blur="${v.id}" data-voucher-id="${v.id}" value="${escapeHtml(v.provider || '')}" placeholder="Provider (optional)" title="Who the voucher is from -- matched against a real logo when it's a known brand (British Airways, Airbnb, Mastercard...).">
 <input type="text" autocomplete="off" class="voucher-edit voucher-reference-edit" data-field="reference" data-voucher-id="${v.id}" value="${escapeHtml(v.reference || '')}" placeholder="Reference (optional)" title="A voucher/booking reference, if it has one -- the loyalty-scan review matches on this to offer a confident 'Update' instead of risking a merge with an unrelated voucher.">
 <div class="voucher-expiry">
 <input type="date" class="voucher-edit expiry-date-edit" data-field="expiry" data-voucher-id="${v.id}" value="${escapeHtml(v.expiry || '')}">
@@ -91,7 +115,7 @@ ${(v.sourceLoyaltyReadingIds || []).length ? `<span class="tag-chip" data-open-l
 <span class="del-x" style="opacity:1;" data-del-voucher="${v.id}">&times;</span>
 </div>
 </div>`;
-}).join('');
+}).join('') + providerDatalistHtml();
 
 list.querySelectorAll('[data-field][data-voucher-id]').forEach((el) => {
 el.addEventListener('change', () => {
@@ -100,6 +124,19 @@ if (!v) return;
 v[el.dataset.field] = el.value.trim();
 renderVouchers();
 queueSave();
+});
+});
+// Auto-fills a logo the moment a typed provider matches a known brand
+// -- `blur`, not `change`, so retyping an already-correct provider
+// still re-triggers the fill-in (same reasoning as financeaccounts.js's
+// identical bank-logo blur handler), and only while logoUrl is still
+// empty so a manually-set one is never silently overwritten.
+list.querySelectorAll('[data-provider-blur]').forEach((el) => {
+el.addEventListener('blur', () => {
+const v = data.vouchers.find((x) => x.id === el.dataset.providerBlur);
+if (!v || v.logoUrl) return;
+const match = matchBrandLogo(el.value.trim() || v.provider);
+if (match) { v.logoUrl = match; queueSave(); renderVouchers(); }
 });
 });
 list.querySelectorAll('[data-del-voucher]').forEach((el) => {
@@ -115,6 +152,7 @@ e.stopPropagation();
 revealLoyaltyReading(el.dataset.openLoyaltyReading);
 });
 });
+bindLogoFallbacks(list);
 }
 
 // ---- Review queue: loyalty-scan readings waiting on a human decision ----
@@ -225,6 +263,12 @@ const value = readingValueText(reading);
 if (value) voucher.value = value;
 if (reading.expiryDate) voucher.expiry = reading.expiryDate;
 if (reading.reference && !voucher.reference) voucher.reference = reading.reference;
+// Backfills provider/logo onto a voucher that predates this field (or
+// was added by hand with neither set) -- the real program name is an
+// exact match, never a guess, so it's always worth filling in for
+// free the moment a reading actually links to this voucher.
+if (!voucher.provider) voucher.provider = program.name;
+if (!voucher.logoUrl) voucher.logoUrl = matchBrandLogo(program.name) || '';
 const note = `Updated from ${program.name} scan (${reading.date}): ${readingSummaryText(reading)}.`;
 voucher.notes = voucher.notes ? `${voucher.notes} | ${note}` : note;
 voucher.sourceLoyaltyReadingIds = [...(voucher.sourceLoyaltyReadingIds || []), reading.id];
@@ -235,8 +279,9 @@ function applyVoucherLink(reading, program, decision, pickedId) {
 if (decision === 'skip') { markVoucherSkipped(reading.id); return; }
 const targetId = decision === 'pick' ? pickedId : decision.startsWith('update:') ? decision.slice(7) : '';
 if (targetId) { applyUpdateToVoucher(reading, program, targetId); return; }
-// decision === 'new'
-const voucher = { id: uid(), name: `${program.name} — ${reading.label}`, type: 'Voucher', value: readingValueText(reading), expiry: reading.expiryDate || '', notes: `From ${program.name} scan, ${reading.date}.`, reference: reading.reference || '', sourceLoyaltyReadingIds: [reading.id] };
+// decision === 'new' -- provider is the real program name (exact, no
+// matching needed) and logoUrl comes free from it too, when seeded.
+const voucher = blankVoucher({ name: `${program.name} — ${reading.label}`, value: readingValueText(reading), expiry: reading.expiryDate || '', notes: `From ${program.name} scan, ${reading.date}.`, reference: reading.reference || '', sourceLoyaltyReadingIds: [reading.id], provider: program.name, logoUrl: matchBrandLogo(program.name) || '' });
 data.vouchers.push(voucher);
 markVoucherLinked(reading.id, voucher.id);
 }
@@ -253,7 +298,7 @@ function applyVoucherLinkToGroup(reading, program, decision, pickedId, allReadin
 if (decision === 'skip') { allReadings.forEach((r) => markVoucherSkipped(r.id)); return; }
 let targetId = decision === 'pick' ? pickedId : decision.startsWith('update:') ? decision.slice(7) : '';
 if (!targetId) {
-const voucher = { id: uid(), name: `${program.name} — ${reading.label}`, type: 'Voucher', value: '', expiry: '', notes: '', reference: '', sourceLoyaltyReadingIds: [] };
+const voucher = blankVoucher({ name: `${program.name} — ${reading.label}`, provider: program.name, logoUrl: matchBrandLogo(program.name) || '' });
 data.vouchers.push(voucher);
 targetId = voucher.id;
 }
@@ -321,22 +366,24 @@ const typeInput = document.getElementById('voucher-type-input');
 const valueInput = document.getElementById('voucher-value-input');
 const expiryInput = document.getElementById('voucher-expiry-input');
 const notesInput = document.getElementById('voucher-notes-input');
+const providerInput = document.getElementById('voucher-provider-input');
 const name = nameInput.value.trim();
 if (!name) return;
-data.vouchers.push({
-id: uid(),
+const provider = (providerInput?.value || '').trim();
+data.vouchers.push(blankVoucher({
 name,
 type: typeInput.value,
 value: valueInput.value.trim(),
 expiry: expiryInput.value,
 notes: notesInput.value.trim(),
-reference: '',
-sourceLoyaltyReadingIds: [],
-});
+provider,
+logoUrl: provider ? (matchBrandLogo(provider) || '') : '',
+}));
 nameInput.value = '';
 valueInput.value = '';
 expiryInput.value = '';
 notesInput.value = '';
+if (providerInput) providerInput.value = '';
 renderVouchers();
 queueSave();
 });
