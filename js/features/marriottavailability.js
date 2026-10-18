@@ -283,12 +283,23 @@ if (months.includes(date.slice(0, 7))) { delete byDate[date]; replacedCount++; }
 });
 });
 
+// Counts unique DATE KEYS actually added, not raw entries processed --
+// confirmed live as a real discrepancy (status said "1112 dates",
+// the panel's own total said "1080"): the scan script's own v11
+// changelog already flags that a calendar's spillover days can be
+// read twice, so the same (nights, resort, roomType, date) can appear
+// more than once in one import; the object-key assignment below
+// already dedupes it correctly, the COUNT just wasn't matching that.
 let dateCount = 0;
 parsed.entries.forEach((e) => {
 if (!store.dates[e.nights]) store.dates[e.nights] = {};
 if (!store.dates[e.nights][e.resort]) store.dates[e.nights][e.resort] = {};
 if (!store.dates[e.nights][e.resort][e.roomType]) store.dates[e.nights][e.resort][e.roomType] = {}; // kept even when empty -- see blankMarriottAvailability's own comment
-if (e.date) { store.dates[e.nights][e.resort][e.roomType][e.date] = e.points; dateCount++; }
+if (e.date) {
+const isNew = !Object.prototype.hasOwnProperty.call(store.dates[e.nights][e.resort][e.roomType], e.date);
+store.dates[e.nights][e.resort][e.roomType][e.date] = e.points;
+if (isNew) dateCount++;
+}
 });
 
 nightsInImport.forEach((nights) => months.forEach((month) => { store.coverage[`${nights}|${month}`] = now; }));

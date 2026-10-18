@@ -246,6 +246,20 @@
 //     into the Travel tab's textarea was clumsy for an object this
 //     size. Upload the .json file via the panel's own file input
 //     instead; the copy()+paste route still works if preferred.
+//   - v16: fixes a real bug reported directly -- a live run came back
+//     with "0 points (potential: 0)" for an account that genuinely
+//     has a large balance. Root cause: Number('') is 0 in JavaScript,
+//     not NaN, so tryCaptureBalanceWidget() silently reported a
+//     confident "0" whenever it read the ".points-search" widget's
+//     own figures before they'd actually populated (an 800ms fixed
+//     wait, not always enough), rather than failing visibly. Now
+//     treats an empty/non-numeric read as "not found yet" and polls
+//     up to ~4s instead of one fixed wait. Also reported directly: a
+//     run that found NO balance at all gave no clue why, so every
+//     real branch here now logs -- whether a day button existed to
+//     click, which one it clicked, and (if the widget never showed
+//     real figures) whether ".points-search" appeared in the DOM at
+//     all or not, which are two genuinely different problems to chase.
 //
 // If Marriott changes their page layout, the selectors below will stop
 // matching -- that's expected eventually, not a bug in this script. Run
@@ -257,12 +271,12 @@
 
 import { todayStr } from '../utils.js';
 
-const SCAN_SCRIPT_VERSION = 'v15';
+const SCAN_SCRIPT_VERSION = 'v16';
 
 // ---- Everything below this line must be self-contained -- see the
 // HARD CONSTRAINT note at the top of this file. ------------------------
 async function marriottAvailabilityScan(CONFIG) {
-  const SCRIPT_VERSION = 'v15'; // kept as a literal, not a reference to the outer const -- toString() drops the closure
+  const SCRIPT_VERSION = 'v16'; // kept as a literal, not a reference to the outer const -- toString() drops the closure
   const NIGHT_COUNTS = CONFIG.nightCounts;
   const GUESTS = CONFIG.guests; // required field -- the search silently fails its own validation without it (confirmed live)
   const MONTHS_TO_SCAN = CONFIG.monthsToScan; // TOTAL distinct months read, INCLUDING the one currently selected on the search form -- e.g. starting on November, 3 covers Nov/Dec/Jan
@@ -558,23 +572,70 @@ async function marriottAvailabilityScan(CONFIG) {
   // of this file for why the day-selection side effect this leaves
   // behind doesn't matter for anything that happens afterward.
   async function tryCaptureBalanceWidget() {
+    // Logged unconditionally, not just on failure -- confirmed live as
+    // a real gap: the original version returned silently null here
+    // with nothing in the console to say WHY (no day button at all?
+    // click didn't land? widget never appeared?), which is exactly the
+    // ambiguity that came up after a real run showed no balance and
+    // there was no way to tell which of those actually happened.
     const dayBtn = document.querySelector('td.week-day button.day.enabled');
-    if (!dayBtn) return null;
+    if (!dayBtn) {
+      console.warn('Points balance: no enabled day button found on this resort\'s calendar to click -- skipping the balance widget for this run.');
+      return null;
+    }
+    console.log(`Points balance: clicking day "${dayBtn.getAttribute('aria-label') || dayBtn.textContent.trim()}" to try to reveal the balance widget.`);
     dayBtn.click();
-    await sleep(800);
-    const widget = document.querySelector('.points-search');
-    if (!widget) return null;
-    const rows = [...widget.querySelectorAll('.points-searchdetails')];
-    const readRow = (label) => {
+
+    // Reads a row's text WITHOUT coercing "not populated yet" into a
+    // number -- Number('') is 0 in JS, not NaN, so the original version
+    // of this function silently reported a confident "0" whenever the
+    // widget's own async figures hadn't finished rendering by the time
+    // this read it (confirmed live: a real account came back as
+    // "0 points, potential 0", not a missing balance -- exactly this
+    // bug, not a wrong account or a wrong selector). An empty string
+    // after stripping non-digits now returns null (not found yet)
+    // instead of 0 (found, and is zero).
+    const readRow = (rows, label) => {
       const row = rows.find((r) => (r.querySelector('.points-key')?.textContent || '').trim().toLowerCase().startsWith(label.toLowerCase()));
-      const text = row?.querySelector('.points-text')?.textContent || '';
-      const n = Number(text.replace(/[^\d]/g, ''));
+      const text = (row?.querySelector('.points-text')?.textContent || '').trim();
+      if (!text) return null;
+      const digits = text.replace(/[^\d]/g, '');
+      if (!digits) return null;
+      const n = Number(digits);
       return Number.isFinite(n) ? n : null;
     };
-    const current = readRow('Current Balance');
-    const potential = readRow('Potential Balance');
-    if (current == null && potential == null) return null;
-    return { current, potential };
+
+    // Polls rather than a single fixed sleep -- 800ms was apparently not
+    // always enough for the widget's own figures to populate after it
+    // first appears in the DOM. Gives it up to ~4s total, checking every
+    // 400ms, and returns as soon as BOTH figures have real text rather
+    // than racing a worst-case fixed wait every time.
+    let widgetEverSeen = false;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      await sleep(400);
+      const widget = document.querySelector('.points-search');
+      if (!widget) continue;
+      widgetEverSeen = true;
+      const rows = [...widget.querySelectorAll('.points-searchdetails')];
+      const current = readRow(rows, 'Current Balance');
+      const potential = readRow(rows, 'Potential Balance');
+      if (current != null || potential != null) {
+        console.log(`Points balance widget read after ${(attempt + 1) * 400}ms: current=${current}, potential=${potential}.`);
+        return { current, potential };
+      }
+    }
+    // Distinguishes the two real failure shapes rather than one flat
+    // "didn't work" -- confirmed directly useful: without this, there
+    // was no way to tell "the click didn't open the widget at all"
+    // (a wrong selector or the click not registering) apart from "it
+    // opened but its own figures never populated" (a timing issue) --
+    // genuinely different things to fix.
+    if (widgetEverSeen) {
+      console.warn('Points balance: the ".points-search" widget appeared but its Current/Potential Balance figures stayed empty for ~4s -- giving up rather than guessing.');
+    } else {
+      console.warn('Points balance: clicked the day but ".points-search" never appeared in the page at all within ~4s -- either this click did not open it, or the real trigger is something else (e.g. a different day, or the click needs to land on an inner element).');
+    }
+    return null;
   }
 
   // Confirmed from a real captured console line ("Owner Contracts -
