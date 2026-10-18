@@ -79,20 +79,34 @@ metrics: [{ label: 'Bonvoy points', balance: Number(main[1].replace(/,/g, '')), 
 };
 }
 
-// Real example: "Membership tier: Red<br>Membership number:
-// 1054957491<br>Virgin Points: 87,896<sup>&#8225;</sup><br>Member
-// since: 7 Aug 2013" -- textContent drops every <br>, so this is read
-// as one run-together string; `\s*` after each colon covers both the
-// gapless and gapped case.
-function extractVirginFlyingClub(bodyText) {
-const text = String(bodyText || '');
-const main = text.match(/Membership tier:\s*(\w+)\s*Membership number:\s*(\d+)\s*Virgin Points:\s*([\d,]+)/i);
-if (!main) return null;
+// A real architectural gap, confirmed live the SAME way Miles & More's
+// was: this sender's own text/plain MIME part is just a "Can't see
+// this email?" + unsubscribe footer, no account data in it at all --
+// js/googlemail.js's bodyTextFromPayload() prefers text/plain whenever
+// ANY part exists, so bodyText never has anything to match here
+// regardless of how the regex is written (confirmed directly: "28
+// emails found, none recognised" wasn't a missing/rare template, it
+// was every single one being unreachable via bodyText). Reads bodyHtml
+// instead. Two real template wordings confirmed from two different
+// real fetched emails, both handled: an older one with its own
+// "Membership tier:" line, and the more common one (confirmed live,
+// Sep 2026) that folds the tier into the heading as "Your account
+// summary : Red member" with no separate "Membership tier:" line at
+// all -- `<strong>Label:</strong> value` is matched directly against
+// the raw tags rather than via textContent, since that's the exact
+// shape confirmed in the real HTML.
+function extractVirginFlyingClub(bodyText, subject, bodyHtml) {
+const html = String(bodyHtml || '');
+if (!html) return null;
+const pointsMatch = html.match(/Virgin Points:<\/strong>\s*([\d,]+)/i);
+if (!pointsMatch) return null;
+const numberMatch = html.match(/Membership number:<\/strong>\s*(\d+)/i);
+const tierMatch = html.match(/Membership tier:<\/strong>\s*(\w+)/i) || html.match(/account summary\s*:\s*(\w+)\s*member/i);
 return {
-membershipNumber: main[2],
-tier: main[1],
+membershipNumber: numberMatch ? numberMatch[1] : '',
+tier: tierMatch ? tierMatch[1].trim() : '',
 date: '',
-metrics: [{ label: 'Virgin Points', balance: Number(main[3].replace(/,/g, '')), unit: 'points' }],
+metrics: [{ label: 'Virgin Points', balance: Number(pointsMatch[1].replace(/,/g, '')), unit: 'points' }],
 };
 }
 
@@ -283,7 +297,13 @@ async function scanOneProgram(program, { force } = {}) {
 if (!program.active || !program.senderAddresses.length) return null;
 if (!isProgramDue(program, force)) return { programId: program.id, programName: program.name, skipped: true };
 
-const query = `from:(${program.senderAddresses.join(' OR ')})`;
+// contentFilter (e.g. `"Your account summary"` for Virgin,
+// `subject:"mileage balance"` for Miles & More) narrows a high-volume
+// sender down to the emails actually worth fetching -- reported
+// directly as worth doing, both for efficiency and because it surfaces
+// the right email even if pure marketing from the same sender would
+// otherwise crowd it out of the fetch window.
+const query = `from:(${program.senderAddresses.join(' OR ')})${program.contentFilter ? ` ${program.contentFilter}` : ''}`;
 let messages = [];
 try {
 // 400 days, not 60 -- confirmed live as a real bug: Boots' own

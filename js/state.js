@@ -992,6 +992,17 @@ extractionMethod: '', aiCallCount: 0, lastAiCallAt: '',
 // matches (or whose AI fallback came back empty) gets re-fetched,
 // and for the AI path re-billed, on every single scan forever.
 seenMessageIds: [],
+// Optional extra Gmail search terms (e.g. `"Your account summary"` or
+// `subject:"mileage balance"`), appended to the sender-only query --
+// reported directly as worth doing for a sender whose real balance
+// content is known to sit in only SOME of its emails, to avoid
+// wasting fetches on the rest and to surface the right ones even if
+// they'd otherwise be crowded out by higher-volume marketing mail of
+// the same sender (same underlying problem the 400-day/maxEvents
+// widening already fought once). Blank for a program with no known
+// reliable phrase -- never required, purely a precision/efficiency
+// aid on top of the sender match.
+contentFilter: '',
 ...fields,
 };
 }
@@ -1019,7 +1030,7 @@ senderAddresses: ['TheBritishAirwaysClub@crm.ba.com'], builtIn: true },
 { id: 'loyalty-marriott', name: 'Marriott Bonvoy', extractorKey: 'marriott-bonvoy',
 senderAddresses: ['marriottbonvoy@email-marriott.com'], builtIn: true },
 { id: 'loyalty-virgin', name: 'Virgin Flying Club', extractorKey: 'virgin-flying-club',
-senderAddresses: ['flyingclub@emails.virginatlantic.com'], builtIn: true },
+senderAddresses: ['flyingclub@emails.virginatlantic.com'], contentFilter: '"Your account summary"', builtIn: true },
 { id: 'loyalty-tesco', name: 'Tesco Clubcard', extractorKey: 'tesco-clubcard',
 senderAddresses: ['no-reply@emails.tesco.com'], builtIn: true },
 { id: 'loyalty-boots', name: 'Boots Advantage Card', extractorKey: 'boots',
@@ -1039,7 +1050,7 @@ senderAddresses: ['loyalty@emails.hertz.com'], builtIn: true },
 { id: 'loyalty-sixt', name: 'SIXT ONE', extractorKey: 'sixt',
 senderAddresses: ['sixt.one@e.sixt.co.uk'], builtIn: true },
 { id: 'loyalty-miles-and-more', name: 'Miles & More', extractorKey: 'miles-and-more',
-senderAddresses: ['newsletter@mailing.milesandmore.com'], builtIn: true },
+senderAddresses: ['newsletter@mailing.milesandmore.com'], contentFilter: 'subject:"mileage balance"', builtIn: true },
 ];
 
 function pruneMarriottAvailability(store, today = todayStr()) {
@@ -2575,6 +2586,20 @@ if (!data.loyaltyProgramsSeededV2) {
 data.loyaltyProgramsSeededV2 = true;
 DEFAULT_LOYALTY_PROGRAMS_V2.forEach((p) => {
 if (!data.loyaltyPrograms.some((x) => x.id === p.id)) data.loyaltyPrograms.push(blankLoyaltyProgram(p));
+});
+}
+// Backfills contentFilter onto a program that already existed before
+// that field did -- the ordinary `{...blankLoyaltyProgram(), ...p}`
+// merge above only fills in a key p doesn't have AT ALL with the
+// blank default (''), it can't retroactively apply a SPECIFIC value
+// from DEFAULT_LOYALTY_PROGRAMS/_V2 to an already-seeded program.
+// One-time (never overwrites a value the user's own edit set).
+if (!data.loyaltyContentFiltersSeeded) {
+data.loyaltyContentFiltersSeeded = true;
+[...DEFAULT_LOYALTY_PROGRAMS, ...DEFAULT_LOYALTY_PROGRAMS_V2].forEach((seed) => {
+if (!seed.contentFilter) return;
+const existing = data.loyaltyPrograms.find((p) => p.id === seed.id);
+if (existing && !existing.contentFilter) existing.contentFilter = seed.contentFilter;
 });
 }
 if (!Array.isArray(data.loyaltyBalances)) data.loyaltyBalances = [];
