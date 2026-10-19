@@ -7,7 +7,7 @@ import { renderCalendarLimits } from './calendars.js';
 import { renderPackingModules, bindPackingModules } from './packing.js';
 import { renderTagCleanup } from './tagcleanup.js';
 import { testConnection, resolveDataSourceId } from '../notion.js';
-import { summarizeUsage, currentMonthKey } from '../ai.js';
+import { summarizeUsage, summarizeClaudeApiSpend, currentMonthKey } from '../ai.js';
 import { setShowSensitiveFields } from './connections.js';
 import { pullRemote } from '../sync/selfhost.js';
 import { restartAutoSync } from '../sync/autosync.js';
@@ -46,6 +46,68 @@ ${rows.map((r) => `<tr>
 <tfoot><tr><td>Total, ${escapeHtml(month)}</td><td></td><td></td><td></td><td>$${totalCost.toFixed(2)}${anyUnpriced ? '+' : ''}</td></tr></tfoot>
 </table>
 <div class="settings-note" style="margin:6px 0 0;">Estimated from reported token counts at list prices${anyUnpriced ? ', excluding models with no price on file' : ''}. Counted on this device only.</div>`;
+}
+
+// Short duration/time formatters for hour-granular display -- nothing
+// existing in utils.js goes below day granularity (daysSince/daysUntil),
+// and the 5-hour/weekly subscription windows need hours+minutes.
+function hoursMinsUntil(isoString) {
+if (!isoString) return '';
+const ms = new Date(isoString) - new Date();
+if (ms <= 0) return 'due now';
+const totalMins = Math.round(ms / 60000);
+const h = Math.floor(totalMins / 60);
+const m = totalMins % 60;
+return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+function shortAgo(isoString) {
+if (!isoString) return '';
+const ms = new Date() - new Date(isoString);
+if (ms < 0) return 'just now';
+const mins = Math.round(ms / 60000);
+if (mins < 1) return 'just now';
+if (mins < 60) return `${mins}m ago`;
+const hours = Math.round(mins / 60);
+if (hours < 48) return `${hours}h ago`;
+return `${Math.round(hours / 24)}d ago`;
+}
+
+// Two synced, cross-device figures distinct from the per-device,
+// current-month-only table renderUsage() shows above: a rolling
+// 12-month API spend total (js/ai.js's own recordUsage() pushes into
+// this every real call, from any device), and Pro/Max subscription
+// usage -- which the dashboard itself can never compute (get_usage
+// only exists inside a live Claude Code session), so this is only ever
+// as fresh as the last external scheduled check; both are null/empty
+// until something has actually written to them at least once.
+function renderClaudeUsage() {
+const el = document.getElementById('claude-usage-summary');
+if (!el) return;
+const spend = summarizeClaudeApiSpend(data.claudeApiSpend);
+const spendHtml = spend.monthCount
+? `<div class="settings-note" style="margin:0;font-weight:500;">All devices, last ${spend.monthCount} month${spend.monthCount === 1 ? '' : 's'}: $${spend.totalCost.toFixed(2)} (${spend.totalCalls.toLocaleString()} calls)</div>`
+: `<div class="settings-note" style="margin:0;">No synced spend data yet — this fills in as real API calls are made, from any device.</div>`;
+
+const sub = data.claudeSubscriptionUsage;
+let subHtml;
+if (!sub || !sub.asOf) {
+subHtml = `<div class="settings-note" style="margin:0;">No Claude subscription data yet — waiting for the first scheduled check (this PC only, via a Claude Code task).</div>`;
+} else {
+const fh = sub.fiveHour || {};
+const wk = sub.weekly || {};
+const lines = [];
+if (fh.percentUsed != null) lines.push(`5h window: ${fh.percentUsed}%, resets in ${hoursMinsUntil(fh.resetsAt)}`);
+if (wk.percentUsed != null) lines.push(`Weekly: ${wk.percentUsed}%, resets in ${hoursMinsUntil(wk.resetsAt)}`);
+if (wk.glideslopePoints != null) {
+const sign = wk.glideslopePoints >= 0 ? 'ahead of' : 'behind';
+lines.push(`Running ${Math.abs(wk.glideslopePoints).toFixed(1)} points ${sign} a flat pace this week`);
+}
+if (wk.projectedExhaustionAt) lines.push(`Projected to reach 100% around ${new Date(wk.projectedExhaustionAt).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}`);
+if (sub.spendEstimateUsd != null) lines.push(`~$${sub.spendEstimateUsd.toFixed(2)} API-equivalent this week`);
+subHtml = `<div class="settings-note" style="margin:0;">${lines.map((l) => escapeHtml(l)).join('<br>')}</div>
+<div class="settings-note" style="margin:2px 0 0;color:var(--muted);">as of ${escapeHtml(shortAgo(sub.asOf))}</div>`;
+}
+el.innerHTML = `<div style="margin-top:4px;">${spendHtml}</div><div style="margin-top:8px;">${subHtml}</div>`;
 }
 
 // Finds connections that ended up holding YOUR OWN details instead of the
@@ -258,6 +320,7 @@ renderAll();
 
 document.getElementById('refresh-usage-btn').addEventListener('click', renderUsage);
 await renderUsage();
+renderClaudeUsage();
 
 initDriveBackup();
 initPairing();

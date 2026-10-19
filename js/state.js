@@ -45,6 +45,17 @@ schoolCalendarUpdates: [], // one entry per detected term-date change, see js/fe
 setCompletionFinds: [],
 leaveYears: [], // one per UK holiday year ever touched -- see js/features/leave.js
 catSittingVisits: [], // {id, date, connectionId, status, notes, tripId} -- see js/features/catsitting.js
+// Synced, cross-device rolling 12-month API spend -- js/ai.js's own
+// recordUsage() already tracks this per-device in local-settings
+// (unsynced); this is the merged total every device's own delta pushes
+// into. See blankClaudeApiSpend below.
+claudeApiSpend: null,
+// Pro/Max subscription usage (5h/weekly %, glideslope, projected
+// exhaustion) -- fed by an external scheduled task (get_usage only
+// exists inside a live Claude Code session, see js/features/settings.js's
+// own comment), never computable in-browser. null until that task's
+// first run.
+claudeSubscriptionUsage: null,
 vouchers: [],
 businessIdeas: [],
 subscriptions: [],
@@ -908,6 +919,32 @@ const LEG_STATUS_LABELS = { unbooked: 'Not booked yet', booked: 'Booked', confir
 // carryover/starting-balance fields.
 function blankLeaveYear(fields = {}) {
 return { id: uid(), startDate: '', entitlementDays: 30, ...fields };
+}
+
+// ---- Claude usage & spend (js/features/settings.js renders both) ---------
+//
+// Synced, cross-device counterpart to js/ai.js's own per-device
+// `local-settings.apiUsage` -- that log is never synced (device-only,
+// per its own header comment); this is the merged rolling-12-month
+// total every device's recordUsage() delta-pushes into, keyed by month
+// so a stale/pruned month just drops out rather than needing its own
+// cleanup pass.
+function blankClaudeApiSpend(fields = {}) {
+return { months: {}, lastDeviceUpdateAt: '', ...fields };
+}
+// Pro/Max subscription usage -- fed entirely by an external scheduled
+// task (get_usage only exists inside a live Claude Code session, never
+// computable in the browser). `asOf` is the one field the UI leans on
+// to flag a stale/never-run state, since every other field here is
+// only ever as fresh as that task's last successful run.
+function blankClaudeSubscriptionUsage(fields = {}) {
+return {
+fiveHour: { percentUsed: null, resetsAt: '' },
+weekly: { percentUsed: null, resetsAt: '', glideslopePoints: null, projectedExhaustionAt: '' },
+spendEstimateUsd: null,
+asOf: '',
+...fields,
+};
 }
 
 // ---- Cat sitting (js/features/catsitting.js) ------------------------------
@@ -2707,6 +2744,10 @@ data.catSittingVisits = data.catSittingVisits.map((v) => ({ ...blankCatSittingVi
 const tripIds = new Set(data.trips.map((t) => t.id));
 data.catSittingVisits = data.catSittingVisits.filter((v) => !v.tripId || tripIds.has(v.tripId));
 }
+// Claude usage & spend -- see blankClaudeApiSpend/blankClaudeSubscriptionUsage's own comments.
+data.claudeApiSpend = { ...blankClaudeApiSpend(), ...(data.claudeApiSpend || {}) };
+if (!data.claudeApiSpend.months || typeof data.claudeApiSpend.months !== 'object') data.claudeApiSpend.months = {};
+data.claudeSubscriptionUsage = { ...blankClaudeSubscriptionUsage(), ...(data.claudeSubscriptionUsage || {}) };
 // Packing module library: array guard, then a ONE-TIME seed -- same
 // shape as data.ticker.tickerLettingSeeded. A deliberate deletion of a
 // built-in module must stick, not get silently restored on reload.
@@ -3986,7 +4027,7 @@ exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, SENSITIVE_BLOCKS,
 MAIL_SEARCH_KINDS, mailSearchLabel, blankMailSearch, blankMailTopic, blankMailRule, blankMailDismissal,
 TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureBatch, blankPendingImport, blankConnection, blankTelegramThread, blankReadingItem, blankCaptureDraft, blankJob, blankMediaItem, MEDIA_KINDS, MEDIA_STATUSES, blankMediaRecSource, blankMediaRecCandidate,
 blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS, LEG_DATE_FIELDS, STAY_TYPE_SUGGESTIONS,
-blankLeaveYear, blankCatSittingVisit,
+blankLeaveYear, blankCatSittingVisit, blankClaudeApiSpend, blankClaudeSubscriptionUsage,
 blankPackingItem, blankPackingModule, blankTripPacking, blankPackingListItem, PACKING_DURATION_TIERS, packingDurationTier, DEFAULT_PACKING_MODULES,
 blankMarriottAvailability, pruneMarriottAvailability,
 blankLoyaltyProgram, blankLoyaltyBalance, blankVoucher,

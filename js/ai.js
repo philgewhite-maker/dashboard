@@ -4,7 +4,7 @@
 // This only works because of the `anthropic-dangerous-direct-browser-access`
 // header — normal server-side calls don't need it, but a client-only app
 // with no backend does. See README for the tradeoffs.
-import { getLocalSettings, setLocalSetting } from './state.js';
+import { getLocalSettings, setLocalSetting, data, queueSave } from './state.js';
 import { fileToBase64, loadImage, cropThumbnailToBlob, hashFile, captureDateOf, betterCaptureDate, ensureBrowserReadableImage, todayStr } from './utils.js';
 import { parseCacheGet, parseCachePut } from './db.js';
 
@@ -69,6 +69,39 @@ output: prev.output + (usage.output_tokens || 0),
 };
 all[month] = monthEntry;
 await setLocalSetting('apiUsage', all);
+pushUsageToSynced(month, model, usage);
+}
+
+// Synced, cross-device counterpart to the per-device log just above --
+// each real call pushes its OWN tokens straight into
+// data.claudeApiSpend.months[month], merged additively (never
+// overwritten), so two devices' calls both land correctly instead of
+// racing to overwrite each other's running total. No delta-snapshot
+// bookkeeping needed: this runs exactly once per real call, the same
+// place the per-device log above already records it, so there's
+// nothing to double-count on a repeat save.
+function pushUsageToSynced(month, model, usage) {
+if (!data.claudeApiSpend || typeof data.claudeApiSpend !== 'object') return;
+if (!data.claudeApiSpend.months || typeof data.claudeApiSpend.months !== 'object') data.claudeApiSpend.months = {};
+const months = data.claudeApiSpend.months;
+const prev = months[month] || { calls: 0, input: 0, output: 0, cost: 0 };
+const price = PRICES_PER_MTOK[model];
+const inputTokens = usage.input_tokens || 0;
+const outputTokens = usage.output_tokens || 0;
+const callCost = price ? (inputTokens / 1e6) * price.input + (outputTokens / 1e6) * price.output : 0;
+months[month] = {
+calls: prev.calls + 1,
+input: prev.input + inputTokens,
+output: prev.output + outputTokens,
+cost: prev.cost + callCost,
+};
+// Rolling 12 months -- drop anything older so this never grows unbounded.
+const cutoff = new Date();
+cutoff.setMonth(cutoff.getMonth() - 12);
+const cutoffKey = cutoff.toISOString().slice(0, 7);
+Object.keys(months).forEach((k) => { if (k < cutoffKey) delete months[k]; });
+data.claudeApiSpend.lastDeviceUpdateAt = new Date().toISOString();
+queueSave();
 }
 
 // Rolls the stored buckets for one month into display rows plus a total.
@@ -86,6 +119,19 @@ if (cost === null) anyUnpriced = true; else totalCost += cost;
 return { purpose, model, calls: v.calls, input: v.input, output: v.output, cost };
 }).sort((a, b) => (b.cost || 0) - (a.cost || 0));
 return { rows, totalCost, anyUnpriced };
+}
+
+// Rolls up the synced, cross-device data.claudeApiSpend into one total --
+// the "all devices, last 12 months" figure Settings shows alongside the
+// per-device current-month breakdown summarizeUsage already produces.
+function summarizeClaudeApiSpend(claudeApiSpend) {
+const months = (claudeApiSpend && claudeApiSpend.months) || {};
+const entries = Object.values(months);
+return {
+totalCost: entries.reduce((sum, m) => sum + (m.cost || 0), 0),
+totalCalls: entries.reduce((sum, m) => sum + (m.calls || 0), 0),
+monthCount: entries.length,
+};
 }
 
 class MissingKeyError extends Error {
@@ -2494,7 +2540,7 @@ return { country: String((data && data.country) || '').trim() };
 
 export {
 MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot, quickScanScreenshot, scanForCaptureMarker,
-callTextJson, DEFAULT_MODEL, summarizeUsage, currentMonthKey, compareFaces,
+callTextJson, DEFAULT_MODEL, summarizeUsage, summarizeClaudeApiSpend, currentMonthKey, compareFaces,
 extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShoppingItem, searchAgentProvocateurElsewhere, searchEbayResaleEstimate, cleanEstimateText, searchDepartmentStoresForMissingSetPiece, generateAirbnbRateReview, analyseOngoingAccountValue, identifyProduct, translateText, romanizeName, parseCaptureIntent,
 resolveUrlTitle, resolveJobPostingUrl, resolveBookDetails, resolveSeriesBooks,
 identifyCountry, extractWellnessScreenshot,
