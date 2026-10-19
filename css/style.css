@@ -3974,8 +3974,13 @@ padding:6px;
    wherever it happens to land, so Brand/Range/Colour reads as one
    primary line and these as a clearly separate, lower-priority one.
    See inventoryHtml, shopping.js. */
-.inv-row-details{display:flex;gap:6px;flex:1 1 100%;flex-wrap:wrap;}
+.inv-row-details{display:flex;gap:6px;flex:1 1 100%;flex-wrap:wrap;align-items:center;}
 .inv-row-links{display:inline-flex;align-items:center;gap:3px;}
+
+/* Third line: resale estimate, who it fits, delete -- its own line
+   same way .inv-row-details is, so it doesn't wrap wherever it
+   happens to land after the details line above it. */
+.inv-row-bottom{display:flex;gap:8px;flex:1 1 100%;flex-wrap:wrap;align-items:center;}
 
 /* The eBay resale estimate -- a <details> rather than a plain span so
    each comparable listing can be a real link through to the actual

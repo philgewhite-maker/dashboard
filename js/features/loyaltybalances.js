@@ -632,6 +632,12 @@ const lastCheckMessages = new Map();
 function methodBadgeHtml(program) {
 if (program.extractionMethod === 'ai') return `<span class="tag-chip tag-chip-amber" title="Costs an AI call each scan — come back and ask for a deterministic extractor once you're confident this one's worth keeping.">AI-parsed (${program.aiCallCount || 0}x)</span>`;
 if (program.extractionMethod === 'deterministic') return `<span class="tag-chip" title="A real pattern match, no AI call — free and exact.">Deterministic</span>`;
+// Marriott Vacation Club only, as of writing -- there's no email to
+// scan at all, this number only ever arrives by hand-pasting a
+// DevTools console script's output. Links back to that script's own
+// "Copy scan script" step (Travel tab), per CLAUDE.md's rule that a
+// location named anywhere must be a real link, not bare prose.
+if (program.extractionMethod === 'manual-scrape') return `<span class="tag-chip tag-chip-blue inline-goto-link" data-goto-tab="travel" data-goto-target="#mvc-copy-btn" title="Not scanned from email -- pasted by hand from a DevTools console script run against the provider's own site. Click to jump to the scan script.">Manual scrape</span>`;
 return '';
 }
 

@@ -1249,20 +1249,26 @@ return o.photoId
 : `<div class="avatar sm inv-photo-empty" title="No photo yet"></div>`;
 }
 
+// Just the thumbnail up top, alongside Brand/Range/Colour -- every
+// control that DOES something (retake, save-from-url) moved out to
+// invPhotoControlsHtml, which sits with the product link icon instead.
+// Reported directly as wanted that way: "the button to add linked pic
+// etc should sit with the link icon" -- "etc" meaning both photo
+// controls, not just the save-from-url one.
 function invPhotoHtml(o) {
-return `<span class="inv-photo-wrap">
-${invPhotoThumbHtml(o)}
-<label class="todo-add-btn" for="inv-photo-file-${escapeHtml(o.id)}" title="Take or choose a photo" style="cursor:pointer;">&#128247;</label>
-<input type="file" id="inv-photo-file-${escapeHtml(o.id)}" accept="image/*" style="display:none;" data-inv-photo-file="${escapeHtml(o.id)}">
-</span>`;
+return `<span class="inv-photo-wrap">${invPhotoThumbHtml(o)}</span>`;
 }
 
-// Split out from invPhotoHtml so it can sit next to the product link
-// icon instead -- both are "fetch something via a URL" actions (the
-// product's own page vs. a photo of it), so they belong together
-// rather than the photo-from-url button living in the photo cluster.
 function invPhotoUrlBtnHtml(o) {
 return `<button type="button" class="todo-add-btn" data-inv-photo-url="${escapeHtml(o.id)}" title="Save a photo from a URL -- the product's own page, or a direct image link">&#128279;</button>`;
+}
+
+// Both photo controls (retake/choose, and save-from-url) plus the
+// product link, all in one cluster -- see invPhotoHtml's comment.
+function invPhotoControlsHtml(o) {
+return `<label class="todo-add-btn" for="inv-photo-file-${escapeHtml(o.id)}" title="Take or choose a photo" style="cursor:pointer;">&#128247;</label>
+<input type="file" id="inv-photo-file-${escapeHtml(o.id)}" accept="image/*" style="display:none;" data-inv-photo-file="${escapeHtml(o.id)}">
+${invPhotoUrlBtnHtml(o)}`;
 }
 
 function inventoryHtml() {
@@ -1293,11 +1299,13 @@ ${field(o, 'colour', 'Colour', '90px')}
 ${field(o, 'piece', 'Piece', '110px')}
 ${field(o, 'size', 'Size', '60px')}
 ${field(o, 'orderNumber', 'Order #', '90px')}
+<span class="inv-row-links">${linkHtml}${invPhotoControlsHtml(o)}</span>
 </span>
-<span class="inv-row-links">${linkHtml}${invPhotoUrlBtnHtml(o)}</span>
-<span class="inv-fits">${fitsHtml}</span>
+<span class="inv-row-bottom">
 ${resaleValueHtml(o)}
+<span class="inv-fits">${fitsHtml}</span>
 <span class="del-x" style="opacity:1;" data-inv-remove="${escapeHtml(o.id)}" title="Delete this item">&times;</span>
+</span>
 </div>`;
 }).join('');
 }

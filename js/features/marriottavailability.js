@@ -321,6 +321,14 @@ data.loyaltyBalances.push(blankLoyaltyBalance({ programId: 'loyalty-marriott-vc'
 };
 addLoyaltyReading('Points balance', pb.balance);
 addLoyaltyReading('Next Use Year', pb.potentialBalance);
+// Distinct from the Gmail-scan programs' 'deterministic'/'ai' --
+// there's no email here at all, this number only ever arrives via the
+// hand-pasted console-script output (see marriottscan.js). Loyalty
+// balances' own methodBadgeHtml() renders this as a badge linking back
+// to this panel's "Copy scan script" step, same record-reference
+// requirement as any other generated text naming a location.
+const mvcProgram = data.loyaltyPrograms.find((p) => p.id === 'loyalty-marriott-vc');
+if (mvcProgram) mvcProgram.extractionMethod = 'manual-scrape';
 }
 if (parsed.apiCaptures) store.apiCaptures = parsed.apiCaptures; // same reasoning -- whatever the console captured THIS run replaces last run's
 
