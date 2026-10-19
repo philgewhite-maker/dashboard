@@ -727,13 +727,15 @@ ${tier ? `<span class="tag-chip tag-chip-blue">${escapeHtml(tier)}</span>` : ''}
 ${methodBadgeHtml(program)}
 ${!program.active ? '<span class="candidate-tag">inactive</span>' : ''}
 </div>
-${rows || '<div class="empty">No readings yet — run a scan, or Check now below.</div>'}
+${rows || `<div class="empty">${program.id === 'loyalty-marriott-vc'
+? `No readings yet. This one isn't scanned from email -- paste a scan's results into <span class="inline-goto-link" data-goto-tab="travel" data-goto-target="#mvc-import-read-btn">Marriott availability &rarr; Import results</span> on the Travel tab, and its points balance is recorded here too.`
+: 'No readings yet — run a scan, or Check now below.'}</div>`}
 <details class="settings-item loyalty-settings-item">
 <summary class="loyalty-settings-summary"><h3>Settings</h3></summary>
 <div class="settings-block" style="margin-top:6px;">
 <label><input type="checkbox" ${program.showOnTravel ? 'checked' : ''} data-loyalty-show-travel="${escapeHtml(program.id)}"> Show on Travel tab</label>
 <label><input type="checkbox" ${program.active ? 'checked' : ''} data-loyalty-active="${escapeHtml(program.id)}"> Active</label>
-<div class="sync-row" style="margin-top:6px;">
+${program.senderAddresses.length || program.id !== 'loyalty-marriott-vc' ? `<div class="sync-row" style="margin-top:6px;">
 <input type="text" value="${escapeHtml((program.senderAddresses || []).join(', '))}" placeholder="Sender address(es), comma separated" data-loyalty-senders="${escapeHtml(program.id)}" style="flex:1 1 260px;">
 </div>
 <div class="sync-row">
@@ -742,7 +744,7 @@ ${rows || '<div class="empty">No readings yet — run a scan, or Check now below
 <button type="button" class="sync-btn sm inline" data-loyalty-forget="${escapeHtml(program.id)}" title="Clears this program's record of which emails it's already looked at, so the next check re-examines everything in the last 400 days -- safe to use (a message already recorded won't be duplicated), useful after an extractor fix so a previously-unrecognised email gets a fresh try.">Forget processed emails</button>
 ${!program.builtIn ? `<button type="button" class="sync-btn sm inline" data-loyalty-remove="${escapeHtml(program.id)}">Remove</button>` : ''}
 </div>
-<div class="settings-note" id="loyalty-status-${escapeHtml(program.id)}">${escapeHtml(lastCheckMessages.get(program.id) || '')}</div>
+<div class="settings-note" id="loyalty-status-${escapeHtml(program.id)}">${escapeHtml(lastCheckMessages.get(program.id) || '')}</div>` : `<div class="settings-note">No email scan for this one -- its points balance comes from pasting a scan's results into <span class="inline-goto-link" data-goto-tab="travel" data-goto-target="#mvc-import-read-btn">Marriott availability &rarr; Import results</span> on the Travel tab.</div>`}
 <div class="settings-note" style="margin:8px 0 2px;font-weight:600;">Record a reading by hand</div>
 <div class="sync-row" style="align-items:flex-start;">
 <input type="text" placeholder="Label, e.g. Gold Plus points" data-loyalty-manual-label="${escapeHtml(program.id)}" style="flex:1 1 160px;">
