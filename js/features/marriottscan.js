@@ -260,6 +260,33 @@
 //     click, which one it clicked, and (if the widget never showed
 //     real figures) whether ".points-search" appeared in the DOM at
 //     all or not, which are two genuinely different problems to chase.
+//   - v17: replaces v14's ".points-search" widget as the PRIMARY balance
+//     source -- reported directly, with real evidence, that it was
+//     never the account total to begin with: it's whatever one resort's
+//     calendar happens to show for one clicked day, confirmed wrong
+//     live (showed 2,850 -- one resort's one-year share -- while the
+//     real account carries 4,450 this Use Year and 6,575 next, across
+//     two resorts). The real total lives on a different page entirely
+//     (owners.marriottvacationclub.com/timeshare/mvco/getProductSummary,
+//     the user's own "Club Points Portfolio" view) as one ".panel.
+//     panel-default" per Use Year, each with a heading ("Use Year: <date
+//     range> | Points Available: <N>") and its own resort/deed
+//     breakdown -- confirmed from a real pasted DOM snippet. Fetched
+//     in the background (same-origin, cookies already carry the
+//     session -- no navigation away from the booking page the script
+//     is actually running on, so nothing about the in-progress scan is
+//     disrupted) and parsed via DOMParser, same string-parsing
+//     discipline as every other real-markup-confirmed piece of this
+//     script. balance = the Use Year whose own date range contains
+//     today (confirmed directly: "4450 is the remaining balance for
+//     this year"); potentialBalance = the NEXT Use Year's own figure
+//     (confirmed directly: "same block exists for next year with more
+//     points showing") -- analogous to, but a real replacement for, the
+//     old widget's same-named fields. byUseYear keeps every year's own
+//     figure too, not just these two, so nothing found is thrown away.
+//     tryCaptureBalanceWidget() is kept as a fallback ONLY (now clearly
+//     commented as resort/date-scoped, not the account total) for the
+//     rare case the summary page can't be fetched at all.
 //
 // If Marriott changes their page layout, the selectors below will stop
 // matching -- that's expected eventually, not a bug in this script. Run
@@ -271,12 +298,12 @@
 
 import { todayStr } from '../utils.js';
 
-const SCAN_SCRIPT_VERSION = 'v16';
+const SCAN_SCRIPT_VERSION = 'v17';
 
 // ---- Everything below this line must be self-contained -- see the
 // HARD CONSTRAINT note at the top of this file. ------------------------
 async function marriottAvailabilityScan(CONFIG) {
-  const SCRIPT_VERSION = 'v16'; // kept as a literal, not a reference to the outer const -- toString() drops the closure
+  const SCRIPT_VERSION = 'v17'; // kept as a literal, not a reference to the outer const -- toString() drops the closure
   const NIGHT_COUNTS = CONFIG.nightCounts;
   const GUESTS = CONFIG.guests; // required field -- the search silently fails its own validation without it (confirmed live)
   const MONTHS_TO_SCAN = CONFIG.monthsToScan; // TOTAL distinct months read, INCLUDING the one currently selected on the search form -- e.g. starting on November, 3 covers Nov/Dec/Jan
@@ -562,10 +589,76 @@ async function marriottAvailabilityScan(CONFIG) {
     return null;
   }
 
-  // Confirmed from a real pasted DOM snippet: clicking an available day
-  // opens a `.points-search` block with "Current Balance:"/"Potential
-  // Balance:" rows (Potential = current + whatever's available to
-  // borrow). Called exactly ONCE for the whole run (see the
+  // PRIMARY balance source as of v17 -- confirmed from a real pasted DOM
+  // snippet of owners.marriottvacationclub.com/timeshare/mvco/
+  // getProductSummary (the user's own "Club Points Portfolio" page):
+  // one `.panel.panel-default` per Use Year, each with a heading
+  // "Use Year: <start date> - <end date> | Points Available: <N>" and
+  // its own resort/deed breakdown underneath. Fetched same-origin (the
+  // booking page's own session cookie covers it -- no login, no
+  // navigating away from wherever the script is actually running) and
+  // parsed via DOMParser rather than touched live, so the in-progress
+  // scan's own page is never disturbed. balance = the Use Year whose
+  // own range contains today (confirmed directly: "4450 is the
+  // remaining balance for this year"); potentialBalance = the NEXT Use
+  // Year's own figure (confirmed directly: "same block exists for next
+  // year with more points showing") -- every year found is kept in
+  // byUseYear too, not just these two.
+  async function fetchProductSummaryBalance() {
+    let html;
+    try {
+      const res = await fetch('/timeshare/mvco/getProductSummary', { credentials: 'same-origin' });
+      if (!res.ok) { console.warn(`Points balance: getProductSummary fetch failed (HTTP ${res.status}).`); return null; }
+      html = await res.text();
+    } catch (err) {
+      console.warn('Points balance: getProductSummary fetch threw:', err.message);
+      return null;
+    }
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const years = [];
+    for (const panel of doc.querySelectorAll('.panel.panel-default')) {
+      const heading = panel.querySelector('h4.panel-title');
+      if (!heading || !/Use Year/i.test(heading.textContent)) continue;
+      // Two real (non-divider) <span>s in the heading: the date range,
+      // then (after "Points Available:") the points figure -- the
+      // divider span (class="divider", just "|") is filtered out rather
+      // than assumed to be a fixed index, since its own presence is the
+      // one thing confirmed stable, not its position.
+      const spans = [...heading.querySelectorAll('span')].filter((s) => !s.classList.contains('divider'));
+      const rangeText = (spans[0]?.textContent || '').replace(/\s+/g, ' ').trim();
+      const pointsDigits = (spans[1]?.textContent || '').replace(/[^\d]/g, '');
+      if (!rangeText || !pointsDigits) continue;
+      const [startText, endText] = rangeText.split(/\s*-\s*/);
+      const startDate = startText ? new Date(startText) : null;
+      const endDate = endText ? new Date(endText) : null;
+      if (!startDate || Number.isNaN(startDate.getTime()) || !endDate || Number.isNaN(endDate.getTime())) continue;
+      years.push({ rangeText, points: Number(pointsDigits), startDate, endDate });
+    }
+    if (!years.length) {
+      console.warn('Points balance: getProductSummary fetched OK but no "Use Year" panels were found in it -- the page\'s own markup may have changed since this was written.');
+      return null;
+    }
+    years.sort((a, b) => a.startDate - b.startDate);
+    const today = new Date();
+    const current = years.find((y) => y.startDate <= today && today <= y.endDate) || years.find((y) => y.startDate > today) || years[0];
+    const next = years.find((y) => y.startDate > current.endDate);
+    console.log(`Points balance (from getProductSummary): current Use Year (${current.rangeText}) = ${current.points}${next ? `, next Use Year (${next.rangeText}) = ${next.points}` : ''}.`);
+    return {
+      balance: current.points,
+      potentialBalance: next ? next.points : null,
+      byUseYear: years.map((y) => ({ range: y.rangeText, points: y.points })),
+      asOf: new Date().toISOString().slice(0, 10),
+      source: 'getProductSummary',
+    };
+  }
+
+  // FALLBACK only, as of v17 -- confirmed wrong as a primary source:
+  // this widget is scoped to whichever ONE resort's calendar happens to
+  // be open and whichever ONE day got clicked, not the account total
+  // (confirmed live: reported 2,850, one resort's one-year share, while
+  // the real total across two resorts is 4,450 this Use Year alone).
+  // Only reached if fetchProductSummaryBalance() above couldn't be
+  // reached at all. Called exactly ONCE for the whole run (see the
   // balanceWidgetChecked guard at the call site) -- clicking a day is a
   // real interaction, not a passive read, so this is deliberately not
   // repeated per resort/month. See the v14 changelog entry at the top
@@ -673,7 +766,14 @@ async function marriottAvailabilityScan(CONFIG) {
   const monthsScannedSet = new Set();
   const consoleCapture = installConsoleCapture();
   let balanceWidgetChecked = false;
-  let widgetBalance = null;
+
+  // A background fetch, independent of the booking page's own DOM --
+  // runs once, up front, rather than nested in the per-resort loop like
+  // the old widget capture had to be (that one needed an actual
+  // rendered calendar to click a day on; this one doesn't need the
+  // booking page at all).
+  let pointsBalance = null;
+  try { pointsBalance = await fetchProductSummaryBalance(); } catch (err) { console.warn('Points balance: getProductSummary read failed, will fall back to the booking-page widget if possible:', err.message); }
 
   // Whatever month is selected on the search form right now -- the fixed
   // starting point every (nights, month-offset) combination below is
@@ -805,13 +905,19 @@ async function marriottAvailabilityScan(CONFIG) {
           btn.click();
           await sleep(WAIT_AFTER_CHECK_AVAILABILITY_MS);
 
-          // Once only, on whichever resort/month happens to be first --
-          // see tryCaptureBalanceWidget()'s own comment for why a single
+          // FALLBACK only -- skipped entirely once the real
+          // getProductSummary total above already succeeded. Once only,
+          // on whichever resort/month happens to be first -- see
+          // tryCaptureBalanceWidget()'s own comment for why a single
           // day-click here is safe to leave unreverted.
-          if (!balanceWidgetChecked) {
+          if (!pointsBalance && !balanceWidgetChecked) {
             balanceWidgetChecked = true;
+            let widgetBalance = null;
             try { widgetBalance = await tryCaptureBalanceWidget(); } catch (e) { console.warn('Points balance widget read failed, continuing without it:', e.message); }
-            if (widgetBalance) console.log(`Points balance (from the ".points-search" widget): current ${widgetBalance.current}, potential ${widgetBalance.potential}.`);
+            if (widgetBalance) {
+              console.log(`Points balance (from the ".points-search" widget, resort/date-scoped fallback): current ${widgetBalance.current}, potential ${widgetBalance.potential}.`);
+              pointsBalance = { balance: widgetBalance.current, potentialBalance: widgetBalance.potential, asOf: new Date().toISOString().slice(0, 10), source: 'widget' };
+            }
           }
 
           await openRoomTypeFilterPanel();
@@ -911,10 +1017,11 @@ async function marriottAvailabilityScan(CONFIG) {
 
   consoleCapture.restore(); // never leave console.log altered past this run
 
-  let pointsBalance = null;
-  if (widgetBalance) {
-    pointsBalance = { balance: widgetBalance.current, potentialBalance: widgetBalance.potential, asOf: new Date().toISOString().slice(0, 10), source: 'widget' };
-  } else {
+  // pointsBalance was already set, if at all possible, up front
+  // (fetchProductSummaryBalance()) or by the resort-loop's own fallback
+  // above (tryCaptureBalanceWidget()) -- this is the last resort of the
+  // last resort, only reached if BOTH of those came back empty.
+  if (!pointsBalance) {
     const headerGuess = readPointsBalanceFromHeader();
     if (headerGuess != null) pointsBalance = { balance: headerGuess, potentialBalance: null, asOf: new Date().toISOString().slice(0, 10), source: 'header-guess' };
   }
