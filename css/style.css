@@ -3964,6 +3964,32 @@ padding:6px;
 .inv-photo-empty{border-radius:6px;background:var(--card);border:1px dashed var(--line);}
 .inv-photo-wrap .todo-add-btn{font-size:11px;padding:2px 6px;}
 
+/* One or more item thumbs in a set's own header row -- plain view-only
+   (no upload controls; editing happens on each item's own row below).
+   See inventorySetsHtml, shopping.js. */
+.inv-set-photos{display:inline-flex;gap:3px;}
+
+/* Secondary details (piece/size/order#) on an inventory row -- always
+   starts its own line within the flex-wrap row rather than wrapping
+   wherever it happens to land, so Brand/Range/Colour reads as one
+   primary line and these as a clearly separate, lower-priority one.
+   See inventoryHtml, shopping.js. */
+.inv-row-details{display:flex;gap:6px;flex:1 1 100%;flex-wrap:wrap;}
+.inv-row-links{display:inline-flex;align-items:center;gap:3px;}
+
+/* The eBay resale estimate -- a <details> rather than a plain span so
+   each comparable listing can be a real link through to the actual
+   eBay page (a hover tooltip can't carry one). See resaleValueHtml,
+   shopping.js. */
+.inv-resale{display:inline-block;}
+.inv-resale summary{display:inline-flex;align-items:center;gap:6px;cursor:pointer;list-style:none;}
+.inv-resale summary::-webkit-details-marker{display:none;}
+.inv-resale summary .account-badge{width:18px;height:18px;font-size:9px;}
+.inv-resale-listings{display:flex;flex-direction:column;gap:3px;margin-top:4px;padding-left:4px;}
+.inv-resale-listing{font-size:11px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.inv-resale-listing a{color:var(--plum);text-decoration:none;}
+.inv-resale-listing a:hover{text-decoration:underline;}
+
 /* Cashback routes, beside the product link at the moment of buying.
    Deliberately quiet -- a reminder of the right door, not a promotion.
    See js/cashback.js. */

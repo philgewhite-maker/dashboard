@@ -20,7 +20,8 @@
 // persisted on the task itself (t.priceCheck), dated, with a Refresh button
 // to re-run it later — not the old in-memory, un-dated Map this used to be.
 import { data, queueSave, SHOPPING_CONTEXTS, unheldInventory, whoFits, inventorySets, whoFitsSet, blankInventoryItem, SET_CORE_GROUPS } from '../state.js';
-import { escapeHtml, affiliateLink, daysUntil, daysSince, todayStr, MISSING_KEY_LINK_HTML, looksLikeUrl, bindBackdropClose, pickChipHtml, knownScalarValues, hydratePhotoBackgrounds, resizeImageToBlob, openLightbox } from '../utils.js';
+import { escapeHtml, affiliateLink, daysUntil, daysSince, todayStr, MISSING_KEY_LINK_HTML, looksLikeUrl, bindBackdropClose, pickChipHtml, knownScalarValues, hydratePhotoBackgrounds, resizeImageToBlob, openLightbox, logoBadgeHtml, bindLogoFallbacks } from '../utils.js';
+import { matchBrandLogo } from '../brandLogos.js';
 import { captureTask, revealTask } from './tasks.js';
 import { connectionChipHtml, bindConnectionChips, connectionPickerHtml, bindConnPickers, setConnPickerValue, sensitiveFieldsShown } from './connections.js';
 import { runStockCheck, stockCheckHtml, adapterFor, seedWatchSpec, pasteStockFor, cashbackHtml, fetchPages, registerCashbackTracked, refreshCashbackRates, money } from './stockwatch.js';
@@ -1173,8 +1174,9 @@ const forceSearchRow = set.complete ? '' : `<div class="sync-row" style="margin:
 <button class="sync-btn sm inline" type="button" data-set-completion-force-retailer="${escapeHtml(set.key)}">Search other retailers</button>
 <span class="sync-status" data-set-completion-force-status="${escapeHtml(set.key)}"></span>
 </div>`;
+const photosHtml = set.items.map((i) => invPhotoThumbHtml(i)).join('');
 return `<div class="inv-set">
-<div class="inv-set-head"><strong>${escapeHtml(name)}</strong> ${head}</div>
+<div class="inv-set-head"><span class="inv-set-photos">${photosHtml}</span><strong>${escapeHtml(name)}</strong> ${head}</div>
 <div class="settings-note" style="margin:0 0 4px;">${pieces}</div>
 ${setCompletionFindHtml(set)}
 ${forceSearchRow}
@@ -1196,6 +1198,13 @@ ${body}
 // the same eBay search twice.
 function resaleKey(o) { return `${(o.style || '').trim().toLowerCase()}|${(o.piece || '').trim().toLowerCase()}`; }
 
+// eBay badge replaces the generic 💰 icon once a search has actually
+// run -- the logo is what makes "where did this estimate come from"
+// legible at a glance, same job a loyalty/voucher provider's own badge
+// does elsewhere. Pre-search it's still a plain button (nothing to
+// badge yet).
+const EBAY_LOGO = matchBrandLogo('eBay');
+
 function resaleValueHtml(o) {
 if (!o.style && !o.piece) return '';
 const key = resaleKey(o);
@@ -1203,8 +1212,21 @@ const cached = data.ebayResaleEstimates[key];
 if (!cached) return `<button type="button" class="todo-add-btn" data-inv-resale="${escapeHtml(o.id)}" title="Search eBay for this style/piece (any colour/size) and estimate resale value">&#128176; Resale value?</button>`;
 if (cached.status === 'running') return `<span class="settings-note" style="margin:0;">Checking eBay…</span>`;
 if (cached.status === 'error') return `<span class="settings-note" style="margin:0;">${escapeHtml(cached.error)}</span> <button type="button" class="todo-add-btn" data-inv-resale="${escapeHtml(o.id)}">Retry</button>`;
-const names = (cached.listings || []).map((l) => `${l.name}${l.condition ? ` (${l.condition})` : ''} — ${l.price}`).join('\n');
-return `<span class="settings-note" title="${escapeHtml(names)}" style="margin:0;">${escapeHtml(cached.estimate || 'No comparable eBay listings found.')}</span> <button type="button" class="todo-add-btn" data-inv-resale="${escapeHtml(o.id)}" title="Re-check">&#8635;</button>`;
+const listings = cached.listings || [];
+// Each listing now links straight to the real eBay page it came from
+// (searchEbayResaleEstimate/ai.js already requires a real url per
+// listing) -- a hover tooltip can't carry a link, so this is a proper
+// <details> disclosure instead, open on click, same "reveal more
+// below a summary line" shape used elsewhere (e.g. a loyalty program's
+// own collapsed history).
+const listingsHtml = listings.length
+? listings.map((l) => `<div class="inv-resale-listing"><a href="${escapeHtml(l.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(l.name)}</a>${l.condition ? ` <span class="tag-chip">${escapeHtml(l.condition)}</span>` : ''} <span class="chip-price">${escapeHtml(l.price)}</span></div>`).join('')
+: `<div class="settings-note" style="margin:0;">No comparable listings were recorded.</div>`;
+return `<details class="inv-resale">
+<summary>${logoBadgeHtml(EBAY_LOGO, 'eB', 'plum')}<span class="match-name">${escapeHtml(cached.estimate || 'No comparable eBay listings found.')}</span></summary>
+<div class="inv-resale-listings">${listingsHtml}</div>
+</details>
+<button type="button" class="todo-add-btn" data-inv-resale="${escapeHtml(o.id)}" title="Re-check">&#8635;</button>`;
 }
 
 // A real photo of the owned piece -- useful to eyeball against a
@@ -1218,16 +1240,29 @@ return `<span class="settings-note" title="${escapeHtml(names)}" style="margin:0
 // storePhoto()/photoPut() every other photo in this app already goes
 // through, not just a link to the source, so it survives that page
 // changing or disappearing.
-function invPhotoHtml(o) {
-const thumb = o.photoId
+// View-only thumb, reused by the set head (inventorySetsHtml) where
+// there's no room/need for the upload controls -- editing a photo
+// always happens on that item's own row further down the page.
+function invPhotoThumbHtml(o) {
+return o.photoId
 ? `<div class="avatar sm inv-photo" data-photo-bg="${escapeHtml(o.photoId)}" data-inv-photo-view="${escapeHtml(o.id)}" title="View photo" style="cursor:pointer;"></div>`
 : `<div class="avatar sm inv-photo-empty" title="No photo yet"></div>`;
+}
+
+function invPhotoHtml(o) {
 return `<span class="inv-photo-wrap">
-${thumb}
+${invPhotoThumbHtml(o)}
 <label class="todo-add-btn" for="inv-photo-file-${escapeHtml(o.id)}" title="Take or choose a photo" style="cursor:pointer;">&#128247;</label>
 <input type="file" id="inv-photo-file-${escapeHtml(o.id)}" accept="image/*" style="display:none;" data-inv-photo-file="${escapeHtml(o.id)}">
-<button type="button" class="todo-add-btn" data-inv-photo-url="${escapeHtml(o.id)}" title="Save a photo from a URL -- the product's own page, or a direct image link">&#128279;</button>
 </span>`;
+}
+
+// Split out from invPhotoHtml so it can sit next to the product link
+// icon instead -- both are "fetch something via a URL" actions (the
+// product's own page vs. a photo of it), so they belong together
+// rather than the photo-from-url button living in the photo cluster.
+function invPhotoUrlBtnHtml(o) {
+return `<button type="button" class="todo-add-btn" data-inv-photo-url="${escapeHtml(o.id)}" title="Save a photo from a URL -- the product's own page, or a direct image link">&#128279;</button>`;
 }
 
 function inventoryHtml() {
@@ -1252,12 +1287,14 @@ const linkHtml = o.link
 return `<div class="shop-row inv-row">
 ${invPhotoHtml(o)}
 ${field(o, 'brand', 'Brand', '110px')}
-${field(o, 'style', 'Style', '100px')}
+${field(o, 'style', 'Range', '100px')}
+${field(o, 'colour', 'Colour', '90px')}
+<span class="inv-row-details">
 ${field(o, 'piece', 'Piece', '110px')}
 ${field(o, 'size', 'Size', '60px')}
-${field(o, 'colour', 'Colour', '90px')}
 ${field(o, 'orderNumber', 'Order #', '90px')}
-${linkHtml}
+</span>
+<span class="inv-row-links">${linkHtml}${invPhotoUrlBtnHtml(o)}</span>
 <span class="inv-fits">${fitsHtml}</span>
 ${resaleValueHtml(o)}
 <span class="del-x" style="opacity:1;" data-inv-remove="${escapeHtml(o.id)}" title="Delete this item">&times;</span>
@@ -1424,6 +1461,7 @@ el.innerHTML = `<div class="sync-row" style="margin-bottom:8px;flex-wrap:wrap;">
 </div>` + inventorySetsHtml() + inventoryHtml();
 bindConnectionChips(el);
 hydratePhotoBackgrounds(el);
+bindLogoFallbacks(el);
 const addItemBtn = el.querySelector('[data-inv-add-item]');
 if (addItemBtn) addItemBtn.addEventListener('click', () => openAddInventoryDialog());
 const apReportBtn = el.querySelector('[data-ap-report]');

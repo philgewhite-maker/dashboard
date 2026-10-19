@@ -44,6 +44,7 @@ const BRAND_LOGOS = [
 { names: ['Mastercard'], logoUrl: iconUrl('hXzjxehVU5aOtGvIvcwVOgUsqQv16U0vIVJRhIz4HUtBcn1-Lu229OXmmSVdRv6Y3taFWj4CBD5lhSeovmnXdA') },
 { names: ['Quidco'], logoUrl: iconUrl('7qUaKxz8H2MfUs0ytJVXFtgfkcaxf4FCu1_dJj1dTadJ6avFF6hUcB5LMP4Myeq5NQ3ybvyGf4WBsND8mlTZDw') },
 { names: ['TopCashback'], logoUrl: iconUrl('svaX1_2RqipFdQdY5kuvXxFAN9-ijDULI6sSZpNRISqyZQ68g788kjXSeZC91WllbyycUt3FJ7qOgS-47x0zHw') },
+{ names: ['eBay'], logoUrl: iconUrl('q0_ZVJFuUH3WFZuZrP8JUMC54dwz1q_SZZufBDMqYaE8O2sLPulV1_dF3xGMQ6b102MTBZlluAF8z4AgZ-Isow') },
 ];
 
 // Exact match (case-insensitive) first, then a partial/substring match
