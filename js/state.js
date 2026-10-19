@@ -1094,7 +1094,11 @@ senderAddresses: ['newsletter@mailing.milesandmore.com'], contentFilter: 'subjec
 // below rather than asked about, since the answer is already known.
 const DEFAULT_LOYALTY_PROGRAMS_V3 = [
 { id: 'loyalty-quidco', name: 'Quidco', extractorKey: 'quidco',
-senderAddresses: ['quidco@info.quidco.com'], contentFilter: '"Your cashback has been confirmed"', builtIn: true },
+// Both the pending ("tracked") and final ("confirmed") stage of the
+// same purchase -- extractQuidco (loyaltybalances.js) tells them
+// apart and labels each separately; the tracked one is superseded
+// automatically once the matching confirmed one lands (same file).
+senderAddresses: ['quidco@info.quidco.com'], contentFilter: '("Your cashback has been confirmed" OR "Your cashback has been tracked")', builtIn: true },
 ];
 
 // V3 already shipped and ran -- same "can't append to an already-
@@ -2754,6 +2758,18 @@ const existing = data.loyaltyPrograms.find((p) => p.id === seed.id);
 if (existing && !existing.contentFilter) existing.contentFilter = seed.contentFilter;
 });
 }
+// Quidco's contentFilter widened from "confirmed" only to "(confirmed
+// OR tracked)" after already being seeded once -- the backfill above
+// only fills a BLANK contentFilter, so an already-seeded Quidco needs
+// its own one-time overwrite here. Still never touches a value the
+// user edited themselves away from either default string.
+if (!data.loyaltyQuidcoTrackedFilterSeeded) {
+data.loyaltyQuidcoTrackedFilterSeeded = true;
+const quidco = data.loyaltyPrograms.find((p) => p.id === 'loyalty-quidco');
+if (quidco && quidco.contentFilter === '"Your cashback has been confirmed"') {
+quidco.contentFilter = '("Your cashback has been confirmed" OR "Your cashback has been tracked")';
+}
+}
 // Same one-time backfill idiom, for the 9 built-ins' real Play Store
 // icons (js/brandLogos.js) -- never overwrites a logoUrl the user
 // pasted in by hand, and never touches a user-added program (those
@@ -2790,6 +2806,12 @@ data.loyaltyLabelKinds = data.loyaltyLabelKinds.filter((k) => k && k.programId &
 // to the user here (see DEFAULT_LOYALTY_PROGRAMS_V3's own comment).
 if (!data.loyaltyLabelKinds.some((k) => k.programId === 'loyalty-quidco' && k.label === 'Cashback confirmed')) {
 data.loyaltyLabelKinds.push({ programId: 'loyalty-quidco', label: 'Cashback confirmed', kind: 'voucher' });
+}
+// Same reasoning -- the pending "tracked" stage of the same purchase
+// (see extractQuidco, loyaltybalances.js), also a real amount, never a
+// balance.
+if (!data.loyaltyLabelKinds.some((k) => k.programId === 'loyalty-quidco' && k.label === 'Cashback tracked')) {
+data.loyaltyLabelKinds.push({ programId: 'loyalty-quidco', label: 'Cashback tracked', kind: 'voucher' });
 }
 // Same reasoning, TopCashback -- see DEFAULT_LOYALTY_PROGRAMS_V4.
 if (!data.loyaltyLabelKinds.some((k) => k.programId === 'loyalty-topcashback' && k.label === 'Cashback confirmed')) {

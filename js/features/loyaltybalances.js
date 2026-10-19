@@ -264,6 +264,22 @@ return { membershipNumber: '', tier: '', date, metrics };
 // 'voucher' in state.js's migrate()) and the retailer name goes into
 // `detail` instead, which doesn't fragment the one-time classification
 // the way folding it into `label` would.
+//
+// Quidco also sends an earlier "Your cashback has been tracked" email
+// for the SAME purchase -- same four fields, a pending estimate rather
+// than the final figure, reported directly as wanted alongside the
+// confirmed one. Told apart by that exact phrase (confirmed live to
+// appear as a plain heading in the body text, same place the pasted
+// example shows it), labelled 'Cashback tracked' (also pre-classified
+// 'voucher' in state.js) so it's never mistaken for the same reading.
+// `reference` is `retailer|total amount` -- stable across both emails
+// for the one purchase (the cashback figure itself can shift between
+// tracked and confirmed, the order total doesn't) -- which is what
+// lets runLoyaltyBalanceScan's own post-pass below recognise a
+// confirmed reading as superseding its matching tracked one, and what
+// lets a tracked reading already turned into a voucher be offered as a
+// confident "Update" match (vouchers.js's own reference-first
+// matching) rather than "add as new" once the confirmed email arrives.
 function extractQuidco(bodyText) {
 const text = String(bodyText || '');
 const cashMatch = text.match(/Cashback earned:\s*\+?£([\d.,]+)/i);
@@ -271,9 +287,15 @@ if (!cashMatch) return null;
 const retailerDateMatch = text.match(/Retailer name:\s*(.+?)\s*Date:\s*\w*\s*(\d{1,2})\s+([A-Za-z]+),?\s+(\d{4})/i);
 const retailer = retailerDateMatch ? retailerDateMatch[1].trim() : '';
 const date = retailerDateMatch ? parseDMonYyyy(retailerDateMatch[2], retailerDateMatch[3], retailerDateMatch[4]) : '';
+const totalMatch = text.match(/Total amount:\s*£([\d.,]+)/i);
+const total = totalMatch ? Number(totalMatch[1].replace(/,/g, '')) : null;
+const label = /cashback has been tracked/i.test(text) ? 'Cashback tracked' : 'Cashback confirmed';
 return {
 membershipNumber: '', tier: '', date,
-metrics: [{ label: 'Cashback confirmed', balance: Number(cashMatch[1].replace(/,/g, '')), unit: '£', detail: retailer }],
+metrics: [{
+label, balance: Number(cashMatch[1].replace(/,/g, '')), unit: '£', detail: retailer,
+reference: retailer && total != null ? `${retailer}|${total.toFixed(2)}` : '',
+}],
 };
 }
 
@@ -469,6 +491,21 @@ detail: metric.detail || '',
 program.seenMessageIds = [...seen];
 program.lastCheckedAt = new Date().toISOString();
 if (newRows.length) data.loyaltyBalances.push(...newRows);
+// Quidco's tracked->confirmed lifecycle (see extractQuidco's own
+// comment): a newly-confirmed reading supersedes the matching tracked
+// one, by the shared retailer|total-amount reference. Only when the
+// tracked reading hasn't already been turned into a voucher -- one
+// that has is left for the user to resolve normally, where the SAME
+// reference match now offers "Update" instead of "Add as new" (see
+// vouchers.js). Skipping (not deleting) keeps the tracked reading's
+// own history intact while dropping it out of the voucher-review
+// queue, exactly as if the user had declined to voucher it themselves.
+if (program.extractorKey === 'quidco' && newRows.length) {
+newRows.filter((r) => r.label === 'Cashback confirmed' && r.reference).forEach((confirmed) => {
+const tracked = data.loyaltyBalances.find((b) => b.programId === program.id && b.label === 'Cashback tracked' && b.reference === confirmed.reference && !b.voucherLinkStatus);
+if (tracked) tracked.voucherLinkStatus = 'skipped';
+});
+}
 return { programId: program.id, programName: program.name, matched, unmatched, newRows: newRows.length, messagesFound: messages.length, alreadySeen };
 }
 
