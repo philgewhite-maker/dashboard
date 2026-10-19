@@ -11,6 +11,7 @@ import { data, replaceData, exportBackup, setLocalChangeHandler } from '../state
 import { renderAll } from '../render-all.js';
 import { ConflictError, NotConfiguredError, isConfigured, pullRemote, pushRemote, setKnownRev, getKnownRev } from './selfhost.js';
 import { LockedError } from '../synccrypto.js';
+import { drainAgentStaging } from './agentstaging.js';
 
 const PUSH_DEBOUNCE_MS = 2500;
 // Only fires while the tab is visible (see the visibilitychange handler), so
@@ -144,7 +145,16 @@ pushTimer = setTimeout(() => push(), PUSH_DEBOUNCE_MS);
 
 function startPolling() {
 clearInterval(pollTimer);
-pollTimer = setInterval(() => { if (document.visibilityState === 'visible') pull(); }, POLL_MS);
+// drainAgentStaging() is independently gated (its own agentWriteUrl/
+// agentSecret config check, its own try/catch) -- deliberately not
+// called from inside pull() itself, which has its own unrelated
+// busy/isConfigured() guard for the MAIN sync. Reuses this same
+// visible-tab cadence rather than a second timer.
+pollTimer = setInterval(() => {
+if (document.visibilityState !== 'visible') return;
+pull();
+drainAgentStaging();
+}, POLL_MS);
 }
 
 async function initAutoSync() {
@@ -153,7 +163,7 @@ if (!(await isConfigured())) return;
 setLocalChangeHandler(schedulePush);
 
 document.addEventListener('visibilitychange', () => {
-if (document.visibilityState === 'visible') pull();
+if (document.visibilityState === 'visible') { pull(); drainAgentStaging(); }
 });
 // A pending debounce would be cancelled by the page tearing down, losing
 // the last few seconds of edits — same gap flushSave() closes locally.
@@ -162,6 +172,7 @@ if (pushTimer) { clearTimeout(pushTimer); push(); }
 });
 
 await pull({ announce: true });
+drainAgentStaging();
 startPolling();
 }
 

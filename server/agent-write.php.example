@@ -1,0 +1,372 @@
+<?php
+declare(strict_types=1);
+
+/**
+ * Agent-write channel -- a SEPARATE, narrowly-scoped endpoint for an
+ * unattended external Claude Code run to drop things for this dashboard
+ * to pick up, distinct from sync.php's own all-or-nothing secret.
+ *
+ * WHY A SEPARATE FILE FROM dashboard-data.json. If live sync encryption
+ * is on (js/synccrypto.js), that document's `data` value is ONE opaque
+ * ciphertext blob -- sync.php never looks inside it, and this script
+ * never has the key to either. There is no way to splice a single field
+ * into an encrypted document from here, so this endpoint doesn't try:
+ * it owns its OWN small, always-plaintext file,
+ * dashboard-agent-staging.json, a transient mailbox, never the system
+ * of record. A live browser session (which DOES hold the decryption
+ * key, if one is set) periodically drains this into the real, synced
+ * document via its own normal save path -- see
+ * js/sync/agentstaging.js's drainAgentStaging(). Permanent storage is
+ * still wherever every other field already lives.
+ *
+ * PERMISSION MODEL. $FIELD_PERMISSIONS below is the ONLY mutation
+ * surface -- there is no generic "set an arbitrary path" primitive, and
+ * no `delete` action exists anywhere in this file (not configured off,
+ * literally unimplemented). Two fields are enabled:
+ *   claudeSubscriptionUsage -- read + replace (a flat value, always
+ *     wholesale-superseded, no history needed).
+ *   agentInbox -- read + append (propose a new task-tree entry) +
+ *     consume (remove specific entries by id -- used only by the
+ *     browser's own drain step, after it has safely copied an entry
+ *     into the real, synced data.agentInbox).
+ * Proposed tasks are NEVER real tasks from this endpoint's point of
+ * view -- nothing here has, or ever will have, a code path to
+ * data.tasks. Only a human's own Accept click in the dashboard
+ * (js/features/agentinbox.js) ever creates a real task.
+ *
+ *   GET  ?fields=claudeSubscriptionUsage,agentInbox
+ *     -> {rev, updatedAt, claudeSubscriptionUsage, agentInbox}
+ *   POST {rev, action:"replace", field:"claudeSubscriptionUsage", value}
+ *   POST {rev, action:"append",  field:"agentInbox", value:{label, nodes:[...]}}
+ *   POST {rev, action:"consume", field:"agentInbox", ids:[...]}
+ *
+ * Upload next to sync.php (cPanel -> File Manager), generate a secret
+ * with `openssl rand -hex 32`, and set it below -- a DIFFERENT value
+ * from sync.php's own $SECRET. Give that value only to the external
+ * script's own config, never to anything under js/ in this repo, never
+ * to Settings, never to IndexedDB/localStorage on any device other than
+ * the one actually running the drain step (see README.md).
+ */
+
+// ---- Configuration ---------------------------------------------------
+
+$AGENT_SECRET = 'PUT-A-LONG-RANDOM-STRING-HERE';
+
+// Same protected directory as sync.php's $DATA_FILE -- outside
+// public_html, so none of these are directly web-reachable even if the
+// .htaccess protecting them is ever lost.
+$STAGING_FILE = dirname(__DIR__) . '/dashboard-agent-staging.json';
+$RATE_LIMIT_FILE = dirname(__DIR__) . '/dashboard-agent-write-ratelimit.json';
+$LOG_FILE = dirname(__DIR__) . '/dashboard-agent-write.log';
+
+$MAX_BODY_BYTES = 200 * 1024;
+$MAX_NODES_PER_PROPOSAL = 20;
+$MAX_PENDING_ENTRIES = 15;
+$MAX_REQUESTS_PER_HOUR = 60;
+
+// field => which actions are allowed. No 'delete' key anywhere in this
+// table or this file -- not "false", unimplemented.
+$FIELD_PERMISSIONS = [
+    'claudeSubscriptionUsage' => ['read' => true, 'replace' => true,  'append' => false, 'consume' => false],
+    'agentInbox'              => ['read' => true, 'replace' => false, 'append' => true,  'consume' => true],
+];
+
+// ---- End of configuration --------------------------------------------
+
+// Deliberately NO Access-Control-Allow-Origin header anywhere in this
+// file -- this endpoint is only ever called from an external script,
+// never a browser fetch(), so it's structurally unreachable cross-
+// origin even if this secret ever ended up in client code by mistake.
+header('Content-Type: application/json');
+header('Cache-Control: no-store');
+
+function fail(int $code, string $message): void {
+    http_response_code($code);
+    echo json_encode(['error' => $message]);
+    exit;
+}
+
+if ($AGENT_SECRET === 'PUT-A-LONG-RANDOM-STRING-HERE') {
+    fail(500, 'Server not configured: set $AGENT_SECRET in agent-write.php');
+}
+
+// Own, independent check -- deliberately NOT routed through auth.php's
+// dash_authorise()/master-secret-fallback machinery, so leaking this
+// secret can never be confused with or grant sync.php's own access,
+// and vice versa.
+$provided = $_SERVER['HTTP_X_AGENT_SECRET'] ?? '';
+if ($provided === '' || !hash_equals($AGENT_SECRET, (string) $provided)) {
+    fail(401, 'Bad or missing agent secret');
+}
+
+// ---- Rate limiting -----------------------------------------------------
+// Same rolling-timestamps-in-a-file convention server/pair.php's own
+// $MAX_FAILURES_PER_HOUR already uses, just for every request (not only
+// failures) on this endpoint.
+
+function rate_limit_check(string $file, int $maxPerHour): void {
+    $now = time();
+    $timestamps = [];
+    if (is_file($file)) {
+        $raw = json_decode((string) file_get_contents($file), true);
+        if (is_array($raw)) $timestamps = $raw;
+    }
+    $timestamps = array_values(array_filter($timestamps, function ($t) use ($now) { return (int) $t > $now - 3600; }));
+    if (count($timestamps) >= $maxPerHour) {
+        fail(429, 'Too many requests to this channel this hour. Try again later.');
+    }
+    $timestamps[] = $now;
+    file_put_contents($file, json_encode($timestamps));
+}
+rate_limit_check($RATE_LIMIT_FILE, $MAX_REQUESTS_PER_HOUR);
+
+// ---- Audit log -----------------------------------------------------------
+// Independent of dashboard-agent-staging.json, so it survives even if
+// that file were ever tampered with -- one line per request, success
+// AND failure, a short derived summary only, never the full payload.
+
+function audit_log(string $file, string $action, string $field, bool $ok, ?int $rev, string $summary): void {
+    $line = json_encode([
+        'ts' => gmdate('c'),
+        'ip' => $_SERVER['REMOTE_ADDR'] ?? '',
+        'action' => $action,
+        'field' => $field,
+        'ok' => $ok,
+        'rev' => $rev,
+        'summary' => $summary,
+    ]);
+    file_put_contents($file, $line . "\n", FILE_APPEND | LOCK_EX);
+}
+
+// ---- Staging store ---------------------------------------------------
+
+function blank_store(): array {
+    return ['rev' => 0, 'updatedAt' => null, 'claudeSubscriptionUsage' => null, 'agentInbox' => []];
+}
+function read_store(string $file): array {
+    $empty = blank_store();
+    if (!is_file($file)) return $empty;
+    $raw = file_get_contents($file);
+    if ($raw === false || $raw === '') return $empty;
+    $parsed = json_decode($raw, true);
+    if (!is_array($parsed) || !array_key_exists('rev', $parsed)) return $empty;
+    return [
+        'rev' => (int) $parsed['rev'],
+        'updatedAt' => $parsed['updatedAt'] ?? null,
+        'claudeSubscriptionUsage' => $parsed['claudeSubscriptionUsage'] ?? null,
+        'agentInbox' => is_array($parsed['agentInbox'] ?? null) ? $parsed['agentInbox'] : [],
+    ];
+}
+function write_store(string $file, array $store): void {
+    $tmp = $file . '.tmp';
+    if (file_put_contents($tmp, json_encode($store)) === false) {
+        fail(500, 'Could not write staging file -- check directory permissions');
+    }
+    rename($tmp, $file);
+}
+
+// ---- Validators --------------------------------------------------------
+
+function valid_attachment_id(?string $id): bool {
+    return is_string($id) && preg_match('/^[a-f0-9]{32}$/', $id) === 1;
+}
+
+// Validates and sanitises a proposed task-tree payload -- everything
+// here is enforced server-side, never trusted from the client. Returns
+// a cleaned node array, or fails the request outright.
+function validate_proposal_nodes($nodes): array {
+    if (!is_array($nodes) || count($nodes) < 1 || count($nodes) > 20) {
+        fail(400, 'Proposal must have between 1 and 20 nodes.');
+    }
+    $tempIds = [];
+    foreach ($nodes as $n) {
+        if (!is_array($n) || !isset($n['tempId']) || !is_string($n['tempId'])) fail(400, 'Every node needs a tempId.');
+        $tempIds[] = $n['tempId'];
+    }
+    if (count($tempIds) !== count(array_unique($tempIds))) fail(400, 'Duplicate tempId in proposal.');
+
+    $roots = array_filter($nodes, function ($n) { return !isset($n['parentTempId']) || $n['parentTempId'] === null || $n['parentTempId'] === ''; });
+    if (count($roots) !== 1) fail(400, 'Proposal must have exactly one root node (parentTempId: null).');
+
+    // Reachability from the root -- catches cycles and dangling parents
+    // in one pass, same idea a topological sort uses.
+    $rootNode = array_values($roots)[0];
+    $reached = [$rootNode['tempId'] => true];
+    $changed = true;
+    while ($changed) {
+        $changed = false;
+        foreach ($nodes as $n) {
+            $pid = $n['parentTempId'] ?? null;
+            if ($pid !== null && $pid !== '' && isset($reached[$pid]) && !isset($reached[$n['tempId']])) {
+                $reached[$n['tempId']] = true;
+                $changed = true;
+            }
+        }
+    }
+    if (count($reached) !== count($nodes)) fail(400, 'Every node must resolve to the root via parentTempId, with no cycles.');
+
+    $clean = [];
+    foreach ($nodes as $n) {
+        $title = isset($n['title']) ? trim((string) $n['title']) : '';
+        if ($title === '' || mb_strlen($title) > 200) fail(400, 'Every node needs a title, 1-200 characters.');
+        $attachments = [];
+        if (isset($n['attachments']) && is_array($n['attachments'])) {
+            foreach ($n['attachments'] as $a) {
+                if (is_array($a) && valid_attachment_id($a['id'] ?? null)) {
+                    $attachments[] = [
+                        'id' => $a['id'],
+                        'name' => isset($a['name']) ? (string) $a['name'] : '',
+                        'type' => isset($a['type']) ? (string) $a['type'] : '',
+                        'size' => isset($a['size']) ? (int) $a['size'] : 0,
+                    ];
+                }
+                // An id that doesn't match files.php's own 32-hex shape is
+                // silently dropped, not stored -- it isn't a real
+                // server-issued attachment id.
+            }
+        }
+        $clean[] = [
+            'tempId' => (string) $n['tempId'],
+            'parentTempId' => (isset($n['parentTempId']) && $n['parentTempId'] !== '') ? (string) $n['parentTempId'] : null,
+            'title' => $title,
+            'notes' => isset($n['notes']) ? (string) $n['notes'] : '',
+            'due' => isset($n['due']) ? (string) $n['due'] : '',
+            'link' => isset($n['link']) ? (string) $n['link'] : '',
+            'contexts' => (isset($n['contexts']) && is_array($n['contexts'])) ? array_values(array_map('strval', $n['contexts'])) : [],
+            'attachments' => $attachments,
+            'forConnectionId' => isset($n['forConnectionId']) ? (string) $n['forConnectionId'] : '',
+            'wantSpec' => $n['wantSpec'] ?? null,
+            // 'source' is deliberately never read from the client here --
+            // provenance is synthesized at Accept time in the browser,
+            // never trusted from the wire.
+        ];
+    }
+    return $clean;
+}
+
+// ---- Request handling ----------------------------------------------------
+
+$rawBody = file_get_contents('php://input') ?: '';
+if (strlen($rawBody) > $MAX_BODY_BYTES) {
+    audit_log($LOG_FILE, 'unknown', 'unknown', false, null, 'body too large');
+    fail(400, 'Request body too large.');
+}
+
+$method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+
+if ($method === 'GET') {
+    $requested = isset($_GET['fields']) ? array_map('trim', explode(',', (string) $_GET['fields'])) : array_keys($FIELD_PERMISSIONS);
+    $store = read_store($STAGING_FILE);
+    $out = ['rev' => $store['rev'], 'updatedAt' => $store['updatedAt']];
+    foreach ($requested as $f) {
+        if (!isset($FIELD_PERMISSIONS[$f]) || !$FIELD_PERMISSIONS[$f]['read']) continue; // unlisted/unreadable fields are silently omitted, never a 400
+        $out[$f] = $store[$f] ?? null;
+    }
+    audit_log($LOG_FILE, 'read', implode(',', $requested), true, $store['rev'], 'read ' . implode(',', array_keys($out)));
+    echo json_encode($out);
+    exit;
+}
+
+if ($method !== 'POST') {
+    fail(405, 'Use GET or POST');
+}
+
+$body = json_decode($rawBody, true);
+if (!is_array($body) || !array_key_exists('rev', $body) || !isset($body['action']) || !isset($body['field'])) {
+    fail(400, 'Expected a JSON body of {rev, action, field, ...}');
+}
+$action = (string) $body['action'];
+$field = (string) $body['field'];
+
+if (!isset($FIELD_PERMISSIONS[$field])) {
+    audit_log($LOG_FILE, $action, $field, false, null, 'field not allowlisted');
+    fail(400, "Field \"$field\" is not writable through this channel.");
+}
+$perm = $FIELD_PERMISSIONS[$field];
+if (!in_array($action, ['replace', 'append', 'consume'], true) || !($perm[$action] ?? false)) {
+    audit_log($LOG_FILE, $action, $field, false, null, 'action not allowed for field');
+    fail(400, "Action \"$action\" is not allowed on field \"$field\".");
+}
+
+// Serialise writers -- identical lock discipline to sync.php, just on
+// this separate file.
+$lock = fopen($STAGING_FILE . '.lock', 'c');
+if ($lock === false) fail(500, 'Could not open lock file -- check directory permissions');
+flock($lock, LOCK_EX);
+
+$current = read_store($STAGING_FILE);
+if ((int) $body['rev'] !== $current['rev']) {
+    flock($lock, LOCK_UN);
+    fclose($lock);
+    audit_log($LOG_FILE, $action, $field, false, $current['rev'], 'stale rev');
+    http_response_code(409);
+    echo json_encode([
+        'error' => 'Out of date',
+        'rev' => $current['rev'],
+        'updatedAt' => $current['updatedAt'],
+        'claudeSubscriptionUsage' => $current['claudeSubscriptionUsage'],
+        'agentInbox' => $current['agentInbox'],
+    ]);
+    exit;
+}
+
+$responseExtra = [];
+
+if ($action === 'replace' && $field === 'claudeSubscriptionUsage') {
+    $value = $body['value'] ?? null;
+    if ($value !== null && !is_array($value)) {
+        flock($lock, LOCK_UN); fclose($lock);
+        audit_log($LOG_FILE, $action, $field, false, $current['rev'], 'bad value shape');
+        fail(400, 'value must be an object or null.');
+    }
+    $current['claudeSubscriptionUsage'] = $value;
+} elseif ($action === 'append' && $field === 'agentInbox') {
+    if (count($current['agentInbox']) >= $MAX_PENDING_ENTRIES) {
+        flock($lock, LOCK_UN); fclose($lock);
+        audit_log($LOG_FILE, $action, $field, false, $current['rev'], 'backlog full');
+        fail(429, 'Pending backlog full (' . $MAX_PENDING_ENTRIES . ') -- ask the user to review data.agentInbox before proposing more.');
+    }
+    $value = $body['value'] ?? null;
+    if (!is_array($value) || !isset($value['nodes'])) {
+        flock($lock, LOCK_UN); fclose($lock);
+        audit_log($LOG_FILE, $action, $field, false, $current['rev'], 'bad value shape');
+        fail(400, 'value must be {label, nodes:[...]}.');
+    }
+    $cleanNodes = validate_proposal_nodes($value['nodes']); // fails the request itself on any problem
+    $id = bin2hex(random_bytes(8)); // 16 hex chars -- a different length from both uid()'s format and files.php's 32-hex ids, so an id's shape alone says which system minted it
+    $entry = [
+        'id' => $id,
+        'label' => isset($value['label']) ? (string) $value['label'] : '',
+        'nodes' => $cleanNodes,
+        'createdAt' => gmdate('c'),
+    ];
+    $current['agentInbox'][] = $entry;
+    $responseExtra['id'] = $id;
+} elseif ($action === 'consume' && $field === 'agentInbox') {
+    $ids = $body['ids'] ?? [];
+    if (!is_array($ids)) {
+        flock($lock, LOCK_UN); fclose($lock);
+        audit_log($LOG_FILE, $action, $field, false, $current['rev'], 'bad ids shape');
+        fail(400, 'ids must be an array.');
+    }
+    $idSet = array_map('strval', $ids);
+    $current['agentInbox'] = array_values(array_filter($current['agentInbox'], function ($e) use ($idSet) {
+        return !in_array($e['id'], $idSet, true);
+    }));
+} else {
+    flock($lock, LOCK_UN); fclose($lock);
+    audit_log($LOG_FILE, $action, $field, false, $current['rev'], 'unreachable action/field combination');
+    fail(400, 'Unsupported action/field combination.');
+}
+
+$current['rev'] = $current['rev'] + 1;
+$current['updatedAt'] = gmdate('c');
+write_store($STAGING_FILE, $current);
+
+flock($lock, LOCK_UN);
+fclose($lock);
+
+$summary = $action === 'append' ? "append agentInbox: '" . ($entry['label'] ?? '') . "' (" . count($cleanNodes ?? []) . " nodes)" : "$action $field";
+audit_log($LOG_FILE, $action, $field, true, $current['rev'], $summary);
+
+echo json_encode(array_merge(['rev' => $current['rev'], 'updatedAt' => $current['updatedAt']], $responseExtra));

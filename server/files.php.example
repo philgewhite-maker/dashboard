@@ -26,6 +26,16 @@ declare(strict_types=1);
 // delete your attachments, so treat it like a password.
 $SECRET = 'PUT-A-LONG-RANDOM-STRING-HERE';
 
+// Same value as server/agent-write.php's $AGENT_SECRET -- lets that
+// separate, narrowly-scoped channel upload an attachment for a task
+// proposal BEFORE a human has reviewed it (so the metadata already
+// exists by the time it's Accepted; see js/features/agentinbox.js,
+// which never re-uploads). Grants upload only -- never list, download,
+// or delete -- so even a fully compromised agent secret can add a file
+// but never read or remove any existing one. Leave on the placeholder
+// to disable this path entirely.
+$AGENT_SECRET = 'PUT-A-LONG-RANDOM-STRING-HERE';
+
 // Where the files live. Defaults to a directory ABOVE this script, which on
 // cPanel means outside public_html — so an uploaded file can never be
 // fetched directly over the web, or executed as a script, even if the
@@ -51,7 +61,7 @@ if ($origin !== '' && in_array($origin, $ALLOWED_ORIGINS, true)) {
     header('Access-Control-Allow-Origin: ' . $origin);
     header('Vary: Origin');
 }
-header('Access-Control-Allow-Headers: Content-Type, X-Sync-Secret, X-File-Name, X-File-Type');
+header('Access-Control-Allow-Headers: Content-Type, X-Sync-Secret, X-Agent-Secret, X-File-Name, X-File-Type');
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
 header('Access-Control-Max-Age: 86400');
 header('Cache-Control: no-store');
@@ -73,17 +83,38 @@ function fail(int $code, string $message): void {
     exit;
 }
 
-$provided = $_SERVER['HTTP_X_SYNC_SECRET'] ?? '';
-require_once __DIR__ . '/auth.php';
-if (!dash_secret_configured($SECRET)) {
-    fail(500, 'Server not configured: set $DASH_MASTER_SECRET in auth.php');
+// Read this early (normally set further down) -- the scoped-auth branch
+// just below needs to know the method+action before the usual checks run.
+$method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+$action = $_GET['action'] ?? '';
+
+$authorised = false;
+// Scoped path: the agent-write channel may ONLY ever upload a new file,
+// never list, fetch, or delete an existing one -- that's enforced here
+// by the method+action check, not by anything the client claims.
+if ($method === 'POST' && $action === 'upload' && $AGENT_SECRET !== 'PUT-A-LONG-RANDOM-STRING-HERE') {
+    $agentProvided = $_SERVER['HTTP_X_AGENT_SECRET'] ?? '';
+    if ($agentProvided !== '' && hash_equals($AGENT_SECRET, (string) $agentProvided)) {
+        $authorised = true;
+    }
 }
-// Accepts this file's $SECRET or any per-device token issued by pair.php
-// -- see auth.php for why a device carrying its own token is worth the
-// extra file. Backwards compatible: with no devices paired, this behaves
-// exactly as the old hash_equals check did.
-if (!dash_authorise((string) $provided, $SECRET)['ok']) {
-    fail(401, 'Bad or missing sync secret');
+// Normal path: everything else, and an upload that didn't present a
+// valid agent secret, falls through to the existing, completely
+// unchanged sync-secret check -- the live browser's own attachment
+// flow (still using X-Sync-Secret) is byte-for-byte unaffected.
+if (!$authorised) {
+    $provided = $_SERVER['HTTP_X_SYNC_SECRET'] ?? '';
+    require_once __DIR__ . '/auth.php';
+    if (!dash_secret_configured($SECRET)) {
+        fail(500, 'Server not configured: set $DASH_MASTER_SECRET in auth.php');
+    }
+    // Accepts this file's $SECRET or any per-device token issued by pair.php
+    // -- see auth.php for why a device carrying its own token is worth the
+    // extra file. Backwards compatible: with no devices paired, this behaves
+    // exactly as the old hash_equals check did.
+    if (!dash_authorise((string) $provided, $SECRET)['ok']) {
+        fail(401, 'Bad or missing sync secret');
+    }
 }
 
 if (!is_dir($FILE_DIR) && !mkdir($FILE_DIR, 0700, true) && !is_dir($FILE_DIR)) {
@@ -96,9 +127,6 @@ if (!is_dir($FILE_DIR) && !mkdir($FILE_DIR, 0700, true) && !is_dir($FILE_DIR)) {
 function valid_id(?string $id): bool {
     return is_string($id) && preg_match('/^[a-f0-9]{32}$/', $id) === 1;
 }
-
-$method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
-$action = $_GET['action'] ?? '';
 
 if ($method === 'GET') {
     $id = $_GET['id'] ?? null;

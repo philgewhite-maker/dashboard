@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v615</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v616</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -173,6 +173,15 @@
 </div>
 <div class="sync-status" id="quick-capture-status"></div>
 <div class="settings-note" style="margin:8px 0 0;">Enter captures it straight to the Inbox, free and instantly. <strong>&#10024; Smart</strong> or the mic reads the same text as an instruction instead &mdash; &ldquo;watch The Bear&rdquo;, or &ldquo;create a trip to Mallorca 1st to 5th November and add Vora Bora to it in my planner&rdquo; &mdash; and queues a draft below for you to confirm.</div>
+</section>
+
+<section class="panel wide" id="agent-inbox-panel" data-tab="tasks" style="display:none;">
+<div class="panel-head">
+<h2><span class="dot plum"></span>Proposed by Claude</h2>
+<span class="count-badge" id="agent-inbox-count"></span>
+</div>
+<div class="settings-note" style="margin:0 0 10px;">Tasks an external Claude Code run has proposed, via a narrowly-scoped channel that can only ever suggest here &mdash; nothing becomes a real task until you Accept it.</div>
+<div id="agent-inbox-list"></div>
 </section>
 
 <section class="panel wide" id="gtasks-panel" data-tab="tasks">
@@ -2969,6 +2978,18 @@ Photos added before task attachments existed live only on the device that added 
 <button class="sync-btn" id="relay-setup-btn" type="button">Set up Dashboard Capture</button>
 </div>
 <div class="settings-note">Android only. Dashboard Capture is a small companion app for sharing images and files in, since Chrome drops shared files on some phones. Install it, then tap this on the phone to hand it the URL and secret above &mdash; you confirm them in the app.</div>
+</div>
+</details>
+
+<details class="settings-item">
+<summary><h3>Agent-write channel (Claude proposals)</h3></summary>
+<div class="settings-block">
+<div class="settings-note" style="margin:0 0 8px;">A separate, narrowly-scoped channel an unattended Claude Code run writes to (server/agent-write.php) &mdash; never the full sync secret above. This device uses these values only to pick up what's waiting there (your subscription usage, proposed tasks) and merge it into your real data, which then syncs normally. Leave blank to leave this off.</div>
+<label for="agent-write-url-input" style="font-size:13px;font-weight:500;display:block;margin-bottom:6px;">Agent-write URL</label>
+<input type="text" autocomplete="off" id="agent-write-url-input" class="settings-input" placeholder="https://georgewhiteeuropean.co.uk/agent-write.php">
+<label for="agent-secret-input" style="font-size:13px;font-weight:500;display:block;margin:10px 0 6px;">Agent secret</label>
+<input type="password" autocomplete="new-password" id="agent-secret-input" class="settings-input" placeholder="the same string as $AGENT_SECRET in agent-write.php">
+<div class="settings-note">Stored only on this device, same as the sync secret above &mdash; never exported, never committed.</div>
 </div>
 </details>
 

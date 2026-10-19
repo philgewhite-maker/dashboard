@@ -261,6 +261,7 @@ e.target.value = '';
 });
 
 initLiveSync(settings);
+initAgentWriteChannel(settings);
 initNotion(settings);
 initTelegramBotUrl(settings);
 initFetchPrefs();
@@ -945,6 +946,30 @@ urlInput.addEventListener('input', () => {
 clearTimeout(saveTimer);
 saveTimer = setTimeout(() => setLocalSetting('telegramBotUrl', urlInput.value.trim()), 400);
 });
+}
+
+// Same debounced-save pattern as initLiveSync just below, for the
+// separate, narrowly-scoped channel (server/agent-write.php) an
+// unattended Claude Code run writes to -- see js/sync/agentstaging.js
+// for what this device does with these values (drains the staging
+// mailbox into the real, synced data; never used to call the agent-
+// write endpoint for anything else).
+function initAgentWriteChannel(settings) {
+const urlInput = document.getElementById('agent-write-url-input');
+const secretInput = document.getElementById('agent-secret-input');
+if (!urlInput || !secretInput) return;
+urlInput.value = settings.agentWriteUrl || '';
+secretInput.value = settings.agentSecret || '';
+let saveTimer = null;
+const queueFieldSave = () => {
+clearTimeout(saveTimer);
+saveTimer = setTimeout(() => {
+setLocalSetting('agentWriteUrl', urlInput.value.trim());
+setLocalSetting('agentSecret', secretInput.value.trim());
+}, 400);
+};
+urlInput.addEventListener('input', queueFieldSave);
+secretInput.addEventListener('input', queueFieldSave);
 }
 
 function initLiveSync(settings) {

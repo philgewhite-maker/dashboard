@@ -840,6 +840,29 @@ createdAt: new Date().toISOString(),
 };
 }
 
+// A whole task TREE proposed via server/agent-write.php (an unattended
+// external Claude Code channel -- see that file's own header) but not
+// yet reviewed. Removed on Accept OR Decline -- same "presence in the
+// array IS pending" convention as blankCaptureDraft/blankPendingImport
+// just above, no separate status flag. id/createdAt are always
+// server-assigned by agent-write.php, never client-generated, so they
+// can't be spoofed by a crafted payload. Drained in from the always-
+// plaintext staging mailbox by js/sync/agentstaging.js's
+// drainAgentStaging() -- agent-write.php itself never touches this
+// synced (and possibly end-to-end-encrypted) document directly.
+function blankAgentInboxEntry(fields = {}) {
+return {
+id: '',
+label: '',
+// [{tempId, parentTempId, title, notes, due, link, contexts,
+//   attachments, forConnectionId, wantSpec}] -- tempIds are scoped to
+// THIS entry only, remapped to real task ids only at Accept time.
+nodes: [],
+createdAt: '',
+...fields,
+};
+}
+
 // A trip is a `bucket:'project'` task (see blankTask) plus this entry
 // holding the travel-specific structure -- same split notionplan.js already
 // uses (task ↔ notionPageId ↔ Notion detail), except the "detail" here has
@@ -2684,6 +2707,12 @@ data.pendingImports = data.pendingImports.map((p) => ({ ...blankPendingImport(),
 // added/updated/discarded) is clutter, not a real review entry -- same
 // reasoning as the captureInbox filter just above.
 data.pendingImports = data.pendingImports.filter((p) => p.candidates.length > 0);
+// Proposed-by-Claude task trees -- see blankAgentInboxEntry's own
+// comment. id/createdAt fallbacks here are only a defensive guard
+// against a hand-edited document; the real path (drainAgentStaging())
+// always supplies server-assigned ones already.
+if (!Array.isArray(data.agentInbox)) data.agentInbox = [];
+data.agentInbox = data.agentInbox.map((e) => ({ ...blankAgentInboxEntry(), ...e, id: e.id || uid(), nodes: Array.isArray(e.nodes) ? e.nodes : [] }));
 if (!Array.isArray(data.telegramThreads)) data.telegramThreads = [];
 data.telegramThreads = data.telegramThreads.map((t) => ({ ...blankTelegramThread(), ...t, id: t.id || uid(), context: { kind: 'general', tripId: '', legId: '', taskId: '', ...(t.context || {}) } }));
 // {chatId, fromName, text, date} entries the bot has seen but nobody's
@@ -4027,7 +4056,7 @@ exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, SENSITIVE_BLOCKS,
 MAIL_SEARCH_KINDS, mailSearchLabel, blankMailSearch, blankMailTopic, blankMailRule, blankMailDismissal,
 TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureBatch, blankPendingImport, blankConnection, blankTelegramThread, blankReadingItem, blankCaptureDraft, blankJob, blankMediaItem, MEDIA_KINDS, MEDIA_STATUSES, blankMediaRecSource, blankMediaRecCandidate,
 blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS, LEG_DATE_FIELDS, STAY_TYPE_SUGGESTIONS,
-blankLeaveYear, blankCatSittingVisit, blankClaudeApiSpend, blankClaudeSubscriptionUsage,
+blankLeaveYear, blankCatSittingVisit, blankClaudeApiSpend, blankClaudeSubscriptionUsage, blankAgentInboxEntry,
 blankPackingItem, blankPackingModule, blankTripPacking, blankPackingListItem, PACKING_DURATION_TIERS, packingDurationTier, DEFAULT_PACKING_MODULES,
 blankMarriottAvailability, pruneMarriottAvailability,
 blankLoyaltyProgram, blankLoyaltyBalance, blankVoucher,
