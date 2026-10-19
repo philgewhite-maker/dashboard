@@ -419,4 +419,4 @@ if (status) status.textContent = 'Done.';
 });
 }
 
-export { runSchoolCalendarCheck, forceSchoolCalendarCheck, renderSchoolCalendar, initSchoolCalendar, computeNotAtSchoolPeriods, hashText };
+export { runSchoolCalendarCheck, forceSchoolCalendarCheck, renderSchoolCalendar, initSchoolCalendar, computeNotAtSchoolPeriods, hashText, fetchGovUkHolidays };

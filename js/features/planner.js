@@ -1678,4 +1678,4 @@ revealPlannerActivity(chip.dataset.openPlannerActivity);
 });
 }
 
-export { renderPlanner, initPlanner, revealPlannerEntry, revealPlannerActivity, plannerActivityChipHtml, bindPlannerActivityChips, syncTripPeopleEntries, placeEntry, addActivityToDay, createDateEventFromExtraction, createDateEventsFromExtractions, rolloverTaskEntries, addPlannerExtraDay, removePlannerExtraDay };
+export { renderPlanner, initPlanner, revealPlannerEntry, revealPlannerActivity, plannerActivityChipHtml, bindPlannerActivityChips, syncTripPeopleEntries, placeEntry, addActivityToDay, createDateEventFromExtraction, createDateEventsFromExtractions, rolloverTaskEntries, addPlannerExtraDay, removePlannerExtraDay, tripRangeFor };

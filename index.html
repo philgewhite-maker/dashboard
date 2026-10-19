@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v613</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v614</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -2728,6 +2728,7 @@ Needs the WHOLE exported folder tree (hundreds of files, not a single JSON) &mda
 </label>
 </div>
 <div id="travel-loyalty-strip"></div>
+<div id="cat-sitting-rollup-strip"></div>
 <div class="settings-note" style="margin:0 0 10px;">A trip is a project you can also work from the Tasks tab &mdash; add flights, car hire, accommodation and transfers here, enrich them from a booking email (Mail's &quot;+ trip leg&quot;) or a screenshot (Capture Inbox's &quot;Extract into a trip leg&quot;), and download a self-contained offline itinerary once it's ready. Anything still open is flagged &#9888; rather than left blank &mdash; fill it in or mark it N/A.</div>
 <div class="capture-row" style="margin-bottom:14px;">
 <input type="text" autocomplete="off" id="travel-new-trip-title" placeholder="Trip name, e.g. Lisbon long weekend">
@@ -2789,6 +2790,14 @@ Needs the WHOLE exported folder tree (hundreds of files, not a single JSON) &mda
 </details>
 
 <div id="mvc-pivot"></div>
+</section>
+
+<section class="panel wide" id="leave-panel" data-tab="travel">
+<div class="panel-head">
+<h2><span class="dot teal"></span>Annual leave</h2>
+</div>
+<div class="settings-note" style="margin:0 0 10px;">30 days a year (1 April &rarr; 31 March), allocated to trips as draft/firm/approved on each trip's own card above. Weekdays only, UK bank holidays excluded automatically.</div>
+<div id="leave-list"></div>
 </section>
 
 <section class="panel wide" id="planner-panel" data-tab="planner">

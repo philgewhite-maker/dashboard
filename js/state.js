@@ -43,6 +43,8 @@ schoolCalendarUpdates: [], // one entry per detected term-date change, see js/fe
 // (incompleteCoreSets() no longer lists it) -- same moment
 // setCompletionSearches' own entry for that key is pruned.
 setCompletionFinds: [],
+leaveYears: [], // one per UK holiday year ever touched -- see js/features/leave.js
+catSittingVisits: [], // {id, date, connectionId, status, notes, tripId} -- see js/features/catsitting.js
 vouchers: [],
 businessIdeas: [],
 subscriptions: [],
@@ -842,6 +844,13 @@ startDate: '', endDate: '', // best-known bounds; refined as legs fill in
 people: [], // {id, name, relation:'self'|'partner'|'child'|'other', connectionId}
 legs: [],
 packing: blankTripPacking(),
+// Annual-leave allocation -- see js/features/leave.js. '' means this
+// trip isn't leave-tracked at all (most trips, e.g. a work trip); the
+// other three values are a click-to-cycle progression mirroring
+// blankPlannerEntry's own draft/firm status below, with one more step
+// for "signed off with work".
+leaveStatus: '', // '' | 'draft' | 'firm' | 'approved'
+leaveDaysOverride: null, // manual day-count override; null = auto-compute (weekdays minus UK bank holidays) via leave.js's computeLeaveDays
 createdAt: new Date().toISOString(),
 ...fields,
 };
@@ -886,6 +895,32 @@ createdAt: new Date().toISOString(),
 
 const LEG_STATUSES = ['unbooked', 'booked', 'confirmed'];
 const LEG_STATUS_LABELS = { unbooked: 'Not booked yet', booked: 'Booked', confirmed: 'Confirmed' };
+
+// ---- Annual leave (js/features/leave.js owns the computation/rendering) --
+//
+// One row per UK holiday year (1 April -> 31 March) ever touched by a
+// leave-tracked trip -- `startDate` is always that year's own 1 April,
+// doubling as both the sort key and the label source, so no separate
+// integer "year" field is needed. `entitlementDays` is the one editable
+// number that covers BOTH the normal annual allowance and any
+// carryover/starting-balance adjustment (e.g. 33 instead of 30) --
+// reported directly as wanted that way, rather than two separate
+// carryover/starting-balance fields.
+function blankLeaveYear(fields = {}) {
+return { id: uid(), startDate: '', entitlementDays: 30, ...fields };
+}
+
+// ---- Cat sitting (js/features/catsitting.js) ------------------------------
+//
+// One row per visitor, per day -- "up to 2 visitors per day" is just 2
+// of these sharing one `date`, the same shape planner.js's own day grid
+// already uses for 2 different connections on one day (separate
+// records, not one record holding an array of ids). `tripId` is
+// deliberately allowed blank (a visit isn't force-tied to a trip), but
+// the only UI surface that creates one today is trip-coupled.
+function blankCatSittingVisit(fields = {}) {
+return { id: uid(), date: '', connectionId: '', status: 'draft', notes: '', tripId: '', createdAt: new Date().toISOString(), ...fields };
+}
 
 // ---- Packing modules (js/features/packing.js owns the generation logic) --
 //
@@ -2655,7 +2690,23 @@ t.packing.items = Array.isArray(t.packing.items)
 ? t.packing.items.map((i) => ({ ...blankPackingListItem(), ...i, id: i.id || uid() })) : [];
 t.packing.moduleState = (t.packing.moduleState && typeof t.packing.moduleState === 'object') ? t.packing.moduleState : {};
 t.packing.removedSourceItemIds = Array.isArray(t.packing.removedSourceItemIds) ? t.packing.removedSourceItemIds : [];
+t.leaveStatus = ['draft', 'firm', 'approved'].includes(t.leaveStatus) ? t.leaveStatus : '';
+t.leaveDaysOverride = (t.leaveDaysOverride === null || typeof t.leaveDaysOverride === 'number') ? t.leaveDaysOverride : null;
 });
+// One row per UK holiday year ever touched -- see js/features/leave.js.
+if (!Array.isArray(data.leaveYears)) data.leaveYears = [];
+data.leaveYears = data.leaveYears.map((y) => ({ ...blankLeaveYear(), ...y, id: y.id || uid() }));
+// Cat-sitting visits -- see js/features/catsitting.js. A visit whose
+// trip was deleted has nothing left to attach to (same "nothing left to
+// route it to" reasoning as the trip/plannerEntries filters elsewhere);
+// a blank tripId is never pruned, since a visit is allowed to exist
+// outside a trip context by design.
+if (!Array.isArray(data.catSittingVisits)) data.catSittingVisits = [];
+data.catSittingVisits = data.catSittingVisits.map((v) => ({ ...blankCatSittingVisit(), ...v, id: v.id || uid() }));
+{
+const tripIds = new Set(data.trips.map((t) => t.id));
+data.catSittingVisits = data.catSittingVisits.filter((v) => !v.tripId || tripIds.has(v.tripId));
+}
 // Packing module library: array guard, then a ONE-TIME seed -- same
 // shape as data.ticker.tickerLettingSeeded. A deliberate deletion of a
 // built-in module must stick, not get silently restored on reload.
@@ -3935,6 +3986,7 @@ exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, SENSITIVE_BLOCKS,
 MAIL_SEARCH_KINDS, mailSearchLabel, blankMailSearch, blankMailTopic, blankMailRule, blankMailDismissal,
 TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureBatch, blankPendingImport, blankConnection, blankTelegramThread, blankReadingItem, blankCaptureDraft, blankJob, blankMediaItem, MEDIA_KINDS, MEDIA_STATUSES, blankMediaRecSource, blankMediaRecCandidate,
 blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS, LEG_DATE_FIELDS, STAY_TYPE_SUGGESTIONS,
+blankLeaveYear, blankCatSittingVisit,
 blankPackingItem, blankPackingModule, blankTripPacking, blankPackingListItem, PACKING_DURATION_TIERS, packingDurationTier, DEFAULT_PACKING_MODULES,
 blankMarriottAvailability, pruneMarriottAvailability,
 blankLoyaltyProgram, blankLoyaltyBalance, blankVoucher,

@@ -567,6 +567,7 @@ return `<div class="alloc-card" data-trip-card="${trip.id}">
 <input type="date" data-trip-start="${trip.id}" value="${escapeHtml(trip.startDate)}">
 <input type="date" data-trip-end="${trip.id}" value="${escapeHtml(trip.endDate)}" min="${escapeHtml(trip.startDate)}">
 </div>
+<div data-leave-mount="${trip.id}"></div>
 <div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:8px;">
 ${trip.people.map((p) => personChipHtml(trip.id, p)).join('')}
 <span data-trip-person-picker-mount="${trip.id}"></span>
@@ -590,6 +591,7 @@ const rows = [
 ].sort((x, y) => x.key.localeCompare(y.key));
 return rows.map((r) => r.html).join('');
 })()}
+<div data-catsitting-mount="${trip.id}"></div>
 <div class="alloc-controls" style="margin-top:8px;">
 <select data-trip-add-leg-kind="${trip.id}">${LEG_KINDS.map((k) => `<option value="${k}">${escapeHtml(LEG_KIND_LABELS[k])}</option>`).join('')}</select>
 <button class="todo-add-btn" type="button" data-trip-add-leg="${trip.id}">+ Add leg</button>
@@ -661,6 +663,26 @@ el.querySelectorAll('[data-packing-mount]').forEach((mount) => {
 mount.outerHTML = packingSectionHtml(tripById(mount.dataset.packingMount));
 });
 bindPacking(el);
+});
+}
+// Annual leave control, same lazy mount-then-fill shape as packing just
+// above -- most sessions open Travel without touching leave tracking.
+if (el.querySelector('[data-leave-mount]')) {
+import('./leave.js').then(({ leaveControlHtml, bindLeaveControls }) => {
+el.querySelectorAll('[data-leave-mount]').forEach((mount) => {
+mount.outerHTML = leaveControlHtml(tripById(mount.dataset.leaveMount));
+});
+bindLeaveControls(el);
+});
+}
+// Cat sitting day grid, same shape.
+if (el.querySelector('[data-catsitting-mount]')) {
+import('./catsitting.js').then(({ catSittingSectionHtml, bindCatSitting, renderCatSittingRollup }) => {
+el.querySelectorAll('[data-catsitting-mount]').forEach((mount) => {
+mount.outerHTML = catSittingSectionHtml(tripById(mount.dataset.catsittingMount));
+});
+bindCatSitting(el);
+renderCatSittingRollup();
 });
 }
 // The "+ person" picker's row list needs the live Dating module, kept as
@@ -969,6 +991,8 @@ if (status) status.textContent = 'Downloaded.';
 }
 
 function initTravel() {
+import('./leave.js').then(({ initLeave }) => initLeave());
+import('./catsitting.js').then(({ initCatSitting }) => initCatSitting());
 const btn = document.getElementById('travel-new-trip-btn');
 const titleInput = document.getElementById('travel-new-trip-title');
 const destInput = document.getElementById('travel-new-trip-destination');
