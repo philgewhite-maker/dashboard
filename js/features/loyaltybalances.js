@@ -280,7 +280,7 @@ return { membershipNumber: '', tier: '', date, metrics };
 // lets a tracked reading already turned into a voucher be offered as a
 // confident "Update" match (vouchers.js's own reference-first
 // matching) rather than "add as new" once the confirmed email arrives.
-function extractQuidco(bodyText) {
+function extractQuidco(bodyText, subject) {
 const text = String(bodyText || '');
 const cashMatch = text.match(/Cashback earned:\s*\+?£([\d.,]+)/i);
 if (!cashMatch) return null;
@@ -289,7 +289,20 @@ const retailer = retailerDateMatch ? retailerDateMatch[1].trim() : '';
 const date = retailerDateMatch ? parseDMonYyyy(retailerDateMatch[2], retailerDateMatch[3], retailerDateMatch[4]) : '';
 const totalMatch = text.match(/Total amount:\s*£([\d.,]+)/i);
 const total = totalMatch ? Number(totalMatch[1].replace(/,/g, '')) : null;
-const label = /cashback has been tracked/i.test(text) ? 'Cashback tracked' : 'Cashback confirmed';
+// Real example confirmed live (Gmail connector, 26 Sept 2026 message):
+// the body text itself reads "Your cashback has been\ntracked" -- a
+// genuine newline between "been" and "tracked", not a space. A
+// literal-space match against bodyText alone (the first version of
+// this) silently fell through to "confirmed" for EVERY tracked email,
+// mislabelling all of them -- same class of bug this file has hit
+// before (BA/Marriott/Virgin/TopCashback's own body-flattening traps).
+// The subject line has no such risk (confirmed as the clean, complete
+// "Your cashback has been tracked"/"...confirmed" string), so it's
+// checked first; the body-text check (now tolerant of the real
+// newline via \s+) is only a fallback for the rare case subject isn't
+// available.
+const isTracked = /cashback has been tracked/i.test(String(subject || '')) || /cashback has been\s+tracked/i.test(text);
+const label = isTracked ? 'Cashback tracked' : 'Cashback confirmed';
 return {
 membershipNumber: '', tier: '', date,
 metrics: [{
