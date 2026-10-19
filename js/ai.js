@@ -1354,9 +1354,26 @@ return `Search eBay UK (ebay.co.uk) for "${query}" and report what CURRENT listi
 1. Search ebay.co.uk for the item. Note the price and condition ("New with tags", "New without tags", "Used", "Pre-owned", etc. -- exactly as each listing states it, never guessed) for every genuinely matching listing you find, up to 8.
 2. Colour and exact size don't matter here -- a listing for the same style/piece in a different colour or size is still a valid comparable for resale value, so don't filter those out.
 3. Never fetch a listing page -- eBay's own search results already show price and condition for each one.
-4. The "estimate" you give MUST be based on "New with tags" (BNWT) listings specifically, NOT "Used"/"Pre-owned"/"New without tags" ones -- the owned item is unworn with tags still on, so a Used listing's price is not a comparable for it and would understate what it's actually worth. If you found any BNWT listings, base "estimate" only on those (say so, e.g. "BNWT pieces are going for £28-£38 on eBay") and ignore the non-BNWT ones for the purpose of that figure. Only fall back to the other conditions, and say so explicitly in "estimate" (e.g. "No BNWT listings found; used ones go for £12-£18"), if truly nothing BNWT turned up at all. Still report every listing you found in "listings" regardless of condition, for reference.
+4. The "estimate" you give MUST be based on "New with tags" (BNWT) listings specifically, NOT "Used"/"Pre-owned"/"New without tags" ones -- the owned item is unworn with tags still on, so a Used listing's price is not a comparable for it and would understate what it's actually worth. If you found any BNWT listings, base "estimate" only on those; only fall back to the other conditions if truly nothing BNWT turned up at all. Still report every listing you found in "listings" regardless of condition (and its real condition), for reference -- that's where the BNWT-vs-not distinction is visible, not in "estimate" itself.
 
-Respond with ONLY a JSON object, no other text, no markdown fences: {"listings":[{"name":"","price":"","condition":"","url":""}],"estimate":""} -- "estimate" is one short sentence giving a realistic resale price range per the BNWT rule above, or "" if nothing comparable turned up at all.`;
+"estimate" is NUMBERS ONLY, never a sentence or any explanation -- the reader sees the full reasoning in "listings" already. Either a single figure like "~£74", or a range like "£32-£114" if prices vary. No words at all beyond the £ sign and digits (not even "BNWT" or "approx"). Use "" only if nothing comparable turned up at all.
+
+Respond with ONLY a JSON object, no other text, no markdown fences: {"listings":[{"name":"","price":"","condition":"","url":""}],"estimate":""}`;
+}
+// Belt-and-braces against prompt drift or a model that just doesn't
+// comply: pulls every £ amount out of whatever "estimate" came back and
+// reformats it as bare numbers, regardless of how much surrounding
+// prose arrived with it -- confirmed live as a real problem (a full
+// sentence like "No listings explicitly labeled... range from about
+// £31.90 to £113.89, so that's the best current resale estimate
+// available" shown verbatim where a short figure belongs).
+function cleanEstimateText(raw) {
+const amounts = [...String(raw || '').matchAll(/£\s*([\d,]+(?:\.\d+)?)/g)].map((m) => Number(m[1].replace(/,/g, '')));
+if (!amounts.length) return String(raw || '').trim();
+if (amounts.length === 1) return `~£${Math.round(amounts[0])}`;
+const low = Math.round(Math.min(...amounts));
+const high = Math.round(Math.max(...amounts));
+return low === high ? `~£${low}` : `£${low}-£${high}`;
 }
 async function searchEbayResaleEstimate(query) {
 const tools = [{
@@ -1372,7 +1389,7 @@ return {
 listings: listings.filter((l) => l && l.url).slice(0, 8).map((l) => ({
 name: String(l.name || ''), price: String(l.price || ''), condition: String(l.condition || ''), url: String(l.url || ''),
 })).sort((a, b) => parsePriceForSort(a.price) - parsePriceForSort(b.price)),
-estimate: String((raw && raw.estimate) || ''),
+estimate: cleanEstimateText((raw && raw.estimate) || ''),
 };
 }
 
@@ -2478,7 +2495,7 @@ return { country: String((data && data.country) || '').trim() };
 export {
 MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot, quickScanScreenshot, scanForCaptureMarker,
 callTextJson, DEFAULT_MODEL, summarizeUsage, currentMonthKey, compareFaces,
-extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShoppingItem, searchAgentProvocateurElsewhere, searchEbayResaleEstimate, searchDepartmentStoresForMissingSetPiece, generateAirbnbRateReview, analyseOngoingAccountValue, identifyProduct, translateText, romanizeName, parseCaptureIntent,
+extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShoppingItem, searchAgentProvocateurElsewhere, searchEbayResaleEstimate, cleanEstimateText, searchDepartmentStoresForMissingSetPiece, generateAirbnbRateReview, analyseOngoingAccountValue, identifyProduct, translateText, romanizeName, parseCaptureIntent,
 resolveUrlTitle, resolveJobPostingUrl, resolveBookDetails, resolveSeriesBooks,
 identifyCountry, extractWellnessScreenshot,
 extractTripScreenshot, extractMediaScreenshot, extractTripLegFromEmail, extractTaskFromEmail, extractDateEventFromEmail, extractMediaRecommendations, rankMediaCandidates, findLatestArticleUrl, extractSchoolCalendar, extractLoyaltyBalanceWithAI,

@@ -25,7 +25,7 @@ import { matchBrandLogo } from '../brandLogos.js';
 import { captureTask, revealTask } from './tasks.js';
 import { connectionChipHtml, bindConnectionChips, connectionPickerHtml, bindConnPickers, setConnPickerValue, sensitiveFieldsShown } from './connections.js';
 import { runStockCheck, stockCheckHtml, adapterFor, seedWatchSpec, pasteStockFor, cashbackHtml, fetchPages, registerCashbackTracked, refreshCashbackRates, money } from './stockwatch.js';
-import { MissingKeyError, searchShoppingItem } from '../ai.js';
+import { MissingKeyError, searchShoppingItem, cleanEstimateText } from '../ai.js';
 import { initMicCapture } from './voicecapture.js';
 import { banner } from './sharetarget.js';
 
@@ -1146,10 +1146,7 @@ ${find.condition ? `<span class="tag-chip">${escapeHtml(find.condition)}</span>`
 </div>`;
 }
 
-function inventorySetsHtml() {
-const sets = inventorySets().filter((s) => s.groups.some((g) => SET_CORE_GROUPS.includes(g)));
-if (!sets.length) return '';
-return `<div class="inv-sets">${sets.map((set) => {
+function setCardHtml(set) {
 const name = [set.brand, set.style, set.colour].filter(Boolean).join(' · ') || 'Unnamed set';
 const pieces = set.items.map((i) => `${escapeHtml(i.piece || '?')} ${escapeHtml(i.size || '')}`).join(', ');
 const fits = whoFitsSet(set);
@@ -1182,7 +1179,21 @@ ${setCompletionFindHtml(set)}
 ${forceSearchRow}
 ${body}
 </div>`;
-}).join('')}</div>`;
+}
+
+// Split by completeness with its own heading each -- reported directly
+// as a real gap: sets, part sets and the flat item list below all ran
+// together with no visual boundary telling you which section you were
+// in.
+function inventorySetsHtml() {
+const sets = inventorySets().filter((s) => s.groups.some((g) => SET_CORE_GROUPS.includes(g)));
+if (!sets.length) return '';
+const complete = sets.filter((s) => s.complete);
+const incomplete = sets.filter((s) => !s.complete);
+const section = (title, list) => list.length
+? `<div class="inv-section-head">${escapeHtml(title)} (${list.length})</div><div class="inv-sets">${list.map(setCardHtml).join('')}</div>`
+: '';
+return section('Complete sets', complete) + section('Part sets', incomplete);
 }
 
 // Brand/style/piece/size/colour editable inline, exactly like a held
@@ -1223,7 +1234,7 @@ const listingsHtml = listings.length
 ? listings.map((l) => `<div class="inv-resale-listing"><a href="${escapeHtml(l.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(l.name)}</a>${l.condition ? ` <span class="tag-chip">${escapeHtml(l.condition)}</span>` : ''} <span class="chip-price">${escapeHtml(l.price)}</span></div>`).join('')
 : `<div class="settings-note" style="margin:0;">No comparable listings were recorded.</div>`;
 return `<details class="inv-resale">
-<summary>${logoBadgeHtml(EBAY_LOGO, 'eB', 'plum')}<span class="match-name">${escapeHtml(cached.estimate || 'No comparable eBay listings found.')}</span></summary>
+<summary>${logoBadgeHtml(EBAY_LOGO, 'eB', 'plum')}<span class="match-name">${escapeHtml(cleanEstimateText(cached.estimate) || 'No comparable eBay listings found.')}</span></summary>
 <div class="inv-resale-listings">${listingsHtml}</div>
 </details>
 <button type="button" class="todo-add-btn" data-inv-resale="${escapeHtml(o.id)}" title="Re-check">&#8635;</button>`;
@@ -1466,7 +1477,7 @@ el.innerHTML = `<div class="sync-row" style="margin-bottom:8px;flex-wrap:wrap;">
 <label style="font-size:12px;">Bra band <input type="number" data-set-completion-bound="braBandMin" value="${escapeHtml(String(bounds.braBandMin ?? ''))}" style="max-width:55px;">&ndash;<input type="number" data-set-completion-bound="braBandMax" value="${escapeHtml(String(bounds.braBandMax ?? ''))}" style="max-width:55px;"></label>
 <label style="font-size:12px;">Bra cup ${cupSelect('braCupMin', bounds.braCupMin)}&ndash;${cupSelect('braCupMax', bounds.braCupMax)}</label>
 <label style="font-size:12px;">Knicker size <input type="number" data-set-completion-bound="knickersMin" value="${escapeHtml(String(bounds.knickersMin ?? ''))}" style="max-width:55px;">&ndash;<input type="number" data-set-completion-bound="knickersMax" value="${escapeHtml(String(bounds.knickersMax ?? ''))}" style="max-width:55px;"></label>
-</div>` + inventorySetsHtml() + inventoryHtml();
+</div>` + inventorySetsHtml() + `<div class="inv-section-head">All items</div>` + inventoryHtml();
 bindConnectionChips(el);
 hydratePhotoBackgrounds(el);
 bindLogoFallbacks(el);
