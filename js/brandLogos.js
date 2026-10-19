@@ -28,6 +28,12 @@ return `https://play-lh.googleusercontent.com/${id}=w240-h480-rw`;
 const BRAND_LOGOS = [
 { names: ['British Airways', 'British Airways Executive Club', 'BA'], logoUrl: iconUrl('3pgRRA6P2XXcmqaTiNBVi1Znc176FOr09rZChTdsqcQw-Qy9YDh0heJOUQeg5ri2yoGrbNFoGaZz6Daoc04WkQ') },
 { names: ['Marriott Bonvoy', 'Marriott'], logoUrl: iconUrl('BXC7DufPjS1Oc7x7TDY3QyHfrkq-MQpSUHyuCsb1_PhY2aju4OAyZtmdPWJXoCTIQr-3t06y-jTGH4WcbYJvYQ') },
+// A distinct app/brand from Marriott Bonvoy above (timeshare ownership,
+// not hotel loyalty) -- 'Marriott Bonvoy'/'Marriott' are checked EXACT-
+// match first elsewhere (matchBrandEntry), so this program's own exact
+// name always wins over the bare "Marriott" substring alias above;
+// listed here for real regardless of array order.
+{ names: ['Marriott Vacation Club'], logoUrl: iconUrl('-KHsrbwweAknVgALxFq_fg0PJQOIt8M4aR_HXH9i39xS2272MHbF7JKuPIoD9ICHHqh_cTbTi3_j_pbBNCx9USQ') },
 { names: ['Virgin Atlantic', 'Virgin Flying Club', 'Virgin'], logoUrl: iconUrl('Zp4MS0HwivSwovGY6Lyv9i0xpbLcz-7xI6ZOLu8AFasats_GXF5KI_x3K6tjFZfWp_lraePif-qLZIXEZrFC') },
 { names: ['Tesco', 'Tesco Clubcard'], logoUrl: iconUrl('UJiliy4e4STktLsmct2a3hjXA4O1Swl5h0RVSOUoXLnGw6tNA3FNM1V1TKVhTOod9ZmDYixSe_iRFuryHCsrAg') },
 { names: ['Boots', 'Boots Advantage Card'], logoUrl: iconUrl('iG3tJfDkPrtDrcFEC4_vvdWimfHIaSLqjf-ll--33LzGt0_0Vi6M9s2UqSa5NYSEyv0m7Sp2oZwBeDoz7Tkq') },

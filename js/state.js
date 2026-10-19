@@ -1051,6 +1051,14 @@ detail: '',
 const DEFAULT_LOYALTY_PROGRAMS = [
 { id: 'loyalty-ba', name: 'British Airways Executive Club', extractorKey: 'ba',
 senderAddresses: ['TheBritishAirwaysClub@crm.ba.com'], builtIn: true },
+// Not email-scanned (extractorKey/senderAddresses blank) -- its
+// readings come from js/features/marriottavailability.js's own import
+// flow instead, fed by marriottscan.js's real getProductSummary read
+// (see that file's v17 changelog entry). Placed right before Marriott
+// Bonvoy per the user's own request -- see DEFAULT_LOYALTY_PROGRAMS_V5
+// for how an already-seeded install gets this same position.
+{ id: 'loyalty-marriott-vc', name: 'Marriott Vacation Club', extractorKey: '',
+senderAddresses: [], builtIn: true },
 { id: 'loyalty-marriott', name: 'Marriott Bonvoy', extractorKey: 'marriott-bonvoy',
 senderAddresses: ['marriottbonvoy@email-marriott.com'], builtIn: true },
 { id: 'loyalty-virgin', name: 'Virgin Flying Club', extractorKey: 'virgin-flying-club',
@@ -1097,6 +1105,19 @@ senderAddresses: ['quidco@info.quidco.com'], contentFilter: '"Your cashback has 
 const DEFAULT_LOYALTY_PROGRAMS_V4 = [
 { id: 'loyalty-topcashback', name: 'TopCashback', extractorKey: 'topcashback',
 senderAddresses: ['notification@topcashback.co.uk'], contentFilter: '"payable cashback"', builtIn: true },
+];
+
+// Not email-scanned -- fed by js/features/marriottavailability.js's own
+// import flow (marriottscan.js's real getProductSummary read). The
+// user asked for this one specifically positioned just above Marriott
+// Bonvoy, not appended to the end like every program before it -- the
+// migrate()-side seed below honours `insertBeforeId` (consumed only
+// during seeding, never itself stored on the program) for exactly that;
+// a fresh install gets the same position for free since this entry
+// also sits directly in DEFAULT_LOYALTY_PROGRAMS, ahead of Bonvoy.
+const DEFAULT_LOYALTY_PROGRAMS_V5 = [
+{ id: 'loyalty-marriott-vc', name: 'Marriott Vacation Club', extractorKey: '',
+senderAddresses: [], builtIn: true, insertBeforeId: 'loyalty-marriott' },
 ];
 
 function pruneMarriottAvailability(store, today = todayStr()) {
@@ -2709,6 +2730,16 @@ DEFAULT_LOYALTY_PROGRAMS_V4.forEach((p) => {
 if (!data.loyaltyPrograms.some((x) => x.id === p.id)) data.loyaltyPrograms.push(blankLoyaltyProgram(p));
 });
 }
+if (!data.loyaltyProgramsSeededV5) {
+data.loyaltyProgramsSeededV5 = true;
+DEFAULT_LOYALTY_PROGRAMS_V5.forEach((p) => {
+if (data.loyaltyPrograms.some((x) => x.id === p.id)) return;
+const { insertBeforeId, ...fields } = p;
+const beforeIdx = insertBeforeId ? data.loyaltyPrograms.findIndex((x) => x.id === insertBeforeId) : -1;
+if (beforeIdx >= 0) data.loyaltyPrograms.splice(beforeIdx, 0, blankLoyaltyProgram(fields));
+else data.loyaltyPrograms.push(blankLoyaltyProgram(fields));
+});
+}
 // Backfills contentFilter onto a program that already existed before
 // that field did -- the ordinary `{...blankLoyaltyProgram(), ...p}`
 // merge above only fills in a key p doesn't have AT ALL with the
@@ -2717,7 +2748,7 @@ if (!data.loyaltyPrograms.some((x) => x.id === p.id)) data.loyaltyPrograms.push(
 // One-time (never overwrites a value the user's own edit set).
 if (!data.loyaltyContentFiltersSeeded) {
 data.loyaltyContentFiltersSeeded = true;
-[...DEFAULT_LOYALTY_PROGRAMS, ...DEFAULT_LOYALTY_PROGRAMS_V2, ...DEFAULT_LOYALTY_PROGRAMS_V3, ...DEFAULT_LOYALTY_PROGRAMS_V4].forEach((seed) => {
+[...DEFAULT_LOYALTY_PROGRAMS, ...DEFAULT_LOYALTY_PROGRAMS_V2, ...DEFAULT_LOYALTY_PROGRAMS_V3, ...DEFAULT_LOYALTY_PROGRAMS_V4, ...DEFAULT_LOYALTY_PROGRAMS_V5].forEach((seed) => {
 if (!seed.contentFilter) return;
 const existing = data.loyaltyPrograms.find((p) => p.id === seed.id);
 if (existing && !existing.contentFilter) existing.contentFilter = seed.contentFilter;
@@ -2764,6 +2795,16 @@ data.loyaltyLabelKinds.push({ programId: 'loyalty-quidco', label: 'Cashback conf
 if (!data.loyaltyLabelKinds.some((k) => k.programId === 'loyalty-topcashback' && k.label === 'Cashback confirmed')) {
 data.loyaltyLabelKinds.push({ programId: 'loyalty-topcashback', label: 'Cashback confirmed', kind: 'voucher' });
 }
+// Marriott Vacation Club's two labels (see marriottavailability.js's
+// mergeMarriottAvailability) are obviously running balances, never a
+// voucher -- pre-classified 'balance' for the same reason the others
+// above are pre-classified 'voucher': the answer is already known, no
+// real question to put to the user.
+['Points balance', 'Next Use Year'].forEach((label) => {
+if (!data.loyaltyLabelKinds.some((k) => k.programId === 'loyalty-marriott-vc' && k.label === label)) {
+data.loyaltyLabelKinds.push({ programId: 'loyalty-marriott-vc', label, kind: 'balance' });
+}
+});
 // Manually-added days beyond Planner's rolling horizon (see planner.js's
 // MAIN_HORIZON_DAYS) -- deduped, format-checked so a corrupt value can't
 // crash dateStrAdd/Date parsing downstream.

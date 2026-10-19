@@ -22,7 +22,7 @@
 // covers -- see mergeMarriottAvailability()'s own comment for why that's
 // the only merge rule that handles a resort selling out between scans
 // (which produces no row at all in a re-scan, not a marked one).
-import { data, queueSave, blankMarriottAvailability, pruneMarriottAvailability } from '../state.js';
+import { data, queueSave, blankMarriottAvailability, pruneMarriottAvailability, blankLoyaltyBalance } from '../state.js';
 import { escapeHtml, splitCsvLine, todayStr, dateStrAdd } from '../utils.js';
 import { createTrip, tripChipHtml, bindTripChips } from './travel.js';
 
@@ -304,7 +304,24 @@ if (isNew) dateCount++;
 
 nightsInImport.forEach((nights) => months.forEach((month) => { store.coverage[`${nights}|${month}`] = now; }));
 
-if (parsed.pointsBalance) store.pointsBalance = parsed.pointsBalance; // a point-in-time reading -- overwritten wholesale, never merged
+if (parsed.pointsBalance) {
+store.pointsBalance = parsed.pointsBalance; // a point-in-time reading -- overwritten wholesale, never merged
+// Also feeds the Loyalty balances panel, as its own "Marriott Vacation
+// Club" program (state.js's DEFAULT_LOYALTY_PROGRAMS/_V5) -- reported
+// directly as wanted there too, not just on this panel. Pushed as a
+// new reading each import (not overwritten in place), same as every
+// other loyalty reading in this app; deduped on (programId, label,
+// date) so re-importing the exact same export twice doesn't double up.
+const pb = parsed.pointsBalance;
+const addLoyaltyReading = (label, balance) => {
+if (balance == null) return;
+const already = data.loyaltyBalances.some((b) => b.programId === 'loyalty-marriott-vc' && b.label === label && b.date === pb.asOf);
+if (already) return;
+data.loyaltyBalances.push(blankLoyaltyBalance({ programId: 'loyalty-marriott-vc', label, date: pb.asOf, balance, unit: 'points', sourceMessageId: 'marriott-scan' }));
+};
+addLoyaltyReading('Points balance', pb.balance);
+addLoyaltyReading('Next Use Year', pb.potentialBalance);
+}
 if (parsed.apiCaptures) store.apiCaptures = parsed.apiCaptures; // same reasoning -- whatever the console captured THIS run replaces last run's
 
 store.lastImport = {
@@ -343,7 +360,7 @@ if (result.skipped.badDate) skipParts.push(`${result.skipped.badDate} unreadable
 if (result.skipped.past) skipParts.push(`${result.skipped.past} past date${result.skipped.past === 1 ? '' : 's'}`);
 if (skipParts.length) message += ` Skipped ${skipParts.join(', ')}.`;
 if (kind === 'csv') message += ' Months inferred from the dates found — paste the JSON export instead for exact scanned-month coverage.';
-if (parsed.pointsBalance) message += ` Points balance updated: ${parsed.pointsBalance.balance.toLocaleString('en-GB')} as of ${parsed.pointsBalance.asOf}.`;
+if (parsed.pointsBalance) message += ` Points balance updated: ${parsed.pointsBalance.balance.toLocaleString('en-GB')} as of ${parsed.pointsBalance.asOf} (also recorded under Marriott Vacation Club in Loyalty balances).`;
 if (parsed.apiCaptures && ownerContractsFromCaptures(parsed.apiCaptures).length) message += ` Found ${ownerContractsFromCaptures(parsed.apiCaptures).length} owner contract${ownerContractsFromCaptures(parsed.apiCaptures).length === 1 ? '' : 's'} in the site's own console output.`;
 return { ok: true, message };
 }
