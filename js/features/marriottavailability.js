@@ -257,6 +257,35 @@ m++; if (m > 12) { m = 1; y++; }
 return months;
 }
 
+// Feeds the Loyalty balances panel, as its own "Marriott Vacation Club"
+// program (state.js's DEFAULT_LOYALTY_PROGRAMS/_V5) -- reported
+// directly as wanted there too, not just on this panel. Pushed as a new
+// reading each call (not overwritten in place), same as every other
+// loyalty reading in this app; deduped on (programId, label, date) so
+// calling this twice for the same pointsBalance never doubles up.
+// state.js's own migrate() runs the equivalent backfill for a
+// pointsBalance that was already stored before this feed existed (has
+// to live there, not here -- it needs to run before app.js's first
+// renderAll(), earlier than this module even loads).
+function feedLoyaltyBalancesFromPointsBalance(pb) {
+const addLoyaltyReading = (label, balance) => {
+if (balance == null) return;
+const already = data.loyaltyBalances.some((b) => b.programId === 'loyalty-marriott-vc' && b.label === label && b.date === pb.asOf);
+if (already) return;
+data.loyaltyBalances.push(blankLoyaltyBalance({ programId: 'loyalty-marriott-vc', label, date: pb.asOf, balance, unit: 'points', sourceMessageId: 'marriott-scan' }));
+};
+addLoyaltyReading('Points balance', pb.balance);
+addLoyaltyReading('Next Use Year', pb.potentialBalance);
+// Distinct from the Gmail-scan programs' 'deterministic'/'ai' -- there's
+// no email here at all, this number only ever arrives via the
+// hand-pasted console-script output (see marriottscan.js). Loyalty
+// balances' own methodBadgeHtml() renders this as a badge linking back
+// to this panel's "Copy scan script" step, same record-reference
+// requirement as any other generated text naming a location.
+const mvcProgram = data.loyaltyPrograms.find((p) => p.id === 'loyalty-marriott-vc');
+if (mvcProgram) mvcProgram.extractionMethod = 'manual-scrape';
+}
+
 // Merge rule: REPLACE by (nights, month) slice. For every nights value
 // and every month this import covers, every existing date in that slice
 // (across every resort/roomType) is dropped before the new rows go in.
@@ -306,29 +335,7 @@ nightsInImport.forEach((nights) => months.forEach((month) => { store.coverage[`$
 
 if (parsed.pointsBalance) {
 store.pointsBalance = parsed.pointsBalance; // a point-in-time reading -- overwritten wholesale, never merged
-// Also feeds the Loyalty balances panel, as its own "Marriott Vacation
-// Club" program (state.js's DEFAULT_LOYALTY_PROGRAMS/_V5) -- reported
-// directly as wanted there too, not just on this panel. Pushed as a
-// new reading each import (not overwritten in place), same as every
-// other loyalty reading in this app; deduped on (programId, label,
-// date) so re-importing the exact same export twice doesn't double up.
-const pb = parsed.pointsBalance;
-const addLoyaltyReading = (label, balance) => {
-if (balance == null) return;
-const already = data.loyaltyBalances.some((b) => b.programId === 'loyalty-marriott-vc' && b.label === label && b.date === pb.asOf);
-if (already) return;
-data.loyaltyBalances.push(blankLoyaltyBalance({ programId: 'loyalty-marriott-vc', label, date: pb.asOf, balance, unit: 'points', sourceMessageId: 'marriott-scan' }));
-};
-addLoyaltyReading('Points balance', pb.balance);
-addLoyaltyReading('Next Use Year', pb.potentialBalance);
-// Distinct from the Gmail-scan programs' 'deterministic'/'ai' --
-// there's no email here at all, this number only ever arrives via the
-// hand-pasted console-script output (see marriottscan.js). Loyalty
-// balances' own methodBadgeHtml() renders this as a badge linking back
-// to this panel's "Copy scan script" step, same record-reference
-// requirement as any other generated text naming a location.
-const mvcProgram = data.loyaltyPrograms.find((p) => p.id === 'loyalty-marriott-vc');
-if (mvcProgram) mvcProgram.extractionMethod = 'manual-scrape';
+feedLoyaltyBalancesFromPointsBalance(parsed.pointsBalance);
 }
 if (parsed.apiCaptures) store.apiCaptures = parsed.apiCaptures; // same reasoning -- whatever the console captured THIS run replaces last run's
 

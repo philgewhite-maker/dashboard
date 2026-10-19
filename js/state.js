@@ -2827,6 +2827,29 @@ if (!data.loyaltyLabelKinds.some((k) => k.programId === 'loyalty-marriott-vc' &&
 data.loyaltyLabelKinds.push({ programId: 'loyalty-marriott-vc', label, kind: 'balance' });
 }
 });
+// Catch-up for a pointsBalance that was already sitting in
+// marriottAvailability BEFORE this feed existed (or from any import
+// that ran before app.js's renderAll() reaches initMarriottAvailability,
+// too late for that first paint) -- confirmed live as a real gap: the
+// Travel panel showed a correct balance while this card stayed empty,
+// since nothing had re-run the import since. Runs every migrate() call
+// (not gated behind a one-time flag), same as the logo backfill above --
+// the date-based dedup inside already makes a repeat call free.
+{
+const pb = data.marriottAvailability.pointsBalance;
+if (pb && Number.isFinite(pb.balance) && pb.asOf) {
+const addLoyaltyReading = (label, balance) => {
+if (balance == null) return;
+const already = data.loyaltyBalances.some((b) => b.programId === 'loyalty-marriott-vc' && b.label === label && b.date === pb.asOf);
+if (already) return;
+data.loyaltyBalances.push(blankLoyaltyBalance({ programId: 'loyalty-marriott-vc', label, date: pb.asOf, balance, unit: 'points', sourceMessageId: 'marriott-scan' }));
+};
+addLoyaltyReading('Points balance', pb.balance);
+addLoyaltyReading('Next Use Year', pb.potentialBalance);
+const mvcProgram = data.loyaltyPrograms.find((p) => p.id === 'loyalty-marriott-vc');
+if (mvcProgram && !mvcProgram.extractionMethod) mvcProgram.extractionMethod = 'manual-scrape';
+}
+}
 // Manually-added days beyond Planner's rolling horizon (see planner.js's
 // MAIN_HORIZON_DAYS) -- deduped, format-checked so a corrupt value can't
 // crash dateStrAdd/Date parsing downstream.
