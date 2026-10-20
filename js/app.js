@@ -42,6 +42,7 @@ import { initVoiceCapture } from './features/voicecapture.js';
 import { initTravel } from './features/travel.js';
 import { initMarriottAvailability } from './features/marriottavailability.js';
 import { initLoyaltyBalances } from './features/loyaltybalances.js';
+import { initApOrders } from './features/aporders.js';
 import { initPlanner, rolloverTaskEntries } from './features/planner.js';
 import { initTelegramFamily } from './features/telegramfamily.js';
 // Photos whose bytes aren't on this device are fetched from your own host.
@@ -284,6 +285,7 @@ initVoiceCapture();
 initTravel();
 initMarriottAvailability();
 initLoyaltyBalances();
+initApOrders();
 initPlanner();
 initTelegramFamily();
 initGoogleTasksFeed();

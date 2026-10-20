@@ -2689,6 +2689,13 @@ border-radius:8px;padding:2px 8px;
 font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap;
 }
 .planner-chip:hover{background:var(--blue);color:#fff;}
+.ap-order-chip{
+display:inline-flex;align-items:center;gap:4px;
+background:var(--amber-bg);color:var(--amber);
+border-radius:8px;padding:2px 8px;
+font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap;
+}
+.ap-order-chip:hover{background:var(--amber);color:#fff;}
 .leg-toggle{cursor:pointer;display:inline-flex;width:16px;justify-content:center;color:var(--muted);user-select:none;}
 .leg-toggle:hover{color:var(--ink);}
 /* The map-pin / reference-link glyphs next to a Planner idea's title

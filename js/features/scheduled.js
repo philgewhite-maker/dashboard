@@ -195,6 +195,17 @@ const { runLoyaltyBalanceScan } = await import('./loyaltybalances.js');
 await runLoyaltyBalanceScan();
 },
 },
+{
+// Own ~28-day cadence gate lives inside aporders.js, same split as
+// the loyalty-balances entry just above -- this file's own interval
+// just decides when it's even attempted.
+id: 'ap-orders', label: 'AP order capture', needsGoogle: true,
+note: 'Reads Agent Provocateur order-confirmation emails about once a month, as the authoritative record for returns-by-elimination. See Shopping → AP orders.',
+run: async () => {
+const { runApOrderCapture } = await import('./aporders.js');
+await runApOrderCapture();
+},
+},
 ];
 
 function runs() {

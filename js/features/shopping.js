@@ -26,6 +26,7 @@ import { captureTask, revealTask } from './tasks.js';
 import { connectionChipHtml, bindConnectionChips, connectionPickerHtml, bindConnPickers, setConnPickerValue, sensitiveFieldsShown } from './connections.js';
 import { runStockCheck, stockCheckHtml, adapterFor, seedWatchSpec, pasteStockFor, cashbackHtml, fetchPages, registerCashbackTracked, refreshCashbackRates, money } from './stockwatch.js';
 import { MissingKeyError, searchShoppingItem, cleanEstimateText } from '../ai.js';
+import { orderForNumber, apOrderLineOptionsHtml, apOrderChipHtml, bindApOrderChips } from './aporders.js';
 import { initMicCapture } from './voicecapture.js';
 import { banner } from './sharetarget.js';
 
@@ -308,6 +309,10 @@ ${chipFieldHtml('Piece', 'piece', knownScalarValues(data.inventory, 'piece'))}
 ${chipFieldHtml('Size', 'size', knownScalarValues(data.inventory, 'size'))}
 ${chipFieldHtml('Colour', 'colour', knownScalarValues(data.inventory, 'colour'))}
 <label style="font-size:12px;display:block;margin:0 0 8px;">Order number <span class="settings-note" style="display:inline;margin:0;">(optional &mdash; lets a kept item be matched back to its order later, e.g. for a returns form)</span><input type="text" autocomplete="off" data-inv-new="orderNumber" style="width:100%;display:block;"></label>
+<div data-inv-new-ap-line-wrap style="display:none;margin:0 0 8px;">
+<select data-inv-new-ap-line style="width:100%;"></select>
+<span class="settings-note" style="display:block;margin:2px 0 0;">Exact match, not guessed &mdash; AP's own names/colours/sizes don't always match what you typed above.</span>
+</div>
 <div class="sync-row" style="margin:8px 0;align-items:center;">
 <div class="avatar sm inv-photo-empty" data-inv-new-photo-thumb title="No photo yet"></div>
 <label class="todo-add-btn" for="inv-new-photo-file" title="Take or choose a photo" style="cursor:pointer;">&#128247;</label>
@@ -340,6 +345,21 @@ setVal(field, chip.dataset.invPickValue);
 });
 const linkInput = dialog.querySelector('[data-inv-new-link]');
 const status = dialog.querySelector('[data-inv-fetch-status]');
+
+// Shows/populates the order-line picker the moment a typed order
+// number matches a captured AP order -- human picks the exact line,
+// never auto-matched (see js/features/aporders.js's own comment on
+// why: AP's own data is known to mismatch name/colour/ID).
+const orderNumberInput = dialog.querySelector('[data-inv-new="orderNumber"]');
+const apLineWrap = dialog.querySelector('[data-inv-new-ap-line-wrap]');
+const apLineSelect = dialog.querySelector('[data-inv-new-ap-line]');
+const refreshApLinePicker = () => {
+const order = orderForNumber(orderNumberInput.value);
+if (!order) { apLineWrap.style.display = 'none'; apLineSelect.innerHTML = ''; return; }
+apLineWrap.style.display = '';
+apLineSelect.innerHTML = apOrderLineOptionsHtml(order);
+};
+orderNumberInput.addEventListener('input', refreshApLinePicker);
 
 // Held in dialog scope, not on a row, since there's no data.inventory
 // item to attach a photoId to until Add is actually clicked -- the
@@ -437,6 +457,7 @@ size: val('size'), colour: val('colour'), notes: val('notes'),
 holderId: dialog.querySelector('#inv-new-holder')?.value || '',
 acquiredAt: todayStr(), link: linkInput.value.trim(),
 photoId: draftPhotoId, orderNumber: val('orderNumber'),
+apOrderLineId: apLineSelect.value,
 }));
 queueSave();
 renderInventory();
@@ -1282,6 +1303,24 @@ return `<label class="todo-add-btn" for="inv-photo-file-${escapeHtml(o.id)}" tit
 ${invPhotoUrlBtnHtml(o)}`;
 }
 
+// A row with an orderNumber matching a captured AP order shows either
+// the exact line it's linked to (chip + the order's own name/colour/
+// size, right next to it, for the eyeball check AP's own data
+// mismatches make necessary) or a picker to link one -- never an
+// auto-guess. A blank or unrecognised order number shows nothing here
+// at all (not every item was bought from AP, and not every AP order is
+// captured yet).
+function apOrderLinkHtml(o) {
+if (!o.orderNumber) return '';
+const order = orderForNumber(o.orderNumber);
+if (!order) return `<span class="settings-note" style="margin:0;font-size:10px;">Order #${escapeHtml(o.orderNumber)} not captured yet &mdash; <span class="inline-goto-link" data-goto-tab="shopping" data-goto-target="#ap-orders-panel">AP orders</span></span>`;
+const line = order.lines.find((l) => l.id === o.apOrderLineId);
+if (line) {
+return `${apOrderChipHtml(order)}<span class="settings-note" style="margin:0;font-size:10px;">${escapeHtml(line.name)}${line.colour ? ` &mdash; ${escapeHtml(line.colour)}` : ''}${line.size ? ` &mdash; ${escapeHtml(line.size)}` : ''}</span><span class="del-x" data-inv-ap-unlink="${escapeHtml(o.id)}" title="Unlink from this order line">&times;</span>`;
+}
+return `<select data-inv-ap-line="${escapeHtml(o.id)}" style="max-width:150px;">${apOrderLineOptionsHtml(order)}</select>`;
+}
+
 function inventoryHtml() {
 const unsorted = unheldInventory();
 if (!unsorted.length) return '<div class="empty">Nothing unassigned — everything recorded is with someone.</div>';
@@ -1314,6 +1353,7 @@ ${field(o, 'orderNumber', 'Order #', '90px')}
 </span>
 <span class="inv-row-bottom">
 ${resaleValueHtml(o)}
+${apOrderLinkHtml(o)}
 <span class="inv-fits">${fitsHtml}</span>
 <span class="del-x" style="opacity:1;" data-inv-remove="${escapeHtml(o.id)}" title="Delete this item">&times;</span>
 </span>
@@ -1633,9 +1673,28 @@ queueSave();
 renderInventory();
 });
 });
+el.querySelectorAll('[data-inv-ap-line]').forEach((select) => {
+select.addEventListener('change', () => {
+const row = data.inventory.find((o) => o.id === select.dataset.invApLine);
+if (!row || !select.value) return;
+row.apOrderLineId = select.value;
+queueSave();
+renderInventory();
+});
+});
+el.querySelectorAll('[data-inv-ap-unlink]').forEach((x) => {
+x.addEventListener('click', () => {
+const row = data.inventory.find((o) => o.id === x.dataset.invApUnlink);
+if (!row) return;
+row.apOrderLineId = '';
+queueSave();
+renderInventory();
+});
+});
 el.querySelectorAll('[data-inv-resale]').forEach((btn) => {
 btn.addEventListener('click', () => checkEbayResaleValue(btn.dataset.invResale));
 });
+bindApOrderChips();
 el.querySelectorAll('[data-inv-photo-view]').forEach((thumb) => {
 thumb.addEventListener('click', async () => {
 const row = data.inventory.find((o) => o.id === thumb.dataset.invPhotoView);

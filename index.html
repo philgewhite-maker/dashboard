@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v616</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v617</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -566,6 +566,24 @@ Prices and offers come from an AI web search of each retailer, not a live basket
 </div>
 <div class="settings-note" style="margin:0 0 8px;">Things you've bought that nobody has yet &mdash; including anything bought for someone you're no longer seeing. Matched against everyone's recorded sizes, so an item can find a person rather than the other way round.</div>
 <div id="inventory-list"></div>
+</section>
+
+<section class="panel wide" id="ap-orders-panel" data-tab="shopping">
+<div class="panel-head">
+<h2><span class="dot amber"></span>AP orders</h2>
+</div>
+<div class="settings-note" style="margin:0 0 10px;">Captures the real Agent Provocateur order-confirmation email as the authoritative record of what was ordered, so a return list is reconciled against exactly what was kept &mdash; not approximated from memory. Link a kept item to its exact order line from the Inventory list above.</div>
+<div class="sync-row">
+<button class="sync-btn" type="button" id="ap-orders-check-btn">Check now</button>
+<span class="sync-status" id="ap-orders-status"></span>
+</div>
+<div id="ap-orders-list"></div>
+<details class="settings-item" style="margin-top:8px;">
+<summary><h3>Paste an order email instead</h3></summary>
+<div class="settings-note" style="margin:4px 0 8px;">If the automatic search hasn't found it yet &mdash; paste the order-confirmation email's full text.</div>
+<textarea rows="4" id="ap-orders-paste-text" style="width:100%;" placeholder="Paste the order confirmation email's text here…"></textarea>
+<button class="sync-btn sm inline" type="button" id="ap-orders-paste-btn" style="margin-top:6px;">Capture from pasted text</button>
+</details>
 </section>
 
 <section class="panel wide" id="recipe-capture-panel" data-tab="menu">

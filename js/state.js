@@ -1839,14 +1839,23 @@ function blankInventoryItem(fields = {}) {
 return {
 id: uid(), brand: '', style: '', piece: '', size: '', colour: '',
 holderId: '', acquiredAt: '', fromTaskId: '', notes: '', link: '',
-// Typed by hand -- no retailer order-confirmation email reading exists
-// yet to auto-fill this. Every row that has one IS, by definition, a
-// KEPT item from that order (an item only ever gets added here if
-// it's being kept, never a "pending return" placeholder) -- a future
-// Claude-in-Chrome returns-form session reads this to work out, by
-// elimination, which of the real form's line items are NOT a kept
-// item and so should be ticked to return.
+// Typed by hand, or copied in automatically once a matching
+// data.apOrders entry exists (see js/features/aporders.js). Every row
+// that has one IS, by definition, a KEPT item from that order (an
+// item only ever gets added here if it's being kept, never a
+// "pending return" placeholder) -- a future Claude-in-Chrome
+// returns-form session reads this to work out, by elimination, which
+// of the real form's line items are NOT a kept item and so should be
+// ticked to return.
 orderNumber: '',
+// A specific blankApOrder() line (js/state.js's blankApOrder, below)
+// this item fulfils -- set via a human-confirmed picker when this
+// row's orderNumber matches a captured order, never guessed by
+// matching name/colour/size text. AP's own data is known to mismatch
+// between the order email, the returns portal and what actually
+// arrived, so returningLinesFor()/keptLinesFor() (aporders.js) match
+// by this exact id, never by re-comparing text.
+apOrderLineId: '',
 // A real photo of the owned piece -- useful to eyeball against a
 // partial-match search result (same mechanism every other photo in
 // this app uses: js/db.js's photo store, via js/files.js's
@@ -1855,6 +1864,26 @@ orderNumber: '',
 // link) -- saved, not just linked to, so it survives the source page
 // disappearing or changing.
 photoId: '',
+...fields,
+};
+}
+
+// One real AP order-confirmation email captured, by js/features/
+// aporders.js -- the authoritative "what was actually ordered" record
+// a kept inventory row (above) is matched against by exact line id,
+// never by re-comparing name/colour/size text (AP's own data is known
+// to mismatch between the order email, the returns portal and what
+// actually arrived -- exact-id matching is the whole point of
+// capturing the order at all, rather than eyeballing it against the
+// real returns form later).
+function blankApOrder(fields = {}) {
+return {
+id: uid(),
+orderNumber: '', // matches an inventory row's own orderNumber field exactly
+orderDate: '', // ISO date, from the email -- drives the 28-day return deadline
+sourceMessageId: '', // dedup guard, same convention loyaltybalances.js's programs use
+lines: [], // [{id, name, colour, size, price}] -- id is a uid(), stable, referenced by inventory rows
+createdAt: new Date().toISOString(),
 ...fields,
 };
 }
@@ -3087,7 +3116,18 @@ acquiredAt: o.acquiredAt || '', fromTaskId: o.fromTaskId || '', notes: o.notes |
 link: o.link || '',
 photoId: o.photoId || '',
 orderNumber: o.orderNumber || '',
+apOrderLineId: o.apOrderLineId || '',
 }));
+// Real captured AP orders -- see js/features/aporders.js. An
+// inventory row's apOrderLineId pointing at an order or line that no
+// longer exists has nothing left to route it to (same reasoning as
+// the trip/planner-entry orphan guards elsewhere in this file) --
+// cleared rather than left dangling.
+if (!Array.isArray(data.apOrders)) data.apOrders = [];
+data.apOrders = data.apOrders.map((o) => ({ ...blankApOrder(), ...o, id: o.id || uid(), lines: Array.isArray(o.lines) ? o.lines : [] }));
+if (typeof data.apOrdersLastCheckedAt !== 'string') data.apOrdersLastCheckedAt = '';
+const apOrderLineIds = new Set(data.apOrders.flatMap((o) => o.lines.map((l) => l.id)));
+data.inventory.forEach((o) => { if (o.apOrderLineId && !apOrderLineIds.has(o.apOrderLineId)) o.apOrderLineId = ''; });
 data.mailDismissed = data.mailDismissed.map((d) => ({ ...blankMailDismissal(), ...d }));
 
 // Fill in any pref added since this document was last written, without
@@ -4052,7 +4092,7 @@ export {
 data, sampleData, loadData, migrate, persist, queueSave, flushSave, setSaveStatusHandler,
 setExternalUpdateHandler, setLocalChangeHandler, getLocalSettings, setLocalSetting, computeStreak, reachOutThreshold,
 isDormantStage, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness,
-exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, SENSITIVE_BLOCKS, whatSheHas, unheldInventory, whoFits, inventorySets, incompleteCoreSets, whoFitsSet, interestNote, SIZE_GROUPS, sizeGroupFor, SET_CORE_GROUPS, DEFAULT_PREFS, blankInventoryItem, blankSetCompletionFind, blankBookItem,
+exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, SENSITIVE_BLOCKS, whatSheHas, unheldInventory, whoFits, inventorySets, incompleteCoreSets, whoFitsSet, interestNote, SIZE_GROUPS, sizeGroupFor, SET_CORE_GROUPS, DEFAULT_PREFS, blankInventoryItem, blankApOrder, blankSetCompletionFind, blankBookItem,
 MAIL_SEARCH_KINDS, mailSearchLabel, blankMailSearch, blankMailTopic, blankMailRule, blankMailDismissal,
 TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureBatch, blankPendingImport, blankConnection, blankTelegramThread, blankReadingItem, blankCaptureDraft, blankJob, blankMediaItem, MEDIA_KINDS, MEDIA_STATUSES, blankMediaRecSource, blankMediaRecCandidate,
 blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS, LEG_DATE_FIELDS, STAY_TYPE_SUGGESTIONS,
