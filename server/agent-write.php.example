@@ -64,6 +64,22 @@ $MAX_NODES_PER_PROPOSAL = 20;
 $MAX_PENDING_ENTRIES = 15;
 $MAX_REQUESTS_PER_HOUR = 60;
 
+// Same allowlist as sync.php/files.php -- the live browser's own drain
+// step (js/sync/agentstaging.js) calls THIS endpoint too (GET, plus the
+// consume/replace(null) follow-ups), using its own locally-held copy of
+// $AGENT_SECRET, so it needs the same CORS treatment those endpoints
+// already have. (An earlier version of this file shipped with no CORS
+// handling at all on the theory that only an external script would ever
+// call it -- wrong, since the browser has to drain the mailbox somehow;
+// confirmed live as a real bug: the drain's own fetch() calls were
+// silently CORS-blocked. The actual security boundary here was always
+// the secret, never same-origin-ness, so this costs nothing.)
+$ALLOWED_ORIGINS = [
+    'https://philgewhite-maker.github.io',
+    'http://localhost:8743',
+    'http://localhost:5173',
+];
+
 // field => which actions are allowed. No 'delete' key anywhere in this
 // table or this file -- not "false", unimplemented.
 $FIELD_PERMISSIONS = [
@@ -73,12 +89,24 @@ $FIELD_PERMISSIONS = [
 
 // ---- End of configuration --------------------------------------------
 
-// Deliberately NO Access-Control-Allow-Origin header anywhere in this
-// file -- this endpoint is only ever called from an external script,
-// never a browser fetch(), so it's structurally unreachable cross-
-// origin even if this secret ever ended up in client code by mistake.
+$origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+if ($origin !== '' && in_array($origin, $ALLOWED_ORIGINS, true)) {
+    header('Access-Control-Allow-Origin: ' . $origin);
+    header('Vary: Origin');
+}
+header('Access-Control-Allow-Headers: Content-Type, X-Agent-Secret');
+header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+header('Access-Control-Max-Age: 86400');
 header('Content-Type: application/json');
 header('Cache-Control: no-store');
+
+// CORS preflight: must answer before the auth check, since the browser
+// sends it without the secret header -- same reasoning sync.php's own
+// OPTIONS handling documents.
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
+    http_response_code(204);
+    exit;
+}
 
 function fail(int $code, string $message): void {
     http_response_code($code);
