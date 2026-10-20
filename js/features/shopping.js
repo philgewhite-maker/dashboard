@@ -26,7 +26,7 @@ import { captureTask, revealTask } from './tasks.js';
 import { connectionChipHtml, bindConnectionChips, connectionPickerHtml, bindConnPickers, setConnPickerValue, sensitiveFieldsShown } from './connections.js';
 import { runStockCheck, stockCheckHtml, adapterFor, seedWatchSpec, pasteStockFor, cashbackHtml, fetchPages, registerCashbackTracked, refreshCashbackRates, money } from './stockwatch.js';
 import { MissingKeyError, searchShoppingItem, cleanEstimateText } from '../ai.js';
-import { orderForNumber, apOrderLineOptionsHtml, apOrderChipHtml, bindApOrderChips } from './aporders.js';
+import { orderForNumber, apOrderLineOptionsHtml, apOrderNumberDatalistHtml, apOrderChipHtml, bindApOrderChips, renderApOrders } from './aporders.js';
 import { initMicCapture } from './voicecapture.js';
 import { banner } from './sharetarget.js';
 
@@ -308,7 +308,7 @@ ${chipFieldHtml('Style', 'style', knownScalarValues(data.inventory, 'style'))}
 ${chipFieldHtml('Piece', 'piece', knownScalarValues(data.inventory, 'piece'))}
 ${chipFieldHtml('Size', 'size', knownScalarValues(data.inventory, 'size'))}
 ${chipFieldHtml('Colour', 'colour', knownScalarValues(data.inventory, 'colour'))}
-<label style="font-size:12px;display:block;margin:0 0 8px;">Order number <span class="settings-note" style="display:inline;margin:0;">(optional &mdash; lets a kept item be matched back to its order later, e.g. for a returns form)</span><input type="text" autocomplete="off" data-inv-new="orderNumber" style="width:100%;display:block;"></label>
+<label style="font-size:12px;display:block;margin:0 0 8px;">Order number <span class="settings-note" style="display:inline;margin:0;">(optional &mdash; lets a kept item be matched back to its order later, e.g. for a returns form)</span><input type="text" autocomplete="off" list="inv-new-ap-order-list" data-inv-new="orderNumber" style="width:100%;display:block;">${apOrderNumberDatalistHtml('inv-new-ap-order-list')}</label>
 <div data-inv-new-ap-line-wrap style="display:none;margin:0 0 8px;">
 <select data-inv-new-ap-line style="width:100%;"></select>
 <span class="settings-note" style="display:block;margin:2px 0 0;">Exact match, not guessed &mdash; AP's own names/colours/sizes don't always match what you typed above.</span>
@@ -462,6 +462,7 @@ apOrderLineId: apLineSelect.value,
 data.inventory.push(newItem);
 queueSave();
 renderInventory();
+if (newItem.apOrderLineId) renderApOrders();
 close();
 fillPhotoFromOrderLineIfMissing(newItem);
 });
@@ -1344,7 +1345,7 @@ return `<select data-inv-ap-line="${escapeHtml(o.id)}" style="max-width:150px;">
 function inventoryHtml() {
 const unsorted = unheldInventory();
 if (!unsorted.length) return '<div class="empty">Nothing unassigned — everything recorded is with someone.</div>';
-const field = (o, name, placeholder, width) => `<input type="text" autocomplete="off" placeholder="${placeholder}" data-inv-field="${name}" data-inv-id="${escapeHtml(o.id)}" value="${escapeHtml(o[name] || '')}" style="max-width:${width};">`;
+const field = (o, name, placeholder, width, listId) => `<input type="text" autocomplete="off" placeholder="${placeholder}"${listId ? ` list="${listId}"` : ''} data-inv-field="${name}" data-inv-id="${escapeHtml(o.id)}" value="${escapeHtml(o[name] || '')}" style="max-width:${width};">`;
 // Blank orderNumber sorts first (most items have none at all), then
 // items sharing a real order number cluster together -- stable sort
 // keeps everything else in its existing relative order. Lets both a
@@ -1368,7 +1369,7 @@ ${field(o, 'colour', 'Colour', '90px')}
 <span class="inv-row-details">
 ${field(o, 'piece', 'Piece', '110px')}
 ${field(o, 'size', 'Size', '60px')}
-${field(o, 'orderNumber', 'Order #', '90px')}
+${field(o, 'orderNumber', 'Order #', '90px', 'inv-ap-order-list')}
 <span class="inv-row-links">${linkHtml}${invPhotoControlsHtml(o)}</span>
 </span>
 <span class="inv-row-bottom">
@@ -1378,7 +1379,7 @@ ${apOrderLinkHtml(o)}
 <span class="del-x" style="opacity:1;" data-inv-remove="${escapeHtml(o.id)}" title="Delete this item">&times;</span>
 </span>
 </div>`;
-}).join('');
+}).join('') + apOrderNumberDatalistHtml('inv-ap-order-list');
 }
 
 // Shared cache key means this only ever actually searches once per
@@ -1700,6 +1701,7 @@ if (!row || !select.value) return;
 row.apOrderLineId = select.value;
 queueSave();
 renderInventory();
+renderApOrders();
 fillPhotoFromOrderLineIfMissing(row);
 });
 });
@@ -1710,6 +1712,7 @@ if (!row) return;
 row.apOrderLineId = '';
 queueSave();
 renderInventory();
+renderApOrders();
 });
 });
 el.querySelectorAll('[data-inv-resale]').forEach((btn) => {

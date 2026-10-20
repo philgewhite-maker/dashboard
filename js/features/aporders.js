@@ -147,6 +147,18 @@ renderApOrders();
 return { added, unmatched, alreadySeen };
 }
 
+// Suggests from captured orders -- same "known-set field gets a
+// datalist, never bare free text" convention as vouchers.js's own
+// provider datalist. The order number still types freely (an order
+// not captured yet, or never will be), this just saves retyping one
+// that's already on file.
+function apOrderNumberDatalistHtml(id) {
+const options = data.apOrders
+.map((o) => `<option value="${escapeHtml(o.orderNumber)}">placed ${escapeHtml(o.orderDate)}, ${o.lines.length} item${o.lines.length === 1 ? '' : 's'}</option>`)
+.join('');
+return `<datalist id="${escapeHtml(id)}">${options}</datalist>`;
+}
+
 function orderForNumber(orderNumber) {
 const n = String(orderNumber || '').trim();
 if (!n) return null;
@@ -218,6 +230,8 @@ return `<div class="account-card" data-ap-order-card="${escapeHtml(order.id)}">
 ${badgeHtml}
 </div>
 <div class="settings-note" style="margin:4px 0 8px;font-weight:600;">${order.lines.length} item${order.lines.length === 1 ? '' : 's'} ordered, ${kept.length} kept, ${returning.length} returning</div>
+<details>
+<summary>Show items &amp; return actions</summary>
 <div class="settings-note" style="margin:8px 0 2px;font-weight:600;">Kept &mdash; check this against the real items first</div>
 ${keptHtml}
 <div class="settings-note" style="margin:8px 0 2px;font-weight:600;">Returning</div>
@@ -228,6 +242,7 @@ ${returningHtml}
 <button type="button" class="sync-btn sm inline" data-ap-order-remove="${escapeHtml(order.id)}">Remove</button>
 </div>
 <div class="settings-note" data-ap-order-copy-status="${escapeHtml(order.id)}" style="margin-top:4px;"></div>
+</details>
 </div>`;
 }
 
@@ -408,6 +423,8 @@ return `<span class="ap-order-chip" data-open-ap-order="${escapeHtml(order.id)}"
 }
 function revealApOrder(id) {
 renderApOrders();
+const details = document.querySelector(`[data-ap-order-card="${id}"] details`);
+if (details) details.open = true;
 setTimeout(() => scrollAndFlash(`[data-ap-order-card="${id}"]`), 60);
 }
 let apOrderChipsBound = false;
@@ -426,6 +443,6 @@ revealApOrder(chip.dataset.openApOrder);
 
 export {
 runApOrderCapture, renderApOrders, initApOrders,
-orderForNumber, apOrderLineOptionsHtml,
+orderForNumber, apOrderLineOptionsHtml, apOrderNumberDatalistHtml,
 apOrderChipHtml, bindApOrderChips, revealApOrder,
 };

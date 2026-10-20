@@ -740,6 +740,12 @@ return poolListHtml(cards, 'activities');
 // established, copied directly rather than reinvented.
 let dateEventsSort = 'date'; // 'date' | 'title'
 let dateEventsFilter = 'all'; // 'all' | 'events' | 'dates'
+// Hidden by default -- same "a trip 7+ days past just clutters the
+// default list" reasoning as travel.js's own showPastTrips, confirmed
+// live as a real complaint: completed Date Events never dropped out of
+// view on their own. An undated activity (entry?.date blank) is never
+// treated as past -- nothing to compare against, so it stays visible.
+let showPastDateEvents = false;
 
 // A "date" is an Event that happens to be with a connection -- derived
 // from connectionId's existing presence/meaning rather than a second
@@ -764,6 +770,7 @@ return `<div class="overview-chips" style="margin-bottom:8px;">
 ${sortChip('date', 'Date')}${sortChip('title', 'Title')}
 <span class="settings-note" style="margin:0 0 0 10px;">Show:</span>
 ${filterChip('all', 'All')}${filterChip('events', 'Events')}${filterChip('dates', 'Dates')}
+<button type="button" class="overview-chip${showPastDateEvents ? ' active' : ''}" data-dateevents-show-past>${showPastDateEvents ? 'Hide past' : 'Show past'}</button>
 </div>`;
 }
 
@@ -771,6 +778,10 @@ function visibleDateEvents() {
 let list = [...data.plannerActivities];
 if (dateEventsFilter === 'events') list = list.filter((a) => !isDateEvent(a));
 else if (dateEventsFilter === 'dates') list = list.filter(isDateEvent);
+if (!showPastDateEvents) {
+const today = todayStr();
+list = list.filter((a) => (entryForActivity(a)?.date || '') >= today || !entryForActivity(a)?.date);
+}
 if (dateEventsSort === 'title') {
 list.sort((a, b) => a.title.localeCompare(b.title));
 } else {
@@ -1297,6 +1308,9 @@ btn.addEventListener('click', () => { dateEventsSort = btn.dataset.dateeventsSor
 });
 root.querySelectorAll('[data-dateevents-filter]').forEach((btn) => {
 btn.addEventListener('click', () => { dateEventsFilter = btn.dataset.dateeventsFilter; renderPlanner(); });
+});
+root.querySelectorAll('[data-dateevents-show-past]').forEach((btn) => {
+btn.addEventListener('click', () => { showPastDateEvents = !showPastDateEvents; renderPlanner(); });
 });
 root.querySelectorAll('[data-dateevent-toggle]').forEach((el) => {
 el.addEventListener('click', () => {

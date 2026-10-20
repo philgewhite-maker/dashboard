@@ -513,11 +513,27 @@ if (newRows.length) data.loyaltyBalances.push(...newRows);
 // vouchers.js). Skipping (not deleting) keeps the tracked reading's
 // own history intact while dropping it out of the voucher-review
 // queue, exactly as if the user had declined to voucher it themselves.
-if (program.extractorKey === 'quidco' && newRows.length) {
+if (program.extractorKey === 'quidco') {
+// One real email can only ever BE tracked or confirmed, never both --
+// a row sharing a sourceMessageId with a genuine 'Cashback tracked'
+// row but itself labeled 'Cashback confirmed' is provably a leftover
+// from before the subject-first fix (every tracked email used to be
+// mislabeled confirmed, and "Forget processed emails" + rescan adds
+// the correct 'tracked' row alongside it rather than replacing it --
+// confirmed live as a real bug: Quidco showing "confirmed" twice for
+// one purchase instead of confirmed+tracked). Removed outright, not
+// just skipped -- it's not a second real reading, it's the same
+// message double-counted under its old wrong label. Runs every scan,
+// not just when this run added a new tracked row, so it also repairs
+// a mislabel left over from an EARLIER scan.
+const trackedMsgIds = new Set(data.loyaltyBalances.filter((b) => b.programId === program.id && b.label === 'Cashback tracked').map((b) => b.sourceMessageId));
+data.loyaltyBalances = data.loyaltyBalances.filter((b) => !(b.programId === program.id && b.label === 'Cashback confirmed' && trackedMsgIds.has(b.sourceMessageId)));
+if (newRows.length) {
 newRows.filter((r) => r.label === 'Cashback confirmed' && r.reference).forEach((confirmed) => {
 const tracked = data.loyaltyBalances.find((b) => b.programId === program.id && b.label === 'Cashback tracked' && b.reference === confirmed.reference && !b.voucherLinkStatus);
 if (tracked) tracked.voucherLinkStatus = 'skipped';
 });
+}
 }
 return { programId: program.id, programName: program.name, matched, unmatched, newRows: newRows.length, messagesFound: messages.length, alreadySeen };
 }
