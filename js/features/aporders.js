@@ -40,7 +40,31 @@ const CADENCE_DAYS = 28;
 // stripped to text, same `\s*`-bridges-tag-boundary idiom every other
 // extractor in this app already relies on. DD/MM/YYYY, confirmed from
 // the same real email (04/10/2026 = 4 October 2026, not 10 April).
-function parseApOrderEmail(bodyText) {
+// Each line's own product image -- pulled from the HTML part (the text
+// part has no src attributes at all, images carry no text). Confirmed
+// live: the returns portal's own "Product code" column (e.g.
+// "108752-10", "APM0525671691-36B") is exactly `<SKU>-<size>`, where
+// <SKU> is the leading token of the image filename itself
+// (".../108752_flatshot_front_copy.png", ".../APM0525001691_flatshot_
+// front.png") -- and critically, AP gives a DIFFERENT base SKU per
+// colourway of the same style (the Pink Kay Plunge Bra was
+// APM0525671691, the Black one APM0525001691), so this is a genuine
+// per-colour identifier, not just a size suffix on one shared code.
+// Capturing it here is what lets a kept-item link (and any script
+// built from it) match the real portal by its own exact code instead
+// of re-comparing colour text, which AP's own data doesn't guarantee
+// renders identically in the order email and the returns portal.
+function productImagesFromHtml(html) {
+const text = String(html || '');
+const urls = [...text.matchAll(/<img[^>]+src="(https:\/\/[^"]*\/catalog\/product\/[^"]+)"/gi)].map((m) => m[1]);
+return urls.map((url) => {
+const file = url.split('/').pop() || '';
+const skuMatch = file.match(/^([A-Za-z0-9]+)_/);
+return { imageUrl: url, code: skuMatch ? skuMatch[1] : '' };
+});
+}
+
+function parseApOrderEmail(bodyText, bodyHtml) {
 const text = String(bodyText || '');
 const orderNumberMatch = text.match(/Order number:\s*#(\d+)/i);
 const dateMatch = text.match(/Order placed:\s*(\d{2})\/(\d{2})\/(\d{4})/i);
@@ -64,9 +88,19 @@ if (!nameMatch) continue; // no name immediately before this "Colour:" -- skip r
 const after = text.slice(cStart, cStart + 2000);
 const m = after.match(/Colour:\s*\n*\s*([^\n]+?)\s*\n+\s*(?:Bra\s+)?[Ss]ize:\s*([^\n]+?)\s*\n+\s*\d+\s*\n+\s*£([\d.,]+)/);
 if (!m) continue; // a row that doesn't fit the template -- counted as unmatched, never guessed
-lines.push({ id: uid(), name: nameMatch[1].trim(), colour: m[1].trim(), size: m[2].trim(), price: Number(m[3].replace(/,/g, '')) });
+lines.push({ id: uid(), name: nameMatch[1].trim(), colour: m[1].trim(), size: m[2].trim(), price: Number(m[3].replace(/,/g, '')), code: '', imageUrl: '' });
 }
 if (!lines.length) return null;
+// Images are only ever zipped in by POSITION, and only when the count
+// matches the parsed line count exactly -- a mismatch means something
+// about the HTML structure didn't match this run's assumptions, and
+// guessing a wrong pairing (the wrong photo/code on a line) is worse
+// than just leaving code/imageUrl blank, which the rest of this file
+// already treats as "not available" everywhere it's used.
+const images = productImagesFromHtml(bodyHtml);
+if (images.length === lines.length) {
+lines.forEach((line, i) => { line.code = images[i].code; line.imageUrl = images[i].imageUrl; });
+}
 return { orderNumber, orderDate, lines };
 }
 
@@ -101,7 +135,7 @@ for (const msg of messages) {
 if (data.apOrders.some((o) => o.sourceMessageId === msg.id)) { alreadySeen++; continue; }
 let detail;
 try { detail = await getMessageDetail(msg.id); } catch (err) { continue; } // transient fetch failure -- try again next scan
-const parsed = parseApOrderEmail(detail.bodyText);
+const parsed = parseApOrderEmail(detail.bodyText, detail.bodyHtml);
 if (!parsed) { unmatched++; continue; }
 if (data.apOrders.some((o) => o.orderNumber === parsed.orderNumber)) { alreadySeen++; continue; }
 data.apOrders.push(blankApOrder({ ...parsed, sourceMessageId: msg.id }));
@@ -190,6 +224,7 @@ ${keptHtml}
 ${returningHtml}
 <div class="sync-row" style="margin-top:8px;">
 <button type="button" class="sync-btn sm inline" data-ap-order-copy="${escapeHtml(order.id)}">Copy return list</button>
+<button type="button" class="sync-btn sm inline" data-ap-order-copy-script="${escapeHtml(order.id)}" title="Copies a DevTools Console script that fills in the real returns portal for you -- ticks every returning line, sets reason/option, stops before the final submit.">Copy return script</button>
 <button type="button" class="sync-btn sm inline" data-ap-order-remove="${escapeHtml(order.id)}">Remove</button>
 </div>
 <div class="settings-note" data-ap-order-copy-status="${escapeHtml(order.id)}" style="margin-top:4px;"></div>
@@ -226,6 +261,92 @@ if (status) status.textContent = "Couldn't copy — your browser blocked clipboa
 }
 }
 
+// Builds the DevTools console script that fills in the real AP
+// returns portal (agentprovocateur.returns.international) -- ticks
+// every line except the kept ones, sets Return reason/Return Option
+// on each, and stops short of the final submit button (always a
+// manual, reviewed step). Baked in as a plain string via a template
+// literal, same "generate a standalone snippet with this device's own
+// config baked in" pattern as js/retailers/agentprovocateur.js's
+// bookmarkletSource() and js/features/marriottscan.js's
+// buildScanSnippet() -- this is NOT run against the real portal from
+// here (confirmed live: the Claude Code permission classifier blocks
+// driving a real commercial transaction page directly), only ever
+// copied out for the user to paste into their own Console.
+//
+// Matches each kept line by the portal's own Product code
+// (`${code}-${size}`, e.g. "APM0525671691-36B") when a code was
+// captured for it -- exact and AP-assigned, not a re-comparison of
+// colour text the order email and the portal aren't guaranteed to
+// render identically. Falls back to name+colour+size text for any
+// kept line captured before this field existed (code blank).
+function buildReturnScript(order) {
+const kept = keptLinesFor(order).map(({ line }) => ({ code: line.code || '', size: line.size, name: line.name, colour: line.colour }));
+const keepJson = JSON.stringify(kept);
+return `// AP returns portal script -- order #${order.orderNumber}, generated by the dashboard.
+// Paste into DevTools Console (F12) on the "Choose your products" page.
+// Starts in DRY_RUN mode (logs a table, clicks nothing). Check the table,
+// then edit DRY_RUN to false below and run again to actually fill the form.
+// Never touches the final submit button -- review and submit by hand.
+(async function () {
+const DRY_RUN = true;
+const KEEP = ${keepJson};
+const REASON = ${JSON.stringify('Doesn\'t suit me')};
+const OPTION = ${JSON.stringify('Refund')};
+
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+const rows = [...document.querySelectorAll('table tr')].filter(
+(r) => r.children.length === 9 && r.querySelector('input[type=checkbox]')
+);
+if (!rows.length) { console.error('No product rows found -- are you on the "Choose your products" page?'); return; }
+
+const results = [];
+for (const row of rows) {
+const name = row.children[2].textContent.trim();
+const code = (row.children[3].textContent.trim().split('-')[0] || '');
+const colour = row.children[4].textContent.trim();
+const size = row.children[5].textContent.trim();
+const isKept = KEEP.some((k) => (k.code && k.code === code && k.size === size) || (!k.code && k.name === name && k.colour === colour && k.size === size));
+const cb = row.children[0].querySelector('input[type=checkbox]');
+const reasonTd = row.children[7];
+const optionTd = row.children[8];
+
+if (isKept) { results.push({ name, colour, size, action: 'KEPT -- left unticked' }); continue; }
+if (DRY_RUN) { results.push({ name, colour, size, action: \`would tick + \${REASON} + \${OPTION}\` }); continue; }
+
+if (!cb.checked) cb.click();
+await wait(80);
+const reasonBtn = [...reasonTd.querySelectorAll('.select-dropbox-menu button')].find((b) => b.textContent.trim() === REASON);
+const optionBtn = [...optionTd.querySelectorAll('.select-dropbox-menu button')].find((b) => b.textContent.trim() === OPTION);
+if (!reasonBtn || !optionBtn) { results.push({ name, colour, size, action: 'ERROR -- reason/option button not found, left as-is' }); continue; }
+reasonBtn.click();
+await wait(40);
+optionBtn.click();
+await wait(40);
+const reasonNow = reasonTd.querySelector('button.dropdown-toggle').textContent.trim();
+const optionNow = optionTd.querySelector('button.dropdown-toggle').textContent.trim();
+results.push({ name, colour, size, action: \`ticked -- reason="\${reasonNow}" option="\${optionNow}"\` });
+}
+
+console.table(results);
+console.log(DRY_RUN
+? 'DRY RUN -- nothing was clicked. Set DRY_RUN = false and re-run to actually fill the form.'
+: \`Done -- \${results.filter((r) => r.action.startsWith('ticked')).length} ticked, \${results.filter((r) => r.action === 'KEPT -- left unticked').length} left unticked, \${results.filter((r) => r.action.startsWith('ERROR')).length} errors. Scroll up and check the table, then submit by hand.\`);
+})();`;
+}
+
+async function copyReturnScript(orderId) {
+const order = data.apOrders.find((o) => o.id === orderId);
+const status = document.querySelector(`[data-ap-order-copy-status="${orderId}"]`);
+if (!order) return;
+try {
+await navigator.clipboard.writeText(buildReturnScript(order));
+if (status) status.textContent = 'Script copied -- paste into DevTools Console (F12) on the returns portal\'s item-list page.';
+} catch (err) {
+if (status) status.textContent = "Couldn't copy — your browser blocked clipboard access.";
+}
+}
+
 function renderApOrders() {
 const el = document.getElementById('ap-orders-list');
 if (!el) return;
@@ -233,6 +354,9 @@ const orders = [...data.apOrders].sort((a, b) => (b.orderDate || '').localeCompa
 el.innerHTML = orders.length ? orders.map(orderCardHtml).join('') : '<div class="empty">No AP orders captured yet &mdash; Check now below, or paste one in.</div>';
 el.querySelectorAll('[data-ap-order-copy]').forEach((btn) => {
 btn.addEventListener('click', () => copyReturnList(btn.dataset.apOrderCopy));
+});
+el.querySelectorAll('[data-ap-order-copy-script]').forEach((btn) => {
+btn.addEventListener('click', () => copyReturnScript(btn.dataset.apOrderCopyScript));
 });
 el.querySelectorAll('[data-ap-order-remove]').forEach((btn) => {
 btn.addEventListener('click', () => {

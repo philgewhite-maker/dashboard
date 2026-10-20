@@ -451,18 +451,38 @@ status.textContent = err.message || String(err);
 });
 
 dialog.querySelector('[data-inv-new-save]').addEventListener('click', () => {
-data.inventory.push(blankInventoryItem({
+const newItem = blankInventoryItem({
 brand: val('brand'), style: val('style'), piece: val('piece'),
 size: val('size'), colour: val('colour'), notes: val('notes'),
 holderId: dialog.querySelector('#inv-new-holder')?.value || '',
 acquiredAt: todayStr(), link: linkInput.value.trim(),
 photoId: draftPhotoId, orderNumber: val('orderNumber'),
 apOrderLineId: apLineSelect.value,
-}));
+});
+data.inventory.push(newItem);
 queueSave();
 renderInventory();
 close();
+fillPhotoFromOrderLineIfMissing(newItem);
 });
+}
+
+// A kept item linked to its exact order line (see aporders.js) often
+// has no photo yet -- the order email's own product image is already
+// known (captured alongside the line itself), so this fills it in for
+// free rather than leaving the user to hunt one down by hand. Never
+// overwrites a photo that's already there -- this is a convenience
+// fill-in, not a replacement.
+async function fillPhotoFromOrderLineIfMissing(item) {
+if (item.photoId || !item.apOrderLineId) return;
+const order = orderForNumber(item.orderNumber);
+const line = order?.lines.find((l) => l.id === item.apOrderLineId);
+if (!line?.imageUrl) return;
+try {
+item.photoId = await saveInventoryPhotoFromUrl(line.imageUrl);
+queueSave();
+renderInventory();
+} catch (err) { /* no photo is no worse than before this ran */ }
 }
 
 // The want -> has step. Prefilled from the want spec, but every field is
@@ -1680,6 +1700,7 @@ if (!row || !select.value) return;
 row.apOrderLineId = select.value;
 queueSave();
 renderInventory();
+fillPhotoFromOrderLineIfMissing(row);
 });
 });
 el.querySelectorAll('[data-inv-ap-unlink]').forEach((x) => {
