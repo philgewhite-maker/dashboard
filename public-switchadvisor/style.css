@@ -1,0 +1,102 @@
+:root {
+  --bg: #f6f7f9;
+  --card-bg: #ffffff;
+  --muted-bg: #eef0f2;
+  --text: #1a1c1f;
+  --muted-text: #6a6f76;
+  --border: #dadde1;
+  --accent: #2a6ac0;
+  --good: #1f8a4c;
+  --warn: #b5651d;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15171a;
+    --card-bg: #1f2226;
+    --muted-bg: #272a2f;
+    --text: #e9eaec;
+    --muted-text: #9aa0a8;
+    --border: #33373d;
+    --accent: #5b9bf0;
+    --good: #4fbf7f;
+    --warn: #e0a24a;
+  }
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.topbar { padding: 16px; }
+.topbar h1 { margin: 0; font-size: 1.3rem; }
+
+.gate { padding: 40px 16px; text-align: center; color: var(--muted-text); }
+
+.tabs {
+  display: flex; flex-wrap: wrap; gap: 4px;
+  padding: 0 16px; border-bottom: 1px solid var(--border);
+}
+.tab-btn {
+  background: none; border: none; padding: 10px 14px; cursor: pointer;
+  color: var(--muted-text); font-size: 0.95rem; border-bottom: 2px solid transparent;
+}
+.tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+
+.tab-panel { display: none; padding: 16px; max-width: 720px; margin: 0 auto; }
+.tab-panel.active { display: block; }
+
+h2 { font-size: 1.1rem; margin-top: 0; }
+.muted { color: var(--muted-text); font-size: 0.9rem; }
+
+.profile-details { margin-bottom: 16px; }
+.profile-form { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+.profile-form label { display: flex; flex-direction: column; gap: 4px; font-size: 0.9rem; }
+.profile-form input, .profile-form select {
+  padding: 8px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--card-bg); color: var(--text); font-size: 0.95rem;
+}
+
+.sync-btn {
+  background: var(--accent); color: #fff; border: none; border-radius: 6px;
+  padding: 8px 14px; cursor: pointer; font-size: 0.9rem;
+}
+.sync-btn.sm { padding: 6px 10px; font-size: 0.85rem; }
+.sync-btn.inline { width: auto; flex: 0 0 auto; margin-top: 0; }
+
+.empty { color: var(--muted-text); padding: 16px 0; font-size: 0.9rem; }
+
+.rec-row, .account-row, .referral-row {
+  background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px;
+  padding: 12px; margin-bottom: 10px;
+}
+.rec-ineligible { opacity: 0.6; }
+.rec-head, .account-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rec-bank, .account-bank { font-weight: 600; }
+.rec-amount { font-weight: 600; color: var(--good); }
+.rec-rationale, .account-detail { font-size: 0.9rem; color: var(--muted-text); margin-top: 4px; }
+.rec-conditions { font-size: 0.85rem; margin-top: 6px; color: var(--muted-text); }
+.rec-link { display: inline-block; margin-top: 6px; color: var(--accent); font-size: 0.9rem; text-decoration: none; }
+
+.tag-chip {
+  display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.75rem;
+  background: var(--muted-bg); color: var(--muted-text);
+}
+.pri-high { background: color-mix(in srgb, var(--good) 20%, transparent); color: var(--good); }
+.pri-medium { background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent); }
+.pri-low { background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); }
+.pri-none { background: var(--muted-bg); color: var(--muted-text); }
+
+.del-x { cursor: pointer; color: var(--muted-text); margin-left: auto; font-size: 1.1rem; }
+
+#cass-grid-mount svg { display: block; margin: 0 auto; }
+
+dialog {
+  border: none; border-radius: 10px; padding: 16px; max-width: 420px; width: 90vw;
+  background: var(--card-bg); color: var(--text);
+}
+dialog::backdrop { background: rgba(0,0,0,0.4); }
+.dialog-actions { display: flex; gap: 8px; justify-content: flex-end; }

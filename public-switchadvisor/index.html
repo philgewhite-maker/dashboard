@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bank-switch advisor</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <h1>Bank-switch advisor</h1>
+</header>
+
+<div id="gate" class="gate">
+  <p id="gate-message">Checking your invite…</p>
+</div>
+
+<div id="app" hidden>
+  <nav class="tabs">
+    <button class="tab-btn active" data-tab="recommend">Recommendations</button>
+    <button class="tab-btn" data-tab="accounts">My accounts</button>
+    <button class="tab-btn" data-tab="cass">CASS map</button>
+    <button class="tab-btn" data-tab="referrals">Referral links</button>
+    <button class="tab-btn" data-tab="admin">Admin</button>
+  </nav>
+
+  <section id="panel-recommend" class="tab-panel active">
+    <h2>Recommendations</h2>
+    <p id="rec-asof" class="muted"></p>
+    <details class="profile-details">
+      <summary>Your profile (for the Kraken estimate)</summary>
+      <form id="profile-form" class="profile-form">
+        <label>Net salary (annual) <input type="number" id="profile-salary" name="annualSalaryNet" min="0" step="100"></label>
+        <label>Assumed balance held <input type="number" id="profile-balance" name="assumedBalance" min="0" step="100" placeholder="defaults to 2 months' net salary"></label>
+        <label>Email (optional, for alerts) <input type="email" id="profile-email" name="email"></label>
+        <button class="sync-btn sm inline" type="submit">Save</button>
+        <span id="profile-status" class="muted"></span>
+      </form>
+    </details>
+    <div id="rec-list"></div>
+  </section>
+
+  <section id="panel-accounts" class="tab-panel">
+    <h2>My accounts</h2>
+    <button class="sync-btn sm inline" id="add-account-btn" type="button">Add account</button>
+    <div id="accounts-list"></div>
+  </section>
+
+  <section id="panel-cass" class="tab-panel">
+    <h2>CASS map</h2>
+    <p class="muted">Which accounts can switch into which, via the Current Account Switch Service.</p>
+    <div id="cass-grid-mount"></div>
+  </section>
+
+  <section id="panel-referrals" class="tab-panel">
+    <h2>Referral links</h2>
+    <div id="referrals-list"></div>
+    <p id="krak-tiers-note" class="muted"></p>
+  </section>
+
+  <section id="panel-admin" class="tab-panel">
+    <h2>Admin</h2>
+    <form id="admin-unlock-form" class="profile-form">
+      <label>Admin secret <input type="password" id="admin-secret-input" autocomplete="off"></label>
+      <button class="sync-btn sm inline" type="submit">Unlock</button>
+    </form>
+    <div id="admin-panel" hidden>
+      <form id="admin-create-invite-form" class="profile-form">
+        <label>Invite someone <input type="text" id="admin-invite-label" placeholder="their name"></label>
+        <button class="sync-btn sm inline" type="submit">Create invite link</button>
+      </form>
+      <p id="admin-invite-result"></p>
+      <h3>Invites</h3>
+      <div id="admin-invite-list"></div>
+    </div>
+  </section>
+</div>
+
+<dialog id="account-dialog">
+  <form id="account-form" method="dialog" class="profile-form">
+    <input type="hidden" name="id">
+    <label>Bank
+      <input type="text" name="bank" id="account-bank-input" list="bank-datalist" required>
+      <datalist id="bank-datalist"></datalist>
+    </label>
+    <label>Nickname (optional) <input type="text" name="nickname"></label>
+    <label>Opened <input type="date" name="openDate"></label>
+    <label>Closed (leave blank if still open) <input type="date" name="closeDate"></label>
+    <label>Direct Debits on this account <input type="number" name="directDebitCount" min="0"></label>
+    <label>Want to keep this one?
+      <select name="wantToKeep">
+        <option value="">Undecided</option>
+        <option value="true">Keep</option>
+        <option value="false">Plan to leave</option>
+      </select>
+    </label>
+    <label><input type="checkbox" name="cassReady"> CASS-ready (free to switch away from)</label>
+    <div class="dialog-actions">
+      <button class="sync-btn sm inline" type="button" id="account-cancel-btn">Cancel</button>
+      <button class="sync-btn sm inline" type="submit">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

@@ -42,6 +42,29 @@ import { money } from './letting.js';
 
 const MSE_SWITCH_URL = 'https://www.moneysavingexpert.com/banking/compare-best-bank-accounts/#switch';
 
+// The bank-switch-advisor app (server-switchadvisor/, a separate
+// invite-only app for a couple of other people) scrapes this SAME MSE
+// page and the SAME CASS participant list once a week and turns them
+// into structured JSON -- set this to that app's own switchadvisor.php
+// URL (e.g. 'https://yourdomain/switchadvisor.php') to read that result
+// here too, rather than this dashboard running its own second scrape +
+// AI-parse of the identical pages. Blank (the default) means that app
+// isn't deployed/configured yet -- everything below falls back to the
+// original home-agent-fetch-then-AI-parse path unchanged, so this is
+// purely additive. The endpoint is public and read-only (just
+// re-published MSE/CASS data, nothing per-user), so no secret is needed.
+const SWITCHADVISOR_URL = '';
+
+async function fetchSharedCache() {
+if (!SWITCHADVISOR_URL) return null;
+try {
+const res = await fetch(`${SWITCHADVISOR_URL}?action=offers`);
+if (!res.ok) return null;
+const json = await res.json();
+return json?.offers?.length ? json : null;
+} catch { return null; }
+}
+
 // Locked, same reasoning as notionplan.js's own PLAN_MODEL choice --
 // interpreting an offer's actual exclusion wording ("no account on
 // [date]" vs. "never held one") deserves a real reasoning pass, not the
@@ -152,6 +175,20 @@ queueSave();
 return opportunities;
 }
 
+// The preferred path once SWITCHADVISOR_URL is set: no AI call, no
+// home-agent fetch of our own -- just the shared weekly scrape's
+// already-structured offers, matched deterministically. Same side
+// effects as applyScan (checkedAt, history, save) so callers can't tell
+// which path ran from the saved state alone.
+function applySharedScan(cache) {
+const opportunities = computeDeterministicOpportunities(cache);
+data.switchOffers = opportunities;
+data.prefs.switchOffersCheckedAt = todayStr();
+recordHistorySnapshot(opportunities, 'shared-cache');
+queueSave();
+return opportunities;
+}
+
 // At least weekly, same "runs at ordinary app-open cadence far more
 // often than the real threshold, so the threshold lives inside the job
 // itself" shape as scheduled.js's own cashback sweep -- this is what
@@ -168,6 +205,13 @@ const AUTO_RECHECK_DAYS = 7;
 async function runAutomaticSwitchCheck() {
 const last = data.prefs.switchOffersCheckedAt;
 if (last && daysSince(last) < AUTO_RECHECK_DAYS) return null;
+const shared = await fetchSharedCache();
+if (shared) {
+const opportunities = applySharedScan(shared);
+renderSwitchOffers();
+import('./sitehealth.js').then(({ reportCheck }) => reportCheck('mse-bank-switch', true, `${opportunities.length} offer${opportunities.length === 1 ? '' : 's'} found (shared scrape)`));
+return { ok: true, count: opportunities.length };
+}
 try {
 const { pages } = await run('page.render', { url: MSE_SWITCH_URL });
 const page = pages?.[0];
@@ -182,6 +226,89 @@ console.error('Automatic switch-offers check failed:', err);
 import('./sitehealth.js').then(({ reportCheck }) => reportCheck('mse-bank-switch', false, err.message || String(err)));
 return { ok: false, detail: err.message || String(err) };
 }
+}
+
+// ---- Deterministic matching against the shared switchadvisor cache --
+//
+// Mirrors server-switchadvisor/switchadvisor.php's own offer_eligibility/
+// offer_donor functions rule-for-rule (PHP there, JS here out of
+// necessity -- one serves a multi-user PHP backend, the other runs in
+// this browser -- but they're meant to agree on every real offer; if you
+// change one, change the other). Reuses THIS file's own
+// normalizeBankName/isCassParticipant below rather than a second copy,
+// same as checkAccountValue already does.
+// Same normalize-then-substring comparison isCassParticipant already
+// does for one name against a list -- this is the same thing for two
+// bare names, pulled out so neither copy drifts from the other.
+function bankNamesMatch(a, b) {
+const na = normalizeBankName(a);
+const nb = normalizeBankName(b);
+return !!na && !!nb && (na === nb || na.includes(nb) || nb.includes(na));
+}
+
+function heldAccountsAtBank(bank) {
+return data.financeAccounts
+.filter((a) => bankNamesMatch(a.bank, bank))
+.sort((a, b) => (b.closeDate || '9999').localeCompare(a.closeDate || '9999'));
+}
+
+function offerEligibility(offer) {
+const bank = offer.bank;
+if (data.financeAccounts.some((a) => bankNamesMatch(a.bank, bank)
+&& (a.switchBonuses || []).some((sb) => sb.status === 'Paid'))) {
+return { eligible: 'no', reasoning: `A ${bank} switch bonus is already on file as Paid.` };
+}
+const held = heldAccountsAtBank(bank);
+if (!held.length) return { eligible: 'yes', reasoning: `You've never held an account with ${bank}.` };
+const cutoff = offer.heldSinceCutoff;
+for (const a of held) {
+const stillOpen = !a.closeDate;
+if (cutoff) {
+if (stillOpen || a.closeDate >= cutoff) {
+return { eligible: 'no', reasoning: `Excluded: ${bank}'s own terms require no account held since ${cutoff.slice(0, 10)}, and you hold one ${stillOpen ? 'that is still open' : `closed ${a.closeDate}`}.` };
+}
+} else if (stillOpen) {
+return { eligible: 'no', reasoning: `You already hold an open ${bank} account — most switch offers exclude existing customers.` };
+}
+}
+return { eligible: 'yes', reasoning: `Your ${bank} account(s) closed before this offer's own exclusion window.` };
+}
+
+function offerDonor(excludeBank, participants) {
+let best = null;
+for (const a of data.financeAccounts) {
+if (a.closeDate || a.stage !== 'CASS-ready') continue;
+if (bankNamesMatch(a.bank, excludeBank)) continue;
+const status = isCassParticipant(a.bank, participants);
+if (status === 'no') continue;
+best = a;
+if (status === 'yes') break;
+}
+return best;
+}
+
+// Produces the SAME opportunity shape the existing UI already renders
+// (opportunityRowHtml/switchOfferActionHtml don't need to change at
+// all) -- only how it's computed changes: plain rules against the
+// shared cache's already-structured offers, no AI call, no per-request
+// cost, same as the plan's own "why deterministic matching" reasoning
+// for the new app.
+function computeDeterministicOpportunities(cache) {
+const participants = cache.cassParticipants || [];
+return cache.offers.map((offer) => {
+const { eligible, reasoning } = offerEligibility(offer);
+const donor = eligible === 'yes' ? offerDonor(offer.bank, participants) : null;
+return {
+id: uid(),
+bank: offer.bank,
+offer: `£${offer.amount} — ${offer.product || offer.bank}`,
+eligible,
+reasoning: donor ? `${reasoning} Switch from your ${donor.name || donor.bank}.` : reasoning,
+suggestedFromAccountId: donor?.id || '',
+dismissed: false,
+taskId: '',
+};
+});
 }
 
 async function scanSwitchOffers(rawText) {
@@ -444,6 +571,16 @@ throw err;
 async function cassParticipants() {
 const cached = data.cassParticipants;
 if (cached?.list?.length && cached.fetchedAt && daysSince(cached.fetchedAt) < CASS_LIST_MAX_AGE_DAYS) return cached.list;
+// Prefer the switchadvisor app's shared weekly scrape (same list, same
+// page) over running our own CASS fetch -- see SWITCHADVISOR_URL's own
+// comment. Falls back to the original direct fetch when that's not
+// configured or unreachable, so this is purely additive.
+const shared = await fetchSharedCache();
+if (shared?.cassParticipants?.length) {
+data.cassParticipants = { list: shared.cassParticipants, fetchedAt: new Date().toISOString() };
+queueSave();
+return shared.cassParticipants;
+}
 return fetchCassParticipants();
 }
 
@@ -524,8 +661,16 @@ const sayHomeAgent = (m) => { if (homeAgentStatusEl) homeAgentStatusEl.innerHTML
 if (homeAgentBtn) {
 homeAgentBtn.addEventListener('click', async () => {
 homeAgentBtn.disabled = true;
-sayHomeAgent('Fetching the page via the home agent…');
+sayHomeAgent('Checking the shared weekly scrape…');
 try {
+const shared = await fetchSharedCache();
+if (shared) {
+const opportunities = applySharedScan(shared);
+sayHomeAgent(opportunities.length ? `Found ${opportunities.length} offer${opportunities.length === 1 ? '' : 's'} (shared scrape, ${shared.scrapedAt}).` : 'No current switch offers in the shared scrape.');
+renderSwitchOffers();
+return;
+}
+sayHomeAgent('Fetching the page via the home agent…');
 const { pages } = await run('page.render', { url: MSE_SWITCH_URL });
 const page = pages?.[0];
 if (!page || !page.html) throw new Error(page?.error || 'the page never came back');

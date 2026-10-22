@@ -1,0 +1,55 @@
+{
+  "scrapedAt": "2026-10-22",
+  "history": [
+    {
+      "at": "2026-10-22",
+      "offers": [
+        { "bank": "Barclays", "amount": 300 },
+        { "bank": "Barclays", "amount": 600 },
+        { "bank": "HSBC", "amount": 220 },
+        { "bank": "HSBC", "amount": 500 },
+        { "bank": "First Direct", "amount": 210 },
+        { "bank": "Lloyds Bank", "amount": 200 },
+        { "bank": "Lloyds Bank", "amount": 200 },
+        { "bank": "NatWest", "amount": 200 },
+        { "bank": "NatWest", "amount": 500 },
+        { "bank": "Nationwide Building Society", "amount": 175 }
+      ]
+    }
+  ],
+  "offers": [
+    { "bank": "Barclays", "product": "Barclays Bank Account", "amount": 300, "conditions": "£150 upfront for switching 3+ Direct Debits and paying in £2,000+/month salary within 30 days; a further 5×£30 for maintaining that pay-in and 10+ debit card payments over the next 5 months. No previous Barclays switch bonus; no currently open Barclays account on or before 1 Oct.", "minFunding": 2000, "ddCount": 3, "heldSinceCutoff": null, "highEarner": false, "url": "https://www.moneysavingexpert.com/banking/compare-best-bank-accounts/#switch" },
+    { "bank": "Barclays", "product": "Barclays Premier", "amount": 600, "conditions": "£450 upfront for switching 3+ Direct Debits and paying in £5,000+/month salary within 30 days; a further 5×£30 over the next 5 months. Needs £75,000+/year earnings (or large savings with Barclays). No previous Barclays switch bonus; no open Barclays account on or before 1 Oct.", "minFunding": 5000, "ddCount": 3, "heldSinceCutoff": null, "highEarner": true, "url": "https://www.moneysavingexpert.com/banking/compare-best-bank-accounts/#switch" },
+    { "bank": "HSBC", "product": "HSBC Bank Account", "amount": 220, "conditions": "£220 for a full switch with 2+ Direct Debits, depositing £2,000+ and spending £500+ on the debit card, all within 60 days. Not already an HSBC/First Direct customer, and no HSBC/First Direct current account held since 1 Jan 2023.", "minFunding": 2000, "ddCount": 2, "heldSinceCutoff": "2023-01-01", "highEarner": false, "url": "https://www.moneysavingexpert.com/banking/compare-best-bank-accounts/#switch" },
+    { "bank": "HSBC", "product": "HSBC Premier", "amount": 500, "conditions": "£500 for earning £100,000+/year (paid into the account) and switching in within 90 days, OR having £100,000+ saved/invested with no switch needed. No HSBC/First Direct current account held since 1 Jan 2025.", "minFunding": null, "ddCount": null, "heldSinceCutoff": "2025-01-01", "highEarner": true, "url": "https://www.moneysavingexpert.com/banking/compare-best-bank-accounts/#switch" },
+    { "bank": "First Direct", "product": "First Direct 1st Account", "amount": 210, "conditions": "£210 for switching in an account with 2+ Direct Debits/standing orders, paying in £1,000+, and 5+ debit card payments, all within 45 days. Never had ANY First Direct product; also excluded if an HSBC current account has been opened since 1 Jan 2018 (a cross-bank condition this engine doesn't check — verify by hand).", "minFunding": 1000, "ddCount": 2, "heldSinceCutoff": null, "highEarner": false, "url": "https://www.moneysavingexpert.com/banking/compare-best-bank-accounts/#switch" },
+    { "bank": "Lloyds Bank", "product": "Club Lloyds", "amount": 200, "conditions": "£200 for switching in an account from a different bank (not Halifax/Bank of Scotland) with 3+ Direct Debits; the switch must START by 9 Dec. No previous switch bonus from Lloyds, Halifax or Bank of Scotland since 1 Jan 2023.", "minFunding": null, "ddCount": 3, "heldSinceCutoff": "2023-01-01", "highEarner": false, "url": "https://www.moneysavingexpert.com/banking/compare-best-bank-accounts/#switch" },
+    { "bank": "Lloyds Bank", "product": "Lloyds Premier", "amount": 200, "conditions": "£200 for switching in from a different bank (not Halifax/Bank of Scotland) with 3+ Direct Debits, switch must start by 9 Dec. Needs £5,000+/month pay-in (roughly an £85,000 salary) or £100,000+ saved/invested. No previous switch bonus from Lloyds, Halifax or Bank of Scotland since 1 Jan 2023.", "minFunding": 5000, "ddCount": 3, "heldSinceCutoff": "2023-01-01", "highEarner": true, "url": "https://www.moneysavingexpert.com/banking/compare-best-bank-accounts/#switch" },
+    { "bank": "NatWest", "product": "NatWest Reward", "amount": 200, "conditions": "£200 for switching in and paying in £1,250+ within 60 days, plus logging into the mobile app. No previous NatWest/RBS/Ulster Bank switch bonus; no NatWest account on 6 May; not switching from an RBS or Ulster Bank account.", "minFunding": 1250, "ddCount": 2, "heldSinceCutoff": null, "highEarner": false, "url": "https://www.moneysavingexpert.com/banking/compare-best-bank-accounts/#switch" },
+    { "bank": "NatWest", "product": "NatWest Premier Reward", "amount": 500, "conditions": "£500 for earning £100,000+/year (or £100,000+ saved/invested, or a £500,000+ NatWest mortgage) and paying in £15,000 within 90 days of the switch completing. No previous NatWest/RBS/Ulster Bank switch bonus; no NatWest account on or after 2 Sep.", "minFunding": 15000, "ddCount": null, "heldSinceCutoff": null, "highEarner": true, "url": "https://www.moneysavingexpert.com/banking/compare-best-bank-accounts/#switch" },
+    { "bank": "Nationwide Building Society", "product": "Nationwide FlexDirect", "amount": 175, "conditions": "£175 for switching in an account with 2+ Direct Debits within 28 days of opening, then paying in £1,000+ and making at least one debit card payment within 31 days of opening. No Nationwide switch bonus since 2021 (a sole↔joint switch is an exception); not switching from a Virgin Money account.", "minFunding": 1000, "ddCount": 2, "heldSinceCutoff": null, "highEarner": false, "url": "https://www.moneysavingexpert.com/banking/compare-best-bank-accounts/#switch" }
+  ],
+  "cassParticipants": [
+    "aib (ni)", "allica bank", "allied irish bank (gb)", "arbuthnot latham & co., limited",
+    "bank of ireland uk plc", "bank of scotland", "barclays", "barclays private",
+    "c. hoare & co.", "cardonemoney", "chase", "co-operative bank", "coutts",
+    "coventry building society", "cumberland building society", "danske bank (northern bank limited)",
+    "first direct", "habib bank zurich plc", "halifax", "hampden bank", "handelsbanken",
+    "hsbc (channel islands, isle of man)", "hsbc private bank", "hsbc uk bank plc",
+    "investec bank plc", "isle of man bank", "lloyds bank", "lloyds international",
+    "lloyds private bank", "metro bank", "monzo", "nationwide building society", "natwest",
+    "natwest international", "reliance bank", "revolut", "rothschild & co",
+    "royal bank of scotland", "santander", "smile", "starling bank", "thinkmoney",
+    "tide – provided by clearbank", "triodos bank", "tsb bank", "ulster bank",
+    "united national bank ltd", "unity trust bank", "virgin money", "weatherbys bank ltd",
+    "zempler bank", "zopa bank"
+  ],
+  "cashbackRates": {},
+  "krakTiers": [
+    { "minBalance": 0, "percent": 0 },
+    { "minBalance": 10000, "percent": 0.75 },
+    { "minBalance": 50000, "percent": 1.0 }
+  ],
+  "krakTiersAsOf": "2026-10-22",
+  "krakTiersSource": "Seeded from your own figures when this was built (2026-10-22) — not yet confirmed by a real scrape of Kraken's own terms page. Set $KRAKEN_TERMS_URL in switchadvisor-scan.php and run a scan to confirm these thresholds."
+}

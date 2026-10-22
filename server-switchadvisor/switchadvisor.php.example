@@ -1,0 +1,580 @@
+<?php
+declare(strict_types=1);
+
+/**
+ * Bank-switch advisor — invite-only, multi-user backend.
+ *
+ * A completely separate app from the personal dashboard: its own data
+ * file, its own secret, its own auth. Nothing here can read or write
+ * dashboard-data.json, and nothing in the dashboard can read this file's
+ * data either.
+ *
+ * Auth has no password. An invite link (?invite=<32-hex-token>) IS the
+ * credential — the server only ever stores its SHA-256 hash, same as
+ * pair.php's device tokens. Redeeming it the first time creates a user
+ * and links the invite to them; redeeming it again (a cleared cookie, a
+ * new browser) just logs the same person back in. The browser then
+ * sends that same token on every call as `X-Invite-Token`.
+ *
+ *   POST ?action=redeem          {token}                      (public — this IS how you get in)
+ *   GET  ?action=me                                            (X-Invite-Token)
+ *   POST ?action=update-profile  {annualSalaryNet, assumedBalance, email}  (X-Invite-Token)
+ *   POST ?action=account-upsert  {account}                     (X-Invite-Token)
+ *   POST ?action=account-delete  {id}                          (X-Invite-Token)
+ *   GET  ?action=banklist                                      (public)
+ *   GET  ?action=referrals                                     (public)
+ *   POST ?action=invite-create   {label}                       (X-Admin-Secret)
+ *   GET  ?action=invite-list                                   (X-Admin-Secret)
+ *
+ * Upload to your Krystal hosting (cPanel -> File Manager), same host as
+ * the dashboard's own sync.php but a separate file, separate data store.
+ * See server-switchadvisor/README.md.
+ */
+
+// ---- Configuration ---------------------------------------------------
+
+// Only you know this — it authorises minting invites and viewing who
+// redeemed them. Generate with the same PowerShell one-liner the
+// dashboard's own README gives for sync.php's $SECRET.
+$ADMIN_SECRET = 'PUT-A-LONG-RANDOM-STRING-HERE';
+
+// Where the two documents live. Defaults to one directory ABOVE this
+// script — on cPanel that's outside public_html, so neither file is
+// web-reachable even if .htaccess is ever lost.
+$DATA_FILE = dirname(__DIR__) . '/switchadvisor-data.json';
+$CACHE_FILE = dirname(__DIR__) . '/switchadvisor-cache.json';
+
+// A browser will only let the frontend call this endpoint from an
+// origin listed here.
+$ALLOWED_ORIGINS = [
+    'https://philgewhite-maker.github.io',
+    'http://localhost:8743',
+];
+
+// ---- End of configuration --------------------------------------------
+
+$origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+if ($origin !== '' && in_array($origin, $ALLOWED_ORIGINS, true)) {
+    header('Access-Control-Allow-Origin: ' . $origin);
+    header('Vary: Origin');
+}
+header('Access-Control-Allow-Headers: Content-Type, X-Invite-Token, X-Admin-Secret');
+header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+header('Access-Control-Max-Age: 86400');
+header('Content-Type: application/json');
+header('Cache-Control: no-store');
+
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
+    http_response_code(204);
+    exit;
+}
+
+function fail(int $code, string $message): void {
+    http_response_code($code);
+    echo json_encode(['error' => $message]);
+    exit;
+}
+
+// ---- Storage: same flock + atomic-tmp-then-rename shape as the
+// dashboard's own sync.php, just with no client-supplied `rev` check —
+// each call only ever touches one user's own slice of the document, so
+// the lock alone (serialising concurrent requests) is enough to stop a
+// lost update; there is no "whole document went stale" case to detect.
+
+function locked_read_modify_write(string $file, array $empty, callable $modify) {
+    $lock = fopen($file . '.lock', 'c');
+    if ($lock === false) fail(500, 'Could not open lock file — check directory permissions');
+    flock($lock, LOCK_EX);
+    $current = $empty;
+    if (is_file($file)) {
+        $raw = file_get_contents($file);
+        $parsed = $raw !== false && $raw !== '' ? json_decode($raw, true) : null;
+        if (is_array($parsed)) $current = $parsed;
+    }
+    $result = $modify($current);
+    $next = $result['doc'];
+    $tmp = $file . '.tmp';
+    if (file_put_contents($tmp, json_encode($next)) === false) {
+        flock($lock, LOCK_UN);
+        fclose($lock);
+        fail(500, 'Could not write data file — check directory permissions');
+    }
+    rename($tmp, $file);
+    flock($lock, LOCK_UN);
+    fclose($lock);
+    return $result['return'] ?? null;
+}
+
+function read_doc(string $file, array $empty): array {
+    if (!is_file($file)) return $empty;
+    $raw = file_get_contents($file);
+    if ($raw === false || $raw === '') return $empty;
+    $parsed = json_decode($raw, true);
+    return is_array($parsed) ? $parsed : $empty;
+}
+
+$EMPTY_DATA = ['rev' => 0, 'invites' => [], 'users' => []];
+$EMPTY_CACHE = ['scrapedAt' => null, 'history' => [], 'offers' => [], 'cassParticipants' => [], 'cashbackRates' => [], 'krakTiers' => [], 'krakTiersAsOf' => null, 'krakTiersSource' => null];
+
+// ---- Shared helpers ----------------------------------------------------
+
+// Strips "Bank of", "Building Society", "plc", "Ltd", bracketed codicils
+// — same cleanup js/features/switchoffers.js's normalizeBankName applies
+// to the identical CASS participant list, so a name matches whether it
+// came from that scrape or was typed into the account form.
+function normalize_bank_name(string $name): string {
+    $s = mb_strtolower($name);
+    $s = preg_replace('/\([^)]*\)/', ' ', $s) ?? $s;
+    $s = preg_replace('/\b(bank of|building society|bank|plc|ltd|limited|co\.?|&|group|holdings)\b/', ' ', $s) ?? $s;
+    $s = preg_replace('/[^a-z0-9]+/', ' ', $s) ?? $s;
+    return trim(preg_replace('/\s+/', ' ', $s) ?? $s);
+}
+
+function bank_names_match(string $a, string $b): bool {
+    $na = normalize_bank_name($a);
+    $nb = normalize_bank_name($b);
+    if ($na === '' || $nb === '') return false;
+    return $na === $nb || strpos($na, $nb) !== false || strpos($nb, $na) !== false;
+}
+
+function is_cass_participant(string $bank, array $participants): string {
+    $target = normalize_bank_name($bank);
+    if ($target === '') return 'unsure';
+    foreach ($participants as $p) {
+        if (bank_names_match($bank, (string) $p)) return 'yes';
+    }
+    return 'no';
+}
+
+function sanitize_user(array $u): array {
+    return [
+        'id' => $u['id'],
+        'email' => $u['email'] ?? '',
+        'createdAt' => $u['createdAt'] ?? null,
+        'lastSeenAt' => $u['lastSeenAt'] ?? null,
+        'annualSalaryNet' => $u['annualSalaryNet'] ?? null,
+        'assumedBalance' => $u['assumedBalance'] ?? null,
+        'accounts' => $u['accounts'] ?? [],
+    ];
+}
+
+// ---- Recommendation engine: plain rule evaluation over the shared
+// cache, no AI call per request (see server-switchadvisor/README.md,
+// "why deterministic matching"). ----------------------------------------
+
+function account_switch_bonus_paid_for_bank(array $accounts, string $bank): bool {
+    foreach ($accounts as $a) {
+        if (!bank_names_match((string) ($a['bank'] ?? ''), $bank)) continue;
+        foreach (($a['switchBonuses'] ?? []) as $sb) {
+            if (($sb['status'] ?? '') === 'Paid') return true;
+        }
+    }
+    return false;
+}
+
+// Held accounts at this bank, most-recently-closed first. A still-open
+// one has closeDate === ''.
+function accounts_at_bank(array $accounts, string $bank): array {
+    $out = [];
+    foreach ($accounts as $a) {
+        if (bank_names_match((string) ($a['bank'] ?? ''), $bank)) $out[] = $a;
+    }
+    usort($out, fn($x, $y) => strcmp((string) ($y['closeDate'] ?? '9999'), (string) ($x['closeDate'] ?? '9999')));
+    return $out;
+}
+
+function offer_eligibility(array $offer, array $accounts): array {
+    $bank = (string) ($offer['bank'] ?? '');
+    $held = accounts_at_bank($accounts, $bank);
+    if (account_switch_bonus_paid_for_bank($accounts, $bank)) {
+        return ['eligible' => false, 'reason' => "A {$bank} switch bonus is already on file as Paid."];
+    }
+    if (!$held) {
+        return ['eligible' => true, 'reason' => "You've never held an account with {$bank}."];
+    }
+    $cutoff = $offer['heldSinceCutoff'] ?? null;
+    foreach ($held as $a) {
+        $closeDate = (string) ($a['closeDate'] ?? '');
+        $stillOpen = $closeDate === '';
+        if ($cutoff) {
+            // "Not held an account since <cutoff>" — disqualified if still
+            // open, or closed on/after the cutoff date.
+            if ($stillOpen || $closeDate >= $cutoff) {
+                return ['eligible' => false, 'reason' => "Excluded: {$bank}'s own terms require no account held since " . substr($cutoff, 0, 10) . ", and you hold one " . ($stillOpen ? 'that is still open' : "closed {$closeDate}") . '.'];
+            }
+        } else if ($stillOpen) {
+            // No dated cutoff captured from the offer's own wording — the
+            // safe default is "can't hold one already", same as almost
+            // every switch offer's baseline condition.
+            return ['eligible' => false, 'reason' => "You already hold an open {$bank} account — most switch offers exclude existing customers."];
+        }
+    }
+    return ['eligible' => true, 'reason' => "Your {$bank} account(s) closed before this offer's own exclusion window."];
+}
+
+function offer_donor(array $accounts, array $cassParticipants, ?string $excludeBank): ?array {
+    $best = null;
+    foreach ($accounts as $a) {
+        if (!empty($a['closeDate'])) continue; // can't CASS from a closed account
+        if (empty($a['cassReady'])) continue;
+        if ($excludeBank && bank_names_match((string) ($a['bank'] ?? ''), $excludeBank)) continue; // can't donate to/from the same bank
+        $status = is_cass_participant((string) ($a['bank'] ?? ''), $cassParticipants);
+        if ($status === 'no') continue; // a dead end — can't CASS away from it at all
+        $best = $a;
+        if ($status === 'yes') break; // a confirmed participant beats an unsure one
+    }
+    return $best;
+}
+
+function history_max_for_bank(array $history, string $bank): ?float {
+    $max = null;
+    foreach ($history as $snap) {
+        foreach (($snap['offers'] ?? []) as $o) {
+            if (!bank_names_match((string) ($o['bank'] ?? ''), $bank)) continue;
+            $amt = (float) ($o['amount'] ?? 0);
+            if ($max === null || $amt > $max) $max = $amt;
+        }
+    }
+    return $max;
+}
+
+function priority_band(float $amount): string {
+    if ($amount >= 200) return 'high';
+    if ($amount >= 100) return 'medium';
+    return 'low';
+}
+
+function compute_recommendations(array $user, array $cache): array {
+    $accounts = $user['accounts'] ?? [];
+    $participants = $cache['cassParticipants'] ?? [];
+    $history = $cache['history'] ?? [];
+    $rows = [];
+
+    foreach (($cache['offers'] ?? []) as $offer) {
+        $bank = (string) ($offer['bank'] ?? '');
+        $amount = (float) ($offer['amount'] ?? 0);
+        $elig = offer_eligibility($offer, $accounts);
+        $donor = $elig['eligible'] ? offer_donor($accounts, $participants, $bank) : null;
+        $histMax = history_max_for_bank($history, $bank);
+        $band = priority_band($amount);
+        $rationale = $elig['reason'];
+        if ($elig['eligible'] && $histMax !== null && $amount < $histMax) {
+            $band = $band === 'high' ? 'medium' : 'low';
+            $lastSeenAt = null;
+            foreach (array_reverse($history) as $snap) {
+                foreach (($snap['offers'] ?? []) as $o) {
+                    if (bank_names_match((string) ($o['bank'] ?? ''), $bank) && (float) ($o['amount'] ?? 0) == $histMax) { $lastSeenAt = $snap['at'] ?? null; break 2; }
+                }
+            }
+            $rationale .= sprintf(' £%s, down from £%s seen%s.', number_format($amount, 0), number_format($histMax, 0), $lastSeenAt ? ' on ' . substr($lastSeenAt, 0, 10) : ' before');
+        }
+        if ($elig['eligible'] && $donor) {
+            $rationale .= ' Switch from your ' . ($donor['nickname'] ?: $donor['bank']) . ' account.';
+        } else if ($elig['eligible'] && !$donor) {
+            $rationale .= ' No CASS-ready donor account on file — you can still open this as a fresh account.';
+        }
+        $rows[] = [
+            'bank' => $bank,
+            'product' => $offer['product'] ?? $bank,
+            'action' => $donor ? 'switch' : 'open',
+            'fromAccountId' => $donor['id'] ?? null,
+            'amount' => $amount,
+            'eligible' => $elig['eligible'],
+            'priority' => $elig['eligible'] ? $band : 'n/a',
+            'rationale' => trim($rationale),
+            'url' => $offer['url'] ?? '',
+            'conditions' => $offer['conditions'] ?? '',
+        ];
+    }
+
+    // Krak row, if the cache has tier data.
+    if (!empty($cache['krakTiers'])) {
+        $rows[] = compute_krak_row($user, $cache);
+    }
+
+    usort($rows, function ($a, $b) {
+        if ($a['eligible'] !== $b['eligible']) return $a['eligible'] ? -1 : 1;
+        return $b['amount'] <=> $a['amount'];
+    });
+    return $rows;
+}
+
+function compute_krak_row(array $user, array $cache): array {
+    $salary = $user['annualSalaryNet'] ?? null;
+    $assumed = $user['assumedBalance'] ?? null;
+    $usedAssumed = false;
+    if ($assumed === null || $assumed === '') {
+        $usedAssumed = true;
+        $assumed = $salary ? ((float) $salary / 12) * 2 : 0;
+    }
+    $assumed = (float) $assumed;
+    $tiers = $cache['krakTiers'] ?? [];
+    usort($tiers, fn($a, $b) => ($a['minBalance'] ?? 0) <=> ($b['minBalance'] ?? 0));
+    $percent = 0.0;
+    foreach ($tiers as $t) {
+        if ($assumed >= ($t['minBalance'] ?? 0)) $percent = (float) ($t['percent'] ?? 0);
+    }
+    $monthly = $assumed * ($percent / 100) / 12;
+    $balanceNote = $usedAssumed
+        ? sprintf('assuming a £%s held balance (2 months\' net salary — edit this to use your own figure)', number_format($assumed, 0))
+        : sprintf('your stated £%s balance', number_format($assumed, 0));
+    $sourceNote = $cache['krakTiersSource'] ?? '';
+    return [
+        'bank' => 'Kraken',
+        'product' => 'Kraken bank account',
+        'action' => 'open',
+        'fromAccountId' => null,
+        'amount' => round($monthly * 12, 2),
+        'eligible' => true,
+        'priority' => priority_band($monthly * 12),
+        'rationale' => sprintf('≈£%s/month (%s%% annual on %s).%s', number_format($monthly, 2), $percent, $balanceNote, $sourceNote ? ' ' . $sourceNote : ''),
+        'url' => '',
+        'conditions' => sprintf('Tiers last confirmed %s.', $cache['krakTiersAsOf'] ?? 'unknown'),
+    ];
+}
+
+// A fixed, simple grid: every open account, plus CASS switch-history
+// edges (donor -> recipient) between accounts that record one. The
+// frontend lays this out 3-wide, wrapping — see js/cass.js.
+function compute_cass_grid(array $user, array $cache): array {
+    $accounts = $user['accounts'] ?? [];
+    $participants = $cache['cassParticipants'] ?? [];
+    $nodes = [];
+    foreach ($accounts as $a) {
+        $nodes[] = [
+            'id' => $a['id'],
+            'bank' => $a['bank'] ?? '',
+            'nickname' => $a['nickname'] ?? '',
+            'open' => empty($a['closeDate']),
+            'cassReady' => !empty($a['cassReady']),
+            'cassStatus' => is_cass_participant((string) ($a['bank'] ?? ''), $participants),
+        ];
+    }
+    $edges = [];
+    foreach ($accounts as $a) {
+        // cassFromAccountId mirrors financeaccounts.js's own field name —
+        // same "the switch date IS the CASS date" reasoning: no separate
+        // date field, openDate of the recipient account already carries it.
+        if (!empty($a['cassFromAccountId'])) {
+            $edges[] = ['from' => $a['cassFromAccountId'], 'to' => $a['id'], 'label' => $a['openDate'] ?? ''];
+        }
+    }
+    return ['nodes' => $nodes, 'edges' => $edges];
+}
+
+// ---- Auth ----------------------------------------------------------
+
+function find_user_by_token(array $data, string $token): ?array {
+    if ($token === '') return null;
+    $hash = hash('sha256', $token);
+    foreach ($data['invites'] as $inv) {
+        if (!hash_equals((string) ($inv['tokenHash'] ?? ''), $hash)) continue;
+        if (empty($inv['userId'])) return null;
+        foreach ($data['users'] as $u) {
+            if ($u['id'] === $inv['userId']) return $u;
+        }
+    }
+    return null;
+}
+
+function require_admin(string $adminSecret, string $configured): void {
+    if ($configured === '' || strpos($configured, 'PUT-') === 0) fail(500, 'Server not configured: set $ADMIN_SECRET');
+    if (!hash_equals($configured, $adminSecret)) fail(401, 'Bad or missing admin secret');
+}
+
+// ---- Routing ---------------------------------------------------------
+
+$action = $_GET['action'] ?? '';
+$method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+$bodyRaw = file_get_contents('php://input') ?: '';
+$body = json_decode($bodyRaw, true);
+if (!is_array($body)) $body = [];
+
+if ($action === 'banklist') {
+    $cache = read_doc($CACHE_FILE, $EMPTY_CACHE);
+    $names = array_values(array_unique(array_merge(
+        array_map(fn($o) => $o['bank'], $cache['offers'] ?? []),
+        $cache['cassParticipants'] ?? []
+    )));
+    sort($names, SORT_FLAG_CASE | SORT_STRING);
+    echo json_encode(['banks' => $names]);
+    exit;
+}
+
+if ($action === 'referrals') {
+    $cache = read_doc($CACHE_FILE, $EMPTY_CACHE);
+    echo json_encode(['krakTiers' => $cache['krakTiers'] ?? [], 'krakTiersAsOf' => $cache['krakTiersAsOf'] ?? null]);
+    exit;
+}
+
+// Public and read-only — this is the SAME scraped MSE/CASS data this
+// app's own recommendation engine uses, re-published whole. It exists so
+// the personal dashboard's own js/features/switchoffers.js can read it
+// too instead of running its own separate weekly scrape + AI-parse of
+// the identical page — one scrape, one source of structured offers, not
+// two that can quietly drift apart. Nothing here is per-user or
+// sensitive: it's exactly what MSE's and CASS's own public pages already
+// show anyone.
+if ($action === 'offers') {
+    $cache = read_doc($CACHE_FILE, $EMPTY_CACHE);
+    echo json_encode([
+        'offers' => $cache['offers'] ?? [],
+        'history' => $cache['history'] ?? [],
+        'cassParticipants' => $cache['cassParticipants'] ?? [],
+        'krakTiers' => $cache['krakTiers'] ?? [],
+        'scrapedAt' => $cache['scrapedAt'] ?? null,
+    ]);
+    exit;
+}
+
+if ($action === 'redeem' && $method === 'POST') {
+    $token = (string) ($body['token'] ?? '');
+    if ($token === '' || strlen($token) < 16) fail(400, 'No invite token given');
+    $hash = hash('sha256', $token);
+    $result = locked_read_modify_write($DATA_FILE, $EMPTY_DATA, function ($doc) use ($hash) {
+        $found = null;
+        foreach ($doc['invites'] as &$inv) {
+            if (!hash_equals((string) ($inv['tokenHash'] ?? ''), $hash)) continue;
+            $found = &$inv;
+            break;
+        }
+        unset($inv);
+        if (!$found) return ['doc' => $doc, 'return' => ['error' => 'not_found']];
+        $now = gmdate('c');
+        if (empty($found['userId'])) {
+            $user = [
+                'id' => bin2hex(random_bytes(8)),
+                'email' => '', 'createdAt' => $now, 'lastSeenAt' => $now,
+                'annualSalaryNet' => null, 'assumedBalance' => null, 'accounts' => [],
+            ];
+            $doc['users'][] = $user;
+            $found['userId'] = $user['id'];
+        }
+        $found['lastRedeemedAt'] = $now;
+        foreach ($doc['users'] as &$u) {
+            if ($u['id'] === $found['userId']) { $u['lastSeenAt'] = $now; $user = $u; break; }
+        }
+        unset($u);
+        return ['doc' => $doc, 'return' => ['user' => sanitize_user($user)]];
+    });
+    if (isset($result['error'])) fail(401, 'That invite link is not valid.');
+    echo json_encode($result);
+    exit;
+}
+
+if ($action === 'invite-create' && $method === 'POST') {
+    require_admin((string) ($_SERVER['HTTP_X_ADMIN_SECRET'] ?? ''), $ADMIN_SECRET);
+    $label = trim((string) ($body['label'] ?? ''));
+    if ($label === '') $label = 'A person';
+    $token = bin2hex(random_bytes(16));
+    locked_read_modify_write($DATA_FILE, $EMPTY_DATA, function ($doc) use ($label, $token) {
+        $doc['invites'][] = ['id' => bin2hex(random_bytes(6)), 'tokenHash' => hash('sha256', $token), 'label' => $label, 'createdAt' => gmdate('c'), 'userId' => null, 'lastRedeemedAt' => null];
+        return ['doc' => $doc, 'return' => null];
+    });
+    echo json_encode(['token' => $token]);
+    exit;
+}
+
+if ($action === 'invite-list' && $method === 'GET') {
+    require_admin((string) ($_SERVER['HTTP_X_ADMIN_SECRET'] ?? ''), $ADMIN_SECRET);
+    $doc = read_doc($DATA_FILE, $EMPTY_DATA);
+    $usersById = [];
+    foreach ($doc['users'] as $u) $usersById[$u['id']] = $u;
+    $invites = array_map(function ($inv) use ($usersById) {
+        $user = $inv['userId'] ? ($usersById[$inv['userId']] ?? null) : null;
+        return [
+            'id' => $inv['id'], 'label' => $inv['label'], 'createdAt' => $inv['createdAt'],
+            'redeemed' => (bool) $inv['userId'], 'lastRedeemedAt' => $inv['lastRedeemedAt'] ?? null,
+            'userEmail' => $user['email'] ?? '', 'accountCount' => $user ? count($user['accounts'] ?? []) : 0,
+        ];
+    }, $doc['invites']);
+    echo json_encode(['invites' => $invites]);
+    exit;
+}
+
+// ---- Everything below needs a resolved user ---------------------------
+
+$token = (string) ($_SERVER['HTTP_X_INVITE_TOKEN'] ?? '');
+$doc = read_doc($DATA_FILE, $EMPTY_DATA);
+$user = find_user_by_token($doc, $token);
+if (!$user) fail(401, 'Bad or missing invite token');
+
+if ($action === 'me' && $method === 'GET') {
+    $cache = read_doc($CACHE_FILE, $EMPTY_CACHE);
+    echo json_encode([
+        'user' => sanitize_user($user),
+        'recommendations' => compute_recommendations($user, $cache),
+        'cassGrid' => compute_cass_grid($user, $cache),
+        'cacheAsOf' => $cache['scrapedAt'] ?? null,
+    ]);
+    exit;
+}
+
+if ($action === 'update-profile' && $method === 'POST') {
+    $userId = $user['id'];
+    $result = locked_read_modify_write($DATA_FILE, $EMPTY_DATA, function ($doc) use ($userId, $body) {
+        foreach ($doc['users'] as &$u) {
+            if ($u['id'] !== $userId) continue;
+            if (array_key_exists('annualSalaryNet', $body)) $u['annualSalaryNet'] = $body['annualSalaryNet'] === null || $body['annualSalaryNet'] === '' ? null : (float) $body['annualSalaryNet'];
+            if (array_key_exists('assumedBalance', $body)) $u['assumedBalance'] = $body['assumedBalance'] === null || $body['assumedBalance'] === '' ? null : (float) $body['assumedBalance'];
+            if (array_key_exists('email', $body)) $u['email'] = trim((string) $body['email']);
+            $u['lastSeenAt'] = gmdate('c');
+            return ['doc' => $doc, 'return' => sanitize_user($u)];
+        }
+        return ['doc' => $doc, 'return' => null];
+    });
+    echo json_encode(['user' => $result]);
+    exit;
+}
+
+if ($action === 'account-upsert' && $method === 'POST') {
+    $userId = $user['id'];
+    $account = is_array($body['account'] ?? null) ? $body['account'] : null;
+    if (!$account || empty($account['bank'])) fail(400, 'An account needs at least a bank');
+    $result = locked_read_modify_write($DATA_FILE, $EMPTY_DATA, function ($doc) use ($userId, $account) {
+        foreach ($doc['users'] as &$u) {
+            if ($u['id'] !== $userId) continue;
+            $id = $account['id'] ?? '';
+            $clean = [
+                'id' => $id ?: bin2hex(random_bytes(6)),
+                'bank' => (string) $account['bank'],
+                'nickname' => (string) ($account['nickname'] ?? ''),
+                'openDate' => (string) ($account['openDate'] ?? ''),
+                'closeDate' => (string) ($account['closeDate'] ?? ''),
+                'wantToKeep' => $account['wantToKeep'] ?? null,
+                'cassReady' => !empty($account['cassReady']),
+                'directDebitCount' => $account['directDebitCount'] ?? null,
+                'cassFromAccountId' => (string) ($account['cassFromAccountId'] ?? ''),
+                'switchBonuses' => $account['switchBonuses'] ?? [],
+            ];
+            $accounts = $u['accounts'] ?? [];
+            $idx = null;
+            foreach ($accounts as $i => $a) { if ($a['id'] === $clean['id']) { $idx = $i; break; } }
+            if ($idx === null) $accounts[] = $clean; else $accounts[$idx] = $clean;
+            $u['accounts'] = $accounts;
+            $u['lastSeenAt'] = gmdate('c');
+            return ['doc' => $doc, 'return' => sanitize_user($u)];
+        }
+        return ['doc' => $doc, 'return' => null];
+    });
+    echo json_encode(['user' => $result]);
+    exit;
+}
+
+if ($action === 'account-delete' && $method === 'POST') {
+    $userId = $user['id'];
+    $id = (string) ($body['id'] ?? '');
+    if ($id === '') fail(400, 'No account id given');
+    $result = locked_read_modify_write($DATA_FILE, $EMPTY_DATA, function ($doc) use ($userId, $id) {
+        foreach ($doc['users'] as &$u) {
+            if ($u['id'] !== $userId) continue;
+            $u['accounts'] = array_values(array_filter($u['accounts'] ?? [], fn($a) => $a['id'] !== $id));
+            return ['doc' => $doc, 'return' => sanitize_user($u)];
+        }
+        return ['doc' => $doc, 'return' => null];
+    });
+    echo json_encode(['user' => $result]);
+    exit;
+}
+
+fail(400, 'Unknown action');

@@ -1,0 +1,277 @@
+<?php
+declare(strict_types=1);
+
+/**
+ * Weekly scrape for the bank-switch advisor's shared cache.
+ *
+ * Runs ONCE for every invited user at once — the whole point of caching
+ * (see server-switchadvisor/README.md). Reuses the dashboard's own NAS
+ * home-agent channel (commands.php's enqueue/pending/result/status
+ * protocol — "one shared Chrome container", see home-agent/agent.py) to
+ * fetch MoneySavingExpert's switch-offers page and the CASS participant
+ * list through a real residential browsing session, exactly the way
+ * js/features/switchoffers.js already does for the personal dashboard.
+ * This script just triggers it on a schedule and writes the RESULT to
+ * its own, separate cache file — it never touches dashboard-data.json.
+ *
+ * Turning the MSE page's prose into structured {bank, amount,
+ * conditions, ...} rows is the one AI call in this whole app (see the
+ * plan's "why deterministic matching, not AI-per-request") — it runs
+ * HERE, once per scrape, never per user request. The CASS participant
+ * list needs no AI at all: it's a clean data-value attribute on the
+ * page, same regex js/features/switchoffers.js already uses.
+ *
+ * Trigger: a cPanel cron job hitting this URL weekly, e.g.
+ *   wget -q -O /dev/null "https://yourdomain/switchadvisor-scan.php?secret=YOUR_SCAN_SECRET"
+ * or the admin page's own "Refresh now" button (same URL, same secret).
+ *
+ * Setup: copy to switchadvisor-scan.php, fill in every value below,
+ * upload next to switchadvisor.php. See server-switchadvisor/README.md
+ * for pairing this script as its own home-agent "device" and for where
+ * the Anthropic key comes from.
+ */
+
+// ---- Configuration ---------------------------------------------------
+
+// Whoever (or whatever cron job) calls this URL must know this. Not the
+// same as switchadvisor.php's $ADMIN_SECRET — a leaked scan secret can
+// only ever trigger a scrape, never read or change user data.
+$SCAN_SECRET = 'PUT-A-LONG-RANDOM-STRING-HERE';
+
+// The dashboard's OWN commands.php URL — same shared NAS channel, see
+// this file's own header comment for why. Usually
+// "https://yourdomain/commands.php".
+$COMMANDS_URL = 'https://yourdomain.example/commands.php';
+
+// A token for THIS script to authenticate to commands.php, i.e. a
+// device token from the dashboard's own pair.php (Settings -> Devices
+// -> Add a device, then redeem it — see README.md here for the exact
+// curl command). Never the master dashboard secret: a revocable device
+// token means a problem here can be cut off without re-pairing every
+// phone and laptop you own.
+$COMMANDS_SECRET = 'PUT-A-DEVICE-TOKEN-FROM-PAIR.PHP-HERE';
+
+// From console.anthropic.com. This is the ONE place in the whole app
+// that spends AI tokens, and it runs at most once a week.
+$ANTHROPIC_API_KEY = 'PUT-YOUR-ANTHROPIC-API-KEY-HERE';
+$ANTHROPIC_MODEL = 'claude-sonnet-5';
+
+$MSE_SWITCH_URL = 'https://www.moneysavingexpert.com/banking/compare-best-bank-accounts/#switch';
+$CASS_LIST_URL = 'https://www.currentaccountswitch.co.uk/banks-building-societies/';
+// Optional. Leave blank to skip re-scraping Kraken's own tier table —
+// the cache keeps whatever krakTiers it already has until this is set
+// and a scan actually succeeds against it.
+$KRAKEN_TERMS_URL = '';
+
+// Same path switchadvisor.php's own $CACHE_FILE points at — MUST match.
+$CACHE_FILE = dirname(__DIR__) . '/switchadvisor-cache.json';
+
+// Oldest-first, capped — mirrors data.switchOffersHistory's own cap in
+// the dashboard (~2 years of weekly snapshots).
+$HISTORY_CAP = 104;
+
+// ---- End of configuration --------------------------------------------
+
+header('Content-Type: application/json');
+header('Cache-Control: no-store');
+
+function fail(int $code, string $message): void {
+    http_response_code($code);
+    echo json_encode(['ok' => false, 'error' => $message]);
+    exit;
+}
+
+if ($SCAN_SECRET === '' || strpos($SCAN_SECRET, 'PUT-') === 0) fail(500, 'Server not configured: set $SCAN_SECRET');
+$provided = (string) ($_GET['secret'] ?? $_SERVER['HTTP_X_SCAN_SECRET'] ?? '');
+if (!hash_equals($SCAN_SECRET, $provided)) fail(401, 'Bad or missing scan secret');
+
+set_time_limit(180);
+
+// ---- Talk to commands.php, same protocol the home-agent itself expects --
+
+function commands_call(string $url, string $secret, string $method, string $query, array $body = []) {
+    $ch = curl_init($url . '?' . $query);
+    $opts = [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'X-Sync-Secret: ' . $secret],
+        CURLOPT_TIMEOUT => 30,
+    ];
+    if ($method === 'POST') {
+        $opts[CURLOPT_POST] = true;
+        $opts[CURLOPT_POSTFIELDS] = json_encode($body);
+    }
+    curl_setopt_array($ch, $opts);
+    $response = curl_exec($ch);
+    $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    if ($response === false) return ['ok' => false, 'error' => 'unreachable'];
+    $parsed = json_decode($response, true);
+    return ['ok' => $status === 200, 'status' => $status, 'data' => is_array($parsed) ? $parsed : null];
+}
+
+// Enqueues a page.render for each URL, then polls `status` every 5s
+// until every job is done/error or $maxSeconds runs out — the agent
+// itself is paced ~4s between fetches, so this just needs to outlast
+// however many pages are queued.
+function fetch_pages(string $commandsUrl, string $secret, array $urls, int $maxSeconds = 150): array {
+    $ids = [];
+    foreach ($urls as $key => $url) {
+        $r = commands_call($commandsUrl, $secret, 'POST', 'action=enqueue', ['verb' => 'page.render', 'args' => ['url' => $url]]);
+        if (!$r['ok'] || empty($r['data']['id'])) { $ids[$key] = null; continue; }
+        $ids[$key] = $r['data']['id'];
+    }
+    $results = [];
+    $deadline = time() + $maxSeconds;
+    while (time() < $deadline) {
+        $pending = array_filter($ids, fn($id, $key) => $id && !isset($results[$key]), ARRAY_FILTER_USE_BOTH);
+        if (!$pending) break;
+        $idList = implode(',', array_filter($ids));
+        $r = commands_call($commandsUrl, $secret, 'GET', 'action=status&ids=' . urlencode($idList));
+        if ($r['ok'] && !empty($r['data']['commands'])) {
+            foreach ($r['data']['commands'] as $c) {
+                $key = array_search($c['id'], $ids, true);
+                if ($key === false || isset($results[$key])) continue;
+                if (in_array($c['status'] ?? '', ['done', 'error'], true)) $results[$key] = $c;
+            }
+        }
+        if (count($results) >= count(array_filter($ids))) break;
+        sleep(5);
+    }
+    return $results;
+}
+
+// ---- HTML -> plain text, same sibling-walk-from-an-anchor idea as
+// js/features/switchoffers.js's own extractSection, since the real page
+// anchors its switch-offers section on the <h2 id="switch"> itself. --
+
+function strip_html_to_text(string $html): string {
+    $html = preg_replace('/(?is)<(script|style|noscript|svg|nav|footer|header|aside|form|iframe|button|select|label)[^>]*>.*?<\/\1>/', ' ', $html) ?? $html;
+    $text = preg_replace('/(?s)<[^>]+>/', ' ', $html) ?? $html;
+    $text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    return trim(preg_replace('/\s+/', ' ', $text) ?? $text);
+}
+
+function extract_section(string $html, string $anchorId, int $maxChars): string {
+    if (!preg_match('/id=["\']' . preg_quote($anchorId, '/') . '["\']/', $html, $m, PREG_OFFSET_CAPTURE)) {
+        return substr(strip_html_to_text($html), 0, $maxChars);
+    }
+    $start = $m[0][1];
+    $chunk = substr($html, $start, $maxChars * 8);
+    return substr(strip_html_to_text($chunk), 0, $maxChars);
+}
+
+function extract_cass_participants(string $html): array {
+    preg_match_all('/accordion__item banks-and-building-societies__accordion-item[^>]*data-value=["\']([^"\']+)["\']/', $html, $m);
+    return array_values(array_unique(array_map(fn($v) => html_entity_decode($v, ENT_QUOTES | ENT_HTML5, 'UTF-8'), $m[1] ?? [])));
+}
+
+// ---- The one AI call: turn the switch-offers prose (and, if
+// configured, Kraken's tier terms) into structured JSON. -----------------
+
+function call_anthropic(string $apiKey, string $model, string $prompt, int $maxTokens): array {
+    $ch = curl_init('https://api.anthropic.com/v1/messages');
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST => true,
+        CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'x-api-key: ' . $apiKey, 'anthropic-version: 2023-06-01'],
+        CURLOPT_POSTFIELDS => json_encode(['model' => $model, 'max_tokens' => $maxTokens, 'messages' => [['role' => 'user', 'content' => $prompt]]]),
+        CURLOPT_TIMEOUT => 90,
+    ]);
+    $response = curl_exec($ch);
+    $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    if ($response === false) return ['ok' => false, 'error' => 'unreachable'];
+    if ($status !== 200) return ['ok' => false, 'error' => "Anthropic returned HTTP {$status}: " . substr((string) $response, 0, 300)];
+    $parsed = json_decode($response, true);
+    $text = '';
+    foreach (($parsed['content'] ?? []) as $block) {
+        if (($block['type'] ?? '') === 'text') $text .= $block['text'];
+    }
+    // Strip a markdown fence if the model added one despite being asked not to.
+    $text = preg_replace('/^```(json)?|```$/m', '', trim($text)) ?? $text;
+    $json = json_decode(trim($text), true);
+    if (!is_array($json)) return ['ok' => false, 'error' => 'Could not parse a JSON object from the response'];
+    return ['ok' => true, 'data' => $json];
+}
+
+// ---- Run ---------------------------------------------------------------
+
+if ($COMMANDS_URL === '' || strpos($COMMANDS_URL, 'yourdomain') !== false) fail(500, 'Server not configured: set $COMMANDS_URL');
+if ($COMMANDS_SECRET === '' || strpos($COMMANDS_SECRET, 'PUT-') === 0) fail(500, 'Server not configured: set $COMMANDS_SECRET');
+if ($ANTHROPIC_API_KEY === '' || strpos($ANTHROPIC_API_KEY, 'PUT-') === 0) fail(500, 'Server not configured: set $ANTHROPIC_API_KEY');
+
+$urls = ['mse' => $MSE_SWITCH_URL, 'cass' => $CASS_LIST_URL];
+if ($KRAKEN_TERMS_URL !== '') $urls['kraken'] = $KRAKEN_TERMS_URL;
+
+$pages = fetch_pages($COMMANDS_URL, $COMMANDS_SECRET, $urls);
+
+$msePage = $pages['mse'] ?? null;
+if (!$msePage || ($msePage['status'] ?? '') !== 'done' || empty($msePage['result']['html'])) {
+    fail(502, 'Could not fetch the MSE switch-offers page via the home agent — is it running? (' . ($msePage['error'] ?? 'no result') . ')');
+}
+$switchText = extract_section((string) $msePage['result']['html'], 'switch', 16000);
+
+$cassPage = $pages['cass'] ?? null;
+$cassParticipants = [];
+if ($cassPage && ($cassPage['status'] ?? '') === 'done' && !empty($cassPage['result']['html'])) {
+    $cassParticipants = extract_cass_participants((string) $cassPage['result']['html']);
+}
+
+$prompt = "Below is text pasted from MoneySavingExpert's bank switch-offers page. Extract every current switch bonus for opening a NEW account (ignore the 'ongoing cashback & perks for accounts you keep' section if present).\n\nPAGE TEXT:\n{$switchText}\n\nReturn ONLY a JSON object, no other text, no markdown fences:\n{\"offers\": [{\"bank\": \"short display name, e.g. 'Barclays' or 'HSBC'\", \"product\": \"the account's own name, e.g. 'Barclays Bank Account' or 'HSBC Premier'\", \"amount\": numeric total cash value in GBP, \"conditions\": \"one or two sentences summarising the real requirements\", \"minFunding\": numeric minimum pay-in/deposit in GBP or null, \"ddCount\": minimum direct debits required or null, \"heldSinceCutoff\": \"YYYY-MM-DD if the offer states an EXACT dated cutoff for 'no account held since <date>', otherwise null — never guess a year that wasn't actually stated\", \"highEarner\": true if this specifically needs a high salary/savings tier (e.g. a Premier account), else false}]}";
+
+$ai = call_anthropic($ANTHROPIC_API_KEY, $ANTHROPIC_MODEL, $prompt, 4000);
+if (!$ai['ok']) fail(502, 'AI extraction failed: ' . $ai['error']);
+$offers = array_values(array_filter($ai['data']['offers'] ?? [], fn($o) => !empty($o['bank']) && !empty($o['amount'])));
+foreach ($offers as &$o) { $o['url'] = $MSE_SWITCH_URL; }
+unset($o);
+
+$krakTiers = null;
+$krakenPage = $pages['kraken'] ?? null;
+if ($krakenPage && ($krakenPage['status'] ?? '') === 'done' && !empty($krakenPage['result']['html'])) {
+    $krakText = strip_html_to_text((string) $krakenPage['result']['html']);
+    $krakPrompt = "Below is text from Kraken's own page describing their UK bank account's tiered monthly reward based on average balance held. Extract the tier table.\n\nPAGE TEXT:\n" . substr($krakText, 0, 12000) . "\n\nReturn ONLY JSON, no other text: {\"tiers\": [{\"minBalance\": numeric GBP threshold, \"percent\": numeric annual percent}]}";
+    $krakAi = call_anthropic($ANTHROPIC_API_KEY, $ANTHROPIC_MODEL, $krakPrompt, 1000);
+    if ($krakAi['ok'] && !empty($krakAi['data']['tiers'])) $krakTiers = $krakAi['data']['tiers'];
+}
+
+// ---- Write the cache: flock + atomic tmp-then-rename, same shape as
+// the dashboard's own sync.php. ------------------------------------------
+
+$lock = fopen($CACHE_FILE . '.lock', 'c');
+if ($lock === false) fail(500, 'Could not open lock file — check directory permissions');
+flock($lock, LOCK_EX);
+
+$current = ['scrapedAt' => null, 'history' => [], 'offers' => [], 'cassParticipants' => [], 'cashbackRates' => [], 'krakTiers' => [], 'krakTiersAsOf' => null, 'krakTiersSource' => null];
+if (is_file($CACHE_FILE)) {
+    $raw = file_get_contents($CACHE_FILE);
+    $parsed = $raw !== false && $raw !== '' ? json_decode($raw, true) : null;
+    if (is_array($parsed)) $current = array_merge($current, $parsed);
+}
+
+$now = gmdate('Y-m-d');
+$history = $current['history'] ?? [];
+$history[] = ['at' => $now, 'offers' => array_map(fn($o) => ['bank' => $o['bank'], 'amount' => $o['amount']], $offers)];
+if (count($history) > $HISTORY_CAP) $history = array_slice($history, -$HISTORY_CAP);
+
+$next = [
+    'scrapedAt' => $now,
+    'history' => $history,
+    'offers' => $offers,
+    'cassParticipants' => $cassParticipants ?: ($current['cassParticipants'] ?? []),
+    'cashbackRates' => $current['cashbackRates'] ?? [],
+    'krakTiers' => $krakTiers ?? ($current['krakTiers'] ?? []),
+    'krakTiersAsOf' => $krakTiers ? $now : ($current['krakTiersAsOf'] ?? null),
+    'krakTiersSource' => $krakTiers ? 'scraped ' . $now : ($current['krakTiersSource'] ?? null),
+];
+
+$tmp = $CACHE_FILE . '.tmp';
+if (file_put_contents($tmp, json_encode($next)) === false) {
+    flock($lock, LOCK_UN);
+    fclose($lock);
+    fail(500, 'Could not write cache file — check directory permissions');
+}
+rename($tmp, $CACHE_FILE);
+flock($lock, LOCK_UN);
+fclose($lock);
+
+echo json_encode(['ok' => true, 'offersFound' => count($offers), 'cassParticipantsFound' => count($cassParticipants), 'krakTiersScraped' => (bool) $krakTiers, 'scrapedAt' => $now]);
