@@ -28,10 +28,31 @@
 //     the real document rather than guessed.
 import { data, queueSave, blankApOrder } from '../state.js';
 import { escapeHtml, uid, daysSince, daysUntil, dateStrAdd, scrollAndFlash } from '../utils.js';
-import { fetchMailSearches, getMessageDetail } from '../googlemail.js';
+import { fetchMailSearches, getMessageDetail, gmailLink } from '../googlemail.js';
+import { captureTask } from './tasks.js';
 
 const SENDER = 'clientservices@agentprovocateur.com';
 const CADENCE_DAYS = 28;
+const RETURN_WINDOW_DAYS = 28;
+const ORDER_NUMBER_RE = /Order number:\s*#(\d+)/i;
+const SHIPPED_SUBJECT_RE = /has been shipped/i;
+
+// The real deadline basis -- AP's own 28-day return window runs from
+// DISPATCH, not from placing the order (confirmed against the real
+// "has been shipped" email: it carries no dispatch-date field at all
+// in its body, only a repeated "Order placed" and a tracking number --
+// so that email's own header Date is the dispatch-date proxy, same
+// dateFromHeader() fallback loyaltybalances.js already relies on when
+// a body has nothing better). Falls back to the order date when the
+// shipped email hasn't been found yet.
+function returnDeadlineFor(order) {
+const base = order.shippedAt || order.orderDate;
+return base ? dateStrAdd(base, RETURN_WINDOW_DAYS) : '';
+}
+function dateFromHeader(dateHeader) {
+const d = new Date(dateHeader);
+return Number.isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10);
+}
 
 // Real example confirmed live (Gmail connector, order #5000289577):
 // "Order number:</b></td><td> #5000289577</td>" and "Order placed:
@@ -110,6 +131,25 @@ if (!data.apOrdersLastCheckedAt) return true;
 return daysSince(data.apOrdersLastCheckedAt) >= CADENCE_DAYS;
 }
 
+// A real task due on the return deadline -- confirmed as a genuine
+// need, not a nicety: AP returns are time-boxed and otherwise have no
+// presence anywhere the user actually looks (Tasks/Planner). `source`
+// links back to the real order-confirmation (or shipped) email via
+// the established {kind:'mail', label, url} convention every other
+// mail-derived task already uses -- gmailLink() needs no real
+// headers/threadId today (it only uses the message id), confirmed
+// from its own source.
+function createReturnTask(order) {
+const deadline = returnDeadlineFor(order);
+if (!deadline) return '';
+const task = captureTask({
+title: `Return non-kept items from AP order #${order.orderNumber}`,
+due: deadline,
+source: { kind: 'mail', label: `AP order #${order.orderNumber}`, url: gmailLink(null, null, order.sourceMessageId) },
+});
+return task.id;
+}
+
 // One real order: search, fetch any new messages, parse, store.
 // Dedup is by sourceMessageId directly against data.apOrders (no
 // separate seenMessageIds set needed, unlike loyaltybalances.js's
@@ -126,25 +166,47 @@ messages = section?.messages || [];
 } catch (err) {
 return { error: err.message };
 }
-let added = 0, unmatched = 0, alreadySeen = 0;
+let added = 0, unmatched = 0, alreadySeen = 0, deadlinesSharpened = 0;
 for (const msg of messages) {
-// The "has been shipped" follow-up email matches this same search
-// (same sender, overlapping subject) but has no item table at all
-// -- parseApOrderEmail correctly returns null for it (no "Colour:"
-// occurrences), so it's just counted unmatched, never recorded.
 if (data.apOrders.some((o) => o.sourceMessageId === msg.id)) { alreadySeen++; continue; }
 let detail;
 try { detail = await getMessageDetail(msg.id); } catch (err) { continue; } // transient fetch failure -- try again next scan
-const parsed = parseApOrderEmail(detail.bodyText, detail.bodyHtml);
-if (!parsed) { unmatched++; continue; }
+const bodyText = detail.bodyText || '';
+
+const parsed = parseApOrderEmail(bodyText, detail.bodyHtml);
+if (parsed) {
 if (data.apOrders.some((o) => o.orderNumber === parsed.orderNumber)) { alreadySeen++; continue; }
-data.apOrders.push(blankApOrder({ ...parsed, sourceMessageId: msg.id }));
+const order = blankApOrder({ ...parsed, sourceMessageId: msg.id });
+data.apOrders.push(order);
+order.taskId = createReturnTask(order);
 added++;
+continue;
+}
+
+// The "has been shipped" follow-up email matches this same search
+// (same sender, overlapping subject) but has no item table at all,
+// so parseApOrderEmail correctly returns null for it. It carries no
+// dispatch-DATE field in its own body either (confirmed against the
+// real email -- only a repeated "Order placed" and a tracking
+// number), so this email's own header Date is the real signal here,
+// matched back to an already-captured order purely by order number.
+const numberMatch = ORDER_NUMBER_RE.exec(bodyText);
+const isShipped = SHIPPED_SUBJECT_RE.test(String(detail.subject || '')) && numberMatch;
+if (!isShipped) { unmatched++; continue; }
+const order = data.apOrders.find((o) => o.orderNumber === numberMatch[1]);
+if (!order || order.shippedAt) { unmatched++; continue; } // no matching order yet, or already sharpened once
+const shippedAt = dateFromHeader(detail.date);
+if (!shippedAt) { unmatched++; continue; }
+order.shippedAt = shippedAt;
+const task = order.taskId ? data.tasks.find((t) => t.id === order.taskId) : null;
+if (task) task.due = returnDeadlineFor(order);
+else order.taskId = createReturnTask(order);
+deadlinesSharpened++;
 }
 data.apOrdersLastCheckedAt = new Date().toISOString();
 queueSave();
 renderApOrders();
-return { added, unmatched, alreadySeen };
+return { added, unmatched, alreadySeen, deadlinesSharpened };
 }
 
 // Suggests from captured orders -- same "known-set field gets a
@@ -239,7 +301,7 @@ return `<div class="loyalty-reading">
 function orderCardHtml(order) {
 const kept = keptLinesFor(order);
 const returning = returningLinesFor(order);
-const deadline = order.orderDate ? dateStrAdd(order.orderDate, 28) : '';
+const deadline = returnDeadlineFor(order);
 let badgeHtml = '';
 if (deadline) {
 const dn = daysUntil(deadline);
@@ -290,7 +352,7 @@ const status = document.querySelector(`[data-ap-order-copy-status="${orderId}"]`
 if (!order) return;
 const kept = keptLinesFor(order);
 const returning = returningLinesFor(order);
-const deadline = order.orderDate ? dateStrAdd(order.orderDate, 28) : '';
+const deadline = returnDeadlineFor(order);
 const lineText = (l) => `- ${l.name} — ${l.colour}${l.size ? ` — ${l.size}` : ''} — £${l.price.toFixed(2)}`;
 const out = [
 `Agent Provocateur order #${order.orderNumber} (placed ${order.orderDate}${deadline ? `, return by ${deadline}` : ''})`,
@@ -429,7 +491,7 @@ try {
 const result = await runApOrderCapture({ force: true });
 if (!status) return;
 status.textContent = result.error ? result.error
-: `Checked — ${result.added} new order${result.added === 1 ? '' : 's'} captured${result.unmatched ? `, ${result.unmatched} email${result.unmatched === 1 ? '' : 's'} not recognised` : ''}.`;
+: `Checked — ${result.added} new order${result.added === 1 ? '' : 's'} captured${result.deadlinesSharpened ? `, ${result.deadlinesSharpened} return deadline${result.deadlinesSharpened === 1 ? '' : 's'} sharpened from a shipping date` : ''}${result.unmatched ? `, ${result.unmatched} email${result.unmatched === 1 ? '' : 's'} not recognised` : ''}.`;
 } catch (err) {
 if (status) status.textContent = err.message || String(err);
 }

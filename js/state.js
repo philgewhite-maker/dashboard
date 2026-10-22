@@ -1909,8 +1909,24 @@ function blankApOrder(fields = {}) {
 return {
 id: uid(),
 orderNumber: '', // matches an inventory row's own orderNumber field exactly
-orderDate: '', // ISO date, from the email -- drives the 28-day return deadline
+orderDate: '', // ISO date, from the confirmation email
+// AP's own "has been shipped" follow-up email carries no dispatch
+// DATE field anywhere in its body (confirmed against the real email --
+// only "Order placed" repeated, plus a tracking number) -- this is the
+// email's own header date instead, same dateFromHeader() fallback
+// loyaltybalances.js already uses when a body has nothing better.
+// Blank until that follow-up email is actually found. The 28-day
+// return window is AP's own policy from DISPATCH, not order placement
+// -- shippedAt is preferred over orderDate for the deadline the
+// moment it's known (see aporders.js's returnDeadlineFor()).
+shippedAt: '',
 sourceMessageId: '', // dedup guard, same convention loyaltybalances.js's programs use
+// The real task created for this order's own return deadline (see
+// aporders.js) -- kept so a LATER scan that finally finds shippedAt
+// (the shipped email can arrive well after the confirmation one) can
+// correct that task's own due date instead of leaving it on the
+// cruder orderDate-based estimate forever.
+taskId: '',
 lines: [], // [{id, name, colour, size, price}] -- id is a uid(), stable, referenced by inventory rows
 createdAt: new Date().toISOString(),
 ...fields,

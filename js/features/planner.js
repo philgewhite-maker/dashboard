@@ -569,7 +569,7 @@ const isToday = dateStr === todayStr() && !tripId;
 const unfiledCount = isToday ? data.tasks.filter((t) => t.bucket === 'inbox').length : 0;
 const removable = isExtra && dateStr < todayStr() && entries.length === 0 && !legChipsHtml;
 const removeX = removable ? `<span class="tag-x" data-planner-remove-extraday="${dateStr}" title="Remove this day">&times;</span>` : '';
-const isEmpty = entries.length === 0 && !legChipsHtml && !unfiledCount;
+const isEmpty = entries.length === 0 && !legChipsHtml && !unfiledCount && !airbnbSegmentsForDay(dateStr).length;
 const expanded = !isEmpty || expandedPlannerDays.has(key);
 
 if (!expanded) {
