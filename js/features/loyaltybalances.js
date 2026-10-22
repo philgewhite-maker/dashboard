@@ -346,6 +346,59 @@ metrics: amounts.map((balance, i) => ({ label: 'Cashback confirmed', balance, un
 };
 }
 
+// Real example confirmed live (Gmail connector, 27 Sept 2026 message,
+// text/plain part): "As of 25-MAR-26, you have 6843 points worth at
+// least £34.22." -- same "embedded in ordinary marketing email, no
+// dedicated statement" shape as BA/Marriott/Virgin. DD-MMM-YY date.
+function extractNectar(bodyText) {
+const text = String(bodyText || '');
+const m = text.match(/As of\s*(\d{1,2})-([A-Za-z]{3})-(\d{2}),?\s*you have\s*([\d,]+)\s*points?\s*worth at least\s*£([\d,]+\.\d{2})/i);
+if (!m) return null;
+const date = parseDMonYyyy(m[1], m[2], `20${m[3]}`);
+return {
+membershipNumber: '', tier: '', date,
+metrics: [{ label: 'Points', balance: Number(m[4].replace(/,/g, '')), unit: 'points', detail: `worth at least £${m[5]}` }],
+};
+}
+
+// Real example confirmed live (Gmail connector, 28 Sept 2026 message):
+// "83 points" immediately followed by "Total points as of 11/08/2026"
+// -- the figure right before that exact label, not just any "N points"
+// text elsewhere in the marketing copy. DD/MM/YYYY, but that date is
+// just when the balance widget's own template was last refreshed
+// server-side (confirmed not reliably close to the email's own send
+// date), so the email's own header date is used instead, same
+// dateFromHeader() fallback every plain-balance extractor here uses.
+function extractIkeaFamily(bodyText) {
+const text = String(bodyText || '');
+const m = text.match(/([\d,]+)\s*points\s*\n*\s*Total points as of/i);
+if (!m) return null;
+return {
+membershipNumber: '', tier: '', date: '',
+metrics: [{ label: 'Points', balance: Number(m[1].replace(/,/g, '')), unit: 'points' }],
+};
+}
+
+// Real example confirmed live (Gmail connector, 14 Apr 2026 "new
+// Vueling Club" message): "...-->You have 929 Avios..." (the "-->"
+// is leftover alt-text from an icon immediately before it, stripped
+// by the `\s*` gap -- "You have" is the real anchor). Only ONE real
+// example exists so far, and it's a one-off club-launch/migration
+// email, not confirmed to be a recurring personalised-footer shape
+// the way BA/Marriott/Virgin's own balance line is -- worth
+// rechecking once a second, ordinary Vueling marketing email with
+// this same line turns up, same as every extractor here started from
+// one real example and got hardened against a second.
+function extractVuelingClub(bodyText) {
+const text = String(bodyText || '');
+const m = text.match(/You have\s*([\d,]+)\s*Avios/i);
+if (!m) return null;
+return {
+membershipNumber: '', tier: '', date: '',
+metrics: [{ label: 'Avios', balance: Number(m[1].replace(/,/g, '')), unit: 'Avios' }],
+};
+}
+
 const EXTRACTORS = {
 'ba': extractBritishAirways,
 'marriott-bonvoy': extractMarriottBonvoy,
@@ -358,6 +411,9 @@ const EXTRACTORS = {
 'miles-and-more': extractMilesAndMore,
 'quidco': extractQuidco,
 'topcashback': extractTopCashback,
+'nectar': extractNectar,
+'ikea-family': extractIkeaFamily,
+'vueling-club': extractVuelingClub,
 };
 
 // ---- Scan engine ----------------------------------------------------------
@@ -923,6 +979,7 @@ export {
 renderLoyaltyBalances, initLoyaltyBalances, runLoyaltyBalanceScan,
 extractBritishAirways, extractMarriottBonvoy, extractVirginFlyingClub, extractBoots, extractTescoClubcard, extractBaVoucher,
 extractHertz, extractSixt, extractMilesAndMore, extractQuidco, extractTopCashback,
+extractNectar, extractIkeaFamily, extractVuelingClub,
 latestBalancesFor, travelStripPrograms,
 labelKindFor, setLabelKind, pendingClassifications, pendingVoucherLinks, markVoucherLinked, markVoucherSkipped,
 };

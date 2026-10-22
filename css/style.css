@@ -1801,6 +1801,14 @@ white-space:nowrap;
    reddish-pink .compare-warning already uses for "look at this") reads
    as more worth acting on than a muted, easy-to-skim-past grey. */
 .cal-badge.cleaner-chip-tbc{background:var(--rose-bg);border:1px dashed var(--rose);color:var(--rose);font-style:italic;}
+/* The base .cal-badge's own white-space:nowrap is right for a plain text
+   pill but overflows a narrow viewport once this variant holds real form
+   controls (Who/date inputs, Add/Cancel) -- confirmed live testing
+   catsitting.js's own reuse of this same form shape: on a narrow column
+   the row ran off the right edge with the Add button unreachable without
+   horizontal scrolling. Also fixes airbnb.js's own cleaner-fill form,
+   which shares this exact class and had the same latent bug. */
+.cal-badge.cleaner-chip-form{white-space:normal;display:inline-flex;flex-wrap:wrap;gap:4px;align-items:center;}
 .cal-actions{
 margin-left:auto;
 display:flex;

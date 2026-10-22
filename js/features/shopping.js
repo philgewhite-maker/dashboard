@@ -357,9 +357,17 @@ const refreshApLinePicker = () => {
 const order = orderForNumber(orderNumberInput.value);
 if (!order) { apLineWrap.style.display = 'none'; apLineSelect.innerHTML = ''; return; }
 apLineWrap.style.display = '';
-apLineSelect.innerHTML = apOrderLineOptionsHtml(order);
+apLineSelect.innerHTML = apOrderLineOptionsHtml(order, '', { style: val('style'), size: val('size') });
 };
 orderNumberInput.addEventListener('input', refreshApLinePicker);
+// Style/size can be set by typing OR by clicking a suggestion chip
+// (the pick-chip listener just above) -- both need to re-rank the
+// picker, not just a direct edit of the order number.
+dialog.querySelector('[data-inv-new="style"]')?.addEventListener('input', refreshApLinePicker);
+dialog.querySelector('[data-inv-new="size"]')?.addEventListener('input', refreshApLinePicker);
+dialog.querySelectorAll('[data-inv-pick-field="style"], [data-inv-pick-field="size"]').forEach((chip) => {
+chip.addEventListener('click', refreshApLinePicker);
+});
 
 // Held in dialog scope, not on a row, since there's no data.inventory
 // item to attach a photoId to until Add is actually clicked -- the
@@ -1339,7 +1347,7 @@ const line = order.lines.find((l) => l.id === o.apOrderLineId);
 if (line) {
 return `${apOrderChipHtml(order)}<span class="settings-note" style="margin:0;font-size:10px;">${escapeHtml(line.name)}${line.colour ? ` &mdash; ${escapeHtml(line.colour)}` : ''}${line.size ? ` &mdash; ${escapeHtml(line.size)}` : ''}</span><span class="del-x" data-inv-ap-unlink="${escapeHtml(o.id)}" title="Unlink from this order line">&times;</span>`;
 }
-return `<select data-inv-ap-line="${escapeHtml(o.id)}" style="max-width:150px;">${apOrderLineOptionsHtml(order)}</select>`;
+return `<select data-inv-ap-line="${escapeHtml(o.id)}" style="max-width:150px;">${apOrderLineOptionsHtml(order, '', { style: o.style, size: o.size })}</select>`;
 }
 
 function inventoryHtml() {

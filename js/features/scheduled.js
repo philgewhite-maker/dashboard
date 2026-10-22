@@ -206,6 +206,18 @@ const { runApOrderCapture } = await import('./aporders.js');
 await runApOrderCapture();
 },
 },
+{
+// No cadence gate of its own (unlike ap-orders/loyalty-balances) --
+// catinaflat bookings are rare enough, and dedup is already by
+// sourceMessageId, that attempting every time this file's own
+// interval fires costs nothing extra.
+id: 'cat-sitting', label: 'Cat-sitting email import', needsGoogle: true,
+note: 'Reads catinaflat.com booking-confirmation emails to capture real cat-sitting bookings. See Travel → Cat sitting.',
+run: async () => {
+const { runCatSittingEmailImport } = await import('./catsitting.js');
+await runCatSittingEmailImport();
+},
+},
 ];
 
 function runs() {

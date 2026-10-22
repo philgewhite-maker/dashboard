@@ -62,7 +62,13 @@ $LOG_FILE = dirname(__DIR__) . '/dashboard-agent-write.log';
 $MAX_BODY_BYTES = 200 * 1024;
 $MAX_NODES_PER_PROPOSAL = 20;
 $MAX_PENDING_ENTRIES = 15;
-$MAX_REQUESTS_PER_HOUR = 60;
+// Raised from 60 -- confirmed live as genuinely too tight: the browser's
+// own drain step alone could hit 80/hour on the old 45s-shared-timer cadence
+// before js/sync/autosync.js gave it its own slower DRAIN_MS timer. 180
+// comfortably covers that drain (now ~12/hour per open tab) plus several
+// tabs/devices plus a real burst of Claude-side proposals, while still being
+// a real ceiling against genuine abuse.
+$MAX_REQUESTS_PER_HOUR = 180;
 
 // Same allowlist as sync.php/files.php -- the live browser's own drain
 // step (js/sync/agentstaging.js) calls THIS endpoint too (GET, plus the

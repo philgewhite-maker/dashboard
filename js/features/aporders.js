@@ -168,9 +168,43 @@ return data.apOrders.find((o) => o.orderNumber === n) || null;
 // Shared between the "Add to inventory" dialog and each inventory
 // row's own picker (shopping.js) -- one place builds the option list,
 // so both pickers always offer the same real order lines.
-function apOrderLineOptionsHtml(order, selectedId = '') {
+//
+// Always alphabetical (an order's own 78 lines arrive in whatever
+// order the email template printed them, not a useful browsing order).
+// `hint` -- the inventory row's own typed style ("Range", e.g. "Kay")
+// and size -- narrows the list when it's given: lines whose name
+// contains the typed style are shown first, and among those, lines
+// matching the typed size take priority too. A hint that matches
+// nothing is simply ignored (never narrows to an empty, useless
+// dropdown) -- this is a convenience ordering, never a hard filter,
+// since AP's own name/colour/size text is known to not always match
+// what's typed on the inventory side, and hiding the right line
+// because of that mismatch would be worse than a longer list.
+function apOrderLineOptionsHtml(order, selectedId = '', hint = {}) {
+const sorted = [...order.lines].sort((a, b) =>
+a.name.localeCompare(b.name) || a.colour.localeCompare(b.colour) || a.size.localeCompare(b.size)
+);
+const style = (hint.style || '').trim().toLowerCase();
+const size = (hint.size || '').trim().toLowerCase();
+let ranked = sorted;
+if (style) {
+const styleMatches = sorted.filter((l) => l.name.toLowerCase().includes(style));
+if (styleMatches.length) {
+const styleMatchIds = new Set(styleMatches.map((l) => l.id));
+const rest = sorted.filter((l) => !styleMatchIds.has(l.id));
+let within = styleMatches;
+if (size) {
+const sizeMatches = styleMatches.filter((l) => l.size.toLowerCase() === size);
+if (sizeMatches.length) {
+const sizeMatchIds = new Set(sizeMatches.map((l) => l.id));
+within = [...sizeMatches, ...styleMatches.filter((l) => !sizeMatchIds.has(l.id))];
+}
+}
+ranked = [...within, ...rest];
+}
+}
 const opts = ['<option value="">Link to an order line&hellip;</option>'];
-order.lines.forEach((l) => {
+ranked.forEach((l) => {
 opts.push(`<option value="${escapeHtml(l.id)}"${l.id === selectedId ? ' selected' : ''}>${escapeHtml(l.name)} &mdash; ${escapeHtml(l.colour)}${l.size ? ` &mdash; ${escapeHtml(l.size)}` : ''} &mdash; £${l.price.toFixed(2)}</option>`);
 });
 return opts.join('');

@@ -17,9 +17,17 @@ const PUSH_DEBOUNCE_MS = 2500;
 // Only fires while the tab is visible (see the visibilitychange handler), so
 // a backgrounded phone isn't polling all day.
 const POLL_MS = 45000;
+// drainAgentStaging() used to ride this same 45s timer -- confirmed live as
+// the actual cause of agent-write.php's own 60/hour rate limit getting
+// permanently maxed out: 3600/45 = 80 requests/hour from ONE open tab alone,
+// already over the ceiling before counting a second device or tab. Agent
+// proposals aren't time-critical to the second the way multi-device sync is,
+// so this gets its own, much slower timer instead of a faster shared one.
+const DRAIN_MS = 300000;
 
 let pushTimer = null;
 let pollTimer = null;
+let drainTimer = null;
 let busy = false;
 let statusEl = null;
 
@@ -145,16 +153,18 @@ pushTimer = setTimeout(() => push(), PUSH_DEBOUNCE_MS);
 
 function startPolling() {
 clearInterval(pollTimer);
-// drainAgentStaging() is independently gated (its own agentWriteUrl/
-// agentSecret config check, its own try/catch) -- deliberately not
-// called from inside pull() itself, which has its own unrelated
-// busy/isConfigured() guard for the MAIN sync. Reuses this same
-// visible-tab cadence rather than a second timer.
 pollTimer = setInterval(() => {
 if (document.visibilityState !== 'visible') return;
 pull();
-drainAgentStaging();
 }, POLL_MS);
+// drainAgentStaging() is independently gated (its own agentWriteUrl/
+// agentSecret config check, its own try/catch) -- its own slower timer,
+// not the main sync poll above (see DRAIN_MS's own comment on why).
+clearInterval(drainTimer);
+drainTimer = setInterval(() => {
+if (document.visibilityState !== 'visible') return;
+drainAgentStaging();
+}, DRAIN_MS);
 }
 
 async function initAutoSync() {
@@ -181,6 +191,7 @@ startPolling();
 async function restartAutoSync() {
 clearTimeout(pushTimer);
 clearInterval(pollTimer);
+clearInterval(drainTimer);
 await initAutoSync();
 }
 

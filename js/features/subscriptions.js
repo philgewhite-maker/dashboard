@@ -60,7 +60,7 @@ ${accountLinkHtml(s)}
 </div>
 <input type="text" autocomplete="off" class="voucher-edit voucher-notes-edit" data-field="notes" data-sub-id="${s.id}" value="${escapeHtml(s.notes || '')}" placeholder="Notes">
 <div class="voucher-expiry">
-<input type="date" class="voucher-edit expiry-date-edit" data-field="nextRenewal" data-sub-id="${s.id}" value="${escapeHtml(s.nextRenewal || '')}">
+<input type="date" class="voucher-edit expiry-date-edit" data-field="nextRenewal" data-sub-id="${s.id}" value="${escapeHtml(s.nextRenewal || '')}" title="Next renewal date — not when you first got it">
 ${badgeHtml}
 </div>
 <div class="voucher-actions">

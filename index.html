@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v619</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v620</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -523,7 +523,7 @@
 <option>Other</option>
 </select>
 <input type="text" autocomplete="off" id="subscription-cost-input" placeholder="Cost (optional)">
-<input type="date" id="subscription-renewal-input">
+<input type="date" id="subscription-renewal-input" title="Next renewal date — not when you first got it">
 <input type="text" autocomplete="off" id="subscription-notes-input" placeholder="Notes (optional)">
 <button class="add-btn" type="button">Add</button>
 </div>
@@ -2755,6 +2755,10 @@ Needs the WHOLE exported folder tree (hundreds of files, not a single JSON) &mda
 </label>
 </div>
 <div id="travel-loyalty-strip"></div>
+<div class="sync-row" style="margin:4px 0;">
+<button class="sync-btn sm inline" type="button" id="catsitting-check-btn">Check cat-sitting emails</button>
+<span class="sync-status" id="catsitting-check-status"></span>
+</div>
 <div id="cat-sitting-rollup-strip"></div>
 <div class="settings-note" style="margin:0 0 10px;">A trip is a project you can also work from the Tasks tab &mdash; add flights, car hire, accommodation and transfers here, enrich them from a booking email (Mail's &quot;+ trip leg&quot;) or a screenshot (Capture Inbox's &quot;Extract into a trip leg&quot;), and download a self-contained offline itinerary once it's ready. Anything still open is flagged &#9888; rather than left blank &mdash; fill it in or mark it N/A.</div>
 <div class="capture-row" style="margin-bottom:14px;">

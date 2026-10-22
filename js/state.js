@@ -44,7 +44,7 @@ schoolCalendarUpdates: [], // one entry per detected term-date change, see js/fe
 // setCompletionSearches' own entry for that key is pruned.
 setCompletionFinds: [],
 leaveYears: [], // one per UK holiday year ever touched -- see js/features/leave.js
-catSittingVisits: [], // {id, date, connectionId, status, notes, tripId} -- see js/features/catsitting.js
+catSittingVisits: [], // {id, startDate, endDate, sitterName, connectionId, status, cost, sourceMessageId, notes, tripId} -- see js/features/catsitting.js
 // Synced, cross-device rolling 12-month API spend -- js/ai.js's own
 // recordUsage() already tracks this per-device in local-settings
 // (unsynced); this is the merged total every device's own delta pushes
@@ -972,14 +972,29 @@ asOf: '',
 
 // ---- Cat sitting (js/features/catsitting.js) ------------------------------
 //
-// One row per visitor, per day -- "up to 2 visitors per day" is just 2
-// of these sharing one `date`, the same shape planner.js's own day grid
-// already uses for 2 different connections on one day (separate
-// records, not one record holding an array of ids). `tripId` is
-// deliberately allowed blank (a visit isn't force-tied to a trip), but
-// the only UI surface that creates one today is trip-coupled.
+// One row per sitter assignment, spanning a real date RANGE -- not one
+// row per day. Confirmed live as a real complaint: the original one-
+// row-per-day shape rendered as a bulky day-by-day grid; this is the
+// "Cleaner chip" shape instead (js/features/airbnb.js's own
+// cleanerChipHtml), one chip per assignment, "pending" chips filling
+// any date range the trip isn't covered for. `sitterName` is plain
+// text, deliberately NOT auto-linked to a Connection -- confirmed live
+// as a real risk: a sitter can share a first name with someone already
+// in Connections (the user's own daughter is also "Zara"), and
+// guessing that match would silently misattribute the booking.
+// `connectionId` stays as an OPTIONAL, human-set link for when the
+// sitter genuinely IS someone already in Connections. `sourceMessageId`
+// is the catinaflat.com import's own dedup guard (blank for a
+// hand-added visit) -- see js/features/catsitting.js.
 function blankCatSittingVisit(fields = {}) {
-return { id: uid(), date: '', connectionId: '', status: 'draft', notes: '', tripId: '', createdAt: new Date().toISOString(), ...fields };
+return {
+id: uid(), tripId: '',
+startDate: '', endDate: '', // inclusive range
+sitterName: '', connectionId: '',
+status: 'draft', cost: null, sourceMessageId: '',
+notes: '', createdAt: new Date().toISOString(),
+...fields,
+};
 }
 
 // ---- Packing modules (js/features/packing.js owns the generation logic) --
@@ -1217,6 +1232,20 @@ senderAddresses: ['notification@topcashback.co.uk'], contentFilter: '"payable ca
 const DEFAULT_LOYALTY_PROGRAMS_V5 = [
 { id: 'loyalty-marriott-vc', name: 'Marriott Vacation Club', extractorKey: '',
 senderAddresses: [], builtIn: true, insertBeforeId: 'loyalty-marriott' },
+];
+
+// V5 already shipped and ran -- own flag loyaltyProgramsSeededV6.
+// Nectar/IKEA Family/Vueling Club all embed their current points/Avios
+// balance in ordinary marketing email, same "no dedicated statement"
+// shape as BA/Marriott/Virgin -- pre-classified 'balance' below like
+// every other running-total program, not asked about.
+const DEFAULT_LOYALTY_PROGRAMS_V6 = [
+{ id: 'loyalty-nectar', name: 'Nectar', extractorKey: 'nectar',
+senderAddresses: ['noreply@emails.sainsburys.nectar.com'], contentFilter: '"points worth at least"', builtIn: true },
+{ id: 'loyalty-ikea-family', name: 'IKEA Family', extractorKey: 'ikea-family',
+senderAddresses: ['ikea@news.email.ikea.co.uk'], contentFilter: '"Total points as of"', builtIn: true },
+{ id: 'loyalty-vueling-club', name: 'Vueling Club', extractorKey: 'vueling-club',
+senderAddresses: ['vuelingclub@comms.vueling.com'], builtIn: true },
 ];
 
 function pruneMarriottAvailability(store, today = todayStr()) {
@@ -2797,7 +2826,21 @@ data.leaveYears = data.leaveYears.map((y) => ({ ...blankLeaveYear(), ...y, id: y
 // a blank tripId is never pruned, since a visit is allowed to exist
 // outside a trip context by design.
 if (!Array.isArray(data.catSittingVisits)) data.catSittingVisits = [];
-data.catSittingVisits = data.catSittingVisits.map((v) => ({ ...blankCatSittingVisit(), ...v, id: v.id || uid() }));
+// Old shape: one row per day (`date`), sitter only ever a real
+// Connection. Reshaped 1:1 into the new date-range shape (startDate =
+// endDate = date) rather than merged across consecutive days -- merging
+// would need guessing how two overlapping same-day visits by different
+// people should combine into one range, which is genuinely ambiguous;
+// several adjacent 1-day chips is still a correct result, just not the
+// tidiest one, and every new row from here on (hand-added or email-
+// imported) is a real range from the start.
+data.catSittingVisits = data.catSittingVisits.map((v) => {
+if (v.date && !v.startDate) {
+const conn = v.connectionId ? data.connections.find((c) => c.id === v.connectionId) : null;
+return { ...blankCatSittingVisit(), ...v, id: v.id || uid(), startDate: v.date, endDate: v.date, sitterName: v.sitterName || (conn ? conn.name : '') };
+}
+return { ...blankCatSittingVisit(), ...v, id: v.id || uid() };
+});
 {
 const tripIds = new Set(data.trips.map((t) => t.id));
 data.catSittingVisits = data.catSittingVisits.filter((v) => !v.tripId || tripIds.has(v.tripId));
@@ -2894,6 +2937,12 @@ if (beforeIdx >= 0) data.loyaltyPrograms.splice(beforeIdx, 0, blankLoyaltyProgra
 else data.loyaltyPrograms.push(blankLoyaltyProgram(fields));
 });
 }
+if (!data.loyaltyProgramsSeededV6) {
+data.loyaltyProgramsSeededV6 = true;
+DEFAULT_LOYALTY_PROGRAMS_V6.forEach((p) => {
+if (!data.loyaltyPrograms.some((x) => x.id === p.id)) data.loyaltyPrograms.push(blankLoyaltyProgram(p));
+});
+}
 // Backfills contentFilter onto a program that already existed before
 // that field did -- the ordinary `{...blankLoyaltyProgram(), ...p}`
 // merge above only fills in a key p doesn't have AT ALL with the
@@ -2902,7 +2951,7 @@ else data.loyaltyPrograms.push(blankLoyaltyProgram(fields));
 // One-time (never overwrites a value the user's own edit set).
 if (!data.loyaltyContentFiltersSeeded) {
 data.loyaltyContentFiltersSeeded = true;
-[...DEFAULT_LOYALTY_PROGRAMS, ...DEFAULT_LOYALTY_PROGRAMS_V2, ...DEFAULT_LOYALTY_PROGRAMS_V3, ...DEFAULT_LOYALTY_PROGRAMS_V4, ...DEFAULT_LOYALTY_PROGRAMS_V5].forEach((seed) => {
+[...DEFAULT_LOYALTY_PROGRAMS, ...DEFAULT_LOYALTY_PROGRAMS_V2, ...DEFAULT_LOYALTY_PROGRAMS_V3, ...DEFAULT_LOYALTY_PROGRAMS_V4, ...DEFAULT_LOYALTY_PROGRAMS_V5, ...DEFAULT_LOYALTY_PROGRAMS_V6].forEach((seed) => {
 if (!seed.contentFilter) return;
 const existing = data.loyaltyPrograms.find((p) => p.id === seed.id);
 if (existing && !existing.contentFilter) existing.contentFilter = seed.contentFilter;

@@ -1143,6 +1143,24 @@ const CANCELLATION_PAYOUT_RE = /payout\s*has\s*been\s*updated\s*to[\s\S]{0,20}?�
 const CANCELLATION_LISTING_ID_RE = /Listing\s*#\s*(\d+)/i;
 const CANCELLATION_GUEST_RE = /your\s+guest\s+(.+?)\s+had\s+to\s+cancel/i;
 
+// Real example confirmed live (Gmail connector, "automated@airbnb.com",
+// 22 Oct 2026 message): subject "You've sent Timo money", body (real
+// text/plain part, not derived from HTML) "YOU'VE SENT £200 GBP TO
+// TIMO" then, a few lines down, "22 Oct – 2 Nov 2026" -- the stay's own
+// check-in/check-out range, with no listing id or reservation code
+// anywhere in the email (unlike the cancellation template above). The
+// link in the email itself (resolutions/CLA-...,
+// claims/resolution_center/to_responder_offer_money) confirms this is
+// specifically a Resolution Center payout -- money the host sent BACK
+// to a guest, not income. Four more real examples (Alfryd, Eduardo, a
+// non-Latin name, Sandra) confirmed the same subject/body shape holds
+// across different guests and amounts.
+const REFUND_SUBJECT_RE = /^You've sent (.+?) money$/i;
+const REFUND_QUERY = 'from:(automated@airbnb.com) subject:"You\'ve sent"';
+const REFUND_SEARCH_LIMIT = 25;
+const REFUND_AMOUNT_RE = /sent\s*£([\d,]+\.?\d*)\s*GBP/i;
+const REFUND_DATE_RANGE_RE = /(\d{1,2})\s+([A-Za-z]+)\s*[–—-]\s*(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})/;
+
 // The digits immediately before ".ics" in an Airbnb feed URL ARE the
 // listing's public id -- confirmed against all three real listings
 // (Settings -> Travel -> Airbnb listings), each shaped
@@ -1295,6 +1313,86 @@ seen.add(m.id);
 posted++;
 }
 data.prefs.airbnbCancellationsSeen = [...seen];
+if (posted || unmatched) queueSave();
+return { posted, unmatched };
+}
+
+// Posted to lettingLedger as a NEGATIVE 'refund' entry -- real money
+// that left the business, not income, so it's excluded by construction
+// from the per-night-rate chart (letting.js's own month-builder only
+// ever counts 'earned'/'cancellation'/orphaned-'accrual' rows, and only
+// when `gross` is set -- a refund row deliberately carries neither).
+// Matched to a reservation purely by its stated check-in/check-out
+// range (matchReservationForCancellation, already built for the
+// cancellation email above) -- there's no listing id or reservation
+// code anywhere in this email template to match on instead, unlike
+// cancellations. Genuinely ambiguous (more than one reservation shares
+// that exact date range) is left unmatched rather than guessed, same
+// discipline as everywhere else in this file.
+async function syncRefundsFromEmail() {
+if (!(await canAttemptGoogleAction())) return { posted: 0 };
+if (!Array.isArray(data.prefs.airbnbRefundsSeen)) data.prefs.airbnbRefundsSeen = [];
+const seen = new Set(data.prefs.airbnbRefundsSeen);
+
+const { fetchMailSearches, getMessageDetail } = await import('../googlemail.js');
+const search = { kind: 'query', value: REFUND_QUERY, maxDays: 0, maxEvents: REFUND_SEARCH_LIMIT };
+let sections;
+try {
+sections = await fetchMailSearches([search], REFUND_SEARCH_LIMIT);
+} catch (err) {
+console.error('Refund email search failed:', err);
+return { posted: 0, error: err.message || String(err) };
+}
+
+const { ownerKeyFor } = await import('./letting.js');
+let posted = 0;
+let unmatched = 0;
+for (const m of sections[0]?.messages || []) {
+if (seen.has(m.id)) continue;
+const subjectMatch = REFUND_SUBJECT_RE.exec(String(m.subject || '').trim());
+if (!subjectMatch) continue;
+const guestName = subjectMatch[1].trim();
+
+let detail;
+try {
+detail = await getMessageDetail(m.id);
+} catch (err) {
+console.error('Refund email fetch failed:', err);
+unmatched++;
+continue; // not marked seen -- a fetch failure is worth retrying
+}
+const bodyText = detail.bodyText || '';
+const amountMatch = REFUND_AMOUNT_RE.exec(bodyText);
+const rangeMatch = REFUND_DATE_RANGE_RE.exec(bodyText);
+if (!amountMatch || !rangeMatch) { seen.add(m.id); unmatched++; continue; }
+const amount = Number(amountMatch[1].replace(/,/g, ''));
+
+const startMonthIdx = MONTH_NAMES.indexOf(rangeMatch[2].slice(0, 3).toLowerCase());
+const endMonthIdx = MONTH_NAMES.indexOf(rangeMatch[4].slice(0, 3).toLowerCase());
+if (startMonthIdx === -1 || endMonthIdx === -1) { seen.add(m.id); unmatched++; continue; }
+const reservation = matchReservationForCancellation(Number(rangeMatch[1]), startMonthIdx + 1, Number(rangeMatch[3]), endMonthIdx + 1);
+if (!reservation) { seen.add(m.id); unmatched++; continue; }
+const listing = data.airbnbListings.find((l) => l.id === reservation.listingId);
+if (!listing) { seen.add(m.id); unmatched++; continue; }
+const ownerKey = ownerKeyFor(listing);
+if (!ownerKey) { seen.add(m.id); continue; }
+
+// Same content-level guard as the cancellation poster above -- a
+// second device syncing close behind this one, or a manual re-run,
+// shouldn't double-post the same real refund.
+const alreadyRecorded = data.lettingLedger.some((e) => e.kind === 'refund' && e.ownerKey === ownerKey && e.date === todayStr() && Math.abs((Number(e.amount) || 0) + amount) < 0.01);
+if (alreadyRecorded) { seen.add(m.id); continue; }
+data.lettingLedger.push({
+id: uid(), ownerKey, kind: 'refund',
+amount: -amount, // money OUT, not in -- the whole point of this kind
+platform: 'airbnb',
+date: todayStr(), // the email states the STAY's dates, not when the refund itself was sent -- today is the real event date
+note: guestName || reservation.guestName || listing.label || 'Refund to guest',
+});
+seen.add(m.id);
+posted++;
+}
+data.prefs.airbnbRefundsSeen = [...seen];
 if (posted || unmatched) queueSave();
 return { posted, unmatched };
 }
@@ -1576,6 +1674,10 @@ try {
 // no longer in the feed), so this needs the record to still exist to
 // match a cancellation email against it.
 const cancelResult = await syncCancellationsFromEmail();
+// Same ordering reason as the cancellation sync just above -- a refund
+// is matched to a reservation by its stated check-in/check-out range,
+// which needs the record to still be on file.
+const refundResult = await syncRefundsFromEmail();
 await syncAllAirbnbListings();
 // After the ICS sync, not before -- a reservation the feed just
 // removed as genuinely cancelled is gone from data.airbnbReservations
@@ -1600,10 +1702,13 @@ const guestNote = guestResult.filled
 const cancelNote = cancelResult.posted
 ? ` Posted ${cancelResult.posted} cancellation payout${cancelResult.posted === 1 ? '' : 's'} to <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#letting-panel">Letting income</span>.`
 : '';
+const refundNote = refundResult.posted
+? ` Posted ${refundResult.posted} guest refund${refundResult.posted === 1 ? '' : 's'} to <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#letting-panel">Letting income</span>.`
+: '';
 const verifyNote = verifyResult.missing
 ? ` ${verifyResult.missing} booking${verifyResult.missing === 1 ? "'s calendar event wasn't" : "s' calendar events weren't"} actually there any more — marked as needing a push again.`
 : '';
-status.innerHTML = `Synced just now.${guestNote}${cancelNote}${verifyNote}`;
+status.innerHTML = `Synced just now.${guestNote}${cancelNote}${refundNote}${verifyNote}`;
 } else {
 // The actual error, right here -- not just a count pointing at devtools
 // most people never open. Every failed listing likely has the SAME
