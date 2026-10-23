@@ -8,6 +8,7 @@ import { renderPackingModules, bindPackingModules } from './packing.js';
 import { renderTagCleanup } from './tagcleanup.js';
 import { testConnection, resolveDataSourceId } from '../notion.js';
 import { summarizeUsage, summarizeClaudeApiSpend, currentMonthKey } from '../ai.js';
+import { renderModelCheck } from './modelcheck.js';
 import { setShowSensitiveFields } from './connections.js';
 import { pullRemote } from '../sync/selfhost.js';
 import { restartAutoSync } from '../sync/autosync.js';
@@ -322,6 +323,7 @@ renderAll();
 document.getElementById('refresh-usage-btn').addEventListener('click', renderUsage);
 await renderUsage();
 renderClaudeUsage();
+renderModelCheck();
 
 initDriveBackup();
 initPairing();

@@ -71,12 +71,12 @@ return json?.offers?.length ? json : null;
 // cheap ranking tier nudges.js's own RANK_MODEL uses for a much simpler
 // job.
 const SWITCH_MODEL = 'claude-sonnet-5-5';
-// Moved from claude-sonnet-5 to this point release. NOT a saving: both
-// are $2/$10 per MTok (an earlier version of this comment wrongly said
-// ~30% cheaper, taken from this app's own stale $3/$15 price table).
-// The thinking/token-budget behaviour below was confirmed against the
-// OLDER claude-sonnet-5; 5.5 recalibrates what each effort level means,
-// so it is not re-verified here -- watch the first few real runs.
+// Moved from claude-sonnet-5 to this point release. Same $2/$10 per MTok
+// rate; the saving is fewer tokens per task (Anthropic: "up to 30% less
+// per task" -- a vendor figure, not measured here). The thinking/token-
+// budget behaviour below was confirmed against the OLDER claude-sonnet-5;
+// 5.5 recalibrates what each effort level means, so it is not re-verified
+// here -- watch the first few real runs.
 //
 // Confirmed live (on claude-sonnet-5): Sonnet thinks by default at this call's effort level
 // (no 'low' passed, deliberately -- see above), and that thinking block

@@ -103,6 +103,18 @@ await refreshCashbackRates(sources);
 },
 },
 {
+// Once a month, gated INSIDE runModelCheck (data.modelCheck.checkedMonth)
+// -- this fires at ordinary app-open cadence and almost every call
+// returns immediately. Silent with no API key. Report-only: it flags
+// newer models, never changes one.
+id: 'model-check', label: 'Model upgrade check', needsGoogle: false,
+note: 'Monthly: compares the models your API usage log shows against what Anthropic currently offers, and flags anything that cost $1+ in a month with a newer model in its family (shown as a ticker tile).',
+run: async () => {
+const { runModelCheck } = await import('./modelcheck.js');
+await runModelCheck();
+},
+},
+{
 // Own weekly threshold lives INSIDE runAutomaticSwitchCheck (see
 // switchoffers.js's AUTO_RECHECK_DAYS), same shape as 'cashback-sweep'
 // just above -- this firing at ordinary app-open cadence costs nothing

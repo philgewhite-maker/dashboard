@@ -468,6 +468,20 @@ if (!failing.length) return [];
 return [{ id: 'auto-sitehealth', kind: 'sitehealth', auto: true, count: failing.length, worst: failing[0] }];
 }
 
+// A single tile while at least one usage row that cost real money in a
+// month has a newer model available in its family (the monthly check in
+// modelcheck.js writes data.modelCheck; this only reads it, so the ticker
+// never imports ai.js). Same "one tile, not one per thing" shape as the
+// site-health tile above; gone once every finding is dismissed.
+function modelUpgradeItems() {
+const mc = data.modelCheck;
+if (!mc || !Array.isArray(mc.findings)) return [];
+const dismissed = new Set(mc.dismissed || []);
+const live = mc.findings.filter((f) => !dismissed.has(f.key)).sort((a, b) => b.cost - a.cost);
+if (!live.length) return [];
+return [{ id: 'auto-modelcheck', kind: 'modelcheck', auto: true, count: live.length, top: live[0], all: live, minCost: mc.flagMinCost || 1 }];
+}
+
 // Lazy, not a top-level import -- connections.js is a heavy module this
 // file would otherwise force onto every single page load (the ticker
 // renders before any tab is even chosen), the same cost travel.js's own
@@ -505,7 +519,7 @@ return [{ id: 'auto-inv-incomplete', kind: 'inv-incomplete', auto: true, count: 
 function activeItems() {
 const mine = (data.ticker.items || []).filter((i) => !i.hidden);
 const seen = new Set(mine.map(keyFor));
-const extra = [...travelItems(), ...cassBonusItems(), ...siteHealthFailureItems(), ...incompleteSetItems()].filter((i) => !seen.has(keyFor(i)));
+const extra = [...travelItems(), ...cassBonusItems(), ...siteHealthFailureItems(), ...modelUpgradeItems(), ...incompleteSetItems()].filter((i) => !seen.has(keyFor(i)));
 return [...mine, ...extra];
 }
 
@@ -696,6 +710,17 @@ return tile('Checks', escapeHtml(item.count === 1 ? check.label : `${item.count}
 `${check.label}: ${row.detail || 'failing'}${item.count > 1 ? ` (and ${item.count - 1} other check${item.count === 2 ? '' : 's'} -- this names the longest-broken one)` : ''}. Click to open it.`,
 { auto: true, gotoTab: 'settings', gotoTarget: `#site-health-row-${check.id}` });
 }
+if (item.kind === 'modelcheck') {
+const { top } = item;
+// Names the feature and the model in the value itself, not just the
+// tooltip -- same lesson as the Checks tile (a hover is unreliable on a
+// phone). Rate wording comes from the finding so a same-price upgrade
+// never reads as a saving.
+const lines = item.all.map((f) => `${f.purpose}: ${f.model} → ${f.upgrade} ($${f.cost.toFixed(2)} in ${f.month}; ${f.price.text})`);
+return tile('Models', escapeHtml(item.count === 1 ? `${top.purpose} ↑ ${top.upgrade}` : `${item.count} upgrades`), '',
+`${lines.join(' · ')}. A newer model exists for something that cost over $${item.minCost} in a month. Click to open.`,
+{ auto: true, gotoTab: 'settings', gotoTarget: '#model-check-panel' });
+}
 if (item.kind === 'holding') {
 const fxHit = c[keyFor({ kind: 'fx', base: HOME, quote: 'EUR' })];
 const dbkHit = c[keyFor({ kind: 'quote', symbol: t.holdingSymbol || 'DBK.DE' })];
@@ -776,6 +801,7 @@ case 'loyalty': return 'Loyalty balances';
 case 'holding': return 'Holding';
 case 'cass': return 'CASS';
 case 'sitehealth': return 'Checks';
+case 'modelcheck': return 'Models';
 default: return item.kind;
 }
 }

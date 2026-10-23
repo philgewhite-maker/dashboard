@@ -18,11 +18,19 @@ const DEFAULT_MODEL = 'claude-opus-5';
 // rather than guessing.
 const PRICES_PER_MTOK = {
 'claude-opus-5': { input: 5, output: 25 },
+// Not called anywhere yet; here so the model check can compare against it
+// (Anthropic's pricing page: $4/$20, down from Opus 5's $5/$25).
+'claude-opus-5-5': { input: 4, output: 20 },
 // Sonnet 5 was $2/$10 at launch as introductory pricing, with a rise to
 // $3/$15 scheduled for 1 Sept 2026 -- Anthropic's pricing page now says
 // that rise will NOT happen and $2/$10 is the standard price. This used
 // to say 3/15, which overstated every Sonnet 5 call's estimated cost by
-// 50%. Sonnet 5.5 is the same $2/$10 (no saving from moving to it).
+// 50%. Sonnet 5.5 has the SAME $2/$10 rate card -- its saving is not a
+// lower rate but fewer tokens per task (Anthropic: "up to 30% less per
+// task", https://www.anthropic.com/claude/sonnet; cache reads also drop
+// to $0.10 from $0.20, which this table doesn't model). That's a vendor
+// claim: Settings' model check shows calls and tokens per call, so it can
+// be checked against this app's own usage rather than taken on trust.
 'claude-sonnet-5': { input: 2, output: 10 },
 'claude-sonnet-5-5': { input: 2, output: 10 },
 // Haiku 5.5 actually has two rate cards (low tier up to a 100K-token
@@ -55,6 +63,10 @@ return 'image/jpeg';
 }
 
 function currentMonthKey() { return new Date().toISOString().slice(0, 7); }
+
+// null for a model with no price on file -- callers show that as unknown
+// rather than guessing, same rule as the spend estimate itself.
+function priceFor(model) { return PRICES_PER_MTOK[model] || null; }
 
 // Usage is bucketed by month, then by purpose+model, so Settings can show
 // "photo import cost this much, nudges cost that much" and price each at the
@@ -335,7 +347,7 @@ const PROFILE_MAX_TOKENS = 3000;
 // profile screenshots (see safeBandHeight below), so this runs more than
 // once per import -- worth pricing right, not just inheriting the user's
 // chosen default.
-const PROFILE_PARSE_MODEL = 'claude-sonnet-5';
+const PROFILE_PARSE_MODEL = 'claude-sonnet-5-5';
 // Escalation for an image tall/narrow enough to need more than one band
 // even on the standard vision tier -- see VISION_TIER_HIGH_RES for why
 // that specifically means Opus, not "a smarter model": Opus 4.7+ gets a
@@ -1234,7 +1246,7 @@ reason: (data && data.reason) || '',
 // mandatory regardless) is exactly the kind of thing a cheap/fast tier
 // under-follows. This runs rarely (one capture, one manual refresh), so
 // the small extra cost buys real reliability rather than another retry.
-const SHOPPING_SEARCH_MODEL = 'claude-sonnet-5';
+const SHOPPING_SEARCH_MODEL = 'claude-sonnet-5-5';
 // Confirmed live: 2000 wasn't a comfortable margin, it was undersized outright
 // -- a real run hit stop_reason:'max_tokens' with NO text block at all after
 // 4 full rounds of thinking + tool calls (3 site-scoped searches, 2 fetches,
@@ -1501,7 +1513,7 @@ name: String(first.name || ''), retailer: String(first.retailer || ''), price: S
 // looked up. `alreadyProposed` is sent back to the model explicitly (on
 // top of the caller's own after-the-fact dedup) so a repeat suggestion
 // is avoided at the source, not just filtered out afterwards.
-const RATE_REVIEW_MODEL = 'claude-sonnet-5';
+const RATE_REVIEW_MODEL = 'claude-sonnet-5-5';
 const RATE_REVIEW_MAX_TOKENS = 8000;
 const RATE_REVIEW_EFFORT = 'medium';
 function airbnbRateReviewPrompt({ listings, windowStart, windowEnd, alreadyProposed, count }) {
@@ -1631,7 +1643,7 @@ recommendation: String(r?.recommendation || ''),
 // bare URL -- confirmed live as a real gap: an Amazon link pasted into
 // Shopping's own capture input became a task titled with the entire raw
 // URL, and the link itself was never even saved by that input at all.
-const RESOLVE_URL_MODEL = 'claude-sonnet-5';
+const RESOLVE_URL_MODEL = 'claude-sonnet-5-5';
 const RESOLVE_URL_MAX_TOKENS = 2000;
 
 // Same web_search/web_fetch pair, UK bias, and Amazon-fetch exclusion
@@ -1789,7 +1801,7 @@ return String((data && data.name) || '').trim();
 // Haiku: resolving "1st November to 5th" against today's date, and
 // picking which existing trip "my Lisbon trip" means, takes more judgement
 // than a lookup.
-const CAPTURE_INTENT_MODEL = 'claude-sonnet-5';
+const CAPTURE_INTENT_MODEL = 'claude-sonnet-5-5';
 const CAPTURE_INTENT_MAX_TOKENS = 2000;
 function captureIntentPrompt(text, trips) {
 const tripList = trips.length
@@ -1830,7 +1842,7 @@ return { steps: Array.isArray(data && data.steps) ? data.steps : [] };
 // extraction, same tier as profile parsing -- Sonnet 5, not the user's
 // chosen vision model, for the same reasoning profilePrompt's own comment
 // gives (nuanced reading, not deep reasoning).
-const WELLNESS_MODEL = 'claude-sonnet-5';
+const WELLNESS_MODEL = 'claude-sonnet-5-5';
 // Confirmed live: this model returns a "thinking" content block even though
 // nothing here ever requests one (no `thinking` param is sent) -- and that
 // block counts against max_tokens the same as the actual answer. At 800,
@@ -2017,7 +2029,7 @@ return { ...result, fromCache: false };
 // wellnessPrompt's band-interpolation comment already establishes for
 // numbers. travel.js's enrichLegFromExtraction is what actually writes
 // these onto a leg.
-const TRIP_MODEL = 'claude-sonnet-5';
+const TRIP_MODEL = 'claude-sonnet-5-5';
 // Room for several passengers each with their own seat/baggage line -- a
 // family-of-5 booking confirmation genuinely needs more output than a
 // single-traveller one, and 1000 tokens was confirmed live to be tight
@@ -2208,7 +2220,7 @@ return shapeTripExtraction(raw);
 // as extractTripLegFromEmail above (Sonnet 5, 'low' effort) -- reading a
 // varied, real email body is the same class of problem, not the cheap/fast
 // recognition tasks elsewhere in this file.
-const MAIL_EXTRACT_MODEL = 'claude-sonnet-5';
+const MAIL_EXTRACT_MODEL = 'claude-sonnet-5-5';
 // Smaller than TRIP_MAX_TOKENS -- no passenger list, just a title/notes/
 // date shape -- but still real body text with real variety, not a fixed
 // little form.
@@ -2546,7 +2558,7 @@ return { country: String((data && data.country) || '').trim() };
 
 export {
 MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot, quickScanScreenshot, scanForCaptureMarker,
-callTextJson, DEFAULT_MODEL, summarizeUsage, summarizeClaudeApiSpend, currentMonthKey, compareFaces,
+callTextJson, DEFAULT_MODEL, summarizeUsage, summarizeClaudeApiSpend, currentMonthKey, priceFor, compareFaces,
 extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShoppingItem, searchAgentProvocateurElsewhere, searchEbayResaleEstimate, cleanEstimateText, searchDepartmentStoresForMissingSetPiece, generateAirbnbRateReview, analyseOngoingAccountValue, identifyProduct, translateText, romanizeName, parseCaptureIntent,
 resolveUrlTitle, resolveJobPostingUrl, resolveBookDetails, resolveSeriesBooks,
 identifyCountry, extractWellnessScreenshot,
