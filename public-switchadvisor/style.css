@@ -79,6 +79,14 @@ h2 { font-size: 1.1rem; margin-top: 0; }
 .rec-amount { font-weight: 600; color: var(--good); }
 .rec-rationale, .account-detail { font-size: 0.9rem; color: var(--muted-text); margin-top: 4px; }
 .rec-conditions { font-size: 0.85rem; margin-top: 6px; color: var(--muted-text); }
+/* Something you'd have to do to actually meet the offer's terms -- set
+   apart from the grey rationale so it isn't read past. */
+.rec-todo {
+  margin-top: 8px; padding: 8px 10px; font-size: 0.9rem; color: var(--text);
+  border-left: 3px solid var(--warn);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  border-radius: 0 6px 6px 0;
+}
 .rec-link { display: inline-block; margin-top: 6px; color: var(--accent); font-size: 0.9rem; text-decoration: none; }
 
 .tag-chip {
