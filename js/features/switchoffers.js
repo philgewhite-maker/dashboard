@@ -70,8 +70,15 @@ return json?.offers?.length ? json : null;
 // [date]" vs. "never held one") deserves a real reasoning pass, not the
 // cheap ranking tier nudges.js's own RANK_MODEL uses for a much simpler
 // job.
-const SWITCH_MODEL = 'claude-sonnet-5';
-// Confirmed live: Sonnet 5 thinks by default at this call's effort level
+const SWITCH_MODEL = 'claude-sonnet-5-5';
+// Moved from claude-sonnet-5 to this point release -- ~30% cheaper, same
+// family, no reason to expect worse results on this kind of structured
+// reading task. The thinking/token-budget behaviour below was confirmed
+// against the OLDER claude-sonnet-5, not re-verified here yet; kept as a
+// caution since SWITCH_MAX_TOKENS is already generous enough that this
+// should still hold, but worth watching the first few real runs.
+//
+// Confirmed live (on claude-sonnet-5): Sonnet thinks by default at this call's effort level
 // (no 'low' passed, deliberately -- see above), and that thinking block
 // counts against max_tokens same as the real answer. At 3000 the whole
 // budget went to thinking and the call hit stop_reason:'max_tokens' with

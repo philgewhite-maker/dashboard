@@ -54,7 +54,7 @@ $COMMANDS_SECRET = 'PUT-A-DEVICE-TOKEN-FROM-PAIR.PHP-HERE';
 // From console.anthropic.com. This is the ONE place in the whole app
 // that spends AI tokens, and it runs at most once a week.
 $ANTHROPIC_API_KEY = 'PUT-YOUR-ANTHROPIC-API-KEY-HERE';
-$ANTHROPIC_MODEL = 'claude-sonnet-5';
+$ANTHROPIC_MODEL = 'claude-sonnet-5-5';
 
 $MSE_SWITCH_URL = 'https://www.moneysavingexpert.com/banking/compare-best-bank-accounts/#switch';
 $CASS_LIST_URL = 'https://www.currentaccountswitch.co.uk/banks-building-societies/';
