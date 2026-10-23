@@ -102,6 +102,9 @@ h2 { font-size: 1.1rem; margin-top: 0; }
   background: color-mix(in srgb, var(--accent) 7%, var(--card-bg));
 }
 .rec-plan-head { font-weight: 600; margin-bottom: 6px; }
+.rec-year { border-width: 2px; }
+.rec-plan ol { margin: 6px 0; padding-left: 22px; }
+.rec-plan { scroll-margin-top: 12px; }
 .rec-plan ul { margin: 6px 0; padding-left: 20px; }
 .rec-plan-how { margin-top: 8px; }
 .rec-plan-how summary { cursor: pointer; color: var(--accent); }
@@ -111,6 +114,13 @@ h2 { font-size: 1.1rem; margin-top: 0; }
   background: color-mix(in srgb, var(--warn) 12%, transparent);
   border-radius: 0 6px 6px 0;
 }
+.rec-tip {
+  margin-top: 8px; padding: 8px 10px; font-size: 0.9rem; color: var(--text);
+  border-left: 3px solid var(--muted-text);
+  background: var(--muted-bg);
+  border-radius: 0 6px 6px 0;
+}
+.rec-todo a { color: var(--accent); font-weight: 600; }
 .rec-link { display: inline-block; margin-top: 6px; color: var(--accent); font-size: 0.9rem; text-decoration: none; }
 
 .tag-chip {

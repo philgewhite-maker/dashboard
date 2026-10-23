@@ -1,4 +1,4 @@
-import { updateProfile } from './api.js';
+import { getLiveProfile, setLiveProfile } from './api.js';
 import { escapeHtml, money } from './utils.js';
 
 const PRIORITY_LABEL = { high: 'High', medium: 'Medium', low: 'Low', blocked: 'Needs another account', alt: 'Alternative', 'n/a': 'Not eligible' };
@@ -18,6 +18,11 @@ function cashbackHtml(r) {
   return `<div class="rec-cashback"><strong>Plus cashback:</strong> ${links}${asOf} — pick one, and click through its link <em>before</em> you apply, or it may not track.${quidco}</div>`;
 }
 
+// The to-do text points at the salary plan by name; make that a real link.
+function linkSalaryPlan(html) {
+  return html.replace(/(?:"|&quot;|&#34;)Where your salary goes(?:"|&quot;|&#34;)/, '<a href="#rec-salary">Where your salary goes</a>');
+}
+
 function rowHtml(r) {
   return `<div class="rec-row ${r.eligible ? '' : 'rec-ineligible'}">
     <div class="rec-head">
@@ -26,7 +31,8 @@ function rowHtml(r) {
       <span class="tag-chip ${PRIORITY_CLASS[r.priority] || ''}">${PRIORITY_LABEL[r.priority] || r.priority}</span>
     </div>
     <div class="rec-rationale">${escapeHtml(r.rationale)}</div>
-    ${(r.todo || []).map((t) => `<div class="rec-todo"><strong>To do:</strong> ${escapeHtml(t)}</div>`).join('')}
+    ${(r.todo || []).map((t) => `<div class="rec-todo"><strong>To do:</strong> ${linkSalaryPlan(escapeHtml(t))}</div>`).join('')}
+    ${(r.tips || []).map((t) => `<div class="rec-tip"><strong>Worth knowing:</strong> ${escapeHtml(t)}</div>`).join('')}
     ${(r.ideas || []).map((t) => `<div class="rec-idea"><strong>Idea:</strong> ${escapeHtml(t)}</div>`).join('')}
     ${cashbackHtml(r)}
     ${r.conditions ? `<details class="rec-conditions"><summary>Terms</summary>${escapeHtml(r.conditions)}</details>` : ''}
@@ -50,11 +56,48 @@ function planHtml(plan) {
   </div>`;
 }
 
+// Salary can only land in one account: which salary-tied offers take turns,
+// and what that costs in Krak Salary Match. Built by the server.
+function salaryPlanHtml(sp) {
+  if (!sp) return '';
+  const li = (arr) => (arr || []).map((l) => `<li>${escapeHtml(l)}</li>`).join('');
+  const notes = (sp.notes || []).length
+    ? `<details class="rec-plan-how"><summary>What counts as salary, and the small print</summary><ul>${li(sp.notes)}</ul></details>`
+    : '';
+  return `<div class="rec-plan" id="rec-salary">
+    <div class="rec-plan-head">${escapeHtml(sp.headline)}</div>
+    ${(sp.steps || []).length ? `<ol>${li(sp.steps)}</ol>` : ''}
+    <ul>${li(sp.summary)}</ul>
+    ${notes}
+  </div>`;
+}
+
+// The year sketch: the most you could collect over 12 months by taking the
+// offers in turn, with the alternatives the server tried. Built by the server.
+function yearPathHtml(yp) {
+  if (!yp) return '';
+  const li = (arr) => (arr || []).map((l) => `<li>${escapeHtml(l)}</li>`).join('');
+  const alts = (yp.options || []).length > 1
+    ? `<p class="muted">Options tried: ${yp.options.map((o) => `${o.newDonors ? '+' + o.newDonors + ' new donor' + (o.newDonors === 1 ? '' : 's') : 'your current accounts only'}: ${o.switches} switch${o.switches === 1 ? '' : 'es'}, about ${money(o.total)}`).join(' · ')}</p>`
+    : '';
+  return `<div class="rec-plan rec-year" id="rec-year">
+    <div class="rec-plan-head">${escapeHtml(yp.headline)}</div>
+    <ol>${li(yp.steps)}</ol>
+    <ul>${li(yp.summary)}</ul>
+    ${alts}
+    <details class="rec-plan-how"><summary>How this was worked out</summary><ul>${li(yp.notes)}</ul></details>
+  </div>`;
+}
+
 export function renderRecommendations(me) {
   const asOf = document.getElementById('rec-asof');
   if (asOf) asOf.textContent = me.cacheAsOf ? `Offers last checked ${me.cacheAsOf}.` : 'Offers not yet checked.';
   const planEl = document.getElementById('rec-plan');
   if (planEl) planEl.innerHTML = planHtml(me.plan);
+  const yearEl = document.getElementById('rec-year-wrap');
+  if (yearEl) yearEl.innerHTML = yearPathHtml(me.yearPath);
+  const salaryEl = document.getElementById('rec-salary-wrap');
+  if (salaryEl) salaryEl.innerHTML = salaryPlanHtml(me.salaryPlan);
 
   const list = document.getElementById('rec-list');
   if (list) {
@@ -66,12 +109,11 @@ export function renderRecommendations(me) {
 
   const salary = document.getElementById('profile-salary');
   const balance = document.getElementById('profile-balance');
-  const email = document.getElementById('profile-email');
   const gross = document.getElementById('profile-gross');
-  if (gross) gross.value = me.user.annualSalaryGross ?? '';
-  if (salary) salary.value = me.user.annualSalaryNet ?? '';
-  if (balance) balance.value = me.user.assumedBalance ?? '';
-  if (email) email.value = me.user.email ?? '';
+  const live = getLiveProfile();
+  if (gross) gross.value = live.annualSalaryGross ?? '';
+  if (salary) salary.value = live.annualSalaryNet ?? '';
+  if (balance) balance.value = live.assumedBalance ?? '';
 }
 
 export function initProfileForm(onSaved) {
@@ -80,22 +122,20 @@ export function initProfileForm(onSaved) {
   const status = document.getElementById('profile-status');
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    status.textContent = 'Saving…';
+    status.textContent = 'Updating…';
     try {
       const salary = document.getElementById('profile-salary').value;
       const gross = document.getElementById('profile-gross').value;
       const balance = document.getElementById('profile-balance').value;
-      const email = document.getElementById('profile-email').value;
-      await updateProfile({
+      setLiveProfile({
         annualSalaryNet: salary === '' ? null : Number(salary),
         annualSalaryGross: gross === '' ? null : Number(gross),
         assumedBalance: balance === '' ? null : Number(balance),
-        email,
       });
-      status.textContent = 'Saved.';
+      status.textContent = 'Updated.';
       await onSaved();
     } catch (err) {
-      status.textContent = `Couldn't save: ${err.message}`;
+      status.textContent = `Couldn't update: ${err.message}`;
     }
   });
 }
