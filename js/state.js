@@ -553,6 +553,11 @@ photoIds: [], // legacy: image blobs in this device's IndexedDB only
 // demand. Unlike photoIds, these genuinely sync.
 attachments: [],
 source: null, // {kind:'mail'|'calendar'|'photo', label, url}
+// Stable slugs stamped when an agent-proposed batch (agentinbox.js) first
+// creates a project / group, so later batches file into the SAME task
+// instead of making a new root each time. Never shown or hand-edited.
+agentProjectKey: '',
+agentGroupKey: '',
 createdAt: new Date().toISOString(),
 completedAt: '',
 // A Supermarket-context item's own price comparison (see ai.js's

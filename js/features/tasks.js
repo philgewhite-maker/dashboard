@@ -960,8 +960,8 @@ console.error('Attachment delete failed on the server:', err);
 // capture: forConnectionId/wantSpec/wantState were each dropped exactly
 // that way on their first run.
 function captureTask({ title, notes = '', source = null, photoIds = [], attachments = [], due = '', link = '', contexts = [], bucket, parentId = null,
-forConnectionId = '', wantSpec = null, wantState = 'active' }) {
-const fields = { title, notes, source, photoIds, attachments, due, link, contexts, parentId, forConnectionId, wantSpec, wantState };
+forConnectionId = '', wantSpec = null, wantState = 'active', agentProjectKey = '', agentGroupKey = '' }) {
+const fields = { title, notes, source, photoIds, attachments, due, link, contexts, parentId, forConnectionId, wantSpec, wantState, agentProjectKey, agentGroupKey };
 if (bucket) fields.bucket = bucket;
 const task = blankTask(fields);
 data.tasks.push(task);

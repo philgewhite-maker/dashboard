@@ -37,7 +37,21 @@ declare(strict_types=1);
  *   GET  ?fields=claudeSubscriptionUsage,agentInbox
  *     -> {rev, updatedAt, claudeSubscriptionUsage, agentInbox}
  *   POST {rev, action:"replace", field:"claudeSubscriptionUsage", value}
- *   POST {rev, action:"append",  field:"agentInbox", value:{label, nodes:[...]}}
+ *   POST {rev, action:"append",  field:"agentInbox", value:{label, projectKey?, projectLabel?, nodes:[...]}}
+ *
+ *   STRUCTURE CONVENTION (all optional; omit for a one-off standalone task):
+ *     projectKey / projectLabel  -- which long-lived project this batch
+ *       belongs to ("dashboard", "bank-switch-advisor"). On Accept the
+ *       browser finds-or-creates ONE persistent project task for that key;
+ *       the batch's single root node IS that project (its other fields are
+ *       ignored), so its children file straight under it. Nest groups
+ *       (node.groupKey) beneath the root, items beneath the groups.
+ *     node.groupKey -- marks a node as a reusable group inside the project
+ *       ("build", "test-deploy"): the browser reuses the existing group
+ *       task instead of creating a new one each batch.
+ *     node.contexts -- ["With Claude"] for setup/build steps Claude can do,
+ *       ["Mobile"] for things to try on the phone, etc.
+ *     Keys are lowercase slugs [a-z0-9-], max 40; use the same ones every time.
  *   POST {rev, action:"consume", field:"agentInbox", ids:[...]}
  *
  * Upload next to sync.php (cPanel -> File Manager), generate a secret
@@ -201,6 +215,16 @@ function write_store(string $file, array $store): void {
 
 // ---- Validators --------------------------------------------------------
 
+// A stable, human-chosen slug ("dashboard", "bank-switch-advisor",
+// "test-deploy") the browser matches against tasks it already created
+// from earlier batches. NOT a task id -- this endpoint has no read access
+// to data.tasks, so the proposer can only ever use a consistent vocabulary.
+// Anything that isn't a plain lowercase slug is dropped to ''.
+function clean_key($v): string {
+    $s = is_string($v) ? strtolower(trim($v)) : '';
+    return preg_match('/^[a-z0-9][a-z0-9-]{0,39}$/', $s) === 1 ? $s : '';
+}
+
 function valid_attachment_id(?string $id): bool {
     return is_string($id) && preg_match('/^[a-f0-9]{32}$/', $id) === 1;
 }
@@ -270,6 +294,7 @@ function validate_proposal_nodes($nodes): array {
             'attachments' => $attachments,
             'forConnectionId' => isset($n['forConnectionId']) ? (string) $n['forConnectionId'] : '',
             'wantSpec' => $n['wantSpec'] ?? null,
+            'groupKey' => clean_key($n['groupKey'] ?? null),
             // 'source' is deliberately never read from the client here --
             // provenance is synthesized at Accept time in the browser,
             // never trusted from the wire.
@@ -371,6 +396,8 @@ if ($action === 'replace' && $field === 'claudeSubscriptionUsage') {
     $entry = [
         'id' => $id,
         'label' => isset($value['label']) ? (string) $value['label'] : '',
+        'projectKey' => clean_key($value['projectKey'] ?? null),
+        'projectLabel' => isset($value['projectLabel']) ? mb_substr(trim((string) $value['projectLabel']), 0, 80) : '',
         'nodes' => $cleanNodes,
         'createdAt' => gmdate('c'),
     ];
