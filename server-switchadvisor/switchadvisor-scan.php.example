@@ -89,22 +89,35 @@ set_time_limit(180);
 
 // ---- Talk to commands.php, same protocol the home-agent itself expects --
 
+// Diagnostic cache, surfaced in the final error so a failed run says WHY
+// rather than just "didn't work" — a self-to-self curl call (this script
+// and commands.php live on the same host) is exactly the kind of thing
+// that fails silently on shared hosting (loopback/firewall blocks), and
+// without this there's no log file to check for the real reason.
+$GLOBALS['__last_commands_call_debug'] = null;
+
 function commands_call(string $url, string $secret, string $method, string $query, array $body = []) {
     $ch = curl_init($url . '?' . $query);
     $opts = [
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'X-Sync-Secret: ' . $secret],
         CURLOPT_TIMEOUT => 30,
+        CURLOPT_CONNECTTIMEOUT => 10,
     ];
     if ($method === 'POST') {
         $opts[CURLOPT_POST] = true;
         $opts[CURLOPT_POSTFIELDS] = json_encode($body);
     }
     curl_setopt_array($ch, $opts);
+    $start = microtime(true);
     $response = curl_exec($ch);
+    $elapsed = round(microtime(true) - $start, 2);
+    $curlErrno = curl_errno($ch);
+    $curlError = curl_error($ch);
     $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
-    if ($response === false) return ['ok' => false, 'error' => 'unreachable'];
+    $GLOBALS['__last_commands_call_debug'] = "{$method} {$query} -> HTTP {$status} in {$elapsed}s" . ($curlError ? " | curl errno {$curlErrno}: {$curlError}" : '') . ($response !== false ? ' | body: ' . substr((string) $response, 0, 200) : ' | no response body');
+    if ($response === false) return ['ok' => false, 'error' => "curl errno {$curlErrno}: {$curlError}"];
     $parsed = json_decode($response, true);
     return ['ok' => $status === 200, 'status' => $status, 'data' => is_array($parsed) ? $parsed : null];
 }
@@ -207,7 +220,7 @@ $pages = fetch_pages($COMMANDS_URL, $COMMANDS_SECRET, $urls);
 
 $msePage = $pages['mse'] ?? null;
 if (!$msePage || ($msePage['status'] ?? '') !== 'done' || empty($msePage['result']['html'])) {
-    fail(502, 'Could not fetch the MSE switch-offers page via the home agent — is it running? (' . ($msePage['error'] ?? 'no result') . ')');
+    fail(502, 'Could not fetch the MSE switch-offers page via the home agent — is it running? (' . ($msePage['error'] ?? 'no result') . ') [debug: ' . ($GLOBALS['__last_commands_call_debug'] ?? 'no calls made') . ']');
 }
 $switchText = extract_section((string) $msePage['result']['html'], 'switch', 16000);
 
