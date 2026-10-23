@@ -18,7 +18,7 @@ declare(strict_types=1);
  *
  *   POST ?action=redeem          {token}                      (public — this IS how you get in)
  *   GET  ?action=me                                            (X-Invite-Token)
- *   POST ?action=update-profile  {annualSalaryNet, assumedBalance, email}  (X-Invite-Token)
+ *   POST ?action=update-profile  {annualSalaryNet, annualSalaryGross, assumedBalance, email}  (X-Invite-Token)
  *   POST ?action=account-upsert  {account}                     (X-Invite-Token)
  *   POST ?action=account-delete  {id}                          (X-Invite-Token)
  *   GET  ?action=banklist                                      (public)
@@ -114,7 +114,7 @@ function read_doc(string $file, array $empty): array {
 }
 
 $EMPTY_DATA = ['rev' => 0, 'invites' => [], 'users' => []];
-$EMPTY_CACHE = ['scrapedAt' => null, 'history' => [], 'offers' => [], 'cassParticipants' => [], 'cashbackRates' => [], 'krakTiers' => [], 'krakSalaryMin' => null, 'krakSalaryCap' => null, 'krakTiersAsOf' => null, 'krakTiersSource' => null];
+$EMPTY_CACHE = ['scrapedAt' => null, 'history' => [], 'offers' => [], 'cassParticipants' => [], 'cashbackRates' => [], 'krakTiers' => [], 'krakSalaryMin' => null, 'krakSalaryCap' => null, 'krakTiersAsOf' => null, 'krakTiersSource' => null, 'cashbackDeals' => [], 'cashbackAsOf' => null, 'cashbackSources' => []];
 
 // ---- Shared helpers ----------------------------------------------------
 
@@ -153,6 +153,7 @@ function sanitize_user(array $u): array {
         'createdAt' => $u['createdAt'] ?? null,
         'lastSeenAt' => $u['lastSeenAt'] ?? null,
         'annualSalaryNet' => $u['annualSalaryNet'] ?? null,
+        'annualSalaryGross' => $u['annualSalaryGross'] ?? null,
         'assumedBalance' => $u['assumedBalance'] ?? null,
         'accounts' => $u['accounts'] ?? [],
     ];
@@ -205,12 +206,29 @@ function offer_eligibility(array $offer, array $accounts): array {
         $reason = $bonusCutoff
             ? "A {$bank} switch bonus is on file as Paid, on or after this offer's own " . substr($bonusCutoff, 0, 10) . ' exclusion cutoff (or with no date recorded against it).'
             : "A {$bank} switch bonus is already on file as Paid.";
-        return ['eligible' => false, 'reason' => $reason];
+        // The dates of the bonuses that block it, so the page can say when a
+        // LATER version of this dated offer would let you back in.
+        $bonusDates = [];
+        if ($bonusCutoff) {
+            foreach ($accounts as $a) {
+                if (!bank_names_match((string) ($a['bank'] ?? ''), $bank)) continue;
+                foreach (($a['switchBonuses'] ?? []) as $sb) {
+                    if (($sb['status'] ?? '') === 'Paid' && !empty($sb['date'])) $bonusDates[] = (string) $sb['date'];
+                }
+            }
+        }
+        return ['eligible' => false, 'kind' => $bonusCutoff ? 'bonus-since' : 'bonus-ever', 'bonusDates' => $bonusDates, 'reason' => $reason];
     }
     if (!$held) {
         return ['eligible' => true, 'reason' => "You've never held an account with {$bank}."];
     }
     $cutoff = $offer['heldSinceCutoff'] ?? null;
+    // The still-open accounts at this bank, handed back with the reason so
+    // the recommendations can say whether CLOSING one would change anything
+    // -- it depends on the kind of rule: with a dated "held since" cutoff,
+    // closing today doesn't undo having held one since then; with a plain
+    // "can't hold an open account" rule, closing it does.
+    $openIds = array_values(array_map(fn($a) => $a['id'] ?? '', array_filter($held, fn($a) => empty($a['closeDate']))));
     foreach ($held as $a) {
         $closeDate = (string) ($a['closeDate'] ?? '');
         $stillOpen = $closeDate === '';
@@ -218,13 +236,13 @@ function offer_eligibility(array $offer, array $accounts): array {
             // "Not held an account since <cutoff>" — disqualified if still
             // open, or closed on/after the cutoff date.
             if ($stillOpen || $closeDate >= $cutoff) {
-                return ['eligible' => false, 'reason' => "Excluded: {$bank}'s own terms require no account held since " . substr($cutoff, 0, 10) . ", and you hold one " . ($stillOpen ? 'that is still open' : "closed {$closeDate}") . '.'];
+                return ['eligible' => false, 'kind' => 'cutoff', 'openIds' => $openIds, 'reason' => "Excluded: {$bank}'s own terms require no account held since " . substr($cutoff, 0, 10) . ", and you hold one " . ($stillOpen ? 'that is still open' : "closed {$closeDate}") . '.'];
             }
         } else if ($stillOpen) {
             // No dated cutoff captured from the offer's own wording — the
             // safe default is "can't hold one already", same as almost
             // every switch offer's baseline condition.
-            return ['eligible' => false, 'reason' => "You already hold an open {$bank} account — most switch offers exclude existing customers."];
+            return ['eligible' => false, 'kind' => 'open', 'openIds' => $openIds, 'reason' => "You already hold an open {$bank} account — most switch offers exclude existing customers."];
         }
     }
     return ['eligible' => true, 'reason' => "Your {$bank} account(s) closed before this offer's own exclusion window."];
@@ -237,6 +255,36 @@ function offer_eligibility(array $offer, array $accounts): array {
 // for no real benefit).
 function is_cass_ready(array $a): bool {
     return empty($a['closeDate']) && ($a['wantToKeep'] ?? null) !== true;
+}
+
+// Banks that share a banking group, as MoneySavingExpert lists them on the
+// switch-offers page ("Santander and Cahoot | HSBC and First Direct |
+// NatWest and Ulster Bank | Nationwide and Virgin Money") plus the Lloyds
+// and NatWest groups the offers' own terms name (Halifax / Bank of Scotland;
+// Royal Bank of Scotland). Keys are normalize_bank_name() output. Two rules
+// rest on it: a switch has to come from a DIFFERENT group than the one you're
+// switching into (MSE: "You must switch from a different banking group"), and
+// two offers from the same group are alternatives -- the second excludes you
+// once you've taken the first. Anything not listed is its own group.
+const BANK_GROUPS = [
+    'hsbc' => 'hsbc', 'first direct' => 'hsbc',
+    'lloyds' => 'lloyds', 'halifax' => 'lloyds', 'scotland' => 'lloyds',
+    'natwest' => 'natwest', 'royal scotland' => 'natwest', 'ulster' => 'natwest',
+    'nationwide' => 'nationwide', 'virgin money' => 'nationwide',
+    'santander' => 'santander', 'cahoot' => 'santander',
+];
+
+function bank_group(string $name): string {
+    $k = normalize_bank_name($name);
+    if ($k === '') return '';
+    if (isset(BANK_GROUPS[$k])) return BANK_GROUPS[$k];
+    // Names often arrive longer than the listed form ("HSBC UK", "Lloyds
+    // International"): match on a leading listed name, never a trailing one,
+    // so "royal scotland" can't be mistaken for "scotland".
+    foreach (BANK_GROUPS as $key => $group) {
+        if (strpos($k, $key . ' ') === 0) return $group;
+    }
+    return $k;
 }
 
 function direct_debits_on(array $a): ?int {
@@ -254,7 +302,8 @@ function offer_donor(array $accounts, array $cassParticipants, ?string $excludeB
     $candidates = [];
     foreach ($accounts as $a) {
         if (!is_cass_ready($a)) continue;
-        if ($excludeBank && bank_names_match((string) ($a['bank'] ?? ''), $excludeBank)) continue; // can't donate to/from the same bank
+        // Can't switch from the same bank -- or the same banking group.
+        if ($excludeBank && (bank_names_match((string) ($a['bank'] ?? ''), $excludeBank) || bank_group((string) ($a['bank'] ?? '')) === bank_group($excludeBank))) continue;
         $status = is_cass_participant((string) ($a['bank'] ?? ''), $cassParticipants);
         if ($status === 'no') continue; // a dead end — can't CASS away from it at all
         $dd = direct_debits_on($a);
@@ -289,18 +338,110 @@ function history_max_for_offer(array $history, string $bank, string $product): ?
     return $max;
 }
 
+// Net vs gross: the two kinds of figure these offers mention are NOT
+// interchangeable, and the profile asks for them separately.
+//   minMonthlySalary  - salary that must be PAID IN each month as a condition
+//                       of the bonus ("monthly salary payments of £2,000+").
+//                       Real money arriving in the account, so it is compared
+//                       with your NET (take-home) salary / 12.
+//   minAnnualEarnings - an "earn £X a year" threshold. That is BEFORE tax, so
+//                       it is compared with your GROSS salary when you've
+//                       given it. With only net to go on it can't be settled
+//                       either way (£75k gross is roughly £52k take-home,
+//                       less with a pension or student loan): net under half
+//                       the threshold is far below anything tax explains and
+//                       counts as a clear miss; anything between is left for
+//                       you to settle by entering your gross salary.
+// This engine used to ignore salary requirements entirely (a £10k salary was
+// still recommended Barclays Premier).
+// incomeAltRoute names a non-salary way in the offer also allows (e.g. £100k
+// saved), which this page has no way to check, so it is mentioned rather than
+// assumed either way. Returns ['fail' => reason|null, 'todo' => note|null]: a
+// clear shortfall makes the offer not eligible, an unknown or borderline one
+// becomes a highlighted to-do.
+const EARNINGS_FLOOR_RATIO = 0.5;
+
+function offer_income_check(array $offer, array $user): array {
+    $none = ['fail' => null, 'todo' => null];
+    $minMonthly = !empty($offer['minMonthlySalary']) ? (float) $offer['minMonthlySalary'] : null;
+    $minAnnual = !empty($offer['minAnnualEarnings']) ? (float) $offer['minAnnualEarnings'] : null;
+    if (!$minMonthly && !$minAnnual) return $none;
+    $alt = !empty($offer['incomeAltRoute']) ? sprintf(" (the offer also allows %s, which this page can't check)", $offer['incomeAltRoute']) : '';
+    $net = (!empty($user['annualSalaryNet']) && (float) $user['annualSalaryNet'] > 0) ? (float) $user['annualSalaryNet'] : null;
+    $gross = (!empty($user['annualSalaryGross']) && (float) $user['annualSalaryGross'] > 0) ? (float) $user['annualSalaryGross'] : null;
+
+    if ($minMonthly) {
+        if ($net === null) {
+            return ['fail' => null, 'todo' => sprintf('Needs £%s a month of salary paid in — enter your net (take-home) annual salary in the profile section above so this can be checked.', number_format($minMonthly, 0))];
+        }
+        $monthly = $net / 12;
+        if ($monthly < $minMonthly) {
+            return ['fail' => sprintf('Needs £%s a month of salary paid in; your take-home is about £%s a month.%s', number_format($minMonthly, 0), number_format($monthly, 0), $alt), 'todo' => null];
+        }
+        return $none; // the pay-in is the binding test; any "earnings" figure is just MSE's guide to it
+    }
+
+    if ($gross !== null) {
+        if ($gross < $minAnnual) {
+            return ['fail' => sprintf('Needs earnings of £%s+ a year before tax; you have given £%s.%s', number_format($minAnnual, 0), number_format($gross, 0), $alt), 'todo' => null];
+        }
+        return $none;
+    }
+    if ($net === null) {
+        return ['fail' => null, 'todo' => sprintf('Needs earnings of £%s+ a year before tax — enter your gross (before-tax) salary in the profile section above so this can be checked.', number_format($minAnnual, 0))];
+    }
+    if ($net < $minAnnual * EARNINGS_FLOOR_RATIO) {
+        return ['fail' => sprintf('Needs earnings of £%s+ a year before tax; your take-home of £%s a year is far below that.%s', number_format($minAnnual, 0), number_format($net, 0), $alt), 'todo' => null];
+    }
+    if ($net < $minAnnual) {
+        return ['fail' => null, 'todo' => sprintf("Needs earnings of £%s+ a year before tax. You've only given your take-home (£%s a year), which can't settle that either way — enter your gross (before-tax) salary in the profile section above.", number_format($minAnnual, 0), number_format($net, 0))];
+    }
+    return $none; // even take-home is at or above the pre-tax figure
+}
+
 function priority_band(float $amount): string {
     if ($amount >= 200) return 'high';
     if ($amount >= 100) return 'medium';
     return 'low';
 }
 
+// Flat-sum cashback for opening a current account at this bank through
+// TopCashback or Quidco, from the weekly scan (only "current account"
+// deals are ever stored, so another product from the same bank can't leak
+// in). A bank can list several products (Santander Edge, Edge Student...);
+// the best one per site is kept and named. Both sites can't be used for one
+// application, so these are alternatives, highest first -- and Quidco's
+// figure is its premium-member rate, which the page says so.
+function cashback_for_bank(string $bank, array $cache): array {
+    $sources = $cache['cashbackSources'] ?? [];
+    $labels = ['topcashback' => 'TopCashback', 'quidco' => 'Quidco'];
+    $best = [];
+    foreach (($cache['cashbackDeals'] ?? []) as $d) {
+        $provider = (string) ($d['provider'] ?? '');
+        if (!isset($labels[$provider]) || !bank_names_match((string) ($d['name'] ?? ''), $bank)) continue;
+        $amount = (float) ($d['amount'] ?? 0);
+        if ($amount <= 0) continue;
+        if (!isset($best[$provider]) || $amount > $best[$provider]['amount']) {
+            $best[$provider] = [
+                'provider' => $provider, 'label' => $labels[$provider], 'amount' => $amount,
+                'name' => (string) ($d['name'] ?? ''), 'url' => (string) ($sources[$provider] ?? ''),
+                'asOf' => $cache['cashbackAsOf'] ?? null,
+            ];
+        }
+    }
+    $out = array_values($best);
+    usort($out, fn($a, $b) => $b['amount'] <=> $a['amount']);
+    return $out;
+}
+
 function compute_recommendations(array $user, array $cache): array {
     $accounts = $user['accounts'] ?? [];
     $participants = $cache['cassParticipants'] ?? [];
     $history = $cache['history'] ?? [];
-    $rows = [];
 
+    // Pass 1: everything about an offer that doesn't depend on WHICH of your
+    // accounts would fund it.
+    $work = [];
     foreach (($cache['offers'] ?? []) as $offer) {
         $bank = (string) ($offer['bank'] ?? '');
         $product = (string) ($offer['product'] ?? $bank);
@@ -318,8 +459,13 @@ function compute_recommendations(array $user, array $cache): array {
         // needed" path) should set this false.
         $requiresSwitch = array_key_exists('requiresSwitch', $offer) ? (bool) $offer['requiresSwitch'] : true;
         $elig = offer_eligibility($offer, $accounts);
-        $needDD = !empty($offer['ddCount']) ? (int) $offer['ddCount'] : null;
-        $donor = $elig['eligible'] ? offer_donor($accounts, $participants, $bank, $needDD) : null;
+        // Account history can already rule an offer out; only if it hasn't
+        // does the salary check get a say (and its reason replaces nothing).
+        $income = ['fail' => null, 'todo' => null];
+        if ($elig['eligible']) {
+            $income = offer_income_check($offer, $user);
+            if ($income['fail']) $elig = ['eligible' => false, 'reason' => $income['fail']];
+        }
         $histMax = history_max_for_offer($history, $bank, $product);
         $band = priority_band($amount);
         $rationale = $elig['reason'];
@@ -333,44 +479,145 @@ function compute_recommendations(array $user, array $cache): array {
             }
             $rationale .= sprintf(' £%s, down from £%s seen%s.', number_format($amount, 0), number_format($histMax, 0), $lastSeenAt ? ' on ' . substr($lastSeenAt, 0, 10) : ' before');
         }
-        if ($elig['eligible'] && $donor) {
-            $rationale .= ' Switch from your ' . ($donor['nickname'] ?: $donor['bank']) . ' account.';
-        } else if ($elig['eligible'] && !$donor && $requiresSwitch) {
+        $work[] = [
+            'offer' => $offer, 'bank' => $bank, 'amount' => $amount,
+            'requiresSwitch' => $requiresSwitch, 'elig' => $elig,
+            'needDD' => !empty($offer['ddCount']) ? (int) $offer['ddCount'] : null,
+            'band' => $band, 'rationale' => $rationale,
+            'todo' => $income['todo'] ? [$income['todo']] : [],
+            'donor' => null, 'donorExisted' => false,
+        ];
+    }
+
+    // Pass 2: hand out the accounts you could switch away from, best offer
+    // first. A full CASS switch moves an account's Direct Debits and closes
+    // it, so ONE account can fund ONE switch -- before this, every eligible
+    // offer said "switch from your Main account", as if a single account
+    // could claim all of them. An offer that doesn't need a switch (the
+    // no-switch route) doesn't use one up.
+    //
+    // One offer per banking group: Barclays Premier and Barclays Bank Account
+    // (or HSBC's two, Lloyds', NatWest's, or HSBC + First Direct) are
+    // alternatives -- taking one excludes you from the other -- so the
+    // better-paying one wins and the rest are marked as alternatives rather
+    // than counted as extra money.
+    $pool = $accounts;
+    $groupTaken = [];
+    $order = array_keys($work);
+    usort($order, fn($i, $j) => $work[$j]['amount'] <=> $work[$i]['amount']);
+    foreach ($order as $i) {
+        if (!$work[$i]['elig']['eligible']) continue;
+        $group = bank_group($work[$i]['bank']);
+        if ($group !== '' && isset($groupTaken[$group])) {
+            $work[$i]['alternativeTo'] = $groupTaken[$group];
+            continue;
+        }
+        $donor = offer_donor($pool, $participants, $work[$i]['bank'], $work[$i]['needDD']);
+        $work[$i]['donor'] = $donor;
+        if ($donor && $work[$i]['requiresSwitch']) {
+            $usedId = $donor['id'] ?? '';
+            $pool = array_values(array_filter($pool, fn($a) => ($a['id'] ?? '') !== $usedId));
+        }
+        // This offer now stands for its whole group -- unless it still can't
+        // be claimed (a switch is needed and there's nothing to switch from).
+        if ($group !== '' && ($donor || !$work[$i]['requiresSwitch'])) {
+            $groupTaken[$group] = $work[$i]['offer']['product'] ?? $work[$i]['bank'];
+        }
+        // No donor left: was that because none ever existed for this offer,
+        // or because better offers already used them all? The advice differs.
+        if (!$donor) $work[$i]['donorExisted'] = offer_donor($accounts, $participants, $work[$i]['bank'], null) !== null;
+    }
+    // Which account is already earmarked to be switched away (and so closed)
+    // for which offer -- used below, since closing it for THAT reason may
+    // also clear what blocks an offer from the same bank.
+    $donorUse = [];
+    foreach ($work as $w) {
+        if ($w['donor'] && $w['requiresSwitch'] && $w['elig']['eligible']) $donorUse[$w['donor']['id'] ?? ''] = $w['offer']['product'] ?? $w['bank'];
+    }
+
+    // Pass 3: the rows themselves.
+    $rows = [];
+    foreach ($work as $w) {
+        $donor = $w['donor'];
+        $eligible = $w['elig']['eligible'];
+        $band = $w['band'];
+        $rationale = $w['rationale'];
+        // Things you'd have to DO to actually meet this offer's terms, kept
+        // apart from the rationale so the page can highlight them -- an
+        // offer can be eligible on paper and still need work before it pays
+        // out. Direct Debits are checked from what's on file (each account's
+        // own count vs. the number the offer wants switched in); anything
+        // the engine can't check stays in the offer's Terms rather than
+        // being guessed at.
+        $todo = $w['todo'];
+        $alternativeTo = $w['alternativeTo'] ?? null;
+        if ($eligible && $alternativeTo) {
+            $band = 'alt';
+            $rationale .= sprintf(' This is an alternative to %s from the same banking group — taking one rules you out of the other, and that one pays more, so only one counts.', $alternativeTo);
+            $todo = []; // nothing to do for an offer you wouldn't take
+        } elseif ($eligible && $donor) {
+            $name = (($donor['nickname'] ?? '') ?: ($donor['bank'] ?? ''));
+            $rationale .= ' Switch from your ' . $name . ' account.';
+            if ($w['needDD']) {
+                $have = direct_debits_on($donor);
+                if ($have === null) {
+                    $todo[] = sprintf("Needs %d+ Direct Debits switched in, and you haven't said how many your %s account has — add that to the account so this can be checked.", $w['needDD'], $name);
+                } elseif ($have < $w['needDD']) {
+                    $short = $w['needDD'] - $have;
+                    $todo[] = sprintf('Needs %d+ Direct Debits switched in, but your %s account has %d — find %d more Direct Debit%s to move across.', $w['needDD'], $name, $have, $short, $short === 1 ? '' : 's');
+                }
+            }
+        } elseif ($eligible && $w['requiresSwitch']) {
             $band = 'blocked';
-            $rationale .= " This needs a CASS switch from an existing account, and you don't have a CASS-ready one on file yet — add an account you're open to switching away from to make this claimable.";
-        } else if ($elig['eligible'] && !$donor && !$requiresSwitch) {
+            $rationale .= $w['donorExisted']
+                ? " Your other accounts that can be switched away from are already lined up for better offers above — a full switch moves an account's Direct Debits and closes it, so each can fund only one. This one needs another account to switch from."
+                : " This needs a CASS switch from an existing account, and you don't have one on file that can be switched from yet — add an account you're open to switching away from to make this claimable.";
+        } elseif ($eligible) {
             $rationale .= ' No switch needed for this one — you can open it fresh (check the conditions for the exact non-switch route).';
         }
-        // Things you'd have to DO to actually meet this offer's terms,
-        // kept apart from the rationale so the page can highlight them --
-        // an offer can be eligible on paper and still need work before it
-        // pays out. Direct Debits are the one the engine can check from
-        // what's on file (each account's own count vs. the number the
-        // offer wants switched in); anything it can't check stays in the
-        // offer's Terms rather than being guessed at.
-        $todo = [];
-        if ($elig['eligible'] && $donor && $needDD) {
-            $name = $donor['nickname'] ?: $donor['bank'];
-            $have = direct_debits_on($donor);
-            if ($have === null) {
-                $todo[] = sprintf("Needs %d+ Direct Debits switched in, and you haven't said how many your %s account has — add that to the account so this can be checked.", $needDD, $name);
-            } elseif ($have < $needDD) {
-                $short = $needDD - $have;
-                $todo[] = sprintf('Needs %d+ Direct Debits switched in, but your %s account has %d — find %d more Direct Debit%s to move across.', $needDD, $name, $have, $short, $short === 1 ? '' : 's');
+        // The third kind of opportunity, after "switch" and "get another
+        // account to switch from": offers structured as "no account (or
+        // bonus) since / on <date>", which banks re-issue with the date moved
+        // forward. Against such a rule, closing an account NOW doesn't undo
+        // having held it on that date, so it never qualifies you for THIS
+        // version -- but it is the step that lets a LATER version's cutoff
+        // pass you by, and a switch away closes it anyway. Deliberately not
+        // offered for a plain undated "no open account" rule, and never
+        // worded as closing "clearing" anything today.
+        $ideas = [];
+        $kind = $w['elig']['kind'] ?? '';
+        $datePhrase = $kind === 'cutoff' ? 'since ' . substr((string) ($w['offer']['heldSinceCutoff'] ?? ''), 0, 10)
+            : ($kind === 'open' && !empty($w['offer']['heldRuleText']) ? (string) $w['offer']['heldRuleText'] : '');
+        if (!$eligible && $datePhrase !== '' && !empty($w['elig']['openIds'])) {
+            $open = array_values(array_filter($accounts, fn($a) => in_array($a['id'] ?? '', $w['elig']['openIds'], true)));
+            $keeping = count(array_filter($open, fn($a) => ($a['wantToKeep'] ?? null) === true)) > 0;
+            $closingFor = [];
+            foreach ($open as $a) {
+                if (isset($donorUse[$a['id'] ?? ''])) $closingFor[] = $donorUse[$a['id']];
             }
+            $alsoCloses = $closingFor ? sprintf(' Switching it away for %s already closes it, so this could follow that.', implode(' / ', array_unique($closingFor))) : '';
+            $keepNote = $keeping ? sprintf(" You've marked it Keep, so only if the £%s is worth giving it up.", number_format($w['amount'], 0)) : '';
+            $ideas[] = sprintf("This offer excludes anyone who held a %s account %s, so closing yours now won't qualify you for this version — but closing it is the step that makes a later version possible, as banks move these dates forward.%s%s", $w['bank'], $datePhrase, $alsoCloses, $keepNote);
+        } elseif (!$eligible && $kind === 'bonus-since' && !empty($w['elig']['bonusDates'])) {
+            $latest = max($w['elig']['bonusDates']);
+            $ideas[] = sprintf("The %s bonus you recorded (%s) falls inside this version's window (bonuses since %s). A later version of this offer with a cutoff after %s would let you back in — worth re-checking when it's refreshed.", $w['bank'], substr($latest, 0, 10), substr((string) ($w['offer']['bonusSinceCutoff'] ?? ''), 0, 10), substr($latest, 0, 10));
         }
         $rows[] = [
-            'bank' => $bank,
-            'product' => $offer['product'] ?? $bank,
+            'bank' => $w['bank'],
+            'product' => $w['offer']['product'] ?? $w['bank'],
             'action' => $donor ? 'switch' : 'open',
             'fromAccountId' => $donor['id'] ?? null,
-            'amount' => $amount,
-            'eligible' => $elig['eligible'],
-            'priority' => $elig['eligible'] ? $band : 'n/a',
+            'amount' => $w['amount'],
+            'eligible' => $eligible,
+            'needsSwitch' => $eligible && $w['requiresSwitch'] && !$alternativeTo,
+            'alternativeTo' => $alternativeTo,
+            'priority' => $eligible ? $band : 'n/a',
             'todo' => $todo,
+            'ideas' => $ideas,
+            'cashback' => ($eligible && !$alternativeTo) ? cashback_for_bank($w['bank'], $cache) : [],
             'rationale' => trim($rationale),
-            'url' => $offer['url'] ?? '',
-            'conditions' => $offer['conditions'] ?? '',
+            'url' => $w['offer']['url'] ?? '',
+            'conditions' => $w['offer']['conditions'] ?? '',
         ];
     }
 
@@ -384,6 +631,46 @@ function compute_recommendations(array $user, array $cache): array {
         return $b['amount'] <=> $a['amount'];
     });
     return $rows;
+}
+
+// How many of the eligible switch offers you can actually claim with the
+// accounts you have, and what to do about the rest. Read off the finished
+// rows (each carries its donor) so it can never disagree with them. Null
+// when there's nothing switch-shaped to talk about.
+function compute_plan(array $rows, array $accounts): ?array {
+    $names = [];
+    foreach ($accounts as $a) $names[$a['id'] ?? ''] = (($a['nickname'] ?? '') ?: ($a['bank'] ?? ''));
+    $assigned = [];
+    $waiting = [];
+    foreach ($rows as $r) {
+        if (empty($r['needsSwitch'])) continue;
+        if (!empty($r['fromAccountId'])) $assigned[] = $r; else $waiting[] = $r;
+    }
+    if (!$assigned && !$waiting) return null;
+    $lines = [];
+    foreach ($assigned as $r) {
+        $lines[] = sprintf('%s (£%s) — switch from your %s account', $r['product'], number_format($r['amount'], 0), $names[$r['fromAccountId']] ?? 'spare');
+    }
+    $assignedTotal = array_sum(array_column($assigned, 'amount'));
+    if ($assigned) {
+        $headline = sprintf('You can claim %d of these with the account%s you have to switch away from: £%s in total.', count($assigned), count($assigned) === 1 ? '' : 's', number_format($assignedTotal, 0));
+    } else {
+        $headline = "None of these can be claimed yet — you have no account on file that can be switched away from.";
+    }
+    $howTo = [];
+    if ($waiting) {
+        $waitingTotal = array_sum(array_column($waiting, 'amount'));
+        $plural = count($waiting) === 1 ? '' : 's';
+        $lines[] = $assigned
+            ? sprintf('%d more eligible offer%s (£%s in total) %s no account left to switch from.', count($waiting), $plural, number_format($waitingTotal, 0), count($waiting) === 1 ? 'has' : 'have')
+            : sprintf('%d offer%s (£%s in total) %s waiting for an account to switch from.', count($waiting), $plural, number_format($waitingTotal, 0), count($waiting) === 1 ? 'is' : 'are');
+        $howTo = [
+            "Open another current account with a bank that's in CASS (the CASS map tab shows which of your banks are) and move the Direct Debits that offer needs onto it, then switch from that one. Each extra account you can switch away from is one more switch.",
+            "Or take them in turn: once a switch has paid out and you've met its conditions (some need pay-ins for several months), the account you switched INTO can be the next one you switch away from.",
+            "Check each offer's Terms first — they can bar switching from the same banking group, and every new account application can leave a mark on your credit file.",
+        ];
+    }
+    return ['headline' => $headline, 'lines' => $lines, 'waiting' => count($waiting), 'howTo' => $howTo];
 }
 
 // Krak "Salary Match", per Krak's own help page (see the cache's
@@ -409,6 +696,8 @@ function compute_krak_row(array $user, array $cache): array {
         'eligible' => true,
         'priority' => 'low',
         'todo' => [],
+        'ideas' => [],
+        'cashback' => [],
         'rationale' => '',
         'url' => 'https://support.krak.app/articles/krak-salary-match',
         'conditions' => sprintf(
@@ -679,7 +968,7 @@ if ($action === 'redeem' && $method === 'POST') {
             $user = [
                 'id' => bin2hex(random_bytes(8)),
                 'email' => '', 'createdAt' => $now, 'lastSeenAt' => $now,
-                'annualSalaryNet' => null, 'assumedBalance' => null, 'accounts' => [],
+                'annualSalaryNet' => null, 'annualSalaryGross' => null, 'assumedBalance' => null, 'accounts' => [],
             ];
             $doc['users'][] = $user;
             $found['userId'] = $user['id'];
@@ -735,9 +1024,11 @@ if (!$user) fail(401, 'Bad or missing invite token');
 
 if ($action === 'me' && $method === 'GET') {
     $cache = read_doc($CACHE_FILE, $EMPTY_CACHE);
+    $recommendations = compute_recommendations($user, $cache);
     echo json_encode([
         'user' => sanitize_user($user),
-        'recommendations' => compute_recommendations($user, $cache),
+        'recommendations' => $recommendations,
+        'plan' => compute_plan($recommendations, $user['accounts'] ?? []),
         'cassGrid' => compute_cass_grid($user, $cache),
         'cacheAsOf' => $cache['scrapedAt'] ?? null,
     ]);
@@ -750,6 +1041,7 @@ if ($action === 'update-profile' && $method === 'POST') {
         foreach ($doc['users'] as &$u) {
             if ($u['id'] !== $userId) continue;
             if (array_key_exists('annualSalaryNet', $body)) $u['annualSalaryNet'] = $body['annualSalaryNet'] === null || $body['annualSalaryNet'] === '' ? null : (float) $body['annualSalaryNet'];
+            if (array_key_exists('annualSalaryGross', $body)) $u['annualSalaryGross'] = $body['annualSalaryGross'] === null || $body['annualSalaryGross'] === '' ? null : (float) $body['annualSalaryGross'];
             if (array_key_exists('assumedBalance', $body)) $u['assumedBalance'] = $body['assumedBalance'] === null || $body['assumedBalance'] === '' ? null : (float) $body['assumedBalance'];
             if (array_key_exists('email', $body)) $u['email'] = trim((string) $body['email']);
             $u['lastSeenAt'] = gmdate('c');

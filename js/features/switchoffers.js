@@ -281,11 +281,33 @@ return { eligible: 'no', reasoning: `You already hold an open ${bank} account â€
 return { eligible: 'yes', reasoning: `Your ${bank} account(s) closed before this offer's own exclusion window.` };
 }
 
+// Banks that share a banking group, as MoneySavingExpert lists them
+// ("You must switch from a different banking group"): mirrors BANK_GROUPS
+// in server-switchadvisor/switchadvisor.php, keys are normalizeBankName()
+// output. Without it a switch into First Direct could be suggested FROM
+// your HSBC account, which the offer doesn't allow.
+const BANK_GROUPS = {
+hsbc: 'hsbc', 'first direct': 'hsbc',
+lloyds: 'lloyds', halifax: 'lloyds', scotland: 'lloyds',
+natwest: 'natwest', 'royal scotland': 'natwest', ulster: 'natwest',
+nationwide: 'nationwide', 'virgin money': 'nationwide',
+santander: 'santander', cahoot: 'santander',
+};
+function bankGroup(name) {
+const k = normalizeBankName(name);
+if (!k) return '';
+if (BANK_GROUPS[k]) return BANK_GROUPS[k];
+// A leading listed name, never a trailing one, so "royal scotland" can't
+// be mistaken for "scotland".
+for (const [key, group] of Object.entries(BANK_GROUPS)) if (k.startsWith(`${key} `)) return group;
+return k;
+}
+
 function offerDonor(excludeBank, participants) {
 let best = null;
 for (const a of data.financeAccounts) {
 if (a.closeDate || a.stage !== 'CASS-ready') continue;
-if (bankNamesMatch(a.bank, excludeBank)) continue;
+if (bankNamesMatch(a.bank, excludeBank) || bankGroup(a.bank) === bankGroup(excludeBank)) continue;
 const status = isCassParticipant(a.bank, participants);
 if (status === 'no') continue;
 best = a;

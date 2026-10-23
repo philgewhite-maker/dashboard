@@ -27,13 +27,19 @@
     <details class="profile-details">
       <summary>Your profile (for the Kraken estimate)</summary>
       <form id="profile-form" class="profile-form">
-        <label>Net salary (annual) <input type="number" id="profile-salary" name="annualSalaryNet" min="0" step="100"></label>
+        <label>Take-home salary per year, after tax <input type="number" id="profile-salary" name="annualSalaryNet" min="0" step="100">
+          <span class="muted">What actually lands in your account. Used for offers that need a monthly salary paid in, and for the Krak estimate.</span>
+        </label>
+        <label>Salary per year before tax (optional) <input type="number" id="profile-gross" name="annualSalaryGross" min="0" step="100">
+          <span class="muted">Only needed for offers that say "earn £X a year" (the Premier accounts). Without it those can only be roughly checked.</span>
+        </label>
         <label>Assumed balance held <input type="number" id="profile-balance" name="assumedBalance" min="0" step="100" placeholder="defaults to 2 months' net salary"></label>
         <label>Email (optional, for alerts) <input type="email" id="profile-email" name="email"></label>
         <button class="sync-btn sm inline" type="submit">Save</button>
         <span id="profile-status" class="muted"></span>
       </form>
     </details>
+    <div id="rec-plan"></div>
     <div id="rec-list"></div>
   </section>
 

@@ -52,6 +52,13 @@ require $configFile;
 $ANTHROPIC_MODEL = 'claude-sonnet-5-5';
 $MSE_SWITCH_URL = 'https://www.moneysavingexpert.com/banking/compare-best-bank-accounts/#switch';
 $CASS_LIST_URL = 'https://www.currentaccountswitch.co.uk/banks-building-societies/';
+// "Current account" searches on both cashback sites. Bank deals are flat
+// sums ("£25"), not percentages, so the dashboard's own rate parser
+// (js/cashback.js) can't read them, and bank merchant pages sit at
+// addresses that can't be guessed (/first-direct/ and /santander/ both
+// missed); one search per site lists every current-account deal together.
+$TOPCASHBACK_SEARCH_URL = 'https://www.topcashback.co.uk/search/merchants/?s=current%20account';
+$QUIDCO_SEARCH_URL = 'https://www.quidco.com/search/?search=current%20account';
 
 // Same path switchadvisor.php's own $CACHE_FILE points at — MUST match.
 $CACHE_FILE = dirname(__DIR__) . '/switchadvisor-cache.json';
@@ -203,7 +210,7 @@ if ($COMMANDS_URL === '' || strpos($COMMANDS_URL, 'yourdomain') !== false) fail(
 if ($COMMANDS_SECRET === '' || strpos($COMMANDS_SECRET, 'PUT-') === 0) fail(500, 'Server not configured: set $COMMANDS_SECRET');
 if ($ANTHROPIC_API_KEY === '' || strpos($ANTHROPIC_API_KEY, 'PUT-') === 0) fail(500, 'Server not configured: set $ANTHROPIC_API_KEY');
 
-$urls = ['mse' => $MSE_SWITCH_URL, 'cass' => $CASS_LIST_URL];
+$urls = ['mse' => $MSE_SWITCH_URL, 'cass' => $CASS_LIST_URL, 'tcb' => $TOPCASHBACK_SEARCH_URL, 'quidco' => $QUIDCO_SEARCH_URL];
 if ($KRAKEN_TERMS_URL !== '') $urls['kraken'] = $KRAKEN_TERMS_URL;
 
 $pages = fetch_pages($COMMANDS_URL, $COMMANDS_SECRET, $urls);
@@ -231,7 +238,66 @@ $switchText = extract_section($mseHtml, 'switch', 16000);
 $cassHtml = rendered_html($pages['cass'] ?? null);
 $cassParticipants = $cassHtml !== '' ? extract_cass_participants($cassHtml) : [];
 
-$prompt = "Below is text pasted from MoneySavingExpert's bank switch-offers page. Extract every current switch bonus for opening a NEW account (ignore the 'ongoing cashback & perks for accounts you keep' section if present).\n\nPAGE TEXT:\n{$switchText}\n\nReturn ONLY a JSON object, no other text, no markdown fences:\n{\"offers\": [{\"bank\": \"short display name, e.g. 'Barclays' or 'HSBC'\", \"product\": \"the account's own name, e.g. 'Barclays Bank Account' or 'HSBC Premier'\", \"amount\": numeric total cash value in GBP, \"conditions\": \"one or two sentences summarising the real requirements\", \"minFunding\": numeric minimum pay-in/deposit in GBP or null, \"ddCount\": minimum direct debits required or null, \"heldSinceCutoff\": \"YYYY-MM-DD if the offer states an EXACT dated cutoff for 'no ACCOUNT HELD since <date>' (about holding an account), otherwise null\", \"bonusSinceCutoff\": \"YYYY-MM-DD if the offer states an EXACT dated cutoff for 'no previous SWITCH BONUS since <date>' (about having RECEIVED a bonus before, a DIFFERENT condition from account-holding — e.g. Lloyds' own 'no previous switch bonus from Lloyds... since 1 Jan 2023'), otherwise null if the exclusion is unconditional ('no previous bonus', no date at all) — never guess a year that wasn't actually stated for either field, and never conflate the two: an account-holding cutoff and a bonus-receipt cutoff are not the same thing even when they share the same date\", \"requiresSwitch\": true unless the offer's own text states a genuine no-switch alternative (e.g. 'OR have £100k+ saved/invested, no switch needed') — true for almost all of these, since they are switch bonuses by definition, \"highEarner\": true if this specifically needs a high salary/savings tier (e.g. a Premier account), else false}]}";
+// ---- Cashback deals ---------------------------------------------------------
+// Plain text split on tags, so a deal reads as a short run of tokens
+// ("first direct", "Current Account", "£25 Cashback") rather than markup.
+function html_to_tokens(string $html): array {
+    $html = preg_replace('/(?is)<(script|style|noscript|svg)[^>]*>.*?<\/\1>/', ' ', $html) ?? $html;
+    $text = preg_replace('/(?s)<[^>]+>/', '|', $html) ?? $html;
+    $text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    return array_values(array_filter(array_map('trim', explode('|', $text)), fn($p) => $p !== ''));
+}
+
+// Quidco lists "<name> | Earn | £20 | cashback". Its page says all rates shown
+// are the PREMIUM-member rate, which the recommendations repeat.
+function parse_quidco_deals(array $t): array {
+    $deals = [];
+    for ($i = 1; $i + 2 < count($t); $i++) {
+        if ($t[$i] !== 'Earn' || strtolower($t[$i + 2]) !== 'cashback') continue;
+        if (!preg_match('/^£(\d+(?:\.\d+)?)$/u', $t[$i + 1], $m)) continue;
+        $name = $t[$i - 1];
+        if (stripos($name, 'current account') === false) continue;
+        $deals[] = ['provider' => 'quidco', 'name' => $name, 'amount' => (float) $m[1]];
+    }
+    return $deals;
+}
+
+// TopCashback splits the name across elements ("first direct", "Current
+// Account", a badge, then "£25 Cashback"), so a deal is everything since the
+// previous deal's amount. Results run from the column header to "You may also
+// be interested in", after which come OTHER merchants (confirmed on the live
+// page: "NatWest Rooster Money £7") that must not be read as bank deals.
+function parse_topcashback_deals(array $t): array {
+    $deals = [];
+    $from = array_search('Highest %', $t, true);
+    $from = $from === false ? 0 : $from + 1;
+    $to = count($t);
+    foreach ($t as $i => $tok) {
+        if (stripos($tok, 'You may also be interested') === 0) { $to = $i; break; }
+    }
+    $name = [];
+    for ($i = $from; $i < $to; $i++) {
+        $tok = $t[$i];
+        if (preg_match('/^£(\d+(?:\.\d+)?) Cashback$/iu', $tok, $m)) {
+            $amount = (float) $m[1];
+            $full = trim(implode(' ', $name));
+            $name = [];
+            if (stripos($full, 'current account') !== false) $deals[] = ['provider' => 'topcashback', 'name' => $full, 'amount' => $amount];
+            continue;
+        }
+        if (stripos($tok, 'Exclusive Offer') === 0 || $tok === 'Popularity') continue;
+        $name[] = $tok;
+    }
+    return $deals;
+}
+
+$cashbackDeals = [];
+$tcbHtml = rendered_html($pages['tcb'] ?? null);
+if ($tcbHtml !== '') $cashbackDeals = array_merge($cashbackDeals, parse_topcashback_deals(html_to_tokens($tcbHtml)));
+$quidcoHtml = rendered_html($pages['quidco'] ?? null);
+if ($quidcoHtml !== '') $cashbackDeals = array_merge($cashbackDeals, parse_quidco_deals(html_to_tokens($quidcoHtml)));
+
+$prompt = "Below is text pasted from MoneySavingExpert's bank switch-offers page. Extract every current switch bonus for opening a NEW account (ignore the 'ongoing cashback & perks for accounts you keep' section if present).\n\nPAGE TEXT:\n{$switchText}\n\nReturn ONLY a JSON object, no other text, no markdown fences:\n{\"offers\": [{\"bank\": \"short display name, e.g. 'Barclays' or 'HSBC'\", \"product\": \"the account's own name, e.g. 'Barclays Bank Account' or 'HSBC Premier'\", \"amount\": numeric total cash value in GBP, \"conditions\": \"one or two sentences summarising the real requirements\", \"minFunding\": numeric minimum pay-in/deposit in GBP or null, \"ddCount\": minimum direct debits required or null, \"heldSinceCutoff\": \"YYYY-MM-DD if the offer states an EXACT dated cutoff for 'no ACCOUNT HELD since <date>' (about holding an account), otherwise null\", \"bonusSinceCutoff\": \"YYYY-MM-DD if the offer states an EXACT dated cutoff for 'no previous SWITCH BONUS since <date>' (about having RECEIVED a bonus before, a DIFFERENT condition from account-holding — e.g. Lloyds' own 'no previous switch bonus from Lloyds... since 1 Jan 2023'), otherwise null if the exclusion is unconditional ('no previous bonus', no date at all) — never guess a year that wasn't actually stated for either field, and never conflate the two: an account-holding cutoff and a bonus-receipt cutoff are not the same thing even when they share the same date\", \"heldRuleText\": \"the date phrase, exactly as the offer words it, when it excludes people by holding an account on/before/after a date but gives NO full date with a year (e.g. 'on or before 1 Oct', 'on 6 May', 'on or after 2 Sep'), otherwise null — leave null whenever heldSinceCutoff already carries the date\", \"minMonthlySalary\": numeric GBP of SALARY or earnings that must be PAID INTO THE ACCOUNT EACH MONTH as a condition of getting the bonus itself (e.g. 'monthly salary payments of £2,000+', 'monthly salary of £5,000+'), otherwise null — never a one-off deposit, never an amount that only avoids a monthly fee, \"minAnnualEarnings\": numeric GBP yearly earnings the offer states as an eligibility requirement (e.g. 'Earn £75,000+ a year'), otherwise null, \"incomeAltRoute\": a short phrase for any way to qualify that does NOT depend on salary (e.g. '£100,000+ saved/invested'), otherwise null, \"requiresSwitch\": true unless the offer's own text states a genuine no-switch alternative (e.g. 'OR have £100k+ saved/invested, no switch needed') — true for almost all of these, since they are switch bonuses by definition, \"highEarner\": true if this specifically needs a high salary/savings tier (e.g. a Premier account), else false}]}";
 
 $ai = call_anthropic($ANTHROPIC_API_KEY, $ANTHROPIC_MODEL, $prompt, 16000);
 if (!$ai['ok']) fail(502, 'AI extraction failed: ' . $ai['error']);
@@ -271,7 +337,7 @@ $lock = fopen($CACHE_FILE . '.lock', 'c');
 if ($lock === false) fail(500, 'Could not open lock file — check directory permissions');
 flock($lock, LOCK_EX);
 
-$current = ['scrapedAt' => null, 'history' => [], 'offers' => [], 'cassParticipants' => [], 'cashbackRates' => [], 'krakTiers' => [], 'krakSalaryMin' => null, 'krakSalaryCap' => null, 'krakTiersAsOf' => null, 'krakTiersSource' => null];
+$current = ['scrapedAt' => null, 'history' => [], 'offers' => [], 'cassParticipants' => [], 'cashbackRates' => [], 'krakTiers' => [], 'krakSalaryMin' => null, 'krakSalaryCap' => null, 'krakTiersAsOf' => null, 'krakTiersSource' => null, 'cashbackDeals' => [], 'cashbackAsOf' => null, 'cashbackSources' => []];
 if (is_file($CACHE_FILE)) {
     $raw = file_get_contents($CACHE_FILE);
     $parsed = $raw !== false && $raw !== '' ? json_decode($raw, true) : null;
@@ -294,6 +360,11 @@ $next = [
     'offers' => $offers,
     'cassParticipants' => $cassParticipants ?: ($current['cassParticipants'] ?? []),
     'cashbackRates' => $current['cashbackRates'] ?? [],
+    // Kept as-is when this scan found none (a site changed its markup, or
+    // its page didn't come back) rather than blanked.
+    'cashbackDeals' => $cashbackDeals ?: ($current['cashbackDeals'] ?? []),
+    'cashbackAsOf' => $cashbackDeals ? $now : ($current['cashbackAsOf'] ?? null),
+    'cashbackSources' => ['topcashback' => $TOPCASHBACK_SEARCH_URL, 'quidco' => $QUIDCO_SEARCH_URL],
     'krakTiers' => $krakTiers ?? ($current['krakTiers'] ?? []),
     'krakSalaryMin' => $krakTiers ? ($krakSalaryMin ?? ($current['krakSalaryMin'] ?? null)) : ($current['krakSalaryMin'] ?? null),
     'krakSalaryCap' => $krakTiers ? ($krakSalaryCap ?? ($current['krakSalaryCap'] ?? null)) : ($current['krakSalaryCap'] ?? null),
@@ -311,4 +382,4 @@ rename($tmp, $CACHE_FILE);
 flock($lock, LOCK_UN);
 fclose($lock);
 
-echo json_encode(['ok' => true, 'offersFound' => count($offers), 'cassParticipantsFound' => count($cassParticipants), 'krakTiersScraped' => (bool) $krakTiers, 'scrapedAt' => $now]);
+echo json_encode(['ok' => true, 'offersFound' => count($offers), 'cassParticipantsFound' => count($cassParticipants), 'krakTiersScraped' => (bool) $krakTiers, 'cashbackDealsFound' => count($cashbackDeals), 'scrapedAt' => $now]);
