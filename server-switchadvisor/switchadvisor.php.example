@@ -542,6 +542,11 @@ function clean_bank_display_name(string $raw): string {
                 $cased = mb_strtoupper(mb_substr($core, 0, 1)) . mb_strtolower(mb_substr($core, 1));
             }
             $out .= $pre . $cased . $post;
+        } elseif (preg_match('/[a-zA-Z]/', $tok)) {
+            // Hyphenated ("co-operative"): the pattern above only takes a
+            // single run of letters, so this would otherwise be left
+            // lowercase. Capitalise the first letter only -> "Co-operative".
+            $out .= mb_strtoupper(mb_substr($tok, 0, 1)) . mb_strtolower(mb_substr($tok, 1));
         } else {
             $out .= $tok; // punctuation-only token (e.g. a bare "&")
         }
@@ -558,14 +563,27 @@ if ($action === 'banklist') {
         array_map(fn($o) => (string) $o['bank'], $cache['offers'] ?? []),
         array_map('clean_bank_display_name', $cache['cassParticipants'] ?? [])
     );
+    // Exact match on a key, NOT bank_names_match()'s substring test: that
+    // is right for eligibility (does your "HSBC" account count as the
+    // offer's HSBC?) but wrong for a picker -- it folded "Royal Bank of
+    // Scotland" into "Bank of Scotland", two different banks in different
+    // groups, so RBS vanished from the list. This key only drops generic
+    // suffixes (UK / Private / International) and parentheticals, so
+    // "HSBC UK Bank", "HSBC Private Bank" and "HSBC (Channel Islands...)"
+    // still collapse into "HSBC".
+    $listKey = function (string $n): string {
+        $k = normalize_bank_name($n);
+        $k = preg_replace('/\b(uk|private|international)\b/', ' ', $k) ?? $k;
+        return trim(preg_replace('/\s+/', ' ', $k) ?? $k);
+    };
     $names = [];
+    $seenKeys = [];
     foreach ($candidates as $name) {
         if ($name === '') continue;
-        $isDuplicate = false;
-        foreach ($names as $existing) {
-            if (bank_names_match($existing, $name)) { $isDuplicate = true; break; }
-        }
-        if (!$isDuplicate) $names[] = $name;
+        $key = $listKey($name);
+        if ($key === '' || isset($seenKeys[$key])) continue;
+        $seenKeys[$key] = true;
+        $names[] = $name;
     }
     sort($names, SORT_FLAG_CASE | SORT_STRING);
     echo json_encode(['banks' => $names]);

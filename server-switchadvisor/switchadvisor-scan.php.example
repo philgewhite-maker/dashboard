@@ -208,17 +208,28 @@ if ($KRAKEN_TERMS_URL !== '') $urls['kraken'] = $KRAKEN_TERMS_URL;
 
 $pages = fetch_pages($COMMANDS_URL, $COMMANDS_SECRET, $urls);
 
-$msePage = $pages['mse'] ?? null;
-if (!$msePage || ($msePage['status'] ?? '') !== 'done' || empty($msePage['result']['html'])) {
-    fail(502, 'Could not fetch the MSE switch-offers page via the home agent — is it running? (' . ($msePage['error'] ?? 'no result') . ') [debug: ' . ($GLOBALS['__last_commands_call_debug'] ?? 'no calls made') . ']');
+// page.render answers {pages: [{url, status, html}]} -- one entry per URL
+// asked for, so one here. Reading result.html directly was the bug that
+// made every scan report "no result" even though all the pages had come
+// back fine (the debug output showed the jobs "done" with the HTML in
+// result.pages[0]); the dashboard's own JS reads it the same way, as
+// `const { pages } = await run('page.render', ...)`.
+function rendered_html($job): string {
+    if (!is_array($job) || ($job['status'] ?? '') !== 'done') return '';
+    $page = $job['result']['pages'][0] ?? null;
+    return is_array($page) ? (string) ($page['html'] ?? '') : '';
 }
-$switchText = extract_section((string) $msePage['result']['html'], 'switch', 16000);
 
-$cassPage = $pages['cass'] ?? null;
-$cassParticipants = [];
-if ($cassPage && ($cassPage['status'] ?? '') === 'done' && !empty($cassPage['result']['html'])) {
-    $cassParticipants = extract_cass_participants((string) $cassPage['result']['html']);
+$mseHtml = rendered_html($pages['mse'] ?? null);
+if ($mseHtml === '') {
+    $mseJob = $pages['mse'] ?? null;
+    $why = is_array($mseJob) ? ($mseJob['error'] ?? ($mseJob['result']['pages'][0]['error'] ?? ('job status ' . ($mseJob['status'] ?? 'unknown') . ', no HTML in the result'))) : 'the job never finished in time';
+    fail(502, 'Could not fetch the MSE switch-offers page via the home agent — is it running? (' . $why . ') [debug: ' . ($GLOBALS['__last_commands_call_debug'] ?? 'no calls made') . ']');
 }
+$switchText = extract_section($mseHtml, 'switch', 16000);
+
+$cassHtml = rendered_html($pages['cass'] ?? null);
+$cassParticipants = $cassHtml !== '' ? extract_cass_participants($cassHtml) : [];
 
 $prompt = "Below is text pasted from MoneySavingExpert's bank switch-offers page. Extract every current switch bonus for opening a NEW account (ignore the 'ongoing cashback & perks for accounts you keep' section if present).\n\nPAGE TEXT:\n{$switchText}\n\nReturn ONLY a JSON object, no other text, no markdown fences:\n{\"offers\": [{\"bank\": \"short display name, e.g. 'Barclays' or 'HSBC'\", \"product\": \"the account's own name, e.g. 'Barclays Bank Account' or 'HSBC Premier'\", \"amount\": numeric total cash value in GBP, \"conditions\": \"one or two sentences summarising the real requirements\", \"minFunding\": numeric minimum pay-in/deposit in GBP or null, \"ddCount\": minimum direct debits required or null, \"heldSinceCutoff\": \"YYYY-MM-DD if the offer states an EXACT dated cutoff for 'no ACCOUNT HELD since <date>' (about holding an account), otherwise null\", \"bonusSinceCutoff\": \"YYYY-MM-DD if the offer states an EXACT dated cutoff for 'no previous SWITCH BONUS since <date>' (about having RECEIVED a bonus before, a DIFFERENT condition from account-holding — e.g. Lloyds' own 'no previous switch bonus from Lloyds... since 1 Jan 2023'), otherwise null if the exclusion is unconditional ('no previous bonus', no date at all) — never guess a year that wasn't actually stated for either field, and never conflate the two: an account-holding cutoff and a bonus-receipt cutoff are not the same thing even when they share the same date\", \"requiresSwitch\": true unless the offer's own text states a genuine no-switch alternative (e.g. 'OR have £100k+ saved/invested, no switch needed') — true for almost all of these, since they are switch bonuses by definition, \"highEarner\": true if this specifically needs a high salary/savings tier (e.g. a Premier account), else false}]}";
 
@@ -231,9 +242,9 @@ unset($o);
 $krakTiers = null;
 $krakSalaryMin = null;
 $krakSalaryCap = null;
-$krakenPage = $pages['kraken'] ?? null;
-if ($krakenPage && ($krakenPage['status'] ?? '') === 'done' && !empty($krakenPage['result']['html'])) {
-    $krakText = strip_html_to_text((string) $krakenPage['result']['html']);
+$krakHtml = rendered_html($pages['kraken'] ?? null);
+if ($krakHtml !== '') {
+    $krakText = strip_html_to_text($krakHtml);
     // Krak's reward is a percentage of each SALARY PAYMENT -- the average
     // balance only picks which percentage. An earlier version of this
     // prompt asked for an "annual percent", which baked the wrong model
