@@ -787,6 +787,7 @@ function compute_salary_plan(array $rows): ?array {
 // PATH_LOCK_MONTHS after the switch; real timing is in each offer's terms.
 const PATH_LOCK_MONTHS = 2;
 const PATH_MAX_NEW_DONORS = 3;
+const PATH_MIN_SIDE_QUEST = 50; // a donor account must add at least this to be offered
 
 function path_month_label(int $m, string $today): string {
     $d = new DateTimeImmutable(substr($today, 0, 7) . '-01');
@@ -799,7 +800,7 @@ function path_deadline_month(?string $date, string $today): ?int {
     return ((int) $mm[1] - (int) substr($today, 0, 4)) * 12 + ((int) $mm[2] - (int) substr($today, 5, 2)) + 1;
 }
 
-function simulate_year_path(array $cands, array $existing, int $newCount, float $krak, string $order): array {
+function simulate_year_path(array $cands, array $existing, array $donorSpecs, int $newCount, float $krak, string $order): array {
     $H = SALARY_HORIZON_MONTHS;
     usort($cands, function ($a, $b) use ($order) {
         if ($order === 'deadline') {
@@ -807,18 +808,25 @@ function simulate_year_path(array $cands, array $existing, int $newCount, float 
             $db = $b['deadline'] ?? 999;
             if ($da !== $db) return $da <=> $db;
         }
-        return $b['amount'] <=> $a['amount'];
+        return ($b['amount'] + $b['cashback']) <=> ($a['amount'] + $a['cashback']);
     });
     $donors = $existing;
     for ($i = 1; $i <= $newCount; $i++) {
-        $donors[] = ['label' => 'new donor account ' . $i, 'group' => '', 'from' => 1, 'dds' => 99, 'kind' => 'new', 'index' => $i];
+        $spec = $donorSpecs[$i - 1] ?? null;
+        $donors[] = [
+            'label' => $spec ? 'your new ' . preg_replace('/\s+account$/i', '', $spec['product']) . ' account' : 'new donor account ' . $i,
+            'group' => $spec['group'] ?? '', 'from' => 1, 'dds' => 99, 'kind' => 'new', 'index' => $i,
+            'cashback' => $spec['cashback'] ?? 0.0, 'site' => $spec['site'] ?? '', 'product' => $spec['product'] ?? '',
+        ];
     }
     $done = [];
     $groups = [];
     $slots = [];
     $events = [];
     $bonus = 0.0;
+    $cashback = 0.0;
     $salaryMonths = 0;
+    $newSeen = [];
     for ($m = 1; $m <= $H; $m++) {
         foreach ($cands as $ci => $c) {
             if (isset($done[$ci]) || isset($groups[$c['group']])) continue;
@@ -848,7 +856,12 @@ function simulate_year_path(array $cands, array $existing, int $newCount, float 
             for ($s = $m; $s < $m + $c['salaryMonths']; $s++) $slots[$s] = true;
             $salaryMonths += $c['salaryMonths'];
             $bonus += $c['amount'];
-            $events[] = ['month' => $m, 'cand' => $c, 'from' => $d['label'], 'fromKind' => $d['kind'], 'newIndex' => $d['index'] ?? null, 'lock' => $lock];
+            $cashback += $c['cashback'];
+            if ($d['kind'] === 'new' && !isset($newSeen[$d['index']])) {
+                $newSeen[$d['index']] = true;
+                $cashback += $d['cashback'];
+            }
+            $events[] = ['month' => $m, 'cand' => $c, 'from' => $d['label'], 'fromKind' => $d['kind'], 'newIndex' => $d['index'] ?? null, 'lock' => $lock, 'donor' => $d['kind'] === 'new' ? $d : null];
             $donors[] = [
                 'label' => 'your new ' . (preg_match('/account$/i', $c['product']) ? $c['product'] : $c['product'] . ' account'), 'group' => $c['group'], 'from' => $m + $lock, 'kind' => 'chain',
                 'dds' => $d['kind'] === 'new' ? $c['dd'] : ($d['dds'] === null ? null : max($d['dds'], $c['dd'])),
@@ -857,9 +870,10 @@ function simulate_year_path(array $cands, array $existing, int $newCount, float 
     }
     $krakMonths = $H - $salaryMonths;
     return [
-        'events' => $events, 'bonus' => $bonus, 'salaryMonths' => $salaryMonths, 'krakMonths' => $krakMonths,
-        'total' => $bonus + $krak * $krakMonths,
-        'newUsed' => count(array_unique(array_filter(array_column($events, 'newIndex')))),
+        'events' => $events, 'bonus' => $bonus, 'cashback' => $cashback, 'salaryMonths' => $salaryMonths, 'krakMonths' => $krakMonths,
+        'krakValue' => $krak * $krakMonths,
+        'total' => $bonus + $cashback + $krak * $krakMonths,
+        'newUsed' => count($newSeen),
     ];
 }
 
@@ -897,48 +911,71 @@ function compute_year_path(array $user, array $cache, array $rows, ?string $toda
             $months = $best['k'];
             $amount = $best['a'];
         }
+        // The best single cashback site for this bank (one per account: you
+        // click through one site), which stacks on top of the bank's bonus.
         $cb = 0.0;
-        foreach (($r['cashback'] ?? []) as $c) $cb = max($cb, (float) ($c['amount'] ?? 0));
+        $cbSite = '';
+        foreach (($r['cashback'] ?? []) as $c) {
+            if ((float) ($c['amount'] ?? 0) > $cb) {
+                $cb = (float) $c['amount'];
+                $cbSite = (string) ($c['label'] ?? '');
+            }
+        }
         $cands[] = [
             'product' => (string) $r['product'], 'bank' => (string) $r['bank'], 'group' => bank_group((string) $r['bank']),
             'amount' => $amount, 'dd' => (int) ($o['ddCount'] ?? 0), 'fund' => (float) ($o['minFunding'] ?? 0),
-            'deadline' => $deadline, 'salaryMonths' => $months, 'cashback' => $cb,
+            'deadline' => $deadline, 'salaryMonths' => $months, 'cashback' => $cb, 'cashbackSite' => $cbSite,
+            'history' => history_max_for_offer($cache['history'] ?? [], (string) $r['bank'], (string) $r['product']),
+            'listed' => (float) $r['amount'],
         ];
     }
     if (!$cands) return null;
 
     $existing = [];
+    $heldGroups = [];
     foreach (($user['accounts'] ?? []) as $a) {
+        $heldGroups[bank_group((string) ($a['bank'] ?? ''))] = true;
         if (!is_cass_ready($a)) continue;
         if (is_cass_participant((string) ($a['bank'] ?? ''), $cache['cassParticipants'] ?? []) === 'no') continue;
         $existing[] = ['label' => 'your ' . (($a['nickname'] ?? '') ?: ($a['bank'] ?? 'spare')) . ' account', 'group' => bank_group((string) ($a['bank'] ?? '')), 'from' => 1, 'dds' => direct_debits_on($a), 'kind' => 'existing'];
     }
+    // A new donor account is best opened with a bank that pays cashback just
+    // for opening, as long as it isn't a bank you already hold or one whose own
+    // switch offer is in this plan (it couldn't fund that offer anyway).
+    $candGroups = array_column($cands, 'group');
+    $specs = [];
+    foreach (($cache['cashbackDeals'] ?? []) as $d) {
+        $name = (string) ($d['name'] ?? '');
+        $g = bank_group($name);
+        $amt = (float) ($d['amount'] ?? 0);
+        // Student and similar accounts need a status the user may not have.
+        if ($g === '' || $amt <= 0 || isset($heldGroups[$g]) || in_array($g, $candGroups, true) || preg_match('/student|graduate|youth|junior|child|kids|under/i', $name)) continue;
+        if (!isset($specs[$g]) || $amt > $specs[$g]['cashback']) {
+            $specs[$g] = ['product' => $name, 'group' => $g, 'cashback' => $amt, 'site' => ($d['provider'] ?? '') === 'quidco' ? 'Quidco' : 'TopCashback'];
+        }
+    }
+    $donorSpecs = array_values($specs);
+    usort($donorSpecs, fn($a, $b) => $b['cashback'] <=> $a['cashback']);
 
     $krakAlone = $krak * $H;
     $sims = [];
     for ($n = 0; $n <= PATH_MAX_NEW_DONORS; $n++) {
         $bestSim = null;
         foreach (['amount', 'deadline'] as $order) {
-            $s = simulate_year_path($cands, $existing, $n, $krak, $order);
+            $s = simulate_year_path($cands, $existing, $donorSpecs, $n, $krak, $order);
             if ($bestSim === null || $s['total'] > $bestSim['total']) $bestSim = $s;
         }
         $sims[] = $bestSim;
     }
-    // Keep an option only if it beats the one before it (a donor that adds
-    // nothing isn't worth listing).
-    $options = [];
+    // A ladder: your current accounts, then each extra donor that adds at
+    // least PATH_MIN_SIDE_QUEST over the rung before it -- a new application
+    // for less than that isn't worth the mark on your credit file.
+    $ladder = [];
     foreach ($sims as $s) {
-        if ($options && $s['total'] <= end($options)['total'] + 0.5) continue;
-        $options[] = $s;
+        if ($ladder && $s['total'] < end($ladder)['total'] + PATH_MIN_SIDE_QUEST) continue;
+        $ladder[] = $s;
     }
-    $maxTotal = max(array_column($options, 'total'));
-    $chosen = $options[0];
-    foreach ($options as $o) {
-        if ($o['total'] >= $maxTotal - 50) {
-            $chosen = $o;
-            break;
-        }
-    }
+    $chosen = end($ladder);
     if (!$chosen['events']) return null;
 
     $money = fn(float $n): string => '£' . number_format($n, 0);
@@ -947,44 +984,64 @@ function compute_year_path(array $user, array $cache, array $rows, ?string $toda
     usort($events, fn($a, $b) => [$a['month'], $a['fromKind'] === 'new' ? 0 : 1] <=> [$b['month'], $b['fromKind'] === 'new' ? 0 : 1]);
     $steps = [];
     $opened = [];
+    $salaryEvents = 0;
     foreach ($events as $e) {
         $c = $e['cand'];
         $when = 'Month ' . $e['month'] . ' (' . path_month_label($e['month'], $today) . ')';
         if ($e['fromKind'] === 'new' && !isset($opened[$e['newIndex']])) {
             $opened[$e['newIndex']] = true;
-            $steps[] = sprintf('%s: open a free current account with a bank that is in CASS (Monzo, Starling or Chase usually are) as donor account %d, and move %s Direct Debits onto it.', $when, $e['newIndex'], $c['dd'] ? $c['dd'] . ' small' : 'a couple of small');
+            $dn = $e['donor'];
+            $which = $dn['product'] !== ''
+                ? sprintf('%s (pays about %s cashback through %s)', $dn['product'], $money($dn['cashback']), $dn['site'])
+                : 'a free current account with a bank that is in CASS (Monzo, Starling or Chase usually are)';
+            $steps[] = sprintf('%s: open %s as donor account %d, and move %s Direct Debits onto it.', $when, $which, $e['newIndex'], $c['dd'] ? $c['dd'] . ' small' : 'a couple of small');
         }
         $text = sprintf('%s: switch %s into %s — worth %s, landing around %s', $when, $e['from'], $c['product'], $money($c['amount']), path_month_label($e['month'] + $e['lock'], $today));
         if ($c['salaryMonths'] > 0) {
+            $salaryEvents++;
             $end = $e['month'] + $c['salaryMonths'] - 1;
             $text .= sprintf('; your salary goes here %s', $c['salaryMonths'] === 1 ? 'for month ' . $e['month'] : sprintf('for months %d–%d', $e['month'], $end));
         }
+        if ($c['cashback'] > 0) $text .= sprintf('; plus about %s cashback if you click through %s before applying', $money($c['cashback']), $c['cashbackSite']);
         $steps[] = $text . '.';
     }
     $switches = count($events);
     $newUsed = $chosen['newUsed'];
-    $cashback = 0.0;
+    $krakOpen = ($krak > 0 && $chosen['krakMonths'] > 0) ? 1 : 0;
+    $repoints = $salaryEvents + $krakOpen;
     $peak = 0.0;
-    foreach ($events as $e) {
-        $cashback += $e['cand']['cashback'];
-        $peak = max($peak, $e['cand']['fund']);
-    }
+    foreach ($events as $e) $peak = max($peak, $e['cand']['fund']);
+    $opens = $newUsed + $switches + $krakOpen;
 
-    $headline = sprintf('You could make about %s over the next %d months: %d switch bonus%s worth %s%s%s.',
-        $money($chosen['total']), $H, $switches, $switches === 1 ? '' : 'es', $money($chosen['bonus']),
-        $newUsed ? sprintf(', opening %d extra free account%s to switch away from', $newUsed, $newUsed === 1 ? '' : 's') : '',
-        $krak > 0 && $chosen['krakMonths'] > 0 ? sprintf(', plus about %s from Krak Salary Match', $money($krak * $chosen['krakMonths'])) : '');
+    $parts = [sprintf('%s from %d switch bonus%s', $money($chosen['bonus']), $switches, $switches === 1 ? '' : 'es')];
+    if ($chosen['cashback'] > 0) $parts[] = sprintf('%s from cashback sites', $money($chosen['cashback']));
+    if ($krakOpen) $parts[] = sprintf('%s from Krak Salary Match', $money($chosen['krakValue']));
+    $headline = sprintf('You could make about %s over the next %d months: %s — by opening %d new account%s (%d donor%s, %d bonus account%s%s) and repointing your salary %d time%s.',
+        $money($chosen['total']), $H, implode(', ', $parts), $opens, $opens === 1 ? '' : 's',
+        $newUsed, $newUsed === 1 ? '' : 's', $switches, $switches === 1 ? '' : 's', $krakOpen ? ', 1 Krak' : '',
+        $repoints, $repoints === 1 ? '' : 's');
 
     $summary = [];
     if ($krak > 0) {
-        $summary[] = sprintf('Salary goes to Krak in the %d month%s not tied up by an offer, about %s a month. Sending it to Krak all year would be %s, so this adds about %s.', $chosen['krakMonths'], $chosen['krakMonths'] === 1 ? '' : 's', $money($krak), $money($krakAlone), $money(max(0, $chosen['total'] - $krakAlone)));
+        $summary[] = sprintf('Salary goes to Krak in the %d month%s not tied up by an offer, about %s a month. Sending it to Krak all year would be %s.', $chosen['krakMonths'], $chosen['krakMonths'] === 1 ? '' : 's', $money($krak), $money($krakAlone));
     }
-    if ($cashback > 0) $summary[] = sprintf('Cashback on top, if you click through a cashback site before applying: up to about %s across these (not counted above).', $money($cashback));
+    if ($chosen['cashback'] > 0) $summary[] = 'Cashback stacks on top of the bank bonus, but only if you click through the cashback site first (one site per account — the better rate is picked) and it tracks; Quidco\'s best rates can need a paid membership. Cashback for a donor account usually has its own conditions (a minimum pay-in, Direct Debits, staying open for a while) — check them, because this plan switches that account away early. Rates move often.';
+    $summary[] = 'Not counted, because the page can\'t yet work them out: interest on the balances you hold, cashback on card spending, and ongoing perks that accounts pay for keeping them (monthly rewards and the like).';
     if ($peak > 0) $summary[] = sprintf('Have about %s ready to pay in for the largest single step; it can usually be moved on afterwards, but check each offer for how long it has to stay.', $money($peak));
-    $summary[] = sprintf('That is %d account applications (%d donor%s plus %d bonus accounts) — each leaves a mark on your credit file.', $newUsed + $switches, $newUsed, $newUsed === 1 ? '' : 's', $switches);
+    $summary[] = sprintf('That is %d account applications — each leaves a mark on your credit file.', $opens);
+
+    // Side quests: what each extra donor account adds.
+    $quests = [];
+    for ($i = 1; $i < count($ladder); $i++) {
+        $more = count($ladder[$i]['events']) - count($ladder[$i - 1]['events']);
+        $quests[] = sprintf('%s: about %s more (%d more switch%s), taking the year to about %s.',
+            $ladder[$i]['newUsed'] === 1 ? 'Open 1 donor account' : sprintf('Open %d donor accounts', $ladder[$i]['newUsed']),
+            $money($ladder[$i]['total'] - $ladder[$i - 1]['total']), $more,
+            $more === 1 ? '' : 'es', $money($ladder[$i]['total']));
+    }
 
     $alts = [];
-    foreach ($options as $o) {
+    foreach ($ladder as $o) {
         $alts[] = ['newDonors' => $o['newUsed'], 'switches' => count($o['events']), 'total' => round($o['total'])];
     }
     $notes = [
@@ -993,6 +1050,17 @@ function compute_year_path(array $user, array $cache, array $rows, ?string $toda
         "A switch must come from a different banking group than the bank you switch into, and each group pays one bonus. Cross-bank conditions beyond that (like First Direct excluding anyone who opened an HSBC account since 2018) are not checked — read each offer's terms.",
         'Offers change weekly, and banks can refuse applicants who switch repeatedly; treat later months as less certain than the first ones.',
     ];
+    $snapshots = count($cache['history'] ?? []);
+    $pricier = [];
+    $ending = [];
+    foreach ($events as $e) {
+        $c = $e['cand'];
+        if ($c['history'] !== null && $c['history'] > $c['listed'] * 1.1) $pricier[] = sprintf('%s (%s now, has paid up to %s)', $c['product'], $money($c['listed']), $money($c['history']));
+        if ($c['deadline'] !== null && $c['deadline'] <= 4) $ending[] = $c['product'];
+    }
+    if ($ending) $notes[] = 'Ending soon, so not worth waiting on: ' . implode(', ', $ending) . '.';
+    if ($pricier) $notes[] = 'Paying less than it has before: ' . implode('; ', $pricier) . ' — if the timing is not pressing, a bigger version might be worth waiting for.';
+    $notes[] = sprintf('The plan takes offers as they stand today and does not try to time them. The page holds %d weekly snapshot%s of offer history, which is too little to say how often offers return or rise — it only flags offers that have paid more before.', $snapshots, $snapshots === 1 ? '' : 's');
     $unsched = [];
     foreach ($cands as $c) {
         $took = false;
@@ -1002,7 +1070,11 @@ function compute_year_path(array $user, array $cache, array $rows, ?string $toda
         if (!$took) $unsched[] = $c['product'] . ' (' . $money($c['amount']) . ')';
     }
     if ($unsched) $notes[] = 'Not fitted into this year: ' . implode(', ', $unsched) . ' — usually because they share a banking group with an offer that pays more, the salary is already committed, or no donor was free in time.';
-    return ['headline' => $headline, 'options' => $alts, 'steps' => $steps, 'summary' => $summary, 'notes' => $notes, 'total' => round($chosen['total']), 'switches' => $switches, 'newDonors' => $newUsed];
+    return [
+        'headline' => $headline, 'options' => $alts, 'quests' => $quests, 'steps' => $steps, 'summary' => $summary, 'notes' => $notes,
+        'total' => round($chosen['total']), 'bonus' => round($chosen['bonus']), 'cashback' => round($chosen['cashback']), 'krak' => round($chosen['krakValue']),
+        'switches' => $switches, 'newDonors' => $newUsed, 'repoints' => $repoints,
+    ];
 }
 
 // How many of the eligible switch offers you can actually claim with the

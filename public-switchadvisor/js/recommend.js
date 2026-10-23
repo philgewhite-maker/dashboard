@@ -77,14 +77,14 @@ function salaryPlanHtml(sp) {
 function yearPathHtml(yp) {
   if (!yp) return '';
   const li = (arr) => (arr || []).map((l) => `<li>${escapeHtml(l)}</li>`).join('');
-  const alts = (yp.options || []).length > 1
-    ? `<p class="muted">Options tried: ${yp.options.map((o) => `${o.newDonors ? '+' + o.newDonors + ' new donor' + (o.newDonors === 1 ? '' : 's') : 'your current accounts only'}: ${o.switches} switch${o.switches === 1 ? '' : 'es'}, about ${money(o.total)}`).join(' · ')}</p>`
+  const quests = (yp.quests || []).length
+    ? `<div class="rec-quests"><strong>Side quests</strong> — what each extra donor account adds (already counted in the total above):<ul>${li(yp.quests)}</ul></div>`
     : '';
   return `<div class="rec-plan rec-year" id="rec-year">
     <div class="rec-plan-head">${escapeHtml(yp.headline)}</div>
     <ol>${li(yp.steps)}</ol>
     <ul>${li(yp.summary)}</ul>
-    ${alts}
+    ${quests}
     <details class="rec-plan-how"><summary>How this was worked out</summary><ul>${li(yp.notes)}</ul></details>
   </div>`;
 }
