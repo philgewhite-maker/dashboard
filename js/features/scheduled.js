@@ -108,7 +108,7 @@ await refreshCashbackRates(sources);
 // returns immediately. Silent with no API key. Report-only: it flags
 // newer models, never changes one.
 id: 'model-check', label: 'Model upgrade check', needsGoogle: false,
-note: 'Monthly: compares the models your API usage log shows against what Anthropic currently offers, and flags anything that cost $1+ in a month with a newer model in its family (shown as a ticker tile).',
+note: 'Monthly, from the 15th: compares the models your API usage log shows against what Anthropic currently offers, and flags anything that cost $1+ in a month with a newer model in its family (shown as a ticker tile).',
 run: async () => {
 const { runModelCheck } = await import('./modelcheck.js');
 await runModelCheck();

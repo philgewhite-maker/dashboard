@@ -127,13 +127,21 @@ upgrade, price: comparePrices(r.model, upgrade),
 return [...found.values()].sort((a, b) => b.cost - a.cost);
 }
 
+// Not before this day of the month: on the 1st the new month's usage log
+// is empty, so a check then would be judging last month alone. From
+// mid-month it sees last month complete plus a real slice of this one.
+const CHECK_FROM_DAY = 15;
+
 // Gated to once a month on its own (scheduled.js fires this at ordinary
 // app-open cadence; almost every call returns null immediately). `force`
-// is the Check-now button.
+// is the Check-now button and skips both gates.
 async function runModelCheck({ force = false } = {}) {
 const month = currentMonthKey();
 const prev = data.modelCheck;
-if (!force && prev && prev.checkedMonth === month) return null;
+if (!force) {
+if (new Date().getUTCDate() < CHECK_FROM_DAY) return null;
+if (prev && prev.checkedMonth === month) return null;
+}
 let available;
 try {
 available = await fetchAvailableModels();
@@ -181,7 +189,7 @@ const dismissed = new Set((mc && mc.dismissed) || []);
 const live = ((mc && mc.findings) || []).filter((f) => !dismissed.has(f.key));
 const status = mc
 ? `Last checked ${escapeHtml(mc.checkedAt.slice(0, 10))} against ${mc.available.length} available models. Flags anything that cost $${mc.flagMinCost}+ in a month and has a newer model in the same family.`
-: 'Not checked yet. Runs about once a month, or press Check now (needs an API key).';
+: `Not checked yet. Runs once a month from the ${CHECK_FROM_DAY}th, or press Check now (needs an API key).`;
 const rows = live.map((f) => `<div class="model-check-row">
 <div><strong>${escapeHtml(f.purpose)}</strong> &mdash; ${escapeHtml(f.model)} &rarr; <strong>${escapeHtml(f.upgrade)}</strong></div>
 <div class="settings-note" style="margin:2px 0 0;">$${f.cost.toFixed(2)} in ${escapeHtml(f.month)} &middot; ${f.calls.toLocaleString()} calls, ~${f.outPerCall.toLocaleString()} output tokens per call &middot; ${escapeHtml(f.price.text)}.
