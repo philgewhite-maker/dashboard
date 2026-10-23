@@ -1,7 +1,16 @@
-import { upsertAccount, deleteAccount, getBankList } from './api.js';
+import { upsertAccount, deleteAccount, getBankList, getToken } from './api.js';
 import { escapeHtml, uid } from './utils.js';
 
 let bankListCache = [];
+
+// Mirrors the server's own is_cass_ready() exactly (switchadvisor.php)
+// -- open, and not explicitly marked "keep". Purely a display label
+// here; the server recomputes this itself for the recommendation
+// engine, so the two can't drift into disagreeing about a stored flag
+// because there no longer is one.
+function cassReadyLabel(a) {
+  return !a.closeDate && a.wantToKeep !== true;
+}
 
 function accountRowHtml(a) {
   const bonuses = (a.switchBonuses || []).map((sb) => `${escapeHtml(sb.bank || '')} ${sb.amount ? `£${sb.amount}` : ''} (${escapeHtml(sb.status || '')})`).join(', ');
@@ -9,7 +18,7 @@ function accountRowHtml(a) {
     <div class="account-head">
       <span class="account-bank">${escapeHtml(a.bank)}${a.nickname ? ` — ${escapeHtml(a.nickname)}` : ''}</span>
       <span class="tag-chip ${a.closeDate ? '' : 'pri-high'}">${a.closeDate ? 'Closed' : 'Open'}</span>
-      ${a.cassReady ? '<span class="tag-chip pri-medium">CASS-ready</span>' : ''}
+      ${cassReadyLabel(a) ? '<span class="tag-chip pri-medium">Assumed CASS-ready</span>' : ''}
       <span class="del-x" data-delete-account="${escapeHtml(a.id)}" title="Delete">&times;</span>
     </div>
     <div class="account-detail">
@@ -30,8 +39,12 @@ export function renderAccounts(me) {
   list.querySelectorAll('[data-delete-account]').forEach((el) => {
     el.addEventListener('click', async () => {
       if (!confirm('Delete this account?')) return;
-      await deleteAccount(el.dataset.deleteAccount);
-      window.dispatchEvent(new CustomEvent('switchadvisor:refresh'));
+      try {
+        await deleteAccount(el.dataset.deleteAccount);
+        window.dispatchEvent(new CustomEvent('switchadvisor:refresh'));
+      } catch (err) {
+        alert(`Couldn't delete: ${err.message}`);
+      }
     });
   });
   list.querySelectorAll('[data-edit-account]').forEach((el) => {
@@ -53,7 +66,6 @@ function openAccountForm(account) {
   form.elements.openDate.value = account?.openDate || '';
   form.elements.closeDate.value = account?.closeDate || '';
   form.elements.wantToKeep.value = account?.wantToKeep === true ? 'true' : account?.wantToKeep === false ? 'false' : '';
-  form.elements.cassReady.checked = !!account?.cassReady;
   form.elements.directDebitCount.value = account?.directDebitCount ?? '';
   dialog.showModal();
 }
@@ -71,11 +83,23 @@ export function initAccounts() {
     if (bankList) bankList.innerHTML = bankListCache.map((b) => `<option value="${escapeHtml(b)}">`).join('');
   }).catch(() => {});
 
-  addBtn.addEventListener('click', () => openAccountForm(null));
+  addBtn.addEventListener('click', () => {
+    // Belt-and-braces: app.js already hides this button with no token,
+    // but guard here too so the dialog never opens into a save that can
+    // only fail -- confirmed live as a real gap otherwise (the button
+    // used to be clickable with no token at all, and the save failed
+    // silently with no visible error).
+    if (!getToken()) { alert("You need an invite link to add accounts. Ask whoever invited you."); return; }
+    openAccountForm(null);
+  });
   document.getElementById('account-cancel-btn')?.addEventListener('click', () => dialog.close());
+
+  const errorEl = document.getElementById('account-form-error');
+  const say = (m) => { if (errorEl) errorEl.textContent = m; };
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
+    say('');
     const fd = new FormData(form);
     const account = {
       id: fd.get('id') || uid(),
@@ -84,12 +108,20 @@ export function initAccounts() {
       openDate: fd.get('openDate'),
       closeDate: fd.get('closeDate'),
       wantToKeep: fd.get('wantToKeep') === 'true' ? true : fd.get('wantToKeep') === 'false' ? false : null,
-      cassReady: fd.get('cassReady') === 'on',
       directDebitCount: fd.get('directDebitCount') ? Number(fd.get('directDebitCount')) : null,
     };
-    if (!account.bank) return;
-    await upsertAccount(account);
-    dialog.close();
-    window.dispatchEvent(new CustomEvent('switchadvisor:refresh'));
+    if (!account.bank) { say('Pick a bank first.'); return; }
+    try {
+      await upsertAccount(account);
+      dialog.close();
+      window.dispatchEvent(new CustomEvent('switchadvisor:refresh'));
+    } catch (err) {
+      say(`Couldn't save: ${err.message}`);
+    }
   });
+}
+
+export function setAddAccountEnabled(enabled) {
+  const addBtn = document.getElementById('add-account-btn');
+  if (addBtn) addBtn.hidden = !enabled;
 }

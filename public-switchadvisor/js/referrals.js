@@ -29,10 +29,16 @@ export async function renderReferrals() {
   const krakNote = document.getElementById('krak-tiers-note');
   if (krakNote) {
     try {
-      const { krakTiers, krakTiersAsOf } = await getReferralInfo();
+      const { krakTiers, krakTiersAsOf, krakTiersSource } = await getReferralInfo();
       if (krakTiers?.length) {
         const tiers = krakTiers.map((t) => `£${Number(t.minBalance).toLocaleString('en-GB')}+ → ${t.percent}%`).join(' · ');
-        krakNote.textContent = `Kraken's current tiers (as of ${krakTiersAsOf || 'unknown'}): ${tiers}`;
+        // Never state these as flat fact -- krakTiersSource says whether
+        // a real scrape has ever confirmed them (starts "scraped ...") or
+        // they're still what was typed in at build time ("Seeded from
+        // your own figures...", the plan's own explicit caveat).
+        const unverified = !krakTiersSource || !krakTiersSource.toLowerCase().startsWith('scraped');
+        krakNote.textContent = `Kraken's tiers (as of ${krakTiersAsOf || 'unknown'}): ${tiers}`
+          + (unverified ? ' — not yet confirmed by a real scrape of Kraken\'s own terms page; treat as a starting estimate.' : ' — confirmed by the last scrape.');
       }
     } catch { /* non-essential context line */ }
   }

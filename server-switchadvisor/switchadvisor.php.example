@@ -212,11 +212,19 @@ function offer_eligibility(array $offer, array $accounts): array {
     return ['eligible' => true, 'reason' => "Your {$bank} account(s) closed before this offer's own exclusion window."];
 }
 
+// CASS-ready is derived, not a field anyone fills in: open, and not
+// explicitly marked "keep" (undecided counts as fair game -- this only
+// ever SUGGESTS a donor, never switches anything, so defaulting open
+// costs nothing and a separate checkbox was one more thing to explain
+// for no real benefit).
+function is_cass_ready(array $a): bool {
+    return empty($a['closeDate']) && ($a['wantToKeep'] ?? null) !== true;
+}
+
 function offer_donor(array $accounts, array $cassParticipants, ?string $excludeBank): ?array {
     $best = null;
     foreach ($accounts as $a) {
-        if (!empty($a['closeDate'])) continue; // can't CASS from a closed account
-        if (empty($a['cassReady'])) continue;
+        if (!is_cass_ready($a)) continue;
         if ($excludeBank && bank_names_match((string) ($a['bank'] ?? ''), $excludeBank)) continue; // can't donate to/from the same bank
         $status = is_cass_participant((string) ($a['bank'] ?? ''), $cassParticipants);
         if ($status === 'no') continue; // a dead end — can't CASS away from it at all
@@ -357,7 +365,7 @@ function compute_cass_grid(array $user, array $cache): array {
             'bank' => $a['bank'] ?? '',
             'nickname' => $a['nickname'] ?? '',
             'open' => empty($a['closeDate']),
-            'cassReady' => !empty($a['cassReady']),
+            'cassReady' => is_cass_ready($a),
             'cassStatus' => is_cass_participant((string) ($a['bank'] ?? ''), $participants),
         ];
     }
@@ -414,7 +422,14 @@ if ($action === 'banklist') {
 
 if ($action === 'referrals') {
     $cache = read_doc($CACHE_FILE, $EMPTY_CACHE);
-    echo json_encode(['krakTiers' => $cache['krakTiers'] ?? [], 'krakTiersAsOf' => $cache['krakTiersAsOf'] ?? null]);
+    echo json_encode([
+        'krakTiers' => $cache['krakTiers'] ?? [],
+        'krakTiersAsOf' => $cache['krakTiersAsOf'] ?? null,
+        // Surfaced so the frontend can say whether these are confirmed by
+        // a real scrape or still the figures seeded at build time --
+        // never present an unverified number as settled fact.
+        'krakTiersSource' => $cache['krakTiersSource'] ?? null,
+    ]);
     exit;
 }
 
@@ -553,7 +568,6 @@ if ($action === 'account-upsert' && $method === 'POST') {
                 'openDate' => (string) ($account['openDate'] ?? ''),
                 'closeDate' => (string) ($account['closeDate'] ?? ''),
                 'wantToKeep' => $account['wantToKeep'] ?? null,
-                'cassReady' => !empty($account['cassReady']),
                 'directDebitCount' => $account['directDebitCount'] ?? null,
                 'cassFromAccountId' => (string) ($account['cassFromAccountId'] ?? ''),
                 'switchBonuses' => $account['switchBonuses'] ?? [],

@@ -1,6 +1,6 @@
 import { getToken, setToken, redeemInvite, getMe, ApiError } from './api.js';
 import { renderRecommendations, initProfileForm } from './recommend.js';
-import { renderAccounts, initAccounts } from './accounts.js';
+import { renderAccounts, initAccounts, setAddAccountEnabled } from './accounts.js';
 import { renderCassGrid } from './cass.js';
 import { renderReferrals } from './referrals.js';
 import { initAdmin } from './admin.js';
@@ -27,6 +27,7 @@ function showNeedsInvite(message) {
     const el = document.getElementById(id);
     if (el) el.innerHTML = `<div class="empty">${message}</div>`;
   });
+  setAddAccountEnabled(false);
 }
 
 async function loadMe() {
@@ -36,6 +37,7 @@ async function loadMe() {
     renderRecommendations(me);
     renderAccounts(me);
     renderCassGrid(me);
+    setAddAccountEnabled(true);
   } catch (err) {
     showNeedsInvite(err instanceof ApiError
       ? 'That invite link is no longer valid — ask whoever invited you for a new one.'

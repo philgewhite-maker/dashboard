@@ -81,7 +81,7 @@
       <datalist id="bank-datalist"></datalist>
     </label>
     <label>Nickname (optional) <input type="text" name="nickname"></label>
-    <label>Opened <input type="date" name="openDate"></label>
+    <label>Opened (optional) <input type="date" name="openDate"></label>
     <label>Closed (leave blank if still open) <input type="date" name="closeDate"></label>
     <label>Direct Debits on this account <input type="number" name="directDebitCount" min="0"></label>
     <label>Want to keep this one?
@@ -90,8 +90,9 @@
         <option value="true">Keep</option>
         <option value="false">Plan to leave</option>
       </select>
+      <span class="muted">Open accounts not marked "Keep" are assumed free to switch away from — no separate CASS-ready tickbox needed.</span>
     </label>
-    <label><input type="checkbox" name="cassReady"> CASS-ready (free to switch away from)</label>
+    <p id="account-form-error" class="muted"></p>
     <div class="dialog-actions">
       <button class="sync-btn sm inline" type="button" id="account-cancel-btn">Cancel</button>
       <button class="sync-btn sm inline" type="submit">Save</button>
