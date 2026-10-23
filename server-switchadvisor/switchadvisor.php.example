@@ -226,11 +226,21 @@ function offer_donor(array $accounts, array $cassParticipants, ?string $excludeB
     return $best;
 }
 
-function history_max_for_bank(array $history, string $bank): ?float {
+// Keyed by (bank, product), not bank alone -- a bank with several
+// products on offer at once (e.g. Barclays Bank Account AND Barclays
+// Premier, different amounts, same scrape) would otherwise have one
+// product's price read as "history" for the other's, producing a
+// nonsensical "down from £600" on a product that was never £600.
+function same_product(string $a, string $b): bool {
+    return mb_strtolower(trim($a)) === mb_strtolower(trim($b));
+}
+
+function history_max_for_offer(array $history, string $bank, string $product): ?float {
     $max = null;
     foreach ($history as $snap) {
         foreach (($snap['offers'] ?? []) as $o) {
             if (!bank_names_match((string) ($o['bank'] ?? ''), $bank)) continue;
+            if (!same_product((string) ($o['product'] ?? $o['bank'] ?? ''), $product)) continue;
             $amt = (float) ($o['amount'] ?? 0);
             if ($max === null || $amt > $max) $max = $amt;
         }
@@ -252,10 +262,11 @@ function compute_recommendations(array $user, array $cache): array {
 
     foreach (($cache['offers'] ?? []) as $offer) {
         $bank = (string) ($offer['bank'] ?? '');
+        $product = (string) ($offer['product'] ?? $bank);
         $amount = (float) ($offer['amount'] ?? 0);
         $elig = offer_eligibility($offer, $accounts);
         $donor = $elig['eligible'] ? offer_donor($accounts, $participants, $bank) : null;
-        $histMax = history_max_for_bank($history, $bank);
+        $histMax = history_max_for_offer($history, $bank, $product);
         $band = priority_band($amount);
         $rationale = $elig['reason'];
         if ($elig['eligible'] && $histMax !== null && $amount < $histMax) {
@@ -263,7 +274,7 @@ function compute_recommendations(array $user, array $cache): array {
             $lastSeenAt = null;
             foreach (array_reverse($history) as $snap) {
                 foreach (($snap['offers'] ?? []) as $o) {
-                    if (bank_names_match((string) ($o['bank'] ?? ''), $bank) && (float) ($o['amount'] ?? 0) == $histMax) { $lastSeenAt = $snap['at'] ?? null; break 2; }
+                    if (bank_names_match((string) ($o['bank'] ?? ''), $bank) && same_product((string) ($o['product'] ?? $o['bank'] ?? ''), $product) && (float) ($o['amount'] ?? 0) == $histMax) { $lastSeenAt = $snap['at'] ?? null; break 2; }
                 }
             }
             $rationale .= sprintf(' £%s, down from £%s seen%s.', number_format($amount, 0), number_format($histMax, 0), $lastSeenAt ? ' on ' . substr($lastSeenAt, 0, 10) : ' before');

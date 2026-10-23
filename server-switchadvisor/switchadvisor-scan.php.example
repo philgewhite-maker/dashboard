@@ -250,7 +250,12 @@ if (is_file($CACHE_FILE)) {
 
 $now = gmdate('Y-m-d');
 $history = $current['history'] ?? [];
-$history[] = ['at' => $now, 'offers' => array_map(fn($o) => ['bank' => $o['bank'], 'amount' => $o['amount']], $offers)];
+// Keyed by (bank, product) when recommendations later compare "is this
+// lower than before" -- switchadvisor.php's own history_max_for_offer()
+// needs product here too, or two products from the same bank (e.g.
+// Barclays Bank Account vs. Barclays Premier) get conflated into one
+// bogus "price history".
+$history[] = ['at' => $now, 'offers' => array_map(fn($o) => ['bank' => $o['bank'], 'product' => $o['product'] ?? $o['bank'], 'amount' => $o['amount']], $offers)];
 if (count($history) > $HISTORY_CAP) $history = array_slice($history, -$HISTORY_CAP);
 
 $next = [

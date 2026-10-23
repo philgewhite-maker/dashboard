@@ -4,16 +4,16 @@
     {
       "at": "2026-10-22",
       "offers": [
-        { "bank": "Barclays", "amount": 300 },
-        { "bank": "Barclays", "amount": 600 },
-        { "bank": "HSBC", "amount": 220 },
-        { "bank": "HSBC", "amount": 500 },
-        { "bank": "First Direct", "amount": 210 },
-        { "bank": "Lloyds Bank", "amount": 200 },
-        { "bank": "Lloyds Bank", "amount": 200 },
-        { "bank": "NatWest", "amount": 200 },
-        { "bank": "NatWest", "amount": 500 },
-        { "bank": "Nationwide Building Society", "amount": 175 }
+        { "bank": "Barclays", "product": "Barclays Bank Account", "amount": 300 },
+        { "bank": "Barclays", "product": "Barclays Premier", "amount": 600 },
+        { "bank": "HSBC", "product": "HSBC Bank Account", "amount": 220 },
+        { "bank": "HSBC", "product": "HSBC Premier", "amount": 500 },
+        { "bank": "First Direct", "product": "First Direct 1st Account", "amount": 210 },
+        { "bank": "Lloyds Bank", "product": "Club Lloyds", "amount": 200 },
+        { "bank": "Lloyds Bank", "product": "Lloyds Premier", "amount": 200 },
+        { "bank": "NatWest", "product": "NatWest Reward", "amount": 200 },
+        { "bank": "NatWest", "product": "NatWest Premier Reward", "amount": 500 },
+        { "bank": "Nationwide Building Society", "product": "Nationwide FlexDirect", "amount": 175 }
       ]
     }
   ],
