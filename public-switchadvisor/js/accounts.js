@@ -13,7 +13,7 @@ function cassReadyLabel(a) {
 }
 
 function accountRowHtml(a) {
-  const bonuses = (a.switchBonuses || []).map((sb) => `${escapeHtml(sb.bank || '')} ${sb.amount ? `£${sb.amount}` : ''} (${escapeHtml(sb.status || '')})`).join(', ');
+  const bonuses = (a.switchBonuses || []).map((sb) => `${sb.amount ? `£${sb.amount}` : ''} (${escapeHtml(sb.status || '')})${sb.date ? ` — ${escapeHtml(sb.date)}` : ''}`).join(', ');
   return `<div class="account-row" data-account-id="${escapeHtml(a.id)}">
     <div class="account-head">
       <span class="account-bank">${escapeHtml(a.bank)}${a.nickname ? ` — ${escapeHtml(a.nickname)}` : ''}</span>
@@ -26,7 +26,7 @@ function accountRowHtml(a) {
       ${a.directDebitCount != null ? ` · ${a.directDebitCount} Direct Debits` : ''}
       ${a.wantToKeep === true ? ' · Keeping this one' : a.wantToKeep === false ? ' · Planning to leave' : ''}
     </div>
-    ${bonuses ? `<div class="account-detail">Switch bonuses: ${bonuses}</div>` : ''}
+    ${bonuses ? `<div class="account-detail">Switch bonus: ${bonuses}</div>` : ''}
     <button class="sync-btn sm inline" type="button" data-edit-account="${escapeHtml(a.id)}">Edit</button>
   </div>`;
 }
@@ -67,6 +67,13 @@ function openAccountForm(account) {
   form.elements.closeDate.value = account?.closeDate || '';
   form.elements.wantToKeep.value = account?.wantToKeep === true ? 'true' : account?.wantToKeep === false ? 'false' : '';
   form.elements.directDebitCount.value = account?.directDebitCount ?? '';
+  // Only one switch bonus shown/edited here (the one from opening THIS
+  // account) -- the data model allows more, but a second one on the same
+  // account is rare enough not to need a repeater UI for it.
+  const bonus = (account?.switchBonuses || [])[0];
+  form.elements.switchBonusStatus.value = bonus?.status || '';
+  form.elements.switchBonusAmount.value = bonus?.amount ?? '';
+  form.elements.switchBonusDate.value = bonus?.date || '';
   dialog.showModal();
 }
 
@@ -109,6 +116,9 @@ export function initAccounts() {
       closeDate: fd.get('closeDate'),
       wantToKeep: fd.get('wantToKeep') === 'true' ? true : fd.get('wantToKeep') === 'false' ? false : null,
       directDebitCount: fd.get('directDebitCount') ? Number(fd.get('directDebitCount')) : null,
+      switchBonuses: fd.get('switchBonusStatus')
+        ? [{ amount: fd.get('switchBonusAmount') ? Number(fd.get('switchBonusAmount')) : 0, status: fd.get('switchBonusStatus'), date: fd.get('switchBonusDate') || '' }]
+        : [],
     };
     if (!account.bank) { say('Pick a bank first.'); return; }
     try {

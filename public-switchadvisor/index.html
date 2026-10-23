@@ -84,6 +84,19 @@
     <label>Opened (optional) <input type="date" name="openDate"></label>
     <label>Closed (leave blank if still open) <input type="date" name="closeDate"></label>
     <label>Direct Debits on this account <input type="number" name="directDebitCount" min="0"></label>
+    <fieldset class="profile-form" style="border:1px solid var(--border);border-radius:8px;padding:10px;margin:0;">
+      <legend class="muted" style="padding:0 4px;">Switch bonus (if you got one opening this account)</legend>
+      <label>Status
+        <select name="switchBonusStatus">
+          <option value="">No bonus to record</option>
+          <option value="Working on">Working on it</option>
+          <option value="Met">Conditions met</option>
+          <option value="Paid">Paid</option>
+        </select>
+      </label>
+      <label>Amount (£) <input type="number" name="switchBonusAmount" min="0"></label>
+      <label>Date <input type="date" name="switchBonusDate"></label>
+    </fieldset>
     <label>Want to keep this one?
       <select name="wantToKeep">
         <option value="">Undecided</option>

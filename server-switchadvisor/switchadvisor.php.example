@@ -162,11 +162,25 @@ function sanitize_user(array $u): array {
 // cache, no AI call per request (see server-switchadvisor/README.md,
 // "why deterministic matching"). ----------------------------------------
 
-function account_switch_bonus_paid_for_bank(array $accounts, string $bank): bool {
+// $bonusSinceCutoff distinguishes two real, different exclusion shapes
+// seen in the actual offer text: "no PREVIOUS switch bonus" (Barclays,
+// First Direct, NatWest -- unconditional, any past Paid bonus excludes
+// forever, cutoff null) vs. "no switch bonus SINCE <date>" (Lloyds
+// "since 1 Jan 2023", Nationwide "since 2021" -- only a bonus paid ON OR
+// AFTER that date excludes; an older one doesn't). Confirmed live as a
+// real gap otherwise: treating every Paid bonus as a permanent
+// disqualification would wrongly exclude someone forever from a current
+// Lloyds offer over a bonus they got in, say, 2019. An undated Paid
+// entry can't be proven old enough to ignore, so it's treated as
+// blocking -- the safe default when the user hasn't recorded a date.
+function account_switch_bonus_blocks(array $accounts, string $bank, ?string $bonusSinceCutoff): bool {
     foreach ($accounts as $a) {
         if (!bank_names_match((string) ($a['bank'] ?? ''), $bank)) continue;
         foreach (($a['switchBonuses'] ?? []) as $sb) {
-            if (($sb['status'] ?? '') === 'Paid') return true;
+            if (($sb['status'] ?? '') !== 'Paid') continue;
+            if ($bonusSinceCutoff === null) return true;
+            $date = (string) ($sb['date'] ?? '');
+            if ($date === '' || $date >= $bonusSinceCutoff) return true;
         }
     }
     return false;
@@ -186,8 +200,12 @@ function accounts_at_bank(array $accounts, string $bank): array {
 function offer_eligibility(array $offer, array $accounts): array {
     $bank = (string) ($offer['bank'] ?? '');
     $held = accounts_at_bank($accounts, $bank);
-    if (account_switch_bonus_paid_for_bank($accounts, $bank)) {
-        return ['eligible' => false, 'reason' => "A {$bank} switch bonus is already on file as Paid."];
+    $bonusCutoff = $offer['bonusSinceCutoff'] ?? null;
+    if (account_switch_bonus_blocks($accounts, $bank, $bonusCutoff)) {
+        $reason = $bonusCutoff
+            ? "A {$bank} switch bonus is on file as Paid, on or after this offer's own " . substr($bonusCutoff, 0, 10) . ' exclusion cutoff (or with no date recorded against it).'
+            : "A {$bank} switch bonus is already on file as Paid.";
+        return ['eligible' => false, 'reason' => $reason];
     }
     if (!$held) {
         return ['eligible' => true, 'reason' => "You've never held an account with {$bank}."];
@@ -272,6 +290,18 @@ function compute_recommendations(array $user, array $cache): array {
         $bank = (string) ($offer['bank'] ?? '');
         $product = (string) ($offer['product'] ?? $bank);
         $amount = (float) ($offer['amount'] ?? 0);
+        // Almost every bank "switch bonus" is, by definition, conditional
+        // on an actual CASS switch -- MSE's own page title is "Top
+        // bonuses for SWITCHING bank". Defaulting true (rather than
+        // assuming "you can just open it") matters: confirmed live as a
+        // real false claim otherwise -- NatWest Premier Reward's own
+        // terms require "£15,000 paid in within 90 days of the SWITCH
+        // completing", yet the old fallback text said "you can still
+        // open this as a fresh account" when no donor was on file. Only
+        // an offer whose own conditions state a genuine no-switch
+        // alternative (e.g. HSBC Premier's "£100k+ saved, no switch
+        // needed" path) should set this false.
+        $requiresSwitch = array_key_exists('requiresSwitch', $offer) ? (bool) $offer['requiresSwitch'] : true;
         $elig = offer_eligibility($offer, $accounts);
         $donor = $elig['eligible'] ? offer_donor($accounts, $participants, $bank) : null;
         $histMax = history_max_for_offer($history, $bank, $product);
@@ -289,8 +319,11 @@ function compute_recommendations(array $user, array $cache): array {
         }
         if ($elig['eligible'] && $donor) {
             $rationale .= ' Switch from your ' . ($donor['nickname'] ?: $donor['bank']) . ' account.';
-        } else if ($elig['eligible'] && !$donor) {
-            $rationale .= ' No CASS-ready donor account on file — you can still open this as a fresh account.';
+        } else if ($elig['eligible'] && !$donor && $requiresSwitch) {
+            $band = 'blocked';
+            $rationale .= " This needs a CASS switch from an existing account, and you don't have a CASS-ready one on file yet — add an account you're open to switching away from to make this claimable.";
+        } else if ($elig['eligible'] && !$donor && !$requiresSwitch) {
+            $rationale .= ' No switch needed for this one — you can open it fresh (check the conditions for the exact non-switch route).';
         }
         $rows[] = [
             'bank' => $bank,
@@ -409,12 +442,82 @@ $bodyRaw = file_get_contents('php://input') ?: '';
 $body = json_decode($bodyRaw, true);
 if (!is_array($body)) $body = [];
 
+// Known acronyms/brand casings generic title-casing can't get right on
+// its own -- applied word-by-word after cleanup, not as whole-string
+// overrides, so "hsbc uk bank plc", "HSBC Private Bank" and "HSBC
+// (Channel Islands, Isle of Man)" all come out correctly cased without
+// three separate entries in this table.
+$BANK_WORD_OVERRIDES = [
+    'aib' => 'AIB', 'ni' => 'NI', 'gb' => 'GB', 'uk' => 'UK',
+    'hsbc' => 'HSBC', 'tsb' => 'TSB', 'natwest' => 'NatWest',
+];
+// A couple of names generic cleanup genuinely can't fix word-by-word --
+// Tide's own CASS listing carries its banking partner in the name
+// ("– provided by Clearbank"), which is marketing fine print, not
+// something anyone would type into an account form.
+$BANK_FULL_OVERRIDES = [
+    'tide – provided by clearbank' => 'Tide',
+    'tide - provided by clearbank' => 'Tide',
+];
+
+// Turns the raw scraped CASS participant list ("hsbc uk bank plc", all
+// lowercase) into names someone would actually recognise and pick from a
+// dropdown. Deliberately does NOT strip "co." as a bare corporate suffix
+// -- confirmed live as a real corruption risk: "c. hoare & co." and
+// "rothschild & co" both have "& Co" as part of the REAL brand name, not
+// legal boilerplate, so a blanket "strip trailing co." rule would mangle
+// them into "C. Hoare &" with a dangling ampersand.
+function clean_bank_display_name(string $raw): string {
+    global $BANK_WORD_OVERRIDES, $BANK_FULL_OVERRIDES;
+    $s = trim($raw);
+    if ($s === '') return '';
+    $key = mb_strtolower($s);
+    if (isset($BANK_FULL_OVERRIDES[$key])) return $BANK_FULL_OVERRIDES[$key];
+    $s = preg_replace('/,?\s*\b(plc|ltd\.?|limited)\s*$/i', '', $s) ?? $s;
+    $s = trim($s, " \t\n\r\0\x0B,.");
+    if ($s === '') return '';
+    $lowerConnectors = ['of', 'and', 'the', 'for'];
+    $tokens = preg_split('/(\s+)/', $s, -1, PREG_SPLIT_DELIM_CAPTURE) ?: [$s];
+    $out = '';
+    $wordIndex = 0;
+    foreach ($tokens as $tok) {
+        if (trim($tok) === '') { $out .= $tok; continue; } // whitespace run between words
+        if (preg_match('/^([^a-zA-Z]*)([a-zA-Z]+)([^a-zA-Z]*)$/', $tok, $m)) {
+            [, $pre, $core, $post] = $m;
+            $bare = mb_strtolower($core);
+            if (isset($BANK_WORD_OVERRIDES[$bare])) {
+                $cased = $BANK_WORD_OVERRIDES[$bare];
+            } elseif ($wordIndex > 0 && in_array($bare, $lowerConnectors, true)) {
+                $cased = $bare;
+            } else {
+                $cased = mb_strtoupper(mb_substr($core, 0, 1)) . mb_strtolower(mb_substr($core, 1));
+            }
+            $out .= $pre . $cased . $post;
+        } else {
+            $out .= $tok; // punctuation-only token (e.g. a bare "&")
+        }
+        $wordIndex++;
+    }
+    return trim($out);
+}
+
 if ($action === 'banklist') {
     $cache = read_doc($CACHE_FILE, $EMPTY_CACHE);
-    $names = array_values(array_unique(array_merge(
-        array_map(fn($o) => $o['bank'], $cache['offers'] ?? []),
-        $cache['cassParticipants'] ?? []
-    )));
+    // Offer bank names first (already hand-written, cleanest casing) so
+    // they win the dedupe below; cleaned CASS names fill in the rest.
+    $candidates = array_merge(
+        array_map(fn($o) => (string) $o['bank'], $cache['offers'] ?? []),
+        array_map('clean_bank_display_name', $cache['cassParticipants'] ?? [])
+    );
+    $names = [];
+    foreach ($candidates as $name) {
+        if ($name === '') continue;
+        $isDuplicate = false;
+        foreach ($names as $existing) {
+            if (bank_names_match($existing, $name)) { $isDuplicate = true; break; }
+        }
+        if (!$isDuplicate) $names[] = $name;
+    }
     sort($names, SORT_FLAG_CASE | SORT_STRING);
     echo json_encode(['banks' => $names]);
     exit;
