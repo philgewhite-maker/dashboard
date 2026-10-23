@@ -14,22 +14,32 @@ tabs.forEach((btn) => {
   });
 });
 
+// Only Recommendations/My accounts/CASS map need an invite token -- the
+// Admin tab uses its own, completely separate credential (the admin
+// secret), and Referrals is public. Showing a "need an invite" message
+// INSIDE just those three panels, rather than hiding the whole app
+// behind one gate, is what lets you (the admin) reach Admin and create
+// the first invite without having redeemed one on yourself.
+const NEEDS_INVITE_MESSAGE = "You need an invite link to use this. If you're the admin, open the Admin tab to create one.";
+
+function showNeedsInvite(message) {
+  ['rec-list', 'accounts-list', 'cass-grid-mount'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = `<div class="empty">${message}</div>`;
+  });
+}
+
 async function loadMe() {
-  const statusEl = document.getElementById('app-status');
+  if (!getToken()) { showNeedsInvite(NEEDS_INVITE_MESSAGE); return; }
   try {
     const me = await getMe();
-    document.getElementById('gate').hidden = true;
-    document.getElementById('app').hidden = false;
     renderRecommendations(me);
     renderAccounts(me);
     renderCassGrid(me);
-    if (statusEl) statusEl.textContent = '';
   } catch (err) {
-    document.getElementById('gate').hidden = false;
-    document.getElementById('app').hidden = true;
-    document.getElementById('gate-message').textContent = err instanceof ApiError
-      ? 'That invite link is no longer valid — ask for a new one.'
-      : `Couldn't reach the server: ${err.message}`;
+    showNeedsInvite(err instanceof ApiError
+      ? 'That invite link is no longer valid — ask whoever invited you for a new one.'
+      : `Couldn't reach the server: ${err.message}`);
   }
 }
 
@@ -42,13 +52,9 @@ async function boot() {
       setToken(inviteToken);
       window.history.replaceState({}, '', window.location.pathname);
     } catch (err) {
-      document.getElementById('gate-message').textContent = 'That invite link is no longer valid — ask for a new one.';
+      showNeedsInvite('That invite link is no longer valid — ask for a new one.');
       return;
     }
-  }
-  if (!getToken()) {
-    document.getElementById('gate-message').textContent = 'You need an invite link to use this. Ask whoever invited you to send it again.';
-    return;
   }
   await loadMe();
 }
