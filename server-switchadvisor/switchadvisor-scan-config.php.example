@@ -1,0 +1,33 @@
+<?php
+/**
+ * The values only you know, for switchadvisor-scan.php.
+ *
+ * Copy to switchadvisor-scan-config.php, fill in, upload next to
+ * switchadvisor-scan.php. Kept separate so uploading a newer
+ * switchadvisor-scan.php never overwrites any of this. The real copy is
+ * gitignored; only this .example is tracked.
+ */
+
+// Whoever (or whatever cron job) calls the scan URL must know this. Not
+// the same as switchadvisor.php's $ADMIN_SECRET -- a leaked scan secret can
+// only ever trigger a scrape, never read or change user data.
+$SCAN_SECRET = 'PUT-A-LONG-RANDOM-STRING-HERE';
+
+// The dashboard's OWN commands.php URL -- the same shared NAS channel the
+// personal dashboard uses. Usually "https://yourdomain/commands.php".
+$COMMANDS_URL = 'https://yourdomain.example/commands.php';
+
+// A device token for THIS script to authenticate to commands.php, from the
+// dashboard's own pair.php (see README.md for the exact curl commands).
+// Never the master dashboard secret: a revocable device token means a
+// problem here can be cut off without re-pairing every phone and laptop.
+$COMMANDS_SECRET = 'PUT-A-DEVICE-TOKEN-FROM-PAIR.PHP-HERE';
+
+// From console.anthropic.com. The one place in the whole app that spends AI
+// tokens, at most once a week.
+$ANTHROPIC_API_KEY = 'PUT-YOUR-ANTHROPIC-API-KEY-HERE';
+
+// Krak's own Salary Match help page, re-read on each scan to keep the tier
+// table current. Leave blank to skip; the cache keeps whatever tiers it
+// already has until a scan actually succeeds against this.
+$KRAKEN_TERMS_URL = 'https://support.krak.app/articles/krak-salary-match';

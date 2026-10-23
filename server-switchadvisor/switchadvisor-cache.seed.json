@@ -46,10 +46,14 @@
   ],
   "cashbackRates": {},
   "krakTiers": [
-    { "minBalance": 0, "percent": 0 },
-    { "minBalance": 10000, "percent": 0.75 },
-    { "minBalance": 50000, "percent": 1.0 }
+    { "name": "Starter", "minBalance": 0, "percent": 0 },
+    { "name": "Light", "minBalance": 200, "percent": 0.25 },
+    { "name": "Pro", "minBalance": 1000, "percent": 0.5 },
+    { "name": "Elite", "minBalance": 10000, "percent": 0.75 },
+    { "name": "Max", "minBalance": 50000, "percent": 1 }
   ],
-  "krakTiersAsOf": "2026-10-22",
-  "krakTiersSource": "Seeded from your own figures when this was built (2026-10-22) — not yet confirmed by a real scrape of Kraken's own terms page. Set $KRAKEN_TERMS_URL in switchadvisor-scan.php and run a scan to confirm these thresholds."
+  "krakSalaryMin": 2500,
+  "krakSalaryCap": 25000,
+  "krakTiersAsOf": "2026-10-23",
+  "krakTiersSource": "Read by hand from Krak's own Salary Match help page on 2026-10-23 (https://support.krak.app/articles/krak-salary-match), not by the weekly scan yet. The percentage is of each salary payment (not of your balance); the tier comes from your average balance over the last 30 days; at least £2,500/month of salary is needed and salary above £25,000/month isn't counted. That page's own FAQ example disagrees with its table, so the table was used."
 }

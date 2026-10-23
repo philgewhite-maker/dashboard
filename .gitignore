@@ -48,6 +48,7 @@ server/claude-test.php
 # as every other secret-carrying file: only the .example is tracked.
 server-switchadvisor/switchadvisor.php
 server-switchadvisor/switchadvisor-scan.php
+server-switchadvisor/switchadvisor-scan-config.php
 # The invite-only app's own two documents, same reasoning as
 # dashboard-data.json above -- never actually written here (they live one
 # directory above public_html on the real host), just a guard in case

@@ -33,35 +33,25 @@ declare(strict_types=1);
 
 // ---- Configuration ---------------------------------------------------
 
-// Whoever (or whatever cron job) calls this URL must know this. Not the
-// same as switchadvisor.php's $ADMIN_SECRET — a leaked scan secret can
-// only ever trigger a scrape, never read or change user data.
-$SCAN_SECRET = 'PUT-A-LONG-RANDOM-STRING-HERE';
+// The five values only you know -- $SCAN_SECRET, $COMMANDS_URL,
+// $COMMANDS_SECRET, $ANTHROPIC_API_KEY and $KRAKEN_TERMS_URL -- live in
+// switchadvisor-scan-config.php next to this file (copy it from
+// switchadvisor-scan-config.php.example). Kept out of this script so that
+// uploading a newer copy of it never wipes them: every earlier update
+// reset the Anthropic key and the Kraken URL to placeholders.
+$configFile = __DIR__ . '/switchadvisor-scan-config.php';
+if (!is_file($configFile)) {
+    http_response_code(500);
+    header('Content-Type: application/json');
+    echo json_encode(['ok' => false, 'error' => 'Server not configured: upload switchadvisor-scan-config.php next to this file (copy switchadvisor-scan-config.php.example and fill it in)']);
+    exit;
+}
+require $configFile;
 
-// The dashboard's OWN commands.php URL — same shared NAS channel, see
-// this file's own header comment for why. Usually
-// "https://yourdomain/commands.php".
-$COMMANDS_URL = 'https://yourdomain.example/commands.php';
-
-// A token for THIS script to authenticate to commands.php, i.e. a
-// device token from the dashboard's own pair.php (Settings -> Devices
-// -> Add a device, then redeem it — see README.md here for the exact
-// curl command). Never the master dashboard secret: a revocable device
-// token means a problem here can be cut off without re-pairing every
-// phone and laptop you own.
-$COMMANDS_SECRET = 'PUT-A-DEVICE-TOKEN-FROM-PAIR.PHP-HERE';
-
-// From console.anthropic.com. This is the ONE place in the whole app
-// that spends AI tokens, and it runs at most once a week.
-$ANTHROPIC_API_KEY = 'PUT-YOUR-ANTHROPIC-API-KEY-HERE';
+// Not secret, so they stay here and update with the script.
 $ANTHROPIC_MODEL = 'claude-sonnet-5-5';
-
 $MSE_SWITCH_URL = 'https://www.moneysavingexpert.com/banking/compare-best-bank-accounts/#switch';
 $CASS_LIST_URL = 'https://www.currentaccountswitch.co.uk/banks-building-societies/';
-// Optional. Leave blank to skip re-scraping Kraken's own tier table —
-// the cache keeps whatever krakTiers it already has until this is set
-// and a scan actually succeeds against it.
-$KRAKEN_TERMS_URL = '';
 
 // Same path switchadvisor.php's own $CACHE_FILE points at — MUST match.
 $CACHE_FILE = dirname(__DIR__) . '/switchadvisor-cache.json';
@@ -239,12 +229,28 @@ foreach ($offers as &$o) { $o['url'] = $MSE_SWITCH_URL; }
 unset($o);
 
 $krakTiers = null;
+$krakSalaryMin = null;
+$krakSalaryCap = null;
 $krakenPage = $pages['kraken'] ?? null;
 if ($krakenPage && ($krakenPage['status'] ?? '') === 'done' && !empty($krakenPage['result']['html'])) {
     $krakText = strip_html_to_text((string) $krakenPage['result']['html']);
-    $krakPrompt = "Below is text from Kraken's own page describing their UK bank account's tiered monthly reward based on average balance held. Extract the tier table.\n\nPAGE TEXT:\n" . substr($krakText, 0, 12000) . "\n\nReturn ONLY JSON, no other text: {\"tiers\": [{\"minBalance\": numeric GBP threshold, \"percent\": numeric annual percent}]}";
+    // Krak's reward is a percentage of each SALARY PAYMENT -- the average
+    // balance only picks which percentage. An earlier version of this
+    // prompt asked for an "annual percent", which baked the wrong model
+    // into the data. Ask for exactly what the page defines.
+    $krakPrompt = "Below is text from Krak's (Kraken's UK app) Salary Match help page. Krak pays cashback as a percentage of each SALARY PAYMENT you receive; your average balance only decides which percentage tier you are in. Extract the tier table and the qualifying rules.\n\nPAGE TEXT:\n" . substr($krakText, 0, 12000) . "\n\nReturn ONLY JSON, no other text: {\"tiers\": [{\"name\": \"tier name\", \"minBalance\": numeric GBP average-balance threshold for this tier, \"percent\": numeric percentage of each salary payment paid as cashback}], \"salaryMin\": numeric minimum monthly salary in GBP needed to qualify or null, \"salaryCap\": numeric monthly salary in GBP above which nothing extra is counted or null}. Use the page's main tier table; if an example elsewhere on the page disagrees with it, trust the table.";
     $krakAi = call_anthropic($ANTHROPIC_API_KEY, $ANTHROPIC_MODEL, $krakPrompt, 8000);
-    if ($krakAi['ok'] && !empty($krakAi['data']['tiers'])) $krakTiers = $krakAi['data']['tiers'];
+    if ($krakAi['ok'] && is_array($krakAi['data']['tiers'] ?? null)) {
+        // Only well-formed tiers, and at least two of them -- a malformed
+        // answer must leave the existing (good) tier data in the cache
+        // alone rather than replace it with garbage.
+        $good = array_values(array_filter($krakAi['data']['tiers'], fn($t) => is_array($t) && isset($t['minBalance'], $t['percent']) && is_numeric($t['minBalance']) && is_numeric($t['percent'])));
+        if (count($good) >= 2) {
+            $krakTiers = $good;
+            $krakSalaryMin = isset($krakAi['data']['salaryMin']) && is_numeric($krakAi['data']['salaryMin']) ? (float) $krakAi['data']['salaryMin'] : null;
+            $krakSalaryCap = isset($krakAi['data']['salaryCap']) && is_numeric($krakAi['data']['salaryCap']) ? (float) $krakAi['data']['salaryCap'] : null;
+        }
+    }
 }
 
 // ---- Write the cache: flock + atomic tmp-then-rename, same shape as
@@ -254,7 +260,7 @@ $lock = fopen($CACHE_FILE . '.lock', 'c');
 if ($lock === false) fail(500, 'Could not open lock file — check directory permissions');
 flock($lock, LOCK_EX);
 
-$current = ['scrapedAt' => null, 'history' => [], 'offers' => [], 'cassParticipants' => [], 'cashbackRates' => [], 'krakTiers' => [], 'krakTiersAsOf' => null, 'krakTiersSource' => null];
+$current = ['scrapedAt' => null, 'history' => [], 'offers' => [], 'cassParticipants' => [], 'cashbackRates' => [], 'krakTiers' => [], 'krakSalaryMin' => null, 'krakSalaryCap' => null, 'krakTiersAsOf' => null, 'krakTiersSource' => null];
 if (is_file($CACHE_FILE)) {
     $raw = file_get_contents($CACHE_FILE);
     $parsed = $raw !== false && $raw !== '' ? json_decode($raw, true) : null;
@@ -278,6 +284,8 @@ $next = [
     'cassParticipants' => $cassParticipants ?: ($current['cassParticipants'] ?? []),
     'cashbackRates' => $current['cashbackRates'] ?? [],
     'krakTiers' => $krakTiers ?? ($current['krakTiers'] ?? []),
+    'krakSalaryMin' => $krakTiers ? ($krakSalaryMin ?? ($current['krakSalaryMin'] ?? null)) : ($current['krakSalaryMin'] ?? null),
+    'krakSalaryCap' => $krakTiers ? ($krakSalaryCap ?? ($current['krakSalaryCap'] ?? null)) : ($current['krakSalaryCap'] ?? null),
     'krakTiersAsOf' => $krakTiers ? $now : ($current['krakTiersAsOf'] ?? null),
     'krakTiersSource' => $krakTiers ? 'scraped ' . $now : ($current['krakTiersSource'] ?? null),
 ];

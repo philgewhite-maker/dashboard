@@ -29,16 +29,14 @@ export async function renderReferrals() {
   const krakNote = document.getElementById('krak-tiers-note');
   if (krakNote) {
     try {
-      const { krakTiers, krakTiersAsOf, krakTiersSource } = await getReferralInfo();
+      const { krakTiers, krakSalaryMin, krakTiersAsOf, krakTiersSource } = await getReferralInfo();
       if (krakTiers?.length) {
-        const tiers = krakTiers.map((t) => `£${Number(t.minBalance).toLocaleString('en-GB')}+ → ${t.percent}%`).join(' · ');
-        // Never state these as flat fact -- krakTiersSource says whether
-        // a real scrape has ever confirmed them (starts "scraped ...") or
-        // they're still what was typed in at build time ("Seeded from
-        // your own figures...", the plan's own explicit caveat).
-        const unverified = !krakTiersSource || !krakTiersSource.toLowerCase().startsWith('scraped');
-        krakNote.textContent = `Kraken's tiers (as of ${krakTiersAsOf || 'unknown'}): ${tiers}`
-          + (unverified ? ' — not yet confirmed by a real scrape of Kraken\'s own terms page; treat as a starting estimate.' : ' — confirmed by the last scrape.');
+        const tiers = krakTiers.map((t) => `${t.name ? `${t.name} ` : ''}£${Number(t.minBalance).toLocaleString('en-GB')}+ → ${t.percent}%`).join(' · ');
+        // Shows the source text as written (it says whether the figures
+        // were read by hand or scraped, and from where) rather than
+        // inferring a label from it -- the percentages are of each salary
+        // PAYMENT, and the tier comes from your average balance.
+        krakNote.textContent = `Krak Salary Match — a percentage of each salary payment${krakSalaryMin ? ` (needs £${Number(krakSalaryMin).toLocaleString('en-GB')}+ a month paid in)` : ''}, tier set by your average balance, as of ${krakTiersAsOf || 'unknown'}: ${tiers}. ${krakTiersSource || ''}`.trim();
       }
     } catch { /* non-essential context line */ }
   }

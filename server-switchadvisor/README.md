@@ -34,10 +34,11 @@ offers and the real CASS participant list, fetched live on 2026-10-22
 when this was built. Upload it as `switchadvisor-cache.json` (one
 directory above `public_html`, next to where `switchadvisor-data.json`
 will appear) so the app has real data from day one instead of waiting a
-week for the first cron run. The Kraken tier figures in it are **seeded
-from your own stated figures, not yet confirmed by a real scrape** — see
-its own `krakTiersSource` field; set `$KRAKEN_TERMS_URL` in step 4 and
-run a scan once you have the real terms page URL.
+week for the first cron run. The Kraken figures in it were read by hand
+from Krak's own Salary Match help page (see its `krakTiersSource`
+field) — the reward is a percentage of each salary payment, with your
+average balance picking the tier. The weekly scan keeps them current
+once `$KRAKEN_TERMS_URL` is set (step 4).
 
 ## 3. Pair the scan script as its own home-agent device
 
@@ -56,16 +57,19 @@ curl -s -X POST "https://yourdomain/pair.php?action=redeem" \
 # -> {"token": "...", ...}  <- paste this into $COMMANDS_SECRET below
 ```
 
-## 4. Configure `switchadvisor-scan.php`
+## 4. Configure the scan: `switchadvisor-scan-config.php`
 
-Fill in:
+The values only you know live in their own file, so uploading a newer
+`switchadvisor-scan.php` never wipes them. Copy
+`switchadvisor-scan-config.php.example` to `switchadvisor-scan-config.php`,
+fill it in, and upload it next to `switchadvisor-scan.php`:
 - `$SCAN_SECRET` — a new random string, the trigger secret (step 5).
 - `$COMMANDS_URL` — your dashboard's own `commands.php` URL.
 - `$COMMANDS_SECRET` — the token from step 3.
 - `$ANTHROPIC_API_KEY` — from console.anthropic.com. This is the only
   place in the whole app that spends AI tokens, at most weekly.
-- `$KRAKEN_TERMS_URL` — optional, leave blank until you have the real
-  URL for Kraken's own tiered-reward terms page.
+- `$KRAKEN_TERMS_URL` — Krak's Salary Match help page
+  (`https://support.krak.app/articles/krak-salary-match`); blank skips it.
 
 ## 5. Weekly cron job
 

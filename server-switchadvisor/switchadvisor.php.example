@@ -114,7 +114,7 @@ function read_doc(string $file, array $empty): array {
 }
 
 $EMPTY_DATA = ['rev' => 0, 'invites' => [], 'users' => []];
-$EMPTY_CACHE = ['scrapedAt' => null, 'history' => [], 'offers' => [], 'cassParticipants' => [], 'cashbackRates' => [], 'krakTiers' => [], 'krakTiersAsOf' => null, 'krakTiersSource' => null];
+$EMPTY_CACHE = ['scrapedAt' => null, 'history' => [], 'offers' => [], 'cassParticipants' => [], 'cashbackRates' => [], 'krakTiers' => [], 'krakSalaryMin' => null, 'krakSalaryCap' => null, 'krakTiersAsOf' => null, 'krakTiersSource' => null];
 
 // ---- Shared helpers ----------------------------------------------------
 
@@ -351,38 +351,87 @@ function compute_recommendations(array $user, array $cache): array {
     return $rows;
 }
 
+// Krak "Salary Match", per Krak's own help page (see the cache's
+// krakTiersSource): the reward is a PERCENTAGE OF EACH SALARY PAYMENT,
+// not of your balance. Your average balance over the last 30 days only
+// decides which percentage tier you are in. At least krakSalaryMin a
+// month of salary is needed to qualify, and salary above krakSalaryCap a
+// month isn't counted. This used to apply the percentage to the balance
+// as an annual rate -- a misreading of the plan's own wording, caught
+// when the figures didn't match how the scheme actually pays out.
 function compute_krak_row(array $user, array $cache): array {
-    $salary = $user['annualSalaryNet'] ?? null;
-    $assumed = $user['assumedBalance'] ?? null;
-    $usedAssumed = false;
-    if ($assumed === null || $assumed === '') {
-        $usedAssumed = true;
-        $assumed = $salary ? ((float) $salary / 12) * 2 : 0;
-    }
-    $assumed = (float) $assumed;
     $tiers = $cache['krakTiers'] ?? [];
     usort($tiers, fn($a, $b) => ($a['minBalance'] ?? 0) <=> ($b['minBalance'] ?? 0));
-    $percent = 0.0;
-    foreach ($tiers as $t) {
-        if ($assumed >= ($t['minBalance'] ?? 0)) $percent = (float) ($t['percent'] ?? 0);
-    }
-    $monthly = $assumed * ($percent / 100) / 12;
-    $balanceNote = $usedAssumed
-        ? sprintf('assuming a £%s held balance (2 months\' net salary — edit this to use your own figure)', number_format($assumed, 0))
-        : sprintf('your stated £%s balance', number_format($assumed, 0));
-    $sourceNote = $cache['krakTiersSource'] ?? '';
-    return [
+    $minSalary = (float) ($cache['krakSalaryMin'] ?? 2500);
+    $salaryCap = (float) ($cache['krakSalaryCap'] ?? 25000);
+    $sourceNote = (string) ($cache['krakTiersSource'] ?? '');
+    $row = [
         'bank' => 'Kraken',
-        'product' => 'Kraken bank account',
+        'product' => 'Krak Salary Match',
         'action' => 'open',
         'fromAccountId' => null,
-        'amount' => round($monthly * 12, 2),
+        'amount' => 0,
         'eligible' => true,
-        'priority' => priority_band($monthly * 12),
-        'rationale' => sprintf('≈£%s/month (%s%% annual on %s).%s', number_format($monthly, 2), $percent, $balanceNote, $sourceNote ? ' ' . $sourceNote : ''),
-        'url' => '',
-        'conditions' => sprintf('Tiers last confirmed %s.', $cache['krakTiersAsOf'] ?? 'unknown'),
+        'priority' => 'low',
+        'rationale' => '',
+        'url' => 'https://support.krak.app/articles/krak-salary-match',
+        'conditions' => sprintf(
+            'Needs at least £%s a month of salary paid in by Faster Payments (UK) or SEPA (EU), straight from an employer or other third party, on a regular pattern; a verified Krak account; UK or listed EU/EEA residence. Your tier uses your average total balance across Krak, Kraken and Kraken Pro over the last 30 days, recalculated monthly; the reward is paid at the start of the following month. Tiers last read %s.',
+            number_format($minSalary, 0),
+            $cache['krakTiersAsOf'] ?? 'unknown'
+        ),
     ];
+    $salary = $user['annualSalaryNet'] ?? null;
+    if (!$salary || (float) $salary <= 0) {
+        $row['rationale'] = 'Enter your net annual salary in the profile section above to estimate this — Krak pays a percentage of each salary payment.';
+        return $row;
+    }
+    $monthlySalary = (float) $salary / 12;
+    $assumed = $user['assumedBalance'] ?? null;
+    $usedAssumed = ($assumed === null || $assumed === '');
+    $balance = $usedAssumed ? $monthlySalary * 2 : (float) $assumed;
+    $balanceNote = $usedAssumed
+        ? sprintf("assuming a £%s average balance (2 months' net salary — enter your own figure in the profile above)", number_format($balance, 0))
+        : sprintf('with your stated £%s average balance', number_format($balance, 0));
+    if ($monthlySalary < $minSalary) {
+        $row['rationale'] = sprintf("Krak needs at least £%s a month of salary paid in to qualify; yours is about £%s a month, so there's no reward at that level.", number_format($minSalary, 0), number_format($monthlySalary, 0));
+        return $row;
+    }
+    $tier = null;
+    foreach ($tiers as $t) {
+        if ($balance >= ($t['minBalance'] ?? 0)) $tier = $t;
+    }
+    $percent = $tier ? (float) ($tier['percent'] ?? 0) : 0.0;
+    if ($percent <= 0) {
+        $firstPaying = null;
+        foreach ($tiers as $t) {
+            if (($t['percent'] ?? 0) > 0) { $firstPaying = $t; break; }
+        }
+        $row['rationale'] = $firstPaying
+            ? sprintf('0%% on a £%s average balance (%s) — the first paying tier needs £%s or more, so nothing here until you hold that.', number_format($balance, 0), $usedAssumed ? 'assumed' : 'your figure', number_format((float) ($firstPaying['minBalance'] ?? 0), 0))
+            : '0% at this balance.';
+        return $row;
+    }
+    $counted = min($monthlySalary, $salaryCap);
+    $monthly = $counted * $percent / 100;
+    $annual = $monthly * 12;
+    $tierName = (string) ($tier['name'] ?? '');
+    $capNote = $monthlySalary > $salaryCap ? sprintf(' (only the first £%s of salary counts)', number_format($salaryCap, 0)) : '';
+    $row['amount'] = round($annual, 2);
+    $row['priority'] = priority_band($annual);
+    $row['rationale'] = sprintf(
+        '≈£%s a month, £%s over a year — ongoing for as long as your salary keeps landing and your balance stays up, not a one-off. That is %s%% of each ~£%s salary payment%s%s, which needs a £%s+ average balance — %s.%s',
+        number_format($monthly, 2),
+        number_format($annual, 0),
+        rtrim(rtrim(number_format($percent, 2), '0'), '.'),
+        number_format($monthlySalary, 0),
+        $capNote,
+        $tierName !== '' ? " at the {$tierName} tier" : '',
+        number_format((float) ($tier['minBalance'] ?? 0), 0),
+        $balanceNote,
+        $sourceNote !== '' ? ' ' . $sourceNote : ''
+    );
+    return $row;
 }
 
 // A fixed, simple grid: every open account, plus CASS switch-history
@@ -527,6 +576,8 @@ if ($action === 'referrals') {
     $cache = read_doc($CACHE_FILE, $EMPTY_CACHE);
     echo json_encode([
         'krakTiers' => $cache['krakTiers'] ?? [],
+        'krakSalaryMin' => $cache['krakSalaryMin'] ?? null,
+        'krakSalaryCap' => $cache['krakSalaryCap'] ?? null,
         'krakTiersAsOf' => $cache['krakTiersAsOf'] ?? null,
         // Surfaced so the frontend can say whether these are confirmed by
         // a real scrape or still the figures seeded at build time --
