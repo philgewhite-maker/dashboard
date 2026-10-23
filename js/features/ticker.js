@@ -25,7 +25,7 @@
 // on the strip by itself and takes them off when you're home. See
 // travelItems().
 import { data, queueSave, inventorySets, SET_CORE_GROUPS } from '../state.js';
-import { escapeHtml, uid, bindBackdropClose } from '../utils.js';
+import { escapeHtml, uid, bindBackdropClose, claudeWeeklyPace } from '../utils.js';
 import * as letting from './letting.js';
 import { travelStripPrograms } from './loyaltybalances.js';
 import { matchBankLogo } from '../bankLogos.js';
@@ -482,6 +482,14 @@ if (!live.length) return [];
 return [{ id: 'auto-modelcheck', kind: 'modelcheck', auto: true, count: live.length, top: live[0], all: live, minCost: mc.flagMinCost || 1 }];
 }
 
+// One tile while a subscription reading exists (written by the hourly
+// Claude Code task via agent-write.php); absent until the first reading.
+function claudeUsageItems() {
+const sub = data.claudeSubscriptionUsage;
+if (!claudeWeeklyPace(sub)) return [];
+return [{ id: 'auto-claudeusage', kind: 'claudeusage', auto: true, sub }];
+}
+
 // Lazy, not a top-level import -- connections.js is a heavy module this
 // file would otherwise force onto every single page load (the ticker
 // renders before any tab is even chosen), the same cost travel.js's own
@@ -519,7 +527,7 @@ return [{ id: 'auto-inv-incomplete', kind: 'inv-incomplete', auto: true, count: 
 function activeItems() {
 const mine = (data.ticker.items || []).filter((i) => !i.hidden);
 const seen = new Set(mine.map(keyFor));
-const extra = [...travelItems(), ...cassBonusItems(), ...siteHealthFailureItems(), ...modelUpgradeItems(), ...incompleteSetItems()].filter((i) => !seen.has(keyFor(i)));
+const extra = [...travelItems(), ...cassBonusItems(), ...siteHealthFailureItems(), ...modelUpgradeItems(), ...claudeUsageItems(), ...incompleteSetItems()].filter((i) => !seen.has(keyFor(i)));
 return [...mine, ...extra];
 }
 
@@ -721,6 +729,20 @@ return tile('Models', escapeHtml(item.count === 1 ? `${top.purpose} ↑ ${top.up
 `${lines.join(' · ')}. A newer model exists for something that cost over $${item.minCost} in a month. Click to open.`,
 { auto: true, gotoTab: 'settings', gotoTarget: '#model-check-panel' });
 }
+if (item.kind === 'claudeusage') {
+const pace = claudeWeeklyPace(item.sub);
+if (!pace) return '';
+const fh = item.sub.fiveHour || {};
+const ageH = item.sub.asOf ? (Date.now() - new Date(item.sub.asOf).getTime()) / 3600000 : null;
+const stale = ageH !== null && ageH > 6;
+// Used above the flat-pace line reads red, at or under it green.
+const cls = pace.points > 0.5 ? 'tick-down' : 'tick-up';
+const five = fh.percentUsed != null ? `<span class="tick-flat">5h ${Math.round(fh.percentUsed)}%${stale ? ' · stale' : ''}</span>` : (stale ? '<span class="tick-flat">stale</span>' : '');
+const exhaust = pace.exhaustAt ? ` At this rate it hits 100% around ${new Date(pace.exhaustAt).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}.` : '';
+return tile('Claude', `<span class="${cls}">w${Math.round(pace.used)}%/${Math.round(pace.expected)}%</span>`, five,
+`Weekly usage ${Math.round(pace.used)}% against ${Math.round(pace.expected)}% of the week elapsed (${Math.abs(pace.points).toFixed(1)} points ${pace.points > 0 ? 'ahead of' : 'behind'} a flat pace).${exhaust}${item.sub.asOf ? ` Reading taken ${Math.round(ageH)}h ago.` : ''} Click for detail.`,
+{ auto: true, gotoTab: 'settings', gotoTarget: '#claude-usage-summary' });
+}
 if (item.kind === 'holding') {
 const fxHit = c[keyFor({ kind: 'fx', base: HOME, quote: 'EUR' })];
 const dbkHit = c[keyFor({ kind: 'quote', symbol: t.holdingSymbol || 'DBK.DE' })];
@@ -802,6 +824,7 @@ case 'holding': return 'Holding';
 case 'cass': return 'CASS';
 case 'sitehealth': return 'Checks';
 case 'modelcheck': return 'Models';
+case 'claudeusage': return 'Claude';
 default: return item.kind;
 }
 }
@@ -975,6 +998,7 @@ renderTicker();
 function initTicker() {
 if (!document.getElementById('ticker')) return;
 renderTicker();
+window.addEventListener('claude-usage-updated', renderTicker);
 // After first paint and the initial document pull, like the scheduled
 // syncs: a fetch into a half-loaded app just fails and caches nothing.
 setTimeout(() => refreshTicker(), 3000);

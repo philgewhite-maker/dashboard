@@ -1363,8 +1363,25 @@ const classified = await Promise.all(files.map(async (f) => ({ file: f, ...(awai
 return classified.every((c) => c.isScreenshot) && looksLikeSameScreenshotPieces(classified);
 }
 
+// Weekly-window pace from a data.claudeSubscriptionUsage reading. The
+// window's start is resetsAt minus 7 days, so the expected share used is
+// computed live (always current) against the last reported percentUsed.
+function claudeWeeklyPace(sub, now = Date.now()) {
+const wk = sub && sub.weekly;
+if (!wk || wk.percentUsed == null || !wk.resetsAt) return null;
+const end = new Date(wk.resetsAt).getTime();
+if (isNaN(end)) return null;
+const WEEK_MS = 7 * 86400000;
+const start = end - WEEK_MS;
+const elapsed = Math.min(Math.max(now - start, 0), WEEK_MS);
+const expected = (elapsed / WEEK_MS) * 100;
+const used = Number(wk.percentUsed);
+const exhaustAt = used > 0 && elapsed > 0 ? start + (elapsed * 100) / used : null;
+return { used, expected, points: used - expected, exhaustAt: exhaustAt && exhaustAt < end ? exhaustAt : null };
+}
+
 export {
-todayStr, daysAgoStr, dateStrAdd, unfoldIcsLines, parseIcsProperty, icsDateTime, parseLooseDateTime, last7Dates, uid, daysSince, daysUntil, foldDiacritics, MISSING_KEY_LINK_HTML, SYNC_LINK_HTML, NOTION_LINK_HTML, TELEGRAM_BOT_LINK_HTML, looksLikeUrl, prettyUrl, stripHtmlForExtraction,
+claudeWeeklyPace, todayStr, daysAgoStr, dateStrAdd, unfoldIcsLines, parseIcsProperty, icsDateTime, parseLooseDateTime, last7Dates, uid, daysSince, daysUntil, foldDiacritics, MISSING_KEY_LINK_HTML, SYNC_LINK_HTML, NOTION_LINK_HTML, TELEGRAM_BOT_LINK_HTML, looksLikeUrl, prettyUrl, stripHtmlForExtraction,
 escapeHtml, decodeHtmlEntities, setPanelCollapsed, affiliateLink, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, buildFlagMatcher, applyFlagMatcher, knownCityMap, knownScalarValues, pickChipHtml, splitCsvLine, scrollAndFlash, bindForm, bindBackdropClose, logoBadgeHtml, bindLogoFallbacks,
 findMentions, COUNTRY_NAME_TO_NATIONALITY,
 resizeImageToBlob, fileToBase64, loadImage, cropThumbnailToBlob, loadJsPdf,

@@ -41,6 +41,7 @@ let changed = false;
 if (claudeSubscriptionUsage) {
 data.claudeSubscriptionUsage = claudeSubscriptionUsage;
 changed = true;
+window.dispatchEvent(new CustomEvent('claude-usage-updated'));
 }
 const newEntries = (Array.isArray(agentInbox) ? agentInbox : []).filter((e) => !data.agentInbox.some((x) => x.id === e.id));
 if (newEntries.length) {

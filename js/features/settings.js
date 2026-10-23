@@ -2,7 +2,7 @@ import { data, queueSave, getLocalSettings, setLocalSetting, exportBackup, impor
 import { TMDB_GENRES } from '../catalogue.js';
 import { runMediaRecsCheck } from './mediarecs.js';
 import { renderAll } from '../render-all.js';
-import { escapeHtml, uid } from '../utils.js';
+import { escapeHtml, uid, claudeWeeklyPace } from '../utils.js';
 import { renderCalendarLimits } from './calendars.js';
 import { renderPackingModules, bindPackingModules } from './packing.js';
 import { renderTagCleanup } from './tagcleanup.js';
@@ -99,11 +99,13 @@ const wk = sub.weekly || {};
 const lines = [];
 if (fh.percentUsed != null) lines.push(`5h window: ${fh.percentUsed}%, resets in ${hoursMinsUntil(fh.resetsAt)}`);
 if (wk.percentUsed != null) lines.push(`Weekly: ${wk.percentUsed}%, resets in ${hoursMinsUntil(wk.resetsAt)}`);
-if (wk.glideslopePoints != null) {
-const sign = wk.glideslopePoints >= 0 ? 'ahead of' : 'behind';
-lines.push(`Running ${Math.abs(wk.glideslopePoints).toFixed(1)} points ${sign} a flat pace this week`);
+// Computed live from the window's reset time, so the reading task only
+// has to report percent + reset.
+const pace = claudeWeeklyPace(sub);
+if (pace) {
+lines.push(`Week ${Math.round(pace.expected)}% elapsed, ${Math.round(pace.used)}% used — ${Math.abs(pace.points).toFixed(1)} points ${pace.points >= 0 ? 'ahead of' : 'behind'} a flat pace`);
+if (pace.exhaustAt) lines.push(`At this rate, 100% around ${new Date(pace.exhaustAt).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}`);
 }
-if (wk.projectedExhaustionAt) lines.push(`Projected to reach 100% around ${new Date(wk.projectedExhaustionAt).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}`);
 if (sub.spendEstimateUsd != null) lines.push(`~$${sub.spendEstimateUsd.toFixed(2)} API-equivalent this week`);
 subHtml = `<div class="settings-note" style="margin:0;">${lines.map((l) => escapeHtml(l)).join('<br>')}</div>
 <div class="settings-note" style="margin:2px 0 0;color:var(--muted);">as of ${escapeHtml(shortAgo(sub.asOf))}</div>`;
@@ -320,7 +322,8 @@ import("./shopping.js").then((m) => m.renderInventory());
 renderAll();
 });
 
-document.getElementById('refresh-usage-btn').addEventListener('click', renderUsage);
+document.getElementById('refresh-usage-btn').addEventListener('click', () => { renderUsage(); renderClaudeUsage(); });
+window.addEventListener('claude-usage-updated', renderClaudeUsage);
 await renderUsage();
 renderClaudeUsage();
 renderModelCheck();
