@@ -85,7 +85,7 @@ if ($SCAN_SECRET === '' || strpos($SCAN_SECRET, 'PUT-') === 0) fail(500, 'Server
 $provided = (string) ($_GET['secret'] ?? $_SERVER['HTTP_X_SCAN_SECRET'] ?? '');
 if (!hash_equals($SCAN_SECRET, $provided)) fail(401, 'Bad or missing scan secret');
 
-set_time_limit(180);
+set_time_limit(400);
 
 // ---- Talk to commands.php, same protocol the home-agent itself expects --
 
@@ -188,7 +188,7 @@ function call_anthropic(string $apiKey, string $model, string $prompt, int $maxT
         CURLOPT_POST => true,
         CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'x-api-key: ' . $apiKey, 'anthropic-version: 2023-06-01'],
         CURLOPT_POSTFIELDS => json_encode(['model' => $model, 'max_tokens' => $maxTokens, 'messages' => [['role' => 'user', 'content' => $prompt]]]),
-        CURLOPT_TIMEOUT => 90,
+        CURLOPT_TIMEOUT => 170,
     ]);
     $response = curl_exec($ch);
     $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -232,7 +232,7 @@ if ($cassPage && ($cassPage['status'] ?? '') === 'done' && !empty($cassPage['res
 
 $prompt = "Below is text pasted from MoneySavingExpert's bank switch-offers page. Extract every current switch bonus for opening a NEW account (ignore the 'ongoing cashback & perks for accounts you keep' section if present).\n\nPAGE TEXT:\n{$switchText}\n\nReturn ONLY a JSON object, no other text, no markdown fences:\n{\"offers\": [{\"bank\": \"short display name, e.g. 'Barclays' or 'HSBC'\", \"product\": \"the account's own name, e.g. 'Barclays Bank Account' or 'HSBC Premier'\", \"amount\": numeric total cash value in GBP, \"conditions\": \"one or two sentences summarising the real requirements\", \"minFunding\": numeric minimum pay-in/deposit in GBP or null, \"ddCount\": minimum direct debits required or null, \"heldSinceCutoff\": \"YYYY-MM-DD if the offer states an EXACT dated cutoff for 'no ACCOUNT HELD since <date>' (about holding an account), otherwise null\", \"bonusSinceCutoff\": \"YYYY-MM-DD if the offer states an EXACT dated cutoff for 'no previous SWITCH BONUS since <date>' (about having RECEIVED a bonus before, a DIFFERENT condition from account-holding — e.g. Lloyds' own 'no previous switch bonus from Lloyds... since 1 Jan 2023'), otherwise null if the exclusion is unconditional ('no previous bonus', no date at all) — never guess a year that wasn't actually stated for either field, and never conflate the two: an account-holding cutoff and a bonus-receipt cutoff are not the same thing even when they share the same date\", \"requiresSwitch\": true unless the offer's own text states a genuine no-switch alternative (e.g. 'OR have £100k+ saved/invested, no switch needed') — true for almost all of these, since they are switch bonuses by definition, \"highEarner\": true if this specifically needs a high salary/savings tier (e.g. a Premier account), else false}]}";
 
-$ai = call_anthropic($ANTHROPIC_API_KEY, $ANTHROPIC_MODEL, $prompt, 4000);
+$ai = call_anthropic($ANTHROPIC_API_KEY, $ANTHROPIC_MODEL, $prompt, 16000);
 if (!$ai['ok']) fail(502, 'AI extraction failed: ' . $ai['error']);
 $offers = array_values(array_filter($ai['data']['offers'] ?? [], fn($o) => !empty($o['bank']) && !empty($o['amount'])));
 foreach ($offers as &$o) { $o['url'] = $MSE_SWITCH_URL; }
@@ -243,7 +243,7 @@ $krakenPage = $pages['kraken'] ?? null;
 if ($krakenPage && ($krakenPage['status'] ?? '') === 'done' && !empty($krakenPage['result']['html'])) {
     $krakText = strip_html_to_text((string) $krakenPage['result']['html']);
     $krakPrompt = "Below is text from Kraken's own page describing their UK bank account's tiered monthly reward based on average balance held. Extract the tier table.\n\nPAGE TEXT:\n" . substr($krakText, 0, 12000) . "\n\nReturn ONLY JSON, no other text: {\"tiers\": [{\"minBalance\": numeric GBP threshold, \"percent\": numeric annual percent}]}";
-    $krakAi = call_anthropic($ANTHROPIC_API_KEY, $ANTHROPIC_MODEL, $krakPrompt, 1000);
+    $krakAi = call_anthropic($ANTHROPIC_API_KEY, $ANTHROPIC_MODEL, $krakPrompt, 8000);
     if ($krakAi['ok'] && !empty($krakAi['data']['tiers'])) $krakTiers = $krakAi['data']['tiers'];
 }
 

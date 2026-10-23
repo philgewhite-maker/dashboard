@@ -18,7 +18,13 @@ const DEFAULT_MODEL = 'claude-opus-5';
 // rather than guessing.
 const PRICES_PER_MTOK = {
 'claude-opus-5': { input: 5, output: 25 },
-'claude-sonnet-5': { input: 3, output: 15 },
+// Sonnet 5 was $2/$10 at launch as introductory pricing, with a rise to
+// $3/$15 scheduled for 1 Sept 2026 -- Anthropic's pricing page now says
+// that rise will NOT happen and $2/$10 is the standard price. This used
+// to say 3/15, which overstated every Sonnet 5 call's estimated cost by
+// 50%. Sonnet 5.5 is the same $2/$10 (no saving from moving to it).
+'claude-sonnet-5': { input: 2, output: 10 },
+'claude-sonnet-5-5': { input: 2, output: 10 },
 // Haiku 5.5 actually has two rate cards (low tier up to a 100K-token
 // prompt, a higher one above it) -- this table has no notion of a
 // per-request tier, and every call this app makes to it is a small,
