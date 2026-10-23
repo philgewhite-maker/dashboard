@@ -53,7 +53,7 @@ const MSE_SWITCH_URL = 'https://www.moneysavingexpert.com/banking/compare-best-b
 // original home-agent-fetch-then-AI-parse path unchanged, so this is
 // purely additive. The endpoint is public and read-only (just
 // re-published MSE/CASS data, nothing per-user), so no secret is needed.
-const SWITCHADVISOR_URL = '';
+const SWITCHADVISOR_URL = 'https://georgewhiteeuropean.co.uk/switchadvisor.php';
 
 async function fetchSharedCache() {
 if (!SWITCHADVISOR_URL) return null;
