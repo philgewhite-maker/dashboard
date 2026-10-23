@@ -87,7 +87,7 @@ output: prev.output + (usage.output_tokens || 0),
 };
 all[month] = monthEntry;
 await setLocalSetting('apiUsage', all);
-pushUsageToSynced(month, model, usage);
+pushUsageToSynced(month, purpose, model, usage);
 }
 
 // Synced, cross-device counterpart to the per-device log just above --
@@ -98,7 +98,7 @@ pushUsageToSynced(month, model, usage);
 // bookkeeping needed: this runs exactly once per real call, the same
 // place the per-device log above already records it, so there's
 // nothing to double-count on a repeat save.
-function pushUsageToSynced(month, model, usage) {
+function pushUsageToSynced(month, purpose, model, usage) {
 if (!data.claudeApiSpend || typeof data.claudeApiSpend !== 'object') return;
 if (!data.claudeApiSpend.months || typeof data.claudeApiSpend.months !== 'object') data.claudeApiSpend.months = {};
 const months = data.claudeApiSpend.months;
@@ -107,11 +107,20 @@ const price = PRICES_PER_MTOK[model];
 const inputTokens = usage.input_tokens || 0;
 const outputTokens = usage.output_tokens || 0;
 const callCost = price ? (inputTokens / 1e6) * price.input + (outputTokens / 1e6) * price.output : 0;
+// Per purpose+model, same key as the device-local log, so the
+// itemised table can be all-devices too. Months written before this
+// existed have totals but no byKey; summarizeSyncedUsage reports the
+// gap as "earlier, not itemised".
+const byKey = { ...(prev.byKey || {}) };
+const key = `${purpose}|${model}`;
+const kPrev = byKey[key] || { calls: 0, input: 0, output: 0 };
+byKey[key] = { calls: kPrev.calls + 1, input: kPrev.input + inputTokens, output: kPrev.output + outputTokens };
 months[month] = {
 calls: prev.calls + 1,
 input: prev.input + inputTokens,
 output: prev.output + outputTokens,
 cost: prev.cost + callCost,
+byKey,
 };
 // Rolling 12 months -- drop anything older so this never grows unbounded.
 const cutoff = new Date();
@@ -137,6 +146,29 @@ if (cost === null) anyUnpriced = true; else totalCost += cost;
 return { purpose, model, calls: v.calls, input: v.input, output: v.output, cost };
 }).sort((a, b) => (b.cost || 0) - (a.cost || 0));
 return { rows, totalCost, anyUnpriced };
+}
+
+// The all-devices counterpart of summarizeUsage: same row shape, from the
+// synced month entry. Anything counted before itemising began (or by a
+// device not yet updated) is the difference between the month's totals and
+// the itemised rows, shown as one honest "earlier" row rather than dropped.
+function summarizeSyncedUsage(claudeApiSpend, month) {
+const entry = ((claudeApiSpend && claudeApiSpend.months) || {})[month];
+if (!entry) return null;
+let itemCost = 0;
+let anyUnpriced = false;
+const sums = { calls: 0, input: 0, output: 0 };
+const rows = Object.entries(entry.byKey || {}).map(([key, v]) => {
+const [purpose, model] = key.split('|');
+const price = PRICES_PER_MTOK[model];
+const cost = price ? (v.input / 1e6) * price.input + (v.output / 1e6) * price.output : null;
+if (cost === null) anyUnpriced = true; else itemCost += cost;
+sums.calls += v.calls; sums.input += v.input; sums.output += v.output;
+return { purpose, model, calls: v.calls, input: v.input, output: v.output, cost };
+}).sort((a, b) => (b.cost || 0) - (a.cost || 0));
+const rest = { calls: (entry.calls || 0) - sums.calls, input: (entry.input || 0) - sums.input, output: (entry.output || 0) - sums.output, cost: (entry.cost || 0) - itemCost };
+if (rest.calls > 0) rows.push({ purpose: 'Earlier, not itemised', model: '', calls: rest.calls, input: Math.max(rest.input, 0), output: Math.max(rest.output, 0), cost: Math.max(rest.cost, 0) });
+return { rows, totalCost: entry.cost || 0, totalCalls: entry.calls || 0, anyUnpriced };
 }
 
 // Rolls up the synced, cross-device data.claudeApiSpend into one total --
@@ -2558,7 +2590,7 @@ return { country: String((data && data.country) || '').trim() };
 
 export {
 MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot, quickScanScreenshot, scanForCaptureMarker,
-callTextJson, DEFAULT_MODEL, summarizeUsage, summarizeClaudeApiSpend, currentMonthKey, priceFor, compareFaces,
+callTextJson, DEFAULT_MODEL, summarizeUsage, summarizeSyncedUsage, summarizeClaudeApiSpend, currentMonthKey, priceFor, compareFaces,
 extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShoppingItem, searchAgentProvocateurElsewhere, searchEbayResaleEstimate, cleanEstimateText, searchDepartmentStoresForMissingSetPiece, generateAirbnbRateReview, analyseOngoingAccountValue, identifyProduct, translateText, romanizeName, parseCaptureIntent,
 resolveUrlTitle, resolveJobPostingUrl, resolveBookDetails, resolveSeriesBooks,
 identifyCountry, extractWellnessScreenshot,

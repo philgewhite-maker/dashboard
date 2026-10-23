@@ -7,7 +7,7 @@ import { renderCalendarLimits } from './calendars.js';
 import { renderPackingModules, bindPackingModules } from './packing.js';
 import { renderTagCleanup } from './tagcleanup.js';
 import { testConnection, resolveDataSourceId } from '../notion.js';
-import { summarizeUsage, summarizeClaudeApiSpend, currentMonthKey } from '../ai.js';
+import { summarizeUsage, summarizeSyncedUsage, summarizeClaudeApiSpend, currentMonthKey } from '../ai.js';
 import { renderModelCheck } from './modelcheck.js';
 import { setShowSensitiveFields } from './connections.js';
 import { pullRemote } from '../sync/selfhost.js';
@@ -27,26 +27,41 @@ const el = document.getElementById('usage-summary');
 if (!el) return;
 const settings = await getLocalSettings();
 const month = currentMonthKey();
-const { rows, totalCost, anyUnpriced } = summarizeUsage(settings.apiUsage, month);
-if (rows.length === 0) {
-el.innerHTML = '<div class="settings-note" style="margin:0;">No API calls yet this month.</div>';
-return;
-}
+const local = summarizeUsage(settings.apiUsage, month);
+const synced = summarizeSyncedUsage(data.claudeApiSpend, month);
 const fmt = (n) => n.toLocaleString();
-el.innerHTML = `<table class="usage-table">
+const tableHtml = ({ rows, totalCost, anyUnpriced }, label) => `<table class="usage-table">
 <thead><tr><th>What</th><th>Calls</th><th>In</th><th>Out</th><th>Est. cost</th></tr></thead>
 <tbody>
 ${rows.map((r) => `<tr>
-<td>${escapeHtml(r.purpose)}<span class="usage-model">${escapeHtml(r.model)}</span></td>
+<td>${escapeHtml(r.purpose)}${r.model ? `<span class="usage-model">${escapeHtml(r.model)}</span>` : ''}</td>
 <td>${fmt(r.calls)}</td>
 <td>${fmt(r.input)}</td>
 <td>${fmt(r.output)}</td>
 <td>${r.cost === null ? '&mdash;' : '$' + r.cost.toFixed(2)}</td>
 </tr>`).join('')}
 </tbody>
-<tfoot><tr><td>Total, ${escapeHtml(month)}</td><td></td><td></td><td></td><td>$${totalCost.toFixed(2)}${anyUnpriced ? '+' : ''}</td></tr></tfoot>
-</table>
-<div class="settings-note" style="margin:6px 0 0;">Estimated from reported token counts at list prices${anyUnpriced ? ', excluding models with no price on file' : ''}. Counted on this device only.</div>`;
+<tfoot><tr><td>${escapeHtml(label)}, ${escapeHtml(month)}</td><td></td><td></td><td></td><td>$${totalCost.toFixed(2)}${anyUnpriced ? '+' : ''}</td></tr></tfoot>
+</table>`;
+const note = (anyUnpriced) => `<div class="settings-note" style="margin:6px 0 0;">Estimated from reported token counts at list prices${anyUnpriced ? ', excluding models with no price on file' : ''}.</div>`;
+// All-devices table once at least one call has been itemised into the
+// synced record; the device's own log stays available beneath it, since
+// it holds history that predates the synced breakdown.
+const itemised = synced && synced.rows.some((r) => r.model);
+if (itemised) {
+el.innerHTML = `${tableHtml(synced, 'Total, all devices')}
+${note(synced.anyUnpriced)}
+${local.rows.length ? `<details style="margin-top:6px;"><summary class="settings-note" style="margin:0;cursor:pointer;">This device only: $${local.totalCost.toFixed(2)}</summary>${tableHtml(local, 'Total, this device')}</details>` : ''}`;
+return;
+}
+if (local.rows.length === 0) {
+el.innerHTML = synced && synced.rows.length
+? `${tableHtml(synced, 'Total, all devices')}${note(synced.anyUnpriced)}`
+: '<div class="settings-note" style="margin:0;">No API calls yet this month.</div>';
+return;
+}
+el.innerHTML = `${tableHtml(local, 'Total')}${note(local.anyUnpriced)}
+<div class="settings-note" style="margin:2px 0 0;">Counted on this device only. The all-devices breakdown starts filling in from the next AI call on any device.</div>`;
 }
 
 // Short duration/time formatters for hour-granular display -- nothing
