@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v629</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v630</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -3557,6 +3557,20 @@ Finds connections whose cover photo is missing or is really just the small place
 
 <details class="settings-group" id="settings-group-advanced">
 <summary><span class="dot rose"></span>Advanced</summary>
+
+<details class="settings-item" id="sa-admin-item">
+<summary><h3>Bank-switch advisor invites</h3></summary>
+<div class="settings-block">
+<div class="settings-note" style="margin:0 0 8px;">Create and review invite links for the public bank-switch advisor. The admin secret is the <code>$ADMIN_SECRET</code> line in <code>switchadvisor.php</code> on the web host; it's kept only in this browser's local storage on this device, never synced.</div>
+<label for="sa-admin-secret" style="font-size:13px;font-weight:500;display:block;margin-bottom:6px;">Admin secret</label>
+<input type="password" autocomplete="new-password" id="sa-admin-secret" class="settings-input">
+<label for="sa-admin-label" style="font-size:13px;font-weight:500;display:block;margin:10px 0 6px;">Invite someone</label>
+<input type="text" id="sa-admin-label" class="settings-input" placeholder="their name">
+<div class="backup-row" style="margin-top:8px;"><button class="log-btn" id="sa-admin-create" type="button">Create invite link</button></div>
+<div class="settings-note" id="sa-admin-result"></div>
+<div id="sa-admin-list" style="margin-top:8px;"></div>
+</div>
+</details>
 
 <details class="settings-item">
 <summary><h3>Tidy up tags</h3></summary>

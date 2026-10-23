@@ -57,6 +57,7 @@ import { initNudges } from './features/nudges.js';
 import { initTicker } from './features/ticker.js';
 import { initLetting, accrueLettings } from './features/letting.js';
 import { initSettings } from './features/settings.js';
+import { initSwitchAdvisorAdmin } from './features/switchadvisoradmin.js';
 import { initGoogleAccount } from './features/googleaccount.js';
 import { initMail } from './features/mail.js';
 import { initAutoSync } from './sync/autosync.js';
@@ -318,6 +319,7 @@ initTicker();
 accrueLettings();
 initLetting();
 await initSettings();
+await initSwitchAdvisorAdmin();
 registerServiceWorker();
 // After the panels are wired, so the captured task renders into a live UI.
 // Not awaited — an upload of a shared file shouldn't hold up the page.

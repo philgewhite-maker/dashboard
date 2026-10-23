@@ -3,7 +3,6 @@ import { renderRecommendations, initProfileForm } from './recommend.js';
 import { renderAccounts, initAccounts, setAddAccountEnabled } from './accounts.js';
 import { renderCassGrid } from './cass.js';
 import { renderReferrals } from './referrals.js';
-import { initAdmin } from './admin.js';
 
 const tabs = [...document.querySelectorAll('.tab-btn')];
 const panels = [...document.querySelectorAll('.tab-panel')];
@@ -14,13 +13,9 @@ tabs.forEach((btn) => {
   });
 });
 
-// Only Recommendations/My accounts/CASS map need an invite token -- the
-// Admin tab uses its own, completely separate credential (the admin
-// secret), and Referrals is public. Showing a "need an invite" message
-// INSIDE just those three panels, rather than hiding the whole app
-// behind one gate, is what lets you (the admin) reach Admin and create
-// the first invite without having redeemed one on yourself.
-const NEEDS_INVITE_MESSAGE = "You need an invite link to use this. If you're the admin, open the Admin tab to create one.";
+// Only Recommendations/My accounts/CASS map need an invite token; Referral
+// links is public, so the message goes inside just those three panels.
+const NEEDS_INVITE_MESSAGE = 'You need an invite link to use this. Ask whoever runs it for one.';
 
 function showNeedsInvite(message) {
   ['rec-list', 'accounts-list', 'cass-grid-mount'].forEach((id) => {
@@ -64,6 +59,5 @@ async function boot() {
 window.addEventListener('switchadvisor:refresh', loadMe);
 initProfileForm(loadMe);
 initAccounts();
-initAdmin();
 renderReferrals();
 boot();

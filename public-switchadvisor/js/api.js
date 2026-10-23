@@ -17,11 +17,10 @@ export function setLiveProfile(p) {
 
 export class ApiError extends Error {}
 
-async function call(action, { method = 'GET', body, auth = true, admin = false } = {}) {
+async function call(action, { method = 'GET', body, auth = true } = {}) {
   const headers = {};
   if (body) headers['Content-Type'] = 'application/json';
   if (auth) headers['X-Invite-Token'] = getToken();
-  if (admin) headers['X-Admin-Secret'] = sessionStorage.getItem('switchadvisor-admin-secret') || '';
   const res = await fetch(`${API_BASE}?action=${action}`, {
     method, headers, body: body ? JSON.stringify(body) : undefined,
   });
@@ -36,5 +35,3 @@ export const upsertAccount = (account) => call('account-upsert', { method: 'POST
 export const deleteAccount = (id) => call('account-delete', { method: 'POST', body: { id } });
 export const getBankList = () => call('banklist', { auth: false });
 export const getReferralInfo = () => call('referrals', { auth: false });
-export const createInvite = (label) => call('invite-create', { method: 'POST', body: { label }, auth: false, admin: true });
-export const listInvites = () => call('invite-list', { auth: false, admin: true });
