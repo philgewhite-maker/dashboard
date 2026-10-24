@@ -144,6 +144,62 @@ function totalOwed() {
 return owners().filter((k) => !isMyOwnKey(k)).reduce((n, k) => n + balanceFor(k), 0);
 }
 
+// ---- Monthly cap ----------------------------------------------------------
+//
+// A share rule's capAmount is a MONTHLY maximum for the owner across all
+// their bookings, but each stay is still capped on its own when it accrues
+// (splitAmountFor). Capping each stay and then capping the month's sum is
+// exactly the same as capping the true monthly total -- if any single stay
+// reached the cap the sum is at least the cap, otherwise nothing was cut --
+// so the only thing missing is one derived row per owner and month that
+// takes off whatever the combined shares exceed the cap by. Computed from
+// the rows' own amounts, so old and new rows both come out right, and
+// recomputed (never accumulated) so it follows any later edit or deletion.
+function ownerCapAt(key, dateStr) {
+for (const l of data.airbnbListings || []) {
+if (ownerKeyFor(l) !== key) continue;
+const { capAmount } = shareRuleAt(l, dateStr);
+if (capAmount != null) return capAmount;
+}
+return null;
+}
+
+function reconcileMonthlyCaps() {
+const ledger = data.lettingLedger || [];
+const sums = new Map();
+ledger.forEach((e) => {
+if (e.autoCap || !e.ownerKey || !e.date || !['accrual', 'earned', 'cancellation'].includes(e.kind)) return;
+const amt = Number(e.amount) || 0;
+if (amt <= 0) return;
+const ym = e.date.slice(0, 7);
+const k = `${e.ownerKey}|${ym}`;
+const s = sums.get(k) || { key: e.ownerKey, ym, total: 0, lastDate: e.date };
+s.total += amt;
+if (e.date > s.lastDate) s.lastDate = e.date;
+sums.set(k, s);
+});
+const wanted = new Map();
+sums.forEach((s) => {
+const [y, m] = s.ym.split('-').map(Number);
+const monthEnd = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+const cap = ownerCapAt(s.key, monthEnd);
+if (cap == null) return;
+const excess = Math.round((s.total - cap) * 100) / 100;
+if (excess <= 0.004) return;
+const id = `capadj:${s.key}:${s.ym}`;
+wanted.set(id, { id, ownerKey: s.key, kind: 'adjustment', autoCap: true, amount: -excess, date: s.lastDate, note: `Monthly cap ${money(cap)}, ${s.ym}` });
+});
+let changed = false;
+const kept = ledger.filter((e) => !e.autoCap || wanted.has(e.id));
+if (kept.length !== ledger.length) changed = true;
+wanted.forEach((row, id) => {
+const ex = kept.find((e) => e.id === id);
+if (!ex) { kept.push(row); changed = true; }
+else if (ex.amount !== row.amount || ex.date !== row.date || ex.note !== row.note) { Object.assign(ex, row); changed = true; }
+});
+if (changed) { data.lettingLedger = kept; queueSave(); }
+}
+
 // ---- Accrual --------------------------------------------------------------
 
 function today() { return new Date().toISOString().slice(0, 10); }
@@ -428,6 +484,7 @@ ${taxYears.map((t) => `<tr>
 // ---- Rendering ------------------------------------------------------------
 
 function renderLetting() {
+reconcileMonthlyCaps();
 // The picker (and the tax-settings rows) are refreshed here rather than
 // only at startup: assigning an owner to a listing happens on another
 // tab, and until this ran again the dropdown had no one to choose and
@@ -518,10 +575,10 @@ const platformBadge = isIncomeKind && e.platform !== 'other' ? ` ${logoBadgeHtml
 // capped per month isn't a fixed percentage of any one booking.
 const grossHtml = e.gross ? ` <span class="letting-gross" title="${escapeHtml(`Booking total (${e.pct ?? 50}% share, before any monthly cap)`)}">${escapeHtml(money(e.gross))}</span>` : '';
 return `<tr>
-<td style="white-space:nowrap;"><input type="date" class="settings-input" data-letting-date="${escapeHtml(e.id)}" value="${escapeHtml(e.date || '')}" title="The payout/accrual date -- used for statements and tax-year grouping only. Edit it to the real Airbnb payout date if that differs from checkout; it has no effect on occupancy or the nightly rate, which both come from check-in/nights instead."></td>
+<td style="white-space:nowrap;">${e.autoCap ? `<span class="settings-note" style="margin:0;" title="Worked out automatically from the month's other entries">${escapeHtml(e.date || '')}</span>` : `<input type="date" class="settings-input" data-letting-date="${escapeHtml(e.id)}" value="${escapeHtml(e.date || '')}" title="The payout/accrual date -- used for statements and tax-year grouping only. Edit it to the real Airbnb payout date if that differs from checkout; it has no effect on occupancy or the nightly rate, which both come from check-in/nights instead.">`}</td>
 <td>${escapeHtml(ledgerNoteFor(e))}${e.kind && e.kind !== 'accrual' ? ` <span class="letting-kind ${escapeHtml(e.kind)}">${escapeHtml(e.kind)}</span>` : ''}${platformBadge}${grossHtml}${nightRateHtml}</td>
 <td style="text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;">${escapeHtml(money(e.amount))}</td>
-<td style="width:1%;white-space:nowrap;">${hasDetail ? `<span class="letting-row-toggle" data-letting-row-toggle="${escapeHtml(e.id)}" title="Check-in date, nights, listing and platform">${open ? '&#9662;' : '&#9656;'}</span> ` : ''}<span class="del-x" data-letting-del="${escapeHtml(e.id)}" title="Remove this entry">&times;</span></td>
+<td style="width:1%;white-space:nowrap;">${hasDetail ? `<span class="letting-row-toggle" data-letting-row-toggle="${escapeHtml(e.id)}" title="Check-in date, nights, listing and platform">${open ? '&#9662;' : '&#9656;'}</span> ` : ''}${e.autoCap ? '' : `<span class="del-x" data-letting-del="${escapeHtml(e.id)}" title="Remove this entry">&times;</span>`}</td>
 </tr>${hasDetail ? `<tr class="letting-detail-row"${open ? '' : ' hidden'}><td colspan="4"><div class="letting-detail">
 ${showStartDate ? `<label>Check-in<input type="date" class="settings-input" data-letting-start-date="${escapeHtml(e.id)}" value="${escapeHtml(e.startDate || '')}" title="The real check-in date for this stay -- what occupancy and the average night rate are actually based on, kept separate from the payout date. Leave blank and nights get guessed backward from the payout date instead, which is wrong whenever the payout didn't land on the real checkout."></label>` : ''}
 ${showNights ? `<label>Nights<input type="number" min="0" step="1" class="settings-input" data-letting-nights="${escapeHtml(e.id)}" value="${e.nights || ''}" placeholder="Nights" title="Nights this stay covered -- used for the average night rate. Filled in automatically when the reservation was still on file at accrual time; type it in for an older row that's missing it."></label>` : ''}
