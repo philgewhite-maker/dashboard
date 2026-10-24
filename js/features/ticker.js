@@ -837,6 +837,13 @@ const monthly = data.ticker.mode === 'month';
 const tiles = activeItems().map((i) => tileFor(i, monthly)).filter(Boolean);
 if (!tiles.length) { el.innerHTML = ''; el.classList.remove('is-rolling'); return; }
 
+// Where the marquee had got to, so rebuilding the strip (the loyalty tile
+// rotates every 20s, and any feed can finish) carries on from the same
+// place instead of snapping back to the start -- which is why the later
+// tiles were never reached before the next rebuild.
+const oldAnim = el.querySelector('#tick-track')?.getAnimations?.()[0];
+const resumeAt = oldAnim ? Number(oldAnim.currentTime) || 0 : 0;
+
 // The track is duplicated so the loop has no seam: the animation slides
 // it exactly one copy's width and restarts, which looks continuous
 // because the second copy is already in the first copy's place.
@@ -874,7 +881,7 @@ switchTab('finances');
 financeaccounts.expandAccountRow(span.dataset.tickerAccount);
 });
 });
-startRolling(el);
+startRolling(el, resumeAt);
 }
 
 // Rotation, but only when it is needed and only when it is wanted: a
@@ -884,7 +891,7 @@ startRolling(el);
 // slows the loop instead of speeding everything up.
 const ROLL_PX_PER_SEC = 26;
 
-function startRolling(el) {
+function startRolling(el, resumeAt = 0) {
 const track = el.querySelector('#tick-track');
 const run = el.querySelector('.tick-run');
 if (!track || !run) return;
@@ -897,7 +904,13 @@ const overflows = runWidth > viewport + 4;
 el.classList.toggle('is-rolling', overflows && !still);
 if (!overflows || still) { track.style.animation = ''; return; }
 track.style.setProperty('--roll-distance', `-${runWidth}px`);
-track.style.animationDuration = `${Math.max(20, runWidth / ROLL_PX_PER_SEC)}s`;
+const seconds = Math.max(20, runWidth / ROLL_PX_PER_SEC);
+track.style.animationDuration = `${seconds}s`;
+if (resumeAt > 0) {
+track.getBoundingClientRect(); // apply the new style so the animation object exists
+const anim = track.getAnimations()[0];
+if (anim) anim.currentTime = resumeAt % (seconds * 1000);
+}
 });
 }
 
