@@ -4174,6 +4174,14 @@ background:var(--sage-bg);color:var(--sage);
    rather than inside it — a note you type replaces the default one, and
    the figure it was half of should not go with it. */
 .letting-gross{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;}
+/* Folding a person's section, and a ledger row's hidden detail line. */
+.letting-chevron,.letting-row-toggle{color:var(--muted);cursor:pointer;user-select:none;}
+.letting-detail{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:flex-end;padding:2px 0 6px;}
+.letting-detail label{display:flex;flex-direction:column;gap:2px;font-size:11px;color:var(--muted);}
+#letting-list .letting-detail .settings-input,#letting-list .letting-detail select{flex:0 0 auto;width:auto;max-width:140px;}
+.letting-detail-row td{border-top:none;}
+#letting-list .letting-platform-badge{width:16px;height:16px;font-size:8px;flex:none;vertical-align:-3px;}
+#letting-list input[type=date]{max-width:122px;font-size:12px;padding:4px 6px;}
 
 /* The add-a-transaction row on a phone. It wraps already, but its inputs
    carry max-widths set for a desktop column and a flex item will not
@@ -4192,6 +4200,13 @@ max-width:none;
 /* The note and the gross stack rather than fighting for one line. */
 #letting-list .letting-gross{display:block;}
 #letting-list td{padding-left:4px;padding-right:4px;}
+/* The ledger's date box is the widest thing in a row: drop its calendar
+   icon (tapping the box still opens the picker) so date, name, amount and
+   the row controls all fit a phone without sideways scrolling. */
+#letting-list .limits-table{min-width:0;}
+#letting-list .letting-tax{overflow-x:auto;}
+#letting-list input[type=date]{max-width:88px;font-size:11px;padding:4px 3px;}
+#letting-list input[type=date]::-webkit-calendar-picker-indicator{display:none;}
 }
 /* A long note must wrap inside its cell rather than widening the table —
    the same min-width:auto trap, one level down. */

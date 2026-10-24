@@ -15,7 +15,20 @@
 // open, so a stay that ended while you were away is picked up the next
 // time you look rather than needing a button.
 import { data, queueSave } from '../state.js';
-import { escapeHtml, uid } from '../utils.js';
+import { escapeHtml, uid, logoBadgeHtml, bindLogoFallbacks } from '../utils.js';
+import { matchBrandLogo } from '../brandLogos.js';
+
+// Per-device view state, not data: which people's sections are folded away
+// (remembered across visits) and which ledger rows have their detail line
+// open (just for this session).
+function loadCollapsedOwners() {
+try { return new Set(JSON.parse(localStorage.getItem('lettingCollapsedOwners') || '[]')); } catch { return new Set(); }
+}
+const collapsedOwners = loadCollapsedOwners();
+function saveCollapsedOwners() {
+try { localStorage.setItem('lettingCollapsedOwners', JSON.stringify([...collapsedOwners])); } catch { /* storage unavailable -- the fold just won't be remembered */ }
+}
+const expandedLedgerRows = new Set();
 
 // An owner is a connection where possible, so the ledger can lead back to
 // the real person. A listing with only a typed name still works — the key
@@ -74,6 +87,22 @@ return rule.capAmount != null ? Math.min(uncapped, rule.capAmount) : uncapped;
 function sharePctFor(key) {
 const listing = (data.airbnbListings || []).find((l) => ownerKeyFor(l) === key);
 return shareRuleAt(listing, today()).pct;
+}
+
+// A refund's own note is the first name Airbnb's email carries ("Eduardo"),
+// while the stay it relates to is recorded under the full booker name
+// ("Eduardo Martinez Escalante"). Shown under the fuller name when a
+// nearby entry for the same owner has it, so the two read as one person.
+function ledgerNoteFor(e) {
+const note = String(e.note || '').trim();
+if (e.kind !== 'refund' || !note) return e.note || e.kind;
+const lower = note.toLowerCase();
+const when = new Date(`${e.date}T00:00:00`).getTime();
+const full = (data.lettingLedger || [])
+.filter((x) => x.ownerKey === e.ownerKey && x.kind !== 'refund' && x.date && Math.abs(new Date(`${x.date}T00:00:00`).getTime() - when) <= 45 * 86400000)
+.map((x) => { const parts = String(x.note || '').split(', '); return (parts.length > 1 ? parts.slice(1).join(', ') : parts[0]).trim(); })
+.find((g) => g.length > note.length && g.toLowerCase().startsWith(`${lower} `));
+return full || note;
 }
 
 function entriesFor(key) {
@@ -312,7 +341,7 @@ const nightRateHtml = nightRate != null
 const statusLabel = isPast ? 'awaiting payout' : 'upcoming';
 return `<tr>
 <td style="white-space:nowrap;">${escapeHtml(r.checkin || '?')} &rarr; ${escapeHtml(r.checkout)}</td>
-<td>${escapeHtml(`${(listing && listing.label) || 'listing'}${r.guestName ? `, ${r.guestName}` : ''}`)} <span class="letting-kind upcoming">${escapeHtml(statusLabel)}</span>${income ? ` <span class="letting-gross">${escapeHtml(`${pct}% of ${money(income)}`)}</span>` : ''}${nightRateHtml}</td>
+<td>${escapeHtml(`${(listing && listing.label) || 'listing'}${r.guestName ? `, ${r.guestName}` : ''}`)} <span class="letting-kind upcoming">${escapeHtml(statusLabel)}</span>${income ? ` <span class="letting-gross" title="${escapeHtml(`Booking total (${pct}% share, before any monthly cap)`)}">${escapeHtml(money(income))}</span>` : ''}${nightRateHtml}</td>
 <td style="text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;">${income ? escapeHtml(money(amount)) : ''}</td>
 </tr>`;
 }).join('')}</tbody></table></div>
@@ -441,13 +470,16 @@ badge.textContent = totalGross()
 // explicit start-date capture an "Earned" row already gets, not just
 // the ones typed in by hand from the start.
 const reservationIds = new Set((data.airbnbReservations || []).map((r) => r.id));
+const airbnbLogo = matchBrandLogo('Airbnb');
 el.innerHTML = keys.map((key) => {
 const rows = entriesFor(key).slice().sort((a, b) => String(b.date).localeCompare(String(a.date)));
 const bal = balanceFor(key);
 const mine = isMyOwnKey(key);
 const taxYears = taxYearSummaryFor(key);
+const collapsed = collapsedOwners.has(key);
 return `<div class="letting-owner">
-<div class="letting-head">
+<div class="letting-head" data-letting-owner-toggle="${escapeHtml(key)}" title="${collapsed ? 'Show' : 'Hide'} this person's ledger" style="cursor:pointer;">
+<span class="letting-chevron">${collapsed ? '&#9656;' : '&#9662;'}</span>
 <span class="letting-name">${escapeHtml(ownerNameFor(key))}</span>
 ${mine
 // No "owed to you" framing for yourself -- that money's already
@@ -460,6 +492,7 @@ ${mine
 ${grossFor(key) ? `<span class="settings-note" style="margin:${mine ? '0' : '0 0 0 auto'};">${escapeHtml(money(grossFor(key)))} taken</span>` : ''}
 ${nightRateSummaryHtml(key)}
 </div>
+<div class="letting-owner-body"${collapsed ? ' hidden' : ''}>
 ${mine ? '' : `<div class="sync-row" style="margin:4px 0 8px;flex-wrap:wrap;align-items:center;">
 <input type="month" class="settings-input" data-report-period="${escapeHtml(key)}" style="max-width:130px;" title="The month this report covers -- defaults to last month.">
 <button class="sync-btn sm inline" type="button" data-report-generate="${escapeHtml(key)}">&#128196; Generate report</button>
@@ -472,27 +505,57 @@ const nightRateHtml = nightRate != null
 : '';
 const isOrphanedAccrual = e.kind === 'accrual' && (!e.reservationId || !reservationIds.has(e.reservationId));
 const showStartDate = e.kind === 'earned' || isOrphanedAccrual;
+const showNights = e.kind === 'accrual' || e.kind === 'earned';
+const showListing = e.kind === 'earned' && !e.listingId;
+const showPlatform = e.kind === 'earned' || e.kind === 'cancellation';
+const hasDetail = showStartDate || showNights || showListing || showPlatform;
+const open = expandedLedgerRows.has(e.id);
+const isIncomeKind = e.kind === 'accrual' || e.kind === 'earned' || e.kind === 'cancellation';
+// The Airbnb mark stands in for the old platform dropdown on the line
+// itself; changing the platform lives in the row's own hidden details.
+const platformBadge = isIncomeKind && e.platform !== 'other' ? ` ${logoBadgeHtml(airbnbLogo, 'A', 'letting-platform-badge')}` : '';
+// The booking's gross total, not "X% of" it -- a share that can be
+// capped per month isn't a fixed percentage of any one booking.
+const grossHtml = e.gross ? ` <span class="letting-gross" title="${escapeHtml(`Booking total (${e.pct ?? 50}% share, before any monthly cap)`)}">${escapeHtml(money(e.gross))}</span>` : '';
 return `<tr>
-<td style="white-space:nowrap;"><input type="date" class="settings-input" style="max-width:130px;" data-letting-date="${escapeHtml(e.id)}" value="${escapeHtml(e.date || '')}" title="The payout/accrual date -- used for statements and tax-year grouping only. Edit it to the real Airbnb payout date if that differs from checkout; it has no effect on occupancy or the nightly rate below, which both come from check-in/nights instead.">${showStartDate ? `<input type="date" class="settings-input" style="max-width:130px;margin-top:3px;" data-letting-start-date="${escapeHtml(e.id)}" value="${escapeHtml(e.startDate || '')}" title="The real check-in date for this stay -- what occupancy and the average night rate are actually based on, kept separate from the payout date on the left. Leave blank and nights get guessed backward from the payout date instead, which is wrong whenever the payout didn't land on the real checkout.">` : ''}${(e.kind === 'accrual' || e.kind === 'earned') ? `<input type="number" min="0" step="1" class="settings-input" style="max-width:70px;margin-top:3px;" data-letting-nights="${escapeHtml(e.id)}" value="${e.nights || ''}" placeholder="Nights" title="Nights this stay covered -- used for the average night rate. Filled in automatically when the reservation was still on file at accrual time; type it in for an older row that's missing it.">` : ''}${(e.kind === 'earned' && !e.listingId) ? `<select class="settings-input" style="max-width:150px;margin-top:3px;" data-letting-listing="${escapeHtml(e.id)}" title="Which listing this stay was for -- a manually-added row has no listing on it yet, so it's left out of the average night-rate chart above (which groups by listing) until this is set.">
+<td style="white-space:nowrap;"><input type="date" class="settings-input" data-letting-date="${escapeHtml(e.id)}" value="${escapeHtml(e.date || '')}" title="The payout/accrual date -- used for statements and tax-year grouping only. Edit it to the real Airbnb payout date if that differs from checkout; it has no effect on occupancy or the nightly rate, which both come from check-in/nights instead."></td>
+<td>${escapeHtml(ledgerNoteFor(e))}${e.kind && e.kind !== 'accrual' ? ` <span class="letting-kind ${escapeHtml(e.kind)}">${escapeHtml(e.kind)}</span>` : ''}${platformBadge}${grossHtml}${nightRateHtml}</td>
+<td style="text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;">${escapeHtml(money(e.amount))}</td>
+<td style="width:1%;white-space:nowrap;">${hasDetail ? `<span class="letting-row-toggle" data-letting-row-toggle="${escapeHtml(e.id)}" title="Check-in date, nights, listing and platform">${open ? '&#9662;' : '&#9656;'}</span> ` : ''}<span class="del-x" data-letting-del="${escapeHtml(e.id)}" title="Remove this entry">&times;</span></td>
+</tr>${hasDetail ? `<tr class="letting-detail-row"${open ? '' : ' hidden'}><td colspan="4"><div class="letting-detail">
+${showStartDate ? `<label>Check-in<input type="date" class="settings-input" data-letting-start-date="${escapeHtml(e.id)}" value="${escapeHtml(e.startDate || '')}" title="The real check-in date for this stay -- what occupancy and the average night rate are actually based on, kept separate from the payout date. Leave blank and nights get guessed backward from the payout date instead, which is wrong whenever the payout didn't land on the real checkout."></label>` : ''}
+${showNights ? `<label>Nights<input type="number" min="0" step="1" class="settings-input" data-letting-nights="${escapeHtml(e.id)}" value="${e.nights || ''}" placeholder="Nights" title="Nights this stay covered -- used for the average night rate. Filled in automatically when the reservation was still on file at accrual time; type it in for an older row that's missing it."></label>` : ''}
+${showListing ? `<label>Listing<select class="settings-input" data-letting-listing="${escapeHtml(e.id)}" title="Which listing this stay was for -- a manually-added row has no listing on it yet, so it's left out of the average night-rate chart (which groups by listing) until this is set.">
 <option value="">Listing…</option>
 ${(data.airbnbListings || []).map((l) => `<option value="${escapeHtml(l.id)}">${escapeHtml(l.label || l.prefix || 'Listing')}</option>`).join('')}
-</select>` : ''}</td>
-<td>${escapeHtml(e.note || e.kind)}${e.kind && e.kind !== 'accrual' ? ` <span class="letting-kind ${escapeHtml(e.kind)}">${escapeHtml(e.kind)}</span>` : ''}${
-// Shown from the FIELD rather than left inside the note, because your
-// own note replaces the default one — type "Bathilde" and the £419 it
-// was half of disappeared from the record entirely.
-e.gross ? ` <span class="letting-gross">${escapeHtml(`${e.pct ?? 50}% of ${money(e.gross)}`)}</span>` : ''}${nightRateHtml}${(e.kind === 'earned' || e.kind === 'cancellation') ? ` <select data-letting-platform="${escapeHtml(e.id)}" title="Which platform this actually happened through -- the chart above draws Other as a striped fill instead of solid.">
+</select></label>` : ''}
+${showPlatform ? `<label>Platform<select data-letting-platform="${escapeHtml(e.id)}" title="Which platform this actually happened through -- the chart above draws Other as a striped fill instead of solid.">
 <option value="airbnb"${e.platform !== 'other' ? ' selected' : ''}>Airbnb</option>
 <option value="other"${e.platform === 'other' ? ' selected' : ''}>Other</option>
-</select>` : ''}</td>
-<td style="text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;">${escapeHtml(money(e.amount))}</td>
-<td style="width:1%;"><span class="del-x" data-letting-del="${escapeHtml(e.id)}" title="Remove this entry">&times;</span></td>
-</tr>`;
+</select></label>` : ''}
+</div></td></tr>` : ''}`;
 }).join('')}</tbody></table></div>` : '<div class="settings-note" style="margin:4px 0 0;">Nothing yet.</div>'}
 ${upcomingTableHtml(key)}
 ${taxYearSummaryHtml(key, taxYears)}
+</div>
 </div>`;
 }).join('');
+bindLogoFallbacks(el);
+el.querySelectorAll('[data-letting-owner-toggle]').forEach((head) => {
+head.addEventListener('click', () => {
+const key = head.dataset.lettingOwnerToggle;
+if (collapsedOwners.has(key)) collapsedOwners.delete(key); else collapsedOwners.add(key);
+saveCollapsedOwners();
+renderLetting();
+});
+});
+el.querySelectorAll('[data-letting-row-toggle]').forEach((t) => {
+t.addEventListener('click', () => {
+const id = t.dataset.lettingRowToggle;
+if (expandedLedgerRows.has(id)) expandedLedgerRows.delete(id); else expandedLedgerRows.add(id);
+renderLetting();
+});
+});
 
 el.querySelectorAll('[data-report-generate]').forEach((btn) => {
 btn.addEventListener('click', async () => {
