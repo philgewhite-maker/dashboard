@@ -18,7 +18,7 @@ NotionNotConfiguredError, createPageForTask, appendBlocks,
 textBlocks, headingBlock, todoBlock,
 } from '../notion.js';
 
-const PLAN_MODEL = 'claude-opus-5';
+const PLAN_MODEL = 'claude-opus-5-5';
 const PLAN_MAX_TOKENS = 4000;
 
 async function draftPlan(task) {

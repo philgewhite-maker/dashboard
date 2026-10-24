@@ -9,7 +9,7 @@ import { fileToBase64, loadImage, cropThumbnailToBlob, hashFile, captureDateOf, 
 import { parseCacheGet, parseCachePut } from './db.js';
 
 const API_URL = 'https://api.anthropic.com/v1/messages';
-const DEFAULT_MODEL = 'claude-opus-5';
+const DEFAULT_MODEL = 'claude-opus-5-5';
 
 // Anthropic list prices in USD per million tokens. Only ever used for the
 // rough spend estimate shown in Settings — nothing functional depends on it,
@@ -251,6 +251,7 @@ const settings = await getLocalSettings();
 const apiKey = (settings.anthropicApiKey || '').trim();
 if (!apiKey) throw new MissingKeyError();
 const model = modelOverride || settings.anthropicModel || DEFAULT_MODEL;
+const effortToSend = effort || (/^claude-opus-5-5/.test(model) ? 'high' : '');
 
 let res;
 try {
@@ -277,7 +278,12 @@ messages: [{ role: 'user', content }],
 // Callers doing plain structured extraction (not open-ended
 // reasoning) pass 'low' here so the model skips thinking rather than
 // silently eating the token budget on a task that doesn't need it.
-...(effort ? { output_config: { effort } } : {}),
+// Opus 5.5's default effort is one tier below Opus 5's ("high" became
+// "medium"), so a call that names no effort would quietly get shallower
+// answers after the move. Asking for "high" keeps Opus 5 behaviour; drop
+// to "medium" here if the Models panel shows tokens per call climbing
+// without the answers needing it.
+...(effortToSend ? { output_config: { effort: effortToSend } } : {}),
 }),
 });
 } catch (networkErr) {
@@ -371,7 +377,7 @@ return callAnthropic([{ type: 'text', text: promptText }], maxTokens, modelOverr
 const MATCHES_MAX_TOKENS = 16000;
 const PROFILE_MAX_TOKENS = 3000;
 // Explicitly locked rather than left to inherit settings.anthropicModel/
-// DEFAULT_MODEL (Opus 5) -- reading a profile's stats/bio and drawing photo
+// DEFAULT_MODEL (Opus 5.5) -- reading a profile's stats/bio and drawing photo
 // bounding boxes is structured extraction, not a task that benefits from
 // Opus-tier reasoning, and Haiku undersells accuracy on the nuanced bits
 // (height written as "5'7\"" vs "170cm", a bio that needs summarising).
@@ -389,7 +395,7 @@ const PROFILE_PARSE_MODEL = 'claude-sonnet-5-5';
 // BAND_OVERLAP exists to manage. Reserved for the images that actually
 // need it -- a normal-length profile never triggers this and stays on
 // cheaper Sonnet.
-const PROFILE_PARSE_MODEL_TALL = 'claude-opus-5';
+const PROFILE_PARSE_MODEL_TALL = 'claude-opus-5-5';
 // Bumped whenever profilePrompt()'s requested fields change. The rich-parse
 // cache is keyed on this alongside the image hash -- without it, re-parsing
 // the exact same screenshot after a prompt change (a genuinely common thing
