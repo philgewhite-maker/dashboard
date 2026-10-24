@@ -3002,6 +3002,20 @@ if (!data.loyaltyPrograms.some((x) => x.id === p.id)) data.loyaltyPrograms.push(
 // blank default (''), it can't retroactively apply a SPECIFIC value
 // from DEFAULT_LOYALTY_PROGRAMS/_V2/_V3 to an already-seeded program.
 // One-time (never overwrites a value the user's own edit set).
+// A built-in program seeded BEFORE its regex extractor existed keeps a blank
+// extractorKey forever (each seed list runs once), so it silently went on
+// paying for an AI call per email -- Nectar 27x, IKEA 51x. Every load, fill
+// the blanks (only) from the built-in definition, matched by id or by name.
+// Idempotent, and never touches a value the user changed.
+[...DEFAULT_LOYALTY_PROGRAMS, ...DEFAULT_LOYALTY_PROGRAMS_V2, ...DEFAULT_LOYALTY_PROGRAMS_V3, ...DEFAULT_LOYALTY_PROGRAMS_V4, ...DEFAULT_LOYALTY_PROGRAMS_V5, ...DEFAULT_LOYALTY_PROGRAMS_V6].forEach((seed) => {
+if (!seed.extractorKey) return;
+const nm = String(seed.name || '').trim().toLowerCase();
+const existing = data.loyaltyPrograms.find((p) => p.id === seed.id) || data.loyaltyPrograms.find((p) => String(p.name || '').trim().toLowerCase() === nm);
+if (!existing) return;
+if (!existing.extractorKey) existing.extractorKey = seed.extractorKey;
+if (!existing.senderAddresses.length && seed.senderAddresses) existing.senderAddresses = [...seed.senderAddresses];
+if (!existing.contentFilter && seed.contentFilter) existing.contentFilter = seed.contentFilter;
+});
 if (!data.loyaltyContentFiltersSeeded) {
 data.loyaltyContentFiltersSeeded = true;
 [...DEFAULT_LOYALTY_PROGRAMS, ...DEFAULT_LOYALTY_PROGRAMS_V2, ...DEFAULT_LOYALTY_PROGRAMS_V3, ...DEFAULT_LOYALTY_PROGRAMS_V4, ...DEFAULT_LOYALTY_PROGRAMS_V5, ...DEFAULT_LOYALTY_PROGRAMS_V6].forEach((seed) => {

@@ -752,6 +752,10 @@ queueSave();
 const lastCheckMessages = new Map();
 
 function methodBadgeHtml(program) {
+// What the NEXT scan will do, not what the last one happened to: a program
+// whose regex extractor now exists no longer pays for AI, even though its
+// stored method still says 'ai' until a new email matches.
+if (EXTRACTORS[program.extractorKey] && program.extractionMethod === 'ai') return `<span class="tag-chip" title="A real pattern match now handles new emails -- free and exact. The readings already on file came from ${program.aiCallCount || 0} earlier AI calls.">Deterministic${program.aiCallCount ? ` (was AI ${program.aiCallCount}x)` : ''}</span>`;
 if (program.extractionMethod === 'ai') return `<span class="tag-chip tag-chip-amber" title="Costs an AI call each scan — come back and ask for a deterministic extractor once you're confident this one's worth keeping.">AI-parsed (${program.aiCallCount || 0}x)</span>`;
 if (program.extractionMethod === 'deterministic') return `<span class="tag-chip" title="A real pattern match, no AI call — free and exact.">Deterministic</span>`;
 // Marriott Vacation Club only, as of writing -- there's no email to
