@@ -10,6 +10,8 @@
 // is the exception -- its title carries the name, and that's read off it.
 import { data, queueSave, blankAirbnbListing, blankAirbnbReservation, blankAirbnbKey, blankAirbnbKeyAssignment, KEY_CUSTODIAN_TYPES } from '../state.js';
 import { escapeHtml, todayStr, dateStrAdd, uid, MISSING_KEY_LINK_HTML } from '../utils.js';
+import { owners, ownerNameFor, money } from './letting.js';
+import { gmailLink } from '../googlemail.js';
 import { parseIcsReservations } from '../icsparse.js';
 import { fetchIcs } from '../files.js';
 import { canAttemptGoogleAction, hasCalendarWrite } from '../sync/googleauth.js';
@@ -764,10 +766,11 @@ const upcoming = data.airbnbReservations
 .sort((a, b) => (a.checkin < b.checkin ? -1 : a.checkin > b.checkin ? 1 : 0));
 if (countEl) countEl.textContent = upcoming.length ? String(upcoming.length) : '';
 const errorsHtml = airbnbSyncErrorsHtml();
-el.innerHTML = errorsHtml + (upcoming.length
+el.innerHTML = errorsHtml + refundsPendingHtml() + (upcoming.length
 ? upcoming.map(reservationRowHtml).join('')
 : (errorsHtml ? '' : '<div class="empty">Nothing upcoming — add a listing in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#airbnb-listings">Settings</span> and Sync.</div>'));
 
+bindRefundsPending(el);
 el.querySelectorAll('[data-airbnb-res-field]').forEach((input) => {
 input.addEventListener('change', () => {
 const r = data.airbnbReservations.find((x) => x.id === input.dataset.airbnbResId);
@@ -1368,6 +1371,75 @@ const rebuilt = hits(fromLedger);
 return rebuilt.length === 1 ? rebuilt[0] : null;
 }
 
+// A cancelled stay vanishes from every feed, but its cancellation payout
+// row is on the ledger with the guest's name and a date one day after
+// check-in -- so a refund for the same guest whose stay starts that day is
+// the same booking.
+function cancellationFor(guest, startDay, startMonth) {
+const g = String(guest || '').trim().toLowerCase();
+if (!g) return null;
+return (data.lettingLedger || []).find((e) => {
+if (e.kind !== 'cancellation' || !e.ownerKey || String(e.note || '').trim().toLowerCase() !== g) return false;
+const checkin = new Date(`${dateStrAdd(e.date, -1)}T00:00:00`);
+return checkin.getDate() === startDay && checkin.getMonth() + 1 === startMonth;
+}) || null;
+}
+
+// The one place a refund row is written -- from Sync, or from mapping an
+// unposted one by hand. Returns false when it was already on the ledger.
+function postRefundRow({ ownerKey, amount, sentOn, guest, messageId, fallbackNote }) {
+const already = data.lettingLedger.some((e) => e.kind === 'refund' && (e.sourceMessageId === messageId
+|| (e.ownerKey === ownerKey && (e.note || '') === (guest || '') && Math.abs((Number(e.amount) || 0) + amount) < 0.01
+&& Math.abs(new Date(`${e.date}T00:00:00`) - new Date(`${sentOn}T00:00:00`)) <= 14 * 86400000)));
+if (already) return false;
+data.lettingLedger.push({
+id: uid(), ownerKey, kind: 'refund',
+amount: -amount, // money OUT, not in -- the whole point of this kind
+platform: 'airbnb',
+date: sentOn,
+note: guest || fallbackNote || 'Refund to guest',
+sourceMessageId: messageId,
+});
+return true;
+}
+
+// Unposted refunds, offered for mapping by hand: pick who it's charged to
+// (the owners already on the ledger, not free text) and post it. The
+// email link is the record reference back to the real message.
+function refundsPendingHtml() {
+const list = data.prefs.airbnbRefundsPending || [];
+if (!list.length) return '';
+const opts = owners().map((k) => `<option value="${escapeHtml(k)}">${escapeHtml(ownerNameFor(k))}</option>`).join('');
+return `<div class="settings-note" style="margin:6px 0 2px;font-weight:600;">Guest refunds waiting to be assigned</div>`
++ list.map((p) => `<div class="alloc-card" data-refund-card="${escapeHtml(p.id)}">
+<div class="settings-note" style="margin:0;"><strong>${escapeHtml(p.guest)}</strong> &middot; ${escapeHtml(money(p.amount))} &middot; stay ${escapeHtml(p.range)} &middot; sent ${escapeHtml(p.sentOn)} &middot; <a href="${escapeHtml(gmailLink(null, null, p.id))}" target="_blank" rel="noopener">email</a></div>
+<div class="settings-note" style="margin:2px 0 4px;">${escapeHtml(p.why)}${p.listingId ? ` &mdash; or set it once in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#airbnb-listings">Settings</span>` : ''}.</div>
+<div class="alloc-controls"><select class="settings-input" data-refund-owner="${escapeHtml(p.id)}"><option value="">Charge to&hellip;</option>${opts}</select>
+<button class="sync-btn sm inline" type="button" data-refund-post="${escapeHtml(p.id)}">Post</button>
+<button class="del-x" type="button" data-refund-dismiss="${escapeHtml(p.id)}" title="Leave this refund off the ledger">&times;</button></div>
+</div>`).join('');
+}
+
+function bindRefundsPending(root) {
+const finish = (id, posted) => {
+data.prefs.airbnbRefundsPending = (data.prefs.airbnbRefundsPending || []).filter((p) => p.id !== id);
+if (!Array.isArray(data.prefs.airbnbRefundsDone)) data.prefs.airbnbRefundsDone = [];
+data.prefs.airbnbRefundsDone.push(id); // stops Sync re-offering it
+queueSave();
+renderAirbnb();
+if (posted) import('./letting.js').then((m) => m.renderLetting());
+};
+root.querySelectorAll('[data-refund-post]').forEach((btn) => btn.addEventListener('click', () => {
+const id = btn.dataset.refundPost;
+const p = (data.prefs.airbnbRefundsPending || []).find((x) => x.id === id);
+const ownerKey = root.querySelector(`[data-refund-owner="${CSS.escape(id)}"]`).value;
+if (!p || !ownerKey) return;
+postRefundRow({ ownerKey, amount: p.amount, sentOn: p.sentOn, guest: p.guest, messageId: p.id });
+finish(id, true);
+}));
+root.querySelectorAll('[data-refund-dismiss]').forEach((btn) => btn.addEventListener('click', () => finish(btn.dataset.refundDismiss, false)));
+}
+
 // Returns {posted, problems:[{guest, listingId?, why}]}. Nothing is dropped
 // silently any more: an email that can't be posted is reported with the
 // reason, and (unlike before) is retried on the next sync rather than being
@@ -1392,6 +1464,7 @@ return { posted: 0, problems, error: err.message || String(err) };
 
 const { ownerKeyFor } = await import('./letting.js');
 let posted = 0;
+const mappable = [];
 for (const m of sections[0]?.messages || []) {
 if (seen.has(m.id)) continue;
 const subjectMatch = REFUND_SUBJECT_RE.exec(String(m.subject || '').trim());
@@ -1415,35 +1488,38 @@ const amount = Number(amountMatch[1].replace(/,/g, ''));
 const endMonthIdx = MONTH_NAMES.indexOf(rangeMatch[4].slice(0, 3).toLowerCase());
 const startMonthIdx = rangeMatch[2] ? MONTH_NAMES.indexOf(rangeMatch[2].slice(0, 3).toLowerCase()) : endMonthIdx;
 if (startMonthIdx === -1 || endMonthIdx === -1) { seen.add(m.id); problems.push({ guest: guestName, why: "the stay's month wasn't readable" }); continue; }
-const stay = matchStayForRefund(Number(rangeMatch[1]), startMonthIdx + 1, Number(rangeMatch[3]), endMonthIdx + 1);
-if (!stay) { problems.push({ guest: guestName, why: 'no single stay with those dates is on file' }); continue; }
-const listing = data.airbnbListings.find((l) => l.id === stay.listingId);
-if (!listing) { seen.add(m.id); continue; }
-const ownerKey = ownerKeyFor(listing);
-if (!ownerKey) { problems.push({ guest: guestName, listingId: listing.id, why: `"${listing.label || 'the listing'}" has no owner set` }); continue; }
-
 // The money left on the email's own date, not on whichever day Sync ran --
 // matters now that a refund can be posted days after it was sent.
 const sentOn = detail.date && !isNaN(new Date(detail.date)) ? new Date(detail.date).toISOString().slice(0, 10) : todayStr();
-// Already posted? By source email first; failing that by content (same
-// guest + amount near the same date), which covers rows posted before
-// rows carried their source email.
-const alreadyRecorded = data.lettingLedger.some((e) => e.kind === 'refund' && (e.sourceMessageId === m.id
-|| (e.ownerKey === ownerKey && (e.note || '') === (guestName || '') && Math.abs((Number(e.amount) || 0) + amount) < 0.01
-&& Math.abs(new Date(`${e.date}T00:00:00`) - new Date(`${sentOn}T00:00:00`)) <= 14 * 86400000)));
-if (alreadyRecorded) { seen.add(m.id); continue; }
-data.lettingLedger.push({
-id: uid(), ownerKey, kind: 'refund',
-amount: -amount, // money OUT, not in -- the whole point of this kind
-platform: 'airbnb',
-date: sentOn,
-note: guestName || stay.guestName || listing.label || 'Refund to guest',
-sourceMessageId: m.id,
-});
+
+// Who it is charged to: the stay's listing if the stay can be found, else
+// the cancellation payout already on the ledger for this same guest (a
+// cancelled stay is gone from every feed, but its payout row remembers the
+// owner and the check-in date).
+const stay = matchStayForRefund(Number(rangeMatch[1]), startMonthIdx + 1, Number(rangeMatch[3]), endMonthIdx + 1);
+const listing = stay ? data.airbnbListings.find((l) => l.id === stay.listingId) : null;
+let ownerKey = listing ? ownerKeyFor(listing) : '';
+let label = listing ? listing.label : '';
+if (!ownerKey) {
+const canc = cancellationFor(guestName, Number(rangeMatch[1]), startMonthIdx + 1);
+if (canc) { ownerKey = canc.ownerKey; label = canc.note; }
+}
+if (!ownerKey) {
+const p = {
+id: m.id, guest: guestName, amount, sentOn, range: rangeMatch[0].trim(), listingId: listing ? listing.id : '',
+why: listing ? `"${listing.label || 'the listing'}" has no owner set` : 'no single stay with those dates is on file',
+};
+problems.push(p);
+mappable.push(p);
+continue;
+}
+if (postRefundRow({ ownerKey, amount, sentOn, guest: guestName, messageId: m.id, fallbackNote: label })) posted++;
 seen.add(m.id);
-posted++;
 }
 data.prefs.airbnbRefundsDone = [...seen];
+// Replaced wholesale each sync: what's still unposted is exactly what the
+// Airbnb panel offers to map by hand.
+data.prefs.airbnbRefundsPending = mappable;
 queueSave();
 return { posted, problems };
 }
