@@ -1918,6 +1918,19 @@ photoId: '',
 // actually arrived -- exact-id matching is the whole point of
 // capturing the order at all, rather than eyeballing it against the
 // real returns form later).
+function blankLoan(fields = {}) {
+return {
+id: uid(),
+ownerKey: '', // a letting owner's key (a connection id, or their typed name) -- same key lettingLedger uses
+amount: 0,
+startDate: '',
+repayDate: '', // interest stops accruing on this day
+ratePct: 10, // per year, accruing daily
+note: '',
+...fields,
+};
+}
+
 function blankApOrder(fields = {}) {
 return {
 id: uid(),
@@ -2415,6 +2428,10 @@ proxyRefusals: {},
 // reservationId, listingId}; a POSITIVE amount increases what they owe
 // and a payment is negative. See js/features/letting.js.
 lettingLedger: [],
+// Money borrowed from a listing owner, in tranches: [{id, ownerKey, amount,
+// startDate, repayDate, ratePct, note}]. Interest on whatever the owner is
+// net owed is posted into lettingLedger monthly -- see js/features/loans.js.
+loans: [],
 // Every date-range rate-uplift proposal a quarterly review
 // (js/features/airbnbrates.js) has ever generated -- {id, listingId,
 // startDate, endDate, reason, upliftPct, upliftAmount, minStayNights,
@@ -2529,6 +2546,8 @@ data.ticker.items.push({ id: 'loyalty', kind: 'loyalty' });
 if (!data.tickerCache || typeof data.tickerCache !== 'object') data.tickerCache = {};
 if (!data.proxyRefusals || typeof data.proxyRefusals !== 'object') data.proxyRefusals = {};
 if (!Array.isArray(data.lettingLedger)) data.lettingLedger = [];
+if (!Array.isArray(data.loans)) data.loans = [];
+data.loans = data.loans.filter((l) => l && typeof l === 'object').map((l) => ({ ...blankLoan(), ...l, id: l.id || uid() }));
 if (!Array.isArray(data.airbnbRateProposals)) data.airbnbRateProposals = [];
 // FIRST, before anything else in here touches it. An existing document
 // predates this key entirely, and two passes below both reach for it --
@@ -4177,7 +4196,7 @@ export {
 data, sampleData, loadData, migrate, persist, queueSave, flushSave, setSaveStatusHandler,
 setExternalUpdateHandler, setLocalChangeHandler, getLocalSettings, setLocalSetting, computeStreak, reachOutThreshold,
 isDormantStage, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness,
-exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, SENSITIVE_BLOCKS, whatSheHas, unheldInventory, whoFits, inventorySets, incompleteCoreSets, whoFitsSet, interestNote, SIZE_GROUPS, sizeGroupFor, SET_CORE_GROUPS, DEFAULT_PREFS, blankInventoryItem, blankApOrder, blankSetCompletionFind, blankBookItem,
+exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, SENSITIVE_BLOCKS, whatSheHas, unheldInventory, whoFits, inventorySets, incompleteCoreSets, whoFitsSet, interestNote, SIZE_GROUPS, sizeGroupFor, SET_CORE_GROUPS, DEFAULT_PREFS, blankInventoryItem, blankApOrder, blankLoan, blankSetCompletionFind, blankBookItem,
 MAIL_SEARCH_KINDS, mailSearchLabel, blankMailSearch, blankMailTopic, blankMailRule, blankMailDismissal,
 TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureBatch, blankPendingImport, blankConnection, blankTelegramThread, blankReadingItem, blankCaptureDraft, blankJob, blankMediaItem, MEDIA_KINDS, MEDIA_STATUSES, blankMediaRecSource, blankMediaRecCandidate,
 blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS, LEG_DATE_FIELDS, STAY_TYPE_SUGGESTIONS,

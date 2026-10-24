@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v635</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v636</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -437,6 +437,28 @@
 <div class="letting-chart-legend" id="night-rate-occupancy-legend" style="flex-direction:row;flex-wrap:wrap;margin-top:4px;"></div>
 </div>
 </section>
+
+<section class="panel wide" id="loans-panel" data-tab="finances">
+<div class="panel-head">
+<h2><span class="dot amber"></span>Loans from owners</h2>
+<span class="count-badge" id="loans-total"></span>
+</div>
+<div class="settings-note" style="margin:0 0 10px;">Money borrowed from a listing owner, in tranches. Interest runs daily on what's lent minus what they owe you on the <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#letting-panel">Airbnb ledger</span>, and each month's total is posted there on the 1st as a deduction.</div>
+<div id="loans-list"></div>
+<div class="sync-row" style="margin-top:12px;flex-wrap:wrap;align-items:flex-end;">
+<select id="loan-add-owner" class="mini" title="Whoever lent the money -- the same owners the Airbnb ledger already has"></select>
+<input type="number" min="0" step="0.01" id="loan-add-amount" class="settings-input" style="max-width:110px;" placeholder="Amount £">
+<label class="settings-note" style="margin:0;display:flex;flex-direction:column;gap:2px;">From<input type="date" id="loan-add-start" class="settings-input" style="max-width:140px;"></label>
+<label class="settings-note" style="margin:0;display:flex;flex-direction:column;gap:2px;">Repay<input type="date" id="loan-add-repay" class="settings-input" style="max-width:140px;"></label>
+<label class="settings-note" style="margin:0;display:flex;flex-direction:column;gap:2px;">% a year<input type="number" min="0" step="0.1" id="loan-add-rate" class="settings-input" style="max-width:80px;" value="10"></label>
+<button class="sync-btn sm inline" id="loan-add-btn" type="button">Add tranche</button>
+<span class="sync-status" id="loan-add-status"></span>
+</div>
+<div class="sync-row" style="margin-top:8px;">
+<button class="sync-btn sm inline" id="loan-recalc-btn" type="button" title="After editing a loan, clears the automatic interest rows and works them out again">Recalculate interest</button>
+</div>
+</section>
+
 <section class="panel wide" id="switch-offers-panel" data-tab="finances">
 <div class="panel-head">
 <h2><span class="dot plum"></span>Switch opportunities</h2>

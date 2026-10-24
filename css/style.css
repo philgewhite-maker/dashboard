@@ -4166,6 +4166,10 @@ background:var(--sage-bg);color:var(--sage);
 .letting-kind.earned{background:var(--amber-bg);color:var(--amber);}
 .letting-kind.upcoming{background:var(--teal-bg);color:var(--teal);}
 .letting-kind.cancellation{background:var(--rose-bg);color:var(--rose);}
+.letting-kind.interest{background:var(--amber-bg);color:var(--amber);}
+.loan-tranche{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;padding:6px 0;border-top:1px solid var(--line);}
+.loan-tranche label{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted);}
+#loans-panel .loan-tranche .settings-input{flex:0 0 auto;max-width:130px;}
 /* The Upcoming subtable is a preview, not part of the ledger it sits
    under -- a faint top rule marks it as a separate block, same purpose
    the tax-year summary's own border already serves just below it. */

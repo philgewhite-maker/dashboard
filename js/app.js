@@ -56,6 +56,7 @@ import './features/notionplan.js';
 import { initNudges } from './features/nudges.js';
 import { initTicker } from './features/ticker.js';
 import { initLetting, accrueLettings } from './features/letting.js';
+import { initLoans } from './features/loans.js';
 import { initSettings } from './features/settings.js';
 import { initSwitchAdvisorAdmin } from './features/switchadvisoradmin.js';
 import { initGoogleAccount } from './features/googleaccount.js';
@@ -318,6 +319,7 @@ initTicker();
 // shows as owed the first time you look rather than the second.
 accrueLettings();
 initLetting();
+initLoans();
 await initSettings();
 await initSwitchAdvisorAdmin();
 registerServiceWorker();
