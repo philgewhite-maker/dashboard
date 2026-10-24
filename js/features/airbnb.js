@@ -95,9 +95,22 @@ added++;
 // longer match anything) -- either way, gone.
 let removed = 0;
 existingByUid.forEach((r) => {
+// A stay that has genuinely finished (not a cancelled future one) is
+// remembered minimally: Airbnb emails a guest refund AFTER checkout, and
+// matching it to a listing needs the stay's dates and listing.
+if (r.checkout && r.checkout < today) {
+if (!Array.isArray(data.airbnbPastStays)) data.airbnbPastStays = [];
+if (!data.airbnbPastStays.some((s) => s.listingId === r.listingId && s.checkin === r.checkin && s.checkout === r.checkout)) {
+data.airbnbPastStays.push({ listingId: r.listingId, checkin: r.checkin, checkout: r.checkout, guestName: r.guestName || '' });
+}
+}
 data.airbnbReservations = data.airbnbReservations.filter((x) => x.id !== r.id);
 removed++;
 });
+if (Array.isArray(data.airbnbPastStays)) {
+const keepFrom = dateStrAdd(today, -400);
+data.airbnbPastStays = data.airbnbPastStays.filter((s) => s.checkout >= keepFrom);
+}
 return { added, updated, removed };
 }
 
@@ -1159,7 +1172,9 @@ const REFUND_SUBJECT_RE = /^You've sent (.+?) money$/i;
 const REFUND_QUERY = 'from:(automated@airbnb.com) subject:"You\'ve sent"';
 const REFUND_SEARCH_LIMIT = 25;
 const REFUND_AMOUNT_RE = /sent\s*£([\d,]+\.?\d*)\s*GBP/i;
-const REFUND_DATE_RANGE_RE = /(\d{1,2})\s+([A-Za-z]+)\s*[–—-]\s*(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})/;
+// The start month is omitted when both ends fall in the same month
+// ("19–22 Oct 2026" vs "22 Oct – 2 Nov 2026") -- both seen in real emails.
+const REFUND_DATE_RANGE_RE = /(\d{1,2})(?:\s+([A-Za-z]+))?\s*[–—-]\s*(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})/;
 
 // The digits immediately before ".ics" in an Airbnb feed URL ARE the
 // listing's public id -- confirmed against all three real listings
@@ -1329,10 +1344,41 @@ return { posted, unmatched };
 // cancellations. Genuinely ambiguous (more than one reservation shares
 // that exact date range) is left unmatched rather than guessed, same
 // discipline as everywhere else in this file.
+// A refund email arrives AFTER the stay, often once the guest has gone and
+// the feed has dropped the reservation -- so this checks live reservations
+// first, then the minimal record of finished stays kept by the ICS sync.
+function matchStayForRefund(startDay, startMonth, endDay, endMonth) {
+const hits = (list) => list.filter((r) => {
+const inD = new Date(`${r.checkin}T00:00:00`);
+const outD = new Date(`${r.checkout}T00:00:00`);
+return inD.getDate() === startDay && inD.getMonth() + 1 === startMonth
+&& outD.getDate() === endDay && outD.getMonth() + 1 === endMonth;
+});
+const live = hits(data.airbnbReservations);
+if (live.length) return live.length === 1 ? live[0] : null;
+const past = hits(data.airbnbPastStays || []);
+if (past.length) return past.length === 1 ? past[0] : null;
+// Stays that finished before past stays were kept at all: an income row
+// already on the ledger records the listing, the checkout date and the
+// number of nights, which is enough to rebuild the stay's dates.
+const fromLedger = (data.lettingLedger || [])
+.filter((e) => e.kind === 'accrual' && e.listingId && e.date && Number(e.nights) > 0)
+.map((e) => ({ listingId: e.listingId, checkout: e.date, checkin: dateStrAdd(e.date, -Number(e.nights)), guestName: '' }));
+const rebuilt = hits(fromLedger);
+return rebuilt.length === 1 ? rebuilt[0] : null;
+}
+
+// Returns {posted, problems:[{guest, listingId?, why}]}. Nothing is dropped
+// silently any more: an email that can't be posted is reported with the
+// reason, and (unlike before) is retried on the next sync rather than being
+// marked done -- so fixing the cause (setting a listing's owner) lets it post.
 async function syncRefundsFromEmail() {
-if (!(await canAttemptGoogleAction())) return { posted: 0 };
-if (!Array.isArray(data.prefs.airbnbRefundsSeen)) data.prefs.airbnbRefundsSeen = [];
-const seen = new Set(data.prefs.airbnbRefundsSeen);
+if (!(await canAttemptGoogleAction())) return { posted: 0, problems: [] };
+// V2: the first version marked unmatched/ownerless emails as done
+// forever, so those are given another chance under a fresh list.
+if (!Array.isArray(data.prefs.airbnbRefundsDone)) data.prefs.airbnbRefundsDone = [];
+const seen = new Set(data.prefs.airbnbRefundsDone);
+const problems = [];
 
 const { fetchMailSearches, getMessageDetail } = await import('../googlemail.js');
 const search = { kind: 'query', value: REFUND_QUERY, maxDays: 0, maxEvents: REFUND_SEARCH_LIMIT };
@@ -1341,12 +1387,11 @@ try {
 sections = await fetchMailSearches([search], REFUND_SEARCH_LIMIT);
 } catch (err) {
 console.error('Refund email search failed:', err);
-return { posted: 0, error: err.message || String(err) };
+return { posted: 0, problems, error: err.message || String(err) };
 }
 
 const { ownerKeyFor } = await import('./letting.js');
 let posted = 0;
-let unmatched = 0;
 for (const m of sections[0]?.messages || []) {
 if (seen.has(m.id)) continue;
 const subjectMatch = REFUND_SUBJECT_RE.exec(String(m.subject || '').trim());
@@ -1358,43 +1403,49 @@ try {
 detail = await getMessageDetail(m.id);
 } catch (err) {
 console.error('Refund email fetch failed:', err);
-unmatched++;
-continue; // not marked seen -- a fetch failure is worth retrying
+problems.push({ guest: guestName, why: "couldn't read the email" });
+continue;
 }
 const bodyText = detail.bodyText || '';
 const amountMatch = REFUND_AMOUNT_RE.exec(bodyText);
 const rangeMatch = REFUND_DATE_RANGE_RE.exec(bodyText);
-if (!amountMatch || !rangeMatch) { seen.add(m.id); unmatched++; continue; }
+if (!amountMatch || !rangeMatch) { seen.add(m.id); problems.push({ guest: guestName, why: "the email's amount or stay dates weren't in a form I recognise" }); continue; }
 const amount = Number(amountMatch[1].replace(/,/g, ''));
 
-const startMonthIdx = MONTH_NAMES.indexOf(rangeMatch[2].slice(0, 3).toLowerCase());
 const endMonthIdx = MONTH_NAMES.indexOf(rangeMatch[4].slice(0, 3).toLowerCase());
-if (startMonthIdx === -1 || endMonthIdx === -1) { seen.add(m.id); unmatched++; continue; }
-const reservation = matchReservationForCancellation(Number(rangeMatch[1]), startMonthIdx + 1, Number(rangeMatch[3]), endMonthIdx + 1);
-if (!reservation) { seen.add(m.id); unmatched++; continue; }
-const listing = data.airbnbListings.find((l) => l.id === reservation.listingId);
-if (!listing) { seen.add(m.id); unmatched++; continue; }
+const startMonthIdx = rangeMatch[2] ? MONTH_NAMES.indexOf(rangeMatch[2].slice(0, 3).toLowerCase()) : endMonthIdx;
+if (startMonthIdx === -1 || endMonthIdx === -1) { seen.add(m.id); problems.push({ guest: guestName, why: "the stay's month wasn't readable" }); continue; }
+const stay = matchStayForRefund(Number(rangeMatch[1]), startMonthIdx + 1, Number(rangeMatch[3]), endMonthIdx + 1);
+if (!stay) { problems.push({ guest: guestName, why: 'no single stay with those dates is on file' }); continue; }
+const listing = data.airbnbListings.find((l) => l.id === stay.listingId);
+if (!listing) { seen.add(m.id); continue; }
 const ownerKey = ownerKeyFor(listing);
-if (!ownerKey) { seen.add(m.id); continue; }
+if (!ownerKey) { problems.push({ guest: guestName, listingId: listing.id, why: `"${listing.label || 'the listing'}" has no owner set` }); continue; }
 
-// Same content-level guard as the cancellation poster above -- a
-// second device syncing close behind this one, or a manual re-run,
-// shouldn't double-post the same real refund.
-const alreadyRecorded = data.lettingLedger.some((e) => e.kind === 'refund' && e.ownerKey === ownerKey && e.date === todayStr() && Math.abs((Number(e.amount) || 0) + amount) < 0.01);
+// The money left on the email's own date, not on whichever day Sync ran --
+// matters now that a refund can be posted days after it was sent.
+const sentOn = detail.date && !isNaN(new Date(detail.date)) ? new Date(detail.date).toISOString().slice(0, 10) : todayStr();
+// Already posted? By source email first; failing that by content (same
+// guest + amount near the same date), which covers rows posted before
+// rows carried their source email.
+const alreadyRecorded = data.lettingLedger.some((e) => e.kind === 'refund' && (e.sourceMessageId === m.id
+|| (e.ownerKey === ownerKey && (e.note || '') === (guestName || '') && Math.abs((Number(e.amount) || 0) + amount) < 0.01
+&& Math.abs(new Date(`${e.date}T00:00:00`) - new Date(`${sentOn}T00:00:00`)) <= 14 * 86400000)));
 if (alreadyRecorded) { seen.add(m.id); continue; }
 data.lettingLedger.push({
 id: uid(), ownerKey, kind: 'refund',
 amount: -amount, // money OUT, not in -- the whole point of this kind
 platform: 'airbnb',
-date: todayStr(), // the email states the STAY's dates, not when the refund itself was sent -- today is the real event date
-note: guestName || reservation.guestName || listing.label || 'Refund to guest',
+date: sentOn,
+note: guestName || stay.guestName || listing.label || 'Refund to guest',
+sourceMessageId: m.id,
 });
 seen.add(m.id);
 posted++;
 }
-data.prefs.airbnbRefundsSeen = [...seen];
-if (posted || unmatched) queueSave();
-return { posted, unmatched };
+data.prefs.airbnbRefundsDone = [...seen];
+queueSave();
+return { posted, problems };
 }
 
 // Runs the search and fills in whatever it can match; never touches a
@@ -1705,10 +1756,14 @@ const cancelNote = cancelResult.posted
 const refundNote = refundResult.posted
 ? ` Posted ${refundResult.posted} guest refund${refundResult.posted === 1 ? '' : 's'} to <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#letting-panel">Letting income</span>.`
 : '';
+const refundProblems = refundResult.problems || [];
+const refundProblemNote = refundProblems.length
+? ` ${refundProblems.length} guest refund${refundProblems.length === 1 ? '' : 's'} couldn't be posted: ${refundProblems.map((p) => `${escapeHtml(p.guest)} (${escapeHtml(p.why)})`).join('; ')}.${refundProblems.some((p) => p.listingId) ? ' Set the owner in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#airbnb-listings">Settings</span> and Sync again.' : ''}`
+: '';
 const verifyNote = verifyResult.missing
 ? ` ${verifyResult.missing} booking${verifyResult.missing === 1 ? "'s calendar event wasn't" : "s' calendar events weren't"} actually there any more — marked as needing a push again.`
 : '';
-status.innerHTML = `Synced just now.${guestNote}${cancelNote}${refundNote}${verifyNote}`;
+status.innerHTML = `Synced just now.${guestNote}${cancelNote}${refundNote}${refundProblemNote}${verifyNote}`;
 } else {
 // The actual error, right here -- not just a count pointing at devtools
 // most people never open. Every failed listing likely has the SAME

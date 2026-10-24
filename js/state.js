@@ -29,6 +29,7 @@ calendars: [], // array of tracked calendar NAMES, as they appear in Google Cale
 calendarStatus: {}, // name -> {found, title, date, syncedAt} — filled in by Sync
 airbnbListings: [], // {id, label, icsUrl, prefix, colour} -- configured in Settings
 airbnbReservations: [], // synced from each listing's ICS feed, see js/features/airbnb.js
+airbnbPastStays: [], // [{listingId, checkin, checkout, guestName}] -- completed stays kept ~400 days just so a late refund email can still be matched to a listing
 airbnbSyncStatus: {}, // listingId -> {ok, syncedAt, added, updated, removed, error}
 airbnbCleanerEvents: [], // [{date, name}] -- last scan of "Cleaner - <Name>" events on the push-target calendar, see js/features/airbnb.js
 airbnbCleanerSyncStatus: null, // {ok, syncedAt, error} for the cleaner-event scan above
@@ -3096,6 +3097,8 @@ data.airbnbReservations = data.airbnbReservations.map((r) => ({ ...blankAirbnbRe
 // planner-entries filter just above.
 const airbnbListingIds = new Set(data.airbnbListings.map((l) => l.id));
 data.airbnbReservations = data.airbnbReservations.filter((r) => airbnbListingIds.has(r.listingId));
+if (!Array.isArray(data.airbnbPastStays)) data.airbnbPastStays = [];
+data.airbnbPastStays = data.airbnbPastStays.filter((s) => s && airbnbListingIds.has(s.listingId));
 // Backfills `nights` onto an older accrual row that predates the
 // average-night-rate feature (letting.js's nightRateFor) -- derived
 // from its own reservation's checkin/checkout while that record still
