@@ -16,6 +16,7 @@ import { loadJsPdf } from '../utils.js';
 import {
 ownerKeyFor, ownerNameFor, entriesFor, nightRateFor, balanceFor, money, money0, monthRange, monthLabel, addMonths, today, isMyOwnListing, resolveColor, listingColorVar,
 } from './letting.js';
+import { loanReportFor } from './loans.js';
 
 // Reads a LOCAL-calendar date straight off the Date object's own
 // getters (never .toISOString(), which converts through UTC first --
@@ -356,6 +357,79 @@ doc.text(`${r.listing}: ${r.pct}% to Dad${capText} — ${r.fromDate} to ${r.toDa
 y += 13;
 });
 y += 10;
+}
+
+// Loans the owner has made to Dad: what was outstanding at each end of
+// the period once the Airbnb money they hold for Dad is set against it
+// (soonest-due tranche first), the interest that cost, and the same per
+// tranche. Only present when they have lent anything in or around the
+// period.
+const loanRep = loanReportFor(key, start, end);
+if (loanRep) {
+const shortDate = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' });
+ensureSpace(150);
+doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
+doc.text('Your loans to Dad', left, y); y += 16;
+doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
+[
+[`Outstanding at the start (${start})`, money(loanRep.openNet)],
+[`Outstanding at the end (${end})`, money(loanRep.closeNet)],
+['Interest earned this period', money(loanRep.interest)],
+...(loanRep.postedInPeriod ? [['Interest taken off your balance in this period (last month\'s)', money(loanRep.postedInPeriod)]] : []),
+].forEach(([label, value]) => {
+doc.text(label, left, y);
+doc.text(value, left + 280, y, { align: 'left' });
+y += 15;
+});
+doc.setFontSize(8); doc.setTextColor(100);
+const note = `This period's interest is taken off what you owe Dad on ${loanRep.postDate}. Interest runs daily on each loan, less whatever you owe Dad from Airbnb that day: that Airbnb money is set against the loan due back soonest first, so the longer-dated loans are what stay outstanding.${(loanRep.close.credit > 0.005 || loanRep.open.credit > 0.005) ? ' The extra is money Dad owes you through the ledger, which also earns interest.' : ''}`;
+doc.splitTextToSize(note, pageW - left * 2).forEach((ln) => { doc.text(ln, left, y); y += 11; });
+doc.setTextColor(0);
+y += 6;
+const lc = { desc: left, lent: left + 150, offOpen: left + 200, netOpen: left + 255, offClose: left + 315, netClose: left + 370, interest: left + 435 };
+const printLoanHeader = () => {
+doc.setFont('helvetica', 'bold'); doc.setFontSize(7); doc.setTextColor(100);
+doc.text('Loan (due back, rate)', lc.desc, y);
+doc.text('Lent', lc.lent, y);
+doc.text('Offset start', lc.offOpen, y);
+doc.text('Owed at start', lc.netOpen, y);
+doc.text('Offset end', lc.offClose, y);
+doc.text('Owed at end', lc.netClose, y);
+doc.text('Interest', lc.interest, y);
+y += 4;
+doc.setDrawColor(200);
+doc.line(left, y, pageW - left, y);
+y += 10;
+doc.setTextColor(0);
+};
+printLoanHeader();
+doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
+loanRep.tranches.forEach((t) => {
+const before = y;
+ensureSpace(13);
+if (y !== before) { doc.setFont('helvetica', 'normal'); doc.setFontSize(8); printLoanHeader(); doc.setFont('helvetica', 'normal'); doc.setFontSize(8); }
+doc.text(`${shortDate(t.startDate)} to ${shortDate(t.repayDate)}, ${t.ratePct}%`, lc.desc, y, { maxWidth: lc.lent - lc.desc - 6 });
+doc.text(money(t.amount), lc.lent, y);
+doc.text(t.openPrincipal ? money(t.openOffset) : '—', lc.offOpen, y);
+doc.text(t.openPrincipal ? money(t.openNet) : '—', lc.netOpen, y);
+doc.text(t.closePrincipal ? money(t.closeOffset) : '—', lc.offClose, y);
+doc.text(t.closePrincipal ? money(t.closeNet) : '—', lc.netClose, y);
+doc.text(money(t.interest), lc.interest, y);
+y += 12;
+});
+ensureSpace(24);
+doc.setDrawColor(200);
+doc.line(left, y - 2, pageW - left, y - 2);
+y += 8;
+doc.setFont('helvetica', 'bold'); doc.setFontSize(8);
+doc.text('Total', lc.desc, y);
+doc.text(money(loanRep.tranches.reduce((n, t) => n + t.amount, 0)), lc.lent, y);
+doc.text(money(loanRep.open.offset), lc.offOpen, y);
+doc.text(money(loanRep.openNet), lc.netOpen, y);
+doc.text(money(loanRep.close.offset), lc.offClose, y);
+doc.text(money(loanRep.closeNet), lc.netClose, y);
+doc.text(money(loanRep.interest), lc.interest, y);
+y += 22;
 }
 
 // Statement -- opening balance, every transaction between the two
