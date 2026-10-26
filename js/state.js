@@ -58,6 +58,10 @@ claudeApiSpend: null,
 // every device, even though the usage rows it was computed from are
 // device-local.
 modelCheck: null,
+// Yearly payments a bank makes for keeping an account (Nationwide Fairer
+// Share), copied from the bank-switch advisor's shared cache so the dated
+// reminders and the ticker tile don't need the network. See yearlyperks.js.
+annualPerks: [],
 // Pro/Max subscription usage (5h/weekly %, glideslope, projected
 // exhaustion) -- fed by an external scheduled task (get_usage only
 // exists inside a live Claude Code session, see js/features/settings.js's
@@ -2901,6 +2905,7 @@ if (!Array.isArray(data.modelCheck.findings)) data.modelCheck.findings = [];
 if (!Array.isArray(data.modelCheck.available)) data.modelCheck.available = [];
 if (!Array.isArray(data.modelCheck.dismissed)) data.modelCheck.dismissed = [];
 } else data.modelCheck = null;
+if (!Array.isArray(data.annualPerks)) data.annualPerks = [];
 data.claudeSubscriptionUsage = { ...blankClaudeSubscriptionUsage(), ...(data.claudeSubscriptionUsage || {}) };
 // Packing module library: array guard, then a ONE-TIME seed -- same
 // shape as data.ticker.tickerLettingSeeded. A deliberate deletion of a

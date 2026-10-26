@@ -1134,15 +1134,17 @@ function compute_year_path(array $user, array $cache, array $rows, ?string $toda
     $repoints = $salaryEvents + $krakOpen;
     $peak = 0.0;
     foreach ($events as $e) $peak = max($peak, $e['cand']['fund']);
-    $opens = $newUsed + $switches + $krakOpen;
+    // Fairer Share needs £100 in a Nationwide savings account in March: one more account to open (skip it if you already have one).
+    $savingsOpen = !empty($chosen['perk']) ? 1 : 0;
+    $opens = $newUsed + $switches + $krakOpen + $savingsOpen;
 
     $parts = [sprintf('%s from %d switch bonus%s', $money($chosen['bonus']), $switches, $switches === 1 ? '' : 'es')];
     if ($chosen['cashback'] > 0) $parts[] = sprintf('%s from cashback sites', $money($chosen['cashback']));
     if ($krakOpen) $parts[] = sprintf('%s from Krak Salary Match', $money($chosen['krakValue']));
     if ($chosen['perkValue'] > 0) $parts[] = sprintf('%s from Nationwide Fairer Share if it is repeated', $money($chosen['perkValue']));
-    $headline = sprintf('You could make about %s over the next %d months: %s — by opening %d new account%s (%d donor%s, %d bonus account%s%s) and repointing your salary %d time%s.',
+    $headline = sprintf('You could make about %s over the next %d months: %s — by opening %d new account%s (%d donor%s, %d bonus account%s%s%s) and repointing your salary %d time%s.',
         $money($chosen['total']), $H, implode(', ', $parts), $opens, $opens === 1 ? '' : 's',
-        $newUsed, $newUsed === 1 ? '' : 's', $switches, $switches === 1 ? '' : 's', $krakOpen ? ', 1 Krak' : '',
+        $newUsed, $newUsed === 1 ? '' : 's', $switches, $switches === 1 ? '' : 's', $krakOpen ? ', 1 Krak' : '', $savingsOpen ? ', 1 Nationwide savings' : '',
         $repoints, $repoints === 1 ? '' : 's');
 
     $summary = [];
@@ -1153,7 +1155,7 @@ function compute_year_path(array $user, array $cache, array $rows, ?string $toda
     if ($chosen['perkValue'] > 0) $summary[] = 'Nationwide Fairer Share is a yearly payment Nationwide has made for three years running but never promised; it is counted here because the plan holds a Nationwide account over 31 March anyway. It needs £100 in a Nationwide savings account in March (recoverable, and it earns interest) and some account use in January–March — the dated steps above cover both.';
     $summary[] = 'Not counted, because the page can\'t yet work them out: interest on the balances you hold, cashback on card spending, and ongoing perks that accounts pay for keeping them (monthly rewards and the like).';
     if ($peak > 0) $summary[] = sprintf('Have about %s ready to pay in for the largest single step; it can usually be moved on afterwards, but check each offer for how long it has to stay.', $money($peak));
-    $summary[] = sprintf('That is %d account applications — each leaves a mark on your credit file.', $opens);
+    $summary[] = sprintf('That is %d account applications%s — each leaves a mark on your credit file (a savings account usually does not).', $opens, $savingsOpen ? ', including the Nationwide savings account if you do not already have one' : '');
 
     // Side quests: what each extra donor account adds.
     $quests = [];

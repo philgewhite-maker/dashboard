@@ -25,7 +25,7 @@
 // on the strip by itself and takes them off when you're home. See
 // travelItems().
 import { data, queueSave, inventorySets, SET_CORE_GROUPS } from '../state.js';
-import { escapeHtml, uid, bindBackdropClose, claudeWeeklyPace } from '../utils.js';
+import { escapeHtml, uid, bindBackdropClose, claudeWeeklyPace, daysUntil } from '../utils.js';
 import * as letting from './letting.js';
 import { travelStripPrograms } from './loyaltybalances.js';
 import { matchBankLogo } from '../bankLogos.js';
@@ -451,6 +451,18 @@ amount: Number(sb.amount) || 0, description: sb.description || '',
 return items;
 }
 
+// One tile while any dated reminder for a yearly bank payment (Nationwide
+// Fairer Share, see yearlyperks.js) is awake and not ticked off -- derived
+// from the tasks themselves, so ticking them off is what removes it. A
+// reminder still hidden by its bring-forward date doesn't count.
+function yearlyPerkItems() {
+const live = (data.tasks || []).filter((t) => t.source && t.source.kind === 'yearly perk' && t.parentId && t.bucket !== 'done'
+&& !(t.bringForward && daysUntil(t.bringForward) > 0));
+if (!live.length) return [];
+live.sort((a, b) => (a.due || '9999').localeCompare(b.due || '9999'));
+return [{ id: 'auto-yearlyperk', kind: 'yearlyperk', auto: true, count: live.length, first: live[0], label: live[0].source.label || 'Yearly perk', amount: Number(live[0].source.amount) || 0 }];
+}
+
 // A single escalation tile, present only while at least one site-health
 // check is actually failing -- not a tile per check (a bad day for three
 // checks at once shouldn't crowd out everything else on the strip), and
@@ -527,7 +539,7 @@ return [{ id: 'auto-inv-incomplete', kind: 'inv-incomplete', auto: true, count: 
 function activeItems() {
 const mine = (data.ticker.items || []).filter((i) => !i.hidden);
 const seen = new Set(mine.map(keyFor));
-const extra = [...travelItems(), ...cassBonusItems(), ...siteHealthFailureItems(), ...modelUpgradeItems(), ...claudeUsageItems(), ...incompleteSetItems()].filter((i) => !seen.has(keyFor(i)));
+const extra = [...travelItems(), ...cassBonusItems(), ...yearlyPerkItems(), ...siteHealthFailureItems(), ...modelUpgradeItems(), ...claudeUsageItems(), ...incompleteSetItems()].filter((i) => !seen.has(keyFor(i)));
 return [...mine, ...extra];
 }
 
@@ -627,7 +639,7 @@ return `<span class="${cls}">${escapeHtml(shown)}</span>`;
 // A link where there's a page worth landing on, a plain span where there
 // isn't -- a tile that looks clickable and does nothing is worse than one
 // that doesn't invite the click.
-function tile(label, value, change, title, { href = '', edit = false, auto = false, tripId = '', accountId = '', gotoTab = '', gotoTarget = '' } = {}) {
+function tile(label, value, change, title, { href = '', edit = false, auto = false, tripId = '', accountId = '', gotoTab = '', gotoTarget = '', taskId = '' } = {}) {
 const attrs = `class="tick${auto ? ' tick-auto' : ''}" title="${escapeHtml(title || '')}"`;
 const inner = `<span class="tick-label">${escapeHtml(label)}</span>
 <span class="tick-value">${value}</span>
@@ -648,6 +660,7 @@ const plane = tripId
 // no bespoke click handler of its own the way accountId still has.
 const extraAttr = edit ? ' data-ticker-edit="1"'
 : accountId ? ` data-ticker-account="${escapeHtml(accountId)}"`
+: taskId ? ` data-ticker-task="${escapeHtml(taskId)}"`
 : gotoTab ? ` data-goto-tab="${escapeHtml(gotoTab)}"${gotoTarget ? ` data-goto-target="${escapeHtml(gotoTarget)}"` : ''}`
 : '';
 if (href) return `<span class="tick-pair">${plane}<a ${attrs} href="${escapeHtml(href)}" target="_blank" rel="noopener">${inner}</a></span>`;
@@ -706,6 +719,11 @@ const logo = item.logoUrl ? `<img class="tick-bank-logo" src="${escapeHtml(item.
 return tile('CASS', `${logo}${letting.money(item.amount)}`, '',
 `${item.bank}${item.description ? ` — ${item.description}` : ''}. Switch bonus still being worked on — click to open the account.`,
 { auto: true, accountId: item.accountId });
+}
+if (item.kind === 'yearlyperk') {
+return tile('Perk', `${letting.money(item.amount)} · ${item.count} to do`, '',
+`${item.label}: ${item.count} reminder${item.count === 1 ? '' : 's'} due — next: ${item.first.title}. Click to open it.`,
+{ auto: true, taskId: item.first.id });
 }
 if (item.kind === 'inv-incomplete') {
 const names = item.sets.map((s) => [s.brand, s.style, s.colour].filter(Boolean).join(' ') || 'Unnamed set');
@@ -852,6 +870,7 @@ case 'letting': return 'Owed';
 case 'loyalty': return 'Loyalty balances';
 case 'holding': return 'Holding';
 case 'cass': return 'CASS';
+case 'yearlyperk': return 'Perk';
 case 'sitehealth': return 'Checks';
 case 'modelcheck': return 'Models';
 case 'claudeusage': return 'Claude';
@@ -909,6 +928,14 @@ span.addEventListener('click', async () => {
 const [{ switchTab }, financeaccounts] = await Promise.all([import('../tabs.js'), import('./financeaccounts.js')]);
 switchTab('finances');
 financeaccounts.expandAccountRow(span.dataset.tickerAccount);
+});
+});
+// A yearly-perk tile opens its next due reminder in Tasks.
+el.querySelectorAll('[data-ticker-task]').forEach((span) => {
+span.addEventListener('click', async () => {
+const [{ switchTab }, tasks] = await Promise.all([import('../tabs.js'), import('./tasks.js')]);
+switchTab('tasks');
+tasks.revealTask(span.dataset.tickerTask);
 });
 });
 startRolling(el, resumeAt);

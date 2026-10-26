@@ -190,6 +190,7 @@ return opportunities;
 function applySharedScan(cache) {
 const opportunities = computeDeterministicOpportunities(cache);
 data.switchOffers = opportunities;
+if (Array.isArray(cache.annualPerks)) data.annualPerks = cache.annualPerks;
 data.prefs.switchOffersCheckedAt = todayStr();
 recordHistorySnapshot(opportunities, 'shared-cache');
 queueSave();
