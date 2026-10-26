@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v640</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v641</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -3058,10 +3058,11 @@ Photos added before task attachments existed live only on the device that added 
 <div id="pair-devices" style="margin-top:10px;"></div>
 <details class="settings-subgroup" style="margin-top:12px;">
 <summary id="pair-redeem-summary">Enter a pairing code on this device</summary>
-<div class="settings-note" style="margin:8px 0;">Open the pairing link on this device instead if you can; it fills both boxes in. Otherwise copy the sync URL from a paired device and type the code.</div>
+<div class="settings-note" style="margin:8px 0;"><strong>Best: open the pairing link on this device.</strong> It fills these boxes in and brings the encryption key with it, so you <em>don&rsquo;t</em> need the recovery key. Only if you can&rsquo;t use the link: copy the sync URL from a paired device, type the code, and also enter the recovery key below &mdash; a typed code can&rsquo;t carry the key, and without it this device can&rsquo;t read encrypted data.</div>
 <input type="text" autocomplete="off" id="pair-redeem-url" class="settings-input" placeholder="https://your-host/sync.php">
 <input type="text" autocomplete="off" id="pair-redeem-code" class="settings-input" style="margin-top:8px;" placeholder="ABCD-EFGH">
 <input type="text" autocomplete="off" id="pair-redeem-label" class="settings-input" style="margin-top:8px;" placeholder="What to call this device">
+<input type="password" autocomplete="new-password" id="pair-redeem-key" class="settings-input" style="margin-top:8px;" placeholder="Recovery key: only if you typed the code instead of using the link" title="44 characters from your password manager. Not needed when you paired with the link.">
 <div class="sync-row" style="margin-top:8px;">
 <button class="sync-btn" id="pair-redeem-btn" type="button">Pair this device</button>
 <span class="sync-status" id="pair-redeem-status"></span>

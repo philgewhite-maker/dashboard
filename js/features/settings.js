@@ -1519,7 +1519,7 @@ const crypt = await import('../synccrypto.js');
 const link = pairing.pairingLink(settings.syncUrl, res.code, await crypt.exportKey());
 const expires = new Date(res.expiresAt).getTime();
 codeBox.hidden = false;
-codeBox.innerHTML = `<div class="settings-note" style="margin:10px 0 4px;">On the other device, open this link — or go to its Settings and type the code.</div>
+codeBox.innerHTML = `<div class="settings-note" style="margin:10px 0 4px;"><strong>On the other device, open the link.</strong> It carries the encryption key, so no recovery key is needed. Typing the code instead pairs it but without the key, so you would also have to enter the recovery key there.</div>
 <div style="font-size:26px;font-weight:600;letter-spacing:3px;font-family:monospace;">${escapeHtml(res.code)}</div>
 <div class="sync-row" style="margin-top:6px;">
 <button class="sync-btn sm inline" type="button" id="pair-copy-link">Copy link</button>
@@ -1572,17 +1572,35 @@ const say = (t) => { const el = document.getElementById('pair-redeem-status'); i
 const url = urlEl.value.trim();
 const code = codeEl.value.trim();
 if (!url || !code) { say('Both the sync URL and the code are needed.'); return; }
+// The link's key wins; otherwise a typed recovery key. Checked BEFORE the
+// code is redeemed -- the code works once, so a typo in the key must not
+// be allowed to use it up.
+const typedKey = (document.getElementById('pair-redeem-key')?.value || '').replace(/\s+/g, '');
+if (!pendingKey && typedKey) {
+const { keyBytesFrom } = await import('../cryptobox.js');
+if (!keyBytesFrom(typedKey)) { say('That isn\'t a recovery key — it should be 44 characters, usually ending in "=". Or leave it blank if you used the link.'); return; }
+}
+const keyToUse = pendingKey || typedKey;
 redeemBtn.disabled = true;
 say('Pairing…');
 try {
 const pairing = await import('../pairing.js');
-const res = await pairing.redeemPairing(url, code, labelEl.value.trim() || pairing.guessLabel(), pendingKey);
+const res = await pairing.redeemPairing(url, code, labelEl.value.trim() || pairing.guessLabel(), keyToUse);
 const urlInput = document.getElementById('sync-url-input');
 const secretInput = document.getElementById('sync-secret-input');
 if (urlInput) urlInput.value = url;
 if (secretInput) secretInput.value = res.token;
 codeEl.value = '';
-say(`Paired as "${res.label}". This device has its own token${pendingKey ? ' and the encryption key' : ''} now.`);
+if (keyToUse) {
+say(`Paired as "${res.label}". This device has its own token and the encryption key now.`);
+} else {
+// Not an error -- an unencrypted document needs no key -- but it is the
+// one outcome that can leave a device unable to read anything.
+const statusEl = document.getElementById('pair-redeem-status');
+if (statusEl) statusEl.innerHTML = `Paired as "${escapeHtml(res.label)}" with its own token, but <strong>without the encryption key</strong>. If your data is encrypted this device can't read it until you paste the recovery key under <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#encrypt-key-input">Encryption</span> -- or unpair and use the link instead.`;
+}
+const keyBox = document.getElementById('pair-redeem-key');
+if (keyBox) keyBox.value = '';
 pendingKey = '';
 await restartAutoSync();
 await renderDevices();
