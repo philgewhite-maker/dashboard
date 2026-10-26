@@ -68,11 +68,22 @@ const zone = timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'Eu
 let resolvedEndDate = endDate || date;
 let resolvedEndTime = endTime;
 if (timed && !endTime) ({ endTime: resolvedEndTime, endDate: resolvedEndDate } = addOneHourAcrossMidnight(startTime, resolvedEndDate));
+// Google rejects (400) an event that ends at or before it starts. For a
+// timed event on one day that is a check-out clock time earlier than the
+// check-in one; for an all-day event the end date is EXCLUSIVE, so a
+// single day needs the day after, not the same date.
+if (timed && resolvedEndDate <= date && resolvedEndTime <= startTime) ({ endTime: resolvedEndTime, endDate: resolvedEndDate } = addOneHourAcrossMidnight(startTime, date));
+let allDayEnd = endDate || date;
+if (!timed && allDayEnd <= date) {
+const [y, mo, d] = date.split('-').map(Number);
+const next = new Date(Date.UTC(y, mo - 1, d + 1));
+allDayEnd = `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, '0')}-${String(next.getUTCDate()).padStart(2, '0')}`;
+}
 return {
 summary: title,
 description,
 start: timed ? { dateTime: `${date}T${startTime}:00`, timeZone: zone } : { date },
-end: timed ? { dateTime: `${resolvedEndDate}T${resolvedEndTime}:00`, timeZone: zone } : { date: endDate || date },
+end: timed ? { dateTime: `${resolvedEndDate}T${resolvedEndTime}:00`, timeZone: zone } : { date: allDayEnd },
 };
 }
 

@@ -1657,7 +1657,13 @@ statusEl.textContent = `Matched an existing "${match.summary}" event — adopted
 } else if (candidates.length > 1) {
 statusEl.textContent = `${candidates.length} existing events near these dates already mention "${listing.prefix}" — too ambiguous to adopt one automatically. Rename or remove the extras in Google Calendar, then push again.`;
 } else {
-const created = await createEvent(calendarId, {
+// A same-day visit (the sprinkler service) has no stay to put check-in
+// and check-out times on -- 15:00 to 11:00 the same day ends before it
+// starts, which Google refuses with a 400. It goes in as an all-day event.
+const sameDay = reservation.checkin === reservation.checkout;
+const created = await createEvent(calendarId, sameDay
+? { title, description, date: reservation.checkin }
+: {
 title, description,
 date: reservation.checkin, endDate: reservation.checkout,
 startTime: CHECKIN_TIME, endTime: CHECKOUT_TIME,
