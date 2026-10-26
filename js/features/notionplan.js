@@ -11,14 +11,14 @@
 // in both places is how two-system setups rot.
 import { data, queueSave, blankTask } from '../state.js';
 import { escapeHtml, NOTION_LINK_HTML } from '../utils.js';
-import { callTextJson, MissingKeyError } from '../ai.js';
+import { callTextJson, MissingKeyError, useModel } from '../ai.js';
 import { setNotionPanel } from './tasks.js';
 import {
 NotionNotConfiguredError, createPageForTask, appendBlocks,
 textBlocks, headingBlock, todoBlock,
 } from '../notion.js';
 
-const PLAN_MODEL = 'claude-opus-5-5';
+const PLAN_MODEL = useModel('claude-opus-5-5');
 const PLAN_MAX_TOKENS = 4000;
 
 async function draftPlan(task) {

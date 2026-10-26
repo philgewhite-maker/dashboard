@@ -690,8 +690,16 @@ const pick = currentLoyaltyPick();
 if (!pick) return '';
 const { program, r } = pick;
 const valueText = r.balance != null ? r.balance.toLocaleString('en-GB') : '—';
-return tile(escapeHtml(program.name), `${escapeHtml(valueText)}${r.unit ? ` ${escapeHtml(r.unit)}` : ''}`, '',
-`${escapeHtml(program.name)}: ${escapeHtml(r.label)} ${escapeHtml(valueText)} ${escapeHtml(r.unit)} as of ${escapeHtml(r.date)}. Loyalty balances — Finances tab.`);
+// Compact: the programme's logo stands in for its name when it has one
+// ("45,000" with the Bonvoy mark), otherwise the short name follows the
+// number ("45,000 Bonvoy"). A bare "points" unit adds nothing either way.
+// tile() escapes its label and title itself, so those are passed RAW --
+// pre-escaping them showed "Miles &amp More".
+const unit = r.unit && !/^(points?|miles?|pts)$/i.test(r.unit) ? ` ${r.unit}` : '';
+const shortName = String(program.name || '').replace(/^(marriott|british airways|virgin)\s+/i, '').replace(/\s+(executive club|flying club|advantage card|gold plus rewards|rewards|club)$/i, '') || program.name;
+const logo = program.logoUrl ? `<img class="tick-bank-logo" src="${escapeHtml(program.logoUrl)}" alt="${escapeHtml(program.name)}" onerror="this.replaceWith(document.createTextNode(this.alt))">` : '';
+return tile('', `${logo}${escapeHtml(valueText)}${escapeHtml(unit)}${logo || unit ? '' : ` ${escapeHtml(shortName)}`}`, '',
+`${program.name}: ${r.label} ${valueText} ${r.unit || ''} as of ${r.date}. Loyalty balances — Finances tab.`);
 }
 if (item.kind === 'cass') {
 const logo = item.logoUrl ? `<img class="tick-bank-logo" src="${escapeHtml(item.logoUrl)}" alt="" onerror="this.remove()">` : '';
@@ -744,6 +752,10 @@ return tile('Claude', `<span class="${cls}">w${Math.round(pace.used)}%/${Math.ro
 { auto: true, gotoTab: 'settings', gotoTarget: '#claude-usage-summary' });
 }
 if (item.kind === 'holding') {
+// Folded into the quote tile for the same stock when the strip has one.
+const holdSym = t.holdingSymbol || 'DBK.DE';
+if ((t.items || []).some((i) => !i.hidden && i.kind === 'quote' && i.symbol === holdSym)
+&& t.shares && c[keyFor({ kind: 'quote', symbol: holdSym })]?.value !== undefined) return '';
 const fxHit = c[keyFor({ kind: 'fx', base: HOME, quote: 'EUR' })];
 const dbkHit = c[keyFor({ kind: 'quote', symbol: t.holdingSymbol || 'DBK.DE' })];
 if (!fxHit || fxHit.value === undefined || !dbkHit || dbkHit.value === undefined) return '';
@@ -785,10 +797,28 @@ case 'fx':
 return tile(labelFor(item), hit.value.toFixed(4), changeHtml(hit.value, pick(hit)),
 `ECB fixing for ${hit.date}, via Frankfurter.${item.note ? ` ${item.note}.` : ''}`,
 { href: SOURCE.fx(item), auto: item.auto, tripId: item.tripId });
-case 'quote':
-return tile(labelFor(item), `${hit.currency === 'EUR' ? '€' : hit.currency === 'USD' ? '$' : ''}${hit.value.toFixed(2)}`,
+case 'quote': {
+const sym = `${hit.currency === 'EUR' ? '€' : hit.currency === 'USD' ? '$' : ''}${hit.value.toFixed(2)}`;
+// The share-scheme holding is the same stock, so it rides on this tile
+// ("DBK €29.11 / £6,401") instead of taking a second one. Click opens the
+// holding editor, which a plain quote link has no use for.
+const fxHit = c[keyFor({ kind: 'fx', base: HOME, quote: 'EUR' })];
+if (item.symbol === (t.holdingSymbol || 'DBK.DE') && t.shares && fxHit && fxHit.value !== undefined) {
+const gbp = (t.shares * hit.value) / fxHit.value;
+const daysSinceDiv = hit.lastDividendAt ? (Date.now() - new Date(hit.lastDividendAt).getTime()) / 86400000 : Infinity;
+const cleared = t.exDivClearedAt && hit.lastDividendAt && new Date(t.exDivClearedAt) >= new Date(hit.lastDividendAt);
+const exDiv = daysSinceDiv <= 14 && !cleared;
+return tile(labelFor(item), `${sym} / £${Math.round(gbp).toLocaleString('en-GB')}${exDiv ? ' ex-div' : ''}`,
+changeHtml(hit.value, pick(hit)),
+`${item.symbol} at ${hit.value.toFixed(2)}; your ${t.shares.toFixed(2)} shares are worth about £${Math.round(gbp).toLocaleString('en-GB')} at ${fxHit.value.toFixed(4)}.`
++ (t.lastBuy ? ` Last added ${t.lastBuy.shares.toFixed(2)} on ${t.lastBuy.on}.` : '')
++ (exDiv ? ` Went ex-dividend ${hit.lastDividendAt} -- the price drop is the payout, not a loss.` : '')
++ ' Click to set the count or the monthly amount.', { edit: true, auto: item.auto });
+}
+return tile(labelFor(item), sym,
 changeHtml(hit.value, pick(hit)), `${item.symbol}, via Yahoo Finance.`,
 { href: SOURCE.quote(item), auto: item.auto });
+}
 case 'sonia':
 return tile('2y SONIA', `${hit.value.toFixed(3)}%`,
 // A swap rate moves in basis points, so a percentage change of a

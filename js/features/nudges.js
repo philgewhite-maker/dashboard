@@ -1,7 +1,7 @@
 import { data, reachOutThreshold, isDormantStage, isTravelPaused, getLocalSettings, setLocalSetting } from '../state.js';
 import { escapeHtml, affiliateLink, scrollAndFlash, daysSince, daysUntil, MISSING_KEY_LINK_HTML } from '../utils.js';
 import { switchTab } from '../tabs.js';
-import { callTextJson, MissingKeyError } from '../ai.js';
+import { callTextJson, MissingKeyError, useModel } from '../ai.js';
 import { gapsFor } from './travel.js';
 import { accountLabel } from './financeaccounts.js';
 
@@ -15,7 +15,7 @@ const AIRBNB_GREET_LEAD_DAYS = 1; // "guest arriving" reminder, this many days b
 const TOP_N = 6;
 // Cheap, fast model for a ranking task — no need for the vision model the
 // user may have set for screenshot import.
-const RANK_MODEL = 'claude-haiku-5-5';
+const RANK_MODEL = useModel('claude-haiku-5-5');
 // 300 was fine under Haiku 4.5, which never thought unless asked. Haiku
 // 5.5 thinks adaptively by default and that counts against max_tokens.
 // 'low' effort (passed at the call site below) does NOT reliably

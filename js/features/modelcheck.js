@@ -15,7 +15,7 @@
 // 5.5 is the same $2/$10 rate card, and any saving there is fewer tokens
 // per task, which only shows up in the calls/tokens-per-call figures below.
 import { data, queueSave, getLocalSettings } from '../state.js';
-import { summarizeUsage, currentMonthKey, priceFor } from '../ai.js';
+import { summarizeUsage, currentMonthKey, priceFor, modelsInUse } from '../ai.js';
 import { escapeHtml } from '../utils.js';
 
 const MODELS_URL = 'https://api.anthropic.com/v1/models';
@@ -127,6 +127,30 @@ upgrade, price: comparePrices(r.model, upgrade),
 return [...found.values()].sort((a, b) => b.cost - a.cost);
 }
 
+// The models a feature is configured to use right now (the model constants,
+// plus a model picked in Settings, if any). A finding about a model outside
+// this set is history -- everything has already been moved off it.
+async function configuredModels() {
+const set = modelsInUse();
+const picked = ((await getLocalSettings()).anthropicModel || '').trim();
+if (picked) set.add(picked);
+return set;
+}
+
+// Drops findings for models nothing is configured to use any more. Runs on
+// every app open (no network), so the ticker stops saying "5 upgrades" the
+// moment the last feature is moved, instead of at the next monthly check.
+async function pruneModelFindings() {
+const mc = data.modelCheck;
+if (!mc || !Array.isArray(mc.findings) || !mc.findings.length) return;
+const inUse = await configuredModels();
+const kept = mc.findings.filter((f) => inUse.has(f.model));
+if (kept.length === mc.findings.length) return;
+mc.findings = kept;
+queueSave();
+import('./ticker.js').then((m) => m.renderTicker());
+}
+
 // Not before this day of the month: on the 1st the new month's usage log
 // is empty, so a check then would be judging last month alone. From
 // mid-month it sees last month complete plus a real slice of this one.
@@ -136,6 +160,7 @@ const CHECK_FROM_DAY = 15;
 // app-open cadence; almost every call returns null immediately). `force`
 // is the Check-now button and skips both gates.
 async function runModelCheck({ force = false } = {}) {
+await pruneModelFindings();
 const month = currentMonthKey();
 const prev = data.modelCheck;
 if (!force) {
@@ -154,12 +179,13 @@ const settings = await getLocalSettings();
 const months = [previousMonthKey(month), month];
 const rowsByMonth = {};
 for (const m of months) rowsByMonth[m] = summarizeUsage(settings.apiUsage, m).rows;
+const inUse = await configuredModels();
 data.modelCheck = {
 checkedAt: new Date().toISOString(),
 checkedMonth: month,
 flagMinCost: FLAG_MIN_COST,
 available,
-findings: buildFindings(rowsByMonth, available),
+findings: buildFindings(rowsByMonth, available).filter((f) => inUse.has(f.model)),
 dismissed: (prev && prev.dismissed) || [],
 };
 queueSave();
@@ -183,6 +209,7 @@ return [...seen];
 async function renderModelCheck() {
 const el = document.getElementById('model-check-panel');
 if (!el) return;
+await pruneModelFindings();
 const mc = data.modelCheck;
 const unpriced = await unpricedUsedModels();
 const dismissed = new Set((mc && mc.dismissed) || []);
@@ -202,7 +229,7 @@ el.innerHTML = `<div class="sync-row">
 </div>
 <div class="settings-note" style="margin:4px 0;">${status}</div>
 ${rows || (mc ? '<div class="settings-note" style="margin:4px 0;">Nothing over the threshold has a newer model available.</div>' : '')}
-${live.length ? '<div class="settings-note" style="margin:6px 0 0;">Rates only: a newer model can still use fewer tokens per task (Anthropic says Sonnet 5.5 does). After switching, compare calls and tokens per call here next month. Dismiss a row if that feature has already been moved &mdash; this reads usage history, which still includes calls made before the switch.</div>' : ''}
+${live.length ? '<div class="settings-note" style="margin:6px 0 0;">Rates only: a newer model can still use fewer tokens per task (Anthropic says Sonnet 5.5 does). After switching, compare calls and tokens per call here next month. Only models a feature is still configured to use are listed; dismiss one to stop it showing.</div>' : ''}
 ${unpriced.length ? `<div class="settings-note" style="margin:6px 0 0;">No price on file for ${unpriced.map(escapeHtml).join(', ')}, so those calls show as a dash and are left out of the totals above. Add them to the price table in js/ai.js.</div>` : ''}`;
 el.querySelector('#model-check-btn').addEventListener('click', async (e) => {
 const btn = e.currentTarget;

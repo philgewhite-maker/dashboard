@@ -9,7 +9,15 @@ import { fileToBase64, loadImage, cropThumbnailToBlob, hashFile, captureDateOf, 
 import { parseCacheGet, parseCachePut } from './db.js';
 
 const API_URL = 'https://api.anthropic.com/v1/messages';
-const DEFAULT_MODEL = 'claude-opus-5-5';
+// Every model a feature is CONFIGURED to call: each model constant passes
+// through useModel(), which records it here. The monthly model check judges
+// "is there a newer model than the one in use" against this set rather than
+// against usage history, which keeps listing a model for weeks after the
+// last feature using it was moved off.
+const MODELS_IN_USE = new Set();
+function useModel(id) { MODELS_IN_USE.add(id); return id; }
+function modelsInUse() { return new Set(MODELS_IN_USE); }
+const DEFAULT_MODEL = useModel('claude-opus-5-5');
 
 // Anthropic list prices in USD per million tokens. Only ever used for the
 // rough spend estimate shown in Settings — nothing functional depends on it,
@@ -385,7 +393,7 @@ const PROFILE_MAX_TOKENS = 3000;
 // profile screenshots (see safeBandHeight below), so this runs more than
 // once per import -- worth pricing right, not just inheriting the user's
 // chosen default.
-const PROFILE_PARSE_MODEL = 'claude-sonnet-5-5';
+const PROFILE_PARSE_MODEL = useModel('claude-sonnet-5-5');
 // Escalation for an image tall/narrow enough to need more than one band
 // even on the standard vision tier -- see VISION_TIER_HIGH_RES for why
 // that specifically means Opus, not "a smarter model": Opus 4.7+ gets a
@@ -395,7 +403,7 @@ const PROFILE_PARSE_MODEL = 'claude-sonnet-5-5';
 // BAND_OVERLAP exists to manage. Reserved for the images that actually
 // need it -- a normal-length profile never triggers this and stays on
 // cheaper Sonnet.
-const PROFILE_PARSE_MODEL_TALL = 'claude-opus-5-5';
+const PROFILE_PARSE_MODEL_TALL = useModel('claude-opus-5-5');
 // Bumped whenever profilePrompt()'s requested fields change. The rich-parse
 // cache is keyed on this alongside the image hash -- without it, re-parsing
 // the exact same screenshot after a prompt change (a genuinely common thing
@@ -589,7 +597,7 @@ return { candidates, truncated };
 //
 // Cached by a hash of the image bytes, so re-reviewing the same album never
 // bills twice for the same photo.
-const QUICK_SCAN_MODEL = 'claude-haiku-5-5';
+const QUICK_SCAN_MODEL = useModel('claude-haiku-5-5');
 // Was 400 under Haiku 4.5, which never thought unless asked. Haiku 5.5
 // thinks adaptively by default and that counts against max_tokens, so a
 // cap this tight risked the exact failure model-migration.md warns about
@@ -1253,7 +1261,7 @@ return normaliseRegenerateVariant(raw, ingredients, instructions);
 // exact name matches (they don't need it) or wired to auto-apply anything;
 // it only ever informs a human decision already in progress, same as every
 // other AI-assisted match in this app.
-const FACE_COMPARE_MODEL = 'claude-haiku-5-5';
+const FACE_COMPARE_MODEL = useModel('claude-haiku-5-5');
 // Was 200 under Haiku 4.5 -- same headroom-for-adaptive-thinking reason
 // as QUICK_SCAN_MAX_TOKENS above.
 const FACE_COMPARE_MAX_TOKENS = 400;
@@ -1284,7 +1292,7 @@ reason: (data && data.reason) || '',
 // mandatory regardless) is exactly the kind of thing a cheap/fast tier
 // under-follows. This runs rarely (one capture, one manual refresh), so
 // the small extra cost buys real reliability rather than another retry.
-const SHOPPING_SEARCH_MODEL = 'claude-sonnet-5-5';
+const SHOPPING_SEARCH_MODEL = useModel('claude-sonnet-5-5');
 // Confirmed live: 2000 wasn't a comfortable margin, it was undersized outright
 // -- a real run hit stop_reason:'max_tokens' with NO text block at all after
 // 4 full rounds of thinking + tool calls (3 site-scoped searches, 2 fetches,
@@ -1551,7 +1559,7 @@ name: String(first.name || ''), retailer: String(first.retailer || ''), price: S
 // looked up. `alreadyProposed` is sent back to the model explicitly (on
 // top of the caller's own after-the-fact dedup) so a repeat suggestion
 // is avoided at the source, not just filtered out afterwards.
-const RATE_REVIEW_MODEL = 'claude-sonnet-5-5';
+const RATE_REVIEW_MODEL = useModel('claude-sonnet-5-5');
 const RATE_REVIEW_MAX_TOKENS = 8000;
 const RATE_REVIEW_EFFORT = 'medium';
 function airbnbRateReviewPrompt({ listings, windowStart, windowEnd, alreadyProposed, count }) {
@@ -1681,7 +1689,7 @@ recommendation: String(r?.recommendation || ''),
 // bare URL -- confirmed live as a real gap: an Amazon link pasted into
 // Shopping's own capture input became a task titled with the entire raw
 // URL, and the link itself was never even saved by that input at all.
-const RESOLVE_URL_MODEL = 'claude-sonnet-5-5';
+const RESOLVE_URL_MODEL = useModel('claude-sonnet-5-5');
 const RESOLVE_URL_MAX_TOKENS = 2000;
 
 // Same web_search/web_fetch pair, UK bias, and Amazon-fetch exclusion
@@ -1769,7 +1777,7 @@ return books.map((b) => ({ title: String(b.title || '').trim(), seriesOrder: Str
 // Cheap/fast tier, same as quickScanScreenshot's own reasoning: reading a
 // product off its packaging is straightforward recognition, not a task that
 // benefits from a bigger model.
-const IDENTIFY_PRODUCT_MODEL = 'claude-haiku-5-5';
+const IDENTIFY_PRODUCT_MODEL = useModel('claude-haiku-5-5');
 // Was 200 under Haiku 4.5 -- same headroom reason as QUICK_SCAN_MAX_TOKENS.
 const IDENTIFY_PRODUCT_MAX_TOKENS = 400;
 async function identifyProduct(file) {
@@ -1786,7 +1794,7 @@ return String((data && data.name) || '').trim();
 // that's confirmed the text isn't already English, so a cheap/fast model
 // is the right call here rather than whatever vision model Settings has
 // configured for photo work.
-const TRANSLATE_MODEL = 'claude-haiku-5-5';
+const TRANSLATE_MODEL = useModel('claude-haiku-5-5');
 // Was 800 under Haiku 4.5 -- same headroom reason as QUICK_SCAN_MAX_TOKENS.
 const TRANSLATE_MAX_TOKENS = 1200;
 function translatePrompt(text) {
@@ -1812,7 +1820,7 @@ translation: String((data && data.translation) || '').trim(),
 // Latin-alphabet form. Distinct, narrower prompt from translatePrompt
 // above rather than a reuse of its dating-profile-specific wording.
 // Same cheap/fast tier: this is a lookup, not reasoning.
-const ROMANIZE_MODEL = 'claude-haiku-5-5';
+const ROMANIZE_MODEL = useModel('claude-haiku-5-5');
 // Was 200 under Haiku 4.5 -- same headroom reason as QUICK_SCAN_MAX_TOKENS.
 const ROMANIZE_MAX_TOKENS = 400;
 function romanizeNamePrompt(name) {
@@ -1839,7 +1847,7 @@ return String((data && data.name) || '').trim();
 // Haiku: resolving "1st November to 5th" against today's date, and
 // picking which existing trip "my Lisbon trip" means, takes more judgement
 // than a lookup.
-const CAPTURE_INTENT_MODEL = 'claude-sonnet-5-5';
+const CAPTURE_INTENT_MODEL = useModel('claude-sonnet-5-5');
 const CAPTURE_INTENT_MAX_TOKENS = 2000;
 function captureIntentPrompt(text, trips) {
 const tripList = trips.length
@@ -1880,7 +1888,7 @@ return { steps: Array.isArray(data && data.steps) ? data.steps : [] };
 // extraction, same tier as profile parsing -- Sonnet 5, not the user's
 // chosen vision model, for the same reasoning profilePrompt's own comment
 // gives (nuanced reading, not deep reasoning).
-const WELLNESS_MODEL = 'claude-sonnet-5-5';
+const WELLNESS_MODEL = useModel('claude-sonnet-5-5');
 // Confirmed live: this model returns a "thinking" content block even though
 // nothing here ever requests one (no `thinking` param is sent) -- and that
 // block counts against max_tokens the same as the actual answer. At 800,
@@ -2067,7 +2075,7 @@ return { ...result, fromCache: false };
 // wellnessPrompt's band-interpolation comment already establishes for
 // numbers. travel.js's enrichLegFromExtraction is what actually writes
 // these onto a leg.
-const TRIP_MODEL = 'claude-sonnet-5-5';
+const TRIP_MODEL = useModel('claude-sonnet-5-5');
 // Room for several passengers each with their own seat/baggage line -- a
 // family-of-5 booking confirmation genuinely needs more output than a
 // single-traveller one, and 1000 tokens was confirmed live to be tight
@@ -2258,7 +2266,7 @@ return shapeTripExtraction(raw);
 // as extractTripLegFromEmail above (Sonnet 5, 'low' effort) -- reading a
 // varied, real email body is the same class of problem, not the cheap/fast
 // recognition tasks elsewhere in this file.
-const MAIL_EXTRACT_MODEL = 'claude-sonnet-5-5';
+const MAIL_EXTRACT_MODEL = useModel('claude-sonnet-5-5');
 // Smaller than TRIP_MAX_TOKENS -- no passenger list, just a title/notes/
 // date shape -- but still real body text with real variety, not a fixed
 // little form.
@@ -2412,7 +2420,7 @@ const MEDIA_RECS_MAX_TOKENS = 12000;
 // its whole point is qualitative judgement a cheap model is the wrong
 // tool for, and it runs once per full check, not once per source, so
 // its own cost contribution here was never the problem.
-const MEDIA_RECS_MODEL = 'claude-haiku-5-5';
+const MEDIA_RECS_MODEL = useModel('claude-haiku-5-5');
 async function extractMediaRecommendations(text, guidance = '') {
 const prompt = `This is text (possibly raw HTML) from an article or list recommending films, TV series, albums or books to watch/listen to (e.g. "New on Apple TV+ this month", a best-of list, a genre roundup, an all-time-best ranking).
 
@@ -2579,7 +2587,7 @@ return { termRanges, breaks, holidays };
 // sometimes already transliterated out of Cyrillic — so the country isn't
 // obvious just from the text alone the way it would be for a well-known
 // English place name.
-const COUNTRY_MODEL = 'claude-haiku-5-5';
+const COUNTRY_MODEL = useModel('claude-haiku-5-5');
 // Was 200 under Haiku 4.5 -- same headroom reason as QUICK_SCAN_MAX_TOKENS.
 const COUNTRY_MAX_TOKENS = 400;
 function countryPrompt(place) {
@@ -2596,7 +2604,7 @@ return { country: String((data && data.country) || '').trim() };
 
 export {
 MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot, quickScanScreenshot, scanForCaptureMarker,
-callTextJson, DEFAULT_MODEL, summarizeUsage, summarizeSyncedUsage, summarizeClaudeApiSpend, currentMonthKey, priceFor, compareFaces,
+callTextJson, DEFAULT_MODEL, useModel, modelsInUse, summarizeUsage, summarizeSyncedUsage, summarizeClaudeApiSpend, currentMonthKey, priceFor, compareFaces,
 extractRecipeFromImage, extractRecipeFromPdf, extractRecipeFromHtml, searchShoppingItem, searchAgentProvocateurElsewhere, searchEbayResaleEstimate, cleanEstimateText, searchDepartmentStoresForMissingSetPiece, generateAirbnbRateReview, analyseOngoingAccountValue, identifyProduct, translateText, romanizeName, parseCaptureIntent,
 resolveUrlTitle, resolveJobPostingUrl, resolveBookDetails, resolveSeriesBooks,
 identifyCountry, extractWellnessScreenshot,

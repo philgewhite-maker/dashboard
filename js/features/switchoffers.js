@@ -34,7 +34,7 @@
 // only ever proposes.
 import { data, queueSave } from '../state.js';
 import { escapeHtml, uid, todayStr, daysSince, SYNC_LINK_HTML } from '../utils.js';
-import { callTextJson, MissingKeyError } from '../ai.js';
+import { callTextJson, MissingKeyError, useModel } from '../ai.js';
 import { accountLabel, expandAccountRow, formatShortDate } from './financeaccounts.js';
 import { captureTask, revealTask } from './tasks.js';
 import { run, AgentNotConfiguredError } from '../homeagent.js';
@@ -70,7 +70,7 @@ return json?.offers?.length ? json : null;
 // [date]" vs. "never held one") deserves a real reasoning pass, not the
 // cheap ranking tier nudges.js's own RANK_MODEL uses for a much simpler
 // job.
-const SWITCH_MODEL = 'claude-sonnet-5-5';
+const SWITCH_MODEL = useModel('claude-sonnet-5-5');
 // Moved from claude-sonnet-5 to this point release. Same $2/$10 per MTok
 // rate; the saving is fewer tokens per task (Anthropic: "up to 30% less
 // per task" -- a vendor figure, not measured here). The thinking/token-
