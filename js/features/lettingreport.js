@@ -372,8 +372,8 @@ doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
 doc.text('Your loans to Dad', left, y); y += 16;
 doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
 [
-[`Outstanding at the start (${start})`, money(loanRep.openNet)],
-[`Outstanding at the end (${end})`, money(loanRep.closeNet)],
+[`Owed to you at the start (${start})`, money(loanRep.openTotal)],
+[`Owed to you at the end (${end})`, money(loanRep.closeTotal)],
 ['Interest earned this period', money(loanRep.interest)],
 ...(loanRep.postedInPeriod ? [['Interest taken off your balance in this period (last month\'s)', money(loanRep.postedInPeriod)]] : []),
 ].forEach(([label, value]) => {
@@ -382,7 +382,7 @@ doc.text(value, left + 280, y, { align: 'left' });
 y += 15;
 });
 doc.setFontSize(8); doc.setTextColor(100);
-const note = `This period's interest is taken off what you owe Dad on ${loanRep.postDate}. Interest runs daily on each loan, less whatever you owe Dad from Airbnb that day: that Airbnb money is set against the loan due back soonest first, so the longer-dated loans are what stay outstanding.${(loanRep.close.credit > 0.005 || loanRep.open.credit > 0.005) ? ' The extra is money Dad owes you through the ledger, which also earns interest.' : ''}`;
+const note = `"Owed to you" is your loans (after the Airbnb offset), plus interest already taken off what you owe Dad (so Dad owes it to you through the ledger), plus interest earned this month that isn't taken off until the 1st. Interest runs daily on each loan, less whatever you owe Dad from Airbnb that day; that Airbnb money is set against the loan due back soonest first. This period's interest is taken off on ${loanRep.postDate}, and from then on it earns interest too, so interest compounds monthly.`;
 doc.splitTextToSize(note, pageW - left * 2).forEach((ln) => { doc.text(ln, left, y); y += 11; });
 doc.setTextColor(0);
 y += 6;
@@ -417,17 +417,32 @@ doc.text(t.closePrincipal ? money(t.closeNet) : '—', lc.netClose, y);
 doc.text(money(t.interest), lc.interest, y);
 y += 12;
 });
+// The two non-tranche parts of what is owed, as their own rows so the
+// columns add up to the total beneath them.
+[
+['Interest already taken off your balance', loanRep.openLedger, loanRep.closeLedger],
+['Interest earned this month, not yet taken off', loanRep.openUnposted, loanRep.closeUnposted],
+].forEach(([label, openAmt, closeAmt]) => {
+const before = y;
+ensureSpace(13);
+if (y !== before) { printLoanHeader(); }
+doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
+doc.text(label, lc.desc, y, { maxWidth: lc.netOpen - lc.desc - 6 });
+doc.text(money(openAmt), lc.netOpen, y);
+doc.text(money(closeAmt), lc.netClose, y);
+y += 12;
+});
 ensureSpace(24);
 doc.setDrawColor(200);
 doc.line(left, y - 2, pageW - left, y - 2);
 y += 8;
 doc.setFont('helvetica', 'bold'); doc.setFontSize(8);
-doc.text('Total', lc.desc, y);
+doc.text('Total owed to you', lc.desc, y);
 doc.text(money(loanRep.tranches.reduce((n, t) => n + t.amount, 0)), lc.lent, y);
 doc.text(money(loanRep.open.offset), lc.offOpen, y);
-doc.text(money(loanRep.openNet), lc.netOpen, y);
+doc.text(money(loanRep.openTotal), lc.netOpen, y);
 doc.text(money(loanRep.close.offset), lc.offClose, y);
-doc.text(money(loanRep.closeNet), lc.netClose, y);
+doc.text(money(loanRep.closeTotal), lc.netClose, y);
 doc.text(money(loanRep.interest), lc.interest, y);
 y += 22;
 }

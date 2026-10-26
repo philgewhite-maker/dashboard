@@ -118,12 +118,24 @@ interest: r2(acc.byLoan.get(l.id) || 0),
 };
 });
 const postedInPeriod = r2(entries.filter((e) => e.autoInterest && e.date >= start && e.date <= end).reduce((n, e) => n - (Number(e.amount) || 0), 0));
+// What is owed to the lender at an end date is three things that must add
+// up: the tranches themselves net of the Airbnb offset; interest already
+// taken off their ledger balance (so they are owed it through the ledger);
+// and interest accrued this month that isn't posted until the next 1st.
+const monthToDate = (day) => r2(accrueDays(key, `${day.slice(0, 7)}-01`, day).total);
+const openLoans = sum(open.rows, 'net');
+const closeLoans = sum(close.rows, 'net');
+const openLedger = r2(Math.max(0, -owedAt(entries, dayBefore)));
+const closeLedger = r2(Math.max(0, -owedAt(entries, end)));
+const openUnposted = monthToDate(dayBefore);
+const closeUnposted = monthToDate(end);
 return {
 tranches,
-open: { principal: sum(open.rows, 'principal'), offset: sum(open.rows, 'offset'), credit: open.credit },
-close: { principal: sum(close.rows, 'principal'), offset: sum(close.rows, 'offset'), credit: close.credit },
-openNet: sum(open.rows, 'net') + open.credit,
-closeNet: sum(close.rows, 'net') + close.credit,
+open: { principal: sum(open.rows, 'principal'), offset: sum(open.rows, 'offset') },
+close: { principal: sum(close.rows, 'principal'), offset: sum(close.rows, 'offset') },
+openLoans, closeLoans, openLedger, closeLedger, openUnposted, closeUnposted,
+openTotal: r2(openLoans + openLedger + openUnposted),
+closeTotal: r2(closeLoans + closeLedger + closeUnposted),
 interest: r2(acc.total),
 creditInterest: r2(acc.creditInterest),
 postedInPeriod,
