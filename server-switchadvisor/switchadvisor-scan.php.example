@@ -355,6 +355,15 @@ if (is_file($CACHE_FILE)) {
     if (is_array($parsed)) $current = array_merge($current, $parsed);
 }
 
+// Yearly payments a scan can't discover, kept by hand. Used to start the list off
+// when the cache has none; once the cache holds the list, edits to it win.
+$DEFAULT_ANNUAL_PERKS = [[
+    'id' => 'nationwide-fairer-share', 'name' => 'Nationwide Fairer Share', 'bank' => 'Nationwide', 'amount' => 100, 'guaranteed' => false,
+    'windowStartMonth' => 1, 'windowEndMonth' => 3, 'payMonth' => 6, 'savingsMin' => 100,
+    'note' => 'A yearly payment to Nationwide members with a current account that was open on 31 March and used in January-March, plus £100+ in a Nationwide savings account (or on a mortgage) in March. Paid for three years running (2026: about 4.4 million members, from 10 June). Nationwide decides each year with its May results. Virgin Money customers missed the 2026 round. Taxable as savings interest.',
+    'lastPaid' => '2026-06', 'url' => 'https://www.moneysavingexpert.com/news/2026/01/nationwide-fairer-share-how-to/', 'readOn' => '2026-10-26',
+]];
+
 $now = gmdate('Y-m-d');
 $history = $current['history'] ?? [];
 // Keyed by (bank, product) when recommendations later compare "is this
@@ -372,7 +381,7 @@ $next = [
     'cassParticipants' => $cassParticipants ?: ($current['cassParticipants'] ?? []),
     'cashbackRates' => $current['cashbackRates'] ?? [],
     // Hand-kept yearly payments (e.g. Nationwide Fairer Share): never produced by a scan, so carried over as they are.
-    'annualPerks' => $current['annualPerks'] ?? [],
+    'annualPerks' => !empty($current['annualPerks']) ? $current['annualPerks'] : $DEFAULT_ANNUAL_PERKS,
     // Kept as-is when this scan found none (a site changed its markup, or
     // its page didn't come back) rather than blanked.
     'cashbackDeals' => $cashbackDeals ?: ($current['cashbackDeals'] ?? []),
