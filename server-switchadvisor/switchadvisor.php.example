@@ -600,6 +600,9 @@ function compute_recommendations(array $user, array $cache): array {
                 }
             }
         }
+        if ($eligible && !$alternativeTo && is_fairer_share_bank($w['bank']) && find_fairer_share($cache)) {
+            $tips[] = "This account can also earn Nationwide's yearly Fairer Share (about £100; Nationwide has paid it three years running but never promises it): keep the account open past 31 March, use it in January–March, and have £100+ in a Nationwide savings account in March. The dated steps are in the 12-month plan above.";
+        }
         // The third kind of opportunity, after "switch" and "get another
         // account to switch from": offers structured as "no account (or
         // bonus) since / on <date>", which banks re-issue with the date moved
@@ -769,6 +772,80 @@ function compute_salary_plan(array $rows): ?array {
     return ['headline' => $headline, 'steps' => $steps, 'summary' => $summary, 'notes' => array_values(array_unique($notes))];
 }
 
+// ---- Yearly extras ----------------------------------------------------------
+// Payments a bank makes every year to customers who simply keep an account
+// and use it (the cache's hand-kept `annualPerks`; the weekly scan carries them
+// over untouched). The one so far is Nationwide's "Fairer Share": about £100 to
+// members with a current account that was used during January-March and £100+
+// of savings (or a mortgage) in March, announced with its May results and paid
+// in June -- not guaranteed, and Nationwide confirms each year only afterwards.
+// It stays out of the switch-bonus rules above: a Nationwide switch bonus is a
+// one-off for opening, this is a yearly payment for staying.
+
+// Nationwide itself; Virgin Money, though it shares Nationwide's banking group,
+// missed the 2026 round (the takeover completed after the cutoff).
+function is_fairer_share_bank(string $bank): bool {
+    return bank_group($bank) === 'nationwide' && stripos($bank, 'virgin') === false;
+}
+
+function find_fairer_share(array $cache): ?array {
+    foreach (($cache['annualPerks'] ?? []) as $p) {
+        if (($p['id'] ?? '') === 'nationwide-fairer-share') return $p;
+    }
+    return null;
+}
+
+// The next window that hasn't finished: [start, end] dates, and the month the
+// payment usually lands in.
+function perk_window(array $perk, string $today): array {
+    $y = (int) substr($today, 0, 4);
+    $endMonth = (int) ($perk['windowEndMonth'] ?? 3);
+    $startMonth = (int) ($perk['windowStartMonth'] ?? 1);
+    $end = date('Y-m-t', strtotime(sprintf('%04d-%02d-01', $y, $endMonth)));
+    if ($today > $end) {
+        $y++;
+        $end = date('Y-m-t', strtotime(sprintf('%04d-%02d-01', $y, $endMonth)));
+    }
+    return ['year' => $y, 'start' => sprintf('%04d-%02d-01', $y, $startMonth), 'end' => $end, 'payMonth' => (int) ($perk['payMonth'] ?? 6)];
+}
+
+function fairer_share_steps_text(array $perk): array {
+    return [
+        'activity' => 'In at least two of January, February and March, use the account: either pay in £500+ from a non-Nationwide account and make two payments out, or make 10+ payments out (card payments, Direct Debits, bank transfers and standing orders all count; transfers to other Nationwide accounts do not). A FlexOne or FlexStudent account only needs one payment in from outside, or one payment out, in March. Last year\'s rules — Nationwide can change them.',
+        'savings' => 'During March have £' . number_format((float) ($perk['savingsMin'] ?? 100), 0) . '+ in a Nationwide savings account (the Flex Regular Saver is the usual route) or owe £100+ on a Nationwide mortgage. Skip this if you already do.',
+    ];
+}
+
+function compute_annual_perks(array $user, array $cache, ?string $today = null): array {
+    $today = $today ?: date('Y-m-d');
+    $perk = find_fairer_share($cache);
+    if (!$perk) return [];
+    $held = [];
+    foreach (($user['accounts'] ?? []) as $a) {
+        if (!empty($a['closeDate'])) continue;
+        if (is_fairer_share_bank((string) ($a['bank'] ?? ''))) $held[] = (($a['nickname'] ?? '') ?: ($a['bank'] ?? 'Nationwide'));
+    }
+    if (!$held) return [];
+    $w = perk_window($perk, $today);
+    $days = (int) floor((strtotime($w['start']) - strtotime($today)) / 86400);
+    $inside = $today >= $w['start'] && $today <= $w['end'];
+    $status = $inside
+        ? sprintf('The window is open now and runs to %s.', date('j M Y', strtotime($w['end'])))
+        : sprintf('The window opens %s (in %d days) and runs to %s.', date('j M Y', strtotime($w['start'])), $days, date('j M Y', strtotime($w['end'])));
+    $text = fairer_share_steps_text($perk);
+    return [[
+        'id' => $perk['id'], 'name' => $perk['name'] ?? 'Nationwide Fairer Share', 'amount' => (float) ($perk['amount'] ?? 100),
+        'guaranteed' => !empty($perk['guaranteed']), 'status' => $status, 'accounts' => $held,
+        'todo' => [
+            sprintf('Keep your Nationwide account open until after %s — switching it away or closing it before then forfeits the payment.', date('j F Y', strtotime($w['end']))),
+            $text['activity'],
+            $text['savings'],
+            sprintf('The payment is decided with Nationwide\'s results in May and usually lands in %s %d — not guaranteed, and taxable as savings interest (most basic-rate taxpayers owe nothing under the savings allowance).', date('F', mktime(0, 0, 0, $w['payMonth'], 1)), $w['year']),
+        ],
+        'url' => $perk['url'] ?? '',
+    ]];
+}
+
 // ---- The 12-month path ----------------------------------------------------
 // Sketches the most you could collect over a year by taking the switch offers
 // in turn. The moves it can make are few and it plays them out month by month:
@@ -800,7 +877,7 @@ function path_deadline_month(?string $date, string $today): ?int {
     return ((int) $mm[1] - (int) substr($today, 0, 4)) * 12 + ((int) $mm[2] - (int) substr($today, 5, 2)) + 1;
 }
 
-function simulate_year_path(array $cands, array $existing, array $donorSpecs, int $newCount, float $krak, string $order): array {
+function simulate_year_path(array $cands, array $existing, array $donorSpecs, int $newCount, float $krak, string $order, ?array $perk = null, bool $hold = false): array {
     $H = SALARY_HORIZON_MONTHS;
     usort($cands, function ($a, $b) use ($order) {
         if ($order === 'deadline') {
@@ -818,6 +895,17 @@ function simulate_year_path(array $cands, array $existing, array $donorSpecs, in
             'group' => $spec['group'] ?? '', 'from' => 1, 'dds' => 99, 'kind' => 'new', 'index' => $i,
             'cashback' => $spec['cashback'] ?? 0.0, 'site' => $spec['site'] ?? '', 'product' => $spec['product'] ?? '',
         ];
+    }
+    // Holding the Nationwide account(s) past the Fairer Share cutoff keeps the
+    // yearly payment but stops them being switched away until after it.
+    $perkVia = null;
+    if ($hold && $perk) {
+        foreach ($donors as $di => $d) {
+            if (!empty($d['nationwide'])) {
+                $donors[$di]['from'] = max($d['from'], $perk['apr']);
+                $perkVia = ['via' => 'existing', 'month' => null];
+            }
+        }
     }
     $done = [];
     $groups = [];
@@ -862,8 +950,13 @@ function simulate_year_path(array $cands, array $existing, array $donorSpecs, in
                 $cashback += $d['cashback'];
             }
             $events[] = ['month' => $m, 'cand' => $c, 'from' => $d['label'], 'fromKind' => $d['kind'], 'newIndex' => $d['index'] ?? null, 'lock' => $lock, 'donor' => $d['kind'] === 'new' ? $d : null];
+            $freeFrom = $m + $lock;
+            if ($hold && $perk && is_fairer_share_bank($c['bank']) && $m <= $perk['mar']) {
+                $freeFrom = max($freeFrom, $perk['apr']);
+                if (!$perkVia) $perkVia = ['via' => 'switch', 'month' => $m];
+            }
             $donors[] = [
-                'label' => 'your new ' . (preg_match('/account$/i', $c['product']) ? $c['product'] : $c['product'] . ' account'), 'group' => $c['group'], 'from' => $m + $lock, 'kind' => 'chain',
+                'label' => 'your new ' . (preg_match('/account$/i', $c['product']) ? $c['product'] : $c['product'] . ' account'), 'group' => $c['group'], 'from' => $freeFrom, 'kind' => 'chain',
                 'dds' => $d['kind'] === 'new' ? $c['dd'] : ($d['dds'] === null ? null : max($d['dds'], $c['dd'])),
             ];
         }
@@ -872,7 +965,8 @@ function simulate_year_path(array $cands, array $existing, array $donorSpecs, in
     return [
         'events' => $events, 'bonus' => $bonus, 'cashback' => $cashback, 'salaryMonths' => $salaryMonths, 'krakMonths' => $krakMonths,
         'krakValue' => $krak * $krakMonths,
-        'total' => $bonus + $cashback + $krak * $krakMonths,
+        'perk' => $perkVia, 'perkValue' => $perkVia ? (float) $perk['amount'] : 0.0,
+        'total' => $bonus + $cashback + $krak * $krakMonths + ($perkVia ? (float) $perk['amount'] : 0.0),
         'newUsed' => count($newSeen),
     ];
 }
@@ -937,7 +1031,7 @@ function compute_year_path(array $user, array $cache, array $rows, ?string $toda
         $heldGroups[bank_group((string) ($a['bank'] ?? ''))] = true;
         if (!is_cass_ready($a)) continue;
         if (is_cass_participant((string) ($a['bank'] ?? ''), $cache['cassParticipants'] ?? []) === 'no') continue;
-        $existing[] = ['label' => 'your ' . (($a['nickname'] ?? '') ?: ($a['bank'] ?? 'spare')) . ' account', 'group' => bank_group((string) ($a['bank'] ?? '')), 'from' => 1, 'dds' => direct_debits_on($a), 'kind' => 'existing'];
+        $existing[] = ['label' => 'your ' . (($a['nickname'] ?? '') ?: ($a['bank'] ?? 'spare')) . ' account', 'group' => bank_group((string) ($a['bank'] ?? '')), 'from' => 1, 'dds' => direct_debits_on($a), 'kind' => 'existing', 'nationwide' => is_fairer_share_bank((string) ($a['bank'] ?? ''))];
     }
     // A new donor account is best opened with a bank that pays cashback just
     // for opening, as long as it isn't a bank you already hold or one whose own
@@ -957,13 +1051,26 @@ function compute_year_path(array $user, array $cache, array $rows, ?string $toda
     $donorSpecs = array_values($specs);
     usort($donorSpecs, fn($a, $b) => $b['cashback'] <=> $a['cashback']);
 
+    // Fairer Share: the month numbers of the Jan-Mar window, if it falls inside the year.
+    $perk = null;
+    $fs = find_fairer_share($cache);
+    if ($fs) {
+        $w = perk_window($fs, $today);
+        $mar = path_deadline_month(substr($w['end'], 0, 7) . '-01', $today);
+        if ($mar !== null && $mar >= 1 && $mar <= $H) {
+            $perk = ['amount' => (float) ($fs['amount'] ?? 100), 'jan' => $mar - 2, 'mar' => $mar, 'apr' => $mar + 1, 'pay' => $mar + 3, 'def' => $fs, 'year' => $w['year']];
+        }
+    }
+
     $krakAlone = $krak * $H;
     $sims = [];
     for ($n = 0; $n <= PATH_MAX_NEW_DONORS; $n++) {
         $bestSim = null;
         foreach (['amount', 'deadline'] as $order) {
-            $s = simulate_year_path($cands, $existing, $donorSpecs, $n, $krak, $order);
-            if ($bestSim === null || $s['total'] > $bestSim['total']) $bestSim = $s;
+            foreach ($perk ? [false, true] : [false] as $hold) {
+                $s = simulate_year_path($cands, $existing, $donorSpecs, $n, $krak, $order, $perk, $hold);
+                if ($bestSim === null || $s['total'] > $bestSim['total']) $bestSim = $s;
+            }
         }
         $sims[] = $bestSim;
     }
@@ -982,7 +1089,7 @@ function compute_year_path(array $user, array $cache, array $rows, ?string $toda
     $events = $chosen['events'];
     // Within a month, opening a new donor comes before the switch it funds.
     usort($events, fn($a, $b) => [$a['month'], $a['fromKind'] === 'new' ? 0 : 1] <=> [$b['month'], $b['fromKind'] === 'new' ? 0 : 1]);
-    $steps = [];
+    $stepRows = [];
     $opened = [];
     $salaryEvents = 0;
     foreach ($events as $e) {
@@ -994,7 +1101,7 @@ function compute_year_path(array $user, array $cache, array $rows, ?string $toda
             $which = $dn['product'] !== ''
                 ? sprintf('%s (pays about %s cashback through %s)', $dn['product'], $money($dn['cashback']), $dn['site'])
                 : 'a free current account with a bank that is in CASS (Monzo, Starling or Chase usually are)';
-            $steps[] = sprintf('%s: open %s as donor account %d, and move %s Direct Debits onto it.', $when, $which, $e['newIndex'], $c['dd'] ? $c['dd'] . ' small' : 'a couple of small');
+            $stepRows[] = [$e['month'], 0, sprintf('%s: open %s as donor account %d, and move %s Direct Debits onto it.', $when, $which, $e['newIndex'], $c['dd'] ? $c['dd'] . ' small' : 'a couple of small')];
         }
         $text = sprintf('%s: switch %s into %s — worth %s, landing around %s', $when, $e['from'], $c['product'], $money($c['amount']), path_month_label($e['month'] + $e['lock'], $today));
         if ($c['salaryMonths'] > 0) {
@@ -1003,8 +1110,24 @@ function compute_year_path(array $user, array $cache, array $rows, ?string $toda
             $text .= sprintf('; your salary goes here %s', $c['salaryMonths'] === 1 ? 'for month ' . $e['month'] : sprintf('for months %d–%d', $e['month'], $end));
         }
         if ($c['cashback'] > 0) $text .= sprintf('; plus about %s cashback if you click through %s before applying', $money($c['cashback']), $c['cashbackSite']);
-        $steps[] = $text . '.';
+        if ($perk && !empty($chosen['perk']) && $chosen['perk']['via'] === 'switch' && $chosen['perk']['month'] === $e['month'] && is_fairer_share_bank($c['bank'])) {
+            $text .= $e['month'] >= $perk['jan'] ? '; because this switch completes in January–March, it also counts as the account use Fairer Share asks for' : '; keep this account open until after 31 March (Fairer Share, below)';
+        }
+        $stepRows[] = [$e['month'], 1, $text . '.'];
     }
+
+    // Nationwide Fairer Share: the dated things to remember.
+    $perkLines = fairer_share_steps_text($perk['def'] ?? []);
+    if ($perk && !empty($chosen['perk'])) {
+        $viaSwitchInWindow = $chosen['perk']['via'] === 'switch' && $chosen['perk']['month'] >= $perk['jan'];
+        if (!$viaSwitchInWindow) {
+            $stepRows[] = [max(1, $perk['jan']), 2, sprintf('Months %d–%d (%s to %s): %s', max(1, $perk['jan']), $perk['mar'], path_month_label(max(1, $perk['jan']), $today), path_month_label($perk['mar'], $today), $perkLines['activity'])];
+        }
+        $stepRows[] = [$perk['mar'], 2, sprintf('Month %d (%s): %s Keep the Nationwide account open until after 31 March — the plan does not switch it away before then.', $perk['mar'], path_month_label($perk['mar'], $today), $perkLines['savings'])];
+        if ($perk['pay'] <= $H) $stepRows[] = [$perk['pay'], 2, sprintf('Month %d (%s): Fairer Share of about %s should arrive, if Nationwide repeats it (it decides with its results in May; not guaranteed).', $perk['pay'], path_month_label($perk['pay'], $today), $money($perk['amount']))];
+    }
+    usort($stepRows, fn($a, $b) => [$a[0], $a[1]] <=> [$b[0], $b[1]]);
+    $steps = array_column($stepRows, 2);
     $switches = count($events);
     $newUsed = $chosen['newUsed'];
     $krakOpen = ($krak > 0 && $chosen['krakMonths'] > 0) ? 1 : 0;
@@ -1016,6 +1139,7 @@ function compute_year_path(array $user, array $cache, array $rows, ?string $toda
     $parts = [sprintf('%s from %d switch bonus%s', $money($chosen['bonus']), $switches, $switches === 1 ? '' : 'es')];
     if ($chosen['cashback'] > 0) $parts[] = sprintf('%s from cashback sites', $money($chosen['cashback']));
     if ($krakOpen) $parts[] = sprintf('%s from Krak Salary Match', $money($chosen['krakValue']));
+    if ($chosen['perkValue'] > 0) $parts[] = sprintf('%s from Nationwide Fairer Share if it is repeated', $money($chosen['perkValue']));
     $headline = sprintf('You could make about %s over the next %d months: %s — by opening %d new account%s (%d donor%s, %d bonus account%s%s) and repointing your salary %d time%s.',
         $money($chosen['total']), $H, implode(', ', $parts), $opens, $opens === 1 ? '' : 's',
         $newUsed, $newUsed === 1 ? '' : 's', $switches, $switches === 1 ? '' : 's', $krakOpen ? ', 1 Krak' : '',
@@ -1026,6 +1150,7 @@ function compute_year_path(array $user, array $cache, array $rows, ?string $toda
         $summary[] = sprintf('Salary goes to Krak in the %d month%s not tied up by an offer, about %s a month. Sending it to Krak all year would be %s.', $chosen['krakMonths'], $chosen['krakMonths'] === 1 ? '' : 's', $money($krak), $money($krakAlone));
     }
     if ($chosen['cashback'] > 0) $summary[] = 'Cashback stacks on top of the bank bonus, but only if you click through the cashback site first (one site per account — the better rate is picked) and it tracks; Quidco\'s best rates can need a paid membership. Cashback for a donor account usually has its own conditions (a minimum pay-in, Direct Debits, staying open for a while) — check them, because this plan switches that account away early. Rates move often.';
+    if ($chosen['perkValue'] > 0) $summary[] = 'Nationwide Fairer Share is a yearly payment Nationwide has made for three years running but never promised; it is counted here because the plan holds a Nationwide account over 31 March anyway. It needs £100 in a Nationwide savings account in March (recoverable, and it earns interest) and some account use in January–March — the dated steps above cover both.';
     $summary[] = 'Not counted, because the page can\'t yet work them out: interest on the balances you hold, cashback on card spending, and ongoing perks that accounts pay for keeping them (monthly rewards and the like).';
     if ($peak > 0) $summary[] = sprintf('Have about %s ready to pay in for the largest single step; it can usually be moved on afterwards, but check each offer for how long it has to stay.', $money($peak));
     $summary[] = sprintf('That is %d account applications — each leaves a mark on your credit file.', $opens);
@@ -1073,7 +1198,7 @@ function compute_year_path(array $user, array $cache, array $rows, ?string $toda
     return [
         'headline' => $headline, 'options' => $alts, 'quests' => $quests, 'steps' => $steps, 'summary' => $summary, 'notes' => $notes,
         'total' => round($chosen['total']), 'bonus' => round($chosen['bonus']), 'cashback' => round($chosen['cashback']), 'krak' => round($chosen['krakValue']),
-        'switches' => $switches, 'newDonors' => $newUsed, 'repoints' => $repoints,
+        'switches' => $switches, 'newDonors' => $newUsed, 'repoints' => $repoints, 'fairerShare' => round($chosen['perkValue']),
     ];
 }
 
@@ -1493,6 +1618,7 @@ if ($action === 'me') {
         'plan' => compute_plan($recommendations, $user['accounts'] ?? []),
         'salaryPlan' => compute_salary_plan($recommendations),
         'yearPath' => compute_year_path($user, $cache, $recommendations),
+        'annualPerks' => compute_annual_perks($user, $cache),
         'cassGrid' => compute_cass_grid($user, $cache),
         'cacheAsOf' => $cache['scrapedAt'] ?? null,
     ]);

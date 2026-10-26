@@ -348,7 +348,7 @@ $lock = fopen($CACHE_FILE . '.lock', 'c');
 if ($lock === false) fail(500, 'Could not open lock file — check directory permissions');
 flock($lock, LOCK_EX);
 
-$current = ['scrapedAt' => null, 'history' => [], 'offers' => [], 'cassParticipants' => [], 'cashbackRates' => [], 'krakTiers' => [], 'krakSalaryMin' => null, 'krakSalaryCap' => null, 'krakTiersAsOf' => null, 'krakTiersSource' => null, 'cashbackDeals' => [], 'cashbackAsOf' => null, 'cashbackSources' => []];
+$current = ['scrapedAt' => null, 'history' => [], 'offers' => [], 'cassParticipants' => [], 'cashbackRates' => [], 'krakTiers' => [], 'krakSalaryMin' => null, 'krakSalaryCap' => null, 'krakTiersAsOf' => null, 'krakTiersSource' => null, 'cashbackDeals' => [], 'cashbackAsOf' => null, 'cashbackSources' => [], 'annualPerks' => []];
 if (is_file($CACHE_FILE)) {
     $raw = file_get_contents($CACHE_FILE);
     $parsed = $raw !== false && $raw !== '' ? json_decode($raw, true) : null;
@@ -371,6 +371,8 @@ $next = [
     'offers' => $offers,
     'cassParticipants' => $cassParticipants ?: ($current['cassParticipants'] ?? []),
     'cashbackRates' => $current['cashbackRates'] ?? [],
+    // Hand-kept yearly payments (e.g. Nationwide Fairer Share): never produced by a scan, so carried over as they are.
+    'annualPerks' => $current['annualPerks'] ?? [],
     // Kept as-is when this scan found none (a site changed its markup, or
     // its page didn't come back) rather than blanked.
     'cashbackDeals' => $cashbackDeals ?: ($current['cashbackDeals'] ?? []),

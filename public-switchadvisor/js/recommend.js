@@ -89,6 +89,17 @@ function yearPathHtml(yp) {
   </div>`;
 }
 
+// Payments a bank makes every year for keeping and using an account (Nationwide
+// Fairer Share), for accounts you already hold. Built by the server.
+function perksHtml(perks) {
+  return (perks || []).map((p) => `<div class="rec-plan">
+    <div class="rec-plan-head">${escapeHtml(p.name)} — about ${money(p.amount)} a year${p.guaranteed ? '' : ' (not guaranteed)'}</div>
+    <p class="muted">Your account${p.accounts.length === 1 ? '' : 's'}: ${p.accounts.map(escapeHtml).join(', ')}. ${escapeHtml(p.status)}</p>
+    <ol>${p.todo.map((t) => `<li>${escapeHtml(t)}</li>`).join('')}</ol>
+    ${p.url ? `<a class="rec-link" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">How it works &rarr;</a>` : ''}
+  </div>`).join('');
+}
+
 export function renderRecommendations(me) {
   const asOf = document.getElementById('rec-asof');
   if (asOf) asOf.textContent = me.cacheAsOf ? `Offers last checked ${me.cacheAsOf}.` : 'Offers not yet checked.';
@@ -96,6 +107,8 @@ export function renderRecommendations(me) {
   if (planEl) planEl.innerHTML = planHtml(me.plan);
   const yearEl = document.getElementById('rec-year-wrap');
   if (yearEl) yearEl.innerHTML = yearPathHtml(me.yearPath);
+  const perksEl = document.getElementById('rec-perks-wrap');
+  if (perksEl) perksEl.innerHTML = perksHtml(me.annualPerks);
   const salaryEl = document.getElementById('rec-salary-wrap');
   if (salaryEl) salaryEl.innerHTML = salaryPlanHtml(me.salaryPlan);
 
