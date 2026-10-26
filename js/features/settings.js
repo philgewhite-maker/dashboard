@@ -2,7 +2,7 @@ import { data, queueSave, getLocalSettings, setLocalSetting, exportBackup, impor
 import { TMDB_GENRES } from '../catalogue.js';
 import { runMediaRecsCheck } from './mediarecs.js';
 import { renderAll } from '../render-all.js';
-import { escapeHtml, uid, claudeWeeklyPace } from '../utils.js';
+import { escapeHtml, uid, claudeWeeklyPace, scrollAndFlash } from '../utils.js';
 import { renderCalendarLimits } from './calendars.js';
 import { renderPackingModules, bindPackingModules } from './packing.js';
 import { renderTagCleanup } from './tagcleanup.js';
@@ -1623,8 +1623,15 @@ if (!found) return;
 // in history, in a bookmark, or in whatever the next screenshot shows.
 history.replaceState(null, '', `${location.pathname}${location.search}#settings`);
 const codeEl = document.getElementById('pair-redeem-code');
-const details = codeEl?.closest('details');
-if (details) details.open = true;
+// Every collapsed <details> above the form, not just the nearest: it sits
+// three levels deep (group > Devices > this), so opening only the inner
+// one left the link landing on a Settings tab with nothing visible.
+let section = codeEl?.closest('details');
+while (section) {
+section.setAttribute('open', '');
+section = section.parentElement?.closest('details') ?? null;
+}
+setTimeout(() => scrollAndFlash('#pair-redeem-btn'), 120);
 const urlEl = document.getElementById('pair-redeem-url');
 const labelEl = document.getElementById('pair-redeem-label');
 if (urlEl) urlEl.value = found.url;
@@ -1632,7 +1639,7 @@ if (codeEl) codeEl.value = found.code;
 if (labelEl && !labelEl.value) labelEl.value = pairing.guessLabel();
 pendingKey = found.key || '';
 const el = document.getElementById('pair-redeem-status');
-if (el) el.textContent = 'Code read from the link — check the name, then press Pair this device.';
+if (el) el.textContent = `Code read from the link — check the name, then press Pair this device.${found.key ? ' The encryption key came with the link, so there is nothing else to enter.' : ' This link has no encryption key in it; if your data is encrypted you will need the recovery key too.'}`;
 })().catch((err) => console.error('Pairing link:', err));
 
 renderDevices();
