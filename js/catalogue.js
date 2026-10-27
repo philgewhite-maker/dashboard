@@ -564,9 +564,13 @@ return (subscriptions || []).find((s) => {
 // never matches the canonical "paramount plus" at all. Confirmed
 // live as a real gap once canonicalProvider started normalising its
 // own side and this one didn't follow.
-const n = String(s.name || '').toLowerCase().trim().replace(/\+$/, ' plus');
+// A subscription now has a provider ("Netflix") and a plan ("Premium")
+// -- either can carry the streaming service's name, so try both.
+return [s.provider, s.name].some((raw) => {
+const n = String(raw || '').toLowerCase().trim().replace(/\+$/, ' plus');
 if (!n) return false;
 return aliases.some((a) => n.includes(a) || a.includes(n));
+});
 }) || null;
 }
 

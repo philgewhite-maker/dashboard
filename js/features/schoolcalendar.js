@@ -355,7 +355,7 @@ const say = (t) => { if (statusEl) statusEl.textContent = t; };
 if (!update || !period) return;
 if (!(await canAttemptGoogleAction())) { say('Sign in to Google at the top of Overview first.'); return; }
 if (!hasCalendarWrite()) { say('Turn on "Allow creating events in Google Calendar" in Settings, then sign out and back in.'); return; }
-const calendarId = data.prefs.schoolCalendarId;
+const calendarId = data.prefs.schoolCalendarId || document.getElementById('school-calendar-picker')?.value;
 if (!calendarId) { say('Pick a calendar above first.'); return; }
 say('Pushing…');
 try {

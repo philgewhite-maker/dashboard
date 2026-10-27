@@ -63,6 +63,7 @@ const resolveBtn = document.getElementById('job-resolve-btn');
 // on the created application, just with the raw URL left as whichever
 // field it was typed into (same free fallback every other quick-add
 // input with this button follows).
+let resolvedUrl = '';
 function currentUrl() {
 if (looksLikeUrl(coInput.value)) return coInput.value.trim();
 if (looksLikeUrl(roleInput.value)) return roleInput.value.trim();
@@ -82,6 +83,7 @@ const { resolveJobPostingUrl } = await import('../ai.js');
 const { company, role } = await resolveJobPostingUrl(url);
 if (company) coInput.value = company;
 if (role) roleInput.value = role;
+resolvedUrl = url;
 } catch (err) {
 console.error('Resolving job posting URL failed:', err);
 } finally {
@@ -93,13 +95,14 @@ resolveBtn.hidden = true;
 }
 
 bindForm('job-form', () => {
-const url = currentUrl();
+const url = currentUrl() || resolvedUrl;
 const company = coInput.value.trim();
 const role = roleInput.value.trim();
 if (!company || !role) return;
 data.jobs.push(blankJob({ company, role, link: url }));
 coInput.value = '';
 roleInput.value = '';
+resolvedUrl = '';
 if (resolveBtn) resolveBtn.hidden = true;
 renderJobs();
 queueSave();
