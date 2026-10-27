@@ -2143,7 +2143,7 @@ if (e.target.dataset.captureAttentionTask) {
 const n = needsAttentionIds().length;
 captureTask({
 title: `Ask ${n} connection${n === 1 ? '' : 's'} the outstanding questions`,
-notes: 'Open the "Needs attention" filter on the Dating tab and work through the list — each card shows what to ask or check.',
+notes: 'Open the "Needs attention" filter on the Contacts tab and work through the list — each card shows what to ask or check.',
 source: ATTENTION_TASK_SOURCE,
 link: '#dating',
 });

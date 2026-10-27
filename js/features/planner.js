@@ -635,7 +635,7 @@ return cards.slice(0, POOL_COLLAPSE_LIMIT).join('')
 
 function priorityPoolHtml() {
 const priority = data.connections.filter(isPriorityConnection);
-if (!priority.length) return '<div class="empty">No priority connections yet — pin someone (📌) below, on the <span class="inline-goto-link" data-goto-tab="dating">Dating tab</span>, or they\'ll appear automatically once things reach "Planning to meet" or later.</div>';
+if (!priority.length) return '<div class="empty">No priority connections yet — pin someone (📌) below, on the <span class="inline-goto-link" data-goto-tab="dating">Contacts tab</span>, or they\'ll appear automatically once things reach "Planning to meet" or later.</div>';
 const cards = priority.map((c) => `<div class="planner-pool-card alloc-card" draggable="true" data-planner-drag="connection:${c.id}">
 <span class="planner-entry-link" data-planner-open-connection="${c.id}">${avatarHtml(c.photoId, c.name, 'sm')}<span>${escapeHtml(c.name)}</span></span>
 ${IS_IOS ? `<select class="planner-select" data-planner-place="connection:${c.id}"><option value="">Place on…</option>${plannerDaySelectOptionsHtml()}</select>` : ''}

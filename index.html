@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v653</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v654</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -731,6 +731,7 @@ Prices and offers come from an AI web search of each retailer, not a live basket
 <section class="panel wide" id="overview-panel" data-tab="dating">
 <div class="panel-head">
 <h2><span class="dot rose"></span>Connections Overview</h2>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-contacts-find" title="Guide: how to use this panel">&#128214;</span>
 </div>
 <div id="overview-content"></div>
 </section>
@@ -741,6 +742,7 @@ Prices and offers come from an AI web search of each retailer, not a live basket
 <span class="count-badge" id="connections-count"></span>
 <span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#rating-categories-list" title="Rating categories &amp; flags">&#9881;</span>
 <span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#tag-cleanup" title="Tidy up tags">&#127991;</span>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-contacts-card" title="Guide: how to use this panel">&#128214;</span>
 </div>
 <div class="sort-row">
 <!-- Options are rendered by connections.js (renderSortOptions), since the
@@ -777,6 +779,7 @@ Prices and offers come from an AI web search of each retailer, not a live basket
 <section class="panel wide" id="import-match-panel" data-tab="dating">
 <div class="panel-head">
 <h2><span class="dot plum"></span>Add &amp; import</h2>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-contacts-add" title="Guide: how to use this panel">&#128214;</span>
 </div>
 
 <details class="settings-item" id="import-connections-item">
@@ -3787,6 +3790,12 @@ Finds connections whose cover photo is missing or is really just the small place
 <span class="pick-chip" data-goto-tab="guide" data-goto-target="#guide-finances">Finances</span>
 <span class="pick-chip" data-goto-tab="guide" data-goto-target="#guide-travel">Travel</span>
 <span class="pick-chip" data-goto-tab="guide" data-goto-target="#guide-shopping">Shopping</span>
+<span class="pick-chip" data-goto-tab="guide" data-goto-target="#guide-jobhunt">Job Hunt</span>
+<span class="pick-chip" data-goto-tab="guide" data-goto-target="#guide-contacts">Contacts</span>
+<span class="pick-chip" data-goto-tab="guide" data-goto-target="#guide-menu">Menu</span>
+<span class="pick-chip" data-goto-tab="guide" data-goto-target="#guide-business">Business</span>
+<span class="pick-chip" data-goto-tab="guide" data-goto-target="#guide-health">Health</span>
+<span class="pick-chip" data-goto-tab="guide" data-goto-target="#guide-family">Family</span>
 <span class="pick-chip" data-goto-tab="guide" data-goto-target="#guide-mail">Mail</span>
 <span class="pick-chip" data-goto-tab="guide" data-goto-target="#guide-media">Media</span>
 <span class="pick-chip" data-goto-tab="guide" data-goto-target="#guide-settings-basics">Settings basics</span>
@@ -5843,6 +5852,487 @@ Finds connections whose cover photo is missing or is really just the small place
 <div class="guide-tip">The reminder does not know when you applied, so it can't wait a set number of days. See <span class="inline-goto-link" data-goto-tab="guide" data-goto-target="#guide-overview-nudges">how Nudges are chosen</span>. To stop being reminded, move the job back to Wishlist or to Offer, or delete it.</div>
 </div>
 </details>
+</div>
+</details>
+
+<details class="settings-item" id="guide-contacts">
+<summary><h3>Contacts</h3></summary>
+<div class="settings-block">
+<p class="settings-note" style="margin:0 0 10px;">The <span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#connections-panel">Contacts tab</span> is where you keep track of the people you meet. Each person is a card in <span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#connections-panel">Connections</span>. <span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#overview-panel">Connections Overview</span> counts them by stage, city, age and tags, and <span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#import-match-panel">Add &amp; import</span> brings in people, photos and chats. People marked as family are kept out of these lists; they live on the <span class="inline-goto-link" data-goto-tab="family" data-goto-target="#family-panel">Family tab</span>.</p>
+
+<details class="settings-subgroup" id="guide-contacts-add">
+<summary>Adding a person</summary>
+<div class="guide-task">
+<div class="guide-q">How do I add one person by hand?</div>
+<ol class="guide-steps">
+<li>At the bottom of <span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#connection-form">Connections</span>, type a name or nickname.</li>
+<li>Choose where you met them: Bumble, Tinder, Hinge, WhatsApp, Telegram, Instagram, Real life or Other.</li>
+<li>Press <strong>Add match</strong>. The new card is added at the stage <strong>Matched</strong> with today as the last contact, and the page scrolls to it and flashes it.</li>
+</ol>
+<div class="guide-tip">For anyone who is already on a dating app, importing is quicker than typing: see <em>Importing from Tinder</em>, <em>Photos and screenshots</em> and <em>Your own spreadsheet</em> below.</div>
+</div>
+<div class="guide-task">
+<div class="guide-q">Where are the instructions for each import?</div>
+<ol class="guide-steps">
+<li>Open <span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#import-connections-item">Add &amp; import &rarr; Import connections</span>.</li>
+<li>Under <strong>Where do I get this from?</strong>, open the source you want (Tinder profile, WhatsApp chat, Connections CSV, Google Photos albums). Each one gives the steps and, where a script is needed, a <strong>Copy snippet</strong> button.</li>
+<li>Telegram and Google Contacts have their own short sections lower down in the same box.</li>
+<li>Below the box, a grey line for each importer says when you last ran it and how much it covered.</li>
+</ol>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-contacts-card">
+<summary>Reading a card</summary>
+<div class="guide-task">
+<div class="guide-q">What does the top of a card tell me?</div>
+<ol class="guide-steps">
+<li>On the left are the photo and the name, with age and city after it in grey. A coloured dot before the name is the worst colour among the red, amber and green flag rules that person matches (see <em>Tidying up and settings</em>).</li>
+<li>Under the name is a row of small icons. Hover over one to read what it is. First come the places that person exists (the app you met on, any chat app you have chat history from, Google Photos, Google Contacts), then one icon for the stage, then one for each milestone such as Met or Kissed.</li>
+<li>Next to that are the pin, the five stars and the stage dropdown. On the right are how long since you were last in touch, <strong>Log contact</strong>, and &times; to delete.</li>
+<li>Under the top row there can be small chips for plans you have made with them in the Planner (a plane means it is part of a trip; click one to open it in the Planner), then the flag dots that matched, then a list of questions to ask.</li>
+</ol>
+<div class="guide-tip">People at the stages Archived, Faded or Got Away are hidden from the list until you show them (see <em>Finding and filtering people</em>). A search by name still finds them.</div>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I change someone's stage?</div>
+<ol class="guide-steps">
+<li>Open the stage dropdown on their card and choose one. In order: Superswiped, Matched, Chatting in app, Moved to WhatsApp, Moved to Telegram, Planning to call, Planning to meet, Arranged to meet, Met in person, Dating. Then Backlog review, FriendZone, Faded, Archived and Got Away for people who are not active.</li>
+<li>Choosing Met in person or any later stage also adds the milestone <strong>Met</strong>. It stays on the card if you move the stage on again.</li>
+</ol>
+<div class="guide-tip">An import can move a stage forward when the chat shows you have moved on (two-way messages, a phone number to WhatsApp or Telegram). It never moves one back.</div>
+</div>
+<div class="guide-task">
+<div class="guide-q">What are the stars and the pin?</div>
+<ol class="guide-steps">
+<li>The five stars beside the stage are your overall rating of that person (new people start at 3). Click a star to set it. It decides how long they can go before <strong>Reach out</strong> appears (see <em>Keeping in touch</em>), and you can sort by it.</li>
+<li>The pin (&#128204;) puts that person in the Planner's <strong>Priority connections</strong> list. Anyone at Planning to meet or a later stage is in that list without a pin. See <span class="inline-goto-link" data-goto-tab="guide" data-goto-target="#guide-planner-people">Planner: planning time with people</span>.</li>
+<li>The detailed ratings inside a card (looks, and whatever else you have set up) are separate. They are under <em>Filling in a profile</em>.</li>
+</ol>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I record that we have been in touch?</div>
+<ol class="guide-steps">
+<li>Press <strong>Log contact</strong> on their card. The counter changes to "today".</li>
+</ol>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I delete someone?</div>
+<ol class="guide-steps">
+<li>Press the &times; at the right of their top row and confirm. Their notes, ratings and photos are removed and it cannot be undone.</li>
+<li>If the person is a duplicate of another card, merge instead so nothing is lost (see <em>Tidying up and settings</em>).</li>
+</ol>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-contacts-find">
+<summary>Finding and filtering people</summary>
+<div class="guide-task">
+<div class="guide-q">How do I search?</div>
+<ol class="guide-steps">
+<li>Type in <span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#conn-search">the search box</span> above the list. It looks at names, also-known-as names, platform handles, job, education, address, stage, age decade and every tag.</li>
+<li>Empty the box to go back to the full list.</li>
+</ol>
+<div class="guide-tip">A search always includes archived, faded and got-away people, even while they are hidden from the plain list.</div>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I change the order?</div>
+<ol class="guide-steps">
+<li>Use the two dropdowns above the search box. The first starts as <strong>Sort: Reach-out priority</strong> (most overdue first); the second, <strong>Then by</strong>, breaks ties.</li>
+<li>Other choices are overall rating, average detailed rating, record completeness, date added, time since contact, stage, distance (closest first), and one for each rating category you have.</li>
+</ol>
+</div>
+<div class="guide-task">
+<div class="guide-q">What do the filter buttons do?</div>
+<ol class="guide-steps">
+<li><span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#conn-needs-attention-btn">Needs attention</span> shows people who have an outstanding question under their card (for example, no city yet).</li>
+<li><span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#conn-thin-profiles-btn">Thin profiles</span> shows people with one photo or fewer and no age, height, job or education. They usually came from a matches list and were never filled in.</li>
+<li><span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#conn-priority-btn">Priority</span> shows everyone who is pinned or at Planning to meet or later.</li>
+<li><span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#conn-show-archived-btn">Show archived, faded &amp; got away</span> adds those hidden stages to the list; press it again to hide them.</li>
+<li>Press a filter again, or <strong>Clear</strong> in the banner, to remove it.</li>
+</ol>
+<div class="guide-tip">The count in brackets on each button is how many people it would show.</div>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I use the Overview?</div>
+<ol class="guide-steps">
+<li>In <span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#overview-panel">Connections Overview</span>, press <strong>Show connections overview</strong>. It stays open next time.</li>
+<li>Each group (Stage, Location, Age, Job, Contact match, Photos, Photo links, and each tag type) lists its values as chips with a count. Click a chip to filter Connections to exactly those people.</li>
+<li>Press a group's heading to fold it away. Use <strong>Sort chips</strong> to order chips by count or A&ndash;Z.</li>
+<li>A <strong>None (n)</strong> chip lists the people who have no value in that group, which is the quickest way to find who is missing a city or nationality.</li>
+<li>Tick <strong>Drill down</strong> to make chips combine: pick several and you get only people who match all of them, and every other group recounts against that smaller set. Press a pill in the bar to drop one, or <strong>Clear all</strong>.</li>
+</ol>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I give several people the same tag in one go?</div>
+<ol class="guide-steps">
+<li>In the Overview, make sure <strong>Drill down</strong> is off, then click a chip in a tag group (Tags, Nationality, Interests and so on, not Stage, Location, Age or Job).</li>
+<li>An <strong>Add someone&hellip;</strong> dropdown appears next to it. Choose a person and press <strong>Add</strong>. Repeat for each person.</li>
+</ol>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-contacts-keep">
+<summary>Keeping in touch</summary>
+<div class="guide-task">
+<div class="guide-q">When does "Reach out" appear on a card?</div>
+<ol class="guide-steps">
+<li>Each person has a number of days they can go without contact: 2 days for five stars, 4 for four stars, 6 for three, 8 for two and 10 for one. People at Planning to call or Planning to meet are 2 days, unless you have set your own timing for that stage (below).</li>
+<li>When the days since contact go past that number, the person is due.</li>
+<li>The <strong>Reach out</strong> badge goes only to the ten people most overdue, with a small boost for high ratings and green flags and a penalty for red flags. Hover over the badge for the numbers behind it.</li>
+<li>Beside the badge there can be a suggested next step such as Contact now, Set up date, Retry in future or Confirm faded.</li>
+</ol>
+<div class="guide-tip">People at Faded, Archived, FriendZone and Got Away never get the badge, and neither does anyone on Standby or Travelling.</div>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I stop someone nagging for a while?</div>
+<ol class="guide-steps">
+<li>Press the &#128164; button beside their Reach out badge. It hides the badge for a week.</li>
+<li>To quieten a whole stage, press <span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#conn-reachout-settings-btn">Reach-out timing</span>. Type the number of days for a stage; leave it empty to use the automatic rule.</li>
+</ol>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I pause someone while they are abroad?</div>
+<ol class="guide-steps">
+<li>Open their card's <strong>Details</strong> and find <strong>Travel status</strong>.</li>
+<li>Choose <strong>Standby</strong> to leave them out until you clear it (for example, someone in a far-off city), or <strong>Travelling</strong> and set <strong>Travelling until</strong>.</li>
+<li>The card shows a badge saying which. Standby has no end date. A Travelling pause ends by itself on that date, and the badge changes to "Travel pause ended" so you can clear it or set a new date.</li>
+</ol>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I clear out people I have not spoken to in months?</div>
+<ol class="guide-steps">
+<li>Press <span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#conn-backlog-review-btn">Backlog review 180+</span>.</li>
+<li>Confirm the count. Everyone who is 180 or more days since last contact moves to the stage <strong>Backlog review</strong>. People who are already Faded, Archived, FriendZone or Got Away, or paused for travel, are left alone.</li>
+<li>Go through that stage and move each person on: back to an active stage, or to Faded or Archived.</li>
+</ol>
+<div class="guide-tip">Pressing it again only picks up people who have crossed 180 days since last time. If it says nobody qualifies but you expected some, they are probably already in Backlog review.</div>
+</div>
+<div class="guide-task">
+<div class="guide-q">What are the questions listed under some cards?</div>
+<ol class="guide-steps">
+<li>They are prompts for things worth asking: where they live, their nationality, whether they have kids (only once there is a chat), a date idea when you have noted interests but no date, and "Still active?" once they are three times past their wait.</li>
+<li>Answer one by filling in the field (see <em>Filling in a profile</em>) and the question goes away.</li>
+<li>To work through all of them as one job, press <span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#conn-needs-attention-btn">Needs attention</span>, then <strong>+ task</strong> next to the filters. It adds one task to your Tasks list; once it is there the button reads <strong>&#10003; task</strong> and takes you to it.</li>
+</ol>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-contacts-details">
+<summary>Filling in a profile</summary>
+<div class="guide-task">
+<div class="guide-q">How do I open and edit a profile?</div>
+<ol class="guide-steps">
+<li>Press <strong>Details</strong> on the card. Fields save when you leave them.</li>
+<li>The plain fields are name, source, age when recorded, date of birth (as YYYY-MM-DD), distance, matched on, full address, kids, job, height, education, email, and "What I like most". Drinking and smoking are pick-lists; choose a value or add a new one.</li>
+<li>If you give a date of birth, the age is worked out from it. If you only give an age, the card says it is carried forward from the date you entered it.</li>
+</ol>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I add a city, nationality or other tag?</div>
+<ol class="guide-steps">
+<li>Find the box for it in Details: City, Also known as, Milestones, Date locations, Date events, Language, Nationality, Tags, Interests, Relationship, Social handles.</li>
+<li>Click <strong>+ add</strong>, type (values you already use are suggested), and press Enter or the <strong>+</strong> button.</li>
+<li>Press the &times; on a chip to remove it.</li>
+</ol>
+<div class="guide-tip">In the Notes preview and the chat history, a place name you already use elsewhere is highlighted. Click it to add it as that person's City. Likewise a country name adds the nationality.</div>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I record several names or apps for one person?</div>
+<ol class="guide-steps">
+<li>In Details, under <strong>Platform identities</strong>, press <strong>+ Add platform identity</strong>.</li>
+<li>Choose the app, then type the display name or handle it uses and, if you have one, the match key.</li>
+<li>Each identity keeps its own chat history, so a second Tinder match or a WhatsApp chat never overwrites an earlier one. Removing an identity that has a chat asks first.</li>
+</ol>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I rate someone in more detail?</div>
+<ol class="guide-steps">
+<li>In Details, find <strong>Ratings</strong> and click stars for each category. The average shows beside the heading.</li>
+<li>To change the categories, press the <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#rating-categories-list">rating categories</span> setting (the cog in the Connections heading takes you there too). Removing a category clears every rating given under it.</li>
+</ol>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I keep a to-do for one person?</div>
+<ol class="guide-steps">
+<li>In Details, under <strong>Things to do</strong>, type it (for example "Theatre trip") and press <strong>Add</strong>.</li>
+<li>Tick it when done, or press &times; to remove it.</li>
+</ol>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I see or edit a chat?</div>
+<ol class="guide-steps">
+<li>Open Details and look at <strong>Chat history</strong>. If chats are saved, the card says "Expand Details to view" until you open it.</li>
+<li>Messages from every app are shown together in date order, with an icon per app when there is more than one.</li>
+<li>Press <strong>Edit raw text</strong> to correct a chat or paste one in by hand. There is one box for each platform identity.</li>
+</ol>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I manage someone's photos?</div>
+<ol class="guide-steps">
+<li>Open Details and find <strong>Photos</strong>. Click a thumbnail to see it full size.</li>
+<li>Press the star on a thumbnail to make it the cover photo shown on the card; the current cover has a filled star.</li>
+<li>Press &times; to remove a photo or video. It is deleted straight away, with no confirmation. A thumbnail with a small &#8635; is low-resolution; press it to swap in a full-size copy.</li>
+<li>To add more, press <strong>Add photos &amp; parse profile</strong> and choose screenshots. They are read with AI and the profile details are offered for you to confirm.</li>
+<li>If you keep full-size pictures in OneDrive or Google Drive, paste the share link in <strong>Drive/OneDrive link</strong>; an "Open full-res photos" link then appears.</li>
+</ol>
+<div class="guide-tip">After a Tinder import you may see a warning that a photo or video did not save because its link had expired. Run the Tinder import for that person again: it fetches fresh links and only adds what is missing.</div>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I fill in sizes, what I have bought, or the Sex field?</div>
+<ol class="guide-steps">
+<li>Turn on <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#sensitive-fields-toggle">Show private fields</span> in Settings. It applies to this device only.</li>
+<li>Back in a card's Details, the extra boxes appear: <strong>Sex</strong>, <strong>Sizes</strong> (per retailer and category), <strong>Wants</strong> and <strong>Has</strong>.</li>
+</ol>
+<div class="guide-tip">While private fields are off, the information is still saved; it just is not shown, grouped or searchable.</div>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I stop my own number ending up on someone's card?</div>
+<ol class="guide-steps">
+<li>Fill in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#my-phone-input">My info</span> in Settings (name, phone, email, address).</li>
+<li>Imports and Google Contacts matching then ignore those details instead of saving them as the other person's.</li>
+<li>To check cards that already have your details on them, use <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#self-info-check">Check connections for your own info</span>.</li>
+</ol>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-contacts-photos">
+<summary>Photos and screenshots</summary>
+<div class="guide-task">
+<div class="guide-q">How do I add photos to someone without reading them?</div>
+<ol class="guide-steps">
+<li>Open <span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#photoscan-panel">Add &amp; import &rarr; Add &amp; scan photos</span>.</li>
+<li>Under <strong>Add photos to an existing connection</strong>, choose the person.</li>
+<li>Press <strong>Pick photo(s), no parsing (free)</strong> and choose as many files as you like.</li>
+</ol>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I read profile screenshots?</div>
+<ol class="guide-steps">
+<li>In the same section, under <strong>Scan screenshots</strong>, press <strong>Pick screenshots to scan</strong>, drag them onto the panel, or copy an image anywhere and press Ctrl+V.</li>
+<li>If the file names do not say which app they came from, choose the app in the dropdown at the top of the section.</li>
+<li>A cheap first pass reads a name, an age and whether the screenshot has much detail. The results appear in a list under the buttons; screenshots you have scanned before cost nothing.</li>
+<li>For each one worth keeping press <strong>Full parse</strong>, then <strong>Add</strong>. If the name matches someone you already have, the button reads <strong>Merge in</strong> instead.</li>
+<li>Press <strong>Clear</strong> to empty the list.</li>
+</ol>
+<div class="guide-tip">If several screenshots are pieces of one long profile, tick <strong>Selected files are one profile, in pieces</strong> before picking them. They are then read together as one person.</div>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I import a whole matches list from one screenshot?</div>
+<ol class="guide-steps">
+<li>Press <strong>Import matches list</strong> and choose one screenshot that shows many people (a Bumble, Tinder or Hinge list view).</li>
+<li>A card appears below with a row for each person found. A person who looks like someone you already have shows the possible matches as options: update that person, <strong>Different existing connection&hellip;</strong>, <strong>Different person &mdash; add as new</strong> or <strong>Skip for now</strong>. Skip is the default.</li>
+<li>A person who is new has a tick box, ticked by default.</li>
+<li>Press <strong>Add / update selected</strong>, or <strong>Discard</strong> to throw the whole list away.</li>
+</ol>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I do this from my phone?</div>
+<ol class="guide-steps">
+<li>Share the screenshot to the dashboard from your phone. A dating screenshot shared on its own goes straight to the review list on this tab. Anything shared with other photos waits in Capture Inbox.</li>
+<li>See <span class="inline-goto-link" data-goto-tab="guide" data-goto-target="#guide-tasks-files">Photos and files you've shared in</span> for how to send a batch to a person or read it as a dating screenshot.</li>
+</ol>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-contacts-tinder">
+<summary>Importing from Tinder</summary>
+<div class="guide-task">
+<div class="guide-q">How do I import one Tinder profile?</div>
+<ol class="guide-steps">
+<li>Open <span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#import-connections-item">Add &amp; import &rarr; Import connections</span> and the entry <strong>Tinder profile</strong>.</li>
+<li>Press <span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#tinder-copy-snippet">Copy snippet</span>.</li>
+<li>On tinder.com, open that person's profile, press F12, choose <strong>Console</strong>, paste, and press Enter (if the browser refuses the paste, type <code>allow pasting</code>, press Enter, and paste again). It reads the profile and photos and copies the result for you.</li>
+<li>Back here, paste into <span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#dating-import-paste">Import data</span> and press <strong>Read</strong>.</li>
+<li>A review card opens. If you already have this person it says "Matched to &lt;name&gt; by Tinder ID". Otherwise choose who it is from the dropdown, or press <strong>+ New</strong>.</li>
+<li>Untick any field you do not want. Set the stage, city, rating, travel status and so on if you want to change them, and type a next step if you have one: it is saved as a to-do on the card.</li>
+<li>Press <strong>Save to &lt;name&gt;</strong> (or <strong>&amp; open profile</strong> to save and go to the card), or <strong>Skip</strong>.</li>
+</ol>
+<div class="guide-tip">When the name is only a near match, <strong>Save</strong> stays greyed out until you open <strong>More info</strong> and confirm it is the same person next to the photos. Phone numbers and social handles found in the chat are offered with a tick box.</div>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I import lots of Tinder profiles at once?</div>
+<ol class="guide-steps">
+<li>In the same entry, press <span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#tinder-bulk-copy-snippet">Copy bulk-import snippet</span>.</li>
+<li>On tinder.com, open the console, paste it, and press Enter. Nothing runs yet; it only defines the commands.</li>
+<li>Type <code>tinderBulkImport()</code> and press Enter to do 15 people, or <code>tinderBulkImport(30)</code> for 30. To catch up on people you have been chatting to since a date, type <code>tinderCatchUp("2026-08-10")</code> with your own date.</li>
+<li>Leave the tab open. It opens each profile with a pause of 10 to 60 seconds between them, and remembers who is done, so running it again later picks up whoever is left.</li>
+<li>Every 25 profiles it saves a file to your Downloads folder. When it finishes, choose <strong>Or upload file(s)&hellip;</strong> here and select all those files together.</li>
+</ol>
+<div class="guide-tip">If you see a rate-limit or verification message on Tinder, stop and leave it a while.</div>
+<details class="settings-subgroup panel-about"><summary>What happens to the uploaded files</summary>
+<div class="guide-task">
+<ol class="guide-steps">
+<li>People the dashboard already knows for certain, with nothing new or only small updates, go into a <strong>bulk review</strong> list with their old and new photo side by side and what would change.</li>
+<li>Tick the ones that look right and press <strong>Save selected</strong>. Press <strong>Review</strong> on a row to open it in the one-at-a-time reviewer instead. Where a stored value differs from Tinder's, tick it to overwrite, or press the small ignore button beside it to stop Tinder offering that field again.</li>
+<li>Anyone new or uncertain goes to the one-at-a-time reviewer, one after another, and saving auto-advances to the next.</li>
+</ol>
+</div>
+</details>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I find people who have unmatched me?</div>
+<ol class="guide-steps">
+<li>With the bulk snippet pasted in the console, type <code>tinderFindUnmatched()</code>. It scrolls both your Matches and Messages lists to the end, lists whoever the dashboard knows who is no longer there, and copies the list.</li>
+<li>Paste it into <strong>Import data</strong> and press <strong>Read</strong>. Those people get an <strong>Unmatched</strong> tag and a dated note. Nothing else changes.</li>
+<li>That list only means "not in the sidebar right now", so check it. Press <strong>Copy bulk-import snippet</strong> again (it now includes who is flagged), paste it in the Tinder console, and type <code>tinderVerifyUnmatched()</code>. It looks each person up by name in Tinder's own search.</li>
+<li>Paste the result into <strong>Import data</strong>. People who are still there lose the Unmatched flag. People who are gone appear in <span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#import-match-panel">Gone from Tinder &mdash; archive these?</span> with a tick each.</li>
+<li>Press <strong>Archive ticked</strong> to move them to Archived, or <strong>Not now</strong> to leave everyone as they are.</li>
+</ol>
+<div class="guide-tip">If the script cannot find Tinder's search box it stops and prints what it found instead; nothing is changed. Nobody is archived without your tick.</div>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I find matches that never made it into the dashboard?</div>
+<ol class="guide-steps">
+<li>Paste a fresh copy of the bulk-import snippet (it carries the list of who you already have), then type <code>tinderFindMissing()</code>.</li>
+<li>It lists who is in your Tinder sidebar but not here and prints a ready-made <code>tinderReextract([...])</code> command. Run that command.</li>
+<li>Upload the file it downloads, as above.</li>
+</ol>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-contacts-chats">
+<summary>Chats from WhatsApp and Telegram</summary>
+<div class="guide-task">
+<div class="guide-q">How do I import a WhatsApp chat?</div>
+<ol class="guide-steps">
+<li>In WhatsApp, open the chat, press &#8942; &rarr; <strong>More</strong> &rarr; <strong>Export chat</strong>, and choose with or without media. Either works; without media is lighter but leaves out photo and video captions.</li>
+<li>Get the .txt file to the dashboard: paste its text into <span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#dating-import-paste">Import data</span> and press <strong>Read</strong>, or press <strong>Or upload file(s)&hellip;</strong>.</li>
+<li>Check <strong>You are</strong> shows your own name (change it if the two sides are the wrong way round), and read the message count and date range.</li>
+<li>Choose who it is in <strong>Import into</strong> (likely matches are listed first, or choose <strong>+ New connection&hellip;</strong>). A note says how many lines it adds to what is already saved.</li>
+<li>Press <strong>Import chat</strong>.</li>
+</ol>
+<div class="guide-tip">Importing the same chat later is safe: a WhatsApp export is always the full history, so the saved copy is simply replaced by the longer one. The person's stage moves up to Moved to WhatsApp if it was lower. The "since contact" counter is only filled from the chat if it was empty, so press <strong>Log contact</strong> if it still shows an old gap. Photos and videos themselves go through <em>Photos and screenshots</em>, not this.</div>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I import many WhatsApp chats at once?</div>
+<ol class="guide-steps">
+<li>Choose <strong>Or upload file(s)&hellip;</strong> and select several .txt files together.</li>
+<li>A table lists every chat with its message count and who it will go into. Press <strong>Select all confident matches</strong> to tick the exact-name ones, then fix or tick the others one by one.</li>
+<li>Press <strong>Import selected</strong>.</li>
+</ol>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I import Telegram chats?</div>
+<ol class="guide-steps">
+<li>In Telegram Desktop, go to Settings &rarr; Advanced &rarr; <strong>Export Telegram data</strong>. Choose JSON or HTML, include chats, and export.</li>
+<li>In <span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#import-connections-item">Import connections</span>, press <strong>Pick the export folder</strong> and choose the folder that contains <code>lists</code> and <code>chats</code>. It reads everything on this device; nothing is sent anywhere.</li>
+<li>A table lists each real conversation, matched by phone number or exact name. Group chats and chats with nothing in them but joins are left out.</li>
+<li>Press <strong>Select all confident matches</strong>, fix the rest (a dropdown on each row can say <strong>&mdash; skip &mdash;</strong> or <strong>+ New connection&hellip;</strong>), and press <strong>Import selected</strong>.</li>
+<li>Tick <strong>Also bring in the photos actually included in each chat</strong> first if you want them. It uses more space and sync.</li>
+</ol>
+</div>
+<div class="guide-task">
+<div class="guide-q">What are the "Mentioned" chips?</div>
+<ol class="guide-steps">
+<li>After reading a chat, places and nationalities found in the text are shown as chips such as "+ Lisbon (City)".</li>
+<li>Once you have picked who the chat is for, click a chip to add that value to that person.</li>
+</ol>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-contacts-albums">
+<summary>Google Photos albums</summary>
+<div class="guide-task">
+<div class="guide-q">How do I name albums so they link to a person?</div>
+<ol class="guide-steps">
+<li>In Google Photos, name each album <strong>Name_Location_Date_Other</strong>, leaving any part you do not need empty but keeping the underscores.</li>
+<li>Examples: <code>Kat_</code> is Kat's main album; <code>Kat_Lisbon</code> adds Lisbon as a place; <code>Kat_x</code> marks it private (its cover is blurred until you hover over it); <code>Alena__2026_Birthday</code> has no place, so "Birthday" is not turned into one.</li>
+<li>Always end the name with the underscore, so <code>Kat_</code> cannot also match <code>Katerina_</code>.</li>
+</ol>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I link my albums to people?</div>
+<ol class="guide-steps">
+<li>Open the entry <strong>Google Photos albums</strong> in <span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#import-connections-item">Import connections</span> and press <span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#albums-copy-snippet">Copy snippet</span>.</li>
+<li>On photos.google.com/albums, open the console (F12), paste and run it, then paste the result into <strong>Import data</strong> and press <strong>Read</strong>. Run it on photos.google.com/people as well to also list faces Google knows that have no album.</li>
+<li>The albums appear grouped under the person each one matched. Under any album you can pick a different person from the dropdown, press <strong>+ New connection</strong>, or press <strong>AI compare faces</strong> to check the cover against the person's saved photo.</li>
+<li>Press <strong>Save N links</strong>. A place from a non-private album is added to that person's Date locations.</li>
+</ol>
+<div class="guide-tip">Below the albums, lists show connections with no album, albums with no connection, faces with no album, and albums whose names do not follow the pattern. Use them as a to-do list. A saved link keeps working if you rename the album later.</div>
+</div>
+<div class="guide-task">
+<div class="guide-q">Where do a person's albums show?</div>
+<ol class="guide-steps">
+<li>Open Details on their card and look at <strong>Google Photos albums</strong>. Click a cover to open the album in Google Photos, or press &times; to unlink it.</li>
+</ol>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-contacts-csv">
+<summary>Your own spreadsheet</summary>
+<div class="guide-task">
+<div class="guide-q">How do I bring in a list I kept elsewhere?</div>
+<ol class="guide-steps">
+<li>Make a CSV whose first row is exactly: <code>Name,City,Language,Nationality,Connected,Tags,Sex,Stage,Milestones,Notes,Date Locations,Date Events,Stars</code>. Columns can be in any order and some can be left out, but Name and City must be there.</li>
+<li>Put several values in one cell by separating them with commas (inside quotes, as a spreadsheet does). <strong>Connected</strong> is a year, <strong>Stage</strong> must be one of the stage names, and <strong>Stars</strong> is 1 to 5.</li>
+<li>Choose <strong>Or upload file(s)&hellip;</strong> in <span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#dating-import-paste">Import data</span>, or paste the text and press <strong>Read</strong>.</li>
+<li>A review lists every row. People who match someone you have are merged in (nothing already on file is overwritten); new and uncertain ones are yours to confirm. A stage that is not recognised is flagged, not guessed.</li>
+<li>Press <strong>Import N rows</strong>, or <strong>Cancel</strong>.</li>
+</ol>
+<div class="guide-tip">The same box reads Tinder, WhatsApp and album data too. It tells the type apart on its own, so you never have to say which.</div>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-contacts-google">
+<summary>Matching Google Contacts</summary>
+<div class="guide-task">
+<div class="guide-q">How do I link people to my Google Contacts?</div>
+<ol class="guide-steps">
+<li>Sign in to Google with the button at the top of the page.</li>
+<li>In <span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#sync-contacts-btn">Add &amp; import</span>, press <strong>Match contacts</strong>. Only people at Moved to WhatsApp or later are checked, since earlier ones rarely have a number.</li>
+<li>A summary says how many were linked, how many need a look and how many were not found.</li>
+<li>A phone number or email match is linked on its own. A match by name is only ever a suggestion: the person's card shows <strong>Possible Google Contacts match</strong>. Press <strong>That's them</strong>, or <strong>None of these</strong>.</li>
+<li>To go through the suggestions, press <strong>Show just those</strong> in the review area under the button.</li>
+</ol>
+<div class="guide-tip">The Overview group <strong>Contact match</strong> shows who is In contacts, to review, or Missing in contacts.</div>
+</div>
+<div class="guide-task">
+<div class="guide-q">What changes when someone is linked?</div>
+<ol class="guide-steps">
+<li>Anything the card is missing (phone, email, city, address, job) is filled in from the contact, and a different name on the contact is added as an also-known-as.</li>
+<li>Where the two disagree, the card shows <strong>Differs from Google Contacts</strong> with two buttons: <strong>Keep</strong> yours or <strong>Use</strong> theirs. Nothing is overwritten until you press one.</li>
+<li>A link you have confirmed stays even if names change later.</li>
+</ol>
+<div class="guide-tip">Put your own phone and email in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#my-phone-input">My info</span> first so a number you gave in chat never links someone to your own contact.</div>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-contacts-tidy">
+<summary>Tidying up and settings</summary>
+<div class="guide-task">
+<div class="guide-q">How do I merge two cards for the same person?</div>
+<ol class="guide-steps">
+<li>In Settings, <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#merge-admin-btn">Merge duplicates</span>: choose the profile to keep and the one to merge in, then press <strong>Merge</strong> and confirm.</li>
+<li>Photos, notes, ratings, tags and to-dos from the second are folded into the first, which keeps its own value wherever both have one. The second card is then removed.</li>
+<li>To find candidates, press <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#dup-find-btn">Find possible duplicates</span>. It lists pairs that share a Tinder ID, a photo, or a similar name with a matching age or city. Press <strong>Compare</strong> to look side by side, then merge from there, or press <strong>Not a duplicate</strong> to dismiss a pair.</li>
+</ol>
+<div class="guide-tip">Nothing is merged without you pressing the merge button.</div>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I tidy up tags?</div>
+<ol class="guide-steps">
+<li>Open <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#tag-cleanup">Tidy up tags</span> in Settings (the tag icon in the Connections heading goes there too).</li>
+<li>Every value in use is listed with how many people have it. Values that differ only by capitals or spacing are flagged so you can merge them in one click; any other value can be renamed or merged by hand. A change applies to every connection.</li>
+</ol>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do the red, amber and green flags work?</div>
+<ol class="guide-steps">
+<li>Open <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#flag-rules-list">red/amber/green flags</span> in Settings. There is one rule per field.</li>
+<li>For a number (Distance, Age) give the limits. For anything else give the values for each colour, separated by commas, or press <strong>Pick tags&hellip;</strong> and click values to cycle green, amber, red, then none.</li>
+<li>A person's dot shows the worst colour among the rules they match, and the matching values are listed under their top row.</li>
+</ol>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I fix a card whose cover photo is missing or tiny?</div>
+<ol class="guide-steps">
+<li>In Settings, press <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#photo-quality-scan-btn">Scan</span> under Photo quality.</li>
+<li>For each person found, it proposes a better photo already on file (a larger saved photo first, then the cover of a linked album). Nothing is applied until you click.</li>
+</ol>
+</div>
+</details>
+
 </div>
 </details>
 
