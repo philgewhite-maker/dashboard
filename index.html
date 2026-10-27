@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v650</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v651</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -573,6 +573,7 @@
 <span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-finances-subscriptions" title="Guide: how to use this panel">&#128214;</span>
 <span class="count-badge" id="subscriptions-count"></span>
 </div>
+<div id="subscriptions-total"></div>
 <div id="subscriptions-list"></div>
 <div class="add-form" id="subscription-form">
 <input type="text" autocomplete="off" id="subscription-name-input" placeholder="e.g. Netflix">
@@ -582,7 +583,7 @@
 <option>Weekly</option>
 <option>Other</option>
 </select>
-<input type="text" autocomplete="off" id="subscription-cost-input" placeholder="Cost (optional)">
+<input type="number" step="0.01" min="0" inputmode="decimal" id="subscription-cost-input" placeholder="£ per payment (optional)" title="What one payment costs, in pounds">
 <input type="date" id="subscription-renewal-input" title="Next renewal date — not when you first got it">
 <input type="text" autocomplete="off" id="subscription-notes-input" placeholder="Notes (optional)">
 <button class="add-btn" type="button">Add</button>
@@ -5117,7 +5118,7 @@ Finds connections whose cover photo is missing or is really just the small place
 <li>The list is sorted by soonest renewal. A badge shows <strong>Nd left</strong> (amber within 7 days), <strong>Renews today</strong>, or <strong>Update due</strong> once the date has passed.</li>
 <li>When a renewal date passes, Monthly, Yearly and Weekly subscriptions move on to the next date by themselves. A subscription set to Other keeps showing <strong>Update due</strong> until you type the next date in.</li>
 </ol>
-<div class="guide-tip">The panel doesn't add costs up. Cost is free text, so write it however you like.</div>
+<div class="guide-tip">Type the amount as a number, in pounds, for one payment (what you pay each month, year or week, matching the frequency). The panel adds them up as <strong>a year</strong> and <strong>a month</strong> above the list and shows each one's yearly equivalent beside it. Subscriptions with no amount, a frequency of Other, or marked free with an account are left out of the total, and the line says how many. Costs typed as text before this was added were converted when they were a plain amount; anything else was moved into Notes.</div>
 </div>
 
 <div class="guide-task">

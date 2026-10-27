@@ -219,11 +219,9 @@ return data.subscriptions.filter((s) => s.accountId === a.id);
 }
 
 function subscriptionCostText(s) {
-const cost = String(s.cost || '').trim();
-if (!cost) return '';
-// A cost typed as a bare number gets a £; one already carrying its own
-// symbol or words ("£8.99", "$5", "free") is left exactly as typed.
-return /^[\d.,]+$/.test(cost) ? `£${cost}` : cost;
+if (s.amount == null || !(s.amount >= 0)) return '';
+const per = { Monthly: '/mo', Yearly: '/yr', Weekly: '/wk' }[s.frequency] || '';
+return `£${Number(s.amount).toLocaleString('en-GB', { minimumFractionDigits: s.amount % 1 ? 2 : 0, maximumFractionDigits: 2 })}${per}`;
 }
 
 // Two counts, not one: "3 subscriptions" hides the only thing worth

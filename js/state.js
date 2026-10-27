@@ -2642,6 +2642,29 @@ v.logoUrl = entry.logoUrl;
 }
 if (!Array.isArray(data.businessIdeas)) data.businessIdeas = [];
 if (!Array.isArray(data.subscriptions)) data.subscriptions = [];
+// Cost used to be free text. It is now a number (pounds per billing period),
+// so totals can be added up. Text that is just an amount ("£8.99", "8.99 pm")
+// is converted; anything else is kept in Notes so nothing is lost, and the
+// amount is left blank to be filled in.
+data.subscriptions.forEach((s) => {
+if (s.amount !== undefined) return;
+const text = String(s.cost || '').trim();
+s.amount = null;
+if (text) {
+const m = /^[£$€]?\s*(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?\s*(?:\/\s*|per\s+|a\s+)?(pm|p\/m|pa|m|mo|month|monthly|y|yr|year|yearly|annually|w|wk|week|weekly)?$/i.exec(text);
+if (m) {
+let amount = Number(`${m[1].replace(/,/g, '')}${m[2] ? `.${m[2]}` : ''}`);
+// A unit in the text ("£120 pa") wins over the frequency chosen next to
+// it: convert to the amount for ONE billing period of that frequency.
+const unit = (m[3] || '').toLowerCase();
+const perYearText = /^(pm|p\/m|m|mo|month|monthly)$/.test(unit) ? 12 : /^(pa|y|yr|year|yearly|annually)$/.test(unit) ? 1 : /^(w|wk|week|weekly)$/.test(unit) ? 52 : 0;
+const perYearFreq = { Monthly: 12, Yearly: 1, Weekly: 52 }[s.frequency];
+if (perYearText && perYearFreq && perYearText !== perYearFreq) amount = Math.round((amount * perYearText / perYearFreq) * 100) / 100;
+s.amount = amount;
+} else s.notes = [s.notes, `Cost: ${text}`].filter(Boolean).join(' · ');
+}
+s.cost = '';
+});
 // A subscription can hang off one of the tracked accounts, and that
 // link says one of two quite different things: it's PAID from that
 // account, or it comes free with it (Apple TV+ included with a Barclays

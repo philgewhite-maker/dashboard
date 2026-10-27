@@ -52,8 +52,30 @@ changed = true;
 if (changed) queueSave();
 }
 
+const fmtGbp = (n) => `£${n.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+// What one subscription costs over a year, or null when that can't be
+// worked out: no amount typed, a frequency of "Other" (no known period), or
+// one that comes free with an account.
+function annualOf(s) {
+if (s.includedWithAccount || s.amount == null || !(s.amount >= 0)) return null;
+const perYear = { Monthly: 12, Yearly: 1, Weekly: 52 }[s.frequency];
+return perYear ? s.amount * perYear : null;
+}
+
+function renderSubscriptionTotal() {
+const el = document.getElementById('subscriptions-total');
+if (!el) return;
+const counted = data.subscriptions.filter((s) => annualOf(s) != null);
+if (!counted.length) { el.innerHTML = data.subscriptions.length ? '<div class="settings-note" style="margin:0 0 8px;">Type an amount on a subscription to see what they cost in a year.</div>' : ''; return; }
+const year = counted.reduce((n, s) => n + annualOf(s), 0);
+const left = data.subscriptions.length - counted.length;
+el.innerHTML = `<div class="settings-note" style="margin:0 0 8px;"><strong>${fmtGbp(year)} a year</strong> (${fmtGbp(year / 12)} a month) across ${counted.length} subscription${counted.length === 1 ? '' : 's'}.${left ? ` ${left} not counted: no amount yet, frequency Other, or free with an account.` : ''}</div>`;
+}
+
 function renderSubscriptions() {
 rollRenewals();
+renderSubscriptionTotal();
 const list = document.getElementById('subscriptions-list');
 document.getElementById('subscriptions-count').textContent = data.subscriptions.length + (data.subscriptions.length === 1 ? ' subscription' : ' subscriptions');
 if (data.subscriptions.length === 0) {
@@ -85,7 +107,8 @@ return `<div class="voucher-row" data-subscription-row="${s.id}">
 <select class="voucher-edit voucher-type-edit" data-field="frequency" data-sub-id="${s.id}">
 ${FREQUENCIES.map((f) => `<option value="${f}" ${f === s.frequency ? 'selected' : ''}>${f}</option>`).join('')}
 </select>
-<input type="text" autocomplete="off" class="voucher-edit voucher-value-edit" data-field="cost" data-sub-id="${s.id}" value="${escapeHtml(s.cost || '')}" placeholder="Cost"${s.includedWithAccount ? ' disabled title="Included with the linked account — no cost of its own"' : ''}>
+<input type="number" step="0.01" min="0" inputmode="decimal" class="voucher-edit voucher-value-edit" data-field="amount" data-sub-id="${s.id}" value="${s.amount != null ? s.amount : ''}" placeholder="£ ${s.frequency === 'Yearly' ? 'a year' : s.frequency === 'Weekly' ? 'a week' : s.frequency === 'Monthly' ? 'a month' : 'each time'}" title="What one payment costs, in pounds"${s.includedWithAccount ? ' disabled title="Included with the linked account — no cost of its own"' : ''}>
+${annualOf(s) != null ? `<span class="settings-note" style="margin:0;white-space:nowrap;" title="Worked out from the amount and how often it is charged">&asymp; ${fmtGbp(annualOf(s))}/yr</span>` : ''}
 </div>
 ${accountLinkHtml(s)}
 </div>
@@ -104,7 +127,12 @@ list.querySelectorAll('[data-field][data-sub-id]').forEach((el) => {
 el.addEventListener('change', () => {
 const s = data.subscriptions.find((x) => x.id === el.dataset.subId);
 if (!s) return;
+if (el.dataset.field === 'amount') {
+const n = el.value.trim() === '' ? null : Number(el.value);
+s.amount = Number.isFinite(n) && n >= 0 ? n : null;
+} else {
 s[el.dataset.field] = el.value.trim();
+}
 renderSubscriptions();
 queueSave();
 });
@@ -166,7 +194,7 @@ data.subscriptions.push({
 id: uid(),
 name,
 frequency: frequencyInput.value,
-cost: costInput.value.trim(),
+amount: costInput.value.trim() === '' || !(Number(costInput.value) >= 0) ? null : Number(costInput.value),
 nextRenewal: renewalInput.value,
 notes: notesInput.value.trim(),
 });
