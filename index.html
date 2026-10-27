@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v648</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v649</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -52,6 +52,7 @@
 <section class="panel wide" id="questions-panel" data-tab="overview" style="display:none;">
 <div class="panel-head">
 <h2><span class="dot amber"></span>Questions from Claude</h2>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-overview-questions" title="Guide: how to use this panel">&#128214;</span>
 <span class="count-badge" id="questions-count"></span>
 </div>
 <div class="sync-row">
@@ -68,6 +69,7 @@
 <section class="panel wide" id="nudges-panel" data-tab="overview">
 <div class="panel-head">
 <h2><span class="dot rose"></span>Nudges</h2>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-overview-nudges" title="Guide: how to use this panel">&#128214;</span>
 <button class="log-btn" id="shuffle-nudge-btn" type="button">Shuffle</button>
 </div>
 <span class="sync-status" id="nudges-ai-status"></span>
@@ -77,6 +79,7 @@
 <section class="panel wide" id="calendars-panel" data-tab="overview">
 <div class="panel-head">
 <h2><span class="dot teal"></span>Next Up</h2>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-overview-calendar" title="Guide: how to use this panel">&#128214;</span>
 <span class="count-badge" id="calendars-count"></span>
 <span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#calendar-form" title="Calendar settings">&#9881;</span>
 </div>
@@ -90,6 +93,7 @@
 <section class="panel wide" id="airbnb-panel" data-tab="overview">
 <div class="panel-head">
 <h2><span class="dot blue"></span>Airbnb</h2>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-overview-airbnb" title="Guide: how to use this panel">&#128214;</span>
 <span class="count-badge" id="airbnb-count"></span>
 <span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#airbnb-listings" title="Airbnb listings">&#9881;</span>
 <span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#keys-settings" title="Keys">&#128273;</span>
@@ -136,6 +140,7 @@
 <section class="panel" id="habits-panel" data-tab="overview">
 <div class="panel-head">
 <h2><span class="dot sage"></span>Habits</h2>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-overview-habits" title="Guide: how to use this panel">&#128214;</span>
 <span class="count-badge" id="habits-count"></span>
 </div>
 <div id="habits-list"></div>
@@ -148,6 +153,7 @@
 <section class="panel" id="goals-panel" data-tab="overview">
 <div class="panel-head">
 <h2><span class="dot slate"></span>Goals</h2>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-overview-habits" title="Guide: how to use this panel">&#128214;</span>
 <span class="count-badge" id="goals-count"></span>
 </div>
 <div id="goals-list"></div>
@@ -160,6 +166,7 @@
 <section class="panel wide" id="capture-panel" data-tab="tasks">
 <div class="panel-head">
 <h2><span class="dot amber"></span>Capture</h2>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-tasks-capture" title="Guide: how to use this panel">&#128214;</span>
 <span class="count-badge" id="capture-status"></span>
 </div>
 <div class="capture-row">
@@ -172,21 +179,27 @@
 <input type="file" id="capture-photo-input" accept="image/*" multiple style="display:none;">
 </div>
 <div class="sync-status" id="quick-capture-status"></div>
+<details class="settings-subgroup panel-about"><summary>About this</summary>
 <div class="settings-note" style="margin:8px 0 0;">Enter captures it straight to the Inbox, free and instantly. <strong>&#10024; Smart</strong> or the mic reads the same text as an instruction instead &mdash; &ldquo;watch The Bear&rdquo;, or &ldquo;create a trip to Mallorca 1st to 5th November and add Vora Bora to it in my planner&rdquo; &mdash; and queues a draft below for you to confirm.</div>
+</details>
 </section>
 
 <section class="panel wide" id="agent-inbox-panel" data-tab="tasks" style="display:none;">
 <div class="panel-head">
 <h2><span class="dot plum"></span>Proposed by Claude</h2>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-tasks-claude" title="Guide: how to use this panel">&#128214;</span>
 <span class="count-badge" id="agent-inbox-count"></span>
 </div>
+<details class="settings-subgroup panel-about"><summary>About this</summary>
 <div class="settings-note" style="margin:0 0 10px;">Tasks an external Claude Code run has proposed, via a narrowly-scoped channel that can only ever suggest here &mdash; nothing becomes a real task until you Accept it.</div>
+</details>
 <div id="agent-inbox-list"></div>
 </section>
 
 <section class="panel wide" id="gtasks-panel" data-tab="tasks">
 <div class="panel-head">
 <h2><span class="dot slate"></span>Pull from Google Tasks</h2>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-tasks-gtasks" title="Guide: how to use this panel">&#128214;</span>
 <span class="count-badge" id="gtasks-count"></span>
 </div>
 <div class="sync-row">
@@ -201,13 +214,16 @@
 <section class="panel wide" id="capture-inbox-panel" data-tab="tasks">
 <div class="panel-head">
 <h2><span class="dot amber"></span>Capture Inbox</h2>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-tasks-files" title="Guide: how to use this panel">&#128214;</span>
 <span class="count-badge" id="capture-inbox-count"></span>
 </div>
 <div class="capture-row">
 <label class="file-btn" for="capture-inbox-file-input">+ Capture files</label>
 <input type="file" id="capture-inbox-file-input" multiple style="display:none;">
 </div>
+<details class="settings-subgroup panel-about"><summary>About this</summary>
 <div class="settings-note" style="margin:8px 0 10px;">Photos, CSVs, or anything else shared or picked in one go &mdash; grouped as a batch here until you decide where each one belongs. Mainly reached via Android's share sheet. A recognised Health CSV (Renpho scale export so far) skips the batch entirely and is imported straight into the Health tab.</div>
+</details>
 <div class="sync-status" id="capture-inbox-status"></div>
 <div id="capture-inbox-list"></div>
 </section>
@@ -215,10 +231,13 @@
 <section class="panel wide" id="capture-drafts-panel" data-tab="tasks">
 <div class="panel-head">
 <h2><span class="dot rose"></span>Capture drafts</h2>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-tasks-drafts" title="Guide: how to use this panel">&#128214;</span>
 <span class="count-badge" id="capture-drafts-count"></span>
 <span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#capture-rules" title="Capture markers &amp; suffixes">&#9881;</span>
 </div>
+<details class="settings-subgroup panel-about"><summary>About this</summary>
 <div class="settings-note" style="margin:0 0 10px;">Nothing here is created until you Confirm it. Drafts arrive from <strong>&#10024; Smart</strong> or the mic in Capture above, and from a shared voice clip, already transcribed.</div>
+</details>
 <div class="sync-status" id="capture-drafts-status"></div>
 <div id="capture-drafts-list"></div>
 </section>
@@ -321,7 +340,7 @@
 <div class="panel-head">
 <h2><span class="dot rose"></span>Inbox &mdash; file these</h2>
 <span class="count-badge" id="inbox-count"></span>
-<span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-inbox" title="Guide — capture, filing, contexts, buckets">&#128214;</span>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-tasks-inbox" title="Guide — capture, filing, contexts, buckets">&#128214;</span>
 </div>
 <div id="task-inbox"></div>
 </section>
@@ -329,6 +348,7 @@
 <section class="panel wide" id="tasks-panel" data-tab="tasks">
 <div class="panel-head">
 <h2><span class="dot sage"></span>Lists</h2>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-tasks-lists" title="Guide: how to use this panel">&#128214;</span>
 <label class="settings-note" style="display:flex;align-items:center;gap:6px;margin:0;cursor:pointer;">
 <input type="checkbox" id="show-done-toggle"> Show done
 </label>
@@ -341,6 +361,7 @@
 <section class="panel wide" id="task-contexts-panel" data-tab="tasks">
 <div class="panel-head">
 <h2><span class="dot teal"></span>Contexts</h2>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-tasks-contexts" title="Guide: how to use this panel">&#128214;</span>
 </div>
 <div class="tag-editor" id="task-contexts-list"></div>
 <div class="settings-note">Where or with what you can actually do things. Removing one clears it from every task.</div>
@@ -363,6 +384,7 @@
 <section class="panel wide" id="accounts-panel" data-tab="finances">
 <div class="panel-head">
 <h2><span class="dot plum"></span>Accounts</h2>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-finances-accounts" title="Guide: how to use this panel">&#128214;</span>
 <span class="count-badge" id="accounts-count"></span>
 </div>
 <div class="settings-note" style="margin:0 0 10px;">Bank accounts and credit cards kept open for their incentive &mdash; a switch bonus, cashback, or a 0% balance-transfer deal. Click a card to see and edit its full details.</div>
@@ -379,6 +401,7 @@
 <section class="panel wide" id="letting-panel" data-tab="finances">
 <div class="panel-head">
 <h2><span class="dot sage"></span>Letting income</h2>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-finances-letting" title="Guide: how to use this panel">&#128214;</span>
 <span class="count-badge" id="letting-total"></span>
 <span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#letting-tax-settings" title="Letting tax — per-owner rate &amp; allowance">&#9881;</span>
 </div>
@@ -416,7 +439,9 @@
 <div class="panel-head" style="margin:14px 0 6px;">
 <h2 style="font-size:13px;">Income by month</h2>
 </div>
+<details class="settings-subgroup panel-about"><summary>About this</summary>
 <div class="settings-note" style="margin:0 0 6px;">15 months back, 6 forward. A stay spanning a month end has its income split across both by nights, so no month looks lumpy just because a booking happened to straddle it. Tick/untick below to choose which of Mine, Lewis', Zara's (or any combination) show in the stack -- each listing's own Owner/Share % decides which bucket its income lands in, not a blanket percentage. Each one's own Aggressive/Normal target adds up across whichever are ticked.</div>
+</details>
 <div class="letting-chart-legend" id="letting-chart-legend"></div>
 <div class="chart-canvas-wrap">
 <canvas id="letting-chart-canvas"></canvas>
@@ -426,7 +451,9 @@
 <div class="panel-head" style="margin:14px 0 6px;">
 <h2 style="font-size:13px;">Average night rate by listing</h2>
 </div>
+<details class="settings-subgroup panel-about"><summary>About this</summary>
 <div class="settings-note" style="margin:0 0 6px;">Gross minus the cleaning cost above (charged once, plus again per full week of the stay), divided by nights, spread across every month a longer stay actually covers. Average: one line per listing. High/Low/Avg: one candle per ROOM per month (a room shared by two listings, like the En-Suite, counts as one) -- the vertical wick spans the cheapest to priciest stay that month, the tick marks the weighted average. The bottom third is occupancy by room -- nights actually booked (including upcoming stays and historic rows with no exact dates) as a share of the month, never more than 100% for a shared room, with each room's average stay length labelled above its bars where there's room to show it. Tick/untick below to choose which rate lines/candles show.</div>
+</details>
 <div class="chart-mode-toggle" id="night-rate-mode-toggle">
 <button type="button" class="chart-mode-btn active" data-night-rate-mode="average">Average</button>
 <button type="button" class="chart-mode-btn" data-night-rate-mode="candles">High / Low / Avg</button>
@@ -442,6 +469,7 @@
 <section class="panel wide" id="loans-panel" data-tab="finances">
 <div class="panel-head">
 <h2><span class="dot amber"></span>Loans from owners</h2>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-finances-loans" title="Guide: how to use this panel">&#128214;</span>
 <span class="count-badge" id="loans-total"></span>
 </div>
 <div class="settings-note" style="margin:0 0 10px;">Money borrowed from a listing owner, in tranches. Interest runs daily on what's lent minus what they owe you on the <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#letting-panel">Airbnb ledger</span>, and each month's total is posted there on the 1st as a deduction.</div>
@@ -463,6 +491,7 @@
 <section class="panel wide" id="switch-offers-panel" data-tab="finances">
 <div class="panel-head">
 <h2><span class="dot plum"></span>Switch opportunities</h2>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-finances-switching" title="Guide: how to use this panel">&#128214;</span>
 <span class="panel-head-total" id="switch-bonus-year-total"></span>
 </div>
 <div class="settings-note" style="margin:0 0 10px;">Cross-references <a href="https://www.moneysavingexpert.com/banking/compare-best-bank-accounts/#switch" target="_blank" rel="noopener">MoneySavingExpert's current switch offers</a> against your own account history (including closed accounts) and which accounts are CASS-ready &mdash; a suggestion to look into, never applied automatically. MSE blocks a plain fetch from the web host, but the home agent's own browser (same route Quidco's cashback rate already uses) reads it fine from your own connection &mdash; use "Check via home agent" below, or paste the page text by hand if that's ever down.</div>
@@ -482,7 +511,9 @@
 <div class="panel-head" style="margin-top:16px;">
 <h3 style="margin:0;">Ongoing account value</h3>
 </div>
+<details class="settings-subgroup panel-about"><summary>About this</summary>
 <div class="settings-note" style="margin:0 0 10px;">Checks each of your own open current accounts against MSE's "ongoing cashback &amp; perks" section (same page, same fetch) &mdash; not a new switch bonus, but whether an account you already hold is worth keeping. Weighs the account's own recorded deal/fee, whether closing it now would help or hurt a FUTURE switch bonus from that bank (some offers exclude anyone who's held an account there "since" a date &mdash; staying put can be what's blocking a future bonus, not protecting one), and whether the alternative even supports the <a href="https://www.currentaccountswitch.co.uk/banks-building-societies/" target="_blank" rel="noopener">Current Account Switch Service</a> for leaving it again later.</div>
+</details>
 <div class="sync-row" style="margin-bottom:8px;">
 <button class="sync-btn" id="account-value-check-btn" type="button">&#128161; Review ongoing accounts</button>
 <span class="sync-status" id="account-value-check-status"></span>
@@ -493,6 +524,7 @@
 <section class="panel wide" id="vouchers-panel" data-tab="finances">
 <div class="panel-head">
 <h2><span class="dot plum"></span>Vouchers &amp; Credits</h2>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-finances-vouchers" title="Guide: how to use this panel">&#128214;</span>
 <span class="count-badge" id="vouchers-count"></span>
 </div>
 <div id="voucher-review-section"></div>
@@ -517,9 +549,12 @@
 <section class="panel wide" id="loyalty-balances-panel" data-tab="finances">
 <div class="panel-head">
 <h2><span class="dot plum"></span>Loyalty balances</h2>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-finances-loyalty" title="Guide: how to use this panel">&#128214;</span>
 <span class="count-badge" id="loyalty-balances-count"></span>
 </div>
+<details class="settings-subgroup panel-about"><summary>About this</summary>
 <div class="settings-note" style="margin:0 0 10px;">Reads known loyalty-program emails (British Airways, Marriott Bonvoy, Virgin Flying Club, Tesco Clubcard, Boots Advantage Card) for a real balance, about once a month per program — never a fixed statement, so some months may show nothing new.</div>
+</details>
 <div class="sync-row">
 <button class="sync-btn" type="button" id="loyalty-checknow-all-btn">Check all now</button>
 <span class="sync-status" id="loyalty-scan-status"></span>
@@ -535,6 +570,7 @@
 <section class="panel wide" id="subscriptions-panel" data-tab="finances">
 <div class="panel-head">
 <h2><span class="dot plum"></span>Subscriptions</h2>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-finances-subscriptions" title="Guide: how to use this panel">&#128214;</span>
 <span class="count-badge" id="subscriptions-count"></span>
 </div>
 <div id="subscriptions-list"></div>
@@ -556,6 +592,7 @@
 <section class="panel wide" id="shopping-capture-panel" data-tab="shopping">
 <div class="panel-head">
 <h2><span class="dot amber"></span>Shopping capture</h2>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-shopping-lists" title="Guide: how to use this panel">&#128214;</span>
 </div>
 <div class="capture-row">
 <input type="text" autocomplete="off" id="shop-capture-input" placeholder="What do you need?">
@@ -566,37 +603,48 @@
 <button class="add-btn" id="shop-capture-mic-btn" type="button" title="Record a voice instruction">&#127908;</button>
 </div>
 <div class="sync-status" id="shop-capture-status"></div>
+<details class="settings-subgroup panel-about"><summary>About this</summary>
 <div class="settings-note" style="margin:8px 0 0;">
 This is the same task system as the Tasks tab &mdash; a shopping item can be part of a bigger project too (tag it both DIY and Supermarket for "buy paint"), and opening it from a list below takes you to the full task, where it can be broken into subtasks, dated, or given a photo. A Supermarket item also gets priced automatically at capture &mdash; Tesco, Amazon, and a third relevant retailer &mdash; whether typed here, spoken, shared as a link, or a photo marked S.
 </div>
+</details>
 </section>
 
 <section class="panel wide" id="shopping-lists-panel" data-tab="shopping">
 <div class="panel-head">
 <h2><span class="dot sage"></span>Lists</h2>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-shopping-lists" title="Guide: how to use this panel">&#128214;</span>
 <label class="settings-note" style="display:flex;align-items:center;gap:6px;margin:0;cursor:pointer;">
 <input type="checkbox" id="shop-show-done-toggle"> Show done
 </label>
 </div>
 <div id="shopping-lists"></div>
+<details class="settings-subgroup panel-about"><summary>About this</summary>
 <div class="settings-note" style="margin:12px 0 0;">
 Prices and offers come from an AI web search of each retailer, not a live basket &mdash; adding to a basket stays a manual click-through (the direct product link), since that needs an authenticated session against each retailer's own site.
 </div>
+</details>
 </section>
 
 <section class="panel wide" id="inventory-panel" data-tab="shopping">
 <div class="panel-head">
 <h2><span class="dot plum"></span>Inventory</h2>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-shopping-inventory" title="Guide: how to use this panel">&#128214;</span>
 </div>
+<details class="settings-subgroup panel-about"><summary>About this</summary>
 <div class="settings-note" style="margin:0 0 8px;">Things you've bought that nobody has yet &mdash; including anything bought for someone you're no longer seeing. Matched against everyone's recorded sizes, so an item can find a person rather than the other way round.</div>
+</details>
 <div id="inventory-list"></div>
 </section>
 
 <section class="panel wide" id="ap-orders-panel" data-tab="shopping">
 <div class="panel-head">
 <h2><span class="dot amber"></span>AP orders</h2>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-shopping-ap" title="Guide: how to use this panel">&#128214;</span>
 </div>
+<details class="settings-subgroup panel-about"><summary>About this</summary>
 <div class="settings-note" style="margin:0 0 10px;">Captures the real Agent Provocateur order-confirmation email as the authoritative record of what was ordered, so a return list is reconciled against exactly what was kept &mdash; not approximated from memory. Link a kept item to its exact order line from the Inventory list above.</div>
+</details>
 <div class="sync-row">
 <button class="sync-btn" type="button" id="ap-orders-check-btn">Check now</button>
 <span class="sync-status" id="ap-orders-status"></span>
@@ -2854,6 +2902,7 @@ Needs the WHOLE exported folder tree (hundreds of files, not a single JSON) &mda
 <section class="panel wide" id="travel-panel" data-tab="travel">
 <div class="panel-head">
 <h2><span class="dot teal"></span>Travel</h2>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-travel" title="Guide: how to use this panel">&#128214;</span>
 <span class="count-badge" id="travel-count"></span>
 <label id="show-past-trips-label" class="settings-note" style="display:flex;align-items:center;gap:6px;margin:0 0 0 auto;cursor:pointer;">
 <input type="checkbox" id="show-past-trips-toggle"> <span id="show-past-trips-text">Show past trips</span>
@@ -2865,7 +2914,9 @@ Needs the WHOLE exported folder tree (hundreds of files, not a single JSON) &mda
 <span class="sync-status" id="catsitting-check-status"></span>
 </div>
 <div id="cat-sitting-rollup-strip"></div>
+<details class="settings-subgroup panel-about"><summary>About this</summary>
 <div class="settings-note" style="margin:0 0 10px;">A trip is a project you can also work from the Tasks tab &mdash; add flights, car hire, accommodation and transfers here, enrich them from a booking email (Mail's &quot;+ trip leg&quot;) or a screenshot (Capture Inbox's &quot;Extract into a trip leg&quot;), and download a self-contained offline itinerary once it's ready. Anything still open is flagged &#9888; rather than left blank &mdash; fill it in or mark it N/A.</div>
+</details>
 <div class="capture-row" style="margin-bottom:14px;">
 <input type="text" autocomplete="off" id="travel-new-trip-title" placeholder="Trip name, e.g. Lisbon long weekend">
 <input type="text" autocomplete="off" id="travel-new-trip-destination" placeholder="Destination (optional)">
@@ -2877,6 +2928,7 @@ Needs the WHOLE exported folder tree (hundreds of files, not a single JSON) &mda
 <section class="panel wide" id="mvc-availability-panel" data-tab="travel">
 <div class="panel-head">
 <h2><span class="dot teal"></span>Marriott availability</h2>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-travel-marriott" title="Guide: how to use this panel">&#128214;</span>
 <span class="count-badge" id="mvc-count"></span>
 </div>
 <div id="mvc-balance-mount"></div>
@@ -2931,16 +2983,22 @@ Needs the WHOLE exported folder tree (hundreds of files, not a single JSON) &mda
 <section class="panel wide" id="leave-panel" data-tab="travel">
 <div class="panel-head">
 <h2><span class="dot teal"></span>Annual leave</h2>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-travel-leave" title="Guide: how to use this panel">&#128214;</span>
 </div>
+<details class="settings-subgroup panel-about"><summary>About this</summary>
 <div class="settings-note" style="margin:0 0 10px;">30 days a year (1 April &rarr; 31 March), allocated to trips as draft/firm/approved on each trip's own card above. Weekdays only, UK bank holidays excluded automatically.</div>
+</details>
 <div id="leave-list"></div>
 </section>
 
 <section class="panel wide" id="planner-panel" data-tab="planner">
 <div class="panel-head">
 <h2><span class="dot sage"></span>Planner</h2>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-planner" title="Guide: how to use this panel">&#128214;</span>
 </div>
+<details class="settings-subgroup panel-about"><summary>About this</summary>
 <div class="settings-note" style="margin:0 0 10px;">Drag a priority connection or a thing-to-do onto a day below to plan it. Mark each placement Draft or Firm; a trip with known dates gets its own mini planner further down, alongside whatever's already booked on the <span class="inline-goto-link" data-goto-tab="travel">Travel tab</span>.</div>
+</details>
 
 <div class="planner-pools">
 <div class="planner-pool">
@@ -3093,7 +3151,7 @@ Photos added before task attachments existed live only on the device that added 
 <div class="settings-block">
 <div class="settings-note" style="margin:0 0 8px;">Saves changes to your own hosting automatically, a couple of seconds after you stop typing, and picks up changes from your other devices. No sign-in, so nothing expires. Leave both boxes empty to stay on manual Google Drive push/pull above.</div>
 <label for="sync-url-input" style="font-size:13px;font-weight:500;display:block;margin-bottom:6px;">Sync URL</label>
-<input type="text" autocomplete="off" id="sync-url-input" class="settings-input" placeholder="https://georgewhiteeuropean.co.uk/sync.php">
+<input type="text" autocomplete="off" id="sync-url-input" class="settings-input" placeholder="https://your-host/sync.php">
 <label for="sync-secret-input" style="font-size:13px;font-weight:500;display:block;margin:10px 0 6px;">Sync secret</label>
 <input type="password" autocomplete="new-password" id="sync-secret-input" class="settings-input" placeholder="the same string as $SECRET in sync.php">
 <div class="sync-row" style="margin-top:10px;">
@@ -3113,7 +3171,7 @@ Photos added before task attachments existed live only on the device that added 
 <div class="settings-block">
 <div class="settings-note" style="margin:0 0 8px;">A separate, narrowly-scoped channel an unattended Claude Code run writes to (server/agent-write.php) &mdash; never the full sync secret above. This device uses these values only to pick up what's waiting there (your subscription usage, proposed tasks) and merge it into your real data, which then syncs normally. Leave blank to leave this off.</div>
 <label for="agent-write-url-input" style="font-size:13px;font-weight:500;display:block;margin-bottom:6px;">Agent-write URL</label>
-<input type="text" autocomplete="off" id="agent-write-url-input" class="settings-input" placeholder="https://georgewhiteeuropean.co.uk/agent-write.php">
+<input type="text" autocomplete="off" id="agent-write-url-input" class="settings-input" placeholder="https://your-host/agent-write.php">
 <label for="agent-secret-input" style="font-size:13px;font-weight:500;display:block;margin:10px 0 6px;">Agent secret</label>
 <input type="password" autocomplete="new-password" id="agent-secret-input" class="settings-input" placeholder="the same string as $AGENT_SECRET in agent-write.php">
 <div class="settings-note">Stored only on this device, same as the sync secret above &mdash; never exported, never committed.</div>
@@ -3209,7 +3267,7 @@ Photos added before task attachments existed live only on the device that added 
 <div class="settings-block">
 <div class="settings-note" style="margin:0 0 8px;">Notion blocks direct browser access, so calls go through <code>notion.php</code> on your own host — which also keeps your Notion token off this device entirely. See README, "Notion".</div>
 <label for="notion-url-input" style="font-size:13px;font-weight:500;display:block;margin-bottom:6px;">Proxy URL</label>
-<input type="text" autocomplete="off" id="notion-url-input" class="settings-input" placeholder="https://georgewhiteeuropean.co.uk/notion.php">
+<input type="text" autocomplete="off" id="notion-url-input" class="settings-input" placeholder="https://your-host/notion.php">
 <label for="notion-db-input" style="font-size:13px;font-weight:500;display:block;margin:10px 0 6px;">Projects database ID</label>
 <input type="text" autocomplete="off" id="notion-db-input" class="settings-input" placeholder="32 characters from the database URL">
 <div class="sync-row" style="margin-top:10px;">
@@ -3225,7 +3283,7 @@ Photos added before task attachments existed live only on the device that added 
 <div class="settings-block">
 <div class="settings-note" style="margin:0 0 8px;">Lets family members be messaged and reply back into the app &mdash; see the <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#telegramfamily-panel">Family panel</span>, under Connections admin. Set up server/telegram-bot.php.example (copy it, fill in a bot token from @BotFather and a webhook secret, upload, then register the webhook once — the file's own top comment has the exact steps).</div>
 <label for="telegrambot-url-input" style="font-size:13px;font-weight:500;display:block;margin-bottom:6px;">Bot URL</label>
-<input type="text" autocomplete="off" id="telegrambot-url-input" class="settings-input" placeholder="https://georgewhiteeuropean.co.uk/telegram-bot.php">
+<input type="text" autocomplete="off" id="telegrambot-url-input" class="settings-input" placeholder="https://your-host/telegram-bot.php">
 <div class="settings-note">Uses the same secret as Live sync above.</div>
 </div>
 </details>
@@ -3421,7 +3479,7 @@ Same idea as Connections' ratings, a separate list (Taste/Health/Prep by default
 <details class="settings-item">
 <summary><h3>Airbnb listings</h3></summary>
 <div class="settings-block">
-<div class="settings-note" style="margin:0 0 10px;">One row per listing you host or co-host. Find each one's export URL on Airbnb: Calendar &rarr; Availability &rarr; Connect calendars &rarr; Export calendar. Prefix and colour identify the physical room (two listings for the same room should share a colour); Sync on the Overview tab pulls reservation dates in, never guest names &mdash; Airbnb's export doesn't include those on any plan, so add a name per reservation there yourself.</div>
+<div class="settings-note" style="margin:0 0 10px;">One row per listing you host or co-host. Press <span class="inline-goto-link" data-goto-tab="guide" data-goto-target="#guide-overview-airbnb">&#128214; the guide</span> for what each box does and how stays turn into income.</div>
 <div id="airbnb-listings"></div>
 <button class="add-btn" id="add-airbnb-listing-btn" type="button" style="margin-top:8px;">Add listing</button>
 </div>
@@ -3705,23 +3763,1996 @@ Finds connections whose cover photo is missing or is really just the small place
 <div class="panel-head">
 <h2><span class="dot sage"></span>Guide</h2>
 </div>
-<div class="settings-note" style="margin:0 0 14px;">How things work, section by section &mdash; the &#128214; next to a panel's own settings link jumps straight here. A work in progress: only a few panels are written up so far, the rest are listed at the bottom.</div>
+<div class="settings-note" style="margin:0 0 14px;">How to get things done, tab by tab. Each section is a set of "How do I &hellip;?" questions with the steps. The book icon (&#128214;) in a panel heading jumps to that panel's part of the guide.</div>
 
 <div class="settings-pill-row">
-<span class="pick-chip" data-goto-tab="guide" data-goto-target="#guide-inbox">Tasks &amp; Inbox</span>
+<span class="pick-chip" data-goto-tab="guide" data-goto-target="#guide-tasks">Tasks</span>
+<span class="pick-chip" data-goto-tab="guide" data-goto-target="#guide-overview">Overview</span>
+<span class="pick-chip" data-goto-tab="guide" data-goto-target="#guide-planner">Planner</span>
+<span class="pick-chip" data-goto-tab="guide" data-goto-target="#guide-finances">Finances</span>
+<span class="pick-chip" data-goto-tab="guide" data-goto-target="#guide-travel">Travel</span>
+<span class="pick-chip" data-goto-tab="guide" data-goto-target="#guide-shopping">Shopping</span>
 <span class="pick-chip" data-goto-tab="guide" data-goto-target="#guide-mail">Mail</span>
 <span class="pick-chip" data-goto-tab="guide" data-goto-target="#guide-media">Media</span>
 <span class="pick-chip" data-goto-tab="guide" data-goto-target="#guide-settings-basics">Settings basics</span>
 </div>
 
-<details class="settings-item" id="guide-inbox">
-<summary><h3>Tasks &amp; Inbox</h3></summary>
+<details class="settings-item" id="guide-tasks">
+<summary><h3>Tasks</h3></summary>
 <div class="settings-block">
-<p class="settings-note" style="margin:0 0 10px;">Follows GTD: everything you capture lands in the <strong>Inbox</strong> first, unfiled and un-prioritised, so capturing never has to wait on deciding what something is. Filing it &mdash; giving it a list and a context &mdash; is a separate, later step.</p>
-<p class="settings-note" style="margin:0 0 10px;"><strong>Capturing:</strong> the box at the top of Tasks takes a plain typed line (<strong>Capture</strong> &mdash; instant, no AI involved) or an instruction (<strong>&#10024; Smart</strong> or the mic) &mdash; "watch The Bear", or "create a trip to Mallorca 1st to 5th November and add Vera Bora to it in my planner" &mdash; which Claude turns into the right record(s) and queues as a draft for you to confirm rather than creating them outright. A shared photo or screenshot goes through <strong>Photo / screenshot</strong>, or arrives automatically via Android's share sheet.</p>
-<p class="settings-note" style="margin:0 0 10px;"><strong>Reading an Inbox card:</strong> each one shows when it arrived and, when it came from somewhere (a share, an email, a photo), a clickable source label. A share with no real title of its own (common for a plain "share as link" with nothing but the URL) shows a shortened, clickable version of the link instead of the raw address &mdash; tap <strong>&#10024; Resolve title</strong> to ask AI to look up a proper one. That only works for a page it can actually search or fetch; an authenticated link (a private OneNote page, a Google Doc you haven't shared publicly) will usually come back empty, same as it would if you searched for it yourself.</p>
-<p class="settings-note" style="margin:0 0 10px;"><strong>Filing:</strong> pick a list from the card's own dropdown, or drag it onto one of the four GTD buckets on the right &mdash; <em>Next actions</em> (doable now, in some context), <em>Projects</em> (an outcome needing more than one action &mdash; can hold its own subtasks), <em>Waiting for</em> (blocked on someone else), or <em>Someday</em> (not now, not forgotten). Add a context chip (Home, Office, DIY, ...) for where or with what it can actually be done &mdash; edited on the Contexts panel next to Lists.</p>
-<p class="settings-note" style="margin:0;"><strong>Bring forward:</strong> set a future date on a task and it goes dormant &mdash; hidden from your active lists until that date arrives, then it surfaces on its own.</p>
+<p class="settings-note" style="margin:0 0 10px;">The Tasks tab is where anything you need to do ends up. Everything you capture lands in the <span class="inline-goto-link" data-goto-tab="tasks" data-goto-target="#inbox-panel">Inbox</span> first; you file it into a list when you have a moment, and then work from the <span class="inline-goto-link" data-goto-tab="tasks" data-goto-target="#tasks-panel">Lists</span>.</p>
+
+<details class="settings-subgroup" id="guide-tasks-capture">
+<summary>Getting something in</summary>
+
+<div class="guide-task">
+<div class="guide-q">How do I jot something down quickly?</div>
+<ol class="guide-steps">
+<li>Go to the <span class="inline-goto-link" data-goto-tab="tasks" data-goto-target="#capture-panel">Capture</span> box at the top of Tasks.</li>
+<li>Type the task and press <strong>Enter</strong>, or press <strong>Capture</strong>.</li>
+<li>"Captured to Inbox." appears briefly and the task is waiting in the Inbox.</li>
+</ol>
+<div class="guide-tip">This costs nothing and needs no connection to any AI service. You can't set a due date while capturing; add it after you file the task.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I save a web link?</div>
+<ol class="guide-steps">
+<li>Paste the link into the Capture box and press <strong>Enter</strong>. The link becomes the task's reference link.</li>
+<li>Optional: before pressing Enter, press <strong>&#10024; Resolve title</strong> (it appears as soon as the box holds a link) to swap the raw address for the page's real title. The link is kept.</li>
+</ol>
+<div class="guide-tip">Resolve title uses your Anthropic key and only works for pages it can look up. A private page (a OneNote page, an unshared Google Doc) usually comes back empty. You can also do this later from the task's card in the Inbox.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I save a photo or screenshot as a task?</div>
+<ol class="guide-steps">
+<li>Optional: type a title in the Capture box first. Without one, the task is called "Screenshot" plus today's date.</li>
+<li>Press <strong>Photo / screenshot</strong> and pick one or more images.</li>
+<li>One task is created with all the images on it, and appears in the Inbox.</li>
+</ol>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I speak or type an instruction instead of a plain task?</div>
+<ol class="guide-steps">
+<li>Type the instruction in the Capture box, for example "create a trip to Mallorca 1st to 5th November and add Vora Bora to it in my planner", or "watch The Bear".</li>
+<li>Press <strong>&#10024; Smart</strong>, not Enter. (Enter always makes a plain task.) Or press the microphone, speak, and stop: it submits for you.</li>
+<li>Claude turns it into a draft listing what it will create. Nothing is created yet. Go to <span class="inline-goto-link" data-goto-tab="tasks" data-goto-target="#capture-drafts-panel">Capture drafts</span> to check and confirm it.</li>
+</ol>
+<div class="guide-tip">Smart capture needs your Anthropic key (Settings &rarr; AI features). The microphone button is hidden on browsers that can't do speech recognition.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I capture from my phone's share menu?</div>
+<ol class="guide-steps">
+<li>Install the dashboard on your Android phone (Chrome's "Install app"). Share menus don't work on iPhone or in a normal browser tab.</li>
+<li>In any app, press Share and choose the Dashboard. A link or plain text becomes a task in your Inbox. A banner appears with <strong>Open it</strong>.</li>
+<li>A share that includes files (photos, a PDF, a CSV) goes to the <span class="inline-goto-link" data-goto-tab="tasks" data-goto-target="#capture-inbox-panel">Capture Inbox</span> instead; see "Photos and files you've shared in".</li>
+</ol>
+<div class="guide-tip">If files shared from your phone arrive empty (Chrome on some phones drops them), use the Dashboard Capture companion app instead. Set it up from <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#relay-setup-btn">Settings &rarr; Set up Dashboard Capture</span>.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I make a share go straight to the right place (task, reading list, shopping, watch list)?</div>
+<ol class="guide-steps">
+<li><strong>A shared link:</strong> add a letter after a <code>#</code> on the end of the link before you share it: <code>#T</code> makes it a task, <code>#R</code> a reading-list item, <code>#S</code> a shopping (supermarket) item, <code>#M</code> a watch-or-listen want.</li>
+<li><strong>A photo:</strong> mark the picture itself with one of those capital letters in a corner (T, R, S or M), then share that single photo. Claude reads the letter and files the photo accordingly. This only works when the photo is the only thing in the share, and it uses your Anthropic key.</li>
+<li><strong>An email:</strong> put <code>zxc</code> and the letter in the subject (for example <code>zxc T</code>). <code>D</code> makes a calendar-style event and <code>L</code> a trip leg; both wait as a draft for you to confirm. Mail picks these up when you refresh the <span class="inline-goto-link" data-goto-tab="overview" data-goto-target="#mail-panel">Mail panel</span>, provided one of your mail searches finds the word <code>zxc</code>.</li>
+</ol>
+<div class="guide-tip">To change which letter does what, or add your own, edit the list in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#capture-rules">Settings &rarr; Capture markers &amp; suffixes</span>. Links from known sites (recipe and film sites, for example) route automatically with no suffix; those rules are in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#share-url-rules">Settings &rarr; Shared-link auto-routing</span>. If the routing fails for any reason, you still get an ordinary Inbox task with the error written on it.</div>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-tasks-inbox">
+<summary>Filing the Inbox</summary>
+
+<div class="guide-task">
+<div class="guide-q">How do I file what I've captured?</div>
+<ol class="guide-steps">
+<li>Open <span class="inline-goto-link" data-goto-tab="tasks" data-goto-target="#inbox-panel">Inbox &mdash; file these</span>. The badge shows how many are waiting. Each card shows what arrived, when, and where it came from (a share, an email, a photo).</li>
+<li>On the card, open the <strong>File to&hellip;</strong> menu and choose a list. Or, on a computer, drag the card onto one of the four boxes on the right.</li>
+<li>The card leaves the Inbox and appears in that list on <span class="inline-goto-link" data-goto-tab="tasks" data-goto-target="#tasks-panel">Lists</span>.</li>
+</ol>
+<div class="guide-tip">The lists: <strong>Next actions</strong> (you can do it now), <strong>Projects</strong> (an outcome that needs several steps), <strong>Waiting for</strong> (blocked on someone else), <strong>Someday / maybe</strong> (not now, not forgotten).</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I file something as part of a project?</div>
+<ol class="guide-steps">
+<li>Choose <strong>Projects</strong> from <strong>File to&hellip;</strong>. A box asks: <em>Make this itself a new project</em> or <em>Add it to an existing project</em>.</li>
+<li>For an existing project, pick it from the menu (the newest is first).</li>
+<li>Press <strong>File it</strong>. The task is now a Next action inside that project.</li>
+</ol>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I say where or with what a task can be done?</div>
+<ol class="guide-steps">
+<li>On the Inbox card, open <strong>+ context</strong> and pick one (Home, Office, DIY&hellip;). You can add several.</li>
+<li>Remove one with the &times; on its chip.</li>
+</ol>
+<div class="guide-tip">The choices come from your <span class="inline-goto-link" data-goto-tab="tasks" data-goto-target="#task-contexts-panel">Contexts</span> panel.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I get rid of something without filing it?</div>
+<ol class="guide-steps">
+<li>Press <strong>Discard</strong> on its card and confirm. It is deleted for good, along with any photos or files on it.</li>
+</ol>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I fix a task's title, add notes or set a due date?</div>
+<ol class="guide-steps">
+<li>An Inbox card can't be edited, so file it first (a list you can change later is fine).</li>
+<li>Then open it from Lists: see "Working from your lists".</li>
+</ol>
+<div class="guide-tip">A link captured with no title shows a shortened version of the address. <strong>&#10024; Resolve title</strong> on the card can look up a proper title without filing.</div>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-tasks-lists">
+<summary>Working from your lists</summary>
+
+<div class="guide-task">
+<div class="guide-q">How do I see just what I can do here, now?</div>
+<ol class="guide-steps">
+<li>On <span class="inline-goto-link" data-goto-tab="tasks" data-goto-target="#tasks-panel">Lists</span>, press a context chip (for example <strong>Home</strong>). The number is how many open tasks have it.</li>
+<li>Press <strong>No context</strong> to find tasks you haven't tagged, or <strong>All</strong> to clear the filter.</li>
+</ol>
+<div class="guide-tip">The default view leaves out trips, business ideas and shopping items so they don't bury everyday tasks &mdash; unless one of their tasks is due within 7 days, in which case it appears anyway. To include them all, press the <strong>Also show</strong> chips (Trips, Business ideas, Shopping). Picking a context always shows everything carrying it.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I find a task?</div>
+<ol class="guide-steps">
+<li>Type in the <strong>Search tasks</strong> box above the context chips on <span class="inline-goto-link" data-goto-tab="tasks" data-goto-target="#tasks-panel">Lists</span>.</li>
+<li>Lists narrow to tasks whose title or notes contain what you typed, with their subtasks. Clear the box to go back.</li>
+</ol>
+<div class="guide-tip">Search looks through everything in the lists, including trips and shopping items that the default view hides. It doesn't look in finished tasks unless <strong>Show done</strong> is ticked.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I tick something off?</div>
+<ol class="guide-steps">
+<li>Tick the checkbox at the left of the task. It moves out of the lists.</li>
+<li>To see finished tasks, tick <strong>Show done</strong> at the top right of Lists. Untick a task there and it comes back as a Next action.</li>
+</ol>
+<div class="guide-tip">Ticking a task doesn't tick its subtasks, and ticking the last subtask doesn't tick the parent. The small <strong>2/5</strong> next to a task counts finished subtasks.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I open a task to edit it?</div>
+<ol class="guide-steps">
+<li>Press the task's <strong>title</strong>. It opens in place. Press the title again to close it.</li>
+<li>You can change: <strong>Title</strong>, <strong>Notes</strong>, <strong>List</strong> (including back to Inbox), <strong>Due</strong>, <strong>Bring forward</strong>, <strong>Part of</strong>, and <strong>Reference link</strong>. Changes save as you go.</li>
+<li>If the task has a reference link, <strong>Open reference</strong> opens it. A task that came from somewhere shows "From mail:", "From share:" and so on, linking back to the source.</li>
+</ol>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I give a task a due date, and how are due tasks shown?</div>
+<ol class="guide-steps">
+<li>Open the task and set <strong>Due</strong>.</li>
+<li>The task shows "due in 5d", "Due today" or "3d overdue" (the badge turns amber at two days or fewer, red when overdue).</li>
+</ol>
+<div class="guide-tip">Each list is sorted with the soonest due date first; tasks with no date come last.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I hide a task until the right time (a tickler)?</div>
+<ol class="guide-steps">
+<li>Open the task and set <strong>Bring forward</strong> to the date it should reappear.</li>
+<li>Until then it leaves your lists and sits in a section at the bottom called <strong>Scheduled to surface</strong>, marked "back 14 Mar".</li>
+<li>On that date it returns to its own list by itself.</li>
+</ol>
+<div class="guide-tip">Nothing alerts you when it surfaces; it simply appears the next time you look at Lists. If you also set a Due date, the due badge replaces the "back" badge but the task still stays hidden until the bring-forward date.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I break a task into steps (subtasks)?</div>
+<ol class="guide-steps">
+<li>Open the task and press <strong>+ Subtask</strong>. A new "New subtask" opens for you to rename. It copies the parent's contexts and starts as a Next action.</li>
+<li>Subtasks appear indented under the parent.</li>
+<li>To move an existing task under another one, open it and use <strong>Part of</strong>: press the box, type to search, and pick the parent. Pick <strong>&mdash; nothing &mdash;</strong> to make it top-level again.</li>
+</ol>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I move a task between lists, or change its context?</div>
+<ol class="guide-steps">
+<li>Open the task and change <strong>List</strong>. To change context without opening it, use the chip's &times; to remove one, or <strong>+ context</strong> on the task's row to add one.</li>
+</ol>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I put a task on a day in the Planner?</div>
+<ol class="guide-steps">
+<li>Open the <span class="inline-goto-link" data-goto-tab="planner" data-goto-target="#planner-panel">Planner</span>. On a day, press <strong>+</strong>, set the type to <strong>Task</strong> and choose <strong>Pick an existing task&hellip;</strong>, or type a new one there and press Enter.</li>
+<li>Or drag a card from <strong>Priority tasks</strong> onto a day. That pool lists open tasks that are due within 7 days (overdue included) and not already placed.</li>
+</ol>
+<div class="guide-tip">Ticking the task on the Planner ticks it here too.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I delete a task?</div>
+<ol class="guide-steps">
+<li>Press the &times; on its row and confirm. Its subtasks, photos and attached files are deleted with it.</li>
+</ol>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-tasks-projects">
+<summary>Projects, plans and extra detail</summary>
+
+<div class="guide-task">
+<div class="guide-q">How do I manage something that needs several steps?</div>
+<ol class="guide-steps">
+<li>File the main task under <strong>Projects</strong>.</li>
+<li>Open it and press <strong>+ Subtask</strong> for each step. Any task that has subtasks is also offered as an existing project when you file something new, whichever list it sits in.</li>
+</ol>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I get Claude to plan a project in Notion?</div>
+<ol class="guide-steps">
+<li>Open the task and press <strong>Create in Notion + draft a plan</strong>.</li>
+<li>It creates a Notion page, writes a plan into it, and adds the plan's actions as subtasks. A project that was in the Inbox or Someday moves to Projects.</li>
+<li>Later, <strong>Add more detail with AI</strong> extends the page and <strong>Open in Notion</strong> opens it.</li>
+</ol>
+<div class="guide-tip">You need Notion set up under <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#notion-url-input">Settings &rarr; Notion</span> and an Anthropic key. The task's reference link is replaced by the Notion page's address.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I attach photos or files to a task?</div>
+<ol class="guide-steps">
+<li>Open the task. Press the <strong>+</strong> square for photos (up to 6 per task) or <strong>+ Attach a file</strong> for any file.</li>
+<li>Files are stored on your server and are available on your other devices. Press a file's name to download it; the &times; removes it everywhere.</li>
+</ol>
+<div class="guide-tip">File attachments need your server set up for files (Settings &rarr; Account &amp; sync).</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I ask someone in the family about a task?</div>
+<ol class="guide-steps">
+<li>Open the task and press <strong>Ask via Telegram</strong>.</li>
+<li>You are taken to the Family Telegram panel in Settings with this task selected as the topic. Choose the person and write your question there.</li>
+</ol>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-tasks-contexts">
+<summary>Contexts</summary>
+
+<div class="guide-task">
+<div class="guide-q">How do I add, remove or choose contexts?</div>
+<ol class="guide-steps">
+<li>Open <span class="inline-goto-link" data-goto-tab="tasks" data-goto-target="#task-contexts-panel">Contexts</span>.</li>
+<li><strong>To add one:</strong> type its name in <strong>+ add context</strong> and press Enter. A name you already have (in any capitalisation) is ignored.</li>
+<li><strong>To remove one:</strong> press the &times; on its chip. If any task uses it you are asked to confirm, and it is then taken off those tasks.</li>
+</ol>
+<div class="guide-tip">There is no rename. To rename, add the new name, retag the tasks and delete the old one. A Google Tasks list only syncs if its name matches a context exactly; see "Pulling in Google Tasks".</div>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-tasks-files">
+<summary>Photos and files you've shared in</summary>
+
+<div class="guide-task">
+<div class="guide-q">How do I deal with files I've shared to the dashboard?</div>
+<ol class="guide-steps">
+<li>Open <span class="inline-goto-link" data-goto-tab="tasks" data-goto-target="#capture-inbox-panel">Capture Inbox</span>. Each batch shows its thumbnails and files, a title you can edit, and where it came from. To add files from this device instead, press <strong>+ Capture files</strong>.</li>
+<li>Tick the photos you want to act on (<strong>Select all</strong> picks them all), then choose what they are:
+<ul>
+<li><strong>Attach to a Task</strong>: makes a new task, titled with the batch title, and attaches everything left in the batch. It goes to your Inbox.</li>
+<li><strong>Send</strong> (after picking someone in <strong>Send selected to&hellip;</strong>): adds the ticked photos to a <span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#connections-panel">contact</span> or creates a new one.</li>
+<li><strong>Extract into a trip leg</strong>: reads a boarding pass, hotel or car hire confirmation into a trip on the Travel tab.</li>
+<li><strong>Extract wellness data</strong>: reads a Samsung Health screenshot into the Health tab.</li>
+<li><strong>Extract dating screenshot</strong>: reads a matches list or profile screenshot for review on the Contacts tab.</li>
+</ul></li>
+<li>The batch disappears once every item in it has been sent or deleted. The &times; on a thumbnail or file deletes just that item; <strong>Discard</strong> deletes the whole batch for good.</li>
+</ol>
+<div class="guide-tip">Some shares skip the batch altogether and are handled as they arrive: a Renpho scale CSV goes straight to Health; a dating-app screenshot shared alone goes to the Contacts review queue; a single photo marked with T, R, S or M is filed by its letter; a voice clip is transcribed into Capture drafts (it needs the transcription service on your server). The banner that appears after the share tells you which happened. The extract buttons read images with your Anthropic key.</div>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-tasks-drafts">
+<summary>Checking Smart capture drafts</summary>
+
+<div class="guide-task">
+<div class="guide-q">How do I review what Smart capture or a voice clip is about to create?</div>
+<ol class="guide-steps">
+<li>Open <span class="inline-goto-link" data-goto-tab="tasks" data-goto-target="#capture-drafts-panel">Capture drafts</span>. Each card shows your original words and a line for each thing it will do: a project, tasks, a reading item, a watch item, a trip, a contact, planner entries, an email event or a trip leg.</li>
+<li>If it looks right, press <strong>Confirm</strong>. The steps run in order and a line of &#10003; or &#10007; per step appears at the top of the panel.</li>
+<li>If it looks wrong, press <strong>Discard</strong> and re-type the instruction.</li>
+</ol>
+<div class="guide-tip">A draft can't be edited, only confirmed or discarded. A step that fails doesn't stop the later ones, and the draft is removed once confirmed, so read the &#10003;/&#10007; line before you move on. Drafts you haven't dealt with stay until you do, even after a reload. The marker rules behind drafts are in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#capture-rules">Settings &rarr; Capture markers &amp; suffixes</span>.</div>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-tasks-gtasks">
+<summary>Pulling in Google Tasks</summary>
+
+<div class="guide-task">
+<div class="guide-q">How do I bring tasks in from Google Tasks (for example ones added by voice or from work)?</div>
+<ol class="guide-steps">
+<li>Make sure you are signed in to Google (top of the Overview tab), then in <span class="inline-goto-link" data-goto-tab="tasks" data-goto-target="#gtasks-panel">Pull from Google Tasks</span> press <strong>Load</strong>.</li>
+<li>Only Google lists whose name is exactly the name of one of your <span class="inline-goto-link" data-goto-tab="tasks" data-goto-target="#task-contexts-panel">Contexts</span> are listed (a list called "Home" matches the context Home). Anything in a list with another name is not shown.</li>
+<li>Press <strong>+ task</strong> on a row, or <strong>Capture all shown</strong> to take every row that isn't already here. Each becomes an Inbox task tagged with its list's context, keeping its due date and notes, and a row you've already captured shows <strong>&#10003; task</strong>, which takes you to it.</li>
+</ol>
+<div class="guide-tip">By default your Google Tasks are left untouched, so the same item is still there in Google. To have a captured item deleted from Google Tasks too, turn on <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#tasks-write-toggle">Allow deleting from Google Tasks</span> in Settings (you will need to sign out and back in).</div>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-tasks-claude">
+<summary>Tasks proposed by Claude</summary>
+
+<div class="guide-task">
+<div class="guide-q">How do I handle tasks a Claude Code session has proposed?</div>
+<ol class="guide-steps">
+<li>When there are proposals, a panel called <span class="inline-goto-link" data-goto-tab="tasks" data-goto-target="#agent-inbox-panel">Proposed by Claude</span> appears on Tasks (it is hidden while there are none). Each card shows when it arrived, a title, the project it belongs to (if any), and the tasks it would create with their contexts and due dates.</li>
+<li>Press <strong>Accept</strong> to create them for real, or the &times; to throw the proposal away. Nothing exists as a task until you accept.</li>
+<li>A project proposal files into your existing project of that name, or creates it the first time. A proposal with no project files its top task under Projects with its steps beneath it.</li>
+</ol>
+<div class="guide-tip">Proposals only arrive if this device has the agent URL and secret saved in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#agent-write-url-input">Settings &rarr; Agent-write channel</span>. Contexts that a proposal names (for example With Claude) are added to your Contexts list if you don't have them yet.</div>
+</div>
+</details>
+</div>
+</details>
+
+<details class="settings-item" id="guide-overview">
+<summary><h3>Overview</h3></summary>
+<div class="settings-block">
+<p class="settings-note" style="margin:0 0 10px;">The Overview tab is your morning view: the <strong>ticker</strong> strip above the tabs, then <strong>Nudges</strong>, <strong>Next Up</strong> (your calendars), <strong>Airbnb</strong>, <strong>Mail</strong>, <strong>Habits</strong> and <strong>Goals</strong>. A <strong>Questions from Claude</strong> panel appears at the top while Claude has questions on file for you. Mail has its own section: <span class="inline-goto-link" data-goto-tab="guide" data-goto-target="#guide-mail">Guide &rarr; Mail</span>.</p>
+<p class="settings-note" style="margin:0 0 10px;">You rarely need to press the Sync buttons. When you open the app it runs the Airbnb, Calendars and Mail syncs for you if they haven't run in the last 6 hours (the Calendars and Mail syncs also need you signed in to Google). Change how often, switch a sync off, or press <strong>Run due tasks now</strong> under <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#scheduled-tasks">Settings &rarr; Scheduled syncs</span>.</p>
+
+<details class="settings-subgroup" id="guide-overview-ticker">
+<summary>The ticker strip</summary>
+
+<div class="guide-task">
+<div class="guide-q">How do I choose what the ticker shows?</div>
+<ol class="guide-steps">
+<li>Go to <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#ticker-items">Settings &rarr; Overview ticker</span>.</li>
+<li>Under the list, pick <strong>Weather for a city</strong>, <strong>Currency pair</strong> or <strong>Share or commodity</strong>, type the value and press <strong>Add</strong>.</li>
+<li>Weather takes a city name (<code>Lisbon</code>). A currency is a three-letter code against pounds (<code>USD</code>). A share is a Yahoo Finance symbol (<code>AAPL</code>, <code>DBK.DE</code>, <code>GC=F</code> for gold, <code>BTC-GBP</code> for bitcoin).</li>
+<li>Use the up and down arrows to reorder the strip, and &times; to remove an item.</li>
+</ol>
+<div class="guide-tip">A city that Add can't find, or a currency code that isn't three letters, is rejected on the spot with a message. A share symbol is only checked when the price is fetched: if its tile says <em>failed</em>, hover it for the reason and check the symbol on Yahoo Finance. With nothing in the list the strip stays hidden.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">What's on the ticker that I didn't add?</div>
+<ul class="guide-steps">
+<li><strong>Trip weather and currency.</strong> A destination on a trip starting within four weeks (or under way) gets a weather tile and its currency tile, with a plane icon that opens the trip. They disappear when the trip ends.</li>
+<li><strong>Loyalty balance</strong> (one tile that rotates every 20 seconds through the programmes you've ticked, see below).</li>
+<li><strong>CASS</strong> (an unpaid switch bonus you're working on; click it to open that account), <strong>Owed</strong> (the total your listing owners owe you, shown while any owner other than you has a balance), <strong>Claude</strong> (your weekly subscription use against the share of the week gone, for example <code>w23%/15%</code>; click for detail), <strong>Checks</strong> (a site check is failing; click to open it), <strong>Models</strong> (an AI model has a newer version) and <strong>Stock</strong> (sets in your inventory missing a piece; only shown when sensitive fields are switched on).</li>
+</ul>
+<div class="guide-tip">The swap-rate, Owed and loyalty tiles come with the app. If you remove one in Settings, the Add list can't bring it back.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I compare with a month ago instead of yesterday?</div>
+<ol class="guide-steps">
+<li>Press the small <strong>day</strong> button at the right end of the strip. It switches to <strong>month</strong>, and every change figure now compares with a month earlier.</li>
+<li>Press it again to go back.</li>
+</ol>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I put a loyalty programme on the ticker?</div>
+<ol class="guide-steps">
+<li>Open <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#loyalty-balances-panel">Finances &rarr; Loyalty balances</span>.</li>
+<li>On the programme's card open its <strong>Settings</strong> and tick <strong>Show on Travel tab</strong>. That one tick also adds the programme to the ticker's rotating tile.</li>
+<li>A programme only appears once it has at least one balance reading.</li>
+</ol>
+<div class="guide-tip">The tile shows the programme's logo and the balance (for example the Bonvoy mark and <code>45,000</code>), or the short name when there is no logo.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I change my share-scheme holding?</div>
+<ol class="guide-steps">
+<li>Click the <strong>DBK</strong> tile (it reads like <code>DBK &euro;29.11 / &pound;5,822</code>: the price, then your holding in pounds).</li>
+<li>Enter the number of shares you hold and the monthly contribution, then <strong>Save</strong>.</li>
+</ol>
+<div class="guide-tip">The pound figure needs the GBP/EUR currency tile on the strip. If you have no GBP/EUR tile the holding isn't shown. After a dividend payout the tile says <em>ex-div</em> for two weeks, or until you next save the share count.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I refresh the figures?</div>
+<ol class="guide-steps">
+<li>Reload the page. Prices are fetched when the app loads and are reused for 30 minutes.</li>
+<li>Adding, moving or removing an item in Settings also refreshes the strip straight away.</li>
+</ol>
+<div class="guide-tip">There is no refresh button, and a phone left open all day keeps showing the morning's numbers. Each tile's tooltip gives the date of its figure.</div>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-overview-airbnb">
+<summary>Airbnb bookings &amp; income</summary>
+
+<div class="guide-task">
+<div class="guide-q">How do I set up a listing?</div>
+<ol class="guide-steps">
+<li>Open <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#airbnb-listings">Settings &rarr; Airbnb listings</span> and press <strong>Add listing</strong>.</li>
+<li><strong>Label</strong>: what you call it. <strong>Calendar export URL</strong>: on Airbnb go to Calendar &rarr; Availability &rarr; Connect calendars &rarr; Export calendar and paste the link. Leave this blank for anything that isn't on Airbnb (a plumber, a cat sitter, a catch-all "Flat").</li>
+<li><strong>Prefix</strong> names the physical room (for example <code>ES-L</code>); give two listings for the same room the same prefix and the same <strong>Colour</strong>. The prefix is what lets Push to Google Calendar find an event you typed by hand instead of duplicating it.</li>
+<li><strong>External prefix</strong> (optional) is a second tag for bookings from outside Airbnb that you type into your Google Calendar (see below).</li>
+<li><strong>Owner</strong>: pick a contact, or type a name in the box under it if they aren't a contact. <strong>Share %</strong> is the part of each stay's income that owner owes you. Use <strong>+ schedule a change</strong> to set a new percentage (and an optional monthly cap in pounds) from a future date.</li>
+<li>Untick <strong>Needs cleaning</strong> for a space that isn't a guest let. That hides its cleaner chips and its checkout-clean reminders.</li>
+</ol>
+<div class="guide-tip">The &times; on a listing removes it and every booking stored for it, with no confirmation. Money already posted in Letting income stays where it is. A listing with no <strong>Owner</strong> still shows bookings, but its income never reaches Letting income.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I load my bookings?</div>
+<ol class="guide-steps">
+<li>Press <strong>&#8635; Sync</strong> in the Airbnb panel. Each listing's calendar is read and every stay that hasn't ended appears as a row: listing, dates and length.</li>
+<li>If a listing's feed fails, its error is shown at the top of the panel and in the status next to the button.</li>
+</ol>
+<div class="guide-tip">Airbnb's calendar gives dates only, never guest names or money. The next sections cover how names and income arrive. A cancelled stay drops off the list at the next Sync, and a finished one once its income has been posted (or 30 days after it ended). Reading the calendar needs <code>ics-proxy.php</code> uploaded next to <code>sync.php</code> on your web host, using the same secret; an error that mentions it, or "rejected the secret", means it isn't set up or doesn't match.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do guest names and payouts get filled in?</div>
+<ol class="guide-steps">
+<li>Sign in to Google (the button at the top of the page) and press <strong>&#8635; Sync</strong>.</li>
+<li>Sync reads your Airbnb "Reservation confirmed &ndash; <em>Name</em> arrives <em>date</em>" emails and puts the name on the one upcoming, unnamed booking arriving that day and month.</li>
+<li>If the email has a payout, the <strong>Income &pound;</strong> box is filled with the "You earn" figure too (only when it was blank). The status line says how many names and payouts were filled.</li>
+<li>A name in another script is converted to Latin letters and the original is kept in <strong>Notes</strong>. That needs your Anthropic key on <em>this</em> device: <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#anthropic-key-input">add it in Settings</span>.</li>
+</ol>
+<div class="guide-tip">Names are never overwritten, so type one yourself any time. If two bookings arrive on the same day and month, neither is filled. Only your most recent confirmation emails (the latest few dozen) are checked.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I record what a stay earned?</div>
+<ol class="guide-steps">
+<li>If the payout didn't arrive by email, type it into the <strong>Income &pound;</strong> box on the booking's row. Choose <strong>Airbnb</strong> or <strong>Other</strong> in the box beside it.</li>
+<li>On the checkout day the owner's share (Share %) is added to what they owe you in <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#letting-panel">Finances &rarr; Letting income</span>. Entering income on or after the checkout day posts it straight away.</li>
+</ol>
+<div class="guide-tip">A stay stays in the list for up to 30 days after it ends, until its income has been posted, so you can still type the figure in. After that, use <strong>Earned (historic)</strong> at the bottom of Letting income. The owner must be set on the listing, or nothing is posted.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do cancellations and refunds get recorded?</div>
+<ol class="guide-steps">
+<li>Sign in to Google and press <strong>&#8635; Sync</strong>. Sync reads Airbnb's "Cancelled: Reservation&hellip;" emails and posts the revised payout to Letting income as a <em>cancellation</em> entry (the owner's share, dated the day after check-in).</li>
+<li>It also reads "You've sent &pound;X GBP to <em>Name</em>" refund emails and posts a negative <em>refund</em> entry, dated the day the email was sent.</li>
+<li>The status line after Sync says how many were posted and, for any it couldn't place, the guest and the reason.</li>
+</ol>
+<div class="guide-tip">Each email is only posted once. Cancellation payouts and refunds both go to the listing's owner. If a listing has no owner, the status line says so and the email is tried again at the next Sync once you have set one under <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#airbnb-listings">Settings &rarr; Airbnb listings</span>. If you are signed out of Google, the status line says that names, cancellations, refunds and cleaner events were not checked.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">What is "Guest refunds waiting to be assigned"?</div>
+<ol class="guide-steps">
+<li>When Sync finds a refund but can't tell which owner it belongs to, a card appears at the top of the Airbnb panel with the guest, amount, stay dates, a link to the email and the reason.</li>
+<li>Pick the owner from <strong>Charge to&hellip;</strong> (the owners already on your ledger) and press <strong>Post</strong>. The refund goes into Letting income dated the day it was sent.</li>
+<li>Press &times; to leave a refund off the ledger.</li>
+</ol>
+<div class="guide-tip">A refund is matched by its stay dates. It still finds a stay that has since finished or been cancelled, and falls back to that guest's cancellation entry. Refunds in other currencies, or in an email layout Sync doesn't recognise, are reported once in the status line and don't get a card.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I add a booking that isn't on Airbnb (a visit, a plumber)?</div>
+<ol class="guide-steps">
+<li>In the row under the booking list choose the <strong>listing</strong> (a listing with no calendar URL works as a plain diary), type <strong>Who</strong>, pick the first day, and leave the last day blank for a single day.</li>
+<li>Press <strong>Add booking</strong>. It shows in the list, on the Planner and in the reminders like any other.</li>
+<li>Press &times; on the row to delete it. Only bookings you added by hand have the &times;.</li>
+</ol>
+<div class="guide-tip">The delete has no confirmation and a deleted booking can't come back.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I show bookings in Google Calendar?</div>
+<ol class="guide-steps">
+<li>Sign in to Google, then turn on <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#calendar-write-toggle">Allow creating events in Google Calendar</span> and sign out and back in.</li>
+<li>Pick a calendar in the <strong>Push to&hellip;</strong> box next to Sync.</li>
+<li>Press <strong>Push</strong> on a booking. It becomes <strong>Pushed &#10003;</strong>. The event is titled with the listing's prefix and the guest's name, runs from 3pm on check-in to 11am on check-out, and carries the listing and your notes in its description.</li>
+<li>A one-day visit (first and last day the same) is pushed as an all-day event.</li>
+</ol>
+<div class="guide-tip">If your calendar already has an event whose title contains the listing's prefix and whose dates match exactly, Push links to it instead of creating a duplicate. If several events nearby mention the prefix, it stops and tells you to tidy them. If you delete a pushed event in Google, the next Sync marks the booking as needing a push again. A pushed event isn't updated when the booking's dates change later, and there is no way to remove it from here.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I record who is cleaning?</div>
+<ol class="guide-steps">
+<li>Choose a <strong>Push to&hellip;</strong> calendar and keep <strong>Needs cleaning</strong> ticked on the listing. Each booking then shows <strong>Check-in clean: TBC</strong> and <strong>Check-out clean: TBC</strong>.</li>
+<li>Click a TBC chip, type <strong>Who</strong>, adjust the date (it starts on the check-in or check-out day) and press <strong>Add</strong>. An event called <code>Cleaner - Name</code> is created on that calendar.</li>
+<li>Events you type into the same calendar as <code>Cleaner - Name</code> are picked up at the next Sync and fill the chip when they fall up to four days before check-in, or up to four days after check-out.</li>
+</ol>
+<div class="guide-tip">Adding a cleaner needs the same Google Calendar permission as Push. A cleaner event doesn't count if another stay on the same listing sits between it and the stay.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I bring in bookings from a friend or another platform?</div>
+<ol class="guide-steps">
+<li>Give the listing an <strong>External prefix</strong> (for example <code>ES-Lg</code>) in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#airbnb-listings">Settings &rarr; Airbnb listings</span>, and choose the calendar in the <strong>Push to&hellip;</strong> box. That is the calendar Sync searches.</li>
+<li>In Google Calendar, on the calendar you push to, create an event whose title is the prefix, a dash, colon or bar, then the name: <code>ES-Lg - Jane Doe</code>.</li>
+<li>Press <strong>&#8635; Sync</strong>. The event appears as a booking marked <strong>External &#10003;</strong>, with the name taken from the title.</li>
+</ol>
+<div class="guide-tip">Sync looks 180 days ahead. Delete or rename the event and the booking goes at the next Sync.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I keep track of keys?</div>
+<ol class="guide-steps">
+<li>Open <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#keys-settings">Settings &rarr; Keys</span>, press <strong>Add keyring</strong> and give it a label, what's on it and the listings it opens.</li>
+<li>In the Airbnb panel, a keyring that isn't earmarked for any booking sits in the <strong>Keys</strong> list at the bottom. Drag it onto a booking to earmark it. Drag the same keyring onto a later booking to earmark it there too.</li>
+<li>Click the letter on a keyring to change who has it: <strong>M</strong> you, <strong>C</strong> concierge, <strong>G</strong> guest, <strong>L</strong> cleaner, <strong>W</strong> workman, <strong>O</strong> other. L, W and O also ask <strong>Who</strong>.</li>
+<li>On a booking, only the earliest earmarked stay shows the real holder; later ones read <strong>Pending</strong>. The &times; on a keyring chip un-earmarks it.</li>
+</ol>
+<div class="guide-tip">Dragging is the only way to earmark a keyring, so it needs a mouse or a device that supports dragging. You get a reminder the day before check-in if the key isn't with the guest, and again after check-out if it still shows as with the guest. Hover a keyring for its contents and listings.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I get suggestions for raising my rates?</div>
+<ol class="guide-steps">
+<li>Press <strong>Rate review now</strong> under the Sync row (needs your Anthropic key). It searches the web for real London events over the next 13 months.</li>
+<li>One task, <em>Airbnb rate review</em>, is added to <span class="inline-goto-link" data-goto-tab="tasks" data-goto-target="#tasks-panel">Tasks</span> with a subtask for each date range, listing, suggested uplift and reason.</li>
+<li>Tick each subtask once you've changed the rate on Airbnb, or decided not to. Ticked ranges aren't suggested again.</li>
+</ol>
+<div class="guide-tip">It also runs by itself roughly every three months when you open the app.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">Where else do bookings show up?</div>
+<ul class="guide-steps">
+<li>On the <span class="inline-goto-link" data-goto-tab="planner" data-goto-target="#planner-panel">Planner</span>, each occupied day carries a coloured stripe per listing (hover for the listing and guest).</li>
+<li>In <strong>Nudges</strong>: a clean to arrange up to two days before checkout, a guest arriving tomorrow or today, and the key reminders above.</li>
+</ul>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-overview-calendar">
+<summary>Next Up (your calendars)</summary>
+
+<div class="guide-task">
+<div class="guide-q">How do I see my next calendar events here?</div>
+<ol class="guide-steps">
+<li>Sign in to Google (button at the top of the page).</li>
+<li>Go to <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#load-cal-list-btn">Settings &rarr; Track a new calendar</span>, press <strong>Load my calendars</strong>, choose one and press <strong>Track</strong>. Repeat for each calendar.</li>
+<li>On Overview press <strong>Sync calendars</strong>. Each calendar shows its upcoming events with a Today, Tomorrow or "in N days" badge, and the calendars with the soonest event come first.</li>
+</ol>
+<div class="guide-tip">It also syncs by itself when you open the app (if you're signed in). A timed event shows its start time after the date.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I show more than one event, or only the next few weeks?</div>
+<ol class="guide-steps">
+<li>Open <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#calendar-limits">Settings &rarr; Calendar limits</span>.</li>
+<li>Per calendar, set <strong>Max days</strong> (how far ahead to look; blank means no limit) and <strong>Max events</strong> (blank uses the default below the table).</li>
+<li>The new limits apply the next time you press <strong>Sync calendars</strong>.</li>
+</ol>
+<div class="guide-tip">A tracked name is matched against your calendar names, and a partial match counts. If a calendar was renamed or deleted, it just says "No upcoming events found" with no hint that it can't be found.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I turn an event into a task?</div>
+<ol class="guide-steps">
+<li>Press <strong>+ task</strong> beside the event. It becomes a task in your Inbox called <em>Prep: &lt;event&gt;</em>, with the calendar and date in its notes and the event as its source.</li>
+<li>The button turns into a tick. File the task from the <span class="inline-goto-link" data-goto-tab="tasks" data-goto-target="#inbox-panel">Tasks inbox</span>.</li>
+</ol>
+<div class="guide-tip">The task is due on the event's date; change that on the task if you need the prep done earlier.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I stop tracking a calendar?</div>
+<ol class="guide-steps">
+<li>Press the &times; on the calendar's name in the panel, or in the Calendar limits table. It's removed straight away, without a confirmation.</li>
+</ol>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-overview-habits">
+<summary>Habits &amp; goals</summary>
+
+<div class="guide-task">
+<div class="guide-q">How do I track a habit?</div>
+<ol class="guide-steps">
+<li>In the Habits panel type the habit and press <strong>Add</strong>.</li>
+<li>Each habit shows the last seven days, today on the right. Click a day to mark it done; click again to undo.</li>
+<li>The count at the right of the habit is your streak of consecutive days ending today, or ending yesterday if you haven't ticked today yet.</li>
+</ol>
+<div class="guide-tip">You can only change the last seven days, and a habit can't be renamed. Press &times; to delete one; it asks first because the whole history goes. A habit with no streak also appears in Nudges ("Keep your streak going").</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I track a goal?</div>
+<ol class="guide-steps">
+<li>In the Goals panel type the goal and press <strong>Add</strong>.</li>
+<li>Drag the slider to set progress (0 to 100 in steps of 5). The bar and percentage update as you drag.</li>
+<li>Press &times; to remove a goal (it asks first).</li>
+</ol>
+<div class="guide-tip">A goal can't be renamed or given a date, and its category always reads <em>General</em>. A goal under 50% turns up in Nudges.</div>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-overview-nudges">
+<summary>Nudges</summary>
+
+<div class="guide-task">
+<div class="guide-q">What do the nudges tell me, and how do I act on one?</div>
+<ol class="guide-steps">
+<li>The panel shows up to six reminders. Click one to jump to the thing it's about (a contact, a task, a habit, a voucher, a trip, a booking and so on).</li>
+<li>A few have a button that finishes the job in place: <strong>Contacted</strong> (overdue contact), <strong>Done</strong> (a to-do on a contact), <strong>Log it</strong> (a habit) and <strong>Buy</strong> (a ready-to-buy shopping item).</li>
+<li>Press <strong>Shuffle</strong> to see a different set.</li>
+</ol>
+<div class="guide-tip">Reminders come from: contacts you haven't spoken to, new high-rated matches and to-dos on contacts; trips with gaps; habits with no streak; goals under 50%; job applications to chase; media requests; vouchers and finance deals about to expire; calendar events coming up; tasks (unfiled inbox, resurfaced, due within 3 days or overdue, sitting in Next actions for 10 days, waiting for 14 days); business ideas; lingerie stock; Airbnb cleans, arrivals and keys; low sleep, weight trend and no exercise.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I make a nudge go away?</div>
+<ol class="guide-steps">
+<li>Deal with what it's about: contact the person, tick off the task, log the habit and so on. It disappears when the situation behind it changes.</li>
+</ol>
+<div class="guide-tip">There is no snooze or dismiss. Without Smart nudges the six shown are a varied random pick, so an overdue or due-today task isn't guaranteed to be among them; Shuffle again, or turn Smart nudges on.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I let Claude choose the most important ones?</div>
+<ol class="guide-steps">
+<li>Tick <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#smart-nudges-toggle">Settings &rarr; Smart nudges</span>. This needs your Anthropic key.</li>
+<li>The panel shows an instant mixed set, says <em>Thinking&hellip;</em>, and swaps in Claude's ranking by urgency, importance and neglect. Shuffle asks for a fresh ranking.</li>
+</ol>
+<div class="guide-tip">Each ranking is a small AI call, and a ranking is reused until what's in the list changes. If the call fails you see a random pick and a message saying so.</div>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-overview-questions">
+<summary>Questions from Claude</summary>
+
+<div class="guide-task">
+<div class="guide-q">How do I answer questions Claude has left for me?</div>
+<ol class="guide-steps">
+<li>When Claude has questions, a <strong>Questions from Claude</strong> panel appears at the top of Overview with a count of how many are waiting. With none, the panel is hidden.</li>
+<li>For each question, tap one of its answer buttons, or type your own answer in the notes box (it saves as you type), or both.</li>
+<li>Press <strong>Copy answers</strong>, then paste into your Claude chat. If the clipboard is blocked, a text box appears for you to copy from.</li>
+</ol>
+<div class="guide-tip">Tick <strong>Show answered</strong> to see questions you've answered. <strong>clear</strong> on an answered question removes your answer. Answers sync to your other devices. You can't add questions yourself.</div>
+</div>
+</details>
+</div>
+</details>
+
+<details class="settings-item" id="guide-planner">
+<summary><h3>Planner</h3></summary>
+<div class="settings-block">
+<p class="settings-note" style="margin:0 0 10px;">The <span class="inline-goto-link" data-goto-tab="planner" data-goto-target="#planner-panel">Planner</span> is where you decide what happens on which day: dates with people, things to do, tasks you want to do on a particular day, and the plans around a trip. It shows today and the next nine days, plus a separate grid for each trip that has dates.</p>
+
+<details class="settings-subgroup" id="guide-planner-read">
+<summary>Reading the Planner</summary>
+<div class="guide-task">
+<div class="guide-q">How do I read the day grid?</div>
+<ol class="guide-steps">
+<li>Open the <span class="inline-goto-link" data-goto-tab="planner" data-goto-target="#planner-main-grid">day grid</span>. Each box is one day, labelled like "Fri 23 Oct". Today is the first box.</li>
+<li>A day with nothing on it shows as a thin one-line row. Tap the date to open it into a full box.</li>
+<li>On an open day, each card is one thing planned. The card's border and name tell you whether it is a draft or firm (see <em>Draft or firm</em> below).</li>
+<li>A thin coloured strip along the bottom of a day means one of your Airbnb rooms is occupied that day. Hover over a strip to see the room and guest.</li>
+<li>On today's box only, an amber "N unfiled tasks" label counts the tasks still sitting in your Tasks inbox. Click it to go and file them.</li>
+</ol>
+<div class="guide-tip">Days before today are not shown, so a plan left on a past day disappears from the Planner (it still shows on the person's card on the Contacts tab). Tasks are the exception: a task placed on a past day moves to today the next time the app opens.</div>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I see further ahead than ten days?</div>
+<ol class="guide-steps">
+<li>Press <strong>+ Add a specific day</strong> above the grid.</li>
+<li>Pick a date in the date box that appears. The day is added at the end of the grid, in date order.</li>
+<li>Place things on it like any other day.</li>
+</ol>
+<div class="guide-tip">An added day with nothing on it has a &times; beside its date to take it off again; it also drops off by itself once it falls inside the ten-day window. A date inside the window does nothing, because that day is already there.</div>
+</div>
+<div class="guide-task">
+<div class="guide-q">What are the faded labels on a day?</div>
+<ol class="guide-steps">
+<li>A faded chip such as "Dinner (Main planner)" or "Maria (Lisbon trip)" means that something is planned on this same date in a different grid (the main one, or a trip's own grid).</li>
+<li>Click the chip to jump to the real card. You can't edit or remove it from here; do that where it lives.</li>
+</ol>
+<div class="guide-tip">A day that only has a faded chip on it opens by itself, so the clash is visible.</div>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-planner-place">
+<summary>Putting something on a day</summary>
+<div class="guide-task">
+<div class="guide-q">How do I add a one-off to-do to a single day?</div>
+<ol class="guide-steps">
+<li>On the day's box, press the small <strong>+</strong> beside the date. (A collapsed day has no <strong>+</strong> yet: tap the date first.)</li>
+<li>Leave the first dropdown on <strong>Quick to-do</strong>, type the name in "Add &amp; press Enter…", and press Enter.</li>
+<li>The card appears on that day and the box closes. Press Escape, or click away with the box empty, to cancel.</li>
+</ol>
+<div class="guide-tip">A quick to-do is also added to <strong>Things to do</strong>, so you can drag it to another day later. It appears in the Date events list too.</div>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I put a task from my Tasks list on a day?</div>
+<ol class="guide-steps">
+<li>Press <strong>+</strong> on the day and switch the dropdown to <strong>Task</strong>.</li>
+<li>Choose from "Pick an existing task…", which lists every task not yet done and not already on a day. Or type a new task in "…or type a new task &amp; press Enter" and press Enter.</li>
+<li>A task you type is created straight into <em>Next actions</em> on the <span class="inline-goto-link" data-goto-tab="tasks" data-goto-target="#tasks-panel">Tasks tab</span>. It does not go to the inbox.</li>
+</ol>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I put a person on a day?</div>
+<ol class="guide-steps">
+<li>Press <strong>+</strong> on the day and switch the dropdown to <strong>Person</strong>.</li>
+<li>Pick someone from "Pick someone…". The list leaves out anyone at the stage Faded, Archived, FriendZone or Got Away, and anyone already on that day.</li>
+</ol>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I place something from one of the three lists at the top?</div>
+<ol class="guide-steps">
+<li>The three lists above the grid are <strong>Priority connections</strong>, <strong>Priority tasks</strong> and <strong>Things to do</strong>.</li>
+<li>Drag a card from a list onto a day box. Dropping it on the thin row of an empty day works too.</li>
+<li>The same card can go on several days: each drop adds another copy to that day. The list card stays where it is, except in <strong>Priority tasks</strong>, where a task leaves the list once it is on a day.</li>
+<li>Each list shows eight cards. Press "Show N more…" for the rest and "Show fewer" to fold it back.</li>
+</ol>
+<div class="guide-tip">On an iPhone or iPad you can't drag. Every card has a "Place on…" dropdown instead. See <em>Phone and tablet</em> below.</div>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I keep a list of things to do that aren't tied to a day yet?</div>
+<ol class="guide-steps">
+<li>In <strong>Things to do</strong>, type the name in "Add something, e.g. Picnic" and press <strong>+ Add</strong> or Enter.</li>
+<li>If you paste a link, the link is kept on the item (a small link icon on the card). Press <strong>&#10024; Resolve title</strong> to ask AI to replace the link with the page's real title.</li>
+<li>Drag the item onto a day when you decide when.</li>
+<li>To remove an item for good, press its <strong>&times;</strong> in the list and confirm. It also disappears from every day it was placed on.</li>
+</ol>
+<div class="guide-tip">Resolve title needs your Anthropic key in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#anthropic-key-input">Settings</span>, and only works for a page it can read. If it fails nothing is shown: the button just disappears and the link stays as the title.</div>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-planner-move">
+<summary>Moving, extending and changing a plan</summary>
+<div class="guide-task">
+<div class="guide-q">How do I move something to another day?</div>
+<ol class="guide-steps">
+<li>Drag the card onto the other day's box. It goes to the bottom of that day.</li>
+<li>To put it in a particular position, drop it on the top half or bottom half of another card on the day. A line shows where it will land.</li>
+<li>The same works between grids: drag from the main grid into a trip's grid, or back.</li>
+</ol>
+<div class="guide-tip">Dropping a card back on a day it already covers does nothing. A multi-day card moves as a whole, keeping its length.</div>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I make something last several days?</div>
+<ol class="guide-steps">
+<li>On the card's controls row, press <strong>&raquo;</strong> to extend it to the next day. Press it again for each extra day.</li>
+<li>The card now shows on every day it covers.</li>
+<li>Press <strong>&laquo;</strong> to shorten it by one day. It appears once the card covers more than one day.</li>
+</ol>
+<div class="guide-tip">Task cards have no &laquo; &raquo; buttons: a task sits on one day.</div>
+</div>
+<div class="guide-task">
+<div class="guide-q">Draft or firm: what do the colours mean?</div>
+<ol class="guide-steps">
+<li>A <strong>draft</strong> card has a dashed border, an italic name and a hollow dot.</li>
+<li>A <strong>firm</strong> card has a solid rose border, a bold name and a filled rose dot.</li>
+<li>Click the dot to switch between the two. New cards start as drafts.</li>
+</ol>
+<div class="guide-tip">Only firm plans can be pushed to Google Calendar (see below). Task cards have no dot, so they stay as drafts and can't be pushed.</div>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I take something off a day?</div>
+<ol class="guide-steps">
+<li>Press the <strong>&times;</strong> on the card.</li>
+<li>That only removes it from the day. A person stays in the Priority connections list, an idea stays in Things to do, and a task stays on your Tasks list (the &times; on a task card is "Unschedule").</li>
+</ol>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-planner-people">
+<summary>Planning time with people</summary>
+<div class="guide-task">
+<div class="guide-q">Who shows up in Priority connections?</div>
+<ol class="guide-steps">
+<li>Anyone you have pinned with the pin button on their card on the <span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#connections-panel">Contacts tab</span>.</li>
+<li>Anyone whose stage is Planning to meet, Arranged to meet, Met in person or Dating. They appear on their own as soon as you move them to one of those stages.</li>
+</ol>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I plan something with a friend or family member who isn't on that list?</div>
+<ol class="guide-steps">
+<li>Under Priority connections, press the "Add someone else…" box and pick the person.</li>
+<li>They are pinned and join the list, ready to drag onto a day. This is the same as pinning them on their Contacts card.</li>
+<li>To drop them from the list again, unpin them on their card on the Contacts tab (press the pin again). That only works for people who are pinned: someone who is listed because of their stage stays until their stage changes.</li>
+</ol>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I see everything planned with one person?</div>
+<ol class="guide-steps">
+<li>Open their card on the Contacts tab. A row of date chips shows each day they are planned on (a plane marks days in a trip).</li>
+<li>Click a chip to jump to that card in the Planner. A pale dashed chip is a draft and a solid rose one is firm.</li>
+</ol>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I open someone's card from the Planner?</div>
+<ol class="guide-steps">
+<li>Click the person's name on a day card or in the list. This opens their full card on the Contacts tab.</li>
+</ol>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-planner-tasks">
+<summary>Tasks on days</summary>
+<div class="guide-task">
+<div class="guide-q">Which tasks appear in Priority tasks?</div>
+<ol class="guide-steps">
+<li>Tasks marked urgent or important, tasks due within 7 days (overdue included), tasks whose start date is within 2 days, and any project with a subtask meeting one of those.</li>
+<li>Done tasks and tasks hidden until a later date (see <span class="inline-goto-link" data-goto-tab="guide" data-goto-target="#guide-tasks-inbox">Tasks &amp; Inbox</span>) are left out, and so is any task already on a day.</li>
+</ol>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I tick a task off from the Planner?</div>
+<ol class="guide-steps">
+<li>Tick the checkbox on its card. The task is marked done everywhere, including the Tasks tab.</li>
+<li>Click the task's name to open it on the Tasks tab. Closing it there takes you back to the Planner.</li>
+</ol>
+</div>
+<div class="guide-task">
+<div class="guide-q">What happens to a task I planned for a day that has passed?</div>
+<ol class="guide-steps">
+<li>The next time you open the app, it moves to today. Nothing marks it as rolled over.</li>
+<li>Done tasks stay where they were.</li>
+</ol>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-planner-trips">
+<summary>Trips</summary>
+<div class="guide-task">
+<div class="guide-q">How do I plan the days of a trip?</div>
+<ol class="guide-steps">
+<li>On the <span class="inline-goto-link" data-goto-tab="travel" data-goto-target="#travel-panel">Travel tab</span>, give the trip a start and end date. If you leave them blank, the earliest and latest dates on its flights and bookings are used.</li>
+<li>Return to the Planner. Below the main grid, the trip has its own grid headed with its name, one box per day (up to 60 days).</li>
+<li>Place things on the trip's days exactly as on the main grid. A card in a trip shows a small plane; press it to open the trip.</li>
+</ol>
+<div class="guide-tip">A trip's grid disappears once its end date has passed. A trip with no dates at all has no grid; the Planner says "No trips with known dates yet".</div>
+</div>
+<div class="guide-task">
+<div class="guide-q">What are the chips already on the trip's days?</div>
+<ol class="guide-steps">
+<li>They are the trip's flights, car hire, accommodation and other bookings from the Travel tab, shown on the day they fall on.</li>
+<li>They are read-only. Click one to open the trip and edit it there.</li>
+</ol>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I put the people travelling with me on the trip's days?</div>
+<ol class="guide-steps">
+<li>On the trip's card on the Travel tab, add them under the trip's people (pick a contact and press <strong>Add</strong>).</li>
+<li>Open the Planner. Each person is placed on every day of the trip for you.</li>
+<li>To take someone off a particular day, press the &times; on their card there. They are not put back on that day.</li>
+</ol>
+<div class="guide-tip">People you add who aren't in your Contacts (typed in by name only), and yourself, are not placed. A person added after the trip's dates were set is placed the next time the Planner draws.</div>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I find people who live where I'm going?</div>
+<ol class="guide-steps">
+<li>Give the trip a destination on the Travel tab.</li>
+<li>Under that trip's grid, "Connections in &lt;destination&gt;" lists contacts whose City matches. Drag them onto a day.</li>
+</ol>
+<div class="guide-tip">The match is on the exact place name in their City field (accents and capitals are ignored). People at a closed-off stage, or paused for travel, are left out.</div>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-planner-dateevents">
+<summary>Date events: tickets, bookings and times</summary>
+<div class="guide-task">
+<div class="guide-q">Where do I keep the details of a booking, such as a theatre ticket or a dinner reservation?</div>
+<ol class="guide-steps">
+<li>Scroll to <strong>Date events</strong> below the grid. It lists everything in Things to do, including items captured from email.</li>
+<li>Press the arrow beside an item to open it.</li>
+<li>Fill in whichever you need: Confirmation ref, Location, Time (HH:MM), Passengers (name and seat), and Notes. Changes save as you leave each box.</li>
+<li>Set the booking status to Not booked yet, Booked or Confirmed in the dropdown beside the title.</li>
+</ol>
+<div class="guide-tip">A ticket or booking link found in an email appears on the card as small icons: a pin opens the venue in Google Maps, a link icon opens the booking page, and a paperclip opens the attached ticket. A time also shows in front of the name on the day card.</div>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I add an event from an email?</div>
+<ol class="guide-steps">
+<li>On the <span class="inline-goto-link" data-goto-tab="overview" data-goto-target="#mail-panel">Mail panel</span>, find the email and press <strong>+ date event</strong> (it is under "&#8943; Other actions" if it isn't one of the buttons shown on the row).</li>
+<li>Optionally pick the person it's with. It reads the calendar invite or the email for the date and venue, and puts the event on that day.</li>
+</ol>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I find a particular event?</div>
+<ol class="guide-steps">
+<li>Use <strong>Sort</strong> to order by Date or Title.</li>
+<li>Use <strong>Show</strong>: All, Events (not linked to a person) or Dates (linked to a person).</li>
+<li>Events whose day has passed are hidden. Press <strong>Show past</strong> to see them; undated ones always show.</li>
+</ol>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I give an undated event a date?</div>
+<ol class="guide-steps">
+<li>An event shows "Undated" until it is on a day. Open it in Date events and pick a day in its <strong>Date</strong> box. Changing the box later moves the event to the new day.</li>
+<li>Or drag its card from <strong>Things to do</strong> onto a day (or use "Place on…" on an iPhone).</li>
+</ol>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I show an event inside a trip?</div>
+<ol class="guide-steps">
+<li>Open the event and choose the trip under "Part of a trip?".</li>
+<li>The event then appears in that trip's itinerary on the Travel tab, with an <strong>Edit in Planner</strong> button that brings you back here.</li>
+</ol>
+<div class="guide-tip">This only adds it to the trip's itinerary. It does not put it on the trip's day grid; place it on a day as well.</div>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I delete an event?</div>
+<ol class="guide-steps">
+<li>Press the &times; on its row in Date events. You are asked to confirm, and it is then removed from every day.</li>
+</ol>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-planner-calendar">
+<summary>Putting plans on Google Calendar</summary>
+<div class="guide-task">
+<div class="guide-q">How do I push my firm plans to Google Calendar?</div>
+<ol class="guide-steps">
+<li>Sign in to Google in the bar at the <span class="inline-goto-link" data-goto-tab="overview" data-goto-target="#google-bar">top of Overview</span>.</li>
+<li>Once, tick "Allow creating events in Google Calendar" in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#calendar-write-toggle">Settings</span>, then sign out and back in.</li>
+<li>On the Planner, mark the plans you want as firm (click each card's dot).</li>
+<li>Press <strong>Push firm plans to Google Calendar</strong>, pick the calendar, tick the plans, and press <strong>Push selected</strong>.</li>
+</ol>
+<div class="guide-tip">Plans already pushed are unticked and marked "Already pushed". Pushing one again creates a second event; this does not update or remove the earlier one.</div>
+</div>
+<div class="guide-task">
+<div class="guide-q">Will a person's name show on my calendar or watch?</div>
+<ol class="guide-steps">
+<li>No. A person's plan is titled after another item planned the same day (for example "Dinner"), or "Personal plans" if there isn't one. Their name, draft or firm and your notes go in the event's description.</li>
+<li>Events are all-day unless the item has a Time, in which case they start at that time and run for an hour (or to its end time, if an email supplied one).</li>
+</ol>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I put one Date event on my calendar?</div>
+<ol class="guide-steps">
+<li>Place the event on a day, then open it in Date events.</li>
+<li>Pick the calendar and press <strong>Check/update calendar</strong>.</li>
+<li>If exactly one event near that date already matches the title, it is linked and nothing is created. If none, a new event is created. If several match, it tells you it is too ambiguous and does nothing.</li>
+</ol>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-planner-phone">
+<summary>Phone and tablet</summary>
+<div class="guide-task">
+<div class="guide-q">How do I plan on a phone?</div>
+<ol class="guide-steps">
+<li>The grid becomes two columns and the three lists stack above it. Use the day's <strong>+</strong> for new to-dos, tasks and people: it needs no dragging.</li>
+<li><strong>iPhone and iPad:</strong> dragging does not work there, so every list card has a "Place on…" dropdown and every placed card has a "Move to a different day" dropdown. The options are grouped by "Main planner" and each trip.</li>
+<li><strong>Android:</strong> press and hold a card, then drag. Dragging near the top or bottom of the screen scrolls the page.</li>
+</ol>
+<div class="guide-tip">On Android there is no dropdown for moving a card, so you can't place an existing item from <strong>Things to do</strong> onto a day without dragging. The same is true of moving a card between days.</div>
+</div>
+</details>
+</div>
+</details>
+
+<details class="settings-item" id="guide-finances">
+<summary><h3>Finances</h3></summary>
+<div class="settings-block">
+<p class="settings-note" style="margin:0 0 10px;">The Finances tab holds seven panels: <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#accounts-panel">Accounts</span>, <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#letting-panel">Letting income</span>, <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#loans-panel">Loans from owners</span>, <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#switch-offers-panel">Switch opportunities</span>, <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#vouchers-panel">Vouchers &amp; Credits</span>, <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#loyalty-balances-panel">Loyalty balances</span> and <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#subscriptions-panel">Subscriptions</span>. Each job below says which panel to use.</p>
+
+<details class="settings-subgroup" id="guide-finances-accounts">
+<summary>Accounts &amp; the money-flow diagram</summary>
+
+<div class="guide-task">
+<div class="guide-q">How do I add a bank account or credit card?</div>
+<ol class="guide-steps">
+<li>In <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#account-form">Accounts</span>, type the <strong>Bank</strong> (for example Halifax) and the <strong>Account name</strong>, then press <strong>Add</strong>. Either one is enough. A known bank's logo is filled in for you.</li>
+<li>Click the new card to open it. Every field saves as soon as you leave it.</li>
+<li>Set <strong>Type</strong> (Current account, Savings, Credit card, Mortgage, Loan or Other) and, if you want it, the <strong>Opened</strong> date.</li>
+</ol>
+<div class="guide-tip">The row of type buttons above the list (All, Current account, Savings...) narrows the list. Click one to see only that type; click more to add them; click <strong>All</strong> to reset. The list shows accounts in the order you added them, with closed accounts mixed in.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I keep track of a deal or incentive on an account?</div>
+<ol class="guide-steps">
+<li>Open the account. Type the offer in <strong>Deal / incentive</strong> (for example "£200 switch bonus, 0% BT 30mo").</li>
+<li>Set <strong>Deal ends</strong>. If the deal has no end (a permanent cashback rate), tick <strong>Ongoing (no end date)</strong> instead.</li>
+<li>The card header now shows <strong>Deal: Nd left</strong>. It turns amber at 60 days or fewer and says <strong>Deal expired</strong> afterwards.</li>
+</ol>
+<div class="guide-tip">The amber <strong>&#9888; N</strong> chip on a card lists things worth a look: a deal that ended but the account is still open, a deal with no Direct Debits or funding recorded, a closed account with no CASS switch recorded, and so on. Hover or open the card to read them. They update on their own as you fill fields in.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I record a switch bonus and whether it has been paid?</div>
+<ol class="guide-steps">
+<li>Open the account that earned the bonus. In the <strong>Switch bonus</strong> box type what it is (for example "£200 on switching"), its <strong>Amount</strong> (a number, 200), and pick <strong>Working on</strong>, <strong>Met</strong> or <strong>Paid</strong>. Press <strong>Add</strong>.</li>
+<li>A bonus paid in pieces (£X on switching, then £Y a month) is one entry per piece.</li>
+<li>Each entry shows as a chip with its status. A bonus marked <strong>Working on</strong> puts a CASS tile in the ticker at the top of Overview; the tile disappears when you stop having any.</li>
+</ol>
+<div class="guide-tip">Click an entry's status badge to move it on to the next status (Working on, Met, Paid); the &times; removes the entry. A bank with a bonus marked <strong>Paid</strong> is treated as already claimed when Switch opportunities checks your eligibility. The panel heading of Switch opportunities totals your bonuses by the year each account was opened (accounts with no Opened date are left out).</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I record that I switched accounts with CASS?</div>
+<ol class="guide-steps">
+<li>Open the <em>new</em> account. In <strong>CASS switch from</strong> choose the account you switched away from.</li>
+<li>Open the <em>old</em> account and set its <strong>Closed</strong> date. It now reads <strong>Closed &mdash; CASS to &lt;bank&gt;</strong>.</li>
+<li>Press <strong>CASS</strong> above the diagram to see the switch drawn as an arrow, labelled with the old account's closed date.</li>
+</ol>
+<div class="guide-tip">A closed account with no CASS switch pointing at it gets the prompt "actually CASS'd away, or just closed outright?". Closing an account doesn't delete it; it stays in the list and the history is what Switch opportunities uses.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I mark which account I could switch away from next?</div>
+<ol class="guide-steps">
+<li>Open the account and set <strong>Stage</strong> to <strong>CASS-ready</strong> (an account you're happy to switch away from) or <strong>To keep</strong>. The default is <strong>Undecided</strong>, which shows nothing.</li>
+<li>Switch opportunities only suggests switching <em>from</em> an open account marked CASS-ready.</li>
+</ol>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I record an account fee?</div>
+<ol class="guide-steps">
+<li>Open the account, type the fee in <strong>Account fee (£)</strong> and choose <strong>Monthly</strong> or <strong>Annually</strong> under <strong>Charged</strong>.</li>
+<li>A note beside it shows the monthly equivalent. The fee is also taken off the account's monthly surplus (see below).</li>
+</ol>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I track a 0% balance transfer on a credit card?</div>
+<ol class="guide-steps">
+<li>Set the card's <strong>Type</strong> to <strong>Credit card</strong>. Credit limit, Min repayment % and the card-repayment fields appear.</li>
+<li>Under <strong>Balance transfers</strong> pick the account the balance came <strong>From</strong>, type the amount, set the transfer date and the date the 0% ends, then press <strong>Add</strong>. A card can have several, each with its own end date.</li>
+<li>Each transfer shows a 0% expiry badge. The card header shows the next expiry, and you get a prompt for any transfer past its 0% end or with no end date recorded.</li>
+<li>To record how the card is paid, choose <strong>Paid by Direct Debit from</strong> (one of your accounts) and <strong>Amount taken</strong> (Full balance or Minimum only). "Minimum only" is shown in amber.</li>
+<li>Press <strong>Balance transfers</strong> above the diagram to see the transfers drawn between your accounts.</li>
+</ol>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I see whether an account breaks even each month?</div>
+<ol class="guide-steps">
+<li>Open the account. Under <strong>Monthly funding in (£)</strong> type what arrives each month, and choose <strong>Funded from</strong>: another of your accounts, <strong>Salary</strong>, <strong>Airbnb</strong>, <strong>Side gig</strong> or <strong>Other&hellip;</strong> (then name it).</li>
+<li>Tick <strong>Variable amount</strong> if the figure is a rough estimate (for example Airbnb income).</li>
+<li>Under <strong>Direct Debits &amp; other outgoings</strong> add each regular payment: <strong>Beneficiary</strong>, <strong>&pound;/mo</strong>, and the method (Direct Debit, Standing Order, Manual payment, Card payment or Other). Pick the last box ("pays into") when the payment goes to another of your own accounts, such as a mortgage overpayment.</li>
+<li>The card header now shows a green or red <strong>+&pound;N/mo</strong> chip. Opening the card spells out the sum: funding in, minus Direct Debits and standing orders, minus any other account it funds, minus the account fee.</li>
+<li>Click a payment chip's text to cycle its status: <strong>Deal-linked</strong> (counts toward the deal), <strong>Transferrable</strong> (can be moved), or not set. The diagram card shows "DD x (y)" for deal-linked and transferrable Direct Debits.</li>
+</ol>
+<div class="guide-tip">Card payments and "Other" outgoings are drawn on the diagram but left out of the surplus, because they aren't a fixed monthly amount. Outgoings with no amount are left out too, and the card says how many.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I read the money-flow diagram?</div>
+<ol class="guide-steps">
+<li>The three buttons above it choose what it shows: <strong>Ongoing</strong> (monthly money moving between accounts), <strong>CASS</strong> (switches) or <strong>Balance transfers</strong>. It shows nothing until you've recorded something of that kind.</li>
+<li>In <strong>Ongoing</strong>, each arrow carries an amount and a two-letter code: <strong>DD</strong> Direct Debit, <strong>SO</strong> Standing Order, <strong>MP</strong> Manual payment (dashed line), <strong>CP</strong> Card payment, <strong>AC</strong> pulled from another account, <strong>OT</strong> other. A small dot on the left is money from outside your accounts: <strong>SA</strong> Salary, <strong>AB</strong> Airbnb, <strong>SG</strong> Side gig. A dotted line and a "~" mean a variable amount. A dot on the right is the total of payments that go to people or firms outside your accounts.</li>
+<li>Click any card in the diagram to jump to that account's row in the list.</li>
+</ol>
+<div class="guide-tip">In Ongoing, closed accounts are left out. In CASS and Balance transfers they are included, so the history stays visible.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I link a subscription to an account?</div>
+<ol class="guide-steps">
+<li>Open the account. Under <strong>Linked subscriptions</strong> pick one of your subscriptions, tick <strong>Free with this account</strong> if it comes as a perk, and press <strong>Link</strong>.</li>
+<li>Or do it from the other side: in <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#subscriptions-panel">Subscriptions</span> use the account drop-down on the subscription. See the Subscriptions section below.</li>
+</ol>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I get rid of an account?</div>
+<ol class="guide-steps">
+<li>If you've just closed it, set its <strong>Closed</strong> date and leave it there; it keeps the history.</li>
+<li>To remove it completely, open it and press <strong>&times; Delete account</strong> at the bottom.</li>
+</ol>
+<div class="guide-tip">You are asked to confirm, and there is no undo. Links to it from other accounts (funding, CASS, balance transfers, "pays into") are cleared.</div>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-finances-switching">
+<summary>Switch opportunities</summary>
+
+<div class="guide-task">
+<div class="guide-q">How do I find bank switch offers I'm eligible for?</div>
+<ol class="guide-steps">
+<li>First make sure <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#accounts-list">Accounts</span> is up to date: every bank you've held an account with, its <strong>Opened</strong> and <strong>Closed</strong> dates, any switch bonus marked <strong>Paid</strong>, and the open accounts you'd switch away from marked <strong>CASS-ready</strong>. Eligibility is worked out from these.</li>
+<li>In <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#switch-offers-panel">Switch opportunities</span> press <strong>Check via home agent</strong>. It reads the weekly shared copy of MoneySavingExpert's switch offers if there is one. Otherwise it fetches the page through your home agent and reads it with AI, which needs your Anthropic key and live sync set up.</li>
+<li>If the home agent isn't available, copy the switch-offers text from MoneySavingExpert, paste it into the box and press <strong>Analyse pasted text</strong>. This also uses AI.</li>
+<li>Each offer shows the bank, an <strong>Eligible</strong>, <strong>Unsure</strong> or <strong>Not eligible</strong> chip, the offer, and the reason. For an eligible offer it names the account to switch from, as a link to that account.</li>
+<li>Press <strong>Create task</strong> on an eligible offer to add a task "Switch to &lt;bank&gt;" with the reasoning in its notes. The button then becomes a <strong>View task</strong> link. Press &times; to dismiss an offer.</li>
+</ol>
+<div class="guide-tip">Suggestions only: nothing is ever applied for you. "Last checked" under the buttons shows when it last ran. It also re-checks itself about once a week when the dashboard is open and the shared copy or your home agent can be reached.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I find out whether an account I already have is worth keeping?</div>
+<ol class="guide-steps">
+<li>Press <strong>Review ongoing accounts</strong> under <strong>Ongoing account value</strong>. It needs the home agent and your Anthropic key, and includes a web search, so allow a minute.</li>
+<li>For each open current account that's worth a second look, you get what it gives you now, a better alternative, whether that alternative supports CASS, a note about how holding or closing the account affects a future switch bonus, and a recommendation. Press &times; to dismiss one.</li>
+</ol>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">What are the yearly perk reminders under the offers?</div>
+<ol class="guide-steps">
+<li>If you hold an open Nationwide account, a row for Nationwide's yearly "Fairer Share" payment appears with a <strong>Create reminders</strong> button. Press it to add dated tasks for what the payment needs.</li>
+<li>The reminders stay hidden until the day they matter, then appear in Tasks and as a "Perk" tile in the ticker until you tick them off.</li>
+</ol>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-finances-letting">
+<summary>Letting income &amp; owner reports</summary>
+
+<div class="guide-task">
+<div class="guide-q">How do I set up someone who owes me a share of a listing?</div>
+<ol class="guide-steps">
+<li>Go to <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#airbnb-listings">Settings &rarr; Finances &rarr; Airbnb listings</span> and find the listing's row.</li>
+<li>Choose the person under <strong>Owner</strong>, or type a name in the box marked "or a name" if they aren't a connection. An owner called <strong>Phil</strong> counts as you: no balance owed and no report.</li>
+<li>Set <strong>Share %</strong>: the part of each stay's takings the owner owes you.</li>
+<li>To change the split from a future date, or to limit it, open <strong>+ schedule a change</strong>, set the date, the %, and optionally <strong>Cap £</strong>, then press <strong>Add</strong>. The cap is the most an owner owes you in one calendar month, across all their bookings.</li>
+</ol>
+<div class="guide-tip">A stay on a listing with no owner never shows in Letting income at all. A change that has already taken effect can't be removed; a future one has an &times;.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How does a stay turn into money owed?</div>
+<ol class="guide-steps">
+<li>In the <span class="inline-goto-link" data-goto-tab="overview" data-goto-target="#airbnb-panel">Airbnb panel</span> on Overview, type what the stay earned in the booking's <strong>Income &pound;</strong> box. If you're signed in to Google, <strong>Sync</strong> at the top of the panel also fills in the guest name and the payout from Airbnb's confirmation emails for bookings that don't have a guest name yet.</li>
+<li>Choose <strong>Airbnb</strong> or <strong>Other</strong> on the booking if it didn't come through Airbnb.</li>
+<li>On the checkout day, a row appears under the owner's name in <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#letting-panel">Letting income</span>, dated that day, showing the guest, the stay's total takings and the owner's share (Share %, limited by any cap). Their balance goes up by the share.</li>
+<li>Stays still to come, or finished but waiting on an income figure, are listed in <strong>Upcoming / awaiting payout</strong> beneath the ledger as a preview. They don't count until they become rows.</li>
+</ol>
+<div class="guide-tip">Rows are created when you open the dashboard, and straight away when you type income on a stay that has already ended. If you leave the dashboard open across checkout, reload to see it. Deleting such a row with its &times; (you are asked to confirm) also clears the income on the booking so it stays deleted; type the income again to charge it again.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I record a payment, a write-off or money from before I started?</div>
+<ol class="guide-steps">
+<li>Under the ledger, pick who it's for, choose the kind, type the <strong>Amount</strong>, check the date, add a note, and press <strong>Add</strong>.</li>
+<li><strong>Payment</strong>: money that really moved. Enter a negative amount when they pay you, a positive one when you hand them money.</li>
+<li><strong>Adjustment</strong>: changes the balance with no money moving, such as writing something off. To clear a balance, add the negative of it.</li>
+<li><strong>Cancellation</strong>: a payout for a stay that never happened. The amount is exactly what the balance moves by, so apply the share yourself.</li>
+<li><strong>Earned (historic)</strong>: what a listing took before you used the dashboard. Type the <em>gross</em> takings; the share is applied for you. Nights and Check-in date are optional but make the charts accurate.</li>
+</ol>
+<div class="guide-tip">Pick the kind for what happened, not for the sign, because months later the kind is the only record of why the balance moved. Every row's date is editable, and its note shows the stay it came from.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">What are the other kinds of row in an owner's ledger?</div>
+<ol class="guide-steps">
+<li><strong>Cancellation</strong> and <strong>Refund</strong> rows also come from Airbnb's emails when you press <strong>Sync</strong> in the Airbnb panel. A cancellation payout is added with the owner's share and dated the day after check-in. A refund you sent a guest is added as a negative row dated the day Airbnb emailed it.</li>
+<li>Any refund Sync can't match to an owner is listed in the Airbnb panel under <strong>Guest refunds waiting to be assigned</strong>. Choose who it's charged to and press <strong>Post</strong>, or press &times; to leave it off the ledger. Setting the listing's owner in Settings and pressing Sync again also posts it.</li>
+<li><strong>Monthly cap</strong> rows (an adjustment) and <strong>Loan interest</strong> rows are worked out for you and can't be edited or deleted.</li>
+</ol>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How does the monthly cap work?</div>
+<ol class="guide-steps">
+<li>Set a <strong>Cap £</strong> on a listing's share rule (see the first job in this section).</li>
+<li>Each stay is limited to the cap on its own. If the owner's shares for one month (by each row's date) add up to more than the cap, a <strong>Monthly cap &pound;N, YYYY-MM</strong> adjustment row takes off the excess so the month totals no more than the cap.</li>
+<li>Bookings, cancellation payouts and historic earned rows count towards the cap. Refunds and payments don't.</li>
+</ol>
+<div class="guide-tip">The adjustment is recalculated whenever rows change, so editing a date or deleting a stay can add, change or remove it. If an owner has several listings with caps, the first listing with a cap in force that month decides it.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I fix a row's check-in date, nights, listing or platform?</div>
+<ol class="guide-steps">
+<li>Press the small <strong>&#9656;</strong> at the end of the row to open its details. The arrow appears only on rows that have something to edit.</li>
+<li>Edit <strong>Check-in</strong>, <strong>Nights</strong>, <strong>Listing</strong> (a hand-added "Earned" row can be given its listing) or <strong>Platform</strong>. The date at the start of the row is the payout date, used for statements and tax years.</li>
+</ol>
+<div class="guide-tip">Nights and check-in drive the night-rate chart and the split of income across months. The Airbnb logo on a row means the platform is Airbnb.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I fold away an owner I'm not working on?</div>
+<ol class="guide-steps">
+<li>Click the owner's name and balance line to collapse their ledger; click again to open it. Each device remembers what you folded.</li>
+</ol>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I see tax by year?</div>
+<ol class="guide-steps">
+<li>Go to <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#letting-tax-settings">Settings &rarr; Finances &rarr; Letting tax</span>, add each owner by name, and set their tax <strong>Rate</strong> % and <strong>Allowance &pound;</strong>.</li>
+<li>Under each owner in Letting income, <strong>By tax year</strong> lists each UK tax year (6 April to 5 April): revenue, the part over the allowance, tax due at their rate, and what's left.</li>
+<li>A row counts in the year of its own date, so set the real payout date on a row if it fell either side of 6 April.</li>
+</ol>
+<div class="guide-tip">Revenue is the gross takings on bookings, email cancellation payouts and historic "Earned" rows. A cancellation you typed in by hand, a refund, a payment or an adjustment isn't counted, and refunds aren't taken off revenue.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I send an owner their monthly report?</div>
+<ol class="guide-steps">
+<li>Under the owner's name in Letting income, pick the month in the box beside <strong>Generate report</strong>. Leave it blank for last month. Owners who count as you have no report.</li>
+<li>Press <strong>Generate report</strong>. A PDF named <code>letting-report-&lt;name&gt;-&lt;YYYY-MM&gt;.pdf</code> downloads.</li>
+<li>To send it, press <strong>Open email draft</strong> (it opens a prefilled message; attach the downloaded PDF yourself), or <strong>Send via Telegram</strong>, which appears only when the owner is a connection with a linked Telegram chat.</li>
+</ol>
+<div class="guide-tip">The report is written for the owner to read: "you" is them and "Dad" is you. It holds a summary of the period, the share rules in force, <strong>Your loans to Dad</strong> when they've lent you money (see Loans), a statement with a running balance, and the income and night-rate charts.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I read the two charts?</div>
+<ol class="guide-steps">
+<li><strong>Income by month</strong> covers 15 months back and 6 forward. A stay across a month end is split by nights. Tick or untick each person to include them in the stack; each person's <strong>Agg &pound;</strong> and <strong>Normal &pound;</strong> boxes set their monthly targets, which add up across whoever is ticked. Stripes mean "Other" platform income.</li>
+<li><strong>Average night rate by listing</strong> is gross minus the cleaning cost, divided by nights. Set what one clean costs in <strong>Cleaning cost &pound;</strong> (it's charged once per stay, plus once more per full 7 nights). <strong>Average</strong> draws a line per listing; <strong>High / Low / Avg</strong> draws a candle per room per month, with occupancy below.</li>
+</ol>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-finances-loans">
+<summary>Loans from owners</summary>
+
+<div class="guide-task">
+<div class="guide-q">How do I record money I've borrowed from an owner?</div>
+<ol class="guide-steps">
+<li>In <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#loans-panel">Loans from owners</span>, choose the lender in the first box. It lists people who have a listing or ledger entry in Letting income; to borrow from anyone else, add them to a listing first.</li>
+<li>Type the <strong>Amount &pound;</strong>, set <strong>From</strong> (the day you receive it) and <strong>Repay</strong> (the day you pay it back), and check <strong>% a year</strong> (it starts at 10).</li>
+<li>Press <strong>Add tranche</strong>. Add one tranche for each separate sum and repayment date.</li>
+</ol>
+<div class="guide-tip">Each tranche shows <strong>upcoming</strong>, <strong>active</strong> or <strong>repaid</strong>. Amount, dates and rate can be edited in place; &times; removes a tranche. The panel heading shows the total currently borrowed.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How is interest worked out?</div>
+<ol class="guide-steps">
+<li>Each day, interest runs on what's lent to you minus what that owner owes you on the Airbnb ledger that day (never below zero). The rate is a yearly % divided by 365. A tranche stops earning on its <strong>Repay</strong> date.</li>
+<li>The Airbnb balance is set against the tranche due back soonest first, so the longer-dated loans are what stay outstanding. Each tranche earns its own rate on its own remaining part.</li>
+<li>If you already owe the owner through the ledger (their balance is negative), that amount is charged interest as well, at the average rate.</li>
+<li>Under the lender's name the panel shows what's lent today, what they owe you on the Airbnb ledger, what's interest-bearing right now, interest so far this month and interest posted to date.</li>
+</ol>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">When does the interest reach the ledger?</div>
+<ol class="guide-steps">
+<li>When the dashboard opens on or after the 1st of a month, the previous month's interest is added to that owner's Letting income ledger as a negative <strong>Interest</strong> row dated the 1st, titled "Loan interest, &lt;Month Year&gt;". It reduces what they owe you.</li>
+<li>Missed months (the dashboard wasn't opened) are all posted next time, oldest first, each one counted after the one before it.</li>
+<li>Once interest is on the ledger it counts towards later months' interest too, so interest compounds monthly.</li>
+</ol>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">I changed or removed a tranche. How do I fix the interest already posted?</div>
+<ol class="guide-steps">
+<li>Press <strong>Recalculate interest</strong> and confirm. It removes every automatic interest row and works them out again from the loans as they are now.</li>
+</ol>
+<div class="guide-tip">Adding a tranche posts interest for any completed months by itself. Editing or deleting one does not, and the panel reminds you to use Recalculate (deleting asks you to confirm first). Paying a tranche back early isn't a separate action: set its <strong>Repay</strong> date to the day it was repaid, then Recalculate. The loan sums themselves aren't kept in the ledger, so if you settle by netting against Airbnb money, record that as a <strong>Payment</strong> row.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How does the owner see all this?</div>
+<ol class="guide-steps">
+<li>Their monthly report (see Letting income) has a <strong>Your loans to Dad</strong> section: what's owed to them at the start and end of the period, the interest for the period, and a table per tranche showing the Airbnb offset, what's still owed at each end, and the interest.</li>
+<li>"Owed to you" is the loans (after the Airbnb offset), plus interest already taken off their balance, plus this month's interest that isn't taken off until the 1st.</li>
+</ol>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-finances-loyalty">
+<summary>Loyalty balances</summary>
+
+<div class="guide-task">
+<div class="guide-q">How do I see my points and miles without logging in anywhere?</div>
+<ol class="guide-steps">
+<li>In <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#loyalty-balances-panel">Loyalty balances</span> each programme (British Airways, Marriott Bonvoy, Virgin Flying Club, Tesco Clubcard, Boots, Hertz, SIXT, Miles &amp; More, Nectar, IKEA Family, Vueling Club, Quidco, TopCashback and others) shows its latest balance, the date it was read, and any expiry.</li>
+<li>Balances come from the programme's emails in your Gmail, so you must be signed in to Google. Each programme is checked about every 28 days when the dashboard is open. Some months have no new email, so nothing new shows.</li>
+<li>Press <strong>Check all now</strong> to check every programme straight away, or open a programme's <strong>Settings</strong> and press <strong>Check now</strong> for just that one.</li>
+</ol>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I show a balance on the Travel tab?</div>
+<ol class="guide-steps">
+<li>Open the programme's <strong>Settings</strong> and tick <strong>Show on Travel tab</strong>. The balance also joins the rotating loyalty tile in the ticker.</li>
+</ol>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I add a programme that isn't listed?</div>
+<ol class="guide-steps">
+<li>At the bottom of the panel type the <strong>Program name</strong> and the <strong>Sender address(es)</strong> its emails come from (comma separated, both required), then press <strong>Add</strong>.</li>
+<li>A programme without a built-in reader is read with an AI call for every new email; its badge says <strong>AI-parsed (Nx)</strong> with the number of calls so far. Built-in programmes say <strong>Deterministic</strong> and cost nothing.</li>
+<li>Open its <strong>Settings</strong> to change the sender addresses, add a membership number, make it inactive, or <strong>Remove</strong> it (custom programmes only).</li>
+</ol>
+<div class="guide-tip">You can't set a search filter on a custom programme, so a sender that mostly sends marketing mail makes the AI read every one. Use a narrow sender address where you can.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">A balance is missing or out of date. What can I do?</div>
+<ol class="guide-steps">
+<li>Open the programme's <strong>Settings</strong> and press <strong>Check now</strong>; the line beneath says what it found.</li>
+<li>If a reader has been fixed or you changed the sender, press <strong>Forget processed emails</strong> and confirm, then Check now. It looks again at the last 400 days without duplicating readings.</li>
+<li>To enter a figure yourself, use <strong>Record a reading by hand</strong>: a label, the balance and an optional unit, then <strong>Record</strong>.</li>
+</ol>
+<div class="guide-tip">Marriott Vacation Club has no email to read. Its balance is recorded from the Travel tab's Marriott availability import.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">Why is the Vouchers panel asking me about a reading?</div>
+<ol class="guide-steps">
+<li>The first time a programme reports a new kind of reading, Vouchers &amp; Credits asks whether it's a <strong>Running balance (points, miles, tier status...)</strong> or a <strong>Voucher / credit event</strong>. Choose one; you're not asked again for that kind.</li>
+<li>Voucher-type readings then need linking to a voucher. See the Vouchers section below.</li>
+</ol>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-finances-vouchers">
+<summary>Vouchers &amp; Credits</summary>
+
+<div class="guide-task">
+<div class="guide-q">How do I keep track of a voucher or credit before it expires?</div>
+<ol class="guide-steps">
+<li>In <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#voucher-form">Vouchers &amp; Credits</span> type the name (for example "BA Companion Voucher"), choose the type (Voucher, Credit, Cheque, Refund or Other), and optionally the value, expiry date, notes and provider. Press <strong>Add</strong>.</li>
+<li>The list is grouped by provider and sorted so the soonest expiry is first. Each voucher shows <strong>Nd left</strong>, amber within 30 days, or <strong>Expired</strong>.</li>
+<li>Every field is editable in the row. Typing a known provider fills in its logo. Press &times; to delete a voucher.</li>
+</ol>
+<div class="guide-tip">There's no "used" state. A voucher you've spent stays in the list, marked Expired once its date passes, until you delete it, and deleting asks you to confirm.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I deal with voucher readings from loyalty emails?</div>
+<ol class="guide-steps">
+<li>A box at the top of the panel says "N items from loyalty scans need a quick decision" when there is something to do.</li>
+<li>For a new kind of reading, choose <strong>Running balance</strong> or <strong>Voucher / credit event</strong>.</li>
+<li>For a voucher event, choose <strong>Update "&lt;existing voucher&gt;"</strong> (offered when the reference or the name matches), <strong>Different existing voucher&hellip;</strong>, <strong>Add as new voucher</strong>, or <strong>Not a voucher &mdash; skip this one</strong>, then press <strong>Confirm</strong>.</li>
+<li>If other unresolved readings share the same label, a tick-box offers to apply your choice to all of them. It starts ticked only when they all carry the same amount, which means the same voucher is being reported again.</li>
+</ol>
+<div class="guide-tip">A voucher created this way shows a <strong>from loyalty scan</strong> chip that jumps back to the reading, and the reading links to the voucher.</div>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-finances-subscriptions">
+<summary>Subscriptions</summary>
+
+<div class="guide-task">
+<div class="guide-q">How do I track what I pay for and when it renews?</div>
+<ol class="guide-steps">
+<li>In <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#subscription-form">Subscriptions</span> type the name, choose the frequency (Monthly, Yearly, Weekly or Other), type the cost if you want, and set the <strong>next</strong> renewal date (not the date you signed up). Press <strong>Add</strong>.</li>
+<li>The list is sorted by soonest renewal. A badge shows <strong>Nd left</strong> (amber within 7 days), <strong>Renews today</strong>, or <strong>Update due</strong> once the date has passed.</li>
+<li>When a renewal passes, type the new date into the row. It doesn't move on by itself.</li>
+</ol>
+<div class="guide-tip">The panel doesn't add costs up. Cost is free text, so write it however you like.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I record that an account pays for a subscription, or gives it to me free?</div>
+<ol class="guide-steps">
+<li>In the subscription's row choose the account from the drop-down (it reads "Not linked to an account" until you do).</li>
+<li>Tick <strong>Free with it</strong> if the account includes it as a perk. The cost box is then disabled, and the account's card lists it as something you'd lose by closing the account.</li>
+</ol>
+</div>
+</details>
+
+</div>
+</details>
+
+<details class="settings-item" id="guide-travel">
+<summary><h3>Travel</h3></summary>
+<div class="settings-block">
+<p class="settings-note" style="margin:0 0 10px;">The <span class="inline-goto-link" data-goto-tab="travel" data-goto-target="#travel-panel">Travel tab</span> holds your trips, the flights, hotels, car hire and transfers inside them, who is going, a packing list, annual leave, cat-sitting cover, and a scan of Marriott Vacation Club availability. Pick a job below.</p>
+
+<details class="settings-subgroup" id="guide-travel-trips">
+<summary>Starting and managing trips</summary>
+
+<div class="guide-task">
+<div class="guide-q">How do I start a trip?</div>
+<ol class="guide-steps">
+<li>In the Travel panel, type a name in <strong>Trip name</strong> (for example "Lisbon long weekend"). Add a destination if you know it.</li>
+<li>Press <strong>+ New trip</strong>. A trip card appears, and a project called "Trip: &lt;name&gt;" is added to your Tasks.</li>
+</ol>
+<div class="guide-tip">Other ways in: tell Smart capture "create a trip to Mallorca 1st to 5th November"; click a city-break suggestion in the <span class="inline-goto-link" data-goto-tab="overview" data-goto-target="#nudges-panel">Nudges</span> panel; press <strong>+ trip</strong> beside an open date in <span class="inline-goto-link" data-goto-tab="travel" data-goto-target="#mvc-pivot">Marriott availability</span>; or choose "New trip" when you add a leg from an email or screenshot (see <span class="inline-goto-link" data-goto-tab="guide" data-goto-target="#guide-travel-legs">Flights, hotels and bookings</span>).</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I set a trip's dates and destinations?</div>
+<ol class="guide-steps">
+<li>On the trip card, pick the first date in the left date box. If the end date is empty it fills in as start + 2 days and its calendar opens, so you can change it straight away.</li>
+<li>Type a place into <strong>+ destination</strong> and press Enter, type a comma, or press the <strong>+</strong> button. Add one chip per place for a multi-city trip. Click the &times; on a chip to remove it.</li>
+</ol>
+<div class="guide-tip">If you leave a trip's dates blank, they are filled in from your bookings as you add them (earliest to latest leg date), so a trip built from emails sorts and expires correctly. Dates you type yourself are never overwritten.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I find a trip that has gone from the list?</div>
+<ol class="guide-steps">
+<li>A trip drops off the list 7 days after its end date. A trip with no end date never drops off.</li>
+<li>Tick <strong>Show past trips</strong> at the top right of the panel. It only appears when at least one past trip exists. Any trip link elsewhere in the app also opens a past trip.</li>
+</ol>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I rename or delete a trip?</div>
+<ol class="guide-steps">
+<li>To rename, edit the title at the top of the card. The linked Tasks project is renamed to match.</li>
+<li>To delete, click the &times; at the top right of the card and confirm. This also deletes the linked project <em>and every subtask under it</em>, the trip's legs and their attachments, and the Planner entries placed for the trip.</li>
+</ol>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I manage the work of a trip as tasks?</div>
+<ol class="guide-steps">
+<li>Open the trip card and click the project chip under the status line. It jumps to the project in <span class="inline-goto-link" data-goto-tab="tasks" data-goto-target="#tasks-panel">Tasks</span>.</li>
+<li>Add subtasks there ("book parking", "buy euros"). They stay in your normal task lists and the trip's project holds them together.</li>
+</ol>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-travel-legs">
+<summary>Flights, hotels, car hire and transfers (legs)</summary>
+
+<div class="guide-task">
+<div class="guide-q">How do I add a booking by hand?</div>
+<ol class="guide-steps">
+<li>At the bottom of the trip card, choose a type (Flight, Car hire, Accommodation, Transfer or Other) and press <strong>+ Add leg</strong>.</li>
+<li>Click the &#9656; arrow on the new leg to open it. Type a short label in the leg's name box (for example "Outbound: LHR to LIS"), then fill in the fields.</li>
+<li>Set the status box to <strong>Not booked yet</strong>, <strong>Booked</strong> or <strong>Confirmed</strong>.</li>
+</ol>
+<div class="guide-tip">Dates and times: type them any usual way ("19/09/2026 15:00"). They are tidied to 2026-09-19 15:00 as soon as you leave the box. A date with no year takes the year of the trip's start date. Anything that isn't a date is left as you typed it.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I add a booking from a confirmation email?</div>
+<ol class="guide-steps">
+<li>Sign in to Google (the bar at the top of the <span class="inline-goto-link" data-goto-tab="overview" data-goto-target="#google-bar">Overview</span>) and add your Anthropic key in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#anthropic-key-input">Settings</span>. Reading an email uses AI, so both are needed.</li>
+<li>On the Overview, press <strong>Refresh mail</strong> in the <span class="inline-goto-link" data-goto-tab="overview" data-goto-target="#mail-panel">Mail</span> panel, find the confirmation, and open its <strong>&#8943; Other actions</strong> menu. Choose <strong>+ trip leg</strong> (it sits directly on the row if your mail topic prefers it).</li>
+<li>Choose <strong>Existing trip</strong> (or <strong>New trip</strong> and type a name), and a starting type.</li>
+<li>Press <strong>&#10024; Read email &amp; add</strong>. A new leg is created and the message tells you how many details were added and whether anything required is still missing. The trip name in that message is a link back to the card.</li>
+</ol>
+<div class="guide-tip">If you have only one trip, "Existing trip" skips the list and shows "&rarr; your trip name". Attachments such as a boarding-pass PDF are saved onto the leg when the email has them, and the leg's status becomes <strong>Confirmed</strong>. Every press of the button creates a new leg, so press it once per email. If you get a duplicate, delete the extra leg with its &times;.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I add a booking from a screenshot?</div>
+<ol class="guide-steps">
+<li>Get the screenshot into the <span class="inline-goto-link" data-goto-tab="tasks" data-goto-target="#capture-inbox-panel">Capture Inbox</span> (share it from your phone, or add photos there).</li>
+<li>Tick the screenshot(s), then press <strong>Extract into a trip leg</strong>. Choose the trip and press <strong>Extract selected</strong>.</li>
+<li>Each ticked screenshot becomes its own leg. A message per image says what was added and links to the trip.</li>
+</ol>
+<div class="guide-tip">Once a screenshot has been turned into a leg it is removed from the Capture Inbox and is not kept on the leg. Keep your own copy of a boarding pass if you need the image offline.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I finish a booking that shows "still needed"?</div>
+<ol class="guide-steps">
+<li>The leg header says "<em>N</em> still needed" or "complete". Open the leg: every required field that is empty is marked &#9888; with the placeholder "Still needed".</li>
+<li>Type the value, or press <strong>N/A</strong> beside the box if it doesn't apply (for example a seat on a train). An N/A field shows "N/A" instead. Click its &times; to bring the box back.</li>
+</ol>
+<div class="guide-tip">Never required: Car type, Contact phone and Stay type. The trip's status line counts every open item and says "Itinerary complete." when nothing is left. Within 14 days of departure, open items also appear in the <span class="inline-goto-link" data-goto-tab="overview" data-goto-target="#nudges-panel">Nudges</span> panel.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I record who is on a flight and where they sit?</div>
+<ol class="guide-steps">
+<li>Open the leg. Under <strong>Passengers</strong>, type a name, then a seat and baggage if known, and press <strong>Add</strong>.</li>
+<li>Edit any box in a passenger row to change it, or click its &times; to remove the passenger.</li>
+</ol>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I put a booking on my Google Calendar?</div>
+<ol class="guide-steps">
+<li>Turn on "Allow creating events in Google Calendar" in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#calendar-write-toggle">Settings</span>, then sign out of Google and back in.</li>
+<li>Open a leg that has a date. Pick a calendar in the box under the notes and press <strong>Check/update calendar</strong>.</li>
+</ol>
+<div class="guide-tip">It looks for an event within a day of the leg's date whose title matches the leg's name (or its type, if you didn't name it). One match is linked, several are left alone and reported as ambiguous, and none creates a new event. A leg with a time becomes a one-hour event at that time, and a leg with only a date becomes an all-day event. Name legs distinctly to avoid ambiguous matches.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I ask a family member about a booking?</div>
+<ol class="guide-steps">
+<li>Open the leg and press <strong>Ask via Telegram</strong>.</li>
+<li>You are taken to the Family Telegram section of <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#telegramfamily-panel">Settings</span> with this leg already chosen as the topic. Pick the person and send.</li>
+</ol>
+<div class="guide-tip">This needs the Telegram family connection to be set up first.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I delete a leg?</div>
+<ol class="guide-steps">
+<li>Click the &times; at the right of the leg's header.</li>
+</ol>
+<div class="guide-tip">If the leg has any details or attached files you are asked to confirm first; the leg and its files are then removed for good.</div>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-travel-people">
+<summary>People on a trip</summary>
+
+<div class="guide-task">
+<div class="guide-q">How do I say who is coming?</div>
+<ol class="guide-steps">
+<li>On the trip card, use the people row. Press <strong>Pick a connection&hellip;</strong> and choose someone from your Connections, or choose <strong>Someone else&hellip;</strong> and type a name.</li>
+<li>Set how they relate to you (Me, Date / partner, Child, Other) and press <strong>Add</strong>.</li>
+<li>Click the &times; on a person's chip to remove them.</li>
+</ol>
+<div class="guide-tip">People you pick from Connections show as a link to their card. "Someone else" stays plain text and never becomes a connection. The relation drives the packing list: a partner or a child adds their own items.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do the people I add show up in the Planner?</div>
+<ol class="guide-steps">
+<li>Give the trip dates (or dated legs). Each person who is a connection is placed on every day of the trip in that trip's own day grid on the <span class="inline-goto-link" data-goto-tab="planner" data-goto-target="#planner-panel">Planner</span>.</li>
+<li>To take someone off a day, drag them off it there. They are not put back on that day when you edit the trip's dates.</li>
+</ol>
+<div class="guide-tip">Removing a person from the trip card takes away only the placements made automatically for them. Dragging in the same person separately is left alone. A trip shows a day grid only while it has a start and end date (or dated legs), and only for its first 60 days.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I show a Planner date event inside a trip?</div>
+<ol class="guide-steps">
+<li>In the Planner's <strong>Date events</strong> section, open the event and choose the trip under <strong>Part of a trip?</strong>.</li>
+<li>It now appears in that trip's itinerary list in date order, with an <strong>Edit in Planner</strong> button. Edit it there, not on the trip card.</li>
+</ol>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-travel-packing">
+<summary>Packing lists</summary>
+
+<div class="guide-task">
+<div class="guide-q">How do I get a packing list for a trip?</div>
+<ol class="guide-steps">
+<li>Give the trip a start and end date first, and add its people and legs. The list is built from them: how many days, who is coming, whether there is car hire, and the accommodation's stay type.</li>
+<li>On the trip card, press <strong>Generate packing list</strong>. The list opens under <strong>Show packing list</strong>.</li>
+<li>Tick items as you pack. Change a quantity in its box. Click an item's &times; to remove it.</li>
+</ol>
+<div class="guide-tip">Without a start date the list assumes a short weekend, and the card says "Add trip dates above". Quantities scale with length: up to 3 days, up to 7 days, and longer.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I add beach, cold-weather or adventure items?</div>
+<ol class="guide-steps">
+<li>Click the chips above the list (Beach, Cold weather, Active / adventure) to switch them on for this trip.</li>
+<li>Press <strong>Generate packing list</strong> (or <strong>Refresh</strong> if the trip already has a list). Switching a chip on does nothing until you press it.</li>
+</ol>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I update the list after the trip changes?</div>
+<ol class="guide-steps">
+<li>Press <strong>Refresh</strong>. It only adds items the trip now needs. It never changes quantities, ticks or notes you have set, and never removes anything.</li>
+</ol>
+<div class="guide-tip">An item you remove stays removed, even on Refresh, and there is no button to bring it back. If you need it again, type it into <strong>+ custom item</strong> and press <strong>Add</strong>.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I turn a packing item into a task, a shopping item or a book?</div>
+<ol class="guide-steps">
+<li>Under the list, use the <strong>Link an item&hellip;</strong> row. Choose the item, then <em>to a Task</em>, <em>to Shopping</em> or <em>to a Book</em>, and press <strong>Link</strong>.</li>
+<li>For a task or shopping item, type the title when asked. For a book, type part of its title; it must already be on your Books shelf.</li>
+<li>The item then shows a chip for what it's linked to. Click the &times; on the chip to unlink it.</li>
+</ol>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I change what goes into the lists?</div>
+<ol class="guide-steps">
+<li>Open <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#packing-modules-block">Settings &rarr; Calendar &amp; Planner &rarr; Packing modules</span>.</li>
+<li>Each module has a name, a section heading, a rule for when it applies (always, who's coming, a leg type, a stay-type keyword, or manual), and its items. Add or delete items, change the rule, or press <strong>Add module</strong> for your own.</li>
+</ol>
+<div class="guide-tip">Deleting a built-in module is permanent. Changes affect lists generated or refreshed from then on, not items already on a trip's list.</div>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-travel-itinerary">
+<summary>Downloading an offline itinerary</summary>
+
+<div class="guide-task">
+<div class="guide-q">How do I get my itinerary onto my phone for travelling?</div>
+<ol class="guide-steps">
+<li>Fill in the trip's legs. Anything required but empty shows as "&#9888; not yet confirmed" in the file, so fix those first if you can.</li>
+<li>Press <strong>Download itinerary</strong> at the bottom of the trip card. If items are open you are asked to confirm.</li>
+<li>Open the downloaded <code>itinerary-&lt;trip-name&gt;.html</code> file. It is a single page that works with no signal.</li>
+</ol>
+<div class="guide-tip">The file has the trip name, destinations, dates, people, and each leg's details, passengers (with seats and baggage) and notes. It does not include the packing list, Planner date events, cat-sitting cover, attachments such as boarding passes, or "manage booking" links. It is a snapshot, so download it again after any change.</div>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-travel-leave">
+<summary>Annual leave</summary>
+
+<div class="guide-task">
+<div class="guide-q">How do I count a trip against my annual leave?</div>
+<ol class="guide-steps">
+<li>On the trip card, click the round dot beside <strong>Annual leave</strong>. Each click moves it on: not tracked, <strong>draft</strong>, <strong>firm</strong>, <strong>approved</strong>, then back to not tracked.</li>
+<li>The card shows the days the trip uses: weekdays only, with UK bank holidays taken out. If that isn't right (a half day, a day you'd have taken off anyway), type your own figure in the box. Leave it blank for the automatic count.</li>
+</ol>
+<div class="guide-tip">Use draft while you're deciding, firm when you've decided, and approved once work has signed it off. The count uses the trip's dates, or its legs' dates if the trip's own are blank, and bank holidays for England and Wales only.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I see how many days I have left?</div>
+<ol class="guide-steps">
+<li>Look at the <span class="inline-goto-link" data-goto-tab="travel" data-goto-target="#leave-panel">Annual leave</span> panel. It has one block per leave year (1 April to 31 March), by the date each trip starts.</li>
+<li>Each block lists its trips with their status and days, and a line such as "30 entitlement &rarr; 24 after approved &rarr; 19 after firm &rarr; 16 after draft".</li>
+<li>If your entitlement isn't 30 days, change the number in the block's <strong>Entitlement</strong> box.</li>
+</ol>
+<div class="guide-tip">A trip marked as leave but with no dates and no dated legs is not listed. A trip counts at most 60 days.</div>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-travel-catsitting">
+<summary>Cat-sitting cover</summary>
+
+<div class="guide-task">
+<div class="guide-q">How do I check my cats are covered while I'm away?</div>
+<ol class="guide-steps">
+<li>Look at the strip near the top of the Travel panel. Each upcoming trip with away dates shows "x of y days firm", any draft days, and a &#9888; if some days are uncovered.</li>
+<li>On a trip card, the <strong>Cat sitting</strong> section lists each sitter's dates as a chip. A dashed <strong>TBC</strong> chip marks each stretch nobody is covering yet.</li>
+</ol>
+<div class="guide-tip">The section appears once the trip has dates (or dated legs). A day counts as covered only when a <em>firm</em> booking includes it.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I record who is covering?</div>
+<ol class="guide-steps">
+<li>Click a dashed TBC chip. Type the sitter's name, adjust the start and end dates if needed, and press <strong>Add</strong>.</li>
+<li>It is added as a draft. Click the coloured dot on the chip to mark it firm (click again for draft). Click the &times; to remove it.</li>
+</ol>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I pull in bookings from Cat in a Flat?</div>
+<ol class="guide-steps">
+<li>Sign in to Google, then press <strong>Check cat-sitting emails</strong> at the top of the Travel panel.</li>
+<li>It reads your "Your booking has been made" emails and reports "N new bookings captured". Each is added as a firm booking, with the sitter's name as plain text.</li>
+</ol>
+<div class="guide-tip">A booking is attached to a trip only if its dates fall entirely inside exactly one trip's dates. Any other booking is captured but not shown anywhere on the Travel tab, so give the trip its dates before you check.</div>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-travel-marriott">
+<summary>Marriott Vacation Club availability</summary>
+
+<div class="guide-task">
+<div class="guide-q">How do I scan for Marriott Vacation Club availability?</div>
+<ol class="guide-steps">
+<li>In the Marriott availability panel, open <strong>1 &middot; Scan settings</strong>. Set the nights to look for (for example 2, 3, 4, 5, 7), the guests, how many months to scan, and the speed. Choose <em>Auto-detect every room type</em> or <em>Only these</em> and type the room types you want (click a suggested chip to add it). The line below shows an estimated run time.</li>
+<li>Press <strong>Copy scan script</strong>.</li>
+<li>Open <a href="https://owners.marriottvacationclub.com/" target="_blank" rel="noopener">owners.marriottvacationclub.com</a>, go to <strong>Book with Points</strong>, and pick your resorts and the starting month.</li>
+<li>Open the browser's Console (F12), paste the script and press Enter. Leave that tab open until it finishes. It runs the searches itself, one night-count and month at a time.</li>
+<li>When it ends it downloads a CSV and a JSON file.</li>
+</ol>
+<div class="guide-tip">"Months to scan" counts from the month showing on Marriott's own search form, including that month. If a run reports zero resorts when you know there are some, raise the speed multiplier and run it again.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I load the results into the dashboard?</div>
+<ol class="guide-steps">
+<li>Open <strong>2 &middot; Import results</strong>.</li>
+<li>Either press <strong>Or upload file(s)&hellip;</strong> and choose the downloaded JSON (and/or CSV) files, or paste the JSON into the box and press <strong>Read</strong>. The scan also leaves its JSON in the Console; run <code>copy(window.__marriottAvailabilityExport)</code> to copy it.</li>
+<li>A message says how many open check-in dates were imported and how many older ones were replaced.</li>
+</ol>
+<div class="guide-tip">Each import replaces everything held for the same night-counts and months, so a re-scan refreshes those slices and removes dates that have since sold out. Prefer the JSON: it records exactly which months were scanned and the points balance, which the CSV cannot. Dates in the past drop out by themselves. <strong>Clear imported data</strong> wipes the lot and can't be undone.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I read the availability table?</div>
+<ol class="guide-steps">
+<li>There is a block for each number of nights (click its heading to fold it). Each row is a resort and each column a month.</li>
+<li>A number is how many check-in dates are open that month, with "from N" for the lowest points price. A dash means scanned and nothing open. A dot means that night-count and month weren't scanned.</li>
+<li>Click a number to see the dates with their room types and points. Use <strong>All room types</strong> to narrow to one.</li>
+</ol>
+<div class="guide-tip">A resort labelled "Resort 1", "Resort 2" etc. has a name the script couldn't read; the label may differ between runs.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I turn a free date into a trip?</div>
+<ol class="guide-steps">
+<li>Click a number in the table to open its dates.</li>
+<li>Press <strong>+ trip</strong> beside the date. A trip named "&lt;resort&gt; &middot; N nights" is created with that start and end date. The button becomes a link to the trip.</li>
+</ol>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I see my points balance?</div>
+<ol class="guide-steps">
+<li>It shows at the top of the Marriott panel after you import a JSON export that includes it, with the date it was read.</li>
+<li>It is also recorded under <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#loyalty-balances-panel">Finances &rarr; Loyalty balances</span> as Marriott Vacation Club.</li>
+</ol>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-travel-points">
+<summary>Showing loyalty points on the Travel tab</summary>
+
+<div class="guide-task">
+<div class="guide-q">How do I keep my points balances in view while planning?</div>
+<ol class="guide-steps">
+<li>Open <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#loyalty-balances-panel">Finances &rarr; Loyalty balances</span>, open a programme's <strong>Settings</strong>, and tick <strong>Show on Travel tab</strong>.</li>
+<li>Its latest balances appear as chips under the Travel heading, and the same programmes rotate through the ticker on the Overview.</li>
+</ol>
+</div>
+</details>
+</div>
+</details>
+
+<details class="settings-item" id="guide-shopping">
+<summary><h3>Shopping</h3></summary>
+<div class="settings-block">
+<p class="settings-note" style="margin:0 0 10px;">The Shopping tab has four panels: <span class="inline-goto-link" data-goto-tab="shopping" data-goto-target="#shopping-capture-panel">Shopping capture</span> (add things), <span class="inline-goto-link" data-goto-tab="shopping" data-goto-target="#shopping-lists-panel">Lists</span> (price checks and wants), <span class="inline-goto-link" data-goto-tab="shopping" data-goto-target="#inventory-panel">Inventory</span> (things you own that nobody has yet) and <span class="inline-goto-link" data-goto-tab="shopping" data-goto-target="#ap-orders-panel">AP orders</span> (Agent Provocateur order emails and returns). Inventory, sizes and wants are hidden until you turn on <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#sensitive-fields-toggle">Show private fields</span> on this device.</p>
+
+<details class="settings-subgroup" id="guide-shopping-lists">
+<summary>Adding things to buy and finding the best price</summary>
+
+<div class="guide-task">
+<div class="guide-q">How do I add something to a shopping list?</div>
+<ol class="guide-steps">
+<li>In <span class="inline-goto-link" data-goto-tab="shopping" data-goto-target="#shopping-capture-panel">Shopping capture</span>, type the item in the box that says "What do you need?".</li>
+<li>Pick the list in the dropdown next to it: Supermarket, Pharmacy, Black Friday or Aspirational purchases.</li>
+<li>Press <strong>Add</strong> (or Enter). The item appears under that list in <strong>Lists</strong> straight away. It does not go through the Tasks inbox.</li>
+</ol>
+<div class="guide-tip">To add by voice, press the microphone button, say the item and stop talking. Whatever you said is added word for word as the item's name. The button is hidden in browsers that can't transcribe speech.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I add a product from a web page?</div>
+<ol class="guide-steps">
+<li>Paste the page's link into the "What do you need?" box. A <strong>&#10024; Resolve title</strong> button appears.</li>
+<li>Press it to replace the link with the product's name. The link is kept on the item. This needs your <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#anthropic-key-input">Anthropic key</span>.</li>
+<li>Choose the list and press <strong>Add</strong>. If you skip Resolve title, the item is named after the link instead, but the link is still attached.</li>
+</ol>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I add something from my phone's share menu?</div>
+<ol class="guide-steps">
+<li>Share a link or a photo to the dashboard.</li>
+<li>Links from tesco.com and amazon.co.uk go to the Supermarket list automatically. For a link from any other shop, put <code>#S</code> on the end of the link before you share it.</li>
+<li>For a photo, mark it with the letter <strong>S</strong>.</li>
+</ol>
+<div class="guide-tip">The routing rules are listed in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#share-url-rules">Shared-link auto-routing</span> and <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#capture-rules">Capture markers &amp; suffixes</span>, where you can change them.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I see where an item is cheapest?</div>
+<ol class="guide-steps">
+<li>A new Supermarket item is priced automatically as soon as you add it.</li>
+<li>For any other list, or to re-check, press <strong>Search prices</strong> on the item's row. The button becomes <strong>Refresh</strong> once it has been run.</li>
+<li>The row then shows a recommendation and a line per shop with the product name, price and any offer. Click a line to open that product page. The last line says how long ago the prices were checked.</li>
+<li>Beside each result are cashback links (Quidco, TopCashback) with the last rate seen. Click through from one of them before you buy so the purchase is tracked.</li>
+</ol>
+<div class="guide-tip">Prices come from an AI search of each shop's site, so they can be out of date or missing, and you add to the shop's basket yourself. Amazon often returns no price. It needs your Anthropic key. If you see a <strong>Paste price</strong> button on an Amazon result, it only works with the Amazon price bookmarklet, which the dashboard does not yet offer for installing.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I tick an item off, bring it back, or add details?</div>
+<ol class="guide-steps">
+<li>Tick the box on the row to mark it bought. It disappears from the list. Tick <strong>Show done</strong> at the top of Lists to see finished items; unticking one puts it back as a next action.</li>
+<li>Click the item's name to open the full task in the Tasks tab, where you can add a due date, subtasks or a photo. Closing it brings you back to Shopping.</li>
+<li>To make an existing task appear on a shopping list, add the Supermarket (or other list) context to it in Tasks. A task tagged DIY and Supermarket shows on both.</li>
+</ol>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-shopping-someone">
+<summary>Buying for someone (sizes and wants)</summary>
+
+<div class="guide-task">
+<div class="guide-q">How do I record someone's sizes?</div>
+<ol class="guide-steps">
+<li>Turn on <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#sensitive-fields-toggle">Show private fields</span> in Settings (it applies to this device only).</li>
+<li>Open their card in the <span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#connections-panel">Connections</span> panel and find <strong>Sizes</strong>.</li>
+<li>Press <strong>+ Add a size</strong>. Pick the retailer, pick what it fits (Bra, Knickers and so on, grouped by shared size scale), then fill in Usual, Backup and Backup 2.</li>
+</ol>
+<div class="guide-tip">Pick the retailer from the suggested chips rather than typing it. A want finds sizes by matching the retailer name exactly.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I start watching something for them?</div>
+<ol class="guide-steps">
+<li>In <strong>Shopping capture</strong>, paste the product page link as the item and pick the person in the "For me" box (it shows their name once chosen). Press <strong>Add</strong>.</li>
+<li>The item is now a want. Their name appears on its row with an <strong>Active</strong> button and a watch button showing how many pages are watched (for example "&#128065; 1").</li>
+<li>If you typed words instead of a link, the watch button reads "&#128065; add pages": the want isn't checked until you add at least one product page. Press it and paste the page addresses, one per line.</li>
+</ol>
+<div class="guide-tip">Stock checking only reads Agent Provocateur product pages today. For any other shop it reports "No parser for that retailer yet."</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I buy the item once it's available?</div>
+<ol class="guide-steps">
+<li>Open the want's row in <strong>Lists</strong>. Each product page that matches shows the piece and colour, which of their sizes are in stock (backups are labelled, and "last one" is flagged), the price and any discount code. Click the name to open the page.</li>
+<li>A piece that also has matching items in stock lists them underneath with a "+".</li>
+<li>When you've ordered it, tick the want off. A dialog titled "Record this item?" opens with brand, style, piece, size and colour filled in. Correct them, tick "Already given to" if it's with them, and press <strong>Add</strong>. It goes into <span class="inline-goto-link" data-goto-tab="shopping" data-goto-target="#inventory-panel">Inventory</span>, or onto their card under Has.</li>
+</ol>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I find a set to buy?</div>
+<ol class="guide-steps">
+<li>In <strong>Inventory</strong>, press <strong>Find a set for her&hellip;</strong>.</li>
+<li>Choose the person, set a bra budget (it starts at &pound;150) and optionally tick colour groups (Black, Neutral, Bright, Other). Press <strong>Search</strong>.</li>
+<li>Results appear under "Within budget" and "Biggest discounts over budget". Each shows the bra, its matching knickers in their size, and the price. <strong>View</strong> opens the page; <strong>Add as want</strong> creates a want for them; <strong>Add &amp; edit&hellip;</strong> creates it and opens it in Tasks.</li>
+<li>A want made this way is given the Aspirational purchases context, so it shows in Lists with its stock results and the Active and watch buttons, and on their card under Wants.</li>
+<li>Press <strong>Also check eBay &amp; department stores</strong> to search outside the brand's own site.</li>
+</ol>
+<div class="guide-tip">The search takes a while because pages are fetched one at a time. You can close the dialog and reopen it later; it shows whatever was last found. It only covers Agent Provocateur, needs the person's bra and knickers sizes recorded, and needs your sync set up (it runs through the home agent). The eBay and department-store button uses your Anthropic key.</div>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-shopping-stock">
+<summary>Keeping a want checked (stock watch)</summary>
+
+<div class="guide-task">
+<div class="guide-q">How do I check a want for stock now?</div>
+<ol class="guide-steps">
+<li>Press the watch button on the want's row (for example "&#128065; 1") to open <strong>Pages to watch</strong>.</li>
+<li>Press <strong>Save &amp; check now</strong>. The dialog shows progress and closes when it finishes; the result then appears on the row.</li>
+</ol>
+<div class="guide-tip">Checks run by themselves when you open the app, about every six hours. You can switch the "Stock watch" task off or change the interval in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#scheduled-tasks">Scheduled syncs</span>. Stock checking needs your <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#sync-url-input">sync URL and secret</span>, because pages are fetched through your web host and then your home agent.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I get told when something comes into stock?</div>
+<ol class="guide-steps">
+<li>Leave the want <strong>Active</strong> and make sure it has at least one product page.</li>
+<li>When the check finds a piece in their size, a line appears among your <span class="inline-goto-link" data-goto-tab="overview" data-goto-target="#nudges-panel">Nudges</span> on Overview, saying what is in stock, the size and the price. It says "down to its last one" when only one is left.</li>
+<li>Nothing is sent to your phone. You see it when you open the dashboard.</li>
+</ol>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I stop checking a want without deleting it?</div>
+<ol class="guide-steps">
+<li>Press the <strong>Active</strong> button on its row. It becomes <strong>Suspended</strong>: the want stays on the list but is no longer checked or flagged in Nudges.</li>
+<li>Press it again to resume.</li>
+</ol>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I watch other colours or pieces of the same style?</div>
+<ol class="guide-steps">
+<li>Open <strong>Pages to watch</strong>. Check Brand and Style are filled in (they're read from the first link if you pasted one). Use <strong>Pieces</strong> and <strong>Colours</strong> to narrow what counts; blank means any.</li>
+<li>Press <strong>Find other colours</strong>. It searches the retailer's listings for every item and colour in that style. Progress shows in the dialog and the result is kept, so reopening the editor later still shows it.</li>
+<li>Tick the ones you want and press <strong>Add ticked</strong>. They're added to the pages list. Hover over a result to see its picture.</li>
+<li>Press <strong>Save</strong>.</li>
+</ol>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">What if a check says 403 or can't read the page?</div>
+<ol class="guide-steps">
+<li>Open <strong>Pages to watch</strong> and find the 403 box underneath the colour search.</li>
+<li>Press <strong>Copy snippet</strong>, open the product page in your browser, paste the snippet into the address bar and run it. For a whole style at once, press <strong>Copy bulk snippet</strong> instead (it needs Style filled in) and run it on a listing page showing that style.</li>
+<li>Back in the editor, press <strong>Paste stock</strong>. The want is updated and the pages are added to its list.</li>
+</ol>
+<div class="guide-tip">Pasting a page that doesn't match the want's pieces or colours is rejected with a message saying which page it was.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I see every Agent Provocateur item in one list?</div>
+<ol class="guide-steps">
+<li>In <strong>Inventory</strong>, press <strong>&#128203; Full AP report</strong>.</li>
+<li>The dialog lists every want, set-search result and owned AP piece, cheapest first, showing why it's there, who it's for, and the price including any discount code. Owned pieces with no price go last.</li>
+</ol>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-shopping-inventory">
+<summary>Inventory: things you own that nobody has yet</summary>
+
+<div class="guide-task">
+<div class="guide-q">Why can't I see Inventory?</div>
+<ol class="guide-steps">
+<li>The panel says "Hidden on this device". Turn on <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#sensitive-fields-toggle">Show private fields</span> in Settings and it appears. You have to do this on each device.</li>
+</ol>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I add something I already own?</div>
+<ol class="guide-steps">
+<li>Press <strong>+ Add item</strong>.</li>
+<li>If there is a product page, paste it under "Product link". <strong>Fill from link</strong> reads brand, style and piece from the address. <strong>Fetch exact colour&hellip;</strong> reads the real page for the colour and also picks up its picture. Both only work for Agent Provocateur links.</li>
+<li>Fill in Brand, Style, Piece, Size and Colour by typing, or by clicking a chip taken from what you've already entered.</li>
+<li>If it came from an AP order, enter the order number to link it (see <span class="inline-goto-link" data-goto-tab="guide" data-goto-target="#guide-shopping-ap">AP orders and returns</span>).</li>
+<li>Optionally add a photo with the camera button or from a web address, set "Already with" if it's with someone, add notes, and press <strong>Add</strong>.</li>
+</ol>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I find who an item would fit, and give it to them?</div>
+<ol class="guide-steps">
+<li>Make sure the item has a Size. Without one the row says "No size recorded".</li>
+<li>On its row you'll see up to four people whose recorded sizes match, best match first. Hover a name to see why it matched.</li>
+<li>Press <strong>Give</strong> next to the person. The item leaves Inventory and appears on their card under <strong>Has</strong>.</li>
+<li>If you've since added a person or changed a size, press <strong>&#8635; Recheck fits</strong> so the matches refresh.</li>
+</ol>
+<div class="guide-tip">To take something back, open their card and press <strong>Take back</strong> next to the item. It returns here and nothing is deleted.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I give away a whole set?</div>
+<ol class="guide-steps">
+<li>Under <strong>Complete sets</strong>, each set shows the people it fits across every piece, with how recently you were in touch.</li>
+<li>Press <strong>Give set</strong> next to a name to hand over every piece in one go.</li>
+</ol>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I fix an item's details, change its photo or delete it?</div>
+<ol class="guide-steps">
+<li>Edit Brand, Range, Colour, Piece, Size or Order # directly in the row; changes save as you leave each box.</li>
+<li>The camera button takes or chooses a photo. The link icon <em>after</em> the camera saves a photo from a web address (a product page works too). Click the small picture to view it full size.</li>
+<li>A link icon <em>before</em> the camera appears only when the item has a product link, and opens that page. The two icons look alike, so hover to check which is which.</li>
+<li>The &times; at the end of the row deletes it. There is no confirmation.</li>
+</ol>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I see what something might resell for?</div>
+<ol class="guide-steps">
+<li>Press <strong>&#128176; Resale value?</strong> on the item. It searches eBay for that style and piece (any colour or size) and shows an estimate with the eBay mark.</li>
+<li>Click the estimate to open the listings it was based on, each linking to eBay.</li>
+<li>Press the circular arrow to re-check. <strong>&#8635; Check resale values now</strong> at the top re-checks up to three styles at once. Estimates also refresh themselves roughly monthly.</li>
+</ol>
+<div class="guide-tip">It uses your Anthropic key. Items sharing a style and piece share one estimate.</div>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-shopping-sets">
+<summary>Completing a part set</summary>
+
+<div class="guide-task">
+<div class="guide-q">How do I see which sets are missing a piece?</div>
+<ol class="guide-steps">
+<li>Items with the same brand, style and colour are grouped into sets at the top of Inventory. A set holding only a bra, or only knickers, appears under <strong>Part sets</strong> with a badge such as "Needs Knickers". Sets with both appear under <strong>Complete sets</strong>.</li>
+<li>For a part set, the card also lists who the pieces you have would fit, and the size to buy for the missing piece.</li>
+</ol>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I look for the missing piece?</div>
+<ol class="guide-steps">
+<li>The dashboard searches for you: Agent Provocateur first, weekly at the start and then less often, and eBay after several misses. A find appears on the set's card with the shop, price, condition and when it was found.</li>
+<li>To search now, press <strong>&#8635; Check for missing pieces now</strong> (up to three sets, ignoring the timer). Its status line says how many were checked and found.</li>
+<li>To search one set, use <strong>Search eBay now</strong> or <strong>Search other retailers</strong> on its card. The status line beside them says what was searched.</li>
+<li>Press <strong>Dismiss</strong> on a find you don't want.</li>
+</ol>
+<div class="guide-tip">A search only counts sizes inside the "Only search within" range at the top of Inventory (band, cup and knicker size). The starting range is band 32&ndash;36, cup B&ndash;D, knicker size 2&ndash;4 and it applies to every set, so change it if you're buying for someone outside it. "Search other retailers" uses your Anthropic key; the eBay search does not.</div>
+</div>
+</details>
+
+<details class="settings-subgroup" id="guide-shopping-ap">
+<summary>AP orders and returns</summary>
+
+<div class="guide-task">
+<div class="guide-q">How do I get an Agent Provocateur order into the dashboard?</div>
+<ol class="guide-steps">
+<li>Sign in to Google at the <span class="inline-goto-link" data-goto-tab="overview" data-goto-target="#google-bar">top of the page</span> if you haven't. Order emails are read from Gmail.</li>
+<li>In <strong>AP orders</strong>, press <strong>Check now</strong>. It looks for AP order-confirmation emails and shows how many new orders it captured, how many return deadlines it sharpened from a shipping email, and how many emails it didn't recognise.</li>
+<li>Without pressing anything, the same check runs about once every four weeks when you open the app.</li>
+<li>If Check now doesn't find an order, open <strong>Paste an order email instead</strong>, paste the confirmation email's text, and press <strong>Capture from pasted text</strong>.</li>
+</ol>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I mark which items I'm keeping?</div>
+<ol class="guide-steps">
+<li>Turn on <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#sensitive-fields-toggle">Show private fields</span>, then find each kept item in <strong>Inventory</strong> (add it with <strong>+ Add item</strong> if it isn't there).</li>
+<li>In its <strong>Order #</strong> box, type or pick the order number. The suggestions list shows each captured order's date and item count.</li>
+<li>A dropdown "Link to an order line&hellip;" appears on the row. Choose the line. The list is alphabetical, with lines whose name contains the item's Range, and then its Size, moved to the top.</li>
+<li>The row now shows an order chip and the line's name, colour and size so you can check it's the right one. Click the &times; beside it to unlink. If the item has no photo, the order email's picture is used.</li>
+</ol>
+<div class="guide-tip">Every order line you haven't linked counts as <em>returning</em>. Link all the kept items before you copy a return list or script.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I return the items I'm not keeping?</div>
+<ol class="guide-steps">
+<li>In <strong>AP orders</strong>, open the order's card and press <strong>Show items &amp; return actions</strong>. Check the "Kept" list against the real items, then check "Returning".</li>
+<li>Press <strong>Copy return list</strong> for a plain text list of kept and returning items. Or press <strong>Copy return script</strong> to fill in AP's returns portal for you.</li>
+<li>For the script: open the returns portal and go to its "Choose your products" page, open the browser's developer Console (F12), paste the script and run it. The first run changes nothing; it prints a table showing what it would tick.</li>
+<li>If the table is right, find <code>const DRY_RUN = true;</code> near the top of the script, change it to <code>false</code> and run it again. It ticks each returning line and sets the reason to "Doesn't suit me" and the option to "Refund". Items you're keeping are left unticked. To use a different reason or option, edit those two lines in the script before running.</li>
+<li>The script never presses the final submit button. Check the table and the form, then submit by hand.</li>
+</ol>
+<div class="guide-tip">If the script says "No product rows found", you're not on the "Choose your products" page. Kept items are matched by AP's own product code where the order email supplied one, otherwise by name, colour and size.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I know when an order has to be returned by?</div>
+<ol class="guide-steps">
+<li>Each order card shows "Return by" with a date. It turns to "Return due in Nd" in the last week and "Return deadline passed" afterwards.</li>
+<li>The date is 28 days from the date AP's "has been shipped" email arrived. If that email hasn't been found yet it's 28 days from the order date, and Check now corrects it once the shipping email appears.</li>
+<li>A task called "Return non-kept items from AP order #&hellip;" is created with that date. It goes straight into Next actions on the Tasks tab.</li>
+</ol>
+<div class="guide-tip">Orders captured from pasted text get a return task dated from the order date (there is no shipping email to sharpen it). The badge doesn't clear once you've returned things; delete the task yourself, and press <strong>Remove</strong> on the order card if you no longer need it. Removing an order unlinks its inventory items but doesn't delete its task.</div>
+</div>
+</details>
 </div>
 </details>
 
@@ -3755,9 +5786,9 @@ Finds connections whose cover photo is missing or is really just the small place
 </details>
 
 <details class="settings-item">
-<summary><h3>More sections &mdash; not written up yet</h3></summary>
+<summary><h3>Not written up yet</h3></summary>
 <div class="settings-block">
-<div class="settings-note" style="margin:0;">Overview, Job Hunt, Contacts, Finances, Shopping, Menu, Business, Health, Travel, Planner, Family. Ask and I'll write one up the same way as the sections above.</div>
+<div class="settings-note" style="margin:0;">Job Hunt, Contacts, Menu, Business, Health and Family. Ask and I'll write one up the same way as the sections above.</div>
 </div>
 </details>
 </section>

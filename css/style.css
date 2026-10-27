@@ -4247,3 +4247,7 @@ max-width:none;
 .letting-chart-group-targets label{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--muted);}
 .letting-chart-group-targets input{max-width:64px;}
 .planner-entry-time{font-variant-numeric:tabular-nums;color:var(--muted);font-size:.9em;}
+/* Long explanatory notes tucked under a closed "About this" line: the text is kept, out of the way. */
+.panel-about{margin:4px 0 8px;}
+.panel-about summary{font-size:11px;padding:2px 0;}
+.panel-about:not([open]) > :not(summary){display:none;}
