@@ -507,7 +507,7 @@ if (!el) return;
 // framing is actually suppressed.
 const keys = owners();
 if (!keys.length) {
-el.innerHTML = '<div class="settings-note" style="margin:0;">No listing has an owner yet — set one on the Travel tab’s Airbnb settings, then enter what each stay earned.</div>';
+el.innerHTML = '<div class="settings-note" style="margin:0;">No listing has an owner yet — set one under <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#airbnb-listings">Settings → Airbnb listings</span>, then enter what each stay earned.</div>';
 return;
 }
 // The two totals the Finances panel exists to show: what the listings
@@ -739,6 +739,7 @@ renderLetting();
 el.querySelectorAll('[data-letting-del]').forEach((x) => {
 x.addEventListener('click', () => {
 const entry = (data.lettingLedger || []).find((e) => e.id === x.dataset.lettingDel);
+if (entry && !confirm(`Delete this ${entry.kind || 'ledger'} entry (${money(entry.amount)})?${entry.reservationId ? ' The stay goes back to "earned, amount not entered".' : ''}`)) return;
 // Deleting an accrual clears the stay's income as well as its
 // already-charged stamp, so the deletion STAYS deleted. Clearing the
 // stamp alone just meant the next sweep rebuilt the identical row,

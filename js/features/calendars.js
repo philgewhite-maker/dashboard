@@ -28,7 +28,7 @@ const eventRowHtml = (e, calName) => {
 const dn = daysUntil(e.date);
 const badgeText = dn <= 0 ? 'Today' : dn === 1 ? 'Tomorrow' : `in ${dn} days`;
 return `<div class="cal-event-row">
-<span class="cal-event">${escapeHtml(e.title)}<span class="cal-date">${escapeHtml(String(e.date).slice(0, 10))}</span></span>
+<span class="cal-event">${escapeHtml(e.title)}<span class="cal-date">${escapeHtml(String(e.date).slice(0, 10))}${/T\d\d:\d\d/.test(String(e.date)) ? ` ${escapeHtml(String(e.date).slice(11, 16))}` : ""}</span></span>
 <button class="mini-task-btn" type="button" title="Capture as a task"
 data-event-task="1" data-event-title="${escapeHtml(e.title)}"
 data-event-date="${escapeHtml(String(e.date).slice(0, 10))}"
@@ -65,6 +65,7 @@ btn.addEventListener('click', () => {
 captureTask({
 title: `Prep: ${btn.dataset.eventTitle}`,
 notes: `${btn.dataset.eventCal} — ${btn.dataset.eventDate}`,
+due: btn.dataset.eventDate,
 source: { kind: 'calendar', label: `${btn.dataset.eventTitle} (${btn.dataset.eventDate})` },
 });
 btn.textContent = '✓';

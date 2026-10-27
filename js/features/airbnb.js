@@ -13,6 +13,10 @@ import { escapeHtml, todayStr, dateStrAdd, uid, MISSING_KEY_LINK_HTML } from '..
 import { owners, ownerNameFor, money } from './letting.js';
 import { gmailLink } from '../googlemail.js';
 import { parseIcsReservations } from '../icsparse.js';
+
+// How long a finished, not-yet-charged stay stays listed so its income can
+// still be entered (see syncAirbnbListing's removal step).
+const AWAITING_INCOME_DAYS = 30;
 import { fetchIcs } from '../files.js';
 import { canAttemptGoogleAction, hasCalendarWrite } from '../sync/googleauth.js';
 import { listCalendars, createEvent, findEvents, getEvent } from '../googlecalendar.js';
@@ -97,6 +101,12 @@ added++;
 // longer match anything) -- either way, gone.
 let removed = 0;
 existingByUid.forEach((r) => {
+// A stay that ended in the last month and hasn't been charged yet stays
+// on file, so what it earned can still be typed in (or arrive from the
+// payout email) before it turns into a ledger row. Without this a stay
+// that ended while the app was closed could be swept out before its
+// income was ever recorded.
+if (r.checkout && r.checkout < today && !r.accruedAt && r.checkout >= dateStrAdd(today, -AWAITING_INCOME_DAYS)) return;
 // A stay that has genuinely finished (not a cancelled future one) is
 // remembered minimally: Airbnb emails a guest refund AFTER checkout, and
 // matching it to a listing needs the stay's dates and listing.
@@ -762,7 +772,7 @@ const el = document.getElementById('airbnb-list');
 const countEl = document.getElementById('airbnb-count');
 if (!el) return;
 const upcoming = data.airbnbReservations
-.filter((r) => r.checkout >= todayStr())
+.filter((r) => r.checkout >= todayStr() || (!r.accruedAt && r.checkout >= dateStrAdd(todayStr(), -AWAITING_INCOME_DAYS)))
 .sort((a, b) => (a.checkin < b.checkin ? -1 : a.checkin > b.checkin ? 1 : 0));
 if (countEl) countEl.textContent = upcoming.length ? String(upcoming.length) : '';
 const errorsHtml = airbnbSyncErrorsHtml();
@@ -1250,6 +1260,7 @@ return { posted: 0, error: err.message || String(err) };
 const { ownerKeyFor } = await import('./letting.js');
 let posted = 0;
 let unmatched = 0;
+let unowned = 0;
 for (const m of sections[0]?.messages || []) {
 if (seen.has(m.id)) continue;
 const subjectMatch = CANCELLATION_SUBJECT_RE.exec(String(m.subject || '').trim());
@@ -1286,7 +1297,7 @@ if (reservation) listing = data.airbnbListings.find((l) => l.id === reservation.
 }
 if (!listing) { seen.add(m.id); unmatched++; continue; }
 const ownerKey = ownerKeyFor(listing);
-if (!ownerKey) { seen.add(m.id); continue; }
+if (!ownerKey) { unowned++; continue; } // not marked done: posts once the listing has an owner
 
 const guestMatch = CANCELLATION_GUEST_RE.exec(bodyText);
 const guestName = (guestMatch && guestMatch[1].trim()) || (reservation && reservation.guestName) || '';
@@ -1332,7 +1343,7 @@ posted++;
 }
 data.prefs.airbnbCancellationsSeen = [...seen];
 if (posted || unmatched) queueSave();
-return { posted, unmatched };
+return { posted, unmatched, unowned };
 }
 
 // Posted to lettingLedger as a NEGATIVE 'refund' entry -- real money
@@ -1806,6 +1817,7 @@ try {
 // a cancelled reservation from data.airbnbReservations entirely (it's
 // no longer in the feed), so this needs the record to still exist to
 // match a cancellation email against it.
+const canAttempt = await canAttemptGoogleAction();
 const cancelResult = await syncCancellationsFromEmail();
 // Same ordering reason as the cancellation sync just above -- a refund
 // is matched to a reservation by its stated check-in/check-out range,
@@ -1845,7 +1857,11 @@ const refundProblemNote = refundProblems.length
 const verifyNote = verifyResult.missing
 ? ` ${verifyResult.missing} booking${verifyResult.missing === 1 ? "'s calendar event wasn't" : "s' calendar events weren't"} actually there any more — marked as needing a push again.`
 : '';
-status.innerHTML = `Synced just now.${guestNote}${cancelNote}${refundNote}${refundProblemNote}${verifyNote}`;
+const unownedNote = cancelResult.unowned
+? ` ${cancelResult.unowned} cancellation payout${cancelResult.unowned === 1 ? "" : "s"} not posted: the listing has no owner. Set one in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#airbnb-listings">Settings → Airbnb listings</span> and Sync again.`
+: "";
+const signedOutNote = canAttempt ? "" : " Signed out of Google: guest names, cancellations, refunds and cleaner events were not checked.";
+status.innerHTML = `Synced just now.${guestNote}${cancelNote}${unownedNote}${refundNote}${refundProblemNote}${verifyNote}${signedOutNote}`;
 } else {
 // The actual error, right here -- not just a count pointing at devtools
 // most people never open. Every failed listing likely has the SAME

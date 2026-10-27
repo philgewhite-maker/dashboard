@@ -145,6 +145,7 @@ if (!deadline) return '';
 const task = captureTask({
 title: `Return non-kept items from AP order #${order.orderNumber}`,
 due: deadline,
+bucket: 'next',
 source: { kind: 'mail', label: `AP order #${order.orderNumber}`, url: gmailLink(null, null, order.sourceMessageId) },
 });
 return task.id;
@@ -473,6 +474,9 @@ el.querySelectorAll('[data-ap-order-remove]').forEach((btn) => {
 btn.addEventListener('click', () => {
 if (!confirm('Remove this captured order? Any inventory item linked to one of its lines will be unlinked, not deleted.')) return;
 const id = btn.dataset.apOrderRemove;
+const gone = data.apOrders.find((o) => o.id === id);
+const goneLines = new Set((gone ? gone.lines : []).map((l) => l.id));
+data.inventory.forEach((i) => { if (goneLines.has(i.apOrderLineId)) i.apOrderLineId = ''; });
 data.apOrders = data.apOrders.filter((o) => o.id !== id);
 queueSave();
 renderApOrders();
@@ -502,7 +506,9 @@ pasteBtn?.addEventListener('click', () => {
 const parsed = parseApOrderEmail(pasteArea.value);
 if (!parsed) { if (status) status.textContent = "Couldn't recognise that as an AP order email."; return; }
 if (data.apOrders.some((o) => o.orderNumber === parsed.orderNumber)) { if (status) status.textContent = `Order #${parsed.orderNumber} is already captured.`; return; }
-data.apOrders.push(blankApOrder({ ...parsed, sourceMessageId: 'manual' }));
+const pasted = blankApOrder({ ...parsed, sourceMessageId: 'manual' });
+pasted.taskId = createReturnTask(pasted);
+data.apOrders.push(pasted);
 queueSave();
 pasteArea.value = '';
 if (status) status.textContent = `Captured order #${parsed.orderNumber} — ${parsed.lines.length} items.`;

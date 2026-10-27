@@ -186,6 +186,8 @@ if (match) { v.logoUrl = match; queueSave(); renderVouchers(); }
 });
 list.querySelectorAll('[data-del-voucher]').forEach((el) => {
 el.addEventListener('click', () => {
+const doomed = data.vouchers.find((x) => x.id === el.dataset.delVoucher);
+if (!confirm(`Delete ${doomed && doomed.name ? `"${doomed.name}"` : 'this voucher'}?`)) return;
 data.vouchers = data.vouchers.filter((x) => x.id !== el.dataset.delVoucher);
 renderVouchers();
 queueSave();

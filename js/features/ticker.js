@@ -606,6 +606,9 @@ bought.push({ on: iso(due), paidOn: iso(paidOn), price: buy.price, shares: buy.s
 // monthly number that silently inflates a holding is worse than no
 // automation at all.
 t.lastBuy = { on: iso(due), paidOn: iso(paidOn), price: buy.price, shares: buy.shares };
+// The month-by-month record the holding editor lists since the baseline.
+if (!Array.isArray(t.accruals)) t.accruals = [];
+t.accruals.push({ on: iso(due), paidOn: iso(paidOn), price: buy.price, shares: buy.shares, gbp: t.monthlyGbp });
 added += buy.shares;
 } catch (err) {
 // A month that can't be priced stops the walk rather than being
@@ -978,38 +981,76 @@ if (anim) anim.currentTime = resumeAt % (seconds * 1000);
 // practice even though the code asked for it. Same backdrop-card shape
 // every other small dialog in this app already uses (e.g. tasks.js's
 // "file to Projects" dialog), not a new pattern.
+// The holding dialog: the baseline you last set, what the monthly scheme has
+// added since (by month), and the controls to rebaseline -- which sets the
+// share count and wipes that list -- or just change the monthly amount.
 function editShares() {
 const t = data.ticker;
+const accruals = Array.isArray(t.accruals) ? t.accruals : [];
+const accruedShares = accruals.reduce((n, a) => n + (Number(a.shares) || 0), 0);
+const baseline = Number((t.shares - accruedShares).toFixed(4));
+const monthKey = (d) => String(d).slice(0, 7);
+const byMonth = new Map();
+accruals.forEach((a) => {
+const k = monthKey(a.on);
+const row = byMonth.get(k) || { shares: 0, gbp: 0, prices: [] };
+row.shares += Number(a.shares) || 0;
+row.gbp += Number(a.gbp) || 0;
+if (a.price) row.prices.push(a.price);
+byMonth.set(k, row);
+});
+const monthLabel = (k) => new Date(`${k}-01T00:00:00`).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
+const rows = [...byMonth.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([k, r]) => `<tr>
+<td>${escapeHtml(monthLabel(k))}</td>
+<td style="text-align:right;">+${r.shares.toFixed(4)}</td>
+<td style="text-align:right;">${r.prices.length ? `€${(r.prices.reduce((n, p) => n + p, 0) / r.prices.length).toFixed(2)}` : ''}</td>
+<td style="text-align:right;">£${Math.round(r.gbp).toLocaleString('en-GB')}</td>
+</tr>`).join('');
+const since = t.baselineAt || t.sharesAt || '';
 const dialog = document.createElement('div');
 dialog.className = 'mail-view-backdrop';
-dialog.innerHTML = `<div class="mail-view-card" style="max-width:340px;">
+dialog.innerHTML = `<div class="mail-view-card" style="max-width:420px;">
 <div class="mail-view-subject">Holding — ${escapeHtml(t.holdingSymbol || 'DBK.DE')}</div>
-<label class="settings-note" style="display:block;margin:0 0 3px;">Shares held</label>
-<input type="number" step="any" min="0" id="holding-edit-shares" class="settings-input" value="${t.shares}" style="width:100%;">
+<div class="settings-note" style="margin:0 0 4px;">Baseline: <strong>${baseline.toLocaleString('en-GB')}</strong> shares${since ? `, set ${escapeHtml(since)}` : ''}</div>
+${rows ? `<table class="limits-table" style="min-width:0;width:100%;margin:4px 0;"><thead><tr><th>Month</th><th style="text-align:right;">Shares added</th><th style="text-align:right;">Price paid</th><th style="text-align:right;">Put in</th></tr></thead><tbody>${rows}</tbody>
+<tfoot><tr><td><strong>Since baseline</strong></td><td style="text-align:right;"><strong>+${accruedShares.toFixed(4)}</strong></td><td></td><td style="text-align:right;"><strong>£${Math.round(accruals.reduce((n, a) => n + (Number(a.gbp) || 0), 0)).toLocaleString('en-GB')}</strong></td></tr></tfoot></table>`
+: '<div class="settings-note" style="margin:4px 0;">Nothing added since the baseline yet. Each month\'s purchase will be listed here.</div>'}
+<div class="settings-note" style="margin:4px 0 10px;">Now: <strong>${t.shares.toLocaleString('en-GB')}</strong> shares</div>
+<label class="settings-note" style="display:block;margin:0 0 3px;">Rebaseline: the real share count today</label>
+<div class="sync-row" style="margin:0;">
+<input type="number" step="any" min="0" id="holding-edit-shares" class="settings-input" value="${t.shares}" style="flex:1;">
+<button class="sync-btn sm inline" type="button" data-holding-rebaseline title="Sets the share count to this number, wipes the monthly list above and counts again from today">Rebaseline</button>
+</div>
 <label class="settings-note" style="display:block;margin:10px 0 3px;">Monthly contribution (£), added on the first business day of each month, priced as at five years earlier</label>
 <input type="number" step="any" min="0" id="holding-edit-monthly" class="settings-input" value="${t.monthlyGbp}" style="width:100%;">
 <div class="mail-view-actions">
-<button class="sync-btn sm" type="button" data-holding-cancel>Cancel</button>
-<button class="add-btn" type="button" data-holding-save>Save</button>
+<button class="sync-btn sm" type="button" data-holding-cancel>Close</button>
+<button class="add-btn" type="button" data-holding-save>Save monthly amount</button>
 </div>
 </div>`;
 document.body.appendChild(dialog);
 const close = () => dialog.remove();
 bindBackdropClose(dialog, close);
 dialog.querySelector('[data-holding-cancel]').addEventListener('click', close);
-dialog.querySelector('[data-holding-save]').addEventListener('click', () => {
+dialog.querySelector('[data-holding-rebaseline]').addEventListener('click', () => {
 const n = Number(dialog.querySelector('#holding-edit-shares').value);
-const m = Number(dialog.querySelector('#holding-edit-monthly').value);
-if (Number.isFinite(n) && n >= 0) {
+if (!Number.isFinite(n) || n < 0) return;
+if (accruals.length && !confirm(`Set the holding to ${n.toLocaleString('en-GB')} shares and clear the ${accruals.length} month${accruals.length === 1 ? '' : 's'} listed? Counting starts again from today.`)) return;
 t.shares = n;
 // Counted from today, so entering a corrected number doesn't replay
 // purchases that number already includes.
 t.sharesAt = iso(new Date());
-// Editing the count is itself the "I've seen this" action the ex-div
-// flag exists to prompt -- clears it immediately rather than making
-// the 14 days run regardless of whether you've already acted on it.
+t.baselineAt = iso(new Date());
+t.accruals = [];
+// Rebaselining is itself the "I've seen this" action the ex-div flag
+// exists to prompt.
 t.exDivClearedAt = new Date().toISOString();
-}
+queueSave();
+renderTicker();
+close();
+});
+dialog.querySelector('[data-holding-save]').addEventListener('click', () => {
+const m = Number(dialog.querySelector('#holding-edit-monthly').value);
 if (Number.isFinite(m) && m >= 0) t.monthlyGbp = m;
 queueSave();
 renderTicker();

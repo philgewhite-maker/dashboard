@@ -346,7 +346,7 @@ pieces: [row.braPiece], colours: row.colour ? [row.colour] : [],
 urls: [url],
 },
 forConnectionId: boundConnId,
-bucket: 'next', wantState: 'active',
+bucket: 'next', wantState: 'active', contexts: ['Aspirational purchases'],
 });
 search.addedUrls = [...(search.addedUrls || []), url];
 queueSave();

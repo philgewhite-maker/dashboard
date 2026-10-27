@@ -239,15 +239,26 @@ const f = input.dataset.loanField;
 loan[f] = (f === 'amount' || f === 'ratePct') ? (Number(input.value) || 0) : input.value;
 queueSave();
 renderLoans();
+loanEditNote();
 });
 });
 el.querySelectorAll('[data-loan-del]').forEach((x) => {
 x.addEventListener('click', () => {
+if (!confirm('Remove this loan tranche? Interest already posted for it is not changed; press Recalculate interest to rebuild it.')) return;
 data.loans = data.loans.filter((l) => l.id !== x.dataset.loanDel);
 queueSave();
 renderLoans();
+loanEditNote();
 });
 });
+}
+
+// Editing or removing a tranche leaves interest rows already posted as they
+// were. Say so right where the change was made, when any exist.
+function loanEditNote() {
+const posted = (data.lettingLedger || []).some((e) => e.autoInterest);
+const el = document.getElementById('loan-add-status');
+if (el && posted) el.textContent = 'Interest already posted is unchanged. Press Recalculate interest to rebuild it from the loans as they are now.';
 }
 
 function initLoans() {

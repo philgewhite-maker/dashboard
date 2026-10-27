@@ -3675,6 +3675,17 @@ padding:8px 0;
 .settings-subgroup summary::after{content:'▾';margin-left:auto;font-size:11px;color:var(--muted);}
 .settings-subgroup[open] summary::after{content:'▴';}
 
+/* Guide: each job is a question, numbered steps, and an optional note. A
+   closed sub-group inside the guide hides everything but its summary
+   explicitly, same belt-and-braces the Settings tiers use above. */
+#guide-panel .settings-subgroup:not([open]) > :not(summary){display:none;}
+#guide-panel .settings-subgroup{margin:0 0 6px;border-top:1px solid var(--line);}
+.guide-task{margin:0 0 14px;padding-left:10px;border-left:2px solid var(--line);}
+.guide-q{font-size:13px;font-weight:600;color:var(--ink);margin:0 0 4px;}
+.guide-steps{margin:0 0 6px 18px;padding:0;font-size:12px;line-height:1.55;color:var(--ink);}
+.guide-steps li{margin:2px 0;}
+.guide-tip{font-size:11.5px;line-height:1.5;color:var(--muted);margin:2px 0 0;}
+
 /* Individual-setting tier: every setting is its own <details>, collapsed
    by default -- the h3 moves into the summary (styled here, not via the
    old .settings-block h3 rule, since it's no longer a descendant of
@@ -4235,3 +4246,4 @@ max-width:none;
 .letting-chart-group-targets{display:flex;flex-wrap:wrap;gap:4px 12px;margin-left:auto;}
 .letting-chart-group-targets label{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--muted);}
 .letting-chart-group-targets input{max-width:64px;}
+.planner-entry-time{font-variant-numeric:tabular-nums;color:var(--muted);font-size:.9em;}

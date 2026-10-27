@@ -26,7 +26,7 @@ function statusEl() { return document.getElementById('gtasks-status'); }
 // across devices — the same item pulled again on a different device is
 // recognised as already captured, exactly like the Mail "+ task" buttons.
 function existingTaskFor(item) {
-return data.tasks.find((t) => t.source && t.source.kind === 'googletask' && t.source.url === item.sourceKey && t.bucket !== 'done');
+return data.tasks.find((t) => t.source && t.source.kind === 'googletask' && t.source.url === item.sourceKey);
 }
 
 function rowHtml(item) {

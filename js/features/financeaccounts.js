@@ -560,7 +560,7 @@ function switchBonusesHtml(a) {
 return (a.switchBonuses || []).map((sb) => {
 const label = [sb.description, sb.amount ? `£${sb.amount}` : ''].filter(Boolean).join(' — ') || 'Bonus';
 const badgeClass = SWITCH_BONUS_STATUS_BADGE_CLASS[sb.status] || '';
-return `<span class="tag-chip">${escapeHtml(label)} <span class="expiry-badge ${badgeClass}">${escapeHtml(sb.status)}</span><span class="tag-x" data-switchbonus-remove="${escapeHtml(a.id)}:${escapeHtml(sb.id)}">&times;</span></span>`;
+return `<span class="tag-chip">${escapeHtml(label)} <span class="expiry-badge ${badgeClass}" style="cursor:pointer;" data-switchbonus-cycle="${escapeHtml(a.id)}:${escapeHtml(sb.id)}" title="Click to move to the next status (Working on, Met, Paid)">${escapeHtml(sb.status)}</span><span class="tag-x" data-switchbonus-remove="${escapeHtml(a.id)}:${escapeHtml(sb.id)}">&times;</span></span>`;
 }).join('');
 }
 
@@ -1779,6 +1779,20 @@ renderFinanceAccounts();
 import('./switchoffers.js').then((m) => m.renderSwitchOffers());
 });
 });
+list.querySelectorAll('[data-switchbonus-cycle]').forEach((badge) => {
+badge.addEventListener('click', (e) => {
+e.stopPropagation();
+const [id, sbId] = badge.dataset.switchbonusCycle.split(':');
+const a = data.financeAccounts.find((acc) => acc.id === id);
+const sb = a && (a.switchBonuses || []).find((x) => x.id === sbId);
+if (!sb) return;
+sb.status = SWITCH_BONUS_STATUSES[(SWITCH_BONUS_STATUSES.indexOf(sb.status) + 1) % SWITCH_BONUS_STATUSES.length];
+queueSave();
+renderFinanceAccounts();
+import('./switchoffers.js').then((m) => m.renderSwitchOffers());
+import('./ticker.js').then((m) => m.renderTicker());
+});
+});
 list.querySelectorAll('[data-switchbonus-remove]').forEach((x) => {
 x.addEventListener('click', () => {
 const [id, sbId] = x.dataset.switchbonusRemove.split(':');
@@ -1803,6 +1817,8 @@ renderFinanceAccounts();
 list.querySelectorAll('[data-del-account]').forEach((x) => {
 x.addEventListener('click', () => {
 const id = x.dataset.delAccount;
+const doomed = data.financeAccounts.find((a) => a.id === id);
+if (!confirm(`Delete ${[doomed && doomed.bank, doomed && doomed.name].filter(Boolean).join(' ') || 'this account'}? Its history and every link to it from other accounts are removed. This can't be undone.`)) return;
 data.financeAccounts = data.financeAccounts.filter((a) => a.id !== id);
 // Same orphan-drop reasoning as the state.js migration guard --
 // another account's link to this one is now dangling.

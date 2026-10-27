@@ -24,6 +24,9 @@ const BUCKET_LABEL = Object.fromEntries(TASK_BUCKETS.map((b) => [b.bucket, b.lab
 const FILING_BUCKETS = TASK_BUCKETS.filter((b) => b.bucket !== 'done' && b.bucket !== 'inbox');
 
 let contextFilter = 'all';
+// Free-text filter over the Lists panel: matches a task's title or notes and
+// shows its whole tree, ignoring the context filter and the "hidden kinds".
+let searchQuery = '';
 let showDone = false;
 const expandedTasks = new Set();
 
@@ -140,14 +143,17 @@ function visibilityContext() {
 const byId = new Map(data.tasks.map((t) => [t.id, t]));
 const dueSoonRoots = new Set();
 const contextMatchRoots = new Set();
+const searchRoots = new Set();
 data.tasks.forEach((t) => {
+if (searchQuery && `${t.title || ''} ${t.notes || ''}`.toLowerCase().includes(searchQuery)) searchRoots.add(rootOf(t, byId).id);
 if (t.bucket !== 'done' && t.due && daysUntil(t.due) <= DUE_SOON_DAYS) dueSoonRoots.add(rootOf(t, byId).id);
 if (contextFilter !== 'all' && contextFilter !== 'none' && (t.contexts || []).includes(contextFilter)) contextMatchRoots.add(rootOf(t, byId).id);
 });
-return { byId, dueSoonRoots, contextMatchRoots };
+return { byId, dueSoonRoots, contextMatchRoots, searchRoots };
 }
 
 function isListed(t, vis) {
+if (searchQuery) return vis.searchRoots.has(t.id);
 if (!matchesContext(t) && !vis.contextMatchRoots.has(t.id)) return false;
 // Picking a specific context is a deliberate filter: show whatever has it.
 if (contextFilter !== 'all' && contextFilter !== 'none') return true;
@@ -409,6 +415,8 @@ el.innerHTML = data.taskContexts.map((c) => `<span class="tag-chip">${escapeHtml
 el.querySelectorAll('[data-delctx]').forEach((x) => {
 x.addEventListener('click', () => {
 const name = x.dataset.delctx;
+const inUse = data.tasks.filter((t) => (t.contexts || []).includes(name)).length;
+if (inUse && !confirm(`Remove the "${name}" context? It is on ${inUse} task${inUse === 1 ? '' : 's'}, and will be taken off ${inUse === 1 ? 'it' : 'them'}.`)) return;
 data.taskContexts = data.taskContexts.filter((c) => c !== name);
 // Leaving the context on tasks would show a chip you can no longer
 // filter by or re-add, so strip it everywhere.
@@ -819,7 +827,13 @@ cursor = cursor.parentId ? taskById(cursor.parentId) : null;
 }
 return false;
 };
-t.parentId = wouldCycle(input.value) ? null : (input.value || null);
+if (wouldCycle(input.value)) {
+// Left where it was (not detached): picking one of its own subtasks as
+// its parent would make it its own ancestor.
+alert('That would make the task part of its own subtask, so it was left where it is.');
+} else {
+t.parentId = input.value || null;
+}
 } else {
 t[field] = input.value;
 }
@@ -1045,6 +1059,10 @@ setTimeout(() => { status.textContent = ''; }, 3000);
 
 document.getElementById('show-done-toggle').addEventListener('change', (e) => {
 showDone = e.target.checked;
+renderLists();
+});
+document.getElementById('task-search')?.addEventListener('input', (e) => {
+searchQuery = e.target.value.trim().toLowerCase();
 renderLists();
 });
 

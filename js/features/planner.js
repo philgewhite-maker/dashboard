@@ -105,6 +105,15 @@ return data.plannerEntries.filter((e) => entryCoversDay(e, date) && (e.tripId ||
 // one-line addition here, not a change to placeEntry itself.
 const KIND_REF_FIELD = { connection: 'connectionId', activity: 'activityId', task: 'taskId' };
 
+// A planner entry's endDate is its LAST day, but an all-day Google Calendar
+// event's end date is the day AFTER its last one -- so a 12-14 Nov entry
+// has to be sent as ending on the 15th or it appears as 12-13 Nov. A timed
+// event does end on its own last date.
+function allDayEndFor(endDate, startTime) {
+if (!endDate) return '';
+return startTime ? endDate : dateStrAdd(endDate, 1);
+}
+
 function placeEntry(kind, refId, date, tripId = '') {
 const order = entriesForDay(date, tripId).length; // append to the end of this day's own order
 const entry = blankPlannerEntry({
@@ -432,7 +441,9 @@ openAttr = ` data-planner-open-connection="${c.id}"`;
 } else {
 const a = data.plannerActivities.find((x) => x.id === entry.activityId);
 if (!a) return ''; // the activity was removed from the pool since this was placed
-label = escapeHtml(a.title);
+// The time leads the title ("19:30 Gig") so it can be read on a phone, where
+// the hover tooltip that used to carry it does not exist.
+label = `${a.eventTime ? `<span class="planner-entry-time">${escapeHtml(a.eventTime)}</span> ` : ''}${escapeHtml(a.title)}`;
 // connectionId is optional on an activity (Mail's "+ date event" action
 // is the one place that sets it, js/features/mail.js) -- quietly omit
 // the chip if it's blank or points at a since-deleted connection, same
@@ -567,9 +578,9 @@ const entries = entriesForDay(dateStr, tripId);
 const key = `${dateStr}|${tripId}`;
 const isToday = dateStr === todayStr() && !tripId;
 const unfiledCount = isToday ? data.tasks.filter((t) => t.bucket === 'inbox').length : 0;
-const removable = isExtra && dateStr < todayStr() && entries.length === 0 && !legChipsHtml;
+const removable = isExtra && entries.length === 0 && !legChipsHtml;
 const removeX = removable ? `<span class="tag-x" data-planner-remove-extraday="${dateStr}" title="Remove this day">&times;</span>` : '';
-const isEmpty = entries.length === 0 && !legChipsHtml && !unfiledCount && !airbnbSegmentsForDay(dateStr).length;
+const isEmpty = entries.length === 0 && !legChipsHtml && !unfiledCount && !airbnbSegmentsForDay(dateStr).length && !mirrorEntriesForDay(dateStr, tripId).length;
 const expanded = !isEmpty || expandedPlannerDays.has(key);
 
 if (!expanded) {
@@ -822,7 +833,8 @@ ${expanded ? `
 <div class="details-grid" style="background:var(--slate-bg);">
 <div class="field-block"><span class="field-label">Confirmation ref</span><input type="text" data-dateevent-confref="${a.id}" value="${escapeHtml(a.confirmationRef)}" placeholder="If known"></div>
 <div class="field-block"><span class="field-label">Location</span><input type="text" data-dateevent-location="${a.id}" value="${escapeHtml(a.location)}" placeholder="Venue/address"></div>
-<div class="field-block"><span class="field-label">Time</span><input type="text" data-dateevent-eventtime="${a.id}" value="${escapeHtml(a.eventTime)}" placeholder="HH:MM"></div>
+<div class="field-block"><span class="field-label">Date</span><input type="date" data-dateevent-date="${a.id}" value="${escapeHtml(entry ? entry.date : '')}"></div>
+<div class="field-block"><span class="field-label">Time</span><input type="time" data-dateevent-eventtime="${a.id}" value="${escapeHtml(a.eventTime)}"></div>
 <div class="field-block"><span class="field-label">Part of a trip?</span>
 <select data-dateevent-trip="${a.id}">
 <option value="">Not part of a trip</option>
@@ -1295,7 +1307,7 @@ revealTrip(el.dataset.plannerOpenTrip);
 // above, since there's nothing more specific to point at (e.g.
 // priorityPoolHtml's empty state naming the Dating tab in general, not
 // any one connection).
-root.querySelectorAll('[data-goto-tab]').forEach((el) => {
+root.querySelectorAll('[data-goto-tab]:not([data-goto-target])').forEach((el) => {
 el.addEventListener('click', (e) => {
 e.stopPropagation();
 switchTab(el.dataset.gotoTab);
@@ -1351,6 +1363,17 @@ const a = data.plannerActivities.find((x) => x.id === sel.dataset.dateeventTrip)
 if (a) { a.tripId = sel.value; queueSave(); }
 });
 });
+// An undated event (one captured from an email with no date in it) is
+// dated here; an already-placed one is moved to the new day.
+root.querySelectorAll('[data-dateevent-date]').forEach((input) => {
+input.addEventListener('change', () => {
+const a = data.plannerActivities.find((x) => x.id === input.dataset.dateeventDate);
+if (!a || !input.value) return;
+const existing = entryForActivity(a);
+if (existing) moveEntry(existing.id, input.value, existing.tripId || '');
+else placeEntry('activity', a.id, input.value, '');
+});
+});
 root.querySelectorAll('[data-dateevent-eventtime]').forEach((input) => {
 input.addEventListener('change', () => {
 const a = data.plannerActivities.find((x) => x.id === input.dataset.dateeventEventtime);
@@ -1367,6 +1390,7 @@ if (a) { a.notes = ta.value; queueSave(); }
 root.querySelectorAll('[data-dateevent-delete]').forEach((x) => {
 x.addEventListener('click', () => {
 const id = x.dataset.dateeventDelete;
+if (!confirm('Delete this date event? It is removed from any day it is placed on too.')) return;
 data.plannerActivities = data.plannerActivities.filter((a) => a.id !== id);
 data.plannerEntries = data.plannerEntries.filter((e) => !(e.kind === 'activity' && e.activityId === id));
 queueSave();
@@ -1446,7 +1470,7 @@ say(`${candidates.length} existing events near ${entry.date} already match "${ac
 } else {
 const created = await createEvent(calendarId, {
 title: activity.title, description: [activity.location, activity.notes].filter(Boolean).join(' — '),
-date: entry.date, endDate: entry.endDate || '', startTime: activity.eventTime || '', endTime: activity.endTime || '',
+date: entry.date, endDate: allDayEndFor(entry.endDate, activity.eventTime), startTime: activity.eventTime || '', endTime: activity.endTime || '',
 });
 activity.googleEventId = created.id;
 activity.googleCalendarId = calendarId;
@@ -1563,7 +1587,7 @@ const activity = entry.kind === 'activity' ? data.plannerActivities.find((a) => 
 try {
 await createEvent(calendarId, {
 title: calendarTitleFor(entry), description: calendarDescriptionFor(entry),
-date: entry.date, endDate: entry.endDate || '',
+date: entry.date, endDate: allDayEndFor(entry.endDate, activity?.eventTime),
 startTime: activity?.eventTime || '', endTime: activity?.endTime || '',
 });
 entry.calendarPushed = true;

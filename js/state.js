@@ -2405,6 +2405,9 @@ holdingSymbol: 'DBK.DE',
 // suppresses the Holding tile's "ex-div" flag once you've acted on it,
 // so it doesn't keep showing for the full 14 days regardless.
 exDivClearedAt: '',
+// Monthly purchases since the last baseline: [{on, paidOn, price, shares, gbp}].
+// The share count minus these is the baseline; Rebaseline wipes them.
+accruals: [], baselineAt: '',
 items: [
 { id: 'fx-eur', kind: 'fx', base: 'GBP', quote: 'EUR' },
 { id: 'q-dbk', kind: 'quote', symbol: 'DBK.DE', label: 'DBK' },
@@ -3767,7 +3770,8 @@ return settingsQueue;
 
 function computeStreak(completions) {
 let streak = 0;
-for (let i = 0; i < 60; i++) {
+// Today not ticked yet is not a broken streak: count back from yesterday.
+for (let i = completions[daysAgoStr(0)] ? 0 : 1; i < 60; i++) {
 const d = daysAgoStr(i);
 if (completions[d]) streak++;
 else break;

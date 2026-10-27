@@ -198,7 +198,7 @@ return candidates.length === 1 ? candidates[0].id : '';
 }
 
 async function runCatSittingEmailImport() {
-if (!(await canAttemptGoogleAction())) return { added: 0 };
+if (!(await canAttemptGoogleAction())) return { added: 0, error: 'Sign in to Google at the top of Overview first.' };
 if (!Array.isArray(data.prefs.catSittingImportSeen)) data.prefs.catSittingImportSeen = [];
 const seen = new Set(data.prefs.catSittingImportSeen);
 

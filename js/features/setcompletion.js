@@ -389,7 +389,7 @@ result = await searchDepartmentStoresForMissingSetPiece(query, set.colour, bound
 console.error(`Retailer search failed for ${set.key}:`, err);
 const { renderInventory } = await import('./shopping.js');
 renderInventory();
-return 'Search failed -- see console.';
+return `Search failed: ${err.message || 'see the console'}.`;
 }
 if (result) { upsertFind(set, missingGroup, { source: 'retailer', ...result }); queueSave(); }
 const { renderInventory } = await import('./shopping.js');

@@ -121,6 +121,7 @@ if (parsed) v = parsed.time ? `${parsed.date} ${parsed.time}` : parsed.date;
 }
 if (v) { leg.fields[field] = v; delete leg.gapStatus[field]; }
 else delete leg.fields[field];
+fillTripDatesFromLegs(tripById(tripId));
 queueSave();
 }
 function confirmGapNA(tripId, legId, field) {
@@ -237,6 +238,18 @@ queueSave();
 // never invent a value to fill a gap. `kind` is allowed to reclassify a
 // leg still sitting at 'other' once real content reveals what it actually
 // is (a boarding pass parsed onto a leg that was created blank).
+// A trip built from emails never had its own Start/End filled, so it sorted
+// last, never left the list and got a weekend packing list. Whenever a leg
+// gains a date, blank trip dates are filled from the earliest and latest
+// dated leg fields (never overwriting dates you set yourself).
+function fillTripDatesFromLegs(trip) {
+if (!trip || (trip.startDate && trip.endDate)) return;
+const dates = trip.legs.flatMap((l) => (LEG_DATE_FIELDS[l.kind] || []).map((f) => parseLooseDateTime(l.fields[f], trip.startDate ? parseInt(trip.startDate.slice(0, 4), 10) : undefined)?.date)).filter(Boolean).sort();
+if (!dates.length) return;
+if (!trip.startDate) trip.startDate = dates[0];
+if (!trip.endDate) trip.endDate = dates[dates.length - 1] >= trip.startDate ? dates[dates.length - 1] : trip.startDate;
+}
+
 function enrichLegFromExtraction(tripId, legId, extraction) {
 const leg = legById(tripId, legId);
 if (!leg) return { filled: 0 };
@@ -259,6 +272,7 @@ leg.fields[k] = val;
 delete leg.gapStatus[k];
 filled++;
 });
+fillTripDatesFromLegs(trip);
 // Matched by name (case-insensitive) so re-reading the same confirmation,
 // or a follow-up email that only updates a seat, refines the same
 // passenger rather than duplicating them.
@@ -723,7 +737,16 @@ hydratePhotoBackgrounds(el);
 
 function bindTravel(root) {
 root.querySelectorAll('[data-trip-title]').forEach((input) => {
-input.addEventListener('change', () => { const t = tripById(input.dataset.tripTitle); if (t) { t.title = input.value.trim(); queueSave(); renderTravel(); } });
+input.addEventListener('change', () => {
+const t = tripById(input.dataset.tripTitle);
+if (!t) return;
+t.title = input.value.trim();
+// The trip's linked Tasks project carries the name too ("Trip: <title>").
+const linked = t.taskId ? data.tasks.find((x) => x.id === t.taskId) : null;
+if (linked && /^Trip: /.test(linked.title || '')) linked.title = `Trip: ${t.title}`;
+queueSave();
+renderTravel();
+});
 });
 root.querySelectorAll('[data-trip-dest-remove]').forEach((el) => {
 el.addEventListener('click', () => {
@@ -851,7 +874,14 @@ if (leg) { leg.label = input.value.trim(); queueSave(); }
 });
 });
 root.querySelectorAll('[data-leg-delete]').forEach((x) => {
-x.addEventListener('click', async () => { await deleteLeg(x.dataset.tripId, x.dataset.legDelete); renderTravel(); });
+x.addEventListener('click', async () => {
+const trip = tripById(x.dataset.tripId);
+const leg = trip && trip.legs.find((l) => l.id === x.dataset.legDelete);
+const hasContent = leg && (Object.keys(leg.fields || {}).length || (leg.attachments || []).length);
+if (hasContent && !confirm(`Delete this ${leg.kind} booking${(leg.attachments || []).length ? ' and its attached files' : ''}? This can't be undone.`)) return;
+await deleteLeg(x.dataset.tripId, x.dataset.legDelete);
+renderTravel();
+});
 });
 root.querySelectorAll('[data-leg-toggle]').forEach((el) => {
 el.addEventListener('click', () => {

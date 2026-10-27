@@ -69,7 +69,7 @@ switch (step.type) {
 // multi-task capture and getting no project at all out the other end.
 case 'project': {
 const { captureTask } = await import('./tasks.js');
-const project = captureTask({ title: step.title || 'New project', bucket: 'next' });
+const project = captureTask({ title: step.title || 'New project', bucket: 'project' });
 ctx.lastProjectId = project.id;
 return project;
 }

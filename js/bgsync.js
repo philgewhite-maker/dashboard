@@ -138,6 +138,10 @@ changed = true;
 }
 });
 existing.forEach((r) => {
+// Same rule as the in-app sync: a stay that ended within the last 30 days
+// and hasn't been charged yet is kept so its income can still be entered.
+const cutoff = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+if (r.checkout && r.checkout < today && !r.accruedAt && r.checkout >= cutoff) return;
 doc.airbnbReservations = doc.airbnbReservations.filter((x) => x.id !== r.id);
 changed = true;
 });
