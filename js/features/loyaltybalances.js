@@ -25,6 +25,7 @@ import { escapeHtml, uid, daysSince, todayStr, logoBadgeHtml, bindLogoFallbacks 
 import { fetchMailSearches, getMessageDetail } from '../googlemail.js';
 import { voucherChipHtml } from './vouchers.js';
 import { matchBrandLogo } from '../brandLogos.js';
+import { resolveProvider, refreshProviderDatalists } from '../providers.js';
 
 // How often a program is actually re-checked, independent of this
 // file being invoked daily by js/features/scheduled.js's own (much
@@ -794,11 +795,12 @@ ${r.voucherId ? voucherChipHtmlFor(r.voucherId) : ''}
 </div>`;
 }).join('');
 const tier = readings.find((r) => r.tier)?.tier || '';
-const programInitials = (program.name || '?').trim().slice(0, 2).toUpperCase();
+const programInitials = (program.provider || program.name || '?').trim().slice(0, 2).toUpperCase();
 return `<div class="account-card" data-loyalty-program="${escapeHtml(program.id)}">
 <div class="account-summary" style="cursor:default;">
 ${logoBadgeHtml(program.logoUrl, programInitials, 'plum')}
-<strong>${escapeHtml(program.name)}</strong>
+<strong>${escapeHtml(program.provider || program.name)}</strong>
+${program.what ? `<span class="tag-chip">${escapeHtml(program.what)}</span>` : ''}
 ${tier ? `<span class="tag-chip tag-chip-blue">${escapeHtml(tier)}</span>` : ''}
 ${methodBadgeHtml(program)}
 ${!program.active ? '<span class="candidate-tag">inactive</span>' : ''}
@@ -809,6 +811,10 @@ ${rows || `<div class="empty">${program.id === 'loyalty-marriott-vc'
 <details class="settings-item loyalty-settings-item">
 <summary class="loyalty-settings-summary"><h3>Settings</h3></summary>
 <div class="settings-block" style="margin-top:6px;">
+<div class="sync-row" style="align-items:flex-start;">
+<input type="text" autocomplete="off" list="taglist-provider" value="${escapeHtml(program.provider || '')}" placeholder="Provider" title="Pick one you already use or type a new one -- BA and British Airways become the one name." data-loyalty-provider="${escapeHtml(program.id)}" style="flex:1 1 160px;">
+<input type="text" autocomplete="off" list="taglist-what" value="${escapeHtml(program.what || '')}" placeholder="What of (Avios, eVoucher...)" data-loyalty-what="${escapeHtml(program.id)}" style="flex:1 1 160px;">
+</div>
 <label><input type="checkbox" ${program.showOnTravel ? 'checked' : ''} data-loyalty-show-travel="${escapeHtml(program.id)}"> Show on Travel tab</label>
 <label><input type="checkbox" ${program.active ? 'checked' : ''} data-loyalty-active="${escapeHtml(program.id)}"> Active</label>
 ${program.senderAddresses.length || program.id !== 'loyalty-marriott-vc' ? `<div class="sync-row" style="margin-top:6px;">
@@ -837,7 +843,16 @@ function renderLoyaltyBalances() {
 const panel = document.getElementById('loyalty-balances-panel');
 if (!panel) return;
 const list = document.getElementById('loyalty-balances-list');
-if (list) { list.innerHTML = data.loyaltyPrograms.map(programCardHtml).join(''); bindLogoFallbacks(list); }
+if (list) {
+// Programs of one provider sit together (BA's Avios and eVoucher side by
+// side), providers in the order they first appear.
+const order = [];
+data.loyaltyPrograms.forEach((p) => { const k = (p.provider || p.name || '').toLowerCase(); if (!order.includes(k)) order.push(k); });
+const sorted = [...data.loyaltyPrograms].sort((a, b) => order.indexOf((a.provider || a.name || '').toLowerCase()) - order.indexOf((b.provider || b.name || '').toLowerCase()));
+refreshProviderDatalists();
+list.innerHTML = sorted.map(programCardHtml).join('');
+bindLogoFallbacks(list);
+}
 const countEl = document.getElementById('loyalty-balances-count');
 if (countEl) {
 const n = data.loyaltyPrograms.filter((p) => p.active).length;
@@ -871,6 +886,25 @@ const activeToggle = e.target.closest('[data-loyalty-active]');
 if (activeToggle) {
 const program = data.loyaltyPrograms.find((p) => p.id === activeToggle.dataset.loyaltyActive);
 if (program) { program.active = activeToggle.checked; queueSave(); renderLoyaltyBalances(); }
+return;
+}
+const providerInput = e.target.closest('[data-loyalty-provider]');
+if (providerInput) {
+const program = data.loyaltyPrograms.find((p) => p.id === providerInput.dataset.loyaltyProvider);
+if (program) {
+const r = resolveProvider(providerInput.value);
+program.provider = r.provider;
+program.logoUrl = r.logoUrl || '';
+if (r.what && !program.what) program.what = r.what;
+queueSave();
+renderLoyaltyBalances();
+}
+return;
+}
+const whatInput = e.target.closest('[data-loyalty-what]');
+if (whatInput) {
+const program = data.loyaltyPrograms.find((p) => p.id === whatInput.dataset.loyaltyWhat);
+if (program) { program.what = whatInput.value.trim(); queueSave(); renderLoyaltyBalances(); }
 return;
 }
 const sendersInput = e.target.closest('[data-loyalty-senders]');
@@ -955,14 +989,18 @@ if (!panel) return;
 const form = document.getElementById('loyalty-add-form');
 const addBtn = document.getElementById('loyalty-add-btn');
 addBtn?.addEventListener('click', () => {
-const nameInput = document.getElementById('loyalty-add-name');
+const providerInput = document.getElementById('loyalty-add-provider');
+const whatInput = document.getElementById('loyalty-add-what');
 const senderInput = document.getElementById('loyalty-add-sender');
-const name = nameInput.value.trim();
+const r = resolveProvider(providerInput.value);
+const what = whatInput.value.trim() || r.what;
 const senders = senderInput.value.split(',').map((s) => s.trim()).filter(Boolean);
-if (!name || !senders.length) return;
-data.loyaltyPrograms.push(blankLoyaltyProgram({ id: uid(), name, senderAddresses: senders, extractorKey: '', logoUrl: matchBrandLogo(name) || '' }));
+if (!r.provider || !senders.length) return;
+const name = what ? `${r.provider} ${what}` : r.provider;
+data.loyaltyPrograms.push(blankLoyaltyProgram({ id: uid(), name, provider: r.provider, what, senderAddresses: senders, extractorKey: '', logoUrl: r.logoUrl }));
 queueSave();
-nameInput.value = '';
+providerInput.value = '';
+whatInput.value = '';
 senderInput.value = '';
 renderLoyaltyBalances();
 });

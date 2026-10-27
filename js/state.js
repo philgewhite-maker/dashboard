@@ -1,6 +1,6 @@
 import { kvGet, kvSet, photoDelete } from './db.js';
 import { uid, todayStr, daysAgoStr, last7Dates, daysSince, daysUntil } from './utils.js';
-import { matchBrandLogo, matchBrandEntry } from './brandLogos.js';
+import { matchBrandLogo, matchBrandEntry, splitProvider } from './brandLogos.js';
 
 const DATA_KEY = 'app-data';
 const REV_KEY = 'app-data-rev'; // separate from DATA_KEY so it never leaks into backup exports
@@ -1105,6 +1105,10 @@ apiCaptures: {},
 function blankLoyaltyProgram(fields = {}) {
 return {
 id: uid(), name: '', extractorKey: '', senderAddresses: [],
+// Canonical provider (one name per brand -- see providers.js) and the
+// "what of" under it (Avios, eVoucher...). `name` stays the program's
+// own full title and is what extractors/readings key off.
+provider: '', what: '',
 membershipNumber: '', lastCheckedAt: '', active: true,
 showOnTravel: false, builtIn: false,
 // '' = not yet run; 'deterministic' = a real regex in EXTRACTORS
@@ -1806,6 +1810,8 @@ reference: '',
 // record-reference back-link to whichever readings fed it.
 sourceLoyaltyReadingIds: [],
 provider: '',
+// What the voucher is of, under its provider (Companion Voucher, eVoucher...).
+what: '',
 logoUrl: '',
 ...fields,
 };
@@ -3028,6 +3034,42 @@ if (!data.loyaltyProgramsSeededV6) {
 data.loyaltyProgramsSeededV6 = true;
 DEFAULT_LOYALTY_PROGRAMS_V6.forEach((p) => {
 if (!data.loyaltyPrograms.some((x) => x.id === p.id)) data.loyaltyPrograms.push(blankLoyaltyProgram(p));
+});
+}
+// Provider consolidation: one canonical provider name per brand ("BA",
+// "British Airways", "British Airways eVoucher" -> "British Airways"), the
+// remainder kept as the "what of". Vouchers and subscriptions run once;
+// a loyalty program missing its provider is filled on every load, so a
+// newly seeded or added program gets one too. Never overwrites a value
+// that is already set.
+const LOYALTY_PROVIDER_SEEDS = {
+'loyalty-ba': ['British Airways', 'Avios'], 'loyalty-ba-evoucher': ['British Airways', 'eVoucher'],
+'loyalty-marriott': ['Marriott Bonvoy', 'Points'], 'loyalty-marriott-vc': ['Marriott Vacation Club', 'Points'],
+'loyalty-virgin': ['Virgin Atlantic', 'Flying Club points'], 'loyalty-tesco': ['Tesco', 'Clubcard'],
+'loyalty-boots': ['Boots', 'Advantage Card'], 'loyalty-hertz': ['Hertz', 'Gold Plus Rewards'],
+'loyalty-sixt': ['Sixt', 'SIXT ONE'], 'loyalty-miles-and-more': ['Miles & More', 'Miles'],
+};
+data.loyaltyPrograms.forEach((p) => {
+if (p.provider) return;
+const seed = LOYALTY_PROVIDER_SEEDS[p.id];
+const hit = splitProvider(p.name);
+if (seed) { p.provider = seed[0]; if (!p.what) p.what = seed[1]; } else if (hit) { p.provider = hit.provider; if (!p.what) p.what = hit.what; } else p.provider = String(p.name || '').trim();
+if (!p.logoUrl) p.logoUrl = (hit && hit.logoUrl) || matchBrandLogo(p.provider) || '';
+});
+if (!data.providersConsolidated) {
+data.providersConsolidated = true;
+data.vouchers.forEach((v) => {
+const hit = splitProvider(v.provider || v.name);
+if (!hit) return;
+v.provider = hit.provider;
+if (!v.what && hit.what) v.what = hit.what;
+if (!v.logoUrl) v.logoUrl = hit.logoUrl;
+});
+data.subscriptions.forEach((s) => {
+if (s.provider) return;
+const hit = splitProvider(s.name);
+s.provider = hit ? hit.provider : String(s.name || '').trim();
+if (hit && !s.logoUrl) s.logoUrl = hit.logoUrl;
 });
 }
 // Backfills contentFilter onto a program that already existed before

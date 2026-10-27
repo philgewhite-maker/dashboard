@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v651</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v652</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -541,7 +541,8 @@
 <input type="text" autocomplete="off" id="voucher-value-input" placeholder="Value (optional)">
 <input type="date" id="voucher-expiry-input">
 <input type="text" autocomplete="off" id="voucher-notes-input" placeholder="Notes (optional)">
-<input type="text" autocomplete="off" id="voucher-provider-input" list="taglist-voucher-provider" placeholder="Provider (optional)">
+<input type="text" autocomplete="off" id="voucher-provider-input" list="taglist-provider" placeholder="Provider (pick or type new)" title="Pick a provider you already use or type a new one. BA, British Airways and British Airways eVoucher all become one name, with its logo.">
+<input type="text" autocomplete="off" id="voucher-what-input" list="taglist-what" placeholder="What of (Avios, eVoucher...)">
 <button class="add-btn" type="button">Add</button>
 </div>
 </section>
@@ -561,8 +562,8 @@
 </div>
 <div id="loyalty-balances-list"></div>
 <div class="add-form" id="loyalty-add-form">
-<input type="text" autocomplete="off" id="loyalty-add-name" placeholder="Program name, e.g. Hertz Gold Plus Rewards">
-<input type="text" autocomplete="off" id="loyalty-add-sender" placeholder="Sender address(es), comma separated">
+<input type="text" autocomplete="off" id="loyalty-add-provider" list="taglist-provider" placeholder="Provider (pick or type new), e.g. Hertz">
+<input type="text" autocomplete="off" id="loyalty-add-what" list="taglist-what" placeholder="What of, e.g. Gold Plus Rewards"><input type="text" autocomplete="off" id="loyalty-add-sender" placeholder="Sender address(es), comma separated">
 <button class="add-btn" type="button" id="loyalty-add-btn">Add</button>
 </div>
 </section>
@@ -576,7 +577,8 @@
 <div id="subscriptions-total"></div>
 <div id="subscriptions-list"></div>
 <div class="add-form" id="subscription-form">
-<input type="text" autocomplete="off" id="subscription-name-input" placeholder="e.g. Netflix">
+<input type="text" autocomplete="off" id="subscription-provider-input" list="taglist-provider" placeholder="Provider (pick or type new), e.g. Netflix">
+<input type="text" autocomplete="off" id="subscription-name-input" placeholder="Plan (optional), e.g. Premium">
 <select id="subscription-frequency-input">
 <option>Monthly</option>
 <option>Yearly</option>
@@ -5057,7 +5059,7 @@ Finds connections whose cover photo is missing or is really just the small place
 <div class="guide-task">
 <div class="guide-q">How do I add a programme that isn't listed?</div>
 <ol class="guide-steps">
-<li>At the bottom of the panel type the <strong>Program name</strong> and the <strong>Sender address(es)</strong> its emails come from (comma separated, both required), then press <strong>Add</strong>.</li>
+<li>At the bottom of the panel pick or type the <strong>Provider</strong> (BA, British Airways and British Airways eVoucher all become one name, with its logo), type <strong>What of</strong> (Avios, eVoucher, Companion Voucher&hellip;) and the <strong>Sender address(es)</strong> its emails come from (comma separated, both required), then press <strong>Add</strong>.</li>
 <li>A programme without a built-in reader is read with an AI call for every new email; its badge says <strong>AI-parsed (Nx)</strong> with the number of calls so far. Built-in programmes say <strong>Deterministic</strong> and cost nothing.</li>
 <li>Open its <strong>Settings</strong> to change the sender addresses, add a membership number, make it inactive, or <strong>Remove</strong> it (custom programmes only).</li>
 </ol>
@@ -5089,9 +5091,9 @@ Finds connections whose cover photo is missing or is really just the small place
 <div class="guide-task">
 <div class="guide-q">How do I keep track of a voucher or credit before it expires?</div>
 <ol class="guide-steps">
-<li>In <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#voucher-form">Vouchers &amp; Credits</span> type the name (for example "BA Companion Voucher"), choose the type (Voucher, Credit, Cheque, Refund or Other), and optionally the value, expiry date, notes and provider. Press <strong>Add</strong>.</li>
+<li>In <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#voucher-form">Vouchers &amp; Credits</span> type the name, choose the type (Voucher, Credit, Cheque, Refund or Other), and optionally the value, expiry date, notes, the <strong>Provider</strong> (pick one you already use or type a new one) and <strong>What of</strong> (Companion Voucher, eVoucher&hellip;). Press <strong>Add</strong>.</li>
 <li>The list is grouped by provider and sorted so the soonest expiry is first. Each voucher shows <strong>Nd left</strong>, amber within 30 days, or <strong>Expired</strong>.</li>
-<li>Every field is editable in the row. Typing a known provider fills in its logo. Press &times; to delete a voucher.</li>
+<li>Every field is editable in the row. A provider is always tidied to one name, so every British Airways voucher sits together whatever you typed; the logo is added when the brand is known. Press &times; to delete a voucher.</li>
 </ol>
 <div class="guide-tip">Tick <strong>Used</strong> on a voucher you have spent or finished with: it is greyed out, moves to the bottom and stops appearing in reminders. Untick it to bring it back. Deleting asks you to confirm.</div>
 </div>
@@ -5114,7 +5116,7 @@ Finds connections whose cover photo is missing or is really just the small place
 <div class="guide-task">
 <div class="guide-q">How do I track what I pay for and when it renews?</div>
 <ol class="guide-steps">
-<li>In <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#subscription-form">Subscriptions</span> type the name, choose the frequency (Monthly, Yearly, Weekly or Other), type the cost if you want, and set the <strong>next</strong> renewal date (not the date you signed up). Press <strong>Add</strong>.</li>
+<li>In <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#subscription-form">Subscriptions</span> pick or type the <strong>Provider</strong> (it gets one tidy name and its logo when known), optionally the plan, choose the frequency (Monthly, Yearly, Weekly or Other), type the cost if you want, and set the <strong>next</strong> renewal date (not the date you signed up). Press <strong>Add</strong>.</li>
 <li>The list is sorted by soonest renewal. A badge shows <strong>Nd left</strong> (amber within 7 days), <strong>Renews today</strong>, or <strong>Update due</strong> once the date has passed.</li>
 <li>When a renewal date passes, Monthly, Yearly and Weekly subscriptions move on to the next date by themselves. A subscription set to Other keeps showing <strong>Update due</strong> until you type the next date in.</li>
 </ol>

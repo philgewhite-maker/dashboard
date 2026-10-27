@@ -1,5 +1,6 @@
 import { data, queueSave } from '../state.js';
-import { uid, escapeHtml, bindForm, daysUntil, scrollAndFlash, todayStr } from '../utils.js';
+import { uid, escapeHtml, bindForm, daysUntil, scrollAndFlash, todayStr, logoBadgeHtml, bindLogoFallbacks } from '../utils.js';
+import { resolveProvider, refreshProviderDatalists } from '../providers.js';
 
 const FREQUENCIES = ['Monthly', 'Yearly', 'Weekly', 'Other'];
 
@@ -75,6 +76,7 @@ el.innerHTML = `<div class="settings-note" style="margin:0 0 8px;"><strong>${fmt
 
 function renderSubscriptions() {
 rollRenewals();
+refreshProviderDatalists();
 renderSubscriptionTotal();
 const list = document.getElementById('subscriptions-list');
 document.getElementById('subscriptions-count').textContent = data.subscriptions.length + (data.subscriptions.length === 1 ? ' subscription' : ' subscriptions');
@@ -100,9 +102,13 @@ badgeHtml = `<span class="expiry-badge soon">${dn === 0 ? 'Renews today' : dn + 
 badgeHtml = `<span class="expiry-badge">${dn}d left</span>`;
 }
 }
+const subInitials = (s.provider || s.name || '?').trim().slice(0, 2).toUpperCase();
 return `<div class="voucher-row" data-subscription-row="${s.id}">
-<div class="voucher-id">
-<input type="text" autocomplete="off" class="voucher-edit voucher-name-edit" data-field="name" data-sub-id="${s.id}" value="${escapeHtml(s.name)}">
+<div class="voucher-id" style="display:flex;gap:8px;align-items:flex-start;">
+${logoBadgeHtml(s.logoUrl, subInitials, 'plum')}
+<div style="flex:1 1 auto;min-width:0;">
+<input type="text" autocomplete="off" class="voucher-edit voucher-provider-edit" list="taglist-provider" data-field="provider" data-sub-id="${s.id}" value="${escapeHtml(s.provider || '')}" placeholder="Provider" title="Pick a provider you already use or type a new one -- the name is tidied to one spelling and its logo is added when known.">
+<input type="text" autocomplete="off" class="voucher-edit voucher-name-edit" data-field="name" data-sub-id="${s.id}" value="${escapeHtml(s.name)}" placeholder="Plan or what it is">
 <div class="voucher-meta">
 <select class="voucher-edit voucher-type-edit" data-field="frequency" data-sub-id="${s.id}">
 ${FREQUENCIES.map((f) => `<option value="${f}" ${f === s.frequency ? 'selected' : ''}>${f}</option>`).join('')}
@@ -111,6 +117,7 @@ ${FREQUENCIES.map((f) => `<option value="${f}" ${f === s.frequency ? 'selected' 
 ${annualOf(s) != null ? `<span class="settings-note" style="margin:0;white-space:nowrap;" title="Worked out from the amount and how often it is charged">&asymp; ${fmtGbp(annualOf(s))}/yr</span>` : ''}
 </div>
 ${accountLinkHtml(s)}
+</div>
 </div>
 <input type="text" autocomplete="off" class="voucher-edit voucher-notes-edit" data-field="notes" data-sub-id="${s.id}" value="${escapeHtml(s.notes || '')}" placeholder="Notes">
 <div class="voucher-expiry">
@@ -123,6 +130,7 @@ ${badgeHtml}
 </div>`;
 }).join('');
 
+bindLogoFallbacks(list);
 list.querySelectorAll('[data-field][data-sub-id]').forEach((el) => {
 el.addEventListener('change', () => {
 const s = data.subscriptions.find((x) => x.id === el.dataset.subId);
@@ -130,6 +138,10 @@ if (!s) return;
 if (el.dataset.field === 'amount') {
 const n = el.value.trim() === '' ? null : Number(el.value);
 s.amount = Number.isFinite(n) && n >= 0 ? n : null;
+} else if (el.dataset.field === 'provider') {
+const r = resolveProvider(el.value);
+s.provider = r.provider;
+s.logoUrl = r.logoUrl || '';
 } else {
 s[el.dataset.field] = el.value.trim();
 }
@@ -183,21 +195,26 @@ if (wasLinked) refreshAccountsPanel();
 
 function initSubscriptionForm() {
 bindForm('subscription-form', () => {
+const providerInput = document.getElementById('subscription-provider-input');
 const nameInput = document.getElementById('subscription-name-input');
 const frequencyInput = document.getElementById('subscription-frequency-input');
 const costInput = document.getElementById('subscription-cost-input');
 const renewalInput = document.getElementById('subscription-renewal-input');
 const notesInput = document.getElementById('subscription-notes-input');
-const name = nameInput.value.trim();
-if (!name) return;
+const resolved = resolveProvider(providerInput.value);
+const name = nameInput.value.trim() || resolved.what || resolved.provider;
+if (!resolved.provider && !name) return;
 data.subscriptions.push({
 id: uid(),
+provider: resolved.provider || name,
+logoUrl: resolved.logoUrl,
 name,
 frequency: frequencyInput.value,
 amount: costInput.value.trim() === '' || !(Number(costInput.value) >= 0) ? null : Number(costInput.value),
 nextRenewal: renewalInput.value,
 notes: notesInput.value.trim(),
 });
+providerInput.value = '';
 nameInput.value = '';
 costInput.value = '';
 renewalInput.value = '';

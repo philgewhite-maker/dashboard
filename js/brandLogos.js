@@ -64,4 +64,32 @@ function matchBrandLogo(name) {
 return matchBrandEntry(name)?.logoUrl || null;
 }
 
-export { BRAND_LOGOS, matchBrandLogo, matchBrandEntry };
+// ---- Canonical providers ----
+// One provider name per brand, however it was typed: "BA", "British
+// Airways Executive Club" and "British Airways eVoucher" all resolve to
+// the entry's FIRST name ("British Airways"), and whatever is left over
+// ("Executive Club", "eVoucher") is the "what of". Pure (no `data`), so
+// state.js's migrate() can use it without an import cycle; the picker
+// that needs the user's own saved providers lives in providers.js.
+// Matching is exact first, then "starts with an alias, at a word
+// boundary" for aliases of 4+ letters -- never substring, so "BA" can't
+// match "Barclays" and "Virgin" can't match "Avirgin".
+const normProv = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+function splitProvider(text) {
+const q = normProv(text);
+if (!q) return null;
+let best = null;
+BRAND_LOGOS.forEach((entry) => {
+entry.names.forEach((n) => {
+const a = normProv(n);
+const exact = q === a;
+const prefix = a.length >= 4 && q.startsWith(a + ' ');
+if (!exact && !prefix) return;
+if (!best || a.length > best.len) best = { entry, len: a.length, rest: exact ? '' : String(text).trim().slice(a.length).replace(/^[\s\-–—:·]+/, '').trim() };
+});
+});
+if (!best) return null;
+return { provider: best.entry.names[0], logoUrl: best.entry.logoUrl, what: best.rest };
+}
+
+export { BRAND_LOGOS, matchBrandLogo, matchBrandEntry, splitProvider, normProv };
