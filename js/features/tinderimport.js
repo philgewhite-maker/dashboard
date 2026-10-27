@@ -22,7 +22,7 @@
 // importer), and the chosen connection's photo stays visible for the whole
 // review regardless of how it got picked, so a wrong dropdown pick is just
 // as visible as a wrong auto-match was invisible before.
-import { data, queueSave, displayAge, computeFlags, distanceMiles, heightCm, FLAG_FIELD_DEFS, suggestedQuestions, TAG_FIELDS, stripSharedSuffix, recordImportRun, importStatusLine, upsertIdentity, tinderMatchIds, mergeChatLog, blankConnection } from '../state.js';
+import { data, queueSave, isDormantStage, displayAge, computeFlags, distanceMiles, heightCm, FLAG_FIELD_DEFS, suggestedQuestions, TAG_FIELDS, stripSharedSuffix, recordImportRun, importStatusLine, upsertIdentity, tinderMatchIds, mergeChatLog, blankConnection } from '../state.js';
 import { escapeHtml, uid, todayStr, hydratePhotoBackgrounds, openLightbox, knownCityMap, knownScalarValues, pickChipHtml, COUNTRY_NAME_TO_NATIONALITY, avatarHtml, foldDiacritics, MISSING_KEY_LINK_HTML } from '../utils.js';
 import { phoneKey } from '../googlecontacts.js';
 import { storePhoto, fetchProxiedImage } from '../files.js';
@@ -2314,8 +2314,84 @@ const trimmed = String(text || '').trim();
 if (!trimmed) return { profiles: [], unmatchedIds: [] };
 const raw = JSON.parse(trimmed);
 const unmatchedIds = Array.isArray(raw.unmatched) ? raw.unmatched.map((id) => String(id || '').trim()).filter(Boolean) : [];
-const profiles = Array.isArray(raw.profiles) ? raw.profiles : (raw.unmatched !== undefined ? [] : [raw]);
-return { profiles, unmatchedIds };
+// tinderVerifyUnmatched()'s output: {verified: {gone:[id], present:[id], unsure:[id]}}
+const ids = (v) => (Array.isArray(v) ? v.map((id) => String(id || '').trim()).filter(Boolean) : []);
+const verified = raw.verified && typeof raw.verified === 'object'
+? { gone: ids(raw.verified.gone), present: ids(raw.verified.present), unsure: ids(raw.verified.unsure) } : null;
+const profiles = Array.isArray(raw.profiles) ? raw.profiles : (raw.unmatched !== undefined || verified ? [] : [raw]);
+return { profiles, unmatchedIds, verified };
+}
+
+// What a Tinder search check found for the people flagged Unmatched:
+//  - still there: the flag was a false alarm (the sidebar list just hadn't
+//    loaded them), so the Unmatched flag and tag come off;
+//  - gone: queued for you to confirm archiving -- never archived on its own;
+//  - unsure: left flagged for another look.
+function applyVerified(verified, status) {
+let cleared = 0;
+let queued = 0;
+let notFound = 0;
+if (!Array.isArray(data.prefs.tinderArchiveQueue)) data.prefs.tinderArchiveQueue = [];
+verified.present.forEach((id) => {
+const conn = data.connections.find((c) => c.tinderMatchId === id);
+if (!conn) { notFound++; return; }
+if (!conn.unmatchedAt) return;
+conn.unmatchedAt = '';
+conn.tags = (conn.tags || []).filter((t) => t.toLowerCase() !== 'unmatched');
+conn.notes = String(conn.notes || '').split('\n').filter((l) => !/^Unmatched: /.test(l)).join('\n');
+data.prefs.tinderArchiveQueue = data.prefs.tinderArchiveQueue.filter((x) => x !== conn.id);
+cleared++;
+});
+verified.gone.forEach((id) => {
+const conn = data.connections.find((c) => c.tinderMatchId === id);
+if (!conn) { notFound++; return; }
+if (isDormantStage(conn.stage)) return; // already faded/archived/got away
+if (!data.prefs.tinderArchiveQueue.includes(conn.id)) { data.prefs.tinderArchiveQueue.push(conn.id); queued++; }
+});
+queueSave();
+renderArchiveQueue();
+if (cleared) import('./connections.js').then((c) => c.renderConnections());
+if (status) {
+status.textContent = `Search check: ${verified.gone.length} gone, ${verified.present.length} still there, ${verified.unsure.length} unsure.`
++ (queued ? ` ${queued} added to the archive queue below.` : '')
++ (cleared ? ` ${cleared} un-flagged.` : '')
++ (notFound ? ` ${notFound} not on file.` : '');
+}
+}
+
+// The people the search check found gone, waiting for you to confirm.
+function renderArchiveQueue() {
+const el = document.getElementById('tinder-archive-queue');
+if (!el) return;
+const queue = (Array.isArray(data.prefs.tinderArchiveQueue) ? data.prefs.tinderArchiveQueue : [])
+.map((id) => data.connections.find((c) => c.id === id)).filter(Boolean);
+if (!queue.length) { el.innerHTML = ''; return; }
+el.innerHTML = `<div class="alloc-card" style="margin-top:10px;">
+<div class="settings-note" style="margin:0 0 6px;font-weight:600;">Gone from Tinder &mdash; archive these? (${queue.length})</div>
+<div class="settings-note" style="margin:0 0 6px;">Searching Tinder for each of these found no match, so they've most likely unmatched you. Archiving moves them to the Archived stage; nothing else is changed.</div>
+${queue.map((c) => `<label class="pending-option" style="display:flex;align-items:center;gap:8px;"><input type="checkbox" data-archive-pick="${escapeHtml(c.id)}" checked> ${connectionChipHtml(c)}<span class="settings-note" style="margin:0;">${escapeHtml(c.stage || '')}${c.unmatchedAt ? ` &middot; flagged ${escapeHtml(c.unmatchedAt)}` : ''}</span></label>`).join('')}
+<div class="alloc-controls" style="margin-top:8px;">
+<button class="todo-add-btn" type="button" data-archive-go>Archive ticked</button>
+<button class="sync-btn sm inline" type="button" data-archive-dismiss title="Leave them as they are and clear this list">Not now</button>
+</div>
+</div>`;
+bindConnectionChips();
+el.querySelector('[data-archive-go]').addEventListener('click', () => {
+const picked = [...el.querySelectorAll('[data-archive-pick]:checked')].map((i) => i.dataset.archivePick);
+picked.forEach((id) => {
+const conn = data.connections.find((c) => c.id === id);
+if (conn) conn.stage = 'Archived';
+});
+data.prefs.tinderArchiveQueue = (data.prefs.tinderArchiveQueue || []).filter((id) => !picked.includes(id));
+queueSave();
+renderArchiveQueue();
+import('./connections.js').then((c) => c.renderConnections());
+});
+el.querySelector('[data-archive-dismiss]').addEventListener('click', () => {
+data.prefs.tinderArchiveQueue = [];
+queueSave();
+renderArchiveQueue();
+});
 }
 
 // Additive-only (a date, a note line, a tag) and never destructive, so
@@ -2359,6 +2435,7 @@ function loadBatch(raws, status) {
 if (!raws.length) { if (status) status.textContent = 'Nothing to import in that.'; return; }
 recordImportRun('tinderSnippet', { scope: `${raws.length} profile${raws.length === 1 ? '' : 's'} read`, count: raws.length });
 renderTinderLastRun();
+renderArchiveQueue();
 const { bulk, review } = classifyRaws(raws);
 if (bulk.length) { bulkSubmitMessage = ''; bulkSubmitIssueConns = []; }
 bulkQueue = bulkQueue.concat(bulk);
@@ -2887,8 +2964,9 @@ if (status) status.textContent = `Couldn't read that as Tinder JSON: ${err.messa
 return;
 }
 if (parsed.unmatchedIds.length) applyUnmatched(parsed.unmatchedIds, status);
+if (parsed.verified) applyVerified(parsed.verified, status);
 if (!parsed.profiles.length) {
-if (!parsed.unmatchedIds.length && status) status.textContent = 'Nothing to import in that.';
+if (!parsed.unmatchedIds.length && !parsed.verified && status) status.textContent = 'Nothing to import in that.';
 return;
 }
 loadBatch(parsed.profiles, status);
@@ -2900,25 +2978,29 @@ async function handleTinderFiles(files) {
 const status = document.getElementById('dating-import-status');
 let raws = [];
 let unmatchedIds = [];
+const verifiedReports = [];
 const errors = [];
 for (const file of files) {
 try {
 const parsed = parseBatch(await file.text());
 raws = raws.concat(parsed.profiles);
 unmatchedIds = unmatchedIds.concat(parsed.unmatchedIds);
+if (parsed.verified) verifiedReports.push(parsed.verified);
 } catch (err) {
 errors.push(`${file.name}: ${err.message}`);
 }
 }
 if (errors.length && status) status.textContent = `Couldn't read ${errors.length === 1 ? 'a file' : `${errors.length} files`}: ${errors.join('; ')}`;
 if (unmatchedIds.length) applyUnmatched(unmatchedIds, status);
+verifiedReports.forEach((v) => applyVerified(v, status));
 if (raws.length) loadBatch(raws, status);
-else if (!errors.length && !unmatchedIds.length && status) status.textContent = 'Nothing to import in that.';
+else if (!errors.length && !unmatchedIds.length && !verifiedReports.length && status) status.textContent = 'Nothing to import in that.';
 }
 
 function initTinderImport() {
 bindConnectionChips();
 renderTinderLastRun();
+renderArchiveQueue();
 const status = document.getElementById('dating-import-status');
 
 const copyBtn = document.getElementById('tinder-copy-snippet');
@@ -2966,8 +3048,14 @@ const videoBacklogIds = known
 // never stored, so a connection known by a second/renamed id shouldn't
 // look missing.
 const allKnownMatchIds = [...new Set(data.connections.flatMap((c) => [...tinderMatchIds(c)]))].filter(Boolean);
+// Flagged Unmatched but not yet archived: who tinderVerifyUnmatched() should
+// look up by name in Tinder's own search. Needs the name, since a search box
+// can't be given an id.
+const unmatchedToCheck = data.connections
+.filter((c) => c.unmatchedAt && c.tinderMatchId && !isDormantStage(c.stage))
+.map((c) => ({ id: c.tinderMatchId, name: c.name }));
 const snippet = document.getElementById('tinder-bulk-snippet').textContent
-+ `\ntinderSeedDone(${JSON.stringify(knownIds)});\ntinderSeedStale(${JSON.stringify(staleById)}, ${JSON.stringify(videoBacklogIds)});\nwindow.__dashKnownIds = ${JSON.stringify(allKnownMatchIds)};\n`;
++ `\ntinderSeedDone(${JSON.stringify(knownIds)});\ntinderSeedStale(${JSON.stringify(staleById)}, ${JSON.stringify(videoBacklogIds)});\nwindow.__dashKnownIds = ${JSON.stringify(allKnownMatchIds)};\nwindow.__dashUnmatched = ${JSON.stringify(unmatchedToCheck)};\n`;
 await navigator.clipboard.writeText(snippet);
 bulkCopyBtn.textContent = 'Copied';
 setTimeout(() => { bulkCopyBtn.textContent = 'Copy bulk-import snippet'; }, 2000);

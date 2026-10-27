@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v647</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v648</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -2126,6 +2126,86 @@ window.tinderFindUnmatched = async () => {
   if (!copied) console.log(json);
 };
 
+// The follow-up to tinderFindUnmatched: its list is only "not in the
+// sidebar right now", which a list that didn't fully load looks identical
+// to. This looks each of those people up in Tinder's OWN search box by name
+// and reports who it can and can't find -- paste the result into the
+// dashboard, which clears the ones that are still there and queues the gone
+// ones for you to confirm archiving. Takes the people from the dashboard's
+// copy of this snippet (window.__dashUnmatched), or pass [{id, name}].
+// Before trusting any "gone" it searches for someone who is visibly present
+// and stops if the search can't find them, so a search box that behaves
+// differently from what's assumed here can't produce false "gone"s.
+window.tinderVerifyUnmatched = async (people) => {
+  const list = (people || window.__dashUnmatched || []).filter((p) =&gt; p &amp;&amp; p.id &amp;&amp; p.name);
+  if (!list.length) { console.warn('Nobody to check -- copy this snippet from the dashboard again (it lists who is flagged Unmatched), or pass [{id, name}].'); return; }
+  const wait = (ms) =&gt; new Promise((r) =&gt; setTimeout(r, ms));
+  const SEARCH_SELECTOR = 'input[type="search"], input[placeholder*="earch" i], input[aria-label*="earch" i]';
+  const findSearchInput = () =&gt; [...document.querySelectorAll(SEARCH_SELECTOR)].find((el) =&gt; el.offsetParent !== null) || null;
+  // React ignores a plain `.value = ...`; the native setter plus an input
+  // event is what it listens for.
+  async function setSearch(input, value) {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+    input.focus();
+    setter.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  let input = findSearchInput();
+  if (!input) {
+    const btn = document.querySelector('button[aria-label*="earch" i]');
+    if (btn) { btn.click(); await wait(600); input = findSearchInput(); }
+  }
+  if (!input) {
+    const bits = [...document.querySelectorAll('input, button[aria-label*="earch" i], [role="search"]')].slice(0, 12).map((el) =&gt; el.outerHTML.slice(0, 220));
+    console.warn('Could not find a search box on this page. Paste the lines below back to Claude so the script can be taught Tinder\'s markup:\n' + bits.join('\n'));
+    return;
+  }
+
+  async function search(name) {
+    await setSearch(input, name);
+    await wait(1500 + Math.random() * 800);
+    return collectCandidates();
+  }
+
+  await setSearch(input, '');
+  await wait(800);
+  const flaggedIds = new Set(list.map((p) =&gt; p.id));
+  const control = collectCandidates().find((r) =&gt; r.name &amp;&amp; !flaggedIds.has(r.id));
+  if (control) {
+    const rows = await search(control.name);
+    if (!rows.some((r) =&gt; r.id === control.id)) {
+      console.warn(`Searching for ${control.name}, who IS in your matches, didn't find them -- so this search can't be trusted to say anyone is gone. Stopped; nothing was checked.`);
+      await setSearch(input, '');
+      return;
+    }
+    console.log(`Search works (found ${control.name}). Checking ${list.length} flagged ${list.length === 1 ? 'person' : 'people'}...`);
+  } else {
+    console.warn('No other match is visible to test the search with first -- carrying on, but treat the "gone" results with care.');
+  }
+
+  const gone = [], present = [], unsure = [];
+  let n = 0;
+  for (const p of list) {
+    n++;
+    const rows = await search(p.name);
+    const exact = rows.some((r) =&gt; r.id === p.id);
+    const sameName = rows.some((r) =&gt; r.id !== p.id &amp;&amp; r.name &amp;&amp; r.name.toLowerCase() === p.name.toLowerCase());
+    if (exact) present.push(p.id);
+    else if (sameName) unsure.push(p.id);
+    else gone.push(p.id);
+    console.log(`[${n}/${list.length}] ${p.name}: ${exact ? 'still there' : sameName ? 'only another match with that name came up -- unsure' : 'not found -- gone'}`);
+    await randomDelay();
+  }
+  await setSearch(input, '');
+  const json = JSON.stringify({ verified: { gone, present, unsure } }, null, 1);
+  let copied = false;
+  try { copy(json); copied = true; } catch (e) { /* not a real DevTools console */ }
+  if (!copied) { try { await navigator.clipboard.writeText(json); copied = true; } catch (e) { /* no clipboard */ } }
+  console.log(`${gone.length} gone, ${present.length} still there, ${unsure.length} unsure${copied ? ' -- copied' : ''}. Paste into the dashboard like any other batch.`);
+  if (!copied) console.log(json);
+};
+
 // The mirror image of tinderFindUnmatched: that one finds ids that
 // VANISHED from the sidebar; this finds ids that are IN the sidebar but
 // the DASHBOARD never got. Deliberately compares against the dashboard's
@@ -2390,7 +2470,7 @@ async function staleSweepTail(n, chunkSize) {
 // default); chunkSize defaults to 15.
 window.tinderStaleRefresh = (n, chunkSize) => staleSweepTail(n ?? 25, chunkSize ?? 15);
 
-console.log('Ready. Run tinderBulkImport() for the default 15, tinderBulkImport(30) for a custom size, or e.g. tinderBulkImport(250) left running overnight -- checkpoints to a file every 25. Or tinderCatchUp("2026-08-10") to re-check active conversations and new matches since a date -- good for a weekly pass. Or tinderFindUnmatched() to spot anyone missing from both lists since they were last indexed. Or tinderFindMissing() to spot the opposite -- matches in your sidebar the dashboard never stored (e.g. an early run scraped them before their panel loaded); it prints a ready tinderReextract([...]) call, and ignores this browser\'s skip-list. Or tinderReextract(["id1", "id2", ...]) to re-check a specific, already-known list of ids -- e.g. profiles a JSON cross-check flagged as suspiciously incomplete. Or tinderSeedDone([...ids]) to mark ids you already have elsewhere as done without opening them -- the dashboard\'s "Copy bulk-import snippet" button does this automatically, along with tinderSeedStale({...}, [...]) which both tinderBulkImport() and tinderCatchUp() use to also refresh a handful of your longest-untouched profiles after their main run (2nd arg: ids still owed a video-clip check from before that feature existed -- those go first), in their own separate file, checkpointed every 15. Or tinderStaleRefresh(200) to run a large, dedicated stale-refresh session on its own instead of only ever getting a small tail-add-on -- better than calling the small version repeatedly in one sitting, which just reselects the same people until a file is actually pasted back in; tinderStaleRefresh(200, 10) to also checkpoint more often than the default 15.');
+console.log('Ready. Run tinderBulkImport() for the default 15, tinderBulkImport(30) for a custom size, or e.g. tinderBulkImport(250) left running overnight -- checkpoints to a file every 25. Or tinderCatchUp("2026-08-10") to re-check active conversations and new matches since a date -- good for a weekly pass. Or tinderFindUnmatched() to spot anyone missing from both lists since they were last indexed, then tinderVerifyUnmatched() to look those people up in Tinder\'s own search and see who has really gone (paste the result back and confirm the archiving in the dashboard). Or tinderFindMissing() to spot the opposite -- matches in your sidebar the dashboard never stored (e.g. an early run scraped them before their panel loaded); it prints a ready tinderReextract([...]) call, and ignores this browser\'s skip-list. Or tinderReextract(["id1", "id2", ...]) to re-check a specific, already-known list of ids -- e.g. profiles a JSON cross-check flagged as suspiciously incomplete. Or tinderSeedDone([...ids]) to mark ids you already have elsewhere as done without opening them -- the dashboard\'s "Copy bulk-import snippet" button does this automatically, along with tinderSeedStale({...}, [...]) which both tinderBulkImport() and tinderCatchUp() use to also refresh a handful of your longest-untouched profiles after their main run (2nd arg: ids still owed a video-clip check from before that feature existed -- those go first), in their own separate file, checkpointed every 15. Or tinderStaleRefresh(200) to run a large, dedicated stale-refresh session on its own instead of only ever getting a small tail-add-on -- better than calling the small version repeatedly in one sitting, which just reselects the same people until a file is actually pasted back in; tinderStaleRefresh(200, 10) to also checkpoint more often than the default 15.');
 })();</pre>
 </details>
 </details>
@@ -2618,6 +2698,7 @@ Album links are permanent, unlike the face-group links tried previously.
 </div>
 <div class="settings-note import-last-run" id="tinder-last-run"></div>
 <div id="tinder-bulk-review"></div>
+<div id="tinder-archive-queue"></div>
 <div id="tinder-review"></div>
 <div id="manual-import-review"></div>
 <div class="settings-note import-last-run" id="whatsapp-last-run"></div>

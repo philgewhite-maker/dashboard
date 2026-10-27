@@ -264,7 +264,7 @@ if (!trimmed) return 'unknown';
 if (trimmed[0] === '{' || trimmed[0] === '[') {
 try {
 const raw = JSON.parse(trimmed);
-if (Array.isArray(raw.profiles) || raw.unmatched !== undefined || (raw.name !== undefined && raw.fields !== undefined && raw.photos !== undefined)) return 'tinder';
+if (Array.isArray(raw.profiles) || raw.unmatched !== undefined || raw.verified !== undefined || (raw.name !== undefined && raw.fields !== undefined && raw.photos !== undefined)) return 'tinder';
 if (Array.isArray(raw) || Array.isArray(raw.albums)) return 'albums';
 } catch (e) { /* not valid JSON -- fall through to the other checks below */ }
 }
