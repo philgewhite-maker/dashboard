@@ -15,7 +15,7 @@
 //    March should not be adding noise in January.
 import { data, queueSave, TASK_BUCKETS, SHOPPING_CONTEXTS, blankTask } from '../state.js';
 import { photoDelete } from '../db.js';
-import { uid, todayStr, escapeHtml, affiliateLink, hydratePhotoBackgrounds, resizeImageToBlob, daysUntil, daysSince, scrollAndFlash, looksLikeUrl, prettyUrl, bindBackdropClose } from '../utils.js';
+import { uid, todayStr, dateStrAdd, escapeHtml, affiliateLink, hydratePhotoBackgrounds, resizeImageToBlob, daysUntil, daysSince, scrollAndFlash, looksLikeUrl, prettyUrl, bindBackdropClose } from '../utils.js';
 import { uploadAttachment, storePhoto, deleteAttachment, openAttachment, formatBytes } from '../files.js';
 
 const BUCKET_LABEL = Object.fromEntries(TASK_BUCKETS.map((b) => [b.bucket, b.label]));
@@ -38,9 +38,40 @@ function childrenOf(id) { return data.tasks.filter((t) => t.parentId === id); }
 // (planner.js) call this, so there's exactly one copy of the logic, not
 // two that could drift. Caller is responsible for its own re-render(s)
 // and queueSave().
+const REPEAT_LABELS = { daily: 'Daily', weekly: 'Weekly', fortnightly: 'Every 2 weeks', monthly: 'Monthly', yearly: 'Yearly' };
+
+// The next date a repeating task is due, strictly after today: counted on
+// from its current due date (so a weekly bin day stays on its weekday even
+// if ticked a day late), and caught up past today if it was left to lapse.
+function nextRepeatDate(due, repeat) {
+const today = todayStr();
+const step = (from, n) => {
+if (repeat === 'daily') return dateStrAdd(from, n);
+if (repeat === 'weekly') return dateStrAdd(from, 7 * n);
+if (repeat === 'fortnightly') return dateStrAdd(from, 14 * n);
+const [y, m, d] = from.split('-').map(Number);
+const months = (repeat === 'yearly' ? 12 : 1) * n;
+const target = new Date(Date.UTC(y, m - 1 + months, 1));
+target.setUTCDate(Math.min(d, new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate()));
+return target.toISOString().slice(0, 10);
+};
+const base = due || today;
+let k = 1;
+let next = step(base, k);
+while (next <= today && k < 4000) next = step(base, ++k);
+return next;
+}
+
 function toggleTaskDone(id, done) {
 const t = taskById(id);
 if (!t) return;
+// A repeating task isn't finished by ticking it: it stays on its list with
+// the next due date, and a note of when it was last done.
+if (done && t.repeat && REPEAT_LABELS[t.repeat]) {
+t.due = nextRepeatDate(t.due, t.repeat);
+t.lastDoneAt = new Date().toISOString();
+return;
+}
 if (done) {
 t.bucket = 'done';
 t.completedAt = new Date().toISOString();
@@ -196,11 +227,12 @@ return `<span class="task-kidcount">${doneKids}/${kids.length}</span>`;
 
 function dateBadgeHtml(t) {
 if (t.bucket === 'done') return '';
+const repeatChip = t.repeat && REPEAT_LABELS[t.repeat] ? ` <span class="task-badge" title="Repeats: ticking it done moves the due date on">&#8635; ${escapeHtml(REPEAT_LABELS[t.repeat])}</span>` : '';
 if (t.due) {
 const dn = daysUntil(t.due);
 const cls = dn < 0 ? 'overdue' : dn <= 2 ? 'soon' : '';
 const text = dn < 0 ? `${-dn}d overdue` : dn === 0 ? 'Due today' : `due in ${dn}d`;
-return `<span class="task-badge ${cls}">${text}</span>`;
+return `<span class="task-badge ${cls}">${text}</span>${repeatChip}`;
 }
 if (isDormant(t)) return `<span class="task-badge dormant">back ${escapeHtml(t.bringForward)}</span>`;
 return '';
@@ -385,6 +417,7 @@ ${TASK_BUCKETS.map((b) => `<option value="${b.bucket}"${b.bucket === t.bucket ? 
 </select></label>
 <label>Due<input type="date" data-task-field="due" data-task-id="${t.id}" value="${escapeHtml(t.due || '')}"></label>
 <label>Bring forward<input type="date" data-task-field="bringForward" data-task-id="${t.id}" value="${escapeHtml(t.bringForward || '')}"></label>
+<label title="Ticking it done moves the due date on and keeps the task, instead of finishing it">Repeats<select data-task-field="repeat" data-task-id="${t.id}"><option value="">Never</option>${Object.entries(REPEAT_LABELS).map(([k, label]) => `<option value="${k}"${t.repeat === k ? ' selected' : ''}>${escapeHtml(label)}</option>`).join('')}</select></label>
 <label>Part of${taskPickerHtml(t)}</label>
 </div>
 <label class="full">Reference link (OneNote, doc, anything)<input type="text" autocomplete="off" placeholder="https://…" data-task-field="link" data-task-id="${t.id}" value="${escapeHtml(t.link || '')}"></label>
@@ -505,6 +538,11 @@ ${inbox.map((t) => { const titleIsUrl = looksLikeUrl(t.title); return `<div clas
 ? `<a href="${escapeHtml(affiliateLink(t.title))}" target="_blank" rel="noopener">${escapeHtml(prettyUrl(t.title))} &#8599;</a>`
 : escapeHtml(t.title || '(untitled)')}</div>
 ${t.notes ? `<div class="alloc-notes">${escapeHtml(t.notes)}</div>` : ''}
+<details class="inbox-edit"><summary>Edit</summary>
+<label>Title<input type="text" autocomplete="off" class="settings-input" data-inbox-field="title" data-inbox-id="${t.id}" value="${escapeHtml(t.title || '')}"></label>
+<label>Notes<textarea class="settings-input" rows="2" data-inbox-field="notes" data-inbox-id="${t.id}">${escapeHtml(t.notes || '')}</textarea></label>
+<label>Due<input type="date" class="settings-input" data-inbox-field="due" data-inbox-id="${t.id}" value="${escapeHtml(t.due || '')}"></label>
+</details>
 ${(t.photoIds || []).length ? `<div class="alloc-photo"><span class="thumb-img" data-photo-bg="${escapeHtml(t.photoIds[0])}"></span></div>` : ''}
 ${!titleIsUrl && t.link ? `<a class="task-link" href="${escapeHtml(affiliateLink(t.link))}" target="_blank" rel="noopener">Open reference &#8599;</a>` : ''}
 ${inboxMetaHtml(t)}
@@ -528,6 +566,25 @@ ${FILING_BUCKETS.map((b) => `<div class="alloc-target" data-drop-bucket="${b.buc
 </div>`;
 hydratePhotoBackgrounds(el);
 bindAllocation(el);
+// Editing in place: the card is draggable, which stops text being selected
+// or the cursor placed in a field inside it, so dragging is switched off
+// while a field has focus.
+el.querySelectorAll('[data-inbox-field]').forEach((input) => {
+const card = input.closest('[data-alloc-card]');
+input.addEventListener('focus', () => { if (card) card.draggable = false; });
+input.addEventListener('blur', () => { if (card) card.draggable = true; });
+input.addEventListener('change', () => {
+const t = taskById(input.dataset.inboxId);
+if (!t) return;
+const field = input.dataset.inboxField;
+t[field] = field === 'title' ? (input.value.trim() || t.title) : input.value;
+queueSave();
+if (field === 'title') {
+const titleEl = card && card.querySelector('.alloc-title');
+if (titleEl && !looksLikeUrl(t.title)) titleEl.textContent = t.title;
+}
+});
+});
 }
 
 function renderLists() {

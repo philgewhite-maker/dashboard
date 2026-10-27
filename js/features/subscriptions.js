@@ -1,5 +1,5 @@
 import { data, queueSave } from '../state.js';
-import { uid, escapeHtml, bindForm, daysUntil, scrollAndFlash } from '../utils.js';
+import { uid, escapeHtml, bindForm, daysUntil, scrollAndFlash, todayStr } from '../utils.js';
 
 const FREQUENCIES = ['Monthly', 'Yearly', 'Weekly', 'Other'];
 
@@ -22,7 +22,38 @@ ${s.accountId ? `<label class="subscription-free" title="Comes free with the acc
 </div>`;
 }
 
+// The date `n` periods after `dateStr`, always counted from the ORIGINAL date
+// (so 31 Jan + 1 month is 28/29 Feb and + 2 months is back on 31 Mar, not
+// stuck on the 28th). Weekly is 7 days; Yearly is 12 months.
+function addPeriod(dateStr, frequency, n) {
+const [y, m, d] = dateStr.split('-').map(Number);
+if (frequency === 'Weekly') return new Date(Date.UTC(y, m - 1, d + 7 * n)).toISOString().slice(0, 10);
+const months = (frequency === 'Yearly' ? 12 : 1) * n;
+const target = new Date(Date.UTC(y, m - 1 + months, 1));
+const last = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
+target.setUTCDate(Math.min(d, last));
+return target.toISOString().slice(0, 10);
+}
+
+// A renewal date that has passed moves on to the next one by itself for the
+// regular frequencies, so a monthly subscription doesn't need retyping every
+// month. "Other" has no known period and keeps asking for an update.
+function rollRenewals() {
+const today = todayStr();
+let changed = false;
+data.subscriptions.forEach((s) => {
+if (!s.nextRenewal || s.nextRenewal >= today || !['Monthly', 'Yearly', 'Weekly'].includes(s.frequency)) return;
+let k = 1;
+let next = addPeriod(s.nextRenewal, s.frequency, k);
+while (next < today && k < 2000) next = addPeriod(s.nextRenewal, s.frequency, ++k);
+s.nextRenewal = next;
+changed = true;
+});
+if (changed) queueSave();
+}
+
 function renderSubscriptions() {
+rollRenewals();
 const list = document.getElementById('subscriptions-list');
 document.getElementById('subscriptions-count').textContent = data.subscriptions.length + (data.subscriptions.length === 1 ? ' subscription' : ' subscriptions');
 if (data.subscriptions.length === 0) {

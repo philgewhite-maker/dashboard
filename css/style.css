@@ -4251,3 +4251,8 @@ max-width:none;
 .panel-about{margin:4px 0 8px;}
 .panel-about summary{font-size:11px;padding:2px 0;}
 .panel-about:not([open]) > :not(summary){display:none;}
+.voucher-used{opacity:.5;}
+.voucher-used .voucher-name-edit{text-decoration:line-through;}
+.inbox-edit{margin:4px 0;}
+.inbox-edit summary{cursor:pointer;font-size:11px;color:var(--muted);}
+.inbox-edit label{display:flex;flex-direction:column;gap:2px;font-size:11px;color:var(--muted);margin:4px 0;}

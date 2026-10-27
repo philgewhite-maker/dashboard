@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v649</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v650</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -3885,8 +3885,8 @@ Finds connections whose cover photo is missing or is really just the small place
 <div class="guide-task">
 <div class="guide-q">How do I fix a task's title, add notes or set a due date?</div>
 <ol class="guide-steps">
-<li>An Inbox card can't be edited, so file it first (a list you can change later is fine).</li>
-<li>Then open it from Lists: see "Working from your lists".</li>
+<li>On the Inbox card, open <strong>Edit</strong> and change the <strong>Title</strong>, <strong>Notes</strong> or <strong>Due</strong> date. Changes save as you leave each box.</li>
+<li>Other details (list, context, bring-forward date, repeat) are set once it is filed: see "Working from your lists".</li>
 </ol>
 <div class="guide-tip">A link captured with no title shows a shortened version of the address. <strong>&#10024; Resolve title</strong> on the card can look up a proper title without filing.</div>
 </div>
@@ -3964,6 +3964,17 @@ Finds connections whose cover photo is missing or is really just the small place
 <ol class="guide-steps">
 <li>Open the task and change <strong>List</strong>. To change context without opening it, use the chip's &times; to remove one, or <strong>+ context</strong> on the task's row to add one.</li>
 </ol>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I make a task repeat (bins, a monthly bill, a yearly check)?</div>
+<ol class="guide-steps">
+<li>Open the task and set <strong>Repeats</strong> to Daily, Weekly, Every 2 weeks, Monthly or Yearly. Give it a <strong>Due</strong> date to start from.</li>
+<li>Tick the task when you have done it. It is not finished: it stays on its list and its due date moves on to the next one, counted from the old date (a weekly task stays on its weekday). A <strong>&#8635;</strong> chip beside the due badge shows it repeats.</li>
+<li>If you let it lapse, the next date is the first one after today.</li>
+<li>To stop it repeating, set <strong>Repeats</strong> back to Never and tick it again.</li>
+</ol>
+<div class="guide-tip">Subtasks aren't reset when a repeating task rolls on. A repeating task with no due date gets one when you first tick it.</div>
 </div>
 
 <div class="guide-task">
@@ -5081,7 +5092,7 @@ Finds connections whose cover photo is missing or is really just the small place
 <li>The list is grouped by provider and sorted so the soonest expiry is first. Each voucher shows <strong>Nd left</strong>, amber within 30 days, or <strong>Expired</strong>.</li>
 <li>Every field is editable in the row. Typing a known provider fills in its logo. Press &times; to delete a voucher.</li>
 </ol>
-<div class="guide-tip">There's no "used" state. A voucher you've spent stays in the list, marked Expired once its date passes, until you delete it, and deleting asks you to confirm.</div>
+<div class="guide-tip">Tick <strong>Used</strong> on a voucher you have spent or finished with: it is greyed out, moves to the bottom and stops appearing in reminders. Untick it to bring it back. Deleting asks you to confirm.</div>
 </div>
 
 <div class="guide-task">
@@ -5104,7 +5115,7 @@ Finds connections whose cover photo is missing or is really just the small place
 <ol class="guide-steps">
 <li>In <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#subscription-form">Subscriptions</span> type the name, choose the frequency (Monthly, Yearly, Weekly or Other), type the cost if you want, and set the <strong>next</strong> renewal date (not the date you signed up). Press <strong>Add</strong>.</li>
 <li>The list is sorted by soonest renewal. A badge shows <strong>Nd left</strong> (amber within 7 days), <strong>Renews today</strong>, or <strong>Update due</strong> once the date has passed.</li>
-<li>When a renewal passes, type the new date into the row. It doesn't move on by itself.</li>
+<li>When a renewal date passes, Monthly, Yearly and Weekly subscriptions move on to the next date by themselves. A subscription set to Other keeps showing <strong>Update due</strong> until you type the next date in.</li>
 </ol>
 <div class="guide-tip">The panel doesn't add costs up. Cost is free text, so write it however you like.</div>
 </div>

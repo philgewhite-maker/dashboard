@@ -221,7 +221,7 @@ category: 'media',
 });
 
 data.vouchers.forEach((v) => {
-if (!v.expiry) return;
+if (!v.expiry || v.used) return;
 const dn = daysUntil(v.expiry);
 if (dn >= 0 && dn <= 30) {
 pool.push({

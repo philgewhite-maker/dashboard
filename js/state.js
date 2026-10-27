@@ -548,6 +548,7 @@ bucket: 'inbox',
 contexts: [],
 parentId: null, // set for subtasks; the parent is any other task
 bringForward: '', // ISO date — hidden from active lists until then
+repeat: '', // '' | daily | weekly | fortnightly | monthly | yearly -- ticking it done moves the due date on instead of closing it
 due: '',
 link: '', // the page holding the detail behind a project
 notionPageId: '', // set once a Notion page backs this task
@@ -1796,6 +1797,8 @@ createdAt: new Date().toISOString(),
 function blankVoucher(fields = {}) {
 return {
 id: uid(), name: '', type: 'Voucher', value: '', expiry: '', notes: '',
+// Spent or otherwise finished with: greyed, sorted last, never nudged.
+used: false,
 // The voucher/booking reference, if known -- see loyaltybalances.js's
 // voucher-linking review, which matches on this first.
 reference: '',

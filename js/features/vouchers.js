@@ -67,12 +67,15 @@ setTimeout(() => scrollAndFlash(`[data-loyalty-reading="${id}"]`), 60);
 // one definition -- blank expiry sorts last, same as "no date" always
 // has throughout this app.
 function expiryRank(v) {
+if (v.used) return Number.MAX_VALUE; // spent ones sink below everything
 return v.expiry ? daysUntil(v.expiry) : Infinity;
 }
 
 function voucherRowHtml(v) {
 let badgeHtml = '';
-if (v.expiry) {
+if (v.used) {
+badgeHtml = `<span class="expiry-badge">Used</span>`;
+} else if (v.expiry) {
 const dn = daysUntil(v.expiry);
 if (dn < 0) {
 badgeHtml = `<span class="expiry-badge expired">Expired</span>`;
@@ -83,7 +86,7 @@ badgeHtml = `<span class="expiry-badge">${dn}d left</span>`;
 }
 }
 const vInitials = (v.provider || v.name || '?').trim().slice(0, 2).toUpperCase();
-return `<div class="voucher-row" data-voucher-row="${v.id}">
+return `<div class="voucher-row${v.used ? " voucher-used" : ""}" data-voucher-row="${v.id}">
 <div class="voucher-id" style="display:flex;gap:8px;align-items:flex-start;">
 ${logoBadgeHtml(v.logoUrl, vInitials, 'plum')}
 <div style="flex:1 1 auto;min-width:0;">
@@ -105,6 +108,7 @@ ${badgeHtml}
 </div>
 <div class="voucher-actions">
 ${(v.sourceLoyaltyReadingIds || []).length ? `<span class="tag-chip" data-open-loyalty-reading="${v.sourceLoyaltyReadingIds[v.sourceLoyaltyReadingIds.length - 1]}" title="Created or updated from a loyalty scan reading -- click to see it">from loyalty scan</span>` : ''}
+<label class="settings-note" style="margin:0;display:inline-flex;align-items:center;gap:4px;cursor:pointer;" title="Tick once you have spent it or are finished with it"><input type="checkbox" data-voucher-used="${v.id}"${v.used ? " checked" : ""}> Used</label>
 <span class="del-x" style="opacity:1;" data-del-voucher="${v.id}">&times;</span>
 </div>
 </div>`;
@@ -182,6 +186,15 @@ const v = data.vouchers.find((x) => x.id === el.dataset.providerBlur);
 if (!v || v.logoUrl) return;
 const match = matchBrandLogo(el.value.trim() || v.provider);
 if (match) { v.logoUrl = match; queueSave(); renderVouchers(); }
+});
+});
+list.querySelectorAll('[data-voucher-used]').forEach((cb) => {
+cb.addEventListener('change', () => {
+const v = data.vouchers.find((x) => x.id === cb.dataset.voucherUsed);
+if (!v) return;
+v.used = cb.checked;
+renderVouchers();
+queueSave();
 });
 });
 list.querySelectorAll('[data-del-voucher]').forEach((el) => {
