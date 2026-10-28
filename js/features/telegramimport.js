@@ -241,7 +241,15 @@ return { chat, nameMatches, phoneMatch, chosenId, confident, checked: confident 
 rows.sort((a, b) => b.chat.messageCount - a.chat.messageCount);
 
 const generation = (pending?.generation || 0) + 1;
-pending = { messagesByChat, photosByChat, rows, importPhotos: false, skippedCount: allChats.length - chats.length, generation };
+// Why each left-out chat was left out, so "N skipped" can be checked
+// rather than taken on trust.
+const skipped = allChats.filter((c) => !chats.includes(c)).map((c) => ({
+name: c.name,
+why: c.type !== 'private' ? `a ${c.type || 'non-private'} chat, not one-to-one`
+: c.messageCount <= 1 ? 'only Telegram\'s join announcement, no real messages'
+: 'its messages weren\'t in the export (chat content excluded when exporting)',
+}));
+pending = { messagesByChat, photosByChat, rows, importPhotos: false, skippedCount: allChats.length - chats.length, skipped, generation };
 status.textContent = '';
 render();
 scanMentions(generation);
@@ -298,7 +306,10 @@ function render() {
 const el = document.getElementById('telegram-review');
 if (!el) return;
 if (!pending) { el.innerHTML = ''; return; }
-if (!pending.rows.length) { el.innerHTML = '<div class="settings-note" style="margin:0;">No chats with more than one message found.</div>'; return; }
+if (!pending.rows.length) {
+el.innerHTML = `<div class="settings-note" style="margin:0;">No chats with more than one message found.</div>${(pending.skipped || []).length ? `<details class="settings-subgroup panel-about"><summary>Why ${pending.skippedCount} chat${pending.skippedCount === 1 ? ' was' : 's were'} skipped</summary><div class="settings-note" style="margin:4px 0 8px;">${pending.skipped.map((s) => `${escapeHtml(s.name || '(unnamed)')} &mdash; ${escapeHtml(s.why)}`).join('<br>')}</div></details>` : ''}`;
+return;
+}
 
 const confidentCount = pending.rows.filter((r) => r.confident).length;
 el.innerHTML = `
@@ -306,6 +317,9 @@ el.innerHTML = `
 ${pending.rows.length} chat${pending.rows.length === 1 ? '' : 's'} with a real conversation (${pending.skippedCount} join-only/group/excluded chats skipped)
 &nbsp;·&nbsp; ${confidentCount} phone- or exact-name-matched
 </div>
+${(pending.skipped || []).length ? `<details class="settings-subgroup panel-about"><summary>Why ${pending.skippedCount} chat${pending.skippedCount === 1 ? ' was' : 's were'} skipped</summary>
+<div class="settings-note" style="margin:4px 0 8px;">${pending.skipped.map((s) => `${escapeHtml(s.name || '(unnamed)')} &mdash; ${escapeHtml(s.why)}`).join('<br>')}</div>
+</details>` : ''}
 <div class="sync-row" style="margin-bottom:8px;">
 <button class="sync-btn" type="button" id="tg-select-confident">Select all confident matches</button>
 <button class="sync-btn" type="button" id="tg-import-go">Import selected</button>
@@ -399,7 +413,10 @@ const newText = buildChatLogText(messages, meName);
 const identityRow = upsertIdentity(conn, { platform: 'Telegram', handle: row.chat.name, matchId: row.chat.chatId });
 if (mergeChatLog(identityRow, newText)) changed = true;
 if ((STAGE_RANK['Moved to Telegram'] ?? 0) > (STAGE_RANK[conn.stage] ?? 0)) { conn.stage = 'Moved to Telegram'; changed = true; }
-if (!conn.lastContact) conn.lastContact = messages[messages.length - 1].dateISO;
+// The newest message wins over whatever was stored, so importing proof of
+// a recent chat clears the Reach out badge instead of leaving the old date.
+const newestMsg = messages[messages.length - 1].dateISO;
+if (!conn.lastContact || newestMsg > conn.lastContact) { conn.lastContact = newestMsg; changed = true; }
 
 // mediaFile is only ever a real filename for an actually-included photo
 // -- the excluded-media placeholder is a human-readable sentence that

@@ -21,6 +21,14 @@ function familyKids() {
 return data.connections.filter((c) => c.isFamily);
 }
 
+// "5-8 yrs", or "5+ yrs" / "up to 8 yrs" when only one end is known --
+// a blank end means no limit on that side, not missing data.
+function ageRangeText(b) {
+if (b.minAge && b.maxAge) return `${b.minAge}–${b.maxAge} yrs`;
+if (b.minAge) return `${b.minAge}+ yrs`;
+return `up to ${b.maxAge} yrs`;
+}
+
 // ---- Series grouping -------------------------------------------------
 
 function orderNum(b) {
@@ -594,7 +602,7 @@ const mainLine = `
 <span class="mail-subject">${book.link ? `<a href="${escapeHtml(affiliateLink(book.link))}" target="_blank" rel="noopener">${escapeHtml(book.title)}</a>` : escapeHtml(book.title)}</span>
 ${byline ? `<span class="settings-note" style="margin:0;">${escapeHtml(byline)}</span>` : ''}
 ${(book.genres || []).map((g) => `<span class="tag-chip">${escapeHtml(g)}</span>`).join('')}
-${(book.minAge || book.maxAge) ? `<span class="settings-note" style="margin:0;">${escapeHtml(book.minAge || '?')}&ndash;${escapeHtml(book.maxAge || '?')} yrs</span>` : ''}
+${(book.minAge || book.maxAge) ? `<span class="settings-note" style="margin:0;">${escapeHtml(ageRangeText(book))}</span>` : ''}
 <label style="display:flex;align-items:center;gap:4px;font-size:12px;"><input type="checkbox" data-book-read="${book.id}" ${book.read ? 'checked' : ''}> Read</label>
 <span class="book-stars">${starsHtml(book)}</span>
 ${holder ? connectionChipHtml(holder) : `<span class="settings-note" style="margin:0;">at your home</span>`}
@@ -685,7 +693,7 @@ const conn = kids.find((c) => c.id === nextForChild);
 const age = conn ? currentAge(conn)?.value ?? null : null;
 const picks = nextToRead(age);
 nextEl.innerHTML = picks.length
-? picks.map((b) => `<div class="mail-row">${bookChipHtml(b)}${(b.minAge || b.maxAge) ? `<span class="settings-note" style="margin:0;">${escapeHtml(b.minAge || '?')}&ndash;${escapeHtml(b.maxAge || '?')} yrs</span>` : ''}</div>`).join('')
+? picks.map((b) => `<div class="mail-row">${bookChipHtml(b)}${(b.minAge || b.maxAge) ? `<span class="settings-note" style="margin:0;">${escapeHtml(ageRangeText(b))}</span>` : ''}</div>`).join('')
 : '<div class="settings-note">Nothing unread fits that age range right now.</div>';
 bindBookChips();
 }
@@ -761,6 +769,8 @@ renderBooks();
 });
 el.querySelectorAll('[data-book-remove]').forEach((x) => {
 x.addEventListener('click', () => {
+const doomed = data.books.find((b) => b.id === x.dataset.bookRemove);
+if (!confirm(`Delete ${doomed && doomed.title ? `"${doomed.title}"` : 'this book'}?`)) return;
 data.books = data.books.filter((b) => b.id !== x.dataset.bookRemove);
 queueSave();
 renderBooks();

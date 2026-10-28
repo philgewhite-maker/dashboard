@@ -9,11 +9,21 @@ import { MAIL_ACTIONS } from './mailActions.js';
 import { runOutcomeOnMessage, processMailRules } from './mailRules.js';
 import { CAPTURE_OUTCOMES, outcomeLabelWithCost, matchCaptureRule } from './captureOutcomes.js';
 
+// Where the Google sign-in lives -- a real link, not prose naming it.
+const SIGN_IN_LINK_HTML = 'Sign in to Google at the <span class="inline-goto-link" data-goto-tab="overview" data-goto-target="#google-bar">top of Overview</span> first.';
+
 // "Tamara White" <tamara.anna.white@gmail.com> -> "Tamara White"; falls
 // back to the raw email if there's no display name on the header.
 function displayName(fromHeader) {
 const match = fromHeader.match(/^"?([^"<]+?)"?\s*<[^>]+>$/);
 return (match ? match[1] : fromHeader).trim();
+}
+
+// The bare address out of a From header -- a rule on the whole header
+// ("Name" <a@b.com>) only ever matched that exact sender line.
+function senderAddress(fromHeader) {
+const match = String(fromHeader || '').match(/<([^>]+)>/);
+return (match ? match[1] : String(fromHeader || '')).trim();
 }
 
 function formatDate(dateStr) {
@@ -311,7 +321,7 @@ if (actionId === 'aiTask') {
 // Prefilled with the SAME deterministic default plain "+ task"
 // produces -- "Use AI" is what replaces it, not the starting point.
 return `<div class="mail-action-picker" data-mail-action-picker="aiTask:${escapeHtml(m.id)}" hidden>
-<input type="text" class="settings-input" data-mail-ai-task-title="${escapeHtml(m.id)}" value="${escapeHtml(`Reply: ${m.subject}`)}" placeholder="Task title">
+<input type="text" class="settings-input" data-mail-ai-task-title="${escapeHtml(m.id)}" value="${escapeHtml(m.subject)}" placeholder="Task title">
 <textarea class="settings-input" data-mail-ai-task-notes="${escapeHtml(m.id)}" rows="2" placeholder="Notes">${escapeHtml(`From ${displayName(m.from)}`)}</textarea>
 <input type="date" class="settings-input" data-mail-ai-task-due="${escapeHtml(m.id)}">
 ${useAiButtonHtml('data-mail-ai-task-fill', m)}
@@ -371,11 +381,12 @@ return `<div class="mail-action-picker" data-mail-action-picker="addRule:${escap
 <label class="settings-note" style="display:block;margin:4px 0 2px;font-weight:600;">Label</label>
 <input type="text" class="settings-input" data-mail-rule-label="${escapeHtml(m.id)}" value="${escapeHtml(m.subject)}" placeholder="What to call this rule">
 <label class="settings-note" style="display:block;margin:6px 0 2px;font-weight:600;">From contains</label>
-<input type="text" class="settings-input" data-mail-rule-from="${escapeHtml(m.id)}" value="${escapeHtml(m.from)}" placeholder="Blank matches any sender">
+<input type="text" class="settings-input" data-mail-rule-from="${escapeHtml(m.id)}" value="${escapeHtml(senderAddress(m.from))}" placeholder="Blank matches any sender">
 <label class="settings-note" style="display:block;margin:6px 0 2px;font-weight:600;">Subject contains</label>
-<input type="text" class="settings-input" data-mail-rule-subject="${escapeHtml(m.id)}" value="${escapeHtml(m.subject)}" placeholder="Blank matches any subject">
+<input type="text" class="settings-input" data-mail-rule-subject="${escapeHtml(m.id)}" value="" placeholder="Blank matches any subject — add a word to narrow it">
 <label class="settings-note" style="display:block;margin:6px 0 2px;font-weight:600;">Creates</label>
 <select class="settings-input" data-mail-rule-outcome="${escapeHtml(m.id)}">${outcomeOptions}</select>
+<div class="settings-note" style="margin:4px 0 0;">The rule then runs by itself on every matching email at each refresh. Options marked with a cost use Claude each time, so keep the match narrow.</div>
 <button class="todo-add-btn" type="button" style="margin-top:8px;" data-mail-rule-create="${escapeHtml(m.id)}">+ Create &amp; run</button>
 <span class="sync-status" data-mail-rule-status="${escapeHtml(m.id)}"></span>
 </div>`;
@@ -470,7 +481,7 @@ const toggleHtml = visibleGroup.length
 // literal ask: duplicate blasts of the identical subject are noise as a
 // GROUP, not one dismiss at a time. Uses the same dismiss mechanism each
 // row's own × already does (blankMailDismissal by url), just looped.
-const memberPayload = escapeHtml(JSON.stringify(visibleGroup.map((m) => ({ url: m.link, subject: m.subject, from: displayName(m.from) }))));
+const memberPayload = escapeHtml(JSON.stringify(visibleGroup.map((m) => ({ url: m.link, subject: m.subject, from: displayName(m.from), id: m.id }))));
 const dismissAllHtml = visibleGroup.length > 1
 ? `<button class="mini-task-btn" type="button" data-mail-group-dismiss-all="${escapeHtml(latest.id)}" data-mail-group-members="${memberPayload}" title="Bin every message in this group">Bin all ${visibleGroup.length}</button>`
 : '';
@@ -667,9 +678,9 @@ renderMail(lastSections);
 // group's own "Bin all" -- so a message is only ever binned once
 // (dismissedFor's url match already guards a re-run) and both save/render
 // exactly the same way.
-function dismissMessage({ url, subject, from }) {
+function dismissMessage({ url, subject, from, id }) {
 if (!data.mailDismissed.some((d) => d.url === url)) {
-data.mailDismissed.push(blankMailDismissal({ url, subject, from }));
+data.mailDismissed.push(blankMailDismissal({ url, subject, from, messageId: id || '' }));
 }
 }
 
@@ -688,7 +699,7 @@ if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
 list.querySelectorAll('[data-mail-dismiss]').forEach((btn) => {
 btn.addEventListener('click', (e) => {
 e.preventDefault();
-dismissMessage({ url: btn.dataset.mailUrl, subject: btn.dataset.mailSubject, from: btn.dataset.mailFrom });
+dismissMessage({ url: btn.dataset.mailUrl, subject: btn.dataset.mailSubject, from: btn.dataset.mailFrom, id: btn.dataset.mailDismiss });
 queueSave();
 // Re-render from the same fetched data rather than re-fetching Gmail
 // -- dismissing is purely a local view change, nothing new to pull.
@@ -728,15 +739,33 @@ voicecapture.revealCaptureDraft(el.dataset.mailGotoDraft);
 });
 
 list.querySelectorAll('[data-mail-task]').forEach((btn) => {
-btn.addEventListener('click', (e) => {
+btn.addEventListener('click', async (e) => {
 e.preventDefault();
-captureTask({
-title: `Reply: ${btn.dataset.mailSubject}`,
+// The email's own subject as the title -- "Reply:" is wrong for a
+// booking or a receipt, and the ✨ Task button reads the email for a
+// better one anyway.
+const task = captureTask({
+title: btn.dataset.mailSubject || '(no subject)',
 notes: `From ${btn.dataset.mailFrom}`,
 source: { kind: 'mail', label: btn.dataset.mailSubject, url: btn.dataset.mailUrl },
 });
 btn.textContent = '✓ captured';
 btn.disabled = true;
+// A ticket/PDF attached to the email comes along, same as ✨ Task and
+// the other capture buttons -- best effort, after the task exists, so
+// a failed fetch never blocks or loses the capture.
+try {
+const { attachments } = await getMessageDetail(btn.dataset.mailTask);
+const grabbed = await grabEmailAttachments(btn.dataset.mailTask, attachments);
+if (grabbed.length) {
+task.attachments.push(...grabbed);
+queueSave();
+btn.textContent = `✓ captured (+ ${grabbed.length} attachment${grabbed.length === 1 ? '' : 's'})`;
+(await import('./tasks.js')).renderTasks();
+}
+} catch (err) {
+console.error('Attachment grab for +task failed:', err);
+}
 });
 });
 
@@ -767,7 +796,12 @@ select.dataset.loaded = '1';
 // picker opens, with no click of the user's own aimed at Google at
 // all (confirmed live on the same pattern in planner.js).
 canAttemptGoogleAction().then((signedIn) => {
-if (!signedIn) { select.innerHTML = '<option value="">Sign in to Google at the top of Overview first</option>'; return; }
+if (!signedIn) {
+select.innerHTML = '<option value="">Sign in to Google first</option>';
+const signInStatus = picker.querySelector(`[data-mail-check-cal-status="${CSS.escape(id)}"]`);
+if (signInStatus) signInStatus.innerHTML = SIGN_IN_LINK_HTML;
+return;
+}
 return import('../googlecalendar.js').then(({ listCalendars }) => listCalendars()).then((cals) => {
 select.innerHTML = cals.length ? cals.map((c) => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.summary)}</option>`).join('') : '<option value="">No calendars found</option>';
 });
@@ -919,7 +953,7 @@ e.preventDefault();
 const id = btn.dataset.mailCheckCalSubmit;
 const status = list.querySelector(`[data-mail-check-cal-status="${CSS.escape(id)}"]`);
 const say = (msg) => { if (status) status.textContent = msg; };
-if (!(await canAttemptGoogleAction())) { say('Sign in to Google at the top of Overview first.'); return; }
+if (!(await canAttemptGoogleAction())) { if (status) status.innerHTML = SIGN_IN_LINK_HTML; return; }
 if (!hasCalendarWrite()) { if (status) status.innerHTML = 'Turn on "Allow creating events in Google Calendar" in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#calendar-write-toggle">Settings</span>, then sign out and back in.'; return; }
 const calendarId = list.querySelector(`[data-mail-check-cal="${CSS.escape(id)}"]`)?.value || '';
 if (!calendarId) { say('Pick a calendar first.'); return; }
@@ -1271,6 +1305,12 @@ btn.disabled = false;
 // nothing new from Gmail) can re-render without a full refetch.
 let lastSections = [];
 
+// The bin's "Put back" (settings.js) removes the dismissal, then asks the
+// Mail list to redraw from what it already fetched -- no Gmail re-fetch.
+function rerenderMail() {
+if (lastSections.length) renderMail(lastSections);
+}
+
 // Which consolidated groups (consolidatedRowHtml, keyed by the group's
 // `latest.id`) are expanded -- every dismiss/action re-renders the whole
 // list (see lastSections above), so without this a group's "Show all"
@@ -1280,7 +1320,20 @@ let lastSections = [];
 // expandedTasks / travel.js's expandedLegs.
 const expandedGroups = new Set();
 
+// "zxc T"-style subject markers and mail rules only ever see emails that one
+// of the Mail searches already fetched, so with no search aimed at them
+// they silently never fire. Say so, with a link to where the search is added.
+function renderMarkerHint() {
+const el = document.getElementById('mail-marker-hint');
+if (!el) return;
+const covered = data.mailSearches.some((s) => /zxc/i.test(String(s.value || '')));
+if (covered || !data.mailSearches.length) { el.hidden = true; el.innerHTML = ''; return; }
+el.hidden = false;
+el.innerHTML = 'Subject markers like <code>zxc T</code> only work on emails one of your searches finds, and none of yours looks for <code>zxc</code>. <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#mail-searches-block">Add a search</span> for the subject <code>zxc</code> to use them.';
+}
+
 function initMail() {
+renderMarkerHint();
 bindConnPickers(); // Mail can render (and its "+ date event" picker with it) before Dating/Planner ever do
 bindTripChips(); // for the trip-leg success message's chip link, see the data-mail-trip-extract handler
 bindTaskChips(); // for the +task/AI-task/Improve-task success messages' chip links
@@ -1288,7 +1341,7 @@ const btn = document.getElementById('sync-mail-btn');
 const status = document.getElementById('mail-sync-status');
 btn.addEventListener('click', async () => {
 if (!(await canAttemptGoogleAction())) {
-status.textContent = 'Sign in to Google at the top of Overview first.';
+status.innerHTML = SIGN_IN_LINK_HTML;
 return;
 }
 btn.disabled = true;
@@ -1298,6 +1351,7 @@ lastSections = await fetchMailSearches(data.mailSearches, data.prefs.mailResultC
 const markerNote = await processMailMarkers(lastSections);
 const ruleNote = await processMailRules(lastSections, messageStatus);
 renderMail(lastSections);
+renderMarkerHint();
 const note = [markerNote, ruleNote].filter(Boolean).join(', ');
 status.textContent = `Updated ${new Date().toLocaleTimeString()}.${note ? ` (${note})` : ''}`;
 } catch (err) {
@@ -1309,4 +1363,4 @@ btn.disabled = false;
 });
 }
 
-export { initMail, extractDateEventFromIcs, icsDateEventIsGoodEnough, grabEmailAttachments };
+export { initMail, rerenderMail, extractDateEventFromIcs, icsDateEventIsGoodEnough, grabEmailAttachments };

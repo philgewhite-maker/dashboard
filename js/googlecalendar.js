@@ -135,6 +135,15 @@ if (!res.ok) throw new Error(`Couldn't check calendar event: ${res.status}`);
 return res.json();
 }
 
+// Removes one event the app itself created (the school-calendar "Remove
+// from calendar" button). An event already gone (404/410) counts as
+// success -- the goal is "not on the calendar", and it isn't.
+async function deleteEvent(calendarId, eventId) {
+const res = await googleFetch(`${EVENTS_API}/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`, { method: 'DELETE' });
+if (res.status === 404 || res.status === 410) return;
+if (!res.ok) throw new Error(`Couldn't remove the calendar event: ${res.status}`);
+}
+
 async function getUpcomingEvents(calendarId, count, daysAhead) {
 const params = new URLSearchParams({
 timeMin: new Date().toISOString(),
@@ -194,4 +203,4 @@ status[name] = { found: false, events: [], error: err.message, syncedAt };
 return status;
 }
 
-export { syncCalendars, listCalendars, createEvent, eventBody, findEvents, getEvent };
+export { syncCalendars, listCalendars, createEvent, deleteEvent, eventBody, findEvents, getEvent };

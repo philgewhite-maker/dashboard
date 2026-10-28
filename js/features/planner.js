@@ -42,6 +42,7 @@ import { switchTab } from '../tabs.js';
 import { revealTrip } from './travel.js';
 import { airbnbSegmentsForDay } from './airbnb.js';
 import { formatBytes } from '../files.js';
+import { revealRecipe } from './recipes.js';
 
 // The 14-day grid (and a long trip's mini-grid) routinely runs well past
 // the fold, but native HTML5 drag-and-drop does NOT auto-scroll the page
@@ -101,9 +102,11 @@ return data.plannerEntries.filter((e) => entryCoversDay(e, date) && (e.tripId ||
 }
 
 // The one place a placeable KIND registers which field on blankPlannerEntry
-// it points through -- a future kind (e.g. a recipe/menu item) is a
-// one-line addition here, not a change to placeEntry itself.
-const KIND_REF_FIELD = { connection: 'connectionId', activity: 'activityId', task: 'taskId' };
+// it points through -- a new kind is a one-line addition here, not a
+// change to placeEntry itself. 'recipe' (a Menu-tab recipe planned for a
+// day) points at a real data.recipes record, shown via the recipe
+// reference helpers in recipes.js.
+const KIND_REF_FIELD = { connection: 'connectionId', activity: 'activityId', task: 'taskId', recipe: 'recipeId' };
 
 // A planner entry's endDate is its LAST day, but an all-day Google Calendar
 // event's end date is the day AFTER its last one -- so a 12-14 Nov entry
@@ -345,6 +348,16 @@ const extra = (data.plannerExtraDays || []).filter((d) => d > horizonEnd).sort()
 return [...base, ...extra];
 }
 
+// "Plan this" on a recipe (Menu tab): puts it on the chosen day of the main
+// grid, adding that day to the grid first when it is beyond the rolling
+// window. Returns the new entry so the caller can link to it. A past date
+// would never show (the grid starts today), so it is refused with null.
+function planRecipe(recipeId, dateStr) {
+if (!dateStr || dateStr < todayStr()) return null;
+if (dateStr > dateStrAdd(todayStr(), MAIN_HORIZON_DAYS - 1) && !data.plannerExtraDays.includes(dateStr)) data.plannerExtraDays.push(dateStr);
+return placeEntry('recipe', recipeId, dateStr, '');
+}
+
 function addPlannerExtraDay(dateStr) {
 if (!dateStr || data.plannerExtraDays.includes(dateStr)) return;
 data.plannerExtraDays.push(dateStr);
@@ -438,6 +451,13 @@ if (!c) return ''; // the connection was deleted since this was placed
 label = escapeHtml(c.name);
 avatar = avatarHtml(c.photoId, c.name, 'sm');
 openAttr = ` data-planner-open-connection="${c.id}"`;
+} else if (entry.kind === 'recipe') {
+const rec = data.recipes.find((x) => x.id === entry.recipeId);
+if (!rec) return ''; // the recipe was deleted since this was placed
+label = escapeHtml(rec.name);
+avatar = '<span class="planner-recipe-glyph" aria-hidden="true">&#127858;</span> ';
+openAttr = ` data-planner-open-recipe="${rec.id}"`;
+detailTitle = 'Planned recipe: click to open it on the Menu tab';
 } else {
 const a = data.plannerActivities.find((x) => x.id === entry.activityId);
 if (!a) return ''; // the activity was removed from the pool since this was placed
@@ -502,6 +522,10 @@ if (entry.kind === 'task') {
 const t = taskById(entry.taskId);
 return t ? displayTaskTitle(t) : null;
 }
+if (entry.kind === 'recipe') {
+const rec = data.recipes.find((x) => x.id === entry.recipeId);
+return rec ? rec.name : null;
+}
 const a = data.plannerActivities.find((x) => x.id === entry.activityId);
 return a ? a.title : null;
 }
@@ -539,13 +563,14 @@ return `<span class="planner-mirror-chip" data-planner-goto-entry="${e.id}" titl
 return chips ? `<div class="planner-mirror-chips">${chips}</div>` : '';
 }
 
-// Kinds the day-box "+" control can add directly -- a future kind (menu
-// items/recipes, out of scope for now) is a one-line addition here plus
-// one new branch in dayAddControlHtml, not a rewrite of either.
+// Kinds the day-box "+" control can add directly -- a new kind is a
+// one-line addition here plus one new branch in dayAddControlHtml, not a
+// rewrite of either.
 const DAY_ADD_KINDS = [
 { key: 'activity', label: 'Quick to-do' },
 { key: 'task', label: 'Task' },
 { key: 'connection', label: 'Person' },
+{ key: 'recipe', label: 'Recipe' },
 ];
 
 function dayAddControlHtml(dateStr, tripId, kind) {
@@ -559,6 +584,11 @@ if (kind === 'connection') {
 const placedHere = new Set(entriesForDay(dateStr, tripId).filter((e) => e.kind === 'connection').map((e) => e.connectionId));
 const candidates = data.connections.filter((c) => !isDormantStage(c.stage) && !placedHere.has(c.id));
 return `<select class="planner-select" data-planner-add-conn-pick="${dateStr}" data-planner-add-trip="${tripId}"><option value="">Pick someone…</option>${candidates.map((c) => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}</select>`;
+}
+if (kind === 'recipe') {
+const placedHere = new Set(entriesForDay(dateStr, tripId).filter((e) => e.kind === 'recipe').map((e) => e.recipeId));
+const candidates = data.recipes.filter((r) => !placedHere.has(r.id)).slice().sort((a, b) => a.name.localeCompare(b.name));
+return `<select class="planner-select" data-planner-add-recipe-pick="${dateStr}" data-planner-add-trip="${tripId}"><option value="">${candidates.length ? 'Pick a recipe…' : 'No recipes to add'}</option>${candidates.map((r) => `<option value="${r.id}">${escapeHtml(r.name)}</option>`).join('')}</select>`;
 }
 // kind === 'activity' -- today's exact existing behaviour, unchanged
 return `<input type="text" autocomplete="off" class="planner-day-add-input" placeholder="Add & press Enter…" data-planner-add-input="${dateStr}" data-planner-add-trip="${tripId}">`;
@@ -635,7 +665,7 @@ return cards.slice(0, POOL_COLLAPSE_LIMIT).join('')
 
 function priorityPoolHtml() {
 const priority = data.connections.filter(isPriorityConnection);
-if (!priority.length) return '<div class="empty">No priority connections yet — pin someone (📌) below, on the <span class="inline-goto-link" data-goto-tab="dating">Contacts tab</span>, or they\'ll appear automatically once things reach "Planning to meet" or later.</div>';
+if (!priority.length) return '<div class="empty">No priority connections yet — pin someone (📌) below, on the <span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#connections-panel">Contacts tab</span>, or they\'ll appear automatically once things reach "Planning to meet" or later.</div>';
 const cards = priority.map((c) => `<div class="planner-pool-card alloc-card" draggable="true" data-planner-drag="connection:${c.id}">
 <span class="planner-entry-link" data-planner-open-connection="${c.id}">${avatarHtml(c.photoId, c.name, 'sm')}<span>${escapeHtml(c.name)}</span></span>
 ${IS_IOS ? `<select class="planner-select" data-planner-place="connection:${c.id}"><option value="">Place on…</option>${plannerDaySelectOptionsHtml()}</select>` : ''}
@@ -1193,8 +1223,16 @@ plannerAddOpenKeys.delete(key);
 placeEntry('connection', sel.value, sel.dataset.plannerAddConnPick, sel.dataset.plannerAddTrip);
 });
 });
+root.querySelectorAll('[data-planner-add-recipe-pick]').forEach((sel) => {
+sel.addEventListener('change', () => {
+if (!sel.value) return;
+const key = `${sel.dataset.plannerAddRecipePick}|${sel.dataset.plannerAddTrip}`;
+plannerAddOpenKeys.delete(key);
+placeEntry('recipe', sel.value, sel.dataset.plannerAddRecipePick, sel.dataset.plannerAddTrip);
+});
+});
 root.querySelectorAll('[data-planner-add-input]').forEach((input) => {
-const key = `${input.dataset.plannerAddInput}|${input.dataset.plannerAddTrip}`;
+const key =`${input.dataset.plannerAddInput}|${input.dataset.plannerAddTrip}`;
 input.addEventListener('keydown', (e) => {
 if (e.key === 'Escape') { plannerAddOpenKeys.delete(key); renderPlanner(); return; }
 if (e.key !== 'Enter') return;
@@ -1259,6 +1297,14 @@ const id = el.dataset.plannerOpenConnection;
 switchTab('dating');
 expandConnection(id);
 setTimeout(() => scrollAndFlash(`[data-conn-row="${id}"]`), 80);
+});
+});
+// A planned recipe: same cross-tab jump, via the one canonical recipe
+// reveal in recipes.js (Menu tab, card expanded, scrolled and flashed).
+root.querySelectorAll('[data-planner-open-recipe]').forEach((el) => {
+el.addEventListener('click', (e) => {
+e.stopPropagation();
+revealRecipe(el.dataset.plannerOpenRecipe);
 });
 });
 // CLAUDE.md's task record-reference standard, verbatim: switchTab('tasks')
@@ -1508,6 +1554,11 @@ if (entry.kind === 'task') {
 const t = taskById(entry.taskId);
 return t ? displayTaskTitle(t) : 'Personal plans';
 }
+// A recipe's name is fine as a title too (a meal to cook, nobody's name).
+if (entry.kind === 'recipe') {
+const rec = data.recipes.find((x) => x.id === entry.recipeId);
+return rec ? `Cook: ${rec.name}` : 'Personal plans';
+}
 const sibling = data.plannerEntries.find((e) => e.kind === 'activity' && e.date === entry.date && (e.tripId || '') === (entry.tripId || ''));
 if (sibling) {
 const a = data.plannerActivities.find((x) => x.id === sibling.activityId);
@@ -1524,6 +1575,10 @@ return c ? c.name : '(deleted connection)';
 if (entry.kind === 'task') {
 const t = taskById(entry.taskId);
 return t ? displayTaskTitle(t) : '(deleted task)';
+}
+if (entry.kind === 'recipe') {
+const rec = data.recipes.find((x) => x.id === entry.recipeId);
+return rec ? `Cook: ${rec.name}` : '(deleted recipe)';
 }
 const a = data.plannerActivities.find((x) => x.id === entry.activityId);
 return a ? a.title : '(removed activity)';
@@ -1716,4 +1771,4 @@ revealPlannerActivity(chip.dataset.openPlannerActivity);
 });
 }
 
-export { renderPlanner, initPlanner, revealPlannerEntry, revealPlannerActivity, plannerActivityChipHtml, bindPlannerActivityChips, syncTripPeopleEntries, placeEntry, addActivityToDay, createDateEventFromExtraction, createDateEventsFromExtractions, rolloverTaskEntries, addPlannerExtraDay, removePlannerExtraDay, tripRangeFor };
+export { planRecipe, renderPlanner, initPlanner, revealPlannerEntry, revealPlannerActivity, plannerActivityChipHtml, bindPlannerActivityChips, syncTripPeopleEntries, placeEntry, addActivityToDay, createDateEventFromExtraction, createDateEventsFromExtractions, rolloverTaskEntries, addPlannerExtraDay, removePlannerExtraDay, tripRangeFor };

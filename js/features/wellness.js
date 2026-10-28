@@ -45,24 +45,37 @@ if (metric !== 'hrv' && metric !== 'antioxidant' && metric !== 'ages' && metric 
 // The headline grade describes one specific reading ("last night's HRV
 // grade"), not the whole week -- attach it only to the day it actually
 // applies to (the chart's most recent point), not to every day written.
+// A printed number already on that date is never replaced by an estimate
+// read off the chart (a later screenshot with no tapped day gives only
+// estimates) -- the exact one is the better figure.
+const FIELDS = {
+hrv: ['hrvMs', 'hrvExact', 'hrvGrade'],
+antioxidant: ['antioxidantIndex', 'antioxidantExact', 'antioxidantGrade'],
+ages: ['agesDailyAvg', 'agesExact', 'agesGrade'],
+sleepingHr: ['sleepingHrBpm', 'sleepingHrExact', 'sleepingHrGrade'],
+};
+const [valueKey, exactKey, gradeKey] = FIELDS[metric];
+const keepsExact = (row, exact) => row[valueKey] != null && row[exactKey] === true && exact === false;
 let daysWritten = 0;
 days.forEach(({ date, value, exact }) => {
 const row = dayFor(date);
+if (keepsExact(row, exact)) return;
 const grade = date === extraction.asOfDate ? headlineGrade : undefined;
-if (metric === 'hrv') { row.hrvMs = value; row.hrvExact = exact; if (grade) row.hrvGrade = grade; }
-else if (metric === 'antioxidant') { row.antioxidantIndex = value; row.antioxidantExact = exact; if (grade) row.antioxidantGrade = grade; }
-else if (metric === 'ages') { row.agesDailyAvg = value; row.agesExact = exact; if (grade) row.agesGrade = grade; }
-else if (metric === 'sleepingHr') { row.sleepingHrBpm = value; row.sleepingHrExact = exact; if (grade) row.sleepingHrGrade = grade; }
+row[valueKey] = value;
+row[exactKey] = exact;
+if (grade) row[gradeKey] = grade;
 daysWritten++;
 });
 
 let wroteAverage = false;
 if (days.length === 0 && average != null && extraction.asOfDate) {
 const row = dayFor(extraction.asOfDate);
-if (metric === 'ages') { row.agesDailyAvg = average; row.agesExact = false; row.agesGrade = headlineGrade || row.agesGrade; wroteAverage = true; }
-else if (metric === 'antioxidant') { row.antioxidantIndex = average; row.antioxidantExact = false; row.antioxidantGrade = headlineGrade || row.antioxidantGrade; wroteAverage = true; }
-else if (metric === 'hrv') { row.hrvMs = average; row.hrvExact = false; row.hrvGrade = headlineGrade || row.hrvGrade; wroteAverage = true; }
-else if (metric === 'sleepingHr') { row.sleepingHrBpm = average; row.sleepingHrExact = false; row.sleepingHrGrade = headlineGrade || row.sleepingHrGrade; wroteAverage = true; }
+if (!keepsExact(row, false)) {
+row[valueKey] = average;
+row[exactKey] = false;
+row[gradeKey] = headlineGrade || row[gradeKey];
+wroteAverage = true;
+}
 }
 
 data.wellnessDaily.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
@@ -114,21 +127,70 @@ function wellnessRowHtml(r) {
 const period = isPeriodRow(r);
 const get = (key) => (period ? r.metrics[key] : r[key]);
 const label = period ? periodLabel(r) : formatWellnessDate(r.date);
+// A day's cell can be clicked to correct the value (a wrong AI read can't
+// otherwise be fixed -- a re-share only helps if the new read is better);
+// period averages are derived, so they are not editable.
+const editAttrs = (key) => (period ? '' : ` class="wellness-editable" data-wellness-edit="${escapeHtml(r.date)}|${key}" title="Click to correct this value"`);
 return `<tr${period ? ' class="health-row-summary"' : ''}>
 <td>${escapeHtml(label)}</td>
-<td>${metricCellHtml(get('hrvMs'), period ? true : r.hrvExact, 'ms', period ? null : r.hrvGrade)}</td>
-<td>${metricCellHtml(get('sleepingHrBpm'), period ? true : r.sleepingHrExact, 'bpm', period ? null : r.sleepingHrGrade)}</td>
-<td>${metricCellHtml(get('antioxidantIndex'), period ? true : r.antioxidantExact, '', period ? null : r.antioxidantGrade)}</td>
-<td>${metricCellHtml(get('agesDailyAvg'), period ? true : r.agesExact, '', period ? null : r.agesGrade)}</td>
+<td${editAttrs('hrvMs')}>${metricCellHtml(get('hrvMs'), period ? true : r.hrvExact, 'ms', period ? null : r.hrvGrade)}</td>
+<td${editAttrs('sleepingHrBpm')}>${metricCellHtml(get('sleepingHrBpm'), period ? true : r.sleepingHrExact, 'bpm', period ? null : r.sleepingHrGrade)}</td>
+<td${editAttrs('antioxidantIndex')}>${metricCellHtml(get('antioxidantIndex'), period ? true : r.antioxidantExact, '', period ? null : r.antioxidantGrade)}</td>
+<td${editAttrs('agesDailyAvg')}>${metricCellHtml(get('agesDailyAvg'), period ? true : r.agesExact, '', period ? null : r.agesGrade)}</td>
+<td>${period ? '' : `<span class="del-x" style="opacity:1;" data-wellness-del="${escapeHtml(r.date)}" title="Delete this day's wellness readings">&times;</span>`}</td>
 </tr>`;
+}
+
+// Which exact/grade fields travel with each value field.
+const WELLNESS_FIELD_META = {
+hrvMs: { label: 'HRV (ms)', exact: 'hrvExact', grade: 'hrvGrade' },
+sleepingHrBpm: { label: 'Sleeping HR (bpm)', exact: 'sleepingHrExact', grade: 'sleepingHrGrade' },
+antioxidantIndex: { label: 'Antioxidant index', exact: 'antioxidantExact', grade: 'antioxidantGrade' },
+agesDailyAvg: { label: 'AGEs index', exact: 'agesExact', grade: 'agesGrade' },
+};
+
+let wellnessEditBound = false;
+function bindWellnessEditing(el) {
+if (wellnessEditBound) return;
+wellnessEditBound = true;
+el.addEventListener('click', (e) => {
+const del = e.target.closest('[data-wellness-del]');
+if (del) {
+const date = del.dataset.wellnessDel;
+if (!confirm(`Delete the wellness readings for ${formatWellnessDate(date)}?`)) return;
+data.wellnessDaily = data.wellnessDaily.filter((d) => d.date !== date);
+queueSave();
+renderWellnessDaily();
+return;
+}
+const cell = e.target.closest('[data-wellness-edit]');
+if (!cell) return;
+const [date, key] = cell.dataset.wellnessEdit.split('|');
+const row = data.wellnessDaily.find((d) => d.date === date);
+const meta = WELLNESS_FIELD_META[key];
+if (!row || !meta) return;
+const answer = prompt(`${meta.label} on ${formatWellnessDate(date)} -- type the right number (leave blank to clear it):`, row[key] != null ? String(row[key]) : '');
+if (answer === null) return;
+const text = answer.trim();
+if (text === '') {
+row[key] = undefined; row[meta.exact] = undefined; row[meta.grade] = undefined;
+} else {
+const n = Number(text);
+if (!Number.isFinite(n)) { alert('That is not a number.'); return; }
+row[key] = n; row[meta.exact] = true;
+}
+queueSave();
+renderWellnessDaily();
+});
 }
 
 function renderWellnessDaily() {
 const el = document.getElementById('wellness-daily-body');
 if (!el) return;
+bindWellnessEditing(el);
 const rows = data.wellnessDaily || [];
 if (!rows.length) {
-el.innerHTML = '<tr><td colspan="5" class="empty">No wellness data yet — select an HRV, Sleeping HR, AGEs, or Antioxidant index screenshot in Capture Inbox and use "Extract wellness data".</td></tr>';
+el.innerHTML = '<tr><td colspan="6" class="empty">No wellness data yet — select an HRV, Sleeping HR, AGEs, or Antioxidant index screenshot in Capture Inbox and use "Extract wellness data".</td></tr>';
 } else if (isFullHistoryMode()) {
 el.innerHTML = rows.map(wellnessRowHtml).join('');
 } else {

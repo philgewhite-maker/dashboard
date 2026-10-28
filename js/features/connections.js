@@ -793,6 +793,39 @@ data.connections
 );
 }
 
+// Everyone past their reach-out time, not just the capped top 10 above --
+// the "Due" filter chip, so a person without the badge can still be found.
+function dueConnectionIds() {
+return data.connections.filter((c) => !c.isFamily && reachOutOverdueAmount(c) >= 0).map((c) => c.id);
+}
+
+// Status line next to the "Backlog review 180+" button. Offers one-click
+// undo of the last bulk move (kept in data.prefs.lastBacklogMove, so it
+// survives a reload); undo only touches people still sitting in Backlog
+// review, so anything moved by hand since is left alone.
+function renderBacklogStatus(message) {
+const el = document.getElementById('conn-backlog-status');
+if (!el) return;
+const last = data.prefs && data.prefs.lastBacklogMove;
+const text = message || '';
+const canUndo = !!(last && Array.isArray(last.moved) && last.moved.length);
+if (!text && !canUndo) { el.hidden = true; el.innerHTML = ''; return; }
+el.hidden = false;
+el.innerHTML = `${escapeHtml(text || `Last bulk move: ${last.moved.length} to "Backlog review" on ${last.at}.`)}${canUndo ? ' <button type="button" class="filter-clear" id="conn-backlog-undo-btn">Undo</button>' : ''}`;
+document.getElementById('conn-backlog-undo-btn')?.addEventListener('click', () => {
+let restored = 0;
+last.moved.forEach((m) => {
+const c = data.connections.find((x) => x.id === m.id);
+if (c && c.stage === 'Backlog review') { c.stage = m.from; restored++; }
+});
+delete data.prefs.lastBacklogMove;
+renderBacklogStatus(`Put ${restored} back where they were.`);
+renderConnections();
+renderOverviewRef();
+queueSave();
+});
+}
+
 let topReachOutIdSet = new Set();
 
 // Mirrors state.js's URGENT_STAGES -- only used here to show the right
@@ -891,6 +924,16 @@ if (priorityBtn) {
 priorityBtn.textContent = `Priority (${datingPool.filter(isPriorityConnection).length})`;
 priorityBtn.classList.toggle('active', idFilter && idFilter.label === 'Priority');
 }
+const dueBtn = document.getElementById('conn-due-btn');
+if (dueBtn) {
+const dueCount = dueConnectionIds().length;
+dueBtn.textContent = `Due (${dueCount})`;
+dueBtn.title = `${dueCount} ${dueCount === 1 ? 'person is' : 'people are'} past their reach-out time; only the ${Math.min(dueCount, 10)} most overdue get the Reach out badge. Snoozed, faded and travel-paused people are left out.`;
+dueBtn.classList.toggle('active', idFilter && idFilter.label === 'Due');
+}
+// Brings the "Undo" for a recent bulk Backlog move back after a reload;
+// a message already showing there is left alone.
+if (document.getElementById('conn-backlog-status')?.hidden) renderBacklogStatus();
 const archivedBtn = document.getElementById('conn-show-archived-btn');
 if (archivedBtn) {
 const hiddenCount = archivedFadedIds().length;
@@ -1191,7 +1234,8 @@ ${CONN_STAGES.map((s) => `<option value="${s}" ${s === c.stage ? 'selected' : ''
 ${c.contactStatus === 'review' ? `<span class="contact-badge review">${escapeHtml(CONTACT_STATUS_LABELS.review)}</span>` : ''}
 ${travelBadgeHtml(c)}
 <span class="match-contact">${since === 0 ? 'today' : since + 'd since contact'}</span>
-${overdue ? `<span class="reach-badge" title="${escapeHtml(`${since}d since contact, ${c.priority}★ threshold is ${reachOutThreshold(c.priority)}d${questions.length ? ` — also: ${questions.join('; ')}` : ''}`)}">Reach out</span><button type="button" class="snooze-btn" data-snooze="${c.id}" title="Snooze this for a week">💤</button>` : ''}
+${overdue ? `<span class="reach-badge" title="${escapeHtml(`${since}d since contact, ${c.priority}★ threshold is ${reachOutThreshold(c.priority)}d${questions.length ? ` — also: ${questions.join('; ')}` : ''}. Only the 10 most overdue get this badge — the Due filter lists everyone`)}">Reach out</span><select class="snooze-btn snooze-select" data-snooze="${c.id}" title="Snooze the Reach out badge for this person"><option value="">💤</option><option value="7">1 week</option><option value="14">2 weeks</option><option value="28">4 weeks</option></select>` : ''}
+${isReachOutSnoozed(c) ? `<span class="snooze-note" title="The Reach out badge is paused for this person">💤 until ${escapeHtml(new Date(`${c.attentionSnoozedUntil}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }))} <button type="button" class="snooze-clear" data-snooze-clear="${c.id}">Clear</button></span>` : ''}
 ${action ? `<span class="suggested-action" title="Suggested next step, recomputed fresh each time">${escapeHtml(action)}</span>` : ''}
 <button class="log-btn" data-log="${c.id}">Log contact</button>
 <span class="del-x" style="opacity:1;" data-del-conn="${c.id}">&times;</span>
@@ -1213,6 +1257,7 @@ ${c.photoId ? `<div class="full conn-hero-photo">${avatarHtml(c.photoId, c.name,
 <label class="full">City <span class="settings-note">Groups in Overview — a borough and its city, or two homes, are two separate entries</span><div class="tag-editor">${tagChips(c.location, c.id, 'location')}</div></label>
 <label>Distance<input type="text" autocomplete="off" placeholder="e.g. &lt; 10 mi" data-field="distance" data-conn-detail="${c.id}" value="${escapeHtml(c.distance || '')}"></label>
 <label>Matched on<input type="date" data-field="matchedOn" data-conn-detail="${c.id}" value="${escapeHtml(c.matchedOn || '')}"></label>
+<label>Last contact<input type="date" data-field="lastContact" data-conn-detail="${c.id}" value="${escapeHtml(c.lastContact || '')}" title="When you last actually spoke. Log contact stamps today; fix it here if that was a mis-click or the real date was earlier."></label>
 <label>Travel status<select data-field="travelStatus" data-conn-detail="${c.id}">
 <option value="" ${!c.travelStatus ? 'selected' : ''}>&mdash; normal reach-out rotation</option>
 <option value="standby" ${c.travelStatus === 'standby' ? 'selected' : ''}>Standby (foreign city, no end date)</option>
@@ -1328,13 +1373,23 @@ logContactNow(btn.dataset.log);
 renderConnections();
 });
 });
-list.querySelectorAll('[data-snooze]').forEach((btn) => {
-btn.addEventListener('click', () => {
-const conn = data.connections.find((x) => x.id === btn.dataset.snooze);
-if (!conn) return;
+list.querySelectorAll('[data-snooze]').forEach((sel) => {
+sel.addEventListener('change', () => {
+const conn = data.connections.find((x) => x.id === sel.dataset.snooze);
+const days = parseInt(sel.value, 10);
+if (!conn || !days) return;
 const d = new Date();
-d.setDate(d.getDate() + 7);
+d.setDate(d.getDate() + days);
 conn.attentionSnoozedUntil = d.toISOString().slice(0, 10);
+renderConnections();
+queueSave();
+});
+});
+list.querySelectorAll('[data-snooze-clear]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const conn = data.connections.find((x) => x.id === btn.dataset.snoozeClear);
+if (!conn) return;
+conn.attentionSnoozedUntil = '';
 renderConnections();
 queueSave();
 });
@@ -1403,7 +1458,7 @@ conn.travelUntil = until.toISOString().slice(0, 10);
 // phone/email are here so a just-dropped stale conflict (above) actually
 // disappears from the card instead of waiting for some other edit to
 // trigger the next full render.
-if (['name', 'app', 'age', 'dob', 'location', 'driveLink', 'travelStatus', 'phone', 'email'].includes(el.dataset.field)) renderConnections();
+if (['name', 'app', 'age', 'dob', 'location', 'driveLink', 'travelStatus', 'phone', 'email', 'lastContact'].includes(el.dataset.field)) renderConnections();
 renderOverviewRef();
 queueSave();
 });
@@ -1682,6 +1737,7 @@ list.querySelectorAll('[data-photo-remove]').forEach((el) => {
 el.addEventListener('click', async () => {
 const conn = data.connections.find((x) => x.id === el.dataset.photoRemove);
 const idx = parseInt(el.dataset.photoIdx, 10);
+if (!conn || !confirm(`Delete this photo of ${conn.name}? The stored file is removed and can't be brought back.`)) return;
 const [removedId] = conn.photoIds.splice(idx, 1);
 if (conn.photoId === removedId) conn.photoId = conn.photoIds[0] || null;
 if (removedId) await photoDelete(removedId);
@@ -1693,6 +1749,7 @@ list.querySelectorAll('[data-video-remove]').forEach((el) => {
 el.addEventListener('click', async () => {
 const conn = data.connections.find((x) => x.id === el.dataset.videoRemove);
 if (!conn || !Array.isArray(conn.videoIds)) return;
+if (!confirm(`Delete this video of ${conn.name}? The stored file is removed and can't be brought back.`)) return;
 const [removedId] = conn.videoIds.splice(parseInt(el.dataset.videoIdx, 10), 1);
 if (removedId) { try { await photoDelete(removedId); } catch (e) { /* already gone */ } }
 renderConnections();
@@ -2107,6 +2164,10 @@ document.getElementById('conn-priority-btn').addEventListener('click', () => {
 if (idFilter && idFilter.label === 'Priority') { clearFilters(); return; }
 filterByIds(data.connections.filter(isPriorityConnection).map((c) => c.id), 'Priority');
 });
+document.getElementById('conn-due-btn').addEventListener('click', () => {
+if (idFilter && idFilter.label === 'Due') { clearFilters(); return; }
+filterByIds(dueConnectionIds(), 'Due');
+});
 document.getElementById('conn-show-archived-btn').addEventListener('click', () => {
 showArchivedFaded = !showArchivedFaded;
 setLocalSetting('showArchivedFaded', showArchivedFaded);
@@ -2162,13 +2223,17 @@ if (!candidates.length) {
 // than showing one message for both. Confirmed live: reported as
 // confusing when a connections list already had plenty in that stage.
 const alreadyThere = data.connections.filter((c) => c.stage === 'Backlog review' && daysSince(c.lastContact) >= 180).length;
-alert(alreadyThere
+renderBacklogStatus(alreadyThere
 ? `No NEW connections crossed 180 days since last contact — ${alreadyThere} already in "Backlog review" are still that stale, if you want to review them.`
 : 'Nobody is 180+ days since last contact right now (outside Faded/Archived/FriendZone/Got Away/travel-paused).');
 return;
 }
-if (!confirm(`Move ${candidates.length} connection${candidates.length === 1 ? '' : 's'} (180+ days since last contact) to "Backlog review"?`)) return;
+const names = candidates.slice(0, 15).map((c) => `• ${c.name} (${daysSince(c.lastContact)}d)`).join('\n');
+const more = candidates.length > 15 ? `\n…and ${candidates.length - 15} more` : '';
+if (!confirm(`Move ${candidates.length} connection${candidates.length === 1 ? '' : 's'} (180+ days since last contact) to "Backlog review"?\n\n${names}${more}\n\nYou can undo this straight afterwards.`)) return;
+data.prefs.lastBacklogMove = { at: todayStr(), moved: candidates.map((c) => ({ id: c.id, from: c.stage })) };
 candidates.forEach((c) => { c.stage = 'Backlog review'; });
+renderBacklogStatus(`Moved ${candidates.length} to "Backlog review".`);
 renderConnections();
 renderOverviewRef();
 queueSave();
@@ -2413,6 +2478,13 @@ const chip = e.target.closest('[data-open-connection]');
 if (!chip) return;
 const id = chip.dataset.openConnection;
 import('../tabs.js').then(({ switchTab }) => {
+// A family member is never listed on the Contacts tab (renderConnections
+// filters them out) -- their own row lives on the Family tab.
+if (data.connections.find((c) => c.id === id)?.isFamily) {
+switchTab('family');
+setTimeout(() => scrollAndFlash(`[data-family-kid-row="${id}"]`), 80);
+return;
+}
 switchTab('dating');
 expandConnection(id);
 setTimeout(() => scrollAndFlash(`[data-conn-row="${id}"]`), 80);

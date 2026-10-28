@@ -195,11 +195,15 @@ category: 'goal',
 });
 });
 
+// Waits a week from the day the job reached this stage (jobs.js stamps
+// stageAt), so marking something Applied doesn't nudge you straight away.
 data.jobs.filter((j) => j.stage === 'Applied' || j.stage === 'Interview').forEach((j) => {
+const waiting = j.stageAt ? daysSince(j.stageAt) : 0;
+if (waiting < 7) return;
 pool.push({
-text: `Follow up on your ${j.stage.toLowerCase()} application to ${j.company}?`,
+text: `Follow up on your ${j.stage.toLowerCase()} application to ${j.company}? It has been ${waiting} days.`,
 target: { type: 'job', id: j.id },
-signals: { kind: 'job-followup', stage: j.stage },
+signals: { kind: 'job-followup', stage: j.stage, daysSince: waiting },
 category: 'job',
 });
 });
@@ -348,9 +352,11 @@ category: 'task',
 }
 });
 
-data.businessIdeas.filter((i) => i.status !== 'Shelved').forEach((idea) => {
+// Only an idea still being thought about: not shelved or finished, not
+// already tracked as a Project/task, and left alone for a week.
+data.businessIdeas.filter((i) => i.status !== 'Shelved' && i.status !== 'Done' && !i.taskId).forEach((idea) => {
 const days = daysSince(idea.date);
-if (days >= 1) {
+if (days >= 7) {
 pool.push({
 text: `Still thinking about "${idea.title}"? Logged ${days} days ago.`,
 target: { type: 'business', id: idea.id },
@@ -494,7 +500,6 @@ category: 'airbnb',
 // problem — they're either present for a day or they're not.
 function buildHealthNudges(pool) {
 const days = data.healthDaily || [];
-if (days.length === 0) return; // Health tab never parsed — nothing to say yet
 const recent = days.slice(0, 7); // newest first, per healthparse.js
 
 const sleepNights = recent.filter((d) => d.sleepMinutes > 0);
@@ -511,7 +516,15 @@ category: 'health',
 }
 }
 
-const weighIns = days.filter((d) => d.weightKg != null); // already newest first
+// Weigh-ins from the phone/watch AND the Renpho scale, one per date (the
+// scale's reading wins when both exist), so someone who only uses the
+// scale still gets this nudge.
+const weightByDate = new Map();
+days.forEach((d) => { if (d.weightKg != null) weightByDate.set(d.date, d.weightKg); });
+(data.renphoDaily || []).forEach((d) => { if (d.weightKg != null) weightByDate.set(d.date, d.weightKg); });
+const weighIns = [...weightByDate.entries()]
+.map(([date, weightKg]) => ({ date, weightKg }))
+.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)); // newest first
 if (weighIns.length >= 2) {
 const latest = weighIns[0];
 const prior = weighIns[1];

@@ -220,6 +220,7 @@ const dims = dimensions();
 const modeHtml = `<div class="overview-mode">
 <label><input type="checkbox" id="drilldown-toggle"${drillDown ? ' checked' : ''}> Drill down — chips combine and filter each other</label>
 <label>Sort chips <select id="overview-chip-sort"><option value="count"${chipSort === 'count' ? ' selected' : ''}>By count</option><option value="alpha"${chipSort === 'alpha' ? ' selected' : ''}>A–Z</option></select></label>
+${drillDown ? '<span class="settings-note" style="margin:0;">Chips only filter while Drill down is on. <button type="button" class="filter-clear" id="drilldown-off-btn">Turn it off</button> to add people to a tag from its chip.</span>' : ''}
 </div>`;
 
 const sections = dims.map((dim) => {
@@ -235,6 +236,14 @@ bindToggle();
 
 document.getElementById('drilldown-toggle').addEventListener('change', (e) => {
 drillDown = e.target.checked;
+facets = [];
+setLocalSetting('overviewDrillDown', drillDown);
+renderOverview();
+applyToList();
+});
+
+document.getElementById('drilldown-off-btn')?.addEventListener('click', () => {
+drillDown = false;
 facets = [];
 setLocalSetting('overviewDrillDown', drillDown);
 renderOverview();

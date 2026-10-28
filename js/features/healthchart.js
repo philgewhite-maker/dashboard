@@ -42,6 +42,16 @@ const HEALTH_METRICS = [
 { key: 'renpho.visceralFat', label: 'Visceral fat', unit: '', source: 'renpho', field: 'visceralFat', decimals: 0, colorVar: '--amber' },
 { key: 'wellness.antioxidantIndex', label: 'Antioxidant index', unit: '', source: 'wellness', field: 'antioxidantIndex', decimals: 0, colorVar: '--slate' },
 { key: 'wellness.agesDailyAvg', label: 'AGEs index', unit: '', source: 'wellness', field: 'agesDailyAvg', decimals: 0, colorVar: '--rose' },
+// The rest of what the three tables below already show, so every column
+// there can be charted -- one line each.
+{ key: 'health.distanceMeters', label: 'Distance', unit: 'm', source: 'health', field: 'distanceMeters', decimals: 0, colorVar: '--teal' },
+{ key: 'health.totalCalories', label: 'Calories', unit: 'kcal', source: 'health', field: 'totalCalories', decimals: 0, colorVar: '--amber' },
+{ key: 'health.exerciseMinutes', label: 'Exercise', unit: 'min', source: 'health', field: 'exerciseMinutes', decimals: 0, colorVar: '--blue' },
+{ key: 'health.oxygenSaturationAvg', label: 'Oxygen (Health Connect)', unit: '%', source: 'health', field: 'oxygenSaturationAvg', decimals: 0, colorVar: '--sage' },
+{ key: 'renpho.bmi', label: 'BMI', unit: '', source: 'renpho', field: 'bmi', decimals: 1, colorVar: '--plum' },
+{ key: 'renpho.metabolicAge', label: 'Metabolic age', unit: 'yrs', source: 'renpho', field: 'metabolicAge', decimals: 0, colorVar: '--red' },
+{ key: 'renpho.waterPct', label: 'Body water %', unit: '%', source: 'renpho', field: 'waterPct', decimals: 1, colorVar: '--blue' },
+{ key: 'renpho.boneMassKg', label: 'Bone mass', unit: 'kg', source: 'renpho', field: 'boneMassKg', decimals: 1, colorVar: '--slate' },
 ];
 
 function metricByKey(key) { return HEALTH_METRICS.find((m) => m.key === key) || null; }

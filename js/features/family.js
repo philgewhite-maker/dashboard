@@ -22,6 +22,7 @@
 // broken rather than deliberately deferred.
 import { data, queueSave, currentAge, blankConnection } from '../state.js';
 import { escapeHtml, avatarHtml, hydratePhotoBackgrounds, bindBackdropClose } from '../utils.js';
+import { photoDelete } from '../db.js';
 import { initBooks, renderBooks } from './books.js';
 import { initSchoolCalendar, renderSchoolCalendar } from './schoolcalendar.js';
 
@@ -44,6 +45,7 @@ dialog.innerHTML = `<div class="mail-view-card" style="max-width:360px;">
 <label style="font-size:12px;display:block;margin-bottom:6px;">Name<input type="text" autocomplete="off" class="tag-add-input" data-kid-field="name" value="${escapeHtml(existing?.name || '')}" style="width:100%;display:block;"></label>
 <label style="font-size:12px;display:block;margin-bottom:6px;">Date of birth <span class="settings-note" style="display:inline;margin:0;">(what "next to read" matches age against)</span><input type="date" class="tag-add-input" data-kid-field="dob" value="${escapeHtml(existing?.dob || '')}" style="width:100%;display:block;"></label>
 <div class="mail-view-actions">
+${existing ? '<button class="sync-btn sm" type="button" data-kid-remove title="Delete this family member">Remove</button>' : ''}
 <button class="sync-btn sm" type="button" data-kid-cancel>Cancel</button>
 <button class="add-btn" type="button" data-kid-save>${existing ? 'Save' : 'Add'}</button>
 </div>
@@ -52,6 +54,31 @@ document.body.appendChild(dialog);
 const close = () => dialog.remove();
 bindBackdropClose(dialog, close);
 dialog.querySelector('[data-kid-cancel]').addEventListener('click', close);
+const removeBtn = dialog.querySelector('[data-kid-remove]');
+if (removeBtn) removeBtn.addEventListener('click', async () => {
+// Everything that points at this person is named in the confirm, and
+// cleared on removal so nothing is left pointing at someone who no
+// longer exists: books they hold go back to "at your home", inventory
+// they hold likewise, and a trip's traveller entry keeps its name but
+// loses the link.
+const books = (data.books || []).filter((b) => b.holderId === existing.id);
+const items = (data.inventory || []).filter((i) => i.holderId === existing.id);
+const trips = (data.trips || []).filter((t) => (t.people || []).some((p) => p.connectionId === existing.id));
+const notes = [];
+if (books.length) notes.push(`${books.length} book${books.length === 1 ? '' : 's'} they hold will go back to "at your home"`);
+if (items.length) notes.push(`${items.length} inventory item${items.length === 1 ? '' : 's'} they hold will go back to your home`);
+if (trips.length) notes.push(`${trips.length} trip${trips.length === 1 ? '' : 's'} will keep their name but lose the link`);
+if (!confirm(`Remove "${existing.name}"?${notes.length ? `\n\n${notes.join('.\n')}.` : ''}\n\nThis also deletes their stored photos and cannot be undone.`)) return;
+books.forEach((b) => { b.holderId = ''; });
+items.forEach((i) => { i.holderId = ''; });
+trips.forEach((t) => t.people.forEach((p) => { if (p.connectionId === existing.id) p.connectionId = null; }));
+for (const pid of existing.photoIds || []) { try { await photoDelete(pid); } catch (e) { /* already gone */ } }
+for (const vid of existing.videoIds || []) { try { await photoDelete(vid); } catch (e) { /* already gone */ } }
+data.connections = data.connections.filter((c) => c.id !== existing.id);
+queueSave();
+renderFamily();
+close();
+});
 dialog.querySelector('[data-kid-save]').addEventListener('click', () => {
 const name = dialog.querySelector('[data-kid-field="name"]').value.trim();
 const dob = dialog.querySelector('[data-kid-field="dob"]').value.trim();

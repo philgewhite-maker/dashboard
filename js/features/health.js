@@ -13,7 +13,7 @@
 import { data, queueSave } from '../state.js';
 import { getConfig, NotConfiguredError } from '../sync/selfhost.js';
 import { escapeHtml, todayStr, SYNC_LINK_HTML } from '../utils.js';
-import { parseHealthPayloads } from './healthparse.js';
+import { parseHealthPayloads, mergeHealthDaily } from './healthparse.js';
 import { tieredRowsForDisplay, flattenHealthDailyRow, isFullHistoryMode, setFullHistoryMode, isPeriodRow, periodLabel } from './healthrollup.js';
 import { HEALTH_METRICS, metricByKey, createHealthChart, isoDaysAgo } from './healthchart.js';
 
@@ -78,7 +78,10 @@ const latest = entries[0];
 el.innerHTML = `<div class="settings-note" style="margin:0 0 8px;">${entries.length} recent entr${entries.length === 1 ? 'y' : 'ies'} &mdash; latest received ${escapeHtml(latest.receivedAt || '')}.</div>
 <pre style="white-space:pre-wrap;font-size:11px;background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:10px;max-height:300px;overflow:auto;">${escapeHtml(JSON.stringify(entries.slice(0, 5), null, 1))}</pre>`;
 } catch (err) {
-el.innerHTML = `<div class="settings-note" style="margin:0;color:var(--red,#b5443a);">${escapeHtml(err.message || String(err))}</div>`;
+const text = err instanceof NotConfiguredError
+? `Health sync needs live sync set up first — add your sync URL and secret in ${SYNC_LINK_HTML}.`
+: `${escapeHtml(err.message || String(err))} Sync URL and secret: ${SYNC_LINK_HTML}.`;
+el.innerHTML = `<div class="settings-note" style="margin:0;color:var(--red,#b5443a);">${text}</div>`;
 }
 }
 
@@ -195,7 +198,7 @@ reportCheck('health-sync', true, healthSyncDetail(entries));
 } catch (staleErr) {
 reportCheck('health-sync', false, staleErr.message || String(staleErr));
 }
-data.healthDaily = parseHealthPayloads(entries);
+data.healthDaily = mergeHealthDaily(data.healthDaily, parseHealthPayloads(entries), entries);
 queueSave();
 renderHealthDaily();
 const msg = data.healthDaily.length
@@ -291,9 +294,26 @@ function pickerHtml() {
 return HEALTH_METRICS.filter((m) => !selectedMetricKeys.includes(m.key)).map((m) => `<button type="button" class="todo-add-btn" data-chart-add-metric="${m.key}">+ ${escapeHtml(m.label)}</button>`).join('');
 }
 
+// Which preset matches the chart's current window, so its button can show
+// as pressed: no window set means the whole history ("All"); a preset's own
+// window ends today and starts `days` back (or at the earliest data for
+// All); a drag-zoom matches none of them.
+function activePresetKey(range) {
+if (!range) return 'all';
+const end = todayStr();
+if (range.end !== end) return null;
+if (range.start === earliestDataDate()) return 'all';
+const hit = RANGE_PRESETS.find((p) => p.days != null && range.start === isoDaysAgo(end, p.days));
+return hit ? String(hit.days) : null;
+}
+
 function rangeControlsHtml() {
 const active = chart ? chart.getRange() : null;
-return RANGE_PRESETS.map((p) => `<button type="button" class="todo-add-btn" data-chart-range="${p.days == null ? 'all' : p.days}">${p.label}</button>`).join('')
+const activeKey = activePresetKey(active);
+return RANGE_PRESETS.map((p) => {
+const key = p.days == null ? 'all' : String(p.days);
+return `<button type="button" class="todo-add-btn${key === activeKey ? ' active' : ''}" data-chart-range="${key}" aria-pressed="${key === activeKey}">${p.label}</button>`;
+}).join('')
 + (active ? '<button type="button" class="todo-add-btn" data-chart-reset-zoom>Reset zoom</button>' : '');
 }
 

@@ -1225,8 +1225,8 @@ return normaliseUnitRatio(raw);
 }
 
 // ---- "make it like this": turning a recipe's per-line substitute/
-// reduce/drop overrides (recipes.js's lineOverrides -- a session-only
-// "what if" exploration, never persisted) into an actual rewritten
+// reduce/drop overrides (recipes.js's lineOverrides -- a "what if"
+// exploration, saved per recipe as dietOverrides) into an actual rewritten
 // recipe someone could cook. Same shape as extractRecipeFromImage/
 // parseIngredients -- a prompt + a normaliser, following this file's
 // own established pattern.

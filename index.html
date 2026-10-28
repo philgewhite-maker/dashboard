@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v654</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v655</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -128,13 +128,15 @@
 <span class="count-badge" id="mail-count"></span>
 <span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#mail-searches-block" title="Mail settings">&#9881;</span>
 <span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#mail-bin-block" title="Mail bin — dismissed messages">&#128465;</span>
-<span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-mail" title="Guide — searches, topics, markers, mail rules">&#128214;</span>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-mail" title="Guide: how to use this panel">&#128214;</span>
 </div>
 <div class="sync-row">
 <button class="sync-btn" id="sync-mail-btn" type="button">Refresh mail</button>
 <span class="sync-status" id="mail-sync-status"></span>
 </div>
+<div class="settings-note" id="mail-marker-hint" style="margin:6px 0 0;" hidden></div>
 <div id="mail-list"></div>
+<details class="settings-subgroup panel-about"><summary>About this</summary><div class="settings-note" style="margin:8px 0 0;">Shows emails found by your Mail searches. Tap one to read it, &times; to hide it, or use its buttons to turn it into a task, trip leg or date idea. Refresh runs on its own about every 6 hours. <span class="inline-goto-link" data-goto-tab="guide" data-goto-target="#guide-mail">Guide</span></div></details>
 </section>
 
 <section class="panel" id="habits-panel" data-tab="overview">
@@ -260,7 +262,7 @@
 </div>
 <div class="settings-note" style="margin:8px 0 10px;">A shared link from IMDb, Letterboxd, Spotify and the like lands here on its own; so does a link ending <code>#M</code>, a screenshot marked <strong>M</strong>, or a Telegram request you accept. Where to watch is checked automatically for anything with a TMDb id, and a service you already subscribe to is ticked. Streaming data by JustWatch, via TMDb.</div>
 <div class="sync-row" style="margin-top:10px;">
-<button class="sync-btn" id="media-plex-check-btn" type="button" title="Ask the home agent whether each wanted film or series is already in your Plex library">Check Plex</button>
+<button class="sync-btn" id="media-plex-check-btn" type="button" title="Ask the home agent whether each wanted film or series (and anything marked Available but not yet confirmed) is in your Plex library">Check Plex</button>
 <span class="sync-status" id="media-plex-status"></span>
 <button class="sync-btn" id="media-tvdb-btn" type="button" title="Find the TVDB id for every series still wanted, so Sonarr can be told to watch them">Link TVDB ids</button>
 <span class="sync-status" id="media-tvdb-status"></span>
@@ -271,7 +273,9 @@
 <div id="media-candidates"></div>
 <details class="settings-item" open style="margin:10px 0;">
 <summary>Recommendations to review <span class="count-badge" id="media-recs-count"></span></summary>
-<div class="settings-note" style="margin:6px 0;">Found automatically from your source pages (Settings &rarr; Media recommendations, each on its own weekly or monthly schedule) — ranked by genre/rating fit and whether you can already watch it on something you pay for. "+ Add as want" is an ordinary add; where-to-watch and Plex checks run on it exactly as they would from anywhere else.</div>
+<details class="settings-subgroup panel-about"><summary>About this</summary>
+<div class="settings-note" style="margin:6px 0;">Found automatically from your source pages (<span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#media-recs-block">Settings &rarr; Media recommendations</span>, each on its own weekly or monthly schedule) — ranked by genre/rating fit and whether you can already watch it on something you pay for. "+ Add as want" is an ordinary add; where-to-watch and Plex checks run on it exactly as they would from anywhere else. The &times; dismisses one; <strong>Show dismissed</strong> under the list brings it back.</div>
+</details>
 <div id="media-recs-list"></div>
 </details>
 <details class="settings-item" style="margin:10px 0;">
@@ -290,6 +294,11 @@
 <span class="count-badge" id="reading-list-count"></span>
 <span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-media-reading" title="Guide: how to use this panel">&#128214;</span>
 </div>
+<div class="capture-row">
+<input type="text" autocomplete="off" id="reading-add-input" placeholder="Paste a link to read later&hellip; or type a title">
+<button class="add-btn" id="reading-add-btn" type="button">Add</button>
+</div>
+<div class="sync-status" id="reading-add-status"></div>
 <div id="reading-list"></div>
 </section>
 
@@ -306,7 +315,9 @@
 <h2><span class="dot sage"></span>School &amp; uni calendars</h2>
 <span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-family-school" title="Guide: how to use this panel">&#128214;</span>
 </div>
+<details class="settings-subgroup panel-about"><summary>About this</summary>
 <div class="settings-note" style="margin:0 0 8px;">Checks Charlotte/Zara/Lewis's term-date pages weekly from 1 May each year, no AI, until that year's update is found. When one is, it shows here with a link to the page and the days they're not at school/uni (weekends and public holidays included) — ready to push to Google Calendar.</div>
+</details>
 <div class="sync-row">
 <select id="school-calendar-picker" title="Which Google Calendar &quot;Push&quot; sends to"><option value="">Push to&hellip;</option></select>
 <button class="sync-btn sm inline" id="school-calendar-check-btn" type="button">Check now</button>
@@ -370,7 +381,7 @@
 <div class="settings-note">Where or with what you can actually do things. Removing one clears it from every task.</div>
 </section>
 
-<section class="panel" id="jobs-panel" data-tab="jobhunt">
+<section class="panel wide" id="jobs-panel" data-tab="jobhunt">
 <div class="panel-head">
 <h2><span class="dot amber"></span>Job hunt</h2>
 <span class="count-badge" id="jobs-count"></span>
@@ -383,6 +394,7 @@
 <button class="add-btn" type="button">Add</button>
 <button type="button" class="mini-task-btn" id="job-resolve-btn" title="Look up the company &amp; role for this pasted job-posting link" hidden>&#10024; Resolve title</button>
 </div>
+<div class="settings-note" id="job-form-note" style="margin:6px 0 0;" hidden></div>
 </section>
 
 <section class="panel wide" id="accounts-panel" data-tab="finances">
@@ -680,7 +692,9 @@ Prices and offers come from an AI web search of each retailer, not a live basket
 <button class="sync-btn" id="recipe-manual-btn" type="button">Add manually</button>
 <span class="sync-status" id="recipe-import-status"></span>
 </div>
+<details class="settings-subgroup panel-about"><summary>About importing</summary>
 <div class="settings-note" style="margin:8px 0 0;">A web import first looks for the recipe data most sites embed for search engines, which is exact and free; only falls back to reading the page with AI if that's not there.</div>
+</details>
 <div id="recipe-review"></div>
 </section>
 
@@ -691,22 +705,6 @@ Prices and offers come from an AI web search of each retailer, not a live basket
 <span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-menu-use" title="Guide: how to use this panel">&#128214;</span>
 </div>
 <div id="recipe-overview-content"></div>
-</section>
-
-<section class="panel wide" id="diet-interests-panel" data-tab="menu">
-<div class="panel-head">
-<h2><span class="dot plum"></span>Diet interests</h2>
-<span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-menu-diet" title="Guide: how to use this panel">&#128214;</span>
-</div>
-<div id="diet-interests-content"></div>
-</section>
-
-<section class="panel wide" id="diet-tag-thresholds-panel" data-tab="menu">
-<div class="panel-head">
-<h2><span class="dot plum"></span>Diet tag thresholds</h2>
-<span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-menu-diet" title="Guide: how to use this panel">&#128214;</span>
-</div>
-<div id="diet-tag-thresholds-content"></div>
 </section>
 
 <section class="panel wide" id="ingredient-reference-panel" data-tab="menu">
@@ -721,7 +719,11 @@ Prices and offers come from an AI web search of each retailer, not a live basket
 <div class="panel-head">
 <h2><span class="dot sage"></span>Recipes</h2>
 <span class="count-badge" id="recipe-count"></span>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#diet-interests-panel" title="Diet settings: which sections show, and the Diet tag cutoffs">&#9881;</span>
 <span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-menu-use" title="Guide: how to use this panel">&#128214;</span>
+</div>
+<div class="sync-row" style="margin-bottom:8px;">
+<input type="search" autocomplete="off" id="recipe-search-input" placeholder="Search recipes by name or ingredient…" style="flex:1 1 240px;min-width:180px;">
 </div>
 <div id="recipe-list"></div>
 </section>
@@ -754,10 +756,12 @@ Prices and offers come from an AI web search of each retailer, not a live basket
 <button class="overview-chip" type="button" id="conn-needs-attention-btn">Needs attention</button>
 <button class="overview-chip" type="button" id="conn-thin-profiles-btn" title="One photo or fewer, none of age/height/job/education filled in -- usually a matches-list-only import that never got fleshed out">Thin profiles</button>
 <button class="overview-chip" type="button" id="conn-priority-btn" title="Pinned (📌), or Planning to meet or later">Priority</button>
+<button class="overview-chip" type="button" id="conn-due-btn" title="Everyone past their reach-out time, not just the 10 who get the Reach out badge. Snoozed, faded and travel-paused people are left out.">Due</button>
 <button class="overview-chip" type="button" id="conn-show-archived-btn" title="Archived and Faded are hidden from the list by default -- searching by name still finds them either way">Show archived &amp; faded</button>
 <button class="mini-task-btn" type="button" id="conn-attention-task-btn" hidden></button>
 <button class="overview-chip" type="button" id="conn-reachout-settings-btn">⏱ Reach-out timing</button>
 <button class="overview-chip" type="button" id="conn-backlog-review-btn" title="Move every non-dormant connection 180+ days since last contact into the &quot;Backlog review&quot; stage">📥 Backlog review 180+</button>
+<span class="settings-note" id="conn-backlog-status" style="margin:0;" hidden></span>
 <div class="reachout-settings" id="conn-reachout-settings" hidden>
 <p class="settings-note">Days since last contact before the "Reach out" badge can appear, per stage. Leave blank to use the default (priority-scaled, or 2 days for Planning to meet/call). A stuck stage full of old matches you don't want nagging you — set it high.</p>
 <div id="conn-reachout-settings-rows"></div>
@@ -786,7 +790,7 @@ Prices and offers come from an AI web search of each retailer, not a live basket
 <summary><h3>Import connections</h3></summary>
 <div class="settings-block">
 <div class="settings-note" style="margin:0 0 10px;">
-Paste or upload data from any of the sources below — the format's detected automatically, so there's one box for all of them, plus a folder-picker and a match button for the two sources that can't share it (see each one's own caption). Open an entry here for the exact steps to get that source's data in the first place.
+Paste or upload data from any of the sources below — the format's detected automatically, so there's one box for all of them, plus a folder-picker and a match button for the two sources that can't share it (see each one's own caption). Open an entry here for the exact steps to get that source's data in the first place. The Tinder snippets need a desktop browser console, and Telegram's folder picker isn't offered on most phones; a WhatsApp .txt export works from anywhere. Step-by-step: <span class="inline-goto-link" data-goto-tab="guide" data-goto-target="#guide-contacts-add">Contacts guide</span>.
 </div>
 <div class="settings-note" style="margin:0 0 4px;font-weight:600;">Where do I get this from?</div>
 <details style="margin:0 0 8px;">
@@ -1286,9 +1290,12 @@ Reads name, age, whatever &ldquo;Family plans / Education / Height / Looking for
   if (!copied) console.log(json);
 })();</pre>
 </details>
+<div class="settings-note" style="margin:10px 0 4px;"><strong>Bulk mode:</strong> steps through your sidebar matches automatically, 15 per run by default. Paste the snippet, then run <code>tinderBulkImport()</code> in the console. Step-by-step: <span class="inline-goto-link" data-goto-tab="guide" data-goto-target="#guide-contacts-tinder">Contacts guide</span>.</div>
+<details class="settings-subgroup panel-about"><summary>About bulk mode</summary>
 <div class="settings-note" style="margin:10px 0;">
 <strong>Bulk mode:</strong> steps through your sidebar matches automatically instead of one profile at a time &mdash; 15 per run by default, real randomised delays (10&ndash;60s) between each, remembered on Tinder's own site so the next run (later today or tomorrow) only picks up whoever's left. Fine to run a few times a day at that pace, or a large number left overnight &mdash; e.g. <code>tinderBulkImport(250)</code>. Pasting the snippet only defines it; run it with <code>tinderBulkImport()</code> in the console for the default 15, or <code>tinderBulkImport(30)</code> for a custom size &mdash; no need to re-paste to change it. Every 25 profiles it checkpoints to its own downloaded file, so a crash, sleep or closed tab partway through an overnight run only loses the last (incomplete) chunk, not the whole night. The dashboard's file picker below takes several of those files at once &mdash; select them all and it sorts anyone it already knows for certain into a bulk-review list (photos, name, and what's new, tick the ones that look right and submit together) and only routes genuinely new or uncertain matches to the one-by-one reviewer. This runs unattended across many real profiles in a row &mdash; if you see anything that looks like a rate limit or a verification prompt, stop and give it a break. A slide that's a short video clip (not just a photo) is captured too &mdash; its poster still goes in with the photos, the clip itself imports as a playable attachment on the connection. If you ever notice a match that never made it into the dashboard (an early run can scrape a profile while its panel hasn't finished loading, mark it done, and never send it on), run <code>tinderFindMissing()</code> after a full scroll of both lists &mdash; it compares your whole match list against what the dashboard already has (ignoring this browser's skip-list) and prints a ready <code>tinderReextract([...])</code> call for anyone missing.
 </div>
+</details>
 <button class="sync-btn" type="button" id="tinder-bulk-copy-snippet">Copy bulk-import snippet</button>
 <details style="margin:0 0 10px;">
 <summary style="cursor:pointer;color:var(--muted);font-size:13px;">Show the bulk-import console snippet</summary>
@@ -2852,12 +2859,12 @@ Needs the WHOLE exported folder tree (hundreds of files, not a single JSON) &mda
 <span class="count-badge" id="ideas-count"></span>
 <span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-business" title="Guide: how to use this panel">&#128214;</span>
 </div>
-<div id="ideas-list"></div>
-<div class="add-form" id="idea-form" style="flex-direction:column;align-items:stretch;">
+<div class="add-form" id="idea-form" style="flex-direction:column;align-items:stretch;margin-bottom:12px;">
 <input type="text" autocomplete="off" id="idea-title-input" placeholder="Idea title">
 <textarea id="idea-notes-input" placeholder="What's the idea?" rows="3" style="font-family:'Inter',sans-serif;font-size:13px;border:1px solid var(--line);border-radius:7px;padding:7px 9px;background:var(--paper);color:var(--ink);resize:vertical;"></textarea>
 <button class="add-btn" type="button" style="align-self:flex-start;">Add idea</button>
 </div>
+<div id="ideas-list"></div>
 </section>
 
 <section class="panel wide" id="health-panel" data-tab="health">
@@ -2866,7 +2873,9 @@ Needs the WHOLE exported folder tree (hundreds of files, not a single JSON) &mda
 <span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#health-sync-body" title="Health data settings">&#9881;</span>
 <span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-health" title="Guide: how to use this panel">&#128214;</span>
 </div>
-<div class="settings-note" style="margin:0 0 10px;">One row per day, parsed from whatever your Health Connect bridge app has posted to <code>health.php</code> &mdash; steps, sleep, heart rate, distance, calories, weight, body fat, and exercise sessions. See <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#health-sync-body">Settings</span> for the raw payload viewer and setup notes.</div>
+<details class="settings-subgroup panel-about"><summary>About this</summary>
+<div class="settings-note" style="margin:0 0 10px;">One row per day, parsed from whatever your Health Connect bridge app has posted to <code>health.php</code> &mdash; steps, sleep, heart rate, distance, calories, weight, body fat, and exercise sessions. The raw payload viewer is in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#health-sync-body">Settings</span>; the steps to set the bridge app up are in the <span class="inline-goto-link" data-goto-tab="guide" data-goto-target="#guide-health-setup">Guide</span>.</div>
+</details>
 <div class="capture-row" style="margin-bottom:10px;">
 <button class="todo-add-btn" type="button" id="health-parse-btn">&#8635; Sync &amp; parse</button>
 <span class="sync-status" id="health-parse-status"></span>
@@ -2906,11 +2915,13 @@ Needs the WHOLE exported folder tree (hundreds of files, not a single JSON) &mda
 </table>
 </div>
 <h3 style="margin:22px 0 6px;">Wellness (Samsung Health)</h3>
-<div class="settings-note" style="margin:0 0 10px;">HRV, Sleeping HR, AGEs index, and Antioxidant index &mdash; read from a screenshot via AI vision, not deterministic like the sources above, so double-check a new row against the source screenshot before trusting it. Sleeping HR (resting heart rate overnight, bpm) is here rather than in Health Connect because Samsung doesn't export it there at all &mdash; it's genuinely only available this way. A <strong>~</strong> before a number means it's estimated from the dot's position within its category band (e.g. Adequate), not a number Samsung actually printed &mdash; tap/highlight a day in the app before screenshotting to get its exact value instead. Select the screenshot in Capture Inbox and use &quot;Extract wellness data&quot;.</div>
+<details class="settings-subgroup panel-about"><summary>About this</summary>
+<div class="settings-note" style="margin:0 0 10px;">HRV, Sleeping HR, AGEs index, and Antioxidant index &mdash; read from a screenshot via AI vision, not deterministic like the sources above, so double-check a new row against the source screenshot before trusting it. Sleeping HR (resting heart rate overnight, bpm) is here rather than in Health Connect because Samsung doesn't export it there at all &mdash; it's genuinely only available this way. A <strong>~</strong> before a number means it's estimated from the dot's position within its category band (e.g. Adequate), not a number Samsung actually printed &mdash; tap/highlight a day in the app before screenshotting to get its exact value instead. Select the screenshot in Capture Inbox and use &quot;Extract wellness data&quot;. Click a figure to correct it; the &times; deletes a day.</div>
+</details>
 <div style="overflow-x:auto;">
 <table class="health-table">
 <thead><tr>
-<th>Date</th><th>HRV</th><th>Sleeping HR</th><th>Antioxidant</th><th>AGEs</th>
+<th>Date</th><th>HRV</th><th>Sleeping HR</th><th>Antioxidant</th><th>AGEs</th><th></th>
 </tr></thead>
 <tbody id="wellness-daily-body"></tbody>
 </table>
@@ -3408,6 +3419,20 @@ Same idea as Connections' ratings, a separate list (Taste/Health/Prep by default
 <div class="tag-editor" id="recipe-rating-categories-list"></div>
 </div>
 </details>
+
+<details class="settings-item" id="diet-interests-panel">
+<summary><h3>Menu — diet interests</h3></summary>
+<div class="settings-block">
+<div id="diet-interests-content"></div>
+</div>
+</details>
+
+<details class="settings-item" id="diet-tag-thresholds-panel">
+<summary><h3>Menu — diet tag thresholds</h3></summary>
+<div class="settings-block">
+<div id="diet-tag-thresholds-content"></div>
+</div>
+</details>
 </details>
 
 <details class="settings-group" id="settings-group-calendar">
@@ -3484,7 +3509,7 @@ Same idea as Connections' ratings, a separate list (Taste/Health/Prep by default
 <details class="settings-item" id="mail-bin-block">
 <summary><h3>Mail bin</h3></summary>
 <div class="settings-block">
-<div class="settings-note" style="margin:0 0 10px;">Messages dismissed from the Mail panel (the &times; on a row) without becoming a task, trip leg, or date event. Not restorable — you still have the real email, and it may have fallen outside a search's own limits by now — this is just a record of what you've already looked at and decided to skip.</div>
+<div class="settings-note" style="margin:0 0 10px;">Messages dismissed from the Mail panel (the &times; on a row) without becoming a task, trip leg, or date event. Press <strong>Put back</strong> on a row to bring one back to Mail (if a search still finds it), or Empty bin to bring them all back. The real email is never touched.</div>
 <div id="mail-bin"></div>
 <button class="sync-btn" id="empty-mail-bin-btn" type="button" style="margin-top:8px;">Empty bin</button>
 </div>
@@ -3707,7 +3732,7 @@ Mostly still a planning space &mdash; a place to keep thinking about what this s
 <div class="tinder-fields" style="margin:0 0 10px;">
 <div class="tinder-field-row">✅ <strong>Re-run a saved batch through today's import logic.</strong> Built &mdash; the "Or upload a saved .json file" option above the paste box in Tinder import replays a <code>tinder-batch-*.json</code> file (the bulk snippet's own download safety-net, or any older saved batch) through whatever the CURRENT dashboard code does with it, so a parsing/routing fix made after that batch was scraped still applies. Only covers dashboard-side fixes, not console-snippet-side ones like icon classification &mdash; those need an actual re-scrape (SCRIPT_VERSION handles that).</div>
 <div class="tinder-field-row"><strong>Check for dropped matches.</strong> Compare every connection's stored Tinder match id against a fresh scrape of the current sidebar; flag anyone no longer in Tinder's own match list &mdash; unmatched, or removed on their end. The match id is already being captured and stored (<code>tinderMatchId</code>); what's missing is the actual comparison snippet and a report screen.</div>
-<div class="tinder-field-row">✅ <strong>Check data completeness &mdash; as questions to ask, not just gaps.</strong> Built &mdash; each connection card on the Dating tab shows a short list of deterministic prompts (stale/still-alive check, missing City, missing kids-plan once there's an actual chat log, an interest never turned into a date). The "Needs attention (N)" button above the Connections list filters down to just those; "+ task" next to it captures one standing task linking back here, findable again after it's marked Done (a genuinely recurring nudge, not a one-off).</div>
+<div class="tinder-field-row">✅ <strong>Check data completeness &mdash; as questions to ask, not just gaps.</strong> Built &mdash; each connection card on the Contacts tab shows a short list of deterministic prompts (stale/still-alive check, missing City, missing kids-plan once there's an actual chat log, an interest never turned into a date). The "Needs attention (N)" button above the Connections list filters down to just those; "+ task" next to it captures one standing task linking back here, findable again after it's marked Done (a genuinely recurring nudge, not a one-off).</div>
 <div class="tinder-field-row">✅ <strong>Propose City/Nationality fill-ins from what's already known.</strong> Built &mdash; see below.</div>
 <div class="tinder-field-row"><strong>Targeted incremental re-runs.</strong> "Re-check just City for anyone missing it," "re-capture photos for anyone with none" &mdash; would need a way to filter by WHAT'S missing, not just re-run everyone.</div>
 <div class="tinder-field-row"><strong>Archive non-interacted profiles.</strong> A match sitting at Superswiped/Matched for a long time with no chat and no stage progression is realistically dead. Flag (never auto-apply) candidates for Faded/Archived, the mirror image of the Nudges change that surfaces the BEST new matches &mdash; this would surface the ones worth giving up on.</div>
@@ -5794,14 +5819,14 @@ Finds connections whose cover photo is missing or is really just the small place
 <details class="settings-item" id="guide-jobhunt">
 <summary><h3>Job Hunt</h3></summary>
 <div class="settings-block">
-<p class="settings-note" style="margin:0 0 10px;">The <span class="inline-goto-link" data-goto-tab="jobhunt" data-goto-target="#jobs-panel">Job hunt</span> panel keeps every job you are chasing in one of four columns: Wishlist, Applied, Interview and Offer.</p>
+<p class="settings-note" style="margin:0 0 10px;">The <span class="inline-goto-link" data-goto-tab="jobhunt" data-goto-target="#jobs-panel">Job hunt</span> panel keeps every job you are chasing in one of five columns: Wishlist, Applied, Interview, Offer and Closed (for ones that were rejected or you withdrew from).</p>
 
 <details class="settings-subgroup" id="guide-jobhunt-add">
 <summary>Adding a job</summary>
 <div class="guide-task">
 <div class="guide-q">How do I add a job I'm interested in?</div>
 <ol class="guide-steps">
-<li>In the <span class="inline-goto-link" data-goto-tab="jobhunt" data-goto-target="#job-form">add row</span> under the list, type the <strong>Company</strong> and the <strong>Role</strong>. Both are needed; nothing is added if either is empty.</li>
+<li>In the <span class="inline-goto-link" data-goto-tab="jobhunt" data-goto-target="#job-form">add row</span> under the list, type the <strong>Company</strong> and, if you know it, the <strong>Role</strong>. The company is needed (a note under the row says so if it is empty); the role can be filled in on the card later.</li>
 <li>Press <strong>Add</strong>. The job appears in the <strong>Wishlist</strong> column.</li>
 </ol>
 </div>
@@ -5812,7 +5837,7 @@ Finds connections whose cover photo is missing or is really just the small place
 <li>Press <strong>&#10024; Resolve title</strong>, which appears beside <strong>Add</strong> as soon as a box holds a link. It looks the page up and fills in the company and the role.</li>
 <li>Check both boxes, correct anything that is wrong, then press <strong>Add</strong>.</li>
 </ol>
-<div class="guide-tip">Resolve title needs your <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#anthropic-key-input">Anthropic key</span> and only works for pages it can read. If it comes back empty, type the company and role yourself. The link you pasted is kept either way: the card shows an <strong>Open reference</strong> link.</div>
+<div class="guide-tip">Resolve title needs your <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#anthropic-key-input">Anthropic key</span> and only works for pages it can read. If there is no key, or it can't read the page, a note under the row says which; then type the company and role yourself. The link you pasted is kept either way: the card shows an <strong>Open reference</strong> link.</div>
 </div>
 </details>
 
@@ -5822,21 +5847,22 @@ Finds connections whose cover photo is missing or is really just the small place
 <div class="guide-q">How do I record that I've applied, got an interview or got an offer?</div>
 <ol class="guide-steps">
 <li>Find the job's card in its <span class="inline-goto-link" data-goto-tab="jobhunt" data-goto-target="#jobs-list">column</span>.</li>
-<li>Use the stage box at the bottom of the card and choose <strong>Wishlist</strong>, <strong>Applied</strong>, <strong>Interview</strong> or <strong>Offer</strong>. The card moves to that column straight away.</li>
+<li>Use the stage box at the bottom of the card and choose <strong>Wishlist</strong>, <strong>Applied</strong>, <strong>Interview</strong>, <strong>Offer</strong> or <strong>Closed</strong>. The card moves to that column straight away and the date you moved it is recorded.</li>
 </ol>
-<div class="guide-tip">A column only shows when it has a job in it, and the count in the panel heading is the total of all applications.</div>
+<div class="guide-tip">A column only shows when it has a job in it, and the count in the panel heading is the total of all applications. Each card shows when it reached its stage (for example "Applied 12 Oct &middot; 5d"), and within a column the job that has waited longest is first.</div>
 </div>
 <div class="guide-task">
 <div class="guide-q">How do I take a job off the list?</div>
 <ol class="guide-steps">
-<li>Press the &times; at the top right of its card. It is removed at once with no confirmation, so be sure.</li>
+<li>Press the &times; at the top right of its card and confirm. It is then gone for good.</li>
 </ol>
-<div class="guide-tip">There is no Rejected or Withdrawn column. A job you are out of can only be deleted, or left in the stage it reached.</div>
+<div class="guide-tip">To keep the record of a job you are out of, move it to <strong>Closed</strong> instead of deleting it. Closed jobs never trigger a reminder.</div>
 </div>
 <div class="guide-task">
-<div class="guide-q">How do I change a company, role or link after adding it?</div>
+<div class="guide-q">How do I change a company, role or link after adding it, or add notes?</div>
 <ol class="guide-steps">
-<li>These can't be edited on the card. Delete the job with &times; and add it again with the right details.</li>
+<li>Click the company, the role or the posting link on the card and type. It saves when you click away. A company can't be left empty.</li>
+<li>Use the <strong>Notes</strong> line at the bottom of the card for a contact, a salary or the next step.</li>
 </ol>
 </div>
 </details>
@@ -5846,10 +5872,10 @@ Finds connections whose cover photo is missing or is really just the small place
 <div class="guide-task">
 <div class="guide-q">How do I get reminded to follow up?</div>
 <ol class="guide-steps">
-<li>Move the job to <strong>Applied</strong> or <strong>Interview</strong>. It then becomes eligible for a "Follow up on your applied application to &hellip;" reminder in <span class="inline-goto-link" data-goto-tab="overview" data-goto-target="#nudges-panel">Nudges</span> on the Overview tab.</li>
+<li>Move the job to <strong>Applied</strong> or <strong>Interview</strong>. A week later it becomes eligible for a "Follow up on your applied application to &hellip;" reminder in <span class="inline-goto-link" data-goto-tab="overview" data-goto-target="#nudges-panel">Nudges</span> on the Overview tab.</li>
 <li>Click the reminder to jump to the job's card, highlighted.</li>
 </ol>
-<div class="guide-tip">The reminder does not know when you applied, so it can't wait a set number of days. See <span class="inline-goto-link" data-goto-tab="guide" data-goto-target="#guide-overview-nudges">how Nudges are chosen</span>. To stop being reminded, move the job back to Wishlist or to Offer, or delete it.</div>
+<div class="guide-tip">The week is counted from the day you moved the job into Applied or Interview, and moving it again restarts the count. See <span class="inline-goto-link" data-goto-tab="guide" data-goto-target="#guide-overview-nudges">how Nudges are chosen</span>. To stop being reminded, move the job to Offer or Closed, or delete it.</div>
 </div>
 </details>
 </div>
@@ -5914,6 +5940,7 @@ Finds connections whose cover photo is missing or is really just the small place
 <div class="guide-q">How do I record that we have been in touch?</div>
 <ol class="guide-steps">
 <li>Press <strong>Log contact</strong> on their card. The counter changes to "today".</li>
+<li>If that was a mis-click, or you last spoke earlier, open <strong>Details</strong> and set <strong>Last contact</strong> to the real date.</li>
 </ol>
 </div>
 <div class="guide-task">
@@ -5966,7 +5993,7 @@ Finds connections whose cover photo is missing or is really just the small place
 <div class="guide-task">
 <div class="guide-q">How do I give several people the same tag in one go?</div>
 <ol class="guide-steps">
-<li>In the Overview, make sure <strong>Drill down</strong> is off, then click a chip in a tag group (Tags, Nationality, Interests and so on, not Stage, Location, Age or Job).</li>
+<li>In the Overview, make sure <strong>Drill down</strong> is off (when it is on, a note beside it has a <strong>Turn it off</strong> button), then click a chip in a tag group (Tags, Nationality, Interests and so on, not Stage, Location, Age or Job).</li>
 <li>An <strong>Add someone&hellip;</strong> dropdown appears next to it. Choose a person and press <strong>Add</strong>. Repeat for each person.</li>
 </ol>
 </div>
@@ -5980,6 +6007,7 @@ Finds connections whose cover photo is missing or is really just the small place
 <li>Each person has a number of days they can go without contact: 2 days for five stars, 4 for four stars, 6 for three, 8 for two and 10 for one. People at Planning to call or Planning to meet are 2 days, unless you have set your own timing for that stage (below).</li>
 <li>When the days since contact go past that number, the person is due.</li>
 <li>The <strong>Reach out</strong> badge goes only to the ten people most overdue, with a small boost for high ratings and green flags and a penalty for red flags. Hover over the badge for the numbers behind it.</li>
+<li>To see everyone who is due, not just those ten, press <span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#conn-due-btn">Due</span>. Its number is how many people are past their time.</li>
 <li>Beside the badge there can be a suggested next step such as Contact now, Set up date, Retry in future or Confirm faded.</li>
 </ol>
 <div class="guide-tip">People at Faded, Archived, FriendZone and Got Away never get the badge, and neither does anyone on Standby or Travelling.</div>
@@ -5987,7 +6015,8 @@ Finds connections whose cover photo is missing or is really just the small place
 <div class="guide-task">
 <div class="guide-q">How do I stop someone nagging for a while?</div>
 <ol class="guide-steps">
-<li>Press the &#128164; button beside their Reach out badge. It hides the badge for a week.</li>
+<li>Use the &#128164; box beside their Reach out badge and choose 1 week, 2 weeks or 4 weeks. The badge is hidden until then, and the card shows "&#128164; until &lt;date&gt;".</li>
+<li>To bring the badge back early, press <strong>Clear</strong> beside that date.</li>
 <li>To quieten a whole stage, press <span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#conn-reachout-settings-btn">Reach-out timing</span>. Type the number of days for a stage; leave it empty to use the automatic rule.</li>
 </ol>
 </div>
@@ -6003,8 +6032,9 @@ Finds connections whose cover photo is missing or is really just the small place
 <div class="guide-q">How do I clear out people I have not spoken to in months?</div>
 <ol class="guide-steps">
 <li>Press <span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#conn-backlog-review-btn">Backlog review 180+</span>.</li>
-<li>Confirm the count. Everyone who is 180 or more days since last contact moves to the stage <strong>Backlog review</strong>. People who are already Faded, Archived, FriendZone or Got Away, or paused for travel, are left alone.</li>
+<li>Check the list of names in the confirmation. Everyone who is 180 or more days since last contact moves to the stage <strong>Backlog review</strong>. People who are already Faded, Archived, FriendZone or Got Away, or paused for travel, are left alone.</li>
 <li>Go through that stage and move each person on: back to an active stage, or to Faded or Archived.</li>
+<li>If the move was a mistake, press <strong>Undo</strong> beside the button. It puts everyone still in Backlog review back in the stage they came from.</li>
 </ol>
 <div class="guide-tip">Pressing it again only picks up people who have crossed 180 days since last time. If it says nobody qualifies but you expected some, they are probably already in Backlog review.</div>
 </div>
@@ -6072,7 +6102,7 @@ Finds connections whose cover photo is missing or is really just the small place
 <ol class="guide-steps">
 <li>Open Details and find <strong>Photos</strong>. Click a thumbnail to see it full size.</li>
 <li>Press the star on a thumbnail to make it the cover photo shown on the card; the current cover has a filled star.</li>
-<li>Press &times; to remove a photo or video. It is deleted straight away, with no confirmation. A thumbnail with a small &#8635; is low-resolution; press it to swap in a full-size copy.</li>
+<li>Press &times; to remove a photo or video. You are asked to confirm first, because the stored file can't be brought back. A thumbnail with a small &#8635; is low-resolution; press it to swap in a full-size copy.</li>
 <li>To add more, press <strong>Add photos &amp; parse profile</strong> and choose screenshots. They are read with AI and the profile details are offered for you to confirm.</li>
 <li>If you keep full-size pictures in OneDrive or Google Drive, paste the share link in <strong>Drive/OneDrive link</strong>; an "Open full-res photos" link then appears.</li>
 </ol>
@@ -6202,7 +6232,7 @@ Finds connections whose cover photo is missing or is really just the small place
 <li>Choose who it is in <strong>Import into</strong> (likely matches are listed first, or choose <strong>+ New connection&hellip;</strong>). A note says how many lines it adds to what is already saved.</li>
 <li>Press <strong>Import chat</strong>.</li>
 </ol>
-<div class="guide-tip">Importing the same chat later is safe: a WhatsApp export is always the full history, so the saved copy is simply replaced by the longer one. The person's stage moves up to Moved to WhatsApp if it was lower. The "since contact" counter is only filled from the chat if it was empty, so press <strong>Log contact</strong> if it still shows an old gap. Photos and videos themselves go through <em>Photos and screenshots</em>, not this.</div>
+<div class="guide-tip">Importing the same chat later is safe: a WhatsApp export is always the full history, so the saved copy is simply replaced by the longer one. The person's stage moves up to Moved to WhatsApp if it was lower. The "since contact" counter moves to the chat's newest message date if that is later than the one stored. Photos and videos themselves go through <em>Photos and screenshots</em>, not this.</div>
 </div>
 <div class="guide-task">
 <div class="guide-q">How do I import many WhatsApp chats at once?</div>
@@ -6217,7 +6247,7 @@ Finds connections whose cover photo is missing or is really just the small place
 <ol class="guide-steps">
 <li>In Telegram Desktop, go to Settings &rarr; Advanced &rarr; <strong>Export Telegram data</strong>. Choose JSON or HTML, include chats, and export.</li>
 <li>In <span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#import-connections-item">Import connections</span>, press <strong>Pick the export folder</strong> and choose the folder that contains <code>lists</code> and <code>chats</code>. It reads everything on this device; nothing is sent anywhere.</li>
-<li>A table lists each real conversation, matched by phone number or exact name. Group chats and chats with nothing in them but joins are left out.</li>
+<li>A table lists each real conversation, matched by phone number or exact name. Group chats and chats with nothing in them but joins are left out; open <strong>Why N chats were skipped</strong> above the table to see each one and its reason.</li>
 <li>Press <strong>Select all confident matches</strong>, fix the rest (a dropdown on each row can say <strong>&mdash; skip &mdash;</strong> or <strong>+ New connection&hellip;</strong>), and press <strong>Import selected</strong>.</li>
 <li>Tick <strong>Also bring in the photos actually included in each chat</strong> first if you want them. It uses more space and sync.</li>
 </ol>
@@ -6350,7 +6380,7 @@ Finds connections whose cover photo is missing or is really just the small place
 <li>Press <strong>Import from URL</strong>. The status next to the buttons says "Fetching the page…".</li>
 <li>A form opens underneath with the name, ingredients, instructions and notes it found. Check it over (see <em>Checking and saving</em> below).</li>
 </ol>
-<div class="guide-tip">Fetching a web page needs live sync set up in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#sync-url-input">Settings</span>. Most recipe sites include the recipe in a form the app reads directly, which is free and exact. If a page doesn't, the app falls back to reading it with AI, which needs an Anthropic key in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#anthropic-key-input">Settings</span>.</div>
+<div class="guide-tip">Fetching a web page needs live sync set up in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#sync-url-input">Settings</span>. Most recipe sites include the recipe in a form the app reads directly, which is free and exact. If a page doesn't, the app falls back to reading it with AI, which needs an Anthropic key in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#anthropic-key-input">Settings</span>. If a site refuses to be read (the status says "Couldn't get that page"), take a screenshot or save the page as a PDF and import that instead.</div>
 </div>
 
 <div class="guide-task">
@@ -6400,7 +6430,7 @@ Finds connections whose cover photo is missing or is really just the small place
 <ol class="guide-steps">
 <li>In <span class="inline-goto-link" data-goto-tab="menu" data-goto-target="#recipe-list">the Recipes list</span> (sorted A to Z), click the recipe's name. It opens in place; click the name again to close it.</li>
 <li>Edit any field directly: name, servings, ingredients, instructions, notes. Changes save as you leave each box.</li>
-<li>Under <strong>Photo</strong>, press <strong>+</strong> to add photos of the finished dish (up to 6). Press the &times; on a thumbnail to remove one. For a bigger set, paste a Google Photos album link into <strong>Google Photos album</strong>.</li>
+<li>Under <strong>Photo</strong>, press <strong>+</strong> to add photos of the finished dish (up to 6; if you pick more than fit, a message says how many were added). Press the &times; on a thumbnail to remove one. For a bigger set, paste a Google Photos album link into <strong>Google Photos album</strong>.</li>
 <li>The <strong>Original source</strong> line, when there is one, opens the web page, photo or PDF the recipe was read from.</li>
 </ol>
 </div>
@@ -6418,7 +6448,7 @@ Finds connections whose cover photo is missing or is really just the small place
 <div class="guide-q">How do I rate a recipe?</div>
 <ol class="guide-steps">
 <li>Open the recipe and find <strong>Ratings</strong>. There is a row of five stars for each category (Taste, Health and Prep by default).</li>
-<li>Click a star to set that category's rating. The list then shows an average beside the recipe's name.</li>
+<li>Click a star to set that category's rating. Click the star that is already set to clear the rating. The list then shows an average beside the recipe's name.</li>
 </ol>
 <div class="guide-tip">To add or remove a rating category, use <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#recipe-rating-categories-list">Menu &mdash; recipe rating categories</span> in Settings (or the gear on <span class="inline-goto-link" data-goto-tab="menu" data-goto-target="#recipe-overview-panel">Recipes Overview</span>). Removing one wipes the ratings already given under it, so it asks first. A star rating can be changed but not cleared back to nothing.</div>
 </div>
@@ -6431,7 +6461,7 @@ Finds connections whose cover photo is missing or is really just the small place
 <li>The bar above the chips shows how many recipes match, with one pill per active filter. Press a pill to drop that filter, or <strong>Clear all</strong>.</li>
 <li>Use <strong>Sort chips</strong> to order the chips by count or A to Z, and the arrow on a group heading to fold it away.</li>
 </ol>
-<div class="guide-tip">The Diet chips (High protein, Low calorie, High fibre, High antioxidant, Low-GI, and "free from" tags such as Gluten-free) appear only for recipes whose ingredients have been analysed (see <em>Diet analysis</em> below). There is no text search for recipes; use the chips and the A to Z list.</div>
+<div class="guide-tip">The Diet chips (High protein, Low calorie, High fibre, High antioxidant, Low-GI, and "free from" tags such as Gluten-free) appear only for recipes whose ingredients have been analysed (see <em>Diet analysis</em> below). To find a recipe by a word in its name, an ingredient or a tag, type in the <span class="inline-goto-link" data-goto-tab="menu" data-goto-target="#recipe-search-input">search box</span> above the list; it combines with any chips you have picked.</div>
 </div>
 
 <div class="guide-task">
@@ -6440,14 +6470,24 @@ Finds connections whose cover photo is missing or is really just the small place
 <li>Press <strong>Cook</strong> on the recipe's row. A cooking sheet opens over the page showing the ingredients, the method and your notes.</li>
 <li>When you're done, press <strong>Made it today</strong> to record today's date, or <strong>Close</strong> to leave without recording.</li>
 </ol>
-<div class="guide-tip">You can also open the recipe and press <strong>Mark made today</strong>. Each row shows "made &lt;date&gt;" or "never made". Only the latest date is kept. At the top of <span class="inline-goto-link" data-goto-tab="menu" data-goto-target="#recipe-list-panel">the list</span>, a "worth another go?" line suggests whichever recipe has gone longest without being made, leaning towards well-rated ones; press <strong>Cook it</strong> to open it.</div>
+<div class="guide-tip">You can also open the recipe and press <strong>Mark made today</strong>. Each row shows "made &lt;date&gt;" or "never made", and an opened recipe shows how many times you have made it, with <strong>Undo last</strong> to take back a mis-tap. At the top of <span class="inline-goto-link" data-goto-tab="menu" data-goto-target="#recipe-list-panel">the list</span>, a "worth another go?" line suggests whichever recipe has gone longest without being made, leaning towards well-rated ones; press <strong>Cook it</strong> to open it.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I plan a recipe for a day, or put its ingredients on my shopping list?</div>
+<ol class="guide-steps">
+<li>Open the recipe. Next to <strong>Mark made today</strong>, pick a day in the date box and press <strong>Plan this</strong>. A link beside the buttons takes you to it in the <span class="inline-goto-link" data-goto-tab="planner" data-goto-target="#planner-panel">Planner</span>, where it shows as a recipe card; click the card to come back to the recipe.</li>
+<li>You can also add one from a day box in the Planner: press its <strong>+</strong>, choose <strong>Recipe</strong> in the first box and pick the recipe.</li>
+<li>Press <strong>Add ingredients to shopping list</strong> to add each ingredient line as an item on your <span class="inline-goto-link" data-goto-tab="shopping" data-goto-target="#shopping-lists-panel">Supermarket list</span>. A line already on the list is skipped, and each item's note links back to the recipe.</li>
+</ol>
+<div class="guide-tip">Items added this way are not priced automatically (a recipe can have a dozen lines); press <strong>Search prices</strong> on any item you want priced. Deleting the recipe removes its Planner cards but leaves the shopping items.</div>
 </div>
 
 <div class="guide-task">
 <div class="guide-q">How do I delete a recipe?</div>
 <ol class="guide-steps">
 <li>Open the recipe and press <strong>&times; Delete</strong> at the bottom.</li>
-<li>Confirm. The recipe, its photos and any kept original photo or PDF are removed, and this can't be undone.</li>
+<li>Confirm. The recipe, its photos, any kept original photo or PDF and anything you planned from it on the Planner are removed, and this can't be undone. The confirmation says which of these there are.</li>
 </ol>
 </div>
 </details>
@@ -6483,7 +6523,7 @@ Finds connections whose cover photo is missing or is really just the small place
 <li>The totals and tags change straight away. Choosing a substitute the app hasn't looked up before takes a moment, once.</li>
 <li>For Use less, the amount appears in a box you can adjust.</li>
 </ol>
-<div class="guide-tip">These choices are for exploring only: nothing is saved to the recipe, and they reset when you reload the page. To keep a version, see the next question.</div>
+<div class="guide-tip">These choices are saved with the recipe, so they are still there after a reload. Setting an ingredient back to "as written" clears it, and so does re-reading the ingredients (Parse), since the lines may be numbered differently afterwards. To turn a set of swaps into a real recipe, see the next question.</div>
 </div>
 
 <div class="guide-task">
@@ -6493,7 +6533,7 @@ Finds connections whose cover photo is missing or is really just the small place
 <li>Press <strong>Save as a new recipe with these changes</strong>. The app rewrites the ingredients and instructions to match and adds the result as a new recipe, opened and scrolled into view.</li>
 <li>The new recipe says "Adapted from" with a link back to the original, which is left untouched.</li>
 </ol>
-<div class="guide-tip">The copy keeps the Course and tags but not the Gluten, Dairy or FODMAP choices (set them again once you've checked the new ingredients) and starts with no ratings. Run Parse and Analyse on it again for its own figures.</div>
+<div class="guide-tip">The copy keeps the Course and tags but not the Gluten, Dairy or FODMAP choices (set them again once you've checked the new ingredients) and starts with no ratings. The new recipe is analysed straight away for its own diet figures (this uses AI, and says so if your key is missing).</div>
 </div>
 </details>
 
@@ -6506,14 +6546,14 @@ Finds connections whose cover photo is missing or is really just the small place
 <li>Change what's wrong: the reference amount, macros, the grams of each FODMAP carbohydrate, glycemic index, antioxidant value, allergens, the vegetarian/halal-type facts, substitutes, and how much one of another unit weighs ("medium" = 110 g).</li>
 <li>Press <strong>Save</strong>. Every recipe using that ingredient picks up the new figures. A saved edit is marked "edited" and is never overwritten by a later AI check.</li>
 </ol>
-<div class="guide-tip">Changing the reference amount does not rescale the other figures, which stay as typed but now apply to the new amount, so check them too. Ingredient Reference only appears once at least one recipe has been analysed.</div>
+<div class="guide-tip">Changing the reference amount does not rescale the other figures, which stay as typed but now apply to the new amount, so check them too. Ingredient Reference is empty until a recipe has been analysed.</div>
 </div>
 
 <div class="guide-task">
 <div class="guide-q">How do I merge two names for the same ingredient?</div>
 <ol class="guide-steps">
 <li>In <span class="inline-goto-link" data-goto-tab="menu" data-goto-target="#ingredient-reference-panel">Ingredient Reference</span>, press <strong>Show ingredient reference</strong>, then <strong>Merge into&hellip;</strong> on the duplicate (for example "scallion").</li>
-<li>Choose the entry to keep (for example "spring onion") and confirm. Recipes using the old name now use the kept entry's figures, and the old entry is removed.</li>
+<li>Start typing the entry to keep (for example "spring onion"), pick it from the list that appears, and confirm. Recipes using the old name now use the kept entry's figures, and the old entry is removed.</li>
 <li>To undo, press <strong>undo</strong> beside the name under <strong>Merged names</strong>. That name is then assessed afresh the next time it is used.</li>
 </ol>
 <div class="guide-tip">Only the kept entry's figures survive a merge, so merge into the one you trust. The &times; on a row removes an entry; the next analysis that needs it asks AI again.</div>
@@ -6522,7 +6562,7 @@ Finds connections whose cover photo is missing or is really just the small place
 <div class="guide-task">
 <div class="guide-q">How do I hide diet sections I don't need?</div>
 <ol class="guide-steps">
-<li>In <span class="inline-goto-link" data-goto-tab="menu" data-goto-target="#diet-interests-panel">Diet interests</span>, press <strong>Show diet interests</strong>.</li>
+<li>Open <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#diet-interests-panel">Menu &mdash; diet interests</span> in Settings (or press the gear in the Recipes panel heading).</li>
 <li>Click a chip to switch it off or on: Macros, FODMAP, Diabetic (glycemic load), Allergens, and Kosher / halal / vegetarian / vegan.</li>
 </ol>
 <div class="guide-tip">This only changes what is shown. Every ingredient is still fully assessed, so switching a section back on shows what was already there, with no new AI check.</div>
@@ -6531,7 +6571,7 @@ Finds connections whose cover photo is missing or is really just the small place
 <div class="guide-task">
 <div class="guide-q">How do I change what counts as High protein, Low calorie and so on?</div>
 <ol class="guide-steps">
-<li>Open <span class="inline-goto-link" data-goto-tab="menu" data-goto-target="#diet-tag-thresholds-panel">Diet tag thresholds</span> and press <strong>Show diet tag thresholds</strong>.</li>
+<li>Open <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#diet-tag-thresholds-panel">Menu &mdash; diet tag thresholds</span> in Settings.</li>
 <li>Type new cutoffs for High protein (% of energy from protein), Low calorie (kcal per serving or under), High fibre (g per serving) and High antioxidant (mmol per serving). A blank or invalid entry goes back to the default.</li>
 <li>Tags on every recipe and the Diet chips update straight away.</li>
 </ol>
@@ -6551,18 +6591,18 @@ Finds connections whose cover photo is missing or is really just the small place
 <div class="guide-task">
 <div class="guide-q">How do I log an idea?</div>
 <ol class="guide-steps">
-<li>At the bottom of the <span class="inline-goto-link" data-goto-tab="business" data-goto-target="#idea-form">Business Ideas panel</span>, type a title in <strong>Idea title</strong>. The title is the only thing you must fill in.</li>
+<li>At the top of the <span class="inline-goto-link" data-goto-tab="business" data-goto-target="#idea-form">Business Ideas panel</span>, type a title in <strong>Idea title</strong>. The title is the only thing you must fill in.</li>
 <li>Optionally describe it in the box under it, then press <strong>Add idea</strong>.</li>
-<li>The new idea appears in <span class="inline-goto-link" data-goto-tab="business" data-goto-target="#ideas-list">the list</span> and flashes so you can see where it landed. Ideas are listed newest first, each with the date you logged it.</li>
+<li>The new idea appears in <span class="inline-goto-link" data-goto-tab="business" data-goto-target="#ideas-list">the list</span> and flashes so you can see where it landed. Live ideas (Idea, Exploring, Building) are listed first, newest first, then Done ones, then Shelved ones, each with the date you logged it.</li>
 </ol>
-<div class="guide-tip">The title and note can't be edited once the idea is added, so write them the way you want to keep them. To change either, delete the idea (press &times;, then confirm) and add it again.</div>
+<div class="guide-tip">To change the title or the note, click it on the idea's row and type; it saves when you click away. A title can't be left empty.</div>
 </div>
 
 <div class="guide-task">
 <div class="guide-q">How do I mark how far along an idea is?</div>
 <ol class="guide-steps">
-<li>On the idea's row, open the drop-down at the bottom and choose <strong>Idea</strong>, <strong>Exploring</strong>, <strong>Building</strong> or <strong>Shelved</strong>. It saves as soon as you choose.</li>
-<li>Choose <strong>Shelved</strong> for one you have decided to leave alone. A shelved idea stops appearing in your Overview reminders (see <em>Reminders about ideas</em> below).</li>
+<li>On the idea's row, open the drop-down at the bottom and choose <strong>Idea</strong>, <strong>Exploring</strong>, <strong>Building</strong>, <strong>Done</strong> or <strong>Shelved</strong>. It saves as soon as you choose and the idea moves to its place in the list.</li>
+<li>Choose <strong>Done</strong> for one you carried through, or <strong>Shelved</strong> for one you have decided to leave alone. Neither appears in your Overview reminders (see <em>Reminders about ideas</em> below).</li>
 </ol>
 </div>
 
@@ -6583,7 +6623,8 @@ Finds connections whose cover photo is missing or is really just the small place
 <ol class="guide-steps">
 <li>On the idea's row, press <strong>Turn into Project</strong> if it needs several steps, or <strong>Turn into Task</strong> if it is a single action.</li>
 <li>The idea's title and note become the Project or task. Each step on the checklist becomes its own task inside it, and a step you had already ticked arrives already done.</li>
-<li>The idea's status changes to <strong>Building</strong> and the two buttons are replaced by a link: <strong>Now tracked as a Project &mdash; open it</strong> (or <strong>task</strong>). Click it to land on the real item in Tasks.</li>
+<li>The idea's status changes to <strong>Building</strong> and the two buttons are replaced by a link: <strong>Now tracked as a Project &mdash; open it</strong> (or <strong>task</strong>). Click it to land on the real item in Tasks. Beside it the idea shows how far the Project has got, for example "3 of 5 steps done", and when the Project is completed the idea moves to <strong>Done</strong> by itself.</li>
+<li>On the Project's card in Tasks, the line <strong>From business idea</strong> is a link back to the idea.</li>
 </ol>
 <div class="guide-tip">An idea can only be turned into a task once, so pressing the button twice can't create a duplicate. The steps list disappears from an idea once it has become a task, because the steps now live in the Project. Manage them as tasks from then on; see <span class="inline-goto-link" data-goto-tab="guide" data-goto-target="#guide-tasks-projects">Projects, plans and extra detail</span>.</div>
 </div>
@@ -6601,7 +6642,7 @@ Finds connections whose cover photo is missing or is really just the small place
 <ol class="guide-steps">
 <li>The idea goes back to normal by itself: the link disappears, and its steps list and <strong>Turn into</strong> buttons return so you can start again.</li>
 </ol>
-<div class="guide-tip">It works the other way round too: deleting an idea does <em>not</em> delete a Project or task you made from it. Delete that in Tasks as well if you want it gone.</div>
+<div class="guide-tip">It works the other way round too: deleting an idea does <em>not</em> delete a Project or task you made from it, and the confirmation says so. Delete that in Tasks as well if you want it gone.</div>
 </div>
 </details>
 
@@ -6610,9 +6651,9 @@ Finds connections whose cover photo is missing or is really just the small place
 <div class="guide-task">
 <div class="guide-q">Why does the Overview ask "Still thinking about&hellip;?"</div>
 <ol class="guide-steps">
-<li>Every idea that is not <strong>Shelved</strong> can come up in <span class="inline-goto-link" data-goto-tab="overview" data-goto-target="#nudges-panel">Nudges</span> on the Overview tab as "Still thinking about &lsquo;&hellip;&rsquo;? Logged N days ago."</li>
+<li>An idea that has been sitting for a week or more can come up in <span class="inline-goto-link" data-goto-tab="overview" data-goto-target="#nudges-panel">Nudges</span> on the Overview tab as "Still thinking about &lsquo;&hellip;&rsquo;? Logged N days ago." Ideas that are <strong>Shelved</strong> or <strong>Done</strong>, or already turned into a Project or task, never come up.</li>
 <li>Click the reminder to land on the idea's row in the Business tab.</li>
-<li>To stop being asked about one, set its status to <strong>Shelved</strong> or delete it.</li>
+<li>To stop being asked about one, set its status to <strong>Shelved</strong> or <strong>Done</strong>, turn it into a task, or delete it.</li>
 </ol>
 <div class="guide-tip">See the <span class="inline-goto-link" data-goto-tab="guide" data-goto-target="#guide-overview-nudges">Nudges guide</span> for how reminders are chosen and how often they show.</div>
 </div>
@@ -6666,9 +6707,9 @@ Finds connections whose cover photo is missing or is really just the small place
 <li>In the Samsung Health app, open the 7-day chart you want (HRV, Sleeping HR, AGEs index or Antioxidant index) and take a screenshot. Tapping a day first makes its exact value show, which makes the reading more accurate.</li>
 <li>Share the screenshot to the dashboard. If its file name contains "Samsung Health" (a normal Android screenshot of that app does), it is read straight away and the banner reports what was found.</li>
 <li>If the screenshot stays in <span class="inline-goto-link" data-goto-tab="tasks" data-goto-target="#capture-inbox-panel">Capture Inbox</span> instead, tick it and press <strong>Extract wellness data</strong>.</li>
-<li>Check the new row in <span class="inline-goto-link" data-goto-tab="health" data-goto-target="#wellness-daily-body">Wellness (Samsung Health)</span> against the screenshot before you rely on it.</li>
+<li>Check the new row in <span class="inline-goto-link" data-goto-tab="health" data-goto-target="#wellness-daily-body">Wellness (Samsung Health)</span> against the screenshot before you rely on it. To correct a wrong figure, click it, type the right number and press OK (leave it blank to clear it); the &times; at the end of a row deletes that whole day.</li>
 </ol>
-<div class="guide-tip">The reading is done by AI from the picture, so it needs an Anthropic key in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#anthropic-key-input">Settings</span>. A <strong>~</strong> in front of a number means it was worked out from where the dot sits on the chart, not from a printed number. A picture that is not one of the four charts is turned down with a message and left in the inbox.</div>
+<div class="guide-tip">The reading is done by AI from the picture, so it needs an Anthropic key in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#anthropic-key-input">Settings</span>. A <strong>~</strong> in front of a number means it was worked out from where the dot sits on the chart, not from a printed number. A figure you have already confirmed (a printed number, with no ~) is never replaced by a later estimate for the same day. A picture that is not one of the four charts is turned down with a message and left in the inbox.</div>
 </div>
 </details>
 
@@ -6701,10 +6742,10 @@ Finds connections whose cover photo is missing or is really just the small place
 <div class="guide-q">How do I compare two measurements?</div>
 <ol class="guide-steps">
 <li>Find the <span class="inline-goto-link" data-goto-tab="health" data-goto-target="#health-chart-controls">Trends chart</span>. It opens with weight and HRV already on it.</li>
-<li>Press a <strong>+</strong> button under the chart to add a measurement (steps, sleep, body fat, muscle mass and so on). They can come from any of the three sources.</li>
+<li>Press a <strong>+</strong> button under the chart to add a measurement (steps, distance, calories, exercise, sleep, oxygen, body fat, muscle mass, BMI, body water and so on). They can come from any of the three sources.</li>
 <li>Press the &times; on a name in the key above the buttons to take it off.</li>
 <li>Press <strong>1M</strong>, <strong>3M</strong>, <strong>6M</strong>, <strong>1Y</strong>, <strong>5Y</strong> or <strong>All</strong> to change how far back it looks.</li>
-<li>Drag across the chart to zoom into those dates, then press <strong>Reset zoom</strong> to come back out.</li>
+<li>Drag across the chart to zoom into those dates, then press <strong>Reset zoom</strong> to come back out. The period buttons (1M, 3M&hellip; All) show which one is in use; after a drag-zoom none is highlighted.</li>
 <li>Hover (or touch) the chart to see every measurement's value for that date.</li>
 </ol>
 <div class="guide-tip">Only the first two measurements you pick get a labelled scale (one on each side). Any others are stretched to fit the same height, so read their actual values from the hover box or the figure at the end of the line, not from the scales. Where the bridge app and the scale both record weight, there are separate "Weight (Health Connect)" and "Weight (scale)" lines.</div>
@@ -6716,10 +6757,10 @@ Finds connections whose cover photo is missing or is really just the small place
 <div class="guide-task">
 <div class="guide-q">When does the dashboard comment on my health numbers?</div>
 <ol class="guide-steps">
-<li>Once the Daily activity table has data, the <span class="inline-goto-link" data-goto-tab="overview" data-goto-target="#nudges-panel">Nudges</span> panel on Overview can mention three things: an average of under six hours' sleep across your last logged nights, a weight change of a kilogram or more since your previous weigh-in (at least three days apart), and no exercise logged for a whole week.</li>
+<li>Once the Daily activity table has data, the <span class="inline-goto-link" data-goto-tab="overview" data-goto-target="#nudges-panel">Nudges</span> panel on Overview can mention three things: an average of under six hours' sleep across your last logged nights, a weight change of a kilogram or more since your previous weigh-in (at least three days apart, from the phone or the scale), and no exercise logged for a whole week.</li>
 <li>A nudge is only a prompt. Press it to come to the Health tab and look at the figures behind it.</li>
 </ol>
-<div class="guide-tip">Heart rate and oxygen are left out of nudges on purpose, and the weight and sleep ones use the Daily activity table only, not the scale or Samsung readings. See <span class="inline-goto-link" data-goto-tab="guide" data-goto-target="#guide-overview-nudges">Nudges</span> in this guide for how nudges work in general.</div>
+<div class="guide-tip">Heart rate and oxygen are left out of nudges on purpose, and the sleep one uses the Daily activity table only. The weight one also counts Renpho scale weigh-ins (the scale wins when both recorded the same day). See <span class="inline-goto-link" data-goto-tab="guide" data-goto-target="#guide-overview-nudges">Nudges</span> in this guide for how nudges work in general.</div>
 </div>
 </details>
 </div>
@@ -6745,7 +6786,14 @@ Finds connections whose cover photo is missing or is really just the small place
 <ol class="guide-steps">
 <li>Press <strong>Edit</strong> on their row, change the name or date, and press <strong>Save</strong>.</li>
 </ol>
-<div class="guide-tip">Family members are kept out of the Contacts pipeline and the Overview, so they only appear here and wherever you pick a person (for example trips and <em>Who has it?</em> on a book).</div>
+<div class="guide-tip">Family members are kept out of the Contacts pipeline and the Overview, so they only appear here and wherever you pick a person (for example trips and <em>Who has it?</em> on a book). Clicking a family member's name chip anywhere brings you to their row here.</div>
+</div>
+<div class="guide-task">
+<div class="guide-q">How do I remove a family member?</div>
+<ol class="guide-steps">
+<li>Press <strong>Edit</strong> on their row, then <strong>Remove</strong>.</li>
+<li>The confirmation lists what it will touch: books they hold go back to "at your home", and trips keep their name but lose the link. Their stored photos are deleted. It cannot be undone.</li>
+</ol>
 </div>
 </details>
 
@@ -6833,7 +6881,7 @@ Finds connections whose cover photo is missing or is really just the small place
 <div class="guide-q">How do I correct a book, or remove it?</div>
 <ol class="guide-steps">
 <li>Press <strong>Edit</strong> on its row, change the details (title, author, series and order, ages, genres, format, who has it, notes), and press <strong>Save</strong>. The cover and link stay.</li>
-<li>To remove a book, press the &times; at the end of its row. There is no confirmation and no undo.</li>
+<li>To remove a book, press the &times; at the end of its row and confirm. There is no undo.</li>
 </ol>
 </div>
 </details>
@@ -6848,7 +6896,7 @@ Finds connections whose cover photo is missing or is really just the small place
 <li>In the <span class="inline-goto-link" data-goto-tab="family" data-goto-target="#school-calendar-picker">Push to&hellip;</span> box on <span class="inline-goto-link" data-goto-tab="family" data-goto-target="#school-calendar-panel">School &amp; uni calendars</span>, choose the calendar the dates should go on.</li>
 <li>When a school's dates have been found, each period of days off is listed with its start and end. Press <strong>Push</strong> on a period. It becomes <strong>Pushed &#10003;</strong> and appears in that calendar as an all-day event titled with the school's short name and the period, such as "BHZ: Easter break" (Charlotte), "UNBC: &hellip;" (Zara) or "Leeds: &hellip;" (Lewis).</li>
 </ol>
-<div class="guide-tip">Each period can be pushed once; after that it shows Pushed and the button is gone.</div>
+<div class="guide-tip">Each period can be pushed once; after that it shows Pushed. To take it off the calendar again, press <strong>Remove from calendar</strong> beside it. The last period of the year has no end date yet: type the real last day in the date box beside <strong>Push</strong> once the school publishes it, or push it as a one-day marker. <strong>Dismiss</strong> on a school's block clears its result from the list without touching events already pushed.</div>
 </div>
 <div class="guide-task">
 <div class="guide-q">When does it look for new dates, and how do I look now?</div>
@@ -6857,7 +6905,7 @@ Finds connections whose cover photo is missing or is really just the small place
 <li>To look straight away, press <span class="inline-goto-link" data-goto-tab="family" data-goto-target="#school-calendar-check-btn">Check now</span>. This reads all three pages whether or not they changed, and each page it reads uses the AI once.</li>
 <li>For each school the panel shows a link to its page (<strong>View page</strong>), the term dates it read, and the days not at school or university: breaks, the gaps between terms, and public holidays during term, each stretched to include the weekend next to it.</li>
 </ol>
-<div class="guide-tip">Check the term dates line against the school's page before pushing. A school whose line says <strong>none found</strong> had a page the reader could not make sense of. Per-school results, and any error, are in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#site-health-table">Site health</span>; the line beside Check now says <strong>Done.</strong> even when a school failed. The last period of the year has no end date (<strong>end TBC</strong>); it is pushed as a single day.</div>
+<div class="guide-tip">Check the term dates line against the school's page before pushing. A school whose line says <strong>none found</strong> had a page the reader could not make sense of. Per-school results, and any error, are in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#site-health-table">Site health</span>; the line beside Check now also says, school by school, whether dates were found, nothing changed, or the check failed and why. Pressing Check now again after pushing keeps the periods you already pushed rather than listing them twice.</div>
 </div>
 </details>
 
@@ -6898,7 +6946,7 @@ Finds connections whose cover photo is missing or is really just the small place
 <div class="guide-q">The same email matches two of my searches. Which heading does it appear under?</div>
 <ol class="guide-steps">
 <li>It appears once, under the first search in the list that finds it. Searches are checked from the top of <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#mail-searches-block">Mail searches</span> down.</li>
-<li>To make the other search win, delete the one that should come later with its &times; and add it again: a new search goes to the bottom of the list.</li>
+<li>To make the other search win, move it up with the <strong>&uarr;</strong> at the end of its row (or the one above it down with <strong>&darr;</strong>).</li>
 </ol>
 </div>
 <div class="guide-task">
@@ -6925,7 +6973,7 @@ Finds connections whose cover photo is missing or is really just the small place
 <li>Press <span class="inline-goto-link" data-goto-tab="overview" data-goto-target="#sync-mail-btn">Refresh mail</span> any time to look again now. The line beside it says when it last updated and how many emails were handled automatically.</li>
 <li>To change the interval or switch it off, use <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#scheduled-tasks">Settings &rarr; Scheduled syncs</span>.</li>
 </ol>
-<div class="guide-tip">If it says "Sign in to Google at the top of Overview first", sign in using the bar at the top of the page and press Refresh mail again.</div>
+<div class="guide-tip">If it says to sign in to Google, press the <strong>top of Overview</strong> link in the message to go to the sign-in bar, sign in, and press Refresh mail again.</div>
 </div>
 </details>
 
@@ -6971,8 +7019,8 @@ Finds connections whose cover photo is missing or is really just the small place
 <div class="guide-task">
 <div class="guide-q">How do I turn an email into a task?</div>
 <ol class="guide-steps">
-<li>Press <strong>+ task</strong> on its row (under <strong>&#8943; Other actions</strong> if it is not one of the topic's quick buttons). The task is titled "Reply: &lt;subject&gt;", with the sender in its notes and a link back to the email, and the button changes to <strong>&#10003; captured</strong>.</li>
-<li>For a better title, notes and due date, use <strong>&#10024; Task</strong> instead: it reads the whole email, fills in a title, notes and due date for you to edit (starting from the same "Reply: &lt;subject&gt;"), and creates the task when you press <strong>Add task</strong>.</li>
+<li>Press <strong>+ task</strong> on its row (under <strong>&#8943; Other actions</strong> if it is not one of the topic's quick buttons). The task is titled with the email's subject, with the sender in its notes and a link back to the email, and the button changes to <strong>&#10003; captured</strong>. Any PDF or real picture attached to the email is saved onto the task a moment later, and the button then shows how many.</li>
+<li>For a better title, notes and due date, use <strong>&#10024; Task</strong> instead: it reads the whole email, fills in a title, notes and due date for you to edit (starting from the email's subject), and creates the task when you press <strong>Add task</strong>.</li>
 </ol>
 <div class="guide-tip">&#10024; always uses your Anthropic key. If it asks for one, add it in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#anthropic-key-input">Settings</span>. <strong>+ task</strong> is free.</div>
 </div>
@@ -7013,7 +7061,7 @@ Finds connections whose cover photo is missing or is really just the small place
 <div class="guide-task">
 <div class="guide-q">Do attachments come with it?</div>
 <ol class="guide-steps">
-<li>PDFs and real pictures attached to the email (not tiny logos) are saved onto what you create with <strong>&#10024; Task</strong>, <strong>+ trip leg</strong>, <strong>+ date event</strong> or <strong>Complex</strong>, and the message says how many. The plain <strong>+ task</strong> button does not copy attachments.</li>
+<li>PDFs and real pictures attached to the email (not tiny logos) are saved onto what you create with <strong>+ task</strong>, <strong>&#10024; Task</strong>, <strong>+ trip leg</strong>, <strong>+ date event</strong> or <strong>Complex</strong>, and the message says how many.</li>
 <li>This needs file storage to be set up. Without it the record is still created, just with no attachments.</li>
 </ol>
 </div>
@@ -7036,7 +7084,7 @@ Finds connections whose cover photo is missing or is really just the small place
 <ol class="guide-steps">
 <li>On one real email press <strong>&#8943; Other actions</strong> then <strong>+ rule</strong>.</li>
 <li>The form is filled in from that email: <strong>Label</strong> (what to call the rule), <strong>From contains</strong>, <strong>Subject contains</strong> and <strong>Creates</strong> (Task, Event, Trip leg, Reading list and so on).</li>
-<li>Shorten <strong>From contains</strong> and <strong>Subject contains</strong> to the part that is always the same, for example the sender's address and a word from the subject. Left as they are, the rule only matches an email with exactly the same sender and subject again.</li>
+<li><strong>From contains</strong> is filled in with just the sender's address and <strong>Subject contains</strong> is left blank, so the rule matches every email from that sender. Add a word from the subject if you want it narrower. The rule runs by itself at every refresh, and options marked with a cost use Claude each time.</li>
 <li>Press <strong>+ Create &amp; run</strong>. It runs on this email straight away, then on every matching email each time Mail refreshes.</li>
 </ol>
 <div class="guide-tip">Matching ignores capital letters. Both boxes must match when both are filled; leave one blank to match on the other alone. If several rules match, only the first one in the list runs.</div>
@@ -7053,7 +7101,7 @@ Finds connections whose cover photo is missing or is really just the small place
 <div class="guide-task">
 <div class="guide-q">Why didn't my marker or rule fire?</div>
 <ol class="guide-steps">
-<li>The email has to be found by one of your <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#mail-searches-block">Mail searches</span>, within its day and result limits. Markers and rules only look at emails the searches already fetched.</li>
+<li>The email has to be found by one of your <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#mail-searches-block">Mail searches</span>, within its day and result limits. Markers and rules only look at emails the searches already fetched. If none of your searches looks for <code>zxc</code>, a note under Refresh mail says so.</li>
 <li>It has to still be open: an email you have already actioned, dismissed or queued is skipped, so each one is only ever handled once.</li>
 <li>You must be signed in to Google, and the refresh has to have run (press <span class="inline-goto-link" data-goto-tab="overview" data-goto-target="#sync-mail-btn">Refresh mail</span>).</li>
 <li>For a marker, the letter has to be one that exists in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#capture-rules">Capture markers &amp; suffixes</span>.</li>
@@ -7067,7 +7115,9 @@ Finds connections whose cover photo is missing or is really just the small place
 <div class="guide-q">Where do dismissed emails go, and can I get one back?</div>
 <ol class="guide-steps">
 <li>Every email you dismiss with its &times; (or <strong>Bin all</strong>) is listed in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#mail-bin-block">Settings &rarr; Mail bin</span> with its subject, sender and the date. You can also reach it from the bin icon at the top of the Mail panel.</li>
-<li>You cannot put back a single email. To bring dismissed emails back, press <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#empty-mail-bin-btn">Empty bin</span> and confirm. That forgets <em>all</em> of them, and any that your searches still find show up in the Mail panel again at the next refresh.</li>
+<li>To bring one back, press <strong>Put back</strong> at the end of its row. It shows in the Mail panel again straight away, if your searches still find it.</li>
+<li>To bring them all back, press <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#empty-mail-bin-btn">Empty bin</span> and confirm. Any that your searches still find show up in the Mail panel again at the next refresh.</li>
+<li>Press an email's subject in the bin to read it in the app (for emails binned from now on; older entries show the subject as plain text).</li>
 </ol>
 <div class="guide-tip">Dismissing never touches Gmail, so the real email is always still there. The bin is just the dashboard's memory of what you have already looked at and skipped, so it does not keep offering it.</div>
 </div>
@@ -7099,7 +7149,7 @@ Finds connections whose cover photo is missing or is really just the small place
 <li>The title, poster and year are filled in a moment later. The kind is worked out from the link; change it afterwards if it guessed wrong (an IMDb link is assumed to be a film).</li>
 <li>If the title stays as a web address, press <strong>&#10024; Resolve title</strong>, which appears once the box holds a link. It asks Claude to read the page and add the item with a proper title.</li>
 </ol>
-<div class="guide-tip">Resolve title uses your Anthropic key and costs a fraction of a cent; the automatic fill-in on a plain Add does not use AI.</div>
+<div class="guide-tip">Resolve title uses your Anthropic key and costs a fraction of a cent; the automatic fill-in on a plain Add does not use AI. If you already have the title on the list, the match list says so with a link to that row.</div>
 </div>
 <div class="guide-task">
 <div class="guide-q">How do I send something here from my phone or an email?</div>
@@ -7120,17 +7170,17 @@ Finds connections whose cover photo is missing or is really just the small place
 <li>Each row shows a poster, a kind tag, the title (a link to its page when it has one), then year and creator.</li>
 <li>Small grey tags to the right are the identifiers (TMDb, TVDB, IMDb). Hover one to see its number.</li>
 <li>Next come where-to-watch tags, a <strong>downloading</strong> tag if a download was requested, and a Plex tag (<strong>In Plex</strong> in green, or <strong>not on Plex</strong> after a check).</li>
-<li>The buttons at the far end of the row are <strong>Monitor&hellip;</strong> (series only), <strong>&#128065; Watchlist</strong> (films and series with a TMDb id), <strong>Get&hellip;</strong>, the status menu and a &times; to delete.</li>
+<li>The buttons at the far end of the row are <strong>Monitor&hellip;</strong> (series only), <strong>&#128065; Watchlist</strong> (films and series with a TMDb id), <strong>Get&hellip;</strong>, <strong>Edit</strong>, the status menu and a &times; to delete.</li>
 </ol>
 <div class="guide-tip">The header shows "N to go of M": the items still Wanted or Available, out of everything on the list. Anything you can already watch on a service you pay for is moved to the top.</div>
 </div>
 <div class="guide-task">
 <div class="guide-q">How do I mark something watched, or drop it?</div>
 <ol class="guide-steps">
-<li>Use the status menu on the row: <strong>Wanted</strong>, <strong>Available</strong>, <strong>Watched</strong> or <strong>Dropped</strong>.</li>
-<li>Watched and Dropped rows leave the list and turn grey. To see them, press <strong>Show watched/dropped</strong> in the chip row under the panel header; press it again to hide them.</li>
+<li>Use the status menu on the row: <strong>Wanted</strong>, <strong>Available</strong>, <strong>Watched</strong> (<strong>Read</strong> for a book, <strong>Heard</strong> for an album, track, artist or podcast) or <strong>Dropped</strong>.</li>
+<li>Watched and Dropped rows leave the list and turn grey. To see them, press <strong>Show finished/dropped</strong> in the chip row under the panel header; press it again to hide them.</li>
 </ol>
-<div class="guide-tip">The menu says "Watched" for every kind, including books and albums; read it as "finished". Available is set for you when the Plex check finds the item, when you use a Get&hellip; route, or when a download is requested.</div>
+<div class="guide-tip">A finished row also shows the date you finished it. Available is set for you when the Plex check finds the item, when you use a Get&hellip; route, or when a download is requested.</div>
 </div>
 <div class="guide-task">
 <div class="guide-q">How do I filter by kind?</div>
@@ -7146,7 +7196,7 @@ Finds connections whose cover photo is missing or is really just the small place
 <li>In the dialog, paste an address or the bare id: a themoviedb.org address or <code>tv/1396</code>, a thetvdb.com address or <code>387219</code>, an imdb.com address or <code>tt0903747</code>.</li>
 <li>Pasting an address from a different site than the box you are in is fine; it is saved under the right catalogue and the dialog says so.</li>
 </ol>
-<div class="guide-tip">The TMDb id is the one that drives where-to-watch and the poster; the TVDB id is how Sonarr finds a series; IMDb is a fallback that is turned into a TMDb id when possible. You can't edit the title, year or notes on a row; delete it and add it again.</div>
+<div class="guide-tip">The TMDb id is the one that drives where-to-watch and the poster; the TVDB id is how Sonarr finds a series; IMDb is a fallback that is turned into a TMDb id when possible. To fix the title, who it's by, the year, the notes or the kind (an IMDb link is always guessed as a film), press <strong>Edit</strong> on the row, change the boxes and press <strong>Save</strong>. The ids stay as they were.</div>
 </div>
 <div class="guide-task">
 <div class="guide-q">How do I put a book on my Family shelf?</div>
@@ -7167,23 +7217,23 @@ Finds connections whose cover photo is missing or is really just the small place
 <li>Plain tags are services that carry it but that you don't subscribe to; the first two are named and the rest are folded into <strong>+N</strong> (hover it for the names).</li>
 <li>"rent/buy: &hellip;" appears only when nothing streams it free. "Not streaming in GB" means nothing carries it right now.</li>
 </ol>
-<div class="guide-tip">The green tick works by matching the service's name against the subscriptions you list in <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#subscriptions-panel">Finances &rarr; Subscriptions</span> (the panel's &#128179; icon is a shortcut). Add Netflix, Disney+ and so on there, and give each one the service's own name. Streaming data is JustWatch's, via TMDb.</div>
+<div class="guide-tip">The green tick works by matching the service's name against the subscriptions you list in <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#subscriptions-panel">Finances &rarr; Subscriptions</span> (the panel's &#128179; icon is a shortcut). Add Netflix, Disney+ and so on there, and give each one the service's own name in the provider box (a plan such as "Premium" can go in the plan box). Streaming data is JustWatch's, via TMDb.</div>
 </div>
 <div class="guide-task">
 <div class="guide-q">How do I check whether I already have it on Plex?</div>
 <ol class="guide-steps">
-<li>Press <strong>Check Plex</strong> under the box. Your home agent searches your Plex library for every <em>Wanted</em> film and series, one at a time, and the line beside the button says which it is on.</li>
+<li>Press <strong>Check Plex</strong> under the box. Your home agent searches your Plex library for every <em>Wanted</em> film and series, and for anything marked <em>Available</em> that isn't yet confirmed in your library, one at a time, and the line beside the button says which it is on.</li>
 <li>A clear single match is accepted for you: the row gets a green <strong>In Plex</strong> tag and its status becomes <strong>Available</strong>.</li>
 <li>If the title is ambiguous (several matches, or a different year), a card asks <em>Is your "&hellip;" one of these?</em>. Press the right one, or <strong>None of these &mdash; not on Plex</strong>.</li>
 <li>Anything not found is tagged <strong>not on Plex</strong> with the date you checked.</li>
 </ol>
-<div class="guide-tip">This needs your home agent running at home. If it says no agent has checked in, the agent is off or unreachable. Only <em>Wanted</em> films and series are checked, so press Check Plex again after adding more.</div>
+<div class="guide-tip">This needs your home agent running at home. If it says no agent has checked in, the agent is off or unreachable. Anything already found on Plex is skipped, so press Check Plex again after adding more, or later to find a title that has since arrived.</div>
 </div>
 <div class="guide-task">
 <div class="guide-q">How do I put something on my Plex Watchlist?</div>
 <ol class="guide-steps">
 <li>Press <strong>&#128065; Watchlist</strong> on a film or series row (it appears once the row has a TMDb id).</li>
-<li>The button shows <strong>&#10003; On Watchlist</strong> when done, or a message saying why not.</li>
+<li>The button shows <strong>&#10003; On Watchlist</strong> when done, and stays that way; or a message saying why not.</li>
 </ol>
 <div class="guide-tip">The Watchlist is your Plex account's list, shown in every Plex app. It is separate from the "In Plex" check, which looks at your own library. Both use the home agent.</div>
 </div>
@@ -7241,7 +7291,7 @@ Finds connections whose cover photo is missing or is really just the small place
 <ol class="guide-steps">
 <li><strong>+ Add as want</strong> adds it to your list like any other item, and where-to-watch is checked.</li>
 <li><strong>&#128065; Watchlist</strong> sends it straight to your Plex Watchlist instead.</li>
-<li>The &times; (Not interested) hides it for good; it won't be suggested again, and you can't bring it back from the screen.</li>
+<li>The &times; (Not interested) hides it and it won't be suggested again. To bring one back, press <strong>Show dismissed</strong> under the list and then <strong>Restore</strong> beside it.</li>
 </ol>
 </div>
 <div class="guide-task">
@@ -7271,13 +7321,13 @@ Finds connections whose cover photo is missing or is really just the small place
 <li>Share a link with <code>#R</code> on the end, or mark a screenshot with a capital <strong>R</strong> and share it. Either lands in the <span class="inline-goto-link" data-goto-tab="media" data-goto-target="#reading-list-panel">Reading list</span> panel, newest first.</li>
 <li>A link shows its title and a cover if one can be found; a screenshot shows as a small thumbnail.</li>
 </ol>
-<div class="guide-tip">There is no box to type a link into on this panel; it is filled only by those two routes (or any other route set to the Reading list in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#capture-rules">Capture markers &amp; suffixes</span>).</div>
+<div class="guide-tip">You can also type or paste a link (or just a title) into the <span class="inline-goto-link" data-goto-tab="media" data-goto-target="#reading-add-input">box at the top of the panel</span> and press <strong>Add</strong>; a link you already have is flagged rather than added twice. Any other route set to the Reading list in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#capture-rules">Capture markers &amp; suffixes</span> lands here too.</div>
 </div>
 <div class="guide-task">
 <div class="guide-q">How do I tick things off?</div>
 <ol class="guide-steps">
 <li>Press <strong>Mark read</strong> on a row. It turns grey and the button reads <strong>&#10003; read</strong>; press it again to mark it unread.</li>
-<li>Press &times; to remove a row. It goes at once with no confirmation.</li>
+<li>Press <strong>Edit</strong> to fix a title, link or notes (changing the link looks up its cover again), and &times; to remove a row, which asks you to confirm first.</li>
 </ol>
 <div class="guide-tip">The header shows "N unread of M". Read rows stay on the list, greyed, until you remove them.</div>
 </div>

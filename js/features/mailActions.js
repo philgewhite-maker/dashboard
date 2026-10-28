@@ -27,9 +27,9 @@ tripLeg: { label: '+ trip leg', title: 'Pull flight/hotel/car-hire details from 
 dateEvent: { label: '+ date event', title: 'Add this as a Planner idea, optionally linked to a connection — reads the calendar invite or the email for a real date and venue', kind: 'picker' },
 // For the rare email the one-click actions above get wrong -- an order
 // covering more than one separate thing, something easy to miscategorise.
-// Never a topic's preferred action (nothing above is either, by design --
-// see js/features/mail.js's own dialog), always reachable under "Other
-// actions" on every message.
+// Never a topic's preferred action -- Settings' topic table doesn't offer
+// it, and migrate() strips it from older topics -- always reachable under
+// "Other actions" on every message. Same for checkCalendar and addRule below.
 complex: { label: '🪄 Complex…', title: 'Tell it what this email actually is and what you want out of it, then route to Task / Date event(s) / Trip leg', kind: 'picker' },
 // Independent of creating any dashboard record at all -- just makes sure
 // a real calendar invite on this email is actually reflected on Google
@@ -39,7 +39,7 @@ complex: { label: '🪄 Complex…', title: 'Tell it what this email actually is
 // above -- the list view has no attachment metadata to gate on without
 // an extra fetch per row, so whether there's actually an invite is
 // discovered when this is opened, not before.
-checkCalendar: { label: '📅 Check calendar', title: "Parse any calendar invite on this email and make sure it's reflected on your real Google Calendar", kind: 'picker' },
+checkCalendar: { label: '📅 Check calendar', title: "Look for a calendar invite on this email (the list can't tell beforehand, so it says if there isn't one) and make sure it's on your real Google Calendar", kind: 'picker' },
 // Creates a data.mailRules row (js/state.js's blankMailRule) matching
 // THIS message's own from/subject, runs it on this message immediately,
 // then auto-runs on every future "Refresh mail" too -- the sender/

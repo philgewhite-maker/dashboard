@@ -13,7 +13,7 @@
 // request, a voice instruction), so shape normalisation lives in exactly
 // one place.
 import { data, queueSave, blankMediaItem, MEDIA_KINDS, MEDIA_STATUSES } from '../state.js';
-import { escapeHtml, affiliateLink, scrollAndFlash, hydratePhotoBackgrounds, looksLikeUrl, prettyUrl, bindBackdropClose } from '../utils.js';
+import { escapeHtml, affiliateLink, scrollAndFlash, hydratePhotoBackgrounds, looksLikeUrl, prettyUrl, bindBackdropClose, todayStr, SYNC_LINK_HTML } from '../utils.js';
 import { identifyUrl, catalogueLabel, CATALOGUE_LABELS, watchProviders, subscriptionFor, collapseProviders, shortProviderName, MissingTmdbKeyError } from '../catalogue.js';
 
 const KIND_LABEL = Object.fromEntries(MEDIA_KINDS.map((k) => [k.kind, k.label]));
@@ -24,6 +24,19 @@ const OPEN_STATUSES = ['wanted', 'available'];
 
 let kindFilter = 'all';
 let showFinished = false;
+// The row currently open for editing (title/year/notes/kind), if any.
+let editingId = '';
+// What has been typed into that row so far, kept across a re-render (a
+// poster or streaming lookup landing mid-edit redraws the list).
+let editDraft = null;
+
+// "Watched" is wrong for a book or an album, so the finished status reads
+// by kind: the stored value stays 'done' either way.
+const DONE_LABEL_BY_KIND = { film: 'Watched', tv: 'Watched', book: 'Read', album: 'Heard', track: 'Heard', artist: 'Heard', podcast: 'Heard', other: 'Done' };
+function statusLabel(kind, status) {
+if (status === 'done') return DONE_LABEL_BY_KIND[kind] || 'Done';
+return STATUS_LABEL[status] || status;
+}
 
 // A link's kind, when the catalogue it came from proves one -- TMDb's
 // /tv/ path does, IMDb's /title/ doesn't (it covers both), so that falls
@@ -108,7 +121,7 @@ setCaptureStatus(`Nothing found for that link — ${catalogueLabel(item.external
 // link, with no reason given, is exactly what made this hard to
 // diagnose the first time.
 console.error('Link lookup failed, item stays as pasted:', err);
-setCaptureStatus(`Couldn't look that link up: ${err.message || err}`);
+setCaptureStatus(`Couldn't look that link up: ${errorHtml(err)}`, true);
 }
 }
 
@@ -217,7 +230,27 @@ if (book) return `<span class="task-chip" data-open-book="${escapeHtml(book.id)}
 return `<button class="mini-task-btn" type="button" data-media-add-book="${item.id}" title="Add this to your physical Books inventory on the Family tab">&#128214; Add to Books</button>`;
 }
 
+// The row while it is being edited: the fields a wrong lookup or a wrong
+// guess of kind (an IMDb link is always "film") most needs fixing. The
+// catalogue ids stay exactly as they were -- they have their own chips.
+function editRowHtml(src) {
+const item = editDraft && editDraft.id === src.id ? { ...src, ...editDraft } : src;
+const kindOptions = MEDIA_KINDS.map((k) => `<option value="${k.kind}"${k.kind === item.kind ? ' selected' : ''}>${escapeHtml(k.label)}</option>`).join('');
+return `<div class="mail-row" data-media-row="${item.id}" data-media-editing="${item.id}" style="align-items:flex-start;flex-wrap:wrap;">
+<select class="voucher-edit" data-media-edit-field="kind" title="What kind of thing it is">${kindOptions}</select>
+<input type="text" autocomplete="off" class="voucher-edit" data-media-edit-field="title" value="${escapeHtml(item.title)}" placeholder="Title" style="flex:2 1 220px;min-width:0;">
+<input type="text" autocomplete="off" class="voucher-edit" data-media-edit-field="creator" value="${escapeHtml(item.creator || '')}" placeholder="By (director, artist, author)" style="flex:1 1 150px;min-width:0;">
+<input type="text" autocomplete="off" class="voucher-edit" data-media-edit-field="year" value="${escapeHtml(item.year || '')}" placeholder="Year" style="flex:0 1 70px;min-width:0;">
+<input type="text" autocomplete="off" class="voucher-edit" data-media-edit-field="notes" value="${escapeHtml(item.notes || '')}" placeholder="Notes" style="flex:2 1 200px;min-width:0;">
+<span class="media-row-actions">
+<button class="mini-task-btn" type="button" data-media-edit-save="${item.id}">Save</button>
+<button class="mini-task-btn" type="button" data-media-edit-cancel="${item.id}">Cancel</button>
+</span>
+</div>`;
+}
+
 function rowHtml(item) {
+if (editingId === item.id) return editRowHtml(item);
 const photoId = (item.photoIds || [])[0];
 const byline = [item.creator, item.year].filter(Boolean).join(' · ');
 // Poster first when there is one -- a shelf of covers is the point of
@@ -239,14 +272,18 @@ ${item.plexCheck ? (item.plexCheck.found
 ? `<span class="task-context" style="background:var(--sage-bg);color:var(--sage);font-weight:600;" title="In your Plex library${item.plexCheck.matchedTitle ? ` as &quot;${escapeHtml(item.plexCheck.matchedTitle)}&quot;${item.plexCheck.matchedYear ? ` (${escapeHtml(item.plexCheck.matchedYear)})` : ''}` : ''}">&#10003; On Plex</span>`
 : `<span class="settings-note" style="margin:0;" title="Checked on ${escapeHtml(String(item.plexCheck.checkedAt).slice(0, 10))}">not on Plex</span>`) : ''}
 ${item.notes ? `<span class="settings-note" style="margin:0;">${escapeHtml(item.notes)}</span>` : ''}
+${item.status === 'done' && item.doneAt ? `<span class="settings-note" style="margin:0;" title="When it was marked ${escapeHtml(statusLabel(item.kind, 'done').toLowerCase())}">${escapeHtml(statusLabel(item.kind, 'done').toLowerCase())} ${escapeHtml(item.doneAt)}</span>` : ''}
 ${bookLinkHtml(item)}
 <span class="media-row-actions">
 ${monitorHtml(item)}
 ${(item.kind === 'film' || item.kind === 'tv') && item.externalIds && item.externalIds.tmdb
-? `<button class="mini-task-btn" type="button" data-media-watchlist="${item.id}" title="Add straight to your Plex Watchlist">&#128065; Watchlist</button>` : ''}
+? (item.watchlistAddedAt
+? `<button class="mini-task-btn" type="button" disabled title="Added to your Plex Watchlist on ${escapeHtml(String(item.watchlistAddedAt).slice(0, 10))}">&#10003; On Watchlist</button>`
+: `<button class="mini-task-btn" type="button" data-media-watchlist="${item.id}" title="Add straight to your Plex Watchlist">&#128065; Watchlist</button>`) : ''}
 <button class="mini-task-btn" type="button" data-media-satisfy="${item.id}" title="How to get hold of it">Get&hellip;</button>
+<button class="mini-task-btn" type="button" data-media-edit="${item.id}" title="Edit the title, year, notes or kind">Edit</button>
 <select class="mini" data-media-status="${item.id}">
-${MEDIA_STATUSES.map((s) => `<option value="${s.status}"${s.status === item.status ? ' selected' : ''}>${escapeHtml(s.label)}</option>`).join('')}
+${MEDIA_STATUSES.map((s) => `<option value="${s.status}"${s.status === item.status ? ' selected' : ''}>${escapeHtml(statusLabel(item.kind, s.status))}</option>`).join('')}
 </select>
 <span class="del-x" data-media-remove="${item.id}" title="Remove">&times;</span>
 </span>
@@ -266,6 +303,13 @@ return collapseProviders(w.flatrate).some((name) => subscriptionFor(name, data.s
 function renderMedia() {
 const list = document.getElementById('media-list');
 if (!list) return; // tab not in this build's DOM
+if (editingId) {
+const row = list.querySelector(`[data-media-editing="${editingId}"]`);
+if (row) {
+const val = (f) => row.querySelector(`[data-media-edit-field="${f}"]`)?.value || '';
+editDraft = { id: editingId, kind: val('kind'), title: val('title'), creator: val('creator'), year: val('year'), notes: val('notes') };
+}
+}
 const open = data.mediaItems.filter((m) => OPEN_STATUSES.includes(m.status));
 const count = document.getElementById('media-count');
 if (count) count.textContent = data.mediaItems.length ? `${open.length} to go of ${data.mediaItems.length}` : '';
@@ -317,8 +361,38 @@ sel.addEventListener('change', () => {
 const item = data.mediaItems.find((m) => m.id === sel.dataset.mediaStatus);
 if (!item) return;
 item.status = sel.value;
+// Remember when it was finished; moving it back out of done clears it.
+if (item.status === 'done') { if (!item.doneAt) item.doneAt = todayStr(); } else item.doneAt = '';
 queueSave();
 renderMedia();
+});
+});
+list.querySelectorAll('[data-media-edit]').forEach((btn) => {
+btn.addEventListener('click', () => { editingId = btn.dataset.mediaEdit; editDraft = null; renderMedia(); });
+});
+list.querySelectorAll('[data-media-editing]').forEach((row) => {
+const id = row.dataset.mediaEditing;
+const save = () => {
+const item = data.mediaItems.find((m) => m.id === id);
+if (item) {
+const val = (f) => (row.querySelector(`[data-media-edit-field="${f}"]`)?.value || '').trim();
+const kind = val('kind');
+if (KIND_LABEL[kind]) item.kind = kind;
+item.title = val('title') || item.title;
+item.creator = val('creator');
+item.year = val('year');
+item.notes = val('notes');
+queueSave();
+}
+editingId = '';
+editDraft = null;
+renderMedia();
+};
+const cancel = () => { editingId = ''; editDraft = null; renderMedia(); };
+row.querySelector('[data-media-edit-save]').addEventListener('click', save);
+row.querySelector('[data-media-edit-cancel]').addEventListener('click', cancel);
+row.querySelectorAll('input[data-media-edit-field]').forEach((inp) => {
+inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') cancel(); });
 });
 });
 list.querySelectorAll('[data-media-add-book]').forEach((btn) => {
@@ -431,15 +505,20 @@ return chips.join('');
 // found flips to Available so it stops looking like something to get.
 async function checkAgainstPlex() {
 const status = document.getElementById('media-plex-status');
-const say = (text) => { if (status) status.textContent = text; };
-const targets = data.mediaItems.filter((m) => m.status === 'wanted' && (m.kind === 'film' || m.kind === 'tv'));
+const say = (text, html = false) => { if (!status) return; if (html) status.innerHTML = text; else status.textContent = text; };
+// Everything wanted, plus anything marked Available (by a Get route or by
+// hand) that has never been confirmed in the library -- a check that
+// finds nothing leaves its status alone, so pressing this again later
+// re-checks the lot, which is how a title that has since arrived is found.
+const targets = data.mediaItems.filter((m) => (m.kind === 'film' || m.kind === 'tv')
+&& (m.status === 'wanted' || (m.status === 'available' && !(m.plexCheck && m.plexCheck.found))));
 if (!targets.length) { say('Nothing wanted to check.'); return; }
 const agent = await import('../homeagent.js');
 try {
 const beat = await agent.agentHeartbeat();
 if (!beat) { say("No agent has checked in — is it running on the NAS?"); return; }
 } catch (err) {
-say(err.message || String(err));
+say(errorHtml(err), true);
 return;
 }
 let found = 0;
@@ -463,7 +542,7 @@ live.plexCheck = { checkedAt: new Date().toISOString(), found: false, ratingKey:
 }
 } catch (err) {
 console.error(`Plex check failed for "${item.title}":`, err);
-say(`Stopped at "${item.title}": ${err.message || err}`);
+say(`Stopped at ${mediaChipHtml(item)}: ${errorHtml(err)}`, true);
 queueSave();
 renderMedia();
 return;
@@ -488,6 +567,10 @@ const agent = await import('../homeagent.js');
 const result = await agent.run('plex.watchlistAdd', { title: item.title, kind: item.kind, year: item.year });
 if (result.added) {
 if (btn) btn.textContent = '✓ On Watchlist';
+// Kept on the record so the tick survives the next render.
+item.watchlistAddedAt = new Date().toISOString();
+queueSave();
+renderMedia();
 } else {
 if (btn) { btn.disabled = false; btn.textContent = '👁 Watchlist'; }
 alert(result.reason || "Couldn't add to the Watchlist.");
@@ -854,7 +937,7 @@ const res = await resolveTvdbId(item);
 renderMedia();
 if (!res.id) { note.textContent = `Saved the link, but ${res.why}.`; return; }
 } catch (err) {
-note.textContent = `Saved the link, but couldn't read the id: ${err.message || err}`;
+note.innerHTML = `Saved the link, but couldn't read the id: ${errorHtml(err)}`;
 return;
 }
 close();
@@ -953,7 +1036,7 @@ ${sessions.sessioned ? `<div class="settings-note" style="margin:0 0 4px;">This 
 <div class="tag-editor" style="margin-bottom:8px;">${sessions.sessions.slice(0, 12).map((s) => `<label class="tag-chip" style="cursor:pointer;">
 <input type="checkbox" data-monitor-session="${escapeHtml(s.session)}"${current.some((c) => c.toLowerCase() === s.session.toLowerCase()) ? ' checked' : ''}> ${escapeHtml(s.session)} <span class="settings-note" style="display:inline;margin:0;">${s.count}</span>
 </label>`).join('')}</div>` : `<div class="settings-note" style="margin:0 0 8px;">Every episode will be monitored${slugRead ? ' — this series puts out one per event' : ", which is right unless it's a sport with practice sessions to skip. Those are filtered from its TheTVDB page, which needs a thetvdb.com link on this item"}.</div>`}
-${tvdbId ? '' : `<div class="settings-note" style="color:var(--amber);margin:0 0 8px;">No TVDB id found, which is what Sonarr looks a series up by${idWhy ? ` — ${escapeHtml(idWhy.replace(/\.$/, ''))}` : ''}. Monitoring can be saved now, but nothing reaches Sonarr until the id is set.
+${tvdbId ? '' : `<div class="settings-note" style="color:var(--amber);margin:0 0 8px;">No TVDB id found, which is what Sonarr looks a series up by${idWhy ? ` — ${settingsLinked(escapeHtml(idWhy.replace(/\.$/, '')))}` : ''}. Monitoring can be saved now, but nothing reaches Sonarr until the id is set.
 <button class="mini-task-btn" type="button" data-monitor-setid style="margin-left:4px;">Set it by hand&hellip;</button></div>`}
 <div class="mail-view-actions">
 <button class="sync-btn sm" type="button" data-monitor-cancel>Not now</button>
@@ -965,7 +1048,7 @@ ${item.monitor && item.monitor.enabledAt ? '<button class="sync-btn sm" type="bu
 if (!dialog.isConnected) return;
 dialog.innerHTML = `<div class="mail-view-card" style="max-width:480px;">
 <div class="mail-view-subject">Couldn't read that series</div>
-<div class="settings-note">${escapeHtml(err.message || String(err))}</div>
+<div class="settings-note">${errorHtml(err)}</div>
 <div class="mail-view-actions"><button class="sync-btn sm" type="button" data-monitor-close>Close</button></div></div>`;
 }
 // Dismissing a dialog that FAILED to load isn't a decision, so it gets
@@ -1125,7 +1208,7 @@ const host = document.getElementById('media-candidates');
 if (!host) return;
 const routes = routesFor(item);
 if (!routes.length) {
-setCaptureStatus(`No routes set for ${KIND_LABEL[item.kind] || item.kind} — add some in Settings.`);
+setCaptureStatus(`No routes set for ${escapeHtml(KIND_LABEL[item.kind] || item.kind)} — add some in ${SETTINGS_ROUTES_LINK}.`, true);
 return;
 }
 host.innerHTML = `<div class="alloc-card">
@@ -1149,16 +1232,49 @@ const message = await runRoute(item, route);
 if (status) status.innerHTML = message;
 } catch (err) {
 console.error('Route failed:', err);
-if (status) status.textContent = `That didn't work: ${err.message || err}`;
+if (status) status.innerHTML = `That didn't work: ${errorHtml(err)}`;
 }
 });
 });
 host.querySelector('[data-route-cancel]').addEventListener('click', () => { host.innerHTML = ''; });
 }
 
-function setCaptureStatus(text) {
+// `html` is for a message that carries a link (a Settings location, a chip
+// back to a record) -- the caller escapes every dynamic part of it.
+function setCaptureStatus(text, html = false) {
 const el = document.getElementById('media-capture-status');
-if (el) el.textContent = text || '';
+if (!el) return;
+if (html) el.innerHTML = text || '';
+else el.textContent = text || '';
+}
+
+const SETTINGS_KEYS_LINK = '<span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#ai-keys">Settings</span>';
+const SETTINGS_ROUTES_LINK = '<span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#media-routes">Settings</span>';
+
+// An error as HTML: the missing-TMDb-key one gets a real link into
+// Settings instead of "Add one in Settings." as plain text.
+function errorHtml(err) {
+if (err instanceof MissingTmdbKeyError) return `No TMDb API key set. Add one in ${SETTINGS_KEYS_LINK}.`;
+return settingsLinked(escapeHtml(err && err.message ? err.message : String(err)));
+}
+
+// An already-escaped message that points at "Settings" in plain words (the
+// home-agent / live-sync errors, the missing TMDb key) with that word made
+// a real link to the place that fixes it.
+function settingsLinked(escaped) {
+if (/sync URL/i.test(escaped)) return escaped.replace(/\bSettings\b/, SYNC_LINK_HTML);
+if (/TMDb API key/i.test(escaped)) return escaped.replace(/\bSettings\b/, SETTINGS_KEYS_LINK);
+return escaped;
+}
+
+// The same real title (or catalogue id) already on the list, if any --
+// typed titles and picked candidates warn with this; the pasted-list flow
+// already used the title half.
+function findDuplicateMediaItem(cand) {
+const t = String(cand.title || '').trim().toLowerCase();
+const tmdb = (cand.externalIds || {}).tmdb;
+return data.mediaItems.find((m) => (m.kind === cand.kind && m.title.trim().toLowerCase() === t)
+|| (tmdb && (m.externalIds || {}).tmdb === tmdb)) || null;
 }
 
 // The disambiguation step. Deliberately a list of real covers rather than
@@ -1169,12 +1285,16 @@ const host = document.getElementById('media-candidates');
 if (!host) return;
 setCaptureStatus(`Which "${typed}"?`);
 host.innerHTML = `<div class="alloc-card">
-${candidates.map((c, i) => `<div class="mail-row" data-media-pick="${i}" style="cursor:pointer;">
+${candidates.map((c, i) => {
+const dup = findDuplicateMediaItem(c);
+return `<div class="mail-row" data-media-pick="${i}" style="cursor:pointer;">
 ${c.imageUrl ? `<img class="media-art" src="${escapeHtml(c.imageUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}
 <span class="task-context">${escapeHtml(KIND_LABEL[c.kind] || c.kind)}</span>
 <span class="mail-subject">${escapeHtml(c.title)}${c.year ? ` (${escapeHtml(c.year)})` : ''}</span>
 ${c.creator ? `<span class="settings-note" style="margin:0;">${escapeHtml(c.creator)}</span>` : ''}
-</div>`).join('')}
+${dup ? `<span class="settings-note" style="margin:0;">already on your list:</span> ${mediaChipHtml(dup)}` : ''}
+</div>`;
+}).join('')}
 <div class="alloc-controls">
 <button class="todo-add-btn" type="button" data-media-pick-none>None of these — add "${escapeHtml(typed)}" as typed</button>
 <button class="del-x" type="button" data-media-pick-cancel>Cancel</button>
@@ -1185,7 +1305,9 @@ img.addEventListener('error', () => { img.style.display = 'none'; });
 });
 const close = () => { host.innerHTML = ''; setCaptureStatus(''); };
 host.querySelectorAll('[data-media-pick]').forEach((row) => {
-row.addEventListener('click', () => {
+row.addEventListener('click', (e) => {
+// The chip to an existing row navigates; it must not also add this one.
+if (e.target.closest('[data-open-media]')) return;
 const c = candidates[Number(row.dataset.mediaPick)];
 addMediaItem({ kind: c.kind, title: c.title, creator: c.creator, year: c.year, link: c.link, externalIds: c.externalIds, imageUrl: c.imageUrl });
 const input = document.getElementById('media-capture-input');
@@ -1210,8 +1332,7 @@ host.querySelector('[data-media-pick-cancel]').addEventListener('click', close);
 // "steer me to where to stream it" half already exists via
 // item.whereToWatch once an item has a TMDb id.
 function isDuplicateMediaItem(cand) {
-const t = cand.title.trim().toLowerCase();
-return data.mediaItems.some((m) => m.kind === cand.kind && m.title.trim().toLowerCase() === t);
+return !!findDuplicateMediaItem(cand);
 }
 
 function renderMediaRecCandidates(items) {
@@ -1257,7 +1378,7 @@ const items = await extractMediaRecommendations(text);
 renderMediaRecCandidates(items);
 } catch (err) {
 console.error('Recommendations extraction failed:', err);
-setCaptureStatus(err.message || String(err));
+setCaptureStatus(errorHtml(err), true);
 }
 }
 
@@ -1272,7 +1393,7 @@ counts[m.kind] = (counts[m.kind] || 0) + 1;
 const chip = (value, label, count) => `<button class="overview-chip${kindFilter === value ? ' active' : ''}" data-media-kind="${escapeHtml(value)}">${escapeHtml(label)}${count === undefined ? '' : ` (${count})`}</button>`;
 el.innerHTML = chip('all', 'All')
 + MEDIA_KINDS.filter((k) => counts[k.kind]).map((k) => chip(k.kind, k.label, counts[k.kind])).join('')
-+ `<button class="overview-chip${showFinished ? ' active' : ''}" data-media-finished="1">Show ${escapeHtml(STATUS_LABEL.done.toLowerCase())}/dropped</button>`;
++ `<button class="overview-chip${showFinished ? ' active' : ''}" data-media-finished="1" title="Watched, read or heard, and dropped">Show finished/dropped</button>`;
 el.querySelectorAll('[data-media-kind]').forEach((b) => {
 b.addEventListener('click', () => { kindFilter = b.dataset.mediaKind; renderMedia(); });
 });
@@ -1346,16 +1467,23 @@ candidates = await searchTitle(kind, title);
 } catch (err) {
 console.error('Title lookup failed, adding it as typed:', err);
 lookupFailed = true;
-setCaptureStatus(err.message || String(err));
+setCaptureStatus(errorHtml(err), true);
 }
 if (!candidates.length) {
+// Looked for before adding, so the warning can name the row that was
+// already there rather than the one just created.
+const already = findDuplicateMediaItem({ kind, title });
 addMediaItem({ kind, title });
 input.value = '';
+const dupNote = already ? ` You already had ${mediaChipHtml(already)} -- this is a second copy.` : '';
 if (!lookupFailed) {
 const needsKey = kind === 'film' || kind === 'tv' || kind === 'other';
 setCaptureStatus(needsKey
-? 'Added as typed. A TMDb key in Settings finds the poster, year and id.'
-: 'Added as typed — nothing matched that title.');
+? `Added as typed. A TMDb key in ${SETTINGS_KEYS_LINK} finds the poster, year and id.${dupNote}`
+: `Added as typed — nothing matched that title.${dupNote}`, true);
+} else if (already) {
+const el = document.getElementById('media-capture-status');
+if (el) el.insertAdjacentHTML('beforeend', dupNote);
 }
 return;
 }

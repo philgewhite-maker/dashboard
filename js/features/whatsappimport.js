@@ -268,7 +268,8 @@ if ((STAGE_RANK['Moved to WhatsApp'] ?? 0) > (STAGE_RANK[conn.stage] ?? 0)) {
 conn.stage = 'Moved to WhatsApp';
 changed = true;
 }
-if (!conn.lastContact && pending.dateRange) conn.lastContact = pending.dateRange[1];
+// Newest message wins over the stored date (see the batch importer below).
+if (pending.dateRange && (!conn.lastContact || pending.dateRange[1] > conn.lastContact)) { conn.lastContact = pending.dateRange[1]; changed = true; }
 
 const status = document.getElementById('whatsapp-status');
 if (status) status.textContent = changed ? `Saved to ${conn.name} (+${Math.max(newCount - oldCount, 0)} lines).` : `Nothing new for ${conn.name}.`;
@@ -420,7 +421,10 @@ const newText = buildChatLogText(row.messages, row.meName);
 const identityRow = upsertIdentity(conn, { platform: 'WhatsApp', handle: row.displayName });
 if (mergeChatLog(identityRow, newText)) changed = true;
 if ((STAGE_RANK['Moved to WhatsApp'] ?? 0) > (STAGE_RANK[conn.stage] ?? 0)) { conn.stage = 'Moved to WhatsApp'; changed = true; }
-if (!conn.lastContact && row.messages.length) conn.lastContact = row.messages[row.messages.length - 1].dateISO;
+if (row.messages.length) {
+const newestMsg = row.messages[row.messages.length - 1].dateISO;
+if (!conn.lastContact || newestMsg > conn.lastContact) { conn.lastContact = newestMsg; changed = true; }
+}
 importedCount++;
 }
 

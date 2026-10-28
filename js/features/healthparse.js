@@ -4,11 +4,11 @@
 // against a real Health Connect payload (see health.js's header comment
 // for how it gets here).
 //
-// Fully rebuilt from scratch on every parse, not incrementally merged into
-// whatever was there before: entries are small in aggregate (health.php
-// caps a GET at 2000) and dedup below is idempotent, so re-deriving the
-// whole thing from the server's current log is simpler and safer than
-// tracking what a previous parse already folded in.
+// Each parse is derived from scratch from the entries it is given (dedup
+// below is idempotent), but health.php only returns the newest 2000, so
+// callers fold the result into the stored days with mergeHealthDaily()
+// rather than replacing them -- otherwise days older than that window
+// would vanish.
 
 // Full Health Connect / Samsung Health activity-type table, supplied
 // directly by the user (not guessed -- this replaces the old single-entry
@@ -297,4 +297,26 @@ result.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)); // newe
 return result;
 }
 
-export { parseHealthPayloads, exerciseTypeLabel, EXERCISE_TYPES, exerciseTypesForHealthConnectId, exerciseTypesForSamsungCode };
+// Folds a fresh parse into the days already stored, instead of replacing
+// them. health.php only ever returns the newest N log entries, so a
+// replace silently drops every day older than that window (and the
+// background refresh asks for fewer entries than the Health tab does,
+// so it could shrink the history further). A day is trusted from the
+// fresh parse only when it is later than the day the OLDEST returned
+// entry arrived: records for a day can only arrive on or after that day,
+// so every entry holding them is inside the window. The window's first
+// day, and anything older, may be only partly covered by the entries,
+// so the stored row wins there. Days the log no longer holds are kept.
+function mergeHealthDaily(existing, parsed, entries) {
+const stored = Array.isArray(existing) ? existing : [];
+const times = (entries || []).map((e) => e && e.receivedAt).filter(Boolean).map((t) => new Date(t).getTime()).filter((t) => !isNaN(t));
+if (!times.length) return stored.length ? stored : parsed;
+const cutoff = localDateOf(new Date(Math.min(...times)).toISOString());
+const byDate = new Map(stored.map((d) => [d.date, d]));
+(parsed || []).forEach((d) => {
+if (d.date > cutoff || !byDate.has(d.date)) byDate.set(d.date, d);
+});
+return [...byDate.values()].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+}
+
+export { mergeHealthDaily, parseHealthPayloads, exerciseTypeLabel, EXERCISE_TYPES, exerciseTypesForHealthConnectId, exerciseTypesForSamsungCode };

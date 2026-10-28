@@ -16,7 +16,7 @@
 // exactly the kind of varied real-world content a hand-rolled regex
 // parser per site would be the wrong, fragile tool for.
 import { data, queueSave, SCHOOL_CALENDAR_SITES } from '../state.js';
-import { escapeHtml, uid, todayStr, dateStrAdd, daysSince, stripHtmlForExtraction } from '../utils.js';
+import { escapeHtml, uid, todayStr, dateStrAdd, daysSince, stripHtmlForExtraction, MISSING_KEY_LINK_HTML } from '../utils.js';
 import { fetchPageHtml } from '../files.js';
 import { canAttemptGoogleAction, hasCalendarWrite } from '../sync/googleauth.js';
 
@@ -245,8 +245,14 @@ const periods = computeNotAtSchoolPeriods({ ...extracted, holidays });
 // it -- but only when nothing in that prior entry was actually pushed
 // to a calendar yet; one with real pushed events stays, since that's a
 // record of something that actually happened, not just a stale guess.
+// An earlier update only stays when it holds a pushed period the new
+// result does NOT repeat (same dates). A pushed period the new result
+// does repeat is carried over as already pushed, with its event id, so
+// pressing Check now after pushing never leaves the same dates twice.
+const sameDates = (a, b) => a.start === b.start && (a.end || '') === (b.end || '');
+const pushedBefore = (data.schoolCalendarUpdates || []).filter((u) => u.siteKey === site.key).flatMap((u) => u.periods.filter((p) => p.pushed));
 data.schoolCalendarUpdates = (data.schoolCalendarUpdates || [])
-.filter((u) => u.siteKey !== site.key || u.periods.some((p) => p.pushed));
+.filter((u) => u.siteKey !== site.key || u.periods.some((p) => p.pushed && !periods.some((n) => sameDates(n, p))));
 data.schoolCalendarUpdates.push({
 id: uid(), siteKey: site.key, label: site.label, url: site.url,
 calendarPrefix: site.calendarPrefix || site.label,
@@ -258,14 +264,22 @@ foundAt: nowIso,
 // output alone (no way to tell an empty extraction from a term span
 // that just didn't produce any additional not-at-school period).
 termRanges: extracted.termRanges,
-periods: periods.map((p) => ({ id: uid(), ...p, pushed: false, googleEventId: '', googleCalendarId: '' })),
+periods: periods.map((p) => {
+const done = pushedBefore.find((o) => sameDates(o, p));
+return { id: uid(), ...p, pushed: !!done, googleEventId: done ? done.googleEventId : '', googleCalendarId: done ? done.googleCalendarId : '' };
+}),
 });
 checks[site.key] = { baselineHash: hash, lastCheckedAt: nowIso, foundYear: year };
 queueSave();
 return { changed: true, firstRun, periods };
 }
 
+// Returns one result per site that was actually checked --
+// {label, state: 'changed' | 'unchanged' | 'failed', periods?, error?,
+// missingKey?} -- so "Check now" can say what really happened instead
+// of a blanket "Done." (the weekly background run ignores the return).
 async function runSchoolCalendarCheck({ force = false } = {}) {
+const results = [];
 for (const site of SCHOOL_CALENDAR_SITES) {
 if (!force && !isDueForSite(site)) continue;
 const { reportCheck } = await import('./sitehealth.js');
@@ -275,12 +289,25 @@ const detail = result.changed
 ? `${result.firstRun ? 'First run' : 'Update found'} -- ${result.periods.length} period(s), see the Family tab.`
 : 'No change.';
 reportCheck(`school-calendar-${site.key}`, true, detail);
+results.push({ label: site.label, state: result.changed ? 'changed' : 'unchanged', periods: result.periods ? result.periods.length : 0 });
 } catch (err) {
 console.error(`School calendar check failed (${site.label}):`, err);
 reportCheck(`school-calendar-${site.key}`, false, err.message || String(err));
+results.push({ label: site.label, state: 'failed', error: err.message || String(err), missingKey: err.name === 'MissingKeyError' });
 }
 }
 renderSchoolCalendar();
+return results;
+}
+
+// One line per checked school, as HTML (a missing key links to Settings).
+function checkSummaryHtml(results) {
+if (!results.length) return 'Nothing to check.';
+return results.map((r) => {
+if (r.state === 'failed') return `${escapeHtml(r.label)}: failed &mdash; ${r.missingKey ? `needs your Anthropic key in ${MISSING_KEY_LINK_HTML}` : escapeHtml(r.error)}`;
+if (r.state === 'changed') return `${escapeHtml(r.label)}: ${r.periods} period${r.periods === 1 ? '' : 's'} found`;
+return `${escapeHtml(r.label)}: no change`;
+}).join(' &middot; ');
 }
 
 // "Check now" is a rare, explicit, human-triggered click, not the
@@ -294,7 +321,7 @@ renderSchoolCalendar();
 // nothing on a manual click, which defeats the entire point of a button
 // whose job is "show me the current state right now").
 async function forceSchoolCalendarCheck() {
-await runSchoolCalendarCheck({ force: true });
+return runSchoolCalendarCheck({ force: true });
 }
 
 // ---- Dashboard rendering (Family tab) ----------------------------------
@@ -304,8 +331,8 @@ return `<div class="sync-row" style="margin:4px 0;flex-wrap:wrap;">
 <span class="settings-note" style="margin:0;min-width:140px;">${escapeHtml(period.label)}</span>
 <span style="font-variant-numeric:tabular-nums;">${escapeHtml(period.start)} &rarr; ${period.end ? escapeHtml(period.end) : 'end TBC'}</span>
 ${period.pushed
-? '<span class="settings-note" style="margin:0;">Pushed &#10003;</span>'
-: `<button class="sync-btn sm inline" type="button" data-school-push="${update.id}:${period.id}">Push</button>`}
+? `<span class="settings-note" style="margin:0;">Pushed &#10003;</span>${period.googleEventId ? `<button class="sync-btn sm inline" type="button" data-school-unpush="${update.id}:${period.id}" title="Delete the event this created in Google Calendar">Remove from calendar</button>` : ''}`
+: `${period.end ? '' : `<input type="date" min="${escapeHtml(period.start)}" data-school-end="${update.id}:${period.id}" title="Set the real last day of the break (once the school publishes it) before pushing, or push as a one-day marker" style="width:auto;">`}<button class="sync-btn sm inline" type="button" data-school-push="${update.id}:${period.id}">Push</button>`}
 </div>`;
 }
 
@@ -326,6 +353,7 @@ return `<div class="cal-row" data-school-update="${update.id}">
 <div class="cal-head">
 <span class="cal-name">${escapeHtml(update.label)}</span>
 <a href="${escapeHtml(update.url)}" target="_blank" rel="noopener" class="settings-note" style="margin:0;">View page</a>
+<button class="sync-btn sm inline" type="button" data-school-dismiss="${update.id}" title="Remove this result from the list (events already pushed stay on your calendar)">Dismiss</button>
 </div>
 ${termRangesLineHtml(update)}
 ${update.periods.map((p) => periodRowHtml(update, p)).join('')}
@@ -345,18 +373,77 @@ const sep = btn.dataset.schoolPush.indexOf(':');
 pushPeriodToCalendar(btn.dataset.schoolPush.slice(0, sep), btn.dataset.schoolPush.slice(sep + 1));
 });
 });
+const findPeriod = (key) => {
+const sep = key.indexOf(':');
+const update = (data.schoolCalendarUpdates || []).find((u) => u.id === key.slice(0, sep));
+const period = update && update.periods.find((p) => p.id === key.slice(sep + 1));
+return { update, period };
+};
+// The open-ended "first day of summer break" marker gets its real last
+// day once the school publishes it; the ", end TBC" in its title goes
+// with it so the pushed event reads as the break it is.
+el.querySelectorAll('[data-school-end]').forEach((input) => {
+input.addEventListener('change', () => {
+const { period } = findPeriod(input.dataset.schoolEnd);
+if (!period || !input.value || input.value < period.start) return;
+period.end = input.value;
+period.label = period.label.replace(/,?\s*end TBC$/i, '');
+queueSave();
+renderSchoolCalendar();
+});
+});
+el.querySelectorAll('[data-school-dismiss]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const update = (data.schoolCalendarUpdates || []).find((u) => u.id === btn.dataset.schoolDismiss);
+if (!update) return;
+const pushed = update.periods.filter((p) => p.pushed).length;
+if (!confirm(`Remove ${update.label}'s result from this list?${pushed ? ` The ${pushed} event${pushed === 1 ? '' : 's'} already pushed stay on your calendar.` : ''} Press Check now to read the page again.`)) return;
+data.schoolCalendarUpdates = data.schoolCalendarUpdates.filter((u) => u.id !== update.id);
+queueSave();
+renderSchoolCalendar();
+});
+});
+el.querySelectorAll('[data-school-unpush]').forEach((btn) => {
+btn.addEventListener('click', async () => {
+const { update, period } = findPeriod(btn.dataset.schoolUnpush);
+if (!update || !period) return;
+const statusEl = document.getElementById('school-calendar-status');
+const say = (html) => { if (statusEl) statusEl.innerHTML = html; };
+if (!confirm(`Delete "${period.label}" (${period.start}) from your Google Calendar?`)) return;
+if (!(await canAttemptGoogleAction())) { say(SIGN_IN_HTML); return; }
+if (!hasCalendarWrite()) { say(WRITE_ON_HTML); return; }
+say('Removing…');
+try {
+const { deleteEvent } = await import('../googlecalendar.js');
+await deleteEvent(period.googleCalendarId || data.prefs.schoolCalendarId, period.googleEventId);
+period.pushed = false;
+period.googleEventId = '';
+period.googleCalendarId = '';
+queueSave();
+renderSchoolCalendar();
+say('Removed from your calendar.');
+} catch (err) {
+say(`Couldn't remove it: ${escapeHtml(err.message || String(err))}`);
 }
+});
+});
+}
+
+// Shared "go and fix it" messages for the Push/Remove buttons -- the
+// places they name are real links, not plain text.
+const SIGN_IN_HTML = 'Sign in to Google first: <span class="inline-goto-link" data-goto-tab="overview" data-goto-target="#google-bar">Google sign-in</span> (top of Overview).';
+const WRITE_ON_HTML = 'Turn on <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#calendar-write-toggle">Allow creating events in Google Calendar</span> in Settings, then sign out and back in.';
 
 async function pushPeriodToCalendar(updateId, periodId) {
 const update = (data.schoolCalendarUpdates || []).find((u) => u.id === updateId);
 const period = update && update.periods.find((p) => p.id === periodId);
 const statusEl = document.getElementById('school-calendar-status');
-const say = (t) => { if (statusEl) statusEl.textContent = t; };
+const say = (html) => { if (statusEl) statusEl.innerHTML = html; };
 if (!update || !period) return;
-if (!(await canAttemptGoogleAction())) { say('Sign in to Google at the top of Overview first.'); return; }
-if (!hasCalendarWrite()) { say('Turn on "Allow creating events in Google Calendar" in Settings, then sign out and back in.'); return; }
+if (!(await canAttemptGoogleAction())) { say(SIGN_IN_HTML); return; }
+if (!hasCalendarWrite()) { say(WRITE_ON_HTML); return; }
 const calendarId = data.prefs.schoolCalendarId || document.getElementById('school-calendar-picker')?.value;
-if (!calendarId) { say('Pick a calendar above first.'); return; }
+if (!calendarId) { say('Pick a <span class="inline-goto-link" data-goto-tab="family" data-goto-target="#school-calendar-picker">calendar</span> to push to first.'); return; }
 say('Pushing…');
 try {
 const { createEvent } = await import('../googlecalendar.js');
@@ -385,7 +472,7 @@ queueSave();
 renderSchoolCalendar();
 say('Pushed.');
 } catch (err) {
-say(`Couldn't push: ${err.message || err}`);
+say(`Couldn't push: ${escapeHtml(err.message || String(err))}`);
 }
 }
 
@@ -397,8 +484,11 @@ try {
 const { listCalendars } = await import('../googlecalendar.js');
 const cals = await listCalendars();
 const previous = data.prefs.schoolCalendarId;
+// A blank first option stays selected until a calendar is really
+// chosen, so what the box shows is always what Push will use.
 select.innerHTML = cals.length
-? cals.map((c) => `<option value="${escapeHtml(c.id)}"${c.id === previous ? ' selected' : ''}>${escapeHtml(c.summary)}</option>`).join('')
+? `<option value=""${cals.some((c) => c.id === previous) ? '' : ' selected'}>Choose a calendar&hellip;</option>`
++ cals.map((c) => `<option value="${escapeHtml(c.id)}"${c.id === previous ? ' selected' : ''}>${escapeHtml(c.summary)}</option>`).join('')
 : '<option value="">No calendars found</option>';
 } catch (err) {
 console.error('Could not load calendars for the school-calendar push:', err);
@@ -414,8 +504,8 @@ const checkBtn = document.getElementById('school-calendar-check-btn');
 if (checkBtn) checkBtn.addEventListener('click', async () => {
 const status = document.getElementById('school-calendar-status');
 if (status) status.textContent = 'Checking…';
-await forceSchoolCalendarCheck();
-if (status) status.textContent = 'Done.';
+const results = await forceSchoolCalendarCheck();
+if (status) status.innerHTML = checkSummaryHtml(results);
 });
 }
 

@@ -21,7 +21,7 @@
 // by the phone's Health Connect bridge, so this only re-parses it) and the
 // Airbnb ICS feeds (fetched through your own ics-proxy.php).
 import { parseIcsReservations } from './icsparse.js';
-import { parseHealthPayloads } from './features/healthparse.js';
+import { parseHealthPayloads, mergeHealthDaily } from './features/healthparse.js';
 
 // Must match js/db.js and js/state.js exactly -- this reads the same
 // stores the app writes. Duplicated rather than imported because db.js is
@@ -92,7 +92,7 @@ headers: { 'X-Sync-Secret': ep.secret },
 });
 if (!res.ok) throw new Error(`health.php returned ${res.status}`);
 const json = await res.json();
-const parsed = parseHealthPayloads(json.entries || []);
+const parsed = mergeHealthDaily(doc.healthDaily, parseHealthPayloads(json.entries || []), json.entries || []);
 const before = JSON.stringify(doc.healthDaily || []);
 doc.healthDaily = parsed;
 return { changed: JSON.stringify(parsed) !== before, days: parsed.length };

@@ -693,10 +693,11 @@ if (data.mailTopics.length === 0) {
 el.innerHTML = '<div class="settings-note" style="margin:0;">No topics yet — every mail search renders on its own, same as before topics existed.</div>';
 return;
 }
-// 'addRule' is deliberately excluded here -- "create a rule" isn't a
-// sensible thing to promote to a topic's own quick-action row; it still
-// shows in every message's "Other actions" regardless (mail.js).
-const actionKeys = Object.keys(MAIL_ACTIONS).filter((k) => k !== 'addRule');
+// 'addRule', 'complex' and 'checkCalendar' are deliberately excluded
+// here -- none is a sensible thing to promote to a topic's own quick-action
+// row; they still show in every message's "Other actions" regardless
+// (mail.js).
+const actionKeys = Object.keys(MAIL_ACTIONS).filter((k) => !['addRule', 'complex', 'checkCalendar'].includes(k));
 el.innerHTML = `<table class="limits-table">
 <thead><tr><th>Topic</th><th>Preferred actions (up to 3)</th><th></th></tr></thead>
 <tbody>${data.mailTopics.map((t) => `<tr>
@@ -771,7 +772,7 @@ ${data.mailTopics.map((t) => `<option value="${t.id}"${t.id === s.topicId ? ' se
 </select></td>
 <td><input type="number" min="0" max="365" data-search-field="maxDays" data-search-id="${s.id}" value="${s.maxDays || ''}" placeholder="any"></td>
 <td><input type="number" min="0" max="50" data-search-field="maxEvents" data-search-id="${s.id}" value="${s.maxEvents || ''}" placeholder="${data.prefs.mailResultCount}"></td>
-<td><span class="del-x" style="opacity:1;" data-del-search="${s.id}">&times;</span></td>
+<td style="white-space:nowrap;"><span class="del-x" style="opacity:1;" data-move-search="up" data-search-id="${s.id}" title="Move up -- an email found by several searches shows under the first one">&uarr;</span> <span class="del-x" style="opacity:1;" data-move-search="down" data-search-id="${s.id}" title="Move down">&darr;</span> <span class="del-x" style="opacity:1;" data-del-search="${s.id}">&times;</span></td>
 </tr>`;
 }).join('')}</tbody>
 </table>
@@ -794,6 +795,16 @@ if (field === 'kind') renderMailSearches();
 queueSave();
 });
 });
+el.querySelectorAll('[data-move-search]').forEach((x) => {
+x.addEventListener('click', () => {
+const i = data.mailSearches.findIndex((s) => s.id === x.dataset.searchId);
+const j = x.dataset.moveSearch === 'up' ? i - 1 : i + 1;
+if (i < 0 || j < 0 || j >= data.mailSearches.length) return;
+[data.mailSearches[i], data.mailSearches[j]] = [data.mailSearches[j], data.mailSearches[i]];
+renderMailSearches();
+queueSave();
+});
+});
 el.querySelectorAll('[data-del-search]').forEach((x) => {
 x.addEventListener('click', () => {
 data.mailSearches = data.mailSearches.filter((s) => s.id !== x.dataset.delSearch);
@@ -813,7 +824,7 @@ function renderMailRules() {
 const el = document.getElementById('mail-rules');
 if (!el) return;
 if (data.mailRules.length === 0) {
-el.innerHTML = '<div class="settings-note" style="margin:0;">No rules yet — create one from a real email via Mail\'s own "⋯ Other actions" → "+ rule".</div>';
+el.innerHTML = '<div class="settings-note" style="margin:0;">No rules yet — create one from a real email in the <span class="inline-goto-link" data-goto-tab="overview" data-goto-target="#mail-panel">Mail panel</span> via "⋯ Other actions" → "+ rule".</div>';
 return;
 }
 const outcomeKeys = Object.keys(CAPTURE_OUTCOMES);
@@ -929,11 +940,12 @@ renderMediaRecPrefs();
 });
 }
 
-// Read-only -- no per-item restore (see the "Mail bin" settings-note: the
-// real email still exists, and a search's own window may have moved past
-// it by now anyway), just a record of what's already been looked at and
-// skipped. "Empty bin" (wired in initSettings) is the only way anything
-// leaves this list.
+// What's been dismissed from Mail. "Put back" removes one entry, and the
+// message shows up again in the Mail list if a search still finds it (a
+// search's own window may have moved past it by now); "Empty bin" (wired
+// in initSettings) removes them all. The subject opens the real message in
+// the app when the dismissal saved its message id -- the Gmail link only
+// ever landed on the inbox, so an older entry without one is plain text.
 function renderMailBin() {
 const el = document.getElementById('mail-bin');
 if (!el) return;
@@ -943,13 +955,34 @@ return;
 }
 const rows = [...data.mailDismissed].sort((a, b) => new Date(b.dismissedAt) - new Date(a.dismissedAt));
 el.innerHTML = `<table class="limits-table">
-<thead><tr><th>Subject</th><th>From</th><th>Dismissed</th></tr></thead>
+<thead><tr><th>Subject</th><th>From</th><th>Dismissed</th><th></th></tr></thead>
 <tbody>${rows.map((d) => `<tr>
-<td><a href="${escapeHtml(d.url)}" target="_blank" rel="noopener">${escapeHtml(d.subject || '(no subject)')}</a></td>
+<td>${d.messageId
+? `<span class="inline-goto-link" role="button" tabindex="0" data-bin-open="${escapeHtml(d.messageId)}" data-bin-subject="${escapeHtml(d.subject || '')}">${escapeHtml(d.subject || '(no subject)')}</span>`
+: escapeHtml(d.subject || '(no subject)')}</td>
 <td>${escapeHtml(d.from || '')}</td>
 <td>${escapeHtml(new Date(d.dismissedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }))}</td>
+<td><button type="button" class="mini-task-btn" data-bin-restore="${escapeHtml(d.url)}" title="Take it out of the bin so it shows in Mail again">Put back</button></td>
 </tr>`).join('')}</tbody>
 </table>`;
+el.querySelectorAll('[data-bin-open]').forEach((x) => {
+const open = async () => {
+const { openMessage } = await import('./mailviewer.js');
+openMessage(x.dataset.binOpen, { subject: x.dataset.binSubject });
+};
+x.addEventListener('click', open);
+x.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
+});
+el.querySelectorAll('[data-bin-restore]').forEach((x) => {
+x.addEventListener('click', async () => {
+data.mailDismissed = data.mailDismissed.filter((d) => d.url !== x.dataset.binRestore);
+renderMailBin();
+queueSave();
+// The Mail list redraws from what it already fetched, so the message
+// reappears straight away if it was in that result.
+(await import('./mail.js')).rerenderMail();
+});
+});
 }
 
 // The URL/secret pair is saved as you type (debounced), but syncing only

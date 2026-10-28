@@ -132,7 +132,7 @@ instructions: document.getElementById('recipe-review-instructions').value.split(
 notes: document.getElementById('recipe-review-notes').value.trim(),
 source,
 photoId: null, photoIds: [], photoAlbums: [], ratings: {}, tags: [],
-createdAt: new Date().toISOString(), lastMade: '',
+createdAt: new Date().toISOString(), lastMade: '', madeDates: [], dietOverrides: {},
 course: '', glutenStatus: '', dairyStatus: '', fodmapLevel: '', servings: null,
 ingredientData: [], ingredientsParsedAt: '', ingredientsSignature: '', variantOf: '',
 };
@@ -204,6 +204,7 @@ urlInput.value = '';
 } catch (err) {
 if (err instanceof MissingKeyError) setStatus(`Add an Anthropic API key in ${MISSING_KEY_LINK_HTML} first.`, true);
 else if (err instanceof NotConfiguredError) setStatus(`Live sync needs to be set up first (${SYNC_LINK_HTML}) before importing from a web page.`, true);
+else if (/\b(401|403|404|429)\b|forbidden|blocked|denied|timed? ?out|timeout|failed to fetch|network/i.test(String(err.message || err))) setStatus(`Couldn't get that page (${escapeHtml(String(err.message || err))}). Some sites refuse automatic reading. Take a screenshot or save the page as a PDF and use the Photo or PDF button above instead.`, true);
 else setStatus(`Couldn't import that: ${err.message || err}`);
 }
 });
@@ -265,14 +266,8 @@ let recipeOverviewChipSort = 'count';
 // and-remember pattern as recipeOverviewCollapsed, one flag for the
 // whole panel rather than per-entry.
 let referencePanelCollapsed = true;
-// Diet-interests panel (see renderDietInterests) -- same collapse-and-
-// remember pattern as the two above.
-let dietInterestsCollapsed = true;
-// Diet-tags thresholds panel (see renderDietTagThresholds) -- same
-// pattern again, lives right below Diet interests.
-let dietTagThresholdsCollapsed = true;
-// Per-recipe, per-ingredient-line "what if" override -- UI-only/in-memory
-// (not persisted, same as the toggle this replaced): recipeId -> Map of
+// Per-recipe, per-ingredient-line "what if" override -- a working Map,
+// saved per recipe as r.dietOverrides (see overridesMap below): recipeId -> Map of
 // ingredientData index -> one of:
 //   { mode: 'sub', subName }   -- use a listed substitute's own reference entry
 //   { mode: 'reduced', qty, basis } -- use LESS of the same ingredient
@@ -299,6 +294,27 @@ let dietTagThresholdsCollapsed = true;
 // cached numbers (computeRecipeDiet) once the relevant reference entry
 // exists; only picking a not-yet-assessed substitute costs a real AI call.
 const lineOverrides = new Map();
+// The choices ARE saved now: each recipe keeps them as r.dietOverrides
+// ({ [lineIndex]: override }), so a reload or a sync refresh no longer
+// loses a swap. The Map above is just the working copy, rebuilt from the
+// recipe the first time a recipe is read and written back (and queued
+// for saving) by saveLineOverrides after every change.
+function overridesMap(recipeId) {
+if (!lineOverrides.has(recipeId)) {
+const rec = data.recipes.find((x) => x.id === recipeId);
+const m = new Map();
+Object.entries((rec && rec.dietOverrides) || {}).forEach(([k, v]) => { const n = Number(k); if (Number.isInteger(n) && v && v.mode) m.set(n, v); });
+lineOverrides.set(recipeId, m);
+}
+return lineOverrides.get(recipeId);
+}
+function saveLineOverrides(recipeId) {
+const rec = data.recipes.find((x) => x.id === recipeId);
+const m = lineOverrides.get(recipeId);
+if (!rec) return;
+rec.dietOverrides = m && m.size ? Object.fromEntries(m) : {};
+queueSave();
+}
 // recipeId -> a short "what's happening" string, shown IN PLACE of the
 // Parse/Analyse link itself (not just the top status bar, which sits far
 // from a card scrolled down the list and is easy to miss entirely --
@@ -673,6 +689,10 @@ const parsed = await parseIngredients(r.ingredients);
 r.ingredientData = parsed;
 r.ingredientsParsedAt = new Date().toISOString();
 r.ingredientsSignature = ingredientsSignatureOf(r.ingredients);
+// The saved swaps point at LINE NUMBERS of the old parse -- a fresh parse
+// can number the lines differently, so they no longer mean anything.
+lineOverrides.delete(r.id);
+r.dietOverrides = {};
 }
 
 // True when an ingredient either has no reference entry at all, or has
@@ -961,7 +981,7 @@ queueSave();
 // (regenerateVariant below) -- there's nothing to regenerate FROM until
 // at least one override exists.
 function describeLineOverrides(r) {
-const overrides = lineOverrides.get(r.id);
+const overrides = overridesMap(r.id);
 if (!overrides || !overrides.size) return [];
 const out = [];
 r.ingredientData.forEach((line, i) => {
@@ -991,10 +1011,9 @@ while (data.recipes.some((x) => x.name === `${base} ${n}`)) n += 1;
 return `${base} ${n}`;
 }
 
-// "Make it like this" -- the one AI call that turns a recipe's session-
-// only "what if" exploration (lineOverrides: substitute/reduce/drop,
-// never persisted -- see the Map's own comment) into something actually
-// cookable. Saved as a NEW recipe (variantOf pointing back at this one)
+// "Make it like this" -- the one AI call that turns a recipe's "what if"
+// exploration (lineOverrides: substitute/reduce/drop, saved per recipe as
+// r.dietOverrides) into something actually cookable. Saved as a NEW recipe (variantOf pointing back at this one)
 // rather than overwriting the original -- the original stays exactly as
 // it was, still cookable as written, and its own diet analysis/overrides
 // are untouched; the variant starts with a completely fresh
@@ -1017,7 +1036,7 @@ ingredients, instructions,
 notes: [r.notes, `Adapted from "${r.name}":`, ...changes.map((c) => `- ${c}`)].filter(Boolean).join('\n'),
 source: { kind: `adapted from "${r.name}"`, url: '', photoId: '', attachment: null },
 photoId: null, photoIds: [], photoAlbums: [], ratings: {}, tags: [...(r.tags || [])],
-createdAt: new Date().toISOString(), lastMade: '',
+createdAt: new Date().toISOString(), lastMade: '', madeDates: [], dietOverrides: {},
 // Course carries over (unrelated to which ingredients changed);
 // the three ingredient-content-specific pickers reset -- copying
 // the OLD recipe's status here would risk claiming something (e.g.
@@ -1044,7 +1063,14 @@ queueSave();
 // added somewhere off-screen. Only once busyIngredientAction is
 // actually cleared and this render has landed, hence AFTER the block
 // above, not inside the try.
-if (newVariantId) setTimeout(() => scrollAndFlash(`[data-recipe-row="${newVariantId}"]`), 0);
+if (newVariantId) {
+setTimeout(() => scrollAndFlash(`[data-recipe-row="${newVariantId}"]`), 0);
+// The new recipe has no parsed ingredients yet (its text changed), so its
+// diet tags would stay blank until someone remembered to press Analyse.
+// Run it straight away; it shows its own busy line and reports a missing
+// key or failure in the status line like any other analyse.
+await analyseIngredients(newVariantId);
+}
 }
 
 const MACRO_FIELDS = ['calories', 'protein', 'carbs', 'sugars', 'fat', 'saturates', 'fibre', 'salt'];
@@ -1282,7 +1308,7 @@ function resolveLineEntry(r, line, i) {
 const originalEntry = findReferenceEntry(line.name, line.form);
 if (!originalEntry) return null;
 let entry = originalEntry;
-const override = (lineOverrides.get(r.id) || new Map()).get(i);
+const override = overridesMap(r.id).get(i);
 const dropped = !!(override && override.mode === 'dropped');
 let subName = '';
 if (override && override.mode === 'sub' && override.subName) {
@@ -1649,7 +1675,7 @@ if (!line.name) return '';
 const resolved = resolveLineEntry(r, line, i);
 if (!resolved) return '';
 const { entry, originalEntry, dropped, portionQty, subName, unitMismatch, unitRatio } = resolved;
-const override = (lineOverrides.get(r.id) || new Map()).get(i);
+const override = overridesMap(r.id).get(i);
 // The ingredient name is the one thing on this line worth finding at a
 // glance while scanning a long list -- everything else here (the used-
 // amount, chips, controls) is detail you read once you've found it, so
@@ -1920,7 +1946,8 @@ const dietTags = recipeDietTagsFromDiet(r, diet);
 const row = (label, key, unit, good) => `<div style="display:flex;gap:10px;font-size:12px;padding:2px 0;"><span style="width:130px;flex-shrink:0;">${escapeHtml(label)}</span><span class="${good ? 'diet-good-value' : ''}">${diet.totals[key].toFixed(1)}${unit}${per ? ` (${(diet.totals[key] / per).toFixed(1)}${unit}/serving)` : ''}</span></div>`;
 return `<div class="full">
 <button class="overview-panel-toggle" type="button" data-recipe-diet-toggle="${r.id}">${expandedDiet.has(r.id) ? '▾ Hide diet analysis' : '▸ Show diet analysis'}</button>
-${expandedDiet.has(r.id) ? `${dietTags.length ? `<div style="margin-top:6px;">${flagListHtml(dietTags, dietTags)}</div>` : ''}
+${expandedDiet.has(r.id) ? `<div class="settings-note" style="margin-top:6px;"><strong>Diet analysis: an AI estimate</strong> from the ingredient reference, not a medical or nutritional check.</div>
+${dietTags.length ? `<div style="margin-top:6px;">${flagListHtml(dietTags, dietTags)}</div>` : ''}
 ${recipeHasStaleReference(r) ? `<div class="settings-note" style="margin-top:6px;">Some ingredients predate dietary-flag checks (kosher/halal/vegetarian/vegan) and/or known unit weights ("medium onion" = how many grams) — <span class="inline-goto-link" data-recipe-analyse="${r.id}">refresh</span> to fill them in.</div>` : ''}
 ${diet.unmatchedLines.length ? `<div class="settings-note" style="margin-top:6px;">Totals below EXCLUDE ${diet.unmatchedLines.length} ingredient${diet.unmatchedLines.length === 1 ? '' : 's'} whose parsed unit doesn't match its reference entry's own basis (never guessed automatically): ${diet.unmatchedLines.map(({ line, entry }) => `${escapeHtml(line.name)} ("${escapeHtml(line.unit)}" vs "${escapeHtml(entry.unitBasis.unit)}")`).join(', ')}. See the ingredient list below to fix the parsed unit, or edit the entry's basis in Ingredient Reference.</div>` : ''}
 ${dietInterestOn('fodmap') ? `<div class="field-block" style="margin-top:6px;">
@@ -1985,9 +2012,9 @@ ${changes.length ? `<div class="field-block full" style="margin-top:6px;">
 </div>`;
 }
 
-// ---- shared ingredient reference panel -- collapsed by default, absent
-// entirely (the whole index.html section hidden, see renderIngredientReference)
-// until the first ingredient is ever analysed ----
+// ---- shared ingredient reference panel -- collapsed by default, and a
+// one-line empty state (see renderIngredientReference) until the first
+// ingredient is ever analysed ----
 let editingReferenceId = null;
 // The entry currently showing its "Merge into…" picker (see
 // ingredientRefRowHtml/mergeIngredientEntries) -- null when none is.
@@ -2080,10 +2107,8 @@ function ingredientRefRowHtml(e) {
 if (editingReferenceId === e.id) return ingredientRefEditHtml(e);
 const unitWeightKeys = Object.keys(e.unitWeights);
 const mergePicker = mergingReferenceId === e.id ? `<div style="margin-top:4px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-<select data-ingredient-ref-merge-target="${e.id}" style="font-size:12px;">
-<option value="">Merge into…</option>
-${[...data.ingredientReference].filter((o) => o.id !== e.id).sort((a, b) => a.name.localeCompare(b.name)).map((o) => `<option value="${o.id}">${escapeHtml(o.name)}${o.form ? ` (${escapeHtml(o.form)})` : ''}</option>`).join('')}
-</select>
+<input type="text" autocomplete="off" list="ref-merge-list-${e.id}" data-ingredient-ref-merge-target="${e.id}" placeholder="Type to find the entry to merge into…" style="font-size:12px;min-width:200px;">
+<datalist id="ref-merge-list-${e.id}">${[...data.ingredientReference].filter((o) => o.id !== e.id).sort((a, b) => a.name.localeCompare(b.name)).map((o) => `<option value="${escapeHtml(o.name)}${o.form ? ` (${escapeHtml(o.form)})` : ''}">`).join('')}</datalist>
 <span class="inline-goto-link" data-ingredient-ref-merge-cancel="1">Cancel</span>
 </div>` : '';
 return `<div class="idea-row" data-ingredient-ref-row="${e.id}">
@@ -2116,14 +2141,10 @@ ${mergePicker}
 function renderDietInterests() {
 const el = document.getElementById('diet-interests-content');
 if (!el) return;
-const toggleHtml = `<button class="overview-panel-toggle" type="button" id="diet-interests-toggle">${dietInterestsCollapsed ? '▸ Show diet interests' : '▾ Hide diet interests'}</button>`;
-el.innerHTML = dietInterestsCollapsed ? toggleHtml
-: `${toggleHtml}<div class="settings-note" style="margin-top:6px;">Which sections show on a recipe's diet analysis -- every ingredient still gets fully assessed and cached regardless, so turning one back on shows what was there all along, no re-checking needed.</div>
+// Lives in Settings now (a Settings item is itself the collapsible), so no
+// show/hide button of its own. One short line; the detail is in the guide.
+el.innerHTML = `<div class="settings-note" style="margin-top:6px;">Which diet sections to show on a recipe. Turning one back on needs no re-checking. <span class="inline-goto-link" data-goto-tab="guide" data-goto-target="#guide-menu-diet">More in the guide</span></div>
 <div class="tag-editor" style="margin-top:6px;">${DIET_INTERESTS.map((d) => `<span class="pick-chip${dietInterestOn(d.key) ? ' active' : ''}" data-diet-interest-toggle="${d.key}">${escapeHtml(d.label)}</span>`).join('')}</div>`;
-document.getElementById('diet-interests-toggle').addEventListener('click', () => {
-dietInterestsCollapsed = !dietInterestsCollapsed;
-renderDietInterests();
-});
 el.querySelectorAll('[data-diet-interest-toggle]').forEach((chip) => {
 chip.addEventListener('click', () => {
 const key = chip.dataset.dietInterestToggle;
@@ -2157,9 +2178,9 @@ const DIET_TAG_THRESHOLD_FIELDS = [
 function renderDietTagThresholds() {
 const el = document.getElementById('diet-tag-thresholds-content');
 if (!el) return;
-const toggleHtml = `<button class="overview-panel-toggle" type="button" id="diet-tag-thresholds-toggle">${dietTagThresholdsCollapsed ? '▸ Show diet tag thresholds' : '▾ Hide diet tag thresholds'}</button>`;
-el.innerHTML = dietTagThresholdsCollapsed ? toggleHtml
-: `${toggleHtml}<div class="settings-note" style="margin-top:6px;">Cutoffs behind the auto-derived Diet tags (High protein/Low calorie/High fibre/High antioxidant) on every recipe -- the three per-serving ones only apply once a recipe has Servings set. Low-GI has no cutoff here -- it reuses the glycemic-load bands already used elsewhere.</div>
+el.innerHTML = `<details class="settings-subgroup panel-about"><summary>About these cutoffs</summary>
+<div class="settings-note" style="margin-top:6px;">Cutoffs behind the auto-derived Diet tags (High protein/Low calorie/High fibre/High antioxidant) on every recipe -- the three per-serving ones only apply once a recipe has Servings set. Low-GI has no cutoff here -- it reuses the glycemic-load bands already used elsewhere.</div>
+</details>
 <div class="tinder-fields tinder-fields-2col" style="margin-top:6px;">
 ${DIET_TAG_THRESHOLD_FIELDS.map((f) => `<label>${escapeHtml(f.label)} <span class="settings-note">${escapeHtml(f.note)}</span>
 <div style="display:flex;align-items:center;gap:6px;">
@@ -2168,10 +2189,6 @@ ${DIET_TAG_THRESHOLD_FIELDS.map((f) => `<label>${escapeHtml(f.label)} <span clas
 </div>
 </label>`).join('')}
 </div>`;
-document.getElementById('diet-tag-thresholds-toggle').addEventListener('click', () => {
-dietTagThresholdsCollapsed = !dietTagThresholdsCollapsed;
-renderDietTagThresholds();
-});
 el.querySelectorAll('[data-diet-tag-threshold]').forEach((input) => {
 input.addEventListener('change', () => {
 const key = input.dataset.dietTagThreshold;
@@ -2192,8 +2209,13 @@ if (!el || !section) return;
 // Absent entirely, not just collapsed, until there's actually something
 // in it -- an empty panel header floating over nothing is exactly the
 // "looks awful when unused" case this whole feature is built to avoid.
-section.hidden = data.ingredientReference.length === 0;
-if (!data.ingredientReference.length) { el.innerHTML = ''; return; }
+// Always shown now, with a one-line empty state, so a link to it (the
+// guide's, a recipe's "Edit in Ingredient Reference") never lands on nothing.
+section.hidden = false;
+if (!data.ingredientReference.length) {
+el.innerHTML = '<div class="settings-note">Empty for now. It fills in by itself the first time a recipe\'s ingredients are analysed: press <strong>Analyse ingredients</strong> on a recipe in <span class="inline-goto-link" data-goto-tab="menu" data-goto-target="#recipe-list-panel">Recipes</span>.</div>';
+return;
+}
 const toggleHtml = `<button class="overview-panel-toggle" type="button" id="ingredient-reference-toggle">${referencePanelCollapsed ? '▸ Show ingredient reference' : '▾ Hide ingredient reference'}</button>`;
 // Merged names -- the alias itself no longer has its own row (it was
 // removed by the merge), so this is the only place it's visible at all
@@ -2239,7 +2261,13 @@ x.addEventListener('click', () => { mergingReferenceId = null; renderIngredientR
 });
 el.querySelectorAll('[data-ingredient-ref-merge-target]').forEach((select) => {
 select.addEventListener('change', () => {
-if (select.value) mergeIngredientEntries(select.dataset.ingredientRefMergeTarget, select.value);
+const typed = select.value.trim().toLowerCase();
+if (!typed) return;
+const sourceId = select.dataset.ingredientRefMergeTarget;
+const label = (o) => `${o.name}${o.form ? ` (${o.form})` : ''}`.toLowerCase();
+const target = data.ingredientReference.find((o) => o.id !== sourceId && label(o) === typed);
+if (!target) { select.setCustomValidity('Pick one of the entries from the list'); select.reportValidity(); select.setCustomValidity(''); return; }
+mergeIngredientEntries(sourceId, target.id);
 });
 });
 el.querySelectorAll('[data-ingredient-ref-del]').forEach((x) => {
@@ -2438,6 +2466,11 @@ ${recipeVariantSourceHtml(r)}
 </div>
 <div class="sync-row full" style="margin-top:8px;">
 <button class="sync-btn" type="button" data-recipe-made="${r.id}">Mark made today</button>
+${madeSummaryHtml(r)}
+<input type="date" min="${todayStr()}" data-recipe-plan-date="${r.id}" title="Day to cook it" style="width:auto;">
+<button class="sync-btn" type="button" data-recipe-plan="${r.id}" title="Puts this recipe on that day of the Planner">Plan this</button>
+<button class="sync-btn" type="button" data-recipe-shop="${r.id}" title="Adds each ingredient line as an item on your Supermarket list">Add ingredients to shopping list</button>
+<span class="settings-note" style="margin:0;" data-recipe-act-msg="${r.id}"></span>
 <span class="del-x" data-recipe-del="${r.id}" title="Delete recipe">&times; Delete</span>
 </div>
 </div>`;
@@ -2469,6 +2502,59 @@ ${r.notes ? `<div class="cook-notes">${escapeHtml(r.notes)}</div>` : ''}
 </div>`;
 }
 
+// ---- the canonical recipe reference (CLAUDE.md record-reference rule) ----
+// Anywhere a recipe is shown away from its own card (the Planner's planned
+// recipe, a shopping task made from one) it leads back here: switch to the
+// Menu tab, clear any search/chips that would hide it, expand its card,
+// scroll and flash it. recipeChipHtml/bindRecipeChips mirror tripChipHtml/
+// bindTripChips (travel.js).
+function revealRecipe(id) {
+import('../tabs.js').then(({ switchTab }) => {
+switchTab('menu');
+recipeFacets = [];
+recipeSearchText = '';
+const box = document.getElementById('recipe-search-input');
+if (box) box.value = '';
+expandedRecipe = id;
+renderRecipes();
+renderRecipeOverview();
+setTimeout(() => scrollAndFlash(`[data-recipe-row="${id}"]`), 60);
+});
+}
+function recipeChipHtml(recipe, extraHtml = '') {
+return `<span class="tag-chip recipe-chip" data-open-recipe="${escapeHtml(recipe.id)}" title="Open this recipe on the Menu tab">&#127858; ${escapeHtml(recipe.name)}</span>${extraHtml}`;
+}
+let recipeChipsBound = false;
+function bindRecipeChips() {
+if (recipeChipsBound) return;
+recipeChipsBound = true;
+document.addEventListener('click', (e) => {
+const chip = e.target.closest('[data-open-recipe]');
+if (chip) revealRecipe(chip.dataset.openRecipe);
+});
+}
+
+// "Made it" keeps every date, not just the latest, so there is a count
+// and an accidental press can be taken back. lastMade stays the newest
+// date (the Made filter, the "worth another go?" pick and the card all
+// read it).
+function markRecipeMade(r) {
+const now = new Date().toISOString();
+if (!Array.isArray(r.madeDates)) r.madeDates = r.lastMade ? [r.lastMade] : [];
+r.madeDates.push(now);
+r.lastMade = now;
+}
+function undoRecipeMade(r) {
+if (!Array.isArray(r.madeDates)) r.madeDates = r.lastMade ? [r.lastMade] : [];
+r.madeDates.pop();
+r.lastMade = r.madeDates[r.madeDates.length - 1] || '';
+}
+function madeSummaryHtml(r) {
+const n = (r.madeDates || []).length;
+if (!n) return '';
+return `<span class="settings-note" style="margin:0;">Made ${n} time${n === 1 ? '' : 's'}, last ${escapeHtml(new Date(r.lastMade).toLocaleDateString('en-GB'))}</span> <span class="inline-goto-link" data-recipe-unmade="${r.id}" title="Removes the most recent 'made' date, for a mis-tap">Undo last</span>`;
+}
+
 function renderCookOverlay() {
 let host = document.getElementById('cook-host');
 if (!host) return;
@@ -2478,7 +2564,7 @@ if (!r) { cookingRecipe = null; host.innerHTML = ''; return; }
 host.innerHTML = cookModeHtml(r);
 document.getElementById('cook-close').addEventListener('click', () => { cookingRecipe = null; renderCookOverlay(); });
 document.getElementById('cook-made-btn').addEventListener('click', () => {
-r.lastMade = new Date().toISOString();
+markRecipeMade(r);
 cookingRecipe = null;
 renderCookOverlay();
 renderRecipes();
@@ -2503,8 +2589,18 @@ const pick = scored[0].r;
 return `<div class="settings-note" style="margin:0 0 10px;">Haven't made <strong>${escapeHtml(pick.name)}</strong> in a while — worth another go? <button class="sync-btn sm" type="button" data-recipe-cook="${pick.id}" style="width:auto;display:inline-block;">Cook it</button></div>`;
 }
 
+// The search box above the list: every word typed must appear somewhere in
+// the recipe's name, ingredient lines or tags, AND the Overview chips still
+// apply (the two combine).
+let recipeSearchText = '';
+function recipeMatchesSearch(r) {
+const words = recipeSearchText.toLowerCase().split(/\s+/).filter(Boolean);
+if (!words.length) return true;
+const hay = [r.name, ...(r.ingredients || []), ...(r.tags || [])].join('\n').toLowerCase();
+return words.every((w) => hay.includes(w));
+}
 function recipesMatchingFilters() {
-return recipesMatchingFacets(recipeDimensions());
+return recipesMatchingFacets(recipeDimensions()).filter(recipeMatchesSearch);
 }
 
 function renderRecipes() {
@@ -2521,7 +2617,7 @@ el.innerHTML = suggestionHtml()
 + (data.recipes.length === 0
 ? '<div class="empty">No recipes yet — import one above.</div>'
 : filtered.length === 0
-? '<div class="empty">Nothing matches this filter.</div>'
+? `<div class="empty">${recipeSearchText.trim() ? `Nothing matches "${escapeHtml(recipeSearchText.trim())}"${recipeFacets.length ? ' with the chips you have picked' : ''}.` : 'Nothing matches this filter.'}</div>`
 : [...filtered].sort((a, b) => a.name.localeCompare(b.name)).map(recipeCardHtml).join(''));
 
 import('../utils.js').then((u) => u.hydratePhotoBackgrounds(el));
@@ -2696,6 +2792,8 @@ el.querySelectorAll('[data-recipe-goto]').forEach((link) => {
 link.addEventListener('click', () => {
 const id = link.dataset.recipeGoto;
 recipeFacets = [];
+recipeSearchText = '';
+{ const box = document.getElementById('recipe-search-input'); if (box) box.value = ''; }
 expandedRecipe = id;
 renderRecipes();
 renderRecipeOverview();
@@ -2754,11 +2852,10 @@ const recipeId = select.dataset.lineRecipe;
 const idx = parseInt(select.dataset.lineOverrideMode, 10);
 const r = data.recipes.find((x) => x.id === recipeId);
 if (!r) return;
-if (!lineOverrides.has(recipeId)) lineOverrides.set(recipeId, new Map());
-const map = lineOverrides.get(recipeId);
+const map = overridesMap(recipeId);
 const val = select.value;
-if (val === 'original') { map.delete(idx); renderRecipes(); return; }
-if (val === 'dropped') { map.set(idx, { mode: 'dropped' }); renderRecipes(); return; }
+if (val === 'original') { map.delete(idx); saveLineOverrides(recipeId); renderRecipes(); return; }
+if (val === 'dropped') { map.set(idx, { mode: 'dropped' }); saveLineOverrides(recipeId); renderRecipes(); return; }
 if (val === 'reduced-line' || val === 'reduced-recipe') {
 const line = r.ingredientData[idx];
 // Resolved (not a raw findReferenceEntry lookup) so this picks up
@@ -2784,6 +2881,7 @@ const suggested = !entry || resolved.unitMismatch ? null
 // using MORE of it.
 const qty = suggested != null ? Math.min(suggested, asWrittenPortion) : asWrittenPortion;
 map.set(idx, { mode: 'reduced', qty: Math.max(0, qty), basis: val === 'reduced-line' ? 'line' : 'recipe' });
+saveLineOverrides(recipeId);
 renderRecipes();
 return;
 }
@@ -2798,6 +2896,7 @@ const sepIdx = rest.indexOf('|');
 const subName = sepIdx >= 0 ? rest.slice(0, sepIdx) : rest;
 const subForm = sepIdx >= 0 ? rest.slice(sepIdx + 1) : '';
 map.set(idx, { mode: 'sub', subName, subForm });
+saveLineOverrides(recipeId);
 // Flipping to a substitute is pure arithmetic over cached figures
 // (computeRecipeDiet) ONLY once the substitute has its OWN reference
 // entry -- the first time a given substitute is picked, nothing has
@@ -2826,6 +2925,7 @@ if (subRecord && substituteEntry) applySubstitutionRatioHint(subRecord, substitu
 if (err instanceof MissingKeyError) setStatus(`Add an Anthropic API key in ${MISSING_KEY_LINK_HTML} first.`, true);
 else setStatus(`Couldn't assess that substitute: ${err.message || err}`);
 map.delete(idx); // revert -- a selection left pointing at an unresolved substitute would look identical to a fixed bug
+saveLineOverrides(recipeId);
 } finally {
 busyIngredientAction.delete(recipeId);
 }
@@ -2840,11 +2940,11 @@ el.querySelectorAll('[data-line-override-qty]').forEach((input) => {
 input.addEventListener('change', () => {
 const recipeId = input.dataset.lineRecipe;
 const idx = parseInt(input.dataset.lineOverrideQty, 10);
-if (!lineOverrides.has(recipeId)) lineOverrides.set(recipeId, new Map());
-const map = lineOverrides.get(recipeId);
+const map = overridesMap(recipeId);
 const v = parseFloat(input.value);
 const prevBasis = (map.get(idx) || {}).basis; // preserve which "less" option is shown selected after a manual tweak
 map.set(idx, { mode: 'reduced', qty: Number.isFinite(v) && v >= 0 ? v : 0, basis: prevBasis });
+saveLineOverrides(recipeId);
 renderRecipes();
 });
 });
@@ -2853,7 +2953,11 @@ star.addEventListener('click', () => {
 const r = data.recipes.find((x) => x.id === star.dataset.recipeRate);
 if (!r) return;
 if (!r.ratings) r.ratings = {};
-r.ratings[star.dataset.recipeRateCat] = parseInt(star.dataset.recipeRateStar, 10);
+// Clicking the star that is already the current rating clears it
+// (back to unrated), so a mis-tap is never permanent.
+const cat = star.dataset.recipeRateCat;
+const n = parseInt(star.dataset.recipeRateStar, 10);
+if (r.ratings[cat] === n) delete r.ratings[cat]; else r.ratings[cat] = n;
 renderRecipes();
 queueSave();
 });
@@ -2862,7 +2966,57 @@ el.querySelectorAll('[data-recipe-made]').forEach((btn) => {
 btn.addEventListener('click', () => {
 const r = data.recipes.find((x) => x.id === btn.dataset.recipeMade);
 if (!r) return;
-r.lastMade = new Date().toISOString();
+markRecipeMade(r);
+renderRecipes();
+renderRecipeOverview();
+queueSave();
+});
+});
+const actMsg = (id, html) => { const m = el.querySelector(`[data-recipe-act-msg="${id}"]`); if (m) m.innerHTML = html; };
+el.querySelectorAll('[data-recipe-plan]').forEach((btn) => {
+btn.addEventListener('click', async () => {
+const id = btn.dataset.recipePlan;
+const dateInput = el.querySelector(`[data-recipe-plan-date="${id}"]`);
+const date = dateInput ? dateInput.value : '';
+if (!date) { actMsg(id, 'Pick a day first.'); return; }
+const { planRecipe } = await import('./planner.js');
+const entry = planRecipe(id, date);
+if (!entry) { actMsg(id, 'That day has passed; pick today or later.'); return; }
+const label = new Date(`${date}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+actMsg(id, `Planned for ${escapeHtml(label)}. <span class="inline-goto-link" data-goto-tab="planner" data-goto-target="[data-planner-entry='${entry.id}']">Show it in the Planner</span>`);
+});
+});
+// Each ingredient line becomes one item on the Supermarket list -- the
+// same list and context captureOutcomes.js's `supermarket` outcome files
+// into, minus its automatic price check (a recipe can have a dozen lines;
+// "Search prices" is still on each item). A line already on the list
+// (open, same wording) is skipped so pressing twice doesn't double up.
+el.querySelectorAll('[data-recipe-shop]').forEach((btn) => {
+btn.addEventListener('click', async () => {
+const id = btn.dataset.recipeShop;
+const r = data.recipes.find((x) => x.id === id);
+if (!r) return;
+if (!r.ingredients.length) { actMsg(id, 'This recipe has no ingredient lines yet.'); return; }
+const { captureTask } = await import('./tasks.js');
+const have = new Set(data.tasks.filter((t) => t.bucket !== 'done' && (t.contexts || []).includes('Supermarket')).map((t) => t.title.trim().toLowerCase()));
+let added = 0;
+let already = 0;
+r.ingredients.forEach((line) => {
+const title = line.trim();
+if (!title) return;
+if (have.has(title.toLowerCase())) { already += 1; return; }
+have.add(title.toLowerCase());
+captureTask({ title, notes: `For ${r.name}`, contexts: ['Supermarket'], source: { kind: 'recipe', label: r.name, recipeId: r.id } });
+added += 1;
+});
+actMsg(id, `${added ? `Added ${added} item${added === 1 ? '' : 's'} to your <span class="inline-goto-link" data-goto-tab="shopping" data-goto-target="#shopping-lists-panel">Supermarket list</span>` : 'Nothing new to add'}${already ? ` (${already} already there)` : ''}.`);
+});
+});
+el.querySelectorAll('[data-recipe-unmade]').forEach((link) => {
+link.addEventListener('click', () => {
+const r = data.recipes.find((x) => x.id === link.dataset.recipeUnmade);
+if (!r) return;
+undoRecipeMade(r);
 renderRecipes();
 renderRecipeOverview();
 queueSave();
@@ -2872,12 +3026,19 @@ el.querySelectorAll('[data-recipe-del]').forEach((x) => {
 x.addEventListener('click', async () => {
 const r = data.recipes.find((rec) => rec.id === x.dataset.recipeDel);
 if (!r) return;
-if (!confirm(`Delete "${r.name}"? This can't be undone.`)) return;
+const src = r.source || {};
+const keptOriginal = src.photoId ? ' The original photo you imported it from is deleted too.' : src.attachment ? ' The original PDF you imported it from is deleted too.' : '';
+const ownPhotos = r.photoIds.length ? ` Its ${r.photoIds.length} photo${r.photoIds.length === 1 ? '' : 's'} go${r.photoIds.length === 1 ? 'es' : ''} too.` : '';
+if (!confirm(`Delete "${r.name}"?${keptOriginal}${ownPhotos} This can't be undone.`)) return;
 for (const pid of r.photoIds) await photoDelete(pid).catch(() => {});
 const source = r.source || {};
 if (source.photoId) await photoDelete(source.photoId).catch(() => {});
 if (source.attachment) await deleteAttachment(source.attachment.id).catch(() => {});
 data.recipes = data.recipes.filter((rec) => rec.id !== r.id);
+// Anything planned for a day from this recipe goes with it.
+const hadPlanned = data.plannerEntries.some((e) => e.kind === 'recipe' && e.recipeId === r.id);
+data.plannerEntries = data.plannerEntries.filter((e) => !(e.kind === 'recipe' && e.recipeId === r.id));
+if (hadPlanned) import('./planner.js').then(({ renderPlanner }) => renderPlanner()).catch(() => {});
 renderRecipes();
 renderRecipeOverview();
 queueSave();
@@ -2890,7 +3051,9 @@ const files = Array.from(e.target.files);
 e.target.value = '';
 if (!r) return;
 const failures = [];
-for (const file of files.slice(0, 6 - r.photoIds.length)) {
+const room = Math.max(0, 6 - r.photoIds.length);
+if (files.length > room) failures.push(`Only ${room} of your ${files.length} photo${files.length === 1 ? '' : 's'} ${room === 1 ? 'was' : 'were'} added (6 per recipe). Remove one first to add more.`);
+for (const file of files.slice(0, room)) {
 try {
 const blob = await resizeImageToBlob(file, 1200, 0.85);
 const id = await storePhoto(blob);
@@ -2960,6 +3123,9 @@ render();
 
 async function initRecipes() {
 initCapture();
+bindRecipeChips();
+const searchInput = document.getElementById('recipe-search-input');
+if (searchInput) searchInput.addEventListener('input', () => { recipeSearchText = searchInput.value; renderRecipes(); });
 initRecipeRatingCategoriesSettings();
 renderReview();
 renderRecipes();
@@ -2970,4 +3136,4 @@ await initRecipeOverviewPrefs();
 renderRecipeOverview();
 }
 
-export { initRecipes, importSharedRecipeUrl };
+export { initRecipes, importSharedRecipeUrl, revealRecipe, recipeChipHtml, bindRecipeChips };

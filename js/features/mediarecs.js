@@ -61,9 +61,12 @@ return data.mediaItems.some((m) => m.title.trim().toLowerCase() === t)
 // the Media-tab one is what's actually visible if you started it from
 // there instead), and whichever one you're looking at should show the
 // same progress.
-function setStatus(text) {
-document.querySelectorAll('[data-media-recs-status]').forEach((el) => { el.textContent = text || ''; });
+// `html` for a message carrying a link into Settings (the caller escapes
+// anything dynamic in it).
+function setStatus(text, html = false) {
+document.querySelectorAll('[data-media-recs-status]').forEach((el) => { if (html) el.innerHTML = text || ''; else el.textContent = text || ''; });
 }
+const SOURCES_LINK = '<span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#media-rec-sources">Settings</span>';
 
 // Feeds the user's own source-pages into Settings' existing Site health
 // table (sitehealth.js) -- the same "does this fetch still work" canary
@@ -314,9 +317,9 @@ return { cand, reason: '' };
 
 async function runMediaRecsCheck({ force = false } = {}) {
 const all = data.mediaRecSources || [];
-if (!all.length) { setStatus('Add a source page below first.'); return; }
+if (!all.length) { setStatus(`Add a source page in ${SOURCES_LINK} first.`, true); return; }
 const sources = all.filter((s) => isSourceDue(s, force));
-if (!sources.length) { setStatus('Nothing due yet -- each source is checked on its own weekly/monthly schedule (Settings).'); return; }
+if (!sources.length) { setStatus(`Nothing due yet -- each source is checked on its own weekly/monthly schedule (${SOURCES_LINK}).`, true); return; }
 const prefs = data.prefs.mediaPreferences || {};
 // Tracked so the final status line can actually answer "is there a cap,
 // or is this genuinely all that qualified" instead of leaving a small
@@ -569,15 +572,41 @@ ${c.reason ? `<div class="settings-note" style="margin:0;">${escapeHtml(c.reason
 </div>`;
 }
 
+let showDismissed = false;
 function renderMediaRecs() {
 const host = document.getElementById('media-recs-list');
 if (!host) return;
 const pending = pendingSorted();
 const count = document.getElementById('media-recs-count');
 if (count) count.textContent = pending.length ? String(pending.length) : '';
-host.innerHTML = pending.length
+// Only ones YOU dismissed are listed (not duplicates dedupeCandidates()
+// tidied away), so a mis-click can be undone.
+const dismissed = (data.mediaRecCandidates || []).filter((c) => c.status === 'dismissed' && c.dismissedAt);
+const dismissedHtml = dismissed.length
+? `<div style="margin-top:8px;"><button class="mini-task-btn" type="button" data-rec-show-dismissed>${showDismissed ? 'Hide' : 'Show'} dismissed (${dismissed.length})</button></div>`
++ (showDismissed ? dismissed.sort((a, b) => String(b.dismissedAt).localeCompare(String(a.dismissedAt))).map((c) => `<div class="mail-row done" data-rec-dismissed-row="${c.id}">
+<span class="task-context">${escapeHtml(KIND_LABEL[c.kind] || c.kind)}</span>
+<span class="mail-subject">${escapeHtml(c.title)}${c.year ? ` (${escapeHtml(c.year)})` : ''}</span>
+<span class="settings-note" style="margin:0;">dismissed ${escapeHtml(String(c.dismissedAt).slice(0, 10))}</span>
+<button class="mini-task-btn" type="button" data-rec-restore="${c.id}" title="Put it back in the list to review">Restore</button>
+</div>`).join('') : '')
+: '';
+host.innerHTML = (pending.length
 ? pending.map(candRowHtml).join('')
-: '<div class="empty">Nothing to review — try "Check now" in Settings, or wait for the monthly check.</div>';
+: '<div class="empty">Nothing to review — press <span class="inline-goto-link" data-goto-tab="media" data-goto-target="#media-recs-checknow-btn">Check recommendations</span> above, or wait for the next scheduled check.</div>') + dismissedHtml;
+host.querySelectorAll('[data-rec-show-dismissed]').forEach((b) => {
+b.addEventListener('click', () => { showDismissed = !showDismissed; renderMediaRecs(); });
+});
+host.querySelectorAll('[data-rec-restore]').forEach((b) => {
+b.addEventListener('click', () => {
+const c = data.mediaRecCandidates.find((cc) => cc.id === b.dataset.recRestore);
+if (!c) return;
+c.status = 'pending';
+c.dismissedAt = '';
+queueSave();
+renderMediaRecs();
+});
+});
 host.querySelectorAll('img.media-art').forEach((img) => { img.addEventListener('error', () => { img.style.display = 'none'; }); });
 
 host.querySelectorAll('[data-rec-add]').forEach((btn) => {
@@ -591,6 +620,7 @@ x.addEventListener('click', () => {
 const c = data.mediaRecCandidates.find((cc) => cc.id === x.dataset.recDismiss);
 if (!c) return;
 c.status = 'dismissed';
+c.dismissedAt = new Date().toISOString();
 queueSave();
 renderMediaRecs();
 });

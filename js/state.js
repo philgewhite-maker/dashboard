@@ -457,13 +457,15 @@ return { id: uid(), label: '', from: '', subject: '', outcome: 'task', createdAt
 // nothing ever looks one up by anything else. subject/from are kept
 // alongside purely so Settings' "Mail bin" list can show something
 // meaningful without re-fetching the message -- the url is what's actually
-// load-bearing. Never deleted by anything except the bin's own "Empty
-// bin" button; dismissing doesn't delete the real email, so there's
-// nothing to restore/undo -- see js/features/mail.js's own dismiss
-// handler for the dedupe-on-insert that keeps this from growing a
-// duplicate entry on every refresh.
+// load-bearing. Only removed by Settings' Mail bin -- a row's "Put back" or
+// "Empty bin"; dismissing doesn't delete the real email -- see
+// js/features/mail.js's own dismiss handler for the dedupe-on-insert that
+// keeps this from growing a duplicate entry on every refresh.
 function blankMailDismissal(fields = {}) {
-return { url: '', subject: '', from: '', dismissedAt: new Date().toISOString(), ...fields };
+// messageId (the Gmail API id) lets the bin open the real message in the
+// app (mailviewer.js) -- `url` only ever lands on the inbox. Blank on a
+// dismissal saved before it existed.
+return { url: '', messageId: '', subject: '', from: '', dismissedAt: new Date().toISOString(), ...fields };
 }
 
 // GTD buckets. `inbox` is deliberately first and unfiled — capture is meant
@@ -697,6 +699,13 @@ externalIds: {},
 // exact route reaches.
 tvdbId: '',
 plexCheck: null, // {checkedAt, found, ratingKey} -- filled by the home agent
+// When it was added to the Plex Watchlist from the row's Watchlist button.
+// Stored so the "On Watchlist" tick survives a re-render and can't invite
+// a second add.
+watchlistAddedAt: '',
+// When the status was last set to done (YYYY-MM-DD) -- shown on the greyed
+// row so "when did I watch / read / hear that" has an answer.
+doneAt: '',
 whereToWatch: null, // {checkedAt, region, flatrate[], rent[], buy[], link} from TMDb
 // Monitoring in Sonarr/Radarr, once you have said yes to it:
 // {service, tvdbId, filter:[session names], askedAt, enabledAt, lastRun}.
@@ -786,6 +795,10 @@ function blankMediaRecCandidate(fields = {}) {
 return {
 id: uid(),
 title: '', kind: 'film', year: '', creator: '', reason: '',
+// Set when YOU dismiss it (the x), as opposed to dedupeCandidates()
+// tidying a duplicate away -- only user dismissals are listed under
+// "Show dismissed" so a pick can be restored.
+dismissedAt: '',
 // When the title is canonicalised to TMDb's own name (e.g. "MobLand
 // Season 2" -> "MobLand"), what the raw extraction said beyond that --
 // "Season 2" -- goes here rather than silently vanishing, so an
@@ -810,7 +823,13 @@ foundAt: new Date().toISOString(),
 // posting's own URL, when "🪄 Resolve title" split one into company+role)
 // has one consistent place to default from.
 function blankJob(fields = {}) {
-return { id: uid(), company: '', role: '', stage: 'Wishlist', link: '', ...fields };
+// `stageAt` is the day the job entered its current stage (stamped by jobs.js
+// when the stage changes) -- the follow-up nudge waits a week from it, and
+// the card shows it. An application saved before it existed starts its
+// clock on the first load after the update (the {...blankJob(), ...j}
+// merge in migrate() fills it). `notes` is a free line for a contact,
+// salary or next step.
+return { id: uid(), company: '', role: '', stage: 'Wishlist', link: '', notes: '', stageAt: todayStr(), ...fields };
 }
 
 // The persisted landing spot for a voice/text capture once parseCaptureIntent
@@ -1446,10 +1465,11 @@ id: uid(),
 date: '', // ISO yyyy-mm-dd -- the day box this sits in (its span's START, once endDate is set)
 endDate: '', // '' means single-day (today's behaviour); set means this entry also covers every day through endDate inclusive -- see planner.js's entryCoversDay
 tripId: '', // '' for the main grid, else the trip this entry belongs to
-kind: 'connection', // 'connection' | 'activity' | 'task'
+kind: 'connection', // 'connection' | 'activity' | 'task' | 'recipe'
 connectionId: '', // set when kind === 'connection'
 activityId: '', // set when kind === 'activity'
 taskId: '', // set when kind === 'task' -- a real data.tasks id, not a copy
+recipeId: '', // set when kind === 'recipe' -- a real data.recipes id (Menu tab "Plan this")
 status: 'draft', // 'draft' | 'firm'
 notes: '',
 calendarPushed: false, // true once pushed -- lets the push UI show what's already gone out
@@ -3285,6 +3305,12 @@ topicId: typeof s.topicId === 'string' ? s.topicId : '',
 // for no visible reason.
 if (!Array.isArray(data.mailTopics)) data.mailTopics = [];
 data.mailTopics = data.mailTopics.map((t) => ({ ...blankMailTopic(), ...t, id: t.id || uid() }));
+// Complex, Check calendar and + rule are always under "Other actions", never a
+// topic's quick buttons (mailActions.js says so); a topic saved when the
+// Settings table still offered them as tick boxes loses them here.
+data.mailTopics.forEach((t) => {
+t.preferredActionIds = (t.preferredActionIds || []).filter((id) => !['complex', 'checkCalendar', 'addRule'].includes(id));
+});
 const mailTopicIds = new Set(data.mailTopics.map((t) => t.id));
 data.mailSearches.forEach((s) => { if (s.topicId && !mailTopicIds.has(s.topicId)) s.topicId = ''; });
 if (!Array.isArray(data.mailRules)) data.mailRules = [];
@@ -3627,6 +3653,12 @@ if (typeof idea.taskId !== 'string') idea.taskId = '';
 // trip entirely, see the orphan guard above), an idea has real content
 // of its own independent of the task, so there's nothing to drop here.
 if (idea.taskId && !taskIds.has(idea.taskId)) idea.taskId = '';
+// The Project made from an idea points back at it (source.ideaId), so its
+// Tasks card can link to the idea. Backfills Projects made before that.
+if (idea.taskId) {
+const made = data.tasks.find((x) => x.id === idea.taskId);
+if (made && made.source && made.source.kind === 'business idea' && !made.source.ideaId) made.source.ideaId = idea.id;
+}
 });
 if (!Array.isArray(data.recipeRatingCategories) || data.recipeRatingCategories.length === 0) {
 data.recipeRatingCategories = DEFAULT_RECIPE_RATING_CATEGORIES.map((c) => ({ ...c }));
@@ -3653,6 +3685,12 @@ if (typeof r.notes !== 'string') r.notes = '';
 if (!r.ratings || typeof r.ratings !== 'object') r.ratings = {};
 if (typeof r.createdAt !== 'string') r.createdAt = '';
 if (typeof r.lastMade !== 'string') r.lastMade = '';
+// Every date it was made (ISO strings, oldest first); lastMade stays the
+// newest. A recipe saved before this had at most one date -- kept as the
+// first entry so the count starts honest rather than at zero.
+if (!Array.isArray(r.madeDates)) r.madeDates = r.lastMade ? [r.lastMade] : [];
+// Saved "what if" swaps for the diet analysis: { [ingredient line index]: override }.
+if (!r.dietOverrides || typeof r.dietOverrides !== 'object' || Array.isArray(r.dietOverrides)) r.dietOverrides = {};
 if (!Array.isArray(r.tags)) r.tags = [];
 // Single-select, own field each -- Course/Gluten/Dairy/FODMAP status,
 // same shape as Connections' own Drinking/Smoking (a scalar, not a tag),
@@ -3683,6 +3721,12 @@ if (typeof r.ingredientsSignature !== 'string') r.ingredientsSignature = '';
 // (see recipeVariantSourceHtml). '' for every ordinary recipe.
 if (typeof r.variantOf !== 'string') r.variantOf = '';
 });
+// A planned-recipe entry whose recipe has since been deleted can never
+// render again, so drop it (same rule as a task entry whose task is gone).
+{
+const recipeIds = new Set(data.recipes.map((r) => r.id));
+data.plannerEntries = data.plannerEntries.filter((e) => e.kind !== 'recipe' || recipeIds.has(e.recipeId));
+}
 if (!Array.isArray(data.ingredientReference)) data.ingredientReference = [];
 // FODMAP moved from a flat low/moderate/high rating per component (old
 // `entry.fodmap`) to real grams of the actual carbohydrate per component

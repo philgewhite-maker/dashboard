@@ -199,6 +199,12 @@ font-size:11px;
 color:var(--muted);
 }
 .idea-notes{font-size:13px;color:var(--ink);white-space:pre-wrap;}
+/* Title and note edited in place (the .idea-row prefix keeps these ahead of
+   the later .voucher-edit rules); a shelved or finished idea is muted. */
+.idea-row .idea-title-edit{font-size:14px;font-weight:600;flex:1 1 200px;min-width:0;}
+.idea-row .idea-notes-edit{display:block;width:calc(100% + 8px);font-size:13px;font-family:'Inter',sans-serif;resize:vertical;}
+.idea-row.idea-closed .idea-title-edit,.idea-row.idea-closed .idea-notes-edit{color:var(--muted);}
+.idea-row .idea-progress{font-size:12px;color:var(--muted);margin-left:6px;}
 .idea-row > .field-block{margin-top:8px;}
 /* Two always-available buttons rather than one -- an idea's own step
    count can't reliably decide Project vs plain task while none of them
@@ -853,7 +859,20 @@ gap:6px;
 display:flex;
 gap:6px;
 margin-top:8px;
+align-items:center;
+flex-wrap:wrap;
 }
+/* The Job hunt panel is full width now, so the stage columns sit side by
+   side instead of stacking. Fields on a card are edited in place; the
+   .job-card prefix keeps these ahead of the later .voucher-edit rules. */
+#jobs-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:4px 16px;align-items:start;}
+.job-card .job-fields{flex:1 1 auto;min-width:0;}
+.job-card .job-co-edit{font-size:13px;font-weight:600;width:calc(100% + 8px);}
+.job-card .job-role-edit{font-size:12px;color:var(--muted);width:calc(100% + 8px);}
+.job-card .job-link-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:2px;}
+.job-card .job-link-edit{font-size:11px;color:var(--muted);flex:1 1 120px;min-width:0;}
+.job-card .job-notes-edit{display:block;margin-top:6px;font-size:12px;color:var(--muted);width:calc(100% + 8px);}
+.job-card .job-since{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--muted);}
 select.mini{
 font-family:'Inter',sans-serif;
 font-size:11px;
@@ -965,6 +984,9 @@ background:none;border:none;cursor:pointer;
 font-size:12px;padding:0 2px;opacity:.7;
 }
 .snooze-btn:hover{opacity:1;}
+.snooze-select{width:auto;cursor:pointer;font-family:inherit;color:var(--muted);}
+.snooze-note{font-size:11px;color:var(--muted);white-space:nowrap;}
+.snooze-clear{background:none;border:none;padding:0 2px;font-size:11px;color:var(--accent,#7a5a8a);cursor:pointer;text-decoration:underline;}
 .reachout-settings{background:var(--paper-alt,#faf8f5);border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-top:6px;}
 .reachout-stage-row{display:flex;align-items:center;gap:8px;padding:3px 0;}
 .reachout-stage-label{flex:1;font-size:12px;}
@@ -2269,6 +2291,9 @@ border-bottom:1px solid var(--line);
 color:var(--ink);
 }
 .health-table tr:last-child td{border-bottom:none;}
+/* A wellness value you can click to correct. */
+.health-table td.wellness-editable{cursor:pointer;}
+.health-table td.wellness-editable:hover{background:var(--card);}
 .health-table .empty{white-space:normal;}
 /* An averaged period row (from the tiered summary view) rather than one
    real day -- italic + slightly muted so it visibly reads as "not a single
@@ -2405,6 +2430,8 @@ gap:6px;
 margin-top:10px;
 }
 .chart-range-row .todo-add-btn{background:var(--teal);}
+.chart-range-row [data-chart-range]{opacity:.6;}
+.chart-range-row [data-chart-range].active{opacity:1;box-shadow:0 0 0 2px var(--ink);}
 .chart-range-row [data-chart-reset-zoom]{background:var(--amber);}
 .capture-row input[type=text]{
 flex:1 1 260px;

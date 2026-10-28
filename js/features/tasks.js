@@ -422,7 +422,7 @@ ${TASK_BUCKETS.map((b) => `<option value="${b.bucket}"${b.bucket === t.bucket ? 
 </div>
 <label class="full">Reference link (OneNote, doc, anything)<input type="text" autocomplete="off" placeholder="https://…" data-task-field="link" data-task-id="${t.id}" value="${escapeHtml(t.link || '')}"></label>
 ${t.link ? `<a class="task-link" href="${escapeHtml(affiliateLink(t.link))}" target="_blank" rel="noopener">Open reference &#8599;</a>` : ''}
-${t.source ? `<div class="task-source">From ${escapeHtml(t.source.kind)}: ${t.source.url ? `<a href="${escapeHtml(affiliateLink(t.source.url))}" target="_blank" rel="noopener">${escapeHtml(t.source.label)}</a>` : escapeHtml(t.source.label)}</div>` : ''}
+${t.source ? `<div class="task-source">From ${escapeHtml(t.source.kind)}: ${t.source.url ? `<a href="${escapeHtml(affiliateLink(t.source.url))}" target="_blank" rel="noopener">${escapeHtml(t.source.label)}</a>` : t.source.ideaId ? `<span class="inline-goto-link" data-goto-tab="business" data-goto-target="[data-idea-row='${escapeHtml(t.source.ideaId)}']" title="Open the idea on the Business tab">${escapeHtml(t.source.label)}</span>` : t.source.recipeId ? `<span class="inline-goto-link" data-goto-tab="menu" data-goto-target="[data-recipe-row='${escapeHtml(t.source.recipeId)}']" title="Open the recipe on the Menu tab">${escapeHtml(t.source.label)}</span>` : escapeHtml(t.source.label)}</div>` : ''}
 ${createdAtHtml(t)}
 <div class="task-photos">${photos}<label class="gallery-add" for="task-photo-${t.id}">+</label>
 <input type="file" id="task-photo-${t.id}" accept="image/*" multiple style="display:none;" data-task-photo-add="${t.id}"></div>
