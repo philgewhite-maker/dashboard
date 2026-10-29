@@ -303,7 +303,7 @@ function offer_v2_normalise(array $o): array {
         'notFromGroups' => array_values(array_filter(array_map('strval', (array) ($sw['notFromGroups'] ?? [])))),
     ];
     $o['eligibility'] = [
-        'heldAccount' => ['since' => nz_date($held['since'] ?? null), 'dateText' => nz_str($held['dateText'] ?? ''), 'ever' => !empty($held['ever']), 'scope' => nz_str($held['scope'] ?? '')],
+        'heldAccount' => ['since' => nz_date($held['since'] ?? null), 'dateText' => nz_str($held['dateText'] ?? ''), 'ever' => !empty($held['ever']), 'scope' => nz_str($held['scope'] ?? ''), 'mode' => in_array($held['mode'] ?? '', ['since', 'on', 'open-by'], true) ? $held['mode'] : 'since'],
         'bonusReceived' => ['since' => nz_date($bonus['since'] ?? null), 'ever' => !empty($bonus['ever']), 'scope' => nz_str($bonus['scope'] ?? '')],
         'otherBankRules' => $other,
         'income' => ['minAnnual' => nz_num($inc['minAnnual'] ?? null), 'basis' => in_array($inc['basis'] ?? '', ['gross', 'net'], true) ? $inc['basis'] : null, 'altRoute' => nz_str($inc['altRoute'] ?? ''), 'altRouteNoSwitch' => !empty($inc['altRouteNoSwitch'])],
@@ -359,6 +359,9 @@ function offer_v2_normalise(array $o): array {
     $o['heldRuleText'] = $h['since'] ? null : ($h['dateText'] ?: null);
     $o['heldOnDate'] = null;
     $o['heldOpenBy'] = null;
+    // A full date can still be an "on that day" or "open by that day" rule, not "held since".
+    if ($h['since'] && $h['mode'] === 'on') { $o['heldOnDate'] = $h['since']; $o['heldSinceCutoff'] = null; }
+    elseif ($h['since'] && $h['mode'] === 'open-by') { $o['heldOpenBy'] = $h['since']; $o['heldSinceCutoff'] = null; }
     if (!$h['since'] && $h['dateText'] !== '') {
         $r = resolve_date_phrase($h['dateText']);
         if ($r) {
