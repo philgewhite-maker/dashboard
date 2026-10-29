@@ -138,6 +138,7 @@ function customPlanHtml(p) {
       <span><b>${money(p.bonus)}</b> switch bonuses</span>
       ${p.cashback ? `<span><b>${money(p.cashback)}</b> cashback sites</span>` : ''}
       ${p.krak ? `<span><b>${money(p.krak)}</b> Krak Salary Match</span>` : ''}
+      ${p.krakSpend ? `<span><b>${money(p.krakSpend)}</b> Krak card cashback</span>` : ''}
       ${p.fairerShare ? `<span><b>${money(p.fairerShare)}</b> Fairer Share (if repeated)</span>` : ''}
       <span><b>${p.openings}</b> accounts opened</span><span><b>${p.switches}</b> switches</span><span><b>${p.repoints}</b> salary moves</span>
     </div></div>`);
@@ -215,7 +216,9 @@ export function renderRecommendations(me) {
   const salary = document.getElementById('profile-salary');
   const balance = document.getElementById('profile-balance');
   const gross = document.getElementById('profile-gross');
+  const spend = document.getElementById('profile-spend');
   const live = getLiveProfile();
+  if (spend) spend.value = live.monthlySpend ?? '';
   if (gross) gross.value = live.annualSalaryGross ?? '';
   if (salary) salary.value = live.annualSalaryNet ?? '';
   if (balance) balance.value = live.assumedBalance ?? '';
@@ -241,7 +244,9 @@ export function initProfileForm(onSaved) {
       const salary = document.getElementById('profile-salary').value;
       const gross = document.getElementById('profile-gross').value;
       const balance = document.getElementById('profile-balance').value;
+      const spend = document.getElementById('profile-spend').value;
       setLiveProfile({
+        monthlySpend: spend === '' ? null : Number(spend),
         annualSalaryNet: salary === '' ? null : Number(salary),
         annualSalaryGross: gross === '' ? null : Number(gross),
         assumedBalance: balance === '' ? null : Number(balance),

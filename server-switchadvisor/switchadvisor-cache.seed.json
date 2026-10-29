@@ -1153,5 +1153,32 @@
             "Nationwide",
             "Virgin Money"
         ]
+    ],
+    "krakCardTiers": [
+        {
+            "name": "Starter",
+            "minBalance": 0,
+            "percent": 0
+        },
+        {
+            "name": "Light",
+            "minBalance": 200,
+            "percent": 0.5
+        },
+        {
+            "name": "Pro",
+            "minBalance": 1000,
+            "percent": 1
+        },
+        {
+            "name": "Elite",
+            "minBalance": 10000,
+            "percent": 1.5
+        },
+        {
+            "name": "Max",
+            "minBalance": 50000,
+            "percent": 2
+        }
     ]
 }

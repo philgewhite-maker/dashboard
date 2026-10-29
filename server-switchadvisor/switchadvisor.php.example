@@ -1169,7 +1169,7 @@ const CASS_DAYS = 10;               // a full switch: 7 working days plus the da
 const PLAN_SAFETY_DAYS = 5;         // margin after a payout before the account is switched on
 const PLAN_MAX_NEW_DONORS = 3;
 const PLAN_MIN_SIDE_QUEST = 50;     // a donor account must add at least this to be offered
-const PLAN_NEW_DONOR_DAYS = 7;      // opening a new donor and setting up its Direct Debits
+const PLAN_NEW_DONOR_DAYS = 30;     // opening a new donor and setting up its Direct Debits: they need about a month to post
 const PLAN_MIN_KRAK_MONTHS = 2;     // a stretch of salary at Krak shorter than this isn't worth two repoints
 
 function plan_date(int $day, string $today): string { return date('Y-m-d', strtotime($today . ' +' . $day . ' days')); }
@@ -1454,6 +1454,7 @@ function plan_build_cards(array $sim, array $ctx, array $cache, array $rows): ar
     usort($events, fn($a, $b) => $a['day'] <=> $b['day']);
     $cards = [];
     $opened = [];
+    $generic = [];
     $holder = [];      // account label -> product, for "has paid out" wording
     foreach ($events as $i => $e) {
         $c = $e['cand'];
@@ -1462,21 +1463,23 @@ function plan_build_cards(array $sim, array $ctx, array $cache, array $rows): ar
         $st = $e['stage'];
         if ($d['kind'] === 'new' && !isset($opened[$d['index']])) {
             $opened[$d['index']] = true;
-            $acts = [];
-            if ($d['product'] !== '') {
+            if ($d['product'] === '') {
+                // Free donors not tied to a cashback deal are opened together, in one card.
+                $generic[] = ['index' => $d['index'], 'dd' => max(2, $c['dd']), 'for' => $o['product'], 'day' => $e['day']];
+            } else {
+                $acts = [];
                 $cb = plan_cashback_action($d['cashbackList'] ?? [], $ctx, $d['product']);
                 if ($cb) $acts[] = $cb;
                 $acts[] = ['text' => sprintf('Open %s (it pays about %s cashback just for opening).', $d['product'], plan_money($d['cashback']))];
-            } else {
-                $acts[] = ['text' => 'Open a free current account with a bank that is in CASS (Monzo, Starling and Chase usually are) — any bank in a different banking group from the account you switch into.'];
+                $acts[] = ['text' => sprintf('Set up %d small Direct Debits on it (a phone, a subscription) — they are what the switch into %s carries across.', max(2, $c['dd']), $o['product'])];
+                $acts[] = ['text' => 'Allow about a month before the first switch: the new Direct Debits take a while to post, and the switch only carries across ones that have.'];
+                $cards[] = [
+                    'kind' => 'open-donor', 'day' => max(0, $e['day'] - PLAN_NEW_DONOR_DAYS), 'dateLabel' => plan_label(max(0, $e['day'] - PLAN_NEW_DONOR_DAYS), $today),
+                    'title' => 'Open ' . $d['product'] . ' as a donor account',
+                    'amount' => $d['cashback'] ?? 0, 'why' => ['A donor account is a free current account you open only to switch away from, so there is something to switch into each bonus account. Opening one adds an application to your credit file, so each is only suggested where it adds at least ' . plan_money(PLAN_MIN_SIDE_QUEST) . '.'],
+                    'actions' => $acts,
+                ];
             }
-            $acts[] = ['text' => sprintf('Set up %d small Direct Debits on it (a phone, a subscription) — they are what the next switch carries across.', max(2, $c['dd']))];
-            $cards[] = [
-                'kind' => 'open-donor', 'day' => max(0, $e['day'] - PLAN_NEW_DONOR_DAYS), 'dateLabel' => plan_label(max(0, $e['day'] - PLAN_NEW_DONOR_DAYS), $today),
-                'title' => $d['product'] !== '' ? 'Open ' . $d['product'] . ' as a donor account' : 'Open free donor account ' . $d['index'],
-                'amount' => $d['cashback'] ?? 0, 'why' => ['A donor account is a free current account you open only to switch away from, so there is something to switch into each bonus account. Opening one adds an application to your credit file, so each is only suggested where it adds at least ' . plan_money(PLAN_MIN_SIDE_QUEST) . '.'],
-                'actions' => $acts,
-            ];
         }
         $actions = [];
         $cb = plan_cashback_action($c['cashbackList'], $ctx, $o['product']);
@@ -1519,11 +1522,49 @@ function plan_build_cards(array $sim, array $ctx, array $cache, array $rows): ar
         ];
         $holder[$e['donor']['label']] = $o['product'];
     }
+    if ($generic) {
+        $n = count($generic);
+        $day0 = max(0, min(array_column($generic, 'day')) - PLAN_NEW_DONOR_DAYS);
+        $acts = [['text' => $n === 1
+            ? 'Open a free current account with a bank that is in CASS — Chase, Monzo and Starling usually are.'
+            : sprintf('Open %d free current accounts in one sitting. Chase is the easiest: it lets you hold more than one current account, so all %d can be there (with Monzo or Starling you would need a different bank for each).', $n, $n)]];
+        foreach (array_values($generic) as $gi => $g) {
+            $acts[] = ['text' => sprintf('%sSet up %d small Direct Debits on it (a phone, a subscription) — they are what the switch into %s carries across.', $n > 1 ? sprintf('Account %d: ', $gi + 1) : '', $g['dd'], $g['for'])];
+        }
+        $acts[] = ['text' => 'Allow about a month before the first switch: the new Direct Debits take a while to post, and the switch only carries across ones that have.'];
+        $cards[] = [
+            'kind' => 'open-donor', 'day' => $day0, 'dateLabel' => plan_label($day0, $today),
+            'title' => $n === 1 ? 'Open a free donor account' : sprintf('Open %d free donor accounts', $n), 'amount' => 0,
+            'why' => ['A donor account is a free current account you open only to switch away from, so there is something to switch into each bonus account. Opening one adds an application to your credit file, so each is only suggested where it adds at least ' . plan_money(PLAN_MIN_SIDE_QUEST) . '.'],
+            'actions' => $acts,
+        ];
+    }
     return $cards;
 }
 
 // Krak Salary Match gets your salary in every whole month the salary-tied
 // offers don't have it.
+// Krak's card cashback follows the same balance tiers as Salary Match but needs no
+// salary at all: it is earned on card spending from the day the average balance is
+// in place. So with spending to put on it, Krak is worth opening NOW, whatever the
+// salary is doing, and the salary step later does not open it again.
+function plan_krak_spend_card(array $ctx, array $cache): ?array {
+    if (empty($ctx['krakSpendMonthly'])) return null;
+    $today = $ctx['today'];
+    $acts = [
+        ['text' => 'Open a Krak account (the Kraken app) and verify it.', 'link' => ['label' => 'Open Krak', 'url' => 'https://support.krak.app/articles/krak-salary-match', 'ref' => 'krak']],
+        ['text' => sprintf('Fund it so your average balance reaches %s (your tier decides the cashback rate: %s%% on card spending at that level). The tier uses your average over the last 30 days, so it builds up over the first month rather than at once.', plan_money($ctx['krakTierMin']), rtrim(rtrim(number_format($ctx['krakSpendPct'], 2), '0'), '.'))],
+        ['text' => sprintf('Order the Krak card and use it for your everyday spending — about %s a month earns about %s a month. Refunds, ATM withdrawals and transfers do not earn.', plan_money($ctx['krakSpendBase']), plan_money($ctx['krakSpendMonthly']))],
+        ['text' => 'Choose whether cashback is paid in pounds or bitcoin (rewards settings in the app). Pounds is the plain choice.'],
+    ];
+    return [
+        'kind' => 'krak', 'day' => 0, 'dateLabel' => plan_label(0, $today),
+        'title' => 'Open Krak now for card cashback', 'amount' => 0, 'amountLabel' => 'about ' . plan_money($ctx['krakSpendMonthly'] * 12) . ' a year',
+        'why' => ['Krak pays cashback on card spending at the same balance tiers as Salary Match, and that needs no salary — so it starts earning as soon as the balance is in place, long before any salary arrives.', 'Your balance has to sit there (an average of ' . plan_money($ctx['krakTierMin']) . ' at this tier), so weigh the cashback against what that money would earn elsewhere.', 'Krak may give new customers a welcome boost to its top tier for a while; its help pages do not say for how long, so this plan does not count it.'],
+        'actions' => $acts, 'krak' => true,
+    ];
+}
+
 function plan_krak_cards(array $sim, array $ctx, array $cache): array {
     $krak = $ctx['krak'];
     if ($krak <= 0 || !$sim['krakSegments']) return [];
@@ -1536,7 +1577,7 @@ function plan_krak_cards(array $sim, array $ctx, array $cache): array {
     foreach ($sim['krakSegments'] as $i => [$a, $b]) {
         $months = intdiv($b - $a, PLAN_MONTH_DAYS);
         $acts = [];
-        if ($i === 0) {
+        if ($i === 0 && empty($ctx['krakSpendMonthly'])) {
             $acts[] = ['text' => 'Open a Krak account (the Kraken app) and verify it.', 'link' => ['label' => 'Open Krak', 'url' => 'https://support.krak.app/articles/krak-salary-match', 'ref' => 'krak']];
         }
         $acts[] = ['text' => sprintf('Ask your employer to pay your salary into Krak by Faster Payments from %s — it has to come straight from an employer (or another third party) and be at least %s a month; a standing order from your own account does not count.', plan_label($a, $today), plan_money((float) ($cache['krakSalaryMin'] ?? 2500)))];
@@ -1704,7 +1745,17 @@ function compute_plan_v2(array $user, array $cache, array $rows, array $rawOptio
     $krak = 0.0;
     foreach ($rows as $r) if (($r['bank'] ?? '') === 'Kraken') $krak = (float) ($r['monthly'] ?? 0);
     $krakBalance = (float) ($user['assumedBalance'] ?? 0) ?: (((float) ($user['annualSalaryNet'] ?? 0)) / 12 * 2);
-
+    // Krak card cashback on everyday spending (independent of salary).
+    $spendBase = (float) ($user['monthlySpend'] ?? 0);
+    $spendPct = 0.0;
+    $spendTierMin = 0.0;
+    $cardTiers = $cache['krakCardTiers'] ?? [];
+    usort($cardTiers, fn($a, $b) => ($a['minBalance'] ?? 0) <=> ($b['minBalance'] ?? 0));
+    foreach ($cardTiers as $t) {
+        if ($krakBalance >= ($t['minBalance'] ?? 0)) { $spendPct = (float) ($t['percent'] ?? 0); $spendTierMin = (float) ($t['minBalance'] ?? 0); }
+    }
+    $krakSpendMonthly = ($spendBase > 0 && $spendPct > 0) ? $spendBase * $spendPct / 100 : 0.0;
+    $krakSpendValue = $krakSpendMonthly * max(0, ($H - PLAN_MONTH_DAYS) / PLAN_MONTH_DAYS); // the average balance takes a month to build
     $byId = [];
     $byProduct = [];
     foreach (($cache['offers'] ?? []) as $o) {
@@ -1833,13 +1884,15 @@ function compute_plan_v2(array $user, array $cache, array $rows, array $rawOptio
     $rerun = function (array $locked) use ($candSets, $existing, $donorSpecs, $krak, $H, $perk, $cfg, $stageKrak) {
         return plan_simulate($candSets[$cfg['setIndex']] ?? $candSets[0], $existing, $donorSpecs, $cfg['n'], $krak, $cfg['order'], $H, $perk, $cfg['hold'], $locked, $stageKrak);
     };
-    $ctx = ['rerun' => $rerun, 'today' => $today, 'main' => $mainLabel, 'krak' => $krak, 'krakBalance' => $krakBalance, 'netMonthly' => !empty($user['annualSalaryNet']) ? (float) $user['annualSalaryNet'] / 12 : null, 'perkVia' => $chosen['perk'] ?? null, 'perkJan' => $perk['jan'] ?? null];
+    $ctx = ['rerun' => $rerun, 'today' => $today, 'main' => $mainLabel, 'krak' => $krak, 'krakBalance' => $krakBalance, 'krakSpendMonthly' => $krakSpendMonthly, 'krakSpendBase' => $spendBase, 'krakSpendPct' => $spendPct, 'krakTierMin' => $spendTierMin, 'netMonthly' => !empty($user['annualSalaryNet']) ? (float) $user['annualSalaryNet'] / 12 : null, 'perkVia' => $chosen['perk'] ?? null, 'perkJan' => $perk['jan'] ?? null];
     if (!$chosen['events'] && !$chosen['krakSegments']) return null;
     // Attach the cashback list of each new donor used.
     foreach ($chosen['events'] as $i => $e) {
         if ($e['donor']['kind'] === 'new' && isset($donorSpecs[$e['donor']['index'] - 1])) $chosen['events'][$i]['donor']['cashbackList'] = $donorSpecs[$e['donor']['index'] - 1]['cashbackList'] ?? [];
     }
     $cards = plan_build_cards($chosen, $ctx, $cache, $rows);
+    $spendCard = plan_krak_spend_card($ctx, $cache);
+    if ($spendCard) $cards[] = $spendCard;
     foreach (plan_krak_cards($chosen, $ctx, $cache) as $k) $cards[] = $k;
 
     // Fairer Share: dated steps for the Nationwide account that is held.
@@ -1860,7 +1913,7 @@ function compute_plan_v2(array $user, array $cache, array $rows, array $rawOptio
 
     $switches = count($chosen['events']);
     $newUsed = $chosen['newUsed'];
-    $krakOpen = ($krak > 0 && $chosen['krakSegments']) ? 1 : 0;
+    $krakOpen = (($krak > 0 && $chosen['krakSegments']) || $krakSpendMonthly > 0) ? 1 : 0;
     $savingsOpen = !empty($chosen['perk']) ? 1 : 0;
     $salaryEvents = count(array_filter($chosen['events'], fn($e) => $e['stage']['months'] > 0));
     $repoints = $salaryEvents + ($krakOpen ? count($chosen['krakSegments']) : 0);
@@ -1871,8 +1924,10 @@ function compute_plan_v2(array $user, array $cache, array $rows, array $rawOptio
 
     $parts = [sprintf('%s from %d switch bonus%s', $money($chosen['bonus']), $switches, $switches === 1 ? '' : 'es')];
     if ($chosen['cashback'] > 0) $parts[] = sprintf('%s from cashback sites', $money($chosen['cashback']));
-    if ($krakOpen) $parts[] = sprintf('%s from Krak Salary Match', $money($chosen['krakValue']));
+    if ($krak > 0 && $chosen['krakSegments']) $parts[] = sprintf('%s from Krak Salary Match', $money($chosen['krakValue']));
+    if ($krakSpendValue > 0) $parts[] = sprintf('%s from Krak card cashback on your spending', $money($krakSpendValue));
     if ($chosen['perkValue'] > 0) $parts[] = sprintf('%s from Nationwide Fairer Share if it is repeated', $money($chosen['perkValue']));
+    $chosen['total'] += $krakSpendValue;
     $headline = sprintf('About %s over %d months: %s — by opening %d new account%s (%d donor%s, %d bonus account%s%s%s) and repointing your salary %d time%s.',
         $money($chosen['total']), $opt['horizonMonths'], implode(', ', $parts), $opens, $opens === 1 ? '' : 's',
         $newUsed, $newUsed === 1 ? '' : 's', $switches, $switches === 1 ? '' : 's', $krakOpen ? ', 1 Krak' : '', $savingsOpen ? ', 1 Nationwide savings' : '',
@@ -1906,7 +1961,7 @@ function compute_plan_v2(array $user, array $cache, array $rows, array $rawOptio
     return [
         'headline' => $headline, 'cards' => $cards, 'quests' => $quests, 'notes' => $notes,
         'endState' => plan_end_state($chosen, $ctx, $cache, $byId),
-        'total' => round($chosen['total']), 'bonus' => round($chosen['bonus']), 'cashback' => round($chosen['cashback']), 'krak' => round($chosen['krakValue']),
+        'total' => round($chosen['total'] + $krakSpendValue), 'bonus' => round($chosen['bonus']), 'cashback' => round($chosen['cashback']), 'krak' => round($chosen['krakValue']), 'krakSpend' => round($krakSpendValue),
         'fairerShare' => round($chosen['perkValue']), 'switches' => $switches, 'newDonors' => $newUsed, 'openings' => $opens, 'repoints' => $repoints,
         'horizonMonths' => $opt['horizonMonths'], 'today' => $today, 'needsIncome' => $needIncome,
     ];
@@ -2340,6 +2395,7 @@ if ($action === 'me') {
     $user['annualSalaryNet'] = $live('annualSalaryNet');
     $user['annualSalaryGross'] = $live('annualSalaryGross');
     $user['assumedBalance'] = $live('assumedBalance');
+    $user['monthlySpend'] = $live('monthlySpend');
     $cache = normalise_cache(read_doc($CACHE_FILE, $EMPTY_CACHE));
     $recommendations = compute_recommendations($user, $cache);
     // The plan options (how far ahead, fewest switches, keep a primary account...)

@@ -610,6 +610,8 @@ $next = [
     'ongoingAccounts' => $ongoingAccounts ?: ($current['ongoingAccounts'] ?? []),
     // Hand-kept yearly payments (e.g. Nationwide Fairer Share): never produced by a scan, so carried over as they are.
     'annualPerks' => !empty($current['annualPerks']) ? $current['annualPerks'] : $DEFAULT_ANNUAL_PERKS,
+    // Krak's card cashback by balance tier (support.krak.app, read 2026-10-29); hand-kept like annualPerks.
+    'krakCardTiers' => !empty($current['krakCardTiers']) ? $current['krakCardTiers'] : [['name' => 'Starter', 'minBalance' => 0, 'percent' => 0], ['name' => 'Light', 'minBalance' => 200, 'percent' => 0.5], ['name' => 'Pro', 'minBalance' => 1000, 'percent' => 1], ['name' => 'Elite', 'minBalance' => 10000, 'percent' => 1.5], ['name' => 'Max', 'minBalance' => 50000, 'percent' => 2]],
     // Kept as-is when this scan found none (a site changed its markup, or
     // its page didn't come back) rather than blanked.
     'cashbackDeals' => $cashbackDeals ?: ($current['cashbackDeals'] ?? []),
