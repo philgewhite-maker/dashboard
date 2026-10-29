@@ -96,7 +96,7 @@ function actionHtml(a) {
   return `<li>${escapeHtml(a.text)}${extra}</li>`;
 }
 
-const KIND_LABEL = { switch: 'Switch', 'open-donor': 'Open', krak: 'Salary', perk: 'Yearly extra' };
+const KIND_LABEL = { switch: 'Switch', 'open-donor': 'Open', krak: 'Salary', perk: 'Yearly extra', bills: 'Bills account' };
 
 function cardHtml(c, n) {
   const facts = [];
@@ -108,7 +108,7 @@ function cardHtml(c, n) {
     <header>
       <span class="plan-n">${n}</span>
       <div class="plan-title"><span class="plan-date">${escapeHtml(c.dateLabel)} · ${escapeHtml(KIND_LABEL[c.kind] || c.kind)}</span><h3>${escapeHtml(c.title)}</h3></div>
-      ${c.amount ? `<span class="plan-amount">${money(c.amount)}</span>` : ''}
+      ${c.amountLabel ? `<span class="plan-amount">${escapeHtml(c.amountLabel)}</span>` : c.amount ? `<span class="plan-amount">${money(c.amount)}</span>` : ''}
     </header>
     ${facts.length ? `<p class="plan-facts muted">${facts.join(' · ')}</p>` : ''}
     <details class="plan-why-box"><summary>Why this move</summary><ul>${(c.why || []).map((w) => `<li>${escapeHtml(w)}</li>`).join('')}</ul></details>

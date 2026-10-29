@@ -193,6 +193,7 @@ dialog::backdrop { background: rgba(0,0,0,0.4); }
 .plan-ref { font-size: 0.82rem; }
 .plan-krak { border-left: 4px solid var(--good); }
 .plan-perk { border-left: 4px solid var(--warn); }
+.plan-bills { border-left: 4px solid var(--accent); }
 .plan-open-donor { border-left: 4px solid var(--muted-text); }
 .plan-end { margin: 14px 0; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--card-bg); }
 .plan-end h3 { margin: 0 0 6px; font-size: 1rem; }
