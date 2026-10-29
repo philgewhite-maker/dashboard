@@ -1240,6 +1240,11 @@ function plan_choose_stage(array $c, int $s, float $krak, int $H): ?array {
 
 function plan_simulate(array $cands, array $existing, array $donorSpecs, int $newCount, float $krak, string $order, int $H, ?array $perk, bool $hold, array $locked = [], ?float $stageKrak = null): array {
     usort($cands, function ($a, $b) use ($order) {
+        if ($order === 'perk') {
+            $pa = is_fairer_share_bank($a['bank']) ? 0 : 1;
+            $pb = is_fairer_share_bank($b['bank']) ? 0 : 1;
+            if ($pa !== $pb) return $pa <=> $pb;
+        }
         if ($order === 'deadline') {
             $da = $a['deadline'] ?? 99999;
             $db = $b['deadline'] ?? 99999;
@@ -1878,15 +1883,29 @@ function compute_plan_v2(array $user, array $cache, array $rows, array $rawOptio
     $stageKrak = $opt['fullBonuses'] ? 0.0 : null;
     $maxNew = (!$opt['allowNew']) ? 0 : ($opt['minimise'] ? ($existing ? 0 : 1) : PLAN_MAX_NEW_DONORS);
     $sims = [];
+    $orders = $perk ? ['amount', 'deadline', 'perk'] : ['amount', 'deadline'];
     for ($n = 0; $n <= $maxNew; $n++) {
-        $bestSim = null;
+        $all = [];
         foreach ($candSets as $si => $set) {
-            foreach (['amount', 'deadline'] as $order) {
+            foreach ($orders as $order) {
                 foreach ($perk ? [false, true] : [false] as $hold) {
-                    $s = plan_simulate($set, $existing, $donorSpecs, $n, $krak, $order, $H, $perk, $hold, [], $stageKrak);
-                    $s['config']['setIndex'] = $si;
-                    if ($bestSim === null || $s['total'] > $bestSim['total']) $bestSim = $s;
+                    $r = plan_simulate($set, $existing, $donorSpecs, $n, $krak, $order, $H, $perk, $hold, [], $stageKrak);
+                    $r['config']['setIndex'] = $si;
+                    $all[] = $r;
                 }
+            }
+        }
+        $top = max(array_column($all, 'total'));
+        // Among plans within £10 of the best, the one that has the Nationwide account open soonest:
+        // Fairer Share's savings account and January-March use are easier with time to spare.
+        $bestSim = null;
+        $bestNw = PHP_INT_MAX;
+        foreach ($all as $r) {
+            if ($r['total'] < $top - 10) continue;
+            $nw = $r['perk'] ? ($r['perk']['via'] === 'existing' ? 0 : (int) $r['perk']['day']) : PHP_INT_MAX - 1;
+            if ($bestSim === null || $r['total'] > $bestSim['total'] + 10 || ($nw < $bestNw && $r['total'] >= $bestSim['total'] - 10)) {
+                $bestSim = $r;
+                $bestNw = $nw;
             }
         }
         $sims[] = $bestSim;
@@ -1922,8 +1941,8 @@ function compute_plan_v2(array $user, array $cache, array $rows, array $rawOptio
         // Regular Saver (6.5% for a year, up to £200 a month) is the usual one and earns its
         // own interest, so it is no dead weight.
         $nwDay = ($chosen['perk']['via'] === 'switch' && $chosen['perk']['day'] !== null) ? $chosen['perk']['day'] + CASS_DAYS + 2 : 0;
-        $saveDay = max($nwDay, max(0, $perk['mar'] - 60));
-        $saveDay = min($saveDay, max(0, $perk['mar'] - 30));
+        // Never before the current account exists, and still inside March at the latest.
+        $saveDay = min(max($nwDay, max(0, $perk['mar'] - 60)), max(0, $perk['mar'] - 2));
         $cards[] = ['kind' => 'perk', 'day' => $saveDay, 'dateLabel' => plan_label($saveDay, $today), 'title' => 'Fairer Share: open a Nationwide savings account', 'amount' => 0,
             'why' => ['Fairer Share needs £100 or more in a Nationwide savings account during March (or a Nationwide mortgage). A savings account can only be opened once the current account exists, so do it as soon as the current account is open rather than leaving it to March.', 'Nationwide is also the account you are holding for the yearly payment anyway; holding it rules out another Nationwide switch bonus until it is closed, so it is the natural place to open its other useful products.'],
             'actions' => [
