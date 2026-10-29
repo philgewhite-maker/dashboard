@@ -320,7 +320,7 @@ if ($quidcoHtml !== '') $cashbackDeals = array_merge($cashbackDeals, parse_quidc
 // carried over from the last good scan rather than dropped.
 
 $OFFER_SCHEMA = <<<'TXT'
-Each offer is ONE JSON object in exactly this shape. Use null (or [] / false) for anything the page does not state — never guess a number. Dates are "YYYY-MM-DD"; where the page gives a date without a year, use the next occurrence of it on or after today's date.
+Each offer is ONE JSON object in exactly this shape. Use null (or [] / false) for anything the page does not state — never guess a number. Dates are "YYYY-MM-DD". For a DEADLINE (a switch must start/complete by, an offer end date) with no year, use the next occurrence of it on or after today's date. This does NOT apply to the eligibility rules below.
 
 {
  "id": "lowercase-hyphenated product name, e.g. 'barclays-premier'",
@@ -344,7 +344,7 @@ Each offer is ONE JSON object in exactly this shape. Use null (or [] / false) fo
     "count": number or null (how many Direct Debits, or how many card payments),
     "amount": number or null (GBP: the salary per month, the deposit, the spend),
     "period": "'once' (a single event), 'each-month' (repeated every month), or 'total' (a one-off amount that may be paid in several parts)",
-    "months": number or null (for 'each-month' items: how many months from the FIRST month, counting it, the requirement must hold for the payment that depends on it to be earned; e.g. salary in the first month plus five more = 6; null if no month count is stated — if you must assume one, set it and set assumed:true),
+    "months": number or null (for 'each-month' items: how many months from the FIRST month, counting it, the requirement must hold for the payment that depends on it to be earned; e.g. salary in the first month plus five more = 6. If the page does not say how many months, it MUST be null — never 1, never a guess),
     "withinDays": number or null (days allowed to meet it),
     "anchor": "'opening' (days counted from opening the account), 'switch-start', or 'switch-complete'",
     "source": "for pay-in/salary: 'employer' when it must be salary/pension/benefit by Bacs from an employer or similar (not your own accounts), 'any' when money from anywhere counts, otherwise null",
@@ -359,7 +359,7 @@ Each offer is ONE JSON object in exactly this shape. Use null (or [] / false) fo
     "requirementIds": ["ids of the requirements this payment depends on"],
     "note": "e.g. '£150 upfront' or '5 x £30'"} ],
  "eligibility": {
-   "heldAccount": {"since": date or null (a dated rule: no account with THIS bank/group held since that date), "dateText": "the date phrase exactly as written when it has no year, e.g. 'on or before 1 Oct', else ''", "ever": true if it is for people who have NEVER had any product/account with the bank, "scope": "which banks the rule covers, e.g. 'HSBC or First Direct'"},
+   "heldAccount": {"since": date or null (only when the page gives a FULL date including the year, e.g. 'since 1 Jan 2023'), "dateText": "when the rule's date has NO year (e.g. 'on or before 1 Oct', 'on 6 May', 'on or after 2 Sep'), the phrase exactly as written, and leave since null — never turn a year-less date into a since date", "ever": true if it is for people who have NEVER had any product/account with the bank, "scope": "which banks the rule covers, e.g. 'HSBC or First Direct'"},
    "bonusReceived": {"since": date or null (no previous switch bonus since this date; if only a year is given use 1 January of it), "ever": true if any previous switch bonus from the bank excludes you, "scope": "..."},
    "otherBankRules": [{"group": "ANOTHER bank group's name", "event": "'opened-account' or 'held-account'", "since": date or null}],
    "income": {"minAnnual": number or null (earnings the offer requires per year), "basis": "'gross' (before tax) or 'net' only if the page says so, else null", "altRoute": "a way to qualify that is not salary, e.g. '£100,000+ saved/invested', else ''", "altRouteNoSwitch": true if that alternative needs no switch}
@@ -372,6 +372,19 @@ Each offer is ONE JSON object in exactly this shape. Use null (or [] / false) fo
 A WORKED EXAMPLE of the format (an invented bank; do not copy its values): "Exampleshire Plus" pays £100 upfront for switching 2+ Direct Debits and paying in £500+ within 30 days of opening, then £20 a month for three months if you also make 5+ card payments each month; the £100 is paid within 14 working days of meeting the conditions and each £20 within 28 days; not for anyone who held an Exampleshire account since 1 Jan 2024.
 {"id":"exampleshire-plus","bank":"Exampleshire","product":"Exampleshire Plus","tier":"standard","serviceRating":60,"jointAllowed":true,"howToOpen":"Open in the app.","conditions":"£100 for switching 2+ Direct Debits and paying in £500+, then £20 a month for three months.","switch":{"required":true,"minDirectDebits":2,"withinDaysOfOpening":null,"startBy":null,"completeBy":null,"notFromGroups":[]},"requirements":[{"id":"dd","type":"direct-debits","count":2,"amount":null,"period":"once","months":null,"withinDays":null,"anchor":"opening","source":null,"mustStayDays":null,"assumed":false,"text":"Switch in 2+ Direct Debits."},{"id":"dep","type":"pay-in","count":null,"amount":500,"period":"total","months":null,"withinDays":30,"anchor":"opening","source":"any","mustStayDays":null,"assumed":false,"text":"Pay in £500+ within 30 days of opening; the page does not say whether it must stay."},{"id":"cards","type":"debit-card-payments","count":5,"amount":null,"period":"each-month","months":4,"withinDays":null,"anchor":"opening","source":null,"mustStayDays":null,"assumed":false,"text":"5+ card payments in each of the three months after the first."}],"payments":[{"amount":100,"count":1,"intervalMonths":null,"anchor":"conditions-met","conditionsWithinDays":30,"paidWithin":{"value":14,"unit":"working days"},"requirementIds":["dd","dep"],"note":"£100 upfront"},{"amount":20,"count":3,"intervalMonths":1,"anchor":"conditions-met","conditionsWithinDays":null,"paidWithin":{"value":28,"unit":"days"},"requirementIds":["cards"],"note":"3 x £20"}],"eligibility":{"heldAccount":{"since":"2024-01-01","dateText":"","ever":false,"scope":"Exampleshire"},"bonusReceived":{"since":null,"ever":false,"scope":""},"otherBankRules":[],"income":{"minAnnual":null,"basis":null,"altRoute":"","altRouteNoSwitch":false}},"fees":{"monthly":null,"waivedBy":""},"perks":[],"ongoing":[]}
 TXT;
+
+// The model sometimes wraps the JSON in a sentence or adds a trailing remark;
+// take the outermost object if the text as a whole doesn't parse.
+function parse_json_loose(string $text): ?array {
+    $text = preg_replace('/^```(json)?|```$/m', '', trim($text)) ?? $text;
+    $j = json_decode(trim($text), true);
+    if (is_array($j)) return $j;
+    $a = strpos($text, '{');
+    $b = strrpos($text, '}');
+    if ($a === false || $b === false || $b <= $a) return null;
+    $j = json_decode(substr($text, $a, $b - $a + 1), true);
+    return is_array($j) ? $j : null;
+}
 
 function slugify_id(string $s): string { return trim(preg_replace('/[^a-z0-9]+/', '-', strtolower($s)), '-'); }
 
@@ -405,9 +418,8 @@ function call_anthropic_multi(string $apiKey, string $model, array $jobs): array
         $parsed = json_decode($response, true);
         $text = '';
         foreach (($parsed['content'] ?? []) as $block) if (($block['type'] ?? '') === 'text') $text .= $block['text'];
-        $text = preg_replace('/^```(json)?|```$/m', '', trim($text)) ?? $text;
-        $json = json_decode(trim($text), true);
-        $out[$key] = is_array($json) ? ['ok' => true, 'data' => $json] : ['ok' => false, 'error' => 'not valid JSON (' . ($parsed['stop_reason'] ?? '?') . ')'];
+        $json = parse_json_loose($text);
+        $out[$key] = $json !== null ? ['ok' => true, 'data' => $json] : ['ok' => false, 'error' => 'not valid JSON (' . ($parsed['stop_reason'] ?? '?') . '), starts: ' . substr(trim($text), 0, 120) . ' ... ends: ' . substr(trim($text), -160)];
     }
     curl_multi_close($mh);
     return $out;
@@ -461,6 +473,31 @@ foreach ($ai as $key => $res) {
         $o['url'] = $MSE_SWITCH_URL;
         $o['amount'] = offer_total_amount($o);
         $offers[$o['id']] = $o;
+    }
+}
+// Any offer named on the page but not structured by the batches: try each once more
+// on its own (small calls, in parallel).
+$missing = [];
+foreach ($names as $n) {
+    $have = false;
+    foreach ($offers as $o) if (strcasecmp($o['product'], (string) $n['product']) === 0) $have = true;
+    if (!$have) $missing[] = $n;
+}
+if ($missing) {
+    $retryJobs = [];
+    foreach ($missing as $i => $n) {
+        $retryJobs["retry{$i}"] = ['maxTokens' => 8000, 'prompt' => "Today's date is {$today}. Below is text from MoneySavingExpert's bank switch-offers page. Extract the full structure for ONLY this one offer: " . ($n['bank'] ?? '') . ' — ' . $n['product'] . ".\n\n{$OFFER_SCHEMA}\n\nPAGE TEXT:\n{$switchText}\n\nReturn ONLY a JSON object {\"offers\": [ one object in the shape above ]}, no other text, no markdown fences."];
+    }
+    foreach (call_anthropic_multi($ANTHROPIC_API_KEY, $ANTHROPIC_MODEL, $retryJobs) as $key => $res) {
+        if (!$res['ok']) { $scanWarnings[] = "{$key}: " . $res['error']; continue; }
+        foreach (($res['data']['offers'] ?? []) as $o) {
+            if (!is_array($o) || !scan_offer_ok($o)) continue;
+            $o['schema'] = 2;
+            $o['id'] = slugify_id((string) ($o['id'] ?? '')) ?: slugify_id((string) $o['product']);
+            $o['url'] = $MSE_SWITCH_URL;
+            $o['amount'] = offer_total_amount($o);
+            $offers[$o['id']] = $o;
+        }
     }
 }
 // An offer the AI named but did not manage to structure this week: keep last week's.
