@@ -170,6 +170,16 @@ function extract_section(string $html, string $anchorId, int $maxChars): string 
     return substr(strip_html_to_text($chunk), 0, $maxChars);
 }
 
+// The text of ONE <h2 id="..."> section of the page, up to the next <h2> --
+// bounded by the page's own structure rather than a character guess, so a
+// section that grows is never silently cut off mid-offer.
+function extract_h2_section(string $html, string $id, int $maxChars): string {
+    if (!preg_match('/<h2[^>]*id=["\']' . preg_quote($id, '/') . '["\']/', $html, $m, PREG_OFFSET_CAPTURE)) return '';
+    $start = $m[0][1];
+    $end = strpos($html, '<h2', $start + 10);
+    return substr(strip_html_to_text(substr($html, $start, ($end === false ? strlen($html) - $start : $end - $start))), 0, $maxChars);
+}
+
 function extract_cass_participants(string $html): array {
     preg_match_all('/accordion__item banks-and-building-societies__accordion-item[^>]*data-value=["\']([^"\']+)["\']/', $html, $m);
     return array_values(array_unique(array_map(fn($v) => html_entity_decode($v, ENT_QUOTES | ENT_HTML5, 'UTF-8'), $m[1] ?? [])));
@@ -233,7 +243,10 @@ if ($mseHtml === '') {
     $why = is_array($mseJob) ? ($mseJob['error'] ?? ($mseJob['result']['pages'][0]['error'] ?? ('job status ' . ($mseJob['status'] ?? 'unknown') . ', no HTML in the result'))) : 'the job never finished in time';
     fail(502, 'Could not fetch the MSE switch-offers page via the home agent — is it running? (' . $why . ') [debug: ' . ($GLOBALS['__last_commands_call_debug'] ?? 'no calls made') . ']');
 }
-$switchText = extract_section($mseHtml, 'switch', 16000);
+$scanWarnings = [];
+$switchText = extract_h2_section($mseHtml, 'switch', 60000);
+if ($switchText === '') $switchText = extract_section($mseHtml, 'switch', 30000);
+$ongoingText = extract_h2_section($mseHtml, 'cashback', 30000);
 
 $cassHtml = rendered_html($pages['cass'] ?? null);
 $cassParticipants = $cassHtml !== '' ? extract_cass_participants($cassHtml) : [];
@@ -297,24 +310,199 @@ if ($tcbHtml !== '') $cashbackDeals = array_merge($cashbackDeals, parse_topcashb
 $quidcoHtml = rendered_html($pages['quidco'] ?? null);
 if ($quidcoHtml !== '') $cashbackDeals = array_merge($cashbackDeals, parse_quidco_deals(html_to_tokens($quidcoHtml)));
 
-$prompt = "Today's date is " . date('Y-m-d') . ". Below is text pasted from MoneySavingExpert's bank switch-offers page. Extract every current switch bonus for opening a NEW account (ignore the 'ongoing cashback & perks for accounts you keep' section if present).\n\nPAGE TEXT:\n{$switchText}\n\nReturn ONLY a JSON object, no other text, no markdown fences:\n{\"offers\": [{\"bank\": \"short display name, e.g. 'Barclays' or 'HSBC'\", \"product\": \"the account's own name, e.g. 'Barclays Bank Account' or 'HSBC Premier'\", \"amount\": numeric total cash value in GBP, \"conditions\": \"one or two sentences summarising the real requirements\", \"minFunding\": numeric minimum pay-in/deposit in GBP or null, \"ddCount\": minimum direct debits required or null, \"heldSinceCutoff\": \"YYYY-MM-DD for a dated 'no ACCOUNT HELD since <date>' rule about holding an account with THIS offer's OWN bank, otherwise null. A rule about a DIFFERENT bank (e.g. First Direct's 'not opened a HSBC current account since 1 Jan 2018') is NOT this field — leave it null\", \"bonusSinceCutoff\": \"YYYY-MM-DD for a dated 'no previous SWITCH BONUS since <date>' rule (about having RECEIVED a bonus before, a DIFFERENT condition from account-holding — e.g. Lloyds' 'no previous switch bonus from Lloyds... since 1 Jan 2023'). If only a YEAR is given ('no Nationwide switch bonus since 2021') use that year's 1 January (2021-01-01) rather than leaving it empty. Null only when the exclusion is unconditional ('no previous bonus', no date at all). Never invent a day or year that is not stated, and never confuse this with heldSinceCutoff: an account-holding cutoff and a bonus-receipt cutoff are different even when they share a date\", \"heldRuleText\": \"the date phrase, exactly as the offer words it, when it excludes people by holding an account on/before/after a date but gives NO full date with a year (e.g. 'on or before 1 Oct', 'on 6 May', 'on or after 2 Sep'), otherwise null — leave null whenever heldSinceCutoff already carries the date\", \"minMonthlySalary\": numeric GBP of SALARY or earnings that must be PAID INTO THE ACCOUNT EACH MONTH as a condition of getting the bonus itself (e.g. 'monthly salary payments of £2,000+', 'monthly salary of £5,000+'), otherwise null — never a one-off deposit, never an amount that only avoids a monthly fee, \"minAnnualEarnings\": numeric GBP yearly earnings the offer states as an eligibility requirement (e.g. 'Earn £75,000+ a year'), otherwise null, \"incomeAltRoute\": a short phrase for any way to qualify that does NOT depend on salary (e.g. '£100,000+ saved/invested', or 'large savings held with the bank' when the offer's salary threshold has a savings alternative), otherwise null, \"requiresSwitch\": true unless the offer's own text states a genuine no-switch alternative (e.g. 'OR have £100k+ saved/invested, no switch needed') — true for almost all of these, since they are switch bonuses by definition, \"highEarner\": true if this specifically needs a high salary/savings tier (e.g. a Premier account), else false, \"payInType\": \"salary\" if the bonus needs actual SALARY (wages/earnings, e.g. 'salary of £2,000+ a month', 'earning £100,000+ paid in') paid into the account, \"deposit\" if it only needs money paid in (any source, e.g. 'pay in £1,000'), null if there is no pay-in requirement, \"salaryMonths\": for payInType salary, the number of months salary must keep arriving to earn the FULL bonus as the offer states it (first month plus any staged months, e.g. 6 for '£150 then 5 x £30'); if the offer gives no month count use 3 and say so in payInNote, otherwise null, \"salaryFirstMonthAmount\": for a staged salary bonus, the GBP paid after the first month only (e.g. 150), otherwise null, \"lastSwitchDate\": \"YYYY-MM-DD, the last day the offer says a switch can start or complete by, when it states an end date (e.g. 'switch must start by 9 Dec'); when the offer gives no year, use the next occurrence of that date on or after today's date, otherwise null\", \"payInNote\": \"one or two plain sentences on what counts toward the pay-in (employer, pension, own-account transfers, split payments), whether the money has to stay, and anything the offer does not say — never guess, say 'not stated' instead\"}]}";
+// ---- Reading the offers into a structured shape (schema 2) ---------------------
+// Three kinds of call, all through the same helper:
+//   1. a short one that lists the offers on the page and the banking groups;
+//   2. several in parallel, each extracting the full structure for a few named
+//      offers (a narrow task, so each is read closely, and none runs long);
+//   3. one for the "ongoing cashback & perks" accounts you can keep.
+// Whatever comes back is validated; an offer that cannot be read this week is
+// carried over from the last good scan rather than dropped.
 
-$ai = call_anthropic($ANTHROPIC_API_KEY, $ANTHROPIC_MODEL, $prompt, 16000);
-if (!$ai['ok']) fail(502, 'AI extraction failed: ' . $ai['error']);
-$offers = array_values(array_filter($ai['data']['offers'] ?? [], fn($o) => !empty($o['bank']) && !empty($o['amount'])));
-foreach ($offers as &$o) {
-    $o['url'] = $MSE_SWITCH_URL;
-    // An offer deadline already in the past is a year-less date read in the wrong year; roll it forward to the next occurrence.
-    if (!empty($o['lastSwitchDate']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $o['lastSwitchDate'])) {
-        while ($o['lastSwitchDate'] < date('Y-m-d', strtotime('-10 days'))) {
-            $o['lastSwitchDate'] = date('Y-m-d', strtotime($o['lastSwitchDate'] . ' +1 year'));
+$OFFER_SCHEMA = <<<'TXT'
+Each offer is ONE JSON object in exactly this shape. Use null (or [] / false) for anything the page does not state — never guess a number. Dates are "YYYY-MM-DD"; where the page gives a date without a year, use the next occurrence of it on or after today's date.
+
+{
+ "id": "lowercase-hyphenated product name, e.g. 'barclays-premier'",
+ "bank": "short bank name, e.g. 'Barclays'",
+ "product": "the account's own name, e.g. 'Barclays Premier'",
+ "tier": "'standard', or 'high-earner' when it is one of the premier-style accounts aimed at high salaries or large savings",
+ "serviceRating": number or null (the '% great' figure),
+ "jointAllowed": true / false / null,
+ "howToOpen": "one short sentence: app / online / branch, sole or joint",
+ "conditions": "two sentences at most summarising what you have to do and who is excluded",
+ "switch": {
+   "required": true unless the page states a genuine no-switch route (then still true for the switch route),
+   "minDirectDebits": number or null (Direct Debits/standing orders that must be switched in),
+   "withinDaysOfOpening": number or null (days after opening within which the switch must be done),
+   "startBy": date or null (the switch must START by), "completeBy": date or null (must COMPLETE by),
+   "notFromGroups": ["names of banks/groups you must not switch FROM, e.g. 'Halifax', 'Bank of Scotland'"]
+ },
+ "requirements": [ one entry per thing you must do, each with its own numbers:
+   {"id": "short unique id like 'dd','sal1','dep','cards','login'",
+    "type": "direct-debits | salary | pay-in | debit-card-payments | card-spend | app-login | min-balance | keep-open | other",
+    "count": number or null (how many Direct Debits, or how many card payments),
+    "amount": number or null (GBP: the salary per month, the deposit, the spend),
+    "period": "'once' (a single event), 'each-month' (repeated every month), or 'total' (a one-off amount that may be paid in several parts)",
+    "months": number or null (for 'each-month' items: how many months from the FIRST month, counting it, the requirement must hold for the payment that depends on it to be earned; e.g. salary in the first month plus five more = 6; null if no month count is stated — if you must assume one, set it and set assumed:true),
+    "withinDays": number or null (days allowed to meet it),
+    "anchor": "'opening' (days counted from opening the account), 'switch-start', or 'switch-complete'",
+    "source": "for pay-in/salary: 'employer' when it must be salary/pension/benefit by Bacs from an employer or similar (not your own accounts), 'any' when money from anywhere counts, otherwise null",
+    "mustStayDays": number or null (how long a deposit must remain; 24 hours = 1),
+    "assumed": true only if you filled a number the page did not state,
+    "text": "one plain sentence on exactly what counts, including what the page does NOT say (e.g. 'The page does not say whether transfers from your own accounts count')"} ],
+ "payments": [ one entry per distinct payment; a monthly instalment series is ONE entry with count and intervalMonths:
+   {"amount": number (each instalment), "count": number (instalments, default 1), "intervalMonths": 1 for monthly or null,
+    "anchor": "'conditions-met' (paid a while after you meet the conditions — the usual case), 'switch-start' (paid within N days of the switch STARTING whatever else you do), or 'switch-complete'",
+    "conditionsWithinDays": number or null (days you have to meet this payment's conditions),
+    "paidWithin": {"value": number, "unit": "'working days', 'days', or 'day-of-following-month' (e.g. 'paid by the 20th of the following month' = value 20)"},
+    "requirementIds": ["ids of the requirements this payment depends on"],
+    "note": "e.g. '£150 upfront' or '5 x £30'"} ],
+ "eligibility": {
+   "heldAccount": {"since": date or null (a dated rule: no account with THIS bank/group held since that date), "dateText": "the date phrase exactly as written when it has no year, e.g. 'on or before 1 Oct', else ''", "ever": true if it is for people who have NEVER had any product/account with the bank, "scope": "which banks the rule covers, e.g. 'HSBC or First Direct'"},
+   "bonusReceived": {"since": date or null (no previous switch bonus since this date; if only a year is given use 1 January of it), "ever": true if any previous switch bonus from the bank excludes you, "scope": "..."},
+   "otherBankRules": [{"group": "ANOTHER bank group's name", "event": "'opened-account' or 'held-account'", "since": date or null}],
+   "income": {"minAnnual": number or null (earnings the offer requires per year), "basis": "'gross' (before tax) or 'net' only if the page says so, else null", "altRoute": "a way to qualify that is not salary, e.g. '£100,000+ saved/invested', else ''", "altRouteNoSwitch": true if that alternative needs no switch}
+ },
+ "fees": {"monthly": number or null, "waivedBy": "what waives it, else ''"},
+ "perks": [{"name": "what you get, e.g. 'Apple TV included'", "annualValue": number or null (only when the page states or clearly implies a yearly value), "needs": "what it requires"}],
+ "ongoing": [{"kind": "'cashback', 'interest', 'saver' or 'perk'", "name": "...", "annualValue": number or null (NET of the account's own fee, only if stated or clearly computable from the page), "needs": "what you must do to get it"}]
+}
+
+A WORKED EXAMPLE of the format (an invented bank; do not copy its values): "Exampleshire Plus" pays £100 upfront for switching 2+ Direct Debits and paying in £500+ within 30 days of opening, then £20 a month for three months if you also make 5+ card payments each month; the £100 is paid within 14 working days of meeting the conditions and each £20 within 28 days; not for anyone who held an Exampleshire account since 1 Jan 2024.
+{"id":"exampleshire-plus","bank":"Exampleshire","product":"Exampleshire Plus","tier":"standard","serviceRating":60,"jointAllowed":true,"howToOpen":"Open in the app.","conditions":"£100 for switching 2+ Direct Debits and paying in £500+, then £20 a month for three months.","switch":{"required":true,"minDirectDebits":2,"withinDaysOfOpening":null,"startBy":null,"completeBy":null,"notFromGroups":[]},"requirements":[{"id":"dd","type":"direct-debits","count":2,"amount":null,"period":"once","months":null,"withinDays":null,"anchor":"opening","source":null,"mustStayDays":null,"assumed":false,"text":"Switch in 2+ Direct Debits."},{"id":"dep","type":"pay-in","count":null,"amount":500,"period":"total","months":null,"withinDays":30,"anchor":"opening","source":"any","mustStayDays":null,"assumed":false,"text":"Pay in £500+ within 30 days of opening; the page does not say whether it must stay."},{"id":"cards","type":"debit-card-payments","count":5,"amount":null,"period":"each-month","months":4,"withinDays":null,"anchor":"opening","source":null,"mustStayDays":null,"assumed":false,"text":"5+ card payments in each of the three months after the first."}],"payments":[{"amount":100,"count":1,"intervalMonths":null,"anchor":"conditions-met","conditionsWithinDays":30,"paidWithin":{"value":14,"unit":"working days"},"requirementIds":["dd","dep"],"note":"£100 upfront"},{"amount":20,"count":3,"intervalMonths":1,"anchor":"conditions-met","conditionsWithinDays":null,"paidWithin":{"value":28,"unit":"days"},"requirementIds":["cards"],"note":"3 x £20"}],"eligibility":{"heldAccount":{"since":"2024-01-01","dateText":"","ever":false,"scope":"Exampleshire"},"bonusReceived":{"since":null,"ever":false,"scope":""},"otherBankRules":[],"income":{"minAnnual":null,"basis":null,"altRoute":"","altRouteNoSwitch":false}},"fees":{"monthly":null,"waivedBy":""},"perks":[],"ongoing":[]}
+TXT;
+
+function slugify_id(string $s): string { return trim(preg_replace('/[^a-z0-9]+/', '-', strtolower($s)), '-'); }
+
+// Parallel version of call_anthropic: all requests go out at once and the
+// results come back keyed the same way.
+function call_anthropic_multi(string $apiKey, string $model, array $jobs): array {
+    $mh = curl_multi_init();
+    $handles = [];
+    foreach ($jobs as $key => $job) {
+        $ch = curl_init('https://api.anthropic.com/v1/messages');
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true,
+            CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'x-api-key: ' . $apiKey, 'anthropic-version: 2023-06-01'],
+            CURLOPT_POSTFIELDS => json_encode(['model' => $model, 'max_tokens' => $job['maxTokens'], 'messages' => [['role' => 'user', 'content' => $job['prompt']]]]),
+            CURLOPT_TIMEOUT => 170,
+        ]);
+        curl_multi_add_handle($mh, $ch);
+        $handles[$key] = $ch;
+    }
+    do {
+        $status = curl_multi_exec($mh, $running);
+        if ($running) curl_multi_select($mh, 1.0);
+    } while ($running && $status === CURLM_OK);
+    $out = [];
+    foreach ($handles as $key => $ch) {
+        $response = curl_multi_getcontent($ch);
+        $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_multi_remove_handle($mh, $ch);
+        curl_close($ch);
+        if ($code !== 200 || !is_string($response)) { $out[$key] = ['ok' => false, 'error' => "HTTP {$code}: " . substr((string) $response, 0, 200)]; continue; }
+        $parsed = json_decode($response, true);
+        $text = '';
+        foreach (($parsed['content'] ?? []) as $block) if (($block['type'] ?? '') === 'text') $text .= $block['text'];
+        $text = preg_replace('/^```(json)?|```$/m', '', trim($text)) ?? $text;
+        $json = json_decode(trim($text), true);
+        $out[$key] = is_array($json) ? ['ok' => true, 'data' => $json] : ['ok' => false, 'error' => 'not valid JSON (' . ($parsed['stop_reason'] ?? '?') . ')'];
+    }
+    curl_multi_close($mh);
+    return $out;
+}
+
+function offer_total_amount(array $o): float {
+    $t = 0.0;
+    foreach ((array) ($o['payments'] ?? []) as $p) $t += (float) ($p['amount'] ?? 0) * max(1, (int) ($p['count'] ?? 1));
+    return $t;
+}
+
+// Cheap structural checks; the engine validates and derives the rest.
+function scan_offer_ok(array $o): bool {
+    return !empty($o['bank']) && !empty($o['product']) && is_array($o['payments'] ?? null) && offer_total_amount($o) > 0
+        && is_array($o['requirements'] ?? null);
+}
+
+$today = date('Y-m-d');
+$listPrompt = "Today's date is {$today}. Below is text from MoneySavingExpert's bank switch-offers page. List every switch bonus for opening a NEW account (both the main list and the high-earner/premier list), and the banking groups it names.\n\nPAGE TEXT:\n{$switchText}\n\nReturn ONLY JSON: {\"offers\": [{\"bank\": \"short bank name\", \"product\": \"the account's own name\", \"tier\": \"standard or high-earner\"}], \"bankGroups\": [[\"names of banks that share one banking group, e.g. 'HSBC', 'First Direct'\"]]} — bankGroups comes from the sentence about banks sharing the same group (and FSCS protection)); use [] if there is none.";
+$list = call_anthropic($ANTHROPIC_API_KEY, $ANTHROPIC_MODEL, $listPrompt, 4000);
+if (!$list['ok']) fail(502, 'AI offer list failed: ' . $list['error']);
+$names = array_values(array_filter($list['data']['offers'] ?? [], fn($o) => !empty($o['product'])));
+if (!$names) fail(502, 'AI found no offers on the MSE page');
+$bankGroups = array_values(array_filter(array_map(fn($g) => array_values(array_filter(array_map('strval', (array) $g))), (array) ($list['data']['bankGroups'] ?? [])), fn($g) => count($g) >= 2));
+
+$prevCache = [];
+if (is_file($CACHE_FILE)) {
+    $rawPrev = file_get_contents($CACHE_FILE);
+    $decodedPrev = $rawPrev !== false && $rawPrev !== '' ? json_decode($rawPrev, true) : null;
+    if (is_array($decodedPrev)) $prevCache = $decodedPrev;
+}
+
+$jobs = [];
+foreach (array_chunk($names, 4) as $i => $batch) {
+    $wanted = implode('; ', array_map(fn($o) => ($o['bank'] ?? '') . ' — ' . $o['product'], $batch));
+    $jobs["offers{$i}"] = ['maxTokens' => 12000, 'prompt' => "Today's date is {$today}. Below is text from MoneySavingExpert's bank switch-offers page. Extract the full structure for ONLY these offers: {$wanted}.\n\n{$OFFER_SCHEMA}\n\nPAGE TEXT:\n{$switchText}\n\nReturn ONLY a JSON object {\"offers\": [ ... one object per requested offer, in the shape above ... ]}, no other text, no markdown fences."];
+}
+if ($ongoingText !== '') {
+    $jobs['ongoing'] = ['maxTokens' => 6000, 'prompt' => "Today's date is {$today}. Below is text from MoneySavingExpert's 'top accounts for ongoing cashback & perks' section — accounts worth opening or keeping for what they keep paying, NOT for a switch bonus.\n\nPAGE TEXT:\n{$ongoingText}\n\nReturn ONLY JSON: {\"accounts\": [{\"bank\": \"short bank name\", \"product\": \"the account's own name\", \"kind\": \"'bills-cashback' (pays cashback on bills paid by Direct Debit), 'spend-cashback', 'interest', 'perks' or 'other' — the main reason to hold it\", \"minPayIn\": number or null (GBP a month), \"monthlyFee\": number or null, \"directDebitsNeeded\": number or null, \"annualValue\": number or null (what it can pay in a year NET of its own fee, only when the page states it or it is a clear sum of stated figures), \"annualValueNote\": \"how that figure is made up, or ''\", \"summary\": \"one sentence: what it pays and what you must do\"}]}. Only accounts the page actually describes; no invented figures."];
+}
+$ai = call_anthropic_multi($ANTHROPIC_API_KEY, $ANTHROPIC_MODEL, $jobs);
+
+$offers = [];
+foreach ($ai as $key => $res) {
+    if (strpos($key, 'offers') !== 0) continue;
+    if (!$res['ok']) { $scanWarnings[] = "{$key}: " . $res['error']; continue; }
+    foreach (($res['data']['offers'] ?? []) as $o) {
+        if (!is_array($o) || !scan_offer_ok($o)) continue;
+        $o['schema'] = 2;
+        $o['id'] = slugify_id((string) ($o['id'] ?? '')) ?: slugify_id((string) $o['product']);
+        $o['url'] = $MSE_SWITCH_URL;
+        $o['amount'] = offer_total_amount($o);
+        $offers[$o['id']] = $o;
+    }
+}
+// An offer the AI named but did not manage to structure this week: keep last week's.
+foreach ($names as $n) {
+    $id = slugify_id((string) $n['product']);
+    $have = false;
+    foreach ($offers as $o) if (strcasecmp($o['product'], (string) $n['product']) === 0) $have = true;
+    if ($have) continue;
+    foreach (($prevCache['offers'] ?? []) as $po) {
+        if (strcasecmp((string) ($po['product'] ?? ''), (string) $n['product']) === 0) {
+            $po['stale'] = true;
+            $offers[$po['id'] ?? $id] = $po;
+            $scanWarnings[] = $n['product'] . ': could not be read this week, kept last week\'s';
+            break;
         }
-    } else {
-        unset($o['lastSwitchDate']);
+    }
+}
+$offers = array_values($offers);
+// A deadline already in the past is a year-less date read in the wrong year: roll it forward.
+foreach ($offers as &$o) {
+    foreach (['startBy', 'completeBy'] as $k) {
+        $d = $o['switch'][$k] ?? null;
+        if (!$d || !preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $d)) { if (isset($o['switch'])) $o['switch'][$k] = null; continue; }
+        while ($o['switch'][$k] < date('Y-m-d', strtotime('-10 days'))) $o['switch'][$k] = date('Y-m-d', strtotime($o['switch'][$k] . ' +1 year'));
     }
 }
 unset($o);
-unset($o);
+if (!$offers) fail(502, 'AI extraction produced no usable offers: ' . implode(' | ', $scanWarnings ?? []));
+
+$ongoingAccounts = [];
+if (isset($ai['ongoing']) && $ai['ongoing']['ok']) {
+    foreach (($ai['ongoing']['data']['accounts'] ?? []) as $a) {
+        if (!is_array($a) || empty($a['product'])) continue;
+        $ongoingAccounts[] = [
+            'bank' => (string) ($a['bank'] ?? ''), 'product' => (string) $a['product'], 'kind' => (string) ($a['kind'] ?? 'other'),
+            'minPayIn' => is_numeric($a['minPayIn'] ?? null) ? (float) $a['minPayIn'] : null, 'monthlyFee' => is_numeric($a['monthlyFee'] ?? null) ? (float) $a['monthlyFee'] : null,
+            'directDebitsNeeded' => is_numeric($a['directDebitsNeeded'] ?? null) ? (int) $a['directDebitsNeeded'] : null,
+            'annualValue' => is_numeric($a['annualValue'] ?? null) ? (float) $a['annualValue'] : null,
+            'annualValueNote' => (string) ($a['annualValueNote'] ?? ''), 'summary' => (string) ($a['summary'] ?? ''),
+        ];
+    }
+}
 
 $krakTiers = null;
 $krakSalaryMin = null;
@@ -348,7 +536,7 @@ $lock = fopen($CACHE_FILE . '.lock', 'c');
 if ($lock === false) fail(500, 'Could not open lock file — check directory permissions');
 flock($lock, LOCK_EX);
 
-$current = ['scrapedAt' => null, 'history' => [], 'offers' => [], 'cassParticipants' => [], 'cashbackRates' => [], 'krakTiers' => [], 'krakSalaryMin' => null, 'krakSalaryCap' => null, 'krakTiersAsOf' => null, 'krakTiersSource' => null, 'cashbackDeals' => [], 'cashbackAsOf' => null, 'cashbackSources' => [], 'annualPerks' => []];
+$current = ['scrapedAt' => null, 'history' => [], 'offers' => [], 'cassParticipants' => [], 'cashbackRates' => [], 'krakTiers' => [], 'krakSalaryMin' => null, 'krakSalaryCap' => null, 'krakTiersAsOf' => null, 'krakTiersSource' => null, 'cashbackDeals' => [], 'cashbackAsOf' => null, 'cashbackSources' => [], 'annualPerks' => [], 'bankGroups' => [], 'ongoingAccounts' => []];
 if (is_file($CACHE_FILE)) {
     $raw = file_get_contents($CACHE_FILE);
     $parsed = $raw !== false && $raw !== '' ? json_decode($raw, true) : null;
@@ -380,6 +568,9 @@ $next = [
     'offers' => $offers,
     'cassParticipants' => $cassParticipants ?: ($current['cassParticipants'] ?? []),
     'cashbackRates' => $current['cashbackRates'] ?? [],
+    // From the page's own "these banks share the same group" sentence; kept as it was when this scan found none.
+    'bankGroups' => $bankGroups ?: ($current['bankGroups'] ?? []),
+    'ongoingAccounts' => $ongoingAccounts ?: ($current['ongoingAccounts'] ?? []),
     // Hand-kept yearly payments (e.g. Nationwide Fairer Share): never produced by a scan, so carried over as they are.
     'annualPerks' => !empty($current['annualPerks']) ? $current['annualPerks'] : $DEFAULT_ANNUAL_PERKS,
     // Kept as-is when this scan found none (a site changed its markup, or
@@ -404,4 +595,4 @@ rename($tmp, $CACHE_FILE);
 flock($lock, LOCK_UN);
 fclose($lock);
 
-echo json_encode(['ok' => true, 'offersFound' => count($offers), 'cassParticipantsFound' => count($cassParticipants), 'krakTiersScraped' => (bool) $krakTiers, 'cashbackDealsFound' => count($cashbackDeals), 'scrapedAt' => $now]);
+echo json_encode(['ok' => true, 'offersFound' => count($offers), 'cassParticipantsFound' => count($cassParticipants), 'krakTiersScraped' => (bool) $krakTiers, 'cashbackDealsFound' => count($cashbackDeals), 'ongoingAccountsFound' => count($ongoingAccounts), 'bankGroups' => count($bankGroups), 'warnings' => $scanWarnings, 'scrapedAt' => $now]);

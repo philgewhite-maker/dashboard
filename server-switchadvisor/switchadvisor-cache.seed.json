@@ -59,173 +59,879 @@
     ],
     "offers": [
         {
+            "id": "barclays-bank-account",
             "bank": "Barclays",
             "product": "Barclays Bank Account",
-            "amount": 300,
-            "conditions": "£150 upfront for switching 3+ Direct Debits and paying in £2,000+/month salary within 30 days; a further 5×£30 for maintaining that pay-in and 10+ debit card payments over the next 5 months. No previous Barclays switch bonus; no currently open Barclays account on or before 1 Oct.",
-            "minFunding": 2000,
-            "ddCount": 3,
-            "heldSinceCutoff": null,
-            "bonusSinceCutoff": null,
-            "highEarner": false,
-            "payInType": "salary",
-            "salaryMonths": 6,
-            "salaryFirstMonthAmount": 150,
-            "payInNote": "£150 after the first month of salary, then £30 a month for 5 more months while £2,000+ keeps arriving (and 10 card payments a month). Counts: Bacs from an employer or pension, or a transfer from your own UK business account; MoneySavingExpert says benefits count too. Does not count: transfers between your own personal accounts. Rental, Airbnb or other platform payouts are not listed anywhere — do not assume they count. The money does not have to stay.",
-            "heldRuleText": "on or before 1 Oct",
-            "minMonthlySalary": 2000,
-            "requiresSwitch": true,
+            "tier": "standard",
+            "serviceRating": 43,
+            "jointAllowed": false,
+            "howToOpen": "Open a sole account in Barclays' app.",
+            "conditions": "£150 upfront for switching 3+ Direct Debits and paying in £2,000+ salary within 30 days; a further 5 x £30 for keeping that salary arriving and making 10+ debit card payments in each of the next five months. No previous Barclays switch bonus; no open Barclays current account on or before 1 Oct.",
+            "switch": {
+                "required": true,
+                "minDirectDebits": 3
+            },
+            "requirements": [
+                {
+                    "id": "dd",
+                    "type": "direct-debits",
+                    "count": 3,
+                    "text": "Switch in 3+ Direct Debits."
+                },
+                {
+                    "id": "sal1",
+                    "type": "salary",
+                    "amount": 2000,
+                    "period": "each-month",
+                    "months": 1,
+                    "withinDays": 30,
+                    "source": "employer",
+                    "text": "£2,000+ salary within 30 days. Salary must arrive by Bacs from an employer, a state or private pension, a transfer from a UK business account, or benefits payments — transfers from your own personal accounts do not count."
+                },
+                {
+                    "id": "sal6",
+                    "type": "salary",
+                    "amount": 2000,
+                    "period": "each-month",
+                    "months": 6,
+                    "source": "employer",
+                    "text": "Keep £2,000+ monthly salary arriving for five more months. Miss a month and you can still qualify in later months."
+                },
+                {
+                    "id": "card6",
+                    "type": "debit-card-payments",
+                    "count": 10,
+                    "period": "each-month",
+                    "months": 6,
+                    "text": "10+ debit card payments in each of the next five months."
+                }
+            ],
+            "payments": [
+                {
+                    "amount": 150,
+                    "count": 1,
+                    "anchor": "conditions-met",
+                    "requirementIds": [
+                        "dd",
+                        "sal1"
+                    ],
+                    "paidWithin": {
+                        "value": 28,
+                        "unit": "working days"
+                    },
+                    "note": "£150 upfront"
+                },
+                {
+                    "amount": 30,
+                    "count": 5,
+                    "anchor": "conditions-met",
+                    "requirementIds": [
+                        "sal6",
+                        "card6"
+                    ],
+                    "intervalMonths": 1,
+                    "paidWithin": {
+                        "value": 28,
+                        "unit": "working days"
+                    },
+                    "note": "5 x £30"
+                }
+            ],
+            "eligibility": {
+                "heldAccount": {
+                    "dateText": "on or before 1 Oct",
+                    "scope": "Barclays"
+                },
+                "bonusReceived": {
+                    "ever": true,
+                    "scope": "Barclays"
+                }
+            },
+            "fees": {
+                "monthly": null,
+                "waivedBy": ""
+            },
+            "perks": [
+                {
+                    "kind": "perk",
+                    "name": "Apple TV at half price (optional £5/month Blue Rewards; needs £800+/month paid in)",
+                    "annualValue": null
+                }
+            ],
+            "ongoing": [],
+            "schema": 2,
             "url": "https://www.moneysavingexpert.com/banking/compare-best-bank-accounts/#switch"
         },
         {
+            "id": "barclays-premier",
             "bank": "Barclays",
             "product": "Barclays Premier",
-            "amount": 600,
-            "conditions": "£450 upfront for switching 3+ Direct Debits and paying in £5,000+/month salary within 30 days; a further 5×£30 over the next 5 months. Needs £75,000+/year earnings (or large savings with Barclays). No previous Barclays switch bonus; no open Barclays account on or before 1 Oct.",
-            "minFunding": 5000,
-            "ddCount": 3,
-            "heldSinceCutoff": null,
-            "bonusSinceCutoff": null,
-            "highEarner": true,
-            "payInType": "salary",
-            "salaryMonths": 6,
-            "salaryFirstMonthAmount": 450,
-            "payInNote": "£450 after the first month of salary, then £30 a month for 5 more months while £5,000+ keeps arriving (and 10 card payments a month). Counts: Bacs from an employer or pension, or a transfer from your own UK business account. Does not count: transfers between your own personal accounts. Rental, Airbnb or other platform payouts are not listed anywhere — do not assume they count. The money does not have to stay.",
-            "heldRuleText": "on or before 1 Oct",
-            "minMonthlySalary": 5000,
-            "minAnnualEarnings": 75000,
-            "incomeAltRoute": "large savings with Barclays",
-            "requiresSwitch": true,
+            "tier": "high-earner",
+            "serviceRating": 43,
+            "jointAllowed": false,
+            "howToOpen": "Open a sole account in Barclays' app.",
+            "conditions": "£450 upfront for switching 3+ Direct Debits and paying in £5,000+ salary within 30 days; a further 5 x £30 over the next five months. Needs £75,000+ a year (or large savings with Barclays). No previous Barclays switch bonus; no open Barclays current account on or before 1 Oct.",
+            "switch": {
+                "required": true,
+                "minDirectDebits": 3
+            },
+            "requirements": [
+                {
+                    "id": "dd",
+                    "type": "direct-debits",
+                    "count": 3,
+                    "text": "Switch in 3+ Direct Debits."
+                },
+                {
+                    "id": "sal1",
+                    "type": "salary",
+                    "amount": 5000,
+                    "period": "each-month",
+                    "months": 1,
+                    "withinDays": 30,
+                    "source": "employer",
+                    "text": "£5,000+ salary within 30 days, by Bacs from an employer."
+                },
+                {
+                    "id": "sal6",
+                    "type": "salary",
+                    "amount": 5000,
+                    "period": "each-month",
+                    "months": 6,
+                    "source": "employer",
+                    "text": "Keep £5,000+ monthly salary arriving for five more months. Miss a month and you can still qualify in later months."
+                },
+                {
+                    "id": "card6",
+                    "type": "debit-card-payments",
+                    "count": 10,
+                    "period": "each-month",
+                    "months": 6,
+                    "text": "10+ debit card payments in each of the next five months."
+                }
+            ],
+            "payments": [
+                {
+                    "amount": 450,
+                    "count": 1,
+                    "anchor": "conditions-met",
+                    "requirementIds": [
+                        "dd",
+                        "sal1"
+                    ],
+                    "paidWithin": {
+                        "value": 28,
+                        "unit": "working days"
+                    },
+                    "note": "£450 upfront"
+                },
+                {
+                    "amount": 30,
+                    "count": 5,
+                    "anchor": "conditions-met",
+                    "requirementIds": [
+                        "sal6",
+                        "card6"
+                    ],
+                    "intervalMonths": 1,
+                    "paidWithin": {
+                        "value": 28,
+                        "unit": "working days"
+                    },
+                    "note": "5 x £30"
+                }
+            ],
+            "eligibility": {
+                "heldAccount": {
+                    "dateText": "on or before 1 Oct",
+                    "scope": "Barclays"
+                },
+                "bonusReceived": {
+                    "ever": true,
+                    "scope": "Barclays"
+                },
+                "income": {
+                    "minAnnual": 75000,
+                    "altRoute": "large savings with Barclays"
+                }
+            },
+            "fees": {
+                "monthly": null,
+                "waivedBy": ""
+            },
+            "perks": [
+                {
+                    "kind": "perk",
+                    "name": "Apple TV subscription included free (Blue Rewards; normally £10/month)",
+                    "annualValue": 120
+                },
+                {
+                    "kind": "perk",
+                    "name": "Possible £500 0% overdraft; fee-free spending abroad",
+                    "annualValue": null
+                }
+            ],
+            "ongoing": [],
+            "schema": 2,
             "url": "https://www.moneysavingexpert.com/banking/compare-best-bank-accounts/#switch"
         },
         {
+            "id": "hsbc-bank-account",
             "bank": "HSBC",
             "product": "HSBC Bank Account",
-            "amount": 220,
+            "tier": "standard",
+            "serviceRating": 32,
+            "jointAllowed": false,
+            "howToOpen": "Open a new HSBC Bank Account in the app (not the Basic Bank Account).",
             "conditions": "£220 for a full switch with 2+ Direct Debits, depositing £2,000+ and spending £500+ on the debit card, all within 60 days. Not already an HSBC/First Direct customer, and no HSBC/First Direct current account held since 1 Jan 2023.",
-            "minFunding": 2000,
-            "ddCount": 2,
-            "heldSinceCutoff": "2023-01-01",
-            "bonusSinceCutoff": null,
-            "highEarner": false,
-            "payInType": "deposit",
-            "payInNote": "£2,000 paid in within 60 days (in dribs and drabs is fine) plus £500 of card spending. HSBC does not say whether the money has to come from outside, or whether it has to stay — check its terms before moving it straight back out.",
-            "requiresSwitch": true,
+            "switch": {
+                "required": true,
+                "minDirectDebits": 2
+            },
+            "requirements": [
+                {
+                    "id": "dd",
+                    "type": "direct-debits",
+                    "count": 2,
+                    "text": "Complete a full switch including 2+ Direct Debits."
+                },
+                {
+                    "id": "dep",
+                    "type": "pay-in",
+                    "amount": 2000,
+                    "period": "total",
+                    "withinDays": 60,
+                    "source": "any",
+                    "text": "Deposit £2,000+ within 60 days (can be in dribs and drabs). HSBC does not say whether it has to come from outside or stay."
+                },
+                {
+                    "id": "spend",
+                    "type": "card-spend",
+                    "amount": 500,
+                    "withinDays": 60,
+                    "text": "Spend £500+ on the debit card within 60 days."
+                }
+            ],
+            "payments": [
+                {
+                    "amount": 220,
+                    "count": 1,
+                    "anchor": "conditions-met",
+                    "requirementIds": [
+                        "dd",
+                        "dep",
+                        "spend"
+                    ],
+                    "conditionsWithinDays": 60,
+                    "paidWithin": {
+                        "value": 60,
+                        "unit": "days"
+                    }
+                }
+            ],
+            "eligibility": {
+                "heldAccount": {
+                    "since": "2023-01-01",
+                    "scope": "HSBC or First Direct"
+                },
+                "bonusReceived": []
+            },
+            "fees": {
+                "monthly": null,
+                "waivedBy": ""
+            },
+            "perks": [],
+            "ongoing": [
+                {
+                    "kind": "saver",
+                    "name": "HSBC regular saver, 5% fixed on up to £250/month for a year",
+                    "annualValue": null,
+                    "needs": ""
+                }
+            ],
+            "schema": 2,
             "url": "https://www.moneysavingexpert.com/banking/compare-best-bank-accounts/#switch"
         },
         {
+            "id": "hsbc-premier",
             "bank": "HSBC",
             "product": "HSBC Premier",
-            "amount": 500,
-            "conditions": "£500 for earning £100,000+/year (paid into the account) and switching in within 90 days, OR having £100,000+ saved/invested with no switch needed. No HSBC/First Direct current account held since 1 Jan 2025.",
-            "minFunding": null,
-            "ddCount": null,
-            "heldSinceCutoff": "2025-01-01",
-            "bonusSinceCutoff": null,
-            "highEarner": true,
-            "payInType": "salary",
-            "salaryMonths": 3,
-            "payInNote": "Needs an individual salary of £100,000+ (typically £5,100+ a month) paid in within 90 days of switching. HSBC does not say how many months of salary, whether self-employed income counts, or whether you can move it out again, so about 3 months is assumed from the 90-day window — check before relying on it.",
-            "minAnnualEarnings": 100000,
-            "incomeAltRoute": "£100,000+ saved/invested",
-            "requiresSwitch": false,
+            "tier": "high-earner",
+            "serviceRating": 32,
+            "jointAllowed": true,
+            "howToOpen": "Open HSBC Premier and switch an account in within 90 days.",
+            "conditions": "£500 for earning £100,000+ a year (salary paid into the account each month) and switching in within 90 days, OR having £100,000+ saved/invested with no switch needed. No HSBC/First Direct current account held since 1 Jan 2025.",
+            "switch": {
+                "required": true,
+                "withinDaysOfOpening": 90
+            },
+            "requirements": [
+                {
+                    "id": "sal",
+                    "type": "salary",
+                    "period": "each-month",
+                    "months": 3,
+                    "assumed": true,
+                    "source": "employer",
+                    "text": "Salary paid into the account each month while you switch in (HSBC does not say how many months — about 3 is assumed from the 90-day window; whether self-employed income counts is not stated)."
+                }
+            ],
+            "payments": [
+                {
+                    "amount": 500,
+                    "count": 1,
+                    "anchor": "conditions-met",
+                    "requirementIds": [
+                        "sal"
+                    ],
+                    "conditionsWithinDays": 90,
+                    "paidWithin": {
+                        "value": 70,
+                        "unit": "days"
+                    }
+                }
+            ],
+            "eligibility": {
+                "heldAccount": {
+                    "since": "2025-01-01",
+                    "scope": "HSBC or First Direct"
+                },
+                "income": {
+                    "minAnnual": 100000,
+                    "basis": "gross",
+                    "altRoute": "£100,000+ saved/invested (no switch needed)",
+                    "altRouteNoSwitch": true
+                }
+            },
+            "fees": {
+                "monthly": null,
+                "waivedBy": ""
+            },
+            "perks": [
+                {
+                    "kind": "perk",
+                    "name": "Worldwide family travel insurance (to age 69) and digital GP access",
+                    "annualValue": null
+                }
+            ],
+            "ongoing": [],
+            "schema": 2,
             "url": "https://www.moneysavingexpert.com/banking/compare-best-bank-accounts/#switch"
         },
         {
+            "id": "first-direct-1st-account",
             "bank": "First Direct",
             "product": "First Direct 1st Account",
-            "amount": 210,
-            "conditions": "£210 for switching in an account with 2+ Direct Debits/standing orders, paying in £1,000+, and 5+ debit card payments, all within 45 days. Never had ANY First Direct product; also excluded if an HSBC current account has been opened since 1 Jan 2018 (a cross-bank condition this engine doesn't check — verify by hand).",
-            "minFunding": 1000,
-            "ddCount": 2,
-            "heldSinceCutoff": null,
-            "bonusSinceCutoff": null,
-            "highEarner": false,
-            "payInType": "deposit",
-            "payInNote": "£1,000 paid in within 45 days (dribs and drabs fine); one guide says each deposit has to stay at least 24 hours. Whether transfers from your own accounts count was not found.",
-            "requiresSwitch": true,
+            "tier": "standard",
+            "serviceRating": 90,
+            "jointAllowed": true,
+            "howToOpen": "Open via the app (online for a joint account).",
+            "conditions": "£210 for switching in an account with 2+ Direct Debits/standing orders, paying in £1,000+, 5+ debit card payments and logging in to digital banking, all within 45 days. Never had ANY First Direct product; not opened an HSBC current account since 1 Jan 2018.",
+            "switch": {
+                "required": true,
+                "minDirectDebits": 2
+            },
+            "requirements": [
+                {
+                    "id": "dd",
+                    "type": "direct-debits",
+                    "count": 2,
+                    "text": "Switch in an account with 2+ Direct Debits or standing orders within 45 days."
+                },
+                {
+                    "id": "dep",
+                    "type": "pay-in",
+                    "amount": 1000,
+                    "period": "total",
+                    "withinDays": 45,
+                    "source": "any",
+                    "mustStayDays": 1,
+                    "text": "Pay in £1,000+ within 45 days (dribs and drabs fine); one guide says each deposit has to stay at least 24 hours."
+                },
+                {
+                    "id": "cards",
+                    "type": "debit-card-payments",
+                    "count": 5,
+                    "period": "total",
+                    "withinDays": 45,
+                    "text": "5+ debit card payments within 45 days."
+                },
+                {
+                    "id": "login",
+                    "type": "app-login",
+                    "withinDays": 45,
+                    "text": "Log in to digital banking."
+                }
+            ],
+            "payments": [
+                {
+                    "amount": 210,
+                    "count": 1,
+                    "anchor": "conditions-met",
+                    "requirementIds": [
+                        "dd",
+                        "dep",
+                        "cards",
+                        "login"
+                    ],
+                    "conditionsWithinDays": 45,
+                    "paidWithin": {
+                        "value": 20,
+                        "unit": "day-of-following-month"
+                    }
+                }
+            ],
+            "eligibility": {
+                "heldAccount": {
+                    "ever": true,
+                    "scope": "First Direct"
+                },
+                "otherBankRules": [
+                    {
+                        "group": "HSBC",
+                        "event": "opened-account",
+                        "since": "2018-01-01"
+                    }
+                ]
+            },
+            "fees": {
+                "monthly": null,
+                "waivedBy": ""
+            },
+            "perks": [
+                {
+                    "kind": "perk",
+                    "name": "Top customer service (90% rate it great), fee-free overseas spending, usually a £250 0% overdraft",
+                    "annualValue": null
+                }
+            ],
+            "ongoing": [
+                {
+                    "kind": "saver",
+                    "name": "7% fixed regular saver on up to £300/month for a year",
+                    "annualValue": null,
+                    "needs": ""
+                }
+            ],
+            "schema": 2,
             "url": "https://www.moneysavingexpert.com/banking/compare-best-bank-accounts/#switch"
         },
         {
+            "id": "club-lloyds",
             "bank": "Lloyds Bank",
-            "lastSwitchDate": "2026-12-09",
             "product": "Club Lloyds",
-            "amount": 200,
+            "tier": "standard",
+            "serviceRating": 47,
+            "jointAllowed": true,
+            "howToOpen": "Open online, by phone or in branch.",
             "conditions": "£200 for switching in an account from a different bank (not Halifax/Bank of Scotland) with 3+ Direct Debits; the switch must START by 9 Dec. No previous switch bonus from Lloyds, Halifax or Bank of Scotland since 1 Jan 2023.",
-            "minFunding": null,
-            "ddCount": 3,
-            "heldSinceCutoff": null,
-            "bonusSinceCutoff": "2023-01-01",
-            "highEarner": false,
-            "requiresSwitch": true,
+            "switch": {
+                "required": true,
+                "minDirectDebits": 3,
+                "startBy": "2026-12-09",
+                "notFromGroups": [
+                    "Halifax",
+                    "Bank of Scotland"
+                ]
+            },
+            "requirements": [
+                {
+                    "id": "dd",
+                    "type": "direct-debits",
+                    "count": 3,
+                    "text": "Switch in 3+ Direct Debits; the switch must be started by 9 Dec."
+                }
+            ],
+            "payments": [
+                {
+                    "amount": 200,
+                    "count": 1,
+                    "anchor": "switch-start",
+                    "requirementIds": [
+                        "dd"
+                    ],
+                    "paidWithin": {
+                        "value": 14,
+                        "unit": "working days"
+                    }
+                }
+            ],
+            "eligibility": {
+                "bonusReceived": {
+                    "since": "2023-01-01",
+                    "scope": "Lloyds, Halifax or Bank of Scotland (either party on a joint account)"
+                }
+            },
+            "fees": {
+                "monthly": 5,
+                "waivedBy": "paying in £2,000 a month"
+            },
+            "perks": [
+                {
+                    "kind": "perk",
+                    "name": "A yearly reward: 12 months Disney+ (with ads), six cinema tickets, Coffee Club & Gourmet Society, or a magazine subscription",
+                    "annualValue": null
+                }
+            ],
+            "ongoing": [
+                {
+                    "kind": "saver",
+                    "name": "6.25% regular saver on up to £250/month for a year",
+                    "annualValue": null,
+                    "needs": ""
+                }
+            ],
+            "schema": 2,
             "url": "https://www.moneysavingexpert.com/banking/compare-best-bank-accounts/#switch"
         },
         {
+            "id": "lloyds-premier",
             "bank": "Lloyds Bank",
-            "lastSwitchDate": "2026-12-09",
             "product": "Lloyds Premier",
-            "amount": 200,
-            "conditions": "£200 for switching in from a different bank (not Halifax/Bank of Scotland) with 3+ Direct Debits, switch must start by 9 Dec. Needs £5,000+/month pay-in (roughly an £85,000 salary) or £100,000+ saved/invested. No previous switch bonus from Lloyds, Halifax or Bank of Scotland since 1 Jan 2023.",
-            "minFunding": 5000,
-            "ddCount": 3,
-            "heldSinceCutoff": null,
-            "bonusSinceCutoff": "2023-01-01",
-            "highEarner": true,
-            "payInType": "deposit",
-            "payInNote": "The £5,000 a month is the Premier account's own entry test (or £100,000+ saved with Lloyds), not salary-specific as far as MoneySavingExpert reports; the bonus itself asks for 3+ Direct Debits. Check whether transfers from your own accounts count toward the £5,000.",
-            "minMonthlySalary": 5000,
-            "incomeAltRoute": "£100,000+ saved/invested",
-            "requiresSwitch": true,
+            "tier": "high-earner",
+            "serviceRating": 47,
+            "jointAllowed": true,
+            "howToOpen": "Open via the Lloyds app.",
+            "conditions": "£200 for switching in an account from a different bank (not Halifax/Bank of Scotland) with 3+ Direct Debits; the switch must be started by 9 Dec. Needs £5,000+ paid in a month (roughly an £85,000 salary) or £100,000+ saved/invested. No previous switch bonus from Lloyds, Halifax or Bank of Scotland since 1 Jan 2023.",
+            "switch": {
+                "required": true,
+                "minDirectDebits": 3,
+                "startBy": "2026-12-09",
+                "notFromGroups": [
+                    "Halifax",
+                    "Bank of Scotland"
+                ]
+            },
+            "requirements": [
+                {
+                    "id": "dd",
+                    "type": "direct-debits",
+                    "count": 3,
+                    "text": "Switch in 3+ Direct Debits; the switch must be started by 9 Dec."
+                },
+                {
+                    "id": "dep",
+                    "type": "pay-in",
+                    "amount": 5000,
+                    "period": "each-month",
+                    "months": 1,
+                    "source": "any",
+                    "text": "Pay in £5,000 a month (the Premier account's own entry test). MSE does not say it has to be salary or whether transfers from your own accounts count."
+                }
+            ],
+            "payments": [
+                {
+                    "amount": 200,
+                    "count": 1,
+                    "anchor": "switch-start",
+                    "requirementIds": [
+                        "dd",
+                        "dep"
+                    ],
+                    "paidWithin": {
+                        "value": 14,
+                        "unit": "working days"
+                    }
+                }
+            ],
+            "eligibility": {
+                "bonusReceived": {
+                    "since": "2023-01-01",
+                    "scope": "Lloyds, Halifax or Bank of Scotland (either party on a joint account)"
+                },
+                "income": {
+                    "minAnnual": 85000,
+                    "altRoute": "£100,000+ saved/invested"
+                }
+            },
+            "fees": {
+                "monthly": null,
+                "waivedBy": ""
+            },
+            "perks": [
+                {
+                    "kind": "perk",
+                    "name": "Digital GP and physio; a yearly reward such as Disney+ (with ads)",
+                    "annualValue": null
+                }
+            ],
+            "ongoing": [
+                {
+                    "kind": "cashback",
+                    "name": "1% cashback on most debit card spending (max £10/month)",
+                    "annualValue": 120,
+                    "needs": "spending £1,000 a month on the debit card"
+                }
+            ],
+            "schema": 2,
             "url": "https://www.moneysavingexpert.com/banking/compare-best-bank-accounts/#switch"
         },
         {
+            "id": "natwest-reward",
             "bank": "NatWest",
             "product": "NatWest Reward",
-            "amount": 200,
-            "conditions": "£200 for switching in and paying in £1,250+ within 60 days, plus logging into the mobile app. No previous NatWest/RBS/Ulster Bank switch bonus; no NatWest account on 6 May; not switching from an RBS or Ulster Bank account.",
-            "minFunding": 1250,
-            "ddCount": 2,
-            "heldSinceCutoff": null,
-            "bonusSinceCutoff": null,
-            "highEarner": false,
-            "payInType": "deposit",
-            "payInNote": "£1,250 paid in within 60 days, in more than one payment if you like, plus a mobile-app login. Reported to accept any payments; NatWest's own terms could not be read.",
-            "heldRuleText": "on 6 May",
-            "requiresSwitch": true,
+            "tier": "standard",
+            "serviceRating": 50,
+            "jointAllowed": true,
+            "howToOpen": "Open online or in the mobile app and complete a switch.",
+            "conditions": "£200 for switching in and paying in £1,250+ within 60 days, plus logging into the mobile app. No previous NatWest/RBS/Ulster Bank switch bonus; no NatWest current account on 6 May; not switching from an RBS or Ulster Bank account.",
+            "switch": {
+                "required": true,
+                "notFromGroups": [
+                    "RBS",
+                    "Ulster Bank"
+                ]
+            },
+            "requirements": [
+                {
+                    "id": "dep",
+                    "type": "pay-in",
+                    "amount": 1250,
+                    "period": "total",
+                    "withinDays": 60,
+                    "source": "any",
+                    "text": "Pay in £1,250+ within 60 days. NatWest does not say whether transfers from your own accounts count."
+                },
+                {
+                    "id": "login",
+                    "type": "app-login",
+                    "withinDays": 60,
+                    "text": "Log in to the mobile app."
+                }
+            ],
+            "payments": [
+                {
+                    "amount": 200,
+                    "count": 1,
+                    "anchor": "conditions-met",
+                    "requirementIds": [
+                        "dep",
+                        "login"
+                    ],
+                    "conditionsWithinDays": 60,
+                    "paidWithin": {
+                        "value": 30,
+                        "unit": "days"
+                    }
+                }
+            ],
+            "eligibility": {
+                "heldAccount": {
+                    "dateText": "on 6 May",
+                    "scope": "NatWest"
+                },
+                "bonusReceived": {
+                    "ever": true,
+                    "scope": "NatWest, RBS or Ulster Bank"
+                }
+            },
+            "fees": {
+                "monthly": 2,
+                "waivedBy": ""
+            },
+            "perks": [],
+            "ongoing": [
+                {
+                    "kind": "cashback",
+                    "name": "£4 a month cashback (net £24 a year after the £2 fee)",
+                    "annualValue": 24,
+                    "needs": "paying in £1,250+ a month and paying out 2+ Direct Debits of £2+"
+                },
+                {
+                    "kind": "saver",
+                    "name": "5.25% variable linked regular saver, up to £150 a month (max £5,000)",
+                    "annualValue": null,
+                    "needs": ""
+                }
+            ],
+            "schema": 2,
             "url": "https://www.moneysavingexpert.com/banking/compare-best-bank-accounts/#switch"
         },
         {
+            "id": "natwest-premier-reward",
             "bank": "NatWest",
             "product": "NatWest Premier Reward",
-            "amount": 500,
-            "conditions": "£500 for earning £100,000+/year (or £100,000+ saved/invested, or a £500,000+ NatWest mortgage) and paying in £15,000 within 90 days of the switch completing. No previous NatWest/RBS/Ulster Bank switch bonus; no NatWest account on or after 2 Sep.",
-            "minFunding": 15000,
-            "ddCount": null,
-            "heldSinceCutoff": null,
-            "bonusSinceCutoff": null,
-            "highEarner": true,
-            "payInType": "salary",
-            "salaryMonths": 3,
-            "payInNote": "£15,000 paid in within 90 days of the switch — in one or several payments, such as your salary — and each payment must stay in the account at least 24 hours. NatWest does not say which income sources count or how many months of salary, so about 3 months is assumed from the 90-day window.",
-            "heldRuleText": "on or after 2 Sep",
-            "minAnnualEarnings": 100000,
-            "incomeAltRoute": "£100,000+ saved/invested, or a £500,000+ NatWest mortgage",
-            "requiresSwitch": true,
+            "tier": "high-earner",
+            "serviceRating": 50,
+            "jointAllowed": false,
+            "howToOpen": "Open the account and complete a switch.",
+            "conditions": "£500 for earning £100,000+ a year (or £100,000+ saved/invested, or a £500,000+ NatWest mortgage) and paying in £15,000 within 90 days of the switch completing. No previous NatWest/RBS/Ulster Bank switch bonus; no NatWest account on or after 2 Sep.",
+            "switch": {
+                "required": true,
+                "notFromGroups": [
+                    "RBS",
+                    "Ulster Bank"
+                ]
+            },
+            "requirements": [
+                {
+                    "id": "sal",
+                    "type": "salary",
+                    "period": "each-month",
+                    "months": 3,
+                    "assumed": true,
+                    "source": "employer",
+                    "text": "Salary paid in each month on the £100,000-earner route (NatWest does not say how many months — about 3 is assumed from the 90-day window)."
+                },
+                {
+                    "id": "dep",
+                    "type": "pay-in",
+                    "amount": 15000,
+                    "period": "total",
+                    "withinDays": 90,
+                    "anchor": "switch-complete",
+                    "source": "any",
+                    "mustStayDays": 1,
+                    "text": "Pay in £15,000 within 90 days of the switch completing, in one or several deposits that each stay at least 24 hours."
+                },
+                {
+                    "id": "login",
+                    "type": "app-login",
+                    "withinDays": 90,
+                    "anchor": "switch-complete",
+                    "text": "Log in to the NatWest mobile app."
+                }
+            ],
+            "payments": [
+                {
+                    "amount": 500,
+                    "count": 1,
+                    "anchor": "switch-complete",
+                    "requirementIds": [
+                        "sal",
+                        "dep",
+                        "login"
+                    ],
+                    "conditionsWithinDays": 90,
+                    "paidWithin": {
+                        "value": 120,
+                        "unit": "days"
+                    }
+                }
+            ],
+            "eligibility": {
+                "heldAccount": {
+                    "dateText": "on or after 2 Sep",
+                    "scope": "NatWest"
+                },
+                "bonusReceived": {
+                    "ever": true,
+                    "scope": "NatWest, RBS or Ulster Bank"
+                },
+                "income": {
+                    "minAnnual": 100000,
+                    "basis": "gross",
+                    "altRoute": "£100,000+ saved/invested, or a £500,000+ NatWest mortgage"
+                }
+            },
+            "fees": {
+                "monthly": 2,
+                "waivedBy": ""
+            },
+            "perks": [],
+            "ongoing": [
+                {
+                    "kind": "cashback",
+                    "name": "£9 a month cashback (net £7 after the £2 fee)",
+                    "annualValue": 84,
+                    "needs": "paying out two Direct Debits of £4.50+ and using the app"
+                }
+            ],
+            "schema": 2,
             "url": "https://www.moneysavingexpert.com/banking/compare-best-bank-accounts/#switch"
         },
         {
+            "id": "nationwide-flexdirect",
             "bank": "Nationwide Building Society",
             "product": "Nationwide FlexDirect",
-            "amount": 175,
-            "conditions": "£175 for switching in an account with 2+ Direct Debits within 28 days of opening, then paying in £1,000+ and making at least one debit card payment within 31 days of opening. No Nationwide switch bonus since 2021 (a sole↔joint switch is an exception); not switching from a Virgin Money account.",
-            "minFunding": 1000,
-            "ddCount": 2,
-            "heldSinceCutoff": null,
-            "bonusSinceCutoff": "2021-01-01",
-            "highEarner": false,
-            "payInType": "deposit",
-            "payInNote": "£1,000 paid in within 31 days of opening, plus one debit card payment. Nationwide does not say whether it can be split, come from your own accounts, or has to stay.",
-            "requiresSwitch": true,
+            "tier": "standard",
+            "serviceRating": 85,
+            "jointAllowed": true,
+            "howToOpen": "Open an account, then switch in within 28 days.",
+            "conditions": "£175 for switching in an account with 2+ Direct Debits within 28 days of opening, then paying in £1,000+ and making at least one debit card payment within 31 days of opening. No Nationwide switch bonus since 2021 (a sole-to-joint switch is an exception); not switching from a Virgin Money account.",
+            "switch": {
+                "required": true,
+                "minDirectDebits": 2,
+                "withinDaysOfOpening": 28,
+                "notFromGroups": [
+                    "Virgin Money"
+                ]
+            },
+            "requirements": [
+                {
+                    "id": "dd",
+                    "type": "direct-debits",
+                    "count": 2,
+                    "withinDays": 28,
+                    "text": "Switch in an account with 2+ Direct Debits within 28 days of opening."
+                },
+                {
+                    "id": "dep",
+                    "type": "pay-in",
+                    "amount": 1000,
+                    "period": "total",
+                    "withinDays": 31,
+                    "source": "any",
+                    "text": "Pay in £1,000+ within 31 days of opening. Nationwide does not say whether it can be split, come from your own accounts, or has to stay."
+                },
+                {
+                    "id": "card",
+                    "type": "debit-card-payments",
+                    "count": 1,
+                    "period": "total",
+                    "withinDays": 31,
+                    "text": "Make at least one debit card payment within 31 days of opening."
+                }
+            ],
+            "payments": [
+                {
+                    "amount": 175,
+                    "count": 1,
+                    "anchor": "conditions-met",
+                    "requirementIds": [
+                        "dd",
+                        "dep",
+                        "card"
+                    ],
+                    "conditionsWithinDays": 31,
+                    "paidWithin": {
+                        "value": 10,
+                        "unit": "days"
+                    }
+                }
+            ],
+            "eligibility": {
+                "bonusReceived": {
+                    "since": "2021-01-01",
+                    "scope": "Nationwide"
+                }
+            },
+            "fees": {
+                "monthly": null,
+                "waivedBy": ""
+            },
+            "perks": [],
+            "ongoing": [
+                {
+                    "kind": "interest",
+                    "name": "5% interest on balances up to £1,500 for a year",
+                    "annualValue": 75,
+                    "needs": "paying in £1,500 a month"
+                },
+                {
+                    "kind": "cashback",
+                    "name": "Up to £120 a year cashback (£5 a month for £300+ of Direct Debits, £5 a month for £500+ of debit card spending)",
+                    "annualValue": 120,
+                    "needs": "£300+ of Direct Debits and £500+ of card spending each month"
+                },
+                {
+                    "kind": "saver",
+                    "name": "6.5% regular saver on up to £200/month for a year",
+                    "annualValue": 84,
+                    "needs": ""
+                }
+            ],
+            "schema": 2,
             "url": "https://www.moneysavingexpert.com/banking/compare-best-bank-accounts/#switch"
         }
     ],
@@ -398,5 +1104,58 @@
             "url": "https://www.moneysavingexpert.com/news/2026/01/nationwide-fairer-share-how-to/",
             "readOn": "2026-10-26"
         }
+    ],
+    "ongoingAccounts": [
+        {
+            "bank": "Santander",
+            "product": "Santander Edge",
+            "kind": "bills-cashback",
+            "minPayIn": 500,
+            "monthlyFee": 3,
+            "directDebitsNeeded": 2,
+            "annualValue": 84,
+            "annualValueNote": "1% cashback on household bills paid by Direct Debit, up to £10 a month (£120 a year), less the £3 monthly fee",
+            "summary": "Pays 1% cashback (up to £10 a month) on council tax, energy, water, phone, broadband and TV bills paid by Direct Debit; needs £500 a month paid in and 2+ Direct Debits."
+        },
+        {
+            "bank": "Zopa",
+            "product": "Zopa Biscuit",
+            "kind": "bills-cashback",
+            "minPayIn": null,
+            "monthlyFee": null,
+            "directDebitsNeeded": null,
+            "annualValue": 54,
+            "annualValueNote": "3% cashback on up to £150 a month of Direct Debit bills (maximum £54 a year)",
+            "summary": "Fee-free app account with no minimum pay-in and no hard credit check; choose 3% cashback on up to £150 a month of Direct Debit bills."
+        },
+        {
+            "bank": "Chase",
+            "product": "Chase current account",
+            "kind": "spend-cashback",
+            "minPayIn": null,
+            "monthlyFee": null,
+            "directDebitsNeeded": null,
+            "annualValue": 240,
+            "annualValueNote": "the maximum: 2% on everyday spending up to £20 a month",
+            "summary": "2% cashback on groceries, restaurants, transport and fuel up to £20 a month; needs 15+ card payments a month and £1,000+ in Chase savings."
+        }
+    ],
+    "bankGroups": [
+        [
+            "Santander",
+            "Cahoot"
+        ],
+        [
+            "HSBC",
+            "First Direct"
+        ],
+        [
+            "NatWest",
+            "Ulster Bank"
+        ],
+        [
+            "Nationwide",
+            "Virgin Money"
+        ]
     ]
 }

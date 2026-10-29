@@ -15,6 +15,25 @@ export function setLiveProfile(p) {
   try { localStorage.setItem(PROFILE_KEY, JSON.stringify(p)); } catch (e) { /* private mode: it just won't be remembered */ }
 }
 
+// How the plan should be built (how far ahead, fewest switches, keep a primary
+// account, ...) and whether this visitor has asked for their plan yet. Both
+// live only in this browser; the options travel with each request like the
+// salary figures do.
+const OPTIONS_KEY = 'switchadvisor-plan-options';
+const PLAN_KEY = 'switchadvisor-plan-requested';
+export function getOptions() {
+  try { return JSON.parse(localStorage.getItem(OPTIONS_KEY) || '{}') || {}; } catch (e) { return {}; }
+}
+export function setOptions(o) {
+  try { localStorage.setItem(OPTIONS_KEY, JSON.stringify(o)); } catch (e) { /* private mode */ }
+}
+export function planRequested() {
+  try { return localStorage.getItem(PLAN_KEY) === '1'; } catch (e) { return false; }
+}
+export function setPlanRequested(v) {
+  try { localStorage.setItem(PLAN_KEY, v ? '1' : '0'); } catch (e) { /* private mode */ }
+}
+
 export class ApiError extends Error {}
 
 async function call(action, { method = 'GET', body, auth = true } = {}) {
@@ -30,7 +49,7 @@ async function call(action, { method = 'GET', body, auth = true } = {}) {
 }
 
 export const redeemInvite = (token) => call('redeem', { method: 'POST', body: { token }, auth: false });
-export const getMe = () => call('me', { method: 'POST', body: getLiveProfile() });
+export const getMe = () => call('me', { method: 'POST', body: { ...getLiveProfile(), options: getOptions() } });
 export const upsertAccount = (account) => call('account-upsert', { method: 'POST', body: { account } });
 export const deleteAccount = (id) => call('account-delete', { method: 'POST', body: { id } });
 export const getBankList = () => call('banklist', { auth: false });

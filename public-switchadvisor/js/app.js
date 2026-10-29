@@ -18,7 +18,7 @@ tabs.forEach((btn) => {
 const NEEDS_INVITE_MESSAGE = 'You need an invite link to use this. Ask whoever runs it for one.';
 
 function showNeedsInvite(message) {
-  ['rec-list', 'accounts-list', 'cass-grid-mount'].forEach((id) => {
+  ['plan-mount', 'rec-list', 'accounts-list', 'cass-grid-mount'].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.innerHTML = `<div class="empty">${message}</div>`;
   });

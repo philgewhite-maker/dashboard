@@ -1,20 +1,11 @@
 import { getReferralInfo } from './api.js';
+import { REFERRALS, isSetUp } from './config.js';
 import { escapeHtml } from './utils.js';
 
-// Same provider-table idea as the dashboard's own affiliateLink()
-// (js/utils.js) -- a provider -> referral-link table, so adding a 4th
-// provider later is one line here, not new code. Fill in your own
-// referral codes/links below; left as placeholders until then.
-const PROVIDERS = [
-  { label: 'TopCashback', url: 'https://www.topcashback.co.uk/ref/PUT-YOUR-CODE-HERE', note: 'Cashback on everyday spending — sign up free.' },
-  { label: 'Quidco', url: 'https://www.quidco.com/raf/PUT-YOUR-CODE-HERE', note: 'Another cashback network — worth comparing a specific offer against TopCashback before clicking either.' },
-  { label: 'Kraken (crypto exchange)', url: 'https://kraken.com/r/PUT-YOUR-CODE-HERE', note: 'Not a bank-switch bonus — see the Kraken row in Recommendations for the actual reward estimate.' },
-];
-
 function providerRowHtml(p) {
-  const isPlaceholder = p.url.includes('PUT-YOUR-CODE-HERE');
+  const isPlaceholder = !isSetUp(p.url);
   return `<div class="referral-row">
-    <div class="rec-head"><span class="rec-bank">${escapeHtml(p.label)}</span></div>
+    <div class="rec-head"><span class="rec-bank">${escapeHtml(p.name)}</span></div>
     <div class="rec-rationale">${escapeHtml(p.note)}</div>
     ${isPlaceholder
       ? '<div class="rec-rationale muted">Referral link not set up yet.</div>'
@@ -25,7 +16,7 @@ function providerRowHtml(p) {
 export async function renderReferrals() {
   const mount = document.getElementById('referrals-list');
   if (!mount) return;
-  mount.innerHTML = PROVIDERS.map(providerRowHtml).join('');
+  mount.innerHTML = Object.values(REFERRALS).map(providerRowHtml).join('');
   const krakNote = document.getElementById('krak-tiers-note');
   if (krakNote) {
     try {
