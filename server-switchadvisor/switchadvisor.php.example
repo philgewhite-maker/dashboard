@@ -1900,7 +1900,26 @@ function compute_plan_v2(array $user, array $cache, array $rows, array $rawOptio
         $lines = fairer_share_steps_text($perk['def']);
         $viaSwitch = $chosen['perk']['via'] === 'switch' && ($chosen['perk']['day'] + CASS_DAYS) >= $perk['jan'];
         if (!$viaSwitch) $cards[] = ['kind' => 'perk', 'day' => $perk['jan'], 'dateLabel' => plan_label($perk['jan'], $today), 'title' => 'Fairer Share: use your Nationwide account', 'amount' => 0, 'why' => ['Nationwide pays about £100 a year to members who use their account in January–March. It is not guaranteed.'], 'actions' => [['text' => $lines['activity']]]];
-        $cards[] = ['kind' => 'perk', 'day' => max(0, $perk['mar'] - 30), 'dateLabel' => plan_label(max(0, $perk['mar'] - 30), $today), 'title' => 'Fairer Share: £100 in savings, keep the account open', 'amount' => 0, 'why' => ['It also needs £100+ in a Nationwide savings account in March (one more account to open if you have none), and the current account still open on 31 March.'], 'actions' => [['text' => $lines['savings']], ['text' => 'Keep the Nationwide current account open until after 31 March — this plan does not switch it on before then.']]];
+        // The savings account needs the Nationwide current account first, and £100 in it by
+        // March: open it well beforehand, as soon as the current account exists. The Flex
+        // Regular Saver (6.5% for a year, up to £200 a month) is the usual one and earns its
+        // own interest, so it is no dead weight.
+        $nwDay = ($chosen['perk']['via'] === 'switch' && $chosen['perk']['day'] !== null) ? $chosen['perk']['day'] + CASS_DAYS + 2 : 0;
+        $saveDay = max($nwDay, max(0, $perk['mar'] - 60));
+        $saveDay = min($saveDay, max(0, $perk['mar'] - 30));
+        $cards[] = ['kind' => 'perk', 'day' => $saveDay, 'dateLabel' => plan_label($saveDay, $today), 'title' => 'Fairer Share: open a Nationwide savings account', 'amount' => 0,
+            'why' => ['Fairer Share needs £100 or more in a Nationwide savings account during March (or a Nationwide mortgage). A savings account can only be opened once the current account exists, so do it as soon as the current account is open rather than leaving it to March.', 'Nationwide is also the account you are holding for the yearly payment anyway; holding it rules out another Nationwide switch bonus until it is closed, so it is the natural place to open its other useful products.'],
+            'actions' => [
+                ['text' => 'In the Nationwide app, open a savings account — the Flex Regular Saver is the usual choice (6.5% for a year on up to £200 a month, per MoneySavingExpert) and it needs the current account first. Skip this if you already have a Nationwide savings account or mortgage.'],
+                ['text' => 'Pay in £100 or more and leave it there at least until the end of March. The balance only has to be £100+ during March, but putting it in early removes the risk of forgetting.'],
+            ]];
+        $cards[] = ['kind' => 'perk', 'day' => max(0, $perk['mar'] - 7), 'dateLabel' => plan_label(max(0, $perk['mar'] - 7), $today), 'title' => 'Fairer Share: check before 31 March', 'amount' => 0,
+            'why' => ['A last check that the three things are in place before the window closes.'],
+            'actions' => [
+                ['text' => 'Check the £100+ is still in your Nationwide savings account (or you still owe £100+ on a Nationwide mortgage).'],
+                ['text' => 'Check you have used the current account in two of January–March (payments in from outside and out, or 10+ payments out) — a switch completing in the window counts instead.'],
+                ['text' => 'Keep the Nationwide current account open until after 31 March — this plan does not switch it on before then.'],
+            ]];
         $cards[] = ['kind' => 'perk', 'day' => $perk['pay'], 'dateLabel' => plan_label($perk['pay'], $today), 'title' => 'Fairer Share arrives (if Nationwide repeats it)', 'amount' => $perk['amount'], 'why' => ['Nationwide decides with its results in May and has paid in June for three years running.'], 'actions' => [['text' => 'Check the £100 landed. If not, check Nationwide\'s May announcement.']]];
     }
     $billsPick = plan_pick_bills($cache);
