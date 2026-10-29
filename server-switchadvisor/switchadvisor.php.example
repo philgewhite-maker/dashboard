@@ -1596,9 +1596,15 @@ function plan_end_state(array $sim, array $ctx, array $cache, array $byId): arra
             $cost === null ? '' : ($cost > 0 ? sprintf(', but the later switches in this plan would lose about %s', plan_money($cost)) : ' — and it costs the rest of this plan nothing'));
     }
     // A separate account for bills: where your Direct Debits finally settle.
+    // Only an account you can actually use: one that asks for a monthly pay-in needs
+    // an income that covers it (and when the income is not known, only accounts
+    // with no pay-in test are suggested).
     $bills = null;
+    $net = $ctx['netMonthly'] ?? null;
     foreach (($cache['ongoingAccounts'] ?? []) as $a) {
         if (($a['kind'] ?? '') !== 'bills-cashback' || empty($a['annualValue'])) continue;
+        $need = (float) ($a['minPayIn'] ?? 0);
+        if ($need > 0 && ($net === null || $net < $need)) continue;
         if ($bills === null || $a['annualValue'] > $bills['annualValue']) $bills = $a;
     }
     if ($bills) {
@@ -1606,7 +1612,7 @@ function plan_end_state(array $sim, array $ctx, array $cache, array $byId): arra
         $needs = [];
         if (!empty($bills['minPayIn'])) $needs[] = 'pay in ' . plan_money($bills['minPayIn']) . ' a month';
         if (!empty($bills['monthlyFee'])) $needs[] = 'a ' . plan_money($bills['monthlyFee']) . '/month fee';
-        $keep[] = ['name' => $bills['product'], 'text' => sprintf('%s as your bills account (optional, one more account) — about %s a year%s. %s Move your Direct Debits onto it once the last bonus is paid%s.', $bills['product'], plan_money($bills['annualValue']), $needs ? ' (' . implode(', ', $needs) . ')' : '', $bills['summary'] ?? '', $inCass ? ', with a CASS switch' : ' (repoint them one by one — it is not on the CASS list)')];
+        $keep[] = ['name' => $bills['product'], 'text' => sprintf('%s as your bills account (optional, one more account) — up to about %s a year%s, if your qualifying bills reach its cap. %s Move your Direct Debits onto it once the last bonus is paid%s.', $bills['product'], plan_money($bills['annualValue']), $needs ? ' (' . implode(', ', $needs) . ')' : '', $bills['summary'] ?? '', $inCass ? ', with a CASS switch' : ' (repoint them one by one — it is not on the CASS list)')];
     }
     $notes = [];
     $notes[] = 'Where your Direct Debits end up: they travel with each switch, so they sit on the last account in the chain. Before you finish, move them onto the account you keep for bills.';
@@ -1763,7 +1769,7 @@ function compute_plan_v2(array $user, array $cache, array $rows, array $rawOptio
     $rerun = function (array $locked) use ($candSets, $existing, $donorSpecs, $krak, $H, $perk, $cfg, $stageKrak) {
         return plan_simulate($candSets[$cfg['setIndex']] ?? $candSets[0], $existing, $donorSpecs, $cfg['n'], $krak, $cfg['order'], $H, $perk, $cfg['hold'], $locked, $stageKrak);
     };
-    $ctx = ['rerun' => $rerun, 'today' => $today, 'main' => $mainLabel, 'krak' => $krak, 'krakBalance' => $krakBalance, 'perkVia' => $chosen['perk'] ?? null, 'perkJan' => $perk['jan'] ?? null];
+    $ctx = ['rerun' => $rerun, 'today' => $today, 'main' => $mainLabel, 'krak' => $krak, 'krakBalance' => $krakBalance, 'netMonthly' => !empty($user['annualSalaryNet']) ? (float) $user['annualSalaryNet'] / 12 : null, 'perkVia' => $chosen['perk'] ?? null, 'perkJan' => $perk['jan'] ?? null];
     if (!$chosen['events'] && !$chosen['krakSegments']) return null;
     // Attach the cashback list of each new donor used.
     foreach ($chosen['events'] as $i => $e) {
@@ -2165,6 +2171,7 @@ if ($action === 'offers') {
     echo json_encode([
         'offers' => $cache['offers'] ?? [],
         'bankGroups' => $cache['bankGroups'] ?? [],
+        'ongoingAccounts' => $cache['ongoingAccounts'] ?? [],
         'annualPerks' => $cache['annualPerks'] ?? [],
         'history' => $cache['history'] ?? [],
         'cassParticipants' => $cache['cassParticipants'] ?? [],
