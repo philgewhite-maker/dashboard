@@ -344,7 +344,7 @@ Each offer is ONE JSON object in exactly this shape. Use null (or [] / false) fo
     "count": number or null (how many Direct Debits, or how many card payments),
     "amount": number or null (GBP: the salary per month, the deposit, the spend),
     "period": "'once' (a single event), 'each-month' (repeated every month), or 'total' (a one-off amount that may be paid in several parts)",
-    "months": number or null (for 'each-month' items: how many months from the FIRST month, counting it, the requirement must hold for the payment that depends on it to be earned; e.g. salary in the first month plus five more = 6. If the page does not say how many months, it MUST be null — never 1, never a guess),
+    "months": number or null (for 'each-month' items: how many months from the FIRST month, counting it, the requirement must hold for the payment that depends on it to be earned; e.g. salary in the first month plus five more = 6. A requirement about the FIRST month only (\"within 30 days\", \"in the first month\") is months 1. If the page does not say how many months a monthly requirement lasts, it MUST be null — never a guess),
     "withinDays": number or null (days allowed to meet it),
     "anchor": "'opening' (days counted from opening the account), 'switch-start', or 'switch-complete'",
     "source": "for pay-in/salary: 'employer' when it must be salary/pension/benefit by Bacs from an employer or similar (not your own accounts), 'any' when money from anywhere counts, otherwise null",

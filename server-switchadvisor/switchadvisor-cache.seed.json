@@ -370,10 +370,8 @@
                     "id": "sal",
                     "type": "salary",
                     "period": "each-month",
-                    "months": 3,
-                    "assumed": true,
                     "source": "employer",
-                    "text": "Salary paid into the account each month while you switch in (HSBC does not say how many months — about 3 is assumed from the 90-day window; whether self-employed income counts is not stated)."
+                    "text": "Salary paid into the account each month (HSBC does not say how many months, so every payday in the 70 days to payment is taken as required — 3 at least; whether self-employed income counts is not stated)."
                 }
             ],
             "payments": [
@@ -768,10 +766,8 @@
                     "id": "sal",
                     "type": "salary",
                     "period": "each-month",
-                    "months": 3,
-                    "assumed": true,
                     "source": "employer",
-                    "text": "Salary paid in each month on the £100,000-earner route (NatWest does not say how many months — about 3 is assumed from the 90-day window)."
+                    "text": "Salary paid in each month on the £100,000-earner route (NatWest does not say how many months, so every payday in the 120 days to payment is taken as required)."
                 },
                 {
                     "id": "dep",

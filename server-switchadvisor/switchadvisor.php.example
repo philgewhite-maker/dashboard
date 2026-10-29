@@ -178,6 +178,7 @@ function sanitize_user(array $u): array {
 // ddCount, minFunding, heldSinceCutoff, payInType, salaryMonths and so on --
 // so there is ONE place that turns structure into those, never two. Offers
 // without "schema": 2 pass through untouched.
+const PLAN_MONTH_DAYS = 30;
 const COND_TYPES = ['direct-debits', 'salary', 'pay-in', 'debit-card-payments', 'card-spend', 'app-login', 'min-balance', 'keep-open', 'other'];
 const PAY_ANCHORS = ['switch-start', 'switch-complete', 'account-open', 'conditions-met'];
 
@@ -185,6 +186,25 @@ function nz_num($v): ?float { return (is_int($v) || is_float($v) || (is_string($
 function nz_int($v): ?int { $n = nz_num($v); return $n === null ? null : (int) round($n); }
 function nz_date($v): ?string { return (is_string($v) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $v)) ? $v : null; }
 function nz_str($v): string { return is_string($v) ? trim($v) : ''; }
+
+// "on or before 1 Oct", "on or after 2 Sep", "on 6 May": an offer's own wording for
+// when you must not have held an account. The year is not stated, but the intent is
+// clear -- it is the most recent such date, i.e. this year's (the offer's own start).
+// Read as: 'on-or-after' = nothing held from that date; 'on' = nothing held on that
+// day; 'on-or-before' = no account that is still open and was opened by that date.
+function resolve_date_phrase(string $text, ?string $today = null): ?array {
+    $today = $today ?: date('Y-m-d');
+    if (!preg_match('/^\s*on(?:\s+or\s+(before|after))?\s+(\d{1,2})(?:st|nd|rd|th)?\s+([a-z]+)/i', $text, $m)) return null;
+    $months = ['jan' => 1, 'feb' => 2, 'mar' => 3, 'apr' => 4, 'may' => 5, 'jun' => 6, 'jul' => 7, 'aug' => 8, 'sep' => 9, 'oct' => 10, 'nov' => 11, 'dec' => 12];
+    $mon = $months[strtolower(substr($m[3], 0, 3))] ?? null;
+    $day = (int) $m[2];
+    if (!$mon || $day < 1 || $day > 31) return null;
+    $y = (int) substr($today, 0, 4);
+    $d = sprintf('%04d-%02d-%02d', $y, $mon, $day);
+    if ($d > $today) $d = sprintf('%04d-%02d-%02d', $y - 1, $mon, $day);
+    $mode = $m[1] === '' ? 'on' : (strtolower($m[1]) === 'before' ? 'on-or-before' : 'on-or-after');
+    return ['mode' => $mode, 'date' => $d];
+}
 
 // "within 28 working days" -> calendar days, so a payout date can be worked out.
 function paid_within_days($pw): int {
@@ -204,7 +224,12 @@ function normalise_condition($c, int $i): ?array {
     $period = in_array($c['period'] ?? '', ['once', 'each-month', 'total'], true) ? $c['period'] : 'once';
     $assumed = !empty($c['assumed']);
     $monthsGiven = nz_int($c['months'] ?? null);
-    if ($type === 'salary' && $monthsGiven === null) { $monthsGiven = 3; $assumed = true; } // the offer does not say how many months
+    // Salary with no month count: a one-off or first-month requirement is one month; a
+    // monthly one the offer doesn't put a number on ("salary paid in each month") is
+    // assumed to be 3, and flagged as an assumption.
+    // (A monthly salary with no stated count is left null here and worked out from
+    // the payment window in offer_v2_normalise(); a first-month-only one is 1.)
+    if ($type === 'salary' && $monthsGiven === null && $period !== 'each-month') $monthsGiven = 1;
     $source = in_array($c['source'] ?? '', ['any', 'employer', 'external'], true) ? $c['source'] : null;
     return [
         'id' => nz_str($c['id'] ?? '') ?: 'c' . ($i + 1),
@@ -234,16 +259,27 @@ function offer_v2_normalise(array $o): array {
         // Months of salary needed before this payment's LAST instalment is earned
         // (conditions count months from the first month, inclusive), and for its
         // first instalment (one interval earlier per extra instalment).
+        $paidDays = paid_within_days($p['paidWithin'] ?? null);
+        $anchor = in_array($p['anchor'] ?? '', PAY_ANCHORS, true) ? $p['anchor'] : 'conditions-met';
         $last = 0;
         foreach ($ids as $id) {
-            if ($conds[$id]['type'] === 'salary') $last = max($last, $conds[$id]['months'] ?? 1);
+            if ($conds[$id]['type'] !== 'salary') continue;
+            if ($conds[$id]['months'] === null) {
+                // "Salary paid in each month", and the bonus is paid within N days: every payday
+                // inside that window is taken to be required (at least 3, conservatively), and the
+                // window itself runs from the switch, not from the last payday.
+                $conds[$id]['months'] = max(3, (int) ceil($paidDays / PLAN_MONTH_DAYS));
+                $conds[$id]['assumed'] = true;
+                if ($anchor === 'conditions-met') $anchor = 'switch-complete';
+            }
+            $last = max($last, $conds[$id]['months']);
         }
         $first = $last ? max(1, $last - ($count - 1) * ($interval ?: 1)) : 0;
         $payments[] = [
             'amount' => $amount, 'count' => $count, 'intervalMonths' => $interval,
-            'anchor' => in_array($p['anchor'] ?? '', PAY_ANCHORS, true) ? $p['anchor'] : 'conditions-met',
+            'anchor' => $anchor,
             'conditionsWithinDays' => nz_int($p['conditionsWithinDays'] ?? null),
-            'paidDays' => paid_within_days($p['paidWithin'] ?? null), 'requirementIds' => $ids,
+            'paidDays' => $paidDays, 'requirementIds' => $ids,
             'salaryMonthsLast' => $last, 'salaryMonthsFirst' => $first, 'note' => nz_str($p['note'] ?? ''),
         ];
     }
@@ -321,6 +357,17 @@ function offer_v2_normalise(array $o): array {
     }
     $o['heldSinceCutoff'] = $h['since'];
     $o['heldRuleText'] = $h['since'] ? null : ($h['dateText'] ?: null);
+    $o['heldOnDate'] = null;
+    $o['heldOpenBy'] = null;
+    if (!$h['since'] && $h['dateText'] !== '') {
+        $r = resolve_date_phrase($h['dateText']);
+        if ($r) {
+            if ($r['mode'] === 'on-or-after') { $o['heldSinceCutoff'] = $r['date']; }
+            elseif ($r['mode'] === 'on') { $o['heldOnDate'] = $r['date']; }
+            else { $o['heldOpenBy'] = $r['date']; $o['heldRuleText'] = null; } // closing a still-open account clears this one
+            if ($r['mode'] === 'on-or-after') $o['heldRuleText'] = null;
+        }
+    }
     $o['heldEver'] = $h['ever'] && !$h['since'] && !$h['dateText'];
     $b = $o['eligibility']['bonusReceived'];
     $o['bonusSinceCutoff'] = $b['since'];
@@ -455,6 +502,22 @@ function offer_eligibility(array $offer, array $accounts): array {
     foreach ($held as $a) {
         $closeDate = (string) ($a['closeDate'] ?? '');
         $stillOpen = $closeDate === '';
+        $opened = (string) ($a['openDate'] ?? '');
+        if (!empty($offer['heldOnDate'])) {
+            // "No account on 6 May": held on that day = opened by then and not closed before it.
+            $day = $offer['heldOnDate'];
+            if (($opened === '' || $opened <= $day) && ($stillOpen || $closeDate >= $day)) {
+                return ['eligible' => false, 'kind' => 'held-on', 'openIds' => $openIds, 'reason' => "Excluded: {$bank}'s terms rule out anyone with a {$bank} account on " . date('j M Y', strtotime($day)) . ', and you held one then.'];
+            }
+            continue;
+        }
+        if (!empty($offer['heldOpenBy'])) {
+            // "No currently open account on or before 1 Oct": open now, and opened by that date.
+            if ($stillOpen && ($opened === '' || $opened <= $offer['heldOpenBy'])) {
+                return ['eligible' => false, 'kind' => 'open', 'openIds' => $openIds, 'reason' => "You still hold a {$bank} account opened by " . date('j M Y', strtotime($offer['heldOpenBy'])) . ", which this offer excludes — closing it would clear that."];
+            }
+            continue;
+        }
         if ($cutoff) {
             // "Not held an account since <cutoff>" — disqualified if still
             // open, or closed on/after the cutoff date.
@@ -849,7 +912,8 @@ function compute_recommendations(array $user, array $cache): array {
         $ideas = [];
         $kind = $w['elig']['kind'] ?? '';
         $datePhrase = $kind === 'cutoff' ? 'since ' . substr((string) ($w['offer']['heldSinceCutoff'] ?? ''), 0, 10)
-            : ($kind === 'open' && !empty($w['offer']['heldRuleText']) ? (string) $w['offer']['heldRuleText'] : '');
+            : ($kind === 'held-on' ? 'on ' . date('j M Y', strtotime((string) $w['offer']['heldOnDate']))
+            : ($kind === 'open' && !empty($w['offer']['heldRuleText']) ? (string) $w['offer']['heldRuleText'] : ''));
         if (!$eligible && $datePhrase !== '' && !empty($w['elig']['openIds'])) {
             $open = array_values(array_filter($accounts, fn($a) => in_array($a['id'] ?? '', $w['elig']['openIds'], true)));
             $keeping = count(array_filter($open, fn($a) => ($a['wantToKeep'] ?? null) === true)) > 0;
@@ -1102,7 +1166,6 @@ const CASS_DAYS = 10;               // a full switch: 7 working days plus the da
 const PLAN_SAFETY_DAYS = 5;         // margin after a payout before the account is switched on
 const PLAN_MAX_NEW_DONORS = 3;
 const PLAN_MIN_SIDE_QUEST = 50;     // a donor account must add at least this to be offered
-const PLAN_MONTH_DAYS = 30;
 const PLAN_NEW_DONOR_DAYS = 7;      // opening a new donor and setting up its Direct Debits
 const PLAN_MIN_KRAK_MONTHS = 2;     // a stretch of salary at Krak shorter than this isn't worth two repoints
 
@@ -1172,7 +1235,7 @@ function plan_choose_stage(array $c, int $s, float $krak, int $H): ?array {
     return $best;
 }
 
-function plan_simulate(array $cands, array $existing, array $donorSpecs, int $newCount, float $krak, string $order, int $H, ?array $perk, bool $hold, array $locked = []): array {
+function plan_simulate(array $cands, array $existing, array $donorSpecs, int $newCount, float $krak, string $order, int $H, ?array $perk, bool $hold, array $locked = [], ?float $stageKrak = null): array {
     usort($cands, function ($a, $b) use ($order) {
         if ($order === 'deadline') {
             $da = $a['deadline'] ?? 99999;
@@ -1224,7 +1287,8 @@ function plan_simulate(array $cands, array $existing, array $donorSpecs, int $ne
                 }
             }
             if ($pick === null) continue;
-            $st = plan_choose_stage($c, $d, $krak, $H);
+            // $stageKrak = 0 takes every instalment of a staged bonus whatever Krak would have paid.
+            $st = plan_choose_stage($c, $d, $stageKrak ?? $krak, $H);
             if (!$st) continue;
             if ($st['months']) {
                 foreach ($salary as [$a, $b]) {
@@ -1365,7 +1429,7 @@ function plan_event_why(array $e, array $ctx, int $idx, ?string $prevHolder): ar
     if ($st['months'] > 0) {
         $why[] = sprintf('It needs real salary for %d month%s, so your salary goes here from %s to %s. Salary can only land in one place, so this is sequenced with the other salary-tied offers and Krak.', $st['months'], $st['months'] === 1 ? '' : 's', plan_label($st['salaryFrom'], $today), plan_label($st['salaryTo'], $today));
         $full = $c['stagesTotal'] ?? null;
-        if ($full !== null && $st['value'] < $full) $why[] = sprintf('The later instalments (%s more) are skipped: they would tie your salary up for longer than they pay compared with Krak.', plan_money($full - $st['value']));
+        if ($full !== null && $st['value'] < $full) $why[] = sprintf('The later instalments (%s more) are skipped: they would tie your salary up for longer than they pay compared with Krak. Tick "Take every instalment" under Options to include them.', plan_money($full - $st['value']));
     }
     if ($c['deadline'] !== null) $why[] = sprintf('The offer ends %s, so it is taken before offers with no deadline.', plan_label($c['deadline'], $today));
     $why[] = sprintf('Pays %s, expected by about %s%s.', plan_money($st['value']), plan_label(max(array_column($st['payouts'], 'day')), $today), count($st['payouts']) > 1 ? sprintf(' (%d payments)', count($st['payouts'])) : '');
@@ -1553,6 +1617,7 @@ function plan_options(array $raw): array {
         'horizonMonths' => $months,
         'minimise' => !empty($raw['minimiseSwitches']),
         'allowNew' => !array_key_exists('allowNewAccounts', $raw) || !empty($raw['allowNewAccounts']),
+        'fullBonuses' => !empty($raw['fullBonuses']),
         'primaryId' => (!empty($raw['keepPrimary']) && is_string($raw['primaryAccountId'] ?? null)) ? $raw['primaryAccountId'] : '',
     ];
 }
@@ -1669,6 +1734,7 @@ function compute_plan_v2(array $user, array $cache, array $rows, array $rawOptio
     }
     $candSets = [$cands];
     if (count($bestPerGroup) < count($cands)) $candSets[] = array_values($bestPerGroup);
+    $stageKrak = $opt['fullBonuses'] ? 0.0 : null;
     $maxNew = (!$opt['allowNew']) ? 0 : ($opt['minimise'] ? ($existing ? 0 : 1) : PLAN_MAX_NEW_DONORS);
     $sims = [];
     for ($n = 0; $n <= $maxNew; $n++) {
@@ -1676,7 +1742,7 @@ function compute_plan_v2(array $user, array $cache, array $rows, array $rawOptio
         foreach ($candSets as $si => $set) {
             foreach (['amount', 'deadline'] as $order) {
                 foreach ($perk ? [false, true] : [false] as $hold) {
-                    $s = plan_simulate($set, $existing, $donorSpecs, $n, $krak, $order, $H, $perk, $hold);
+                    $s = plan_simulate($set, $existing, $donorSpecs, $n, $krak, $order, $H, $perk, $hold, [], $stageKrak);
                     $s['config']['setIndex'] = $si;
                     if ($bestSim === null || $s['total'] > $bestSim['total']) $bestSim = $s;
                 }
@@ -1691,8 +1757,8 @@ function compute_plan_v2(array $user, array $cache, array $rows, array $rawOptio
     }
     $chosen = end($ladder);
     $cfg = $chosen['config'];
-    $rerun = function (array $locked) use ($candSets, $existing, $donorSpecs, $krak, $H, $perk, $cfg) {
-        return plan_simulate($candSets[$cfg['setIndex']] ?? $candSets[0], $existing, $donorSpecs, $cfg['n'], $krak, $cfg['order'], $H, $perk, $cfg['hold'], $locked);
+    $rerun = function (array $locked) use ($candSets, $existing, $donorSpecs, $krak, $H, $perk, $cfg, $stageKrak) {
+        return plan_simulate($candSets[$cfg['setIndex']] ?? $candSets[0], $existing, $donorSpecs, $cfg['n'], $krak, $cfg['order'], $H, $perk, $cfg['hold'], $locked, $stageKrak);
     };
     $ctx = ['rerun' => $rerun, 'today' => $today, 'main' => $mainLabel, 'krak' => $krak, 'krakBalance' => $krakBalance, 'perkVia' => $chosen['perk'] ?? null, 'perkJan' => $perk['jan'] ?? null];
     if (!$chosen['events'] && !$chosen['krakSegments']) return null;

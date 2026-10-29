@@ -154,6 +154,7 @@ function readOptionsFromForm() {
   return {
     horizonMonths: horizon,
     minimiseSwitches: document.getElementById('opt-minimise').checked,
+    fullBonuses: document.getElementById('opt-full').checked,
     keepPrimary: keep,
     primaryAccountId: keep ? document.getElementById('opt-primary').value : '',
     allowNewAccounts: document.getElementById('opt-allow-new').checked,
@@ -165,6 +166,7 @@ function fillOptionsForm(me) {
   const set = (id, fn) => { const el = document.getElementById(id); if (el) fn(el); };
   set('opt-horizon', (el) => { el.value = String(o.horizonMonths || 12); });
   set('opt-minimise', (el) => { el.checked = !!o.minimiseSwitches; });
+  set('opt-full', (el) => { el.checked = !!o.fullBonuses; });
   set('opt-allow-new', (el) => { el.checked = o.allowNewAccounts !== false; });
   const accounts = (me.user.accounts || []).filter((a) => !a.closeDate);
   const sel = document.getElementById('opt-primary');
