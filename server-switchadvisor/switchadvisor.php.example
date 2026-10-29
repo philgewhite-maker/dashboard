@@ -1570,8 +1570,10 @@ function plan_end_state(array $sim, array $ctx, array $cache, array $byId): arra
         $value = 0.0;
         $parts = [];
         $n = 0;
+        $seen = [];
         foreach (array_merge($o['ongoing'], $o['perks']) as $b) {
-            if ($b['annualValue']) { $value += $b['annualValue']; $n++; $parts[] = $b['name'] . (' ' . '(' . plan_money($b['annualValue']) . ')'); }
+            $dupe = $b['kind'] . '|' . $b['annualValue'];
+            if ($b['annualValue'] && !isset($seen[$dupe])) { $seen[$dupe] = true; $value += $b['annualValue']; $n++; $parts[] = $b['name'] . (' ' . '(' . plan_money($b['annualValue']) . ')'); }
         }
         if ($n === 1) $parts = [preg_replace('/ \(£[\d,]+\)$/', '', $parts[0])];
         if ($value > 0) $keep[] = ['name' => $o['product'], 'text' => sprintf('%s — keeps paying about %s a year: %s.', $o['product'], plan_money($value), implode('; ', $parts))];
@@ -1610,13 +1612,26 @@ function plan_end_state(array $sim, array $ctx, array $cache, array $byId): arra
         $needs = [];
         if (!empty($bills['minPayIn'])) $needs[] = 'pay in ' . plan_money($bills['minPayIn']) . ' a month — money moved in from your own accounts normally counts, but check the terms';
         if (!empty($bills['monthlyFee'])) $needs[] = 'a ' . plan_money($bills['monthlyFee']) . '/month fee';
-        $keep[] = ['name' => $bills['product'], 'text' => sprintf('%s as your bills account (optional, one more account) — up to about %s a year%s, if your qualifying bills reach its cap. %s Move your Direct Debits onto it once the last bonus is paid%s.', $bills['product'], plan_money($bills['annualValue']), $needs ? ' (' . implode(', ', $needs) . ')' : '', $bills['summary'] ?? '', $inCass ? ', with a CASS switch' : ' (repoint them one by one — it is not on the CASS list)')];
+        $billsName = stripos($bills['product'], (string) $bills['bank']) === false ? trim($bills['bank'] . ' ' . $bills['product']) : $bills['product'];
+        $keep[] = ['name' => $billsName, 'text' => sprintf('%s as your bills account (optional, one more account) — up to about %s a year%s, if your qualifying bills reach its cap. %s Move your Direct Debits onto it once the last bonus is paid%s.', $billsName, plan_money($bills['annualValue']), $needs ? ' (' . implode(', ', $needs) . ')' : '', $bills['summary'] ?? '', $inCass ? ', with a CASS switch' : ' (repoint them one by one — it is not on the CASS list)')];
     }
     $notes = [];
     $notes[] = 'Where your Direct Debits end up: they travel with each switch, so they sit on the last account in the chain. Before you finish, move them onto the account you keep for bills.';
     $notes[] = 'Close the accounts you no longer need: many offers exclude anyone who held an account since a date, and banks keep moving that date forward — a closed account can let you in again for a future round.';
     return ['keep' => array_map(fn($k) => $k['text'], $keep), 'alternatives' => $alts, 'close' => $closeAtEnd, 'notes' => $notes];
 }
+// A cashback deal's name ("Santander Everyday Current Account") starts with the bank. The
+// sites also list comparison-site deals ("Compare the Market Current Accounts") that are
+// not banks; only a deal that begins with a bank on the CASS list can be a donor account.
+function deal_is_cass_bank(string $name, array $participants): bool {
+    $n = normalize_bank_name($name);
+    foreach ($participants as $p) {
+        $np = normalize_bank_name((string) $p);
+        if (strlen($np) >= 3 && ($n === $np || strpos($n, $np . ' ') === 0)) return true;
+    }
+    return false;
+}
+
 function plan_options(array $raw): array {
     $months = (int) ($raw['horizonMonths'] ?? 12);
     if (!in_array($months, [6, 12, 18, 24], true)) $months = 12;
@@ -1704,7 +1719,7 @@ function compute_plan_v2(array $user, array $cache, array $rows, array $rawOptio
         $name = (string) ($d['name'] ?? '');
         $g = bank_group($name);
         $amt = (float) ($d['amount'] ?? 0);
-        if ($g === '' || $amt <= 0 || isset($heldGroups[$g]) || in_array($g, $candGroups, true) || preg_match('/student|graduate|youth|junior|child|kids|under/i', $name)) continue;
+        if ($g === '' || $amt <= 0 || isset($heldGroups[$g]) || in_array($g, $candGroups, true) || preg_match('/student|graduate|youth|junior|child|kids|under/i', $name) || !deal_is_cass_bank($name, $cache['cassParticipants'] ?? [])) continue;
         if (!isset($specs[$g]) || $amt > $specs[$g]['cashback']) {
             $prov = ($d['provider'] ?? '') === 'quidco' ? 'quidco' : 'topcashback';
             $specs[$g] = ['product' => $name, 'group' => $g, 'cashback' => $amt, 'site' => $prov === 'quidco' ? 'Quidco' : 'TopCashback'];
