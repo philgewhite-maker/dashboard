@@ -638,7 +638,7 @@
                     "scope": "Lloyds, Halifax or Bank of Scotland (either party on a joint account)"
                 },
                 "income": {
-                    "minAnnual": 85000,
+                    "minAnnual": null,
                     "altRoute": "£100,000+ saved/invested"
                 }
             },

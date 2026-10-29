@@ -1596,21 +1596,19 @@ function plan_end_state(array $sim, array $ctx, array $cache, array $byId): arra
             $cost === null ? '' : ($cost > 0 ? sprintf(', but the later switches in this plan would lose about %s', plan_money($cost)) : ' — and it costs the rest of this plan nothing'));
     }
     // A separate account for bills: where your Direct Debits finally settle.
-    // Only an account you can actually use: one that asks for a monthly pay-in needs
-    // an income that covers it (and when the income is not known, only accounts
-    // with no pay-in test are suggested).
+    // A monthly pay-in test is NOT an income test: unless an offer says "salary", money
+    // moved in from your own accounts normally counts, so savings can be rotated through
+    // to meet it. The best account is suggested whatever your income, with the pay-in
+    // named so you can check it.
     $bills = null;
-    $net = $ctx['netMonthly'] ?? null;
     foreach (($cache['ongoingAccounts'] ?? []) as $a) {
         if (($a['kind'] ?? '') !== 'bills-cashback' || empty($a['annualValue'])) continue;
-        $need = (float) ($a['minPayIn'] ?? 0);
-        if ($need > 0 && ($net === null || $net < $need)) continue;
         if ($bills === null || $a['annualValue'] > $bills['annualValue']) $bills = $a;
     }
     if ($bills) {
         $inCass = is_cass_participant((string) $bills['bank'], $cache['cassParticipants'] ?? []) === 'yes';
         $needs = [];
-        if (!empty($bills['minPayIn'])) $needs[] = 'pay in ' . plan_money($bills['minPayIn']) . ' a month';
+        if (!empty($bills['minPayIn'])) $needs[] = 'pay in ' . plan_money($bills['minPayIn']) . ' a month — money moved in from your own accounts normally counts, but check the terms';
         if (!empty($bills['monthlyFee'])) $needs[] = 'a ' . plan_money($bills['monthlyFee']) . '/month fee';
         $keep[] = ['name' => $bills['product'], 'text' => sprintf('%s as your bills account (optional, one more account) — up to about %s a year%s, if your qualifying bills reach its cap. %s Move your Direct Debits onto it once the last bonus is paid%s.', $bills['product'], plan_money($bills['annualValue']), $needs ? ' (' . implode(', ', $needs) . ')' : '', $bills['summary'] ?? '', $inCass ? ', with a CASS switch' : ' (repoint them one by one — it is not on the CASS list)')];
     }
@@ -1655,8 +1653,8 @@ function compute_plan_v2(array $user, array $cache, array $rows, array $rawOptio
         if (($r['bank'] ?? '') === 'Kraken' || empty($r['eligible'])) continue;
         $o = $byProduct[mb_strtolower(trim((string) $r['product']))] ?? null;
         if (!$o) continue;
-        // An offer with an income test can't be planned until the page knows your income.
-        if (!$incomeKnown && (!empty($o['highEarner']) || !empty($o['minAnnualEarnings']) || !empty($o['minMonthlySalary']))) {
+        // An offer with an earnings or salary test can't be planned until the page knows your income (a pay-in test is not one: savings can be rotated through to meet it).
+        if (!$incomeKnown && (!empty($o['minAnnualEarnings']) || !empty($o['minMonthlySalary']))) {
             $needIncome[] = (string) $o['product'];
             continue;
         }
