@@ -1560,7 +1560,7 @@ function plan_krak_spend_card(array $ctx, array $cache): ?array {
     return [
         'kind' => 'krak', 'day' => 0, 'dateLabel' => plan_label(0, $today),
         'title' => 'Open Krak now for card cashback', 'amount' => 0, 'amountLabel' => 'about ' . plan_money($ctx['krakSpendMonthly'] * 12) . ' a year',
-        'why' => ['Krak pays cashback on card spending at the same balance tiers as Salary Match, and that needs no salary — so it starts earning as soon as the balance is in place, long before any salary arrives.', 'Your balance has to sit there (an average of ' . plan_money($ctx['krakTierMin']) . ' at this tier), so weigh the cashback against what that money would earn elsewhere.', 'Krak may give new customers a welcome boost to its top tier for a while; its help pages do not say for how long, so this plan does not count it.'],
+        'why' => ['Krak pays cashback on card spending at the same balance tiers as Salary Match, and that needs no salary — so it starts earning as soon as the balance is in place, long before any salary arrives.', 'Your balance has to sit there (an average of ' . plan_money($ctx['krakTierMin']) . ' at this tier), so weigh the cashback against what that money would earn elsewhere.', 'New Krak customers get its top rewards (2% cashback, 1% salary match) for their first 30 days, then it falls back to the rate your balance earns. Opening now uses that month for spending; the plan counts it as the first month\'s cashback.'],
         'actions' => $acts, 'krak' => true,
     ];
 }
@@ -1578,7 +1578,7 @@ function plan_krak_cards(array $sim, array $ctx, array $cache): array {
         $months = intdiv($b - $a, PLAN_MONTH_DAYS);
         $acts = [];
         if ($i === 0 && empty($ctx['krakSpendMonthly'])) {
-            $acts[] = ['text' => 'Open a Krak account (the Kraken app) and verify it.', 'link' => ['label' => 'Open Krak', 'url' => 'https://support.krak.app/articles/krak-salary-match', 'ref' => 'krak']];
+            $acts[] = ['text' => 'Open a Krak account (the Kraken app) and verify it — a few days before your first salary arrives, so the first 30 days fall on your first salary.', 'link' => ['label' => 'Open Krak', 'url' => 'https://support.krak.app/articles/krak-salary-match', 'ref' => 'krak']];
         }
         $acts[] = ['text' => sprintf('Ask your employer to pay your salary into Krak by Faster Payments from %s — it has to come straight from an employer (or another third party) and be at least %s a month; a standing order from your own account does not count.', plan_label($a, $today), plan_money((float) ($cache['krakSalaryMin'] ?? 2500)))];
         $acts[] = ['text' => sprintf('Krak pays a percentage of each salary payment, set by your average balance over the last 30 days%s. Have the balance in place a month before the salary starts arriving.', $tier ? sprintf(' — at your assumed balance of %s that is %s%% (the %s tier), about %s a month', plan_money($ctx['krakBalance']), rtrim(rtrim(number_format((float) $tier['percent'], 2), '0'), '.'), $tier['name'] ?? '', plan_money($krak)) : '')];
@@ -1586,7 +1586,8 @@ function plan_krak_cards(array $sim, array $ctx, array $cache): array {
             'kind' => 'krak', 'day' => $a, 'dateLabel' => plan_label($a, $today),
             'title' => $i === 0 ? 'Send your salary to Krak Salary Match' : 'Move your salary back to Krak',
             'amount' => $krak * $months,
-            'why' => [sprintf('Salary only lands in one account. For %d month%s nothing else in this plan needs it, and Krak pays about %s a month for it — an ongoing benefit, not a one-off.', $months, $months === 1 ? '' : 's', plan_money($krak))],
+            'why' => array_values(array_filter([sprintf('Salary only lands in one account. For %d month%s nothing else in this plan needs it, and Krak pays about %s a month for it — an ongoing benefit, not a one-off.', $months, $months === 1 ? '' : 's', plan_money($krak)),
+                ($i === 0 && !empty($ctx['krakWelcomeSalary'])) ? sprintf('Open Krak a few days before your first salary arrives: a new customer gets the top salary-match rate for the first 30 days, worth about %s extra on that first month, and then it falls back to your balance tier.', plan_money($ctx['krakWelcomeSalary'])) : null])),
             'actions' => $acts, 'krak' => true,
         ];
     }
@@ -1755,7 +1756,23 @@ function compute_plan_v2(array $user, array $cache, array $rows, array $rawOptio
         if ($krakBalance >= ($t['minBalance'] ?? 0)) { $spendPct = (float) ($t['percent'] ?? 0); $spendTierMin = (float) ($t['minBalance'] ?? 0); }
     }
     $krakSpendMonthly = ($spendBase > 0 && $spendPct > 0) ? $spendBase * $spendPct / 100 : 0.0;
-    $krakSpendValue = $krakSpendMonthly * max(0, ($H - PLAN_MONTH_DAYS) / PLAN_MONTH_DAYS); // the average balance takes a month to build
+    // The average balance takes a month to build, but a new customer gets Max rewards for the first 30 days.
+    $topCard = 0.0;
+    foreach ($cardTiers as $t) $topCard = max($topCard, (float) ($t['percent'] ?? 0));
+    $krakSpendValue = $krakSpendMonthly * max(0, ($H - PLAN_MONTH_DAYS) / PLAN_MONTH_DAYS) + ($krakSpendMonthly > 0 ? $spendBase * $topCard / 100 : 0.0);
+    // Salary: opened just before the first Krak salary, the first 30 days pay the top salary-match rate.
+    $welcomeSalary = 0.0;
+    $salaryTiers = $cache['krakTiers'] ?? [];
+    usort($salaryTiers, fn($a, $b) => ($a['minBalance'] ?? 0) <=> ($b['minBalance'] ?? 0));
+    $salTierPct = 0.0;
+    $salTopPct = 0.0;
+    foreach ($salaryTiers as $t) {
+        $salTopPct = max($salTopPct, (float) ($t['percent'] ?? 0));
+        if ($krakBalance >= ($t['minBalance'] ?? 0)) $salTierPct = (float) ($t['percent'] ?? 0);
+    }
+    if (!empty($user['annualSalaryNet']) && $krakSpendMonthly <= 0) {
+        $welcomeSalary = max(0.0, $salTopPct - $salTierPct) / 100 * min((float) $user['annualSalaryNet'] / 12, (float) ($cache['krakSalaryCap'] ?? 25000));
+    }
     $byId = [];
     $byProduct = [];
     foreach (($cache['offers'] ?? []) as $o) {
@@ -1884,7 +1901,7 @@ function compute_plan_v2(array $user, array $cache, array $rows, array $rawOptio
     $rerun = function (array $locked) use ($candSets, $existing, $donorSpecs, $krak, $H, $perk, $cfg, $stageKrak) {
         return plan_simulate($candSets[$cfg['setIndex']] ?? $candSets[0], $existing, $donorSpecs, $cfg['n'], $krak, $cfg['order'], $H, $perk, $cfg['hold'], $locked, $stageKrak);
     };
-    $ctx = ['rerun' => $rerun, 'today' => $today, 'main' => $mainLabel, 'krak' => $krak, 'krakBalance' => $krakBalance, 'krakSpendMonthly' => $krakSpendMonthly, 'krakSpendBase' => $spendBase, 'krakSpendPct' => $spendPct, 'krakTierMin' => $spendTierMin, 'netMonthly' => !empty($user['annualSalaryNet']) ? (float) $user['annualSalaryNet'] / 12 : null, 'perkVia' => $chosen['perk'] ?? null, 'perkJan' => $perk['jan'] ?? null];
+    $ctx = ['rerun' => $rerun, 'today' => $today, 'main' => $mainLabel, 'krak' => $krak, 'krakBalance' => $krakBalance, 'krakWelcomeSalary' => $welcomeSalary, 'krakSpendMonthly' => $krakSpendMonthly, 'krakSpendBase' => $spendBase, 'krakSpendPct' => $spendPct, 'krakTierMin' => $spendTierMin, 'netMonthly' => !empty($user['annualSalaryNet']) ? (float) $user['annualSalaryNet'] / 12 : null, 'perkVia' => $chosen['perk'] ?? null, 'perkJan' => $perk['jan'] ?? null];
     if (!$chosen['events'] && !$chosen['krakSegments']) return null;
     // Attach the cashback list of each new donor used.
     foreach ($chosen['events'] as $i => $e) {
@@ -1941,12 +1958,13 @@ function compute_plan_v2(array $user, array $cache, array $rows, array $rawOptio
     foreach ($chosen['events'] as $e) $peak = max($peak, $e['cand']['fund']);
     $money = 'plan_money';
 
+    $chosen['krakValue'] += $welcomeSalary; // the welcome month's extra salary match belongs with Krak's figure
     $parts = [sprintf('%s from %d switch bonus%s', $money($chosen['bonus']), $switches, $switches === 1 ? '' : 'es')];
     if ($chosen['cashback'] > 0) $parts[] = sprintf('%s from cashback sites', $money($chosen['cashback']));
     if ($krak > 0 && $chosen['krakSegments']) $parts[] = sprintf('%s from Krak Salary Match', $money($chosen['krakValue']));
     if ($krakSpendValue > 0) $parts[] = sprintf('%s from Krak card cashback on your spending', $money($krakSpendValue));
     if ($chosen['perkValue'] > 0) $parts[] = sprintf('%s from Nationwide Fairer Share if it is repeated', $money($chosen['perkValue']));
-    $chosen['total'] += $krakSpendValue;
+    $chosen['total'] += $krakSpendValue + $welcomeSalary;
     $headline = sprintf('About %s over %d months: %s — by opening %d new account%s (%d donor%s, %d bonus account%s%s%s) and repointing your salary %d time%s.',
         $money($chosen['total']), $opt['horizonMonths'], implode(', ', $parts), $opens, $opens === 1 ? '' : 's',
         $newUsed, $newUsed === 1 ? '' : 's', $switches, $switches === 1 ? '' : 's', $krakOpen ? ', 1 Krak' : '', $savingsOpen ? ', 1 Nationwide savings' : '',
@@ -1980,7 +1998,7 @@ function compute_plan_v2(array $user, array $cache, array $rows, array $rawOptio
     return [
         'headline' => $headline, 'cards' => $cards, 'quests' => $quests, 'notes' => $notes,
         'endState' => plan_end_state($chosen, $ctx, $cache, $byId),
-        'total' => round($chosen['total'] + $krakSpendValue), 'bonus' => round($chosen['bonus']), 'cashback' => round($chosen['cashback']), 'krak' => round($chosen['krakValue']), 'krakSpend' => round($krakSpendValue),
+        'total' => round($chosen['total']), 'bonus' => round($chosen['bonus']), 'cashback' => round($chosen['cashback']), 'krak' => round($chosen['krakValue']), 'krakSpend' => round($krakSpendValue),
         'fairerShare' => round($chosen['perkValue']), 'switches' => $switches, 'newDonors' => $newUsed, 'openings' => $opens, 'repoints' => $repoints,
         'horizonMonths' => $opt['horizonMonths'], 'today' => $today, 'needsIncome' => $needIncome,
     ];
