@@ -1,3 +1,5 @@
+// Must stay the first import: it starts remembering errors before anything else loads.
+import { initDiagnostics } from './diagnostics.js';
 import { loadData, setSaveStatusHandler, setExternalUpdateHandler, flushSave } from './state.js';
 import { renderAll } from './render-all.js';
 import { switchTab } from './tabs.js';
@@ -338,6 +340,7 @@ initConnectionSync();
 // Shadow copy of the core tabs into server/records.php, one row per
 // record -- see recordsync.js's header. Inactive until that file exists.
 initRecordSync();
+initDiagnostics();
 }
 
 main();
