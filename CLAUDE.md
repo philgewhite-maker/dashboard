@@ -250,6 +250,20 @@ defaulted to building a passive diagnostic (a byte-count note, a log
 line) for the user to run and report back, when I could have queried
 the real page myself in the same turn.
 
+## Pushing tasks into the dashboard — use the agent-write channel yourself
+
+When asked to "push tasks into the dashboard", propose them through
+`agent-write.php` (the agent inbox the user accepts in the app) rather than
+asking for a secret or listing them in chat. URL and secret are on disk at
+`C:\Users\philg\OneDrive\Claude\.claude\agent-write.env` (one directory above
+this checkout, like `nas-test.env`). Read it, `GET ?fields=agentInbox` for the
+current `rev`, then `POST {rev, action:"append", field:"agentInbox", value}`
+with header `X-Agent-Secret`. Batch shape and the projectKey/groupKey slug
+convention are documented at the top of `server/agent-write.php.example`
+(use `projectKey: "dashboard"`, groups `build` / `test-deploy`, contexts
+`With Claude` for build steps). State the returned batch id in chat. Only runs
+from a session on this PC — a cloud session has no access to that file.
+
 ## Deploy ritual
 
 Every shipped change: bump `sw.js`'s `CACHE_NAME` and `index.html`'s
