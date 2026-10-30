@@ -15,7 +15,7 @@
 // createBlankConnection, placeEntry, addActivityToDay) -- never writing
 // into data.* directly itself.
 import { data, queueSave, blankCaptureDraft } from '../state.js';
-import { escapeHtml, scrollAndFlash, dateStrAdd, todayStr, MISSING_KEY_LINK_HTML } from '../utils.js';
+import { escapeHtml, scrollAndFlash, dateStrAdd, todayStr, MISSING_KEY_LINK_HTML, isCardCollapsed, cardToggleHtml } from '../utils.js';
 
 // ---- Executing a confirmed draft's steps ---------------------------------
 
@@ -198,10 +198,11 @@ default: return `Unrecognised: ${step.type}`;
 }
 
 function draftCardHtml(d) {
-return `<div class="alloc-card" data-draft-card="${d.id}">
-<div class="task-source">${escapeHtml(d.rawText)}</div>
+return `<div class="alloc-card card-collapsible${isCardCollapsed(d.id) ? ' card-collapsed' : ''}" data-draft-card="${d.id}" data-collapsible-card="${d.id}">
+<div class="task-source card-keep" style="display:flex;gap:6px;align-items:flex-start;">${cardToggleHtml(d.id)}<span>${escapeHtml(d.rawText)}</span></div>
+<div class="card-summary">${d.steps.length} step${d.steps.length === 1 ? '' : 's'} proposed</div>
 ${d.steps.map((s) => `<div class="settings-note" style="margin:2px 0;">${escapeHtml(stepSummary(s))}</div>`).join('')}
-<div class="alloc-controls">
+<div class="alloc-controls card-keep">
 <button class="todo-add-btn" type="button" data-draft-confirm="${d.id}">Confirm</button>
 <button class="del-x" type="button" data-draft-discard="${d.id}">Discard</button>
 </div>

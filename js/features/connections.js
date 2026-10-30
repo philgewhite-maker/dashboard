@@ -4,7 +4,7 @@ import { photoDelete, photoUrl } from '../db.js';
 import { storePhoto, serverPhotoUrl } from '../files.js';
 import {
 uid, todayStr, daysSince, escapeHtml, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, buildFlagMatcher, applyFlagMatcher, knownCityMap, knownScalarValues, pickChipHtml, scrollAndFlash, bindForm, foldDiacritics, bindBackdropClose,
-resizeImageToBlob, classifyProfileUpload, cropToContentBlob, contentCropBounds, loadImage, MISSING_KEY_LINK_HTML,
+resizeImageToBlob, classifyProfileUpload, cropToContentBlob, contentCropBounds, loadImage, MISSING_KEY_LINK_HTML, isCardCollapsed, cardToggleHtml,
 } from '../utils.js';
 import { MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreenshot } from '../ai.js';
 import { isSensitive, noCoverNote } from './photoalbums.js';
@@ -3054,9 +3054,10 @@ const extra = isProfile
 return candidateRowHtml(p.id, idx, cand.name, cand.age, matches, extra, (cand.photoIds || [])[0] || null);
 }).join('');
 const when = new Date(p.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
-return `<div class="alloc-card" data-pending-import="${p.id}">
-<div class="alloc-title">${escapeHtml(isProfile ? 'Profile' : 'Matches list')}</div>
-<div class="alloc-notes">${escapeHtml(p.app || 'unknown app')} &middot; ${escapeHtml(p.sourceLabel)} &middot; ${escapeHtml(when)}</div>
+return `<div class="alloc-card card-collapsible${isCardCollapsed(p.id) ? ' card-collapsed' : ''}" data-pending-import="${p.id}" data-collapsible-card="${p.id}">
+<div class="alloc-title card-keep" style="display:flex;align-items:center;gap:6px;">${cardToggleHtml(p.id)}${escapeHtml(isProfile ? 'Profile' : 'Matches list')}</div>
+<div class="alloc-notes card-keep">${escapeHtml(p.app || 'unknown app')} &middot; ${escapeHtml(p.sourceLabel)} &middot; ${escapeHtml(when)}</div>
+<div class="card-summary">${p.candidates.length} candidate${p.candidates.length === 1 ? '' : 's'}</div>
 <div class="candidate-list" style="margin-top:8px;">${rows}</div>
 <div class="alloc-controls">
 <button class="add-btn" type="button" data-confirm-pending="${p.id}">Add / update selected</button>

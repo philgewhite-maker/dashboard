@@ -41,7 +41,7 @@
 // that can quietly grow apart.
 import { data, queueSave, blankCaptureBatch } from '../state.js';
 import { photoDelete } from '../db.js';
-import { todayStr, escapeHtml, hydratePhotoBackgrounds, resizeImageToBlob, scrollAndFlash, looksLikeHeic, sniffsAsHeic, sniffsAsRasterImage, sniffsAsAvif, sniffsAsAudio, MISSING_KEY_LINK_HTML } from '../utils.js';
+import { todayStr, escapeHtml, hydratePhotoBackgrounds, resizeImageToBlob, scrollAndFlash, isCardCollapsed, cardToggleHtml, looksLikeHeic, sniffsAsHeic, sniffsAsRasterImage, sniffsAsAvif, sniffsAsAudio, MISSING_KEY_LINK_HTML } from '../utils.js';
 import { storePhoto, uploadAttachment, deleteAttachment, fetchAttachment, openAttachment, formatBytes } from '../files.js';
 import { looksLikeRenphoCsv, parseRenphoCsv, mergeRenphoDaily, looksLikeHrvCsv } from './renpho.js';
 import { legTargetPickerHtml, bindLegTargetPicker, readLegTargetPicker, applyLegExtraction, gapsFor, tripChipHtml, bindTripChips } from './travel.js';
@@ -414,8 +414,9 @@ const fileItems = b.items.filter((it) => it.kind !== 'photo');
 const sourceLabel = b.source?.kind === 'share' ? (b.source.label || 'Shared from another app') : 'Picked in-app';
 const selected = selectionFor(b.id, photoItems);
 const selectedCount = photoItems.filter((it) => selected.has(it.id)).length;
-return `<div class="alloc-card" data-inbox-batch="${b.id}">
-<input type="text" class="alloc-title" autocomplete="off" data-inbox-label="${b.id}" value="${escapeHtml(b.label || 'Captured batch')}" placeholder="Captured batch">
+return `<div class="alloc-card card-collapsible${isCardCollapsed(b.id) ? ' card-collapsed' : ''}" data-inbox-batch="${b.id}" data-collapsible-card="${b.id}">
+<div class="card-keep" style="display:flex;align-items:center;gap:6px;">${cardToggleHtml(b.id)}<input type="text" class="alloc-title" autocomplete="off" data-inbox-label="${b.id}" value="${escapeHtml(b.label || 'Captured batch')}" placeholder="Captured batch" style="flex:1;"></div>
+<div class="card-summary">${photoItems.length} photo${photoItems.length === 1 ? '' : 's'}${fileItems.length ? `, ${fileItems.length} file${fileItems.length === 1 ? '' : 's'}` : ''} &middot; ${escapeHtml(sourceLabel)}</div>
 ${b.notes ? `<div class="alloc-notes">${escapeHtml(b.notes)}</div>` : ''}
 <div class="task-source">from ${escapeHtml(sourceLabel)} · ${photoItems.length} photo${photoItems.length === 1 ? '' : 's'}${fileItems.length ? `, ${fileItems.length} file${fileItems.length === 1 ? '' : 's'}` : ''}${photoItems.length > 1 ? ' — tick who belongs together, e.g. a profile screenshot plus that person\'s loose photos, then send that group' : ''}</div>
 ${photoItems.length ? `<div class="task-photos">${photoItems.map((it) => `<label class="gallery-thumb${selected.has(it.id) ? ' selected' : ''}" title="Tap to select">

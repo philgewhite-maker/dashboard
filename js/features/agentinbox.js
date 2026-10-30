@@ -9,7 +9,7 @@
 // all -- only a human's own Accept click here ever calls the real
 // captureTask().
 import { data, queueSave } from '../state.js';
-import { escapeHtml } from '../utils.js';
+import { escapeHtml, isCardCollapsed, cardToggleHtml } from '../utils.js';
 import { captureTask, revealTask } from './tasks.js';
 
 // Topological (parent-first) walk. Defensive against a malformed tree
@@ -102,12 +102,13 @@ const { order, hasProject, project, map } = planFor(entry);
 const projectLine = hasProject
 ? `<div class="settings-note" style="margin:0 0 4px;">Project: <strong>${escapeHtml(entry.projectLabel || entry.projectKey)}</strong> &middot; ${project ? 'files into your existing project' : 'new project'}</div>`
 : '';
-return `<div class="alloc-card" data-agentinbox-card="${escapeHtml(entry.id)}">
-<div class="task-source">From claude${entry.createdAt ? ` &middot; ${new Date(entry.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}</div>
-<div class="settings-note" style="margin:0 0 4px;font-weight:600;">${escapeHtml(entry.label || 'Proposed task')}</div>
+return `<div class="alloc-card card-collapsible${isCardCollapsed(entry.id) ? ' card-collapsed' : ''}" data-agentinbox-card="${escapeHtml(entry.id)}" data-collapsible-card="${escapeHtml(entry.id)}">
+<div class="task-source card-keep">From claude${entry.createdAt ? ` &middot; ${new Date(entry.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}</div>
+<div class="settings-note card-keep" style="margin:0 0 4px;font-weight:600;display:flex;align-items:center;gap:6px;">${cardToggleHtml(entry.id)}${escapeHtml(entry.label || 'Proposed task')}</div>
+<div class="card-summary">${order.length} task${order.length === 1 ? '' : 's'}${hasProject ? ` &middot; ${escapeHtml(entry.projectLabel || entry.projectKey)}` : ''}</div>
 ${projectLine}
 ${order.map(({ node, depth }) => nodeSummaryHtml(node, depth, map.get(node.tempId))).join('')}
-<div class="alloc-controls" style="margin-top:6px;">
+<div class="alloc-controls card-keep" style="margin-top:6px;">
 <button class="todo-add-btn" type="button" data-agentinbox-accept="${escapeHtml(entry.id)}">Accept</button>
 <button class="del-x" type="button" data-agentinbox-decline="${escapeHtml(entry.id)}" title="Discard this proposal">&times;</button>
 </div>
