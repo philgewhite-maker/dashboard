@@ -63,6 +63,7 @@ import { initGoogleAccount } from './features/googleaccount.js';
 import { initMail } from './features/mail.js';
 import { initAutoSync } from './sync/autosync.js';
 import { initConnectionSync } from './sync/connectionsync.js';
+import { initRecordSync } from './sync/recordsync.js';
 
 // The Settings pill row (settings.js) sticks itself just below the main
 // tab bar -- but the tab bar's own height isn't fixed, it `flex-wrap`s
@@ -334,6 +335,9 @@ initAutoSync();
 // not instead of it; silently inactive until server/sync-connections.php
 // is uploaded next to sync.php.
 initConnectionSync();
+// Shadow copy of the core tabs into server/records.php, one row per
+// record -- see recordsync.js's header. Inactive until that file exists.
+initRecordSync();
 }
 
 main();

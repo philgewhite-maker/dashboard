@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v663</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v664</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -3212,6 +3212,17 @@ Photos added before task attachments existed live only on the device that added 
 <div class="settings-block">
 <div class="settings-note" style="margin:0 0 10px;">Live sync above re-uploads the whole document on every save. With several devices, the NAS, and Dashboard Capture all writing, that's a growing truncation/conflict risk for what's usually the biggest part of it &mdash; so Connections specifically ALSO sync one record at a time, additively (the whole-document sync above keeps covering everything, including Connections, exactly as before). Needs <code>server/sync-connections.php</code> uploaded next to <code>sync.php</code> &mdash; nothing else to configure, it reuses the URL/secret above. Inactive until that file is there.</div>
 <div class="settings-note" id="conn-sync-status"></div>
+</div>
+</details>
+
+<details class="settings-item" id="record-store-settings">
+<summary><h3>Record store (preview)</h3></summary>
+<div class="settings-block">
+<div class="settings-note" style="margin:0 0 10px;">The next step after the whole-document sync: Tasks, Health, Travel, Planner and Finances saved one record at a time, so devices only send and fetch what changed and a deleted record stays deleted everywhere. For now this only <em>copies</em> into the store, alongside the normal sync, which is still what your data comes from. Needs <code>server/records.php</code> uploaded next to <code>sync.php</code>; does nothing until then.</div>
+<div class="sync-row" style="align-items:flex-start;">
+<button class="sync-btn sm inline" id="record-store-check-btn" type="button">Check record store</button>
+</div>
+<div class="settings-note" id="record-store-status"></div>
 </div>
 </details>
 
