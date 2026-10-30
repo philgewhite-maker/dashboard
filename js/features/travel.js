@@ -7,7 +7,7 @@
 // detail has to live here rather than in Notion because the itinerary
 // export has to work fully offline.
 import { data, queueSave, blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS, LEG_DATE_FIELDS, STAY_TYPE_SUGGESTIONS } from '../state.js';
-import { escapeHtml, uid, dateStrAdd, daysAgoStr, hydratePhotoBackgrounds, parseLooseDateTime, scrollAndFlash } from '../utils.js';
+import { escapeHtml, uid, dateStrAdd, daysAgoStr, hydratePhotoBackgrounds, parseLooseDateTime, scrollAndFlash, isCardCollapsed, cardToggleHtml } from '../utils.js';
 import { deleteAttachment, formatBytes, openAttachment } from '../files.js';
 
 function tripById(id) { return data.trips.find((t) => t.id === id); }
@@ -571,11 +571,21 @@ return trip.destinations.map((d, i) => `<span class="tag-chip">${escapeHtml(d)}<
 function tripCardHtml(trip) {
 const gapCount = tripGapCount(trip);
 const complete = tripIsComplete(trip);
-return `<div class="alloc-card" data-trip-card="${trip.id}">
-<div class="alloc-title" style="display:flex;align-items:center;gap:8px;">
+// What stays visible when the card is collapsed: dates, where, how much is
+// booked and whether anything still needs confirming.
+const summary = [
+[trip.startDate, trip.endDate].filter(Boolean).join(' – '),
+trip.destinations.join(', '),
+`${trip.legs.length} leg${trip.legs.length === 1 ? '' : 's'}`,
+trip.legs.length === 0 ? '' : complete ? 'itinerary complete' : `${gapCount} thing${gapCount === 1 ? '' : 's'} still need confirming`,
+].filter(Boolean).join(' · ');
+return `<div class="alloc-card card-collapsible${isCardCollapsed(trip.id) ? ' card-collapsed' : ''}" data-trip-card="${trip.id}" data-collapsible-card="${trip.id}">
+<div class="alloc-title card-keep" style="display:flex;align-items:center;gap:8px;">
+${cardToggleHtml(trip.id)}
 <input type="text" data-trip-title="${trip.id}" value="${escapeHtml(trip.title)}" placeholder="Trip title" style="flex:1;font-weight:700;">
 <span class="del-x" data-trip-delete="${trip.id}" title="Delete this trip">&times;</span>
 </div>
+<div class="card-summary">${escapeHtml(summary)}</div>
 <div class="tag-editor" style="margin-top:4px;">${destinationChipsHtml(trip)}</div>
 <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">
 <input type="date" data-trip-start="${trip.id}" value="${escapeHtml(trip.startDate)}">

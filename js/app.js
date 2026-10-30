@@ -51,7 +51,7 @@ import { initTelegramFamily } from './features/telegramfamily.js';
 // Photos whose bytes aren't on this device are fetched from your own host.
 // Registered rather than imported: the implementation reaches state.js, and
 // state.js imports utils.js, so importing it back would be a cycle.
-import { setPhotoFallback, scrollAndFlash, setPanelCollapsed } from './utils.js';
+import { setPhotoFallback, scrollAndFlash, setPanelCollapsed, setCardCollapsed } from './utils.js';
 import { serverPhotoUrl } from './files.js';
 // Imported for its side effect: it registers the Notion controls with
 // tasks.js, which keeps that dependency pointing one way.
@@ -123,6 +123,13 @@ if (!toggle) return;
 const panel = toggle.closest('section.panel[id]');
 if (!panel) return;
 setPanelCollapsed(panel, !panel.classList.contains('panel-collapsed'));
+});
+// Per-record cards (a trip...), same one delegated listener idea.
+document.addEventListener('click', (e) => {
+const toggle = e.target.closest('[data-card-collapse]');
+if (!toggle) return;
+const card = toggle.closest('[data-collapsible-card]');
+if (card) setCardCollapsed(card, !card.classList.contains('card-collapsed'));
 });
 }
 

@@ -289,6 +289,14 @@ min-width:0;
    links beside it) are always reachable to expand again. */
 section.panel.panel-collapsed{padding-bottom:22px;}
 section.panel.panel-collapsed > *:not(.panel-head){display:none;}
+/* Per-record cards (utils.js cardToggleHtml): a collapsed card keeps its
+   .card-keep header row and shows its .card-summary line, nothing else. */
+.card-collapse-toggle{cursor:pointer;display:inline-flex;width:18px;justify-content:center;color:var(--muted);user-select:none;flex:0 0 auto;}
+.card-collapse-toggle:hover{color:var(--ink);}
+.card-collapsible > .card-summary{display:none;font-size:12px;color:var(--muted);margin-top:4px;}
+.card-collapsible.card-collapsed > .card-summary{display:block;}
+/* !important: most card rows set display:flex inline, which would otherwise win. */
+.card-collapsible.card-collapsed > *:not(.card-keep):not(.card-summary){display:none !important;}
 .dot{width:9px;height:9px;border-radius:50%;display:inline-block;}
 .dot.sage{background:var(--sage);}
 .dot.slate{background:var(--slate);}

@@ -708,9 +708,42 @@ if (toggle) toggle.innerHTML = collapsed ? '&#9656;' : '&#9662;';
 try { localStorage.setItem(`panelCollapsed:${panel.id}`, collapsed ? '1' : '0'); } catch (e) { /* private browsing etc -- still works for this load */ }
 }
 
+// Per-record version of the panel collapse above, for a card taller than
+// about a quarter of the screen (a trip, say): the card keeps its header row
+// and a one-line summary, everything else hides. Mark the card
+// `data-collapsible-card="<record id>"` plus `class="card-collapsible"`, give
+// its header row `card-keep`, put `cardToggleHtml(id)` inside that header and
+// an optional `<div class="card-summary">` beside it; app.js's delegated
+// click handler does the rest, so no re-render is needed to toggle. The set
+// of collapsed ids is device-local, like panel collapse.
+const CARD_COLLAPSED_KEY = 'cardCollapsed';
+function collapsedCardIds() {
+try { return new Set(JSON.parse(localStorage.getItem(CARD_COLLAPSED_KEY) || '[]')); } catch (e) { return new Set(); }
+}
+function isCardCollapsed(id) { return collapsedCardIds().has(String(id)); }
+function setCardCollapsed(card, collapsed) {
+if (!card) return;
+const id = card.dataset.collapsibleCard;
+card.classList.toggle('card-collapsed', collapsed);
+const toggle = card.querySelector('[data-card-collapse]');
+if (toggle) { toggle.innerHTML = collapsed ? '&#9656;' : '&#9662;'; toggle.title = collapsed ? 'Expand' : 'Collapse'; }
+if (!id) return;
+const ids = collapsedCardIds();
+if (collapsed) ids.add(id); else ids.delete(id);
+try { localStorage.setItem(CARD_COLLAPSED_KEY, JSON.stringify([...ids])); } catch (e) { /* private browsing etc -- still works for this load */ }
+}
+function cardToggleHtml(id) {
+const collapsed = isCardCollapsed(id);
+return `<span class="card-collapse-toggle" data-card-collapse="${escapeHtml(String(id))}" title="${collapsed ? 'Expand' : 'Collapse'}">${collapsed ? '&#9656;' : '&#9662;'}</span>`;
+}
+
 function scrollAndFlash(selector) {
 const el = document.querySelector(selector);
 if (!el) return;
+// Same reasoning as the panel below, one level down: a link to a card (or
+// something inside one) must open it first.
+const card = el.closest('.card-collapsed');
+if (card) setCardCollapsed(card, false);
 // A collapsed panel (css/style.css's .panel-collapsed) hides every
 // child but its own header -- scrolling to something inside one would
 // otherwise silently do nothing, since a `display:none` element has no
@@ -1382,7 +1415,7 @@ return { used, expected, points: used - expected, exhaustAt: exhaustAt && exhaus
 
 export {
 claudeWeeklyPace, todayStr, daysAgoStr, dateStrAdd, unfoldIcsLines, parseIcsProperty, icsDateTime, parseLooseDateTime, last7Dates, uid, daysSince, daysUntil, foldDiacritics, MISSING_KEY_LINK_HTML, SYNC_LINK_HTML, NOTION_LINK_HTML, TELEGRAM_BOT_LINK_HTML, looksLikeUrl, prettyUrl, stripHtmlForExtraction,
-escapeHtml, decodeHtmlEntities, setPanelCollapsed, affiliateLink, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, buildFlagMatcher, applyFlagMatcher, knownCityMap, knownScalarValues, pickChipHtml, splitCsvLine, scrollAndFlash, bindForm, bindBackdropClose, logoBadgeHtml, bindLogoFallbacks,
+escapeHtml, decodeHtmlEntities, setPanelCollapsed, isCardCollapsed, setCardCollapsed, cardToggleHtml, affiliateLink, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, buildFlagMatcher, applyFlagMatcher, knownCityMap, knownScalarValues, pickChipHtml, splitCsvLine, scrollAndFlash, bindForm, bindBackdropClose, logoBadgeHtml, bindLogoFallbacks,
 findMentions, COUNTRY_NAME_TO_NATIONALITY,
 resizeImageToBlob, fileToBase64, loadImage, cropThumbnailToBlob, loadJsPdf,
 hashFile, captureDateOf, betterCaptureDate, dateFromFilename,
