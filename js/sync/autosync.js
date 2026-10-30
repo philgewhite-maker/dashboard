@@ -7,7 +7,9 @@
 // never silently erase a save made on another device. When that happens the
 // newer document wins and a backup of what this device had is downloaded
 // first, matching what "Pull from Google Drive" already does.
-import { data, replaceData, exportBackup, setLocalChangeHandler } from '../state.js';
+import { data, replaceData, exportBackup, setLocalChangeHandler, hasPendingSave, flushSave } from '../state.js';
+import { kvGet, kvSet } from '../db.js';
+import { mergeDocuments } from './merge.js';
 import { renderAll } from '../render-all.js';
 import { ConflictError, NotConfiguredError, isConfigured, pullRemote, pushRemote, setKnownRev, getKnownRev } from './selfhost.js';
 import { LockedError } from '../synccrypto.js';
@@ -65,6 +67,27 @@ if (err instanceof NotConfiguredError) return '';
 return err.message || String(err);
 }
 
+// The document as it was at the last successful sync with the server --
+// the "base" a three-way merge needs to tell what THIS device changed from
+// what the SERVER changed. Kept in IndexedDB so it survives a reload.
+const BASE_KEY = 'sync-base';
+async function saveBase(jsonText) {
+try { await kvSet(BASE_KEY, jsonText); } catch (err) { console.warn('Could not store the sync baseline:', err); }
+}
+
+// A short, local-only trail of the moments this device's document was
+// replaced or merged by the server's -- so a "my edit vanished" report can
+// be checked against what actually happened. Read it in the console with
+// JSON.parse(localStorage['dash-sync-log']).
+function syncLog(event, detail) {
+console.warn(`Live sync: ${event}`, detail || '');
+try {
+const log = JSON.parse(localStorage.getItem('dash-sync-log') || '[]');
+log.push({ at: new Date().toISOString(), event, detail: detail || '' });
+localStorage.setItem('dash-sync-log', JSON.stringify(log.slice(-40)));
+} catch (err) { /* storage unavailable: the console line above still stands */ }
+}
+
 // Adopts the server's copy: keeps a local safety backup first, then replaces
 // and re-renders. `fromRemote` stops this write from being treated as a local
 // edit and bounced straight back up.
@@ -72,7 +95,37 @@ async function adoptRemote(remote, { backupFirst }) {
 if (backupFirst) await exportBackup();
 await replaceData(remote.data, { fromRemote: true });
 await setKnownRev(remote.rev);
+await saveBase(JSON.stringify(data));
 renderAll();
+}
+
+// This device has edits the server hasn't seen and the server moved on.
+// Rather than throwing the local edits away, merge both: what only this
+// device changed is kept, what only the server changed is taken, and only
+// a field both sides changed differently goes to the server's value (with
+// a backup downloaded first). Returns whether a merge happened; with no
+// baseline to merge against it falls back to adopting the server's copy.
+async function mergeWithRemote(remote) {
+const baseText = await kvGet(BASE_KEY);
+const ours = JSON.parse(JSON.stringify(data));
+if (!baseText) {
+syncLog('no baseline, took the server copy', `rev ${remote.rev}`);
+await adoptRemote(remote, { backupFirst: true });
+return { merged: false, conflicts: [] };
+}
+await replaceData(remote.data, { fromRemote: true });
+const theirs = JSON.parse(JSON.stringify(data));
+const { merged, conflicts } = mergeDocuments(JSON.parse(baseText), ours, theirs);
+if (conflicts.length) {
+// Same field changed on both sides: keep a file of this device's version.
+await replaceData(ours, { fromRemote: true });
+await exportBackup();
+}
+await replaceData(merged, { fromRemote: true });
+await setKnownRev(remote.rev);
+renderAll();
+syncLog(conflicts.length ? 'merged, server value kept for' : 'merged cleanly', conflicts.length ? conflicts.slice(0, 8).join(', ') : `rev ${remote.rev}`);
+return { merged: true, conflicts };
 }
 
 async function pull({ announce } = {}) {
@@ -96,12 +149,27 @@ if (remote.rev !== knownRev) {
 // up, so there's nothing unique left to lose, and a download on every
 // remote change would be unbearable.
 const firstAdoption = knownRev === 0 && hasLocalContent();
+if (!firstAdoption && (hasPendingSave() || pushTimer)) {
+// An edit is still on its way up. Replacing the document now would
+// silently drop it, so send it first; if the server has moved on the
+// push's conflict path merges the two.
+await flushSave();
+clearTimeout(pushTimer);
+pushTimer = null;
+busy = false;
+await push();
+return;
+}
 await adoptRemote(remote, { backupFirst: firstAdoption });
+if (!firstAdoption) syncLog('adopted newer server copy', `rev ${remote.rev}`);
 setStatus(firstAdoption
 ? 'Loaded from server — previous data on this device saved to Downloads'
 : `Updated from server ${new Date().toLocaleTimeString()}`, 'ok');
-} else if (announce) {
-setStatus('Up to date', 'ok');
+} else {
+// Same revision as the server: its copy IS the last synced state, so it
+// is the right baseline for any later merge. Stored once, not per poll.
+if (!hasPendingSave() && !pushTimer && !(await kvGet(BASE_KEY))) await saveBase(JSON.stringify(remote.data));
+if (announce) setStatus('Up to date', 'ok');
 }
 } catch (err) {
 if (err instanceof LockedError) {
@@ -116,23 +184,30 @@ busy = false;
 }
 }
 
-async function push({ force } = {}) {
+async function push({ force, attempt = 0 } = {}) {
 if ((busy && !force) || !(await isConfigured())) return;
 const wasBusy = busy;
 busy = true;
 try {
 setStatus('Saving…');
+const sent = JSON.stringify(data);
 await pushRemote(data);
+await saveBase(sent);
 setStatus(`Synced ${new Date().toLocaleTimeString()}`, 'ok');
 } catch (err) {
 if (err instanceof ConflictError) {
-// Someone else saved between our last pull and this push. Their copy
-// is newer, so it wins — but this device's version is downloaded as a
-// backup first, because the edit that just lost is the one you were
-// most recently making.
-console.warn('Live sync conflict — adopting the server copy.', err.remote);
-await adoptRemote(err.remote, { backupFirst: true });
+// Someone else saved between our last pull and this push. Merge their
+// changes with ours instead of discarding either; the merged document
+// is then pushed again (a couple of tries, in case it moves again).
+const result = await mergeWithRemote(err.remote);
+if (!result.merged) {
 setStatus('Another device had newer data — took theirs, saved yours to Downloads', 'error');
+} else if (result.conflicts.length) {
+setStatus('Merged with another device — one field changed on both sides, theirs kept, yours saved to Downloads', 'error');
+} else {
+setStatus('Merged with changes from another device', 'ok');
+}
+if (result.merged && attempt < 2) await push({ force: true, attempt: attempt + 1 });
 } else if (err instanceof LockedError) {
 setStatus(LOCKED_STATUS_HTML, 'error', { html: true });
 console.error('Live sync push failed:', err);

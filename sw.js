@@ -2,7 +2,7 @@
 // deletes every cache that isn't the current name, so raising the version is
 // what actually evicts a stale copy from a device that has been running the
 // app for a while.
-const CACHE_NAME = 'dashboard-v655';
+const CACHE_NAME = 'dashboard-v656';
 const CORE_ASSETS = [
 './',
 './index.html',
@@ -128,6 +128,12 @@ self.addEventListener('periodicsync', (event) => {
 if (event.tag !== 'dashboard-refresh') return;
 event.waitUntil((async () => {
 try {
+// An open page keeps its own document and syncs it itself. This run
+// writes IndexedDB and the server behind that page's back, which made
+// the page's next save fail its revision check and reload from disk,
+// dropping whatever it hadn't saved yet. Only run with no page open.
+const open = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+if (open.length) { console.log('Background refresh skipped: the app is open.'); return; }
 const { runBackgroundRefresh } = await import('./js/bgsync.js');
 const result = await runBackgroundRefresh();
 console.log('Background refresh:', result);

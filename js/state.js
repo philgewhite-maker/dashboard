@@ -3815,7 +3815,14 @@ if (!data.ingredientAliases || typeof data.ingredientAliases !== 'object') data.
 // pull that in and re-render instead of clobbering it. This also happens
 // to be the same conflict check a future sync layer needs, so it's not
 // throwaway work.
+let savePending = false;
+// True between an edit being made and it reaching IndexedDB -- autosync
+// uses it to avoid replacing this device's document with the server's
+// while an edit is still in flight.
+function hasPendingSave() { return savePending; }
+
 async function persist(opts = {}) {
+savePending = false;
 try {
 const onDiskRev = (await kvGet(REV_KEY)) || 0;
 if (onDiskRev > knownRev) {
@@ -3839,6 +3846,7 @@ onSaveStatus('error');
 }
 
 function queueSave() {
+savePending = true;
 clearTimeout(saveTimer);
 saveTimer = setTimeout(persist, 250);
 }
@@ -4328,7 +4336,7 @@ await replaceData(JSON.parse(text));
 }
 
 export {
-data, sampleData, loadData, migrate, persist, queueSave, flushSave, setSaveStatusHandler,
+data, sampleData, loadData, migrate, persist, queueSave, flushSave, hasPendingSave, setSaveStatusHandler,
 setExternalUpdateHandler, setLocalChangeHandler, getLocalSettings, setLocalSetting, computeStreak, reachOutThreshold,
 isDormantStage, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness,
 exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, SENSITIVE_BLOCKS, whatSheHas, unheldInventory, whoFits, inventorySets, incompleteCoreSets, whoFitsSet, interestNote, SIZE_GROUPS, sizeGroupFor, SET_CORE_GROUPS, DEFAULT_PREFS, blankInventoryItem, blankApOrder, blankLoan, blankSetCompletionFind, blankBookItem,
