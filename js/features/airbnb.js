@@ -686,7 +686,7 @@ ${r.source === 'external'
 : r.googleEventId
 ? '<span class="settings-note" style="margin:0;">Pushed &#10003;</span>'
 : `<button class="sync-btn inline" type="button" data-airbnb-push="${r.id}" title="Push to Google Calendar">Push</button>`}
-<span class="sync-status" data-airbnb-push-status="${r.id}"></span>
+<span class="sync-status" data-airbnb-push-status="${r.id}">${pushNoteHtml(r)}</span>
 ${r.source === 'manual' ? `<span class="del-x" style="opacity:1;" data-airbnb-res-del="${r.id}" title="Delete this booking — nothing else records it, so it won't come back on the next Sync">&times;</span>` : ''}
 ${data.prefs.airbnbCalendarId && listing.needsCleaning ? `<div class="cal-clean-group">${cleanerChipHtml(r, 'checkin')}${cleanerChipHtml(r, 'checkout')}</div>` : ''}
 </div>
@@ -1627,24 +1627,42 @@ return { filled, romanizeFailed, incomeFilled };
 // possible at all (Google's `q` is a general text search, no per-field
 // match). Never auto-picks between multiple candidates -- same
 // never-auto-merge discipline the duplicate-connection finder uses.
+// The last Push message per reservation. A live-sync merge re-renders this
+// list every few seconds and a re-render empties the status span, so a
+// failure (blocked sign-in popup, no calendar picked) vanished before it could
+// be read and Push looked like it did nothing. Kept here and redrawn with the row.
+const pushNotes = new Map();
+function pushStatusFor(id, fallbackEl) {
+const el = () => document.querySelector(`[data-airbnb-push-status="${id}"]`) || fallbackEl;
+return {
+set textContent(v) { pushNotes.set(id, { t: v }); el().textContent = v; },
+set innerHTML(v) { pushNotes.set(id, { h: v }); el().innerHTML = v; },
+};
+}
+function pushNoteHtml(r) {
+const n = !r.googleEventId && pushNotes.get(r.id);
+return n ? (n.h !== undefined ? n.h : escapeHtml(n.t)) : '';
+}
+
 async function pushReservation(reservation, statusEl) {
+const out = pushStatusFor(reservation.id, statusEl);
 const listing = data.airbnbListings.find((l) => l.id === reservation.listingId);
 if (!listing) return;
-if (reservation.googleEventId) { statusEl.textContent = 'Already pushed.'; return; }
+if (reservation.googleEventId) { out.textContent = 'Already pushed.'; return; }
 // An expired token can only be renewed through a popup, and browsers
 // only allow that straight after a click -- so ask for it here, first
 // thing, rather than deep inside the first Calendar call (where the
 // popup was being blocked and Push just failed).
 if (!isSignedIn()) {
-statusEl.textContent = 'Signing in to Google…';
-try { await signIn(); } catch (err) { statusEl.textContent = `Couldn't sign in to Google: ${err.message || err}`; return; }
+out.textContent = 'Signing in to Google…';
+try { await signIn(); } catch (err) { out.textContent = `Couldn't sign in to Google: ${err.message || err}`; return; }
 }
-if (!(await canAttemptGoogleAction())) { statusEl.textContent = 'Sign in to Google at the top of Overview first.'; return; }
-if (!hasCalendarWrite()) { statusEl.innerHTML = 'Turn on "Allow creating events in Google Calendar" in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#calendar-write-toggle">Settings</span>, then sign out and back in.'; return; }
+if (!(await canAttemptGoogleAction())) { out.textContent = 'Sign in to Google at the top of Overview first.'; return; }
+if (!hasCalendarWrite()) { out.innerHTML = 'Turn on "Allow creating events in Google Calendar" in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#calendar-write-toggle">Settings</span>, then sign out and back in.'; return; }
 const calendarId = data.prefs.airbnbCalendarId;
-if (!calendarId) { statusEl.textContent = 'Pick which calendar to push to, next to Sync, first.'; return; }
+if (!calendarId) { out.textContent = 'Pick which calendar to push to, next to Sync, first.'; return; }
 
-statusEl.textContent = 'Checking…';
+out.textContent = 'Checking…';
 const title = `${listing.prefix || listing.label} — ${reservation.guestName || 'Guest'}`;
 const description = [listing.label, reservation.notes].filter(Boolean).join(' — ');
 try {
@@ -1679,9 +1697,9 @@ if (match && matchRange.checkin === reservation.checkin && matchRange.checkout =
 const target = live();
 target.googleEventId = match.id;
 target.googleCalendarId = calendarId;
-statusEl.textContent = `Matched an existing "${match.summary}" event — adopted, nothing new created.`;
+out.textContent = `Matched an existing "${match.summary}" event — adopted, nothing new created.`;
 } else if (candidates.length > 1) {
-statusEl.textContent = `${candidates.length} existing events near these dates already mention "${listing.prefix}" — too ambiguous to adopt one automatically. Rename or remove the extras in Google Calendar, then push again.`;
+out.textContent = `${candidates.length} existing events near these dates already mention "${listing.prefix}" — too ambiguous to adopt one automatically. Rename or remove the extras in Google Calendar, then push again.`;
 } else {
 // A same-day visit (the sprinkler service) has no stay to put check-in
 // and check-out times on -- 15:00 to 11:00 the same day ends before it
@@ -1697,14 +1715,14 @@ startTime: CHECKIN_TIME, endTime: CHECKOUT_TIME,
 const target = live();
 target.googleEventId = created.id;
 target.googleCalendarId = calendarId;
-statusEl.textContent = match
+out.textContent = match
 ? `Pushed as a new event — a nearby "${match.summary}" (${matchRange.checkin} → ${matchRange.checkout}) mentions "${listing.prefix}" too but its dates don't match this stay, so it wasn't adopted.`
 : 'Pushed.';
 }
 queueSave();
 renderAirbnb();
 } catch (err) {
-statusEl.textContent = `Couldn't push: ${err.message || err}`;
+out.textContent = `Couldn't push: ${err.message || err}`;
 }
 }
 
