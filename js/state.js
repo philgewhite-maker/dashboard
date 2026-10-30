@@ -2399,7 +2399,7 @@ const DEFAULT_FLAG_RULES = [
 ];
 
 function blankData() {
-return { habits: [], goals: [], jobs: [], connections: [], calendars: [], calendarStatus: {}, vouchers: [], businessIdeas: [], subscriptions: [], enhancementIdeas: [], financeAccounts: [], switchOffers: [], mailSearches: [], mailTopics: [], mailRules: [], mailDismissed: [], tasks: [], taskContexts: [...DEFAULT_TASK_CONTEXTS],
+return { settingsVault: { entries: {} }, habits: [], goals: [], jobs: [], connections: [], calendars: [], calendarStatus: {}, vouchers: [], businessIdeas: [], subscriptions: [], enhancementIdeas: [], financeAccounts: [], switchOffers: [], mailSearches: [], mailTopics: [], mailRules: [], mailDismissed: [], tasks: [], taskContexts: [...DEFAULT_TASK_CONTEXTS],
 ratingCategories: DEFAULT_RATING_CATEGORIES.map((c) => ({ ...c })),
 recipes: [], recipeRatingCategories: DEFAULT_RECIPE_RATING_CATEGORIES.map((c) => ({ ...c })), ingredientReference: [], ingredientAliases: {},
 claudeAnswers: {},
@@ -2887,6 +2887,8 @@ if (!Array.isArray(data.telegramUnclaimed)) data.telegramUnclaimed = [];
 // payloads on every parse (see healthparse.js) rather than edited by hand
 // -- no per-item blank-factory needed, just an array-shape guard.
 if (!Array.isArray(data.healthDaily)) data.healthDaily = [];
+if (!data.settingsVault || typeof data.settingsVault !== 'object' || Array.isArray(data.settingsVault)) data.settingsVault = { entries: {} };
+if (!data.settingsVault.entries || typeof data.settingsVault.entries !== 'object' || Array.isArray(data.settingsVault.entries)) data.settingsVault.entries = {};
 // One row per local calendar day of Renpho scale readings, accumulated
 // (not rebuilt) across however many CSV exports get shared over time --
 // see renpho.js's mergeRenphoDaily() for why a re-share is safe to repeat.
@@ -3885,8 +3887,12 @@ s[key] = value;
 localSettingsCache = s;
 await kvSet(LOCAL_SETTINGS_KEY, s);
 });
+// Told after the write has landed, so a listener reading the settings sees it.
+settingsQueue.then(() => localSettingHandlers.forEach((fn) => { try { fn(key); } catch (e) { /* a listener must never break a save */ } }));
 return settingsQueue;
 }
+const localSettingHandlers = [];
+function setLocalSettingHandler(fn) { localSettingHandlers.push(fn); }
 
 function computeStreak(completions) {
 let streak = 0;
@@ -4337,7 +4343,7 @@ await replaceData(JSON.parse(text));
 
 export {
 data, sampleData, loadData, migrate, persist, queueSave, flushSave, hasPendingSave, setSaveStatusHandler,
-setExternalUpdateHandler, setLocalChangeHandler, getLocalSettings, setLocalSetting, computeStreak, reachOutThreshold,
+setExternalUpdateHandler, setLocalChangeHandler, getLocalSettings, setLocalSetting, setLocalSettingHandler, computeStreak, reachOutThreshold,
 isDormantStage, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness,
 exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, SENSITIVE_BLOCKS, whatSheHas, unheldInventory, whoFits, inventorySets, incompleteCoreSets, whoFitsSet, interestNote, SIZE_GROUPS, sizeGroupFor, SET_CORE_GROUPS, DEFAULT_PREFS, blankInventoryItem, blankApOrder, blankLoan, blankSetCompletionFind, blankBookItem,
 MAIL_SEARCH_KINDS, mailSearchLabel, blankMailSearch, blankMailTopic, blankMailRule, blankMailDismissal,

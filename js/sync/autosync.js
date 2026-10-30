@@ -91,6 +91,12 @@ localStorage.setItem('dash-sync-log', JSON.stringify(log.slice(-40)));
 } catch (err) { /* storage unavailable: the console line above still stands */ }
 }
 
+// Another device may have carried a setting (js/settingsvault.js) in the copy
+// just taken; imported on demand so autosync doesn't depend on it loading.
+function settingsAfterRemote() {
+import('../settingsvault.js').then((m) => m.reconcileSyncedSettings()).catch(() => {});
+}
+
 // Adopts the server's copy: keeps a local safety backup first, then replaces
 // and re-renders. `fromRemote` stops this write from being treated as a local
 // edit and bounced straight back up.
@@ -100,6 +106,7 @@ await replaceData(remote.data, { fromRemote: true });
 await setKnownRev(remote.rev);
 await saveBase(JSON.stringify(data));
 renderAll();
+settingsAfterRemote();
 }
 
 // This device has edits the server hasn't seen and the server moved on.
@@ -127,6 +134,7 @@ await exportBackup();
 await replaceData(merged, { fromRemote: true });
 await setKnownRev(remote.rev);
 renderAll();
+settingsAfterRemote();
 syncLog(conflicts.length ? 'merged, server value kept for' : 'merged cleanly', conflicts.length ? conflicts.slice(0, 8).join(', ') : `rev ${remote.rev}`);
 return { merged: true, conflicts };
 }
@@ -279,6 +287,7 @@ if (pushTimer) { clearTimeout(pushTimer); push(); }
 });
 
 await pull({ announce: true });
+settingsAfterRemote();
 drainAgentStaging();
 startPolling();
 }

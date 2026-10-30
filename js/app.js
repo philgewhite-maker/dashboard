@@ -1,5 +1,6 @@
 // Must stay the first import: it starts remembering errors before anything else loads.
 import { initDiagnostics } from './diagnostics.js';
+import { initSettingsVault } from './settingsvault.js';
 import { loadData, setSaveStatusHandler, setExternalUpdateHandler, flushSave } from './state.js';
 import { renderAll } from './render-all.js';
 import { switchTab } from './tabs.js';
@@ -341,6 +342,7 @@ initConnectionSync();
 // record -- see recordsync.js's header. Inactive until that file exists.
 initRecordSync();
 initDiagnostics();
+initSettingsVault();
 }
 
 main();

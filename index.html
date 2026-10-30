@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v666</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v667</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -3212,6 +3212,15 @@ Photos added before task attachments existed live only on the device that added 
 <div class="settings-block">
 <div class="settings-note" style="margin:0 0 10px;">Live sync above re-uploads the whole document on every save. With several devices, the NAS, and Dashboard Capture all writing, that's a growing truncation/conflict risk for what's usually the biggest part of it &mdash; so Connections specifically ALSO sync one record at a time, additively (the whole-document sync above keeps covering everything, including Connections, exactly as before). Needs <code>server/sync-connections.php</code> uploaded next to <code>sync.php</code> &mdash; nothing else to configure, it reuses the URL/secret above. Inactive until that file is there.</div>
 <div class="settings-note" id="conn-sync-status"></div>
+</div>
+</details>
+
+<details class="settings-item" id="synced-settings-details">
+<summary><h3>Settings carried between devices</h3></summary>
+<div class="settings-block">
+<div class="settings-note" style="margin:0 0 10px;">Some settings, like your Anthropic key, normally stay on the one device where you typed them. Tick one here and it is copied to your other devices, so a new device doesn't need them retyped. Each is encrypted separately with your sync encryption key, so the server and backup files never hold it readable. Your sync login and encryption key are not in this list: a new device gets those first, from &ldquo;Add a device&rdquo;.</div>
+<div class="settings-note" id="synced-settings-note"></div>
+<div id="synced-settings-list"></div>
 </div>
 </details>
 
