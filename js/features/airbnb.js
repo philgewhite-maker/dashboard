@@ -1676,8 +1676,20 @@ q: listing.prefix,
 // Same exclusive-end correction as the external scan (eventDayRange),
 // so a hand-typed ALL-DAY event's dates compare fairly against
 // Google's own exclusive end.
-const match = candidates.length === 1 ? candidates[0] : null;
-const matchRange = match ? eventDayRange(match) : null;
+// Events another reservation has already claimed are never adopted again --
+// two reservations sharing one event id is the exact bug verifyPushedEvents
+// exists to undo.
+const claimed = new Set(data.airbnbReservations.filter((r) => r.id !== reservation.id && r.googleEventId).map((r) => r.googleEventId));
+// The listing prefix is in the search, so every candidate is already this
+// listing's; the check-in and check-out dates decide which is THIS stay.
+// Any number of other events nearby (back-to-back guests, a cleaner's
+// entry) no longer blocks a push: only an exact date match is adopted.
+const exact = candidates.filter((e) => {
+const range = eventDayRange(e);
+return !claimed.has(e.id) && range.checkin === reservation.checkin && range.checkout === reservation.checkout;
+});
+const match = exact[0] || null;
+const near = candidates.filter((e) => !claimed.has(e.id) && e !== match);
 // Adopted only on an EXACT date match -- confirmed live as a real bug,
 // not a hypothetical one: adopting the one same-prefix candidate
 // REGARDLESS of how much its dates differed once silently linked a
@@ -1693,13 +1705,13 @@ const matchRange = match ? eventDayRange(match) : null;
 // that copy is silently lost, so the row kept saying "Push" even though
 // the event now existed in Calendar. Always write to the live record.
 const live = () => data.airbnbReservations.find((r) => r.id === reservation.id) || reservation;
-if (match && matchRange.checkin === reservation.checkin && matchRange.checkout === reservation.checkout) {
+if (match) {
 const target = live();
 target.googleEventId = match.id;
 target.googleCalendarId = calendarId;
-out.textContent = `Matched an existing "${match.summary}" event — adopted, nothing new created.`;
-} else if (candidates.length > 1) {
-out.textContent = `${candidates.length} existing events near these dates already mention "${listing.prefix}" — too ambiguous to adopt one automatically. Rename or remove the extras in Google Calendar, then push again.`;
+out.textContent = exact.length > 1
+? `Matched an existing "${match.summary}" event — adopted, nothing new created. ${exact.length} events share these exact dates; the others were left alone.`
+: `Matched an existing "${match.summary}" event — adopted, nothing new created.`;
 } else {
 // A same-day visit (the sprinkler service) has no stay to put check-in
 // and check-out times on -- 15:00 to 11:00 the same day ends before it
@@ -1715,8 +1727,10 @@ startTime: CHECKIN_TIME, endTime: CHECKOUT_TIME,
 const target = live();
 target.googleEventId = created.id;
 target.googleCalendarId = calendarId;
-out.textContent = match
-? `Pushed as a new event — a nearby "${match.summary}" (${matchRange.checkin} → ${matchRange.checkout}) mentions "${listing.prefix}" too but its dates don't match this stay, so it wasn't adopted.`
+// A duplicate on the calendar is cheap to delete; a stay missing from it
+// isn't, so a near-miss never blocks the push -- it is just mentioned.
+out.textContent = near.length
+? `Pushed as a new event. ${near.length} nearby event${near.length === 1 ? '' : 's'} mention "${listing.prefix}" but ${near.length === 1 ? "its dates don't" : "their dates don't"} match this stay exactly (${near.slice(0, 3).map((e) => { const r = eventDayRange(e); return `${r.checkin} → ${r.checkout}`; }).join(', ')}), so none was adopted.`
 : 'Pushed.';
 }
 queueSave();
