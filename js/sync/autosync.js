@@ -191,6 +191,17 @@ busy = true;
 try {
 setStatus('Saving…');
 const sent = JSON.stringify(data);
+// Which top-level sections this push actually changed, kept in the local
+// sync log so a chatty writer (a poll, a scheduled task, another open
+// device) can be identified from the keys that keep appearing here.
+try {
+const baseText = await kvGet(BASE_KEY);
+if (baseText) {
+const base = JSON.parse(baseText), now = JSON.parse(sent);
+const changed = Object.keys(now).filter((k) => JSON.stringify(now[k]) !== JSON.stringify(base[k]));
+syncLog('pushing changes to', changed.slice(0, 12).join(', ') || '(nothing differs from baseline)');
+}
+} catch (err) { /* diagnostic only */ }
 await pushRemote(data);
 await saveBase(sent);
 setStatus(`Synced ${new Date().toLocaleTimeString()}`, 'ok');
