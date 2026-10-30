@@ -696,7 +696,8 @@ const total = totalOwed();
 const owed = owners().filter((k) => !isMyOwnKey(k));
 if (!owed.length) return '';
 return tile('Owed', escapeHtml(money(total)), '',
-`${owed.map((k) => `${ownerNameFor(k)} ${money(balanceFor(k))}`).join(' · ')}. Letting income owed to you — Finances tab.`);
+`${owed.map((k) => `${ownerNameFor(k)} ${money(balanceFor(k))}`).join(' · ')}. Letting income owed to you — click to open Lettings.`,
+{ gotoTab: 'finances', gotoTarget: '#letting-panel' });
 }
 if (item.kind === 'loyalty') {
 // One tile, rotating through whichever programs are flagged
@@ -715,7 +716,8 @@ const unit = r.unit && !/^(points?|miles?|pts)$/i.test(r.unit) ? ` ${r.unit}` : 
 const shortName = String(program.name || '').replace(/^(marriott|british airways|virgin)\s+/i, '').replace(/\s+(executive club|flying club|advantage card|gold plus rewards|rewards|club)$/i, '') || program.name;
 const logo = program.logoUrl ? `<img class="tick-bank-logo" src="${escapeHtml(program.logoUrl)}" alt="${escapeHtml(program.name)}" onerror="this.replaceWith(document.createTextNode(this.alt))">` : '';
 return tile('', `${logo}${escapeHtml(valueText)}${escapeHtml(unit)}${logo || unit ? '' : ` ${escapeHtml(shortName)}`}`, '',
-`${program.name}: ${r.label} ${valueText} ${r.unit || ''} as of ${r.date}. Loyalty balances — Finances tab.`);
+`${program.name}: ${r.label} ${valueText} ${r.unit || ''} as of ${r.date}. Click to open Loyalty balances.`,
+{ gotoTab: 'finances', gotoTarget: '#loyalty-balances-panel' });
 }
 if (item.kind === 'cass') {
 const logo = item.logoUrl ? `<img class="tick-bank-logo" src="${escapeHtml(item.logoUrl)}" alt="" onerror="this.remove()">` : '';
@@ -810,7 +812,8 @@ return tile('Holding', `£${Math.round(gbp).toLocaleString('en-GB')}${exDiv ? ' 
 if (!hit || hit.value === undefined) {
 if (!hit || !hit.error) return '';
 return tile(labelFor(item), '<span class="tick-flat">·</span>',
-'<span class="tick-down">failed</span>', `${labelFor(item)}: ${hit.error}`);
+'<span class="tick-down">failed</span>', `${labelFor(item)}: ${hit.error}. Click to open the ticker settings.`,
+{ gotoTab: 'settings', gotoTarget: '#ticker-items' });
 }
 
 switch (item.kind) {
