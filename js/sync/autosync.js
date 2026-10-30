@@ -301,4 +301,4 @@ clearInterval(drainTimer);
 await initAutoSync();
 }
 
-export { initAutoSync, restartAutoSync, pull, push };
+export { initAutoSync, restartAutoSync, pull, push, syncLog };

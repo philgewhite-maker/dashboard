@@ -101,6 +101,22 @@ return crypt.decryptDocument(payload);
 
 function snapshotOf(conn) { return JSON.stringify(conn); }
 
+// Which top-level fields of a connection differ between two copies (either
+// objects or a JSON snapshot) -- written to the sync trail so a repeating
+// conflict shows WHAT keeps changing, not just that something did.
+function changedFields(a, b) {
+const x = typeof a === 'string' ? JSON.parse(a) : a || {};
+const y = typeof b === 'string' ? JSON.parse(b) : b || {};
+return [...new Set([...Object.keys(x), ...Object.keys(y)])]
+.filter((k) => JSON.stringify(x[k]) !== JSON.stringify(y[k])).slice(0, 8).join(', ') || '(nothing)';
+}
+async function trail(event, conn, fields) {
+try {
+const { syncLog } = await import('./autosync.js');
+syncLog(event, `${conn.name || conn.id}: ${fields}`);
+} catch (err) { /* the trail is only a diagnostic */ }
+}
+
 // Pushes every connection whose current JSON differs from its last-synced
 // snapshot (new, edited, or -- via the delete branch -- removed). A 409
 // means someone else changed this record since this device last saw it:
@@ -137,6 +153,7 @@ const snap = snapshotOf(conn);
 if (known && known.snapshot === snap) continue; // unchanged since last sync
 try {
 const payload = await encryptIfNeeded(conn);
+await trail('connection push, changed since last sync', conn, known ? changedFields(known.snapshot, conn) : 'new on this device');
 const result = await apiRequest(url, secret, 'POST', { id: conn.id, rev: known ? known.rev : 0, data: payload });
 state[conn.id] = { rev: result.rev, snapshot: snap };
 } catch (err) {
@@ -146,6 +163,7 @@ if (!err.conflict) { console.error(`Connection sync: push failed for ${conn.id}:
 // drops either side's edit), then push the merged record as the
 // next revision on top of what they have.
 const remote = await decryptIfNeeded(err.conflict.data);
+await trail(`connection conflict (server rev ${err.conflict.rev}, we had ${known ? known.rev : 0}), differs from server in`, conn, changedFields(conn, remote));
 const { mergeConnectionInto } = await import('../features/connections.js');
 mergeConnectionInto(conn, remote);
 try {
@@ -199,6 +217,7 @@ const { mergeConnectionInto } = await import('../features/connections.js');
 mergeConnectionInto(local, remote);
 state[row.id] = { rev: full.rev, snapshot: snapshotOf(local) };
 } else if (local) {
+await trail(`connection taken from server (rev ${full.rev})`, local, changedFields(local, remote));
 Object.assign(local, remote);
 state[row.id] = { rev: full.rev, snapshot: snapshotOf(local) };
 } else {
