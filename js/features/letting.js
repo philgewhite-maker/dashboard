@@ -110,7 +110,9 @@ return (data.lettingLedger || []).filter((e) => e.ownerKey === key);
 }
 
 function balanceFor(key) {
-return entriesFor(key).reduce((n, e) => n + (Number(e.amount) || 0), 0);
+// Summed in pence: adding pound floats (0.1 + 0.2 ...) leaves residue like
+// -0.0000000001, which showed as "-£0.00 in credit" instead of "settled".
+return Math.round(entriesFor(key).reduce((n, e) => n + Math.round((Number(e.amount) || 0) * 100), 0)) / 100;
 }
 
 // What the listing has taken, as opposed to what is owed on it. Two
@@ -118,7 +120,7 @@ return entriesFor(key).reduce((n, e) => n + (Number(e.amount) || 0), 0);
 // — and keeping the gross as a field is what makes the first answerable
 // at all.
 function grossFor(key) {
-return entriesFor(key).reduce((n, e) => n + (Number(e.gross) || 0), 0);
+return Math.round(entriesFor(key).reduce((n, e) => n + Math.round((Number(e.gross) || 0) * 100), 0)) / 100;
 }
 
 // Every owner who has a listing or a ledger entry, so somebody who has
