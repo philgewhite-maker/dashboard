@@ -1661,9 +1661,16 @@ const matchRange = match ? eventDayRange(match) : null;
 // -- "Pushed ✓" kept showing for a reservation whose real event, on
 // Calendar, belonged to someone else's stay entirely. A near-miss is
 // surfaced in the create branch below instead of acted on blind.
+// Live sync can replace every record in `data` while the network calls
+// above are in flight (a pull or merge swaps in fresh objects), leaving
+// `reservation` pointing at a detached copy -- writing the event id onto
+// that copy is silently lost, so the row kept saying "Push" even though
+// the event now existed in Calendar. Always write to the live record.
+const live = () => data.airbnbReservations.find((r) => r.id === reservation.id) || reservation;
 if (match && matchRange.checkin === reservation.checkin && matchRange.checkout === reservation.checkout) {
-reservation.googleEventId = match.id;
-reservation.googleCalendarId = calendarId;
+const target = live();
+target.googleEventId = match.id;
+target.googleCalendarId = calendarId;
 statusEl.textContent = `Matched an existing "${match.summary}" event — adopted, nothing new created.`;
 } else if (candidates.length > 1) {
 statusEl.textContent = `${candidates.length} existing events near these dates already mention "${listing.prefix}" — too ambiguous to adopt one automatically. Rename or remove the extras in Google Calendar, then push again.`;
@@ -1679,8 +1686,9 @@ title, description,
 date: reservation.checkin, endDate: reservation.checkout,
 startTime: CHECKIN_TIME, endTime: CHECKOUT_TIME,
 });
-reservation.googleEventId = created.id;
-reservation.googleCalendarId = calendarId;
+const target = live();
+target.googleEventId = created.id;
+target.googleCalendarId = calendarId;
 statusEl.textContent = match
 ? `Pushed as a new event — a nearby "${match.summary}" (${matchRange.checkin} → ${matchRange.checkout}) mentions "${listing.prefix}" too but its dates don't match this stay, so it wasn't adopted.`
 : 'Pushed.';
@@ -1752,14 +1760,17 @@ if (group.length > 1) {
 // A real conflict: clear it for every reservation except the one
 // (if any) whose own dates actually match the event's real ones.
 const range = gone ? null : eventDayRange(event);
+// Writes go to the live records, looked up again by id: a sync can
+// swap in fresh objects during the awaits above (see pushReservation).
+const liveOf = (r) => data.airbnbReservations.find((x) => x.id === r.id);
 group.forEach((r) => {
 const keeps = !gone && range.checkin === r.checkin && range.checkout === r.checkout;
-if (!keeps) { r.googleEventId = ''; r.googleCalendarId = ''; missing++; }
+const t = liveOf(r);
+if (!keeps && t) { t.googleEventId = ''; t.googleCalendarId = ''; missing++; }
 });
 } else if (gone) {
-group[0].googleEventId = '';
-group[0].googleCalendarId = '';
-missing++;
+const t = data.airbnbReservations.find((x) => x.id === group[0].id);
+if (t) { t.googleEventId = ''; t.googleCalendarId = ''; missing++; }
 }
 }
 if (missing) queueSave();
