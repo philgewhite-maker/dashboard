@@ -264,6 +264,27 @@ convention are documented at the top of `server/agent-write.php.example`
 `With Claude` for build steps). State the returned batch id in chat. Only runs
 from a session on this PC — a cloud session has no access to that file.
 
+**Do this by default, without asking.** Whenever work leaves a step only the
+user can do (uploading a server file or `.php.example` they must deploy,
+running a command on the NAS/web host, a data update or migration they must
+trigger, a device they must reload or test, a decision they owe), push it to
+the agent inbox as a task in the same turn, then say in the reply that you
+did and give the batch id. One batch per piece of work, at the end of it,
+not one per step. Server deployments go under the `test-deploy` group; things
+Claude still has to build go under `build` with `With Claude`. Before pushing,
+`GET ?fields=agentInbox` and skip anything already pending there, so repeated
+turns don't stack duplicates.
+
+**Don't push when the user is clearly doing the step right now.** If this
+session is a live back-and-forth at the desktop where they are carrying out
+that very step — they just said they're uploading/running it, asked "what do I
+do next", or you are walking them through it one command at a time — just say
+it in chat; a task for something they'll finish in the next minute is noise.
+The same applies to a step you can finish yourself in this session (do it, no
+task), and to anything already done and verified. When it's unclear which
+side of that line a step falls on, push it: a task they didn't need is
+dismissed in one click, a step that only lived in chat gets lost.
+
 ## Deploy ritual
 
 Every shipped change: bump `sw.js`'s `CACHE_NAME` and `index.html`'s
