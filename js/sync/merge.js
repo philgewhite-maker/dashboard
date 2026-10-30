@@ -67,10 +67,19 @@ if (v !== undefined) out.push(v);
 return out;
 }
 
-function mergeDocuments(base, ours, theirs) {
+// Top-level sections that are just a cache or a status stamp refreshed
+// independently on every device (stock quotes, weather, "last synced at").
+// Two devices always differ on them, so a merge would report a conflict and
+// the caller would download a backup for nothing: take the server's value.
+function mergeDocuments(base, ours, theirs, volatile = []) {
 const conflicts = [];
 if (!isPlainObject(base) || !isPlainObject(ours) || !isPlainObject(theirs)) return { merged: theirs, conflicts: ['(whole document)'] };
-const merged = mergeObject(base, ours, theirs, '', conflicts);
+const strip = (doc) => { const c = { ...doc }; volatile.forEach((k) => { delete c[k]; }); return c; };
+const merged = mergeObject(strip(base), strip(ours), strip(theirs), '', conflicts);
+volatile.forEach((k) => {
+if (k in theirs) merged[k] = theirs[k];
+else if (k in ours) merged[k] = ours[k];
+});
 return { merged, conflicts };
 }
 

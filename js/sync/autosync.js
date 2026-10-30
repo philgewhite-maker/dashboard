@@ -71,6 +71,9 @@ return err.message || String(err);
 // the "base" a three-way merge needs to tell what THIS device changed from
 // what the SERVER changed. Kept in IndexedDB so it survives a reload.
 const BASE_KEY = 'sync-base';
+// Caches and last-run stamps each device refreshes for itself: never a reason
+// to push on their own, and never a merge conflict worth a backup file.
+const VOLATILE_KEYS = ['tickerCache', 'airbnbSyncStatus', 'airbnbCleanerSyncStatus', 'siteHealth'];
 async function saveBase(jsonText) {
 try { await kvSet(BASE_KEY, jsonText); } catch (err) { console.warn('Could not store the sync baseline:', err); }
 }
@@ -115,7 +118,7 @@ return { merged: false, conflicts: [] };
 }
 await replaceData(remote.data, { fromRemote: true });
 const theirs = JSON.parse(JSON.stringify(data));
-const { merged, conflicts } = mergeDocuments(JSON.parse(baseText), ours, theirs);
+const { merged, conflicts } = mergeDocuments(JSON.parse(baseText), ours, theirs, VOLATILE_KEYS);
 if (conflicts.length) {
 // Same field changed on both sides: keep a file of this device's version.
 await replaceData(ours, { fromRemote: true });
@@ -157,8 +160,7 @@ await flushSave();
 clearTimeout(pushTimer);
 pushTimer = null;
 busy = false;
-await push();
-return;
+if ((await push()) !== 'skipped') return;
 }
 await adoptRemote(remote, { backupFirst: firstAdoption });
 if (!firstAdoption) syncLog('adopted newer server copy', `rev ${remote.rev}`);
@@ -199,12 +201,14 @@ const baseText = await kvGet(BASE_KEY);
 if (baseText) {
 const base = JSON.parse(baseText), now = JSON.parse(sent);
 const changed = Object.keys(now).filter((k) => JSON.stringify(now[k]) !== JSON.stringify(base[k]));
-if (!changed.length && Object.keys(base).length === Object.keys(now).length) {
-// Nothing to send. A pull's re-render can queue a save that changes
-// nothing; pushing it anyway bumped the server revision, which made
-// every other open device pull and do the same -- a ping-pong.
+const meaningful = changed.filter((k) => !VOLATILE_KEYS.includes(k));
+if (!meaningful.length && Object.keys(base).length === Object.keys(now).length) {
+// Nothing worth sending. A pull's re-render can queue a save that changes
+// nothing, and a quote/weather refresh or sync-status stamp changes only
+// per-device caches; pushing either bumped the server revision, which
+// made every other open device pull and do the same -- a ping-pong.
 setStatus(`Synced ${new Date().toLocaleTimeString()}`, 'ok');
-return;
+return 'skipped';
 }
 syncLog('pushing changes to', changed.slice(0, 12).join(', '));
 }
