@@ -18,7 +18,7 @@ import { parseIcsReservations } from '../icsparse.js';
 // still be entered (see syncAirbnbListing's removal step).
 const AWAITING_INCOME_DAYS = 30;
 import { fetchIcs } from '../files.js';
-import { canAttemptGoogleAction, hasCalendarWrite } from '../sync/googleauth.js';
+import { canAttemptGoogleAction, hasCalendarWrite, isSignedIn, signIn } from '../sync/googleauth.js';
 import { listCalendars, createEvent, findEvents, getEvent } from '../googlecalendar.js';
 
 // Same fixed palette every other coloured chip in the app already uses
@@ -1631,6 +1631,14 @@ async function pushReservation(reservation, statusEl) {
 const listing = data.airbnbListings.find((l) => l.id === reservation.listingId);
 if (!listing) return;
 if (reservation.googleEventId) { statusEl.textContent = 'Already pushed.'; return; }
+// An expired token can only be renewed through a popup, and browsers
+// only allow that straight after a click -- so ask for it here, first
+// thing, rather than deep inside the first Calendar call (where the
+// popup was being blocked and Push just failed).
+if (!isSignedIn()) {
+statusEl.textContent = 'Signing in to Google…';
+try { await signIn(); } catch (err) { statusEl.textContent = `Couldn't sign in to Google: ${err.message || err}`; return; }
+}
 if (!(await canAttemptGoogleAction())) { statusEl.textContent = 'Sign in to Google at the top of Overview first.'; return; }
 if (!hasCalendarWrite()) { statusEl.innerHTML = 'Turn on "Allow creating events in Google Calendar" in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#calendar-write-toggle">Settings</span>, then sign out and back in.'; return; }
 const calendarId = data.prefs.airbnbCalendarId;

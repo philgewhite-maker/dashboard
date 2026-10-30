@@ -199,7 +199,14 @@ const baseText = await kvGet(BASE_KEY);
 if (baseText) {
 const base = JSON.parse(baseText), now = JSON.parse(sent);
 const changed = Object.keys(now).filter((k) => JSON.stringify(now[k]) !== JSON.stringify(base[k]));
-syncLog('pushing changes to', changed.slice(0, 12).join(', ') || '(nothing differs from baseline)');
+if (!changed.length && Object.keys(base).length === Object.keys(now).length) {
+// Nothing to send. A pull's re-render can queue a save that changes
+// nothing; pushing it anyway bumped the server revision, which made
+// every other open device pull and do the same -- a ping-pong.
+setStatus(`Synced ${new Date().toLocaleTimeString()}`, 'ok');
+return;
+}
+syncLog('pushing changes to', changed.slice(0, 12).join(', '));
 }
 } catch (err) { /* diagnostic only */ }
 await pushRemote(data);
