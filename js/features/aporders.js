@@ -108,15 +108,39 @@ lines.push({ id: uid(), name: nameMatch[1].trim(), colour: m[1].trim(), size: m[
 return lines;
 }
 
-// The totals block at the foot of an order email.
+// The totals block at the foot of an order email. Read from the "Subtotal" onward, with
+// up to 40 non-digit characters allowed between a label and its amount, because the
+// email's table cells reach this text separated by whatever whitespace or markup the
+// sender's template had (a pipe, a newline, a minus sign) and that was not confirmed
+// against the real extracted text.
 function parseOrderTotals(text) {
-const num = (re) => { const m = text.match(re); return m ? Number(m[1].replace(/,/g, '')) : null; };
-return {
-subtotal: num(/Subtotal\s*\|?\s*£\s*([\d,]+(?:\.\d+)?)/i),
-discount: num(/Discount\s*\|?\s*-\s*£\s*([\d,]+(?:\.\d+)?)/i),
-delivery: num(/Delivery\s*\|?\s*£\s*([\d,]+(?:\.\d+)?)/i),
-total: num(/\bTOTAL\s*\|?\s*£\s*([\d,]+(?:\.\d+)?)/),
+const none = { subtotal: null, discount: null, delivery: null, total: null };
+const at = String(text || '').search(/Sub-?total/i);
+if (at < 0) return none;
+const tail = text.slice(at);
+const amt = (label) => {
+const m = tail.match(new RegExp(`${label}[^£\\d]{0,40}£\\s*([\\d,]+(?:\\.\\d+)?)`, 'i'));
+return m ? Number(m[1].replace(/,/g, '')) : null;
 };
+return { subtotal: amt('Sub-?total'), discount: amt('Discount'), delivery: amt('Delivery'), total: amt('\\bTOTAL') };
+}
+
+// When an order was captured before its totals were read (or they could not be), fetch its
+// own email again and read them; if that still fails, keep a snippet of the text near
+// "Subtotal" so the card can show why.
+async function backfillTotals(order) {
+if (order.subtotal != null || !order.sourceMessageId || order.sourceMessageId === 'manual') return;
+try {
+const src = await getMessageDetail(order.sourceMessageId);
+const text = String(src.bodyText || '');
+Object.assign(order, parseOrderTotals(text));
+if (order.subtotal == null) {
+const i = text.search(/Sub-?total/i);
+order.totalsNote = i < 0 ? `no "Subtotal" found in the ${text.length}-character body` : `text near Subtotal: ${text.slice(i, i + 160).replace(/\s+/g, ' ')}`;
+} else order.totalsNote = '';
+} catch (err) {
+order.totalsNote = `could not fetch the order email: ${err.message}`;
+}
 }
 
 // "We have processed your refund request": the returned lines, then a refund block
@@ -131,10 +155,10 @@ const lines = extractLines(text).map(({ name, colour, size, price }) => ({ name,
 if (!lines.length) return null;
 return {
 orderNumber: orderNumberMatch[1], lines,
-discount: num(/Discount amount\s*\|?\s*-?\s*£\s*([\d,]+(?:\.\d+)?)/i) || 0,
-deliveryRefunded: num(/Delivery refunded\s*\|?\s*£\s*([\d,]+(?:\.\d+)?)/i) || 0,
-giftcardRefunded: num(/Giftcard refunded\s*\|?\s*£\s*([\d,]+(?:\.\d+)?)/i) || 0,
-valueRefunded: num(/Value refunded\s*\|?\s*£\s*([\d,]+(?:\.\d+)?)/i),
+discount: num(/Discount amount[^£\d]{0,40}£\s*([\d,]+(?:\.\d+)?)/i) || 0,
+deliveryRefunded: num(/Delivery refunded[^£\d]{0,40}£\s*([\d,]+(?:\.\d+)?)/i) || 0,
+giftcardRefunded: num(/Giftcard refunded[^£\d]{0,40}£\s*([\d,]+(?:\.\d+)?)/i) || 0,
+valueRefunded: num(/Value refunded[^£\d]{0,40}£\s*([\d,]+(?:\.\d+)?)/i),
 };
 }
 
@@ -447,6 +471,8 @@ messages = section?.messages || [];
 return { error: err.message };
 }
 const out = { added: 0, matched: 0, differing: [], noOrder: 0, alreadySeen: 0 };
+// Orders whose totals were never read get another go (once, unless forced).
+for (const o of data.apOrders) if (o.subtotal == null && (force || !o.totalsNote)) await backfillTotals(o);
 for (const msg of messages) {
 if (data.apOrders.some((o) => (o.refunds || []).some((r) => r.messageId === msg.id))) { out.alreadySeen++; continue; }
 let detail;
@@ -465,12 +491,7 @@ return out;
 
 async function attachRefund(order, parsed, messageId, date, out) {
 // An order captured before totals were read: take them from its own email, once.
-if (order.subtotal == null && order.sourceMessageId && order.sourceMessageId !== 'manual') {
-try {
-const src = await getMessageDetail(order.sourceMessageId);
-Object.assign(order, parseOrderTotals(String(src.bodyText || '')));
-} catch (err) { /* the check still runs, just without the discount rate */ }
-}
+await backfillTotals(order);
 if (!Array.isArray(order.refunds)) order.refunds = [];
 order.refunds.push({ messageId, date, lines: parsed.lines, discount: parsed.discount, deliveryRefunded: parsed.deliveryRefunded, giftcardRefunded: parsed.giftcardRefunded, valueRefunded: parsed.valueRefunded });
 const chk = refundCheck(order);
@@ -497,31 +518,43 @@ return `<div class="loyalty-reading">
 }
 
 // What was expected, and -- once AP's refund email has arrived -- whether it matches.
+// Like for like: items against items, then the net amount against what the order's own
+// discount rate predicts -- never "expected £6,135" next to "refunded £4,909", which
+// reads as a shortfall when the difference is just the discount.
 function refundBlockHtml(order) {
 const chk = refundCheck(order);
 if (chk.state === 'none') return '';
 const rate = orderDiscountRate(order);
-const expectedLine = rate > 0
-? `${money2(chk.expectedNet)} (${money2(chk.expectedItems)} of items less the order's ${(rate * 100).toFixed(1)}% discount)`
-: `${money2(chk.expectedItems)} of items (the order's discount, if any, is not known yet)`;
+const totalsNote = order.subtotal == null && order.totalsNote ? `<div class="settings-note" style="margin:0 0 6px;">The order's own discount could not be read (${escapeHtml(order.totalsNote)}).</div>` : '';
 if (chk.state === 'awaiting') {
-return `<div class="settings-note" style="margin:0 0 8px;" title="${escapeHtml(REFUND_NOTE)}">Expected refund: <strong>≈${escapeHtml(expectedLine)}</strong>. Delivery is not normally refunded. No refund email from AP yet.</div>`;
+const due = rate > 0
+? `Refund due: <strong>≈${money2(chk.expectedNet)}</strong> &mdash; ${money2(chk.expectedItems)} of items going back, less the order's ${(rate * 100).toFixed(1)}% discount.`
+: `<strong>${money2(chk.expectedItems)}</strong> of items going back. The refund will be that less whatever discount applied (the order email did not give it).`;
+return `${totalsNote}<div class="settings-note" style="margin:0 0 8px;" title="${escapeHtml(REFUND_NOTE)}">${due} Delivery is not normally refunded. No refund email from AP yet.</div>`;
 }
 const badge = chk.state === 'match' ? '<span class="expiry-badge done">Refund matches</span>'
 : chk.state === 'partial' ? '<span class="expiry-badge soon">Refund incomplete</span>'
 : '<span class="expiry-badge expired">Refund differs</span>';
 const when = chk.date ? ` on ${escapeHtml(chk.date)}` : '';
+const gone = chk.expectedItems;
+const itemsLine = Math.abs(chk.itemsRefunded - gone) < 0.005
+? `All ${money2(chk.itemsRefunded)} of items going back were refunded`
+: `${money2(chk.itemsRefunded)} of items refunded, against ${money2(gone)} going back`;
+const discountPct = chk.itemsRefunded > 0 ? ` (${((chk.discount / chk.itemsRefunded) * 100).toFixed(1)}% of the items)` : '';
+const predicted = rate > 0 && chk.diff != null
+? ` The order's own ${(rate * 100).toFixed(1)}% discount rate predicts about ${money2(chk.expectedNet)}; ${Math.abs(chk.diff) < 0.5 ? 'exactly what was refunded' : `this is ${money2(Math.abs(chk.diff))} ${chk.diff < 0 ? 'under' : 'over'}${chk.issues.length ? '' : ', within the usual give-and-take on how a discount is shared out'}`}.`
+: '';
 const issues = chk.issues.length ? `<ul style="margin:4px 0 0 18px;padding:0;">${chk.issues.map((i) => `<li>${escapeHtml(i)}</li>`).join('')}</ul>` : '';
-const diffNote = chk.diff != null && !chk.issues.length ? ` The amount is ${money2(Math.abs(chk.diff))} ${chk.diff < 0 ? 'under' : 'over'} the pro-rata estimate, within the usual give-and-take on how a discount is shared out.` : '';
-return `<div class="settings-note" style="margin:0 0 8px;">${badge} Refunded <strong>${money2(chk.value)}</strong>${when}: ${money2(chk.itemsRefunded)} of items less ${money2(chk.discount)} discount${chk.delivery ? `, plus ${money2(chk.delivery)} delivery` : ''}. Expected ≈${escapeHtml(expectedLine)}.${diffNote}${issues}</div>`;
+return `${totalsNote}<div class="settings-note" style="margin:0 0 8px;">${badge} Refunded <strong>${money2(chk.value)}</strong>${when}. ${itemsLine}; AP took off ${money2(chk.discount)} discount${discountPct}${chk.delivery ? `, and refunded ${money2(chk.delivery)} delivery` : ''}.${predicted}${issues}</div>`;
 }
-
 function orderCardHtml(order) {
 const kept = keptLinesFor(order);
 const returning = returningLinesFor(order);
 const deadline = returnDeadlineFor(order);
 let badgeHtml = '';
-if (deadline) {
+if ((order.refunds || []).length) {
+badgeHtml = '<span class="expiry-badge done">Returned &mdash; refund received</span>';
+} else if (deadline) {
 const dn = daysUntil(deadline);
 if (dn < 0) badgeHtml = '<span class="expiry-badge expired">Return deadline passed</span>';
 else if (dn <= 7) badgeHtml = `<span class="expiry-badge soon">${dn === 0 ? 'Return due today' : `Return due in ${dn}d`}</span>`;
