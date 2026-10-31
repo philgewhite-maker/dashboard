@@ -26,7 +26,7 @@ import { captureTask, revealTask } from './tasks.js';
 import { connectionChipHtml, bindConnectionChips, connectionPickerHtml, bindConnPickers, setConnPickerValue, sensitiveFieldsShown } from './connections.js';
 import { runStockCheck, stockCheckHtml, adapterFor, seedWatchSpec, pasteStockFor, cashbackHtml, fetchPages, registerCashbackTracked, refreshCashbackRates, money } from './stockwatch.js';
 import { MissingKeyError, searchShoppingItem, cleanEstimateText } from '../ai.js';
-import { orderForNumber, apOrderLineOptionsHtml, apOrderNumberDatalistHtml, apOrderChipHtml, bindApOrderChips, renderApOrders } from './aporders.js';
+import { orderForNumber, apOrderLineOptionsHtml, apOrderNumberDatalistHtml, apOrderChipHtml, bindApOrderChips, renderApOrders, syncApRefundTasks } from './aporders.js';
 import { initMicCapture } from './voicecapture.js';
 import { banner } from './sharetarget.js';
 
@@ -291,7 +291,11 @@ bindBackdropClose(dialog, close);
 dialog.querySelector('[data-apreport-close]').addEventListener('click', close);
 }
 
-function openAddInventoryDialog() {
+// `prefill` (optional): {brand, style, piece, size, colour, notes, orderNumber, apOrderLineId} --
+// used by the AP refund check, so a piece AP didn't refund can be added with the order line
+// already picked and the photo/link/holder still to fill in.
+function openAddInventoryDialog(prefill = null) {
+if (!prefill || typeof prefill !== 'object' || prefill instanceof Event) prefill = null;
 const dialog = document.createElement('div');
 dialog.className = 'mail-view-backdrop';
 dialog.innerHTML = `<div class="mail-view-card" style="max-width:420px;">
@@ -368,6 +372,11 @@ dialog.querySelector('[data-inv-new="size"]')?.addEventListener('input', refresh
 dialog.querySelectorAll('[data-inv-pick-field="style"], [data-inv-pick-field="size"]').forEach((chip) => {
 chip.addEventListener('click', refreshApLinePicker);
 });
+if (prefill) {
+['brand', 'style', 'piece', 'size', 'colour', 'notes', 'orderNumber'].forEach((k) => setVal(k, prefill[k]));
+refreshApLinePicker();
+if (prefill.apOrderLineId) apLineSelect.value = prefill.apOrderLineId;
+}
 
 // Held in dialog scope, not on a row, since there's no data.inventory
 // item to attach a photoId to until Add is actually clicked -- the
@@ -470,7 +479,7 @@ apOrderLineId: apLineSelect.value,
 data.inventory.push(newItem);
 queueSave();
 renderInventory();
-if (newItem.apOrderLineId) renderApOrders();
+if (newItem.apOrderLineId) { renderApOrders(); syncApRefundTasks(); }
 close();
 fillPhotoFromOrderLineIfMissing(newItem);
 });
@@ -1916,4 +1925,4 @@ doneToggle.addEventListener('change', (e) => { showDone = e.target.checked; rend
 render();
 }
 
-export { initShopping, render as refreshShopping, runAutoPriceCheck, renderInventory, runResaleEstimateSweep, forceResaleEstimateSweep };
+export { initShopping, render as refreshShopping, runAutoPriceCheck, renderInventory, openAddInventoryDialog, runResaleEstimateSweep, forceResaleEstimateSweep };

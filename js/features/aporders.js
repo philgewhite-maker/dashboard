@@ -551,15 +551,26 @@ queueSave();
 return true;
 }
 
+// After an inventory item is linked to an order line by any route (the full add form, or
+// the quick button), bring every refund's tasks in line with what is now kept.
+function syncApRefundTasks() {
+for (const o of data.apOrders) {
+const last = (o.refunds || [])[(o.refunds || []).length - 1];
+if (last) syncRefundTasks(o, refundCheck(o), last.messageId);
+}
+queueSave();
+renderApOrders();
+}
+
 // The lines AP has not refunded, each with the choices: you kept it (add to inventory), or
 // AP missed it (the alert task is the place to chase it).
 function missingLinesHtml(order, chk) {
 if (!chk.missing.length) return '';
 const rows = chk.missing.map((l) => `<div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;margin:4px 0;">
 <span><strong>${escapeHtml(l.name)}</strong> &mdash; ${escapeHtml(l.colour)}${l.size ? `, ${escapeHtml(l.size)}` : ''} &mdash; ${money2(l.price)}</span>
-<button type="button" class="sync-btn sm inline" data-ap-keep-line="${escapeHtml(order.id)}|${escapeHtml(l.id)}" title="Adds it to Inventory as a kept item linked to this order line, so it stops counting as a return.">I kept it &mdash; add to inventory</button>
+<button type="button" class="sync-btn sm inline" data-ap-keep-line="${escapeHtml(order.id)}|${escapeHtml(l.id)}" title="Opens the Add to inventory form with this order line already picked, so you can add the photo and link too. Once it is saved it stops counting as a return.">I kept it &mdash; add to inventory&hellip;</button>
 </div>`).join('');
-const all = chk.missing.length > 1 ? `<button type="button" class="sync-btn sm inline" data-ap-keep-all="${escapeHtml(order.id)}">I kept all of these</button>` : '';
+const all = chk.missing.length > 1 ? `<button type="button" class="sync-btn sm inline" data-ap-keep-all="${escapeHtml(order.id)}">Add all without the form</button>` : '';
 const chase = order.refundIssueTaskId && data.tasks.some((t) => t.id === order.refundIssueTaskId && t.bucket !== 'done')
 ? ` <span class="inline-goto-link" data-ap-open-task="${escapeHtml(order.refundIssueTaskId)}">Not kept? Chase AP from the task &rarr;</span>` : '';
 return `<div class="settings-note" style="margin:0 0 8px;"><strong>Not in the refund</strong> &mdash; did you keep ${chk.missing.length === 1 ? 'this' : 'these'}, or has AP missed ${chk.missing.length === 1 ? 'it' : 'them'}?${rows}${all}${chase}</div>`;
@@ -817,9 +828,18 @@ renderApOrders();
 import('./shopping.js').then((m) => m.renderInventory && m.renderInventory()).catch(() => {});
 };
 el.querySelectorAll('[data-ap-keep-line]').forEach((btn) => {
-btn.addEventListener('click', () => {
+btn.addEventListener('click', async () => {
 const [orderId, lineId] = btn.dataset.apKeepLine.split('|');
-if (keepLineAsInventory(orderId, lineId)) afterKeep();
+const order = data.apOrders.find((o) => o.id === orderId);
+const line = order && order.lines.find((l) => l.id === lineId);
+if (!line) return;
+const { style, piece } = splitStylePiece(line.name);
+const shopping = await import('./shopping.js');
+shopping.openAddInventoryDialog({
+brand: 'Agent Provocateur', style, piece, size: line.size, colour: line.colour,
+orderNumber: order.orderNumber, apOrderLineId: line.id,
+notes: `Kept from AP order #${order.orderNumber}: it was not in AP's refund.`,
+});
 });
 });
 el.querySelectorAll('[data-ap-keep-all]').forEach((btn) => {
@@ -914,7 +934,7 @@ revealApOrder(chip.dataset.openApOrder);
 }
 
 export {
-runApOrderCapture, runApRefundCheck, renderApOrders, initApOrders,
+runApOrderCapture, runApRefundCheck, syncApRefundTasks, renderApOrders, initApOrders,
 orderForNumber, apOrderLineOptionsHtml, apOrderNumberDatalistHtml,
 apOrderChipHtml, bindApOrderChips, revealApOrder,
 };
