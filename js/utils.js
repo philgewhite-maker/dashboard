@@ -1410,7 +1410,9 @@ const elapsed = Math.min(Math.max(now - start, 0), WEEK_MS);
 const expected = (elapsed / WEEK_MS) * 100;
 const used = Number(wk.percentUsed);
 const exhaustAt = used > 0 && elapsed > 0 ? start + (elapsed * 100) / used : null;
-return { used, expected, points: used - expected, exhaustAt: exhaustAt && exhaustAt < end ? exhaustAt : null };
+// Past resetsAt the reading describes the previous week: the window has
+// rolled over but no newer reading has arrived to say what the new one holds.
+return { used, expected, points: used - expected, exhaustAt: exhaustAt && exhaustAt < end ? exhaustAt : null, expired: now >= end };
 }
 
 export {

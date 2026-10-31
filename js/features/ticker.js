@@ -766,6 +766,11 @@ if (!pace) return '';
 const fh = item.sub.fiveHour || {};
 const ageH = item.sub.asOf ? (Date.now() - new Date(item.sub.asOf).getTime()) / 3600000 : null;
 const stale = ageH !== null && ageH > 6;
+if (pace.expired) {
+return tile('Claude', '<span class="tick-flat">week reset</span>', `<span class="tick-flat">awaiting reading${ageH !== null ? ` · last ${Math.round(ageH)}h ago` : ''}</span>`,
+`The last reading (${Math.round(pace.used)}% used) was for the week that has since reset, so there is no figure for the new week until the next scheduled check runs. Click for detail.`,
+{ auto: true, gotoTab: 'settings', gotoTarget: '#claude-usage-summary' });
+}
 // Used above the flat-pace line reads red, at or under it green.
 const cls = pace.points > 0.5 ? 'tick-down' : 'tick-up';
 const five = fh.percentUsed != null ? `<span class="tick-flat">5h ${Math.round(fh.percentUsed)}%${stale ? ' · stale' : ''}</span>` : (stale ? '<span class="tick-flat">stale</span>' : '');

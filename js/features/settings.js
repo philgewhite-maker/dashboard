@@ -113,11 +113,13 @@ const fh = sub.fiveHour || {};
 const wk = sub.weekly || {};
 const lines = [];
 if (fh.percentUsed != null) lines.push(`5h window: ${fh.percentUsed}%, resets in ${hoursMinsUntil(fh.resetsAt)}`);
-if (wk.percentUsed != null) lines.push(`Weekly: ${wk.percentUsed}%, resets in ${hoursMinsUntil(wk.resetsAt)}`);
+const pace = claudeWeeklyPace(sub);
+if (wk.percentUsed != null && !(pace && pace.expired)) lines.push(`Weekly: ${wk.percentUsed}%, resets in ${hoursMinsUntil(wk.resetsAt)}`);
 // Computed live from the window's reset time, so the reading task only
 // has to report percent + reset.
-const pace = claudeWeeklyPace(sub);
-if (pace) {
+if (pace && pace.expired) {
+lines.push(`Weekly: the week this reading covered (${wk.percentUsed}% used) has reset; waiting for the next check to report the new week`);
+} else if (pace) {
 lines.push(`Week ${Math.round(pace.expected)}% elapsed, ${Math.round(pace.used)}% used — ${Math.abs(pace.points).toFixed(1)} points ${pace.points >= 0 ? 'ahead of' : 'behind'} a flat pace`);
 if (pace.exhaustAt) lines.push(`At this rate, 100% around ${new Date(pace.exhaustAt).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}`);
 }
