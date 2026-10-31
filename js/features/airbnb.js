@@ -1084,6 +1084,19 @@ const GUEST_NAME_SEARCH_LIMIT = 25;
 // turns Airbnb's own table layout into plain text with whatever
 // whitespace/line breaks happened to fall between the two.
 const PAYOUT_RE = /you\s*earn[\s\S]{0,60}?£\s*([\d,]+\.\d{2})/i;
+// The same email's party size, a "GUESTS" heading followed by "1 adult" or
+// "2 adults" (and, when present, ", 1 child" / "1 infant" / "1 pet" -- the
+// intro sentence "Guests will now let you know if they're bringing children"
+// has no number after it, so it can't match). Only the booker's name is in
+// the email, so a party of more than one is marked on the name as "+N"
+// rather than inventing the other names.
+const GUEST_PARTY_RE = /\bguests\b\s*(\d+)\s+adults?((?:[\s,]+\d+\s+(?:children|child|infants?|pets?))*)/i;
+function extraGuestsFrom(bodyText) {
+const m = GUEST_PARTY_RE.exec(bodyText || '');
+if (!m) return 0;
+const kids = /(\d+)\s+(?:children|child)\b/i.exec(m[2] || '');
+return Math.max(0, Number(m[1]) + (kids ? Number(kids[1]) : 0) - 1);
+}
 const MONTH_NAMES = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 
 // The subject carries a day+month with no year ("23 Sept" or "Sept 23"
@@ -1592,22 +1605,29 @@ console.error('Guest-name romanization failed, using the raw name:', err);
 romanizeFailed++;
 }
 }
+const romanized = name !== rawName;
+// One body fetch per matched reservation serves both extractions below.
+// Never blocks the name fill this function exists for -- the party size and
+// the payout are bonus extractions on top of it (the payout is typeable by
+// hand same as always).
+let bodyText = '';
+try {
+bodyText = (await getMessageDetail(m.id)).bodyText || '';
+} catch (err) {
+console.error('Reading the booking email body failed, skipping party size and payout:', err);
+}
+const extra = extraGuestsFrom(bodyText);
+// A name already naming two people ("Ben & Sam") needs no marker.
+if (extra > 0 && !/[&+]|\band\b/i.test(name)) name = `${name} +${extra}`;
 reservation.guestName = name;
-if (name !== rawName) {
+if (romanized) {
 reservation.notes = reservation.notes ? `${reservation.notes} · Booking name: ${rawName}` : `Booking name: ${rawName}`;
 }
 if (reservation.income == null) {
-try {
-const detail = await getMessageDetail(m.id);
-const payoutMatch = PAYOUT_RE.exec(detail.bodyText || '');
+const payoutMatch = PAYOUT_RE.exec(bodyText);
 if (payoutMatch) {
 reservation.income = Number(payoutMatch[1].replace(/,/g, ''));
 incomeFilled++;
-}
-} catch (err) {
-// Never blocks the name fill this function exists for -- the payout
-// is a bonus extraction on top of it, typeable by hand same as always.
-console.error('Payout extraction failed, leaving income blank:', err);
 }
 }
 filled++;
