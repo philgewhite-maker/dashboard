@@ -26,10 +26,10 @@
 //     pretty-printed with heavy indentation) -- the lookback/lookahead
 //     windows below are sized generously for that, confirmed against
 //     the real document rather than guessed.
-import { data, queueSave, blankApOrder } from '../state.js';
+import { data, queueSave, blankApOrder, blankInventoryItem } from '../state.js';
 import { escapeHtml, uid, daysSince, daysUntil, dateStrAdd, scrollAndFlash } from '../utils.js';
 import { fetchMailSearches, getMessageDetail, gmailLink } from '../googlemail.js';
-import { captureTask, toggleTaskDone } from './tasks.js';
+import { captureTask, toggleTaskDone, revealTask } from './tasks.js';
 
 const SENDER = 'clientservices@agentprovocateur.com';
 const CADENCE_DAYS = 28;
@@ -399,7 +399,11 @@ const extra = [...pool.values()].flat();
 
 const issues = [];
 const names = (arr) => arr.slice(0, 4).map((l) => `${l.name} (${l.colour}${l.size ? `, ${l.size}` : ''})`).join('; ') + (arr.length > 4 ? ` and ${arr.length - 4} more` : '');
-if (missing.length) issues.push(`${missing.length} item${missing.length === 1 ? '' : 's'} you are returning ${missing.length === 1 ? 'is' : 'are'} not in the refund yet (${money2(sumOf(missing, (l) => l.price))}): ${names(missing)}.`);
+let missingIssue = '';
+if (missing.length) {
+missingIssue = `${missing.length} item${missing.length === 1 ? '' : 's'} you are returning ${missing.length === 1 ? 'is' : 'are'} not in the refund yet (${money2(sumOf(missing, (l) => l.price))}): ${names(missing)}.`;
+issues.push(missingIssue);
+}
 if (extra.length) issues.push(`the refund includes ${extra.length} item${extra.length === 1 ? '' : 's'} you have as kept or not on the order (${money2(sumOf(extra, (l) => l.price))}): ${names(extra)}.`);
 // The email's own sum: items less discount should be the value refunded.
 if (Math.abs((itemsRefunded - discount) - value) > 0.01) issues.push(`the email's own figures do not add up: ${money2(itemsRefunded)} of items less ${money2(discount)} discount is ${money2(itemsRefunded - discount)}, but it says ${money2(value)} was refunded.`);
@@ -410,7 +414,7 @@ diff = value - expectedNet;
 if (Math.abs(diff) > Math.max(5, expectedNet * 0.01)) issues.push(`the amount refunded (${money2(value)}) is ${money2(Math.abs(diff))} ${diff < 0 ? 'less' : 'more'} than the order's own discount rate predicts (about ${money2(expectedNet)}).`);
 }
 const state = issues.length ? (issues.length === 1 && missing.length && !extra.length ? 'partial' : 'differs') : 'match';
-return { state, refunds, value, discount, delivery, gift, itemsRefunded, expectedItems, expectedNet, diff, missing, extra, issues, date: refunds[refunds.length - 1].date };
+return { state, refunds, value, discount, delivery, gift, itemsRefunded, expectedItems, expectedNet, diff, missing, extra, issues, missingIssue, date: refunds[refunds.length - 1].date };
 }
 
 // 5 working days from a date -- AP's own "3-5 working days" to refund the card.
@@ -499,6 +503,50 @@ syncRefundTasks(order, chk, messageId);
 if (out) { out.added++; if (chk.state === 'match') out.matched++; else out.differing.push(order); }
 }
 
+// "Kay Thong" -> style "Kay", piece "Thong"; "Kay Plunge Underwired Bra" -> style "Kay",
+// piece "Plunge Underwired Bra". The style is the name up to the first garment word.
+const PIECE_WORDS = /^(plunge|balconette|high|full|brief|thong|suspender|slip|playsuit|ouvert|trixie|detachable|bra|bodysuit|body|robe|kimono|chemise|stocking|stockings|garter|corset|bralette|tank|top|short|shorts|cami|camisole|teddy|set|brazilian)$/i;
+function splitStylePiece(name) {
+const words = String(name || '').trim().split(/\s+/);
+const at = words.findIndex((w, i) => i > 0 && PIECE_WORDS.test(w));
+return at > 0 ? { style: words.slice(0, at).join(' '), piece: words.slice(at).join(' ') } : { style: words.join(' '), piece: '' };
+}
+
+// The line was never going back: record it as the kept item it is (linked to its exact
+// order line, as the Inventory picker does), which takes it out of "returning" and so
+// out of the refund discrepancy -- and re-runs the refund tasks to match.
+function keepLineAsInventory(orderId, lineId) {
+const order = data.apOrders.find((o) => o.id === orderId);
+const line = order && order.lines.find((l) => l.id === lineId);
+if (!line) return false;
+if (data.inventory.some((i) => i.apOrderLineId === line.id)) return false;
+const { style, piece } = splitStylePiece(line.name);
+data.inventory.push(blankInventoryItem({
+brand: 'Agent Provocateur', style, piece, colour: line.colour, size: line.size,
+orderNumber: order.orderNumber, apOrderLineId: line.id,
+acquiredAt: new Date().toISOString().slice(0, 10),
+notes: `Added from the refund check for AP order #${order.orderNumber}: it was not in AP's refund, so it was kept.`,
+}));
+const last = (order.refunds || [])[(order.refunds || []).length - 1];
+if (last) syncRefundTasks(order, refundCheck(order), last.messageId);
+queueSave();
+return true;
+}
+
+// The lines AP has not refunded, each with the choices: you kept it (add to inventory), or
+// AP missed it (the alert task is the place to chase it).
+function missingLinesHtml(order, chk) {
+if (!chk.missing.length) return '';
+const rows = chk.missing.map((l) => `<div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;margin:4px 0;">
+<span><strong>${escapeHtml(l.name)}</strong> &mdash; ${escapeHtml(l.colour)}${l.size ? `, ${escapeHtml(l.size)}` : ''} &mdash; ${money2(l.price)}</span>
+<button type="button" class="sync-btn sm inline" data-ap-keep-line="${escapeHtml(order.id)}|${escapeHtml(l.id)}" title="Adds it to Inventory as a kept item linked to this order line, so it stops counting as a return.">I kept it &mdash; add to inventory</button>
+</div>`).join('');
+const all = chk.missing.length > 1 ? `<button type="button" class="sync-btn sm inline" data-ap-keep-all="${escapeHtml(order.id)}">I kept all of these</button>` : '';
+const chase = order.refundIssueTaskId && data.tasks.some((t) => t.id === order.refundIssueTaskId && t.bucket !== 'done')
+? ` <span class="inline-goto-link" data-ap-open-task="${escapeHtml(order.refundIssueTaskId)}">Not kept? Chase AP from the task &rarr;</span>` : '';
+return `<div class="settings-note" style="margin:0 0 8px;"><strong>Not in the refund</strong> &mdash; did you keep ${chk.missing.length === 1 ? 'this' : 'these'}, or has AP missed ${chk.missing.length === 1 ? 'it' : 'them'}?${rows}${all}${chase}</div>`;
+}
+
 // Return still to make: not ticked off as done, and the window hasn't closed.
 function returnStillOpen(order) {
 const task = order.taskId ? data.tasks.find((t) => t.id === order.taskId) : null;
@@ -544,8 +592,9 @@ const discountPct = chk.itemsRefunded > 0 ? ` (${((chk.discount / chk.itemsRefun
 const predicted = rate > 0 && chk.diff != null
 ? ` The order's own ${(rate * 100).toFixed(1)}% discount rate predicts about ${money2(chk.expectedNet)}; ${Math.abs(chk.diff) < 0.5 ? 'exactly what was refunded' : `this is ${money2(Math.abs(chk.diff))} ${chk.diff < 0 ? 'under' : 'over'}${chk.issues.length ? '' : ', within the usual give-and-take on how a discount is shared out'}`}.`
 : '';
-const issues = chk.issues.length ? `<ul style="margin:4px 0 0 18px;padding:0;">${chk.issues.map((i) => `<li>${escapeHtml(i)}</li>`).join('')}</ul>` : '';
-return `${totalsNote}<div class="settings-note" style="margin:0 0 8px;">${badge} Refunded <strong>${money2(chk.value)}</strong>${when}. ${itemsLine}; AP took off ${money2(chk.discount)} discount${discountPct}${chk.delivery ? `, and refunded ${money2(chk.delivery)} delivery` : ''}.${predicted}${issues}</div>`;
+const shown = chk.issues.filter((i) => i !== chk.missingIssue);
+const issues = shown.length ? `<ul style="margin:4px 0 0 18px;padding:0;">${shown.map((i) => `<li>${escapeHtml(i)}</li>`).join('')}</ul>` : '';
+return `${totalsNote}<div class="settings-note" style="margin:0 0 8px;">${badge} Refunded <strong>${money2(chk.value)}</strong>${when}. ${itemsLine}; AP took off ${money2(chk.discount)} discount${discountPct}${chk.delivery ? `, and refunded ${money2(chk.delivery)} delivery` : ''}.${predicted}${issues}</div>${missingLinesHtml(order, chk)}`;
 }
 function orderCardHtml(order) {
 const kept = keptLinesFor(order);
@@ -742,6 +791,32 @@ data.inventory.forEach((i) => { if (goneLines.has(i.apOrderLineId)) i.apOrderLin
 data.apOrders = data.apOrders.filter((o) => o.id !== id);
 queueSave();
 renderApOrders();
+});
+});
+const afterKeep = () => {
+queueSave();
+renderApOrders();
+import('./shopping.js').then((m) => m.renderInventory && m.renderInventory()).catch(() => {});
+};
+el.querySelectorAll('[data-ap-keep-line]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const [orderId, lineId] = btn.dataset.apKeepLine.split('|');
+if (keepLineAsInventory(orderId, lineId)) afterKeep();
+});
+});
+el.querySelectorAll('[data-ap-keep-all]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const order = data.apOrders.find((o) => o.id === btn.dataset.apKeepAll);
+if (!order) return;
+refundCheck(order).missing.slice().forEach((l) => keepLineAsInventory(order.id, l.id));
+afterKeep();
+});
+});
+el.querySelectorAll('[data-ap-open-task]').forEach((link) => {
+link.addEventListener('click', async () => {
+const { switchTab } = await import('../tabs.js');
+switchTab('tasks');
+revealTask(link.dataset.apOpenTask);
 });
 });
 bindApOrderChips();
