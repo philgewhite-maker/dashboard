@@ -14,6 +14,7 @@ import { renderAll } from '../render-all.js';
 import { ConflictError, NotConfiguredError, isConfigured, pullRemote, pushRemote, setKnownRev, getKnownRev } from './selfhost.js';
 import { LockedError } from '../synccrypto.js';
 import { drainAgentStaging } from './agentstaging.js';
+import { flippedKeys } from './recordsync.js';
 
 const PUSH_DEBOUNCE_MS = 2500;
 // Only fires while the tab is visible (see the visibilitychange handler), so
@@ -102,7 +103,12 @@ import('../settingsvault.js').then((m) => m.reconcileSyncedSettings()).catch(() 
 // edit and bounced straight back up.
 async function adoptRemote(remote, { backupFirst }) {
 if (backupFirst) await exportBackup();
+// Collections read from the record store (js/sync/recordsync.js) are not
+// the whole document's to overwrite: this device's copy came from the store.
+const kept = {};
+flippedKeys().forEach((k) => { if (k in data) kept[k] = data[k]; });
 await replaceData(remote.data, { fromRemote: true });
+Object.assign(data, kept);
 await setKnownRev(remote.rev);
 await saveBase(JSON.stringify(data));
 renderAll();
@@ -125,7 +131,11 @@ return { merged: false, conflicts: [] };
 }
 await replaceData(remote.data, { fromRemote: true });
 const theirs = JSON.parse(JSON.stringify(data));
-const { merged, conflicts } = mergeDocuments(JSON.parse(baseText), ours, theirs, VOLATILE_KEYS);
+const fromStore = flippedKeys();
+const { merged, conflicts } = mergeDocuments(JSON.parse(baseText), ours, theirs, VOLATILE_KEYS.concat(fromStore));
+// Read from the record store, so this device's copy stands (mergeDocuments
+// would otherwise take the server document's older one).
+fromStore.forEach((k) => { if (k in ours) merged[k] = ours[k]; });
 if (conflicts.length) {
 // Same field changed on both sides: keep a file of this device's version.
 await replaceData(ours, { fromRemote: true });
@@ -209,7 +219,10 @@ const baseText = await kvGet(BASE_KEY);
 if (baseText) {
 const base = JSON.parse(baseText), now = JSON.parse(sent);
 const changed = Object.keys(now).filter((k) => JSON.stringify(now[k]) !== JSON.stringify(base[k]));
-const meaningful = changed.filter((k) => !VOLATILE_KEYS.includes(k));
+// A collection read from the record store changes whenever another
+// device edits it; that arrives via the store, not as a reason to push.
+const fromStore = flippedKeys();
+const meaningful = changed.filter((k) => !VOLATILE_KEYS.includes(k) && !fromStore.includes(k));
 if (!meaningful.length && Object.keys(base).length === Object.keys(now).length) {
 // Nothing worth sending. A pull's re-render can queue a save that changes
 // nothing, and a quote/weather refresh or sync-status stamp changes only

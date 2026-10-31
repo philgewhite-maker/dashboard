@@ -86,6 +86,26 @@ rows.set(id, item);
 return rows;
 }
 
+// Where each row id sits in a records/dated array, using the same id and
+// de-duplication rules as rowsOf, so a row received from the store can be
+// found (and replaced or removed) in the document.
+function rowIndex(entry, arr) {
+const out = new Map();
+if (!Array.isArray(arr)) return out;
+const seen = new Map();
+arr.forEach((item, i) => {
+const raw = entry.kind === 'dated'
+? (item && item[entry.dateField]) || `index-${i}`
+: (item && item.id) || `index-${i}`;
+let id = rowId(raw);
+const n = seen.get(id) || 0;
+seen.set(id, n + 1);
+if (n) id = `${id}~${n}`;
+out.set(id, i);
+});
+return out;
+}
+
 // cyrb53: a fast 53-bit string hash. Only used to notice that a row
 // changed, never for security.
 function hashString(str) {
@@ -124,4 +144,4 @@ const v = value || {};
 return String(v.title || v.name || v.label || v.guestName || v.note || v.provider || v.date || id).slice(0, 60);
 }
 
-export { COLLECTIONS, rowsOf, rowId, hashValue, rowLabel };
+export { COLLECTIONS, rowsOf, rowIndex, rowId, hashValue, rowLabel };

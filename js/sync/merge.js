@@ -83,4 +83,4 @@ else if (k in ours) merged[k] = ours[k];
 return { merged, conflicts };
 }
 
-export { mergeDocuments };
+export { mergeDocuments, mergeValue };
