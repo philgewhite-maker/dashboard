@@ -289,6 +289,23 @@ const keptLineIds = new Set(keptLinesFor(order).map((k) => k.line.id));
 return order.lines.filter((l) => !keptLineIds.has(l.id));
 }
 
+// What AP should refund for an order: the item prices on the order email for every
+// line that is going back. The email carries no delivery charge or discount-code
+// line, so this is the items-only figure -- a code applied at checkout means the
+// real refund can be lower, which the tooltip says.
+function expectedRefundFor(order) {
+return returningLinesFor(order).reduce((sum, l) => sum + (Number(l.price) || 0), 0);
+}
+const REFUND_NOTE = 'Sum of the item prices on the order email for the lines being returned. Delivery and any discount code are not in that email, so check it against what you actually paid.';
+
+// Return still to make: not ticked off as done, and the window hasn't closed.
+function returnStillOpen(order) {
+const task = order.taskId ? data.tasks.find((t) => t.id === order.taskId) : null;
+if (task && task.bucket === 'done') return false;
+const deadline = returnDeadlineFor(order);
+return !(deadline && daysUntil(deadline) < 0);
+}
+
 function readingRowHtml(labelHtml, valueHtml, noteHtml) {
 return `<div class="loyalty-reading">
 <div class="loyalty-reading-id">
@@ -326,12 +343,12 @@ return `<div class="account-card" data-ap-order-card="${escapeHtml(order.id)}">
 <span class="settings-note" style="margin:0;">placed ${escapeHtml(order.orderDate)}</span>
 ${badgeHtml}
 </div>
-<div class="settings-note" style="margin:4px 0 8px;font-weight:600;">${order.lines.length} item${order.lines.length === 1 ? '' : 's'} ordered, ${kept.length} kept, ${returning.length} returning</div>
+<div class="settings-note" style="margin:4px 0 8px;font-weight:600;">${order.lines.length} item${order.lines.length === 1 ? '' : 's'} ordered, ${kept.length} kept, ${returning.length} returning &mdash; <span title="${escapeHtml(REFUND_NOTE)}">expected refund £${expectedRefundFor(order).toFixed(2)}</span></div>
 <details>
 <summary>Show items &amp; return actions</summary>
 <div class="settings-note" style="margin:8px 0 2px;font-weight:600;">Kept &mdash; check this against the real items first</div>
 ${keptHtml}
-<div class="settings-note" style="margin:8px 0 2px;font-weight:600;">Returning</div>
+<div class="settings-note" style="margin:8px 0 2px;font-weight:600;">Returning &mdash; refund £${expectedRefundFor(order).toFixed(2)}</div>
 ${returningHtml}
 <div class="sync-row" style="margin-top:8px;">
 <button type="button" class="sync-btn sm inline" data-ap-order-copy="${escapeHtml(order.id)}">Copy return list</button>
@@ -364,6 +381,8 @@ const out = [
 '',
 'RETURNING:',
 ...returning.map(lineText),
+'',
+`EXPECTED REFUND: £${expectedRefundFor(order).toFixed(2)} (item prices from the order email; delivery and any discount code are not included)`,
 ].join('\n');
 try {
 await navigator.clipboard.writeText(out);
@@ -463,7 +482,12 @@ function renderApOrders() {
 const el = document.getElementById('ap-orders-list');
 if (!el) return;
 const orders = [...data.apOrders].sort((a, b) => (b.orderDate || '').localeCompare(a.orderDate || ''));
-el.innerHTML = orders.length ? orders.map(orderCardHtml).join('') : '<div class="empty">No AP orders captured yet &mdash; Check now below, or paste one in.</div>';
+const open = orders.filter((o) => returningLinesFor(o).length && returnStillOpen(o));
+const openTotal = open.reduce((sum, o) => sum + expectedRefundFor(o), 0);
+const totalHtml = open.length
+? `<div class="settings-note" style="margin:0 0 10px;font-weight:600;" title="${escapeHtml(REFUND_NOTE)}">Expected refunds still to come: £${openTotal.toFixed(2)} across ${open.length} order${open.length === 1 ? '' : 's'} with a return to make</div>`
+: '';
+el.innerHTML = orders.length ? totalHtml + orders.map(orderCardHtml).join('') : '<div class="empty">No AP orders captured yet &mdash; Check now below, or paste one in.</div>';
 el.querySelectorAll('[data-ap-order-copy]').forEach((btn) => {
 btn.addEventListener('click', () => copyReturnList(btn.dataset.apOrderCopy));
 });
