@@ -1987,7 +1987,17 @@ sourceMessageId: '', // dedup guard, same convention loyaltybalances.js's progra
 // cruder orderDate-based estimate forever.
 taskId: '',
 lines: [], // [{id, name, colour, size, price}] -- id is a uid(), stable, referenced by inventory rows
-createdAt: new Date().toISOString(),
+// The order email's own totals block: items before discount, the discount, delivery
+// and what was charged. Null on an order captured before these were read -- the refund
+// check fills them in from the source email the first time it needs them.
+subtotal: null, discount: null, delivery: null, total: null,
+// Each "We have processed your refund request" email that mentions this order:
+// [{messageId, date, lines:[{name,colour,size,price}], discount, deliveryRefunded,
+// giftcardRefunded, valueRefunded}] -- compared against what was expected
+// (aporders.js's refundCheck). A return can be refunded in more than one email.
+refunds: [],
+refundTaskId: '', // the "check the refund landed" subtask
+refundIssueTaskId: '', // the subtask raised when a refund doesn't match what was expectedcreatedAt: new Date().toISOString(),
 ...fields,
 };
 }
@@ -3348,6 +3358,7 @@ apOrderLineId: o.apOrderLineId || '',
 if (!Array.isArray(data.apOrders)) data.apOrders = [];
 data.apOrders = data.apOrders.map((o) => ({ ...blankApOrder(), ...o, id: o.id || uid(), lines: Array.isArray(o.lines) ? o.lines : [] }));
 if (typeof data.apOrdersLastCheckedAt !== 'string') data.apOrdersLastCheckedAt = '';
+if (typeof data.apRefundsLastCheckedAt !== 'string') data.apRefundsLastCheckedAt = '';
 const apOrderLineIds = new Set(data.apOrders.flatMap((o) => o.lines.map((l) => l.id)));
 data.inventory.forEach((o) => { if (o.apOrderLineId && !apOrderLineIds.has(o.apOrderLineId)) o.apOrderLineId = ''; });
 data.mailDismissed = data.mailDismissed.map((d) => ({ ...blankMailDismissal(), ...d }));

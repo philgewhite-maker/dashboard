@@ -219,6 +219,16 @@ await runApOrderCapture();
 },
 },
 {
+// Own one-day cadence gate inside aporders.js. Refund emails turn up days after a return is
+// posted, so this looks far more often than the monthly order capture does.
+id: 'ap-refunds', label: 'AP refund check', needsGoogle: true,
+note: 'Looks for Agent Provocateur "We have processed your refund request" emails, checks each against what you expected back, and raises a task if they differ. See Shopping → AP orders.',
+run: async () => {
+const { runApRefundCheck } = await import('./aporders.js');
+await runApRefundCheck();
+},
+},
+{
 // No cadence gate of its own (unlike ap-orders/loyalty-balances) --
 // catinaflat bookings are rare enough, and dedup is already by
 // sourceMessageId, that attempting every time this file's own
