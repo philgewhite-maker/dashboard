@@ -382,7 +382,17 @@ const REFUND_NOTE = 'Sum of the item prices on the order email for the lines bei
 function orderDiscountRate(order) {
 return order.subtotal > 0 && order.discount > 0 ? order.discount / order.subtotal : 0;
 }
+// What was actually paid for the items: the order's TOTAL less delivery (delivery is not
+// refunded). Null when the order email's total was not read.
+function paidForItems(order) {
+return order.total > 0 ? Math.max(0, order.total - (order.delivery || 0)) : null;
+}
+// Nothing kept: the whole of what was paid for the items comes back, exactly. With pieces
+// kept, how AP shares a discount across lines isn't published, so it is estimated from the
+// order's overall discount rate.
 function expectedNetRefundFor(order) {
+const paid = paidForItems(order);
+if (paid != null && !keptLinesFor(order).length) return paid;
 return expectedRefundFor(order) * (1 - orderDiscountRate(order));
 }
 const money2 = (n) => `£${Number(n).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -425,14 +435,31 @@ issues.push(missingIssue);
 if (extra.length) issues.push(`the refund includes ${extra.length} item${extra.length === 1 ? '' : 's'} you have as kept or not on the order (${money2(sumOf(extra, (l) => l.price))}): ${names(extra)}.`);
 // The email's own sum: items less discount should be the value refunded.
 if (Math.abs((itemsRefunded - discount) - value) > 0.01) issues.push(`the email's own figures do not add up: ${money2(itemsRefunded)} of items less ${money2(discount)} discount is ${money2(itemsRefunded - discount)}, but it says ${money2(value)} was refunded.`);
-// Against the order's own discount rate, when every line matched.
+// Against what was actually paid, when every line matched: with nothing kept the refund
+// should equal what was paid for the items; with pieces kept, what is left over is what
+// they cost you, which cannot be negative or more than their list price.
+const paid = paidForItems(order);
+const keptNow = keptLinesFor(order).map((k) => k.line);
+const keptList = sumOf(keptNow, (l) => l.price);
+let keptNet = null;
+if (paid != null && !missing.length && !extra.length) {
+keptNet = paid - value;
+if (!keptNow.length) {
+if (Math.abs(keptNet) > 0.5) issues.push(`nothing is kept, so the refund should be everything you paid for the items (${money2(paid)}: ${money2(order.total)} less ${money2(order.delivery || 0)} delivery), but ${money2(value)} was refunded.`);
+} else if (keptNet < -0.5) {
+issues.push(`${money2(value)} was refunded, which is ${money2(-keptNet)} more than the ${money2(paid)} you paid for the items.`);
+} else if (keptNet > keptList + 0.5) {
+issues.push(`the refund leaves you having paid ${money2(keptNet)} for the pieces you kept, more than their ${money2(keptList)} list price.`);
+}
+}
+// Against the order's own discount rate, only when the payment itself is not known.
 let diff = null;
-if (!missing.length && !extra.length && orderDiscountRate(order) > 0) {
+if (paid == null && !missing.length && !extra.length && orderDiscountRate(order) > 0) {
 diff = value - expectedNet;
 if (Math.abs(diff) > Math.max(5, expectedNet * 0.01)) issues.push(`the amount refunded (${money2(value)}) is ${money2(Math.abs(diff))} ${diff < 0 ? 'less' : 'more'} than the order's own discount rate predicts (about ${money2(expectedNet)}).`);
 }
 const state = issues.length ? (issues.length === 1 && missing.length && !extra.length ? 'partial' : 'differs') : 'match';
-return { state, refunds, value, discount, delivery, gift, itemsRefunded, expectedItems, expectedNet, diff, missing, extra, issues, missingIssue, date: refunds[refunds.length - 1].date };
+return { state, refunds, value, discount, delivery, gift, itemsRefunded, expectedItems, expectedNet, diff, missing, extra, issues, missingIssue, paid, keptNet, keptList, keptCount: keptNow.length, date: refunds[refunds.length - 1].date };
 }
 
 // 5 working days from a date -- AP's own "3-5 working days" to refund the card.
@@ -604,7 +631,10 @@ if (chk.state === 'none') return '';
 const rate = orderDiscountRate(order);
 const totalsNote = order.subtotal == null && order.totalsNote ? `<div class="settings-note" style="margin:0 0 6px;">The order's own discount could not be read (${escapeHtml(order.totalsNote)}).</div>` : '';
 if (chk.state === 'awaiting') {
-const due = rate > 0
+const paidSure = paidForItems(order) != null && !keptLinesFor(order).length;
+const due = paidSure
+? `Refund due: <strong>${money2(chk.expectedNet)}</strong> &mdash; what you paid (${money2(order.total)}) less ${money2(order.delivery || 0)} delivery, since nothing is kept.`
+: rate > 0
 ? `Refund due: <strong>≈${money2(chk.expectedNet)}</strong> &mdash; ${money2(chk.expectedItems)} of items going back, less the order's ${(rate * 100).toFixed(1)}% discount.`
 : `<strong>${money2(chk.expectedItems)}</strong> of items going back. The refund will be that less whatever discount applied (the order email did not give it).`;
 return `${totalsNote}<div class="settings-note" style="margin:0 0 8px;" title="${escapeHtml(REFUND_NOTE)}">${due} Delivery is not normally refunded. No refund email from AP yet.</div>`;
@@ -618,12 +648,19 @@ const itemsLine = Math.abs(chk.itemsRefunded - gone) < 0.005
 ? `All ${money2(chk.itemsRefunded)} of items going back were refunded`
 : `${money2(chk.itemsRefunded)} of items refunded, against ${money2(gone)} going back`;
 const discountPct = chk.itemsRefunded > 0 ? ` (${((chk.discount / chk.itemsRefunded) * 100).toFixed(1)}% of the items)` : '';
+const paidNote = chk.keptNet != null
+? (chk.keptCount
+? ` You paid ${money2(order.total)} (${money2(order.delivery || 0)} delivery), so the ${chk.keptCount} kept piece${chk.keptCount === 1 ? '' : 's'} cost you ${money2(chk.keptNet)} net (${money2(chk.keptList)} at list price${chk.keptList > 0 ? `, ${((1 - chk.keptNet / chk.keptList) * 100).toFixed(1)}% off` : ''}).`
+: (Math.abs(chk.keptNet) <= 0.5
+? ` You paid ${money2(order.total)} (${money2(order.delivery || 0)} delivery) and nothing is kept, so ${money2(chk.value)} is everything you paid for the items.`
+: ` You paid ${money2(order.total)} (${money2(order.delivery || 0)} delivery) and nothing is kept, so the full ${money2(chk.paid)} should have come back.`))
+: '';
 const predicted = rate > 0 && chk.diff != null
 ? ` The order's own ${(rate * 100).toFixed(1)}% discount rate predicts about ${money2(chk.expectedNet)}; ${Math.abs(chk.diff) < 0.5 ? 'exactly what was refunded' : `this is ${money2(Math.abs(chk.diff))} ${chk.diff < 0 ? 'under' : 'over'}${chk.issues.length ? '' : ', within the usual give-and-take on how a discount is shared out'}`}.`
 : '';
 const shown = chk.issues.filter((i) => i !== chk.missingIssue);
 const issues = shown.length ? `<ul style="margin:4px 0 0 18px;padding:0;">${shown.map((i) => `<li>${escapeHtml(i)}</li>`).join('')}</ul>` : '';
-return `${totalsNote}<div class="settings-note" style="margin:0 0 8px;">${badge} Refunded <strong>${money2(chk.value)}</strong>${when}. ${itemsLine}; AP took off ${money2(chk.discount)} discount${discountPct}${chk.delivery ? `, and refunded ${money2(chk.delivery)} delivery` : ''}.${predicted}${issues}</div>${missingLinesHtml(order, chk)}`;
+return `${totalsNote}<div class="settings-note" style="margin:0 0 8px;">${badge} Refunded <strong>${money2(chk.value)}</strong>${when}. ${itemsLine}; AP took off ${money2(chk.discount)} discount${discountPct}${chk.delivery ? `, and refunded ${money2(chk.delivery)} delivery` : ''}.${paidNote}${predicted}${issues}</div>${missingLinesHtml(order, chk)}`;
 }
 function orderCardHtml(order) {
 const kept = keptLinesFor(order);
