@@ -125,14 +125,15 @@ return m ? Number(m[1].replace(/,/g, '')) : null;
 return { subtotal: amt('Sub-?total'), discount: amt('Discount'), delivery: amt('Delivery'), total: amt('\\bTOTAL') };
 }
 
-// When an order was captured before its totals were read (or they could not be), fetch its
-// own email again and read them; if that still fails, keep a snippet of the text near
-// "Subtotal" so the card can show why.
+// When an order's totals were never read (captured before they were, or pasted by hand so
+// there is no email id on record), find its own email -- by id if there is one, otherwise
+// by searching Gmail for the order number -- and read them. If that still fails, keep a
+// short reason so the card can say why instead of silently showing items only.
 async function backfillTotals(order) {
-if (order.subtotal != null || !order.sourceMessageId || order.sourceMessageId === 'manual') return;
+if (order.subtotal != null) return;
 try {
-const src = await getMessageDetail(order.sourceMessageId);
-const text = String(src.bodyText || '');
+const text = await orderEmailText(order);
+if (text == null) { order.totalsNote = 'the order confirmation email was not found in Gmail'; return; }
 Object.assign(order, parseOrderTotals(text));
 if (order.subtotal == null) {
 const i = text.search(/Sub-?total/i);
@@ -141,6 +142,23 @@ order.totalsNote = i < 0 ? `no "Subtotal" found in the ${text.length}-character 
 } catch (err) {
 order.totalsNote = `could not fetch the order email: ${err.message}`;
 }
+}
+
+// The body text of an order's confirmation email, or null if it can't be found.
+async function orderEmailText(order) {
+const known = order.sourceMessageId && order.sourceMessageId !== 'manual' ? order.sourceMessageId : '';
+if (known) return String((await getMessageDetail(known)).bodyText || '');
+const query = `from:(${SENDER}) subject:"Your Agent Provocateur order" "${order.orderNumber}"`;
+const [section] = await fetchMailSearches([{ kind: 'query', value: query, maxDays: 400, maxEvents: 6 }]);
+for (const msg of (section?.messages || [])) {
+const detail = await getMessageDetail(msg.id);
+if (SHIPPED_SUBJECT_RE.test(String(detail.subject || ''))) continue; // the dispatch email has no totals
+const text = String(detail.bodyText || '');
+if (!new RegExp(`#${order.orderNumber}\\b`).test(text)) continue;
+if (!order.sourceMessageId || order.sourceMessageId === 'manual') order.sourceMessageId = msg.id;
+return text;
+}
+return null;
 }
 
 // "We have processed your refund request": the returned lines, then a refund block
