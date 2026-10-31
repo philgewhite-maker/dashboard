@@ -568,7 +568,7 @@ if (data.inventory.some((i) => i.apOrderLineId === line.id)) return false;
 const { style, piece } = splitStylePiece(line.name);
 data.inventory.push(blankInventoryItem({
 brand: 'Agent Provocateur', style, piece, colour: line.colour, size: line.size,
-orderNumber: order.orderNumber, apOrderLineId: line.id,
+orderNumber: order.orderNumber, apOrderLineId: line.id, sku: skuOf(line),
 acquiredAt: new Date().toISOString().slice(0, 10),
 notes: `Added from the refund check for AP order #${order.orderNumber}: it was not in AP's refund, so it was kept.`,
 }));
@@ -610,6 +610,13 @@ if (task && task.bucket === 'done') return false;
 const deadline = returnDeadlineFor(order);
 return !(deadline && daysUntil(deadline) < 0);
 }
+
+// The portal's Product code for a line: the image-derived SKU plus the size
+// ("APM0525671691-36B"). Empty when no code was captured for this line.
+function skuOf(line) {
+return line && line.code ? `${line.code}${line.size ? `-${line.size}` : ''}` : '';
+}
+const skuSpanHtml = (line) => (skuOf(line) ? ` <span class="settings-note" style="display:inline;margin:0;font-size:11px;" title="The returns portal's Product code">SKU ${escapeHtml(skuOf(line))}</span>` : '');
 
 function readingRowHtml(labelHtml, valueHtml, noteHtml) {
 return `<div class="loyalty-reading">
@@ -678,12 +685,12 @@ else badgeHtml = `<span class="expiry-badge">Return by ${escapeHtml(deadline)}</
 const keptHtml = kept.length
 ? kept.map(({ item, line }) => readingRowHtml(
 escapeHtml(line.name),
-`${escapeHtml(line.colour)}${line.size ? ` &mdash; ${escapeHtml(line.size)}` : ''}`,
+`${escapeHtml(line.colour)}${line.size ? ` &mdash; ${escapeHtml(line.size)}` : ''}${skuSpanHtml(line)}`,
 `Matched to: ${escapeHtml([item.brand, item.style, item.colour, item.size].filter(Boolean).join(' ') || '(untitled inventory item)')}`,
 )).join('')
 : '<div class="empty">Nothing kept yet &mdash; link a kept inventory item to an order line from the Inventory list above.</div>';
 const returningHtml = returning.length
-? returning.map((l) => readingRowHtml(escapeHtml(l.name), `${escapeHtml(l.colour)}${l.size ? ` &mdash; ${escapeHtml(l.size)}` : ''}`, `£${l.price.toFixed(2)}`)).join('')
+? returning.map((l) => readingRowHtml(escapeHtml(l.name), `${escapeHtml(l.colour)}${l.size ? ` &mdash; ${escapeHtml(l.size)}` : ''}${skuSpanHtml(l)}`, `£${l.price.toFixed(2)}`)).join('')
 : '<div class="empty">Nothing returning.</div>';
 return `<div class="account-card" data-ap-order-card="${escapeHtml(order.id)}">
 <div class="account-summary" style="cursor:default;">
@@ -720,7 +727,7 @@ if (!order) return;
 const kept = keptLinesFor(order);
 const returning = returningLinesFor(order);
 const deadline = returnDeadlineFor(order);
-const lineText = (l) => `- ${l.name} — ${l.colour}${l.size ? ` — ${l.size}` : ''} — £${l.price.toFixed(2)}`;
+const lineText = (l) => `- ${l.name} — ${l.colour}${l.size ? ` — ${l.size}` : ''}${skuOf(l) ? ` — SKU ${skuOf(l)}` : ''} — £${l.price.toFixed(2)}`;
 const out = [
 `Agent Provocateur order #${order.orderNumber} (placed ${order.orderDate}${deadline ? `, return by ${deadline}` : ''})`,
 `${order.lines.length} items ordered, ${kept.length} kept, ${returning.length} returning`,
@@ -874,7 +881,7 @@ const { style, piece } = splitStylePiece(line.name);
 const shopping = await import('./shopping.js');
 shopping.openAddInventoryDialog({
 brand: 'Agent Provocateur', style, piece, size: line.size, colour: line.colour,
-orderNumber: order.orderNumber, apOrderLineId: line.id,
+orderNumber: order.orderNumber, apOrderLineId: line.id, sku: skuOf(line),
 notes: `Kept from AP order #${order.orderNumber}: it was not in AP's refund.`,
 });
 });
@@ -973,5 +980,5 @@ revealApOrder(chip.dataset.openApOrder);
 export {
 runApOrderCapture, runApRefundCheck, syncApRefundTasks, renderApOrders, initApOrders,
 orderForNumber, apOrderLineOptionsHtml, apOrderNumberDatalistHtml,
-apOrderChipHtml, bindApOrderChips, revealApOrder,
+apOrderChipHtml, bindApOrderChips, revealApOrder, skuOf,
 };

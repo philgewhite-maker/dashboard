@@ -1931,6 +1931,11 @@ orderNumber: '',
 // arrived, so returningLinesFor()/keptLinesFor() (aporders.js) match
 // by this exact id, never by re-comparing text.
 apOrderLineId: '',
+// The returns portal's own "Product code" for this piece (<SKU>-<size>, e.g.
+// APM0525671691-36B), copied from its order line when the two are linked so it stays
+// with the item. Blank when the order email's product images did not line up with its
+// lines, so no code was captured.
+sku: '',
 // A real photo of the owned piece -- useful to eyeball against a
 // partial-match search result (same mechanism every other photo in
 // this app uses: js/db.js's photo store, via js/files.js's

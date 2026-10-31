@@ -26,7 +26,7 @@ import { captureTask, revealTask } from './tasks.js';
 import { connectionChipHtml, bindConnectionChips, connectionPickerHtml, bindConnPickers, setConnPickerValue, sensitiveFieldsShown } from './connections.js';
 import { runStockCheck, stockCheckHtml, adapterFor, seedWatchSpec, pasteStockFor, cashbackHtml, fetchPages, registerCashbackTracked, refreshCashbackRates, money } from './stockwatch.js';
 import { MissingKeyError, searchShoppingItem, cleanEstimateText } from '../ai.js';
-import { orderForNumber, apOrderLineOptionsHtml, apOrderNumberDatalistHtml, apOrderChipHtml, bindApOrderChips, renderApOrders, syncApRefundTasks } from './aporders.js';
+import { orderForNumber, apOrderLineOptionsHtml, apOrderNumberDatalistHtml, apOrderChipHtml, bindApOrderChips, renderApOrders, syncApRefundTasks, skuOf } from './aporders.js';
 import { initMicCapture } from './voicecapture.js';
 import { banner } from './sharetarget.js';
 
@@ -476,6 +476,7 @@ acquiredAt: todayStr(), link: linkInput.value.trim(),
 photoId: draftPhotoId, orderNumber: val('orderNumber'),
 apOrderLineId: apLineSelect.value,
 });
+newItem.sku = skuOf(orderForNumber(newItem.orderNumber)?.lines.find((l) => l.id === newItem.apOrderLineId));
 data.inventory.push(newItem);
 queueSave();
 renderInventory();
@@ -1354,7 +1355,7 @@ const order = orderForNumber(o.orderNumber);
 if (!order) return `<span class="settings-note" style="margin:0;font-size:10px;">Order #${escapeHtml(o.orderNumber)} not captured yet &mdash; <span class="inline-goto-link" data-goto-tab="shopping" data-goto-target="#ap-orders-panel">AP orders</span></span>`;
 const line = order.lines.find((l) => l.id === o.apOrderLineId);
 if (line) {
-return `${apOrderChipHtml(order)}<span class="settings-note" style="margin:0;font-size:10px;">${escapeHtml(line.name)}${line.colour ? ` &mdash; ${escapeHtml(line.colour)}` : ''}${line.size ? ` &mdash; ${escapeHtml(line.size)}` : ''}</span><span class="del-x" data-inv-ap-unlink="${escapeHtml(o.id)}" title="Unlink from this order line">&times;</span>`;
+return `${apOrderChipHtml(order)}<span class="settings-note" style="margin:0;font-size:10px;">${escapeHtml(line.name)}${line.colour ? ` &mdash; ${escapeHtml(line.colour)}` : ''}${line.size ? ` &mdash; ${escapeHtml(line.size)}` : ''}${(o.sku || skuOf(line)) ? ` &mdash; SKU ${escapeHtml(o.sku || skuOf(line))}` : ''}</span><span class="del-x" data-inv-ap-unlink="${escapeHtml(o.id)}" title="Unlink from this order line">&times;</span>`;
 }
 return `<select data-inv-ap-line="${escapeHtml(o.id)}" style="max-width:150px;">${apOrderLineOptionsHtml(order, '', { style: o.style, size: o.size })}</select>`;
 }
@@ -1525,6 +1526,15 @@ return runResaleEstimateSweep({ force: true });
 function renderInventory() {
 const el = document.getElementById('inventory-list');
 if (!el) return;
+// Items linked before the SKU field existed pick it up the first time they are drawn.
+let skuFilled = false;
+for (const it of data.inventory) {
+if (it.apOrderLineId && !it.sku) {
+const sku = skuOf(orderForNumber(it.orderNumber)?.lines.find((l) => l.id === it.apOrderLineId));
+if (sku) { it.sku = sku; skuFilled = true; }
+}
+}
+if (skuFilled) queueSave();
 // Behind the same device-local gate as the sizes it matches against --
 // showing "who fits this 36C bra" on an unlocked phone is exactly what
 // that gate is for. See SENSITIVE_BLOCKS in state.js.
@@ -1716,6 +1726,7 @@ select.addEventListener('change', () => {
 const row = data.inventory.find((o) => o.id === select.dataset.invApLine);
 if (!row || !select.value) return;
 row.apOrderLineId = select.value;
+row.sku = skuOf(orderForNumber(row.orderNumber)?.lines.find((l) => l.id === row.apOrderLineId)) || row.sku || '';
 queueSave();
 renderInventory();
 renderApOrders();
