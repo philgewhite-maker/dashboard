@@ -19,10 +19,36 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const hasIds = (arr) => arr.every((x) => isPlainObject(x) && typeof x.id === 'string' && x.id);
 
+// Places where two devices changing the same value is expected and either
+// outcome is acceptable, so they resolve themselves instead of being reported
+// as conflicts (which would offer a backup for nothing).
+//   scheduledRuns.<task>            "when did this last run": the later run wins
+//   claudeApiSpend.months.*.<count> running totals: both devices' additions are kept
+//   claudeApiSpend.lastDeviceUpdateAt  the later stamp wins
+const SCHEDULED_RUN = /^\.?scheduledRuns\.[^.]+$/;
+const SPEND_COUNTER = /^\.?claudeApiSpend\.months\..+\.(calls|input|output|cost)$/;
+const SPEND_STAMP = /^\.?claudeApiSpend\.lastDeviceUpdateAt$/;
+const num = (v) => (typeof v === 'number' && isFinite(v) ? v : 0);
+
+function resolveBenign(base, ours, theirs, path) {
+if (SCHEDULED_RUN.test(path) && isPlainObject(ours) && isPlainObject(theirs)) {
+return { value: String(ours.at || '') > String(theirs.at || '') ? ours : theirs };
+}
+if (SPEND_COUNTER.test(path) && typeof ours === 'number' && typeof theirs === 'number') {
+return { value: Math.max(0, num(base) + (ours - num(base)) + (theirs - num(base))) };
+}
+if (SPEND_STAMP.test(path) && typeof ours === 'string' && typeof theirs === 'string') {
+return { value: ours > theirs ? ours : theirs };
+}
+return null;
+}
+
 function mergeValue(base, ours, theirs, path, conflicts) {
 if (same(ours, base)) return theirs;
 if (same(theirs, base)) return ours;
 if (same(ours, theirs)) return ours;
+const benign = resolveBenign(base, ours, theirs, path);
+if (benign) return benign.value;
 if (isPlainObject(ours) && isPlainObject(theirs)) {
 return mergeObject(isPlainObject(base) ? base : {}, ours, theirs, path, conflicts);
 }
