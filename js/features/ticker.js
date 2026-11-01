@@ -27,7 +27,7 @@
 import { data, queueSave, inventorySets, SET_CORE_GROUPS } from '../state.js';
 import { escapeHtml, uid, bindBackdropClose, claudeWeeklyPace, daysUntil } from '../utils.js';
 import * as letting from './letting.js';
-import { travelStripPrograms } from './loyaltybalances.js';
+import { travelStripPrograms, labelKindFor } from './loyaltybalances.js';
 import { matchBankLogo } from '../bankLogos.js';
 import { CHECKS as SITE_HEALTH_CHECKS, reportCheck as reportSiteHealth } from './sitehealth.js';
 
@@ -53,7 +53,12 @@ const loyaltyTickerPhaseOffset = Math.floor(Math.random() * 97); // a prime, so 
 // whether the bucket has actually changed.
 function currentLoyaltyPick() {
 const entries = travelStripPrograms();
-const flat = entries.flatMap(({ program, readings }) => readings.map((r) => ({ program, r })));
+// Only running balances: a voucher event (an eVoucher used, a free day
+// earned) or a reading with no figure has nothing to show as a number, and
+// used to come up as a bare "—".
+const flat = entries.flatMap(({ program, readings }) => readings
+.filter((r) => r.balance != null && labelKindFor(program.id, r.label) !== 'voucher')
+.map((r) => ({ program, r })));
 if (!flat.length) return null;
 const idx = (Math.floor(Date.now() / LOYALTY_TICKER_BUCKET_MS) + loyaltyTickerPhaseOffset) % flat.length;
 return flat[idx];
