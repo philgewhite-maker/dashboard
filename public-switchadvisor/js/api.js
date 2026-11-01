@@ -1,4 +1,5 @@
 import { API_BASE } from './config.js';
+import { committedPayload } from './changes.js';
 
 const TOKEN_KEY = 'switchadvisor-invite-token';
 
@@ -49,7 +50,7 @@ async function call(action, { method = 'GET', body, auth = true } = {}) {
 }
 
 export const redeemInvite = (token) => call('redeem', { method: 'POST', body: { token }, auth: false });
-export const getMe = () => call('me', { method: 'POST', body: { ...getLiveProfile(), options: getOptions() } });
+export const getMe = () => call('me', { method: 'POST', body: { ...getLiveProfile(), options: { ...getOptions(), committed: committedPayload() } } });
 export const upsertAccount = (account) => call('account-upsert', { method: 'POST', body: { account } });
 export const deleteAccount = (id) => call('account-delete', { method: 'POST', body: { id } });
 export const getBankList = () => call('banklist', { auth: false });

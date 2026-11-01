@@ -4,7 +4,7 @@
 // the in-progress work across when they choose to update.
 import { escapeHtml as esc, money } from './utils.js';
 import { cardProgress, cardStarted } from './steps.js';
-import { isSkipped } from './progress.js';
+import { isSkipped, getAccepted } from './progress.js';
 
 // ---- Offers -----------------------------------------------------------------
 // Compares two offerDigest objects from the server. An entry is "yours" when the plan
@@ -65,6 +65,37 @@ export function allCards(accepted) {
   return [...(accepted.carried || []), ...((accepted.plan && accepted.plan.cards) || [])];
 }
 
+const addDays = (isoDate, n) => {
+  const d = new Date(`${isoDate}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+};
+
+// The calendar date a switch card began (or is planned to begin).
+export function startDateOf(card, planToday) {
+  return card.startDate || addDays(planToday, card.startDay ?? card.day ?? 0);
+}
+
+// The switches the person has started, sent with every plan request so the server keeps
+// each one where it is, whether or not it is still the best move, and plans everything not
+// yet begun around them. A switch counts as started once any step in it is ticked. One out
+// of an account that an earlier switch created brings that earlier switch with it.
+export function committedPayload() {
+  const accepted = getAccepted();
+  if (!accepted || !accepted.plan) return undefined;
+  const cards = activeCards(accepted).filter((c) => c.kind === 'switch' && c.offerId && c.donorRef);
+  const byOffer = new Map(cards.map((c) => [c.offerId, c]));
+  const picked = new Map();
+  const add = (c) => {
+    if (!c || picked.has(c.offerId)) return;
+    picked.set(c.offerId, c);
+    if (c.donorRef.kind === 'chain') add(byOffer.get(c.donorRef.offerId));
+  };
+  cards.filter((c) => cardStarted(c) || cardProgress(c).complete).forEach(add);
+  const switches = [...picked.values()].map((c) => ({ offerId: c.offerId, start: startDateOf(c, accepted.plan.today), donor: c.donorRef }));
+  return switches.length ? { switches } : undefined;
+}
+
 // The accepted object for an updated plan: the new plan, plus any card that was under
 // way in the old one but is not in the new one -- still theirs to finish.
 export function acceptedFrom(fresh, digest, inputSig, previous, abandoned = {}) {
@@ -72,7 +103,7 @@ export function acceptedFrom(fresh, digest, inputSig, previous, abandoned = {}) 
   const carried = previous
     ? startedCards(previous)
       .filter((c) => !freshKeys.has(c.key) && !abandoned[c.key])
-      .map((c) => ({ ...c, carried: true }))
+      .map((c) => ({ ...c, carried: true, startDate: startDateOf(c, previous.plan.today) }))
     : [];
   return { plan: fresh, digest, inputSig, builtAt: new Date().toISOString(), carried };
 }
@@ -112,11 +143,14 @@ export function changeBannerHtml({ accepted, fresh, offerChanges, inputsChanged 
   if (removed.length) stepDiff.push(`<li><strong>${removed.length} no longer needed:</strong> ${titles(removed)}.</li>`);
   const diffHtml = stepDiff.length ? `<p class="plan-sub">If you update</p><ul>${stepDiff.join('')}</ul>` : '';
 
+  const kept = started.filter((c) => freshKeys.has(c.key));
+  const lost = started.filter((c) => !freshKeys.has(c.key));
   const under = started.length ? `<div class="chg-reassure">
       <strong>You are part-way through ${started.map((c) => esc(c.title)).join('; ')}.</strong>
-      Carry on with ${started.length === 1 ? 'it' : 'them'} whatever the offers do: finish what you have started. Updating keeps every tick you have made, and
-      ${started.some((c) => !freshKeys.has(c.key)) ? 'anything you have started that the new plan would not begin today stays on your list until you finish it or stop it.' : 'everything you have started is still in the new plan.'}
-      ${started.some((c) => !freshKeys.has(c.key)) ? 'Check the bank’s own terms for an offer you have already applied under.' : ''}
+      Carry on with ${started.length === 1 ? 'it' : 'them'} whatever the offers do: finish what you have started.
+      ${kept.length ? `${kept.map((c) => esc(c.title)).join('; ')} stay${kept.length === 1 ? 's' : ''} in the new plan even where ${kept.length === 1 ? 'it is' : 'they are'} no longer the best move, and the switches you have not started are re-planned around ${kept.length === 1 ? 'it' : 'them'}.` : ''}
+      ${lost.length ? `${lost.map((c) => esc(c.title)).join('; ')} cannot be kept in a new plan (the offer is no longer available to plan with), so ${lost.length === 1 ? 'it stays' : 'they stay'} on your list until you finish or stop ${lost.length === 1 ? 'it' : 'them'}. Check the bank’s own terms for an offer you have already applied under.` : ''}
+      Updating keeps every tick you have made.
     </div>` : '';
 
   return `<div class="chg-banner chg-${tone}" id="change-banner">

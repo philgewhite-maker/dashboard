@@ -1172,8 +1172,8 @@ const PLAN_MIN_SIDE_QUEST = 50;     // a donor account must add at least this to
 const PLAN_NEW_DONOR_DAYS = 30;     // opening a new donor and setting up its Direct Debits: they need about a month to post
 const PLAN_MIN_KRAK_MONTHS = 2;     // a stretch of salary at Krak shorter than this isn't worth two repoints
 
-function plan_date(int $day, string $today): string { return date('Y-m-d', strtotime($today . ' +' . $day . ' days')); }
-function plan_label(int $day, string $today): string { return date('j M Y', strtotime($today . ' +' . $day . ' days')); }
+function plan_date(int $day, string $today): string { return date('Y-m-d', strtotime($today . sprintf(' %+d days', $day))); }
+function plan_label(int $day, string $today): string { return date('j M Y', strtotime($today . sprintf(' %+d days', $day))); }
 function plan_day_of(?string $date, string $today): ?int {
     if (!$date || !preg_match('/^\d{4}-\d{2}-\d{2}/', $date)) return null;
     return (int) round((strtotime(substr($date, 0, 10)) - strtotime($today)) / 86400);
@@ -1238,7 +1238,7 @@ function plan_choose_stage(array $c, int $s, float $krak, int $H): ?array {
     return $best;
 }
 
-function plan_simulate(array $cands, array $existing, array $donorSpecs, int $newCount, float $krak, string $order, int $H, ?array $perk, bool $hold, array $locked = [], ?float $stageKrak = null): array {
+function plan_simulate(array $cands, array $existing, array $donorSpecs, int $newCount, float $krak, string $order, int $H, ?array $perk, bool $hold, array $locked = [], ?float $stageKrak = null, array $committed = []): array {
     usort($cands, function ($a, $b) use ($order) {
         if ($order === 'perk') {
             $pa = is_fairer_share_bank($a['bank']) ? 0 : 1;
@@ -1276,6 +1276,60 @@ function plan_simulate(array $cands, array $existing, array $donorSpecs, int $ne
     $events = [];
     $cashback = 0.0;
     $newSeen = [];
+    $missing = [];
+    // Puts one switch into the plan: marks its donor used, reserves its salary months and
+    // banking group, and turns the account it creates into a donor for later switches.
+    $place = function (int $ci, int $pick, int $d, array $st, bool $isCommitted) use (&$cands, &$donors, &$done, &$groups, &$salary, &$cashback, &$newSeen, &$events, &$perkVia, $hold, $perk, $locked) {
+        $c = $cands[$ci];
+        $dn = $donors[$pick];
+        $donors[$pick]['used'] = true;
+        $done[$ci] = true;
+        $groups[$c['group']] = true;
+        if ($st['months']) $salary[] = [$st['salaryFrom'], $st['salaryTo']];
+        $cashback += $c['cashback'];
+        if ($dn['kind'] === 'new' && !isset($newSeen[$dn['index']])) {
+            $newSeen[$dn['index']] = true;
+            $cashback += $dn['cashback'];
+        }
+        $freeFrom = $st['freeDay'];
+        if ($hold && $perk && is_fairer_share_bank($c['bank']) && $st['complete'] <= $perk['mar']) {
+            $freeFrom = max($freeFrom, $perk['apr']);
+            if (!$perkVia) $perkVia = ['via' => 'switch', 'day' => $d];
+        }
+        $addDDs = ($dn['dds'] !== null && $dn['kind'] !== 'new' && $dn['dds'] < $c['dd']) ? $c['dd'] - $dn['dds'] : 0;
+        $events[] = ['day' => $d, 'cand' => $c, 'stage' => $st, 'donor' => $dn, 'addDDs' => $addDDs, 'freeFrom' => $freeFrom, 'committed' => $isCommitted];
+        $donors[] = [
+            'label' => 'your new ' . (preg_match('/account$/i', $c['product']) ? $c['product'] : $c['product'] . ' account'), 'bank' => $c['bank'], 'group' => $c['group'],
+            'from' => in_array($c['id'], $locked, true) ? PHP_INT_MAX : $freeFrom, 'kind' => 'chain', 'product' => $c['product'], 'offerId' => $c['id'],
+            'dds' => $dn['kind'] === 'new' ? $c['dd'] : ($dn['dds'] === null ? null : max($dn['dds'], $c['dd'])),
+        ];
+    };
+    // Switches the person has already begun are fixed: placed first, on the day they were
+    // started and out of the donor they used, whether or not they are still the best move.
+    // Everything not yet begun is then planned around them.
+    foreach ($committed as $cm) {
+        $ci = null;
+        foreach ($cands as $i => $cc) if ($cc['id'] === $cm['offerId']) { $ci = $i; break; }
+        $ref = $cm['donor'];
+        $pick = null;
+        foreach ($donors as $di => $dn) {
+            if (!empty($dn['used'])) continue;
+            if ($ref['kind'] === 'existing' && $dn['kind'] === 'existing' && ($dn['id'] ?? '') === $ref['id']) $pick = $di;
+            elseif ($ref['kind'] === 'chain' && $dn['kind'] === 'chain' && ($dn['offerId'] ?? '') === $ref['offerId']) $pick = $di;
+            elseif ($ref['kind'] === 'new' && $dn['kind'] === 'new' && strcasecmp((string) ($dn['product'] ?? ''), $ref['product']) === 0) $pick = $di;
+            if ($pick !== null) break;
+        }
+        // A donor they opened has since been added to their accounts: match it by bank.
+        if ($pick === null && $ref['kind'] === 'new') {
+            foreach ($donors as $di => $dn) {
+                if (empty($dn['used']) && $dn['kind'] === 'existing' && $dn['group'] !== '' && $dn['group'] === bank_group($ref['product'])) { $pick = $di; break; }
+            }
+        }
+        $st = null;
+        if ($ci !== null && $pick !== null && !isset($groups[$cands[$ci]['group']])) $st = plan_choose_stage($cands[$ci], $cm['startDay'], $stageKrak ?? $krak, $H);
+        if ($st) $place($ci, $pick, $cm['startDay'], $st, true);
+        else $missing[] = $cm['offerId'];
+    }
     for ($d = 0; $d <= $H; $d++) {
         foreach ($cands as $ci => $c) {
             if (isset($done[$ci]) || isset($groups[$c['group']])) continue;
@@ -1303,28 +1357,7 @@ function plan_simulate(array $cands, array $existing, array $donorSpecs, int $ne
                     if ($st['salaryFrom'] < $b && $st['salaryTo'] > $a) continue 2;
                 }
             }
-            $dn = $donors[$pick];
-            $donors[$pick]['used'] = true;
-            $done[$ci] = true;
-            $groups[$c['group']] = true;
-            if ($st['months']) $salary[] = [$st['salaryFrom'], $st['salaryTo']];
-            $cashback += $c['cashback'];
-            if ($dn['kind'] === 'new' && !isset($newSeen[$dn['index']])) {
-                $newSeen[$dn['index']] = true;
-                $cashback += $dn['cashback'];
-            }
-            $freeFrom = $st['freeDay'];
-            if ($hold && $perk && is_fairer_share_bank($c['bank']) && $st['complete'] <= $perk['mar']) {
-                $freeFrom = max($freeFrom, $perk['apr']);
-                if (!$perkVia) $perkVia = ['via' => 'switch', 'day' => $d];
-            }
-            $addDDs = ($dn['dds'] !== null && $dn['kind'] !== 'new' && $dn['dds'] < $c['dd']) ? $c['dd'] - $dn['dds'] : 0;
-            $events[] = ['day' => $d, 'cand' => $c, 'stage' => $st, 'donor' => $dn, 'addDDs' => $addDDs, 'freeFrom' => $freeFrom];
-            $donors[] = [
-                'label' => 'your new ' . (preg_match('/account$/i', $c['product']) ? $c['product'] : $c['product'] . ' account'), 'bank' => $c['bank'], 'group' => $c['group'],
-                'from' => in_array($c['id'], $locked, true) ? PHP_INT_MAX : $freeFrom, 'kind' => 'chain', 'product' => $c['product'], 'offerId' => $c['id'],
-                'dds' => $dn['kind'] === 'new' ? $c['dd'] : ($dn['dds'] === null ? null : max($dn['dds'], $c['dd'])),
-            ];
+            $place($ci, $pick, $d, $st, false);
         }
     }
     // Where the salary can sit with Krak: whole salary-months between the
@@ -1349,7 +1382,7 @@ function plan_simulate(array $cands, array $existing, array $donorSpecs, int $ne
         'krakValue' => $krak * $krakMonths, 'salary' => $salary,
         'perk' => $perkVia, 'perkValue' => $perkVia ? (float) $perk['amount'] : 0.0,
         'total' => $bonus + $cashback + $krak * $krakMonths + ($perkVia ? (float) $perk['amount'] : 0.0),
-        'newUsed' => count($newSeen), 'terminal' => $unused,
+        'newUsed' => count($newSeen), 'terminal' => $unused, 'committedMissing' => $missing,
         'config' => ['order' => $order, 'hold' => $hold, 'n' => $newCount],
     ];
 }
@@ -1576,6 +1609,10 @@ function plan_build_cards(array $sim, array $ctx, array $cache, array $rows): ar
         }
         $actions[] = ['t' => 'expect', 'params' => ['amount' => $st['value'], 'product' => $o['product']], 'text' => sprintf('Expect %s around %s. Keep %s open until %s.%s', plan_money($st['value']), plan_label($last, $today), $o['product'], plan_label($e['freeFrom'], $today), $e['freeFrom'] > $st['freeDay'] ? ' (held longer than the bonus needs, for Nationwide Fairer Share.)' : '')];
         $prevHolder = $e['donor']['kind'] === 'chain' ? ($holder[$e['donor']['label']] ?? $e['donor']['product'] ?? null) : null;
+        // What the browser sends back once the person has started this switch, so a rebuilt plan keeps it.
+        $donorRef = $e['donor']['kind'] === 'existing' ? ['kind' => 'existing', 'id' => (string) ($e['donor']['id'] ?? '')]
+            : ($e['donor']['kind'] === 'new' ? ['kind' => 'new', 'product' => (string) ($e['donor']['product'] ?? '')]
+                : ['kind' => 'chain', 'offerId' => (string) ($e['donor']['offerId'] ?? '')]);
         $cards[] = [
             'kind' => 'switch', 'day' => $e['day'], 'dateLabel' => plan_label($e['day'], $today),
             'title' => sprintf('%s → %s', preg_replace('/^your (new )?/i', '', $e['donor']['label']), $o['product']),
@@ -1583,6 +1620,7 @@ function plan_build_cards(array $sim, array $ctx, array $cache, array $rows): ar
             'completes' => plan_label($st['complete'], $today), 'bonusBy' => plan_label($last, $today), 'freeFrom' => plan_label($e['freeFrom'], $today),
             'salary' => $st['months'] ? ['from' => plan_label($st['salaryFrom'], $today), 'to' => plan_label($st['salaryTo'], $today), 'months' => $st['months']] : null,
             'cashback' => $c['cashback'], 'url' => $o['url'] ?? '', 'bank' => $o['bank'], 'product' => $o['product'],
+            'offerId' => (string) $c['id'], 'donorRef' => $donorRef, 'startDay' => $e['day'], 'committed' => !empty($e['committed']),
         ];
         $holder[$e['donor']['label']] = $o['product'];
     }
@@ -1807,6 +1845,21 @@ function compute_plan_v2(array $user, array $cache, array $rows, array $rawOptio
     $today = $today ?: date('Y-m-d');
     $opt = plan_options($rawOptions);
     $H = (int) round($opt['horizonMonths'] * 30.4);
+    // Switches already started (sent by the browser from the person's ticks): fixed points of the plan.
+    $committed = [];
+    $committedDonors = [];
+    $rawC = is_array($rawOptions['committed'] ?? null) ? $rawOptions['committed'] : [];
+    foreach (array_slice(is_array($rawC['switches'] ?? null) ? $rawC['switches'] : [], 0, 12) as $cm) {
+        if (!is_array($cm) || !is_string($cm['offerId'] ?? null) || !is_string($cm['start'] ?? null)) continue;
+        $sd = plan_day_of($cm['start'], $today);
+        $dr = is_array($cm['donor'] ?? null) ? $cm['donor'] : [];
+        $kind = in_array($dr['kind'] ?? '', ['existing', 'new', 'chain'], true) ? $dr['kind'] : '';
+        if ($sd === null || $kind === '') continue;
+        $committed[] = ['offerId' => substr($cm['offerId'], 0, 120), 'startDay' => $sd, 'donor' => ['kind' => $kind, 'id' => substr((string) ($dr['id'] ?? ''), 0, 60), 'product' => substr((string) ($dr['product'] ?? ''), 0, 120), 'offerId' => substr((string) ($dr['offerId'] ?? ''), 0, 120)]];
+        if ($kind === 'new' && !empty($dr['product'])) $committedDonors[] = substr((string) $dr['product'], 0, 120);
+    }
+    usort($committed, fn($a, $b) => $a['startDay'] <=> $b['startDay']);
+    $committedIds = array_column($committed, 'offerId');
     $krak = 0.0;
     foreach ($rows as $r) if (($r['bank'] ?? '') === 'Kraken') $krak = (float) ($r['monthly'] ?? 0);
     $krakBalance = (float) ($user['assumedBalance'] ?? 0) ?: (((float) ($user['annualSalaryNet'] ?? 0)) / 12 * 2);
@@ -1848,11 +1901,15 @@ function compute_plan_v2(array $user, array $cache, array $rows, array $rawOptio
     $needIncome = [];
     $incomeKnown = !empty($user['annualSalaryNet']) || !empty($user['annualSalaryGross']);
     foreach ($rows as $r) {
-        if (($r['bank'] ?? '') === 'Kraken' || empty($r['eligible'])) continue;
+        if (($r['bank'] ?? '') === 'Kraken') continue;
         $o = $byProduct[mb_strtolower(trim((string) $r['product']))] ?? null;
         if (!$o) continue;
+        // Once a switch is started it stays, whatever has happened since (the new account now
+        // counts as one they hold, the deadline has passed, the offer is no longer the best).
+        $isCommitted = in_array((string) ($o['id'] ?? $r['product']), $committedIds, true);
+        if (empty($r['eligible']) && !$isCommitted) continue;
         // An offer with an earnings or salary test can't be planned until the page knows your income (a pay-in test is not one: savings can be rotated through to meet it).
-        if (!$incomeKnown && (!empty($o['minAnnualEarnings']) || !empty($o['minMonthlySalary']))) {
+        if (!$isCommitted && !$incomeKnown && (!empty($o['minAnnualEarnings']) || !empty($o['minMonthlySalary']))) {
             $needIncome[] = (string) $o['product'];
             continue;
         }
@@ -1861,7 +1918,7 @@ function compute_plan_v2(array $user, array $cache, array $rows, array $rawOptio
             $cd = plan_day_of($o['switch']['completeBy'], $today);
             $deadline = $cd === null ? null : $cd - CASS_DAYS;
         }
-        if ($deadline !== null && $deadline < 0) continue;
+        if ($deadline !== null && $deadline < 0 && !$isCommitted) continue;
         $cb = 0.0;
         $cbList = $r['cashback'] ?? [];
         foreach ($cbList as $x) $cb = max($cb, (float) ($x['amount'] ?? 0));
@@ -1869,7 +1926,7 @@ function compute_plan_v2(array $user, array $cache, array $rows, array $rawOptio
         foreach ($o['payments'] as $p) $total += $p['amount'] * $p['count'];
         $notFrom = [];
         foreach ($o['switch']['notFromGroups'] as $g) $notFrom[] = bank_group($g);
-        if ($opt['minimise'] && $total + $cb < 200) continue;
+        if ($opt['minimise'] && $total + $cb < 200 && !$isCommitted) continue;
         $cands[] = [
             'id' => $o['id'] ?? $r['product'], 'product' => (string) $o['product'], 'bank' => (string) $o['bank'], 'group' => bank_group((string) $o['bank']),
             'offer' => $o, 'dd' => (int) ($o['ddCount'] ?? 0), 'fund' => (float) ($o['minFunding'] ?? 0), 'deadline' => $deadline,
@@ -1919,6 +1976,22 @@ function compute_plan_v2(array $user, array $cache, array $rows, array $rawOptio
         }
         $donorSpecs[$i]['cashbackList'] = array_values($list);
     }
+    // A new donor account they have already opened for a started switch is used first and kept
+    // even if its cashback deal has gone.
+    $minNew = 0;
+    foreach (array_values(array_unique($committedDonors)) as $dp) {
+        if (isset($heldGroups[bank_group($dp)])) continue; // already one of their accounts: matched by bank instead
+        $found = null;
+        foreach ($donorSpecs as $i => $sp) if (strcasecmp($sp['product'], $dp) === 0) { $found = $i; break; }
+        if ($found === null) {
+            $sp = ['product' => $dp, 'group' => bank_group($dp), 'cashback' => 0.0, 'site' => '', 'cashbackList' => []];
+        } else {
+            $sp = $donorSpecs[$found];
+            array_splice($donorSpecs, $found, 1);
+        }
+        array_splice($donorSpecs, $minNew, 0, [$sp]);
+        $minNew++;
+    }
 
     $perk = null;
     $fs = find_fairer_share($cache);
@@ -1935,7 +2008,8 @@ function compute_plan_v2(array $user, array $cache, array $rows, array $rawOptio
     $bestPerGroup = [];
     foreach ($cands as $c) {
         $g = $c['group'];
-        if (!isset($bestPerGroup[$g]) || $c['listed'] + $c['cashback'] > $bestPerGroup[$g]['listed'] + $bestPerGroup[$g]['cashback']) $bestPerGroup[$g] = $c;
+        $worth = fn($x) => $x['listed'] + $x['cashback'] + (in_array($x['id'], $committedIds, true) ? 1e9 : 0);
+        if (!isset($bestPerGroup[$g]) || $worth($c) > $worth($bestPerGroup[$g])) $bestPerGroup[$g] = $c;
     }
     $candSets = [$cands];
     if (count($bestPerGroup) < count($cands)) $candSets[] = array_values($bestPerGroup);
@@ -1943,12 +2017,12 @@ function compute_plan_v2(array $user, array $cache, array $rows, array $rawOptio
     $maxNew = (!$opt['allowNew']) ? 0 : ($opt['minimise'] ? ($existing ? 0 : 1) : PLAN_MAX_NEW_DONORS);
     $sims = [];
     $orders = $perk ? ['amount', 'deadline', 'perk'] : ['amount', 'deadline'];
-    for ($n = 0; $n <= $maxNew; $n++) {
+    for ($n = $minNew; $n <= max($maxNew, $minNew); $n++) {
         $all = [];
         foreach ($candSets as $si => $set) {
             foreach ($orders as $order) {
                 foreach ($perk ? [false, true] : [false] as $hold) {
-                    $r = plan_simulate($set, $existing, $donorSpecs, $n, $krak, $order, $H, $perk, $hold, [], $stageKrak);
+                    $r = plan_simulate($set, $existing, $donorSpecs, $n, $krak, $order, $H, $perk, $hold, [], $stageKrak, $committed);
                     $r['config']['setIndex'] = $si;
                     $all[] = $r;
                 }
@@ -1976,8 +2050,8 @@ function compute_plan_v2(array $user, array $cache, array $rows, array $rawOptio
     }
     $chosen = end($ladder);
     $cfg = $chosen['config'];
-    $rerun = function (array $locked) use ($candSets, $existing, $donorSpecs, $krak, $H, $perk, $cfg, $stageKrak) {
-        return plan_simulate($candSets[$cfg['setIndex']] ?? $candSets[0], $existing, $donorSpecs, $cfg['n'], $krak, $cfg['order'], $H, $perk, $cfg['hold'], $locked, $stageKrak);
+    $rerun = function (array $locked) use ($candSets, $existing, $donorSpecs, $krak, $H, $perk, $cfg, $stageKrak, $committed) {
+        return plan_simulate($candSets[$cfg['setIndex']] ?? $candSets[0], $existing, $donorSpecs, $cfg['n'], $krak, $cfg['order'], $H, $perk, $cfg['hold'], $locked, $stageKrak, $committed);
     };
     $ctx = ['rerun' => $rerun, 'today' => $today, 'main' => $mainLabel, 'krak' => $krak, 'krakBalance' => $krakBalance, 'krakWelcomeSalary' => $welcomeSalary, 'krakSpendMonthly' => $krakSpendMonthly, 'krakSpendBase' => $spendBase, 'krakSpendPct' => $spendPct, 'krakTierMin' => $spendTierMin, 'netMonthly' => !empty($user['annualSalaryNet']) ? (float) $user['annualSalaryNet'] / 12 : null, 'perkVia' => $chosen['perk'] ?? null, 'perkJan' => $perk['jan'] ?? null];
     if (!$chosen['events'] && !$chosen['krakSegments']) return null;
@@ -2094,6 +2168,7 @@ function compute_plan_v2(array $user, array $cache, array $rows, array $rawOptio
         'fairerShare' => round($chosen['perkValue']), 'switches' => $switches, 'newDonors' => $newUsed, 'openings' => $opens, 'repoints' => $repoints,
         'horizonMonths' => $opt['horizonMonths'], 'today' => $today, 'needsIncome' => $needIncome,
         'funds' => ['maxMonthlyPayIn' => $maxMonthlyPayIn, 'maxLumpPayIn' => $maxLumpPayIn, 'peak' => $peak],
+        'committed' => ['kept' => array_values(array_diff($committedIds, $chosen['committedMissing'] ?? [])), 'missing' => $chosen['committedMissing'] ?? []],
     ];
 }
 

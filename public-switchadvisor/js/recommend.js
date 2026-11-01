@@ -131,7 +131,7 @@ function cardHtml(c, n, planToday) {
   if (c.salary) facts.push(`salary here ${escapeHtml(c.salary.from)} → ${escapeHtml(c.salary.to)}`);
   const status = prog.complete ? '<span class="tag-chip pri-high">✓ Done</span>'
     : c.carried ? '<span class="tag-chip pri-low">Under way</span>'
-      : cardStarted(c) ? '<span class="tag-chip pri-medium">Started</span>'
+      : cardStarted(c) ? `<span class="tag-chip pri-medium" ${c.kind === 'switch' ? 'title="A started switch is kept in your plan when it is rebuilt, even if it is no longer the best move."' : ''}>Started</span>`
         : `<span class="tag-chip due ${due.cls}">${escapeHtml(due.label)}</span>`;
   return `<article class="plan-card plan-${escapeHtml(c.kind)} ${prog.complete ? 'plan-complete' : ''}" id="c-${escapeHtml(c.key)}">
     <header>
@@ -202,7 +202,7 @@ function catchUpHtml(accepted) {
     const k = escapeHtml(c.key);
     return `<div class="catchup">
       <strong>Did you start “${escapeHtml(c.title)}”?</strong>
-      <p class="muted">It was due ${-due.days} day${due.days === -1 ? '' : 's'} ago and nothing in it is ticked yet. If you did it already, say so and the plan moves on to what is next.</p>
+      <p class="muted">It was due ${-due.days} day${due.days === -1 ? '' : 's'} ago and nothing in it is ticked yet. A switch you have started stays in your plan even if a better one comes along; one you have not started is re-planned freely. So if you did begin it, say so.</p>
       <div class="next-actions">
         <button type="button" class="sync-btn" data-catch="all" data-key="${k}">Yes, it is all done</button>
         <button type="button" class="sync-btn ghost" data-catch="some" data-key="${k}">I started it: let me tick what I have done</button>
