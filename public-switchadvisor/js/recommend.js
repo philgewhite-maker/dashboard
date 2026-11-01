@@ -1,6 +1,10 @@
 import { getLiveProfile, setLiveProfile, getOptions, setOptions, planRequested, setPlanRequested } from './api.js';
 import { escapeHtml, money } from './utils.js';
 import { REFERRALS, isSetUp } from './config.js';
+import { getAccepted, setAccepted, getFlag, setFlag, patchStep, fingerprint } from './progress.js';
+import { stepsHtml, bindSteps, cardProgress, nextAction, revealTarget, setStepContext } from './steps.js';
+import { diffDigest, changeBannerHtml, acceptedFrom, allCards, overallProgress, normalisePlan } from './changes.js';
+import { renderSetup, initSetup, incomeNoteHtml, incomeNoteRefresh, incomeState } from './setup.js';
 
 const PRIORITY_LABEL = { high: 'High', medium: 'Medium', low: 'Low', blocked: 'Needs another account', alt: 'Alternative', 'n/a': 'Not eligible' };
 const PRIORITY_CLASS = { high: 'pri-high', medium: 'pri-medium', low: 'pri-low', blocked: 'pri-none', alt: 'pri-none', 'n/a': 'pri-none' };
@@ -84,37 +88,59 @@ function opportunityHtml(op) {
   return `<div class="opp">
     <div class="opp-label">Potential opportunity over 12 months</div>
     <div class="opp-figure">about ${range}</div>
-    <p class="muted">${lo && hi && hi > lo ? 'The lower figure is for an ordinary salary; the higher one also counts the premier accounts, which need roughly £75,000–£100,000+ a year. ' : ''}It is switch bonuses (plus cashback and Krak Salary Match) from the best sequence of switches for someone starting with no accounts, and it is subject to your existing accounts and income — those can move it either way. Tell the page about yours below for a plan that fits you.</p>
+    <p class="muted">${lo && hi && hi > lo ? 'The lower figure is for an ordinary salary; the higher one also counts the premier accounts, which need roughly £75,000–£100,000+ a year. ' : ''}It is switch bonuses (plus cashback and Krak Salary Match) from the best sequence of switches for someone starting with no accounts, and it is subject to your existing accounts and income — those can move it either way. Answer the three quick steps below for a plan that fits you.</p>
   </div>`;
 }
 
 // ---- The customised plan ---------------------------------------------------
-function actionHtml(a) {
+// One step's own sentence, with any links it carries (cashback sites, Krak).
+function stepBodyHtml(a) {
   let extra = '';
   if (a.links) extra = ' ' + a.links.map(linkHtml).join(' &middot; ');
   if (a.link) extra = ' ' + linkHtml(a.link);
-  return `<li>${escapeHtml(a.text)}${extra}</li>`;
+  return `${escapeHtml(a.text)}${extra}`;
 }
 
 const KIND_LABEL = { switch: 'Switch', 'open-donor': 'Open', krak: 'Salary', perk: 'Yearly extra', bills: 'Bills account' };
 
-function cardHtml(c, n) {
+// "Starts in 12 days" / "Today" / "Was due 3 days ago", from the day the plan was built.
+function dueInfo(card, planToday) {
+  const base = new Date(`${planToday || new Date().toISOString().slice(0, 10)}T00:00:00`);
+  base.setDate(base.getDate() + (card.day || 0));
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  const days = Math.round((base - now) / 86400000);
+  if (days > 1) return { days, label: `Starts in ${days} days`, cls: 'due-later' };
+  if (days === 1) return { days, label: 'Starts tomorrow', cls: 'due-later' };
+  if (days === 0) return { days, label: 'Do this today', cls: 'due-now' };
+  return { days, label: `Was due ${-days} day${days === -1 ? '' : 's'} ago`, cls: 'due-over' };
+}
+
+function cardHtml(c, n, planToday) {
+  const prog = cardProgress(c);
+  const due = dueInfo(c, planToday);
   const facts = [];
   if (c.completes) facts.push(`switch completes about ${escapeHtml(c.completes)}`);
   if (c.bonusBy) facts.push(`bonus by about ${escapeHtml(c.bonusBy)}`);
   if (c.freeFrom) facts.push(`keep open until ${escapeHtml(c.freeFrom)}`);
   if (c.salary) facts.push(`salary here ${escapeHtml(c.salary.from)} → ${escapeHtml(c.salary.to)}`);
-  return `<article class="plan-card plan-${escapeHtml(c.kind)}">
+  const status = prog.complete ? '<span class="tag-chip pri-high">✓ Done</span>'
+    : c.carried ? '<span class="tag-chip pri-low">Under way</span>'
+      : `<span class="tag-chip due ${due.cls}">${escapeHtml(due.label)}</span>`;
+  return `<article class="plan-card plan-${escapeHtml(c.kind)} ${prog.complete ? 'plan-complete' : ''}" id="c-${escapeHtml(c.key)}">
     <header>
-      <span class="plan-n">${n}</span>
-      <div class="plan-title"><span class="plan-date">${escapeHtml(c.dateLabel)} · ${escapeHtml(KIND_LABEL[c.kind] || c.kind)}</span><h3>${escapeHtml(c.title)}</h3></div>
+      <span class="plan-n">${prog.complete ? '✓' : n}</span>
+      <div class="plan-title"><span class="plan-date">${escapeHtml(c.dateLabel)} · ${escapeHtml(KIND_LABEL[c.kind] || c.kind)} ${status}</span><h3>${escapeHtml(c.title)}</h3></div>
       ${c.amountLabel ? `<span class="plan-amount">${escapeHtml(c.amountLabel)}</span>` : c.amount ? `<span class="plan-amount">${money(c.amount)}</span>` : ''}
     </header>
-    ${facts.length ? `<p class="plan-facts muted">${facts.join(' · ')}</p>` : ''}
-    <details class="plan-why-box"><summary>Why this move</summary><ul>${(c.why || []).map((w) => `<li>${escapeHtml(w)}</li>`).join('')}</ul></details>
-    <div class="plan-do-head">What to do</div>
-    <ol class="plan-do">${(c.actions || []).map(actionHtml).join('')}</ol>
-    ${c.url ? `<a class="rec-link" href="${escapeHtml(c.url)}" target="_blank" rel="noopener">View offer &rarr;</a>` : ''}
+    <details class="plan-body" data-dkey="card:${escapeHtml(c.key)}" ${prog.complete ? '' : 'open'}>
+      <summary>${prog.done} of ${prog.total} step${prog.total === 1 ? '' : 's'} done</summary>
+      ${facts.length ? `<p class="plan-facts muted">${facts.join(' · ')}</p>` : ''}
+      ${c.carried ? `<p class="muted">You started this under an earlier plan, so it stays here until you finish it. <button type="button" class="linklike" data-stop-card="${escapeHtml(c.key)}">Stop tracking this one</button></p>` : ''}
+      <details class="plan-why-box" data-dkey="why:${escapeHtml(c.key)}"><summary>Why this move</summary><ul>${(c.why || []).map((w) => `<li>${escapeHtml(w)}</li>`).join('')}</ul></details>
+      ${stepsHtml(c, stepBodyHtml)}
+      ${c.url ? `<a class="rec-link" href="${escapeHtml(c.url)}" target="_blank" rel="noopener">View offer &rarr;</a>` : ''}
+    </details>
   </article>`;
 }
 
@@ -130,10 +156,14 @@ function endStateHtml(es) {
   </div>`;
 }
 
-function customPlanHtml(p) {
-  if (!p) return '<div class="rec-plan">The plan is built from this week\'s structured offer data. It will appear after the next weekly check — please look again shortly.</div>';
+function customPlanHtml(accepted) {
+  const p = accepted.plan;
+  const cards = allCards(accepted);
+  const prog = overallProgress(accepted);
+  const built = accepted.builtAt ? new Date(accepted.builtAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+  const live = getLiveProfile();
   const parts = [];
-  parts.push(`<div class="plan-head"><div class="opp-label">Your customised plan</div><p class="plan-headline">${escapeHtml(p.headline)}</p>
+  parts.push(`<div class="plan-head"><div class="opp-label">Your customised plan${built ? ` · built ${escapeHtml(built)}` : ''}</div><p class="plan-headline">${escapeHtml(p.headline)}</p>
     <div class="plan-totals">
       <span><b>${money(p.bonus)}</b> switch bonuses</span>
       ${p.cashback ? `<span><b>${money(p.cashback)}</b> cashback sites</span>` : ''}
@@ -141,12 +171,36 @@ function customPlanHtml(p) {
       ${p.krakSpend ? `<span><b>${money(p.krakSpend)}</b> Krak card cashback</span>` : ''}
       ${p.fairerShare ? `<span><b>${money(p.fairerShare)}</b> Fairer Share (if repeated)</span>` : ''}
       <span><b>${p.openings}</b> accounts opened</span><span><b>${p.switches}</b> switches</span><span><b>${p.repoints}</b> salary moves</span>
-    </div></div>`);
+    </div>
+    ${prog.total ? `<div class="prog"><div class="prog-bar"><span style="width:${Math.round((prog.done / prog.total) * 100)}%"></span></div><span class="muted">${prog.done} of ${prog.total} steps done</span></div>` : ''}
+  </div>`);
+  parts.push(incomeNoteHtml(live.annualSalaryNet, p.funds));
   if ((p.quests || []).length) parts.push(`<div class="rec-quests"><strong>Side quests</strong> — what each extra donor account adds (already counted above):<ul>${p.quests.map((q) => `<li>${escapeHtml(q)}</li>`).join('')}</ul></div>`);
-  parts.push((p.cards || []).map((c, i) => cardHtml(c, i + 1)).join(''));
+  parts.push(cards.map((c, i) => cardHtml(c, i + 1, p.today)).join(''));
   parts.push(endStateHtml(p.endState));
   parts.push(`<details class="rec-plan-how"><summary>How this was worked out</summary><ul>${(p.notes || []).map((t) => `<li>${escapeHtml(t)}</li>`).join('')}</ul></details>`);
   return `<div class="plan-wrap">${parts.join('')}</div>`;
+}
+
+// The one thing to do next, with the way to do it right there.
+function nextStepHtml(accepted) {
+  const cards = allCards(accepted);
+  if (!cards.length) return '';
+  const next = nextAction(cards);
+  if (!next) {
+    return '<div class="next-step next-done"><div class="opp-label">Your next step</div><p class="next-text">Every step in your plan is ticked. 🎉 Check back here: if the offers change, you will be told what it means for you.</p></div>';
+  }
+  const due = next.card.carried ? { days: 0, label: 'Already under way', cls: 'due-now' } : dueInfo(next.card, accepted.plan.today);
+  const early = !next.card.carried && due.days > 0;
+  const cta = next.kind === 'check'
+    ? `<button type="button" class="sync-btn" data-next-tick="${escapeHtml(next.tickId)}">Done ✓</button>`
+    : '<button type="button" class="sync-btn" data-next-show>Answer this ↓</button>';
+  return `<div class="next-step ${early ? 'next-later' : ''}">
+    <div class="opp-label">${early ? 'Coming up' : 'Your next step'}</div>
+    <p class="next-text">${escapeHtml(next.plain)}</p>
+    <p class="muted next-where">${escapeHtml(next.card.title)} · ${escapeHtml(due.label)}</p>
+    <div class="next-actions">${early ? '' : cta} <button type="button" class="sync-btn ghost" data-next-show>${next.kind === 'check' && !early ? 'Show me where' : 'Show me'}</button></div>
+  </div>`;
 }
 
 function readOptionsFromForm() {
@@ -181,25 +235,98 @@ function fillOptionsForm(me) {
     const wrap = document.getElementById('opt-primary-wrap');
     if (wrap) wrap.hidden = !el.checked;
   });
-  const summary = document.getElementById('plan-accounts-summary');
-  if (summary) {
-    summary.textContent = accounts.length
-      ? `You have added ${accounts.length} open account${accounts.length === 1 ? '' : 's'}: ${accounts.map((a) => a.bank).join(', ')}. Accounts you mark "keep" are never switched away.`
-      : "You haven't added any accounts, so the plan assumes you start by opening a new free account to switch from.";
+}
+
+// ---- Putting it together -----------------------------------------------------
+let lastMe = null;
+let reload = async () => {};
+const openState = new Map();
+
+// What the person controls, as a fingerprint: accounts, figures and options. When it
+// differs from the one the plan was built on, the plan is out of date by their own doing.
+function inputSignature(me) {
+  const accounts = (me.user.accounts || []).map((a) => [a.id, a.bank, a.closeDate || '', a.wantToKeep, a.directDebitCount]);
+  return fingerprint({ accounts, live: getLiveProfile(), opts: getOptions() });
+}
+
+function digestKey(d) {
+  return fingerprint((d?.items || []).map((i) => [i.id, i.amount, i.terms, i.deadline]));
+}
+
+// Adopt the freshly computed plan as the one being followed, when the person has just
+// asked for that (building or updating); otherwise leave the plan they have alone.
+function syncAccepted(me) {
+  if (!planRequested()) return;
+  let accepted = getAccepted();
+  const wanted = getFlag('accept') === true || !accepted;
+  if (wanted && me.actionPlan) {
+    accepted = acceptedFrom(me.actionPlan, me.offerDigest, inputSignature(me), accepted, getFlag('abandoned', {}) || {});
+    setAccepted(accepted);
+    setFlag('accept', null);
+    setFlag('dismissed', null);
+  } else if (getFlag('accept') === true) {
+    setFlag('accept', null);
   }
 }
 
-export function renderRecommendations(me) {
-  const asOf = document.getElementById('rec-asof');
-  if (asOf) asOf.textContent = me.cacheAsOf ? `Offers last checked ${me.cacheAsOf}.` : 'Offers not yet checked.';
-  const opp = document.getElementById('opportunity');
-  if (opp) opp.innerHTML = opportunityHtml(me.opportunity);
+function pendingUpdate(me, accepted) {
+  if (!accepted || !me.actionPlan) return null;
+  const offerChanges = diffDigest(accepted.digest, me.offerDigest, accepted.plan.cards);
+  const inputsChanged = accepted.inputSig !== inputSignature(me);
+  if (!offerChanges.length && !inputsChanged) return null;
+  if (getFlag('dismissed') === `${digestKey(me.offerDigest)}:${inputSignature(me)}`) return null;
+  return { offerChanges, inputsChanged };
+}
+
+function captureOpen() {
+  document.querySelectorAll('#plan-mount details[data-dkey]').forEach((d) => openState.set(d.dataset.dkey, d.open));
+}
+function restoreOpen() {
+  document.querySelectorAll('#plan-mount details[data-dkey]').forEach((d) => {
+    if (openState.has(d.dataset.dkey)) d.open = openState.get(d.dataset.dkey);
+  });
+}
+
+function renderPlanUi() {
+  const me = lastMe;
+  if (!me) return;
+  const built = planRequested();
+  const accepted = built ? getAccepted() : null;
+  const pending = pendingUpdate(me, accepted);
+
+  const lowIncome = incomeState(getLiveProfile().annualSalaryNet, accepted?.plan?.funds || me.actionPlan?.funds).low;
+  setStepContext({ lowIncome });
+
+  captureOpen();
+  const change = document.getElementById('change-mount');
+  if (change) {
+    change.innerHTML = pending ? changeBannerHtml({ accepted, fresh: me.actionPlan, offerChanges: pending.offerChanges, inputsChanged: pending.inputsChanged }) : '';
+  }
+  const next = document.getElementById('next-mount');
+  if (next) next.innerHTML = accepted ? nextStepHtml(accepted) : '';
+
   const mount = document.getElementById('plan-mount');
   if (mount) {
-    mount.innerHTML = planRequested()
-      ? customPlanHtml(me.actionPlan)
-      : '<p class="muted plan-hint">Fill in as much as you like above — or nothing — then press <strong>Show my customised plan</strong> for your step-by-step action plan.</p>';
+    if (accepted) mount.innerHTML = customPlanHtml(accepted);
+    else if (built) mount.innerHTML = '<div class="rec-plan">The plan is built from this week\'s structured offer data. It will appear after the next weekly check — please look again shortly.</div>';
+    else mount.innerHTML = '';
   }
+  restoreOpen();
+
+  const prog = accepted ? overallProgress(accepted) : { done: 0, total: 0 };
+  renderSetup({ me, built: !!accepted, allDone: prog.total > 0 && prog.done === prog.total, hasUpdate: !!pending });
+  const opp = document.getElementById('opportunity');
+  if (opp) opp.innerHTML = accepted ? '' : opportunityHtml(me.opportunity);
+  incomeNoteRefresh(accepted?.plan?.funds || me.actionPlan?.funds);
+}
+
+export function renderRecommendations(me) {
+  lastMe = me;
+  normalisePlan(me.actionPlan);
+  syncAccepted(me);
+  const asOf = document.getElementById('rec-asof');
+  if (asOf) asOf.textContent = me.cacheAsOf ? `Offers last checked ${me.cacheAsOf}.` : 'Offers not yet checked.';
+
   const planEl = document.getElementById('rec-plan');
   if (planEl) planEl.innerHTML = planHtml(me.plan);
   const perksEl = document.getElementById('rec-perks-wrap');
@@ -213,49 +340,102 @@ export function renderRecommendations(me) {
       : '<div class="empty">Nothing to show yet — add your accounts first.</div>';
   }
 
-  const salary = document.getElementById('profile-salary');
-  const balance = document.getElementById('profile-balance');
-  const gross = document.getElementById('profile-gross');
-  const spend = document.getElementById('profile-spend');
-  const live = getLiveProfile();
-  if (spend) spend.value = live.monthlySpend ?? '';
-  if (gross) gross.value = live.annualSalaryGross ?? '';
-  if (salary) salary.value = live.annualSalaryNet ?? '';
-  if (balance) balance.value = live.assumedBalance ?? '';
-  fillOptionsForm(me);
+  // Don't overwrite what someone is typing: the figures are only refilled when no
+  // field in the form has focus.
+  const form = document.getElementById('profile-form');
+  if (!form || !form.contains(document.activeElement)) {
+    const live = getLiveProfile();
+    const put = (id, v) => { const el = document.getElementById(id); if (el) el.value = v ?? ''; };
+    put('profile-spend', live.monthlySpend);
+    put('profile-gross', live.annualSalaryGross);
+    put('profile-salary', live.annualSalaryNet);
+    put('profile-balance', live.assumedBalance);
+    fillOptionsForm(me);
+  }
+  renderPlanUi();
+}
+
+function readFigures() {
+  const num = (id) => { const v = document.getElementById(id).value; return v === '' ? null : Number(v); };
+  return {
+    monthlySpend: num('profile-spend'),
+    annualSalaryNet: num('profile-salary'),
+    annualSalaryGross: num('profile-gross'),
+    assumedBalance: num('profile-balance'),
+  };
 }
 
 export function initProfileForm(onSaved) {
   const form = document.getElementById('profile-form');
   if (!form) return;
+  reload = onSaved;
   const status = document.getElementById('profile-status');
   const keep = document.getElementById('opt-keep-primary');
   keep?.addEventListener('change', () => {
     const wrap = document.getElementById('opt-primary-wrap');
     if (wrap) wrap.hidden = !keep.checked;
   });
-  document.getElementById('plan-goto-accounts')?.addEventListener('click', () => {
-    document.querySelector('.tab-btn[data-tab="accounts"]')?.click();
+
+  // Enter inside a field must not build the plan half-way through the setup.
+  form.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || !(e.target instanceof HTMLInputElement) || e.target.type === 'checkbox') return;
+    if (!planRequested()) {
+      e.preventDefault();
+      const step = Number(getFlag('wizStep', 1)) || 1;
+      if (step < 3) { setFlag('wizStep', step + 1); renderPlanUi(); }
+    }
   });
+
+  initSetup(() => lastMe, renderPlanUi);
+  const plan = document.getElementById('panel-recommend');
+  bindSteps(plan, renderPlanUi);
+
+  plan.addEventListener('click', async (e) => {
+    const tick = e.target.closest('[data-next-tick]');
+    if (tick) { patchStep(tick.dataset.nextTick, { done: true, at: new Date().toISOString().slice(0, 10) }); renderPlanUi(); return; }
+    if (e.target.closest('[data-next-show]')) {
+      const next = nextAction(allCards(getAccepted()));
+      if (next) revealTarget(next.targetId);
+      return;
+    }
+    const chg = e.target.closest('[data-chg]');
+    if (chg) {
+      if (chg.dataset.chg === 'update') {
+        setFlag('accept', true);
+        chg.disabled = true;
+        chg.textContent = 'Updating…';
+        try { await onSaved(); } catch (err) { chg.disabled = false; chg.textContent = 'Update my plan'; }
+        document.getElementById('plan-mount')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } else if (lastMe) {
+        setFlag('dismissed', `${digestKey(lastMe.offerDigest)}:${inputSignature(lastMe)}`);
+        renderPlanUi();
+      }
+      return;
+    }
+    const stop = e.target.closest('[data-stop-card]');
+    if (stop) {
+      const key = stop.dataset.stopCard;
+      const accepted = getAccepted();
+      if (accepted) {
+        accepted.carried = (accepted.carried || []).filter((c) => c.key !== key);
+        setAccepted(accepted);
+        setFlag('abandoned', { ...(getFlag('abandoned', {}) || {}), [key]: true });
+      }
+      renderPlanUi();
+    }
+  });
+
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     status.textContent = 'Building your plan…';
     try {
-      const salary = document.getElementById('profile-salary').value;
-      const gross = document.getElementById('profile-gross').value;
-      const balance = document.getElementById('profile-balance').value;
-      const spend = document.getElementById('profile-spend').value;
-      setLiveProfile({
-        monthlySpend: spend === '' ? null : Number(spend),
-        annualSalaryNet: salary === '' ? null : Number(salary),
-        annualSalaryGross: gross === '' ? null : Number(gross),
-        assumedBalance: balance === '' ? null : Number(balance),
-      });
+      setLiveProfile(readFigures());
       setOptions(readOptionsFromForm());
       setPlanRequested(true);
+      setFlag('accept', true);
       await onSaved();
       status.textContent = '';
-      document.getElementById('plan-mount')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      document.getElementById('next-mount')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (err) {
       status.textContent = `Couldn't build the plan: ${err.message}`;
     }

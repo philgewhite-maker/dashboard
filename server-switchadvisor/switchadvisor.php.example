@@ -1362,6 +1362,65 @@ function plan_caveat(string $text): string {
     return preg_match_all('/[^.]*(?:does not say|not stated|not say)[^.]*\./i', $text, $m) ? ' ' . trim(implode(' ', array_map('trim', $m[0]))) : '';
 }
 
+function plan_slug(string $s): string {
+    return trim(strtolower(preg_replace('/[^a-z0-9]+/i', '-', $s)), '-');
+}
+
+// For steps that carry no explicit type: guessed from how the sentence starts. The guess
+// only has to be stable (it names the step's id), so a step keeps its tick when the plan is
+// rebuilt and the same step comes round again.
+function plan_guess_step_type(string $text): string {
+    $rules = [
+        '/^Open a Krak|^Open Krak|^Open a free|^Open \d+ free|^Open [A-Z]/' => 'open',
+        '/^Allow about a month/' => 'wait',
+        '/^Make \d+\+ debit card|^Spend |^Order the Krak card/' => 'card',
+        '/^Log in/' => 'login',
+        '/^Fund it/' => 'fund',
+        '/^Choose whether/' => 'setting',
+        '/^Move your household/' => 'dd-move',
+        '/^Set up a second standing order/' => 'payin-back',
+        '/^Set up a standing order of/' => 'standing-order',
+        '/^Nationwide Fairer Share/' => 'note',
+        '/^Krak pays a percentage/' => 'info',
+        '/^There is no minimum/' => 'info',
+        '/^After the first month/' => 'check',
+        '/^Check |^Keep the Nationwide/' => 'check',
+        '/^In the Nationwide app|^Pay in £100/' => 'savings',
+    ];
+    foreach ($rules as $re => $t) if (preg_match($re, $text)) return $t;
+    return 'step';
+}
+
+function plan_finalise_cards(array $cards): array {
+    $seen = [];
+    foreach ($cards as $ci => $card) {
+        // Direct Debits have to be in place before the switch is started, so they come first.
+        if ($card['kind'] === 'switch') {
+            $dds = array_values(array_filter($card['actions'], fn($x) => in_array($x['t'] ?? '', ['dd', 'dd-verify'], true)));
+            $rest = array_values(array_filter($card['actions'], fn($x) => !in_array($x['t'] ?? '', ['dd', 'dd-verify'], true)));
+            $at = null;
+            foreach ($rest as $ri => $x) if (($x['t'] ?? '') === 'cass') { $at = $ri; break; }
+            if ($dds && $at !== null) {
+                array_splice($rest, $at, 0, $dds);
+                $card['actions'] = $rest;
+                $cards[$ci]['actions'] = $rest;
+            }
+        }
+        $key = $card['key'] ?? ($card['kind'] . ':' . plan_slug((string) $card['title']));
+        $seen[$key] = ($seen[$key] ?? 0) + 1;
+        if ($seen[$key] > 1) $key .= '-' . $seen[$key];
+        $cards[$ci]['key'] = $key;
+        $count = [];
+        foreach ($card['actions'] as $ai => $a) {
+            $t = $a['t'] ?? plan_guess_step_type((string) $a['text']);
+            $count[$t] = ($count[$t] ?? 0) + 1;
+            $cards[$ci]['actions'][$ai]['t'] = $t;
+            $cards[$ci]['actions'][$ai]['id'] = $key . '/' . $t . $count[$t];
+        }
+    }
+    return $cards;
+}
+
 function plan_requirement_actions(array $o, array $ctx, array $e): array {
     $acts = [];
     $main = $ctx['main'];
@@ -1383,14 +1442,14 @@ function plan_requirement_actions(array $o, array $ctx, array $e): array {
                 $m = $r['months'] ?? 1;
                 $amt = $r['amount'] ? plan_money($r['amount']) . ' a month' : 'your salary';
                 $src = $r['source'] === 'employer' ? ' by Bacs from your employer (a pension or benefits payment also counts; a transfer from your own account does not)' : '';
-                $acts[] = ['text' => sprintf('Salary: ask your employer to pay %s into %s from your first payday after %s — for %d month%s%s. %s', $amt, $prod, plan_label($c, $today), $m, $m === 1 ? '' : 's', $src ? ',' . $src : '', $r['assumed'] ? "The offer doesn't say how many months, so $m is assumed — check its terms." : '')];
+                $acts[] = ['t' => 'salary', 'params' => ['amount' => (float) ($r['amount'] ?? 0), 'months' => $m, 'from' => plan_label($c, $today), 'product' => $prod, 'bank' => $o['bank']], 'text' => sprintf('Salary: ask your employer to pay %s into %s from your first payday after %s — for %d month%s%s. %s', $amt, $prod, plan_label($c, $today), $m, $m === 1 ? '' : 's', $src ? ',' . $src : '', $r['assumed'] ? "The offer doesn't say how many months, so $m is assumed — check its terms." : '')];
                 break;
             case 'pay-in':
                 $stay = $r['mustStayDays'] ? sprintf(' Each deposit has to stay at least %s.', $r['mustStayDays'] <= 1 ? '24 hours' : round($r['mustStayDays']) . ' days') : '';
                 if ($r['period'] === 'each-month') {
-                    $acts[] = ['text' => sprintf('Set up a standing order of %s a month from %s into %s%s.%s', plan_money($r['amount'] ?? 0), $main, $prod, $r['months'] ? sprintf(' for %d month%s', $r['months'], $r['months'] === 1 ? '' : 's') : '', $stay)];
+                    $acts[] = ['t' => 'standing-order', 'params' => ['amount' => (float) ($r['amount'] ?? 0), 'from' => $main, 'to' => $prod, 'months' => $r['months'] ?? null], 'text' => sprintf('Set up a standing order of %s a month from %s into %s%s.%s', plan_money($r['amount'] ?? 0), $main, $prod, $r['months'] ? sprintf(' for %d month%s', $r['months'], $r['months'] === 1 ? '' : 's') : '', $stay)];
                 } else {
-                    $acts[] = ['text' => sprintf('Pay in %s%s: a standing order or transfer from %s into %s%s.%s%s', plan_money($r['amount'] ?? 0), $when ? " $when" : '', $main, $prod, $r['source'] === 'any' ? ' (it can come from your own accounts unless the offer says otherwise)' : '', $stay, plan_caveat($r['text']))];
+                    $acts[] = ['t' => 'payin', 'params' => ['amount' => (float) ($r['amount'] ?? 0), 'from' => $main, 'to' => $prod], 'text' => sprintf('Pay in %s%s: a standing order or transfer from %s into %s%s.%s%s', plan_money($r['amount'] ?? 0), $when ? " $when" : '', $main, $prod, $r['source'] === 'any' ? ' (it can come from your own accounts unless the offer says otherwise)' : '', $stay, plan_caveat($r['text']))];
                 }
                 break;
             case 'debit-card-payments':
@@ -1450,7 +1509,7 @@ function plan_cashback_action(array $list, array $ctx, string $what): ?array {
     foreach ($list as $c) {
         $links[] = ['label' => sprintf('%s (%s)', $c['label'], plan_money($c['amount'])), 'url' => $c['url'] ?? '', 'ref' => $c['provider'] ?? ''];
     }
-    return ['text' => sprintf('Before you open %s, click through a cashback site — it only tracks if you do, and one site per account:', $what), 'links' => $links, 'kind' => 'cashback'];
+    return ['t' => 'cashback', 'text' => sprintf('Before you open %s, click through a cashback site — it only tracks if you do, and one site per account:', $what), 'links' => $links, 'kind' => 'cashback'];
 }
 
 function plan_build_cards(array $sim, array $ctx, array $cache, array $rows): array {
@@ -1475,8 +1534,8 @@ function plan_build_cards(array $sim, array $ctx, array $cache, array $rows): ar
                 $acts = [];
                 $cb = plan_cashback_action($d['cashbackList'] ?? [], $ctx, $d['product']);
                 if ($cb) $acts[] = $cb;
-                $acts[] = ['text' => sprintf('Open %s (it pays about %s cashback just for opening).', $d['product'], plan_money($d['cashback']))];
-                $acts[] = ['text' => sprintf('Set up %d small Direct Debits on it (a phone, a subscription) — they are what the switch into %s carries across.', max(2, $c['dd']), $o['product'])];
+                $acts[] = ['t' => 'open', 'text' => sprintf('Open %s (it pays about %s cashback just for opening).', $d['product'], plan_money($d['cashback']))];
+                $acts[] = ['t' => 'dd', 'params' => ['account' => $d['product'], 'need' => max(2, $c['dd']), 'have' => 0, 'fresh' => true, 'purpose' => $o['product']], 'text' => sprintf('Set up %d small Direct Debits on it (a phone, a subscription) — they are what the switch into %s carries across.', max(2, $c['dd']), $o['product'])];
                 $acts[] = ['text' => 'Allow about a month before the first switch: the new Direct Debits take a while to post, and the switch only carries across ones that have.'];
                 $cards[] = [
                     'kind' => 'open-donor', 'day' => max(0, $e['day'] - PLAN_NEW_DONOR_DAYS), 'dateLabel' => plan_label(max(0, $e['day'] - PLAN_NEW_DONOR_DAYS), $today),
@@ -1489,23 +1548,23 @@ function plan_build_cards(array $sim, array $ctx, array $cache, array $rows): ar
         $actions = [];
         $cb = plan_cashback_action($c['cashbackList'], $ctx, $o['product']);
         if ($cb) $actions[] = $cb;
-        $actions[] = ['text' => sprintf('Open %s. %s', $o['product'], $o['howToOpen'] ?? '')];
+        $actions[] = ['t' => 'open', 'text' => sprintf('Open %s. %s', $o['product'], $o['howToOpen'] ?? '')];
         $cass = sprintf('Ask %s to run a Current Account Switch (CASS) from %s — choose a switch date at least 7 working days ahead; allow about %d days in all. It closes %s and moves its Direct Debits and standing orders.', $o['bank'], $e['donor']['label'], CASS_DAYS, $e['donor']['label']);
         if ($o['switch']['startBy']) $cass .= sprintf(' The switch must be started by %s.', plan_label(plan_day_of($o['switch']['startBy'], $today), $today));
         if ($o['switch']['withinDaysOfOpening']) $cass .= sprintf(' Start it within %d days of opening.', $o['switch']['withinDaysOfOpening']);
-        $actions[] = ['text' => $cass];
+        $actions[] = ['t' => 'cass', 'params' => ['from' => $e['donor']['label'], 'bank' => $o['bank'], 'product' => $o['product']], 'text' => $cass];
         if ($c['dd'] > 0) {
             $have = $e['donor']['dds'];
-            if ($e['donor']['kind'] === 'new') $actions[] = ['text' => sprintf('Make sure the donor has at least %d active Direct Debits when you switch — they move across with the CASS.', $c['dd'])];
-            elseif ($have === null) $actions[] = ['text' => sprintf('Check %s has at least %d active Direct Debits (they move across with the CASS) — add any that are missing.', $e['donor']['label'], $c['dd'])];
-            elseif ($have >= $c['dd']) $actions[] = ['text' => sprintf('Keep the %d Direct Debits that move across with the CASS active — the offer needs %d+.', $have, $c['dd'])];
-            else $actions[] = ['text' => sprintf('Add %d more Direct Debit%s to %s before the switch — the offer needs %d and it has %d.', $e['addDDs'], $e['addDDs'] === 1 ? '' : 's', $e['donor']['label'], $c['dd'], $have)];
+            if ($e['donor']['kind'] === 'new') $actions[] = ['t' => 'dd-verify', 'text' => sprintf('Make sure the donor has at least %d active Direct Debits when you switch — they move across with the CASS.', $c['dd'])];
+            elseif ($have === null) $actions[] = ['t' => 'dd', 'params' => ['account' => $e['donor']['label'], 'need' => $c['dd'], 'have' => null, 'fresh' => false, 'purpose' => $o['product']], 'text' => sprintf('Check %s has at least %d active Direct Debits (they move across with the CASS) — add any that are missing.', $e['donor']['label'], $c['dd'])];
+            elseif ($have >= $c['dd']) $actions[] = ['t' => 'dd-verify', 'text' => sprintf('Keep the %d Direct Debits that move across with the CASS active — the offer needs %d+.', $have, $c['dd'])];
+            else $actions[] = ['t' => 'dd', 'params' => ['account' => $e['donor']['label'], 'need' => $c['dd'], 'have' => $have, 'fresh' => false, 'purpose' => $o['product']], 'text' => sprintf('Add %d more Direct Debit%s to %s before the switch — the offer needs %d and it has %d.', $e['addDDs'], $e['addDDs'] === 1 ? '' : 's', $e['donor']['label'], $c['dd'], $have)];
         }
         foreach (plan_requirement_actions($o, $ctx, $e) as $a) $actions[] = $a;
         // Pay-ins from your own account can usually go straight back out.
         foreach ($o['requirements'] as $r) {
             if ($r['type'] === 'pay-in' && $r['period'] !== 'each-month' && ($r['source'] ?? 'any') === 'any') {
-                $actions[] = ['text' => sprintf('Once the offer\'s conditions are met%s, set up a standing order of %s from %s back to %s (or to the account that pays your bills) — the money only has to pass through.%s', $r['mustStayDays'] ? sprintf(' and the deposit has sat for %s', $r['mustStayDays'] <= 1 ? '24 hours' : round($r['mustStayDays']) . ' days') : '', plan_money($r['amount'] ?? 0), $o['product'], $ctx['main'], $r['mustStayDays'] ? '' : ' The offer doesn\'t say the money has to stay, but check its terms first.')];
+                $actions[] = ['t' => 'payin-back', 'params' => ['amount' => (float) ($r['amount'] ?? 0), 'from' => $o['product'], 'to' => $ctx['main']], 'text' => sprintf('Once the offer\'s conditions are met%s, set up a standing order of %s from %s back to %s (or to the account that pays your bills) — the money only has to pass through.%s', $r['mustStayDays'] ? sprintf(' and the deposit has sat for %s', $r['mustStayDays'] <= 1 ? '24 hours' : round($r['mustStayDays']) . ' days') : '', plan_money($r['amount'] ?? 0), $o['product'], $ctx['main'], $r['mustStayDays'] ? '' : ' The offer doesn\'t say the money has to stay, but check its terms first.')];
                 break;
             }
         }
@@ -1515,7 +1574,7 @@ function plan_build_cards(array $sim, array $ctx, array $cache, array $rows): ar
                 ? 'Nationwide Fairer Share: because this switch completes in January–March it counts as the account use Fairer Share asks for — keep the account open past 31 March and have £100 in a Nationwide savings account in March (see the Fairer Share steps below).'
                 : 'Nationwide Fairer Share: this account is kept open past 31 March for it (see the Fairer Share steps below), which is why it is not switched on sooner.'];
         }
-        $actions[] = ['text' => sprintf('Expect %s around %s. Keep %s open until %s.%s', plan_money($st['value']), plan_label($last, $today), $o['product'], plan_label($e['freeFrom'], $today), $e['freeFrom'] > $st['freeDay'] ? ' (held longer than the bonus needs, for Nationwide Fairer Share.)' : '')];
+        $actions[] = ['t' => 'expect', 'params' => ['amount' => $st['value'], 'product' => $o['product']], 'text' => sprintf('Expect %s around %s. Keep %s open until %s.%s', plan_money($st['value']), plan_label($last, $today), $o['product'], plan_label($e['freeFrom'], $today), $e['freeFrom'] > $st['freeDay'] ? ' (held longer than the bonus needs, for Nationwide Fairer Share.)' : '')];
         $prevHolder = $e['donor']['kind'] === 'chain' ? ($holder[$e['donor']['label']] ?? $e['donor']['product'] ?? null) : null;
         $cards[] = [
             'kind' => 'switch', 'day' => $e['day'], 'dateLabel' => plan_label($e['day'], $today),
@@ -1534,11 +1593,11 @@ function plan_build_cards(array $sim, array $ctx, array $cache, array $rows): ar
             ? 'Open a free current account with a bank that is in CASS — Chase, Monzo and Starling usually are.'
             : sprintf('Open %d free current accounts in one sitting. Chase is the easiest: it lets you hold more than one current account, so all %d can be there (with Monzo or Starling you would need a different bank for each).', $n, $n)]];
         foreach (array_values($generic) as $gi => $g) {
-            $acts[] = ['text' => sprintf('%sSet up %d small Direct Debits on it (a phone, a subscription) — they are what the switch into %s carries across.', $n > 1 ? sprintf('Account %d: ', $gi + 1) : '', $g['dd'], $g['for'])];
+            $acts[] = ['t' => 'dd', 'params' => ['account' => $n > 1 ? sprintf('donor account %d', $gi + 1) : 'the donor account', 'need' => $g['dd'], 'have' => 0, 'fresh' => true, 'purpose' => $g['for']], 'text' => sprintf('%sSet up %d small Direct Debits on it (a phone, a subscription) — they are what the switch into %s carries across.', $n > 1 ? sprintf('Account %d: ', $gi + 1) : '', $g['dd'], $g['for'])];
         }
         $acts[] = ['text' => 'Allow about a month before the first switch: the new Direct Debits take a while to post, and the switch only carries across ones that have.'];
         $cards[] = [
-            'kind' => 'open-donor', 'day' => $day0, 'dateLabel' => plan_label($day0, $today),
+            'kind' => 'open-donor', 'key' => 'open-donor:generic', 'day' => $day0, 'dateLabel' => plan_label($day0, $today),
             'title' => $n === 1 ? 'Open a free donor account' : sprintf('Open %d free donor accounts', $n), 'amount' => 0,
             'why' => ['A donor account is a free current account you open only to switch away from, so there is something to switch into each bonus account. Opening one adds an application to your credit file, so each is only suggested where it adds at least ' . plan_money(PLAN_MIN_SIDE_QUEST) . '.'],
             'actions' => $acts,
@@ -1585,7 +1644,7 @@ function plan_krak_cards(array $sim, array $ctx, array $cache): array {
         if ($i === 0 && empty($ctx['krakSpendMonthly'])) {
             $acts[] = ['text' => 'Open a Krak account (the Kraken app) and verify it — a few days before your first salary arrives, so the first 30 days fall on your first salary.', 'link' => ['label' => 'Open Krak', 'url' => 'https://support.krak.app/articles/krak-salary-match', 'ref' => 'krak']];
         }
-        $acts[] = ['text' => sprintf('Ask your employer to pay your salary into Krak by Faster Payments from %s — it has to come straight from an employer (or another third party) and be at least %s a month; a standing order from your own account does not count.', plan_label($a, $today), plan_money((float) ($cache['krakSalaryMin'] ?? 2500)))];
+        $acts[] = ['t' => 'salary', 'params' => ['amount' => (float) ($cache['krakSalaryMin'] ?? 2500), 'months' => 0, 'from' => plan_label($a, $today), 'product' => 'Krak', 'bank' => 'Krak', 'krak' => true], 'text' => sprintf('Ask your employer to pay your salary into Krak by Faster Payments from %s — it has to come straight from an employer (or another third party) and be at least %s a month; a standing order from your own account does not count.', plan_label($a, $today), plan_money((float) ($cache['krakSalaryMin'] ?? 2500)))];
         $acts[] = ['text' => sprintf('Krak pays a percentage of each salary payment, set by your average balance over the last 30 days%s. Have the balance in place a month before the salary starts arriving.', $tier ? sprintf(' — at your assumed balance of %s that is %s%% (the %s tier), about %s a month', plan_money($ctx['krakBalance']), rtrim(rtrim(number_format((float) $tier['percent'], 2), '0'), '.'), $tier['name'] ?? '', plan_money($krak)) : '')];
         $cards[] = [
             'kind' => 'krak', 'day' => $a, 'dateLabel' => plan_label($a, $today),
@@ -1965,6 +2024,20 @@ function compute_plan_v2(array $user, array $cache, array $rows, array $rawOptio
         $cards[] = plan_bills_card($billsPick, $ctx, $cache, $lastFree + 1, $rows);
     }
     usort($cards, fn($a, $b) => $a['day'] <=> $b['day']);
+    $cards = plan_finalise_cards($cards);
+
+    // Money that has to be moved in to meet a pay-in test is a test of movement, not of
+    // savings: the front-end uses these figures to tell a low-income user it can circulate.
+    $maxMonthlyPayIn = 0.0;
+    $maxLumpPayIn = 0.0;
+    foreach ($chosen['events'] as $e) {
+        foreach ($e['cand']['offer']['requirements'] as $r) {
+            if ($r['type'] !== 'pay-in' || $r['source'] === 'employer') continue;
+            if ($r['period'] === 'each-month') $maxMonthlyPayIn = max($maxMonthlyPayIn, (float) ($r['amount'] ?? 0));
+            else $maxLumpPayIn = max($maxLumpPayIn, (float) ($r['amount'] ?? 0));
+        }
+    }
+    if ($billsPick) $maxMonthlyPayIn = max($maxMonthlyPayIn, (float) ($billsPick['minPayIn'] ?? 0));
 
     $switches = count($chosen['events']);
     $newUsed = $chosen['newUsed'];
@@ -2020,7 +2093,40 @@ function compute_plan_v2(array $user, array $cache, array $rows, array $rawOptio
         'total' => round($chosen['total']), 'bonus' => round($chosen['bonus']), 'cashback' => round($chosen['cashback']), 'krak' => round($chosen['krakValue']), 'krakSpend' => round($krakSpendValue),
         'fairerShare' => round($chosen['perkValue']), 'switches' => $switches, 'newDonors' => $newUsed, 'openings' => $opens, 'repoints' => $repoints,
         'horizonMonths' => $opt['horizonMonths'], 'today' => $today, 'needsIncome' => $needIncome,
+        'funds' => ['maxMonthlyPayIn' => $maxMonthlyPayIn, 'maxLumpPayIn' => $maxLumpPayIn, 'peak' => $peak],
     ];
+}
+
+// What the offers look like this week, boiled down to the numbers that move a plan, so a
+// returning visitor can be told exactly what changed since they built theirs. Only
+// structured fields are hashed (never the free-text conditions, which the weekly scan can
+// reword without anything having changed).
+function compute_offer_digest(array $cache): array {
+    $items = [];
+    foreach (($cache['offers'] ?? []) as $o) {
+        if ((int) ($o['schema'] ?? 1) < 2 || empty($o['payments'])) continue;
+        $total = 0.0;
+        foreach ($o['payments'] as $p) $total += $p['amount'] * $p['count'];
+        $reqs = [];
+        foreach (($o['requirements'] ?? []) as $r) $reqs[] = [$r['type'] ?? '', $r['amount'] ?? null, $r['count'] ?? null, $r['months'] ?? null, $r['period'] ?? '', $r['withinDays'] ?? null, $r['anchor'] ?? '', $r['source'] ?? ''];
+        $pays = [];
+        foreach ($o['payments'] as $p) $pays[] = [$p['amount'] ?? null, $p['count'] ?? null, $p['paidWithin'] ?? null];
+        $sw = $o['switch'] ?? [];
+        $terms = substr(md5(json_encode([$reqs, $pays, $sw['required'] ?? null, $sw['startBy'] ?? null, $sw['completeBy'] ?? null, $sw['withinDaysOfOpening'] ?? null, $sw['notFromGroups'] ?? [], $o['ddCount'] ?? 0, $o['minFunding'] ?? 0])), 0, 8);
+        $items[] = [
+            'id' => (string) ($o['id'] ?? plan_slug($o['bank'] . ' ' . $o['product'])), 'kind' => 'switch', 'bank' => (string) $o['bank'], 'product' => (string) $o['product'],
+            'amount' => round($total), 'deadline' => $sw['startBy'] ?? ($sw['completeBy'] ?? null), 'terms' => $terms, 'url' => (string) ($o['url'] ?? ''),
+        ];
+    }
+    foreach (($cache['cashbackDeals'] ?? []) as $d) {
+        $name = (string) ($d['name'] ?? '');
+        if ($name === '' || empty($d['amount'])) continue;
+        $prov = ($d['provider'] ?? '') === 'quidco' ? 'Quidco' : 'TopCashback';
+        $items[] = ['id' => 'cb:' . strtolower($prov) . ':' . plan_slug($name), 'kind' => 'cashback', 'bank' => '', 'product' => $name . ' (' . $prov . ')', 'amount' => round((float) $d['amount']), 'deadline' => null, 'terms' => '', 'url' => ''];
+    }
+    $tiers = [$cache['krakTiers'] ?? [], $cache['krakCardTiers'] ?? [], $cache['krakSalaryMin'] ?? null];
+    $items[] = ['id' => 'krak', 'kind' => 'krak', 'bank' => 'Krak', 'product' => 'Krak Salary Match and card cashback', 'amount' => 0, 'deadline' => null, 'terms' => substr(md5(json_encode($tiers)), 0, 8), 'url' => ''];
+    return ['asOf' => $cache['scrapedAt'] ?? null, 'items' => $items];
 }
 
 // The simple figure shown before anyone has told the page anything: the best
@@ -2464,6 +2570,7 @@ if ($action === 'me') {
         'plan' => compute_plan($recommendations, $user['accounts'] ?? []),
         'actionPlan' => compute_plan_v2($user, $cache, $recommendations, $options),
         'opportunity' => compute_opportunity($cache),
+        'offerDigest' => compute_offer_digest($cache),
         'annualPerks' => compute_annual_perks($user, $cache),
         'cassGrid' => compute_cass_grid($user, $cache),
         'cacheAsOf' => $cache['scrapedAt'] ?? null,

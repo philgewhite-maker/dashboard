@@ -6,11 +6,17 @@ import { renderReferrals } from './referrals.js';
 
 const tabs = [...document.querySelectorAll('.tab-btn')];
 const panels = [...document.querySelectorAll('.tab-panel')];
-tabs.forEach((btn) => {
-  btn.addEventListener('click', () => {
-    tabs.forEach((b) => b.classList.toggle('active', b === btn));
-    panels.forEach((p) => p.classList.toggle('active', p.id === `panel-${btn.dataset.tab}`));
-  });
+function showTab(name) {
+  tabs.forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
+  panels.forEach((p) => p.classList.toggle('active', p.id === `panel-${name}`));
+  window.scrollTo({ top: 0 });
+}
+tabs.forEach((btn) => btn.addEventListener('click', () => showTab(btn.dataset.tab)));
+// Any button marked data-goto-tab="<tab>" jumps there (the hand-off between the
+// accounts tab and the plan).
+document.addEventListener('click', (e) => {
+  const go = e.target.closest?.('[data-goto-tab]');
+  if (go) showTab(go.dataset.gotoTab);
 });
 
 // Only Recommendations/My accounts/CASS map need an invite token; Referral

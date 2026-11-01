@@ -55,7 +55,7 @@ export function renderAccounts(me) {
   });
 }
 
-function openAccountForm(account) {
+export function openAccountForm(account) {
   const dialog = document.getElementById('account-dialog');
   const form = document.getElementById('account-form');
   if (!dialog || !form) return;

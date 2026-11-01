@@ -14,7 +14,7 @@
 
 <div id="app">
   <nav class="tabs">
-    <button class="tab-btn active" data-tab="recommend">Recommendations</button>
+    <button class="tab-btn active" data-tab="recommend">My plan <span id="plan-tab-dot" class="tab-dot" hidden title="Your plan has an update waiting">●</span></button>
     <button class="tab-btn" data-tab="accounts">My accounts</button>
     <button class="tab-btn" data-tab="cass">CASS map</button>
     <button class="tab-btn" data-tab="referrals">Referral links</button>
@@ -23,12 +23,17 @@
   <section id="panel-recommend" class="tab-panel active">
     <h2>Your bank-switch plan</h2>
     <p id="rec-asof" class="muted"></p>
+    <div id="change-mount"></div>
+    <div id="next-mount"></div>
     <div id="opportunity"></div>
 
+    <details id="setup-box" class="setup-box" open>
+    <summary id="setup-summary">Get started: three quick steps</summary>
+    <ol id="stepper" class="stepper"></ol>
     <form id="profile-form" class="plan-form">
-      <h3>Make it yours <span class="muted">— all optional; the more you tell it, the better the plan</span></h3>
+      <section class="wiz" data-wiz="1">
       <fieldset>
-        <legend>Your income</legend>
+        <legend>Step 1 &mdash; Your income <span class="muted">(optional)</span></legend>
         <label>Take-home pay per year, after tax <input type="number" id="profile-salary" name="annualSalaryNet" min="0" step="100">
           <span class="muted">What actually lands in your account. Used for offers that need a monthly salary paid in, and for the Krak estimate.</span>
         </label>
@@ -41,15 +46,29 @@
         <label>Everyday spending you could put on a Krak card, per month <input type="number" id="profile-spend" name="monthlySpend" min="0" step="50">
           <span class="muted">Krak pays up to 1.5% cashback on card spending at the £10,000 tier, with no salary needed. Leave blank to leave it out.</span>
         </label>
+        <div id="income-note"></div>
         <p class="muted">These stay in this browser. They are sent with each request to work out your plan and are never stored on the server, so you will need to enter them again on another device.</p>
       </fieldset>
+      <div class="wiz-nav">
+        <button class="sync-btn" type="button" data-wiz-go="2">Continue &rarr;</button>
+        <span class="muted">Everything here is optional &mdash; leave it blank and carry on.</span>
+      </div>
+      </section>
+
+      <section class="wiz" data-wiz="2">
       <fieldset>
-        <legend>Your accounts</legend>
-        <p id="plan-accounts-summary" class="muted"></p>
-        <button class="sync-btn sm inline" type="button" id="plan-goto-accounts">Add or edit your accounts</button>
+        <legend>Step 2 &mdash; Your current accounts</legend>
+        <div id="wiz-accounts"></div>
       </fieldset>
+      <div class="wiz-nav">
+        <button class="sync-btn ghost" type="button" data-wiz-go="1">&larr; Back</button>
+        <button class="sync-btn" type="button" data-wiz-go="3">Continue &rarr;</button>
+      </div>
+      </section>
+
+      <section class="wiz" data-wiz="3">
       <fieldset>
-        <legend>Options</legend>
+        <legend>Step 3 &mdash; How you want it</legend>
         <label>Plan over
           <select id="opt-horizon">
             <option value="6">6 months</option>
@@ -64,9 +83,14 @@
         <label id="opt-primary-wrap" hidden>Which account is your primary one? <select id="opt-primary"></select></label>
         <label class="check"><input type="checkbox" id="opt-allow-new" checked> Allow opening extra free accounts to switch from, if it earns more</label>
       </fieldset>
-      <button class="sync-btn" id="show-plan-btn" type="submit">Show my customised plan</button>
-      <span id="profile-status" class="muted"></span>
+      <div class="wiz-nav">
+        <button class="sync-btn ghost" type="button" data-wiz-go="2" id="wiz-back-3">&larr; Back</button>
+        <button class="sync-btn" id="show-plan-btn" type="submit">Build my plan</button>
+        <span id="profile-status" class="muted"></span>
+      </div>
+      </section>
     </form>
+    </details>
 
     <div id="plan-mount"></div>
 
@@ -80,8 +104,10 @@
 
   <section id="panel-accounts" class="tab-panel">
     <h2>My accounts</h2>
+    <p class="muted">The current accounts you hold now. Your plan switches away from the ones you have not marked &ldquo;keep&rdquo;, and avoids banks you already have.</p>
     <button class="sync-btn sm inline" id="add-account-btn" type="button">Add account</button>
     <div id="accounts-list"></div>
+    <div id="accounts-next"></div>
   </section>
 
   <section id="panel-cass" class="tab-panel">
