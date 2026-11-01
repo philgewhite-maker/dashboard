@@ -9,7 +9,7 @@
 // fact, by hand or from the booking email. A hand-typed external event
 // is the exception -- its title carries the name, and that's read off it.
 import { data, queueSave, blankAirbnbListing, blankAirbnbReservation, blankAirbnbKey, blankAirbnbKeyAssignment, KEY_CUSTODIAN_TYPES } from '../state.js';
-import { escapeHtml, todayStr, dateStrAdd, uid, MISSING_KEY_LINK_HTML } from '../utils.js';
+import { escapeHtml, todayStr, dateStrAdd, uid, MISSING_KEY_LINK_HTML, pickChipHtml } from '../utils.js';
 import { owners, ownerNameFor, money } from './letting.js';
 import { gmailLink } from '../googlemail.js';
 import { parseIcsReservations } from '../icsparse.js';
@@ -558,6 +558,8 @@ q: 'Cleaner',
 data.airbnbCleanerEvents = items
 .map((e) => ({ date: e.start?.date || (e.start?.dateTime || '').slice(0, 10), name: parseCleanerEventName(e.summary) }))
 .filter((e) => e.date && e.name);
+// A name typed into Google Calendar by hand joins the pool too.
+data.airbnbCleanerEvents.forEach((e) => rememberCleaner(e.name));
 data.airbnbCleanerSyncStatus = { ok: true, syncedAt: new Date().toISOString() };
 } catch (err) {
 data.airbnbCleanerSyncStatus = { ok: false, syncedAt: new Date().toISOString(), error: err.message || String(err) };
@@ -616,14 +618,14 @@ const label = edge === 'checkin' ? 'Check-in clean' : 'Check-out clean';
 if (match) return `<span class="cal-badge cleaner-chip">${label}: ${formatAirbnbDate(match.date)} &middot; ${escapeHtml(match.name)}</span>`;
 const key = `${reservation.id}:${edge}`;
 if (!openCleanerForms.has(key)) {
-return `<span class="cal-badge cleaner-chip cleaner-chip-tbc" data-airbnb-cleaner-toggle="${key}" title="Click to add who's doing this clean and when">${label}: TBC</span>`;
+return `<span class="cal-badge cleaner-chip cleaner-chip-tbc" data-airbnb-cleaner-toggle="${key}" data-airbnb-cleaner-drop="${key}" title="Drop a cleaner here, or click to add who's doing this clean and when">${label}: TBC</span><span class="sync-status" data-airbnb-cleaner-status="${key}"></span>`;
 }
 // Prefilled to the stay's own boundary -- the common case -- but still
 // editable, since the actual clean can land a day either side of it.
 const prefillDate = edge === 'checkin' ? reservation.checkin : reservation.checkout;
 return `<span class="cal-badge cleaner-chip-form">
 ${label}:
-<input type="text" autocomplete="off" class="tag-add-input" placeholder="Who" data-airbnb-cleaner-name="${key}" style="max-width:90px;">
+<input type="text" autocomplete="off" list="airbnb-cleaner-names" class="tag-add-input" placeholder="Who" data-airbnb-cleaner-name="${key}" style="max-width:90px;">
 <input type="date" class="tag-add-input" data-airbnb-cleaner-date="${key}" value="${escapeHtml(prefillDate)}" style="max-width:130px;">
 <button class="sync-btn sm inline" type="button" data-airbnb-cleaner-add="${key}">Add</button>
 <span class="tag-x" data-airbnb-cleaner-cancel="${key}" title="Cancel">&times;</span>
@@ -650,6 +652,7 @@ statusEl.textContent = 'Adding…';
 try {
 await createEvent(calendarId, { title: `Cleaner - ${trimmedName}`, date });
 data.airbnbCleanerEvents = [...(data.airbnbCleanerEvents || []), { date, name: trimmedName }];
+rememberCleaner(trimmedName);
 openCleanerForms.delete(`${reservation.id}:${edge}`);
 queueSave();
 renderAirbnb();
@@ -768,6 +771,7 @@ import('./planner.js').then(({ renderPlanner }) => renderPlanner()).catch(() => 
 
 function renderAirbnb() {
 renderAirbnbAddBooking();
+renderAirbnbCleaners();
 const el = document.getElementById('airbnb-list');
 const countEl = document.getElementById('airbnb-count');
 if (!el) return;
@@ -844,6 +848,28 @@ addCleanerEvent(reservation, edge, nameInput.value, dateInput.value, statusEl);
 }
 });
 });
+// A cleaner chip dropped on a "TBC" clean books it for that edge's own date
+// (the stay's check-in or check-out day) -- the same calendar event, and the
+// same write gating, as typing the name into the inline form. A clean that
+// already has a cleaner isn't a drop target: a second event on the same edge
+// would just make the match ambiguous.
+el.querySelectorAll('[data-airbnb-cleaner-drop]').forEach((chip) => {
+chip.addEventListener('dragover', (e) => { e.preventDefault(); chip.classList.add('over'); });
+chip.addEventListener('dragleave', () => chip.classList.remove('over'));
+chip.addEventListener('drop', (e) => {
+e.preventDefault();
+chip.classList.remove('over');
+const payload = e.dataTransfer.getData('text/plain');
+if (!payload.startsWith(CLEANER_DRAG_PREFIX)) return;
+const key = chip.dataset.airbnbCleanerDrop;
+const sep = key.lastIndexOf(':');
+const reservation = data.airbnbReservations.find((r) => r.id === key.slice(0, sep));
+const edge = key.slice(sep + 1);
+const statusEl = el.querySelector(`[data-airbnb-cleaner-status="${key}"]`);
+if (!reservation || !statusEl) return;
+addCleanerEvent(reservation, edge, payload.slice(CLEANER_DRAG_PREFIX.length), edge === 'checkin' ? reservation.checkin : reservation.checkout, statusEl);
+});
+});
 bindKeyCards(el);
 el.querySelectorAll('[data-airbnb-key-drop]').forEach((zone) => {
 zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('over'); });
@@ -854,6 +880,78 @@ zone.classList.remove('over');
 const keyId = e.dataTransfer.getData('text/plain');
 assignKeyToReservation(keyId, zone.dataset.airbnbKeyDrop);
 });
+});
+}
+
+// ---- Cleaner pool -----------------------------------------------------------
+//
+// The cleaners booked so far, plus any added here, as chips to drag onto a
+// "TBC" clean -- the same holding-zone idea as the keyrings below, except a
+// cleaner is never "used up": the chip stays put and can be dropped on as
+// many cleans as needed. The pool is the shared pick-a-known-value widget
+// (pickChipHtml: one chip per known value plus a "+ add" box) so a new name
+// is typed once and offered from then on; names found on the calendar join it
+// automatically (syncCleanerEvents).
+const CLEANER_DRAG_PREFIX = 'cleaner:';
+
+function cleanerNames() {
+const seen = new Map();
+[...(data.airbnbCleaners || []), ...(data.airbnbCleanerEvents || []).map((e) => e.name)].forEach((n) => {
+const t = String(n || '').trim();
+if (t && !seen.has(t.toLowerCase())) seen.set(t.toLowerCase(), t);
+});
+return [...seen.values()].sort((a, b) => a.localeCompare(b));
+}
+
+// Returns whether the pool changed (caller saves).
+function rememberCleaner(name) {
+const t = String(name || '').trim();
+if (!t) return false;
+if (!Array.isArray(data.airbnbCleaners)) data.airbnbCleaners = [];
+if (data.airbnbCleaners.some((n) => n.toLowerCase() === t.toLowerCase())) return false;
+data.airbnbCleaners.push(t);
+return true;
+}
+
+function renderAirbnbCleaners() {
+const el = document.getElementById('airbnb-cleaners-list');
+if (!el) return;
+const names = cleanerNames();
+const onCalendar = new Set((data.airbnbCleanerEvents || []).map((e) => String(e.name || '').trim().toLowerCase()));
+// The datalist also feeds the inline "Who" box on each TBC clean.
+el.innerHTML = `<datalist id="airbnb-cleaner-names">${names.map((n) => `<option value="${escapeHtml(n)}"></option>`).join('')}</datalist>`
++ (names.length ? '' : '<span class="settings-note" style="margin:0 6px 0 0;">No cleaners yet — add one, then drag it onto a clean:</span>')
++ pickChipHtml('airbnbCleaner', '', names);
+el.querySelectorAll('.pick-chip').forEach((chip) => {
+const name = chip.dataset.pickValue;
+chip.draggable = true;
+chip.title = `Drag ${name} onto a "TBC" clean`;
+// A name that's on the calendar comes back on the next scan, so only
+// one added here by hand can be removed.
+if (!onCalendar.has(name.toLowerCase()) && (data.airbnbCleaners || []).some((n) => n.toLowerCase() === name.toLowerCase())) {
+chip.insertAdjacentHTML('beforeend', ' <span class="tag-x" data-cleaner-remove title="Remove from this list">&times;</span>');
+}
+chip.addEventListener('dragstart', (e) => {
+e.dataTransfer.setData('text/plain', `${CLEANER_DRAG_PREFIX}${name}`);
+e.dataTransfer.effectAllowed = 'copy';
+chip.classList.add('dragging');
+keysDragActive = true;
+});
+chip.addEventListener('dragend', () => { chip.classList.remove('dragging'); keysDragActive = false; });
+const x = chip.querySelector('[data-cleaner-remove]');
+if (x) x.addEventListener('click', (e) => {
+e.stopPropagation();
+data.airbnbCleaners = data.airbnbCleaners.filter((n) => n.toLowerCase() !== name.toLowerCase());
+queueSave();
+renderAirbnbCleaners();
+});
+});
+const add = el.querySelector('[data-pick-add="airbnbCleaner"]');
+if (add) add.addEventListener('change', () => {
+const added = rememberCleaner(add.value);
+add.value = '';
+if (added) queueSave();
+renderAirbnb();
 });
 }
 
@@ -1055,6 +1153,7 @@ bindKeyCards(el);
 
 function initAirbnbKeys() {
 renderAirbnbKeys();
+renderAirbnbCleaners();
 // Bound once here, not inside renderAirbnb()/bindKeyCards (which re-run
 // every render and would stack duplicate listeners) -- same "init once"
 // placement planner.js uses for its own equivalent listener.

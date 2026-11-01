@@ -2631,6 +2631,11 @@ border-color:var(--line);background:var(--paper);color:var(--ink);outline:none;
 }
 .key-drop-zone{display:flex;flex-wrap:wrap;gap:6px;min-height:24px;border-radius:7px;padding:2px;}
 .key-drop-zone.over{background:var(--teal-bg);outline:1px dashed var(--teal);}
+.airbnb-cleaners{display:flex;flex-wrap:wrap;gap:6px;align-items:center;}
+.airbnb-cleaners .pick-chip{cursor:grab;}
+.airbnb-cleaners .pick-chip.dragging{opacity:.45;}
+.airbnb-cleaners .pick-chip .tag-x{margin-left:2px;}
+.cleaner-chip-tbc.over{background:var(--teal-bg);outline:1px dashed var(--teal);}
 .key-pending{font-size:11px;font-style:italic;color:var(--muted);}
 .planner-grid{
 display:grid;
