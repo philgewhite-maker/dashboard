@@ -62,6 +62,16 @@ export function setFlag(name, value) {
   save();
 }
 
+// The answer to "did you start this?" for a card: 'skipped', 'started' (they said they
+// had, and will tick what is done), or 'later:<date>' to ask again tomorrow.
+export function getCatchup(key) { return (getFlag('catchup', {}) || {})[key] || ''; }
+export function setCatchup(key, value) {
+  const m = { ...(getFlag('catchup', {}) || {}) };
+  if (value) m[key] = value; else delete m[key];
+  setFlag('catchup', m);
+}
+export const isSkipped = (key) => getCatchup(key) === 'skipped';
+
 // A short fingerprint of everything the person controls (accounts, figures, options),
 // so the page can tell "you changed your details" from "the offers moved".
 export function fingerprint(obj) {

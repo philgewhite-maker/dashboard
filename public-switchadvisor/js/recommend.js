@@ -1,9 +1,9 @@
 import { getLiveProfile, setLiveProfile, getOptions, setOptions, planRequested, setPlanRequested } from './api.js';
 import { escapeHtml, money } from './utils.js';
 import { REFERRALS, isSetUp } from './config.js';
-import { getAccepted, setAccepted, getFlag, setFlag, patchStep, fingerprint } from './progress.js';
-import { stepsHtml, bindSteps, cardProgress, nextAction, revealTarget, setStepContext } from './steps.js';
-import { diffDigest, changeBannerHtml, acceptedFrom, allCards, overallProgress, normalisePlan } from './changes.js';
+import { getAccepted, setAccepted, getFlag, setFlag, patchStep, fingerprint, getCatchup, setCatchup, isSkipped } from './progress.js';
+import { stepsHtml, bindSteps, cardProgress, cardStarted, nextAction, revealTarget, setStepContext } from './steps.js';
+import { diffDigest, changeBannerHtml, acceptedFrom, allCards, activeCards, overallProgress, normalisePlan } from './changes.js';
 import { renderSetup, initSetup, incomeNoteHtml, incomeNoteRefresh, incomeState } from './setup.js';
 
 const PRIORITY_LABEL = { high: 'High', medium: 'Medium', low: 'Low', blocked: 'Needs another account', alt: 'Alternative', 'n/a': 'Not eligible' };
@@ -117,6 +117,11 @@ function dueInfo(card, planToday) {
 }
 
 function cardHtml(c, n, planToday) {
+  if (isSkipped(c.key)) {
+    return `<article class="plan-card plan-skipped" id="c-${escapeHtml(c.key)}"><header><span class="plan-n">–</span>
+      <div class="plan-title"><span class="plan-date">${escapeHtml(c.dateLabel)} <span class="tag-chip">Skipped</span></span><h3>${escapeHtml(c.title)}</h3></div>
+      <button type="button" class="linklike" data-unskip="${escapeHtml(c.key)}">Undo</button></header></article>`;
+  }
   const prog = cardProgress(c);
   const due = dueInfo(c, planToday);
   const facts = [];
@@ -126,7 +131,8 @@ function cardHtml(c, n, planToday) {
   if (c.salary) facts.push(`salary here ${escapeHtml(c.salary.from)} → ${escapeHtml(c.salary.to)}`);
   const status = prog.complete ? '<span class="tag-chip pri-high">✓ Done</span>'
     : c.carried ? '<span class="tag-chip pri-low">Under way</span>'
-      : `<span class="tag-chip due ${due.cls}">${escapeHtml(due.label)}</span>`;
+      : cardStarted(c) ? '<span class="tag-chip pri-medium">Started</span>'
+        : `<span class="tag-chip due ${due.cls}">${escapeHtml(due.label)}</span>`;
   return `<article class="plan-card plan-${escapeHtml(c.kind)} ${prog.complete ? 'plan-complete' : ''}" id="c-${escapeHtml(c.key)}">
     <header>
       <span class="plan-n">${prog.complete ? '✓' : n}</span>
@@ -183,8 +189,33 @@ function customPlanHtml(accepted) {
 }
 
 // The one thing to do next, with the way to do it right there.
+// "Did you start this?" for the first card whose date has passed with nothing ticked in it.
+// Ticking any step marks a card as started, so this only asks about the ones left untouched.
+function catchUpHtml(accepted) {
+  const today = new Date().toISOString().slice(0, 10);
+  for (const c of activeCards(accepted)) {
+    if (c.carried || cardProgress(c).complete || cardStarted(c)) continue;
+    const st = getCatchup(c.key);
+    if (st === 'started' || st === `later:${today}`) continue;
+    const due = dueInfo(c, accepted.plan.today);
+    if (due.days >= 0) return ''; // cards run in date order: nothing after this one is due either
+    const k = escapeHtml(c.key);
+    return `<div class="catchup">
+      <strong>Did you start “${escapeHtml(c.title)}”?</strong>
+      <p class="muted">It was due ${-due.days} day${due.days === -1 ? '' : 's'} ago and nothing in it is ticked yet. If you did it already, say so and the plan moves on to what is next.</p>
+      <div class="next-actions">
+        <button type="button" class="sync-btn" data-catch="all" data-key="${k}">Yes, it is all done</button>
+        <button type="button" class="sync-btn ghost" data-catch="some" data-key="${k}">I started it: let me tick what I have done</button>
+        <button type="button" class="sync-btn ghost" data-catch="later" data-key="${k}">Not yet</button>
+        <button type="button" class="sync-btn ghost" data-catch="skip" data-key="${k}">Skip this one</button>
+      </div>
+    </div>`;
+  }
+  return '';
+}
+
 function nextStepHtml(accepted) {
-  const cards = allCards(accepted);
+  const cards = activeCards(accepted);
   if (!cards.length) return '';
   const next = nextAction(cards);
   if (!next) {
@@ -303,7 +334,7 @@ function renderPlanUi() {
     change.innerHTML = pending ? changeBannerHtml({ accepted, fresh: me.actionPlan, offerChanges: pending.offerChanges, inputsChanged: pending.inputsChanged }) : '';
   }
   const next = document.getElementById('next-mount');
-  if (next) next.innerHTML = accepted ? nextStepHtml(accepted) : '';
+  if (next) next.innerHTML = accepted ? catchUpHtml(accepted) + nextStepHtml(accepted) : '';
 
   const mount = document.getElementById('plan-mount');
   if (mount) {
@@ -394,7 +425,7 @@ export function initProfileForm(onSaved) {
     const tick = e.target.closest('[data-next-tick]');
     if (tick) { patchStep(tick.dataset.nextTick, { done: true, at: new Date().toISOString().slice(0, 10) }); renderPlanUi(); return; }
     if (e.target.closest('[data-next-show]')) {
-      const next = nextAction(allCards(getAccepted()));
+      const next = nextAction(activeCards(getAccepted()));
       if (next) revealTarget(next.targetId);
       return;
     }
@@ -410,6 +441,28 @@ export function initProfileForm(onSaved) {
         setFlag('dismissed', `${digestKey(lastMe.offerDigest)}:${inputSignature(lastMe)}`);
         renderPlanUi();
       }
+      return;
+    }
+    const unskip = e.target.closest('[data-unskip]');
+    if (unskip) { setCatchup(unskip.dataset.unskip, ''); renderPlanUi(); return; }
+    const catchBtn = e.target.closest('[data-catch]');
+    if (catchBtn) {
+      const key = catchBtn.dataset.key;
+      const card = allCards(getAccepted()).find((c) => c.key === key);
+      const choice = catchBtn.dataset.catch;
+      if (choice === 'all' && card) {
+        const at = new Date().toISOString().slice(0, 10);
+        (card.actions || []).forEach((a) => patchStep(a.id, { done: true, at }));
+      } else if (choice === 'some') {
+        setCatchup(key, 'started');
+        openState.set(`card:${key}`, true);
+      } else if (choice === 'later') {
+        setCatchup(key, `later:${new Date().toISOString().slice(0, 10)}`);
+      } else if (choice === 'skip') {
+        setCatchup(key, 'skipped');
+      }
+      renderPlanUi();
+      if (choice === 'some') revealTarget(`c-${key}`);
       return;
     }
     const stop = e.target.closest('[data-stop-card]');

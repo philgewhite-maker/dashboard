@@ -4,6 +4,7 @@
 // the in-progress work across when they choose to update.
 import { escapeHtml as esc, money } from './utils.js';
 import { cardProgress, cardStarted } from './steps.js';
+import { isSkipped } from './progress.js';
 
 // ---- Offers -----------------------------------------------------------------
 // Compares two offerDigest objects from the server. An entry is "yours" when the plan
@@ -51,7 +52,12 @@ export function diffPlans(oldPlan, newPlan) {
 
 // Cards the person has begun but not finished (counting ones carried over earlier).
 export function startedCards(accepted) {
-  return allCards(accepted).filter(cardStarted);
+  return activeCards(accepted).filter(cardStarted);
+}
+
+// The cards still being followed: skipped ones stay on screen but no longer count.
+export function activeCards(accepted) {
+  return allCards(accepted).filter((c) => !isSkipped(c.key));
 }
 
 export function allCards(accepted) {
@@ -132,7 +138,7 @@ export function changeBannerHtml({ accepted, fresh, offerChanges, inputsChanged 
 export function overallProgress(accepted) {
   let done = 0;
   let total = 0;
-  allCards(accepted).forEach((c) => { const p = cardProgress(c); done += p.done; total += p.total; });
+  activeCards(accepted).forEach((c) => { const p = cardProgress(c); done += p.done; total += p.total; });
   return { done, total };
 }
 
