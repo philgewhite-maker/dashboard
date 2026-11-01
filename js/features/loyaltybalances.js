@@ -171,7 +171,9 @@ membershipNumber: '', tier: '', date: '',
 metrics: [{ label: 'eVoucher issued', balance: Number(issued[2].replace(/,/g, '')), unit: '£', expiryDate: parseDMonYyyy(issued[3], issued[4], issued[5]), reference: issued[1] }],
 };
 }
-const used = text.match(/eVoucher:\s*([\w-]+)[\s\S]{0,60}?has been used/i);
+// \s+ between the words: BA hard-wraps its plain text at ~60 columns, and the
+// 1 Nov 2026 "used" email broke the line between "has been" and "used".
+const used = text.match(/eVoucher:\s*([\w-]+)[\s\S]{0,60}?has\s+been\s+used/i);
 if (used) {
 return { membershipNumber: '', tier: '', date: '', metrics: [{ label: 'eVoucher used', balance: null, unit: '£', expiryDate: '', reference: used[1] }] };
 }
