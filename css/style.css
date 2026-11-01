@@ -1315,6 +1315,7 @@ padding:2px 8px;
 font-size:11px;
 }
 .tag-chip .tag-x{cursor:pointer;font-weight:700;}
+.tag-chip.loyalty-member-id{font-family:'IBM Plex Mono',monospace;letter-spacing:.02em;}
 /* A price sitting inline among .tag-chip pills (e.g. a found-item row)
    needs to match their own font-size -- a bare <strong> inherits the
    ambient body size instead, which reads oversized and sits off the

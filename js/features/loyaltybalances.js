@@ -423,6 +423,23 @@ function isProgramDue(program, force) {
 return !!force || !program.lastCheckedAt || daysSince(program.lastCheckedAt) >= CADENCE_DAYS;
 }
 
+// Fallback for every extractor that doesn't read a membership number itself:
+// looks for a labelled "Membership number: ...", "Member ID: ..." or
+// "Loyalty number: ..." in the plain text, then in the HTML with tags
+// removed (some senders' text/plain part is just a "view in browser" link).
+// Masked values ("••••1234", "xxxx") and anything without a digit are
+// rejected, so marketing copy that merely mentions the label can't be
+// recorded as an ID.
+const MEMBER_ID_RE = /\b(?:member(?:ship)?|loyalty)\s*(?:number|no\.?|id|#)\s*[:#-]?\s*(\d{4}(?: \d{4}){2,4}|\d{5,20}|[A-Z]{1,4}\d[A-Z0-9]{4,18})(?![A-Za-z0-9])/i;
+function findMembershipId(bodyText, bodyHtml) {
+const strippedHtml = String(bodyHtml || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ');
+for (const text of [String(bodyText || ''), strippedHtml]) {
+const m = text.match(MEMBER_ID_RE);
+if (m && /\d/.test(m[1])) return m[1].trim();
+}
+return '';
+}
+
 function dateFromHeader(dateHeader) {
 const d = new Date(dateHeader);
 return Number.isNaN(d.getTime()) ? todayStr() : d.toISOString().slice(0, 10);
@@ -536,6 +553,7 @@ if (result || usedAi) seen.add(msg.id);
 
 if (!result) { unmatched++; continue; }
 matched++;
+if (!result.membershipNumber) result.membershipNumber = findMembershipId(detail.bodyText, detail.bodyHtml);
 if (method) program.extractionMethod = method;
 if (result.membershipNumber && !program.membershipNumber) program.membershipNumber = result.membershipNumber;
 const date = result.date || dateFromHeader(detail.date);
@@ -802,6 +820,7 @@ ${logoBadgeHtml(program.logoUrl, programInitials, 'plum')}
 <strong>${escapeHtml(program.provider || program.name)}</strong>
 ${program.what ? `<span class="tag-chip">${escapeHtml(program.what)}</span>` : ''}
 ${tier ? `<span class="tag-chip tag-chip-blue">${escapeHtml(tier)}</span>` : ''}
+${program.membershipNumber ? `<span class="tag-chip loyalty-member-id" title="Membership number">${escapeHtml(program.membershipNumber)}</span>` : ''}
 ${methodBadgeHtml(program)}
 ${!program.active ? '<span class="candidate-tag">inactive</span>' : ''}
 </div>
