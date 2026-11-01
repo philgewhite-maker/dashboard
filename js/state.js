@@ -1192,6 +1192,10 @@ voucherId: '',
 // ("Cashback confirmed", classified/reviewed once) while still
 // showing which real transaction each one actually was.
 detail: '',
+// A caveat to carry onto the voucher this reading becomes (e.g. "expiry
+// is estimated -- check the exact date"), shown with the reading and
+// copied into the voucher's notes. Never used for grouping/matching.
+note: '',
 ...fields,
 };
 }

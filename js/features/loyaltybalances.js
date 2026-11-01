@@ -46,21 +46,60 @@ const CADENCE_DAYS = 28;
 // LABEL, but the next tile's value runs on with no separator -- so
 // "750" (tier points) is stuck to the end of the "AVIOS" label, and
 // "5,864" (lifetime tier points) to the end of "TIER POINTS".
-function extractBritishAirways(bodyText) {
+//
+// The same sender also mails the annual Barclays Avios Rewards "cabin
+// upgrade voucher" (confirmed live, 16 Oct 2026): the email carries no
+// voucher number, value or expiry at all -- it only says the voucher is in
+// "Member Vouchers" on ba.com and "available to use for up to two years" --
+// so the expiry is inferred as two years from the email's date and flagged
+// as an estimate (see `note`). It also has the usual balance block below the
+// text, so both readings come out of the one message.
+function extractBritishAirways(bodyText, subject) {
 const text = String(bodyText || '');
 const main = text.match(/([\d,]+)\s*AVIOS([\d,]+)\s*TIER POINTS([\d,]+)\s*LIFETIME TIER POINTS/i);
-if (!main) return null;
+const upgrade = /reward you with your cabin upgrade voucher/i.test(text) || /annual cabin upgrade/i.test(String(subject || ''));
+// The Amex "Companion Voucher is here" email (30 Oct 2026) is the same
+// shape: no voucher number, value or expiry, just the news that it's in
+// the member's BA account -- so, as with the cabin upgrade, the expiry is
+// inferred as two years from the email's date (the user's stated validity)
+// and flagged as an estimate.
+const companion = /you.ve earned a Companion Voucher/i.test(text) || /Companion Voucher is here/i.test(String(subject || ''));
+if (!main && !upgrade && !companion) return null;
 const memberMatch = text.match(/([A-Z][A-Z ]{2,30}?)\s*MEMBERSHIP\s+(\d{5,12})(?!\d)/);
+const metrics = [];
+if (main) {
+metrics.push(
+{ label: 'Avios', balance: Number(main[1].replace(/,/g, '')), unit: 'Avios' },
+{ label: 'Tier points', balance: Number(main[2].replace(/,/g, '')), unit: 'points' },
+{ label: 'Lifetime tier points', balance: Number(main[3].replace(/,/g, '')), unit: 'points' },
+);
+}
+if (upgrade) {
+metrics.push({
+label: 'Cabin upgrade voucher', balance: null, unit: '', kind: 'voucher', expiryYears: 2,
+detail: 'Barclays Avios Rewards anniversary',
+note: 'Expiry is estimated as 2 years from issue — check the exact date under Member Vouchers on ba.com.',
+});
+}
+if (companion) {
+const card = text.match(/American Express\s*(?:\(R\)|®)?\s*(Premium Plus\s*)?Card/i);
+metrics.push({
+label: 'Companion voucher', balance: null, unit: '', kind: 'voucher', expiryYears: 2,
+detail: `Amex ${card && card[1] ? 'Premium Plus ' : ''}Card`.replace('Card', 'card'),
+note: 'Expiry is estimated as 2 years from issue — check the exact date under Member Vouchers on ba.com.',
+});
+}
 return {
 membershipNumber: memberMatch ? memberMatch[2] : '',
 tier: memberMatch ? memberMatch[1].trim() : '',
 date: '',
-metrics: [
-{ label: 'Avios', balance: Number(main[1].replace(/,/g, '')), unit: 'Avios' },
-{ label: 'Tier points', balance: Number(main[2].replace(/,/g, '')), unit: 'points' },
-{ label: 'Lifetime tier points', balance: Number(main[3].replace(/,/g, '')), unit: 'points' },
-],
+metrics,
 };
+}
+
+function addYearsToDate(isoDate, years) {
+const m = String(isoDate || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+return m ? `${Number(m[1]) + years}-${m[2]}-${m[3]}` : '';
 }
 
 // Real example: "...| 46,089 points | Platinum Elite | | | XXXXX5970
@@ -571,10 +610,13 @@ if (alreadyRecorded) return;
 newRows.push(blankLoyaltyBalance({
 programId: program.id, label: metric.label, date,
 balance: metric.balance, unit: metric.unit || '',
-tier: result.tier || '', expiryDate: metric.expiryDate || '',
+tier: result.tier || '', expiryDate: metric.expiryDate || (metric.expiryYears ? addYearsToDate(date, metric.expiryYears) : ''),
 sourceMessageId: msg.id, reference: metric.reference || '',
-detail: metric.detail || '',
+detail: metric.detail || '', note: metric.note || '',
 }));
+// A label the extractor already knows is a voucher event needs no
+// balance-or-voucher question in the review queue.
+if (metric.kind && labelKindFor(program.id, metric.label) === undefined) data.loyaltyLabelKinds.push({ programId: program.id, label: metric.label, kind: metric.kind });
 });
 }
 
@@ -804,7 +846,7 @@ return `<div class="loyalty-reading" data-loyalty-reading="${escapeHtml(r.id)}">
 ${r.unit && r.unit !== '£' ? `<span class="loyalty-reading-unit">${escapeHtml(r.unit)}</span>` : ''}
 </div>
 </div>
-<div class="loyalty-reading-notes">${escapeHtml(r.detail || (r.sourceMessageId === 'manual' ? 'Entered by hand' : ''))}</div>
+<div class="loyalty-reading-notes">${escapeHtml([r.detail || (r.sourceMessageId === 'manual' ? 'Entered by hand' : ''), r.note].filter(Boolean).join(' — '))}</div>
 <div class="loyalty-reading-date">
 <span class="loyalty-reading-asof">as of ${escapeHtml(r.date)}</span>
 ${r.expiryDate ? `<span class="expiry-badge">expires ${escapeHtml(r.expiryDate)}</span>` : ''}

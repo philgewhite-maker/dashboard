@@ -223,6 +223,7 @@ if (value) parts.push(value);
 parts.push(`on ${reading.date}`);
 if (reading.expiryDate) parts.push(`expires ${reading.expiryDate}`);
 if (reading.reference) parts.push(`ref ${reading.reference}`);
+if (reading.note) parts.push(reading.note);
 return parts.join(' — ');
 }
 
@@ -342,7 +343,7 @@ const targetId = decision === 'pick' ? pickedId : decision.startsWith('update:')
 if (targetId) { applyUpdateToVoucher(reading, program, targetId); return; }
 // decision === 'new' -- provider is the real program name (exact, no
 // matching needed) and logoUrl comes free from it too, when seeded.
-const voucher = blankVoucher({ name: voucherNameFor(program, reading), value: readingValueText(reading), expiry: reading.expiryDate || '', notes: `From ${program.name} scan, ${reading.date}.`, reference: reading.reference || '', sourceLoyaltyReadingIds: [reading.id], provider: program.provider || program.name, what: program.what || '', logoUrl: program.logoUrl || matchBrandLogo(program.provider || program.name) || '' });
+const voucher = blankVoucher({ name: voucherNameFor(program, reading), value: readingValueText(reading), expiry: reading.expiryDate || '', notes: `From ${program.name} scan, ${reading.date}.${reading.note ? ` ${reading.note}` : ''}`, reference: reading.reference || '', sourceLoyaltyReadingIds: [reading.id], provider: program.provider || program.name, what: program.what || '', logoUrl: program.logoUrl || matchBrandLogo(program.provider || program.name) || '' });
 data.vouchers.push(voucher);
 markVoucherLinked(reading.id, voucher.id);
 }
