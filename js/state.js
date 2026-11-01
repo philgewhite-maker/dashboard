@@ -4330,8 +4330,10 @@ out.push(`Mentioned interests (${conn.interests.slice(0, 3).join(', ')}) — wor
 return out;
 }
 
-async function exportBackup() {
-const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+// `snapshotText` is a JSON copy captured earlier (js/backupgate.js holds one
+// while the user decides); without it the live document is written.
+async function exportBackup(snapshotText) {
+const blob = new Blob([snapshotText || JSON.stringify(data, null, 2)], { type: 'application/json' });
 const url = URL.createObjectURL(blob);
 const a = document.createElement('a');
 a.href = url;

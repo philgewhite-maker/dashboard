@@ -248,6 +248,13 @@ tmdbTimer = setTimeout(() => setLocalSetting('tmdbApiKey', tmdbInput.value.trim(
 });
 }
 
+const backupSelect = document.getElementById('backup-downloads-select');
+if (backupSelect) {
+const { backupPolicy } = await import('../backupgate.js');
+backupSelect.value = await backupPolicy();
+backupSelect.addEventListener('change', () => setLocalSetting('backupDownloads', backupSelect.value));
+}
+
 const exportBtn = document.getElementById('export-btn');
 let exportHandledByPointer = false;
 exportBtn.addEventListener('pointerdown', (e) => {

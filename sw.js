@@ -57,6 +57,7 @@ const CORE_ASSETS = [
 './js/sync/collections.js',
 './js/diagnostics.js',
 './js/settingsvault.js',
+'./js/backupgate.js',
 './js/sync/recordsync.js',
 './js/googlecalendar.js',
 './js/googlecontacts.js',

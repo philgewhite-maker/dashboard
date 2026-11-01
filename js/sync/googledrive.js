@@ -6,7 +6,8 @@
 //
 // Sync stays explicit (Push / Pull buttons), not automatic — see
 // README.md for why, after the incident that prompted this whole rewrite.
-import { data, exportBackup, replaceData, setLocalSetting } from '../state.js';
+import { data, replaceData, setLocalSetting } from '../state.js';
+import { offerBackup } from '../backupgate.js';
 import { photoGet, photoPut } from '../db.js';
 import { googleFetch } from './googleauth.js';
 
@@ -115,8 +116,8 @@ await setLocalSetting('lastPushedAt', new Date().toISOString());
 
 async function pullFromGoogleDrive(onProgress) {
 const progress = onProgress || (() => {});
-progress('Backing up your current local data first…');
-await exportBackup();
+progress('Keeping a copy of your current local data first…');
+await offerBackup('Pulling from Google Drive will replace the data on this device.');
 
 progress('Downloading data…');
 const res = await getFileContent(DATA_FILENAME);

@@ -7,7 +7,8 @@
 // never silently erase a save made on another device. When that happens the
 // newer document wins and a backup of what this device had is downloaded
 // first, matching what "Pull from Google Drive" already does.
-import { data, replaceData, exportBackup, setLocalChangeHandler, hasPendingSave, flushSave } from '../state.js';
+import { data, replaceData, setLocalChangeHandler, hasPendingSave, flushSave } from '../state.js';
+import { offerBackup, backupOutcomePhrase } from '../backupgate.js';
 import { kvGet, kvSet } from '../db.js';
 import { mergeDocuments } from './merge.js';
 import { renderAll } from '../render-all.js';
@@ -102,7 +103,8 @@ import('../settingsvault.js').then((m) => m.reconcileSyncedSettings()).catch(() 
 // and re-renders. `fromRemote` stops this write from being treated as a local
 // edit and bounced straight back up.
 async function adoptRemote(remote, { backupFirst }) {
-if (backupFirst) await exportBackup();
+// Whether a file reaches Downloads is this device's choice (js/backupgate.js).
+const backup = backupFirst ? await offerBackup("This device's data is about to be replaced by the server's copy.") : null;
 // Collections read from the record store (js/sync/recordsync.js) are not
 // the whole document's to overwrite: this device's copy came from the store.
 const kept = {};
@@ -113,6 +115,7 @@ await setKnownRev(remote.rev);
 await saveBase(JSON.stringify(data));
 renderAll();
 settingsAfterRemote();
+return backup;
 }
 
 // This device has edits the server hasn't seen and the server moved on.
@@ -126,8 +129,8 @@ const baseText = await kvGet(BASE_KEY);
 const ours = JSON.parse(JSON.stringify(data));
 if (!baseText) {
 syncLog('no baseline, took the server copy', `rev ${remote.rev}`);
-await adoptRemote(remote, { backupFirst: true });
-return { merged: false, conflicts: [] };
+const backup = await adoptRemote(remote, { backupFirst: true });
+return { merged: false, conflicts: [], backup };
 }
 await replaceData(remote.data, { fromRemote: true });
 const theirs = JSON.parse(JSON.stringify(data));
@@ -136,17 +139,18 @@ const { merged, conflicts } = mergeDocuments(JSON.parse(baseText), ours, theirs,
 // Read from the record store, so this device's copy stands (mergeDocuments
 // would otherwise take the server document's older one).
 fromStore.forEach((k) => { if (k in ours) merged[k] = ours[k]; });
+let backup = null;
 if (conflicts.length) {
-// Same field changed on both sides: keep a file of this device's version.
-await replaceData(ours, { fromRemote: true });
-await exportBackup();
+// Same field changed on both sides: this device's version is offered as a
+// file (or not, per this device's setting) before the server's value wins.
+backup = await offerBackup(`Two devices changed the same thing (${conflicts.slice(0, 3).join(', ')}) and the other device's version was kept.`, ours);
 }
 await replaceData(merged, { fromRemote: true });
 await setKnownRev(remote.rev);
 renderAll();
 settingsAfterRemote();
 syncLog(conflicts.length ? 'merged, server value kept for' : 'merged cleanly', conflicts.length ? conflicts.slice(0, 8).join(', ') : `rev ${remote.rev}`);
-return { merged: true, conflicts };
+return { merged: true, conflicts, backup };
 }
 
 async function pull({ announce } = {}) {
@@ -180,10 +184,10 @@ pushTimer = null;
 busy = false;
 if ((await push()) !== 'skipped') return;
 }
-await adoptRemote(remote, { backupFirst: firstAdoption });
+const backup = await adoptRemote(remote, { backupFirst: firstAdoption });
 if (!firstAdoption) syncLog('adopted newer server copy', `rev ${remote.rev}`);
 setStatus(firstAdoption
-? 'Loaded from server — previous data on this device saved to Downloads'
+? `Loaded from server — previous data on this device: ${backupOutcomePhrase(backup).replace(/^yours /, '')}`
 : `Updated from server ${new Date().toLocaleTimeString()}`, 'ok');
 } else {
 // Same revision as the server: its copy IS the last synced state, so it
@@ -244,9 +248,9 @@ if (err instanceof ConflictError) {
 // is then pushed again (a couple of tries, in case it moves again).
 const result = await mergeWithRemote(err.remote);
 if (!result.merged) {
-setStatus('Another device had newer data — took theirs, saved yours to Downloads', 'error');
+setStatus(`Another device had newer data — took theirs, ${backupOutcomePhrase(result.backup)}`, 'error');
 } else if (result.conflicts.length) {
-setStatus('Merged with another device — one field changed on both sides, theirs kept, yours saved to Downloads', 'error');
+setStatus(`Merged with another device — one field changed on both sides, theirs kept, ${backupOutcomePhrase(result.backup)}`, 'error');
 } else {
 setStatus('Merged with changes from another device', 'ok');
 }

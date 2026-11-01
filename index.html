@@ -3291,6 +3291,14 @@ Photos added before task attachments existed live only on the device that added 
 <input type="file" id="import-backup-input" accept="application/json" style="display:none;">
 <span class="settings-note" id="backup-status" style="margin:0;"></span>
 </div>
+<div class="settings-block" style="margin-top:10px;">
+<label class="settings-note" for="backup-downloads-select" style="display:block;margin:0 0 4px;">When sync is about to replace this device's data (a first load, a conflict, a Google Drive pull), a copy of this device's version is&hellip; <em>(this device only)</em></label>
+<select id="backup-downloads-select">
+<option value="ask">Offered, with a prompt before anything downloads</option>
+<option value="never">Never downloaded (use on a locked-down machine)</option>
+<option value="always">Downloaded automatically</option>
+</select>
+</div>
 </div>
 </details>
 </details>
