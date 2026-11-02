@@ -27,7 +27,48 @@
 --blue-bg:#E5ECF5;
 --pink:#C15C86;
 --pink-bg:#F6E8EE;
+color-scheme:light;
 }
+/* Dark mode. Only the tokens change -- everything else already reads them.
+   Accents stay mid-tone rather than pastel so white button text on a filled
+   accent (the common pattern here) still reads, and the *-bg tints become
+   deep translucent-looking washes of the same hue. Applies when the device
+   prefers dark and nothing was chosen (:not([data-theme])), or when
+   "Dark" was chosen in the header toggle. js/theme.js sets data-theme. */
+@media (prefers-color-scheme: dark){
+:root:not([data-theme="light"]):not([data-theme="dark"]){
+--paper:#161512;--card:#201F1B;--ink:#EDEAE2;--muted:#A19C8F;--line:#36332C;
+--sage:#6B957D;--sage-bg:#253229;
+--amber:#CB9550;--amber-bg:#392E1D;
+--slate:#7790BA;--slate-bg:#232B3A;
+--red:#D56A57;--red-bg:#3A2320;
+--rose:#CF7596;--rose-bg:#39252F;
+--teal:#4FA3B6;--teal-bg:#1E3137;
+--plum:#9A7FB2;--plum-bg:#2E2637;
+--blue:#6291CB;--blue-bg:#1E2C40;
+--pink:#D678A0;--pink-bg:#392530;
+color-scheme:dark;
+}
+}
+:root[data-theme="dark"]{
+--paper:#161512;--card:#201F1B;--ink:#EDEAE2;--muted:#A19C8F;--line:#36332C;
+--sage:#6B957D;--sage-bg:#253229;
+--amber:#CB9550;--amber-bg:#392E1D;
+--slate:#7790BA;--slate-bg:#232B3A;
+--red:#D56A57;--red-bg:#3A2320;
+--rose:#CF7596;--rose-bg:#39252F;
+--teal:#4FA3B6;--teal-bg:#1E3137;
+--plum:#9A7FB2;--plum-bg:#2E2637;
+--blue:#6291CB;--blue-bg:#1E2C40;
+--pink:#D678A0;--pink-bg:#392530;
+color-scheme:dark;
+}
+.theme-toggle{
+font-family:'Inter',sans-serif;font-size:12px;font-weight:500;
+background:transparent;color:var(--muted);border:1px solid var(--line);
+border-radius:20px;padding:4px 12px;cursor:pointer;
+}
+.theme-toggle:hover{color:var(--ink);border-color:var(--muted);}
 *{box-sizing:border-box;}
 /* A plain <img> is natively draggable; nudging one a pixel mid-click is
    enough on Windows Chrome to kick off an OS-level drag that pops File
