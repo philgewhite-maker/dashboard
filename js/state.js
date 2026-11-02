@@ -34,6 +34,7 @@ airbnbSyncStatus: {}, // listingId -> {ok, syncedAt, added, updated, removed, er
 airbnbCleanerEvents: [], // [{date, name}] -- last scan of "Cleaner - <Name>" events on the push-target calendar, see js/features/airbnb.js
 airbnbCleanerSyncStatus: null, // {ok, syncedAt, error} for the cleaner-event scan above
 airbnbCleaners: [], // names offered as draggable chips in the Cleaners pool -- see js/features/airbnb.js
+airbnbCleanerBlocks: [], // ["reservationId:edge"] stay edges the user un-assigned a cleaner from (x on the chip) -- see js/features/airbnb.js
 airbnbKeys: [], // physical keyrings and their current custody -- see js/features/airbnb.js
 airbnbKeyAssignments: [], // {id, keyId, reservationId} -- a key dragged onto a reservation, see js/features/airbnb.js
 schoolCalendarUpdates: [], // one entry per detected term-date change, see js/features/schoolcalendar.js
@@ -3270,6 +3271,7 @@ if (n > 0) e.nights = n;
 if (!data.airbnbSyncStatus || typeof data.airbnbSyncStatus !== 'object' || Array.isArray(data.airbnbSyncStatus)) data.airbnbSyncStatus = {};
 if (!Array.isArray(data.airbnbCleanerEvents)) data.airbnbCleanerEvents = [];
 if (!Array.isArray(data.airbnbCleaners)) data.airbnbCleaners = [];
+if (!Array.isArray(data.airbnbCleanerBlocks)) data.airbnbCleanerBlocks = [];
 if (!Array.isArray(data.airbnbKeys)) data.airbnbKeys = [];
 data.airbnbKeys = data.airbnbKeys.map((k) => ({ ...blankAirbnbKey(), ...k, id: k.id || uid(), listingIds: Array.isArray(k.listingIds) ? k.listingIds : [] }));
 // A keyring's own listings can be deleted out from under it -- unlike a

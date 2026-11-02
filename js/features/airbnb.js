@@ -617,6 +617,8 @@ return Math.round(Math.abs(new Date(`${a}T00:00:00`) - new Date(`${b}T00:00:00`)
 function cleanerClaims() {
 const events = data.airbnbCleanerEvents || [];
 const claims = new Map();
+// Edges the user un-assigned with the x on a matched chip ("resId:edge").
+const blocked = new Set(data.airbnbCleanerBlocks || []);
 events.forEach((e) => {
 if (e.reservationId && e.edge && !claims.has(`${e.reservationId}:${e.edge}`)) claims.set(`${e.reservationId}:${e.edge}`, e);
 });
@@ -636,8 +638,12 @@ if (!free.length) return;
 const nearest = Math.min(...free.map((c) => c.dist));
 const tied = free.filter((c) => c.dist === nearest);
 if (nearest > 0 && tied.length > 1) return;
-tied.forEach((c) => claims.set(c.key, e));
+// An edge the user un-assigned still counts when working out which edge
+// is nearest -- otherwise un-assigning the right one would just hand the
+// clean to the next-nearest turnover, the very spill this exists to stop.
+tied.filter((c) => !blocked.has(c.key)).forEach((c) => claims.set(c.key, e));
 });
+blocked.forEach((k) => claims.delete(k));
 return claims;
 }
 
@@ -654,7 +660,7 @@ const openCleanerForms = new Set();
 function cleanerChipHtml(reservation, edge) {
 const match = findCleanerMatch(reservation, edge);
 const label = edge === 'checkin' ? 'Check-in clean' : 'Check-out clean';
-if (match) return `<span class="cal-badge cleaner-chip">${label}: ${formatAirbnbDate(match.date)} &middot; ${escapeHtml(match.name)}</span>`;
+if (match) return `<span class="cal-badge cleaner-chip">${label}: ${formatAirbnbDate(match.date)} &middot; ${escapeHtml(match.name)} <span class="tag-x" data-airbnb-cleaner-unassign="${reservation.id}:${edge}" title="Un-assign this clean from this stay. The calendar event stays where it is; it just stops counting for this ${edge === 'checkin' ? 'check-in' : 'check-out'}.">&times;</span></span>`;
 const key = `${reservation.id}:${edge}`;
 if (!openCleanerForms.has(key)) {
 return `<span class="cal-badge cleaner-chip cleaner-chip-tbc" data-airbnb-cleaner-toggle="${key}" data-airbnb-cleaner-drop="${key}" title="Drop a cleaner here, or click to add who's doing this clean and when">${label}: TBC</span><span class="sync-status" data-airbnb-cleaner-status="${key}"></span>`;
@@ -692,6 +698,8 @@ try {
 await createEvent(calendarId, { title: `Cleaner - ${trimmedName}`, date });
 data.airbnbCleanerEvents = [...(data.airbnbCleanerEvents || []), { date, name: trimmedName, reservationId: reservation.id, edge }];
 rememberCleaner(trimmedName);
+// Assigning again lifts an earlier un-assign of this same stay edge.
+data.airbnbCleanerBlocks = (data.airbnbCleanerBlocks || []).filter((k) => k !== `${reservation.id}:${edge}`);
 openCleanerForms.delete(`${reservation.id}:${edge}`);
 queueSave();
 renderAirbnb();
@@ -865,6 +873,15 @@ if (r && statusEl) pushReservation(r, statusEl);
 el.querySelectorAll('[data-airbnb-cleaner-toggle]').forEach((chip) => {
 chip.addEventListener('click', () => {
 openCleanerForms.add(chip.dataset.airbnbCleanerToggle);
+renderAirbnb();
+});
+});
+el.querySelectorAll('[data-airbnb-cleaner-unassign]').forEach((x) => {
+x.addEventListener('click', () => {
+const key = x.dataset.airbnbCleanerUnassign;
+if (!Array.isArray(data.airbnbCleanerBlocks)) data.airbnbCleanerBlocks = [];
+if (!data.airbnbCleanerBlocks.includes(key)) data.airbnbCleanerBlocks.push(key);
+queueSave();
 renderAirbnb();
 });
 });
