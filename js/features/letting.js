@@ -188,6 +188,19 @@ const ledger = data.lettingLedger || [];
 const reservations = data.airbnbReservations || [];
 const sums = new Map();
 const keepSums = new Map();
+// A stay that accrued before the cap changed meaning still carries the old
+// per-stay-capped amount; restate it as the plain share so the row and the
+// monthly adjustment add up the way they read.
+let restated = false;
+ledger.forEach((e) => {
+if (e.autoCap || !['accrual', 'earned'].includes(e.kind) || !e.date || e.date < CAP_KEEPS_FROM) return;
+const gross = Number(e.gross);
+const pct = Number(e.pct);
+if (!(gross > 0) || !(pct > 0)) return;
+const share = Math.round(gross * pct) / 100;
+if (Math.abs((Number(e.amount) || 0) - share) > 0.004) { e.amount = share; restated = true; }
+});
+if (restated) queueSave();
 const bump = (map, key, ym, amount, date) => {
 const k = `${key}|${ym}`;
 const s = map.get(k) || { key, ym, total: 0, lastDate: date };
