@@ -1,6 +1,6 @@
 import { data, queueSave, blankVoucher } from '../state.js';
 import { escapeHtml, bindForm, daysUntil, scrollAndFlash, logoBadgeHtml, bindLogoFallbacks } from '../utils.js';
-import { pendingClassifications, pendingVoucherLinks, setLabelKind, markVoucherLinked, markVoucherSkipped } from './loyaltybalances.js';
+import { pendingClassifications, pendingVoucherLinks, setLabelKind, markVoucherLinked, markVoucherSkipped, voucherWhatFor, VOUCHER_WHAT_BY_LABEL, CURRENCY_UNITS } from './loyaltybalances.js';
 import { matchBrandLogo } from '../brandLogos.js';
 import { resolveProvider, refreshProviderDatalists } from '../providers.js';
 
@@ -213,7 +213,8 @@ return { byReference, byNameOnly };
 
 function readingValueText(reading) {
 if (reading.balance == null) return /used/i.test(reading.label) ? 'Used' : '';
-return `${reading.unit === '£' ? '£' : ''}${reading.balance.toLocaleString('en-GB')}${reading.unit && reading.unit !== '£' ? ' ' + reading.unit : ''}`;
+const money = CURRENCY_UNITS.has(reading.unit);
+return `${money ? reading.unit : ''}${reading.balance.toLocaleString('en-GB', money ? { minimumFractionDigits: 2 } : undefined)}${reading.unit && !money ? ' ' + reading.unit : ''}`;
 }
 
 function readingSummaryText(reading) {
@@ -231,6 +232,8 @@ return parts.join(' — ');
 // Provocateur" reads far better than "Quidco: Cashback confirmed"
 // repeated identically for every single retailer.
 function voucherNameFor(program, reading) {
+const what = VOUCHER_WHAT_BY_LABEL[reading.label];
+if (what) return `${program.name} — ${what}${reading.detail ? ` (${reading.detail})` : ''}`;
 return reading.detail ? `${program.name} — ${reading.detail}` : `${program.name} — ${reading.label}`;
 }
 
@@ -329,7 +332,7 @@ if (reading.reference && !voucher.reference) voucher.reference = reading.referen
 // exact match, never a guess, so it's always worth filling in for
 // free the moment a reading actually links to this voucher.
 if (!voucher.provider) voucher.provider = program.provider || program.name;
-if (!voucher.what && program.what) voucher.what = program.what;
+if (!voucher.what) voucher.what = voucherWhatFor(program, reading);
 if (!voucher.logoUrl) voucher.logoUrl = program.logoUrl || matchBrandLogo(voucher.provider) || '';
 const note = `Updated from ${program.name} scan (${reading.date}): ${readingSummaryText(reading)}.`;
 voucher.notes = voucher.notes ? `${voucher.notes} | ${note}` : note;
@@ -343,7 +346,7 @@ const targetId = decision === 'pick' ? pickedId : decision.startsWith('update:')
 if (targetId) { applyUpdateToVoucher(reading, program, targetId); return; }
 // decision === 'new' -- provider is the real program name (exact, no
 // matching needed) and logoUrl comes free from it too, when seeded.
-const voucher = blankVoucher({ name: voucherNameFor(program, reading), value: readingValueText(reading), expiry: reading.expiryDate || '', notes: `From ${program.name} scan, ${reading.date}.${reading.note ? ` ${reading.note}` : ''}`, reference: reading.reference || '', sourceLoyaltyReadingIds: [reading.id], provider: program.provider || program.name, what: program.what || '', logoUrl: program.logoUrl || matchBrandLogo(program.provider || program.name) || '' });
+const voucher = blankVoucher({ name: voucherNameFor(program, reading), value: readingValueText(reading), expiry: reading.expiryDate || '', notes: `From ${program.name} scan, ${reading.date}.${reading.note ? ` ${reading.note}` : ''}`, reference: reading.reference || '', sourceLoyaltyReadingIds: [reading.id], provider: program.provider || program.name, what: voucherWhatFor(program, reading), logoUrl: program.logoUrl || matchBrandLogo(program.provider || program.name) || '' });
 data.vouchers.push(voucher);
 markVoucherLinked(reading.id, voucher.id);
 }
@@ -360,7 +363,7 @@ function applyVoucherLinkToGroup(reading, program, decision, pickedId, allReadin
 if (decision === 'skip') { allReadings.forEach((r) => markVoucherSkipped(r.id)); return; }
 let targetId = decision === 'pick' ? pickedId : decision.startsWith('update:') ? decision.slice(7) : '';
 if (!targetId) {
-const voucher = blankVoucher({ name: voucherNameFor(program, reading), provider: program.provider || program.name, what: program.what || '', logoUrl: program.logoUrl || matchBrandLogo(program.provider || program.name) || '' });
+const voucher = blankVoucher({ name: voucherNameFor(program, reading), provider: program.provider || program.name, what: voucherWhatFor(program, reading), logoUrl: program.logoUrl || matchBrandLogo(program.provider || program.name) || '' });
 data.vouchers.push(voucher);
 targetId = voucher.id;
 }

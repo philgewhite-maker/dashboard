@@ -196,10 +196,25 @@ return `${year}-${String(idx + 1).padStart(2, '0')}-${String(day).padStart(2, '0
 // confirmed live: my first version only matched THIS shape (a bare
 // "eVoucher:" + "£" check), silently missing the issued one entirely
 // because its real format uses "Number:"/"Value: GBP" instead.
+// A unit in this set is money: shown as a prefix ("€109.15"), not a suffix.
+const CURRENCY_SYMBOLS = { GBP: '£', EUR: '€', USD: '$' };
+const CURRENCY_UNITS = new Set(Object.values(CURRENCY_SYMBOLS));
+
+// What a voucher-kind reading is, as the Vouchers panel's "What of" column
+// should say it -- the program's own default ("Avios") would be wrong for a
+// Companion or upgrade voucher that merely arrives from the Avios program.
+const VOUCHER_WHAT_BY_LABEL = { 'Companion voucher': 'Companion Voucher', 'Cabin upgrade voucher': 'Cabin upgrade voucher' };
+function voucherWhatFor(program, reading) {
+return VOUCHER_WHAT_BY_LABEL[reading.label] || program.what || '';
+}
+
 function extractBaVoucher(bodyText) {
 const text = String(bodyText || '');
-const issued = text.match(/Number:\s*([\w-]+)[\s\S]{0,150}?Value:\s*GBP\s*([\d.,]+)[\s\S]{0,60}?Expiry:\s*(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})/i);
+// Any currency, not just GBP: a voucher re-issued for change on a euro
+// booking reads "Value: EUR 109.15".
+const issued = text.match(/Number:\s*([\w-]+)[\s\S]{0,150}?Value:\s*([A-Z]{3})\s*([\d.,]+)[\s\S]{0,60}?Expiry:\s*(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})/i);
 if (issued) {
+const currency = issued[2].toUpperCase();
 return {
 membershipNumber: '', tier: '', date: '',
 // The voucher's own number (e.g. "125-4262603242") -- captured as
@@ -207,7 +222,7 @@ membershipNumber: '', tier: '', date: '',
 // DIFFERENT eVouchers apart (a second one from an unrelated flight
 // delay must never get matched against the first just because they
 // share a program) rather than matching on program name alone.
-metrics: [{ label: 'eVoucher issued', balance: Number(issued[2].replace(/,/g, '')), unit: '£', expiryDate: parseDMonYyyy(issued[3], issued[4], issued[5]), reference: issued[1] }],
+metrics: [{ label: 'eVoucher issued', balance: Number(issued[3].replace(/,/g, '')), unit: CURRENCY_SYMBOLS[currency] || currency, expiryDate: parseDMonYyyy(issued[4], issued[5], issued[6]), reference: issued[1] }],
 };
 }
 // \s+ between the words: BA hard-wraps its plain text at ~60 columns, and the
@@ -441,6 +456,11 @@ metrics: [{ label: 'Avios', balance: Number(m[1].replace(/,/g, '')), unit: 'Avio
 };
 }
 
+// Bump a program's number when its extractor gains a new email shape that
+// older, already-"seen" messages could now match (see scanOneProgram).
+// ba: 2 = Companion voucher and cabin upgrade voucher emails.
+const EXTRACTOR_VERSIONS = { 'ba': 2 };
+
 const EXTRACTORS = {
 'ba': extractBritishAirways,
 'marriott-bonvoy': extractMarriottBonvoy,
@@ -551,6 +571,24 @@ return { programId: program.id, programName: program.name, error: err.message };
 }
 
 const seen = new Set(program.seenMessageIds || []);
+// An extractor that learns a new kind of email only helps if the emails it
+// already matched under the old logic get read again; this does that once,
+// automatically, instead of relying on "Forget processed emails". Safe:
+// a (message, label) pair that is already on file is never duplicated.
+const wantVersion = EXTRACTOR_VERSIONS[program.extractorKey] || 0;
+if ((program.extractorVersion || 0) < wantVersion) {
+seen.clear();
+program.extractorVersion = wantVersion;
+// Vouchers already created from this program's Companion/upgrade readings
+// were labelled with the program's default ("Avios"); correct them.
+(data.vouchers || []).forEach((v) => (v.sourceLoyaltyReadingIds || []).forEach((rid) => {
+const r = data.loyaltyBalances.find((b) => b.id === rid && b.programId === program.id);
+const what = r && VOUCHER_WHAT_BY_LABEL[r.label];
+if (!what || v.what !== program.what) return;
+v.what = what;
+if (v.name === `${program.name} — ${r.detail}`) v.name = `${program.name} — ${what}${r.detail ? ` (${r.detail})` : ''}`;
+}));
+}
 let matched = 0;
 let unmatched = 0;
 let alreadySeen = 0;
@@ -837,13 +875,13 @@ const readings = latestBalancesFor(program);
 // reported directly as wanting visual parity between the two panels,
 // now that readings can link into real voucher records.
 const rows = readings.map((r) => {
-const valueText = r.balance != null ? (r.unit === '£' || r.unit === '£ worth of points' ? `£${r.balance.toLocaleString('en-GB')}` : r.balance.toLocaleString('en-GB')) : '—';
+const valueText = r.balance != null ? (CURRENCY_UNITS.has(r.unit) ? `${r.unit}${r.balance.toLocaleString('en-GB', { minimumFractionDigits: 2 })}` : r.unit === '£ worth of points' ? `£${r.balance.toLocaleString('en-GB')}` : r.balance.toLocaleString('en-GB')) : '—';
 return `<div class="loyalty-reading" data-loyalty-reading="${escapeHtml(r.id)}">
 <div class="loyalty-reading-id">
 <span class="loyalty-reading-label">${escapeHtml(r.label)}</span>
 <div class="loyalty-reading-meta">
 <span class="loyalty-reading-value">${escapeHtml(valueText)}</span>
-${r.unit && r.unit !== '£' ? `<span class="loyalty-reading-unit">${escapeHtml(r.unit)}</span>` : ''}
+${r.unit && !CURRENCY_UNITS.has(r.unit) ? `<span class="loyalty-reading-unit">${escapeHtml(r.unit)}</span>` : ''}
 </div>
 </div>
 <div class="loyalty-reading-notes">${escapeHtml([r.detail || (r.sourceMessageId === 'manual' ? 'Entered by hand' : ''), r.note].filter(Boolean).join(' — '))}</div>
@@ -1085,6 +1123,6 @@ renderLoyaltyBalances, initLoyaltyBalances, runLoyaltyBalanceScan,
 extractBritishAirways, extractMarriottBonvoy, extractVirginFlyingClub, extractBoots, extractTescoClubcard, extractBaVoucher,
 extractHertz, extractSixt, extractMilesAndMore, extractQuidco, extractTopCashback,
 extractNectar, extractIkeaFamily, extractVuelingClub,
-latestBalancesFor, travelStripPrograms,
+latestBalancesFor, travelStripPrograms, voucherWhatFor, VOUCHER_WHAT_BY_LABEL, CURRENCY_UNITS,
 labelKindFor, setLabelKind, pendingClassifications, pendingVoucherLinks, markVoucherLinked, markVoucherSkipped,
 };
