@@ -195,7 +195,46 @@ if (capAmount != null) return capAmount;
 return null;
 }
 
+// Refunds posted before the split applied to them were charged to the owner's
+// debt in full. Rather than rewrite those months (which would also move the
+// interest already accrued on them), each gets ONE correction row dated
+// REFUND_FIX_DATE: the owner owes you back their share of the refund. The
+// row id is derived from the refund's id and the refund is flagged, so
+// several devices running this converge on a single row, and deleting the
+// row by hand doesn't bring it back.
+const REFUND_FIX_DATE = '2026-11-02';
+
+function refundShareFor(e) {
+const guest = String(e.note || '').trim().toLowerCase();
+const when = new Date(`${e.date}T00:00:00`).getTime();
+const near = guest && (data.lettingLedger || []).find((x) => x.ownerKey === e.ownerKey && x.kind !== 'refund' && Number(x.pct) > 0 && x.date
+&& Math.abs(new Date(`${x.date}T00:00:00`).getTime() - when) <= 45 * 86400000
+&& String(x.note || '').split(', ').slice(-1)[0].trim().toLowerCase().startsWith(guest));
+if (near) return Number(near.pct);
+const listing = (data.airbnbListings || []).find((l) => ownerKeyFor(l) === e.ownerKey);
+return shareRuleAt(listing, e.date).pct;
+}
+
+function postRefundCorrections() {
+const ledger = data.lettingLedger || [];
+const fixes = [];
+let flagged = false;
+ledger.forEach((e) => {
+if (e.kind !== 'refund' || e.refundGross != null || e.refundFixed || !e.ownerKey || !e.date || !(Number(e.amount) < 0)) return;
+e.refundFixed = true;
+flagged = true;
+const pct = refundShareFor(e);
+const back = Math.round(-Number(e.amount) * (100 - pct)) / 100;
+if (!(back > 0) || ledger.some((x) => x.id === `refundfix:${e.id}`)) return;
+fixes.push({ id: `refundfix:${e.id}`, ownerKey: e.ownerKey, kind: 'adjustment', amount: back, date: REFUND_FIX_DATE, note: `Refund split: ${e.note || 'guest'} ${money(-e.amount)} refund on ${e.date} was charged in full; ${pct}% share is theirs` });
+});
+if (!flagged) return;
+data.lettingLedger.push(...fixes);
+queueSave();
+}
+
 function reconcileMonthlyCaps() {
+postRefundCorrections();
 const ledger = data.lettingLedger || [];
 const reservations = data.airbnbReservations || [];
 const sums = new Map();
