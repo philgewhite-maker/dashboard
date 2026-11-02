@@ -114,6 +114,17 @@ const full = (data.lettingLedger || [])
 return full || note;
 }
 
+// The owner's side of a ledger row: what they keep from it. A booking row
+// keeps the booking total minus what they owe you; a monthly-cap row moves
+// the opposite way to its own amount (they owe more, so keep less). A
+// payment or refund doesn't split a booking, so it has no owner's side.
+function ownerKeepsFor(e) {
+if (e.autoCap) return -(Number(e.amount) || 0);
+if (!['accrual', 'earned', 'cancellation'].includes(e.kind)) return null;
+const gross = Number(e.gross);
+return gross > 0 ? Math.round((gross - (Number(e.amount) || 0)) * 100) / 100 : null;
+}
+
 function entriesFor(key) {
 return (data.lettingLedger || []).filter((e) => e.ownerKey === key);
 }
@@ -604,7 +615,7 @@ ${mine ? '' : `<div class="sync-row" style="margin:4px 0 8px;flex-wrap:wrap;alig
 <button class="sync-btn sm inline" type="button" data-report-generate="${escapeHtml(key)}">&#128196; Generate report</button>
 <span class="sync-status" data-report-status="${escapeHtml(key)}"></span>
 </div>`}
-${rows.length ? `<div class="letting-scroll"><table class="limits-table"><tbody>${rows.map((e) => {
+${rows.length ? `<div class="letting-scroll"><table class="limits-table"><tbody>${mine ? '' : `<tr class="letting-col-head"><th></th><th></th><th style="text-align:right;font-weight:500;" class="settings-note" title="Your side: how this row changes what ${escapeHtml(ownerNameFor(key))} owes you. Plus means they owe you more; minus means less (a payment or refund).">Owed to you</th><th style="text-align:right;font-weight:500;" class="settings-note" title="${escapeHtml(ownerNameFor(key))}'s side: the part of the booking they keep. Blank for payments and refunds, which move money but don't split a booking.">${escapeHtml(ownerNameFor(key))} keeps</th><th></th></tr>`}${rows.map((e) => {
 const nightRate = nightRateFor(e);
 const nightRateHtml = nightRate != null
 ? ` <span class="letting-gross" title="${escapeHtml(`${e.nights} night${e.nights === 1 ? '' : 's'}, after cleaning cost`)}">${escapeHtml(`${money(nightRate)}/night`)}</span>`
@@ -627,8 +638,9 @@ return `<tr>
 <td style="white-space:nowrap;">${(e.autoCap || e.autoInterest) ? `<span class="settings-note" style="margin:0;" title="Worked out automatically from the month's other entries">${escapeHtml(e.date || '')}</span>` : `<input type="date" class="settings-input" data-letting-date="${escapeHtml(e.id)}" value="${escapeHtml(e.date || '')}" title="The payout/accrual date -- used for statements and tax-year grouping only. Edit it to the real Airbnb payout date if that differs from checkout; it has no effect on occupancy or the nightly rate, which both come from check-in/nights instead.">`}</td>
 <td>${escapeHtml(ledgerNoteFor(e))}${e.kind && e.kind !== 'accrual' ? ` <span class="letting-kind ${escapeHtml(e.kind)}">${escapeHtml(e.kind)}</span>` : ''}${platformBadge}${grossHtml}${nightRateHtml}</td>
 <td style="text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;">${escapeHtml(money(e.amount))}</td>
+${mine ? '' : `<td style="text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--muted);">${ownerKeepsFor(e) == null ? '' : escapeHtml(money(ownerKeepsFor(e)))}</td>`}
 <td style="width:1%;white-space:nowrap;">${hasDetail ? `<span class="letting-row-toggle" data-letting-row-toggle="${escapeHtml(e.id)}" title="Check-in date, nights, listing and platform">${open ? '&#9662;' : '&#9656;'}</span> ` : ''}${(e.autoCap || e.autoInterest) ? '' : `<span class="del-x" data-letting-del="${escapeHtml(e.id)}" title="Remove this entry">&times;</span>`}</td>
-</tr>${hasDetail ? `<tr class="letting-detail-row"${open ? '' : ' hidden'}><td colspan="4"><div class="letting-detail">
+</tr>${hasDetail ? `<tr class="letting-detail-row"${open ? '' : ' hidden'}><td colspan="${mine ? 4 : 5}"><div class="letting-detail">
 ${showStartDate ? `<label>Check-in<input type="date" class="settings-input" data-letting-start-date="${escapeHtml(e.id)}" value="${escapeHtml(e.startDate || '')}" title="The real check-in date for this stay -- what occupancy and the average night rate are actually based on, kept separate from the payout date. Leave blank and nights get guessed backward from the payout date instead, which is wrong whenever the payout didn't land on the real checkout."></label>` : ''}
 ${showNights ? `<label>Nights<input type="number" min="0" step="1" class="settings-input" data-letting-nights="${escapeHtml(e.id)}" value="${e.nights || ''}" placeholder="Nights" title="Nights this stay covered -- used for the average night rate. Filled in automatically when the reservation was still on file at accrual time; type it in for an older row that's missing it."></label>` : ''}
 ${showListing ? `<label>Listing<select class="settings-input" data-letting-listing="${escapeHtml(e.id)}" title="Which listing this stay was for -- a manually-added row has no listing on it yet, so it's left out of the average night-rate chart (which groups by listing) until this is set.">
