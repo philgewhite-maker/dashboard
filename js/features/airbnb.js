@@ -555,9 +555,21 @@ timeMin: `${dateStrAdd(earliest, -CLEANER_MATCH_WINDOW_DAYS)}T00:00:00Z`,
 timeMax: `${dateStrAdd(latest, CLEANER_MATCH_WINDOW_DAYS)}T00:00:00Z`,
 q: 'Cleaner',
 });
+// A re-scan only knows date + name, so the stay edge a clean was added
+// for is carried over from the previous list by that pair; without this
+// the pin is lost on the next Sync and the clean is date-matched again.
+const pins = new Map();
+(data.airbnbCleanerEvents || []).filter((e) => e.reservationId && e.edge).forEach((e) => {
+const k = `${e.date}|${String(e.name).trim().toLowerCase()}`;
+pins.set(k, [...(pins.get(k) || []), { reservationId: e.reservationId, edge: e.edge }]);
+});
 data.airbnbCleanerEvents = items
 .map((e) => ({ date: e.start?.date || (e.start?.dateTime || '').slice(0, 10), name: parseCleanerEventName(e.summary) }))
-.filter((e) => e.date && e.name);
+.filter((e) => e.date && e.name)
+.map((e) => {
+const list = pins.get(`${e.date}|${e.name.trim().toLowerCase()}`);
+return list && list.length ? { ...e, ...list.shift() } : e;
+});
 // A name typed into Google Calendar by hand joins the pool too.
 data.airbnbCleanerEvents.forEach((e) => rememberCleaner(e.name));
 data.airbnbCleanerSyncStatus = { ok: true, syncedAt: new Date().toISOString() };
@@ -585,25 +597,52 @@ function otherStayOverlaps(sameListing, gapStart, gapEnd) {
 return sameListing.some((o) => o.checkin < gapEnd && o.checkout > gapStart);
 }
 
-// Scoped to the same listingId only, not other listings that might share
-// a physical room -- a known limitation, not solved speculatively.
-function findCleanerMatch(reservation, edge) {
-const events = data.airbnbCleanerEvents || [];
-const sameListing = data.airbnbReservations.filter((r) => r.listingId === reservation.listingId && r.id !== reservation.id);
-if (edge === 'checkin') {
-const windowStart = dateStrAdd(reservation.checkin, -CLEANER_MATCH_WINDOW_DAYS);
-const best = events
-.filter((e) => e.date >= windowStart && e.date <= reservation.checkin)
-.sort((a, b) => (a.date < b.date ? 1 : -1))[0];
-if (!best) return null;
-return otherStayOverlaps(sameListing, best.date, reservation.checkin) ? null : best;
+function daysBetween(a, b) {
+return Math.round(Math.abs(new Date(`${a}T00:00:00`) - new Date(`${b}T00:00:00`)) / 86400000);
 }
-const windowEnd = dateStrAdd(reservation.checkout, CLEANER_MATCH_WINDOW_DAYS);
-const best = events
-.filter((e) => e.date >= reservation.checkout && e.date <= windowEnd)
-.sort((a, b) => (a.date < b.date ? -1 : 1))[0];
-if (!best) return null;
-return otherStayOverlaps(sameListing, reservation.checkout, best.date) ? null : best;
+
+// Which cleaner event serves which reservation edge. Two rules keep a clean
+// from spilling onto turnovers it can't cover:
+//  1. An event added through this app is pinned to the exact stay edge it
+//     was added for (reservationId + edge) and serves nothing else.
+//  2. An event typed straight into Google Calendar has no stay on it, so it
+//     is matched by date -- but to its NEAREST edge only, never to every
+//     edge inside the window. A clean on the double room's checkout day is
+//     claimed by that checkout (0 days away) and is no longer also offered to
+//     an ensuite checkout the day before (1 day away). Edges tied at the
+//     same distance on a same-day clean all claim it (one visit, several
+//     rooms); a tie further out is ambiguous and is left unassigned.
+// Scoped to the same listingId for the "no other stay in between" test, not
+// other listings that might share a physical room -- a known limitation.
+function cleanerClaims() {
+const events = data.airbnbCleanerEvents || [];
+const claims = new Map();
+events.forEach((e) => {
+if (e.reservationId && e.edge && !claims.has(`${e.reservationId}:${e.edge}`)) claims.set(`${e.reservationId}:${e.edge}`, e);
+});
+const cleaned = data.airbnbListings.filter((l) => l.needsCleaning).map((l) => l.id);
+const stays = data.airbnbReservations.filter((r) => cleaned.includes(r.listingId));
+events.filter((e) => !(e.reservationId && e.edge)).forEach((e) => {
+const cands = [];
+stays.forEach((r) => {
+const sameListing = data.airbnbReservations.filter((o) => o.listingId === r.listingId && o.id !== r.id);
+if (e.date >= dateStrAdd(r.checkin, -CLEANER_MATCH_WINDOW_DAYS) && e.date <= r.checkin
+&& !otherStayOverlaps(sameListing, e.date, r.checkin)) cands.push({ key: `${r.id}:checkin`, dist: daysBetween(e.date, r.checkin) });
+if (e.date >= r.checkout && e.date <= dateStrAdd(r.checkout, CLEANER_MATCH_WINDOW_DAYS)
+&& !otherStayOverlaps(sameListing, r.checkout, e.date)) cands.push({ key: `${r.id}:checkout`, dist: daysBetween(e.date, r.checkout) });
+});
+const free = cands.filter((c) => !claims.has(c.key));
+if (!free.length) return;
+const nearest = Math.min(...free.map((c) => c.dist));
+const tied = free.filter((c) => c.dist === nearest);
+if (nearest > 0 && tied.length > 1) return;
+tied.forEach((c) => claims.set(c.key, e));
+});
+return claims;
+}
+
+function findCleanerMatch(reservation, edge) {
+return cleanerClaims().get(`${reservation.id}:${edge}`) || null;
 }
 
 // Which "TBC" chips currently show their inline name/date capture form,
@@ -651,7 +690,7 @@ if (!calendarId) { statusEl.textContent = 'Pick which calendar to push to, next 
 statusEl.textContent = 'Adding…';
 try {
 await createEvent(calendarId, { title: `Cleaner - ${trimmedName}`, date });
-data.airbnbCleanerEvents = [...(data.airbnbCleanerEvents || []), { date, name: trimmedName }];
+data.airbnbCleanerEvents = [...(data.airbnbCleanerEvents || []), { date, name: trimmedName, reservationId: reservation.id, edge }];
 rememberCleaner(trimmedName);
 openCleanerForms.delete(`${reservation.id}:${edge}`);
 queueSave();
