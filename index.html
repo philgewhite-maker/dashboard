@@ -15,7 +15,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v687</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v688</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -4985,7 +4985,7 @@ Finds connections whose cover photo is missing or is really just the small place
 <li>Go to <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#airbnb-listings">Settings &rarr; Finances &rarr; Airbnb listings</span> and find the listing's row.</li>
 <li>Choose the person under <strong>Owner</strong>, or type a name in the box marked "or a name" if they aren't a connection. An owner called <strong>Phil</strong> counts as you: no balance owed and no report.</li>
 <li>Set <strong>Share %</strong>: the part of each stay's takings the owner owes you.</li>
-<li>To change the split from a future date, or to limit it, open <strong>+ schedule a change</strong>, set the date, the %, and optionally <strong>Cap £</strong>, then press <strong>Add</strong>. The cap is the most an owner owes you in one calendar month, across all their bookings.</li>
+<li>To change the split from a future date, or to limit it, open <strong>+ schedule a change</strong>, set the date, the %, and optionally <strong>Cap £</strong>, then press <strong>Add</strong>. The cap is the most the owner keeps in one calendar month, across all their bookings — they hold the payout and owe you everything above it. (Before November 2026 it was the most they owed you.)</li>
 </ol>
 <div class="guide-tip">A stay on a listing with no owner never shows in Letting income at all. A change that has already taken effect can't be removed; a future one has an &times;.</div>
 </div>
@@ -5026,7 +5026,8 @@ Finds connections whose cover photo is missing or is really just the small place
 <div class="guide-q">How does the monthly cap work?</div>
 <ol class="guide-steps">
 <li>Set a <strong>Cap £</strong> on a listing's share rule (see the first job in this section).</li>
-<li>Each stay is limited to the cap on its own. If the owner's shares for one month (by each row's date) add up to more than the cap, a <strong>Monthly cap &pound;N, YYYY-MM</strong> adjustment row takes off the excess so the month totals no more than the cap.</li>
+<li>Each stay books its plain share. The part the owner keeps (the booking total minus that share) is added up per month, using the day the guest paid, or the checkout month if no pay date is set (the <strong>date box</strong> on each Airbnb reservation row). If it comes to more than the cap, a <strong>keeps up to &pound;N</strong> adjustment row adds the excess to what they owe you. The cap is used up in order, so a stay in a month that is already full owes its whole share, and nothing is ever reversed.</li>
+<li>This applies to stays checking out from 1 November 2026. Earlier rows keep the old rule, because those months were already settled.</li>
 <li>Bookings, cancellation payouts and historic earned rows count towards the cap. Refunds and payments don't.</li>
 </ol>
 <div class="guide-tip">The adjustment is recalculated whenever rows change, so editing a date or deleting a stay can add, change or remove it. If an owner has several listings with caps, the first listing with a cap in force that month decides it.</div>

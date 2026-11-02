@@ -72,10 +72,19 @@ return { pct: Number.isFinite(pct) ? pct : 50, capAmount: null };
 // of 50% or £800/month" means Math.min(gross * pct/100, capAmount),
 // not just the raw percentage -- so every caller gets the real owed
 // figure without re-deriving the cap logic itself.
+//
+// From CAP_KEEPS_FROM on, the cap means something different: it limits
+// what the OWNER keeps each month (they hold the payout and owe you the
+// rest), so a stay's row is the plain share and reconcileMonthlyCaps()
+// adds whatever the owner kept above the cap. Earlier rows keep the old
+// per-stay cap, because those months were already settled that way.
+const CAP_KEEPS_FROM = '2026-11-01';
+
 function splitAmountFor(listing, gross, dateStr) {
 const rule = shareRuleAt(listing, dateStr);
 const uncapped = Number(gross) * (rule.pct / 100);
-return rule.capAmount != null ? Math.min(uncapped, rule.capAmount) : uncapped;
+if (rule.capAmount == null || String(dateStr) >= CAP_KEEPS_FROM) return uncapped;
+return Math.min(uncapped, rule.capAmount);
 }
 
 // Their share, taken from whichever listing they own, as of today --
@@ -148,15 +157,23 @@ return owners().filter((k) => !isMyOwnKey(k)).reduce((n, k) => n + balanceFor(k)
 
 // ---- Monthly cap ----------------------------------------------------------
 //
-// A share rule's capAmount is a MONTHLY maximum for the owner across all
-// their bookings, but each stay is still capped on its own when it accrues
-// (splitAmountFor). Capping each stay and then capping the month's sum is
-// exactly the same as capping the true monthly total -- if any single stay
-// reached the cap the sum is at least the cap, otherwise nothing was cut --
-// so the only thing missing is one derived row per owner and month that
-// takes off whatever the combined shares exceed the cap by. Computed from
-// the rows' own amounts, so old and new rows both come out right, and
-// recomputed (never accumulated) so it follows any later edit or deletion.
+// A share rule's capAmount is a MONTHLY limit across all of an owner's
+// bookings, and it has meant two things over time:
+//
+// * Before CAP_KEEPS_FROM it limited what the owner OWES you: each stay was
+//   capped on its own at accrual, and a negative "Monthly cap" row took off
+//   whatever the month's shares added up to above the cap.
+// * From CAP_KEEPS_FROM it limits what the owner KEEPS (they hold the
+//   payout and pass the rest on). A stay's row is the plain share; the
+//   owner's kept part is gross minus that row; and a positive "Monthly cap"
+//   row adds back whatever the month's kept parts exceed the cap by. So the
+//   cap is used up in order and nothing is ever reversed -- a stay in a
+//   month that is already full just owes its whole share.
+//
+// The month a stay counts in is the day the guest paid (reservation.paidOn,
+// copied to the row as capDate), falling back to the row's own date (the
+// checkout). Derived rows are recomputed on every call, never accumulated,
+// so they follow any later edit or deletion.
 function ownerCapAt(key, dateStr) {
 for (const l of data.airbnbListings || []) {
 if (ownerKeyFor(l) !== key) continue;
@@ -168,28 +185,44 @@ return null;
 
 function reconcileMonthlyCaps() {
 const ledger = data.lettingLedger || [];
+const reservations = data.airbnbReservations || [];
 const sums = new Map();
+const keepSums = new Map();
+const bump = (map, key, ym, amount, date) => {
+const k = `${key}|${ym}`;
+const s = map.get(k) || { key, ym, total: 0, lastDate: date };
+s.total += amount;
+if (date > s.lastDate) s.lastDate = date;
+map.set(k, s);
+};
 ledger.forEach((e) => {
 if (e.autoCap || !e.ownerKey || !e.date || !['accrual', 'earned', 'cancellation'].includes(e.kind)) return;
 const amt = Number(e.amount) || 0;
 if (amt <= 0) return;
-const ym = e.date.slice(0, 7);
-const k = `${e.ownerKey}|${ym}`;
-const s = sums.get(k) || { key: e.ownerKey, ym, total: 0, lastDate: e.date };
-s.total += amt;
-if (e.date > s.lastDate) s.lastDate = e.date;
-sums.set(k, s);
+if (e.date < CAP_KEEPS_FROM) { bump(sums, e.ownerKey, e.date.slice(0, 7), amt, e.date); return; }
+const pct = Number(e.pct) || 50;
+const gross = Number(e.gross) || (amt * 100) / pct;
+const res = e.reservationId && reservations.find((r) => r.id === e.reservationId);
+const capDate = (res && res.paidOn) || e.capDate || e.date;
+bump(keepSums, e.ownerKey, capDate.slice(0, 7), Math.max(0, gross - amt), e.date);
 });
+const monthEndOf = (ym) => { const [y, m] = ym.split('-').map(Number); return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10); };
 const wanted = new Map();
 sums.forEach((s) => {
-const [y, m] = s.ym.split('-').map(Number);
-const monthEnd = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
-const cap = ownerCapAt(s.key, monthEnd);
+const cap = ownerCapAt(s.key, monthEndOf(s.ym));
 if (cap == null) return;
 const excess = Math.round((s.total - cap) * 100) / 100;
 if (excess <= 0.004) return;
 const id = `capadj:${s.key}:${s.ym}`;
 wanted.set(id, { id, ownerKey: s.key, kind: 'adjustment', autoCap: true, amount: -excess, date: s.lastDate, note: `Monthly cap ${money(cap)}, ${s.ym}` });
+});
+keepSums.forEach((s) => {
+const cap = ownerCapAt(s.key, monthEndOf(s.ym));
+if (cap == null) return;
+const excess = Math.round((s.total - cap) * 100) / 100;
+if (excess <= 0.004) return;
+const id = `capkeep:${s.key}:${s.ym}`;
+wanted.set(id, { id, ownerKey: s.key, kind: 'adjustment', autoCap: true, amount: excess, date: s.lastDate, note: `${ownerNameFor(s.key)} keeps up to ${money(cap)} in ${s.ym}; the rest is owed` });
 });
 let changed = false;
 const kept = ledger.filter((e) => !e.autoCap || wanted.has(e.id));
@@ -270,6 +303,7 @@ date: r.checkout,
 note: `${listing.label || 'listing'}${r.guestName ? `, ${r.guestName}` : ''}`,
 reservationId: r.id,
 listingId: r.listingId,
+...(r.paidOn ? { capDate: r.paidOn } : {}),
 });
 r.accruedAt = new Date().toISOString();
 added += 1;
