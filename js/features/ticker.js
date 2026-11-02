@@ -569,7 +569,7 @@ const from = new Date(dateIso);
 const to = new Date(from);
 to.setDate(to.getDate() + 7);
 const chart = JSON.parse(await viaProxy(
-`https://query1.finance.yahoo.com/v8/finance/chart/${DBK}`
+`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(data.ticker.holdingSymbol || 'DBK.DE')}`
 + `?period1=${Math.floor(from.getTime() / 1000)}&period2=${Math.floor(to.getTime() / 1000)}&interval=1d`,
 ));
 const result = ((chart.chart || {}).result || [])[0];
@@ -620,10 +620,16 @@ added += buy.shares;
 // skipped: skipping it would lose that purchase silently and leave
 // sharesAt past it, so it could never be recovered.
 console.error('Share accrual stopped at', iso(due), err);
-break;
+// Kept on the record and shown in the Holding dialog: this used to log
+// to the console only, so a month that couldn't be priced looked exactly
+// like "nothing due yet".
+t.accrualError = { on: iso(due), paidOn: iso(paidOn), message: (err && err.message) || String(err), at: new Date().toISOString() };
+queueSave();
+return { added, bought, failed: true };
 }
 t.sharesAt = iso(due);
 }
+if (t.accrualError) { delete t.accrualError; queueSave(); }
 if (added) queueSave();
 return { added, bought };
 }
@@ -1028,6 +1034,8 @@ dialog.innerHTML = `<div class="mail-view-card" style="max-width:420px;">
 ${rows ? `<table class="limits-table" style="min-width:0;width:100%;margin:4px 0;"><thead><tr><th>Month</th><th style="text-align:right;">Shares added</th><th style="text-align:right;">Price paid</th><th style="text-align:right;">Put in</th></tr></thead><tbody>${rows}</tbody>
 <tfoot><tr><td><strong>Since baseline</strong></td><td style="text-align:right;"><strong>+${accruedShares.toFixed(4)}</strong></td><td></td><td style="text-align:right;"><strong>£${Math.round(accruals.reduce((n, a) => n + (Number(a.gbp) || 0), 0)).toLocaleString('en-GB')}</strong></td></tr></tfoot></table>`
 : '<div class="settings-note" style="margin:4px 0;">Nothing added since the baseline yet. Each month\'s purchase will be listed here.</div>'}
+${t.accrualError ? `<div class="settings-note" style="margin:4px 0;color:var(--red);">The ${escapeHtml(t.accrualError.on)} purchase couldn't be priced (needs the DBK close and GBP/EUR rate for ${escapeHtml(t.accrualError.paidOn)}): ${escapeHtml(t.accrualError.message)}</div>
+<button class="sync-btn sm" type="button" data-holding-retry>Try pricing it again</button>` : ''}
 <div class="settings-note" style="margin:4px 0 10px;">Now: <strong>${t.shares.toLocaleString('en-GB')}</strong> shares</div>
 <label class="settings-note" style="display:block;margin:0 0 3px;">Rebaseline: the real share count today</label>
 <div class="sync-row" style="margin:0;">
@@ -1045,6 +1053,15 @@ document.body.appendChild(dialog);
 const close = () => dialog.remove();
 bindBackdropClose(dialog, close);
 dialog.querySelector('[data-holding-cancel]').addEventListener('click', close);
+const retry = dialog.querySelector('[data-holding-retry]');
+if (retry) retry.addEventListener('click', async () => {
+retry.disabled = true;
+retry.textContent = 'Pricing…';
+try { await accrueShares(); } catch (err) { console.error('Ticker: share accrual failed:', err); }
+renderTicker();
+close();
+editShares();
+});
 dialog.querySelector('[data-holding-rebaseline]').addEventListener('click', () => {
 const n = Number(dialog.querySelector('#holding-edit-shares').value);
 if (!Number.isFinite(n) || n < 0) return;
