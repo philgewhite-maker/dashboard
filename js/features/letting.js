@@ -120,6 +120,7 @@ return full || note;
 // payment or refund doesn't split a booking, so it has no owner's side.
 function ownerKeepsFor(e) {
 if (e.autoCap) return -(Number(e.amount) || 0);
+if (e.kind === 'refund') return e.refundGross == null ? null : Math.round((e.refundGross - (Number(e.amount) || 0)) * 100) / 100;
 if (!['accrual', 'earned', 'cancellation'].includes(e.kind)) return null;
 const gross = Number(e.gross);
 return gross > 0 ? Math.round((gross - (Number(e.amount) || 0)) * 100) / 100 : null;
@@ -220,7 +221,14 @@ if (date > s.lastDate) s.lastDate = date;
 map.set(k, s);
 };
 ledger.forEach((e) => {
-if (e.autoCap || !e.ownerKey || !e.date || !['accrual', 'earned', 'cancellation'].includes(e.kind)) return;
+if (e.autoCap || !e.ownerKey || !e.date) return;
+// A refund shares the booking's split in reverse: it takes back part of
+// what the owner kept as well as part of what they owe you.
+if (e.kind === 'refund') {
+if (e.refundGross != null && e.date >= CAP_KEEPS_FROM) bump(keepSums, e.ownerKey, e.date.slice(0, 7), e.refundGross - (Number(e.amount) || 0), e.date);
+return;
+}
+if (!['accrual', 'earned', 'cancellation'].includes(e.kind)) return;
 const amt = Number(e.amount) || 0;
 if (amt <= 0) return;
 if (e.date < CAP_KEEPS_FROM) { bump(sums, e.ownerKey, e.date.slice(0, 7), amt, e.date); return; }
@@ -2594,6 +2602,6 @@ if (keep) sel.value = keep;
 }
 
 export {
-accrueLettings, reconcileMonthlyCaps, renderLetting, initLetting, totalOwed, totalGross, balanceFor, grossFor, owners, ownerNameFor, ownerKeyFor, sharePctFor, shareRuleAt, splitAmountFor, money, isMyOwnKey, isMyOwnListing,
+CAP_KEEPS_FROM, accrueLettings, reconcileMonthlyCaps, renderLetting, initLetting, totalOwed, totalGross, balanceFor, grossFor, owners, ownerNameFor, ownerKeyFor, sharePctFor, shareRuleAt, splitAmountFor, money, isMyOwnKey, isMyOwnListing,
 entriesFor, nightRateFor, money0, monthRange, monthLabel, addMonths, today, resolveColor, listingColorVar, nightsByMonthForEntry,
 };

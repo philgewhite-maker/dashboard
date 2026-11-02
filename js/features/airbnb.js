@@ -10,7 +10,7 @@
 // is the exception -- its title carries the name, and that's read off it.
 import { data, queueSave, blankAirbnbListing, blankAirbnbReservation, blankAirbnbKey, blankAirbnbKeyAssignment, KEY_CUSTODIAN_TYPES } from '../state.js';
 import { escapeHtml, todayStr, dateStrAdd, uid, MISSING_KEY_LINK_HTML, pickChipHtml } from '../utils.js';
-import { owners, ownerNameFor, money } from './letting.js';
+import { owners, ownerNameFor, ownerKeyFor, shareRuleAt, money, CAP_KEEPS_FROM } from './letting.js';
 import { gmailLink } from '../googlemail.js';
 import { parseIcsReservations } from '../icsparse.js';
 
@@ -1511,14 +1511,23 @@ return checkin.getDate() === startDay && checkin.getMonth() + 1 === startMonth;
 
 // The one place a refund row is written -- from Sync, or from mapping an
 // unposted one by hand. Returns false when it was already on the ledger.
-function postRefundRow({ ownerKey, amount, sentOn, guest, messageId, fallbackNote }) {
+//
+// From CAP_KEEPS_FROM a refund follows the payout split in reverse: with a
+// 50% share, a £30 refund takes £15 off what the owner owes you (and £15
+// off what they keep). Earlier refunds were charged to the owner's debt in
+// full, and stay that way.
+function postRefundRow({ ownerKey, amount, sentOn, guest, messageId, fallbackNote, listing }) {
 const already = data.lettingLedger.some((e) => e.kind === 'refund' && (e.sourceMessageId === messageId
-|| (e.ownerKey === ownerKey && (e.note || '') === (guest || '') && Math.abs((Number(e.amount) || 0) + amount) < 0.01
+|| (e.ownerKey === ownerKey && (e.note || '') === (guest || '') && Math.abs((e.refundGross ?? -(Number(e.amount) || 0)) - amount) < 0.01
 && Math.abs(new Date(`${e.date}T00:00:00`) - new Date(`${sentOn}T00:00:00`)) <= 14 * 86400000)));
 if (already) return false;
+const shared = sentOn >= CAP_KEEPS_FROM;
+const refundListing = listing || (data.airbnbListings || []).find((l) => ownerKeyFor(l) === ownerKey);
+const pct = shared ? shareRuleAt(refundListing, sentOn).pct : 100;
 data.lettingLedger.push({
 id: uid(), ownerKey, kind: 'refund',
-amount: -amount, // money OUT, not in -- the whole point of this kind
+amount: shared ? -Math.round(amount * pct) / 100 : -amount, // money OUT, not in -- the whole point of this kind
+...(shared ? { refundGross: -amount, pct } : {}),
 platform: 'airbnb',
 date: sentOn,
 note: guest || fallbackNote || 'Refund to guest',
@@ -1637,7 +1646,7 @@ problems.push(p);
 mappable.push(p);
 continue;
 }
-if (postRefundRow({ ownerKey, amount, sentOn, guest: guestName, messageId: m.id, fallbackNote: label })) posted++;
+if (postRefundRow({ ownerKey, amount, sentOn, guest: guestName, messageId: m.id, fallbackNote: label, listing })) posted++;
 seen.add(m.id);
 }
 data.prefs.airbnbRefundsDone = [...seen];
