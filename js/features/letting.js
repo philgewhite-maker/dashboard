@@ -1188,12 +1188,14 @@ return groups;
 // exclusive (the turnover day, same convention as everywhere else this app
 // reads a reservation), so the loop stops the day before it.
 function nightsByMonth(checkin, checkout) {
-const start = new Date(`${checkin}T00:00:00`);
 const end = new Date(`${checkout}T00:00:00`);
 const counts = new Map();
 let total = 0;
-for (let t = start.getTime(); t < end.getTime(); t += DAY_MS) {
-const d = new Date(t);
+// Step by calendar day (setDate), never by adding 24 hours: the night the
+// clocks go back is 25 hours long, so adding 24h from local midnight lands on
+// 23:00 of the SAME day and counts that night twice -- which shifted a little
+// of every stay spanning a clock change into the wrong month.
+for (const d = new Date(`${checkin}T00:00:00`); d < end; d.setDate(d.getDate() + 1)) {
 const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 counts.set(ym, (counts.get(ym) || 0) + 1);
 total += 1;
