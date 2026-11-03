@@ -1238,6 +1238,59 @@ if (!dateStr || !(nights > 0)) return '';
 return addDaysIso(dateStr, -nights);
 }
 
+// Every piece of income the Income by month chart counts, before it is split
+// between owners: a reservation with income, a historic "earned" row, a
+// cancellation payout, an accrual whose reservation has aged out. One list,
+// so the occupancy and booking-pace charts add up the same money by
+// construction instead of re-deriving it. `start`/`end` (exclusive) are the
+// nights it covers; an item with none is one lump on `date`. `splitDate` is
+// the date the owner-share rule is looked up on. `explicit` says the row
+// named its own room rather than falling back to its owner's first one.
+function lettingIncomeItems() {
+const listings = data.airbnbListings || [];
+const listingById = new Map(listings.map((l) => [l.id, l]));
+const reservationIds = new Set((data.airbnbReservations || []).map((r) => r.id));
+const items = [];
+(data.airbnbReservations || []).forEach((r) => {
+const income = Number(r.income);
+if (!Number.isFinite(income) || income <= 0) return;
+if (!r.checkin || !r.checkout || r.checkout <= r.checkin) return;
+const listing = listingById.get(r.listingId);
+if (!listing) return; // listing deleted, or never assigned -- nothing to attribute this to
+items.push({ id: r.id, source: 'reservation', kind: 'reservation', listing, explicit: true, gross: income, start: r.checkin, end: r.checkout, date: r.checkout, splitDate: r.checkout, platform: r.platform === 'other' ? 'other' : 'airbnb', note: r.guestName || '' });
+});
+(data.lettingLedger || []).forEach((e) => {
+const isOrphanedAccrual = e.kind === 'accrual' && e.reservationId && !reservationIds.has(e.reservationId);
+if ((e.kind !== 'earned' && e.kind !== 'cancellation' && !isOrphanedAccrual) || !e.gross || !e.date) return;
+const named = e.listingId && listingById.get(e.listingId);
+const listing = named || listings.find((l) => ownerKeyFor(l) === e.ownerKey);
+if (!listing) return;
+// A historic booking that actually ran longer than one month gets
+// split pro-rata by night across every month it spans, exactly like a
+// real reservation's own checkin/checkout (nightsByMonth) -- otherwise
+// the whole gross lands as one spike in a single month, which is what
+// was blowing the chart's own scale for a multi-month let. A real
+// startDate+nights pair (letting-add-start-date/-nights inputs above)
+// wins when both are set, counted FORWARD from check-in rather than
+// bounded by `date` -- `date` is the payout/accrual date, which can
+// legitimately land any time during the stay, not just on its last
+// day, so it must never be the thing deciding where the stay's own
+// nights actually fall. Falling back to "date minus nights" only when
+// there's no real startDate to use instead -- a guess, not a certainty,
+// but still better than lumping the whole gross into date's own single
+// month just because neither of the above was available.
+const splitStart = (e.startDate && e.nights > 0) ? e.startDate : impliedStartDate(e.date, e.nights);
+const splitEnd = (e.startDate && e.nights > 0) ? addDaysIso(e.startDate, e.nights) : e.date;
+const spans = !!(splitStart && splitEnd && splitStart < splitEnd);
+items.push({
+id: e.id, source: 'ledger', kind: e.kind, listing, explicit: !!named, ownerKey: e.ownerKey,
+gross: Number(e.gross), start: spans ? splitStart : '', end: spans ? splitEnd : '', date: e.date, splitDate: e.date,
+platform: e.platform === 'other' ? 'other' : 'airbnb', note: e.note || '', checkin: e.checkin || '', checkout: e.checkout || '',
+});
+});
+return items;
+}
+
 // One Map per group (Mine / Lewis' / Zara's / ...), ym -> allocated
 // income, built fresh from data.airbnbReservations every render -- same
 // "derive it, don't store it" rule the owed/gross totals above already
@@ -1277,23 +1330,7 @@ byMonth.set(ym, bucket);
 };
 
 const listings = data.airbnbListings || [];
-const listingById = new Map(listings.map((l) => [l.id, l]));
-const reservationIds = new Set((data.airbnbReservations || []).map((r) => r.id));
-
-(data.airbnbReservations || []).forEach((r) => {
-const income = Number(r.income);
-if (!Number.isFinite(income) || income <= 0) return;
-if (!r.checkin || !r.checkout || r.checkout <= r.checkin) return;
-const listing = listingById.get(r.listingId);
-if (!listing) return; // listing deleted, or never assigned -- nothing to attribute this to
-const { counts, total } = nightsByMonth(r.checkin, r.checkout);
-if (!total) return;
-const platform = r.platform === 'other' ? 'other' : 'airbnb';
-counts.forEach((nights, ym) => {
-if (!baseMonthSet.has(ym)) return;
-splitContribution(listing, income * (nights / total), r.checkout).forEach((c) => { addAmount(c.group, ym, c.amount); addAmountPlatform(c.group, ym, platform, c.amount); });
-});
-});
+const items = lettingIncomeItems();
 
 // "Earned (historic)" and "cancellation" ledger rows -- real income
 // that has no entry in data.airbnbReservations for the loop above to
@@ -1324,41 +1361,20 @@ splitContribution(listing, income * (nights / total), r.checkout).forEach((c) =>
 // not just a default -- a historic entry older than that is excluded
 // rather than widening the chart back to meet it, so the window stays
 // a fixed 15 months regardless of how far back the ledger goes.
-(data.lettingLedger || []).forEach((e) => {
-const isOrphanedAccrual = e.kind === 'accrual' && e.reservationId && !reservationIds.has(e.reservationId);
-if ((e.kind !== 'earned' && e.kind !== 'cancellation' && !isOrphanedAccrual) || !e.gross || !e.date) return;
-const listing = (e.listingId && listingById.get(e.listingId)) || listings.find((l) => ownerKeyFor(l) === e.ownerKey);
-if (!listing) return;
-// A historic booking that actually ran longer than one month gets
-// split pro-rata by night across every month it spans, exactly like a
-// real reservation's own checkin/checkout (nightsByMonth) -- otherwise
-// the whole gross lands as one spike in a single month, which is what
-// was blowing the chart's own scale for a multi-month let. A real
-// startDate+nights pair (letting-add-start-date/-nights inputs above)
-// wins when both are set, counted FORWARD from check-in rather than
-// bounded by `date` -- `date` is the payout/accrual date, which can
-// legitimately land any time during the stay, not just on its last
-// day, so it must never be the thing deciding where the stay's own
-// nights actually fall. Falling back to "date minus nights" only when
-// there's no real startDate to use instead -- a guess, not a certainty,
-// but still better than lumping the whole gross into date's own single
-// month just because neither of the above was available.
-const platform = e.platform === 'other' ? 'other' : 'airbnb';
-const splitStart = (e.startDate && e.nights > 0) ? e.startDate : impliedStartDate(e.date, e.nights);
-const splitEnd = (e.startDate && e.nights > 0) ? addDaysIso(e.startDate, e.nights) : e.date;
-if (splitStart && splitEnd && splitStart < splitEnd) {
-const { counts, total } = nightsByMonth(splitStart, splitEnd);
+items.forEach((it) => {
+if (it.start) {
+const { counts, total } = nightsByMonth(it.start, it.end);
 if (!total) return;
 counts.forEach((nights, ym) => {
 if (!baseMonthSet.has(ym)) return;
-splitContribution(listing, Number(e.gross) * (nights / total), e.date).forEach((c) => { addAmount(c.group, ym, c.amount); addAmountPlatform(c.group, ym, platform, c.amount); });
+splitContribution(it.listing, it.gross * (nights / total), it.splitDate).forEach((c) => { addAmount(c.group, ym, c.amount); addAmountPlatform(c.group, ym, it.platform, c.amount); });
 });
 return;
 }
-const ym = e.date.slice(0, 7);
+const ym = it.date.slice(0, 7);
 if (ym > endYm) return; // a future-dated "historic" entry makes no sense -- ignore rather than extend forward
 if (ym < baseStart) return; // older than the rolling window -- excluded, not widened in to meet it
-splitContribution(listing, Number(e.gross), e.date).forEach((c) => { addAmount(c.group, ym, c.amount); addAmountPlatform(c.group, ym, platform, c.amount); });
+splitContribution(it.listing, it.gross, it.date).forEach((c) => { addAmount(c.group, ym, c.amount); addAmountPlatform(c.group, ym, it.platform, c.amount); });
 });
 
 const months = monthRange(baseStart, endYm);
@@ -2650,5 +2666,5 @@ if (keep) sel.value = keep;
 
 export {
 CAP_KEEPS_FROM, accrueLettings, reconcileMonthlyCaps, renderLetting, initLetting, totalOwed, totalGross, balanceFor, grossFor, owners, ownerNameFor, ownerKeyFor, sharePctFor, shareRuleAt, splitAmountFor, money, isMyOwnKey, isMyOwnListing,
-lettingChartMonthTotal, entriesFor, nightRateFor, money0, monthRange, monthLabel, addMonths, today, resolveColor, listingColorVar, nightsByMonthForEntry,
+lettingChartMonthTotal, lettingIncomeItems, entriesFor, nightRateFor, money0, monthRange, monthLabel, addMonths, today, resolveColor, listingColorVar, nightsByMonthForEntry,
 };

@@ -12,7 +12,7 @@
 // the live list the moment it ends or is cancelled.
 import { data } from '../state.js';
 import { escapeHtml, dateStrAdd, todayStr } from '../utils.js';
-import { listingColorVar, resolveColor, addMonths, monthLabel, ownerKeyFor, ownerNameFor, lettingChartMonthTotal, money0 } from './letting.js';
+import { listingColorVar, resolveColor, addMonths, monthLabel, ownerKeyFor, ownerNameFor, lettingChartMonthTotal, lettingIncomeItems, money0 } from './letting.js';
 
 const DAY_MS = 86400000;
 const MIN_COVERAGE = 0.8; // share of a month's nights that must have a known booking date before it is compared
@@ -66,15 +66,21 @@ const k = ownerKeyFor(l);
 if (!ownerListings.has(k)) ownerListings.set(k, []);
 ownerListings.get(k).push(l);
 });
-const reservationIds = new Set((data.airbnbReservations || []).map((r) => r.id));
+// Revenue is read straight from the income items the Income by month chart adds up, so
+// the two can't drift apart. Stays below are only for drawing and counting nights.
+const items = lettingIncomeItems();
 let unplaced = 0;
-const lumps = [];       // dated lump sums with no night-by-night shape: cancellation payouts, undated historic income
-const revenueOnly = []; // income that spans nights but has no room to draw it on
+let unplacedIncome = 0;
+// Income from the ledger (historic or aged-out bookings) that spans real nights becomes a stay to draw,
+// on the room the row names or, failing that, its owner's only room.
+items.forEach((it) => {
+if (it.source !== 'ledger' || it.kind === 'cancellation' || !it.start) return;
+const listingId = roomForCancellation({ listingId: it.explicit ? it.listing.id : '', ownerKey: it.ownerKey, date: it.date }, ownerListings);
+if (!listingId) { unplacedIncome += 1; return; }
+add({ id: `led:${it.id}`, listingId, checkin: it.start, checkout: it.end, guest: it.note, income: it.gross, bookedOn: '', status: 'stay', source: 'ledger' });
+});
 (data.lettingLedger || []).forEach((e) => {
 if (e.kind === 'cancellation') {
-const gross = Number(e.gross) || 0;
-// The payout is revenue whether or not we know the room.
-if (gross && e.date) lumps.push({ id: e.id, date: e.date, gross });
 const checkin = e.checkin || dateStrAdd(e.date, -1);
 const listingId = roomForCancellation(e, ownerListings);
 if (!listingId) { unplaced += 1; return; }
@@ -82,38 +88,12 @@ if ((data.airbnbCancelledStays || []).some((s) => s.listingId === listingId && s
 // Without a recorded end date the stay's own length is unknown, so one night is drawn.
 const checkout = e.checkout && e.checkout > checkin ? e.checkout : dateStrAdd(checkin, 1);
 add({ id: `led:${e.id}`, listingId, checkin, checkout, guest: e.note || '', income: null, bookedOn: '', cancelledOn: e.date, status: 'cancelled', source: 'ledger', approx: !(e.checkout && e.checkout > checkin) });
-return;
-}
-if (e.kind === 'accrual' || e.kind === 'earned') {
-// The Income by month chart counts a historic "earned" row, and an accrual whose
-// reservation has aged out; an accrual whose reservation is still on file is the
-// reservation's own income, already counted. Same rule here.
-const orphaned = e.kind === 'accrual' && e.reservationId && !reservationIds.has(e.reservationId);
-if ((e.kind !== 'earned' && !orphaned) || !e.gross || !e.date) return;
-const span = ledgerSpan(e);
-if (e.listingId && span) {
-add({ id: `led:${e.id}`, listingId: e.listingId, checkin: span.start, checkout: span.end, guest: e.note || '', income: e.gross, bookedOn: '', status: 'stay', source: 'ledger' });
-return;
-}
-if (span) revenueOnly.push({ checkin: span.start, checkout: span.end, income: e.gross, status: 'stay' });
-else lumps.push({ id: e.id, date: e.date, gross: Number(e.gross) });
 }
 });
 stays.unplacedCancellations = unplaced;
-stays.lumps = lumps;
-stays.revenueOnly = revenueOnly;
+stays.unplacedIncome = unplacedIncome;
+stays.items = items;
 return stays;
-}
-
-// The nights a ledger row's income belongs to, read the way the Income by month
-// chart reads it: a real start date plus night count wins (counted forward from
-// check-in; the payout date can land anywhere in a stay), else the payout date
-// minus the nights. No night count means one lump on the payout date.
-function ledgerSpan(e) {
-const nights = Number(e.nights);
-if (e.startDate && nights > 0) return { start: e.startDate, end: dateStrAdd(e.startDate, nights) };
-if (e.date && nights > 0) return { start: dateStrAdd(e.date, -nights), end: e.date };
-return null;
 }
 
 // A cancellation payout from before the room was stored on it. Its owner's only
@@ -172,13 +152,15 @@ const out = [];
 for (let d = 1; d <= n; d++) {
 if (dayStr(ym, d) > today) { out.push(null); continue; }
 let sum = 0;
-stays.forEach((s) => { sum += countFor(s, ym, d, metric, today); });
 if (metric === 'revenue') {
-// Income with no room to draw (it still counts toward the month's revenue).
-(stays.revenueOnly || []).forEach((s) => { sum += countFor(s, ym, d, metric, today); });
-// A payout lands on its own date, all at once, and only once that date has passed.
 const day = dayStr(ym, d);
-(stays.lumps || []).forEach((p) => { if (p.date.slice(0, 7) === ym && p.date <= day && p.date <= today) sum += p.gross; });
+(stays.items || []).forEach((it) => {
+if (it.start) { sum += countFor({ checkin: it.start, checkout: it.end, income: it.gross, status: 'stay' }, ym, d, 'revenue', today); return; }
+// No nights to spread it over: a payout lands on its own date, all at once, once that date has passed.
+if (it.date.slice(0, 7) === ym && it.date <= day && it.date <= today) sum += it.gross;
+});
+} else {
+stays.forEach((s) => { sum += countFor(s, ym, d, metric, today); });
 }
 out.push(Math.round(sum * 100) / 100);
 }
@@ -189,6 +171,11 @@ return out;
 // nights belong to stays with a known booking date. Older stays predate that
 // being recorded, so they say so instead of showing a flat, misleading line.
 function coverageFor(stays, ym, metric) {
+if (metric === 'revenue') {
+// Revenue exists from the first income item onward; before that there is nothing to compare with.
+const next = dayStr(addMonths(ym, 1), 1);
+return (stays.items || []).some((it) => (it.start || it.date) < next) ? 1 : 0;
+}
 let total = 0; let known = 0;
 stays.forEach((s) => {
 const n = nightsInMonth(s, ym);
@@ -547,10 +534,11 @@ const nights = inMonth.reduce((a, s) => a + nightsInMonth(s, state.ym), 0);
 const cancelled = stays.filter((s) => s.status === 'cancelled' && nightsInMonth(s, state.ym) > 0).length;
 const roomNights = (listings.length || 1) * daysIn(state.ym);
 const unplaced = stays.unplacedCancellations ? `; ${stays.unplacedCancellations} older cancellation payout${stays.unplacedCancellations === 1 ? '' : 's'} couldn't be placed on a room` : '';
-const payouts = (stays.lumps || []).filter((p) => p.date.slice(0, 7) === state.ym);
-const payoutNote = state.metric === 'revenue' && payouts.length ? `. Revenue includes £${Math.round(payouts.reduce((a, p) => a + p.gross, 0)).toLocaleString('en-GB')} from ${payouts.length} payout${payouts.length === 1 ? '' : 's'} with no booking (cancellations and historic entries)` : '';
+const payouts = (stays.items || []).filter((it) => !it.start && it.date.slice(0, 7) === state.ym);
+const payoutNote = state.metric === 'revenue' && payouts.length ? `. Revenue includes £${Math.round(payouts.reduce((a, p) => a + p.gross, 0)).toLocaleString('en-GB')} from ${payouts.length} payout${payouts.length === 1 ? '' : 's'} with no stay dates (cancellations and historic entries)` : '';
+const undrawn = stays.unplacedIncome ? `; ${stays.unplacedIncome} ledger income entr${stays.unplacedIncome === 1 ? 'y' : 'ies'} couldn't be placed on a room (counted in revenue, not drawn)` : '';
 const check = reconcileNote(stays);
-sum.textContent = `${inMonth.length} booking${inMonth.length === 1 ? '' : 's'}, ${nights} night${nights === 1 ? '' : 's'} (${Math.round((nights / roomNights) * 100)}% of room-nights)${cancelled ? `, ${cancelled} cancelled` : ''}${unplaced}${payoutNote}.${check ? ` Against Income by month: ${check}.` : ''}`;
+sum.textContent = `${inMonth.length} booking${inMonth.length === 1 ? '' : 's'}, ${nights} night${nights === 1 ? '' : 's'} (${Math.round((nights / roomNights) * 100)}% of room-nights)${cancelled ? `, ${cancelled} cancelled` : ''}${unplaced}${undrawn}${payoutNote}.${check ? ` Against Income by month: ${check}.` : ''}`;
 }
 }
 
