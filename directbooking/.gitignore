@@ -1,0 +1,10 @@
+# Real config holds Stripe/Beds24 secrets -- only the .example is tracked.
+config/config.php
+# SQLite database, logs, sessions -- runtime state, never committed.
+data/*
+!data/.keep
+# Published pages are generated on the server by bin/publish.php.
+public/*
+!public/index.php
+!public/.htaccess
+!public/assets/
