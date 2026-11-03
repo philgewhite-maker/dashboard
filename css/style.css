@@ -4340,3 +4340,46 @@ max-width:none;
 .inbox-edit{margin:4px 0;}
 .inbox-edit summary{cursor:pointer;font-size:11px;color:var(--muted);}
 .inbox-edit label{display:flex;flex-direction:column;gap:2px;font-size:11px;color:var(--muted);margin:4px 0;}
+
+/* Activity tray (js/features/activity.js): stacked cards for running/finished
+   long actions. Sits above the share banner when one is showing. */
+.activity-tray{
+position:fixed;right:12px;bottom:12px;z-index:49;
+display:flex;flex-direction:column;gap:8px;
+width:min(360px,calc(100vw - 24px));
+max-height:60vh;overflow-y:auto;
+}
+body:has(.share-banner) .activity-tray{bottom:84px;}
+.activity-card{
+background:var(--card);color:var(--ink);
+border:1px solid var(--line);border-radius:10px;
+padding:10px 12px;font-size:12px;
+box-shadow:0 4px 16px rgba(0,0,0,.14);
+display:flex;flex-direction:column;gap:5px;
+}
+.activity-head{display:flex;align-items:center;gap:8px;}
+.activity-label{font-weight:600;flex:1 1 auto;min-width:0;}
+.activity-state{
+font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.04em;text-transform:uppercase;
+padding:2px 7px;border-radius:10px;flex:0 0 auto;
+background:var(--slate-bg);color:var(--slate);
+}
+.activity-card.done .activity-state{background:var(--sage-bg);color:var(--sage);}
+.activity-card.zero .activity-state{background:var(--amber-bg);color:var(--amber);}
+.activity-card.fail .activity-state{background:var(--red-bg);color:var(--red);}
+.activity-x{cursor:pointer;opacity:.6;font-size:16px;line-height:1;}
+.activity-x:hover{opacity:1;}
+.activity-msg{color:var(--ink);overflow-wrap:anywhere;}
+.activity-time,.activity-leave{color:var(--muted);font-size:11px;}
+.activity-where{font-size:11px;color:var(--muted);}
+.activity-bar{height:5px;border-radius:3px;background:var(--line);overflow:hidden;}
+.activity-bar span{display:block;height:100%;background:var(--slate);border-radius:3px;transition:width .3s;}
+.activity-bar.indeterminate span{animation:activity-slide 1.4s ease-in-out infinite;}
+@keyframes activity-slide{0%{margin-left:-40%;}100%{margin-left:100%;}}
+@media (prefers-reduced-motion:reduce){.activity-bar.indeterminate span{animation:none;margin-left:30%;}}
+/* The status line each panel keeps for itself now mirrors the tray. */
+.sync-status.busy{color:var(--slate);}
+.sync-status.ok{color:var(--sage);}
+.sync-status.zero{color:var(--amber);}
+.sync-status.error{color:var(--red);}
+.activity-card .sync-btn{align-self:flex-start;}

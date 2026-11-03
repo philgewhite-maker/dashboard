@@ -204,7 +204,7 @@ id: 'loyalty-balances', label: 'Loyalty balance scan', needsGoogle: true,
 note: 'Reads known loyalty-program emails (British Airways, Marriott Bonvoy, Virgin, Tesco Clubcard, Boots) about once a month for a real balance.',
 run: async () => {
 const { runLoyaltyBalanceScan } = await import('./loyaltybalances.js');
-await runLoyaltyBalanceScan();
+await runLoyaltyBalanceScan({ quiet: true });
 },
 },
 {

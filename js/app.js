@@ -2,6 +2,7 @@
 import { initDiagnostics } from './diagnostics.js';
 import { initSettingsVault } from './settingsvault.js';
 import { initTheme } from './theme.js';
+import { initActivity } from './features/activity.js';
 import { loadData, setSaveStatusHandler, setExternalUpdateHandler, flushSave } from './state.js';
 import { renderAll } from './render-all.js';
 import { switchTab } from './tabs.js';
@@ -352,6 +353,7 @@ initRecordSync();
 initDiagnostics();
 initSettingsVault();
 initTheme();
+initActivity();
 }
 
 main();

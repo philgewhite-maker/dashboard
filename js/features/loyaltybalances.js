@@ -24,6 +24,8 @@ import { data, queueSave, blankLoyaltyProgram, blankLoyaltyBalance } from '../st
 import { escapeHtml, uid, daysSince, todayStr, logoBadgeHtml, bindLogoFallbacks } from '../utils.js';
 import { fetchMailSearches, getMessageDetail } from '../googlemail.js';
 import { voucherChipHtml } from './vouchers.js';
+import { track } from './activity.js';
+import { canAttemptGoogleAction } from '../sync/googleauth.js';
 import { matchBrandLogo } from '../brandLogos.js';
 import { resolveProvider, refreshProviderDatalists } from '../providers.js';
 
@@ -705,11 +707,47 @@ if (tracked) tracked.voucherLinkStatus = 'skipped';
 return { programId: program.id, programName: program.name, matched, unmatched, newRows: newRows.length, messagesFound: messages.length, alreadySeen };
 }
 
-async function runLoyaltyBalanceScan({ force } = {}) {
+// Where a finished scan's output actually lives. Two homes, which used to be
+// the confusing part: balances go on the Loyalty cards; anything that looks
+// like a voucher goes to the review queue in the Vouchers panel.
+function loyaltyWhere({ newRows, reviewCount }) {
+const where = [];
+if (newRows) where.push({ tab: 'finances', target: '#loyalty-balances-panel', label: 'Loyalty balances' });
+if (reviewCount) where.push({ tab: 'finances', target: '#voucher-review-section', fallback: '#vouchers-panel', label: `Vouchers: ${reviewCount} to review` });
+return where;
+}
+
+// `quiet`: a background run (the scheduled one on app open) stays out of
+// sight unless it found something or failed.
+async function runLoyaltyBalanceScan({ force, quiet = false } = {}) {
+const t = track({
+id: 'loyalty-scan', label: 'Loyalty check', hint: force ? '1-3 minutes' : 'under a minute', leave: 'stops',
+mirror: 'loyalty-scan-status', quiet,
+retry: () => runLoyaltyBalanceScan({ force }),
+// While running we don't know which home each reading will land in, so name both.
+where: [
+{ tab: 'finances', target: '#loyalty-balances-panel', label: 'Loyalty balances' },
+{ tab: 'finances', target: '#voucher-review-section', fallback: '#vouchers-panel', label: 'Vouchers review queue' },
+],
+});
 const results = [];
-for (const program of data.loyaltyPrograms) {
-const result = await scanOneProgram(program, { force });
-if (result) results.push(result);
+try {
+if (!(await canAttemptGoogleAction())) {
+t.fail('Not signed in to Google, so no emails can be read.', { where: [{ tab: 'overview', target: '#google-bar', label: 'Sign in at the top' }] });
+return results;
+}
+const programs = data.loyaltyPrograms.slice();
+for (let i = 0; i < programs.length; i++) {
+const program = programs[i];
+t.step(i, programs.length, `Checking ${program.name} (${i + 1} of ${programs.length})…`);
+let result;
+try { result = await scanOneProgram(program, { force }); } catch (err) {
+result = { programId: program.id, programName: program.name, error: (err && err.message) || String(err) };
+}
+if (result) {
+results.push(result);
+lastCheckMessages.set(program.id, summariseResults([result]));
+}
 // A small gap between programs, not just the 403 retry above --
 // spreads out the burst of searches + message fetches across 9
 // programs instead of firing them in a tight loop, which is the more
@@ -717,6 +755,22 @@ if (result) results.push(result);
 await new Promise((r) => setTimeout(r, 300));
 }
 queueSave();
+const newRows = results.reduce((n, r) => n + (r.newRows || 0), 0);
+const failed = results.filter((r) => r.error);
+const skipped = results.filter((r) => r.skipped).length;
+const checked = results.length - failed.length - skipped;
+const reviewCount = pendingClassifications().length + pendingVoucherLinks().length;
+const parts = [`Checked ${checked} program${checked === 1 ? '' : 's'}${skipped ? `, skipped ${skipped} checked recently` : ''}.`];
+if (failed.length) parts.push(`${failed.length} failed: ${failed.map((r) => `${r.programName || r.programId} (${r.error})`).join('; ')}.`);
+const where = loyaltyWhere({ newRows, reviewCount });
+if (failed.length && failed.length === results.length) t.fail(parts.join(' '));
+else if (!newRows && !reviewCount) t.zero(`${parts.join(' ')} Nothing new.`);
+else t.done(`${parts.join(' ')} ${newRows} new reading${newRows === 1 ? '' : 's'}${reviewCount ? `, ${reviewCount} waiting for your decision` : ''}.`, { where });
+// The review queue lives in another panel; make sure it shows what was just found.
+import('./vouchers.js').then((m) => m.renderVouchers()).catch(() => {});
+} catch (err) {
+t.fail(err);
+}
 return results;
 }
 
@@ -1040,9 +1094,28 @@ if (!program) return;
 checkBtn.disabled = true;
 lastCheckMessages.set(programId, 'Checking…');
 if (statusEl) statusEl.textContent = 'Checking…';
-const result = await scanOneProgram(program, { force: true });
+const t = track({
+id: `loyalty-scan:${programId}`, label: `Loyalty check: ${program.name}`, hint: 'under a minute', leave: 'stops',
+where: [
+{ tab: 'finances', target: `[data-loyalty-program="${programId}"]`, fallback: '#loyalty-balances-panel', label: `${program.name} card` },
+{ tab: 'finances', target: '#voucher-review-section', fallback: '#vouchers-panel', label: 'Vouchers review queue' },
+],
+});
+let result;
+try {
+if (!(await canAttemptGoogleAction())) throw new Error('Not signed in to Google, so no emails can be read.');
+result = await scanOneProgram(program, { force: true });
+} catch (err) {
+result = { programId, programName: program.name, error: (err && err.message) || String(err) };
+}
 queueSave();
-lastCheckMessages.set(programId, summariseResults([result]));
+const text = summariseResults([result]);
+lastCheckMessages.set(programId, text);
+const reviewCount = pendingClassifications().length + pendingVoucherLinks().length;
+if (result.error) t.fail(text);
+else if (!result.newRows && !reviewCount) t.zero(text);
+else t.done(text, { where: loyaltyWhere({ newRows: result.newRows, reviewCount }) });
+import('./vouchers.js').then((m) => m.renderVouchers()).catch(() => {});
 renderLoyaltyBalances();
 return;
 }
@@ -1117,12 +1190,15 @@ renderLoyaltyBalances();
 });
 
 document.getElementById('loyalty-checknow-all-btn')?.addEventListener('click', async (e) => {
-e.target.disabled = true;
-const results = await runLoyaltyBalanceScan({ force: true });
-const statusEl = document.getElementById('loyalty-scan-status');
-if (statusEl) statusEl.textContent = summariseResults(results);
-e.target.disabled = false;
+const btn = e.currentTarget;
+btn.disabled = true;
+try {
+// The tray card and #loyalty-scan-status (its mirror) carry the outcome and where it went.
+await runLoyaltyBalanceScan({ force: true });
+} finally {
+btn.disabled = false;
 renderLoyaltyBalances();
+}
 });
 
 renderLoyaltyBalances();
