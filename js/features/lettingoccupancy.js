@@ -12,7 +12,7 @@
 // the live list the moment it ends or is cancelled.
 import { data } from '../state.js';
 import { escapeHtml, dateStrAdd, todayStr } from '../utils.js';
-import { listingColorVar, resolveColor, addMonths, monthLabel, ownerKeyFor, ownerNameFor } from './letting.js';
+import { listingColorVar, resolveColor, addMonths, monthLabel, ownerKeyFor, ownerNameFor, lettingChartMonthTotal, money0 } from './letting.js';
 
 const DAY_MS = 86400000;
 const MIN_COVERAGE = 0.8; // share of a month's nights that must have a known booking date before it is compared
@@ -34,13 +34,16 @@ function longMonth(ym) { const [y, m] = ym.split('-').map(Number); return new Da
 // A stay is matched across sources by listing + check-in + check-out so it is never drawn twice.
 function collectStays() {
 const stays = [];
-const seen = new Set();
+const seen = new Map();
 const keyOf = (s) => `${s.listingId}|${s.checkin}|${s.checkout}`;
 const add = (s) => {
 if (!s.listingId || !s.checkin || !s.checkout || s.checkout <= s.checkin) return;
-const k = `${s.status}|${keyOf(s)}`;
-if (seen.has(k)) return;
-seen.add(k);
+// One stay per room and check-in, whichever record it came from; a copy that knows the
+// income fills it in on the one already held (an unpaid copy must not hide a paid one).
+const k = s.status === 'stay' ? `stay|${s.listingId}|${s.checkin}` : `${s.status}|${keyOf(s)}`;
+const held = seen.get(k);
+if (held) { if (held.income == null && s.income != null) held.income = s.income; return; }
+seen.set(k, s);
 stays.push(s);
 };
 (data.airbnbReservations || []).forEach((r) => add({
@@ -82,24 +85,35 @@ add({ id: `led:${e.id}`, listingId, checkin, checkout, guest: e.note || '', inco
 return;
 }
 if (e.kind === 'accrual' || e.kind === 'earned') {
-const checkin = e.startDate || (e.nights ? dateStrAdd(e.date, -Number(e.nights)) : '');
-if (e.listingId && checkin) {
-add({ id: `led:${e.id}`, listingId: e.listingId, checkin, checkout: e.date, guest: e.note || '', income: e.gross ?? null, bookedOn: '', status: 'stay', source: 'ledger' });
+// The Income by month chart counts a historic "earned" row, and an accrual whose
+// reservation has aged out; an accrual whose reservation is still on file is the
+// reservation's own income, already counted. Same rule here.
+const orphaned = e.kind === 'accrual' && e.reservationId && !reservationIds.has(e.reservationId);
+if ((e.kind !== 'earned' && !orphaned) || !e.gross || !e.date) return;
+const span = ledgerSpan(e);
+if (e.listingId && span) {
+add({ id: `led:${e.id}`, listingId: e.listingId, checkin: span.start, checkout: span.end, guest: e.note || '', income: e.gross, bookedOn: '', status: 'stay', source: 'ledger' });
 return;
 }
-// Income the Letting income chart above counts but that has no room to draw: historic
-// entries, and accruals whose reservation has aged out. Same rule that chart uses.
-const orphaned = e.kind === 'accrual' && e.reservationId && !reservationIds.has(e.reservationId);
-if ((e.kind === 'earned' || orphaned) && e.gross && e.date) {
-if (checkin && checkin < e.date) revenueOnly.push({ checkin, checkout: e.date, income: e.gross, status: 'stay' });
+if (span) revenueOnly.push({ checkin: span.start, checkout: span.end, income: e.gross, status: 'stay' });
 else lumps.push({ id: e.id, date: e.date, gross: Number(e.gross) });
-}
 }
 });
 stays.unplacedCancellations = unplaced;
 stays.lumps = lumps;
 stays.revenueOnly = revenueOnly;
 return stays;
+}
+
+// The nights a ledger row's income belongs to, read the way the Income by month
+// chart reads it: a real start date plus night count wins (counted forward from
+// check-in; the payout date can land anywhere in a stay), else the payout date
+// minus the nights. No night count means one lump on the payout date.
+function ledgerSpan(e) {
+const nights = Number(e.nights);
+if (e.startDate && nights > 0) return { start: e.startDate, end: dateStrAdd(e.startDate, nights) };
+if (e.date && nights > 0) return { start: dateStrAdd(e.date, -nights), end: e.date };
+return null;
 }
 
 // A cancellation payout from before the room was stored on it. Its owner's only
@@ -535,8 +549,23 @@ const roomNights = (listings.length || 1) * daysIn(state.ym);
 const unplaced = stays.unplacedCancellations ? `; ${stays.unplacedCancellations} older cancellation payout${stays.unplacedCancellations === 1 ? '' : 's'} couldn't be placed on a room` : '';
 const payouts = (stays.lumps || []).filter((p) => p.date.slice(0, 7) === state.ym);
 const payoutNote = state.metric === 'revenue' && payouts.length ? `. Revenue includes £${Math.round(payouts.reduce((a, p) => a + p.gross, 0)).toLocaleString('en-GB')} from ${payouts.length} payout${payouts.length === 1 ? '' : 's'} with no booking (cancellations and historic entries)` : '';
-sum.textContent = `${inMonth.length} booking${inMonth.length === 1 ? '' : 's'}, ${nights} night${nights === 1 ? '' : 's'} (${Math.round((nights / roomNights) * 100)}% of room-nights)${cancelled ? `, ${cancelled} cancelled` : ''}${unplaced}${payoutNote}.`;
+const check = reconcileNote(stays);
+sum.textContent = `${inMonth.length} booking${inMonth.length === 1 ? '' : 's'}, ${nights} night${nights === 1 ? '' : 's'} (${Math.round((nights / roomNights) * 100)}% of room-nights)${cancelled ? `, ${cancelled} cancelled` : ''}${unplaced}${payoutNote}.${check ? ` Against Income by month: ${check}.` : ''}`;
 }
+}
+
+// On the revenue metric, finished months are checked against the Income by month
+// chart so a gap between the two shows up here rather than being taken on trust.
+function reconcileNote(stays) {
+if (state.metric !== 'revenue') return '';
+const months = [state.ym, ...compareMonths(state.ym, state.compare)].filter((m) => m < currentYm());
+return months.map((ym) => {
+const series = seriesFor(stays, ym, 'revenue', todayStr());
+const mine = series[series.length - 1] || 0;
+const main = lettingChartMonthTotal(ym);
+const gap = Math.round(main - mine);
+return `${monthLabel(ym)} ${money0(mine)} here, ${money0(main)} there${Math.abs(gap) > 1 ? ` (${money0(Math.abs(gap))} ${gap > 0 ? 'missing here' : 'extra here'})` : ' ✓'}`;
+}).join(' · ');
 }
 
 function renderLettingOccupancy() {

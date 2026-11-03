@@ -1371,6 +1371,14 @@ const activeGroups = [...groupMeta.values()].filter((g) => [...(perGroupByMonth.
 return { months, groups: activeGroups, perGroupByMonth, perGroupByMonthPlatform, nowIndex };
 }
 
+// One month's total on the Income by month chart, across every owner group.
+// Lets another view check itself against that chart instead of drifting from it.
+function lettingChartMonthTotal(ym) {
+let total = 0;
+lettingChartData().perGroupByMonth.forEach((byMonth) => { total += byMonth.get(ym) || 0; });
+return total;
+}
+
 function money0(n) { return `£${Math.round(n).toLocaleString('en-GB')}`; }
 
 // Reads (and, the first time, migrates) a group's own Aggressive/Normal
@@ -2642,5 +2650,5 @@ if (keep) sel.value = keep;
 
 export {
 CAP_KEEPS_FROM, accrueLettings, reconcileMonthlyCaps, renderLetting, initLetting, totalOwed, totalGross, balanceFor, grossFor, owners, ownerNameFor, ownerKeyFor, sharePctFor, shareRuleAt, splitAmountFor, money, isMyOwnKey, isMyOwnListing,
-entriesFor, nightRateFor, money0, monthRange, monthLabel, addMonths, today, resolveColor, listingColorVar, nightsByMonthForEntry,
+lettingChartMonthTotal, entriesFor, nightRateFor, money0, monthRange, monthLabel, addMonths, today, resolveColor, listingColorVar, nightsByMonthForEntry,
 };
