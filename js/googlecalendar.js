@@ -186,7 +186,8 @@ const daysAhead = Math.max(0, Number(entry.maxDays) || 0);
 const syncedAt = new Date().toISOString();
 const calendarId = resolveCalendarId(name, calendarList);
 if (!calendarId) {
-status[name] = { found: false, events: [], syncedAt };
+// `missing` tells "no calendar by that name in your Google account" apart from "calendar found, nothing upcoming".
+status[name] = { found: false, missing: true, events: [], syncedAt };
 continue;
 }
 try {

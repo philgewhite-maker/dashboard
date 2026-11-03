@@ -261,10 +261,17 @@ if (!apiKey) throw new MissingKeyError();
 const model = modelOverride || settings.anthropicModel || DEFAULT_MODEL;
 const effortToSend = effort || (/^claude-opus-5-5/.test(model) ? 'high' : '');
 
+// No call here used to have any time limit, so a stalled one left "Reading…"
+// on screen forever. Web-search calls legitimately run for minutes; plain
+// extraction should not.
+const timeoutMs = tools ? 240000 : 90000;
+const controller = new AbortController();
+const timer = setTimeout(() => controller.abort(), timeoutMs);
 let res;
 try {
 res = await fetch(API_URL, {
 method: 'POST',
+signal: controller.signal,
 headers: {
 'content-type': 'application/json',
 'x-api-key': apiKey,
@@ -295,6 +302,10 @@ messages: [{ role: 'user', content }],
 }),
 });
 } catch (networkErr) {
+clearTimeout(timer);
+if (networkErr && networkErr.name === 'AbortError') {
+throw new Error(`The AI didn't answer within ${Math.round(timeoutMs / 1000)}s, so the request was stopped. Try again.`);
+}
 // fetch() throws (not a rejected .ok) on DNS failure, offline, or a CORS
 // rejection — surface that distinctly since "couldn't read the image"
 // would be a misleading diagnosis for a connectivity problem.
@@ -304,12 +315,21 @@ throw new Error(`Network error calling the Anthropic API: ${networkErr.message}`
 
 if (!res.ok) {
 const body = await res.text().catch(() => '');
+clearTimeout(timer);
 console.error(`Anthropic API error ${res.status}:`, body);
 let detail = body;
 try { detail = JSON.parse(body).error?.message || body; } catch (e) { /* not JSON, use as-is */ }
 throw new Error(`Anthropic API error ${res.status}: ${detail.slice(0, 300)}`);
 }
-const result = await res.json();
+let result;
+try {
+result = await res.json();
+} catch (bodyErr) {
+if (bodyErr && bodyErr.name === 'AbortError') throw new Error(`The AI didn't finish answering within ${Math.round(timeoutMs / 1000)}s, so the request was stopped. Try again.`);
+throw bodyErr;
+} finally {
+clearTimeout(timer);
+}
 // Record before parsing: the call was billed whether or not the JSON that
 // came back turns out to be usable, so a parse failure shouldn't quietly
 // under-report spend.

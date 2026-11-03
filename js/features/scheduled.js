@@ -18,6 +18,7 @@
 import { data, queueSave } from '../state.js';
 import { escapeHtml } from '../utils.js';
 import { canAttemptGoogleAction } from '../sync/googleauth.js';
+import { track } from './activity.js';
 
 // Long enough that opening the app twice in a morning doesn't re-run
 // everything, short enough that once a day is comfortably covered.
@@ -292,30 +293,62 @@ let running = false;
 async function runDueTasks(trigger = 'open') {
 if (running) return;
 running = true;
+let t = null;
 try {
 const signedIn = await canAttemptGoogleAction().catch(() => false);
+const due = SCHEDULED_TASKS.filter((task) => isEnabled(task) && isDue(task));
+// Stay invisible when nothing is due (the common case on every app open);
+// otherwise one card names each task as it runs and what happened to it.
+if (due.length) {
+t = track({
+id: 'scheduled-run', label: 'Background refresh', hint: '1-2 minutes', leave: 'stops', quiet: trigger === 'open',
+where: [{ tab: 'settings', target: '#scheduled-tasks', label: 'Scheduled tasks (last-run table)' }],
+});
+}
+const failures = [];
+const ran = [];
+const notSignedIn = [];
+let step = 0;
 for (const task of SCHEDULED_TASKS) {
 if (!isEnabled(task) || !isDue(task)) continue;
-if (task.needsGoogle && !signedIn) continue;
+if (task.needsGoogle && !signedIn) { notSignedIn.push(task.label); continue; }
+if (t) t.step(step++, due.length, `${task.label}…`);
 // A task is either a button to press or a function to call. The
 // button form is the common one (it reuses a sync's whole existing
 // path, status line included); a function is for work that has no
 // single button, like checking every want at once.
 if (task.run) {
-try { await task.run(); } catch (err) { console.error(`Scheduled "${task.id}" failed:`, err); }
+try { await task.run(); ran.push(task.label); } catch (err) {
+console.error(`Scheduled "${task.id}" failed:`, err);
+failures.push(`${task.label} (${(err && err.message) || err})`);
+}
 runs()[task.id] = { at: new Date().toISOString(), trigger };
 continue;
 }
 const btn = document.getElementById(task.buttonId);
 if (!btn) {
 runs()[task.id] = { at: new Date().toISOString(), trigger, skipped: 'no button' };
+failures.push(`${task.label} (its button wasn't on the page)`);
 continue;
 }
 await clickAndWait(btn);
+ran.push(task.label);
 runs()[task.id] = { at: new Date().toISOString(), trigger };
 }
 queueSave();
 renderScheduled();
+if (t) {
+const parts = [];
+if (ran.length) parts.push(`Ran ${ran.join(', ')}.`);
+if (notSignedIn.length) parts.push(`Skipped (not signed in to Google): ${notSignedIn.join(', ')}.`);
+if (failures.length) parts.push(`Failed: ${failures.join('; ')}.`);
+if (failures.length) t.fail(parts.join(' '));
+else if (!ran.length) t.zero(parts.join(' ') || 'Nothing ran.');
+else t.done(parts.join(' '));
+}
+} catch (err) {
+if (t) t.fail(err);
+throw err;
 } finally {
 running = false;
 }

@@ -12,6 +12,7 @@ import { data, queueSave, blankAirbnbListing, blankAirbnbReservation, blankAirbn
 import { escapeHtml, todayStr, dateStrAdd, uid, MISSING_KEY_LINK_HTML, pickChipHtml } from '../utils.js';
 import { owners, ownerNameFor, ownerKeyFor, shareRuleAt, money, CAP_KEEPS_FROM } from './letting.js';
 import { gmailLink } from '../googlemail.js';
+import { track } from './activity.js';
 import { parseIcsReservations } from '../icsparse.js';
 
 // How long a finished, not-yet-charged stay stays listed so its income can
@@ -2051,25 +2052,43 @@ if (!btn) return;
 btn.addEventListener('click', async () => {
 if (!data.airbnbListings.length) { status.innerHTML = 'Add a listing in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#airbnb-listings">Settings</span> first.'; return; }
 btn.disabled = true;
-status.textContent = 'Syncing…';
+// Seven named steps, so the tray shows which one is running and an ETA.
+// Results land in the bookings list here and on the Planner stripes;
+// payouts posted from emails land in Letting income (named in the result).
+const t = track({
+id: 'airbnb-sync', label: 'Airbnb sync', hint: '30-90 seconds', leave: 'stops', mirror: 'airbnb-sync-status',
+retry: () => btn.click(),
+where: [
+{ tab: 'overview', target: '#airbnb-panel', label: 'Airbnb bookings' },
+{ tab: 'planner', target: '#planner-panel', label: 'Planner stripes' },
+],
+});
 try {
+const STEPS = 7;
 // Must run BEFORE syncAllAirbnbListings -- that's the step that drops
 // a cancelled reservation from data.airbnbReservations entirely (it's
 // no longer in the feed), so this needs the record to still exist to
 // match a cancellation email against it.
 const canAttempt = await canAttemptGoogleAction();
+t.step(0, STEPS, 'Reading cancellation emails…');
 const cancelResult = await syncCancellationsFromEmail();
 // Same ordering reason as the cancellation sync just above -- a refund
 // is matched to a reservation by its stated check-in/check-out range,
 // which needs the record to still be on file.
+t.step(1, STEPS, 'Reading guest refund emails…');
 const refundResult = await syncRefundsFromEmail();
+t.step(2, STEPS, 'Fetching each listing’s calendar feed…');
 await syncAllAirbnbListings();
 // After the ICS sync, not before -- a reservation the feed just
 // removed as genuinely cancelled is gone from data.airbnbReservations
 // by now, so there's nothing left here to waste a calendar lookup on.
+t.step(3, STEPS, 'Checking pushed calendar events still exist…');
 const verifyResult = await verifyPushedEvents();
+t.step(4, STEPS, 'Reading cleaner events…');
 await syncCleanerEvents();
+t.step(5, STEPS, 'Reading hand-typed external bookings…');
 await syncExternalBookings();
+t.step(6, STEPS, 'Reading booking confirmation emails for guest names…');
 const guestResult = await syncGuestNamesFromEmail();
 renderAirbnb();
 loadAirbnbCalendarOptions({ silent: true });
@@ -2101,7 +2120,29 @@ const unownedNote = cancelResult.unowned
 ? ` ${cancelResult.unowned} cancellation payout${cancelResult.unowned === 1 ? "" : "s"} not posted: the listing has no owner. Set one in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#airbnb-listings">Settings → Airbnb listings</span> and Sync again.`
 : "";
 const signedOutNote = canAttempt ? "" : " Signed out of Google: guest names, cancellations, refunds and cleaner events were not checked.";
-status.innerHTML = `Synced just now.${guestNote}${cancelNote}${unownedNote}${refundNote}${refundProblemNote}${verifyNote}${signedOutNote}`;
+// Steps that finished but reported an error used to read as "Synced just now."
+const stepErrors = [['cancellation emails', cancelResult], ['refund emails', refundResult], ['guest names', guestResult]]
+.filter(([, r]) => r && r.error).map(([name, r]) => `${name} (${escapeHtml(String(r.error))})`);
+if (data.airbnbCleanerSyncStatus && data.airbnbCleanerSyncStatus.ok === false) stepErrors.push(`cleaner events (${escapeHtml(String(data.airbnbCleanerSyncStatus.error || 'failed'))})`);
+const stepErrorNote = stepErrors.length ? ` Couldn't read: ${stepErrors.join('; ')}.` : '';
+// What the feed sync actually changed, so "nothing new" is distinguishable from "did something".
+const feedTotals = data.airbnbListings.reduce((n, l) => {
+const s = data.airbnbSyncStatus[l.id] || {};
+return { added: n.added + (s.added || 0), updated: n.updated + (s.updated || 0), removed: n.removed + (s.removed || 0) };
+}, { added: 0, updated: 0, removed: 0 });
+const feedParts = [];
+if (feedTotals.added) feedParts.push(`${feedTotals.added} new booking${feedTotals.added === 1 ? '' : 's'}`);
+if (feedTotals.updated) feedParts.push(`${feedTotals.updated} changed`);
+if (feedTotals.removed) feedParts.push(`${feedTotals.removed} gone (cancelled or finished)`);
+const feedNote = feedParts.length ? feedParts.join(', ') + '.' : 'No change to bookings.';
+const message = `${feedNote}${guestNote}${cancelNote}${unownedNote}${refundNote}${refundProblemNote}${verifyNote}${stepErrorNote}${signedOutNote}`;
+const letting = [{ tab: 'finances', target: '#letting-panel', label: 'Letting income' }];
+const payouts = (cancelResult.posted || 0) + (refundResult.posted || 0);
+// Payouts were posted to the ledger: refresh the Letting panel (and the loans that read it) now, not on reload.
+if (payouts) import('./letting.js').then((m) => m.renderLetting()).catch(() => {});
+if (stepErrors.length || !canAttempt) t.fail(message, { html: true, where: [{ tab: 'overview', target: '#airbnb-panel', label: 'Airbnb bookings' }] });
+else if (!feedParts.length && !guestResult.filled && !payouts) t.zero(message, { html: true });
+else t.done(message, { html: true, where: [{ tab: 'overview', target: '#airbnb-panel', label: 'Airbnb bookings' }, { tab: 'planner', target: '#planner-panel', label: 'Planner stripes' }, ...(payouts ? letting : [])] });
 } else {
 // The actual error, right here -- not just a count pointing at devtools
 // most people never open. Every failed listing likely has the SAME
@@ -2113,10 +2154,10 @@ const first = data.airbnbSyncStatus[failed[0].id];
 // listing -- a feed-less one was never attempted, so "1 of 4 failed"
 // when only two have feeds reads as a worse result than it is.
 const withFeeds = data.airbnbListings.filter((l) => l.icsUrl).length;
-status.textContent = `Synced, but ${failed.length} of ${withFeeds} listing${failed.length === 1 ? '' : 's'} with a feed failed: ${first.error}`;
+t.fail(`Synced, but ${failed.length} of ${withFeeds} listing${failed.length === 1 ? '' : 's'} with a feed failed: ${first.error}`, { where: [{ tab: 'settings', target: '#airbnb-listings', label: 'Airbnb listings settings' }] });
 }
 } catch (err) {
-status.textContent = `Couldn't sync: ${err.message || err}`;
+t.fail(`Couldn't sync: ${err.message || err}`);
 console.error('Airbnb sync failed:', err);
 } finally {
 btn.disabled = false;

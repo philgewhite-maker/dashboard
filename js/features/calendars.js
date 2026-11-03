@@ -7,6 +7,7 @@ import { escapeHtml, bindForm, scrollAndFlash, daysUntil } from '../utils.js';
 import { canAttemptGoogleAction } from '../sync/googleauth.js';
 import { syncCalendars, listCalendars } from '../googlecalendar.js';
 import { captureTask } from './tasks.js';
+import { track } from './activity.js';
 
 function renderCalendars() {
 const list = document.getElementById('calendars-list');
@@ -187,15 +188,33 @@ status.textContent = 'Sign in to Google at the top of Overview first.';
 return;
 }
 btn.disabled = true;
-status.textContent = 'Syncing…';
+const t = track({
+id: 'calendar-sync', label: 'Calendar sync', hint: 'about 10 seconds', leave: 'stops', mirror: 'cal-sync-status',
+retry: () => btn.click(),
+where: [{ tab: 'overview', target: '#calendars-panel', label: 'Next Up' }],
+});
 try {
+t.note(`Reading ${data.calendars.length} calendar${data.calendars.length === 1 ? '' : 's'} from Google…`);
 const results = await syncCalendars(data.calendars, data.prefs.calendarEventCount);
 data.calendarStatus = { ...data.calendarStatus, ...results };
 renderCalendars();
 queueSave();
-status.textContent = `Synced just now.`;
+// "Synced" used to cover a calendar Google couldn't find and one that errored.
+const names = Object.keys(results);
+const errored = names.filter((n) => results[n].error);
+const missing = names.filter((n) => results[n].missing);
+const withEvents = names.filter((n) => results[n].found);
+const eventCount = withEvents.reduce((n, k) => n + results[k].events.length, 0);
+const problems = [
+...errored.map((n) => `${n}: ${results[n].error}`),
+...missing.map((n) => `${n}: no calendar with that name in your Google account`),
+];
+const base = `${eventCount} upcoming event${eventCount === 1 ? '' : 's'} across ${withEvents.length} of ${names.length} calendar${names.length === 1 ? '' : 's'}.`;
+if (problems.length) t.fail(`${base} Couldn't read ${problems.join('; ')}.`, { where: [{ tab: 'settings', target: '#calendar-form', label: 'Calendar settings' }] });
+else if (!eventCount) t.zero(`${base} No upcoming events found.`);
+else t.done(base);
 } catch (err) {
-status.textContent = `Couldn't sync: ${err.message || err}`;
+t.fail(`Couldn't sync: ${err.message || err}`);
 console.error('Calendar sync failed:', err);
 } finally {
 btn.disabled = false;
