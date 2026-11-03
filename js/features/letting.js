@@ -1248,7 +1248,7 @@ return addDaysIso(dateStr, -nights);
 // nights it covers; an item with none is one lump on `date`. `splitDate` is
 // the date the owner-share rule is looked up on. `explicit` says the row
 // named its own room rather than falling back to its owner's first one.
-function lettingIncomeItems() {
+function lettingIncomeItems(skipped) {
 const listings = data.airbnbListings || [];
 const listingById = new Map(listings.map((l) => [l.id, l]));
 const reservationIds = new Set((data.airbnbReservations || []).map((r) => r.id));
@@ -1263,10 +1263,16 @@ items.push({ id: r.id, source: 'reservation', kind: 'reservation', listing, expl
 });
 (data.lettingLedger || []).forEach((e) => {
 const isOrphanedAccrual = e.kind === 'accrual' && e.reservationId && !reservationIds.has(e.reservationId);
-if ((e.kind !== 'earned' && e.kind !== 'cancellation' && !isOrphanedAccrual) || !e.gross || !e.date) return;
+// `skipped` (optional) collects the income-like rows this chart leaves out, with why.
+const skip = (reason) => { if (skipped && (e.kind === 'accrual' || e.kind === 'earned' || e.kind === 'cancellation')) skipped.push({ e, reason }); };
+if (e.kind !== 'earned' && e.kind !== 'cancellation' && !isOrphanedAccrual) {
+if (e.kind === 'accrual') skip(e.reservationId ? 'Its booking is still on file, so the income counts through that booking.' : 'It has no link to a booking, so Income by month leaves it out.');
+return;
+}
+if (!e.gross || !e.date) { skip('It has no amount or no date.'); return; }
 const named = e.listingId && listingById.get(e.listingId);
 const listing = named || listings.find((l) => ownerKeyFor(l) === e.ownerKey);
-if (!listing) return;
+if (!listing) { skip('Its listing no longer exists, so there is nothing to attribute it to.'); return; }
 // A historic booking that actually ran longer than one month gets
 // split pro-rata by night across every month it spans, exactly like a
 // real reservation's own checkin/checkout (nightsByMonth) -- otherwise

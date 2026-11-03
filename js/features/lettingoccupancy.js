@@ -37,14 +37,15 @@ const stays = [];
 const seen = new Map();
 const keyOf = (s) => `${s.listingId}|${s.checkin}|${s.checkout}`;
 const add = (s) => {
-if (!s.listingId || !s.checkin || !s.checkout || s.checkout <= s.checkin) return;
+if (!s.listingId || !s.checkin || !s.checkout || s.checkout <= s.checkin) return null;
 // One stay per room and check-in, whichever record it came from; a copy that knows the
 // income fills it in on the one already held (an unpaid copy must not hide a paid one).
 const k = s.status === 'stay' ? `stay|${s.listingId}|${s.checkin}` : `${s.status}|${keyOf(s)}`;
 const held = seen.get(k);
-if (held) { if (held.income == null && s.income != null) held.income = s.income; return; }
+if (held) { if (held.income == null && s.income != null) held.income = s.income; return { stay: held, merged: true }; }
 seen.set(k, s);
 stays.push(s);
+return { stay: s, merged: false };
 };
 (data.airbnbReservations || []).forEach((r) => add({
 id: r.id, listingId: r.listingId, checkin: r.checkin, checkout: r.checkout, guest: r.guestName || '',
@@ -68,16 +69,25 @@ ownerListings.get(k).push(l);
 });
 // Revenue is read straight from the income items the Income by month chart adds up, so
 // the two can't drift apart. Stays below are only for drawing and counting nights.
-const items = lettingIncomeItems();
+const skippedRows = [];
+const items = lettingIncomeItems(skippedRows);
 let unplaced = 0;
 let unplacedIncome = 0;
 // Income from the ledger (historic or aged-out bookings) that spans real nights becomes a stay to draw,
 // on the room the row names or, failing that, its owner's only room.
+// What became of each item, so "why isn't this booking drawn?" has an answer on screen.
+const trace = [];
 items.forEach((it) => {
-if (it.source !== 'ledger' || it.kind === 'cancellation' || !it.start) return;
+const row = { it, fate: '', room: '' };
+trace.push(row);
+if (it.kind === 'cancellation') { row.fate = 'payout'; return; }
+if (it.source === 'reservation') { row.fate = 'drawn'; row.room = it.listing.id; return; } // drawn from the booking itself, above
+if (!it.start) { row.fate = 'lump'; return; }
 const listingId = roomForCancellation({ listingId: it.explicit ? it.listing.id : '', ownerKey: it.ownerKey, date: it.date }, ownerListings);
-if (!listingId) { unplacedIncome += 1; return; }
-add({ id: `led:${it.id}`, listingId, checkin: it.start, checkout: it.end, guest: it.note, income: it.gross, bookedOn: '', status: 'stay', source: 'ledger' });
+if (!listingId) { unplacedIncome += 1; row.fate = 'noroom'; return; }
+const res = add({ id: `led:${it.id}`, listingId, checkin: it.start, checkout: it.end, guest: it.note, income: it.gross, bookedOn: '', status: 'stay', source: 'ledger' });
+row.fate = !res ? 'invalid' : (res.merged ? 'merged' : 'drawn');
+row.room = listingId;
 });
 (data.lettingLedger || []).forEach((e) => {
 if (e.kind === 'cancellation') {
@@ -93,6 +103,15 @@ add({ id: `led:${e.id}`, listingId, checkin, checkout, guest: e.note || '', inco
 stays.unplacedCancellations = unplaced;
 stays.unplacedIncome = unplacedIncome;
 stays.items = items;
+stays.trace = trace;
+// Ledger rows the Income by month chart does not count at all, so they can't be on the timeline either.
+skippedRows.forEach(({ e, reason }) => {
+const nights = Number(e.nights);
+const start = nights > 0 ? (e.startDate || dateStrAdd(e.date, -nights)) : '';
+const end = nights > 0 ? (e.startDate ? dateStrAdd(e.startDate, nights) : e.date) : '';
+const listing = (data.airbnbListings || []).find((l) => l.id === e.listingId) || { label: ownerNameFor(e.ownerKey) };
+trace.push({ it: { start, end, date: e.date || '', gross: Number(e.gross) || 0, note: e.note || '', listing, source: 'ledger' }, fate: 'skipped', reason, room: '' });
+});
 return stays;
 }
 
@@ -234,6 +253,7 @@ return `<div class="letting-chart-wrap" id="letting-occupancy-section">
 <select id="occ-month" class="mini" title="The month both charts show"></select>
 <span class="settings-note" id="occ-summary" style="margin:0;"></span>
 </div>
+<details class="settings-subgroup" id="occ-income-trace" style="margin:0 0 6px;"></details>
 <div class="letting-chart-legend" id="occ-legend" style="flex-direction:row;flex-wrap:wrap;"></div>
 <div class="chart-canvas-wrap occ-wrap" style="position:relative;"><canvas id="occ-timeline-canvas"></canvas><div class="occ-tip" id="occ-tip" hidden></div></div>
 <div class="sync-row" style="gap:8px;flex-wrap:wrap;align-items:center;margin:12px 0 4px;">
@@ -556,9 +576,43 @@ return `${monthLabel(ym)} ${money0(mine)} here, ${money0(main)} there${Math.abs(
 }).join(' · ');
 }
 
+function shortDate(d) { return new Date(`${d}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }); }
+
+// Every income entry that falls in the chosen month and where it ended up, with the
+// reason for any that are not on the timeline.
+function renderIncomeTrace(stays) {
+const el = document.getElementById('occ-income-trace');
+if (!el) return;
+const first = dayStr(state.ym, 1);
+const next = dayStr(addMonths(state.ym, 1), 1);
+const rows = (stays.trace || [])
+.filter(({ it }) => (it.start ? it.start < next && it.end > first : (it.date || '').slice(0, 7) === state.ym))
+.sort((a, b) => (a.it.start || a.it.date).localeCompare(b.it.start || b.it.date));
+const roomName = (id) => ((data.airbnbListings || []).find((l) => l.id === id) || {}).label || 'a room';
+const goto = '<span class="inline-goto-link" role="button" tabindex="0" data-goto-tab="finances" data-goto-target="#letting-list">Letting income</span>';
+const why = (r) => {
+const { it } = r;
+if (r.fate === 'drawn') return `Drawn on the ${escapeHtml(roomName(r.room))} row${it.source === 'ledger' && !it.explicit ? ' (room chosen from its owner)' : ''}.`;
+if (r.fate === 'skipped') return `Not counted anywhere. ${escapeHtml(r.reason)} Fix it on its ${goto} row.`;
+if (r.fate === 'merged') return `Same room and check-in as another record, so drawn once on ${escapeHtml(roomName(r.room))}.`;
+if (r.fate === 'payout') return `Cancellation payout, counted on ${shortDate(it.date)}.`;
+if (r.fate === 'lump') return `No check-in date or nights, so it can't be drawn. Counted in revenue on ${shortDate(it.date)} only. Add them on its ${goto} row.`;
+if (r.fate === 'noroom') return `The row names no room and its owner has several, so it counts in revenue but isn't drawn. Pick the room on its ${goto} row.`;
+return 'Its dates are not valid, so it is not drawn.';
+};
+const when = (it) => (it.start ? `${shortDate(it.start)} to ${shortDate(it.end)}` : (it.date ? `paid ${shortDate(it.date)}` : 'no date'));
+el.innerHTML = `<summary class="settings-note" style="cursor:pointer;">Where this month's income entries went (${rows.length})</summary>
+<div style="overflow-x:auto;"><table class="limits-table"><thead><tr><th>Dates</th><th>Entry</th><th>£</th><th>On the timeline?</th></tr></thead><tbody>${rows.map((r) => `<tr>
+<td>${escapeHtml(when(r.it))}</td>
+<td>${escapeHtml(r.it.listing.label || 'Listing')}${r.it.note ? `, ${escapeHtml(r.it.note)}` : ''}</td>
+<td>${escapeHtml(money0(r.it.gross))}</td>
+<td>${why(r)}</td></tr>`).join('') || '<tr><td colspan="4">No income entries fall in this month.</td></tr>'}</tbody></table></div>`;
+}
+
 function renderLettingOccupancy() {
 if (!document.getElementById('occ-timeline-canvas')) return;
 const stays = collectStays();
+renderIncomeTrace(stays);
 renderLegend(stays);
 drawTimeline(stays);
 drawPace(stays);
