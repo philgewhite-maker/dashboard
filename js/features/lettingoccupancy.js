@@ -12,7 +12,7 @@
 // the live list the moment it ends or is cancelled.
 import { data } from '../state.js';
 import { escapeHtml, dateStrAdd, todayStr } from '../utils.js';
-import { listingColorVar, resolveColor, addMonths, monthLabel, ownerKeyFor, ownerNameFor, lettingChartMonthTotal, lettingIncomeItems, money0 } from './letting.js';
+import { listingColorVar, resolveColor, addMonths, monthLabel, ownerKeyFor, ownerNameFor, lettingChartMonthTotal, lettingIncomeItems, nightRateRooms, money0 } from './letting.js';
 
 const DAY_MS = 86400000;
 const MIN_COVERAGE = 0.8; // share of a month's nights that must have a known booking date before it is compared
@@ -33,23 +33,21 @@ function longMonth(ym) { const [y, m] = ym.split('-').map(Number); return new Da
 //            start date or night count), and older cancellations (a payout row only)
 // A stay is matched across sources by listing + check-in + check-out so it is never drawn twice.
 function collectStays() {
+roomKeys = null; // listings/colours may have changed since the last read
 const stays = [];
 const seen = new Map();
 const keyOf = (s) => `${s.listingId}|${s.checkin}|${s.checkout}`;
 const add = (s) => {
 if (!s.listingId || !s.checkin || !s.checkout || s.checkout <= s.checkin) return null;
-// One stay per room and check-in, whichever record it came from; a copy that knows the
-// income fills it in on the one already held (an unpaid copy must not hide a paid one).
-const k = s.status === 'stay' ? `stay|${s.listingId}|${s.checkin}` : `${s.status}|${keyOf(s)}`;
+// Two records are the same stay only when room, check-in AND check-out all match (and status: a
+// cancelled booking is never the live one). A copy that knows the income fills it in on the one
+// already held. Anything else is a separate record and is drawn separately, so two guests whose
+// dates clash both show, and the clash is flagged rather than one quietly replacing the other.
+const k = `${s.status}|${keyOf(s)}`;
 const held = seen.get(k);
 if (held) {
-const before = { source: held.source, checkin: held.checkin, checkout: held.checkout };
 if (held.income == null && s.income != null) held.income = s.income;
-// An income entry that runs longer than the booking record it matched is the one the money was
-// split over, so the stay is drawn to the same length (otherwise the extra nights vanish).
-const extended = s.source === 'ledger' && s.checkout > held.checkout;
-if (extended) held.checkout = s.checkout;
-return { stay: held, merged: true, before, extended };
+return { stay: held, merged: true };
 }
 seen.set(k, s);
 stays.push(s);
@@ -96,7 +94,6 @@ if (!listingId) { unplacedIncome += 1; row.fate = 'noroom'; return; }
 const res = add({ id: `led:${it.id}`, listingId, checkin: it.start, checkout: it.end, guest: it.note, income: it.gross, bookedOn: '', status: 'stay', source: 'ledger' });
 row.fate = !res ? 'invalid' : (res.merged ? 'merged' : 'drawn');
 row.room = listingId;
-if (res && res.merged) { row.held = res.before; row.extended = res.extended; }
 });
 (data.lettingLedger || []).forEach((e) => {
 if (e.kind === 'cancellation') {
@@ -115,6 +112,17 @@ stays.unplacedCancellations = unplaced;
 stays.unplacedIncome = unplacedIncome;
 stays.items = items;
 stays.trace = trace;
+// A physical room holds one guest a night. Two stays in the same room whose nights overlap are a data
+// clash (one of the two has wrong dates); name each on the other so it can be fixed at the source.
+const live = stays.filter((s) => s.status === 'stay');
+live.forEach((a) => {
+a.clashes = live.filter((b) => b !== a && roomKeyFor(b.listingId) === roomKeyFor(a.listingId) && a.checkin < b.checkout && b.checkin < a.checkout);
+});
+trace.forEach((row) => {
+if (!row.room || !row.it.start) return;
+const stay = seen.get(`stay|${row.room}|${row.it.start}|${row.it.end}`);
+row.clashes = (stay && stay.clashes) || [];
+});
 // Ledger rows the Income by month chart does not count at all, so they can't be on the timeline either.
 skippedRows.forEach(({ e, reason }) => {
 const nights = Number(e.nights);
@@ -153,24 +161,55 @@ const to = stay.checkout < next ? stay.checkout : next;
 return to > from ? nightsBetween(from, to) : 0;
 }
 
+// Revenue only: a stay's income accrues night by night, up to today.
 function countFor(stay, ym, upToDay, metric, today) {
 const D = dayStr(ym, upToDay);
-if (metric === 'bookings') {
-if (!stay.bookedOn || stay.bookedOn > D) return 0;
-if (stay.status === 'cancelled' && (!stay.cancelledOn || stay.cancelledOn <= D)) return 0;
-return nightsInMonth(stay, ym);
-}
-if (stay.status === 'cancelled') return 0;
-// Occupied nights and revenue both accrue night by night, only up to today.
 const upTo = D < dateStrAdd(today, 1) ? D : today;
 const first = dayStr(ym, 1);
 const lastNight = dateStrAdd(upTo, 1); // nights strictly before this date
 const from = stay.checkin > first ? stay.checkin : first;
 const to = stay.checkout < lastNight ? stay.checkout : lastNight;
 const nights = to > from ? nightsBetween(from, to) : 0;
-if (metric === 'nights') return nights;
 const total = nightsBetween(stay.checkin, stay.checkout);
 return stay.income != null && total > 0 ? (Number(stay.income) * nights) / total : 0;
+}
+
+// The physical room a listing is (listings drawn the same colour are one room, as on the
+// average-night-rate chart, whose occupancy bars count the same way).
+let roomKeys = null;
+function roomKeyFor(listingId) {
+if (!roomKeys) {
+roomKeys = new Map();
+nightRateRooms().forEach((room) => room.listingIds.forEach((id) => roomKeys.set(id, room.key)));
+}
+return roomKeys.get(listingId) || listingId;
+}
+
+// Nights booked / occupied, counted the way the occupancy bars on the night-rate chart count them:
+// a set of (room, night) pairs, so a room is never more than one night occupied per night however
+// many records overlap it. `D` is the day of the month being read up to.
+function distinctRoomNights(stays, ym, upToDay, metric, today) {
+const D = dayStr(ym, upToDay);
+const first = dayStr(ym, 1);
+const next = dayStr(addMonths(ym, 1), 1);
+const n = daysIn(ym);
+// Occupied nights only exist up to today; booked nights cover the whole month (they are future nights too).
+const limit = metric === 'nights' ? dateStrAdd(D < today ? D : today, 1) : next;
+const keys = new Set();
+stays.forEach((s) => {
+if (metric === 'bookings') {
+if (!s.bookedOn || s.bookedOn > D) return;
+if (s.status === 'cancelled' && (!s.cancelledOn || s.cancelledOn <= D)) return;
+} else if (s.status === 'cancelled') return;
+const from = s.checkin > first ? s.checkin : first;
+const to = s.checkout < limit ? s.checkout : (limit < next ? limit : next);
+if (to <= from) return;
+const startDay = Number(from.slice(8, 10));
+const endDay = to >= next ? n + 1 : Number(to.slice(8, 10));
+const room = roomKeyFor(s.listingId);
+for (let day = startDay; day < endDay; day++) keys.add(`${room}|${day}`);
+});
+return keys.size;
 }
 
 // Cumulative series for one month, day 1..N. Days after today in the current
@@ -190,7 +229,7 @@ if (it.start) { sum += countFor({ checkin: it.start, checkout: it.end, income: i
 if (it.date.slice(0, 7) === ym && it.date <= day && it.date <= today) sum += it.gross;
 });
 } else {
-stays.forEach((s) => { sum += countFor(s, ym, d, metric, today); });
+sum = distinctRoomNights(stays, ym, d, metric, today);
 }
 out.push(Math.round(sum * 100) / 100);
 }
@@ -406,6 +445,7 @@ const lines = [
 if (st.status === 'cancelled') lines.push(`Cancelled${st.cancelledOn ? ` ${fmt(st.cancelledOn)}` : ''}`);
 if (st.income != null) lines.push(`Income £${Number(st.income).toLocaleString('en-GB', { maximumFractionDigits: 2 })}`);
 if (st.bookedOn) lines.push(`Booked ${fmt(st.bookedOn)}`);
+if ((st.clashes || []).length) lines.push(`<strong>Clashes with ${st.clashes.map((c) => `${escapeHtml(c.guest || 'another stay')} (${fmt(c.checkin)} to ${fmt(c.checkout)})`).join(', ')}</strong>`);
 tip.innerHTML = lines.join('<br>');
 tip.hidden = false;
 tip.style.left = `${Math.min(x + 12, PLOTS.timeline.width - 200)}px`;
@@ -561,9 +601,10 @@ el.innerHTML = items.join('');
 const sum = document.getElementById('occ-summary');
 if (sum) {
 const inMonth = stays.filter((s) => s.status === 'stay' && nightsInMonth(s, state.ym) > 0);
-const nights = inMonth.reduce((a, s) => a + nightsInMonth(s, state.ym), 0);
+// Distinct (room, night) pairs, the same count the night-rate chart's occupancy bars use: never above one a night.
+const nights = distinctRoomNights(stays, state.ym, daysIn(state.ym), 'month', todayStr()); // every booked night in the month, none cancelled
 const cancelled = stays.filter((s) => s.status === 'cancelled' && nightsInMonth(s, state.ym) > 0).length;
-const roomNights = (listings.length || 1) * daysIn(state.ym);
+const roomNights = (nightRateRooms().length || 1) * daysIn(state.ym);
 const unplaced = stays.unplacedCancellations ? `; ${stays.unplacedCancellations} older cancellation payout${stays.unplacedCancellations === 1 ? '' : 's'} couldn't be placed on a room` : '';
 const payouts = (stays.items || []).filter((it) => !it.start && it.date.slice(0, 7) === state.ym);
 const payoutNote = state.metric === 'revenue' && payouts.length ? `. Revenue includes £${Math.round(payouts.reduce((a, p) => a + p.gross, 0)).toLocaleString('en-GB')} from ${payouts.length} payout${payouts.length === 1 ? '' : 's'} with no stay dates (cancellations and historic entries)` : '';
@@ -601,15 +642,15 @@ const rows = (stays.trace || [])
 .sort((a, b) => (a.it.start || a.it.date).localeCompare(b.it.start || b.it.date));
 const roomName = (id) => ((data.airbnbListings || []).find((l) => l.id === id) || {}).label || 'a room';
 const goto = '<span class="inline-goto-link" role="button" tabindex="0" data-goto-tab="finances" data-goto-target="#letting-list">Letting income</span>';
+// The room holds one guest a night: name every other stay whose nights overlap this one.
+const clash = (r) => ((r.clashes || []).length
+? ` <strong>Clashes with ${r.clashes.map((c) => `${escapeHtml(c.guest || 'another stay')} (${shortDate(c.checkin)} to ${shortDate(c.checkout)})`).join(', ')}</strong> in the same room, so one of them has the wrong dates.`
+: '');
 const why = (r) => {
 const { it } = r;
-if (r.fate === 'drawn') return `Drawn on the ${escapeHtml(roomName(r.room))} row${it.source === 'ledger' && !it.explicit ? ' (room chosen from its owner)' : ''}.`;
+if (r.fate === 'drawn') return `Drawn on the ${escapeHtml(roomName(r.room))} row${it.source === 'ledger' && !it.explicit ? ' (room chosen from its owner)' : ''}.${clash(r)}`;
 if (r.fate === 'skipped') return `Not counted anywhere. ${escapeHtml(r.reason)} Fix it on its ${goto} row.`;
-if (r.fate === 'merged') {
-const h = r.held;
-const other = h ? `a ${h.source === 'finished' ? 'finished-stay' : 'booking'} record (${shortDate(h.checkin)} to ${shortDate(h.checkout)})` : 'another record';
-return `Same room and check-in as ${other}, so drawn once on ${escapeHtml(roomName(r.room))}${r.extended ? `, stretched to ${shortDate(r.it.end)} to match this entry` : ''}.`;
-}
+if (r.fate === 'merged') return `Exactly the same room and dates as another record, so drawn once on ${escapeHtml(roomName(r.room))}.${clash(r)}`;
 if (r.fate === 'payout') return `Cancellation payout, counted on ${shortDate(it.date)}.`;
 if (r.fate === 'lump') return `No check-in date or nights, so it can't be drawn. Counted in revenue on ${shortDate(it.date)} only. Add them on its ${goto} row.`;
 if (r.fate === 'noroom') return `The row names no room and its owner has several, so it counts in revenue but isn't drawn. Pick the room on its ${goto} row.`;

@@ -2674,5 +2674,5 @@ if (keep) sel.value = keep;
 
 export {
 CAP_KEEPS_FROM, accrueLettings, reconcileMonthlyCaps, renderLetting, initLetting, totalOwed, totalGross, balanceFor, grossFor, owners, ownerNameFor, ownerKeyFor, sharePctFor, shareRuleAt, splitAmountFor, money, isMyOwnKey, isMyOwnListing,
-lettingChartMonthTotal, lettingIncomeItems, entriesFor, nightRateFor, money0, monthRange, monthLabel, addMonths, today, resolveColor, listingColorVar, nightsByMonthForEntry,
+lettingChartMonthTotal, lettingIncomeItems, nightRateRooms, entriesFor, nightRateFor, money0, monthRange, monthLabel, addMonths, today, resolveColor, listingColorVar, nightsByMonthForEntry,
 };
