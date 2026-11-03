@@ -30,6 +30,7 @@ calendarStatus: {}, // name -> {found, title, date, syncedAt} — filled in by S
 airbnbListings: [], // {id, label, icsUrl, prefix, colour} -- configured in Settings
 airbnbReservations: [], // synced from each listing's ICS feed, see js/features/airbnb.js
 airbnbPastStays: [], // [{listingId, checkin, checkout, guestName}] -- completed stays kept ~400 days just so a late refund email can still be matched to a listing
+airbnbCancelledStays: [], // [{id, listingId, checkin, checkout, guestName, bookedOn, cancelledOn}] -- bookings that vanished from the feed before they ended, kept ~400 days for the occupancy timeline (js/features/lettingoccupancy.js)
 airbnbSyncStatus: {}, // listingId -> {ok, syncedAt, added, updated, removed, error}
 airbnbCleanerEvents: [], // [{date, name}] -- last scan of "Cleaner - <Name>" events on the push-target calendar, see js/features/airbnb.js
 airbnbCleanerSyncStatus: null, // {ok, syncedAt, error} for the cleaner-event scan above
@@ -1617,6 +1618,9 @@ guestName: '', notes: '',
 // and skips anything it has already written.
 income: null,
 accruedAt: '',
+// When this stay was booked: the date of its confirmation email (set by
+// airbnb.js's guest-name sync), NOT when it was paid. Booking-pace chart input.
+confirmedOn: '',
 // Which platform this stay's income actually came through -- 'airbnb' |
 // 'other'. Independent of `source` (which says how the RESERVATION got
 // into this app, not who paid for it): a manually-added booking can
@@ -3284,6 +3288,8 @@ data.airbnbReservations = data.airbnbReservations.map((r) => ({ ...blankAirbnbRe
 const airbnbListingIds = new Set(data.airbnbListings.map((l) => l.id));
 data.airbnbReservations = data.airbnbReservations.filter((r) => airbnbListingIds.has(r.listingId));
 if (!Array.isArray(data.airbnbPastStays)) data.airbnbPastStays = [];
+if (!Array.isArray(data.airbnbCancelledStays)) data.airbnbCancelledStays = [];
+data.airbnbCancelledStays = data.airbnbCancelledStays.filter((s) => s && airbnbListingIds.has(s.listingId));
 data.airbnbPastStays = data.airbnbPastStays.filter((s) => s && airbnbListingIds.has(s.listingId));
 // Backfills `nights` onto an older accrual row that predates the
 // average-night-rate feature (letting.js's nightRateFor) -- derived

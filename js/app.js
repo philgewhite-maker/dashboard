@@ -3,6 +3,7 @@ import { initDiagnostics } from './diagnostics.js';
 import { initSettingsVault } from './settingsvault.js';
 import { initTheme } from './theme.js';
 import { initActivity } from './features/activity.js';
+import { initLettingOccupancy } from './features/lettingoccupancy.js';
 import { initRenderBus } from './render-bus.js';
 import { loadData, setSaveStatusHandler, setExternalUpdateHandler, flushSave } from './state.js';
 import { renderAll } from './render-all.js';
@@ -355,6 +356,7 @@ initDiagnostics();
 initSettingsVault();
 initTheme();
 initActivity();
+initLettingOccupancy();
 initRenderBus();
 }
 

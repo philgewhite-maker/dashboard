@@ -22,6 +22,8 @@ const root = document.documentElement;
 if (mode === 'auto') root.removeAttribute('data-theme'); else root.setAttribute('data-theme', mode);
 const meta = document.querySelector('meta[name="theme-color"]');
 if (meta) meta.setAttribute('content', BAR[effective(mode)]);
+// Canvas charts read their colours when drawn, so they need to hear the theme changed.
+window.dispatchEvent(new Event('themechange'));
 const btn = document.getElementById('theme-toggle');
 if (btn) {
 btn.textContent = LABEL[mode];

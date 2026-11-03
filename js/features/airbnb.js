@@ -93,6 +93,11 @@ if (existing.checkin !== checkin || existing.checkout !== checkout) { existing.c
 existingByUid.delete(evUid);
 } else {
 data.airbnbReservations.push(blankAirbnbReservation({ listingId: listing.id, uid: evUid, checkin, checkout }));
+// A booking that came back (a feed hiccup, or the guest rebooked the same dates)
+// is no longer a cancellation.
+if (Array.isArray(data.airbnbCancelledStays)) {
+data.airbnbCancelledStays = data.airbnbCancelledStays.filter((s) => !(s.listingId === listing.id && s.checkin === checkin && s.checkout === checkout));
+}
 added++;
 }
 });
@@ -114,7 +119,23 @@ if (r.checkout && r.checkout < today && !r.accruedAt && r.checkout >= dateStrAdd
 if (r.checkout && r.checkout < today) {
 if (!Array.isArray(data.airbnbPastStays)) data.airbnbPastStays = [];
 if (!data.airbnbPastStays.some((s) => s.listingId === r.listingId && s.checkin === r.checkin && s.checkout === r.checkout)) {
-data.airbnbPastStays.push({ listingId: r.listingId, checkin: r.checkin, checkout: r.checkout, guestName: r.guestName || '' });
+// bookedOn: when it was booked (confirmation email, else first seen by sync);
+// income/platform kept so the timeline and pace charts can still draw it.
+data.airbnbPastStays.push({
+listingId: r.listingId, checkin: r.checkin, checkout: r.checkout, guestName: r.guestName || '',
+bookedOn: r.confirmedOn || String(r.createdAt || '').slice(0, 10), income: r.income ?? null,
+});
+}
+} else {
+// Gone from the feed before it was due to end: a cancellation. Kept (not
+// just dropped) so the occupancy timeline can show it hatched and the
+// pace chart can take it out of the bookings from the day it was cancelled.
+if (!Array.isArray(data.airbnbCancelledStays)) data.airbnbCancelledStays = [];
+if (r.checkin && r.checkout && !data.airbnbCancelledStays.some((s) => s.listingId === r.listingId && s.checkin === r.checkin && s.checkout === r.checkout)) {
+data.airbnbCancelledStays.push({
+id: uid(), listingId: r.listingId, checkin: r.checkin, checkout: r.checkout, guestName: r.guestName || '',
+bookedOn: r.confirmedOn || String(r.createdAt || '').slice(0, 10), cancelledOn: today,
+});
 }
 }
 data.airbnbReservations = data.airbnbReservations.filter((x) => x.id !== r.id);
@@ -123,6 +144,10 @@ removed++;
 if (Array.isArray(data.airbnbPastStays)) {
 const keepFrom = dateStrAdd(today, -400);
 data.airbnbPastStays = data.airbnbPastStays.filter((s) => s.checkout >= keepFrom);
+}
+if (Array.isArray(data.airbnbCancelledStays)) {
+const keepCancelledFrom = dateStrAdd(today, -400);
+data.airbnbCancelledStays = data.airbnbCancelledStays.filter((s) => s.checkout >= keepCancelledFrom);
 }
 return { added, updated, removed };
 }
@@ -1498,6 +1523,8 @@ const pct = Number.isFinite(share) ? share : 50;
 const amount = Math.round(payout * (pct / 100) * 100) / 100;
 data.lettingLedger.push({
 id: uid(), ownerKey, kind: 'cancellation', amount, gross: payout, pct,
+// Which room and which night it was for, so the occupancy timeline can draw it hatched.
+listingId: listing.id, checkin,
 platform: 'airbnb',
 // Matches the email's own stated timing ("released 24 hours after
 // the check-in date"), not today -- so this lands in the right tax
@@ -1786,6 +1813,14 @@ const extra = extraGuestsFrom(bodyText);
 // A name already naming two people ("Ben & Sam") needs no marker.
 if (extra > 0 && !/[&+]|\band\b/i.test(name)) name = `${name} +${extra}`;
 reservation.guestName = name;
+// The confirmation email's own date is when this was booked (not paid -- that
+// can land much later). The earliest one wins, so a later change email
+// can't move it. Feeds the booking-pace chart on Letting income.
+const bookedDate = new Date(m.date);
+if (!Number.isNaN(bookedDate.getTime())) {
+const day = bookedDate.toISOString().slice(0, 10);
+if (!reservation.confirmedOn || day < reservation.confirmedOn) reservation.confirmedOn = day;
+}
 if (romanized) {
 reservation.notes = reservation.notes ? `${reservation.notes} · Booking name: ${rawName}` : `Booking name: ${rawName}`;
 }
