@@ -84,10 +84,20 @@ const events = parseIcsReservations(text).filter((e) => e.checkout >= today);
 // explicitly invites); certain the moment a booking can be typed in by
 // hand.
 const existingByUid = new Map(
-data.airbnbReservations.filter((r) => r.listingId === listing.id && (r.source || 'ics') === 'ics').map((r) => [r.uid, r])
+data.airbnbReservations.filter((r) => r.listingId === listing.id && (r.source || 'ics') === 'ics' && !r.movedFrom).map((r) => [r.uid, r])
+);
+// A booking moved to another listing by hand (see the room picker on a booking) still has its
+// event in this listing's feed; recognise it so the feed neither re-adds it here nor sweeps it.
+const movedByUid = new Map(
+data.airbnbReservations.filter((r) => r.movedFrom && r.movedFrom.listingId === listing.id && r.movedFrom.uid).map((r) => [r.movedFrom.uid, r])
 );
 let added = 0, updated = 0;
 events.forEach(({ uid: evUid, checkin, checkout }) => {
+const moved = movedByUid.get(evUid);
+if (moved) {
+if (moved.checkin !== checkin || moved.checkout !== checkout) { moved.checkin = checkin; moved.checkout = checkout; updated++; }
+return;
+}
 const existing = existingByUid.get(evUid);
 if (existing) {
 if (existing.checkin !== checkin || existing.checkout !== checkout) { existing.checkin = checkin; existing.checkout = checkout; updated++; }
@@ -270,8 +280,12 @@ q: listing.externalPrefix,
 // TITLE, same discipline pushReservation's own adoption step already
 // applies before trusting a search hit.
 const matching = items.filter((e) => (e.summary || '').includes(listing.externalPrefix));
+// Includes a booking moved to another listing by hand (it keeps the calendar event it came from),
+// so the scan updates its dates instead of adding a second copy here.
 const existingByEventId = new Map(
-data.airbnbReservations.filter((r) => r.listingId === listing.id && r.source === 'external').map((r) => [r.googleEventId, r])
+data.airbnbReservations
+.filter((r) => (r.listingId === listing.id && r.source === 'external' && !r.movedFrom) || (r.movedFrom && r.movedFrom.listingId === listing.id && r.movedFrom.googleEventId))
+.map((r) => [r.movedFrom && r.movedFrom.googleEventId ? r.movedFrom.googleEventId : r.googleEventId, r])
 );
 let added = 0, updated = 0;
 matching.forEach((e) => {
@@ -302,7 +316,10 @@ added++;
 // calendar since the last scan -- same "gone means gone" reasoning
 // syncAirbnbListing's own cancelled-booking cleanup already follows.
 let removed = 0;
-existingByEventId.forEach((r) => { data.airbnbReservations = data.airbnbReservations.filter((x) => x.id !== r.id); removed++; });
+existingByEventId.forEach((r) => {
+if (r.movedFrom) return; // moved by hand: it is now this dashboard's own record, not the calendar's
+data.airbnbReservations = data.airbnbReservations.filter((x) => x.id !== r.id); removed++;
+});
 return { added, updated, removed };
 }
 
@@ -751,6 +768,7 @@ return `<div class="cal-row" data-airbnb-row="${r.id}">
 <span class="cal-badge ${escapeHtml(listing.colour)}">${formatAirbnbDate(r.checkin)} &rarr; ${formatAirbnbDate(r.checkout)} &middot; ${lengthLabel}</span>
 </div>
 <div class="cal-event-row">
+${data.airbnbListings.length > 1 ? `<select class="mini" data-airbnb-res-move="${r.id}" title="Which listing this stay belongs to. Change it when someone else rented the room out this time, e.g. you took the booking yourself, so the income and occupancy go to the right listing and owner.">${data.airbnbListings.map((l) => `<option value="${escapeHtml(l.id)}"${l.id === r.listingId ? ' selected' : ''}>${escapeHtml(l.label || l.prefix || 'Listing')}</option>`).join('')}</select>` : ''}
 <input type="text" autocomplete="off" class="tag-add-input" placeholder="Guest name" data-airbnb-res-field="guestName" data-airbnb-res-id="${r.id}" value="${escapeHtml(r.guestName)}" style="max-width:130px;">
 <input type="text" autocomplete="off" class="tag-add-input" placeholder="Notes" data-airbnb-res-field="notes" data-airbnb-res-id="${r.id}" value="${escapeHtml(r.notes)}" style="max-width:160px;">
 <input type="number" step="0.01" min="0" class="tag-add-input" placeholder="Income £" data-airbnb-res-field="income" data-airbnb-res-id="${r.id}" value="${r.income ?? ''}" style="max-width:95px;" title="What this stay earned. The owner's share becomes a debt on the checkout date — see Letting income on Finances.">
@@ -877,6 +895,29 @@ queueSave();
 if (field === 'income' || field === 'paidOn') {
 import('./letting.js').then((m) => { m.accrueLettings(); m.renderLetting(); });
 }
+});
+});
+// Moving a booking to another listing. Refused once its income has been charged to the old owner
+// (that ledger row would still name them); before that nothing else refers to the listing.
+el.querySelectorAll('[data-airbnb-res-move]').forEach((select) => {
+select.addEventListener('change', async () => {
+const r = data.airbnbReservations.find((x) => x.id === select.dataset.airbnbResMove);
+const target = data.airbnbListings.find((l) => l.id === select.value);
+if (!r || !target || target.id === r.listingId) return;
+if (r.accruedAt) {
+select.value = r.listingId;
+const status = el.querySelector(`[data-airbnb-push-status="${r.id}"]`);
+if (status) status.textContent = 'Already charged to its owner in Letting income, so it can\'t be moved. Remove that entry there first.';
+return;
+}
+// Remember where it came from so the calendar feed (or shared calendar) doesn't re-add it there.
+if (!r.movedFrom && (r.uid || r.googleEventId)) r.movedFrom = { listingId: r.listingId, uid: r.uid || '', googleEventId: r.googleEventId || '' };
+r.listingId = target.id;
+if (r.movedFrom && r.movedFrom.listingId === target.id) delete r.movedFrom; // back where it came from: the feed owns it again
+queueSave();
+renderAirbnb();
+import('./letting.js').then((m) => { m.accrueLettings(); m.renderLetting(); }).catch(() => {});
+import('./planner.js').then(({ renderPlanner }) => renderPlanner()).catch(() => {});
 });
 });
 // Only manual bookings carry this -- a feed or external one is deleted
