@@ -416,7 +416,9 @@ const RELATION_LABELS = { self: 'Me', partner: 'Date / partner', child: 'Child',
 // below. A freetext-only companion (no connectionId) has no record to
 // link to, so stays plain text permanently.
 function personChipHtml(tripId, p) {
-const relationSuffix = p.relation !== 'other' ? ` (${escapeHtml(RELATION_LABELS[p.relation] || p.relation)})` : '';
+// The relationship decides which companion packing modules apply (Partner,
+// Kids), so it is a control rather than fixed text: changing it re-checks the packing list.
+const relationSuffix = ` <select class="tag-add-input" style="width:auto;max-width:120px;font-size:11px;padding:1px 2px;" data-trip-person-rel="${tripId}" data-person-id="${p.id}" title="Who they are to you. Partner and Child add extra items to the packing list.">${Object.entries(RELATION_LABELS).map(([k, v]) => `<option value="${k}"${p.relation === k ? ' selected' : ''}>${escapeHtml(v)}</option>`).join('')}</select>`;
 const removeBtn = `<span class="tag-x" data-trip-remove-person="${tripId}" data-person-id="${p.id}">&times;</span>`;
 const nameHtml = p.connectionId ? `<span data-person-chip-mount="${p.id}">${escapeHtml(p.name)}</span>` : escapeHtml(p.name);
 return `<span class="tag-chip">${nameHtml}${relationSuffix}${removeBtn}</span>`;
@@ -833,8 +835,28 @@ const freeInput = root.querySelector(`[data-trip-person-freetext="${tripId}"]`);
 if (freeInput) freeInput.hidden = !picker || picker.value !== '__freetext__';
 });
 });
+// A packing list that has already been generated tops itself up when the
+// people or legs change (Generate is a safe additive merge), so a companion
+// joining later brings their items without another click on Refresh. A trip
+// with no list yet stays as it was: lists are only started on request.
+async function topUpPacking(tripId) {
+const trip = tripById(tripId);
+if (!trip || !trip.packing || !trip.packing.generatedAt) return;
+try { (await import('./packing.js')).generatePackingItems(trip); } catch (err) { console.error('Packing top-up failed:', err); }
+}
+root.querySelectorAll('[data-trip-person-rel]').forEach((sel) => {
+sel.addEventListener('change', async () => {
+const trip = tripById(sel.dataset.tripPersonRel);
+const person = trip && trip.people.find((p) => p.id === sel.dataset.personId);
+if (!person) return;
+person.relation = sel.value;
+queueSave();
+await topUpPacking(trip.id);
+renderTravel();
+});
+});
 root.querySelectorAll('[data-trip-add-person]').forEach((btn) => {
-btn.addEventListener('click', () => {
+btn.addEventListener('click', async () => {
 const tripId = btn.dataset.tripAddPerson;
 const relSel = root.querySelector(`[data-trip-person-relation="${tripId}"]`);
 const picker = document.getElementById(`trip-person-picker-${tripId}`);
@@ -857,6 +879,7 @@ return;
 // file) -- same shape this file's own connections.js import already
 // uses above.
 import('./planner.js').then(({ syncTripPeopleEntries }) => syncTripPeopleEntries(tripById(tripId)));
+await topUpPacking(tripId);
 renderTravel();
 });
 });
