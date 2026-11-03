@@ -1,6 +1,6 @@
 import { data, queueSave, blankVoucher } from '../state.js';
 import { escapeHtml, bindForm, daysUntil, scrollAndFlash, logoBadgeHtml, bindLogoFallbacks } from '../utils.js';
-import { pendingClassifications, pendingVoucherLinks, setLabelKind, markVoucherLinked, markVoucherSkipped, voucherWhatFor, VOUCHER_WHAT_BY_LABEL, CURRENCY_UNITS } from './loyaltybalances.js';
+import { renderLoyaltyBalances, pendingClassifications, pendingVoucherLinks, setLabelKind, markVoucherLinked, markVoucherSkipped, voucherWhatFor, VOUCHER_WHAT_BY_LABEL, CURRENCY_UNITS } from './loyaltybalances.js';
 import { matchBrandLogo } from '../brandLogos.js';
 import { resolveProvider, refreshProviderDatalists } from '../providers.js';
 
@@ -184,7 +184,14 @@ el.addEventListener('click', () => {
 const doomed = data.vouchers.find((x) => x.id === el.dataset.delVoucher);
 if (!confirm(`Delete ${doomed && doomed.name ? `"${doomed.name}"` : 'this voucher'}?`)) return;
 data.vouchers = data.vouchers.filter((x) => x.id !== el.dataset.delVoucher);
+// A loyalty reading that was confirmed into this voucher still said "linked"
+// with a voucher id that no longer exists, so the scan never offered it
+// again and the Loyalty card showed a chip to nothing. Put it back in the review queue.
+data.loyaltyBalances.forEach((b) => {
+if (b.voucherId === el.dataset.delVoucher) { b.voucherId = ''; b.voucherLinkStatus = ''; }
+});
 renderVouchers();
+renderLoyaltyBalances();
 queueSave();
 });
 });

@@ -1830,6 +1830,8 @@ a.balanceTransfers = (a.balanceTransfers || []).filter((bt) => bt.fromAccountId 
 // the entry, same reasoning as state.js's own orphan-cleanup guard.
 (a.outgoings || []).forEach((o) => { if (o.toAccountId === id) o.toAccountId = ''; });
 });
+// A subscription paid from this account would otherwise keep a link to nothing until the next reload.
+(data.subscriptions || []).forEach((s) => { if (s.accountId === id) s.accountId = ''; });
 expandedAccounts.delete(id);
 queueSave();
 renderFinanceAccounts();

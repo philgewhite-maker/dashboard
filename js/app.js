@@ -3,6 +3,7 @@ import { initDiagnostics } from './diagnostics.js';
 import { initSettingsVault } from './settingsvault.js';
 import { initTheme } from './theme.js';
 import { initActivity } from './features/activity.js';
+import { initRenderBus } from './render-bus.js';
 import { loadData, setSaveStatusHandler, setExternalUpdateHandler, flushSave } from './state.js';
 import { renderAll } from './render-all.js';
 import { switchTab } from './tabs.js';
@@ -354,6 +355,7 @@ initDiagnostics();
 initSettingsVault();
 initTheme();
 initActivity();
+initRenderBus();
 }
 
 main();

@@ -2527,6 +2527,40 @@ const onLocalChangeHandlers = [];
 function setLocalChangeHandler(fn) { onLocalChangeHandlers.push(fn); }
 function fireLocalChange() { onLocalChangeHandlers.forEach((fn) => fn()); }
 
+// ---- Change notification for the UI ---------------------------------------
+// persist() is the only writer, and until now nothing told the screen what
+// had changed: each handler re-rendered only its own panel, so any other
+// panel showing the same data stayed stale until reload. After every save
+// this works out WHICH top-level keys of `data` changed (by comparing
+// per-key JSON against the last save, the same trick autosync uses) and
+// tells the listeners js/render-bus.js registers. Keys that change
+// constantly and mean nothing to a panel are left out.
+const NON_RENDER_KEYS = new Set(['tickerCache', 'airbnbSyncStatus', 'airbnbCleanerSyncStatus', 'siteHealth', 'scheduledRuns', 'calendarStatus', 'diagnostics']);
+const dataChangeListeners = [];
+let lastSignatures = null;
+function onDataChange(fn) { dataChangeListeners.push(fn); }
+function currentSignatures() {
+const sig = {};
+Object.keys(data).forEach((k) => {
+if (NON_RENDER_KEYS.has(k)) return;
+try { sig[k] = JSON.stringify(data[k]); } catch (e) { sig[k] = String(Math.random()); }
+});
+return sig;
+}
+// Called once after the first render so the first real save has a baseline to diff against.
+function baselineDataSignatures() { lastSignatures = currentSignatures(); }
+// `fire: false` records the new state without notifying: used when the
+// caller re-renders everything itself (a remote pull, a backup import).
+function notifyDataChanged({ fire = true } = {}) {
+if (lastSignatures === null) return;
+const next = currentSignatures();
+const changed = new Set();
+Object.keys(next).forEach((k) => { if (next[k] !== lastSignatures[k]) changed.add(k); });
+Object.keys(lastSignatures).forEach((k) => { if (!(k in next)) changed.add(k); });
+lastSignatures = next;
+if (fire && changed.size) dataChangeListeners.forEach((fn) => { try { fn(changed); } catch (e) { console.error('Data-change listener failed:', e); } });
+}
+
 function setSaveStatusHandler(fn) { onSaveStatus = fn; }
 // Called when persist() finds newer data on disk than this session knew
 // about and pulls it in instead of overwriting it — app.js wires this to a
@@ -3858,6 +3892,7 @@ data = onDiskData;
 migrate();
 knownRev = onDiskRev;
 onSaveStatus('conflict');
+notifyDataChanged({ fire: false });
 onExternalUpdate();
 return;
 }
@@ -3865,6 +3900,7 @@ knownRev = onDiskRev + 1;
 await kvSet(DATA_KEY, data);
 await kvSet(REV_KEY, knownRev);
 onSaveStatus('ok');
+notifyDataChanged({ fire: !opts.silentDispatch });
 if (opts.notify !== false) fireLocalChange();
 } catch (e) {
 onSaveStatus('error');
@@ -4359,7 +4395,8 @@ async function replaceData(parsed, opts = {}) {
 const base = blankData();
 data = Object.assign({}, base, parsed);
 migrate();
-await persist({ notify: opts.fromRemote !== true });
+// Every caller re-renders everything itself afterwards, so skip the per-key dispatch.
+await persist({ notify: opts.fromRemote !== true, silentDispatch: true });
 }
 
 async function importBackup(file) {
@@ -4369,7 +4406,7 @@ await replaceData(JSON.parse(text));
 
 export {
 data, sampleData, loadData, migrate, persist, queueSave, flushSave, hasPendingSave, setSaveStatusHandler,
-setExternalUpdateHandler, setLocalChangeHandler, getLocalSettings, setLocalSetting, setLocalSettingHandler, computeStreak, reachOutThreshold,
+setExternalUpdateHandler, setLocalChangeHandler, onDataChange, baselineDataSignatures, getLocalSettings, setLocalSetting, setLocalSettingHandler, computeStreak, reachOutThreshold,
 isDormantStage, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness,
 exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, SENSITIVE_BLOCKS, whatSheHas, unheldInventory, whoFits, inventorySets, incompleteCoreSets, whoFitsSet, interestNote, SIZE_GROUPS, sizeGroupFor, SET_CORE_GROUPS, DEFAULT_PREFS, blankInventoryItem, blankApOrder, blankLoan, blankSetCompletionFind, blankBookItem,
 MAIL_SEARCH_KINDS, mailSearchLabel, blankMailSearch, blankMailTopic, blankMailRule, blankMailDismissal,

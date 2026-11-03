@@ -34,6 +34,18 @@ import { renderPlanner } from './features/planner.js';
 import { renderNudges } from './features/nudges.js';
 import { renderTagCleanup } from './features/tagcleanup.js';
 import { renderTelegramFamily } from './features/telegramfamily.js';
+// These used to be missing from renderAll(), so a remote sync left them
+// showing the old data until a reload.
+import { renderLetting } from './features/letting.js';
+import { renderLoans } from './features/loans.js';
+import { renderTicker } from './features/ticker.js';
+import { renderLeave } from './features/leave.js';
+import { renderBooks } from './features/books.js';
+import { renderSchoolCalendar } from './features/schoolcalendar.js';
+import { refreshShopping } from './features/shopping.js';
+
+// The panels added later run before their init function on the very first paint; one that is not ready yet must not stop the rest.
+function safely(fn) { try { fn(); } catch (err) { console.error(`renderAll: ${fn.name || "a panel"} failed:`, err); } }
 
 function renderAll() {
 renderHabits();
@@ -70,6 +82,13 @@ renderOverview();
 renderNudges();
 renderTagCleanup();
 renderTelegramFamily();
+safely(renderLetting);
+safely(renderLoans);
+safely(renderTicker);
+safely(renderLeave);
+safely(renderBooks);
+safely(renderSchoolCalendar);
+safely(refreshShopping);
 }
 
 export { renderAll };
