@@ -15,6 +15,7 @@ final class App
     private ?RateSource $rates = null;
     private ?PaymentGateway $gateway = null;
     private ?Mailer $mailer = null;
+    private ?DashboardInbox $inbox = null;
 
     private function __construct(array $config)
     {
@@ -90,6 +91,8 @@ final class App
             ],
             'mail' => ['transport' => 'log', 'from' => ''],
             'tfl' => ['app_key' => ''],
+            // Phil's dashboard agent inbox (agent-write.php). Blank = off.
+            'dashboard' => ['inbox_url' => '', 'secret' => ''],
         ];
     }
 
@@ -113,6 +116,11 @@ final class App
     public function mailer(): Mailer
     {
         return $this->mailer ??= new Mailer($this);
+    }
+
+    public function inbox(): DashboardInbox
+    {
+        return $this->inbox ??= new DashboardInbox($this);
     }
 
     /** Tests swap providers in. */

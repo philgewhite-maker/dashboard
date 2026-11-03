@@ -20,14 +20,22 @@ final class Cron
             'rates' => fn() => $this->app->rates()->refresh(),
             'fx' => fn() => $this->due('fx', 20 * 3600) ? (new Fx($this->app))->refresh() : 'fresh',
             'rollforward' => fn() => $this->due('rollforward', 24 * 3600) ? $this->rollForward() : 'done today',
-            'routes' => fn() => (new Tfl($this->app))->proposeAll(),
+            // Quarterly: fresh TfL times for every route, proposed for approval.
+            'routes' => fn() => $this->due('routes', 90 * 86400) ? (new Tfl($this->app))->proposeAll() : 'done this quarter',
+            'reviews' => fn() => (new Reviews($this->app))->run(),
+            'inbox' => fn() => $this->app->inbox()->flush(),   // last: sends whatever the jobs above queued
         ];
-        // Routes cost TfL calls and need approval, so they only run when asked for by name.
-        $run = $task === 'all' ? array_diff_key($jobs, ['routes' => 1]) : array_intersect_key($jobs, [$task => 1]);
+        $run = $task === 'all' ? $jobs : array_intersect_key($jobs, [$task => 1]);
+        // Asked for by name (e.g. from setup): run now, whatever the schedule says.
+        if ($task === 'routes') $run = ['routes' => fn() => (new Tfl($this->app))->proposeAll(), 'inbox' => $jobs['inbox']];
         $out = [];
         foreach ($run as $name => $fn) {
             try { $out[$name] = $fn(); }
-            catch (Throwable $e) { $out[$name] = 'ERROR: ' . $e->getMessage(); $this->app->log('cron', $name, $e->getMessage()); }
+            catch (Throwable $e) {
+                $out[$name] = 'ERROR: ' . $e->getMessage();
+                $this->app->log('cron', $name, $e->getMessage());
+                if ($name !== 'inbox') $this->app->inbox()->propose("cron:$name:" . date('Y-m-d'), "Booking site job '$name' is failing", '/admin', $e->getMessage());
+            }
         }
         return $out;
     }

@@ -306,6 +306,13 @@ final class Bookings
             "\nGuests: {$b['adults']}\n" . $schedule . "\nCancellation: " . Cancellation::POLICIES[$b['policy']]['text'] . "\n" .
             ($arrival ? "\nArriving:\n" . implode("\n\n", array_unique($arrival)) . "\n" : '') .
             "\nYour booking page: " . $this->guestUrl($b['ref']) . "\n", $this->hostFrom($id));
+        if (!$this->app->rates()->pushesToAirbnb()) {
+            $airbnb = array_filter(array_map(fn($l) => $l['airbnb_url'] ? "{$l['name']}: {$l['airbnb_url']}" : null, $product['listings']));
+            $this->app->inbox()->propose("block:$id", 'Block ' . date('j M', strtotime($b['arrival'])) . '–' . date('j M', strtotime($b['departure'])) . " on Airbnb for {$product['name']} ({$b['ref']})",
+                '/admin/booking?id=' . $id, "Confirmed direct booking; until Beds24 is connected Airbnb doesn't know.
+" . implode("
+", $airbnb), date('Y-m-d'), true);
+        }
         foreach ($this->hostsFor($id) as $h) {
             $push = $this->app->rates()->pushesToAirbnb() ? '' : "\nACTION: block these dates on Airbnb now -- this site can't do it until Beds24 is connected.\n";
             $this->mail($h['email'], "Confirmed {$b['ref']}: " . Util::fmtDate($b['arrival']) . " ({$b['guest_name']})",
@@ -347,6 +354,11 @@ final class Bookings
                 'Total ' . Util::money((int)$b['total_minor'], $b['currency']) . " by {$b['method']}\n" . ($b['message'] ? "\nMessage:\n{$b['message']}\n" : '') .
                 "\nApprove or decline: " . $this->adminUrl($b) . "\nNo answer by then = declined automatically.\n");
         }
+        $this->app->inbox()->propose("request:{$b['id']}",
+            "Answer {$b['ref']} by " . date('D H:i', strtotime($b['approve_by'])) . ": {$b['guest_name']}, {$q['product_name']}, " . date('j M', strtotime($b['arrival'])) . '–' . date('j M', strtotime($b['departure'])),
+            '/admin/booking?id=' . $b['id'],
+            Util::money((int)$b['total_minor'], $b['currency']) . " by {$b['method']}. Unanswered requests are declined automatically. If it's already answered in the booking site, just tick this off.",
+            date('Y-m-d', strtotime($b['approve_by'])), true);
         $op = $this->app->config['site']['operator_email'];
         if ($op && !in_array($op, array_column($this->hostsFor($b['id']), 'email'), true)) {
             $this->mail($op, "New request {$b['ref']}", "New direct request: " . $this->adminUrl($b) . "\n");
@@ -362,6 +374,8 @@ final class Bookings
             $amount = Util::money((int)$pay['amount_minor'], $pay['currency']);
             if ($pay['kind'] === 'manual') {
                 $h = $this->content->host($part['host_id']);
+                $this->app->inbox()->propose("manual:{$pay['id']}", "Check {$h['name']} received $amount by {$b['method']} for {$b['ref']} (ref {$b['ref']}-{$pay['seq']})",
+                    '/admin/booking?id=' . $b['id'], 'Mark it received in the booking site once it arrives.', $b['pay_by'] ? date('Y-m-d', strtotime($b['pay_by'])) : $pay['due_date']);
                 $lines[] = "{$l['name']}: $amount\n" . $this->manualInstructions($b, $h, $pay);
             } else {
                 $lines[] = "{$l['name']}: $amount\nPay here: " . $this->guestUrl($b['ref']) . '&pay=' . $pay['id'];

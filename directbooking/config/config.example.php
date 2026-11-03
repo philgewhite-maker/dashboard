@@ -44,6 +44,13 @@ return [
         'webhook_secret' => '',                    // whsec_... of the Connect webhook endpoint /api/stripe/webhook
     ],
 
+    // Tasks for Phil's dashboard (its agent inbox), each linking to the admin
+    // page where it's done. Secret = $AGENT_SECRET in agent-write.php.
+    'dashboard' => [
+        'inbox_url' => 'https://georgewhiteeuropean.co.uk/agent-write.php',
+        'secret' => '',
+    ],
+
     // 'log' until the domain's mailbox and SPF/DKIM are set up, then 'mail'.
     'mail' => ['transport' => 'log', 'from' => 'bookings@YOUR-DOMAIN'],
 ];

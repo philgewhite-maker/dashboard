@@ -97,6 +97,37 @@ listing's Airbnb calendar export URL into its `ical_url`) or to
 `mail` once the domain's mailbox exists. In cPanel > Email
 Deliverability, fix SPF and DKIM with the "Repair" button.
 
+## Tasks in Phil's dashboard
+
+With `dashboard.inbox_url` and `dashboard.secret` set in `config.php`,
+the site proposes tasks into the personal dashboard's agent inbox. The
+secret is `$AGENT_SECRET` from `agent-write.php`. All tasks go under one
+"Direct booking site" project, in a "Bookings and site" group, and each
+links straight to the admin page where it's done. After signing in you
+land on that page.
+
+| Task | When |
+|---|---|
+| Answer a booking request (due = the auto-decline time) | Immediately |
+| Block the dates on Airbnb (only while not on Beds24) | Immediately, on confirmation |
+| Check a bank, Revolut or USDT payment arrived | When the guest is sent the details |
+| Review proposed changes (TfL routes, next year's events) | Weekly, while any are waiting |
+| Publishing blocked by `[CHECK]` items | Weekly, while blocked |
+| Events with no confirmed date, or within 4 months with no event rules | Monthly |
+| Travel times over 6 months old | Quarterly (TfL times also refresh themselves quarterly) |
+| Direct pricing check: discount, long-stay and event rules | Quarterly |
+| A scheduled job failing | Once a day while it fails |
+
+Each task is keyed, so nothing is proposed twice in its period. If the
+dashboard can't be reached, the task waits in `inbox_outbox` and the next
+cron run sends it.
+
+The inbox has one limit: it only accepts *new* proposals. Something
+handled in the booking-site admin isn't ticked off in the dashboard by
+itself; the task's link shows its current state. Nightly prices aren't
+reviewed here, because the dashboard's own quarterly Airbnb rate review
+already does that.
+
 ## Stripe setup
 
 1. Phil: open the platform Stripe account and turn on **Connect** in its

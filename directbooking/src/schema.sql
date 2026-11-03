@@ -256,6 +256,15 @@ CREATE TABLE IF NOT EXISTS activity (
   message TEXT NOT NULL
 );
 
+-- Tasks proposed to the owner's personal dashboard (DashboardInbox).
+CREATE TABLE IF NOT EXISTS inbox_outbox (
+  key TEXT PRIMARY KEY,             -- e.g. request:bk_123, so nothing is proposed twice
+  payload TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  sent_at TEXT,
+  batch_id TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_bookings_status ON bookings(status);
 CREATE INDEX IF NOT EXISTS idx_parts_booking ON booking_parts(booking_id);
 CREATE INDEX IF NOT EXISTS idx_payments_part ON payments(part_id);

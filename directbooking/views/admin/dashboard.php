@@ -35,7 +35,7 @@ $table = fn(array $rows, callable $extra) => $rows
 <?php endif; ?>
 
 <?php if ($operator): ?>
-<h2>Proposed changes</h2>
+<h2 id="approvals">Proposed changes</h2>
 <?php if (!$approvals): ?><p class="muted">None waiting.</p><?php endif; ?>
 <?php foreach ($approvals as $a): ?>
   <form method="post" action="/admin/approval" class="approval">{{csrf}}<input type="hidden" name="id" value="<?= $h($a['id']) ?>">

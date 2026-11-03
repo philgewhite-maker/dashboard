@@ -23,6 +23,7 @@ final class Admin
         if ($path === '/admin/login' && $method === 'POST') { $this->login(); return; }
         if ($path === '/admin/auth') { $this->auth(); return; }
         $this->me = isset($_SESSION['admin']) ? $this->app->one('SELECT * FROM admins WHERE email = ?', [$_SESSION['admin']]) : null;
+        if (!$this->me && $method === 'GET' && $path !== '/admin' && str_starts_with($_SERVER['REQUEST_URI'] ?? '', '/admin/')) $_SESSION['next'] = $_SERVER['REQUEST_URI'];
         if (!$this->me) { $this->page('Sign in', View::render('admin/login', ['sent' => !empty($_GET['sent'])])); return; }
         if ($method === 'POST' && !hash_equals($_SESSION['csrf'] ?? '', (string)($_POST['csrf'] ?? ''))) { http_response_code(400); echo 'Form expired: go back and reload.'; return; }
 
@@ -75,7 +76,10 @@ final class Admin
         $this->app->update('login_tokens', $row['token_hash'], ['used_at' => time()], 'token_hash');
         session_regenerate_id(true);
         $_SESSION['admin'] = $row['email'];
-        header('Location: /admin', true, 303);
+        $next = $_SESSION['next'] ?? '/admin';
+        unset($_SESSION['next']);
+        // Only ever back into the admin on this site: never an outside address.
+        header('Location: ' . (preg_match('#^/admin(/|$|\?)#', $next) ? $next : '/admin'), true, 303);
     }
 
     private function logout(): void

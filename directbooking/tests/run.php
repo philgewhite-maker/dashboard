@@ -221,6 +221,29 @@ eq((new Cron($app))->rollForward(), 1, 'past yearly event proposes next year');
 eq((new Cron($app))->rollForward(), 1, 'repeat run does not stack a duplicate');
 eq((int)$app->one("SELECT COUNT(*) AS n FROM approvals WHERE kind = 'occurrence.create'")['n'], 1, 'one pending proposal');
 
+// ---- dashboard inbox tasks ---------------------------------------------------
+// A dead local port: queueing works, sending fails fast and is retried later.
+$app->config['dashboard'] = ['inbox_url' => 'http://127.0.0.1:9/agent-write.php', 'secret' => 'x'];
+$r = $bk->request(['product' => 'double-room', 'arrival' => $d(200), 'departure' => $d(202), 'adults' => 1, 'currency' => 'GBP', 'method' => 'bank_transfer', 'guest' => $guest]);
+$b = $bk->byRef($r['ref']);
+$row = $app->one('SELECT * FROM inbox_outbox WHERE key = ?', ["request:{$b['id']}"]);
+ok($row !== null, 'new request queues a dashboard task');
+ok(str_contains(Util::json($row['payload'])['link'], "/admin/booking?id={$b['id']}"), 'task links straight to the booking in the admin');
+eq($row['sent_at'], null, 'unsent while the dashboard is unreachable (retried by cron)');
+(new Approvals($app))->propose('route.upsert', 'routes', null, 'Route: test', ['x' => 1]);
+eq((int)$app->one("SELECT COUNT(*) AS n FROM inbox_outbox WHERE key LIKE 'approval:%'")['n'], 0, 'single proposals do not each make a task');
+$rv = new Reviews($app);
+$rv->run();
+ok((bool)$app->one("SELECT 1 FROM inbox_outbox WHERE key LIKE 'approvals:%'"), 'weekly task summarises waiting proposals');
+ok((bool)$app->one("SELECT 1 FROM inbox_outbox WHERE key LIKE 'events:%'"), 'monthly task lists events with no confirmed date');
+ok((bool)$app->one("SELECT 1 FROM inbox_outbox WHERE key LIKE 'pricing:%'"), 'quarterly pricing check queued');
+ok((bool)$app->one("SELECT 1 FROM inbox_outbox WHERE key LIKE 'publish-blocked:%'"), 'blocked publishing becomes a task');
+$before = (int)$app->one('SELECT COUNT(*) AS n FROM inbox_outbox')['n'];
+$rv->run();
+eq((int)$app->one('SELECT COUNT(*) AS n FROM inbox_outbox')['n'], $before, 'reviews do not repeat within their period');
+try { $app->inbox()->flush(); ok(false, 'flush fails while unreachable'); } catch (RuntimeException $e) { ok(true, 'flush fails while unreachable'); }
+$app->config['dashboard'] = ['inbox_url' => '', 'secret' => ''];
+
 // ---- publishing -------------------------------------------------------------------
 $pub = new Publisher($app);
 $r = $pub->publish();
