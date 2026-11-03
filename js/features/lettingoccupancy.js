@@ -103,7 +103,9 @@ if (e.kind === 'cancellation') {
 const checkin = e.checkin || dateStrAdd(e.date, -1);
 const listingId = roomForCancellation(e, ownerListings);
 if (!listingId) { unplaced += 1; return; }
-if ((data.airbnbCancelledStays || []).some((s) => s.listingId === listingId && s.checkin === checkin)) return;
+// Already recorded from the feed: the same room and check-in, and the same check-out when the payout row knows it
+// (two guests can cancel the same arrival date, and the second must not be taken for the first).
+if ((data.airbnbCancelledStays || []).some((s) => s.listingId === listingId && s.checkin === checkin && (!e.checkout || s.checkout === e.checkout))) return;
 // Without a recorded end date the stay's own length is unknown, so one night is drawn.
 const checkout = e.checkout && e.checkout > checkin ? e.checkout : dateStrAdd(checkin, 1);
 add({ id: `led:${e.id}`, listingId, checkin, checkout, guest: e.note || '', income: null, bookedOn: '', cancelledOn: e.date, status: 'cancelled', source: 'ledger', approx: !(e.checkout && e.checkout > checkin) });
