@@ -1358,6 +1358,7 @@ return candidates.length === 1 ? candidates[0] : null;
 // "your guest <Name> had to cancel".
 const CANCELLATION_SUBJECT_RE = /^Cancelled:\s*Reservation\s+(\S+)\s+for\s+(\d{1,2})(?:\s+([a-z]+))?\s*[–—-]\s*(\d{1,2})\s+([a-z]+)(?:\s+(\d{4}))?$/i;
 const CANCELLATION_QUERY = 'subject:"Cancelled: Reservation"';
+const CANCELLATION_REPLAY_VERSION = 1;
 const CANCELLATION_SEARCH_LIMIT = 25;
 // Loose gap between the words and the amount, same tolerance PAYOUT_RE
 // above uses for stripped-HTML whitespace.
@@ -1442,6 +1443,14 @@ async function syncCancellationsFromEmail() {
 if (!(await canAttemptGoogleAction())) return { posted: 0 };
 if (!Array.isArray(data.prefs.airbnbCancellationsSeen)) data.prefs.airbnbCancellationsSeen = [];
 const seen = new Set(data.prefs.airbnbCancellationsSeen);
+// One-time replay: payouts posted before the room and the real stay dates were
+// recorded on the ledger row have neither. Reading those emails again fills them
+// in on the existing row (the duplicate guard below stops a second payout being
+// posted). Bump CANCELLATION_REPLAY_VERSION to run it again.
+const replaying = (data.prefs.airbnbCancellationsReplayed || 0) < CANCELLATION_REPLAY_VERSION;
+if (replaying) seen.clear();
+let fetchFailures = 0;
+let enriched = 0;
 
 const { fetchMailSearches, getMessageDetail } = await import('../googlemail.js');
 const search = { kind: 'query', value: CANCELLATION_QUERY, maxDays: 0, maxEvents: CANCELLATION_SEARCH_LIMIT };
@@ -1484,6 +1493,7 @@ detail = await getMessageDetail(m.id);
 } catch (err) {
 console.error('Cancellation email fetch failed:', err);
 unmatched++;
+fetchFailures++;
 recordMail(m, 'airbnb-cancel', 'failed', { note: `Could not read the email: ${err.message || err}` });
 continue; // not marked seen -- a fetch failure is worth retrying
 }
@@ -1525,15 +1535,28 @@ const checkin = `${checkinYear}-${String(startMonthIdx + 1).padStart(2, '0')}-${
 // cancellation on the exact same date for the exact same payout is
 // not a real scenario this app needs to support.
 const releaseDate = dateStrAdd(checkin, 1);
-const alreadyRecorded = data.lettingLedger.some((e) => e.kind === 'cancellation' && e.ownerKey === ownerKey && e.date === releaseDate && Math.abs((Number(e.gross) || 0) - payout) < 0.01);
-if (alreadyRecorded) { seen.add(m.id); recordMail(m, 'airbnb-cancel', 'filed', { note: 'This payout was already on the letting ledger.', produced: [{ kind: 'letting', label: 'Letting income' }] }); continue; }
+// The stay's real last night: the subject states the end day and month.
+const endYear = Number(checkin.slice(0, 4)) + (endMonthIdx < startMonthIdx ? 1 : 0);
+const stayCheckout = `${endYear}-${String(endMonthIdx + 1).padStart(2, '0')}-${String(endDay).padStart(2, '0')}`;
+const recorded = data.lettingLedger.find((e) => e.kind === 'cancellation' && e.ownerKey === ownerKey && e.date === releaseDate && Math.abs((Number(e.gross) || 0) - payout) < 0.01);
+if (recorded) {
+// Fills in what an older row lacks without touching its amounts.
+let filled = false;
+if (!recorded.listingId) { recorded.listingId = listing.id; filled = true; }
+if (!recorded.checkin) { recorded.checkin = checkin; filled = true; }
+if (!recorded.checkout && stayCheckout > checkin) { recorded.checkout = stayCheckout; filled = true; }
+if (filled) enriched++;
+seen.add(m.id);
+recordMail(m, 'airbnb-cancel', 'filed', { note: filled ? `This payout was already on the letting ledger. Room and stay dates (${checkin} to ${stayCheckout}) added to it.` : 'This payout was already on the letting ledger.', produced: [{ kind: 'letting', label: 'Letting income' }] });
+continue;
+}
 const share = Number(listing.sharePct);
 const pct = Number.isFinite(share) ? share : 50;
 const amount = Math.round(payout * (pct / 100) * 100) / 100;
 data.lettingLedger.push({
 id: uid(), ownerKey, kind: 'cancellation', amount, gross: payout, pct,
 // Which room and which night it was for, so the occupancy timeline can draw it hatched.
-listingId: listing.id, checkin,
+listingId: listing.id, checkin, ...(stayCheckout > checkin ? { checkout: stayCheckout } : {}),
 platform: 'airbnb',
 // Matches the email's own stated timing ("released 24 hours after
 // the check-in date"), not today -- so this lands in the right tax
@@ -1549,8 +1572,10 @@ posted++;
 recordMail(m, 'airbnb-cancel', 'filed', { note: `£${amount.toFixed(2)} cancellation payout for ${guestName || listing.label || 'a cancelled stay'}.`, produced: [{ kind: 'letting', label: 'Letting income' }] });
 }
 data.prefs.airbnbCancellationsSeen = [...seen];
-if (posted || unmatched) queueSave();
-return { posted, unmatched, unowned };
+// Only count the replay as done if every email could be read this time.
+if (replaying && !fetchFailures) data.prefs.airbnbCancellationsReplayed = CANCELLATION_REPLAY_VERSION;
+if (posted || unmatched || enriched || replaying) queueSave();
+return { posted, unmatched, unowned, enriched };
 }
 
 // The ledger's Retry: forget this one message and run the cancellation sync again.

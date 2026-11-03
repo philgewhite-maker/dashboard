@@ -12,7 +12,7 @@
 // the live list the moment it ends or is cancelled.
 import { data } from '../state.js';
 import { escapeHtml, dateStrAdd, todayStr } from '../utils.js';
-import { listingColorVar, resolveColor, addMonths, monthLabel } from './letting.js';
+import { listingColorVar, resolveColor, addMonths, monthLabel, ownerKeyFor, ownerNameFor } from './letting.js';
 
 const DAY_MS = 86400000;
 const MIN_COVERAGE = 0.8; // share of a month's nights that must have a known booking date before it is compared
@@ -55,34 +55,70 @@ income: s.income ?? null, bookedOn: s.bookedOn || '', status: 'stay', source: 'f
 id: s.id, listingId: s.listingId, checkin: s.checkin, checkout: s.checkout, guest: s.guestName || '',
 income: null, bookedOn: s.bookedOn || '', cancelledOn: s.cancelledOn || '', status: 'cancelled', source: 'cancelled',
 }));
+// Listings by the same owner key the ledger rows carry (a connection id, or a
+// lowercased typed name), so a ledger row finds its owner's rooms either way.
 const ownerListings = new Map();
 (data.airbnbListings || []).forEach((l) => {
-const k = String(l.ownerLabel || '').trim().toLowerCase();
+const k = ownerKeyFor(l);
 if (!ownerListings.has(k)) ownerListings.set(k, []);
 ownerListings.get(k).push(l);
 });
+const reservationIds = new Set((data.airbnbReservations || []).map((r) => r.id));
 let unplaced = 0;
+const lumps = [];       // dated lump sums with no night-by-night shape: cancellation payouts, undated historic income
+const revenueOnly = []; // income that spans nights but has no room to draw it on
 (data.lettingLedger || []).forEach((e) => {
 if (e.kind === 'cancellation') {
+const gross = Number(e.gross) || 0;
+// The payout is revenue whether or not we know the room.
+if (gross && e.date) lumps.push({ id: e.id, date: e.date, gross });
 const checkin = e.checkin || dateStrAdd(e.date, -1);
-let listingId = e.listingId;
-if (!listingId) {
-const mine = ownerListings.get(String(e.ownerKey || '').toLowerCase()) || [];
-if (mine.length === 1) listingId = mine[0].id; else { unplaced += 1; return; }
-}
-// A cancellation payout carries only the check-in; the stay's own length is unknown, so one night is drawn.
+const listingId = roomForCancellation(e, ownerListings);
+if (!listingId) { unplaced += 1; return; }
 if ((data.airbnbCancelledStays || []).some((s) => s.listingId === listingId && s.checkin === checkin)) return;
-add({ id: `led:${e.id}`, listingId, checkin, checkout: dateStrAdd(checkin, 1), guest: e.note || '', income: null, bookedOn: '', cancelledOn: e.date, status: 'cancelled', source: 'ledger', approx: true });
+// Without a recorded end date the stay's own length is unknown, so one night is drawn.
+const checkout = e.checkout && e.checkout > checkin ? e.checkout : dateStrAdd(checkin, 1);
+add({ id: `led:${e.id}`, listingId, checkin, checkout, guest: e.note || '', income: null, bookedOn: '', cancelledOn: e.date, status: 'cancelled', source: 'ledger', approx: !(e.checkout && e.checkout > checkin) });
 return;
 }
-if ((e.kind === 'accrual' || e.kind === 'earned') && e.listingId) {
+if (e.kind === 'accrual' || e.kind === 'earned') {
 const checkin = e.startDate || (e.nights ? dateStrAdd(e.date, -Number(e.nights)) : '');
-if (!checkin) return;
+if (e.listingId && checkin) {
 add({ id: `led:${e.id}`, listingId: e.listingId, checkin, checkout: e.date, guest: e.note || '', income: e.gross ?? null, bookedOn: '', status: 'stay', source: 'ledger' });
+return;
+}
+// Income the Letting income chart above counts but that has no room to draw: historic
+// entries, and accruals whose reservation has aged out. Same rule that chart uses.
+const orphaned = e.kind === 'accrual' && e.reservationId && !reservationIds.has(e.reservationId);
+if ((e.kind === 'earned' || orphaned) && e.gross && e.date) {
+if (checkin && checkin < e.date) revenueOnly.push({ checkin, checkout: e.date, income: e.gross, status: 'stay' });
+else lumps.push({ id: e.id, date: e.date, gross: Number(e.gross) });
+}
 }
 });
 stays.unplacedCancellations = unplaced;
+stays.lumps = lumps;
+stays.revenueOnly = revenueOnly;
 return stays;
+}
+
+// A cancellation payout from before the room was stored on it. Its owner's only
+// room is the answer; failing that, since Aug 2026 Zara's payouts belong to the
+// double room and Lewis's to the ensuite.
+const ROOM_RULES_FROM = '2026-08-01';
+const ROOM_BY_OWNER = [{ owner: /zara/i, room: /double/i }, { owner: /lewis/i, room: /en-?suite/i }];
+function roomForCancellation(e, ownerListings) {
+if (e.listingId) return e.listingId;
+const mine = ownerListings.get(e.ownerKey) || ownerListings.get(String(e.ownerKey || '').toLowerCase()) || [];
+if (mine.length === 1) return mine[0].id;
+if (e.date && e.date >= ROOM_RULES_FROM) {
+const rule = ROOM_BY_OWNER.find((r) => r.owner.test(ownerNameFor(e.ownerKey)));
+if (rule) {
+const hits = (mine.length ? mine : (data.airbnbListings || [])).filter((l) => rule.room.test(l.label || ''));
+if (hits.length === 1) return hits[0].id;
+}
+}
+return '';
 }
 
 function nightsInMonth(stay, ym) {
@@ -123,6 +159,13 @@ for (let d = 1; d <= n; d++) {
 if (dayStr(ym, d) > today) { out.push(null); continue; }
 let sum = 0;
 stays.forEach((s) => { sum += countFor(s, ym, d, metric, today); });
+if (metric === 'revenue') {
+// Income with no room to draw (it still counts toward the month's revenue).
+(stays.revenueOnly || []).forEach((s) => { sum += countFor(s, ym, d, metric, today); });
+// A payout lands on its own date, all at once, and only once that date has passed.
+const day = dayStr(ym, d);
+(stays.lumps || []).forEach((p) => { if (p.date.slice(0, 7) === ym && p.date <= day && p.date <= today) sum += p.gross; });
+}
 out.push(Math.round(sum * 100) / 100);
 }
 return out;
@@ -490,7 +533,9 @@ const nights = inMonth.reduce((a, s) => a + nightsInMonth(s, state.ym), 0);
 const cancelled = stays.filter((s) => s.status === 'cancelled' && nightsInMonth(s, state.ym) > 0).length;
 const roomNights = (listings.length || 1) * daysIn(state.ym);
 const unplaced = stays.unplacedCancellations ? `; ${stays.unplacedCancellations} older cancellation payout${stays.unplacedCancellations === 1 ? '' : 's'} couldn't be placed on a room` : '';
-sum.textContent = `${inMonth.length} booking${inMonth.length === 1 ? '' : 's'}, ${nights} night${nights === 1 ? '' : 's'} (${Math.round((nights / roomNights) * 100)}% of room-nights)${cancelled ? `, ${cancelled} cancelled` : ''}${unplaced}.`;
+const payouts = (stays.lumps || []).filter((p) => p.date.slice(0, 7) === state.ym);
+const payoutNote = state.metric === 'revenue' && payouts.length ? `. Revenue includes £${Math.round(payouts.reduce((a, p) => a + p.gross, 0)).toLocaleString('en-GB')} from ${payouts.length} payout${payouts.length === 1 ? '' : 's'} with no booking (cancellations and historic entries)` : '';
+sum.textContent = `${inMonth.length} booking${inMonth.length === 1 ? '' : 's'}, ${nights} night${nights === 1 ? '' : 's'} (${Math.round((nights / roomNights) * 100)}% of room-nights)${cancelled ? `, ${cancelled} cancelled` : ''}${unplaced}${payoutNote}.`;
 }
 }
 
