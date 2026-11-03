@@ -893,6 +893,13 @@ if (platformFieldEl) platformFieldEl.style.display = (kindEl.value === 'earned' 
 };
 kindEl?.addEventListener('change', setHint);
 setHint();
+// Picking the room settles who it is for, so the two can't disagree.
+document.getElementById('letting-add-listing')?.addEventListener('change', (e) => {
+const l = (data.airbnbListings || []).find((x) => x.id === e.target.value);
+const ownerSel = document.getElementById('letting-add-owner');
+const key = l && ownerKeyFor(l);
+if (key && ownerSel && [...ownerSel.options].some((o) => o.value === key)) ownerSel.value = key;
+});
 const dateEl = document.getElementById('letting-add-date');
 if (dateEl && !dateEl.value) dateEl.value = today();
 addBtn.addEventListener('click', () => {
@@ -938,7 +945,14 @@ const platformVal = (kind === 'earned' || kind === 'cancellation') ? (document.g
 const dateVal = document.getElementById('letting-add-date')?.value || today();
 // Resolved as of the row's OWN date, not today's -- a backdated
 // "Earned" entry should use whichever rule actually applied then.
-const whoListing = (data.airbnbListings || []).find((l) => ownerKeyFor(l) === who.value);
+// A listing chosen in the row is the one the stay was in; otherwise the owner's first listing stands in.
+const listingPick = kind === 'earned' ? (document.getElementById('letting-add-listing')?.value || '') : '';
+const chosenListing = listingPick ? (data.airbnbListings || []).find((l) => l.id === listingPick) : null;
+if (chosenListing && ownerKeyFor(chosenListing) && ownerKeyFor(chosenListing) !== who.value) {
+say(`${chosenListing.label || 'That listing'} belongs to ${ownerNameFor(ownerKeyFor(chosenListing))}. Pick them as who it is for, or another listing.`);
+return;
+}
+const whoListing = chosenListing || (data.airbnbListings || []).find((l) => ownerKeyFor(l) === who.value);
 const pct = shareRuleAt(whoListing, dateVal).pct;
 const signed = kind === 'earned'
 ? Math.round(splitAmountFor(whoListing, amount, dateVal) * 100) / 100
@@ -955,6 +969,7 @@ amount: signed,
 ...(kind === 'earned' ? { gross: Math.round(amount * 100) / 100, pct } : {}),
 ...(kind === 'earned' && Number.isFinite(nightsVal) && nightsVal > 0 ? { nights: Math.round(nightsVal) } : {}),
 ...(kind === 'earned' && startDateVal ? { startDate: startDateVal } : {}),
+...(chosenListing ? { listingId: chosenListing.id } : {}),
 ...(platformVal ? { platform: platformVal } : {}),
 date: dateVal,
 note: note || (kind === 'earned'
@@ -969,6 +984,8 @@ const nightsEl = document.getElementById('letting-add-nights');
 const startEl = document.getElementById('letting-add-start-date');
 if (nightsEl) nightsEl.value = '';
 if (startEl) startEl.value = '';
+const listingEl = document.getElementById('letting-add-listing');
+if (listingEl) listingEl.value = '';
 if (dateEl) dateEl.value = today();
 say(`Added ${money(amount)} for ${ownerNameFor(who.value)}.`);
 renderOwnerPicker();
@@ -2670,6 +2687,13 @@ const keep = sel.value;
 // stay's accrual uses, no self-exception.
 sel.innerHTML = `<option value="">Who…</option>${owners().map((k) => `<option value="${escapeHtml(k)}">${escapeHtml(ownerNameFor(k))}</option>`).join('')}`;
 if (keep) sel.value = keep;
+// The room picker beside it: choosing a listing also chooses its owner (see the add handler).
+const listingSel = document.getElementById('letting-add-listing');
+if (listingSel) {
+const keepListing = listingSel.value;
+listingSel.innerHTML = `<option value="">Listing…</option>${(data.airbnbListings || []).map((l) => `<option value="${escapeHtml(l.id)}">${escapeHtml(l.label || l.prefix || 'Listing')}</option>`).join('')}`;
+if (keepListing) listingSel.value = keepListing;
+}
 }
 
 export {
