@@ -270,11 +270,20 @@ metrics: [{ label: earnedFreeDay ? 'Free day earned' : 'Status', balance: null, 
 function extractSixt(bodyText) {
 const text = String(bodyText || '');
 const idMatch = text.match(/Member ID:\s*([\w-]+)/i);
-const tierMatch = text.match(/you.re\s*\n?\s*([A-Za-z]+)\s*,/i);
+// Two real wordings: the welcome ("you're\nSilver, Philip!") and the tier-up
+// email ("You've reached\nPlatinum!", 2 Nov 2026), which also carries a
+// "0\n\nStatus points" figure (the count before the next tier, reset on
+// reaching it). The welcome has no figure at all, so a missing one stays
+// null rather than reading as zero.
+const tierMatch = text.match(/you.re\s*\n?\s*([A-Za-z]+)\s*,/i) || text.match(/you.ve\s+reached\s*\n?\s*([A-Za-z]+)\s*!/i);
+const pointsMatch = text.match(/(\d[\d,]*)\s*\n+\s*Status points/i);
 if (!idMatch && !tierMatch) return null;
+const points = pointsMatch ? Number(pointsMatch[1].replace(/,/g, '')) : null;
 return {
 membershipNumber: idMatch ? idMatch[1] : '', tier: tierMatch ? tierMatch[1].trim() : '', date: '',
-metrics: [{ label: 'Status', balance: null, unit: '', expiryDate: '' }],
+metrics: points !== null
+? [{ label: 'Status points', balance: points, unit: 'status points', expiryDate: '', kind: 'balance' }]
+: [{ label: 'Status', balance: null, unit: '', expiryDate: '' }],
 };
 }
 
@@ -459,7 +468,8 @@ metrics: [{ label: 'Avios', balance: Number(m[1].replace(/,/g, '')), unit: 'Avio
 // Bump a program's number when its extractor gains a new email shape that
 // older, already-"seen" messages could now match (see scanOneProgram).
 // ba: 2 = Companion voucher and cabin upgrade voucher emails.
-const EXTRACTOR_VERSIONS = { 'ba': 2 };
+// sixt: 1 = the "You've reached Platinum!" tier-up email and its status points.
+const EXTRACTOR_VERSIONS = { 'ba': 2, 'sixt': 1 };
 
 const EXTRACTORS = {
 'ba': extractBritishAirways,
