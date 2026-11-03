@@ -134,7 +134,7 @@ if (!data.airbnbPastStays.some((s) => s.listingId === r.listingId && s.checkin =
 // income/platform kept so the timeline and pace charts can still draw it.
 data.airbnbPastStays.push({
 listingId: r.listingId, checkin: r.checkin, checkout: r.checkout, guestName: r.guestName || '',
-bookedOn: r.confirmedOn || String(r.createdAt || '').slice(0, 10), income: r.income ?? null,
+bookedOn: r.confirmedOn || String(r.createdAt || '').slice(0, 10), income: r.income ?? null, platform: r.platform === 'other' ? 'other' : 'airbnb',
 });
 }
 } else {

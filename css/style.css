@@ -4396,6 +4396,7 @@ background:var(--slate-bg);color:var(--slate);
 .occ-verdict{font-size:12px;margin:2px 0 6px;color:var(--ink);}
 .pace-up{color:var(--sage);}
 .pace-down{color:var(--red);}
-.occ-key-solid,.occ-key-hatch{display:inline-block;width:16px;height:8px;border-radius:3px;border:1px solid var(--muted);flex:none;}
+.occ-key-solid,.occ-key-hatch,.occ-key-striped{display:inline-block;width:16px;height:8px;border-radius:3px;border:1px solid var(--muted);flex:none;}
 .occ-key-solid{background:var(--muted);}
+.occ-key-striped{background:repeating-linear-gradient(135deg,var(--muted) 0 2px,var(--card) 2px 4px);}
 .occ-key-hatch{background:repeating-linear-gradient(135deg,var(--muted) 0 2px,transparent 2px 5px);border-style:dashed;}

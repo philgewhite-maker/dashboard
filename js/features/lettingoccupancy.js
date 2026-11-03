@@ -55,15 +55,15 @@ return { stay: s, merged: false };
 };
 (data.airbnbReservations || []).forEach((r) => add({
 id: r.id, listingId: r.listingId, checkin: r.checkin, checkout: r.checkout, guest: r.guestName || '',
-income: r.income ?? null, bookedOn: r.confirmedOn || String(r.createdAt || '').slice(0, 10), status: 'stay', source: 'live',
+income: r.income ?? null, bookedOn: r.confirmedOn || String(r.createdAt || '').slice(0, 10), status: 'stay', source: 'live', platform: r.platform === 'other' ? 'other' : 'airbnb',
 }));
 (data.airbnbPastStays || []).forEach((s) => add({
 id: `past:${keyOf(s)}`, listingId: s.listingId, checkin: s.checkin, checkout: s.checkout, guest: s.guestName || '',
-income: s.income ?? null, bookedOn: s.bookedOn || '', status: 'stay', source: 'finished',
+income: s.income ?? null, bookedOn: s.bookedOn || '', status: 'stay', source: 'finished', platform: s.platform === 'other' ? 'other' : 'airbnb',
 }));
 (data.airbnbCancelledStays || []).forEach((s) => add({
 id: s.id, listingId: s.listingId, checkin: s.checkin, checkout: s.checkout, guest: s.guestName || '',
-income: null, bookedOn: s.bookedOn || '', cancelledOn: s.cancelledOn || '', status: 'cancelled', source: 'cancelled',
+income: null, bookedOn: s.bookedOn || '', cancelledOn: s.cancelledOn || '', status: 'cancelled', source: 'cancelled', platform: 'airbnb',
 }));
 // Listings by the same owner key the ledger rows carry (a connection id, or a
 // lowercased typed name), so a ledger row finds its owner's rooms either way.
@@ -91,7 +91,7 @@ if (it.source === 'reservation') { row.fate = 'drawn'; row.room = it.listing.id;
 if (!it.start) { row.fate = 'lump'; return; }
 const listingId = roomForCancellation({ listingId: it.explicit ? it.listing.id : '', ownerKey: it.ownerKey, date: it.date }, ownerListings);
 if (!listingId) { unplacedIncome += 1; row.fate = 'noroom'; return; }
-const res = add({ id: `led:${it.id}`, listingId, checkin: it.start, checkout: it.end, guest: it.note, income: it.gross, bookedOn: '', status: 'stay', source: 'ledger' });
+const res = add({ id: `led:${it.id}`, listingId, checkin: it.start, checkout: it.end, guest: it.note, income: it.gross, bookedOn: '', status: 'stay', source: 'ledger', platform: it.platform });
 row.fate = !res ? 'invalid' : (res.merged ? 'merged' : 'drawn');
 row.room = listingId;
 });
@@ -105,7 +105,7 @@ if (!listingId) { unplaced += 1; return; }
 if ((data.airbnbCancelledStays || []).some((s) => s.listingId === listingId && s.checkin === checkin && (!e.checkout || s.checkout === e.checkout))) return;
 // Without a recorded end date the stay's own length is unknown, so one night is drawn.
 const checkout = e.checkout && e.checkout > checkin ? e.checkout : dateStrAdd(checkin, 1);
-add({ id: `led:${e.id}`, listingId, checkin, checkout, guest: e.note || '', income: null, bookedOn: '', cancelledOn: e.date, status: 'cancelled', source: 'ledger', approx: !(e.checkout && e.checkout > checkin) });
+add({ id: `led:${e.id}`, listingId, checkin, checkout, guest: e.note || '', income: null, bookedOn: '', cancelledOn: e.date, status: 'cancelled', source: 'ledger', platform: e.platform === 'other' ? 'other' : 'airbnb', approx: !(e.checkout && e.checkout > checkin) });
 }
 });
 stays.unplacedCancellations = unplaced;
@@ -189,14 +189,21 @@ return roomKeys.get(listingId) || listingId;
 // a set of (room, night) pairs, so a room is never more than one night occupied per night however
 // many records overlap it. `D` is the day of the month being read up to.
 function distinctRoomNights(stays, ym, upToDay, metric, today) {
+return roomNightMap(stays, ym, upToDay, metric, today).size;
+}
+
+// The same set, as (room, night) -> the channel that filled it, optionally for one channel only
+// (the pace chart's Channel picker). A night two records claim is credited to whichever came first.
+function roomNightMap(stays, ym, upToDay, metric, today, channel = state.channel) {
 const D = dayStr(ym, upToDay);
 const first = dayStr(ym, 1);
 const next = dayStr(addMonths(ym, 1), 1);
 const n = daysIn(ym);
 // Occupied nights only exist up to today; booked nights cover the whole month (they are future nights too).
 const limit = metric === 'nights' ? dateStrAdd(D < today ? D : today, 1) : next;
-const keys = new Set();
+const keys = new Map();
 stays.forEach((s) => {
+if (channel && channelOf(s) !== channel) return;
 if (metric === 'bookings') {
 if (!s.bookedOn || s.bookedOn > D) return;
 if (s.status === 'cancelled' && (!s.cancelledOn || s.cancelledOn <= D)) return;
@@ -207,9 +214,9 @@ if (to <= from) return;
 const startDay = Number(from.slice(8, 10));
 const endDay = to >= next ? n + 1 : Number(to.slice(8, 10));
 const room = roomKeyFor(s.listingId);
-for (let day = startDay; day < endDay; day++) keys.add(`${room}|${day}`);
+for (let day = startDay; day < endDay; day++) { const k = `${room}|${day}`; if (!keys.has(k)) keys.set(k, channelOf(s)); }
 });
-return keys.size;
+return keys;
 }
 
 // Cumulative series for one month, day 1..N. Days after today in the current
@@ -224,6 +231,7 @@ let sum = 0;
 if (metric === 'revenue') {
 const day = dayStr(ym, d);
 (stays.items || []).forEach((it) => {
+if (state.channel && (it.platform === 'other' ? 'other' : 'airbnb') !== state.channel) return;
 if (it.start) { sum += countFor({ checkin: it.start, checkout: it.end, income: it.gross, status: 'stay' }, ym, d, 'revenue', today); return; }
 // No nights to spread it over: a payout lands on its own date, all at once, once that date has passed.
 if (it.date.slice(0, 7) === ym && it.date <= day && it.date <= today) sum += it.gross;
@@ -279,7 +287,7 @@ return { values, usable, months };
 
 // ---- State & markup ----------------------------------------------------------
 
-const state = { ym: '', metric: 'bookings', compare: 'prev', hoverStay: null, hoverDay: null };
+const state = { ym: '', metric: 'bookings', compare: 'prev', channel: '', hoverStay: null, hoverDay: null };
 const PLOTS = { timeline: null, pace: null };
 const METRIC_LABEL = { bookings: 'Nights booked', nights: 'Nights occupied', revenue: 'Revenue earned' };
 const METRIC_UNIT = { bookings: 'nights', nights: 'nights', revenue: '£' };
@@ -310,6 +318,7 @@ return `<div class="letting-chart-wrap" id="letting-occupancy-section">
 <select id="pace-metric" class="mini" title="What the line adds up"><option value="bookings">Nights booked</option><option value="nights">Nights occupied</option><option value="revenue">Revenue earned</option></select>
 <span class="settings-note" style="margin:0;">against</span>
 <select id="pace-compare" class="mini" title="What to compare it with"><option value="prev">Last month</option><option value="prev3">Last 3 months (average)</option><option value="lastyear">This month last year</option></select>
+<select id="pace-channel" class="mini" title="Count every booking, or only those that came through one channel"><option value="">All channels</option>${Object.entries(CHANNELS).map(([k, v]) => `<option value="${k}">${escapeHtml(v.label)} only</option>`).join('')}</select>
 </div>
 <div class="occ-verdict" id="pace-verdict"></div>
 <div class="chart-canvas-wrap occ-wrap" style="position:relative;height:240px;"><canvas id="pace-canvas"></canvas><div class="occ-tip" id="pace-tip" hidden></div></div>
@@ -344,6 +353,37 @@ t.strokeStyle = color; t.lineWidth = 1.6;
 return ctx.createPattern(tile, 'repeat');
 }
 
+// How a booking's channel is drawn on a bar. Solid is Airbnb; a booking taken another way (direct,
+// another platform) is the same room colour with light diagonal stripes, matching the striped
+// "Other" on the Letting income chart. Add an entry here when a new channel (e.g. the direct site) arrives.
+const CHANNELS = {
+airbnb: { label: 'Airbnb', striped: false },
+other: { label: 'Direct / other', striped: true },
+};
+const channelOf = (stay) => (CHANNELS[stay.platform] ? stay.platform : 'airbnb');
+
+function stripes(ctx, color) {
+const size = 6;
+const tile = document.createElement('canvas');
+tile.width = size; tile.height = size;
+const t = tile.getContext('2d');
+t.fillStyle = color; t.fillRect(0, 0, size, size);
+t.strokeStyle = 'rgba(255,255,255,0.55)'; t.lineWidth = 1.6;
+[-size, 0, size].forEach((o) => { t.beginPath(); t.moveTo(o, size); t.lineTo(o + size, 0); t.stroke(); });
+return ctx.createPattern(tile, 'repeat');
+}
+
+// The rooms the timeline is laid out in: one lane per physical room, whichever listings (owners)
+// and channels fill it. A room is the set of listings that share a colour, as on the night-rate chart.
+function lanes() {
+const listings = data.airbnbListings || [];
+return nightRateRooms().map((room) => {
+const members = room.listingIds.map((id) => listings.find((l) => l.id === id)).filter(Boolean);
+const owners = [...new Set(members.map((l) => ownerNameFor(ownerKeyFor(l))).filter(Boolean))];
+return { ...room, members, owners };
+});
+}
+
 function palette() {
 return {
 ink: resolveColor('--ink'), muted: resolveColor('--muted'), line: resolveColor('--line'), card: resolveColor('--card'),
@@ -356,11 +396,11 @@ good: resolveColor('--sage'), bad: resolveColor('--red'),
 function drawTimeline(stays) {
 const canvas = document.getElementById('occ-timeline-canvas');
 if (!canvas) return;
-const listings = (data.airbnbListings || []);
+const rooms = lanes();
 const laneH = 40;
 const headH = 22;
 const wrap = canvas.parentElement;
-wrap.style.height = `${Math.max(120, headH + listings.length * laneH + 12)}px`;
+wrap.style.height = `${Math.max(120, headH + rooms.length * laneH + 12)}px`;
 const s = setup(canvas);
 if (!s) return;
 const { ctx, width, height } = s;
@@ -386,16 +426,25 @@ ctx.fillText(String(d), xDay(d) + colW / 2, headH / 2);
 }
 }
 const hits = [];
-listings.forEach((l, i) => {
+rooms.forEach((room, i) => {
 const top = headH + i * laneH;
 const mid = top + laneH / 2;
 ctx.strokeStyle = c.line; ctx.lineWidth = 1;
 ctx.beginPath(); ctx.moveTo(left, top + laneH); ctx.lineTo(width - right, top + laneH); ctx.stroke();
+// Room name, with who rents it out underneath (several owners can share one room).
+const roomLabel = room.label || 'Room';
+const showOwners = !narrow && room.owners.length > 0;
 ctx.fillStyle = c.ink; ctx.textAlign = 'left';
-const label = l.label || l.prefix || 'Listing';
-ctx.fillText(label.length > (narrow ? 9 : 17) ? `${label.slice(0, narrow ? 8 : 16)}…` : label, 6, mid);
-const color = resolveColor(listingColorVar(l.colour));
-stays.filter((st) => st.listingId === l.id && nightsInMonth(st, ym) > 0).forEach((st) => {
+ctx.font = '11px Inter, sans-serif';
+ctx.fillText(roomLabel.length > (narrow ? 9 : 17) ? `${roomLabel.slice(0, narrow ? 8 : 16)}…` : roomLabel, 6, showOwners ? mid - 6 : mid);
+if (showOwners) {
+ctx.fillStyle = c.muted; ctx.font = '10px Inter, sans-serif';
+const ownersText = room.owners.join(' · ');
+ctx.fillText(ownersText.length > 20 ? `${ownersText.slice(0, 19)}…` : ownersText, 6, mid + 7);
+ctx.font = '11px Inter, sans-serif';
+}
+const color = resolveColor(listingColorVar(room.colour));
+stays.filter((st) => roomKeyFor(st.listingId) === room.key && nightsInMonth(st, ym) > 0).forEach((st) => {
 // A stay runs from the middle of check-in day to the middle of check-out day, so a same-day turnover shows as a gap.
 const startD = st.checkin < dayStr(ym, 1) ? 0.5 : (Number(st.checkin.slice(8, 10)) + 0.5);
 const endD = st.checkout >= dayStr(addMonths(ym, 1), 1) ? n + 1 : (Number(st.checkout.slice(8, 10)) + 0.5);
@@ -411,12 +460,12 @@ ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.setLineDash([3, 2]);
 ctx.strokeRect(x1 + 0.5, y - h / 2 + 0.5, Math.max(3, x2 - x1) - 1, h - 1);
 ctx.setLineDash([]);
 } else {
-ctx.fillStyle = color;
+ctx.fillStyle = CHANNELS[channelOf(st)].striped ? stripes(ctx, color) : color;
 ctx.beginPath();
 if (ctx.roundRect) ctx.roundRect(x1, y - h / 2, Math.max(3, x2 - x1), h, 4); else ctx.rect(x1, y - h / 2, Math.max(3, x2 - x1), h);
 ctx.fill();
 }
-hits.push({ x1, x2: Math.max(x1 + 3, x2), y: y - h / 2 - 3, y2: y + h / 2 + 3, stay: st, listing: l });
+hits.push({ x1, x2: Math.max(x1 + 3, x2), y: y - h / 2 - 3, y2: y + h / 2 + 3, stay: st, room });
 });
 });
 if (today.startsWith(ym)) {
@@ -425,6 +474,12 @@ ctx.strokeStyle = c.ink; ctx.lineWidth = 1; ctx.setLineDash([2, 3]);
 ctx.beginPath(); ctx.moveTo(x, headH); ctx.lineTo(x, height); ctx.stroke(); ctx.setLineDash([]);
 }
 PLOTS.timeline = { hits, width };
+}
+
+// Whose rental this was: the owner of the listing the stay sits on.
+function stayOwner(stay) {
+const listing = (data.airbnbListings || []).find((l) => l.id === stay.listingId);
+return (listing && ownerNameFor(ownerKeyFor(listing))) || 'Unassigned';
 }
 
 function timelineTip(evt) {
@@ -440,7 +495,8 @@ const nights = nightsBetween(st.checkin, st.checkout);
 const fmt = (d) => new Date(`${d}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 const lines = [
 `<strong>${escapeHtml(st.guest || (st.status === 'cancelled' ? 'Cancelled booking' : 'Booking'))}</strong>`,
-`${escapeHtml(hit.listing.label || hit.listing.prefix || 'Listing')} · ${fmt(st.checkin)} to ${fmt(st.checkout)}${st.approx ? ' (check-out unknown, one night shown)' : ` · ${nights} night${nights === 1 ? '' : 's'}`}`,
+`${escapeHtml(hit.room.label || 'Room')} · ${escapeHtml(stayOwner(st))} · ${escapeHtml(CHANNELS[channelOf(st)].label)}`,
+`${fmt(st.checkin)} to ${fmt(st.checkout)}${st.approx ? ' (check-out unknown, one night shown)' : ` · ${nights} night${nights === 1 ? '' : 's'}`}`,
 ];
 if (st.status === 'cancelled') lines.push(`Cancelled${st.cancelledOn ? ` ${fmt(st.cancelledOn)}` : ''}`);
 if (st.income != null) lines.push(`Income £${Number(st.income).toLocaleString('en-GB', { maximumFractionDigits: 2 })}`);
@@ -593,16 +649,20 @@ drawPace(collectStays());
 function renderLegend(stays) {
 const el = document.getElementById('occ-legend');
 if (!el) return;
-const listings = data.airbnbListings || [];
-const items = listings.map((l) => `<span class="letting-chart-legend-item"><span class="dot ${escapeHtml(l.colour || 'slate')}"></span>${escapeHtml(l.label || l.prefix || 'Listing')}</span>`);
-items.push('<span class="letting-chart-legend-item"><span class="occ-key-solid"></span>Booking</span>');
+const rooms = lanes();
+const items = rooms.map((r) => `<span class="letting-chart-legend-item"><span class="dot ${escapeHtml(r.colour || 'slate')}"></span>${escapeHtml(r.label || 'Room')}${r.owners.length ? ` <span class="settings-note" style="margin:0;">(${escapeHtml(r.owners.join(', '))})</span>` : ''}</span>`);
+Object.values(CHANNELS).forEach((ch) => items.push(`<span class="letting-chart-legend-item"><span class="${ch.striped ? 'occ-key-striped' : 'occ-key-solid'}"></span>${escapeHtml(ch.label)}</span>`));
 items.push('<span class="letting-chart-legend-item"><span class="occ-key-hatch"></span>Cancelled</span>');
 el.innerHTML = items.join('');
 const sum = document.getElementById('occ-summary');
 if (sum) {
 const inMonth = stays.filter((s) => s.status === 'stay' && nightsInMonth(s, state.ym) > 0);
 // Distinct (room, night) pairs, the same count the night-rate chart's occupancy bars use: never above one a night.
-const nights = distinctRoomNights(stays, state.ym, daysIn(state.ym), 'month', todayStr()); // every booked night in the month, none cancelled
+const nightMap = roomNightMap(stays, state.ym, daysIn(state.ym), 'month', todayStr(), ''); // every booked night in the month, all channels, none cancelled
+const nights = nightMap.size;
+const byChannel = {};
+nightMap.forEach((ch) => { byChannel[ch] = (byChannel[ch] || 0) + 1; });
+const split = Object.keys(byChannel).length > 1 ? `; ${Object.entries(byChannel).map(([ch, k]) => `${k} ${CHANNELS[ch].label}`).join(', ')}` : '';
 const cancelled = stays.filter((s) => s.status === 'cancelled' && nightsInMonth(s, state.ym) > 0).length;
 const roomNights = (nightRateRooms().length || 1) * daysIn(state.ym);
 const unplaced = stays.unplacedCancellations ? `; ${stays.unplacedCancellations} older cancellation payout${stays.unplacedCancellations === 1 ? '' : 's'} couldn't be placed on a room` : '';
@@ -610,14 +670,14 @@ const payouts = (stays.items || []).filter((it) => !it.start && it.date.slice(0,
 const payoutNote = state.metric === 'revenue' && payouts.length ? `. Revenue includes £${Math.round(payouts.reduce((a, p) => a + p.gross, 0)).toLocaleString('en-GB')} from ${payouts.length} payout${payouts.length === 1 ? '' : 's'} with no stay dates (cancellations and historic entries)` : '';
 const undrawn = stays.unplacedIncome ? `; ${stays.unplacedIncome} ledger income entr${stays.unplacedIncome === 1 ? 'y' : 'ies'} couldn't be placed on a room (counted in revenue, not drawn)` : '';
 const check = reconcileNote(stays);
-sum.textContent = `${inMonth.length} booking${inMonth.length === 1 ? '' : 's'}, ${nights} night${nights === 1 ? '' : 's'} (${Math.round((nights / roomNights) * 100)}% of room-nights)${cancelled ? `, ${cancelled} cancelled` : ''}${unplaced}${undrawn}${payoutNote}.${check ? ` Against Income by month: ${check}.` : ''}`;
+sum.textContent = `${inMonth.length} booking${inMonth.length === 1 ? '' : 's'}, ${nights} night${nights === 1 ? '' : 's'} (${Math.round((nights / roomNights) * 100)}% of room-nights${split})${cancelled ? `, ${cancelled} cancelled` : ''}${unplaced}${undrawn}${payoutNote}.${check ? ` Against Income by month: ${check}.` : ''}`;
 }
 }
 
 // On the revenue metric, finished months are checked against the Income by month
 // chart so a gap between the two shows up here rather than being taken on trust.
 function reconcileNote(stays) {
-if (state.metric !== 'revenue') return '';
+if (state.metric !== 'revenue' || state.channel) return ''; // Income by month counts every channel
 const months = [state.ym, ...compareMonths(state.ym, state.compare)].filter((m) => m < currentYm());
 return months.map((ym) => {
 const series = seriesFor(stays, ym, 'revenue', todayStr());
@@ -684,6 +744,7 @@ monthSel.innerHTML = monthOptions().map((o) => `<option value="${o.ym}"${o.ym ==
 monthSel.addEventListener('change', () => { state.ym = monthSel.value; renderLettingOccupancy(); });
 document.getElementById('pace-metric').addEventListener('change', (e) => { state.metric = e.target.value; renderLettingOccupancy(); });
 document.getElementById('pace-compare').addEventListener('change', (e) => { state.compare = e.target.value; renderLettingOccupancy(); });
+document.getElementById('pace-channel').addEventListener('change', (e) => { state.channel = e.target.value; renderLettingOccupancy(); });
 const tl = document.getElementById('occ-timeline-canvas');
 tl.addEventListener('pointermove', timelineTip);
 tl.addEventListener('pointerleave', () => { document.getElementById('occ-tip').hidden = true; });
