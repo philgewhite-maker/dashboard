@@ -42,7 +42,15 @@ if (!s.listingId || !s.checkin || !s.checkout || s.checkout <= s.checkin) return
 // income fills it in on the one already held (an unpaid copy must not hide a paid one).
 const k = s.status === 'stay' ? `stay|${s.listingId}|${s.checkin}` : `${s.status}|${keyOf(s)}`;
 const held = seen.get(k);
-if (held) { if (held.income == null && s.income != null) held.income = s.income; return { stay: held, merged: true }; }
+if (held) {
+const before = { source: held.source, checkin: held.checkin, checkout: held.checkout };
+if (held.income == null && s.income != null) held.income = s.income;
+// An income entry that runs longer than the booking record it matched is the one the money was
+// split over, so the stay is drawn to the same length (otherwise the extra nights vanish).
+const extended = s.source === 'ledger' && s.checkout > held.checkout;
+if (extended) held.checkout = s.checkout;
+return { stay: held, merged: true, before, extended };
+}
 seen.set(k, s);
 stays.push(s);
 return { stay: s, merged: false };
@@ -88,6 +96,7 @@ if (!listingId) { unplacedIncome += 1; row.fate = 'noroom'; return; }
 const res = add({ id: `led:${it.id}`, listingId, checkin: it.start, checkout: it.end, guest: it.note, income: it.gross, bookedOn: '', status: 'stay', source: 'ledger' });
 row.fate = !res ? 'invalid' : (res.merged ? 'merged' : 'drawn');
 row.room = listingId;
+if (res && res.merged) { row.held = res.before; row.extended = res.extended; }
 });
 (data.lettingLedger || []).forEach((e) => {
 if (e.kind === 'cancellation') {
@@ -594,7 +603,11 @@ const why = (r) => {
 const { it } = r;
 if (r.fate === 'drawn') return `Drawn on the ${escapeHtml(roomName(r.room))} row${it.source === 'ledger' && !it.explicit ? ' (room chosen from its owner)' : ''}.`;
 if (r.fate === 'skipped') return `Not counted anywhere. ${escapeHtml(r.reason)} Fix it on its ${goto} row.`;
-if (r.fate === 'merged') return `Same room and check-in as another record, so drawn once on ${escapeHtml(roomName(r.room))}.`;
+if (r.fate === 'merged') {
+const h = r.held;
+const other = h ? `a ${h.source === 'finished' ? 'finished-stay' : 'booking'} record (${shortDate(h.checkin)} to ${shortDate(h.checkout)})` : 'another record';
+return `Same room and check-in as ${other}, so drawn once on ${escapeHtml(roomName(r.room))}${r.extended ? `, stretched to ${shortDate(r.it.end)} to match this entry` : ''}.`;
+}
 if (r.fate === 'payout') return `Cancellation payout, counted on ${shortDate(it.date)}.`;
 if (r.fate === 'lump') return `No check-in date or nights, so it can't be drawn. Counted in revenue on ${shortDate(it.date)} only. Add them on its ${goto} row.`;
 if (r.fate === 'noroom') return `The row names no room and its owner has several, so it counts in revenue but isn't drawn. Pick the room on its ${goto} row.`;
