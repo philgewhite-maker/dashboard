@@ -261,8 +261,17 @@ current `rev`, then `POST {rev, action:"append", field:"agentInbox", value}`
 with header `X-Agent-Secret`. Batch shape and the projectKey/groupKey slug
 convention are documented at the top of `server/agent-write.php.example`
 (use `projectKey: "dashboard"`, groups `build` / `test-deploy`, contexts
-`With Claude` for build steps). State the returned batch id in chat. Only runs
-from a session on this PC — a cloud session has no access to that file.
+`With Claude` for build steps). State the returned batch id in chat.
+
+**In a cloud session** there is no `agent-write.env`, and none is needed: the
+URL is `https://georgewhiteeuropean.co.uk/agent-write.php`, and the cloud
+environment has a network secret that adds the `X-Agent-Secret` header to
+every request to that path by itself. Call it with plain curl and no secret
+header; never ask the user for the secret or paste it anywhere. Confirmed
+working 2026-11-03 (a read returned HTTP 200). A 401/403 means the network
+secret is missing from the environment the session is running in. A
+different project gets its own `projectKey` (the direct booking site uses
+`direct-booking`).
 
 **Do this by default, without asking.** Whenever work leaves a step only the
 user can do (uploading a server file or `.php.example` they must deploy,
