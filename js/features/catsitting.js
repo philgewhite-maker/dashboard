@@ -23,6 +23,7 @@ import { escapeHtml, dateStrAdd, todayStr } from '../utils.js';
 import { tripById, tripChipHtml, bindTripChips, renderTravel } from './travel.js';
 import { tripRangeFor } from './planner.js';
 import { canAttemptGoogleAction } from '../sync/googleauth.js';
+import { recordMail, registerRetry } from './mailledger.js';
 
 const MONTH_NAMES = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 
@@ -157,16 +158,25 @@ const today = todayStr();
 const rows = data.trips
 .map((trip) => ({ trip, cov: tripCoverage(trip) }))
 .filter(({ trip, cov }) => cov.totalDays && (!tripRangeFor(trip).end || tripRangeFor(trip).end >= today));
-if (!rows.length) return '';
-return `<div class="sync-row" style="align-items:flex-start;flex-wrap:wrap;">${rows.map(({ trip, cov }) =>
+// Bookings no single trip covers yet -- shown here so they can't go missing.
+const orphans = data.catSittingVisits.filter((v) => !v.tripId && v.endDate >= today).sort((a, b) => a.startDate.localeCompare(b.startDate));
+if (!rows.length && !orphans.length) return '';
+const tripsHtml = rows.length ? `<div class="sync-row" style="align-items:flex-start;flex-wrap:wrap;">${rows.map(({ trip, cov }) =>
 tripChipHtml(trip, `<span class="settings-note" style="margin:0 0 0 4px;">${escapeHtml(tripCoverageSummaryLabel(cov))}${cov.uncoveredDays ? ' <span class="tag-chip tag-chip-amber">&#9888;</span>' : ''}</span>`)
-).join('')}</div>`;
+).join('')}</div>` : '';
+const orphanHtml = orphans.length ? `<div class="sync-row" style="align-items:flex-start;flex-wrap:wrap;gap:6px;">
+<span class="settings-note" style="margin:0;">&#9888; Booked, but no single trip covers these dates yet (they attach once one does):</span>
+${orphans.map(visitChipHtml).join('')}
+</div>` : '';
+return tripsHtml + orphanHtml;
 }
 function renderCatSittingRollup() {
 const mount = document.getElementById('cat-sitting-rollup-strip');
 if (!mount) return;
+attachOrphanVisits();
 mount.innerHTML = catSittingRollupStripHtml();
 bindTripChips();
+bindCatSitting(mount);
 }
 
 // ---- catinaflat.com email import ---------------------------------------
@@ -197,10 +207,77 @@ return r.start && r.end && startDate >= r.start && endDate <= r.end;
 return candidates.length === 1 ? candidates[0].id : '';
 }
 
+// What the ledger records for a visit: on a trip it's that trip's chip; a
+// visit no single trip covers yet is flagged as waiting for one.
+function visitOutcome(visit) {
+const range = formatDateRange(visit.startDate, visit.endDate);
+if (visit.tripId && tripById(visit.tripId)) {
+const trip = tripById(visit.tripId);
+return { outcome: 'filed', note: `${visit.sitterName}, ${range}`, produced: [{ kind: 'trip', id: trip.id, label: trip.title }] };
+}
+return {
+outcome: 'waiting',
+note: `${visit.sitterName}, ${range}: no single trip covers these dates yet. It attaches itself once one does.`,
+produced: [{ kind: 'catvisit', id: visit.id, label: `Cat-sitting visit ${range}` }],
+};
+}
+
+// Reads one catinaflat email and files it as a visit (or updates the visit it
+// already made). The scan and the ledger's Retry button both come through here,
+// so a retried email takes exactly the path a fresh one does. Returns true when
+// the email was a booking, false when it wasn't recognised.
+function fileCatSittingEmail(summary, detail) {
+const bodyText = detail.bodyText || '';
+const meta = { id: summary.id, from: detail.from || summary.from, subject: detail.subject || summary.subject, date: detail.date || summary.date, snippet: summary.snippet };
+const dateMatch = CATINAFLAT_DATE_RE.exec(bodyText);
+const sitterMatch = CATINAFLAT_SITTER_RE.exec(bodyText);
+const startMonth = dateMatch ? MONTH_NAMES.indexOf(dateMatch[2].slice(0, 3).toLowerCase()) : -1;
+const endMonth = dateMatch ? MONTH_NAMES.indexOf(dateMatch[5].slice(0, 3).toLowerCase()) : -1;
+if (!dateMatch || !sitterMatch || startMonth === -1 || endMonth === -1) {
+recordMail(meta, 'catsitting', 'nomatch', { note: !dateMatch ? 'No "Date(s):" line found in the email.' : !sitterMatch ? 'No "Sitter:" line found in the email.' : 'The month name was not recognised.' });
+return false;
+}
+const startDate = `${dateMatch[3]}-${String(startMonth + 1).padStart(2, '0')}-${String(dateMatch[1]).padStart(2, '0')}`;
+const endDate = `${dateMatch[6]}-${String(endMonth + 1).padStart(2, '0')}-${String(dateMatch[4]).padStart(2, '0')}`;
+const sitterName = sitterMatch[1].trim();
+const paidMatch = CATINAFLAT_PAID_RE.exec(bodyText);
+const cost = paidMatch ? Number(paidMatch[1].replace(/,/g, '')) : null;
+
+let visit = data.catSittingVisits.find((v) => v.sourceMessageId === summary.id);
+if (!visit) {
+// A real, paid booking confirmation -- 'firm', not 'draft', unlike a
+// hand-added placeholder that still needs confirming.
+visit = blankCatSittingVisit({ startDate, endDate, sitterName, status: 'firm', cost, sourceMessageId: summary.id });
+data.catSittingVisits.push(visit);
+}
+if (!visit.tripId) visit.tripId = matchTripForDates(visit.startDate, visit.endDate);
+const { outcome, note, produced } = visitOutcome(visit);
+recordMail(meta, 'catsitting', outcome, { note, produced });
+return true;
+}
+
+// A visit saved before its trip existed attaches itself the moment exactly one
+// trip covers its dates, instead of waiting for the next email check.
+function attachOrphanVisits() {
+let changed = false;
+data.catSittingVisits.forEach((v) => {
+if (v.tripId || !v.sourceMessageId) return;
+const tripId = matchTripForDates(v.startDate, v.endDate);
+if (!tripId) return;
+v.tripId = tripId;
+const { outcome, note, produced } = visitOutcome(v);
+recordMail({ id: v.sourceMessageId }, 'catsitting', outcome, { note, produced });
+changed = true;
+});
+if (changed) queueSave();
+return changed;
+}
+
 async function runCatSittingEmailImport() {
 if (!(await canAttemptGoogleAction())) return { added: 0, error: 'Sign in to Google at the top of Overview first.' };
 if (!Array.isArray(data.prefs.catSittingImportSeen)) data.prefs.catSittingImportSeen = [];
 const seen = new Set(data.prefs.catSittingImportSeen);
+attachOrphanVisits();
 
 const { fetchMailSearches, getMessageDetail } = await import('../googlemail.js');
 const search = { kind: 'query', value: CATINAFLAT_QUERY, maxDays: 0, maxEvents: CATINAFLAT_SEARCH_LIMIT };
@@ -214,38 +291,41 @@ return { added: 0, error: err.message || String(err) };
 let added = 0;
 let unmatched = 0;
 for (const m of sections[0]?.messages || []) {
-if (seen.has(m.id)) continue;
-if (data.catSittingVisits.some((v) => v.sourceMessageId === m.id)) { seen.add(m.id); continue; }
-let detail;
-try { detail = await getMessageDetail(m.id); } catch (err) { continue; } // transient fetch failure -- try again next check
-
-const bodyText = detail.bodyText || '';
-const dateMatch = CATINAFLAT_DATE_RE.exec(bodyText);
-const sitterMatch = CATINAFLAT_SITTER_RE.exec(bodyText);
-if (!dateMatch || !sitterMatch) { seen.add(m.id); unmatched++; continue; }
-const startMonth = MONTH_NAMES.indexOf(dateMatch[2].slice(0, 3).toLowerCase());
-const endMonth = MONTH_NAMES.indexOf(dateMatch[5].slice(0, 3).toLowerCase());
-if (startMonth === -1 || endMonth === -1) { seen.add(m.id); unmatched++; continue; }
-const startDate = `${dateMatch[3]}-${String(startMonth + 1).padStart(2, '0')}-${String(dateMatch[1]).padStart(2, '0')}`;
-const endDate = `${dateMatch[6]}-${String(endMonth + 1).padStart(2, '0')}-${String(dateMatch[4]).padStart(2, '0')}`;
-const sitterName = sitterMatch[1].trim();
-const paidMatch = CATINAFLAT_PAID_RE.exec(bodyText);
-const cost = paidMatch ? Number(paidMatch[1].replace(/,/g, '')) : null;
-
-// A real, paid booking confirmation -- 'firm', not 'draft', unlike a
-// hand-added placeholder that still needs confirming.
-data.catSittingVisits.push(blankCatSittingVisit({
-tripId: matchTripForDates(startDate, endDate),
-startDate, endDate, sitterName, status: 'firm', cost,
-sourceMessageId: m.id,
-}));
+const visit = data.catSittingVisits.find((v) => v.sourceMessageId === m.id);
+if (seen.has(m.id) || visit) {
+// Handled before the ledger existed: give it a row (never overwriting a real outcome).
+if (visit) { const { outcome, note, produced } = visitOutcome(visit); recordMail(m, 'catsitting', outcome, { note, produced, onlyIfMissing: true }); }
+else recordMail(m, 'catsitting', 'seen', { note: 'Read by an earlier check; nothing was filed.', onlyIfMissing: true });
 seen.add(m.id);
-added++;
+continue;
+}
+let detail;
+try { detail = await getMessageDetail(m.id); } catch (err) {
+// transient fetch failure -- try again next check
+recordMail(m, 'catsitting', 'failed', { note: `Could not read the email: ${err.message || err}` });
+continue;
+}
+if (fileCatSittingEmail(m, detail)) added++; else unmatched++;
+seen.add(m.id);
 }
 data.prefs.catSittingImportSeen = [...seen];
 if (added || unmatched) queueSave();
 return { added, unmatched };
 }
+
+// The ledger's Retry button: re-reads this one email and files it again.
+async function retryCatSittingMessage(entry) {
+const { getMessageDetail } = await import('../googlemail.js');
+let detail;
+try { detail = await getMessageDetail(entry.messageId); } catch (err) {
+recordMail({ id: entry.messageId }, 'catsitting', 'failed', { note: `Could not read the email: ${err.message || err}` });
+return;
+}
+fileCatSittingEmail({ id: entry.messageId, from: entry.from, subject: entry.subject, date: entry.date }, detail);
+renderTravel();
+renderCatSittingRollup();
+}
+registerRetry('catsitting', { retry: retryCatSittingMessage });
 
 // ---- Binding (called from travel.js, same as bindPacking) -----------------
 

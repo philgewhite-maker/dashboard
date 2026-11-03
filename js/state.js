@@ -31,6 +31,7 @@ airbnbListings: [], // {id, label, icsUrl, prefix, colour} -- configured in Sett
 airbnbReservations: [], // synced from each listing's ICS feed, see js/features/airbnb.js
 airbnbPastStays: [], // [{listingId, checkin, checkout, guestName}] -- completed stays kept ~400 days just so a late refund email can still be matched to a listing
 airbnbCancelledStays: [], // [{id, listingId, checkin, checkout, guestName, bookedOn, cancelledOn}] -- bookings that vanished from the feed before they ended, kept ~400 days for the occupancy timeline (js/features/lettingoccupancy.js)
+mailLedger: [], // [{key, messageId, feature, outcome, from, subject, date, seenAt, tries, note, ref, produced:[{kind,id,label}]}] -- one row per Gmail message an importer has handled, so any one can be searched and retried; see js/features/mailledger.js
 airbnbSyncStatus: {}, // listingId -> {ok, syncedAt, added, updated, removed, error}
 airbnbCleanerEvents: [], // [{date, name}] -- last scan of "Cleaner - <Name>" events on the push-target calendar, see js/features/airbnb.js
 airbnbCleanerSyncStatus: null, // {ok, syncedAt, error} for the cleaner-event scan above
@@ -3288,6 +3289,7 @@ data.airbnbReservations = data.airbnbReservations.map((r) => ({ ...blankAirbnbRe
 const airbnbListingIds = new Set(data.airbnbListings.map((l) => l.id));
 data.airbnbReservations = data.airbnbReservations.filter((r) => airbnbListingIds.has(r.listingId));
 if (!Array.isArray(data.airbnbPastStays)) data.airbnbPastStays = [];
+if (!Array.isArray(data.mailLedger)) data.mailLedger = [];
 if (!Array.isArray(data.airbnbCancelledStays)) data.airbnbCancelledStays = [];
 data.airbnbCancelledStays = data.airbnbCancelledStays.filter((s) => s && airbnbListingIds.has(s.listingId));
 data.airbnbPastStays = data.airbnbPastStays.filter((s) => s && airbnbListingIds.has(s.listingId));

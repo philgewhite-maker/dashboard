@@ -25,6 +25,7 @@ import { escapeHtml, uid, daysSince, todayStr, logoBadgeHtml, bindLogoFallbacks 
 import { fetchMailSearches, getMessageDetail } from '../googlemail.js';
 import { voucherChipHtml } from './vouchers.js';
 import { track } from './activity.js';
+import { recordMail, registerRetry } from './mailledger.js';
 import { canAttemptGoogleAction } from '../sync/googleauth.js';
 import { matchBrandLogo } from '../brandLogos.js';
 import { resolveProvider, refreshProviderDatalists } from '../providers.js';
@@ -607,9 +608,22 @@ let alreadySeen = 0;
 const newRows = [];
 
 for (const msg of messages) {
-if (seen.has(msg.id)) { alreadySeen++; continue; }
+if (seen.has(msg.id)) {
+alreadySeen++;
+// Read before the ledger existed: give it a row (never overwriting a real outcome).
+const earlier = data.loyaltyBalances.filter((b) => b.programId === program.id && b.sourceMessageId === msg.id);
+recordMail(msg, 'loyalty', earlier.length ? 'filed' : 'seen', {
+ref: program.id, onlyIfMissing: true,
+note: earlier.length ? earlier.map((b) => b.label).join(', ') : 'Read by an earlier scan; nothing was filed.',
+produced: earlier.length ? [{ kind: 'loyalty', id: program.id, label: `${program.name} balance` }] : null,
+});
+continue;
+}
 let detail;
-try { detail = await withRetryOn403(() => getMessageDetail(msg.id)); } catch (err) { continue; } // transient fetch failure -- try again next scan, don't mark seen
+try { detail = await withRetryOn403(() => getMessageDetail(msg.id)); } catch (err) { // transient fetch failure -- try again next scan, don't mark seen
+recordMail(msg, 'loyalty', 'failed', { ref: program.id, note: `Could not read the email: ${err.message || err}` });
+continue;
+}
 
 const extractor = EXTRACTORS[program.extractorKey];
 let result = extractor ? extractor(detail.bodyText, detail.subject, detail.bodyHtml) : null;
@@ -642,8 +656,20 @@ result = { membershipNumber: ai.membershipNumber, tier: ai.tier, date: '', metri
 // every scan costs nothing.
 if (result || usedAi) seen.add(msg.id);
 
-if (!result) { unmatched++; continue; }
+if (!result) {
+unmatched++;
+recordMail(msg, 'loyalty', 'nomatch', {
+ref: program.id,
+note: usedAi ? `The AI read found no balance in this ${program.name} email.` : `Not a ${program.name} layout the reader recognises (often marketing). It is retried every scan.`,
+});
+continue;
+}
 matched++;
+recordMail(msg, 'loyalty', 'filed', {
+ref: program.id,
+note: result.metrics.map((metric) => metric.label).join(', '),
+produced: [{ kind: 'loyalty', id: program.id, label: `${program.name} balance` }],
+});
 if (!result.membershipNumber) result.membershipNumber = findMembershipId(detail.bodyText, detail.bodyHtml);
 if (method) program.extractionMethod = method;
 if (result.membershipNumber && !program.membershipNumber) program.membershipNumber = result.membershipNumber;
@@ -1203,6 +1229,23 @@ renderLoyaltyBalances();
 
 renderLoyaltyBalances();
 }
+
+// The ledger's Retry: forget this one message and scan its programme again.
+// The rest of the programme's already-read mail stays skipped.
+registerRetry('loyalty', {
+retry: async (entry) => {
+const program = data.loyaltyPrograms.find((p) => p.id === entry.ref);
+if (!program) { recordMail({ id: entry.messageId }, 'loyalty', 'failed', { ref: entry.ref, note: 'That loyalty programme no longer exists.' }); return; }
+program.seenMessageIds = (program.seenMessageIds || []).filter((id) => id !== entry.messageId);
+const before = entry.seenAt;
+await scanOneProgram(program, { force: true });
+queueSave();
+const after = data.mailLedger.find((r) => r.key === entry.key);
+// The scan only sees the latest messages from the sender; an older one may have scrolled out of reach.
+if (after && after.seenAt === before) recordMail({ id: entry.messageId }, 'loyalty', entry.outcome, { ref: entry.ref, note: `Gmail's search no longer returns this email (a scan reads the latest 40 from ${program.name}).` });
+renderLoyaltyBalances();
+},
+});
 
 export {
 renderLoyaltyBalances, initLoyaltyBalances, runLoyaltyBalanceScan,

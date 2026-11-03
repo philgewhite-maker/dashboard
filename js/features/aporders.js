@@ -30,6 +30,7 @@ import { data, queueSave, blankApOrder, blankInventoryItem } from '../state.js';
 import { escapeHtml, uid, daysSince, daysUntil, dateStrAdd, scrollAndFlash } from '../utils.js';
 import { fetchMailSearches, getMessageDetail, gmailLink } from '../googlemail.js';
 import { captureTask, toggleTaskDone, revealTask } from './tasks.js';
+import { recordMail, registerRetry } from './mailledger.js';
 
 const SENDER = 'clientservices@agentprovocateur.com';
 const CADENCE_DAYS = 28;
@@ -247,18 +248,32 @@ return { error: err.message };
 }
 let added = 0, unmatched = 0, alreadySeen = 0, deadlinesSharpened = 0;
 for (const msg of messages) {
-if (data.apOrders.some((o) => o.sourceMessageId === msg.id)) { alreadySeen++; continue; }
+const known = data.apOrders.find((o) => o.sourceMessageId === msg.id);
+if (known) {
+alreadySeen++;
+recordMail(msg, 'aporders', 'filed', { onlyIfMissing: true, note: `Order #${known.orderNumber}`, produced: [{ kind: 'aporder', id: known.id, label: `AP order #${known.orderNumber}` }] });
+continue;
+}
 let detail;
-try { detail = await getMessageDetail(msg.id); } catch (err) { continue; } // transient fetch failure -- try again next scan
+try { detail = await getMessageDetail(msg.id); } catch (err) { // transient fetch failure -- try again next scan
+recordMail(msg, 'aporders', 'failed', { note: `Could not read the email: ${err.message || err}` });
+continue;
+}
 const bodyText = detail.bodyText || '';
 
 const parsed = parseApOrderEmail(bodyText, detail.bodyHtml);
 if (parsed) {
-if (data.apOrders.some((o) => o.orderNumber === parsed.orderNumber)) { alreadySeen++; continue; }
+const dupe = data.apOrders.find((o) => o.orderNumber === parsed.orderNumber);
+if (dupe) {
+alreadySeen++;
+recordMail(msg, 'aporders', 'filed', { note: `Order #${dupe.orderNumber} was already on file.`, produced: [{ kind: 'aporder', id: dupe.id, label: `AP order #${dupe.orderNumber}` }] });
+continue;
+}
 const order = blankApOrder({ ...parsed, sourceMessageId: msg.id });
 data.apOrders.push(order);
 order.taskId = createReturnTask(order);
 added++;
+recordMail(msg, 'aporders', 'filed', { note: `Order #${order.orderNumber}`, produced: [{ kind: 'aporder', id: order.id, label: `AP order #${order.orderNumber}` }] });
 continue;
 }
 
@@ -271,12 +286,23 @@ continue;
 // matched back to an already-captured order purely by order number.
 const numberMatch = ORDER_NUMBER_RE.exec(bodyText);
 const isShipped = SHIPPED_SUBJECT_RE.test(String(detail.subject || '')) && numberMatch;
-if (!isShipped) { unmatched++; continue; }
+if (!isShipped) {
+unmatched++;
+recordMail(msg, 'aporders', 'nomatch', { note: 'Neither an order confirmation nor a "has been shipped" email.' });
+continue;
+}
 const order = data.apOrders.find((o) => o.orderNumber === numberMatch[1]);
-if (!order || order.shippedAt) { unmatched++; continue; } // no matching order yet, or already sharpened once
+if (!order || order.shippedAt) { // no matching order yet, or already sharpened once
+unmatched++;
+recordMail(msg, 'aporders', order ? 'filed' : 'waiting', order
+? { note: `Shipped date for order #${order.orderNumber} was already recorded.`, produced: [{ kind: 'aporder', id: order.id, label: `AP order #${order.orderNumber}` }] }
+: { note: `Shipped email for order #${numberMatch[1]}, but that order isn't captured yet. Retry once it is.` });
+continue;
+}
 const shippedAt = dateFromHeader(detail.date);
-if (!shippedAt) { unmatched++; continue; }
+if (!shippedAt) { unmatched++; recordMail(msg, 'aporders', 'nomatch', { note: 'No usable date on the shipped email.' }); continue; }
 order.shippedAt = shippedAt;
+recordMail(msg, 'aporders', 'filed', { note: `Shipped ${shippedAt}: return deadline updated.`, produced: [{ kind: 'aporder', id: order.id, label: `AP order #${order.orderNumber}` }] });
 const task = order.taskId ? data.tasks.find((t) => t.id === order.taskId) : null;
 if (task) task.due = returnDeadlineFor(order);
 else order.taskId = createReturnTask(order);
@@ -976,6 +1002,15 @@ revealApOrder(chip.dataset.openApOrder);
 });
 });
 }
+
+// The ledger's Retry: orders are deduplicated by message id and order number,
+// so a forced capture only acts on what isn't filed yet.
+registerRetry('aporders', {
+retry: async (entry) => {
+const result = await runApOrderCapture({ force: true });
+if (result && result.error) recordMail({ id: entry.messageId }, 'aporders', 'failed', { note: result.error });
+},
+});
 
 export {
 runApOrderCapture, runApRefundCheck, syncApRefundTasks, renderApOrders, initApOrders,

@@ -16,7 +16,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v703</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v704</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -132,6 +132,7 @@
 <span class="count-badge" id="mail-count"></span>
 <span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#mail-searches-block" title="Mail settings">&#9881;</span>
 <span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#mail-bin-block" title="Mail bin — dismissed messages">&#128465;</span>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#mail-history-block" title="Mail history — every email the importers have read, searchable, with Retry">&#128269;</span>
 <span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-mail" title="Guide: how to use this panel">&#128214;</span>
 </div>
 <div class="sync-row">
@@ -3557,6 +3558,28 @@ Same idea as Connections' ratings, a separate list (Taste/Health/Prep by default
 <div class="settings-note" style="margin:0 0 10px;">Messages dismissed from the Mail panel (the &times; on a row) without becoming a task, trip leg, or date event. Press <strong>Put back</strong> on a row to bring one back to Mail (if a search still finds it), or Empty bin to bring them all back. The real email is never touched.</div>
 <div id="mail-bin"></div>
 <button class="sync-btn" id="empty-mail-bin-btn" type="button" style="margin-top:8px;">Empty bin</button>
+</div>
+</details>
+
+<details class="settings-item" id="mail-history-block">
+<summary><h3>Mail history</h3></summary>
+<div class="settings-block">
+<div class="settings-note" style="margin:0 0 10px;">Every email the cat-sitting, loyalty, Agent Provocateur and Airbnb cancellation checks have read, with what became of it. Search by sender, topic or note. <strong>Retry</strong> re-reads one email and tries to file it again, so a message that was missed or filed wrongly doesn't need a whole-programme reset. Only the sender, subject, date and a short snippet are kept here; the email itself stays in Gmail.</div>
+<div class="sync-row" style="flex-wrap:wrap;align-items:flex-start;gap:6px;">
+<input type="search" autocomplete="off" id="mail-history-search" class="settings-input" style="max-width:240px;" placeholder="Search sender, subject, note…">
+<select id="mail-history-feature" class="mini" title="Which check read the email"></select>
+<select id="mail-history-outcome" class="mini" title="What happened to the email">
+<option value="">Any result</option>
+<option value="attention">Needs a look</option>
+<option value="filed">Filed</option>
+<option value="nomatch">Not recognised</option>
+<option value="failed">Failed</option>
+<option value="waiting">Waiting</option>
+<option value="seen">Handled earlier</option>
+</select>
+<span class="settings-note" id="mail-history-count" style="margin:0;"></span>
+</div>
+<div id="mail-history-rows" style="margin-top:8px;overflow-x:auto;"></div>
 </div>
 </details>
 </details>

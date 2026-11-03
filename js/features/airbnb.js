@@ -13,6 +13,7 @@ import { escapeHtml, todayStr, dateStrAdd, uid, MISSING_KEY_LINK_HTML, pickChipH
 import { owners, ownerNameFor, ownerKeyFor, shareRuleAt, money, CAP_KEEPS_FROM } from './letting.js';
 import { gmailLink } from '../googlemail.js';
 import { track } from './activity.js';
+import { recordMail, registerRetry } from './mailledger.js';
 import { parseIcsReservations } from '../icsparse.js';
 
 // How long a finished, not-yet-charged stay stays listed so its income can
@@ -1457,15 +1458,22 @@ let posted = 0;
 let unmatched = 0;
 let unowned = 0;
 for (const m of sections[0]?.messages || []) {
-if (seen.has(m.id)) continue;
+if (seen.has(m.id)) {
+// Read before the ledger existed: give it a row (never overwriting a real outcome).
+recordMail(m, 'airbnb-cancel', 'seen', { note: 'Read by an earlier sync.', onlyIfMissing: true });
+continue;
+}
 const subjectMatch = CANCELLATION_SUBJECT_RE.exec(String(m.subject || '').trim());
-if (!subjectMatch) continue;
+if (!subjectMatch) {
+recordMail(m, 'airbnb-cancel', 'nomatch', { note: 'Not a "reservation cancelled" subject in the format the reader knows.', onlyIfMissing: true });
+continue;
+}
 const endMonthIdx = MONTH_NAMES.indexOf(subjectMatch[5].slice(0, 3).toLowerCase());
-if (endMonthIdx === -1) { seen.add(m.id); continue; }
+if (endMonthIdx === -1) { seen.add(m.id); recordMail(m, 'airbnb-cancel', 'nomatch', { note: 'The month in the subject was not recognised.' }); continue; }
 // The start month is its own group only when the stay crosses a
 // month boundary -- otherwise it's absent and shares the end month.
 const startMonthIdx = subjectMatch[3] ? MONTH_NAMES.indexOf(subjectMatch[3].slice(0, 3).toLowerCase()) : endMonthIdx;
-if (startMonthIdx === -1) { seen.add(m.id); continue; }
+if (startMonthIdx === -1) { seen.add(m.id); recordMail(m, 'airbnb-cancel', 'nomatch', { note: 'The start month in the subject was not recognised.' }); continue; }
 const startDay = Number(subjectMatch[2]);
 const endDay = Number(subjectMatch[4]);
 const subjectYear = subjectMatch[6] ? Number(subjectMatch[6]) : null;
@@ -1476,11 +1484,12 @@ detail = await getMessageDetail(m.id);
 } catch (err) {
 console.error('Cancellation email fetch failed:', err);
 unmatched++;
+recordMail(m, 'airbnb-cancel', 'failed', { note: `Could not read the email: ${err.message || err}` });
 continue; // not marked seen -- a fetch failure is worth retrying
 }
 const bodyText = detail.bodyText || '';
 const payoutMatch = CANCELLATION_PAYOUT_RE.exec(bodyText);
-if (!payoutMatch) { seen.add(m.id); unmatched++; continue; }
+if (!payoutMatch) { seen.add(m.id); unmatched++; recordMail(m, 'airbnb-cancel', 'nomatch', { note: 'No payout amount found in the email.' }); continue; }
 const payout = Number(payoutMatch[1].replace(/,/g, ''));
 
 const idMatch = CANCELLATION_LISTING_ID_RE.exec(bodyText);
@@ -1490,9 +1499,9 @@ if (!listing) {
 reservation = matchReservationForCancellation(startDay, startMonthIdx + 1, endDay, endMonthIdx + 1);
 if (reservation) listing = data.airbnbListings.find((l) => l.id === reservation.listingId);
 }
-if (!listing) { seen.add(m.id); unmatched++; continue; }
+if (!listing) { seen.add(m.id); unmatched++; recordMail(m, 'airbnb-cancel', 'nomatch', { note: 'Could not tell which of your listings this was for (no listing id, and no booking on those dates).' }); continue; }
 const ownerKey = ownerKeyFor(listing);
-if (!ownerKey) { unowned++; continue; } // not marked done: posts once the listing has an owner
+if (!ownerKey) { unowned++; recordMail(m, 'airbnb-cancel', 'waiting', { note: `${listing.label || 'The listing'} has no owner yet. It posts once it does.` }); continue; } // not marked done: posts once the listing has an owner
 
 const guestMatch = CANCELLATION_GUEST_RE.exec(bodyText);
 const guestName = (guestMatch && guestMatch[1].trim()) || (reservation && reservation.guestName) || '';
@@ -1517,7 +1526,7 @@ const checkin = `${checkinYear}-${String(startMonthIdx + 1).padStart(2, '0')}-${
 // not a real scenario this app needs to support.
 const releaseDate = dateStrAdd(checkin, 1);
 const alreadyRecorded = data.lettingLedger.some((e) => e.kind === 'cancellation' && e.ownerKey === ownerKey && e.date === releaseDate && Math.abs((Number(e.gross) || 0) - payout) < 0.01);
-if (alreadyRecorded) { seen.add(m.id); continue; }
+if (alreadyRecorded) { seen.add(m.id); recordMail(m, 'airbnb-cancel', 'filed', { note: 'This payout was already on the letting ledger.', produced: [{ kind: 'letting', label: 'Letting income' }] }); continue; }
 const share = Number(listing.sharePct);
 const pct = Number.isFinite(share) ? share : 50;
 const amount = Math.round(payout * (pct / 100) * 100) / 100;
@@ -1537,11 +1546,25 @@ note: guestName || listing.label || 'Cancellation payout',
 });
 seen.add(m.id);
 posted++;
+recordMail(m, 'airbnb-cancel', 'filed', { note: `£${amount.toFixed(2)} cancellation payout for ${guestName || listing.label || 'a cancelled stay'}.`, produced: [{ kind: 'letting', label: 'Letting income' }] });
 }
 data.prefs.airbnbCancellationsSeen = [...seen];
 if (posted || unmatched) queueSave();
 return { posted, unmatched, unowned };
 }
+
+// The ledger's Retry: forget this one message and run the cancellation sync again.
+registerRetry('airbnb-cancel', {
+retry: async (entry) => {
+data.prefs.airbnbCancellationsSeen = (data.prefs.airbnbCancellationsSeen || []).filter((id) => id !== entry.messageId);
+const before = entry.seenAt;
+const result = await syncCancellationsFromEmail();
+if (result && result.error) { recordMail({ id: entry.messageId }, 'airbnb-cancel', 'failed', { note: result.error }); return; }
+const after = data.mailLedger.find((r) => r.key === entry.key);
+if (after && after.seenAt === before) recordMail({ id: entry.messageId }, 'airbnb-cancel', entry.outcome, { note: "Gmail's search no longer returns this email (the sync reads the latest cancellation emails only)." });
+queueSave();
+},
+});
 
 // Posted to lettingLedger as a NEGATIVE 'refund' entry -- real money
 // that left the business, not income, so it's excluded by construction

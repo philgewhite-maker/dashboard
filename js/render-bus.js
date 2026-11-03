@@ -28,6 +28,7 @@ import { renderAirbnb, renderAirbnbKeys } from './features/airbnb.js';
 import { renderLetting } from './features/letting.js';
 import { renderLoans } from './features/loans.js';
 import { renderLettingOccupancy } from './features/lettingoccupancy.js';
+import { renderMailHistory } from './features/mailledger.js';
 import { renderFinanceAccounts } from './features/financeaccounts.js';
 import { renderSubscriptions } from './features/subscriptions.js';
 import { renderSwitchOffers } from './features/switchoffers.js';
@@ -56,6 +57,7 @@ const RULES = [
 { id: 'airbnb-keys', keys: ['airbnbKeys', 'airbnbKeyAssignments', 'airbnbReservations'], panels: ['#airbnb-panel'], render: renderAirbnbKeys },
 { id: 'letting', keys: ['lettingLedger', 'airbnbListings', 'airbnbReservations', 'loans'], panels: ['#letting-panel'], render: renderLetting },
 { id: 'occupancy', keys: ['airbnbReservations', 'airbnbPastStays', 'airbnbCancelledStays', 'airbnbListings', 'lettingLedger'], panels: ['#letting-occupancy-section'], render: renderLettingOccupancy },
+{ id: 'mail-history', keys: ['mailLedger', 'trips'], panels: ['#mail-history-block'], render: renderMailHistory },
 { id: 'loans', keys: ['lettingLedger', 'loans', 'airbnbListings'], panels: ['#loans-panel'], render: renderLoans },
 { id: 'finance-accounts', keys: ['financeAccounts', 'subscriptions'], panels: ['#accounts-panel'], render: renderFinanceAccounts },
 { id: 'subscriptions', keys: ['subscriptions', 'financeAccounts'], panels: ['#subscriptions-panel'], render: renderSubscriptions },
