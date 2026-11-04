@@ -1,4 +1,5 @@
 :root{
+--font-head:'Geist','Inter',system-ui,sans-serif;
 --paper:#FAF9F5;
 --card:#FFFFFF;
 --ink:#242320;
@@ -100,11 +101,11 @@ flex-wrap:wrap;
 gap:12px;
 }
 header.top h1{
-font-family:'Fraunces',serif;
-font-weight:500;
-font-size:34px;
+font-family:var(--font-head);
+font-weight:600;
+font-size:32px;
 margin:0;
-letter-spacing:-0.01em;
+letter-spacing:-0.03em;
 }
 .build-stamp{
 font-family:'IBM Plex Mono',monospace;
@@ -290,24 +291,34 @@ border-color:var(--rose);
 box-shadow:0 0 0 3px var(--rose-bg);
 }
 section.panel.drop-target *{pointer-events:none;}
-.panel-head{
+/* Title, then its icons (guide book, settings gear) right beside it in one fixed
+   order, then the summary pinned to the far right -- the same on every panel, so
+   nothing floats to the middle when a panel has a different number of parts. */
+.panel-head,.panel-subhead{
 display:flex;
 align-items:center;
-justify-content:space-between;
+justify-content:flex-start;
 flex-wrap:wrap;
+column-gap:8px;
 row-gap:4px;
 margin-bottom:18px;
 }
-.panel-head h2{
-font-family:'Fraunces',serif;
-font-weight:500;
+.panel-head h2,.panel-subhead h2{
+font-family:var(--font-head);
+font-weight:600;
 font-size:19px;
+letter-spacing:-0.015em;
 margin:0;
 display:flex;
 align-items:center;
 gap:9px;
 min-width:0;
 }
+.panel-subhead h3{font-family:var(--font-head);font-weight:600;font-size:14px;letter-spacing:-0.01em;margin:0;}
+.panel-head > .panel-settings-link{order:1;flex:0 0 auto;text-decoration:none;font-size:14px;line-height:1;opacity:.75;}
+.panel-head > .panel-settings-link:hover{opacity:1;}
+.panel-head > :is(.count-badge,.panel-head-total,label,button){order:2;margin-left:auto;}
+.panel-head > :is(.count-badge,.panel-head-total,label,button) ~ :is(.count-badge,.panel-head-total,label,button){margin-left:0;}
 /* On a narrow phone a long title already wraps to two lines (h2 has no
    nowrap of its own) -- without flex-wrap above, .panel-head-total had
    nowhere to go but collide with that now-taller title instead of
@@ -3707,9 +3718,10 @@ padding:14px 0;
 display:flex;
 align-items:center;
 gap:9px;
-font-family:'Fraunces',serif;
-font-weight:500;
-font-size:16px;
+font-family:var(--font-head);
+font-weight:600;
+font-size:15px;
+letter-spacing:-0.01em;
 color:var(--ink);
 }
 .settings-group summary::-webkit-details-marker{display:none;}
