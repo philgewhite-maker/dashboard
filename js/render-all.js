@@ -43,6 +43,7 @@ import { renderLeave } from './features/leave.js';
 import { renderBooks } from './features/books.js';
 import { renderSchoolCalendar } from './features/schoolcalendar.js';
 import { refreshShopping } from './features/shopping.js';
+import { renderDayQueue } from './features/dayqueue.js';
 
 // The panels added later run before their init function on the very first paint; one that is not ready yet must not stop the rest.
 function safely(fn) { try { fn(); } catch (err) { console.error(`renderAll: ${fn.name || "a panel"} failed:`, err); } }
@@ -52,6 +53,7 @@ renderHabits();
 renderGoals();
 renderJobs();
 renderConnections();
+safely(renderDayQueue);
 renderPendingImports();
 renderCalendars();
 renderAirbnb();

@@ -2353,7 +2353,7 @@ setSearch: null,
 // list hanging off a person. `whatSheHas(conn)` is the filter.
 likes: '', notes: '', chatLog: '', chatLogWhatsApp: '', chatLogTelegram: '',
 todos: [], ratings: {}, driveLink: '', photosAlbumUrl: '', photosPersonUrl: '',
-distance: '', matchedOn: '', tinderMatchId: '', tinderLastScrapedAt: '', attentionSnoozedUntil: '',
+distance: '', matchedOn: '', tinderMatchId: '', tinderLastScrapedAt: '', attentionSnoozedUntil: '', chaseUntil: '', sentAt: '',
 // Import values this person's re-scrape keeps offering that you've
 // already judged wrong -- {field, value} where field is a FIELD_MAP
 // label ("Height") and value is the exact incoming string to stop
@@ -2440,6 +2440,9 @@ myName: '', myPhone: '', myEmail: '', myAddress: '',
 // A stage with no entry falls back to the priority-scaled formula. See
 // reachOutThreshold() below.
 reachOutStageDays: {},
+// Today queue (dayqueue.js): how many offboard decisions were made today,
+// so the "chip away at N a day" quota survives a reload.
+dayQueue: { date: '', offboarded: 0 },
 // Per-importer run history, keyed by importer id (see recordImportRun()
 // below) -- name -> {lastRunAt, scope, count}. Same shape/spirit as
 // calendarStatus above, just for the various dating-import panels.
@@ -3536,6 +3539,12 @@ if (typeof c.chatLogTelegram !== 'string') c.chatLogTelegram = '';
 // connection is still past its threshold -- lets a specific overdue
 // connection be dismissed for a while without changing Stage or priority.
 if (typeof c.attentionSnoozedUntil !== 'string') c.attentionSnoozedUntil = '';
+// ISO date a "Sent, wait for an answer" timer ends (Today queue). Past it
+// with no reply, the person joins the offboard bucket instead of nagging.
+if (typeof c.chaseUntil !== 'string') c.chaseUntil = '';
+// ISO datetime of the last "Sent" press in the Today queue -- lets a stale
+// chat read ("they spoke last") be recognised as already answered.
+if (typeof c.sentAt !== 'string') c.sentAt = '';
 if (typeof c.job !== 'string') c.job = '';
 if (typeof c.height !== 'string') c.height = '';
 if (typeof c.education !== 'string') c.education = '';
@@ -3693,6 +3702,9 @@ if (typeof data.myPhone !== 'string') data.myPhone = '';
 if (typeof data.myEmail !== 'string') data.myEmail = '';
 if (typeof data.myAddress !== 'string') data.myAddress = '';
 if (!data.reachOutStageDays || typeof data.reachOutStageDays !== 'object') data.reachOutStageDays = {};
+if (!data.dayQueue || typeof data.dayQueue !== 'object') data.dayQueue = { date: '', offboarded: 0 };
+if (typeof data.dayQueue.date !== 'string') data.dayQueue.date = '';
+if (typeof data.dayQueue.offboarded !== 'number') data.dayQueue.offboarded = 0;
 if (!data.importStatus || typeof data.importStatus !== 'object') data.importStatus = {};
 if (!Array.isArray(data.ratingCategories) || data.ratingCategories.length === 0) {
 data.ratingCategories = DEFAULT_RATING_CATEGORIES.map((c) => ({ ...c }));

@@ -4430,3 +4430,13 @@ background:var(--slate-bg);color:var(--slate);
 .occ-key-solid{background:var(--muted);}
 .occ-key-striped{background:repeating-linear-gradient(135deg,var(--muted) 0 2px,var(--card) 2px 4px);}
 .occ-key-hatch{background:repeating-linear-gradient(135deg,var(--muted) 0 2px,transparent 2px 5px);border-style:dashed;}
+
+/* Today queue (dayqueue.js) */
+.dq-section{margin:0 0 14px;}
+.dq-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:2px;}
+.dq-hint{margin:0 0 6px;}
+.dq-row{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:6px 12px;padding:7px 0;border-top:1px solid var(--border, rgba(128,128,128,.25));}
+.dq-who{display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:0;}
+.dq-note{margin:0;}
+.dq-actions{display:flex;flex-wrap:wrap;align-items:center;gap:6px;}
+.dq-chat{text-decoration:none;}
