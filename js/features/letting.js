@@ -1281,9 +1281,9 @@ items.push({ id: r.id, source: 'reservation', kind: 'reservation', listing, expl
 (data.lettingLedger || []).forEach((e) => {
 const isOrphanedAccrual = e.kind === 'accrual' && e.reservationId && !reservationIds.has(e.reservationId);
 // `skipped` (optional) collects the income-like rows this chart leaves out, with why.
-const skip = (reason) => { if (skipped && (e.kind === 'accrual' || e.kind === 'earned' || e.kind === 'cancellation')) skipped.push({ e, reason }); };
+const skip = (reason, covered) => { if (skipped && (e.kind === 'accrual' || e.kind === 'earned' || e.kind === 'cancellation')) skipped.push({ e, reason, covered: !!covered }); };
 if (e.kind !== 'earned' && e.kind !== 'cancellation' && !isOrphanedAccrual) {
-if (e.kind === 'accrual') skip(e.reservationId ? 'Its booking is still on file, so the income counts through that booking.' : 'It has no link to a booking, so Income by month leaves it out.');
+if (e.kind === 'accrual') skip(e.reservationId ? 'Its booking is still on file, so the income counts through that booking.' : 'It has no link to a booking, so Income by month leaves it out.', !!e.reservationId);
 return;
 }
 if (!e.gross || !e.date) { skip('It has no amount or no date.'); return; }
@@ -1923,8 +1923,13 @@ const listings = data.airbnbListings || [];
 const byColour = new Map();
 listings.forEach((l) => {
 const colour = l.colour || 'slate';
-if (!byColour.has(colour)) byColour.set(colour, { key: colour, colour, labels: [], listingIds: [] });
-const g = byColour.get(colour);
+// A label like "Double - Zara" names its room before the dash, so Double - Phil
+// joins it whatever colour the listing was given. No dash: fall back to colour.
+const label = String(l.label || '');
+const prefix = label.includes(' - ') ? label.split(/\s+-\s+/)[0].toLowerCase().replace(/[^a-z0-9]/g, '') : '';
+const key = prefix ? `room:${prefix}` : colour;
+if (!byColour.has(key)) byColour.set(key, { key, colour, labels: [], listingIds: [] });
+const g = byColour.get(key);
 g.listingIds.push(l.id);
 g.labels.push(l.label || l.prefix || 'Listing');
 });
@@ -1938,7 +1943,7 @@ return [...byColour.values()].map((g) => ({ key: g.key, colour: g.colour, listin
 function roomLabelFromListingLabels(labels) {
 if (labels.length <= 1) return labels[0] || 'Room';
 const stripped = labels.map((l) => l.split(/\s+-\s+/)[0].trim());
-return stripped.every((s) => s === stripped[0]) ? stripped[0] : labels.join(' / ');
+return stripped.every((s) => s.toLowerCase() === stripped[0].toLowerCase()) ? stripped[0] : labels.join(' / ');
 }
 
 // Every real "this stay happened/will happen at this rate" contribution,

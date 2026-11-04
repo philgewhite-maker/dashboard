@@ -124,12 +124,12 @@ const stay = seen.get(`stay|${row.room}|${row.it.start}|${row.it.end}`);
 row.clashes = (stay && stay.clashes) || [];
 });
 // Ledger rows the Income by month chart does not count at all, so they can't be on the timeline either.
-skippedRows.forEach(({ e, reason }) => {
+skippedRows.forEach(({ e, reason, covered }) => {
 const nights = Number(e.nights);
 const start = nights > 0 ? (e.startDate || dateStrAdd(e.date, -nights)) : '';
 const end = nights > 0 ? (e.startDate ? dateStrAdd(e.startDate, nights) : e.date) : '';
 const listing = (data.airbnbListings || []).find((l) => l.id === e.listingId) || { label: ownerNameFor(e.ownerKey) };
-trace.push({ it: { start, end, date: e.date || '', gross: Number(e.gross) || 0, note: e.note || '', listing, source: 'ledger' }, fate: 'skipped', reason, room: '' });
+trace.push({ it: { start, end, date: e.date || '', gross: Number(e.gross) || 0, note: e.note || '', listing, source: 'ledger' }, fate: covered ? 'covered' : 'skipped', reason, room: '' });
 });
 return stays;
 }
@@ -709,6 +709,7 @@ const clash = (r) => ((r.clashes || []).length
 const why = (r) => {
 const { it } = r;
 if (r.fate === 'drawn') return `Drawn on the ${escapeHtml(roomName(r.room))} row${it.source === 'ledger' && !it.explicit ? ' (room chosen from its owner)' : ''}.${clash(r)}`;
+if (r.fate === 'covered') return 'Nothing to fix: this is the accrual posted for a booking that is still on file, so the money is already counted once through that booking (its row above).';
 if (r.fate === 'skipped') return `Not counted anywhere. ${escapeHtml(r.reason)} Fix it on its ${goto} row.`;
 if (r.fate === 'merged') return `Exactly the same room and dates as another record, so drawn once on ${escapeHtml(roomName(r.room))}.${clash(r)}`;
 if (r.fate === 'payout') return `Cancellation payout, counted on ${shortDate(it.date)}.`;
@@ -716,11 +717,17 @@ if (r.fate === 'lump') return `No check-in date or nights, so it can't be drawn.
 if (r.fate === 'noroom') return `The row names no room and its owner has several, so it counts in revenue but isn't drawn. Pick the room on its ${goto} row.`;
 return 'Its dates are not valid, so it is not drawn.';
 };
+// The note often already repeats the listing name ("Double - Zara, Guest"); show it once.
+const entryName = (it) => {
+const label = it.listing.label || 'Listing';
+const note = String(it.note || '').split(/\s*,\s*/).filter((p) => p && p !== label).join(', ');
+return note ? `${label}, ${note}` : label;
+};
 const when = (it) => (it.start ? `${shortDate(it.start)} to ${shortDate(it.end)}` : (it.date ? `paid ${shortDate(it.date)}` : 'no date'));
 el.innerHTML = `<summary class="settings-note" style="cursor:pointer;">Where this month's income entries went (${rows.length})</summary>
 <div style="overflow-x:auto;"><table class="limits-table"><thead><tr><th>Dates</th><th>Entry</th><th>£</th><th>On the timeline?</th></tr></thead><tbody>${rows.map((r) => `<tr>
 <td>${escapeHtml(when(r.it))}</td>
-<td>${escapeHtml(r.it.listing.label || 'Listing')}${r.it.note ? `, ${escapeHtml(r.it.note)}` : ''}</td>
+<td>${escapeHtml(entryName(r.it))}</td>
 <td>${escapeHtml(money0(r.it.gross))}</td>
 <td>${why(r)}</td></tr>`).join('') || '<tr><td colspan="4">No income entries fall in this month.</td></tr>'}</tbody></table></div>`;
 }
