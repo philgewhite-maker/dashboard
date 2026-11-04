@@ -144,7 +144,7 @@ return;
 // "Katya PDN" shouldn't hide the "Kat" who is actually her. Offering both
 // and letting you choose beats silently picking the tidier-looking one.
 const suggestions = [];
-const seen = new Set();
+const seen = new Set(conn.contactRejected || []); // turned down with "None of these"
 (candidates || []).forEach((c) => {
 if (seen.has(c.resourceName) || claimed.has(c.resourceName)) return;
 seen.add(c.resourceName);
@@ -301,6 +301,13 @@ if (!conn) return;
 conn.contactStatus = 'missing';
 conn.contactResourceName = '';
 conn.contactEtag = '';
+// Remember what was turned down so the next sync doesn't offer the same
+// contacts again. A phone or email match is unaffected (that is evidence,
+// not a guess).
+if (!Array.isArray(conn.contactRejected)) conn.contactRejected = [];
+pendingFor(connId).forEach(({ contact }) => {
+if (contact && !conn.contactRejected.includes(contact.resourceName)) conn.contactRejected.push(contact.resourceName);
+});
 pendingMatches.delete(connId);
 queueSave();
 renderContactReview();

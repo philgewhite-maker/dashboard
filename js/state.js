@@ -2318,7 +2318,7 @@ address: '', kids: '', job: '', height: '', education: '',
 drinking: '', smoking: '',
 phone: '', email: '',
 contactStatus: '', contactResourceName: '', contactEtag: '', contactConflicts: [],
-contactMatchedBy: '', unmatchedAt: '',
+contactMatchedBy: '', contactRejected: [], unmatchedAt: '',
 // What size she takes where, and what she already owns. Both sit behind
 // the same device-local `sensitive` gate as sexTags (see SENSITIVE_BLOCKS
 // below and showSensitiveFields in connections.js): this is a named real
@@ -3669,6 +3669,7 @@ if (typeof c.contactEtag !== 'string') c.contactEtag = '';
 // "unmatched" sweep) but never guarded here until now -- the one gap in
 // this migration pass every other connection field already goes through.
 if (typeof c.contactMatchedBy !== 'string') c.contactMatchedBy = '';
+if (!Array.isArray(c.contactRejected)) c.contactRejected = [];
 if (typeof c.unmatchedAt !== 'string') c.unmatchedAt = '';
 if (!c.ratings || typeof c.ratings !== 'object') c.ratings = {};
 // "Intelligence" became "IQ" — move any rating already given under the
