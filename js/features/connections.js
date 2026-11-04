@@ -3724,6 +3724,13 @@ showArchivedFaded = true;
 setLocalSetting('showArchivedFaded', true);
 }
 renderConnections();
+// A search, drill-down or "no X" filter that doesn't include this person
+// would leave nothing to scroll to (searching "Alona" then clicking "Ola"
+// elsewhere): drop the filter so they show. A filter that already includes
+// them is left alone.
+if ((connectionSearchTerm.trim() || idFilter || emptyFieldFilter) && !document.querySelector(`[data-conn-row="${id}"]`)) {
+clearFilters();
+}
 }
 
 // The actual "you spoke to them" fact -- moves the reach-out clock
