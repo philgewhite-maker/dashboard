@@ -1,0 +1,755 @@
+<title>Dashboard Data Model</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Instrument+Sans:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: one long reference page. Findings first, then diagrams, then lookup tables. */
+:root{
+  --bg:#f2f5f8; --panel:#ffffff; --ink:#15212e; --muted:#586878; --line:#d5dde6;
+  --accent:#0a6a72; --accent-soft:#dff0f1;
+  --high:#b42318; --high-soft:#fbe4e1; --med:#9a5b05; --med-soft:#fbefd9; --low:#4a5b6c; --low-soft:#e6ebf0;
+  --ok:#17794a; --code-bg:#e9eef3;
+  --sans:'Instrument Sans',system-ui,-apple-system,'Segoe UI',sans-serif; --mono:'IBM Plex Mono',ui-monospace,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0e151d; --panel:#151f2a; --ink:#e4ebf2; --muted:#93a4b5; --line:#2a3745;
+  --accent:#5cc3cb; --accent-soft:#123a3f;
+  --high:#ff8e82; --high-soft:#3b1d1a; --med:#f0b45c; --med-soft:#3a2a10; --low:#a9b9c9; --low-soft:#213040;
+  --ok:#62d29a; --code-bg:#1d2a38; color-scheme:dark;}}
+:root[data-theme="dark"]{
+  --bg:#0e151d; --panel:#151f2a; --ink:#e4ebf2; --muted:#93a4b5; --line:#2a3745;
+  --accent:#5cc3cb; --accent-soft:#123a3f;
+  --high:#ff8e82; --high-soft:#3b1d1a; --med:#f0b45c; --med-soft:#3a2a10; --low:#a9b9c9; --low-soft:#213040;
+  --ok:#62d29a; --code-bg:#1d2a38; color-scheme:dark;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 var(--sans);padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:0 64px}
+.wrap{max-width:1080px;margin:0 auto}
+header{padding:36px 0 18px}
+h1{font-size:clamp(28px,4.5vw,40px);line-height:1.1;margin:0 0 8px;letter-spacing:-.02em;text-wrap:balance}
+h2{font-size:24px;margin:0 0 6px;letter-spacing:-.01em;text-wrap:balance}
+h3{font-size:16px;margin:26px 0 8px}
+.lede{color:var(--muted);max-width:68ch;margin:0}
+.stats{display:flex;flex-wrap:wrap;gap:10px 28px;margin:22px 0 0;padding:0;list-style:none}
+.stats li{display:flex;flex-direction:column}
+.stats b{font:600 22px var(--mono);font-variant-numeric:tabular-nums}
+.stats span{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+nav.toc{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line);margin:0 0 8px;overflow-x:auto;white-space:nowrap}
+nav.toc a{display:inline-block;padding:10px 12px 10px 0;color:var(--muted);text-decoration:none;font-size:13px;font-weight:500}
+nav.toc a:hover,nav.toc a:focus-visible{color:var(--accent)}
+section{padding:34px 0 6px;scroll-margin-top:44px}
+section>p.sub{color:var(--muted);margin:0 0 18px;max-width:72ch}
+code,.mono{font-family:var(--mono);font-size:.88em;background:var(--code-bg);padding:1px 5px;border-radius:4px}
+.finding{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:0 0 14px}
+.finding h3{margin:0 0 6px;font-size:17px;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+.sev{font:600 11px var(--mono);text-transform:uppercase;letter-spacing:.06em;padding:2px 7px;border-radius:4px}
+.sev.high{background:var(--high-soft);color:var(--high)} .sev.med{background:var(--med-soft);color:var(--med)} .sev.low{background:var(--low-soft);color:var(--low)}
+.finding p{margin:6px 0}
+.finding ul{margin:6px 0 6px 18px;padding:0}
+.finding li{margin:3px 0}
+.ev{color:var(--muted);font-size:13.5px}
+.fix{border-left:3px solid var(--accent);padding:2px 0 2px 12px;margin:10px 0 0;background:transparent}
+.fix b{color:var(--accent)}
+figure{margin:12px 0 22px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
+figure>.scroll{overflow-x:auto}
+figcaption{color:var(--muted);font-size:13.5px;margin-top:8px;max-width:80ch}
+pre.mermaid{margin:0;text-align:center;min-width:560px}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media (max-width:860px){.pair{grid-template-columns:1fr}}
+.tag{font:600 11px var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.tag.now{color:var(--high)} .tag.next{color:var(--ok)}
+.tablewrap{overflow-x:auto;background:var(--panel);border:1px solid var(--line);border-radius:10px}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+th,td{text-align:left;padding:8px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);white-space:nowrap;background:var(--bg)}
+tr:last-child td{border-bottom:0}
+td.num{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+td.k{font-family:var(--mono);font-size:12.5px;white-space:nowrap}
+.pill{font:500 11px var(--mono);padding:1px 6px;border-radius:4px;background:var(--low-soft);color:var(--low);white-space:nowrap}
+.pill.bad{background:var(--high-soft);color:var(--high)} .pill.good{color:var(--ok)}
+.steps{counter-reset:s;list-style:none;margin:0;padding:0}
+.steps li{counter-increment:s;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 16px 12px 52px;margin:0 0 10px;position:relative}
+.steps li::before{content:counter(s);position:absolute;left:16px;top:11px;font:600 15px var(--mono);color:var(--accent)}
+.steps b{display:block}
+.steps .meta{color:var(--muted);font-size:13px}
+pre.snip{background:var(--code-bg);padding:12px 14px;border-radius:8px;overflow-x:auto;font:12.5px/1.5 var(--mono);margin:8px 0}
+.note{color:var(--muted);font-size:13px}
+a{color:var(--accent)}
+</style>
+
+<div class="wrap">
+<header>
+  <h1>Dashboard data model</h1>
+  <p class="lede">What the app stores, how the pieces refer to each other, where the same fact is kept twice, and where text stands in for structure. Built from the code and from a read of the live document (field names, types, fill rates and reference checks; no personal values). Verified against build <b>v731</b>.</p>
+  <ul class="stats">
+    <li><b>109</b><span>top-level keys</span></li>
+    <li><b>597</b><span>connections</span></li>
+    <li><b>382</b><span>loyalty readings</span></li>
+    <li><b>41</b><span>references checked</span></li>
+    <li><b>7</b><span>dangling references</span></li>
+  </ul>
+</header>
+
+<nav class="toc" aria-label="Sections">
+  <a href="#findings">Findings</a><a href="#map">Map</a><a href="#airbnb">Airbnb</a><a href="#loyalty">Vouchers &amp; loyalty</a><a href="#people">Connections</a><a href="#work">Tasks &amp; travel</a><a href="#money">Finance</a><a href="#text">Text as data</a><a href="#archive">Archive &amp; hide</a><a href="#external">External keys</a><a href="#inventory">Inventory</a><a href="#plan">Plan</a><a href="#keep">Keeping it current</a>
+</nav>
+
+<section id="findings">
+  <h2>Findings</h2>
+  <p class="sub">Ordered by how much they can hurt. Each one cites what the live data showed.</p>
+
+  <div class="finding">
+    <h3><span class="sev high">High</span> A stay has no stable identity, and its record is deleted when it ends</h3>
+    <p>An Airbnb booking is created from a calendar feed with a fresh random <code>id</code>. When the stay finishes, or vanishes from the feed, that reservation is deleted. A thin copy goes into <code>airbnbPastStays</code> (no id, matched by listing + dates) or <code>airbnbCancelledStays</code>. Anything that held the old id is left pointing at nothing.</p>
+    <ul class="ev">
+      <li><code>lettingLedger.reservationId</code>: 4 of 5 references dangle.</li>
+      <li><code>airbnbKeys.forReservationId</code>: 2 of 2 dangle.</li>
+      <li>Income is stored twice: on the reservation (<code>income</code>, 8 of 10) and as 29 <code>earned</code> ledger rows. None of the 10 live reservations has a ledger row for the same listing and check-in, so the two records cannot be joined.</li>
+      <li>Two stays on the same listing with the same dates collapse into one past-stay record.</li>
+    </ul>
+    <p class="fix"><b>Fix.</b> One <code>stays</code> collection. The id never changes and the row is never deleted; it moves through <code>booked, completed, cancelled, moved</code>. Past and cancelled stays become views. Ledger rows, keys and cleaning events hold <code>stayId</code>.</p>
+  </div>
+
+  <div class="finding">
+    <h3><span class="sev high">High</span> Vouchers are loyalty readings that were copied out</h3>
+    <p>A loyalty reading can be a points balance or a voucher. The kind is stored in <code>loyaltyLabelKinds</code>, keyed by the program id and the reading's display label (27 rows, no id). 45 of 382 readings are voucher-kind. Confirming one copies it into <code>vouchers</code>, and each side then points at the other.</p>
+    <ul class="ev">
+      <li>Two-way link: <code>loyaltyBalances.voucherId</code> and <code>vouchers.sourceLoyaltyReadingIds</code>. One <code>voucherId</code> dangles. 25 readings are marked <code>skipped</code>, so the same voucher reading is decided twice over time.</li>
+      <li>Both sides carry expiry and reference. The amount is a number plus a free-text unit on a reading (9 spellings: Avios, points, £, miles, €, status points, ...) and a free-text string on a voucher (<code>£9.99</code>, <code>EUR9</code>, <code>99</code> with no currency).</li>
+      <li>4 of 15 vouchers have no source reading at all, so some are hand-entered and some are derived.</li>
+    </ul>
+    <p class="fix"><b>Fix.</b> Keep readings as the history. Add one <code>entitlements</code> concept (voucher, credit, upgrade) with a single direction of reference to its source reading, a numeric amount and a currency or unit enum, and a status of <code>active, used, expired</code>.</p>
+  </div>
+
+  <div class="finding">
+    <h3><span class="sev high">High</span> "Provider" is a plain string in five places</h3>
+    <p>The same company is typed as text on vouchers, loyalty programs, subscriptions, finance accounts (<code>bank</code>) and cashback keys (<code>"provider|merchant"</code>). Each copy has its own <code>logoUrl</code>. A migration (<code>providersConsolidated</code>) unified the pick-list, but the data still stores strings, so a rename in one place changes nothing in the others.</p>
+    <ul class="ev">
+      <li>7 voucher providers, 14 loyalty providers, 7 subscription providers, 20 banks. 5 of the 7 voucher providers are also loyalty programs.</li>
+      <li>You already guessed this overlap. It is wider than vouchers: any company you hold points, a card, a subscription and a voucher with is four unrelated records.</li>
+    </ul>
+    <p class="fix"><b>Fix.</b> A <code>providers</code> registry (id, name, logo, kinds). The other collections hold <code>providerId</code>.</p>
+  </div>
+
+  <div class="finding">
+    <h3><span class="sev med">Medium</span> Airbnb relations rest on text and on ids that do not merge</h3>
+    <ul>
+      <li>A listing is matched to calendar events by a text <code>prefix</code> in the event title (<code>ES-P</code>, <code>Dbl-Z</code>, ...). Two of five listings have no feed at all.</li>
+      <li>Cleaners are bare strings (<code>airbnbCleaners</code>). Cleaning events are <code>{date, name}</code>. Un-assigning a clean is stored as the string <code>"reservationId:edge"</code>.</li>
+      <li>The ledger owner is called <code>ownerKey</code> and holds a connection id. Listings call the same thing <code>ownerConnectionId</code>.</li>
+      <li>None of the Airbnb collections is in the per-record sync. Four of them have no ids (<code>airbnbPastStays</code>, <code>airbnbCleanerEvents</code>, <code>airbnbCleanerBlocks</code>, <code>airbnbCleaners</code>), so a two-device edit cannot be merged by id and the server copy wins.</li>
+      <li>Domain data sits in the settings blob: <code>prefs.airbnbRefundsSeen / Done / Pending</code>, <code>lettingTaxByOwner</code>, <code>airbnbCleaningCost</code>.</li>
+    </ul>
+  </div>
+
+  <div class="finding">
+    <h3><span class="sev med">Medium</span> Connections hold the same fact in two shapes</h3>
+    <ul>
+      <li>Chat: 217 connections still have the legacy <code>chatLog</code> string although all 597 are flagged as migrated to <code>identities[].chatLog</code>. <code>chatLogWhatsApp</code> and <code>chatLogTelegram</code> are empty everywhere.</li>
+      <li>Tinder id: the scalar <code>tinderMatchId</code> duplicates the first identity row. 3 people have more than one match id.</li>
+      <li>Photos: <code>photoId</code> and <code>photoIds[]</code>. One record has a cover that is not in its own list.</li>
+      <li>Telegram: <code>telegramChatId</code> and <code>telegramUsername</code> (0% filled) duplicate the identity row.</li>
+      <li>Duplicates: 76 groups of connections share a name. Some are real different people, some are the same person.</li>
+      <li>Transient UI state is saved on the record: <code>createdJustNow</code> (60% of records), <code>tinderPhotoRetryNeeded</code> (57%).</li>
+    </ul>
+  </div>
+
+  <div class="finding">
+    <h3><span class="sev med">Medium</span> At least ten ways to say "hidden" or "done"</h3>
+    <p>A stage value, a boolean, a timestamp, a separate dismissed list, a snooze date, a family flag and age-based deletion are all used. See <a href="#archive">Archive &amp; hide</a>. Each feature re-implements its own filter, so a new list has to remember which idiom applies.</p>
+  </div>
+
+  <div class="finding">
+    <h3><span class="sev med">Medium</span> Structured facts stored as prose</h3>
+    <p>Height has four text formats, distance is <code>"≤N/M"</code>, age is a string next to an "as of" date, and the Tinder bio is appended to <code>notes</code> on 347 connections (average note 371 characters, longest 2,602). Details in <a href="#text">Text as data</a>.</p>
+  </div>
+
+  <div class="finding">
+    <h3><span class="sev low">Low</span> Smaller drift</h3>
+    <ul>
+      <li>Twelve boolean <code>…Seeded / …Backfilled</code> flags sit in the document as migration bookkeeping (<code>loyaltyProgramsSeededV2</code> to <code>V6</code>, <code>providersConsolidated</code>, ...). A single <code>schemaVersion</code> would replace them.</li>
+      <li>Mixed-type fields: <code>financeAccounts.fundingAmount</code> and <code>airbnbListings.sharePct</code> hold both strings and numbers.</li>
+      <li><code>subscriptions.cost</code> (string, 0% filled) and <code>subscriptions.amount</code> (number, 57%) are the same thing. <code>mediaItems.tvdbId</code> duplicates <code>externalIds.tvdb</code>.</li>
+      <li><code>plannerEntries</code> is polymorphic: <code>kind</code> plus five nullable foreign keys (trip, connection, activity, task, recipe).</li>
+      <li><code>mailLedger.produced</code> lists <code>{kind, id}</code> pairs, a reference with no target collection fixed.</li>
+      <li>The synced document carries derived and cached data: 203 media candidates, per-recipe parsed ingredient data with a signature, ingredient "stale" flags.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="map">
+  <h2>How the areas connect</h2>
+  <p class="sub">Arrows run from the record that holds the reference to the record it points at. Only cross-area references are drawn.</p>
+  <figure>
+    <div class="scroll">
+<pre class="mermaid">
+flowchart LR
+  subgraph PEOPLE["People"]
+    CONN["connections"]
+  end
+  subgraph WORK["Work"]
+    TASK["tasks"]
+    BIZ["businessIdeas"]
+  end
+  subgraph TRAVEL["Planner and travel"]
+    TRIP["trips"]
+    PE["plannerEntries"]
+    PA["plannerActivities"]
+    CAT["catSittingVisits"]
+  end
+  subgraph LET["Letting"]
+    LST["airbnbListings"]
+    RES["airbnbReservations"]
+    LED["lettingLedger"]
+    KEY["airbnbKeys"]
+    RATE["airbnbRateProposals"]
+  end
+  subgraph MONEY["Money"]
+    ACC["financeAccounts"]
+    SUB["subscriptions"]
+    SW["switchOffers"]
+    APO["apOrders"]
+    INV["inventory"]
+  end
+  subgraph LOY["Loyalty and vouchers"]
+    PRG["loyaltyPrograms"]
+    RD["loyaltyBalances"]
+    VOU["vouchers"]
+  end
+  TASK -->|"forConnectionId"| CONN
+  PE -->|"connectionId"| CONN
+  PE -->|"tripId"| TRIP
+  PE -->|"activityId"| PA
+  PE -->|"taskId"| TASK
+  TRIP -->|"taskId"| TASK
+  CAT -->|"tripId, connectionId"| TRIP
+  CAT --> CONN
+  LST -->|"ownerConnectionId"| CONN
+  LED -->|"ownerKey"| CONN
+  LED -->|"listingId"| LST
+  LED -.->|"reservationId (dangles)"| RES
+  RES --> LST
+  KEY --> LST
+  KEY -.->|"forReservationId (dangles)"| RES
+  RATE --> LST
+  RATE --> TASK
+  SUB -->|"accountId"| ACC
+  SW --> ACC
+  SW --> TASK
+  APO -->|"refundTaskId"| TASK
+  INV -->|"holderId, fromTaskId"| CONN
+  INV --> TASK
+  RD --> PRG
+  RD -->|"voucherId"| VOU
+  VOU -->|"sourceLoyaltyReadingIds"| RD
+  BIZ --> TASK
+</pre>
+    </div>
+    <figcaption>Tasks are the hub for follow-ups: seven different collections point at a task. Connections are the hub for people: letting, planner, inventory, books and cat-sitting all reach them. Dotted arrows are references that already point at deleted records in the live data.</figcaption>
+  </figure>
+</section>
+
+<section id="airbnb">
+  <h2>Airbnb and letting</h2>
+  <p class="sub">You suspected this model is not robust. It is the weakest area, mainly because one real-world thing, a stay, is spread over four collections with different keys.</p>
+
+  <h3>Where a stay lives over its life</h3>
+  <figure>
+    <div class="scroll">
+<pre class="mermaid">
+stateDiagram-v2
+  [*] --> Feed: event appears in the calendar feed
+  Feed --> Reservation: created with a random id
+  Reservation --> Reservation: guest name, income, confirmedOn, paidOn added from email
+  Reservation --> PastStay: checkout passes (reservation deleted, no id)
+  Reservation --> CancelledStay: vanishes before checkout (reservation deleted, new id)
+  PastStay --> [*]: pruned after 400 days
+  CancelledStay --> [*]: pruned after 400 days
+  Reservation --> LedgerRow: income entered at checkout (reservationId copied)
+  PastStay --> LedgerRow: refund email matched by listing and dates
+</pre>
+    </div>
+    <figcaption>The reservation id is only valid until the reservation is deleted. Everything that copied it (ledger, key, cleaning pin) is left with a dead reference. Past stays have no id at all, so they are matched by dates.</figcaption>
+  </figure>
+
+  <div class="pair">
+    <figure>
+      <span class="tag now">Today</span>
+      <div class="scroll">
+<pre class="mermaid">
+erDiagram
+  LISTING ||--o{ RESERVATION : listingId
+  LISTING ||--o{ PAST_STAY : listingId
+  LISTING ||--o{ CANCELLED_STAY : listingId
+  LISTING ||--o{ LEDGER_ROW : "listingId (71 pct)"
+  RESERVATION ||..o{ LEDGER_ROW : "reservationId (dangles)"
+  KEY }o--o{ LISTING : "listingIds"
+  KEY ||--o{ KEY_ASSIGNMENT : keyId
+  RESERVATION ||--o{ KEY_ASSIGNMENT : reservationId
+  RESERVATION |o..o{ KEY : "forReservationId (dangles)"
+  LISTING ||--o{ RATE_PROPOSAL : listingId
+  CONNECTION ||--o{ LISTING : ownerConnectionId
+  CONNECTION ||--o{ LEDGER_ROW : ownerKey
+  RESERVATION ||..o{ CLEANER_EVENT : "name and date text"
+  LISTING {
+    string id PK
+    string prefix "matches event title text"
+    string icsUrl "60 pct"
+    string sharePct "string or number"
+  }
+  RESERVATION {
+    string id PK "deleted at checkout"
+    string listingId FK
+    string uid "ICS id, 70 pct"
+    string source "ics, external, manual"
+    string checkin
+    string checkout
+    number income "also in ledger"
+  }
+  PAST_STAY {
+    string listingId FK
+    string checkin
+    string checkout "no id"
+  }
+  CANCELLED_STAY {
+    string id PK
+    string listingId FK
+    string cancelledOn
+  }
+  LEDGER_ROW {
+    string id PK
+    string ownerKey FK
+    string kind "earned, payment, refund ..."
+    string reservationId "9 pct"
+    string note "free text"
+  }
+  CLEANER_EVENT {
+    string date
+    string name "no id"
+  }
+</pre>
+      </div>
+    </figure>
+    <figure>
+      <span class="tag next">Proposed</span>
+      <div class="scroll">
+<pre class="mermaid">
+erDiagram
+  PROVIDER_LISTING ||--o{ STAY : listingId
+  STAY ||--o{ LEDGER_ENTRY : stayId
+  STAY ||--o{ STAY_CLEAN : stayId
+  STAY ||--o{ KEY_ASSIGNMENT : stayId
+  CLEANER ||--o{ STAY_CLEAN : cleanerId
+  KEY ||--o{ KEY_ASSIGNMENT : keyId
+  KEY }o--o{ PROVIDER_LISTING : listingIds
+  OWNER ||--o{ PROVIDER_LISTING : ownerId
+  PROVIDER_LISTING ||--o{ SHARE_RULE : listingId
+  PROVIDER_LISTING {
+    string id PK
+    string feedPrefix
+    string feedUrl
+  }
+  STAY {
+    string id PK "never reused or deleted"
+    string listingId FK
+    string feedUid "natural key with listing"
+    string status "booked completed cancelled moved"
+    string checkin
+    string checkout
+    string bookedOn
+    string cancelledOn
+    string guestName
+  }
+  LEDGER_ENTRY {
+    string id PK
+    string stayId FK "nullable"
+    string listingId FK
+    string kind
+    number amount
+    string note
+  }
+  STAY_CLEAN {
+    string stayId FK
+    string edge "checkin or checkout"
+    string cleanerId FK
+    string state "assigned or unassigned"
+  }
+</pre>
+      </div>
+    </figure>
+  </div>
+  <p class="note">Income would live only in ledger entries. The stay reads its earnings by summing entries with its id, so the second copy on the reservation goes away. The existing ICS <code>uid</code> plus listing becomes the natural key used to avoid duplicates on each sync.</p>
+</section>
+
+<section id="loyalty">
+  <h2>Vouchers and loyalty</h2>
+  <p class="sub">Your guess holds: they overlap on the provider, on the expiry and reference, and on the reading itself.</p>
+  <div class="pair">
+    <figure>
+      <span class="tag now">Today</span>
+      <div class="scroll">
+<pre class="mermaid">
+erDiagram
+  LOYALTY_PROGRAM ||--o{ READING : programId
+  LOYALTY_PROGRAM ||--o{ LABEL_KIND : "programId + label text"
+  READING |o--o| VOUCHER : voucherId
+  VOUCHER }o--o{ READING : sourceLoyaltyReadingIds
+  LOYALTY_PROGRAM }o..o{ VOUCHER : "same provider text"
+  LOYALTY_PROGRAM }o..o{ SUBSCRIPTION : "same provider text"
+  LOYALTY_PROGRAM }o..o{ FINANCE_ACCOUNT : "bank text"
+  LOYALTY_PROGRAM {
+    string id PK
+    string provider "text"
+    string what "text"
+    string logoUrl
+    string membershipNumber
+    string extractorKey
+  }
+  READING {
+    string id PK
+    string programId FK
+    string label "display text"
+    number balance
+    string unit "9 spellings"
+    string expiryDate
+    string reference
+    string voucherId FK
+    string voucherLinkStatus "none linked skipped"
+  }
+  LABEL_KIND {
+    string programId
+    string label "no id"
+    string kind "balance or voucher"
+  }
+  VOUCHER {
+    string id PK
+    string provider "text"
+    string what "text"
+    string logoUrl
+    string type "Voucher Credit Other"
+    string value "text, mixed units"
+    string expiry
+    string reference
+    boolean used
+  }
+</pre>
+      </div>
+    </figure>
+    <figure>
+      <span class="tag next">Proposed</span>
+      <div class="scroll">
+<pre class="mermaid">
+erDiagram
+  PROVIDER ||--o{ PROGRAM : providerId
+  PROVIDER ||--o{ ENTITLEMENT : providerId
+  PROVIDER ||--o{ SUBSCRIPTION : providerId
+  PROVIDER ||--o{ FINANCE_ACCOUNT : providerId
+  PROGRAM ||--o{ READING : programId
+  READING |o--o{ ENTITLEMENT : sourceReadingId
+  PROVIDER {
+    string id PK
+    string name
+    string logoUrl
+  }
+  PROGRAM {
+    string id PK
+    string providerId FK
+    string membershipNumber
+    string extractorKey
+  }
+  READING {
+    string id PK
+    string programId FK
+    string kind "balance or entitlement"
+    number amount
+    string unit "enum"
+    string date
+  }
+  ENTITLEMENT {
+    string id PK
+    string providerId FK
+    string sourceReadingId FK "one direction"
+    string kind "voucher credit upgrade"
+    number amount
+    string unit "enum, GBP EUR points"
+    string expiry
+    string reference
+    string status "active used expired"
+  }
+</pre>
+      </div>
+    </figure>
+  </div>
+  <p class="note">Also separate today: Marriott points (<code>marriottAvailability.pointsBalance</code>) and cashback network balances (they appear as <code>£</code> readings in <code>loyaltyBalances</code>, while the rates sit in <code>cashbackRates</code>). The label-to-kind table disappears once a reading carries its own <code>kind</code>.</p>
+</section>
+
+<section id="people">
+  <h2>Connections</h2>
+  <p class="sub">The biggest record: 597 rows, about 2.1 MB of the synced document. It has its own per-record sync.</p>
+  <figure>
+    <div class="scroll">
+<pre class="mermaid">
+erDiagram
+  CONNECTION ||--o{ IDENTITY : "identities (embedded)"
+  CONNECTION ||--o{ PHOTO_REF : "photoIds (embedded)"
+  CONNECTION ||--o{ TODO : "todos (embedded)"
+  CONNECTION ||--o{ MILESTONE : "milestones (embedded)"
+  CONNECTION ||--o{ RATING : "ratings (embedded)"
+  CONNECTION ||--o{ TASK : forConnectionId
+  CONNECTION ||--o{ PLANNER_ENTRY : connectionId
+  CONNECTION ||--o{ CAT_VISIT : connectionId
+  CONNECTION ||--o{ LISTING : ownerConnectionId
+  CONNECTION ||--o{ LEDGER_ROW : ownerKey
+  CONNECTION ||--o{ INVENTORY_ITEM : holderId
+  CONNECTION ||--o{ BOOK : holderId
+  IDENTITY }o..o| TINDER_MATCH : "matchId"
+  CONNECTION }o..o| GOOGLE_CONTACT : "contactResourceName"
+  PHOTO_REF }o..|| PHOTO_BLOB : "IndexedDB, per device"
+  CONNECTION {
+    string id PK
+    string stage "15 values"
+    string app "Tinder Bumble ..."
+    string tinderMatchId "first match only"
+    string chatLog "legacy, 217 set"
+    string age "text"
+    string height "4 formats"
+    string notes "avg 371 chars"
+  }
+  IDENTITY {
+    string id PK
+    string platform
+    string handle
+    string matchId
+    string chatLog "text lines"
+  }
+</pre>
+    </div>
+    <figcaption>Identities, photos, to-dos, milestones and ratings live inside the connection. Everything else that refers to a person does so by connection id, and in the live data every one of those references resolves.</figcaption>
+  </figure>
+</section>
+
+<section id="work">
+  <h2>Tasks, planner and travel</h2>
+  <p class="sub">The healthiest area. All 96 parent links and every planner reference resolve.</p>
+  <figure>
+    <div class="scroll">
+<pre class="mermaid">
+erDiagram
+  TASK ||--o{ TASK : parentId
+  TRIP ||--|| TASK : taskId
+  TRIP ||--o{ TRIP_LEG : "legs (embedded)"
+  PLANNER_ENTRY }o--o| TRIP : tripId
+  PLANNER_ENTRY }o--o| CONNECTION : connectionId
+  PLANNER_ENTRY }o--o| PLANNER_ACTIVITY : activityId
+  PLANNER_ENTRY }o--o| TASK : taskId
+  PLANNER_ENTRY }o--o| RECIPE : recipeId
+  CAT_VISIT }o--o| TRIP : tripId
+  RATE_PROPOSAL }o--|| TASK : taskId
+  AP_ORDER }o--o| TASK : refundTaskId
+  SWITCH_OFFER }o--o| TASK : taskId
+  BUSINESS_IDEA }o--o| TASK : taskId
+  PLANNER_ENTRY {
+    string id PK
+    string kind "task connection activity trip recipe"
+    string date
+    string status
+  }
+  TASK {
+    string id PK
+    string bucket "plus completedAt"
+    string parentId FK
+    string notionPageId
+    object wantSpec "shopping data inside a task"
+    object stockCheck
+  }
+</pre>
+    </div>
+    <figcaption>A planner entry carries a <code>kind</code> and one of five foreign keys, only one of which is meaningful. A task also embeds shopping sub-records (<code>wantSpec</code>, <code>priceCheck</code>, <code>stockCheck</code>, <code>colourSearch</code>), which makes it two things at once.</figcaption>
+  </figure>
+</section>
+
+<section id="money">
+  <h2>Finance</h2>
+  <p class="sub">Self-references between accounts are valid in the data. The overlap is on the provider text and on rent and loan money.</p>
+  <figure>
+    <div class="scroll">
+<pre class="mermaid">
+erDiagram
+  FINANCE_ACCOUNT ||--o{ FINANCE_ACCOUNT : "cassFromAccountId"
+  FINANCE_ACCOUNT ||--o{ FINANCE_ACCOUNT : "repaymentFromAccountId"
+  FINANCE_ACCOUNT ||--o{ FINANCE_ACCOUNT : "fundingFromAccountId"
+  SUBSCRIPTION }o--o| FINANCE_ACCOUNT : accountId
+  SWITCH_OFFER }o--o| FINANCE_ACCOUNT : suggestedFromAccountId
+  ACCOUNT_VALUE_REVIEW }o..o| FINANCE_ACCOUNT : "currentBank text"
+  ANNUAL_PERK }o..o| FINANCE_ACCOUNT : "bank text"
+  LOAN }o--|| CONNECTION : ownerKey
+  LEDGER_ROW }o--|| CONNECTION : ownerKey
+  FINANCE_ACCOUNT {
+    string id PK
+    string bank "text"
+    string accountType
+    string stage "plus closeDate"
+    string fundingAmount "string or number"
+    array outgoings "embedded"
+    array switchBonuses "embedded"
+  }
+  SUBSCRIPTION {
+    string id PK
+    string provider "text"
+    string cost "string, unused"
+    number amount "the real one"
+  }
+</pre>
+    </div>
+    <figcaption>Account value reviews and annual perks name the bank as text, so a bank rename or a closed account leaves them untouched.</figcaption>
+  </figure>
+</section>
+
+<section id="text">
+  <h2>Text where structure belongs</h2>
+  <p class="sub">Formats counted from the live data (digits and words collapsed). "Fill" is the share of records with a value.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Field</th><th>What is stored</th><th>Problem</th><th>Structured form</th></tr></thead>
+    <tbody>
+    <tr><td class="k">connections.age + ageAsOf + dob</td><td>String, 77% filled; dob 1%</td><td>Age is a snapshot that goes stale. Derivable only when dob exists.</td><td>dob (or birthYear) as the stored fact, age computed</td></tr>
+    <tr><td class="k">connections.height</td><td>"175 cm", 5'9", 5’9” (curly quotes), bare number</td><td>Four formats, so filters and sorts use a parser.</td><td>heightCm number</td></tr>
+    <tr><td class="k">connections.distance</td><td>"≤N/M" (372), "N/M+" (72)</td><td>A range written as a string, parsed on every read.</td><td>distanceMilesMin / Max, or one number plus the source label</td></tr>
+    <tr><td class="k">connections.kids</td><td>Free text, 4 shapes</td><td>Cannot be filtered reliably.</td><td>enum (has, wants, does not want, open) plus a note</td></tr>
+    <tr><td class="k">connections.notes</td><td>Avg 371 chars, max 2,602. 347 contain imported profile lines</td><td>Bio facts and your own notes are mixed.</td><td>profile object for imports; notes left for your own text</td></tr>
+    <tr><td class="k">identities[].chatLog</td><td>Text lines "[date time] Sender: message"</td><td>Parsed with a regex whenever read. Doubled lines across two threads (fixed in display only).</td><td>message rows (time, sender, text) per identity</td></tr>
+    <tr><td class="k">connections.phone</td><td>"+44 7…" with the dial code in the string, some national format</td><td>A number without +country cannot open WhatsApp.</td><td>E.164 string, normalised on save</td></tr>
+    <tr><td class="k">loyaltyBalances.unit</td><td>9 spellings</td><td>Totals and comparisons need string matching.</td><td>unit enum</td></tr>
+    <tr><td class="k">vouchers.value</td><td>"£9.99", "EUR9", "99"</td><td>Amount and currency in one string, some with no currency.</td><td>amount number + currency enum</td></tr>
+    <tr><td class="k">financeAccounts.fundingAmount, airbnbListings.sharePct</td><td>string or number</td><td>Mixed types in one field.</td><td>number only</td></tr>
+    <tr><td class="k">subscriptions.cost vs amount</td><td>cost: string, 0% filled. amount: number, 57%</td><td>Two fields for one thing.</td><td>amount only</td></tr>
+    <tr><td class="k">airbnbListings.prefix</td><td>Text matched against calendar event titles</td><td>A title edit breaks the match silently.</td><td>feed id or a stored mapping of event uid to listing</td></tr>
+    <tr><td class="k">airbnbCleaners, airbnbCleanerEvents</td><td>Name strings; {date, name}</td><td>Rename a cleaner and history detaches.</td><td>cleaners with ids; events hold cleanerId and stayId</td></tr>
+    <tr><td class="k">airbnbCleanerBlocks</td><td>"reservationId:edge" strings</td><td>A composite key packed into one string.</td><td>a row {stayId, edge, state}</td></tr>
+    <tr><td class="k">loyaltyLabelKinds, ebayResaleEstimates, cashbackRates</td><td>Keys like "programId|label", "style|piece", "provider|merchant"</td><td>Meaning lives in a joined string.</td><td>objects keyed by real ids</td></tr>
+    <tr><td class="k">lettingLedger.note, platform</td><td>note 100% filled free text; platform "-" on 34 of 55</td><td>Context that other rows need is only in the note.</td><td>reference fields (stayId, source message) and a platform enum</td></tr>
+    <tr><td class="k">tasks.contexts, taskContexts</td><td>Context names as strings</td><td>Renaming a context does not update tasks.</td><td>context ids</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note" style="margin-top:10px">Dates are consistent: every date field checked is ISO <code>YYYY-MM-DD</code>, and timestamps are ISO. That part of the model is in good shape.</p>
+</section>
+
+<section id="archive">
+  <h2>How things are archived or hidden</h2>
+  <p class="sub">No common mechanism. Ten idioms in use.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Idiom</th><th>Where</th><th>Effect</th></tr></thead>
+    <tbody>
+    <tr><td>Stage value</td><td class="k">connections.stage</td><td>Faded, Archived, Got Away, FriendZone are hidden from the default list; Backlog review is an active triage bucket. Search and drill-downs show them anyway.</td></tr>
+    <tr><td>Snooze date</td><td class="k">attentionSnoozedUntil, chaseUntil, travelStatus + travelUntil</td><td>Hidden from attention lists until the date. Three fields, three meanings.</td></tr>
+    <tr><td>Event timestamp</td><td class="k">connections.unmatchedAt</td><td>Marks a Tinder match that has gone; feeds the archive queue.</td></tr>
+    <tr><td>Role flag</td><td class="k">connections.isFamily</td><td>Moves the record out of Contacts into the Family tab.</td></tr>
+    <tr><td>Bucket plus completion time</td><td class="k">tasks.bucket + completedAt</td><td>Two fields that must agree.</td></tr>
+    <tr><td>Boolean</td><td class="k">vouchers.used, loyaltyPrograms.active, switchOffers / setCompletionFinds / accountValueReviews .dismissed</td><td>Hides the row; cannot say when or why.</td></tr>
+    <tr><td>Dismissed timestamp</td><td class="k">mediaRecCandidates.dismissedAt (plus status)</td><td>Hidden, with a time.</td></tr>
+    <tr><td>Separate dismissed list</td><td class="k">mailDismissed, modelCheck.dismissed, mailLedger</td><td>The source row is untouched; a second list remembers the decision (no ids).</td></tr>
+    <tr><td>Status enums</td><td class="k">businessIdeas, enhancementIdeas, mediaItems (+doneAt), books.read (+readAt), catSittingVisits, financeAccounts.stage (+closeDate), plannerEntries.status</td><td>Each has its own set of values and its own "done" word.</td></tr>
+    <tr><td>Age-out or delete</td><td class="k">airbnbPastStays, airbnbCancelledStays (400 d), switchOffersHistory (capped), reservations deleted at checkout</td><td>Information is removed rather than flagged. Connections are hard-deleted with no tombstone.</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note" style="margin-top:10px">A shared <code>archivedAt</code> and <code>archiveReason</code> pair on every record type, plus one helper that every list uses to decide visibility, would replace most of the above. Stages would keep their business meaning without also acting as the archive switch.</p>
+</section>
+
+<section id="external">
+  <h2>Keys to other systems</h2>
+  <p class="sub">Where a record is tied to something outside the app, and how.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>System</th><th>Field(s)</th><th>Notes</th></tr></thead>
+    <tbody>
+    <tr><td>Tinder</td><td class="k">connections.tinderMatchId, identities[].matchId</td><td>The scalar keeps only the first match id. 3 people have several. The deep link is built from the newest.</td></tr>
+    <tr><td>Bumble / Telegram / WhatsApp</td><td class="k">identities[].handle, telegramChatId, telegramUsername, phone</td><td>WhatsApp has no id; the phone number is the key. Telegram fields are empty and duplicate identities.</td></tr>
+    <tr><td>Google Contacts</td><td class="k">contactResourceName, contactEtag, contactStatus, contactMatchedBy, contactRejected</td><td>9% of connections linked. Rejected suggestions are stored per connection (v730).</td></tr>
+    <tr><td>Google Calendar</td><td class="k">reservations.googleEventId / googleCalendarId, plannerActivities.googleEventId / googleCalendarId, calendars[] (names), prefs.airbnbCalendarId</td><td>Tracked calendars are matched by display name, not calendar id.</td></tr>
+    <tr><td>Airbnb feed</td><td class="k">airbnbListings.icsUrl, reservations.uid, listing.prefix</td><td>uid missing on 3 of 10 reservations (manual or external). Prefix is a title match.</td></tr>
+    <tr><td>Gmail</td><td class="k">sourceMessageId on loyaltyBalances, lettingLedger, catSittingVisits, apOrders; mailLedger.messageId; loyaltyPrograms.seenMessageIds; mailDismissed.url; senderAddresses</td><td>The only link from a record back to the email that produced it. Three different names for the same idea.</td></tr>
+    <tr><td>Notion</td><td class="k">tasks.notionPageId</td><td>1 task has one.</td></tr>
+    <tr><td>Photos</td><td class="k">photoId / photoIds (blob store on each device), photosAlbumUrl, photosPersonUrl, driveLink</td><td>Image bytes are per device, with a fallback fetch from your host. Link fields are empty.</td></tr>
+    <tr><td>Media services</td><td class="k">mediaItems.externalIds{}, tvdbId, plexCheck, book externalIds</td><td>tvdbId duplicates externalIds.tvdb.</td></tr>
+    <tr><td>Programs and banks</td><td class="k">membershipNumber, sortCode, accountNumber, senderAddresses</td><td>Plain fields in the synced document.</td></tr>
+    <tr><td>Market data</td><td class="k">ticker.holdingSymbol, tickerCache keys</td><td>Cache is volatile and excluded from sync merges.</td></tr>
+    <tr><td>Agent inbox</td><td class="k">tasks.agentProjectKey / agentGroupKey</td><td>Slugs; 0% filled in the live data.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="inventory">
+  <h2>Collection inventory</h2>
+  <p class="sub">Row counts from the live document. "Sync" is how a collection travels between devices: per-record store (rows merge by id), whole document (merged by id when it has ids, otherwise the server copy wins), or its own sync.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Collection</th><th>Rows</th><th>Has id</th><th>Sync</th><th>Notes</th></tr></thead>
+    <tbody>
+    <tr><td class="k">connections</td><td class="num">597</td><td>yes</td><td>own per-record sync</td><td>2.1 MB</td></tr>
+    <tr><td class="k">tasks</td><td class="num">182</td><td>yes</td><td>per-record</td><td>142 KB</td></tr>
+    <tr><td class="k">loyaltyBalances</td><td class="num">382</td><td>yes</td><td>per-record</td><td>append-only readings</td></tr>
+    <tr><td class="k">mediaRecCandidates</td><td class="num">203</td><td>yes</td><td>whole document</td><td>derived and cached suggestions</td></tr>
+    <tr><td class="k">renphoDaily</td><td class="num">255</td><td>date</td><td>per-record</td><td>one row per weigh-in day</td></tr>
+    <tr><td class="k">books</td><td class="num">76</td><td>yes</td><td>whole document</td><td></td></tr>
+    <tr><td class="k">lettingLedger</td><td class="num">55</td><td>yes</td><td>per-record</td><td>7 kinds in one list</td></tr>
+    <tr><td class="k">healthDaily</td><td class="num">51</td><td>date</td><td>per-record</td><td></td></tr>
+    <tr><td class="k">plannerEntries</td><td class="num">45</td><td>yes</td><td>per-record</td><td>polymorphic</td></tr>
+    <tr><td class="k">financeAccounts</td><td class="num">34</td><td>yes</td><td>per-record</td><td>30 KB</td></tr>
+    <tr><td class="k">mailDismissed</td><td class="num">34</td><td><span class="pill bad">no</span></td><td>whole document</td><td>keyed by url</td></tr>
+    <tr><td class="k">ingredientReference</td><td class="num">36</td><td>yes</td><td>whole document</td><td>derived AI data</td></tr>
+    <tr><td class="k">loyaltyLabelKinds</td><td class="num">27</td><td><span class="pill bad">no</span></td><td>whole document</td><td>keyed by program + label text</td></tr>
+    <tr><td class="k">inventory</td><td class="num">26</td><td>yes</td><td>whole document</td><td></td></tr>
+    <tr><td class="k">mailLedger</td><td class="num">25</td><td>key</td><td>whole document</td><td>capped history</td></tr>
+    <tr><td class="k">vouchers / loyaltyPrograms</td><td class="num">15 / 15</td><td>yes</td><td>per-record</td><td></td></tr>
+    <tr><td class="k">mediaItems</td><td class="num">12</td><td>yes</td><td>whole document</td><td></td></tr>
+    <tr><td class="k">airbnbRateProposals</td><td class="num">12</td><td>yes</td><td>whole document</td><td>links to a task</td></tr>
+    <tr><td class="k">airbnbReservations</td><td class="num">10</td><td>yes</td><td>whole document</td><td>deleted at checkout</td></tr>
+    <tr><td class="k">airbnbKeys, airbnbListings</td><td class="num">5 / 5</td><td>yes</td><td>whole document</td><td></td></tr>
+    <tr><td class="k">airbnbCleaners</td><td class="num">5</td><td><span class="pill bad">strings</span></td><td>whole document</td><td></td></tr>
+    <tr><td class="k">airbnbPastStays</td><td class="num">1</td><td><span class="pill bad">no</span></td><td>whole document</td><td>1 row</td></tr>
+    <tr><td class="k">airbnbCleanerEvents / Blocks</td><td class="num">2 / 1</td><td><span class="pill bad">no</span></td><td>whole document</td><td></td></tr>
+    <tr><td class="k">trips, plannerActivities, catSittingVisits, leaveYears, packingModules</td><td class="num">7 / 12 / 6 / 2 / 10</td><td>yes</td><td>per-record</td><td></td></tr>
+    <tr><td class="k">prefs</td><td class="num">36 keys</td><td>by key</td><td>per-record (one row per key)</td><td>holds domain data too</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>References that resolve and ones that do not</h3>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Reference</th><th>Refs</th><th>Dangling</th></tr></thead>
+    <tbody>
+    <tr><td class="k">lettingLedger.reservationId → airbnbReservations</td><td class="num">5</td><td class="num"><span class="pill bad">4</span></td></tr>
+    <tr><td class="k">airbnbKeys.forReservationId → airbnbReservations</td><td class="num">2</td><td class="num"><span class="pill bad">2</span></td></tr>
+    <tr><td class="k">loyaltyBalances.voucherId → vouchers</td><td class="num">20</td><td class="num"><span class="pill bad">1</span></td></tr>
+    <tr><td class="k">All other 38 checked references</td><td class="num">about 730</td><td class="num"><span class="pill good">0</span></td></tr>
+    </tbody>
+  </table></div>
+  <p class="note" style="margin-top:10px">The 38 clean references include every task, trip, planner, finance, listing and connection link. The problems are concentrated in the Airbnb stay id and the voucher cross-link.</p>
+</section>
+
+<section id="plan">
+  <h2>Suggested order of work</h2>
+  <p class="sub">Each step is independent and reversible. Steps 1 to 3 give the most robustness for the least change.</p>
+  <ol class="steps">
+    <li><b>Give Airbnb stays a permanent id.</b><span class="meta">Medium. Keep the existing reservation id as the stay id from now on, stop deleting at checkout (set a status instead), and migrate past and cancelled stays into the same list. Repoint ledger, key and cleaning references. Do this before any further Airbnb features.</span></li>
+    <li><b>Add a providers registry.</b><span class="meta">Small to medium. Seed from the existing unified pick-list, add <code>providerId</code> next to the text on vouchers, programs, subscriptions and accounts, then stop writing the text.</span></li>
+    <li><b>Make vouchers one direction from readings.</b><span class="meta">Medium. Add <code>kind</code> on a reading, an entitlements shape with numeric amount and a currency or unit enum, and drop the label-to-kind table and the reverse link.</span></li>
+    <li><b>Put the Airbnb collections in the per-record sync and give every list an id.</b><span class="meta">Small. Past stays, cleaner events, blocks and cleaners get ids, and the five Airbnb collections join the finance set.</span></li>
+    <li><b>Type the loose fields.</b><span class="meta">Small each: number-only <code>sharePct</code> and <code>fundingAmount</code>, remove <code>subscriptions.cost</code>, unit enum, <code>heightCm</code>, a distance range, E.164 phone.</span></li>
+    <li><b>One archive convention.</b><span class="meta">Medium and cross-cutting. <code>archivedAt</code> plus reason, one visibility helper, and migrate lists one at a time starting with vouchers and offers.</span></li>
+    <li><b>Replace the seeded flags with a schema version.</b><span class="meta">Small. One number and an ordered list of migrations.</span></li>
+    <li><b>Retire the duplicate connection fields.</b><span class="meta">Small after a parity check: legacy <code>chatLog</code> (217), <code>tinderMatchId</code> scalar, Telegram id fields, and the saved UI flags.</span></li>
+    <li><b>Reference clean-up helpers.</b><span class="meta">Small. One delete helper per record type that unlinks or cascades, so a deleted task, trip or voucher cannot leave a dead id. The 7 dangling references found today (of about 760) would stop growing.</span></li>
+  </ol>
+  <p class="note" style="margin-top:12px">Limits of this review: counts come from one device's copy of the document read on 4 November 2026. Server-side tables (<code>records.php</code>) and fields that are always empty in your data but used by code paths you have not hit were reviewed from code only.</p>
+</section>
+
+<section id="keep">
+  <h2>Keeping this current</h2>
+  <p class="sub">Two files sit in the repository next to the app, so the page can be checked against the real data instead of trusted.</p>
+  <ul>
+    <li><code>docs/data-model.json</code> lists every top-level key by area and every reference worth checking.</li>
+    <li><code>docs/check-model.js</code> reports keys the model does not know, keys that no longer exist, and dangling references. Run it on the live site:</li>
+  </ul>
+  <pre class="snip">const r = await import('./docs/check-model.js').then((m) =&gt; m.checkModel());
+console.table(r.dangling); r.undocumented</pre>
+  <ul>
+    <li>Rule in the repository's <code>CLAUDE.md</code>: any change to <code>state.js</code> (new key, new reference field, new factory, new archive field) updates the JSON and the matching diagram, runs the check, and republishes this page.</li>
+    <li>The diagrams are plain text in this page, so a changed relationship is a small, reviewable edit.</li>
+  </ul>
+</section>
+</div>

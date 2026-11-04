@@ -347,3 +347,22 @@ are different claims, and only the second is worth making.
 **Verify a deploy from outside** where it's reachable — curl the live
 URL, don't trust the local tree or the commit. `git log` says what was
 committed, not what is being served.
+
+## Data model doc — keep it current
+
+`docs/data-model.html` (published as the "Dashboard data model" artifact,
+https://claude.ai/artifact/2qA4cNAxA1RbVBC8dFL1y1) draws the entity
+relationships and lists overlaps, text-as-data fields, archive idioms and
+external keys. Its machine-readable twin is `docs/data-model.json`; the
+drift check is `docs/check-model.js`.
+
+Whenever a change touches `js/state.js` data shape — a new top-level key, a
+new `blank*` factory or field, a new reference to another record's id, a new
+archive/hide field, a collection joining or leaving the per-record sync
+(`js/sync/collections.js`) — in the same change: update `docs/data-model.json`
+(group + `fks`), update the matching diagram/table in `docs/data-model.html`,
+run the check on the live site (`const r = await import('./docs/check-model.js')
+.then((m) => m.checkModel()); r`) and fix anything it reports as undocumented,
+gone or dangling, then republish the artifact (same file path keeps the URL)
+and bump "Verified against build vNNN". Skip for a copy/CSS change or a field
+rename that changes nothing a diagram shows.

@@ -1,0 +1,39 @@
+{
+  "_about": "Machine-readable twin of docs/data-model.html. js check: import('./docs/check-model.js') from the live site's console. Update when state.js gains/changes a key or a reference.",
+  "verifiedAgainst": "v731",
+  "groups": {
+    "people": ["connections","telegramThreads","telegramUnclaimed","pendingImports","importStatus","flagRules","flagRulesSeeded","ratingCategories","reachOutStageDays","dayQueue","myCity","myName","myPhone","myEmail","myAddress"],
+    "work": ["tasks","taskContexts","captureInbox","captureDrafts","agentInbox","businessIdeas","enhancementIdeas","readingList","jobs","habits","goals"],
+    "planner-travel": ["trips","plannerEntries","plannerActivities","plannerExtraDays","packingModules","packingModulesSeeded","leaveYears","catSittingVisits","marriottAvailability","calendars","calendarStatus","schoolCalendarUpdates"],
+    "letting": ["airbnbListings","airbnbReservations","airbnbPastStays","airbnbCancelledStays","airbnbCleaners","airbnbCleanerEvents","airbnbCleanerBlocks","airbnbKeys","airbnbKeyAssignments","airbnbRateProposals","airbnbSyncStatus","airbnbCleanerSyncStatus","lettingLedger","loans"],
+    "money": ["financeAccounts","subscriptions","switchOffers","switchOffersHistory","accountValueReviews","cassParticipants","annualPerks","cashbackRates","cashbackTracked","ebayResaleEstimates","ticker","tickerCache","proxyRefusals","apOrders","apOrdersLastCheckedAt","apRefundsLastCheckedAt","inventory","setCompletionFinds"],
+    "loyalty-vouchers": ["vouchers","loyaltyPrograms","loyaltyBalances","loyaltyLabelKinds","loyaltyProgramsSeeded","loyaltyProgramsSeededV2","loyaltyProgramsSeededV3","loyaltyProgramsSeededV4","loyaltyProgramsSeededV5","loyaltyProgramsSeededV6","loyaltyContentFiltersSeeded","loyaltyLogosSeeded","loyaltyQuidcoTrackedFilterSeeded","voucherProviderBackfilled","providersConsolidated"],
+    "media-home": ["mediaItems","mediaRecSources","mediaRecCandidates","books","recipes","recipeRatingCategories","ingredientReference","ingredientAliases"],
+    "health": ["healthDaily","renphoDaily","wellnessDaily"],
+    "mail": ["mailSearches","mailTopics","mailRules","mailDismissed","mailLedger"],
+    "system": ["settingsVault","prefs","scheduledRuns","siteHealth","claudeAnswers","claudeApiSpend","claudeSubscriptionUsage","modelCheck"]
+  },
+  "fks": [
+    ["tasks","parentId","tasks"],["tasks","forConnectionId","connections"],
+    ["trips","taskId","tasks"],
+    ["plannerEntries","tripId","trips"],["plannerEntries","connectionId","connections"],["plannerEntries","activityId","plannerActivities"],["plannerEntries","taskId","tasks"],
+    ["plannerActivities","connectionId","connections"],["plannerActivities","tripId","trips"],
+    ["catSittingVisits","tripId","trips"],["catSittingVisits","connectionId","connections"],
+    ["airbnbReservations","listingId","airbnbListings"],["airbnbPastStays","listingId","airbnbListings"],["airbnbCancelledStays","listingId","airbnbListings"],
+    ["airbnbListings","ownerConnectionId","connections"],
+    ["lettingLedger","listingId","airbnbListings"],["lettingLedger","reservationId","airbnbReservations"],["lettingLedger","ownerKey","connections"],
+    ["airbnbKeys","listingIds","airbnbListings"],["airbnbKeys","forReservationId","airbnbReservations"],
+    ["airbnbKeyAssignments","keyId","airbnbKeys"],["airbnbKeyAssignments","reservationId","airbnbReservations"],
+    ["airbnbRateProposals","listingId","airbnbListings"],["airbnbRateProposals","taskId","tasks"],
+    ["vouchers","sourceLoyaltyReadingIds","loyaltyBalances"],["loyaltyBalances","programId","loyaltyPrograms"],["loyaltyBalances","voucherId","vouchers"],["loyaltyLabelKinds","programId","loyaltyPrograms"],
+    ["subscriptions","accountId","financeAccounts"],
+    ["financeAccounts","cassFromAccountId","financeAccounts"],["financeAccounts","repaymentFromAccountId","financeAccounts"],["financeAccounts","fundingFromAccountId","financeAccounts"],
+    ["switchOffers","suggestedFromAccountId","financeAccounts"],["switchOffers","taskId","tasks"],
+    ["businessIdeas","taskId","tasks"],
+    ["inventory","holderId","connections"],["inventory","fromTaskId","tasks"],
+    ["books","holderId","connections"],["books","fromMediaId","mediaItems"],
+    ["apOrders","taskId","tasks"],["apOrders","refundTaskId","tasks"],["apOrders","refundIssueTaskId","tasks"],
+    ["recipes","variantOf","recipes"],
+    ["mailSearches","topicId","mailTopics"]
+  ]
+}
