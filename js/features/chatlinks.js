@@ -5,14 +5,15 @@
 import { escapeHtml } from '../utils.js';
 import { CONN_STAGES } from './connections.js';
 
-// Moved to Telegram -> Telegram. Moved to WhatsApp, or any stage after it up
-// to Dating (calls, meetings, dating), -> WhatsApp when there is a usable
-// number. Everything earlier (or no number) stays on Tinder.
+// Moved to Telegram -> Telegram. Moved to WhatsApp, and every stage after it
+// (calls, meetings, dating, and the dormant ones: Backlog review, FriendZone,
+// Faded, Archived, Got Away), -> WhatsApp when there is a usable number.
+// Only the in-app stages before it (and anyone with no number) stay on Tinder.
 function liveChat(c) {
 if (c.stage === 'Moved to Telegram') return 'Telegram';
 if (c.stage === 'Moved to WhatsApp') return 'WhatsApp';
 const i = CONN_STAGES.indexOf(c.stage);
-if (i > CONN_STAGES.indexOf('Moved to WhatsApp') && i <= CONN_STAGES.indexOf('Dating') && waDigits(c.phone)) return 'WhatsApp';
+if (i > CONN_STAGES.indexOf('Moved to WhatsApp') && waDigits(c.phone)) return 'WhatsApp';
 return 'Tinder';
 }
 
