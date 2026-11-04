@@ -2674,6 +2674,20 @@ if (!Array.isArray(data.goals)) data.goals = [];
 if (!Array.isArray(data.jobs)) data.jobs = [];
 data.jobs = data.jobs.map((j) => ({ ...blankJob(), ...j, id: j.id || uid() }));
 if (!Array.isArray(data.connections)) data.connections = [];
+// The same record id present twice (a per-record sync pull racing a
+// whole-document pull used to push a second copy) -- keep the fuller one.
+{
+const seen = new Map();
+let dup = false;
+for (const c of data.connections) {
+if (!c || !c.id) continue;
+const prev = seen.get(c.id);
+if (!prev) { seen.set(c.id, c); continue; }
+dup = true;
+if (JSON.stringify(c).length > JSON.stringify(prev).length) seen.set(c.id, c);
+}
+if (dup) data.connections = data.connections.filter((c, i, arr) => !c || !c.id || seen.get(c.id) === c).filter((c, i, arr) => !c || !c.id || arr.findIndex((x) => x && x.id === c.id) === i);
+}
 if (!Array.isArray(data.calendars)) data.calendars = [];
 // Tracked calendars have been through three shapes: {id,name,date} manual
 // entries, then bare name strings, and now {name, maxDays, maxEvents} so

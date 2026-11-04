@@ -208,7 +208,11 @@ const known = state[row.id];
 if (known && known.rev >= row.rev) continue; // already have this revision
 const full = await apiRequest(`${url}?id=${encodeURIComponent(row.id)}`, secret, 'GET');
 const remote = await decryptIfNeeded(full.data);
-const local = byId.get(row.id);
+// Look the record up in the LIVE array, not the map built before the
+// awaits above: a whole-document pull can replace data.connections
+// mid-loop (already containing this record), and the stale map would
+// then say "not here" and push a second copy with the same id.
+const local = data.connections.find((c) => c.id === row.id) || byId.get(row.id);
 if (local && known && snapshotOf(local) !== known.snapshot) {
 // Locally edited since we last agreed with the server AND the
 // server has a newer revision too -- genuine concurrent edit,
@@ -221,6 +225,7 @@ await trail(`connection taken from server (rev ${full.rev})`, local, changedFiel
 Object.assign(local, remote);
 state[row.id] = { rev: full.rev, snapshot: snapshotOf(local) };
 } else {
+if (data.connections.some((c) => c.id === remote.id)) { state[row.id] = { rev: full.rev, snapshot: snapshotOf(remote) }; continue; }
 data.connections.push(remote);
 state[row.id] = { rev: full.rev, snapshot: snapshotOf(remote) };
 }
