@@ -97,8 +97,27 @@ let linked = 0;
 let review = 0;
 let missing = 0;
 
+// A phone or email match identifies a person at ANY stage, so connections
+// below the stage gate (or dormant ones) are still linked when their number
+// or email is in Google. Only the weak name guesses stay gated. Claiming
+// those contacts first also keeps them out of other people's name
+// suggestions (Alona's contact was being offered to five look-alikes).
+const claimed = new Set();
+data.connections.forEach((conn) => {
+const { matched, how } = findMatch(conn, index);
+if (!matched) return;
+claimed.add(matched.resourceName);
+if (isPostAppStage(conn)) return; // linked by the main pass below
+conn.contactStatus = 'linked';
+conn.contactResourceName = matched.resourceName;
+conn.contactEtag = matched.etag;
+conn.contactMatchedBy = how;
+applyContactDiff(conn, matched);
+linked++;
+});
 eligibleConnections().forEach((conn) => {
 const { matched, how, candidates } = findMatch(conn, index);
+if (matched) claimed.add(matched.resourceName);
 if (matched) {
 conn.contactStatus = 'linked';
 conn.contactResourceName = matched.resourceName;
@@ -127,12 +146,12 @@ return;
 const suggestions = [];
 const seen = new Set();
 (candidates || []).forEach((c) => {
-if (seen.has(c.resourceName)) return;
+if (seen.has(c.resourceName) || claimed.has(c.resourceName)) return;
 seen.add(c.resourceName);
 suggestions.push({ contact: c, why: 'same name' });
 });
 widerNameCandidates(conn.name, contacts).forEach(({ contact, why }) => {
-if (seen.has(contact.resourceName)) return;
+if (seen.has(contact.resourceName) || claimed.has(contact.resourceName)) return;
 seen.add(contact.resourceName);
 suggestions.push({ contact, why });
 });
