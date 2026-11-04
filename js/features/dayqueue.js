@@ -10,6 +10,7 @@
 // data.dayQueue (the daily offboard counter).
 import { data, queueSave, isDormantStage, isTravelPaused, reachOutThreshold } from '../state.js';
 import { todayStr, daysSince, escapeHtml, hydratePhotoBackgrounds } from '../utils.js';
+import { liveChat, chatTarget } from './chatlinks.js';
 import { isPriorityConnection, connectionChipHtml, bindConnectionChips, logContactNow, renderConnections, CONN_STAGES } from './connections.js';
 
 const OFFBOARD_PER_DAY = 5;
@@ -47,43 +48,6 @@ if (you) hasYou = true;
 last = you ? 'you' : 'them';
 });
 return { hasYou, last };
-}
-
-// Moved to Telegram -> Telegram. Moved to WhatsApp, or any stage after it up
-// to Dating (calls, meetings, dating), -> WhatsApp when there is a usable
-// number. Everything earlier (or no number) stays on Tinder.
-function liveChat(c) {
-if (c.stage === 'Moved to Telegram') return 'Telegram';
-if (c.stage === 'Moved to WhatsApp') return 'WhatsApp';
-const i = CONN_STAGES.indexOf(c.stage);
-if (i > CONN_STAGES.indexOf('Moved to WhatsApp') && i <= CONN_STAGES.indexOf('Dating') && waDigits(c.phone)) return 'WhatsApp';
-return 'Tinder';
-}
-
-function waDigits(phone) {
-const raw = String(phone || '').trim();
-if (!raw || !(raw.startsWith('+') || raw.startsWith('00'))) return '';
-const d = raw.replace(/\D/g, '').replace(/^00/, '');
-return d.length >= 8 ? d : '';
-}
-
-// The page that opens this person's live chat, or null with a reason.
-function chatTarget(c) {
-const want = liveChat(c);
-const tinderRows = (c.identities || []).filter((r) => r.platform === 'Tinder' && r.matchId);
-const tinderId = tinderRows.length ? tinderRows[tinderRows.length - 1].matchId : c.tinderMatchId;
-const wa = waDigits(c.phone);
-const tgRows = (c.identities || []).filter((r) => r.platform === 'Telegram' && r.handle);
-const tg = tgRows.length ? String(tgRows[tgRows.length - 1].handle).replace(/^@/, '') : '';
-const options = {
-Tinder: tinderId ? { url: `https://tinder.com/app/messages/${encodeURIComponent(tinderId)}`, label: 'Tinder' } : null,
-WhatsApp: wa ? { url: `https://wa.me/${wa}`, label: 'WhatsApp' } : null,
-Telegram: tg ? { url: `https://t.me/${encodeURIComponent(tg)}`, label: 'Telegram' } : null,
-};
-const hit = options[want] || options.Tinder || options.WhatsApp || options.Telegram;
-if (hit) return { ...hit, why: '' };
-if (want === 'WhatsApp' && c.phone) return { url: '', label: '', why: 'phone needs a +country code' };
-return { url: '', label: '', why: 'no Tinder id or number on file' };
 }
 
 function activeFor(c) {

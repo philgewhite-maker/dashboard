@@ -10,6 +10,7 @@ import { MissingKeyError, extractMatchesFromScreenshot, extractProfileFromScreen
 import { isSensitive, noCoverNote } from './photoalbums.js';
 import { nameKey, editDistance } from '../googlecontacts.js';
 import { switchTab } from '../tabs.js';
+import { chatLinksRowHtml } from './chatlinks.js';
 
 // 'Backlog review' is an active triage bucket (see the "Backlog review
 // 180+" button below), not a resolved outcome -- it's excluded from
@@ -1222,8 +1223,8 @@ ${chatSourceRow}
 <div class="tinder-chat-block" style="margin:0;">${chatTranscriptHtml(mergedLines, matcher, multiSource ? SOURCE_ICONS : null)}</div>
 <details class="tinder-edit-details"><summary>Edit raw text</summary>
 ${editorsHtml}
-</details></div>`
-: `<div class="field-block full"><span class="field-label">Chat history</span>${editorsHtml}</div>`;
+</details>${chatLinksRowHtml(c)}</div>`
+: `<div class="field-block full"><span class="field-label">Chat history</span>${editorsHtml}${chatLinksRowHtml(c)}</div>`;
 }
 return `<div class="match-card" data-conn-row="${c.id}">
 <div class="match-row">
