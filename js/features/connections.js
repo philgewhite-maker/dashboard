@@ -1103,7 +1103,16 @@ const cached = mergedChatLinesCache.get(c.id);
 if (cached && cached.sig === sig) return cached.lines;
 const tagged = (c.identities || []).flatMap((r) => String(r.chatLog || '').split('\n').filter(Boolean)
 .map((text) => ({ source: r.platform, rowId: r.id, text })));
-const lines = tagged.sort((a, b) => {
+// A re-matched person has one thread per Tinder id, and each can carry the
+// same earlier messages. The same line (same time, sender and text) already
+// seen from a DIFFERENT thread is the same message, not a second one.
+const seenFrom = new Map();
+const unique = tagged.filter((t) => {
+const first = seenFrom.get(t.text);
+if (first === undefined) { seenFrom.set(t.text, t.rowId); return true; }
+return first === t.rowId;
+});
+const lines = unique.sort((a, b) => {
 const da = (a.text.match(/^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\]/) || [])[1] || '';
 const db = (b.text.match(/^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\]/) || [])[1] || '';
 return da < db ? -1 : da > db ? 1 : 0;

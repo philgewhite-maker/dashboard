@@ -9,7 +9,7 @@
 // attentionSnoozedUntil); the only new state is c.chaseUntil / c.sentAt and
 // data.dayQueue (the daily offboard counter).
 import { data, queueSave, isDormantStage, isTravelPaused, reachOutThreshold } from '../state.js';
-import { todayStr, daysSince, escapeHtml } from '../utils.js';
+import { todayStr, daysSince, escapeHtml, hydratePhotoBackgrounds } from '../utils.js';
 import { isPriorityConnection, connectionChipHtml, bindConnectionChips, logContactNow, renderConnections, CONN_STAGES } from './connections.js';
 
 const OFFBOARD_PER_DAY = 5;
@@ -199,6 +199,8 @@ ${sectionHtml('Priority', 'Pinned or far-along people past their reach-out time.
 ${sectionHtml('Recent matches', `Matched in the last ${RECENT_DAYS} days and waiting on you: not messaged yet, or their message is last. Based on the last chat read, so it can be a little behind.`, b.recent, actionRowHtml)}
 ${offHtml}
 ${waiting ? `<p class="settings-note">${waiting} waiting out a ${CHASE_DAYS}-day timer, not shown.</p>` : ''}`;
+// Avatars are placeholders until their photo blobs are filled in.
+hydratePhotoBackgrounds(host);
 }
 
 function refresh() {
