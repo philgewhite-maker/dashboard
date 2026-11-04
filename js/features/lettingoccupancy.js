@@ -188,14 +188,20 @@ return roomKeys.get(listingId) || listingId;
 // Nights booked / occupied, counted the way the occupancy bars on the night-rate chart count them:
 // a set of (room, night) pairs, so a room is never more than one night occupied per night however
 // many records overlap it. `D` is the day of the month being read up to.
-function distinctRoomNights(stays, ym, upToDay, metric, today) {
-return roomNightMap(stays, ym, upToDay, metric, today).size;
+function distinctRoomNights(stays, ym, upToDay, metric, today, asOf) {
+return roomNightMap(stays, ym, upToDay, metric, today, state.channel, asOf).size;
 }
+
+// "Nights booked" looks back from the month: bookings arrive weeks before the nights do, so its
+// axis starts this many weeks ahead of the 1st (index 0 is that day; the 1st is at index LEAD_DAYS).
+const LEAD_WEEKS = 16;
+const LEAD_DAYS = LEAD_WEEKS * 7;
+function leadFor(metric) { return metric === 'bookings' ? LEAD_DAYS : 0; }
 
 // The same set, as (room, night) -> the channel that filled it, optionally for one channel only
 // (the pace chart's Channel picker). A night two records claim is credited to whichever came first.
-function roomNightMap(stays, ym, upToDay, metric, today, channel = state.channel) {
-const D = dayStr(ym, upToDay);
+function roomNightMap(stays, ym, upToDay, metric, today, channel = state.channel, asOf = '') {
+const D = asOf || dayStr(ym, upToDay); // asOf: a date outside the month, for "booked as of" before it starts
 const first = dayStr(ym, 1);
 const next = dayStr(addMonths(ym, 1), 1);
 const n = daysIn(ym);
@@ -225,6 +231,16 @@ return keys;
 function seriesFor(stays, ym, metric, today) {
 const n = daysIn(ym);
 const out = [];
+if (metric === 'bookings') {
+// One point per day from LEAD_WEEKS before the 1st to the month's last day: the month's nights
+// that were already booked as of that date (none after today, which hasn't happened yet).
+const first = dayStr(ym, 1);
+for (let i = 0; i < LEAD_DAYS + n; i++) {
+const asOf = dateStrAdd(first, i - LEAD_DAYS);
+out.push(asOf > today ? null : distinctRoomNights(stays, ym, n, metric, today, asOf));
+}
+return out;
+}
 for (let d = 1; d <= n; d++) {
 if (dayStr(ym, d) > today) { out.push(null); continue; }
 let sum = 0;
@@ -274,7 +290,7 @@ const COMPARE_LABEL = { prev: 'last month', prev3: 'the last 3 months (average)'
 function comparisonSeries(stays, ym, mode, metric, today) {
 const months = compareMonths(ym, mode);
 const usable = months.filter((m) => coverageFor(stays, m, metric) >= MIN_COVERAGE);
-const n = daysIn(ym);
+const n = leadFor(metric) + daysIn(ym);
 if (!usable.length) return { values: null, usable, months };
 const all = usable.map((m) => seriesFor(stays, m, metric, today));
 const values = [];
@@ -297,6 +313,7 @@ function currentYm() { return todayStr().slice(0, 7); }
 function monthOptions() {
 const cur = currentYm();
 const opts = [{ ym: addMonths(cur, 1), label: `Next month (${longMonth(addMonths(cur, 1))})` }, { ym: cur, label: `This month (${longMonth(cur)})` }, { ym: addMonths(cur, -1), label: `Last month (${longMonth(addMonths(cur, -1))})` }];
+opts.unshift({ ym: addMonths(cur, 2), label: longMonth(addMonths(cur, 2)) });
 for (let i = 2; i <= 13; i++) opts.push({ ym: addMonths(cur, -i), label: longMonth(addMonths(cur, -i)) });
 return opts;
 }
@@ -305,7 +322,7 @@ function sectionHtml() {
 return `<div class="letting-chart-wrap" id="letting-occupancy-section">
 <div class="panel-head" style="margin:14px 0 6px;"><h2 style="font-size:13px;">Occupancy and booking pace</h2></div>
 <details class="settings-subgroup panel-about"><summary>About this</summary>
-<div class="settings-note" style="margin:0 0 6px;">Top: each room is a lane and each booking a line from check-in to check-out, so turnovers show as a gap. Hatched lines are cancelled bookings (recorded from the day they leave the Airbnb feed; older ones appear only when they have a cancellation payout, and show as a single night). Bottom: the same month as a cumulative line against the same day of a comparison month, with the gap shaded and named. <strong>Nights booked</strong> counts a booking from the day it was confirmed (its confirmation email) and takes a cancelled one back out from the day it was cancelled; booking dates are only known for stays seen since this was added, so older months say "collecting data" instead of showing a misleading line. <strong>Nights occupied</strong> and <strong>Revenue earned</strong> compare straight away.</div>
+<div class="settings-note" style="margin:0 0 6px;">Top: each room is a lane and each booking a line from check-in to check-out, so turnovers show as a gap. Hatched lines are cancelled bookings (recorded from the day they leave the Airbnb feed; older ones appear only when they have a cancellation payout, and show as a single night). Bottom: the same month as a cumulative line against a comparison month, with the gap shaded and named. <strong>Nights booked</strong> zooms out: its axis starts 16 weeks before the 1st and runs through the month, showing how many of the month's nights were already booked at each point, against the comparison month at the same distance from its own 1st (so you can see whether next month is filling faster or slower than last month did). A booking counts from the day it was confirmed (its confirmation email) and a cancelled one is taken back out from the day it was cancelled; booking dates are only known for stays seen since this was added, so older months say "collecting data" instead of showing a misleading line. <strong>Nights occupied</strong> and <strong>Revenue earned</strong> compare straight away.</div>
 </details>
 <div class="sync-row" style="gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px;">
 <select id="occ-month" class="mini" title="The month both charts show"></select>
@@ -525,6 +542,7 @@ const verdictEl = document.getElementById('pace-verdict');
 const tableEl = document.getElementById('occ-table');
 if (!canvas) return;
 const ym = state.ym; const metric = state.metric; const today = todayStr();
+const lead = leadFor(metric);
 const cur = seriesFor(stays, ym, metric, today);
 const cmp = comparisonSeries(stays, ym, state.compare, metric, today);
 const n = cur.length;
@@ -535,7 +553,8 @@ let verdict = '';
 let delta = null;
 if (lastIdx >= 0 && cmp.values && cmp.values[lastIdx] !== null) {
 delta = cur[lastIdx] - cmp.values[lastIdx];
-const where = ym === currentYm() ? `by day ${lastIdx + 1}` : 'over the whole month';
+const off = lastIdx - lead; // days from the 1st
+const where = off < 0 ? `at the same point, ${-off} day${off === -1 ? '' : 's'} before it starts` : (ym === currentYm() ? `by day ${off + 1}` : 'over the whole month');
 const mag = fmtVal(Math.abs(delta));
 verdict = Math.abs(delta) < (metric === 'revenue' ? 1 : 0.05)
 ? `&#9644; Level with ${COMPARE_LABEL[state.compare]} ${where}.`
@@ -547,7 +566,7 @@ verdict = metric === 'bookings'
 ? `Collecting data for this comparison (${escapeHtml(cov.join('; '))}). It fills in as bookings are seen from now on; try &ldquo;Nights occupied&rdquo; for an immediate comparison.`
 : `Nothing on file to compare with for ${escapeHtml(compareMonths(ym, state.compare).map(longMonth).join(', '))} (${escapeHtml(cov.join('; '))}).`;
 }
-if (ym > currentYm()) verdict = 'This month has not started, so there is no pace to compare yet. The timeline above shows what is already booked.';
+if (ym > currentYm() && metric !== 'bookings') verdict = 'This month has not started, so there is no pace to compare yet. The timeline above shows what is already booked.';
 verdictEl.innerHTML = verdict || 'No bookings found for this month yet.';
 const s = setup(canvas);
 if (!s) return;
@@ -570,9 +589,31 @@ ctx.fillText(metric === 'revenue' ? `£${Math.round(v)}` : String(Math.round(v *
 }
 // x axis
 ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+if (lead) {
+// Weeks before the month, then the weeks within it; the 1st is marked with a line.
+const stride = narrow ? 4 : 2;
+for (let i = 0; i < n; i++) {
+const o = i - lead;
+const wk = o / 7;
+let label = '';
+if (o < 0 && Number.isInteger(wk) && (-wk) % stride === 0) label = `${-wk}w`;
+else if (o === 0) label = `${shortDate(dayStr(ym, 1))}`;
+else if (o > 0 && Number.isInteger(wk)) label = `wk ${wk + 1}`;
+else if (i === n - 1 && (o % 7) >= 4) label = 'end'; // skipped when it would sit on top of the last week label
+if (label) { ctx.fillStyle = c.muted; ctx.fillText(label, X(i), plot.y + plot.h + 6); }
+}
+const x0 = X(lead);
+ctx.strokeStyle = c.muted; ctx.lineWidth = 1; ctx.setLineDash([2, 3]);
+ctx.beginPath(); ctx.moveTo(x0, plot.y); ctx.lineTo(x0, plot.y + plot.h); ctx.stroke(); ctx.setLineDash([]);
+ctx.fillStyle = c.muted; ctx.textAlign = 'right'; ctx.textBaseline = 'top';
+ctx.fillText('weeks before the month', x0 - 6, plot.y + 2);
+ctx.textAlign = 'left'; ctx.fillText('the month', x0 + 6, plot.y + 2);
+ctx.textAlign = 'center';
+} else {
 for (let i = 0; i < n; i++) {
 const d = i + 1;
 if (d === 1 || d % 5 === 0 || d === n) { ctx.fillStyle = c.muted; ctx.fillText(String(d), X(i), plot.y + plot.h + 6); }
+}
 }
 // shaded gap between the two lines, only where both exist
 if (cmp.values) {
@@ -621,24 +662,29 @@ if (state.hoverDay !== null && state.hoverDay >= 0 && state.hoverDay < n) {
 ctx.strokeStyle = c.muted; ctx.lineWidth = 1; ctx.setLineDash([2, 3]);
 ctx.beginPath(); ctx.moveTo(X(state.hoverDay), plot.y); ctx.lineTo(X(state.hoverDay), plot.y + plot.h); ctx.stroke(); ctx.setLineDash([]);
 }
-PLOTS.pace = { plot, n, cur, cmp: cmp.values, X, fmtVal };
-// table view
+PLOTS.pace = { plot, n, cur, cmp: cmp.values, X, fmtVal, lead };
+// table view (a row a week for the long lead-in axis, a row a day otherwise)
 const rows = [];
-for (let i = 0; i < n; i++) rows.push(`<tr><td>${i + 1}</td><td style="text-align:right;">${cur[i] === null ? '' : escapeHtml(fmtVal(cur[i]))}</td><td style="text-align:right;">${cmp.values && cmp.values[i] !== null ? escapeHtml(fmtVal(cmp.values[i])) : ''}</td></tr>`);
-tableEl.innerHTML = `<table class="limits-table" style="min-width:0;"><thead><tr><th>Day</th><th style="text-align:right;">${escapeHtml(METRIC_LABEL[metric])}</th><th style="text-align:right;">${escapeHtml(COMPARE_LABEL[state.compare])}</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
+for (let i = 0; i < n; i++) {
+if (lead && (i - lead) % 7 !== 0 && i !== n - 1) continue;
+rows.push(`<tr><td>${lead ? escapeHtml(shortDate(dateStrAdd(dayStr(ym, 1), i - lead))) : i + 1}</td><td style="text-align:right;">${cur[i] === null ? '' : escapeHtml(fmtVal(cur[i]))}</td><td style="text-align:right;">${cmp.values && cmp.values[i] !== null ? escapeHtml(fmtVal(cmp.values[i])) : ''}</td></tr>`);
+}
+tableEl.innerHTML = `<table class="limits-table" style="min-width:0;"><thead><tr><th>${lead ? 'Date' : 'Day'}</th><th style="text-align:right;">${escapeHtml(METRIC_LABEL[metric])}</th><th style="text-align:right;">${escapeHtml(COMPARE_LABEL[state.compare])}</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
 }
 
 function paceTip(evt) {
 const canvas = document.getElementById('pace-canvas');
 const tip = document.getElementById('pace-tip');
 if (!canvas || !tip || !PLOTS.pace) return;
-const { plot, n, cur, cmp, fmtVal } = PLOTS.pace;
+const { plot, n, cur, cmp, fmtVal, lead } = PLOTS.pace;
 const r = canvas.getBoundingClientRect();
 const x = evt.clientX - r.left;
 const i = Math.round(((x - plot.x) / plot.w) * (n - 1));
 if (i < 0 || i >= n) { state.hoverDay = null; tip.hidden = true; drawPace(collectStays()); return; }
 state.hoverDay = i;
-const day = new Date(`${dayStr(state.ym, i + 1)}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+const date = dateStrAdd(dayStr(state.ym, 1), i - lead);
+let day = new Date(`${date}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+if (lead && i < lead) day += ` (${Math.ceil((lead - i) / 7)} wk${Math.ceil((lead - i) / 7) === 1 ? '' : 's'} before the month)`;
 tip.innerHTML = `<strong>${escapeHtml(day)}</strong><br>${cur[i] === null ? 'No data yet' : escapeHtml(`${METRIC_LABEL[state.metric]}: ${fmtVal(cur[i])}`)}${cmp && cmp[i] !== null ? `<br>${escapeHtml(COMPARE_LABEL[state.compare])}: ${escapeHtml(fmtVal(cmp[i]))}` : ''}`;
 tip.hidden = false;
 tip.style.left = `${Math.min(x + 12, r.width - 190)}px`;
