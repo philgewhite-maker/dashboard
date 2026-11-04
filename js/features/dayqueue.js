@@ -49,9 +49,14 @@ last = you ? 'you' : 'them';
 return { hasYou, last };
 }
 
+// Moved to Telegram -> Telegram. Moved to WhatsApp, or any stage after it up
+// to Dating (calls, meetings, dating), -> WhatsApp when there is a usable
+// number. Everything earlier (or no number) stays on Tinder.
 function liveChat(c) {
-if (c.stage === 'Moved to WhatsApp') return 'WhatsApp';
 if (c.stage === 'Moved to Telegram') return 'Telegram';
+if (c.stage === 'Moved to WhatsApp') return 'WhatsApp';
+const i = CONN_STAGES.indexOf(c.stage);
+if (i > CONN_STAGES.indexOf('Moved to WhatsApp') && i <= CONN_STAGES.indexOf('Dating') && waDigits(c.phone)) return 'WhatsApp';
 return 'Tinder';
 }
 
