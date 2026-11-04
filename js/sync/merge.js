@@ -28,6 +28,10 @@ const hasIds = (arr) => arr.every((x) => isPlainObject(x) && typeof x.id === 'st
 const SCHEDULED_RUN = /^\.?scheduledRuns\.[^.]+$/;
 const SPEND_COUNTER = /^\.?claudeApiSpend\.months\..+\.(calls|input|output|cost)$/;
 const SPEND_STAMP = /^\.?claudeApiSpend\.lastDeviceUpdateAt$/;
+// "When did I last contact / answer / start the chase timer": two devices
+// both setting these is normal (e.g. a Sent tap on each), and the later date
+// is the right answer, so it resolves itself instead of raising a conflict.
+const CONTACT_DATE = /^\.?connections\[[^\]]+\]\.(sentAt|chaseUntil|lastContact)$/;
 const num = (v) => (typeof v === 'number' && isFinite(v) ? v : 0);
 
 function resolveBenign(base, ours, theirs, path) {
@@ -36,6 +40,9 @@ return { value: String(ours.at || '') > String(theirs.at || '') ? ours : theirs 
 }
 if (SPEND_COUNTER.test(path) && typeof ours === 'number' && typeof theirs === 'number') {
 return { value: Math.max(0, num(base) + (ours - num(base)) + (theirs - num(base))) };
+}
+if (CONTACT_DATE.test(path) && typeof ours === 'string' && typeof theirs === 'string') {
+return { value: ours > theirs ? ours : theirs };
 }
 if (SPEND_STAMP.test(path) && typeof ours === 'string' && typeof theirs === 'string') {
 return { value: ours > theirs ? ours : theirs };

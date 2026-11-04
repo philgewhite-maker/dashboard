@@ -37,7 +37,7 @@ if (!banner) {
 banner = document.createElement('div');
 banner.className = 'backup-offer';
 banner.setAttribute('role', 'alert');
-banner.style.cssText = 'position:fixed;left:12px;right:12px;bottom:12px;z-index:9999;max-width:560px;margin:0 auto;padding:12px 14px;border-radius:12px;background:var(--card,#fff);color:var(--text,#222);border:1px solid var(--border,#ccc);box-shadow:0 6px 24px rgba(0,0,0,.25);font-size:14px;';
+banner.style.cssText = 'position:fixed;left:12px;right:12px;bottom:12px;z-index:9999;max-width:560px;margin:0 auto;padding:12px 14px;border-radius:12px;background:var(--card,#fff);color:var(--ink,#222);border:1px solid var(--line,#ccc);box-shadow:0 6px 24px rgba(0,0,0,.25);font-size:14px;';
 document.body.appendChild(banner);
 }
 banner._snapshot = snapshot;
