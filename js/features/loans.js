@@ -226,6 +226,8 @@ ${mine.map((l) => `<div class="loan-tranche" data-loan-row="${escapeHtml(l.id)}"
 <label>from<input type="date" class="settings-input" data-loan-field="startDate" data-loan-id="${escapeHtml(l.id)}" value="${escapeHtml(l.startDate)}"></label>
 <label>repay<input type="date" class="settings-input" data-loan-field="repayDate" data-loan-id="${escapeHtml(l.id)}" value="${escapeHtml(l.repayDate)}"></label>
 <label>%<input type="number" min="0" step="0.1" class="settings-input" data-loan-field="ratePct" data-loan-id="${escapeHtml(l.id)}" value="${escapeHtml(l.ratePct)}" style="width:64px;"></label>
+<label>lender<select class="settings-input" data-loan-field="ownerKey" data-loan-id="${escapeHtml(l.id)}">${owners().map((k) => `<option value="${escapeHtml(k)}"${k === l.ownerKey ? ' selected' : ''}>${escapeHtml(ownerNameFor(k))}</option>`).join('')}</select></label>
+<input type="text" class="settings-input" data-loan-field="note" data-loan-id="${escapeHtml(l.id)}" value="${escapeHtml(l.note || '')}" placeholder="Note" style="min-width:120px;flex:1 1 120px;">
 <span class="del-x" data-loan-del="${escapeHtml(l.id)}" title="Remove this tranche">&times;</span>
 </div>`).join('')}
 </div>`;
