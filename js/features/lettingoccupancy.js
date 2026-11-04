@@ -443,8 +443,10 @@ const ownersText = room.owners.join(' · ');
 ctx.fillText(ownersText.length > 20 ? `${ownersText.slice(0, 19)}…` : ownersText, 6, mid + 7);
 ctx.font = '11px Inter, sans-serif';
 }
-const color = resolveColor(listingColorVar(room.colour));
 stays.filter((st) => roomKeyFor(st.listingId) === room.key && nightsInMonth(st, ym) > 0).forEach((st) => {
+// Each stay keeps its own listing's colour, so Phil's blue and Zara's pink share one row.
+const own = room.members.find((l) => l.id === st.listingId);
+const color = resolveColor(listingColorVar((own && own.colour) || room.colour));
 // A stay runs from the middle of check-in day to the middle of check-out day, so a same-day turnover shows as a gap.
 const startD = st.checkin < dayStr(ym, 1) ? 0.5 : (Number(st.checkin.slice(8, 10)) + 0.5);
 const endD = st.checkout >= dayStr(addMonths(ym, 1), 1) ? n + 1 : (Number(st.checkout.slice(8, 10)) + 0.5);
@@ -650,7 +652,11 @@ function renderLegend(stays) {
 const el = document.getElementById('occ-legend');
 if (!el) return;
 const rooms = lanes();
-const items = rooms.map((r) => `<span class="letting-chart-legend-item"><span class="dot ${escapeHtml(r.colour || 'slate')}"></span>${escapeHtml(r.label || 'Room')}${r.owners.length ? ` <span class="settings-note" style="margin:0;">(${escapeHtml(r.owners.join(', '))})</span>` : ''}</span>`);
+// One entry per room, then a coloured dot per listing in it (named by its owner).
+const items = rooms.map((r) => {
+const dots = r.members.map((l) => `<span class="dot ${escapeHtml(l.colour || 'slate')}"></span><span class="settings-note" style="margin:0 6px 0 0;">${escapeHtml(ownerNameFor(ownerKeyFor(l)) || l.label || 'Listing')}</span>`).join('');
+return `<span class="letting-chart-legend-item">${escapeHtml(r.label || 'Room')}: ${dots}</span>`;
+});
 Object.values(CHANNELS).forEach((ch) => items.push(`<span class="letting-chart-legend-item"><span class="${ch.striped ? 'occ-key-striped' : 'occ-key-solid'}"></span>${escapeHtml(ch.label)}</span>`));
 items.push('<span class="letting-chart-legend-item"><span class="occ-key-hatch"></span>Cancelled</span>');
 el.innerHTML = items.join('');
