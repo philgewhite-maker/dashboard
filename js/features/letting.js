@@ -670,9 +670,17 @@ const nightRateHtml = nightRate != null
 const isOrphanedAccrual = e.kind === 'accrual' && (!e.reservationId || !reservationIds.has(e.reservationId));
 const showStartDate = e.kind === 'earned' || isOrphanedAccrual;
 const showNights = e.kind === 'accrual' || e.kind === 'earned';
-const showListing = e.kind === 'earned' && !e.listingId;
+// A row the app works out by itself (monthly cap, interest) is read-only; everything else can be corrected.
+const manual = !(e.autoCap || e.autoInterest);
+// Only this owner's own listings: moving a row to someone else's would change who owes what.
+const ownListings = (data.airbnbListings || []).filter((l) => ownerKeyFor(l) === e.ownerKey || l.id === e.listingId);
+const showListing = (e.kind === 'earned' || e.kind === 'cancellation' || isOrphanedAccrual) && ownListings.length > 0;
 const showPlatform = e.kind === 'earned' || e.kind === 'cancellation';
-const hasDetail = showStartDate || showNights || showListing || showPlatform;
+const showStay = e.kind === 'cancellation'; // the dates that place a cancelled booking on the occupancy chart
+const showTotal = e.kind === 'earned';
+const showAmount = e.kind === 'payment' || e.kind === 'adjustment';
+const showNote = manual && (e.kind === 'earned' || e.kind === 'cancellation' || e.kind === 'payment' || e.kind === 'adjustment');
+const hasDetail = showStartDate || showNights || showListing || showPlatform || showStay || showTotal || showAmount || showNote;
 const open = expandedLedgerRows.has(e.id);
 const isIncomeKind = e.kind === 'accrual' || e.kind === 'earned' || e.kind === 'cancellation';
 // The Airbnb mark stands in for the old platform dropdown on the line
@@ -690,10 +698,15 @@ ${mine ? '' : `<td style="text-align:right;font-variant-numeric:tabular-nums;whi
 </tr>${hasDetail ? `<tr class="letting-detail-row"${open ? '' : ' hidden'}><td colspan="${mine ? 4 : 5}"><div class="letting-detail">
 ${showStartDate ? `<label>Check-in<input type="date" class="settings-input" data-letting-start-date="${escapeHtml(e.id)}" value="${escapeHtml(e.startDate || '')}" title="The real check-in date for this stay -- what occupancy and the average night rate are actually based on, kept separate from the payout date. Leave blank and nights get guessed backward from the payout date instead, which is wrong whenever the payout didn't land on the real checkout."></label>` : ''}
 ${showNights ? `<label>Nights<input type="number" min="0" step="1" class="settings-input" data-letting-nights="${escapeHtml(e.id)}" value="${e.nights || ''}" placeholder="Nights" title="Nights this stay covered -- used for the average night rate. Filled in automatically when the reservation was still on file at accrual time; type it in for an older row that's missing it."></label>` : ''}
-${showListing ? `<label>Listing<select class="settings-input" data-letting-listing="${escapeHtml(e.id)}" title="Which listing this stay was for -- a manually-added row has no listing on it yet, so it's left out of the average night-rate chart (which groups by listing) until this is set.">
+${showListing ? `<label>Listing<select class="settings-input" data-letting-listing="${escapeHtml(e.id)}" title="Which of ${escapeHtml(ownerNameFor(e.ownerKey))}'s listings this stay was for -- it decides which room the stay is drawn on, and which listing the average night-rate chart groups it under.">
 <option value="">Listing…</option>
-${(data.airbnbListings || []).map((l) => `<option value="${escapeHtml(l.id)}">${escapeHtml(l.label || l.prefix || 'Listing')}</option>`).join('')}
+${ownListings.map((l) => `<option value="${escapeHtml(l.id)}"${l.id === e.listingId ? ' selected' : ''}>${escapeHtml(l.label || l.prefix || 'Listing')}</option>`).join('')}
 </select></label>` : ''}
+${showStay ? `<label>Check-in<input type="date" class="settings-input" data-letting-checkin="${escapeHtml(e.id)}" value="${escapeHtml(e.checkin || '')}" title="The first night of the booking that was cancelled -- with the check-out, it places the cancelled stay on the occupancy chart."></label>
+<label>Check-out<input type="date" class="settings-input" data-letting-checkout="${escapeHtml(e.id)}" value="${escapeHtml(e.checkout || '')}" title="The day the cancelled booking would have ended (the turnover day)."></label>` : ''}
+${showTotal ? `<label>Booking total £<input type="number" min="0" step="0.01" class="settings-input" data-letting-gross="${escapeHtml(e.id)}" value="${e.gross || ''}" title="What the guest paid for the whole stay. ${escapeHtml(ownerNameFor(e.ownerKey))}'s share of it is worked out again when you change this."></label>` : ''}
+${showAmount ? `<label>Amount £<input type="number" step="0.01" class="settings-input" data-letting-amount="${escapeHtml(e.id)}" value="${e.amount}" title="The figure itself, signed: minus means ${escapeHtml(ownerNameFor(e.ownerKey))} paid you, plus means they owe you more."></label>` : ''}
+${showNote ? `<label>Note<input type="text" class="settings-input" data-letting-note="${escapeHtml(e.id)}" value="${escapeHtml(e.note || '')}" style="min-width:180px;"></label>` : ''}
 ${showPlatform ? `<label>Platform<select data-letting-platform="${escapeHtml(e.id)}" title="Which platform this actually happened through -- the chart above draws Other as a striped fill instead of solid.">
 <option value="airbnb"${e.platform !== 'other' ? ' selected' : ''}>Airbnb</option>
 <option value="other"${e.platform === 'other' ? ' selected' : ''}>Other</option>
@@ -834,6 +847,27 @@ entry.listingId = sel.value || undefined;
 queueSave();
 renderLetting();
 });
+});
+// The other corrections a row's detail panel offers. Each writes one field and re-renders.
+const editEntry = (attr, apply) => el.querySelectorAll(`[data-letting-${attr}]`).forEach((input) => {
+input.addEventListener('change', () => {
+const entry = (data.lettingLedger || []).find((x) => x.id === input.dataset[`letting${attr[0].toUpperCase()}${attr.slice(1)}`]);
+if (!entry) return;
+if (apply(entry, input.value) === false) { renderLetting(); return; }
+queueSave();
+renderLetting();
+});
+});
+editEntry('checkin', (entry, v) => { if (v && entry.checkout && entry.checkout <= v) return false; entry.checkin = v || undefined; });
+editEntry('checkout', (entry, v) => { if (v && entry.checkin && v <= entry.checkin) return false; entry.checkout = v || undefined; });
+editEntry('note', (entry, v) => { if (v.trim()) entry.note = v.trim(); else return false; });
+editEntry('amount', (entry, v) => { const n = Number(v); if (!Number.isFinite(n) || !n) return false; entry.amount = Math.round(n * 100) / 100; });
+editEntry('gross', (entry, v) => {
+const n = Number(v);
+if (!Number.isFinite(n) || n <= 0) return false;
+const listing = (data.airbnbListings || []).find((l) => l.id === entry.listingId) || (data.airbnbListings || []).find((l) => ownerKeyFor(l) === entry.ownerKey);
+entry.gross = Math.round(n * 100) / 100;
+entry.amount = Math.round(splitAmountFor(listing, n, entry.date) * 100) / 100;
 });
 el.querySelectorAll('[data-letting-platform]').forEach((sel) => {
 sel.addEventListener('change', () => {

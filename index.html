@@ -16,7 +16,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v719</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v720</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -72,6 +72,7 @@
 <div class="panel-head">
 <h2><span class="dot rose"></span>Nudges</h2>
 <span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-overview-nudges" title="Guide: how to use this panel">&#128214;</span>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#smart-nudges-settings" title="Smart nudges setting">&#9881;</span>
 <button class="log-btn" id="shuffle-nudge-btn" type="button">Shuffle</button>
 </div>
 <span class="sync-status" id="nudges-ai-status"></span>
@@ -174,6 +175,7 @@
 <div class="panel-head">
 <h2><span class="dot amber"></span>Capture</h2>
 <span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-tasks-capture" title="Guide: how to use this panel">&#128214;</span>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#share-routing-settings" title="Shared-link auto-routing">&#9881;</span>
 <span class="count-badge" id="capture-status"></span>
 </div>
 <div class="capture-row">
@@ -195,6 +197,7 @@
 <div class="panel-head">
 <h2><span class="dot plum"></span>Proposed by Claude</h2>
 <span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-tasks-claude" title="Guide: how to use this panel">&#128214;</span>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#agent-write-settings" title="Agent-write channel (where proposals come from)">&#9881;</span>
 <span class="count-badge" id="agent-inbox-count"></span>
 </div>
 <details class="settings-subgroup panel-about"><summary>About this</summary>
@@ -207,6 +210,7 @@
 <div class="panel-head">
 <h2><span class="dot slate"></span>Pull from Google Tasks</h2>
 <span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-tasks-gtasks" title="Guide: how to use this panel">&#128214;</span>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#google-tasks-settings" title="Google Tasks permissions">&#9881;</span>
 <span class="count-badge" id="gtasks-count"></span>
 </div>
 <div class="sync-row">
@@ -573,6 +577,7 @@
 <div class="panel-head">
 <h2><span class="dot plum"></span>Loyalty balances</h2>
 <span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-finances-loyalty" title="Guide: how to use this panel">&#128214;</span>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#scheduled-syncs-settings" title="Scheduled syncs (the automatic loyalty check)">&#9881;</span>
 <span class="count-badge" id="loyalty-balances-count"></span>
 </div>
 <details class="settings-subgroup panel-about"><summary>About this</summary>
@@ -2938,6 +2943,7 @@ Needs the WHOLE exported folder tree (hundreds of files, not a single JSON) &mda
 <div class="panel-head">
 <h2><span class="dot teal"></span>Travel</h2>
 <span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-travel" title="Guide: how to use this panel">&#128214;</span>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#packing-modules-block" title="Packing modules">&#9881;</span>
 <span class="count-badge" id="travel-count"></span>
 <label id="show-past-trips-label" class="settings-note" style="display:flex;align-items:center;gap:6px;margin:0 0 0 auto;cursor:pointer;">
 <input type="checkbox" id="show-past-trips-toggle"> <span id="show-past-trips-text">Show past trips</span>
@@ -3030,6 +3036,7 @@ Needs the WHOLE exported folder tree (hundreds of files, not a single JSON) &mda
 <div class="panel-head">
 <h2><span class="dot sage"></span>Planner</h2>
 <span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-planner" title="Guide: how to use this panel">&#128214;</span>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#calendar-limits-settings" title="Calendar limits">&#9881;</span>
 </div>
 <details class="settings-subgroup panel-about"><summary>About this</summary>
 <div class="settings-note" style="margin:0 0 10px;">Drag a priority connection or a thing-to-do onto a day below to plan it. Mark each placement Draft or Firm; a trip with known dates gets its own mini planner further down, alongside whatever's already booked on the <span class="inline-goto-link" data-goto-tab="travel">Travel tab</span>.</div>
@@ -3152,7 +3159,7 @@ Allow creating events in Google Calendar (Planner tab)
 </div>
 </details>
 
-<details class="settings-item">
+<details class="settings-item" id="google-tasks-settings">
 <summary><h3>Google Tasks</h3></summary>
 <div class="settings-block">
 <div class="settings-note" style="margin:0 0 8px;">"Pull from Google Tasks" (Tasks tab) always reads. Deleting a Google Task once it's safely captured here — so it doesn't sit duplicated in both places — needs a separate, broader permission, off unless you turn it on here.</div>
@@ -3201,7 +3208,7 @@ Photos added before task attachments existed live only on the device that added 
 </div>
 </details>
 
-<details class="settings-item">
+<details class="settings-item" id="agent-write-settings">
 <summary><h3>Agent-write channel (Claude proposals)</h3></summary>
 <div class="settings-block">
 <div class="settings-note" style="margin:0 0 8px;">A separate, narrowly-scoped channel an unattended Claude Code run writes to (server/agent-write.php) &mdash; never the full sync secret above. This device uses these values only to pick up what's waiting there (your subscription usage, proposed tasks) and merge it into your real data, which then syncs normally. Leave blank to leave this off.</div>
@@ -3280,7 +3287,7 @@ Photos added before task attachments existed live only on the device that added 
 </div>
 </details>
 
-<details class="settings-item">
+<details class="settings-item" id="scheduled-syncs-settings">
 <summary><h3>Scheduled syncs</h3></summary>
 <div class="settings-block">
 <div class="settings-note" style="margin:0 0 10px;">Presses the Sync buttons for you when you open the app, for anything that hasn't run recently. Health data and the Airbnb ICS feeds also refresh while the app is closed, if your browser allows it &mdash; Chrome grants that only to an installed app and picks the timing itself, roughly daily at best. The rest need you signed in to Google: that sign-in issues a one-hour token with no way to renew it unattended, so nothing can refresh Calendar, Mail, Contacts or Google Tasks without a page open.</div>
@@ -3485,7 +3492,7 @@ Same idea as Connections' ratings, a separate list (Taste/Health/Prep by default
 <details class="settings-group" id="settings-group-calendar">
 <summary><span class="dot plum"></span>Calendar &amp; Planner</summary>
 
-<details class="settings-item">
+<details class="settings-item" id="calendar-limits-settings">
 <summary><h3>Calendar limits</h3></summary>
 <div class="settings-block">
 <div id="calendar-limits"></div>
@@ -3622,7 +3629,7 @@ Same idea as Connections' ratings, a separate list (Taste/Health/Prep by default
 <details class="settings-group" id="settings-group-capture">
 <summary><span class="dot red"></span>Capture &amp; Shopping</summary>
 
-<details class="settings-item">
+<details class="settings-item" id="share-routing-settings">
 <summary><h3>Shared-link auto-routing</h3></summary>
 <div class="settings-block">
 <div class="settings-note" style="margin:0 0 10px;">When you share a web link to the Dashboard, a matching rule here opens it straight into the right flow (e.g. a recipe site &rarr; the recipe importer) instead of just filing a task. Seeded with a few recipe sites &mdash; edit freely.</div>
@@ -3698,7 +3705,7 @@ Stored only in this browser's local storage on this device — never synced, nev
 </div>
 </details>
 
-<details class="settings-item">
+<details class="settings-item" id="smart-nudges-settings">
 <summary><h3>Smart nudges</h3></summary>
 <div class="settings-block">
 <label class="settings-note" style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0;">
