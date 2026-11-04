@@ -15,6 +15,13 @@ return [
     // Who gets seeded by bin/setup.php. Emails are where notifications and
     // sign-in links go. The operator approves anything; a host only their rooms.
     'seed' => [
+        // Where each branded site lives. Temporary subdomains on the existing
+        // domain until names are chosen; each points at directbooking/public.
+        'site_urls' => [
+            'rooms' => 'https://rooms.georgewhiteeuropean.co.uk',
+            'katsu' => 'https://katsu.georgewhiteeuropean.co.uk',
+            'stays' => 'https://stays.georgewhiteeuropean.co.uk',
+        ],
         'operator' => ['name' => 'Phil', 'email' => 'you@example.com'],
         'hosts' => [
             'lewis' => ['name' => 'Lewis', 'email' => 'lewis@example.com'],

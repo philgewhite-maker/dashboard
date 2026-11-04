@@ -59,19 +59,64 @@ payment path, double-booking, expiry, publishing and webhooks.
 - **Day 2 items in the plan:** ID checks, whole-flat product, area
   guides, extras page, Revolut Pay, Kakao/Naver Pay, USDT.
 
+## Sites (brands)
+
+One install serves several branded sites from the same rooms, admin and
+database. The host name picks the site. Each site has its own:
+
+- name, colour and headline;
+- room list, in its own order;
+- event pages, or none;
+- noindex switch;
+- wording for any record.
+
+To give a record different wording on one site, add a `sites` block to
+its `data`:
+
+```json
+{"summary": "King bed, ensuite...", "sites": {"katsu": {"summary": "Your own ensuite room, with Katsu for company"}}}
+```
+
+| Site | Temporary address | Lists | Events |
+|---|---|---|---|
+| `rooms`: London Bridge Rooms | rooms.georgewhiteeuropean.co.uk | both rooms + the pair | yes (canonical on `stays`) |
+| `katsu`: Stay with Katsu | katsu.georgewhiteeuropean.co.uk | ensuite room only | none |
+| `stays`: London Event Stays | stays.georgewhiteeuropean.co.uk | everything, later other hosts' rooms too | yes (their home) |
+
+How the details work:
+
+- **Duplicate content.** Event pages appear on more than one site, so
+  only one copy is canonical: `events_home`, here `stays`. The other
+  copies point search engines at it.
+- **noindex while temporary.** All three are noindex
+  (`indexable = 0`), so search engines don't build up ranking on
+  addresses you'll replace. Flip `indexable` to 1 per site in
+  `/admin` > Content > Sites once a site has its real domain.
+- **Moving to a real domain.** Point the new domain's document root at
+  `directbooking/public`, change the site's `base_url`, and add a 301
+  redirect from the old subdomain.
+- **Stripe's checkout page shows the room owner's Stripe name, not the
+  site's brand.** That's because Stripe charges on the owner's own
+  account.
+
 ## Deploy to Krystal (about 20 minutes)
 
 All steps are **in cPanel on Krystal** unless they say otherwise.
 
-1. **Domain.** Add your new domain under Domains, with its *document
-   root* set to `directbooking/public`. That's outside `public_html`, so
-   the code, database and config are never web-reachable.
+1. **Addresses.** Under Domains, create the subdomains `rooms`, `katsu`
+   and `stays` of georgewhiteeuropean.co.uk, each with *document root*
+   `directbooking/public`. All three share one root, outside
+   `public_html`, so the code, database and config are never
+   web-reachable. If the domain's DNS isn't on Krystal, add an A record
+   for each subdomain where the DNS is hosted. Then check SSL/TLS Status
+   shows a certificate for each.
 2. **Upload.** Upload this whole `directbooking/` folder to your home
    directory (File Manager, or `git clone` this branch over SSH, then
    copy the folder).
 3. **Config.** Copy `config/config.example.php` to `config/config.php` and
    fill in:
-   - the domain as `base_url`;
+   - `site.base_url` as `https://rooms.georgewhiteeuropean.co.uk`
+     (used for admin links and the cron URL);
    - a random `secret`;
    - your email, and Lewis's and Zara's, under `seed`.
 
@@ -87,9 +132,10 @@ All steps are **in cPanel on Krystal** unless they say otherwise.
 7. **Review and publish.** Clear every `[CHECK]` marker under `/admin` >
    Content, then press **Publish**. Publish refuses to run while any
    marker remains.
-8. **Check it's live.** View the page source of `https://YOUR-DOMAIN/`.
-   It should contain your site name in the `<title>`, and
-   `https://YOUR-DOMAIN/robots.txt` should list `GPTBot`.
+8. **Check it's live.** `https://katsu.georgewhiteeuropean.co.uk/`
+   should have the title "Stay with Katsu: an ensuite room in London
+   with a resident Maine Coon". `https://stays.georgewhiteeuropean.co.uk/events/`
+   should list the events.
 
 Before taking real money: switch `rates.source` to `ical` (paste each
 listing's Airbnb calendar export URL into its `ical_url`) or to
@@ -164,8 +210,8 @@ git push git@github.com:philgewhite-maker/direct-stays.git directbooking-only:ma
 
 ## Layout
 
-- `public/`: web root. Published pages are written here, and
-  `index.php` handles everything dynamic.
+- `public/`: web root, holding only the assets and `index.php`. Published
+  pages are in `data/published/<site>/`, served by host name.
 - `src/`: one class per file:
   - `Pricing`, `Bookings`, `Cancellation`, `Publisher`, `Admin`
   - providers: `Beds24Rates`, `IcalRates`, `LocalRates`,

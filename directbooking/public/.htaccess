@@ -5,8 +5,10 @@ DirectoryIndex index.html index.php
 RewriteEngine On
 RewriteCond %{HTTPS} off
 RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
-RewriteCond %{REQUEST_FILENAME} -f [OR]
-RewriteCond %{REQUEST_FILENAME}/index.html -f
+# Only real files here (assets) are served directly. Published pages live
+# outside the web root, one folder per site, and index.php serves the right
+# site's page by host name.
+RewriteCond %{REQUEST_FILENAME} -f
 RewriteRule ^ - [L]
 RewriteRule ^ index.php [L,QSA]
 

@@ -5,6 +5,21 @@
 -- `tenant` is on every content row so other hosts can be added later
 -- without a migration; Day 1 only ever uses 'default'.
 
+-- One row per branded website. All share this database, the admin and the
+-- rooms; each has its own address, look, wording and room list. The
+-- request's host name picks the site.
+CREATE TABLE IF NOT EXISTS sites (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  base_url TEXT NOT NULL,           -- https://host (no trailing slash)
+  products TEXT NOT NULL DEFAULT '"*"',  -- JSON: "*" = every published product, or product ids in display order
+  events TEXT NOT NULL DEFAULT 'all' CHECK (events IN ('all','none')),
+  events_home TEXT,                 -- site whose event pages are the canonical copy; NULL = this one
+  indexable INTEGER NOT NULL DEFAULT 0,  -- 0 = noindex everywhere (temporary addresses)
+  sort INTEGER NOT NULL DEFAULT 0,
+  data TEXT NOT NULL DEFAULT '{}'   -- headline, description, accent colours, contact/from email, home layout
+);
+
 CREATE TABLE IF NOT EXISTS hosts (
   id TEXT PRIMARY KEY,
   tenant TEXT NOT NULL DEFAULT 'default',
@@ -168,6 +183,7 @@ CREATE TABLE IF NOT EXISTS bookings (
   id TEXT PRIMARY KEY,
   ref TEXT NOT NULL UNIQUE,
   tenant TEXT NOT NULL DEFAULT 'default',
+  site_id TEXT,                     -- which branded site the guest booked on
   product_id TEXT NOT NULL,
   occurrence_id TEXT,
   arrival TEXT NOT NULL,

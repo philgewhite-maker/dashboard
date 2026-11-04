@@ -8,7 +8,7 @@ declare(strict_types=1);
  */
 final class Admin
 {
-    private const EDITABLE = ['hosts', 'admins', 'places', 'listings', 'products', 'venues', 'points', 'event_series', 'occurrences', 'routes', 'rate_rules'];
+    private const EDITABLE = ['sites', 'hosts', 'admins', 'places', 'listings', 'products', 'venues', 'points', 'event_series', 'occurrences', 'routes', 'rate_rules'];
     private const JSON_COLS = ['data', 'payment_methods', 'listing_ids', 'point_ids', 'legs'];
 
     private ?array $me = null;
@@ -197,7 +197,7 @@ final class Admin
     {
         $r = (new Publisher($this->app))->publish();
         $_SESSION['flash'] = $r['ok']
-            ? ['html' => 'Published ' . count($r['pages']) . ' files. <a href="/" target="_blank" rel="noopener">View the site</a>.']
+            ? ['html' => 'Published ' . count($r['pages']) . ' files. View: ' . implode(' · ', array_map(fn($id, $url) => '<a href="' . Util::h($url) . '/" target="_blank" rel="noopener">' . Util::h($id) . '</a>', array_keys($r['sites']), $r['sites'])) . '.']
             : ['html' => 'Not published. Fix these first (see each record under Content):<ul>' . implode('', array_map(fn($p) => '<li>' . Util::h($p) . '</li>', $r['problems'])) . '</ul>'];
         header('Location: /admin', true, 303);
     }

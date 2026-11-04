@@ -16,6 +16,8 @@ final class App
     private ?PaymentGateway $gateway = null;
     private ?Mailer $mailer = null;
     private ?DashboardInbox $inbox = null;
+    /** The branded site this request is for (picked by host name); null in CLI. */
+    public ?array $site = null;
 
     private function __construct(array $config)
     {
@@ -116,6 +118,31 @@ final class App
     public function mailer(): Mailer
     {
         return $this->mailer ??= new Mailer($this);
+    }
+
+    public function sites(): array
+    {
+        $rows = $this->all('SELECT * FROM sites ORDER BY sort, id');
+        foreach ($rows as &$s) $s['content'] = Util::json($s['data']);
+        return $rows;
+    }
+
+    public function siteById(?string $id): ?array
+    {
+        foreach ($this->sites() as $s) if ($s['id'] === $id) return $s;
+        return null;
+    }
+
+    /** The site whose base_url has this host (and port); else the first site. */
+    public function siteForHost(string $host): ?array
+    {
+        $sites = $this->sites();
+        foreach ($sites as $s) {
+            $u = parse_url($s['base_url']);
+            $h = strtolower(($u['host'] ?? '') . (isset($u['port']) ? ':' . $u['port'] : ''));
+            if ($h === strtolower($host)) return $s;
+        }
+        return $sites[0] ?? null;
     }
 
     public function inbox(): DashboardInbox

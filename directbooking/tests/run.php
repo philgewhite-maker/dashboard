@@ -256,25 +256,50 @@ foreach (['places', 'listings', 'products', 'event_series', 'occurrences', 'poin
 }
 $app->insert('routes', ['id' => 'rt1', 'property_id' => 'flat', 'point_id' => 'pt-o2', 'direction' => 'to', 'context' => 'normal', 'summary' => 'Walk, then Jubilee line', 'minutes' => 33,
     'fare_pence' => 405, 'legs' => Util::enc($legs), 'source' => 'TfL', 'verified_at' => date('Y-m-d'), 'status' => 'published']);
+// Sites carry [CHECK] text too (Katsu's).
+foreach ($app->all('SELECT id, data FROM sites') as $row) $app->update('sites', $row['id'], ['data' => str_replace(['[CHECK] ', '[CHECK]'], '', $row['data'])]);
 $r = $pub->publish();
 ok($r['ok'], 'publishes once reviewed: ' . implode(' | ', $r['problems']));
+eq(array_keys($r['sites']), ['rooms', 'katsu', 'stays'], 'all three sites published');
+$out = fn(string $site, string $f) => Publisher::outDir($app, $site) . $f;
 foreach (['/index.html', '/stay/both-rooms/index.html', '/events/concerts-at-the-o2/index.html', '/events/index.html', '/policies/index.html', '/sitemap.xml', '/robots.txt', '/llms.txt'] as $f) {
-    ok(is_file("$tmp/public$f"), "wrote $f");
+    ok(is_file($out('rooms', $f)), "rooms site wrote $f");
 }
 $all = '';
-foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator("$tmp/public", FilesystemIterator::SKIP_DOTS)) as $f) $all .= file_get_contents((string)$f);
+foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator("$tmp/data/published", FilesystemIterator::SKIP_DOTS)) as $f) $all .= file_get_contents((string)$f);
 ok(!preg_match('/SE1 ?4GT/i', $all), 'postcode never published');
 ok(!str_contains($all, 'only goes in the confirmation email'), 'private arrival info never published');
 ok(str_contains($all, 'Walk to The O2 entrance'), 'route shown on event page');
-$o2 = file_get_contents("$tmp/public/events/concerts-at-the-o2/index.html");
+$o2 = file_get_contents($out('rooms', '/events/concerts-at-the-o2/index.html'));
 preg_match_all('#<script type="application/ld\+json">(.*?)</script>#s', $o2, $m);
 ok($m[1] && array_reduce($m[1], fn($c, $j) => $c && is_array(json_decode($j, true)), true), 'structured data is valid JSON');
-ok(str_contains(file_get_contents("$tmp/public/robots.txt"), 'GPTBot'), 'robots welcomes AI crawlers');
+ok(str_contains($o2, '<link rel="canonical" href="https://stays.georgewhiteeuropean.co.uk/events/concerts-at-the-o2/">'), 'shared event page points to its home site');
+ok(str_contains($o2, 'noindex'), 'temporary sites are noindex');
+eq(trim(file_get_contents($out('rooms', '/robots.txt'))), "User-agent: *\nDisallow: /", 'temporary site robots blocks all');
+
+// Katsu: one room, cat-first wording, no events; other sites keep the plain wording.
+ok(is_file($out('katsu', '/stay/ensuite-king-room/index.html')), 'Katsu site has the ensuite room');
+ok(!is_file($out('katsu', '/stay/double-room/index.html')), 'Katsu site lists only what it is set to');
+ok(!is_file($out('katsu', '/events/index.html')), 'Katsu site has no event pages');
+$k = file_get_contents($out('katsu', '/stay/ensuite-king-room/index.html'));
+ok(str_contains($k, 'Katsu') && str_contains($k, '#b5541c'), 'Katsu wording and colours on its own site');
+ok(!str_contains(file_get_contents($out('rooms', '/stay/ensuite-king-room/index.html')), 'Katsu the Maine Coon'), 'rooms site keeps the plain wording');
+ok(str_contains(file_get_contents($out('katsu', '/index.html')), 'About Katsu'), 'Katsu home leads with the cat');
+ok(!str_contains(file_get_contents($out('stays', '/index.html')), 'walk to'), 'directory site home is not about one flat');
+
+// A site only sells what it lists, and a booking remembers its site.
+$app->site = $app->siteById('katsu');
+ok(!(new Pricing($app))->quote('both-rooms', $d(300), $d(302), 2)['ok'], 'Katsu site cannot quote a room it does not list');
+$r = (new Bookings($app))->request(['product' => 'ensuite-king-room', 'arrival' => $d(300), 'departure' => $d(302), 'adults' => 1, 'currency' => 'GBP', 'method' => 'card', 'guest' => $guest]);
+eq((new Bookings($app))->byRef($r['ref'])['site_id'], 'katsu', 'booking records its site');
+ok(str_starts_with((new Bookings($app))->guestUrl($r['ref']), 'https://katsu.'), 'guest links go back to the site they booked on');
+$app->site = null;
+eq($app->siteForHost('stays.georgewhiteeuropean.co.uk')['id'], 'stays', 'host name picks the site');
 
 // Unpublishing an event removes its page on the next publish.
 $app->update('event_series', 'o2-concerts', ['status' => 'draft']);
 $pub->publish();
-ok(!is_file("$tmp/public/events/concerts-at-the-o2/index.html"), 'unpublished event page removed');
+ok(!is_file($out('rooms', '/events/concerts-at-the-o2/index.html')), 'unpublished event page removed');
 
 echo "\n$count checks, " . ($fails ? "$fails FAILED" : 'all passed') . "\n";
 exit($fails ? 1 : 0);

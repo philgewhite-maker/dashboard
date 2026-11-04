@@ -18,6 +18,30 @@
 return function (array $hosts): array {
     $j = fn($v) => json_encode($v, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     return [
+        // Three brands over the same rooms. Temporary addresses on the existing
+        // domain until names are chosen; noindex until then (indexable = 0).
+        'sites' => [
+            ['id' => 'rooms', 'name' => 'London Bridge Rooms', 'base_url' => 'https://rooms.georgewhiteeuropean.co.uk', 'sort' => 1,
+             'products' => $j(['p-room-1', 'p-room-2', 'p-both']), 'events' => 'all', 'events_home' => 'stays', 'indexable' => 0,
+             'data' => $j(['accent' => '#1f5f8b', 'accent_dark' => '#7fb6dc'])],
+            ['id' => 'katsu', 'name' => 'Stay with Katsu', 'base_url' => 'https://katsu.georgewhiteeuropean.co.uk', 'sort' => 2,
+             'products' => $j(['p-room-1']), 'events' => 'none', 'events_home' => null, 'indexable' => 0,
+             'data' => $j([
+                'accent' => '#b5541c', 'accent_dark' => '#f0a46c',
+                'headline' => 'Stay with Katsu, in an ensuite room by London Bridge',
+                'description' => '[CHECK] Katsu is the flat\'s big, friendly ginger Maine Coon. Book the ensuite king room and he comes with it: cat company on tap, a short walk from London Bridge.',
+                'seo_title' => 'Stay with Katsu: an ensuite room in London with a resident Maine Coon',
+                'seo_description' => 'An ensuite king room near London Bridge in a flat with a friendly resident Maine Coon. Book directly with the host.',
+             ])],
+            ['id' => 'stays', 'name' => 'London Event Stays', 'base_url' => 'https://stays.georgewhiteeuropean.co.uk', 'sort' => 3,
+             'products' => $j('*'), 'events' => 'all', 'events_home' => null, 'indexable' => 0,
+             'data' => $j([
+                'home' => 'directory', 'accent' => '#2f6f4f', 'accent_dark' => '#86c9a3',
+                'headline' => 'Rooms in London for the events you\'re coming for',
+                'description' => 'Rooms booked directly with their hosts, with real travel times to the venues and back late at night.',
+                'seo_title' => 'Where to stay in London for concerts, sport and events | book direct',
+             ])],
+        ],
         'hosts' => [
             ['id' => 'lewis', 'name' => $hosts['lewis']['name'] ?? 'Lewis', 'email' => $hosts['lewis']['email'] ?? 'lewis@example.com', 'from_email' => null, 'stripe_account' => null,
              'payment_methods' => $j(['card' => true, 'alipay' => true, 'wechat_pay' => true, 'pay_by_bank' => true, 'revolut' => false, 'bank_transfer' => []])],
@@ -50,6 +74,10 @@ return function (array $hosts): array {
                 'amenities' => ['[CHECK] Wifi', '[CHECK] Boiling and sparkling water tap', '[CHECK] Wine fridge', '[CHECK] Washing machine', '[CHECK] Residents\' gym'],
                 'house_rules' => ['[CHECK] No smoking', '[CHECK] No parties', '[CHECK] Check-in from 15:00, check-out by 11:00', 'A cat lives here'],
                 'arrival_info' => '[CHECK] Full address, how to get in, and who to call. This only goes in the confirmation email.',
+                'sites' => ['katsu' => [
+                    'highlights_heading' => 'About Katsu',
+                    'highlights' => ['[CHECK] A large ginger Maine Coon, very friendly with guests', '[CHECK] Happy to be fed, fussed and photographed', 'Not for guests with cat allergies', 'He lives here: the room door locks if you want him out'],
+                ]],
             ])],
         ],
         'listings' => [
@@ -63,6 +91,10 @@ return function (array $hosts): array {
                 'weekly_discount_pct' => 0, 'monthly_discount_pct' => 0,
                 'rating' => null, 'reviews' => [],
                 'photos' => [],
+                'sites' => ['katsu' => [
+                    'summary' => 'Your own ensuite king room, with Katsu the Maine Coon for company. [CHECK]',
+                    'description' => '[CHECK] A king room with its own ensuite shower room and a big desk, in a flat shared with Katsu, a large and very friendly ginger Maine Coon.',
+                ]],
              ])],
             ['id' => 'room-2', 'property_id' => 'flat', 'host_id' => 'zara', 'slug' => 'double-room', 'name' => 'Double room with mini fridge',
              'beds24_room_id' => null, 'ical_url' => null, 'airbnb_url' => null, 'max_guests' => 2, 'base_rate' => 100, 'status' => 'published',

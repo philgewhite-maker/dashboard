@@ -3,12 +3,14 @@ declare(strict_types=1);
 
 final class Seeder
 {
-    private const CONTENT = ['hosts', 'places', 'listings', 'products', 'venues', 'points', 'event_series', 'occurrences'];
+    private const CONTENT = ['sites', 'hosts', 'places', 'listings', 'products', 'venues', 'points', 'event_series', 'occurrences'];
 
     public static function run(App $app, bool $wipe = false): void
     {
         $seed = $app->config['seed'] ?? [];
         $content = (require dirname(__DIR__) . '/seed/content.php')($seed['hosts'] ?? []);
+        foreach ($content['sites'] as &$site) $site['base_url'] = $seed['site_urls'][$site['id']] ?? $site['base_url'];
+        unset($site);
         $app->tx(function () use ($app, $content, $seed, $wipe) {
             if ($wipe) foreach (self::CONTENT as $t) $app->exec("DELETE FROM $t");
             foreach (self::CONTENT as $t) foreach ($content[$t] ?? [] as $row) $app->insert($t, $row);

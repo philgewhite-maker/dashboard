@@ -61,6 +61,7 @@ final class Pricing
         $q = ['ok' => false, 'product' => $productSlug, 'arrival' => $arrival, 'departure' => $departure, 'adults' => $adults, 'currency' => $currency, 'method' => $method];
 
         $product = $this->content->product($productSlug);
+        if ($product && $publicOnly && $this->app->site && !Content::siteLists($this->app->site, $product['id'])) $product = null;
         if (!$product || ($publicOnly && $product['status'] !== 'published')) return $q + ['errors' => ['That room or package is not available.']];
         if (!Util::isDate($arrival) || !Util::isDate($departure)) return $q + ['errors' => ['Pick valid dates.']];
         $nights = Util::nightsBetween($arrival, $departure);

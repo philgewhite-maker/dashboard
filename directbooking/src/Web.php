@@ -9,6 +9,7 @@ final class Web
     public function handle(string $method, string $path): void
     {
         try {
+            $this->app->site = $this->app->siteForHost($_SERVER['HTTP_HOST'] ?? '');
             if (str_starts_with($path, '/admin')) { (new Admin($this->app))->handle($method, $path); return; }
             match (true) {
                 $path === '/api/quote' => $this->quote(),
@@ -18,6 +19,7 @@ final class Web
                 $path === '/checkout/return' => $this->checkoutReturn(),
                 $path === '/dev/checkout' => $this->devCheckout($method),
                 $path === '/cron' => $this->cron(),
+                $method === 'GET' || $method === 'HEAD' => $this->published($path),
                 default => $this->notFound(),
             };
         } catch (Throwable $e) {
@@ -93,7 +95,7 @@ final class Web
             $url = $pay ? $bookings->payUrl($b, $pay) : null;
             if ($url) { header('Location: ' . $url, true, 303); return; }
         }
-        $site = $this->app->config['site'];
+        $site = Publisher::siteVars($this->app, $this->app->siteById($b['site_id']) ?? $this->app->site);
         header('Cache-Control: no-store');
         header('X-Robots-Tag: noindex');
         echo View::page('booking', [
@@ -140,6 +142,21 @@ final class Web
         $key = (string)($_GET['key'] ?? '');
         if (!hash_equals(Util::sign('cron', $this->app->config['site']['secret']), $key)) { $this->notFound(); return; }
         self::json((new Cron($this->app))->run((string)($_GET['task'] ?? 'all')));
+    }
+
+    /** Serves this site's published page (pages live outside the web root, one folder per site). */
+    private function published(string $path): void
+    {
+        if (!$this->app->site) { $this->notFound(); return; }
+        $dir = realpath(Publisher::outDir($this->app, $this->app->site['id']));
+        $rel = $path === '/' || !preg_match('/\.[a-z0-9]+$/', $path) ? rtrim($path, '/') . '/index.html' : $path;
+        $file = $dir ? realpath($dir . $rel) : false;
+        if (!$file || !str_starts_with($file, $dir . DIRECTORY_SEPARATOR) || !is_file($file)) { $this->notFound(); return; }
+        $types = ['html' => 'text/html; charset=utf-8', 'xml' => 'application/xml', 'txt' => 'text/plain; charset=utf-8'];
+        header('Content-Type: ' . ($types[pathinfo($file, PATHINFO_EXTENSION)] ?? 'application/octet-stream'));
+        header('Cache-Control: public, max-age=300');
+        if (!$this->app->site['indexable']) header('X-Robots-Tag: noindex');
+        readfile($file);
     }
 
     private function notFound(): void

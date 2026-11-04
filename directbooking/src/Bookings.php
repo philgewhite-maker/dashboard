@@ -50,7 +50,7 @@ final class Bookings
         $ref = Util::ref();
         $card = $method === 'card';
         $b = [
-            'id' => $id, 'ref' => $ref, 'product_id' => $q['product_id'], 'occurrence_id' => $in['occurrence_id'] ?? null,
+            'id' => $id, 'ref' => $ref, 'site_id' => $this->app->site['id'] ?? null, 'product_id' => $q['product_id'], 'occurrence_id' => $in['occurrence_id'] ?? null,
             'arrival' => $q['arrival'], 'departure' => $q['departure'], 'nights' => $q['nights'], 'adults' => $q['adults'],
             'guest_name' => $name, 'guest_email' => $email,
             'guest_phone' => trim((string)($guest['phone'] ?? '')) ?: null, 'guest_country' => trim((string)($guest['country'] ?? '')) ?: null,
@@ -122,7 +122,7 @@ final class Bookings
     public function returned(string $ref): string
     {
         $b = $this->byRef($ref);
-        if (!$b) return $this->app->config['site']['base_url'];
+        if (!$b) return $this->base(null);
         foreach ($this->payments($b['id']) as $pay) if ($pay['stripe_session_id'] && $pay['status'] === 'pending') $this->syncPayment($pay);
         $b = $this->booking($b['id']);
         return $b['status'] === 'checkout' ? $this->nextCheckoutUrl($b) : $this->guestUrl($ref);
@@ -185,7 +185,7 @@ final class Bookings
         $this->close($id, 'declined', $by, $reason);
         $this->mail($b['guest_email'], "Your request {$b['ref']} could not be accepted",
             "Hello {$b['guest_name']},\n\nSorry, we can't accept your request for " . Util::fmtDate($b['arrival']) . ' to ' . Util::fmtDate($b['departure']) . ".\n" .
-            ($reason ? "\n$reason\n" : '') . "\nAny card authorisation has been released and you have not been charged.\n", $this->hostFrom($id));
+            ($reason ? "\n$reason\n" : '') . "\nAny card authorisation has been released and you have not been charged.\n", $this->hostFrom($id), $b);
         return "Declined {$b['ref']}.";
     }
 
@@ -221,7 +221,7 @@ final class Bookings
         $manualNote = array_filter($paid, fn($p) => !$p['stripe_pi_id']) && $refund > 0 ? "\nPart of the refund was paid by bank, so it will be returned to you the same way.\n" : '';
         $this->mail($b['guest_email'], "Booking {$b['ref']} cancelled",
             "Hello {$b['guest_name']},\n\nYour booking for " . Util::fmtDate($b['arrival']) . " has been cancelled.\nRefund under the " .
-            Cancellation::POLICIES[$b['policy']]['name'] . ' policy: ' . Util::money($refund, $b['currency']) . ".\n$manualNote", $this->hostFrom($id));
+            Cancellation::POLICIES[$b['policy']]['name'] . ' policy: ' . Util::money($refund, $b['currency']) . ".\n$manualNote", $this->hostFrom($id), $b);
         return "Cancelled {$b['ref']}; refund " . Util::money($refund, $b['currency']) . '.';
     }
 
@@ -239,11 +239,11 @@ final class Bookings
         foreach ($this->app->all("SELECT * FROM bookings WHERE status = 'requested' AND approve_by < ?", [$now]) as $b) {
             $this->close($b['id'], 'expired', 'system', 'Not answered in time.'); $n++;
             $this->mail($b['guest_email'], "Your request {$b['ref']} has lapsed",
-                "Hello {$b['guest_name']},\n\nSorry: your request wasn't answered in time, so it has lapsed and any card authorisation has been released. You have not been charged.\n", $this->hostFrom($b['id']));
+                "Hello {$b['guest_name']},\n\nSorry: your request wasn't answered in time, so it has lapsed and any card authorisation has been released. You have not been charged.\n", $this->hostFrom($b['id']), $b);
         }
         foreach ($this->app->all("SELECT * FROM bookings WHERE status = 'approved' AND pay_by < ?", [$now]) as $b) {
             $this->close($b['id'], 'expired', 'system', 'Payment not received in time.'); $n++;
-            $this->mail($b['guest_email'], "Booking {$b['ref']} released", "Hello {$b['guest_name']},\n\nWe didn't receive payment in time, so the dates have been released.\n", $this->hostFrom($b['id']));
+            $this->mail($b['guest_email'], "Booking {$b['ref']} released", "Hello {$b['guest_name']},\n\nWe didn't receive payment in time, so the dates have been released.\n", $this->hostFrom($b['id']), $b);
         }
         return $n;
     }
@@ -305,7 +305,7 @@ final class Bookings
             "Hello {$b['guest_name']},\n\nYour stay is confirmed.\n\nBooking: {$b['ref']}\nCheck-in: " . Util::fmtDate($b['arrival']) . "\nCheck-out: " . Util::fmtDate($b['departure']) .
             "\nGuests: {$b['adults']}\n" . $schedule . "\nCancellation: " . Cancellation::POLICIES[$b['policy']]['text'] . "\n" .
             ($arrival ? "\nArriving:\n" . implode("\n\n", array_unique($arrival)) . "\n" : '') .
-            "\nYour booking page: " . $this->guestUrl($b['ref']) . "\n", $this->hostFrom($id));
+            "\nYour booking page: " . $this->guestUrl($b['ref']) . "\n", $this->hostFrom($id), $b);
         if (!$this->app->rates()->pushesToAirbnb()) {
             $airbnb = array_filter(array_map(fn($l) => $l['airbnb_url'] ? "{$l['name']}: {$l['airbnb_url']}" : null, $product['listings']));
             $this->app->inbox()->propose("block:$id", 'Block ' . date('j M', strtotime($b['arrival'])) . '–' . date('j M', strtotime($b['departure'])) . " on Airbnb for {$product['name']} ({$b['ref']})",
@@ -346,7 +346,7 @@ final class Bookings
             "Hello {$b['guest_name']},\n\nThanks: your request for {$q['product_name']}, " . Util::fmtDate($b['arrival']) . ' to ' . Util::fmtDate($b['departure']) .
             ", is with the host. You'll hear back by " . date('D j M, H:i', strtotime($b['approve_by'])) . " (UK time).\n\n" .
             ($b['method'] === 'card' ? "Your card has been authorised, not charged. It is only charged if the host accepts.\n" : "Nothing has been charged. If the host accepts, we'll email you how to pay.\n") .
-            "\nTotal: " . Util::money((int)$b['total_minor'], $b['currency']) . "\nYour booking page: " . $this->guestUrl($b['ref']) . "\n", $this->hostFrom($b['id']));
+            "\nTotal: " . Util::money((int)$b['total_minor'], $b['currency']) . "\nYour booking page: " . $this->guestUrl($b['ref']) . "\n", $this->hostFrom($b['id']), $b);
         foreach ($this->hostsFor($b['id']) as $h) {
             $this->mail($h['email'], "Approve or decline {$b['ref']} by " . date('D H:i', strtotime($b['approve_by'])),
                 "{$b['guest_name']} ({$b['guest_email']}" . ($b['guest_country'] ? ", {$b['guest_country']}" : '') . ") asks for " . $q['product_name'] . ":\n" .
@@ -385,7 +385,7 @@ final class Bookings
         $deadline = $b['status'] === 'approved' && $b['pay_by'] ? "\nPlease pay by " . date('D j M, H:i', strtotime($b['pay_by'])) . " (UK time) or the dates will be released.\n" : '';
         $this->mail($b['guest_email'], "Payment for {$b['ref']}",
             "Hello {$b['guest_name']},\n\n" . ($b['status'] === 'approved' ? "Good news: your request is accepted.\n\n" : '') .
-            implode("\n\n", $lines) . "\n$deadline", $this->hostFrom($b['id']));
+            implode("\n\n", $lines) . "\n$deadline", $this->hostFrom($b['id']), $b);
     }
 
     public function manualInstructions(array $b, array $host, array $pay): string
@@ -403,7 +403,7 @@ final class Bookings
     private function checkoutParams(array $b, array $pay, array $part, int $minutes): array
     {
         $l = $this->content->listing($part['listing_id']);
-        $base = rtrim($this->app->config['site']['base_url'], '/');
+        $base = $this->base($b);
         $k = Util::sign($b['ref'], $this->app->config['site']['secret']);
         return [
             'amount_minor' => (int)$pay['amount_minor'], 'currency' => $pay['currency'], 'email' => $b['guest_email'],
@@ -427,10 +427,20 @@ final class Bookings
         return date('Y-m-d H:i:s', time() + (int)round($h * 3600));
     }
 
-    private function mail(string $to, string $subject, string $body, ?string $from = null): void
+    /** Guest emails ($b given) are signed and sent as the site the guest booked on. */
+    private function mail(string $to, string $subject, string $body, ?string $from = null, ?array $b = null): void
     {
-        $sig = "\n-- \n{$this->app->config['site']['name']}\n{$this->app->config['site']['base_url']}\n";
-        $this->app->mailer()->send($to, $subject, $body . $sig, $from);
+        $site = $b ? $this->app->siteById($b['site_id']) : null;
+        $name = $site['name'] ?? $this->app->config['site']['name'];
+        $from ??= $site['content']['from_email'] ?? null;
+        $this->app->mailer()->send($to, $subject, $body . "\n-- \n$name\n" . $this->base($b) . "\n", $from, $name);
+    }
+
+    /** The address of the site a booking was made on (else the main one). */
+    private function base(?array $b): string
+    {
+        $site = $b ? $this->app->siteById($b['site_id']) : null;
+        return rtrim($site['base_url'] ?? $this->app->site['base_url'] ?? $this->app->config['site']['base_url'], '/');
     }
 
     private function hostFrom(string $bookingId): ?string
@@ -446,7 +456,7 @@ final class Bookings
 
     public function guestUrl(string $ref): string
     {
-        return rtrim($this->app->config['site']['base_url'], '/') . "/booking?ref=$ref&k=" . Util::sign($ref, $this->app->config['site']['secret']);
+        return $this->base($this->byRef($ref)) . "/booking?ref=$ref&k=" . Util::sign($ref, $this->app->config['site']['secret']);
     }
 
     public function adminUrl(array $b): string

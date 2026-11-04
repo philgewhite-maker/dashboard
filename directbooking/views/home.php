@@ -1,12 +1,14 @@
 <?php
-/** @var array $property @var array $products @var array $events */
+/** @var array $property @var array $products @var array $events @var array $sitecontent */
 $h = 'Util::h';
 $c = $property['content'];
+$sc = $sitecontent ?? [];
+$directory = ($sc['home'] ?? 'property') === 'directory';  // a multi-host site: rooms and events, not one flat
 ?>
 <section class="hero">
-  <h1><?= $h(Util::t($c['headline'] ?? $property['name'])) ?></h1>
-  <p class="lead"><?= $h(Util::t($c['description'] ?? '')) ?></p>
-  <?php if (!empty($c['walk_times'])): ?>
+  <h1><?= $h(Util::t($sc['headline'] ?? $c['headline'] ?? $property['name'])) ?></h1>
+  <p class="lead"><?= $h(Util::t($sc['description'] ?? $c['description'] ?? '')) ?></p>
+  <?php if (!$directory && !empty($c['walk_times'])): ?>
   <ul class="facts"><?php foreach ($c['walk_times'] as $w): ?><li><strong><?= (int)$w['minutes'] ?> min</strong> walk to <?= $h(Util::t($w['to'])) ?></li><?php endforeach; ?></ul>
   <?php endif; ?>
 </section>
@@ -16,9 +18,9 @@ $c = $property['content'];
   <?= View::render('_rooms', ['products' => $products]) ?>
 </section>
 
-<?php if (!empty($c['highlights'])): ?>
+<?php if (!$directory && !empty($c['highlights'])): ?>
 <section>
-  <h2>The flat</h2>
+  <h2><?= $h(Util::t($c['highlights_heading'] ?? 'The flat')) ?></h2>
   <ul class="ticks"><?php foreach ($c['highlights'] as $x): ?><li><?= $h(Util::t($x)) ?></li><?php endforeach; ?></ul>
 </section>
 <?php endif; ?>

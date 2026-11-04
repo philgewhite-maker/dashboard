@@ -9,7 +9,24 @@ declare(strict_types=1);
  */
 final class Content
 {
-    public function __construct(private App $app) {}
+    private ?string $siteId;
+
+    /** $site: render for this branded site (its `sites.<id>` overlays apply); default = the request's site. */
+    public function __construct(private App $app, ?array $site = null)
+    {
+        $this->siteId = $site['id'] ?? $app->site['id'] ?? null;
+    }
+
+    /**
+     * A record's data may carry per-site wording: {"summary": "...",
+     * "sites": {"katsu": {"summary": "..."}}}. For that site, its block
+     * wins over the shared text.
+     */
+    public function overlay(array $c): array
+    {
+        $o = $this->siteId ? ($c['sites'][$this->siteId] ?? null) : null;
+        return is_array($o) ? Util::inherit($c, $o) : $c;
+    }
 
     public function placeChain(string $placeId): array
     {
@@ -35,7 +52,7 @@ final class Content
     {
         $l = $this->app->one('SELECT * FROM listings WHERE id = ? OR slug = ?', [$idOrSlug, $idOrSlug]);
         if (!$l) return null;
-        $l['content'] = Util::inherit($this->placeData($l['property_id']), Util::json($l['data']));
+        $l['content'] = $this->overlay(Util::inherit($this->placeData($l['property_id']), Util::json($l['data'])));
         $l['host'] = $this->host($l['host_id']);
         $l['property'] = $this->app->one('SELECT * FROM places WHERE id = ?', [$l['property_id']]);
         return $l;
@@ -52,7 +69,7 @@ final class Content
     {
         $p = $this->app->one('SELECT * FROM products WHERE id = ? OR slug = ?', [$idOrSlug, $idOrSlug]);
         if (!$p) return null;
-        $p['content'] = Util::json($p['data']);
+        $p['content'] = $this->overlay(Util::json($p['data']));
         $p['listings'] = [];
         foreach (Util::json($p['listing_ids']) as $lid) {
             $l = $this->listing($lid);
@@ -62,10 +79,20 @@ final class Content
         return $p;
     }
 
-    public function products(bool $publishedOnly = true): array
+    /** Published products; for a site, only the ones it lists, in its order. */
+    public function products(bool $publishedOnly = true, ?array $site = null): array
     {
         $rows = $this->app->all('SELECT id FROM products' . ($publishedOnly ? " WHERE status = 'published'" : '') . ' ORDER BY name');
-        return array_map(fn($r) => $this->product($r['id']), $rows);
+        $ids = array_column($rows, 'id');
+        $want = $site ? json_decode($site['products'], true) : '*';
+        if (is_array($want)) $ids = array_values(array_filter($want, fn($id) => in_array($id, $ids, true)));
+        return array_map(fn($id) => $this->product($id), $ids);
+    }
+
+    public static function siteLists(array $site, string $productId): bool
+    {
+        $want = json_decode($site['products'], true);
+        return !is_array($want) || in_array($productId, $want, true);
     }
 
     public function venue(?string $id): ?array
@@ -82,7 +109,7 @@ final class Content
         $s = $this->app->one('SELECT * FROM event_series WHERE id = ? OR slug = ?', [$idOrSlug, $idOrSlug]);
         if (!$s) return null;
         $s['venue'] = $this->venue($s['venue_id']);
-        $s['content'] = Util::inherit($s['venue']['content'] ?? [], Util::json($s['data']));
+        $s['content'] = $this->overlay(Util::inherit($s['venue']['content'] ?? [], Util::json($s['data'])));
         $pointIds = Util::json($s['point_ids']);
         $s['points'] = $pointIds
             ? array_values(array_filter(array_map(fn($id) => $this->app->one('SELECT * FROM points WHERE id = ?', [$id]), $pointIds)))
@@ -103,7 +130,7 @@ final class Content
 
     public function occurrence(array $o, array $series): array
     {
-        $o['content'] = Util::inherit($series['content'], Util::json($o['data']));
+        $o['content'] = $this->overlay(Util::inherit($series['content'], Util::json($o['data'])));
         $o['label'] = $o['name'] ?: ($series['name'] . ($o['start_date'] ? ' ' . substr($o['start_date'], 0, 4) : ''));
         return $o;
     }

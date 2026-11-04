@@ -12,31 +12,73 @@ final class Publisher
 {
     private Content $content;
     private array $written = [];
+    private string $base = '';
+    private string $outDir = '';
+    private array $siteRow = [];
 
-    public function __construct(private App $app)
+    public function __construct(private App $app) {}
+
+    /**
+     * Publishes every site (or one). Pages go to data/published/<site id>/,
+     * served by index.php according to the host name asked for.
+     * @return array{ok:bool, problems:array, pages:array, sites:array}
+     */
+    public function publish(?string $onlySite = null): array
     {
-        $this->content = new Content($app);
+        $problems = $this->check();
+        if ($problems) return ['ok' => false, 'problems' => $problems, 'pages' => [], 'sites' => []];
+        $pages = $sites = [];
+        foreach ($this->app->sites() as $site) {
+            if ($onlySite && $site['id'] !== $onlySite) continue;
+            foreach ($this->publishSite($site) as $p) $pages[] = $site['id'] . $p;
+            $sites[$site['id']] = $site['base_url'];
+        }
+        if (!$sites) $problems[] = 'No sites set up: run bin/setup.php.';
+        $this->app->log('site', null, 'Published ' . count($pages) . ' files across ' . count($sites) . ' site(s)');
+        return ['ok' => !$problems, 'problems' => $problems, 'pages' => $pages, 'sites' => $sites];
     }
 
-    /** @return array{ok:bool, problems:array, pages:array} */
-    public function publish(): array
+    /** What the page templates know about a site (falls back to config site.* when there are no sites yet). */
+    public static function siteVars(App $app, ?array $row): array
+    {
+        $cfg = $app->config['site'];
+        $sc = $row['content'] ?? [];
+        return [
+            'id' => $row['id'] ?? null, 'name' => $row['name'] ?? $cfg['name'], 'base_url' => rtrim($row['base_url'] ?? $cfg['base_url'], '/'),
+            'lang' => $cfg['lang'], 'operator_email' => $sc['contact_email'] ?? $cfg['operator_email'],
+            'accent' => $sc['accent'] ?? null, 'accent_dark' => $sc['accent_dark'] ?? null,
+            'indexable' => (bool)($row['indexable'] ?? false), 'show_events' => ($row['events'] ?? 'all') === 'all',
+        ];
+    }
+
+    public static function outDir(App $app, string $siteId): string
+    {
+        return $app->config['paths']['data'] . '/published/' . $siteId;
+    }
+
+    private function publishSite(array $siteRow): array
     {
         $this->written = [];
-        $problems = $this->check();
-        if ($problems) return ['ok' => false, 'problems' => $problems, 'pages' => []];
-
-        $site = $this->app->config['site'];
-        $products = $this->content->products();
+        $this->siteRow = $siteRow;
+        $this->content = new Content($this->app, $siteRow);
+        $this->base = rtrim($siteRow['base_url'], '/');
+        $this->outDir = self::outDir($this->app, $siteRow['id']);
+        $sc = $siteRow['content'];
+        $site = self::siteVars($this->app, $siteRow);
+        $products = $this->content->products(true, $siteRow);
         $currencies = $this->app->config['booking']['currencies'];
-        $events = $this->events();
+        $events = $siteRow['events'] === 'all' ? $this->events() : [];
         $property = $this->mainProperty($products);
-        $base = rtrim($site['base_url'], '/');
         $business = $this->businessLd($site, $property);
+        // Event pages are shared content: only their home site is canonical, so
+        // the same text on several sites isn't treated as duplicates.
+        $home = $siteRow['events_home'] ? $this->app->siteById($siteRow['events_home']) : null;
+        $eventBase = $home ? rtrim($home['base_url'], '/') : $this->base;
 
         $this->write('/', View::page('home', [
-            'site' => $site, 'path' => '/', 'property' => $property, 'products' => $products, 'events' => $events,
-            'title' => Util::t($property['content']['seo_title'] ?? $site['name']),
-            'description' => Util::t($property['content']['seo_description'] ?? $property['content']['description'] ?? ''),
+            'site' => $site, 'path' => '/', 'property' => $property, 'products' => $products, 'events' => $events, 'sitecontent' => $sc,
+            'title' => Util::t($sc['seo_title'] ?? $property['content']['seo_title'] ?? $site['name']),
+            'description' => Util::t($sc['seo_description'] ?? $sc['description'] ?? $property['content']['seo_description'] ?? $property['content']['description'] ?? ''),
             'jsonld' => [$business],
         ]));
 
@@ -47,7 +89,7 @@ final class Publisher
                 'title' => "{$p['name']} | {$site['name']}",
                 'description' => Util::t($p['content']['summary'] ?? $p['listings'][0]['content']['summary'] ?? ''),
                 'og_image' => isset($p['listings'][0]['content']['photos'][0]) ? $this->abs($p['listings'][0]['content']['photos'][0]['src']) : null,
-                'jsonld' => [$this->roomLd($p, $business, $base . $path), $this->crumbs([[$site['name'], '/'], [$p['name'], $path]])],
+                'jsonld' => [$this->roomLd($p, $business, $this->base . $path), $this->crumbs([[$site['name'], '/'], [$p['name'], $path]])],
             ]));
         }
 
@@ -56,32 +98,32 @@ final class Publisher
             $occ = $e['occ'];
             $path = "/events/{$s['slug']}/";
             $c = $occ['content'] ?? $s['content'];
-            $propertyId = $property['id'];
             $this->write($path, View::page('event', [
-                'site' => $site, 'path' => $path, 'series' => $s, 'occ' => $occ, 'products' => $products, 'currencies' => $currencies, 'widget' => true,
-                'routeGroups' => $this->content->routes($propertyId, $s['points']),
+                'site' => $site, 'path' => $path, 'canonical' => $eventBase . $path, 'series' => $s, 'occ' => $occ, 'products' => $products, 'currencies' => $currencies, 'widget' => true,
+                'routeGroups' => $this->content->routes($property['id'], $s['points']),
                 'title' => Util::t($c['seo_title'] ?? "Where to stay for {$s['name']} | {$site['name']}"),
                 'description' => Util::t($c['seo_description'] ?? $c['summary'] ?? ''),
-                'jsonld' => array_values(array_filter([$this->eventLd($s, $occ, $base . $path), $this->crumbs([[$site['name'], '/'], ['Events', '/events/'], [$s['name'], $path]])])),
+                'jsonld' => array_values(array_filter([$this->eventLd($s, $occ, $eventBase . $path), $this->crumbs([[$site['name'], '/'], ['Events', '/events/'], [$s['name'], $path]])])),
             ]));
         }
 
-        $this->write('/events/', View::page('events', [
-            'site' => $site, 'path' => '/events/', 'events' => $events,
-            'title' => "Events near London Bridge | {$site['name']}", 'description' => 'Dates, transport from London Bridge and rooms for the events our guests come to London for.',
-        ]));
+        if ($events) {
+            $this->write('/events/', View::page('events', [
+                'site' => $site, 'path' => '/events/', 'canonical' => $eventBase . '/events/', 'events' => $events,
+                'title' => "Events near London Bridge | {$site['name']}", 'description' => 'Dates, transport from London Bridge and rooms for the events our guests come to London for.',
+            ]));
+        }
         $methods = $products ? (new Pricing($this->app))->methodsFor($products[0], 'GBP') : [];
         $this->write('/policies/', View::page('policies', [
             'site' => $site, 'path' => '/policies/', 'methods' => $methods,
             'title' => "Booking, cancellation and privacy | {$site['name']}", 'description' => 'How direct booking works, cancellation policies, ways to pay and privacy.',
         ]));
 
-        $this->writeRaw('/sitemap.xml', $this->sitemap($base));
-        $this->writeRaw('/robots.txt', $this->robots($base));
-        $this->writeRaw('/llms.txt', $this->llms($site, $property, $products, $events, $base));
+        $this->writeRaw('/sitemap.xml', $this->sitemap($this->base, $eventBase));
+        $this->writeRaw('/robots.txt', $this->robots($this->base, $site['indexable']));
+        $this->writeRaw('/llms.txt', $this->llms($site, $property, $products, $events, $this->base));
         $this->sweep();
-        $this->app->log('site', null, 'Published ' . count($this->written) . ' files');
-        return ['ok' => true, 'problems' => [], 'pages' => array_keys($this->written)];
+        return array_keys($this->written);
     }
 
     /** Every published record whose text still holds a [CHECK] marker. */
@@ -94,6 +136,7 @@ final class Publisher
                 $out[] = "$what: " . implode(' | ', array_map(fn($s) => stripslashes($s), array_slice($m[0], 0, 3)));
             }
         };
+        $this->content = new Content($this->app);
         $products = $this->content->products();
         $placeIds = [];
         foreach ($products as $p) {
@@ -111,6 +154,7 @@ final class Publisher
             foreach ($e['series']['points'] as $pt) $scan("Point {$pt['name']}", $pt['data']);
         }
         foreach ($this->app->all("SELECT * FROM routes WHERE status = 'published'") as $r) $scan("Route {$r['id']}", $r['summary'] . $r['legs']);
+        foreach ($this->app->sites() as $site) $scan("Site {$site['name']}", $site['data']);
         if (!$products) $out[] = 'No published products: publish at least one room first.';
         return $out;
     }
@@ -131,7 +175,7 @@ final class Publisher
         $pid = $products[0]['listings'][0]['property_id'] ?? null;
         $row = $pid ? $this->app->one('SELECT * FROM places WHERE id = ?', [$pid]) : null;
         if (!$row) return ['id' => '', 'name' => $this->app->config['site']['name'], 'content' => []];
-        $row['content'] = $this->content->placeData($pid);
+        $row['content'] = $this->content->overlay($this->content->placeData($pid));
         return $row;
     }
 
@@ -177,22 +221,24 @@ final class Publisher
 
     private function crumbs(array $items): array
     {
-        $base = rtrim($this->app->config['site']['base_url'], '/');
+        $base = $this->base;
         return ['@context' => 'https://schema.org', '@type' => 'BreadcrumbList', 'itemListElement' => array_map(
             fn($i, $n) => ['@type' => 'ListItem', 'position' => $n + 1, 'name' => $i[0], 'item' => $base . $i[1]], $items, array_keys($items))];
     }
 
     // ---- files ------------------------------------------------------------
 
-    private function sitemap(string $base): string
+    private function sitemap(string $base, string $eventBase): string
     {
         $x = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n";
-        foreach (array_keys($this->written) as $p) if (str_ends_with($p, '/')) $x .= '  <url><loc>' . Util::h($base . $p) . '</loc><lastmod>' . date('Y-m-d') . "</lastmod></url>\n";
+        foreach (array_keys($this->written) as $p) if (str_ends_with($p, '/') && !($eventBase !== $base && str_starts_with($p, '/events/'))) $x .= '  <url><loc>' . Util::h($base . $p) . '</loc><lastmod>' . date('Y-m-d') . "</lastmod></url>\n";
         return $x . "</urlset>\n";
     }
 
-    private function robots(string $base): string
+    private function robots(string $base, bool $indexable = true): string
     {
+        // A temporary address stays out of search until the real domain is chosen.
+        if (!$indexable) return "User-agent: *\nDisallow: /\n";
         // AI crawlers are welcome: being cited by AI assistants is one of the site's goals.
         $private = "Disallow: /admin\nDisallow: /api/\nDisallow: /booking\nDisallow: /checkout/\nDisallow: /dev/\n";
         return "User-agent: *\n$private\nUser-agent: GPTBot\nUser-agent: OAI-SearchBot\nUser-agent: ClaudeBot\nUser-agent: Claude-SearchBot\nUser-agent: PerplexityBot\nUser-agent: Google-Extended\n$private\nSitemap: $base/sitemap.xml\n";
@@ -210,7 +256,7 @@ final class Publisher
 
     private function abs(string $src): string
     {
-        return preg_match('#^https?://#', $src) ? $src : rtrim($this->app->config['site']['base_url'], '/') . '/' . ltrim($src, '/');
+        return preg_match('#^https?://#', $src) ? $src : $this->base . '/' . ltrim($src, '/');
     }
 
     private function write(string $path, string $html): void
@@ -221,7 +267,7 @@ final class Publisher
 
     private function writeRaw(string $rel, string $body): void
     {
-        $file = $this->app->config['paths']['public'] . $rel;
+        $file = $this->outDir . $rel;
         if (!is_dir(dirname($file))) mkdir(dirname($file), 0755, true);
         file_put_contents($file . '.tmp', $body);
         rename($file . '.tmp', $file);
@@ -231,13 +277,13 @@ final class Publisher
     /** Removes pages from a previous publish that no longer exist (an unpublished event, say). */
     private function sweep(): void
     {
-        $manifest = $this->app->config['paths']['data'] . '/published.json';
+        $manifest = $this->outDir . '.json';
         $old = is_file($manifest) ? Util::json(file_get_contents($manifest)) : [];
         $now = [];
         foreach (array_keys($this->written) as $p) $now[] = str_ends_with($p, '/') ? rtrim($p, '/') . '/index.html' : $p;
         $now = array_values(array_unique($now));
         foreach (array_diff($old, $now) as $gone) {
-            $f = $this->app->config['paths']['public'] . $gone;
+            $f = $this->outDir . $gone;
             if (is_file($f)) unlink($f);
         }
         file_put_contents($manifest, Util::enc($now));
