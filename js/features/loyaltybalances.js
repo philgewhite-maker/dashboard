@@ -845,16 +845,30 @@ function latestBalancesFor(program) {
 const rows = data.loyaltyBalances.filter((b) => b.programId === program.id);
 const byLabel = new Map();
 rows.forEach((r) => {
-const prev = byLabel.get(r.label);
-if (!prev || r.date > prev.date) byLabel.set(r.label, r);
+// A reading linked to a voucher is one particular voucher (its number is the reference), so two
+// live eVouchers each keep a row; a running balance is just the latest reading under its label.
+const key = r.voucherId && r.reference ? `${r.label}|${r.reference}` : r.label;
+const prev = byLabel.get(key);
+if (!prev || r.date > prev.date) byLabel.set(key, r);
 });
-return [...byLabel.values()].sort((a, b) => a.label.localeCompare(b.label));
+return [...byLabel.values()].sort((a, b) => a.label.localeCompare(b.label) || (b.date || '').localeCompare(a.date || ''));
+}
+
+// 'used' / 'expired' / '' -- whether a reading is history rather than something you still hold.
+function readingPastWhy(r) {
+const today = todayStr();
+if (r.balance == null && /\bused\b/i.test(r.label)) return 'used';
+const v = r.voucherId ? data.vouchers.find((x) => x.id === r.voucherId) : null;
+if (v && v.used) return 'used';
+if (v && v.expiry && v.expiry < today) return 'expired';
+if (!v && r.expiryDate && r.expiryDate < today && labelKindFor(r.programId, r.label) === 'voucher') return 'expired';
+return '';
 }
 
 function travelStripPrograms() {
 return data.loyaltyPrograms
 .filter((p) => p.showOnTravel)
-.map((p) => ({ program: p, readings: latestBalancesFor(p) }))
+.map((p) => ({ program: p, readings: latestBalancesFor(p).filter((r) => !readingPastWhy(r)) }))
 .filter((x) => x.readings.length);
 }
 
@@ -941,6 +955,7 @@ queueSave();
 // manualImportMessage, just keyed per program since several cards can
 // each have their own independent status.
 const lastCheckMessages = new Map();
+const loyaltyPastOpen = new Set(); // programs whose "Used or expired" fold is open
 
 function methodBadgeHtml(program) {
 // What the NEXT scan will do, not what the last one happened to: a program
@@ -959,14 +974,21 @@ return '';
 }
 
 function programCardHtml(program) {
-const readings = latestBalancesFor(program);
+const allReadings = latestBalancesFor(program);
+// A voucher that has been used (or has run out) is history, not a balance: it moves
+// out of the main list into a folded "Used or expired" group, and an "eVoucher used"
+// notification, which carries no value at all, never needs a row of its own.
+const pastWhy = readingPastWhy;
+const readings = allReadings.filter((r) => !pastWhy(r));
+const pastReadings = allReadings.filter((r) => pastWhy(r));
 // Same row anatomy as .voucher-row (vouchers.js) -- an id/meta column,
 // a wide middle column, a right-aligned date, and an actions column --
 // reported directly as wanting visual parity between the two panels,
 // now that readings can link into real voucher records.
-const rows = readings.map((r) => {
+const readingRowHtml = (r) => {
 const valueText = r.balance != null ? (CURRENCY_UNITS.has(r.unit) ? `${r.unit}${r.balance.toLocaleString('en-GB', { minimumFractionDigits: 2 })}` : r.unit === '£ worth of points' ? `£${r.balance.toLocaleString('en-GB')}` : r.balance.toLocaleString('en-GB')) : '—';
-return `<div class="loyalty-reading" data-loyalty-reading="${escapeHtml(r.id)}">
+const why = pastWhy(r);
+return `<div class="loyalty-reading${why ? ' loyalty-reading-past' : ''}" data-loyalty-reading="${escapeHtml(r.id)}">
 <div class="loyalty-reading-id">
 <span class="loyalty-reading-label">${escapeHtml(r.label)}</span>
 <div class="loyalty-reading-meta">
@@ -976,14 +998,18 @@ ${r.unit && !CURRENCY_UNITS.has(r.unit) ? `<span class="loyalty-reading-unit">${
 </div>
 <div class="loyalty-reading-notes">${escapeHtml([r.detail || (r.sourceMessageId === 'manual' ? 'Entered by hand' : ''), r.note].filter(Boolean).join(' — '))}</div>
 <div class="loyalty-reading-date">
-<span class="loyalty-reading-asof">as of ${escapeHtml(r.date)}</span>
-${r.expiryDate ? `<span class="expiry-badge">expires ${escapeHtml(r.expiryDate)}</span>` : ''}
+${why ? `<span class="expiry-badge${why === 'expired' ? ' expired' : ''}">${why === 'used' ? 'Used' : 'Expired'}</span>` : `<span class="loyalty-reading-asof">as of ${escapeHtml(r.date)}</span>${r.expiryDate ? `<span class="expiry-badge">expires ${escapeHtml(r.expiryDate)}</span>` : ''}`}
 </div>
 <div class="loyalty-reading-actions">
 ${r.voucherId ? voucherChipHtmlFor(r.voucherId) : ''}
 </div>
 </div>`;
-}).join('');
+};
+const rowsLive = readings.map(readingRowHtml).join('');
+// Stays folded unless you opened it; the state lives outside the card so a re-render keeps it.
+const rows = rowsLive + (pastReadings.length
+? `<details class="loyalty-past" data-loyalty-past="${escapeHtml(program.id)}"${loyaltyPastOpen.has(program.id) ? ' open' : ''}><summary class="settings-note" style="cursor:pointer;margin:6px 0 0;">Used or expired (${pastReadings.length})</summary>${pastReadings.map(readingRowHtml).join('')}</details>`
+: '');
 const tier = readings.find((r) => r.tier)?.tier || '';
 const programInitials = (program.provider || program.name || '?').trim().slice(0, 2).toUpperCase();
 return `<div class="account-card" data-loyalty-program="${escapeHtml(program.id)}">
@@ -1066,6 +1092,12 @@ readings.map((r) => `<span class="tag-chip" title="${escapeHtml(program.name)} �
 function bindLoyaltyBalances(panel) {
 if (panel.dataset.loyaltyBound) return;
 panel.dataset.loyaltyBound = '1';
+// <details> toggle doesn't bubble, hence capture: remember which "Used or expired" folds are open.
+panel.addEventListener('toggle', (e) => {
+const d = e.target;
+if (!d.matches || !d.matches('[data-loyalty-past]')) return;
+if (d.open) loyaltyPastOpen.add(d.dataset.loyaltyPast); else loyaltyPastOpen.delete(d.dataset.loyaltyPast);
+}, true);
 panel.addEventListener('change', (e) => {
 const showTravel = e.target.closest('[data-loyalty-show-travel]');
 if (showTravel) {

@@ -1201,6 +1201,24 @@ background:var(--card);
 color:var(--ink);
 resize:vertical;
 }
+/* Fields on a record card: one shape for text, date, select and notes boxes, with a clear focus ring. */
+.details-grid input,.details-grid textarea,.details-grid select{
+padding:7px 10px;
+border-radius:8px;
+min-height:34px;
+box-sizing:border-box;
+transition:border-color .15s,box-shadow .15s;
+}
+.details-grid select{
+font-family:'Inter',sans-serif;font-size:13px;text-transform:none;letter-spacing:normal;
+border:1px solid var(--line);background:var(--card);color:var(--ink);
+}
+.details-grid input:hover,.details-grid textarea:hover,.details-grid select:hover{border-color:var(--muted);}
+.details-grid input:focus,.details-grid textarea:focus,.details-grid select:focus{outline:none;border-color:var(--rose);box-shadow:0 0 0 3px var(--rose-bg);}
+.details-grid input::placeholder,.details-grid textarea::placeholder{color:var(--muted);opacity:.7;}
+/* An "+ Add ..." button inside a field label sits at its own width, not stretched across the card
+   (a label is a column, and a column stretches whatever is in it). */
+.todo-add-btn,.details-grid label > button{align-self:flex-start;width:auto;}
 .compare-caption{
 font-family:'IBM Plex Mono',monospace;
 font-size:9px;

@@ -140,17 +140,25 @@ ${b.members.map(voucherRowHtml).join('')}
 }).join('');
 }
 
+let usedFoldOpen = false; // whether the "Used" fold is open, kept across re-renders
+
 function renderVouchers() {
 renderVoucherReview();
 const list = document.getElementById('vouchers-list');
-document.getElementById('vouchers-count').textContent = data.vouchers.length + (data.vouchers.length === 1 ? ' item' : ' items');
+const live = data.vouchers.filter((v) => !v.used);
+const spent = data.vouchers.filter((v) => v.used);
+document.getElementById('vouchers-count').textContent = `${live.length} ${live.length === 1 ? 'item' : 'items'}${spent.length ? ` · ${spent.length} used` : ''}`;
 if (data.vouchers.length === 0) {
 refreshProviderDatalists();
 list.innerHTML = '<div class="empty">Nothing tracked yet. Add one below.</div>';
 return;
 }
 refreshProviderDatalists();
-list.innerHTML = groupedVouchersHtml(data.vouchers);
+// Used ones are history: folded away below the live list instead of greyed out among it.
+list.innerHTML = (live.length ? groupedVouchersHtml(live) : '<div class="empty">Nothing active right now.</div>')
++ (spent.length ? `<details class="voucher-used-fold" style="margin-top:10px;"${usedFoldOpen ? ' open' : ''}><summary class="settings-note" style="cursor:pointer;">Used (${spent.length})</summary>${groupedVouchersHtml(spent)}</details>` : '');
+const fold = list.querySelector('.voucher-used-fold');
+if (fold) fold.addEventListener('toggle', () => { usedFoldOpen = fold.open; });
 
 list.querySelectorAll('[data-field][data-voucher-id]').forEach((el) => {
 el.addEventListener('change', () => {
@@ -217,6 +225,10 @@ const needle = (program?.name || '').toLowerCase();
 const byNameOnly = needle ? data.vouchers.filter((v) => !byReference.includes(v) && v.name.toLowerCase().includes(needle)) : [];
 return { byReference, byNameOnly };
 }
+
+// "eVoucher used": a notification that a voucher was spent. It has no value of its own, so it
+// must mark the voucher used and never overwrite the amount it was issued for.
+function isUsedEvent(reading) { return reading.balance == null && /\bused\b/i.test(reading.label); }
 
 function readingValueText(reading) {
 if (reading.balance == null) return /used/i.test(reading.label) ? 'Used' : '';
@@ -330,8 +342,10 @@ return `<label class="pending-option" style="margin-top:6px;">
 function applyUpdateToVoucher(reading, program, voucherId) {
 const voucher = data.vouchers.find((v) => v.id === voucherId);
 if (!voucher) return;
-const value = readingValueText(reading);
+const usedEvent = isUsedEvent(reading);
+const value = usedEvent ? '' : readingValueText(reading);
 if (value) voucher.value = value;
+if (usedEvent) voucher.used = true;
 if (reading.expiryDate) voucher.expiry = reading.expiryDate;
 if (reading.reference && !voucher.reference) voucher.reference = reading.reference;
 // Backfills provider/logo onto a voucher that predates this field (or
@@ -353,7 +367,7 @@ const targetId = decision === 'pick' ? pickedId : decision.startsWith('update:')
 if (targetId) { applyUpdateToVoucher(reading, program, targetId); return; }
 // decision === 'new' -- provider is the real program name (exact, no
 // matching needed) and logoUrl comes free from it too, when seeded.
-const voucher = blankVoucher({ name: voucherNameFor(program, reading), value: readingValueText(reading), expiry: reading.expiryDate || '', notes: `From ${program.name} scan, ${reading.date}.${reading.note ? ` ${reading.note}` : ''}`, reference: reading.reference || '', sourceLoyaltyReadingIds: [reading.id], provider: program.provider || program.name, what: voucherWhatFor(program, reading), logoUrl: program.logoUrl || matchBrandLogo(program.provider || program.name) || '' });
+const voucher = blankVoucher({ name: voucherNameFor(program, reading), value: isUsedEvent(reading) ? '' : readingValueText(reading), used: isUsedEvent(reading), expiry: reading.expiryDate || '', notes: `From ${program.name} scan, ${reading.date}.${reading.note ? ` ${reading.note}` : ''}`, reference: reading.reference || '', sourceLoyaltyReadingIds: [reading.id], provider: program.provider || program.name, what: voucherWhatFor(program, reading), logoUrl: program.logoUrl || matchBrandLogo(program.provider || program.name) || '' });
 data.vouchers.push(voucher);
 markVoucherLinked(reading.id, voucher.id);
 }
@@ -377,9 +391,34 @@ targetId = voucher.id;
 allReadings.forEach((r) => applyUpdateToVoucher(r, program, targetId));
 }
 
+// Tidies what earlier scans got wrong, then lets a "used" notification settle itself:
+// - a voucher whose amount was overwritten with the word "Used" gets its amount back
+//   from the reading that issued it, and is marked used;
+// - an "eVoucher used" reading whose voucher number matches a voucher marks it used,
+//   with no question asked.
+function settleUsedVouchers() {
+let changed = false;
+data.vouchers.forEach((v) => {
+if (v.value !== 'Used') return;
+const issued = data.loyaltyBalances.filter((b) => b.reference && b.reference === v.reference && b.balance != null).sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0];
+v.value = issued ? readingValueText(issued) : '';
+v.used = true;
+changed = true;
+});
+pendingVoucherLinks().forEach(({ reading, program }) => {
+if (!isUsedEvent(reading) || !reading.reference) return;
+const match = data.vouchers.find((v) => v.reference === reading.reference);
+if (!match) return;
+applyUpdateToVoucher(reading, program, match.id);
+changed = true;
+});
+if (changed) queueSave();
+}
+
 function renderVoucherReview() {
 const mount = document.getElementById('voucher-review-section');
 if (!mount) return;
+settleUsedVouchers();
 const classifications = pendingClassifications();
 const links = pendingVoucherLinks();
 const total = classifications.length + links.length;
