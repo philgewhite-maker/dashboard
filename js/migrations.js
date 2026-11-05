@@ -213,7 +213,11 @@ function migrateProviders(doc) {
 // ---- Connections: legacy chat text, saved UI flags -----------------------------
 
 const LEGACY_CHAT = [['chatLog', 'Tinder'], ['chatLogWhatsApp', 'WhatsApp'], ['chatLogTelegram', 'Telegram']];
+const CHAT_PLATFORMS = ['Tinder', 'Bumble', 'Telegram', 'WhatsApp'];
 const lines = (t) => String(t || '').split('\n').map((l) => l.trim()).filter(Boolean);
+// "Sender: message" without the leading [time] or [date time]: an older
+// scrape wrote only the time, a newer one the date too, for the same message.
+const messageKey = (l) => l.replace(/^\[[^\]]*\]\s*/, '');
 
 function migrateConnections(doc) {
   const report = { chatCleared: 0, chatMovedToNewRow: 0, notCovered: [], flagsStripped: 0, coverFixed: 0 };
@@ -223,15 +227,25 @@ function migrateConnections(doc) {
       if (!(field in c)) return;
       const legacy = lines(c[field]);
       if (legacy.length) {
-        const rows = c.identities.filter((r) => r.platform === platform);
-        const covered = rows.some((r) => { const have = new Set(lines(r.chatLog)); return legacy.every((l) => have.has(l)); });
+        // The connection-level "chatLog" was whichever app the chat came from,
+        // not always Tinder: use the connection's own app when it is a chat app.
+        const target = field === 'chatLog' && CHAT_PLATFORMS.includes(c.app) ? c.app : platform;
+        const rows = c.identities.filter((r) => r.platform === target);
+        const covered = rows.some((r) => { const have = new Set(lines(r.chatLog).map(messageKey)); return legacy.every((l) => have.has(messageKey(l))); });
         if (covered) report.chatCleared++;
         else {
           const empty = rows.find((r) => !lines(r.chatLog).length);
           if (empty) empty.chatLog = c[field];
-          else c.identities.push({ id: `${c.id}-legacy-${platform.toLowerCase()}`, platform, handle: 'earlier chat', matchId: '', chatLog: c[field] });
+          else {
+            c.identities.push({
+              id: `${c.id}-legacy-${target.toLowerCase()}`, platform: target,
+              handle: rows.length ? 'earlier chat' : (c.profileName || c.name || ''),
+              matchId: target === 'Tinder' && !rows.some((r) => r.matchId === c.tinderMatchId) ? (c.tinderMatchId || '') : '',
+              chatLog: c[field],
+            });
+          }
           report.chatMovedToNewRow++;
-          report.notCovered.push(`${c.name} (${platform}, ${legacy.length} lines)`);
+          report.notCovered.push(`${c.name} (${target}, ${legacy.length} lines${rows.length ? '' : ', had no chat row'})`);
         }
       }
       delete c[field];
