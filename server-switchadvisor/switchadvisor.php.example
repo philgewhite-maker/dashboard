@@ -63,7 +63,7 @@ header('Access-Control-Allow-Headers: Content-Type, X-Invite-Token, X-Admin-Secr
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
 header('Access-Control-Max-Age: 86400');
 header('Content-Type: application/json');
-header('Cache-Control: no-store');
+if (($_GET['action'] ?? '') !== 'public-offers') header('Cache-Control: no-store');
 
 if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
     http_response_code(204);
@@ -2468,6 +2468,19 @@ function clean_bank_display_name(string $raw): string {
         $wordIndex++;
     }
     return trim($out);
+}
+
+// The structured offer data, for the public site's build (site/build.php --source=URL).
+// Offers, cashback listings, tiers and the CASS list only -- nothing about any user. Cached
+// for an hour so a crawler or a build cannot hammer it.
+if ($action === 'public-offers' && $method === 'GET') {
+    $cache = normalise_cache(read_doc($CACHE_FILE, $EMPTY_CACHE));
+    $keep = ['scrapedAt', 'history', 'offers', 'cassParticipants', 'cashbackDeals', 'cashbackAsOf', 'cashbackSources', 'krakTiers', 'krakCardTiers', 'krakSalaryMin', 'krakSalaryCap', 'krakTiersAsOf', 'annualPerks', 'ongoingAccounts', 'bankGroups'];
+    $out = [];
+    foreach ($keep as $k) if (array_key_exists($k, $cache)) $out[$k] = $cache[$k];
+    header('Cache-Control: public, max-age=3600');
+    echo json_encode($out, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    exit;
 }
 
 if ($action === 'banklist') {
