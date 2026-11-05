@@ -85,6 +85,39 @@ function migrateStays(doc) {
   delete doc.airbnbPastStays;
   delete doc.airbnbCancelledStays;
 
+  // The same stay charged twice: two accrual rows for one reservation (seen
+  // live on 2026-11-05, identical amounts). Keep the first.
+  const seenAccrual = new Set();
+  report.duplicateAccrualsRemoved = [];
+  doc.lettingLedger = ledger.filter((e) => {
+    if (e.kind !== 'accrual' || !e.reservationId) return true;
+    if (!seenAccrual.has(e.reservationId)) { seenAccrual.add(e.reservationId); return true; }
+    report.duplicateAccrualsRemoved.push({ date: e.date, amount: e.amount });
+    return false;
+  });
+
+  // Stays deleted before past stays were kept at all: the accrual row still
+  // holds listing, checkout, nights, gross and the guest in its note, which is
+  // enough to put the stay back under the id the row already points at.
+  report.rebuiltFromLedger = 0;
+  const known = ids();
+  doc.lettingLedger.forEach((e) => {
+    if (e.kind !== 'accrual' || !e.reservationId || known.has(e.reservationId) || !e.listingId || !e.date) return;
+    const nights = Number(e.nights) || 0;
+    const checkin = nights > 0 ? new Date(Date.parse(`${e.date}T00:00:00Z`) - nights * 86400000).toISOString().slice(0, 10) : e.date;
+    const comma = String(e.note || '').indexOf(', ');
+    res.push({
+      id: e.reservationId, listingId: e.listingId, uid: '', source: 'ics', status: 'completed', cancelledOn: '',
+      checkin, checkout: e.date, guestName: comma >= 0 ? e.note.slice(comma + 2) : '', notes: 'Rebuilt from its Letting income entry',
+      confirmationCode: '', revisions: [], payoutCheck: false,
+      income: Number.isFinite(Number(e.gross)) ? Number(e.gross) : null, accruedAt: 'migrated', confirmedOn: '', paidOn: e.capDate || '',
+      platform: e.platform === 'other' ? 'other' : 'airbnb', googleEventId: '', googleCalendarId: '',
+      createdAt: `${e.date}T00:00:00.000Z`,
+    });
+    known.add(e.reservationId);
+    report.rebuiltFromLedger++;
+  });
+
   (doc.airbnbKeys || []).forEach((k) => {
     if ('forReservationId' in k || 'forNote' in k) { delete k.forReservationId; delete k.forNote; report.keysCleared++; }
   });
