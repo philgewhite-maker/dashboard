@@ -1,7 +1,7 @@
 import { kvGet, kvSet, photoDelete } from './db.js';
 import { uid, todayStr, daysAgoStr, last7Dates, daysSince, daysUntil } from './utils.js';
 import { matchBrandLogo, matchBrandEntry, splitProvider } from './brandLogos.js';
-import { migrateStays } from './migrations.js';
+import { migrateStays, migrateVouchers, dedupeAccruals } from './migrations.js';
 
 const DATA_KEY = 'app-data';
 const REV_KEY = 'app-data-rev'; // separate from DATA_KEY so it never leaks into backup exports
@@ -1184,10 +1184,10 @@ reference: '',
 // '' = not yet resolved (either its (programId, label) pair has never
 // been classified balance-vs-voucher -- see data.loyaltyLabelKinds --
 // or it's classified 'voucher' and not yet linked); 'linked' =
-// created/updated a data.vouchers row (see voucherId); 'skipped' =
+// created/updated a data.vouchers row (the voucher's sourceLoyaltyReadingIds
+// holds the link; there is no copy here); 'skipped' =
 // reviewed, stays a plain reading.
 voucherLinkStatus: '',
-voucherId: '',
 // A free-text elaboration shown alongside `label`, never used for
 // grouping/matching (unlike reference) -- e.g. Quidco's retailer name
 // ("Agent Provocateur"). Lets many readings share one stable `label`
@@ -1849,6 +1849,9 @@ createdAt: new Date().toISOString(),
 function blankVoucher(fields = {}) {
 return {
 id: uid(), name: '', type: 'Voucher', value: '', expiry: '', notes: '',
+// What it is worth: a number and a unit (GBP, EUR, points, Avios, miles,
+// nights, other). `value` is the display text built from them.
+amount: null, unit: '',
 // Spent or otherwise finished with: greyed, sorted last, never nudged.
 used: false,
 // The voucher/booking reference, if known -- see loyaltybalances.js's
@@ -3247,6 +3250,16 @@ if (match) p.logoUrl = match;
 });
 if (!Array.isArray(data.loyaltyBalances)) data.loyaltyBalances = [];
 data.loyaltyBalances = data.loyaltyBalances.map((b) => ({ ...blankLoyaltyBalance(), ...b, id: b.id || uid() }));
+// Vouchers get a number + unit instead of free text, and a reading no longer
+// keeps its own copy of the voucher id (js/migrations.js). Runs while any
+// reading still carries voucherId, so a device on older code pushing it back
+// is cleaned again.
+if (data.loyaltyBalances.some((b) => 'voucherId' in b) || !(data.schemaVersion >= 2)) {
+if (!Array.isArray(data.vouchers)) data.vouchers = [];
+const report = migrateVouchers(data);
+if (!(data.schemaVersion >= 2)) data.schemaVersion = 2;
+console.info('Vouchers migration:', report);
+}
 // A balance row whose program was deleted entirely (not just
 // deactivated) has nowhere left to render -- same "nothing left to
 // route it to" reasoning as the trip/planner-entry orphan guards above.
@@ -3333,6 +3346,12 @@ const report = migrateStays(data);
 data.airbnbReservations = data.airbnbReservations.filter((r) => airbnbListingIds.has(r.listingId));
 if (!(data.schemaVersion >= 1)) data.schemaVersion = 1;
 console.info('Stays migration:', report);
+}
+// One accrual row per stay, on every load (a device on old code can charge a
+// stay a second time under another id; see dedupeAccruals).
+if (Array.isArray(data.lettingLedger)) {
+const dupes = dedupeAccruals(data);
+if (dupes.length) console.info('Duplicate Letting income rows removed:', dupes);
 }
 // Backfills `nights` onto an older accrual row that predates the
 // average-night-rate feature (letting.js's nightRateFor) -- derived

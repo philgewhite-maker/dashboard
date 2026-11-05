@@ -3,8 +3,35 @@ import { escapeHtml, bindForm, daysUntil, scrollAndFlash, logoBadgeHtml, bindLog
 import { renderLoyaltyBalances, pendingClassifications, pendingVoucherLinks, setLabelKind, markVoucherLinked, markVoucherSkipped, voucherWhatFor, VOUCHER_WHAT_BY_LABEL, CURRENCY_UNITS } from './loyaltybalances.js';
 import { matchBrandLogo } from '../brandLogos.js';
 import { resolveProvider, refreshProviderDatalists } from '../providers.js';
+import { VOUCHER_UNITS } from '../migrations.js';
 
 const VOUCHER_TYPES = ['Voucher', 'Credit', 'Cheque', 'Refund', 'Other'];
+
+// A voucher's worth is a number and a unit, not free text. `value` is kept as
+// the display text built from them, for anything that still reads it.
+const UNIT_LABELS = { GBP: '£', EUR: '€', points: 'points', Avios: 'Avios', miles: 'miles', nights: 'nights', other: 'other' };
+function voucherValueText(v) {
+if (v.amount == null || v.amount === '') return v.unit ? '' : (v.value || '');
+const n = Number(v.amount);
+if (v.unit === 'GBP' || v.unit === 'EUR') return `${UNIT_LABELS[v.unit]}${n.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const num = n.toLocaleString('en-GB');
+return v.unit && v.unit !== 'other' ? `${num} ${v.unit}` : num;
+}
+// A loyalty reading's own unit, as one of the voucher units.
+const READING_UNIT_MAP = { '£': 'GBP', '€': 'EUR', Avios: 'Avios', points: 'points', 'status points': 'points', miles: 'miles' };
+function unitFromReading(reading) {
+if (!reading.unit) return '';
+return READING_UNIT_MAP[reading.unit] || 'other';
+}
+function setAmountFromReading(voucher, reading) {
+if (reading.balance == null) return;
+voucher.amount = reading.balance;
+voucher.unit = unitFromReading(reading);
+voucher.value = voucherValueText(voucher);
+}
+function unitSelectHtml(selected, attrs) {
+return `<select ${attrs}><option value=""${!selected ? ' selected' : ''}>Unit</option>${VOUCHER_UNITS.map((u) => `<option value="${u}"${u === selected ? ' selected' : ''}>${escapeHtml(UNIT_LABELS[u])}</option>`).join('')}</select>`;
+}
 
 // The canonical voucher reference -- this record type had none until
 // now (dashboard/CLAUDE.md's own Record-reference standards table
@@ -78,7 +105,8 @@ ${logoBadgeHtml(v.logoUrl, vInitials, 'plum')}
 <select class="voucher-edit voucher-type-edit" data-field="type" data-voucher-id="${v.id}">
 ${VOUCHER_TYPES.map((t) => `<option value="${t}" ${t === v.type ? 'selected' : ''}>${t}</option>`).join('')}
 </select>
-<input type="text" autocomplete="off" class="voucher-edit voucher-value-edit" data-field="value" data-voucher-id="${v.id}" value="${escapeHtml(v.value || '')}" placeholder="Value">
+<input type="number" step="0.01" min="0" class="voucher-edit voucher-value-edit" data-field="amount" data-voucher-id="${v.id}" value="${v.amount ?? ''}" placeholder="${escapeHtml(v.amount == null && v.value ? v.value : 'Amount')}" title="${v.amount == null && v.value ? `Was typed as "${escapeHtml(v.value)}": enter the number and pick its unit` : 'How much it is worth'}" style="max-width:90px;">
+${unitSelectHtml(v.unit || '', `class="voucher-edit voucher-unit-edit" data-field="unit" data-voucher-id="${v.id}" title="What the amount is in"`)}
 </div>
 </div>
 </div>
@@ -171,6 +199,12 @@ const r = resolveProvider(el.value);
 v.provider = r.provider;
 v.logoUrl = r.logoUrl || '';
 if (r.what && !v.what) v.what = r.what;
+} else if (el.dataset.field === 'amount') {
+v.amount = el.value === '' ? null : Number(el.value);
+v.value = voucherValueText(v);
+} else if (el.dataset.field === 'unit') {
+v.unit = el.value;
+v.value = voucherValueText(v);
 } else {
 v[el.dataset.field] = el.value.trim();
 }
@@ -195,8 +229,9 @@ data.vouchers = data.vouchers.filter((x) => x.id !== el.dataset.delVoucher);
 // A loyalty reading that was confirmed into this voucher still said "linked"
 // with a voucher id that no longer exists, so the scan never offered it
 // again and the Loyalty card showed a chip to nothing. Put it back in the review queue.
+const sources = new Set((doomed && doomed.sourceLoyaltyReadingIds) || []);
 data.loyaltyBalances.forEach((b) => {
-if (b.voucherId === el.dataset.delVoucher) { b.voucherId = ''; b.voucherLinkStatus = ''; }
+if (sources.has(b.id) && b.voucherLinkStatus === 'linked') b.voucherLinkStatus = '';
 });
 renderVouchers();
 renderLoyaltyBalances();
@@ -343,8 +378,7 @@ function applyUpdateToVoucher(reading, program, voucherId) {
 const voucher = data.vouchers.find((v) => v.id === voucherId);
 if (!voucher) return;
 const usedEvent = isUsedEvent(reading);
-const value = usedEvent ? '' : readingValueText(reading);
-if (value) voucher.value = value;
+if (!usedEvent) setAmountFromReading(voucher, reading);
 if (usedEvent) voucher.used = true;
 if (reading.expiryDate) voucher.expiry = reading.expiryDate;
 if (reading.reference && !voucher.reference) voucher.reference = reading.reference;
@@ -368,6 +402,7 @@ if (targetId) { applyUpdateToVoucher(reading, program, targetId); return; }
 // decision === 'new' -- provider is the real program name (exact, no
 // matching needed) and logoUrl comes free from it too, when seeded.
 const voucher = blankVoucher({ name: voucherNameFor(program, reading), value: isUsedEvent(reading) ? '' : readingValueText(reading), used: isUsedEvent(reading), expiry: reading.expiryDate || '', notes: `From ${program.name} scan, ${reading.date}.${reading.note ? ` ${reading.note}` : ''}`, reference: reading.reference || '', sourceLoyaltyReadingIds: [reading.id], provider: program.provider || program.name, what: voucherWhatFor(program, reading), logoUrl: program.logoUrl || matchBrandLogo(program.provider || program.name) || '' });
+if (!isUsedEvent(reading)) setAmountFromReading(voucher, reading);
 data.vouchers.push(voucher);
 markVoucherLinked(reading.id, voucher.id);
 }
@@ -401,7 +436,8 @@ let changed = false;
 data.vouchers.forEach((v) => {
 if (v.value !== 'Used') return;
 const issued = data.loyaltyBalances.filter((b) => b.reference && b.reference === v.reference && b.balance != null).sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0];
-v.value = issued ? readingValueText(issued) : '';
+v.value = '';
+if (issued) setAmountFromReading(v, issued);
 v.used = true;
 changed = true;
 });
@@ -475,6 +511,7 @@ bindForm('voucher-form', () => {
 const nameInput = document.getElementById('voucher-name-input');
 const typeInput = document.getElementById('voucher-type-input');
 const valueInput = document.getElementById('voucher-value-input');
+const unitInput = document.getElementById('voucher-unit-input');
 const expiryInput = document.getElementById('voucher-expiry-input');
 const notesInput = document.getElementById('voucher-notes-input');
 const providerInput = document.getElementById('voucher-provider-input');
@@ -482,10 +519,14 @@ const name = nameInput.value.trim();
 if (!name) return;
 const resolved = resolveProvider(providerInput?.value || '');
 const whatInput = document.getElementById('voucher-what-input');
+const amount = valueInput.value.trim() === '' ? null : Number(valueInput.value);
+const unit = unitInput ? unitInput.value : '';
 data.vouchers.push(blankVoucher({
 name,
 type: typeInput.value,
-value: valueInput.value.trim(),
+amount: Number.isFinite(amount) ? amount : null,
+unit,
+value: voucherValueText({ amount: Number.isFinite(amount) ? amount : null, unit, value: '' }),
 expiry: expiryInput.value,
 notes: notesInput.value.trim(),
 provider: resolved.provider,
@@ -495,6 +536,7 @@ logoUrl: resolved.logoUrl,
 if (whatInput) whatInput.value = '';
 nameInput.value = '';
 valueInput.value = '';
+if (unitInput) unitInput.value = '';
 expiryInput.value = '';
 notesInput.value = '';
 if (providerInput) providerInput.value = '';

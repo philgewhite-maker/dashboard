@@ -1,6 +1,6 @@
 {
   "_about": "Machine-readable twin of docs/data-model.html. js check: import('./docs/check-model.js') from the live site's console. Update when state.js gains/changes a key or a reference.",
-  "verifiedAgainst": "v734",
+  "verifiedAgainst": "v736",
   "groups": {
     "people": ["connections","telegramThreads","telegramUnclaimed","pendingImports","importStatus","flagRules","flagRulesSeeded","ratingCategories","reachOutStageDays","dayQueue","myCity","myName","myPhone","myEmail","myAddress"],
     "work": ["tasks","taskContexts","captureInbox","captureDrafts","agentInbox","businessIdeas","enhancementIdeas","readingList","jobs","habits","goals"],
@@ -24,7 +24,7 @@
     ["airbnbKeys","listingIds","airbnbListings"],
     ["airbnbKeyAssignments","keyId","airbnbKeys"],["airbnbKeyAssignments","reservationId","airbnbReservations"],
     ["airbnbRateProposals","listingId","airbnbListings"],["airbnbRateProposals","taskId","tasks"],
-    ["vouchers","sourceLoyaltyReadingIds","loyaltyBalances"],["loyaltyBalances","programId","loyaltyPrograms"],["loyaltyBalances","voucherId","vouchers"],["loyaltyLabelKinds","programId","loyaltyPrograms"],
+    ["vouchers","sourceLoyaltyReadingIds","loyaltyBalances"],["loyaltyBalances","programId","loyaltyPrograms"],["loyaltyLabelKinds","programId","loyaltyPrograms"],
     ["subscriptions","accountId","financeAccounts"],
     ["financeAccounts","cassFromAccountId","financeAccounts"],["financeAccounts","repaymentFromAccountId","financeAccounts"],["financeAccounts","fundingFromAccountId","financeAccounts"],
     ["switchOffers","suggestedFromAccountId","financeAccounts"],["switchOffers","taskId","tasks"],

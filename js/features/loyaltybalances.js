@@ -847,7 +847,7 @@ const byLabel = new Map();
 rows.forEach((r) => {
 // A reading linked to a voucher is one particular voucher (its number is the reference), so two
 // live eVouchers each keep a row; a running balance is just the latest reading under its label.
-const key = r.voucherId && r.reference ? `${r.label}|${r.reference}` : r.label;
+const key = voucherIdForReading(r.id) && r.reference ? `${r.label}|${r.reference}` : r.label;
 const prev = byLabel.get(key);
 if (!prev || r.date > prev.date) byLabel.set(key, r);
 });
@@ -858,7 +858,7 @@ return [...byLabel.values()].sort((a, b) => a.label.localeCompare(b.label) || (b
 function readingPastWhy(r) {
 const today = todayStr();
 if (r.balance == null && /\bused\b/i.test(r.label)) return 'used';
-const v = r.voucherId ? data.vouchers.find((x) => x.id === r.voucherId) : null;
+const v = voucherForReading(r.id);
 if (v && v.used) return 'used';
 if (v && v.expiry && v.expiry < today) return 'expired';
 if (!v && r.expiryDate && r.expiryDate < today && labelKindFor(r.programId, r.label) === 'voucher') return 'expired';
@@ -870,6 +870,17 @@ return data.loyaltyPrograms
 .filter((p) => p.showOnTravel)
 .map((p) => ({ program: p, readings: latestBalancesFor(p).filter((r) => !readingPastWhy(r)) }))
 .filter((x) => x.readings.length);
+}
+
+// The link between a reading and the voucher it became lives in one place:
+// the voucher's sourceLoyaltyReadingIds. A reading looks its voucher up
+// instead of holding a second copy of the id that could drift.
+function voucherForReading(readingId) {
+return (data.vouchers || []).find((v) => (v.sourceLoyaltyReadingIds || []).includes(readingId)) || null;
+}
+function voucherIdForReading(readingId) {
+const v = voucherForReading(readingId);
+return v ? v.id : '';
 }
 
 function voucherChipHtmlFor(voucherId) {
@@ -934,7 +945,6 @@ function markVoucherLinked(readingId, voucherId) {
 const reading = data.loyaltyBalances.find((b) => b.id === readingId);
 if (!reading) return;
 reading.voucherLinkStatus = 'linked';
-reading.voucherId = voucherId;
 queueSave();
 }
 function markVoucherSkipped(readingId) {
@@ -1001,7 +1011,7 @@ ${r.unit && !CURRENCY_UNITS.has(r.unit) ? `<span class="loyalty-reading-unit">${
 ${why ? `<span class="expiry-badge${why === 'expired' ? ' expired' : ''}">${why === 'used' ? 'Used' : 'Expired'}</span>` : `<span class="loyalty-reading-asof">as of ${escapeHtml(r.date)}</span>${r.expiryDate ? `<span class="expiry-badge">expires ${escapeHtml(r.expiryDate)}</span>` : ''}`}
 </div>
 <div class="loyalty-reading-actions">
-${r.voucherId ? voucherChipHtmlFor(r.voucherId) : ''}
+${voucherIdForReading(r.id) ? voucherChipHtmlFor(voucherIdForReading(r.id)) : ''}
 </div>
 </div>`;
 };

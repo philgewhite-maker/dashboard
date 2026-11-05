@@ -78,7 +78,7 @@ a{color:var(--accent)}
 <div class="wrap">
 <header>
   <h1>Dashboard data model</h1>
-  <p class="lede">What the app stores, how the pieces refer to each other, where the same fact is kept twice, and where text stands in for structure. Built from the code and from a read of the live document (field names, types, fill rates and reference checks; no personal values). Verified against build <b>v734</b>.</p>
+  <p class="lede">What the app stores, how the pieces refer to each other, where the same fact is kept twice, and where text stands in for structure. Built from the code and from a read of the live document (field names, types, fill rates and reference checks; no personal values). Verified against build <b>v736</b>.</p>
   <ul class="stats">
     <li><b>109</b><span>top-level keys</span></li>
     <li><b>597</b><span>connections</span></li>
@@ -118,6 +118,7 @@ a{color:var(--accent)}
       <li>4 of 15 vouchers have no source reading at all, so some are hand-entered and some are derived.</li>
     </ul>
     <p class="fix"><b>Fix.</b> Keep readings as the history. Add one <code>entitlements</code> concept (voucher, credit, upgrade) with a single direction of reference to its source reading, a numeric amount and a currency or unit enum, and a status of <code>active, used, expired</code>.</p>
+    <p class="fix"><b>Done in v736.</b> The link runs one way: <code>vouchers.sourceLoyaltyReadingIds</code>. <code>loyaltyBalances.voucherId</code> was dropped (382 rows, 1 dangling) and a reading now looks its voucher up. Vouchers have a numeric <code>amount</code> and a <code>unit</code> (GBP, EUR, points, Avios, miles, nights, other), entered with a number box and a dropdown; <code>value</code> is now display text built from them. 10 of 15 values were parsed; Mastercard "70" and Tesco Clubcard "68" need a unit set by hand. <b>Not done:</b> a separate entitlements collection (vouchers already play that role).</p>
   </div>
 
   <div class="finding">
@@ -240,7 +241,6 @@ flowchart LR
   INV -->|"holderId, fromTaskId"| CONN
   INV --> TASK
   RD --> PRG
-  RD -->|"voucherId"| VOU
   VOU -->|"sourceLoyaltyReadingIds"| RD
   BIZ --> TASK
 </pre>
@@ -420,7 +420,6 @@ erDiagram
 erDiagram
   LOYALTY_PROGRAM ||--o{ READING : programId
   LOYALTY_PROGRAM ||--o{ LABEL_KIND : "programId + label text"
-  READING |o--o| VOUCHER : voucherId
   VOUCHER }o--o{ READING : sourceLoyaltyReadingIds
   LOYALTY_PROGRAM }o..o{ VOUCHER : "same provider text"
   LOYALTY_PROGRAM }o..o{ SUBSCRIPTION : "same provider text"
@@ -441,7 +440,6 @@ erDiagram
     string unit "9 spellings"
     string expiryDate
     string reference
-    string voucherId FK
     string voucherLinkStatus "none linked skipped"
   }
   LABEL_KIND {
@@ -455,7 +453,9 @@ erDiagram
     string what "text"
     string logoUrl
     string type "Voucher Credit Other"
-    string value "text, mixed units"
+    number amount
+    string unit "GBP EUR points Avios miles nights other"
+    string value "display text, derived"
     string expiry
     string reference
     boolean used
@@ -744,7 +744,7 @@ erDiagram
     <tbody>
     <tr><td class="k">lettingLedger.reservationId → airbnbReservations</td><td class="num">5</td><td class="num"><span class="pill bad">4</span></td></tr>
     <tr><td class="k">airbnbKeys.forReservationId → airbnbReservations</td><td class="num">2</td><td class="num"><span class="pill bad">2</span></td></tr>
-    <tr><td class="k">loyaltyBalances.voucherId → vouchers</td><td class="num">20</td><td class="num"><span class="pill bad">1</span></td></tr>
+    <tr><td class="k">loyaltyBalances.voucherId → vouchers</td><td class="num">removed in v736</td><td class="num"><span class="pill good">0</span></td></tr>
     <tr><td class="k">All other 38 checked references</td><td class="num">about 730</td><td class="num"><span class="pill good">0</span></td></tr>
     </tbody>
   </table></div>

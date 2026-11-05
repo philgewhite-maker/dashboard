@@ -85,16 +85,7 @@ function migrateStays(doc) {
   delete doc.airbnbPastStays;
   delete doc.airbnbCancelledStays;
 
-  // The same stay charged twice: two accrual rows for one reservation (seen
-  // live on 2026-11-05, identical amounts). Keep the first.
-  const seenAccrual = new Set();
-  report.duplicateAccrualsRemoved = [];
-  doc.lettingLedger = ledger.filter((e) => {
-    if (e.kind !== 'accrual' || !e.reservationId) return true;
-    if (!seenAccrual.has(e.reservationId)) { seenAccrual.add(e.reservationId); return true; }
-    report.duplicateAccrualsRemoved.push({ date: e.date, amount: e.amount });
-    return false;
-  });
+  report.duplicateAccrualsRemoved = dedupeAccruals(doc);
 
   // Stays deleted before past stays were kept at all: the accrual row still
   // holds listing, checkout, nights, gross and the guest in its note, which is
@@ -126,6 +117,31 @@ function migrateStays(doc) {
 
 function todayIso() { return new Date().toISOString().slice(0, 10); }
 
+// The same stay charged twice: two accrual rows for one reservation (seen
+// live on 2026-11-04 and 2026-11-05: a device on code older than v734 charged
+// with a random row id). Not one-shot: state.js runs it on every load, since
+// such a device can add a second row at any time. The survivor is chosen by
+// id, never by array order, so two devices holding both rows keep the same
+// one: the id derived from the stay if present, otherwise the smallest id.
+function dedupeAccruals(doc) {
+  const ledger = Array.isArray(doc.lettingLedger) ? doc.lettingLedger : [];
+  const keep = new Map();
+  ledger.forEach((e) => {
+    if (e.kind !== 'accrual' || !e.reservationId) return;
+    const cur = keep.get(e.reservationId);
+    const derived = `accrual-${e.reservationId}`;
+    if (!cur || e.id === derived || (cur.id !== derived && String(e.id) < String(cur.id))) keep.set(e.reservationId, e);
+  });
+  const removed = [];
+  const kept = ledger.filter((e) => {
+    if (e.kind !== 'accrual' || !e.reservationId || keep.get(e.reservationId) === e) return true;
+    removed.push({ id: e.id, date: e.date, amount: e.amount, note: e.note || '' });
+    return false;
+  });
+  if (removed.length) doc.lettingLedger = kept;
+  return removed;
+}
+
 // ---- Vouchers: typed amount, one-way link from readings ---------------------
 
 const VOUCHER_UNITS = ['GBP', 'EUR', 'points', 'Avios', 'miles', 'nights', 'other'];
@@ -145,12 +161,18 @@ function migrateVouchers(doc) {
   const report = { parsed: 0, noUnit: [], unparsed: [], usedSentinel: 0, linksRestored: 0, voucherIdsDropped: 0, danglingDropped: 0 };
   const vouchers = Array.isArray(doc.vouchers) ? doc.vouchers : [];
   vouchers.forEach((v) => {
-    if (v.amount !== undefined && v.unit !== undefined) return;
+    if (typeof v.unit !== 'string') v.unit = '';
+    if (v.amount === undefined) v.amount = null;
     if (String(v.value || '').trim() === 'Used') { v.used = true; v.value = ''; report.usedSentinel++; }
+    // Only a voucher still holding just the old text needs parsing; a
+    // number already set (by hand or an earlier run) is never overwritten.
+    if (v.amount != null || !String(v.value || '').trim()) return;
     const p = parseVoucherValue(v.value);
-    if (p === null) { v.amount = null; v.unit = ''; report.unparsed.push(`${v.name}: "${v.value}"`); return; }
-    v.amount = p.amount; v.unit = p.unit;
-    if (p.amount != null) { report.parsed++; if (!p.unit) report.noUnit.push(`${v.name}: "${v.value}"`); }
+    if (p === null || p.amount == null) { report.unparsed.push(`${v.name}: "${v.value}"`); return; }
+    v.amount = p.amount;
+    if (!v.unit) v.unit = p.unit;
+    report.parsed++;
+    if (!v.unit) report.noUnit.push(`${v.name}: "${v.value}"`);
   });
   const byId = new Map(vouchers.map((v) => [v.id, v]));
   (doc.loyaltyBalances || []).forEach((b) => {
@@ -256,4 +278,4 @@ function migrateConnections(doc) {
   return report;
 }
 
-export { SCHEMA_VERSION, migrateStays, migrateVouchers, migrateProviders, migrateConnections, parseVoucherValue, ensureProvider, canonicalName, providerIdFor, VOUCHER_UNITS };
+export { SCHEMA_VERSION, migrateStays, dedupeAccruals, migrateVouchers, migrateProviders, migrateConnections, parseVoucherValue, ensureProvider, canonicalName, providerIdFor, VOUCHER_UNITS };
