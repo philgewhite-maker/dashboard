@@ -15,6 +15,7 @@
 // createBlankConnection, placeEntry, addActivityToDay) -- never writing
 // into data.* directly itself.
 import { data, queueSave, blankCaptureDraft } from '../state.js';
+import { recordOutcome } from '../airuns.js';
 import { escapeHtml, scrollAndFlash, dateStrAdd, todayStr, MISSING_KEY_LINK_HTML, isCardCollapsed, cardToggleHtml } from '../utils.js';
 
 // ---- Executing a confirmed draft's steps ---------------------------------
@@ -230,6 +231,7 @@ const status = root.querySelector(`[data-draft-status="${draft.id}"]`);
 btn.disabled = true;
 if (status) status.textContent = 'Working…';
 const results = await runCaptureSteps(draft.steps);
+if (draft.aiRunId) recordOutcome(draft.aiRunId, { steps: draft.steps }, { steps: draft.steps }, { errors: results.filter((r) => r.error).map((r) => ({ type: r.step.type, error: r.error })) });
 data.captureDrafts = data.captureDrafts.filter((d) => d.id !== draft.id);
 queueSave();
 renderCaptureDrafts();
@@ -241,6 +243,8 @@ banner.textContent = results.map((r) => (r.error ? `✗ ${stepSummary(r.step)}: 
 });
 root.querySelectorAll('[data-draft-discard]').forEach((btn) => {
 btn.addEventListener('click', () => {
+const discarded = data.captureDrafts.find((d) => d.id === btn.dataset.draftDiscard);
+if (discarded && discarded.aiRunId) recordOutcome(discarded.aiRunId, { steps: discarded.steps }, null);
 data.captureDrafts = data.captureDrafts.filter((d) => d.id !== btn.dataset.draftDiscard);
 queueSave();
 renderCaptureDrafts();
@@ -255,8 +259,10 @@ async function createCaptureDraft(rawText, source) {
 const text = String(rawText || '').trim();
 if (!text) return null;
 const { parseCaptureIntent } = await import('../ai.js');
-const { steps } = await parseCaptureIntent(text);
-const draft = blankCaptureDraft({ rawText: text, steps, source: source || null });
+const { steps, runId } = await parseCaptureIntent(text);
+// aiRunId ties the draft back to its logged AI run (js/airuns.js), so
+// Confirm or Discard can record what happened to the proposal.
+const draft = blankCaptureDraft({ rawText: text, steps, source: source || null, aiRunId: runId || '' });
 data.captureDrafts.unshift(draft);
 queueSave();
 renderCaptureDrafts();

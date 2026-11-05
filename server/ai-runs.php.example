@@ -1,0 +1,317 @@
+<?php
+declare(strict_types=1);
+
+/**
+ * AI run log: one row per Claude call the dashboard makes (js/ai.js), so a
+ * flow's results can be rated and later replayed against a newer model as
+ * test data (js/airuns.js, Settings -> API usage -> AI runs).
+ *
+ * The prompt, the response and what you finally saved are sealed by the
+ * client with the sync key (AES-GCM envelope, js/cryptobox.js) before they
+ * are sent, so this file only ever stores ciphertext for them. The listing
+ * fields (time, flow, model, outcome, rating, tokens) are plain so the
+ * server can count and prune without the key.
+ *
+ *   GET  ?ping                                  -> {ok, version, user}
+ *   GET  ?list[&flow=][&model=][&outcome=][&before=<at>][&limit=n]
+ *                                               -> {runs:[meta...], more}
+ *   GET  ?get=<id>                              -> {run: meta + payload, outcomePayload, ratePayload}
+ *   GET  ?stats                                 -> {flows:[{flow, model, runs, kept, edited, discarded, up, down, lastAt, tokensIn, tokensOut}]}
+ *   POST ?action=log      {runs:[{id, at, flow, model, build, tools, tokensIn, tokensOut, ms, error, fileIds, payload}]}
+ *                                               -> {ok, stored, pruned, deletedFileIds}
+ *   POST ?action=outcome  {id, outcome: kept|edited|discarded, payload}
+ *   POST ?action=rate     {id, rating: 1|-1|0, payload}
+ *   POST ?action=delete   {id}                  -> {ok, deletedFileIds}
+ *
+ * Retention, applied on every log: a run is deleted only when it is older
+ * than RETAIN_DAYS, has no rating, its outcome is not "edited", and it is not
+ * among the newest KEEP_PER_FLOW runs of its flow. So every flow always keeps
+ * a test set, and everything you rated or corrected is kept for good.
+ *
+ * Upload next to sync.php and records.php. No configuration needed: it reuses
+ * auth.php, like records.php. The database is created one directory above
+ * this script (outside public_html on cPanel).
+ */
+
+// ---- Configuration ---------------------------------------------------
+
+// Leave as a placeholder to use auth.php's master secret and device tokens.
+$SECRET = 'PUT-A-LONG-RANDOM-STRING-HERE';
+
+$STORE_FILE = dirname(__DIR__) . '/dashboard-ai-runs.sqlite';
+
+// Must match sync.php's own $ALLOWED_ORIGINS.
+$ALLOWED_ORIGINS = [
+    'https://philgewhite-maker.github.io',
+    'http://localhost:8743',
+];
+
+// ---- End of configuration --------------------------------------------
+
+const AIRUNS_VERSION = 1;
+const RETAIN_DAYS = 365;
+const KEEP_PER_FLOW = 50;
+const MAX_BODY_BYTES = 16 * 1024 * 1024;
+const MAX_LOG_BATCH = 100;
+const DEFAULT_PAGE = 50;
+const MAX_PAGE = 500;
+
+if (!defined('AIRUNS_NO_MAIN')) {
+    $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+    if ($origin !== '' && in_array($origin, $ALLOWED_ORIGINS, true)) {
+        header('Access-Control-Allow-Origin: ' . $origin);
+        header('Vary: Origin');
+    }
+    header('Access-Control-Allow-Headers: Content-Type, X-Sync-Secret');
+    header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+    header('Access-Control-Max-Age: 86400');
+    header('Content-Type: application/json');
+    header('Cache-Control: no-store');
+    if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
+        http_response_code(204);
+        exit;
+    }
+}
+
+function air_fail(int $code, string $message): void {
+    http_response_code($code);
+    echo json_encode(['error' => $message]);
+    exit;
+}
+
+function air_valid_id(string $id): bool {
+    return preg_match('/^[A-Za-z0-9_.:-]{1,80}$/', $id) === 1;
+}
+
+/** Same rule as records.php: master secret -> "owner", a device -> its userId. */
+function air_user_for(string $provided, ?string $localSecret): ?string {
+    global $DASH_DEVICES_FILE;
+    $auth = dash_authorise($provided, $localSecret);
+    if (!$auth['ok']) return null;
+    if ($auth['via'] === 'master') return 'owner';
+    $device = dash_find_device(dash_devices_read($DASH_DEVICES_FILE)['devices'], $provided);
+    $user = is_array($device) ? (string) ($device['userId'] ?? '') : '';
+    if ($user === '') return 'owner';
+    return preg_match('/^[A-Za-z0-9_-]{1,64}$/', $user) === 1 ? $user : null;
+}
+
+function air_open(string $file): PDO {
+    $pdo = new PDO('sqlite:' . $file, null, null, [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+    ]);
+    @chmod($file, 0600);
+    $pdo->exec('PRAGMA journal_mode = WAL');
+    $pdo->exec('PRAGMA busy_timeout = 5000');
+    $pdo->exec('PRAGMA synchronous = NORMAL');
+    $pdo->exec('CREATE TABLE IF NOT EXISTS runs (
+        user_id TEXT NOT NULL,
+        id TEXT NOT NULL,
+        at TEXT NOT NULL,
+        flow TEXT NOT NULL,
+        model TEXT NOT NULL,
+        build TEXT NOT NULL DEFAULT \'\',
+        tools INTEGER NOT NULL DEFAULT 0,
+        tokens_in INTEGER NOT NULL DEFAULT 0,
+        tokens_out INTEGER NOT NULL DEFAULT 0,
+        ms INTEGER NOT NULL DEFAULT 0,
+        error TEXT,
+        file_ids TEXT NOT NULL DEFAULT \'[]\',
+        payload TEXT NOT NULL,
+        outcome TEXT,
+        outcome_at TEXT,
+        outcome_payload TEXT,
+        rating INTEGER,
+        rated_at TEXT,
+        rate_payload TEXT,
+        PRIMARY KEY (user_id, id)
+    )');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS runs_by_flow ON runs (user_id, flow, at)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS runs_by_at ON runs (user_id, at)');
+    return $pdo;
+}
+
+function air_meta(array $r): array {
+    return [
+        'id' => $r['id'], 'at' => $r['at'], 'flow' => $r['flow'], 'model' => $r['model'], 'build' => $r['build'],
+        'tools' => (bool) $r['tools'], 'tokensIn' => (int) $r['tokens_in'], 'tokensOut' => (int) $r['tokens_out'],
+        'ms' => (int) $r['ms'], 'error' => $r['error'], 'fileIds' => json_decode($r['file_ids'] ?: '[]'),
+        'outcome' => $r['outcome'], 'outcomeAt' => $r['outcome_at'],
+        'rating' => $r['rating'] === null ? null : (int) $r['rating'], 'ratedAt' => $r['rated_at'],
+    ];
+}
+
+/** Rows that a client sent are stored as-is; payloads are opaque JSON (ciphertext). */
+function air_log(PDO $pdo, string $user, array $runs): array {
+    $ins = $pdo->prepare('INSERT OR IGNORE INTO runs (user_id, id, at, flow, model, build, tools, tokens_in, tokens_out, ms, error, file_ids, payload)
+        VALUES (:u, :id, :at, :flow, :model, :build, :tools, :ti, :to, :ms, :err, :files, :payload)');
+    $stored = 0;
+    $pdo->exec('BEGIN IMMEDIATE');
+    try {
+        foreach ($runs as $run) {
+            $run = is_object($run) ? (array) $run : (is_array($run) ? $run : []);
+            $id = (string) ($run['id'] ?? '');
+            $flow = substr(trim((string) ($run['flow'] ?? '')), 0, 120);
+            if (!air_valid_id($id) || $flow === '' || !array_key_exists('payload', $run)) continue;
+            $files = array_values(array_filter(array_map('strval', (array) ($run['fileIds'] ?? [])), 'air_valid_id'));
+            $ins->execute([
+                ':u' => $user, ':id' => $id,
+                ':at' => substr((string) ($run['at'] ?? gmdate('c')), 0, 40),
+                ':flow' => $flow, ':model' => substr((string) ($run['model'] ?? ''), 0, 80),
+                ':build' => substr((string) ($run['build'] ?? ''), 0, 20),
+                ':tools' => !empty($run['tools']) ? 1 : 0,
+                ':ti' => (int) ($run['tokensIn'] ?? 0), ':to' => (int) ($run['tokensOut'] ?? 0), ':ms' => (int) ($run['ms'] ?? 0),
+                ':err' => isset($run['error']) && $run['error'] !== null ? substr((string) $run['error'], 0, 500) : null,
+                ':files' => json_encode($files),
+                ':payload' => json_encode($run['payload'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+            ]);
+            $stored += $ins->rowCount();
+        }
+        $pdo->exec('COMMIT');
+    } catch (Throwable $e) {
+        $pdo->exec('ROLLBACK');
+        throw $e;
+    }
+    return ['ok' => true, 'stored' => $stored] + air_prune($pdo, $user, gmdate('c', time() - RETAIN_DAYS * 86400));
+}
+
+/** See the retention rule in the header. Returns the uploaded files the deleted runs used. */
+function air_prune(PDO $pdo, string $user, string $cutoff): array {
+    $sel = $pdo->prepare('SELECT id, file_ids FROM runs AS r
+        WHERE r.user_id = :u AND r.at < :cut AND r.rating IS NULL AND (r.outcome IS NULL OR r.outcome != \'edited\')
+          AND r.id NOT IN (SELECT r2.id FROM runs AS r2 WHERE r2.user_id = r.user_id AND r2.flow = r.flow ORDER BY r2.at DESC LIMIT ' . KEEP_PER_FLOW . ')');
+    $sel->execute([':u' => $user, ':cut' => $cutoff]);
+    $doomed = $sel->fetchAll();
+    $files = [];
+    if ($doomed) {
+        $del = $pdo->prepare('DELETE FROM runs WHERE user_id = :u AND id = :id');
+        $pdo->exec('BEGIN IMMEDIATE');
+        foreach ($doomed as $d) {
+            $del->execute([':u' => $user, ':id' => $d['id']]);
+            foreach ((array) json_decode($d['file_ids'] ?: '[]') as $f) $files[] = (string) $f;
+        }
+        $pdo->exec('COMMIT');
+    }
+    return ['pruned' => count($doomed), 'deletedFileIds' => $files];
+}
+
+function air_set(PDO $pdo, string $user, string $id, array $cols): bool {
+    $sets = [];
+    $args = [':u' => $user, ':id' => $id];
+    foreach ($cols as $k => $v) { $sets[] = "$k = :$k"; $args[":$k"] = $v; }
+    $st = $pdo->prepare('UPDATE runs SET ' . implode(', ', $sets) . ' WHERE user_id = :u AND id = :id');
+    $st->execute($args);
+    return $st->rowCount() > 0;
+}
+
+function air_list(PDO $pdo, string $user, array $q): array {
+    $where = ['user_id = :u'];
+    $args = [':u' => $user];
+    foreach (['flow' => 'flow', 'model' => 'model', 'outcome' => 'outcome'] as $param => $col) {
+        if (isset($q[$param]) && $q[$param] !== '') { $where[] = "$col = :$param"; $args[":$param"] = (string) $q[$param]; }
+    }
+    if (!empty($q['before'])) { $where[] = 'at < :before'; $args[':before'] = (string) $q['before']; }
+    $limit = max(1, min(MAX_PAGE, (int) ($q['limit'] ?? DEFAULT_PAGE)));
+    $st = $pdo->prepare('SELECT * FROM runs WHERE ' . implode(' AND ', $where) . ' ORDER BY at DESC LIMIT ' . ($limit + 1));
+    $st->execute($args);
+    $rows = $st->fetchAll();
+    $more = count($rows) > $limit;
+    if ($more) array_pop($rows);
+    return ['runs' => array_map('air_meta', $rows), 'more' => $more];
+}
+
+function air_get(PDO $pdo, string $user, string $id): ?array {
+    $st = $pdo->prepare('SELECT * FROM runs WHERE user_id = :u AND id = :id');
+    $st->execute([':u' => $user, ':id' => $id]);
+    $r = $st->fetch();
+    if (!$r) return null;
+    return ['run' => air_meta($r) + ['payload' => json_decode($r['payload'])],
+        'outcomePayload' => $r['outcome_payload'] === null ? null : json_decode($r['outcome_payload']),
+        'ratePayload' => $r['rate_payload'] === null ? null : json_decode($r['rate_payload'])];
+}
+
+function air_stats(PDO $pdo, string $user): array {
+    $st = $pdo->prepare("SELECT flow, model, COUNT(*) AS runs,
+        SUM(outcome = 'kept') AS kept, SUM(outcome = 'edited') AS edited, SUM(outcome = 'discarded') AS discarded,
+        SUM(rating = 1) AS up, SUM(rating = -1) AS down, MAX(at) AS last_at,
+        SUM(tokens_in) AS tokens_in, SUM(tokens_out) AS tokens_out, SUM(error IS NOT NULL) AS errors
+        FROM runs WHERE user_id = :u GROUP BY flow, model ORDER BY flow, model");
+    $st->execute([':u' => $user]);
+    return ['flows' => array_map(fn($r) => [
+        'flow' => $r['flow'], 'model' => $r['model'], 'runs' => (int) $r['runs'],
+        'kept' => (int) $r['kept'], 'edited' => (int) $r['edited'], 'discarded' => (int) $r['discarded'],
+        'up' => (int) $r['up'], 'down' => (int) $r['down'], 'errors' => (int) $r['errors'], 'lastAt' => $r['last_at'],
+        'tokensIn' => (int) $r['tokens_in'], 'tokensOut' => (int) $r['tokens_out'],
+    ], $st->fetchAll())];
+}
+
+if (defined('AIRUNS_NO_MAIN')) return;
+
+// ---- Request handling --------------------------------------------------
+
+require_once __DIR__ . '/auth.php';
+if (!dash_secret_configured($SECRET)) air_fail(500, 'Server not configured: set $DASH_MASTER_SECRET in auth.php');
+if (!extension_loaded('pdo_sqlite')) air_fail(500, 'This host has no pdo_sqlite extension');
+
+$user = air_user_for((string) ($_SERVER['HTTP_X_SYNC_SECRET'] ?? ''), $SECRET);
+if ($user === null) air_fail(401, 'Bad or missing sync secret');
+
+$enc = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE;
+try {
+    $pdo = air_open($STORE_FILE);
+    $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+    if ($method === 'GET') {
+        if (isset($_GET['ping'])) { echo json_encode(['ok' => true, 'version' => AIRUNS_VERSION, 'user' => $user]); exit; }
+        if (isset($_GET['stats'])) { echo json_encode(air_stats($pdo, $user), $enc); exit; }
+        if (isset($_GET['get'])) {
+            $id = (string) $_GET['get'];
+            if (!air_valid_id($id)) air_fail(400, 'Bad id');
+            $row = air_get($pdo, $user, $id);
+            if ($row === null) air_fail(404, 'No such run');
+            echo json_encode($row, $enc);
+            exit;
+        }
+        if (isset($_GET['list'])) { echo json_encode(air_list($pdo, $user, $_GET), $enc); exit; }
+        air_fail(400, 'Use ?ping, ?list, ?get=<id> or ?stats');
+    }
+    if ($method !== 'POST') air_fail(405, 'Use GET or POST');
+    $raw = file_get_contents('php://input') ?: '';
+    if (strlen($raw) > MAX_BODY_BYTES) air_fail(413, 'Body too large');
+    $body = json_decode($raw);
+    if (!is_object($body)) air_fail(400, 'Expected a JSON object');
+    $action = (string) ($_GET['action'] ?? '');
+    if ($action === 'log') {
+        $runs = $body->runs ?? null;
+        if (!is_array($runs) || !array_is_list($runs)) air_fail(400, 'Expected {runs:[...]}');
+        if (count($runs) > MAX_LOG_BATCH) air_fail(413, 'At most ' . MAX_LOG_BATCH . ' runs per request');
+        echo json_encode(air_log($pdo, $user, $runs), $enc);
+        exit;
+    }
+    $id = (string) ($body->id ?? '');
+    if (!air_valid_id($id)) air_fail(400, 'Bad id');
+    if ($action === 'outcome') {
+        $outcome = (string) ($body->outcome ?? '');
+        if (!in_array($outcome, ['kept', 'edited', 'discarded'], true)) air_fail(400, 'outcome must be kept, edited or discarded');
+        $ok = air_set($pdo, $user, $id, ['outcome' => $outcome, 'outcome_at' => gmdate('c'),
+            'outcome_payload' => isset($body->payload) ? json_encode($body->payload, $enc) : null]);
+        echo json_encode(['ok' => $ok]);
+        exit;
+    }
+    if ($action === 'rate') {
+        $rating = (int) ($body->rating ?? 0);
+        if (!in_array($rating, [1, -1, 0], true)) air_fail(400, 'rating must be 1, -1 or 0');
+        $ok = air_set($pdo, $user, $id, ['rating' => $rating === 0 ? null : $rating, 'rated_at' => $rating === 0 ? null : gmdate('c'),
+            'rate_payload' => isset($body->payload) && $rating !== 0 ? json_encode($body->payload, $enc) : null]);
+        echo json_encode(['ok' => $ok]);
+        exit;
+    }
+    if ($action === 'delete') {
+        $row = air_get($pdo, $user, $id);
+        $pdo->prepare('DELETE FROM runs WHERE user_id = :u AND id = :id')->execute([':u' => $user, ':id' => $id]);
+        echo json_encode(['ok' => true, 'deletedFileIds' => $row ? $row['run']['fileIds'] : []], $enc);
+        exit;
+    }
+    air_fail(400, 'Unknown action');
+} catch (Throwable $e) {
+    air_fail(500, 'Store error: ' . $e->getMessage());
+}

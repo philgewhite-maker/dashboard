@@ -8,6 +8,7 @@ import { connectionPickerHtml, bindConnPickers } from './connections.js';
 import { MAIL_ACTIONS } from './mailActions.js';
 import { runOutcomeOnMessage, processMailRules } from './mailRules.js';
 import { CAPTURE_OUTCOMES, outcomeLabelWithCost, matchCaptureRule } from './captureOutcomes.js';
+import { recordOutcome } from '../airuns.js';
 
 // Where the Google sign-in lives -- a real link, not prose naming it.
 const SIGN_IN_LINK_HTML = 'Sign in to Google at the <span class="inline-goto-link" data-goto-tab="overview" data-goto-target="#google-bar">top of Overview</span> first.';
@@ -875,6 +876,9 @@ const task = captureTask({
 title: result.title || btn.dataset.mailSubject, notes: result.notes || '', due: result.due || '', link: result.link || '',
 source: { kind: 'mail', label: result.title || btn.dataset.mailSubject, url: btn.dataset.mailUrl },
 });
+// Created straight from the suggestion, with no review step: recorded as kept.
+recordOutcome(result.runId, { title: result.title, notes: result.notes, due: result.due, link: result.link },
+{ title: task.title, notes: task.notes, due: task.due, link: task.link }, { taskId: task.id, reviewed: false });
 bindTaskChips();
 say('');
 if (status) status.innerHTML = `Added ${taskChipHtml(task)}.`;
@@ -1167,6 +1171,9 @@ if (dueInput) dueInput.value = result.due || '';
 if (addBtn) {
 addBtn.dataset.mailLink = result.link || '';
 addBtn.dataset.mailAttachments = JSON.stringify(attachments || []);
+// What the AI proposed, so saving can record kept vs edited (js/airuns.js).
+addBtn.dataset.aiRunId = result.runId || '';
+addBtn.dataset.aiSuggested = JSON.stringify({ title: result.title, notes: result.notes, due: result.due, link: result.link });
 }
 say('Filled in — review, then Add task.');
 });
@@ -1183,6 +1190,12 @@ const status = list.querySelector(`[data-mail-ai-task-status="${CSS.escape(id)}"
 const say = (msg) => { if (status) status.textContent = msg; };
 if (!title) { say('Give the task a title first.'); return; }
 const task = captureTask({ title, notes, due, link: btn.dataset.mailLink || '', source: { kind: 'mail', label: title, url: btn.dataset.mailUrl } });
+if (btn.dataset.aiRunId) {
+let suggested = null;
+try { suggested = JSON.parse(btn.dataset.aiSuggested || 'null'); } catch (err) { /* written above as JSON */ }
+recordOutcome(btn.dataset.aiRunId, suggested, { title, notes, due, link: btn.dataset.mailLink || '' }, { taskId: task.id });
+btn.dataset.aiRunId = '';
+}
 bindTaskChips();
 if (status) status.innerHTML = `Added ${taskChipHtml(task)}.`;
 btn.disabled = true;
@@ -1219,6 +1232,10 @@ if (titleInput && result.title) titleInput.value = result.title;
 if (notesInput && result.notes) notesInput.value = result.notes;
 if (dueInput && result.due) dueInput.value = result.due;
 if (applyBtn && result.link) applyBtn.dataset.mailLink = result.link;
+if (applyBtn) {
+applyBtn.dataset.aiRunId = result.runId || '';
+applyBtn.dataset.aiSuggested = JSON.stringify({ title: result.title, notes: result.notes, due: result.due });
+}
 say('Filled in — review, then Apply.');
 });
 });
@@ -1237,6 +1254,12 @@ if (!title) { say('Give the task a title first.'); return; }
 task.title = title;
 task.notes = list.querySelector(`[data-mail-improve-task-notes="${CSS.escape(id)}"]`)?.value || '';
 task.due = list.querySelector(`[data-mail-improve-task-due="${CSS.escape(id)}"]`)?.value || '';
+if (btn.dataset.aiRunId) {
+let suggested = null;
+try { suggested = JSON.parse(btn.dataset.aiSuggested || 'null'); } catch (err) { /* written above as JSON */ }
+recordOutcome(btn.dataset.aiRunId, suggested, { title: task.title, notes: task.notes, due: task.due }, { taskId: task.id });
+btn.dataset.aiRunId = '';
+}
 // Never clobbers a reference link the task already has with a blank --
 // only ever fills one in if AI actually found one.
 if (btn.dataset.mailLink) task.link = btn.dataset.mailLink;

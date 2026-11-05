@@ -7,6 +7,8 @@ import { initLettingOccupancy } from './features/lettingoccupancy.js';
 import { initMailHistory } from './features/mailledger.js';
 import { initAutoLink } from './features/autolink.js';
 import { initDayQueue } from './features/dayqueue.js';
+import { initAiRuns } from './airuns.js';
+import { initAiRunsView } from './features/airunsview.js';
 import { initRenderBus } from './render-bus.js';
 import { loadData, setSaveStatusHandler, setExternalUpdateHandler, flushSave } from './state.js';
 import { renderAll } from './render-all.js';
@@ -362,6 +364,8 @@ initActivity();
 initLettingOccupancy();
 initMailHistory();
 initAutoLink();
+initAiRuns();
+initAiRunsView();
 initDayQueue();
 initRenderBus();
 }

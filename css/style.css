@@ -4440,3 +4440,11 @@ background:var(--slate-bg);color:var(--slate);
 .dq-note{margin:0;}
 .dq-actions{display:flex;flex-wrap:wrap;align-items:center;gap:6px;}
 .dq-chat{text-decoration:none;}
+/* AI runs (Settings -> API usage) */
+.airuns-table{border-collapse:collapse;width:100%;font-size:13px;}
+.airuns-table th,.airuns-table td{text-align:left;padding:4px 8px;border-bottom:1px solid var(--line);}
+.airuns-table td.num{text-align:right;font-variant-numeric:tabular-nums;}
+.airuns-link{color:var(--slate);cursor:pointer;text-decoration:underline;}
+.airuns-run{padding:6px 0;border-top:1px solid var(--line);display:flex;flex-wrap:wrap;gap:6px 10px;align-items:baseline;}
+.airuns-run>[data-airuns-detail]{flex-basis:100%;}
+.airuns-pre{white-space:pre-wrap;max-height:260px;overflow:auto;font-size:12px;background:var(--paper);border:1px solid var(--line);border-radius:6px;padding:8px;}

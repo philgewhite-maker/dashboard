@@ -7,6 +7,7 @@
 import { getLocalSettings, setLocalSetting, data, queueSave } from './state.js';
 import { fileToBase64, loadImage, cropThumbnailToBlob, hashFile, captureDateOf, betterCaptureDate, ensureBrowserReadableImage, todayStr } from './utils.js';
 import { parseCacheGet, parseCachePut } from './db.js';
+import { newRunId, logRun } from './airuns.js';
 
 const API_URL = 'https://api.anthropic.com/v1/messages';
 // Every model a feature is CONFIGURED to call: each model constant passes
@@ -260,6 +261,12 @@ const apiKey = (settings.anthropicApiKey || '').trim();
 if (!apiKey) throw new MissingKeyError();
 const model = modelOverride || settings.anthropicModel || DEFAULT_MODEL;
 const effortToSend = effort || (/^claude-opus-5-5/.test(model) ? 'high' : '');
+// Every call is logged (js/airuns.js) with what was sent and what came back,
+// so a flow can be rated and its inputs replayed on a newer model. Logging
+// only queues; it can never fail or slow the call itself.
+const run = { id: newRunId(), flow: purpose || 'other', model, effort: effortToSend, maxTokens: maxTokens || 1500, tools: tools || null, content };
+const startedAt = performance.now();
+const logFailure = (message, extra = {}) => logRun({ ...run, ...extra, ms: performance.now() - startedAt, error: String(message || 'failed').slice(0, 500) });
 
 // No call here used to have any time limit, so a stalled one left "Reading…"
 // on screen forever. Web-search calls legitimately run for minutes; plain
@@ -303,6 +310,7 @@ messages: [{ role: 'user', content }],
 });
 } catch (networkErr) {
 clearTimeout(timer);
+logFailure(networkErr && networkErr.name === 'AbortError' ? `timed out after ${Math.round(timeoutMs / 1000)}s` : `network: ${networkErr && networkErr.message}`);
 if (networkErr && networkErr.name === 'AbortError') {
 throw new Error(`The AI didn't answer within ${Math.round(timeoutMs / 1000)}s, so the request was stopped. Try again.`);
 }
@@ -319,6 +327,7 @@ clearTimeout(timer);
 console.error(`Anthropic API error ${res.status}:`, body);
 let detail = body;
 try { detail = JSON.parse(body).error?.message || body; } catch (e) { /* not JSON, use as-is */ }
+logFailure(`HTTP ${res.status}: ${detail.slice(0, 300)}`);
 throw new Error(`Anthropic API error ${res.status}: ${detail.slice(0, 300)}`);
 }
 let result;
@@ -348,8 +357,10 @@ const text = tools
 // Only Haiku 5.5 among the models this file calls can decline like this
 // (an ordinary HTTP 200, no error) -- a bare "No text in response" would
 // have been genuinely misleading here, since nothing actually broke.
+const runResult = { stopReason: result.stop_reason || '', usage: result.usage, responseText: text || null };
 if (!text && result.stop_reason === 'refusal') {
 const category = (result.stop_details && result.stop_details.category) || 'unspecified';
+logFailure(`refusal (${category})`, runResult);
 throw new Error(`Claude declined this request (${category}) rather than erroring — try different wording or content.`);
 }
 if (!text) {
@@ -360,11 +371,16 @@ if (!text) {
 // callers surface straight to the user) now carry them.
 const blockTypes = (result.content || []).map((b) => b.type).join(', ') || 'none';
 console.error('Anthropic response had no text block:', result);
+logFailure(`no text (stop_reason ${result.stop_reason || 'unknown'}, content ${blockTypes})`, runResult);
 throw new Error(`No text in response (stop_reason: ${result.stop_reason || 'unknown'}, content: ${blockTypes})`);
 }
 try {
-return extractJson(text);
+const parsed = extractJson(text);
+logRun({ ...run, ...runResult, parsed: parsed.data, truncated: parsed.truncated, ms: performance.now() - startedAt });
+// runId lets the screen that uses this answer record what you did with it.
+return { ...parsed, runId: run.id };
 } catch (parseErr) {
+logFailure(`unparseable response${result.stop_reason === 'max_tokens' ? ' (cut off at max_tokens)' : ''}`, runResult);
 console.error('Could not parse JSON from Claude response:', text);
 // Confirmed live: a wellness extraction failed with a raw "Response
 // wasn't JSON" dump of a cut-off object -- the real cause (hit
@@ -1890,11 +1906,11 @@ return `Today is ${todayStr()}. Turn this instruction into an ordered list of st
 async function parseCaptureIntent(text) {
 const { data: appData } = await import('./state.js');
 const trips = (appData.trips || []).map((t) => ({ id: t.id, title: t.title, startDate: t.startDate, endDate: t.endDate }));
-const { data } = await callAnthropic(
+const { data, runId } = await callAnthropic(
 [{ type: 'text', text: captureIntentPrompt(text, trips) }],
 CAPTURE_INTENT_MAX_TOKENS, CAPTURE_INTENT_MODEL, 'Capture intent parsing', null, 'low',
 );
-return { steps: Array.isArray(data && data.steps) ? data.steps : [] };
+return { steps: Array.isArray(data && data.steps) ? data.steps : [], runId };
 }
 
 // ---- Wellness screenshot (Samsung Health) ----
@@ -2339,12 +2355,13 @@ Propose a task for this: a short, specific title (not just the subject line rest
 ${actionLinkInstruction()}
 
 Reply with ONLY a JSON object, no other text, no markdown fences: {"title":"","notes":"","due":"","link":""} -- due is an ISO yyyy-mm-dd or "".`;
-const { data: raw } = await callTextJson(prompt, MAIL_EXTRACT_MAX_TOKENS, MAIL_EXTRACT_MODEL, 'Task email', 'low');
+const { data: raw, runId } = await callTextJson(prompt, MAIL_EXTRACT_MAX_TOKENS, MAIL_EXTRACT_MODEL, 'Task email', 'low');
 return {
 title: String((raw && raw.title) || '').trim(),
 notes: String((raw && raw.notes) || '').trim(),
 due: String((raw && raw.due) || '').trim(),
 link: String((raw && raw.link) || '').trim(),
+runId,
 };
 }
 
