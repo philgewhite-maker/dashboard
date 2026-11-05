@@ -78,7 +78,7 @@ a{color:var(--accent)}
 <div class="wrap">
 <header>
   <h1>Dashboard data model</h1>
-  <p class="lede">What the app stores, how the pieces refer to each other, where the same fact is kept twice, and where text stands in for structure. Built from the code and from a read of the live document (field names, types, fill rates and reference checks; no personal values). Verified against build <b>v741</b>.</p>
+  <p class="lede">What the app stores, how the pieces refer to each other, where the same fact is kept twice, and where text stands in for structure. Built from the code and from a read of the live document (field names, types, fill rates and reference checks; no personal values). Verified against build <b>v744</b>.</p>
   <ul class="stats">
     <li><b>109</b><span>top-level keys</span></li>
     <li><b>597</b><span>connections</span></li>
@@ -110,6 +110,7 @@ a{color:var(--accent)}
     <p class="fix"><b>Added in v739.</b> Duplicate stays (same room and dates, from two devices adding one feed event or Airbnb giving a booking a second calendar id) are merged on every load into one stay, keeping the calendar ids as <code>altUids</code> so the feed never adds it again; stays added from the feed take their id from the listing and calendar id, so two devices write the same record.</p>
     <p class="fix"><b>Added in v740.</b> A booking code belongs to one booking: the guest-name email sync skips an email whose code is already on another stay (it matched only by arrival day, and copied one booking's name, payout and code onto the same dates on a second listing), and a load-time check clears a code and the details copied with it from any later holder.</p>
     <p class="fix"><b>Added in v741.</b> A feed stay is "unconfirmed" until a confirmation email, a name or an income vouches for it (derived, no new field): Airbnb marks dates "Reserved" for an enquiry it is holding as well as for a booking. An unconfirmed stay shows a badge, gets no nudges, and if its dates drop off the feed before it starts and nothing refers to it, it is forgotten instead of being recorded as a cancelled booking.</p>
+    <p class="fix"><b>Added in v744.</b> Booking dates come from the inbox: the Airbnb sync reads every "Reservation confirmed" email (they go back to April 2024; each is dated the day the booking was made) and sets <code>confirmedOn</code> on a stay with none, or <code>bookedOn</code> on an old income entry in the ledger that has no stay record, when exactly one fits the arrival date and first name. It runs at most once a day (<code>prefs.airbnbBookingDatesCheckedOn</code>). Stays the Airbnb migration rebuilt no longer claim their checkout date as the booking date. The Nights booked chart shows nights with no booking date as a shaded band instead of hiding the comparison.</p>
   </div>
 
   <div class="finding">

@@ -1942,6 +1942,56 @@ if (codes) queueSave();
 return { codes };
 }
 
+// Booking dates for stays that have none. Every "Reservation confirmed - Name arrives 27 Nov"
+// email is dated the day the booking was made, and its subject names the arrival day and month,
+// so an old stay can be dated from the inbox without opening a single message: the arrival
+// date is the first one on or after the email's date with that day and month, and a stay is
+// dated only when exactly one stay with that check-in (and a matching first name) fits. Once a
+// day at most, since it reads the whole history.
+async function backfillBookingDates() {
+const todayKey = todayStr();
+if (data.prefs.airbnbBookingDatesCheckedOn === todayKey) return { dates: 0 };
+const need = () => data.airbnbReservations.filter((r) => !r.confirmedOn && (r.source || 'ics') === 'ics' && r.checkin);
+// Older stays that exist only as an income entry in Letting income (no stay record): the entry
+// carries the check-in (or the nights to count back from its date) and the guest in its note.
+const liveIds = new Set(data.airbnbReservations.map((r) => r.id));
+const ledgerCheckin = (e) => e.startDate || (Number(e.nights) > 0 && e.date ? dateStrAdd(e.date, -Number(e.nights)) : '');
+const needLedger = () => (data.lettingLedger || []).filter((e) => !e.bookedOn && (e.kind === 'earned' || (e.kind === 'accrual' && !liveIds.has(e.reservationId))) && ledgerCheckin(e));
+if ((!need().length && !needLedger().length) || !(await canAttemptGoogleAction())) return { dates: 0 };
+const { fetchMailSearches } = await import('../googlemail.js');
+let sections;
+try {
+sections = await fetchMailSearches([{ kind: 'query', value: GUEST_NAME_QUERY, maxDays: 0, maxEvents: 150 }], 150);
+} catch (err) {
+console.error('Booking-date email search failed:', err);
+return { dates: 0 };
+}
+const iso = (y, mo, d) => `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+const ascii = (t) => !/[^\x00-\x7F]/.test(t);
+let dates = 0;
+for (const m of sections[0]?.messages || []) {
+const sm = GUEST_NAME_SUBJECT_RE.exec(String(m.subject || '').trim());
+const arrival = sm && parseArrivalDayMonth(sm[2]);
+const sent = new Date(m.date);
+if (!arrival || Number.isNaN(sent.getTime())) continue;
+const booked = sent.toISOString().slice(0, 10);
+let arrivalDate = iso(sent.getUTCFullYear(), arrival.month, arrival.day);
+if (arrivalDate < booked) arrivalDate = iso(sent.getUTCFullYear() + 1, arrival.month, arrival.day);
+const first = sm[1].trim().split(/\s+/)[0].toLowerCase();
+const fits = (r) => !r.guestName || !ascii(r.guestName) || !ascii(first) || r.guestName.toLowerCase().startsWith(first);
+const candidates = need().filter((r) => r.checkin === arrivalDate && fits(r));
+if (candidates.length === 1) { candidates[0].confirmedOn = booked; dates++; continue; }
+if (candidates.length) continue;
+// An income entry's note is "room, guest" for a stay charged by the app, or just the guest.
+const entryFits = (e) => { const g = String(e.note || '').split(', ').pop().trim().toLowerCase(); return !g || !ascii(g) || !ascii(first) || g.startsWith(first) || g.includes(first); };
+const entries = needLedger().filter((e) => ledgerCheckin(e) === arrivalDate && entryFits(e));
+if (entries.length === 1) { entries[0].bookedOn = booked; dates++; }
+}
+data.prefs.airbnbBookingDatesCheckedOn = todayKey;
+queueSave();
+return { dates };
+}
+
 // Runs the search and fills in whatever it can match; never touches a
 // reservation that already has a name. A non-Latin name (the common case
 // this exists for) is romanized via ai.js -- only when actually needed,
@@ -2338,6 +2388,7 @@ await syncExternalBookings();
 t.step(6, STEPS, 'Reading booking confirmation emails for guest names…');
 const guestResult = await syncGuestNamesFromEmail();
 await backfillConfirmationCodes();
+const dateResult = await backfillBookingDates();
 renderAirbnb();
 loadAirbnbCalendarOptions({ silent: true });
 // Stripes live on the Planner tab -- dynamic import avoids a static
@@ -2351,6 +2402,7 @@ if (!failed.length) {
 const guestNote = guestResult.filled
 ? ` Filled in ${guestResult.filled} guest name${guestResult.filled === 1 ? '' : 's'} from email${guestResult.romanizeFailed ? ` (${guestResult.romanizeFailed} left in the original script — add an Anthropic key on THIS device in ${MISSING_KEY_LINK_HTML} to romanize ${guestResult.romanizeFailed === 1 ? 'it' : 'them'})` : ''}${guestResult.incomeFilled ? `, ${guestResult.incomeFilled} with the payout too` : ''}.`
 : '';
+const dateNote = dateResult.dates ? ` Dated ${dateResult.dates} older booking${dateResult.dates === 1 ? '' : 's'} from their confirmation emails (the Nights booked chart uses it).` : '';
 const cancelNote = cancelResult.posted
 ? ` Posted ${cancelResult.posted} cancellation payout${cancelResult.posted === 1 ? '' : 's'} to <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#letting-panel">Letting income</span>.`
 : '';
@@ -2383,7 +2435,7 @@ if (feedTotals.added) feedParts.push(`${feedTotals.added} new booking${feedTotal
 if (feedTotals.updated) feedParts.push(`${feedTotals.updated} changed`);
 if (feedTotals.removed) feedParts.push(`${feedTotals.removed} gone (cancelled or finished)`);
 const feedNote = feedParts.length ? feedParts.join(', ') + '.' : 'No change to bookings.';
-const message = `${feedNote}${guestNote}${cancelNote}${unownedNote}${refundNote}${refundProblemNote}${verifyNote}${stepErrorNote}${signedOutNote}`;
+const message = `${feedNote}${guestNote}${dateNote}${cancelNote}${unownedNote}${refundNote}${refundProblemNote}${verifyNote}${stepErrorNote}${signedOutNote}`;
 const letting = [{ tab: 'finances', target: '#letting-panel', label: 'Letting income' }];
 const payouts = (cancelResult.posted || 0) + (refundResult.posted || 0);
 // Payouts were posted to the ledger: refresh the Letting panel (and the loans that read it) now, not on reload.
@@ -2433,4 +2485,4 @@ queueSave();
 // stores, and each was wrong in a way that stayed invisible until a
 // round-trip through Google -- an end date a day out, a name silently
 // dropped, a title separator nobody types. Nothing else imports them.
-export { isLiveStay, notCancelled, renderAirbnb, renderAirbnbListings, initAirbnbListingsForm, initAirbnbSync, airbnbSegmentsForDay, renderAirbnbKeys, initAirbnbKeys, initKeysSettingsForm, initAirbnbAddBooking, eventDayRange, externalNameFromSummary, parseCleanerEventName };
+export { backfillBookingDates, isLiveStay, notCancelled, renderAirbnb, renderAirbnbListings, initAirbnbListingsForm, initAirbnbSync, airbnbSegmentsForDay, renderAirbnbKeys, initAirbnbKeys, initKeysSettingsForm, initAirbnbAddBooking, eventDayRange, externalNameFromSummary, parseCleanerEventName };

@@ -4456,7 +4456,7 @@ background:var(--slate-bg);color:var(--slate);
 /* Letting income: each ledger record is two lines. Top: channel mark, date, guest, then the two
    split amounts and the row controls. Bottom: payment type, room, nights, what the guest paid and
    the nightly average. Wraps on a phone instead of scrolling sideways. */
-#letting-list .letting-rec{padding:7px 0;border-top:1px solid var(--line);}
+#letting-list .letting-rec{padding:6px 0;border-top:1px solid var(--line);font-size:12px;}
 #letting-list .letting-rec:first-of-type{border-top:none;}
 #letting-list .letting-rec-top{display:flex;align-items:center;gap:6px 8px;flex-wrap:wrap;}
 #letting-list .letting-rec-logo{flex:0 0 18px;display:inline-flex;align-items:center;justify-content:center;}
@@ -4468,7 +4468,7 @@ background:var(--slate-bg);color:var(--slate);
 #letting-list .letting-rec-head{display:flex;justify-content:flex-end;gap:8px;padding-bottom:2px;}
 #letting-list .letting-rec-head>span{flex:0 0 auto;min-width:70px;text-align:right;}
 #letting-list .letting-rec-head>.letting-rec-ctl{min-width:0;}
-#letting-list .letting-rec-sub{display:flex;align-items:center;flex-wrap:wrap;gap:2px 10px;margin:3px 0 0 26px;font-size:12px;color:var(--muted);}
+#letting-list .letting-rec-sub{display:flex;align-items:center;flex-wrap:wrap;gap:2px 10px;margin:2px 0 0 26px;font-size:11px;color:var(--muted);}
 #letting-list .letting-rec-sub>span:not(.letting-kind){font-variant-numeric:tabular-nums;}
 #letting-list .letting-kind.accrual{background:var(--sage-bg);color:var(--sage);}
 #letting-list .letting-kind.payment{background:var(--slate-bg);color:var(--slate);}

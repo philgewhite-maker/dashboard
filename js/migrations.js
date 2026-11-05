@@ -200,6 +200,18 @@ function dedupeStays(doc) {
   return removed;
 }
 
+// A stay brought in by the Airbnb migration (accruedAt 'migrated') was given a createdAt that is
+// not when anything was first seen (its checkout date, or the day of the migration), and the
+// charts read createdAt as the booking date when there is no confirmedOn. With no real booking
+// date it is unknown, so the date is cleared and the stay shows as such on the booking chart.
+function repairMigratedBookingDates(doc) {
+  let n = 0;
+  (doc.airbnbReservations || []).forEach((r) => {
+    if (r.accruedAt === 'migrated' && !r.confirmedOn && r.createdAt) { r.createdAt = ''; n++; }
+  });
+  return n;
+}
+
 // A booking code belongs to one booking. Two stays holding the same code means
 // an email matched only by arrival day was copied onto a second stay (the same
 // booking showing on another listing's calendar). The earliest holder keeps
@@ -378,4 +390,4 @@ function migrateConnections(doc) {
   return report;
 }
 
-export { SCHEMA_VERSION, migrateStays, dedupeStays, unlinkCopiedCodes, dedupeAccruals, migrateVouchers, migrateProviders, linkProviders, providerMatches, PROVIDER_FIELDS, migrateConnections, parseVoucherValue, ensureProvider, canonicalName, providerIdFor, VOUCHER_UNITS };
+export { SCHEMA_VERSION, migrateStays, dedupeStays, unlinkCopiedCodes, repairMigratedBookingDates, dedupeAccruals, migrateVouchers, migrateProviders, linkProviders, providerMatches, PROVIDER_FIELDS, migrateConnections, parseVoucherValue, ensureProvider, canonicalName, providerIdFor, VOUCHER_UNITS };

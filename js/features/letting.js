@@ -728,7 +728,8 @@ const splitNote = e.kind === 'accrual' && noteParts.length > 1;
 const stayRoom = (data.airbnbListings || []).find((l) => l.id === e.listingId);
 const roomLabel = splitNote ? noteParts[0] : (isStayKind && stayRoom ? (stayRoom.label || stayRoom.prefix || '') : '');
 const guest = splitNote ? noteParts.slice(1).join(', ') : ledgerNoteFor(e);
-const logoCell = isIncomeKind
+// A refund is a guest refund Airbnb paid out of a booking, so it carries the same mark.
+const logoCell = isIncomeKind || e.kind === 'refund'
 ? (e.platform !== 'other' ? logoBadgeHtml(airbnbLogo, 'A', 'letting-platform-badge') : '<span class="letting-platform-other" title="Not through Airbnb">Other</span>')
 : '';
 const kindLabel = e.kind === 'accrual' ? 'income' : (e.kind || 'entry');
