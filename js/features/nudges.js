@@ -437,6 +437,7 @@ category: 'shopping',
 // render instead.
 function buildAirbnbNudges(pool) {
 data.airbnbReservations.forEach((r) => {
+if ((r.status || 'booked') !== 'booked') return; // completed and cancelled stays stay on file but need nothing doing
 const listing = data.airbnbListings.find((l) => l.id === r.listingId);
 if (!listing) return;
 const label = listing.label || listing.prefix || 'A listing';

@@ -110,8 +110,10 @@ const events = parseIcsReservations(text).filter((e) => e.checkout >= today);
 // from a friend on a real Airbnb listing, which the Settings tooltip
 // explicitly invites); certain the moment a booking can be typed in by
 // hand.
+// Completed stays are past and can't be in the feed again; a cancelled one
+// can (a feed hiccup, or the guest rebooked), and then comes back to booked.
 const existingByUid = new Map(
-data.airbnbReservations.filter((r) => r.listingId === listing.id && (r.source || 'ics') === 'ics' && !r.movedFrom).map((r) => [r.uid, r])
+data.airbnbReservations.filter((r) => r.listingId === listing.id && (r.source || 'ics') === 'ics' && !r.movedFrom && r.uid && r.status !== 'completed').map((r) => [r.uid, r])
 );
 // A booking moved to another listing by hand (see the room picker on a booking) still has its
 // event in this listing's feed; recognise it so the feed neither re-adds it here nor sweeps it.
@@ -127,70 +129,38 @@ return;
 }
 const existing = existingByUid.get(evUid);
 if (existing) {
+if (existing.status === 'cancelled') { existing.status = 'booked'; existing.cancelledOn = ''; updated++; }
 if (existing.checkin !== checkin || existing.checkout !== checkout) { noteDateChange(existing, checkin, checkout); existing.checkin = checkin; existing.checkout = checkout; updated++; }
 existingByUid.delete(evUid);
 } else {
 data.airbnbReservations.push(blankAirbnbReservation({ listingId: listing.id, uid: evUid, checkin, checkout }));
-// A booking that came back (a feed hiccup, or the guest rebooked the same dates)
-// is no longer a cancellation.
-if (Array.isArray(data.airbnbCancelledStays)) {
-data.airbnbCancelledStays = data.airbnbCancelledStays.filter((s) => !(s.listingId === listing.id && s.checkin === checkin && s.checkout === checkout));
-}
 added++;
 }
 });
-// Whatever's left in existingByUid is either a cancelled booking (isn't
-// in this sync's events at all any more) or one that's simply completed
-// since the last sync (past events are excluded above, so it can no
-// longer match anything) -- either way, gone.
+// Whatever booked stay is left has dropped out of the feed: past its
+// checkout it finished, otherwise it was cancelled. The record stays either
+// way (retireStay), so its income, refunds and every id pointing at it keep
+// working; past events are filtered out above, so nothing completed returns.
 let removed = 0;
-existingByUid.forEach((r) => {
-// A stay that ended in the last month and hasn't been charged yet stays
-// on file, so what it earned can still be typed in (or arrive from the
-// payout email) before it turns into a ledger row. Without this a stay
-// that ended while the app was closed could be swept out before its
-// income was ever recorded.
-if (r.checkout && r.checkout < today && !r.accruedAt && r.checkout >= dateStrAdd(today, -AWAITING_INCOME_DAYS)) return;
-// A stay that has genuinely finished (not a cancelled future one) is
-// remembered minimally: Airbnb emails a guest refund AFTER checkout, and
-// matching it to a listing needs the stay's dates and listing.
-if (r.checkout && r.checkout < today) {
-if (!Array.isArray(data.airbnbPastStays)) data.airbnbPastStays = [];
-if (!data.airbnbPastStays.some((s) => s.listingId === r.listingId && s.checkin === r.checkin && s.checkout === r.checkout)) {
-// bookedOn: when it was booked (confirmation email, else first seen by sync);
-// income/platform kept so the timeline and pace charts can still draw it.
-data.airbnbPastStays.push({
-listingId: r.listingId, checkin: r.checkin, checkout: r.checkout, guestName: r.guestName || '',
-bookedOn: r.confirmedOn || String(r.createdAt || '').slice(0, 10), income: r.income ?? null, platform: r.platform === 'other' ? 'other' : 'airbnb',
-confirmationCode: r.confirmationCode || '', revisions: r.revisions || [],
-});
-}
-} else {
-// Gone from the feed before it was due to end: a cancellation. Kept (not
-// just dropped) so the occupancy timeline can show it hatched and the
-// pace chart can take it out of the bookings from the day it was cancelled.
-if (!Array.isArray(data.airbnbCancelledStays)) data.airbnbCancelledStays = [];
-if (r.checkin && r.checkout && !data.airbnbCancelledStays.some((s) => s.listingId === r.listingId && s.checkin === r.checkin && s.checkout === r.checkout)) {
-data.airbnbCancelledStays.push({
-id: uid(), listingId: r.listingId, checkin: r.checkin, checkout: r.checkout, guestName: r.guestName || '',
-bookedOn: r.confirmedOn || String(r.createdAt || '').slice(0, 10), cancelledOn: today,
-confirmationCode: r.confirmationCode || '', revisions: r.revisions || [],
-});
-}
-}
-data.airbnbReservations = data.airbnbReservations.filter((x) => x.id !== r.id);
-removed++;
-});
-if (Array.isArray(data.airbnbPastStays)) {
-const keepFrom = dateStrAdd(today, -400);
-data.airbnbPastStays = data.airbnbPastStays.filter((s) => s.checkout >= keepFrom);
-}
-if (Array.isArray(data.airbnbCancelledStays)) {
-const keepCancelledFrom = dateStrAdd(today, -400);
-data.airbnbCancelledStays = data.airbnbCancelledStays.filter((s) => s.checkout >= keepCancelledFrom);
-}
+existingByUid.forEach((r) => { if (retireStay(r, today)) removed++; });
 return { added, updated, removed };
 }
+
+// A booked stay that is no longer on its calendar: completed if it has ended,
+// cancelled if not. Returns whether anything changed.
+function retireStay(r, today) {
+if (r.status !== 'booked' && r.status) return false;
+if (r.checkout && r.checkout < today) { r.status = 'completed'; return true; }
+r.status = 'cancelled';
+r.cancelledOn = today;
+return true;
+}
+
+// Booked, current or upcoming: what the Airbnb panel, planner stripes, nudges,
+// cleaning and calendar push mean by "a booking". Completed and cancelled
+// stays stay on file for income, refunds and the occupancy chart.
+function isLiveStay(r) { return !!r && (r.status || 'booked') === 'booked'; }
+function notCancelled(r) { return !!r && r.status !== 'cancelled'; }
 
 async function syncAllAirbnbListings() {
 for (const listing of data.airbnbListings) {
@@ -313,6 +283,7 @@ const matching = items.filter((e) => (e.summary || '').includes(listing.external
 // so the scan updates its dates instead of adding a second copy here.
 const existingByEventId = new Map(
 data.airbnbReservations
+.filter((r) => r.status !== 'completed')
 .filter((r) => (r.listingId === listing.id && r.source === 'external' && !r.movedFrom) || (r.movedFrom && r.movedFrom.listingId === listing.id && r.movedFrom.googleEventId))
 .map((r) => [r.movedFrom && r.movedFrom.googleEventId ? r.movedFrom.googleEventId : r.googleEventId, r])
 );
@@ -324,6 +295,7 @@ const name = externalNameFromSummary(e.summary, listing.externalPrefix);
 const existing = existingByEventId.get(e.id);
 if (existing) {
 let changed = false;
+if (existing.status === 'cancelled') { existing.status = 'booked'; existing.cancelledOn = ''; changed = true; }
 if (existing.checkin !== checkin || existing.checkout !== checkout) { existing.checkin = checkin; existing.checkout = checkout; changed = true; }
 // Filled only when blank, never overwritten -- the same rule
 // syncGuestNamesFromEmail already follows, and for the same reason:
@@ -347,7 +319,10 @@ added++;
 let removed = 0;
 existingByEventId.forEach((r) => {
 if (r.movedFrom) return; // moved by hand: it is now this dashboard's own record, not the calendar's
-data.airbnbReservations = data.airbnbReservations.filter((x) => x.id !== r.id); removed++;
+// Off the calendar now: finished, or cancelled -- kept on file either way.
+// The scan only looks from today forward, so a stay that ended is simply
+// out of the window, not deleted.
+if (retireStay(r, today)) removed++;
 });
 return { added, updated, removed };
 }
@@ -384,7 +359,7 @@ queueSave();
 // push does (see pushReservation below).
 function airbnbSegmentsForDay(dateStr) {
 return data.airbnbReservations
-.filter((r) => r.checkin <= dateStr && dateStr <= r.checkout)
+.filter((r) => notCancelled(r) && r.checkin <= dateStr && dateStr <= r.checkout)
 .map((r) => {
 const listing = data.airbnbListings.find((l) => l.id === r.listingId);
 if (!listing) return null;
@@ -618,7 +593,7 @@ return m ? m[1].trim() : null;
 // already uses); the regex above is the real confirmation.
 async function syncCleanerEvents() {
 const calendarId = data.prefs.airbnbCalendarId;
-const upcoming = data.airbnbReservations.filter((r) => r.checkout >= todayStr());
+const upcoming = data.airbnbReservations.filter((r) => isLiveStay(r) && r.checkout >= todayStr());
 if (!calendarId || !upcoming.length) { data.airbnbCleanerEvents = []; return; }
 const earliest = upcoming.reduce((min, r) => (r.checkin < min ? r.checkin : min), upcoming[0].checkin);
 const latest = upcoming.reduce((max, r) => (r.checkout > max ? r.checkout : max), upcoming[0].checkout);
@@ -696,11 +671,11 @@ events.forEach((e) => {
 if (e.reservationId && e.edge && !claims.has(`${e.reservationId}:${e.edge}`)) claims.set(`${e.reservationId}:${e.edge}`, e);
 });
 const cleaned = data.airbnbListings.filter((l) => l.needsCleaning).map((l) => l.id);
-const stays = data.airbnbReservations.filter((r) => cleaned.includes(r.listingId));
+const stays = data.airbnbReservations.filter((r) => notCancelled(r) && cleaned.includes(r.listingId));
 events.filter((e) => !(e.reservationId && e.edge)).forEach((e) => {
 const cands = [];
 stays.forEach((r) => {
-const sameListing = data.airbnbReservations.filter((o) => o.listingId === r.listingId && o.id !== r.id);
+const sameListing = data.airbnbReservations.filter((o) => notCancelled(o) && o.listingId === r.listingId && o.id !== r.id);
 if (e.date >= dateStrAdd(r.checkin, -CLEANER_MATCH_WINDOW_DAYS) && e.date <= r.checkin
 && !otherStayOverlaps(sameListing, e.date, r.checkin)) cands.push({ key: `${r.id}:checkin`, dist: daysBetween(e.date, r.checkin) });
 if (e.date >= r.checkout && e.date <= dateStrAdd(r.checkout, CLEANER_MATCH_WINDOW_DAYS)
@@ -830,7 +805,7 @@ const last = (r.revisions || [])[(r.revisions || []).length - 1];
 const change = last ? `${formatAirbnbDate(last.oldCheckin)} &rarr; ${formatAirbnbDate(last.oldCheckout)} became ${formatAirbnbDate(last.newCheckin)} &rarr; ${formatAirbnbDate(last.newCheckout)}. ` : '';
 const url = reservationPageUrl(r);
 const page = url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">Airbnb reservation page &#8599;</a>` : 'no booking code on file yet, so open the booking in Airbnb';
-const charged = r.accruedAt ? ' It has already been charged in Letting income; change that entry there too.' : '';
+const charged = r.accruedAt ? ' It has already been charged in Letting income; that entry updates when you change the income.' : '';
 return `<div class="cal-event-row"><span class="settings-note" style="margin:0;"><b>Payout to check.</b> ${change}The payout was recorded before the dates changed and Airbnb's change email has no amounts: ${page}, then type the new income above.${charged}</span> <button class="sync-btn sm inline" type="button" data-airbnb-payout-checked="${r.id}" title="The payout shown is still right">Checked</button></div>`;
 }
 
@@ -913,6 +888,7 @@ const el = document.getElementById('airbnb-list');
 const countEl = document.getElementById('airbnb-count');
 if (!el) return;
 const upcoming = data.airbnbReservations
+.filter(notCancelled)
 .filter((r) => r.checkout >= todayStr() || (!r.accruedAt && r.checkout >= dateStrAdd(todayStr(), -AWAITING_INCOME_DAYS)))
 .sort((a, b) => (a.checkin < b.checkin ? -1 : a.checkin > b.checkin ? 1 : 0));
 if (countEl) countEl.textContent = upcoming.length ? String(upcoming.length) : '';
@@ -939,7 +915,8 @@ queueSave();
 // rather than at the next app open -- that gap is exactly when you'd
 // go to Finances to check the figure.
 if (field === 'income' || field === 'paidOn') {
-import('./letting.js').then((m) => { m.accrueLettings(); m.renderLetting(); });
+// An already-charged stay's ledger row follows the new figure (reconcileAccrual).
+import('./letting.js').then((m) => { m.reconcileAccrual(r); m.accrueLettings(); m.renderLetting(); });
 }
 });
 });
@@ -1405,7 +1382,7 @@ return null;
 // below.
 function matchReservationForArrival(day, month) {
 const candidates = data.airbnbReservations.filter((r) => {
-if (r.guestName || r.checkout < todayStr()) return false;
+if (!isLiveStay(r) || r.guestName || r.checkout < todayStr()) return false;
 const d = new Date(`${r.checkin}T00:00:00`);
 return d.getDate() === day && d.getMonth() + 1 === month;
 });
@@ -1508,7 +1485,13 @@ const outD = new Date(`${r.checkout}T00:00:00`);
 return inD.getDate() === startDay && inD.getMonth() + 1 === startMonth
 && outD.getDate() === endDay && outD.getMonth() + 1 === endMonth;
 });
-return candidates.length === 1 ? candidates[0] : null;
+if (candidates.length === 1) return candidates[0];
+// Same dates booked again after a cancellation: the stay that is not
+// completed, and among those the cancelled one, is what the email is about.
+const open = candidates.filter((r) => r.status !== 'completed');
+if (open.length === 1) return open[0];
+const cancelled = open.filter((r) => r.status === 'cancelled');
+return cancelled.length === 1 ? cancelled[0] : null;
 }
 
 // Only needed when the subject itself has no year AND no reservation
@@ -1641,6 +1624,7 @@ let filled = false;
 if (!recorded.listingId) { recorded.listingId = listing.id; filled = true; }
 if (!recorded.checkin) { recorded.checkin = checkin; filled = true; }
 if (!recorded.checkout && stayCheckout > checkin) { recorded.checkout = stayCheckout; filled = true; }
+if (!recorded.reservationId && reservation) { recorded.reservationId = reservation.id; filled = true; }
 if (filled) enriched++;
 seen.add(m.id);
 recordMail(m, 'airbnb-cancel', 'filed', { note: filled ? `This payout was already on the letting ledger. Room and stay dates (${checkin} to ${stayCheckout}) added to it.` : 'This payout was already on the letting ledger.', produced: [{ kind: 'letting', label: 'Letting income' }] });
@@ -1653,6 +1637,8 @@ data.lettingLedger.push({
 id: uid(), ownerKey, kind: 'cancellation', amount, gross: payout, pct,
 // Which room and which night it was for, so the occupancy timeline can draw it hatched.
 listingId: listing.id, checkin, ...(stayCheckout > checkin ? { checkout: stayCheckout } : {}),
+// The stay itself, when it is on file: stays are never deleted now, so this id stays valid.
+...(reservation ? { reservationId: reservation.id } : {}),
 platform: 'airbnb',
 // Matches the email's own stated timing ("released 24 hours after
 // the check-in date"), not today -- so this lands in the right tax
@@ -1709,10 +1695,9 @@ const outD = new Date(`${r.checkout}T00:00:00`);
 return inD.getDate() === startDay && inD.getMonth() + 1 === startMonth
 && outD.getDate() === endDay && outD.getMonth() + 1 === endMonth;
 });
-const live = hits(data.airbnbReservations);
-if (live.length) return live.length === 1 ? live[0] : null;
-const past = hits(data.airbnbPastStays || []);
-if (past.length) return past.length === 1 ? past[0] : null;
+// Every stay is on file now (completed ones included), so one list answers.
+const stays = hits(data.airbnbReservations.filter(notCancelled));
+if (stays.length) return stays.length === 1 ? stays[0] : null;
 // Stays that finished before past stays were kept at all: an income row
 // already on the ledger records the listing, the checkout date and the
 // number of nights, which is enough to rebuild the stay's dates.
@@ -1890,7 +1875,7 @@ return { posted, problems };
 // only when exactly one code-less stay arrives then (never guessed between
 // candidates), and only that one email's body is fetched.
 async function backfillConfirmationCodes() {
-const need = () => data.airbnbReservations.filter((r) => !r.confirmationCode && (r.source || 'ics') === 'ics' && r.checkout >= todayStr());
+const need = () => data.airbnbReservations.filter((r) => isLiveStay(r) && !r.confirmationCode && (r.source || 'ics') === 'ics' && r.checkout >= todayStr());
 if (!need().length || !(await canAttemptGoogleAction())) return { codes: 0 };
 const { fetchMailSearches, getMessageDetail } = await import('../googlemail.js');
 let sections;
@@ -1936,7 +1921,7 @@ return { codes };
 // for 25 messages at once), so a matched reservation gets ONE extra
 // format=full fetch for its own body, not all of them up front.
 async function syncGuestNamesFromEmail() {
-const pending = data.airbnbReservations.filter((r) => !r.guestName && r.checkout >= todayStr());
+const pending = data.airbnbReservations.filter((r) => isLiveStay(r) && !r.guestName && r.checkout >= todayStr());
 if (!pending.length || !(await canAttemptGoogleAction())) return { filled: 0 };
 
 const { fetchMailSearches, getMessageDetail } = await import('../googlemail.js');
@@ -2406,4 +2391,4 @@ queueSave();
 // stores, and each was wrong in a way that stayed invisible until a
 // round-trip through Google -- an end date a day out, a name silently
 // dropped, a title separator nobody types. Nothing else imports them.
-export { renderAirbnb, renderAirbnbListings, initAirbnbListingsForm, initAirbnbSync, airbnbSegmentsForDay, renderAirbnbKeys, initAirbnbKeys, initKeysSettingsForm, initAirbnbAddBooking, eventDayRange, externalNameFromSummary, parseCleanerEventName };
+export { isLiveStay, notCancelled, renderAirbnb, renderAirbnbListings, initAirbnbListingsForm, initAirbnbSync, airbnbSegmentsForDay, renderAirbnbKeys, initAirbnbKeys, initKeysSettingsForm, initAirbnbAddBooking, eventDayRange, externalNameFromSummary, parseCleanerEventName };

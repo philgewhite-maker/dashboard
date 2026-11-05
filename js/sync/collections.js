@@ -9,8 +9,8 @@
 //   prefs     - data.prefs, one row per pref key, so two devices editing
 //               different prefs never collide
 //
-// Scope for now: the five tabs that matter most -- Tasks, Health, Travel,
-// Planner, Finances. Everything else stays in the whole document.
+// Scope for now: Tasks, Health, Travel, Planner, Finances, and the Airbnb
+// collections (Overview tab). Everything else stays in the whole document.
 
 const COLLECTIONS = [
 // Tasks
@@ -43,6 +43,15 @@ const COLLECTIONS = [
 { key: 'switchOffersHistory', kind: 'singleton', tab: 'finances', label: 'Switch offer history' },
 { key: 'accountValueReviews', kind: 'singleton', tab: 'finances', label: 'Account value reviews' },
 { key: 'annualPerks', kind: 'singleton', tab: 'finances', label: 'Annual perks' },
+// Airbnb (Overview tab). Stays are never deleted now, so they have stable ids.
+{ key: 'airbnbListings', kind: 'records', tab: 'overview', label: 'Airbnb listings' },
+{ key: 'airbnbReservations', kind: 'records', tab: 'overview', label: 'Airbnb stays' },
+{ key: 'airbnbKeys', kind: 'records', tab: 'overview', label: 'Airbnb keys' },
+{ key: 'airbnbKeyAssignments', kind: 'records', tab: 'overview', label: 'Airbnb key assignments' },
+{ key: 'airbnbRateProposals', kind: 'records', tab: 'overview', label: 'Airbnb rate proposals' },
+{ key: 'airbnbCleaners', kind: 'singleton', tab: 'overview', label: 'Airbnb cleaners' },
+{ key: 'airbnbCleanerBlocks', kind: 'singleton', tab: 'overview', label: 'Airbnb cleaner un-assignments' },
+{ key: 'airbnbCleanerEvents', kind: 'singleton', tab: 'overview', label: 'Airbnb cleaner events' },
 // Shared
 { key: 'prefs', kind: 'prefs', tab: 'settings', label: 'Preferences' },
 ];

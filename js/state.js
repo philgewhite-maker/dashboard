@@ -1,6 +1,7 @@
 import { kvGet, kvSet, photoDelete } from './db.js';
 import { uid, todayStr, daysAgoStr, last7Dates, daysSince, daysUntil } from './utils.js';
 import { matchBrandLogo, matchBrandEntry, splitProvider } from './brandLogos.js';
+import { migrateStays } from './migrations.js';
 
 const DATA_KEY = 'app-data';
 const REV_KEY = 'app-data-rev'; // separate from DATA_KEY so it never leaks into backup exports
@@ -29,8 +30,6 @@ calendars: [], // array of tracked calendar NAMES, as they appear in Google Cale
 calendarStatus: {}, // name -> {found, title, date, syncedAt} — filled in by Sync
 airbnbListings: [], // {id, label, icsUrl, prefix, colour} -- configured in Settings
 airbnbReservations: [], // synced from each listing's ICS feed, see js/features/airbnb.js
-airbnbPastStays: [], // [{listingId, checkin, checkout, guestName}] -- completed stays kept ~400 days just so a late refund email can still be matched to a listing
-airbnbCancelledStays: [], // [{id, listingId, checkin, checkout, guestName, bookedOn, cancelledOn}] -- bookings that vanished from the feed before they ended, kept ~400 days for the occupancy timeline (js/features/lettingoccupancy.js)
 mailLedger: [], // [{key, messageId, feature, outcome, from, subject, date, seenAt, tries, note, ref, produced:[{kind,id,label}]}] -- one row per Gmail message an importer has handled, so any one can be searched and retried; see js/features/mailledger.js
 airbnbSyncStatus: {}, // listingId -> {ok, syncedAt, added, updated, removed, error}
 airbnbCleanerEvents: [], // [{date, name}] -- last scan of "Cleaner - <Name>" events on the push-target calendar, see js/features/airbnb.js
@@ -1609,6 +1608,11 @@ function blankAirbnbReservation(fields = {}) {
 return {
 id: uid(),
 listingId: '', uid: '', source: 'ics',
+// A stay is never deleted when it ends or is cancelled, so every id that
+// points at it (ledger rows, keys, cleaning pins) stays valid:
+// 'booked' -> 'completed' when it drops out of the feed after checkout,
+// 'cancelled' (with cancelledOn) when it drops out before.
+status: 'booked', cancelledOn: '',
 checkin: '', checkout: '', // ISO yyyy-mm-dd, checkout is exclusive (the turnover day, not an occupied night)
 guestName: '', notes: '',
 // Airbnb's own booking code (the HM... in every host email's reservation
@@ -3318,11 +3322,18 @@ data.airbnbReservations = data.airbnbReservations.map((r) => ({ ...blankAirbnbRe
 // planner-entries filter just above.
 const airbnbListingIds = new Set(data.airbnbListings.map((l) => l.id));
 data.airbnbReservations = data.airbnbReservations.filter((r) => airbnbListingIds.has(r.listingId));
-if (!Array.isArray(data.airbnbPastStays)) data.airbnbPastStays = [];
 if (!Array.isArray(data.mailLedger)) data.mailLedger = [];
-if (!Array.isArray(data.airbnbCancelledStays)) data.airbnbCancelledStays = [];
-data.airbnbCancelledStays = data.airbnbCancelledStays.filter((s) => s && airbnbListingIds.has(s.listingId));
-data.airbnbPastStays = data.airbnbPastStays.filter((s) => s && airbnbListingIds.has(s.listingId));
+// Past and cancelled stays used to live in two side lists and stays were
+// deleted when they ended; now every stay is one record with a status (see
+// js/migrations.js). Runs whenever the old lists are still present, so a
+// device on older code pushing them back once is folded in again.
+if ('airbnbPastStays' in data || 'airbnbCancelledStays' in data || data.airbnbKeys?.some((k) => 'forReservationId' in k) || !(data.schemaVersion >= 1)) {
+if (!Array.isArray(data.lettingLedger)) data.lettingLedger = [];
+const report = migrateStays(data);
+data.airbnbReservations = data.airbnbReservations.filter((r) => airbnbListingIds.has(r.listingId));
+if (!(data.schemaVersion >= 1)) data.schemaVersion = 1;
+console.info('Stays migration:', report);
+}
 // Backfills `nights` onto an older accrual row that predates the
 // average-night-rate feature (letting.js's nightRateFor) -- derived
 // from its own reservation's checkin/checkout while that record still

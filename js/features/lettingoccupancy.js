@@ -25,13 +25,12 @@ function longMonth(ym) { const [y, m] = ym.split('-').map(Number); return new Da
 
 // ---- Data ------------------------------------------------------------------
 
-// One list of every stay we know about, whichever record it is still held in:
-//  live      data.airbnbReservations (current and upcoming, and recent ones awaiting income)
-//  finished  data.airbnbPastStays (kept ~400 days after they end)
-//  cancelled data.airbnbCancelledStays (recorded from the day a future booking leaves the feed)
-//  ledger    older stays only the Letting ledger remembers (accrual/earned rows with a
-//            start date or night count), and older cancellations (a payout row only)
-// A stay is matched across sources by listing + check-in + check-out so it is never drawn twice.
+// One list of every stay we know about:
+//  stays     data.airbnbReservations, with status booked, completed or cancelled
+//  ledger    older stays only the Letting ledger remembers ("earned before tracking" rows
+//            with a start date or night count), and older cancellations (a payout row only)
+// A ledger-only stay is matched to a recorded one by listing + check-in + check-out so it is
+// never drawn twice; a cancellation payout linked to its stay by id is not drawn again.
 function collectStays() {
 roomKeys = null; // listings/colours may have changed since the last read
 const stays = [];
@@ -53,18 +52,15 @@ seen.set(k, s);
 stays.push(s);
 return { stay: s, merged: false };
 };
+// Every stay is one record in data.airbnbReservations, whatever its status
+// (booked, completed, cancelled); nothing is deleted when a stay ends.
 (data.airbnbReservations || []).forEach((r) => add({
 id: r.id, listingId: r.listingId, checkin: r.checkin, checkout: r.checkout, guest: r.guestName || '',
-income: r.income ?? null, bookedOn: r.confirmedOn || String(r.createdAt || '').slice(0, 10), status: 'stay', source: 'live', platform: r.platform === 'other' ? 'other' : 'airbnb',
+income: r.status === 'cancelled' ? null : (r.income ?? null), bookedOn: r.confirmedOn || String(r.createdAt || '').slice(0, 10),
+cancelledOn: r.cancelledOn || '', status: r.status === 'cancelled' ? 'cancelled' : 'stay',
+source: r.status === 'completed' ? 'finished' : r.status === 'cancelled' ? 'cancelled' : 'live', platform: r.platform === 'other' ? 'other' : 'airbnb',
 }));
-(data.airbnbPastStays || []).forEach((s) => add({
-id: `past:${keyOf(s)}`, listingId: s.listingId, checkin: s.checkin, checkout: s.checkout, guest: s.guestName || '',
-income: s.income ?? null, bookedOn: s.bookedOn || '', status: 'stay', source: 'finished', platform: s.platform === 'other' ? 'other' : 'airbnb',
-}));
-(data.airbnbCancelledStays || []).forEach((s) => add({
-id: s.id, listingId: s.listingId, checkin: s.checkin, checkout: s.checkout, guest: s.guestName || '',
-income: null, bookedOn: s.bookedOn || '', cancelledOn: s.cancelledOn || '', status: 'cancelled', source: 'cancelled', platform: 'airbnb',
-}));
+const reservationIds = new Set((data.airbnbReservations || []).map((r) => r.id));
 // Listings by the same owner key the ledger rows carry (a connection id, or a
 // lowercased typed name), so a ledger row finds its owner's rooms either way.
 const ownerListings = new Map();
@@ -102,7 +98,8 @@ const listingId = roomForCancellation(e, ownerListings);
 if (!listingId) { unplaced += 1; return; }
 // Already recorded from the feed: the same room and check-in, and the same check-out when the payout row knows it
 // (two guests can cancel the same arrival date, and the second must not be taken for the first).
-if ((data.airbnbCancelledStays || []).some((s) => s.listingId === listingId && s.checkin === checkin && (!e.checkout || s.checkout === e.checkout))) return;
+if (e.reservationId && reservationIds.has(e.reservationId)) return;
+if ((data.airbnbReservations || []).some((s) => s.status === 'cancelled' && s.listingId === listingId && s.checkin === checkin && (!e.checkout || s.checkout === e.checkout))) return;
 // Without a recorded end date the stay's own length is unknown, so one night is drawn.
 const checkout = e.checkout && e.checkout > checkin ? e.checkout : dateStrAdd(checkin, 1);
 add({ id: `led:${e.id}`, listingId, checkin, checkout, guest: e.note || '', income: null, bookedOn: '', cancelledOn: e.date, status: 'cancelled', source: 'ledger', platform: e.platform === 'other' ? 'other' : 'airbnb', approx: !(e.checkout && e.checkout > checkin) });

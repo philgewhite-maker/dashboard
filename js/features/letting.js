@@ -317,7 +317,11 @@ function accrueLettings() {
 const listings = data.airbnbListings || [];
 let added = 0;
 (data.airbnbReservations || []).forEach((r) => {
-if (r.accruedAt) return;
+if (r.accruedAt || r.status === 'cancelled') return;
+// Already charged on another device that hasn't synced its accruedAt back
+// yet: the row is there by its stay id. (Two devices both charging one stay
+// produced two identical rows; see accrualIdFor.)
+if ((data.lettingLedger || []).some((e) => e.kind === 'accrual' && e.reservationId === r.id)) { r.accruedAt = new Date().toISOString(); return; }
 const income = Number(r.income);
 if (!Number.isFinite(income) || income <= 0) return;
 if (!r.checkout || r.checkout > today()) return;
@@ -353,7 +357,9 @@ if (!amount) return;
 // night rate, nightRateFor() below -- needs to survive that.
 const nights = Math.round((new Date(`${r.checkout}T00:00:00`) - new Date(`${r.checkin}T00:00:00`)) / 86400000);
 data.lettingLedger.push({
-id: uid(),
+// Derived from the stay, so two devices charging the same stay before
+// syncing write the same row id and the sync merge keeps one.
+id: accrualIdFor(r),
 ownerKey: key,
 kind: 'accrual',
 amount,
@@ -381,6 +387,33 @@ added += 1;
 });
 if (added) queueSave();
 return { added };
+}
+
+function accrualIdFor(r) { return `accrual-${r.id}`; }
+
+// The stay's income is the one figure; its accrual row follows it. Called
+// when income or paidOn is edited on a stay that was already charged (an
+// amended booking whose payout changed): the row's gross, owner share and cap
+// month are recomputed with the same rule accrueLettings used. Income cleared
+// or zero leaves the row alone (remove it in Letting income if the stay
+// really earned nothing). Returns whether the row changed.
+function reconcileAccrual(r) {
+if (!r || !r.accruedAt) return false;
+const row = (data.lettingLedger || []).find((e) => e.kind === 'accrual' && e.reservationId === r.id);
+const income = Number(r.income);
+if (!row || !Number.isFinite(income) || income <= 0) return false;
+const listing = (data.airbnbListings || []).find((l) => l.id === (row.listingId || r.listingId));
+if (!listing) return false;
+const amount = Math.round(splitAmountFor(listing, income, row.date) * 100) / 100;
+const pct = shareRuleAt(listing, row.date).pct;
+const capDate = r.paidOn || '';
+if (row.gross === income && row.amount === amount && row.pct === pct && (row.capDate || '') === capDate) return false;
+row.gross = income;
+row.amount = amount;
+row.pct = pct;
+if (capDate) row.capDate = capDate; else delete row.capDate;
+queueSave();
+return true;
 }
 
 function money(n) {
@@ -466,7 +499,7 @@ return `<span class="settings-note" style="margin:0;" title="Average night rate,
 function upcomingReservationsFor(key) {
 const listingIds = new Set((data.airbnbListings || []).filter((l) => ownerKeyFor(l) === key).map((l) => l.id));
 return (data.airbnbReservations || [])
-.filter((r) => listingIds.has(r.listingId) && !r.accruedAt && r.checkout)
+.filter((r) => r.status !== 'cancelled' && listingIds.has(r.listingId) && !r.accruedAt && r.checkout)
 .sort((a, b) => String(a.checkout).localeCompare(String(b.checkout)));
 }
 
@@ -1305,6 +1338,7 @@ const listingById = new Map(listings.map((l) => [l.id, l]));
 const reservationIds = new Set((data.airbnbReservations || []).map((r) => r.id));
 const items = [];
 (data.airbnbReservations || []).forEach((r) => {
+if (r.status === 'cancelled') return; // a cancelled stay earned only its cancellation payout, which is a ledger row
 const income = Number(r.income);
 if (!Number.isFinite(income) || income <= 0) return;
 if (!r.checkin || !r.checkout || r.checkout <= r.checkin) return;
@@ -2003,6 +2037,7 @@ if (!total) return;
 out.push({ listingId: e.listingId, rate, counts });
 });
 (data.airbnbReservations || []).forEach((r) => {
+if (r.status === 'cancelled') return; // a cancelled stay earned only its cancellation payout, which is a ledger row
 if (r.accruedAt) return; // already counted via its own ledger row, above
 const income = Number(r.income);
 if (!Number.isFinite(income) || income <= 0) return;
@@ -2099,6 +2134,7 @@ byMonth.set(ym, b);
 };
 const reservationsById = new Map((data.airbnbReservations || []).map((r) => [r.id, r]));
 (data.airbnbReservations || []).forEach((r) => {
+if (r.status === 'cancelled') return; // a cancelled stay occupied no nights
 const roomKey = listingToRoom.get(r.listingId);
 if (!roomKey || !r.checkin || !r.checkout || r.checkout <= r.checkin) return;
 const seenDays = occupiedDays.get(roomKey);
@@ -2736,6 +2772,6 @@ if (keepListing) listingSel.value = keepListing;
 }
 
 export {
-CAP_KEEPS_FROM, accrueLettings, reconcileMonthlyCaps, renderLetting, initLetting, totalOwed, totalGross, balanceFor, grossFor, owners, ownerNameFor, ownerKeyFor, sharePctFor, shareRuleAt, splitAmountFor, money, isMyOwnKey, isMyOwnListing,
+CAP_KEEPS_FROM, accrueLettings, reconcileAccrual, accrualIdFor, reconcileMonthlyCaps, renderLetting, initLetting, totalOwed, totalGross, balanceFor, grossFor, owners, ownerNameFor, ownerKeyFor, sharePctFor, shareRuleAt, splitAmountFor, money, isMyOwnKey, isMyOwnListing,
 lettingChartMonthTotal, lettingIncomeItems, nightRateRooms, entriesFor, nightRateFor, money0, monthRange, monthLabel, addMonths, today, resolveColor, listingColorVar, nightsByMonthForEntry,
 };

@@ -1322,7 +1322,7 @@ mailDismissed: () => true,
 captureDrafts: () => true,
 captureBatches: () => true,
 switchOffers: (o) => !!o.dismissed,
-airbnbReservations: (r) => (r.checkOut || r.end || '') && (r.checkOut || r.end) < new Date().toISOString().slice(0, 10),
+airbnbReservations: (r) => r.status === 'completed' || r.status === 'cancelled',
 trips: (t) => (t.endDate || '') && t.endDate < new Date().toISOString().slice(0, 10),
 };
 

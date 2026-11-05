@@ -115,13 +115,24 @@ headers: { 'X-Sync-Secret': ep.secret },
 });
 if (!res.ok) throw new Error(`ics-proxy.php returned ${res.status} for "${listing.label || listing.id}"`);
 const events = parseIcsReservations(await res.text()).filter((e) => e.checkout >= today);
+// Same rules as the in-app sync: completed stays can't come back, a
+// cancelled one can (and returns to booked), and nothing is ever deleted.
 const existing = new Map(
-(doc.airbnbReservations || []).filter((r) => r.listingId === listing.id && (r.source || 'ics') === 'ics').map((r) => [r.uid, r])
+(doc.airbnbReservations || []).filter((r) => r.listingId === listing.id && (r.source || 'ics') === 'ics' && !r.movedFrom && r.uid && r.status !== 'completed').map((r) => [r.uid, r])
 );
 events.forEach(({ uid: evUid, checkin, checkout }) => {
 const found = existing.get(evUid);
 if (found) {
-if (found.checkin !== checkin || found.checkout !== checkout) { found.checkin = checkin; found.checkout = checkout; changed = true; }
+if (found.status === 'cancelled') { found.status = 'booked'; found.cancelledOn = ''; changed = true; }
+if (found.checkin !== checkin || found.checkout !== checkout) {
+// Kept as a revision, and a recorded payout flagged for checking -- the
+// same as noteDateChange in js/features/airbnb.js.
+if (!Array.isArray(found.revisions)) found.revisions = [];
+found.revisions.push({ at: new Date().toISOString(), oldCheckin: found.checkin, oldCheckout: found.checkout, newCheckin: checkin, newCheckout: checkout });
+if (found.revisions.length > 20) found.revisions = found.revisions.slice(-20);
+if (found.income != null) found.payoutCheck = true;
+found.checkin = checkin; found.checkout = checkout; changed = true;
+}
 existing.delete(evUid);
 } else {
 // Only the fields a feed can know. Everything else keeps whatever
@@ -129,7 +140,7 @@ existing.delete(evUid);
 // page next loads and migrate() runs over the document.
 doc.airbnbReservations.push({
 id: `bg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-listingId: listing.id, uid: evUid, source: 'ics',
+listingId: listing.id, uid: evUid, source: 'ics', status: 'booked', cancelledOn: '',
 checkin, checkout, guestName: '', notes: '',
 googleEventId: '', googleCalendarId: '',
 createdAt: new Date().toISOString(),
@@ -138,11 +149,11 @@ changed = true;
 }
 });
 existing.forEach((r) => {
-// Same rule as the in-app sync: a stay that ended within the last 30 days
-// and hasn't been charged yet is kept so its income can still be entered.
-const cutoff = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
-if (r.checkout && r.checkout < today && !r.accruedAt && r.checkout >= cutoff) return;
-doc.airbnbReservations = doc.airbnbReservations.filter((x) => x.id !== r.id);
+// Out of the feed: finished if past its checkout, otherwise cancelled.
+// Never deleted -- ledger rows, keys and cleaning pins point at its id.
+if (r.status && r.status !== 'booked') return;
+if (r.checkout && r.checkout < today) r.status = 'completed';
+else { r.status = 'cancelled'; r.cancelledOn = today; }
 changed = true;
 });
 }
