@@ -105,7 +105,7 @@ a{color:var(--accent)}
       <li>Income is stored twice: on the reservation (<code>income</code>, 8 of 10) and as 29 <code>earned</code> ledger rows. None of the 10 live reservations has a ledger row for the same listing and check-in, so the two records cannot be joined.</li>
       <li>Two stays on the same listing with the same dates collapse into one past-stay record.</li>
     </ul>
-    <p class="fix"><b>Fix.</b> One <code>stays</code> collection. The id never changes and the row is never deleted; it moves through <code>booked, completed, cancelled, moved</code>. Past and cancelled stays become views. Ledger rows, keys and cleaning events hold <code>stayId</code>.</p>
+    <p class="fix"><b>Fix.</b> One <code>stays</code> collection. The id never changes and the row is never deleted; it moves through <code>booked, completed, cancelled</code>. Amendments are kept as revisions on the stay. Past and cancelled stays become views. Ledger rows, keys and cleaning events hold <code>stayId</code>.</p>
   </div>
 
   <div class="finding">
@@ -334,6 +334,7 @@ erDiagram
 <pre class="mermaid">
 erDiagram
   PROVIDER_LISTING ||--o{ STAY : listingId
+  STAY ||--o{ STAY_REVISION : stayId
   STAY ||--o{ LEDGER_ENTRY : stayId
   STAY ||--o{ STAY_CLEAN : stayId
   STAY ||--o{ KEY_ASSIGNMENT : stayId
@@ -350,20 +351,40 @@ erDiagram
   STAY {
     string id PK "never reused or deleted"
     string listingId FK
-    string feedUid "natural key with listing"
-    string status "booked completed cancelled moved"
-    string checkin
-    string checkout
-    string bookedOn
-    string cancelledOn
+    string feedUid "natural key with listing, empty if manual"
+    string source "feed external manual"
+    string platform "airbnb other"
+    string status "booked completed cancelled"
+    string checkin "current dates"
+    string checkout "current dates"
     string guestName
+    string bookedOn "confirmation email date"
+    string cancelledOn
+    number expectedPayout "from the booking email, not yet income"
+    string paidOn "money date, drives monthly caps"
+    string recognisedOn "when income was posted, empty until then"
+    string movedFromListingId "moved by hand between rooms"
+    string notes
+  }
+  STAY_REVISION {
+    string id PK
+    string stayId FK
+    string at "when the change was seen"
+    string oldCheckin
+    string oldCheckout
+    string newCheckin
+    string newCheckout
+    number payoutDelta "nullable"
+    string source "feed email manual"
   }
   LEDGER_ENTRY {
     string id PK
-    string stayId FK "nullable"
+    string stayId FK "nullable, only for income rows"
+    string group "income or settlement"
     string listingId FK
-    string kind
-    number amount
+    string kind "income refund adjustment, or payment interest cap"
+    number amount "delta, can be negative"
+    string effectiveOn
     string note
   }
   STAY_CLEAN {
@@ -376,7 +397,9 @@ erDiagram
       </div>
     </figure>
   </div>
-  <p class="note">Income would live only in ledger entries. The stay reads its earnings by summing entries with its id, so the second copy on the reservation goes away. The existing ICS <code>uid</code> plus listing becomes the natural key used to avoid duplicates on each sync.</p>
+  <p class="note"><b>Money.</b> Before income counts, the amount sits on the stay as <code>expectedPayout</code> (with <code>paidOn</code>). Once recognised it is posted as one ledger entry carrying the <code>stayId</code>, and the stay's income is the sum of its entries, never a stored second copy. Refunds, price changes and cancellations are further entries (deltas), so there is no "two halves" of one payment. <b>Settlement</b> rows with the owner (payments, interest, monthly-cap adjustments) share the ledger but have no stay.</p>
+  <p class="note"><b>Amendments.</b> A changed booking is a <code>STAY_REVISION</code>, not a status. The stay stays <code>booked</code>, its current dates are updated, and the old dates are kept in the revision, so a chart can use the dates that applied on any given day. <b>Open question:</b> whether Airbnb keeps the same feed <code>uid</code> when dates change; the next real amendment will show it. <code>moved</code> is no longer a status: <code>movedFromListingId</code> records a hand move between rooms.</p>
+  <p class="note">The existing feed <code>uid</code> plus listing is the natural key used to avoid duplicates on each sync.</p>
 </section>
 
 <section id="loyalty">
