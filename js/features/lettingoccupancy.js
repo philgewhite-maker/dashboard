@@ -615,7 +615,7 @@ if (metric === 'bookings') {
 // this point in the comparison month how many were booked on a known date against how many may have been.
 const kThis = knowledgeFor(stays, ym);
 const kCmp = compareMonths(ym, state.compare).filter((m) => stays.some((x) => nightsInMonth(x, m) > 0)).map((m) => ({ m, ...knowledgeFor(stays, m) }));
-const pctOf = (k) => `${Math.round(k.share * 100)}% of its ${k.total} booked night${k.total === 1 ? '' : 's'}`;
+const pctOf = (k) => `${Math.round(k.share * 100)}% of its ${k.total} night${k.total === 1 ? "" : "s"} still booked`;
 const month = (m) => escapeHtml(longMonth(m).split(' ')[0]);
 const bits = [`<strong>${month(ym)}</strong> ${pctOf(kThis)}`, ...kCmp.map((k) => `<strong>${month(k.m)}</strong> ${pctOf(k)}`)];
 let atPoint = '';
@@ -623,7 +623,7 @@ const lo = cmp.values && lastIdx >= 0 ? cmp.values[lastIdx] : null;
 const hi = cmp.upper && lastIdx >= 0 ? cmp.upper[lastIdx] : null;
 if (lo !== null && hi !== null) {
 const more = Math.round((hi - lo) * 10) / 10;
-atPoint = ` At this point ${COMPARE_LABEL[state.compare]} had ${fmtVal(lo)} booked on a known date${more > 0 ? `, and up to ${fmtVal(more)} more that may have been booked by then but have no booking date (the shaded band)` : ''}.`;
+atPoint = ` At this point ${COMPARE_LABEL[state.compare]} had ${fmtVal(lo)} booked on a known date${more > 0 ? `, and up to ${fmtVal(more)} more that may have been booked by then but have no booking date (the shaded band; these include bookings cancelled since, which are recorded by their cancellation date only)` : ''}.`;
 if (kCmp.length && kCmp.every((k) => k.known === 0) && hi > 0) verdict = `Nothing to measure against yet: no booking dates are known for ${COMPARE_LABEL[state.compare]}, so only its band is shown (up to ${fmtVal(hi)} may have been booked by now).`;
 }
 if (kThis.known < kThis.total || (hi !== null && hi > lo)) atPoint += ' Shaded bands are nights with no booking date: they could have been booked at any point, so the line is the least that was booked.';
