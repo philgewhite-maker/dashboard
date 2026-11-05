@@ -1919,7 +1919,8 @@ if (candidates.length !== 1) continue;
 try {
 const detail = await getMessageDetail(m.id);
 const code = confirmationCodeFrom(`${detail.bodyText || ''} ${detail.bodyHtml || ''}`);
-if (code) { candidates[0].confirmationCode = code; codes++; }
+// A code is one booking's: never put it on a second stay.
+if (code && !data.airbnbReservations.some((r) => r.id !== candidates[0].id && r.confirmationCode === code)) { candidates[0].confirmationCode = code; codes++; }
 } catch (err) {
 console.error('Reading a booking email for its code failed:', err);
 }
@@ -1967,6 +1968,26 @@ if (!rawName || !arrival) continue;
 const reservation = matchReservationForArrival(arrival.day, arrival.month);
 if (!reservation) continue;
 
+// One body fetch per matched reservation serves every extraction below.
+// Never blocks the name fill this function exists for -- the party size and
+// the payout are bonus extractions on top of it (the payout is typeable by
+// hand same as always).
+let bodyText = '';
+let linkText = ''; // body plus the HTML part, which still has the links the stripped text loses
+try {
+const detail = await getMessageDetail(m.id);
+bodyText = detail.bodyText || '';
+linkText = `${bodyText} ${detail.bodyHtml || ''}`;
+} catch (err) {
+console.error('Reading the booking email body failed, skipping party size and payout:', err);
+}
+const emailCode = confirmationCodeFrom(linkText);
+// A booking code belongs to exactly one booking. The match above is only by
+// arrival day, so when this email's code is already on another stay (the
+// same booking showing on a second listing's calendar), it is not this
+// stay's email: skip it rather than copy another booking's name and payout.
+if (emailCode && data.airbnbReservations.some((r) => r.id !== reservation.id && r.confirmationCode === emailCode)) continue;
+
 let name = rawName;
 if (/[^\x00-\x7F]/.test(rawName)) {
 try {
@@ -1986,20 +2007,7 @@ romanizeFailed++;
 }
 }
 const romanized = name !== rawName;
-// One body fetch per matched reservation serves both extractions below.
-// Never blocks the name fill this function exists for -- the party size and
-// the payout are bonus extractions on top of it (the payout is typeable by
-// hand same as always).
-let bodyText = '';
-let linkText = ''; // body plus the HTML part, which still has the links the stripped text loses
-try {
-const detail = await getMessageDetail(m.id);
-bodyText = detail.bodyText || '';
-linkText = `${bodyText} ${detail.bodyHtml || ''}`;
-} catch (err) {
-console.error('Reading the booking email body failed, skipping party size and payout:', err);
-}
-if (!reservation.confirmationCode) reservation.confirmationCode = confirmationCodeFrom(linkText);
+if (!reservation.confirmationCode) reservation.confirmationCode = emailCode;
 const extra = extraGuestsFrom(bodyText);
 // A name already naming two people ("Ben & Sam") needs no marker.
 if (extra > 0 && !/[&+]|\band\b/i.test(name)) name = `${name} +${extra}`;

@@ -200,6 +200,32 @@ function dedupeStays(doc) {
   return removed;
 }
 
+// A booking code belongs to one booking. Two stays holding the same code means
+// an email matched only by arrival day was copied onto a second stay (the same
+// booking showing on another listing's calendar). The earliest holder keeps
+// the code; any other holder loses it, and loses the name, payout and dates of
+// booking/payment that equal the keeper's (they were copied, not its own).
+function unlinkCopiedCodes(doc) {
+  const res = Array.isArray(doc.airbnbReservations) ? doc.airbnbReservations : [];
+  const byCode = new Map();
+  res.forEach((r) => { if (r.confirmationCode) { if (!byCode.has(r.confirmationCode)) byCode.set(r.confirmationCode, []); byCode.get(r.confirmationCode).push(r); } });
+  const fixed = [];
+  byCode.forEach((list, code) => {
+    if (list.length < 2) return;
+    list.sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')) || String(a.id).localeCompare(String(b.id)));
+    const keep = list[0];
+    list.slice(1).forEach((x) => {
+      x.confirmationCode = '';
+      ['guestName', 'paidOn', 'confirmedOn'].forEach((f) => { if (x[f] && x[f] === keep[f]) x[f] = ''; });
+      if (x.income != null && x.income === keep.income && !x.accruedAt) x.income = null;
+      if (x.notes && keep.notes && x.notes === keep.notes) x.notes = '';
+      x.payoutCheck = false;
+      fixed.push({ code, keptOn: keep.id, clearedOn: x.id, listingId: x.listingId, checkin: x.checkin });
+    });
+  });
+  return fixed;
+}
+
 // ---- Vouchers: typed amount, one-way link from readings ---------------------
 
 const VOUCHER_UNITS = ['GBP', 'EUR', 'points', 'Avios', 'miles', 'nights', 'other'];
@@ -352,4 +378,4 @@ function migrateConnections(doc) {
   return report;
 }
 
-export { SCHEMA_VERSION, migrateStays, dedupeStays, dedupeAccruals, migrateVouchers, migrateProviders, linkProviders, providerMatches, PROVIDER_FIELDS, migrateConnections, parseVoucherValue, ensureProvider, canonicalName, providerIdFor, VOUCHER_UNITS };
+export { SCHEMA_VERSION, migrateStays, dedupeStays, unlinkCopiedCodes, dedupeAccruals, migrateVouchers, migrateProviders, linkProviders, providerMatches, PROVIDER_FIELDS, migrateConnections, parseVoucherValue, ensureProvider, canonicalName, providerIdFor, VOUCHER_UNITS };

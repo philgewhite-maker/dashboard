@@ -1,6 +1,6 @@
 {
   "_about": "Machine-readable twin of docs/data-model.html. js check: import('./docs/check-model.js') from the live site's console. Update when state.js gains/changes a key or a reference.",
-  "verifiedAgainst": "v739",
+  "verifiedAgainst": "v740",
   "groups": {
     "people": ["connections","telegramThreads","telegramUnclaimed","pendingImports","importStatus","flagRules","flagRulesSeeded","ratingCategories","reachOutStageDays","dayQueue","myCity","myName","myPhone","myEmail","myAddress"],
     "work": ["tasks","taskContexts","captureInbox","captureDrafts","agentInbox","businessIdeas","enhancementIdeas","readingList","jobs","habits","goals"],
