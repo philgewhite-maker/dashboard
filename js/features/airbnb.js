@@ -1955,8 +1955,8 @@ const need = () => data.airbnbReservations.filter((r) => !r.confirmedOn && (r.so
 // Older stays that exist only as an income entry in Letting income (no stay record): the entry
 // carries the check-in (or the nights to count back from its date) and the guest in its note.
 const liveIds = new Set(data.airbnbReservations.map((r) => r.id));
-const ledgerCheckin = (e) => e.startDate || (Number(e.nights) > 0 && e.date ? dateStrAdd(e.date, -Number(e.nights)) : '');
-const needLedger = () => (data.lettingLedger || []).filter((e) => !e.bookedOn && (e.kind === 'earned' || (e.kind === 'accrual' && !liveIds.has(e.reservationId))) && ledgerCheckin(e));
+const ledgerCheckin = (e) => e.startDate || e.checkin || (Number(e.nights) > 0 && e.date ? dateStrAdd(e.date, -Number(e.nights)) : '');
+const needLedger = () => (data.lettingLedger || []).filter((e) => !e.bookedOn && (e.kind === 'earned' || e.kind === 'cancellation' || (e.kind === 'accrual' && !liveIds.has(e.reservationId))) && ledgerCheckin(e));
 if ((!need().length && !needLedger().length) || !(await canAttemptGoogleAction())) return { dates: 0 };
 const { fetchMailSearches } = await import('../googlemail.js');
 let sections;

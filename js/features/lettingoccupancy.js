@@ -10,7 +10,7 @@
 // Everything is derived from data the app already keeps; nothing here writes.
 // Stays come from four places (see collectStays), because a booking leaves
 // the live list the moment it ends or is cancelled.
-import { data } from '../state.js';
+import { data, queueSave } from '../state.js';
 import { escapeHtml, dateStrAdd, todayStr } from '../utils.js';
 import { listingColorVar, resolveColor, addMonths, monthLabel, ownerKeyFor, ownerNameFor, lettingChartMonthTotal, lettingIncomeItems, nightRateRooms, money0 } from './letting.js';
 import { isUnconfirmedStay } from '../icsparse.js';
@@ -103,7 +103,7 @@ if (e.reservationId && reservationIds.has(e.reservationId)) return;
 if ((data.airbnbReservations || []).some((s) => s.status === 'cancelled' && s.listingId === listingId && s.checkin === checkin && (!e.checkout || s.checkout === e.checkout))) return;
 // Without a recorded end date the stay's own length is unknown, so one night is drawn.
 const checkout = e.checkout && e.checkout > checkin ? e.checkout : dateStrAdd(checkin, 1);
-add({ id: `led:${e.id}`, listingId, checkin, checkout, guest: e.note || '', income: null, bookedOn: '', cancelledOn: e.date, status: 'cancelled', source: 'ledger', platform: e.platform === 'other' ? 'other' : 'airbnb', approx: !(e.checkout && e.checkout > checkin) });
+add({ id: `led:${e.id}`, listingId, checkin, checkout, guest: e.note || '', income: null, bookedOn: e.bookedOn || '', cancelledOn: e.date, status: 'cancelled', source: 'ledger', platform: e.platform === 'other' ? 'other' : 'airbnb', approx: !(e.checkout && e.checkout > checkin) });
 }
 });
 stays.unplacedCancellations = unplaced;
@@ -365,6 +365,7 @@ return `<div class="letting-chart-wrap" id="letting-occupancy-section">
 <div class="occ-verdict" id="pace-verdict"></div>
 <div class="chart-canvas-wrap occ-wrap" style="position:relative;height:240px;"><canvas id="pace-canvas"></canvas><div class="occ-tip" id="pace-tip" hidden></div></div>
 <details class="settings-subgroup" style="margin-top:6px;"><summary class="settings-note" style="cursor:pointer;">Table view</summary><div id="occ-table" style="overflow-x:auto;"></div></details>
+<details class="settings-subgroup" id="occ-undated" style="margin-top:6px;"></details>
 </div>`;
 }
 
@@ -875,9 +876,57 @@ el.innerHTML = `<summary class="settings-note" style="cursor:pointer;">Where thi
 <td>${why(r)}</td></tr>`).join('') || '<tr><td colspan="4">No income entries fall in this month.</td></tr>'}</tbody></table></div>`;
 }
 
+// The bookings behind the shaded band on Nights booked: stays touching this month or the comparison
+// month that have no booking date. Typing the day sets it where it belongs (a stay's confirmedOn, or
+// bookedOn on an income / cancellation entry that has no stay record), and the chart redraws.
+function undatedStays(stays) {
+const months = [state.ym, ...compareMonths(state.ym, state.compare)];
+return stays.filter((s) => !s.bookedOn && months.some((m) => nightsInMonth(s, m) > 0)).sort((a, b) => String(a.checkin).localeCompare(String(b.checkin)));
+}
+
+function renderUndated(stays) {
+const el = document.getElementById('occ-undated');
+if (!el) return;
+const open = el.open;
+const list = undatedStays(stays);
+const months = [state.ym, ...compareMonths(state.ym, state.compare)];
+const rows = list.map((s) => {
+const room = (data.airbnbListings || []).find((l) => l.id === s.listingId);
+const where = months.map((m) => ({ m, n: nightsInMonth(s, m) })).filter((x) => x.n > 0).map((x) => `${x.n} night${x.n === 1 ? '' : 's'} in ${escapeHtml(longMonth(x.m).split(' ')[0])}`).join(', ');
+const entryOnly = String(s.id).startsWith('led:');
+const kind = s.status === 'cancelled' ? 'cancelled' : entryOnly ? 'income entry only' : 'stay';
+const link = entryOnly
+? '<span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#letting-panel">Letting income</span>'
+: '<span class="inline-goto-link" data-goto-tab="overview" data-goto-target="#airbnb-panel">Airbnb</span>';
+return `<div class="occ-undated-row">
+<span class="occ-undated-who">${escapeHtml(s.guest || 'No name')}</span>
+<span class="settings-note" style="margin:0;">${escapeHtml(room ? (room.label || room.prefix || 'Room') : 'Room?')} &middot; ${escapeHtml(shortDate(s.checkin))} &rarr; ${escapeHtml(shortDate(s.checkout))} &middot; ${where} &middot; ${escapeHtml(kind)}${s.approx ? ' (length unknown, one night drawn)' : ''} &middot; ${link}</span>
+<label class="occ-undated-set">Booked on <input type="date" class="settings-input" data-occ-booked="${escapeHtml(s.id)}" max="${escapeHtml(todayStr())}"></label>
+</div>`;
+}).join('');
+el.innerHTML = `<summary class="settings-note" style="cursor:pointer;">Bookings with no booking date (${list.length})</summary>
+<div class="settings-note" style="margin:4px 0 6px;">These are the nights in the shaded band on Nights booked. Type the day each was booked and it moves out of the band. Where the confirmation email is in your inbox the Airbnb sync fills it in itself; older and cancelled bookings often have none, and the date is in the Airbnb reservation if you can still open it.</div>
+${rows || '<div class="settings-note" style="margin:0;">Every booking in these months has a booking date.</div>'}`;
+el.open = open;
+}
+
+function setBookedOn(id, value) {
+if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return;
+if (String(id).startsWith('led:')) {
+const row = (data.lettingLedger || []).find((e) => e.id === String(id).slice(4));
+if (row) row.bookedOn = value;
+} else {
+const r = (data.airbnbReservations || []).find((x) => x.id === id);
+if (r) r.confirmedOn = value;
+}
+queueSave();
+renderLettingOccupancy();
+}
+
 function renderLettingOccupancy() {
 if (!document.getElementById('occ-timeline-canvas')) return;
 const stays = collectStays();
+renderUndated(stays);
 renderIncomeTrace(stays);
 renderLegend(stays);
 drawTimeline(stays);
@@ -895,6 +944,10 @@ monthSel.addEventListener('change', () => { state.ym = monthSel.value; renderLet
 document.getElementById('pace-metric').addEventListener('change', (e) => { state.metric = e.target.value; renderLettingOccupancy(); });
 document.getElementById('pace-compare').addEventListener('change', (e) => { state.compare = e.target.value; renderLettingOccupancy(); });
 document.getElementById('pace-channel').addEventListener('change', (e) => { state.channel = e.target.value; renderLettingOccupancy(); });
+document.getElementById('occ-undated').addEventListener('change', (e) => {
+const input = e.target.closest('[data-occ-booked]');
+if (input && input.value) setBookedOn(input.dataset.occBooked, input.value);
+});
 const tl = document.getElementById('occ-timeline-canvas');
 tl.addEventListener('pointermove', timelineTip);
 tl.addEventListener('pointerleave', () => { document.getElementById('occ-tip').hidden = true; });
