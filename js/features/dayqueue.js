@@ -27,13 +27,12 @@ return d.toISOString().slice(0, 10);
 }
 
 function logFor(c, platform) {
-const rows = (c.identities || []).filter((r) => r.platform === platform);
-const row = rows[rows.length - 1];
-if (row && String(row.chatLog || '').trim()) return row.chatLog;
-if (platform === 'Tinder') return c.chatLog || '';
-if (platform === 'WhatsApp') return c.chatLogWhatsApp || '';
-if (platform === 'Telegram') return c.chatLogTelegram || '';
-return '';
+// The newest thread on that app with text. A row the data-model migration made
+// for an older chat (id ending -legacy-<app>) only counts when it is the only one.
+const rows = (c.identities || []).filter((r) => r.platform === platform && String(r.chatLog || '').trim());
+const live = rows.filter((r) => !/-legacy-/.test(r.id || ''));
+const row = (live.length ? live : rows).slice(-1)[0];
+return row ? row.chatLog : '';
 }
 
 // { hasYou, last } from one chat log; last is 'you' | 'them' | ''.

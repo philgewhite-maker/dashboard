@@ -1,7 +1,7 @@
 import { kvGet, kvSet, photoDelete } from './db.js';
 import { uid, todayStr, daysAgoStr, last7Dates, daysSince, daysUntil } from './utils.js';
 import { matchBrandLogo, matchBrandEntry, splitProvider } from './brandLogos.js';
-import { migrateStays, migrateVouchers, dedupeAccruals } from './migrations.js';
+import { migrateStays, migrateVouchers, dedupeAccruals, migrateConnections } from './migrations.js';
 
 const DATA_KEY = 'app-data';
 const REV_KEY = 'app-data-rev'; // separate from DATA_KEY so it never leaks into backup exports
@@ -2371,7 +2371,7 @@ setSearch: null,
 // you've since stopped seeing is still a real 36C bra sitting in a
 // drawer), so "owned" is a property of the ITEM with a holder, not a
 // list hanging off a person. `whatSheHas(conn)` is the filter.
-likes: '', notes: '', chatLog: '', chatLogWhatsApp: '', chatLogTelegram: '',
+likes: '', notes: '',
 todos: [], ratings: {}, driveLink: '', photosAlbumUrl: '', photosPersonUrl: '',
 distance: '', matchedOn: '', tinderMatchId: '', tinderLastScrapedAt: '', attentionSnoozedUntil: '', chaseUntil: '', sentAt: '',
 // Import values this person's re-scrape keeps offering that you've
@@ -3582,16 +3582,6 @@ if (typeof c.tinderMatchId !== 'string') c.tinderMatchId = '';
 if (!Array.isArray(c.tinderPhotoKeys)) c.tinderPhotoKeys = [];
 if (!Array.isArray(c.videoIds)) c.videoIds = [];
 if (!Array.isArray(c.tinderVideoKeys)) c.tinderVideoKeys = [];
-if (typeof c.chatLog !== 'string') c.chatLog = '';
-// Separate per-source so a WhatsApp or Telegram import can never overwrite
-// or hide another source's history -- chatLog stays Tinder's own (it
-// predates these two and re-scrapes are always the full transcript, same
-// growth-check merge as before). A connection whose Stage moved from
-// "Chatting in app" to "Moved to WhatsApp" to "Moved to Telegram" is
-// expected to end up with all three eventually; connections.js merges and
-// sorts all three chronologically for display rather than showing one.
-if (typeof c.chatLogWhatsApp !== 'string') c.chatLogWhatsApp = '';
-if (typeof c.chatLogTelegram !== 'string') c.chatLogTelegram = '';
 // ISO date the "Reach out" badge is suppressed until, even though the
 // connection is still past its threshold -- lets a specific overdue
 // connection be dismissed for a while without changing Stage or priority.
@@ -3725,6 +3715,16 @@ delete c.ratings.intelligence;
 // treats as oldest rather than guessing today's date for everyone.
 if (typeof c.createdAt !== 'string') c.createdAt = '';
 });
+// Old connection-level chat copies (chatLog, chatLogWhatsApp, chatLogTelegram)
+// are dropped once every line is on a chat row; lines that are not are moved
+// to one first (js/migrations.js). Also drops the import-only createdJustNow
+// flag and puts a cover photo missing from photoIds back in the list. Runs
+// while any connection still has one, since a device on older code adds the
+// empty fields back.
+if (data.connections.some((c) => 'chatLog' in c || 'chatLogWhatsApp' in c || 'chatLogTelegram' in c || 'createdJustNow' in c || (c.photoId && Array.isArray(c.photoIds) && !c.photoIds.includes(c.photoId)))) {
+const report = migrateConnections(data);
+if (report.chatMovedToNewRow || report.coverFixed) console.info('Connections migration:', report);
+}
 if (!Array.isArray(data.flagRules)) {
 data.flagRules = DEFAULT_FLAG_RULES.map((r) => ({ ...r }));
 data.flagRulesSeeded = DEFAULT_FLAG_RULES.map((r) => r.id);
@@ -4441,8 +4441,7 @@ out.push("What's their nationality? Ask rather than assume.");
 // app the conversation happened) is a more reliable signal for "a real
 // conversation has happened" than stage alone, and avoids importing
 // STAGE_RANK from connections.js (circular dependency).
-const hasAnyChat = (conn.identities || []).some((r) => String(r.chatLog || '').trim())
-|| String(conn.chatLog || '').trim() || String(conn.chatLogWhatsApp || '').trim() || String(conn.chatLogTelegram || '').trim();
+const hasAnyChat = (conn.identities || []).some((r) => String(r.chatLog || '').trim());
 if (!String(conn.kids || '').trim() && hasAnyChat) {
 out.push('Ask whether they have kids, or want them.');
 }

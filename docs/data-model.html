@@ -78,7 +78,7 @@ a{color:var(--accent)}
 <div class="wrap">
 <header>
   <h1>Dashboard data model</h1>
-  <p class="lede">What the app stores, how the pieces refer to each other, where the same fact is kept twice, and where text stands in for structure. Built from the code and from a read of the live document (field names, types, fill rates and reference checks; no personal values). Verified against build <b>v736</b>.</p>
+  <p class="lede">What the app stores, how the pieces refer to each other, where the same fact is kept twice, and where text stands in for structure. Built from the code and from a read of the live document (field names, types, fill rates and reference checks; no personal values). Verified against build <b>v737</b>.</p>
   <ul class="stats">
     <li><b>109</b><span>top-level keys</span></li>
     <li><b>597</b><span>connections</span></li>
@@ -153,6 +153,7 @@ a{color:var(--accent)}
       <li>Duplicates: 76 groups of connections share a name. Some are real different people, some are the same person.</li>
       <li>Transient UI state is saved on the record: <code>createdJustNow</code> (60% of records), <code>tinderPhotoRetryNeeded</code> (57%).</li>
     </ul>
+    <p class="fix"><b>Done in v737.</b> The connection-level <code>chatLog</code>, <code>chatLogWhatsApp</code> and <code>chatLogTelegram</code> are gone: 199 were already on a chat row and were dropped, 18 were moved onto one (16 of those people had no chat row, so their old chats were not showing anywhere). The Today list and the "has chatted" check read chat rows only. <code>createdJustNow</code> is no longer saved (the Tinder review keeps it in memory) and was removed from 368 records. The one cover photo missing from its own list was added. <b>Corrected:</b> <code>tinderPhotoRetryNeeded</code> is a deliberate warning flag, and <code>telegramChatId</code> is the family bot's chat id, not a copy of an identity row. <b>Left for you:</b> the 76 same-name groups need a person to judge; the merge picker handles each pair. <code>tinderMatchId</code> stays as the first match id.</p>
   </div>
 
   <div class="finding">
@@ -538,7 +539,6 @@ erDiagram
     string stage "15 values"
     string app "Tinder Bumble ..."
     string tinderMatchId "first match only"
-    string chatLog "legacy, 217 set"
     string age "text"
     string height "4 formats"
     string notes "avg 371 chars"

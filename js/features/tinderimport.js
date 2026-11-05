@@ -314,6 +314,9 @@ const GENERIC_ADD_LABELS = [
 'Interests', 'Tags', 'Social handles',
 ];
 
+// Connections made from this review, this session: their first save needs no
+// match confirmation. Kept here, not as a field on the record, so it is never saved.
+const createdThisSession = new Set();
 let pending = null; // { name, age, fields, photos, chosenId, match, matchConfirmed, aiVerdict }
 let queue = []; // raw {name,age,fields,photos} profiles still waiting, from a bulk-import paste
 // Certain-identity re-matches (known Tinder match id) with nothing risky
@@ -1656,7 +1659,7 @@ const chosenConn = data.connections.find((c) => c.id === p.chosenId);
 // (any non-exact pick, including one made straight from the dropdown)
 // needs an explicit look-and-choose in More Info first. Changing the
 // dropdown always re-arms this, same as before.
-const canSave = !!p.chosenId && (p.match?.why === 'exact' || p.matchConfirmed || !p.match || chosenConn?.createdJustNow);
+const canSave = !!p.chosenId && (p.match?.why === 'exact' || p.matchConfirmed || !p.match || (chosenConn && createdThisSession.has(chosenConn.id)));
 const saveLabel = chosenConn ? `Save to ${chosenConn.name}` : 'Save to…';
 const saveBlockedNote = !p.chosenId ? 'pick who this is first'
 : !canSave ? "open More info and confirm it's them first"
@@ -1775,7 +1778,7 @@ const newBtn = document.getElementById('tinder-newconn');
 if (newBtn) newBtn.addEventListener('click', () => {
 const typed = (document.getElementById('tinder-new-name')?.value || '').trim();
 const conn = createConnectionFor(typed || pending.name || 'Unnamed', pending.name);
-conn.createdJustNow = true; // not a persisted field — just marks this session's save as safe without a match confirmation
+createdThisSession.add(conn.id);
 pending.chosenId = conn.id;
 pending.matchConfirmed = true;
 refreshOverrides();
@@ -1789,7 +1792,7 @@ const moreInfoNewBtn = document.getElementById('tinder-more-info-newconn');
 if (moreInfoNewBtn) moreInfoNewBtn.addEventListener('click', () => {
 const typed = (document.getElementById('tinder-more-info-new-name')?.value || '').trim();
 const conn = createConnectionFor(typed || pending.name || 'Unnamed', pending.name);
-conn.createdJustNow = true;
+createdThisSession.add(conn.id);
 pending.chosenId = conn.id;
 pending.matchConfirmed = true;
 pending.showMoreInfo = false;
