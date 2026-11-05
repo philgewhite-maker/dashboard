@@ -1,7 +1,7 @@
 import { kvGet, kvSet, photoDelete } from './db.js';
 import { uid, todayStr, daysAgoStr, last7Dates, daysSince, daysUntil } from './utils.js';
 import { matchBrandLogo, matchBrandEntry, splitProvider } from './brandLogos.js';
-import { migrateStays, migrateVouchers, dedupeAccruals, migrateConnections } from './migrations.js';
+import { migrateStays, migrateVouchers, dedupeAccruals, migrateConnections, linkProviders } from './migrations.js';
 
 const DATA_KEY = 'app-data';
 const REV_KEY = 'app-data-rev'; // separate from DATA_KEY so it never leaks into backup exports
@@ -2445,7 +2445,7 @@ const DEFAULT_FLAG_RULES = [
 ];
 
 function blankData() {
-return { settingsVault: { entries: {} }, habits: [], goals: [], jobs: [], connections: [], calendars: [], calendarStatus: {}, vouchers: [], businessIdeas: [], subscriptions: [], enhancementIdeas: [], financeAccounts: [], switchOffers: [], mailSearches: [], mailTopics: [], mailRules: [], mailDismissed: [], tasks: [], taskContexts: [...DEFAULT_TASK_CONTEXTS],
+return { settingsVault: { entries: {} }, habits: [], goals: [], jobs: [], connections: [], calendars: [], calendarStatus: {}, vouchers: [], providers: [], businessIdeas: [], subscriptions: [], enhancementIdeas: [], financeAccounts: [], switchOffers: [], mailSearches: [], mailTopics: [], mailRules: [], mailDismissed: [], tasks: [], taskContexts: [...DEFAULT_TASK_CONTEXTS],
 ratingCategories: DEFAULT_RATING_CATEGORIES.map((c) => ({ ...c })),
 recipes: [], recipeRatingCategories: DEFAULT_RECIPE_RATING_CATEGORIES.map((c) => ({ ...c })), ingredientReference: [], ingredientAliases: {},
 claudeAnswers: {},
@@ -3191,6 +3191,12 @@ s.provider = hit ? hit.provider : String(s.name || '').trim();
 if (hit && !s.logoUrl) s.logoUrl = hit.logoUrl;
 });
 }
+// One registry of providers (js/migrations.js linkProviders): every voucher,
+// loyalty program, subscription and bank account points at its entry by
+// providerId. The text field stays the displayed name; relinked on every load
+// so an edit to the text (or a device on older code) can never leave a stale id.
+if (!Array.isArray(data.providers)) data.providers = [];
+{ const report = linkProviders(data); if (report.created) console.info('Providers registry:', report); }
 // Backfills contentFilter onto a program that already existed before
 // that field did -- the ordinary `{...blankLoyaltyProgram(), ...p}`
 // merge above only fills in a key p doesn't have AT ALL with the

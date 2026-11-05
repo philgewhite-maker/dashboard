@@ -28,7 +28,7 @@ import { track } from './activity.js';
 import { recordMail, registerRetry } from './mailledger.js';
 import { canAttemptGoogleAction } from '../sync/googleauth.js';
 import { matchBrandLogo } from '../brandLogos.js';
-import { resolveProvider, refreshProviderDatalists } from '../providers.js';
+import { resolveProvider, refreshProviderDatalists, providerLogo } from '../providers.js';
 
 // How often a program is actually re-checked, independent of this
 // file being invoked daily by js/features/scheduled.js's own (much
@@ -1024,7 +1024,7 @@ const tier = readings.find((r) => r.tier)?.tier || '';
 const programInitials = (program.provider || program.name || '?').trim().slice(0, 2).toUpperCase();
 return `<div class="account-card" data-loyalty-program="${escapeHtml(program.id)}">
 <div class="account-summary" style="cursor:default;">
-${logoBadgeHtml(program.logoUrl, programInitials, 'plum')}
+${logoBadgeHtml(providerLogo(program), programInitials, 'plum')}
 <strong>${escapeHtml(program.provider || program.name)}</strong>
 ${program.what ? `<span class="tag-chip">${escapeHtml(program.what)}</span>` : ''}
 ${tier ? `<span class="tag-chip tag-chip-blue">${escapeHtml(tier)}</span>` : ''}

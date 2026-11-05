@@ -1,6 +1,6 @@
 import { data, queueSave } from '../state.js';
 import { uid, escapeHtml, bindForm, daysUntil, scrollAndFlash, todayStr, logoBadgeHtml, bindLogoFallbacks } from '../utils.js';
-import { resolveProvider, refreshProviderDatalists } from '../providers.js';
+import { resolveProvider, refreshProviderDatalists, providerLogo } from '../providers.js';
 
 const FREQUENCIES = ['Monthly', 'Yearly', 'Weekly', 'Other'];
 
@@ -105,7 +105,7 @@ badgeHtml = `<span class="expiry-badge">${dn}d left</span>`;
 const subInitials = (s.provider || s.name || '?').trim().slice(0, 2).toUpperCase();
 return `<div class="voucher-row" data-subscription-row="${s.id}">
 <div class="voucher-id" style="display:flex;gap:8px;align-items:flex-start;">
-${logoBadgeHtml(s.logoUrl, subInitials, 'plum')}
+${logoBadgeHtml(providerLogo(s), subInitials, 'plum')}
 <div style="flex:1 1 auto;min-width:0;">
 <input type="text" autocomplete="off" class="voucher-edit voucher-provider-edit" list="taglist-provider" data-field="provider" data-sub-id="${s.id}" value="${escapeHtml(s.provider || '')}" placeholder="Provider" title="Pick a provider you already use or type a new one -- the name is tidied to one spelling and its logo is added when known.">
 <input type="text" autocomplete="off" class="voucher-edit voucher-name-edit" data-field="name" data-sub-id="${s.id}" value="${escapeHtml(s.name)}" placeholder="Plan or what it is">

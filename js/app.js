@@ -9,6 +9,7 @@ import { initAutoLink } from './features/autolink.js';
 import { initDayQueue } from './features/dayqueue.js';
 import { initAiRuns } from './airuns.js';
 import { initAiRunsView } from './features/airunsview.js';
+import { initProvidersSettings } from './features/providerssettings.js';
 import { initRenderBus } from './render-bus.js';
 import { loadData, setSaveStatusHandler, setExternalUpdateHandler, flushSave } from './state.js';
 import { renderAll } from './render-all.js';
@@ -366,6 +367,7 @@ initMailHistory();
 initAutoLink();
 initAiRuns();
 initAiRunsView();
+initProvidersSettings();
 initDayQueue();
 initRenderBus();
 }

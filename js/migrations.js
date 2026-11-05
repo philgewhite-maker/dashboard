@@ -212,22 +212,38 @@ function ensureProvider(doc, name, logoHint) {
   return p;
 }
 
-function migrateProviders(doc) {
+// The four collections that name a provider, and the text field each uses.
+const PROVIDER_FIELDS = [['vouchers', 'provider'], ['loyaltyPrograms', 'provider'], ['subscriptions', 'provider'], ['financeAccounts', 'bank']];
+
+function providerMatches(p, text) {
+  const key = normProv(canonicalName(text));
+  return !!p && (normProv(p.name) === key || (p.aliases || []).some((a) => normProv(a) === key));
+}
+
+// Points every record's providerId at the registry entry its provider text
+// names, creating the entry for a new name. The text is what the edit forms
+// change, so a record whose id no longer matches its text is relinked; the
+// registry's own rename and merge rewrite the text of every linked record, so
+// they never look like a mismatch. Run on every load; cheap and idempotent.
+function linkProviders(doc) {
   const report = { created: 0, linked: { vouchers: 0, loyaltyPrograms: 0, subscriptions: 0, financeAccounts: 0 } };
-  const before = (doc.providers || []).length;
-  const link = (list, field, key) => (list || []).forEach((r) => {
-    if (r.providerId) return;
-    const p = ensureProvider(doc, r[field], r.logoUrl);
-    if (!p) return;
-    r.providerId = p.id;
-    report.linked[key]++;
-  });
-  link(doc.vouchers, 'provider', 'vouchers');
-  link(doc.loyaltyPrograms, 'provider', 'loyaltyPrograms');
-  link(doc.subscriptions, 'provider', 'subscriptions');
-  link(doc.financeAccounts, 'bank', 'financeAccounts');
   if (!Array.isArray(doc.providers)) doc.providers = [];
+  const before = doc.providers.length;
+  PROVIDER_FIELDS.forEach(([list, field]) => (doc[list] || []).forEach((r) => {
+    const text = String(r[field] || '').trim();
+    if (!text) { if (r.providerId) r.providerId = ''; return; }
+    if (r.providerId && providerMatches(doc.providers.find((x) => x.id === r.providerId), text)) return;
+    const p = ensureProvider(doc, text, r.logoUrl);
+    if (!p || r.providerId === p.id) return;
+    r.providerId = p.id;
+    report.linked[list]++;
+  }));
   report.created = doc.providers.length - before;
+  return report;
+}
+
+function migrateProviders(doc) {
+  const report = linkProviders(doc);
   report.names = doc.providers.map((p) => p.name);
   return report;
 }
@@ -278,4 +294,4 @@ function migrateConnections(doc) {
   return report;
 }
 
-export { SCHEMA_VERSION, migrateStays, dedupeAccruals, migrateVouchers, migrateProviders, migrateConnections, parseVoucherValue, ensureProvider, canonicalName, providerIdFor, VOUCHER_UNITS };
+export { SCHEMA_VERSION, migrateStays, dedupeAccruals, migrateVouchers, migrateProviders, linkProviders, providerMatches, PROVIDER_FIELDS, migrateConnections, parseVoucherValue, ensureProvider, canonicalName, providerIdFor, VOUCHER_UNITS };

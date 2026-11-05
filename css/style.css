@@ -4448,3 +4448,8 @@ background:var(--slate-bg);color:var(--slate);
 .airuns-run{padding:6px 0;border-top:1px solid var(--line);display:flex;flex-wrap:wrap;gap:6px 10px;align-items:baseline;}
 .airuns-run>[data-airuns-detail]{flex-basis:100%;}
 .airuns-pre{white-space:pre-wrap;max-height:260px;overflow:auto;font-size:12px;background:var(--paper);border:1px solid var(--line);border-radius:6px;padding:8px;}
+
+/* Providers registry (Settings -> Finances -> Providers) */
+.provider-row { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.provider-row:last-child { border-bottom: 0; }
+.provider-uses { margin-top: 4px; font-size: 0.85em; display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; }

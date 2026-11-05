@@ -78,7 +78,7 @@ a{color:var(--accent)}
 <div class="wrap">
 <header>
   <h1>Dashboard data model</h1>
-  <p class="lede">What the app stores, how the pieces refer to each other, where the same fact is kept twice, and where text stands in for structure. Built from the code and from a read of the live document (field names, types, fill rates and reference checks; no personal values). Verified against build <b>v737</b>.</p>
+  <p class="lede">What the app stores, how the pieces refer to each other, where the same fact is kept twice, and where text stands in for structure. Built from the code and from a read of the live document (field names, types, fill rates and reference checks; no personal values). Verified against build <b>v738</b>.</p>
   <ul class="stats">
     <li><b>109</b><span>top-level keys</span></li>
     <li><b>597</b><span>connections</span></li>
@@ -129,6 +129,7 @@ a{color:var(--accent)}
       <li>You already guessed this overlap. It is wider than vouchers: any company you hold points, a card, a subscription and a voucher with is four unrelated records.</li>
     </ul>
     <p class="fix"><b>Fix.</b> A <code>providers</code> registry (id, name, logo, kinds). The other collections hold <code>providerId</code>.</p>
+    <p class="fix"><b>Done in v738.</b> New <code>providers</code> (id, name, logoUrl, aliases): 39 entries for 71 records. Vouchers, loyalty programs, subscriptions and bank accounts hold <code>providerId</code>. The text field stays as the displayed name and is relinked on every load, so an edit can never leave a stale id. A record's own logo still wins; otherwise the provider's is shown. Settings → Finances → Providers lists each provider with what uses it (each a link back) and renames or merges it everywhere; a merged name is kept as an alias. Annual perks still match a bank by text.</p>
   </div>
 
   <div class="finding">
@@ -422,9 +423,10 @@ erDiagram
   LOYALTY_PROGRAM ||--o{ READING : programId
   LOYALTY_PROGRAM ||--o{ LABEL_KIND : "programId + label text"
   VOUCHER }o--o{ READING : sourceLoyaltyReadingIds
-  LOYALTY_PROGRAM }o..o{ VOUCHER : "same provider text"
-  LOYALTY_PROGRAM }o..o{ SUBSCRIPTION : "same provider text"
-  LOYALTY_PROGRAM }o..o{ FINANCE_ACCOUNT : "bank text"
+  PROVIDER ||--o{ VOUCHER : providerId
+  PROVIDER ||--o{ LOYALTY_PROGRAM : providerId
+  PROVIDER ||--o{ SUBSCRIPTION : providerId
+  PROVIDER ||--o{ FINANCE_ACCOUNT : providerId
   LOYALTY_PROGRAM {
     string id PK
     string provider "text"

@@ -2,7 +2,7 @@ import { data, queueSave, blankVoucher } from '../state.js';
 import { escapeHtml, bindForm, daysUntil, scrollAndFlash, logoBadgeHtml, bindLogoFallbacks } from '../utils.js';
 import { renderLoyaltyBalances, pendingClassifications, pendingVoucherLinks, setLabelKind, markVoucherLinked, markVoucherSkipped, voucherWhatFor, VOUCHER_WHAT_BY_LABEL, CURRENCY_UNITS } from './loyaltybalances.js';
 import { matchBrandLogo } from '../brandLogos.js';
-import { resolveProvider, refreshProviderDatalists } from '../providers.js';
+import { resolveProvider, refreshProviderDatalists, providerLogo } from '../providers.js';
 import { VOUCHER_UNITS } from '../migrations.js';
 
 const VOUCHER_TYPES = ['Voucher', 'Credit', 'Cheque', 'Refund', 'Other'];
@@ -98,7 +98,7 @@ badgeHtml = `<span class="expiry-badge">${dn}d left</span>`;
 const vInitials = (v.provider || v.name || '?').trim().slice(0, 2).toUpperCase();
 return `<div class="voucher-row${v.used ? " voucher-used" : ""}" data-voucher-row="${v.id}">
 <div class="voucher-id" style="display:flex;gap:8px;align-items:flex-start;">
-${logoBadgeHtml(v.logoUrl, vInitials, 'plum')}
+${logoBadgeHtml(providerLogo(v), vInitials, 'plum')}
 <div style="flex:1 1 auto;min-width:0;">
 <input type="text" autocomplete="off" class="voucher-edit voucher-name-edit" data-field="name" data-voucher-id="${v.id}" value="${escapeHtml(v.name)}">
 <div class="voucher-meta">

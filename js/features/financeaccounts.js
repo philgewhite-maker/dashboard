@@ -8,6 +8,7 @@
 import { data, queueSave, blankFinanceAccount } from '../state.js';
 import { uid, escapeHtml, bindForm, daysUntil, scrollAndFlash, logoBadgeHtml, bindLogoFallbacks } from '../utils.js';
 import { matchBankLogo } from '../bankLogos.js';
+import { providerLogo } from '../providers.js';
 // Subscriptions carry the account link (subscription.accountId), so
 // changing it here has to redraw their panel too -- both sit on the
 // Finances tab and are on screen together. Imported dynamically to keep
@@ -66,7 +67,7 @@ return (a.bank || a.name || '?').trim().slice(0, 2).toUpperCase();
 // Loyalty balances wanted the identical pattern; behaviour here is
 // unchanged).
 function accountBadgeHtml(a, sizeClass) {
-return logoBadgeHtml(a.logoUrl, accountInitials(a), `${a.colour} ${sizeClass || ''}`);
+return logoBadgeHtml(providerLogo(a), accountInitials(a), `${a.colour} ${sizeClass || ''}`);
 }
 
 // Same expiry-badge classes vouchers.js/subscriptions.js/the old

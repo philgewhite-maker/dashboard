@@ -8,7 +8,7 @@
 // "what of", kept in its own field so one provider can hold Avios, an
 // eVoucher and a Companion Voucher side by side.
 import { data } from './state.js';
-import { BRAND_LOGOS, splitProvider } from './brandLogos.js';
+import { BRAND_LOGOS, splitProvider, normProv } from './brandLogos.js';
 import { escapeHtml } from './utils.js';
 
 const WHAT_SUGGESTIONS = ['Avios', 'eVoucher', 'Companion Voucher', 'Points', 'Miles', 'Cashback', 'Gift card'];
@@ -16,6 +16,7 @@ const WHAT_SUGGESTIONS = ['Avios', 'eVoucher', 'Companion Voucher', 'Points', 'M
 function allProviderNames() {
 const seen = new Map();
 const add = (n) => { const t = String(n || '').trim(); if (t && !seen.has(t.toLowerCase())) seen.set(t.toLowerCase(), t); };
+(data.providers || []).forEach((p) => add(p.name));
 BRAND_LOGOS.forEach((e) => add(e.names[0]));
 (data.vouchers || []).forEach((v) => add(v.provider));
 (data.loyaltyPrograms || []).forEach((p) => add(p.provider));
@@ -40,6 +41,10 @@ const t = String(text || '').trim();
 if (!t) return { provider: '', logoUrl: '', what: '' };
 const hit = splitProvider(t);
 if (hit) return hit;
+// A name merged into another provider (Settings -> Finances -> Providers)
+// resolves to the provider it was merged into.
+const merged = (data.providers || []).find((p) => (p.aliases || []).some((a) => normProv(a) === normProv(t)));
+if (merged) return { provider: merged.name, logoUrl: merged.logoUrl || '', what: '' };
 const existing = allProviderNames().find((n) => n.toLowerCase() === t.toLowerCase());
 // A brand-new name typed all in lower case gets capitalised once, so
 // "netflix" and "Netflix" never end up as two providers.
@@ -60,4 +65,15 @@ if (!host) { host = document.createElement('div'); host.id = 'provider-datalists
 host.innerHTML = providerDatalistHtml();
 }
 
-export { resolveProvider, allProviderNames, allWhatValues, refreshProviderDatalists };
+// The registry entry a voucher, program, subscription or account points at.
+function providerFor(rec) {
+return (rec && rec.providerId && (data.providers || []).find((p) => p.id === rec.providerId)) || null;
+}
+// A record's own logo wins; otherwise its provider's.
+function providerLogo(rec) {
+if (rec && rec.logoUrl) return rec.logoUrl;
+const p = providerFor(rec);
+return (p && p.logoUrl) || '';
+}
+
+export { resolveProvider, allProviderNames, allWhatValues, refreshProviderDatalists, providerFor, providerLogo };
