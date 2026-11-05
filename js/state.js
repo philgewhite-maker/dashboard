@@ -1,7 +1,7 @@
 import { kvGet, kvSet, photoDelete } from './db.js';
 import { uid, todayStr, daysAgoStr, last7Dates, daysSince, daysUntil } from './utils.js';
 import { matchBrandLogo, matchBrandEntry, splitProvider } from './brandLogos.js';
-import { migrateStays, dedupeStays, unlinkCopiedCodes, repairMigratedBookingDates, migrateVouchers, dedupeAccruals, migrateConnections, linkProviders } from './migrations.js';
+import { splitLedgerNotes, migrateStays, dedupeStays, unlinkCopiedCodes, repairMigratedBookingDates, migrateVouchers, dedupeAccruals, migrateConnections, linkProviders } from './migrations.js';
 
 const DATA_KEY = 'app-data';
 const REV_KEY = 'app-data-rev'; // separate from DATA_KEY so it never leaks into backup exports
@@ -3362,6 +3362,9 @@ console.info('Stays migration:', report);
 const merged = dedupeStays(data);
 if (merged.length) console.info('Duplicate stays merged:', merged);
 repairMigratedBookingDates(data);
+// Letting ledger rows keep who it was (guest) apart from what it says (description), on every
+// load so a row written by an older device or code path is filled in too.
+splitLedgerNotes(data);
 const copied = unlinkCopiedCodes(data);
 if (copied.length) console.info('Booking code copied onto a second stay, cleared:', copied);
 }

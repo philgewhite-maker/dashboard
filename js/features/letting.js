@@ -17,6 +17,7 @@
 import { data, queueSave } from '../state.js';
 import { escapeHtml, uid, logoBadgeHtml, bindLogoFallbacks } from '../utils.js';
 import { matchBrandLogo } from '../brandLogos.js';
+import { splitLedgerNote } from '../migrations.js';
 
 // Per-device view state, not data: which people's sections are folded away
 // (remembered across visits) and which ledger rows have their detail line
@@ -226,7 +227,7 @@ flagged = true;
 const pct = refundShareFor(e);
 const back = Math.round(-Number(e.amount) * (100 - pct)) / 100;
 if (!(back > 0) || ledger.some((x) => x.id === `refundfix:${e.id}`)) return;
-fixes.push({ id: `refundfix:${e.id}`, ownerKey: e.ownerKey, kind: 'adjustment', amount: back, date: REFUND_FIX_DATE, note: `Refund split: ${e.note || 'guest'} ${money(-e.amount)} refund on ${e.date} was charged in full; ${pct}% share is theirs` });
+fixes.push({ id: `refundfix:${e.id}`, ownerKey: e.ownerKey, kind: 'adjustment', amount: back, date: REFUND_FIX_DATE, guest: e.note || 'guest', description: `Refund of ${money(-e.amount)} on ${e.date} was charged in full; ${pct}% share is theirs`, note: `Refund split: ${e.note || 'guest'} ${money(-e.amount)} refund on ${e.date} was charged in full; ${pct}% share is theirs` });
 });
 if (!flagged) return;
 data.lettingLedger.push(...fixes);
@@ -725,18 +726,19 @@ const grossHtml = e.gross ? `<span class="letting-gross" title="${escapeHtml(`Wh
 const nightRateBit = nightRate != null ? `<span class="letting-gross" title="${escapeHtml(`${e.nights} night${e.nights === 1 ? '' : 's'}, after cleaning cost`)}">${escapeHtml(money(nightRate))}/night</span>` : '';
 // Top line: who it was. A stay row is "listing, guest" in its note; anything else (a payment,
 // an adjustment, interest) just shows its own note.
-const noteParts = String(e.note || '').split(', ');
+// The guest and the description are their own fields (splitLedgerNote reads an older row's note).
+const parts = typeof e.guest === 'string' ? { guest: e.guest, description: e.description || '' } : splitLedgerNote(e);
 const isStayKind = isIncomeKind || e.kind === 'refund';
-const splitNote = e.kind === 'accrual' && noteParts.length > 1;
 const stayRoom = (data.airbnbListings || []).find((l) => l.id === e.listingId);
-const roomLabel = splitNote ? noteParts[0] : (isStayKind && stayRoom ? (stayRoom.label || stayRoom.prefix || '') : '');
-const guest = splitNote ? noteParts.slice(1).join(', ') : ledgerNoteFor(e);
+const noteHead = String(e.note || '').split(', ')[0];
+const roomLabel = isStayKind && stayRoom ? (stayRoom.label || stayRoom.prefix || '') : (e.kind === 'accrual' && String(e.note || '').includes(', ') ? noteHead : '');
+const guest = e.kind === 'refund' ? ledgerNoteFor(e) : (parts.guest || parts.description || ledgerNoteFor(e));
 // A refund is a guest refund Airbnb paid out of a booking, so it carries the same mark.
 const logoCell = isIncomeKind || e.kind === 'refund'
 ? (e.platform !== 'other' ? logoBadgeHtml(airbnbLogo, 'A', 'letting-platform-badge') : '<span class="letting-platform-other" title="Not through Airbnb">Other</span>')
 : '';
 const kindLabel = e.kind === 'accrual' ? 'income' : (e.kind || 'entry');
-const bits = [roomLabel ? `<span>${escapeHtml(roomLabel)}</span>` : '', e.nights ? `<span>${escapeHtml(`${e.nights} night${e.nights === 1 ? '' : 's'}`)}</span>` : '', grossHtml, nightRateBit].filter(Boolean);
+const bits = [parts.guest && parts.description ? `<span class="letting-rec-desc">${escapeHtml(parts.description)}</span>` : '', roomLabel ? `<span>${escapeHtml(roomLabel)}</span>` : '', e.nights ? `<span>${escapeHtml(`${e.nights} night${e.nights === 1 ? '' : 's'}`)}</span>` : '', grossHtml, nightRateBit].filter(Boolean);
 return `<div class="letting-rec">
 <div class="letting-rec-top">
 <span class="letting-rec-logo">${logoCell}</span>

@@ -200,6 +200,38 @@ function dedupeStays(doc) {
   return removed;
 }
 
+// ---- Letting ledger: who it was, separate from what it says -----------------
+//
+// A ledger row used to keep everything in one `note`: the guest ("Eduardo"), a sentence about it
+// ("Refund split: Eduardo £30.00 refund on 2026-10-19 was charged in full; 50% share is theirs"),
+// and for a stay "room, guest". Rows now carry `guest` (a person) and `description` (what happened)
+// as fields; `note` stays as it was, because other code still matches on it. This is the one place
+// that knows how to read an old note, used to fill the fields on load and as the display fallback.
+const REFUND_SPLIT_RE = /^Refund split:\s*(.+?)\s+(£[\d,]+(?:\.\d+)?)\s+refund on\s+(\d{4}-\d{2}-\d{2})\s+was charged in full;\s*(\d+)% share is theirs$/;
+function splitLedgerNote(e) {
+  const note = String(e.note || '').trim();
+  const split = REFUND_SPLIT_RE.exec(note);
+  if (split) return { guest: split[1], description: `Refund of ${split[2]} on ${split[3]} was charged in full; ${split[4]}% share is theirs` };
+  if (e.kind === 'accrual') {
+    const i = note.indexOf(', ');
+    return { guest: i >= 0 ? note.slice(i + 2).trim() : note, description: '' };
+  }
+  if (e.kind === 'earned' || e.kind === 'cancellation' || e.kind === 'refund') return { guest: note, description: '' };
+  return { guest: '', description: note }; // payments, interest, caps, other adjustments: a description, no guest
+}
+
+function splitLedgerNotes(doc) {
+  let n = 0;
+  (doc.lettingLedger || []).forEach((e) => {
+    if (typeof e.guest === 'string' && typeof e.description === 'string') return;
+    const s = splitLedgerNote(e);
+    if (typeof e.guest !== 'string') e.guest = s.guest;
+    if (typeof e.description !== 'string') e.description = s.description;
+    n++;
+  });
+  return n;
+}
+
 // A stay brought in by the Airbnb migration (accruedAt 'migrated') was given a createdAt that is
 // not when anything was first seen (its checkout date, or the day of the migration), and the
 // charts read createdAt as the booking date when there is no confirmedOn. With no real booking
@@ -390,4 +422,4 @@ function migrateConnections(doc) {
   return report;
 }
 
-export { SCHEMA_VERSION, migrateStays, dedupeStays, unlinkCopiedCodes, repairMigratedBookingDates, dedupeAccruals, migrateVouchers, migrateProviders, linkProviders, providerMatches, PROVIDER_FIELDS, migrateConnections, parseVoucherValue, ensureProvider, canonicalName, providerIdFor, VOUCHER_UNITS };
+export { SCHEMA_VERSION, splitLedgerNote, splitLedgerNotes, migrateStays, dedupeStays, unlinkCopiedCodes, repairMigratedBookingDates, dedupeAccruals, migrateVouchers, migrateProviders, linkProviders, providerMatches, PROVIDER_FIELDS, migrateConnections, parseVoucherValue, ensureProvider, canonicalName, providerIdFor, VOUCHER_UNITS };

@@ -4488,3 +4488,5 @@ background:var(--slate-bg);color:var(--slate);
 #letting-list .letting-rec-sub{margin-left:0;}
 #letting-list .letting-detail-row{margin-left:0;}
 }
+/* The description under a guest's name on a ledger record (what happened), in the text colour so it reads as the row's note. */
+#letting-list .letting-rec-sub>.letting-rec-desc{color:var(--ink);flex:1 1 100%;order:5;}
