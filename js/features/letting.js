@@ -710,10 +710,13 @@ const ownListings = (data.airbnbListings || []).filter((l) => ownerKeyFor(l) ===
 const showListing = (e.kind === 'earned' || e.kind === 'cancellation' || isOrphanedAccrual) && ownListings.length > 0;
 const showPlatform = e.kind === 'earned' || e.kind === 'cancellation';
 const showStay = e.kind === 'cancellation'; // the dates that place a cancelled booking on the occupancy chart
+// An income row charged from a stay on file: the stay's own dates (read-only here; they come from the stay, and nights below stay editable).
+const stayRec = e.kind === 'accrual' ? (data.airbnbReservations || []).find((r) => r.id === e.reservationId) : null;
+const showStayDates = !!(stayRec && stayRec.checkin && stayRec.checkout);
 const showTotal = e.kind === 'earned';
 const showAmount = e.kind === 'payment' || e.kind === 'adjustment';
 const showNote = manual && (e.kind === 'earned' || e.kind === 'cancellation' || e.kind === 'payment' || e.kind === 'adjustment');
-const hasDetail = showStartDate || showNights || showListing || showPlatform || showStay || showTotal || showAmount || showNote;
+const hasDetail = showStayDates || showStartDate || showNights || showListing || showPlatform || showStay || showTotal || showAmount || showNote;
 const open = expandedLedgerRows.has(e.id);
 const isIncomeKind = e.kind === 'accrual' || e.kind === 'earned' || e.kind === 'cancellation';
 // The booking's gross total, not "X% of" it -- a share that can be
@@ -746,6 +749,8 @@ ${mine ? '' : `<span class="letting-rec-amt keeps" title="${escapeHtml(ownerName
 <div class="letting-rec-sub"><span class="letting-kind ${escapeHtml(e.kind || '')}">${escapeHtml(kindLabel)}</span>${bits.join('')}</div>
 ${hasDetail ? `<div class="letting-detail-row"${open ? '' : ' hidden'}><div class="letting-detail">
 ${showStartDate ? `<label>Check-in<input type="date" class="settings-input" data-letting-start-date="${escapeHtml(e.id)}" value="${escapeHtml(e.startDate || '')}" title="The real check-in date for this stay -- what occupancy and the average night rate are actually based on, kept separate from the payout date. Leave blank and nights get guessed backward from the payout date instead, which is wrong whenever the payout didn't land on the real checkout."></label>` : ''}
+${showStayDates ? `<label>Check-in<span class="settings-note" style="margin:0;white-space:nowrap;" title="From the stay this income was charged for. Change it on the stay itself.">${escapeHtml(stayRec.checkin)}</span></label>
+<label>Check-out<span class="settings-note" style="margin:0;white-space:nowrap;" title="The day the guest left (the turnover day).">${escapeHtml(stayRec.checkout)}</span></label>` : ''}
 ${showNights ? `<label>Nights<input type="number" min="0" step="1" class="settings-input" data-letting-nights="${escapeHtml(e.id)}" value="${e.nights || ''}" placeholder="Nights" title="Nights this stay covered -- used for the average night rate. Filled in automatically when the reservation was still on file at accrual time; type it in for an older row that's missing it."></label>` : ''}
 ${showListing ? `<label>Listing<select class="settings-input" data-letting-listing="${escapeHtml(e.id)}" title="Which of ${escapeHtml(ownerNameFor(e.ownerKey))}'s listings this stay was for -- it decides which room the stay is drawn on, and which listing the average night-rate chart groups it under.">
 <option value="">Listing…</option>
