@@ -4309,7 +4309,6 @@ background:var(--sage-bg);color:var(--sage);
 .letting-detail{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:flex-end;padding:2px 0 6px;}
 .letting-detail label{display:flex;flex-direction:column;gap:2px;font-size:11px;color:var(--muted);}
 #letting-list .letting-detail .settings-input,#letting-list .letting-detail select{flex:0 0 auto;width:auto;max-width:140px;}
-.letting-detail-row td{border-top:none;}
 #letting-list .letting-platform-badge{width:16px;height:16px;font-size:8px;flex:none;vertical-align:-3px;}
 #letting-list input[type=date]{max-width:122px;font-size:12px;padding:4px 6px;}
 
@@ -4453,3 +4452,39 @@ background:var(--slate-bg);color:var(--slate);
 .provider-row { padding: 8px 0; border-bottom: 1px solid var(--line); }
 .provider-row:last-child { border-bottom: 0; }
 .provider-uses { margin-top: 4px; font-size: 0.85em; display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; }
+
+/* Letting income: each ledger record is two lines. Top: channel mark, date, guest, then the two
+   split amounts and the row controls. Bottom: payment type, room, nights, what the guest paid and
+   the nightly average. Wraps on a phone instead of scrolling sideways. */
+#letting-list .letting-rec{padding:7px 0;border-top:1px solid var(--line);}
+#letting-list .letting-rec:first-of-type{border-top:none;}
+#letting-list .letting-rec-top{display:flex;align-items:center;gap:6px 8px;flex-wrap:wrap;}
+#letting-list .letting-rec-logo{flex:0 0 18px;display:inline-flex;align-items:center;justify-content:center;}
+#letting-list .letting-rec-date{flex:0 0 auto;}
+#letting-list .letting-rec-guest{flex:1 1 120px;min-width:0;font-weight:500;overflow-wrap:anywhere;}
+#letting-list .letting-rec-amt{flex:0 0 auto;min-width:70px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;}
+#letting-list .letting-rec-amt.keeps{color:var(--muted);}
+#letting-list .letting-rec-ctl{flex:0 0 40px;text-align:right;white-space:nowrap;}
+#letting-list .letting-rec-head{display:flex;justify-content:flex-end;gap:8px;padding-bottom:2px;}
+#letting-list .letting-rec-head>span{flex:0 0 auto;min-width:70px;text-align:right;}
+#letting-list .letting-rec-head>.letting-rec-ctl{min-width:0;}
+#letting-list .letting-rec-sub{display:flex;align-items:center;flex-wrap:wrap;gap:2px 10px;margin:3px 0 0 26px;font-size:12px;color:var(--muted);}
+#letting-list .letting-rec-sub>span:not(.letting-kind){font-variant-numeric:tabular-nums;}
+#letting-list .letting-kind.accrual{background:var(--sage-bg);color:var(--sage);}
+#letting-list .letting-kind.payment{background:var(--slate-bg);color:var(--slate);}
+#letting-list .letting-kind.refund{background:var(--rose-bg);color:var(--rose);}
+#letting-list .letting-platform-other{font-size:9px;color:var(--muted);border:1px solid var(--line);border-radius:3px;padding:0 3px;}
+#letting-list .letting-detail-row{margin:2px 0 0 26px;}
+@media (max-width:520px){
+#letting-list .letting-rec-top{gap:4px 6px;}
+#letting-list .letting-rec-logo{order:1;}
+#letting-list .letting-rec-date{order:2;}
+#letting-list .letting-rec-ctl{order:3;margin-left:auto;}
+#letting-list .letting-rec-guest{order:4;flex:1 1 calc(100% - 140px);}
+#letting-list .letting-rec-amt{order:5;}
+#letting-list .letting-rec-head>.letting-rec-ctl{display:none;}
+#letting-list .letting-rec-amt{min-width:60px;}
+#letting-list .letting-rec-head>span{min-width:60px;}
+#letting-list .letting-rec-sub{margin-left:0;}
+#letting-list .letting-detail-row{margin-left:0;}
+}
