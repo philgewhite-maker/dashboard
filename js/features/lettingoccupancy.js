@@ -13,9 +13,13 @@
 import { data } from '../state.js';
 import { escapeHtml, dateStrAdd, todayStr } from '../utils.js';
 import { listingColorVar, resolveColor, addMonths, monthLabel, ownerKeyFor, ownerNameFor, lettingChartMonthTotal, lettingIncomeItems, nightRateRooms, money0 } from './letting.js';
+import { isUnconfirmedStay } from '../icsparse.js';
 
 const DAY_MS = 86400000;
-const MIN_COVERAGE = 0.8; // share of a month's nights that must have a known booking date before it is compared
+const MIN_COVERAGE = 0.8; // share of a month's nights that must have a known income/dates before it is compared
+// Nights booked: an older month's line counts only stays with a known booking date, so it is an
+// under-count. From this share it is still drawn (with a note saying so); below it, not at all.
+const MIN_COVERAGE_BOOKINGS = 0.5;
 
 function ymOf(dateStr) { return String(dateStr).slice(0, 7); }
 function daysIn(ym) { const [y, m] = ym.split('-').map(Number); return new Date(y, m, 0).getDate(); }
@@ -56,7 +60,7 @@ return { stay: s, merged: false };
 // (booked, completed, cancelled); nothing is deleted when a stay ends.
 (data.airbnbReservations || []).forEach((r) => add({
 id: r.id, listingId: r.listingId, checkin: r.checkin, checkout: r.checkout, guest: r.guestName || '',
-income: r.status === 'cancelled' ? null : (r.income ?? null), bookedOn: r.confirmedOn || String(r.createdAt || '').slice(0, 10),
+unconfirmed: isUnconfirmedStay(r), income: r.status === 'cancelled' ? null : (r.income ?? null), bookedOn: r.confirmedOn || String(r.createdAt || '').slice(0, 10),
 cancelledOn: r.cancelledOn || '', status: r.status === 'cancelled' ? 'cancelled' : 'stay',
 source: r.status === 'completed' ? 'finished' : r.status === 'cancelled' ? 'cancelled' : 'live', platform: r.platform === 'other' ? 'other' : 'airbnb',
 }));
@@ -158,10 +162,11 @@ const to = stay.checkout < next ? stay.checkout : next;
 return to > from ? nightsBetween(from, to) : 0;
 }
 
-// Revenue only: a stay's income accrues night by night, up to today.
-function countFor(stay, ym, upToDay, metric, today) {
+// Revenue only: a stay's income accrues night by night, up to today. `uncapped` carries on past
+// today (the nights already booked), for the projection to the month's end.
+function countFor(stay, ym, upToDay, metric, today, uncapped = false) {
 const D = dayStr(ym, upToDay);
-const upTo = D < dateStrAdd(today, 1) ? D : today;
+const upTo = uncapped || D < dateStrAdd(today, 1) ? D : today;
 const first = dayStr(ym, 1);
 const lastNight = dateStrAdd(upTo, 1); // nights strictly before this date
 const from = stay.checkin > first ? stay.checkin : first;
@@ -203,10 +208,13 @@ const first = dayStr(ym, 1);
 const next = dayStr(addMonths(ym, 1), 1);
 const n = daysIn(ym);
 // Occupied nights only exist up to today; booked nights cover the whole month (they are future nights too).
-const limit = metric === 'nights' ? dateStrAdd(D < today ? D : today, 1) : next;
+// 'projected': the nights up to day D that are booked (future ones too), counting only stays that
+// are confirmed, since an unconfirmed one may be an enquiry that never happens.
+const limit = metric === 'nights' ? dateStrAdd(D < today ? D : today, 1) : metric === 'projected' ? dateStrAdd(D, 1) : next;
 const keys = new Map();
 stays.forEach((s) => {
 if (channel && channelOf(s) !== channel) return;
+if (metric === 'projected' && s.unconfirmed) return;
 if (metric === 'bookings') {
 if (!s.bookedOn || s.bookedOn > D) return;
 if (s.status === 'cancelled' && (!s.cancelledOn || s.cancelledOn <= D)) return;
@@ -225,7 +233,9 @@ return keys;
 // Cumulative series for one month, day 1..N. Days after today in the current
 // month are null (nothing has happened yet for occupied nights / revenue; for
 // bookings the line stops too, since bookings made after today don't exist).
-function seriesFor(stays, ym, metric, today) {
+// `project`: for Nights occupied and Revenue earned, carry the line on past today using the stays
+// already booked (nights, and the income entered for them), instead of leaving the rest empty.
+function seriesFor(stays, ym, metric, today, project = false) {
 const n = daysIn(ym);
 const out = [];
 if (metric === 'bookings') {
@@ -239,18 +249,18 @@ out.push(asOf > today ? null : distinctRoomNights(stays, ym, n, metric, today, a
 return out;
 }
 for (let d = 1; d <= n; d++) {
-if (dayStr(ym, d) > today) { out.push(null); continue; }
+if (!project && dayStr(ym, d) > today) { out.push(null); continue; }
 let sum = 0;
 if (metric === 'revenue') {
 const day = dayStr(ym, d);
 (stays.items || []).forEach((it) => {
 if (state.channel && (it.platform === 'other' ? 'other' : 'airbnb') !== state.channel) return;
-if (it.start) { sum += countFor({ checkin: it.start, checkout: it.end, income: it.gross, status: 'stay' }, ym, d, 'revenue', today); return; }
+if (it.start) { sum += countFor({ checkin: it.start, checkout: it.end, income: it.gross, status: 'stay' }, ym, d, 'revenue', today, project); return; }
 // No nights to spread it over: a payout lands on its own date, all at once, once that date has passed.
 if (it.date.slice(0, 7) === ym && it.date <= day && it.date <= today) sum += it.gross;
 });
 } else {
-sum = distinctRoomNights(stays, ym, d, metric, today);
+sum = distinctRoomNights(stays, ym, d, project ? 'projected' : metric, today);
 }
 out.push(Math.round(sum * 100) / 100);
 }
@@ -286,16 +296,18 @@ const COMPARE_LABEL = { prev: 'last month', prev3: 'the last 3 months (average)'
 
 function comparisonSeries(stays, ym, mode, metric, today) {
 const months = compareMonths(ym, mode);
-const usable = months.filter((m) => coverageFor(stays, m, metric) >= MIN_COVERAGE);
+const need = metric === 'bookings' ? MIN_COVERAGE_BOOKINGS : MIN_COVERAGE;
+const usable = months.filter((m) => coverageFor(stays, m, metric) >= need);
 const n = leadFor(metric) + daysIn(ym);
 if (!usable.length) return { values: null, usable, months };
+const minCoverage = Math.min(...usable.map((m) => coverageFor(stays, m, metric)));
 const all = usable.map((m) => seriesFor(stays, m, metric, today));
 const values = [];
 for (let d = 0; d < n; d++) {
 const picked = all.map((s) => s[Math.min(d, s.length - 1)]).filter((v) => v !== null);
 values.push(picked.length ? Math.round((picked.reduce((a, b) => a + b, 0) / picked.length) * 100) / 100 : null);
 }
-return { values, usable, months };
+return { values, usable, months, minCoverage };
 }
 
 // ---- State & markup ----------------------------------------------------------
@@ -319,7 +331,7 @@ function sectionHtml() {
 return `<div class="letting-chart-wrap" id="letting-occupancy-section">
 <div class="panel-head" style="margin:14px 0 6px;"><h2 style="font-size:13px;">Occupancy and booking pace</h2></div>
 <details class="settings-subgroup panel-about"><summary>About this</summary>
-<div class="settings-note" style="margin:0 0 6px;">Top: each room is a lane and each booking a line from check-in to check-out, so turnovers show as a gap. Hatched lines are cancelled bookings (recorded from the day they leave the Airbnb feed; older ones appear only when they have a cancellation payout, and show as a single night). Bottom: the same month as a cumulative line against a comparison month, with the gap shaded and named. <strong>Nights booked</strong> zooms out: its axis starts 16 weeks before the 1st and runs through the month, showing how many of the month's nights were already booked at each point, against the comparison month at the same distance from its own 1st (so you can see whether next month is filling faster or slower than last month did). A booking counts from the day it was confirmed (its confirmation email) and a cancelled one is taken back out from the day it was cancelled; booking dates are only known for stays seen since this was added, so older months say "collecting data" instead of showing a misleading line. <strong>Nights occupied</strong> and <strong>Revenue earned</strong> compare straight away.</div>
+<div class="settings-note" style="margin:0 0 6px;">Top: each room is a lane and each booking a line from check-in to check-out, so turnovers show as a gap. Hatched lines are cancelled bookings (recorded from the day they leave the Airbnb feed; older ones appear only when they have a cancellation payout, and show as a single night). Bottom: the same month as a cumulative line against a comparison month, with the gap shaded and named. <strong>Nights booked</strong> zooms out: its axis starts a week or so before the first booking for the month (or the comparison month) appears, up to 16 weeks before the 1st, and runs through the month, showing how many of the month's nights were already booked at each point, against the comparison month at the same distance from its own 1st (so you can see whether next month is filling faster or slower than last month did). A booking counts from the day it was confirmed (its confirmation email) and a cancelled one is taken back out from the day it was cancelled; booking dates are only known for stays seen since this was added, so an older month's line is an under-count: it is drawn with a note once half its nights have a known booking date, and below that says "collecting data" instead. <strong>Nights occupied</strong> and <strong>Revenue earned</strong> compare straight away, and for a month not yet over a dotted line carries them to the month's end using only stays already booked and confirmed (revenue counts the income entered for them; a stay with none adds nothing, and unconfirmed enquiries are left out).</div>
 </details>
 <div class="sync-row" style="gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px;">
 <select id="occ-month" class="mini" title="The month both charts show"></select>
@@ -539,10 +551,24 @@ const verdictEl = document.getElementById('pace-verdict');
 const tableEl = document.getElementById('occ-table');
 if (!canvas) return;
 const ym = state.ym; const metric = state.metric; const today = todayStr();
-const lead = leadFor(metric);
-const cur = seriesFor(stays, ym, metric, today);
+const fullLead = leadFor(metric);
+let lead = fullLead;
+let cur = seriesFor(stays, ym, metric, today);
 const cmp = comparisonSeries(stays, ym, state.compare, metric, today);
+if (fullLead) {
+// Nights booked: start the axis just before bookings begin to appear (in this month or in the
+// comparison one), not a fixed 16 weeks back, so there are not weeks of flat zero on the left.
+let firstIdx = Infinity;
+[cur, cmp.values || []].forEach((arr) => { const i = arr.findIndex((v) => v !== null && v > 0); if (i >= 0 && i < firstIdx) firstIdx = i; });
+const daysBefore = Number.isFinite(firstIdx) ? Math.max(0, fullLead - firstIdx) : 0;
+lead = Math.min(fullLead, Math.max(14, Math.ceil(daysBefore / 7) * 7 + 7)); // whole weeks, one of lead-in
+const cut = fullLead - lead;
+if (cut > 0) { cur = cur.slice(cut); if (cmp.values) cmp.values = cmp.values.slice(cut); }
+}
 const n = cur.length;
+// Nights occupied and Revenue earned: the rest of the month (or all of a month yet to start) as
+// already booked. Only for a month that is not over.
+const proj = metric !== 'bookings' && cur.some((v) => v === null) ? seriesFor(stays, ym, metric, today, true) : null;
 const unit = METRIC_UNIT[metric];
 const fmtVal = (v) => (metric === 'revenue' ? `£${Math.round(v).toLocaleString('en-GB')}` : `${Math.round(v * 10) / 10} night${Math.round(v * 10) / 10 === 1 ? '' : 's'}`);
 const lastIdx = cur.reduce((acc, v, i) => (v !== null ? i : acc), -1); // latest day with data (today, or the month end)
@@ -563,7 +589,16 @@ verdict = metric === 'bookings'
 ? `Collecting data for this comparison (${escapeHtml(cov.join('; '))}). It fills in as bookings are seen from now on; try &ldquo;Nights occupied&rdquo; for an immediate comparison.`
 : `Nothing on file to compare with for ${escapeHtml(compareMonths(ym, state.compare).map(longMonth).join(', '))} (${escapeHtml(cov.join('; '))}).`;
 }
-if (ym > currentYm() && metric !== 'bookings') verdict = 'This month has not started, so there is no pace to compare yet. The timeline above shows what is already booked.';
+if (metric === 'bookings' && cmp.values && cmp.minCoverage < 0.9) {
+verdict += ` Booking dates are only known for ${Math.round(cmp.minCoverage * 100)}% of ${COMPARE_LABEL[state.compare]}'s nights, so its line is an under-count and "ahead" flatters this month.`;
+}
+const projEnd = proj ? proj[n - 1] : null;
+if (ym > currentYm() && metric !== 'bookings') {
+verdict = projEnd ? `This month has not started, so there is no pace to compare yet. The dotted line is what is already booked: ${fmtVal(projEnd)}.` : 'This month has not started, so there is no pace to compare yet. The timeline above shows what is already booked.';
+} else if (projEnd !== null && lastIdx >= 0 && projEnd > cur[lastIdx] + 1e-9) {
+const full = cmp.values && cmp.values[n - 1] !== null ? `, against ${fmtVal(cmp.values[n - 1])} for ${COMPARE_LABEL[state.compare]} in full` : '';
+verdict += ` Stays already booked take it to ${fmtVal(projEnd)} by the end of the month${full}.${metric === 'revenue' ? ' A stay with no income entered yet adds nothing.' : ''}`;
+}
 verdictEl.innerHTML = verdict || 'No bookings found for this month yet.';
 const s = setup(canvas);
 if (!s) return;
@@ -571,7 +606,7 @@ const { ctx, width, height } = s;
 const c = palette();
 const narrow = width < 520;
 const plot = { x: narrow ? 38 : 48, y: 14, w: width - (narrow ? 38 : 48) - 16, h: height - 14 - 26 };
-const maxV = niceMax(Math.max(1, ...cur.filter((v) => v !== null), ...(cmp.values || []).filter((v) => v !== null)));
+const maxV = niceMax(Math.max(1, ...cur.filter((v) => v !== null), ...(cmp.values || []).filter((v) => v !== null), ...(proj || []).filter((v) => v !== null)));
 const X = (i) => plot.x + (n === 1 ? 0 : (i / (n - 1)) * plot.w);
 const Y = (v) => plot.y + plot.h - (v / maxV) * plot.h;
 ctx.font = '11px Inter, sans-serif';
@@ -634,6 +669,13 @@ ctx.strokeStyle = c.ink; ctx.lineWidth = 2.5; ctx.lineJoin = 'round';
 ctx.beginPath(); let st = false;
 cur.forEach((v, i) => { if (v === null) return; if (!st) { ctx.moveTo(X(i), Y(v)); st = true; } else ctx.lineTo(X(i), Y(v)); });
 ctx.stroke();
+// the rest of the month as already booked, dotted, joined to today's point
+if (proj && proj[n - 1] !== null && proj[n - 1] > 0) {
+ctx.strokeStyle = c.ink; ctx.lineWidth = 2; ctx.globalAlpha = 0.7; ctx.setLineDash([2, 4]);
+ctx.beginPath(); let ps = false;
+for (let i = Math.max(lastIdx, 0); i < n; i++) { const v = proj[i]; if (v === null) continue; if (!ps) { ctx.moveTo(X(i), Y(v)); ps = true; } else ctx.lineTo(X(i), Y(v)); }
+ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
+}
 if (lastIdx >= 0) {
 ctx.fillStyle = c.ink; ctx.beginPath(); ctx.arc(X(lastIdx), Y(cur[lastIdx]), 4, 0, Math.PI * 2); ctx.fill();
 ctx.strokeStyle = c.card; ctx.lineWidth = 2; ctx.stroke();
@@ -654,26 +696,27 @@ ctx.fillText(text, flip ? X(idx) - 8 : X(idx) + 8, y);
 };
 const behind = lastIdx >= 0 && cmp.values && cmp.values[lastIdx] !== null && cur[lastIdx] < cmp.values[lastIdx];
 if (lastIdx >= 0) putLabel(`${longMonth(ym).split(' ')[0]} ${fmtVal(cur[lastIdx]).replace(/ nights?/, '')}`, lastIdx, cur[lastIdx], c.ink, behind ? 12 : -10);
+if (proj && proj[n - 1] !== null && proj[n - 1] > 0 && (lastIdx < 0 || proj[n - 1] > cur[lastIdx] + 1e-9)) putLabel(`Booked ${fmtVal(proj[n - 1]).replace(/ nights?/, '')}`, n - 1, proj[n - 1], c.ink, -10);
 if (cmp.values && lastIdx >= 0 && cmp.values[lastIdx] !== null) putLabel(`${state.compare === 'lastyear' ? 'Last yr' : state.compare === 'prev3' ? 'Avg 3m' : 'Last mo'} ${fmtVal(cmp.values[lastIdx]).replace(/ nights?/, '')}`, lastIdx, cmp.values[lastIdx], c.muted, behind ? -10 : 12);
 if (state.hoverDay !== null && state.hoverDay >= 0 && state.hoverDay < n) {
 ctx.strokeStyle = c.muted; ctx.lineWidth = 1; ctx.setLineDash([2, 3]);
 ctx.beginPath(); ctx.moveTo(X(state.hoverDay), plot.y); ctx.lineTo(X(state.hoverDay), plot.y + plot.h); ctx.stroke(); ctx.setLineDash([]);
 }
-PLOTS.pace = { plot, n, cur, cmp: cmp.values, X, fmtVal, lead };
+PLOTS.pace = { plot, n, cur, cmp: cmp.values, proj, X, fmtVal, lead };
 // table view (a row a week for the long lead-in axis, a row a day otherwise)
 const rows = [];
 for (let i = 0; i < n; i++) {
 if (lead && (i - lead) % 7 !== 0 && i !== n - 1) continue;
-rows.push(`<tr><td>${lead ? escapeHtml(shortDate(dateStrAdd(dayStr(ym, 1), i - lead))) : i + 1}</td><td style="text-align:right;">${cur[i] === null ? '' : escapeHtml(fmtVal(cur[i]))}</td><td style="text-align:right;">${cmp.values && cmp.values[i] !== null ? escapeHtml(fmtVal(cmp.values[i])) : ''}</td></tr>`);
+rows.push(`<tr><td>${lead ? escapeHtml(shortDate(dateStrAdd(dayStr(ym, 1), i - lead))) : i + 1}</td><td style="text-align:right;">${cur[i] === null ? '' : escapeHtml(fmtVal(cur[i]))}</td>${proj ? `<td style="text-align:right;">${proj[i] === null ? '' : escapeHtml(fmtVal(proj[i]))}</td>` : ''}<td style="text-align:right;">${cmp.values && cmp.values[i] !== null ? escapeHtml(fmtVal(cmp.values[i])) : ''}</td></tr>`);
 }
-tableEl.innerHTML = `<table class="limits-table" style="min-width:0;"><thead><tr><th>${lead ? 'Date' : 'Day'}</th><th style="text-align:right;">${escapeHtml(METRIC_LABEL[metric])}</th><th style="text-align:right;">${escapeHtml(COMPARE_LABEL[state.compare])}</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
+tableEl.innerHTML = `<table class="limits-table" style="min-width:0;"><thead><tr><th>${lead ? 'Date' : 'Day'}</th><th style="text-align:right;">${escapeHtml(METRIC_LABEL[metric])}</th>${proj ? '<th style="text-align:right;">With stays already booked</th>' : ''}<th style="text-align:right;">${escapeHtml(COMPARE_LABEL[state.compare])}</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
 }
 
 function paceTip(evt) {
 const canvas = document.getElementById('pace-canvas');
 const tip = document.getElementById('pace-tip');
 if (!canvas || !tip || !PLOTS.pace) return;
-const { plot, n, cur, cmp, fmtVal, lead } = PLOTS.pace;
+const { plot, n, cur, cmp, proj, fmtVal, lead } = PLOTS.pace;
 const r = canvas.getBoundingClientRect();
 const x = evt.clientX - r.left;
 const i = Math.round(((x - plot.x) / plot.w) * (n - 1));
@@ -682,7 +725,7 @@ state.hoverDay = i;
 const date = dateStrAdd(dayStr(state.ym, 1), i - lead);
 let day = new Date(`${date}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 if (lead && i < lead) day += ` (${Math.ceil((lead - i) / 7)} wk${Math.ceil((lead - i) / 7) === 1 ? '' : 's'} before the month)`;
-tip.innerHTML = `<strong>${escapeHtml(day)}</strong><br>${cur[i] === null ? 'No data yet' : escapeHtml(`${METRIC_LABEL[state.metric]}: ${fmtVal(cur[i])}`)}${cmp && cmp[i] !== null ? `<br>${escapeHtml(COMPARE_LABEL[state.compare])}: ${escapeHtml(fmtVal(cmp[i]))}` : ''}`;
+tip.innerHTML = `<strong>${escapeHtml(day)}</strong><br>${cur[i] === null ? 'Not yet' : escapeHtml(`${METRIC_LABEL[state.metric]}: ${fmtVal(cur[i])}`)}${proj && proj[i] !== null && (cur[i] === null || proj[i] !== cur[i]) ? `<br>${escapeHtml(`With stays already booked: ${fmtVal(proj[i])}`)}` : ''}${cmp && cmp[i] !== null ? `<br>${escapeHtml(COMPARE_LABEL[state.compare])}: ${escapeHtml(fmtVal(cmp[i]))}` : ''}`;
 tip.hidden = false;
 tip.style.left = `${Math.min(x + 12, r.width - 190)}px`;
 tip.style.top = '8px';
