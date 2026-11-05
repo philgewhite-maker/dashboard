@@ -1611,6 +1611,19 @@ id: uid(),
 listingId: '', uid: '', source: 'ics',
 checkin: '', checkout: '', // ISO yyyy-mm-dd, checkout is exclusive (the turnover day, not an occupied night)
 guestName: '', notes: '',
+// Airbnb's own booking code (the HM... in every host email's reservation
+// link): the one key that ties an email to this exact stay. Read from the
+// booking confirmation email; empty for manual/external bookings.
+confirmationCode: '',
+// Each time the feed moved this booking's dates: [{at, oldCheckin,
+// oldCheckout, newCheckin, newCheckout}]. The dates above are always the
+// current ones.
+revisions: [],
+// True after the dates changed on a stay that already has a payout, until
+// you enter the new figure or mark it checked. Airbnb's "Reservation
+// updated" email carries no amounts, so the new payout is read off the
+// reservation page by hand. Never estimated.
+payoutCheck: false,
 // What the stay earned -- filled in from the same "Reservation
 // confirmed" email syncGuestNamesFromEmail() already reads for the
 // guest name (airbnb.js), or typed in by hand when that doesn't find

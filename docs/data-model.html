@@ -78,7 +78,7 @@ a{color:var(--accent)}
 <div class="wrap">
 <header>
   <h1>Dashboard data model</h1>
-  <p class="lede">What the app stores, how the pieces refer to each other, where the same fact is kept twice, and where text stands in for structure. Built from the code and from a read of the live document (field names, types, fill rates and reference checks; no personal values). Verified against build <b>v731</b>.</p>
+  <p class="lede">What the app stores, how the pieces refer to each other, where the same fact is kept twice, and where text stands in for structure. Built from the code and from a read of the live document (field names, types, fill rates and reference checks; no personal values). Verified against build <b>v733</b>.</p>
   <ul class="stats">
     <li><b>109</b><span>top-level keys</span></li>
     <li><b>597</b><span>connections</span></li>
@@ -303,6 +303,9 @@ erDiagram
     string checkin
     string checkout
     number income "also in ledger"
+    string confirmationCode "added v733, read from the confirmation email"
+    array revisions "added v733, date changes seen in the feed"
+    boolean payoutCheck "added v733, set when dates change after a payout"
   }
   PAST_STAY {
     string listingId FK
@@ -352,6 +355,7 @@ erDiagram
     string id PK "never reused or deleted"
     string listingId FK
     string feedUid "natural key with listing, empty if manual"
+    string confirmationCode "Airbnb booking code, in every email link"
     string source "feed external manual"
     string platform "airbnb other"
     string status "booked completed cancelled"
@@ -399,7 +403,8 @@ erDiagram
   </div>
   <p class="note"><b>Money.</b> Before income counts, the amount sits on the stay as <code>expectedPayout</code> (with <code>paidOn</code>). Once recognised it is posted as one ledger entry carrying the <code>stayId</code>, and the stay's income is the sum of its entries, never a stored second copy. Refunds, price changes and cancellations are further entries (deltas), so there is no "two halves" of one payment. <b>Settlement</b> rows with the owner (payments, interest, monthly-cap adjustments) share the ledger but have no stay.</p>
   <p class="note"><b>Amendments.</b> A changed booking is a <code>STAY_REVISION</code>, not a status. The stay stays <code>booked</code>, its current dates are updated, and the old dates are kept in the revision, so a chart can use the dates that applied on any given day. <b>Open question:</b> whether Airbnb keeps the same feed <code>uid</code> when dates change; the next real amendment will show it. <code>moved</code> is no longer a status: <code>movedFromListingId</code> records a hand move between rooms.</p>
-  <p class="note">The existing feed <code>uid</code> plus listing is the natural key used to avoid duplicates on each sync.</p>
+  <p class="note">The existing feed <code>uid</code> plus listing is the natural key used to avoid duplicates on each sync. The <b>confirmation code</b> (the <code>HM…</code> string in every Airbnb host email) is the key that ties an email to its stay exactly, and gives a direct link to the reservation page.</p>
+  <p class="note"><b>Built already (v733).</b> Reservations now carry <code>confirmationCode</code>, <code>revisions</code> and <code>payoutCheck</code>. When the feed changes the dates of a stay that has a payout, the old dates are kept as a revision and the stay is flagged "payout to check" with a link to the Airbnb reservation page. Airbnb's "Reservation updated" email has no dates or amounts, so the new payout is entered by hand; it is never estimated. These fields are copied onto past and cancelled stays too.</p>
 </section>
 
 <section id="loyalty">

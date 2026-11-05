@@ -59,6 +59,33 @@ window.scrollBy(0, Math.ceil(((y - (window.innerHeight - AIRBNB_SCROLL_EDGE)) / 
 // parser, used both ways, rather than a copy that drifts the first time a
 // real feed shows up something unexpected.
 
+// The feed moved this booking's dates (a guest extended or shortened the
+// stay). Keep what they were, and if a payout is already on file mark it for
+// checking: it was read from the first confirmation email, and Airbnb's
+// "Reservation updated" email has no amounts.
+function noteDateChange(r, checkin, checkout) {
+if (!Array.isArray(r.revisions)) r.revisions = [];
+r.revisions.push({ at: new Date().toISOString(), oldCheckin: r.checkin, oldCheckout: r.checkout, newCheckin: checkin, newCheckout: checkout });
+if (r.revisions.length > 20) r.revisions = r.revisions.slice(-20);
+if (r.income != null) r.payoutCheck = true;
+}
+
+const AIRBNB_RESERVATION_URL = 'https://www.airbnb.co.uk/hosting/reservations/details/';
+function reservationPageUrl(r) {
+return r && r.confirmationCode ? `${AIRBNB_RESERVATION_URL}${encodeURIComponent(r.confirmationCode)}` : '';
+}
+// Airbnb's booking code, from the reservation link every host email carries.
+// Two forms in the confirmation email: the link, and a "CONFIRMATION CODE"
+// heading followed by the code (which survives HTML stripping).
+const CONFIRMATION_CODE_RE = /reservations\/details\/([A-Z0-9]{6,14})/;
+const CONFIRMATION_CODE_HEADING_RE = /confirmation\s+code\s*[:\s]\s*([A-Z0-9]{6,14})\b/i;
+function confirmationCodeFrom(bodyText) {
+const text = bodyText || '';
+const m = CONFIRMATION_CODE_RE.exec(text) || CONFIRMATION_CODE_HEADING_RE.exec(text);
+// A real code always has a digit; a plain word after the heading is not one.
+return m && /\d/.test(m[1]) ? m[1].toUpperCase() : '';
+}
+
 // Merges one listing's feed into data.airbnbReservations, keyed on the
 // feed's OWN event uid (not this record's id) so re-running Sync updates
 // in place instead of piling up duplicates every time.
@@ -95,12 +122,12 @@ let added = 0, updated = 0;
 events.forEach(({ uid: evUid, checkin, checkout }) => {
 const moved = movedByUid.get(evUid);
 if (moved) {
-if (moved.checkin !== checkin || moved.checkout !== checkout) { moved.checkin = checkin; moved.checkout = checkout; updated++; }
+if (moved.checkin !== checkin || moved.checkout !== checkout) { noteDateChange(moved, checkin, checkout); moved.checkin = checkin; moved.checkout = checkout; updated++; }
 return;
 }
 const existing = existingByUid.get(evUid);
 if (existing) {
-if (existing.checkin !== checkin || existing.checkout !== checkout) { existing.checkin = checkin; existing.checkout = checkout; updated++; }
+if (existing.checkin !== checkin || existing.checkout !== checkout) { noteDateChange(existing, checkin, checkout); existing.checkin = checkin; existing.checkout = checkout; updated++; }
 existingByUid.delete(evUid);
 } else {
 data.airbnbReservations.push(blankAirbnbReservation({ listingId: listing.id, uid: evUid, checkin, checkout }));
@@ -135,6 +162,7 @@ if (!data.airbnbPastStays.some((s) => s.listingId === r.listingId && s.checkin =
 data.airbnbPastStays.push({
 listingId: r.listingId, checkin: r.checkin, checkout: r.checkout, guestName: r.guestName || '',
 bookedOn: r.confirmedOn || String(r.createdAt || '').slice(0, 10), income: r.income ?? null, platform: r.platform === 'other' ? 'other' : 'airbnb',
+confirmationCode: r.confirmationCode || '', revisions: r.revisions || [],
 });
 }
 } else {
@@ -146,6 +174,7 @@ if (r.checkin && r.checkout && !data.airbnbCancelledStays.some((s) => s.listingI
 data.airbnbCancelledStays.push({
 id: uid(), listingId: r.listingId, checkin: r.checkin, checkout: r.checkout, guestName: r.guestName || '',
 bookedOn: r.confirmedOn || String(r.createdAt || '').slice(0, 10), cancelledOn: today,
+confirmationCode: r.confirmationCode || '', revisions: r.revisions || [],
 });
 }
 }
@@ -786,8 +815,23 @@ ${r.source === 'external'
 ${r.source === 'manual' ? `<span class="del-x" style="opacity:1;" data-airbnb-res-del="${r.id}" title="Delete this booking — nothing else records it, so it won't come back on the next Sync">&times;</span>` : ''}
 ${data.prefs.airbnbCalendarId && listing.needsCleaning ? `<div class="cal-clean-group">${cleanerChipHtml(r, 'checkin')}${cleanerChipHtml(r, 'checkout')}</div>` : ''}
 </div>
+${payoutCheckHtml(r)}
 ${reservationKeysHtml(r)}
 </div>`;
+}
+
+// Shown on a stay whose dates the feed changed after a payout was recorded.
+// The new amount is not in Airbnb's change email and is never estimated here:
+// the link goes to the reservation page (when the booking code is known) and
+// typing the new income, or "Checked", clears it.
+function payoutCheckHtml(r) {
+if (!r.payoutCheck) return '';
+const last = (r.revisions || [])[(r.revisions || []).length - 1];
+const change = last ? `${formatAirbnbDate(last.oldCheckin)} &rarr; ${formatAirbnbDate(last.oldCheckout)} became ${formatAirbnbDate(last.newCheckin)} &rarr; ${formatAirbnbDate(last.newCheckout)}. ` : '';
+const url = reservationPageUrl(r);
+const page = url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">Airbnb reservation page &#8599;</a>` : 'no booking code on file yet, so open the booking in Airbnb';
+const charged = r.accruedAt ? ' It has already been charged in Letting income; change that entry there too.' : '';
+return `<div class="cal-event-row"><span class="settings-note" style="margin:0;"><b>Payout to check.</b> ${change}The payout was recorded before the dates changed and Airbnb's change email has no amounts: ${page}, then type the new income above.${charged}</span> <button class="sync-btn sm inline" type="button" data-airbnb-payout-checked="${r.id}" title="The payout shown is still right">Checked</button></div>`;
 }
 
 // A failed listing contributes zero reservations, which used to fail
@@ -888,6 +932,8 @@ const field = input.dataset.airbnbResField;
 r[field] = field === 'income'
 ? (input.value.trim() === '' ? null : Number(input.value))
 : input.value;
+// Typing the new payout is the answer to a "check the payout" flag.
+if (field === 'income' && r.payoutCheck) { r.payoutCheck = false; renderAirbnb(); }
 queueSave();
 // Entering it on a stay that has already ended should charge it now
 // rather than at the next app open -- that gap is exactly when you'd
@@ -895,6 +941,15 @@ queueSave();
 if (field === 'income' || field === 'paidOn') {
 import('./letting.js').then((m) => { m.accrueLettings(); m.renderLetting(); });
 }
+});
+});
+el.querySelectorAll('[data-airbnb-payout-checked]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const r = data.airbnbReservations.find((x) => x.id === btn.dataset.airbnbPayoutChecked);
+if (!r) return;
+r.payoutCheck = false;
+queueSave();
+renderAirbnb();
 });
 });
 // Moving a booking to another listing. Refused once its income has been charged to the old owner
@@ -1830,6 +1885,43 @@ queueSave();
 return { posted, problems };
 }
 
+// Fills in the booking code on stays that were named before it was captured.
+// Same confirmation emails; a stay is matched on its arrival day and month
+// only when exactly one code-less stay arrives then (never guessed between
+// candidates), and only that one email's body is fetched.
+async function backfillConfirmationCodes() {
+const need = () => data.airbnbReservations.filter((r) => !r.confirmationCode && (r.source || 'ics') === 'ics' && r.checkout >= todayStr());
+if (!need().length || !(await canAttemptGoogleAction())) return { codes: 0 };
+const { fetchMailSearches, getMessageDetail } = await import('../googlemail.js');
+let sections;
+try {
+sections = await fetchMailSearches([{ kind: 'query', value: GUEST_NAME_QUERY, maxDays: 0, maxEvents: GUEST_NAME_SEARCH_LIMIT }], GUEST_NAME_SEARCH_LIMIT);
+} catch (err) {
+console.error('Booking-code email search failed:', err);
+return { codes: 0 };
+}
+let codes = 0;
+for (const m of sections[0]?.messages || []) {
+const subjectMatch = GUEST_NAME_SUBJECT_RE.exec(String(m.subject || '').trim());
+const arrival = subjectMatch && parseArrivalDayMonth(subjectMatch[2]);
+if (!arrival) continue;
+const candidates = need().filter((r) => {
+const d = new Date(`${r.checkin}T00:00:00`);
+return d.getDate() === arrival.day && d.getMonth() + 1 === arrival.month;
+});
+if (candidates.length !== 1) continue;
+try {
+const detail = await getMessageDetail(m.id);
+const code = confirmationCodeFrom(`${detail.bodyText || ''} ${detail.bodyHtml || ''}`);
+if (code) { candidates[0].confirmationCode = code; codes++; }
+} catch (err) {
+console.error('Reading a booking email for its code failed:', err);
+}
+}
+if (codes) queueSave();
+return { codes };
+}
+
 // Runs the search and fills in whatever it can match; never touches a
 // reservation that already has a name. A non-Latin name (the common case
 // this exists for) is romanized via ai.js -- only when actually needed,
@@ -1893,11 +1985,15 @@ const romanized = name !== rawName;
 // the payout are bonus extractions on top of it (the payout is typeable by
 // hand same as always).
 let bodyText = '';
+let linkText = ''; // body plus the HTML part, which still has the links the stripped text loses
 try {
-bodyText = (await getMessageDetail(m.id)).bodyText || '';
+const detail = await getMessageDetail(m.id);
+bodyText = detail.bodyText || '';
+linkText = `${bodyText} ${detail.bodyHtml || ''}`;
 } catch (err) {
 console.error('Reading the booking email body failed, skipping party size and payout:', err);
 }
+if (!reservation.confirmationCode) reservation.confirmationCode = confirmationCodeFrom(linkText);
 const extra = extraGuestsFrom(bodyText);
 // A name already naming two people ("Ben & Sam") needs no marker.
 if (extra > 0 && !/[&+]|\band\b/i.test(name)) name = `${name} +${extra}`;
@@ -2214,6 +2310,7 @@ t.step(5, STEPS, 'Reading hand-typed external bookings…');
 await syncExternalBookings();
 t.step(6, STEPS, 'Reading booking confirmation emails for guest names…');
 const guestResult = await syncGuestNamesFromEmail();
+await backfillConfirmationCodes();
 renderAirbnb();
 loadAirbnbCalendarOptions({ silent: true });
 // Stripes live on the Planner tab -- dynamic import avoids a static
