@@ -117,11 +117,23 @@ if (!res.ok) throw new Error(`ics-proxy.php returned ${res.status} for "${listin
 const events = parseIcsReservations(await res.text()).filter((e) => e.checkout >= today);
 // Same rules as the in-app sync: completed stays can't come back, a
 // cancelled one can (and returns to booked), and nothing is ever deleted.
-const existing = new Map(
-(doc.airbnbReservations || []).filter((r) => r.listingId === listing.id && (r.source || 'ics') === 'ics' && !r.movedFrom && r.uid && r.status !== 'completed').map((r) => [r.uid, r])
-);
+// A stay is known by its own calendar id and any others it has appeared under
+// (altUids); a new id for a room and dates already on file is the same booking.
+const feedStays = (doc.airbnbReservations || []).filter((r) => r.listingId === listing.id && (r.source || 'ics') === 'ics' && !r.movedFrom && r.status !== 'completed');
+const existing = new Map();
+feedStays.forEach((r) => { [r.uid, ...(r.altUids || [])].filter(Boolean).forEach((u) => { if (!existing.has(u)) existing.set(u, r); }); });
+const seen = new Set();
 events.forEach(({ uid: evUid, checkin, checkout }) => {
-const found = existing.get(evUid);
+let found = existing.get(evUid);
+if (!found) {
+const twin = (doc.airbnbReservations || []).find((r) => r.listingId === listing.id && r.status !== 'cancelled' && r.checkin === checkin && r.checkout === checkout && !seen.has(r.id));
+if (twin) {
+if (!Array.isArray(twin.altUids)) twin.altUids = [];
+if (twin.uid && twin.uid !== evUid && !twin.altUids.includes(evUid)) { twin.altUids.push(evUid); changed = true; }
+else if (!twin.uid) { twin.uid = evUid; changed = true; }
+found = twin;
+}
+}
 if (found) {
 if (found.status === 'cancelled') { found.status = 'booked'; found.cancelledOn = ''; changed = true; }
 if (found.checkin !== checkin || found.checkout !== checkout) {
@@ -133,13 +145,17 @@ if (found.revisions.length > 20) found.revisions = found.revisions.slice(-20);
 if (found.income != null) found.payoutCheck = true;
 found.checkin = checkin; found.checkout = checkout; changed = true;
 }
-existing.delete(evUid);
+seen.add(found.id);
 } else {
 // Only the fields a feed can know. Everything else keeps whatever
 // blankAirbnbReservation would have given it, filled in when the
-// page next loads and migrate() runs over the document.
+// page next loads and migrate() runs over the document. The id comes from
+// the listing and calendar id, so two devices adding the same event before
+// syncing write the same record, not two.
+const newId = `feed-${listing.id}-${evUid}`.replace(/[^A-Za-z0-9_.:-]/g, '_').slice(0, 190);
+seen.add(newId);
 doc.airbnbReservations.push({
-id: `bg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+id: newId,
 listingId: listing.id, uid: evUid, source: 'ics', status: 'booked', cancelledOn: '',
 checkin, checkout, guestName: '', notes: '',
 googleEventId: '', googleCalendarId: '',
@@ -148,7 +164,8 @@ createdAt: new Date().toISOString(),
 changed = true;
 }
 });
-existing.forEach((r) => {
+feedStays.forEach((r) => {
+if (seen.has(r.id)) return;
 // Out of the feed: finished if past its checkout, otherwise cancelled.
 // Never deleted -- ledger rows, keys and cleaning pins point at its id.
 if (r.status && r.status !== 'booked') return;

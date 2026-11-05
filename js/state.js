@@ -1,7 +1,7 @@
 import { kvGet, kvSet, photoDelete } from './db.js';
 import { uid, todayStr, daysAgoStr, last7Dates, daysSince, daysUntil } from './utils.js';
 import { matchBrandLogo, matchBrandEntry, splitProvider } from './brandLogos.js';
-import { migrateStays, migrateVouchers, dedupeAccruals, migrateConnections, linkProviders } from './migrations.js';
+import { migrateStays, dedupeStays, migrateVouchers, dedupeAccruals, migrateConnections, linkProviders } from './migrations.js';
 
 const DATA_KEY = 'app-data';
 const REV_KEY = 'app-data-rev'; // separate from DATA_KEY so it never leaks into backup exports
@@ -1613,6 +1613,9 @@ listingId: '', uid: '', source: 'ics',
 // 'booked' -> 'completed' when it drops out of the feed after checkout,
 // 'cancelled' (with cancelledOn) when it drops out before.
 status: 'booked', cancelledOn: '',
+// Other calendar ids this same stay has appeared under (Airbnb can give one
+// booking a second event id), so the feed never adds it a second time.
+altUids: [],
 checkin: '', checkout: '', // ISO yyyy-mm-dd, checkout is exclusive (the turnover day, not an occupied night)
 guestName: '', notes: '',
 // Airbnb's own booking code (the HM... in every host email's reservation
@@ -3352,6 +3355,12 @@ const report = migrateStays(data);
 data.airbnbReservations = data.airbnbReservations.filter((r) => airbnbListingIds.has(r.listingId));
 if (!(data.schemaVersion >= 1)) data.schemaVersion = 1;
 console.info('Stays migration:', report);
+}
+// One stay per room and dates, on every load (two devices adding the same
+// feed event before syncing); before the accrual dedupe so its ids settle.
+{
+const merged = dedupeStays(data);
+if (merged.length) console.info('Duplicate stays merged:', merged);
 }
 // One accrual row per stay, on every load (a device on old code can charge a
 // stay a second time under another id; see dedupeAccruals).

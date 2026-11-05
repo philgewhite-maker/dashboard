@@ -142,6 +142,64 @@ function dedupeAccruals(doc) {
   return removed;
 }
 
+// ---- Duplicate stays --------------------------------------------------------
+//
+// One room holds one guest on a given night, so two stays on the same listing
+// with the same check-in and check-out are one stay recorded twice (seen live:
+// three records for one booking; two devices each added the same feed event
+// before syncing, and Airbnb gave a third copy a different calendar id). Runs
+// on every load. The survivor is chosen by content then id, never by array
+// order, so two devices holding the same copies keep the same one. Calendar
+// ids of the removed copies are kept on the survivor (altUids) so the next
+// feed read recognises them instead of adding the stay again. Everything that
+// pointed at a removed copy is repointed first.
+const stayScore = (r) => (r.accruedAt ? 4 : 0) + (r.income != null ? 2 : 0) + (r.guestName ? 1 : 0);
+function dedupeStays(doc) {
+  const res = Array.isArray(doc.airbnbReservations) ? doc.airbnbReservations : [];
+  const groups = new Map();
+  res.forEach((r) => {
+    if (!r.listingId || !r.checkin || !r.checkout || r.status === 'cancelled') return;
+    const k = `${r.listingId}|${r.checkin}|${r.checkout}|${r.status || 'booked'}`;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(r);
+  });
+  const removed = [];
+  const gone = new Map(); // removed id -> survivor id
+  groups.forEach((list) => {
+    if (list.length < 2) return;
+    list.sort((a, b) => stayScore(b) - stayScore(a) || String(a.id).localeCompare(String(b.id)));
+    const keep = list[0];
+    if (!Array.isArray(keep.altUids)) keep.altUids = [];
+    list.slice(1).forEach((x) => {
+      ['guestName', 'confirmationCode', 'paidOn', 'confirmedOn', 'googleEventId', 'googleCalendarId', 'notes'].forEach((f) => { if (!keep[f] && x[f]) keep[f] = x[f]; });
+      if (keep.income == null && x.income != null) keep.income = x.income;
+      if (!keep.accruedAt && x.accruedAt) keep.accruedAt = x.accruedAt;
+      if (x.payoutCheck) keep.payoutCheck = true;
+      if (Array.isArray(x.revisions) && x.revisions.length) keep.revisions = [...(keep.revisions || []), ...x.revisions];
+      [x.uid, ...(x.altUids || [])].forEach((u) => { if (u && u !== keep.uid && !keep.altUids.includes(u)) keep.altUids.push(u); });
+      gone.set(x.id, keep.id);
+      removed.push({ id: x.id, kept: keep.id, checkin: x.checkin, checkout: x.checkout });
+    });
+  });
+  if (!removed.length) return removed;
+  doc.airbnbReservations = res.filter((r) => !gone.has(r.id));
+  (doc.lettingLedger || []).forEach((e) => { if (gone.has(e.reservationId)) e.reservationId = gone.get(e.reservationId); });
+  (doc.airbnbCleanerEvents || []).forEach((e) => { if (gone.has(e.reservationId)) e.reservationId = gone.get(e.reservationId); });
+  if (Array.isArray(doc.airbnbCleanerBlocks)) {
+    doc.airbnbCleanerBlocks = [...new Set(doc.airbnbCleanerBlocks.map((b) => {
+      const i = String(b).lastIndexOf(':');
+      const id = String(b).slice(0, i);
+      return gone.has(id) ? `${gone.get(id)}${String(b).slice(i)}` : b;
+    }))];
+  }
+  if (Array.isArray(doc.airbnbKeyAssignments)) {
+    const seen = new Set();
+    doc.airbnbKeyAssignments = doc.airbnbKeyAssignments.map((a) => (gone.has(a.reservationId) ? { ...a, reservationId: gone.get(a.reservationId) } : a))
+      .filter((a) => { const k = `${a.keyId}|${a.reservationId}`; if (seen.has(k)) return false; seen.add(k); return true; });
+  }
+  return removed;
+}
+
 // ---- Vouchers: typed amount, one-way link from readings ---------------------
 
 const VOUCHER_UNITS = ['GBP', 'EUR', 'points', 'Avios', 'miles', 'nights', 'other'];
@@ -294,4 +352,4 @@ function migrateConnections(doc) {
   return report;
 }
 
-export { SCHEMA_VERSION, migrateStays, dedupeAccruals, migrateVouchers, migrateProviders, linkProviders, providerMatches, PROVIDER_FIELDS, migrateConnections, parseVoucherValue, ensureProvider, canonicalName, providerIdFor, VOUCHER_UNITS };
+export { SCHEMA_VERSION, migrateStays, dedupeStays, dedupeAccruals, migrateVouchers, migrateProviders, linkProviders, providerMatches, PROVIDER_FIELDS, migrateConnections, parseVoucherValue, ensureProvider, canonicalName, providerIdFor, VOUCHER_UNITS };

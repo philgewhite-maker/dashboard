@@ -112,9 +112,12 @@ const events = parseIcsReservations(text).filter((e) => e.checkout >= today);
 // hand.
 // Completed stays are past and can't be in the feed again; a cancelled one
 // can (a feed hiccup, or the guest rebooked), and then comes back to booked.
-const existingByUid = new Map(
-data.airbnbReservations.filter((r) => r.listingId === listing.id && (r.source || 'ics') === 'ics' && !r.movedFrom && r.uid && r.status !== 'completed').map((r) => [r.uid, r])
-);
+// A stay is known by its own calendar id and any others it has appeared under
+// (altUids), so a second id for the same booking never adds a second stay.
+const feedStays = data.airbnbReservations.filter((r) => r.listingId === listing.id && (r.source || 'ics') === 'ics' && !r.movedFrom && r.status !== 'completed');
+const existingByUid = new Map();
+feedStays.forEach((r) => { [r.uid, ...(r.altUids || [])].filter(Boolean).forEach((u) => { if (!existingByUid.has(u)) existingByUid.set(u, r); }); });
+const seenStays = new Set();
 // A booking moved to another listing by hand (see the room picker on a booking) still has its
 // event in this listing's feed; recognise it so the feed neither re-adds it here nor sweeps it.
 const movedByUid = new Map(
@@ -127,22 +130,40 @@ if (moved) {
 if (moved.checkin !== checkin || moved.checkout !== checkout) { noteDateChange(moved, checkin, checkout); moved.checkin = checkin; moved.checkout = checkout; updated++; }
 return;
 }
-const existing = existingByUid.get(evUid);
+let existing = existingByUid.get(evUid);
+if (!existing) {
+// A new calendar id for a room and dates already on file is the same
+// booking (one room holds one guest a night): note the id on that stay.
+const twin = data.airbnbReservations.find((r) => r.listingId === listing.id && r.status !== 'cancelled' && r.checkin === checkin && r.checkout === checkout && !seenStays.has(r.id));
+if (twin) {
+if (!Array.isArray(twin.altUids)) twin.altUids = [];
+if (twin.uid && twin.uid !== evUid && !twin.altUids.includes(evUid)) twin.altUids.push(evUid);
+else if (!twin.uid) twin.uid = evUid;
+existing = twin;
+updated++;
+}
+}
 if (existing) {
 if (existing.status === 'cancelled') { existing.status = 'booked'; existing.cancelledOn = ''; updated++; }
 if (existing.checkin !== checkin || existing.checkout !== checkout) { noteDateChange(existing, checkin, checkout); existing.checkin = checkin; existing.checkout = checkout; updated++; }
-existingByUid.delete(evUid);
+seenStays.add(existing.id);
 } else {
-data.airbnbReservations.push(blankAirbnbReservation({ listingId: listing.id, uid: evUid, checkin, checkout }));
+// The id comes from the listing and calendar id, so two devices adding the
+// same event before they sync write one record, not two (the same rule as the
+// background refresh in js/bgsync.js).
+const fresh = blankAirbnbReservation({ id: `feed-${listing.id}-${evUid}`.replace(/[^A-Za-z0-9_.:-]/g, '_').slice(0, 190), listingId: listing.id, uid: evUid, checkin, checkout });
+data.airbnbReservations.push(fresh);
+seenStays.add(fresh.id);
 added++;
 }
 });
-// Whatever booked stay is left has dropped out of the feed: past its
-// checkout it finished, otherwise it was cancelled. The record stays either
-// way (retireStay), so its income, refunds and every id pointing at it keep
-// working; past events are filtered out above, so nothing completed returns.
+// Whatever booked stay was not matched by any of its calendar ids has
+// dropped out of the feed: past its checkout it finished, otherwise it was
+// cancelled. The record stays either way (retireStay), so its income,
+// refunds and every id pointing at it keep working; past events are filtered
+// out above, so nothing completed returns.
 let removed = 0;
-existingByUid.forEach((r) => { if (retireStay(r, today)) removed++; });
+feedStays.forEach((r) => { if (!seenStays.has(r.id) && retireStay(r, today)) removed++; });
 return { added, updated, removed };
 }
 

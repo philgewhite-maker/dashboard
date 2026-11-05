@@ -78,7 +78,7 @@ a{color:var(--accent)}
 <div class="wrap">
 <header>
   <h1>Dashboard data model</h1>
-  <p class="lede">What the app stores, how the pieces refer to each other, where the same fact is kept twice, and where text stands in for structure. Built from the code and from a read of the live document (field names, types, fill rates and reference checks; no personal values). Verified against build <b>v738</b>.</p>
+  <p class="lede">What the app stores, how the pieces refer to each other, where the same fact is kept twice, and where text stands in for structure. Built from the code and from a read of the live document (field names, types, fill rates and reference checks; no personal values). Verified against build <b>v739</b>.</p>
   <ul class="stats">
     <li><b>109</b><span>top-level keys</span></li>
     <li><b>597</b><span>connections</span></li>
@@ -107,6 +107,7 @@ a{color:var(--accent)}
     </ul>
     <p class="fix"><b>Fix.</b> One <code>stays</code> collection. The id never changes and the row is never deleted; it moves through <code>booked, completed, cancelled</code>. Amendments are kept as revisions on the stay. Past and cancelled stays become views. Ledger rows, keys and cleaning events hold <code>stayId</code>.</p>
     <p class="fix"><b>Done in v734.</b> <code>airbnbReservations</code> is now the one stay list with a <code>status</code>; the feed sync and background refresh mark stays completed or cancelled instead of deleting them. The past and cancelled side lists were folded in, and three stays deleted before past stays were kept were rebuilt from their ledger rows, so no ledger reference dangles. A duplicate accrual (the same 2-night stay charged twice, £97.11 owner share) was removed, and accrual rows now take their id from the stay so a second device can't charge it again. Editing a charged stay's income updates its ledger row.</p>
+    <p class="fix"><b>Added in v739.</b> Duplicate stays (same room and dates, from two devices adding one feed event or Airbnb giving a booking a second calendar id) are merged on every load into one stay, keeping the calendar ids as <code>altUids</code> so the feed never adds it again; stays added from the feed take their id from the listing and calendar id, so two devices write the same record.</p>
   </div>
 
   <div class="finding">
@@ -310,6 +311,7 @@ erDiagram
     string confirmationCode "added v733, read from the confirmation email"
     array revisions "added v733, date changes seen in the feed"
     boolean payoutCheck "added v733, set when dates change after a payout"
+    array altUids "added v739, other calendar ids this stay has appeared under"
   }
   PAST_STAY {
     string listingId FK
