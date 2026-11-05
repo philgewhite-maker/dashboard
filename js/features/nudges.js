@@ -438,6 +438,7 @@ category: 'shopping',
 function buildAirbnbNudges(pool) {
 data.airbnbReservations.forEach((r) => {
 if ((r.status || 'booked') !== 'booked') return; // completed and cancelled stays stay on file but need nothing doing
+if (!r.confirmationCode && !r.guestName && r.income == null && !r.accruedAt && (r.source || 'ics') === 'ics') return; // unconfirmed: may be an enquiry hold (isUnconfirmedStay)
 const listing = data.airbnbListings.find((l) => l.id === r.listingId);
 if (!listing) return;
 const label = listing.label || listing.prefix || 'A listing';

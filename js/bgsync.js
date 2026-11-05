@@ -20,7 +20,7 @@
 // the two worth having: the health log (already POSTed to your own server
 // by the phone's Health Connect bridge, so this only re-parses it) and the
 // Airbnb ICS feeds (fetched through your own ics-proxy.php).
-import { parseIcsReservations } from './icsparse.js';
+import { parseIcsReservations, isForgettableStay } from './icsparse.js';
 import { parseHealthPayloads, mergeHealthDaily } from './features/healthparse.js';
 
 // Must match js/db.js and js/state.js exactly -- this reads the same
@@ -169,6 +169,9 @@ if (seen.has(r.id)) return;
 // Out of the feed: finished if past its checkout, otherwise cancelled.
 // Never deleted -- ledger rows, keys and cleaning pins point at its id.
 if (r.status && r.status !== 'booked') return;
+// An enquiry hold that lapsed (nothing confirmed it, nothing refers to it) is
+// forgotten, not recorded as a cancelled booking (see isForgettableStay).
+if (isForgettableStay(r, doc, today)) { doc.airbnbReservations = doc.airbnbReservations.filter((x) => x.id !== r.id); changed = true; return; }
 if (r.checkout && r.checkout < today) r.status = 'completed';
 else { r.status = 'cancelled'; r.cancelledOn = today; }
 changed = true;

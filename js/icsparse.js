@@ -81,4 +81,28 @@ else if (prop.name === 'SUMMARY') current.summary = prop.value.trim();
 return events;
 }
 
-export { unfoldIcsLines, parseIcsProperty, icsDateOnly, isNotAvailablePlaceholder, parseIcsReservations };
+// A feed event is "Reserved" for a confirmed booking and equally for an enquiry
+// Airbnb is holding the dates for, and nothing in the feed says which. A feed
+// stay is unconfirmed until something outside the feed vouches for it: the
+// booking confirmation email (which brings the code, name and payout) or you
+// typing a name or income. Derived, so there is nothing to keep in step.
+function isUnconfirmedStay(r) {
+  return !!r && (r.source || 'ics') === 'ics' && (r.status || 'booked') === 'booked' && !r.movedFrom
+    && !r.confirmationCode && !r.guestName && r.income == null && !r.accruedAt;
+}
+
+// An unconfirmed stay that has dropped out of the feed before it started was an
+// enquiry hold that lapsed: nothing happened, so it is forgotten instead of
+// being kept as a cancelled booking (which would show in the cancellations and
+// booking-pace charts). Only when nothing else refers to it.
+function isForgettableStay(r, doc, today) {
+  if (!isUnconfirmedStay(r) || !r.checkout || r.checkout < today || r.googleEventId || r.notes) return false;
+  const id = r.id;
+  if ((doc.lettingLedger || []).some((e) => e.reservationId === id)) return false;
+  if ((doc.airbnbKeyAssignments || []).some((a) => a.reservationId === id)) return false;
+  if ((doc.airbnbCleanerEvents || []).some((e) => e.reservationId === id)) return false;
+  if ((doc.airbnbCleanerBlocks || []).some((b) => String(b).startsWith(`${id}:`))) return false;
+  return true;
+}
+
+export { unfoldIcsLines, parseIcsProperty, icsDateOnly, isNotAvailablePlaceholder, parseIcsReservations, isUnconfirmedStay, isForgettableStay };

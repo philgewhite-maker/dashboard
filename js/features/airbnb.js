@@ -14,7 +14,7 @@ import { owners, ownerNameFor, ownerKeyFor, shareRuleAt, money, CAP_KEEPS_FROM }
 import { gmailLink } from '../googlemail.js';
 import { track } from './activity.js';
 import { recordMail, registerRetry } from './mailledger.js';
-import { parseIcsReservations } from '../icsparse.js';
+import { parseIcsReservations, isUnconfirmedStay, isForgettableStay } from '../icsparse.js';
 
 // How long a finished, not-yet-charged stay stays listed so its income can
 // still be entered (see syncAirbnbListing's removal step).
@@ -171,6 +171,9 @@ return { added, updated, removed };
 // cancelled if not. Returns whether anything changed.
 function retireStay(r, today) {
 if (r.status !== 'booked' && r.status) return false;
+// An enquiry hold that lapsed (nothing confirmed it, nothing refers to it) is
+// forgotten, not recorded as a cancelled booking.
+if (isForgettableStay(r, data, today)) { data.airbnbReservations = data.airbnbReservations.filter((x) => x.id !== r.id); return true; }
 if (r.checkout && r.checkout < today) { r.status = 'completed'; return true; }
 r.status = 'cancelled';
 r.cancelledOn = today;
@@ -811,9 +814,19 @@ ${r.source === 'external'
 ${r.source === 'manual' ? `<span class="del-x" style="opacity:1;" data-airbnb-res-del="${r.id}" title="Delete this booking — nothing else records it, so it won't come back on the next Sync">&times;</span>` : ''}
 ${data.prefs.airbnbCalendarId && listing.needsCleaning ? `<div class="cal-clean-group">${cleanerChipHtml(r, 'checkin')}${cleanerChipHtml(r, 'checkout')}</div>` : ''}
 </div>
+${unconfirmedHtml(r)}
 ${payoutCheckHtml(r)}
 ${reservationKeysHtml(r)}
 </div>`;
+}
+
+// A feed event with no confirmation email, name or income yet. Airbnb's
+// calendar shows "Reserved" for an enquiry it is holding dates for as well as
+// for a booking, so this may be nothing: it clears itself when the
+// confirmation email arrives, and is forgotten if the dates drop off the feed.
+function unconfirmedHtml(r) {
+if (!isUnconfirmedStay(r)) return '';
+return `<div class="cal-event-row"><span class="settings-note" style="margin:0;"><b>Unconfirmed.</b> On your Airbnb calendar, but no confirmation email, name or income yet. Airbnb also marks dates "Reserved" while it holds them for an enquiry, so this may not be a booking.</span></div>`;
 }
 
 // Shown on a stay whose dates the feed changed after a payout was recorded.
