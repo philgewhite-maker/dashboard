@@ -735,8 +735,11 @@ const noteHead = String(e.note || '').split(', ')[0];
 const roomLabel = isStayKind && stayRoom ? (stayRoom.label || stayRoom.prefix || '') : (e.kind === 'accrual' && String(e.note || '').includes(', ') ? noteHead : '');
 const guest = e.kind === 'refund' ? ledgerNoteFor(e) : (parts.guest || parts.description || ledgerNoteFor(e));
 // A refund is a guest refund Airbnb paid out of a booking, so it carries the same mark.
+// Airbnb: its logo. A direct booking: a £ mark. A payment (money moving between you and the owner): two opposite arrows.
 const logoCell = isIncomeKind || e.kind === 'refund'
-? (e.platform !== 'other' ? logoBadgeHtml(airbnbLogo, 'A', 'letting-platform-badge') : '<span class="letting-platform-other" title="Not through Airbnb">Other</span>')
+? (e.platform !== 'other' ? logoBadgeHtml(airbnbLogo, 'A', 'letting-platform-badge') : '<span class="letting-platform-direct" title="Direct booking (not through Airbnb)">&pound;</span>')
+: e.kind === 'payment'
+? `<span class="letting-xfer" title="${escapeHtml(`Transfer between you and ${ownerNameFor(key)}`)}"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 5.5h10M9.5 2.5l3 3-3 3"/><path d="M13.5 10.5h-10M6.5 7.5l-3 3 3 3"/></svg></span>`
 : '';
 const kindLabel = e.kind === 'accrual' ? 'income' : (e.kind || 'entry');
 const bits = [parts.guest && parts.description ? `<span class="letting-rec-desc">${escapeHtml(parts.description)}</span>` : '', roomLabel ? `<span>${escapeHtml(roomLabel)}</span>` : '', e.nights ? `<span>${escapeHtml(`${e.nights} night${e.nights === 1 ? '' : 's'}`)}</span>` : '', grossHtml, nightRateBit].filter(Boolean);
