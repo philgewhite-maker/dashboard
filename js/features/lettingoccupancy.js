@@ -229,6 +229,27 @@ for (let day = startDay; day < endDay; day++) { const k = `${room}|${day}`; if (
 return keys;
 }
 
+// Income accrued over the nights in [from, toExcl): a stay's income spread evenly over its nights
+// (future nights only when `project`), a payout with no nights on its own date once that has passed.
+const AVG_DAYS = 30;
+function revenueInWindow(stays, from, toExcl, today, project) {
+let sum = 0;
+const cap = dateStrAdd(today, 1);
+(stays.items || []).forEach((it) => {
+if (state.channel && (it.platform === 'other' ? 'other' : 'airbnb') !== state.channel) return;
+const gross = Number(it.gross) || 0;
+if (it.start) {
+const total = nightsBetween(it.start, it.end);
+if (total <= 0) return;
+const lim = project || toExcl < cap ? toExcl : cap;
+const a = it.start > from ? it.start : from;
+const b = it.end < lim ? it.end : lim;
+if (b > a) sum += (gross * nightsBetween(a, b)) / total;
+} else if (it.date >= from && it.date < toExcl && it.date <= today) sum += gross;
+});
+return sum;
+}
+
 // Cumulative series for one month, day 1..N. Days after today in the current
 // month are null (nothing has happened yet for occupied nights / revenue; for
 // bookings the line stops too, since bookings made after today don't exist).
@@ -245,6 +266,14 @@ const first = dayStr(ym, 1);
 for (let i = 0; i < LEAD_DAYS + n; i++) {
 const asOf = dateStrAdd(first, i - LEAD_DAYS);
 out.push(asOf > today ? null : distinctRoomNights(stays, ym, n, upper ? 'bookingsUpper' : metric, today, asOf));
+}
+return out;
+}
+if (metric === 'avgnight') {
+// Moving average: the income of the 30 days up to each day, divided by 30 (empty nights count).
+for (let d = 1; d <= n; d++) {
+const day = dayStr(ym, d);
+out.push(!project && day > today ? null : Math.round((revenueInWindow(stays, dateStrAdd(day, -(AVG_DAYS - 1)), dateStrAdd(day, 1), today, project) / AVG_DAYS) * 100) / 100);
 }
 return out;
 }
@@ -271,7 +300,7 @@ return out;
 // nights belong to stays with a known booking date. Older stays predate that
 // being recorded, so they say so instead of showing a flat, misleading line.
 function coverageFor(stays, ym, metric) {
-if (metric === 'revenue') {
+if (metric === 'revenue' || metric === 'avgnight') {
 // Revenue exists from the first income item onward; before that there is nothing to compare with.
 const next = dayStr(addMonths(ym, 1), 1);
 return (stays.items || []).some((it) => (it.start || it.date) < next) ? 1 : 0;
@@ -330,8 +359,8 @@ return { total, known, share: total ? known / total : 0 };
 
 const state = { ym: '', metric: 'bookings', compare: 'prev', channel: '', hoverStay: null, hoverDay: null };
 const PLOTS = { timeline: null, pace: null };
-const METRIC_LABEL = { bookings: 'Nights booked', nights: 'Nights occupied', revenue: 'Revenue earned' };
-const METRIC_UNIT = { bookings: 'nights', nights: 'nights', revenue: '£' };
+const METRIC_LABEL = { bookings: 'Nights booked', nights: 'Nights occupied', revenue: 'Revenue earned', avgnight: 'Average revenue per night (30 days)' };
+const METRIC_UNIT = { bookings: 'nights', nights: 'nights', revenue: '£', avgnight: '£' };
 
 function currentYm() { return todayStr().slice(0, 7); }
 
@@ -357,7 +386,7 @@ return `<div class="letting-chart-wrap" id="letting-occupancy-section">
 <div class="letting-chart-legend" id="occ-legend" style="flex-direction:row;flex-wrap:wrap;"></div>
 <div class="chart-canvas-wrap occ-wrap" style="position:relative;"><canvas id="occ-timeline-canvas"></canvas><div class="occ-tip" id="occ-tip" hidden></div></div>
 <div class="sync-row" style="gap:8px;flex-wrap:wrap;align-items:center;margin:12px 0 4px;">
-<select id="pace-metric" class="mini" title="What the line adds up"><option value="bookings">Nights booked</option><option value="nights">Nights occupied</option><option value="revenue">Revenue earned</option></select>
+<select id="pace-metric" class="mini" title="What the line adds up"><option value="bookings">Nights booked</option><option value="nights">Nights occupied</option><option value="revenue">Revenue earned</option><option value="avgnight">Average revenue per night (30 days)</option></select>
 <span class="settings-note" style="margin:0;">against</span>
 <select id="pace-compare" class="mini" title="What to compare it with"><option value="prev">Last month</option><option value="prev3">Last 3 months (average)</option><option value="lastyear">This month last year</option></select>
 <select id="pace-channel" class="mini" title="Count every booking, or only those that came through one channel"><option value="">All channels</option>${Object.entries(CHANNELS).map(([k, v]) => `<option value="${k}">${escapeHtml(v.label)} only</option>`).join('')}</select>
@@ -592,7 +621,8 @@ const n = cur.length;
 // already booked. Only for a month that is not over.
 const proj = metric !== 'bookings' && cur.some((v) => v === null) ? seriesFor(stays, ym, metric, today, true) : null;
 const unit = METRIC_UNIT[metric];
-const fmtVal = (v) => (metric === 'revenue' ? `£${Math.round(v).toLocaleString('en-GB')}` : `${Math.round(v * 10) / 10} night${Math.round(v * 10) / 10 === 1 ? '' : 's'}`);
+const money = metric === 'revenue' || metric === 'avgnight';
+const fmtVal = (v) => (money ? `£${Math.round(v).toLocaleString('en-GB')}` : `${Math.round(v * 10) / 10} night${Math.round(v * 10) / 10 === 1 ? '' : 's'}`);
 const lastIdx = cur.reduce((acc, v, i) => (v !== null ? i : acc), -1); // latest day with data (today, or the month end)
 let verdict = '';
 let delta = null;
@@ -601,12 +631,12 @@ delta = cur[lastIdx] - cmp.values[lastIdx];
 const off = lastIdx - lead; // days from the 1st
 const where = off < 0 ? `at the same point, ${-off} day${off === -1 ? '' : 's'} before it starts` : (ym === currentYm() ? `by day ${off + 1}` : 'over the whole month');
 const mag = fmtVal(Math.abs(delta));
-verdict = Math.abs(delta) < (metric === 'revenue' ? 1 : 0.05)
+verdict = Math.abs(delta) < (money ? 1 : 0.05)
 ? `&#9644; Level with ${COMPARE_LABEL[state.compare]} ${where}.`
 : delta > 0 ? `&#9650; <strong class="pace-up">${escapeHtml(mag)} ahead</strong> of ${COMPARE_LABEL[state.compare]} ${where}.`
 : `&#9660; <strong class="pace-down">${escapeHtml(mag)} behind</strong> ${COMPARE_LABEL[state.compare]} ${where}.`;
 } else if (!cmp.values) {
-const cov = compareMonths(ym, state.compare).map((m) => `${longMonth(m)}: ${Math.round(coverageFor(stays, m, metric) * 100)}% of its nights have ${metric === 'bookings' ? 'a known booking date' : metric === 'revenue' ? 'income entered' : 'dates'}`);
+const cov = compareMonths(ym, state.compare).map((m) => `${longMonth(m)}: ${Math.round(coverageFor(stays, m, metric) * 100)}% of its nights have ${metric === 'bookings' ? 'a known booking date' : money ? 'income entered' : 'dates'}`);
 verdict = metric === 'bookings'
 ? `Collecting data for this comparison (${escapeHtml(cov.join('; '))}). It fills in as bookings are seen from now on; try &ldquo;Nights occupied&rdquo; for an immediate comparison.`
 : `Nothing on file to compare with for ${escapeHtml(compareMonths(ym, state.compare).map(longMonth).join(', '))} (${escapeHtml(cov.join('; '))}).`;
@@ -635,8 +665,9 @@ if (ym > currentYm() && metric !== 'bookings') {
 verdict = projEnd ? `This month has not started, so there is no pace to compare yet. The dotted line is what is already booked: ${fmtVal(projEnd)}.` : 'This month has not started, so there is no pace to compare yet. The timeline above shows what is already booked.';
 } else if (projEnd !== null && lastIdx >= 0 && projEnd > cur[lastIdx] + 1e-9) {
 const full = cmp.values && cmp.values[n - 1] !== null ? `, against ${fmtVal(cmp.values[n - 1])} for ${COMPARE_LABEL[state.compare]} in full` : '';
-verdict += ` Stays already booked take it to ${fmtVal(projEnd)} by the end of the month${full}.${metric === 'revenue' ? ' A stay with no income entered yet adds nothing.' : ''}`;
+verdict += ` Stays already booked take it to ${fmtVal(projEnd)} by the end of the month${full}.${money ? ' A stay with no income entered yet adds nothing.' : ''}`;
 }
+if (metric === 'avgnight') verdict += `<br><span class="settings-note" style="margin:0;">Each point is the income of the ${AVG_DAYS} days up to that day divided by ${AVG_DAYS}, empty nights included. The comparison is the same ${AVG_DAYS}-day window ${state.compare === 'lastyear' ? 'a year' : 'a month'} earlier.</span>`;
 verdictEl.innerHTML = verdict || 'No bookings found for this month yet.';
 const s = setup(canvas);
 if (!s) return;
@@ -655,7 +686,7 @@ const v = (maxV * g) / 4; const y = Y(v);
 ctx.strokeStyle = c.line; ctx.globalAlpha = g === 0 ? 1 : 0.6; ctx.lineWidth = 1;
 ctx.beginPath(); ctx.moveTo(plot.x, y); ctx.lineTo(plot.x + plot.w, y); ctx.stroke(); ctx.globalAlpha = 1;
 ctx.fillStyle = c.muted;
-ctx.fillText(metric === 'revenue' ? `£${Math.round(v)}` : String(Math.round(v * 10) / 10), plot.x - 5, y);
+ctx.fillText(money ? `£${Math.round(v)}` : String(Math.round(v * 10) / 10), plot.x - 5, y);
 }
 // x axis
 ctx.textAlign = 'center'; ctx.textBaseline = 'top';
