@@ -1682,6 +1682,7 @@ date: releaseDate,
 // what this is, same as an 'earned' row's note is just the payer's
 // name with no "earned" repeated in the text itself.
 note: guestName || listing.label || 'Cancellation payout',
+guest: guestName || '', description: guestName ? '' : (listing.label || 'Cancellation payout'),
 });
 seen.add(m.id);
 posted++;
@@ -1778,6 +1779,7 @@ amount: shared ? -Math.round(amount * pct) / 100 : -amount, // money OUT, not in
 platform: 'airbnb',
 date: sentOn,
 note: guest || fallbackNote || 'Refund to guest',
+guest: guest || '', description: guest ? '' : (fallbackNote || 'Refund to guest'),
 sourceMessageId: messageId,
 });
 return true;

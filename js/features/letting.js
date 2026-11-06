@@ -379,6 +379,7 @@ date: r.checkout,
 // it should be: which stay it was. No more repeating a number that now
 // renders beside it.
 note: `${listing.label || 'listing'}${r.guestName ? `, ${r.guestName}` : ''}`,
+guest: r.guestName || '', description: '',
 reservationId: r.id,
 listingId: r.listingId,
 ...(r.paidOn ? { capDate: r.paidOn } : {}),
@@ -762,7 +763,8 @@ ${showStay ? `<label>Check-in<input type="date" class="settings-input" data-lett
 <label>Check-out<input type="date" class="settings-input" data-letting-checkout="${escapeHtml(e.id)}" value="${escapeHtml(e.checkout || '')}" title="The day the cancelled booking would have ended (the turnover day)."></label>` : ''}
 ${showTotal ? `<label>Booking total £<input type="number" min="0" step="0.01" class="settings-input" data-letting-gross="${escapeHtml(e.id)}" value="${e.gross || ''}" title="What the guest paid for the whole stay. ${escapeHtml(ownerNameFor(e.ownerKey))}'s share of it is worked out again when you change this."></label>` : ''}
 ${showAmount ? `<label>Amount £<input type="number" step="0.01" class="settings-input" data-letting-amount="${escapeHtml(e.id)}" value="${e.amount}" title="The figure itself, signed: minus means ${escapeHtml(ownerNameFor(e.ownerKey))} paid you, plus means they owe you more."></label>` : ''}
-${showNote ? `<label>Note<input type="text" class="settings-input" data-letting-note="${escapeHtml(e.id)}" value="${escapeHtml(e.note || '')}" style="min-width:180px;"></label>` : ''}
+${showNote && (e.kind === 'earned' || e.kind === 'cancellation') ? `<label>Guest<input type="text" class="settings-input" data-letting-guest="${escapeHtml(e.id)}" value="${escapeHtml(parts.guest || '')}" placeholder="Guest name" style="min-width:140px;" title="Who stayed: the name shown on the row."></label>` : ''}
+${showNote ? `<label>Description<input type="text" class="settings-input" data-letting-description="${escapeHtml(e.id)}" value="${escapeHtml(e.kind === 'earned' || e.kind === 'cancellation' ? (parts.description || '') : (parts.description || parts.guest || ''))}" placeholder="What it was for" style="min-width:180px;" title="What it was for, if more than the guest's name."></label>` : ''}
 ${showPlatform ? `<label>Platform<select data-letting-platform="${escapeHtml(e.id)}" title="Which platform this actually happened through -- the chart above draws Other as a striped fill instead of solid.">
 <option value="airbnb"${e.platform !== 'other' ? ' selected' : ''}>Airbnb</option>
 <option value="other"${e.platform === 'other' ? ' selected' : ''}>Other</option>
@@ -917,7 +919,19 @@ renderLetting();
 });
 editEntry('checkin', (entry, v) => { if (v && entry.checkout && entry.checkout <= v) return false; entry.checkin = v || undefined; });
 editEntry('checkout', (entry, v) => { if (v && entry.checkin && v <= entry.checkin) return false; entry.checkout = v || undefined; });
-editEntry('note', (entry, v) => { if (v.trim()) entry.note = v.trim(); else return false; });
+// The guest and the description are separate fields; `note` stays as the one-line form refund and
+// cancellation matching reads (the guest's name when there is one).
+const stayKindEntry = (entry) => entry.kind === 'earned' || entry.kind === 'cancellation';
+const ensureParts = (entry) => { if (typeof entry.guest !== 'string') { const p = splitLedgerNote(entry); entry.guest = p.guest || ''; entry.description = p.description || ''; } };
+const syncNote = (entry) => { entry.note = entry.guest || entry.description || entry.note; };
+editEntry('guest', (entry, v) => { ensureParts(entry); entry.guest = v.trim(); if (!entry.guest && !entry.description) return false; syncNote(entry); });
+editEntry('description', (entry, v) => {
+ensureParts(entry);
+entry.description = v.trim();
+if (!stayKindEntry(entry)) entry.guest = ''; // a payment or adjustment has no guest: its text is the description
+if (!entry.guest && !entry.description) return false;
+syncNote(entry);
+});
 editEntry('amount', (entry, v) => { const n = Number(v); if (!Number.isFinite(n) || !n) return false; entry.amount = Math.round(n * 100) / 100; });
 editEntry('gross', (entry, v) => {
 const n = Number(v);
@@ -998,7 +1012,8 @@ addBtn.addEventListener('click', () => {
 // different things here and getting it wrong is a silent factor of two.
 const who = document.getElementById('letting-add-owner');
 const amount = Number(document.getElementById('letting-add-amount').value);
-const note = (document.getElementById('letting-add-note').value || '').trim();
+const description = (document.getElementById('letting-add-note').value || '').trim();
+const guestName = (document.getElementById('letting-add-guest')?.value || '').trim();
 const status = document.getElementById('letting-add-status');
 const say = (t) => { if (status) status.textContent = t; };
 if (!who.value) { say('Pick who it is for.'); return; }
@@ -1063,7 +1078,8 @@ amount: signed,
 ...(chosenListing ? { listingId: chosenListing.id } : {}),
 ...(platformVal ? { platform: platformVal } : {}),
 date: dateVal,
-note: note || (kind === 'earned'
+...((kind === 'earned' || kind === 'cancellation') ? { guest: guestName, description } : { guest: '', description: description || (kind === 'payment' ? (amount < 0 ? 'Paid' : 'Owed more') : 'Adjustment') }),
+note: guestName || description || (kind === 'earned'
 ? `Earned before tracking`
 : kind === 'cancellation' ? 'Cancellation'
 : kind === 'payment' ? (amount < 0 ? 'Paid' : 'Owed more') : 'Adjustment'),
@@ -1071,6 +1087,8 @@ note: note || (kind === 'earned'
 queueSave();
 document.getElementById('letting-add-amount').value = '';
 document.getElementById('letting-add-note').value = '';
+const guestEl = document.getElementById('letting-add-guest');
+if (guestEl) guestEl.value = '';
 const nightsEl = document.getElementById('letting-add-nights');
 const startEl = document.getElementById('letting-add-start-date');
 if (nightsEl) nightsEl.value = '';

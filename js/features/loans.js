@@ -163,7 +163,7 @@ done.add(id); // even a nil month, so it isn't re-priced on every open
 if (amount > 0) {
 data.lettingLedger.push({
 id, ownerKey: key, kind: 'interest', autoInterest: true, amount: -amount,
-date: firstOfNext(ym), note: `Loan interest, ${monthLabel(ym)}`,
+date: firstOfNext(ym), note: `Loan interest, ${monthLabel(ym)}`, guest: '', description: `Loan interest, ${monthLabel(ym)}`,
 });
 posted++;
 }
