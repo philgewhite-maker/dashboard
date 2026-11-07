@@ -63,6 +63,17 @@ out.set(d, cur);
 return out;
 }
 
+// Lets the page paint between slices. A message-channel hop, not setTimeout(0): a tab in the background clamps
+// timers to a second or a minute, which turned a half-minute run into many minutes while the user was elsewhere.
+function yieldToPage() {
+return new Promise((resolve) => {
+if (typeof MessageChannel === 'undefined') { setTimeout(resolve, 0); return; }
+const ch = new MessageChannel();
+ch.port1.onmessage = () => { ch.port1.close(); resolve(); };
+ch.port2.postMessage(0);
+});
+}
+
 // Runs the projection (in slices, so the page keeps responding), saves it and returns the record.
 // `onProgress(0..1)` for a status line.
 async function runProjection({ onProgress = () => {} } = {}) {
@@ -72,7 +83,7 @@ const proj = model.makeProjection(ctx);
 if (proj.error) return { error: proj.error };
 while (!proj.step(25)) {
 onProgress(proj.progress);
-await new Promise((r) => setTimeout(r, 0));
+await yieldToPage();
 }
 const result = proj.finish();
 if (result.error) return { error: result.error };
