@@ -137,7 +137,9 @@ const firstClean = Number.isFinite(Number(overrides.firstClean)) ? Number(overri
 const rooms = evaluatorRooms().map((room) => ({ key: room.key, label: room.label, listingIds: room.listingIds, ...roomSettings(room.key), ...((overrides.rooms || {})[room.key] || {}) })).filter((r) => r.include !== false);
 const stays = collectStays().map((x) => ({ id: x.id, listingId: x.listingId, checkin: x.checkin, checkout: x.checkout, income: x.income, bookedOn: x.bookedOn, cancelledOn: x.cancelledOn, status: x.status, unconfirmed: !!x.unconfirmed, guest: x.guest || '', platform: x.platform }));
 const requests = (data.bookingRequests || []).map((q) => ({ ...q }));
-const proposals = (data.airbnbRateProposals || []).map((p) => ({ listingId: p.listingId, startDate: p.startDate, endDate: p.endDate, upliftPct: p.upliftPct, upliftAmount: p.upliftAmount, reason: p.reason }));
+// A rate-review proposal is only a suggestion until you act on it: it lifts the model's price for those dates only once its
+// subtask has been ticked off (the rate review's own meaning of "actioned"), so an unactioned event uplift can't inflate a verdict.
+const proposals = (data.airbnbRateProposals || []).filter((p) => { const sub = (data.tasks || []).find((t) => t.id === p.subtaskId); return !!sub && sub.bucket === 'done'; }).map((p) => ({ listingId: p.listingId, startDate: p.startDate, endDate: p.endDate, upliftPct: p.upliftPct, upliftAmount: p.upliftAmount, reason: p.reason }));
 const listingLabels = Object.fromEntries((data.airbnbListings || []).map((l) => [l.id, l.label || 'Listing']));
 // The stored earnings-export rows for stays (data.airbnbEarnings), and which stays they cover, so a stay isn't counted twice.
 const earningRows = (data.airbnbEarnings || []).filter((e) => String(e.type).toLowerCase() === 'reservation' && Number(e.amount) > 0 && Number(e.nights) > 0 && e.start);
