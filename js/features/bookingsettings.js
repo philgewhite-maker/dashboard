@@ -3,7 +3,7 @@
 // (defaults in state.js DEFAULT_PREFS). Every box is a number or a tick; the model blends
 // each with your own data as it builds up.
 import { data, queueSave, DEFAULT_PREFS } from '../state.js';
-import { escapeHtml } from '../utils.js';
+import { escapeHtml, uid } from '../utils.js';
 import { nightRateRooms } from './letting.js';
 
 const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -15,6 +15,7 @@ const d = DEFAULT_PREFS.bookingEvaluator;
 if (s.leadMedian === d.leadMedian) s.leadMedian = [...d.leadMedian];
 if (s.lastMinute === d.lastMinute) s.lastMinute = d.lastMinute.map((x) => ({ ...x }));
 if (s.rooms === d.rooms) s.rooms = {};
+if (!Array.isArray(s.unavailable) || s.unavailable === d.unavailable) s.unavailable = Array.isArray(s.unavailable) ? s.unavailable.map((u) => ({ ...u })) : [];
 data.prefs.bookingEvaluator = s;
 return s;
 }
@@ -64,6 +65,15 @@ return `<tr><td>${escapeHtml(room.label)}</td>
 <td>${numBox(`${p}.priceWeekday`, r.priceWeekday, { placeholder: 'from data' })}</td>
 <td>${numBox(`${p}.priceWeekend`, r.priceWeekend, { placeholder: 'from data' })}</td></tr>`;
 }).join('')}</tbody></table>` : '<div class="settings-note" style="margin:0;">No guest rooms set up yet.</div>'}
+<h4 class="be-set-h">Times a room wasn't offered</h4>
+<div class="settings-note" style="margin:0 0 4px;">In use yourself, or off Airbnb. These nights are left out of the occupancy demand is calibrated to, so an empty spell isn't read as nobody wanting the room. A month with no stay and no request or enquiry at all is left out on its own. A direct booking belongs in Letting income instead (it counts as occupied).</div>
+${(s.unavailable || []).map((u) => `<div class="be-set-row"><span class="be-set-label">${escapeHtml((rooms.find((r) => r.key === u.roomKey) || {}).label || 'Room')}</span><span>${escapeHtml(u.from)} – ${escapeHtml(u.to)}</span><span class="del-x" data-be-unavail-del="${escapeHtml(u.id)}" title="Remove">&times;</span></div>`).join('')}
+<div class="sync-row" style="align-items:center;">
+<select id="be-unavail-room" class="settings-input">${rooms.map((r) => `<option value="${escapeHtml(r.key)}">${escapeHtml(r.label)}</option>`).join('')}</select>
+<input type="date" id="be-unavail-from" class="settings-input" title="First night not offered">
+<input type="date" id="be-unavail-to" class="settings-input" title="Last night not offered">
+<button class="sync-btn sm inline" type="button" id="be-unavail-add">Add</button>
+</div>
 <h4 class="be-set-h">The request itself</h4>
 ${row('Direct booking income counts', `×${numBox('directWeight', s.directWeight, { step: 0.05, width: 56 })}`)}
 ${row('Guest with no reviews', `×${numBox('guestNoReviews', s.guestNoReviews, { step: 0.05, width: 56 })}`)}
@@ -118,9 +128,23 @@ s.rooms[key] = { ...roomSettings(key), [field]: value };
 queueSave();
 });
 el.addEventListener('click', (e) => {
+const del = e.target.closest('[data-be-unavail-del]');
+if (del) {
+const s = settings();
+s.unavailable = s.unavailable.filter((u) => u.id !== del.dataset.beUnavailDel);
+queueSave(); renderBookingEvaluatorSettings(); return;
+}
+if (e.target.closest('#be-unavail-add')) {
+const roomKey = document.getElementById('be-unavail-room').value;
+const from = document.getElementById('be-unavail-from').value;
+const to = document.getElementById('be-unavail-to').value;
+if (!roomKey || !from || !to || to < from) return;
+settings().unavailable.push({ id: uid(), roomKey, from, to });
+queueSave(); renderBookingEvaluatorSettings(); return;
+}
 if (!e.target.closest('#be-reset')) return;
-const rooms = settings().rooms;
-data.prefs.bookingEvaluator = { ...structuredClone(DEFAULT_PREFS.bookingEvaluator), rooms };
+const { rooms, unavailable } = settings();
+data.prefs.bookingEvaluator = { ...structuredClone(DEFAULT_PREFS.bookingEvaluator), rooms, unavailable };
 queueSave();
 renderBookingEvaluatorSettings();
 });

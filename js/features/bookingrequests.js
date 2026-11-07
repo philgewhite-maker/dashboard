@@ -201,6 +201,23 @@ if (!a || !b) return true; // a stay with no name yet can still be this guest's
 return a.startsWith(b) || a.includes(b);
 }
 
+// Direct (non-Airbnb) stays a request or enquiry may have turned into: income entries marked
+// Other with a check-in and nights, and stays marked Other. id is 'led:<entry id>' or 'res:<stay id>'.
+function directEntries() {
+const out = [];
+(data.lettingLedger || []).forEach((e) => {
+if (e.platform !== 'other' || !['earned', 'accrual'].includes(e.kind)) return;
+const start = e.startDate || e.checkin || '';
+const n = Number(e.nights);
+if (!start || !(n > 0)) return;
+out.push({ id: `led:${e.id}`, listingId: e.listingId || '', start, end: dateStrAdd(start, n), guest: e.guest || e.note || '' });
+});
+(data.airbnbReservations || []).forEach((r) => {
+if (r.platform !== 'other' || r.status === 'cancelled' || !r.checkin || !r.checkout) return;
+out.push({ id: `res:${r.id}`, listingId: r.listingId, start: r.checkin, end: r.checkout, guest: r.guestName || '' });
+});
+return out;
+}
 // Whether each request or enquiry became a stay. A request matches by its HM code; failing
 // that (and for an enquiry, which has none) by the same room, the same check-in or
 // check-out, and a guest name that fits. With no stay, a request is 'not-booked' two days
@@ -210,10 +227,11 @@ function resolveRequestOutcomes() {
 const stays = data.airbnbReservations || [];
 // Older stays are known only from their Letting income entry (no stay record, no code).
 const ledgerStays = collectStays().filter((s) => String(s.id).startsWith('led:') && s.status === 'stay');
+const directs = directEntries();
 const today = todayStr();
 let changed = 0;
 (data.bookingRequests || []).forEach((q) => {
-if (q.decision === 'declined' || q.decision === 'accepted') return;
+if (q.decision === 'declined' || q.decision === 'accepted' || q.decision === 'direct') return;
 let stay = q.confirmationCode ? stays.find((s) => s.confirmationCode === q.confirmationCode) : null;
 if (!stay) {
 stay = stays.find((s) => roomOf(s.listingId) === roomOf(q.listingId)
@@ -246,6 +264,9 @@ q.decidedOn = String(q.receivedAt || '').slice(0, 10);
 changed++;
 return;
 }
+// It went direct: a direct stay in the same room whose dates overlap, under the same guest name.
+const direct = directs.find((x) => sameRoom(x.listingId) && x.start < q.checkout && x.end > q.checkin && x.guest && q.guestName && nameFits(x.guest, q.guestName));
+if (direct) { q.decision = 'direct'; q.directEntryId = direct.id; q.decidedOn = String(q.receivedAt || '').slice(0, 10); changed++; return; }
 const received = String(q.receivedAt || '').slice(0, 10);
 const lapsed = q.kind === 'request' ? received && dateStrAdd(received, 2) < today : q.checkin < today;
 if (lapsed && q.decision !== 'not-booked') { q.decision = 'not-booked'; changed++; }
@@ -255,17 +276,26 @@ return changed;
 
 // ---- List on the Airbnb panel ---------------------------------------------------
 
-const DECISION_LABEL = { '': 'Waiting', accepted: 'Became a stay', 'not-booked': 'Not booked', declined: 'Declined' };
+const DECISION_LABEL = { '': 'Waiting', accepted: 'Became a stay', 'not-booked': 'Not booked', declined: 'Declined', direct: 'Went direct' };
 const nightsOf = (q) => Math.round((new Date(`${q.checkout}T00:00:00`) - new Date(`${q.checkin}T00:00:00`)) / 86400000);
 const shortDate = (d) => new Date(`${d}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 
-function requestRowHtml(q, stayChip) {
+function requestRowHtml(q, stayChip, directs) {
 const listing = (data.airbnbListings || []).find((l) => l.id === q.listingId);
 const n = nightsOf(q);
 const money = q.payout != null ? `£${Math.round(q.payout)}` : (q.nightlyRate != null ? `£${Math.round(q.nightlyRate)}/night` : '');
 const who = `${q.guestName || 'Guest'}${q.guestReviews != null ? ` · ${q.guestReviews} review${q.guestReviews === 1 ? '' : 's'}` : ''}${q.identityVerified ? '' : ' · not verified'}`;
 const stay = q.reservationId ? (data.airbnbReservations || []).find((r) => r.id === q.reservationId) : null;
-const outcome = q.decision === 'accepted' && stay ? stayChip(stay) : `<span class="bkreq-outcome ${escapeHtml(q.decision || 'waiting')}">${escapeHtml(DECISION_LABEL[q.decision] || q.decision)}</span>`;
+let outcome = q.decision === 'accepted' && stay ? stayChip(stay) : `<span class="bkreq-outcome ${escapeHtml(q.decision || 'waiting')}">${escapeHtml(DECISION_LABEL[q.decision] || q.decision)}</span>`;
+if (q.decision === 'direct') {
+const x = directs.find((d) => d.id === q.directEntryId);
+outcome = `<span class="bkreq-outcome accepted">Went direct:</span> ${x ? `<span class="inline-goto-link" data-bkreq-direct-open="${escapeHtml(x.id)}" title="Open the direct booking">${escapeHtml(`${String(x.guest).split(',').pop().trim() || 'Guest'} · ${shortDate(x.start)} – ${shortDate(x.end)}`)}</span>` : '<span class="settings-note" style="margin:0;">entry no longer there</span>'} <span class="del-x" data-bkreq-undirect="${escapeHtml(q.id)}" title="Not this one">&times;</span>`;
+} else if (q.decision === 'not-booked') {
+// A request that didn't become an Airbnb stay may have been booked direct: offer the direct
+// stays in the same room within two months of it.
+const near = directs.filter((x) => (!q.listingId || !x.listingId || roomOf(x.listingId) === roomOf(q.listingId)) && x.end > dateStrAdd(q.checkin, -60) && x.start < dateStrAdd(q.checkout, 60));
+if (near.length) outcome += ` <select class="mini" data-bkreq-direct="${escapeHtml(q.id)}" title="It was booked direct instead"><option value="">Went direct?</option>${near.map((x) => `<option value="${escapeHtml(x.id)}">${escapeHtml(`${String(x.guest).split(',').pop().trim() || 'Guest'} · ${shortDate(x.start)} – ${shortDate(x.end)}`)}</option>`).join('')}</select>`;
+}
 return `<div class="bkreq-row" data-bkreq="${escapeHtml(q.id)}">
 <span class="bkreq-kind ${escapeHtml(q.kind)}">${q.kind === 'enquiry' ? 'Enquiry' : 'Request'}</span>
 <span class="bkreq-dates"><span class="dot ${escapeHtml((listing && listing.colour) || 'slate')}" title="${escapeHtml((listing && listing.label) || 'Listing not matched')}"></span>${escapeHtml(`${shortDate(q.checkin)} – ${shortDate(q.checkout)}`)} <span class="settings-note" style="margin:0;">${n} night${n === 1 ? '' : 's'}</span></span>
@@ -283,21 +313,23 @@ const el = document.getElementById('booking-requests');
 if (!el) return;
 const { stayChipHtml, bindStayChips } = await import('./airbnb.js');
 bindStayChips();
+const directs = directEntries();
 const all = (data.bookingRequests || []).slice().sort((a, b) => String(b.receivedAt).localeCompare(String(a.receivedAt)));
 const today = todayStr();
 const open = all.filter((q) => q.checkout >= today);
 const past = all.filter((q) => q.checkout < today);
 const requests = all.filter((q) => q.kind === 'request');
 const became = requests.filter((q) => q.decision === 'accepted').length;
+const wentDirect = all.filter((q) => q.decision === 'direct').length;
 const since = all.length ? String(all[all.length - 1].receivedAt).slice(0, 10) : '';
 const summary = all.length
-? `${requests.length} request${requests.length === 1 ? '' : 's'} (${became} became stays) and ${all.length - requests.length} enquir${all.length - requests.length === 1 ? 'y' : 'ies'} on file${since ? ` since ${shortDate(since)} ${since.slice(0, 4)}` : ''}.`
+? `${requests.length} request${requests.length === 1 ? '' : 's'} (${became} became Airbnb stays) and ${all.length - requests.length} enquir${all.length - requests.length === 1 ? 'y' : 'ies'} on file${since ? ` since ${shortDate(since)} ${since.slice(0, 4)}` : ''}${wentDirect ? `; ${wentDirect} went direct instead` : ''}.`
 : 'None read yet.';
 const wasOpen = el.open;
 el.innerHTML = `<summary>Requests and enquiries <span class="settings-note" style="margin:0;">${open.length ? `${open.length} for upcoming dates` : ''}</span></summary>
 <div class="settings-note" style="margin:4px 0 6px;">Every booking request and enquiry read from your inbox, including the ones that never became stays: the demand the booking evaluator learns from. ${escapeHtml(summary)}</div>
-<div class="bkreq-list">${open.map((q) => requestRowHtml(q, stayChipHtml)).join('') || '<div class="settings-note" style="margin:0;">None for upcoming dates.</div>'}</div>
-${past.length ? `<details style="margin-top:6px;"><summary class="settings-note" style="margin:0;cursor:pointer;">Earlier (${past.length})</summary><div class="bkreq-list">${past.slice(0, 200).map((q) => requestRowHtml(q, stayChipHtml)).join('')}</div></details>` : ''}
+<div class="bkreq-list">${open.map((q) => requestRowHtml(q, stayChipHtml, directs)).join('') || '<div class="settings-note" style="margin:0;">None for upcoming dates.</div>'}</div>
+${past.length ? `<details style="margin-top:6px;"><summary class="settings-note" style="margin:0;cursor:pointer;">Earlier (${past.length})</summary><div class="bkreq-list">${past.slice(0, 200).map((q) => requestRowHtml(q, stayChipHtml, directs)).join('')}</div></details>` : ''}
 <div class="sync-row" style="margin-top:8px;align-items:center;">
 <button class="sync-btn sm inline" type="button" id="booking-requests-backfill" title="Reads every request and enquiry email from the last ${BACKFILL_MONTHS} months. Safe to run again: emails already read are skipped.">Read past requests from the inbox</button>
 <span class="sync-status" id="booking-requests-status">${data.prefs.bookingRequestsBackfilledAt ? `Last read ${escapeHtml(String(data.prefs.bookingRequestsBackfilledAt).slice(0, 10))}.` : ''}</span>
@@ -305,7 +337,32 @@ ${past.length ? `<details style="margin-top:6px;"><summary class="settings-note"
 el.open = wasOpen;
 if (!bound) {
 bound = true;
+el.addEventListener('change', (e) => {
+const sel = e.target.closest('[data-bkreq-direct]');
+if (!sel || !sel.value) return;
+const q = (data.bookingRequests || []).find((x) => x.id === sel.dataset.bkreqDirect);
+if (!q) return;
+q.decision = 'direct'; q.directEntryId = sel.value; q.decidedOn = String(q.receivedAt || '').slice(0, 10);
+queueSave();
+renderBookingRequests();
+});
 el.addEventListener('click', async (e) => {
+const undo = e.target.closest('[data-bkreq-undirect]');
+if (undo) {
+const q = (data.bookingRequests || []).find((x) => x.id === undo.dataset.bkreqUndirect);
+// Back to "not booked"; set as declined so the automatic match doesn't put it straight back.
+if (q) { q.decision = 'declined'; q.directEntryId = ''; queueSave(); renderBookingRequests(); }
+return;
+}
+const dOpen = e.target.closest('[data-bkreq-direct-open]');
+if (dOpen) {
+const [kind, id] = [dOpen.dataset.bkreqDirectOpen.slice(0, 3), dOpen.dataset.bkreqDirectOpen.slice(4)];
+const { switchTab } = await import('../tabs.js');
+const { scrollAndFlash } = await import('../utils.js');
+if (kind === 'led') { switchTab('finances'); requestAnimationFrame(() => scrollAndFlash(`[data-letting-date="${CSS.escape(id)}"]`)); }
+else { switchTab('overview'); requestAnimationFrame(() => scrollAndFlash(`[data-airbnb-row="${CSS.escape(id)}"]`)); }
+return;
+}
 const ev = e.target.closest('[data-bkreq-eval]');
 if (ev) { const { openEvaluator } = await import('./bookingevaluator.js'); openEvaluator({ requestId: ev.dataset.bkreqEval }); return; }
 const mail = e.target.closest('[data-bkreq-open]');

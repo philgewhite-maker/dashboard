@@ -78,7 +78,7 @@ a{color:var(--accent)}
 <div class="wrap">
 <header>
   <h1>Dashboard data model</h1>
-  <p class="lede">What the app stores, how the pieces refer to each other, where the same fact is kept twice, and where text stands in for structure. Built from the code and from a read of the live document (field names, types, fill rates and reference checks; no personal values). Verified against build <b>v759</b>.</p>
+  <p class="lede">What the app stores, how the pieces refer to each other, where the same fact is kept twice, and where text stands in for structure. Built from the code and from a read of the live document (field names, types, fill rates and reference checks; no personal values). Verified against build <b>v761</b>.</p>
   <ul class="stats">
     <li><b>109</b><span>top-level keys</span></li>
     <li><b>597</b><span>connections</span></li>
@@ -115,6 +115,7 @@ a{color:var(--accent)}
     <p class="fix"><b>Added in v749.</b> A ledger row can carry <code>bookedOn</code> (the day the booking was made) when it has no stay record behind it, such as an older cancellation or income entry. The list under the Nights booked chart shows the bookings with no booking date and takes a date for each, written to the stay's <code>confirmedOn</code> or the ledger row's <code>bookedOn</code>. The inbox backfill also covers cancellation entries.</p>
     <p class="fix"><b>Added in v753.</b> <code>bookingRequests</code>: every Airbnb "Pending: Reservation Request" and "Enquiry for" email becomes a record (guest, review count, city, listing from the email's rooms id matched to the ICS link, dates, party size, nightly rate and payout for a request, HM code or Airbnb thread id), including the ones never booked. <code>decision</code> is set when a stay with its code, or the same room, dates and guest, appears (<code>reservationId</code>), or <code>not-booked</code> once it lapses. <code>prefs.bookingEvaluator</code> holds the booking evaluator's starting assumptions, including per-room settings keyed by room. The checkout clean in the net night rate is now shared between rooms turned over the same day.</p>
     <p class="fix"><b>Added in v759.</b> Letting income entries can carry <code>confirmationCode</code> (Airbnb's HM code), filled by the Airbnb earnings CSV import (Letting income → Import Airbnb earnings), which also fills <code>startDate</code>, <code>nights</code>, <code>bookedOn</code> and <code>listingId</code> on older entries and <code>confirmationCode</code>/<code>confirmedOn</code>/<code>income</code> on stays, only where blank. A booking request whose code is on an income entry counts as having become a stay.</p>
+    <p class="fix"><b>Added in v761.</b> A booking request can be marked <code>decision: 'direct'</code> (it was booked direct instead), with <code>directEntryId</code> = <code>led:&lt;income entry id&gt;</code> or <code>res:&lt;stay id&gt;</code>, set automatically when a direct stay in the same room overlaps it under the same guest name, or picked by hand. <code>prefs.bookingEvaluator.unavailable</code> lists periods a room wasn't offered, left out of the occupancy the evaluator calibrates to.</p>
   </div>
 
   <div class="finding">

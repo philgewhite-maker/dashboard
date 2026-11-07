@@ -219,6 +219,9 @@ leadMedian: [17, 17, 17, 25, 25, 35, 35, 35, 21, 21, 21, 17], christmasLead: 300
 lastMinute: [{ days: 7, pct: 10 }, { days: 0, pct: 0 }, { days: 0, pct: 0 }],
 gapDiscountPct: 15, gapMaxNights: 2,
 elasticity: 1.5, enquiryWeight: 0.3,
+// [{id, roomKey, from, to}]: times a room wasn't offered (in use, off Airbnb), left out of
+// the occupancy the evaluator calibrates demand to.
+unavailable: [],
 rooms: {},
 },
 // {lastRunAt} -- gates js/features/airbnbrates.js's own quarterly
@@ -2015,7 +2018,8 @@ photoId: '',
 // `kind` 'request' (Request to Book: has a payout, nightly rate and HM code) or 'enquiry'
 // (a question with dates: no payout, has Airbnb's thread id). `decision`: '' while it can
 // still turn into a stay, 'accepted' (a stay with its code or guest and dates appeared,
-// reservationId set), 'not-booked' (no stay followed), or 'declined' when you said so.
+// reservationId set), 'direct' (it was booked direct instead: directEntryId is 'led:<income entry
+// id>' or 'res:<stay id>'), 'not-booked' (no stay followed), or 'declined' when you said so.
 // `evaluation` is the booking evaluator's last verdict on it, kept for later checks.
 function blankBookingRequest(fields = {}) {
 return {
@@ -2024,7 +2028,7 @@ checkin: '', checkout: '', guests: null,
 guestName: '', guestReviews: null, identityVerified: false, guestCity: '', guestRating: null,
 nightlyRate: null, payout: null, confirmationCode: '', airbnbThreadId: '',
 messageId: '', receivedAt: '',
-reservationId: '', decision: '', decidedOn: '',
+reservationId: '', decision: '', decidedOn: '', directEntryId: '',
 evaluation: null,
 ...fields,
 };
