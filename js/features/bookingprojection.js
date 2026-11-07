@@ -63,15 +63,11 @@ out.set(d, cur);
 return out;
 }
 
-// Lets the page paint between slices. A message-channel hop, not setTimeout(0): a tab in the background clamps
-// timers to a second or a minute, which turned a half-minute run into many minutes while the user was elsewhere.
+// Lets the page paint between slices. In a background tab there is nothing to paint and the browser clamps
+// timers to a second or a minute (a half-minute run took many minutes), so there it just carries on.
 function yieldToPage() {
-return new Promise((resolve) => {
-if (typeof MessageChannel === 'undefined') { setTimeout(resolve, 0); return; }
-const ch = new MessageChannel();
-ch.port1.onmessage = () => { ch.port1.close(); resolve(); };
-ch.port2.postMessage(0);
-});
+if (typeof document !== 'undefined' && document.hidden) return Promise.resolve();
+return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 // Runs the projection (in slices, so the page keeps responding), saves it and returns the record.
