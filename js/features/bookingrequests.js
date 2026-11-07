@@ -228,6 +228,15 @@ q.decidedOn = stay.confirmedOn || String(q.receivedAt || '').slice(0, 10);
 changed++;
 return;
 }
+// An income entry carrying the request's code (from the Airbnb earnings export).
+const coded = q.confirmationCode ? (data.lettingLedger || []).find((e) => e.confirmationCode === q.confirmationCode) : null;
+if (coded) {
+q.decision = 'accepted';
+if (!q.listingId && coded.listingId) q.listingId = coded.listingId;
+q.decidedOn = coded.bookedOn || String(q.receivedAt || '').slice(0, 10);
+changed++;
+return;
+}
 const sameRoom = (listingId) => !q.listingId || roomOf(listingId) === roomOf(q.listingId);
 const old = ledgerStays.find((s) => sameRoom(s.listingId) && (s.checkin === q.checkin || s.checkout === q.checkout) && nameFits(s.guest, q.guestName));
 if (old) {

@@ -4554,3 +4554,9 @@ background:var(--slate-bg);color:var(--slate);
 .be-key.full{background:var(--line);}
 .be-whatif{font-size:11px;display:inline-flex;align-items:center;gap:4px;white-space:nowrap;}
 .be-example{font-size:12px;margin:4px 0;line-height:1.45;}
+/* Airbnb earnings CSV import (airbnbearnings.js), in the Letting panel. */
+.aex-list{display:flex;flex-direction:column;}
+.aex-row{display:flex;flex-wrap:wrap;align-items:center;gap:3px 10px;padding:4px 0;border-bottom:1px solid var(--line);font-size:12px;}
+.aex-what{flex:1 1 260px;min-width:0;font-variant-numeric:tabular-nums;}
+.aex-target{flex:0 0 auto;}
+.aex-differs{font-size:11px;color:var(--red);flex-basis:100%;}
