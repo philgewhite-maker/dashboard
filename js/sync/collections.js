@@ -49,6 +49,7 @@ const COLLECTIONS = [
 { key: 'airbnbKeys', kind: 'records', tab: 'overview', label: 'Airbnb keys' },
 { key: 'airbnbKeyAssignments', kind: 'records', tab: 'overview', label: 'Airbnb key assignments' },
 { key: 'airbnbRateProposals', kind: 'records', tab: 'overview', label: 'Airbnb rate proposals' },
+{ key: 'bookingRequests', kind: 'records', tab: 'overview', label: 'Airbnb booking requests' },
 { key: 'airbnbCleaners', kind: 'singleton', tab: 'overview', label: 'Airbnb cleaners' },
 { key: 'airbnbCleanerBlocks', kind: 'singleton', tab: 'overview', label: 'Airbnb cleaner un-assignments' },
 { key: 'airbnbCleanerEvents', kind: 'singleton', tab: 'overview', label: 'Airbnb cleaner events' },

@@ -9,7 +9,7 @@
 // fact, by hand or from the booking email. A hand-typed external event
 // is the exception -- its title carries the name, and that's read off it.
 import { data, queueSave, blankAirbnbListing, blankAirbnbReservation, blankAirbnbKey, blankAirbnbKeyAssignment, KEY_CUSTODIAN_TYPES } from '../state.js';
-import { escapeHtml, todayStr, dateStrAdd, uid, MISSING_KEY_LINK_HTML, pickChipHtml } from '../utils.js';
+import { escapeHtml, todayStr, dateStrAdd, uid, MISSING_KEY_LINK_HTML, pickChipHtml, scrollAndFlash } from '../utils.js';
 import { owners, ownerNameFor, ownerKeyFor, shareRuleAt, money, CAP_KEEPS_FROM } from './letting.js';
 import { gmailLink } from '../googlemail.js';
 import { track } from './activity.js';
@@ -820,6 +820,43 @@ ${reservationKeysHtml(r)}
 </div>`;
 }
 
+// A stay shown away from its own row (a booking request's outcome, the bookings either side
+// of a gap in the booking evaluator): listing dot, guest and dates; click opens the stay.
+// Upcoming stays and those still awaiting income are rows on this panel; an earlier or
+// cancelled one is shown by its entry in Letting income instead.
+function stayIsOnPanel(r) {
+return notCancelled(r) && (r.checkout >= todayStr() || (!r.accruedAt && r.checkout >= dateStrAdd(todayStr(), -AWAITING_INCOME_DAYS)));
+}
+function stayChipHtml(r, extraHtml = '') {
+const listing = data.airbnbListings.find((l) => l.id === r.listingId) || {};
+const label = `${r.guestName || 'Guest'} · ${formatAirbnbDate(r.checkin)} → ${formatAirbnbDate(r.checkout)}${r.status === 'cancelled' ? ' (cancelled)' : ''}`;
+return `<span class="stay-chip" data-open-stay="${escapeHtml(r.id)}" title="${escapeHtml(`${listing.label || 'Listing'}: open this stay`)}"><span class="dot ${escapeHtml(listing.colour || 'slate')}"></span>${escapeHtml(label)}</span>${extraHtml}`;
+}
+function openStay(id) {
+const r = data.airbnbReservations.find((x) => x.id === id);
+if (!r) return;
+import('../tabs.js').then(({ switchTab }) => {
+if (stayIsOnPanel(r)) {
+switchTab('overview');
+requestAnimationFrame(() => scrollAndFlash(`[data-airbnb-row="${CSS.escape(id)}"]`));
+return;
+}
+const entry = (data.lettingLedger || []).find((e) => e.reservationId === id);
+if (!entry) return;
+switchTab('finances');
+requestAnimationFrame(() => scrollAndFlash(`[data-letting-date="${CSS.escape(entry.id)}"]`));
+});
+}
+let stayChipsBound = false;
+function bindStayChips() {
+if (stayChipsBound) return;
+stayChipsBound = true;
+document.addEventListener('click', (e) => {
+const chip = e.target.closest('[data-open-stay]');
+if (chip) openStay(chip.dataset.openStay);
+});
+}
+
 // A feed event with no confirmation email, name or income yet. Airbnb's
 // calendar shows "Reserved" for an enquiry it is holding dates for as well as
 // for a booking, so this may be nothing: it clears itself when the
@@ -932,6 +969,7 @@ el.innerHTML = errorsHtml + refundsPendingHtml() + (upcoming.length
 : (errorsHtml ? '' : '<div class="empty">Nothing upcoming — add a listing in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#airbnb-listings">Settings</span> and Sync.</div>'));
 
 bindRefundsPending(el);
+import('./bookingrequests.js').then((m) => m.renderBookingRequests()).catch((err) => console.error('Booking requests render failed:', err));
 el.querySelectorAll('[data-airbnb-res-field]').forEach((input) => {
 input.addEventListener('change', () => {
 const r = data.airbnbReservations.find((x) => x.id === input.dataset.airbnbResId);
@@ -2391,6 +2429,11 @@ t.step(6, STEPS, 'Reading booking confirmation emails for guest names…');
 const guestResult = await syncGuestNamesFromEmail();
 await backfillConfirmationCodes();
 const dateResult = await backfillBookingDates();
+// Booking requests and enquiries (the booking evaluator's demand data), after the stays
+// above, so a request whose stay was just confirmed is matched to it.
+const requestsMod = await import('./bookingrequests.js');
+await requestsMod.syncBookingRequestsFromEmail();
+requestsMod.renderBookingRequests();
 renderAirbnb();
 loadAirbnbCalendarOptions({ silent: true });
 // Stripes live on the Planner tab -- dynamic import avoids a static
@@ -2487,4 +2530,4 @@ queueSave();
 // stores, and each was wrong in a way that stayed invisible until a
 // round-trip through Google -- an end date a day out, a name silently
 // dropped, a title separator nobody types. Nothing else imports them.
-export { backfillBookingDates, isLiveStay, notCancelled, renderAirbnb, renderAirbnbListings, initAirbnbListingsForm, initAirbnbSync, airbnbSegmentsForDay, renderAirbnbKeys, initAirbnbKeys, initKeysSettingsForm, initAirbnbAddBooking, eventDayRange, externalNameFromSummary, parseCleanerEventName };
+export { backfillBookingDates, stayChipHtml, bindStayChips, isLiveStay, notCancelled, renderAirbnb, renderAirbnbListings, initAirbnbListingsForm, initAirbnbSync, airbnbSegmentsForDay, renderAirbnbKeys, initAirbnbKeys, initKeysSettingsForm, initAirbnbAddBooking, eventDayRange, externalNameFromSummary, parseCleanerEventName };

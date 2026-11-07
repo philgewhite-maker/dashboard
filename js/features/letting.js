@@ -430,13 +430,40 @@ return `${v < 0 ? '-' : ''}£${Math.abs(v).toLocaleString('en-GB', { minimumFrac
 // this (and everything else money-shaped here): `gross` of 0 or less
 // returns null just like having no nights does, no separate "is this a
 // real booking" flag needed.
-function nightRateFromGrossNights(gross, nights) {
+function firstCleanCost() {
+const configured = Number(data.prefs.airbnbCleaningCost);
+return Number.isFinite(configured) ? configured : 50;
+}
+// The checkout clean's cost for one room on one day. Rooms turned over the same day share
+// the cleaner's visit: the first room costs the full clean, each further room the
+// "extra room" figure (Settings -> Booking evaluator), and the day's total is shared
+// equally. Rooms, not listings: two listings of one physical room count once.
+function cleanCostOn(date, listingId) {
+const first = firstCleanCost();
+const extraSetting = Number(data.prefs.bookingEvaluator?.cleanExtra);
+const extra = Number.isFinite(extraSetting) ? extraSetting : first;
+if (!date) return first;
+const roomOf = new Map();
+nightRateRooms().forEach((room) => room.listingIds.forEach((id) => roomOf.set(id, room.key)));
+const rooms = new Set([roomOf.get(listingId) || listingId]);
+(data.airbnbReservations || []).forEach((r) => {
+if (r.status === 'cancelled' || r.checkout !== date) return;
+const l = (data.airbnbListings || []).find((x) => x.id === r.listingId);
+if (l && l.needsCleaning === false) return;
+rooms.add(roomOf.get(r.listingId) || r.listingId);
+});
+const k = rooms.size;
+return (first + extra * (k - 1)) / k;
+}
+// `stay` (optional, a reservation): when known, its checkout clean is priced by
+// cleanCostOn (shared with other rooms turned over that day); mid-stay cleans and stays
+// with no record keep the full clean cost.
+function nightRateFromGrossNights(gross, nights, stay = null) {
 if (!nights || nights <= 0) return null;
 if (!(Number(gross) > 0)) return null;
-const configured = Number(data.prefs.airbnbCleaningCost);
-const cleaningCost = Number.isFinite(configured) ? configured : 50;
-const cleanings = 1 + Math.floor(nights / 7);
-const net = Number(gross) - cleanings * cleaningCost;
+const cleaningCost = firstCleanCost();
+const checkoutClean = stay && stay.checkout ? cleanCostOn(stay.checkout, stay.listingId) : cleaningCost;
+const net = Number(gross) - checkoutClean - Math.floor(nights / 7) * cleaningCost;
 return net / nights;
 }
 // Only meaningful for a ledger row that's actually a real stay with
@@ -446,7 +473,8 @@ return net / nights;
 // had a guest in it, and a plain payment/adjustment isn't a stay at all.
 function nightRateFor(e) {
 if (e.kind !== 'accrual' && e.kind !== 'earned') return null;
-return nightRateFromGrossNights(e.gross, e.nights);
+const stay = e.reservationId ? (data.airbnbReservations || []).find((r) => r.id === e.reservationId) : null;
+return nightRateFromGrossNights(e.gross, e.nights, stay);
 }
 
 // Weighted by nights, not a plain average of each row's own rate -- a
@@ -477,7 +505,7 @@ const parts = summary.map((g) => `${escapeHtml(g.label)} ${escapeHtml(money(g.av
 // No auto-margin of its own -- the "taken" badge right before it
 // already pushed the row to the far edge (for a non-mine owner); this
 // one just follows on immediately after it, same flex row.
-return `<span class="settings-note" style="margin:0;" title="Average night rate, weighted by nights, after the configured cleaning cost -- number in brackets is how many stays it's averaged over.">${parts}</span>`;
+return `<span class="settings-note" style="margin:0;" title="Average night rate, weighted by nights, after cleaning (a clean shared with another room turned over the same day costs each room less) -- number in brackets is how many stays it's averaged over.">${parts}</span>`;
 }
 
 // ---- Upcoming / awaiting payout (not yet accrued) ----------------------
@@ -532,7 +560,7 @@ const isPast = r.checkout && r.checkout <= today();
 // does a past stay still waiting on its income figure, for the same
 // reason, not a bug: there's genuinely no gross to divide yet.
 const nights = r.checkin && r.checkout ? Math.round((new Date(`${r.checkout}T00:00:00`) - new Date(`${r.checkin}T00:00:00`)) / 86400000) : 0;
-const nightRate = nightRateFromGrossNights(income, nights);
+const nightRate = nightRateFromGrossNights(income, nights, r);
 const nightRateHtml = nightRate != null
 ? `<span class="letting-gross" title="${escapeHtml(`${nights} night${nights === 1 ? '' : 's'}, after cleaning cost`)}">${escapeHtml(`${money(nightRate)}/night`)}</span>`
 : '';
@@ -2088,7 +2116,7 @@ const income = Number(r.income);
 if (!Number.isFinite(income) || income <= 0) return;
 if (!r.checkin || !r.checkout || r.checkout <= r.checkin) return;
 const wholeNights = Math.round((new Date(`${r.checkout}T00:00:00`) - new Date(`${r.checkin}T00:00:00`)) / DAY_MS);
-const rate = nightRateFromGrossNights(income, wholeNights);
+const rate = nightRateFromGrossNights(income, wholeNights, r);
 if (rate == null) return;
 const { counts, total } = nightsByMonth(r.checkin, r.checkout);
 if (!total) return;
@@ -2818,5 +2846,5 @@ if (keepListing) listingSel.value = keepListing;
 
 export {
 CAP_KEEPS_FROM, accrueLettings, reconcileAccrual, accrualIdFor, reconcileMonthlyCaps, renderLetting, initLetting, totalOwed, totalGross, balanceFor, grossFor, owners, ownerNameFor, ownerKeyFor, sharePctFor, shareRuleAt, splitAmountFor, money, isMyOwnKey, isMyOwnListing,
-lettingChartMonthTotal, lettingIncomeItems, nightRateRooms, entriesFor, nightRateFor, money0, monthRange, monthLabel, addMonths, today, resolveColor, listingColorVar, nightsByMonthForEntry,
+lettingChartMonthTotal, lettingIncomeItems, nightRateRooms, entriesFor, nightRateFor, cleanCostOn, money0, monthRange, monthLabel, addMonths, today, resolveColor, listingColorVar, nightsByMonthForEntry,
 };

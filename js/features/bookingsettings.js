@@ -1,0 +1,129 @@
+// Settings -> Finances -> Booking evaluator: the assumptions the booking evaluator
+// (js/features/bookingmodel.js) starts from, stored in data.prefs.bookingEvaluator
+// (defaults in state.js DEFAULT_PREFS). Every box is a number or a tick; the model blends
+// each with your own data as it builds up.
+import { data, queueSave, DEFAULT_PREFS } from '../state.js';
+import { escapeHtml } from '../utils.js';
+import { nightRateRooms } from './letting.js';
+
+const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function settings() {
+const s = { ...DEFAULT_PREFS.bookingEvaluator, ...(data.prefs.bookingEvaluator || {}) };
+// Never edit the defaults' own arrays/objects in place (a spread copies their reference).
+const d = DEFAULT_PREFS.bookingEvaluator;
+if (s.leadMedian === d.leadMedian) s.leadMedian = [...d.leadMedian];
+if (s.lastMinute === d.lastMinute) s.lastMinute = d.lastMinute.map((x) => ({ ...x }));
+if (s.rooms === d.rooms) s.rooms = {};
+data.prefs.bookingEvaluator = s;
+return s;
+}
+
+// Guest rooms the evaluator looks at: physical rooms (listings sharing a room count once),
+// leaving out a space with no guests (cleaning switched off on all its listings).
+function evaluatorRooms() {
+return nightRateRooms().filter((room) => room.listingIds.some((id) => {
+const l = (data.airbnbListings || []).find((x) => x.id === id);
+return l && l.needsCleaning !== false;
+}));
+}
+
+function roomSettings(key) {
+const s = settings();
+if (!s.rooms || typeof s.rooms !== 'object') s.rooms = {};
+return { include: true, weight: 1, minNights: 1, priceWeekday: null, priceWeekend: null, ...(s.rooms[key] || {}) };
+}
+
+const numBox = (path, value, { step = 1, min = 0, width = 64, placeholder = '', title = '' } = {}) => `<input type="number" class="settings-input" data-be="${escapeHtml(path)}" value="${value == null ? '' : escapeHtml(String(value))}" step="${step}" min="${min}" style="width:${width}px;" placeholder="${escapeHtml(placeholder)}"${title ? ` title="${escapeHtml(title)}"` : ''}>`;
+const row = (label, inner, note = '') => `<div class="be-set-row"><span class="be-set-label">${label}</span><span class="be-set-inputs">${inner}</span>${note ? `<span class="settings-note" style="margin:0;">${note}</span>` : ''}</div>`;
+
+function renderBookingEvaluatorSettings() {
+const el = document.getElementById('booking-evaluator-settings');
+if (!el) return;
+const s = settings();
+const rooms = evaluatorRooms();
+const lm = Array.isArray(s.lastMinute) ? s.lastMinute : [];
+el.innerHTML = `
+<div class="settings-note" style="margin:0 0 8px;">The booking evaluator weighs accepting a booking request against keeping its dates open. Each figure here is a starting assumption; the model blends it with your own stays and requests as they build up, and shows which it used.</div>
+<h4 class="be-set-h">Cleaning and changeovers</h4>
+${row('First room cleaned', `£${numBox('airbnbCleaningCost', data.prefs.airbnbCleaningCost)}`, 'Same figure as Cleaning cost in Letting income.')}
+${row('Each extra room the same day', `£${numBox('cleanExtra', s.cleanExtra)}`, 'Two rooms turned over on one day cost first + extra, shared between them.')}
+${row('Changeover hassle', `Mon–Fri £${numBox('hassleWeekday', s.hassleWeekday)} Sat–Sun £${numBox('hassleWeekend', s.hassleWeekend)}`, 'Per changeover day, however many rooms turn over that day.')}
+<h4 class="be-set-h">An empty night is worth to you</h4>
+${row('Sun–Thu nights', `£${numBox('ownUseWeekday', s.ownUseWeekday)}`)}
+${row('Fri and Sat nights', `£${numBox('ownUseWeekend', s.ownUseWeekend)}`)}
+${row('A second room empty the same night', `${numBox('ownUseSecondPct', s.ownUseSecondPct, { width: 56 })}% of its value`)}
+<h4 class="be-set-h">Rooms</h4>
+${rooms.length ? `<table class="limits-table be-rooms"><thead><tr><th>Room</th><th title="Include this room in the evaluator">Use</th><th title="How much you value having this room empty, relative to the others (1 = the figures above; 1.5 = your preferred room)">Own-use weight</th><th>Min nights</th><th title="Blank = worked out from what this room has actually earned">Price Sun–Thu £</th><th title="Blank = worked out from what this room has actually earned">Price Fri–Sat £</th></tr></thead><tbody>${rooms.map((room) => {
+const r = roomSettings(room.key);
+const p = `rooms.${room.key}`;
+return `<tr><td>${escapeHtml(room.label)}</td>
+<td style="text-align:center;"><input type="checkbox" data-be="${escapeHtml(p)}.include"${r.include ? ' checked' : ''}></td>
+<td>${numBox(`${p}.weight`, r.weight, { step: 0.1, width: 56 })}</td>
+<td>${numBox(`${p}.minNights`, r.minNights, { min: 1, width: 56 })}</td>
+<td>${numBox(`${p}.priceWeekday`, r.priceWeekday, { placeholder: 'from data' })}</td>
+<td>${numBox(`${p}.priceWeekend`, r.priceWeekend, { placeholder: 'from data' })}</td></tr>`;
+}).join('')}</tbody></table>` : '<div class="settings-note" style="margin:0;">No guest rooms set up yet.</div>'}
+<h4 class="be-set-h">The request itself</h4>
+${row('Direct booking income counts', `×${numBox('directWeight', s.directWeight, { step: 0.05, width: 56 })}`)}
+${row('Guest with no reviews', `×${numBox('guestNoReviews', s.guestNoReviews, { step: 0.05, width: 56 })}`)}
+${row('Guest rated below', `${numBox('lowRatingBelow', s.lowRatingBelow, { step: 0.1, width: 56 })} stars ×${numBox('guestLowRating', s.guestLowRating, { step: 0.05, width: 56 })}`)}
+${row('Late cancellation', `within ${numBox('lateCancelDays', s.lateCancelDays, { width: 50 })} days of arrival still pays ${numBox('lateCancelPayPct', s.lateCancelPayPct, { width: 56 })}%`)}
+<h4 class="be-set-h">When bookings arrive</h4>
+<div class="settings-note" style="margin:0 0 4px;">Median days ahead a booking arrives, by the month of the stay.</div>
+<div class="be-lead-grid">${MONTH_SHORT.map((m, i) => `<label>${m}${numBox(`leadMedian.${i}`, (s.leadMedian || [])[i], { width: 52 })}</label>`).join('')}<label>Christmas &amp; New Year${numBox('christmasLead', s.christmasLead, { width: 60 })}</label></div>
+<h4 class="be-set-h">Discounts and price</h4>
+${row('Last-minute discount', lm.map((step, i) => `within ${numBox(`lastMinute.${i}.days`, step.days, { width: 46 })} days ${numBox(`lastMinute.${i}.pct`, step.pct, { width: 46 })}%`).join(' · '), 'As set on Airbnb. The largest step that applies is used; 0 days = off.')}
+${row('Gap discount', `${numBox('gapDiscountPct', s.gapDiscountPct, { width: 50 })}% on gaps of ${numBox('gapMaxNights', s.gapMaxNights, { width: 46 })} nights or fewer`)}
+${row('Price sensitivity', numBox('elasticity', s.elasticity, { step: 0.1, width: 56 }), 'How much demand falls as price rises: 1.5 means 10% dearer gets about 15% fewer bookings. A guess until your request history says otherwise.')}
+${row('An enquiry counts as', `${numBox('enquiryWeight', s.enquiryWeight, { step: 0.05, width: 56 })} of a request`, 'Enquiries are often guests shopping around.')}
+<button class="sync-btn sm inline" type="button" id="be-reset" style="margin-top:8px;">Reset to starting assumptions</button>`;
+}
+
+function setPath(obj, path, value) {
+const parts = path.split('.');
+let o = obj;
+for (let i = 0; i < parts.length - 1; i++) {
+const k = parts[i];
+if (o[k] == null || typeof o[k] !== 'object') o[k] = /^\d+$/.test(parts[i + 1]) ? [] : {};
+o = o[k];
+}
+o[parts[parts.length - 1]] = value;
+}
+
+function initBookingEvaluatorSettings() {
+const el = document.getElementById('booking-evaluator-settings');
+if (!el) return;
+renderBookingEvaluatorSettings();
+el.addEventListener('change', (e) => {
+const input = e.target.closest('[data-be]');
+if (!input) return;
+const path = input.dataset.be;
+let value;
+if (input.type === 'checkbox') value = input.checked;
+else if (input.value.trim() === '') value = /price/i.test(path) ? null : undefined;
+else value = Number(input.value);
+if (value === undefined || (typeof value === 'number' && !Number.isFinite(value))) { renderBookingEvaluatorSettings(); return; }
+if (path === 'airbnbCleaningCost') {
+data.prefs.airbnbCleaningCost = value;
+const lettingBox = document.getElementById('letting-cleaning-cost');
+if (lettingBox) lettingBox.value = value;
+} else {
+const s = settings();
+if (path.startsWith('rooms.')) {
+const [, key, field] = path.split('.');
+s.rooms[key] = { ...roomSettings(key), [field]: value };
+} else setPath(s, path, value);
+}
+queueSave();
+});
+el.addEventListener('click', (e) => {
+if (!e.target.closest('#be-reset')) return;
+const rooms = settings().rooms;
+data.prefs.bookingEvaluator = { ...structuredClone(DEFAULT_PREFS.bookingEvaluator), rooms };
+queueSave();
+renderBookingEvaluatorSettings();
+});
+}
+
+export { initBookingEvaluatorSettings, renderBookingEvaluatorSettings, evaluatorRooms, roomSettings };

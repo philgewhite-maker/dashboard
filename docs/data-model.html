@@ -78,7 +78,7 @@ a{color:var(--accent)}
 <div class="wrap">
 <header>
   <h1>Dashboard data model</h1>
-  <p class="lede">What the app stores, how the pieces refer to each other, where the same fact is kept twice, and where text stands in for structure. Built from the code and from a read of the live document (field names, types, fill rates and reference checks; no personal values). Verified against build <b>v749</b>.</p>
+  <p class="lede">What the app stores, how the pieces refer to each other, where the same fact is kept twice, and where text stands in for structure. Built from the code and from a read of the live document (field names, types, fill rates and reference checks; no personal values). Verified against build <b>v753</b>.</p>
   <ul class="stats">
     <li><b>109</b><span>top-level keys</span></li>
     <li><b>597</b><span>connections</span></li>
@@ -113,6 +113,7 @@ a{color:var(--accent)}
     <p class="fix"><b>Added in v744.</b> Booking dates come from the inbox: the Airbnb sync reads every "Reservation confirmed" email (they go back to April 2024; each is dated the day the booking was made) and sets <code>confirmedOn</code> on a stay with none, or <code>bookedOn</code> on an old income entry in the ledger that has no stay record, when exactly one fits the arrival date and first name. It runs at most once a day (<code>prefs.airbnbBookingDatesCheckedOn</code>). Stays the Airbnb migration rebuilt no longer claim their checkout date as the booking date. The Nights booked chart shows nights with no booking date as a shaded band instead of hiding the comparison.</p>
     <p class="fix"><b>Added in v746.</b> A Letting income row kept the guest, a sentence about it and (for a stay) the room all in one <code>note</code>, and the screen guessed the split. Rows now have <code>guest</code> (a person) and <code>description</code> (what happened) as fields, filled for every existing row on load by one function that reads an old note; <code>note</code> is unchanged because refund and cancellation matching still read it. The room comes from <code>listingId</code>.</p>
     <p class="fix"><b>Added in v749.</b> A ledger row can carry <code>bookedOn</code> (the day the booking was made) when it has no stay record behind it, such as an older cancellation or income entry. The list under the Nights booked chart shows the bookings with no booking date and takes a date for each, written to the stay's <code>confirmedOn</code> or the ledger row's <code>bookedOn</code>. The inbox backfill also covers cancellation entries.</p>
+    <p class="fix"><b>Added in v753.</b> <code>bookingRequests</code>: every Airbnb "Pending: Reservation Request" and "Enquiry for" email becomes a record (guest, review count, city, listing from the email's rooms id matched to the ICS link, dates, party size, nightly rate and payout for a request, HM code or Airbnb thread id), including the ones never booked. <code>decision</code> is set when a stay with its code, or the same room, dates and guest, appears (<code>reservationId</code>), or <code>not-booked</code> once it lapses. <code>prefs.bookingEvaluator</code> holds the booking evaluator's starting assumptions, including per-room settings keyed by room. The checkout clean in the net night rate is now shared between rooms turned over the same day.</p>
   </div>
 
   <div class="finding">
@@ -212,6 +213,7 @@ flowchart LR
     LED["lettingLedger"]
     KEY["airbnbKeys"]
     RATE["airbnbRateProposals"]
+    BREQ["bookingRequests"]
   end
   subgraph MONEY["Money"]
     ACC["financeAccounts"]
@@ -238,6 +240,8 @@ flowchart LR
   LED -->|"listingId"| LST
   LED -.->|"reservationId (dangles)"| RES
   RES --> LST
+  BREQ -->|"listingId"| LST
+  BREQ -.->|"reservationId (when it became a stay)"| RES
   KEY --> LST
   KEY -.->|"forReservationId (dangles)"| RES
   RATE --> LST
@@ -739,6 +743,7 @@ erDiagram
     <tr><td class="k">vouchers / loyaltyPrograms</td><td class="num">15 / 15</td><td>yes</td><td>per-record</td><td></td></tr>
     <tr><td class="k">mediaItems</td><td class="num">12</td><td>yes</td><td>whole document</td><td></td></tr>
     <tr><td class="k">airbnbRateProposals</td><td class="num">12</td><td>yes</td><td>whole document</td><td>links to a task</td></tr>
+    <tr><td class="k">bookingRequests</td><td class="num">new (v753)</td><td>yes</td><td>per-record (shadow)</td><td>every Airbnb request and enquiry from the inbox, incl. ones never booked; HM code and listing id from the email</td></tr>
     <tr><td class="k">airbnbReservations</td><td class="num">10</td><td>yes</td><td>whole document</td><td>deleted at checkout</td></tr>
     <tr><td class="k">airbnbKeys, airbnbListings</td><td class="num">5 / 5</td><td>yes</td><td>whole document</td><td></td></tr>
     <tr><td class="k">airbnbCleaners</td><td class="num">5</td><td><span class="pill bad">strings</span></td><td>whole document</td><td></td></tr>

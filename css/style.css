@@ -4500,3 +4500,28 @@ background:var(--slate-bg);color:var(--slate);
 /* Letting income: marks for a direct booking (£) and a transfer between you and an owner (two opposite arrows). */
 #letting-list .letting-platform-direct{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;border:1.5px solid var(--ink);color:var(--ink);font-size:10px;font-weight:700;line-height:1;}
 #letting-list .letting-xfer{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;color:var(--ink);}
+
+/* A stay referenced away from its own row (stayChipHtml, airbnb.js). */
+.stay-chip{display:inline-flex;align-items:center;gap:4px;padding:1px 7px;border:1px solid var(--line);border-radius:10px;font-size:11px;cursor:pointer;white-space:nowrap;}
+.stay-chip:hover{border-color:var(--ink);}
+/* Booking requests and enquiries (bookingrequests.js), on the Airbnb panel. */
+#booking-requests > summary{cursor:pointer;font-size:13px;font-weight:600;}
+.bkreq-list{display:flex;flex-direction:column;}
+.bkreq-row{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;padding:5px 0;border-bottom:1px solid var(--line);font-size:12px;}
+.bkreq-kind{font-size:9px;text-transform:uppercase;letter-spacing:.04em;border:1px solid var(--line);border-radius:3px;padding:0 4px;color:var(--muted);flex:0 0 auto;}
+.bkreq-kind.request{color:var(--ink);}
+.bkreq-dates{display:inline-flex;align-items:center;gap:5px;font-variant-numeric:tabular-nums;}
+.bkreq-who{flex:1 1 160px;min-width:0;overflow-wrap:anywhere;}
+.bkreq-money{font-variant-numeric:tabular-nums;}
+.bkreq-outcome{font-size:11px;color:var(--muted);}
+.bkreq-outcome.accepted{color:var(--ink);}
+.bkreq-mail{cursor:pointer;color:var(--muted);}
+.bkreq-mail:hover{color:var(--ink);}
+/* Settings -> Booking evaluator (bookingsettings.js). */
+.be-set-h{font-size:12px;margin:12px 0 4px;}
+.be-set-row{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;margin:3px 0;font-size:12px;}
+.be-set-label{flex:0 0 220px;}
+.be-set-inputs{display:inline-flex;flex-wrap:wrap;align-items:center;gap:4px;}
+.be-lead-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(70px,1fr));gap:6px;font-size:11px;}
+.be-lead-grid label{display:flex;flex-direction:column;gap:2px;}
+@media (max-width:600px){.be-set-label{flex-basis:100%;}}

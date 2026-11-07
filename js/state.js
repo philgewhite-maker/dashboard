@@ -200,6 +200,27 @@ lettingChartTargets: {},
 // Settings section, same reasoning setCompletionSizeBounds already
 // uses -- nothing else reads it.
 airbnbCleaningCost: 50,
+// The booking evaluator's own assumptions (js/features/bookingmodel.js), edited in
+// Settings -> Finances -> Booking evaluator. Every figure is a starting assumption the
+// model blends with your own data. The first room's clean is airbnbCleaningCost above;
+// cleanExtra is each further room turned over the same day. ownUse* are what an empty
+// night is worth to you (nights: Fri and Sat are the weekend ones); ownUseSecondPct is a
+// second room empty the same night, as a % of its own value. leadMedian is the median
+// days ahead a booking arrives, by the stay's month (Jan..Dec), christmasLead for
+// 20 Dec - 2 Jan. rooms: {roomKey: {include, weight, minNights, priceWeekday,
+// priceWeekend}}, blank prices = derived from achieved rates.
+bookingEvaluator: {
+cleanExtra: 30,
+hassleWeekday: 15, hassleWeekend: 0,
+ownUseWeekday: 25, ownUseWeekend: 40, ownUseSecondPct: 50,
+directWeight: 1, guestNoReviews: 0.95, guestLowRating: 0.85, lowRatingBelow: 4.5,
+lateCancelDays: 5, lateCancelPayPct: 50,
+leadMedian: [17, 17, 17, 25, 25, 35, 35, 35, 21, 21, 21, 17], christmasLead: 300,
+lastMinute: [{ days: 7, pct: 10 }, { days: 0, pct: 0 }, { days: 0, pct: 0 }],
+gapDiscountPct: 15, gapMaxNights: 2,
+elasticity: 1.5, enquiryWeight: 0.3,
+rooms: {},
+},
 // {lastRunAt} -- gates js/features/airbnbrates.js's own quarterly
 // cadence, same shape setCompletionSearches/resaleEstimateChecks
 // already use for their own recheck gates.
@@ -1990,6 +2011,25 @@ photoId: '',
 // actually arrived -- exact-id matching is the whole point of
 // capturing the order at all, rather than eyeballing it against the
 // real returns form later).
+// One Airbnb booking request or enquiry, read from its email (js/features/bookingrequests.js).
+// `kind` 'request' (Request to Book: has a payout, nightly rate and HM code) or 'enquiry'
+// (a question with dates: no payout, has Airbnb's thread id). `decision`: '' while it can
+// still turn into a stay, 'accepted' (a stay with its code or guest and dates appeared,
+// reservationId set), 'not-booked' (no stay followed), or 'declined' when you said so.
+// `evaluation` is the booking evaluator's last verdict on it, kept for later checks.
+function blankBookingRequest(fields = {}) {
+return {
+id: uid(), kind: 'request', listingId: '', airbnbListingId: '',
+checkin: '', checkout: '', guests: null,
+guestName: '', guestReviews: null, identityVerified: false, guestCity: '', guestRating: null,
+nightlyRate: null, payout: null, confirmationCode: '', airbnbThreadId: '',
+messageId: '', receivedAt: '',
+reservationId: '', decision: '', decidedOn: '',
+evaluation: null,
+...fields,
+};
+}
+
 function blankLoan(fields = {}) {
 return {
 id: uid(),
@@ -2528,6 +2568,10 @@ loans: [],
 // -- a task can be deleted later without that silently reopening the
 // same event to be re-proposed.
 airbnbRateProposals: [],
+// Every Airbnb booking request and enquiry read from the inbox (js/features/bookingrequests.js),
+// including the ones that never became stays: the demand the booking evaluator calibrates
+// against. See blankBookingRequest.
+bookingRequests: [],
 prefs: { ...DEFAULT_PREFS } };
 }
 
@@ -2671,6 +2715,8 @@ if (!Array.isArray(data.lettingLedger)) data.lettingLedger = [];
 if (!Array.isArray(data.loans)) data.loans = [];
 data.loans = data.loans.filter((l) => l && typeof l === 'object').map((l) => ({ ...blankLoan(), ...l, id: l.id || uid() }));
 if (!Array.isArray(data.airbnbRateProposals)) data.airbnbRateProposals = [];
+if (!Array.isArray(data.bookingRequests)) data.bookingRequests = [];
+data.bookingRequests = data.bookingRequests.filter((r) => r && typeof r === 'object').map((r) => ({ ...blankBookingRequest(), ...r, id: r.id || uid() }));
 // FIRST, before anything else in here touches it. An existing document
 // predates this key entirely, and two passes below both reach for it --
 // the connection loop that carries the old per-person `owned` across,
@@ -3503,6 +3549,9 @@ data.mailDismissed = data.mailDismissed.map((d) => ({ ...blankMailDismissal(), .
 // discarding ones already customised. The pre-per-row keys are deliberately
 // left in place rather than deleted — they're what the seeding above reads.
 data.prefs = { ...DEFAULT_PREFS, ...(data.prefs || {}) };
+// One level deeper for the booking evaluator's settings object, so a setting added later
+// reaches a device whose prefs already hold an older copy of it.
+data.prefs.bookingEvaluator = { ...DEFAULT_PREFS.bookingEvaluator, ...(data.prefs.bookingEvaluator || {}) };
 // The spread above is shallow -- an ALREADY-PRESENT array key (shareUrlRules/
 // captureRules have both existed since v300/v310) keeps its own contents
 // wholesale, never gaining new entries from a later DEFAULT_PREFS. Confirmed
@@ -4515,7 +4564,7 @@ blankPackingItem, blankPackingModule, blankTripPacking, blankPackingListItem, PA
 blankMarriottAvailability, pruneMarriottAvailability,
 blankLoyaltyProgram, blankLoyaltyBalance, blankVoucher,
 blankPlannerEntry, blankPlannerActivity,
-blankAirbnbListing, blankAirbnbReservation, blankAirbnbKey, blankAirbnbKeyAssignment, KEY_CUSTODIAN_TYPES, blankFinanceAccount, SCHOOL_CALENDAR_SITES,
+blankAirbnbListing, blankAirbnbReservation, blankBookingRequest, blankAirbnbKey, blankAirbnbKeyAssignment, KEY_CUSTODIAN_TYPES, blankFinanceAccount, SCHOOL_CALENDAR_SITES,
 CONTACT_STATUS_LABELS, CONTACT_MATCH_MIN_STAGE,
 DEFAULT_RATING_CATEGORIES, slugifyField, DEFAULT_RECIPE_RATING_CATEGORIES,
 FLAG_FIELD_DEFS, DEFAULT_FLAG_RULES, computeFlags, valueColorForField, stripSharedSuffix, suggestedAction, suggestedQuestions, isTravelPaused, ACTIONS, distanceMiles, heightCm,

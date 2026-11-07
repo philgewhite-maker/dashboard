@@ -26,6 +26,7 @@ import { renderCaptureInbox } from './features/captureinbox.js';
 import { renderCaptureDrafts } from './features/voicecapture.js';
 import { renderAirbnb, renderAirbnbKeys } from './features/airbnb.js';
 import { renderLetting } from './features/letting.js';
+import { renderBookingRequests } from './features/bookingrequests.js';
 import { renderLoans } from './features/loans.js';
 import { renderLettingOccupancy } from './features/lettingoccupancy.js';
 import { renderMailHistory } from './features/mailledger.js';
@@ -54,6 +55,7 @@ const RULES = [
 { id: 'capture-inbox', keys: ['captureInbox'], panels: ['#capture-inbox-panel'], render: renderCaptureInbox },
 { id: 'capture-drafts', keys: ['captureDrafts'], panels: ['#capture-drafts-panel'], render: renderCaptureDrafts },
 { id: 'airbnb', keys: ['airbnbListings', 'airbnbReservations', 'airbnbCleanerEvents', 'airbnbCleanerBlocks', 'airbnbCleaners', 'lettingLedger'], panels: ['#airbnb-panel'], render: renderAirbnb },
+{ id: 'booking-requests', keys: ['bookingRequests', 'airbnbReservations', 'airbnbListings'], panels: ['#booking-requests'], render: renderBookingRequests },
 { id: 'airbnb-keys', keys: ['airbnbKeys', 'airbnbKeyAssignments', 'airbnbReservations'], panels: ['#airbnb-panel'], render: renderAirbnbKeys },
 { id: 'letting', keys: ['lettingLedger', 'airbnbListings', 'airbnbReservations', 'loans'], panels: ['#letting-panel'], render: renderLetting },
 { id: 'occupancy', keys: ['airbnbReservations', 'airbnbListings', 'lettingLedger'], panels: ['#letting-occupancy-section'], render: renderLettingOccupancy },
