@@ -26,7 +26,7 @@ import { todayStr } from '../utils.js';
 import { collectStays } from './lettingoccupancy.js';
 import { evaluatorRooms, roomSettings } from './bookingsettings.js';
 
-const MODEL_VERSION = 1;
+const MODEL_VERSION = 2;
 const DAY_MS = 86400000;
 const LEAD_SIGMA = 0.9; // spread of the lead-time curve (log scale); fixed
 const LOS_MAX = 28;
@@ -101,6 +101,32 @@ return (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q
 const median = (xs) => { if (!xs.length) return null; const s = xs.slice().sort((x, y) => x - y); const m = Math.floor(s.length / 2); return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
 const pct = (xs, p) => { if (!xs.length) return 0; const s = xs.slice().sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.max(0, Math.round(p * (s.length - 1))))]; };
 
+// ---- Discounts (Airbnb's structure, Settings -> Booking evaluator -> Discounts) -----------------
+// A step applies when the booking is within `days` of arrival (short notice) or the stay is at least `nights`
+// long (length); the largest applicable step of each kind is taken, and the two combine multiplicatively.
+function stepPct(steps, key, value) {
+let best = 0;
+(steps || []).forEach((st) => {
+const k = Number(st[key]);
+const p = Number(st.pct) || 0;
+if (!(k > 0)) return;
+if (key === 'days' ? value <= k : value >= k) best = Math.max(best, p);
+});
+return best / 100;
+}
+function discountsOf(s, channel = 'airbnb') {
+const d = (s.discounts || {})[channel] || {};
+return { shortNotice: d.shortNotice || [], length: d.length || [] };
+}
+// Nightly payout with the cleaning fee taken out, and the discounts undone, for one stay.
+function rawNightlyRate({ amount, cleaning, nights, leadDays }, disc) {
+const nightly = (Number(amount) - (Number(cleaning) || 0)) / nights;
+if (!(nightly > 0)) return null;
+const sn = leadDays == null ? 0 : stepPct(disc.shortNotice, 'days', leadDays);
+const ln = stepPct(disc.length, 'nights', nights);
+return { raw: nightly / ((1 - sn) * (1 - ln)), nightly, sn, ln };
+}
+
 // ---- Context: everything the model reads ------------------------------------------------------
 
 // From the live data. `overrides.settings` replaces individual settings for one evaluation
@@ -113,12 +139,19 @@ const stays = collectStays().map((x) => ({ id: x.id, listingId: x.listingId, che
 const requests = (data.bookingRequests || []).map((q) => ({ ...q }));
 const proposals = (data.airbnbRateProposals || []).map((p) => ({ listingId: p.listingId, startDate: p.startDate, endDate: p.endDate, upliftPct: p.upliftPct, upliftAmount: p.upliftAmount, reason: p.reason }));
 const listingLabels = Object.fromEntries((data.airbnbListings || []).map((l) => [l.id, l.label || 'Listing']));
+// The stored earnings-export rows for stays (data.airbnbEarnings), and which stays they cover, so a stay isn't counted twice.
+const earningRows = (data.airbnbEarnings || []).filter((e) => String(e.type).toLowerCase() === 'reservation' && Number(e.amount) > 0 && Number(e.nights) > 0 && e.start);
+const earnings = earningRows.map((e) => ({ listingId: e.listingId, code: e.confirmationCode, start: e.start, nights: Number(e.nights), amount: Number(e.amount), cleaningFee: e.cleaningFee == null ? 0 : Number(e.cleaningFee), bookingDate: e.bookingDate }));
+const codes = new Set(earnings.map((e) => e.code).filter(Boolean));
+const earnedStayIds = new Set();
+(data.airbnbReservations || []).forEach((r) => { if (r.confirmationCode && codes.has(r.confirmationCode)) earnedStayIds.add(r.id); });
+(data.lettingLedger || []).forEach((e) => { if (e.confirmationCode && codes.has(e.confirmationCode)) earnedStayIds.add(`led:${e.id}`); });
 // The factors the monthly review applied, times any what-if for this one evaluation.
 const cal = s.calibration || {};
 const ov = overrides.scale || {};
 const scale = { ...ov };
 [['demand', 'demand'], ['lead', 'lead'], ['cancel', 'cancel']].forEach(([k]) => { const c = Number(cal[k]) || 1; if (c !== 1 || ov[k] != null) scale[k] = c * (ov[k] != null ? ov[k] : 1); });
-return { today, s, firstClean, rooms, stays, requests, proposals, listingLabels, scale };
+return { today, s, firstClean, rooms, stays, requests, proposals, listingLabels, earnings, earnedStayIds, scale };
 }
 
 // ---- Calibration ----------------------------------------------------------------------------
@@ -139,28 +172,55 @@ const since = T - 730;
 const live = ctx.stays.filter((x) => x.status === 'stay' && !x.unconfirmed && ri.has(x.listingId));
 const fromRequest = new Set(ctx.requests.map((q) => q.reservationId).filter(Boolean));
 
-// Nightly payout by room (and by month of the year when there are 3+ stays in it).
-const perNight = ctx.rooms.map(() => ({ all: [], byMonth: Array.from({ length: 12 }, () => []) }));
-live.forEach((x) => {
-const n = dayNum(x.checkout) - dayNum(x.checkin);
-if (!(Number(x.income) > 0) || n <= 0 || dayNum(x.checkin) < since) return;
-const p = perNight[ri.get(x.listingId)];
-const v = Number(x.income) / n;
-p.all.push(v);
-p.byMonth[monthOf(dayNum(x.checkin))].push(v);
+// What each room's bookings would earn per night before any discount, worked back from what actually reached you.
+// Every stay with an earnings-export row (data.airbnbEarnings) gives: (amount received - cleaning fee) / nights,
+// then the discounts that stay will have taken are undone (short notice from its booking date, length of stay, the
+// steps in Settings -> Booking evaluator -> Discounts): raw rate = that / ((1 - short notice) x (1 - length)).
+// A stay with no export row uses its income with the room's usual cleaning fee taken out. The guest-rating and
+// special-offer discounts have no source and stay inside the median.
+const disc = discountsOf(s, 'airbnb');
+const samples = ctx.rooms.map(() => []); // {raw, ws (share of nights Fri/Sat), month, via, sn, ln}
+const cleanFees = ctx.rooms.map(() => []);
+const weekendShare = (start, n) => { let k = 0; for (let i = 0; i < n; i++) if (weekendNight(start + i)) k++; return n > 0 ? k / n : 0; };
+(ctx.earnings || []).forEach((e) => {
+const r = ri.get(e.listingId);
+const start = e.start ? dayNum(e.start) : null;
+if (r == null || start == null || start < since || !(e.nights > 0)) return;
+const out = rawNightlyRate({ amount: e.amount, cleaning: e.cleaningFee, nights: e.nights, leadDays: e.bookingDate ? start - dayNum(e.bookingDate) : null }, disc);
+if (!out) return;
+samples[r].push({ raw: out.raw, ws: weekendShare(start, e.nights), month: monthOf(start), via: 'earnings', sn: out.sn, ln: out.ln });
+if (e.cleaningFee > 0) cleanFees[r].push(Number(e.cleaningFee));
 });
-const everyone = perNight.flatMap((p) => p.all);
+const everyCleaning = cleanFees.flat();
+live.forEach((x) => {
+if ((ctx.earnedStayIds || new Set()).has(x.id)) return;
+const n = dayNum(x.checkout) - dayNum(x.checkin);
+const start = dayNum(x.checkin);
+if (!(Number(x.income) > 0) || n <= 0 || start < since) return;
+const r = ri.get(x.listingId);
+const usual = median(cleanFees[r]) ?? median(everyCleaning) ?? 0;
+const out = rawNightlyRate({ amount: x.income, cleaning: usual, nights: n, leadDays: x.bookedOn ? start - dayNum(x.bookedOn) : null }, disc);
+if (out) samples[r].push({ raw: out.raw, ws: weekendShare(start, n), month: monthOf(start), via: 'stay', sn: out.sn, ln: out.ln });
+});
+const everyRaw = samples.flat().map((x) => x.raw);
 const prices = ctx.rooms.map((room, i) => {
-const p = perNight[i];
-const overall = median(p.all);
-const fallback = overall ?? median(everyone);
-const base = fallback ?? DEFAULT_PRICE;
+const sm = samples[i];
+// Friday/Saturday premium: weekend-heavy stays against weekday-heavy ones, when there are enough of each.
+const low = sm.filter((x) => x.ws <= 0.2).map((x) => x.raw);
+const high = sm.filter((x) => x.ws >= 0.5).map((x) => x.raw);
+const uplift = low.length >= 3 && high.length >= 3 ? Math.min(1.6, Math.max(0.9, median(high) / median(low))) : 1;
+const wd = sm.map((x) => ({ v: x.raw / (1 + x.ws * (uplift - 1)), month: x.month }));
+const byMonth = Array.from({ length: 12 }, (_, m) => { const xs = wd.filter((x) => x.month === m).map((x) => x.v); return xs.length >= 3 ? median(xs) : null; });
+const overall = median(wd.map((x) => x.v));
+const base = overall ?? median(everyRaw) ?? DEFAULT_PRICE;
+const clean = room.cleaningIncome != null && room.cleaningIncome !== '' ? Number(room.cleaningIncome) : (median(cleanFees[i]) ?? median(everyCleaning) ?? 0);
+const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
+const nEarn = sm.filter((x) => x.via === 'earnings').length;
 return {
 weekday: room.priceWeekday != null ? Number(room.priceWeekday) : null,
 weekend: room.priceWeekend != null ? Number(room.priceWeekend) : null,
-byMonth: p.byMonth.map((xs) => (xs.length >= 3 ? median(xs) : null)),
-base,
-source: room.priceWeekday != null || room.priceWeekend != null ? 'your setting' : overall != null ? `your stays (${p.all.length})` : everyone.length ? `other rooms' stays (${everyone.length})` : 'assumption',
+byMonth, base, uplift, clean, n: sm.length, nEarn, avgShortNotice: mean(sm.map((x) => x.sn)), avgLength: mean(sm.map((x) => x.ln)),
+source: room.priceWeekday != null || room.priceWeekend != null ? 'your setting' : overall != null ? `${sm.length} of your stays (${nEarn} from the earnings export)` : everyRaw.length ? `other rooms' stays (${everyRaw.length})` : 'assumption',
 };
 });
 
@@ -290,8 +350,8 @@ return LOS_MAX;
 // earned in that month of the year, else overall; plus any event uplift on the date.
 function basePrice(ctx, params, roomIdx, n) {
 const p = params.prices[roomIdx];
-const set = weekendNight(n) ? (p.weekend ?? p.weekday) : p.weekday;
-let v = set ?? p.byMonth[monthOf(n)] ?? p.base;
+const monthly = p.weekday ?? p.byMonth[monthOf(n)] ?? p.base;
+let v = weekendNight(n) ? (p.weekend ?? monthly * p.uplift) : monthly;
 const room = ctx.rooms[roomIdx];
 const day = dayStr(n);
 ctx.proposals.forEach((pr) => {
@@ -301,13 +361,12 @@ else if (Number.isFinite(Number(pr.upliftAmount)) && pr.upliftAmount != null) v 
 });
 return v;
 }
-function lastMinutePct(s, daysAhead) {
-let best = 0;
-(s.lastMinute || []).forEach((st) => { if (Number(st.days) > 0 && daysAhead <= Number(st.days)) best = Math.max(best, Number(st.pct) || 0); });
-return best / 100;
-}
+function shortNoticePct(s, daysAhead) { return stepPct(discountsOf(s).shortNotice, 'days', daysAhead); }
+function lengthPct(s, nights) { return stepPct(discountsOf(s).length, 'nights', nights); }
 function maxBoost(s) {
-const lm = Math.max(0, ...(s.lastMinute || []).map((st) => (Number(st.days) > 0 ? Number(st.pct) || 0 : 0))) / 100;
+const d = discountsOf(s);
+const top = (steps) => Math.max(0, ...steps.map((st) => (Number(st.days ?? st.nights) > 0 ? Number(st.pct) || 0 : 0))) / 100;
+const lm = 1 - (1 - top(d.shortNotice)) * (1 - top(d.length));
 const gap = (Number(s.gapDiscountPct) || 0) / 100;
 return Math.pow((1 - lm) * (1 - gap), -(Number(s.elasticity) || 0));
 }
@@ -372,7 +431,7 @@ const after = ge - i1;
 const orphan = (boundedL && before > 0 && before < min) || (boundedR && after > 0 && after < min);
 if (orphan && a.lead > 7) continue;
 const inGap = boundedL && boundedR && ge - gs <= gapMax;
-const factor = (1 - lastMinutePct(s, a.lead)) * (inGap ? 1 - gapPct : 1);
+const factor = (1 - shortNoticePct(s, a.lead)) * (1 - lengthPct(s, a.los)) * (inGap ? 1 - gapPct : 1);
 if (a.u > Math.pow(factor, -eps) / boost) continue; // the guest doesn't take it at this price
 for (let i = i0; i < i1 && i < len; i++) o[i] = 1;
 booked.push({ room: a.room, ci: a.c, co: a.c + a.los, factor, at: a.at, lead: a.lead });
@@ -521,6 +580,8 @@ t[cat] += v;
 t[`d_${cat}`] += 1;
 if (first) { t[`n_${cat}`] += 1; first = false; }
 }
+// The cleaning fee guests pay is income too (your own clean cost is deducted separately, per changeover below).
+if (b.ci >= wS) { const cat0 = b.room !== ri ? 'other' : b.ci < ci ? 'before' : b.ci >= co ? 'after' : 'inside'; t[cat0] += params.prices[b.room].clean; }
 });
 if (reqState === 'none') t.request = weighted;
 else if (reqState === 'late') t.request = weighted * latePay;
@@ -581,7 +642,10 @@ if (examples.length < 3) {
 const describe = (booked) => booked.filter((b) => b.room === ri && b.co > wS && b.ci < wE).map((b) => {
 let amount = 0;
 for (let d = b.ci; d < b.co; d++) amount += basePrice(ctx, params, ri, d) * b.factor;
-return { checkin: dayStr(b.ci), checkout: dayStr(b.co), nights: b.co - b.ci, arrived: dayStr(Math.max(T, Math.floor(b.at))), perNight: Math.round(amount / (b.co - b.ci)), amount: Math.round(amount), discounted: b.factor < 0.999 };
+const nightsAmount = amount;
+const cleaningIncome = b.ci >= wS ? params.prices[ri].clean : 0;
+amount += cleaningIncome;
+return { checkin: dayStr(b.ci), checkout: dayStr(b.co), nights: b.co - b.ci, arrived: dayStr(Math.max(T, Math.floor(b.at))), perNight: Math.round(nightsAmount / (b.co - b.ci)), amount: Math.round(amount), cleaning: Math.round(cleaningIncome), discounted: b.factor < 0.999 };
 }).sort((a, b) => a.checkin.localeCompare(b.checkin));
 examples.push({ reject: describe(R.booked), accept: describe(A0.booked), total: { accept: Math.round(total(tN)), reject: Math.round(r) } });
 }
@@ -615,7 +679,10 @@ const bgBooked = playArrivals(ctx, params, bgArr, bgOcc, base, { minNights, len 
 const projected = bgBooked.map((b) => {
 let amount = 0;
 for (let d = b.ci; d < b.co; d++) amount += basePrice(ctx, params, ri, d) * b.factor;
-return { checkin: dayStr(b.ci), checkout: dayStr(b.co), nights: b.co - b.ci, arrived: dayStr(Math.max(T, Math.floor(b.at))), perNight: Math.round(amount / (b.co - b.ci)), amount: Math.round(amount), discounted: b.factor < 0.999 };
+const nightsAmount = amount;
+const cleaningIncome = b.ci >= dispS ? params.prices[ri].clean : 0;
+amount += cleaningIncome;
+return { checkin: dayStr(b.ci), checkout: dayStr(b.co), nights: b.co - b.ci, arrived: dayStr(Math.max(T, Math.floor(b.at))), perNight: Math.round(nightsAmount / (b.co - b.ci)), amount: Math.round(amount), cleaning: Math.round(cleaningIncome), discounted: b.factor < 0.999 };
 }).sort((a, b) => a.checkin.localeCompare(b.checkin));
 const projectedNight = new Set();
 bgBooked.forEach((b) => { for (let d = b.ci; d < b.co; d++) projectedNight.add(d); });
@@ -661,6 +728,13 @@ return { before: before ? before.id : null, after: after ? after.id : null };
 }
 
 // Every figure behind the answer, with where it came from, for the workbench.
+function discountText(s) {
+const d = discountsOf(s);
+const sn = d.shortNotice.filter((x) => Number(x.days) > 0).map((x) => `${x.pct}% within ${x.days} days`);
+const ln = d.length.filter((x) => Number(x.nights) > 0).map((x) => `${x.pct}% for ${x.nights}+ nights`);
+return [...sn, ...ln].join(', ') || 'none set';
+}
+
 function describeAssumptions(ctx, params, ri, ci) {
 const s = ctx.s;
 const m = monthOf(ci);
@@ -670,7 +744,9 @@ const o = params.occ[ri];
 const fmtMoney = (v) => `£${Math.round(v)}`;
 const occVal = o.byMonth[m] ?? o.overall;
 return [
-{ id: 'price', label: 'Payout per night, before discounts', value: fmtMoney(basePrice(ctx, params, ri, ci)), source: price.source },
+{ id: 'price', label: 'Raw nightly rate (before discounts and the cleaning fee)', value: `${fmtMoney(basePrice(ctx, params, ri, ci))}${price.uplift > 1.005 ? ` (Fri/Sat ×${price.uplift.toFixed(2)})` : ''}`, source: price.source },
+{ id: 'discounts', label: 'Discounts the rate is worked back through', value: discountText(ctx.s), source: price.n ? `undone on ${price.n} stays: on average ${(price.avgShortNotice * 100).toFixed(1)}% short notice, ${(price.avgLength * 100).toFixed(1)}% length` : 'your setting' },
+{ id: 'cleanfee', label: 'Cleaning fee guests pay (income per booking)', value: fmtMoney(price.clean), source: ctx.rooms[ri].cleaningIncome != null && ctx.rooms[ri].cleaningIncome !== '' ? 'your setting' : price.n ? 'median of your earnings export' : 'none known' },
 { id: 'occupancy', label: `Occupancy expected for this room in ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m]}`, value: occVal == null ? `${Math.round(OCC_PRIOR * 100)}%` : `${Math.round(occVal * 100)}%`, source: o.byMonth[m] != null ? `your stays: ${o.byMonthN[m]} earlier ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m]}${o.byMonthN[m] === 1 ? '' : 's'}, blended with all ${o.months} months on offer${o.skipped ? `; ${o.skipped} left out as not on offer` : ''}` : o.overall != null ? `your stays, ${o.months} months on offer${o.skipped ? `; ${o.skipped} left out as not on offer` : ''}` : 'assumption', editable: 'demand' },
 { id: 'lead', label: 'Median days ahead bookings arrive', value: `${Math.round(lead.median)} days`, source: lead.n ? `your guide blended with ${lead.n} of your bookings` : 'your guide (Settings)', editable: 'lead' },
 { id: 'los', label: 'Average stay length', value: `${params.losMean.toFixed(1)} nights`, source: params.losN ? `your requests and stays (${Math.round(params.losN)}) blended with an assumption` : 'assumption' },
@@ -826,6 +902,13 @@ const vid = voidAt[b.room][i];
 if (vid >= 0) { voidIncome[vid][run] += v; voidNights[vid][run] += 1; }
 arrivedNights[monthIdx[i]][off] += 1;
 }
+if (b.ci >= wS) {
+const c0 = params.prices[b.room].clean; const i0 = a - wS;
+amount += c0;
+nightIncome[b.room][i0] += c0;
+const vid0 = voidAt[b.room][i0];
+if (vid0 >= 0) voidIncome[vid0][run] += c0;
+}
 total += amount;
 list.push({ room: b.room, ci: a, co: z, amount });
 });
@@ -913,7 +996,7 @@ rooms: ctx.rooms.map((room, i) => ({ key: room.key, occupancy: params.occ[i].ove
 // ---- Self-test: cases with an answer that can be worked out by hand ----------------------------
 
 function testContext({ occupancy, today = '2026-11-01', minNights = 1 }) {
-const s = { ...DEFAULT_PREFS.bookingEvaluator, lastMinute: [{ days: 0, pct: 0 }], gapDiscountPct: 0 };
+const s = { ...DEFAULT_PREFS.bookingEvaluator, discounts: { airbnb: { shortNotice: [], length: [] }, direct: { shortNotice: [], length: [] } }, gapDiscountPct: 0 };
 const ctx = {
 today, s, firstClean: 50,
 rooms: [{ key: 'A', label: 'Room A', listingIds: ['LA'], include: true, weight: 1, minNights, priceWeekday: 100, priceWeekend: 100 }],
@@ -986,10 +1069,27 @@ const q1 = projectVoids(testContext({ occupancy: 0.5 }), { from: '2026-11-01', t
 const q2 = projectVoids(testContext({ occupancy: 0.5 }), { from: '2026-11-01', to: '2026-12-01', runs: 40 });
 check('Projection is deterministic', q1.total.expected === q2.total.expected, `${q1.total.expected} / ${q2.total.expected}`);
 
+// 10. Raw nightly rate: the payout with the cleaning fee out, discounts undone (Stacey Smith, Josie Wilson from your export).
+const disc10 = { shortNotice: [{ days: 10, pct: 5 }, { days: 5, pct: 10 }], length: [] };
+const stacey = rawNightlyRate({ amount: 433.55, cleaning: 95, nights: 3, leadDays: 13 }, disc10);
+const josie = rawNightlyRate({ amount: 1847.99, cleaning: 70, nights: 16, leadDays: 128 }, disc10);
+check('Raw rate: payout less cleaning fee over nights', Math.abs(stacey.raw - 112.85) < 0.005 && Math.abs(josie.raw - 111.1244) < 0.001, `${stacey.raw.toFixed(3)} / ${josie.raw.toFixed(3)}`);
+// 11. Short-notice steps: 4 days takes 10%, 8 days 5%, 12 days nothing; a 10% discount is undone.
+const steps = [stepPct(disc10.shortNotice, 'days', 4), stepPct(disc10.shortNotice, 'days', 8), stepPct(disc10.shortNotice, 'days', 12)];
+const short4 = rawNightlyRate({ amount: 90, cleaning: 0, nights: 2, leadDays: 4 }, disc10);
+check('Discount steps and undoing them', steps.join() === '0.1,0.05,0' && Math.abs(short4.raw - 50) < 1e-9, `${steps.join()} ${short4.raw}`);
+// 12. The cleaning fee guests pay is income on every simulated booking.
+const ctx12 = testContext({ occupancy: 0.97, today: '2026-10-01' });
+ctx12.stays = ctx5.stays;
+ctx12.params.lambda = new Map(Array.from({ length: 12 }, (_, m) => [`0|${m}`, 40]));
+ctx12.params.prices[0].clean = 40;
+const p12 = projectVoids(ctx12, { from: '2026-11-01', to: '2026-12-01', runs: 40 });
+check('Cleaning fee income is added per booking', p12.total.expected > p7.total.expected + 30, `£${p12.total.expected} vs £${p7.total.expected}`);
+
 // 9. A window that crosses the year end splits into months correctly.
 const q3 = projectVoids(testContext({ occupancy: 0.5, today: '2026-12-10' }), { runs: 20 });
 check('Default window runs to the end of the month after this one', q3.to === '2027-02-01' && Object.keys(q3.months).join() === '2026-12,2027-01', `${q3.to} ${Object.keys(q3.months).join()}`);
 return results;
 }
 
-export { buildContext, calibrate, evaluate, sensitivity, makeProjection, projectVoids, defaultProjectionEnd, selfTest, MODEL_VERSION };
+export { buildContext, calibrate, evaluate, sensitivity, makeProjection, projectVoids, defaultProjectionEnd, rawNightlyRate, stepPct, discountsOf, selfTest, MODEL_VERSION };

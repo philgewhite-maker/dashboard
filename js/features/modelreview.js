@@ -14,6 +14,7 @@ import { escapeHtml, todayStr, dateStrAdd, scrollAndFlash } from '../utils.js';
 import { nightRateRooms } from './letting.js';
 import { collectStays } from './lettingoccupancy.js';
 import { stayChipHtml, bindStayChips } from './airbnb.js';
+import { MODEL_VERSION } from './bookingmodel.js';
 
 const MIN_NIGHTS_FOR_PROPOSAL = 40;
 const MIN_NIGHTS_FOR_BUCKET = 25;
@@ -59,7 +60,9 @@ return out;
 // Every elapsed night a saved projection covered, with the earliest and the latest forecast for it.
 function forecastNights(actual) {
 const today = todayStr();
-const projections = (data.bookingProjections || []).slice().sort((a, b) => String(a.madeAt).localeCompare(String(b.madeAt)));
+// Only projections made by the current version of the model are scored: an earlier one rested on a different price basis
+// (before rates were worked back from the earnings export), and scoring it would mislead the calibration.
+const projections = (data.bookingProjections || []).filter((p) => (p.modelVersion || 1) === MODEL_VERSION).sort((a, b) => String(a.madeAt).localeCompare(String(b.madeAt)));
 const nights = new Map();
 projections.forEach((p) => {
 const made = String(p.madeAt).slice(0, 10) || p.today;
@@ -219,9 +222,10 @@ function reviewHtml() {
 const cal = calibrationNow();
 const pr = projectionReview();
 const reqs = requestReview();
-const projCount = (data.bookingProjections || []).length;
+const projCount = (data.bookingProjections || []).filter((p) => (p.modelVersion || 1) === MODEL_VERSION).length;
+const older = (data.bookingProjections || []).length - projCount;
 const lines = [];
-lines.push(`<div class="settings-note" style="margin:4px 0 8px;">Compares what the model projected, and what it estimated when you evaluated a request, with what happened. ${projCount} saved projection${projCount === 1 ? '' : 's'}; ${pr.rows.length} night${pr.rows.length === 1 ? '' : 's'} checked so far. Calibration in force: demand ×${cal.demand.toFixed(2)}${cal.appliedOn ? ` (applied ${escapeHtml(cal.appliedOn)})` : ''}.</div>`);
+lines.push(`<div class="settings-note" style="margin:4px 0 8px;">Compares what the model projected, and what it estimated when you evaluated a request, with what happened. ${projCount} saved projection${projCount === 1 ? '' : 's'}; ${pr.rows.length} night${pr.rows.length === 1 ? '' : 's'} checked so far.${older ? ` ${older} earlier projection${older === 1 ? '' : 's'} from the previous price basis ${older === 1 ? 'is' : 'are'} not scored.` : ''} Calibration in force: demand ×${cal.demand.toFixed(2)}${cal.appliedOn ? ` (applied ${escapeHtml(cal.appliedOn)})` : ''}.</div>`);
 if (!pr.rows.length) {
 const first = (data.bookingProjections || []).slice().sort((a, b) => String(a.madeAt).localeCompare(String(b.madeAt)))[0];
 lines.push(`<div class="settings-note" style="margin:6px 0;">Nothing to compare yet. ${first ? `Projections are checked once their nights have passed: the first one was made on ${escapeHtml(String(first.madeAt).slice(0, 10))} and covers up to ${escapeHtml(dateStrAdd(first.to, -1))}.` : 'Run "Project the next two months" in the occupancy section, and come back after the month has gone.'}</div>`);

@@ -4608,3 +4608,6 @@ background:var(--slate-bg);color:var(--slate);
 .be-table tr.be-sub[hidden]{display:none;}
 .be-table tr.be-info td{font-style:italic;}
 .occ-key-proj{display:inline-block;width:16px;height:8px;border-radius:3px;border:1px dashed var(--sage);background:var(--sage-bg);flex:none;}
+/* Discounts in Settings -> Booking evaluator. */
+.be-disc{margin:2px 0 8px;}
+.be-disc-kind{margin:2px 0 4px;}

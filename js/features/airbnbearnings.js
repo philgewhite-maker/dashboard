@@ -15,7 +15,7 @@
 // check-in that was guessed backwards from the payout date: the export's real dates replace
 // it. Anything that differs from what you typed is listed, not changed. Stays not in Letting
 // income at all are listed and can be added as Earned entries.
-import { data, queueSave } from '../state.js';
+import { data, queueSave, blankAirbnbEarning } from '../state.js';
 import { escapeHtml, splitCsvLine, dateStrAdd, scrollAndFlash, uid } from '../utils.js';
 import { owners, ownerNameFor, ownerKeyFor, splitAmountFor, shareRuleAt, nightRateRooms, renderLetting } from './letting.js';
 
@@ -26,35 +26,70 @@ const within = (a, b, tol) => a != null && b != null && Math.abs(Number(a) - Num
 // A guest name that fits (first name contained), or nothing to compare.
 const nameFits = (have, want) => { const a = String(have || '').toLowerCase(); const b = String(want || '').toLowerCase().split(/\s+/)[0]; return !a || !b || a.includes(b); };
 
-// One record per HM code: the reservation row plus what adjusts it.
-function parseEarningsCsv(text) {
+// Every row of the CSV as a stored record (blankAirbnbEarning): all columns, dates as ISO. `ownerKey` is whose
+// Airbnb account the export is from. The id is derived from the row, so the same row read again is the same record.
+function rowsFromCsv(text, ownerKey = '', source = '') {
 const lines = String(text || '').replace(/^﻿/, '').split(/\r?\n/).filter((l) => l.trim());
-if (!lines.length) return { stays: [], cancelled: [], error: 'The file is empty.' };
+if (!lines.length) return { records: [], error: 'The file is empty.' };
 const head = splitCsvLine(lines[0]).map((h) => h.trim().toLowerCase());
 const col = (name) => head.indexOf(name);
 const need = ['date', 'type', 'confirmation code', 'start date', 'end date', 'amount'];
 const missing = need.filter((n) => col(n) < 0);
-if (missing.length) return { stays: [], cancelled: [], error: `This doesn't look like Airbnb's earnings export (no ${missing.join(', ')} column).` };
-const rows = lines.slice(1).map((l) => { const c = splitCsvLine(l); const g = (n) => (col(n) >= 0 ? (c[col(n)] || '').trim() : ''); return g; });
+if (missing.length) return { records: [], error: `This doesn't look like Airbnb's earnings export (no ${missing.join(', ')} column).` };
+const importedAt = new Date().toISOString();
+const records = lines.slice(1).map((l) => {
+const c = splitCsvLine(l);
+const g = (n) => (col(n) >= 0 ? (c[col(n)] || '').trim() : '');
+const rec = blankAirbnbEarning({
+ownerKey, type: g('type'), date: usDate(g('date')), arrivingBy: usDate(g('arriving by date')), confirmationCode: g('confirmation code'),
+bookingDate: usDate(g('booking date')), start: usDate(g('start date')), end: usDate(g('end date')), nights: num(g('nights')), guest: g('guest'),
+listingTitle: g('listing'), details: g('details'), referenceCode: g('reference code'), currency: g('currency') || 'GBP', amount: num(g('amount')),
+paidOut: num(g('paid out')), serviceFee: num(g('service fee')), fastPayFee: num(g('fast pay fee')), cleaningFee: num(g('cleaning fee')),
+grossEarnings: num(g('gross earnings')), tax: num(g('airbnb remitted tax')), earningsYear: g('earnings year'), importedAt, source,
+});
+rec.id = `ae|${ownerKey}|${rec.type}|${rec.confirmationCode || rec.referenceCode}|${rec.date}|${rec.amount ?? ''}|${rec.paidOut ?? ''}|${rec.details.slice(0, 40)}`;
+return rec;
+}).filter((r) => r.type);
+return { records };
+}
+
+// Stores rows not already held (by id). Rows already there keep their resolved listing; a row that is new gets
+// the listing it was on where that can be told (the booking request with its code, else the owner's listing in
+// the room its title names).
+function storeEarnings(records, ownerKey) {
+const have = new Set((data.airbnbEarnings || []).map((r) => r.id));
+let added = 0;
+records.forEach((r) => {
+if (have.has(r.id)) return;
+if (r.type.toLowerCase() === 'reservation' || r.confirmationCode) r.listingId = listingFor({ code: r.confirmationCode, listingTitle: r.listingTitle }, ownerKey);
+data.airbnbEarnings.push(r);
+have.add(r.id);
+added++;
+});
+if (added) queueSave();
+return { added, already: records.length - added, total: data.airbnbEarnings.length };
+}
+
+// The stays and cancellations in a set of stored rows: one entry per HM code, the reservation row plus what adjusts
+// it, and the payout it was paid in (its "arriving by" date).
+function parseFromRecords(records) {
 const payoutArriving = new Map(); // payout date -> latest arriving-by date that day
 const byCode = new Map();
 const cancelled = new Map();
-rows.forEach((g) => {
-const type = g('type').toLowerCase();
-const date = usDate(g('date'));
+records.forEach((r) => {
+const type = r.type.toLowerCase();
 if (type === 'payout') {
-const arr = usDate(g('arriving by date'));
-if (date && arr && (!payoutArriving.has(date) || payoutArriving.get(date) < arr)) payoutArriving.set(date, arr);
+if (r.date && r.arrivingBy && (!payoutArriving.has(r.date) || payoutArriving.get(r.date) < r.arrivingBy)) payoutArriving.set(r.date, r.arrivingBy);
 return;
 }
-const code = g('confirmation code');
+const code = r.confirmationCode;
 if (!code) return;
-const base = { code, bookingDate: usDate(g('booking date')), checkin: usDate(g('start date')), checkout: usDate(g('end date')), nights: num(g('nights')), guest: g('guest').trim(), listingTitle: g('listing'), date };
+const base = { code, bookingDate: r.bookingDate, checkin: r.start, checkout: r.end, nights: r.nights, guest: r.guest.trim(), listingTitle: r.listingTitle, date: r.date, recordId: r.id };
 if (type === 'reservation') {
-byCode.set(code, { ...(byCode.get(code) || { adjustments: 0 }), ...base, amount: num(g('amount')), cleaningFee: num(g('cleaning fee')), serviceFee: num(g('service fee')), grossEarnings: num(g('gross earnings')) });
+byCode.set(code, { ...(byCode.get(code) || { adjustments: 0 }), ...base, amount: r.amount, cleaningFee: r.cleaningFee, serviceFee: r.serviceFee, grossEarnings: r.grossEarnings });
 } else if (type.startsWith('resolution') || type === 'adjustment') {
 const held = byCode.get(code) || { ...base, adjustments: 0 };
-held.adjustments = (held.adjustments || 0) + (num(g('amount')) || 0);
+held.adjustments = (held.adjustments || 0) + (r.amount || 0);
 byCode.set(code, held);
 } else if (type.startsWith('cancellation fee')) {
 cancelled.set(code, { ...base });
@@ -63,6 +98,13 @@ cancelled.set(code, { ...base });
 const stays = [...byCode.values()].filter((s) => s.amount != null && s.checkin && s.checkout).map((s) => ({ ...s, arriving: payoutArriving.get(s.date) || '', net: Math.round((s.amount + (s.adjustments || 0)) * 100) / 100 }));
 stays.sort((a, b) => b.checkin.localeCompare(a.checkin));
 return { stays, cancelled: [...cancelled.values()].filter((c) => !byCode.has(c.code)) };
+}
+
+// Straight from a file's text, without storing anything (what the matching reads).
+function parseEarningsCsv(text) {
+const { records, error } = rowsFromCsv(text);
+if (error) return { stays: [], cancelled: [], error };
+return parseFromRecords(records);
 }
 
 // The listing a stay was on: from a booking request with the same code, else the chosen
@@ -209,6 +251,7 @@ return `<details class="settings-subgroup" id="airbnb-earnings-import" style="ma
 <label class="settings-note" style="margin:0;">Whose account <select id="aex-owner" class="settings-input">${keys.map((k) => `<option value="${escapeHtml(k)}">${escapeHtml(ownerNameFor(k))}</option>`).join('')}</select></label>
 <input type="file" id="aex-file" accept=".csv,text/csv">
 </div>
+<div class="settings-note" id="aex-stored" style="margin:4px 0;"></div>
 <div id="aex-report"></div>
 </details>`;
 }
@@ -226,6 +269,16 @@ if (bound) return;
 bound = true;
 const root = document.getElementById('airbnb-earnings-import');
 const report = () => document.getElementById('aex-report');
+const storedNote = () => {
+  const el = document.getElementById('aex-stored');
+  if (!el) return;
+  const rows = data.airbnbEarnings || [];
+  const stays = rows.filter((r) => r.type.toLowerCase() === 'reservation').length;
+  const dates = rows.map((r) => r.date).filter(Boolean).sort();
+  const who = [...new Set(rows.map((r) => r.ownerKey))].map((k) => ownerNameFor(k)).join(', ');
+  el.innerHTML = rows.length ? `Stored in full: ${rows.length} rows (${stays} stays) from ${escapeHtml(who)}, ${escapeHtml(dates[0])} to ${escapeHtml(dates[dates.length - 1])}. The booking model reads its rates and cleaning fees from these. <button class="sync-btn sm inline" type="button" id="aex-rerun-stored" title="Match the stored rows of the chosen account to your stays and income entries again, without the file">Match stored rows</button>` : 'Nothing stored yet: the rows of every file you pick are kept in full.';
+};
+storedNote();
 const rerun = () => {
 if (!state.parsed) return;
 state.ownerKey = document.getElementById('aex-owner').value;
@@ -236,12 +289,26 @@ root.addEventListener('change', async (e) => {
 if (e.target.id === 'aex-file') {
 const file = e.target.files && e.target.files[0];
 if (!file) return;
-state.parsed = parseEarningsCsv(await file.text());
-if (state.parsed.error) { report().innerHTML = `<div class="settings-note" style="margin:6px 0;">${escapeHtml(state.parsed.error)}</div>`; state.parsed = null; return; }
+const text = await file.text();
+const ownerKey = document.getElementById('aex-owner').value;
+const read = rowsFromCsv(text, ownerKey, file.name);
+if (read.error) { report().innerHTML = `<div class="settings-note" style="margin:6px 0;">${escapeHtml(read.error)}</div>`; state.parsed = null; return; }
+const saved = storeEarnings(read.records, ownerKey);
+state.parsed = parseFromRecords(read.records);
 rerun();
+storedNote();
+const note = document.createElement('div'); note.className = 'settings-note'; note.style.margin = '4px 0';
+note.textContent = `Read ${read.records.length} rows from ${file.name}: ${saved.added} new, ${saved.already} already stored.`;
+report().prepend(note);
 } else if (e.target.id === 'aex-owner') rerun();
 });
 root.addEventListener('click', (e) => {
+if (e.target.closest('#aex-rerun-stored')) {
+const ownerKey = document.getElementById('aex-owner').value;
+state.parsed = parseFromRecords((data.airbnbEarnings || []).filter((r) => r.ownerKey === ownerKey));
+rerun();
+return;
+}
 const link = e.target.closest('[data-open-ledger]');
 if (link) { scrollAndFlash(`[data-letting-date="${CSS.escape(link.dataset.openLedger)}"]`); return; }
 if (!e.target.closest('#aex-apply') || !state.items) return;
@@ -255,4 +322,4 @@ if (status) status.textContent = `Filled in ${r.filled} stay${r.filled === 1 ? '
 });
 }
 
-export { parseEarningsCsv, planImport, applyImport, initAirbnbEarningsImport };
+export { parseEarningsCsv, parseFromRecords, rowsFromCsv, storeEarnings, planImport, applyImport, initAirbnbEarningsImport };

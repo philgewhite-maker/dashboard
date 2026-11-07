@@ -78,7 +78,7 @@ a{color:var(--accent)}
 <div class="wrap">
 <header>
   <h1>Dashboard data model</h1>
-  <p class="lede">What the app stores, how the pieces refer to each other, where the same fact is kept twice, and where text stands in for structure. Built from the code and from a read of the live document (field names, types, fill rates and reference checks; no personal values). Verified against build <b>v766</b>.</p>
+  <p class="lede">What the app stores, how the pieces refer to each other, where the same fact is kept twice, and where text stands in for structure. Built from the code and from a read of the live document (field names, types, fill rates and reference checks; no personal values). Verified against build <b>v767</b>.</p>
   <ul class="stats">
     <li><b>109</b><span>top-level keys</span></li>
     <li><b>597</b><span>connections</span></li>
@@ -119,6 +119,7 @@ a{color:var(--accent)}
     <p class="fix"><b>Added in v764.</b> No stored fields changed. The booking evaluator now simulates only the free stretch of the request's room between the bookings either side of it (the dates the decision can change), shows the rest of the calendar as one projected scenario shared by every future, and lets each row of its Accept/Reject table open to the pieces it is made of.</p>
     <p class="fix"><b>Added in v765.</b> <code>bookingProjections</code>: on request, the booking model simulates every room's free nights from today to the end of the month after next and saves one projection per day (per void: expected income, expected nights, a 1-in-10 range and a chance for each night; per month: totals and the expected cumulative nights booked by arrival day; one representative scenario; the assumptions used). The Letting charts (occupancy timeline, pace chart, Income by month, the occupancy bars on the night-rate charts) draw the latest one as hatched or dashed additions, hidden by <code>prefs.showProjection</code>.</p>
     <p class="fix"><b>Added in v766.</b> A saved verdict (<code>bookingRequests[].evaluation</code>) now also keeps the free stretch it covered, both scenarios' money by part, the chance each night was expected to be booked either way, the cancellation odds and the assumptions used. The monthly model review (Letting panel) compares saved projections and these verdicts with what happened, and can apply a demand factor to <code>prefs.bookingEvaluator.calibration</code> ({demand, lead, cancel, appliedOn, history}), which every later evaluation and projection uses; <code>prefs.modelReviewSeen</code> remembers the month whose review was last opened, for the first-days-of-the-month nudge.</p>
+    <p class="fix"><b>Added in v767.</b> <code>airbnbEarnings</code> keeps the Airbnb earnings export in full (one record per CSV row, whose account, the listing it resolved to). The booking model now works each room's <em>raw nightly rate</em> back from them: (amount received − cleaning fee) ÷ nights, with short-notice and length discounts undone, and counts the cleaning fee guests pay as income per booking, with your own clean cost deducted separately. <code>prefs.bookingEvaluator.discounts</code> ({airbnb, direct} × {shortNotice:[{days,pct}], length:[{nights,pct}]}) replaces the old <code>lastMinute</code> setting; rooms gain <code>cleaningIncome</code>. Model version 2: projections from version 1 are not scored by the review.</p>
   </div>
 
   <div class="finding">
@@ -220,6 +221,7 @@ flowchart LR
     RATE["airbnbRateProposals"]
     BREQ["bookingRequests"]
     BPRJ["bookingProjections"]
+    AEARN["airbnbEarnings"]
   end
   subgraph MONEY["Money"]
     ACC["financeAccounts"]
@@ -247,6 +249,8 @@ flowchart LR
   LED -.->|"reservationId (dangles)"| RES
   RES --> LST
   BREQ -->|"listingId"| LST
+  AEARN -->|"listingId"| LST
+  AEARN -->|"ownerKey"| CONN
   BREQ -.->|"reservationId (when it became a stay)"| RES
   KEY --> LST
   KEY -.->|"forReservationId (dangles)"| RES
@@ -749,6 +753,7 @@ erDiagram
     <tr><td class="k">vouchers / loyaltyPrograms</td><td class="num">15 / 15</td><td>yes</td><td>per-record</td><td></td></tr>
     <tr><td class="k">mediaItems</td><td class="num">12</td><td>yes</td><td>whole document</td><td></td></tr>
     <tr><td class="k">airbnbRateProposals</td><td class="num">12</td><td>yes</td><td>whole document</td><td>links to a task</td></tr>
+    <tr><td class="k">airbnbEarnings</td><td class="num">new (v767)</td><td>yes</td><td>per-record (shadow)</td><td>every row of every Airbnb earnings export, all columns; amount, cleaning fee, booking date and nights give the raw nightly rates</td></tr>
     <tr><td class="k">bookingProjections</td><td class="num">new (v765)</td><td>yes</td><td>per-record (shadow)</td><td>saved void projections: per void expected income, nights and a chance per night; run on request; listing/room keys are stored inside it, not as references</td></tr>
     <tr><td class="k">bookingRequests</td><td class="num">new (v753)</td><td>yes</td><td>per-record (shadow)</td><td>every Airbnb request and enquiry from the inbox, incl. ones never booked; HM code and listing id from the email</td></tr>
     <tr><td class="k">airbnbReservations</td><td class="num">10</td><td>yes</td><td>whole document</td><td>deleted at checkout</td></tr>

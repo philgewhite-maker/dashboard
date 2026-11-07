@@ -218,7 +218,14 @@ ownUseWeekday: 25, ownUseWeekend: 40, ownUseSecondPct: 50,
 directWeight: 1, guestNoReviews: 0.95, guestLowRating: 0.85, lowRatingBelow: 4.5,
 lateCancelDays: 5, lateCancelPayPct: 50,
 leadMedian: [17, 17, 17, 25, 25, 35, 35, 35, 21, 21, 21, 17], christmasLead: 300,
-lastMinute: [{ days: 7, pct: 10 }, { days: 0, pct: 0 }, { days: 0, pct: 0 }],
+// Discounts, mirroring Airbnb's own structure, per channel: booked within `days` of arrival takes `pct`; a stay of
+// at least `nights` takes `pct`; the largest step of each kind applies and the two combine. They are what the
+// model undoes to get from a payout back to a raw nightly rate, and applies to the simulated bookings. The
+// guest-rating and special-offer discounts have no source and are not modelled.
+discounts: {
+airbnb: { shortNotice: [{ days: 10, pct: 5 }, { days: 5, pct: 10 }], length: [] },
+direct: { shortNotice: [], length: [] },
+},
 gapDiscountPct: 15, gapMaxNights: 2,
 elasticity: 1.5, enquiryWeight: 0.3,
 // [{id, roomKey, from, to}]: times a room wasn't offered (in use, off Airbnb), left out of
@@ -2052,6 +2059,21 @@ rooms: [], voids: [], months: {}, scenario: [], total: { expected: 0, p10: 0, p9
 };
 }
 
+// One row of an Airbnb earnings export (Menu -> Earnings -> Transaction history -> CSV), kept in full so rates,
+// cleaning fees and discounts can be worked out again without the file (js/features/airbnbearnings.js).
+// `type` is the export's own: Reservation, Payout, Adjustment, Resolution Adjustment, Cancellation Fee, ...
+// Dates are ISO. `ownerKey` says whose Airbnb account the export came from; `listingId` is the listing the stay
+// was on, when it could be worked out. The id is derived from the row, so re-importing adds nothing twice.
+function blankAirbnbEarning(fields = {}) {
+return {
+id: uid(), ownerKey: '', listingId: '', type: '', date: '', arrivingBy: '', confirmationCode: '', bookingDate: '',
+start: '', end: '', nights: null, guest: '', listingTitle: '', details: '', referenceCode: '', currency: 'GBP',
+amount: null, paidOut: null, serviceFee: null, fastPayFee: null, cleaningFee: null, grossEarnings: null, tax: null,
+earningsYear: '', importedAt: '', source: '',
+...fields,
+};
+}
+
 function blankLoan(fields = {}) {
 return {
 id: uid(),
@@ -2593,6 +2615,8 @@ airbnbRateProposals: [],
 // Saved projections of the free nights between now and the end of next month (js/features/bookingprojection.js),
 // made on request, so each can be compared with what actually happened (js/features/modelreview.js).
 bookingProjections: [],
+// Every row of every Airbnb earnings export you have imported, in full (blankAirbnbEarning).
+airbnbEarnings: [],
 // Every Airbnb booking request and enquiry read from the inbox (js/features/bookingrequests.js),
 // including the ones that never became stays: the demand the booking evaluator calibrates
 // against. See blankBookingRequest.
@@ -2741,6 +2765,8 @@ if (!Array.isArray(data.loans)) data.loans = [];
 data.loans = data.loans.filter((l) => l && typeof l === 'object').map((l) => ({ ...blankLoan(), ...l, id: l.id || uid() }));
 if (!Array.isArray(data.airbnbRateProposals)) data.airbnbRateProposals = [];
 if (!Array.isArray(data.bookingProjections)) data.bookingProjections = [];
+if (!Array.isArray(data.airbnbEarnings)) data.airbnbEarnings = [];
+data.airbnbEarnings = data.airbnbEarnings.filter((r) => r && typeof r === 'object').map((r) => ({ ...blankAirbnbEarning(), ...r, id: r.id || uid() }));
 data.bookingProjections = data.bookingProjections.filter((p) => p && typeof p === 'object').map((p) => ({ ...blankBookingProjection(), ...p, id: p.id || uid() }));
 if (!Array.isArray(data.bookingRequests)) data.bookingRequests = [];
 data.bookingRequests = data.bookingRequests.filter((r) => r && typeof r === 'object').map((r) => ({ ...blankBookingRequest(), ...r, id: r.id || uid() }));
@@ -3591,7 +3617,17 @@ data.mailDismissed = data.mailDismissed.map((d) => ({ ...blankMailDismissal(), .
 data.prefs = { ...DEFAULT_PREFS, ...(data.prefs || {}) };
 // One level deeper for the booking evaluator's settings object, so a setting added later
 // reaches a device whose prefs already hold an older copy of it.
+const savedEvaluator = (data.prefs.bookingEvaluator || {});
 data.prefs.bookingEvaluator = { ...DEFAULT_PREFS.bookingEvaluator, ...(data.prefs.bookingEvaluator || {}) };
+// The old three-step "last-minute" setting became the short-notice array of the Airbnb discounts, once: kept when you
+// had changed it from the shipped default (7 days, 10%), otherwise replaced by the 5%/10 days, 10%/5 days default.
+if (!savedEvaluator.discounts) {
+const steps = (Array.isArray(savedEvaluator.lastMinute) ? savedEvaluator.lastMinute : []).filter((x) => Number(x.days) > 0).map((x) => ({ days: Number(x.days), pct: Number(x.pct) || 0 }));
+const shipped = steps.length === 1 && steps[0].days === 7 && steps[0].pct === 10;
+if (steps.length && !shipped) data.prefs.bookingEvaluator.discounts = { airbnb: { shortNotice: steps, length: [] }, direct: { shortNotice: [], length: [] } };
+}
+delete data.prefs.bookingEvaluator.lastMinute;
+data.prefs.bookingEvaluator.discounts = { airbnb: { shortNotice: [], length: [], ...((data.prefs.bookingEvaluator.discounts || {}).airbnb || {}) }, direct: { shortNotice: [], length: [], ...((data.prefs.bookingEvaluator.discounts || {}).direct || {}) } };
 // The spread above is shallow -- an ALREADY-PRESENT array key (shareUrlRules/
 // captureRules have both existed since v300/v310) keeps its own contents
 // wholesale, never gaining new entries from a later DEFAULT_PREFS. Confirmed
@@ -4604,7 +4640,7 @@ blankPackingItem, blankPackingModule, blankTripPacking, blankPackingListItem, PA
 blankMarriottAvailability, pruneMarriottAvailability,
 blankLoyaltyProgram, blankLoyaltyBalance, blankVoucher,
 blankPlannerEntry, blankPlannerActivity,
-blankAirbnbListing, blankAirbnbReservation, blankBookingRequest, blankBookingProjection, blankAirbnbKey, blankAirbnbKeyAssignment, KEY_CUSTODIAN_TYPES, blankFinanceAccount, SCHOOL_CALENDAR_SITES,
+blankAirbnbListing, blankAirbnbReservation, blankBookingRequest, blankBookingProjection, blankAirbnbEarning, blankAirbnbKey, blankAirbnbKeyAssignment, KEY_CUSTODIAN_TYPES, blankFinanceAccount, SCHOOL_CALENDAR_SITES,
 CONTACT_STATUS_LABELS, CONTACT_MATCH_MIN_STAGE,
 DEFAULT_RATING_CATEGORIES, slugifyField, DEFAULT_RECIPE_RATING_CATEGORIES,
 FLAG_FIELD_DEFS, DEFAULT_FLAG_RULES, computeFlags, valueColorForField, stripSharedSuffix, suggestedAction, suggestedQuestions, isTravelPaused, ACTIONS, distanceMiles, heightCm,
