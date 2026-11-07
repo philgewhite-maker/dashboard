@@ -551,6 +551,7 @@ hits.push({ x1, x2: Math.max(x1 + 3, x2), y: y - h / 2 - 3, y2: y + h / 2 + 3, s
 });
 // The saved void projection: each free stretch tinted by how likely each night is to be booked, with
 // what it is expected to earn, and one representative scenario drawn as dashed ghost bookings.
+// A ghost booking is not drawn inside a dead void: the void says it will most likely stay empty.
 const lateHits = [];
 if (proj && state.channel !== 'other') {
 const monthFirst = dayStr(ym, 1);
@@ -579,7 +580,7 @@ ctx.font = '11px Inter, sans-serif';
 }
 lateHits.push({ x1: vx1, x2: vx2, y: top + 3, y2: top + laneH - 3, void: v, room });
 });
-(proj.scenario || []).filter((b) => b.roomKey === room.key && b.to > monthFirst && b.from < nextFirst).forEach((b) => {
+(proj.scenario || []).filter((b) => b.roomKey === room.key && b.to > monthFirst && b.from < nextFirst && !proj.voids.some((v) => v.roomKey === room.key && isDeadVoid(v) && b.from >= v.from && b.to <= v.to)).forEach((b) => {
 const own = room.members.find((l) => l.id === b.listingId);
 const color = resolveColor(listingColorVar((own && own.colour) || room.colour));
 const startD = b.from < monthFirst ? 0.5 : dayOf(b.from) + 0.5;
