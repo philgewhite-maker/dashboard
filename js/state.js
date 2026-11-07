@@ -2717,6 +2717,19 @@ data.loans = data.loans.filter((l) => l && typeof l === 'object').map((l) => ({ 
 if (!Array.isArray(data.airbnbRateProposals)) data.airbnbRateProposals = [];
 if (!Array.isArray(data.bookingRequests)) data.bookingRequests = [];
 data.bookingRequests = data.bookingRequests.filter((r) => r && typeof r === 'object').map((r) => ({ ...blankBookingRequest(), ...r, id: r.id || uid() }));
+// One record per email: early backfill runs gave the same email two records under different ids.
+// Keep the one carrying your own input (a verdict or a decision you set), else the first.
+{
+const byMsg = new Map();
+data.bookingRequests.forEach((r) => {
+if (!r.messageId) return;
+const held = byMsg.get(r.messageId);
+const score = (x) => (x.evaluation ? 2 : 0) + (x.decision === 'declined' ? 1 : 0) + (x.id === `req-${x.messageId}` ? 0.5 : 0);
+if (!held || score(r) > score(held)) byMsg.set(r.messageId, r);
+});
+const dropped = data.bookingRequests.filter((r) => r.messageId && byMsg.get(r.messageId) !== r);
+if (dropped.length) data.bookingRequests = data.bookingRequests.filter((r) => !r.messageId || byMsg.get(r.messageId) === r);
+}
 // FIRST, before anything else in here touches it. An existing document
 // predates this key entirely, and two passes below both reach for it --
 // the connection loop that carries the old per-person `owned` across,

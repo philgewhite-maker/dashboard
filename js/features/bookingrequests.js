@@ -121,7 +121,9 @@ const parsed = parseRequestEmail({ subject: m.subject, bodyText: detail.bodyText
 if (!parsed) { skipped.add(m.id); continue; }
 if (!parsed.listingId) unmatchedListing++;
 const { listingTitle, ...fields } = parsed;
-data.bookingRequests.push(blankBookingRequest({ ...fields, messageId: m.id }));
+// The id comes from the Gmail message, so two devices (or two runs) reading the same email
+// write the same record instead of two.
+data.bookingRequests.push(blankBookingRequest({ ...fields, id: `req-${m.id}`, messageId: m.id }));
 known.add(m.id);
 added++;
 }
@@ -218,6 +220,7 @@ stay = stays.find((s) => roomOf(s.listingId) === roomOf(q.listingId)
 if (stay) {
 q.decision = 'accepted';
 q.reservationId = stay.id;
+if (!q.listingId) q.listingId = stay.listingId; // an email for a listing id not in any ICS link
 q.decidedOn = stay.confirmedOn || String(q.receivedAt || '').slice(0, 10);
 changed++;
 return;
