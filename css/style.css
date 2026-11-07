@@ -4326,6 +4326,11 @@ flex:1 1 7rem;
 max-width:none;
 }
 #letting-panel .sync-btn{flex:0 0 auto;}
+/* The evaluator's fields stack label over box (a column), so the flex-basis
+   above would set the box's HEIGHT: reset it and let the field take the share. */
+#letting-panel .be-field{flex:1 1 7rem;min-width:0;}
+#letting-panel .be-field .settings-input,
+#letting-panel .be-field select{flex:0 0 auto;width:100%;box-sizing:border-box;}
 /* The note and the gross stack rather than fighting for one line. */
 #letting-list .letting-gross{display:block;}
 #letting-list td{padding-left:4px;padding-right:4px;}
