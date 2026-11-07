@@ -2,7 +2,7 @@
 // deletes every cache that isn't the current name, so raising the version is
 // what actually evicts a stale copy from a device that has been running the
 // app for a while.
-const CACHE_NAME = 'dashboard-v783';
+const CACHE_NAME = 'dashboard-v784';
 const CORE_ASSETS = [
 './',
 './index.html',
@@ -172,7 +172,9 @@ console.error('Background refresh failed:', err);
 
 self.addEventListener('install', (event) => {
 event.waitUntil(
-caches.open(CACHE_NAME).then((cache) => cache.addAll(CORE_ASSETS)).then(() => self.skipWaiting())
+// `cache: 'reload'` skips the browser's own HTTP cache (GitHub Pages sends max-age=600): without it a fresh install right after a
+// deploy could store the previous version's files under the new version's name and keep them until the next bump.
+caches.open(CACHE_NAME).then((cache) => cache.addAll(CORE_ASSETS.map((u) => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting())
 );
 });
 
