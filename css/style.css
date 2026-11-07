@@ -4611,3 +4611,4 @@ background:var(--slate-bg);color:var(--slate);
 /* Discounts in Settings -> Booking evaluator. */
 .be-disc{margin:2px 0 8px;}
 .be-disc-kind{margin:2px 0 4px;}
+.occ-key-dots{display:inline-block;width:16px;height:8px;border-radius:3px;border:1px dashed var(--muted);flex:none;background:radial-gradient(circle,var(--muted) 0 0.9px,transparent 1.1px) 0 0/4px 4px;}

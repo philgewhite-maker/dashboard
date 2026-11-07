@@ -1832,7 +1832,7 @@ cumulative += p.amt;
 });
 });
 // The projected cap: what the month's gaps are expected to add, per owner group, hatched and
-// dashed so it can't be mistaken for income that has happened.
+// dashed so it can't be mistaken for income that has happened. Dotted, not striped: the stripe means Direct / other.
 if (monthProjected[i] > 0.004) {
 let capped = cumulative;
 groups.forEach((g, gi) => {
@@ -1841,7 +1841,7 @@ if (!(pj > 0.004)) return;
 const color = resolveColor(listingColorVar(g.colour));
 const yBottom = scaleY(capped); const yTop = scaleY(capped + pj);
 const h = Math.max(1, yBottom - yTop);
-ctx.fillStyle = stripePatternFor(color);
+ctx.fillStyle = dotPatternFor(ctx, color);
 ctx.fillRect(cx - barW / 2, yTop, barW, h);
 ctx.save();
 ctx.strokeStyle = color; ctx.setLineDash([3, 2]); ctx.lineWidth = 1;
@@ -2398,15 +2398,17 @@ el.innerHTML = occupancy.map((s) => `<span class="letting-chart-legend-item"><sp
 // holds the average-stay-LENGTH labels (asked for directly), one per
 // room per month, skipped wherever a month/room's own slot is too
 // narrow to hold a legible number rather than letting labels collide.
-// A 45-degree hatch in one colour, for the projected (not yet booked) parts of the charts.
-function hatchPatternFor(ctx, color) {
-const size = 8;
+// Stippled dots in one colour, for the projected (not yet booked) parts of the charts. Deliberately not the
+// diagonal stripe: that already means "Direct / other" (not Airbnb), and the two must stay tellable apart.
+function dotPatternFor(ctx, color) {
+const size = 6;
 const tile = document.createElement('canvas');
 tile.width = size; tile.height = size;
 const t = tile.getContext('2d');
-t.fillStyle = color; t.globalAlpha = 0.18; t.fillRect(0, 0, size, size);
-t.globalAlpha = 1; t.strokeStyle = color; t.lineWidth = 2;
-[-size, 0, size].forEach((o) => { t.beginPath(); t.moveTo(o, size); t.lineTo(o + size, 0); t.stroke(); });
+t.fillStyle = color; t.globalAlpha = 0.08; t.fillRect(0, 0, size, size);
+t.globalAlpha = 0.9;
+// offset rows so the dots stagger rather than line up in a grid
+[[1.5, 1.5], [4.5, 4.5]].forEach(([x, y]) => { t.beginPath(); t.arc(x, y, 1.05, 0, Math.PI * 2); t.fill(); });
 return ctx.createPattern(tile, 'repeat');
 }
 
@@ -2455,7 +2457,7 @@ const extra = projectedOccupancyShare(s.room.key, months[i]);
 if (extra > 0.004 && pct < 1) {
 const eh = Math.min(1 - pct, extra) * barArea.h;
 ctx.save();
-ctx.fillStyle = hatchPatternFor(ctx, color);
+ctx.fillStyle = dotPatternFor(ctx, color);
 ctx.fillRect(x, y - eh, barW, eh);
 ctx.strokeStyle = color; ctx.setLineDash([3, 2]); ctx.lineWidth = 1;
 ctx.strokeRect(x + 0.5, y - eh + 0.5, Math.max(1, barW - 1), Math.max(1, eh - 1));
