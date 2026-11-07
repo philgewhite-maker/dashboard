@@ -134,6 +134,7 @@ ${row('Late cancellation', `within ${numBox('lateCancelDays', s.lateCancelDays, 
 <h4 class="be-set-h">When bookings arrive</h4>
 <div class="settings-note" style="margin:0 0 4px;">Median days ahead a booking arrives, by the month of the stay.</div>
 <div class="be-lead-grid">${MONTH_SHORT.map((m, i) => `<label>${m}${numBox(`leadMedian.${i}`, (s.leadMedian || [])[i], { width: 52 })}</label>`).join('')}<label>Christmas &amp; New Year${numBox('christmasLead', s.christmasLead, { width: 60 })}</label></div>
+${row('Hidden 1-night demand', `${numBox('oneNightDemandPct', s.oneNightDemandPct ?? 10, { width: 50 })}% extra requests, as 1-night stays, if the minimum stay is lowered to 1`, 'A minimum of 2+ nights means Airbnb never shows you 1-night requests, so your own history cannot say how many there are. A guess until you try it. Used when the booking model tests allowing 1-night stays.')}
 <h4 class="be-set-h">Discounts and price</h4>
 ${discountsHtml(s)}
 ${row('Gap discount', `${numBox('gapDiscountPct', s.gapDiscountPct, { width: 50 })}% on gaps of ${numBox('gapMaxNights', s.gapMaxNights, { width: 46 })} nights or fewer`)}

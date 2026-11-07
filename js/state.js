@@ -219,6 +219,9 @@ ownUseWeekday: 25, ownUseWeekend: 40, ownUseSecondPct: 50,
 directWeight: 1, guestNoReviews: 0.95, guestLowRating: 0.85, lowRatingBelow: 4.5,
 lateCancelDays: 5, lateCancelPayPct: 50,
 leadMedian: [17, 17, 17, 25, 25, 35, 35, 35, 21, 21, 21, 17], christmasLead: 300,
+// Requests a minimum stay of 2+ nights hides: as a % of the usual requests, extra 1-night ones that appear if the
+// minimum is lowered to 1 (a guess; your own history cannot show them).
+oneNightDemandPct: 10,
 // Discounts, mirroring Airbnb's own structure, per channel: booked within `days` of arrival takes `pct`; a stay of
 // at least `nights` takes `pct`; the largest step of each kind applies and the two combine. They are what the
 // model undoes to get from a payout back to a raw nightly rate, and applies to the simulated bookings. The

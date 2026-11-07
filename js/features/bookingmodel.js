@@ -26,9 +26,17 @@ import { todayStr } from '../utils.js';
 import { collectStays } from './lettingoccupancy.js';
 import { evaluatorRooms, roomSettings } from './bookingsettings.js';
 
-const MODEL_VERSION = 2;
+const MODEL_VERSION = 3;
 const DAY_MS = 86400000;
-const LEAD_SIGMA = 0.9; // spread of the lead-time curve (log scale); fixed
+// Spread of the lead-time curve (log scale). Lead times are shaped like a wide lognormal on (days ahead + 0.5): the
+// bookings per day keep rising towards arrival, and a narrow curve badly understates the last week (your own stays and
+// requests: 22% within 3 days, 39% within 7; a spread of 0.9 gave 4% and 17%). The spread is fitted to your bookings,
+// blended with this prior (Airbnb-wide lead times fit a lognormal of about 1.3) as LEAD_SIGMA_K pseudo-bookings.
+const LEAD_SIGMA_PRIOR = 1.3;
+const LEAD_SIGMA_K = 10;
+const LEAD_SIGMA_MIN = 0.7;
+const LEAD_SIGMA_MAX = 2;
+const ONE_NIGHT_DEMAND_PCT = 10; // extra requests, as 1-night stays, a 2+ night minimum hides (a guess)
 const LOS_MAX = 28;
 const LOS_PRIOR = [0, 0.12, 0.24, 0.2, 0.13, 0.09, 0.06, 0.06]; // 1..7 nights; the rest spread over 8..28
 const LOS_PRIOR_LONG = 0.1;
@@ -257,17 +265,26 @@ const addLead = (checkin, from) => {
 if (!checkin || !from) return;
 const c = dayNum(checkin);
 const L = c - dayNum(String(from).slice(0, 10));
-if (L < 0 || L > 400) return;
-leads[isChristmas(c) ? 12 : monthOf(c)].push(Math.max(L, 0.5));
+// A stay still ahead is only seen if it was booked early (the ones booked late haven't happened yet), which
+// would skew the curve long: only check-ins that have passed count.
+if (L < 0 || L > 400 || c >= T) return;
+leads[isChristmas(c) ? 12 : monthOf(c)].push(L);
 };
 ctx.requests.forEach((q) => { if (q.kind === 'request') addLead(q.checkin, q.receivedAt); });
 live.forEach((x) => { if (!fromRequest.has(x.id)) addLead(x.checkin, x.bookedOn); });
 const lead = leads.map((xs, m) => {
 const prior = m === 12 ? Number(s.christmasLead) || 300 : Number((s.leadMedian || [])[m]) || 21;
 const scaled = prior * (ctx.scale.lead || 1);
-const mu = (LEAD_PRIOR_K * Math.log(scaled) + xs.reduce((a, L) => a + Math.log(L * (ctx.scale.lead || 1)), 0)) / (LEAD_PRIOR_K + xs.length);
-return { mu, median: Math.exp(mu), n: xs.length, prior: scaled };
+const logs = xs.map((L) => Math.log(L * (ctx.scale.lead || 1) + 0.5));
+const mu = (LEAD_PRIOR_K * Math.log(scaled + 0.5) + logs.reduce((a, v) => a + v, 0)) / (LEAD_PRIOR_K + xs.length);
+return { mu, median: Math.max(0, Math.exp(mu) - 0.5), n: xs.length, prior: scaled, logs };
 });
+// One spread for every month (there are too few bookings in each to fit its own): the pooled variance of the
+// lead times about their own month's mean, blended with the prior.
+let ss = 0; let df = 0;
+lead.forEach((l) => { if (l.logs.length > 1) { const m = l.logs.reduce((a, v) => a + v, 0) / l.logs.length; ss += l.logs.reduce((a, v) => a + (v - m) ** 2, 0); df += l.logs.length - 1; } });
+const leadSigma = Math.min(LEAD_SIGMA_MAX, Math.max(LEAD_SIGMA_MIN, Math.sqrt((LEAD_SIGMA_K * LEAD_SIGMA_PRIOR ** 2 + ss) / (LEAD_SIGMA_K + df))));
+lead.forEach((l) => { delete l.logs; });
 
 // Cancellations: how often, and how many come within the late window.
 let nAll = 0; let nCancel = 0; let nLate = 0; let nTimed = 0;
@@ -334,7 +351,7 @@ overall, months: all.length, skipped,
 };
 });
 
-ctx.params = { prices, losCdf, losMean, losN, dowW, dowN, lead, cancelRate, lateShare, nAll, nCancel, occ, lambda: new Map() };
+ctx.params = { prices, losCdf, losMean, losN, dowW, dowN, lead, leadSigma, cancelRate, lateShare, nAll, nCancel, occ, lambda: new Map() };
 return ctx.params;
 }
 
@@ -345,13 +362,13 @@ return params.lead[isChristmas(c) ? 12 : monthOf(c)];
 function leadCdf(params, c, daysLeft) {
 if (daysLeft < 0) return 0;
 const { mu } = leadFor(params, c);
-return normCdf((Math.log(daysLeft + 0.5) - mu) / LEAD_SIGMA);
+return normCdf((Math.log(daysLeft + 0.5) - mu) / params.leadSigma);
 }
 // A lead time from the curve, no longer than `daysLeft`.
 function sampleLead(params, c, daysLeft, rng) {
 const { mu } = leadFor(params, c);
-const cap = daysLeft == null ? 1 : normCdf((Math.log(daysLeft + 0.5) - mu) / LEAD_SIGMA);
-const L = Math.exp(mu + LEAD_SIGMA * normInv(rng() * cap));
+const cap = daysLeft == null ? 1 : normCdf((Math.log(daysLeft + 0.5) - mu) / params.leadSigma);
+const L = Math.max(0, Math.exp(mu + params.leadSigma * normInv(rng() * cap)) - 0.5);
 return daysLeft == null ? L : Math.min(L, daysLeft);
 }
 function sampleLos(params, rng) {
@@ -390,7 +407,9 @@ return Math.pow((1 - lm) * (1 - gap), -(Number(s.elasticity) || 0));
 // Request arrivals for every room and check-in date in [from, to), all arriving on or after
 // `todayN` (those that arrived before today already did whatever they did). `lam(roomIdx, c)`
 // is the eventual number of requests for check-in date c, before price thinning.
-function drawArrivals(ctx, params, { from, to, todayN, lam, rooms }, rng) {
+// `extra` ({roomIdx: fraction}): requests for 1 night on top of the usual ones, in rooms whose minimum stay has
+// been lowered below the one the demand was calibrated under (see ONE_NIGHT_DEMAND_PCT).
+function drawArrivals(ctx, params, { from, to, todayN, lam, rooms, extra = null }, rng) {
 const out = [];
 const boost = maxBoost(ctx.s);
 rooms.forEach((ri) => {
@@ -401,6 +420,13 @@ const k = poisson(rng, lam(ri, c) * params.dowW[dowOf(c)] * boost * share);
 for (let j = 0; j < k; j++) {
 const L = sampleLead(params, c, daysLeft, rng);
 out.push({ room: ri, c, los: sampleLos(params, rng), at: c - L, lead: L, u: rng(), tie: rng() });
+}
+if (extra && extra[ri]) {
+const k1 = poisson(rng, lam(ri, c) * params.dowW[dowOf(c)] * boost * share * extra[ri]);
+for (let j = 0; j < k1; j++) {
+const L = sampleLead(params, c, daysLeft, rng);
+out.push({ room: ri, c, los: 1, at: c - L, lead: L, u: rng(), tie: rng() });
+}
 }
 }
 });
@@ -763,6 +789,7 @@ return [
 { id: 'cleanfee', label: 'Cleaning fee guests pay (income per booking)', value: fmtMoney(price.clean), source: ctx.rooms[ri].cleaningIncome != null && ctx.rooms[ri].cleaningIncome !== '' ? 'your setting' : price.n ? 'median of your earnings export' : 'none known' },
 { id: 'occupancy', label: `Occupancy expected for this room in ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m]}`, value: occVal == null ? `${Math.round(OCC_PRIOR * 100)}%` : `${Math.round(occVal * 100)}%`, source: o.byMonth[m] != null ? `your stays: ${o.byMonthN[m]} earlier ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m]}${o.byMonthN[m] === 1 ? '' : 's'} (resting on ${o.byMonthBookings[m]} booking${o.byMonthBookings[m] === 1 ? '' : 's'}, so counting as ${o.byMonthW[m].toFixed(2)} of a full month), blended with all ${o.months} months on offer${o.skipped ? `; ${o.skipped} left out as not on offer` : ''}` : o.overall != null ? `your stays, ${o.months} months on offer${o.skipped ? `; ${o.skipped} left out as not on offer` : ''}` : 'assumption', editable: 'demand' },
 { id: 'lead', label: 'Median days ahead bookings arrive', value: `${Math.round(lead.median)} days`, source: lead.n ? `your guide blended with ${lead.n} of your bookings` : 'your guide (Settings)', editable: 'lead' },
+{ id: 'leadspread', label: 'Share of bookings made in the last 3 / 7 days', value: `${Math.round(normCdf((Math.log(3.5) - lead.mu) / params.leadSigma) * 100)}% / ${Math.round(normCdf((Math.log(7.5) - lead.mu) / params.leadSigma) * 100)}%`, source: `a lead-time spread of ${params.leadSigma.toFixed(2)}, fitted to your bookings and requests (past check-ins) and blended with the Airbnb-wide shape` },
 { id: 'los', label: 'Average stay length', value: `${params.losMean.toFixed(1)} nights`, source: params.losN ? `your requests and stays (${Math.round(params.losN)}) blended with an assumption` : 'assumption' },
 { id: 'dow', label: 'Busiest check-in day', value: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][params.dowW.indexOf(Math.max(...params.dowW))], source: params.dowN ? `your requests and stays (${Math.round(params.dowN)})` : 'assumption' },
 { id: 'cancel', label: 'Bookings cancelled', value: `${Math.round(params.cancelRate * 100)}% (${Math.round(params.lateShare * 100)}% of those late)`, source: params.nAll ? `your stays (${params.nCancel} of ${params.nAll}) blended with an assumption` : 'assumption', editable: 'cancel' },
@@ -882,6 +909,10 @@ const lamCache = new Map();
 const lam = (r, c) => { const k = `${r}|${monthOf(c)}`; if (!lamCache.has(k)) lamCache.set(k, lambdaFor(ctx, params, r, monthOf(c))); return lamCache.get(k); };
 const roomsIdx = ctx.rooms.map((_, i) => i).filter((i) => !roomKeys || roomKeys.includes(ctx.rooms[i].key));
 const minNights = Object.fromEntries(ctx.rooms.map((r, i) => [i, play && play.minNights && play.minNights[r.key] != null ? Number(play.minNights[r.key]) : (Number(r.minNights) || 1)]));
+// A room whose minimum is lowered below the one its demand was calibrated under also gets the 1-night requests it was hiding.
+const oneNightFrac = (Number(ctx.s.oneNightDemandPct ?? ONE_NIGHT_DEMAND_PCT) || 0) / 100;
+const extra = {};
+ctx.rooms.forEach((r, i) => { if (minNights[i] < (Number(r.minNights) || 1)) extra[i] = oneNightFrac; });
 const rng = mulberry32(hashStr(`proj|${MODEL_VERSION}|${ctx.today}|${wS}|${wE}|${JSON.stringify(ctx.s)}|${JSON.stringify(ctx.scale)}`));
 
 const monthKeys = [];
@@ -902,7 +933,7 @@ const state = { run: 0 };
 const step = (n) => {
 for (let k = 0; k < n && state.run < runs; k++, state.run++) {
 const run = state.run;
-const arrivals = drawArrivals(pctx, params, { from: base, to: wE + AFTER, todayN: T, lam, rooms: roomsIdx }, rng);
+const arrivals = drawArrivals(pctx, params, { from: base, to: wE + AFTER, todayN: T, lam, rooms: roomsIdx, extra }, rng);
 const occ = occ0.map((o) => o.slice());
 const booked = playArrivals(pctx, params, arrivals, occ, base, { minNights, len });
 const list = [];
@@ -1060,7 +1091,7 @@ months.push({ lead: Math.round(params.lead[m].median), n: params.lead[m].n });
 }
 return {
 calibration: { demand: ctx.scale.demand || 1, lead: ctx.scale.lead || 1, cancel: ctx.scale.cancel || 1 },
-elasticity: Number(s.elasticity) || 0, cancelRate: Math.round(params.cancelRate * 1000) / 1000, lateShare: Math.round(params.lateShare * 1000) / 1000,
+elasticity: Number(s.elasticity) || 0, leadSigma: Math.round(params.leadSigma * 100) / 100, cancelRate: Math.round(params.cancelRate * 1000) / 1000, lateShare: Math.round(params.lateShare * 1000) / 1000,
 meanStay: Math.round(params.losMean * 10) / 10, leadMedianByMonth: months.map((x) => x.lead), christmasLead: Math.round(params.lead[12].median),
 rooms: ctx.rooms.map((room, i) => ({ key: room.key, occupancy: params.occ[i].overall == null ? null : Math.round(params.occ[i].overall * 100) / 100, monthsOnOffer: params.occ[i].months, minNights: Number(room.minNights) || 1, price: Math.round(params.prices[i].base) })),
 };
