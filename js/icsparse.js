@@ -88,6 +88,28 @@ else if (prop.name === 'SUMMARY') current.summary = prop.value.trim();
 return events;
 }
 
+// The nights a ROOM is blocked: those on which every one of its listings is blocked. A room can be sold through more than one
+// listing (En-Suite - Phil and - Lewis), each with its own Airbnb calendar, so a block on one leaves the room open through the
+// other. `blocks`: [{listingId, from, to}] (to exclusive); `listingIds`: the room's listings that have a calendar feed (none: nothing
+// is known, so nothing is blocked). Returns [{from, to}] ranges, to exclusive, in date order.
+function roomBlocks(blocks, listingIds) {
+if (!listingIds || !listingIds.length) return [];
+const merged = (id) => {
+const xs = (blocks || []).filter((b) => b.listingId === id && b.from && b.to && b.to > b.from).map((b) => [b.from, b.to]).sort((a, b) => a[0].localeCompare(b[0]));
+const out = [];
+xs.forEach(([f, t]) => { const last = out[out.length - 1]; if (last && f <= last[1]) { if (t > last[1]) last[1] = t; } else out.push([f, t]); });
+return out;
+};
+let acc = merged(listingIds[0]);
+for (let i = 1; i < listingIds.length && acc.length; i++) {
+const next = merged(listingIds[i]);
+const out = [];
+acc.forEach(([f1, t1]) => next.forEach(([f2, t2]) => { const f = f1 > f2 ? f1 : f2; const t = t1 < t2 ? t1 : t2; if (f < t) out.push([f, t]); }));
+acc = out.sort((a, b) => a[0].localeCompare(b[0]));
+}
+return acc.map(([from, to]) => ({ from, to }));
+}
+
 // A feed event is "Reserved" for a confirmed booking and equally for an enquiry
 // Airbnb is holding the dates for, and nothing in the feed says which. A feed
 // stay is unconfirmed until something outside the feed vouches for it: the
@@ -112,4 +134,4 @@ function isForgettableStay(r, doc, today) {
   return true;
 }
 
-export { unfoldIcsLines, parseIcsProperty, icsDateOnly, isNotAvailablePlaceholder, parseIcsReservations, parseIcsBlocks, isUnconfirmedStay, isForgettableStay };
+export { unfoldIcsLines, parseIcsProperty, icsDateOnly, isNotAvailablePlaceholder, parseIcsReservations, parseIcsBlocks, roomBlocks, isUnconfirmedStay, isForgettableStay };

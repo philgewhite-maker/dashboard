@@ -23,6 +23,7 @@
 // builds made-up ones).
 import { data, DEFAULT_PREFS } from '../state.js';
 import { todayStr } from '../utils.js';
+import { roomBlocks } from '../icsparse.js';
 import { collectStays } from './lettingoccupancy.js';
 import { evaluatorRooms, roomSettings } from './bookingsettings.js';
 
@@ -164,7 +165,8 @@ const scale = { ...ov };
 [['demand', 'demand'], ['lead', 'lead'], ['cancel', 'cancel']].forEach(([k]) => { const c = Number(cal[k]) || 1; if (c !== 1 || ov[k] != null) scale[k] = c * (ov[k] != null ? ov[k] : 1); });
 // Nights Airbnb's feed marks "Not available" (a host's manual blocks): not free nights, so not voids.
 const blocks = (data.airbnbBlocks || []).map((b) => ({ listingId: b.listingId, from: b.from, to: b.to }));
-return { today, s, firstClean, rooms, stays, requests, proposals, listingLabels, earnings, earnedStayIds, scale, blocks };
+const feedListingIds = (data.airbnbListings || []).filter((l) => l.icsUrl).map((l) => l.id);
+return { today, s, firstClean, rooms, stays, requests, proposals, listingLabels, earnings, earnedStayIds, scale, blocks, feedListingIds };
 }
 
 // ---- Calibration ----------------------------------------------------------------------------
@@ -561,10 +563,11 @@ existing.forEach((x) => {
 const r = ri2.get(x.listingId);
 for (let d = dayNum(x.checkin); d < dayNum(x.checkout); d++) if (d >= base && d < base + len) occ0[r][d - base] = 1;
 });
-(ctx.blocks || []).forEach((b) => {
-const r = ri2.get(b.listingId);
-if (r == null) return;
+// A room is blocked only on nights when every one of its listings is (see roomBlocks).
+ctx.rooms.forEach((room, r) => {
+roomBlocks(ctx.blocks, room.listingIds.filter((id) => (ctx.feedListingIds || []).includes(id))).forEach((b) => {
 for (let d = dayNum(b.from); d < dayNum(b.to); d++) if (d >= base && d < base + len) occ0[r][d - base] = 1;
+});
 });
 for (let d = base; d < T; d++) occ0.forEach((o) => { o[d - base] = 1; }); // the past can't be booked
 const clash = [];
@@ -894,10 +897,11 @@ existing.forEach((x) => {
 const r = ri2.get(x.listingId);
 for (let d = dayNum(x.checkin); d < dayNum(x.checkout); d++) if (d >= base && d < base + len) occ0[r][d - base] = 1;
 });
-(ctx.blocks || []).forEach((b) => {
-const r = ri2.get(b.listingId);
-if (r == null) return;
+// A room is blocked only on nights when every one of its listings is (see roomBlocks).
+ctx.rooms.forEach((room, r) => {
+roomBlocks(ctx.blocks, room.listingIds.filter((id) => (ctx.feedListingIds || []).includes(id))).forEach((b) => {
 for (let d = dayNum(b.from); d < dayNum(b.to); d++) if (d >= base && d < base + len) occ0[r][d - base] = 1;
+});
 });
 for (let d = base; d < T; d++) occ0.forEach((o) => { o[d - base] = 1; }); // the past can't be booked
 
