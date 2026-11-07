@@ -40,6 +40,10 @@ const OCC_PRIOR = 0.6;
 const DEFAULT_PRICE = 80;
 const BEFORE = 28; // nights simulated before the window, so a stay can run into it
 const AFTER = 28; // and after it, so a stay can run out of it
+const BLOCK_CAP = 28; // nights either side of a request simulated when nothing is booked nearby
+// Counters tallied alongside the money, for the table's expandable rows: bookings (n_) and nights (d_) by
+// where they fall, changeover days, and what the empty nights are worth, split.
+const DETAIL_KEYS = ['n_before', 'n_inside', 'n_after', 'n_other', 'd_before', 'd_inside', 'd_after', 'd_other', 'cleanFirstN', 'cleanExtraN', 'hassleWdN', 'hassleWeN', 'ownWd', 'ownWdN', 'ownWe', 'ownWeN', 'ownSecond', 'ownSecondN'];
 const RUNS = 1500;
 const CAL_RUNS = 150;
 
@@ -423,16 +427,29 @@ const payout = Number(request.payout);
 if (!(payout > 0)) return { error: 'Enter the payout for the stay.' };
 const room = ctx.rooms[ri];
 
-// Window: two weeks either side of the request, at least 30 nights, never before today.
-const wS = Math.max(T, ci - 14);
-const wE = Math.max(wS + 30, co + 14);
-const base = Math.max(T - 1, wS - BEFORE); // the night before today counts as taken
-const len = wE + AFTER - base;
-
-// Calendars as they stand: live stays (not this request's own, not unconfirmed holds).
-const existing = ctx.stays.filter((x) => x.status === 'stay' && !x.unconfirmed && x.id !== request.reservationId && roomIndexOf(ctx).has(x.listingId));
-const occ0 = ctx.rooms.map(() => new Uint8Array(len));
 const ri2 = roomIndexOf(ctx);
+// Calendars as they stand: live stays (not this request's own, not unconfirmed holds).
+const existing = ctx.stays.filter((x) => x.status === 'stay' && !x.unconfirmed && x.id !== request.reservationId && ri2.has(x.listingId));
+
+// The free stretch around the request in its room: the nights between the booking before it
+// and the booking after it (or today; or at most BLOCK_CAP nights either side when nothing
+// is booked nearby). Only these nights can come out differently if you accept or reject:
+// a booking can't cross an existing one, so everything beyond them is the same either way.
+// The comparison is run over this stretch; the nights beyond are shown as one projected
+// scenario, shared by every future, and don't enter the totals.
+const mine = existing.filter((x) => ri2.get(x.listingId) === ri);
+let wS = Math.max(T, ci - BLOCK_CAP);
+mine.forEach((x) => { const xo = dayNum(x.checkout); if (xo <= ci && xo > wS) wS = xo; });
+let wE = co + BLOCK_CAP;
+mine.forEach((x) => { const xi = dayNum(x.checkin); if (xi >= co && xi < wE) wE = xi; });
+const capped = { before: wS === Math.max(T, ci - BLOCK_CAP) && wS > T, after: wE === co + BLOCK_CAP };
+// What the charts show: the free stretch, widened to a fortnight either side of the request.
+const dispS = Math.max(T, Math.min(ci - 14, wS));
+const dispE = Math.max(dispS + 30, co + 14, wE);
+const base = Math.max(T - 1, Math.min(wS, dispS) - BEFORE); // the night before today counts as taken
+const len = Math.max(wE, dispE) + AFTER - base;
+
+const occ0 = ctx.rooms.map(() => new Uint8Array(len));
 existing.forEach((x) => {
 const r = ri2.get(x.listingId);
 for (let d = dayNum(x.checkin); d < dayNum(x.checkout); d++) if (d >= base && d < base + len) occ0[r][d - base] = 1;
@@ -470,10 +487,14 @@ let existingIncome = 0;
 existing.forEach((x) => {
 const n = dayNum(x.checkout) - dayNum(x.checkin);
 const r = ri2.get(x.listingId);
+let inWin = 0;
 for (let d = Math.max(dayNum(x.checkin), wS); d < Math.min(dayNum(x.checkout), wE); d++) {
-existingIncome += Number(x.income) > 0 ? Number(x.income) / n : basePrice(ctx, params, r, d);
+inWin += Number(x.income) > 0 ? Number(x.income) / n : basePrice(ctx, params, r, d);
 }
+existingIncome += inWin;
+if (inWin > 0) existingList.push({ id: x.id, room: ctx.listingLabels[x.listingId] || ctx.rooms[r].label, guest: x.guest, checkin: x.checkin, checkout: x.checkout, income: Number(x.income) > 0 ? Number(x.income) : null, inWindow: inWin });
 });
+const existingList = [];
 const existingCheckouts = existing.map((x) => ({ room: ri2.get(x.listingId), co: dayNum(x.checkout) }));
 
 const firstClean = ctx.firstClean;
@@ -484,31 +505,39 @@ const secondPct = (Number(s.ownUseSecondPct) || 0) / 100;
 // Totals for one future: bookings (simulated), plus the request if it stays booked.
 const tally = (occ, booked, reqState) => {
 const t = { before: 0, inside: 0, after: 0, other: 0, request: 0, clean: 0, hassle: 0, ownUse: 0, nightsTaken: [] };
+DETAIL_KEYS.forEach((k) => { t[k] = 0; });
 booked.forEach((b) => {
+let first = true;
 for (let d = Math.max(b.ci, wS); d < Math.min(b.co, wE); d++) {
 const v = basePrice(ctx, params, b.room, d) * b.factor;
-if (b.room !== ri) t.other += v;
-else if (d < ci) t.before += v;
-else if (d >= co) t.after += v;
-else t.inside += v;
+const cat = b.room !== ri ? 'other' : d < ci ? 'before' : d >= co ? 'after' : 'inside';
+t[cat] += v;
+t[`d_${cat}`] += 1;
+if (first) { t[`n_${cat}`] += 1; first = false; }
 }
 });
 if (reqState === 'none') t.request = weighted;
 else if (reqState === 'late') t.request = weighted * latePay;
 const outs = new Map();
-const addOut = (n, r) => { if (n >= wS && n < wE) { if (!outs.has(n)) outs.set(n, new Set()); outs.get(n).add(r); } };
+const addOut = (n, r) => { if (n >= wS && n <= wE) { if (!outs.has(n)) outs.set(n, new Set()); outs.get(n).add(r); } };
 existingCheckouts.forEach((x) => addOut(x.co, x.room));
 booked.forEach((b) => addOut(b.co, b.room));
 if (reqState === 'none') addOut(co, ri);
 outs.forEach((set, n) => {
 t.clean += firstClean + extraClean * (set.size - 1);
+t.cleanFirstN += 1; t.cleanExtraN += set.size - 1;
 t.hassle += weekendDay(n) ? Number(s.hassleWeekend) : Number(s.hassleWeekday);
+if (weekendDay(n)) t.hassleWeN += 1; else t.hassleWdN += 1;
 });
 for (let d = wS; d < wE; d++) {
 const empties = [];
 roomsIdx.forEach((r) => { if (!occ[r][d - base]) empties.push(ownUseOf(r, d)); });
 empties.sort((a, b) => b - a);
-empties.forEach((v, k) => { t.ownUse += k === 0 ? v : v * secondPct; });
+empties.forEach((v, k) => {
+t.ownUse += k === 0 ? v : v * secondPct;
+if (k === 0) { if (weekendNight(d)) { t.ownWe += v; t.ownWeN += 1; } else { t.ownWd += v; t.ownWdN += 1; } }
+else { t.ownSecond += v * secondPct; t.ownSecondN += 1; }
+});
 }
 for (let d = wS; d < wE; d++) t.nightsTaken.push(occ[ri][d - base]);
 return t;
@@ -517,9 +546,9 @@ const total = (t) => existingIncome + t.request + t.before + t.inside + t.after 
 
 const seed = hashStr(`${MODEL_VERSION}|${request.listingId}|${request.checkin}|${request.checkout}|${payout}|${ctx.today}|${JSON.stringify(s)}|${JSON.stringify(ctx.scale)}`);
 const rng = mulberry32(seed);
-const keys = ['request', 'before', 'inside', 'after', 'other', 'clean', 'hassle', 'ownUse'];
-const sumA = Object.fromEntries(keys.map((k) => [k, 0]));
-const sumR = Object.fromEntries(keys.map((k) => [k, 0]));
+const keys = ['request', 'before', 'inside', 'after', 'other', 'clean', 'hassle', 'ownUse', ...DETAIL_KEYS];
+const zero = () => Object.fromEntries(keys.map((k) => [k, 0]));
+const sumA = zero(); const sumR = zero(); const sumN = zero(); const sumL = zero(); const sumE = zero();
 const totA = []; const totR = []; const diffs = [];
 const nightA = new Float64Array(wE - wS); const nightR = new Float64Array(wE - wS);
 const examples = [];
@@ -534,7 +563,7 @@ let tLt = null; let tEa = null;
 if (wLate > 0) { const AL = play({ room: ri, ci, co, until: tLate }); tLt = tally(AL.occ, AL.booked, 'late'); }
 if (wEarly > 0) { const AE = play({ room: ri, ci, co, until: tEarly }); tEa = tally(AE.occ, AE.booked, 'early'); }
 const mix = (k) => wNone * tN[k] + (tLt ? wLate * tLt[k] : 0) + (tEa ? wEarly * tEa[k] : 0);
-keys.forEach((k) => { sumA[k] += mix(k); sumR[k] += tR[k]; });
+keys.forEach((k) => { sumA[k] += mix(k); sumR[k] += tR[k]; sumN[k] += tN[k]; if (tLt) sumL[k] += tLt[k]; if (tEa) sumE[k] += tEa[k]; });
 const a = wNone * total(tN) + (tLt ? wLate * total(tLt) : 0) + (tEa ? wEarly * total(tEa) : 0);
 const r = total(tR);
 totA.push(a); totR.push(r); diffs.push(a - r);
@@ -553,6 +582,7 @@ examples.push({ reject: describe(R.booked), accept: describe(A0.booked), total: 
 }
 const meanA = Object.fromEntries(keys.map((k) => [k, sumA[k] / runs]));
 const meanR = Object.fromEntries(keys.map((k) => [k, sumR[k] / runs]));
+const meanOf = (sum) => Object.fromEntries(keys.map((k) => [k, sum[k] / runs]));
 const accept = totA.reduce((x, y) => x + y, 0) / runs;
 const reject = totR.reduce((x, y) => x + y, 0) / runs;
 const diff = accept - reject;
@@ -569,19 +599,37 @@ else if (Math.abs(diff) <= margin) recommendation = 'EITHER';
 const ownUseNights = [];
 for (let d = ci; d < co; d++) if (weekendNight(d)) ownUseNights.push({ date: dayStr(d), value: Math.round(ownUseOf(ri, d)) });
 
+// The nights beyond the free stretch: one projected scenario (a single simulated future, drawn
+// with its own fixed seed), shown in every chart as the same thing. It is not part of the
+// comparison or its totals: it is what the rest of the calendar might look like.
+const bgRng = mulberry32(hashStr(`bg|${MODEL_VERSION}|${ctx.today}|${request.listingId}|${JSON.stringify(s)}|${JSON.stringify(ctx.scale)}`));
+const bgOcc = occ0.map((o) => o.slice());
+const bgArr = drawArrivals(ctx, params, { from: base, to: dispE + AFTER, todayN: T, lam, rooms: [ri] }, bgRng);
+const bgBooked = playArrivals(ctx, params, bgArr, bgOcc, base, { minNights, len }).filter((b) => b.room === ri && (b.co <= wS || b.ci >= wE) && b.co > dispS && b.ci < dispE);
+const projected = bgBooked.map((b) => {
+let amount = 0;
+for (let d = b.ci; d < b.co; d++) amount += basePrice(ctx, params, ri, d) * b.factor;
+return { checkin: dayStr(b.ci), checkout: dayStr(b.co), nights: b.co - b.ci, arrived: dayStr(Math.max(T, Math.floor(b.at))), perNight: Math.round(amount / (b.co - b.ci)), amount: Math.round(amount), discounted: b.factor < 0.999 };
+}).sort((a, b) => a.checkin.localeCompare(b.checkin));
+const projectedNight = new Set();
+bgBooked.forEach((b) => { for (let d = b.ci; d < b.co; d++) projectedNight.add(d); });
 const nights = [];
-for (let i = 0; i < wE - wS; i++) {
-const d = wS + i;
-nights.push({ date: dayStr(d), weekend: weekendNight(d), existing: !!occ0[ri][d - base], request: d >= ci && d < co, accept: nightA[i] / runs, reject: nightR[i] / runs });
+for (let d = dispS; d < dispE; d++) {
+const inBlock = d >= wS && d < wE;
+nights.push({ date: dayStr(d), weekend: weekendNight(d), existing: !!occ0[ri][d - base], request: d >= ci && d < co, inBlock, projected: !inBlock && projectedNight.has(d), accept: inBlock ? nightA[d - wS] / runs : null, reject: inBlock ? nightR[d - wS] / runs : null });
 }
 return {
 modelVersion: MODEL_VERSION,
 room: { key: room.key, label: room.label },
-window: { start: dayStr(wS), end: dayStr(wE), nights: wE - wS },
+window: { start: dayStr(wS), end: dayStr(wE), nights: wE - wS, capped },
+display: { start: dayStr(dispS), end: dayStr(dispE), nights: dispE - dispS },
+projected,
 request: { checkin: request.checkin, checkout: request.checkout, nights: co - ci, payout, weighted, guestFactor, guestWhy, channelFactor },
 cancel: { rate: pC, lateShare: qL, wNone, wLate, wEarly, latePay, earlyPossible },
 existingIncome,
-accept: { mean: accept, p10: pct(totA, 0.1), p90: pct(totA, 0.9), parts: meanA },
+existingList: existingList.sort((a, b) => a.checkin.localeCompare(b.checkin)),
+costs: { firstClean, extraClean, hassleWd: Number(s.hassleWeekday), hassleWe: Number(s.hassleWeekend), secondPct },
+accept: { mean: accept, p10: pct(totA, 0.1), p90: pct(totA, 0.9), parts: meanA, scen: { none: meanOf(sumN), late: wLate > 0 ? meanOf(sumL) : null, early: wEarly > 0 ? meanOf(sumE) : null } },
 reject: { mean: reject, p10: pct(totR, 0.1), p90: pct(totR, 0.9), parts: meanR },
 diff,
 pRejectBetter: diffs.filter((x) => x < 0).length / runs,
@@ -591,7 +639,7 @@ ownUseNights,
 nights,
 examples,
 neighbours: neighbourStays(ctx, ri, ci, co),
-existingStays: existing.filter((x) => ri2.get(x.listingId) === ri && dayNum(x.checkout) > wS && dayNum(x.checkin) < wE).map((x) => ({ id: x.id, checkin: x.checkin, checkout: x.checkout, guest: x.guest, amount: Number(x.income) > 0 ? Math.round(Number(x.income)) : null })).sort((a, b) => a.checkin.localeCompare(b.checkin)),
+existingStays: existing.filter((x) => ri2.get(x.listingId) === ri && dayNum(x.checkout) > dispS && dayNum(x.checkin) < dispE).map((x) => ({ id: x.id, checkin: x.checkin, checkout: x.checkout, guest: x.guest, amount: Number(x.income) > 0 ? Math.round(Number(x.income)) : null })).sort((a, b) => a.checkin.localeCompare(b.checkin)),
 runs,
 assumptions: describeAssumptions(ctx, params, ri, ci),
 };

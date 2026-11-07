@@ -8,7 +8,7 @@ import { data, queueSave, blankBookingRequest } from '../state.js';
 import { escapeHtml, todayStr, scrollAndFlash } from '../utils.js';
 import { evaluatorRooms } from './bookingsettings.js';
 
-const state = { prefill: null, result: null, ctx: null, overrides: {}, busy: false };
+const state = { prefill: null, result: null, ctx: null, overrides: {}, busy: false, expanded: new Set() };
 const money = (v) => `${v < 0 ? '−' : ''}£${Math.abs(Math.round(v)).toLocaleString('en-GB')}`;
 const signed = (v) => `${v >= 0 ? '+' : '−'}£${Math.abs(Math.round(v)).toLocaleString('en-GB')}`;
 const nice = (d) => new Date(`${d}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
@@ -144,7 +144,7 @@ const win = `${short(r.window.start)} – ${short(r.window.end)}`;
 const lines = [];
 const rec = r.recommendation === 'COUNTER' ? `COUNTER at ${money(Math.ceil(r.breakEven / 5) * 5)}` : r.recommendation === 'EITHER' ? 'CLOSE CALL' : r.recommendation;
 lines.push(`<div class="be-rec ${escapeHtml(r.recommendation.toLowerCase())}">Recommendation: <strong>${escapeHtml(rec)}</strong></div>`);
-lines.push(`Accepting moves the expected value of ${room} and the other rooms for ${escapeHtml(win)} (${r.window.nights} nights) from <strong>${money(r.reject.mean)}</strong> to <strong>${money(r.accept.mean)}</strong>.`);
+lines.push(`Accepting moves the expected value of the free stretch (${escapeHtml(win)}, ${r.window.nights} nights between the bookings either side${r.window.capped.before || r.window.capped.after ? ', limited to 4 weeks around the request' : ''}) in ${room} and the other rooms from <strong>${money(r.reject.mean)}</strong> to <strong>${money(r.accept.mean)}</strong>.`);
 lines.push(r.diff >= 0
 ? `It beats rejecting by <strong>${money(r.diff)}</strong>; rejecting does better in ${Math.round(r.pRejectBetter * 100)}% of the simulated futures.`
 : `It falls short of rejecting by <strong>${money(-r.diff)}</strong>; rejecting does better in ${Math.round(r.pRejectBetter * 100)}% of the simulated futures.`);
@@ -152,21 +152,83 @@ if (r.ownUseNights.length) lines.push(`It takes ${r.ownUseNights.map((n) => esca
 if (r.breakEven != null) lines.push(r.breakEven > r.request.payout ? `Break-even payout: <strong>${money(r.breakEven)}</strong> (asked ${money(r.request.payout)}). From there accepting beats rejecting.` : `Break-even payout: ${money(r.breakEven)}, below the ${money(r.request.payout)} on offer.`);
 const targets = Object.values(data.prefs.lettingChartTargets || {}).reduce((a, t) => a + (Number(t && t.normal) || 0), 0);
 const income = (side) => side.parts.request + side.parts.before + side.parts.inside + side.parts.after + side.parts.other + r.existingIncome;
-lines.push(`Expected income in the window: ${money(income(r.accept))} if accepted, ${money(income(r.reject))} if not${targets ? ` (your monthly targets add up to ${money(targets)})` : ''}.`);
+lines.push(`Expected income in that stretch: ${money(income(r.accept))} if accepted, ${money(income(r.reject))} if not${targets ? ` (your monthly targets add up to ${money(targets)})` : ''}.`);
 if (state.prefill && state.prefill.estimated) lines.push('<span class="settings-note" style="margin:0;">The payout is an estimate from your nightly rate: this enquiry\'s email has none. Change it above and Evaluate again.</span>');
 return `<div class="be-verdict">${lines.map((l) => `<div>${l}</div>`).join('')}</div>`;
 }
 
+// The Accept/Reject table. Each row opens to the pieces it is made of: the request's payout and
+// what cancellation takes off it, the bookings expected before / on / after its nights (by
+// whether it goes ahead or is cancelled), the bookings already made, cleaning, changeovers and
+// what the empty nights are worth to you. A row's pieces add up to the figure on the row.
 function tableHtml(r) {
+const A = r.accept.parts; const J = r.reject.parts; const S = r.accept.scen; const c = r.cancel; const k = r.costs;
+const pctTxt = (p) => `${Math.round(p * 100)}%`;
+const num = (v) => (Math.abs(v) >= 10 ? Math.round(v) : Math.round(v * 10) / 10);
+// A detail line: label, accept amount, reject amount (null = nothing to show), and a note.
+const line = (label, a, j, { note = '', info = false } = {}) => ({ label, a, j, note, info });
+const sign = (p, v) => (p.minus ? -v : v);
+
+// Bookings expected in a stretch of the room, with their counts, nights and typical rate.
+const bookingLines = (cat, name) => {
+const out = [];
+const avg = (parts) => (parts[`d_${cat}`] > 0 ? parts[cat] / parts[`d_${cat}`] : 0);
+const describe = (parts) => (parts[`n_${cat}`] > 0.05 ? `${num(parts[`n_${cat}`])} booking${Math.abs(parts[`n_${cat}`] - 1) < 0.05 ? '' : 's'}, ${num(parts[`d_${cat}`])} nights at about ${money(avg(parts))}/night` : 'none expected');
+out.push(line(`If you reject: ${describe(J)}`, null, J[cat]));
+if (cat === 'other') { out.push(line(`Accept or reject: ${describe(A)}`, A[cat], null, { note: 'the same either way' })); return out; }
+out.push(line(`If you accept and it goes ahead (${pctTxt(c.wNone)}): ${describe(S.none)}`, c.wNone * S.none[cat], null));
+if (S.late) out.push(line(`If cancelled late (${pctTxt(c.wLate)}): ${describe(S.late)}`, c.wLate * S.late[cat], null, { note: 'the nights reopen with little time left to re-sell' }));
+if (S.early) out.push(line(`If cancelled early (${pctTxt(c.wEarly)}): ${describe(S.early)}`, c.wEarly * S.early[cat], null, { note: 'the nights reopen with time to re-sell' }));
+return out;
+};
+
+const w = r.request.weighted;
+const detail = {
+request: [
+line(`The booking: ${money(r.request.payout)}${r.request.guestFactor !== 1 ? ` × ${r.request.guestFactor} (${r.request.guestWhy})` : ''}${r.request.channelFactor !== 1 ? ` × ${r.request.channelFactor} (direct)` : ''}`, w, 0),
+...(c.wLate > 0 ? [line(`Cancelled late (${pctTxt(c.wLate)}): only ${pctTxt(c.latePay)} is paid`, -w * c.wLate * (1 - c.latePay), 0)] : []),
+...(c.wEarly > 0 ? [line(`Cancelled early (${pctTxt(c.wEarly)}): nothing is paid`, -w * c.wEarly, 0)] : []),
+line(`Nights re-sold after a cancellation: ${money(A.inside)} (counted in "New bookings on its nights", not added here)`, null, null, { info: true }),
+],
+before: bookingLines('before'),
+inside: bookingLines('inside'),
+after: bookingLines('after'),
+other: bookingLines('other'),
+existing: r.existingList.length
+? r.existingList.map((x) => line(`${x.guest ? String(x.guest).split(/[ ,]/)[0] : 'Booked'} · ${x.room} · ${short(x.checkin)} – ${short(x.checkout)}${x.income && Math.abs(x.income - x.inWindow) > 1 ? ` (${money(x.income)} in all, ${money(x.inWindow)} falls in the stretch)` : ''}`, x.inWindow, x.inWindow))
+: [line('No other bookings fall in the stretch', 0, 0)],
+clean: [
+line(`First room cleaned on a changeover day: ${num(A.cleanFirstN)} days (if you accept) vs ${num(J.cleanFirstN)} (reject) × ${money(k.firstClean)}`, -A.cleanFirstN * k.firstClean, -J.cleanFirstN * k.firstClean),
+line(`Each extra room the same day: ${num(A.cleanExtraN)} vs ${num(J.cleanExtraN)} × ${money(k.extraClean)}`, -A.cleanExtraN * k.extraClean, -J.cleanExtraN * k.extraClean),
+],
+hassle: [
+line(`Mon–Fri changeover days: ${num(A.hassleWdN)} vs ${num(J.hassleWdN)} × ${money(k.hassleWd)}`, -A.hassleWdN * k.hassleWd, -J.hassleWdN * k.hassleWd),
+line(`Sat–Sun changeover days: ${num(A.hassleWeN)} vs ${num(J.hassleWeN)} × ${money(k.hassleWe)}`, -A.hassleWeN * k.hassleWe, -J.hassleWeN * k.hassleWe),
+],
+ownUse: [
+line(`Sun–Thu nights with a room empty: ${num(A.ownWdN)} vs ${num(J.ownWdN)}`, A.ownWd, J.ownWd, { note: `about ${money(A.ownWdN ? A.ownWd / A.ownWdN : J.ownWdN ? J.ownWd / J.ownWdN : 0)} a night` }),
+line(`Fri–Sat nights with a room empty: ${num(A.ownWeN)} vs ${num(J.ownWeN)}`, A.ownWe, J.ownWe, { note: `about ${money(A.ownWeN ? A.ownWe / A.ownWeN : J.ownWeN ? J.ownWe / J.ownWeN : 0)} a night` }),
+line(`A second room empty the same night (${Math.round(k.secondPct * 100)}% of its value): ${num(A.ownSecondN)} vs ${num(J.ownSecondN)} room-nights`, A.ownSecond, J.ownSecond),
+],
+};
+
 const rows = PARTS.map((p) => {
-const a = p.k === 'existing' ? r.existingIncome : r.accept.parts[p.k];
-const j = p.k === 'existing' ? r.existingIncome : r.reject.parts[p.k];
-const sa = p.minus ? -a : a; const sj = p.minus ? -j : j;
+const a = p.k === 'existing' ? r.existingIncome : A[p.k];
+const j = p.k === 'existing' ? r.existingIncome : J[p.k];
+const sa = sign(p, a); const sj = sign(p, j);
 const d = sa - sj;
-return `<tr><td>${escapeHtml(p.label)}</td><td class="num">${money(sa)}</td><td class="num">${money(sj)}</td><td class="num ${Math.abs(d) < 0.5 ? 'be-zero' : d > 0 ? 'be-pos' : 'be-neg'}">${Math.abs(d) < 0.5 ? '–' : signed(d)}</td></tr>`;
+const open = state.expanded.has(p.k);
+const diffCell = (v) => `<td class="num ${Math.abs(v) < 0.5 ? 'be-zero' : v > 0 ? 'be-pos' : 'be-neg'}">${Math.abs(v) < 0.5 ? '–' : signed(v)}</td>`;
+const head = `<tr class="be-main" data-be-row="${p.k}" title="Show what this is made of"><td><span class="be-caret">${open ? '&#9662;' : '&#9656;'}</span>${escapeHtml(p.label)}</td><td class="num">${money(sa)}</td><td class="num">${money(sj)}</td>${diffCell(d)}</tr>`;
+const subs = (detail[p.k] || []).map((l) => {
+if (l.info) return `<tr class="be-sub be-info" data-be-sub="${p.k}"${open ? '' : ' hidden'}><td colspan="4">${escapeHtml(l.label)}</td></tr>`;
+const la = l.a == null ? null : l.a; const lj = l.j == null ? null : l.j;
+const dd = (la ?? 0) - (lj ?? 0);
+return `<tr class="be-sub" data-be-sub="${p.k}"${open ? '' : ' hidden'}><td>${escapeHtml(l.label)}${l.note ? ` <span class="settings-note" style="margin:0;">· ${escapeHtml(l.note)}</span>` : ''}</td><td class="num">${la == null ? '' : money(la)}</td><td class="num">${lj == null ? '' : money(lj)}</td><td class="num ${Math.abs(dd) < 0.5 ? 'be-zero' : dd > 0 ? 'be-pos' : 'be-neg'}">${la == null && lj == null ? '' : Math.abs(dd) < 0.5 ? '–' : signed(dd)}</td></tr>`;
 }).join('');
-const c = r.cancel;
-const cancelNote = `Cancellation: ${Math.round(c.wNone * 100)}% it goes ahead (${money(r.request.weighted)}), ${Math.round(c.wLate * 100)}% cancelled late (${Math.round(c.latePay * 100)}% paid, nights reopen with little time left)${c.earlyPossible ? `, ${Math.round(c.wEarly * 100)}% cancelled early (nothing paid, nights reopen)` : ''}. Payout ${money(r.request.payout)}${r.request.guestFactor !== 1 ? ` × ${r.request.guestFactor} (${escapeHtml(r.request.guestWhy)})` : ''}${r.request.channelFactor !== 1 ? ` × ${r.request.channelFactor} (direct)` : ''}.`;
+return head + subs;
+}).join('');
+const cancelNote = `Cancellation: ${pctTxt(c.wNone)} it goes ahead, ${pctTxt(c.wLate)} cancelled late (${pctTxt(c.latePay)} paid, nights reopen with little time left)${c.earlyPossible ? `, ${pctTxt(c.wEarly)} cancelled early (nothing paid, nights reopen)` : ''}. Click a row to see what it is made of.`;
 return `<div style="overflow-x:auto;"><table class="limits-table be-table"><thead><tr><th></th><th class="num">Accept</th><th class="num">Reject</th><th class="num">Difference</th></tr></thead><tbody>${rows}
 <tr class="be-total"><td>Total</td><td class="num">${money(r.accept.mean)}</td><td class="num">${money(r.reject.mean)}</td><td class="num ${r.diff >= 0 ? 'be-pos' : 'be-neg'}">${signed(r.diff)}</td></tr>
 <tr><td class="settings-note" style="margin:0;">Range (1 in 10 futures below / above)</td><td class="num settings-note">${money(r.accept.p10)}–${money(r.accept.p90)}</td><td class="num settings-note">${money(r.reject.p10)}–${money(r.reject.p90)}</td><td></td></tr>
@@ -174,22 +236,25 @@ return `<div style="overflow-x:auto;"><table class="limits-table be-table"><thea
 <div class="settings-note" style="margin:4px 0 0;">${cancelNote}</div>`;
 }
 
+
 function stripHtml(r) {
 const cells = r.nights.map((n) => {
-const cls = n.existing ? 'taken' : n.request ? 'req' : '';
 const day = new Date(`${n.date}T00:00:00`);
-const title = n.existing ? `${nice(n.date)}: already booked` : `${nice(n.date)}: booked in ${Math.round(n.accept * 100)}% of futures if you accept${n.request ? ' (this request, allowing for cancellation)' : ''}, ${Math.round(n.reject * 100)}% if you reject`;
+let cls = n.existing ? 'taken' : n.request ? 'req' : '';
+let title; let bars;
+if (n.existing) { title = `${nice(n.date)}: already booked`; bars = '<span class="be-bar full"></span>'; }
+else if (!n.inBlock) { cls += ' out'; title = `${nice(n.date)}: not affected by this decision (${n.projected ? 'booked in the projected scenario' : 'empty in the projected scenario'})`; bars = n.projected ? '<span class="be-bar proj"></span>' : ''; }
+else { title = `${nice(n.date)}: booked in ${Math.round(n.accept * 100)}% of futures if you accept${n.request ? ' (this request, allowing for cancellation)' : ''}, ${Math.round(n.reject * 100)}% if you reject`; bars = `<span class="be-bar a" style="height:${Math.round(n.accept * 100)}%"></span><span class="be-bar r" style="height:${Math.round(n.reject * 100)}%"></span>`; }
 return `<div class="be-night ${cls}${n.weekend ? ' wknd' : ''}" title="${escapeHtml(title)}">
-<div class="be-bars">${n.existing ? '<span class="be-bar full"></span>' : `<span class="be-bar a" style="height:${Math.round(n.accept * 100)}%"></span><span class="be-bar r" style="height:${Math.round(n.reject * 100)}%"></span>`}</div>
+<div class="be-bars">${bars}</div>
 <div class="be-day">${day.getDate()}</div><div class="be-wd">${'SMTWTFS'[day.getDay()]}</div></div>`;
 }).join('');
 const nb = r.neighbours;
 const stayChip = state.stayChipHtml;
 const edge = (id) => { const s = id && (data.airbnbReservations || []).find((x) => x.id === id); return s && stayChip ? stayChip(s) : '<span class="settings-note" style="margin:0;">none in view</span>'; };
-return `<div class="be-strip-head settings-note" style="margin:10px 0 4px;">Chance each night in ${escapeHtml(r.room.label)} is booked: <span class="be-key a"></span> if you accept, <span class="be-key r"></span> if you reject, <span class="be-key full"></span> already booked; the request's nights are outlined. Booking before: ${edge(nb.before)}. Booking after: ${edge(nb.after)}.</div>
+return `<div class="be-strip-head settings-note" style="margin:10px 0 4px;">Chance each night in ${escapeHtml(r.room.label)} is booked: <span class="be-key a"></span> if you accept, <span class="be-key r"></span> if you reject, <span class="be-key full"></span> already booked, <span class="be-key proj"></span> beyond the bookings either side (not affected by the decision: one projected scenario); the request's nights are outlined. Booking before: ${edge(nb.before)}. Booking after: ${edge(nb.after)}.</div>
 <div class="be-strip">${cells}</div>`;
 }
-
 function assumptionsHtml(r) {
 const o = state.overrides;
 const whatIf = {
@@ -210,12 +275,14 @@ return `<details class="settings-subgroup" id="be-assumptions"${changed ? ' open
 
 // Three simulated futures drawn as timeline rows (the occupancy chart's style), one pair per
 // future: what happens if you reject, and if you accept. Each bar is a booking with its
-// amount; each row ends with the bookings' total in this room and the model's net figure for
-// the whole window (every room, after cleaning, hassle and what empty nights are worth to you).
+// amount; each row ends with a total of everything drawn in it and the model's net figure for
+// the free stretch (every room, after cleaning, hassle and what empty nights are worth to you).
+// Only the shaded free stretch is simulated per future; the nights beyond the bookings either
+// side are one projected scenario, drawn identically in every row.
 function examplesHtml(r) {
 const dayMs = 86400000;
-const t0 = new Date(`${r.window.start}T00:00:00Z`).getTime();
-const N = r.window.nights;
+const t0 = new Date(`${r.display.start}T00:00:00Z`).getTime();
+const N = r.display.nights;
 const idx = (d) => Math.round((new Date(`${d}T00:00:00Z`).getTime() - t0) / dayMs);
 const pctOf = (i) => `${(Math.max(0, Math.min(N, i)) / N) * 100}%`;
 const bar = (b, cls, label, title) => {
@@ -224,23 +291,30 @@ if (z <= 0 || a >= N) return '';
 const clipL = a < 0; const clipR = z > N;
 return `<span class="be-bk ${cls}${clipL ? ' clip-l' : ''}${clipR ? ' clip-r' : ''}" style="left:${pctOf(a)};width:${(Math.min(N, z) - Math.max(0, a)) / N * 100}%;" title="${escapeHtml(title)}">${escapeHtml(label)}</span>`;
 };
+// One overlay behind every row, so the weekend bands run unbroken from the top row to the
+// bottom one, with the simulated free stretch tinted.
 const weekends = [];
 for (let i = 0; i < N; i++) { const wd = new Date(t0 + i * dayMs).getUTCDay(); if (wd === 5 || wd === 6) weekends.push(i); }
 const wk = weekends.map((i) => `<span class="be-wk" style="left:${pctOf(i)};width:${100 / N}%;"></span>`).join('');
+const bs = idx(r.window.start); const be = idx(r.window.end);
+const blk = `<span class="be-blk" style="left:${pctOf(bs)};width:${(Math.min(N, be) - Math.max(0, bs)) / N * 100}%;" title="The free stretch: the only dates that can come out differently if you accept or reject"></span>`;
 const head = Array.from({ length: N }, (_, i) => { const d = new Date(t0 + i * dayMs); const day = d.getUTCDate(); const show = day === 1 || i === 0 || day % 2 === 1; return `<span class="be-hd" style="left:${pctOf(i)};width:${100 / N}%;">${show ? (day === 1 || i === 0 ? `${day} ${d.toLocaleDateString('en-GB', { month: 'short', timeZone: 'UTC' })}` : day) : ''}</span>`; }).join('');
 const existing = r.existingStays.map((x) => bar(x, 'existing', `${x.guest ? String(x.guest).split(/[ ,]/)[0] : 'Booked'}${x.amount ? ` ${money(x.amount)}` : ''}`, `${x.guest || 'Booked'}: ${short(x.checkin)} – ${short(x.checkout)}${x.amount ? `, ${money(x.amount)}` : ''} (already booked)`)).join('');
+const projected = r.projected.map((b) => bar(b, 'proj', `${b.nights}n ${money(b.amount)}`, `Projected booking ${short(b.checkin)} – ${short(b.checkout)}: ${b.nights} night${b.nights === 1 ? '' : 's'} at about ${money(b.perNight)}/night = ${money(b.amount)}. One possible scenario for dates this decision doesn't touch; the same in every future.`)).join('');
+const projectedSum = r.projected.reduce((a, b) => a + b.amount, 0);
 const reqBar = bar(r.request, 'request', `Request ${money(r.request.payout)}`, `This request: ${short(r.request.checkin)} – ${short(r.request.checkout)}, ${money(r.request.payout)} (if it goes ahead)`);
 const row = (label, bookings, withRequest, net) => {
-const sum = r.existingStays.reduce((a, x) => a + (x.amount || 0), 0) + bookings.reduce((a, b) => a + b.amount, 0) + (withRequest ? r.request.payout : 0);
+const sum = r.existingStays.reduce((a, x) => a + (x.amount || 0), 0) + projectedSum + bookings.reduce((a, b) => a + b.amount, 0) + (withRequest ? r.request.payout : 0);
 const bars = bookings.map((b) => bar(b, `new${b.discounted ? ' disc' : ''}`, `${b.nights}n ${money(b.amount)}`, `New booking ${short(b.checkin)} – ${short(b.checkout)}: ${b.nights} night${b.nights === 1 ? '' : 's'} at about ${money(b.perNight)}/night = ${money(b.amount)}${b.discounted ? ' (after a discount)' : ''}; arrived ${short(b.arrived)}`)).join('');
-return `<div class="be-ex-row"><span class="be-ex-label">${escapeHtml(label)}</span><div class="be-ex-track">${wk}${existing}${withRequest ? reqBar : ''}${bars}</div><span class="be-ex-total" title="Everything drawn in this row (already booked, new and the request), then the model's net figure for the whole window">${money(sum)}<small>net ${money(net)}</small></span></div>`;
+return `<div class="be-ex-row"><span class="be-ex-label ${label === 'Accept' ? 'acc' : 'rej'}">${escapeHtml(label)}</span><div class="be-ex-track">${existing}${projected}${withRequest ? reqBar : ''}${bars}</div><span class="be-ex-total" title="Everything drawn in this row (already booked, projected, new and the request), then the model's net figure for the free stretch">${money(sum)}<small>net ${money(net)}</small></span></div>`;
 };
 const futures = r.examples.map((e, i) => `<div class="be-ex-future"><div class="be-ex-name">Future ${i + 1}</div>
 ${row('Reject', e.reject, false, e.total.reject)}
 ${row('Accept', e.accept, true, e.total.accept)}</div>`).join('');
+const key = (cls, text) => `<span class="be-sw ${cls}"></span>${text}`;
 return `<details class="settings-subgroup" open><summary>Three of the simulated futures</summary>
-<div class="settings-note" style="margin:4px 0 6px;">${escapeHtml(r.room.label)}, ${escapeHtml(short(r.window.start))} – ${escapeHtml(short(r.window.end))}. Grey: already booked. Dark: bookings that arrive in this future, with nights and amount. Outlined: this request, if it goes ahead. Shaded days are Fri and Sat. The figure at the end of a row adds up everything drawn in it; "net" is the whole window across every room after cleaning, hassle and what empty nights are worth to you. The model averages ${r.runs.toLocaleString('en-GB')} futures like these.</div>
-<div class="be-ex-wrap"><div class="be-ex-row be-ex-axis"><span class="be-ex-label"></span><div class="be-ex-track be-ex-head">${head}</div><span class="be-ex-total"></span></div>${futures}</div>
+<div class="settings-note be-ex-key" style="margin:4px 0 6px;">${escapeHtml(r.room.label)}. ${key('existing', 'Already booked')} ${key('new', 'New booking in this future')} ${key('disc', 'New, after a discount')} ${key('request', 'This request, if it goes ahead')} ${key('proj', 'Projected: not affected by the decision, same in every future')} ${key('wk', 'Fri and Sat')} ${key('blk', 'The free stretch that is simulated')}. The figure at the end of a row adds up everything drawn in it; "net" is the free stretch across every room after cleaning, hassle and what empty nights are worth to you. The model averages ${r.runs.toLocaleString('en-GB')} futures like these.</div>
+<div class="be-ex-wrap"><div class="be-ex-chart"><div class="be-ex-overlay">${blk}${wk}</div><div class="be-ex-row be-ex-axis"><span class="be-ex-label"></span><div class="be-ex-track be-ex-head">${head}</div><span class="be-ex-total"></span></div>${futures}</div></div>
 </details>`;
 }
 
@@ -300,6 +374,15 @@ bound = true;
 const root = document.getElementById('booking-evaluator');
 root.addEventListener('focusin', (e) => { if (e.target.id === 'be-listing') fillListingSelect(); });
 root.addEventListener('click', async (e) => {
+const main = e.target.closest('[data-be-row]');
+if (main) {
+const k = main.dataset.beRow;
+const open = !state.expanded.has(k);
+if (open) state.expanded.add(k); else state.expanded.delete(k);
+root.querySelectorAll(`[data-be-sub="${k}"]`).forEach((tr) => { tr.hidden = !open; });
+const caret = main.querySelector('.be-caret'); if (caret) caret.innerHTML = open ? '&#9662;' : '&#9656;';
+return;
+}
 if (e.target.closest('#be-run')) { state.overrides = {}; run(); return; }
 if (e.target.closest('#be-whatif-reset')) { state.overrides = {}; run(); return; }
 if (e.target.closest('#be-save')) { saveToLog(); renderResult(); const s = document.getElementById('be-save-status'); if (s) s.textContent = 'Saved on the request log.'; return; }
