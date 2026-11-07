@@ -22,6 +22,9 @@ import { owners, ownerNameFor, ownerKeyFor, splitAmountFor, shareRuleAt, nightRa
 const usDate = (s) => { const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(String(s || '').trim()); return m ? `${m[3]}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}` : ''; };
 const num = (s) => { const v = Number(String(s || '').replace(/[£,\s]/g, '')); return Number.isFinite(v) && String(s || '').trim() !== '' ? v : null; };
 const near = (a, b) => a != null && b != null && Math.abs(Number(a) - Number(b)) < 0.02;
+const within = (a, b, tol) => a != null && b != null && Math.abs(Number(a) - Number(b)) <= tol;
+// A guest name that fits (first name contained), or nothing to compare.
+const nameFits = (have, want) => { const a = String(have || '').toLowerCase(); const b = String(want || '').toLowerCase().split(/\s+/)[0]; return !a || !b || a.includes(b); };
 
 // One record per HM code: the reservation row plus what adjusts it.
 function parseEarningsCsv(text) {
@@ -92,7 +95,7 @@ item.kind = 'stay'; item.target = stay;
 if (!stay.confirmationCode) item.fill.confirmationCode = s.code;
 if (!stay.confirmedOn && s.bookingDate) item.fill.confirmedOn = s.bookingDate;
 if (stay.income == null) item.fill.income = s.amount;
-else if (!near(stay.income, s.amount) && !near(stay.income, s.net)) item.differs.push(`income £${stay.income} here, £${s.amount} in the export`);
+else if (!within(stay.income, s.amount, 1) && !within(stay.income, s.net, 1)) item.differs.push(`income £${stay.income} here, £${s.amount} in the export`);
 if (stay.checkin !== s.checkin || stay.checkout !== s.checkout) item.differs.push(`dates ${stay.checkin}–${stay.checkout} here, ${s.checkin}–${s.checkout} in the export`);
 return item;
 }
@@ -101,7 +104,18 @@ const from = dateStrAdd(s.date || s.checkout, -3);
 const hits = (data.lettingLedger || []).filter((e) => ['earned', 'accrual', 'cancellation'].includes(e.kind) && !claimed.has(e.id)
 && (e.confirmationCode === s.code || ((near(e.gross, s.amount) || near(e.gross, s.net) || near(e.amount, s.amount) || near(e.amount, s.net)) && e.date >= from && e.date <= until)));
 const byCode = hits.find((e) => e.confirmationCode === s.code);
-const entry = byCode || (hits.length === 1 ? hits[0] : null);
+let entry = byCode || (hits.length === 1 ? hits[0] : null);
+// Looser, for entries typed by hand at the month end with a rounded amount: within £1, dated
+// from check-in to six weeks after checkout, same room, and the guest's name must fit.
+if (!entry && !hits.length) {
+const loose = (data.lettingLedger || []).filter((e) => ['earned', 'accrual', 'cancellation'].includes(e.kind) && !claimed.has(e.id)
+&& (within(e.gross, s.amount, 1) || within(e.gross, s.net, 1) || within(e.amount, s.amount, 1) || within(e.amount, s.net, 1))
+&& e.date >= dateStrAdd(s.checkin, -3) && e.date <= dateStrAdd(s.checkout, 45)
+&& (!listingId || !e.listingId || roomOf.get(e.listingId) === roomOf.get(listingId))
+&& nameFits(e.guest || e.note, s.guest));
+if (loose.length === 1) entry = loose[0];
+else if (loose.length > 1) { item.ambiguous = true; return item; }
+}
 if (!entry) { item.ambiguous = hits.length > 1; return item; }
 claimed.add(entry.id);
 item.kind = 'ledger'; item.target = entry;
