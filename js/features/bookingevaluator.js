@@ -1,0 +1,300 @@
+// "Should I accept this booking?": the booking evaluator's workbench, in the Letting panel
+// (Finances). Feed it a request (or press Evaluate on one in the Airbnb panel's requests list,
+// or on an unconfirmed stay) and it shows the verdict, every factor's contribution to accept
+// and reject, the chance each night gets booked either way, the assumptions behind it (each
+// with its source, editable for this evaluation), what would change the answer, and a few
+// simulated futures written out. The engine is js/features/bookingmodel.js.
+import { data, queueSave, blankBookingRequest } from '../state.js';
+import { escapeHtml, todayStr, scrollAndFlash } from '../utils.js';
+import { evaluatorRooms } from './bookingsettings.js';
+
+const state = { prefill: null, result: null, ctx: null, overrides: {}, busy: false };
+const money = (v) => `${v < 0 ? '−' : ''}£${Math.abs(Math.round(v)).toLocaleString('en-GB')}`;
+const signed = (v) => `${v >= 0 ? '+' : '−'}£${Math.abs(Math.round(v)).toLocaleString('en-GB')}`;
+const nice = (d) => new Date(`${d}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+const short = (d) => new Date(`${d}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+
+function listingOptions() {
+const rooms = evaluatorRooms();
+const ids = new Set(rooms.flatMap((r) => r.listingIds));
+return (data.airbnbListings || []).filter((l) => ids.has(l.id));
+}
+
+function sectionHtml() {
+return `<div class="letting-chart-wrap" id="booking-evaluator">
+<div class="panel-head" style="margin:18px 0 6px;"><h2 style="font-size:13px;">Should I accept this booking?</h2>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#booking-evaluator-settings" title="Booking evaluator settings">&#9881;</span></div>
+<div class="settings-note" style="margin:0 0 6px;">Weighs accepting a request against keeping its dates open, over the nights around it. Press Evaluate on a request in the <span class="inline-goto-link" data-goto-tab="overview" data-goto-target="#booking-requests">Airbnb panel</span>, or enter one here.</div>
+<div class="sync-row be-form" style="align-items:flex-end;">
+<label class="be-field">Listing<select id="be-listing" class="settings-input"></select></label>
+<label class="be-field">Check-in<input type="date" id="be-checkin" class="settings-input"></label>
+<label class="be-field">Check-out<input type="date" id="be-checkout" class="settings-input"></label>
+<label class="be-field">Payout £<input type="number" id="be-payout" class="settings-input" min="0" step="1" style="width:90px;"></label>
+<label class="be-field">Channel<select id="be-platform" class="settings-input"><option value="airbnb">Airbnb</option><option value="other">Direct</option></select></label>
+<label class="be-field">Reviews<input type="number" id="be-reviews" class="settings-input" min="0" step="1" style="width:70px;" placeholder="?"></label>
+<label class="be-field">Rating<input type="number" id="be-rating" class="settings-input" min="0" max="5" step="0.1" style="width:70px;" placeholder="optional"></label>
+<button class="sync-btn sm inline" type="button" id="be-run">Evaluate</button>
+<span class="sync-status" id="be-status"></span>
+</div>
+<div id="be-result"></div>
+</div>`;
+}
+
+function fillListingSelect() {
+const sel = document.getElementById('be-listing');
+if (!sel) return;
+const cur = sel.value;
+sel.innerHTML = listingOptions().map((l) => `<option value="${escapeHtml(l.id)}">${escapeHtml(l.label || 'Listing')}</option>`).join('');
+if (cur) sel.value = cur;
+}
+
+// An enquiry has no payout in its email: estimate one from the latest request on the same
+// listing (its payout against its nightly rate × nights covers Airbnb's fee and any cleaning fee).
+function estimatePayout(listingId, checkin, checkout, nightlyRate) {
+const nights = Math.round((new Date(`${checkout}T00:00:00`) - new Date(`${checkin}T00:00:00`)) / 86400000);
+const latest = (data.bookingRequests || []).filter((q) => q.listingId === listingId && q.payout > 0 && q.nightlyRate > 0).sort((a, b) => String(b.receivedAt).localeCompare(String(a.receivedAt)))[0];
+const rate = nightlyRate || (latest && latest.nightlyRate);
+if (!rate || nights <= 0) return null;
+const ratio = latest ? latest.payout / (latest.nightlyRate * Math.max(1, Math.round((new Date(`${latest.checkout}T00:00:00`) - new Date(`${latest.checkin}T00:00:00`)) / 86400000))) : 0.97;
+return Math.round(rate * nights * ratio);
+}
+
+// Opens the workbench on a logged request/enquiry (`requestId`) or a stay (`reservationId`).
+async function openEvaluator({ requestId = '', reservationId = '' } = {}) {
+const q = requestId ? (data.bookingRequests || []).find((x) => x.id === requestId) : null;
+const r = reservationId ? (data.airbnbReservations || []).find((x) => x.id === reservationId) : null;
+const src = q || r;
+if (!src) return;
+const payout = q ? (q.payout ?? estimatePayout(q.listingId, q.checkin, q.checkout, q.nightlyRate)) : (r.income ?? estimatePayout(r.listingId, r.checkin, r.checkout, null));
+state.prefill = { requestId: q ? q.id : '', reservationId: q ? (q.reservationId || '') : r.id, estimated: q ? q.payout == null : r.income == null };
+state.overrides = {};
+const { switchTab } = await import('../tabs.js');
+switchTab('finances');
+fillListingSelect();
+document.getElementById('be-listing').value = src.listingId;
+document.getElementById('be-checkin').value = src.checkin;
+document.getElementById('be-checkout').value = src.checkout;
+document.getElementById('be-payout').value = payout == null ? '' : payout;
+document.getElementById('be-platform').value = src.platform === 'other' ? 'other' : 'airbnb';
+document.getElementById('be-reviews').value = q && q.guestReviews != null ? q.guestReviews : '';
+document.getElementById('be-rating').value = q && q.guestRating != null ? q.guestRating : '';
+requestAnimationFrame(() => scrollAndFlash('#booking-evaluator'));
+run();
+}
+
+function readForm() {
+const v = (id) => document.getElementById(id).value;
+return {
+listingId: v('be-listing'), checkin: v('be-checkin'), checkout: v('be-checkout'),
+payout: v('be-payout') === '' ? null : Number(v('be-payout')), platform: v('be-platform'),
+guestReviews: v('be-reviews') === '' ? null : Number(v('be-reviews')),
+guestRating: v('be-rating') === '' ? null : Number(v('be-rating')),
+reservationId: state.prefill ? state.prefill.reservationId : '',
+};
+}
+
+async function run() {
+if (state.busy) return;
+const status = document.getElementById('be-status');
+const req = readForm();
+state.busy = true;
+if (status) status.textContent = 'Working it out…';
+await new Promise((r) => setTimeout(r, 20)); // let the status paint before the simulation runs
+try {
+const model = await import('./bookingmodel.js');
+const ctx = model.buildContext({ overrides: buildOverrides() });
+const result = model.evaluate(req, ctx);
+state.ctx = ctx; state.result = result; state.req = req;
+if (status) status.textContent = result.error ? '' : `${result.runs.toLocaleString('en-GB')} simulated futures.`;
+renderResult();
+} catch (err) {
+console.error('Booking evaluation failed:', err);
+if (status) status.textContent = `Failed: ${err.message || err}`;
+} finally { state.busy = false; }
+}
+
+// The assumptions panel's what-ifs, as engine overrides.
+function buildOverrides() {
+const o = state.overrides;
+const scale = {};
+if (o.demand) scale.demand = o.demand;
+if (o.lead) scale.lead = o.lead;
+if (o.cancel) scale.cancel = o.cancel;
+if (o.ownUse != null) scale.ownUse = o.ownUse;
+const settings = {};
+if (o.elasticity != null) settings.elasticity = o.elasticity;
+return { scale, settings };
+}
+
+const PARTS = [
+{ k: 'request', label: 'This request, allowing for cancellation' },
+{ k: 'before', label: 'New bookings before it, same room' },
+{ k: 'inside', label: 'New bookings on its nights' },
+{ k: 'after', label: 'New bookings after it, same room' },
+{ k: 'other', label: 'New bookings in other rooms' },
+{ k: 'existing', label: 'Bookings already made' },
+{ k: 'clean', label: 'Cleaning', minus: true },
+{ k: 'hassle', label: 'Changeover hassle', minus: true },
+{ k: 'ownUse', label: 'Empty nights, worth to you' },
+];
+
+function verdictHtml(r) {
+const room = escapeHtml(r.room.label);
+const win = `${short(r.window.start)} – ${short(r.window.end)}`;
+const lines = [];
+const rec = r.recommendation === 'COUNTER' ? `COUNTER at ${money(Math.ceil(r.breakEven / 5) * 5)}` : r.recommendation === 'EITHER' ? 'CLOSE CALL' : r.recommendation;
+lines.push(`<div class="be-rec ${escapeHtml(r.recommendation.toLowerCase())}">Recommendation: <strong>${escapeHtml(rec)}</strong></div>`);
+lines.push(`Accepting moves the expected value of ${room} and the other rooms for ${escapeHtml(win)} (${r.window.nights} nights) from <strong>${money(r.reject.mean)}</strong> to <strong>${money(r.accept.mean)}</strong>.`);
+lines.push(r.diff >= 0
+? `It beats rejecting by <strong>${money(r.diff)}</strong>; rejecting does better in ${Math.round(r.pRejectBetter * 100)}% of the simulated futures.`
+: `It falls short of rejecting by <strong>${money(-r.diff)}</strong>; rejecting does better in ${Math.round(r.pRejectBetter * 100)}% of the simulated futures.`);
+if (r.ownUseNights.length) lines.push(`It takes ${r.ownUseNights.map((n) => escapeHtml(nice(n.date))).join(' and ')} in ${room}, worth ${money(r.ownUseNights.reduce((a, n) => a + n.value, 0))} to you empty.`);
+if (r.breakEven != null) lines.push(r.breakEven > r.request.payout ? `Break-even payout: <strong>${money(r.breakEven)}</strong> (asked ${money(r.request.payout)}). From there accepting beats rejecting.` : `Break-even payout: ${money(r.breakEven)}, below the ${money(r.request.payout)} on offer.`);
+const targets = Object.values(data.prefs.lettingChartTargets || {}).reduce((a, t) => a + (Number(t && t.normal) || 0), 0);
+const income = (side) => side.parts.request + side.parts.before + side.parts.inside + side.parts.after + side.parts.other + r.existingIncome;
+lines.push(`Expected income in the window: ${money(income(r.accept))} if accepted, ${money(income(r.reject))} if not${targets ? ` (your monthly targets add up to ${money(targets)})` : ''}.`);
+if (state.prefill && state.prefill.estimated) lines.push('<span class="settings-note" style="margin:0;">The payout is an estimate from your nightly rate: this enquiry\'s email has none. Change it above and Evaluate again.</span>');
+return `<div class="be-verdict">${lines.map((l) => `<div>${l}</div>`).join('')}</div>`;
+}
+
+function tableHtml(r) {
+const rows = PARTS.map((p) => {
+const a = p.k === 'existing' ? r.existingIncome : r.accept.parts[p.k];
+const j = p.k === 'existing' ? r.existingIncome : r.reject.parts[p.k];
+const sa = p.minus ? -a : a; const sj = p.minus ? -j : j;
+const d = sa - sj;
+return `<tr><td>${escapeHtml(p.label)}</td><td class="num">${money(sa)}</td><td class="num">${money(sj)}</td><td class="num ${Math.abs(d) < 0.5 ? 'be-zero' : d > 0 ? 'be-pos' : 'be-neg'}">${Math.abs(d) < 0.5 ? '–' : signed(d)}</td></tr>`;
+}).join('');
+const c = r.cancel;
+const cancelNote = `Cancellation: ${Math.round(c.wNone * 100)}% it goes ahead (${money(r.request.weighted)}), ${Math.round(c.wLate * 100)}% cancelled late (${Math.round(c.latePay * 100)}% paid, nights reopen with little time left)${c.earlyPossible ? `, ${Math.round(c.wEarly * 100)}% cancelled early (nothing paid, nights reopen)` : ''}. Payout ${money(r.request.payout)}${r.request.guestFactor !== 1 ? ` × ${r.request.guestFactor} (${escapeHtml(r.request.guestWhy)})` : ''}${r.request.channelFactor !== 1 ? ` × ${r.request.channelFactor} (direct)` : ''}.`;
+return `<div style="overflow-x:auto;"><table class="limits-table be-table"><thead><tr><th></th><th class="num">Accept</th><th class="num">Reject</th><th class="num">Difference</th></tr></thead><tbody>${rows}
+<tr class="be-total"><td>Total</td><td class="num">${money(r.accept.mean)}</td><td class="num">${money(r.reject.mean)}</td><td class="num ${r.diff >= 0 ? 'be-pos' : 'be-neg'}">${signed(r.diff)}</td></tr>
+<tr><td class="settings-note" style="margin:0;">Range (1 in 10 futures below / above)</td><td class="num settings-note">${money(r.accept.p10)}–${money(r.accept.p90)}</td><td class="num settings-note">${money(r.reject.p10)}–${money(r.reject.p90)}</td><td></td></tr>
+</tbody></table></div>
+<div class="settings-note" style="margin:4px 0 0;">${cancelNote}</div>`;
+}
+
+function stripHtml(r) {
+const cells = r.nights.map((n) => {
+const cls = n.existing ? 'taken' : n.request ? 'req' : '';
+const day = new Date(`${n.date}T00:00:00`);
+const title = n.existing ? `${nice(n.date)}: already booked` : `${nice(n.date)}: booked in ${Math.round(n.accept * 100)}% of futures if you accept${n.request ? ' (this request, allowing for cancellation)' : ''}, ${Math.round(n.reject * 100)}% if you reject`;
+return `<div class="be-night ${cls}${n.weekend ? ' wknd' : ''}" title="${escapeHtml(title)}">
+<div class="be-bars">${n.existing ? '<span class="be-bar full"></span>' : `<span class="be-bar a" style="height:${Math.round(n.accept * 100)}%"></span><span class="be-bar r" style="height:${Math.round(n.reject * 100)}%"></span>`}</div>
+<div class="be-day">${day.getDate()}</div><div class="be-wd">${'SMTWTFS'[day.getDay()]}</div></div>`;
+}).join('');
+const nb = r.neighbours;
+const stayChip = state.stayChipHtml;
+const edge = (id) => { const s = id && (data.airbnbReservations || []).find((x) => x.id === id); return s && stayChip ? stayChip(s) : '<span class="settings-note" style="margin:0;">none in view</span>'; };
+return `<div class="be-strip-head settings-note" style="margin:10px 0 4px;">Chance each night in ${escapeHtml(r.room.label)} is booked: <span class="be-key a"></span> if you accept, <span class="be-key r"></span> if you reject, <span class="be-key full"></span> already booked; the request's nights are outlined. Booking before: ${edge(nb.before)}. Booking after: ${edge(nb.after)}.</div>
+<div class="be-strip">${cells}</div>`;
+}
+
+function assumptionsHtml(r) {
+const o = state.overrides;
+const whatIf = {
+demand: `<label class="be-whatif">Demand <select data-be-whatif="demand">${[0.6, 0.8, 1, 1.2, 1.5].map((v) => `<option value="${v}"${(o.demand || 1) === v ? ' selected' : ''}>${v === 1 ? 'as calibrated' : `${v > 1 ? '+' : ''}${Math.round((v - 1) * 100)}%`}</option>`).join('')}</select></label>`,
+lead: `<label class="be-whatif">Lead time <select data-be-whatif="lead">${[0.5, 0.75, 1, 1.5, 2].map((v) => `<option value="${v}"${(o.lead || 1) === v ? ' selected' : ''}>${v === 1 ? 'as is' : `×${v}`}</option>`).join('')}</select></label>`,
+cancel: `<label class="be-whatif">Cancellations <select data-be-whatif="cancel">${[0.5, 1, 2, 3].map((v) => `<option value="${v}"${(o.cancel || 1) === v ? ' selected' : ''}>${v === 1 ? 'as is' : `×${v}`}</option>`).join('')}</select></label>`,
+elasticity: `<label class="be-whatif">Sensitivity <input type="number" step="0.1" min="0" data-be-whatif="elasticity" value="${escapeHtml(String(o.elasticity ?? state.ctx.s.elasticity))}" style="width:56px;"></label>`,
+ownUse: `<label class="be-whatif">Own use <select data-be-whatif="ownUse">${[0, 0.5, 1, 1.5, 2].map((v) => `<option value="${v}"${(o.ownUse ?? 1) === v ? ' selected' : ''}>${v === 1 ? 'as set' : `×${v}`}</option>`).join('')}</select></label>`,
+};
+const rows = r.assumptions.map((a) => `<tr><td>${escapeHtml(a.label)}</td><td>${escapeHtml(a.value)}</td><td class="settings-note" style="margin:0;">${escapeHtml(a.source)}</td><td>${a.editable ? whatIf[a.editable] : ''}</td></tr>`).join('');
+const changed = Object.keys(o).length;
+return `<details class="settings-subgroup" id="be-assumptions"${changed ? ' open' : ''}><summary>Assumptions${changed ? ' (what-if applied)' : ''}</summary>
+<div style="overflow-x:auto;"><table class="limits-table be-table"><thead><tr><th>Figure</th><th>Value</th><th>Where it comes from</th><th>What if</th></tr></thead><tbody>${rows}</tbody></table></div>
+<div class="sync-row" style="margin-top:6px;">${changed ? '<button class="sync-btn sm inline" type="button" id="be-whatif-reset">Back to calibrated</button>' : ''}
+<span class="settings-note" style="margin:0;">What-ifs apply to this evaluation only. Defaults are in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#booking-evaluator-settings">Settings</span>. The simulated host takes any request that fits, so rejecting is slightly undervalued.</span></div>
+</details>`;
+}
+
+function examplesHtml(r) {
+const fmt = (list) => (list.length ? list.map((b) => `${escapeHtml(`${b.nights}-night booking ${short(b.checkin)}–${short(b.checkout)} at £${b.perNight}/night, arrived ${short(b.arrived)}`)}`).join('; ') : 'no new booking in this room');
+return `<details class="settings-subgroup"><summary>Three of the simulated futures</summary>
+${r.examples.map((e, i) => `<div class="be-example"><b>Future ${i + 1}.</b> If you reject: ${fmt(e.reject)}. If you accept (and it isn't cancelled): ${fmt(e.accept)}. Totals ${money(e.total.reject)} vs ${money(e.total.accept)}.</div>`).join('')}
+</details>`;
+}
+
+function logHtml() {
+const q = state.prefill && state.prefill.requestId ? (data.bookingRequests || []).find((x) => x.id === state.prefill.requestId) : null;
+const saved = q && q.evaluation ? `Saved ${escapeHtml(String(q.evaluation.at).slice(0, 10))} (${escapeHtml(q.evaluation.recommendation)}).` : '';
+return `<div class="sync-row" style="margin-top:8px;align-items:center;">
+<button class="sync-btn sm inline" type="button" id="be-sensitivity">What would change the answer?</button>
+<button class="sync-btn sm inline" type="button" id="be-save">${q ? 'Save this verdict on the request' : 'Save to the request log'}</button>
+<button class="sync-btn sm inline" type="button" data-be-decide="accepted">I accepted it</button>
+<button class="sync-btn sm inline" type="button" data-be-decide="declined">I declined it</button>
+<span class="sync-status" id="be-save-status">${saved}</span>
+</div>
+<div id="be-sens"></div>`;
+}
+
+function renderResult() {
+const el = document.getElementById('be-result');
+if (!el) return;
+const r = state.result;
+if (!r) { el.innerHTML = ''; return; }
+if (r.error) { el.innerHTML = `<div class="settings-note" style="margin:6px 0;">${escapeHtml(r.error)}</div>`; return; }
+el.innerHTML = verdictHtml(r) + tableHtml(r) + stripHtml(r) + assumptionsHtml(r) + examplesHtml(r) + logHtml();
+}
+
+// Saves the verdict on the logged request it came from, or adds a request record for one
+// typed in by hand. `decision` (optional) records what you did.
+function saveToLog(decision = '') {
+const r = state.result;
+if (!r || r.error) return null;
+const req = state.req;
+const evaluation = { at: new Date().toISOString(), accept: Math.round(r.accept.mean), reject: Math.round(r.reject.mean), diff: Math.round(r.diff), breakEven: r.breakEven == null ? null : Math.round(r.breakEven), recommendation: r.recommendation, payout: req.payout, modelVersion: r.modelVersion };
+let q = state.prefill && state.prefill.requestId ? (data.bookingRequests || []).find((x) => x.id === state.prefill.requestId) : null;
+if (!q) {
+q = blankBookingRequest({ kind: 'request', listingId: req.listingId, checkin: req.checkin, checkout: req.checkout, payout: req.payout, platform: req.platform, guestReviews: req.guestReviews, guestRating: req.guestRating, receivedAt: new Date().toISOString(), reservationId: req.reservationId || '' });
+data.bookingRequests.push(q);
+state.prefill = { requestId: q.id, reservationId: q.reservationId, estimated: false };
+}
+q.evaluation = evaluation;
+if (req.guestRating != null) q.guestRating = req.guestRating;
+if (decision) { q.decision = decision; q.decidedOn = todayStr(); }
+queueSave();
+return q;
+}
+
+let bound = false;
+async function initBookingEvaluator() {
+const anchor = document.getElementById('letting-occupancy-section') || document.getElementById('letting-panel');
+if (!anchor || document.getElementById('booking-evaluator')) return;
+anchor.insertAdjacentHTML(anchor.id === 'letting-panel' ? 'beforeend' : 'afterend', sectionHtml());
+fillListingSelect();
+const { stayChipHtml, bindStayChips } = await import('./airbnb.js');
+state.stayChipHtml = stayChipHtml;
+bindStayChips();
+if (bound) return;
+bound = true;
+const root = document.getElementById('booking-evaluator');
+root.addEventListener('focusin', (e) => { if (e.target.id === 'be-listing') fillListingSelect(); });
+root.addEventListener('click', async (e) => {
+if (e.target.closest('#be-run')) { state.overrides = {}; run(); return; }
+if (e.target.closest('#be-whatif-reset')) { state.overrides = {}; run(); return; }
+if (e.target.closest('#be-save')) { saveToLog(); renderResult(); const s = document.getElementById('be-save-status'); if (s) s.textContent = 'Saved on the request log.'; return; }
+const decide = e.target.closest('[data-be-decide]');
+if (decide) { saveToLog(decide.dataset.beDecide); renderResult(); const s = document.getElementById('be-save-status'); if (s) s.textContent = `Recorded as ${decide.dataset.beDecide}.`; return; }
+if (e.target.closest('#be-sensitivity')) {
+const out = document.getElementById('be-sens');
+out.innerHTML = '<div class="settings-note" style="margin:6px 0;">Re-running with each assumption moved…</div>';
+await new Promise((r) => setTimeout(r, 20));
+const model = await import('./bookingmodel.js');
+const rows = await model.sensitivity(state.req, state.ctx, state.result, { onProgress: (t) => { out.innerHTML = `<div class="settings-note" style="margin:6px 0;">Re-running with each assumption moved: ${escapeHtml(t)}</div>`; } });
+const flips = rows.filter((x) => x.flips);
+out.innerHTML = `<div class="settings-note" style="margin:6px 0 2px;">${flips.length ? `${flips.length} change${flips.length === 1 ? '' : 's'} would flip the recommendation.` : 'None of these changes flips the recommendation.'}</div>
+<table class="limits-table be-table"><thead><tr><th>If…</th><th class="num">Accept beats reject by</th><th>Recommendation</th></tr></thead><tbody>${rows.map((x) => `<tr${x.flips ? ' class="be-flip"' : ''}><td>${escapeHtml(x.label)}</td><td class="num">${x.error ? '' : signed(x.diff)}</td><td>${escapeHtml(x.error || x.recommendation)}${x.flips ? ' ⚠' : ''}</td></tr>`).join('')}</tbody></table>`;
+}
+});
+root.addEventListener('change', (e) => {
+const w = e.target.closest('[data-be-whatif]');
+if (!w) return;
+const v = Number(w.value);
+if (!Number.isFinite(v)) return;
+state.overrides[w.dataset.beWhatif] = v;
+run();
+});
+}
+
+export { initBookingEvaluator, openEvaluator };

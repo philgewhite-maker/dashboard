@@ -4525,3 +4525,32 @@ background:var(--slate-bg);color:var(--slate);
 .be-lead-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(70px,1fr));gap:6px;font-size:11px;}
 .be-lead-grid label{display:flex;flex-direction:column;gap:2px;}
 @media (max-width:600px){.be-set-label{flex-basis:100%;}}
+/* Booking evaluator workbench (bookingevaluator.js), in the Letting panel. */
+.be-form{flex-wrap:wrap;gap:6px 10px;}
+.be-field{display:flex;flex-direction:column;gap:2px;font-size:11px;color:var(--muted);}
+.be-verdict{display:flex;flex-direction:column;gap:4px;margin:10px 0 8px;font-size:13px;line-height:1.45;max-width:72ch;}
+.be-rec{font-size:15px;}
+.be-rec.accept strong{color:var(--sage);}
+.be-rec.decline strong{color:var(--red);}
+.be-table{min-width:0;font-size:12px;}
+.be-table td.num,.be-table th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.be-table .be-total td{font-weight:600;border-top:1px solid var(--ink);}
+.be-pos{color:var(--sage);}
+.be-neg{color:var(--red);}
+.be-zero{color:var(--muted);}
+.be-flip td{font-weight:600;}
+.be-strip{display:flex;gap:2px;overflow-x:auto;padding-bottom:4px;}
+.be-night{flex:0 0 18px;display:flex;flex-direction:column;align-items:center;font-size:9px;color:var(--muted);border:1px solid transparent;border-radius:3px;padding:1px 0;}
+.be-night.req{border-color:var(--ink);}
+.be-night.wknd .be-wd{color:var(--ink);font-weight:600;}
+.be-bars{height:48px;width:14px;display:flex;align-items:flex-end;gap:1px;}
+.be-bar{display:block;width:6px;border-radius:2px 2px 0 0;}
+.be-bar.a{background:var(--ink);}
+.be-bar.r{background:var(--muted);opacity:.6;}
+.be-bar.full{width:13px;height:100%;background:var(--line);}
+.be-key{display:inline-block;width:9px;height:9px;border-radius:2px;vertical-align:-1px;}
+.be-key.a{background:var(--ink);}
+.be-key.r{background:var(--muted);opacity:.6;}
+.be-key.full{background:var(--line);}
+.be-whatif{font-size:11px;display:inline-flex;align-items:center;gap:4px;white-space:nowrap;}
+.be-example{font-size:12px;margin:4px 0;line-height:1.45;}

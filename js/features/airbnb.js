@@ -863,7 +863,7 @@ if (chip) openStay(chip.dataset.openStay);
 // confirmation email arrives, and is forgotten if the dates drop off the feed.
 function unconfirmedHtml(r) {
 if (!isUnconfirmedStay(r)) return '';
-return `<div class="cal-event-row"><span class="settings-note" style="margin:0;"><b>Unconfirmed.</b> On your Airbnb calendar, but no confirmation email, name or income yet. Airbnb also marks dates "Reserved" while it holds them for an enquiry, so this may not be a booking.</span></div>`;
+return `<div class="cal-event-row"><span class="settings-note" style="margin:0;"><b>Unconfirmed.</b> On your Airbnb calendar, but no confirmation email, name or income yet. Airbnb also marks dates "Reserved" while it holds them for an enquiry, so this may not be a booking.</span> <button class="sync-btn sm inline" type="button" data-airbnb-eval="${escapeHtml(r.id)}" title="Weigh accepting this against keeping the dates open">Evaluate</button></div>`;
 }
 
 // Shown on a stay whose dates the feed changed after a payout was recorded.
@@ -970,6 +970,9 @@ el.innerHTML = errorsHtml + refundsPendingHtml() + (upcoming.length
 
 bindRefundsPending(el);
 import('./bookingrequests.js').then((m) => m.renderBookingRequests()).catch((err) => console.error('Booking requests render failed:', err));
+el.querySelectorAll('[data-airbnb-eval]').forEach((btn) => {
+btn.addEventListener('click', () => import('./bookingevaluator.js').then((m) => m.openEvaluator({ reservationId: btn.dataset.airbnbEval })));
+});
 el.querySelectorAll('[data-airbnb-res-field]').forEach((input) => {
 input.addEventListener('change', () => {
 const r = data.airbnbReservations.find((x) => x.id === input.dataset.airbnbResId);

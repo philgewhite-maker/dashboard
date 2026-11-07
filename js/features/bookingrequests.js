@@ -232,7 +232,8 @@ return `<div class="bkreq-row" data-bkreq="${escapeHtml(q.id)}">
 <span class="bkreq-who">${escapeHtml(who)}</span>
 <span class="bkreq-money">${escapeHtml(money)}</span>
 <span class="bkreq-out">${outcome}</span>
-<span class="bkreq-mail" data-bkreq-open="${escapeHtml(q.messageId)}" title="Read the email">&#9993;</span>
+${q.checkin >= todayStr() ? `<button class="sync-btn sm inline" type="button" data-bkreq-eval="${escapeHtml(q.id)}" title="Weigh accepting this against keeping the dates open">Evaluate</button>` : ''}
+${q.messageId ? `<span class="bkreq-mail" data-bkreq-open="${escapeHtml(q.messageId)}" title="Read the email">&#9993;</span>` : ''}
 </div>`;
 }
 
@@ -265,6 +266,8 @@ el.open = wasOpen;
 if (!bound) {
 bound = true;
 el.addEventListener('click', async (e) => {
+const ev = e.target.closest('[data-bkreq-eval]');
+if (ev) { const { openEvaluator } = await import('./bookingevaluator.js'); openEvaluator({ requestId: ev.dataset.bkreqEval }); return; }
 const mail = e.target.closest('[data-bkreq-open]');
 if (mail) { const { openMessage } = await import('./mailviewer.js'); openMessage(mail.dataset.bkreqOpen); return; }
 if (!e.target.closest('#booking-requests-backfill')) return;
