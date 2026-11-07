@@ -4,8 +4,9 @@ import { switchTab } from '../tabs.js';
 import { callTextJson, MissingKeyError, useModel } from '../ai.js';
 import { gapsFor } from './travel.js';
 import { accountLabel } from './financeaccounts.js';
+import { reviewDueMonth } from './bookingprojection.js';
 
-const TARGET_TABS = { connection: 'dating', search: 'dating', habit: 'overview', goal: 'overview', job: 'jobhunt', voucher: 'finances', financeAccount: 'finances', switchOffers: 'finances', calendar: 'overview', business: 'business', task: 'tasks', want: 'shopping', health: 'health', trip: 'travel', 'trip-suggestion': 'travel', airbnb: 'overview', media: 'media' };
+const TARGET_TABS = { connection: 'dating', search: 'dating', habit: 'overview', goal: 'overview', job: 'jobhunt', voucher: 'finances', financeAccount: 'finances', switchOffers: 'finances', calendar: 'overview', business: 'business', task: 'tasks', want: 'shopping', health: 'health', trip: 'travel', 'trip-suggestion': 'travel', airbnb: 'overview', media: 'media', modelReview: 'finances' };
 // Lead time for the "trip's coming up and still has gaps" nudge -- same
 // 14-day window as NEW_MATCH_STAGES below, so a trip nudge doesn't start
 // nagging the moment it's created, only once it's genuinely close.
@@ -390,6 +391,7 @@ buyUrl: best.url,
 
 buildHealthNudges(pool);
 buildAirbnbNudges(pool);
+buildModelReviewNudge(pool);
 buildStockNudges(pool);
 
 return pool;
@@ -435,6 +437,20 @@ category: 'shopping',
 // RESERVATION event itself). No snooze/dismiss, matching every other
 // nudge in this pool -- none of them have one, the pool re-shuffles each
 // render instead.
+// The monthly review of the booking model's projections and verdicts, in the first days of a month
+// (see reviewDueMonth, js/features/bookingprojection.js). Clears once the review has been opened.
+function buildModelReviewNudge(pool) {
+const ym = reviewDueMonth();
+if (!ym) return;
+const name = new Date(`${ym}-01T00:00:00`).toLocaleDateString('en-GB', { month: 'long' });
+pool.push({
+text: `Review how ${name}'s booking projections turned out against what happened.`,
+target: { type: 'modelReview', id: ym },
+signals: { kind: 'model-review', month: ym },
+category: 'airbnb',
+});
+}
+
 function buildAirbnbNudges(pool) {
 data.airbnbReservations.forEach((r) => {
 if ((r.status || 'booked') !== 'booked') return; // completed and cancelled stays stay on file but need nothing doing
@@ -608,6 +624,8 @@ setTimeout(() => scrollAndFlash('#switch-offers-panel'), 50);
 setTimeout(() => scrollAndFlash(`[data-cal-row="${CSS.escape(target.name)}"]`), 50);
 } else if (target.type === 'airbnb') {
 setTimeout(() => scrollAndFlash(`[data-airbnb-row="${target.id}"]`), 50);
+} else if (target.type === 'modelReview') {
+setTimeout(() => { const d = document.getElementById('model-review'); if (d) { d.open = true; scrollAndFlash('#model-review'); } }, 80);
 } else if (target.type === 'business') {
 setTimeout(() => scrollAndFlash(`[data-idea-row="${target.id}"]`), 50);
 } else if (target.type === 'task') {

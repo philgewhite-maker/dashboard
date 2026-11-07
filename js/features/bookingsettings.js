@@ -143,8 +143,8 @@ settings().unavailable.push({ id: uid(), roomKey, from, to });
 queueSave(); renderBookingEvaluatorSettings(); return;
 }
 if (!e.target.closest('#be-reset')) return;
-const { rooms, unavailable } = settings();
-data.prefs.bookingEvaluator = { ...structuredClone(DEFAULT_PREFS.bookingEvaluator), rooms, unavailable };
+const { rooms, unavailable, calibration } = settings();
+data.prefs.bookingEvaluator = { ...structuredClone(DEFAULT_PREFS.bookingEvaluator), rooms, unavailable, calibration };
 queueSave();
 renderBookingEvaluatorSettings();
 });

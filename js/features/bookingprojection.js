@@ -85,4 +85,19 @@ queueSave();
 return { record };
 }
 
-export { latestProjection, projectionForMonth, projectedNights, projectedByDate, runProjection, statusText, ageDays, showProjection, STALE_DAYS };
+// The month whose model review is due: in the first ten days of a month, last month, if saved
+// projections cover at least ten of its nights that have now passed and the review hasn't been opened
+// since. Light on purpose (reads only the saved projections): the Today nudges call it on every build.
+function reviewDueMonth() {
+const today = todayStr();
+if (Number(today.slice(8, 10)) > 10) return '';
+const prev = dateStrAdd(`${today.slice(0, 7)}-01`, -1).slice(0, 7);
+if (data.prefs.modelReviewSeen === prev) return '';
+const nights = new Set();
+(data.bookingProjections || []).forEach((p) => (p.voids || []).forEach((v) => {
+for (let i = 0; i < v.nights; i++) { const d = dateStrAdd(v.from, i); if (d.startsWith(prev) && d < today && d > String(p.madeAt).slice(0, 10)) nights.add(`${v.roomKey}|${d}`); }
+}));
+return nights.size >= 10 ? prev : '';
+}
+
+export { latestProjection, projectionForMonth, projectedNights, projectedByDate, runProjection, statusText, ageDays, showProjection, reviewDueMonth, STALE_DAYS };

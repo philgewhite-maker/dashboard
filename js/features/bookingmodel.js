@@ -113,7 +113,12 @@ const stays = collectStays().map((x) => ({ id: x.id, listingId: x.listingId, che
 const requests = (data.bookingRequests || []).map((q) => ({ ...q }));
 const proposals = (data.airbnbRateProposals || []).map((p) => ({ listingId: p.listingId, startDate: p.startDate, endDate: p.endDate, upliftPct: p.upliftPct, upliftAmount: p.upliftAmount, reason: p.reason }));
 const listingLabels = Object.fromEntries((data.airbnbListings || []).map((l) => [l.id, l.label || 'Listing']));
-return { today, s, firstClean, rooms, stays, requests, proposals, listingLabels, scale: overrides.scale || {} };
+// The factors the monthly review applied, times any what-if for this one evaluation.
+const cal = s.calibration || {};
+const ov = overrides.scale || {};
+const scale = { ...ov };
+[['demand', 'demand'], ['lead', 'lead'], ['cancel', 'cancel']].forEach(([k]) => { const c = Number(cal[k]) || 1; if (c !== 1 || ov[k] != null) scale[k] = c * (ov[k] != null ? ov[k] : 1); });
+return { today, s, firstClean, rooms, stays, requests, proposals, listingLabels, scale };
 }
 
 // ---- Calibration ----------------------------------------------------------------------------
@@ -643,6 +648,7 @@ neighbours: neighbourStays(ctx, ri, ci, co),
 existingStays: existing.filter((x) => ri2.get(x.listingId) === ri && dayNum(x.checkout) > dispS && dayNum(x.checkin) < dispE).map((x) => ({ id: x.id, checkin: x.checkin, checkout: x.checkout, guest: x.guest, amount: Number(x.income) > 0 ? Math.round(Number(x.income)) : null })).sort((a, b) => a.checkin.localeCompare(b.checkin)),
 runs,
 assumptions: describeAssumptions(ctx, params, ri, ci),
+assumptionsSnap: assumptionsSnapshot(ctx, params),
 };
 }
 
@@ -725,11 +731,18 @@ const [y, m] = today.split('-').map(Number);
 return new Date(Date.UTC(y, m + 1, 1)).toISOString().slice(0, 10); // first of the month after next
 }
 
-// The listing in a room that currently takes its bookings: the one with its latest stay.
+// The listing in a room that currently takes its bookings: the one with most stays starting within
+// two months either side of today (a one-off booking elsewhere in the year doesn't change who the
+// room is let for); failing that, the one with the latest stay.
 function ownerListingOf(ctx, room) {
+const T = dayNum(ctx.today);
 const mine = ctx.stays.filter((x) => room.listingIds.includes(x.listingId) && x.status === 'stay');
+if (!mine.length) return room.listingIds[0];
+const near = new Map();
+mine.forEach((x) => { if (Math.abs(dayNum(x.checkin) - T) <= 60) near.set(x.listingId, (near.get(x.listingId) || 0) + 1); });
+if (near.size) return [...near.entries()].sort((a, b) => b[1] - a[1])[0][0];
 mine.sort((a, b) => String(b.checkin).localeCompare(String(a.checkin)));
-return mine.length ? mine[0].listingId : room.listingIds[0];
+return mine[0].listingId;
 }
 
 // Returns {step(n) -> done, finish() -> result, runs}, so a caller can run it in slices and keep the

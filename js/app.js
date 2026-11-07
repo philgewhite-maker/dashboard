@@ -6,6 +6,7 @@ import { initActivity } from './features/activity.js';
 import { initLettingOccupancy } from './features/lettingoccupancy.js';
 import { initBookingEvaluatorSettings } from './features/bookingsettings.js';
 import { initBookingEvaluator } from './features/bookingevaluator.js';
+import { initModelReview } from './features/modelreview.js';
 import { initAirbnbEarningsImport } from './features/airbnbearnings.js';
 import { initMailHistory } from './features/mailledger.js';
 import { initAutoLink } from './features/autolink.js';
@@ -368,6 +369,8 @@ initTheme();
 initActivity();
 initLettingOccupancy();
 initBookingEvaluator();
+async function startModelReview() { await new Promise((r) => setTimeout(r, 0)); initModelReview(); }
+startModelReview();
 initAirbnbEarningsImport();
 initMailHistory();
 initAutoLink();

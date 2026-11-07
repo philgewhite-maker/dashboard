@@ -346,7 +346,21 @@ function saveToLog(decision = '') {
 const r = state.result;
 if (!r || r.error) return null;
 const req = state.req;
-const evaluation = { at: new Date().toISOString(), accept: Math.round(r.accept.mean), reject: Math.round(r.reject.mean), diff: Math.round(r.diff), breakEven: r.breakEven == null ? null : Math.round(r.breakEven), recommendation: r.recommendation, payout: req.payout, modelVersion: r.modelVersion };
+// Everything the monthly review (js/features/modelreview.js) needs to check this estimate against what
+// happened: the free stretch it covered, both scenarios' money by part, the chance each night was
+// expected to be booked either way, the cancellation odds, and the assumptions it was made under.
+const block = r.nights.filter((n) => n.inBlock);
+const partsOf = (p) => ({ request: Math.round(p.request), before: Math.round(p.before), inside: Math.round(p.inside), after: Math.round(p.after), other: Math.round(p.other), clean: Math.round(p.clean), hassle: Math.round(p.hassle), ownUse: Math.round(p.ownUse) });
+const evaluation = {
+at: new Date().toISOString(), accept: Math.round(r.accept.mean), reject: Math.round(r.reject.mean), diff: Math.round(r.diff), breakEven: r.breakEven == null ? null : Math.round(r.breakEven), recommendation: r.recommendation, payout: req.payout, modelVersion: r.modelVersion,
+roomKey: r.room.key, listingId: req.listingId, checkin: req.checkin, checkout: req.checkout, platform: req.platform || 'airbnb', guestReviews: req.guestReviews,
+weighted: Math.round(r.request.weighted), runs: r.runs,
+block: { from: r.window.start, to: r.window.end, capped: r.window.capped },
+acceptParts: partsOf(r.accept.parts), rejectParts: partsOf(r.reject.parts), existingIncome: Math.round(r.existingIncome),
+nightAccept: block.map((n) => Math.round(n.accept * 100) / 100), nightReject: block.map((n) => Math.round(n.reject * 100) / 100),
+cancel: { rate: Math.round(r.cancel.rate * 1000) / 1000, wNone: Math.round(r.cancel.wNone * 1000) / 1000, wLate: Math.round(r.cancel.wLate * 1000) / 1000, wEarly: Math.round(r.cancel.wEarly * 1000) / 1000, latePay: r.cancel.latePay },
+assumptions: r.assumptionsSnap || null,
+};
 let q = state.prefill && state.prefill.requestId ? (data.bookingRequests || []).find((x) => x.id === state.prefill.requestId) : null;
 if (!q) {
 q = blankBookingRequest({ kind: 'request', listingId: req.listingId, checkin: req.checkin, checkout: req.checkout, payout: req.payout, platform: req.platform, guestReviews: req.guestReviews, guestRating: req.guestRating, receivedAt: new Date().toISOString(), reservationId: req.reservationId || '' });

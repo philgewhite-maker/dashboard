@@ -224,6 +224,9 @@ elasticity: 1.5, enquiryWeight: 0.3,
 // [{id, roomKey, from, to}]: times a room wasn't offered (in use, off Airbnb), left out of
 // the occupancy the evaluator calibrates demand to.
 unavailable: [],
+// Factors the monthly model review has applied, on top of the starting assumptions (js/features/modelreview.js):
+// {demand, lead, cancel, appliedOn, note, history:[{on, demand, from, n}]}. 1 = no correction.
+calibration: { demand: 1, lead: 1, cancel: 1, appliedOn: '', note: '', history: [] },
 rooms: {},
 },
 // {lastRunAt} -- gates js/features/airbnbrates.js's own quarterly
