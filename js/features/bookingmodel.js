@@ -936,8 +936,20 @@ const finish = () => {
 const n = Math.max(1, state.run);
 const r2 = (v) => Math.round(v * 100) / 100;
 const meanTotal = runTotal.reduce((a, b) => a + b, 0) / n;
+// The representative run: closest to the average in total income AND in nights booked in each month, so the
+// ghost bookings drawn on the charts agree with the expected nights shown beside them.
+const runMonthNights = runBookings.map((list) => {
+const per = monthKeys.map(() => 0);
+list.forEach((b) => { for (let d = b.ci; d < b.co; d++) per[monthIdx[d - wS]] += 1; });
+return per;
+});
+const meanMonth = monthKeys.map((_, mi) => { let a = 0; for (let i = 0; i < n; i++) a += runMonthNights[i][mi]; return a / n; });
 let best = 0; let bestGap = Infinity;
-for (let i = 0; i < n; i++) { const g = Math.abs(runTotal[i] - meanTotal); if (g < bestGap) { bestGap = g; best = i; } }
+for (let i = 0; i < n; i++) {
+let g = Math.abs(runTotal[i] - meanTotal) / Math.max(1, meanTotal);
+meanMonth.forEach((mm, mi) => { g += Math.abs(runMonthNights[i][mi] - mm) / Math.max(1, mm); });
+if (g < bestGap) { bestGap = g; best = i; }
+}
 const roomInfo = ctx.rooms.map((room) => ({ key: room.key, label: room.label, listingId: ownerListingOf(ctx, room) }));
 const mean = (xs) => { let a = 0; for (let i = 0; i < n; i++) a += xs[i]; return a / n; };
 const voidOut = voids.map((v, id) => {

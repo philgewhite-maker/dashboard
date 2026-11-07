@@ -687,7 +687,10 @@ if (!cum.length) return null;
 let lastIdx = -1; cur.forEach((v, i) => { if (v !== null) lastIdx = i; });
 if (lastIdx < 0) return null;
 const idxOf = (date) => Math.min(cum.length - 1, Math.max(0, Math.round((new Date(`${date}T00:00:00Z`) - new Date(`${pj.today}T00:00:00Z`)) / 86400000)));
-const baseCum = cum[idxOf(today)];
+// What the projection had already counted before today began (nothing, if it was made today): the bookings
+// expected during today itself are still to come, so they stay in.
+const todayIdx = idxOf(today);
+const baseCum = todayIdx > 0 ? cum[todayIdx - 1] : 0;
 for (let i = lastIdx + 1; i < n; i++) out[i] = Math.round((cur[lastIdx] + cum[idxOf(dateAt(i))] - baseCum) * 100) / 100;
 return out;
 }
