@@ -58,7 +58,7 @@ const RULES = [
 { id: 'booking-requests', keys: ['bookingRequests', 'airbnbReservations', 'airbnbListings'], panels: ['#booking-requests'], render: renderBookingRequests },
 { id: 'airbnb-keys', keys: ['airbnbKeys', 'airbnbKeyAssignments', 'airbnbReservations'], panels: ['#airbnb-panel'], render: renderAirbnbKeys },
 { id: 'letting', keys: ['lettingLedger', 'airbnbListings', 'airbnbReservations', 'loans'], panels: ['#letting-panel'], render: renderLetting },
-{ id: 'occupancy', keys: ['airbnbReservations', 'airbnbListings', 'lettingLedger'], panels: ['#letting-occupancy-section'], render: renderLettingOccupancy },
+{ id: 'occupancy', keys: ['airbnbReservations', 'airbnbListings', 'lettingLedger', 'bookingProjections'], panels: ['#letting-occupancy-section'], render: renderLettingOccupancy },
 { id: 'mail-history', keys: ['mailLedger', 'trips'], panels: ['#mail-history-block'], render: renderMailHistory },
 { id: 'loans', keys: ['lettingLedger', 'loans', 'airbnbListings'], panels: ['#loans-panel'], render: renderLoans },
 { id: 'finance-accounts', keys: ['financeAccounts', 'subscriptions'], panels: ['#accounts-panel'], render: renderFinanceAccounts },

@@ -46,6 +46,7 @@ const BLOCK_CAP = 28; // nights either side of a request simulated when nothing 
 const DETAIL_KEYS = ['n_before', 'n_inside', 'n_after', 'n_other', 'd_before', 'd_inside', 'd_after', 'd_other', 'cleanFirstN', 'cleanExtraN', 'hassleWdN', 'hassleWeN', 'ownWd', 'ownWdN', 'ownWe', 'ownWeN', 'ownSecond', 'ownSecondN'];
 const RUNS = 1500;
 const CAL_RUNS = 150;
+const PROJECT_RUNS = 1000;
 
 // ---- Dates as day numbers ------------------------------------------------------------------
 const dayNum = (s) => { const [y, m, d] = s.split('-').map(Number); return Date.UTC(y, m - 1, d) / DAY_MS; };
@@ -707,6 +708,195 @@ out.push({ label: v.label, diff: r.diff, recommendation: r.recommendation, flips
 return out;
 }
 
+// ---- Projecting every void ---------------------------------------------------------------------
+//
+// The same simulation as evaluate(), turned on every room's free nights between today and the end
+// of the month after the current one, with no request in the picture. A "void" is a run of free
+// nights in one room (between bookings, or today, or the window end). Each run of the simulation
+// plays random arrivals into the real calendars; averaging many runs gives, for every night, the
+// chance it gets booked and what it earns, and so an expected income for every void, the whole
+// window and each month, plus the expected cumulative nights booked by arrival date (the pace
+// chart's Nights booked line). One run, the one closest to the average, is kept as a
+// representative scenario to draw as ghost bookings. It is gross income: cleaning, changeover
+// hassle and what empty nights are worth to you belong to the accept/reject comparison.
+
+function defaultProjectionEnd(today) {
+const [y, m] = today.split('-').map(Number);
+return new Date(Date.UTC(y, m + 1, 1)).toISOString().slice(0, 10); // first of the month after next
+}
+
+// The listing in a room that currently takes its bookings: the one with its latest stay.
+function ownerListingOf(ctx, room) {
+const mine = ctx.stays.filter((x) => room.listingIds.includes(x.listingId) && x.status === 'stay');
+mine.sort((a, b) => String(b.checkin).localeCompare(String(a.checkin)));
+return mine.length ? mine[0].listingId : room.listingIds[0];
+}
+
+// Returns {step(n) -> done, finish() -> result, runs}, so a caller can run it in slices and keep the
+// page responsive; projectVoids() runs it straight through.
+function makeProjection(ctx = buildContext(), { from, to, runs = PROJECT_RUNS } = {}) {
+const params = calibrate(ctx);
+const T = dayNum(ctx.today);
+const wS = Math.max(T, dayNum(from || ctx.today));
+const wE = dayNum(to || defaultProjectionEnd(ctx.today));
+if (!ctx.rooms.length) return { error: 'No rooms are set up for the evaluator (Settings, Booking evaluator, Rooms).' };
+if (!(wE > wS)) return { error: 'The window to project is empty.' };
+const W = wE - wS;
+const nRooms = ctx.rooms.length;
+const ri2 = roomIndexOf(ctx);
+const existing = ctx.stays.filter((x) => x.status === 'stay' && !x.unconfirmed && ri2.has(x.listingId));
+const base = Math.max(T - 1, wS - BEFORE);
+const len = wE + AFTER - base;
+const occ0 = ctx.rooms.map(() => new Uint8Array(len));
+existing.forEach((x) => {
+const r = ri2.get(x.listingId);
+for (let d = dayNum(x.checkin); d < dayNum(x.checkout); d++) if (d >= base && d < base + len) occ0[r][d - base] = 1;
+});
+for (let d = base; d < T; d++) occ0.forEach((o) => { o[d - base] = 1; }); // the past can't be booked
+
+// The voids: runs of free nights per room inside the window.
+const voids = [];
+const voidAt = ctx.rooms.map(() => new Int16Array(W).fill(-1));
+ctx.rooms.forEach((room, r) => {
+let d = wS;
+while (d < wE) {
+if (occ0[r][d - base]) { d++; continue; }
+let e = d;
+while (e < wE && !occ0[r][e - base]) e++;
+const id = voids.length;
+voids.push({ r, a: d, b: e, open: e === wE && !occ0[r][wE - base] });
+for (let k = d; k < e; k++) voidAt[r][k - wS] = id;
+d = e;
+}
+});
+
+const lamCache = new Map();
+const lam = (r, c) => { const k = `${r}|${monthOf(c)}`; if (!lamCache.has(k)) lamCache.set(k, lambdaFor(ctx, params, r, monthOf(c))); return lamCache.get(k); };
+const roomsIdx = ctx.rooms.map((_, i) => i);
+const minNights = Object.fromEntries(ctx.rooms.map((r, i) => [i, Number(r.minNights) || 1]));
+const rng = mulberry32(hashStr(`proj|${MODEL_VERSION}|${ctx.today}|${wS}|${wE}|${JSON.stringify(ctx.s)}|${JSON.stringify(ctx.scale)}`));
+
+const monthKeys = [];
+for (let d = wS; d < wE; d++) { const ym = dayStr(d).slice(0, 7); if (monthKeys[monthKeys.length - 1] !== ym) monthKeys.push(ym); }
+const monthIdx = new Int8Array(W);
+for (let i = 0; i < W; i++) monthIdx[i] = monthKeys.indexOf(dayStr(wS + i).slice(0, 7));
+const nArr = wE - T + 1;
+const arrivedNights = monthKeys.map(() => new Float64Array(nArr)); // expected nights, by arrival day, per stay month
+
+const nightBooked = ctx.rooms.map(() => new Float64Array(W));
+const nightIncome = ctx.rooms.map(() => new Float64Array(W));
+const voidIncome = voids.map(() => new Float64Array(runs));
+const voidNights = voids.map(() => new Float64Array(runs));
+const runTotal = new Float64Array(runs);
+const runBookings = [];
+const state = { run: 0 };
+
+const step = (n) => {
+for (let k = 0; k < n && state.run < runs; k++, state.run++) {
+const run = state.run;
+const arrivals = drawArrivals(ctx, params, { from: base, to: wE + AFTER, todayN: T, lam, rooms: roomsIdx }, rng);
+const occ = occ0.map((o) => o.slice());
+const booked = playArrivals(ctx, params, arrivals, occ, base, { minNights, len });
+const list = [];
+let total = 0;
+booked.forEach((b) => {
+const a = Math.max(b.ci, wS); const z = Math.min(b.co, wE);
+if (z <= a) return;
+let amount = 0;
+const off = Math.min(nArr - 1, Math.max(0, Math.floor(b.at) - T));
+for (let d = a; d < z; d++) {
+const v = basePrice(ctx, params, b.room, d) * b.factor;
+const i = d - wS;
+amount += v;
+nightIncome[b.room][i] += v; nightBooked[b.room][i] += 1;
+const vid = voidAt[b.room][i];
+if (vid >= 0) { voidIncome[vid][run] += v; voidNights[vid][run] += 1; }
+arrivedNights[monthIdx[i]][off] += 1;
+}
+total += amount;
+list.push({ room: b.room, ci: a, co: z, amount });
+});
+runTotal[run] = total;
+runBookings.push(list);
+}
+return state.run >= runs;
+};
+
+const finish = () => {
+const n = Math.max(1, state.run);
+const r2 = (v) => Math.round(v * 100) / 100;
+const meanTotal = runTotal.reduce((a, b) => a + b, 0) / n;
+let best = 0; let bestGap = Infinity;
+for (let i = 0; i < n; i++) { const g = Math.abs(runTotal[i] - meanTotal); if (g < bestGap) { bestGap = g; best = i; } }
+const roomInfo = ctx.rooms.map((room) => ({ key: room.key, label: room.label, listingId: ownerListingOf(ctx, room) }));
+const mean = (xs) => { let a = 0; for (let i = 0; i < n; i++) a += xs[i]; return a / n; };
+const voidOut = voids.map((v, id) => {
+const inc = Array.from(voidIncome[id].subarray(0, n));
+const nights = v.b - v.a;
+const prob = []; const income = [];
+for (let d = v.a; d < v.b; d++) { prob.push(r2(nightBooked[v.r][d - wS] / n)); income.push(r2(nightIncome[v.r][d - wS] / n)); }
+return {
+id: `${roomInfo[v.r].key}|${dayStr(v.a)}`, roomKey: roomInfo[v.r].key, roomLabel: roomInfo[v.r].label, listingId: roomInfo[v.r].listingId,
+from: dayStr(v.a), to: dayStr(v.b), nights, open: v.open,
+expected: r2(mean(inc)), p10: r2(pct(inc, 0.1)), p90: r2(pct(inc, 0.9)), expectedNights: r2(mean(Array.from(voidNights[id].subarray(0, n)))),
+nightProb: prob, nightIncome: income,
+};
+});
+// By month: per room, income and nights expected (the by-day figures live in the voids), and the
+// cumulative nights booked by arrival day.
+const months = {};
+monthKeys.forEach((ym, mi) => {
+const rooms = {};
+let incomeAll = 0; let nightsAll = 0;
+ctx.rooms.forEach((room, r) => {
+let inc = 0; let nts = 0;
+for (let i = 0; i < W; i++) {
+if (monthIdx[i] !== mi) continue;
+inc += nightIncome[r][i] / n; nts += nightBooked[r][i] / n;
+}
+rooms[room.key] = { income: r2(inc), nights: r2(nts) };
+incomeAll += inc; nightsAll += nts;
+});
+const cum = []; let run = 0;
+for (let i = 0; i < nArr; i++) { run += arrivedNights[mi][i] / n; cum.push(r2(run)); }
+months[ym] = { income: r2(incomeAll), nights: r2(nightsAll), rooms, bookedByDate: cum };
+});
+const scenario = (runBookings[best] || []).map((b) => ({ roomKey: roomInfo[b.room].key, listingId: roomInfo[b.room].listingId, from: dayStr(b.ci), to: dayStr(b.co), nights: b.co - b.ci, amount: Math.round(b.amount) }))
+.sort((a, b) => a.from.localeCompare(b.from));
+const totals = Array.from(runTotal.subarray(0, n));
+return {
+modelVersion: MODEL_VERSION, today: ctx.today, from: dayStr(wS), to: dayStr(wE), runs: n,
+rooms: roomInfo, voids: voidOut, months, scenario,
+total: { expected: r2(meanTotal), p10: r2(pct(totals, 0.1)), p90: r2(pct(totals, 0.9)) },
+assumptions: assumptionsSnapshot(ctx, params),
+};
+};
+return { step, finish, runs, get done() { return state.run >= runs; }, get progress() { return state.run / runs; } };
+}
+
+function projectVoids(ctx = buildContext(), opts = {}) {
+const p = makeProjection(ctx, opts);
+if (p.error) return p;
+while (!p.step(200)) { /* run to the end */ }
+return p.finish();
+}
+
+// What the model assumed when it made a projection, kept with it so a later review can say why it
+// was off: per room and month of the year, the occupancy and request rate; and the shared figures.
+function assumptionsSnapshot(ctx, params) {
+const s = ctx.s;
+const months = [];
+for (let m = 0; m < 12; m++) {
+months.push({ lead: Math.round(params.lead[m].median), n: params.lead[m].n });
+}
+return {
+calibration: { demand: ctx.scale.demand || 1, lead: ctx.scale.lead || 1, cancel: ctx.scale.cancel || 1 },
+elasticity: Number(s.elasticity) || 0, cancelRate: Math.round(params.cancelRate * 1000) / 1000, lateShare: Math.round(params.lateShare * 1000) / 1000,
+meanStay: Math.round(params.losMean * 10) / 10, leadMedianByMonth: months.map((x) => x.lead), christmasLead: Math.round(params.lead[12].median),
+rooms: ctx.rooms.map((room, i) => ({ key: room.key, occupancy: params.occ[i].overall == null ? null : Math.round(params.occ[i].overall * 100) / 100, monthsOnOffer: params.occ[i].months, minNights: Number(room.minNights) || 1, price: Math.round(params.prices[i].base) })),
+};
+}
+
 // ---- Self-test: cases with an answer that can be worked out by hand ----------------------------
 
 function testContext({ occupancy, today = '2026-11-01', minNights = 1 }) {
@@ -754,7 +944,39 @@ check('Deterministic', r2.diff === r3.diff, `${r2.diff.toFixed(4)} / ${r3.diff.t
 const ctx4 = testContext({ occupancy: 0.6 });
 const lam = lambdaFor(ctx4, ctx4.params, 0, 10);
 check('Calibration finds a request rate for 60% occupancy', lam > 0 && lam < 4, lam.toFixed(3));
+
+// 5. Voids partition the free nights exactly: one booking in the middle leaves two voids, and their
+// nights add up to the window less the booked nights.
+const ctx5 = testContext({ occupancy: 0.5 });
+ctx5.stays = [{ id: 's1', listingId: 'LA', checkin: '2026-11-10', checkout: '2026-11-14', status: 'stay', income: 400, guest: 'X' }];
+const p5 = projectVoids(ctx5, { from: '2026-11-01', to: '2026-12-01', runs: 40 });
+const free5 = 30 - 4;
+check('Voids partition the free nights', p5.voids.length === 2 && p5.voids.reduce((a, v) => a + v.nights, 0) === free5 && p5.voids[0].to === '2026-11-10' && p5.voids[1].from === '2026-11-14', p5.voids.map((v) => `${v.from}>${v.to}`).join(' '));
+
+// 6. No demand: nothing is expected anywhere. A void that reaches the window end is flagged open.
+const ctx6 = testContext({ occupancy: 0.5 });
+ctx6.stays = ctx5.stays;
+ctx6.params.lambda = new Map(Array.from({ length: 12 }, (_, m) => [`0|${m}`, 0]));
+const p6 = projectVoids(ctx6, { from: '2026-11-01', to: '2026-12-01', runs: 20 });
+check('No demand: every void expects nothing', p6.voids.every((v) => v.expected === 0 && v.expectedNights === 0) && p6.total.expected === 0 && p6.voids[1].open === true && p6.voids[0].open === false, `${p6.total.expected}`);
+
+// 7. Saturating demand: voids fill at the base price.
+const ctx7 = testContext({ occupancy: 0.97, today: '2026-10-01' }); // a month ahead, so every night has had time to be asked for
+ctx7.stays = ctx5.stays;
+ctx7.params.lambda = new Map(Array.from({ length: 12 }, (_, m) => [`0|${m}`, 40]));
+const p7 = projectVoids(ctx7, { from: '2026-11-01', to: '2026-12-01', runs: 40 });
+const share7 = p7.voids.reduce((a, v) => a + v.expectedNights, 0) / free5;
+check('Saturated demand: voids fill at about £100 a night', share7 > 0.95 && p7.total.expected > 0.95 * 100 * free5 && p7.total.expected <= 100 * free5 + 0.01, `${(share7 * 100).toFixed(0)}% £${p7.total.expected}`);
+
+// 8. The projection is deterministic.
+const q1 = projectVoids(testContext({ occupancy: 0.5 }), { from: '2026-11-01', to: '2026-12-01', runs: 40 });
+const q2 = projectVoids(testContext({ occupancy: 0.5 }), { from: '2026-11-01', to: '2026-12-01', runs: 40 });
+check('Projection is deterministic', q1.total.expected === q2.total.expected, `${q1.total.expected} / ${q2.total.expected}`);
+
+// 9. A window that crosses the year end splits into months correctly.
+const q3 = projectVoids(testContext({ occupancy: 0.5, today: '2026-12-10' }), { runs: 20 });
+check('Default window runs to the end of the month after this one', q3.to === '2027-02-01' && Object.keys(q3.months).join() === '2026-12,2027-01', `${q3.to} ${Object.keys(q3.months).join()}`);
 return results;
 }
 
-export { buildContext, calibrate, evaluate, sensitivity, selfTest, MODEL_VERSION };
+export { buildContext, calibrate, evaluate, sensitivity, makeProjection, projectVoids, defaultProjectionEnd, selfTest, MODEL_VERSION };

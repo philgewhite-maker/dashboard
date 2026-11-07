@@ -18,6 +18,7 @@ import { data, queueSave } from '../state.js';
 import { escapeHtml, uid, logoBadgeHtml, bindLogoFallbacks } from '../utils.js';
 import { matchBrandLogo } from '../brandLogos.js';
 import { splitLedgerNote } from '../migrations.js';
+import { projectionForMonth, statusText } from './bookingprojection.js';
 
 // Per-device view state, not data: which people's sections are folded away
 // (remembered across visits) and which ledger rows have their detail line
@@ -1543,14 +1544,32 @@ if (ym < baseStart) return; // older than the rolling window -- excluded, not wi
 splitContribution(it.listing, it.gross, it.date).forEach((c) => { addAmount(c.group, ym, c.amount); addAmountPlatform(c.group, ym, it.platform, c.amount); });
 });
 
+// The saved void projection (bookingprojection.js), split by owner the same way real income is: each room'"'"'s
+// expected income goes to the listing that currently takes its bookings. Drawn as a hatched cap on the
+// month'"'"'s bar; never part of the real totals, targets or rolling average.
+const perGroupProjected = new Map();
+groupMeta.forEach((g) => perGroupProjected.set(g.key, new Map()));
+monthRange(baseStart, endYm).forEach((ym) => {
+const proj = projectionForMonth(ym);
+if (!proj) return;
+proj.rooms.forEach((room) => {
+const inc = proj.months[ym].rooms[room.key] ? proj.months[ym].rooms[room.key].income : 0;
+const listing = listings.find((l) => l.id === room.listingId);
+if (!(inc > 0.004) || !listing) return;
+splitContribution(listing, inc, `${ym}-15`).forEach((c) => {
+const byMonth = perGroupProjected.get(c.group);
+if (byMonth) byMonth.set(ym, (byMonth.get(ym) || 0) + c.amount);
+});
+});
+});
 const months = monthRange(baseStart, endYm);
 const nowIndex = months.indexOf(current);
 // Only a group that actually has something in this window plots a
 // picker row and a stack segment -- "Mine, Lewis', Zara's" in practice,
 // but not hardcoded to those names, so a 4th owner (or one retired with
 // no recent income) is handled correctly either way.
-const activeGroups = [...groupMeta.values()].filter((g) => [...(perGroupByMonth.get(g.key) || new Map()).values()].some((v) => v > 0.004));
-return { months, groups: activeGroups, perGroupByMonth, perGroupByMonthPlatform, nowIndex };
+const activeGroups = [...groupMeta.values()].filter((g) => [...(perGroupByMonth.get(g.key) || new Map()).values()].some((v) => v > 0.004) || [...(perGroupProjected.get(g.key) || new Map()).values()].some((v) => v > 0.004));
+return { months, groups: activeGroups, perGroupByMonth, perGroupByMonthPlatform, perGroupProjected, nowIndex };
 }
 
 // One month's total on the Income by month chart, across every owner group.
@@ -1659,7 +1678,7 @@ return niceResidual * magnitude;
 }
 
 function drawLettingChart(canvas, chartData) {
-const { months, groups: allGroups, perGroupByMonth, perGroupByMonthPlatform, nowIndex } = chartData;
+const { months, groups: allGroups, perGroupByMonth, perGroupByMonthPlatform, perGroupProjected, nowIndex } = chartData;
 const groups = allGroups.filter((g) => lettingChartSelectedGroups.has(g.key));
 // One 45-degree-hatch pattern per colour, built fresh each draw (colours
 // can change with the theme, and a redraw already happens on every
@@ -1718,13 +1737,15 @@ const padLeft = 46, padRight = 10, padTop = 62, padBottom = 20;
 const plot = { x: padLeft, y: padTop, w: Math.max(10, width - padLeft - padRight), h: Math.max(10, height - padTop - padBottom) };
 
 const monthTotals = months.map((ym) => groups.reduce((n, g) => n + (perGroupByMonth.get(g.key).get(ym) || 0), 0));
+const projOf = (g, ym) => (perGroupProjected && perGroupProjected.get(g.key) ? perGroupProjected.get(g.key).get(ym) || 0 : 0);
+const monthProjected = months.map((ym) => groups.reduce((n, g) => n + projOf(g, ym), 0));
 // Each visible group's own target, summed -- additive across whichever
 // rows are ticked, same `groups` (already filtered by selection) the
 // stack itself sums over, so the two stay comparable: tick just Lewis'
 // and the lines show only his target, tick everyone and they show the
 // combined one.
 const targets = LETTING_TARGETS.map((t) => ({ ...t, amount: groups.reduce((n, g) => n + (Number(lettingChartTargetsFor(g.key)[t.key]) || 0), 0) }));
-const rawMax = Math.max(...monthTotals, ...targets.map((t) => t.amount), 1);
+const rawMax = Math.max(...monthTotals.map((v, i) => v + monthProjected[i]), ...targets.map((t) => t.amount), 1);
 // A round step (500, 1000, 2000, 5000...) rather than an arbitrary
 // fraction of whatever the data's own max happens to be -- a classic
 // 1-2-5 "nice numbers" sequence scaled to the data's own order of
@@ -1810,6 +1831,29 @@ ctx.fillText(money0(p.amt), cx, (top + bottom) / 2);
 cumulative += p.amt;
 });
 });
+// The projected cap: what the month's gaps are expected to add, per owner group, hatched and
+// dashed so it can't be mistaken for income that has happened.
+if (monthProjected[i] > 0.004) {
+let capped = cumulative;
+groups.forEach((g, gi) => {
+const pj = projOf(g, ym);
+if (!(pj > 0.004)) return;
+const color = resolveColor(listingColorVar(g.colour));
+const yBottom = scaleY(capped); const yTop = scaleY(capped + pj);
+const h = Math.max(1, yBottom - yTop);
+ctx.fillStyle = stripePatternFor(color);
+ctx.fillRect(cx - barW / 2, yTop, barW, h);
+ctx.save();
+ctx.strokeStyle = color; ctx.setLineDash([3, 2]); ctx.lineWidth = 1;
+ctx.strokeRect(cx - barW / 2 + 0.5, yTop + 0.5, barW - 1, Math.max(1, h - 1));
+ctx.restore();
+if (h >= 15) {
+ctx.fillStyle = ink; ctx.font = "600 9px 'Inter', sans-serif"; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+ctx.fillText(`+${money0(pj)}`, cx, yTop + h / 2);
+}
+capped += pj;
+});
+}
 if (i === lettingChartHoverIndex) {
 ctx.fillStyle = ink;
 ctx.globalAlpha = 0.05;
@@ -1921,6 +1965,12 @@ if (r.platform.airbnb > 0.004 && r.platform.other > 0.004) {
 lines.push(`  Airbnb ${money0(r.platform.airbnb)} · Other ${money0(r.platform.other)}`);
 }
 });
+const projTotal = groups.reduce((n, g) => n + projOf(g, ym), 0);
+if (projTotal > 0.004) {
+const p = projectionForMonth(ym);
+lines.push(`Projected, not yet booked: +${money0(projTotal)} (${p ? statusText(p).split(':')[0].toLowerCase() : 'saved projection'})`);
+groups.forEach((g) => { const pj = projOf(g, ym); if (pj > 0.004) lines.push(`  ${g.label}: +${money0(pj)}`); });
+}
 ctx.font = "10px 'Inter', sans-serif";
 const boxW = Math.max(...lines.map((l) => ctx.measureText(l).width)) + 16;
 const boxH = lines.length * 14 + 10;
@@ -2348,6 +2398,18 @@ el.innerHTML = occupancy.map((s) => `<span class="letting-chart-legend-item"><sp
 // holds the average-stay-LENGTH labels (asked for directly), one per
 // room per month, skipped wherever a month/room's own slot is too
 // narrow to hold a legible number rather than letting labels collide.
+// A 45-degree hatch in one colour, for the projected (not yet booked) parts of the charts.
+function hatchPatternFor(ctx, color) {
+const size = 8;
+const tile = document.createElement('canvas');
+tile.width = size; tile.height = size;
+const t = tile.getContext('2d');
+t.fillStyle = color; t.globalAlpha = 0.18; t.fillRect(0, 0, size, size);
+t.globalAlpha = 1; t.strokeStyle = color; t.lineWidth = 2;
+[-size, 0, size].forEach((o) => { t.beginPath(); t.moveTo(o, size); t.lineTo(o + size, 0); t.stroke(); });
+return ctx.createPattern(tile, 'repeat');
+}
+
 function drawOccupancySubplot(ctx, occPlot, months, occupancy, hoverIndex, nowIndex, bw, colors) {
 const { lineColor, muted, ink } = colors;
 const labelPad = 10;
@@ -2388,6 +2450,17 @@ const h = Math.max(0, Math.min(1, pct)) * barArea.h;
 const x = barArea.x + i * bw + groupPad + ri * (barW + gap);
 const y = barArea.y + barArea.h - h;
 ctx.fillRect(x, y, barW, h);
+// The projected cap: the share of the month's nights the saved projection expects the room's gaps to add.
+const extra = projectedOccupancyShare(s.room.key, months[i]);
+if (extra > 0.004 && pct < 1) {
+const eh = Math.min(1 - pct, extra) * barArea.h;
+ctx.save();
+ctx.fillStyle = hatchPatternFor(ctx, color);
+ctx.fillRect(x, y - eh, barW, eh);
+ctx.strokeStyle = color; ctx.setLineDash([3, 2]); ctx.lineWidth = 1;
+ctx.strokeRect(x + 0.5, y - eh + 0.5, Math.max(1, barW - 1), Math.max(1, eh - 1));
+ctx.restore();
+}
 });
 });
 
@@ -2413,14 +2486,25 @@ ctx.fillText(`${Math.round(avg)}n`, cx, occPlot.y + labelPad - 1);
 // worth a line of its own once it's the common case for an off-season
 // month, and every line here costs real vertical space reserved above
 // the chart for it (see padTop).
-function occupancyTooltipLines(occupancy, hoverIndex) {
+function occupancyTooltipLines(occupancy, hoverIndex, months = []) {
 if (hoverIndex == null) return [];
 return occupancy.map((s) => {
 const pct = s.pctByMonth[hoverIndex];
-if (!pct) return null;
+const extra = projectedOccupancyShare(s.room.key, months[hoverIndex]);
+if (!pct && !(extra > 0.004)) return null;
 const avg = s.avgDurationByMonth ? s.avgDurationByMonth[hoverIndex] : null;
-return `${s.room.label}: ${Math.round(pct * 100)}% occ${avg != null ? `, avg ${avg.toFixed(1)}n` : ''}`;
+return `${s.room.label}: ${Math.round((pct || 0) * 100)}% occ${avg != null ? `, avg ${avg.toFixed(1)}n` : ''}${extra > 0.004 ? `, +${Math.round(extra * 100)}% projected` : ''}`;
 }).filter(Boolean);
+}
+
+// The share of a month's nights the saved projection expects a room's free nights to add (0 when the
+// month is outside the projection or the projection is hidden).
+function projectedOccupancyShare(roomKey, ym) {
+const p = ym ? projectionForMonth(ym) : null;
+const m = p && p.months[ym] && p.months[ym].rooms[roomKey];
+if (!m) return 0;
+const [y, mo] = ym.split('-').map(Number);
+return m.nights / new Date(y, mo, 0).getDate();
 }
 
 // One line per room, rate AND occupancy together -- used by the candle
@@ -2590,7 +2674,7 @@ nightRateChartLastPlot = { plot, bw, months };
 // combined box rather than two.
 if (nightRateChartHoverIndex != null && months[nightRateChartHoverIndex]) {
 const rows = series.map((s) => ({ l: s.l, v: s.rates[nightRateChartHoverIndex] })).filter((r) => r.v != null);
-const occLines = occupancyTooltipLines(occupancyShown, nightRateChartHoverIndex);
+const occLines = occupancyTooltipLines(occupancyShown, nightRateChartHoverIndex, months);
 if (rows.length || occLines.length) {
 const lines = [monthLabel(months[nightRateChartHoverIndex]), ...rows.map((r) => `${r.l.label}: ${money0(r.v)}/n`), ...occLines];
 ctx.font = "10px 'Inter', sans-serif";

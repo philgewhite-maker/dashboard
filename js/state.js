@@ -200,6 +200,8 @@ lettingChartTargets: {},
 // Settings section, same reasoning setCompletionSizeBounds already
 // uses -- nothing else reads it.
 airbnbCleaningCost: 50,
+// Whether the charts draw the latest saved void projection (bookingprojection.js).
+showProjection: true,
 // The booking evaluator's own assumptions (js/features/bookingmodel.js), edited in
 // Settings -> Finances -> Booking evaluator. Every figure is a starting assumption the
 // model blends with your own data. The first room's clean is airbnbCleaningCost above;
@@ -2034,6 +2036,19 @@ evaluation: null,
 };
 }
 
+// One saved projection of the voids (free nights) from `from` to `to` (js/features/bookingmodel.js
+// makeProjection): per void its expected income, nights and a chance for each night, per month the
+// totals and the expected cumulative nights booked by arrival day (index 0 = `today`), one
+// representative scenario to draw, and the assumptions it was made under, kept so a monthly review
+// can compare it with what happened. `rooms` maps each room to the listing that takes its bookings.
+function blankBookingProjection(fields = {}) {
+return {
+id: uid(), madeAt: '', today: '', from: '', to: '', runs: 0, modelVersion: 0,
+rooms: [], voids: [], months: {}, scenario: [], total: { expected: 0, p10: 0, p90: 0 }, assumptions: null,
+...fields,
+};
+}
+
 function blankLoan(fields = {}) {
 return {
 id: uid(),
@@ -2572,6 +2587,9 @@ loans: [],
 // -- a task can be deleted later without that silently reopening the
 // same event to be re-proposed.
 airbnbRateProposals: [],
+// Saved projections of the free nights between now and the end of next month (js/features/bookingprojection.js),
+// made on request, so each can be compared with what actually happened (js/features/modelreview.js).
+bookingProjections: [],
 // Every Airbnb booking request and enquiry read from the inbox (js/features/bookingrequests.js),
 // including the ones that never became stays: the demand the booking evaluator calibrates
 // against. See blankBookingRequest.
@@ -2719,6 +2737,8 @@ if (!Array.isArray(data.lettingLedger)) data.lettingLedger = [];
 if (!Array.isArray(data.loans)) data.loans = [];
 data.loans = data.loans.filter((l) => l && typeof l === 'object').map((l) => ({ ...blankLoan(), ...l, id: l.id || uid() }));
 if (!Array.isArray(data.airbnbRateProposals)) data.airbnbRateProposals = [];
+if (!Array.isArray(data.bookingProjections)) data.bookingProjections = [];
+data.bookingProjections = data.bookingProjections.filter((p) => p && typeof p === 'object').map((p) => ({ ...blankBookingProjection(), ...p, id: p.id || uid() }));
 if (!Array.isArray(data.bookingRequests)) data.bookingRequests = [];
 data.bookingRequests = data.bookingRequests.filter((r) => r && typeof r === 'object').map((r) => ({ ...blankBookingRequest(), ...r, id: r.id || uid() }));
 // One record per email: early backfill runs gave the same email two records under different ids.
@@ -4581,7 +4601,7 @@ blankPackingItem, blankPackingModule, blankTripPacking, blankPackingListItem, PA
 blankMarriottAvailability, pruneMarriottAvailability,
 blankLoyaltyProgram, blankLoyaltyBalance, blankVoucher,
 blankPlannerEntry, blankPlannerActivity,
-blankAirbnbListing, blankAirbnbReservation, blankBookingRequest, blankAirbnbKey, blankAirbnbKeyAssignment, KEY_CUSTODIAN_TYPES, blankFinanceAccount, SCHOOL_CALENDAR_SITES,
+blankAirbnbListing, blankAirbnbReservation, blankBookingRequest, blankBookingProjection, blankAirbnbKey, blankAirbnbKeyAssignment, KEY_CUSTODIAN_TYPES, blankFinanceAccount, SCHOOL_CALENDAR_SITES,
 CONTACT_STATUS_LABELS, CONTACT_MATCH_MIN_STAGE,
 DEFAULT_RATING_CATEGORIES, slugifyField, DEFAULT_RECIPE_RATING_CATEGORIES,
 FLAG_FIELD_DEFS, DEFAULT_FLAG_RULES, computeFlags, valueColorForField, stripSharedSuffix, suggestedAction, suggestedQuestions, isTravelPaused, ACTIONS, distanceMiles, heightCm,

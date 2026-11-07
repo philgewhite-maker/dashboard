@@ -14,6 +14,7 @@ import { data, queueSave } from '../state.js';
 import { escapeHtml, dateStrAdd, todayStr } from '../utils.js';
 import { listingColorVar, resolveColor, addMonths, monthLabel, ownerKeyFor, ownerNameFor, lettingChartMonthTotal, lettingIncomeItems, nightRateRooms, money0 } from './letting.js';
 import { isUnconfirmedStay } from '../icsparse.js';
+import { latestProjection, projectionForMonth, projectedNights, projectedByDate, runProjection, statusText } from './bookingprojection.js';
 
 const DAY_MS = 86400000;
 const MIN_COVERAGE = 0.8; // share of a month's nights that must have a known income/dates before it is compared
@@ -382,6 +383,11 @@ return `<div class="letting-chart-wrap" id="letting-occupancy-section">
 <select id="occ-month" class="mini" title="The month both charts show"></select>
 <span class="settings-note" id="occ-summary" style="margin:0;"></span>
 </div>
+<div class="sync-row" style="gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px;" id="occ-projection-row">
+<button class="sync-btn sm inline" type="button" id="occ-project-btn" title="Estimates what each gap between bookings, today to the end of next month, is likely to earn, and draws it on the charts. Saved, so it can be checked against what happens.">Project the next two months</button>
+<label class="settings-note" style="margin:0;display:flex;gap:4px;align-items:center;" title="Draw the saved projection on the charts"><input type="checkbox" id="occ-project-show"> Show projection</label>
+<span class="settings-note" id="occ-project-status" style="margin:0;"></span>
+</div>
 <details class="settings-subgroup" id="occ-income-trace" style="margin:0 0 6px;"></details>
 <div class="letting-chart-legend" id="occ-legend" style="flex-direction:row;flex-wrap:wrap;"></div>
 <div class="chart-canvas-wrap occ-wrap" style="position:relative;"><canvas id="occ-timeline-canvas"></canvas><div class="occ-tip" id="occ-tip" hidden></div></div>
@@ -479,6 +485,7 @@ const { ctx, width, height } = s;
 const c = palette();
 const ym = state.ym;
 const n = daysIn(ym);
+const proj = projectionForMonth(ym);
 const narrow = width < 520;
 const left = narrow ? 64 : 120;
 const right = 8;
@@ -541,6 +548,53 @@ ctx.fill();
 }
 hits.push({ x1, x2: Math.max(x1 + 3, x2), y: y - h / 2 - 3, y2: y + h / 2 + 3, stay: st, room });
 });
+// The saved void projection: each free stretch tinted by how likely each night is to be booked, with
+// what it is expected to earn, and one representative scenario drawn as dashed ghost bookings.
+const lateHits = [];
+if (proj && state.channel !== 'other') {
+const monthFirst = dayStr(ym, 1);
+const nextFirst = dayStr(addMonths(ym, 1), 1);
+const dayOf = (date) => Number(date.slice(8, 10));
+proj.voids.filter((v) => v.roomKey === room.key && v.to > monthFirst && v.from < nextFirst).forEach((v) => {
+let vx1 = Infinity; let vx2 = -Infinity;
+for (let k = 0; k < v.nights; k++) {
+const date = dateStrAdd(v.from, k);
+if (date < monthFirst || date >= nextFirst) continue;
+const x = xDay(dayOf(date)) + colW / 2;
+ctx.fillStyle = c.good; ctx.globalAlpha = 0.07 + 0.4 * (v.nightProb[k] || 0);
+ctx.fillRect(x, top + 3, colW, laneH - 6);
+ctx.globalAlpha = 1;
+vx1 = Math.min(vx1, x); vx2 = Math.max(vx2, x + colW);
+}
+if (vx1 === Infinity) return;
+ctx.strokeStyle = c.good; ctx.globalAlpha = 0.7; ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
+ctx.strokeRect(vx1 + 0.5, top + 3.5, vx2 - vx1 - 1, laneH - 7);
+ctx.setLineDash([]); ctx.globalAlpha = 1;
+if (vx2 - vx1 > 34 && v.expected >= 1) {
+ctx.fillStyle = c.muted; ctx.font = '9px Inter, sans-serif'; ctx.textAlign = 'left';
+ctx.fillText(`£${Math.round(v.expected).toLocaleString('en-GB')}`, vx1 + 4, top + 11);
+ctx.font = '11px Inter, sans-serif';
+}
+lateHits.push({ x1: vx1, x2: vx2, y: top + 3, y2: top + laneH - 3, void: v, room });
+});
+(proj.scenario || []).filter((b) => b.roomKey === room.key && b.to > monthFirst && b.from < nextFirst).forEach((b) => {
+const own = room.members.find((l) => l.id === b.listingId);
+const color = resolveColor(listingColorVar((own && own.colour) || room.colour));
+const startD = b.from < monthFirst ? 0.5 : dayOf(b.from) + 0.5;
+const endD = b.to >= nextFirst ? n + 1 : dayOf(b.to) + 0.5;
+const x1 = left + (startD - 1) * colW;
+const x2 = left + (endD - 1) * colW;
+const yy = mid - 4; const hh = 10;
+ctx.fillStyle = color; ctx.globalAlpha = 0.22;
+ctx.fillRect(x1, yy - hh / 2, Math.max(3, x2 - x1), hh);
+ctx.globalAlpha = 1;
+ctx.strokeStyle = color; ctx.lineWidth = 1.25; ctx.setLineDash([4, 2]);
+ctx.strokeRect(x1 + 0.5, yy - hh / 2 + 0.5, Math.max(3, x2 - x1) - 1, hh - 1);
+ctx.setLineDash([]);
+hits.push({ x1, x2: Math.max(x1 + 3, x2), y: yy - hh / 2 - 3, y2: yy + hh / 2 + 3, ghost: b, room });
+});
+}
+hits.push(...lateHits);
 });
 if (today.startsWith(ym)) {
 const x = xDay(Number(today.slice(8, 10))) + colW / 2;
@@ -564,6 +618,28 @@ const r = canvas.getBoundingClientRect();
 const x = evt.clientX - r.left; const y = evt.clientY - r.top;
 const hit = PLOTS.timeline.hits.find((h) => x >= h.x1 && x <= h.x2 && y >= h.y && y <= h.y2);
 if (!hit) { tip.hidden = true; return; }
+const fmtD = (d) => new Date(`${d}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+if (hit.void || hit.ghost) {
+const p = latestProjection();
+const lines = [];
+if (hit.void) {
+const v = hit.void;
+lines.push(`<strong>Projected: ${v.nights} free night${v.nights === 1 ? '' : 's'}, ${fmtD(v.from)} to ${fmtD(v.to)}</strong>`);
+lines.push(`${escapeHtml(hit.room.label || 'Room')}${v.open ? ' (runs past the projection window)' : ''}`);
+lines.push(`Expected £${Math.round(v.expected).toLocaleString('en-GB')} (1 in 10 below £${Math.round(v.p10).toLocaleString('en-GB')}, above £${Math.round(v.p90).toLocaleString('en-GB')}), about ${v.expectedNights.toFixed(1)} of ${v.nights} nights booked`);
+} else {
+const b = hit.ghost;
+lines.push(`<strong>One possible booking</strong>`);
+lines.push(`${escapeHtml(hit.room.label || 'Room')} · ${fmtD(b.from)} to ${fmtD(b.to)} · ${b.nights} night${b.nights === 1 ? '' : 's'} · about £${b.amount.toLocaleString('en-GB')}`);
+lines.push('Not booked: a typical simulated future, drawn to show what the gaps could look like');
+}
+if (p) lines.push(escapeHtml(statusText(p)));
+tip.innerHTML = lines.join('<br>');
+tip.hidden = false;
+tip.style.left = `${Math.min(x + 12, PLOTS.timeline.width - 240)}px`;
+tip.style.top = `${Math.max(0, y - 10)}px`;
+return;
+}
 const st = hit.stay;
 const nights = nightsBetween(st.checkin, st.checkout);
 const fmt = (d) => new Date(`${d}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
@@ -589,6 +665,49 @@ if (v <= 0) return 1;
 const mag = 10 ** Math.floor(Math.log10(v));
 const f = v / mag;
 return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * mag;
+}
+
+// What the saved void projection adds to the pace line, for the dates after today: the line the
+// chart draws dotted in green. null when there is nothing to add (no projection, a month outside
+// it, the Direct-only channel view, or a month that is over).
+function projectedPace(ym, metric, cur, proj, lead, today) {
+if (state.channel === 'other') return null;
+const pj = projectionForMonth(ym);
+if (!pj) return null;
+const n = cur.length;
+const first = dayStr(ym, 1);
+const dateAt = (i) => dateStrAdd(first, i - lead);
+const byDate = projectedByDate(pj);
+const out = new Array(n).fill(null);
+if (metric === 'bookings') {
+// Nights booked so far, plus the arrivals the projection expects from now on (counted from today even
+// when the projection is older, so bookings it expected that have already come in aren't added twice).
+const cum = (pj.months[ym] || {}).bookedByDate || [];
+if (!cum.length) return null;
+let lastIdx = -1; cur.forEach((v, i) => { if (v !== null) lastIdx = i; });
+if (lastIdx < 0) return null;
+const idxOf = (date) => Math.min(cum.length - 1, Math.max(0, Math.round((new Date(`${date}T00:00:00Z`) - new Date(`${pj.today}T00:00:00Z`)) / 86400000)));
+const baseCum = cum[idxOf(today)];
+for (let i = lastIdx + 1; i < n; i++) out[i] = Math.round((cur[lastIdx] + cum[idxOf(dateAt(i))] - baseCum) * 100) / 100;
+return out;
+}
+if (!proj) return null; // a month that is over
+let run = 0;
+for (let i = 0; i < n; i++) {
+const date = dateAt(i);
+if (date <= today) continue;
+if (proj[i] === null || proj[i] === undefined) continue;
+if (metric === 'avgnight') {
+let add = 0;
+for (let k = 0; k < AVG_DAYS; k++) { const dd = dateStrAdd(date, -k); if (dd > today && byDate.has(dd)) add += byDate.get(dd).income; }
+out[i] = Math.round((proj[i] + add / AVG_DAYS) * 100) / 100;
+} else {
+const e = byDate.get(date);
+if (e && date.slice(0, 7) === ym) run += metric === 'revenue' ? e.income : e.nights;
+out[i] = Math.round((proj[i] + run) * 100) / 100;
+}
+}
+return out;
 }
 
 function drawPace(stays) {
@@ -620,6 +739,8 @@ const n = cur.length;
 // Nights occupied and Revenue earned: the rest of the month (or all of a month yet to start) as
 // already booked. Only for a month that is not over.
 const proj = metric !== 'bookings' && cur.some((v) => v === null) ? seriesFor(stays, ym, metric, today, true) : null;
+// The saved void projection, added on top: what the month's gaps are expected to add. Only dates after today.
+const projPlus = projectedPace(ym, metric, cur, proj, lead, today);
 const unit = METRIC_UNIT[metric];
 const money = metric === 'revenue' || metric === 'avgnight';
 const fmtVal = (v) => (money ? `£${Math.round(v).toLocaleString('en-GB')}` : `${Math.round(v * 10) / 10} night${Math.round(v * 10) / 10 === 1 ? '' : 's'}`);
@@ -668,6 +789,11 @@ const full = cmp.values && cmp.values[n - 1] !== null ? `, against ${fmtVal(cmp.
 verdict += ` Stays already booked take it to ${fmtVal(projEnd)} by the end of the month${full}.${money ? ' A stay with no income entered yet adds nothing.' : ''}`;
 }
 if (metric === 'avgnight') verdict += `<br><span class="settings-note" style="margin:0;">Each point is the income of the ${AVG_DAYS} days up to that day divided by ${AVG_DAYS}, empty nights included. The comparison is the same ${AVG_DAYS}-day window ${state.compare === 'lastyear' ? 'a year' : 'a month'} earlier.</span>`;
+if (projPlus && projPlus.some((v) => v !== null)) {
+const pEnd = projPlus[n - 1];
+const pjRec = latestProjection();
+verdict += `<br><span class="settings-note" style="margin:0;">With what the gaps are expected to add (the dotted green line, ${escapeHtml(statusText(pjRec).split(':')[0].toLowerCase())}): ${escapeHtml(fmtVal(pEnd))}${metric === 'avgnight' ? ' on the last day of the month' : ' by the end of the month'}${metric === 'bookings' ? '' : ''}.</span>`;
+}
 verdictEl.innerHTML = verdict || 'No bookings found for this month yet.';
 const s = setup(canvas);
 if (!s) return;
@@ -675,7 +801,7 @@ const { ctx, width, height } = s;
 const c = palette();
 const narrow = width < 520;
 const plot = { x: narrow ? 38 : 48, y: 14, w: width - (narrow ? 38 : 48) - 16, h: height - 14 - 26 };
-const maxV = niceMax(Math.max(1, ...cur.filter((v) => v !== null), ...(cmp.values || []).filter((v) => v !== null), ...(proj || []).filter((v) => v !== null), ...(curUpper || []).filter((v) => v !== null), ...(cmp.upper || []).filter((v) => v !== null)));
+const maxV = niceMax(Math.max(1, ...cur.filter((v) => v !== null), ...(projPlus || []).filter((v) => v !== null), ...(cmp.values || []).filter((v) => v !== null), ...(proj || []).filter((v) => v !== null), ...(curUpper || []).filter((v) => v !== null), ...(cmp.upper || []).filter((v) => v !== null)));
 const X = (i) => plot.x + (n === 1 ? 0 : (i / (n - 1)) * plot.w);
 const Y = (v) => plot.y + plot.h - (v / maxV) * plot.h;
 ctx.font = '11px Inter, sans-serif';
@@ -759,6 +885,13 @@ ctx.beginPath(); let ps = false;
 for (let i = Math.max(lastIdx, 0); i < n; i++) { const v = proj[i]; if (v === null) continue; if (!ps) { ctx.moveTo(X(i), Y(v)); ps = true; } else ctx.lineTo(X(i), Y(v)); }
 ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
 }
+// with what the gaps are expected to add, dotted green, from today's point
+if (projPlus && projPlus.some((v) => v !== null) && lastIdx >= 0) {
+ctx.strokeStyle = c.good; ctx.lineWidth = 2.25; ctx.setLineDash([1, 4]); ctx.lineCap = 'round';
+ctx.beginPath(); ctx.moveTo(X(lastIdx), Y(cur[lastIdx]));
+for (let i = lastIdx + 1; i < n; i++) { const v = projPlus[i]; if (v === null) continue; ctx.lineTo(X(i), Y(v)); }
+ctx.stroke(); ctx.setLineDash([]); ctx.lineCap = 'butt';
+}
 if (lastIdx >= 0) {
 ctx.fillStyle = c.ink; ctx.beginPath(); ctx.arc(X(lastIdx), Y(cur[lastIdx]), 4, 0, Math.PI * 2); ctx.fill();
 ctx.strokeStyle = c.card; ctx.lineWidth = 2; ctx.stroke();
@@ -780,26 +913,27 @@ ctx.fillText(text, flip ? X(idx) - 8 : X(idx) + 8, y);
 const behind = lastIdx >= 0 && cmp.values && cmp.values[lastIdx] !== null && cur[lastIdx] < cmp.values[lastIdx];
 if (lastIdx >= 0) putLabel(`${longMonth(ym).split(' ')[0]} ${fmtVal(cur[lastIdx]).replace(/ nights?/, '')}`, lastIdx, cur[lastIdx], c.ink, behind ? 12 : -10);
 if (proj && proj[n - 1] !== null && proj[n - 1] > 0 && (lastIdx < 0 || proj[n - 1] > cur[lastIdx] + 1e-9)) putLabel(`Booked ${fmtVal(proj[n - 1]).replace(/ nights?/, '')}`, n - 1, proj[n - 1], c.ink, -10);
+if (projPlus && projPlus[n - 1] !== null && projPlus[n - 1] > 0) putLabel(`Projected ${fmtVal(projPlus[n - 1]).replace(/ nights?/, '')}`, n - 1, projPlus[n - 1], c.good, 12);
 if (cmp.values && lastIdx >= 0 && cmp.values[lastIdx] !== null) putLabel(`${state.compare === 'lastyear' ? 'Last yr' : state.compare === 'prev3' ? 'Avg 3m' : 'Last mo'} ${fmtVal(cmp.values[lastIdx]).replace(/ nights?/, '')}`, lastIdx, cmp.values[lastIdx], c.muted, behind ? -10 : 12);
 if (state.hoverDay !== null && state.hoverDay >= 0 && state.hoverDay < n) {
 ctx.strokeStyle = c.muted; ctx.lineWidth = 1; ctx.setLineDash([2, 3]);
 ctx.beginPath(); ctx.moveTo(X(state.hoverDay), plot.y); ctx.lineTo(X(state.hoverDay), plot.y + plot.h); ctx.stroke(); ctx.setLineDash([]);
 }
-PLOTS.pace = { plot, n, cur, cmp: cmp.values, proj, curUpper, cmpUpper: cmp.upper, X, fmtVal, lead };
+PLOTS.pace = { plot, n, cur, cmp: cmp.values, proj, projPlus, curUpper, cmpUpper: cmp.upper, X, fmtVal, lead };
 // table view (a row a week for the long lead-in axis, a row a day otherwise)
 const rows = [];
 for (let i = 0; i < n; i++) {
 if (lead && (i - lead) % 7 !== 0 && i !== n - 1) continue;
-rows.push(`<tr><td>${lead ? escapeHtml(shortDate(dateStrAdd(dayStr(ym, 1), i - lead))) : i + 1}</td><td style="text-align:right;">${cur[i] === null ? '' : escapeHtml(fmtVal(cur[i]))}</td>${proj ? `<td style="text-align:right;">${proj[i] === null ? '' : escapeHtml(fmtVal(proj[i]))}</td>` : ''}<td style="text-align:right;">${cmp.values && cmp.values[i] !== null ? escapeHtml(fmtVal(cmp.values[i])) : ''}</td></tr>`);
+rows.push(`<tr><td>${lead ? escapeHtml(shortDate(dateStrAdd(dayStr(ym, 1), i - lead))) : i + 1}</td><td style="text-align:right;">${cur[i] === null ? '' : escapeHtml(fmtVal(cur[i]))}</td>${proj ? `<td style="text-align:right;">${proj[i] === null ? '' : escapeHtml(fmtVal(proj[i]))}</td>` : ''}${projPlus ? `<td style="text-align:right;">${projPlus[i] === null ? '' : escapeHtml(fmtVal(projPlus[i]))}</td>` : ''}<td style="text-align:right;">${cmp.values && cmp.values[i] !== null ? escapeHtml(fmtVal(cmp.values[i])) : ''}</td></tr>`);
 }
-tableEl.innerHTML = `<table class="limits-table" style="min-width:0;"><thead><tr><th>${lead ? 'Date' : 'Day'}</th><th style="text-align:right;">${escapeHtml(METRIC_LABEL[metric])}</th>${proj ? '<th style="text-align:right;">With stays already booked</th>' : ''}<th style="text-align:right;">${escapeHtml(COMPARE_LABEL[state.compare])}</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
+tableEl.innerHTML = `<table class="limits-table" style="min-width:0;"><thead><tr><th>${lead ? 'Date' : 'Day'}</th><th style="text-align:right;">${escapeHtml(METRIC_LABEL[metric])}</th>${proj ? '<th style="text-align:right;">With stays already booked</th>' : ''}${projPlus ? '<th style="text-align:right;">With projected gaps</th>' : ''}<th style="text-align:right;">${escapeHtml(COMPARE_LABEL[state.compare])}</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
 }
 
 function paceTip(evt) {
 const canvas = document.getElementById('pace-canvas');
 const tip = document.getElementById('pace-tip');
 if (!canvas || !tip || !PLOTS.pace) return;
-const { plot, n, cur, cmp, proj, curUpper, cmpUpper, fmtVal, lead } = PLOTS.pace;
+const { plot, n, cur, cmp, proj, projPlus, curUpper, cmpUpper, fmtVal, lead } = PLOTS.pace;
 const r = canvas.getBoundingClientRect();
 const x = evt.clientX - r.left;
 const i = Math.round(((x - plot.x) / plot.w) * (n - 1));
@@ -808,7 +942,7 @@ state.hoverDay = i;
 const date = dateStrAdd(dayStr(state.ym, 1), i - lead);
 let day = new Date(`${date}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 if (lead && i < lead) day += ` (${Math.ceil((lead - i) / 7)} wk${Math.ceil((lead - i) / 7) === 1 ? '' : 's'} before the month)`;
-tip.innerHTML = `<strong>${escapeHtml(day)}</strong><br>${cur[i] === null ? 'Not yet' : escapeHtml(`${METRIC_LABEL[state.metric]}: ${fmtVal(cur[i])}`)}${proj && proj[i] !== null && (cur[i] === null || proj[i] !== cur[i]) ? `<br>${escapeHtml(`With stays already booked: ${fmtVal(proj[i])}`)}` : ''}${curUpper && curUpper[i] !== null && cur[i] !== null && curUpper[i] > cur[i] ? `<br>${escapeHtml(`up to ${fmtVal(curUpper[i])} counting nights with no booking date`)}` : ''}${cmp && cmp[i] !== null ? `<br>${escapeHtml(COMPARE_LABEL[state.compare])}: ${escapeHtml(fmtVal(cmp[i]))}` : ''}${cmpUpper && cmp && cmp[i] !== null && cmpUpper[i] > cmp[i] ? `<br>${escapeHtml(`up to ${fmtVal(cmpUpper[i])} counting nights with no booking date`)}` : ''}`;
+tip.innerHTML = `<strong>${escapeHtml(day)}</strong><br>${cur[i] === null ? 'Not yet' : escapeHtml(`${METRIC_LABEL[state.metric]}: ${fmtVal(cur[i])}`)}${proj && proj[i] !== null && (cur[i] === null || proj[i] !== cur[i]) ? `<br>${escapeHtml(`With stays already booked: ${fmtVal(proj[i])}`)}` : ''}${projPlus && projPlus[i] !== null ? `<br>${escapeHtml(`With projected gaps: ${fmtVal(projPlus[i])}`)}` : ''}${curUpper && curUpper[i] !== null && cur[i] !== null && curUpper[i] > cur[i] ? `<br>${escapeHtml(`up to ${fmtVal(curUpper[i])} counting nights with no booking date`)}` : ''}${cmp && cmp[i] !== null ? `<br>${escapeHtml(COMPARE_LABEL[state.compare])}: ${escapeHtml(fmtVal(cmp[i]))}` : ''}${cmpUpper && cmp && cmp[i] !== null && cmpUpper[i] > cmp[i] ? `<br>${escapeHtml(`up to ${fmtVal(cmpUpper[i])} counting nights with no booking date`)}` : ''}`;
 tip.hidden = false;
 tip.style.left = `${Math.min(x + 12, r.width - 190)}px`;
 tip.style.top = '8px';
@@ -828,6 +962,7 @@ return `<span class="letting-chart-legend-item">${escapeHtml(r.label || 'Room')}
 });
 Object.values(CHANNELS).forEach((ch) => items.push(`<span class="letting-chart-legend-item"><span class="${ch.striped ? 'occ-key-striped' : 'occ-key-solid'}"></span>${escapeHtml(ch.label)}</span>`));
 items.push('<span class="letting-chart-legend-item"><span class="occ-key-hatch"></span>Cancelled</span>');
+if (projectionForMonth(state.ym)) items.push('<span class="letting-chart-legend-item"><span class="occ-key-proj"></span>Projected: free nights shaded by chance of being booked, one possible fill dashed</span>');
 el.innerHTML = items.join('');
 const sum = document.getElementById('occ-summary');
 if (sum) {
@@ -960,8 +1095,36 @@ const stays = collectStays();
 renderUndated(stays);
 renderIncomeTrace(stays);
 renderLegend(stays);
+refreshProjectionStatus();
 drawTimeline(stays);
 drawPace(stays);
+}
+
+// ---- Projection button -----------------------------------------------------------------------
+
+function refreshProjectionStatus() {
+const el = document.getElementById('occ-project-status');
+if (el) el.textContent = statusText();
+}
+
+async function runProjectionFromUi() {
+const btn = document.getElementById('occ-project-btn');
+const el = document.getElementById('occ-project-status');
+if (!btn || btn.disabled) return;
+btn.disabled = true;
+if (el) el.textContent = 'Projecting…';
+try {
+const r = await runProjection({ onProgress: (p) => { if (el) el.textContent = `Projecting… ${Math.round(p * 100)}%`; } });
+if (r.error) { if (el) el.textContent = r.error; return; }
+data.prefs.showProjection = true;
+const box = document.getElementById('occ-project-show'); if (box) box.checked = true;
+refreshProjectionStatus();
+renderLettingOccupancy();
+import('./letting.js').then((m) => m.renderLetting()).catch(() => {});
+} catch (err) {
+console.error('Projection failed:', err);
+if (el) el.textContent = `Failed: ${err.message || err}`;
+} finally { btn.disabled = false; }
 }
 
 function initLettingOccupancy() {
@@ -975,6 +1138,10 @@ monthSel.addEventListener('change', () => { state.ym = monthSel.value; renderLet
 document.getElementById('pace-metric').addEventListener('change', (e) => { state.metric = e.target.value; renderLettingOccupancy(); });
 document.getElementById('pace-compare').addEventListener('change', (e) => { state.compare = e.target.value; renderLettingOccupancy(); });
 document.getElementById('pace-channel').addEventListener('change', (e) => { state.channel = e.target.value; renderLettingOccupancy(); });
+document.getElementById('occ-project-show').checked = data.prefs.showProjection !== false;
+document.getElementById('occ-project-show').addEventListener('change', (e) => { data.prefs.showProjection = e.target.checked; queueSave(); renderLettingOccupancy(); import('./letting.js').then((m) => m.renderLetting()).catch(() => {}); });
+document.getElementById('occ-project-btn').addEventListener('click', runProjectionFromUi);
+refreshProjectionStatus();
 document.getElementById('occ-undated').addEventListener('change', (e) => {
 const input = e.target.closest('[data-occ-booked]');
 if (input && input.value) setBookedOn(input.dataset.occBooked, input.value);

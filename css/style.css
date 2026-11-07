@@ -4607,3 +4607,4 @@ background:var(--slate-bg);color:var(--slate);
 .be-table tr.be-sub td.num{padding-left:8px;}
 .be-table tr.be-sub[hidden]{display:none;}
 .be-table tr.be-info td{font-style:italic;}
+.occ-key-proj{display:inline-block;width:16px;height:8px;border-radius:3px;border:1px dashed var(--sage);background:var(--sage-bg);flex:none;}
