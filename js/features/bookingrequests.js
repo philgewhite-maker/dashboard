@@ -16,6 +16,7 @@ import { data, queueSave, blankBookingRequest } from '../state.js';
 import { escapeHtml, todayStr, dateStrAdd } from '../utils.js';
 import { canAttemptGoogleAction } from '../sync/googleauth.js';
 import { nightRateRooms } from './letting.js';
+import { collectStays } from './lettingoccupancy.js';
 
 const QUERY = 'from:automated@airbnb.com (subject:"Pending: Reservation Request" OR subject:"Enquiry for")';
 const SUBJECT_RE = /^(Pending:\s*Reservation Request at|Enquiry for)\s+(.+)\s+for\s+(\d.+)$/i;
@@ -207,6 +208,8 @@ return a.startsWith(b) || a.includes(b);
 // passed. A decision you set yourself ('declined') is left alone.
 function resolveRequestOutcomes() {
 const stays = data.airbnbReservations || [];
+// Older stays are known only from their Letting income entry (no stay record, no code).
+const ledgerStays = collectStays().filter((s) => String(s.id).startsWith('led:') && s.status === 'stay');
 const today = todayStr();
 let changed = 0;
 (data.bookingRequests || []).forEach((q) => {
@@ -222,6 +225,15 @@ q.decision = 'accepted';
 q.reservationId = stay.id;
 if (!q.listingId) q.listingId = stay.listingId; // an email for a listing id not in any ICS link
 q.decidedOn = stay.confirmedOn || String(q.receivedAt || '').slice(0, 10);
+changed++;
+return;
+}
+const sameRoom = (listingId) => !q.listingId || roomOf(listingId) === roomOf(q.listingId);
+const old = ledgerStays.find((s) => sameRoom(s.listingId) && (s.checkin === q.checkin || s.checkout === q.checkout) && nameFits(s.guest, q.guestName));
+if (old) {
+q.decision = 'accepted';
+if (!q.listingId) q.listingId = old.listingId;
+q.decidedOn = String(q.receivedAt || '').slice(0, 10);
 changed++;
 return;
 }
