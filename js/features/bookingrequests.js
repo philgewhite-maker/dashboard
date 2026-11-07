@@ -21,10 +21,10 @@ const QUERY = 'from:automated@airbnb.com (subject:"Pending: Reservation Request"
 const SUBJECT_RE = /^(Pending:\s*Reservation Request at|Enquiry for)\s+(.+)\s+for\s+(\d.+)$/i;
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 const RECENT_LIMIT = 30;
-// The backfill walks back this many months, two months per search, so no single search
+// The backfill walks back this many months, one month per search, so no single search
 // asks Gmail for hundreds of messages at once.
 const BACKFILL_MONTHS = 24;
-const BACKFILL_WINDOW_LIMIT = 60;
+const BACKFILL_WINDOW_LIMIT = 30;
 
 const iso = (y, m, d) => `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 const monthIdx = (s) => MONTHS.indexOf(String(s || '').slice(0, 3).toLowerCase());
@@ -144,24 +144,40 @@ queueSave();
 return result;
 }
 
-// The whole history, two months at a time, newest first. `onProgress(text)` for a status line.
+// The whole history, a month at a time, newest first. Gmail limits how many reads a second an
+// app may make (it answers 403 past that), so each month is a small search, there is a pause
+// between months, and a refused month is retried after a longer wait. `onProgress(text)` for
+// a status line.
 async function backfillBookingRequests(onProgress = () => {}) {
 if (!(await canAttemptGoogleAction())) return { added: 0, error: 'Not signed in to Google.' };
 const fmt = (d) => d.replace(/-/g, '/');
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 let added = 0;
 let unmatchedListing = 0;
 let end = dateStrAdd(todayStr(), 1);
-for (let i = 0; i < BACKFILL_MONTHS / 2; i++) {
-const start = dateStrAdd(end, -61);
-onProgress(`Reading ${start.slice(0, 7)} to ${end.slice(0, 7)}…`);
+for (let i = 0; i < BACKFILL_MONTHS; i++) {
+const start = dateStrAdd(end, -31);
+let tries = 0;
+for (;;) {
+onProgress(`Reading ${start.slice(0, 7)}${tries ? ` (retry ${tries})` : ''}…`);
 try {
 const r = await readSearch(`${QUERY} after:${fmt(start)} before:${fmt(end)}`, BACKFILL_WINDOW_LIMIT);
 added += r.added;
 unmatchedListing += r.unmatchedListing;
+break;
 } catch (err) {
+tries++;
+if (tries > 3) {
 console.error('Booking request backfill failed:', err);
-return { added, unmatchedListing, error: err.message || String(err) };
+resolveRequestOutcomes();
+queueSave();
+return { added, unmatchedListing, error: `${err.message || String(err)} (read up to ${end.slice(0, 7)}; run it again to carry on)` };
 }
+await wait(15000 * tries);
+}
+}
+queueSave();
+await wait(1500);
 end = start;
 }
 data.prefs.bookingRequestsBackfilledAt = new Date().toISOString();
