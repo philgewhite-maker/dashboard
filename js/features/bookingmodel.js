@@ -47,6 +47,7 @@ const DETAIL_KEYS = ['n_before', 'n_inside', 'n_after', 'n_other', 'd_before', '
 const RUNS = 1500;
 const CAL_RUNS = 150;
 const PROJECT_RUNS = 1000;
+const OCC_FULL_EVIDENCE = 3; // bookings a month needs to count in full towards the occupancy it shows
 
 // ---- Dates as day numbers ------------------------------------------------------------------
 const dayNum = (s) => { const [y, m, d] = s.split('-').map(Number); return Date.UTC(y, m - 1, d) / DAY_MS; };
@@ -285,9 +286,13 @@ const lateShare = (nLate + CANCEL_PRIOR.lateK * CANCEL_PRIOR.late) / (nTimed + C
 // room wasn't listed, not as a month nobody wanted it, and is left out; so are the periods
 // you marked as not offered (Settings -> Booking evaluator), night by night. A long direct
 // booking counts as occupied like any other stay.
+// How much a month tells you depends on how many separate bookings it rests on: a month that was one long
+// booking (a three-month block, say) says little about how often guests ask for the room, so each month counts
+// for min(1, bookings touching it / OCC_FULL_EVIDENCE) when averaging, in the all-months figure and in the
+// month-of-year one alike.
 const occ = ctx.rooms.map((room, i) => {
 const mine = live.filter((x) => ri.get(x.listingId) === i);
-if (!mine.length) return { byMonth: new Array(12).fill(null), byMonthN: new Array(12).fill(0), overall: null, months: 0, skipped: 0 };
+if (!mine.length) return { byMonth: new Array(12).fill(null), byMonthN: new Array(12).fill(0), byMonthW: new Array(12).fill(0), byMonthBookings: new Array(12).fill(0), overall: null, months: 0, skipped: 0 };
 const first = Math.min(...mine.map((x) => dayNum(x.checkin)));
 const nights = new Set();
 mine.forEach((x) => { for (let d = dayNum(x.checkin); d < dayNum(x.checkout); d++) nights.add(d); });
@@ -298,7 +303,7 @@ for (let d = dayNum(u.from); d <= dayNum(u.to); d++) off.add(d);
 });
 const asked = new Set();
 ctx.requests.forEach((q) => { if (q.checkin && ri.get(q.listingId) === i) asked.add(q.checkin.slice(0, 7)); });
-const sums = Array.from({ length: 12 }, () => []);
+const sums = Array.from({ length: 12 }, () => []); // {share, w} per month of the year
 const curMonthStart = dayNum(`${today.slice(0, 7)}-01`);
 let d0 = dayNum(`${dayStr(Math.max(first, T - 730)).slice(0, 7)}-01`);
 const all = [];
@@ -311,15 +316,22 @@ for (let d = d0; d < next; d++) { if (off.has(d)) continue; open++; if (nights.h
 const ym = dayStr(d0).slice(0, 7);
 if (open < 7 || (k === 0 && !asked.has(ym))) { skipped++; d0 = next; continue; }
 const share = k / open;
-sums[dt.getUTCMonth()].push(share);
-all.push(share);
+const bookings = mine.filter((x) => dayNum(x.checkin) < next && dayNum(x.checkout) > d0).length;
+const w = Math.min(1, Math.max(bookings, 0.2) / OCC_FULL_EVIDENCE);
+sums[dt.getUTCMonth()].push({ share, w, bookings });
+all.push({ share, w, bookings });
 d0 = next;
 }
-const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+const wmean = (xs) => { const W = xs.reduce((a, x) => a + x.w, 0); return W > 0 ? xs.reduce((a, x) => a + x.w * x.share, 0) / W : null; };
 // A month of the year seen once or twice is blended with the room's all-months average (weight
 // one), so a single full or empty month doesn't set the demand on its own.
-const overall = mean(all);
-return { byMonth: sums.map((xs) => (xs.length ? (xs.reduce((a, b) => a + b, 0) + overall) / (xs.length + 1) : null)), byMonthN: sums.map((xs) => xs.length), overall, months: all.length, skipped };
+const overall = wmean(all);
+const weightOf = (xs) => xs.reduce((a, x) => a + x.w, 0);
+return {
+byMonth: sums.map((xs) => (xs.length ? (xs.reduce((a, x) => a + x.w * x.share, 0) + overall) / (weightOf(xs) + 1) : null)),
+byMonthN: sums.map((xs) => xs.length), byMonthW: sums.map((xs) => weightOf(xs)), byMonthBookings: sums.map((xs) => xs.reduce((a, x) => a + x.bookings, 0)),
+overall, months: all.length, skipped,
+};
 });
 
 ctx.params = { prices, losCdf, losMean, losN, dowW, dowN, lead, cancelRate, lateShare, nAll, nCancel, occ, lambda: new Map() };
@@ -749,7 +761,7 @@ return [
 { id: 'price', label: 'Raw nightly rate (before discounts and the cleaning fee)', value: `${fmtMoney(basePrice(ctx, params, ri, ci))}${price.uplift > 1.005 ? ` (Fri/Sat ×${price.uplift.toFixed(2)})` : ''}`, source: price.source },
 { id: 'discounts', label: 'Discounts the rate is worked back through', value: discountText(ctx.s), source: price.n ? `undone on ${price.n} stays: on average ${(price.avgShortNotice * 100).toFixed(1)}% short notice, ${(price.avgLength * 100).toFixed(1)}% length` : 'your setting' },
 { id: 'cleanfee', label: 'Cleaning fee guests pay (income per booking)', value: fmtMoney(price.clean), source: ctx.rooms[ri].cleaningIncome != null && ctx.rooms[ri].cleaningIncome !== '' ? 'your setting' : price.n ? 'median of your earnings export' : 'none known' },
-{ id: 'occupancy', label: `Occupancy expected for this room in ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m]}`, value: occVal == null ? `${Math.round(OCC_PRIOR * 100)}%` : `${Math.round(occVal * 100)}%`, source: o.byMonth[m] != null ? `your stays: ${o.byMonthN[m]} earlier ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m]}${o.byMonthN[m] === 1 ? '' : 's'}, blended with all ${o.months} months on offer${o.skipped ? `; ${o.skipped} left out as not on offer` : ''}` : o.overall != null ? `your stays, ${o.months} months on offer${o.skipped ? `; ${o.skipped} left out as not on offer` : ''}` : 'assumption', editable: 'demand' },
+{ id: 'occupancy', label: `Occupancy expected for this room in ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m]}`, value: occVal == null ? `${Math.round(OCC_PRIOR * 100)}%` : `${Math.round(occVal * 100)}%`, source: o.byMonth[m] != null ? `your stays: ${o.byMonthN[m]} earlier ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m]}${o.byMonthN[m] === 1 ? '' : 's'} (resting on ${o.byMonthBookings[m]} booking${o.byMonthBookings[m] === 1 ? '' : 's'}, so counting as ${o.byMonthW[m].toFixed(2)} of a full month), blended with all ${o.months} months on offer${o.skipped ? `; ${o.skipped} left out as not on offer` : ''}` : o.overall != null ? `your stays, ${o.months} months on offer${o.skipped ? `; ${o.skipped} left out as not on offer` : ''}` : 'assumption', editable: 'demand' },
 { id: 'lead', label: 'Median days ahead bookings arrive', value: `${Math.round(lead.median)} days`, source: lead.n ? `your guide blended with ${lead.n} of your bookings` : 'your guide (Settings)', editable: 'lead' },
 { id: 'los', label: 'Average stay length', value: `${params.losMean.toFixed(1)} nights`, source: params.losN ? `your requests and stays (${Math.round(params.losN)}) blended with an assumption` : 'assumption' },
 { id: 'dow', label: 'Busiest check-in day', value: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][params.dowW.indexOf(Math.max(...params.dowW))], source: params.dowN ? `your requests and stays (${Math.round(params.dowN)})` : 'assumption' },
@@ -1006,7 +1018,7 @@ stays: [], requests: [], proposals: [], listingLabels: { LA: 'Room A' }, scale: 
 };
 calibrate(ctx);
 ctx.params.cancelRate = 0;
-ctx.params.occ = [{ byMonth: new Array(12).fill(occupancy), byMonthN: new Array(12).fill(1), overall: occupancy, months: 12 }];
+ctx.params.occ = [{ byMonth: new Array(12).fill(occupancy), byMonthN: new Array(12).fill(1), byMonthW: new Array(12).fill(1), byMonthBookings: new Array(12).fill(3), overall: occupancy, months: 12 }];
 return ctx;
 }
 function selfTest() {
