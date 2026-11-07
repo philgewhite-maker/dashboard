@@ -230,7 +230,10 @@ all.push(share);
 d0 = next;
 }
 const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
-return { byMonth: sums.map(mean), overall: mean(all), months: all.length };
+// A month of the year seen once or twice is blended with the room's all-months average (weight
+// one), so a single full or empty month doesn't set the demand on its own.
+const overall = mean(all);
+return { byMonth: sums.map((xs) => (xs.length ? (xs.reduce((a, b) => a + b, 0) + overall) / (xs.length + 1) : null)), byMonthN: sums.map((xs) => xs.length), overall, months: all.length };
 });
 
 ctx.params = { prices, losCdf, losMean, losN, dowW, dowN, lead, cancelRate, lateShare, nAll, nCancel, occ, lambda: new Map() };
@@ -597,7 +600,7 @@ const fmtMoney = (v) => `£${Math.round(v)}`;
 const occVal = o.byMonth[m] ?? o.overall;
 return [
 { id: 'price', label: 'Payout per night, before discounts', value: fmtMoney(basePrice(ctx, params, ri, ci)), source: price.source },
-{ id: 'occupancy', label: `Occupancy this room reached in ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m]}`, value: occVal == null ? `${Math.round(OCC_PRIOR * 100)}%` : `${Math.round(occVal * 100)}%`, source: o.byMonth[m] != null ? 'your stays, same month in earlier years' : o.overall != null ? `your stays, all months (${o.months})` : 'assumption', editable: 'demand' },
+{ id: 'occupancy', label: `Occupancy expected for this room in ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m]}`, value: occVal == null ? `${Math.round(OCC_PRIOR * 100)}%` : `${Math.round(occVal * 100)}%`, source: o.byMonth[m] != null ? `your stays: ${o.byMonthN[m]} earlier ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m]}${o.byMonthN[m] === 1 ? '' : 's'}, blended with all ${o.months} months` : o.overall != null ? `your stays, all months (${o.months})` : 'assumption', editable: 'demand' },
 { id: 'lead', label: 'Median days ahead bookings arrive', value: `${Math.round(lead.median)} days`, source: lead.n ? `your guide blended with ${lead.n} of your bookings` : 'your guide (Settings)', editable: 'lead' },
 { id: 'los', label: 'Average stay length', value: `${params.losMean.toFixed(1)} nights`, source: params.losN ? `your requests and stays (${Math.round(params.losN)}) blended with an assumption` : 'assumption' },
 { id: 'dow', label: 'Busiest check-in day', value: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][params.dowW.indexOf(Math.max(...params.dowW))], source: params.dowN ? `your requests and stays (${Math.round(params.dowN)})` : 'assumption' },
@@ -651,7 +654,7 @@ stays: [], requests: [], proposals: [], listingLabels: { LA: 'Room A' }, scale: 
 };
 calibrate(ctx);
 ctx.params.cancelRate = 0;
-ctx.params.occ = [{ byMonth: new Array(12).fill(occupancy), overall: occupancy, months: 12 }];
+ctx.params.occ = [{ byMonth: new Array(12).fill(occupancy), byMonthN: new Array(12).fill(1), overall: occupancy, months: 12 }];
 return ctx;
 }
 function selfTest() {
