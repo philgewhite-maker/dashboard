@@ -1641,6 +1641,7 @@ return `<div class="letting-chart-group-row">
 </span>
 </div>`;
 }).join('')
++ '<span class="letting-chart-legend-item"><span class="occ-key-solid"></span>Airbnb</span><span class="letting-chart-legend-item"><span class="occ-key-striped"></span>Direct / other</span><span class="letting-chart-legend-item"><span class="occ-key-dots"></span>Projected</span>'
 + `<span class="letting-chart-legend-item">${avgSwatch}3-month avg</span>`;
 el.querySelectorAll('[data-letting-chart-group]').forEach((cb) => {
 cb.addEventListener('change', () => {
