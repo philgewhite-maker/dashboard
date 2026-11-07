@@ -1,4 +1,5 @@
 import { kvGet, kvSet, photoDelete } from './db.js';
+import { mergeDocuments } from './sync/merge.js';
 import { uid, todayStr, daysAgoStr, last7Dates, daysSince, daysUntil } from './utils.js';
 import { matchBrandLogo, matchBrandEntry, splitProvider } from './brandLogos.js';
 import { splitLedgerNotes, migrateStays, dedupeStays, unlinkCopiedCodes, repairMigratedBookingDates, migrateVouchers, dedupeAccruals, migrateConnections, linkProviders } from './migrations.js';
@@ -2633,6 +2634,9 @@ let onExternalUpdate = () => {};
 // against the current on-disk revision on every save — see persist() for
 // why this exists.
 let knownRev = 0;
+// JSON text of the document as this session last read it from, or wrote it to, disk: the common ancestor
+// persist() merges from when another tab has saved in the meantime.
+let persistedBase = null;
 
 // Fired after a local save that actually changed something, so any
 // live-sync layer knows there's something to upload. Deliberately NOT
@@ -2695,6 +2699,7 @@ async function loadData() {
 const stored = await kvGet(DATA_KEY);
 knownRev = (await kvGet(REV_KEY)) || 0;
 data = stored || sampleData();
+try { persistedBase = stored ? JSON.stringify(stored) : null; } catch (e) { persistedBase = null; }
 migrate();
 if (!stored) await persist();
 }
@@ -4111,10 +4116,30 @@ try {
 const onDiskRev = (await kvGet(REV_KEY)) || 0;
 if (onDiskRev > knownRev) {
 const onDiskData = await kvGet(DATA_KEY);
+// Another tab or window on this origin saved since this session last looked. Throwing this session's edit
+// away loses it silently (a projection that finished a minute ago simply vanished), so merge it three ways
+// instead: what this session last saw on disk (base), what it holds now (ours), what is on disk now (theirs).
+let kept = false;
+if (persistedBase && onDiskData && (opts.retries || 0) < 3) {
+try {
+const { merged, conflicts } = mergeDocuments(JSON.parse(persistedBase), data, onDiskData, ['tickerCache', 'airbnbSyncStatus', 'airbnbCleanerSyncStatus', 'siteHealth']);
+console.warn(`Disk revision ${onDiskRev} is newer than this session's ${knownRev}: merged this session's edits into it${conflicts.length ? ` (the disk copy won on ${conflicts.join(', ')})` : ''}.`);
+data = merged; kept = true;
+} catch (e) { kept = false; }
+}
+if (!kept) {
 console.warn(`Refusing to overwrite: disk revision ${onDiskRev} is newer than this session's ${knownRev}. Reloading instead of saving.`);
 data = onDiskData;
+}
 migrate();
 knownRev = onDiskRev;
+if (kept) {
+// Save the merged document (the revision now matches), then redraw everything: it may include the other tab's changes.
+await persist({ ...opts, retries: (opts.retries || 0) + 1 });
+onExternalUpdate();
+return;
+}
+persistedBase = JSON.stringify(data);
 onSaveStatus('conflict');
 notifyDataChanged({ fire: false });
 onExternalUpdate();
@@ -4123,6 +4148,7 @@ return;
 knownRev = onDiskRev + 1;
 await kvSet(DATA_KEY, data);
 await kvSet(REV_KEY, knownRev);
+persistedBase = JSON.stringify(data);
 onSaveStatus('ok');
 notifyDataChanged({ fire: !opts.silentDispatch });
 if (opts.notify !== false) fireLocalChange();
