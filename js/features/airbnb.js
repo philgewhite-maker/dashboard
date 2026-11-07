@@ -696,6 +696,20 @@ if (e.reservationId && e.edge && !claims.has(`${e.reservationId}:${e.edge}`)) cl
 });
 const cleaned = data.airbnbListings.filter((l) => l.needsCleaning).map((l) => l.id);
 const stays = data.airbnbReservations.filter((r) => notCancelled(r) && cleaned.includes(r.listingId));
+// A pinned clean on a same-day turnover (one guest out, the next in, same listing, same
+// day) is one visit serving both edges: the check-out clean of the leaving stay is also
+// the check-in clean of the arriving one, and the other way round. Only on the day itself.
+events.filter((e) => e.reservationId && e.edge).forEach((e) => {
+const r = data.airbnbReservations.find((x) => x.id === e.reservationId);
+if (!r) return;
+const day = e.edge === 'checkout' ? r.checkout : r.checkin;
+if (e.date !== day) return;
+stays.filter((o) => o.id !== r.id && o.listingId === r.listingId
+&& (e.edge === 'checkout' ? o.checkin === day : o.checkout === day)).forEach((o) => {
+const key = `${o.id}:${e.edge === 'checkout' ? 'checkin' : 'checkout'}`;
+if (!claims.has(key)) claims.set(key, e);
+});
+});
 events.filter((e) => !(e.reservationId && e.edge)).forEach((e) => {
 const cands = [];
 stays.forEach((r) => {
