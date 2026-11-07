@@ -4560,3 +4560,22 @@ background:var(--slate-bg);color:var(--slate);
 .aex-what{flex:1 1 260px;min-width:0;font-variant-numeric:tabular-nums;}
 .aex-target{flex:0 0 auto;}
 .aex-differs{font-size:11px;color:var(--red);flex-basis:100%;}
+/* Simulated futures as timeline rows (bookingevaluator.js examplesHtml). */
+.be-ex-wrap{overflow-x:auto;padding-bottom:4px;}
+.be-ex-future{min-width:640px;margin:8px 0 12px;}
+.be-ex-name{font-size:11px;font-weight:600;margin:0 0 2px 70px;}
+.be-ex-row{display:flex;align-items:center;gap:8px;min-width:640px;margin:2px 0;}
+.be-ex-label{flex:0 0 62px;font-size:11px;color:var(--muted);}
+.be-ex-track{position:relative;flex:1 1 auto;height:24px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);}
+.be-ex-head{height:16px;border:0;}
+.be-hd{position:absolute;top:0;font-size:9px;color:var(--muted);text-align:center;white-space:nowrap;overflow:visible;}
+.be-wk{position:absolute;top:0;bottom:0;background:var(--line);opacity:.45;}
+.be-bk{position:absolute;top:3px;bottom:3px;border-radius:5px;font-size:10px;line-height:16px;padding:0 4px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;box-sizing:border-box;font-variant-numeric:tabular-nums;}
+.be-bk.clip-l{border-top-left-radius:0;border-bottom-left-radius:0;}
+.be-bk.clip-r{border-top-right-radius:0;border-bottom-right-radius:0;}
+.be-bk.existing{background:var(--line);color:var(--muted);}
+.be-bk.new{background:var(--ink);color:var(--card);}
+.be-bk.new.disc{background:repeating-linear-gradient(135deg,var(--ink) 0 4px,var(--muted) 4px 6px);}
+.be-bk.request{background:transparent;border:2px solid var(--ink);color:var(--ink);font-weight:600;}
+.be-ex-total{flex:0 0 78px;text-align:right;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;display:flex;flex-direction:column;line-height:1.15;}
+.be-ex-total small{font-weight:400;font-size:10px;color:var(--muted);}

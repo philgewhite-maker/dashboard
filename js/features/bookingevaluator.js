@@ -208,10 +208,39 @@ return `<details class="settings-subgroup" id="be-assumptions"${changed ? ' open
 </details>`;
 }
 
+// Three simulated futures drawn as timeline rows (the occupancy chart's style), one pair per
+// future: what happens if you reject, and if you accept. Each bar is a booking with its
+// amount; each row ends with the bookings' total in this room and the model's net figure for
+// the whole window (every room, after cleaning, hassle and what empty nights are worth to you).
 function examplesHtml(r) {
-const fmt = (list) => (list.length ? list.map((b) => `${escapeHtml(`${b.nights}-night booking ${short(b.checkin)}–${short(b.checkout)} at £${b.perNight}/night, arrived ${short(b.arrived)}`)}`).join('; ') : 'no new booking in this room');
-return `<details class="settings-subgroup"><summary>Three of the simulated futures</summary>
-${r.examples.map((e, i) => `<div class="be-example"><b>Future ${i + 1}.</b> If you reject: ${fmt(e.reject)}. If you accept (and it isn't cancelled): ${fmt(e.accept)}. Totals ${money(e.total.reject)} vs ${money(e.total.accept)}.</div>`).join('')}
+const dayMs = 86400000;
+const t0 = new Date(`${r.window.start}T00:00:00Z`).getTime();
+const N = r.window.nights;
+const idx = (d) => Math.round((new Date(`${d}T00:00:00Z`).getTime() - t0) / dayMs);
+const pctOf = (i) => `${(Math.max(0, Math.min(N, i)) / N) * 100}%`;
+const bar = (b, cls, label, title) => {
+const a = idx(b.checkin); const z = idx(b.checkout);
+if (z <= 0 || a >= N) return '';
+const clipL = a < 0; const clipR = z > N;
+return `<span class="be-bk ${cls}${clipL ? ' clip-l' : ''}${clipR ? ' clip-r' : ''}" style="left:${pctOf(a)};width:${(Math.min(N, z) - Math.max(0, a)) / N * 100}%;" title="${escapeHtml(title)}">${escapeHtml(label)}</span>`;
+};
+const weekends = [];
+for (let i = 0; i < N; i++) { const wd = new Date(t0 + i * dayMs).getUTCDay(); if (wd === 5 || wd === 6) weekends.push(i); }
+const wk = weekends.map((i) => `<span class="be-wk" style="left:${pctOf(i)};width:${100 / N}%;"></span>`).join('');
+const head = Array.from({ length: N }, (_, i) => { const d = new Date(t0 + i * dayMs); const day = d.getUTCDate(); const show = day === 1 || i === 0 || day % 2 === 1; return `<span class="be-hd" style="left:${pctOf(i)};width:${100 / N}%;">${show ? (day === 1 || i === 0 ? `${day} ${d.toLocaleDateString('en-GB', { month: 'short', timeZone: 'UTC' })}` : day) : ''}</span>`; }).join('');
+const existing = r.existingStays.map((x) => bar(x, 'existing', `${x.guest ? String(x.guest).split(/[ ,]/)[0] : 'Booked'}${x.amount ? ` ${money(x.amount)}` : ''}`, `${x.guest || 'Booked'}: ${short(x.checkin)} – ${short(x.checkout)}${x.amount ? `, ${money(x.amount)}` : ''} (already booked)`)).join('');
+const reqBar = bar(r.request, 'request', `Request ${money(r.request.payout)}`, `This request: ${short(r.request.checkin)} – ${short(r.request.checkout)}, ${money(r.request.payout)} (if it goes ahead)`);
+const row = (label, bookings, withRequest, net) => {
+const sum = bookings.reduce((a, b) => a + b.amount, 0) + (withRequest ? r.request.payout : 0);
+const bars = bookings.map((b) => bar(b, `new${b.discounted ? ' disc' : ''}`, `${b.nights}n ${money(b.amount)}`, `New booking ${short(b.checkin)} – ${short(b.checkout)}: ${b.nights} night${b.nights === 1 ? '' : 's'} at about ${money(b.perNight)}/night = ${money(b.amount)}${b.discounted ? ' (after a discount)' : ''}; arrived ${short(b.arrived)}`)).join('');
+return `<div class="be-ex-row"><span class="be-ex-label">${escapeHtml(label)}</span><div class="be-ex-track">${wk}${existing}${withRequest ? reqBar : ''}${bars}</div><span class="be-ex-total" title="Bookings drawn in this room, then the model's net figure for the whole window">${money(sum)}<small>net ${money(net)}</small></span></div>`;
+};
+const futures = r.examples.map((e, i) => `<div class="be-ex-future"><div class="be-ex-name">Future ${i + 1}</div>
+${row('Reject', e.reject, false, e.total.reject)}
+${row('Accept', e.accept, true, e.total.accept)}</div>`).join('');
+return `<details class="settings-subgroup" open><summary>Three of the simulated futures</summary>
+<div class="settings-note" style="margin:4px 0 6px;">${escapeHtml(r.room.label)}, ${escapeHtml(short(r.window.start))} – ${escapeHtml(short(r.window.end))}. Grey: already booked. Dark: bookings that arrive in this future, with nights and amount. Outlined: this request, if it goes ahead. Shaded days are Fri and Sat. The figure at the end of a row is the bookings in this room; "net" is the whole window across every room after cleaning, hassle and what empty nights are worth to you. The model averages ${r.runs.toLocaleString('en-GB')} futures like these.</div>
+<div class="be-ex-wrap"><div class="be-ex-row be-ex-axis"><span class="be-ex-label"></span><div class="be-ex-track be-ex-head">${head}</div><span class="be-ex-total"></span></div>${futures}</div>
 </details>`;
 }
 

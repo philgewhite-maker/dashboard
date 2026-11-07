@@ -543,10 +543,11 @@ nightA[i] += wNone * tN.nightsTaken[i] + (tLt ? wLate * tLt.nightsTaken[i] : 0) 
 nightR[i] += tR.nightsTaken[i];
 }
 if (examples.length < 3) {
-const describe = (booked) => booked.filter((b) => b.room === ri && b.co > wS && b.ci < wE).map((b) => ({
-checkin: dayStr(b.ci), checkout: dayStr(b.co), nights: b.co - b.ci, arrived: dayStr(Math.max(T, Math.floor(b.at))),
-perNight: Math.round(basePrice(ctx, params, ri, b.ci) * b.factor),
-}));
+const describe = (booked) => booked.filter((b) => b.room === ri && b.co > wS && b.ci < wE).map((b) => {
+let amount = 0;
+for (let d = b.ci; d < b.co; d++) amount += basePrice(ctx, params, ri, d) * b.factor;
+return { checkin: dayStr(b.ci), checkout: dayStr(b.co), nights: b.co - b.ci, arrived: dayStr(Math.max(T, Math.floor(b.at))), perNight: Math.round(amount / (b.co - b.ci)), amount: Math.round(amount), discounted: b.factor < 0.999 };
+}).sort((a, b) => a.checkin.localeCompare(b.checkin));
 examples.push({ reject: describe(R.booked), accept: describe(A0.booked), total: { accept: Math.round(total(tN)), reject: Math.round(r) } });
 }
 }
@@ -590,6 +591,7 @@ ownUseNights,
 nights,
 examples,
 neighbours: neighbourStays(ctx, ri, ci, co),
+existingStays: existing.filter((x) => ri2.get(x.listingId) === ri && dayNum(x.checkout) > wS && dayNum(x.checkin) < wE).map((x) => ({ id: x.id, checkin: x.checkin, checkout: x.checkout, guest: x.guest, amount: Number(x.income) > 0 ? Math.round(Number(x.income)) : null })).sort((a, b) => a.checkin.localeCompare(b.checkin)),
 runs,
 assumptions: describeAssumptions(ctx, params, ri, ci),
 };
