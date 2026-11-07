@@ -326,7 +326,7 @@ const summary = all.length
 ? `${requests.length} request${requests.length === 1 ? '' : 's'} (${became} became Airbnb stays) and ${all.length - requests.length} enquir${all.length - requests.length === 1 ? 'y' : 'ies'} on file${since ? ` since ${shortDate(since)} ${since.slice(0, 4)}` : ''}${wentDirect ? `; ${wentDirect} went direct instead` : ''}.`
 : 'None read yet.';
 const wasOpen = el.open;
-el.innerHTML = `<summary>Requests and enquiries <span class="settings-note" style="margin:0;">${open.length ? `${open.length} for upcoming dates` : ''}</span></summary>
+el.innerHTML = `<summary>Requests and enquiries <span class="settings-note" style="margin:0;">${open.length ? `${open.length} for upcoming dates` : ''}</span> <button class="sync-btn sm inline" type="button" data-bkreq-sim title="Open the booking simulator: on the newest request still waiting for an answer, or blank if there is none">Simulate</button></summary>
 <div class="settings-note" style="margin:4px 0 6px;">Every booking request and enquiry read from your inbox, including the ones that never became stays: the demand the booking evaluator learns from. ${escapeHtml(summary)}</div>
 <div class="bkreq-list">${open.map((q) => requestRowHtml(q, stayChipHtml, directs)).join('') || '<div class="settings-note" style="margin:0;">None for upcoming dates.</div>'}</div>
 ${past.length ? `<details style="margin-top:6px;"><summary class="settings-note" style="margin:0;cursor:pointer;">Earlier (${past.length})</summary><div class="bkreq-list">${past.slice(0, 200).map((q) => requestRowHtml(q, stayChipHtml, directs)).join('')}</div></details>` : ''}
@@ -347,6 +347,16 @@ queueSave();
 renderBookingRequests();
 });
 el.addEventListener('click', async (e) => {
+const sim = e.target.closest('[data-bkreq-sim]');
+if (sim) {
+// The button sits in the summary: don't let the click fold the list open or shut.
+e.preventDefault();
+const today = todayStr();
+const waiting = (data.bookingRequests || []).filter((q) => !q.decision && q.checkin >= today).sort((a, b) => String(b.receivedAt).localeCompare(String(a.receivedAt)))[0];
+const { openEvaluator } = await import('./bookingevaluator.js');
+openEvaluator(waiting ? { requestId: waiting.id } : {});
+return;
+}
 const undo = e.target.closest('[data-bkreq-undirect]');
 if (undo) {
 const q = (data.bookingRequests || []).find((x) => x.id === undo.dataset.bkreqUndirect);

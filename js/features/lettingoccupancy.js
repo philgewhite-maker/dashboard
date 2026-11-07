@@ -14,7 +14,7 @@ import { data, queueSave } from '../state.js';
 import { escapeHtml, dateStrAdd, todayStr } from '../utils.js';
 import { listingColorVar, resolveColor, addMonths, monthLabel, ownerKeyFor, ownerNameFor, lettingChartMonthTotal, lettingIncomeItems, nightRateRooms, money0 } from './letting.js';
 import { isUnconfirmedStay } from '../icsparse.js';
-import { latestProjection, projectionForMonth, projectedNights, projectedByDate, runProjection, statusText } from './bookingprojection.js';
+import { latestProjection, projectionForMonth, projectedNights, projectedByDate, runProjection, statusText, isDeadVoid, deadVoidsOf, showProjection as showProjectionOn } from './bookingprojection.js';
 
 const DAY_MS = 86400000;
 const MIN_COVERAGE = 0.8; // share of a month's nights that must have a known income/dates before it is compared
@@ -388,6 +388,7 @@ return `<div class="letting-chart-wrap" id="letting-occupancy-section">
 <label class="settings-note" style="margin:0;display:flex;gap:4px;align-items:center;" title="Draw the saved projection on the charts"><input type="checkbox" id="occ-project-show"> Show projection</label>
 <span class="settings-note" id="occ-project-status" style="margin:0;"></span>
 </div>
+<div class="dead-voids" id="occ-dead-voids" hidden></div>
 <details class="settings-subgroup" id="occ-income-trace" style="margin:0 0 6px;"></details>
 <div class="letting-chart-legend" id="occ-legend" style="flex-direction:row;flex-wrap:wrap;"></div>
 <div class="chart-canvas-wrap occ-wrap" style="position:relative;"><canvas id="occ-timeline-canvas"></canvas><div class="occ-tip" id="occ-tip" hidden></div></div>
@@ -556,18 +557,19 @@ const monthFirst = dayStr(ym, 1);
 const nextFirst = dayStr(addMonths(ym, 1), 1);
 const dayOf = (date) => Number(date.slice(8, 10));
 proj.voids.filter((v) => v.roomKey === room.key && v.to > monthFirst && v.from < nextFirst).forEach((v) => {
+const dead = isDeadVoid(v);
 let vx1 = Infinity; let vx2 = -Infinity;
 for (let k = 0; k < v.nights; k++) {
 const date = dateStrAdd(v.from, k);
 if (date < monthFirst || date >= nextFirst) continue;
 const x = xDay(dayOf(date)) + colW / 2;
-ctx.fillStyle = c.good; ctx.globalAlpha = 0.07 + 0.4 * (v.nightProb[k] || 0);
+ctx.fillStyle = dead ? c.bad : c.good; ctx.globalAlpha = dead ? 0.3 : 0.07 + 0.4 * (v.nightProb[k] || 0);
 ctx.fillRect(x, top + 3, colW, laneH - 6);
 ctx.globalAlpha = 1;
 vx1 = Math.min(vx1, x); vx2 = Math.max(vx2, x + colW);
 }
 if (vx1 === Infinity) return;
-ctx.strokeStyle = c.good; ctx.globalAlpha = 0.7; ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
+ctx.strokeStyle = dead ? c.bad : c.good; ctx.globalAlpha = 0.7; ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
 ctx.strokeRect(vx1 + 0.5, top + 3.5, vx2 - vx1 - 1, laneH - 7);
 ctx.setLineDash([]); ctx.globalAlpha = 1;
 if (vx2 - vx1 > 34 && v.expected >= 1) {
@@ -627,6 +629,10 @@ const v = hit.void;
 lines.push(`<strong>Projected: ${v.nights} free night${v.nights === 1 ? '' : 's'}, ${fmtD(v.from)} to ${fmtD(v.to)}</strong>`);
 lines.push(`${escapeHtml(hit.room.label || 'Room')}${v.open ? ' (runs past the projection window)' : ''}`);
 lines.push(`Expected £${Math.round(v.expected).toLocaleString('en-GB')} (1 in 10 below £${Math.round(v.p10).toLocaleString('en-GB')}, above £${Math.round(v.p90).toLocaleString('en-GB')}), about ${v.expectedNights.toFixed(1)} of ${v.nights} nights booked`);
+if (isDeadVoid(v)) {
+const dv = (p && p.deadVoids || []).find((x) => x.id === v.id);
+lines.push(`<strong style="color:var(--red);">Dead void</strong>: expected to fill under a night. ${escapeHtml(dv ? dv.text : "Run the projection again for advice.")}`);
+}
 } else {
 const b = hit.ghost;
 lines.push(`<strong>One possible booking</strong>`);
@@ -966,6 +972,7 @@ return `<span class="letting-chart-legend-item">${escapeHtml(r.label || 'Room')}
 Object.values(CHANNELS).forEach((ch) => items.push(`<span class="letting-chart-legend-item"><span class="${ch.striped ? 'occ-key-striped' : 'occ-key-solid'}"></span>${escapeHtml(ch.label)}</span>`));
 items.push('<span class="letting-chart-legend-item"><span class="occ-key-hatch"></span>Cancelled</span>');
 if (projectionForMonth(state.ym)) items.push('<span class="letting-chart-legend-item"><span class="occ-key-proj"></span>Projected: free nights shaded by chance of being booked, one possible fill dashed</span>');
+if (projectionForMonth(state.ym) && deadVoidsOf().length) items.push('<span class="letting-chart-legend-item"><span class="occ-key-dead"></span>Dead void: expected to fill under a night</span>');
 el.innerHTML = items.join('');
 const sum = document.getElementById('occ-summary');
 if (sum) {
@@ -1099,11 +1106,30 @@ renderUndated(stays);
 renderIncomeTrace(stays);
 renderLegend(stays);
 refreshProjectionStatus();
+renderDeadVoids();
 drawTimeline(stays);
 drawPace(stays);
 }
 
 // ---- Projection button -----------------------------------------------------------------------
+
+// The dead voids of the latest projection, each with what to change and the task for it.
+async function renderDeadVoids() {
+const el = document.getElementById('occ-dead-voids');
+if (!el) return;
+const p = latestProjection();
+const list = p && showProjectionOn() ? deadVoidsOf(p) : [];
+if (!list.length) { el.hidden = true; el.innerHTML = ''; return; }
+const { taskChipHtml, bindTaskChips } = await import('./tasks.js');
+bindTaskChips();
+const short = (d) => new Date(`${d}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+el.innerHTML = list.map((v) => {
+const dv = (p.deadVoids || []).find((x) => x.id === v.id);
+const task = dv && dv.taskId ? (data.tasks || []).find((t) => t.id === dv.taskId) : null;
+return `<div class="dead-void-row"><strong>${escapeHtml(v.roomLabel || 'Room')} ${short(v.from)}&ndash;${short(v.to)}</strong><span class="settings-note" style="margin:0;">dead void: ${v.expectedNights.toFixed(1)} of ${v.nights} night${v.nights === 1 ? '' : 's'} expected. ${escapeHtml(dv ? dv.text : 'Run the projection again for advice.')}</span>${task ? taskChipHtml(task) : ''}</div>`;
+}).join('');
+el.hidden = false;
+}
 
 function refreshProjectionStatus() {
 const el = document.getElementById('occ-project-status');

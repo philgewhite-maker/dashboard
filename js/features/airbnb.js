@@ -2279,6 +2279,8 @@ out.textContent = near.length
 }
 queueSave();
 renderAirbnb();
+// A stay now on the calendar changes what the free nights ahead are worth: re-run the two-month projection.
+if (reservation.checkout >= todayStr()) import('./bookingprojection.js').then((m) => m.refreshProjection());
 } catch (err) {
 out.textContent = `Couldn't push: ${err.message || err}`;
 }

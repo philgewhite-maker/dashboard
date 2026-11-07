@@ -27,6 +27,7 @@
 import { data, queueSave, inventorySets, SET_CORE_GROUPS } from '../state.js';
 import { escapeHtml, uid, bindBackdropClose, claudeWeeklyPace, daysUntil } from '../utils.js';
 import * as letting from './letting.js';
+import { deadVoidsOf } from './bookingprojection.js';
 import { travelStripPrograms, labelKindFor } from './loyaltybalances.js';
 import { matchBankLogo } from '../bankLogos.js';
 import { CHECKS as SITE_HEALTH_CHECKS, reportCheck as reportSiteHealth } from './sitehealth.js';
@@ -485,6 +486,14 @@ if (!failing.length) return [];
 return [{ id: 'auto-sitehealth', kind: 'sitehealth', auto: true, count: failing.length, worst: failing[0] }];
 }
 
+// One tile while the latest projection has dead voids ahead: free stretches expected to fill with under a
+// night (see isDeadVoid). Derived from the saved projection each render, so a re-run clears it.
+function deadVoidItems() {
+const dead = deadVoidsOf();
+if (!dead.length) return [];
+return [{ id: 'auto-deadvoids', kind: 'deadvoids', auto: true, count: dead.length, voids: dead }];
+}
+
 // A single tile while at least one usage row that cost real money in a
 // month has a newer model available in its family (the monthly check in
 // modelcheck.js writes data.modelCheck; this only reads it, so the ticker
@@ -544,7 +553,7 @@ return [{ id: 'auto-inv-incomplete', kind: 'inv-incomplete', auto: true, count: 
 function activeItems() {
 const mine = (data.ticker.items || []).filter((i) => !i.hidden);
 const seen = new Set(mine.map(keyFor));
-const extra = [...travelItems(), ...cassBonusItems(), ...yearlyPerkItems(), ...siteHealthFailureItems(), ...modelUpgradeItems(), ...claudeUsageItems(), ...incompleteSetItems()].filter((i) => !seen.has(keyFor(i)));
+const extra = [...travelItems(), ...cassBonusItems(), ...yearlyPerkItems(), ...siteHealthFailureItems(), ...modelUpgradeItems(), ...deadVoidItems(), ...claudeUsageItems(), ...incompleteSetItems()].filter((i) => !seen.has(keyFor(i)));
 return [...mine, ...extra];
 }
 
@@ -759,6 +768,13 @@ const { check, row } = item.worst;
 return tile('Checks', escapeHtml(item.count === 1 ? check.label : `${item.count} failing`), '',
 `${check.label}: ${row.detail || 'failing'}${item.count > 1 ? ` (and ${item.count - 1} other check${item.count === 2 ? '' : 's'} -- this names the longest-broken one)` : ''}. Click to open it.`,
 { auto: true, gotoTab: 'settings', gotoTarget: `#site-health-row-${check.id}` });
+}
+if (item.kind === 'deadvoids') {
+const fmt = (d) => new Date(`${d}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+const lines = item.voids.map((v) => `${v.roomLabel} ${fmt(v.from)}2013${fmt(v.to)} (${v.expectedNights.toFixed(1)} of ${v.nights} nights expected)`);
+return tile('Voids', escapeHtml(item.count === 1 ? '1 dead' : `${item.count} dead`), '',
+`Dead voids: ${lines.join(' · ')}. Free stretches the projection expects to stay empty. Click to see what to change.`,
+{ auto: true, gotoTab: 'finances', gotoTarget: '#occ-dead-voids' });
 }
 if (item.kind === 'modelcheck') {
 const { top } = item;

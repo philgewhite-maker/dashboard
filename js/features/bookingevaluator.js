@@ -64,7 +64,16 @@ async function openEvaluator({ requestId = '', reservationId = '' } = {}) {
 const q = requestId ? (data.bookingRequests || []).find((x) => x.id === requestId) : null;
 const r = reservationId ? (data.airbnbReservations || []).find((x) => x.id === reservationId) : null;
 const src = q || r;
-if (!src) return;
+if (!src) {
+// No request or stay given: just open the workbench, ready to fill in.
+if (requestId || reservationId) return;
+state.prefill = null; state.overrides = {};
+const { switchTab } = await import('../tabs.js');
+switchTab('finances');
+fillListingSelect();
+requestAnimationFrame(() => { scrollAndFlash('#booking-evaluator'); const f = document.getElementById('be-checkin'); if (f) f.focus({ preventScroll: true }); });
+return;
+}
 const payout = q ? (q.payout ?? estimatePayout(q.listingId, q.checkin, q.checkout, q.nightlyRate)) : (r.income ?? estimatePayout(r.listingId, r.checkin, r.checkout, null));
 state.prefill = { requestId: q ? q.id : '', reservationId: q ? (q.reservationId || '') : r.id, estimated: q ? q.payout == null : r.income == null };
 state.overrides = {};
@@ -401,7 +410,17 @@ if (e.target.closest('#be-run')) { state.overrides = {}; run(); return; }
 if (e.target.closest('#be-whatif-reset')) { state.overrides = {}; run(); return; }
 if (e.target.closest('#be-save')) { saveToLog(); renderResult(); const s = document.getElementById('be-save-status'); if (s) s.textContent = 'Saved on the request log.'; return; }
 const decide = e.target.closest('[data-be-decide]');
-if (decide) { saveToLog(decide.dataset.beDecide); renderResult(); const s = document.getElementById('be-save-status'); if (s) s.textContent = `Recorded as ${decide.dataset.beDecide}.`; return; }
+if (decide) {
+saveToLog(decide.dataset.beDecide); renderResult();
+const s = document.getElementById('be-save-status');
+if (decide.dataset.beDecide === 'accepted') {
+// An accepted request becomes a stay in the Airbnb feed and its confirmation email: sync now so it lands.
+const sync = document.getElementById('airbnb-sync-btn');
+if (sync && !sync.disabled) { sync.click(); if (s) s.innerHTML = 'Recorded as accepted. Running the <span class="inline-goto-link" data-goto-tab="overview" data-goto-target="#airbnb-panel">Airbnb sync</span>…'; }
+else if (s) s.innerHTML = 'Recorded as accepted. The <span class="inline-goto-link" data-goto-tab="overview" data-goto-target="#airbnb-panel">Airbnb sync</span> is already running or not available, so it was not started.';
+} else if (s) s.textContent = `Recorded as ${decide.dataset.beDecide}.`;
+return;
+}
 if (e.target.closest('#be-sensitivity')) {
 const out = document.getElementById('be-sens');
 out.innerHTML = '<div class="settings-note" style="margin:6px 0;">Re-running with each assumption moved…</div>';

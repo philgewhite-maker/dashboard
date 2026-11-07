@@ -4617,3 +4617,7 @@ background:var(--slate-bg);color:var(--slate);
 .be-disc{margin:2px 0 8px;}
 .be-disc-kind{margin:2px 0 4px;}
 .occ-key-dots{display:inline-block;width:16px;height:8px;border-radius:3px;border:1px dashed var(--muted);flex:none;background:radial-gradient(circle,var(--muted) 0 0.9px,transparent 1.1px) 0 0/4px 4px;}
+.occ-key-dead{display:inline-block;width:16px;height:8px;border-radius:3px;border:1px dashed var(--red);background:color-mix(in srgb,var(--red) 30%,transparent);flex:none;}
+.dead-voids{margin:0 0 8px;display:flex;flex-direction:column;gap:4px;}
+.dead-void-row{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:baseline;font-size:12px;border-left:3px solid var(--red);padding:2px 0 2px 8px;}
+.dead-voids[hidden]{display:none;}

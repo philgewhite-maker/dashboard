@@ -2055,7 +2055,7 @@ evaluation: null,
 function blankBookingProjection(fields = {}) {
 return {
 id: uid(), madeAt: '', today: '', from: '', to: '', runs: 0, modelVersion: 0,
-rooms: [], voids: [], months: {}, scenario: [], total: { expected: 0, p10: 0, p90: 0 }, assumptions: null,
+rooms: [], voids: [], months: {}, scenario: [], total: { expected: 0, p10: 0, p90: 0 }, assumptions: null, deadVoids: [],
 ...fields,
 };
 }

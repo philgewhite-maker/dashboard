@@ -837,8 +837,13 @@ return mine[0].listingId;
 
 // Returns {step(n) -> done, finish() -> result, runs}, so a caller can run it in slices and keep the
 // page responsive; projectVoids() runs it straight through.
-function makeProjection(ctx = buildContext(), { from, to, runs = PROJECT_RUNS } = {}) {
-const params = calibrate(ctx);
+// `play` (optional) changes only how the arrivals are played, never the demand they are calibrated to:
+// {minNights: {roomKey: n}, s: {gapDiscountPct, gapMaxNights, ...}}. That is what lets a what-if (allow
+// 1-night stays, cut the price) be compared fairly with the same demand. `params` reuses a calibration
+// already made; `roomKeys` limits the simulation to those rooms.
+function makeProjection(ctx = buildContext(), { from, to, runs = PROJECT_RUNS, play = null, params: givenParams = null, roomKeys = null } = {}) {
+const params = givenParams || calibrate(ctx);
+const pctx = play && play.s ? { ...ctx, s: { ...ctx.s, ...play.s } } : ctx;
 const T = dayNum(ctx.today);
 const wS = Math.max(T, dayNum(from || ctx.today));
 const wE = dayNum(to || defaultProjectionEnd(ctx.today));
@@ -875,8 +880,8 @@ d = e;
 
 const lamCache = new Map();
 const lam = (r, c) => { const k = `${r}|${monthOf(c)}`; if (!lamCache.has(k)) lamCache.set(k, lambdaFor(ctx, params, r, monthOf(c))); return lamCache.get(k); };
-const roomsIdx = ctx.rooms.map((_, i) => i);
-const minNights = Object.fromEntries(ctx.rooms.map((r, i) => [i, Number(r.minNights) || 1]));
+const roomsIdx = ctx.rooms.map((_, i) => i).filter((i) => !roomKeys || roomKeys.includes(ctx.rooms[i].key));
+const minNights = Object.fromEntries(ctx.rooms.map((r, i) => [i, play && play.minNights && play.minNights[r.key] != null ? Number(play.minNights[r.key]) : (Number(r.minNights) || 1)]));
 const rng = mulberry32(hashStr(`proj|${MODEL_VERSION}|${ctx.today}|${wS}|${wE}|${JSON.stringify(ctx.s)}|${JSON.stringify(ctx.scale)}`));
 
 const monthKeys = [];
@@ -897,9 +902,9 @@ const state = { run: 0 };
 const step = (n) => {
 for (let k = 0; k < n && state.run < runs; k++, state.run++) {
 const run = state.run;
-const arrivals = drawArrivals(ctx, params, { from: base, to: wE + AFTER, todayN: T, lam, rooms: roomsIdx }, rng);
+const arrivals = drawArrivals(pctx, params, { from: base, to: wE + AFTER, todayN: T, lam, rooms: roomsIdx }, rng);
 const occ = occ0.map((o) => o.slice());
-const booked = playArrivals(ctx, params, arrivals, occ, base, { minNights, len });
+const booked = playArrivals(pctx, params, arrivals, occ, base, { minNights, len });
 const list = [];
 let total = 0;
 booked.forEach((b) => {
@@ -989,11 +994,11 @@ const totals = Array.from(runTotal.subarray(0, n));
 return {
 modelVersion: MODEL_VERSION, today: ctx.today, from: dayStr(wS), to: dayStr(wE), runs: n,
 rooms: roomInfo, voids: voidOut, months, scenario,
-total: { expected: r2(meanTotal), p10: r2(pct(totals, 0.1)), p90: r2(pct(totals, 0.9)) },
+total: { expected: r2(meanTotal), p10: r2(pct(totals, 0.1)), p90: r2(pct(totals, 0.9)), bookings: r2(runBookings.reduce((a, l) => a + l.filter((b) => b.ci >= wS).length, 0) / n) },
 assumptions: assumptionsSnapshot(ctx, params),
 };
 };
-return { step, finish, runs, get done() { return state.run >= runs; }, get progress() { return state.run / runs; } };
+return { step, finish, runs, params, get done() { return state.run >= runs; }, get progress() { return state.run / runs; } };
 }
 
 function projectVoids(ctx = buildContext(), opts = {}) {
@@ -1001,6 +1006,48 @@ const p = makeProjection(ctx, opts);
 if (p.error) return p;
 while (!p.step(200)) { /* run to the end */ }
 return p.finish();
+}
+
+// ---- Dead voids (what is one: isDeadVoid in bookingprojection.js) -----------------------------
+// What each way of selling a dead void is worth, on the same demand: as it is now, allowing 1-night
+// stays (when the room has a longer minimum), and a discount on the void's nights (the gap discount the
+// model already has, widened to cover this void), alone or together. Net = expected income less what
+// cleaning the bookings costs. `runs` is per option; the same calibration is reused throughout.
+function optimiseVoid(ctx, v, { runs = 600, params = null } = {}) {
+const room = ctx.rooms.find((r) => r.key === v.roomKey);
+if (!room) return { error: 'That room is no longer set up.' };
+const calib = params || calibrate(ctx);
+const curMin = Number(room.minNights) || 1;
+const curPct = Number(ctx.s.gapDiscountPct) || 0;
+const curMax = Number(ctx.s.gapMaxNights) || 0;
+const clean = ctx.firstClean;
+const simulate = (minNights, pct) => {
+const reach = Math.max(curMax, v.nights);
+const p = makeProjection(ctx, { from: v.from, to: v.to, runs, params: calib, roomKeys: [room.key], play: { minNights: { [room.key]: minNights }, s: { gapDiscountPct: pct, gapMaxNights: pct > 0 ? reach : curMax } } });
+if (p.error) return null;
+while (!p.step(100)) { /* run to the end */ }
+const r = p.finish();
+const vo = r.voids.find((x) => x.roomKey === room.key && x.from === v.from);
+if (!vo) return null;
+const bookings = r.total.bookings || 0;
+return { minNights, pct, income: vo.expected, nights: vo.expectedNights, bookings, net: Math.round((vo.expected - bookings * clean) * 100) / 100 };
+};
+// As it is now: the room's own minimum and whatever gap discount applies to a gap this long.
+const base = simulate(curMin, v.nights <= curMax ? curPct : 0);
+if (!base) return { error: 'Could not simulate this void.' };
+const options = [];
+const mins = curMin > 1 ? [curMin, 1] : [1];
+const pcts = [0, 10, 20, 30, 40];
+mins.forEach((m) => pcts.forEach((pct) => {
+if (m === curMin && pct === 0) return;
+const o = simulate(m, pct);
+if (o) options.push(o);
+}));
+options.sort((a, b) => b.net - a.net);
+const top = options[0] || null;
+// Only worth acting on if it clearly beats leaving it alone.
+const best = top && top.net - base.net >= Math.max(3, Math.abs(base.net) * 0.03) ? top : null;
+return { base, options, best, curMin, clean, gain: best ? Math.round((best.net - base.net) * 100) / 100 : 0 };
 }
 
 // What the model assumed when it made a projection, kept with it so a later review can say why it
@@ -1118,4 +1165,4 @@ check('Default window runs to the end of the month after this one', q3.to === '2
 return results;
 }
 
-export { buildContext, calibrate, evaluate, sensitivity, makeProjection, projectVoids, defaultProjectionEnd, rawNightlyRate, stepPct, discountsOf, selfTest, MODEL_VERSION };
+export { buildContext, calibrate, evaluate, sensitivity, makeProjection, projectVoids, optimiseVoid, defaultProjectionEnd, rawNightlyRate, stepPct, discountsOf, selfTest, MODEL_VERSION };
