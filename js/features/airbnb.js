@@ -14,7 +14,7 @@ import { owners, ownerNameFor, ownerKeyFor, shareRuleAt, money, CAP_KEEPS_FROM }
 import { gmailLink } from '../googlemail.js';
 import { track } from './activity.js';
 import { recordMail, registerRetry } from './mailledger.js';
-import { parseIcsReservations, isUnconfirmedStay, isForgettableStay } from '../icsparse.js';
+import { parseIcsReservations, parseIcsBlocks, isUnconfirmedStay, isForgettableStay } from '../icsparse.js';
 
 // How long a finished, not-yet-charged stay stays listed so its income can
 // still be entered (see syncAirbnbListing's removal step).
@@ -102,6 +102,12 @@ const today = todayStr();
 // event is ever turned into a stored record, not just hidden from a
 // display list downstream.
 const events = parseIcsReservations(text).filter((e) => e.checkout >= today);
+// The feed's "Not available" blocks (a host's manual blocks, e.g. over Christmas) are not stays, but they are not free nights
+// either: kept per listing, for the booking projection and the occupancy timeline. Airbnb also puts one at the far edge of
+// its booking window, a year out; anything starting beyond 400 days is of no use and left out.
+const horizon = dateStrAdd(today, 400);
+const blocks = parseIcsBlocks(text).filter((e) => e.checkout >= today && e.checkin <= horizon).map((e) => ({ id: `||`, listingId: listing.id, from: e.checkin, to: e.checkout }));
+data.airbnbBlocks = [...(data.airbnbBlocks || []).filter((b) => b.listingId !== listing.id), ...blocks];
 // Feed-sourced reservations ONLY. This map's leftovers get deleted at
 // the end of the pass as cancelled bookings, and an external or manual
 // booking on the same listing has no feed `uid` to match on -- it would
@@ -164,7 +170,7 @@ added++;
 // out above, so nothing completed returns.
 let removed = 0;
 feedStays.forEach((r) => { if (!seenStays.has(r.id) && retireStay(r, today)) removed++; });
-return { added, updated, removed };
+return { added, updated, removed, blocks: blocks.length };
 }
 
 // A booked stay that is no longer on its calendar: completed if it has ended,
@@ -2421,6 +2427,7 @@ where: [
 });
 try {
 const STEPS = 7;
+const blocksBefore = JSON.stringify(data.airbnbBlocks || []);
 // Must run BEFORE syncAllAirbnbListings -- that's the step that drops
 // a cancelled reservation from data.airbnbReservations entirely (it's
 // no longer in the feed), so this needs the record to still exist to
@@ -2454,6 +2461,10 @@ const requestsMod = await import('./bookingrequests.js');
 await requestsMod.syncBookingRequestsFromEmail();
 requestsMod.renderBookingRequests();
 renderAirbnb();
+// Nights newly blocked (or unblocked) on Airbnb change which nights are free: redo the projection and redraw the timeline.
+if (JSON.stringify(data.airbnbBlocks || []) !== blocksBefore) {
+import('./bookingprojection.js').then((m) => m.refreshProjection()).finally(() => import('./lettingoccupancy.js').then((o) => o.renderLettingOccupancy())).catch(() => {});
+}
 loadAirbnbCalendarOptions({ silent: true });
 // Stripes live on the Planner tab -- dynamic import avoids a static
 // import cycle, since planner.js itself statically imports

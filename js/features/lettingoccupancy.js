@@ -523,6 +523,19 @@ const ownersText = room.owners.join(' · ');
 ctx.fillText(ownersText.length > 20 ? `${ownersText.slice(0, 19)}…` : ownersText, 6, mid + 7);
 ctx.font = '11px Inter, sans-serif';
 }
+// Nights Airbnb's feed marks "Not available" (host blocks): greyed and hatched, not offered for booking.
+(data.airbnbBlocks || []).filter((b) => roomKeyFor(b.listingId) === room.key && b.to > dayStr(ym, 1) && b.from < dayStr(addMonths(ym, 1), 1)).forEach((b) => {
+const startD = b.from < dayStr(ym, 1) ? 1 : Number(b.from.slice(8, 10));
+const endD = b.to >= dayStr(addMonths(ym, 1), 1) ? n + 1 : Number(b.to.slice(8, 10));
+const x1 = xDay(startD); const x2 = xDay(endD);
+ctx.fillStyle = hatch(ctx, c.muted); ctx.globalAlpha = 0.55;
+ctx.fillRect(x1, top + 3, Math.max(3, x2 - x1), laneH - 6);
+ctx.globalAlpha = 1;
+ctx.strokeStyle = c.muted; ctx.lineWidth = 1; ctx.setLineDash([2, 3]);
+ctx.strokeRect(x1 + 0.5, top + 3.5, Math.max(3, x2 - x1) - 1, laneH - 7);
+ctx.setLineDash([]);
+hits.push({ x1, x2: Math.max(x1 + 3, x2), y: top + 3, y2: top + laneH - 3, block: b, room });
+});
 stays.filter((st) => roomKeyFor(st.listingId) === room.key && nightsInMonth(st, ym) > 0).forEach((st) => {
 // Each stay keeps its own listing's colour, so Phil's blue and Zara's pink share one row.
 const own = room.members.find((l) => l.id === st.listingId);
@@ -642,6 +655,15 @@ lines.push('Not booked: a typical simulated future, drawn to show what the gaps 
 }
 if (p) lines.push(escapeHtml(statusText(p)));
 tip.innerHTML = lines.join('<br>');
+tip.hidden = false;
+tip.style.left = `${Math.min(x + 12, PLOTS.timeline.width - 240)}px`;
+tip.style.top = `${Math.max(0, y - 10)}px`;
+return;
+}
+if (hit.block) {
+const fmtB = (d) => new Date(`${d}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+const nb = nightsBetween(hit.block.from, hit.block.to);
+tip.innerHTML = `<strong>Blocked on Airbnb</strong><br>${escapeHtml(hit.room.label || 'Room')} · ${fmtB(hit.block.from)} to ${fmtB(hit.block.to)} · ${nb} night${nb === 1 ? '' : 's'}<br>Not offered for booking, so left out of the projection.`;
 tip.hidden = false;
 tip.style.left = `${Math.min(x + 12, PLOTS.timeline.width - 240)}px`;
 tip.style.top = `${Math.max(0, y - 10)}px`;
@@ -972,6 +994,7 @@ return `<span class="letting-chart-legend-item">${escapeHtml(r.label || 'Room')}
 });
 Object.values(CHANNELS).forEach((ch) => items.push(`<span class="letting-chart-legend-item"><span class="${ch.striped ? 'occ-key-striped' : 'occ-key-solid'}"></span>${escapeHtml(ch.label)}</span>`));
 items.push('<span class="letting-chart-legend-item"><span class="occ-key-hatch"></span>Cancelled</span>');
+if ((data.airbnbBlocks || []).length) items.push('<span class="letting-chart-legend-item"><span class="occ-key-blocked"></span>Blocked on Airbnb</span>');
 if (projectionForMonth(state.ym)) items.push('<span class="letting-chart-legend-item"><span class="occ-key-proj"></span>Projected: free nights shaded by chance of being booked, one possible fill dashed</span>');
 if (projectionForMonth(state.ym) && deadVoidsOf().length) items.push('<span class="letting-chart-legend-item"><span class="occ-key-dead"></span>Dead void: expected to fill under a night</span>');
 el.innerHTML = items.join('');

@@ -59,14 +59,21 @@ return /not available/i.test(summary || '');
 // cancelled/malformed entry), or one of Airbnb's own "Not available"
 // placeholders (see isNotAvailablePlaceholder above), rather than failing
 // the whole sync over it.
-function parseIcsReservations(text) {
+function parseIcsReservations(text) { return parseIcsEvents(text, false); }
+
+// The feed's own "Not available" blocks: nights Airbnb won't take bookings for (a host's manual block, or a window
+// edge). {uid, checkin, checkout}[], checkout exclusive. They are not stays, so they never become reservations,
+// but the booking projection must not count them as free nights.
+function parseIcsBlocks(text) { return parseIcsEvents(text, true); }
+
+function parseIcsEvents(text, blocks) {
 const lines = unfoldIcsLines(text);
 const events = [];
 let current = null;
 lines.forEach((line) => {
 if (line === 'BEGIN:VEVENT') { current = {}; return; }
 if (line === 'END:VEVENT') {
-if (current && current.uid && current.checkin && current.checkout && !isNotAvailablePlaceholder(current.summary)) events.push(current);
+if (current && current.uid && current.checkin && current.checkout && isNotAvailablePlaceholder(current.summary) === blocks) events.push(current);
 current = null;
 return;
 }
@@ -105,4 +112,4 @@ function isForgettableStay(r, doc, today) {
   return true;
 }
 
-export { unfoldIcsLines, parseIcsProperty, icsDateOnly, isNotAvailablePlaceholder, parseIcsReservations, isUnconfirmedStay, isForgettableStay };
+export { unfoldIcsLines, parseIcsProperty, icsDateOnly, isNotAvailablePlaceholder, parseIcsReservations, parseIcsBlocks, isUnconfirmedStay, isForgettableStay };
