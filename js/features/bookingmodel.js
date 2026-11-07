@@ -24,6 +24,7 @@
 import { data, DEFAULT_PREFS } from '../state.js';
 import { todayStr } from '../utils.js';
 import { roomBlocks } from '../icsparse.js';
+import { activeListingId } from '../roomowner.js';
 import { collectStays } from './lettingoccupancy.js';
 import { evaluatorRooms, roomSettings } from './bookingsettings.js';
 
@@ -563,9 +564,10 @@ existing.forEach((x) => {
 const r = ri2.get(x.listingId);
 for (let d = dayNum(x.checkin); d < dayNum(x.checkout); d++) if (d >= base && d < base + len) occ0[r][d - base] = 1;
 });
-// A room is blocked only on nights when every one of its listings is (see roomBlocks).
+// A room is blocked by the blocks on the listing in use for it (a sibling listing may be blocked all winter without the room being).
 ctx.rooms.forEach((room, r) => {
-roomBlocks(ctx.blocks, room.listingIds.filter((id) => (ctx.feedListingIds || []).includes(id))).forEach((b) => {
+const active = ownerListingOf(ctx, room);
+roomBlocks(ctx.blocks, (ctx.feedListingIds || []).includes(active) ? [active] : []).forEach((b) => {
 for (let d = dayNum(b.from); d < dayNum(b.to); d++) if (d >= base && d < base + len) occ0[r][d - base] = 1;
 });
 });
@@ -861,16 +863,7 @@ return new Date(Date.UTC(y, m + 1, 1)).toISOString().slice(0, 10); // first of t
 // The listing in a room that currently takes its bookings: the one with most stays starting within
 // two months either side of today (a one-off booking elsewhere in the year doesn't change who the
 // room is let for); failing that, the one with the latest stay.
-function ownerListingOf(ctx, room) {
-const T = dayNum(ctx.today);
-const mine = ctx.stays.filter((x) => room.listingIds.includes(x.listingId) && x.status === 'stay');
-if (!mine.length) return room.listingIds[0];
-const near = new Map();
-mine.forEach((x) => { if (Math.abs(dayNum(x.checkin) - T) <= 60) near.set(x.listingId, (near.get(x.listingId) || 0) + 1); });
-if (near.size) return [...near.entries()].sort((a, b) => b[1] - a[1])[0][0];
-mine.sort((a, b) => String(b.checkin).localeCompare(String(a.checkin)));
-return mine[0].listingId;
-}
+function ownerListingOf(ctx, room) { return activeListingId(room.listingIds, ctx.stays, ctx.today); }
 
 // Returns {step(n) -> done, finish() -> result, runs}, so a caller can run it in slices and keep the
 // page responsive; projectVoids() runs it straight through.
@@ -897,9 +890,10 @@ existing.forEach((x) => {
 const r = ri2.get(x.listingId);
 for (let d = dayNum(x.checkin); d < dayNum(x.checkout); d++) if (d >= base && d < base + len) occ0[r][d - base] = 1;
 });
-// A room is blocked only on nights when every one of its listings is (see roomBlocks).
+// A room is blocked by the blocks on the listing in use for it (a sibling listing may be blocked all winter without the room being).
 ctx.rooms.forEach((room, r) => {
-roomBlocks(ctx.blocks, room.listingIds.filter((id) => (ctx.feedListingIds || []).includes(id))).forEach((b) => {
+const active = ownerListingOf(ctx, room);
+roomBlocks(ctx.blocks, (ctx.feedListingIds || []).includes(active) ? [active] : []).forEach((b) => {
 for (let d = dayNum(b.from); d < dayNum(b.to); d++) if (d >= base && d < base + len) occ0[r][d - base] = 1;
 });
 });

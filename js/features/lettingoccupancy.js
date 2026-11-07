@@ -14,6 +14,7 @@ import { data, queueSave } from '../state.js';
 import { escapeHtml, dateStrAdd, todayStr } from '../utils.js';
 import { listingColorVar, resolveColor, addMonths, monthLabel, ownerKeyFor, ownerNameFor, lettingChartMonthTotal, lettingIncomeItems, nightRateRooms, money0 } from './letting.js';
 import { isUnconfirmedStay, roomBlocks } from '../icsparse.js';
+import { activeListingId } from '../roomowner.js';
 import { latestProjection, projectionForMonth, projectedNights, projectedByDate, runProjection, statusText, isDeadVoid, deadVoidsOf, showProjection as showProjectionOn } from './bookingprojection.js';
 
 const DAY_MS = 86400000;
@@ -472,6 +473,9 @@ good: resolveColor('--sage'), bad: resolveColor('--red'),
 
 // ---- Timeline -----------------------------------------------------------------
 
+// The listing in use for a room (see js/roomowner.js): its blocks are the room's.
+const inUse = (room, stays) => activeListingId(room.listingIds, stays, todayStr());
+
 function drawTimeline(stays) {
 const canvas = document.getElementById('occ-timeline-canvas');
 if (!canvas) return;
@@ -524,7 +528,7 @@ ctx.fillText(ownersText.length > 20 ? `${ownersText.slice(0, 19)}…` : ownersTe
 ctx.font = '11px Inter, sans-serif';
 }
 // Nights Airbnb's feed marks "Not available" (host blocks): greyed and hatched, not offered for booking.
-roomBlocks(data.airbnbBlocks, room.members.filter((l) => l.icsUrl).map((l) => l.id)).filter((b) => b.to > dayStr(ym, 1) && b.from < dayStr(addMonths(ym, 1), 1)).forEach((b) => {
+roomBlocks(data.airbnbBlocks, room.members.some((l) => l.id === inUse(room, stays) && l.icsUrl) ? [inUse(room, stays)] : []).filter((b) => b.to > dayStr(ym, 1) && b.from < dayStr(addMonths(ym, 1), 1)).forEach((b) => {
 const startD = b.from < dayStr(ym, 1) ? 1 : Number(b.from.slice(8, 10));
 const endD = b.to >= dayStr(addMonths(ym, 1), 1) ? n + 1 : Number(b.to.slice(8, 10));
 const x1 = xDay(startD); const x2 = xDay(endD);
@@ -663,7 +667,7 @@ return;
 if (hit.block) {
 const fmtB = (d) => new Date(`${d}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 const nb = nightsBetween(hit.block.from, hit.block.to);
-tip.innerHTML = `<strong>Blocked on Airbnb</strong><br>${escapeHtml(hit.room.label || 'Room')} · ${fmtB(hit.block.from)} to ${fmtB(hit.block.to)} · ${nb} night${nb === 1 ? '' : 's'}<br>Blocked on every listing in this room, so left out of the projection.`;
+tip.innerHTML = `<strong>Blocked on Airbnb</strong><br>${escapeHtml(hit.room.label || 'Room')} · ${fmtB(hit.block.from)} to ${fmtB(hit.block.to)} · ${nb} night${nb === 1 ? '' : 's'}<br>Blocked on the listing in use for this room, so left out of the projection.`;
 tip.hidden = false;
 tip.style.left = `${Math.min(x + 12, PLOTS.timeline.width - 240)}px`;
 tip.style.top = `${Math.max(0, y - 10)}px`;

@@ -88,10 +88,9 @@ else if (prop.name === 'SUMMARY') current.summary = prop.value.trim();
 return events;
 }
 
-// The nights a ROOM is blocked: those on which every one of its listings is blocked. A room can be sold through more than one
-// listing (En-Suite - Phil and - Lewis), each with its own Airbnb calendar, so a block on one leaves the room open through the
-// other. `blocks`: [{listingId, from, to}] (to exclusive); `listingIds`: the room's listings that have a calendar feed (none: nothing
-// is known, so nothing is blocked). Returns [{from, to}] ranges, to exclusive, in date order.
+// The nights on which every one of `listingIds` is blocked. A room can be sold through more than one listing (En-Suite - Phil
+// and - Lewis), each with its own Airbnb calendar, and only the one in use matters (js/roomowner.js): pass just that listing
+// (none: nothing is known, so nothing is blocked). Returns [{from, to}] ranges, to exclusive, in date order.
 function roomBlocks(blocks, listingIds) {
 if (!listingIds || !listingIds.length) return [];
 const merged = (id) => {
