@@ -4649,3 +4649,13 @@ background:var(--slate-bg);color:var(--slate);
 .sh-rev-guest{font-weight:500;}
 .sh-review .settings-input{flex:0 0 auto;width:auto;margin-left:auto;}
 .sh-rev-guest[data-sh-goto]{cursor:pointer;text-decoration:underline dotted;}
+/* Guest rating (Superhost): gold, narrow. Unrated shows a hollow star; click sets 5 stars, then a tiny select adjusts it. */
+.letting-rec-star{flex:0 0 auto;order:4;}
+.sh-star-btn,.sh-star-sel{font-size:12px;line-height:1;color:#B8860B;background:transparent;border:1px solid transparent;border-radius:6px;padding:2px 3px;cursor:pointer;font-family:inherit;}
+.sh-star-btn:hover,.sh-star-sel:hover{border-color:#D4A72C;background:rgba(212,167,44,.12);}
+.sh-star-sel{appearance:none;-webkit-appearance:none;width:34px;text-align:center;text-align-last:center;font-weight:600;color:#B8860B;border-color:rgba(212,167,44,.5);background:rgba(212,167,44,.12);padding:2px 0;}
+.sh-star-btn{min-width:24px;color:#B8860B;opacity:.75;}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .sh-star-btn,:root:not([data-theme="light"]) .sh-star-sel{color:#E6B93C;}}
+:root[data-theme="dark"] .sh-star-btn,:root[data-theme="dark"] .sh-star-sel{color:#E6B93C;}
+#letting-list .letting-rec-star .sh-star-sel,#letting-list .letting-rec-star .sh-star-btn{width:auto;}
+#letting-list .letting-rec-star .sh-star-sel{width:34px;}

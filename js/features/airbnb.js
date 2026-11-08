@@ -2426,7 +2426,7 @@ where: [
 ],
 });
 try {
-const STEPS = 7;
+const STEPS = 8;
 const blocksBefore = JSON.stringify(data.airbnbBlocks || []);
 // Must run BEFORE syncAllAirbnbListings -- that's the step that drops
 // a cancelled reservation from data.airbnbReservations entirely (it's
@@ -2460,6 +2460,8 @@ const dateResult = await backfillBookingDates();
 const requestsMod = await import('./bookingrequests.js');
 await requestsMod.syncBookingRequestsFromEmail();
 requestsMod.renderBookingRequests();
+t.step(7, STEPS, 'Reading guest review emails…');
+const reviewResult = await import('./airbnbreviews.js').then((m) => m.syncReviewsFromEmail());
 renderAirbnb();
 // Nights newly blocked (or unblocked) on Airbnb change which nights are free: redo the projection and redraw the timeline.
 if (JSON.stringify(data.airbnbBlocks || []) !== blocksBefore) {
@@ -2476,6 +2478,9 @@ const failed = data.airbnbListings.filter((l) => data.airbnbSyncStatus[l.id] && 
 if (!failed.length) {
 const guestNote = guestResult.filled
 ? ` Filled in ${guestResult.filled} guest name${guestResult.filled === 1 ? '' : 's'} from email${guestResult.romanizeFailed ? ` (${guestResult.romanizeFailed} left in the original script — add an Anthropic key on THIS device in ${MISSING_KEY_LINK_HTML} to romanize ${guestResult.romanizeFailed === 1 ? 'it' : 'them'})` : ''}${guestResult.incomeFilled ? `, ${guestResult.incomeFilled} with the payout too` : ''}.`
+: '';
+const reviewNote = reviewResult.rated || reviewResult.written
+? ` Read ${reviewResult.rated ? `${reviewResult.rated} guest rating${reviewResult.rated === 1 ? '' : 's'}` : ''}${reviewResult.rated && reviewResult.written ? ' and ' : ''}${reviewResult.written ? `${reviewResult.written} review${reviewResult.written === 1 ? '' : 's'} with no rating shown` : ''} from email (<span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#letting-panel">Superhost assessment</span>).`
 : '';
 const dateNote = dateResult.dates ? ` Dated ${dateResult.dates} older booking${dateResult.dates === 1 ? '' : 's'} from their confirmation emails (the Nights booked chart uses it).` : '';
 const cancelNote = cancelResult.posted
@@ -2496,7 +2501,7 @@ const unownedNote = cancelResult.unowned
 : "";
 const signedOutNote = canAttempt ? "" : " Signed out of Google: guest names, cancellations, refunds and cleaner events were not checked.";
 // Steps that finished but reported an error used to read as "Synced just now."
-const stepErrors = [['cancellation emails', cancelResult], ['refund emails', refundResult], ['guest names', guestResult]]
+const stepErrors = [['cancellation emails', cancelResult], ['refund emails', refundResult], ['guest names', guestResult], ['guest review emails', reviewResult]]
 .filter(([, r]) => r && r.error).map(([name, r]) => `${name} (${escapeHtml(String(r.error))})`);
 if (data.airbnbCleanerSyncStatus && data.airbnbCleanerSyncStatus.ok === false) stepErrors.push(`cleaner events (${escapeHtml(String(data.airbnbCleanerSyncStatus.error || 'failed'))})`);
 const stepErrorNote = stepErrors.length ? ` Couldn't read: ${stepErrors.join('; ')}.` : '';
@@ -2510,13 +2515,13 @@ if (feedTotals.added) feedParts.push(`${feedTotals.added} new booking${feedTotal
 if (feedTotals.updated) feedParts.push(`${feedTotals.updated} changed`);
 if (feedTotals.removed) feedParts.push(`${feedTotals.removed} gone (cancelled or finished)`);
 const feedNote = feedParts.length ? feedParts.join(', ') + '.' : 'No change to bookings.';
-const message = `${feedNote}${guestNote}${dateNote}${cancelNote}${unownedNote}${refundNote}${refundProblemNote}${verifyNote}${stepErrorNote}${signedOutNote}`;
+const message = `${feedNote}${guestNote}${reviewNote}${dateNote}${cancelNote}${unownedNote}${refundNote}${refundProblemNote}${verifyNote}${stepErrorNote}${signedOutNote}`;
 const letting = [{ tab: 'finances', target: '#letting-panel', label: 'Letting income' }];
 const payouts = (cancelResult.posted || 0) + (refundResult.posted || 0);
 // Payouts were posted to the ledger: refresh the Letting panel (and the loans that read it) now, not on reload.
 if (payouts) import('./letting.js').then((m) => m.renderLetting()).catch(() => {});
 if (stepErrors.length || !canAttempt) t.fail(message, { html: true, where: [{ tab: 'overview', target: '#airbnb-panel', label: 'Airbnb bookings' }] });
-else if (!feedParts.length && !guestResult.filled && !payouts) t.zero(message, { html: true });
+else if (!feedParts.length && !guestResult.filled && !payouts && !reviewResult.rated && !reviewResult.written) t.zero(message, { html: true });
 else t.done(message, { html: true, where: [{ tab: 'overview', target: '#airbnb-panel', label: 'Airbnb bookings' }, { tab: 'planner', target: '#planner-panel', label: 'Planner stripes' }, ...(payouts ? letting : [])] });
 } else {
 // The actual error, right here -- not just a count pointing at devtools

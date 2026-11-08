@@ -6,8 +6,9 @@
 //   * response rate 90% or higher
 //   * host cancellations under 1%
 // Stays and ratings come from what the dashboard already holds: stays on file (airbnbReservations) plus older
-// income-only ledger rows (lettingLedger). A guest rating is captured per stay (`reviewRating`); until one is
-// entered a stay counts as 5 stars, and 0 means the guest left no review. Response rate and host cancellations
+// income-only ledger rows (lettingLedger). A guest rating is captured per stay (`reviewRating`), read from Airbnb's
+// "has left a 5-star review" emails or set by hand. A stay with no rating is unrated and left out of the average; 0 means
+// the guest left no review (also left out). Response rate and host cancellations
 // aren't in any feed, so they're typed per owner (prefs.superhostByOwner).
 //
 // The maths (assessStays) is pure so it can be checked on its own; the rest is the Letting income display.
@@ -15,7 +16,7 @@
 import { data, queueSave } from '../state.js';
 import { escapeHtml, todayStr, dateStrAdd, scrollAndFlash } from '../utils.js';
 
-export const SUPERHOST = { stays: 10, altStays: 3, altNights: 100, rating: 4.8, response: 90, cancelPct: 1, defaultRating: 5, windowDays: 365 };
+export const SUPERHOST = { stays: 10, altStays: 3, altNights: 100, rating: 4.8, response: 90, cancelPct: 1, topRating: 5, windowDays: 365 };
 const DAY = 86400000;
 const QUARTERS_AHEAD = 5;
 
@@ -48,11 +49,12 @@ export function assessStays(stays, assessOn, today, { responseRate = 100, hostCa
   const nights = inWin.reduce((n, s) => n + (s.nights || 0), 0);
   let sum = 0;
   let reviews = 0;
-  let assumed = 0;
+  let unrated = 0;
   inWin.forEach((s) => {
     if (s.rating === 0) return; // the guest left no review
+    if (s.rating == null) { unrated += 1; return; } // not rated yet: nothing to average
     reviews += 1;
-    if (s.rating == null) { assumed += 1; sum += SUPERHOST.defaultRating; } else sum += s.rating;
+    sum += s.rating;
   });
   const avg = reviews ? sum / reviews : null;
   const cancelPct = count + hostCancellations > 0 ? (hostCancellations / (count + hostCancellations)) * 100 : 0;
@@ -67,11 +69,11 @@ export function assessStays(stays, assessOn, today, { responseRate = 100, hostCa
     : Math.max(SUPERHOST.altStays - count, Math.ceil(Math.max(0, SUPERHOST.altNights - nights) / avgNights));
   const staysNeeded = staysOk ? 0 : Math.min(viaTen, viaNights);
   // 5-star reviews that would lift the average to the bar (each new review is one more 5-star).
-  const fiveNeeded = ratingOk || avg == null ? 0 : Math.ceil((SUPERHOST.rating * reviews - sum) / (SUPERHOST.defaultRating - SUPERHOST.rating) - 1e-9);
+  const fiveNeeded = ratingOk || avg == null ? 0 : Math.ceil((SUPERHOST.rating * reviews - sum) / (SUPERHOST.topRating - SUPERHOST.rating) - 1e-9);
   // Lowest rating the NEXT review can be without dropping under the bar (null when any rating is safe).
   const floorNext = ratingOk && reviews ? Math.max(1, Math.ceil(SUPERHOST.rating * (reviews + 1) - sum - 1e-9)) : null;
   return {
-    assessOn, from, count, booked, done: count - booked, nights, reviews, assumed, avg, cancelPct, responseRate, hostCancellations,
+    assessOn, from, count, booked, done: count - booked, nights, reviews, unrated, avg, cancelPct, responseRate, hostCancellations,
     staysOk, ratingOk, responseOk, cancelOk, ok: staysOk && ratingOk && responseOk && cancelOk,
     staysNeeded, viaTen, viaNights, fiveNeeded, floorNext, avgNights,
   };
@@ -160,7 +162,7 @@ export function collectStays(ownerKey, ownerKeyFor) {
     resIds.add(r.id);
     if (!ids.has(r.listingId) || r.status === 'cancelled' || r.platform === 'other' || r.source === 'external' || !r.checkin || !r.checkout) return;
     const entry = ledger.find((e) => e.reservationId === r.id);
-    stays.push({ kind: 'res', id: r.id, entryId: entry ? entry.id : '', checkin: r.checkin, checkout: r.checkout, nights: Math.max(0, days(r.checkin, r.checkout)), guest: r.guestName || '', rating: r.reviewRating == null ? null : Number(r.reviewRating), listing: labelOf(r.listingId) });
+    stays.push({ kind: 'res', id: r.id, entryId: entry ? entry.id : '', checkin: r.checkin, checkout: r.checkout, nights: Math.max(0, days(r.checkin, r.checkout)), guest: r.guestName || '', rating: r.reviewRating == null ? null : Number(r.reviewRating), seen: !!r.reviewSeen, listing: labelOf(r.listingId) });
   });
   ledger.forEach((e) => {
     if (e.ownerKey !== ownerKey || !['accrual', 'earned'].includes(e.kind) || e.platform === 'other') return;
@@ -172,7 +174,7 @@ export function collectStays(ownerKey, ownerKeyFor) {
     // An income row for a stay that is also on file as a reservation (same room, same checkout day) is that stay.
     const same = stays.find((s) => s.kind === 'res' && Math.abs(days(s.checkout, checkout)) <= 1 && (!e.listingId || (data.airbnbReservations.find((r) => r.id === s.id) || {}).listingId === e.listingId));
     if (same) { if (same.rating == null && e.reviewRating != null) same.rating = Number(e.reviewRating); return; }
-    stays.push({ kind: 'ledger', id: e.id, entryId: e.id, checkin: e.startDate || dateStrAdd(checkout, -nights), checkout, nights, guest: e.guest || String(e.note || '').split(', ').slice(1).join(', '), rating: e.reviewRating == null ? null : Number(e.reviewRating), listing: labelOf(e.listingId) });
+    stays.push({ kind: 'ledger', id: e.id, entryId: e.id, checkin: e.startDate || dateStrAdd(checkout, -nights), checkout, nights, guest: e.guest || String(e.note || '').split(', ').slice(1).join(', '), rating: e.reviewRating == null ? null : Number(e.reviewRating), seen: !!e.reviewSeen, listing: labelOf(e.listingId) });
   });
   return stays.sort((a, b) => b.checkout.localeCompare(a.checkout));
 }
@@ -203,10 +205,14 @@ export function superhostChipHtml(a, ownerKey) {
   return `<span class="sh-chip ${escapeHtml(a.state)}" data-sh-chip="${escapeHtml(ownerKey)}" title="${escapeHtml(`${text}. ${a.detail}`.trim())}">&#9733; ${escapeHtml(text)}</span>`;
 }
 
-export function ratingOptionsHtml(value) {
-  const cur = value == null ? '' : String(value);
-  const opt = (v, label) => `<option value="${v}"${cur === v ? ' selected' : ''}>${label}</option>`;
-  return [opt('', '5★ (default)'), opt('5', '5★'), opt('4', '4★'), opt('3', '3★'), opt('2', '2★'), opt('1', '1★'), opt('0', 'No review')].join('');
+export function ratingControlHtml(target, rating, seen) {
+  const t = escapeHtml(target);
+  if (rating == null) {
+    return `<button type="button" class="sh-star-btn" data-sh-rate-set="${t}" title="${seen ? "The guest wrote a review but the email doesn't say the rating. " : 'Not rated yet. '}Click to set 5 stars, then change it if needed.">${seen ? '&#9734;?' : '&#9734;'}</button>`;
+  }
+  const opt = (v, label) => `<option value="${v}"${String(rating) === v ? ' selected' : ''}>${label}</option>`;
+  const stars = (n) => `${n}&#9733;`;
+  return `<select class="sh-star-sel" data-sh-rate="${t}" title="Guest rating for this stay: 1 to 5 stars, No = the guest left no review, dash = back to unrated.">${[opt('', '&ndash;'), opt('0', 'No'), opt('1', stars(1)), opt('2', stars(2)), opt('3', stars(3)), opt('4', stars(4)), opt('5', stars(5))].join('')}</select>`;
 }
 
 function verdictCell(c) {
@@ -220,7 +226,7 @@ function verdictCell(c) {
 
 function row(label, c, extra) {
   const stays = `${c.count}${c.booked ? ` <span class="sh-dim">(${c.booked} booked)</span>` : ''}${extra ? ` <span class="sh-dim">~${extra}</span>` : ''}`;
-  return `<tr><td>${label}</td><td>${stays}</td><td>${c.nights}</td><td>${star(c.avg)}${c.assumed ? ` <span class="sh-dim" title="${plural(c.assumed, 'stay')} with no rating entered count as 5★">(${c.assumed} assumed)</span>` : ''}</td><td>${verdictCell(c)}</td></tr>`;
+  return `<tr><td>${label}</td><td>${stays}</td><td>${c.nights}</td><td>${star(c.avg)}${c.unrated ? ` <span class="sh-dim" title="${plural(c.unrated, 'stay')} with no rating yet, left out of the average">(${c.unrated} unrated)</span>` : ''}</td><td>${verdictCell(c)}</td></tr>`;
 }
 
 // The assessment block inside an owner's section of Letting income.
@@ -240,14 +246,14 @@ export function superhostPanelHtml(a, ownerKey) {
 ${row('Today', a.now)}
 ${a.rows.map((r) => row(escapeHtml(fmtDate(r.date)), r.conf, r.extra >= 0.5 ? r.extra.toFixed(0) : '')).join('')}
 </tbody></table></div>
-<div class="settings-note" style="margin:2px 0 6px;">Stays are those finishing in the 365 days before each date, counting booked ones. A <span class="sh-dim">~n</span> is how many more the recent pace would add. Rating: a stay with none entered counts as 5★.</div>
+<div class="settings-note" style="margin:2px 0 6px;">Stays are those finishing in the 365 days before each date, counting booked ones. A <span class="sh-dim">~n</span> is how many more the recent pace would add. Rating: stays with no rating yet are left out of the average.</div>
 <div class="sh-set">
 <label><input type="checkbox" data-sh-set="holds" data-sh-key="${k}"${s.holds ? ' checked' : ''}> Currently a Superhost</label>
 <label>Response rate %<input type="number" min="0" max="100" step="1" class="settings-input" data-sh-set="responseRate" data-sh-key="${k}" value="${s.responseRate}" title="From the Airbnb app (Performance). Airbnb asks for 90% or more."></label>
 <label>Host cancellations (12 months)<input type="number" min="0" step="1" class="settings-input" data-sh-set="hostCancellations" data-sh-key="${k}" value="${s.hostCancellations}" title="Cancellations you made as host, not guest cancellations. Airbnb allows under 1% of bookings."></label>
 </div>
-<div class="sh-reviews-toggle" data-sh-toggle="${k}">${open ? '&#9662;' : '&#9656;'} Guest ratings: ${plural(recent.length, 'stay')} in the last 12 months${a.now.assumed ? ` (${a.now.assumed} not yet rated)` : ''}</div>
-${open ? `<div class="sh-reviews">${recent.length ? recent.map((x) => `<div class="sh-review"><span class="sh-rev-date">${escapeHtml(x.checkout)}</span>${x.entryId ? `<span class="sh-rev-guest" data-sh-goto="${escapeHtml(x.entryId)}" title="Show this stay in the ledger below">${escapeHtml(x.guest || x.listing || 'Stay')}</span>` : `<span class="sh-rev-guest">${escapeHtml(x.guest || x.listing || 'Stay')}</span>`}<span class="sh-dim">${escapeHtml(plural(x.nights, 'night'))}${x.listing ? `, ${escapeHtml(x.listing)}` : ''}</span><select class="settings-input" data-sh-rate="${x.kind}:${escapeHtml(x.id)}" title="The overall rating this guest gave. Leave on default to count 5★.">${ratingOptionsHtml(x.rating)}</select></div>`).join('') : '<div class="settings-note">No completed stays in the last 12 months.</div>'}</div>` : ''}
+<div class="sh-reviews-toggle" data-sh-toggle="${k}">${open ? '&#9662;' : '&#9656;'} Guest ratings: ${plural(recent.length, 'stay')} in the last 12 months${a.now.unrated ? ` (${a.now.unrated} not yet rated)` : ''}</div>
+${open ? `<div class="sh-reviews">${recent.length ? recent.map((x) => `<div class="sh-review"><span class="sh-rev-date">${escapeHtml(x.checkout)}</span>${x.entryId ? `<span class="sh-rev-guest" data-sh-goto="${escapeHtml(x.entryId)}" title="Show this stay in the ledger below">${escapeHtml(x.guest || x.listing || 'Stay')}</span>` : `<span class="sh-rev-guest">${escapeHtml(x.guest || x.listing || 'Stay')}</span>`}<span class="sh-dim">${escapeHtml(plural(x.nights, 'night'))}${x.listing ? `, ${escapeHtml(x.listing)}` : ''}</span>${ratingControlHtml(`${x.kind}:${x.id}`, x.rating, x.seen)}</div>`).join('') : '<div class="settings-note">No completed stays in the last 12 months.</div>'}</div>` : ''}
 </div>`;
 }
 
@@ -269,9 +275,21 @@ export function bindSuperhost(root, rerender) {
     queueSave();
     rerender();
   }));
+  const recFor = (target) => {
+    const [kind, id] = target.split(/:(.*)/s);
+    return kind === 'res' ? (data.airbnbReservations || []).find((r) => r.id === id) : (data.lettingLedger || []).find((e) => e.id === id);
+  };
+  root.querySelectorAll('[data-sh-rate-set]').forEach((b) => b.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    const rec = recFor(b.dataset.shRateSet);
+    if (!rec) return;
+    rec.reviewRating = SUPERHOST.topRating; // picking one starts at 5 stars
+    delete rec.reviewSeen;
+    queueSave();
+    rerender();
+  }));
   root.querySelectorAll('[data-sh-rate]').forEach((sel) => sel.addEventListener('change', () => {
-    const [kind, id] = sel.dataset.shRate.split(/:(.*)/s);
-    const rec = kind === 'res' ? (data.airbnbReservations || []).find((r) => r.id === id) : (data.lettingLedger || []).find((e) => e.id === id);
+    const rec = recFor(sel.dataset.shRate);
     if (!rec) return;
     if (sel.value === '') delete rec.reviewRating; else rec.reviewRating = Number(sel.value);
     queueSave();
