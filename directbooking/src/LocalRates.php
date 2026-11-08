@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 /** base_rate for price and only the site's own bookings for availability: dev and tests. */
-final class LocalRates extends RateSource
+class LocalRates extends RateSource
 {
     public function calendar(array $listing, string $from, string $to): array
     {

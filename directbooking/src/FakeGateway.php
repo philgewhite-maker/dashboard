@@ -44,7 +44,7 @@ final class FakeGateway implements PaymentGateway
         return $s;
     }
 
-    public function capture(string $account, string $paymentIntent): void { $this->pi($paymentIntent, 'captured'); }
+    public function capture(string $account, string $paymentIntent, ?int $amountMinor = null): void { $this->pi($paymentIntent, 'captured'); if ($amountMinor !== null) $this->pi($paymentIntent, "captured $amountMinor"); }
     public function cancelAuth(string $account, string $paymentIntent): void { $this->pi($paymentIntent, 'cancelled'); }
     public function refund(string $account, string $paymentIntent, int $amountMinor): void { $this->pi($paymentIntent, "refunded $amountMinor"); }
 

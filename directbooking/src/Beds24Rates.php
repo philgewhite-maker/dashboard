@@ -83,6 +83,19 @@ final class Beds24Rates extends RateSource
         if ($ref) $this->call('POST', '/bookings', [['id' => (int)$ref, 'status' => 'cancelled']]);
     }
 
+    /** Prices and minimum stay on the shared calendar (Beds24 passes them to Airbnb). VERIFY the v2 field names live. */
+    public function canSetCalendar(): bool { return true; }
+
+    public function setCalendar(array $listing, array $prices, ?array $minStay): void
+    {
+        if (empty($listing['beds24_room_id'])) throw new RuntimeException("{$listing['name']} has no Beds24 room id.");
+        $cal = [];
+        foreach ($prices as $d => $p) $cal[] = ['from' => $d, 'to' => $d, 'price1' => (float)$p];
+        if ($minStay) $cal[] = ['from' => $minStay[0], 'to' => Util::addDays($minStay[1], -1), 'minStay' => (int)$minStay[2]];
+        if ($cal) $this->call('POST', '/inventory/rooms/calendar', [['roomId' => (int)$listing['beds24_room_id'], 'calendar' => $cal]]);
+        $this->refresh(); // so this site sees the new prices at once
+    }
+
     private static function findId(mixed $res): mixed
     {
         if (!is_array($res)) return null;

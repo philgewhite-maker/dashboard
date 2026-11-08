@@ -43,9 +43,9 @@ final class StripeGateway implements PaymentGateway
         ];
     }
 
-    public function capture(string $account, string $paymentIntent): void
+    public function capture(string $account, string $paymentIntent, ?int $amountMinor = null): void
     {
-        $this->call('POST', "/payment_intents/$paymentIntent/capture", $account, []);
+        $this->call('POST', "/payment_intents/$paymentIntent/capture", $account, $amountMinor !== null ? ['amount_to_capture' => $amountMinor] : []);
     }
 
     public function cancelAuth(string $account, string $paymentIntent): void

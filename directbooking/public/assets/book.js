@@ -47,8 +47,11 @@
       }
       const rows = q.lines.map((l) => `<tr><td>${esc(l.label)}</td><td>${esc(l.text)}</td></tr>`).join('');
       const sched = q.schedule.length ? '<p class="small">Paid monthly in advance: ' + q.schedule.map((s) => `${esc(s.text)} ${esc(s.due)}`).join('; ') + '.</p>' : '';
+      const ext = (q.extensions || []).map((x) => `<button type="button" class="chip ext" data-a="${esc(x.arrival)}" data-d="${esc(x.departure)}">${esc(x.text)}</button>`).join(' ');
       quoteBox.innerHTML = `<table>${rows}<tr class="total"><td>Total</td><td>${esc(q.total_text)}</td></tr></table>${sched}`
+        + (ext ? `<p class="small">Stay longer? ${ext}</p>` : '')
         + `<p class="small muted">Cancellation: ${esc(q.policy_text)}</p>`;
+      quoteBox.querySelectorAll('.ext').forEach((b) => b.addEventListener('click', () => setDates(b.dataset.a, b.dataset.d)));
       const current = $('method').value;
       $('method').innerHTML = q.methods.map((m) => `<option value="${esc(m)}">${esc(METHOD_NAMES[m] || m)}</option>`).join('');
       if (q.methods.includes(current)) $('method').value = current;
@@ -56,6 +59,25 @@
       if (!q.methods.length) quoteBox.insertAdjacentHTML('beforeend', '<p class="errors">No payment method takes this currency for these rooms. Try GBP.</p>');
     }
     const later = () => { clearTimeout(timer); timer = setTimeout(quote, 250); };
+
+    // Special offers: quiet dates the booking model expects to stay empty, as clickable windows.
+    const offersBox = form.querySelector('.offers');
+    const setDates = (a, d) => { $('arrival').value = a; $('departure').value = d; $('departure').min = a; later(); };
+    fetch('/api/offers?' + new URLSearchParams({ product: form.dataset.product })).then((r) => r.json()).then((o) => {
+      if (!o.offers || !o.offers.length) return;
+      offersBox.innerHTML = '<p class="small"><strong>Special offers</strong> on quieter dates:</p>' + o.offers.map((w) =>
+        `<button type="button" class="chip" data-a="${esc(w.arrival)}" data-d="${esc(w.departure)}">${esc(w.label)} · ${esc(String(w.pct_off))}% off${w.min_nights === 1 ? ' · 1 night OK' : ''}</button>`).join(' ');
+      offersBox.hidden = false;
+      offersBox.addEventListener('click', (e) => {
+        const b = e.target.closest('[data-a]');
+        if (!b) return;
+        // Keep the guest's own stay length where it fits inside the window.
+        const len = $('arrival').value && $('departure').value ? Math.round((new Date($('departure').value) - new Date($('arrival').value)) / 864e5) : 0;
+        const winLen = Math.round((new Date(b.dataset.d) - new Date(b.dataset.a)) / 864e5);
+        const dep = len > 0 && len < winLen ? new Date(new Date(b.dataset.a + 'T12:00:00Z').getTime() + len * 864e5).toISOString().slice(0, 10) : b.dataset.d;
+        setDates(b.dataset.a, dep);
+      });
+    }).catch(() => { /* offers are optional */ });
 
     $('arrival').addEventListener('change', () => {
       if ($('arrival').value && (!$('departure').value || $('departure').value <= $('arrival').value)) {

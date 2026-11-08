@@ -94,7 +94,25 @@ final class App
             'mail' => ['transport' => 'log', 'from' => ''],
             'tfl' => ['app_key' => ''],
             // Phil's dashboard agent inbox (agent-write.php). Blank = off.
-            'dashboard' => ['inbox_url' => '', 'secret' => ''],
+            'dashboard' => ['inbox_url' => '', 'secret' => '', 'data_file' => '', 'url' => 'https://philgewhite-maker.github.io/dashboard/'],
+            // Offers from the dashboard booking model's void projection (Demand).
+            'demand' => [
+                'enabled' => true,
+                'max_age_days' => 7,        // ignore a projection older than this
+                'low_prob' => 0.5,          // only nights less likely than this to be booked get an offer
+                'margin_pct' => 10,         // offer price = expected income if left empty, plus this
+                'floor_gbp' => 45,          // never below this per night
+                'max_discount_pct' => 30,   // never more than this off the direct price
+                'extension_nights' => 3,    // look this many nights either side of a stay for extension offers
+            ],
+            // Changes to Beds24 (and so Airbnb) for dead voids, within limits. Off until switched on.
+            'autopilot' => [
+                'enabled' => false,
+                'max_discount_pct' => 20,
+                'floor_gbp' => 60,
+                'max_days_ahead' => 45,
+                'allow_min_stay' => true,
+            ],
         ];
     }
 

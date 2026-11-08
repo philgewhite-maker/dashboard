@@ -18,6 +18,8 @@ final class Cron
             'expire' => fn() => (new Bookings($this->app))->expireDue(),
             'instalments' => fn() => (new Bookings($this->app))->sendDueInstalments(),
             'rates' => fn() => $this->app->rates()->refresh(),
+            'demand' => fn() => (new Demand($this->app))->sync(),
+            'autopilot' => fn() => (new Autopilot($this->app))->run(),
             'fx' => fn() => $this->due('fx', 20 * 3600) ? (new Fx($this->app))->refresh() : 'fresh',
             'rollforward' => fn() => $this->due('rollforward', 24 * 3600) ? $this->rollForward() : 'done today',
             // Quarterly: fresh TfL times for every route, proposed for approval.
@@ -28,6 +30,7 @@ final class Cron
         $run = $task === 'all' ? $jobs : array_intersect_key($jobs, [$task => 1]);
         // Asked for by name (e.g. from setup): run now, whatever the schedule says.
         if ($task === 'routes') $run = ['routes' => fn() => (new Tfl($this->app))->proposeAll(), 'inbox' => $jobs['inbox']];
+        $this->app->migrate(); // new tables after a code update appear by themselves (all CREATE IF NOT EXISTS)
         $out = [];
         foreach ($run as $name => $fn) {
             try { $out[$name] = $fn(); }

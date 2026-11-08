@@ -143,6 +143,38 @@ listing's Airbnb calendar export URL into its `ical_url`) or to
 `mail` once the domain's mailbox exists. In cPanel > Email
 Deliverability, fix SPF and DKIM with the "Repair" button.
 
+## Demand: special offers from the dashboard's booking model
+
+The dashboard's booking model saves each void projection in its own data
+file on this host. For every free night up to the end of next month, a
+projection holds the chance the night gets booked, the income it's
+expected to bring, and, for dead voids, the fix the model found best.
+The cron job copies the latest projection into `demand_nights`, read-only.
+It matches each dashboard room to a listing here by Airbnb listing
+number, or by `data.dashboard_room_key` on the listing.
+
+| Use | What the site does |
+|---|---|
+| Special offer price | A night with under a 50% chance of booking is offered at its expected income if left empty, plus 10%. Never below £45, never more than 30% off the direct price. The quote shows it as "Special offer on quieter nights". |
+| Shorter stays | In a dead void the model says sells better with shorter stays, the calendar's minimum is relaxed to the model's figure. |
+| Highlight offer dates | Each booking box lists the offer windows (`/api/offers`). Clicking one fills the dates. |
+| Extend a stay | The quote suggests nights either side: quiet ones at the offer price, and any short gap the stay would strand, which nobody else could book. |
+| Re-price a request | The admin can approve at a lower total, and the card is charged less. Check the dashboard's evaluator first (channel: Direct). A higher price needs the guest's agreement. |
+| Airbnb, automatically | With Beds24 and `autopilot.enabled`, dead-void fixes go to the shared calendar. Limits: at most 20% off, at least £60 a night, within 45 days. Each change is logged at `/admin/adjustments` with undo, undone by itself when a newer projection stops calling the void dead, and reported to the dashboard. The direct site keeps pricing from the original price, so a cut isn't taken twice. |
+
+Limits:
+
+- **Stale projections.** A projection older than 7 days is ignored:
+  offers pause rather than run on old guesses. The dashboard runs a
+  projection only when asked (or after pushing a stay), so a weekly task
+  reminds you while it's stale.
+- **Rough price comparison.** The model's income figures are Airbnb
+  payouts, while direct prices are before card fees, so the comparison
+  is approximate.
+- **Duplicate dead-void tasks.** The dashboard still creates its own
+  Airbnb tasks for dead voids. With autopilot on, those are duplicates
+  until the dashboard learns to skip them.
+
 ## Tasks in Phil's dashboard
 
 With `dashboard.inbox_url` and `dashboard.secret` set in `config.php`,
@@ -163,6 +195,8 @@ land on that page.
 | Travel times over 6 months old | Quarterly (TfL times also refresh themselves quarterly) |
 | Direct pricing check: discount, long-stay and event rules | Quarterly |
 | A scheduled job failing | Once a day while it fails |
+| The void projection is over a week old (offers paused) | Weekly while stale |
+| An autopilot change made on Airbnb (with undo link) | Immediately |
 
 Each task is keyed, so nothing is proposed twice in its period. If the
 dashboard can't be reached, the task waits in `inbox_outbox` and the next

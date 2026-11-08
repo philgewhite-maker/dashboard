@@ -156,26 +156,39 @@ final class Bookings
 
     // ---- owner side -------------------------------------------------------
 
-    public function approve(string $id, string $by): string
+    /**
+     * $priceMinor: approve at a LOWER total than requested (a counter-offer down,
+     * e.g. when the dashboard's evaluator says the dates are worth less). Every
+     * payment is scaled down; a card is charged the smaller amount from its
+     * authorisation. A higher price needs the guest's agreement, so it isn't offered here.
+     */
+    public function approve(string $id, string $by, ?int $priceMinor = null): string
     {
         $b = $this->booking($id);
         if (!$b || $b['status'] !== 'requested') return 'Only a waiting request can be approved.';
+        $note = '';
+        if ($priceMinor !== null && $priceMinor !== (int)$b['total_minor']) {
+            if ($priceMinor <= 0 || $priceMinor > (int)$b['total_minor']) return 'An approval price must be lower than the requested total.';
+            $this->reprice($b, $priceMinor);
+            $note = ' at the reduced price of ' . Util::money($priceMinor, $b['currency']);
+            $b = $this->booking($id);
+        }
         $cfg = $this->app->config['booking'];
         if ($b['method'] === 'card') {
             foreach ($this->firstPayments($id) as $pay) {
                 $part = $this->app->one('SELECT * FROM booking_parts WHERE id = ?', [$pay['part_id']]);
-                $this->app->gateway()->capture($this->account($part['host_id']), $pay['stripe_pi_id']);
+                $this->app->gateway()->capture($this->account($part['host_id']), $pay['stripe_pi_id'], (int)$pay['amount_minor']);
                 $this->app->update('payments', $pay['id'], ['status' => 'paid', 'paid_at' => Util::now()]);
             }
             $this->app->update('bookings', $id, ['status' => 'approved', 'decided_at' => Util::now(), 'decided_by' => $by]);
             $this->confirm($id);
-            return "Approved and charged {$b['ref']}.";
+            return "Approved and charged {$b['ref']}$note.";
         }
         $hours = $this->pricing->isManual($b['method']) ? $cfg['pay_within_hours']['manual'] : $cfg['pay_within_hours']['link'];
         $this->app->update('bookings', $id, ['status' => 'approved', 'pay_by' => $this->hoursFromNow($hours), 'decided_at' => Util::now(), 'decided_by' => $by]);
         $this->app->log('booking', $id, "Approved by $by; waiting for payment");
         $this->sendPaymentRequest($this->booking($id), $this->firstPayments($id));
-        return "Approved {$b['ref']}; payment request sent to the guest.";
+        return "Approved {$b['ref']}$note; payment request sent to the guest.";
     }
 
     public function decline(string $id, string $by, string $reason = ''): string
@@ -223,6 +236,25 @@ final class Bookings
             "Hello {$b['guest_name']},\n\nYour booking for " . Util::fmtDate($b['arrival']) . " has been cancelled.\nRefund under the " .
             Cancellation::POLICIES[$b['policy']]['name'] . ' policy: ' . Util::money($refund, $b['currency']) . ".\n$manualNote", $this->hostFrom($id), $b);
         return "Cancelled {$b['ref']}; refund " . Util::money($refund, $b['currency']) . '.';
+    }
+
+    /** Scales every part and payment of a booking down to a new total; the last payment takes the rounding. */
+    private function reprice(array $b, int $newTotal): void
+    {
+        $factor = $newTotal / (int)$b['total_minor'];
+        $pays = $this->payments($b['id']);
+        $left = $newTotal;
+        foreach ($pays as $i => $p) {
+            $amt = $i === count($pays) - 1 ? $left : (int)round($p['amount_minor'] * $factor);
+            $left -= $amt;
+            $this->app->update('payments', $p['id'], ['amount_minor' => $amt]);
+        }
+        foreach ($this->parts($b['id']) as $part) {
+            $sum = (int)$this->app->one('SELECT SUM(amount_minor) AS s FROM payments WHERE part_id = ?', [$part['id']])['s'];
+            $this->app->update('booking_parts', $part['id'], ['amount_minor' => $sum]);
+        }
+        $this->app->update('bookings', $b['id'], ['total_minor' => $newTotal]);
+        $this->app->log('booking', $b['id'], 'Repriced from ' . Util::money((int)$b['total_minor'], $b['currency']) . ' to ' . Util::money($newTotal, $b['currency']));
     }
 
     // ---- scheduled jobs ---------------------------------------------------

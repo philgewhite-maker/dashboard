@@ -244,6 +244,101 @@ eq((int)$app->one('SELECT COUNT(*) AS n FROM inbox_outbox')['n'], $before, 'revi
 try { $app->inbox()->flush(); ok(false, 'flush fails while unreachable'); } catch (RuntimeException $e) { ok(true, 'flush fails while unreachable'); }
 $app->config['dashboard'] = ['inbox_url' => '', 'secret' => ''];
 
+// ---- demand from the dashboard's booking model ------------------------------------
+// A stand-in calendar: 3-night minimum, one night booked elsewhere, and it records calendar writes.
+$cal = new class($app) extends LocalRates {
+    public array $writes = [];
+    public array $blocked = [];
+    public array $prices = [];
+    public function calendar(array $listing, string $from, string $to): array {
+        $out = parent::calendar($listing, $from, $to);
+        foreach ($out as $d => &$day) {
+            $day['min_stay'] = 3;
+            if (isset($this->blocked[$d])) $day['available'] = false;
+            if (isset($this->prices[$listing['id']][$d])) $day['price'] = $this->prices[$listing['id']][$d];
+        }
+        return $out;
+    }
+    public function canSetCalendar(): bool { return true; }
+    public function setCalendar(array $listing, array $prices, ?array $minStay): void {
+        $this->writes[] = [$listing['id'], $prices, $minStay];
+        foreach ($prices as $d => $p) $this->prices[$listing['id']][$d] = $p;
+    }
+};
+$app->use($cal);
+$v0 = $d(400);
+$dash = [
+    'airbnbListings' => [['id' => 'dl1', 'icsUrl' => 'https://www.airbnb.co.uk/calendar/ical/1651495519889440619.ics?s=abc']],
+    'bookingProjections' => [[
+        'madeAt' => date('c'), 'today' => date('Y-m-d'), 'to' => $d(420),
+        'rooms' => [['key' => 'room:lb1', 'label' => 'Ensuite', 'listingId' => 'dl1']],
+        'voids' => [['roomKey' => 'room:lb1', 'roomLabel' => 'Ensuite', 'listingId' => 'dl1', 'from' => $v0, 'to' => Util::addDays($v0, 4), 'nights' => 4, 'open' => false,
+            'nightProb' => [0.1, 0.2, 0.8, 0.3], 'nightIncome' => [8, 15, 90, 25]]],
+        'deadVoids' => [['roomKey' => 'room:lb1', 'from' => $v0, 'to' => Util::addDays($v0, 4), 'best' => ['minNights' => 1, 'pct' => 30]]],
+    ]],
+];
+$dm = new Demand($app);
+$st = $dm->sync($dash);
+eq($st['nights'] ?? 0, 4, 'projection nights mapped to the listing by Airbnb number');
+$app->update('listings', 'room-1', ['data' => str_replace('"photos"', '"zz":1,"photos"', $app->one('SELECT data FROM listings WHERE id = ?', ['room-1'])['data'])]);
+
+$q = $pricing->quote('ensuite-king-room', $v0, Util::addDays($v0, 2), 2);
+ok($q['ok'], 'quiet nights bookable: ' . implode(' ', $q['errors']));
+eq($q['total_minor'], 15400, 'two quiet nights at the offer price: expected income + 10%, floored at 30% off £110');
+eq($q['offer_nights'], 2, 'offer nights counted');
+ok(in_array('Special offer on quieter nights', array_column($q['parts'][0]['lines'], 'label'), true), 'offer shown as its own line');
+$q = $pricing->quote('ensuite-king-room', $v0, Util::addDays($v0, 1), 2);
+ok($q['ok'], 'dead void relaxes the 3-night minimum to the model\'s 1: ' . implode(' ', $q['errors']));
+$q = $pricing->quote('ensuite-king-room', $d(380), $d(381), 2);
+ok(!$q['ok'], 'outside the dead void the 3-night minimum stands');
+$q = $pricing->quote('ensuite-king-room', Util::addDays($v0, 2), Util::addDays($v0, 5), 2);
+eq($q['total_minor'], 11000 + 7700 + 11000, 'a likely-to-sell night keeps full price; a quiet one gets the offer');
+
+// Extensions: a quiet night before; a stranded gap after (next night booked elsewhere).
+$cal->blocked[Util::addDays($v0, 3)] = true;
+$q = $pricing->quote('ensuite-king-room', Util::addDays($v0, 1), Util::addDays($v0, 2), 2);
+$sides = array_column($q['extensions'], null, 'side');
+ok(isset($sides['before']) && $sides['before']['reason'] === 'quiet' && $sides['before']['arrival'] === $v0, 'quiet night before offered as an extension');
+ok(isset($sides['after']) && $sides['after']['reason'] === 'gap' && $sides['after']['extra_minor'] === 7700, 'stranded gap night after offered at the offer price');
+unset($cal->blocked[Util::addDays($v0, 3)]);
+
+$offers = (new Pricing($app))->offers('ensuite-king-room', 420);
+ok(count($offers) >= 1 && $offers[0]['arrival'] === $v0 && $offers[0]['nights'] === 2 && $offers[0]['pct_off'] === 30, 'offer windows list the quiet dates');
+
+// Approve at a lower price: the card is charged less.
+$r = $bk->request(['product' => 'ensuite-king-room', 'arrival' => $d(390), 'departure' => $d(393), 'adults' => 2, 'currency' => 'GBP', 'method' => 'card', 'guest' => $guest]);
+parse_str(parse_url($r['next_url'], PHP_URL_QUERY), $qs);
+$gw->complete($qs['session']);
+$bk->returned($r['ref']);
+$b = $bk->byRef($r['ref']);
+eq($bk->approve($b['id'], 'op@example.test', 50000), 'An approval price must be lower than the requested total.', 'cannot approve above the asked price');
+$msg = $bk->approve($b['id'], 'op@example.test', 30000);
+eq((int)$bk->byRef($r['ref'])['total_minor'], 30000, 'approved at the lower total: ' . $msg);
+ok(in_array('captured 30000', $gw->get($qs['session'])['pi_log'], true), 'card charged the lower amount');
+
+// Autopilot: within limits on the shared calendar, priced from the original on the direct site, undone when no longer dead.
+$app->config['autopilot']['enabled'] = true;
+eq((new Autopilot($app))->run(), [], 'autopilot leaves voids beyond max_days_ahead alone');
+$app->config['autopilot']['max_days_ahead'] = 500;
+$done = (new Autopilot($app))->run();
+eq(count($cal->writes), 1, 'autopilot wrote one change: ' . Util::enc($done));
+eq($cal->writes[0][1][$v0] ?? null, 100.0, '20% cap: £125 -> £100 on the shared calendar');
+eq($cal->writes[0][2][2] ?? null, 1, 'and the minimum stay shortened to the model\'s 1');
+eq((new Autopilot($app))->originalPrices('room-1', $v0, Util::addDays($v0, 1))[$v0] ?? null, 125.0, 'original price kept for undo');
+eq($pricing->quote('ensuite-king-room', Util::addDays($v0, 2), Util::addDays($v0, 3), 2)['total_minor'], 11000, 'direct price still from the original, not cut twice');
+ok((bool)$app->one("SELECT 1 FROM inbox_outbox WHERE key LIKE 'adjust:%'") || ($app->config['dashboard']['inbox_url'] ?? '') === '', 'change reported to the dashboard when the inbox is on');
+$dash['bookingProjections'][0]['deadVoids'] = [];
+$dm->sync($dash);
+(new Autopilot($app))->run();
+eq($app->one('SELECT status FROM adjustments')['status'], 'reverted', 'undone when the model no longer calls it dead');
+eq((float)($cal->writes[1][1][$v0] ?? 0), 125.0, 'original price written back');
+$app->config['autopilot']['enabled'] = false;
+
+// A stale projection stops offers.
+$app->exec("UPDATE demand_nights SET projected_at = ?", [date('Y-m-d H:i:s', strtotime('-10 days'))]);
+eq($pricing->quote('ensuite-king-room', $v0, Util::addDays($v0, 2), 2)['offer_nights'], 0, 'no offers from a projection over a week old');
+$app->use(new LocalRates($app));
+
 // ---- publishing -------------------------------------------------------------------
 $pub = new Publisher($app);
 $r = $pub->publish();

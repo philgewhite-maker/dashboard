@@ -281,6 +281,39 @@ CREATE TABLE IF NOT EXISTS inbox_outbox (
   batch_id TEXT
 );
 
+-- The dashboard booking model's view of each free night (Demand::sync).
+CREATE TABLE IF NOT EXISTS demand_nights (
+  listing_id TEXT NOT NULL,
+  date TEXT NOT NULL,
+  prob REAL NOT NULL,               -- chance the night gets booked if left as it is
+  income REAL NOT NULL,             -- what it's expected to bring if left as it is (GBP)
+  void_from TEXT NOT NULL,
+  void_to TEXT NOT NULL,
+  open_ended INTEGER NOT NULL DEFAULT 0,
+  dead INTEGER NOT NULL DEFAULT 0,  -- a dead void the model has a fix for
+  best_pct INTEGER,                 -- the model's best discount for that void
+  best_min INTEGER,                 -- and its best minimum stay
+  projected_at TEXT NOT NULL,
+  PRIMARY KEY (listing_id, date)
+);
+
+-- Changes made on the shared calendar (Beds24, so Airbnb too) by the autopilot.
+CREATE TABLE IF NOT EXISTS adjustments (
+  id TEXT PRIMARY KEY,
+  listing_id TEXT NOT NULL,
+  date_from TEXT NOT NULL,
+  date_to TEXT NOT NULL,            -- exclusive
+  old_prices TEXT NOT NULL,         -- JSON {date: price} before the change, for undo and for direct pricing
+  old_min_stay INTEGER,
+  new_price_pct INTEGER,
+  new_min_stay INTEGER,
+  reason TEXT NOT NULL,
+  applied_at TEXT NOT NULL,
+  reverted_at TEXT,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','reverted','expired','failed')),
+  note TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_bookings_status ON bookings(status);
 CREATE INDEX IF NOT EXISTS idx_parts_booking ON booking_parts(booking_id);
 CREATE INDEX IF NOT EXISTS idx_payments_part ON payments(part_id);

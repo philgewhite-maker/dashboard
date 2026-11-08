@@ -29,6 +29,16 @@ abstract class RateSource
     public function hold(array $listing, array $booking, array $part): ?string { return null; }
     public function confirm(?string $ref): void {}
     public function release(?string $ref): void {}
+    /**
+     * Writes prices ({date: price}) and/or a minimum stay ([from, toExclusive, n]) to the
+     * shared calendar. Only Beds24 can; the others refuse, so nothing pretends to have changed Airbnb.
+     */
+    public function canSetCalendar(): bool { return false; }
+
+    public function setCalendar(array $listing, array $prices, ?array $minStay): void
+    {
+        throw new RuntimeException('This calendar source cannot change prices; connect Beds24.');
+    }
     /** Whether holds reach Airbnb by themselves (drives the owner's email). */
     public function pushesToAirbnb(): bool { return false; }
     /** Pulls outside calendars into rate_cache; returns rows written. */

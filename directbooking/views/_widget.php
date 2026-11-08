@@ -15,6 +15,7 @@ $cap = array_sum(array_map(fn($l) => (int)$l['max_guests'], $product['listings']
     <label>Guests<select name="adults"><?php for ($i = 1; $i <= $cap; $i++): ?><option<?= $i === min(2, $cap) ? ' selected' : '' ?>><?= $i ?></option><?php endfor; ?></select></label>
     <label>Currency<select name="currency"><?php foreach ($currencies as $c): ?><option><?= $h($c) ?></option><?php endforeach; ?></select></label>
   </div>
+  <div class="offers" hidden></div>
   <div class="quote" aria-live="polite"><p class="muted">Pick dates to see the price.</p></div>
   <fieldset class="guest" hidden>
     <label>How to pay<select name="method"></select></label>

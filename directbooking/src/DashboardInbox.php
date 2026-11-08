@@ -36,7 +36,7 @@ final class DashboardInbox
         $this->app->insert('inbox_outbox', [
             'key' => $key, 'created_at' => Util::now(),
             'payload' => Util::enc(['title' => mb_substr($title, 0, 200), 'notes' => $notes, 'due' => $due ?? '',
-                'link' => rtrim($this->app->config['site']['base_url'], '/') . $link]),
+                'link' => preg_match('#^https?://#', $link) ? $link : rtrim($this->app->config['site']['base_url'], '/') . $link]),
         ]);
         if ($urgent) {
             try { $this->flush(); } catch (Throwable $e) { $this->app->log('inbox', $key, 'Will retry: ' . $e->getMessage()); }

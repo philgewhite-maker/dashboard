@@ -17,7 +17,8 @@ interface PaymentGateway
     /** ['status' => open|complete|expired, 'paid' => bool, 'authorised' => bool, 'payment_intent' => ?string] */
     public function session(string $account, string $sessionId): array;
 
-    public function capture(string $account, string $paymentIntent): void;
+    /** Charges an authorisation; $amountMinor (optional) charges less than was authorised. */
+    public function capture(string $account, string $paymentIntent, ?int $amountMinor = null): void;
 
     public function cancelAuth(string $account, string $paymentIntent): void;
 

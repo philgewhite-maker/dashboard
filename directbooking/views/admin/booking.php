@@ -12,7 +12,12 @@ $partById = array_column($parts, null, 'id');
 <?php if ($b['status'] === 'requested'): ?>
 <div class="actions">
   <?php if (!$pushes): ?><p class="warn">Before approving: check the dates are still free on Airbnb, and block them there once approved.</p><?php endif; ?>
-  <form method="post" action="/admin/booking/action" class="inline">{{csrf}}<input type="hidden" name="id" value="<?= $h($b['id']) ?>"><button name="action" value="approve">Approve<?= $b['method'] === 'card' ? ' and charge' : '' ?></button></form>
+  <form method="post" action="/admin/booking/action" class="stack" style="max-width:260px">{{csrf}}<input type="hidden" name="id" value="<?= $h($b['id']) ?>">
+    <button name="action" value="approve">Approve<?= $b['method'] === 'card' ? ' and charge' : '' ?> <?= $h(Util::money((int)$b['total_minor'], $b['currency'])) ?></button>
+    <label>Or approve at a lower total (<?= $h($b['currency']) ?>)<input name="price" type="number" step="0.01" min="1" max="<?= $h((string)((int)$b['total_minor'] / Util::minorFactor($b['currency']))) ?>" placeholder="e.g. what the evaluator suggests"></label>
+    <button name="action" value="approve" class="secondary">Approve at this price</button>
+    <p class="small muted">Check it first in the dashboard's booking evaluator (channel: Direct). A higher price needs the guest's agreement: decline with a note instead.</p>
+  </form>
   <form method="post" action="/admin/booking/action" class="stack">{{csrf}}<input type="hidden" name="id" value="<?= $h($b['id']) ?>">
     <label>Reason for the guest (optional)<input name="reason"></label><button name="action" value="decline" class="secondary">Decline</button></form>
 </div>

@@ -36,6 +36,7 @@ final class Admin
             '/admin/table' => $this->operatorOnly(fn() => $this->table()),
             '/admin/edit' => $this->operatorOnly(fn() => $this->edit($method)),
             '/admin/stripe-onboard' => $this->operatorOnly(fn() => $this->stripeOnboard()),
+            '/admin/adjustments' => $this->operatorOnly(fn() => $this->adjustments($method)),
             '/admin/logout' => $this->logout(),
             default => $this->page('Not found', '<p>Not found.</p>'),
         };
@@ -145,6 +146,10 @@ final class Admin
         $out[] = ['Exchange rates', $fx['at'] ?? 'never', ($fx['at'] ?? '') > date('Y-m-d', strtotime('-3 days')) ? 'ok' : 'warn', 'Refreshed by the cron job.'];
         $rc = $this->app->one('SELECT MAX(updated_at) AS at FROM rate_cache');
         if ($c['rates']['source'] !== 'local') $out[] = ['Calendar refresh', $rc['at'] ?? 'never', ($rc['at'] ?? '') > date('Y-m-d H:i:s', strtotime('-2 hours')) ? 'ok' : 'warn', 'Refreshed by the cron job.'];
+        $ds = (new Demand($this->app))->status();
+        $out[] = ['Booking model (dashboard)', $ds['projected_at'] ? "projection of {$ds['projected_at']}, {$ds['nights']} nights" : 'nothing yet', $ds['fresh'] ? 'ok' : 'warn',
+            ($c['dashboard']['data_file'] ?? '') === '' ? 'Set dashboard.data_file in config.php to read the projection.' : ($ds['fresh'] ? 'Special offers and extension prices are on.' : 'Offers paused: run the void projection in the dashboard.')];
+        $out[] = ['Airbnb autopilot', (new Autopilot($this->app))->enabled() ? 'on' : 'off', 'ok', (new Autopilot($this->app))->enabled() ? 'Applies dead-void fixes within limits; see Airbnb changes.' : 'Needs Beds24 and autopilot.enabled; until then the dashboard\'s dead-void tasks cover it.'];
         $stale = $this->app->one("SELECT COUNT(*) AS n FROM routes WHERE status = 'published' AND (verified_at IS NULL OR verified_at < ?)", [date('Y-m-d', strtotime('-1 year'))]);
         $out[] = ['Routes older than a year', (string)$stale['n'], $stale['n'] ? 'warn' : 'ok', 'Re-run bin/fetch-routes.php and approve.'];
         return $out;
@@ -171,7 +176,7 @@ final class Admin
         if (!$b || !$this->canSee($b)) { $this->page('Not found', '<p>No such booking.</p>'); return; }
         $who = $this->me['email'];
         $msg = match ($_POST['action'] ?? '') {
-            'approve' => $bk->approve($b['id'], $who),
+            'approve' => $bk->approve($b['id'], $who, ($_POST['price'] ?? '') !== '' ? Util::toMinor((float)$_POST['price'], $b['currency']) : null),
             'decline' => $bk->decline($b['id'], $who, trim((string)($_POST['reason'] ?? ''))),
             'paid' => $bk->markPaid((string)($_POST['payment_id'] ?? ''), $who),
             'cancel' => $bk->cancel($b['id'], $who),
@@ -200,6 +205,19 @@ final class Admin
             ? ['html' => 'Published ' . count($r['pages']) . ' files. View: ' . implode(' · ', array_map(fn($id, $url) => '<a href="' . Util::h($url) . '/" target="_blank" rel="noopener">' . Util::h($id) . '</a>', array_keys($r['sites']), $r['sites'])) . '.']
             : ['html' => 'Not published. Fix these first (see each record under Content):<ul>' . implode('', array_map(fn($p) => '<li>' . Util::h($p) . '</li>', $r['problems'])) . '</ul>'];
         header('Location: /admin', true, 303);
+    }
+
+    /** Changes the autopilot made on Beds24/Airbnb, with undo. */
+    private function adjustments(string $method): void
+    {
+        $ap = new Autopilot($this->app);
+        if ($method === 'POST') {
+            $_SESSION['flash'] = ['text' => $ap->revert((string)($_POST['id'] ?? ''))];
+            header('Location: /admin/adjustments', true, 303);
+            return;
+        }
+        $rows = $this->app->all('SELECT a.*, l.name AS listing FROM adjustments a LEFT JOIN listings l ON l.id = a.listing_id ORDER BY a.applied_at DESC LIMIT 100');
+        $this->page('Airbnb changes', View::render('admin/adjustments', ['rows' => $rows, 'enabled' => $ap->enabled(), 'cfg' => $this->app->config['autopilot']]));
     }
 
     /** Makes a Stripe sign-up link for a host; the operator sends it to them. */

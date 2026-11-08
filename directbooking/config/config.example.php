@@ -56,7 +56,15 @@ return [
     'dashboard' => [
         'inbox_url' => 'https://georgewhiteeuropean.co.uk/agent-write.php',
         'secret' => '',
+        // The dashboard's own data file on this host (sync.php's $DATA_FILE: one level above
+        // public_html). Read-only: the booking model's void projection drives special offers.
+        'data_file' => '/home/YOUR-CPANEL-USER/dashboard-data.json',
     ],
+
+    // Special offers from the booking model (defaults shown; see README "Demand").
+    // 'demand' => ['low_prob' => 0.5, 'margin_pct' => 10, 'floor_gbp' => 45, 'max_discount_pct' => 30, 'max_age_days' => 7],
+    // Dead-void fixes applied to Beds24/Airbnb within limits. Needs rates.source = beds24.
+    // 'autopilot' => ['enabled' => false, 'max_discount_pct' => 20, 'floor_gbp' => 60, 'max_days_ahead' => 45, 'allow_min_stay' => true],
 
     // 'log' until the domain's mailbox and SPF/DKIM are set up, then 'mail'.
     'mail' => ['transport' => 'log', 'from' => 'bookings@YOUR-DOMAIN'],

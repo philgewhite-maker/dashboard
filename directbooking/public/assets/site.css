@@ -72,3 +72,6 @@ textarea.code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--muted); }
 .dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); }
 body.admin main { max-width: 1200px; }
+.chip { font: inherit; font-size: .85rem; font-weight: 500; background: var(--bg); color: var(--accent); border: 1px solid var(--accent); border-radius: 999px; padding: 4px 10px; margin: 2px 0; cursor: pointer; }
+.chip:hover { background: var(--accent); color: var(--accent-ink); }
+.offers p { margin: 0 0 4px; }

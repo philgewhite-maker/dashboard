@@ -33,6 +33,16 @@ final class Reviews
             $done[] = "approvals: $n";
         }
 
+        // Special offers depend on a recent void projection from the dashboard: weekly while it is stale.
+        if (($this->app->config['dashboard']['data_file'] ?? '') !== '' && $this->app->config['demand']['enabled']) {
+            $ds = (new Demand($this->app))->status();
+            if (!$ds['fresh']) {
+                $inbox->propose("projection:$week", 'Run the void projection in the dashboard: booking-site offers are paused', $this->app->config['dashboard']['url'],
+                    ($ds['projected_at'] ? "The last one is from {$ds['projected_at']}" : 'No projection has reached the booking site yet') . '. Special offers and extension prices stop after ' . $this->app->config['demand']['max_age_days'] . " days rather than run on old guesses.\nDashboard: Finances > Letting > Project the voids.");
+                $done[] = 'projection stale';
+            }
+        }
+
         // Publishing blocked by unconfirmed text: weekly.
         $problems = (new Publisher($this->app))->check();
         if ($problems) {
