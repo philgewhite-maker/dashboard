@@ -677,6 +677,7 @@ const minNights = Object.fromEntries(ctx.rooms.map((r, i) => [i, Number(r.minNig
 
 // What existing stays earn inside the window (same in both futures).
 let existingIncome = 0;
+const existingList = [];
 existing.forEach((x) => {
 const n = dayNum(x.checkout) - dayNum(x.checkin);
 const r = ri2.get(x.listingId);
@@ -687,7 +688,6 @@ inWin += Number(x.income) > 0 ? Number(x.income) / n : basePrice(ctx, params, r,
 existingIncome += inWin;
 if (inWin > 0) existingList.push({ id: x.id, room: ctx.listingLabels[x.listingId] || ctx.rooms[r].label, guest: x.guest, checkin: x.checkin, checkout: x.checkout, income: Number(x.income) > 0 ? Number(x.income) : null, inWindow: inWin });
 });
-const existingList = [];
 const existingCheckouts = existing.map((x) => ({ room: ri2.get(x.listingId), co: dayNum(x.checkout) }));
 
 const firstClean = ctx.firstClean;
