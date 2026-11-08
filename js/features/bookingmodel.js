@@ -58,7 +58,7 @@ const BLOCK_CAP = 28; // nights either side of a request simulated when nothing 
 const DETAIL_KEYS = ['n_before', 'n_inside', 'n_after', 'n_other', 'd_before', 'd_inside', 'd_after', 'd_other', 'cleanFirstN', 'cleanExtraN', 'hassleWdN', 'hassleWeN', 'ownWd', 'ownWdN', 'ownWe', 'ownWeN', 'ownSecond', 'ownSecondN'];
 const RUNS = 1500;
 const CAL_RUNS = 150;
-const PROJECT_RUNS = 1000;
+const PROJECT_RUNS = 3000; // about 2 s warm; the run-to-run spread of a void's figure at 1,000 was 2-4%
 const OCC_FULL_EVIDENCE = 3; // bookings a month needs to count in full towards the occupancy it shows
 
 // ---- Dates as day numbers ------------------------------------------------------------------
