@@ -45,6 +45,8 @@ const LOS_PRIOR_LONG = 0.1;
 const LOS_PRIOR_K = 10; // pseudo-stays behind the stay-length assumption
 const DOW_PRIOR_K = 3; // pseudo check-ins per weekday
 const LEAD_PRIOR_K = 3; // pseudo-bookings behind each month's lead-time assumption
+const LEAD_SHIFT_K = 5; // pseudo-bookings holding the shared lead-time shift at 0 (no shift)
+const LEAD_SHIFT_MAX = 1.2; // the shift never exceeds this in log-days (about x3.3 either way)
 const CANCEL_PRIOR = { rate: 0.08, k: 10, late: 0.3, lateK: 3 };
 const OCC_PRIOR = 0.6;
 const DEFAULT_PRICE = 80;
@@ -310,11 +312,20 @@ leads[isChristmas(c) ? 12 : monthOf(c)].push(L);
 };
 ctx.requests.forEach((q) => { if (q.kind === 'request') addLead(q.checkin, q.receivedAt); });
 live.forEach((x) => { if (!fromRequest.has(x.id)) addLead(x.checkin, x.bookedOn); });
+const priorOf = (m) => (m === 12 ? Number(s.christmasLead) || 300 : Number((s.leadMedian || [])[m]) || 21) * (ctx.scale.lead || 1);
+const logsOf = (xs) => xs.map((L) => Math.log(L * (ctx.scale.lead || 1) + 0.5));
+// One shared shift: how much sooner (or later) than the Settings guide your bookings arrive, across every month at once
+// (Christmas has its own, very different, guide and stays out of it). Each month alone has too few bookings to correct the
+// guide's level, but together they can; the shift is pulled towards 0 by LEAD_SHIFT_K pseudo-bookings, and each month's
+// own bookings still count on top of the shifted guide. Edit the guide to match your real speed and the shift shrinks to 0.
+let shiftSum = 0; let shiftN = 0;
+for (let m = 0; m < 12; m++) { const g = Math.log(priorOf(m) + 0.5); logsOf(leads[m]).forEach((v) => { shiftSum += v - g; shiftN += 1; }); }
+const leadShift = Math.min(LEAD_SHIFT_MAX, Math.max(-LEAD_SHIFT_MAX, shiftSum / (shiftN + LEAD_SHIFT_K)));
 const lead = leads.map((xs, m) => {
-const prior = m === 12 ? Number(s.christmasLead) || 300 : Number((s.leadMedian || [])[m]) || 21;
-const scaled = prior * (ctx.scale.lead || 1);
-const logs = xs.map((L) => Math.log(L * (ctx.scale.lead || 1) + 0.5));
-const mu = (LEAD_PRIOR_K * Math.log(scaled + 0.5) + logs.reduce((a, v) => a + v, 0)) / (LEAD_PRIOR_K + xs.length);
+const scaled = priorOf(m);
+const logs = logsOf(xs);
+const shift = m === 12 ? 0 : leadShift;
+const mu = (LEAD_PRIOR_K * (Math.log(scaled + 0.5) + shift) + logs.reduce((a, v) => a + v, 0)) / (LEAD_PRIOR_K + xs.length);
 return { mu, median: Math.max(0, Math.exp(mu) - 0.5), n: xs.length, prior: scaled, logs };
 });
 // One spread for every month (there are too few bookings in each to fit its own): the pooled variance of the
@@ -390,7 +401,7 @@ overall, months: all.length, skipped, sums,
 });
 blendSiblingShape(occ);
 
-ctx.params = { prices, losCdf, losMean, losN, dowW, dowN, lead, leadSigma, cancelRate, lateShare, nAll, nCancel, occ, lambda: new Map() };
+ctx.params = { prices, losCdf, losMean, losN, dowW, dowN, lead, leadShift, leadSigma, cancelRate, lateShare, nAll, nCancel, occ, lambda: new Map() };
 return ctx.params;
 }
 
@@ -861,7 +872,7 @@ return [
 { id: 'discounts', label: 'Discounts the rate is worked back through', value: discountText(ctx.s), source: price.n ? `undone on ${price.n} stays: on average ${(price.avgShortNotice * 100).toFixed(1)}% short notice, ${(price.avgLength * 100).toFixed(1)}% length` : 'your setting' },
 { id: 'cleanfee', label: 'Cleaning fee guests pay (income per booking)', value: fmtMoney(price.clean), source: ctx.rooms[ri].cleaningIncome != null && ctx.rooms[ri].cleaningIncome !== '' ? 'your setting' : price.n ? 'median of your earnings export' : 'none known' },
 { id: 'occupancy', label: `Occupancy expected for this room in ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m]}`, value: occVal == null ? `${Math.round(OCC_PRIOR * 100)}%` : `${Math.round(occVal * 100)}%`, source: `${o.byMonth[m] != null && o.byMonthN[m] === 0 ? `no stays of its own that month: its ${o.months}-month average` : o.byMonth[m] != null ? `your stays: ${o.byMonthN[m]} earlier ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m]}${o.byMonthN[m] === 1 ? '' : 's'} (resting on ${o.byMonthBookings[m]} booking${o.byMonthBookings[m] === 1 ? '' : 's'}, so counting as ${o.byMonthW[m].toFixed(2)} of a full month), blended with all ${o.months} months on offer${o.skipped ? `; ${o.skipped} left out as not on offer` : ''}` : o.overall != null ? `your stays, ${o.months} months on offer${o.skipped ? `; ${o.skipped} left out as not on offer` : ''}` : 'assumption'}${sibNote}`, editable: 'demand' },
-{ id: 'lead', label: 'Median days ahead bookings arrive', value: `${Math.round(lead.median)} days`, source: lead.n ? `your guide blended with ${lead.n} of your bookings` : 'your guide (Settings)', editable: 'lead' },
+{ id: 'lead', label: 'Median days ahead bookings arrive', value: `${Math.round(lead.median)} days`, source: `${lead.n ? `your guide blended with ${lead.n} of your bookings` : 'your guide (Settings)'}${Math.abs(params.leadShift || 0) > 0.05 && ci != null && !isChristmas(ci) ? `, scaled x${Math.exp(params.leadShift).toFixed(2)} to match how soon your bookings really arrive` : ''}`, editable: 'lead' },
 { id: 'leadspread', label: 'Share of bookings made in the last 3 / 7 days', value: `${Math.round(normCdf((Math.log(3.5) - lead.mu) / params.leadSigma) * 100)}% / ${Math.round(normCdf((Math.log(7.5) - lead.mu) / params.leadSigma) * 100)}%`, source: `a lead-time spread of ${params.leadSigma.toFixed(2)}, fitted to your bookings and requests (past check-ins) and blended with the Airbnb-wide shape` },
 { id: 'los', label: 'Average stay length', value: `${params.losMean.toFixed(1)} nights`, source: params.losN ? `your requests and stays (${Math.round(params.losN)}) blended with an assumption` : 'assumption' },
 { id: 'dow', label: 'Busiest check-in day', value: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][params.dowW.indexOf(Math.max(...params.dowW))], source: params.dowN ? `your requests and stays (${Math.round(params.dowN)})` : 'assumption' },
