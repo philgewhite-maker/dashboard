@@ -181,6 +181,9 @@ switchOffersCheckedAt: '', // ISO date of the last bank-switch-offers scan -- dr
 // something to store a setting for, so only rate/allowance are kept
 // here. {"lewis": {ratePct: 20, allowance: 1000}, ...}.
 lettingTaxByOwner: {},
+// Airbnb Superhost inputs the feeds don't carry, per letting owner (same key as above): {holds, responseRate, hostCancellations}.
+// Guest ratings themselves live on the stay (airbnbReservations.reviewRating) -- see js/features/superhost.js.
+superhostByOwner: {},
 // The two monthly targets drawn as reference lines on the letting-income
 // chart (js/features/letting.js) -- per owner-group (keyed by letting.js's
 // own group key: '__mine__', or an ownerKey for Lewis/Zara), and additive
@@ -1680,6 +1683,9 @@ payoutCheck: false,
 // and skips anything it has already written.
 income: null,
 accruedAt: '',
+// The overall star rating the guest left (1-5), for the Superhost assessment (js/features/superhost.js). Absent means not
+// entered yet and counts as 5; 0 means the guest left no review.
+reviewRating: null,
 // When this stay was booked: the date of its confirmation email (set by
 // airbnb.js's guest-name sync), NOT when it was paid. Booking-pace chart input.
 confirmedOn: '',

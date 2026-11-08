@@ -4622,3 +4622,30 @@ background:var(--slate-bg);color:var(--slate);
 .dead-void-row{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:baseline;font-size:12px;border-left:3px solid var(--red);padding:2px 0 2px 8px;}
 .dead-voids[hidden]{display:none;}
 .occ-key-blocked{display:inline-block;width:16px;height:8px;border-radius:3px;border:1px dashed var(--muted);background:repeating-linear-gradient(45deg,var(--muted) 0 1.5px,transparent 1.5px 4px);opacity:.7;flex:none;}
+
+/* Superhost assessment (js/features/superhost.js): a chip beside the owner's name and a panel at the top of their section. */
+.sh-chip{display:inline-block;font-size:11px;font-weight:600;padding:1px 8px;border-radius:20px;background:var(--slate-bg);color:var(--slate);white-space:normal;}
+.sh-chip.ok{background:var(--sage-bg);color:var(--sage);}
+.sh-chip.warn{background:var(--amber-bg);color:var(--amber);}
+.sh-chip.bad{background:var(--red-bg);color:var(--red);}
+.sh-panel{margin:6px 0 10px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;}
+.sh-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px;}
+.sh-line{margin:4px 0 6px;font-size:13px;}
+.sh-scroll{overflow-x:auto;}
+.sh-table{border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums;width:100%;}
+.sh-table th{text-align:left;font-weight:500;color:var(--muted);padding:2px 10px 2px 0;white-space:nowrap;}
+.sh-table td{padding:3px 10px 3px 0;border-top:1px solid var(--line);white-space:nowrap;}
+.sh-dim{color:var(--muted);font-size:11px;}
+.sh-pass{color:var(--sage);}
+.sh-fail{color:var(--red);}
+.sh-set{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:flex-end;margin:4px 0;}
+.sh-set label{display:flex;flex-direction:column;gap:2px;font-size:11px;color:var(--muted);}
+.sh-set label:first-child{flex-direction:row;align-items:center;gap:6px;}
+.sh-set .settings-input{flex:0 0 auto;width:90px;}
+.sh-reviews-toggle{cursor:pointer;font-size:12px;color:var(--muted);margin-top:4px;}
+.sh-reviews{margin-top:4px;}
+.sh-review{display:flex;flex-wrap:wrap;align-items:center;gap:2px 10px;padding:3px 0;border-top:1px solid var(--line);font-size:12px;}
+.sh-rev-date{font-variant-numeric:tabular-nums;color:var(--muted);}
+.sh-rev-guest{font-weight:500;}
+.sh-review .settings-input{flex:0 0 auto;width:auto;margin-left:auto;}
+.sh-rev-guest[data-sh-goto]{cursor:pointer;text-decoration:underline dotted;}

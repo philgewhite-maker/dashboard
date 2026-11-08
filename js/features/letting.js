@@ -19,6 +19,7 @@ import { escapeHtml, uid, logoBadgeHtml, bindLogoFallbacks } from '../utils.js';
 import { matchBrandLogo } from '../brandLogos.js';
 import { splitLedgerNote } from '../migrations.js';
 import { projectionForMonth, statusText } from './bookingprojection.js';
+import { assessmentFor, superhostChipHtml, superhostPanelHtml, bindSuperhost, ratingOptionsHtml } from './superhost.js';
 
 // Per-device view state, not data: which people's sections are folded away
 // (remembered across visits) and which ledger rows have their detail line
@@ -708,6 +709,8 @@ const bal = balanceFor(key);
 const mine = isMyOwnKey(key);
 const taxYears = taxYearSummaryFor(key);
 const collapsed = collapsedOwners.has(key);
+// Superhost assessment, for an owner with an Airbnb listing of their own.
+const superhost = (data.airbnbListings || []).some((l) => ownerKeyFor(l) === key) ? assessmentFor(key, ownerKeyFor, mine) : null;
 return `<div class="letting-owner">
 <div class="letting-head" data-letting-owner-toggle="${escapeHtml(key)}" title="${collapsed ? 'Show' : 'Hide'} this person's ledger" style="cursor:pointer;">
 <span class="letting-chevron">${collapsed ? '&#9656;' : '&#9662;'}</span>
@@ -722,8 +725,10 @@ ${mine
 <span class="settings-note" style="margin:0;">${bal > 0 ? 'owed to you' : bal < 0 ? 'in credit' : 'settled'}</span>`}
 ${grossFor(key) ? `<span class="settings-note" style="margin:${mine ? '0' : '0 0 0 auto'};">${escapeHtml(money(grossFor(key)))} taken</span>` : ''}
 ${nightRateSummaryHtml(key)}
+${superhost ? superhostChipHtml(superhost, key) : ''}
 </div>
 <div class="letting-owner-body"${collapsed ? ' hidden' : ''}>
+${superhost ? superhostPanelHtml(superhost, key) : ''}
 ${mine ? '' : `<div class="sync-row" style="margin:4px 0 8px;flex-wrap:wrap;align-items:center;">
 <input type="month" class="settings-input" data-report-period="${escapeHtml(key)}" style="max-width:130px;" title="The month this report covers -- defaults to last month.">
 <button class="sync-btn sm inline" type="button" data-report-generate="${escapeHtml(key)}">&#128196; Generate report</button>
@@ -747,7 +752,10 @@ const showStayDates = !!(stayRec && stayRec.checkin && stayRec.checkout);
 const showTotal = e.kind === 'earned';
 const showAmount = e.kind === 'payment' || e.kind === 'adjustment';
 const showNote = manual && (e.kind === 'earned' || e.kind === 'cancellation' || e.kind === 'payment' || e.kind === 'adjustment');
-const hasDetail = showStayDates || showStartDate || showNights || showListing || showPlatform || showStay || showTotal || showAmount || showNote;
+const showRating = (e.kind === 'accrual' || e.kind === 'earned') && e.platform !== 'other';
+const ratingTarget = stayRec ? `res:${stayRec.id}` : `ledger:${e.id}`;
+const ratingValue = stayRec ? stayRec.reviewRating : e.reviewRating;
+const hasDetail = showRating || showStayDates || showStartDate || showNights || showListing || showPlatform || showStay || showTotal || showAmount || showNote;
 const open = expandedLedgerRows.has(e.id);
 const isIncomeKind = e.kind === 'accrual' || e.kind === 'earned' || e.kind === 'cancellation';
 // The booking's gross total, not "X% of" it -- a share that can be
@@ -772,7 +780,7 @@ const logoCell = isIncomeKind || e.kind === 'refund'
 : '';
 const kindLabel = e.kind === 'accrual' ? 'income' : (e.kind || 'entry');
 const bits = [parts.guest && parts.description ? `<span class="letting-rec-desc">${escapeHtml(parts.description)}</span>` : '', roomLabel ? `<span>${escapeHtml(roomLabel)}</span>` : '', e.nights ? `<span>${escapeHtml(`${e.nights} night${e.nights === 1 ? '' : 's'}`)}</span>` : '', grossHtml, nightRateBit].filter(Boolean);
-return `<div class="letting-rec">
+return `<div class="letting-rec" data-letting-rec="${escapeHtml(e.id)}">
 <div class="letting-rec-top">
 <span class="letting-rec-logo">${logoCell}</span>
 <span class="letting-rec-date">${(e.autoCap || e.autoInterest) ? `<span class="settings-note" style="margin:0;" title="Worked out automatically from the month's other entries">${escapeHtml(e.date || '')}</span>` : `<input type="date" class="settings-input" data-letting-date="${escapeHtml(e.id)}" value="${escapeHtml(e.date || '')}" title="The payout/accrual date -- used for statements and tax-year grouping only. Edit it to the real Airbnb payout date if that differs from checkout; it has no effect on occupancy or the nightly rate, which both come from check-in/nights instead.">`}</span>
@@ -797,6 +805,7 @@ ${showTotal ? `<label>Booking total £<input type="number" min="0" step="0.01" c
 ${showAmount ? `<label>Amount £<input type="number" step="0.01" class="settings-input" data-letting-amount="${escapeHtml(e.id)}" value="${e.amount}" title="The figure itself, signed: minus means ${escapeHtml(ownerNameFor(e.ownerKey))} paid you, plus means they owe you more."></label>` : ''}
 ${showNote && (e.kind === 'earned' || e.kind === 'cancellation') ? `<label>Guest<input type="text" class="settings-input" data-letting-guest="${escapeHtml(e.id)}" value="${escapeHtml(parts.guest || '')}" placeholder="Guest name" style="min-width:140px;" title="Who stayed: the name shown on the row."></label>` : ''}
 ${showNote ? `<label>Description<input type="text" class="settings-input" data-letting-description="${escapeHtml(e.id)}" value="${escapeHtml(e.kind === 'earned' || e.kind === 'cancellation' ? (parts.description || '') : (parts.description || parts.guest || ''))}" placeholder="What it was for" style="min-width:180px;" title="What it was for, if more than the guest's name."></label>` : ''}
+${showRating ? `<label>Guest rating<select class="settings-input" data-sh-rate="${escapeHtml(ratingTarget)}" title="The overall rating this guest gave -- feeds the Superhost assessment at the top of this person's section. Default counts as 5 stars; No review leaves the stay out of the average.">${ratingOptionsHtml(ratingValue)}</select></label>` : ''}
 ${showPlatform ? `<label>Platform<select data-letting-platform="${escapeHtml(e.id)}" title="Which platform this actually happened through -- the chart above draws Other as a striped fill instead of solid.">
 <option value="airbnb"${e.platform !== 'other' ? ' selected' : ''}>Airbnb</option>
 <option value="other"${e.platform === 'other' ? ' selected' : ''}>Other</option>
@@ -810,6 +819,7 @@ ${taxYearSummaryHtml(key, taxYears)}
 </div>`;
 }).join('');
 bindLogoFallbacks(el);
+bindSuperhost(el, renderLetting);
 el.querySelectorAll('[data-letting-owner-toggle]').forEach((head) => {
 head.addEventListener('click', () => {
 const key = head.dataset.lettingOwnerToggle;
