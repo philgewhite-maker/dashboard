@@ -1139,7 +1139,7 @@ return p.finish();
 // stays (when the room has a longer minimum), and a discount on the void's nights (the gap discount the
 // model already has, widened to cover this void), alone or together. Net = expected income less what
 // cleaning the bookings costs. `runs` is per option; the same calibration is reused throughout.
-function optimiseVoid(ctx, v, { runs = 600, params = null } = {}) {
+function optimiseVoid(ctx, v, { runs = 1000, params = null } = {}) {
 const room = ctx.rooms.find((r) => r.key === v.roomKey);
 if (!room) return { error: 'That room is no longer set up.' };
 const calib = params || calibrate(ctx);
