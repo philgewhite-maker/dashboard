@@ -11,11 +11,11 @@
 // Stays come from four places (see collectStays), because a booking leaves
 // the live list the moment it ends or is cancelled.
 import { data, queueSave } from '../state.js';
-import { escapeHtml, dateStrAdd, todayStr } from '../utils.js';
+import { escapeHtml, dateStrAdd, todayStr, uid } from '../utils.js';
 import { listingColorVar, resolveColor, addMonths, monthLabel, ownerKeyFor, ownerNameFor, lettingChartMonthTotal, lettingIncomeItems, nightRateRooms, money0 } from './letting.js';
 import { isUnconfirmedStay, roomBlocks } from '../icsparse.js';
 import { activeListingId } from '../roomowner.js';
-import { latestProjection, projectionForMonth, projectedNights, projectedByDate, runProjection, statusText, isDeadVoid, deadVoidsOf, showProjection as showProjectionOn } from './bookingprojection.js';
+import { latestProjection, projectionForMonth, projectedNights, projectedByDate, runProjection, refreshProjection, statusText, isDeadVoid, deadVoidsOf, showProjection as showProjectionOn } from './bookingprojection.js';
 
 const DAY_MS = 86400000;
 const MIN_COVERAGE = 0.8; // share of a month's nights that must have a known income/dates before it is compared
@@ -359,7 +359,7 @@ return { total, known, share: total ? known / total : 0 };
 
 // ---- State & markup ----------------------------------------------------------
 
-const state = { ym: '', metric: 'bookings', compare: 'prev', channel: '', hoverStay: null, hoverDay: null };
+const state = { voidPlansOpen: false, ym: '', metric: 'bookings', compare: 'prev', channel: '', hoverStay: null, hoverDay: null };
 const PLOTS = { timeline: null, pace: null };
 const METRIC_LABEL = { bookings: 'Nights booked', nights: 'Nights occupied', revenue: 'Revenue earned', avgnight: 'Average revenue per night (30 days)' };
 const METRIC_UNIT = { bookings: 'nights', nights: 'nights', revenue: '£', avgnight: '£' };
@@ -390,6 +390,7 @@ return `<div class="letting-chart-wrap" id="letting-occupancy-section">
 <span class="settings-note" id="occ-project-status" style="margin:0;"></span>
 </div>
 <div class="dead-voids" id="occ-dead-voids" hidden></div>
+<div class="dead-voids" id="occ-void-plans" hidden></div>
 <details class="settings-subgroup" id="occ-income-trace" style="margin:0 0 6px;"></details>
 <div class="letting-chart-legend" id="occ-legend" style="flex-direction:row;flex-wrap:wrap;"></div>
 <div class="chart-canvas-wrap occ-wrap" style="position:relative;"><canvas id="occ-timeline-canvas"></canvas><div class="occ-tip" id="occ-tip" hidden></div></div>
@@ -647,6 +648,8 @@ const v = hit.void;
 lines.push(`<strong>Projected: ${v.nights} free night${v.nights === 1 ? '' : 's'}, ${fmtD(v.from)} to ${fmtD(v.to)}</strong>`);
 lines.push(`${escapeHtml(hit.room.label || 'Room')}${v.open ? ' (runs past the projection window)' : ''}`);
 lines.push(`Expected £${Math.round(v.expected).toLocaleString('en-GB')} (1 in 10 below £${Math.round(v.p10).toLocaleString('en-GB')}, above £${Math.round(v.p90).toLocaleString('en-GB')}), about ${v.expectedNights.toFixed(1)} of ${v.nights} nights booked`);
+const myPlan = planFor(v);
+if (myPlan) lines.push(`<strong>Your plan:</strong> ${escapeHtml(planText(myPlan))}, included above`);
 if (isDeadVoid(v)) {
 const dv = (p && p.deadVoids || []).find((x) => x.id === v.id);
 lines.push(`<strong style="color:var(--red);">Dead void</strong>: expected to fill under a night. ${escapeHtml(dv ? dv.text : "Run the projection again for advice.")}`);
@@ -1135,11 +1138,71 @@ renderIncomeTrace(stays);
 renderLegend(stays);
 refreshProjectionStatus();
 renderDeadVoids();
+renderVoidPlans();
 drawTimeline(stays);
 drawPace(stays);
 }
 
 // ---- Projection button -----------------------------------------------------------------------
+
+// ---- What you set on Airbnb for a void ---------------------------------------------------------
+
+// A plan is a minimum stay and/or a price cut you chose for a stretch of nights (data.prefs.bookingEvaluator.voidPlans).
+// Saving one re-runs the projection, which then plays those nights that way.
+function plansOf() { const s = data.prefs.bookingEvaluator || {}; return Array.isArray(s.voidPlans) ? s.voidPlans : []; }
+function planFor(v) { return plansOf().find((p) => p.roomKey === v.roomKey && p.from < v.to && p.to > v.from) || null; }
+function planText(p) {
+const bits = [];
+if (p.discountPct > 0) bits.push(`${p.discountPct}% off`);
+if (p.minNights != null) bits.push(`${p.minNights}-night minimum`);
+return `${bits.join(', ')} (set ${p.madeOn || 'earlier'})`;
+}
+function voidPlanFormHtml(v) {
+const p = planFor(v);
+const mins = ['', 1, 2, 3, 4, 5, 6, 7].map((m) => `<option value="${m}"${(p && String(p.minNights ?? '') === String(m)) || (!p && m === '') ? ' selected' : ''}>${m === '' ? 'as set' : m}</option>`).join('');
+return `<div class="vp-form" data-vp-row data-vp-room="${escapeHtml(v.roomKey)}" data-vp-from="${escapeHtml(v.from)}" data-vp-to="${escapeHtml(v.to)}">
+<span class="settings-note" style="margin:0;flex:1 1 100%;">${p ? `<strong>Your plan:</strong> ${escapeHtml(planText(p))}. The figures above already include it.` : 'What did you set on Airbnb for these nights? Record it and the projection re-runs with it.'}</span>
+<label>Min nights<select class="settings-input" data-vp-min>${mins}</select></label>
+<label>Price cut %<input type="number" min="0" max="90" step="5" class="settings-input" data-vp-pct value="${p && p.discountPct ? p.discountPct : ''}" placeholder="0"></label>
+<button class="sync-btn sm inline" type="button" data-vp-save>Save and re-run</button>${p ? '<button class="sync-btn sm inline" type="button" data-vp-clear>Remove plan</button>' : ''}
+<span class="settings-note" data-vp-status style="margin:0;"></span>
+</div>`;
+}
+
+// Every other void still ahead (the dead ones are listed above, with the same form).
+function renderVoidPlans() {
+const el = document.getElementById('occ-void-plans');
+if (!el) return;
+const p = latestProjection();
+const today = todayStr();
+const list = p && showProjectionOn() ? (p.voids || []).filter((v) => v.to > today && v.nights >= 1 && !isDeadVoid(v)) : [];
+if (!list.length) { el.hidden = true; el.innerHTML = ''; return; }
+const short = (d) => new Date(`${d}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+el.innerHTML = `<details class="settings-subgroup"${state.voidPlansOpen ? ' open' : ''}><summary>Voids ahead (${list.length}): record a price or minimum-stay change</summary>${list.map((v) => `<div class="vp-row"><strong>${escapeHtml(v.roomLabel || 'Room')} ${short(v.from)}&ndash;${short(v.to)}</strong> <span class="settings-note" style="margin:0;">${v.nights} night${v.nights === 1 ? '' : 's'}, about ${v.expectedNights.toFixed(1)} expected, &pound;${Math.round(v.expected).toLocaleString('en-GB')}</span>${voidPlanFormHtml(v)}</div>`).join('')}</details>`;
+el.hidden = false;
+const d = el.querySelector('details');
+if (d) d.addEventListener('toggle', () => { state.voidPlansOpen = d.open; });
+}
+
+async function onVoidPlanClick(e) {
+const save = e.target.closest('[data-vp-save]');
+const clear = e.target.closest('[data-vp-clear]');
+if (!save && !clear) return;
+const row = e.target.closest('[data-vp-row]');
+if (!row) return;
+const { vpRoom: roomKey, vpFrom: from, vpTo: to } = row.dataset;
+const min = row.querySelector('[data-vp-min]').value;
+const pct = Math.max(0, Math.min(90, Number(row.querySelector('[data-vp-pct]').value) || 0));
+const s = data.prefs.bookingEvaluator || (data.prefs.bookingEvaluator = {});
+// A fresh array each time, never edited in place (the defaults' own array is shared).
+const keep = plansOf().filter((p) => !(p.roomKey === roomKey && p.from < to && p.to > from));
+if (save && (min !== '' || pct > 0)) keep.push({ id: uid(), roomKey, from, to, minNights: min === '' ? null : Number(min), discountPct: pct, madeOn: todayStr() });
+s.voidPlans = keep;
+queueSave();
+const status = row.querySelector('[data-vp-status]');
+if (status) status.textContent = 'Re-running the projection…';
+await refreshProjection();
+}
 
 // The dead voids of the latest projection, each with what to change and the task for it.
 async function renderDeadVoids() {
@@ -1154,7 +1217,7 @@ const short = (d) => new Date(`${d}T00:00:00`).toLocaleDateString('en-GB', { day
 el.innerHTML = list.map((v) => {
 const dv = (p.deadVoids || []).find((x) => x.id === v.id);
 const task = dv && dv.taskId ? (data.tasks || []).find((t) => t.id === dv.taskId) : null;
-return `<div class="dead-void-row"><strong>${escapeHtml(v.roomLabel || 'Room')} ${short(v.from)}&ndash;${short(v.to)}</strong><span class="settings-note" style="margin:0;">dead void: ${v.expectedNights.toFixed(1)} of ${v.nights} night${v.nights === 1 ? '' : 's'} expected. ${escapeHtml(dv ? dv.text : 'Run the projection again for advice.')}</span>${task ? taskChipHtml(task) : ''}</div>`;
+return `<div class="dead-void-row"><strong>${escapeHtml(v.roomLabel || 'Room')} ${short(v.from)}&ndash;${short(v.to)}</strong><span class="settings-note" style="margin:0;">dead void: ${v.expectedNights.toFixed(1)} of ${v.nights} night${v.nights === 1 ? '' : 's'} expected. ${escapeHtml(dv ? dv.text : 'Run the projection again for advice.')}</span>${task ? taskChipHtml(task) : ''}${voidPlanFormHtml(v)}</div>`;
 }).join('');
 el.hidden = false;
 }
@@ -1198,6 +1261,8 @@ document.getElementById('pace-channel').addEventListener('change', (e) => { stat
 document.getElementById('occ-project-show').checked = data.prefs.showProjection !== false;
 document.getElementById('occ-project-show').addEventListener('change', (e) => { data.prefs.showProjection = e.target.checked; queueSave(); renderLettingOccupancy(); import('./letting.js').then((m) => m.renderLetting()).catch(() => {}); });
 document.getElementById('occ-project-btn').addEventListener('click', runProjectionFromUi);
+document.getElementById('occ-dead-voids').addEventListener('click', onVoidPlanClick);
+document.getElementById('occ-void-plans').addEventListener('click', onVoidPlanClick);
 refreshProjectionStatus();
 document.getElementById('occ-undated').addEventListener('change', (e) => {
 const input = e.target.closest('[data-occ-booked]');

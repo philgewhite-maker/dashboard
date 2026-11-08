@@ -79,26 +79,27 @@ export function assessStays(stays, assessOn, today, { responseRate = 100, hostCa
   };
 }
 
-// Stays per 30 days over the last 90, and whether anything new can still arrive (a stay lately or one booked ahead).
-export function paceOf(stays, today) {
-  const recent = stays.filter((s) => s.checkout <= today && s.checkout > dateStrAdd(today, -90)).length;
-  const ahead = stays.filter((s) => s.checkout > today).length;
-  return { perMonth: recent / 3, recent, ahead, active: recent > 0 || ahead > 0 };
+// Stays still ahead (booked, not yet completed).
+export function aheadOf(stays, today) {
+  return stays.filter((s) => s.checkout > today).length;
 }
 
 // The whole picture for one owner: where they stand today, each coming assessment on booked stays alone and with
-// more bookings at the recent pace, and the headline to show.
-export function assessOwner(stays, settings, today) {
+// the bookings the booking model projects for their rooms, and the headline to show. `proj`: {ready, rooms,
+// extraBefore(date) -> {stays, nights}} from the booking model (see ensureSuperhostProjection), or null.
+export function assessOwner(stays, settings, today, proj = null) {
   const opts = { responseRate: settings.responseRate, hostCancellations: settings.hostCancellations };
-  const pace = paceOf(stays, today);
+  const projected = !!proj && proj.ready && !proj.error;
+  const ahead = aheadOf(stays, today);
+  const active = ahead > 0 || (projected && proj.rooms > 0);
   const lastBooked = stays.reduce((m, s) => (s.checkout > m ? s.checkout : m), today);
   const now = assessStays(stays, dateStrAdd(today, 1), today, opts);
   const rows = assessmentDates(today).map((date) => {
     const conf = assessStays(stays, date, today, opts);
-    const gapDays = Math.max(0, days(lastBooked > today ? lastBooked : today, dateStrAdd(date, -1)));
-    const extra = pace.active ? (pace.perMonth / 30) * gapDays : 0;
+    const ex = projected ? proj.extraBefore(date) : { stays: 0, nights: 0 };
+    const extra = ex.stays;
     const projCount = conf.count + extra;
-    const projNights = conf.nights + extra * conf.avgNights;
+    const projNights = conf.nights + ex.nights;
     const projStaysOk = projCount >= SUPERHOST.stays - 0.5 || (projCount >= SUPERHOST.altStays && projNights >= SUPERHOST.altNights);
     const projOk = projStaysOk && conf.ratingOk && conf.responseOk && conf.cancelOk;
     return { date, conf, extra, projCount, projOk };
@@ -118,6 +119,7 @@ export function assessOwner(stays, settings, today) {
     return r;
   };
   const firstFail = (pick) => rows.findIndex((r) => !pick(r));
+  const noNew = !active ? ' No room is let on their listing, so the booking model projects no new bookings.' : '';
   let state; let headline; let detail = '';
   const holds = !!settings.holds;
   const failConf = firstFail((r) => r.conf.ok);
@@ -127,24 +129,85 @@ export function assessOwner(stays, settings, today) {
     else {
       const f = rows[failConf];
       const why = reasons(f.conf, fmtDate(dateStrAdd(f.date, -1)));
-      const covered = f.projOk;
+      const covered = projected && f.projOk;
       state = covered ? 'ok' : (failConf <= 1 ? 'bad' : 'warn');
       headline = holds ? `fine at ${fmtDate(q0.date)}, at risk from ${fmtDate(f.date)}` : `qualifies at ${fmtDate(q0.date)}, but not at ${fmtDate(f.date)} on booked stays`;
-      detail = `On booked stays alone, ${fmtDate(f.date)}: ${why.join('; ')}.${covered ? ' Your recent booking pace would cover it.' : (pace.active ? '' : ' No active listing is bringing in new bookings.')}`;
+      detail = `On booked stays alone, ${fmtDate(f.date)}: ${why.join('; ')}.${covered ? ' The booking model projects enough new bookings to cover it.' : noNew}`;
     }
   } else {
     const why = reasons(q0.conf, lastDay);
-    state = q0.projOk ? 'warn' : 'bad';
+    state = projected && q0.projOk ? 'warn' : 'bad';
     headline = holds ? `at risk at ${fmtDate(q0.date)}, ${why[0]}` : why[0];
     detail = why.slice(1).length ? `Also: ${why.slice(1).join('; ')}.` : '';
-    if (pace.perMonth > 0 && !q0.conf.staysOk) detail = `${detail} At the recent pace (${pace.perMonth.toFixed(1)} stays a month) about ${q0.extra.toFixed(1)} more would complete by then.`.trim();
-    if (!pace.active) detail = `${detail} No active listing is bringing in new bookings.`.trim();
-    if (!holds && failProj >= 0 && failProj < rows.length) {
+    if (!projected) detail = `${detail} Still projecting new bookings.`.trim();
+    else if (q0.extra >= 0.05 && !q0.conf.staysOk) detail = `${detail} The booking model projects about ${q0.extra.toFixed(1)} more stays completing by then.`.trim();
+    detail = `${detail}${noNew}`.trim();
+    if (projected && !holds && failProj >= 0) {
       const hit = rows.find((r) => r.projOk);
-      detail = `${detail} ${hit ? `At the recent pace the first assessment you'd pass is ${fmtDate(hit.date)}.` : `At the recent pace you wouldn't pass within ${rows.length} assessments.`}`.trim();
+      detail = `${detail} ${hit ? `On the projected bookings the first assessment you'd pass is ${fmtDate(hit.date)}.` : `Even with the projected bookings you wouldn't pass within ${rows.length} assessments.`}`.trim();
     }
   }
-  return { state, headline, detail, now, rows, pace, holds, lastBooked };
+  return { state, headline, detail, now, rows, proj: { ready: projected, rooms: projected ? proj.rooms : 0, ahead, active }, holds, lastBooked };
+}
+
+// ---- the booking model's projection of new stays ---------------------------------------------
+
+// One projection of every room from today to the last assessment shown, run in slices so the page stays responsive and
+// cached for half an hour (invalidated when the projection is re-run). It needs no saved projection: the Letting
+// occupancy projection only looks two months ahead and an assessment looks up to fourteen.
+const projState = { cache: null, inflight: null };
+const yieldToPage = () => (typeof document !== 'undefined' && document.hidden ? Promise.resolve() : new Promise((r) => setTimeout(r, 0)));
+
+async function computeProjection(ownerKeyFor) {
+  const today = todayStr();
+  const to = assessmentDates(today)[QUARTERS_AHEAD - 1];
+  const model = await import('./bookingmodel.js');
+  const ctx = model.buildContext();
+  const p = model.makeProjection(ctx, { from: today, to, runs: 250 });
+  if (p.error) return { today, at: Date.now(), error: p.error, owners: {} };
+  while (!p.step(25)) await yieldToPage();
+  const res = p.finish();
+  const owners = {};
+  res.rooms.forEach((room) => {
+    const listing = (data.airbnbListings || []).find((l) => l.id === room.listingId);
+    const key = listing ? ownerKeyFor(listing) : '';
+    const se = res.stayEnds && res.stayEnds[room.key];
+    if (!key || !se) return;
+    const o = owners[key] || (owners[key] = { rooms: 0, ends: new Array(se.ends.length).fill(0), nights: new Array(se.ends.length).fill(0) });
+    o.rooms += 1;
+    se.ends.forEach((v, i) => { o.ends[i] += v; o.nights[i] += se.nights[i]; });
+  });
+  return { today, at: Date.now(), from: res.from, owners, error: '' };
+}
+
+export function ensureSuperhostProjection(ownerKeyFor, rerender) {
+  const c = projState.cache;
+  if (c && c.today === todayStr() && Date.now() - c.at < 30 * 60000) return;
+  if (projState.inflight) return;
+  projState.inflight = computeProjection(ownerKeyFor)
+    .catch((err) => ({ today: todayStr(), at: Date.now(), error: String((err && err.message) || err), owners: {} }))
+    .then((r) => { projState.cache = r; })
+    .finally(() => { projState.inflight = null; if (rerender) rerender(); });
+}
+
+export function invalidateSuperhostProjection() { projState.cache = null; }
+
+function projFor(ownerKey) {
+  const c = projState.cache;
+  if (!c || c.today !== todayStr()) return { ready: false, rooms: 0, extraBefore: () => ({ stays: 0, nights: 0 }) };
+  const o = c.owners[ownerKey];
+  return {
+    ready: true,
+    error: c.error,
+    rooms: o ? o.rooms : 0,
+    extraBefore: (date) => {
+      if (!o) return { stays: 0, nights: 0 };
+      const n = Math.min(o.ends.length, Math.max(0, days(c.from, date)));
+      let stays = 0; let nights = 0;
+      for (let i = 0; i < n; i++) { stays += o.ends[i]; nights += o.nights[i]; }
+      return { stays, nights };
+    },
+  };
 }
 
 // ---- what counts as a stay ----------------------------------------------------------------
@@ -188,10 +251,12 @@ export function settingsFor(ownerKey, isMine) {
   };
 }
 
-export function assessmentFor(ownerKey, ownerKeyFor, isMine) {
+// `rerender` redraws Letting income once the booking model's projection of new stays has been worked out.
+export function assessmentFor(ownerKey, ownerKeyFor, isMine, rerender) {
+  ensureSuperhostProjection(ownerKeyFor, rerender);
   const stays = collectStays(ownerKey, ownerKeyFor);
   const settings = settingsFor(ownerKey, isMine);
-  return { stays, settings, ...assessOwner(stays, settings, todayStr()) };
+  return { stays, settings, ...assessOwner(stays, settings, todayStr(), projFor(ownerKey)) };
 }
 
 // ---- display ------------------------------------------------------------------------------
@@ -236,9 +301,13 @@ export function superhostPanelHtml(a, ownerKey) {
   const today = todayStr();
   const recent = a.stays.filter((x) => x.checkout <= today && x.checkout > dateStrAdd(today, -SUPERHOST.windowDays));
   const open = shOpen.has(ownerKey);
-  const paceLine = a.pace.active
-    ? `Recent pace: ${plural(a.pace.recent, 'stay')} in the last 90 days${a.pace.ahead ? `, ${a.pace.ahead} booked ahead` : ''}.`
-    : 'No stays lately and none booked ahead, so nothing new is coming in.';
+  const q0 = a.rows[0];
+  const byDay = fmtDate(dateStrAdd(q0.date, -1));
+  const paceLine = !a.proj.ready
+    ? 'Projecting new bookings from the booking model...'
+    : !a.proj.rooms
+      ? "No room is let on this owner's listings, so no new bookings are projected."
+      : `Booking model: about ${q0.extra.toFixed(1)} more stays by ${byDay}${a.proj.ahead ? ` (${a.proj.ahead} already booked ahead)` : ''}.`;
   return `<div class="sh-panel" data-sh-panel="${k}">
 <div class="sh-head"><span class="sh-chip ${escapeHtml(a.state)}">&#9733; ${escapeHtml(STATE_LABEL[a.state])}</span><b>Superhost assessment</b> <span class="settings-note" style="margin:0;">${escapeHtml(paceLine)}</span></div>
 <div class="sh-line"><b>${escapeHtml(cap(a.holds ? `Superhost ${a.headline}` : a.headline))}.</b> ${escapeHtml(a.detail)}</div>
@@ -246,7 +315,7 @@ export function superhostPanelHtml(a, ownerKey) {
 ${row('Today', a.now)}
 ${a.rows.map((r) => row(escapeHtml(fmtDate(r.date)), r.conf, r.extra >= 0.5 ? r.extra.toFixed(0) : '')).join('')}
 </tbody></table></div>
-<div class="settings-note" style="margin:2px 0 6px;">Stays are those finishing in the 365 days before each date, counting booked ones. A <span class="sh-dim">~n</span> is how many more the recent pace would add. Rating: stays with no rating yet are left out of the average.</div>
+<div class="settings-note" style="margin:2px 0 6px;">Stays are those finishing in the 365 days before each date, counting booked ones. A <span class="sh-dim">~n</span> is how many more stays the booking model projects. Rating: stays with no rating yet are left out of the average.</div>
 <div class="sh-set">
 <label><input type="checkbox" data-sh-set="holds" data-sh-key="${k}"${s.holds ? ' checked' : ''}> Currently a Superhost</label>
 <label>Response rate %<input type="number" min="0" max="100" step="1" class="settings-input" data-sh-set="responseRate" data-sh-key="${k}" value="${s.responseRate}" title="From the Airbnb app (Performance). Airbnb asks for 90% or more."></label>

@@ -141,6 +141,7 @@ await yieldToPage();
 }
 const result = proj.finish();
 if (result.error) return { error: result.error };
+delete result.stayEnds; // for the Superhost forecast only, not kept with the projection
 const record = blankBookingProjection({ ...result, madeAt: new Date().toISOString() });
 try { await assessDeadVoids(record, ctx, proj.params, model); } catch (err) { console.error('Dead void check failed:', err); }
 // One per day: a re-run replaces today's, and older ones past the retention are dropped.
@@ -148,6 +149,7 @@ const cutoff = dateStrAdd(todayStr(), -KEEP_DAYS);
 data.bookingProjections = (data.bookingProjections || []).filter((p) => p.today !== record.today && String(p.today) >= cutoff);
 data.bookingProjections.push(record);
 queueSave();
+import('./superhost.js').then((m) => m.invalidateSuperhostProjection()).catch(() => {}); // the Superhost forecast re-projects too
 import('./ticker.js').then((m) => m.renderTicker()).catch(() => {});
 return { record };
 }

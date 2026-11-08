@@ -710,7 +710,7 @@ const mine = isMyOwnKey(key);
 const taxYears = taxYearSummaryFor(key);
 const collapsed = collapsedOwners.has(key);
 // Superhost assessment, for an owner with an Airbnb listing of their own.
-const superhost = (data.airbnbListings || []).some((l) => ownerKeyFor(l) === key) ? assessmentFor(key, ownerKeyFor, mine) : null;
+const superhost = (data.airbnbListings || []).some((l) => ownerKeyFor(l) === key) ? assessmentFor(key, ownerKeyFor, mine, renderLetting) : null;
 return `<div class="letting-owner">
 <div class="letting-head" data-letting-owner-toggle="${escapeHtml(key)}" title="${collapsed ? 'Show' : 'Hide'} this person's ledger" style="cursor:pointer;">
 <span class="letting-chevron">${collapsed ? '&#9656;' : '&#9662;'}</span>

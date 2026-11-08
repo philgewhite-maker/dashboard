@@ -241,6 +241,9 @@ elasticity: 1.5, enquiryWeight: 0.3,
 // [{id, roomKey, from, to}]: times a room wasn't offered (in use, off Airbnb), left out of
 // the occupancy the evaluator calibrates demand to.
 unavailable: [],
+// [{id, roomKey, from, to, minNights|null, discountPct, madeOn}]: what you set on Airbnb for a stretch of nights (a minimum
+// stay and/or a price cut), so projections play those nights that way (js/features/bookingmodel.js, lettingoccupancy.js).
+voidPlans: [],
 // Factors the monthly model review has applied, on top of the starting assumptions (js/features/modelreview.js):
 // {demand, lead, cancel, appliedOn, note, history:[{on, demand, from, n}]}. 1 = no correction.
 calibration: { demand: 1, lead: 1, cancel: 1, appliedOn: '', note: '', history: [] },

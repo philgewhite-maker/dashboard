@@ -19,6 +19,7 @@ const copySteps = (xs) => (Array.isArray(xs) ? xs.map((x) => ({ ...x })) : []);
 s.discounts = { airbnb: { shortNotice: copySteps((dd.airbnb || {}).shortNotice), length: copySteps((dd.airbnb || {}).length) }, direct: { shortNotice: copySteps((dd.direct || {}).shortNotice), length: copySteps((dd.direct || {}).length) } };
 if (s.rooms === d.rooms) s.rooms = {};
 if (!Array.isArray(s.unavailable) || s.unavailable === d.unavailable) s.unavailable = Array.isArray(s.unavailable) ? s.unavailable.map((u) => ({ ...u })) : [];
+if (!Array.isArray(s.voidPlans) || s.voidPlans === d.voidPlans) s.voidPlans = Array.isArray(s.voidPlans) ? s.voidPlans.map((p) => ({ ...p })) : [];
 data.prefs.bookingEvaluator = s;
 return s;
 }
@@ -210,8 +211,8 @@ settings().unavailable.push({ id: uid(), roomKey, from, to });
 queueSave(); renderBookingEvaluatorSettings(); return;
 }
 if (!e.target.closest('#be-reset')) return;
-const { rooms, unavailable, calibration } = settings();
-data.prefs.bookingEvaluator = { ...structuredClone(DEFAULT_PREFS.bookingEvaluator), rooms, unavailable, calibration };
+const { rooms, unavailable, calibration, voidPlans } = settings();
+data.prefs.bookingEvaluator = { ...structuredClone(DEFAULT_PREFS.bookingEvaluator), rooms, unavailable, calibration, voidPlans };
 queueSave();
 renderBookingEvaluatorSettings();
 });

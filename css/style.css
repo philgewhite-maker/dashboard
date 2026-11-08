@@ -4659,3 +4659,9 @@ background:var(--slate-bg);color:var(--slate);
 :root[data-theme="dark"] .sh-star-btn,:root[data-theme="dark"] .sh-star-sel{color:#E6B93C;}
 #letting-list .letting-rec-star .sh-star-sel,#letting-list .letting-rec-star .sh-star-btn{width:auto;}
 #letting-list .letting-rec-star .sh-star-sel{width:34px;}
+/* Void plans: what you set on Airbnb for a stretch of nights. */
+.vp-row{border-left:3px solid var(--sage);padding:3px 0 3px 8px;margin-top:6px;font-size:12px;}
+.vp-form{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:flex-end;margin-top:4px;flex:1 1 100%;}
+.vp-form label{display:flex;flex-direction:column;gap:2px;font-size:11px;color:var(--muted);}
+.vp-form .settings-input{flex:0 0 auto;width:84px;}
+#occ-void-plans .settings-subgroup{margin:0;}
