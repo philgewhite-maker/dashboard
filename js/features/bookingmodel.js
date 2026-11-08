@@ -310,8 +310,11 @@ const L = c - dayNum(String(from).slice(0, 10));
 if (L < 0 || L > 400 || c >= T) return;
 leads[isChristmas(c) ? 12 : monthOf(c)].push(L);
 };
-ctx.requests.forEach((q) => { if (q.kind === 'request') addLead(q.checkin, q.receivedAt); });
-live.forEach((x) => { if (!fromRequest.has(x.id)) addLead(x.checkin, x.bookedOn); });
+// Only bookings that happened. A request that was declined, or never booked, arrived earlier on average (median 21 days
+// ahead against 13 for the stays themselves on your data) and is not demand that filled the calendar, so counting it
+// made the whole curve too slow. A stay with no booking date uses its request's date.
+const requestAt = new Map(ctx.requests.filter((q) => q.reservationId && q.receivedAt).map((q) => [q.reservationId, q.receivedAt]));
+live.forEach((x) => addLead(x.checkin, x.bookedOn || requestAt.get(x.id)));
 const priorOf = (m) => (m === 12 ? Number(s.christmasLead) || 300 : Number((s.leadMedian || [])[m]) || 21) * (ctx.scale.lead || 1);
 const logsOf = (xs) => xs.map((L) => Math.log(L * (ctx.scale.lead || 1) + 0.5));
 // One shared shift: how much sooner (or later) than the Settings guide your bookings arrive, across every month at once
