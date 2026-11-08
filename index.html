@@ -16,7 +16,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v792</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v793</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -460,6 +460,14 @@
 <span class="sync-status" id="letting-add-status"></span>
 </div>
 <div class="settings-note" style="margin:6px 0 0;"><strong>Earned (historic)</strong> is for what a listing took before you started tracking it here: enter the <em>gross</em> figure and their share is applied, the same way a stay would. For the other three, a <strong>negative</strong> amount reduces what they owe and a positive increases it &mdash; to wipe a balance, add the negative of it. The choice is only about what happened: a <strong>payment</strong> is money that reached you, an <strong>adjustment</strong> moves the balance without any, a <strong>cancellation</strong> is a payout for a stay that never happened. Months later that difference is the whole story, and the amount alone cannot tell you.</div>
+</section>
+
+<section class="panel wide" id="letting-analytics-panel" data-tab="finances">
+<div class="panel-head">
+<h2><span class="dot teal"></span>Letting analytics</h2>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="finances" data-goto-target="#letting-panel" title="The ledger by owner">&#128200;</span>
+</div>
+<div class="settings-note" style="margin:0 0 10px;">How the lettings are doing: income by month, nightly rates, occupancy and booking pace. Read-only charts of what has happened (the ledger itself is in <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#letting-panel">Letting income</span>, and what is expected next is in <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#letting-forecast-panel">Letting forecast and pricing</span>).</div>
 <div class="sync-row" style="margin-top:8px;align-items:center;">
 <label style="font-size:12px;" title="What one clean costs -- charged at checkout against every stay's gross, plus another for every full 7 days (a longer stay needs a mid-stay clean too), before dividing by nights for the average night rate below. When two rooms are turned over the same day, the second room costs the extra-room figure in Settings, Booking evaluator, and the day's total is shared.">Cleaning cost £<input type="number" min="0" step="1" id="letting-cleaning-cost" class="settings-input" style="max-width:70px;"></label>
 </div>
@@ -492,6 +500,14 @@
 </div>
 <div class="letting-chart-legend" id="night-rate-occupancy-legend" style="flex-direction:row;flex-wrap:wrap;margin-top:4px;"></div>
 </div>
+</section>
+
+<section class="panel wide" id="letting-forecast-panel" data-tab="finances">
+<div class="panel-head">
+<h2><span class="dot amber"></span>Letting forecast and pricing</h2>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#booking-evaluator-settings" title="Booking evaluator settings (what the model assumes)">&#9881;</span>
+</div>
+<div class="settings-note" style="margin:0 0 10px;">What the booking model expects the free nights to earn, and what to change on Airbnb to fill them. Run the projection, then record any price cut or minimum stay you set on a void so the next run uses it. How well past projections held up is in the <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#model-review">model review</span>, and each owner's Superhost outlook is in <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#letting-panel">Letting income</span>.</div>
 </section>
 
 <section class="panel wide" id="loans-panel" data-tab="finances">
@@ -4899,7 +4915,7 @@ Finds connections whose cover photo is missing or is really just the small place
 <details class="settings-item" id="guide-finances">
 <summary><h3>Finances</h3></summary>
 <div class="settings-block">
-<p class="settings-note" style="margin:0 0 10px;">The Finances tab holds seven panels: <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#accounts-panel">Accounts</span>, <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#letting-panel">Letting income</span>, <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#loans-panel">Loans from owners</span>, <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#switch-offers-panel">Switch opportunities</span>, <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#vouchers-panel">Vouchers &amp; Credits</span>, <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#loyalty-balances-panel">Loyalty balances</span> and <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#subscriptions-panel">Subscriptions</span>. Each job below says which panel to use.</p>
+<p class="settings-note" style="margin:0 0 10px;">The Finances tab holds nine panels: <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#accounts-panel">Accounts</span>, <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#letting-panel">Letting income</span> (the ledger by owner), <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#letting-analytics-panel">Letting analytics</span> (income, rates, occupancy and pace charts), <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#letting-forecast-panel">Letting forecast and pricing</span> (the projection, void plans and booking evaluator), <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#loans-panel">Loans from owners</span>, <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#switch-offers-panel">Switch opportunities</span>, <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#vouchers-panel">Vouchers &amp; Credits</span>, <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#loyalty-balances-panel">Loyalty balances</span> and <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#subscriptions-panel">Subscriptions</span>. Each job below says which panel to use.</p>
 
 <details class="settings-subgroup" id="guide-finances-accounts">
 <summary>Accounts &amp; the money-flow diagram</summary>

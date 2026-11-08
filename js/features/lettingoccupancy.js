@@ -374,6 +374,21 @@ for (let i = 2; i <= 13; i++) opts.push({ ym: addMonths(cur, -i), label: longMon
 return opts;
 }
 
+// The projection controls, dead voids and void plans: they live in the "Letting forecast and pricing" panel, apart from the
+// charts (which still draw the projection they produce).
+function forecastHtml() {
+return `<div id="letting-forecast-section">
+<div class="sync-row" style="gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px;" id="occ-projection-row">
+<button class="sync-btn sm inline" type="button" id="occ-project-btn" title="Estimates what each gap between bookings, today to the end of next month, is likely to earn, and draws it on the charts. Saved, so it can be checked against what happens.">Project the next two months</button>
+<label class="settings-note" style="margin:0;display:flex;gap:4px;align-items:center;" title="Draw the saved projection on the charts"><input type="checkbox" id="occ-project-show"> Show projection</label>
+<span class="settings-note" id="occ-project-status" style="margin:0;"></span>
+</div>
+<div class="settings-note" id="occ-plans-pending" hidden style="margin:0 0 6px;"></div>
+<div class="dead-voids" id="occ-dead-voids" hidden></div>
+<div class="dead-voids" id="occ-void-plans" hidden></div>
+</div>`;
+}
+
 function sectionHtml() {
 return `<div class="letting-chart-wrap" id="letting-occupancy-section">
 <div class="panel-head" style="margin:14px 0 6px;"><h2 style="font-size:13px;">Occupancy and booking pace</h2></div>
@@ -384,14 +399,6 @@ return `<div class="letting-chart-wrap" id="letting-occupancy-section">
 <select id="occ-month" class="mini" title="The month both charts show"></select>
 <span class="settings-note" id="occ-summary" style="margin:0;"></span>
 </div>
-<div class="sync-row" style="gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px;" id="occ-projection-row">
-<button class="sync-btn sm inline" type="button" id="occ-project-btn" title="Estimates what each gap between bookings, today to the end of next month, is likely to earn, and draws it on the charts. Saved, so it can be checked against what happens.">Project the next two months</button>
-<label class="settings-note" style="margin:0;display:flex;gap:4px;align-items:center;" title="Draw the saved projection on the charts"><input type="checkbox" id="occ-project-show"> Show projection</label>
-<span class="settings-note" id="occ-project-status" style="margin:0;"></span>
-</div>
-<div class="settings-note" id="occ-plans-pending" hidden style="margin:0 0 6px;"></div>
-<div class="dead-voids" id="occ-dead-voids" hidden></div>
-<div class="dead-voids" id="occ-void-plans" hidden></div>
 <details class="settings-subgroup" id="occ-income-trace" style="margin:0 0 6px;"></details>
 <div class="letting-chart-legend" id="occ-legend" style="flex-direction:row;flex-wrap:wrap;"></div>
 <div class="chart-canvas-wrap occ-wrap" style="position:relative;"><canvas id="occ-timeline-canvas"></canvas><div class="occ-tip" id="occ-tip" hidden></div></div>
@@ -1287,9 +1294,11 @@ if (el) el.textContent = `Failed: ${err.message || err}`;
 }
 
 function initLettingOccupancy() {
-const panel = document.getElementById('letting-panel');
-if (!panel || document.getElementById('letting-occupancy-section')) return;
+const panel = document.getElementById('letting-analytics-panel');
+const forecast = document.getElementById('letting-forecast-panel');
+if (!panel || !forecast || document.getElementById('letting-occupancy-section')) return;
 panel.insertAdjacentHTML('beforeend', sectionHtml());
+forecast.insertAdjacentHTML('beforeend', forecastHtml());
 state.ym = currentYm();
 const monthSel = document.getElementById('occ-month');
 monthSel.innerHTML = monthOptions().map((o) => `<option value="${o.ym}"${o.ym === state.ym ? ' selected' : ''}>${escapeHtml(o.label)}</option>`).join('');

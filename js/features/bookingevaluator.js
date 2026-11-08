@@ -385,9 +385,10 @@ return q;
 
 let bound = false;
 async function initBookingEvaluator() {
-const anchor = document.getElementById('letting-occupancy-section') || document.getElementById('letting-panel');
+// In the "Letting forecast and pricing" panel, after the projection controls.
+const anchor = document.getElementById('letting-forecast-section') || document.getElementById('letting-forecast-panel');
 if (!anchor || document.getElementById('booking-evaluator')) return;
-anchor.insertAdjacentHTML(anchor.id === 'letting-panel' ? 'beforeend' : 'afterend', sectionHtml());
+anchor.insertAdjacentHTML(anchor.id === 'letting-forecast-panel' ? 'beforeend' : 'afterend', sectionHtml());
 fillListingSelect();
 const { stayChipHtml, bindStayChips } = await import('./airbnb.js');
 state.stayChipHtml = stayChipHtml;

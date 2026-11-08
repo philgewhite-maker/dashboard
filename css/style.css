@@ -4318,19 +4318,25 @@ background:var(--sage-bg);color:var(--sage);
    the panel. Each one gets a floor of zero and a share of the line
    instead of a fixed size. */
 @media (max-width:700px){
-#letting-panel .sync-row{gap:6px;}
+#letting-panel .sync-row,#letting-analytics-panel .sync-row,#letting-forecast-panel .sync-row{gap:6px;}
 #letting-panel .settings-input,
-#letting-panel select{
+#letting-analytics-panel .settings-input,
+#letting-forecast-panel .settings-input,
+#letting-panel select,
+#letting-analytics-panel select,
+#letting-forecast-panel select{
 min-width:0;
 flex:1 1 7rem;
 max-width:none;
 }
-#letting-panel .sync-btn{flex:0 0 auto;}
+#letting-panel .sync-btn,#letting-analytics-panel .sync-btn,#letting-forecast-panel .sync-btn{flex:0 0 auto;}
 /* The evaluator's fields stack label over box (a column), so the flex-basis
    above would set the box's HEIGHT: reset it and let the field take the share. */
-#letting-panel .be-field{flex:1 1 7rem;min-width:0;}
+#letting-panel .be-field,#letting-forecast-panel .be-field{flex:1 1 7rem;min-width:0;}
 #letting-panel .be-field .settings-input,
-#letting-panel .be-field select{flex:0 0 auto;width:100%;box-sizing:border-box;}
+#letting-forecast-panel .be-field .settings-input,
+#letting-panel .be-field select,
+#letting-forecast-panel .be-field select{flex:0 0 auto;width:100%;box-sizing:border-box;}
 /* The note and the gross stack rather than fighting for one line. */
 #letting-list .letting-gross{display:block;}
 #letting-list td{padding-left:4px;padding-right:4px;}
