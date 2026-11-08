@@ -72,7 +72,9 @@ for (let i = 0; i < v.nights; i++) {
 const date = dateStrAdd(v.from, i);
 if (date >= today || date <= made) continue; // only nights that have passed, and were still in the future when forecast
 const key = `${v.roomKey}|${date}`;
-const f = { p: v.nightProb[i] || 0, income: v.nightIncome[i] || 0, made, lead: daysBetween(made, date), voidNights: v.nights, demand };
+// A night inside a void plan (what you set on Airbnb) is forecast with it, and the same night without it is kept alongside.
+const plan = (p.plans || []).find((q) => q.roomKey === v.roomKey && date >= q.from && date < q.to) || null;
+const f = { p: v.nightProb[i] || 0, income: v.nightIncome[i] || 0, made, lead: daysBetween(made, date), voidNights: v.nights, demand, plan, noP: plan && v.noPlan ? (v.noPlan.nightProb[i] || 0) : null, noIncome: plan && v.noPlan ? (v.noPlan.nightIncome[i] || 0) : null };
 const cur = nights.get(key) || { roomKey: v.roomKey, date, first: null, last: null };
 if (!cur.first) cur.first = f;
 cur.last = f;
@@ -108,9 +110,30 @@ rows.forEach((r) => { if (!r[which]) return; const k = keyOf(r, r[which]); if (g
 return labels.map((l) => ({ label: l, ...summarise(groups.get(l), which) }));
 }
 
+// Nights forecast under a void plan, scored on their own: with-plan and without-plan expectations against what happened.
+// (What would have happened without the plan can't be observed, so both stay as the model's estimates.)
+function planReview(all) {
+const groups = new Map();
+all.forEach((r) => {
+const f = r.last;
+if (!f || !f.plan) return;
+const g = groups.get(f.plan.id) || { plan: f.plan, n: 0, withN: 0, withInc: 0, noN: 0, noInc: 0, noKnown: 0, actN: 0, actInc: 0, unknown: 0, from: r.date, to: r.date };
+g.n += 1; g.withN += f.p; g.actN += r.booked;
+if (r.date < g.from) g.from = r.date;
+if (r.date > g.to) g.to = r.date;
+if (f.noP != null) { g.noN += f.noP; g.noKnown += 1; }
+if (r.incomeKnown) { g.withInc += f.income; g.actInc += r.actualIncome || 0; if (f.noIncome != null) g.noInc += f.noIncome; } else g.unknown += 1;
+groups.set(f.plan.id, g);
+});
+return [...groups.values()].sort((a, b) => String(b.plan.madeOn).localeCompare(String(a.plan.madeOn)));
+}
+
 function projectionReview() {
 const actual = actualNights();
-const rows = forecastNights(actual);
+const all = forecastNights(actual);
+// The existing scoring and the demand proposal leave out forecasts made under a plan: a plan changes how nights are sold,
+// not how much demand there is, so counting those nights would pull the demand factor the wrong way.
+const rows = all.map((r) => ({ ...r, first: r.first && !r.first.plan ? r.first : null, last: r.last && !r.last.plan ? r.last : null }));
 const months = [...new Set(rows.map((r) => r.date.slice(0, 7)))].sort().reverse();
 const byMonth = months.map((ym) => {
 const mine = rows.filter((r) => r.date.startsWith(ym));
@@ -118,7 +141,7 @@ return { ym, first: summarise(mine, 'first'), last: summarise(mine, 'last') };
 });
 const dow = (r) => new Date(`${r.date}T00:00:00`).getDay();
 const view = {
-rows, byMonth,
+rows: all, byMonth, plans: planReview(all),
 overall: { first: summarise(rows, 'first'), last: summarise(rows, 'last') },
 byLead: bucketed(rows, 'first', (r, f) => (f.lead <= 7 ? '0–7 days ahead' : f.lead <= 21 ? '8–21 days ahead' : f.lead <= 45 ? '22–45 days ahead' : '46+ days ahead'), ['0–7 days ahead', '8–21 days ahead', '22–45 days ahead', '46+ days ahead']),
 byLen: bucketed(rows, 'first', (r, f) => (f.voidNights <= 2 ? '1–2 night gaps' : f.voidNights <= 5 ? '3–5 night gaps' : '6+ night gaps'), ['1–2 night gaps', '3–5 night gaps', '6+ night gaps']),
@@ -234,6 +257,12 @@ lines.push(`<div style="overflow-x:auto;"><table class="limits-table be-table">$
 lines.push(`<div style="overflow-x:auto;margin-top:8px;"><table class="limits-table be-table">${tableHead('Month (latest forecast before each night)')}<tbody>${pr.byMonth.map((m) => summaryRow(`${monthName(m.ym)}`, m.last, true)).join('')}${summaryRow('All months', pr.overall.last, true)}</tbody></table></div>`);
 const small = (s) => (s.n < MIN_NIGHTS_FOR_BUCKET ? ' <span class="settings-note" style="margin:0;">few nights, take with care</span>' : '');
 const bucketTable = (title, list) => `<details class="settings-subgroup"><summary>${escapeHtml(title)}</summary><div style="overflow-x:auto;"><table class="limits-table be-table">${tableHead(title)}<tbody>${list.map((b) => summaryRow(b.label, b, true).replace(/<td>([^<]*)<\/td>/, `<td>$1${small(b)}</td>`)).join('')}</tbody></table></div></details>`;
+if (pr.plans.length) {
+const roomLabel = (key) => (nightRateRooms().find((r) => r.key === key) || {}).label || 'Room';
+lines.push(`<div style="margin:10px 0 4px;"><b style="font-size:12px;">Voids where you set a price or minimum stay</b></div>`);
+lines.push(`<div style="overflow-x:auto;"><table class="limits-table be-table"><thead><tr><th>Your plan</th><th class="num" title="Nights of the void that have passed">Nights</th><th class="num" title="Booked nights the model expected with the plan">Expected with plan</th><th class="num" title="The same nights projected without the plan">Expected without</th><th class="num">Booked</th><th class="num">Income with plan</th><th class="num">Income without</th><th class="num">Actual income</th></tr></thead><tbody>${pr.plans.map((g) => `<tr><td>${escapeHtml(`${roomLabel(g.plan.roomKey)} ${short(g.plan.from)}–${short(dateStrAdd(g.plan.to, -1))}: ${[g.plan.discountPct > 0 ? `${g.plan.discountPct}% off` : '', g.plan.minNights != null ? `${g.plan.minNights}-night min` : ''].filter(Boolean).join(', ')}`)}</td><td class="num">${g.n}</td><td class="num">${g.withN.toFixed(1)}</td><td class="num">${g.noKnown ? g.noN.toFixed(1) : '–'}</td><td class="num">${g.actN}</td><td class="num">${money(g.withInc)}</td><td class="num">${g.noKnown ? money(g.noInc) : '–'}</td><td class="num">${money(g.actInc)}${g.unknown ? ` <span class="settings-note" style="margin:0;">+${g.unknown} unpriced</span>` : ''}</td></tr>`).join('')}</tbody></table></div>`);
+lines.push(`<div class="settings-note" style="margin:4px 0 0;">Each plan is scored on its own and left out of the other tables here and the demand suggestion. "Without" is the model's estimate of the same nights with no plan: what would really have happened without it can't be seen, so judge the plan by whether booked nights and income came in nearer the with-plan or the without-plan figure.</div>`);
+}
 lines.push(bucketTable('By how far ahead it was forecast', pr.byLead));
 lines.push(bucketTable('By length of the gap', pr.byLen));
 lines.push(bucketTable('By night of the week', pr.byDay));

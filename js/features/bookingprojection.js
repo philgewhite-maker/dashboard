@@ -121,6 +121,31 @@ record.deadVoids.push({ id: v.id, roomKey: v.roomKey, from: v.from, to: v.to, ni
 }
 }
 
+// The void plans (what you set on Airbnb) this projection was made with, kept on it, and for every void a plan touches the
+// same void projected WITHOUT any plan (same demand, same random draws) next to the with-plan figures. Both are needed
+// for the model review to judge a plan: what actually happened can be set against either.
+async function attachPlans(result, ctx, proj, model) {
+const today = todayStr();
+const plans = (ctx.s.voidPlans || [])
+.filter((p) => p && p.roomKey && p.to > today && (p.minNights != null || Number(p.discountPct) > 0))
+.map((p) => ({ id: p.id, roomKey: p.roomKey, from: p.from, to: p.to, minNights: p.minNights == null ? null : Number(p.minNights), discountPct: Number(p.discountPct) || 0, madeOn: p.madeOn || '' }));
+result.plans = plans;
+if (!plans.length) return;
+try {
+const bare = model.makeProjection({ ...ctx, s: { ...ctx.s, voidPlans: [] } }, { from: result.from, to: result.to, runs: proj.runs, params: proj.params });
+if (bare.error) return;
+while (!bare.step(25)) await yieldToPage();
+const b = bare.finish();
+result.voids.forEach((v) => {
+const hit = plans.filter((p) => p.roomKey === v.roomKey && p.from < v.to && p.to > v.from);
+if (!hit.length) return;
+v.planIds = hit.map((p) => p.id);
+const bv = b.voids.find((x) => x.id === v.id);
+if (bv) v.noPlan = { expectedNights: bv.expectedNights, expected: bv.expected, nightProb: bv.nightProb, nightIncome: bv.nightIncome };
+});
+} catch (err) { console.error('Projection without the plans failed:', err); }
+}
+
 // One run at a time: a second request (a push while one is going) waits for and shares the first.
 let inflight = null;
 // Runs the projection (in slices, so the page keeps responding), saves it and returns the record.
@@ -142,6 +167,7 @@ await yieldToPage();
 const result = proj.finish();
 if (result.error) return { error: result.error };
 delete result.stayEnds; // for the Superhost forecast only, not kept with the projection
+await attachPlans(result, ctx, proj, model);
 const record = blankBookingProjection({ ...result, madeAt: new Date().toISOString() });
 try { await assessDeadVoids(record, ctx, proj.params, model); } catch (err) { console.error('Dead void check failed:', err); }
 // One per day: a re-run replaces today's, and older ones past the retention are dropped.

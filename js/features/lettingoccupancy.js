@@ -389,6 +389,7 @@ return `<div class="letting-chart-wrap" id="letting-occupancy-section">
 <label class="settings-note" style="margin:0;display:flex;gap:4px;align-items:center;" title="Draw the saved projection on the charts"><input type="checkbox" id="occ-project-show"> Show projection</label>
 <span class="settings-note" id="occ-project-status" style="margin:0;"></span>
 </div>
+<div class="settings-note" id="occ-plans-pending" hidden style="margin:0 0 6px;"></div>
 <div class="dead-voids" id="occ-dead-voids" hidden></div>
 <div class="dead-voids" id="occ-void-plans" hidden></div>
 <details class="settings-subgroup" id="occ-income-trace" style="margin:0 0 6px;"></details>
@@ -1148,29 +1149,59 @@ drawPace(stays);
 // ---- What you set on Airbnb for a void ---------------------------------------------------------
 
 // A plan is a minimum stay and/or a price cut you chose for a stretch of nights (data.prefs.bookingEvaluator.voidPlans).
-// Saving one re-runs the projection, which then plays those nights that way.
+// Each box saves as you change it and touches nothing else; the projection only picks the plans up when it is re-run
+// (the "Re-run projection" button that appears above when they differ), and each saved projection keeps the plans it used.
 function plansOf() { const s = data.prefs.bookingEvaluator || {}; return Array.isArray(s.voidPlans) ? s.voidPlans : []; }
 function planFor(v) { return plansOf().find((p) => p.roomKey === v.roomKey && p.from < v.to && p.to > v.from) || null; }
+function planSig(p) { return `${p.roomKey}|${p.from}|${p.to}|${p.minNights == null ? '' : p.minNights}|${Number(p.discountPct) || 0}`; }
 function planText(p) {
 const bits = [];
 if (p.discountPct > 0) bits.push(`${p.discountPct}% off`);
 if (p.minNights != null) bits.push(`${p.minNights}-night minimum`);
 return `${bits.join(', ')} (set ${p.madeOn || 'earlier'})`;
 }
+// Plans still ahead whose figures the latest projection does not reflect (new, changed or removed since it was made).
+function pendingPlanChanges() {
+const today = todayStr();
+const now = new Set(plansOf().filter((p) => p.to > today).map(planSig));
+const p = latestProjection();
+const used = new Set(((p && p.plans) || []).filter((x) => x.to > today).map(planSig));
+let n = 0;
+now.forEach((s) => { if (!used.has(s)) n += 1; });
+used.forEach((s) => { if (!now.has(s)) n += 1; });
+return n;
+}
+function planIncluded(plan) {
+const p = latestProjection();
+return !!(p && (p.plans || []).some((x) => planSig(x) === planSig(plan)));
+}
 function voidPlanFormHtml(v) {
 const p = planFor(v);
 const mins = ['', 1, 2, 3, 4, 5, 6, 7].map((m) => `<option value="${m}"${(p && String(p.minNights ?? '') === String(m)) || (!p && m === '') ? ' selected' : ''}>${m === '' ? 'as set' : m}</option>`).join('');
 return `<div class="vp-form" data-vp-row data-vp-room="${escapeHtml(v.roomKey)}" data-vp-from="${escapeHtml(v.from)}" data-vp-to="${escapeHtml(v.to)}">
-<span class="settings-note" style="margin:0;flex:1 1 100%;">${p ? `<strong>Your plan:</strong> ${escapeHtml(planText(p))}. The figures above already include it.` : 'What did you set on Airbnb for these nights? Record it and the projection re-runs with it.'}</span>
 <label>Min nights<select class="settings-input" data-vp-min>${mins}</select></label>
 <label>Price cut %<input type="number" min="0" max="90" step="5" class="settings-input" data-vp-pct value="${p && p.discountPct ? p.discountPct : ''}" placeholder="0"></label>
-<button class="sync-btn sm inline" type="button" data-vp-save>Save and re-run</button>${p ? '<button class="sync-btn sm inline" type="button" data-vp-clear>Remove plan</button>' : ''}
-<span class="settings-note" data-vp-status style="margin:0;"></span>
+<span class="settings-note" data-vp-note style="margin:0;flex:1 1 180px;">${vpNote(p)}</span>
 </div>`;
 }
+function vpNote(p) {
+if (!p) return 'What you set on Airbnb for these nights. Saves as you type; clear both boxes to remove it.';
+return planIncluded(p) ? `<strong>Your plan:</strong> ${escapeHtml(planText(p))}. Included in the figures above.` : `<strong>Your plan:</strong> ${escapeHtml(planText(p))}. Saved, but not in the figures yet: re-run the projection.`;
+}
 
-// Every other void still ahead (the dead ones are listed above, with the same form).
+// The banner with the one re-run button, wherever the plan boxes are.
+function updatePlansPending() {
+const el = document.getElementById('occ-plans-pending');
+if (!el) return;
+const n = pendingPlanChanges();
+if (!n) { el.hidden = true; el.innerHTML = ''; return; }
+el.innerHTML = `<span>${n} void plan change${n === 1 ? '' : 's'} not in the projection yet. The figures below are from before.</span> <button class="sync-btn sm inline" type="button" id="occ-plans-rerun" title="Runs the whole projection again (every room and void), now using your saved plans">Re-run projection with these plans</button>`;
+el.hidden = false;
+}
+
+// Every other void still ahead (the dead ones are listed above, with the same boxes).
 function renderVoidPlans() {
+updatePlansPending();
 const el = document.getElementById('occ-void-plans');
 if (!el) return;
 const p = latestProjection();
@@ -1184,10 +1215,8 @@ const d = el.querySelector('details');
 if (d) d.addEventListener('toggle', () => { state.voidPlansOpen = d.open; });
 }
 
-async function onVoidPlanClick(e) {
-const save = e.target.closest('[data-vp-save]');
-const clear = e.target.closest('[data-vp-clear]');
-if (!save && !clear) return;
+// A box changed: save that void's plan (replacing any overlapping one for the room) and update only its own note.
+function onVoidPlanChange(e) {
 const row = e.target.closest('[data-vp-row]');
 if (!row) return;
 const { vpRoom: roomKey, vpFrom: from, vpTo: to } = row.dataset;
@@ -1196,12 +1225,22 @@ const pct = Math.max(0, Math.min(90, Number(row.querySelector('[data-vp-pct]').v
 const s = data.prefs.bookingEvaluator || (data.prefs.bookingEvaluator = {});
 // A fresh array each time, never edited in place (the defaults' own array is shared).
 const keep = plansOf().filter((p) => !(p.roomKey === roomKey && p.from < to && p.to > from));
-if (save && (min !== '' || pct > 0)) keep.push({ id: uid(), roomKey, from, to, minNights: min === '' ? null : Number(min), discountPct: pct, madeOn: todayStr() });
+let plan = null;
+if (min !== '' || pct > 0) { plan = { id: uid(), roomKey, from, to, minNights: min === '' ? null : Number(min), discountPct: pct, madeOn: todayStr(), savedAt: new Date().toISOString() }; keep.push(plan); }
 s.voidPlans = keep;
 queueSave();
-const status = row.querySelector('[data-vp-status]');
-if (status) status.textContent = 'Re-running the projection…';
-await refreshProjection();
+const note = row.querySelector('[data-vp-note]');
+if (note) note.innerHTML = vpNote(plan);
+updatePlansPending();
+}
+
+let rerunning = false;
+async function onPlansRerun(e) {
+if (!e.target.closest('#occ-plans-rerun') || rerunning) return;
+rerunning = true;
+const el = document.getElementById('occ-plans-pending');
+if (el) el.textContent = 'Re-running the whole projection with your plans…';
+try { await refreshProjection(); } finally { rerunning = false; }
 }
 
 // The dead voids of the latest projection, each with what to change and the task for it.
@@ -1261,8 +1300,9 @@ document.getElementById('pace-channel').addEventListener('change', (e) => { stat
 document.getElementById('occ-project-show').checked = data.prefs.showProjection !== false;
 document.getElementById('occ-project-show').addEventListener('change', (e) => { data.prefs.showProjection = e.target.checked; queueSave(); renderLettingOccupancy(); import('./letting.js').then((m) => m.renderLetting()).catch(() => {}); });
 document.getElementById('occ-project-btn').addEventListener('click', runProjectionFromUi);
-document.getElementById('occ-dead-voids').addEventListener('click', onVoidPlanClick);
-document.getElementById('occ-void-plans').addEventListener('click', onVoidPlanClick);
+document.getElementById('occ-dead-voids').addEventListener('change', onVoidPlanChange);
+document.getElementById('occ-void-plans').addEventListener('change', onVoidPlanChange);
+document.getElementById('occ-plans-pending').addEventListener('click', onPlansRerun);
 refreshProjectionStatus();
 document.getElementById('occ-undated').addEventListener('change', (e) => {
 const input = e.target.closest('[data-occ-booked]');

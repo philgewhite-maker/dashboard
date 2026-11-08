@@ -2073,6 +2073,9 @@ function blankBookingProjection(fields = {}) {
 return {
 id: uid(), madeAt: '', today: '', from: '', to: '', runs: 0, modelVersion: 0,
 rooms: [], voids: [], months: {}, scenario: [], total: { expected: 0, p10: 0, p90: 0 }, assumptions: null, deadVoids: [],
+// The void plans (what you set on Airbnb) in force when it was made, [{id, roomKey, from, to, minNights, discountPct, madeOn}];
+// a void they touch also carries `planIds` and `noPlan` (the same void projected without them). See bookingprojection.js.
+plans: [],
 ...fields,
 };
 }
