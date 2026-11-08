@@ -43,9 +43,9 @@ final class Web
     {
         $g = $_GET;
         $q = (new Pricing($this->app))->quote((string)($g['product'] ?? ''), (string)($g['arrival'] ?? ''), (string)($g['departure'] ?? ''),
-            (int)($g['adults'] ?? 1), (string)($g['currency'] ?? 'GBP'), ($g['method'] ?? '') !== '' ? (string)$g['method'] : null);
+            (int)($g['adults'] ?? 1), (string)($g['currency'] ?? 'GBP'), ($g['method'] ?? '') !== '' ? (string)$g['method'] : null, true, ($g['offer'] ?? '') !== '' ? (string)$g['offer'] : null);
         // Never expose per-night source prices or host ids to the browser.
-        $public = array_intersect_key($q, array_flip(['ok', 'errors', 'nights', 'currency', 'total_minor', 'total_text', 'min_nights', 'policy', 'policy_text', 'methods', 'airbnb_gbp', 'extensions', 'offer_nights']));
+        $public = array_intersect_key($q, array_flip(['ok', 'errors', 'nights', 'currency', 'total_minor', 'total_text', 'min_nights', 'policy', 'policy_text', 'methods', 'airbnb_gbp', 'extensions', 'offer_nights', 'held_until']));
         $public['lines'] = [];
         foreach ($q['parts'] ?? [] as $p) foreach ($p['lines'] as $l) $public['lines'][] = ['label' => $l['label'], 'text' => Util::money($l['minor'], $q['currency'])];
         $public['schedule'] = [];

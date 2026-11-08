@@ -53,7 +53,7 @@ final class Pricing
         return in_array($method, ['pay_by_bank', 'bank_transfer', 'revolut'], true);
     }
 
-    public function quote(string $productSlug, string $arrival, string $departure, int $adults, string $currency = 'GBP', ?string $method = null, bool $publicOnly = true): array
+    public function quote(string $productSlug, string $arrival, string $departure, int $adults, string $currency = 'GBP', ?string $method = null, bool $publicOnly = true, ?string $offerToken = null): array
     {
         $cfg = $this->app->config['booking'];
         $currency = strtoupper($currency);
@@ -128,6 +128,21 @@ final class Pricing
             $sourceMin = max($sourceMin, $listingMin);
             $lines = [['label' => "{$l['name']}: $nights night" . ($nights > 1 ? 's' : ''), 'gbp' => $subDirect]];
             if ($subDirect - $sub > 0.005) $lines[] = ['label' => 'Special offer on quieter nights', 'gbp' => $sub - $subDirect];
+            // What this stay does to the nights around it: stranding nights nobody else can book costs
+            // first the offer discount, then a capped surcharge; fitting exactly between bookings earns a little off.
+            if ($nightly && count($nightly) === $nights) {
+                $eff = $this->stayEffect($cal, $dem, $arrival, $departure, $listingMin, $nightly);
+                $dcfg = $this->app->config['demand'];
+                if ($eff['raise'] > 0.005) {
+                    $giveBack = min($eff['raise'], max(0, $subDirect - $sub));
+                    $extra = min($eff['raise'] - $giveBack, $subDirect * $dcfg['max_surcharge_pct'] / 100);
+                    $lines[] = ['label' => ($extra > 0.005 ? 'Short-gap adjustment' : 'Special offer reduced') . ": leaves {$eff['gap_text']} nobody else can book (see below to add " . (count($eff['gap_nights']) === 1 ? 'it' : 'them') . ')', 'gbp' => $giveBack + $extra];
+                    $sub += $giveBack + $extra;
+                } elseif ($eff['fit'] && $dcfg['fit_discount_pct'] > 0) {
+                    $off = min($sub * $dcfg['fit_discount_pct'] / 100, max(0, $sub - $eff['floor']));
+                    if ($off > 0.005) { $lines[] = ['label' => "Fits neatly between bookings ({$dcfg['fit_discount_pct']}% off)", 'gbp' => -$off]; $sub -= $off; }
+                }
+            }
             $c = $l['content'];
             $los = $nights >= 28 ? ($c['monthly_discount_pct'] ?? 0) : ($nights >= 7 ? ($c['weekly_discount_pct'] ?? 0) : 0);
             if ($los > 0) $lines[] = ['label' => ($nights >= 28 ? 'Monthly' : 'Weekly') . " discount ($los%)", 'gbp' => -$sub * $los / 100];
@@ -156,6 +171,22 @@ final class Pricing
         $methods = $this->methodsFor($product, $currency);
         if ($method !== null && !in_array($method, $methods, true)) $errors[] = 'That payment method is not available for this booking and currency.';
 
+        // A re-offer link (ReOffer): a held lower total for exactly these dates, guests and currency.
+        $offer = $offerToken ? ReOffer::parse($this->app, $offerToken) : null;
+        if ($offer && !$errors && $offer['p'] === $product['slug'] && $offer['a'] === $arrival && $offer['d'] === $departure && $offer['n'] === $adults && $offer['c'] === $currency) {
+            $before = array_sum(array_column($parts, 'amount_minor'));
+            if ($offer['t'] < $before) {
+                $left = $offer['t'];
+                foreach ($parts as $i => &$pt) {
+                    $new = $i === count($parts) - 1 ? $left : (int)round($pt['amount_minor'] * $offer['t'] / $before);
+                    $left -= $new;
+                    $pt['lines'][] = ['label' => 'Your special price (held until ' . date('D j M, H:i', $offer['x']) . ')', 'gbp' => 0, 'minor' => $new - $pt['amount_minor']];
+                    $pt['amount_minor'] = $new;
+                }
+                unset($pt);
+                $q['held_until'] = date('D j M, H:i', $offer['x']);
+            }
+        }
         $total = array_sum(array_column($parts, 'amount_minor'));
         $q = array_merge($q, [
             'ok' => !$errors,
@@ -233,6 +264,51 @@ final class Pricing
         $direct = round((float)$price * (1 - $disc / 100), 2);
         $offer = (new Demand($this->app))->offerPrice($direct, $demandRow);
         return ['gross' => (float)$price, 'direct' => $direct, 'price' => $offer ?? $direct, 'offer' => $offer !== null];
+    }
+
+    /**
+     * The stay's effect on its neighbours, valued with the booking model:
+     *  - gap: free nights between this stay and the next/previous booking that
+     *    are fewer than the minimum stay die with it. Their expected income is
+     *    what the stay costs beyond its own nights.
+     *  - floor: what the stay's own nights would bring if left open (+ margin);
+     *    nights outside the projection count at their price.
+     *  - raise: how far the price must rise for the stay to beat leaving the
+     *    dates open (gap cost not covered by the price's margin over floor).
+     *  - fit: booked right up to both neighbours, nothing stranded.
+     * Without a fresh projection nothing is valued (empty $dem): no change.
+     */
+    private function stayEffect(array $cal, array $dem, string $arrival, string $departure, int $minStay, array $nightly): array
+    {
+        $c = $this->app->config['demand'];
+        $out = ['raise' => 0.0, 'fit' => false, 'floor' => array_sum($nightly), 'gap_text' => '', 'gap_nights' => []];
+        if (!$c['enabled'] || !$c['gap_pricing'] || !$dem) return $out;
+        $today = date('Y-m-d');
+        $gapCost = 0.0;
+        $adjacent = 0;
+        foreach ([-1, 1] as $step) {
+            $d = $step < 0 ? Util::addDays($arrival, -1) : $departure;
+            $run = [];
+            $byBooking = false;
+            for ($i = 0; $i < 30; $i++, $d = Util::addDays($d, $step)) {
+                if ($d < $today || !isset($cal[$d])) break;                 // the past, or beyond what we can see: not a booking
+                if (!$cal[$d]['available']) { $byBooking = true; break; }
+                $run[] = $d;
+            }
+            if ($byBooking && !$run) $adjacent++;
+            if ($byBooking && $run && count($run) < max(2, $minStay)) {
+                foreach ($run as $g) { $gapCost += (float)($dem[$g]['income'] ?? 0); $out['gap_nights'][] = $g; }
+            }
+        }
+        $floor = 0.0;
+        foreach ($nightly as $d => $p) $floor += isset($dem[$d]) ? min($p, $dem[$d]['income'] * (1 + $c['margin_pct'] / 100)) : $p;
+        $out['floor'] = $floor;
+        $out['raise'] = max(0.0, $gapCost - (array_sum($nightly) - $floor));
+        $out['fit'] = $adjacent === 2 && (bool)array_intersect_key($dem, $nightly);
+        sort($out['gap_nights']);
+        $g = $out['gap_nights'];
+        $out['gap_text'] = !$g ? '' : (count($g) === 1 ? Util::fmtDate($g[0]) : count($g) . ' nights');
+        return $out;
     }
 
     /**

@@ -104,6 +104,10 @@ final class App
                 'floor_gbp' => 45,          // never below this per night
                 'max_discount_pct' => 30,   // never more than this off the direct price
                 'extension_nights' => 3,    // look this many nights either side of a stay for extension offers
+                'gap_pricing' => true,      // price a stay by what it does to the nights around it
+                'max_surcharge_pct' => 25,  // a stay that strands nights costs at most this much more than the direct price
+                'fit_discount_pct' => 5,    // a stay that fits exactly between bookings gets this off
+                'reoffer' => ['enabled' => true, 'pct' => 10, 'hours_valid' => 48],  // one lower offer when a booking falls through
             ],
             // Changes to Beds24 (and so Airbnb) for dead voids, within limits. Off until switched on.
             'autopilot' => [

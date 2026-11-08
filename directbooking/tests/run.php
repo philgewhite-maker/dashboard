@@ -300,7 +300,37 @@ $q = $pricing->quote('ensuite-king-room', Util::addDays($v0, 1), Util::addDays($
 $sides = array_column($q['extensions'], null, 'side');
 ok(isset($sides['before']) && $sides['before']['reason'] === 'quiet' && $sides['before']['arrival'] === $v0, 'quiet night before offered as an extension');
 ok(isset($sides['after']) && $sides['after']['reason'] === 'gap' && $sides['after']['extra_minor'] === 7700, 'stranded gap night after offered at the offer price');
+eq($q['total_minor'], 10650, 'stranding a night gives back the offer discount first: £77 + (£90 gap value - £60.50 margin)');
+ok(str_contains(implode(' ', array_column($q['parts'][0]['lines'], 'label')), 'Special offer reduced: leaves'), 'quote says which night it strands');
 unset($cal->blocked[Util::addDays($v0, 3)]);
+
+// A stay that fits exactly between two bookings earns the fit discount (never below the expected-income floor).
+$cal->blocked[Util::addDays($v0, -1)] = true;
+$cal->blocked[Util::addDays($v0, 2)] = true;
+$q = $pricing->quote('ensuite-king-room', $v0, Util::addDays($v0, 2), 2);
+eq($q['total_minor'], 14630, 'neat fit: 5% off two offer nights');
+$cal->blocked = [];
+
+// Re-offer: a guest abandons card checkout on quiet dates; one lower offer, held by a signed link.
+$r = $bk->request(['product' => 'ensuite-king-room', 'arrival' => $v0, 'departure' => Util::addDays($v0, 2), 'adults' => 2, 'currency' => 'GBP', 'method' => 'card', 'guest' => ['name' => 'Ren Offer', 'email' => 'ren@example.test']]);
+ok($r['ok'], 'request on quiet dates: ' . implode(' ', $r['errors'] ?? []));
+$bk->expireDue(date('Y-m-d H:i:s', strtotime('+3 hours')));
+$mail = $app->one("SELECT * FROM mail_log WHERE to_addr = 'ren@example.test' AND subject LIKE 'Still thinking%' ORDER BY id DESC");
+ok($mail !== null && str_contains($mail['subject'], '£138.60'), 'abandoned checkout gets one offer 10% lower: ' . ($mail['subject'] ?? 'none'));
+preg_match('/offer=([A-Za-z0-9_.%-]+)/', $mail['body'] ?? '', $m);
+$token = rawurldecode($m[1] ?? '');
+$q = $pricing->quote('ensuite-king-room', $v0, Util::addDays($v0, 2), 2, 'GBP', null, true, $token);
+eq($q['total_minor'], 13860, 'the link holds the lower price');
+ok(isset($q['held_until']), 'quote says until when');
+eq($pricing->quote('ensuite-king-room', $v0, Util::addDays($v0, 3), 2, 'GBP', null, true, $token)['held_until'] ?? null, null, 'held price only for the exact dates');
+eq($pricing->quote('ensuite-king-room', $v0, Util::addDays($v0, 2), 2, 'GBP', null, true, substr($token, 0, -1) . 'x')['total_minor'], 15400, 'a tampered link is ignored');
+$r = $bk->request(['product' => 'ensuite-king-room', 'arrival' => $v0, 'departure' => Util::addDays($v0, 2), 'adults' => 2, 'currency' => 'GBP', 'method' => 'card', 'offer' => $token, 'guest' => ['name' => 'Ren Offer', 'email' => 'ren@example.test']]);
+eq((int)$bk->byRef($r['ref'])['total_minor'], 13860, 'booking made from the link is at the held price');
+$bk->expireDue(date('Y-m-d H:i:s', strtotime('+3 hours')));
+eq((int)$app->one("SELECT COUNT(*) AS n FROM mail_log WHERE to_addr = 'ren@example.test' AND subject LIKE 'Still thinking%'")['n'], 1, 'only ever one re-offer per guest and dates');
+$r = $bk->request(['product' => 'ensuite-king-room', 'arrival' => $v0, 'departure' => Util::addDays($v0, 2), 'adults' => 2, 'currency' => 'GBP', 'method' => 'bank_transfer', 'guest' => ['name' => 'Dee Clined', 'email' => 'dee@example.test']]);
+$bk->decline($bk->byRef($r['ref'])['id'], 'op@example.test');
+ok(!(new ReOffer($app))->maybeSend($bk->byRef($r['ref'])), 'no re-offer after the owner declined');
 
 $offers = (new Pricing($app))->offers('ensuite-king-room', 420);
 ok(count($offers) >= 1 && $offers[0]['arrival'] === $v0 && $offers[0]['nights'] === 2 && $offers[0]['pct_off'] === 30, 'offer windows list the quiet dates');

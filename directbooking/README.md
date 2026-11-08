@@ -159,7 +159,9 @@ number, or by `data.dashboard_room_key` on the listing.
 | Shorter stays | In a dead void the model says sells better with shorter stays, the calendar's minimum is relaxed to the model's figure. |
 | Highlight offer dates | Each booking box lists the offer windows (`/api/offers`). Clicking one fills the dates. |
 | Extend a stay | The quote suggests nights either side: quiet ones at the offer price, and any short gap the stay would strand, which nobody else could book. |
-| Re-price a request | The admin can approve at a lower total, and the card is charged less. Check the dashboard's evaluator first (channel: Direct). A higher price needs the guest's agreement. |
+| Price the stay by its effect | Before anything is charged, the quote values what the stay does to its neighbours. If it strands nights nobody else can book (fewer than the minimum stay before the next booking), their expected income is added. That cost first takes back the offer discount, then becomes a "Short-gap adjustment" capped at 25% over the direct price, and the quote suggests adding those nights at the offer price instead. A stay that fits exactly between bookings gets 5% off, never below what its nights would bring if left open. |
+| Re-offer lower | When the guest doesn't complete (card checkout abandoned, or not paid after acceptance), and the model says the dates would probably stay empty, they get one email offering the same dates 10% cheaper. The price is never below the nights' expected value and is held for 48 hours by a signed link for exactly those dates. Never sent after the owner declined or didn't answer; only once per guest and dates. |
+| Re-price by hand | The admin can still approve at a lower total, and the card is charged less. |
 | Airbnb, automatically | With Beds24 and `autopilot.enabled`, dead-void fixes go to the shared calendar. Limits: at most 20% off, at least £60 a night, within 45 days. Each change is logged at `/admin/adjustments` with undo, undone by itself when a newer projection stops calling the void dead, and reported to the dashboard. The direct site keeps pricing from the original price, so a cut isn't taken twice. |
 
 Limits:

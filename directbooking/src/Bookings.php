@@ -42,7 +42,8 @@ final class Bookings
         if ($method === '') $errors[] = 'Pick how you would like to pay.';
         if ($errors) return ['ok' => false, 'errors' => $errors];
 
-        $q = $this->pricing->quote((string)$in['product'], (string)$in['arrival'], (string)$in['departure'], (int)$in['adults'], (string)($in['currency'] ?? 'GBP'), $method);
+        $offer = ($in['offer'] ?? '') !== '' ? (string)$in['offer'] : null;
+        $q = $this->pricing->quote((string)$in['product'], (string)$in['arrival'], (string)$in['departure'], (int)$in['adults'], (string)($in['currency'] ?? 'GBP'), $method, true, $offer);
         if (!$q['ok']) return ['ok' => false, 'errors' => $q['errors']];
 
         $cfg = $this->app->config['booking'];
@@ -62,9 +63,9 @@ final class Bookings
         ];
 
         try {
-            $this->app->tx(function () use ($b, $q, $method, $card, $id, $in) {
+            $this->app->tx(function () use ($b, $q, $method, $card, $id, $in, $offer) {
                 // Re-check inside the write lock so two guests can't take the same night.
-                $again = $this->pricing->quote((string)$in['product'], $b['arrival'], $b['departure'], (int)$b['adults'], $b['currency'], $method);
+                $again = $this->pricing->quote((string)$in['product'], $b['arrival'], $b['departure'], (int)$b['adults'], $b['currency'], $method, true, $offer);
                 if (!$again['ok']) throw new DomainException(implode(' ', $again['errors']));
                 $this->app->insert('bookings', $b);
                 foreach ($q['parts'] as $pi => $part) {
@@ -267,6 +268,7 @@ final class Bookings
         $abandoned = date('Y-m-d H:i:s', strtotime($now) - ($this->app->config['booking']['checkout_minutes'] + 15) * 60);
         foreach ($this->app->all("SELECT id FROM bookings WHERE status = 'checkout' AND created_at < ?", [$abandoned]) as $r) {
             $this->close($r['id'], 'expired', 'system', 'Card checkout was not completed.'); $n++;
+            (new ReOffer($this->app))->maybeSend($this->booking($r['id']));
         }
         foreach ($this->app->all("SELECT * FROM bookings WHERE status = 'requested' AND approve_by < ?", [$now]) as $b) {
             $this->close($b['id'], 'expired', 'system', 'Not answered in time.'); $n++;
@@ -275,7 +277,9 @@ final class Bookings
         }
         foreach ($this->app->all("SELECT * FROM bookings WHERE status = 'approved' AND pay_by < ?", [$now]) as $b) {
             $this->close($b['id'], 'expired', 'system', 'Payment not received in time.'); $n++;
-            $this->mail($b['guest_email'], "Booking {$b['ref']} released", "Hello {$b['guest_name']},\n\nWe didn't receive payment in time, so the dates have been released.\n", $this->hostFrom($b['id']), $b);
+            if (!(new ReOffer($this->app))->maybeSend($this->booking($b['id']))) {
+                $this->mail($b['guest_email'], "Booking {$b['ref']} released", "Hello {$b['guest_name']},\n\nWe didn't receive payment in time, so the dates have been released.\n", $this->hostFrom($b['id']), $b);
+            }
         }
         return $n;
     }
@@ -460,7 +464,7 @@ final class Bookings
     }
 
     /** Guest emails ($b given) are signed and sent as the site the guest booked on. */
-    private function mail(string $to, string $subject, string $body, ?string $from = null, ?array $b = null): void
+    public function mail(string $to, string $subject, string $body, ?string $from = null, ?array $b = null): void
     {
         $site = $b ? $this->app->siteById($b['site_id']) : null;
         $name = $site['name'] ?? $this->app->config['site']['name'];
@@ -469,13 +473,13 @@ final class Bookings
     }
 
     /** The address of the site a booking was made on (else the main one). */
-    private function base(?array $b): string
+    public function base(?array $b): string
     {
         $site = $b ? $this->app->siteById($b['site_id']) : null;
         return rtrim($site['base_url'] ?? $this->app->site['base_url'] ?? $this->app->config['site']['base_url'], '/');
     }
 
-    private function hostFrom(string $bookingId): ?string
+    public function hostFrom(string $bookingId): ?string
     {
         $h = $this->hostsFor($bookingId)[0] ?? null;
         return $h['from_email'] ?? null;

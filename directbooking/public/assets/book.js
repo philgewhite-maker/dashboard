@@ -18,6 +18,16 @@
     const errors = form.querySelector('.errors');
     let timer = null;
     let seq = 0;
+    // A re-offer link (?offer=...): a held price for exact dates. The token is signed by the server;
+    // here it only prefills the form, and the server checks it again on every quote.
+    let offer = new URLSearchParams(location.search).get('offer') || '';
+    if (offer) {
+      try {
+        const o = JSON.parse(atob(offer.split('.')[0].replace(/-/g, '+').replace(/_/g, '/')));
+        if (o.p !== form.dataset.product) offer = '';
+        else { $('arrival').value = o.a; $('departure').value = o.d; $('adults').value = String(o.n); $('currency').value = o.c; }
+      } catch (e) { offer = ''; }
+    }
     $('arrival').min = today;
     $('departure').min = today;
 
@@ -31,6 +41,7 @@
       const my = ++seq;
       const params = new URLSearchParams({ product: form.dataset.product, arrival: a, departure: d, adults: $('adults').value, currency: $('currency').value });
       if ($('method').value) params.set('method', $('method').value);
+      if (offer) params.set('offer', offer);
       quoteBox.innerHTML = '<p class="muted">Checking…</p>';
       let q;
       try {
@@ -49,6 +60,7 @@
       const sched = q.schedule.length ? '<p class="small">Paid monthly in advance: ' + q.schedule.map((s) => `${esc(s.text)} ${esc(s.due)}`).join('; ') + '.</p>' : '';
       const ext = (q.extensions || []).map((x) => `<button type="button" class="chip ext" data-a="${esc(x.arrival)}" data-d="${esc(x.departure)}">${esc(x.text)}</button>`).join(' ');
       quoteBox.innerHTML = `<table>${rows}<tr class="total"><td>Total</td><td>${esc(q.total_text)}</td></tr></table>${sched}`
+        + (q.held_until ? `<p class="small"><strong>Your special price is held until ${esc(q.held_until)}.</strong></p>` : '')
         + (ext ? `<p class="small">Stay longer? ${ext}</p>` : '')
         + `<p class="small muted">Cancellation: ${esc(q.policy_text)}</p>`;
       quoteBox.querySelectorAll('.ext').forEach((b) => b.addEventListener('click', () => setDates(b.dataset.a, b.dataset.d)));
@@ -99,7 +111,7 @@
         const body = {
           product: form.dataset.product, occurrence_id: form.dataset.occurrence || null,
           arrival: $('arrival').value, departure: $('departure').value, adults: Number($('adults').value),
-          currency: $('currency').value, method: $('method').value, message: $('message').value,
+          currency: $('currency').value, method: $('method').value, message: $('message').value, offer,
           guest: { name: $('name').value, email: $('email').value, phone: $('phone').value, country: $('country').value },
         };
         const r = await (await fetch('/api/request', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).json();
