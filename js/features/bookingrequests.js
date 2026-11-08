@@ -17,6 +17,7 @@ import { escapeHtml, todayStr, dateStrAdd } from '../utils.js';
 import { canAttemptGoogleAction } from '../sync/googleauth.js';
 import { nightRateRooms } from './letting.js';
 import { collectStays } from './lettingoccupancy.js';
+import { isUnconfirmedStay } from '../icsparse.js';
 
 const QUERY = 'from:automated@airbnb.com (subject:"Pending: Reservation Request" OR subject:"Enquiry for")';
 const SUBJECT_RE = /^(Pending:\s*Reservation Request at|Enquiry for)\s+(.+)\s+for\s+(\d.+)$/i;
@@ -224,13 +225,21 @@ return out;
 // after it arrived (Airbnb gives 24 hours to answer) and an enquiry once its check-in has
 // passed. A decision you set yourself ('declined') is left alone.
 function resolveRequestOutcomes() {
-const stays = data.airbnbReservations || [];
+const allStays = data.airbnbReservations || [];
+// Airbnb holds a request's dates on the calendar ("Reserved") while it waits for your answer: that hold is not a booking. Only a
+// stay with a confirmation code, a name or an income can be what a request became.
+const stays = allStays.filter((s) => !isUnconfirmedStay(s));
 // Older stays are known only from their Letting income entry (no stay record, no code).
 const ledgerStays = collectStays().filter((s) => String(s.id).startsWith('led:') && s.status === 'stay');
 const directs = directEntries();
 const today = todayStr();
 let changed = 0;
 (data.bookingRequests || []).forEach((q) => {
+// Undo an earlier match to a calendar hold (the request was wrongly marked as having become a stay).
+if (q.decision === 'accepted' && q.reservationId) {
+const held = allStays.find((s) => s.id === q.reservationId);
+if (held && isUnconfirmedStay(held)) { q.decision = ''; q.reservationId = ''; q.decidedOn = ''; changed++; }
+}
 if (q.decision === 'declined' || q.decision === 'accepted' || q.decision === 'direct') return;
 let stay = q.confirmationCode ? stays.find((s) => s.confirmationCode === q.confirmationCode) : null;
 if (!stay) {
