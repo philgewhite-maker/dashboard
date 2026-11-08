@@ -178,6 +178,39 @@ ctx.rooms.forEach((r, i) => r.listingIds.forEach((id) => m.set(id, i)));
 return m;
 }
 
+// Where a room's own months are thin (a month seen once, or never), the other rooms' seasonal pattern gives the month a
+// shape: each other room's occupancy in that month as a multiple of its own average, pooled by how much evidence each has
+// and smoothed over the neighbouring months, then applied to THIS room's own average. It counts for less than the
+// room's own months (it replaces only the one pseudo-month the room's average already contributed, and its trust is
+// capped at SIB_TRUST and scaled by the evidence behind the shape) but for more than nothing: a month with no data
+// of its own gets the room's average reshaped by it instead of the flat average. No other room, or no evidence: unchanged.
+const SIB_TRUST = 0.6;
+function blendSiblingShape(occ) {
+const wsum = (xs) => xs.reduce((a, x) => a + x.w, 0);
+const meanOf = (xs) => { const W = wsum(xs); return W > 0 ? xs.reduce((a, x) => a + x.w * x.share, 0) / W : null; };
+const smooth = (arr, m) => 0.25 * arr[(m + 11) % 12] + 0.5 * arr[m] + 0.25 * arr[(m + 1) % 12];
+occ.forEach((o, i) => {
+if (!o.sums || o.overall == null) return;
+const num = new Array(12).fill(0);
+const den = new Array(12).fill(0);
+occ.forEach((p, j) => {
+if (j === i || !p.sums || !(p.overall > 0)) return;
+p.sums.forEach((xs, m) => { const mu = meanOf(xs); if (mu == null) return; const w = wsum(xs); num[m] += w * (mu / p.overall); den[m] += w; });
+});
+o.sibling = new Array(12).fill(null);
+o.byMonth = o.sums.map((xs, m) => {
+const dn = smooth(den, m);
+const idx = dn > 0 ? smooth(num, m) / dn : null;
+const a = idx == null ? 0 : SIB_TRUST * Math.min(1, dn / OCC_FULL_EVIDENCE);
+const prior = a > 0 ? Math.min(0.97, Math.max(0.02, o.overall * (1 + a * (idx - 1)))) : o.overall;
+o.sibling[m] = a > 0 ? { idx, a } : null;
+const W = wsum(xs);
+if (W > 0) return (xs.reduce((s, x) => s + x.w * x.share, 0) + prior) / (W + 1);
+return a > 0 ? prior : null;
+});
+});
+}
+
 // What the model assumes, each with where it came from. Cached on the context.
 function calibrate(ctx) {
 if (ctx.params) return ctx.params;
@@ -352,9 +385,10 @@ const weightOf = (xs) => xs.reduce((a, x) => a + x.w, 0);
 return {
 byMonth: sums.map((xs) => (xs.length ? (xs.reduce((a, x) => a + x.w * x.share, 0) + overall) / (weightOf(xs) + 1) : null)),
 byMonthN: sums.map((xs) => xs.length), byMonthW: sums.map((xs) => weightOf(xs)), byMonthBookings: sums.map((xs) => xs.reduce((a, x) => a + x.bookings, 0)),
-overall, months: all.length, skipped,
+overall, months: all.length, skipped, sums,
 };
 });
+blendSiblingShape(occ);
 
 ctx.params = { prices, losCdf, losMean, losN, dowW, dowN, lead, leadSigma, cancelRate, lateShare, nAll, nCancel, occ, lambda: new Map() };
 return ctx.params;
@@ -820,11 +854,13 @@ const price = params.prices[ri];
 const o = params.occ[ri];
 const fmtMoney = (v) => `£${Math.round(v)}`;
 const occVal = o.byMonth[m] ?? o.overall;
+const sib = o.sibling && o.sibling[m];
+const sibNote = sib ? `; reshaped by the other room's seasonal pattern (this month is x${sib.idx.toFixed(2)} of its average there, trusted ${Math.round(sib.a * 100)}%)` : '';
 return [
 { id: 'price', label: 'Raw nightly rate (before discounts and the cleaning fee)', value: `${fmtMoney(basePrice(ctx, params, ri, ci))}${price.uplift > 1.005 ? ` (Fri/Sat ×${price.uplift.toFixed(2)})` : ''}`, source: price.source },
 { id: 'discounts', label: 'Discounts the rate is worked back through', value: discountText(ctx.s), source: price.n ? `undone on ${price.n} stays: on average ${(price.avgShortNotice * 100).toFixed(1)}% short notice, ${(price.avgLength * 100).toFixed(1)}% length` : 'your setting' },
 { id: 'cleanfee', label: 'Cleaning fee guests pay (income per booking)', value: fmtMoney(price.clean), source: ctx.rooms[ri].cleaningIncome != null && ctx.rooms[ri].cleaningIncome !== '' ? 'your setting' : price.n ? 'median of your earnings export' : 'none known' },
-{ id: 'occupancy', label: `Occupancy expected for this room in ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m]}`, value: occVal == null ? `${Math.round(OCC_PRIOR * 100)}%` : `${Math.round(occVal * 100)}%`, source: o.byMonth[m] != null ? `your stays: ${o.byMonthN[m]} earlier ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m]}${o.byMonthN[m] === 1 ? '' : 's'} (resting on ${o.byMonthBookings[m]} booking${o.byMonthBookings[m] === 1 ? '' : 's'}, so counting as ${o.byMonthW[m].toFixed(2)} of a full month), blended with all ${o.months} months on offer${o.skipped ? `; ${o.skipped} left out as not on offer` : ''}` : o.overall != null ? `your stays, ${o.months} months on offer${o.skipped ? `; ${o.skipped} left out as not on offer` : ''}` : 'assumption', editable: 'demand' },
+{ id: 'occupancy', label: `Occupancy expected for this room in ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m]}`, value: occVal == null ? `${Math.round(OCC_PRIOR * 100)}%` : `${Math.round(occVal * 100)}%`, source: `${o.byMonth[m] != null && o.byMonthN[m] === 0 ? `no stays of its own that month: its ${o.months}-month average` : o.byMonth[m] != null ? `your stays: ${o.byMonthN[m]} earlier ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m]}${o.byMonthN[m] === 1 ? '' : 's'} (resting on ${o.byMonthBookings[m]} booking${o.byMonthBookings[m] === 1 ? '' : 's'}, so counting as ${o.byMonthW[m].toFixed(2)} of a full month), blended with all ${o.months} months on offer${o.skipped ? `; ${o.skipped} left out as not on offer` : ''}` : o.overall != null ? `your stays, ${o.months} months on offer${o.skipped ? `; ${o.skipped} left out as not on offer` : ''}` : 'assumption'}${sibNote}`, editable: 'demand' },
 { id: 'lead', label: 'Median days ahead bookings arrive', value: `${Math.round(lead.median)} days`, source: lead.n ? `your guide blended with ${lead.n} of your bookings` : 'your guide (Settings)', editable: 'lead' },
 { id: 'leadspread', label: 'Share of bookings made in the last 3 / 7 days', value: `${Math.round(normCdf((Math.log(3.5) - lead.mu) / params.leadSigma) * 100)}% / ${Math.round(normCdf((Math.log(7.5) - lead.mu) / params.leadSigma) * 100)}%`, source: `a lead-time spread of ${params.leadSigma.toFixed(2)}, fitted to your bookings and requests (past check-ins) and blended with the Airbnb-wide shape` },
 { id: 'los', label: 'Average stay length', value: `${params.losMean.toFixed(1)} nights`, source: params.losN ? `your requests and stays (${Math.round(params.losN)}) blended with an assumption` : 'assumption' },
