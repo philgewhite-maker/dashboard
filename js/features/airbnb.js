@@ -803,6 +803,7 @@ statusEl.textContent = `Couldn't add: ${err.message || err}`;
 function reservationRowHtml(r) {
 const listing = data.airbnbListings.find((l) => l.id === r.listingId);
 if (!listing) return '';
+const pend = pendingRequestFor(r);
 // "0 nights" is right arithmetic and a useless label: a listing that
 // isn't on Airbnb at all (a plumber, a cat sitter -- see the Calendar
 // export URL note in the Settings table) is routinely booked for a
@@ -817,9 +818,9 @@ return `<div class="cal-row" data-airbnb-row="${r.id}">
 </div>
 <div class="cal-event-row">
 ${data.airbnbListings.length > 1 ? `<select class="mini" data-airbnb-res-move="${r.id}" title="Which listing this stay belongs to. Change it when someone else rented the room out this time, e.g. you took the booking yourself, so the income and occupancy go to the right listing and owner.">${data.airbnbListings.map((l) => `<option value="${escapeHtml(l.id)}"${l.id === r.listingId ? ' selected' : ''}>${escapeHtml(l.label || l.prefix || 'Listing')}</option>`).join('')}</select>` : ''}
-<input type="text" autocomplete="off" class="tag-add-input" placeholder="Guest name" data-airbnb-res-field="guestName" data-airbnb-res-id="${r.id}" value="${escapeHtml(r.guestName)}" style="max-width:130px;">
+<input type="text" autocomplete="off" class="tag-add-input" placeholder="${escapeHtml(pend && pend.guestName ? `${pend.guestName} (pending)` : 'Guest name')}" data-airbnb-res-field="guestName" data-airbnb-res-id="${r.id}" value="${escapeHtml(r.guestName)}" style="max-width:130px;">
 <input type="text" autocomplete="off" class="tag-add-input" placeholder="Notes" data-airbnb-res-field="notes" data-airbnb-res-id="${r.id}" value="${escapeHtml(r.notes)}" style="max-width:160px;">
-<input type="number" step="0.01" min="0" class="tag-add-input" placeholder="Income £" data-airbnb-res-field="income" data-airbnb-res-id="${r.id}" value="${r.income ?? ''}" style="max-width:95px;" title="What this stay earned. The owner's share becomes a debt on the checkout date — see Letting income on Finances.">
+<input type="number" step="0.01" min="0" class="tag-add-input" placeholder="${escapeHtml(pend && pend.payout != null ? `£${Math.round(pend.payout)} if accepted` : 'Income £')}" data-airbnb-res-field="income" data-airbnb-res-id="${r.id}" value="${r.income ?? ''}" style="max-width:95px;" title="What this stay earned. The owner's share becomes a debt on the checkout date — see Letting income on Finances.">
 <input type="date" class="tag-add-input" data-airbnb-res-field="paidOn" data-airbnb-res-id="${r.id}" value="${escapeHtml(r.paidOn || '')}" style="max-width:130px;" title="The day the guest paid (the booking email's date). A capped owner's monthly limit is counted in this month; blank falls back to the checkout month.">
 <select data-airbnb-res-field="platform" data-airbnb-res-id="${r.id}" title="Which platform this stay's income came through -- the Letting income chart on Finances breaks solid (Airbnb) out from striped (Other).">
 <option value="airbnb"${r.platform !== 'other' ? ' selected' : ''}>Airbnb</option>
@@ -881,8 +882,24 @@ if (chip) openStay(chip.dataset.openStay);
 // calendar shows "Reserved" for an enquiry it is holding dates for as well as
 // for a booking, so this may be nothing: it clears itself when the
 // confirmation email arrives, and is forgotten if the dates drop off the feed.
+// The request or enquiry email behind a calendar hold, while nothing has been decided: it is where the guest's name and the
+// potential payout are known before you accept. Shown, never written into the stay: only a confirmed booking carries a name
+// and income (an income on a stay is charged to the owner at checkout, so a request that is declined must not leave one).
+function pendingRequestFor(r) {
+if (!isUnconfirmedStay(r)) return null;
+const mine = (data.bookingRequests || []).filter((q) => !q.decision && q.checkin === r.checkin && q.checkout === r.checkout && (!q.listingId || q.listingId === r.listingId));
+mine.sort((a, b) => String(b.receivedAt).localeCompare(String(a.receivedAt)));
+return mine[0] || null;
+}
+
 function unconfirmedHtml(r) {
 if (!isUnconfirmedStay(r)) return '';
+const q = pendingRequestFor(r);
+if (q) {
+const who = [q.guestName || 'A guest', q.guestReviews != null ? `${q.guestReviews} review${q.guestReviews === 1 ? '' : 's'}` : '', q.identityVerified ? '' : 'not verified', q.guests ? `${q.guests} guest${q.guests === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ');
+const money = q.payout != null ? `potential payout £${Math.round(q.payout)}` : (q.nightlyRate != null ? `£${Math.round(q.nightlyRate)} a night` : '');
+return `<div class="cal-event-row"><span class="settings-note" style="margin:0;"><b>Pending ${q.kind === 'enquiry' ? 'enquiry' : 'request'}</b> from <span class="inline-goto-link" data-goto-tab="overview" data-goto-target="[data-bkreq='${escapeHtml(q.id)}']" title="Open it in Requests and enquiries">${escapeHtml(who)}</span>${money ? `, ${escapeHtml(money)}` : ''}. Not a booking yet: the name and income are filled in from the confirmation email once you accept it on Airbnb.</span> <button class="sync-btn sm inline" type="button" data-airbnb-eval="${escapeHtml(r.id)}" title="Weigh accepting this against keeping the dates open">Evaluate</button></div>`;
+}
 return `<div class="cal-event-row"><span class="settings-note" style="margin:0;"><b>Unconfirmed.</b> On your Airbnb calendar, but no confirmation email, name or income yet. Airbnb also marks dates "Reserved" while it holds them for an enquiry, so this may not be a booking.</span> <button class="sync-btn sm inline" type="button" data-airbnb-eval="${escapeHtml(r.id)}" title="Weigh accepting this against keeping the dates open">Evaluate</button></div>`;
 }
 
