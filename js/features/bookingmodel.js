@@ -483,7 +483,7 @@ return null;
 // is the eventual number of requests for check-in date c, before price thinning.
 // `extra` ({roomIdx: fraction}): requests for 1 night on top of the usual ones, in rooms whose minimum stay has
 // been lowered below the one the demand was calibrated under (see ONE_NIGHT_DEMAND_PCT).
-function drawArrivals(ctx, params, { from, to, todayN, lam, rooms, extra = null }, rng) {
+function drawArrivals(ctx, params, { from, to, todayN, lam, rooms, extra = null, rngX = null }, rng) {
 const out = [];
 const boost = maxBoost(ctx.s, ctx.planMaxPct);
 const oneNight = (Number(ctx.s.oneNightDemandPct ?? ONE_NIGHT_DEMAND_PCT) || 0) / 100;
@@ -499,10 +499,13 @@ out.push({ room: ri, c, los: sampleLos(params, rng), at: c - L, lead: L, u: rng(
 const planLow = ctx.plans && ctx.plans.length ? planAt(ctx.plans, ri, c) : null;
 const exFrac = (extra && extra[ri]) || (planLow && planLow.minNights != null && planLow.minNights < (Number(ctx.rooms[ri].minNights) || 1) ? oneNight : 0);
 if (exFrac) {
-const k1 = poisson(rng, lam(ri, c) * params.dowW[dowOf(c)] * boost * share * exFrac);
+// The 1-night extras come from their own random stream when one is given, so lowering a minimum stay leaves the
+// ordinary arrivals exactly as they were (what lets a what-if be compared with the same draws).
+const rx = rngX || rng;
+const k1 = poisson(rx, lam(ri, c) * params.dowW[dowOf(c)] * boost * share * exFrac);
 for (let j = 0; j < k1; j++) {
-const L = sampleLead(params, c, daysLeft, rng);
-out.push({ room: ri, c, los: 1, at: c - L, lead: L, u: rng(), tie: rng() });
+const L = sampleLead(params, c, daysLeft, rx);
+out.push({ room: ri, c, los: 1, at: c - L, lead: L, u: rx(), tie: rx() });
 }
 }
 }
@@ -946,10 +949,10 @@ function ownerListingOf(ctx, room) { return activeListingId(room.listingIds, ctx
 // {minNights: {roomKey: n}, s: {gapDiscountPct, gapMaxNights, ...}}. That is what lets a what-if (allow
 // 1-night stays, cut the price) be compared fairly with the same demand. `params` reuses a calibration
 // already made; `roomKeys` limits the simulation to those rooms.
-function makeProjection(ctx = buildContext(), { from, to, runs = PROJECT_RUNS, play = null, params: givenParams = null, roomKeys = null } = {}) {
+function makeProjection(ctx = buildContext(), { from, to, runs = PROJECT_RUNS, play = null, params: givenParams = null, roomKeys = null, boostPct = 0 } = {}) {
 const params = givenParams || calibrate(ctx);
 const plans = normalisePlans(ctx);
-const pctx = { ...ctx, s: play && play.s ? { ...ctx.s, ...play.s } : ctx.s, plans, planMaxPct: Math.max(0, ...plans.map((p) => p.pct)) };
+const pctx = { ...ctx, s: play && play.s ? { ...ctx.s, ...play.s } : ctx.s, plans, planMaxPct: Math.max(Number(boostPct) || 0, ...plans.map((p) => p.pct)) };
 const T = dayNum(ctx.today);
 const wS = Math.max(T, dayNum(from || ctx.today));
 const wE = dayNum(to || defaultProjectionEnd(ctx.today));
@@ -1000,6 +1003,7 @@ const oneNightFrac = (Number(ctx.s.oneNightDemandPct ?? ONE_NIGHT_DEMAND_PCT) ||
 const extra = {};
 ctx.rooms.forEach((r, i) => { if (minNights[i] < (Number(r.minNights) || 1)) extra[i] = oneNightFrac; });
 const rng = mulberry32(hashStr(`proj|${MODEL_VERSION}|${ctx.today}|${wS}|${wE}|${JSON.stringify({ ...ctx.s, voidPlans: undefined })}|${JSON.stringify(ctx.scale)}`));
+const rngX = mulberry32(hashStr(`projx|${MODEL_VERSION}|${ctx.today}|${wS}|${wE}|${JSON.stringify({ ...ctx.s, voidPlans: undefined })}|${JSON.stringify(ctx.scale)}`));
 
 const monthKeys = [];
 for (let d = wS; d < wE; d++) { const ym = dayStr(d).slice(0, 7); if (monthKeys[monthKeys.length - 1] !== ym) monthKeys.push(ym); }
@@ -1021,7 +1025,7 @@ const state = { run: 0 };
 const step = (n) => {
 for (let k = 0; k < n && state.run < runs; k++, state.run++) {
 const run = state.run;
-const arrivals = drawArrivals(pctx, params, { from: base, to: wE + AFTER, todayN: T, lam, rooms: roomsIdx, extra }, rng);
+const arrivals = drawArrivals(pctx, params, { from: base, to: wE + AFTER, todayN: T, lam, rooms: roomsIdx, extra, rngX }, rng);
 const occ = occ0.map((o) => o.slice());
 const booked = playArrivals(pctx, params, arrivals, occ, base, { minNights, len });
 const list = [];
@@ -1147,7 +1151,7 @@ const simulate = (minNights, pct) => {
 const reach = Math.max(curMax, v.nights);
 // Without any plan already set on this void, so the options are compared with each other and with doing nothing.
 const bare = { ...ctx, s: { ...ctx.s, voidPlans: (ctx.s.voidPlans || []).filter((q) => !(q.roomKey === v.roomKey && q.from < v.to && q.to > v.from)) } };
-const p = makeProjection(bare, { from: v.from, to: v.to, runs, params: calib, roomKeys: [room.key], play: { minNights: { [room.key]: minNights }, s: { gapDiscountPct: pct, gapMaxNights: pct > 0 ? reach : curMax } } });
+const p = makeProjection(bare, { from: v.from, to: v.to, runs, params: calib, roomKeys: [room.key], boostPct: 40, play: { minNights: { [room.key]: minNights }, s: { gapDiscountPct: pct, gapMaxNights: pct > 0 ? reach : curMax } } });
 if (p.error) return null;
 while (!p.step(100)) { /* run to the end */ }
 const r = p.finish();
