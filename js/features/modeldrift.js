@@ -278,7 +278,7 @@ async function proposeRecent(progress = () => {}) {
 
 // ---- charts -------------------------------------------------------------------------------------------------
 
-const W = 640; const PL = 38; const PR = 8; const PT = 16; const PB = 20;
+const W = 640; const PL = 38; const PR = 34; const PT = 16; const PB = 20; // the right margin carries the season axis on the requests chart (and keeps the other charts aligned with it)
 
 function frame({ h, x0, x1, yMin, yMax, ticks, fmt }) {
   const X = (d) => PL + ((d - x0) / (x1 - x0)) * (W - PL - PR);
@@ -313,7 +313,8 @@ function demandChart(calc, events) {
   const top = Math.max(2, ...weeks.map((w) => Math.max(w.requests + w.enquiries, w.expected))) * 1.1;
   const step = top > 12 ? 4 : top > 6 ? 2 : 1;
   const ticks = []; for (let v = 0; v <= top; v += step) ticks.push(v);
-  const f = frame({ h, x0, x1, yMin: 0, yMax: Math.ceil(top / step) * step, ticks, fmt: (v) => String(v) });
+  const yMax = Math.ceil(top / step) * step;
+  const f = frame({ h, x0, x1, yMin: 0, yMax, ticks, fmt: (v) => String(v) });
   const bw = Math.max(2, (f.X(x0 + 7) - f.X(x0)) * 0.72);
   const bars = weeks.map((w) => {
     const x = f.X(w.t + 3.5) - bw / 2;
@@ -321,13 +322,17 @@ function demandChart(calc, events) {
     const tip = `Week of ${shortDate(w.t)}${w.partial ? ' (so far)' : ''}: ${w.requests} request${w.requests === 1 ? '' : 's'}${w.enquiries ? `, ${w.enquiries} enquir${w.enquiries === 1 ? 'y' : 'ies'}` : ''}; model expects ${w.expected.toFixed(1)}`;
     return `<g opacity="${w.partial ? 0.45 : 1}"><title>${escapeHtml(tip)}</title>${w.requests ? `<rect x="${x.toFixed(1)}" y="${yR.toFixed(1)}" width="${bw.toFixed(1)}" height="${(base - yR).toFixed(1)}" rx="2" fill="var(--slate)"/>` : ''}${w.enquiries ? `<rect x="${x.toFixed(1)}" y="${yE.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(0, yR - yE - 1).toFixed(1)}" rx="2" fill="var(--slate-bg)" stroke="var(--slate)" stroke-width="0.6"/>` : ''}<rect x="${(x - 2).toFixed(1)}" y="${PT}" width="${(bw + 4).toFixed(1)}" height="${(h - PT - PB).toFixed(1)}" fill="transparent"/></g>`;
   }).join('');
-  const line = weeks.filter((w) => !w.partial).map((w) => `${f.X(w.t + 3.5).toFixed(1)},${f.Y(w.expected).toFixed(1)}`).join(' ');
-  // London's seasonal shape, scaled so it averages what this room actually received over the weeks shown.
+  // The model's line is smoothed a little for drawing (1-2-1 over neighbouring weeks, the ends left as they are): a week's
+  // expectation jumps with which nights happen to be open, and the tooltips still give each week's own figure.
   const done = weeks.filter((w) => !w.partial);
-  const idxSum = done.reduce((a, w) => a + marketAt(w.t + 3), 0);
-  const scale = idxSum > 0 ? done.reduce((a, w) => a + w.requests, 0) / idxSum : 0;
-  const mkt = scale > 0 ? done.map((w) => `${f.X(w.t + 3.5).toFixed(1)},${f.Y(scale * marketAt(w.t + 3)).toFixed(1)}`).join(' ') : '';
-  return `<svg viewBox="0 0 ${W} ${h}" class="md-svg" role="img" aria-label="Requests received each week against the model's expectation">${f.grid}${bars}${mkt ? `<polyline points="${mkt}" fill="none" stroke="var(--sage)" stroke-width="1.5" stroke-dasharray="5 4" stroke-linejoin="round"/>` : ''}<polyline points="${line}" fill="none" stroke="var(--amber)" stroke-width="2" stroke-linejoin="round"/>${eventLayer(events, f.X, h)}</svg>`;
+  const sm = done.map((w, i) => (done[i - 1] && done[i + 1] ? (done[i - 1].expected + 2 * w.expected + done[i + 1].expected) / 4 : w.expected));
+  const line = done.map((w, i) => `${f.X(w.t + 3.5).toFixed(1)},${f.Y(sm[i]).toFixed(1)}`).join(' ');
+  // London's seasonal shape on its own right-hand axis (100% = an average month of the year), parked in the upper part of the
+  // chart where the bars and the model line rarely reach, so it reads as a shape to compare with, not a level.
+  const seasonY = (idx) => yMax * (0.72 + (idx - 1) * 0.5);
+  const mkt = done.map((w) => `${f.X(w.t + 3.5).toFixed(1)},${f.Y(seasonY(marketAt(w.t + 3))).toFixed(1)}`).join(' ');
+  const seasonAxis = [60, 80, 100, 120].map((p) => `<text x="${W - PR + 5}" y="${(f.Y(seasonY(p / 100)) + 3.5).toFixed(1)}" font-size="10" fill="var(--sage)">${p}%</text>`).join('') + `<text x="${W - PR + 5}" y="${PT - 5}" font-size="9" fill="var(--sage)">season</text>`;
+  return `<svg viewBox="0 0 ${W} ${h}" class="md-svg" role="img" aria-label="Requests received each week against the model's expectation, with London's seasonal shape on a right-hand axis">${f.grid}${bars}${mkt ? `<polyline points="${mkt}" fill="none" stroke="var(--sage)" stroke-width="2.25" stroke-dasharray="6 4" stroke-linecap="round" stroke-linejoin="round"/>` : ''}<polyline points="${line}" fill="none" stroke="var(--amber)" stroke-width="2" stroke-linejoin="round"/>${seasonAxis}${eventLayer(events, f.X, h)}</svg>`;
 }
 
 function ratioChart(calc, list, events, label) {
@@ -365,6 +370,14 @@ function statusTable(ctx, calc) {
   if (d.recent) {
     const r = d.recent; const above = r.lo > 1; const below = r.hi < 1;
     rows.push(`<tr><td>Requests a week</td><td class="num">${d.K} in the last 4 weeks</td><td class="num">${d.E.toFixed(1)} expected</td><td class="num">${r.rho.toFixed(2)}× <span class="settings-note" style="margin:0;">(${r.lo.toFixed(2)}–${r.hi.toFixed(2)})</span></td><td>${above ? chip('warn', 'Running above the model') : below ? chip('warn', 'Running below the model') : chip('ok', 'In line')}</td></tr>`);
+  }
+  // Enquiries: not forecast, but how many turn into bookings says whether they are worth counting as demand.
+  const enq = ctx.requests.filter((q) => q.kind === 'enquiry' && calc.ids.has(q.listingId) && q.receivedAt);
+  if (enq.length) {
+    const tally = (list) => { const booked = list.filter((q) => q.decision === 'accepted').length; const not = list.filter((q) => q.decision === 'not-booked').length; return { n: list.length, booked, not, open: list.length - booked - not, rate: booked + not ? booked / (booked + not) : null }; };
+    const rc = tally(enq.filter((q) => dn(q.receivedAt) > calc.today - RECENT)); const all = tally(enq.filter((q) => dn(q.receivedAt) > calc.today - 182));
+    const pct = (t) => (t.rate == null ? '–' : `${Math.round(t.rate * 100)}%`);
+    rows.push(`<tr><td>Enquiries</td><td class="num">${rc.n} in the last 6 weeks</td><td class="num">${rc.booked} booked, ${rc.not} not, ${rc.open} open</td><td class="num">${pct(rc)} <span class="settings-note" style="margin:0;">(${pct(all)} of ${all.n} in 26 weeks)</span></td><td>${chip('', 'Not modelled')}</td></tr>`);
   }
   [['lead', 'Lead time', days], ['price', 'Price per night', money], ['length', 'Stay length', nights]].forEach(([k, name, fmt]) => {
     const rd = readPoints(calc.pts[k], calc.today);
@@ -409,7 +422,7 @@ function sectionHtml() {
   return `${picker}
 ${statusTable(ctx, calc)}
 ${storyHtml(ctx, calc)}
-<div class="md-chart"><div class="md-title">Requests received each week <span class="md-key"><i style="background:var(--slate)"></i>requests <i style="background:var(--slate-bg);border:1px solid var(--slate)"></i>enquiries <i style="background:var(--amber)"></i>model expects <i style="background:var(--sage)"></i>London season</span></div><div class="settings-note" style="margin:0 0 2px;">Counts requests, enquiries and instant bookings by the day they landed. The model line is what it expects at list price for the nights that were still open; the pale last bar is this week so far. The dashed line is how London private rooms rise and fall through the year, scaled to your average over these weeks: requests above it are not just the season. ${creditHtml()}</div>${demandChart(calc, events)}</div>
+<div class="md-chart"><div class="md-title">Requests received each week <span class="md-key"><i style="background:var(--slate)"></i>requests <i style="background:var(--slate-bg);border:1px solid var(--slate)"></i>enquiries <i style="background:var(--amber)"></i>model expects <i style="background:var(--sage)"></i>London season (right axis)</span></div><div class="settings-note" style="margin:0 0 2px;">Solid bars are requests and instant bookings by the day they landed; outlined bars on top are enquiries, which the model does not forecast (an enquiry that turns into a booking also appears as a solid bar). The orange line is the model's expectation of requests and instant bookings only, at list price, for the nights still open then, lightly smoothed for drawing. A faded last bar is this week so far. The dashed line is how London private rooms rise and fall through the year on the right-hand axis (100% is an average month): compare its rises and falls with the bars, not its height. ${creditHtml()}</div>${demandChart(calc, events)}</div>
 <div class="md-chart"><div class="md-title">Lead time against the model <span class="md-key"><i style="background:var(--slate)"></i>each request <i style="background:var(--sage)"></i>6-week median</span></div><div class="settings-note" style="margin:0 0 2px;">How far ahead requests come, as a multiple of the model's median for that check-in month (above 1× is further ahead than modelled).</div>${ratioChart(calc, calc.pts.lead, events, lead)}</div>
 <div class="md-chart"><div class="md-title">Price per night against the model</div><div class="settings-note" style="margin:0 0 2px;">Each request's payout per night with the cleaning fee and short-notice and length discounts taken out, over the model's price for those nights.</div>${ratioChart(calc, calc.pts.price, events, price)}</div>
 <div class="md-chart"><div class="md-title">Stay length against the model</div><div class="settings-note" style="margin:0 0 2px;">Nights requested over the model's median stay.</div>${ratioChart(calc, calc.pts.length, events, len)}</div>
