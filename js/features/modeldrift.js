@@ -98,18 +98,25 @@ function opennessOf(ctx, ri) {
 
 // Requests the model expects to be received in the week starting `t0`: each check-in date asks at its rate x weekday
 // weight, and the lead-time curve says what share of that lands in this week.
-function expectedWeek(ctx, params, ri, open, t0) {
+// weekParts also gives the open-night capacity C (the same sum with every night's rate set to 1) and, when asked, Cm (the
+// sum with London's seasonal index as the rate), so charts can show requests per open night and what the market's own shape
+// would have expected through the same lead-time weights.
+function weekParts(ctx, params, ri, open, t0, withMarket = false) {
   const { lambdaFor, leadCdf, dowOf, monthOf } = driftKit;
-  let sum = 0;
+  let E = 0; let C = 0; let Cm = 0;
   for (let c = t0; c < t0 + 420; c++) {
     const share = leadCdf(params, c, c - t0) - leadCdf(params, c, c - t0 - 7);
     if (!(share > 1e-9)) continue;
     const o = open(c, t0 + 3);
     if (!o) continue;
-    sum += lambdaFor(ctx, params, ri, monthOf(c)) * params.dowW[dowOf(c)] * share;
+    const wgt = params.dowW[dowOf(c)] * share;
+    E += lambdaFor(ctx, params, ri, monthOf(c)) * wgt;
+    C += wgt;
+    if (withMarket) Cm += marketAt(c) * wgt;
   }
-  return sum;
+  return { E, C, Cm };
 }
+function expectedWeek(ctx, params, ri, open, t0) { return weekParts(ctx, params, ri, open, t0).E; }
 
 // ---- everything one room's charts need ---------------------------------------------------------------------
 
@@ -125,11 +132,12 @@ function computeRoom(ctx, params, ri) {
   const weeks = [];
   for (let w = first; w <= weekStart(today); w += 7) {
     const inWeek = asks.filter((a) => a.t >= w && a.t < w + 7);
+    const parts = weekParts(ctx, params, ri, open, w, true);
     weeks.push({
       t: w, partial: w + 7 > today + 1,
       requests: inWeek.filter((a) => a.kind === 'request').length,
       enquiries: inWeek.filter((a) => a.kind === 'enquiry').length,
-      expected: expectedWeek(ctx, params, ri, open, w),
+      expected: parts.E, cap: parts.C, capMarket: parts.Cm,
     });
   }
   const done = weeks.filter((w) => !w.partial && w.expected > 0);
@@ -181,12 +189,12 @@ function eventsFor(ctx, calc) {
   const lbl = (id) => ctx.listingLabels[id] || 'Listing';
   calc.ids.forEach((id) => {
     const mine = calc.asks.filter((a) => a.listingId === id);
-    if (mine.length) out.push({ t: mine[0].t, label: 'first request', listingId: id, auto: true });
+    if (mine.length) out.push({ t: mine[0].t, label: 'first request', listingId: id, auto: true, kind: 'first' });
     // The last few stays to end on this listing, by guest (a stay's review can follow within days).
     ctx.earnings.filter((e) => e.listingId === id && e.start && dn(e.start) + e.nights <= calc.today && dn(e.start) + e.nights >= calc.first)
       .map((e) => ({ c: dn(e.start) + e.nights, who: String(e.guest || '').trim().split(/\s+/)[0] }))
       .sort((a, b) => b.c - a.c).slice(0, 8)
-      .forEach((x) => out.push({ t: x.c, label: x.who ? `${x.who}'s stay ends` : 'a stay ends', listingId: id, auto: true }));
+      .forEach((x) => out.push({ t: x.c, label: x.who ? `${x.who}'s stay ends` : 'a stay ends', listingId: id, auto: true, kind: 'stay' }));
   });
   (data.prefs.listingEvents || []).forEach((e) => { if (e.date && (!e.listingId || calc.ids.has(e.listingId))) out.push({ t: dn(e.date), label: e.note || 'change', listingId: e.listingId || '', id: e.id }); });
   return out.filter((e) => e.t >= calc.first && e.t <= calc.today + 1).sort((a, b) => a.t - b.t).map((e, i) => ({ ...e, n: i + 1, lbl: e.listingId ? lbl(e.listingId) : 'All rooms' }));
@@ -296,9 +304,6 @@ function frame({ h, x0, x1, yMin, yMax, ticks, fmt }) {
   return { X, Y, grid };
 }
 
-function eventLayer(events, X, h) {
-  return events.map((e) => `<g><title>${escapeHtml(`${e.n}. ${shortDate(e.t)} · ${e.lbl}: ${e.label}`)}</title><line x1="${X(e.t).toFixed(1)}" x2="${X(e.t).toFixed(1)}" y1="${PT - 2}" y2="${h - PB}" stroke="var(--plum)" stroke-width="1" stroke-dasharray="3 3" opacity="${e.auto ? 0.45 : 0.9}"/><text x="${X(e.t).toFixed(1)}" y="${PT - 5}" text-anchor="middle" font-size="9" font-weight="600" fill="var(--plum)">${e.n}</text></g>`).join('');
-}
 
 // London's seasonal index at a day number, interpolated between month centres so the line doesn't step at month ends.
 function marketAt(n) {
@@ -309,6 +314,67 @@ function marketAt(n) {
   const i = Math.floor(pos); const fr = pos - i;
   return MARKET_SEASON[(i + 12) % 12] * (1 - fr) + MARKET_SEASON[(i + 13) % 12] * fr;
 }
+
+
+// ---- layer toggles and one shared crosshair per chart ---------------------------------------------------------
+
+const LAYER_KEY = 'md-layers';
+const LAYER_DEFAULTS = { 'ev-stay': false }; // the automatic stay-ending markers are clutter until asked for
+function loadLayers() { try { return JSON.parse(localStorage.getItem(LAYER_KEY)) || {}; } catch (e) { return {}; } }
+function saveLayers() { try { localStorage.setItem(LAYER_KEY, JSON.stringify(ui.layers)); } catch (e) { /* private window: the choice just isn't remembered */ } }
+const layerOn = (k) => (k in ui.layers ? !!ui.layers[k] : LAYER_DEFAULTS[k] !== false);
+const lay = (k) => ` data-md-layer="${k}"`;
+
+// A row of tick boxes above a chart, doubling as its key. A `fixed` item is always drawn and has no box.
+function togglesHtml(items) {
+  const ev = [{ k: 'ev-own', label: 'Your changes and first request', color: 'var(--plum)' }, { k: 'ev-stay', label: 'Stay endings', color: 'var(--plum)', dash: true }];
+  return `<div class="md-togs">${items.concat(ev).map((it) => {
+    const sw = `<i style="border-color:${it.color};${it.dash ? 'border-top-style:dashed;' : ''}${it.bar ? 'border-top-width:7px;' : ''}"></i>`;
+    return it.fixed ? `<span>${sw}${escapeHtml(it.label)}</span>` : `<label><input type="checkbox" data-md-tog="${it.k}"${layerOn(it.k) ? ' checked' : ''}>${sw}${escapeHtml(it.label)}</label>`;
+  }).join('')}</div>`;
+}
+
+function applyLayers(scope) {
+  scope.querySelectorAll('[data-md-layer]').forEach((el) => { el.style.display = layerOn(el.dataset.mdLayer) ? '' : 'none'; });
+  scope.querySelectorAll('[data-md-tog]').forEach((el) => { el.checked = layerOn(el.dataset.mdTog); });
+}
+
+// Hover points for a chart: x in drawing units, plain-text lines, the layer they belong to. Events are points too, so a
+// marker can be read by pointing near it; everything else snaps to the nearest week or request.
+const hovAttr = (pts) => ` data-md-hov="${escapeHtml(JSON.stringify(pts.map((p) => ({ x: Math.round(p.x * 10) / 10, l: p.lines, k: p.layer || '', e: p.ev ? 1 : 0 }))))}"`;
+const eventHov = (events, X) => events.map((e) => ({ x: X(e.t), lines: [`${e.n}. ${shortDate(e.t)} · ${e.lbl}: ${e.label}`], layer: e.kind === 'stay' ? 'ev-stay' : 'ev-own', ev: true }));
+const crossLine = (h) => `<line data-md-cross x1="0" x2="0" y1="${PT}" y2="${h - PB}" stroke="var(--ink)" stroke-width="1" opacity="0.45" style="display:none"/>`;
+const plotHtml = (svg) => `<div class="md-plot">${svg}<div class="md-tip"></div></div>`;
+
+function wireHover(scope) {
+  scope.querySelectorAll('.md-plot').forEach((plot) => {
+    const svg = plot.querySelector('svg[data-md-hov]'); if (!svg) return;
+    let pts = []; try { pts = JSON.parse(svg.dataset.mdHov); } catch (e) { return; }
+    const tip = plot.querySelector('.md-tip'); const cross = svg.querySelector('[data-md-cross]');
+    const hide = () => { tip.style.display = 'none'; if (cross) cross.style.display = 'none'; };
+    const show = (ev) => {
+      const r = svg.getBoundingClientRect(); if (!r.width) return;
+      const vx = ((ev.clientX - r.left) / r.width) * W;
+      const live = pts.filter((p) => !p.k || layerOn(p.k));
+      let best = null;
+      const pick = (list, reach) => list.forEach((p) => { const d = Math.abs(p.x - vx); if (d <= reach && (!best || d < best.d)) best = { p, d }; });
+      pick(live.filter((p) => p.e), 5); // a marker if the pointer is on one, else the nearest week or request
+      if (!best) pick(live.filter((p) => !p.e), Infinity);
+      if (!best) { hide(); return; }
+      if (cross) { cross.setAttribute('x1', best.p.x); cross.setAttribute('x2', best.p.x); cross.style.display = ''; }
+      tip.textContent = best.p.l.join('\n'); tip.style.display = 'block';
+      const px = (best.p.x / W) * r.width; const tw = tip.offsetWidth;
+      tip.style.left = `${Math.max(0, Math.min(r.width - tw, px + 10 + tw > r.width ? px - tw - 10 : px + 10))}px`;
+    };
+    svg.addEventListener('pointermove', show); svg.addEventListener('pointerdown', show); svg.addEventListener('pointerleave', hide);
+  });
+}
+
+function eventLayer(events, X, h) {
+  return events.map((e) => `<g${lay(e.kind === 'stay' ? 'ev-stay' : 'ev-own')}><line x1="${X(e.t).toFixed(1)}" x2="${X(e.t).toFixed(1)}" y1="${PT - 2}" y2="${h - PB}" stroke="var(--plum)" stroke-width="1" stroke-dasharray="3 3" opacity="${e.auto ? 0.45 : 0.9}"/><text x="${X(e.t).toFixed(1)}" y="${PT - 5}" text-anchor="middle" font-size="9" font-weight="600" fill="var(--plum)">${e.n}</text></g>`).join('');
+}
+
+const niceStep = (top) => { for (const s of [0.05, 0.1, 0.2, 0.25, 0.5, 1, 2, 5, 10]) if (top / s <= 5) return s; return 20; };
 
 function demandChart(calc, events) {
   const h = 190;
@@ -323,11 +389,10 @@ function demandChart(calc, events) {
   const bars = weeks.map((w) => {
     const x = f.X(w.t + 3.5) - bw / 2;
     const yR = f.Y(w.requests); const yE = f.Y(w.requests + w.enquiries); const base = f.Y(0);
-    const tip = `Week of ${shortDate(w.t)}${w.partial ? ' (so far)' : ''}: ${w.requests} request${w.requests === 1 ? '' : 's'}${w.enquiries ? `, ${w.enquiries} enquir${w.enquiries === 1 ? 'y' : 'ies'}` : ''}; model expects ${w.expected.toFixed(1)}`;
-    return `<g opacity="${w.partial ? 0.45 : 1}"><title>${escapeHtml(tip)}</title>${w.requests ? `<rect x="${x.toFixed(1)}" y="${yR.toFixed(1)}" width="${bw.toFixed(1)}" height="${(base - yR).toFixed(1)}" rx="2" fill="var(--slate)"/>` : ''}${w.enquiries ? `<rect x="${x.toFixed(1)}" y="${yE.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(0, yR - yE - 1).toFixed(1)}" rx="2" fill="var(--slate-bg)" stroke="var(--slate)" stroke-width="0.6"/>` : ''}<rect x="${(x - 2).toFixed(1)}" y="${PT}" width="${(bw + 4).toFixed(1)}" height="${(h - PT - PB).toFixed(1)}" fill="transparent"/></g>`;
+    return `<g opacity="${w.partial ? 0.45 : 1}">${w.requests ? `<rect x="${x.toFixed(1)}" y="${yR.toFixed(1)}" width="${bw.toFixed(1)}" height="${(base - yR).toFixed(1)}" rx="2" fill="var(--slate)"/>` : ''}${w.enquiries ? `<rect${lay('req:enq')} x="${x.toFixed(1)}" y="${yE.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(0, yR - yE - 1).toFixed(1)}" rx="2" fill="var(--slate-bg)" stroke="var(--slate)" stroke-width="0.6"/>` : ''}</g>`;
   }).join('');
   // The model's line is smoothed a little for drawing (1-2-1 over neighbouring weeks, the ends left as they are): a week's
-  // expectation jumps with which nights happen to be open, and the tooltips still give each week's own figure.
+  // expectation jumps with which nights happen to be open, and the hover gives each week's own figure.
   const done = weeks.filter((w) => !w.partial);
   const sm = done.map((w, i) => (done[i - 1] && done[i + 1] ? (done[i - 1].expected + 2 * w.expected + done[i + 1].expected) / 4 : w.expected));
   const line = done.map((w, i) => `${f.X(w.t + 3.5).toFixed(1)},${f.Y(sm[i]).toFixed(1)}`).join(' ');
@@ -336,26 +401,55 @@ function demandChart(calc, events) {
   const seasonY = (idx) => yMax * (0.72 + (idx - 1) * 0.5);
   const mkt = done.map((w) => `${f.X(w.t + 3.5).toFixed(1)},${f.Y(seasonY(marketAt(w.t + 3))).toFixed(1)}`).join(' ');
   const seasonAxis = [60, 80, 100, 120].map((p) => `<text x="${W - PR + 5}" y="${(f.Y(seasonY(p / 100)) + 3.5).toFixed(1)}" font-size="10" fill="var(--sage)">${p}%</text>`).join('') + `<text x="${W - PR + 5}" y="${PT - 5}" font-size="9" fill="var(--sage)">season</text>`;
-  return `<svg viewBox="0 0 ${W} ${h}" class="md-svg" role="img" aria-label="Requests received each week against the model's expectation, with London's seasonal shape on a right-hand axis">${f.grid}${bars}${mkt ? `<polyline points="${mkt}" fill="none" stroke="var(--sage)" stroke-width="2.25" stroke-dasharray="6 4" stroke-linecap="round" stroke-linejoin="round"/>` : ''}<polyline points="${line}" fill="none" stroke="var(--amber)" stroke-width="2" stroke-linejoin="round"/>${seasonAxis}${eventLayer(events, f.X, h)}</svg>`;
+  const pts = weeks.map((w) => ({ x: f.X(w.t + 3.5), lines: [`Week of ${shortDate(w.t)}${w.partial ? ' (so far)' : ''}`, `${w.requests} request${w.requests === 1 ? '' : 's'}${w.enquiries ? `, ${w.enquiries} enquir${w.enquiries === 1 ? 'y' : 'ies'}` : ''}`, `Model expects ${w.expected.toFixed(1)}`, `London season ${Math.round(marketAt(w.t + 3) * 100)}%`] })).concat(eventHov(events, f.X));
+  return plotHtml(`<svg viewBox="0 0 ${W} ${h}" class="md-svg" role="img" aria-label="Requests received each week against the model's expectation, with London's seasonal shape on a right-hand axis"${hovAttr(pts)}>${f.grid}${bars}${mkt ? `<g${lay('req:season')}><polyline points="${mkt}" fill="none" stroke="var(--sage)" stroke-width="2.25" stroke-dasharray="6 4" stroke-linecap="round" stroke-linejoin="round"/>${seasonAxis}</g>` : ''}<polyline${lay('req:model')} points="${line}" fill="none" stroke="var(--amber)" stroke-width="2" stroke-linejoin="round"/>${eventLayer(events, f.X, h)}${crossLine(h)}</svg>`);
 }
 
-function ratioChart(calc, list, events, label) {
+// Requests per open night, in layers: London's shape (scaled to the same average, through the model's own lead-time weights),
+// the model's own rate, what actually arrived, and actual over model as a ratio on the right-hand axis.
+function sourceChart(calc, events) {
+  const h = 210;
+  const done = calc.weeks.filter((w) => !w.partial && w.cap > 0);
+  if (done.length < 4) return '';
+  const sumE = done.reduce((a, w) => a + w.expected, 0); const sumCm = done.reduce((a, w) => a + w.capMarket, 0);
+  const k = sumCm > 0 ? sumE / sumCm : 0;
+  const rows = done.map((w, i) => {
+    const win = done.slice(Math.max(0, i - 3), i + 1);
+    const cap = win.reduce((a, x) => a + x.cap, 0); const E = win.reduce((a, x) => a + x.expected, 0); const A = win.reduce((a, x) => a + x.requests, 0);
+    return { t: w.t, model: w.expected / w.cap, market: (k * w.capMarket) / w.cap, raw: w.requests / w.cap, actual: win.length >= 2 ? A / cap : null, err: win.length >= 2 && E >= 1 ? A / E : null };
+  });
+  const top = Math.max(0.1, ...rows.map((r) => Math.max(r.model, r.market, r.actual || 0))) * 1.15;
+  const step = niceStep(top); const yMax = Math.ceil(top / step) * step;
+  const ticks = []; for (let v = 0; v <= yMax + 1e-9; v += step) ticks.push(+v.toFixed(3));
+  const x0 = done[0].t; const x1 = done[done.length - 1].t + 7;
+  const f = frame({ h, x0, x1, yMin: 0, yMax, ticks, fmt: (v) => String(+v.toFixed(2)) });
+  const errMax = 3; const errY = (r) => PT + (1 - Math.min(errMax, r) / errMax) * (h - PT - PB);
+  const poly = (key, y, attrs, layer) => { const p = rows.filter((r) => r[key] != null).map((r) => `${f.X(r.t + 3.5).toFixed(1)},${y(r[key]).toFixed(1)}`); return p.length > 1 ? `<polyline${layer ? lay(layer) : ''} points="${p.join(' ')}" fill="none" ${attrs} stroke-linejoin="round" stroke-linecap="round"/>` : ''; };
+  const dots = rows.map((r) => `<circle cx="${f.X(r.t + 3.5).toFixed(1)}" cy="${f.Y(r.raw).toFixed(1)}" r="2" fill="var(--slate)" opacity="0.3"/>`).join('');
+  const rightAxis = [0, 1, 2, 3].map((v) => `<text x="${W - PR + 5}" y="${(errY(v) + 3.5).toFixed(1)}" font-size="10" fill="var(--ink)">${v}×</text>`).join('') + `<text x="${W - PR + 5}" y="${PT - 5}" font-size="9" fill="var(--ink)">actual÷model</text><line x1="${PL}" x2="${W - PR}" y1="${errY(1).toFixed(1)}" y2="${errY(1).toFixed(1)}" stroke="var(--ink)" stroke-width="1" stroke-dasharray="1 3" opacity="0.5"/>`;
+  const pts = rows.map((r) => ({ x: f.X(r.t + 3.5), lines: [`Week of ${shortDate(r.t)}`, `London's shape ${r.market.toFixed(2)}`, `Model ${r.model.toFixed(2)}`, `Actual, 4 weeks ${r.actual == null ? 'n/a' : r.actual.toFixed(2)} (this week ${r.raw.toFixed(2)})`, `Actual ÷ model ${r.err == null ? 'n/a' : `${r.err.toFixed(2)}×`}`] })).concat(eventHov(events, f.X));
+  return plotHtml(`<svg viewBox="0 0 ${W} ${h}" class="md-svg" role="img" aria-label="Requests per open night: London's shape, the model's rate and what arrived, with actual over model on the right-hand axis"${hovAttr(pts)}>${f.grid}${poly('market', f.Y, 'stroke="var(--sage)" stroke-width="2.25" stroke-dasharray="6 4"', 'src:market')}${poly('model', f.Y, 'stroke="var(--amber)" stroke-width="2"', 'src:model')}<g${lay('src:actual')}>${dots}</g>${poly('actual', f.Y, 'stroke="var(--slate)" stroke-width="2.5"', 'src:actual')}<g${lay('src:err')}>${poly('err', errY, 'stroke="var(--ink)" stroke-width="1.75"')}${rightAxis}</g>${eventLayer(events, f.X, h)}${crossLine(h)}</svg>`);
+}
+
+function ratioChart(calc, list, events, label, id) {
   const h = 150;
   const x0 = calc.first; const x1 = calc.today + 1;
   const lg = (v) => Math.log2(v);
   const f = frame({ h, x0, x1, yMin: -2, yMax: 2, ticks: [-2, -1, 0, 1, 2], fmt: (v) => ['¼×', '½×', '1×', '2×', '4×'][v + 2] });
-  const dots = list.map((p) => `<circle cx="${f.X(p.t).toFixed(1)}" cy="${f.Y(lg(p.r)).toFixed(1)}" r="3" fill="var(--slate)" opacity="0.45"><title>${escapeHtml(`${shortDate(p.t)}: ${label.fmt(p.actual)} against the model's ${label.fmt(p.model)} (${p.r.toFixed(2)}×)`)}</title></circle>`).join('');
+  const dots = list.map((p) => `<circle cx="${f.X(p.t).toFixed(1)}" cy="${f.Y(lg(p.r)).toFixed(1)}" r="3" fill="var(--slate)" opacity="0.45"/>`).join('');
   const roll = [];
   for (let w = calc.first; w <= calc.today; w += 7) {
     const win = list.filter((p) => p.t > w + 7 - RECENT && p.t <= w + 7);
     if (win.length >= 4) roll.push(`${f.X(w + 3.5).toFixed(1)},${f.Y(median(win.map((p) => lg(p.r)))).toFixed(1)}`);
   }
-  return `<svg viewBox="0 0 ${W} ${h}" class="md-svg" role="img" aria-label="${escapeHtml(label.name)} against the model">${f.grid}<line x1="${PL}" x2="${W - PR}" y1="${f.Y(0).toFixed(1)}" y2="${f.Y(0).toFixed(1)}" stroke="var(--ink)" stroke-width="1" opacity="0.5"/>${dots}${roll.length > 1 ? `<polyline points="${roll.join(' ')}" fill="none" stroke="var(--sage)" stroke-width="2" stroke-linejoin="round"/>` : ''}${eventLayer(events, f.X, h)}</svg>`;
+  const dts = [...new Set(list.map((p) => p.t))].sort((a, b) => a - b);
+  const pts = dts.map((t) => ({ x: f.X(t), lines: [shortDate(t)].concat(list.filter((p) => p.t === t).map((p) => `${label.fmt(p.actual)} against the model's ${label.fmt(p.model)} (${p.r.toFixed(2)}×)`)), layer: `${id}:dots` })).concat(eventHov(events, f.X));
+  return plotHtml(`<svg viewBox="0 0 ${W} ${h}" class="md-svg" role="img" aria-label="${escapeHtml(label.name)} against the model"${hovAttr(pts)}>${f.grid}<line x1="${PL}" x2="${W - PR}" y1="${f.Y(0).toFixed(1)}" y2="${f.Y(0).toFixed(1)}" stroke="var(--ink)" stroke-width="1" opacity="0.5"/><g${lay(`${id}:dots`)}>${dots}</g>${roll.length > 1 ? `<polyline${lay(`${id}:median`)} points="${roll.join(' ')}" fill="none" stroke="var(--sage)" stroke-width="2" stroke-linejoin="round"/>` : ''}${eventLayer(events, f.X, h)}${crossLine(h)}</svg>`);
 }
 
 // ---- the section --------------------------------------------------------------------------------------------
 
-const ui = { room: 0, ctx: null, params: null, calcs: {}, busy: false };
+const ui = { room: 0, ctx: null, params: null, calcs: {}, busy: false, layers: loadLayers() };
 
 const money = (v) => `£${Math.round(v)}`;
 const days = (v) => `${v < 10 ? v.toFixed(1) : Math.round(v)} days`;
@@ -407,7 +501,7 @@ function eventsHtml(ctx, calc, events) {
   const listings = [...calc.ids];
   const opts = ['<option value="">All rooms</option>'].concat(listings.map((id) => `<option value="${escapeHtml(id)}">${escapeHtml(ctx.listingLabels[id] || 'Listing')}</option>`)).join('');
   const rows = events.map((e) => `<li class="md-ev"><b>${e.n}.</b> ${longDate(e.t)} · ${e.listingId ? listingLink(ctx, e.listingId) : 'All rooms'}: ${escapeHtml(e.label)}${e.auto ? '' : ` <button class="sync-btn sm inline" type="button" data-md-del="${escapeHtml(e.id)}" title="Remove this marker">Remove</button>`}</li>`).join('');
-  return `<div class="md-events"><div class="settings-note" style="margin:0 0 4px;">Markers on the charts. Stay endings and first requests come from your data; add the work you do on a listing so its effect can be seen.</div><ul class="md-evlist">${rows || '<li class="settings-note" style="margin:0;">None in this period.</li>'}</ul>
+  return `<div class="md-events"><div class="settings-note" style="margin:0 0 4px;">Markers on the charts. First requests and stay endings come from your data (stay endings are hidden until you tick "Stay endings" above a chart); add the work you do on a listing so its effect can be seen.</div><ul class="md-evlist">${rows || '<li class="settings-note" style="margin:0;">None in this period.</li>'}</ul>
 <div class="sync-row" style="align-items:flex-start;flex-wrap:wrap;gap:6px;margin-top:6px;"><input type="date" data-md-date value="${todayStr()}"><select data-md-listing>${opts}</select><input type="text" list="md-notes" data-md-note placeholder="What changed" autocomplete="off" style="min-width:160px;"><datalist id="md-notes"><option value="New photos"><option value="Title changed"><option value="Description rewritten"><option value="Price changed"><option value="Minimum stay changed"><option value="Amenities added"><option value="Calendar opened up"><option value="Cancellation policy changed"></datalist><button class="sync-btn sm inline" type="button" data-md-add>Add marker</button></div></div>`;
 }
 
@@ -427,16 +521,18 @@ function sectionHtml() {
   return `${picker}
 ${statusTable(ctx, calc)}
 ${storyHtml(ctx, calc)}
-<div class="md-chart"><div class="md-title">Requests received each week <span class="md-key"><i style="background:var(--slate)"></i>requests <i style="background:var(--slate-bg);border:1px solid var(--slate)"></i>enquiries <i style="background:var(--amber)"></i>model expects <i style="background:var(--sage)"></i>London season (right axis)</span></div><div class="settings-note" style="margin:0 0 2px;">Solid bars are requests and instant bookings by the day they landed; outlined bars on top are enquiries, which the model does not forecast (an enquiry that turns into a booking also appears as a solid bar). The orange line is the model's expectation of requests and instant bookings only, at list price, for the nights still open then, lightly smoothed for drawing. A faded last bar is this week so far. The dashed line is how London private rooms rise and fall through the year on the right-hand axis (100% is an average month): compare its rises and falls with the bars, not its height. ${creditHtml()}</div>${demandChart(calc, events)}</div>
-<div class="md-chart"><div class="md-title">Lead time against the model <span class="md-key"><i style="background:var(--slate)"></i>each request <i style="background:var(--sage)"></i>6-week median</span></div><div class="settings-note" style="margin:0 0 2px;">How far ahead requests come, as a multiple of the model's median for that check-in month (above 1× is further ahead than modelled).</div>${ratioChart(calc, calc.pts.lead, events, lead)}</div>
-<div class="md-chart"><div class="md-title">Price per night against the model</div><div class="settings-note" style="margin:0 0 2px;">Each request's payout per night with the cleaning fee and short-notice and length discounts taken out, over the model's price for those nights.</div>${ratioChart(calc, calc.pts.price, events, price)}</div>
-<div class="md-chart"><div class="md-title">Stay length against the model</div><div class="settings-note" style="margin:0 0 2px;">Nights requested over the model's median stay.</div>${ratioChart(calc, calc.pts.length, events, len)}</div>
+<div class="md-chart"><div class="md-title">Requests received each week</div>${togglesHtml([{ fixed: true, label: 'requests', color: 'var(--slate)', bar: true }, { k: 'req:enq', label: 'enquiries', color: 'var(--slate)', bar: true }, { k: 'req:model', label: 'model expects', color: 'var(--amber)' }, { k: 'req:season', label: 'London season (right axis)', color: 'var(--sage)', dash: true }])}<div class="settings-note" style="margin:0 0 2px;">Solid bars are requests and instant bookings by the day they landed; outlined bars on top are enquiries, which the model does not forecast (an enquiry that turns into a booking also appears as a solid bar). The orange line is the model's expectation of requests and instant bookings only, at list price, for the nights still open then, lightly smoothed for drawing. A faded last bar is this week so far. The dashed line is how London private rooms rise and fall through the year on the right-hand axis (100% is an average month): compare its rises and falls with the bars, not its height. Point at a week for its figures. ${creditHtml()}</div>${demandChart(calc, events)}</div>
+${sourceChart(calc, events) ? `<div class="md-chart"><div class="md-title">Where requests come from: London, our season, the model, what arrived</div>${togglesHtml([{ k: 'src:market', label: "London's shape", color: 'var(--sage)', dash: true }, { k: 'src:model', label: "model's rate", color: 'var(--amber)' }, { k: 'src:actual', label: 'actual (4-week)', color: 'var(--slate)' }, { k: 'src:err', label: 'actual ÷ model (right axis)', color: 'var(--ink)' }])}<div class="settings-note" style="margin:0 0 2px;">Requests per open night: how many requests each night on offer draws over its lead time, so a week with fewer open nights does not read as weaker demand. The dashed line is London's seasonal shape, scaled to the same average as the model and run through the model's own lead-time weights. The gap between it and the orange line is what the model has learned about your own seasonality (and the demand factor); the gap between orange and blue is what the model gets wrong. The dark line, on the right-hand axis, is that error as a ratio: 1× is right, above 1× means more requests than modelled. Actual is a 4-week rolling figure with single weeks as faint dots. ${creditHtml()}</div>${sourceChart(calc, events)}</div>` : ''}
+<div class="md-chart"><div class="md-title">Lead time against the model</div>${togglesHtml([{ k: 'lead:dots', label: 'each request', color: 'var(--slate)', bar: true }, { k: 'lead:median', label: '6-week median', color: 'var(--sage)' }])}<div class="settings-note" style="margin:0 0 2px;">How far ahead requests come, as a multiple of the model's median for that check-in month (above 1× is further ahead than modelled).</div>${ratioChart(calc, calc.pts.lead, events, lead, 'lead')}</div>
+<div class="md-chart"><div class="md-title">Price per night against the model</div>${togglesHtml([{ k: 'price:dots', label: 'each request', color: 'var(--slate)', bar: true }, { k: 'price:median', label: '6-week median', color: 'var(--sage)' }])}<div class="settings-note" style="margin:0 0 2px;">Each request's payout per night with the cleaning fee and short-notice and length discounts taken out, over the model's price for those nights.</div>${ratioChart(calc, calc.pts.price, events, price, 'price')}</div>
+<div class="md-chart"><div class="md-title">Stay length against the model</div>${togglesHtml([{ k: 'len:dots', label: 'each request', color: 'var(--slate)', bar: true }, { k: 'len:median', label: '6-week median', color: 'var(--sage)' }])}<div class="settings-note" style="margin:0 0 2px;">Nights requested over the model's median stay.</div>${ratioChart(calc, calc.pts.length, events, len, 'len')}</div>
 ${eventsHtml(ctx, calc, events)}
 <div class="settings-note" style="margin:8px 0 0;">Corrections in force: empty nights divided by ${f(cal.demand)}, lead time ×${f(cal.lead)}, and typical stay ${(data.prefs.bookingEvaluator || {}).stayMedian ? ((data.prefs.bookingEvaluator || {}).stayMedian + " nights") : "as learned"} (stay in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#booking-evaluator-settings">Booking evaluator settings</span>). Where an input is flagged, work out a correction from recent requests in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#model-review">Model review</span>. The model also borrows London's seasonal shape for months it has no evidence of its own. ${creditHtml()}</div>`;
 }
 
 function renderBody(el) {
   el.innerHTML = sectionHtml();
+  applyLayers(el); wireHover(el);
 }
 
 // calibrate() and the demand rates are the slow part (a second or two), so they run when the section is opened.
@@ -466,6 +562,8 @@ function initModelDrift() {
   const body = document.getElementById('model-drift-body');
   root.addEventListener('toggle', () => { if (root.open) calculate(body, true); });
   root.addEventListener('change', (e) => {
+    const tg = e.target.closest('[data-md-tog]');
+    if (tg) { ui.layers[tg.dataset.mdTog] = tg.checked; saveLayers(); applyLayers(body); return; }
     const sel = e.target.closest('[data-md-room]');
     if (sel) { ui.room = Number(sel.value) || 0; calculate(body); }
   });
