@@ -145,9 +145,9 @@ function readCells(r) {
   const ratio = r.ratio == null ? '' : ` <span class="settings-note" style="margin:0;">(${r.ratio.toFixed(2)}×, ${r.lo.toFixed(2)}–${r.hi.toFixed(2)})</span>`;
   const have = plural(r.bookings, 'booking');
   const words = {
-    above: `More than the model expected: ${have} where ${r.expBookings.toFixed(2)} were expected, a ${pctTxt(r.pHigh)} chance of that many or more if the model is right.`,
+    above: `More than the model expected: ${have} where ${r.expBookings.toFixed(2)} were expected. Chance of that many or more if the model is right: ${pctTxt(r.pHigh)}.`,
     'lean-above': `Leaning above the model: ${have} where ${r.expBookings.toFixed(2)} were expected (${pctTxt(r.pHigh)} chance of that many or more if it is right). Weak on its own.`,
-    below: `Fewer than the model expected: ${have} where ${r.expBookings.toFixed(1)} were expected, a ${pctTxt(r.pLow)} chance of so few if it is right.`,
+    below: `Fewer than the model expected: ${have} where ${r.expBookings.toFixed(1)} were expected. Chance of so few if the model is right: ${pctTxt(r.pLow)}.`,
     'lean-below': `Leaning below the model (${pctTxt(r.pLow)} chance of so few if it is right). Weak on its own.`,
     inline: 'Consistent with the model.',
     thin: r.bookings ? `Nothing to call yet: ${have} is about what ${r.expBookings.toFixed(2)} expected allows.` : 'Too little due by now to read either way.',
