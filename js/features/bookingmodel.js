@@ -1293,4 +1293,6 @@ check('Default window runs to the end of the month after this one', q3.to === '2
 return results;
 }
 
-export { buildContext, calibrate, evaluate, sensitivity, makeProjection, projectVoids, optimiseVoid, defaultProjectionEnd, rawNightlyRate, stepPct, discountsOf, selfTest, MODEL_VERSION };
+// The calibrated model's own pieces, read by the drift charts (js/features/modeldrift.js) to compare inputs with reality.
+const driftKit = { lambdaFor, leadCdf, leadFor, basePrice, roomIndexOf, dayNum, dayStr, dowOf, monthOf };
+export { driftKit, buildContext, calibrate, evaluate, sensitivity, makeProjection, projectVoids, optimiseVoid, defaultProjectionEnd, rawNightlyRate, stepPct, discountsOf, selfTest, MODEL_VERSION };

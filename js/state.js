@@ -184,6 +184,9 @@ lettingTaxByOwner: {},
 // Airbnb Superhost inputs the feeds don't carry, per letting owner (same key as above): {holds, responseRate, hostCancellations}.
 // Guest ratings themselves live on the stay (airbnbReservations.reviewRating) -- see js/features/superhost.js.
 superhostByOwner: {},
+// Things you changed on a listing (photos, title, price, minimum stay...), drawn as markers on the model-drift charts
+// (js/features/modeldrift.js): [{id, listingId ('' = every room), date, note}].
+listingEvents: [],
 // Gmail message ids of Airbnb review emails already applied to a stay (js/features/airbnbreviews.js).
 airbnbReviewMailSeen: [],
 // The two monthly targets drawn as reference lines on the letting-income

@@ -4671,3 +4671,12 @@ background:var(--slate-bg);color:var(--slate);
 .vp-form label{display:flex;flex-direction:column;gap:2px;font-size:11px;color:var(--muted);}
 .vp-form .settings-input{flex:0 0 auto;width:84px;}
 #occ-void-plans .settings-subgroup{margin:0;}
+
+/* Model drift charts (js/features/modeldrift.js) */
+.md-chart{margin:12px 0 4px;}
+.md-title{font-size:12px;font-weight:600;display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;}
+.md-key{font-weight:400;font-size:11px;color:var(--muted);display:inline-flex;gap:4px 10px;flex-wrap:wrap;align-items:center;}
+.md-key i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:3px;vertical-align:-1px;}
+.md-svg{width:100%;height:auto;display:block;}
+.md-evlist{margin:0;padding:0;list-style:none;font-size:12px;display:flex;flex-direction:column;gap:3px;}
+.md-events{margin-top:12px;}
