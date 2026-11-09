@@ -23,6 +23,7 @@ const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : nu
 const sd = (xs) => { if (xs.length < 2) return null; const m = mean(xs); return Math.sqrt(xs.reduce((a, v) => a + (v - m) ** 2, 0) / (xs.length - 1)); };
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const shortDate = (n) => { const d = new Date(n * DAY); return `${d.getUTCDate()} ${MON[d.getUTCMonth()]}`; };
+const longDate = (n) => `${shortDate(n)} ${new Date(n * DAY).getUTCFullYear()}`;
 const RECENT = 42; // days a "recent" figure covers
 const MAX_WEEKS = 78;
 
@@ -128,13 +129,17 @@ function computeRoom(ctx, params, ri) {
   const done = weeks.filter((w) => !w.partial && w.expected > 0);
   const last4 = done.slice(-4);
   const K = last4.reduce((a, w) => a + w.requests, 0); const E = last4.reduce((a, w) => a + w.expected, 0);
-  const demand = { recent: poissonBand(K, E), K, E, split: done.length >= 8 ? bestSplit(done.map((w) => w.requests), done.map((w) => w.expected)) : null, doneWeeks: done };
-  if (demand.split) demand.split.week = done[demand.split.at].t;
+  const demand = { recent: poissonBand(K, E), K, E, split: null };
+  // Where the level changed within the last half year (further back is a different listing history, not "recent").
+  const lastHalf = done.slice(-26);
+  if (lastHalf.length >= 8) { demand.split = bestSplit(lastHalf.map((w) => w.requests), lastHalf.map((w) => w.expected)); if (demand.split) demand.split.week = lastHalf[demand.split.at].t; }
 
   // Per-request comparisons with the model.
   const disc = discountsOf(ctx.s, 'airbnb');
   const clean = params.prices[ri].clean || 0;
   const pts = { lead: [], price: [], length: [] };
+  // The model's typical stay is its median: a few long stays drag its mean well above what a usual request asks for.
+  const losMed = Math.max(1, params.losCdf.findIndex((c) => c >= 0.5));
   asks.filter((a) => a.kind === 'request').forEach((a) => {
     const lead = a.checkin - a.t;
     if (lead >= 0) {
@@ -147,8 +152,8 @@ function computeRoom(ctx, params, ri) {
       model /= a.nights;
       const raw = rawNightlyRate({ amount: a.payout, cleaning: clean, nights: a.nights, leadDays: lead >= 0 ? lead : null }, disc);
       if (raw && model > 0) pts.price.push({ t: a.t, r: raw.raw / model, actual: raw.raw, model });
-      pts.length.push({ t: a.t, r: a.nights / params.losMean, actual: a.nights, model: params.losMean });
-    } else if (a.nights >= 1) pts.length.push({ t: a.t, r: a.nights / params.losMean, actual: a.nights, model: params.losMean });
+      pts.length.push({ t: a.t, r: a.nights / losMed, actual: a.nights, model: losMed });
+    } else if (a.nights >= 1) pts.length.push({ t: a.t, r: a.nights / losMed, actual: a.nights, model: losMed });
   });
   return { room, ids, today, first, weeks, demand, pts, asks, clean };
 }
@@ -265,7 +270,7 @@ function storyHtml(ctx, calc) {
   const d = calc.demand; const out = [];
   if (d.split && d.split.lr > 9 && Math.abs(Math.log(d.split.after / Math.max(d.split.before, 0.01))) > Math.log(1.4)) {
     const s = d.split;
-    out.push(`Requests changed level from the week of <b>${shortDate(s.week)}</b>: ${s.before.toFixed(2)}× the model's expectation before, ${s.after.toFixed(2)}× since${s.after > s.before ? '' : ' (down)'}. The model's seasonality and the nights that were open are already allowed for, so this is not just the time of year (a statistical flag, not proof of cause).`);
+    out.push(`Requests changed level from the week of <b>${longDate(s.week)}</b>: ${s.before.toFixed(2)}× the model's expectation before, ${s.after.toFixed(2)}× since${s.after > s.before ? '' : ' (down)'}. The model's seasonality and the nights that were open are already allowed for, so this is not just the time of year (a statistical flag, not proof of cause).`);
   } else if (d.split) out.push('No clear change of level in the weekly requests against what the model expected.');
   const near = (calc.events || []).filter((e) => d.split && d.split.lr > 9 && Math.abs(e.t - d.split.week) <= 14);
   if (near.length) out.push(`Within two weeks of that: ${near.map((e) => `${e.n}. ${escapeHtml(e.lbl)}: ${escapeHtml(e.label)} (${shortDate(e.t)})`).join('; ')}.`);
@@ -299,7 +304,7 @@ ${storyHtml(ctx, calc)}
 <div class="md-chart"><div class="md-title">Requests received each week <span class="md-key"><i style="background:var(--slate)"></i>requests <i style="background:var(--slate-bg);border:1px solid var(--slate)"></i>enquiries <i style="background:var(--amber)"></i>model expects</span></div><div class="settings-note" style="margin:0 0 2px;">Counts requests, enquiries and instant bookings by the day they landed. The model line is what it expects at list price for the nights that were still open; the pale last bar is this week so far.</div>${demandChart(calc, events)}</div>
 <div class="md-chart"><div class="md-title">Lead time against the model <span class="md-key"><i style="background:var(--slate)"></i>each request <i style="background:var(--sage)"></i>6-week median</span></div><div class="settings-note" style="margin:0 0 2px;">How far ahead requests come, as a multiple of the model's median for that check-in month (above 1× is further ahead than modelled).</div>${ratioChart(calc, calc.pts.lead, events, lead)}</div>
 <div class="md-chart"><div class="md-title">Price per night against the model</div><div class="settings-note" style="margin:0 0 2px;">Each request's payout per night with the cleaning fee and short-notice and length discounts taken out, over the model's price for those nights.</div>${ratioChart(calc, calc.pts.price, events, price)}</div>
-<div class="md-chart"><div class="md-title">Stay length against the model</div><div class="settings-note" style="margin:0 0 2px;">Nights requested over the model's average stay.</div>${ratioChart(calc, calc.pts.length, events, len)}</div>
+<div class="md-chart"><div class="md-title">Stay length against the model</div><div class="settings-note" style="margin:0 0 2px;">Nights requested over the model's median stay.</div>${ratioChart(calc, calc.pts.length, events, len)}</div>
 ${eventsHtml(ctx, calc, events)}
 <div class="settings-note" style="margin:8px 0 0;">Corrections currently applied by the monthly review: demand ×${f(cal.demand)}, lead time ×${f(cal.lead)}. Where an input is flagged, apply a correction in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#model-review">Model review</span>. There is no market data feed here: the only public pattern in the model is the starting lead times in Settings.</div>`;
 }
