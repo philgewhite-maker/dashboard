@@ -692,6 +692,35 @@ return Math.round(Math.abs(new Date(`${a}T00:00:00`) - new Date(`${b}T00:00:00`)
 //     rooms); a tie further out is ambiguous and is left unassigned.
 // Scoped to the same listingId for the "no other stay in between" test, not
 // other listings that might share a physical room -- a known limitation.
+// A room stays clean until the next guest arrives: a clean on or after a check-out also serves the next check-in on the same
+// listing, and a clean before a check-in also serves the previous check-out, when no other stay falls in between and it is
+// within the match window (so a check-out clean on the 10th marks a check-in on the 13th done too). This was lost when
+// calendar cleans were limited to their nearest edge; that limit stays for edges on OTHER listings (a clean on one room's
+// check-out day is not offered to a neighbouring room's), but the other edge of the SAME gap is the same visit. A same-day
+// turnover is the zero-days case of this. An edge already claimed by its own clean is left alone.
+function extendAcrossGaps(claims, stays) {
+const live = data.airbnbReservations.filter(notCancelled);
+const eligible = new Set(stays.map((r) => r.id));
+[...claims.entries()].forEach(([key, e]) => {
+const at = key.lastIndexOf(':');
+const r = live.find((x) => x.id === key.slice(0, at));
+if (!r) return;
+const edge = key.slice(at + 1);
+const onListing = live.filter((o) => o.listingId === r.listingId);
+let other = null;
+if (edge === 'checkout') {
+other = onListing.filter((o) => o.id !== r.id && o.checkin >= e.date && o.checkin <= dateStrAdd(e.date, CLEANER_MATCH_WINDOW_DAYS)).sort((a, b) => (a.checkin < b.checkin ? -1 : 1))[0];
+if (other && otherStayOverlaps(onListing.filter((o) => o.id !== other.id), e.date, other.checkin)) other = null;
+} else {
+other = onListing.filter((o) => o.id !== r.id && o.checkout <= e.date && o.checkout >= dateStrAdd(e.date, -CLEANER_MATCH_WINDOW_DAYS)).sort((a, b) => (a.checkout < b.checkout ? 1 : -1))[0];
+if (other && otherStayOverlaps(onListing.filter((o) => o.id !== other.id), other.checkout, e.date)) other = null;
+}
+if (!other || !eligible.has(other.id)) return;
+const k2 = `${other.id}:${edge === 'checkout' ? 'checkin' : 'checkout'}`;
+if (!claims.has(k2)) claims.set(k2, e);
+});
+}
+
 function cleanerClaims() {
 const events = data.airbnbCleanerEvents || [];
 const claims = new Map();
@@ -702,20 +731,7 @@ if (e.reservationId && e.edge && !claims.has(`${e.reservationId}:${e.edge}`)) cl
 });
 const cleaned = data.airbnbListings.filter((l) => l.needsCleaning).map((l) => l.id);
 const stays = data.airbnbReservations.filter((r) => notCancelled(r) && cleaned.includes(r.listingId));
-// A pinned clean on a same-day turnover (one guest out, the next in, same listing, same
-// day) is one visit serving both edges: the check-out clean of the leaving stay is also
-// the check-in clean of the arriving one, and the other way round. Only on the day itself.
-events.filter((e) => e.reservationId && e.edge).forEach((e) => {
-const r = data.airbnbReservations.find((x) => x.id === e.reservationId);
-if (!r) return;
-const day = e.edge === 'checkout' ? r.checkout : r.checkin;
-if (e.date !== day) return;
-stays.filter((o) => o.id !== r.id && o.listingId === r.listingId
-&& (e.edge === 'checkout' ? o.checkin === day : o.checkout === day)).forEach((o) => {
-const key = `${o.id}:${e.edge === 'checkout' ? 'checkin' : 'checkout'}`;
-if (!claims.has(key)) claims.set(key, e);
-});
-});
+extendAcrossGaps(claims, stays);
 events.filter((e) => !(e.reservationId && e.edge)).forEach((e) => {
 const cands = [];
 stays.forEach((r) => {
@@ -735,6 +751,7 @@ if (nearest > 0 && tied.length > 1) return;
 // clean to the next-nearest turnover, the very spill this exists to stop.
 tied.filter((c) => !blocked.has(c.key)).forEach((c) => claims.set(c.key, e));
 });
+extendAcrossGaps(claims, stays);
 blocked.forEach((k) => claims.delete(k));
 return claims;
 }
@@ -2582,4 +2599,4 @@ queueSave();
 // stores, and each was wrong in a way that stayed invisible until a
 // round-trip through Google -- an end date a day out, a name silently
 // dropped, a title separator nobody types. Nothing else imports them.
-export { backfillBookingDates, stayChipHtml, bindStayChips, isLiveStay, notCancelled, renderAirbnb, renderAirbnbListings, initAirbnbListingsForm, initAirbnbSync, airbnbSegmentsForDay, renderAirbnbKeys, initAirbnbKeys, initKeysSettingsForm, initAirbnbAddBooking, eventDayRange, externalNameFromSummary, parseCleanerEventName };
+export { backfillBookingDates, stayChipHtml, bindStayChips, isLiveStay, notCancelled, renderAirbnb, renderAirbnbListings, initAirbnbListingsForm, initAirbnbSync, airbnbSegmentsForDay, renderAirbnbKeys, initAirbnbKeys, initKeysSettingsForm, initAirbnbAddBooking, eventDayRange, externalNameFromSummary, parseCleanerEventName, findCleanerMatch };
