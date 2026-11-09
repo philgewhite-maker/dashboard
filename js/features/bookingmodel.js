@@ -284,7 +284,19 @@ live.forEach((x) => { if (!fromRequest.has(x.id) && dayNum(x.checkin) >= since) 
 const losPrior = new Array(LOS_MAX + 1).fill(0);
 LOS_PRIOR.forEach((v, i) => { losPrior[i] = v; });
 for (let i = 8; i <= LOS_MAX; i++) losPrior[i] = LOS_PRIOR_LONG / (LOS_MAX - 7);
-const losW = losCount.map((c, i) => c + LOS_PRIOR_K * losPrior[i]);
+let losW = losCount.map((c, i) => c + LOS_PRIOR_K * losPrior[i]);
+// A pinned typical stay (Settings): tilt the learned shape towards short or long stays until its median is that many nights.
+// The long stays stay in the mix, just rarer (or commoner); nothing is cut.
+const pinned = Number(s.stayMedian);
+if (pinned >= 1 && pinned <= 7) {
+const medianOf = (w) => { const t = w.reduce((a, b) => a + b, 0); let acc = 0; for (let i = 0; i < w.length; i++) { acc += w[i]; if (acc / t >= 0.5) return i; } return LOS_MAX; };
+// Only the 1-7 night part is reshaped, keeping its total, so the share of long stays does not move with the median.
+  const headTotal = losW.slice(1, 8).reduce((a, b) => a + b, 0);
+  const tilted = (th) => { const t = losW.map((w, i) => (i >= 1 && i <= 7 ? w * Math.exp(-th * i) : w)); const hs = t.slice(1, 8).reduce((a, b) => a + b, 0); return t.map((w, i) => (i >= 1 && i <= 7 && hs > 0 ? w * headTotal / hs : w)); };
+let lo = -2; let hi = 4;
+for (let it = 0; it < 40; it++) { const mid = (lo + hi) / 2; if (medianOf(tilted(mid)) > pinned) lo = mid; else hi = mid; }
+losW = tilted(hi);
+}
 const losTotal = losW.reduce((a, b) => a + b, 0);
 const losCdf = [];
 losW.reduce((acc, w, i) => { losCdf[i] = (acc + w) / losTotal; return acc + w; }, 0);

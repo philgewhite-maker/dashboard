@@ -231,6 +231,8 @@ leadMedian: [17, 17, 17, 25, 25, 35, 35, 35, 21, 21, 21, 17], christmasLead: 300
 // Requests a minimum stay of 2+ nights hides: as a % of the usual requests, extra 1-night ones that appear if the
 // minimum is lowered to 1 (a guess; your own history cannot show them).
 oneNightDemandPct: 10,
+// Median nights of a stay the model draws, overriding what your requests and stays say; null = learn it from them.
+stayMedian: null,
 // Discounts, mirroring Airbnb's own structure, per channel: booked within `days` of arrival takes `pct`; a stay of
 // at least `nights` takes `pct`; the largest step of each kind applies and the two combine. They are what the
 // model undoes to get from a payout back to a raw nightly rate, and applies to the simulated bookings. The
