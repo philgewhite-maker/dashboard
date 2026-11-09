@@ -58,7 +58,7 @@ return out;
 // ---- Projections against outcomes --------------------------------------------------------------
 
 // Every elapsed night a saved projection covered, with the earliest and the latest forecast for it.
-function forecastNights(actual) {
+function forecastNights(actual, { future = false } = {}) {
 const today = todayStr();
 // Only projections made by the current version of the model are scored: an earlier one rested on a different price basis
 // (before rates were worked back from the earnings export), and scoring it would mislead the calibration.
@@ -70,7 +70,7 @@ const demand = p.assumptions && p.assumptions.calibration ? Number(p.assumptions
 (p.voids || []).forEach((v) => {
 for (let i = 0; i < v.nights; i++) {
 const date = dateStrAdd(v.from, i);
-if (date >= today || date <= made) continue; // only nights that have passed, and were still in the future when forecast
+if ((date >= today && !future) || date <= made) continue; // only nights that have passed (unless the early read asks for the ones still to come), and were still in the future when forecast
 const key = `${v.roomKey}|${date}`;
 // A night inside a void plan (what you set on Airbnb) is forecast with it, and the same night without it is kept alongside.
 const plan = (p.plans || []).find((q) => q.roomKey === v.roomKey && date >= q.from && date < q.to) || null;
@@ -188,7 +188,7 @@ return out;
 
 // ---- Accepted and declined estimates against outcomes --------------------------------------------
 
-function requestReview() {
+function requestReview(early = false) {
 const today = todayStr();
 const roomOf = new Map();
 nightRateRooms().forEach((room) => room.listingIds.forEach((id) => roomOf.set(id, room.key)));
@@ -197,7 +197,7 @@ const rows = [];
 (data.bookingRequests || []).forEach((q) => {
 const e = q.evaluation;
 if (!e || !e.block || !e.acceptParts) return;
-if (e.block.to > today) return; // its nights haven't all passed yet
+if ((e.block.to > today) !== early) return; // the final score waits for every night to pass; the early read takes the ones that have not
 const decided = q.decision;
 if (!decided || decided === '') return;
 const room = e.roomKey || roomOf.get(q.listingId);
@@ -266,6 +266,30 @@ const s = r.stay;
 if (s.tooFew) rows.push(`<tr><td>Typical stay</td><td colspan="3" class="settings-note">Only ${s.n} request${s.n === 1 ? '' : 's'} with nights in the last 12 weeks: too few to propose a change.</td></tr>`);
 else rows.push(`<tr><td>Typical stay<div class="settings-note" style="margin:0;">median nights</div></td><td class="num">${s.pinned ? `${s.pinned} (set)` : `${s.model} (learned)`}</td><td class="num"><input type="number" step="1" min="1" max="7" value="${s.proposed}" data-mr-new-stay style="width:64px;"></td><td class="settings-note">${s.n} requests since ${escapeHtml(short(r.window.from))} ask for a median of ${s.median} night${s.median === 1 ? '' : 's'} (mean ${s.mean.toFixed(1)}${s.long ? `, ${s.long} of ${s.n} are 14 nights or more` : ''}). The model's median is set higher than the requests' on purpose if you want the long stays in the mix to average out, so change it only if you agree.</td></tr>`);
 return `${head}<div style="overflow-x:auto;margin-top:6px;"><table class="limits-table be-table"><thead><tr><th>Setting</th><th class="num">Now</th><th class="num">Proposed (editable)</th><th>Why</th></tr></thead><tbody>${rows.join('')}</tbody></table></div><div class="sync-row" style="align-items:center;margin:6px 0;"><button class="sync-btn sm inline" type="button" data-mr-recent-apply>Apply these</button><span class="settings-note" style="margin:0;">Window ${escapeHtml(short(r.window.from))} – ${escapeHtml(short(r.window.to))}. Current: stay ${be.stayMedian ? `${be.stayMedian} nights` : 'as learned'}, empty nights divided by ×${cal.demand.toFixed(2)}.</span></div>`;
+}
+
+// ---- Early read: the forecasts scored as if the future so far had happened (js/features/modelearly.js) ----
+
+const early = { busy: false, error: '', html: '' };
+
+function earlyBlockHtml() {
+return `<div style="margin:12px 0 4px;"><b style="font-size:12px;">Early read: forecasts scored before their nights have passed</b></div><div class="settings-note" style="margin:2px 0 6px;">Compares the bookings made so far with what the model's lead-time curve says should have arrived by now, for nights still to come as well as the ones that passed, and blends the two. It can show the model undershooting or overshooting weeks before the final score can, but it is a faster, rougher signal: the caveats are listed under the result.</div><div class="sync-row" style="align-items:center;margin:2px 0;"><button class="sync-btn sm inline" type="button" data-mr-early${early.busy ? ' disabled' : ''}>${early.html ? 'Read it again' : 'Read the forecasts early'}</button><span class="settings-note" style="margin:0;">${early.busy ? 'Reading…' : early.error ? `<span style="color:var(--red);">${escapeHtml(early.error)}</span>` : ''}</span></div>${early.html}`;
+}
+
+async function runEarly() {
+if (early.busy) return;
+early.busy = true; early.error = '';
+renderModelReview();
+try {
+await new Promise((r) => setTimeout(r, 30));
+const mod = await import('./modelearly.js');
+early.html = mod.earlyHtml(await mod.earlyRead());
+} catch (err) {
+console.error('Early read failed:', err);
+early.error = `Could not read them: ${err.message || err}`;
+}
+early.busy = false;
+renderModelReview();
 }
 
 async function runRecent() {
@@ -346,6 +370,7 @@ if (cal.demand !== 1 || cal.history.length) {
 lines.push(`<div class="sync-row" style="align-items:center;margin:2px 0;"><span class="settings-note" style="margin:0;">Applied so far: ${cal.history.length ? cal.history.map((h) => `${escapeHtml(h.on)} ×${Number(h.demand).toFixed(2)} (${h.note ? escapeHtml(h.note) : `from ${h.n} nights`})`).join('; ') : 'none'}.</span><button class="sync-btn sm inline" type="button" data-mr-reset>Back to ×1.00</button></div>`);
 }
 lines.push(recentHtml());
+lines.push(earlyBlockHtml());
 // Requests.
 lines.push(`<div style="margin:12px 0 4px;"><b style="font-size:12px;">Verdicts on requests you evaluated</b></div>`);
 if (!reqs.length) {
@@ -396,6 +421,7 @@ queueSave();
 renderModelReview();
 return;
 }
+if (e.target.closest('[data-mr-early]')) { runEarly(); return; }
 if (e.target.closest('[data-mr-recent-apply]')) { applyRecent(root); return; }
 if (e.target.closest('[data-mr-recent]')) { runRecent(); return; }
 if (e.target.closest('[data-mr-reset]')) {
@@ -416,4 +442,4 @@ requestAnimationFrame(() => scrollAndFlash(`[data-bkreq="${CSS.escape(open.datas
 });
 }
 
-export { initModelReview, renderModelReview, projectionReview, requestReview };
+export { initModelReview, renderModelReview, projectionReview, requestReview, forecastNights, actualNights, calibrationNow };
