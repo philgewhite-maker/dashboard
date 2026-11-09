@@ -169,15 +169,18 @@ function readPoints(list, today) {
   return { n: recent.length, ratio: Math.exp(m), actual: median(recent.map((p) => p.actual)), model: median(recent.map((p) => p.model)), z, off: Math.abs(z) > 2 && Math.abs(m) > Math.log(1.15) };
 }
 
-// Markers: when each listing's stays ended (the first few are when reviews arrive), its first request, and what you logged.
+// Markers: when each listing's recent stays ended, its first request, and what you logged.
 function eventsFor(ctx, calc) {
   const out = [];
   const lbl = (id) => ctx.listingLabels[id] || 'Listing';
   calc.ids.forEach((id) => {
     const mine = calc.asks.filter((a) => a.listingId === id);
     if (mine.length) out.push({ t: mine[0].t, label: 'first request', listingId: id, auto: true });
-    ctx.earnings.filter((e) => e.listingId === id && e.start).map((e) => dn(e.start) + e.nights).filter((c) => c <= calc.today).sort((a, b) => a - b).slice(0, 5)
-      .forEach((c, i) => out.push({ t: c, label: `stay ${i + 1} ends${i === 2 ? ' (third review can publish)' : ''}`, listingId: id, auto: true }));
+    // The last few stays to end on this listing, by guest (a stay's review can follow within days).
+    ctx.earnings.filter((e) => e.listingId === id && e.start && dn(e.start) + e.nights <= calc.today && dn(e.start) + e.nights >= calc.first)
+      .map((e) => ({ c: dn(e.start) + e.nights, who: String(e.guest || '').trim().split(/\s+/)[0] }))
+      .sort((a, b) => b.c - a.c).slice(0, 8)
+      .forEach((x) => out.push({ t: x.c, label: x.who ? `${x.who}'s stay ends` : 'a stay ends', listingId: id, auto: true }));
   });
   (data.prefs.listingEvents || []).forEach((e) => { if (e.date && (!e.listingId || calc.ids.has(e.listingId))) out.push({ t: dn(e.date), label: e.note || 'change', listingId: e.listingId || '', id: e.id }); });
   return out.filter((e) => e.t >= calc.first && e.t <= calc.today + 1).sort((a, b) => a.t - b.t).map((e, i) => ({ ...e, n: i + 1, lbl: e.listingId ? lbl(e.listingId) : 'All rooms' }));
