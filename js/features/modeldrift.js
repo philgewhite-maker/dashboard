@@ -15,6 +15,8 @@ import { data, queueSave } from '../state.js';
 import { escapeHtml, todayStr, uid } from '../utils.js';
 import { buildContext, calibrate, driftKit, discountsOf, rawNightlyRate } from './bookingmodel.js';
 import { MARKET_SEASON, creditHtml } from './marketdata.js';
+import { roomBlocks } from '../icsparse.js';
+import { activeListingId } from '../roomowner.js';
 
 const DAY = 86400000;
 const dn = (s) => { const [y, m, d] = String(s).slice(0, 10).split('-').map(Number); return Date.UTC(y, m - 1, d) / DAY; };
@@ -88,7 +90,9 @@ function opennessOf(ctx, ri) {
     if (x.status === 'stay' || x.unconfirmed) held.push({ ci, co, since, until: Infinity });
   });
   (Array.isArray(ctx.s.unavailable) ? ctx.s.unavailable : []).forEach((u) => { if (u.roomKey === room.key && u.from && u.to) held.push({ ci: dn(u.from), co: dn(u.to) + 1, since: -Infinity, until: Infinity }); });
-  (ctx.blocks || []).forEach((b) => { if (ids.has(b.listingId) && b.from && b.to) held.push({ ci: dn(b.from), co: dn(b.to), since: -Infinity, until: Infinity }); });
+  // Calendar blocks count only on the listing in use for the room (a sibling listing can be blocked all winter without the room being).
+  const inUse = activeListingId(room.listingIds, ctx.stays, ctx.today);
+  roomBlocks(ctx.blocks, (ctx.feedListingIds || []).includes(inUse) ? [inUse] : []).forEach((b) => held.push({ ci: dn(b.from), co: dn(b.to), since: -Infinity, until: Infinity }));
   return (c, t) => { for (const o of held) if (c >= o.ci && c < o.co && o.since <= t && t < o.until) return 0; return 1; };
 }
 
@@ -374,7 +378,8 @@ function statusTable(ctx, calc) {
   // Enquiries: not forecast, but how many turn into bookings says whether they are worth counting as demand.
   const enq = ctx.requests.filter((q) => q.kind === 'enquiry' && calc.ids.has(q.listingId) && q.receivedAt);
   if (enq.length) {
-    const tally = (list) => { const booked = list.filter((q) => q.decision === 'accepted').length; const not = list.filter((q) => q.decision === 'not-booked').length; return { n: list.length, booked, not, open: list.length - booked - not, rate: booked + not ? booked / (booked + not) : null }; };
+    // An enquiry lapses after 24 hours: one still undecided after that counts as not booked; only the last day's are open.
+    const tally = (list) => { const live = (q) => Date.now() - Date.parse(q.receivedAt) < 864e5; const booked = list.filter((q) => q.decision === 'accepted').length; const open = list.filter((q) => q.decision !== 'accepted' && q.decision !== 'not-booked' && live(q)).length; const not = list.length - booked - open; return { n: list.length, booked, not, open, rate: booked + not ? booked / (booked + not) : null }; };
     const rc = tally(enq.filter((q) => dn(q.receivedAt) > calc.today - RECENT)); const all = tally(enq.filter((q) => dn(q.receivedAt) > calc.today - 182));
     const pct = (t) => (t.rate == null ? '–' : `${Math.round(t.rate * 100)}%`);
     rows.push(`<tr><td>Enquiries</td><td class="num">${rc.n} in the last 6 weeks</td><td class="num">${rc.booked} booked, ${rc.not} not, ${rc.open} open</td><td class="num">${pct(rc)} <span class="settings-note" style="margin:0;">(${pct(all)} of ${all.n} in 26 weeks)</span></td><td>${chip('', 'Not modelled')}</td></tr>`);
