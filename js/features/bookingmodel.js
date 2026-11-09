@@ -27,6 +27,7 @@ import { roomBlocks } from '../icsparse.js';
 import { activeListingId } from '../roomowner.js';
 import { collectStays } from './lettingoccupancy.js';
 import { evaluatorRooms, roomSettings } from './bookingsettings.js';
+import { MARKET_SEASON } from './marketdata.js';
 
 const MODEL_VERSION = 3;
 const DAY_MS = 86400000;
@@ -166,8 +167,6 @@ const cal = s.calibration || {};
 const ov = overrides.scale || {};
 const scale = { ...ov };
 [['demand', 'demand'], ['lead', 'lead'], ['cancel', 'cancel']].forEach(([k]) => { const c = Number(cal[k]) || 1; if (c !== 1 || ov[k] != null) scale[k] = c * (ov[k] != null ? ov[k] : 1); });
-const paceSet = Number(s.paceFactor);
-if (paceSet > 0 && paceSet !== 1) scale.pace = paceSet;
 // Nights Airbnb's feed marks "Not available" (a host's manual blocks): not free nights, so not voids.
 const blocks = (data.airbnbBlocks || []).map((b) => ({ listingId: b.listingId, from: b.from, to: b.to }));
 const feedListingIds = (data.airbnbListings || []).filter((l) => l.icsUrl).map((l) => l.id);
@@ -189,12 +188,22 @@ return m;
 // capped at SIB_TRUST and scaled by the evidence behind the shape) but for more than nothing: a month with no data
 // of its own gets the room's average reshaped by it instead of the flat average. No other room, or no evidence: unchanged.
 const SIB_TRUST = 0.6;
+// How far a month with no evidence of its own, and no sibling room to borrow from, follows London's seasonal shape (Inside Airbnb).
+const MARKET_TRUST = 0.5;
 function blendSiblingShape(occ) {
 const wsum = (xs) => xs.reduce((a, x) => a + x.w, 0);
 const meanOf = (xs) => { const W = wsum(xs); return W > 0 ? xs.reduce((a, x) => a + x.w * x.share, 0) / W : null; };
 const smooth = (arr, m) => 0.25 * arr[(m + 11) % 12] + 0.5 * arr[m] + 0.25 * arr[(m + 1) % 12];
+// The market index averaged over the months each room actually has evidence in (weighted by that evidence).
+const marketObs = occ.map((o) => {
+if (!o.sums) return 0;
+let n = 0; let d = 0;
+o.sums.forEach((xs, m) => { const w = wsum(xs); n += w * smooth(MARKET_SEASON, m); d += w; });
+return d > 0 ? n / d : 0;
+});
 occ.forEach((o, i) => {
 if (!o.sums || o.overall == null) return;
+o.market = new Array(12).fill(null);
 const num = new Array(12).fill(0);
 const den = new Array(12).fill(0);
 occ.forEach((p, j) => {
@@ -206,11 +215,20 @@ o.byMonth = o.sums.map((xs, m) => {
 const dn = smooth(den, m);
 const idx = dn > 0 ? smooth(num, m) / dn : null;
 const a = idx == null ? 0 : SIB_TRUST * Math.min(1, dn / OCC_FULL_EVIDENCE);
-const prior = a > 0 ? Math.min(0.97, Math.max(0.02, o.overall * (1 + a * (idx - 1)))) : o.overall;
+let prior = a > 0 ? Math.min(0.97, Math.max(0.02, o.overall * (1 + a * (idx - 1)))) : o.overall;
 o.sibling[m] = a > 0 ? { idx, a } : null;
+// No other room to borrow the shape from for this month: use London's seasonal shape (Inside Airbnb), relative to the
+// months this room's own average was measured in, so a room only seen in busy months is not scaled up for the quiet ones.
+let fromMarket = false;
+if (a === 0 && marketObs[i] > 0) {
+const rel = smooth(MARKET_SEASON, m) / marketObs[i];
+prior = Math.min(0.97, Math.max(0.02, o.overall * (1 + MARKET_TRUST * (rel - 1))));
+fromMarket = true;
+o.market[m] = { idx: rel, a: MARKET_TRUST };
+}
 const W = wsum(xs);
 if (W > 0) return (xs.reduce((s, x) => s + x.w * x.share, 0) + prior) / (W + 1);
-return a > 0 ? prior : null;
+return a > 0 || fromMarket ? prior : null;
 });
 });
 }
@@ -577,13 +595,15 @@ return booked;
 
 // The rate of requests per check-in date that makes an empty calendar for this room fill to
 // the occupancy it achieved in that month of the year. Bisection over simulated months.
-// The rate the model uses: the solved one times the booking-pace factor (Settings), which scales requests directly without touching the occupancy it was solved for.
-function lambdaFor(ctx, params, ri, month) { return lambdaSolved(ctx, params, ri, month) * (ctx.scale.pace || 1); }
-function lambdaSolved(ctx, params, ri, month) {
+// The demand factor divides the share of nights left empty (2 halves the vacancy: 50% occupied becomes 75%, 80% becomes 90%),
+// rather than multiplying the occupancy: a calendar cannot fill past 100%, and the requests that need to arrive to gain each
+// further night grow faster as it fills, so the rate solved for below rises less than the factor does when occupancy is already high.
+function lambdaFor(ctx, params, ri, month) {
 const key = `${ri}|${month}`;
 if (params.lambda.has(key)) return params.lambda.get(key);
 const o = params.occ[ri];
-const target = Math.min(0.97, Math.max(0.02, (o.byMonth[month] ?? o.overall ?? OCC_PRIOR) * (ctx.scale.demand || 1)));
+const occNow = Math.min(1, Math.max(0, o.byMonth[month] ?? o.overall ?? OCC_PRIOR));
+const target = Math.min(0.97, Math.max(0.02, 1 - (1 - occNow) / (ctx.scale.demand || 1)));
 // A synthetic month: 30 nights of this month (any year), 28 before it, all arrivals seen.
 const y = 2030;
 const start = Date.UTC(y, month, 1) / DAY_MS;

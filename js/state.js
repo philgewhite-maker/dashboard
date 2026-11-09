@@ -233,9 +233,6 @@ leadMedian: [17, 17, 17, 25, 25, 35, 35, 35, 21, 21, 21, 17], christmasLead: 300
 oneNightDemandPct: 10,
 // Median nights of a stay the model draws, overriding what your requests and stays say; null = learn it from them.
 stayMedian: null,
-// Multiplier on how often the model expects requests (1 = as learned). Unlike the monthly review's demand factor, which scales the occupancy the
-// model aims for, this scales the arrival rate itself.
-paceFactor: 1,
 // Discounts, mirroring Airbnb's own structure, per channel: booked within `days` of arrival takes `pct`; a stay of
 // at least `nights` takes `pct`; the largest step of each kind applies and the two combine. They are what the
 // model undoes to get from a payout back to a raw nightly rate, and applies to the simulated bookings. The

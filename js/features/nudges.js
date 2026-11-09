@@ -444,7 +444,7 @@ const ym = reviewDueMonth();
 if (!ym) return;
 const name = new Date(`${ym}-01T00:00:00`).toLocaleDateString('en-GB', { month: 'long' });
 pool.push({
-text: `Review how ${name}'s booking projections turned out against what happened.`,
+text: `Review the booking model for ${name}: projections against what happened, and booking pace and typical stay from recent requests.`,
 target: { type: 'modelReview', id: ym },
 signals: { kind: 'model-review', month: ym },
 category: 'airbnb',

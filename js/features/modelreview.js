@@ -170,15 +170,18 @@ out.push({ kind: 'note', text: `Not enough evidence for a proposal yet: ${s.n} n
 return out;
 }
 const ratio = s.actN / s.expN;
-const shrunk = 1 + (ratio - 1) * (s.n / (s.n + PROPOSAL_SHRINK_K));
+// The factor divides the empty nights, so it is the empty nights that are compared: expected against what stayed empty.
+const vacExp = s.n - s.expN; const vacAct = Math.max(s.n - s.actN, 0.5);
+const vacRatio = vacExp / vacAct;
+const shrunk = 1 + (vacRatio - 1) * (s.n / (s.n + PROPOSAL_SHRINK_K));
 if (Math.abs(shrunk - 1) < PROPOSAL_MIN_MOVE) {
 out.push({ kind: 'note', text: `Bookings arrived about as often as projected (${Math.round(ratio * 100)}% of the expected nights over ${s.n} nights): no change proposed.` });
 return out;
 }
-const suggested = Math.max(0.4, Math.min(2, Math.round(cal.demand * shrunk * 100) / 100));
+const suggested = Math.max(0.4, Math.min(8, Math.round(cal.demand * shrunk * 100) / 100));
 out.push({
 kind: 'demand', value: suggested, from: cal.demand, n: s.n,
-text: `Over ${s.n} nights, ${s.actN} were booked against ${s.expN.toFixed(1)} expected (${Math.round(ratio * 100)}%). A demand factor of ×${suggested.toFixed(2)} (now ×${cal.demand.toFixed(2)}) would have fitted better.`,
+text: `Over ${s.n} nights, ${s.actN} were booked against ${s.expN.toFixed(1)} expected (${Math.round(ratio * 100)}%), so ${vacAct.toFixed(0)} stayed empty against ${vacExp.toFixed(1)} expected. Dividing the empty nights by ×${suggested.toFixed(2)} (now ×${cal.demand.toFixed(2)}) would have fitted better.`,
 });
 return out;
 }
@@ -241,6 +244,70 @@ function tableHead(first, withBrier = true) {
 return `<thead><tr><th>${escapeHtml(first)}</th><th class="num" title="Nights that have passed and were forecast">Nights</th><th class="num" title="Booked nights the model expected">Expected</th><th class="num">Booked</th><th class="num" title="Booked over expected">Hit</th><th class="num">Expected income</th><th class="num">Actual income</th>${withBrier ? '<th class="num" title="Average squared miss on each night\'s chance (0 = perfect, 0.25 = no better than guessing 50%)">Score</th>' : ''}</tr></thead>`;
 }
 
+// ---- Booking pace and typical stay, proposed from the last 12 weeks of requests ------------------------------------
+
+const recent = { busy: false, msg: '', result: null, error: '' };
+const pctOf = (v) => (v == null ? '–' : `${Math.round(v * 100)}%`);
+
+function recentHtml() {
+const cal = calibrationNow();
+const be = data.prefs.bookingEvaluator || {};
+const head = `<div style="margin:12px 0 4px;"><b style="font-size:12px;">Booking pace and typical stay, from recent requests</b></div><div class="settings-note" style="margin:2px 0 6px;">Looks at the last 12 weeks of requests, newer weeks counting more (a week's weight halves every four weeks), and works out what the settings would need to be for the model to expect what arrived. Nothing changes until you press Apply: edit either number first if you disagree. The monthly nudge on Today points here.</div><div class="sync-row" style="align-items:center;margin:2px 0;"><button class="sync-btn sm inline" type="button" data-mr-recent${recent.busy ? ' disabled' : ''}>${recent.result ? 'Work it out again' : 'Work it out from recent requests'}</button><span class="settings-note" style="margin:0;">${recent.busy ? escapeHtml(recent.msg) : recent.error ? `<span style="color:var(--red);">${escapeHtml(recent.error)}</span>` : ''}</span></div>`;
+const r = recent.result;
+if (!r) return head;
+const rows = [];
+const p = r.pace;
+if (p.tooFew) rows.push(`<tr><td>Demand</td><td colspan="3" class="settings-note">Only ${p.N} request${p.N === 1 ? '' : 's'} in the last 12 weeks: too few to propose a change.</td></tr>`);
+else {
+const rooms = p.rooms.map((x) => `${escapeHtml(x.label)} ${x.K} against ${x.E.toFixed(1)}`).join('; ');
+rows.push(`<tr><td>Demand<div class="settings-note" style="margin:0;">empty nights divided by</div></td><td class="num">×${r.current.toFixed(2)}</td><td class="num"><input type="number" step="0.05" min="0.25" max="16" value="${p.proposed.toFixed(2)}" data-mr-new-demand style="width:64px;"></td><td class="settings-note">${p.N} requests arrived against ${p.expected.toFixed(1)} expected at ×${r.current.toFixed(2)} (${rooms}). Matching them exactly would take ×${p.fit.toFixed(2)}${p.atBound ? ' (the limit of what is tried)' : ''}; pulled back towards the current factor by how few requests there are, that gives ×${p.proposed.toFixed(2)}. A typical month's target occupancy goes ${pctOf(p.occNow)} to ${pctOf(p.occProposed)}.</td></tr>`);
+}
+const s = r.stay;
+if (s.tooFew) rows.push(`<tr><td>Typical stay</td><td colspan="3" class="settings-note">Only ${s.n} request${s.n === 1 ? '' : 's'} with nights in the last 12 weeks: too few to propose a change.</td></tr>`);
+else rows.push(`<tr><td>Typical stay<div class="settings-note" style="margin:0;">median nights</div></td><td class="num">${s.pinned ? `${s.pinned} (set)` : `${s.model} (learned)`}</td><td class="num"><input type="number" step="1" min="1" max="7" value="${s.proposed}" data-mr-new-stay style="width:64px;"></td><td class="settings-note">${s.n} requests since ${escapeHtml(short(r.window.from))} ask for a median of ${s.median} night${s.median === 1 ? '' : 's'} (mean ${s.mean.toFixed(1)}${s.long ? `, ${s.long} of ${s.n} of 14 nights or more` : ''}). The model's median is set higher than the requests' on purpose if you want the long stays in the mix to average out, so change it only if you agree.</td></tr>`);
+return `${head}<div style="overflow-x:auto;margin-top:6px;"><table class="limits-table be-table"><thead><tr><th>Setting</th><th class="num">Now</th><th class="num">Proposed (editable)</th><th>Why</th></tr></thead><tbody>${rows.join('')}</tbody></table></div><div class="sync-row" style="align-items:center;margin:6px 0;"><button class="sync-btn sm inline" type="button" data-mr-recent-apply>Apply these</button><span class="settings-note" style="margin:0;">Window ${escapeHtml(short(r.window.from))} – ${escapeHtml(short(r.window.to))}. Current: stay ${be.stayMedian ? `${be.stayMedian} nights` : 'as learned'}, empty nights divided by ×${cal.demand.toFixed(2)}.</span></div>`;
+}
+
+async function runRecent() {
+if (recent.busy) return;
+recent.busy = true; recent.error = ''; recent.msg = 'Reading the last 12 weeks of requests…';
+renderModelReview();
+try {
+const { proposeRecent } = await import('./modeldrift.js');
+recent.result = await proposeRecent((m) => { recent.msg = m; const el = document.querySelector('#model-review-body [data-mr-recent]'); if (el && el.parentElement.lastElementChild) el.parentElement.lastElementChild.textContent = m; });
+} catch (err) {
+console.error('Recent-requests proposal failed:', err);
+recent.error = `Could not work it out: ${err.message || err}`;
+}
+recent.busy = false;
+renderModelReview();
+}
+
+function applyRecent(root) {
+const r = recent.result; if (!r) return;
+const be = data.prefs.bookingEvaluator || (data.prefs.bookingEvaluator = {});
+const cal = calibrationNow();
+const demandEl = root.querySelector('[data-mr-new-demand]'); const stayEl = root.querySelector('[data-mr-new-stay]');
+const notes = [];
+if (demandEl && demandEl.value !== '') {
+const v = Math.min(16, Math.max(0.25, Math.round(Number(demandEl.value) * 100) / 100));
+if (Number.isFinite(v) && Math.abs(v - cal.demand) > 0.004) {
+be.calibration = { demand: v, lead: cal.lead, cancel: cal.cancel, appliedOn: todayStr(), note: 'from recent requests', history: [...cal.history, { on: todayStr(), demand: v, from: cal.demand, n: r.pace && r.pace.N || 0, note: `last 12 weeks of requests, ${r.pace && r.pace.N || 0}` }] };
+notes.push(`empty nights ÷ ×${v.toFixed(2)}`);
+}
+}
+if (stayEl && stayEl.value !== '') {
+const v = Math.min(7, Math.max(1, Math.round(Number(stayEl.value))));
+if (Number.isFinite(v) && v !== Number(be.stayMedian)) { be.stayMedian = v; notes.push(`typical stay ${v}`); }
+}
+if (!notes.length) { recent.error = 'Nothing to apply: both numbers match what is already set.'; renderModelReview(); return; }
+recent.result = null; recent.error = '';
+queueSave();
+renderModelReview();
+const out = document.querySelector('#model-review-body [data-mr-recent]');
+if (out && out.parentElement.lastElementChild) out.parentElement.lastElementChild.textContent = `Applied: ${notes.join(', ')}.`;
+}
+
 function reviewHtml() {
 const cal = calibrationNow();
 const pr = projectionReview();
@@ -248,7 +315,7 @@ const reqs = requestReview();
 const projCount = (data.bookingProjections || []).filter((p) => (p.modelVersion || 1) === MODEL_VERSION).length;
 const older = (data.bookingProjections || []).length - projCount;
 const lines = [];
-lines.push(`<div class="settings-note" style="margin:4px 0 8px;">Compares what the model projected, and what it estimated when you evaluated a request, with what happened. ${projCount} saved projection${projCount === 1 ? '' : 's'}; ${pr.rows.length} night${pr.rows.length === 1 ? '' : 's'} checked so far.${older ? ` ${older} earlier projection${older === 1 ? '' : 's'} from the previous price basis ${older === 1 ? 'is' : 'are'} not scored.` : ''} Calibration in force: demand ×${cal.demand.toFixed(2)}${cal.appliedOn ? ` (applied ${escapeHtml(cal.appliedOn)})` : ''}.</div>`);
+lines.push(`<div class="settings-note" style="margin:4px 0 8px;">Compares what the model projected, and what it estimated when you evaluated a request, with what happened. ${projCount} saved projection${projCount === 1 ? '' : 's'}; ${pr.rows.length} night${pr.rows.length === 1 ? '' : 's'} checked so far.${older ? ` ${older} earlier projection${older === 1 ? '' : 's'} from the previous price basis ${older === 1 ? 'is' : 'are'} not scored.` : ''} Calibration in force: empty nights divided by ×${cal.demand.toFixed(2)}${cal.appliedOn ? ` (applied ${escapeHtml(cal.appliedOn)})` : ''}.</div>`);
 if (!pr.rows.length) {
 const first = (data.bookingProjections || []).slice().sort((a, b) => String(a.madeAt).localeCompare(String(b.madeAt)))[0];
 lines.push(`<div class="settings-note" style="margin:6px 0;">Nothing to compare yet. ${first ? `Projections are checked once their nights have passed: the first one was made on ${escapeHtml(String(first.madeAt).slice(0, 10))} and covers up to ${escapeHtml(dateStrAdd(first.to, -1))}.` : 'Run "Project the next two months" in the occupancy section, and come back after the month has gone.'}</div>`);
@@ -276,8 +343,9 @@ if (p.kind === 'note') lines.push(`<div class="settings-note" style="margin:2px 
 else lines.push(`<div class="sync-row" style="align-items:center;margin:2px 0;"><span style="font-size:12px;">${escapeHtml(p.text)}</span><button class="sync-btn sm inline" type="button" data-mr-apply="${p.value}" data-mr-n="${p.n}">Apply ×${p.value.toFixed(2)}</button></div>`);
 });
 if (cal.demand !== 1 || cal.history.length) {
-lines.push(`<div class="sync-row" style="align-items:center;margin:2px 0;"><span class="settings-note" style="margin:0;">Applied so far: ${cal.history.length ? cal.history.map((h) => `${escapeHtml(h.on)} ×${Number(h.demand).toFixed(2)} (from ${h.n} nights)`).join('; ') : 'none'}.</span><button class="sync-btn sm inline" type="button" data-mr-reset>Back to ×1.00</button></div>`);
+lines.push(`<div class="sync-row" style="align-items:center;margin:2px 0;"><span class="settings-note" style="margin:0;">Applied so far: ${cal.history.length ? cal.history.map((h) => `${escapeHtml(h.on)} ×${Number(h.demand).toFixed(2)} (${h.note ? escapeHtml(h.note) : `from ${h.n} nights`})`).join('; ') : 'none'}.</span><button class="sync-btn sm inline" type="button" data-mr-reset>Back to ×1.00</button></div>`);
 }
+lines.push(recentHtml());
 // Requests.
 lines.push(`<div style="margin:12px 0 4px;"><b style="font-size:12px;">Verdicts on requests you evaluated</b></div>`);
 if (!reqs.length) {
@@ -328,6 +396,8 @@ queueSave();
 renderModelReview();
 return;
 }
+if (e.target.closest('[data-mr-recent-apply]')) { applyRecent(root); return; }
+if (e.target.closest('[data-mr-recent]')) { runRecent(); return; }
 if (e.target.closest('[data-mr-reset]')) {
 const be = data.prefs.bookingEvaluator || (data.prefs.bookingEvaluator = {});
 const cal = calibrationNow();

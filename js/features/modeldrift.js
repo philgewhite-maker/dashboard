@@ -9,10 +9,12 @@
 //   Price             each request's payout per night, cleaning and discounts taken out, as a multiple of the model's price.
 //   Stay length       each request's nights as a multiple of the model's average stay.
 // 1x is "the model has it right". Markers show what happened to the listing (stays ending, your own changes).
-// There is no market feed in the app: the only public pattern the model carries is the starting lead times in Settings.
+// The public patterns the model carries are the starting lead times in Settings and London's seasonal shape from Inside Airbnb
+// (marketdata.js), drawn on the requests chart.
 import { data, queueSave } from '../state.js';
 import { escapeHtml, todayStr, uid } from '../utils.js';
 import { buildContext, calibrate, driftKit, discountsOf, rawNightlyRate } from './bookingmodel.js';
+import { MARKET_SEASON, creditHtml } from './marketdata.js';
 
 const DAY = 86400000;
 const dn = (s) => { const [y, m, d] = String(s).slice(0, 10).split('-').map(Number); return Date.UTC(y, m - 1, d) / DAY; };
@@ -186,6 +188,93 @@ function eventsFor(ctx, calc) {
   return out.filter((e) => e.t >= calc.first && e.t <= calc.today + 1).sort((a, b) => a.t - b.t).map((e, i) => ({ ...e, n: i + 1, lbl: e.listingId ? lbl(e.listingId) : 'All rooms' }));
 }
 
+// ---- the monthly proposal: what the settings would need to be to match recent requests ------------------------
+
+const PROPOSAL_WEEKS = 12; // complete weeks looked at
+const HALF_LIFE_WEEKS = 4; // a week counts half as much for every four weeks older it is
+const PACE_SHRINK_K = 10; // pseudo-requests pulling a proposed demand factor back towards the current one
+const MIN_STAY_REQUESTS = 8;
+
+const wmedian = (items) => {
+  const s = items.slice().sort((a, b) => a.v - b.v); const tot = s.reduce((a, x) => a + x.w, 0); let acc = 0;
+  for (const x of s) { acc += x.w; if (acc >= tot / 2) return x.v; }
+  return null;
+};
+
+// Works out, from the last 12 weeks of requests (recent weeks counting more), the demand factor (empty nights divided by it)
+// that makes the model expect what actually arrived, and the median stay the requests ask for. Nothing is changed:
+// the caller shows the numbers for review. Async only so the page stays responsive while the model is recalibrated.
+async function proposeRecent(progress = () => {}) {
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+  const ctx = buildContext(); const params = calibrate(ctx);
+  const today = dn(ctx.today);
+  const last = weekStart(today) - 7; // the latest complete week
+  const starts = Array.from({ length: PROPOSAL_WEEKS }, (_, i) => last - 7 * i);
+  const wt = (t) => Math.min(1, Math.pow(0.5, (last - t) / 7 / HALF_LIFE_WEEKS));
+  const rooms = ctx.rooms.map((room, ri) => {
+    const asks = asksFor(ctx, new Set(room.listingIds)).filter((a) => a.kind === 'request');
+    const first = asks.length ? weekStart(asks[0].t) : Infinity; // weeks before a room's first request are not evidence of anything
+    return { ri, room, asks, first, open: opennessOf(ctx, ri), K: starts.map((t) => asks.filter((a) => a.t >= t && a.t < t + 7).length) };
+  }).filter((r) => r.asks.length);
+  const kc = ctx.scale.demand || 1;
+  const used = (r, i) => starts[i] >= r.first;
+  const rawK = rooms.reduce((a, r) => a + r.K.reduce((b, k, i) => b + (used(r, i) ? k : 0), 0), 0);
+  const out = { window: { from: ds(starts[starts.length - 1]), to: ds(last + 6) }, current: kc, pace: null, stay: null };
+
+  if (rawK >= 8) {
+    const wK = rooms.reduce((a, r) => a + r.K.reduce((b, k, i) => b + (used(r, i) ? k * wt(starts[i]) : 0), 0), 0);
+    const evalAt = async (k) => {
+      progress(`Recalibrating the model at ×${k.toFixed(2)}…`);
+      await tick();
+      const ctx2 = { ...ctx, scale: { ...ctx.scale, demand: k } };
+      const p2 = { ...params, lambda: new Map() };
+      const E = rooms.map((r) => starts.map((t, i) => (used(r, i) ? expectedWeek(ctx2, p2, r.ri, r.open, t) : 0)));
+      const w = E.reduce((a, row) => a + row.reduce((b, e, i) => b + e * wt(starts[i]), 0), 0);
+      const raw = E.reduce((a, row) => a + row.reduce((b, e) => b + e, 0), 0);
+      return { w, raw, E };
+    };
+    const g = (e) => Math.log(Math.max(e.w, 1e-6)) - Math.log(Math.max(wK, 1e-6));
+    const e0 = await evalAt(kc);
+    const pts = [{ lk: Math.log(kc), f: g(e0) }];
+    const LO = Math.log(0.25); const HI = Math.log(16);
+    let lk = pts[0].lk + (pts[0].f > 0 ? -0.5 : 0.5);
+    for (let it = 0; it < 5 && Math.abs(pts[pts.length - 1].f) >= 0.03; it++) {
+      lk = Math.min(HI, Math.max(LO, lk));
+      if (pts.some((p) => Math.abs(p.lk - lk) < 1e-3)) break;
+      const e = await evalAt(Math.exp(lk));
+      pts.push({ lk, f: g(e) });
+      const [a, b] = pts.slice(-2);
+      const slope = (b.f - a.f) / (b.lk - a.lk);
+      if (!(slope > 0.02)) break;
+      lk = b.lk - Math.max(-1.5, Math.min(1.5, b.f / slope));
+    }
+    const best = pts.reduce((a, b) => (Math.abs(b.f) < Math.abs(a.f) ? b : a));
+    const fit = Math.exp(best.lk);
+    const shr = rawK / (rawK + PACE_SHRINK_K);
+    const proposed = Math.min(16, Math.max(0.25, Math.round(Math.exp(Math.log(kc) + shr * (Math.log(fit) - Math.log(kc))) * 20) / 20));
+    const occ = params.occ.map((o) => o.overall).filter((v) => v != null);
+    const occAvg = occ.length ? occ.reduce((a, b) => a + b, 0) / occ.length : null;
+    const at = (k) => (occAvg == null ? null : Math.min(0.97, Math.max(0.02, 1 - (1 - occAvg) / k)));
+    out.pace = {
+      N: rawK, expected: e0.raw, ratio: e0.raw > 0 ? rawK / e0.raw : null, fit, proposed, atBound: best.lk <= LO + 1e-6 || best.lk >= HI - 1e-6,
+      occBase: occAvg, occNow: at(kc), occProposed: at(proposed),
+      rooms: rooms.map((r, i) => ({ label: r.room.label, K: r.K.reduce((b, k, j) => b + (used(r, j) ? k : 0), 0), E: e0.E[i].reduce((b, e) => b + e, 0) })),
+    };
+  } else out.pace = { tooFew: true, N: rawK };
+
+  // Typical stay: the median nights asked for, newer requests counting more.
+  const since = starts[starts.length - 1];
+  const items = [];
+  rooms.forEach((r) => r.asks.forEach((a) => { if (a.t >= since && a.nights >= 1) items.push({ v: a.nights, w: wt(a.t) }); }));
+  const modelMedian = Math.max(1, params.losCdf.findIndex((c) => c >= 0.5));
+  if (items.length >= MIN_STAY_REQUESTS) {
+    const med = wmedian(items);
+    const nights = items.map((x) => x.v);
+    out.stay = { n: items.length, median: med, mean: mean(nights), long: nights.filter((v) => v >= 14).length, proposed: Math.min(7, Math.max(1, Math.round(med))), model: modelMedian, pinned: Number(ctx.s.stayMedian) || null };
+  } else out.stay = { tooFew: true, n: items.length, model: modelMedian, pinned: Number(ctx.s.stayMedian) || null };
+  return out;
+}
+
 // ---- charts -------------------------------------------------------------------------------------------------
 
 const W = 640; const PL = 38; const PR = 8; const PT = 16; const PB = 20;
@@ -206,6 +295,16 @@ function eventLayer(events, X, h) {
   return events.map((e) => `<g><title>${escapeHtml(`${e.n}. ${shortDate(e.t)} · ${e.lbl}: ${e.label}`)}</title><line x1="${X(e.t).toFixed(1)}" x2="${X(e.t).toFixed(1)}" y1="${PT - 2}" y2="${h - PB}" stroke="var(--plum)" stroke-width="1" stroke-dasharray="3 3" opacity="${e.auto ? 0.45 : 0.9}"/><text x="${X(e.t).toFixed(1)}" y="${PT - 5}" text-anchor="middle" font-size="9" font-weight="600" fill="var(--plum)">${e.n}</text></g>`).join('');
 }
 
+// London's seasonal index at a day number, interpolated between month centres so the line doesn't step at month ends.
+function marketAt(n) {
+  const d = new Date(n * DAY);
+  const m = d.getUTCMonth();
+  const dim = new Date(Date.UTC(d.getUTCFullYear(), m + 1, 0)).getUTCDate();
+  const pos = m + (d.getUTCDate() - 0.5) / dim - 0.5;
+  const i = Math.floor(pos); const fr = pos - i;
+  return MARKET_SEASON[(i + 12) % 12] * (1 - fr) + MARKET_SEASON[(i + 13) % 12] * fr;
+}
+
 function demandChart(calc, events) {
   const h = 190;
   const { weeks } = calc;
@@ -222,7 +321,12 @@ function demandChart(calc, events) {
     return `<g opacity="${w.partial ? 0.45 : 1}"><title>${escapeHtml(tip)}</title>${w.requests ? `<rect x="${x.toFixed(1)}" y="${yR.toFixed(1)}" width="${bw.toFixed(1)}" height="${(base - yR).toFixed(1)}" rx="2" fill="var(--slate)"/>` : ''}${w.enquiries ? `<rect x="${x.toFixed(1)}" y="${yE.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(0, yR - yE - 1).toFixed(1)}" rx="2" fill="var(--slate-bg)" stroke="var(--slate)" stroke-width="0.6"/>` : ''}<rect x="${(x - 2).toFixed(1)}" y="${PT}" width="${(bw + 4).toFixed(1)}" height="${(h - PT - PB).toFixed(1)}" fill="transparent"/></g>`;
   }).join('');
   const line = weeks.filter((w) => !w.partial).map((w) => `${f.X(w.t + 3.5).toFixed(1)},${f.Y(w.expected).toFixed(1)}`).join(' ');
-  return `<svg viewBox="0 0 ${W} ${h}" class="md-svg" role="img" aria-label="Requests received each week against the model's expectation">${f.grid}${bars}<polyline points="${line}" fill="none" stroke="var(--amber)" stroke-width="2" stroke-linejoin="round"/>${eventLayer(events, f.X, h)}</svg>`;
+  // London's seasonal shape, scaled so it averages what this room actually received over the weeks shown.
+  const done = weeks.filter((w) => !w.partial);
+  const idxSum = done.reduce((a, w) => a + marketAt(w.t + 3), 0);
+  const scale = idxSum > 0 ? done.reduce((a, w) => a + w.requests, 0) / idxSum : 0;
+  const mkt = scale > 0 ? done.map((w) => `${f.X(w.t + 3.5).toFixed(1)},${f.Y(scale * marketAt(w.t + 3)).toFixed(1)}`).join(' ') : '';
+  return `<svg viewBox="0 0 ${W} ${h}" class="md-svg" role="img" aria-label="Requests received each week against the model's expectation">${f.grid}${bars}${mkt ? `<polyline points="${mkt}" fill="none" stroke="var(--sage)" stroke-width="1.5" stroke-dasharray="5 4" stroke-linejoin="round"/>` : ''}<polyline points="${line}" fill="none" stroke="var(--amber)" stroke-width="2" stroke-linejoin="round"/>${eventLayer(events, f.X, h)}</svg>`;
 }
 
 function ratioChart(calc, list, events, label) {
@@ -304,12 +408,12 @@ function sectionHtml() {
   return `${picker}
 ${statusTable(ctx, calc)}
 ${storyHtml(ctx, calc)}
-<div class="md-chart"><div class="md-title">Requests received each week <span class="md-key"><i style="background:var(--slate)"></i>requests <i style="background:var(--slate-bg);border:1px solid var(--slate)"></i>enquiries <i style="background:var(--amber)"></i>model expects</span></div><div class="settings-note" style="margin:0 0 2px;">Counts requests, enquiries and instant bookings by the day they landed. The model line is what it expects at list price for the nights that were still open; the pale last bar is this week so far.</div>${demandChart(calc, events)}</div>
+<div class="md-chart"><div class="md-title">Requests received each week <span class="md-key"><i style="background:var(--slate)"></i>requests <i style="background:var(--slate-bg);border:1px solid var(--slate)"></i>enquiries <i style="background:var(--amber)"></i>model expects <i style="background:var(--sage)"></i>London season</span></div><div class="settings-note" style="margin:0 0 2px;">Counts requests, enquiries and instant bookings by the day they landed. The model line is what it expects at list price for the nights that were still open; the pale last bar is this week so far. The dashed line is how London private rooms rise and fall through the year, scaled to your average over these weeks: requests above it are not just the season. ${creditHtml()}</div>${demandChart(calc, events)}</div>
 <div class="md-chart"><div class="md-title">Lead time against the model <span class="md-key"><i style="background:var(--slate)"></i>each request <i style="background:var(--sage)"></i>6-week median</span></div><div class="settings-note" style="margin:0 0 2px;">How far ahead requests come, as a multiple of the model's median for that check-in month (above 1× is further ahead than modelled).</div>${ratioChart(calc, calc.pts.lead, events, lead)}</div>
 <div class="md-chart"><div class="md-title">Price per night against the model</div><div class="settings-note" style="margin:0 0 2px;">Each request's payout per night with the cleaning fee and short-notice and length discounts taken out, over the model's price for those nights.</div>${ratioChart(calc, calc.pts.price, events, price)}</div>
 <div class="md-chart"><div class="md-title">Stay length against the model</div><div class="settings-note" style="margin:0 0 2px;">Nights requested over the model's median stay.</div>${ratioChart(calc, calc.pts.length, events, len)}</div>
 ${eventsHtml(ctx, calc, events)}
-<div class="settings-note" style="margin:8px 0 0;">Corrections in force: booking pace ×${f((data.prefs.bookingEvaluator || {}).paceFactor)} and typical stay ${(data.prefs.bookingEvaluator || {}).stayMedian ? ((data.prefs.bookingEvaluator || {}).stayMedian + " nights") : "as learned"} (both in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#booking-evaluator-settings">Booking evaluator settings</span>), and from the monthly review demand ×${f(cal.demand)}, lead time ×${f(cal.lead)}. Where an input is flagged, apply a correction in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#model-review">Model review</span>. There is no market data feed here: the only public pattern in the model is the starting lead times in Settings.</div>`;
+<div class="settings-note" style="margin:8px 0 0;">Corrections in force: empty nights divided by ${f(cal.demand)}, lead time ×${f(cal.lead)}, and typical stay ${(data.prefs.bookingEvaluator || {}).stayMedian ? ((data.prefs.bookingEvaluator || {}).stayMedian + " nights") : "as learned"} (stay in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#booking-evaluator-settings">Booking evaluator settings</span>). Where an input is flagged, work out a correction from recent requests in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#model-review">Model review</span>. The model also borrows London's seasonal shape for months it has no evidence of its own. ${creditHtml()}</div>`;
 }
 
 function renderBody(el) {
@@ -361,4 +465,4 @@ function initModelDrift() {
   });
 }
 
-export { initModelDrift, poissonBand, bestSplit };
+export { initModelDrift, poissonBand, bestSplit, proposeRecent };

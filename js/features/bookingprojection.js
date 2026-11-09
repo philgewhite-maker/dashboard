@@ -208,7 +208,10 @@ const nights = new Set();
 (data.bookingProjections || []).forEach((p) => (p.voids || []).forEach((v) => {
 for (let i = 0; i < v.nights; i++) { const d = dateStrAdd(v.from, i); if (d.startsWith(prev) && d < today && d > String(p.madeAt).slice(0, 10)) nights.add(`${v.roomKey}|${d}`); }
 }));
-return nights.size >= 10 ? prev : '';
+if (nights.size >= 10) return prev;
+// The recent-requests proposal needs no saved projections, only requests: a month with a handful is worth a look too.
+const asked = (data.bookingRequests || []).filter((q) => String(q.receivedAt || '').startsWith(prev)).length;
+return asked >= 5 ? prev : '';
 }
 
 export { latestProjection, projectionForMonth, projectedNights, projectedByDate, runProjection, refreshProjection, isDeadVoid, deadVoidsOf, DEAD_VOID_NIGHTS, statusText, ageDays, showProjection, reviewDueMonth, STALE_DAYS };
