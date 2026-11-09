@@ -370,7 +370,7 @@ return { total, known, share: total ? known / total : 0 };
 const state = { voidPlansOpen: false, ym: '', metric: 'bookings', compare: 'prev', channel: '', hoverStay: null, hoverDay: null };
 const PLOTS = { timeline: null, pace: null };
 const METRIC_LABEL = { bookings: 'Nights booked', nights: 'Nights occupied', revenue: 'Revenue earned', avgnight: 'Average revenue per night (30 days)' };
-const METRIC_UNIT = { bookings: 'nights', nights: 'nights', revenue: 'Â£', avgnight: 'Â£' };
+const METRIC_UNIT = { bookings: 'nights', nights: 'nights', revenue: '£', avgnight: '£' };
 
 function currentYm() { return todayStr().slice(0, 7); }
 
@@ -537,11 +537,11 @@ const roomLabel = room.label || 'Room';
 const showOwners = !narrow && room.owners.length > 0;
 ctx.fillStyle = c.ink; ctx.textAlign = 'left';
 ctx.font = '11px Inter, sans-serif';
-ctx.fillText(roomLabel.length > (narrow ? 9 : 17) ? `${roomLabel.slice(0, narrow ? 8 : 16)}â¦` : roomLabel, 6, showOwners ? mid - 6 : mid);
+ctx.fillText(roomLabel.length > (narrow ? 9 : 17) ? `${roomLabel.slice(0, narrow ? 8 : 16)}…` : roomLabel, 6, showOwners ? mid - 6 : mid);
 if (showOwners) {
 ctx.fillStyle = c.muted; ctx.font = '10px Inter, sans-serif';
-const ownersText = room.owners.join(' Â· ');
-ctx.fillText(ownersText.length > 20 ? `${ownersText.slice(0, 19)}â¦` : ownersText, 6, mid + 7);
+const ownersText = room.owners.join(' · ');
+ctx.fillText(ownersText.length > 20 ? `${ownersText.slice(0, 19)}…` : ownersText, 6, mid + 7);
 ctx.font = '11px Inter, sans-serif';
 }
 // Nights Airbnb's feed marks "Not available" (host blocks): greyed and hatched, not offered for booking.
@@ -609,7 +609,7 @@ ctx.strokeRect(vx1 + 0.5, top + 3.5, vx2 - vx1 - 1, laneH - 7);
 ctx.setLineDash([]); ctx.globalAlpha = 1;
 if (vx2 - vx1 > 34 && v.expected >= 1) {
 ctx.fillStyle = c.muted; ctx.font = '9px Inter, sans-serif'; ctx.textAlign = 'left';
-ctx.fillText(`Â£${Math.round(v.expected).toLocaleString('en-GB')}`, vx1 + 4, top + 11);
+ctx.fillText(`£${Math.round(v.expected).toLocaleString('en-GB')}`, vx1 + 4, top + 11);
 ctx.font = '11px Inter, sans-serif';
 }
 lateHits.push({ x1: vx1, x2: vx2, y: top + 3, y2: top + laneH - 3, void: v, room });
@@ -663,7 +663,7 @@ if (hit.void) {
 const v = hit.void;
 lines.push(`<strong>Projected: ${v.nights} free night${v.nights === 1 ? '' : 's'}, ${fmtD(v.from)} to ${fmtD(v.to)}</strong>`);
 lines.push(`${escapeHtml(hit.room.label || 'Room')}${v.open ? ' (runs past the projection window)' : ''}`);
-lines.push(`Expected Â£${Math.round(v.expected).toLocaleString('en-GB')} (1 in 10 below Â£${Math.round(v.p10).toLocaleString('en-GB')}, above Â£${Math.round(v.p90).toLocaleString('en-GB')}), about ${v.expectedNights.toFixed(1)} of ${v.nights} nights booked`);
+lines.push(`Expected £${Math.round(v.expected).toLocaleString('en-GB')} (1 in 10 below £${Math.round(v.p10).toLocaleString('en-GB')}, above £${Math.round(v.p90).toLocaleString('en-GB')}), about ${v.expectedNights.toFixed(1)} of ${v.nights} nights booked`);
 const myPlan = planFor(v);
 if (myPlan) lines.push(`<strong>Your plan:</strong> ${escapeHtml(planText(myPlan))}, included above`);
 if (isDeadVoid(v)) {
@@ -673,7 +673,7 @@ lines.push(`<strong style="color:var(--red);">Dead void</strong>: expected to fi
 } else {
 const b = hit.ghost;
 lines.push(`<strong>One possible booking</strong>`);
-lines.push(`${escapeHtml(hit.room.label || 'Room')} Â· ${fmtD(b.from)} to ${fmtD(b.to)} Â· ${b.nights} night${b.nights === 1 ? '' : 's'} Â· about Â£${b.amount.toLocaleString('en-GB')}`);
+lines.push(`${escapeHtml(hit.room.label || 'Room')} · ${fmtD(b.from)} to ${fmtD(b.to)} · ${b.nights} night${b.nights === 1 ? '' : 's'} · about £${b.amount.toLocaleString('en-GB')}`);
 lines.push('Not booked: a typical simulated future, drawn to show what the gaps could look like');
 }
 if (p) lines.push(escapeHtml(statusText(p)));
@@ -686,7 +686,7 @@ return;
 if (hit.block) {
 const fmtB = (d) => new Date(`${d}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 const nb = nightsBetween(hit.block.from, hit.block.to);
-tip.innerHTML = `<strong>Blocked on Airbnb</strong><br>${escapeHtml(hit.room.label || 'Room')} Â· ${fmtB(hit.block.from)} to ${fmtB(hit.block.to)} Â· ${nb} night${nb === 1 ? '' : 's'}<br>Blocked on the listing in use for this room, so left out of the projection.`;
+tip.innerHTML = `<strong>Blocked on Airbnb</strong><br>${escapeHtml(hit.room.label || 'Room')} · ${fmtB(hit.block.from)} to ${fmtB(hit.block.to)} · ${nb} night${nb === 1 ? '' : 's'}<br>Blocked on the listing in use for this room, so left out of the projection.`;
 tip.hidden = false;
 tip.style.left = `${Math.min(x + 12, PLOTS.timeline.width - 240)}px`;
 tip.style.top = `${Math.max(0, y - 10)}px`;
@@ -697,11 +697,11 @@ const nights = nightsBetween(st.checkin, st.checkout);
 const fmt = (d) => new Date(`${d}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 const lines = [
 `<strong>${escapeHtml(st.guest || (st.status === 'cancelled' ? 'Cancelled booking' : 'Booking'))}</strong>`,
-`${escapeHtml(hit.room.label || 'Room')} Â· ${escapeHtml(stayOwner(st))} Â· ${escapeHtml(CHANNELS[channelOf(st)].label)}`,
-`${fmt(st.checkin)} to ${fmt(st.checkout)}${st.approx ? ' (check-out unknown, one night shown)' : ` Â· ${nights} night${nights === 1 ? '' : 's'}`}`,
+`${escapeHtml(hit.room.label || 'Room')} · ${escapeHtml(stayOwner(st))} · ${escapeHtml(CHANNELS[channelOf(st)].label)}`,
+`${fmt(st.checkin)} to ${fmt(st.checkout)}${st.approx ? ' (check-out unknown, one night shown)' : ` · ${nights} night${nights === 1 ? '' : 's'}`}`,
 ];
 if (st.status === 'cancelled') lines.push(`Cancelled${st.cancelledOn ? ` ${fmt(st.cancelledOn)}` : ''}`);
-if (st.income != null) lines.push(`Income Â£${Number(st.income).toLocaleString('en-GB', { maximumFractionDigits: 2 })}`);
+if (st.income != null) lines.push(`Income £${Number(st.income).toLocaleString('en-GB', { maximumFractionDigits: 2 })}`);
 if (st.bookedOn) lines.push(`Booked ${fmt(st.bookedOn)}`);
 if ((st.clashes || []).length) lines.push(`<strong>Clashes with ${st.clashes.map((c) => `${escapeHtml(c.guest || 'another stay')} (${fmt(c.checkin)} to ${fmt(c.checkout)})`).join(', ')}</strong>`);
 tip.innerHTML = lines.join('<br>');
@@ -798,7 +798,7 @@ const proj = metric !== 'bookings' && cur.some((v) => v === null) ? seriesFor(st
 const projPlus = projectedPace(ym, metric, cur, proj, lead, today);
 const unit = METRIC_UNIT[metric];
 const money = metric === 'revenue' || metric === 'avgnight';
-const fmtVal = (v) => (money ? `Â£${Math.round(v).toLocaleString('en-GB')}` : `${Math.round(v * 10) / 10} night${Math.round(v * 10) / 10 === 1 ? '' : 's'}`);
+const fmtVal = (v) => (money ? `£${Math.round(v).toLocaleString('en-GB')}` : `${Math.round(v * 10) / 10} night${Math.round(v * 10) / 10 === 1 ? '' : 's'}`);
 const lastIdx = cur.reduce((acc, v, i) => (v !== null ? i : acc), -1); // latest day with data (today, or the month end)
 let verdict = '';
 let delta = null;
@@ -877,7 +877,7 @@ const v = (maxV * g) / 4; const y = Y(v);
 ctx.strokeStyle = c.line; ctx.globalAlpha = g === 0 ? 1 : 0.6; ctx.lineWidth = 1;
 ctx.beginPath(); ctx.moveTo(plot.x, y); ctx.lineTo(plot.x + plot.w, y); ctx.stroke(); ctx.globalAlpha = 1;
 ctx.fillStyle = c.muted;
-ctx.fillText(money ? `Â£${Math.round(v)}` : String(Math.round(v * 10) / 10), plot.x - 5, y);
+ctx.fillText(money ? `£${Math.round(v)}` : String(Math.round(v * 10) / 10), plot.x - 5, y);
 }
 // x axis
 ctx.textAlign = 'center'; ctx.textBaseline = 'top';
@@ -1045,7 +1045,7 @@ const cancelled = stays.filter((s) => s.status === 'cancelled' && nightsInMonth(
 const roomNights = (nightRateRooms().length || 1) * daysIn(state.ym);
 const unplaced = stays.unplacedCancellations ? `; ${stays.unplacedCancellations} older cancellation payout${stays.unplacedCancellations === 1 ? '' : 's'} couldn't be placed on a room` : '';
 const payouts = (stays.items || []).filter((it) => !it.start && it.date.slice(0, 7) === state.ym);
-const payoutNote = state.metric === 'revenue' && payouts.length ? `. Revenue includes Â£${Math.round(payouts.reduce((a, p) => a + p.gross, 0)).toLocaleString('en-GB')} from ${payouts.length} payout${payouts.length === 1 ? '' : 's'} with no stay dates (cancellations and historic entries)` : '';
+const payoutNote = state.metric === 'revenue' && payouts.length ? `. Revenue includes £${Math.round(payouts.reduce((a, p) => a + p.gross, 0)).toLocaleString('en-GB')} from ${payouts.length} payout${payouts.length === 1 ? '' : 's'} with no stay dates (cancellations and historic entries)` : '';
 const undrawn = stays.unplacedIncome ? `; ${stays.unplacedIncome} ledger income entr${stays.unplacedIncome === 1 ? 'y' : 'ies'} couldn't be placed on a room (counted in revenue, not drawn)` : '';
 const check = reconcileNote(stays);
 sum.textContent = `${inMonth.length} booking${inMonth.length === 1 ? '' : 's'}, ${nights} night${nights === 1 ? '' : 's'} (${Math.round((nights / roomNights) * 100)}% of room-nights${split})${cancelled ? `, ${cancelled} cancelled` : ''}${unplaced}${undrawn}${payoutNote}.${check ? ` Against Income by month: ${check}.` : ''}`;
@@ -1062,8 +1062,8 @@ const series = seriesFor(stays, ym, 'revenue', todayStr());
 const mine = series[series.length - 1] || 0;
 const main = lettingChartMonthTotal(ym);
 const gap = Math.round(main - mine);
-return `${monthLabel(ym)} ${money0(mine)} here, ${money0(main)} there${Math.abs(gap) > 1 ? ` (${money0(Math.abs(gap))} ${gap > 0 ? 'missing here' : 'extra here'})` : ' â'}`;
-}).join(' Â· ');
+return `${monthLabel(ym)} ${money0(mine)} here, ${money0(main)} there${Math.abs(gap) > 1 ? ` (${money0(Math.abs(gap))} ${gap > 0 ? 'missing here' : 'extra here'})` : ' ✓'}`;
+}).join(' · ');
 }
 
 function shortDate(d) { return new Date(`${d}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }); }
@@ -1103,7 +1103,7 @@ return note ? `${label}, ${note}` : label;
 };
 const when = (it) => (it.start ? `${shortDate(it.start)} to ${shortDate(it.end)}` : (it.date ? `paid ${shortDate(it.date)}` : 'no date'));
 el.innerHTML = `<summary class="settings-note" style="cursor:pointer;">Where this month's income entries went (${rows.length})</summary>
-<div style="overflow-x:auto;"><table class="limits-table"><thead><tr><th>Dates</th><th>Entry</th><th>Â£</th><th>On the timeline?</th></tr></thead><tbody>${rows.map((r) => `<tr>
+<div style="overflow-x:auto;"><table class="limits-table"><thead><tr><th>Dates</th><th>Entry</th><th>£</th><th>On the timeline?</th></tr></thead><tbody>${rows.map((r) => `<tr>
 <td>${escapeHtml(when(r.it))}</td>
 <td>${escapeHtml(entryName(r.it))}</td>
 <td>${escapeHtml(money0(r.it.gross))}</td>
@@ -1265,7 +1265,7 @@ async function onPlansRerun(e) {
 if (!e.target.closest('#occ-plans-rerun') || rerunning) return;
 rerunning = true;
 const el = document.getElementById('occ-plans-pending');
-if (el) el.textContent = 'Re-running the whole projection with your plansâ¦';
+if (el) el.textContent = 'Re-running the whole projection with your plans…';
 try { await refreshProjection(); } finally { rerunning = false; }
 }
 
@@ -1297,9 +1297,9 @@ const btn = document.getElementById('occ-project-btn');
 const el = document.getElementById('occ-project-status');
 if (!btn || btn.disabled) return;
 btn.disabled = true;
-if (el) el.textContent = 'Projectingâ¦';
+if (el) el.textContent = 'Projecting…';
 try {
-const r = await runProjection({ onProgress: (p) => { if (el) el.textContent = `Projectingâ¦ ${Math.round(p * 100)}%`; } });
+const r = await runProjection({ onProgress: (p) => { if (el) el.textContent = `Projecting… ${Math.round(p * 100)}%`; } });
 if (r.error) { if (el) el.textContent = r.error; return; }
 data.prefs.showProjection = true;
 const box = document.getElementById('occ-project-show'); if (box) box.checked = true;
