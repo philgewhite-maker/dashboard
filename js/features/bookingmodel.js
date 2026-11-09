@@ -166,6 +166,8 @@ const cal = s.calibration || {};
 const ov = overrides.scale || {};
 const scale = { ...ov };
 [['demand', 'demand'], ['lead', 'lead'], ['cancel', 'cancel']].forEach(([k]) => { const c = Number(cal[k]) || 1; if (c !== 1 || ov[k] != null) scale[k] = c * (ov[k] != null ? ov[k] : 1); });
+const paceSet = Number(s.paceFactor);
+if (paceSet > 0 && paceSet !== 1) scale.pace = paceSet;
 // Nights Airbnb's feed marks "Not available" (a host's manual blocks): not free nights, so not voids.
 const blocks = (data.airbnbBlocks || []).map((b) => ({ listingId: b.listingId, from: b.from, to: b.to }));
 const feedListingIds = (data.airbnbListings || []).filter((l) => l.icsUrl).map((l) => l.id);
@@ -575,7 +577,9 @@ return booked;
 
 // The rate of requests per check-in date that makes an empty calendar for this room fill to
 // the occupancy it achieved in that month of the year. Bisection over simulated months.
-function lambdaFor(ctx, params, ri, month) {
+// The rate the model uses: the solved one times the booking-pace factor (Settings), which scales requests directly without touching the occupancy it was solved for.
+function lambdaFor(ctx, params, ri, month) { return lambdaSolved(ctx, params, ri, month) * (ctx.scale.pace || 1); }
+function lambdaSolved(ctx, params, ri, month) {
 const key = `${ri}|${month}`;
 if (params.lambda.has(key)) return params.lambda.get(key);
 const o = params.occ[ri];
