@@ -623,7 +623,7 @@ return filled / ((ctx.calRuns || CAL_RUNS) * 30);
 };
 let lo = 0; let hi = 4;
 if (occupancyAt(hi) < target) { params.lambda.set(key, hi); return hi; }
-for (let it = 0; it < 12; it++) {
+for (let it = 0; it < (ctx.calIters || 12); it++) {
 const mid = (lo + hi) / 2;
 if (occupancyAt(mid) < target) lo = mid; else hi = mid;
 }

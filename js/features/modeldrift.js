@@ -226,7 +226,8 @@ async function proposeRecent(progress = () => {}) {
     const evalAt = async (k) => {
       progress(`Recalibrating the model at ×${k.toFixed(2)}…`);
       await tick();
-      const ctx2 = { ...ctx, scale: { ...ctx.scale, demand: k } };
+      // A lighter calibration (fewer simulated months and bisection steps): the answer is rounded and reviewed by hand anyway.
+      const ctx2 = { ...ctx, scale: { ...ctx.scale, demand: k }, calRuns: 50, calIters: 8 };
       const p2 = { ...params, lambda: new Map() };
       const E = rooms.map((r) => starts.map((t, i) => (used(r, i) ? expectedWeek(ctx2, p2, r.ri, r.open, t) : 0)));
       const w = E.reduce((a, row) => a + row.reduce((b, e, i) => b + e * wt(starts[i]), 0), 0);
@@ -238,7 +239,7 @@ async function proposeRecent(progress = () => {}) {
     const pts = [{ lk: Math.log(kc), f: g(e0) }];
     const LO = Math.log(0.25); const HI = Math.log(16);
     let lk = pts[0].lk + (pts[0].f > 0 ? -0.5 : 0.5);
-    for (let it = 0; it < 5 && Math.abs(pts[pts.length - 1].f) >= 0.03; it++) {
+    for (let it = 0; it < 5 && Math.abs(pts[pts.length - 1].f) >= 0.06; it++) {
       lk = Math.min(HI, Math.max(LO, lk));
       if (pts.some((p) => Math.abs(p.lk - lk) < 1e-3)) break;
       const e = await evalAt(Math.exp(lk));
