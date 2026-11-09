@@ -14,6 +14,7 @@ import { buildContext, calibrate, driftKit } from './bookingmodel.js';
 import { forecastNights, actualNights, requestReview } from './modelreview.js';
 
 const Z90 = 1.645;
+const MIN_EXPECTED = 3; // expected booked nights below which a group is too thin to read (a single booking would swing it)
 const SUGGEST_MIN_SHARE = 0.7; // an early night counts towards a demand suggestion only when this much of its bookings should be in
 const SUGGEST_MIN_NIGHTS = 40;
 const SHRINK_K = 60;
@@ -25,7 +26,7 @@ const add = (g, sh, q, a) => { g.rows += 1; g.N += sh; g.E += q; g.A += a; g.V +
 
 // Booked over expected, with a ~90% range that allows for a booking covering several nights.
 function reading(g, stay) {
-  if (!(g.E > 0.5)) return { ...g, ratio: null, lo: null, hi: null, call: 'none' };
+  if (!(g.E >= MIN_EXPECTED)) return { ...g, ratio: null, lo: null, hi: null, call: 'none' };
   const se = Math.sqrt(g.V * Math.max(1, stay));
   const ratio = g.A / g.E; const lo = Math.max(0, (g.A - Z90 * se) / g.E); const hi = (g.A + Z90 * se) / g.E;
   return { ...g, ratio, lo, hi, call: lo > 1 ? 'above' : hi < 1 ? 'below' : 'inline' };
