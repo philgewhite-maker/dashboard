@@ -154,7 +154,7 @@ export function assessOwner(stays, settings, today, proj = null) {
 
 // One projection of every room from today to the last assessment shown, run in slices so the page stays responsive and
 // cached for half an hour (invalidated when the projection is re-run). It needs no saved projection: the Letting
-// occupancy projection only looks two months ahead and an assessment looks up to fourteen.
+// occupancy projection only looks three months ahead and an assessment looks up to fourteen.
 const projState = { cache: null, inflight: null };
 const yieldToPage = () => (typeof document !== 'undefined' && document.hidden ? Promise.resolve() : new Promise((r) => setTimeout(r, 0)));
 

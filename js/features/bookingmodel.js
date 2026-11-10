@@ -971,7 +971,7 @@ return out;
 
 function defaultProjectionEnd(today) {
 const [y, m] = today.split('-').map(Number);
-return new Date(Date.UTC(y, m + 1, 1)).toISOString().slice(0, 10); // first of the month after next
+return new Date(Date.UTC(y, m + 2, 1)).toISOString().slice(0, 10); // first of the month three on: the window runs to the end of the third month
 }
 
 // The listing in a room that currently takes its bookings: the one with most stays starting within

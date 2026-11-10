@@ -2638,7 +2638,7 @@ loans: [],
 // -- a task can be deleted later without that silently reopening the
 // same event to be re-proposed.
 airbnbRateProposals: [],
-// Saved projections of the free nights between now and the end of next month (js/features/bookingprojection.js),
+// Saved projections of the free nights between now and the end of the third month (js/features/bookingprojection.js),
 // made on request, so each can be compared with what actually happened (js/features/modelreview.js).
 bookingProjections: [],
 // Every row of every Airbnb earnings export you have imported, in full (blankAirbnbEarning).

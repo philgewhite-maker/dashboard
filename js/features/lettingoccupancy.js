@@ -387,7 +387,7 @@ return opts;
 function forecastHtml() {
 return `<div id="letting-forecast-section">
 <div class="sync-row" style="gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px;" id="occ-projection-row">
-<button class="sync-btn sm inline" type="button" id="occ-project-btn" title="Estimates what each gap between bookings, today to the end of next month, is likely to earn, and draws it on the charts. Saved, so it can be checked against what happens.">Project the next two months</button>
+<button class="sync-btn sm inline" type="button" id="occ-project-btn" title="Estimates what each gap between bookings, today to the end of the third month, is likely to earn, and draws it on the charts. Saved, so it can be checked against what happens.">Project the next three months</button>
 <label class="settings-note" style="margin:0;display:flex;gap:4px;align-items:center;" title="Draw the saved projection on the charts"><input type="checkbox" id="occ-project-show"> Show projection</label>
 <span class="settings-note" id="occ-project-status" style="margin:0;"></span>
 </div>

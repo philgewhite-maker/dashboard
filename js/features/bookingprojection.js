@@ -1,4 +1,4 @@
-// Saved projections of the voids (the free nights between now and the end of next month): run on
+// Saved projections of the voids (the free nights between now and the end of the third month): run on
 // request, kept in data.bookingProjections, drawn onto the Letting charts, and compared with what
 // happened by the monthly model review (js/features/modelreview.js). The engine is
 // js/features/bookingmodel.js (makeProjection).
