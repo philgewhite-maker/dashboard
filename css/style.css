@@ -4670,6 +4670,11 @@ background:var(--slate-bg);color:var(--slate);
 .vp-form{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:flex-end;margin-top:4px;flex:1 1 100%;}
 .vp-form label{display:flex;flex-direction:column;gap:2px;font-size:11px;color:var(--muted);}
 .vp-form .settings-input{flex:0 0 auto;width:84px;}
+/* On a phone the forecast panel gives every .settings-input flex:1 1 7rem, which in this column-direction label sets the box's HEIGHT: reset it. */
+#letting-panel .vp-form .settings-input,#letting-forecast-panel .vp-form .settings-input,#letting-analytics-panel .vp-form .settings-input,
+#letting-panel .vp-form select,#letting-forecast-panel .vp-form select,#letting-analytics-panel .vp-form select{flex:0 0 auto;width:84px;min-width:0;max-width:none;}
+/* A long task title wraps inside the row instead of running off the screen. */
+.dead-void-row .task-chip{white-space:normal;max-width:100%;}
 #occ-void-plans .settings-subgroup{margin:0;}
 
 /* Model drift charts (js/features/modeldrift.js) */
