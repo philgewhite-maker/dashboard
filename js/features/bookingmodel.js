@@ -1047,6 +1047,7 @@ const monthIdx = new Int8Array(W);
 for (let i = 0; i < W; i++) monthIdx[i] = monthKeys.indexOf(dayStr(wS + i).slice(0, 7));
 const nArr = wE - T + 1;
 const arrivedNights = monthKeys.map(() => new Float64Array(nArr)); // expected nights, by arrival day, per stay month
+const arrivedByRoom = ctx.rooms.map(() => monthKeys.map(() => new Float64Array(nArr))); // the same, per room
 
 const nightBooked = ctx.rooms.map(() => new Float64Array(W));
 const nightIncome = ctx.rooms.map(() => new Float64Array(W));
@@ -1081,6 +1082,7 @@ nightIncome[b.room][i] += v; nightBooked[b.room][i] += 1;
 const vid = voidAt[b.room][i];
 if (vid >= 0) { voidIncome[vid][run] += v; voidNights[vid][run] += 1; }
 arrivedNights[monthIdx[i]][off] += 1;
+arrivedByRoom[b.room][monthIdx[i]][off] += 1;
 }
 if (b.ci >= wS) {
 const c0 = params.prices[b.room].clean; const i0 = a - wS;
@@ -1142,7 +1144,9 @@ for (let i = 0; i < W; i++) {
 if (monthIdx[i] !== mi) continue;
 inc += nightIncome[r][i] / n; nts += nightBooked[r][i] / n;
 }
-rooms[room.key] = { income: r2(inc), nights: r2(nts) };
+const cumRoom = []; let runRoom = 0;
+for (let i = 0; i < nArr; i++) { runRoom += arrivedByRoom[r][mi][i] / n; cumRoom.push(r2(runRoom)); }
+rooms[room.key] = { income: r2(inc), nights: r2(nts), bookedByDate: cumRoom };
 incomeAll += inc; nightsAll += nts;
 });
 const cum = []; let run = 0;

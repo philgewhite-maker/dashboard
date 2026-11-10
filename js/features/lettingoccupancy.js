@@ -367,8 +367,24 @@ return { total, known, share: total ? known / total : 0 };
 
 // ---- State & markup ----------------------------------------------------------
 
-const state = { voidPlansOpen: false, ym: '', metric: 'bookings', compare: 'prev', channel: '', hoverStay: null, hoverDay: null };
+const state = { voidPlansOpen: false, ym: '', metric: 'bookings', compare: 'prev', channel: '', room: '', hoverStay: null, hoverDay: null };
 const PLOTS = { timeline: null, pace: null };
+
+// The stays and income entries behind every chart here, cut to the room picked in the Room box (every room
+// when none is). collectStays() itself stays whole: the booking model and the request log read it too.
+// Cancellation payouts and ledger entries that could not be placed on a room belong to no room, so they only count in "All rooms".
+function stayView() {
+const all = collectStays();
+if (!state.room) return all;
+const inRoom = (listingId) => !!listingId && roomKeyFor(listingId) === state.room;
+const view = all.filter((s) => inRoom(s.listingId));
+view.items = (all.items || []).filter((it) => it.listing && inRoom(it.listing.id));
+view.trace = (all.trace || []).filter((r) => r.it.listing && inRoom(r.it.listing.id));
+view.unplacedCancellations = 0;
+view.unplacedIncome = 0;
+return view;
+}
+const inPickedRoom = (v) => !state.room || v.roomKey === state.room;
 const METRIC_LABEL = { bookings: 'Nights booked', nights: 'Nights occupied', revenue: 'Revenue earned', avgnight: 'Average revenue per night (30 days)' };
 const METRIC_UNIT = { bookings: 'nights', nights: 'nights', revenue: '£', avgnight: '£' };
 
@@ -401,10 +417,11 @@ function sectionHtml() {
 return `<div class="letting-chart-wrap" id="letting-occupancy-section">
 <div class="panel-head" style="margin:14px 0 6px;"><h2 style="font-size:13px;">Occupancy and booking pace</h2></div>
 <details class="settings-subgroup panel-about"><summary>About this</summary>
-<div class="settings-note" style="margin:0 0 6px;">Top: each room is a lane and each booking a line from check-in to check-out, so turnovers show as a gap. Hatched lines are cancelled bookings (recorded from the day they leave the Airbnb feed; older ones appear only when they have a cancellation payout, and show as a single night). Bottom: the same month as a cumulative line against a comparison month, with the gap shaded and named. <strong>Nights booked</strong> zooms out: its axis starts a week or so before the first booking for the month (or the comparison month) appears, up to 16 weeks before the 1st, and runs through the month, showing how many of the month's nights were already booked at each point, against the comparison month at the same distance from its own 1st (so you can see whether next month is filling faster or slower than last month did). A booking counts from the day it was confirmed (its confirmation email) and a cancelled one is taken back out from the day it was cancelled; booking dates are only known for stays seen since this was added, so the comparison is always drawn, and the nights with no booking date are shown as a shaded band above each line (they could have been booked at any point, so the line is the least that was booked by then). The text under the chart says how much of each month's booked nights have a booking date, and how much was known at the same point last month. <strong>Nights occupied</strong> and <strong>Revenue earned</strong> compare straight away, and for a month not yet over a dotted line carries them to the month's end using only stays already booked and confirmed (revenue counts the income entered for them; a stay with none adds nothing, and unconfirmed enquiries are left out).</div>
+<div class="settings-note" style="margin:0 0 6px;">The <strong>room box</strong> next to the month narrows everything here (the timeline, the pace line, its projection, the voids and plans below) to one room; a cancellation payout or ledger entry that could not be placed on a room only counts under all rooms. Top: each room is a lane and each booking a line from check-in to check-out, so turnovers show as a gap. Hatched lines are cancelled bookings (recorded from the day they leave the Airbnb feed; older ones appear only when they have a cancellation payout, and show as a single night). Bottom: the same month as a cumulative line against a comparison month, with the gap shaded and named. <strong>Nights booked</strong> zooms out: its axis starts a week or so before the first booking for the month (or the comparison month) appears, up to 16 weeks before the 1st, and runs through the month, showing how many of the month's nights were already booked at each point, against the comparison month at the same distance from its own 1st (so you can see whether next month is filling faster or slower than last month did). A booking counts from the day it was confirmed (its confirmation email) and a cancelled one is taken back out from the day it was cancelled; booking dates are only known for stays seen since this was added, so the comparison is always drawn, and the nights with no booking date are shown as a shaded band above each line (they could have been booked at any point, so the line is the least that was booked by then). The text under the chart says how much of each month's booked nights have a booking date, and how much was known at the same point last month. <strong>Nights occupied</strong> and <strong>Revenue earned</strong> compare straight away, and for a month not yet over a dotted line carries them to the month's end using only stays already booked and confirmed (revenue counts the income entered for them; a stay with none adds nothing, and unconfirmed enquiries are left out).</div>
 </details>
 <div class="sync-row" style="gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px;">
 <select id="occ-month" class="mini" title="The month both charts show"></select>
+<select id="occ-room" class="mini" title="Show every room, or just one: the bookings, the projection, the voids and the pace line all follow it"></select>
 <span class="settings-note" id="occ-summary" style="margin:0;"></span>
 </div>
 <details class="settings-subgroup" id="occ-income-trace" style="margin:0 0 6px;"></details>
@@ -474,7 +491,7 @@ return ctx.createPattern(tile, 'repeat');
 // and channels fill it. A room is the set of listings that share a colour, as on the night-rate chart.
 function lanes() {
 const listings = data.airbnbListings || [];
-return nightRateRooms().map((room) => {
+return nightRateRooms().filter((room) => !state.room || room.key === state.room).map((room) => {
 const members = room.listingIds.map((id) => listings.find((l) => l.id === id)).filter(Boolean);
 const owners = [...new Set(members.map((l) => ownerNameFor(ownerKeyFor(l))).filter(Boolean))];
 return { ...room, members, owners };
@@ -729,12 +746,14 @@ if (!pj) return null;
 const n = cur.length;
 const first = dayStr(ym, 1);
 const dateAt = (i) => dateStrAdd(first, i - lead);
-const byDate = projectedByDate(pj);
+const byDate = projectedByDate(pj, state.room);
 const out = new Array(n).fill(null);
 if (metric === 'bookings') {
 // Nights booked so far, plus the arrivals the projection expects from now on (counted from today even
 // when the projection is older, so bookings it expected that have already come in aren't added twice).
-const cum = (pj.months[ym] || {}).bookedByDate || [];
+// One room: its own arrivals, kept in projections made since the Room box was added (an older one has only the total).
+const monthRec = pj.months[ym] || {};
+const cum = (state.room ? ((monthRec.rooms || {})[state.room] || {}).bookedByDate : monthRec.bookedByDate) || [];
 if (!cum.length) return null;
 let lastIdx = -1; cur.forEach((v, i) => { if (v !== null) lastIdx = i; });
 if (lastIdx < 0) return null;
@@ -1003,7 +1022,7 @@ const { plot, n, cur, cmp, proj, projPlus, curUpper, cmpUpper, fmtVal, lead } = 
 const r = canvas.getBoundingClientRect();
 const x = evt.clientX - r.left;
 const i = Math.round(((x - plot.x) / plot.w) * (n - 1));
-if (i < 0 || i >= n) { state.hoverDay = null; tip.hidden = true; drawPace(collectStays()); return; }
+if (i < 0 || i >= n) { state.hoverDay = null; tip.hidden = true; drawPace(stayView()); return; }
 state.hoverDay = i;
 const date = dateStrAdd(dayStr(state.ym, 1), i - lead);
 let day = new Date(`${date}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
@@ -1012,7 +1031,7 @@ tip.innerHTML = `<strong>${escapeHtml(day)}</strong><br>${cur[i] === null ? 'Not
 tip.hidden = false;
 tip.style.left = `${Math.min(x + 12, r.width - 190)}px`;
 tip.style.top = '8px';
-drawPace(collectStays());
+drawPace(stayView());
 }
 
 // ---- Render / init --------------------------------------------------------------
@@ -1030,7 +1049,7 @@ Object.values(CHANNELS).forEach((ch) => items.push(`<span class="letting-chart-l
 items.push('<span class="letting-chart-legend-item"><span class="occ-key-hatch"></span>Cancelled</span>');
 if ((data.airbnbBlocks || []).length) items.push('<span class="letting-chart-legend-item"><span class="occ-key-blocked"></span>Blocked on Airbnb</span>');
 if (projectionForMonth(state.ym)) items.push('<span class="letting-chart-legend-item"><span class="occ-key-proj"></span>Projected: free nights shaded by chance of being booked, one possible fill dashed</span>');
-if (projectionForMonth(state.ym) && deadVoidsOf().length) items.push('<span class="letting-chart-legend-item"><span class="occ-key-dead"></span>Dead void: expected to fill under a night</span>');
+if (projectionForMonth(state.ym) && deadVoidsOf().filter(inPickedRoom).length) items.push('<span class="letting-chart-legend-item"><span class="occ-key-dead"></span>Dead void: expected to fill under a night</span>');
 el.innerHTML = items.join('');
 const sum = document.getElementById('occ-summary');
 if (sum) {
@@ -1042,7 +1061,7 @@ const byChannel = {};
 nightMap.forEach((ch) => { byChannel[ch] = (byChannel[ch] || 0) + 1; });
 const split = Object.keys(byChannel).length > 1 ? `; ${Object.entries(byChannel).map(([ch, k]) => `${k} ${CHANNELS[ch].label}`).join(', ')}` : '';
 const cancelled = stays.filter((s) => s.status === 'cancelled' && nightsInMonth(s, state.ym) > 0).length;
-const roomNights = (nightRateRooms().length || 1) * daysIn(state.ym);
+const roomNights = (state.room ? 1 : (nightRateRooms().length || 1)) * daysIn(state.ym);
 const unplaced = stays.unplacedCancellations ? `; ${stays.unplacedCancellations} older cancellation payout${stays.unplacedCancellations === 1 ? '' : 's'} couldn't be placed on a room` : '';
 const payouts = (stays.items || []).filter((it) => !it.start && it.date.slice(0, 7) === state.ym);
 const payoutNote = state.metric === 'revenue' && payouts.length ? `. Revenue includes £${Math.round(payouts.reduce((a, p) => a + p.gross, 0)).toLocaleString('en-GB')} from ${payouts.length} payout${payouts.length === 1 ? '' : 's'} with no stay dates (cancellations and historic entries)` : '';
@@ -1055,7 +1074,7 @@ sum.textContent = `${inMonth.length} booking${inMonth.length === 1 ? '' : 's'}, 
 // On the revenue metric, finished months are checked against the Income by month
 // chart so a gap between the two shows up here rather than being taken on trust.
 function reconcileNote(stays) {
-if (state.metric !== 'revenue' || state.channel) return ''; // Income by month counts every channel
+if (state.metric !== 'revenue' || state.channel || state.room) return ''; // Income by month counts every channel and room
 const months = [state.ym, ...compareMonths(state.ym, state.compare)].filter((m) => m < currentYm());
 return months.map((ym) => {
 const series = seriesFor(stays, ym, 'revenue', todayStr());
@@ -1159,7 +1178,15 @@ renderLettingOccupancy();
 
 function renderLettingOccupancy() {
 if (!document.getElementById('occ-timeline-canvas')) return;
-const stays = collectStays();
+const roomSel = document.getElementById('occ-room');
+if (roomSel) {
+const rooms = nightRateRooms();
+if (state.room && !rooms.some((r) => r.key === state.room)) state.room = '';
+const html = `<option value="">All rooms</option>${rooms.map((r) => `<option value="${escapeHtml(r.key)}">${escapeHtml(r.label || 'Room')}</option>`).join('')}`;
+if (roomSel.dataset.sig !== html) { roomSel.innerHTML = html; roomSel.dataset.sig = html; }
+roomSel.value = state.room;
+}
+const stays = stayView();
 renderUndated(stays);
 renderIncomeTrace(stays);
 renderLegend(stays);
@@ -1232,7 +1259,7 @@ const el = document.getElementById('occ-void-plans');
 if (!el) return;
 const p = latestProjection();
 const today = todayStr();
-const list = p && showProjectionOn() ? (p.voids || []).filter((v) => v.to > today && v.nights >= 1 && !isDeadVoid(v)) : [];
+const list = p && showProjectionOn() ? (p.voids || []).filter((v) => inPickedRoom(v) && v.to > today && v.nights >= 1 && !isDeadVoid(v)) : [];
 if (!list.length) { el.hidden = true; el.innerHTML = ''; return; }
 const short = (d) => new Date(`${d}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 el.innerHTML = `<details class="settings-subgroup"${state.voidPlansOpen ? ' open' : ''}><summary>Voids ahead (${list.length}): record a price or minimum-stay change</summary>${list.map((v) => `<div class="vp-row"><strong>${escapeHtml(v.roomLabel || 'Room')} ${short(v.from)}&ndash;${short(v.to)}</strong> <span class="settings-note" style="margin:0;">${v.nights} night${v.nights === 1 ? '' : 's'}, about ${v.expectedNights.toFixed(1)} expected, &pound;${Math.round(v.expected).toLocaleString('en-GB')}</span>${voidPlanFormHtml(v)}</div>`).join('')}</details>`;
@@ -1274,7 +1301,7 @@ async function renderDeadVoids() {
 const el = document.getElementById('occ-dead-voids');
 if (!el) return;
 const p = latestProjection();
-const list = p && showProjectionOn() ? deadVoidsOf(p) : [];
+const list = p && showProjectionOn() ? deadVoidsOf(p).filter(inPickedRoom) : [];
 if (!list.length) { el.hidden = true; el.innerHTML = ''; return; }
 const { taskChipHtml, bindTaskChips } = await import('./tasks.js');
 bindTaskChips();
@@ -1322,6 +1349,12 @@ state.ym = currentYm();
 const monthSel = document.getElementById('occ-month');
 monthSel.innerHTML = monthOptions().map((o) => `<option value="${o.ym}"${o.ym === state.ym ? ' selected' : ''}>${escapeHtml(o.label)}</option>`).join('');
 monthSel.addEventListener('change', () => { state.ym = monthSel.value; renderLettingOccupancy(); });
+try { state.room = localStorage.getItem('occ-room') || ''; } catch (err) { state.room = ''; }
+document.getElementById('occ-room').addEventListener('change', (e) => {
+state.room = e.target.value;
+try { localStorage.setItem('occ-room', state.room); } catch (err) { /* private window: the choice just isn't remembered */ }
+renderLettingOccupancy();
+});
 document.getElementById('pace-metric').addEventListener('change', (e) => { state.metric = e.target.value; renderLettingOccupancy(); });
 document.getElementById('pace-compare').addEventListener('change', (e) => { state.compare = e.target.value; renderLettingOccupancy(); });
 document.getElementById('pace-channel').addEventListener('change', (e) => { state.channel = e.target.value; renderLettingOccupancy(); });
@@ -1341,7 +1374,7 @@ tl.addEventListener('pointermove', timelineTip);
 tl.addEventListener('pointerleave', () => { document.getElementById('occ-tip').hidden = true; });
 const pc = document.getElementById('pace-canvas');
 pc.addEventListener('pointermove', paceTip);
-pc.addEventListener('pointerleave', () => { state.hoverDay = null; document.getElementById('pace-tip').hidden = true; drawPace(collectStays()); });
+pc.addEventListener('pointerleave', () => { state.hoverDay = null; document.getElementById('pace-tip').hidden = true; drawPace(stayView()); });
 // A canvas on a hidden tab measures 0x0: draw again once Finances is shown, on resize and on a theme change.
 document.addEventListener('tabshown', (e) => { if (e.detail?.tab === 'finances') renderLettingOccupancy(); });
 window.addEventListener('resize', renderLettingOccupancy);
