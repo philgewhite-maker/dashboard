@@ -1880,7 +1880,19 @@ white-space:nowrap;
    its own natural size (35px vs 24px, measured) -- the "2x button
    size" look. Each chip now sizes to its own content regardless of
    how tall its sibling happens to be. */
-.cal-clean-group{display:flex;gap:6px;flex-wrap:wrap;align-items:flex-start;margin-left:auto;}
+.cal-clean-group{display:flex;gap:6px;flex-wrap:wrap;align-items:flex-start;}
+/* Cleaners and keys share one row; each chip stays one line, the row wraps only when the screen is too narrow for all of them. */
+.cal-turn-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px;}
+.cal-turn-row .cal-badge,.cal-turn-row .key-chip{white-space:nowrap;}
+.cal-turn-row .cal-badge.cleaner-chip{font-size:10px;padding:2px 6px;letter-spacing:0;}
+.cal-turn-row .cal-clean-group{gap:4px;}
+.cal-turn-row .key-drop-zone{flex:0 1 auto;min-height:0;padding:0;gap:6px;}
+.cal-turn-row .key-drop-zone:not(:empty){border-color:transparent;}
+.cal-turn-row .key-drop-zone:empty{padding:2px 10px;min-height:22px;flex:1 1 60px;}
+/* The listing picker is the card title itself, so the name is not repeated in a dropdown. */
+.cal-name-pick{position:relative;display:inline-block;}
+.cal-name-pick::after{content:"\25BE";position:absolute;right:0;top:50%;transform:translateY(-50%);font-size:11px;color:var(--muted);pointer-events:none;}
+.cal-name-select{appearance:none;-webkit-appearance:none;border:0;background:transparent;color:inherit;font:inherit;padding:0 16px 0 0;margin:0;cursor:pointer;max-width:100%;}
 /* .cal-event-row .cal-badge{margin-left:auto} below (existing rule, used
    by calendars.js's own "Today" badge) would otherwise also apply to
    EACH cleaner chip individually, pushing them apart from each other
@@ -1891,7 +1903,7 @@ white-space:nowrap;
    much later, so this override was silently losing. Three classes, not
    two, so this wins on specificity instead of depending on staying
    below the rule it overrides. */
-.cal-event-row .cal-clean-group .cal-badge{margin-left:0;}
+.cal-turn-row .cal-clean-group .cal-badge{margin-left:0;}
 /* Cleaner chips can't safely reuse any of the room-colour fills above --
    all 9 are already claimed by AIRBNB_COLOURS, so any one of them could
    collide with whichever colour the listing badge just above happens to

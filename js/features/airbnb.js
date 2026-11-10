@@ -768,17 +768,18 @@ const openCleanerForms = new Set();
 
 function cleanerChipHtml(reservation, edge) {
 const match = findCleanerMatch(reservation, edge);
-const label = edge === 'checkin' ? 'Check-in clean' : 'Check-out clean';
-if (match) return `<span class="cal-badge cleaner-chip">${label}: ${formatAirbnbDate(match.date)} &middot; ${escapeHtml(match.name)} <span class="tag-x" data-airbnb-cleaner-unassign="${reservation.id}:${edge}" title="Un-assign this clean from this stay. The calendar event stays where it is; it just stops counting for this ${edge === 'checkin' ? 'check-in' : 'check-out'}.">&times;</span></span>`;
+const label = edge === 'checkin' ? '&rarr;&#129529;' : '&#129529;&rarr;';
+const edgeName = edge === 'checkin' ? 'Check-in clean' : 'Check-out clean';
+if (match) return `<span class="cal-badge cleaner-chip" title="${edgeName}">${label} ${formatAirbnbDate(match.date)} &middot; ${escapeHtml(match.name)} <span class="tag-x" data-airbnb-cleaner-unassign="${reservation.id}:${edge}" title="Un-assign this clean from this stay. The calendar event stays where it is; it just stops counting for this ${edge === 'checkin' ? 'check-in' : 'check-out'}.">&times;</span></span>`;
 const key = `${reservation.id}:${edge}`;
 if (!openCleanerForms.has(key)) {
-return `<span class="cal-badge cleaner-chip cleaner-chip-tbc" data-airbnb-cleaner-toggle="${key}" data-airbnb-cleaner-drop="${key}" title="Drop a cleaner here, or click to add who's doing this clean and when">${label}: TBC</span><span class="sync-status" data-airbnb-cleaner-status="${key}"></span>`;
+return `<span class="cal-badge cleaner-chip cleaner-chip-tbc" data-airbnb-cleaner-toggle="${key}" data-airbnb-cleaner-drop="${key}" title="${edgeName}: drop a cleaner here, or click to add who's doing this clean and when">${label} TBC</span><span class="sync-status" data-airbnb-cleaner-status="${key}"></span>`;
 }
 // Prefilled to the stay's own boundary -- the common case -- but still
 // editable, since the actual clean can land a day either side of it.
 const prefillDate = edge === 'checkin' ? reservation.checkin : reservation.checkout;
-return `<span class="cal-badge cleaner-chip-form">
-${label}:
+return `<span class="cal-badge cleaner-chip-form" title="${edgeName}">
+${label}
 <input type="text" autocomplete="off" list="airbnb-cleaner-names" class="tag-add-input" placeholder="Who" data-airbnb-cleaner-name="${key}" style="max-width:90px;">
 <input type="date" class="tag-add-input" data-airbnb-cleaner-date="${key}" value="${escapeHtml(prefillDate)}" style="max-width:130px;">
 <button class="sync-btn sm inline" type="button" data-airbnb-cleaner-add="${key}">Add</button>
@@ -830,11 +831,10 @@ const nights = Math.round((new Date(`${r.checkout}T00:00:00`) - new Date(`${r.ch
 const lengthLabel = nights <= 0 ? 'same day' : `${nights} night${nights === 1 ? '' : 's'}`;
 return `<div class="cal-row" data-airbnb-row="${r.id}">
 <div class="cal-head">
-<span class="cal-name"><span class="dot ${escapeHtml(listing.colour)}"></span>${escapeHtml(listing.label || listing.prefix || 'Listing')}</span>
+<span class="cal-name"><span class="dot ${escapeHtml(listing.colour)}"></span>${data.airbnbListings.length > 1 ? `<span class="cal-name-pick"><select class="cal-name-select" data-airbnb-res-move="${r.id}" title="Which listing this stay belongs to. Change it when someone else rented the room out this time, e.g. you took the booking yourself, so the income and occupancy go to the right listing and owner.">${data.airbnbListings.map((l) => `<option value="${escapeHtml(l.id)}"${l.id === r.listingId ? ' selected' : ''}>${escapeHtml(l.label || l.prefix || 'Listing')}</option>`).join('')}</select></span>` : escapeHtml(listing.label || listing.prefix || 'Listing')}</span>
 <span class="cal-badge ${escapeHtml(listing.colour)}">${formatAirbnbDate(r.checkin)} &rarr; ${formatAirbnbDate(r.checkout)} &middot; ${lengthLabel}</span>
 </div>
 <div class="cal-event-row">
-${data.airbnbListings.length > 1 ? `<select class="mini" data-airbnb-res-move="${r.id}" title="Which listing this stay belongs to. Change it when someone else rented the room out this time, e.g. you took the booking yourself, so the income and occupancy go to the right listing and owner.">${data.airbnbListings.map((l) => `<option value="${escapeHtml(l.id)}"${l.id === r.listingId ? ' selected' : ''}>${escapeHtml(l.label || l.prefix || 'Listing')}</option>`).join('')}</select>` : ''}
 <input type="text" autocomplete="off" class="tag-add-input" placeholder="${escapeHtml(pend && pend.guestName ? `${pend.guestName} (pending)` : 'Guest name')}" data-airbnb-res-field="guestName" data-airbnb-res-id="${r.id}" value="${escapeHtml(r.guestName)}" style="max-width:130px;">
 <input type="text" autocomplete="off" class="tag-add-input" placeholder="Notes" data-airbnb-res-field="notes" data-airbnb-res-id="${r.id}" value="${escapeHtml(r.notes)}" style="max-width:160px;">
 <input type="number" step="0.01" min="0" class="tag-add-input" placeholder="${escapeHtml(pend && pend.payout != null ? `£${Math.round(pend.payout)} if accepted` : 'Income £')}" data-airbnb-res-field="income" data-airbnb-res-id="${r.id}" value="${r.income ?? ''}" style="max-width:95px;" title="What this stay earned. The owner's share becomes a debt on the checkout date — see Letting income on Finances.">
@@ -850,11 +850,10 @@ ${r.source === 'external'
 : `<button class="sync-btn inline" type="button" data-airbnb-push="${r.id}" title="Push to Google Calendar">Push</button>`}
 <span class="sync-status" data-airbnb-push-status="${r.id}">${pushNoteHtml(r)}</span>
 ${r.source === 'manual' ? `<span class="del-x" style="opacity:1;" data-airbnb-res-del="${r.id}" title="Delete this booking — nothing else records it, so it won't come back on the next Sync">&times;</span>` : ''}
-${data.prefs.airbnbCalendarId && listing.needsCleaning ? `<div class="cal-clean-group">${cleanerChipHtml(r, 'checkin')}${cleanerChipHtml(r, 'checkout')}</div>` : ''}
 </div>
 ${unconfirmedHtml(r)}
 ${payoutCheckHtml(r)}
-${reservationKeysHtml(r)}
+<div class="cal-turn-row">${data.prefs.airbnbCalendarId && listing.needsCleaning ? `<div class="cal-clean-group">${cleanerChipHtml(r, 'checkin')}${cleanerChipHtml(r, 'checkout')}</div>` : ''}${reservationKeysHtml(r)}</div>
 </div>`;
 }
 
