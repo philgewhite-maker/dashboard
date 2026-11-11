@@ -16,7 +16,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v829</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v830</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -780,6 +780,7 @@ Prices and offers come from an AI web search of each retailer, not a live basket
 <section class="panel wide" id="day-queue-panel" data-tab="dating">
 <div class="panel-head">
 <h2><span class="dot rose"></span>Today</h2>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="guide" data-goto-target="#guide-contacts-today" title="Guide: how to use this panel">&#128214;</span>
 </div>
 <div id="day-queue-content"></div>
 </section>
@@ -5894,6 +5895,21 @@ Finds connections whose cover photo is missing or is really just the small place
 </div>
 </details>
 
+<details class="settings-subgroup" id="guide-shopping-setfinder">
+<summary>Finding a set to buy</summary>
+
+<div class="guide-task">
+<div class="guide-q">How do I search for a set for someone?</div>
+<ol class="guide-steps">
+<li>Turn on <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#sensitive-fields-toggle">Show private fields</span> if you have not, then open <span class="inline-goto-link" data-goto-tab="shopping" data-goto-target="#inventory-panel">Inventory</span>.</li>
+<li>Press <strong>Find a set for her&hellip;</strong>. A box called Find a set opens.</li>
+<li>Pick who it is for with <strong>Choose a connection&hellip;</strong>. Her recorded sizes are used, so add them on her card first.</li>
+<li>Set the <strong>Bra budget</strong> (it starts at 150) and tick any colours you want (Black, Neutral, Bright, Other). Leave them all unticked for any colour.</li>
+<li>Press <strong>Search</strong>. It looks at Agent Provocateur bras in her size, cheapest first, and checks each one's matching knickers before showing it, because a set needs both.</li>
+</ol>
+</div>
+</details>
+
 <details class="settings-subgroup" id="guide-shopping-ap">
 <summary>AP orders and returns</summary>
 
@@ -6012,6 +6028,39 @@ Finds connections whose cover photo is missing or is really just the small place
 <summary><h3>Contacts</h3></summary>
 <div class="settings-block">
 <p class="settings-note" style="margin:0 0 10px;">The <span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#connections-panel">Contacts tab</span> is where you keep track of the people you meet. Each person is a card in <span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#connections-panel">Connections</span>. <span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#overview-panel">Connections Overview</span> counts them by stage, city, age and tags, and <span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#import-match-panel">Add &amp; import</span> brings in people, photos and chats. People marked as family are kept out of these lists; they live on the <span class="inline-goto-link" data-goto-tab="family" data-goto-target="#family-panel">Family tab</span>.</p>
+
+<details class="settings-subgroup" id="guide-contacts-today">
+<summary>The Today list</summary>
+<p class="settings-note" style="margin:0 0 10px;"><span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#day-queue-panel">Today</span> sits above the <span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#connections-panel">Connections</span> list. It turns "who should I deal with now?" into three short lists with one-tap buttons. It only suggests; nothing changes until you press a button.</p>
+
+<div class="guide-task">
+<div class="guide-q">What do the three lists mean?</div>
+<ol class="guide-steps">
+<li><strong>Priority</strong>: people you have pinned, or who rank as priority, who are due a message. Each row says how many days it is since you last made contact. The most overdue is first.</li>
+<li><strong>Recent matches</strong>: people who matched in the last 14 days and are waiting on you, either because you have not messaged them yet or because their message is the last one in the chat. This is based on the last chat read, so it can be a little behind.</li>
+<li><strong>Offboard</strong>: people who have gone quiet. It lists anyone in Backlog review, anyone whose 14-day wait ran out with no answer, and anyone you have not contacted for 180 days or more. It counts "N of 5 done today", so a long backlog never becomes a chore.</li>
+</ol>
+<div class="guide-tip">Family, people in finished stages such as Faded and Archived, and people with a travel pause are left out. People waiting out a 14-day timer are not listed; a line at the bottom counts them.</div>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I clear someone from Priority or Recent matches?</div>
+<ol class="guide-steps">
+<li>Press the chat link on their row (for example "Tinder chat") to open that chat in a new browser tab. If there is no link, the row says why.</li>
+<li>After you have messaged them, press <strong>Sent</strong>. That records today as the last contact and removes them from the list.</li>
+<li>Or press <strong>Sent + 14d</strong>. That does the same and also starts a 14-day wait. If they have not answered when it ends, they move to Offboard.</li>
+<li>The pin button adds them to, or removes them from, the Planner's priority list. The <strong>P1 to P5</strong> box changes their priority, and the stage box changes their stage straight from the row.</li>
+</ol>
+</div>
+
+<div class="guide-task">
+<div class="guide-q">How do I offboard someone?</div>
+<ol class="guide-steps">
+<li>In <strong>Offboard</strong>, press <strong>Faded</strong> or <strong>Archived</strong> to set that stage. They disappear from the Connections list.</li>
+<li>Or press <strong>Keep 30d</strong> to keep them and hide them from this list for 30 days.</li>
+</ol>
+</div>
+</details>
 
 <details class="settings-subgroup" id="guide-contacts-add">
 <summary>Adding a person</summary>
