@@ -1144,16 +1144,16 @@ return all.filter((r) => (r.type === 'stream' ? !!subscribedProvider(item) : tru
 async function runRoute(item, route) {
 if (route.type === 'stream') {
 const where = subscribedProvider(item);
-const url = (item.whereToWatch && item.whereToWatch.link) || item.link;
-if (url) window.open(url, '_blank', 'noopener');
+const url = safeHref((item.whereToWatch && item.whereToWatch.link) || item.link);
+if (url && url !== '#') window.open(url, '_blank', 'noopener');
 item.status = 'available';
 queueSave();
 renderMedia();
 return `Opened ${where ? shortProviderName(where.name) : 'where to watch'}.`;
 }
 if (route.type === 'search') {
-const url = fillTemplate(route.urlTemplate, item);
-if (!url) return 'That route has no search URL set — add one in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#media-routes">Settings</span>.';
+const url = safeHref(fillTemplate(route.urlTemplate, item));
+if (!url || url === '#') return 'That route has no search URL set — add one in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#media-routes">Settings</span>.';
 window.open(url, '_blank', 'noopener');
 return `Searched ${route.label}.`;
 }
