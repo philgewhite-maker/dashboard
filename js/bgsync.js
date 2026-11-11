@@ -25,13 +25,12 @@ import { parseHealthPayloads, mergeHealthDaily } from './features/healthparse.js
 
 // Must match js/db.js and js/state.js exactly -- this reads the same
 // stores the app writes. Duplicated rather than imported because db.js is
-// reachable from utils.js's DOM helpers; these four constants are stable
+// reachable from utils.js's DOM helpers; these constants are stable
 // and a mismatch fails loudly (a missing document, not a corrupt one).
 const DB_NAME = 'dashboard-db';
 const DB_VERSION = 2;
-const DATA_KEY = 'app-data';
-const REV_KEY = 'app-data-rev';
 const LOCAL_SETTINGS_KEY = 'local-settings';
+const SYNC_DIRTY_KEY = 'sync-dirty'; // js/state.js SYNC_DIRTY_KEY
 
 function openDb() {
 return new Promise((resolve, reject) => {
@@ -49,15 +48,6 @@ return new Promise((resolve, reject) => {
 const req = db.transaction('kv', 'readonly').objectStore('kv').get(key);
 req.onsuccess = () => resolve(req.result);
 req.onerror = () => reject(req.error);
-});
-}
-
-function kvSet(db, key, value) {
-return new Promise((resolve, reject) => {
-const tx = db.transaction('kv', 'readwrite');
-tx.objectStore('kv').put(value, key);
-tx.oncomplete = () => resolve();
-tx.onerror = () => reject(tx.error);
 });
 }
 
@@ -196,6 +186,11 @@ const db = await openDb();
 const settings = (await kvGet(db, LOCAL_SETTINGS_KEY)) || {};
 const ep = endpoints(settings);
 if (!ep) return { skipped: 'not configured' };
+// This device holds edits the server hasn't seen (js/state.js sets the
+// marker with every local save; js/sync/autosync.js clears it after a
+// push). Leave the server alone: the page pushes them through its merge
+// path when next opened, and refreshes health and ICS then anyway.
+if (await kvGet(db, SYNC_DIRTY_KEY)) return { skipped: 'unsent edits on this device' };
 
 const pull = await fetch(ep.sync, { headers: { 'X-Sync-Secret': ep.secret } });
 if (!pull.ok) throw new Error(`sync.php returned ${pull.status}`);
@@ -247,10 +242,11 @@ if (push.status === 409) return { ...results, wrote: false, conflict: true };
 throw new Error(`sync.php write returned ${push.status}`);
 }
 const written = await push.json();
-// Keep this device's known rev in step, so the page doesn't wake up
-// thinking it's behind and re-pull for no reason.
-await kvSet(db, REV_KEY, written.rev);
-await kvSet(db, DATA_KEY, doc);
+// Deliberately NO local write. This used to put `doc` into app-data and
+// the server rev into app-data-rev (the page's local save counter, not its
+// sync rev), which overwrote unsent edits on disk and wound that counter
+// backwards. The server now holds the refreshed copy; the page adopts it
+// on its next open through its normal pull, which knows how to merge.
 return { ...results, wrote: true, rev: written.rev };
 }
 

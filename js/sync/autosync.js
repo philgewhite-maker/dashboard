@@ -7,9 +7,9 @@
 // never silently erase a save made on another device. When that happens the
 // newer document wins and a backup of what this device had is downloaded
 // first, matching what "Pull from Google Drive" already does.
-import { data, replaceData, setLocalChangeHandler, hasPendingSave, flushSave } from '../state.js';
+import { data, replaceData, setLocalChangeHandler, hasPendingSave, flushSave, SYNC_DIRTY_KEY } from '../state.js';
 import { offerBackup, backupOutcomePhrase } from '../backupgate.js';
-import { kvGet, kvSet } from '../db.js';
+import { kvGet, kvSet, kvDeleteIf } from '../db.js';
 import { mergeDocuments } from './merge.js';
 import { renderAll } from '../render-all.js';
 import { ConflictError, NotConfiguredError, isConfigured, pullRemote, pushRemote, setKnownRev, getKnownRev } from './selfhost.js';
@@ -34,6 +34,8 @@ let pollTimer = null;
 let drainTimer = null;
 let busy = false;
 let statusEl = null;
+// The sync-dirty token pull() last scheduled a "stranded edit" push for.
+let strandedTokenTried = null;
 
 // `html` defaults off -- this is the one status line shown on EVERY tab
 // (the global page header), fed by plain strings from several call sites
@@ -78,6 +80,47 @@ const BASE_KEY = 'sync-base';
 const VOLATILE_KEYS = ['tickerCache', 'airbnbSyncStatus', 'airbnbCleanerSyncStatus', 'siteHealth', 'calendarStatus'];
 async function saveBase(jsonText) {
 try { await kvSet(BASE_KEY, jsonText); } catch (err) { console.warn('Could not store the sync baseline:', err); }
+}
+
+// Which top-level sections of `nowText` differ from the last-synced baseline,
+// and which of those are worth a push (not a per-device cache, not a
+// collection read from the record store). `hasBase` false means there is no
+// baseline to compare with. `sameShape` is false when a section was added or
+// removed. One definition, used by push() to decide whether to send and by
+// pull() to decide whether this device holds unsent edits.
+async function meaningfulChanges(nowText) {
+const baseText = await kvGet(BASE_KEY);
+if (!baseText) return { hasBase: false, changed: [], meaningful: [], sameShape: false };
+const base = JSON.parse(baseText), now = JSON.parse(nowText);
+const changed = Object.keys(now).filter((k) => JSON.stringify(now[k]) !== JSON.stringify(base[k]));
+const fromStore = flippedKeys();
+const meaningful = changed.filter((k) => !VOLATILE_KEYS.includes(k) && !fromStore.includes(k));
+return { hasBase: true, changed, meaningful, sameShape: Object.keys(base).length === Object.keys(now).length };
+}
+
+// Clears the persisted "unsent edits" marker, but only if it still holds the
+// token read before the push serialised the document: an edit saved after
+// that (this tab or another) keeps its own marker.
+async function clearDirty(token) {
+if (!token) return;
+try { await kvDeleteIf(SYNC_DIRTY_KEY, token); } catch (err) { console.warn('Could not clear the sync-dirty marker:', err); }
+}
+
+// Does this device hold edits the server has not seen? In-memory signals
+// first (an edit not yet saved, a push still on its debounce), then the
+// persisted marker (survives a reload), then a content check against the
+// baseline as a backstop (data saved by an older build without the marker,
+// or a marker another tab cleared for data this tab never held).
+async function hasUnsentEdits() {
+if (hasPendingSave() || pushTimer) return true;
+try { if (await kvGet(SYNC_DIRTY_KEY)) return true; } catch (err) { return true; }
+try {
+const { hasBase, meaningful, sameShape } = await meaningfulChanges(JSON.stringify(data));
+return hasBase && (meaningful.length > 0 || !sameShape);
+} catch (err) {
+// Can't tell: err on the side of pushing, whose conflict path merges.
+return true;
+}
 }
 
 // A short, local-only trail of the moments this device's document was
@@ -132,7 +175,10 @@ syncLog('no baseline, took the server copy', `rev ${remote.rev}`);
 const backup = await adoptRemote(remote, { backupFirst: true });
 return { merged: false, conflicts: [], backup };
 }
-await replaceData(remote.data, { fromRemote: true });
+// Normalised in memory only: disk keeps this device's own copy (and its
+// sync-dirty marker) until the merged result is written below, so a page
+// that dies mid-merge comes back with its unsent edits intact.
+await replaceData(remote.data, { fromRemote: true, persist: false });
 const theirs = JSON.parse(JSON.stringify(data));
 const fromStore = flippedKeys();
 const { merged, conflicts } = mergeDocuments(JSON.parse(baseText), ours, theirs, VOLATILE_KEYS.concat(fromStore));
@@ -174,11 +220,14 @@ if (remote.rev !== knownRev) {
 // up, so there's nothing unique left to lose, and a download on every
 // remote change would be unbearable.
 const firstAdoption = knownRev === 0 && hasLocalContent();
-if (!firstAdoption && (hasPendingSave() || pushTimer)) {
+// The unsent-edit test survives a reload (persisted marker + content
+// check), not just this session: a phone that edited offline, or was
+// swiped away within the push debounce, must not have that edit replaced.
+if (!firstAdoption && (await hasUnsentEdits())) {
 // An edit is still on its way up. Replacing the document now would
 // silently drop it, so send it first; if the server has moved on the
 // push's conflict path merges the two.
-await flushSave();
+if (hasPendingSave()) await flushSave();
 clearTimeout(pushTimer);
 pushTimer = null;
 busy = false;
@@ -193,6 +242,16 @@ setStatus(firstAdoption
 // Same revision as the server: its copy IS the last synced state, so it
 // is the right baseline for any later merge. Stored once, not per poll.
 if (!hasPendingSave() && !pushTimer && !(await kvGet(BASE_KEY))) await saveBase(JSON.stringify(remote.data));
+// An edit saved on this device but never pushed (the page closed inside
+// the push debounce, or the push failed) would otherwise wait for the
+// next local edit. Send it now -- once per marker per page, so a push the
+// server keeps refusing doesn't repeat on every poll.
+let token = null;
+try { token = await kvGet(SYNC_DIRTY_KEY); } catch (err) { token = null; }
+if (token && token !== strandedTokenTried && !pushTimer) {
+strandedTokenTried = token;
+schedulePush();
+}
 if (announce) setStatus('Up to date', 'ok');
 }
 } catch (err) {
@@ -212,34 +271,42 @@ async function push({ force, attempt = 0 } = {}) {
 if ((busy && !force) || !(await isConfigured())) return;
 const wasBusy = busy;
 busy = true;
+let token = null;
 try {
 setStatus('Saving…');
+// Read BEFORE serialising: an edit saved after this point writes a new
+// token, which the compare-and-clear below leaves in place.
+try { token = await kvGet(SYNC_DIRTY_KEY); } catch (err) { token = null; }
 const sent = JSON.stringify(data);
 // Which top-level sections this push actually changed, kept in the local
 // sync log so a chatty writer (a poll, a scheduled task, another open
 // device) can be identified from the keys that keep appearing here.
+let skip = false;
 try {
-const baseText = await kvGet(BASE_KEY);
-if (baseText) {
-const base = JSON.parse(baseText), now = JSON.parse(sent);
-const changed = Object.keys(now).filter((k) => JSON.stringify(now[k]) !== JSON.stringify(base[k]));
+const { hasBase, changed, meaningful, sameShape } = await meaningfulChanges(sent);
+if (hasBase) {
 // A collection read from the record store changes whenever another
 // device edits it; that arrives via the store, not as a reason to push.
-const fromStore = flippedKeys();
-const meaningful = changed.filter((k) => !VOLATILE_KEYS.includes(k) && !fromStore.includes(k));
-if (!meaningful.length && Object.keys(base).length === Object.keys(now).length) {
+if (!meaningful.length && sameShape) {
 // Nothing worth sending. A pull's re-render can queue a save that changes
 // nothing, and a quote/weather refresh or sync-status stamp changes only
 // per-device caches; pushing either bumped the server revision, which
 // made every other open device pull and do the same -- a ping-pong.
+skip = true;
+} else {
+syncLog('pushing changes to', changed.slice(0, 12).join(', '));
+}
+}
+} catch (err) { /* diagnostic only */ }
+if (skip) {
+await clearDirty(token);
 setStatus(`Synced ${new Date().toLocaleTimeString()}`, 'ok');
 return 'skipped';
 }
-syncLog('pushing changes to', changed.slice(0, 12).join(', '));
-}
-} catch (err) { /* diagnostic only */ }
-await pushRemote(data);
+// Exactly the text the baseline records, so base and server agree.
+await pushRemote(JSON.parse(sent));
 await saveBase(sent);
+await clearDirty(token);
 setStatus(`Synced ${new Date().toLocaleTimeString()}`, 'ok');
 } catch (err) {
 if (err instanceof ConflictError) {
@@ -248,6 +315,9 @@ if (err instanceof ConflictError) {
 // is then pushed again (a couple of tries, in case it moves again).
 const result = await mergeWithRemote(err.remote);
 if (!result.merged) {
+// No baseline: the server copy was adopted (with this device's copy
+// offered as a backup first), so nothing unsent is left here.
+await clearDirty(token);
 setStatus(`Another device had newer data — took theirs, ${backupOutcomePhrase(result.backup)}`, 'error');
 } else if (result.conflicts.length) {
 setStatus(`Merged with another device — one field changed on both sides, theirs kept, ${backupOutcomePhrase(result.backup)}`, 'error');
@@ -270,7 +340,10 @@ busy = wasBusy ? busy : false;
 
 function schedulePush() {
 clearTimeout(pushTimer);
-pushTimer = setTimeout(() => push(), PUSH_DEBOUNCE_MS);
+// The handle is cleared when it fires, so `pushTimer` means "a push is
+// waiting on its debounce" and nothing more; unsent edits after that are
+// tracked by the persisted sync-dirty marker.
+pushTimer = setTimeout(() => { pushTimer = null; push(); }, PUSH_DEBOUNCE_MS);
 }
 
 function startPolling() {
@@ -300,8 +373,10 @@ if (document.visibilityState === 'visible') { pull(); drainAgentStaging(); }
 // A pending debounce would be cancelled by the page tearing down, losing
 // the last few seconds of edits — same gap flushSave() closes locally.
 window.addEventListener('pagehide', () => {
-if (pushTimer) { clearTimeout(pushTimer); push(); }
+if (pushTimer) { clearTimeout(pushTimer); pushTimer = null; push(); }
 });
+// Back online: try again at once, including a push that already failed.
+window.addEventListener('online', () => { strandedTokenTried = null; pull(); });
 
 await pull({ announce: true });
 settingsAfterRemote();

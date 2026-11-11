@@ -1,4 +1,4 @@
-import { kvGet, kvSet, photoDelete } from './db.js';
+import { kvGet, kvSet, kvSetMany, photoDelete } from './db.js';
 import { mergeDocuments } from './sync/merge.js';
 import { uid, todayStr, daysAgoStr, last7Dates, daysSince, daysUntil } from './utils.js';
 import { matchBrandLogo, matchBrandEntry, splitProvider } from './brandLogos.js';
@@ -6,6 +6,12 @@ import { splitLedgerNotes, migrateStays, dedupeStays, unlinkCopiedCodes, repairM
 
 const DATA_KEY = 'app-data';
 const REV_KEY = 'app-data-rev'; // separate from DATA_KEY so it never leaks into backup exports
+// Set (to an opaque token) in the same write as every local edit, and cleared
+// by js/sync/autosync.js only once a push has carried that edit to the server.
+// It is how a fresh page, or the service worker, knows this device holds edits
+// the server has not seen. An IndexedDB key outside the document: never synced,
+// never exported, not a local-settings entry.
+const SYNC_DIRTY_KEY = 'sync-dirty';
 const LOCAL_SETTINGS_KEY = 'local-settings'; // device-only: never synced, never exported in backups
 
 function sampleData() {
@@ -4172,7 +4178,14 @@ onExternalUpdate();
 return;
 }
 knownRev = onDiskRev + 1;
+// A local edit (anything but a remote adopt/merge, which passes notify:false)
+// marks the document dirty in the SAME transaction as the data, so a reload
+// or the service worker can never see the edit without the marker.
+if (opts.notify !== false) {
+await kvSetMany([[SYNC_DIRTY_KEY, `${Date.now()}.${Math.random().toString(36).slice(2, 8)}`], [DATA_KEY, data]]);
+} else {
 await kvSet(DATA_KEY, data);
+}
 await kvSet(REV_KEY, knownRev);
 persistedBase = JSON.stringify(data);
 onSaveStatus('ok');
@@ -4666,10 +4679,15 @@ URL.revokeObjectURL(url);
 // Shared by "import a backup file" and "pull from OneDrive" — both are
 // "replace local data with this external document" operations that need
 // the same defaults-filling and persistence.
+// `persist: false` normalises the document in memory without writing it: the
+// sync merge uses it to read the server's copy, so disk keeps this device's
+// own copy until the merged result is written (an interrupted merge then
+// loses nothing).
 async function replaceData(parsed, opts = {}) {
 const base = blankData();
 data = Object.assign({}, base, parsed);
 migrate();
+if (opts.persist === false) return;
 // Every caller re-renders everything itself afterwards, so skip the per-key dispatch.
 await persist({ notify: opts.fromRemote !== true, silentDispatch: true });
 }
@@ -4683,7 +4701,7 @@ export {
 data, sampleData, loadData, migrate, persist, queueSave, flushSave, hasPendingSave, setSaveStatusHandler,
 setExternalUpdateHandler, setLocalChangeHandler, onDataChange, baselineDataSignatures, getLocalSettings, setLocalSetting, setLocalSettingHandler, computeStreak, reachOutThreshold,
 isDormantStage, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness,
-exportBackup, importBackup, replaceData, DATA_KEY, TAG_FIELDS, SENSITIVE_BLOCKS, whatSheHas, unheldInventory, whoFits, inventorySets, incompleteCoreSets, whoFitsSet, interestNote, SIZE_GROUPS, sizeGroupFor, SET_CORE_GROUPS, DEFAULT_PREFS, blankInventoryItem, blankApOrder, blankLoan, blankSetCompletionFind, blankBookItem,
+exportBackup, importBackup, replaceData, DATA_KEY, SYNC_DIRTY_KEY, TAG_FIELDS, SENSITIVE_BLOCKS, whatSheHas, unheldInventory, whoFits, inventorySets, incompleteCoreSets, whoFitsSet, interestNote, SIZE_GROUPS, sizeGroupFor, SET_CORE_GROUPS, DEFAULT_PREFS, blankInventoryItem, blankApOrder, blankLoan, blankSetCompletionFind, blankBookItem,
 MAIL_SEARCH_KINDS, mailSearchLabel, blankMailSearch, blankMailTopic, blankMailRule, blankMailDismissal,
 TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureBatch, blankPendingImport, blankConnection, blankTelegramThread, blankReadingItem, blankCaptureDraft, blankJob, blankMediaItem, MEDIA_KINDS, MEDIA_STATUSES, blankMediaRecSource, blankMediaRecCandidate,
 blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS, LEG_DATE_FIELDS, STAY_TYPE_SUGGESTIONS,

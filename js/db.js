@@ -65,6 +65,38 @@ tx.onerror = () => reject(tx.error);
 });
 }
 
+// Several keys in ONE transaction: all land or none do. persist() uses it so
+// "the document on disk has an edit" and "the sync-dirty marker is set"
+// can never disagree (and it costs no extra transaction during page unload).
+async function kvSetMany(entries) {
+const db = await openDb();
+return new Promise((resolve, reject) => {
+const tx = db.transaction('kv', 'readwrite');
+const store = tx.objectStore('kv');
+entries.forEach(([key, value]) => store.put(value, key));
+tx.oncomplete = () => resolve();
+tx.onerror = () => reject(tx.error);
+});
+}
+
+// Compare-and-clear: deletes `key` only if it still holds `expected`, read and
+// deleted inside one transaction, so a newer value written by this tab or
+// another one is never wiped. Resolves whether it deleted.
+async function kvDeleteIf(key, expected) {
+const db = await openDb();
+return new Promise((resolve, reject) => {
+const tx = db.transaction('kv', 'readwrite');
+const store = tx.objectStore('kv');
+let deleted = false;
+const req = store.get(key);
+req.onsuccess = () => {
+if (req.result === expected) { store.delete(key); deleted = true; }
+};
+tx.oncomplete = () => resolve(deleted);
+tx.onerror = () => reject(tx.error);
+});
+}
+
 async function photoPut(id, blob) {
 const db = await openDb();
 return new Promise((resolve, reject) => {
@@ -158,6 +190,6 @@ req.onerror = () => reject(req.error);
 }
 
 export {
-openDb, kvGet, kvSet, photoPut, photoGet, photoDelete, photoUrl,
+openDb, kvGet, kvSet, kvSetMany, kvDeleteIf, photoPut, photoGet, photoDelete, photoUrl,
 parseCacheGet, parseCachePut, parseCacheClear, parseCacheCount,
 };

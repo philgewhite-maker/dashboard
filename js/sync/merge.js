@@ -32,6 +32,11 @@ const SPEND_STAMP = /^\.?claudeApiSpend\.lastDeviceUpdateAt$/;
 // both setting these is normal (e.g. a Sent tap on each), and the later date
 // is the right answer, so it resolves itself instead of raising a conflict.
 const CONTACT_DATE = /^\.?connections\[[^\]]+\]\.(sentAt|chaseUntil|lastContact)$/;
+// "When was this stay's income accrued": two devices that each ran the
+// boot-time accrual stamp the same accrual at different moments. The
+// earliest stamp is the real one (and clock skew can't matter: both mean
+// "accrued").
+const ACCRUED_AT = /^\.?airbnbReservations\[[^\]]+\]\.accruedAt$/;
 const num = (v) => (typeof v === 'number' && isFinite(v) ? v : 0);
 
 function resolveBenign(base, ours, theirs, path) {
@@ -43,6 +48,11 @@ return { value: Math.max(0, num(base) + (ours - num(base)) + (theirs - num(base)
 }
 if (CONTACT_DATE.test(path) && typeof ours === 'string' && typeof theirs === 'string') {
 return { value: ours > theirs ? ours : theirs };
+}
+// Both non-empty only: an empty stamp means "un-accrued" (letting.js clears
+// it when a stay's income is reset), which is a real edit, not noise.
+if (ACCRUED_AT.test(path) && typeof ours === 'string' && typeof theirs === 'string' && ours && theirs) {
+return { value: ours < theirs ? ours : theirs };
 }
 if (SPEND_STAMP.test(path) && typeof ours === 'string' && typeof theirs === 'string') {
 return { value: ours > theirs ? ours : theirs };
