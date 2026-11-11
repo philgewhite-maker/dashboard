@@ -12,7 +12,7 @@
 // before this runs, the payload is still in the cache next time.
 //
 // Only works from an installed PWA on Android. iOS has no share target.
-import { escapeHtml, scrollAndFlash } from '../utils.js';
+import { escapeHtml, scrollAndFlash, SYNC_LINK_HTML } from '../utils.js';
 import { data } from '../state.js';
 import { captureTask, revealTask } from './tasks.js';
 import { CAPTURE_OUTCOMES, matchCaptureRule } from './captureOutcomes.js';
@@ -201,10 +201,10 @@ source: { kind: 'share', label: title || link || 'Shared from another app', url:
 };
 }
 
-function banner(message, onOpen) {
+function banner(message, onOpen, opts = {}) {
 const el = document.createElement('div');
 el.className = 'share-banner';
-el.innerHTML = `<span>${escapeHtml(message)}</span>${onOpen ? '<button type="button">Open it</button>' : ''}<span class="share-x">&times;</span>`;
+el.innerHTML = `<span>${opts.html ? message : escapeHtml(message)}</span>${onOpen ? '<button type="button">Open it</button>' : ''}<span class="share-x">&times;</span>`;
 document.body.appendChild(el);
 const close = () => el.remove();
 el.querySelector('.share-x').addEventListener('click', close);
@@ -261,26 +261,27 @@ if (!failed.length) deleteRelayOriginals(share.relayIds);
 // never becomes a batch item -- if that's everything that was shared,
 // there's nothing left in Capture Inbox to open.
 const parts = [];
-if (batch.items.length) parts.push(`Captured ${batch.items.length} file${batch.items.length === 1 ? '' : 's'} to your Capture Inbox as "${label.slice(0, 60)}".`);
-if (matchesImports.length) parts.push(matchesImports.join(' '));
-if (healthImports.length) parts.push(healthImports.join(' '));
-if (markerImports.length) parts.push(markerImports.join(' '));
-if (voiceImports.length) parts.push(voiceImports.join(' '));
-if (failed.length) parts.push(`${failed.length} couldn't be captured — see Settings.`);
-const msg = parts.join(' ') || `Nothing from "${label.slice(0, 60)}" could be captured — see Settings.`;
+if (batch.items.length) parts.push(escapeHtml(`Captured ${batch.items.length} file${batch.items.length === 1 ? "" : "s"} to your Capture Inbox as "${label.slice(0, 60)}".`));
+if (matchesImports.length) parts.push(escapeHtml(matchesImports.join(" ")));
+if (healthImports.length) parts.push(escapeHtml(healthImports.join(" ")));
+if (markerImports.length) parts.push(escapeHtml(markerImports.join(" ")));
+if (voiceImports.length) parts.push(escapeHtml(voiceImports.join(" ")));
+if (failed.length) parts.push(escapeHtml(`${failed.length} couldn't be captured —`) + ` see ${SYNC_LINK_HTML}.`);
+const msg = parts.join(' ') || (escapeHtml(`Nothing from "${label.slice(0, 60)}" could be captured —`) + ` see ${SYNC_LINK_HTML}.`);
+const bannerHtml = (m, cb) => banner(m, cb, { html: true });
 if (batch.items.length) {
-banner(msg, async () => {
+bannerHtml(msg, async () => {
 const { switchTab } = await import('../tabs.js');
 switchTab('tasks');
 revealCaptureBatch(batch.id);
 });
 } else if (matchesImports.length) {
-banner(msg, async () => {
+bannerHtml(msg, async () => {
 const { switchTab } = await import('../tabs.js');
 switchTab('dating');
 });
 } else if (healthImports.length) {
-banner(msg, async () => {
+bannerHtml(msg, async () => {
 const { switchTab } = await import('../tabs.js');
 switchTab('health');
 });
@@ -289,12 +290,12 @@ switchTab('health');
 // the Capture drafts a transcribed voice clip lands in, live on the
 // Tasks tab -- always the right destination regardless of which
 // actually fired.
-banner(msg, async () => {
+bannerHtml(msg, async () => {
 const { switchTab } = await import('../tabs.js');
 switchTab('tasks');
 });
 } else {
-banner(msg);
+bannerHtml(msg);
 }
 return;
 }

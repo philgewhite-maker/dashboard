@@ -79,6 +79,7 @@ await reconcileMonitors();
 // this firing far more often than that doesn't re-run anything early.
 id: 'site-health', label: 'Site health checks', needsGoogle: false,
 note: 'Confirms the NAS-browser fetches other scheduled tasks and features depend on haven’t silently broken (a site redesign, a new anti-bot block). See Settings → Site health for the full list and current status.',
+noteHtml: escapeHtml('Confirms the NAS-browser fetches other scheduled tasks and features depend on haven’t silently broken (a site redesign, a new anti-bot block). ') + 'See <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#site-health-table">Settings → Site health</span> for the full list and current status.',
 run: async () => {
 const { runAllChecks } = await import('./sitehealth.js');
 await runAllChecks();
@@ -408,7 +409,7 @@ el.innerHTML = `<table class="limits-table">
 <tbody>${SCHEDULED_TASKS.map((t) => {
 const r = runs()[t.id];
 return `<tr>
-<td>${escapeHtml(t.label)}<div class="settings-note" style="margin:0;">${escapeHtml(t.note)}</div></td>
+<td>${escapeHtml(t.label)}<div class="settings-note" style="margin:0;">${t.noteHtml || escapeHtml(t.note)}</div></td>
 <td>${escapeHtml(agoLabel(r?.at))}${r?.skipped ? ` <span class="settings-note" style="display:inline;margin:0;">(${escapeHtml(r.skipped)})</span>` : ''}</td>
 <td>${t.needsGoogle ? 'Yes' : 'No'}</td>
 <td><input type="checkbox" data-scheduled-toggle="${t.id}" ${isEnabled(t) ? 'checked' : ''}></td>

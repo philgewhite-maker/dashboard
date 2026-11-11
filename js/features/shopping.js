@@ -792,7 +792,7 @@ return `<div class="mail-view-card" style="max-width:520px;">
 <label>Colours <span class="settings-note" style="display:inline;margin:0;">(blank = any)</span><input type="text" autocomplete="off" data-watch-spec="colours" value="${escapeHtml((spec.colours || []).join(', '))}" placeholder="Navy, Cobalt"></label>
 </div>
 <div class="sync-row" style="margin-top:8px;">
-<button class="sync-btn sm" type="button" data-watch-colours>Find other colours</button>
+<button class="sync-btn sm inline" type="button" data-watch-colours>Find other colours</button>
 <span class="settings-note" style="margin:0;">Searches the retailer's listings for every item and colour in this style's range.</span>
 </div>
 <div class="settings-block" style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line);">

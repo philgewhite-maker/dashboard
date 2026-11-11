@@ -9,7 +9,7 @@
 // the same album costs nothing. That matters because reviewing an album is
 // something you do repeatedly as it grows.
 import { data, queueSave, blankTask, recordImportRun, importStatusLine, upsertIdentity, blankConnection } from '../state.js';
-import { escapeHtml, resizeImageToBlob, MISSING_KEY_LINK_HTML } from '../utils.js';
+import { escapeHtml, resizeImageToBlob, MISSING_KEY_LINK_HTML, hydratePhotoBackgrounds } from '../utils.js';
 import { storePhoto } from '../files.js';
 import { MissingKeyError, quickScanScreenshot, extractProfileFromScreenshot } from '../ai.js';
 
@@ -139,10 +139,10 @@ if (!target.photoId) target.photoId = target.photoIds[0] || null;
 // interests/lookingFor/drinking/smoking entirely.
 if (existing) {
 fill(existing);
-const { applyProfileFieldsToConnection } = await import('./connections.js');
+const { applyProfileFieldsToConnection, connectionChipHtml } = await import('./connections.js');
 applyProfileFieldsToConnection(existing, rich);
 upsertIdentity(existing, { platform: s.app || 'Other', handle: s.name });
-statusEl().textContent = `Merged into ${existing.name}.`;
+statusEl().innerHTML = `Merged into ${connectionChipHtml(existing)}.`; hydratePhotoBackgrounds(statusEl());
 } else {
 const conn = blankConnection({
 name: s.name, profileName: s.name, app: s.app || 'Other', lastContact: new Date().toISOString().slice(0, 10),
@@ -153,9 +153,9 @@ height: rich.height || '', education: rich.education || '',
 });
 upsertIdentity(conn, { platform: conn.app, handle: s.name });
 data.connections.push(conn);
-const { applyProfileFieldsToConnection } = await import('./connections.js');
+const { applyProfileFieldsToConnection, connectionChipHtml } = await import('./connections.js');
 applyProfileFieldsToConnection(conn, rich);
-statusEl().textContent = `Added ${conn.name}.`;
+statusEl().innerHTML = `Added ${connectionChipHtml(conn)}.`; hydratePhotoBackgrounds(statusEl());
 }
 s.saved = true;
 queueSave();

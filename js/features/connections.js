@@ -2194,7 +2194,8 @@ if (target.id === source.id) { status.textContent = "Can't merge a profile into 
 if (!confirm(`Merge "${source.name}" into "${target.name}"?\n\nEverything from "${source.name}" — photos, notes, ratings, tags, to-dos — is folded in, keeping "${target.name}"'s values wherever both have one. "${source.name}" is then removed.\n\nThis can't be undone.`)) return;
 mergeConnectionInto(target, source);
 data.connections = data.connections.filter((x) => x.id !== source.id);
-status.textContent = `Merged "${source.name}" into "${target.name}".`;
+status.innerHTML = `Merged "${escapeHtml(source.name)}" into ${connectionChipHtml(target)}.`;
+hydratePhotoBackgrounds(status);
 renderConnections();
 renderOverviewRef();
 queueSave();
@@ -2690,10 +2691,12 @@ return;
 if (!Array.isArray(conn.photoIds)) conn.photoIds = [];
 const room = 12 - conn.photoIds.length;
 if (room <= 0) {
-status.textContent = `${conn.name} already has the maximum of 12 photos.`;
+status.innerHTML = `${connectionChipHtml(conn)} already has the maximum of 12 photos.`;
+hydratePhotoBackgrounds(status);
 return;
 }
-status.textContent = `Adding ${Math.min(files.length, room)} photo${files.length === 1 ? '' : 's'} to ${conn.name}…`;
+status.innerHTML = `Adding ${Math.min(files.length, room)} photo${files.length === 1 ? "" : "s"} to ${connectionChipHtml(conn)}…`;
+hydratePhotoBackgrounds(status);
 let added = 0;
 let failed = 0;
 for (const file of files.slice(0, room)) {
@@ -2709,9 +2712,10 @@ console.error('Could not add photo:', err);
 }
 }
 const skipped = files.length - Math.min(files.length, room);
-status.textContent = `Added ${added} photo${added === 1 ? '' : 's'} to ${conn.name}, no AI used.`
+status.innerHTML = `Added ${added} photo${added === 1 ? "" : "s"} to ${connectionChipHtml(conn)}, no AI used.`
 + (failed ? ` ${failed} couldn't be read.` : '')
 + (skipped ? ` ${skipped} skipped — 12 photo limit.` : '');
+hydratePhotoBackgrounds(status);
 renderConnections();
 queueSave();
 }

@@ -378,7 +378,8 @@ titleInput.hidden = false;
 tripSel.hidden = true;
 tripSel.value = data.trips[0].id;
 singleNote.hidden = false;
-singleNote.textContent = `→ ${data.trips[0].title}`;
+singleNote.innerHTML = `→ ${tripChipHtml(data.trips[0])}`;
+bindTripChips();
 titleInput.hidden = true;
 } else {
 tripSel.hidden = false;

@@ -1125,7 +1125,7 @@ endTime: btn.dataset.mailDateEventEndTime || '',
 link: btn.dataset.mailLink || '',
 }, { connectionId, source: { kind: 'mail', label: title, url: btn.dataset.mailUrl } });
 planner.bindPlannerActivityChips();
-const dateNote = date ? `, placed on ${date}` : ' to Planner’s Activities pool';
+const dateNote = date ? `, placed on ${escapeHtml(date)}` : ' to Planner’s <span class="inline-goto-link" data-goto-tab="planner" data-goto-target="#planner-activities-pool">Activities pool</span>';
 if (status) status.innerHTML = `Added ${planner.plannerActivityChipHtml(activity)}${dateNote}.`;
 btn.disabled = true;
 // createDateEventFromExtraction already re-renders Planner itself --

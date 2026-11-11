@@ -5,9 +5,9 @@
 // summarizeCleanMatch) -- so importing again just overwrites chatLog with
 // whatever's now longer, rather than needing to dedupe line by line.
 import { data, queueSave, recordImportRun, importStatusLine, upsertIdentity, mergeChatLog, blankConnection } from '../state.js';
-import { escapeHtml, findMentions } from '../utils.js';
+import { escapeHtml, findMentions, hydratePhotoBackgrounds } from '../utils.js';
 import { nameKey, editDistance } from '../googlecontacts.js';
-import { STAGE_RANK, renderConnections, unionInto } from './connections.js';
+import { STAGE_RANK, renderConnections, unionInto, connectionChipHtml } from './connections.js';
 
 // "DD/MM/YYYY, HH:MM - rest of line". Everything after this prefix belongs
 // to whichever entry it starts; a line that doesn't match is a continuation
@@ -244,7 +244,7 @@ unionInto(conn[hit.field], [hit.value]);
 queueSave();
 renderConnections();
 const status = document.getElementById('whatsapp-status');
-if (status) status.textContent = `Added ${hit.value} to ${conn.name}'s ${FIELD_LABELS[hit.field]}.`;
+if (status) { status.innerHTML = `Added ${escapeHtml(hit.value)} to ${connectionChipHtml(conn)}'s ${escapeHtml(FIELD_LABELS[hit.field])}.`; hydratePhotoBackgrounds(status); }
 });
 });
 document.getElementById('wa-import-go').addEventListener('click', () => applyImport());
@@ -272,7 +272,7 @@ changed = true;
 if (pending.dateRange && (!conn.lastContact || pending.dateRange[1] > conn.lastContact)) { conn.lastContact = pending.dateRange[1]; changed = true; }
 
 const status = document.getElementById('whatsapp-status');
-if (status) status.textContent = changed ? `Saved to ${conn.name} (+${Math.max(newCount - oldCount, 0)} lines).` : `Nothing new for ${conn.name}.`;
+if (status) { status.innerHTML = changed ? `Saved to ${connectionChipHtml(conn)} (+${Math.max(newCount - oldCount, 0)} lines).` : `Nothing new for ${connectionChipHtml(conn)}.`; hydratePhotoBackgrounds(status); }
 
 recordImportRun('whatsapp', { scope: conn.name, count: changed ? 1 : 0 });
 renderWhatsAppLastRun();
@@ -486,7 +486,7 @@ unionInto(conn[hit.field], [hit.value]);
 queueSave();
 renderConnections();
 const status = document.getElementById('whatsapp-status');
-if (status) status.textContent = `Added ${hit.value} to ${conn.name}'s ${FIELD_LABELS[hit.field]}.`;
+if (status) { status.innerHTML = `Added ${escapeHtml(hit.value)} to ${connectionChipHtml(conn)}'s ${escapeHtml(FIELD_LABELS[hit.field])}.`; hydratePhotoBackgrounds(status); }
 });
 }
 }

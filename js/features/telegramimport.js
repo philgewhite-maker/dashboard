@@ -5,9 +5,9 @@
 // cross-matches every chat against existing connections, and lets a bulk
 // review pass apply the confident ones while flagging the rest for a glance.
 import { data, queueSave, recordImportRun, importStatusLine, upsertIdentity, mergeChatLog, blankConnection } from '../state.js';
-import { escapeHtml, findMentions } from '../utils.js';
+import { escapeHtml, findMentions, hydratePhotoBackgrounds } from '../utils.js';
 import { nameKey, editDistance, phoneKey } from '../googlecontacts.js';
-import { STAGE_RANK, renderConnections, unionInto } from './connections.js';
+import { STAGE_RANK, renderConnections, unionInto, connectionChipHtml } from './connections.js';
 import { formatMessageLine, buildChatLogText } from './whatsappimport.js';
 import { storePhoto } from '../files.js';
 
@@ -480,7 +480,7 @@ unionInto(conn[hit.field], [hit.value]);
 queueSave();
 renderConnections();
 const status = document.getElementById('telegram-status');
-if (status) status.textContent = `Added ${hit.value} to ${conn.name}'s ${FIELD_LABELS[hit.field]}.`;
+if (status) { status.innerHTML = `Added ${escapeHtml(hit.value)} to ${connectionChipHtml(conn)}'s ${escapeHtml(FIELD_LABELS[hit.field])}.`; hydratePhotoBackgrounds(status); }
 });
 }
 }
