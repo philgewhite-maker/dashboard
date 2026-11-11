@@ -184,6 +184,8 @@ refreshAccountsPanel();
 });
 list.querySelectorAll('[data-del-subscription]').forEach((el) => {
 el.addEventListener('click', () => {
+const delSub = data.subscriptions.find((x) => x.id === el.dataset.delSubscription);
+if (!confirm(`Delete subscription "${(delSub && (delSub.name || delSub.provider)) || "this one"}"?`)) return;
 const wasLinked = data.subscriptions.some((x) => x.id === el.dataset.delSubscription && x.accountId);
 data.subscriptions = data.subscriptions.filter((x) => x.id !== el.dataset.delSubscription);
 renderSubscriptions();

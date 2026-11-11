@@ -714,6 +714,7 @@ btn.addEventListener('click', (e) => {
 e.preventDefault();
 let members = [];
 try { members = JSON.parse(btn.dataset.mailGroupMembers || '[]'); } catch (err) { /* stashed value always valid JSON */ }
+if (!confirm(`Bin all ${members.length} message${members.length === 1 ? "" : "s"} in this group?`)) return;
 members.forEach(dismissMessage);
 queueSave();
 // The group itself is gone now (everything in it just got binned) --

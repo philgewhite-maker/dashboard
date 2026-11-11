@@ -384,3 +384,25 @@ initRenderBus();
 }
 
 main();
+
+// App-wide Escape: closes the top-most open dialog / overlay by driving its
+// OWN existing close path (backdrop click, or its close button), so nothing
+// is closed differently from how a mouse user would close it. mailviewer's
+// two dialogs handle Escape themselves (data-esc-own) and are skipped.
+document.addEventListener('keydown', (e) => {
+if (e.key !== 'Escape' || e.defaultPrevented || e.isComposing) return;
+const open = Array.from(document.querySelectorAll('.mail-view-backdrop, .lightbox, #tag-picker-close, #dup-compare-close, #tinder-more-info-close, #cook-close'))
+.filter((n) => !n.dataset.escOwn);
+const top = open[open.length - 1];
+if (!top) return;
+e.preventDefault();
+if (top.matches('.mail-view-backdrop')) {
+// bindBackdropClose needs mousedown then click, both on the backdrop itself
+top.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+top.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+} else if (top.matches('.lightbox')) {
+top.click();
+} else {
+top.click(); // the overlay's own close button
+}
+});

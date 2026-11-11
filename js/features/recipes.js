@@ -3071,6 +3071,7 @@ el.querySelectorAll('[data-recipe-photo-remove]').forEach((x) => {
 x.addEventListener('click', async () => {
 const r = data.recipes.find((rec) => rec.id === x.dataset.recipePhotoRemove);
 if (!r) return;
+if (!confirm("Delete this photo? The stored file is removed and can't be brought back.")) return;
 const [removed] = r.photoIds.splice(parseInt(x.dataset.photoIdx, 10), 1);
 if (r.photoId === removed) r.photoId = r.photoIds[0] || null;
 if (removed) await photoDelete(removed).catch(() => {});

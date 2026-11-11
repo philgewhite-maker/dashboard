@@ -940,6 +940,7 @@ root.querySelectorAll('[data-task-photo-remove]').forEach((x) => {
 x.addEventListener('click', async () => {
 const t = taskById(x.dataset.taskPhotoRemove);
 if (!t) return;
+if (!confirm("Delete this photo? The stored file is removed and can't be brought back.")) return;
 const [removed] = t.photoIds.splice(parseInt(x.dataset.photoIdx, 10), 1);
 if (removed) await photoDelete(removed);
 renderTasks();

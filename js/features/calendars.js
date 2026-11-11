@@ -77,6 +77,7 @@ btn.disabled = true;
 list.querySelectorAll('[data-del-cal]').forEach((el) => {
 el.addEventListener('click', () => {
 const name = el.dataset.delCal;
+if (!confirm(`Remove calendar "${name}"? Its fetched events are cleared too.`)) return;
 data.calendars = data.calendars.filter((c) => c.name !== name);
 delete data.calendarStatus[name];
 renderCalendars();
@@ -120,6 +121,7 @@ queueSave();
 el.querySelectorAll('[data-del-cal-limit]').forEach((x) => {
 x.addEventListener('click', () => {
 const name = x.dataset.delCalLimit;
+if (!confirm(`Remove calendar "${name}"? Its fetched events are cleared too.`)) return;
 data.calendars = data.calendars.filter((c) => c.name !== name);
 delete data.calendarStatus[name];
 renderCalendars();

@@ -475,6 +475,9 @@ if (input.dataset.airbnbListingField === 'needsCleaning') renderAirbnb();
 el.querySelectorAll('[data-del-airbnb-listing]').forEach((x) => {
 x.addEventListener('click', () => {
 const id = x.dataset.delAirbnbListing;
+const delL = data.airbnbListings.find((l) => l.id === id);
+const delN = data.airbnbReservations.filter((r) => r.listingId === id).length;
+if (!confirm(`Delete listing "${(delL && delL.label) || "Untitled"}"? Its ${delN} reservation${delN === 1 ? "" : "s"} and sync status are removed with it. This can't be undone.`)) return;
 data.airbnbListings = data.airbnbListings.filter((l) => l.id !== id);
 data.airbnbReservations = data.airbnbReservations.filter((r) => r.listingId !== id);
 delete data.airbnbSyncStatus[id];
@@ -571,6 +574,8 @@ queueSave();
 });
 el.querySelectorAll('[data-del-key-settings]').forEach((x) => {
 x.addEventListener('click', () => {
+const delK = data.airbnbKeys.find((k) => k.id === x.dataset.delKeySettings);
+if (!confirm(`Delete key "${(delK && delK.label) || "Untitled"}"? This can't be undone.`)) return;
 data.airbnbKeys = data.airbnbKeys.filter((k) => k.id !== x.dataset.delKeySettings);
 renderKeysSettings();
 queueSave();
@@ -1090,6 +1095,8 @@ import('./planner.js').then(({ renderPlanner }) => renderPlanner()).catch(() => 
 // reappear on the next Sync.
 el.querySelectorAll('[data-airbnb-res-del]').forEach((x) => {
 x.addEventListener('click', () => {
+const delR = data.airbnbReservations.find((r) => r.id === x.dataset.airbnbResDel);
+if (!confirm(`Delete this manual booking${delR && delR.checkin ? ` (${delR.checkin} to ${delR.checkout})` : ""}? Nothing else records it, so it will not come back on Sync.`)) return;
 data.airbnbReservations = data.airbnbReservations.filter((r) => r.id !== x.dataset.airbnbResDel);
 queueSave();
 renderAirbnb();

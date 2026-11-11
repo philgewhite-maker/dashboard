@@ -747,6 +747,8 @@ queueSave();
 el.querySelectorAll('[data-del-topic]').forEach((x) => {
 x.addEventListener('click', () => {
 const id = x.dataset.delTopic;
+const delT = data.mailTopics.find((t) => t.id === id);
+if (!confirm(`Delete topic "${(delT && delT.label) || "Untitled topic"}"? Searches using it will fall back to no topic.`)) return;
 data.mailTopics = data.mailTopics.filter((t) => t.id !== id);
 // A search pointed at the deleted topic falls back to rendering on
 // its own, same as it would for a topic it was never assigned.
@@ -816,6 +818,8 @@ queueSave();
 });
 el.querySelectorAll('[data-del-search]').forEach((x) => {
 x.addEventListener('click', () => {
+const delS = data.mailSearches.find((s) => s.id === x.dataset.delSearch);
+if (!confirm(`Delete this saved search${delS && delS.value ? ` ("${delS.value}")` : ""}?`)) return;
 data.mailSearches = data.mailSearches.filter((s) => s.id !== x.dataset.delSearch);
 renderMailSearches();
 queueSave();
@@ -862,6 +866,8 @@ queueSave();
 });
 el.querySelectorAll('[data-del-mailrule]').forEach((x) => {
 x.addEventListener('click', () => {
+const delM = data.mailRules.find((r) => r.id === x.dataset.delMailrule);
+if (!confirm(`Delete mail rule "${(delM && delM.label) || "Untitled"}"?`)) return;
 data.mailRules = data.mailRules.filter((r) => r.id !== x.dataset.delMailrule);
 renderMailRules();
 queueSave();
@@ -925,6 +931,8 @@ queueSave();
 });
 el.querySelectorAll('[data-del-recsrc]').forEach((x) => {
 x.addEventListener('click', () => {
+const delC = data.mediaRecSources.find((s) => s.id === x.dataset.delRecsrc);
+if (!confirm(`Delete recommendation source "${(delC && delC.label) || "Untitled"}"?`)) return;
 data.mediaRecSources = data.mediaRecSources.filter((s) => s.id !== x.dataset.delRecsrc);
 renderMediaRecSources();
 queueSave();
@@ -1262,6 +1270,8 @@ refreshStrip();
 box.querySelectorAll('[data-ticker-up]').forEach((b) => b.addEventListener('click', () => move(Number(b.dataset.tickerUp), Number(b.dataset.tickerUp) - 1)));
 box.querySelectorAll('[data-ticker-down]').forEach((b) => b.addEventListener('click', () => move(Number(b.dataset.tickerDown), Number(b.dataset.tickerDown) + 1)));
 box.querySelectorAll('[data-ticker-del]').forEach((b) => b.addEventListener('click', () => {
+const delI = data.ticker.items[Number(b.dataset.tickerDel)];
+if (!confirm(`Remove ticker item "${delI ? tickerLabel(delI) : "this item"}"?`)) return;
 data.ticker.items.splice(Number(b.dataset.tickerDel), 1);
 queueSave();
 renderTickerItems();

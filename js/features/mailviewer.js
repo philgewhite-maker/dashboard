@@ -252,6 +252,7 @@ async function openMessage(id, { subject } = {}) {
 close();
 dialog = document.createElement('div');
 dialog.className = 'mail-view-backdrop';
+dialog.dataset.escOwn = '1'; // closes itself on Escape (onKey) -- the app-wide handler skips it
 bindBackdropClose(dialog, close);
 dialog.innerHTML = `<div class="mail-view-card"><div class="mail-view-subject">${escapeHtml(subject || 'Loading…')}</div><div class="settings-note">Fetching the message…</div></div>`;
 document.body.appendChild(dialog);
@@ -279,6 +280,7 @@ function showDetail(detail) {
 if (!dialog) {
 dialog = document.createElement('div');
 dialog.className = 'mail-view-backdrop';
+dialog.dataset.escOwn = '1'; // closes itself on Escape (onKey) -- the app-wide handler skips it
 bindBackdropClose(dialog, close);
 document.body.appendChild(dialog);
 document.addEventListener('keydown', onKey);

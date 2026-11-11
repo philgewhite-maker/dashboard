@@ -1717,6 +1717,7 @@ renderInventory();
 });
 el.querySelectorAll('[data-inv-remove]').forEach((x) => {
 x.addEventListener('click', () => {
+if (!confirm("Remove this inventory item? This can't be undone.")) return;
 data.inventory = data.inventory.filter((o) => o.id !== x.dataset.invRemove);
 queueSave();
 renderInventory();

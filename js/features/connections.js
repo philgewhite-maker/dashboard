@@ -1690,6 +1690,7 @@ renderConnections();
 });
 list.querySelectorAll('[data-owned-remove]').forEach((el) => {
 el.addEventListener('click', () => {
+if (!confirm("Remove this owned item? This can't be undone.")) return;
 data.inventory = data.inventory.filter((o) => o.id !== el.dataset.ownedRemove);
 queueSave();
 renderConnections();
