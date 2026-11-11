@@ -15,6 +15,7 @@
 // ordinal, a clean HTML table, prose plus a closures list), which is
 // exactly the kind of varied real-world content a hand-rolled regex
 // parser per site would be the wrong, fragile tool for.
+import { safeHref } from '../utils.js';
 import { data, queueSave, SCHOOL_CALENDAR_SITES } from '../state.js';
 import { escapeHtml, uid, todayStr, dateStrAdd, daysSince, stripHtmlForExtraction, MISSING_KEY_LINK_HTML } from '../utils.js';
 import { fetchPageHtml } from '../files.js';
@@ -352,7 +353,7 @@ function updateHtml(update) {
 return `<div class="cal-row" data-school-update="${update.id}">
 <div class="cal-head">
 <span class="cal-name">${escapeHtml(update.label)}</span>
-<a href="${escapeHtml(update.url)}" target="_blank" rel="noopener" class="settings-note" style="margin:0;">View page</a>
+<a href="${escapeHtml(safeHref(update.url))}" target="_blank" rel="noopener" class="settings-note" style="margin:0;">View page</a>
 <button class="sync-btn sm inline" type="button" data-school-dismiss="${update.id}" title="Remove this result from the list (events already pushed stay on your calendar)">Dismiss</button>
 </div>
 ${termRangesLineHtml(update)}

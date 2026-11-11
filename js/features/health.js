@@ -44,7 +44,7 @@ const controller = new AbortController();
 const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 let res;
 try {
-res = await fetch(`${endpoint}?limit=${limit || 20}&secret=${encodeURIComponent(secret)}`, {
+res = await fetch(`${endpoint}?limit=${limit || 20}`, {
 headers: { 'X-Sync-Secret': secret },
 signal: controller.signal,
 });

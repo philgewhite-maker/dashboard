@@ -2,7 +2,7 @@
 // deletes every cache that isn't the current name, so raising the version is
 // what actually evicts a stale copy from a device that has been running the
 // app for a while.
-const CACHE_NAME = 'dashboard-v824';
+const CACHE_NAME = 'dashboard-v825';
 const CORE_ASSETS = [
 './',
 './index.html',
@@ -317,6 +317,10 @@ if (url.origin !== self.location.origin) return;
 // was reverted rather than left in on the strength of being a common
 // pattern elsewhere.
 if (event.request.method === 'POST' && url.pathname.endsWith('/share')) {
+// Ignore a share POST submitted by another site's page (cross-site form).
+// A genuine Android share has no Origin header or the app's own.
+const reqOrigin = event.request.headers.get('origin');
+if (reqOrigin && reqOrigin !== 'null' && reqOrigin !== self.location.origin) return;
 event.respondWith(handleShare(event.request));
 return;
 }
@@ -326,7 +330,7 @@ event.respondWith(
 fetch(event.request, { cache: 'no-store' })
 .then((res) => {
 const clone = res.clone();
-caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+if (res.status === 200 && res.type !== 'opaque' && res.type !== 'error') caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
 return res;
 })
 .catch(() => caches.match(event.request))

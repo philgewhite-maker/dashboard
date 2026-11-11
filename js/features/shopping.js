@@ -19,6 +19,7 @@
 // a link to buy it from the right place," not a manual step. The result is
 // persisted on the task itself (t.priceCheck), dated, with a Refresh button
 // to re-run it later — not the old in-memory, un-dated Map this used to be.
+import { safeHref } from '../utils.js';
 import { data, queueSave, SHOPPING_CONTEXTS, unheldInventory, whoFits, inventorySets, whoFitsSet, blankInventoryItem, SET_CORE_GROUPS } from '../state.js';
 import { escapeHtml, affiliateLink, daysUntil, daysSince, todayStr, MISSING_KEY_LINK_HTML, looksLikeUrl, bindBackdropClose, pickChipHtml, knownScalarValues, hydratePhotoBackgrounds, resizeImageToBlob, openLightbox, logoBadgeHtml, bindLogoFallbacks } from '../utils.js';
 import { matchBrandLogo } from '../brandLogos.js';
@@ -129,7 +130,7 @@ return `<div class="shop-search-results">
 ${recommendation ? `<div class="shop-recommendation">${escapeHtml(recommendation)}</div>` : ''}
 ${results.map((r, idx) => `
 <div class="shop-hit-row">
-<a class="shop-search-hit" href="${escapeHtml(affiliateLink(r.url))}" target="_blank" rel="noopener noreferrer">
+<a class="shop-search-hit" href="${escapeHtml(safeHref(affiliateLink(r.url)))}" target="_blank" rel="noopener noreferrer">
 <span class="shop-hit-retailer">${escapeHtml(r.retailer || 'Link')}</span>
 <span class="shop-hit-name">${escapeHtml(r.name || t.title)}</span>
 ${r.price ? `<span class="shop-hit-price">${escapeHtml(r.price)}</span>` : ''}
@@ -250,7 +251,7 @@ const priceHtml = row.net != null
 ? `<strong>${escapeHtml(money(row.net))}</strong>${row.code ? ` <span class="settings-note" style="display:inline;margin:0;">with ${escapeHtml(row.code)}${row.now != null && row.now !== row.net ? ` (was ${escapeHtml(money(row.now))})` : ''}</span>` : ''}`
 : row.now != null ? `<strong>${escapeHtml(money(row.now))}</strong>` : '<span class="settings-note" style="margin:0;">Owned — no price</span>';
 return `<div class="shop-row" style="align-items:center;">
-<span style="flex:1;min-width:0;">${row.url ? `<a href="${escapeHtml(affiliateLink(row.url))}" target="_blank" rel="noopener">${escapeHtml(row.label || 'Item')}</a>` : escapeHtml(row.label || 'Item')}</span>
+<span style="flex:1;min-width:0;">${row.url ? `<a href="${escapeHtml(safeHref(affiliateLink(row.url)))}" target="_blank" rel="noopener">${escapeHtml(row.label || 'Item')}</a>` : escapeHtml(row.label || 'Item')}</span>
 <span class="settings-note" style="margin:0;min-width:110px;">${escapeHtml(row.trigger)}${row.triggerDetail ? ` &middot; ${escapeHtml(row.triggerDetail)}` : ''}</span>
 ${conn ? connectionChipHtml(conn) : '<span class="settings-note" style="margin:0;">Unassigned</span>'}
 <span style="min-width:120px;text-align:right;">${priceHtml}</span>
@@ -918,7 +919,7 @@ box.innerHTML = rows.length
 ? `<div class="settings-note" style="margin:6px 0 2px;">${search.colours.length} colour${search.colours.length === 1 ? '' : 's'} (${escapeHtml(search.colours.join(', '))}), ${search.pieces.length} item${search.pieces.length === 1 ? '' : 's'} (${escapeHtml(search.pieces.join(', '))}) found. Tick what to watch.</div>`
 + rows.map((r, i) => `<label style="display:block;font-size:12px;">
 <input type="checkbox" data-watch-found="${i}" value="${escapeHtml(r.url)}">
-<a href="${escapeHtml(affiliateLink(r.url))}" target="_blank" rel="noopener noreferrer" data-watch-row-link${r.image ? ` data-img="${escapeHtml(r.image)}"` : ''}>${escapeHtml(rowLabel(r))}</a>
+<a href="${escapeHtml(safeHref(affiliateLink(r.url)))}" target="_blank" rel="noopener noreferrer" data-watch-row-link${r.image ? ` data-img="${escapeHtml(r.image)}"` : ''}>${escapeHtml(rowLabel(r))}</a>
 </label>`).join('')
 + '<button class="sync-btn sm" type="button" data-watch-add-found style="margin-top:6px;">Add ticked</button>'
 : '<div class="settings-note">Nothing new found — the listings only render part of a category, so an item can be missing from both.</div>';
@@ -1197,7 +1198,7 @@ const sourceLabel = find.source === 'ebay' ? 'eBay' : find.source === 'retailer'
 const days = daysSince(find.foundAt);
 const ago = days <= 0 ? 'today' : days === 1 ? '1 day ago' : `${days} days ago`;
 return `<div class="inv-fit-row">
-<a href="${escapeHtml(find.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(find.name || `${find.missingGroup} found`)}</a>
+<a href="${escapeHtml(safeHref(find.url))}" target="_blank" rel="noopener noreferrer">${escapeHtml(find.name || `${find.missingGroup} found`)}</a>
 <span class="tag-chip ${find.source === 'ebay' ? 'tag-chip-amber' : find.source === 'retailer' ? 'tag-chip-blue' : 'tag-chip-green'}">${escapeHtml(sourceLabel)}</span>
 ${find.price ? `<span class="chip-price">${escapeHtml(find.price)}</span>` : ''}
 ${find.condition ? `<span class="tag-chip">${escapeHtml(find.condition)}</span>` : ''}
@@ -1291,7 +1292,7 @@ const listings = cached.listings || [];
 // below a summary line" shape used elsewhere (e.g. a loyalty program's
 // own collapsed history).
 const listingsHtml = listings.length
-? listings.map((l) => `<div class="inv-resale-listing"><a href="${escapeHtml(l.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(l.name)}</a>${l.condition ? ` <span class="tag-chip">${escapeHtml(l.condition)}</span>` : ''} <span class="chip-price">${escapeHtml(l.price)}</span></div>`).join('')
+? listings.map((l) => `<div class="inv-resale-listing"><a href="${escapeHtml(safeHref(l.url))}" target="_blank" rel="noopener noreferrer">${escapeHtml(l.name)}</a>${l.condition ? ` <span class="tag-chip">${escapeHtml(l.condition)}</span>` : ''} <span class="chip-price">${escapeHtml(l.price)}</span></div>`).join('')
 : `<div class="settings-note" style="margin:0;">No comparable listings were recorded.</div>`;
 return `<details class="inv-resale">
 <summary>${logoBadgeHtml(EBAY_LOGO, 'eB', 'plum')}<span class="match-name">${escapeHtml(cleanEstimateText(cached.estimate) || 'No comparable eBay listings found.')}</span></summary>
@@ -1377,7 +1378,7 @@ const fitsHtml = fits.length
 ? fits.slice(0, 4).map(({ conn, how }) => `<span class="inv-fit" title="${escapeHtml(how)}">${connectionChipHtml(conn)}<button type="button" class="todo-add-btn" data-inv-assign="${escapeHtml(o.id)}:${escapeHtml(conn.id)}" title="Record that ${escapeHtml(conn.name || 'she')} now has this">Give</button></span>`).join('')
 : `<span class="settings-note" style="margin:0;">${o.size ? 'Nobody on file takes this size.' : 'No size recorded — add one and this can find a match.'}</span>`;
 const linkHtml = o.link
-? `<a class="inv-link" href="${escapeHtml(affiliateLink(o.link))}" target="_blank" rel="noopener noreferrer" title="Open the product page this was bought from">&#128279;</a>`
+? `<a class="inv-link" href="${escapeHtml(safeHref(affiliateLink(o.link)))}" target="_blank" rel="noopener noreferrer" title="Open the product page this was bought from">&#128279;</a>`
 : '';
 return `<div class="shop-row inv-row">
 ${invPhotoHtml(o)}

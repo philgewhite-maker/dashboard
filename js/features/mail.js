@@ -1,3 +1,4 @@
+import { safeHref } from '../utils.js';
 import { data, queueSave, mailSearchLabel, blankMailDismissal, blankMailRule } from '../state.js';
 import { escapeHtml, decodeHtmlEntities, affiliateLink, unfoldIcsLines, parseIcsProperty, icsDateTime, dateStrAdd, MISSING_KEY_LINK_HTML } from '../utils.js';
 import { canAttemptGoogleAction, hasCalendarWrite } from '../sync/googleauth.js';
@@ -448,7 +449,7 @@ return `<div class="mail-row">
 <span class="mail-subject">${escapeHtml(m.subject)}</span>
 <span class="mail-date">${escapeHtml(formatDate(m.date))}</span>
 </span>
-<a class="mini-task-btn" href="${escapeHtml(affiliateLink(m.link))}" target="_blank" rel="noopener" title="Open Gmail (to reply)">&#8599;</a>
+<a class="mini-task-btn" href="${escapeHtml(safeHref(affiliateLink(m.link)))}" target="_blank" rel="noopener" title="Open Gmail (to reply)">&#8599;</a>
 ${actionsHtml}
 <button class="mail-dismiss-btn" type="button" title="Dismiss — not turning this into anything, just stop showing it"
 data-mail-dismiss="${escapeHtml(m.id)}" data-mail-url="${escapeHtml(m.link)}" data-mail-subject="${escapeHtml(m.subject)}" data-mail-from="${escapeHtml(displayName(m.from))}">&times;</button>

@@ -2,6 +2,7 @@
 // Telegram (t.me). Shared by the Today queue and the connection card's
 // chat history box. Only function-level use of connections.js, so the
 // import cycle with it is harmless.
+import { safeHref } from '../utils.js';
 import { escapeHtml } from '../utils.js';
 import { CONN_STAGES } from './connections.js';
 
@@ -49,7 +50,7 @@ return { url: '', label: '', why: 'no Tinder id or number on file' };
 }
 
 function linkHtml(o, primary) {
-return `<a class="overview-chip dq-chat" href="${escapeHtml(o.url)}" target="_blank" rel="noopener noreferrer" title="Opens the ${escapeHtml(o.label)} chat in a new tab (you need to be signed in)"${primary ? ' style="font-weight:600;"' : ''}>${escapeHtml(o.label)} chat &#8599;</a>`;
+return `<a class="overview-chip dq-chat" href="${escapeHtml(safeHref(o.url))}" target="_blank" rel="noopener noreferrer" title="Opens the ${escapeHtml(o.label)} chat in a new tab (you need to be signed in)"${primary ? ' style="font-weight:600;"' : ''}>${escapeHtml(o.label)} chat &#8599;</a>`;
 }
 
 // One row of every available chat link, the live one first and bold, for the

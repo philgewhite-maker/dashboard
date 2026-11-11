@@ -1,3 +1,4 @@
+import { safeHref } from '../utils.js';
 import { data, reachOutThreshold, isDormantStage, isTravelPaused, getLocalSettings, setLocalSetting } from '../state.js';
 import { escapeHtml, affiliateLink, scrollAndFlash, daysSince, daysUntil, MISSING_KEY_LINK_HTML } from '../utils.js';
 import { switchTab } from '../tabs.js';
@@ -716,7 +717,7 @@ el.innerHTML = `<div class="nudge-list">${list.map((n, i) => {
 const quick = quickCompleteFor(n);
 return `<div class="nudge-item" data-nudge-idx="${i}" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
 <span>${escapeHtml(n.text)} &rarr;</span>
-${n.buyUrl ? `<a href="${escapeHtml(affiliateLink(n.buyUrl))}" target="_blank" rel="noopener noreferrer" class="add-btn" data-nudge-buy="${i}" style="padding:4px 9px;font-size:11px;flex-shrink:0;">Buy &rarr;</a>` : ''}
+${n.buyUrl ? `<a href="${escapeHtml(safeHref(affiliateLink(n.buyUrl)))}" target="_blank" rel="noopener noreferrer" class="add-btn" data-nudge-buy="${i}" style="padding:4px 9px;font-size:11px;flex-shrink:0;">Buy &rarr;</a>` : ''}
 ${quick ? `<button type="button" class="add-btn" data-nudge-quick="${i}" style="padding:4px 9px;font-size:11px;flex-shrink:0;">${escapeHtml(quick.label)}</button>` : ''}
 </div>`;
 }).join('')}</div>`;

@@ -24,6 +24,7 @@
 //
 // Matching by name happens ONCE, at import; what gets stored is the album
 // URL. So renaming an album later doesn't break an already-linked person.
+import { safeHref } from '../utils.js';
 import { data, queueSave, TAG_FIELDS, recordImportRun, importStatusLine, blankConnection } from '../state.js';
 import { escapeHtml, todayStr, hydratePhotoBackgrounds, MISSING_KEY_LINK_HTML } from '../utils.js';
 import { nameKey, editDistance } from '../googlecontacts.js';
@@ -240,7 +241,7 @@ const img = row.cover
 : `<span class="album-nocover">${escapeHtml(noCoverNote(row.count))}</span>`;
 return `<div class="album-card${row.chosenId ? ' chosen' : ''}${row.applied ? ' saved' : ''}${isSensitive(row) ? ' album-sensitive' : ''}">
 <span class="album-compare-row">
-<a class="album-thumb" href="${escapeHtml(row.url)}" target="_blank" rel="noopener" title="${escapeHtml(row.title)}">${img}</a>
+<a class="album-thumb" href="${escapeHtml(safeHref(row.url))}" target="_blank" rel="noopener" title="${escapeHtml(row.title)}">${img}</a>
 ${existingPhotoHtml(row.chosenId)}
 </span>
 <div class="album-caption">${escapeHtml(captionFor(row))}</div>

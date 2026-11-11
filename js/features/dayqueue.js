@@ -8,6 +8,7 @@
 // Actions reuse the existing mutations (logContactNow, priorityFlag, stage,
 // attentionSnoozedUntil); the only new state is c.chaseUntil / c.sentAt and
 // data.dayQueue (the daily offboard counter).
+import { safeHref } from '../utils.js';
 import { data, queueSave, isDormantStage, isTravelPaused, reachOutThreshold } from '../state.js';
 import { todayStr, daysSince, escapeHtml, hydratePhotoBackgrounds } from '../utils.js';
 import { liveChat, chatTarget } from './chatlinks.js';
@@ -102,7 +103,7 @@ return { priority, recent, offAll, done, remaining: Math.max(0, OFFBOARD_PER_DAY
 function chatLinkHtml(c) {
 const t = chatTarget(c);
 return t.url
-? `<a class="overview-chip dq-chat" href="${escapeHtml(t.url)}" target="_blank" rel="noopener noreferrer" title="Opens the ${escapeHtml(t.label)} chat in a new tab (you need to be signed in)">${escapeHtml(t.label)} chat &#8599;</a>`
+? `<a class="overview-chip dq-chat" href="${escapeHtml(safeHref(t.url))}" target="_blank" rel="noopener noreferrer" title="Opens the ${escapeHtml(t.label)} chat in a new tab (you need to be signed in)">${escapeHtml(t.label)} chat &#8599;</a>`
 : `<span class="settings-note dq-nochat" style="margin:0;">no chat link: ${escapeHtml(t.why)}</span>`;
 }
 

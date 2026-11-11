@@ -12,6 +12,7 @@
 // quick-add row here, a shared link, a marked screenshot, a Telegram
 // request, a voice instruction), so shape normalisation lives in exactly
 // one place.
+import { safeHref } from '../utils.js';
 import { data, queueSave, blankMediaItem, MEDIA_KINDS, MEDIA_STATUSES } from '../state.js';
 import { escapeHtml, affiliateLink, scrollAndFlash, hydratePhotoBackgrounds, looksLikeUrl, prettyUrl, bindBackdropClose, todayStr, SYNC_LINK_HTML } from '../utils.js';
 import { identifyUrl, catalogueLabel, CATALOGUE_LABELS, watchProviders, subscriptionFor, collapseProviders, shortProviderName, MissingTmdbKeyError } from '../catalogue.js';
@@ -262,7 +263,7 @@ const art = item.imageUrl
 return `<div class="mail-row${OPEN_STATUSES.includes(item.status) ? '' : ' done'}" data-media-row="${item.id}">
 ${art}
 <span class="task-context">${escapeHtml(KIND_LABEL[item.kind] || item.kind)}</span>
-<span class="mail-subject">${item.link ? `<a href="${escapeHtml(affiliateLink(item.link))}" target="_blank" rel="noopener">${escapeHtml(displayTitle(item))}</a>` : escapeHtml(displayTitle(item))}</span>
+<span class="mail-subject">${item.link ? `<a href="${escapeHtml(safeHref(affiliateLink(item.link)))}" target="_blank" rel="noopener">${escapeHtml(displayTitle(item))}</a>` : escapeHtml(displayTitle(item))}</span>
 ${byline ? `<span class="settings-note" style="margin:0;">${escapeHtml(byline)}</span>` : ''}
 ${item.requestedBy ? `<span class="settings-note" style="margin:0;">asked by ${escapeHtml(item.requestedBy)}</span>` : ''}
 ${idChipsHtml(item)}

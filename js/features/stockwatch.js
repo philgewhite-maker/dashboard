@@ -13,6 +13,7 @@
 //
 // Suspended wants are skipped entirely -- no fetch, no alert. That's what
 // suspending is for: keeping the record without chasing it.
+import { safeHref } from '../utils.js';
 import { data, queueSave, whoFits, sizeGroupFor } from '../state.js';
 import { escapeHtml } from '../utils.js';
 import { fetchPageHtml, FilesNotConfiguredError } from '../files.js';
@@ -503,7 +504,7 @@ const age = seen ? ageLabel(seen.ageMs) : '';
 const title = seen
 ? `${l.label}: ${seen.upTo ? 'up to ' : ''}${seen.percent}% when last checked, ${age}${seen.due ? ' — due a refresh' : ''}. Opens their ${l.name} page, where the live rate is shown; click through from there so the purchase is tracked.`
 : `Open ${l.label}'s ${l.name} page and click through from there, so the purchase is tracked. ${l.fetchable ? 'No rate checked yet.' : 'Their rate cannot be read from here — Cloudflare blocks every automated request — so it is only shown on their own page.'}`;
-return `<a href="${escapeHtml(l.merchantUrl)}" target="_blank" rel="noopener noreferrer" class="cashback-link${seen && seen.due ? ' cashback-due' : ''}" title="${escapeHtml(title)}">${escapeHtml(l.label)}${rate ? ` <b>${escapeHtml(rate)}</b>` : ''}${age && rate ? `<span class="cashback-age">${escapeHtml(age)}</span>` : ''}</a>`;
+return `<a href="${escapeHtml(safeHref(l.merchantUrl))}" target="_blank" rel="noopener noreferrer" class="cashback-link${seen && seen.due ? ' cashback-due' : ''}" title="${escapeHtml(title)}">${escapeHtml(l.label)}${rate ? ` <b>${escapeHtml(rate)}</b>` : ''}${age && rate ? `<span class="cashback-age">${escapeHtml(age)}</span>` : ''}</a>`;
 }).join('')}</span>`;
 }
 
@@ -597,7 +598,7 @@ const goneNote = !r.available.length && r.gone.length
 const noSizes = r.noSizesOnFile
 ? '<span class="settings-note" style="display:inline;margin:0;">no size on file for this — add one on her card</span>' : '';
 return `<div class="stock-line${r.available.length ? ' stock-line-in' : ''}">
-<a href="${escapeHtml(r.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(r.piece)}${r.colour ? ` · ${escapeHtml(r.colour)}` : ''}</a>
+<a href="${escapeHtml(safeHref(r.url))}" target="_blank" rel="noopener noreferrer">${escapeHtml(r.piece)}${r.colour ? ` · ${escapeHtml(r.colour)}` : ''}</a>
 ${r.available.length ? `<span class="stock-sizes">${sizes}</span> ${price}` : `${goneNote}${noSizes}`}
 ${r.available.length ? cashbackHtml({ retailer: r.retailer, url: r.url }) : ''}
 ${setHtml(r)}

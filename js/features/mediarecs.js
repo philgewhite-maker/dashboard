@@ -17,6 +17,7 @@
 // and media.js's addMediaItem -- "+ Add as want" on a candidate is a
 // completely ordinary add, so Plex-check/whereToWatch pick it up exactly
 // as they do for anything else added any other way.
+import { safeHref } from '../utils.js';
 import { data, queueSave, blankMediaRecCandidate, MEDIA_KINDS } from '../state.js';
 import { escapeHtml, stripHtmlForExtraction } from '../utils.js';
 import { searchTitle, watchProviders, subscriptionFor, collapseProviders, shortProviderName } from '../catalogue.js';
@@ -526,7 +527,7 @@ return chips.join('');
 // the same relative position regardless of content length.
 function candRowHtml(c) {
 const art = c.imageUrl ? `<img class="media-art" src="${escapeHtml(c.imageUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : '';
-const titleHtml = c.link ? `<a href="${escapeHtml(c.link)}" target="_blank" rel="noopener">${escapeHtml(c.title)}</a>` : escapeHtml(c.title);
+const titleHtml = c.link ? `<a href="${escapeHtml(safeHref(c.link))}" target="_blank" rel="noopener">${escapeHtml(c.title)}</a>` : escapeHtml(c.title);
 const ratingBadge = c.rating ? `<span class="settings-note" style="margin:0;">&#9733; ${c.rating.toFixed(1)}</span>` : '';
 const genreChips = (c.genres || []).map((g) => `<span class="task-context">${escapeHtml(g)}</span>`).join('');
 const aiBadge = c.aiPick ? `<span class="task-context" style="background:var(--lilac-bg,#efe7ff);color:var(--lilac,#7c4dff);font-weight:600;" title="Flagged by the optional AI top-up pass">&#10024; AI pick</span>` : '';
@@ -566,7 +567,7 @@ ${genreChips}${providerChipsHtml(c)}${aiBadge}
 </div>
 ${c.reason ? `<div class="settings-note" style="margin:0;">${escapeHtml(c.reason)}</div>` : ''}
 <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-<span class="settings-note" style="margin:0;">via ${c.sourceUrl ? `<a href="${escapeHtml(c.sourceUrl)}" target="_blank" rel="noopener">${escapeHtml(c.sourceLabel || c.sourceUrl)}</a>` : escapeHtml(c.sourceLabel)}</span>
+<span class="settings-note" style="margin:0;">via ${c.sourceUrl ? `<a href="${escapeHtml(safeHref(c.sourceUrl))}" target="_blank" rel="noopener">${escapeHtml(c.sourceLabel || c.sourceUrl)}</a>` : escapeHtml(c.sourceLabel)}</span>
 </div>
 </div>
 </div>`;

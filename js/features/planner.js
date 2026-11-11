@@ -34,6 +34,7 @@
 // iOS only; everyone else gets drag alone, same as a mouse user always
 // has. See plannerDaySelectOptionsHtml for the option list itself.
 const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+import { safeHref } from '../utils.js';
 import { data, queueSave, blankPlannerEntry, blankPlannerActivity, isDormantStage, isTravelPaused, LEG_DATE_FIELDS, LEG_STATUSES, LEG_STATUS_LABELS } from '../state.js';
 import { escapeHtml, uid, todayStr, dateStrAdd, avatarHtml, hydratePhotoBackgrounds, bindForm, foldDiacritics, scrollAndFlash, parseLooseDateTime, looksLikeUrl } from '../utils.js';
 import { isPriorityConnection, renderConnPicker, bindConnPickers, expandConnection, connectionChipHtml, bindConnectionChips } from './connections.js';
@@ -738,7 +739,7 @@ return ` <a class="planner-pin-link" href="https://www.google.com/maps/search/?a
 // written out as a full URL on the card.
 function activityLinkHtml(a) {
 if (!a.link) return '';
-return ` <a class="planner-pin-link" href="${escapeHtml(a.link)}" target="_blank" rel="noopener" title="Open reference">&#128279;</a>`;
+return ` <a class="planner-pin-link" href="${escapeHtml(safeHref(a.link))}" target="_blank" rel="noopener" title="Open reference">&#128279;</a>`;
 }
 // A QR/ticket image or PDF Mail's extraction grabbed from the email
 // (js/state.js's blankPlannerActivity.attachments, same shape/mechanism

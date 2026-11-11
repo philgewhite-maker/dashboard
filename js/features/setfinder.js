@@ -41,6 +41,7 @@
 // the browser TAB staying open, same as every home-agent operation: the
 // agent finishes its own work regardless, but nothing is left running in
 // a closed tab to start the NEXT fetch once one stage's result is back.
+import { safeHref } from '../utils.js';
 import { data, queueSave, sizeGroupFor } from '../state.js';
 import { escapeHtml, bindBackdropClose } from '../utils.js';
 import { captureTask } from './tasks.js';
@@ -236,7 +237,7 @@ return `<div class="setfinder-row" style="border-top:1px solid var(--line);paddi
 ${knickersHtml}
 ${extrasHtml}
 <div class="sync-row" style="margin-top:4px;">
-<a class="sync-btn sm inline" href="${escapeHtml(r.bra.url)}" target="_blank" rel="noopener noreferrer">View</a>
+<a class="sync-btn sm inline" href="${escapeHtml(safeHref(r.bra.url))}" target="_blank" rel="noopener noreferrer">View</a>
 <button class="sync-btn sm inline" type="button" data-setfinder-add="${escapeHtml(r.bra.url)}" ${added ? 'disabled' : ''}>${added ? 'Added' : 'Add as want'}</button>
 <button class="sync-btn sm inline" type="button" data-setfinder-add-edit="${escapeHtml(r.bra.url)}" title="Create the want, then open it in Tasks to set a context, file it under a project, add a due date etc.">Add &amp; edit…</button>
 </div>
@@ -252,7 +253,7 @@ ${extrasHtml}
 // click" reasoning as every other AI-assisted step in this app.
 function elsewhereRowHtml(r) {
 return `<div class="settings-note" style="margin:4px 0;padding-top:4px;border-top:1px solid var(--line);">
-<a href="${escapeHtml(r.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(r.name || r.retailer)}</a>
+<a href="${escapeHtml(safeHref(r.url))}" target="_blank" rel="noopener noreferrer">${escapeHtml(r.name || r.retailer)}</a>
 — ${escapeHtml(r.retailer)}${r.price ? `, <strong>${escapeHtml(r.price)}</strong>` : ''}${r.condition ? ` <span class="tag-chip">${escapeHtml(r.condition)}</span>` : ''}
 </div>`;
 }

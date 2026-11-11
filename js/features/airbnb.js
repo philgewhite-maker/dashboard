@@ -8,6 +8,7 @@
 // FEED-sourced reservation's guestName is only ever filled in after the
 // fact, by hand or from the booking email. A hand-typed external event
 // is the exception -- its title carries the name, and that's read off it.
+import { safeHref } from '../utils.js';
 import { data, queueSave, blankAirbnbListing, blankAirbnbReservation, blankAirbnbKey, blankAirbnbKeyAssignment, KEY_CUSTODIAN_TYPES } from '../state.js';
 import { escapeHtml, todayStr, dateStrAdd, uid, MISSING_KEY_LINK_HTML, pickChipHtml, scrollAndFlash } from '../utils.js';
 import { owners, ownerNameFor, ownerKeyFor, shareRuleAt, money, CAP_KEEPS_FROM } from './letting.js';
@@ -932,7 +933,7 @@ if (!r.payoutCheck) return '';
 const last = (r.revisions || [])[(r.revisions || []).length - 1];
 const change = last ? `${formatAirbnbDate(last.oldCheckin)} &rarr; ${formatAirbnbDate(last.oldCheckout)} became ${formatAirbnbDate(last.newCheckin)} &rarr; ${formatAirbnbDate(last.newCheckout)}. ` : '';
 const url = reservationPageUrl(r);
-const page = url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">Airbnb reservation page &#8599;</a>` : 'no booking code on file yet, so open the booking in Airbnb';
+const page = url ? `<a href="${escapeHtml(safeHref(url))}" target="_blank" rel="noopener noreferrer">Airbnb reservation page &#8599;</a>` : 'no booking code on file yet, so open the booking in Airbnb';
 const charged = r.accruedAt ? ' It has already been charged in Letting income; that entry updates when you change the income.' : '';
 return `<div class="cal-event-row"><span class="settings-note" style="margin:0;"><b>Payout to check.</b> ${change}The payout was recorded before the dates changed and Airbnb's change email has no amounts: ${page}, then type the new income above.${charged}</span> <button class="sync-btn sm inline" type="button" data-airbnb-payout-checked="${r.id}" title="The payout shown is still right">Checked</button></div>`;
 }

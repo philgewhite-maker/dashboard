@@ -1,3 +1,4 @@
+import { safeHref } from '../utils.js';
 import { data, queueSave, whatSheHas, SIZE_GROUPS, reachOutThreshold, isDormantStage, isTravelPaused, getLocalSettings, setLocalSetting, TAG_FIELDS, CONTACT_STATUS_LABELS, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness, slugifyField, FLAG_FIELD_DEFS, DEFAULT_FLAG_RULES, computeFlags, valueColorForField, stripSharedSuffix, suggestedAction, suggestedQuestions, recordImportRun, importStatusLine, upsertIdentity, tinderMatchIds, mergeChatLog, blankConnection, blankPendingImport } from '../state.js';
 import { captureTask, revealTask } from './tasks.js';
 import { photoDelete, photoUrl } from '../db.js';
@@ -450,7 +451,7 @@ function albumListHtml(c) {
 const albums = c.photoAlbums || [];
 if (!albums.length) return '<div class="album-empty">None linked — name an album "' + escapeHtml(c.name) + '_" in Google Photos, then <span class="inline-goto-link" data-goto-tab="dating" data-goto-target="#import-connections-item">import it</span>.</div>';
 return `<div class="album-strip">${albums.map((a, i) => `<div class="album-card sm${isSensitive(a) ? ' album-sensitive' : ''}">
-<a class="album-thumb" href="${escapeHtml(a.url)}" target="_blank" rel="noopener" title="${escapeHtml(a.title || a.url)}">
+<a class="album-thumb" href="${escapeHtml(safeHref(a.url))}" target="_blank" rel="noopener" title="${escapeHtml(a.title || a.url)}">
 ${a.coverPhotoId ? `<span class="thumb-img" data-photo-bg="${escapeHtml(a.coverPhotoId)}"></span>`
 : a.cover ? `<img src="${escapeHtml(a.cover)}" alt="" draggable="false" loading="lazy" referrerpolicy="no-referrer" onerror="this.outerHTML='<span class=&quot;album-nocover&quot;>cover link expired &mdash; re-run the snippet</span>'">`
 : `<span class="album-nocover">${escapeHtml(noCoverNote(a.count))}</span>`}
@@ -1319,7 +1320,7 @@ ${c.tinderPhotoRetryNeeded ? `<div class="settings-note" style="color:var(--ambe
 </div>
 <label class="full">Google Photos albums${albumListHtml(c)}</label>
 <label class="full">Drive/OneDrive link (optional, for full-res photos filed elsewhere)<input type="text" autocomplete="off" placeholder="Paste a share link" data-field="driveLink" data-conn-detail="${c.id}" value="${escapeHtml(c.driveLink || '')}"></label>
-${c.driveLink ? `<div class="full"><a href="${escapeHtml(c.driveLink)}" target="_blank" rel="noopener" style="font-size:12px;color:var(--rose);">Open full-res photos &#8599;</a></div>` : ''}
+${c.driveLink ? `<div class="full"><a href="${escapeHtml(safeHref(c.driveLink))}" target="_blank" rel="noopener" style="font-size:12px;color:var(--rose);">Open full-res photos &#8599;</a></div>` : ''}
 </div>
 </details>
 </div>`;

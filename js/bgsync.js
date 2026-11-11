@@ -87,7 +87,7 @@ icsProxy: url.replace(/sync\.php(?=$|\?)/, 'ics-proxy.php'),
 // Refresh button does, and is why health was the easiest thing to stop
 // having to remember.
 async function refreshHealth(doc, ep) {
-const res = await fetch(`${ep.health}?limit=500&secret=${encodeURIComponent(ep.secret)}`, {
+const res = await fetch(`${ep.health}?limit=500`, {
 headers: { 'X-Sync-Secret': ep.secret },
 });
 if (!res.ok) throw new Error(`health.php returned ${res.status}`);

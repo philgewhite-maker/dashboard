@@ -6,6 +6,7 @@
 // notionplan.js already uses for a project task ↔ its Notion page. The
 // detail has to live here rather than in Notion because the itinerary
 // export has to work fully offline.
+import { safeHref } from '../utils.js';
 import { data, queueSave, blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS, LEG_DATE_FIELDS, STAY_TYPE_SUGGESTIONS } from '../state.js';
 import { escapeHtml, uid, dateStrAdd, daysAgoStr, hydratePhotoBackgrounds, parseLooseDateTime, scrollAndFlash, isCardCollapsed, cardToggleHtml } from '../utils.js';
 import { deleteAttachment, formatBytes, openAttachment } from '../files.js';
@@ -488,7 +489,7 @@ const gaps = gapsFor(leg);
 const sourceLabel = leg.source?.kind === 'mail' ? `Parsed from an email${leg.source.label ? `: ${leg.source.label}` : ''}`
 : leg.source?.kind === 'screenshot' ? 'Parsed from a screenshot' : 'Entered manually';
 const sourceHtml = leg.source?.url
-? `<a href="${escapeHtml(leg.source.url)}" target="_blank" rel="noopener">${escapeHtml(sourceLabel)}</a>`
+? `<a href="${escapeHtml(safeHref(leg.source.url))}" target="_blank" rel="noopener">${escapeHtml(sourceLabel)}</a>`
 : escapeHtml(sourceLabel);
 const expanded = expandedLegs.has(leg.id);
 return `<div class="alloc-card" data-leg-card="${leg.id}" style="margin-top:8px;">
@@ -522,7 +523,7 @@ ${leg.passengers.map((p) => passengerRowHtml(trip.id, leg, p)).join('')}
 </div>
 ${leg.attachments.length ? `<div style="margin-top:6px;">${leg.attachments.map((a) => `<div class="attach-row"><button class="attach-name" type="button" data-leg-attach-open="${leg.id}" data-trip-id="${trip.id}" data-attach-id="${escapeHtml(a.id)}">${escapeHtml(a.name || 'file')}</button><span class="attach-size">${escapeHtml(formatBytes(a.size))}</span></div>`).join('')}</div>` : ''}
 <textarea data-leg-notes="${leg.id}" data-trip-id="${trip.id}" placeholder="Notes" style="width:100%;margin-top:8px;min-height:44px;">${escapeHtml(leg.notes)}</textarea>
-<div class="settings-note" style="margin-top:4px;">${sourceHtml}${leg.link ? ` &middot; <a href="${escapeHtml(leg.link)}" target="_blank" rel="noopener">Open reference &#8599;</a>` : ''}</div>
+<div class="settings-note" style="margin-top:4px;">${sourceHtml}${leg.link ? ` &middot; <a href="${escapeHtml(safeHref(leg.link))}" target="_blank" rel="noopener">Open reference &#8599;</a>` : ''}</div>
 <button type="button" class="todo-add-btn" data-ask-telegram="trip" data-ask-telegram-trip="${trip.id}" data-ask-telegram-leg="${leg.id}" title="Ask a family member about this leg via Telegram" style="margin-top:6px;">Ask via Telegram</button>
 ${legHasDate(leg) ? `<div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;">
 <select class="settings-input" data-leg-cal="${leg.id}" data-trip-id="${trip.id}" style="max-width:220px;"><option value="">Loading your calendars…</option></select>

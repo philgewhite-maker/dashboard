@@ -286,6 +286,15 @@ if (!u.searchParams.get('tag')) u.searchParams.set('tag', AMAZON_ASSOCIATES_TAG)
 return u.toString();
 }
 
+// Only http(s), mailto, tel, relative and hash URLs survive; anything else (javascript:, data:, ...) becomes '#'.
+function safeHref(url) {
+const s = String(url == null ? "" : url).replace(/[\u0000-\u001f\u007f]/g, "").trim();
+if (!s) return s;
+const m = /^([a-z][a-z0-9+.-]*):/i.exec(s);
+if (!m) return s;
+return /^(https?|mailto|tel)$/i.test(m[1]) ? s : '#';
+}
+
 function initials(name) {
 return (name || '?').trim().charAt(0).toUpperCase();
 }
@@ -1417,7 +1426,7 @@ return { used, expected, points: used - expected, exhaustAt: exhaustAt && exhaus
 
 export {
 claudeWeeklyPace, todayStr, daysAgoStr, dateStrAdd, unfoldIcsLines, parseIcsProperty, icsDateTime, parseLooseDateTime, last7Dates, uid, daysSince, daysUntil, foldDiacritics, MISSING_KEY_LINK_HTML, SYNC_LINK_HTML, NOTION_LINK_HTML, TELEGRAM_BOT_LINK_HTML, looksLikeUrl, prettyUrl, stripHtmlForExtraction,
-escapeHtml, decodeHtmlEntities, setPanelCollapsed, isCardCollapsed, setCardCollapsed, cardToggleHtml, affiliateLink, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, buildFlagMatcher, applyFlagMatcher, knownCityMap, knownScalarValues, pickChipHtml, splitCsvLine, scrollAndFlash, bindForm, bindBackdropClose, logoBadgeHtml, bindLogoFallbacks,
+safeHref, escapeHtml, decodeHtmlEntities, setPanelCollapsed, isCardCollapsed, setCardCollapsed, cardToggleHtml, affiliateLink, initials, avatarHtml, hydratePhotoBackgrounds, openLightbox, chatTranscriptHtml, highlightFlagValues, buildFlagMatcher, applyFlagMatcher, knownCityMap, knownScalarValues, pickChipHtml, splitCsvLine, scrollAndFlash, bindForm, bindBackdropClose, logoBadgeHtml, bindLogoFallbacks,
 findMentions, COUNTRY_NAME_TO_NATIONALITY,
 resizeImageToBlob, fileToBase64, loadImage, cropThumbnailToBlob, loadJsPdf,
 hashFile, captureDateOf, betterCaptureDate, dateFromFilename,

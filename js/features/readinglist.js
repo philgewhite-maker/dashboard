@@ -2,6 +2,7 @@
 // outcome (see captureOutcomes.js). Deliberately lighter than a Task:
 // title + link + an unread flag, no bucket/due/context. The unread flag
 // IS the review queue, same as an unrouted Capture Inbox item already is.
+import { safeHref } from '../utils.js';
 import { data, queueSave, blankReadingItem } from '../state.js';
 import { escapeHtml, affiliateLink, scrollAndFlash, hydratePhotoBackgrounds, looksLikeUrl, prettyUrl } from '../utils.js';
 import { identifyUrl, linkMetadata } from '../catalogue.js';
@@ -105,7 +106,7 @@ const art = item.imageUrl
 const shownTitle = looksLikeUrl(item.title) ? prettyUrl(item.title, 70) : item.title;
 return `<div class="mail-row${item.read ? ' done' : ''}" data-reading-row="${item.id}">
 ${art}
-<span class="mail-subject">${item.url ? `<a href="${escapeHtml(affiliateLink(item.url))}" target="_blank" rel="noopener">${escapeHtml(shownTitle)}</a>` : escapeHtml(shownTitle)}</span>
+<span class="mail-subject">${item.url ? `<a href="${escapeHtml(safeHref(affiliateLink(item.url)))}" target="_blank" rel="noopener">${escapeHtml(shownTitle)}</a>` : escapeHtml(shownTitle)}</span>
 ${item.notes ? `<span class="settings-note" style="margin:0;">${escapeHtml(item.notes)}</span>` : ''}
 <button class="mini-task-btn${item.read ? ' done' : ''}" type="button" data-reading-toggle="${item.id}" title="${item.read ? 'Mark unread' : 'Mark read'}">${item.read ? '✓ read' : 'Mark read'}</button>
 <button class="mini-task-btn" type="button" data-reading-edit="${item.id}" title="Edit the title, link or notes">Edit</button>

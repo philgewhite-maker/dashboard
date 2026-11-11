@@ -1,3 +1,4 @@
+import { safeHref } from '../utils.js';
 import { data, queueSave, blankJob } from '../state.js';
 import { escapeHtml, bindForm, looksLikeUrl, affiliateLink, todayStr, daysSince, MISSING_KEY_LINK_HTML } from '../utils.js';
 
@@ -39,7 +40,7 @@ ${items.map((j) => `
 <input type="text" autocomplete="off" class="voucher-edit job-role-edit" data-job-field="role" data-job-id="${j.id}" value="${escapeHtml(j.role)}" placeholder="Role">
 <div class="job-link-row">
 <input type="text" autocomplete="off" class="voucher-edit job-link-edit" data-job-field="link" data-job-id="${j.id}" value="${escapeHtml(j.link || '')}" placeholder="Posting link (optional)">
-${j.link ? `<a class="task-link" href="${escapeHtml(affiliateLink(j.link))}" target="_blank" rel="noopener">Open reference &#8599;</a>` : ''}
+${j.link ? `<a class="task-link" href="${escapeHtml(safeHref(affiliateLink(j.link)))}" target="_blank" rel="noopener">Open reference &#8599;</a>` : ''}
 </div>
 </div>
 <span class="del-x" style="opacity:1;" data-del-job="${j.id}">&times;</span>

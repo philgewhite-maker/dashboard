@@ -9,6 +9,7 @@
 // blankInventoryItem's own holderId meaning exactly (shopping.js's AP
 // inventory): blank is "at your home", set is "given permanently to
 // that connection" -- same question, same answer shape.
+import { safeHref } from '../utils.js';
 import { data, queueSave, blankBookItem, currentAge } from '../state.js';
 import { escapeHtml, affiliateLink, scrollAndFlash, hydratePhotoBackgrounds, splitCsvLine, todayStr, MISSING_KEY_LINK_HTML, bindBackdropClose } from '../utils.js';
 import { connectionChipHtml, bindConnectionChips, connectionPickerHtml, bindConnPickers, setConnPickerValue } from './connections.js';
@@ -599,7 +600,7 @@ const art = book.imageUrl
 const holder = book.holderId ? data.connections.find((c) => c.id === book.holderId) : null;
 const byline = [book.author, book.format].filter(Boolean).join(' · ');
 const mainLine = `
-<span class="mail-subject">${book.link ? `<a href="${escapeHtml(affiliateLink(book.link))}" target="_blank" rel="noopener">${escapeHtml(book.title)}</a>` : escapeHtml(book.title)}</span>
+<span class="mail-subject">${book.link ? `<a href="${escapeHtml(safeHref(affiliateLink(book.link)))}" target="_blank" rel="noopener">${escapeHtml(book.title)}</a>` : escapeHtml(book.title)}</span>
 ${byline ? `<span class="settings-note" style="margin:0;">${escapeHtml(byline)}</span>` : ''}
 ${(book.genres || []).map((g) => `<span class="tag-chip">${escapeHtml(g)}</span>`).join('')}
 ${(book.minAge || book.maxAge) ? `<span class="settings-note" style="margin:0;">${escapeHtml(ageRangeText(book))}</span>` : ''}

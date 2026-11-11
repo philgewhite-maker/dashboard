@@ -13,6 +13,7 @@
 // 2. `bringForward` hides a task from the active lists until its date. That
 //    is the point of a tickler: something you genuinely cannot act on until
 //    March should not be adding noise in January.
+import { safeHref } from '../utils.js';
 import { data, queueSave, TASK_BUCKETS, SHOPPING_CONTEXTS, blankTask } from '../state.js';
 import { photoDelete } from '../db.js';
 import { uid, todayStr, dateStrAdd, escapeHtml, affiliateLink, hydratePhotoBackgrounds, resizeImageToBlob, daysUntil, daysSince, scrollAndFlash, looksLikeUrl, prettyUrl, bindBackdropClose } from '../utils.js';
@@ -421,8 +422,8 @@ ${TASK_BUCKETS.map((b) => `<option value="${b.bucket}"${b.bucket === t.bucket ? 
 <label>Part of${taskPickerHtml(t)}</label>
 </div>
 <label class="full">Reference link (OneNote, doc, anything)<input type="text" autocomplete="off" placeholder="https://…" data-task-field="link" data-task-id="${t.id}" value="${escapeHtml(t.link || '')}"></label>
-${t.link ? `<a class="task-link" href="${escapeHtml(affiliateLink(t.link))}" target="_blank" rel="noopener">Open reference &#8599;</a>` : ''}
-${t.source ? `<div class="task-source">From ${escapeHtml(t.source.kind)}: ${t.source.url ? `<a href="${escapeHtml(affiliateLink(t.source.url))}" target="_blank" rel="noopener">${escapeHtml(t.source.label)}</a>` : t.source.ideaId ? `<span class="inline-goto-link" data-goto-tab="business" data-goto-target="[data-idea-row='${escapeHtml(t.source.ideaId)}']" title="Open the idea on the Business tab">${escapeHtml(t.source.label)}</span>` : t.source.recipeId ? `<span class="inline-goto-link" data-goto-tab="menu" data-goto-target="[data-recipe-row='${escapeHtml(t.source.recipeId)}']" title="Open the recipe on the Menu tab">${escapeHtml(t.source.label)}</span>` : escapeHtml(t.source.label)}</div>` : ''}
+${t.link ? `<a class="task-link" href="${escapeHtml(safeHref(affiliateLink(t.link)))}" target="_blank" rel="noopener">Open reference &#8599;</a>` : ''}
+${t.source ? `<div class="task-source">From ${escapeHtml(t.source.kind)}: ${t.source.url ? `<a href="${escapeHtml(safeHref(affiliateLink(t.source.url)))}" target="_blank" rel="noopener">${escapeHtml(t.source.label)}</a>` : t.source.ideaId ? `<span class="inline-goto-link" data-goto-tab="business" data-goto-target="[data-idea-row='${escapeHtml(t.source.ideaId)}']" title="Open the idea on the Business tab">${escapeHtml(t.source.label)}</span>` : t.source.recipeId ? `<span class="inline-goto-link" data-goto-tab="menu" data-goto-target="[data-recipe-row='${escapeHtml(t.source.recipeId)}']" title="Open the recipe on the Menu tab">${escapeHtml(t.source.label)}</span>` : escapeHtml(t.source.label)}</div>` : ''}
 ${createdAtHtml(t)}
 <div class="task-photos">${photos}<label class="gallery-add" for="task-photo-${t.id}">+</label>
 <input type="file" id="task-photo-${t.id}" accept="image/*" multiple style="display:none;" data-task-photo-add="${t.id}"></div>
@@ -518,7 +519,7 @@ if (!isNaN(d)) bits.push(escapeHtml(d.toLocaleString('en-GB', { day: 'numeric', 
 }
 if (t.source) {
 const label = t.source.label && t.source.label !== t.title ? t.source.label : t.source.kind;
-bits.push(t.source.url ? `<a href="${escapeHtml(affiliateLink(t.source.url))}" target="_blank" rel="noopener">${escapeHtml(label)}</a>` : escapeHtml(label));
+bits.push(t.source.url ? `<a href="${escapeHtml(safeHref(affiliateLink(t.source.url)))}" target="_blank" rel="noopener">${escapeHtml(label)}</a>` : escapeHtml(label));
 }
 return bits.length ? `<div class="alloc-source">${bits.join(' · ')}</div>` : '';
 }
@@ -535,7 +536,7 @@ el.innerHTML = `<div class="alloc-grid">
 <div class="alloc-cards">
 ${inbox.map((t) => { const titleIsUrl = looksLikeUrl(t.title); return `<div class="alloc-card" draggable="true" data-alloc-card="${t.id}">
 <div class="alloc-title">${titleIsUrl
-? `<a href="${escapeHtml(affiliateLink(t.title))}" target="_blank" rel="noopener">${escapeHtml(prettyUrl(t.title))} &#8599;</a>`
+? `<a href="${escapeHtml(safeHref(affiliateLink(t.title)))}" target="_blank" rel="noopener">${escapeHtml(prettyUrl(t.title))} &#8599;</a>`
 : escapeHtml(t.title || '(untitled)')}</div>
 ${t.notes ? `<div class="alloc-notes">${escapeHtml(t.notes)}</div>` : ''}
 <details class="inbox-edit"><summary>Edit</summary>
@@ -544,7 +545,7 @@ ${t.notes ? `<div class="alloc-notes">${escapeHtml(t.notes)}</div>` : ''}
 <label>Due<input type="date" class="settings-input" data-inbox-field="due" data-inbox-id="${t.id}" value="${escapeHtml(t.due || '')}"></label>
 </details>
 ${(t.photoIds || []).length ? `<div class="alloc-photo"><span class="thumb-img" data-photo-bg="${escapeHtml(t.photoIds[0])}"></span></div>` : ''}
-${!titleIsUrl && t.link ? `<a class="task-link" href="${escapeHtml(affiliateLink(t.link))}" target="_blank" rel="noopener">Open reference &#8599;</a>` : ''}
+${!titleIsUrl && t.link ? `<a class="task-link" href="${escapeHtml(safeHref(affiliateLink(t.link)))}" target="_blank" rel="noopener">Open reference &#8599;</a>` : ''}
 ${inboxMetaHtml(t)}
 <div class="alloc-controls">
 <select data-alloc-bucket="${t.id}">

@@ -2,6 +2,7 @@
 // the same configurable-star mechanism as Connections (a distinct category
 // list — Taste/Health/Prep by default — not the same list, just the same
 // idea), with an occasional nudge to actually cook one of them.
+import { safeHref } from '../utils.js';
 import { data, queueSave, DEFAULT_RECIPE_RATING_CATEGORIES, DEFAULT_PREFS, slugifyField, averageRating, getLocalSettings, setLocalSetting } from '../state.js';
 import { photoDelete, photoGet, photoUrl } from '../db.js';
 import { escapeHtml, uid, todayStr, resizeImageToBlob, openLightbox, pickChipHtml, scrollAndFlash, MISSING_KEY_LINK_HTML, SYNC_LINK_HTML } from '../utils.js';
@@ -546,7 +547,7 @@ function recipeSourceHtml(r) {
 const source = r.source || {};
 if (!source.url && !source.photoId && !source.attachment) return '';
 const parts = [];
-if (source.url) parts.push(`<a href="${escapeHtml(source.url)}" target="_blank" rel="noopener" style="font-size:12px;color:var(--rose);">Open original page &#8599;</a>`);
+if (source.url) parts.push(`<a href="${escapeHtml(safeHref(source.url))}" target="_blank" rel="noopener" style="font-size:12px;color:var(--rose);">Open original page &#8599;</a>`);
 if (source.photoId) parts.push(`<span class="thumb-img" data-view-photo="${escapeHtml(source.photoId)}" data-photo-bg="${escapeHtml(source.photoId)}" style="width:52px;height:52px;border-radius:8px;cursor:pointer;flex:0 0 auto;"></span>`);
 if (source.attachment) parts.push(`<span class="inline-goto-link" data-recipe-source-pdf="${r.id}">Open original PDF (${escapeHtml(formatBytes(source.attachment.size))})</span>`);
 return `<div class="field-block full">
@@ -2457,7 +2458,7 @@ ${recipeDietHtml(r)}
 <label class="full">Notes<textarea rows="2" data-recipe-field="notes" data-recipe-id="${r.id}">${escapeHtml(r.notes || '')}</textarea></label>
 <label class="full">Google Photos album <span class="settings-note">Optional — for a bigger set (the occasion it was made for, several attempts...), not needed just for a quick single photo above</span>
 <input type="text" autocomplete="off" placeholder="https://photos.google.com/album/…" data-recipe-album="${r.id}" value="${escapeHtml((r.photoAlbums[0] || {}).url || '')}"></label>
-${(r.photoAlbums[0] || {}).url ? `<div class="full"><a href="${escapeHtml(r.photoAlbums[0].url)}" target="_blank" rel="noopener" style="font-size:12px;color:var(--rose);">Open album &#8599;</a></div>` : ''}
+${(r.photoAlbums[0] || {}).url ? `<div class="full"><a href="${escapeHtml(safeHref(r.photoAlbums[0].url))}" target="_blank" rel="noopener" style="font-size:12px;color:var(--rose);">Open album &#8599;</a></div>` : ''}
 ${recipeSourceHtml(r)}
 ${recipeVariantSourceHtml(r)}
 <div class="field-block full">

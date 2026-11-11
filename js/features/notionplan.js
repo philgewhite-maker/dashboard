@@ -9,6 +9,7 @@
 // ACTIONS back as dashboard subtasks. Deliberately asymmetric — detail flows
 // out to Notion, actionable items flow back — because duplicating the detail
 // in both places is how two-system setups rot.
+import { safeHref } from '../utils.js';
 import { data, queueSave, blankTask } from '../state.js';
 import { escapeHtml, NOTION_LINK_HTML } from '../utils.js';
 import { callTextJson, MissingKeyError, useModel } from '../ai.js';
@@ -132,7 +133,7 @@ url: task.link,
 function notionControlsHtml(task) {
 return `<div class="notion-row">
 ${task.notionPageId
-? `<a class="notion-link" href="${escapeHtml(task.link || '#')}" target="_blank" rel="noopener">Open in Notion &#8599;</a>`
+? `<a class="notion-link" href="${escapeHtml(safeHref(task.link || '#'))}" target="_blank" rel="noopener">Open in Notion &#8599;</a>`
 : ''}
 <button class="sync-btn" type="button" data-notion-plan="${escapeHtml(task.id)}">${task.notionPageId ? 'Add more detail with AI' : 'Create in Notion + draft a plan'}</button>
 <span class="sync-status" data-notion-status="${escapeHtml(task.id)}"></span>
