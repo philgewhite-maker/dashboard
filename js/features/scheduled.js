@@ -258,7 +258,13 @@ const n = Number(data.prefs.scheduledIntervalHours);
 return Number.isFinite(n) && n > 0 ? n : DEFAULT_INTERVAL_HOURS;
 }
 
+// In-memory only: after a network-caused failure a task is not stamped as run (so it retries on the next open/visibility),
+// but not again for 5 minutes, so a dead connection can't cause a tight retry loop.
+const RETRY_GAP_MS = 5 * 60000;
+const retryAfter = {};
+
 function isDue(task) {
+if (retryAfter[task.id] && Date.now() < retryAfter[task.id]) return false;
 const last = runs()[task.id]?.at;
 if (!last) return true;
 return Date.now() - new Date(last).getTime() >= intervalHours() * 3600000;
@@ -312,6 +318,8 @@ let step = 0;
 for (const task of SCHEDULED_TASKS) {
 if (!isEnabled(task) || !isDue(task)) continue;
 if (task.needsGoogle && !signedIn) { notSignedIn.push(task.label); continue; }
+// Offline: skip without stamping, so it runs on the next open once back online.
+if (task.needsGoogle && navigator.onLine === false) { continue; }
 if (t) t.step(step++, due.length, `${task.label}…`);
 // A task is either a button to press or a function to call. The
 // button form is the common one (it reuses a sync's whole existing
@@ -332,6 +340,8 @@ failures.push(`${task.label} (its button wasn't on the page)`);
 continue;
 }
 await clickAndWait(btn);
+// The button's handler flags a network-caused failure; don't record that as a completed run.
+if (btn.dataset.netFail === '1') { retryAfter[task.id] = Date.now() + RETRY_GAP_MS; failures.push(`${task.label} (couldn't reach Google, will retry)`); continue; }
 ran.push(task.label);
 runs()[task.id] = { at: new Date().toISOString(), trigger };
 }

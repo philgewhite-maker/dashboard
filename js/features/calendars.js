@@ -188,6 +188,7 @@ status.textContent = 'Sign in to Google at the top of Overview first.';
 return;
 }
 btn.disabled = true;
+btn.dataset.netFail = '';
 const t = track({
 id: 'calendar-sync', label: 'Calendar sync', hint: 'about 10 seconds', leave: 'stops', mirror: 'cal-sync-status',
 retry: () => btn.click(),
@@ -214,7 +215,10 @@ if (problems.length) t.fail(`${base} Couldn't read ${problems.join('; ')}.`, { w
 else if (!eventCount) t.zero(`${base} No upcoming events found.`);
 else t.done(base);
 } catch (err) {
-t.fail(`Couldn't sync: ${err.message || err}`);
+// A raw "Failed to fetch" (offline, dropped connection) is not worth showing as-is; flag it so the scheduler retries soon.
+const netFail = err instanceof TypeError || /failed to fetch|networkerror|load failed/i.test(String(err && err.message));
+btn.dataset.netFail = netFail ? '1' : '';
+t.fail(netFail ? "Couldn't reach Google Calendar (offline or connection dropped). Will retry." : `Couldn't sync: ${err.message || err}`);
 console.error('Calendar sync failed:', err);
 } finally {
 btn.disabled = false;

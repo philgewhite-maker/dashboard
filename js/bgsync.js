@@ -114,7 +114,11 @@ const res = await fetch(`${ep.icsProxy}?url=${encodeURIComponent(listing.icsUrl)
 headers: { 'X-Sync-Secret': ep.secret },
 });
 if (!res.ok) throw new Error(`ics-proxy.php returned ${res.status} for "${listing.label || listing.id}"`);
-const events = parseIcsReservations(await res.text()).filter((e) => e.checkout >= today);
+const feedText = await res.text();
+const events = parseIcsReservations(feedText).filter((e) => e.checkout >= today);
+// A truncated, non-ICS or empty feed is a failed fetch, not "every booking cancelled": change nothing for this listing.
+if (!/BEGIN:VCALENDAR/.test(feedText) || !/END:VCALENDAR/.test(feedText)) continue;
+if (!events.length && (doc.airbnbReservations || []).some((r) => r.listingId === listing.id && (r.source || 'ics') === 'ics' && !r.movedFrom && (r.status || 'booked') === 'booked' && r.checkout >= today)) continue;
 // Same rules as the in-app sync: completed stays can't come back, a
 // cancelled one can (and returns to booked), and nothing is ever deleted.
 // A stay is known by its own calendar id and any others it has appeared under

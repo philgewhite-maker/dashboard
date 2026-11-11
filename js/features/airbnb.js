@@ -102,6 +102,10 @@ const today = todayStr();
 // event is ever turned into a stored record, not just hidden from a
 // display list downstream.
 const events = parseIcsReservations(text).filter((e) => e.checkout >= today);
+// A truncated, non-ICS or empty feed is a failed fetch, not "every booking cancelled": change nothing and say so.
+if (!/BEGIN:VCALENDAR/.test(text) || !/END:VCALENDAR/.test(text) || (!events.length && data.airbnbReservations.some((r) => r.listingId === listing.id && (r.source || 'ics') === 'ics' && !r.movedFrom && (r.status || 'booked') === 'booked' && r.checkout >= today))) {
+  throw new Error('The calendar feed came back empty or incomplete, so it was ignored and no bookings were changed. It will be checked again on the next sync.');
+}
 // The feed's "Not available" blocks (a host's manual blocks, e.g. over Christmas) are not stays, but they are not free nights
 // either: kept per listing, for the booking projection and the occupancy timeline. Airbnb also puts one at the far edge of
 // its booking window, a year out; anything starting beyond 400 days is of no use and left out.

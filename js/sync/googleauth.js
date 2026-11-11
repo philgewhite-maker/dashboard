@@ -227,7 +227,17 @@ const token = await getAccessToken(interactive);
 const controller = new AbortController();
 const timer = setTimeout(() => controller.abort(), GOOGLE_FETCH_TIMEOUT_MS);
 try {
-return await fetch(url, { ...options, headers: { ...(options.headers || {}), Authorization: `Bearer ${token}` }, signal: controller.signal });
+const doFetch = (tok) => fetch(url, { ...options, headers: { ...(options.headers || {}), Authorization: `Bearer ${tok}` }, signal: controller.signal });
+const resp = await doFetch(token);
+// A rejected token (revoked or expired in flight) would otherwise be reused from the cache until its expiry:
+// drop it and retry once with a fresh one. If getting a fresh one fails, hand back the original 401.
+if (resp.status === 401 && cachedToken && cachedToken.accessToken === token) {
+cachedToken = null;
+let fresh = null;
+try { fresh = await getAccessToken(interactive); } catch (e) { fresh = null; }
+if (fresh && fresh !== token) return await doFetch(fresh);
+}
+return resp;
 } catch (err) {
 if (err.name === 'AbortError') throw new Error(`Google didn't respond within ${GOOGLE_FETCH_TIMEOUT_MS / 1000}s — try again, or check for anything (a privacy extension, a network filter) that might be blocking requests to Google's API.`);
 throw err;
