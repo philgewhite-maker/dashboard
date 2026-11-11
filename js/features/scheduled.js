@@ -345,7 +345,7 @@ if (btn.dataset.netFail === '1') { retryAfter[task.id] = Date.now() + RETRY_GAP_
 ran.push(task.label);
 runs()[task.id] = { at: new Date().toISOString(), trigger };
 }
-queueSave();
+if (ran.length || failures.length) queueSave(); // only a run stamp to save when something actually ran
 renderScheduled();
 if (t) {
 const parts = [];

@@ -4144,6 +4144,11 @@ function hasPendingSave() { return savePending; }
 
 async function persist(opts = {}) {
 savePending = false;
+// Compare-before-write: nothing changed since the last save/load, so no write, no dirty marker, no push. Not for
+// remote adopt/merge (notify:false) or the merge retry, which must always write.
+if (opts.notify !== false && !opts.retries && persistedBase !== null) {
+try { if (JSON.stringify(data) === persistedBase) return; } catch (e) { /* fall through and save */ }
+}
 try {
 const onDiskRev = (await kvGet(REV_KEY)) || 0;
 if (onDiskRev > knownRev) {
