@@ -3851,7 +3851,7 @@ background:var(--paper);
 padding:8px 0;
 margin-bottom:10px;
 }
-input[type=password], input[type=text].settings-input{
+input[type=password], input[type=text].settings-input, input[type=number].settings-input, input[type=date].settings-input, select.settings-input{
 font-family:'IBM Plex Mono',monospace;
 font-size:13px;
 border:1px solid var(--line);

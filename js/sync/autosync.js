@@ -75,7 +75,7 @@ return err.message || String(err);
 const BASE_KEY = 'sync-base';
 // Caches and last-run stamps each device refreshes for itself: never a reason
 // to push on their own, and never a merge conflict worth a backup file.
-const VOLATILE_KEYS = ['tickerCache', 'airbnbSyncStatus', 'airbnbCleanerSyncStatus', 'siteHealth'];
+const VOLATILE_KEYS = ['tickerCache', 'airbnbSyncStatus', 'airbnbCleanerSyncStatus', 'siteHealth', 'calendarStatus'];
 async function saveBase(jsonText) {
 try { await kvSet(BASE_KEY, jsonText); } catch (err) { console.warn('Could not store the sync baseline:', err); }
 }

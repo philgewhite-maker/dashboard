@@ -55,3 +55,21 @@ server-switchadvisor/switchadvisor-scan-config.php
 # anyone points the config at a path inside the repo while testing.
 switchadvisor-data.json
 switchadvisor-cache.json
+
+# Real (non-.example) secret-bearing server files; only the .example is tracked.
+# (records.php and sync-connections.php are tracked on purpose and not listed.)
+server/auth.php
+server/commands.php
+server/pair.php
+server/agent-write.php
+server/ai-runs.php
+server/ics-proxy.php
+server/product-image-proxy.php
+# Env files, personal review material, local tool config, python cache.
+.env
+*.env
+!*.env.example
+Files for review by Claude/
+.claude/
+__pycache__/
+*.pyc
