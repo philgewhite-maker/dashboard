@@ -116,6 +116,7 @@ function weekParts(ctx, params, ri, open, t0, withMarket = false) {
   }
   return { E, C, Cm };
 }
+const ALL_OPEN = () => 1;
 function expectedWeek(ctx, params, ri, open, t0) { return weekParts(ctx, params, ri, open, t0).E; }
 
 // ---- everything one room's charts need ---------------------------------------------------------------------
@@ -139,7 +140,16 @@ function computeRoom(ctx, params, ri) {
       enquiries: inWeek.filter((a) => a.kind === 'enquiry').length,
       expected: parts.E, cap: parts.C, capMarket: parts.Cm,
     });
+    // The same week with every night open: the model's demand before availability takes its share, and London's
+    // index for the stay dates this week's requests are for (the same lead-time weights), so the two are comparable.
+    const all = weekParts(ctx, params, ri, ALL_OPEN, w, true);
+    const wk = weeks[weeks.length - 1];
+    wk.demandAll = all.E; wk.seasonLead = all.C > 0 ? all.Cm / all.C : null;
   }
+  // A year's average of that all-open demand, so it can be drawn as "% of an average week" like London's index.
+  let yearSum = 0;
+  for (let k = 0; k < 52; k++) yearSum += weekParts(ctx, params, ri, ALL_OPEN, first + 7 * k).E;
+  const demandMean = yearSum / 52;
   const done = weeks.filter((w) => !w.partial && w.expected > 0);
   const last4 = done.slice(-4);
   const K = last4.reduce((a, w) => a + w.requests, 0); const E = last4.reduce((a, w) => a + w.expected, 0);
@@ -169,7 +179,7 @@ function computeRoom(ctx, params, ri) {
       pts.length.push({ t: a.t, r: a.nights / losMed, actual: a.nights, model: losMed });
     } else if (a.nights >= 1) pts.length.push({ t: a.t, r: a.nights / losMed, actual: a.nights, model: losMed });
   });
-  return { room, ids, today, first, weeks, demand, pts, asks, clean };
+  return { room, ids, today, first, weeks, demand, demandMean, pts, asks, clean };
 }
 
 // Last RECENT days of per-request ratios against 1x.
@@ -399,10 +409,14 @@ function demandChart(calc, events) {
   // London's seasonal shape on its own right-hand axis (100% = an average month of the year), parked in the upper part of the
   // chart where the bars and the model line rarely reach, so it reads as a shape to compare with, not a level.
   const seasonY = (idx) => yMax * (0.72 + (idx - 1) * 0.5);
-  const mkt = done.map((w) => `${f.X(w.t + 3.5).toFixed(1)},${f.Y(seasonY(marketAt(w.t + 3))).toFixed(1)}`).join(' ');
+  const seasonOf = (w) => (w.seasonLead != null ? w.seasonLead : marketAt(w.t + 3));
+  const mkt = done.map((w) => `${f.X(w.t + 3.5).toFixed(1)},${f.Y(seasonY(seasonOf(w))).toFixed(1)}`).join(' ');
+  // Our own demand with every night open, as a share of its average week over a year: the curve to hold against London's.
+  const ownIdx = (w) => (calc.demandMean > 0 ? w.demandAll / calc.demandMean : null);
+  const own = calc.demandMean > 0 ? done.map((w) => `${f.X(w.t + 3.5).toFixed(1)},${f.Y(seasonY(ownIdx(w))).toFixed(1)}`).join(' ') : '';
   const seasonAxis = [60, 80, 100, 120].map((p) => `<text x="${W - PR + 5}" y="${(f.Y(seasonY(p / 100)) + 3.5).toFixed(1)}" font-size="10" fill="var(--sage)">${p}%</text>`).join('') + `<text x="${W - PR + 5}" y="${PT - 5}" font-size="9" fill="var(--sage)">season</text>`;
-  const pts = weeks.map((w) => ({ x: f.X(w.t + 3.5), lines: [`Week of ${shortDate(w.t)}${w.partial ? ' (so far)' : ''}`, `${w.requests} request${w.requests === 1 ? '' : 's'}${w.enquiries ? `, ${w.enquiries} enquir${w.enquiries === 1 ? 'y' : 'ies'}` : ''}`, `Model expects ${w.expected.toFixed(1)}`, `London season ${Math.round(marketAt(w.t + 3) * 100)}%`] })).concat(eventHov(events, f.X));
-  return plotHtml(`<svg viewBox="0 0 ${W} ${h}" class="md-svg" role="img" aria-label="Requests received each week against the model's expectation, with London's seasonal shape on a right-hand axis"${hovAttr(pts)}>${f.grid}${bars}${mkt ? `<g${lay('req:season')}><polyline points="${mkt}" fill="none" stroke="var(--sage)" stroke-width="2.25" stroke-dasharray="6 4" stroke-linecap="round" stroke-linejoin="round"/>${seasonAxis}</g>` : ''}<polyline${lay('req:model')} points="${line}" fill="none" stroke="var(--amber)" stroke-width="2" stroke-linejoin="round"/>${eventLayer(events, f.X, h)}${crossLine(h)}</svg>`);
+  const pts = weeks.map((w) => ({ x: f.X(w.t + 3.5), lines: [`Week of ${shortDate(w.t)}${w.partial ? ' (so far)' : ''}`, `${w.requests} request${w.requests === 1 ? '' : 's'}${w.enquiries ? `, ${w.enquiries} enquir${w.enquiries === 1 ? 'y' : 'ies'}` : ''}`, `Model expects ${w.expected.toFixed(1)} (nights still open)`, ...(ownIdx(w) != null ? [`All nights open: ${w.demandAll.toFixed(1)}, ${Math.round(ownIdx(w) * 100)}% of our average week`] : []), `London, for those stay dates: ${Math.round(seasonOf(w) * 100)}%`] })).concat(eventHov(events, f.X));
+  return plotHtml(`<svg viewBox="0 0 ${W} ${h}" class="md-svg" role="img" aria-label="Requests received each week against the model's expectation, with London's seasonal shape on a right-hand axis"${hovAttr(pts)}>${f.grid}${bars}${mkt ? `<g${lay('req:season')}><polyline points="${mkt}" fill="none" stroke="var(--sage)" stroke-width="2.25" stroke-dasharray="6 4" stroke-linecap="round" stroke-linejoin="round"/></g>` : ''}${own ? `<polyline${lay('req:demand')} points="${own}" fill="none" stroke="var(--amber)" stroke-width="1.75" stroke-dasharray="2 4" stroke-linecap="round" stroke-linejoin="round"/>` : ''}${seasonAxis}<polyline${lay('req:model')} points="${line}" fill="none" stroke="var(--amber)" stroke-width="2" stroke-linejoin="round"/>${eventLayer(events, f.X, h)}${crossLine(h)}</svg>`);
 }
 
 // Requests per open night, in layers: London's shape (scaled to the same average, through the model's own lead-time weights),
@@ -521,7 +535,7 @@ function sectionHtml() {
   return `${picker}
 ${statusTable(ctx, calc)}
 ${storyHtml(ctx, calc)}
-<div class="md-chart"><div class="md-title">Requests received each week</div>${togglesHtml([{ fixed: true, label: 'requests', color: 'var(--slate)', bar: true }, { k: 'req:enq', label: 'enquiries', color: 'var(--slate)', bar: true }, { k: 'req:model', label: 'model expects', color: 'var(--amber)' }, { k: 'req:season', label: 'London season (right axis)', color: 'var(--sage)', dash: true }])}<div class="settings-note" style="margin:0 0 2px;">Solid bars are requests and instant bookings by the day they landed; outlined bars on top are enquiries, which the model does not forecast (an enquiry that turns into a booking also appears as a solid bar). The orange line is the model's expectation of requests and instant bookings only, at list price, for the nights still open then, lightly smoothed for drawing. A faded last bar is this week so far. The dashed line is how London private rooms rise and fall through the year on the right-hand axis (100% is an average month): compare its rises and falls with the bars, not its height. Point at a week for its figures. ${creditHtml()}</div>${demandChart(calc, events)}</div>
+<div class="md-chart"><div class="md-title">Requests received each week</div>${togglesHtml([{ fixed: true, label: 'requests', color: 'var(--slate)', bar: true }, { k: 'req:enq', label: 'enquiries', color: 'var(--slate)', bar: true }, { k: 'req:model', label: 'model expects', color: 'var(--amber)' }, { k: 'req:demand', label: 'our demand, all nights open (right axis)', color: 'var(--amber)', dash: true }, { k: 'req:season', label: 'London season (right axis)', color: 'var(--sage)', dash: true }])}<div class="settings-note" style="margin:0 0 2px;">Solid bars are requests and instant bookings by the day they landed; outlined bars on top are enquiries, which the model does not forecast (an enquiry that turns into a booking also appears as a solid bar). The orange line is the model's expectation of requests and instant bookings only, at list price, for the nights still open then, lightly smoothed for drawing. A faded last bar is this week so far. The two dashed lines share the right-hand axis (100% is an average week of the year) and are there to compare with each other: the orange one is the model's demand for this room with every night open, before availability takes its share, and the green one is how London private rooms rise and fall, read for the stay dates each week's requests are for (requests arrive ahead of the stay, so it runs earlier than the calendar). The solid orange line falls when the dashed ones rise if the busy nights are already booked: fewer nights are left to ask about. Point at a week for its figures. ${creditHtml()}</div>${demandChart(calc, events)}</div>
 ${sourceChart(calc, events) ? `<div class="md-chart"><div class="md-title">Where requests come from: London, our season, the model, what arrived</div>${togglesHtml([{ k: 'src:market', label: "London's shape", color: 'var(--sage)', dash: true }, { k: 'src:model', label: "model's rate", color: 'var(--amber)' }, { k: 'src:actual', label: 'actual (4-week)', color: 'var(--slate)' }, { k: 'src:err', label: 'actual ÷ model (right axis)', color: 'var(--ink)' }])}<div class="settings-note" style="margin:0 0 2px;">Requests per open night: how many requests each night on offer draws over its lead time, so a week with fewer open nights does not read as weaker demand. The dashed line is London's seasonal shape, scaled to the same average as the model and run through the model's own lead-time weights. The gap between it and the orange line is what the model has learned about your own seasonality (and the demand factor); the gap between orange and blue is what the model gets wrong. The dark line, on the right-hand axis, is that error as a ratio: 1× is right, above 1× means more requests than modelled. Actual is a 4-week rolling figure with single weeks as faint dots. ${creditHtml()}</div>${sourceChart(calc, events)}</div>` : ''}
 <div class="md-chart"><div class="md-title">Lead time against the model</div>${togglesHtml([{ k: 'lead:dots', label: 'each request', color: 'var(--slate)', bar: true }, { k: 'lead:median', label: '6-week median', color: 'var(--sage)' }])}<div class="settings-note" style="margin:0 0 2px;">How far ahead requests come, as a multiple of the model's median for that check-in month (above 1× is further ahead than modelled).</div>${ratioChart(calc, calc.pts.lead, events, lead, 'lead')}</div>
 <div class="md-chart"><div class="md-title">Price per night against the model</div>${togglesHtml([{ k: 'price:dots', label: 'each request', color: 'var(--slate)', bar: true }, { k: 'price:median', label: '6-week median', color: 'var(--sage)' }])}<div class="settings-note" style="margin:0 0 2px;">Each request's payout per night with the cleaning fee and short-notice and length discounts taken out, over the model's price for those nights.</div>${ratioChart(calc, calc.pts.price, events, price, 'price')}</div>
