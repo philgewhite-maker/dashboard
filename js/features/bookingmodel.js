@@ -74,7 +74,7 @@ const PROJECT_RUNS = 3000; // about 2 s warm; the run-to-run spread of a void's 
 const OCC_FULL_EVIDENCE = 3; // bookings a month needs to count in full towards the occupancy it shows
 
 // ---- Dates as day numbers ------------------------------------------------------------------
-const dayNum = (s) => { const [y, m, d] = s.split('-').map(Number); return Date.UTC(y, m - 1, d) / DAY_MS; };
+const dayNum = (s) => { const [y, m, d] = String(s).slice(0, 10).split('-').map(Number); return Date.UTC(y, m - 1, d) / DAY_MS; }; // a date, or a timestamp's date
 const dayStr = (n) => new Date(n * DAY_MS).toISOString().slice(0, 10);
 const dowOf = (n) => new Date(n * DAY_MS).getUTCDay(); // 0 Sun .. 6 Sat
 const monthOf = (n) => new Date(n * DAY_MS).getUTCMonth(); // 0..11
@@ -1471,7 +1471,7 @@ const c13 = testContext({ occupancy: 0.6 });
 const tN = dayNum(c13.today);
 const arr = drawArrivals(c13, c13.params, { from: tN - 500, to: tN + 400, todayN: null, lam: (ri, c) => TRUE_LEVEL * MARKET_SEASON[monthOf(c)], rooms: [0] }, mulberry32(hashStr('demand-test')));
 const seen = arr.filter((a) => a.at >= tN - 364 && a.at < tN && a.los >= PAST_MIN_NIGHTS && !(blockFrom != null && a.c < blockTo && a.c + a.los > blockFrom));
-c13.requests = seen.map((a, i) => ({ id: `q${i}`, listingId: 'LA', kind: 'request', receivedAt: dayStr(a.at), checkin: dayStr(a.c), checkout: dayStr(a.c + a.los) }));
+c13.requests = seen.map((a, i) => ({ id: `q${i}`, listingId: 'LA', kind: 'request', receivedAt: `${dayStr(a.at)}T12:34:56.000Z`, checkin: dayStr(a.c), checkout: dayStr(a.c + a.los) }));
 if (blockFrom != null) c13.stays = [{ id: 'long', listingId: 'LA', checkin: dayStr(blockFrom), checkout: dayStr(blockTo), status: 'stay', bookedOn: dayStr(tN - 600), income: 1, guest: 'L' }];
 return demandFor(c13, c13.params, 0);
 };
