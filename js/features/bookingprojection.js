@@ -13,11 +13,13 @@ const daysBetween = (a, b) => Math.round((new Date(`${b}T00:00:00Z`) - new Date(
 
 function showProjection() { return data.prefs.showProjection !== false; }
 
-// The newest saved projection whose window has not finished.
+// The saved projection in use: from the most recent day one was made, the one reaching furthest, then the newest.
+// (Two can exist for one day when another device or tab re-ran a three-month one before the six-month one reached
+// it; the shorter, slightly newer one must not hide the far months.)
 function latestProjection() {
 const today = todayStr();
 const list = (data.bookingProjections || []).filter((p) => p.to && p.to > today);
-list.sort((a, b) => String(b.madeAt).localeCompare(String(a.madeAt)));
+list.sort((a, b) => String(b.today).localeCompare(String(a.today)) || String(b.to).localeCompare(String(a.to)) || String(b.madeAt).localeCompare(String(a.madeAt)));
 return list[0] || null;
 }
 
@@ -151,6 +153,8 @@ let inflight = null;
 // Runs the projection (in slices, so the page keeps responding), saves it and returns the record.
 // `onProgress(0..1)` for a status line.
 function runProjection(opts = {}) {
+// A run asked for with a set span while a quiet refresh is under way waits for it, then runs its own.
+if (inflight && opts.months) return inflight.catch(() => {}).then(() => runProjection(opts));
 if (!inflight) inflight = runProjectionOnce(opts).finally(() => { inflight = null; });
 return inflight;
 }
