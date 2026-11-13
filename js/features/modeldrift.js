@@ -13,10 +13,8 @@
 // (marketdata.js), drawn on the requests chart.
 import { data, queueSave } from '../state.js';
 import { escapeHtml, todayStr, uid } from '../utils.js';
-import { buildContext, calibrate, driftKit, discountsOf, rawNightlyRate } from './bookingmodel.js';
+import { buildContext, calibrate, driftKit, discountsOf, rawNightlyRate, demandFactorOf } from './bookingmodel.js';
 import { MARKET_SEASON, creditHtml } from './marketdata.js';
-import { roomBlocks } from '../icsparse.js';
-import { activeListingId } from '../roomowner.js';
 
 const DAY = 86400000;
 const dn = (s) => { const [y, m, d] = String(s).slice(0, 10).split('-').map(Number); return Date.UTC(y, m - 1, d) / DAY; };
@@ -60,64 +58,34 @@ function bestSplit(counts, expected, minSide = 3) {
 
 // ---- what actually arrived ---------------------------------------------------------------------------------
 
-// Every ask for a room's listings: requests and enquiries by the day they landed, plus bookings that never had a
-// request (instant bookings), by the day they were made.
-function asksFor(ctx, ids) {
-  const reqs = ctx.requests.filter((q) => ids.has(q.listingId) && q.receivedAt && q.checkin);
-  const codes = new Set(reqs.map((q) => q.confirmationCode).filter(Boolean));
-  const keys = new Set(reqs.map((q) => `${q.listingId}|${q.checkin}`));
-  const asks = reqs.map((q) => ({ t: dn(q.receivedAt), listingId: q.listingId, kind: q.kind === 'enquiry' ? 'enquiry' : 'request', checkin: dn(q.checkin), nights: q.checkout ? dn(q.checkout) - dn(q.checkin) : null, payout: q.kind === 'enquiry' ? null : Number(q.payout) || null }));
-  ctx.earnings.forEach((e) => {
-    if (!ids.has(e.listingId) || !e.bookingDate || !e.start) return;
-    if (codes.has(e.code) || keys.has(`${e.listingId}|${e.start}`)) return;
-    asks.push({ t: dn(e.bookingDate), listingId: e.listingId, kind: 'request', checkin: dn(e.start), nights: e.nights, payout: e.amount, instant: true });
-  });
-  return asks.filter((a) => a.t <= dn(ctx.today)).sort((a, b) => a.t - b.t);
-}
-
-// Was night `c` still free to ask about on day `t`? Bookings count from the day they were made (booking date, else the
-// request that became them, else two weeks before arrival); your own "not offered" spells and calendar blocks count always.
-function opennessOf(ctx, ri) {
-  const room = ctx.rooms[ri];
-  const ids = new Set(room.listingIds);
-  const reqAt = new Map(ctx.requests.filter((q) => q.reservationId && q.receivedAt).map((q) => [q.reservationId, dn(q.receivedAt)]));
-  const held = [];
-  ctx.stays.forEach((x) => {
-    if (!ids.has(x.listingId) || !x.checkin || !x.checkout) return;
-    const ci = dn(x.checkin); const co = dn(x.checkout);
-    const since = x.bookedOn ? dn(x.bookedOn) : reqAt.has(x.id) ? reqAt.get(x.id) : ci - 14;
-    if (x.status === 'cancelled') { if (x.cancelledOn) held.push({ ci, co, since, until: dn(x.cancelledOn) }); return; }
-    if (x.status === 'stay' || x.unconfirmed) held.push({ ci, co, since, until: Infinity });
-  });
-  (Array.isArray(ctx.s.unavailable) ? ctx.s.unavailable : []).forEach((u) => { if (u.roomKey === room.key && u.from && u.to) held.push({ ci: dn(u.from), co: dn(u.to) + 1, since: -Infinity, until: Infinity }); });
-  // Calendar blocks count only on the listing in use for the room (a sibling listing can be blocked all winter without the room being).
-  const inUse = activeListingId(room.listingIds, ctx.stays, ctx.today);
-  roomBlocks(ctx.blocks, (ctx.feedListingIds || []).includes(inUse) ? [inUse] : []).forEach((b) => held.push({ ci: dn(b.from), co: dn(b.to), since: -Infinity, until: Infinity }));
-  return (c, t) => { for (const o of held) if (c >= o.ci && c < o.co && o.since <= t && t < o.until) return 0; return 1; };
-}
+// Shared with the model's own demand estimate (bookingmodel.js): every ask for a room's listings, and what the room
+// had on offer on a past day (which nights were free, and which stay lengths could still be requested for them).
+const asksFor = (ctx, ids) => driftKit.asksFor(ctx, ids);
+const fitOf = (ctx, params, ri) => driftKit.availabilityOf(ctx, params, ri).fit;
 
 // Requests the model expects to be received in the week starting `t0`: each check-in date asks at its rate x weekday
 // weight, and the lead-time curve says what share of that lands in this week.
 // weekParts also gives the open-night capacity C (the same sum with every night's rate set to 1) and, when asked, Cm (the
 // sum with London's seasonal index as the rate), so charts can show requests per open night and what the market's own shape
 // would have expected through the same lead-time weights.
-function weekParts(ctx, params, ri, open, t0, withMarket = false) {
+function weekParts(ctx, params, ri, fitFor, t0, withMarket = false) {
+  const fit = fitFor(t0 + 3, t0);
   const { lambdaFor, leadCdf, dowOf, monthOf } = driftKit;
   let E = 0; let C = 0; let Cm = 0;
   for (let c = t0; c < t0 + 420; c++) {
     const share = leadCdf(params, c, c - t0) - leadCdf(params, c, c - t0 - 7);
     if (!(share > 1e-9)) continue;
-    const o = open(c, t0 + 3);
-    if (!o) continue;
-    const wgt = params.dowW[dowOf(c)] * share;
+    const F = fit(c);
+    if (!(F > 0)) continue;
+    const wgt = params.dowW[dowOf(c)] * share * F;
     E += lambdaFor(ctx, params, ri, monthOf(c)) * wgt;
     C += wgt;
     if (withMarket) Cm += marketAt(c) * wgt;
   }
   return { E, C, Cm };
 }
-const ALL_OPEN = () => 1;
-function expectedWeek(ctx, params, ri, open, t0) { return weekParts(ctx, params, ri, open, t0).E; }
+const ALL_OPEN = () => () => 1;
+function expectedWeek(ctx, params, ri, fitFor, t0) { return weekParts(ctx, params, ri, fitFor, t0).E; }
 
 // ---- everything one room's charts need ---------------------------------------------------------------------
 
@@ -129,7 +97,7 @@ function computeRoom(ctx, params, ri) {
   const asks = asksFor(ctx, ids);
   if (!asks.length) return { empty: true, room, ids, today };
   const first = Math.max(weekStart(asks[0].t), weekStart(today) - 7 * MAX_WEEKS);
-  const open = opennessOf(ctx, ri);
+  const open = fitOf(ctx, params, ri);
   const weeks = [];
   for (let w = first; w <= weekStart(today); w += 7) {
     const inWeek = asks.filter((a) => a.t >= w && a.t < w + 7);
@@ -223,7 +191,7 @@ const wmedian = (items) => {
   return null;
 };
 
-// Works out, from the last 12 weeks of requests (recent weeks counting more), the demand factor (empty nights divided by it)
+// Works out, from the last 12 weeks of requests (recent weeks counting more), the demand factor (a multiplier on the request rate)
 // that makes the model expect what actually arrived, and the median stay the requests ask for. Nothing is changed:
 // the caller shows the numbers for review. Async only so the page stays responsive while the model is recalibrated.
 async function proposeRecent(progress = () => {}) {
@@ -236,7 +204,7 @@ async function proposeRecent(progress = () => {}) {
   const rooms = ctx.rooms.map((room, ri) => {
     const asks = asksFor(ctx, new Set(room.listingIds)).filter((a) => a.kind === 'request');
     const first = asks.length ? weekStart(asks[0].t) : Infinity; // weeks before a room's first request are not evidence of anything
-    return { ri, room, asks, first, open: opennessOf(ctx, ri), K: starts.map((t) => asks.filter((a) => a.t >= t && a.t < t + 7).length) };
+    return { ri, room, asks, first, open: fitOf(ctx, params, ri), K: starts.map((t) => asks.filter((a) => a.t >= t && a.t < t + 7).length) };
   }).filter((r) => r.asks.length);
   const kc = ctx.scale.demand || 1;
   const used = (r, i) => starts[i] >= r.first;
@@ -275,12 +243,8 @@ async function proposeRecent(progress = () => {}) {
     const fit = Math.exp(best.lk);
     const shr = rawK / (rawK + PACE_SHRINK_K);
     const proposed = Math.min(16, Math.max(0.25, Math.round(Math.exp(Math.log(kc) + shr * (Math.log(fit) - Math.log(kc))) * 20) / 20));
-    const occ = params.occ.map((o) => o.overall).filter((v) => v != null);
-    const occAvg = occ.length ? occ.reduce((a, b) => a + b, 0) / occ.length : null;
-    const at = (k) => (occAvg == null ? null : Math.min(0.97, Math.max(0.02, 1 - (1 - occAvg) / k)));
     out.pace = {
       N: rawK, expected: e0.raw, ratio: e0.raw > 0 ? rawK / e0.raw : null, fit, proposed, atBound: best.lk <= LO + 1e-6 || best.lk >= HI - 1e-6,
-      occBase: occAvg, occNow: at(kc), occProposed: at(proposed),
       rooms: rooms.map((r, i) => ({ label: r.room.label, K: r.K.reduce((b, k, j) => b + (used(r, j) ? k : 0), 0), E: e0.E[i].reduce((b, e) => b + e, 0) })),
     };
   } else out.pace = { tooFew: true, N: rawK };
@@ -541,7 +505,7 @@ ${sourceChart(calc, events) ? `<div class="md-chart"><div class="md-title">Where
 <div class="md-chart"><div class="md-title">Price per night against the model</div>${togglesHtml([{ k: 'price:dots', label: 'each request', color: 'var(--slate)', bar: true }, { k: 'price:median', label: '6-week median', color: 'var(--sage)' }])}<div class="settings-note" style="margin:0 0 2px;">Each request's payout per night with the cleaning fee and short-notice and length discounts taken out, over the model's price for those nights.</div>${ratioChart(calc, calc.pts.price, events, price, 'price')}</div>
 <div class="md-chart"><div class="md-title">Stay length against the model</div>${togglesHtml([{ k: 'len:dots', label: 'each request', color: 'var(--slate)', bar: true }, { k: 'len:median', label: '6-week median', color: 'var(--sage)' }])}<div class="settings-note" style="margin:0 0 2px;">Nights requested over the model's median stay.</div>${ratioChart(calc, calc.pts.length, events, len, 'len')}</div>
 ${eventsHtml(ctx, calc, events)}
-<div class="settings-note" style="margin:8px 0 0;">Corrections in force: empty nights divided by ${f(cal.demand)}, lead time ×${f(cal.lead)}, and typical stay ${(data.prefs.bookingEvaluator || {}).stayMedian ? ((data.prefs.bookingEvaluator || {}).stayMedian + " nights") : "as learned"} (stay in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#booking-evaluator-settings">Booking evaluator settings</span>). Where an input is flagged, work out a correction from recent requests in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#model-review">Model review</span>. The model also borrows London's seasonal shape for months it has no evidence of its own. ${creditHtml()}</div>`;
+<div class="settings-note" style="margin:8px 0 0;">Corrections in force: request rate ×${f(demandFactorOf(cal))}, lead time ×${f(cal.lead)}, and typical stay ${(data.prefs.bookingEvaluator || {}).stayMedian ? ((data.prefs.bookingEvaluator || {}).stayMedian + " nights") : "as learned"} (stay in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#booking-evaluator-settings">Booking evaluator settings</span>). Where an input is flagged, work out a correction from recent requests in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#model-review">Model review</span>. The model also borrows London's seasonal shape for months it has no evidence of its own. ${creditHtml()}</div>`;
 }
 
 function renderBody(el) {

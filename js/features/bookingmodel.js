@@ -7,8 +7,9 @@
 // Both count cleaning (a day's clean shared between the rooms turned over that day),
 // changeover hassle, and what an empty night is worth to you (a second room empty the same
 // night counts for less). Future bookings are simulated: booking requests arrive for each
-// check-in date at a rate calibrated so that an empty calendar fills to the occupancy your
-// rooms actually achieved in that month, with your lead times, stay lengths and weekday mix
+// check-in date at a rate that follows London's season (Inside Airbnb), scaled to the requests
+// each room has drawn for the dates and stay lengths that were open to request (see demandFor),
+// with your lead times, stay lengths and weekday mix
 // (each blended with a starting assumption from Settings -> Booking evaluator). Every run
 // uses the same random arrivals for accept and reject, so the difference between them is
 // stable even when each total is uncertain.
@@ -27,9 +28,19 @@ import { roomBlocks } from '../icsparse.js';
 import { activeListingId } from '../roomowner.js';
 import { collectStays } from './lettingoccupancy.js';
 import { evaluatorRooms, roomSettings } from './bookingsettings.js';
-import { MARKET_SEASON } from './marketdata.js';
+import { MARKET_SEASON, MARKET_CREDIT } from './marketdata.js';
 
-const MODEL_VERSION = 3;
+const MODEL_VERSION = 4;
+// Demand (see demandFor): the minimum stay assumed in force before shorter requests start appearing, how far back
+// requests are counted, and how many pseudo-requests hold the level to the occupancy-based start and each month to London.
+const PAST_MIN_NIGHTS = 5;
+const DEMAND_WEEKS = 104;
+const LEVEL_PRIOR_K = 3;
+const MONTH_SHRINK_K = 5;
+const LAMBDA_MAX = 4;
+// The review's demand factor multiplies the request rate. One fitted under an earlier model version meant something else
+// (it divided the empty nights of an occupancy target), so it is not carried over.
+const demandFactorOf = (cal) => (cal && Number(cal.modelVersion) === MODEL_VERSION ? Number(cal.demand) || 1 : 1);
 const DAY_MS = 86400000;
 // Spread of the lead-time curve (log scale). Lead times are shaped like a wide lognormal on (days ahead + 0.5): the
 // bookings per day keep rising towards arrival, and a narrow curve badly understates the last week (your own stays and
@@ -166,7 +177,7 @@ const earnedStayIds = new Set();
 const cal = s.calibration || {};
 const ov = overrides.scale || {};
 const scale = { ...ov };
-[['demand', 'demand'], ['lead', 'lead'], ['cancel', 'cancel']].forEach(([k]) => { const c = Number(cal[k]) || 1; if (c !== 1 || ov[k] != null) scale[k] = c * (ov[k] != null ? ov[k] : 1); });
+[['demand', 'demand'], ['lead', 'lead'], ['cancel', 'cancel']].forEach(([k]) => { const c = k === 'demand' ? demandFactorOf(cal) : Number(cal[k]) || 1; if (c !== 1 || ov[k] != null) scale[k] = c * (ov[k] != null ? ov[k] : 1); });
 // Nights Airbnb's feed marks "Not available" (a host's manual blocks): not free nights, so not voids.
 const blocks = (data.airbnbBlocks || []).map((b) => ({ listingId: b.listingId, from: b.from, to: b.to }));
 const feedListingIds = (data.airbnbListings || []).filter((l) => l.icsUrl).map((l) => l.id);
@@ -593,25 +604,95 @@ if (blocked) for (let d = block.ci; d < block.co; d++) occ[block.room][d - base]
 return booked;
 }
 
-// The rate of requests per check-in date that makes an empty calendar for this room fill to
-// the occupancy it achieved in that month of the year. Bisection over simulated months.
-// The demand factor divides the share of nights left empty (2 halves the vacancy: 50% occupied becomes 75%, 80% becomes 90%),
-// rather than multiplying the occupancy: a calendar cannot fill past 100%, and the requests that need to arrive to gain each
-// further night grow faster as it fills, so the rate solved for below rises less than the factor does when occupancy is already high.
-function lambdaFor(ctx, params, ri, month) {
-const key = `${ri}|${month}`;
-if (params.lambda.has(key)) return params.lambda.get(key);
-const o = params.occ[ri];
-const occNow = Math.min(1, Math.max(0, o.byMonth[month] ?? o.overall ?? OCC_PRIOR));
-const target = Math.min(0.97, Math.max(0.02, 1 - (1 - occNow) / (ctx.scale.demand || 1)));
-// A synthetic month: 30 nights of this month (any year), 28 before it, all arrivals seen.
-const y = 2030;
-const start = Date.UTC(y, month, 1) / DAY_MS;
+// ---- Demand: requests per check-in date -------------------------------------------------------
+//
+// rate(room, month) = London's seasonal shape (Inside Airbnb, marketdata.js) x the room's own level x a monthly
+// adjustment from the room's own requests x the review's demand factor.
+// The level and the adjustment come from requests, not from occupancy: each past week, every check-in date could
+// only draw the requests that were still possible then (the nights had to be open, and the stay had to fit the
+// open run and meet the minimum stay in force), so the requests that arrived are divided by that exposure. A month
+// that was full, or held by one long booking, offered almost no exposure: it says nothing either way, and London's
+// shape stands in for it. A tight gap offers little exposure, so a request that lands in one counts for more.
+
+const weekStartN = (n) => n - ((n + 3) % 7); // Monday
+
+// Every ask for a room's listings: requests and enquiries by the day they landed, plus bookings that never had a
+// request (instant bookings), by the day they were made.
+function asksFor(ctx, ids) {
+const reqs = ctx.requests.filter((q) => ids.has(q.listingId) && q.receivedAt && q.checkin);
+const codes = new Set(reqs.map((q) => q.confirmationCode).filter(Boolean));
+const keys = new Set(reqs.map((q) => `${q.listingId}|${q.checkin}`));
+const asks = reqs.map((q) => ({ t: dayNum(q.receivedAt), listingId: q.listingId, kind: q.kind === 'enquiry' ? 'enquiry' : 'request', checkin: dayNum(q.checkin), nights: q.checkout ? dayNum(q.checkout) - dayNum(q.checkin) : null, payout: q.kind === 'enquiry' ? null : Number(q.payout) || null }));
+(ctx.earnings || []).forEach((e) => {
+if (!ids.has(e.listingId) || !e.bookingDate || !e.start) return;
+if (codes.has(e.code) || keys.has(`${e.listingId}|${e.start}`)) return;
+asks.push({ t: dayNum(e.bookingDate), listingId: e.listingId, kind: 'request', checkin: dayNum(e.start), nights: e.nights, payout: e.amount, instant: true });
+});
+return asks.filter((a) => a.t <= dayNum(ctx.today)).sort((a, b) => a.t - b.t);
+}
+
+// What a room had on offer on a past day `t`.
+//   open(c, t)  was night c still free? Bookings count from the day they were made (booking date, else the request
+//               that became them, else two weeks before arrival); "not offered" spells and calendar blocks count always.
+//   minAt(t)    the minimum stay then: the shortest stay anyone had requested by then (a request that exactly filled
+//               a gap aside, since those are allowed under the minimum), and no more than PAST_MIN_NIGHTS.
+//   fit(t, from, span)  returns c -> the share of stay lengths that could be requested for check-in c as things
+//               stood on day t: they fit the open run from c and meet the minimum (or exactly fill a gap shorter than it).
+function availabilityOf(ctx, params, ri) {
+const room = ctx.rooms[ri];
+const ids = new Set(room.listingIds);
+const reqAt = new Map(ctx.requests.filter((q) => q.reservationId && q.receivedAt).map((q) => [q.reservationId, dayNum(q.receivedAt)]));
+const held = [];
+ctx.stays.forEach((x) => {
+if (!ids.has(x.listingId) || !x.checkin || !x.checkout) return;
+const ci = dayNum(x.checkin); const co = dayNum(x.checkout);
+const since = x.bookedOn ? dayNum(x.bookedOn) : reqAt.has(x.id) ? reqAt.get(x.id) : ci - 14;
+if (x.status === 'cancelled') { if (x.cancelledOn) held.push({ ci, co, since, until: dayNum(x.cancelledOn) }); return; }
+if (x.status === 'stay' || x.unconfirmed) held.push({ ci, co, since, until: Infinity });
+});
+(Array.isArray(ctx.s.unavailable) ? ctx.s.unavailable : []).forEach((u) => { if (u.roomKey === room.key && u.from && u.to) held.push({ ci: dayNum(u.from), co: dayNum(u.to) + 1, since: -Infinity, until: Infinity }); });
+// Calendar blocks count only on the listing in use for the room (a sibling listing can be blocked all winter without the room being).
+const inUse = activeListingId(room.listingIds, ctx.stays, ctx.today);
+roomBlocks(ctx.blocks || [], (ctx.feedListingIds || []).includes(inUse) ? [inUse] : []).forEach((b) => held.push({ ci: dayNum(b.from), co: dayNum(b.to), since: -Infinity, until: Infinity }));
+const open = (c, t) => { for (const o of held) if (c >= o.ci && c < o.co && o.since <= t && t < o.until) return 0; return 1; };
+const shortest = asksFor(ctx, ids)
+.filter((a) => a.kind === 'request' && a.nights >= 1 && a.nights < PAST_MIN_NIGHTS && !(!open(a.checkin - 1, a.t) && !open(a.checkin + a.nights, a.t)))
+.map((a) => [a.t, a.nights]);
+const minAt = (t) => { let m = PAST_MIN_NIGHTS; for (const [at, n] of shortest) { if (at > t + 7) break; if (n < m) m = n; } return m; };
+const cdf = params.losCdf;
+const fit = (t, from = t, span = 420) => {
+const base = from - 1;
+const len = span + LOS_MAX + 2;
+const occ = new Uint8Array(len);
+for (const o of held) {
+if (!(o.since <= t && t < o.until)) continue;
+for (let i = Math.max(0, o.ci - base), e = Math.min(len, o.co - base); i < e; i++) occ[i] = 1;
+}
+const run = new Uint8Array(len + 1);
+for (let i = len - 1; i >= 0; i--) run[i] = occ[i] ? 0 : Math.min(LOS_MAX, run[i + 1] + 1);
+const min = minAt(t);
+return (c) => {
+const i = c - base;
+if (i < 1 || i >= len) return 0;
+const r = run[i];
+if (!r) return 0;
+if (r >= min) return cdf[r] - (cdf[min - 1] || 0);
+return occ[i - 1] && r < LOS_MAX ? cdf[r] - (cdf[r - 1] || 0) : 0;
+};
+};
+return { open, minAt, fit };
+}
+
+// The rate of requests per check-in date (flat through the year) at which an empty calendar for this room fills to
+// `target`. Bisection over simulated months. Used only as the starting level before a room has requests of its own.
+function rateForOccupancy(ctx, params, ri, target) {
+// A synthetic month: 30 nights, 28 before it, all arrivals seen.
+const start = Date.UTC(2030, 5, 1) / DAY_MS;
 const base = start - BEFORE;
 const len = BEFORE + 30 + AFTER;
 const minNights = { [ri]: Number(ctx.rooms[ri].minNights) || 1 };
 const occupancyAt = (lam) => {
-const rng = mulberry32(hashStr(`cal|${key}|${lam.toFixed(4)}`));
+const rng = mulberry32(hashStr(`cal|${ri}|${lam.toFixed(4)}`));
 let filled = 0;
 for (let r = 0; r < (ctx.calRuns || CAL_RUNS); r++) {
 const occ = []; occ[ri] = new Uint8Array(len);
@@ -621,13 +702,63 @@ for (let i = BEFORE; i < BEFORE + 30; i++) filled += occ[ri][i];
 }
 return filled / ((ctx.calRuns || CAL_RUNS) * 30);
 };
-let lo = 0; let hi = 4;
-if (occupancyAt(hi) < target) { params.lambda.set(key, hi); return hi; }
+let lo = 0; let hi = LAMBDA_MAX;
+if (occupancyAt(hi) < target) return hi;
 for (let it = 0; it < (ctx.calIters || 12); it++) {
 const mid = (lo + hi) / 2;
 if (occupancyAt(mid) < target) lo = mid; else hi = mid;
 }
-const lam = (lo + hi) / 2;
+return (lo + hi) / 2;
+}
+
+// A room's demand: its level L (requests per check-in date in an average month, all stay lengths, before
+// availability), and how far each month of the year sits from London's shape (adj, 1 = as London).
+//   exposure X[m] = sum over past weeks and check-in dates in month m of
+//                   London's index x weekday weight x the share of that date's requests due that week x fit
+//   L      = (requests + LEVEL_PRIOR_K) / (total exposure + LEVEL_PRIOR_K / L0), L0 being the rate that fills an
+//            empty calendar to the room's achieved occupancy (all a room without requests has to go on);
+//   adj[m] = (requests for month m + MONTH_SHRINK_K) / (L x X[m] + MONTH_SHRINK_K): a month with little exposure
+//            or few requests stays near London's shape.
+// Kept on the context (not the calibration), so what-ifs that only rescale demand reuse it.
+function demandFor(ctx, params, ri) {
+const cache = ctx.demandCache || (ctx.demandCache = new Map());
+if (cache.has(ri)) return cache.get(ri);
+const o = params.occ[ri];
+const L0 = Math.max(0.01, rateForOccupancy(ctx, params, ri, Math.min(0.97, Math.max(0.02, o.overall ?? OCC_PRIOR))));
+const out = { L: L0, L0, adj: new Array(12).fill(1), N: new Array(12).fill(0), X: new Array(12).fill(0), n: 0, weeks: 0, from: null };
+const end = weekStartN(dayNum(ctx.today)); // complete weeks only
+const asks = asksFor(ctx, new Set(ctx.rooms[ri].listingIds)).filter((a) => a.kind === 'request' && a.checkin >= a.t);
+if (asks.length && weekStartN(asks[0].t) < end) {
+const first = Math.max(weekStartN(asks[0].t), end - 7 * DEMAND_WEEKS);
+const av = availabilityOf(ctx, params, ri);
+for (let w = first; w < end; w += 7) {
+const fit = av.fit(w + 3, w);
+for (let c = w; c < w + 420; c++) {
+const share = leadCdf(params, c, c - w) - leadCdf(params, c, c - w - 7);
+if (!(share > 1e-9)) continue;
+const F = fit(c);
+if (F > 0) out.X[monthOf(c)] += MARKET_SEASON[monthOf(c)] * params.dowW[dowOf(c)] * share * F;
+}
+out.weeks++;
+}
+asks.forEach((a) => { if (a.t >= first && a.t < end) { out.N[monthOf(a.checkin)]++; out.n++; } });
+const X = out.X.reduce((a, b) => a + b, 0);
+if (X > 0) {
+out.L = (out.n + LEVEL_PRIOR_K) / (X + LEVEL_PRIOR_K / L0);
+out.adj = out.N.map((n, m) => (n + MONTH_SHRINK_K) / (out.L * out.X[m] + MONTH_SHRINK_K));
+}
+out.from = dayStr(first);
+}
+cache.set(ri, out);
+return out;
+}
+
+// Requests per check-in date in this month of the year, all stay lengths, before availability and price.
+function lambdaFor(ctx, params, ri, month) {
+const key = `${ri}|${month}`;
+if (params.lambda.has(key)) return params.lambda.get(key);
+const d = demandFor(ctx, params, ri);
+const lam = Math.min(LAMBDA_MAX, d.L * MARKET_SEASON[month] * d.adj[month] * (ctx.scale.demand || 1));
 params.lambda.set(key, lam);
 return lam;
 }
@@ -906,14 +1037,14 @@ const lead = leadFor(params, ci);
 const price = params.prices[ri];
 const o = params.occ[ri];
 const fmtMoney = (v) => `£${Math.round(v)}`;
-const occVal = o.byMonth[m] ?? o.overall;
-const sib = o.sibling && o.sibling[m];
-const sibNote = sib ? `; reshaped by the other room's seasonal pattern (this month is x${sib.idx.toFixed(2)} of its average there, trusted ${Math.round(sib.a * 100)}%)` : '';
+const d = demandFor(ctx, params, ri);
+const mon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m];
+const demandSource = `London's season for ${mon} ×${MARKET_SEASON[m].toFixed(2)} (${MARKET_CREDIT}); this room's level ${d.L.toFixed(2)} a date, ${d.n ? `from ${d.n} request${d.n === 1 ? '' : 's'} since ${d.from} set against the dates and stay lengths that were open to request each week` : `from the ${Math.round((o.overall ?? OCC_PRIOR) * 100)}% occupancy it has achieved (no requests of its own yet)`}${d.n ? `; ${mon} adjusted ×${d.adj[m].toFixed(2)} on ${d.N[m]} request${d.N[m] === 1 ? '' : 's'} for ${mon} dates` : ''}${(ctx.scale.demand || 1) !== 1 ? `; review factor ×${(ctx.scale.demand || 1).toFixed(2)}` : ''}`;
 return [
 { id: 'price', label: 'Raw nightly rate (before discounts and the cleaning fee)', value: `${fmtMoney(basePrice(ctx, params, ri, ci))}${price.uplift > 1.005 ? ` (Fri/Sat ×${price.uplift.toFixed(2)})` : ''}`, source: price.source },
 { id: 'discounts', label: 'Discounts the rate is worked back through', value: discountText(ctx.s), source: price.n ? `undone on ${price.n} stays: on average ${(price.avgShortNotice * 100).toFixed(1)}% short notice, ${(price.avgLength * 100).toFixed(1)}% length` : 'your setting' },
 { id: 'cleanfee', label: 'Cleaning fee guests pay (income per booking)', value: fmtMoney(price.clean), source: ctx.rooms[ri].cleaningIncome != null && ctx.rooms[ri].cleaningIncome !== '' ? 'your setting' : price.n ? 'median of your earnings export' : 'none known' },
-{ id: 'occupancy', label: `Occupancy expected for this room in ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m]}`, value: occVal == null ? `${Math.round(OCC_PRIOR * 100)}%` : `${Math.round(occVal * 100)}%`, source: `${o.byMonth[m] != null && o.byMonthN[m] === 0 ? `no stays of its own that month: its ${o.months}-month average` : o.byMonth[m] != null ? `your stays: ${o.byMonthN[m]} earlier ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m]}${o.byMonthN[m] === 1 ? '' : 's'} (resting on ${o.byMonthBookings[m]} booking${o.byMonthBookings[m] === 1 ? '' : 's'}, so counting as ${o.byMonthW[m].toFixed(2)} of a full month), blended with all ${o.months} months on offer${o.skipped ? `; ${o.skipped} left out as not on offer` : ''}` : o.overall != null ? `your stays, ${o.months} months on offer${o.skipped ? `; ${o.skipped} left out as not on offer` : ''}` : 'assumption'}${sibNote}`, editable: 'demand' },
+{ id: 'demand', label: `Requests expected per check-in date in ${mon} (any stay length, before availability)`, value: lambdaFor(ctx, params, ri, m).toFixed(2), source: demandSource, editable: 'demand' },
 { id: 'lead', label: 'Median days ahead bookings arrive', value: `${Math.round(lead.median)} days`, source: `${lead.n ? `your guide blended with ${lead.n} of your bookings` : 'your guide (Settings)'}${Math.abs(params.leadShift || 0) > 0.05 && ci != null && !isChristmas(ci) ? `, scaled x${Math.exp(params.leadShift).toFixed(2)} to match how soon your bookings really arrive` : ''}`, editable: 'lead' },
 { id: 'leadspread', label: 'Share of bookings made in the last 3 / 7 days', value: `${Math.round(normCdf((Math.log(3.5) - lead.mu) / params.leadSigma) * 100)}% / ${Math.round(normCdf((Math.log(7.5) - lead.mu) / params.leadSigma) * 100)}%`, source: `a lead-time spread of ${params.leadSigma.toFixed(2)}, fitted to your bookings and requests (past check-ins) and blended with the Airbnb-wide shape` },
 { id: 'los', label: 'Average stay length', value: `${params.losMean.toFixed(1)} nights`, source: params.losN ? `your requests and stays (${Math.round(params.losN)}) blended with an assumption` : 'assumption' },
@@ -969,9 +1100,9 @@ return out;
 // representative scenario to draw as ghost bookings. It is gross income: cleaning, changeover
 // hassle and what empty nights are worth to you belong to the accept/reject comparison.
 
-function defaultProjectionEnd(today) {
+function defaultProjectionEnd(today, months = 3) {
 const [y, m] = today.split('-').map(Number);
-return new Date(Date.UTC(y, m + 2, 1)).toISOString().slice(0, 10); // first of the month three on: the window runs to the end of the third month
+return new Date(Date.UTC(y, m - 1 + months, 1)).toISOString().slice(0, 10); // first of the month `months` on: by default the window runs to the end of the third month
 }
 
 // The listing in a room that currently takes its bookings: the one with most stays starting within
@@ -1329,10 +1460,29 @@ check('Cleaning fee income is added per booking', p12.total.expected > p7.total.
 
 // 9. A window that crosses the year end splits into months correctly.
 const q3 = projectVoids(testContext({ occupancy: 0.5, today: '2026-12-10' }), { runs: 20 });
-check('Default window runs to the end of the month after this one', q3.to === '2027-02-01' && Object.keys(q3.months).join() === '2026-12,2027-01', `${q3.to} ${Object.keys(q3.months).join()}`);
+check('Default window runs to the end of the third month', q3.to === '2027-03-01' && Object.keys(q3.months).join() === '2026-12,2027-01,2027-02' && defaultProjectionEnd('2026-12-10', 6) === '2027-06-01', `${q3.to} ${Object.keys(q3.months).join()}`);
+
+// 10. Demand is recovered from requests: a year of requests drawn at a known level on London's shape, of which only
+// stays of PAST_MIN_NIGHTS or more could be made, gives that level back; and it still does when a four-month booking
+// hides every request that would have touched it (the level must not fall because the calendar was full).
+const TRUE_LEVEL = 0.5;
+const demandCase = (blockFrom, blockTo) => {
+const c13 = testContext({ occupancy: 0.6 });
+const tN = dayNum(c13.today);
+const arr = drawArrivals(c13, c13.params, { from: tN - 500, to: tN + 400, todayN: null, lam: (ri, c) => TRUE_LEVEL * MARKET_SEASON[monthOf(c)], rooms: [0] }, mulberry32(hashStr('demand-test')));
+const seen = arr.filter((a) => a.at >= tN - 364 && a.at < tN && a.los >= PAST_MIN_NIGHTS && !(blockFrom != null && a.c < blockTo && a.c + a.los > blockFrom));
+c13.requests = seen.map((a, i) => ({ id: `q${i}`, listingId: 'LA', kind: 'request', receivedAt: dayStr(a.at), checkin: dayStr(a.c), checkout: dayStr(a.c + a.los) }));
+if (blockFrom != null) c13.stays = [{ id: 'long', listingId: 'LA', checkin: dayStr(blockFrom), checkout: dayStr(blockTo), status: 'stay', bookedOn: dayStr(tN - 600), income: 1, guest: 'L' }];
+return demandFor(c13, c13.params, 0);
+};
+const dOpen = demandCase(null, null);
+check('Demand level recovered from requests on an open calendar', Math.abs(dOpen.L / TRUE_LEVEL - 1) < 0.2, `${dOpen.L.toFixed(3)} from ${dOpen.n} requests (true ${TRUE_LEVEL})`);
+const t13 = dayNum('2026-11-01');
+const dHeld = demandCase(t13 - 240, t13 - 120);
+check('Demand level unchanged by a long booking that hid requests', Math.abs(dHeld.L / TRUE_LEVEL - 1) < 0.2 && dHeld.n < dOpen.n * 0.85, `${dHeld.L.toFixed(3)} from ${dHeld.n} requests (open calendar: ${dOpen.n})`);
 return results;
 }
 
 // The calibrated model's own pieces, read by the drift charts (js/features/modeldrift.js) to compare inputs with reality.
-const driftKit = { lambdaFor, leadCdf, leadFor, basePrice, roomIndexOf, dayNum, dayStr, dowOf, monthOf };
-export { driftKit, buildContext, calibrate, evaluate, sensitivity, makeProjection, projectVoids, optimiseVoid, defaultProjectionEnd, rawNightlyRate, stepPct, discountsOf, selfTest, MODEL_VERSION };
+const driftKit = { lambdaFor, demandFor, asksFor, availabilityOf, leadCdf, leadFor, basePrice, roomIndexOf, dayNum, dayStr, dowOf, monthOf };
+export { driftKit, buildContext, calibrate, evaluate, sensitivity, makeProjection, projectVoids, optimiseVoid, defaultProjectionEnd, rawNightlyRate, stepPct, discountsOf, selfTest, MODEL_VERSION, demandFactorOf };

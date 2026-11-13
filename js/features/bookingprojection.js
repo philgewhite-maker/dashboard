@@ -155,10 +155,14 @@ if (!inflight) inflight = runProjectionOnce(opts).finally(() => { inflight = nul
 return inflight;
 }
 
-async function runProjectionOnce({ onProgress = () => {} } = {}) {
+// `months`: 3 (to the end of the third month) or 6 (the three after that too). Left out, a re-run covers what the
+// latest projection covers, so a refresh after a booking doesn't drop the far months you asked for.
+async function runProjectionOnce({ onProgress = () => {}, months = null } = {}) {
 const model = await import('./bookingmodel.js');
 const ctx = model.buildContext();
-const proj = model.makeProjection(ctx);
+const prev = latestProjection();
+const span = months || (prev && prev.to > model.defaultProjectionEnd(ctx.today, 3) ? 6 : 3);
+const proj = model.makeProjection(ctx, { to: model.defaultProjectionEnd(ctx.today, span) });
 if (proj.error) return { error: proj.error };
 while (!proj.step(25)) {
 onProgress(proj.progress);

@@ -394,6 +394,9 @@ function monthOptions() {
 const cur = currentYm();
 const opts = [{ ym: addMonths(cur, 1), label: `Next month (${longMonth(addMonths(cur, 1))})` }, { ym: cur, label: `This month (${longMonth(cur)})` }, { ym: addMonths(cur, -1), label: `Last month (${longMonth(addMonths(cur, -1))})` }];
 opts.unshift({ ym: addMonths(cur, 2), label: longMonth(addMonths(cur, 2)) });
+// Further months, when the saved projection reaches them.
+const p = latestProjection();
+for (let i = 3; i <= 5; i++) if (p && p.months && p.months[addMonths(cur, i)]) opts.unshift({ ym: addMonths(cur, i), label: longMonth(addMonths(cur, i)) });
 for (let i = 2; i <= 13; i++) opts.push({ ym: addMonths(cur, -i), label: longMonth(addMonths(cur, -i)) });
 return opts;
 }
@@ -404,6 +407,7 @@ function forecastHtml() {
 return `<div id="letting-forecast-section">
 <div class="sync-row" style="gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px;" id="occ-projection-row">
 <button class="sync-btn sm inline" type="button" id="occ-project-btn" title="Estimates what each gap between bookings, today to the end of the third month, is likely to earn, and draws it on the charts. Saved, so it can be checked against what happens.">Project the next three months</button>
+<button class="sync-btn sm inline" type="button" id="occ-project-more-btn" title="The same projection, run on to the end of the sixth month. Takes about twice as long. Later re-runs keep covering six months until you press the three-month button again.">&hellip;and the three after</button>
 <label class="settings-note" style="margin:0;display:flex;gap:4px;align-items:center;" title="Draw the saved projection on the charts"><input type="checkbox" id="occ-project-show"> Show projection</label>
 <span class="settings-note" id="occ-project-status" style="margin:0;"></span>
 </div>
@@ -1319,15 +1323,22 @@ const el = document.getElementById('occ-project-status');
 if (el) el.textContent = statusText();
 }
 
-async function runProjectionFromUi() {
-const btn = document.getElementById('occ-project-btn');
+function fillMonthSelect() {
+const sel = document.getElementById('occ-month');
+if (sel) sel.innerHTML = monthOptions().map((o) => `<option value="${o.ym}"${o.ym === state.ym ? ' selected' : ''}>${escapeHtml(o.label)}</option>`).join('');
+}
+
+async function runProjectionFromUi(months = 3) {
+const btns = ['occ-project-btn', 'occ-project-more-btn'].map((id) => document.getElementById(id)).filter(Boolean);
+const btn = btns[0];
 const el = document.getElementById('occ-project-status');
 if (!btn || btn.disabled) return;
-btn.disabled = true;
+btns.forEach((b) => { b.disabled = true; });
 if (el) el.textContent = 'Projecting…';
 try {
-const r = await runProjection({ onProgress: (p) => { if (el) el.textContent = `Projecting… ${Math.round(p * 100)}%`; } });
+const r = await runProjection({ months, onProgress: (p) => { if (el) el.textContent = `Projecting… ${Math.round(p * 100)}%`; } });
 if (r.error) { if (el) el.textContent = r.error; return; }
+fillMonthSelect();
 data.prefs.showProjection = true;
 const box = document.getElementById('occ-project-show'); if (box) box.checked = true;
 refreshProjectionStatus();
@@ -1336,7 +1347,7 @@ import('./letting.js').then((m) => m.renderLetting()).catch(() => {});
 } catch (err) {
 console.error('Projection failed:', err);
 if (el) el.textContent = `Failed: ${err.message || err}`;
-} finally { btn.disabled = false; }
+} finally { btns.forEach((b) => { b.disabled = false; }); }
 }
 
 function initLettingOccupancy() {
@@ -1347,7 +1358,7 @@ panel.insertAdjacentHTML('beforeend', sectionHtml());
 forecast.insertAdjacentHTML('beforeend', forecastHtml());
 state.ym = currentYm();
 const monthSel = document.getElementById('occ-month');
-monthSel.innerHTML = monthOptions().map((o) => `<option value="${o.ym}"${o.ym === state.ym ? ' selected' : ''}>${escapeHtml(o.label)}</option>`).join('');
+fillMonthSelect();
 monthSel.addEventListener('change', () => { state.ym = monthSel.value; renderLettingOccupancy(); });
 try { state.room = localStorage.getItem('occ-room') || ''; } catch (err) { state.room = ''; }
 document.getElementById('occ-room').addEventListener('change', (e) => {
@@ -1360,7 +1371,8 @@ document.getElementById('pace-compare').addEventListener('change', (e) => { stat
 document.getElementById('pace-channel').addEventListener('change', (e) => { state.channel = e.target.value; renderLettingOccupancy(); });
 document.getElementById('occ-project-show').checked = data.prefs.showProjection !== false;
 document.getElementById('occ-project-show').addEventListener('change', (e) => { data.prefs.showProjection = e.target.checked; queueSave(); renderLettingOccupancy(); import('./letting.js').then((m) => m.renderLetting()).catch(() => {}); });
-document.getElementById('occ-project-btn').addEventListener('click', runProjectionFromUi);
+document.getElementById('occ-project-btn').addEventListener('click', () => runProjectionFromUi(3));
+document.getElementById('occ-project-more-btn').addEventListener('click', () => runProjectionFromUi(6));
 document.getElementById('occ-dead-voids').addEventListener('change', onVoidPlanChange);
 document.getElementById('occ-void-plans').addEventListener('change', onVoidPlanChange);
 document.getElementById('occ-plans-pending').addEventListener('click', onPlansRerun);
