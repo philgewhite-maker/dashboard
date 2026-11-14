@@ -198,6 +198,8 @@ const rows = [];
 (data.bookingRequests || []).forEach((q) => {
 const e = q.evaluation;
 if (!e || !e.block || !e.acceptParts) return;
+// A verdict saved by an earlier version of the model is not scored against this one (the same rule as the projections).
+if ((e.modelVersion || 1) !== MODEL_VERSION) return;
 if ((e.block.to > today) !== early) return; // the final score waits for every night to pass; the early read takes the ones that have not
 const decided = q.decision;
 if (!decided || decided === '') return;
@@ -339,7 +341,7 @@ const reqs = requestReview();
 const projCount = (data.bookingProjections || []).filter((p) => (p.modelVersion || 1) === MODEL_VERSION).length;
 const older = (data.bookingProjections || []).length - projCount;
 const lines = [];
-lines.push(`<div class="settings-note" style="margin:4px 0 8px;">Compares what the model projected, and what it estimated when you evaluated a request, with what happened. ${projCount} saved projection${projCount === 1 ? '' : 's'}; ${pr.rows.length} night${pr.rows.length === 1 ? '' : 's'} checked so far.${older ? ` ${older} earlier projection${older === 1 ? '' : 's'} from the previous price basis ${older === 1 ? 'is' : 'are'} not scored.` : ''} Calibration in force: empty nights divided by ×${cal.demand.toFixed(2)}${cal.appliedOn ? ` (applied ${escapeHtml(cal.appliedOn)})` : ''}.</div>`);
+lines.push(`<div class="settings-note" style="margin:4px 0 8px;">Compares what the model projected, and what it estimated when you evaluated a request, with what happened. ${projCount} saved projection${projCount === 1 ? '' : 's'}; ${pr.rows.length} night${pr.rows.length === 1 ? '' : 's'} checked so far.${older ? ` ${older} earlier projection${older === 1 ? '' : 's'} from an earlier version of the model ${older === 1 ? 'is' : 'are'} not scored.` : ''} Calibration in force: empty nights divided by ×${cal.demand.toFixed(2)}${cal.appliedOn ? ` (applied ${escapeHtml(cal.appliedOn)})` : ''}.</div>`);
 if (!pr.rows.length) {
 const first = (data.bookingProjections || []).slice().sort((a, b) => String(a.madeAt).localeCompare(String(b.madeAt)))[0];
 lines.push(`<div class="settings-note" style="margin:6px 0;">Nothing to compare yet. ${first ? `Projections are checked once their nights have passed: the first one was made on ${escapeHtml(String(first.madeAt).slice(0, 10))} and covers up to ${escapeHtml(dateStrAdd(first.to, -1))}.` : 'Run "Project the next three months" in the occupancy section, and come back after the month has gone.'}</div>`);
@@ -374,7 +376,7 @@ lines.push(earlyBlockHtml());
 // Requests.
 lines.push(`<div style="margin:12px 0 4px;"><b style="font-size:12px;">Verdicts on requests you evaluated</b></div>`);
 if (!reqs.length) {
-const waiting = (data.bookingRequests || []).filter((q) => q.evaluation && q.evaluation.block && q.evaluation.block.to > todayStr()).length;
+const waiting = (data.bookingRequests || []).filter((q) => q.evaluation && q.evaluation.block && (q.evaluation.modelVersion || 1) === MODEL_VERSION && q.evaluation.block.to > todayStr()).length;
 lines.push(`<div class="settings-note" style="margin:2px 0;">None to check yet${waiting ? `: ${waiting} saved verdict${waiting === 1 ? '' : 's'} still have nights to come` : ': save a verdict from the workbench ("Save to the request log", or "I accepted it" / "I declined it"), and it is checked once its dates have passed'}.</div>`);
 } else {
 lines.push(`<div style="overflow-x:auto;"><table class="limits-table be-table"><thead><tr><th>Request</th><th>You</th><th class="num">Said</th><th class="num">New bookings expected</th><th class="num">New bookings actual</th><th>The request itself</th></tr></thead><tbody>${reqs.map((r) => {
