@@ -749,6 +749,9 @@ const showStay = e.kind === 'cancellation'; // the dates that place a cancelled 
 // An income row charged from a stay on file: the stay's own dates (read-only here; they come from the stay, and nights below stay editable).
 const stayRec = e.kind === 'accrual' ? (data.airbnbReservations || []).find((r) => r.id === e.reservationId) : null;
 const showStayDates = !!(stayRec && stayRec.checkin && stayRec.checkout);
+// The day the booking was made: on the stay itself when this income was charged from one, else on this entry.
+const showBooked = e.kind === 'accrual' || e.kind === 'earned' || e.kind === 'cancellation';
+const bookedOn = stayRec ? (stayRec.confirmedOn || stayRec.paidOn || '') : (e.bookedOn || '');
 const showTotal = e.kind === 'earned';
 const showAmount = e.kind === 'payment' || e.kind === 'adjustment';
 const showNote = manual && (e.kind === 'earned' || e.kind === 'cancellation' || e.kind === 'payment' || e.kind === 'adjustment');
@@ -756,7 +759,7 @@ const showRating = (e.kind === 'accrual' || e.kind === 'earned') && e.platform !
 const ratingTarget = stayRec ? `res:${stayRec.id}` : `ledger:${e.id}`;
 const ratingValue = stayRec ? stayRec.reviewRating : e.reviewRating;
 const ratingSeen = stayRec ? stayRec.reviewSeen : e.reviewSeen;
-const hasDetail = showStayDates || showStartDate || showNights || showListing || showPlatform || showStay || showTotal || showAmount || showNote;
+const hasDetail = showBooked || showStayDates || showStartDate || showNights || showListing || showPlatform || showStay || showTotal || showAmount || showNote;
 const open = expandedLedgerRows.has(e.id);
 const isIncomeKind = e.kind === 'accrual' || e.kind === 'earned' || e.kind === 'cancellation';
 // The booking's gross total, not "X% of" it -- a share that can be
@@ -780,7 +783,7 @@ const logoCell = isIncomeKind || e.kind === 'refund'
 ? `<span class="letting-xfer" title="${escapeHtml(`Transfer between you and ${ownerNameFor(key)}`)}"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 5.5h10M9.5 2.5l3 3-3 3"/><path d="M13.5 10.5h-10M6.5 7.5l-3 3 3 3"/></svg></span>`
 : '';
 const kindLabel = e.kind === 'accrual' ? 'income' : (e.kind || 'entry');
-const bits = [parts.guest && parts.description ? `<span class="letting-rec-desc">${escapeHtml(parts.description)}</span>` : '', roomLabel ? `<span>${escapeHtml(roomLabel)}</span>` : '', e.nights ? `<span>${escapeHtml(`${e.nights} night${e.nights === 1 ? '' : 's'}`)}</span>` : '', grossHtml, nightRateBit].filter(Boolean);
+const bits = [parts.guest && parts.description ? `<span class="letting-rec-desc">${escapeHtml(parts.description)}</span>` : '', roomLabel ? `<span>${escapeHtml(roomLabel)}</span>` : '', e.nights ? `<span>${escapeHtml(`${e.nights} night${e.nights === 1 ? '' : 's'}`)}</span>` : '', showBooked ? (bookedOn ? `<span title="The day this booking was made">booked ${escapeHtml(bookedOn)}</span>` : `<span class="letting-nobook" title="No booking date: open the row (the arrow on the right) and set Booked. Lead times and the Nights booked chart need it.">no booking date</span>`) : '', grossHtml, nightRateBit].filter(Boolean);
 return `<div class="letting-rec" data-letting-rec="${escapeHtml(e.id)}">
 <div class="letting-rec-top">
 <span class="letting-rec-logo">${logoCell}</span>
@@ -796,6 +799,7 @@ ${hasDetail ? `<div class="letting-detail-row"${open ? '' : ' hidden'}><div clas
 ${showStartDate ? `<label>Check-in<input type="date" class="settings-input" data-letting-start-date="${escapeHtml(e.id)}" value="${escapeHtml(e.startDate || '')}" title="The real check-in date for this stay -- what occupancy and the average night rate are actually based on, kept separate from the payout date. Leave blank and nights get guessed backward from the payout date instead, which is wrong whenever the payout didn't land on the real checkout."></label>` : ''}
 ${showStayDates ? `<label>Check-in<span class="settings-note" style="margin:0;white-space:nowrap;" title="From the stay this income was charged for. Change it on the stay itself.">${escapeHtml(stayRec.checkin)}</span></label>
 <label>Check-out<span class="settings-note" style="margin:0;white-space:nowrap;" title="The day the guest left (the turnover day).">${escapeHtml(stayRec.checkout)}</span></label>` : ''}
+${showBooked ? `<label>Booked<input type="date" class="settings-input" data-letting-booked="${escapeHtml(e.id)}" value="${escapeHtml(bookedOn)}" max="${new Date().toISOString().slice(0, 10)}" title="The day this booking was made. Lead times in the booking model and the Nights booked chart are worked out from it."></label>` : ''}
 ${showNights ? `<label>Nights<input type="number" min="0" step="1" class="settings-input" data-letting-nights="${escapeHtml(e.id)}" value="${e.nights || ''}" placeholder="Nights" title="Nights this stay covered -- used for the average night rate. Filled in automatically when the reservation was still on file at accrual time; type it in for an older row that's missing it."></label>` : ''}
 ${showListing ? `<label>Listing<select class="settings-input" data-letting-listing="${escapeHtml(e.id)}" title="Which of ${escapeHtml(ownerNameFor(e.ownerKey))}'s listings this stay was for -- it decides which room the stay is drawn on, and which listing the average night-rate chart groups it under.">
 <option value="">Listing…</option>
@@ -959,6 +963,11 @@ if (apply(entry, input.value) === false) { renderLetting(); return; }
 queueSave();
 renderLetting();
 });
+});
+editEntry('booked', (entry, v) => {
+const stay = entry.kind === 'accrual' ? (data.airbnbReservations || []).find((r) => r.id === entry.reservationId) : null;
+if (stay) stay.confirmedOn = v || '';
+else entry.bookedOn = v || undefined;
 });
 editEntry('checkin', (entry, v) => { if (v && entry.checkout && entry.checkout <= v) return false; entry.checkin = v || undefined; });
 editEntry('checkout', (entry, v) => { if (v && entry.checkin && v <= entry.checkin) return false; entry.checkout = v || undefined; });

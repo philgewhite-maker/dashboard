@@ -4720,3 +4720,4 @@ background:var(--slate-bg);color:var(--slate);
 .stay-more label{display:inline-flex;align-items:center;gap:5px;}
 .stay-more .stay-notes{flex:1 1 140px;max-width:none;}
 .stay-row .cal-name .dot{margin-right:5px;}
+.letting-nobook{color:var(--amber,#b7791f);}
