@@ -891,7 +891,7 @@ ${payoutCheckHtml(r)}
 // Upcoming stays and those still awaiting income are rows on this panel; an earlier or
 // cancelled one is shown by its entry in Letting income instead.
 function stayIsOnPanel(r) {
-return notCancelled(r) && (r.checkout >= todayStr() || (!r.accruedAt && r.checkout >= dateStrAdd(todayStr(), -AWAITING_INCOME_DAYS)));
+return notCancelled(r) && (r.checkout >= todayStr() || (!r.accruedAt && r.checkout > r.checkin && r.checkout >= dateStrAdd(todayStr(), -AWAITING_INCOME_DAYS)));
 }
 function stayChipHtml(r, extraHtml = '') {
 const listing = data.airbnbListings.find((l) => l.id === r.listingId) || {};
@@ -1042,7 +1042,7 @@ const countEl = document.getElementById('airbnb-count');
 if (!el) return;
 const upcoming = data.airbnbReservations
 .filter(notCancelled)
-.filter((r) => r.checkout >= todayStr() || (!r.accruedAt && r.checkout >= dateStrAdd(todayStr(), -AWAITING_INCOME_DAYS)))
+.filter((r) => r.checkout >= todayStr() || (!r.accruedAt && r.checkout > r.checkin && r.checkout >= dateStrAdd(todayStr(), -AWAITING_INCOME_DAYS)))
 .sort((a, b) => (a.checkin < b.checkin ? -1 : a.checkin > b.checkin ? 1 : 0));
 if (countEl) countEl.textContent = upcoming.length ? String(upcoming.length) : '';
 const errorsHtml = airbnbSyncErrorsHtml();
