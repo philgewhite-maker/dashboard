@@ -751,7 +751,7 @@ const stayRec = e.kind === 'accrual' ? (data.airbnbReservations || []).find((r) 
 const showStayDates = !!(stayRec && stayRec.checkin && stayRec.checkout);
 // The day the booking was made: on the stay itself when this income was charged from one, else on this entry.
 const showBooked = e.kind === 'accrual' || e.kind === 'earned' || e.kind === 'cancellation';
-const bookedOn = stayRec ? (stayRec.confirmedOn || stayRec.paidOn || '') : (e.bookedOn || '');
+const bookedOn = stayRec ? (stayRec.confirmedOn || '') : (e.bookedOn || '');
 const showTotal = e.kind === 'earned';
 const showAmount = e.kind === 'payment' || e.kind === 'adjustment';
 const showNote = manual && (e.kind === 'earned' || e.kind === 'cancellation' || e.kind === 'payment' || e.kind === 'adjustment');

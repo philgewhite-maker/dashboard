@@ -59,7 +59,7 @@ return { stay: s, merged: false };
 // (booked, completed, cancelled); nothing is deleted when a stay ends.
 (data.airbnbReservations || []).forEach((r) => add({
 id: r.id, listingId: r.listingId, checkin: r.checkin, checkout: r.checkout, guest: r.guestName || '',
-unconfirmed: isUnconfirmedStay(r), income: r.status === 'cancelled' ? null : (r.income ?? null), bookedOn: r.confirmedOn || r.paidOn || String(r.createdAt || '').slice(0, 10),
+unconfirmed: isUnconfirmedStay(r), income: r.status === 'cancelled' ? null : (r.income ?? null), bookedOn: r.confirmedOn || String(r.createdAt || '').slice(0, 10),
 cancelledOn: r.cancelledOn || '', status: r.status === 'cancelled' ? 'cancelled' : 'stay',
 source: r.status === 'completed' ? 'finished' : r.status === 'cancelled' ? 'cancelled' : 'live', platform: r.platform === 'other' ? 'other' : 'airbnb',
 }));
