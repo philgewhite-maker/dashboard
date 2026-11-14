@@ -250,10 +250,31 @@ stayMedian: null,
 // at least `nights` takes `pct`; the largest step of each kind applies and the two combine. They are what the
 // model undoes to get from a payout back to a raw nightly rate, and applies to the simulated bookings. The
 // guest-rating and special-offer discounts have no source and are not modelled.
+// `listings` holds one Airbnb listing's own steps, keyed by its Airbnb listing id (the digits before ".ics" in its
+// calendar link; a listing's own record id works too): {shortNotice, length, topRatedPct}. A listing with an entry
+// uses it instead of the shared `airbnb` steps. Seeded from the listings' Airbnb settings as read on 14 Nov 2026
+// (weekly = 7 nights, monthly = 28, the "trip length" discount = 5); only today's settings are known, so the model
+// undoes them on past stays as if they had always been so.
 discounts: {
 airbnb: { shortNotice: [{ days: 10, pct: 5 }, { days: 5, pct: 10 }], length: [] },
 direct: { shortNotice: [], length: [] },
+listings: {
+'1635499706498185151': { shortNotice: [{ days: 10, pct: 5 }, { days: 5, pct: 10 }], length: [{ nights: 5, pct: 5 }, { nights: 7, pct: 10 }, { nights: 28, pct: 18 }], topRatedPct: 15 },
+'1437224781619025669': { shortNotice: [{ days: 2, pct: 10 }], length: [{ nights: 7, pct: 10 }, { nights: 28, pct: 20 }], topRatedPct: 0 },
+'1651495519889440619': { shortNotice: [{ days: 8, pct: 5 }, { days: 3, pct: 10 }], length: [{ nights: 5, pct: 5 }, { nights: 7, pct: 10 }, { nights: 28, pct: 15 }], topRatedPct: 15 },
 },
+},
+// Rating stages (model v6). A new listing's promotion: % off for bookings made before its third review, undone on
+// those stays. superhostFrom: the date your own listings gained Superhost ('' = never); superhostListings:
+// {listing id: date} for a listing run by someone else. topRatedGuestSharePct: the share of bookings assumed to come
+// from guests who get a listing's top-rated-guest discount (a guess; nothing on record says which guests did).
+// stagePriors: where the model starts before your own before/after data corrects it: nightly rate with no rating,
+// and as a Superhost, as a % against a rated listing (unsourced third-party figures), and the same for requests as a
+// multiple (1 = no effect: no figure was found).
+newListingDiscountPct: 15,
+superhostFrom: '2026-01-01', superhostListings: {},
+topRatedGuestSharePct: 30,
+stagePriors: { newAdrPct: -16, superhostAdrPct: 14, newDemand: 1, superhostDemand: 1 },
 gapDiscountPct: 15, gapMaxNights: 2,
 elasticity: 1.5, enquiryWeight: 0.3,
 // [{id, roomKey, from, to}]: times a room wasn't offered (in use, off Airbnb), left out of
@@ -3686,7 +3707,10 @@ const shipped = steps.length === 1 && steps[0].days === 7 && steps[0].pct === 10
 if (steps.length && !shipped) data.prefs.bookingEvaluator.discounts = { airbnb: { shortNotice: steps, length: [] }, direct: { shortNotice: [], length: [] } };
 }
 delete data.prefs.bookingEvaluator.lastMinute;
-data.prefs.bookingEvaluator.discounts = { airbnb: { shortNotice: [], length: [], ...((data.prefs.bookingEvaluator.discounts || {}).airbnb || {}) }, direct: { shortNotice: [], length: [], ...((data.prefs.bookingEvaluator.discounts || {}).direct || {}) } };
+// Per-listing discounts: the seeded ones reach a device whose saved discounts predate them; a listing's saved entry wins.
+const savedListings = (data.prefs.bookingEvaluator.discounts || {}).listings;
+data.prefs.bookingEvaluator.discounts = { airbnb: { shortNotice: [], length: [], ...((data.prefs.bookingEvaluator.discounts || {}).airbnb || {}) }, direct: { shortNotice: [], length: [], ...((data.prefs.bookingEvaluator.discounts || {}).direct || {}) }, listings: { ...DEFAULT_PREFS.bookingEvaluator.discounts.listings, ...(savedListings && typeof savedListings === 'object' ? savedListings : {}) } };
+data.prefs.bookingEvaluator.stagePriors = { ...DEFAULT_PREFS.bookingEvaluator.stagePriors, ...(data.prefs.bookingEvaluator.stagePriors || {}) };
 // The spread above is shallow -- an ALREADY-PRESENT array key (shareUrlRules/
 // captureRules have both existed since v300/v310) keeps its own contents
 // wholesale, never gaining new entries from a later DEFAULT_PREFS. Confirmed

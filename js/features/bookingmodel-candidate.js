@@ -1,4 +1,4 @@
-// CANDIDATE COPY (model v5) for modelbacktest only: nothing in the app imports this file. Delete once v5 is live or dropped.
+// CANDIDATE COPY (model v6) for modelbacktest only: nothing in the app imports this file. Delete once v6 is live or dropped.
 // The booking evaluator's engine: should this booking request be accepted?
 //
 // It compares two futures over a window of nights around the request:
@@ -31,7 +31,25 @@ import { collectStays } from './lettingoccupancy.js';
 import { evaluatorRooms, roomSettings } from './bookingsettings.js';
 import { MARKET_SEASON, MARKET_CREDIT } from './marketdata.js';
 
-const MODEL_VERSION = 5;
+const MODEL_VERSION = 6;
+// Rating stage (see listingStages) and the price calibration built on it. Every figure here is an assumption.
+const LIVE_BEFORE_FIRST_ASK = 7; // a listing went live this many days before its first request or booking
+const REVIEW_LAG_DAYS = 4; // a review is taken to appear this many days after checkout (the review's own date is not stored)
+const NEW_STAGE_DAYS_PER_REVIEW = 15; // a listing still short of 3 reviews is taken to gain one every this many days
+const UNDATED_BOOKING_LEAD = 14; // a short stay with no booking date: taken as booked this long before arrival
+const LONG_LET_LEAD_DAYS = 30; // a long let with no booking date: its nights are held from this long before it starts
+const PRICE_HALF_LIFE_DAYS = 180; // a price sample counts half as much for every this many days since it was booked
+const PRICE_MONTH_K = 5; // pseudo-samples holding each month's price index at 1
+const STAGE_FIT_MIN = 4; // samples needed each side of a stage change before the listing's own before/after is read
+const STAGE_FIT_WINDOW = 180; // days either side of the change that are compared (limits, but does not remove, the seasonal mix)
+const STAGE_FIT_K = 8; // pseudo-samples holding a stage's price multiplier at its prior
+const STAGE_DEMAND_K = 20; // pseudo-requests holding a stage's demand multiplier at its prior
+// Priors for a stage against "rated" (3+ reviews, no superhost). The price ones are third-party figures with no source
+// (ranges of -12% to -20% and +10% to +18% in achieved nightly rate; the midpoints are used). There is no figure at all
+// for demand, so it starts at "no effect". Settings can override them (prefs.bookingEvaluator.stagePriors).
+const STAGE_PRIOR = { newAdrPct: -16, superhostAdrPct: 14, newDemand: 1, superhostDemand: 1 };
+const NEW_LISTING_DISCOUNT_PCT = 15;
+const TOP_RATED_GUEST_SHARE_PCT = 30;
 // Demand (see demandFor): the minimum stay assumed in force before shorter requests start appearing, how far back
 // requests are counted, and how many pseudo-requests hold the level to the occupancy-based start and each month to London.
 const PAST_MIN_NIGHTS = 5;
@@ -144,18 +162,106 @@ if (key === 'days' ? value <= k : value >= k) best = Math.max(best, p);
 });
 return best / 100;
 }
-function discountsOf(s, channel = 'airbnb') {
-const d = (s.discounts || {})[channel] || {};
-return { shortNotice: d.shortNotice || [], length: d.length || [] };
+// A listing with its own entry in discounts.listings uses that (Airbnb's settings differ by listing: weekly and monthly
+// are length steps at 7 and 28 nights, a trip-length discount is one more length step, and topRatedPct is the
+// top-rated-guest discount). A listing without one, or no listing given, uses the channel's shared steps.
+// Only today's settings are stored: the same steps are assumed for every past stay.
+function discountsOf(s, channel = 'airbnb', listingId = null) {
+const all = s.discounts || {};
+const own = listingId && channel === 'airbnb' && all.listings && typeof all.listings === 'object' ? all.listings[listingId] : null;
+const d = own || all[channel] || {};
+return { shortNotice: d.shortNotice || [], length: d.length || [], topRatedPct: own ? Number(own.topRatedPct) || 0 : 0, perListing: !!own };
 }
-// Nightly payout with the cleaning fee taken out, and the discounts undone, for one stay.
-function rawNightlyRate({ amount, cleaning, nights, leadDays }, disc) {
+const pctOf = (v, dflt) => { const n = Number(v ?? dflt); return Number.isFinite(n) ? Math.min(90, Math.max(0, n)) / 100 : 0; };
+const newListingPctOf = (s) => pctOf(s.newListingDiscountPct, NEW_LISTING_DISCOUNT_PCT);
+// The top-rated-guest discount is taken by only some guests, and which ones is not on record: it is applied (and
+// undone) at its expected value, the discount x the share of bookings assumed to come from such guests.
+const topRatedOf = (s, disc) => (Number(disc.topRatedPct) || 0) / 100 * pctOf(s.topRatedGuestSharePct, TOP_RATED_GUEST_SHARE_PCT);
+// Nightly payout with the cleaning fee taken out, and the discounts undone, for one stay. `newListing` and `topRated`
+// are fractions (0.15 = 15%): the new-listing discount where the booking was made before the listing's third review,
+// and the expected top-rated-guest discount. Every discount is taken to combine by multiplying.
+function rawNightlyRate({ amount, cleaning, nights, leadDays, newListing = 0, topRated = 0 }, disc) {
 const nightly = (Number(amount) - (Number(cleaning) || 0)) / nights;
 if (!(nightly > 0)) return null;
 const sn = leadDays == null ? 0 : stepPct(disc.shortNotice, 'days', leadDays);
 const ln = stepPct(disc.length, 'nights', nights);
-return { raw: nightly / ((1 - sn) * (1 - ln)), nightly, sn, ln };
+const nl = Math.min(0.9, Math.max(0, Number(newListing) || 0));
+const tr = Math.min(0.9, Math.max(0, Number(topRated) || 0));
+return { raw: nightly / ((1 - sn) * (1 - ln) * (1 - nl) * (1 - tr)), nightly, sn, ln, nl, tr };
 }
+
+// ---- Rating stage per listing -------------------------------------------------------------------
+// Worked out from the records, never asked for:
+//   went live     LIVE_BEFORE_FIRST_ASK days before the listing's first request or booking, whichever is earlier;
+//   rating shown  the third review. A review's own date is not stored (only "this stay was reviewed"), so it is taken
+//                 as the reviewed stay's checkout + REVIEW_LAG_DAYS. With fewer than 3 reviewed stays on record, the
+//                 third completed short stay stands in (ratedVia 'stays'), on the same lag;
+//   superhost     from Settings: superhostFrom for your own listings, superhostListings[listingId] for anyone else's.
+// A booking's stage is the listing's stage on the day the booking was made: 'new' before the rating shows, then
+// 'rated', then 'superhost'. Only what was known by ctx.today is used, so a backtest sees the stage as it then was.
+function listingStages(ctx) {
+const T = dayNum(ctx.today);
+const s = ctx.s;
+const out = new Map();
+const validDate = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v);
+ctx.rooms.forEach((room) => room.listingIds.forEach((id) => {
+const firsts = [];
+(ctx.requests || []).forEach((q) => { if (q.listingId === id && q.receivedAt) firsts.push(dayNum(q.receivedAt)); });
+(ctx.earnings || []).forEach((e) => { if (e.listingId === id && e.bookingDate) firsts.push(dayNum(e.bookingDate)); });
+const done = new Map(); // checkout day -> reviewed?, one per check-in
+(ctx.stays || []).forEach((x) => {
+if (x.listingId !== id || x.noDemand || !x.checkin || !x.checkout) return;
+if (x.status === 'stay' || x.status === 'cancelled') firsts.push(x.bookedOn ? dayNum(x.bookedOn) : dayNum(x.checkin) - UNDATED_BOOKING_LEAD);
+if (x.status !== 'stay' || x.unconfirmed) return;
+const co = dayNum(x.checkout);
+if (co + REVIEW_LAG_DAYS > T) return;
+const k = dayNum(x.checkin);
+done.set(k, { co, reviewed: !!x.reviewed || !!(done.get(k) || {}).reviewed });
+});
+(ctx.earnings || []).forEach((e) => {
+if (e.listingId !== id || !e.start || !(e.nights > 0)) return;
+const k = dayNum(e.start);
+if (k + e.nights + REVIEW_LAG_DAYS <= T && !done.has(k)) done.set(k, { co: k + e.nights, reviewed: false });
+});
+const stays = [...done.values()].sort((a, b) => a.co - b.co);
+const reviewed = stays.filter((x) => x.reviewed);
+let ratedOn = null; let ratedVia = 'none';
+if (reviewed.length >= 3) { ratedOn = reviewed[2].co + REVIEW_LAG_DAYS; ratedVia = 'reviews'; }
+else if (stays.length >= 3) { ratedOn = stays[2].co + REVIEW_LAG_DAYS; ratedVia = 'stays'; }
+const sh = (s.superhostListings && s.superhostListings[id]) || ((ctx.ownListings || {})[id] ? s.superhostFrom : '');
+const have = ratedVia === 'reviews' ? 3 : Math.min(2, Math.max(reviewed.length, ratedOn == null ? stays.length : 0));
+out.set(id, {
+liveOn: firsts.length ? Math.min(...firsts) - LIVE_BEFORE_FIRST_ASK : null,
+ratedOn, ratedVia, reviews: reviewed.length, stays: stays.length,
+superhostOn: validDate(sh) ? dayNum(sh) : null,
+// When a listing still in the new stage is expected to leave it (the simulated bookings made before then carry the discount).
+newUntil: ratedOn != null ? ratedOn : T + NEW_STAGE_DAYS_PER_REVIEW * (3 - have),
+});
+}));
+return out;
+}
+function stageAt(st, t) {
+if (!st || st.ratedOn == null || t < st.ratedOn) return 'new';
+return st.superhostOn != null && t >= st.superhostOn ? 'superhost' : 'rated';
+}
+// Stage multipliers on the nightly rate, against 'rated' = 1. The new-stage prior is the quoted gap in ACHIEVED rate
+// with the new-listing discount taken back out, since that discount is undone separately: (1 - 16%) / (1 - 15%) = 0.99.
+function stagePriors(s) {
+const p = { ...STAGE_PRIOR, ...(s.stagePriors && typeof s.stagePriors === 'object' ? s.stagePriors : {}) };
+const nl = newListingPctOf(s);
+return {
+price: { new: Math.max(0.3, (1 + Number(p.newAdrPct) / 100) / (1 - nl)), rated: 1, superhost: Math.max(0.3, 1 + Number(p.superhostAdrPct) / 100) },
+demand: { new: Number(p.newDemand) > 0 ? Number(p.newDemand) : 1, rated: 1, superhost: Number(p.superhostDemand) > 0 ? Number(p.superhostDemand) : 1 },
+};
+}
+const weightedMedian = (xs) => { // [{v, w}]
+const s = xs.filter((x) => x.w > 0 && Number.isFinite(x.v)).sort((a, b) => a.v - b.v);
+if (!s.length) return null;
+const W = s.reduce((a, x) => a + x.w, 0);
+let acc = 0;
+for (let i = 0; i < s.length; i++) { acc += s[i].w; if (acc > W / 2 + 1e-12) return s[i].v; if (Math.abs(acc - W / 2) <= 1e-12) return i + 1 < s.length ? (s[i].v + s[i + 1].v) / 2 : s[i].v; }
+return s[s.length - 1].v;
+};
 
 // ---- Context: everything the model reads ------------------------------------------------------
 
@@ -163,13 +269,40 @@ return { raw: nightly / ((1 - sn) * (1 - ln)), nightly, sn, ln };
 // (the workbench's "try a different assumption").
 function buildContext({ today = todayStr(), overrides = {} } = {}) {
 const s = { ...DEFAULT_PREFS.bookingEvaluator, ...(data.prefs.bookingEvaluator || {}), ...(overrides.settings || {}) };
+// Per-listing discounts are stored under the listing's Airbnb id (the digits before ".ics" in its calendar link) or its
+// own record id: here they are re-keyed to record ids, which is what every stay carries.
+if (s.discounts && s.discounts.listings && typeof s.discounts.listings === 'object') {
+const byId = {};
+(data.airbnbListings || []).forEach((l) => {
+const m = /(\d{6,})\.ics/i.exec(String(l.icsUrl || ''));
+const own = s.discounts.listings[l.id] || (m && s.discounts.listings[m[1]]);
+if (own) byId[l.id] = own;
+});
+s.discounts = { ...s.discounts, listings: byId };
+}
 const firstClean = Number.isFinite(Number(overrides.firstClean)) ? Number(overrides.firstClean) : (Number.isFinite(Number(data.prefs.airbnbCleaningCost)) ? Number(data.prefs.airbnbCleaningCost) : 50);
 const rooms = evaluatorRooms().map((room) => ({ key: room.key, label: room.label, listingIds: room.listingIds, ...roomSettings(room.key), ...((overrides.rooms || {})[room.key] || {}) })).filter((r) => r.include !== false);
 // Each stay's confirmation code, where its record has one: asksFor matches a stay to the request it came from by it.
 const stayCode = new Map();
 (data.airbnbReservations || []).forEach((r) => { if (r.confirmationCode) stayCode.set(r.id, r.confirmationCode); });
 (data.lettingLedger || []).forEach((e) => { if (e.confirmationCode) stayCode.set(`led:${e.id}`, e.confirmationCode); });
-const stays = collectStays().map((x) => ({ id: x.id, listingId: x.listingId, checkin: x.checkin, checkout: x.checkout, income: x.income, bookedOn: x.bookedOn, cancelledOn: x.cancelledOn, status: x.status, unconfirmed: !!x.unconfirmed, guest: x.guest || '', platform: x.platform, code: stayCode.get(x.id) || '' }));
+// Where each stay came from and whether a guest reviewed it. A long let, and a stay from a channel that does not count as
+// short-let demand (Settings -> Channels), keeps its nights off the market but is not a request, a stay length or a price
+// for the short-let model (noDemand). A long let's booking date is only ever its own confirmation date: the day its
+// record was created says when it was typed in, not when it was agreed, so it is left blank.
+const recOf = new Map();
+(data.airbnbReservations || []).forEach((r) => recOf.set(r.id, r));
+(data.lettingLedger || []).forEach((e) => recOf.set(`led:${e.id}`, e));
+const demandChannel = new Map((data.prefs.lettingChannels || []).map((c) => [c.id, c.countsAsDemand !== false]));
+const stays = collectStays().map((x) => {
+const rec = recOf.get(x.id) || {};
+const channel = rec.channel || (x.platform === 'other' ? '' : 'airbnb');
+const longLet = !!x.longLet || rec.letType === 'long';
+const noDemand = longLet || (channel ? demandChannel.get(channel) === false : false);
+return { id: x.id, listingId: x.listingId, checkin: x.checkin, checkout: x.checkout, income: x.income, bookedOn: longLet ? (rec.confirmedOn || rec.bookedOn || '') : x.bookedOn, cancelledOn: x.cancelledOn, status: x.status, unconfirmed: !!x.unconfirmed, guest: x.guest || '', platform: x.platform, code: stayCode.get(x.id) || '', channel, longLet, noDemand, reviewed: Number(rec.reviewRating) > 0 || !!rec.reviewSeen };
+});
+// Listings that are yours (no other owner on the listing): the ones Settings' superhost date applies to.
+const ownListings = Object.fromEntries((data.airbnbListings || []).map((l) => [l.id, !l.ownerConnectionId && (!l.ownerLabel || /^(me|phil)\b/i.test(String(l.ownerLabel).trim()))]));
 const requests = (data.bookingRequests || []).map((q) => ({ ...q }));
 // A rate-review proposal is only a suggestion until you act on it: it lifts the model's price for those dates only once its
 // subtask has been ticked off (the rate review's own meaning of "actioned"), so an unactioned event uplift can't inflate a verdict.
@@ -190,7 +323,7 @@ const scale = { ...ov };
 // Nights Airbnb's feed marks "Not available" (a host's manual blocks): not free nights, so not voids.
 const blocks = (data.airbnbBlocks || []).map((b) => ({ listingId: b.listingId, from: b.from, to: b.to }));
 const feedListingIds = (data.airbnbListings || []).filter((l) => l.icsUrl).map((l) => l.id);
-return { today, s, firstClean, rooms, stays, requests, proposals, listingLabels, earnings, earnedStayIds, scale, blocks, feedListingIds };
+return { today, s, firstClean, rooms, stays, requests, proposals, listingLabels, earnings, earnedStayIds, scale, blocks, feedListingIds, ownListings };
 }
 
 // ---- Calibration ----------------------------------------------------------------------------
@@ -269,17 +402,32 @@ const fromRequest = new Set(ctx.requests.map((q) => q.reservationId).filter(Bool
 // steps in Settings -> Booking evaluator -> Discounts): raw rate = that / ((1 - short notice) x (1 - length)).
 // A stay with no export row uses its income with the room's usual cleaning fee taken out. The guest-rating and
 // special-offer discounts have no source and stay inside the median.
-const disc = discountsOf(s, 'airbnb');
-const samples = ctx.rooms.map(() => []); // {raw, ws (share of nights Fri/Sat), month, via, sn, ln}
+// v6: each listing has its own discount steps (discountsOf), a booking made before the listing's third review also
+// carried the new-listing discount (newListingDiscountPct), and the top-rated-guest discount is undone at its expected
+// value. Long lets and stays from channels that are not short-let demand are left out (their rate is not a nightly one).
+// The samples are then put on one footing, the stage the room's listing is in today (see listingStages), and the base
+// price is their median weighted towards recent bookings, so an old or early-stage price neither drags it nor is lost.
+const stages = listingStages(ctx);
+const priors = stagePriors(s);
+const newPct = newListingPctOf(s);
+const roomListing = ctx.rooms.map((room) => activeListingId(room.listingIds, ctx.stays, today));
+const roomStage = ctx.rooms.map((_, i) => stageAt(stages.get(roomListing[i]), T));
+const samples = ctx.rooms.map(() => []); // {raw, nightly, ws (share of nights Fri/Sat), month, via, sn, ln, nl, tr, stage, listingId, start, booked}
 const cleanFees = ctx.rooms.map(() => []);
+const skipped = ctx.rooms.map(() => []); // nightly income of the stays left out as not short-let demand
 const weekendShare = (start, n) => { let k = 0; for (let i = 0; i < n; i++) if (weekendNight(start + i)) k++; return n > 0 ? k / n : 0; };
+const addSample = (r, listingId, { amount, cleaning, nights, start, booked, via }) => {
+const disc = discountsOf(s, 'airbnb', listingId);
+const madeOn = booked == null ? start - UNDATED_BOOKING_LEAD : booked;
+const stage = stageAt(stages.get(listingId), madeOn);
+const out = rawNightlyRate({ amount, cleaning, nights, leadDays: booked == null ? null : start - booked, newListing: stage === 'new' ? newPct : 0, topRated: topRatedOf(s, disc) }, disc);
+if (out) samples[r].push({ raw: out.raw, nightly: out.nightly, ws: weekendShare(start, nights), month: monthOf(start), via, sn: out.sn, ln: out.ln, nl: out.nl, tr: out.tr, stage, listingId, start, booked: madeOn });
+};
 (ctx.earnings || []).forEach((e) => {
 const r = ri.get(e.listingId);
 const start = e.start ? dayNum(e.start) : null;
 if (r == null || start == null || start < since || !(e.nights > 0)) return;
-const out = rawNightlyRate({ amount: e.amount, cleaning: e.cleaningFee, nights: e.nights, leadDays: e.bookingDate ? start - dayNum(e.bookingDate) : null }, disc);
-if (!out) return;
-samples[r].push({ raw: out.raw, ws: weekendShare(start, e.nights), month: monthOf(start), via: 'earnings', sn: out.sn, ln: out.ln });
+addSample(r, e.listingId, { amount: e.amount, cleaning: e.cleaningFee, nights: e.nights, start, booked: e.bookingDate ? dayNum(e.bookingDate) : null, via: 'earnings' });
 if (e.cleaningFee > 0) cleanFees[r].push(Number(e.cleaningFee));
 });
 const everyCleaning = cleanFees.flat();
@@ -287,37 +435,89 @@ live.forEach((x) => {
 if ((ctx.earnedStayIds || new Set()).has(x.id)) return;
 const n = dayNum(x.checkout) - dayNum(x.checkin);
 const start = dayNum(x.checkin);
-if (!(Number(x.income) > 0) || n <= 0 || start < since) return;
+if (!(Number(x.income) > 0) || n <= 0) return;
 const r = ri.get(x.listingId);
+if (x.noDemand) { skipped[r].push(Number(x.income) / n); return; }
+if (start < since) return;
 const usual = median(cleanFees[r]) ?? median(everyCleaning) ?? 0;
-const out = rawNightlyRate({ amount: x.income, cleaning: usual, nights: n, leadDays: x.bookedOn ? start - dayNum(x.bookedOn) : null }, disc);
-if (out) samples[r].push({ raw: out.raw, ws: weekendShare(start, n), month: monthOf(start), via: 'stay', sn: out.sn, ln: out.ln });
+addSample(r, x.listingId, { amount: x.income, cleaning: usual, nights: n, start, booked: x.bookedOn ? dayNum(x.bookedOn) : null, via: 'stay' });
 });
 const everyRaw = samples.flat().map((x) => x.raw);
-const prices = ctx.rooms.map((room, i) => {
-const sm = samples[i];
-// Friday/Saturday premium: weekend-heavy stays against weekday-heavy ones, when there are enough of each.
+// Friday/Saturday premium, per room: weekend-heavy stays against weekday-heavy ones, when there are enough of each.
+const uplifts = samples.map((sm) => {
 const low = sm.filter((x) => x.ws <= 0.2).map((x) => x.raw);
 const high = sm.filter((x) => x.ws >= 0.5).map((x) => x.raw);
-const uplift = low.length >= 3 && high.length >= 3 ? Math.min(1.6, Math.max(0.9, median(high) / median(low))) : 1;
-const wd = sm.map((x) => ({ v: x.raw / (1 + x.ws * (uplift - 1)), month: x.month }));
-const byMonth = Array.from({ length: 12 }, (_, m) => { const xs = wd.filter((x) => x.month === m).map((x) => x.v); return xs.length >= 3 ? median(xs) : null; });
-const overall = median(wd.map((x) => x.v));
+return low.length >= 3 && high.length >= 3 ? Math.min(1.6, Math.max(0.9, median(high) / median(low))) : 1;
+});
+samples.forEach((sm, i) => sm.forEach((x) => { x.wd = x.raw / (1 + x.ws * (uplifts[i] - 1)); }));
+// What a stage does to the rate, shared by every room: the prior, corrected by each listing's own stays either side
+// of the change (within STAGE_FIT_WINDOW days of it, STAGE_FIT_MIN or more each side), as
+//   fitted = exp((n x ln(observed) + STAGE_FIT_K x ln(prior)) / (n + STAGE_FIT_K)),  n = the smaller side's count.
+// The two sides fall in different months, so part of an observed gap is season, not stage: hence the heavy prior.
+const stagePrice = { rated: 1 };
+const stageFit = {};
+['new', 'superhost'].forEach((stg) => {
+let num = 0; let n = 0;
+stages.forEach((st, id) => {
+const at = stg === 'new' ? st.ratedOn : st.superhostOn;
+if (at == null) return;
+const near = samples.flat().filter((x) => x.listingId === id && Math.abs(x.start - at) <= STAGE_FIT_WINDOW);
+const a = near.filter((x) => x.stage === stg).map((x) => x.wd);
+const b = near.filter((x) => x.stage === 'rated').map((x) => x.wd);
+if (a.length < STAGE_FIT_MIN || b.length < STAGE_FIT_MIN) return;
+const w = Math.min(a.length, b.length);
+num += w * Math.log(median(a) / median(b)); n += w;
+});
+const prior = priors.price[stg];
+const observed = n > 0 ? Math.exp(num / n) : null;
+const fitted = n > 0 ? Math.min(1.5, Math.max(0.6, Math.exp((num + STAGE_FIT_K * Math.log(prior)) / (n + STAGE_FIT_K)))) : prior;
+stagePrice[stg] = fitted;
+stageFit[stg] = { prior, observed, n, fitted };
+});
+// Every sample on the footing of its room's stage today, weighted by how recently it was booked.
+samples.forEach((sm, i) => sm.forEach((x) => { x.cur = x.wd * stagePrice[roomStage[i]] / stagePrice[x.stage]; x.w = Math.pow(0.5, Math.max(0, T - x.booked) / PRICE_HALF_LIFE_DAYS); }));
+// The month-of-year shape of the rate, shared by the rooms: each sample against its own room's plain median, by the
+// month of the stay, held at 1 by PRICE_MONTH_K pseudo-samples. A month with fewer than 3 samples has no index.
+const plainMed = samples.map((sm) => (sm.length >= 3 ? median(sm.map((x) => x.cur)) : null));
+const monthRel = Array.from({ length: 12 }, () => []);
+samples.forEach((sm, i) => { if (plainMed[i] > 0) sm.forEach((x) => monthRel[x.month].push(x.cur / plainMed[i])); });
+const monthIdx = monthRel.map((xs) => (xs.length >= 3 ? Math.exp(xs.length * Math.log(median(xs)) / (xs.length + PRICE_MONTH_K)) : null));
+const prices = ctx.rooms.map((room, i) => {
+const sm = samples[i];
+const uplift = uplifts[i];
+const overall = weightedMedian(sm.map((x) => ({ v: x.cur, w: x.w })));
 const base = overall ?? median(everyRaw) ?? DEFAULT_PRICE;
+const byMonth = monthIdx.map((ix) => (ix != null && overall != null ? base * ix : null));
 const clean = room.cleaningIncome != null && room.cleaningIncome !== '' ? Number(room.cleaningIncome) : (median(cleanFees[i]) ?? median(everyCleaning) ?? 0);
 const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
 const nEarn = sm.filter((x) => x.via === 'earnings').length;
+const r1 = (v) => (v == null ? null : Math.round(v * 10) / 10);
+const group = (keyOf) => { const g = {}; sm.forEach((x) => { const k = keyOf(x); (g[k] || (g[k] = [])).push(x); }); return Object.fromEntries(Object.entries(g).map(([k, xs]) => [k, { n: xs.length, paid: r1(median(xs.map((x) => x.nightly))), undone: r1(median(xs.map((x) => x.wd))), onTodaysStage: r1(median(xs.map((x) => x.cur))) }])); };
+// Each step from what was paid to the base price, so a figure that looks wrong can be traced to the step that moved it.
+const trace = {
+listingInUse: roomListing[i], stageToday: roomStage[i], samples: sm.length,
+bySource: group((x) => x.via), byStage: group((x) => x.stage), byListing: group((x) => x.listingId),
+byQuarterBooked: group((x) => { const d = new Date(x.booked * DAY_MS); return `${d.getUTCFullYear()}Q${Math.floor(d.getUTCMonth() / 3) + 1}`; }),
+medianPaidPerNight: r1(median(sm.map((x) => x.nightly))),
+medianShortNoticeAndLengthUndone: r1(median(sm.map((x) => x.nightly / ((1 - x.sn) * (1 - x.ln)) / (1 + x.ws * (uplift - 1))))),
+medianAllDiscountsUndone: r1(median(sm.map((x) => x.wd))),
+medianOnTodaysStage: r1(median(sm.map((x) => x.cur))),
+base: r1(base), weekendUplift: Math.round(uplift * 100) / 100,
+leftOutNotShortLet: { n: skipped[i].length, medianPerNight: r1(median(skipped[i])) },
+setting: room.priceWeekday != null ? Number(room.priceWeekday) : null,
+};
 return {
 weekday: room.priceWeekday != null ? Number(room.priceWeekday) : null,
 weekend: room.priceWeekend != null ? Number(room.priceWeekend) : null,
 byMonth, base, uplift, clean, n: sm.length, nEarn, avgShortNotice: mean(sm.map((x) => x.sn)), avgLength: mean(sm.map((x) => x.ln)),
-source: room.priceWeekday != null || room.priceWeekend != null ? 'your setting' : overall != null ? `${sm.length} of your stays (${nEarn} from the earnings export)` : everyRaw.length ? `other rooms' stays (${everyRaw.length})` : 'assumption',
+nNewListing: sm.filter((x) => x.nl > 0).length, avgTopRated: mean(sm.map((x) => x.tr)), stage: roomStage[i], trace,
+source: room.priceWeekday != null || room.priceWeekend != null ? 'your setting' : overall != null ? `${sm.length} of your stays (${nEarn} from the earnings export), recent ones counting most (half as much every ${PRICE_HALF_LIFE_DAYS} days), each put on today's rating stage` : everyRaw.length ? `other rooms' stays (${everyRaw.length})` : 'assumption',
 };
 });
 
 // The calibration so far. availabilityOf and exposureGrid read the stay-length curve and the weekday mix from it,
 // and the lead-time fit below needs both of those, so it is filled in as each piece is worked out.
-const P = {};
+const P = { stages, roomListing, roomStage, stagePrice, stageFit, stagePriors: priors, monthIdx };
 const avs = ctx.rooms.map((_, i) => availabilityOf(ctx, P, i));
 
 // Stay length: requests (an enquiry at its weight), plus stays that didn't come from one.
@@ -341,7 +541,7 @@ losObs.push({ k, w, lo: ok ? range[0] : 1, hi: ok ? range[1] : LOS_MAX });
 losN += w;
 };
 ctx.requests.forEach((q) => { if (q.checkin && q.checkout) addLos(dayNum(q.checkout) - dayNum(q.checkin), q.kind === 'enquiry' ? s.enquiryWeight : 1, q.listingId, dayNum(q.checkin), q.receivedAt); });
-live.forEach((x) => { if (!fromRequest.has(x.id) && dayNum(x.checkin) >= since) addLos(dayNum(x.checkout) - dayNum(x.checkin), 1, x.listingId, dayNum(x.checkin), x.bookedOn); });
+live.forEach((x) => { if (!x.noDemand && !fromRequest.has(x.id) && dayNum(x.checkin) >= since) addLos(dayNum(x.checkout) - dayNum(x.checkin), 1, x.listingId, dayNum(x.checkin), x.bookedOn); });
 const losPrior = new Array(LOS_MAX + 1).fill(0);
 let harmonic = 0;
 for (let i = 1; i <= LOS_MAX; i++) harmonic += 1 / i;
@@ -384,7 +584,7 @@ P.losCdf = losCdf;
 const dowCount = new Array(7).fill(0);
 let dowN = 0;
 ctx.requests.forEach((q) => { if (q.checkin) { dowCount[dowOf(dayNum(q.checkin))] += q.kind === 'enquiry' ? s.enquiryWeight : 1; dowN += q.kind === 'enquiry' ? s.enquiryWeight : 1; } });
-live.forEach((x) => { if (!fromRequest.has(x.id) && dayNum(x.checkin) >= since) { dowCount[dowOf(dayNum(x.checkin))] += 1; dowN += 1; } });
+live.forEach((x) => { if (!x.noDemand && !fromRequest.has(x.id) && dayNum(x.checkin) >= since) { dowCount[dowOf(dayNum(x.checkin))] += 1; dowN += 1; } });
 const dowRaw = dowCount.map((c) => c + DOW_PRIOR_K);
 const dowMean = dowRaw.reduce((a, b) => a + b, 0) / 7;
 const dowW = dowRaw.map((v) => v / dowMean);
@@ -464,7 +664,7 @@ return { mu, median: Math.max(0, Math.exp(mu) - 0.5), n, prior };
 // Cancellations: how often, and how many come within the late window.
 let nAll = 0; let nCancel = 0; let nLate = 0; let nTimed = 0;
 ctx.stays.forEach((x) => {
-if (!ri.has(x.listingId) || dayNum(x.checkin) < since || dayNum(x.checkin) >= T) return;
+if (x.noDemand || !ri.has(x.listingId) || dayNum(x.checkin) < since || dayNum(x.checkin) >= T) return;
 nAll++;
 if (x.status !== 'cancelled') return;
 nCancel++;
@@ -483,7 +683,7 @@ const lateShare = (nLate + CANCEL_PRIOR.lateK * CANCEL_PRIOR.late) / (nTimed + C
 // for min(1, bookings touching it / OCC_FULL_EVIDENCE) when averaging, in the all-months figure and in the
 // month-of-year one alike.
 const occ = ctx.rooms.map((room, i) => {
-const mine = live.filter((x) => ri.get(x.listingId) === i);
+const mine = live.filter((x) => ri.get(x.listingId) === i && !x.noDemand);
 if (!mine.length) return { byMonth: new Array(12).fill(null), byMonthN: new Array(12).fill(0), byMonthW: new Array(12).fill(0), byMonthBookings: new Array(12).fill(0), overall: null, months: 0, skipped: 0 };
 const first = Math.min(...mine.map((x) => dayNum(x.checkin)));
 const nights = new Set();
@@ -493,6 +693,9 @@ const off = new Set();
 if (u.roomKey !== room.key || !u.from || !u.to) return;
 for (let d = dayNum(u.from); d <= dayNum(u.to); d++) off.add(d);
 });
+// A long let (or a stay from a channel that is not short-let demand) took its nights off the market: they are neither
+// nights on offer nor nights a short-let guest filled.
+live.forEach((x) => { if (x.noDemand && ri.get(x.listingId) === i) for (let d = dayNum(x.checkin); d < dayNum(x.checkout); d++) off.add(d); });
 const asked = new Set();
 ctx.requests.forEach((q) => { if (q.checkin && ri.get(q.listingId) === i) asked.add(q.checkin.slice(0, 7)); });
 const sums = Array.from({ length: 12 }, () => []); // {share, w} per month of the year
@@ -568,10 +771,9 @@ else if (Number.isFinite(Number(pr.upliftAmount)) && pr.upliftAmount != null) v 
 });
 return v;
 }
-function shortNoticePct(s, daysAhead) { return stepPct(discountsOf(s).shortNotice, 'days', daysAhead); }
-function lengthPct(s, nights) { return stepPct(discountsOf(s).length, 'nights', nights); }
-function maxBoost(s, planPct = 0) {
-const d = discountsOf(s);
+// The discount steps a room's simulated bookings take: those of the listing it is let through today.
+function roomDiscount(ctx, params, ri) { return discountsOf(ctx.s, 'airbnb', (params.roomListing || [])[ri] || null); }
+function maxBoost(s, planPct = 0, d = discountsOf(s)) {
 const top = (steps) => Math.max(0, ...steps.map((st) => (Number(st.days ?? st.nights) > 0 ? Number(st.pct) || 0 : 0))) / 100;
 const lm = 1 - (1 - top(d.shortNotice)) * (1 - top(d.length));
 const gap = Math.max(Number(s.gapDiscountPct) || 0, Number(planPct) || 0) / 100;
@@ -608,9 +810,10 @@ return null;
 // been lowered below the one the demand was calibrated under (see ONE_NIGHT_DEMAND_PCT).
 function drawArrivals(ctx, params, { from, to, todayN, lam, rooms, extra = null, rngX = null }, rng) {
 const out = [];
-const boost = maxBoost(ctx.s, ctx.planMaxPct);
+const boosts = ctx.rooms.map((_, i) => maxBoost(ctx.s, ctx.planMaxPct, roomDiscount(ctx, params, i)));
 const oneNight = (Number(ctx.s.oneNightDemandPct ?? ONE_NIGHT_DEMAND_PCT) || 0) / 100;
 rooms.forEach((ri) => {
+const boost = boosts[ri];
 for (let c = Math.max(from, todayN); c < to; c++) {
 const daysLeft = todayN == null ? null : c - todayN;
 const share = daysLeft == null ? 1 : leadCdf(params, c, daysLeft);
@@ -643,7 +846,14 @@ return out;
 function playArrivals(ctx, params, arrivals, occ, base, { block = null, minNights, len }) {
 const s = ctx.s;
 const eps = Number(s.elasticity) || 0;
-const boost = maxBoost(s, ctx.planMaxPct);
+const discs = ctx.rooms.map((_, i) => roomDiscount(ctx, params, i));
+const boosts = discs.map((d) => maxBoost(s, ctx.planMaxPct, d));
+// Discounts that change what a booking pays but are not played as a price cut the guest responds to (the demand
+// level already reflects them): the expected top-rated-guest discount, and the new-listing discount on bookings made
+// while the room's listing is still short of its third review.
+const topRated = discs.map((d) => 1 - topRatedOf(s, d));
+const newPct = newListingPctOf(s);
+const newUntil = ctx.rooms.map((_, i) => { const st = params.stages && params.stages.get((params.roomListing || [])[i]); return newPct > 0 && (params.roomStage || [])[i] === 'new' && st ? st.newUntil : -Infinity; });
 const gapPct = (Number(s.gapDiscountPct) || 0) / 100;
 const gapMax = Number(s.gapMaxNights) || 0;
 
@@ -675,10 +885,10 @@ const after = ge - i1;
 const orphan = (boundedL && before > 0 && before < min) || (boundedR && after > 0 && after < min);
 if (orphan && a.lead > 7) continue;
 const inGap = boundedL && boundedR && ge - gs <= gapMax;
-const factor = (1 - shortNoticePct(s, a.lead)) * (1 - lengthPct(s, a.los)) * (plan && plan.pct > 0 ? 1 - plan.pct / 100 : inGap ? 1 - gapPct : 1);
-if (a.u > Math.pow(factor, -eps) / boost) continue; // the guest doesn't take it at this price
+const factor = (1 - stepPct(discs[a.room].shortNotice, 'days', a.lead)) * (1 - stepPct(discs[a.room].length, 'nights', a.los)) * (plan && plan.pct > 0 ? 1 - plan.pct / 100 : inGap ? 1 - gapPct : 1);
+if (a.u > Math.pow(factor, -eps) / boosts[a.room]) continue; // the guest doesn't take it at this price
 for (let i = i0; i < i1 && i < len; i++) o[i] = 1;
-booked.push({ room: a.room, ci: a.c, co: a.c + a.los, factor, at: a.at, lead: a.lead });
+booked.push({ room: a.room, ci: a.c, co: a.c + a.los, factor: factor * topRated[a.room] * (a.at < newUntil[a.room] ? 1 - newPct : 1), at: a.at, lead: a.lead });
 }
 if (blocked) for (let d = block.ci; d < block.co; d++) occ[block.room][d - base] = 1;
 return booked;
@@ -720,7 +930,7 @@ asks.push({ t: dayNum(e.bookingDate), listingId: e.listingId, kind: 'request', c
 });
 const stayKeys = new Set(); // two records of one stay (same listing and check-in) count once
 (ctx.stays || []).forEach((x) => {
-if (x.status !== 'stay' || x.unconfirmed || !ids.has(x.listingId) || !x.bookedOn || !x.checkin || !x.checkout) return;
+if (x.noDemand || x.status !== 'stay' || x.unconfirmed || !ids.has(x.listingId) || !x.bookedOn || !x.checkin || !x.checkout) return;
 const key = `${x.listingId}|${x.checkin}`;
 if (reserved.has(x.id) || keys.has(key) || earnedKeys.has(key) || stayKeys.has(key)) return;
 if (x.code && (codes.has(x.code) || earnedCodes.has(x.code))) return;
@@ -749,7 +959,7 @@ const held = [];
 ctx.stays.forEach((x) => {
 if (!ids.has(x.listingId) || !x.checkin || !x.checkout) return;
 const ci = dayNum(x.checkin); const co = dayNum(x.checkout);
-const since = x.bookedOn ? dayNum(x.bookedOn) : reqAt.has(x.id) ? reqAt.get(x.id) : ci - 14;
+const since = x.bookedOn ? dayNum(x.bookedOn) : reqAt.has(x.id) ? reqAt.get(x.id) : ci - (x.longLet ? LONG_LET_LEAD_DAYS : UNDATED_BOOKING_LEAD);
 if (x.status === 'cancelled') { if (x.cancelledOn) held.push({ ci, co, since, until: dayNum(x.cancelledOn), booking: true }); return; }
 if (x.status === 'stay' || x.unconfirmed) held.push({ ci, co, since, until: Infinity, booking: true });
 });
@@ -883,13 +1093,60 @@ return (lo + hi) / 2;
 //            empty calendar to the room's achieved occupancy (all a room without requests has to go on);
 //   adj[m] = (requests for month m + MONTH_SHRINK_K) / (L x X[m] + MONTH_SHRINK_K): a month with little exposure
 //            or few requests stays near London's shape.
+// The level is then put on the footing of the room's rating stage today (out.stage, see stageDemand).
 // Kept on the context (not the calibration), so what-ifs that only rescale demand reuse it.
+
+// What a rating stage does to the number of requests, shared by every room, against 'rated' = 1. There is no outside
+// figure for it, so the prior is "no effect"; it is corrected by each room's own requests a week in each stage (8 or
+// more weeks each side), held to the prior by STAGE_DEMAND_K pseudo-requests and kept within 0.5 to 2. The weekly
+// counts are not corrected for how much was open to request, so a stage spent mostly booked up reads low.
+// A past week's stage is that of the room's most recently launched listing then. adj[room] = today's stage multiplier
+// over the average multiplier of the weeks the level was measured on: 1 when nothing was fitted.
+function stageDemand(ctx, params) {
+const cache = ctx.demandCache || (ctx.demandCache = new Map());
+if (cache.has('stage')) return cache.get('stage');
+const prior = (params.stagePriors || stagePriors(ctx.s)).demand;
+const stages = params.stages || new Map();
+const end = weekStartN(dayNum(ctx.today));
+const perRoom = ctx.rooms.map((room, ri) => {
+const grid = exposureGrid(ctx, params, ri);
+const n = { new: 0, rated: 0, superhost: 0 }; const weeks = { new: 0, rated: 0, superhost: 0 };
+if (!grid) return { n, weeks };
+const launched = room.listingIds.map((id) => ({ id, st: stages.get(id) })).filter((x) => x.st && x.st.liveOn != null).sort((a, b) => a.st.liveOn - b.st.liveOn);
+const stageOfWeek = (w) => { let cur = launched[0]; launched.forEach((x) => { if (x.st.liveOn <= w) cur = x; }); return stageAt(cur ? cur.st : null, w); };
+for (let w = grid.first; w < end; w += 7) weeks[stageOfWeek(w)]++;
+grid.asks.forEach((a) => { if (a.t >= grid.first && a.t < end) n[stageOfWeek(weekStartN(a.t))]++; });
+return { n, weeks };
+});
+const mult = { rated: 1 }; const fit = {};
+['new', 'superhost'].forEach((stg) => {
+let num = 0; let nEff = 0;
+perRoom.forEach(({ n, weeks }) => {
+if (weeks[stg] < 8 || weeks.rated < 8 || n[stg] + n.rated < 4) return;
+const w = Math.min(n[stg], n.rated);
+if (!(w > 0)) return;
+num += w * Math.log(((n[stg] + 0.5) / weeks[stg]) / ((n.rated + 0.5) / weeks.rated)); nEff += w;
+});
+const fitted = nEff > 0 ? Math.min(2, Math.max(0.5, Math.exp((num + STAGE_DEMAND_K * Math.log(prior[stg])) / (nEff + STAGE_DEMAND_K)))) : prior[stg];
+mult[stg] = fitted;
+fit[stg] = { prior: prior[stg], observed: nEff > 0 ? Math.exp(num / nEff) : null, n: nEff, fitted };
+});
+const adj = perRoom.map(({ weeks }, ri) => {
+const W = weeks.new + weeks.rated + weeks.superhost;
+if (!W) return 1;
+const avg = (weeks.new * mult.new + weeks.rated * mult.rated + weeks.superhost * mult.superhost) / W;
+return mult[(params.roomStage || [])[ri] || 'rated'] / avg;
+});
+const out = { mult, fit, adj, perRoom };
+cache.set('stage', out);
+return out;
+}
 function demandFor(ctx, params, ri) {
 const cache = ctx.demandCache || (ctx.demandCache = new Map());
 if (cache.has(ri)) return cache.get(ri);
 const o = params.occ[ri];
 const L0 = Math.max(0.01, rateForOccupancy(ctx, params, ri, Math.min(0.97, Math.max(0.02, o.overall ?? OCC_PRIOR))));
-const out = { L: L0, L0, adj: new Array(12).fill(1), N: new Array(12).fill(0), X: new Array(12).fill(0), n: 0, weeks: 0, from: null };
+const out = { L: L0, L0, stage: 1, adj: new Array(12).fill(1), N: new Array(12).fill(0), X: new Array(12).fill(0), n: 0, weeks: 0, from: null };
 const grid = exposureGrid(ctx, params, ri);
 if (grid) {
 out.X = exposureByMonth(grid, params.lead, params.leadSigma);
@@ -901,6 +1158,8 @@ out.L = (out.n + LEVEL_PRIOR_K) / (X + LEVEL_PRIOR_K / L0);
 out.adj = out.N.map((n, m) => (n + MONTH_SHRINK_K) / (out.L * out.X[m] + MONTH_SHRINK_K));
 }
 out.from = dayStr(grid.first);
+const sd = stageDemand(ctx, params);
+out.stage = sd.adj[ri];
 }
 cache.set(ri, out);
 return out;
@@ -911,7 +1170,7 @@ function lambdaFor(ctx, params, ri, month) {
 const key = `${ri}|${month}`;
 if (params.lambda.has(key)) return params.lambda.get(key);
 const d = demandFor(ctx, params, ri);
-const lam = Math.min(LAMBDA_MAX, d.L * MARKET_SEASON[month] * d.adj[month] * (ctx.scale.demand || 1));
+const lam = Math.min(LAMBDA_MAX, d.L * (d.stage || 1) * MARKET_SEASON[month] * d.adj[month] * (ctx.scale.demand || 1));
 params.lambda.set(key, lam);
 return lam;
 }
@@ -1176,11 +1435,35 @@ return { before: before ? before.id : null, after: after ? after.id : null };
 }
 
 // Every figure behind the answer, with where it came from, for the workbench.
-function discountText(s) {
-const d = discountsOf(s);
+function discountText(s, listingId = null) {
+const d = discountsOf(s, 'airbnb', listingId);
 const sn = d.shortNotice.filter((x) => Number(x.days) > 0).map((x) => `${x.pct}% within ${x.days} days`);
 const ln = d.length.filter((x) => Number(x.nights) > 0).map((x) => `${x.pct}% for ${x.nights}+ nights`);
-return [...sn, ...ln].join(', ') || 'none set';
+const tr = d.topRatedPct > 0 ? [`${d.topRatedPct}% for top-rated guests, counted as ${(topRatedOf(s, d) * 100).toFixed(1)}% on every booking`] : [];
+return [...sn, ...ln, ...tr].join(', ') || 'none set';
+}
+const STAGE_LABEL = { new: 'new listing (rating not shown yet)', rated: 'rated (3 or more reviews)', superhost: 'superhost' };
+// The rows about the rating stage, the per-listing discounts and long lets (v6).
+function stageAssumptions(ctx, params, ri) {
+const s = ctx.s;
+const price = params.prices[ri];
+const listingId = (params.roomListing || [])[ri];
+const st = params.stages && params.stages.get(listingId);
+const stage = (params.roomStage || [])[ri] || 'rated';
+const name = (ctx.listingLabels || {})[listingId] || 'this listing';
+const sd = stageDemand(ctx, params);
+const x2 = (v) => `×${Number(v).toFixed(2)}`;
+const fitText = (f, what) => (f.n > 0 ? `${what}: prior ${x2(f.prior)}, your own before/after ${x2(f.observed)} on ${f.n} either side, used ${x2(f.fitted)}` : `${what}: prior ${x2(f.prior)}, used as it is (not enough of your own stays either side of the change)`);
+const ratedText = !st ? 'no records' : st.ratedVia === 'reviews' ? `rating shown from ${dayStr(st.ratedOn)} (third reviewed stay's checkout + ${REVIEW_LAG_DAYS} days; a review's own date is not stored)` : st.ratedVia === 'stays' ? `rating taken as shown from ${dayStr(st.ratedOn)}: only ${st.reviews} reviewed stay${st.reviews === 1 ? '' : 's'} on record, so the third completed stay stands in (checkout + ${REVIEW_LAG_DAYS} days)` : `fewer than 3 completed stays, so still new; taken to leave the stage around ${dayStr(st.newUntil)} (a review every ${NEW_STAGE_DAYS_PER_REVIEW} days, an assumption)`;
+const skippedN = price.trace ? price.trace.leftOutNotShortLet.n : 0;
+return [
+{ id: 'stage', label: `Rating stage of ${name}`, value: STAGE_LABEL[stage], source: `worked out from your records: live from ${st && st.liveOn != null ? dayStr(st.liveOn) : 'unknown'} (${LIVE_BEFORE_FIRST_ASK} days before its first request or booking); ${ratedText}; superhost ${st && st.superhostOn != null ? `from ${dayStr(st.superhostOn)} (Settings, approximate)` : 'not set'}` },
+{ id: 'newlisting', label: 'New-listing discount', value: `${Math.round(newListingPctOf(s) * 100)}%`, source: `your estimate of Airbnb's new-listing promotion, net: undone on the ${price.nNewListing || 0} stay${price.nNewListing === 1 ? '' : 's'} booked before the third review${stage === 'new' ? ', and taken off simulated bookings until the listing leaves the stage' : ''}. Taken to combine with the other discounts by multiplying (not checked against Airbnb's rules)` },
+{ id: 'stageprice', label: 'What a rating stage does to the nightly rate (against rated)', value: `new ${x2(params.stagePrice.new)}, superhost ${x2(params.stagePrice.superhost)}`, source: `${fitText(params.stageFit.new, 'new')}; ${fitText(params.stageFit.superhost, 'superhost')}. The priors are third-party figures with no source (new listings achieve 12% to 20% less, superhosts 10% to 18% more; midpoints used, the new one net of the new-listing discount already undone). Earlier-stage prices are rescaled by these, not dropped` },
+{ id: 'stagedemand', label: 'What a rating stage does to requests (against rated)', value: `new ${x2(sd.mult.new)}, superhost ${x2(sd.mult.superhost)}; this room ${x2(sd.adj[ri])}`, source: `${fitText(sd.fit.new, 'new')}; ${fitText(sd.fit.superhost, 'superhost')}. No outside figure exists, so the prior is no effect; your own figure compares requests a week in each stage and is not corrected for how much was open to book` },
+{ id: 'listingdiscounts', label: `Discounts set on ${name}`, value: discountText(s, listingId), source: `${discountsOf(s, 'airbnb', listingId).perListing ? 'this listing\'s own settings (as read from Airbnb on 14 Nov 2026)' : 'the shared Airbnb steps (this listing has none of its own)'}. Only today's settings are known: past stays are worked back as if the same discounts applied then. Top-rated guests are assumed to be ${Math.round(pctOf(s.topRatedGuestSharePct, TOP_RATED_GUEST_SHARE_PCT) * 100)}% of bookings (an assumption, no data)` },
+{ id: 'longlets', label: 'Long lets and channels that are not short-let demand', value: skippedN ? `${skippedN} left out` : 'none', source: `their nights are held off the market from the day they were booked (a long let with no booking date: from ${LONG_LET_LEAD_DAYS} days before it starts), but they are not counted as requests, stay lengths or nightly rates${skippedN && price.trace.leftOutNotShortLet.medianPerNight != null ? ` (typically £${Math.round(price.trace.leftOutNotShortLet.medianPerNight)} a night)` : ''}` },
+];
 }
 
 function describeAssumptions(ctx, params, ri, ci) {
@@ -1195,7 +1478,7 @@ const mon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct
 const demandSource = `London's season for ${mon} ×${MARKET_SEASON[m].toFixed(2)} (${MARKET_CREDIT}); this room's level ${d.L.toFixed(2)} a date, ${d.n ? `from ${d.n} request${d.n === 1 ? '' : 's'} since ${d.from} set against the dates and stay lengths that were open to request each week` : `from the ${Math.round((o.overall ?? OCC_PRIOR) * 100)}% occupancy it has achieved (no requests of its own yet)`}${d.n ? `; ${mon} adjusted ×${d.adj[m].toFixed(2)} on ${d.N[m]} request${d.N[m] === 1 ? '' : 's'} for ${mon} dates` : ''}${(ctx.scale.demand || 1) !== 1 ? `; review factor ×${(ctx.scale.demand || 1).toFixed(2)}` : ''}`;
 return [
 { id: 'price', label: 'Raw nightly rate (before discounts and the cleaning fee)', value: `${fmtMoney(basePrice(ctx, params, ri, ci))}${price.uplift > 1.005 ? ` (Fri/Sat ×${price.uplift.toFixed(2)})` : ''}`, source: price.source },
-{ id: 'discounts', label: 'Discounts the rate is worked back through', value: discountText(ctx.s), source: price.n ? `undone on ${price.n} stays: on average ${(price.avgShortNotice * 100).toFixed(1)}% short notice, ${(price.avgLength * 100).toFixed(1)}% length` : 'your setting' },
+{ id: 'discounts', label: 'Discounts the rate is worked back through', value: discountText(ctx.s, (params.roomListing || [])[ri]), source: price.n ? `undone on ${price.n} stays: on average ${(price.avgShortNotice * 100).toFixed(1)}% short notice, ${(price.avgLength * 100).toFixed(1)}% length` : 'your setting' },
 { id: 'cleanfee', label: 'Cleaning fee guests pay (income per booking)', value: fmtMoney(price.clean), source: ctx.rooms[ri].cleaningIncome != null && ctx.rooms[ri].cleaningIncome !== '' ? 'your setting' : price.n ? 'median of your earnings export' : 'none known' },
 { id: 'demand', label: `Requests expected per check-in date in ${mon} (any stay length, before availability)`, value: lambdaFor(ctx, params, ri, m).toFixed(2), source: demandSource, editable: 'demand' },
 { id: 'lead', label: 'Median days ahead bookings arrive', value: `${Math.round(lead.median)} days`, source: `your guide (Settings)${Math.abs(params.leadShift || 0) > 0.05 && ci != null && !isChristmas(ci) ? `, scaled x${Math.exp(params.leadShift).toFixed(2)} to match how far ahead your ${params.leadN} requests arrived, allowing for the dates that were already taken when each one came` : ''}`, editable: 'lead' },
@@ -1208,6 +1491,7 @@ return [
 { id: 'clean', label: 'Cleaning', value: `£${ctx.firstClean} first room, +£${s.cleanExtra} each extra the same day`, source: 'your setting' },
 { id: 'hassle', label: 'Changeover hassle', value: `£${s.hassleWeekday} Mon–Fri, £${s.hassleWeekend} Sat–Sun`, source: 'your setting' },
 { id: 'minNights', label: 'Minimum stay', value: `${ctx.rooms[ri].minNights || 1} night${(ctx.rooms[ri].minNights || 1) === 1 ? '' : 's'}`, source: 'your setting' },
+...stageAssumptions(ctx, params, ri),
 ];
 }
 
@@ -1514,14 +1798,15 @@ return {
 calibration: { demand: ctx.scale.demand || 1, lead: ctx.scale.lead || 1, cancel: ctx.scale.cancel || 1 },
 elasticity: Number(s.elasticity) || 0, leadSigma: Math.round(params.leadSigma * 100) / 100, cancelRate: Math.round(params.cancelRate * 1000) / 1000, lateShare: Math.round(params.lateShare * 1000) / 1000,
 meanStay: Math.round(params.losMean * 10) / 10, leadMedianByMonth: months.map((x) => x.lead), christmasLead: Math.round(params.lead[12].median),
-rooms: ctx.rooms.map((room, i) => ({ key: room.key, occupancy: params.occ[i].overall == null ? null : Math.round(params.occ[i].overall * 100) / 100, monthsOnOffer: params.occ[i].months, minNights: Number(room.minNights) || 1, price: Math.round(params.prices[i].base) })),
+rooms: ctx.rooms.map((room, i) => ({ key: room.key, occupancy: params.occ[i].overall == null ? null : Math.round(params.occ[i].overall * 100) / 100, monthsOnOffer: params.occ[i].months, minNights: Number(room.minNights) || 1, price: Math.round(params.prices[i].base), stage: (params.roomStage || [])[i] || null })),
+stagePrice: params.stagePrice || null,
 };
 }
 
 // ---- Self-test: cases with an answer that can be worked out by hand ----------------------------
 
 function testContext({ occupancy, today = '2026-11-01', minNights = 1 }) {
-const s = { ...DEFAULT_PREFS.bookingEvaluator, discounts: { airbnb: { shortNotice: [], length: [] }, direct: { shortNotice: [], length: [] } }, gapDiscountPct: 0 };
+const s = { ...DEFAULT_PREFS.bookingEvaluator, discounts: { airbnb: { shortNotice: [], length: [] }, direct: { shortNotice: [], length: [] } }, gapDiscountPct: 0, newListingDiscountPct: 0 };
 const ctx = {
 today, s, firstClean: 50,
 rooms: [{ key: 'A', label: 'Room A', listingIds: ['LA'], include: true, weight: 1, minNights, priceWeekday: 100, priceWeekend: 100 }],
@@ -1713,9 +1998,84 @@ const asksU = asksFor(cu, new Set(['LA']));
 const fromStays = asksU.filter((a) => a.unmatched);
 const dU = demandFor(cu, cu.params, 0);
 check('Unmatched stays: a dated one is one ask on its booking date, an undated one none, matched ones none', asksU.length === 5 && fromStays.length === 1 && fromStays[0].t === dayNum('2026-06-20') && fromStays[0].checkin === dayNum('2026-07-10') && fromStays[0].nights === 4 && dU.n === 5, `${asksU.length} asks (3 requests, 1 earnings row, ${fromStays.length} from stays${fromStays[0] ? `, dated ${dayStr(fromStays[0].t)}` : ''}); demand counts ${dU.n}`);
+// ---- v6 ----
+const fresh = (more = {}, stays = []) => {
+const c = testContext({ occupancy: 0.5 });
+c.rooms[0].priceWeekday = null; c.rooms[0].priceWeekend = null;
+c.s = { ...c.s, ...more };
+c.stays = stays;
+delete c.params; delete c.gridCache; delete c.demandCache;
+return c;
+};
+// 17. New-listing discount. Six 2-night Monday stays, no cleaning fee, no other discount. The first three were booked
+// on 10 Jul, before the third review (third checkout 19 Aug + 4 days = 23 Aug), and paid 170 = 85 a night; the last
+// three were booked on 25 Aug and paid 200 = 100 a night. With a 15% new-listing discount, 85 / 0.85 = 100, so every
+// sample is 100 and so is the base price. (The stage prior is set to -15%, which after the discount is x1: no rescale.)
+const st17 = (id, checkin, checkout, bookedOn, income) => ({ id, listingId: 'LA', checkin, checkout, bookedOn, income, status: 'stay', guest: id });
+const stays17 = [
+st17('n1', '2026-08-03', '2026-08-05', '2026-07-10', 170), st17('n2', '2026-08-10', '2026-08-12', '2026-07-10', 170), st17('n3', '2026-08-17', '2026-08-19', '2026-07-10', 170),
+st17('r1', '2026-09-07', '2026-09-09', '2026-08-25', 200), st17('r2', '2026-09-14', '2026-09-16', '2026-08-25', 200), st17('r3', '2026-09-21', '2026-09-23', '2026-08-25', 200),
+];
+const c17 = fresh({ newListingDiscountPct: 15, stagePriors: { newAdrPct: -15, superhostAdrPct: 0 } }, stays17);
+const p17 = calibrate(c17);
+const stg17 = p17.stages.get('LA');
+const tr17 = p17.prices[0].trace;
+check('New-listing discount: stays booked before the third review are divided by 0.85', Math.abs(p17.prices[0].base - 100) < 1e-9 && tr17.byStage.new.n === 3 && tr17.byStage.new.paid === 85 && tr17.byStage.new.undone === 100 && tr17.byStage.rated.paid === 100 && p17.prices[0].nNewListing === 3, `base ${p17.prices[0].base.toFixed(2)}; new stage paid ${tr17.byStage.new.paid}, undone ${tr17.byStage.new.undone}; rated paid ${tr17.byStage.rated.paid}`);
+check('Rating stage: live 7 days before the first booking, rated 4 days after the third completed stay, rated today', stg17.liveOn === dayNum('2026-07-03') && stg17.ratedOn === dayNum('2026-08-23') && stg17.ratedVia === 'stays' && p17.roomStage[0] === 'rated' && stageAt(stg17, dayNum('2026-08-22')) === 'new' && stageAt(stg17, dayNum('2026-08-23')) === 'rated', `live ${dayStr(stg17.liveOn)}, rated ${dayStr(stg17.ratedOn)} via ${stg17.ratedVia}`);
+// The same stays with the discount switched off (and no stage effect): the early ones stay at 85.
+const p17b = calibrate(fresh({ newListingDiscountPct: 0, stagePriors: { newAdrPct: 0, superhostAdrPct: 0 } }, stays17));
+check('New-listing discount off: the early stays keep the 85 they paid', p17b.prices[0].trace.byStage.new.undone === 85 && p17b.prices[0].nNewListing === 0, `new stage undone ${p17b.prices[0].trace.byStage.new.undone}`);
+// A stage multiplier rescales, not discards: with a prior of new = x0.8 of rated (after the discount) and no discount,
+// an early stay at 80 counts as 100 on today's (rated) footing. newAdrPct -20 with a 0% discount gives x0.8.
+const stays17c = stays17.map((x) => (x.id.startsWith('n') ? { ...x, income: 160 } : x));
+const p17c = calibrate(fresh({ newListingDiscountPct: 0, stagePriors: { newAdrPct: -20, superhostAdrPct: 0 } }, stays17c));
+check('Stage rescale: an early-stage 80 counts as 100 on a rated footing (prior x0.8)', Math.abs(p17c.stagePrice.new - 0.8) < 1e-9 && p17c.prices[0].trace.byStage.new.onTodaysStage === 100 && Math.abs(p17c.prices[0].base - 100) < 1e-9, `multiplier ${p17c.stagePrice.new.toFixed(3)}, rescaled ${p17c.prices[0].trace.byStage.new.onTodaysStage}, base ${p17c.prices[0].base.toFixed(2)}`);
+// 18. Per-listing discounts. LA: last-minute 10% within 5 days, 5% within 10; 5% for 5+ nights, weekly 10%, monthly
+// 18%; top-rated guests 15%. LB: 10% within 2 days; weekly 10%, monthly 20%; no top-rated discount. LC has no entry
+// and falls back to the shared Airbnb steps (5% within 10 days).
+const s18 = { topRatedGuestSharePct: 30, discounts: { airbnb: { shortNotice: [{ days: 10, pct: 5 }], length: [] }, direct: { shortNotice: [], length: [] }, listings: {
+LA: { shortNotice: [{ days: 5, pct: 10 }, { days: 10, pct: 5 }], length: [{ nights: 5, pct: 5 }, { nights: 7, pct: 10 }, { nights: 28, pct: 18 }], topRatedPct: 15 },
+LB: { shortNotice: [{ days: 2, pct: 10 }], length: [{ nights: 7, pct: 10 }, { nights: 28, pct: 20 }], topRatedPct: 0 },
+} } };
+const dA = discountsOf(s18, 'airbnb', 'LA'); const dB = discountsOf(s18, 'airbnb', 'LB'); const dC = discountsOf(s18, 'airbnb', 'LC');
+const tiers = [stepPct(dA.length, 'nights', 4), stepPct(dA.length, 'nights', 5), stepPct(dA.length, 'nights', 7), stepPct(dA.length, 'nights', 30), stepPct(dA.shortNotice, 'days', 3), stepPct(dA.shortNotice, 'days', 8), stepPct(dA.shortNotice, 'days', 11), stepPct(dB.shortNotice, 'days', 3), stepPct(dB.length, 'nights', 30), stepPct(dC.shortNotice, 'days', 8), stepPct(dC.length, 'nights', 30)];
+check('Per-listing discounts: each listing takes its own tier, one without settings takes the shared steps', tiers.join() === '0,0.05,0.1,0.18,0.1,0.05,0,0,0.2,0.05,0' && dA.topRatedPct === 15 && dB.topRatedPct === 0 && dC.topRatedPct === 0 && dA.perListing && !dC.perListing, tiers.join());
+// Top-rated guests: 15% x 30% of bookings = 4.5% on every booking. A 7-night LA stay booked 3 days ahead at a raw 100
+// pays 100 x 0.9 (last minute) x 0.9 (weekly) x 0.955 = 77.355 a night, 541.485 in all; undoing gives 100 back.
+const tr18 = topRatedOf(s18, dA);
+const raw18 = rawNightlyRate({ amount: 541.485, cleaning: 0, nights: 7, leadDays: 3, topRated: tr18 }, dA);
+check('Top-rated-guest discount at its expected value, undone with the listing\'s own tiers', Math.abs(tr18 - 0.045) < 1e-12 && Math.abs(raw18.raw - 100) < 1e-9, `${(tr18 * 100).toFixed(2)}% expected; raw ${raw18.raw.toFixed(4)}`);
+// And in a simulated booking: room A let through LA, a certain 7-night request 3 days ahead earns factor 0.9 x 0.9 x 0.955.
+const c18 = testContext({ occupancy: 0.5 });
+c18.s = { ...c18.s, ...s18, elasticity: 0 };
+const booked18 = playArrivals(c18, c18.params, [{ room: 0, c: 10, los: 7, at: 7, lead: 3, u: 0.5, tie: 0 }], [new Uint8Array(40)], 0, { minNights: [1], len: 40 });
+check('Simulated bookings take the listing\'s own discounts', booked18.length === 1 && Math.abs(booked18[0].factor - 0.9 * 0.9 * 0.955) < 1e-12, `factor ${booked18[0] ? booked18[0].factor.toFixed(5) : 'none'}`);
+// 19. Long lets. One three-month let with no booking date and nothing else: no ask, no stay length, no price sample,
+// no occupancy to read demand from; but its nights are held from 30 days before it starts.
+const long19 = { id: 'L1', listingId: 'LA', checkin: '2026-03-01', checkout: '2026-06-01', bookedOn: '', income: 7360, status: 'stay', guest: 'long', longLet: true, noDemand: true, channel: 'wordofmouth' };
+const c19 = fresh({}, [long19]);
+const p19 = calibrate(c19);
+const av19 = availabilityOf(c19, p19, 0);
+const apr = dayNum('2026-04-10');
+check('Long let: no request, no price, no occupancy read from it', asksFor(c19, new Set(['LA'])).length === 0 && p19.prices[0].n === 0 && p19.prices[0].trace.leftOutNotShortLet.n === 1 && p19.prices[0].trace.leftOutNotShortLet.medianPerNight === 80 && p19.occ[0].overall == null && p19.losN === 0, `${asksFor(c19, new Set(['LA'])).length} asks, ${p19.prices[0].n} price samples, ${p19.prices[0].trace.leftOutNotShortLet.n} left out at ${p19.prices[0].trace.leftOutNotShortLet.medianPerNight} a night`);
+check('Long let with no booking date: nights held from 30 days before it starts, not from when it was typed in', av19.open(apr, dayNum('2026-01-29')) === 1 && av19.open(apr, dayNum('2026-01-30')) === 0 && av19.open(apr, dayNum('2026-05-01')) === 0, `${av19.open(apr, dayNum('2026-01-29'))}${av19.open(apr, dayNum('2026-01-30'))}${av19.open(apr, dayNum('2026-05-01'))}`);
+// With a booking date it is held from that day, and is still not an ask. The same stay as a short let is one ask.
+const c19b = fresh({}, [{ ...long19, bookedOn: '2026-01-05' }]);
+const av19b = availabilityOf(c19b, calibrate(c19b), 0);
+const c19c = fresh({}, [{ ...long19, bookedOn: '2026-01-05', longLet: false, noDemand: false }]);
+const p19c = calibrate(c19c);
+check('Long let with a booking date: held from that day, still no ask; as a short let it would be one ask and a price', av19b.open(apr, dayNum('2026-01-04')) === 1 && av19b.open(apr, dayNum('2026-01-05')) === 0 && asksFor(c19b, new Set(['LA'])).length === 0 && asksFor(c19c, new Set(['LA'])).length === 1 && p19c.prices[0].n === 1 && p19c.occ[0].overall != null, `${asksFor(c19b, new Set(['LA'])).length} / ${asksFor(c19c, new Set(['LA'])).length} asks`);
 return results;
 }
 
 // The calibrated model's own pieces, read by the drift charts (js/features/modeldrift.js) to compare inputs with reality.
+// Debug: per room, each step from what stays paid to the base price, and the stage figures (see calibrate).
+function priceTrace(ctx) {
+const params = calibrate(ctx);
+const sd = stageDemand(ctx, params);
+return { today: ctx.today, stagePrice: params.stagePrice, stagePriceFit: params.stageFit, stageDemand: sd.mult, stageDemandFit: sd.fit, monthIndex: params.monthIdx.map((v) => (v == null ? null : Math.round(v * 100) / 100)),
+stages: Object.fromEntries([...params.stages.entries()].map(([id, st]) => [id, { liveOn: st.liveOn == null ? null : dayStr(st.liveOn), ratedOn: st.ratedOn == null ? null : dayStr(st.ratedOn), ratedVia: st.ratedVia, reviews: st.reviews, completedStays: st.stays, superhostOn: st.superhostOn == null ? null : dayStr(st.superhostOn) }])),
+rooms: ctx.rooms.map((room, i) => ({ key: room.key, ...params.prices[i].trace, demandStageAdj: Math.round(sd.adj[i] * 100) / 100, priceThisMonth: Math.round(basePrice(ctx, params, i, dayNum(ctx.today)) * 10) / 10 })) };
+}
 const driftKit = { lambdaFor, demandFor, asksFor, availabilityOf, leadCdf, leadFor, basePrice, roomIndexOf, dayNum, dayStr, dowOf, monthOf };
-export { driftKit, buildContext, calibrate, evaluate, sensitivity, makeProjection, projectVoids, optimiseVoid, defaultProjectionEnd, rawNightlyRate, stepPct, discountsOf, selfTest, MODEL_VERSION, demandFactorOf };
+export { driftKit, buildContext, calibrate, evaluate, sensitivity, makeProjection, projectVoids, optimiseVoid, defaultProjectionEnd, rawNightlyRate, stepPct, discountsOf, selfTest, MODEL_VERSION, demandFactorOf, listingStages, stageAt, priceTrace };

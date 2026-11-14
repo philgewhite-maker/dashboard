@@ -98,7 +98,10 @@ earnFallback++; return true;
 counts.earningsKept = ctx.earnings.length; counts.earningsDropped = eBefore - ctx.earnings.length; counts.earningsDatedByFallback = earnFallback;
 // Which stays an earnings row stands for, rebuilt from the rows that are left (buildContext matches them by confirmation code).
 const codes = new Set(ctx.earnings.map((e) => e.code).filter(Boolean));
-ctx.earnedStayIds = new Set(ctx.stays.filter((x) => x.code && codes.has(x.code)).map((x) => x.id));
+// A model whose stays carry no confirmation code (v4) cannot have the set rebuilt this way: rebuilding left it empty,
+// so every stay with an earnings row was counted twice as a price. Its own set is kept, cut to the stays still known.
+if (ctx.stays.some((x) => x.code)) ctx.earnedStayIds = new Set(ctx.stays.filter((x) => x.code && codes.has(x.code)).map((x) => x.id));
+else { const left = new Set(ctx.stays.map((x) => x.id)); ctx.earnedStayIds = new Set([...(ctx.earnedStayIds || [])].filter((id) => left.has(id))); }
 
 // The monthly review's factors were fitted to outcomes after T.
 if (opts.reviewFactors !== 'current') { ctx.scale = {}; if (ctx.s) ctx.s.calibration = {}; }
@@ -167,7 +170,7 @@ stayMean: r2(params.losMean), stayMedian: cdf.findIndex((c, i) => i >= 1 && c >=
 cancelRate: r2(params.cancelRate),
 rooms: ctx.rooms.map((room, i) => {
 const d = ctx.demandCache && ctx.demandCache.get(i);
-return { key: room.key, demandLevel: d ? r2(d.L) : null, startingLevel: d ? r2(d.L0) : null, requestsCounted: d ? d.n : null, weeksCounted: d ? d.weeks : null, requestsPerCheckinThisMonth: r2(params.lambda && params.lambda.get(`${i}|${li}`)), occupancy: r2(params.occ[i].overall), basePrice: r2(params.prices[i].base) };
+return { key: room.key, demandLevel: d ? r2(d.L) : null, startingLevel: d ? r2(d.L0) : null, requestsCounted: d ? d.n : null, weeksCounted: d ? d.weeks : null, requestsPerCheckinThisMonth: r2(params.lambda && params.lambda.get(`${i}|${li}`)), occupancy: r2(params.occ[i].overall), basePrice: r2(params.prices[i].base), priceSamples: params.prices[i].n, stage: params.prices[i].stage || null, priceTrace: params.prices[i].trace || null };
 }),
 };
 } catch (e) {

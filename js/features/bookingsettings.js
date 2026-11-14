@@ -17,7 +17,9 @@ if (s.leadMedian === d.leadMedian) s.leadMedian = [...d.leadMedian];
 // The discount steps: own copies, so editing never reaches the defaults.
 const dd = s.discounts || {};
 const copySteps = (xs) => (Array.isArray(xs) ? xs.map((x) => ({ ...x })) : []);
-s.discounts = { airbnb: { shortNotice: copySteps((dd.airbnb || {}).shortNotice), length: copySteps((dd.airbnb || {}).length) }, direct: { shortNotice: copySteps((dd.direct || {}).shortNotice), length: copySteps((dd.direct || {}).length) } };
+s.discounts = { airbnb: { shortNotice: copySteps((dd.airbnb || {}).shortNotice), length: copySteps((dd.airbnb || {}).length) }, direct: { shortNotice: copySteps((dd.direct || {}).shortNotice), length: copySteps((dd.direct || {}).length) },
+// Per-listing steps (model v6) have no boxes here yet: carried through untouched, as own copies.
+listings: Object.fromEntries(Object.entries(dd.listings && typeof dd.listings === 'object' ? dd.listings : {}).map(([id, l]) => [id, { ...l, shortNotice: copySteps(l && l.shortNotice), length: copySteps(l && l.length) }])) };
 if (s.rooms === d.rooms) s.rooms = {};
 if (!Array.isArray(s.unavailable) || s.unavailable === d.unavailable) s.unavailable = Array.isArray(s.unavailable) ? s.unavailable.map((u) => ({ ...u })) : [];
 if (!Array.isArray(s.voidPlans) || s.voidPlans === d.voidPlans) s.voidPlans = Array.isArray(s.voidPlans) ? s.voidPlans.map((p) => ({ ...p })) : [];
@@ -52,7 +54,7 @@ const list = (kind, steps, unit, text) => `<div class="be-disc-kind"><span class
 return `<div class="be-disc"><div style="font-size:12px;font-weight:600;margin:6px 0 2px;">${label}</div>${note ? `<div class="settings-note" style="margin:0 0 2px;">${note}</div>` : ''}${list('shortNotice', d.shortNotice, 'days', 'Short notice')}${list('length', d.length, 'nights', 'Longer stays')}</div>`;
 };
 return `<h4 class="be-set-h">Discounts</h4>
-<div class="settings-note" style="margin:0 0 4px;">As on Airbnb: the nightly rate you set is cut by the largest short-notice step and the largest length step that apply to a booking. The model uses them two ways: it undoes them on past stays to get back to a raw nightly rate, and applies them to the bookings it simulates. The occasional guest-rating discount (such as 15% for top-rated guests) has no source in your data, so it stays inside the rate.</div>
+<div class="settings-note" style="margin:0 0 4px;">As on Airbnb: the nightly rate you set is cut by the largest short-notice step and the largest length step that apply to a booking. The model uses them two ways: it undoes them on past stays to get back to a raw nightly rate, and applies them to the bookings it simulates. These are the shared steps. An Airbnb listing with its own steps on record (including its discount for top-rated guests, counted at the share of bookings assumed to take it) uses those instead: they are listed under each room in the evaluator's assumptions and have no boxes here yet.</div>
 ${block('airbnb', 'Airbnb', '')}
 ${block('direct', 'Direct bookings (your own site)', 'Not used until bookings come through your own site.')}`;
 }
