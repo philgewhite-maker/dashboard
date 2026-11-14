@@ -3,6 +3,7 @@
 // days. Uses the same shared Google sign-in as Drive and Calendar
 // (googleauth.js), via the `gmail.readonly` scope.
 import { googleFetch } from './sync/googleauth.js';
+import { kvGet, kvSet } from './db.js';
 
 const GMAIL_API = 'https://gmail.googleapis.com/gmail/v1/users/me';
 
@@ -57,6 +58,58 @@ link: gmailLink(headers, json.threadId, id),
 };
 }
 
+// Device-local cache of message summaries, keyed by message id. A message's
+// headers, snippet and threadId never change, and a deleted message simply
+// stops appearing in messages.list, so a stored summary can't go stale. Only
+// the one metadata shape above is cached (fixed header list), hence one key;
+// change that shape and bump the key. Every IDB failure falls back to a
+// plain fetch. Bounded: the newest META_CACHE_MAX entries by usedAt are kept.
+const META_KEY = 'gmail-meta-v1';
+const META_CACHE_MAX = 3000;
+let metaCache = null; // Map id -> { s: summary, usedAt }
+let metaLoading = null;
+
+async function loadMetaCache() {
+if (metaCache) return metaCache;
+if (!metaLoading) {
+metaLoading = (async () => {
+const map = new Map();
+try {
+const stored = await kvGet(META_KEY);
+if (stored && typeof stored === 'object') {
+for (const [id, e] of Object.entries(stored)) {
+if (e && e.s && e.s.id === id) map.set(id, e);
+}
+}
+} catch (e) { /* unreadable cache = empty cache */ }
+metaCache = map;
+return map;
+})();
+}
+return metaLoading;
+}
+
+async function saveMetaCache(map) {
+try {
+if (map.size > META_CACHE_MAX) {
+const keep = [...map.entries()].sort((a, b) => b[1].usedAt - a[1].usedAt).slice(0, META_CACHE_MAX);
+map.clear();
+keep.forEach(([id, e]) => map.set(id, e));
+}
+await kvSet(META_KEY, Object.fromEntries(map));
+} catch (e) { /* cache is best-effort */ }
+}
+
+// Runs fn over items with at most `limit` in flight, so a big cold run
+// doesn't fire hundreds of gets at once and trip Gmail's rate limit (403).
+async function runPool(items, limit, fn) {
+let next = 0;
+const worker = async () => {
+while (next < items.length) await fn(items[next++]);
+};
+await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+}
+
 // Turns one configured row into a Gmail query string. Returns null when
 // there's nothing to search for, so an incomplete row is skipped rather
 // than sent as an empty query — Gmail would read that as "everything".
@@ -109,9 +162,22 @@ sections.push({ search, limit, ids: unique });
 
 const allIds = sections.flatMap((s) => s.ids);
 const summaries = {};
-await Promise.all(allIds.map(async (id) => {
-try { summaries[id] = await getMessageSummary(id); } catch (e) { /* skip unreadable message */ }
-}));
+let cache = null;
+try { cache = await loadMetaCache(); } catch (e) { /* fetch everything */ }
+const now = Date.now();
+const misses = [];
+for (const id of allIds) {
+const hit = cache && cache.get(id);
+if (hit) { hit.usedAt = now; summaries[id] = { ...hit.s }; } else misses.push(id);
+}
+await runPool(misses, 8, async (id) => {
+try {
+const s = await getMessageSummary(id);
+summaries[id] = s;
+if (cache) cache.set(id, { s: { ...s }, usedAt: now });
+} catch (e) { /* skip unreadable message */ }
+});
+if (cache && misses.length) await saveMetaCache(cache);
 
 return sections.map(({ search, limit, ids }) => ({
 search,
