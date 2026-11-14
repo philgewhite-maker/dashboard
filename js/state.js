@@ -273,6 +273,8 @@ listings: {
 // multiple (1 = no effect: no figure was found).
 newListingDiscountPct: 15,
 superhostFrom: '2026-01-01', superhostListings: {},
+// Which listings are your own (record ids): null = worked out, a listing whose owner is called Phil or that has none.
+ownListingIds: null,
 topRatedGuestSharePct: 30,
 stagePriors: { newAdrPct: -16, superhostAdrPct: 14, newDemand: 1, superhostDemand: 1 },
 gapDiscountPct: 15, gapMaxNights: 2,

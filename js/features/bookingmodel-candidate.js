@@ -43,6 +43,7 @@ const PRICE_MONTH_K = 5; // pseudo-samples holding each month's price index at 1
 const STAGE_FIT_MIN = 4; // samples needed each side of a stage change before the listing's own before/after is read
 const STAGE_FIT_WINDOW = 180; // days either side of the change that are compared (limits, but does not remove, the seasonal mix)
 const STAGE_FIT_K = 8; // pseudo-samples holding a stage's price multiplier at its prior
+const STAGE_DEMAND_MIN = 10; // requests needed in each stage, per room, before its own before/after request rate is read
 const STAGE_DEMAND_K = 20; // pseudo-requests holding a stage's demand multiplier at its prior
 // Priors for a stage against "rated" (3+ reviews, no superhost). The price ones are third-party figures with no source
 // (ranges of -12% to -20% and +10% to +18% in achieved nightly rate; the midpoints are used). There is no figure at all
@@ -194,8 +195,9 @@ return { raw: nightly / ((1 - sn) * (1 - ln) * (1 - nl) * (1 - tr)), nightly, sn
 // Worked out from the records, never asked for:
 //   went live     LIVE_BEFORE_FIRST_ASK days before the listing's first request or booking, whichever is earlier;
 //   rating shown  the third review. A review's own date is not stored (only "this stay was reviewed"), so it is taken
-//                 as the reviewed stay's checkout + REVIEW_LAG_DAYS. With fewer than 3 reviewed stays on record, the
-//                 third completed short stay stands in (ratedVia 'stays'), on the same lag;
+//                 as the reviewed stay's checkout + REVIEW_LAG_DAYS. Stored reviews are incomplete (recent stays only),
+//                 so the third completed short stay, on the same lag, is used when it is earlier or when fewer than 3
+//                 reviewed stays are on record (ratedVia 'stays');
 //   superhost     from Settings: superhostFrom for your own listings, superhostListings[listingId] for anyone else's.
 // A booking's stage is the listing's stage on the day the booking was made: 'new' before the rating shows, then
 // 'rated', then 'superhost'. Only what was known by ctx.today is used, so a backtest sees the stage as it then was.
@@ -225,9 +227,14 @@ if (k + e.nights + REVIEW_LAG_DAYS <= T && !done.has(k)) done.set(k, { co: k + e
 });
 const stays = [...done.values()].sort((a, b) => a.co - b.co);
 const reviewed = stays.filter((x) => x.reviewed);
+// The earlier of the two readings. Reviews are only on record for recent stays (older ones are known from the earnings
+// export, which says nothing about reviews), so the third REVIEWED stay on record can be long after the listing's real
+// third review: the third completed stay bounds it.
 let ratedOn = null; let ratedVia = 'none';
-if (reviewed.length >= 3) { ratedOn = reviewed[2].co + REVIEW_LAG_DAYS; ratedVia = 'reviews'; }
-else if (stays.length >= 3) { ratedOn = stays[2].co + REVIEW_LAG_DAYS; ratedVia = 'stays'; }
+const byReviews = reviewed.length >= 3 ? reviewed[2].co + REVIEW_LAG_DAYS : null;
+const byStays = stays.length >= 3 ? stays[2].co + REVIEW_LAG_DAYS : null;
+if (byReviews != null && (byStays == null || byReviews <= byStays)) { ratedOn = byReviews; ratedVia = 'reviews'; }
+else if (byStays != null) { ratedOn = byStays; ratedVia = 'stays'; }
 const sh = (s.superhostListings && s.superhostListings[id]) || ((ctx.ownListings || {})[id] ? s.superhostFrom : '');
 const have = ratedVia === 'reviews' ? 3 : Math.min(2, Math.max(reviewed.length, ratedOn == null ? stays.length : 0));
 out.set(id, {
@@ -301,8 +308,18 @@ const longLet = !!x.longLet || rec.letType === 'long';
 const noDemand = longLet || (channel ? demandChannel.get(channel) === false : false);
 return { id: x.id, listingId: x.listingId, checkin: x.checkin, checkout: x.checkout, income: x.income, bookedOn: longLet ? (rec.confirmedOn || rec.bookedOn || '') : x.bookedOn, cancelledOn: x.cancelledOn, status: x.status, unconfirmed: !!x.unconfirmed, guest: x.guest || '', platform: x.platform, code: stayCode.get(x.id) || '', channel, longLet, noDemand, reviewed: Number(rec.reviewRating) > 0 || !!rec.reviewSeen };
 });
-// Listings that are yours (no other owner on the listing): the ones Settings' superhost date applies to.
-const ownListings = Object.fromEntries((data.airbnbListings || []).map((l) => [l.id, !l.ownerConnectionId && (!l.ownerLabel || /^(me|phil)\b/i.test(String(l.ownerLabel).trim()))]));
+// Listings that are yours: the ones Settings' superhost date applies to. Settings' ownListingIds decides when it is a
+// list; otherwise the same rule the Letting ledger uses (letting.js isMyOwnKey): no owner on the listing, or an owner,
+// a connection or a typed name, called Phil. Every listing has an owner connection, yours included, so "no owner
+// connection" alone would never match. An owner connection that no longer exists falls back to a label ending "- Phil".
+const ownIds = Array.isArray(s.ownListingIds) ? new Set(s.ownListingIds) : null;
+const ownListings = Object.fromEntries((data.airbnbListings || []).map((l) => {
+if (ownIds) return [l.id, ownIds.has(l.id)];
+const conn = l.ownerConnectionId ? (data.connections || []).find((c) => c.id === l.ownerConnectionId) : null;
+const name = String(conn ? conn.name || '' : l.ownerConnectionId ? '' : l.ownerLabel || '').trim();
+if (l.ownerConnectionId && !conn) return [l.id, /-\s*phil\s*$/i.test(String(l.label || ''))];
+return [l.id, (!l.ownerConnectionId && !name) || /^(me|phil)\b/i.test(name)];
+}));
 const requests = (data.bookingRequests || []).map((q) => ({ ...q }));
 // A rate-review proposal is only a suggestion until you act on it: it lifts the model's price for those dates only once its
 // subtask has been ticked off (the rate review's own meaning of "actioned"), so an unactioned event uplift can't inflate a verdict.
@@ -470,9 +487,12 @@ num += w * Math.log(median(a) / median(b)); n += w;
 });
 const prior = priors.price[stg];
 const observed = n > 0 ? Math.exp(num / n) : null;
-const fitted = n > 0 ? Math.min(1.5, Math.max(0.6, Math.exp((num + STAGE_FIT_K * Math.log(prior)) / (n + STAGE_FIT_K)))) : prior;
+// A listing with no rating is not taken to earn MORE than the same listing rated: a fitted 'new' above 1 is read as
+// season or drift between the two sides, and held at 1 (capped: true in the trace).
+const raw = n > 0 ? Math.min(1.5, Math.max(0.6, Math.exp((num + STAGE_FIT_K * Math.log(prior)) / (n + STAGE_FIT_K)))) : prior;
+const fitted = stg === 'new' ? Math.min(1, raw) : raw;
 stagePrice[stg] = fitted;
-stageFit[stg] = { prior, observed, n, fitted };
+stageFit[stg] = { prior, observed, n, fitted, capped: fitted !== raw };
 });
 // Every sample on the footing of its room's stage today, weighted by how recently it was booked.
 samples.forEach((sm, i) => sm.forEach((x) => { x.cur = x.wd * stagePrice[roomStage[i]] / stagePrice[x.stage]; x.w = Math.pow(0.5, Math.max(0, T - x.booked) / PRICE_HALF_LIFE_DAYS); }));
@@ -1122,7 +1142,7 @@ const mult = { rated: 1 }; const fit = {};
 ['new', 'superhost'].forEach((stg) => {
 let num = 0; let nEff = 0;
 perRoom.forEach(({ n, weeks }) => {
-if (weeks[stg] < 8 || weeks.rated < 8 || n[stg] + n.rated < 4) return;
+if (weeks[stg] < 8 || weeks.rated < 8 || n[stg] < STAGE_DEMAND_MIN || n.rated < STAGE_DEMAND_MIN) return;
 const w = Math.min(n[stg], n.rated);
 if (!(w > 0)) return;
 num += w * Math.log(((n[stg] + 0.5) / weeks[stg]) / ((n.rated + 0.5) / weeks.rated)); nEff += w;
@@ -1454,10 +1474,10 @@ const name = (ctx.listingLabels || {})[listingId] || 'this listing';
 const sd = stageDemand(ctx, params);
 const x2 = (v) => `×${Number(v).toFixed(2)}`;
 const fitText = (f, what) => (f.n > 0 ? `${what}: prior ${x2(f.prior)}, your own before/after ${x2(f.observed)} on ${f.n} either side, used ${x2(f.fitted)}` : `${what}: prior ${x2(f.prior)}, used as it is (not enough of your own stays either side of the change)`);
-const ratedText = !st ? 'no records' : st.ratedVia === 'reviews' ? `rating shown from ${dayStr(st.ratedOn)} (third reviewed stay's checkout + ${REVIEW_LAG_DAYS} days; a review's own date is not stored)` : st.ratedVia === 'stays' ? `rating taken as shown from ${dayStr(st.ratedOn)}: only ${st.reviews} reviewed stay${st.reviews === 1 ? '' : 's'} on record, so the third completed stay stands in (checkout + ${REVIEW_LAG_DAYS} days)` : `fewer than 3 completed stays, so still new; taken to leave the stage around ${dayStr(st.newUntil)} (a review every ${NEW_STAGE_DAYS_PER_REVIEW} days, an assumption)`;
+const ratedText = !st ? 'no records' : st.ratedVia === 'reviews' ? `rating shown from ${dayStr(st.ratedOn)} (third reviewed stay's checkout + ${REVIEW_LAG_DAYS} days; a review's own date is not stored)` : st.ratedVia === 'stays' ? `rating taken as shown from ${dayStr(st.ratedOn)}: the third completed stay's checkout + ${REVIEW_LAG_DAYS} days. Reviews are on record for recent stays only (${st.reviews} here), so the earlier of the third reviewed stay and the third completed stay is used` : `fewer than 3 completed stays, so still new; taken to leave the stage around ${dayStr(st.newUntil)} (a review every ${NEW_STAGE_DAYS_PER_REVIEW} days, an assumption)`;
 const skippedN = price.trace ? price.trace.leftOutNotShortLet.n : 0;
 return [
-{ id: 'stage', label: `Rating stage of ${name}`, value: STAGE_LABEL[stage], source: `worked out from your records: live from ${st && st.liveOn != null ? dayStr(st.liveOn) : 'unknown'} (${LIVE_BEFORE_FIRST_ASK} days before its first request or booking); ${ratedText}; superhost ${st && st.superhostOn != null ? `from ${dayStr(st.superhostOn)} (Settings, approximate)` : 'not set'}` },
+{ id: 'stage', label: `Rating stage of ${name}`, value: STAGE_LABEL[stage], source: `worked out from your records: live from ${st && st.liveOn != null ? dayStr(st.liveOn) : 'unknown'} (${LIVE_BEFORE_FIRST_ASK} days before its first request or booking); ${ratedText}; superhost ${st && st.superhostOn != null ? `from ${dayStr(st.superhostOn)} (Settings, approximate)` : 'not set'}; ${(ctx.ownListings || {})[listingId] ? 'counted as your own listing (its owner is Phil, or it is on your list of own listings in Settings)' : 'not counted as your own listing (its owner is not Phil)'}` },
 { id: 'newlisting', label: 'New-listing discount', value: `${Math.round(newListingPctOf(s) * 100)}%`, source: `your estimate of Airbnb's new-listing promotion, net: undone on the ${price.nNewListing || 0} stay${price.nNewListing === 1 ? '' : 's'} booked before the third review${stage === 'new' ? ', and taken off simulated bookings until the listing leaves the stage' : ''}. Taken to combine with the other discounts by multiplying (not checked against Airbnb's rules)` },
 { id: 'stageprice', label: 'What a rating stage does to the nightly rate (against rated)', value: `new ${x2(params.stagePrice.new)}, superhost ${x2(params.stagePrice.superhost)}`, source: `${fitText(params.stageFit.new, 'new')}; ${fitText(params.stageFit.superhost, 'superhost')}. The priors are third-party figures with no source (new listings achieve 12% to 20% less, superhosts 10% to 18% more; midpoints used, the new one net of the new-listing discount already undone). Earlier-stage prices are rescaled by these, not dropped` },
 { id: 'stagedemand', label: 'What a rating stage does to requests (against rated)', value: `new ${x2(sd.mult.new)}, superhost ${x2(sd.mult.superhost)}; this room ${x2(sd.adj[ri])}`, source: `${fitText(sd.fit.new, 'new')}; ${fitText(sd.fit.superhost, 'superhost')}. No outside figure exists, so the prior is no effect; your own figure compares requests a week in each stage and is not corrected for how much was open to book` },
@@ -2065,6 +2085,24 @@ const av19b = availabilityOf(c19b, calibrate(c19b), 0);
 const c19c = fresh({}, [{ ...long19, bookedOn: '2026-01-05', longLet: false, noDemand: false }]);
 const p19c = calibrate(c19c);
 check('Long let with a booking date: held from that day, still no ask; as a short let it would be one ask and a price', av19b.open(apr, dayNum('2026-01-04')) === 1 && av19b.open(apr, dayNum('2026-01-05')) === 0 && asksFor(c19b, new Set(['LA'])).length === 0 && asksFor(c19c, new Set(['LA'])).length === 1 && p19c.prices[0].n === 1 && p19c.occ[0].overall != null, `${asksFor(c19b, new Set(['LA'])).length} / ${asksFor(c19c, new Set(['LA'])).length} asks`);
+// 20. Reviews are on record for recent stays only. Same six stays as 17, with only the last three reviewed: the third
+// REVIEWED stay ends 23 Sep (+4 = 27 Sep), the third COMPLETED stay ends 19 Aug (+4 = 23 Aug). The earlier one counts,
+// so the three stays booked on 25 Aug are rated-stage bookings and are not divided by 0.85.
+const stays20 = stays17.map((x) => (x.id.startsWith('r') ? { ...x, reviewed: true } : x));
+const p20 = calibrate(fresh({ newListingDiscountPct: 15, stagePriors: { newAdrPct: -15, superhostAdrPct: 0 } }, stays20));
+const stg20 = p20.stages.get('LA');
+check('Rating stage with incomplete reviews: the earlier of the third reviewed stay and the third completed stay', stg20.reviews === 3 && stg20.ratedOn === dayNum('2026-08-23') && stg20.ratedVia === 'stays' && p20.prices[0].nNewListing === 3 && Math.abs(p20.prices[0].base - 100) < 1e-9, `rated ${dayStr(stg20.ratedOn)} via ${stg20.ratedVia}, ${stg20.reviews} reviews; ${p20.prices[0].nNewListing} stays undone; base ${p20.prices[0].base.toFixed(2)}`);
+// With all six reviewed the two readings agree and the reviews are quoted.
+const stg20b = calibrate(fresh({}, stays17.map((x) => ({ ...x, reviewed: true })))).stages.get('LA');
+check('Rating stage with every stay reviewed: third review, same date', stg20b.ratedOn === dayNum('2026-08-23') && stg20b.ratedVia === 'reviews', `rated ${dayStr(stg20b.ratedOn)} via ${stg20b.ratedVia}`);
+// 21. A "new" stage never counts as dearer than rated. Four early stays at 120 a night and four later ones at 100, no
+// discount, prior x1: the listing's own before/after says x1.2, the fit (4 real against 8 at the prior) x1.063, held at 1.
+const stays21 = [
+st17('a1', '2026-08-03', '2026-08-05', '2026-07-10', 240), st17('a2', '2026-08-10', '2026-08-12', '2026-07-10', 240), st17('a3', '2026-08-17', '2026-08-19', '2026-07-10', 240), st17('a4', '2026-08-24', '2026-08-26', '2026-07-10', 240),
+st17('b1', '2026-09-07', '2026-09-09', '2026-08-25', 200), st17('b2', '2026-09-14', '2026-09-16', '2026-08-25', 200), st17('b3', '2026-09-21', '2026-09-23', '2026-08-25', 200), st17('b4', '2026-09-28', '2026-09-30', '2026-08-25', 200),
+];
+const p21 = calibrate(fresh({ newListingDiscountPct: 0, stagePriors: { newAdrPct: 0, superhostAdrPct: 0 } }, stays21));
+check('Stage fit: a new stage that looks dearer than rated is held at x1', p21.stageFit.new.n === 4 && Math.abs(p21.stageFit.new.observed - 1.2) < 1e-9 && p21.stagePrice.new === 1 && p21.stageFit.new.capped === true, `observed ${p21.stageFit.new.observed.toFixed(3)} on ${p21.stageFit.new.n}, used ${p21.stagePrice.new.toFixed(3)}`);
 return results;
 }
 
