@@ -57,9 +57,19 @@ return { stay: s, merged: false };
 };
 // Every stay is one record in data.airbnbReservations, whatever its status
 // (booked, completed, cancelled); nothing is deleted when a stay ends.
+// A long let is one stay paid by a schedule of income rows (stay.paymentIds). It is drawn once, over the same nights the
+// separate rows were; its income is what those rows add up to, and the rows themselves are not drawn again below.
+const longPaid = new Map();
+const ledgerById = new Map((data.lettingLedger || []).map((e) => [e.id, e]));
+(data.airbnbReservations || []).forEach((r) => {
+if (r.letType !== 'long' || r.status === 'cancelled') return;
+(r.paymentIds || []).forEach((id) => longPaid.set(id, r.id));
+});
+const longIncome = (r) => (r.paymentIds || []).reduce((t, id) => t + (Number((ledgerById.get(id) || {}).gross) || 0), 0) || null;
 (data.airbnbReservations || []).forEach((r) => add({
 id: r.id, listingId: r.listingId, checkin: r.checkin, checkout: r.checkout, guest: r.guestName || '',
-unconfirmed: isUnconfirmedStay(r), income: r.status === 'cancelled' ? null : (r.income ?? null), bookedOn: r.confirmedOn || String(r.createdAt || '').slice(0, 10),
+...(r.letType === 'long' && (r.paymentIds || []).length ? { longLet: true, payments: r.paymentIds.length } : {}),
+unconfirmed: isUnconfirmedStay(r), income: r.status === 'cancelled' ? null : (r.letType === 'long' && (r.paymentIds || []).length ? longIncome(r) : (r.income ?? null)), bookedOn: r.confirmedOn || (r.letType === 'long' && (r.paymentIds || []).length ? '' : String(r.createdAt || '').slice(0, 10)),
 cancelledOn: r.cancelledOn || '', status: r.status === 'cancelled' ? 'cancelled' : 'stay',
 source: r.status === 'completed' ? 'finished' : r.status === 'cancelled' ? 'cancelled' : 'live', platform: r.platform === 'other' ? 'other' : 'airbnb',
 }));
@@ -87,6 +97,7 @@ const row = { it, fate: '', room: '' };
 trace.push(row);
 if (it.kind === 'cancellation') { row.fate = 'payout'; return; }
 if (it.source === 'reservation') { row.fate = 'drawn'; row.room = it.listing.id; return; } // drawn from the booking itself, above
+if (longPaid.has(it.id)) { row.fate = 'longlet'; row.stayId = longPaid.get(it.id); row.room = (data.airbnbReservations.find((r) => r.id === row.stayId) || {}).listingId || ''; return; } // part of a long let, drawn as one stay above
 if (!it.start) { row.fate = 'lump'; return; }
 const listingId = roomForCancellation({ listingId: it.explicit ? it.listing.id : '', ownerKey: it.ownerKey, date: it.date }, ownerListings);
 if (!listingId) { unplacedIncome += 1; row.fate = 'noroom'; return; }
@@ -1112,6 +1123,7 @@ const { it } = r;
 if (r.fate === 'drawn') return `Drawn on the ${escapeHtml(roomName(r.room))} row${it.source === 'ledger' && !it.explicit ? ' (room chosen from its owner)' : ''}.${clash(r)}`;
 if (r.fate === 'covered') return 'Nothing to fix: this is the accrual posted for a booking that is still on file, so the money is already counted once through that booking (its row above).';
 if (r.fate === 'skipped') return `Not counted anywhere. ${escapeHtml(r.reason)} Fix it on its ${goto} row.`;
+if (r.fate === 'longlet') return `One payment of a <span class="inline-goto-link" role="button" tabindex="0" data-goto-tab="overview" data-goto-target="[data-airbnb-row='${escapeHtml(r.stayId)}']">long let</span>, drawn once as that stay on ${escapeHtml(roomName(r.room))}.`;
 if (r.fate === 'merged') return `Exactly the same room and dates as another record, so drawn once on ${escapeHtml(roomName(r.room))}.${clash(r)}`;
 if (r.fate === 'payout') return `Cancellation payout, counted on ${shortDate(it.date)}.`;
 if (r.fate === 'lump') return `No check-in date or nights, so it can't be drawn. Counted in revenue on ${shortDate(it.date)} only. Add them on its ${goto} row.`;

@@ -9,6 +9,7 @@
 // fact, by hand or from the booking email. A hand-typed external event
 // is the exception -- its title carries the name, and that's read off it.
 import { safeHref } from '../utils.js';
+import { channelChoices, channelName, applyStayChannel } from '../channels.js';
 import { data, queueSave, blankAirbnbListing, blankAirbnbReservation, blankAirbnbKey, blankAirbnbKeyAssignment, KEY_CUSTODIAN_TYPES } from '../state.js';
 import { escapeHtml, todayStr, dateStrAdd, uid, MISSING_KEY_LINK_HTML, pickChipHtml, scrollAndFlash } from '../utils.js';
 import { owners, ownerNameFor, ownerKeyFor, shareRuleAt, money, CAP_KEEPS_FROM } from './letting.js';
@@ -851,6 +852,7 @@ const nights = Math.round((new Date(`${r.checkout}T00:00:00`) - new Date(`${r.ch
 const lengthLabel = nights <= 0 ? 'same day' : `${nights} night${nights === 1 ? '' : 's'}`;
 const label = listing.label || listing.prefix || 'Listing';
 const more = openStayMore.has(r.id);
+const isLong = r.letType === 'long' && (r.paymentIds || []).length > 0;
 const pushed = r.source === 'external'
 ? '<span class="stay-cal-ok" title="Found on the shared calendar by its external prefix: nothing to push, it is already there.">&#128197;&#10003;</span>'
 : r.googleEventId
@@ -863,10 +865,10 @@ return `<div class="cal-row stay-row" data-airbnb-row="${r.id}">
 <span class="cal-badge ${escapeHtml(listing.colour)}" title="${escapeHtml(lengthLabel)}">${formatAirbnbDate(r.checkin)} &rarr; ${formatAirbnbDate(r.checkout)} &middot; ${nights <= 0 ? 'day' : `${nights}n`}</span>
 </div>
 <div class="cal-turn-row">
-<input type="number" step="0.01" min="0" class="tag-add-input" placeholder="${escapeHtml(pend && pend.payout != null ? `£${Math.round(pend.payout)} if accepted` : 'Income £')}" data-airbnb-res-field="income" data-airbnb-res-id="${r.id}" value="${r.income ?? ''}" style="max-width:86px;" title="What this stay earned. The owner's share becomes a debt on the checkout date — see Letting income on Finances.">
-${r.platform !== 'other' ? AIRBNB_LOGO : '<span class="settings-note" style="margin:0;" title="Not booked through Airbnb">Other</span>'}
+${isLong ? `<span class="settings-note" style="margin:0;" title="One let paid by a schedule of income entries in Letting income. The entries are unchanged; this stay only says the nights are one let.">Long let &middot; ${r.paymentIds.length} payments</span>` : `<input type="number" step="0.01" min="0" class="tag-add-input" placeholder="${escapeHtml(pend && pend.payout != null ? `£${Math.round(pend.payout)} if accepted` : 'Income £')}" data-airbnb-res-field="income" data-airbnb-res-id="${r.id}" value="${r.income ?? ''}" style="max-width:86px;" title="What this stay earned. The owner's share becomes a debt on the checkout date — see Letting income on Finances.">`}
+${r.platform !== 'other' ? AIRBNB_LOGO : `<span class="settings-note" style="margin:0;" title="Not booked through Airbnb">${escapeHtml(channelName(data.prefs.lettingChannels, r.channel))}</span>`}
 ${pushed}
-${data.prefs.airbnbCalendarId && listing.needsCleaning ? `<div class="cal-clean-group">${cleanerChipHtml(r, 'checkin')}${cleanerChipHtml(r, 'checkout')}</div>` : ''}${reservationKeysHtml(r)}
+${data.prefs.airbnbCalendarId && listing.needsCleaning && !isLong ? `<div class="cal-clean-group">${cleanerChipHtml(r, 'checkin')}${cleanerChipHtml(r, 'checkout')}</div>` : ''}${reservationKeysHtml(r)}
 <button type="button" class="stay-more-btn" data-airbnb-more="${r.id}" aria-expanded="${more}" title="Listing, notes, the booking date, the day the guest paid, and the channel${r.notes ? `. Notes: ${escapeHtml(r.notes)}` : ''}">${r.notes ? '&#9998; ' : ''}<span class="stay-more-caret">&#9662;</span></button>
 </div>
 <div class="sync-status" data-airbnb-push-status="${r.id}">${pushNoteHtml(r)}</div>
@@ -874,10 +876,8 @@ ${data.prefs.airbnbCalendarId && listing.needsCleaning ? `<div class="cal-clean-
 ${data.airbnbListings.length > 1 ? `<label>Listing <select data-airbnb-res-move="${r.id}" title="Which listing this stay belongs to. Change it when someone else rented the room out this time, e.g. you took the booking yourself, so the income and occupancy go to the right listing and owner.">${data.airbnbListings.map((l) => `<option value="${escapeHtml(l.id)}"${l.id === r.listingId ? ' selected' : ''}>${escapeHtml(l.label || l.prefix || 'Listing')}</option>`).join('')}</select></label>` : ''}
 <label>Booked <input type="date" class="tag-add-input" data-airbnb-res-field="confirmedOn" data-airbnb-res-id="${r.id}" value="${escapeHtml(r.confirmedOn || '')}" style="max-width:130px;" title="The day this booking was made (the confirmation email's date). Lead times in the booking model and the Nights booked chart are worked out from it. Sync fills it in when the confirmation email is in your inbox."></label>
 <label>Guest paid <input type="date" class="tag-add-input" data-airbnb-res-field="paidOn" data-airbnb-res-id="${r.id}" value="${escapeHtml(r.paidOn || '')}" style="max-width:130px;" title="The day the guest paid. Only used for a capped owner's monthly limit, never as the booking date. A capped owner's monthly limit is counted in this month; blank falls back to the checkout month."></label>
-<label>Channel <select data-airbnb-res-field="platform" data-airbnb-res-id="${r.id}" title="Which platform this stay's income came through: the Letting income chart on Finances breaks solid (Airbnb) out from striped (Other).">
-<option value="airbnb"${r.platform !== 'other' ? ' selected' : ''}>Airbnb</option>
-<option value="other"${r.platform === 'other' ? ' selected' : ''}>Other</option>
-</select></label>
+<label>Channel <select data-airbnb-stay-channel="${r.id}" title="Where this stay came from (channels are edited in Settings). The Letting income chart on Finances draws Airbnb solid and every other channel striped. A channel that is a long let by default also sets the let type to long.">${channelChoices(data.prefs.lettingChannels, r.channel).map((c) => `<option value="${escapeHtml(c.id)}"${c.id === r.channel ? ' selected' : ''}>${escapeHtml(c.name)}${c.active ? '' : ' (inactive)'}</option>`).join('')}</select></label>
+<label>Let <select data-airbnb-stay-lettype="${r.id}"${isLong ? ' disabled' : ''} title="${isLong ? 'Fixed while payments are linked. ' : ''}A long let takes the room off the market for the whole run and is not a short-let request. To fold a run of income entries into one long let, use Merge into one long let in Settings."><option value="short"${r.letType !== 'long' ? ' selected' : ''}>Short let</option><option value="long"${r.letType === 'long' ? ' selected' : ''}>Long let</option></select></label>
 <input type="text" autocomplete="off" class="tag-add-input stay-notes" placeholder="Notes" data-airbnb-res-field="notes" data-airbnb-res-id="${r.id}" value="${escapeHtml(r.notes)}">
 ${r.source === 'manual' ? `<span class="del-x" style="opacity:1;" data-airbnb-res-del="${r.id}" title="Delete this booking — nothing else records it, so it won't come back on the next Sync">&times;</span>` : ''}
 </div>
@@ -891,7 +891,7 @@ ${payoutCheckHtml(r)}
 // Upcoming stays and those still awaiting income are rows on this panel; an earlier or
 // cancelled one is shown by its entry in Letting income instead.
 function stayIsOnPanel(r) {
-return notCancelled(r) && (r.checkout >= todayStr() || (!r.accruedAt && r.checkout > r.checkin && r.checkout >= dateStrAdd(todayStr(), -AWAITING_INCOME_DAYS)));
+return notCancelled(r) && ((r.letType === 'long' && (r.paymentIds || []).length > 0) || r.checkout >= todayStr() || (!r.accruedAt && r.checkout > r.checkin && r.checkout >= dateStrAdd(todayStr(), -AWAITING_INCOME_DAYS)));
 }
 function stayChipHtml(r, extraHtml = '') {
 const listing = data.airbnbListings.find((l) => l.id === r.listingId) || {};
@@ -1042,7 +1042,7 @@ const countEl = document.getElementById('airbnb-count');
 if (!el) return;
 const upcoming = data.airbnbReservations
 .filter(notCancelled)
-.filter((r) => r.checkout >= todayStr() || (!r.accruedAt && r.checkout > r.checkin && r.checkout >= dateStrAdd(todayStr(), -AWAITING_INCOME_DAYS)))
+.filter((r) => (r.letType === 'long' && (r.paymentIds || []).length > 0) || r.checkout >= todayStr() || (!r.accruedAt && r.checkout > r.checkin && r.checkout >= dateStrAdd(todayStr(), -AWAITING_INCOME_DAYS)))
 .sort((a, b) => (a.checkin < b.checkin ? -1 : a.checkin > b.checkin ? 1 : 0));
 if (countEl) countEl.textContent = upcoming.length ? String(upcoming.length) : '';
 const errorsHtml = airbnbSyncErrorsHtml();
@@ -1085,6 +1085,25 @@ if (field === 'income' || field === 'paidOn') {
 // An already-charged stay's ledger row follows the new figure (reconcileAccrual).
 import('./letting.js').then((m) => { m.reconcileAccrual(r); m.accrueLettings(); m.renderLetting(); });
 }
+});
+});
+el.querySelectorAll('[data-airbnb-stay-channel]').forEach((select) => {
+select.addEventListener('change', () => {
+const r = data.airbnbReservations.find((x) => x.id === select.dataset.airbnbStayChannel);
+if (!r) return;
+applyStayChannel(r, data.prefs.lettingChannels, select.value);
+queueSave();
+renderAirbnb();
+import('./letting.js').then((m) => m.renderLetting()).catch(() => {});
+});
+});
+el.querySelectorAll('[data-airbnb-stay-lettype]').forEach((select) => {
+select.addEventListener('change', () => {
+const r = data.airbnbReservations.find((x) => x.id === select.dataset.airbnbStayLettype);
+if (!r) return;
+r.letType = select.value === 'long' ? 'long' : 'short';
+queueSave();
+renderAirbnb();
 });
 });
 el.querySelectorAll('[data-airbnb-payout-checked]').forEach((btn) => {

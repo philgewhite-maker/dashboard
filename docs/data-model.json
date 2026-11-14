@@ -20,7 +20,7 @@
     ["plannerActivities","connectionId","connections"],["plannerActivities","tripId","trips"],
     ["catSittingVisits","tripId","trips"],["catSittingVisits","connectionId","connections"],
     ["airbnbReservations","listingId","airbnbListings"],    ["airbnbListings","ownerConnectionId","connections"],
-    ["lettingLedger","listingId","airbnbListings"],["lettingLedger","reservationId","airbnbReservations"],["lettingLedger","ownerKey","connections"],
+    ["lettingLedger","listingId","airbnbListings"],["lettingLedger","reservationId","airbnbReservations"],["airbnbReservations","paymentIds","lettingLedger"],["lettingLedger","ownerKey","connections"],
     ["airbnbKeys","listingIds","airbnbListings"],
     ["airbnbKeyAssignments","keyId","airbnbKeys"],["airbnbKeyAssignments","reservationId","airbnbReservations"],
     ["airbnbRateProposals","listingId","airbnbListings"],["airbnbRateProposals","taskId","tasks"],

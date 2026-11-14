@@ -2,6 +2,7 @@ import { kvGet, kvSet, kvSetMany, photoDelete } from './db.js';
 import { mergeDocuments } from './sync/merge.js';
 import { uid, todayStr, daysAgoStr, last7Dates, daysSince, daysUntil } from './utils.js';
 import { matchBrandLogo, matchBrandEntry, splitProvider } from './brandLogos.js';
+import { DEFAULT_LETTING_CHANNELS, normaliseChannels, migrateStayChannel, migrateLeoJerry } from './channels.js';
 import { splitLedgerNotes, migrateStays, dedupeStays, unlinkCopiedCodes, repairMigratedBookingDates, migrateVouchers, dedupeAccruals, migrateConnections, linkProviders } from './migrations.js';
 
 const DATA_KEY = 'app-data';
@@ -167,6 +168,12 @@ prefs: { ...DEFAULT_PREFS },
 // "no limit" for days and "use this default" for count, so leaving the boxes
 // empty stays the simple case.
 const DEFAULT_PREFS = {
+// Where a stay came from (js/channels.js): [{id, name, group:'platform'|'ownsite'|'personal', feePct, countsAsDemand,
+// longLetDefault, active}]. Edited in Settings -> Finances -> Booking evaluator. Built-in ids can be deactivated, not removed.
+lettingChannels: DEFAULT_LETTING_CHANNELS.map((c) => ({ ...c })),
+// Set once the Leo & Jerry long-let migration (js/channels.js migrateLeoJerry) has made, or found, its stay, so a
+// deliberate "Split back" is not undone by the migration on the next load.
+leoJerryLongLetDone: false,
 calendarEventCount: 1,
 mailResultCount: 5,
 airbnbCalendarId: '', // which Google Calendar "Push to Google Calendar" targets -- picked once, remembered
@@ -1716,6 +1723,10 @@ confirmedOn: '',
 // chart (letting.js) draws 'other' as a striped fill of the same
 // listing colour rather than solid.
 platform: 'airbnb',
+// Where the stay came from: an id in prefs.lettingChannels. `platform` above is derived from it ('airbnb' only for the
+// 'airbnb' channel) so older readers keep working. letType 'long' = one let paid by a schedule of ledger income rows:
+// paymentIds lists those lettingLedger row ids (the rows themselves are never edited; see js/channels.js).
+channel: 'airbnb', letType: 'short', paymentIds: [],
 googleEventId: '', googleCalendarId: '', // set once pushed, OR always set for source:'external' -- see js/googlecalendar.js's findEvents()/createEvent()
 createdAt: new Date().toISOString(),
 ...fields,
@@ -3486,7 +3497,9 @@ data.plannerExtraDays = [...new Set(data.plannerExtraDays.filter((d) => typeof d
 if (!Array.isArray(data.airbnbListings)) data.airbnbListings = [];
 data.airbnbListings = data.airbnbListings.map((l) => ({ ...blankAirbnbListing(), ...l, id: l.id || uid() }));
 if (!Array.isArray(data.airbnbReservations)) data.airbnbReservations = [];
-data.airbnbReservations = data.airbnbReservations.map((r) => ({ ...blankAirbnbReservation(), ...r, id: r.id || uid() }));
+// channel/letType: derived from the stored record BEFORE blank defaults are merged over it, so "no channel yet" is
+// still detectable (platform 'airbnb' -> channel 'airbnb', anything else -> 'wordofmouth'). Idempotent.
+data.airbnbReservations = data.airbnbReservations.map((r) => { const s = { ...r }; migrateStayChannel(s); return { ...blankAirbnbReservation(), ...s, id: r.id || uid() }; });
 // A reservation whose listing was since deleted from Settings has nothing
 // left to sync it or show it against -- same orphan-drop reasoning as the
 // planner-entries filter just above.
@@ -3521,6 +3534,14 @@ if (copied.length) console.info('Booking code copied onto a second stay, cleared
 if (Array.isArray(data.lettingLedger)) {
 const dupes = dedupeAccruals(data);
 if (dupes.length) console.info('Duplicate Letting income rows removed:', dupes);
+}
+// Leo & Jerry's 17 fortnightly payments become one long let (js/channels.js). Acts only on exactly the expected rows;
+// the id comes from the first payment, so every device makes the same record. Income rows are not touched.
+// Runs until it has made (or found) the stay once; after that the marker keeps a later "Split back" split.
+if (Array.isArray(data.lettingLedger) && data.lettingLedger.length && !(data.prefs && data.prefs.leoJerryLongLetDone)) {
+const lj = migrateLeoJerry(data, blankAirbnbReservation);
+if (lj.done) console.info('Long let created from ledger rows:', lj);
+if (lj.stayId || lj.reason === 'already merged') { data.prefs = data.prefs || {}; data.prefs.leoJerryLongLetDone = true; }
 }
 // Backfills `nights` onto an older accrual row that predates the
 // average-night-rate feature (letting.js's nightRateFor) -- derived
@@ -3654,6 +3675,7 @@ data.mailDismissed = data.mailDismissed.map((d) => ({ ...blankMailDismissal(), .
 data.prefs = { ...DEFAULT_PREFS, ...(data.prefs || {}) };
 // One level deeper for the booking evaluator's settings object, so a setting added later
 // reaches a device whose prefs already hold an older copy of it.
+data.prefs.lettingChannels = normaliseChannels(data.prefs.lettingChannels);
 const savedEvaluator = (data.prefs.bookingEvaluator || {});
 data.prefs.bookingEvaluator = { ...DEFAULT_PREFS.bookingEvaluator, ...(data.prefs.bookingEvaluator || {}) };
 // The old three-step "last-minute" setting became the short-notice array of the Airbnb discounts, once: kept when you

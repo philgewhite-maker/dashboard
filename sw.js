@@ -2,7 +2,7 @@
 // deletes every cache that isn't the current name, so raising the version is
 // what actually evicts a stale copy from a device that has been running the
 // app for a while.
-const CACHE_NAME = 'dashboard-v842';
+const CACHE_NAME = 'dashboard-v843';
 const CORE_ASSETS = [
 './',
 './index.html',
@@ -49,6 +49,7 @@ const CORE_ASSETS = [
 './js/theme.js',
 './js/features/activity.js',
 './js/render-bus.js',
+'./js/channels.js',
 './js/features/lettingoccupancy.js',
 './js/features/bookingrequests.js',
 './js/features/bookingsettings.js',

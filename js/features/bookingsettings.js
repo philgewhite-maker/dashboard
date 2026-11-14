@@ -2,7 +2,8 @@
 // (js/features/bookingmodel.js) starts from, stored in data.prefs.bookingEvaluator
 // (defaults in state.js DEFAULT_PREFS). Every box is a number or a tick; the model blends
 // each with your own data as it builds up.
-import { data, queueSave, DEFAULT_PREFS } from '../state.js';
+import { data, queueSave, DEFAULT_PREFS, blankAirbnbReservation } from '../state.js';
+import { CHANNEL_GROUPS, CHANNEL_GROUP_LABEL, BUILTIN_CHANNEL_IDS, normaliseChannels, newChannelId, longLetCandidates, planLongLet, createLongLet, ledgerRowSpan, channelName } from '../channels.js';
 import { escapeHtml, uid } from '../utils.js';
 import { nightRateRooms } from './letting.js';
 
@@ -56,6 +57,65 @@ ${block('airbnb', 'Airbnb', '')}
 ${block('direct', 'Direct bookings (your own site)', 'Not used until bookings come through your own site.')}`;
 }
 
+// ---- Channels and long lets ---------------------------------------------------------------------------------------
+function channels() {
+data.prefs.lettingChannels = normaliseChannels(data.prefs.lettingChannels);
+return data.prefs.lettingChannels;
+}
+
+function channelsHtml() {
+const cb = (id, field, on, title) => `<input type="checkbox" data-ch="${escapeHtml(id)}" data-ch-field="${field}"${on ? ' checked' : ''} title="${escapeHtml(title)}">`;
+return `<h4 class="be-set-h" id="letting-channels">Channels</h4>
+<div class="settings-note" style="margin:0 0 4px;">Where a stay came from. Pick one on each stay. "Counts as demand" is whether its bookings respond to your listed price (word of mouth and long lets do not). "Long let" makes a stay on that channel a long let by default. A built-in channel can be switched off but not removed.</div>
+<table class="limits-table be-channels"><thead><tr><th>Channel</th><th>Group</th><th title="Percent of a booking this channel takes. Left at 0 until you enter your own figure.">Fee %</th><th>Counts as demand</th><th>Long let</th><th>Active</th><th></th></tr></thead><tbody>${channels().map((c) => `<tr>
+<td><input type="text" class="settings-input" data-ch="${escapeHtml(c.id)}" data-ch-field="name" value="${escapeHtml(c.name)}" style="width:150px;"></td>
+<td><select class="settings-input" data-ch="${escapeHtml(c.id)}" data-ch-field="group">${CHANNEL_GROUPS.map((g) => `<option value="${g}"${c.group === g ? ' selected' : ''}>${CHANNEL_GROUP_LABEL[g]}</option>`).join('')}</select></td>
+<td><input type="number" class="settings-input" data-ch="${escapeHtml(c.id)}" data-ch-field="feePct" value="${escapeHtml(String(c.feePct))}" min="0" step="0.1" style="width:60px;"></td>
+<td style="text-align:center;">${cb(c.id, 'countsAsDemand', c.countsAsDemand, 'Its bookings count as market demand')}</td>
+<td style="text-align:center;">${cb(c.id, 'longLetDefault', c.longLetDefault, 'A stay on this channel defaults to a long let')}</td>
+<td style="text-align:center;">${cb(c.id, 'active', c.active, 'Offered when picking a channel for a stay')}</td>
+<td>${BUILTIN_CHANNEL_IDS.includes(c.id) ? '' : `<span class="del-x" data-ch-del="${escapeHtml(c.id)}" title="Remove this channel">&times;</span>`}</td></tr>`).join('')}</tbody></table>
+<button class="sync-btn sm inline" type="button" id="ch-add" style="margin-top:4px;">Add a channel</button>
+<div class="sync-status" id="ch-status"></div>`;
+}
+
+const money2 = (n) => `£${Number(n).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const guestOf = (e) => String(e.guest || e.note || '').trim();
+let llGuest = '';
+let llOff = new Set();
+let llMsg = '';
+
+// Merge a run of income entries into one long let. The entries are only linked to the new stay, never edited.
+function longLetHtml() {
+const cands = longLetCandidates(data);
+const groups = new Map();
+cands.forEach((e) => { const k = guestOf(e).toLowerCase(); if (k) { if (!groups.has(k)) groups.set(k, []); groups.get(k).push(e); } });
+const multi = [...groups.entries()].filter(([, rows]) => rows.length >= 2);
+if (!multi.some(([k]) => k === llGuest.toLowerCase())) llGuest = multi.length ? multi[0][0] : '';
+const listings = data.airbnbListings || [];
+const made = (data.airbnbReservations || []).filter((r) => r.letType === 'long' && (r.paymentIds || []).length);
+let body = '';
+if (!multi.length) body = '<div class="settings-note" style="margin:0;">No guest has two or more unlinked income entries with a start date and nights.</div>';
+else {
+const rows = groups.get(llGuest).slice().sort((a, b) => ledgerRowSpan(a).start.localeCompare(ledgerRowSpan(b).start));
+const picked = rows.filter((e) => !llOff.has(e.id));
+const plan = picked.length >= 2 ? planLongLet(data, picked.map((e) => e.id)) : { ok: false, error: 'Pick at least two payments.' };
+body = `<div class="sync-row" style="align-items:center;"><select id="ll-guest" class="settings-input">${multi.map(([k, rs]) => `<option value="${escapeHtml(k)}"${k === llGuest ? ' selected' : ''}>${escapeHtml(guestOf(rs[0]))} (${rs.length} entries)</option>`).join('')}</select></div>
+<div class="be-ll-rows">${rows.map((e) => { const sp = ledgerRowSpan(e); const l = listings.find((x) => x.id === e.listingId); return `<label class="be-set-row" style="display:flex;gap:6px;align-items:center;"><input type="checkbox" data-ll-row="${escapeHtml(e.id)}"${llOff.has(e.id) ? '' : ' checked'}> ${escapeHtml(sp.start)} &rarr; ${escapeHtml(sp.end)} &middot; ${sp.nights}n &middot; ${money2(e.gross)} &middot; ${escapeHtml(l ? (l.label || l.prefix || 'Listing') : 'no listing')}</label>`; }).join('')}</div>
+${plan.ok ? `<div class="settings-note" style="margin:4px 0;">${picked.length} payments, ${escapeHtml(plan.start)} &rarr; ${escapeHtml(plan.end)}, ${plan.nights} nights, ${money2(plan.total)}. Occupancy is unchanged: the same nights, drawn once.</div>
+<div class="sync-row" style="align-items:center;flex-wrap:wrap;"><label>Listing <select id="ll-listing" class="settings-input">${listings.map((l) => `<option value="${escapeHtml(l.id)}"${l.id === plan.listingId ? ' selected' : ''}>${escapeHtml(l.label || l.prefix || 'Listing')}</option>`).join('')}</select></label>
+<label>Signed <input type="date" id="ll-booked" class="settings-input" value="${escapeHtml(plan.bookedOn)}" title="The day the contract was signed (the booking date)"></label>
+<label>Channel <select id="ll-channel" class="settings-input">${channels().filter((c) => c.active).map((c) => `<option value="${escapeHtml(c.id)}"${c.id === 'wordofmouth' ? ' selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}</select></label>
+<button class="sync-btn sm inline" type="button" id="ll-merge">Merge into one long let</button></div>` : `<div class="settings-note" style="margin:4px 0;">${escapeHtml(plan.error)}</div>`}`;
+}
+return `<h4 class="be-set-h" id="long-lets">Long lets</h4>
+<div class="settings-note" style="margin:0 0 4px;">A long let is one stay with a signing date, a start and an end, paid by a schedule of income entries. Merging links the entries you tick to a single stay; the entries themselves (amounts, owners, dates) do not change, and the same nights stay blocked on the occupancy chart.</div>
+${body}
+${llMsg ? `<div class="sync-status">${llMsg}</div>` : ''}
+${made.length ? `<div class="settings-note" style="margin:8px 0 2px;">Long lets already made</div>${made.map((r) => `<div class="be-set-row"><span class="inline-goto-link" data-goto-tab="overview" data-goto-target="[data-airbnb-row='${escapeHtml(r.id)}']" title="Open this stay">${escapeHtml(r.guestName || 'Long let')} &middot; ${escapeHtml(r.checkin)} &rarr; ${escapeHtml(r.checkout)} &middot; ${r.paymentIds.length} payments &middot; ${escapeHtml(channelName(channels(), r.channel))}</span> <button class="sync-btn sm inline" type="button" data-ll-split="${escapeHtml(r.id)}" title="Delete this stay and show its payments as separate stays again. The income entries are untouched.">Split back</button></div>`).join('')}` : ''}`;
+}
+function renderLongLet() { const el = document.getElementById('ll-merge-box'); if (el) el.innerHTML = longLetHtml(); }
+
 function earningsDataHtml() {
 const rows = data.airbnbEarnings || [];
 if (!rows.length) return `<div class="settings-note" style="margin:0;">No Airbnb earnings stored yet. <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#airbnb-earnings-import">Import an earnings CSV</span> in Letting income: its rows are kept in full, and the raw nightly rates and cleaning fees below are worked out from them.</div>`;
@@ -94,6 +154,8 @@ const s = settings();
 const rooms = evaluatorRooms();
 el.innerHTML = `
 <div class="settings-note" style="margin:0 0 8px;">The booking evaluator weighs accepting a booking request against keeping its dates open. Each figure here is a starting assumption; the model blends it with your own stays and requests as they build up, and shows which it used.</div>
+<div id="ch-box">${channelsHtml()}</div>
+<div id="ll-merge-box">${longLetHtml()}</div>
 <h4 class="be-set-h">Earnings data</h4>
 ${earningsDataHtml()}
 <h4 class="be-set-h">Estimated rates</h4>
@@ -162,6 +224,19 @@ const el = document.getElementById('booking-evaluator-settings');
 if (!el) return;
 renderBookingEvaluatorSettings();
 el.addEventListener('change', (e) => {
+const chIn = e.target.closest('[data-ch]');
+if (chIn) {
+const c = channels().find((x) => x.id === chIn.dataset.ch);
+const f = chIn.dataset.chField;
+if (!c) return;
+if (f === 'name') { if (!chIn.value.trim()) { chIn.value = c.name; return; } c.name = chIn.value.trim(); }
+else if (f === 'group') c.group = CHANNEL_GROUPS.includes(chIn.value) ? chIn.value : c.group;
+else if (f === 'feePct') { const v = Number(chIn.value); if (!(v >= 0)) { chIn.value = c.feePct; return; } c.feePct = v; }
+else c[f] = chIn.checked;
+queueSave(); renderLongLet(); return;
+}
+if (e.target.id === 'll-guest') { llGuest = e.target.value; llOff = new Set(); llMsg = ''; renderLongLet(); return; }
+if (e.target.dataset.llRow) { if (e.target.checked) llOff.delete(e.target.dataset.llRow); else llOff.add(e.target.dataset.llRow); renderLongLet(); return; }
 const input = e.target.closest('[data-be]');
 if (!input) return;
 const path = input.dataset.be;
@@ -185,6 +260,42 @@ renderEstimatedRates();
 queueSave();
 });
 el.addEventListener('click', (e) => {
+if (e.target.closest('#ch-add')) {
+const list = channels();
+list.push({ id: newChannelId(list, 'New channel'), name: 'New channel', group: 'platform', feePct: 0, countsAsDemand: false, longLetDefault: false, active: true });
+queueSave(); document.getElementById('ch-box').innerHTML = channelsHtml(); return;
+}
+const chDel = e.target.closest('[data-ch-del]');
+if (chDel) {
+const id = chDel.dataset.chDel;
+const used = (data.airbnbReservations || []).filter((r) => r.channel === id).length;
+if (BUILTIN_CHANNEL_IDS.includes(id)) return;
+if (used) { document.getElementById('ch-status').textContent = `${used} stay${used === 1 ? ' uses' : 's use'} this channel, so it can only be switched off, not removed.`; return; }
+data.prefs.lettingChannels = channels().filter((c) => c.id !== id);
+queueSave(); document.getElementById('ch-box').innerHTML = channelsHtml(); return;
+}
+if (e.target.closest('#ll-merge')) {
+const rows = longLetCandidates(data).filter((x) => guestOf(x).toLowerCase() === llGuest.toLowerCase() && !llOff.has(x.id));
+const picked = rows.map((x) => x.id);
+const guestName = rows.length ? guestOf(rows[0]) : '';
+const r = createLongLet(data, { paymentIds: picked, listingId: document.getElementById('ll-listing').value, bookedOn: document.getElementById('ll-booked').value, channel: document.getElementById('ll-channel').value, guestName }, blankAirbnbReservation);
+if (r.error) { llMsg = escapeHtml(r.error); } else {
+llMsg = `Merged ${r.stay.paymentIds.length} payments into one long let, <span class="inline-goto-link" data-goto-tab="overview" data-goto-target="[data-airbnb-row='${escapeHtml(r.stay.id)}']">open the stay</span>.`;
+llOff = new Set(); queueSave();
+import('./airbnb.js').then((m) => m.renderAirbnb && m.renderAirbnb()).catch(() => {});
+import('./letting.js').then((m) => m.renderLetting && m.renderLetting()).catch(() => {});
+}
+renderLongLet(); return;
+}
+const split = e.target.closest('[data-ll-split]');
+if (split) {
+const r = (data.airbnbReservations || []).find((x) => x.id === split.dataset.llSplit);
+if (!r || !confirm('Delete this long-let stay and show its payments as separate stays again? The income entries are not changed.')) return;
+data.airbnbReservations = data.airbnbReservations.filter((x) => x.id !== r.id);
+llMsg = ''; queueSave(); renderLongLet();
+import('./airbnb.js').then((m) => m.renderAirbnb && m.renderAirbnb()).catch(() => {});
+return;
+}
 const addStep = e.target.closest('[data-be-disc-add]');
 if (addStep) {
 const [channel, kind] = addStep.dataset.beDiscAdd.split('.');
