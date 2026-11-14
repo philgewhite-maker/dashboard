@@ -828,6 +828,16 @@ statusEl.textContent = `Couldn't add: ${err.message || err}`;
 }
 }
 
+// Which stays have their "more" row open (listing, booked date, channel, notes): session-only.
+const openStayMore = new Set();
+// "Double - Zara" -> "Double · Z": the dot's colour already says whose it is; the full name is in the tooltip and the more row.
+function shortListingLabel(label) {
+const [room, ...rest] = String(label).split(/\s+[-–]\s+/);
+const who = rest.join(' ').trim();
+return who ? `${room} · ${who[0].toUpperCase()}` : room;
+}
+const AIRBNB_LOGO = '<svg class="airbnb-logo" viewBox="0 0 24 24" width="15" height="15" role="img" aria-label="Airbnb"><title>Airbnb</title><path fill="currentColor" d="M12.001 18.275c-1.353-1.697-2.148-3.184-2.413-4.457-.263-1.027-.16-1.848.291-2.465.477-.71 1.188-1.056 2.121-1.056s1.643.345 2.12 1.063c.446.61.558 1.432.286 2.465-.291 1.298-1.085 2.785-2.412 4.458zm9.601 1.14c-.185 1.246-1.034 2.28-2.2 2.783-2.253.98-4.483-.583-6.392-2.704 3.157-3.951 3.74-7.028 2.385-9.018-.795-1.14-1.933-1.695-3.394-1.695-2.944 0-4.563 2.49-3.927 5.382.37 1.565 1.352 3.343 2.917 5.332-.98 1.085-1.91 1.856-2.732 2.333-.636.344-1.245.558-1.828.609-2.679.399-4.778-2.2-3.825-4.88.132-.345.395-.98.845-1.961l.025-.053c1.464-3.178 3.242-6.79 5.285-10.795l.053-.132.58-1.116c.45-.822.635-1.19 1.351-1.643.346-.21.77-.315 1.246-.315.954 0 1.698.558 2.016 1.007.158.239.345.557.582.953l.558 1.089.08.159c2.041 4.004 3.821 7.608 5.279 10.794l.026.025.533 1.22.318.764c.243.613.294 1.222.213 1.858zm1.22-2.39c-.186-.583-.505-1.271-.9-2.094v-.03c-1.889-4.006-3.642-7.608-5.307-10.844l-.111-.163C15.317 1.461 14.468 0 12.001 0c-2.44 0-3.476 1.695-4.535 3.898l-.081.16c-1.669 3.236-3.421 6.843-5.308 10.849v.053l-.559 1.22c-.21.504-.317.768-.345.847C-.172 20.74 2.611 24 5.98 24c.027 0 .132 0 .265-.027h.372c1.75-.213 3.554-1.325 5.384-3.317 1.829 1.989 3.635 3.104 5.382 3.317h.372c.133.027.239.027.265.027 3.37.003 6.152-3.261 4.802-6.975z"/></svg>';
+
 function reservationRowHtml(r) {
 const listing = data.airbnbListings.find((l) => l.id === r.listingId);
 if (!listing) return '';
@@ -839,31 +849,39 @@ const pend = pendingRequestFor(r);
 // look like a data error.
 const nights = Math.round((new Date(`${r.checkout}T00:00:00`) - new Date(`${r.checkin}T00:00:00`)) / 86400000);
 const lengthLabel = nights <= 0 ? 'same day' : `${nights} night${nights === 1 ? '' : 's'}`;
-return `<div class="cal-row" data-airbnb-row="${r.id}">
+const label = listing.label || listing.prefix || 'Listing';
+const more = openStayMore.has(r.id);
+const pushed = r.source === 'external'
+? '<span class="stay-cal-ok" title="Found on the shared calendar by its external prefix: nothing to push, it is already there.">&#128197;&#10003;</span>'
+: r.googleEventId
+? '<span class="stay-cal-ok" title="Pushed to Google Calendar">&#128197;&#10003;</span>'
+: `<button class="sync-btn inline" type="button" data-airbnb-push="${r.id}" title="Push to Google Calendar">Push</button>`;
+return `<div class="cal-row stay-row" data-airbnb-row="${r.id}">
 <div class="cal-head">
-<span class="cal-name"><span class="dot ${escapeHtml(listing.colour)}"></span>${data.airbnbListings.length > 1 ? `<span class="cal-name-pick"><select class="cal-name-select" data-airbnb-res-move="${r.id}" title="Which listing this stay belongs to. Change it when someone else rented the room out this time, e.g. you took the booking yourself, so the income and occupancy go to the right listing and owner.">${data.airbnbListings.map((l) => `<option value="${escapeHtml(l.id)}"${l.id === r.listingId ? ' selected' : ''}>${escapeHtml(l.label || l.prefix || 'Listing')}</option>`).join('')}</select></span>` : escapeHtml(listing.label || listing.prefix || 'Listing')}</span>
-<span class="cal-badge ${escapeHtml(listing.colour)}">${formatAirbnbDate(r.checkin)} &rarr; ${formatAirbnbDate(r.checkout)} &middot; ${lengthLabel}</span>
+<span class="cal-name" title="${escapeHtml(label)}"><span class="dot ${escapeHtml(listing.colour)}"></span>${escapeHtml(shortListingLabel(label))}</span>
+<input type="text" autocomplete="off" class="tag-add-input stay-guest" placeholder="${escapeHtml(pend && pend.guestName ? `${pend.guestName} (pending)` : 'Guest name')}" data-airbnb-res-field="guestName" data-airbnb-res-id="${r.id}" value="${escapeHtml(r.guestName)}">
+<span class="cal-badge ${escapeHtml(listing.colour)}" title="${escapeHtml(lengthLabel)}">${formatAirbnbDate(r.checkin)} &rarr; ${formatAirbnbDate(r.checkout)} &middot; ${nights <= 0 ? 'day' : `${nights}n`}</span>
 </div>
-<div class="cal-event-row">
-<input type="text" autocomplete="off" class="tag-add-input" placeholder="${escapeHtml(pend && pend.guestName ? `${pend.guestName} (pending)` : 'Guest name')}" data-airbnb-res-field="guestName" data-airbnb-res-id="${r.id}" value="${escapeHtml(r.guestName)}" style="max-width:130px;">
-<input type="text" autocomplete="off" class="tag-add-input" placeholder="Notes" data-airbnb-res-field="notes" data-airbnb-res-id="${r.id}" value="${escapeHtml(r.notes)}" style="max-width:160px;">
-<input type="number" step="0.01" min="0" class="tag-add-input" placeholder="${escapeHtml(pend && pend.payout != null ? `£${Math.round(pend.payout)} if accepted` : 'Income £')}" data-airbnb-res-field="income" data-airbnb-res-id="${r.id}" value="${r.income ?? ''}" style="max-width:95px;" title="What this stay earned. The owner's share becomes a debt on the checkout date — see Letting income on Finances.">
-<input type="date" class="tag-add-input" data-airbnb-res-field="paidOn" data-airbnb-res-id="${r.id}" value="${escapeHtml(r.paidOn || '')}" style="max-width:130px;" title="The day the guest paid (the booking email's date). A capped owner's monthly limit is counted in this month; blank falls back to the checkout month.">
-<select data-airbnb-res-field="platform" data-airbnb-res-id="${r.id}" title="Which platform this stay's income came through -- the Letting income chart on Finances breaks solid (Airbnb) out from striped (Other).">
+<div class="cal-turn-row">
+<input type="number" step="0.01" min="0" class="tag-add-input" placeholder="${escapeHtml(pend && pend.payout != null ? `£${Math.round(pend.payout)} if accepted` : 'Income £')}" data-airbnb-res-field="income" data-airbnb-res-id="${r.id}" value="${r.income ?? ''}" style="max-width:86px;" title="What this stay earned. The owner's share becomes a debt on the checkout date — see Letting income on Finances.">
+${r.platform !== 'other' ? AIRBNB_LOGO : '<span class="settings-note" style="margin:0;" title="Not booked through Airbnb">Other</span>'}
+${pushed}
+${data.prefs.airbnbCalendarId && listing.needsCleaning ? `<div class="cal-clean-group">${cleanerChipHtml(r, 'checkin')}${cleanerChipHtml(r, 'checkout')}</div>` : ''}${reservationKeysHtml(r)}
+<button type="button" class="stay-more-btn" data-airbnb-more="${r.id}" aria-expanded="${more}" title="Listing, notes, the day the guest paid, and the channel${r.notes ? `. Notes: ${escapeHtml(r.notes)}` : ''}">${r.notes ? '&#9998; ' : ''}<span class="stay-more-caret">&#9662;</span></button>
+</div>
+<div class="sync-status" data-airbnb-push-status="${r.id}">${pushNoteHtml(r)}</div>
+<div class="stay-more"${more ? '' : ' hidden'}>
+${data.airbnbListings.length > 1 ? `<label>Listing <select data-airbnb-res-move="${r.id}" title="Which listing this stay belongs to. Change it when someone else rented the room out this time, e.g. you took the booking yourself, so the income and occupancy go to the right listing and owner.">${data.airbnbListings.map((l) => `<option value="${escapeHtml(l.id)}"${l.id === r.listingId ? ' selected' : ''}>${escapeHtml(l.label || l.prefix || 'Listing')}</option>`).join('')}</select></label>` : ''}
+<label>Booked <input type="date" class="tag-add-input" data-airbnb-res-field="paidOn" data-airbnb-res-id="${r.id}" value="${escapeHtml(r.paidOn || '')}" style="max-width:130px;" title="The day the guest paid (the booking email's date). A capped owner's monthly limit is counted in this month; blank falls back to the checkout month."></label>
+<label>Channel <select data-airbnb-res-field="platform" data-airbnb-res-id="${r.id}" title="Which platform this stay's income came through: the Letting income chart on Finances breaks solid (Airbnb) out from striped (Other).">
 <option value="airbnb"${r.platform !== 'other' ? ' selected' : ''}>Airbnb</option>
 <option value="other"${r.platform === 'other' ? ' selected' : ''}>Other</option>
-</select>
-${r.source === 'external'
-? '<span class="settings-note" style="margin:0;" title="Found on the shared calendar by its external prefix -- nothing to push, it\'s already there.">External &#10003;</span>'
-: r.googleEventId
-? '<span class="settings-note" style="margin:0;">Pushed &#10003;</span>'
-: `<button class="sync-btn inline" type="button" data-airbnb-push="${r.id}" title="Push to Google Calendar">Push</button>`}
-<span class="sync-status" data-airbnb-push-status="${r.id}">${pushNoteHtml(r)}</span>
+</select></label>
+<input type="text" autocomplete="off" class="tag-add-input stay-notes" placeholder="Notes" data-airbnb-res-field="notes" data-airbnb-res-id="${r.id}" value="${escapeHtml(r.notes)}">
 ${r.source === 'manual' ? `<span class="del-x" style="opacity:1;" data-airbnb-res-del="${r.id}" title="Delete this booking — nothing else records it, so it won't come back on the next Sync">&times;</span>` : ''}
 </div>
 ${unconfirmedHtml(r)}
 ${payoutCheckHtml(r)}
-<div class="cal-turn-row">${data.prefs.airbnbCalendarId && listing.needsCleaning ? `<div class="cal-clean-group">${cleanerChipHtml(r, 'checkin')}${cleanerChipHtml(r, 'checkout')}</div>` : ''}${reservationKeysHtml(r)}</div>
 </div>`;
 }
 
@@ -1035,6 +1053,16 @@ bindRefundsPending(el);
 import('./bookingrequests.js').then((m) => m.renderBookingRequests()).catch((err) => console.error('Booking requests render failed:', err));
 el.querySelectorAll('[data-airbnb-eval]').forEach((btn) => {
 btn.addEventListener('click', () => import('./bookingevaluator.js').then((m) => m.openEvaluator({ reservationId: btn.dataset.airbnbEval })));
+});
+el.querySelectorAll('[data-airbnb-more]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const id = btn.dataset.airbnbMore;
+const open = !openStayMore.has(id);
+if (open) openStayMore.add(id); else openStayMore.delete(id);
+btn.setAttribute('aria-expanded', String(open));
+const box = btn.closest('[data-airbnb-row]').querySelector('.stay-more');
+if (box) box.hidden = !open;
+});
 });
 el.querySelectorAll('[data-airbnb-res-field]').forEach((input) => {
 input.addEventListener('change', () => {

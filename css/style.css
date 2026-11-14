@@ -4703,3 +4703,20 @@ background:var(--slate-bg);color:var(--slate);
 .md-togs i{display:inline-block;width:14px;height:0;border-top:2.5px solid;vertical-align:middle;}
 .md-evlist{margin:0;padding:0;list-style:none;font-size:12px;display:flex;flex-direction:column;gap:3px;}
 .md-events{margin-top:12px;}
+/* A stay on the Overview panel: two lines (listing, guest, dates / income, channel, calendar, cleans, keys), the rest behind the caret. */
+.stay-row{padding:7px 0;}
+.stay-row .cal-head{gap:8px;}
+.stay-row .cal-head .cal-name{flex:0 0 auto;white-space:nowrap;}
+.stay-row .stay-guest{flex:1 1 60px;min-width:0;max-width:none;}
+.stay-row .cal-turn-row{margin-top:4px;}
+.stay-row .cal-turn-row .key-drop-zone:empty{flex:1 1 40px;}
+.stay-row .sync-status:empty{display:none;}
+.airbnb-logo{color:#ff5a5f;flex:0 0 auto;}
+.stay-cal-ok{font-size:12px;color:var(--muted);white-space:nowrap;flex:0 0 auto;}
+.stay-more-btn{margin-left:auto;border:0;background:transparent;color:var(--muted);font:inherit;font-size:13px;padding:2px 6px;cursor:pointer;flex:0 0 auto;}
+.stay-more-btn[aria-expanded="true"] .stay-more-caret{display:inline-block;transform:rotate(180deg);}
+.stay-more{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;margin-top:6px;font-size:12px;color:var(--muted);}
+.stay-more[hidden]{display:none;}
+.stay-more label{display:inline-flex;align-items:center;gap:5px;}
+.stay-more .stay-notes{flex:1 1 140px;max-width:none;}
+.stay-row .cal-name .dot{margin-right:5px;}
