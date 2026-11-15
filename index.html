@@ -16,7 +16,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v847</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v848</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -156,6 +156,18 @@
 <div class="add-form" id="habit-form">
 <input type="text" autocomplete="off" id="habit-input" placeholder="New habit, e.g. Stretch">
 <button class="add-btn" type="button">Add</button>
+</div>
+</section>
+
+<section class="panel" id="heating-panel" data-tab="overview">
+<div class="panel-head">
+<h2><span class="dot amber"></span>Heating</h2>
+<span class="count-badge" id="heating-count"></span>
+</div>
+<div id="heating-list"></div>
+<div class="sync-row heat-foot">
+<span class="sync-status" id="heating-status"></span>
+<button class="sync-btn sm inline" id="heating-refresh-btn" type="button">Refresh</button>
 </div>
 </section>
 

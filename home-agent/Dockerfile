@@ -23,6 +23,7 @@ WORKDIR /app
 RUN pip install --no-cache-dir "curl_cffi>=0.7"
 
 COPY agent.py /app/agent.py
+COPY neohub.py /app/neohub.py
 
 # Unbuffered, so `docker logs` shows what it's doing as it happens rather
 # than in bursts when a buffer fills.

@@ -20,6 +20,7 @@ import { loadData, setSaveStatusHandler, setExternalUpdateHandler, flushSave } f
 import { renderAll } from './render-all.js';
 import { switchTab } from './tabs.js';
 import { initHabitForm } from './features/habits.js';
+import { initHeating } from './features/heating.js';
 import { initGoalForm } from './features/goals.js';
 import { initJobForm } from './features/jobs.js';
 import { initConnectionForm, initSensitiveFields, initRatingCategoriesSettings, initFlagRulesSettings, initHideArchivedFaded } from './features/connections.js';
@@ -299,6 +300,7 @@ initVoucherForm();
 initSubscriptionForm();
 initFinanceAccountForm();
 initSwitchOffers();
+initHeating();
 initShopping();
 initRecipes();
 initIdeaForm();

@@ -4721,3 +4721,18 @@ background:var(--slate-bg);color:var(--slate);
 .stay-more .stay-notes{flex:1 1 140px;max-width:none;}
 .stay-row .cal-name .dot{margin-right:5px;}
 .letting-nobook{color:var(--amber,#b7791f);}
+
+/* Heating: one line per zone -- name, flags, actual (big), target (muted). */
+.heat-row{display:flex;align-items:baseline;gap:8px;padding:6px 0;border-bottom:1px solid var(--line);}
+.heat-row:last-child{border-bottom:0;}
+.heat-zone{flex:1 1 auto;min-width:0;overflow-wrap:anywhere;text-transform:capitalize;}
+.heat-flags{display:inline-flex;gap:4px;flex:0 0 auto;}
+.heat-flag{font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:4px;padding:0 4px;}
+.heat-flag.bad{color:var(--red);border-color:var(--red);}
+.heat-on{font-size:11px;color:var(--amber);flex:0 0 auto;}
+.heat-actual{font-size:18px;font-variant-numeric:tabular-nums;flex:0 0 auto;min-width:3.2em;text-align:right;}
+.heat-row.warm .heat-actual{color:var(--amber);}
+.heat-row.cool .heat-actual{color:var(--blue);}
+.heat-row.heating .heat-actual{color:var(--amber);}
+.heat-target{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;flex:0 0 auto;min-width:3.6em;}
+.heat-foot{align-items:center;justify-content:space-between;margin-top:8px;}
