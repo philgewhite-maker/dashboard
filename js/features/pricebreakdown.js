@@ -18,6 +18,7 @@
 import { data } from '../state.js';
 import { escapeHtml, todayStr, dateStrAdd, scrollAndFlash } from '../utils.js';
 import { ledgerLine, ledgerFormHtml, bindLedgerForm } from './priceledger.js';
+import { airbnbImportHtml, bindAirbnbImport } from './airbnbcalendar.js';
 import { referenceLine, panelHtml as hotelPanelHtml, bindPanel as bindHotelPanel } from './hotelbasket.js';
 
 const RANGES = [30, 60, 90];
@@ -490,7 +491,7 @@ root.innerHTML = '<div class="settings-note">No rooms are set up for the evaluat
 return;
 }
 if (!rooms.some((r) => r.key === state.room)) state.room = rooms[0].key;
-root.innerHTML = `${controlsHtml(rooms)}<div class="pb-caption">What the model expects each night to earn from your own history, plus named events and gap filling: not a market price. <strong>Current</strong> counts only what’s applied (a ticked-off rate proposal or gap task, a recorded void plan); <strong>proposed</strong> adds every change still proposed or suggested, drawn outlined. The price actually set in Airbnb’s calendar comes from the price ledger: record it below (reading it back automatically is phase 7), and until a night has one that slot says not known yet. Short-notice and length discounts are shown as they would apply to a booking made today, the length one averaged over your stay-length mix.</div>${ledgerFormHtml(rooms, state.room)}${hotelPanelHtml()}<div id="pb-out"></div>`;
+root.innerHTML = `${controlsHtml(rooms)}<div class="pb-caption">What the model expects each night to earn from your own history, plus named events and gap filling: not a market price. <strong>Current</strong> counts only what’s applied (a ticked-off rate proposal or gap task, a recorded void plan); <strong>proposed</strong> adds every change still proposed or suggested, drawn outlined. The price actually set in Airbnb’s calendar comes from the price ledger: record it below (reading it back automatically is phase 7), and until a night has one that slot says not known yet. Short-notice and length discounts are shown as they would apply to a booking made today, the length one averaged over your stay-length mix.</div>${ledgerFormHtml(rooms, state.room)}${airbnbImportHtml()}${hotelPanelHtml()}<div id="pb-out"></div>`;
 run();
 }
 
@@ -503,6 +504,7 @@ details.addEventListener('toggle', () => { if (details.open && !state.opened) { 
 const root = document.getElementById('pb-root');
 root.addEventListener('change', (e) => { if (e.target.id === 'pb-room') { state.room = e.target.value; const lr = root.querySelector('#pl-room'); if (lr) lr.value = state.room; run(); } });
 bindLedgerForm(root, () => renderResult());
+bindAirbnbImport(root, () => renderResult());
 bindHotelPanel(root, () => renderResult());
 root.addEventListener('click', (e) => {
 const rg = e.target.closest('[data-pb-range]');
