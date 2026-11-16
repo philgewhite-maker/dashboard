@@ -125,4 +125,17 @@ if (!staleTabs.delete(tab)) return;
 RENDERERS.forEach(([fn, t]) => { if (t === tab) safely(fn); });
 }
 
-export { renderAll, renderTab };
+// After boot, draw the still-stale tabs one per idle slot, so the first visit to a heavy tab (Contacts took 2.4 s on the
+// owner's data, Settings 1.1 s, Finances 0.6 s, measured 16 Nov 2026) usually finds it already drawn, without putting
+// that cost back into startup. A tab drawn by switchTab first is simply skipped (renderTab is a no-op once current).
+function prewarmStaleTabs({ delayMs = 4000 } = {}) {
+const idle = (fn) => (typeof requestIdleCallback === 'function' ? requestIdleCallback(fn, { timeout: 10000 }) : setTimeout(fn, 200));
+const next = () => {
+const tab = TAB_NAMES.find((t) => staleTabs.has(t));
+if (!tab) return;
+idle(() => { renderTab(tab); next(); });
+};
+setTimeout(next, delayMs);
+}
+
+export { renderAll, renderTab, prewarmStaleTabs };

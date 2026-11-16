@@ -16,7 +16,7 @@ import { initDayQueue } from './features/dayqueue.js';
 import { initAiRuns } from './airuns.js';
 import { initRenderBus } from './render-bus.js';
 import { loadData, setSaveStatusHandler, setExternalUpdateHandler, flushSave } from './state.js';
-import { renderAll, renderTab } from './render-all.js';
+import { renderAll, renderTab, prewarmStaleTabs } from './render-all.js';
 import { switchTab, setTabRenderer } from './tabs.js';
 import { initHabitForm } from './features/habits.js';
 import { initHeating } from './features/heating.js';
@@ -307,6 +307,7 @@ setTabRenderer(renderTab);
 initTabs();
 // Reveal the board (see the boot gate in css/style.css) now that the first paint's content is in.
 document.documentElement.dataset.booted = '';
+prewarmStaleTabs();
 initGoogleAccount();
 initMail();
 initHabitForm();
