@@ -423,7 +423,7 @@ ${TASK_BUCKETS.map((b) => `<option value="${b.bucket}"${b.bucket === t.bucket ? 
 </div>
 <label class="full">Reference link (OneNote, doc, anything)<input type="text" autocomplete="off" placeholder="https://…" data-task-field="link" data-task-id="${t.id}" value="${escapeHtml(t.link || '')}"></label>
 ${t.link ? `<a class="task-link" href="${escapeHtml(safeHref(affiliateLink(t.link)))}" target="_blank" rel="noopener">Open reference &#8599;</a>` : ''}
-${t.source ? `<div class="task-source">From ${escapeHtml(t.source.kind)}: ${t.source.url ? `<a href="${escapeHtml(safeHref(affiliateLink(t.source.url)))}" target="_blank" rel="noopener">${escapeHtml(t.source.label)}</a>` : t.source.ideaId ? `<span class="inline-goto-link" data-goto-tab="business" data-goto-target="[data-idea-row='${escapeHtml(t.source.ideaId)}']" title="Open the idea on the Business tab">${escapeHtml(t.source.label)}</span>` : t.source.recipeId ? `<span class="inline-goto-link" data-goto-tab="menu" data-goto-target="[data-recipe-row='${escapeHtml(t.source.recipeId)}']" title="Open the recipe on the Menu tab">${escapeHtml(t.source.label)}</span>` : escapeHtml(t.source.label)}</div>` : ''}
+${t.source ? `<div class="task-source">From ${escapeHtml(t.source.kind)}: ${t.source.url ? `<a href="${escapeHtml(safeHref(affiliateLink(t.source.url)))}" target="_blank" rel="noopener">${escapeHtml(t.source.label)}</a>${originLinkHtml(t) ? ' ' + originLinkHtml(t) : ''}` : originLinkHtml(t) ? originLinkHtml(t) : t.source.ideaId ? `<span class="inline-goto-link" data-goto-tab="business" data-goto-target="[data-idea-row='${escapeHtml(t.source.ideaId)}']" title="Open the idea on the Business tab">${escapeHtml(t.source.label)}</span>` : t.source.recipeId ? `<span class="inline-goto-link" data-goto-tab="menu" data-goto-target="[data-recipe-row='${escapeHtml(t.source.recipeId)}']" title="Open the recipe on the Menu tab">${escapeHtml(t.source.label)}</span>` : escapeHtml(t.source.label)}</div>` : ''}
 ${createdAtHtml(t)}
 <div class="task-photos">${photos}<label class="gallery-add" for="task-photo-${t.id}">+</label>
 <input type="file" id="task-photo-${t.id}" accept="image/*" multiple style="display:none;" data-task-photo-add="${t.id}"></div>
@@ -511,6 +511,30 @@ queueSave();
 // share" and the same raw URL already shown (badly) as the title -- no
 // when, no clue what page it actually was, until after it had already
 // been filed and expanded.
+// WF6: link a feature-created task back to the record that made it. The creators don't store the record id on
+// task.source; the records point at the task (trip.taskId, order.taskId, offer.taskId), so look them up in reverse.
+// The chip helpers live in travel.js/aporders.js, which import this file, so they are loaded dynamically in initTasks;
+// until then trips and AP orders return '' and the plain label shows.
+const originChips = {};
+function originLinkHtml(t) {
+if (!t || !t.source || !t.id) return '';
+if (t.source.kind === 'trip' && originChips.tripChipHtml) {
+const trip = (data.trips || []).find((x) => x.taskId === t.id);
+if (trip) return originChips.tripChipHtml(trip);
+}
+if (originChips.apOrderChipHtml) {
+const order = (data.apOrders || []).find((o) => o.taskId === t.id);
+if (order) return originChips.apOrderChipHtml(order);
+}
+const offer = (data.switchOffers || []).find((o) => o.taskId === t.id);
+if (offer) return `<span class="inline-goto-link" data-goto-tab="finances" data-goto-target="[data-switch-offer='${escapeHtml(offer.id)}']" title="Open this offer on Finances">${escapeHtml(offer.bank)}</span>`;
+if (t.source.kind === 'dead void') {
+const voids = document.getElementById('occ-dead-voids');
+const target = voids && !voids.hidden ? '#occ-dead-voids' : '#letting-occupancy-section';
+return `<span class="inline-goto-link" data-goto-tab="finances" data-goto-target="${target}" title="Open the dead voids on Finances">Dead void</span>`;
+}
+return '';
+}
 function inboxMetaHtml(t) {
 const bits = [];
 if (t.createdAt) {
@@ -519,7 +543,8 @@ if (!isNaN(d)) bits.push(escapeHtml(d.toLocaleString('en-GB', { day: 'numeric', 
 }
 if (t.source) {
 const label = t.source.label && t.source.label !== t.title ? t.source.label : t.source.kind;
-bits.push(t.source.url ? `<a href="${escapeHtml(safeHref(affiliateLink(t.source.url)))}" target="_blank" rel="noopener">${escapeHtml(label)}</a>` : escapeHtml(label));
+const origin = originLinkHtml(t);
+bits.push(t.source.url ? `<a href="${escapeHtml(safeHref(affiliateLink(t.source.url)))}" target="_blank" rel="noopener">${escapeHtml(label)}</a>${origin ? ' ' + origin : ''}` : (origin || escapeHtml(label)));
 }
 return bits.length ? `<div class="alloc-source">${bits.join(' · ')}</div>` : '';
 }
@@ -1044,6 +1069,13 @@ return task;
 }
 
 function initTasks() {
+Promise.all([import('./travel.js'), import('./aporders.js')]).then(([tr, ap]) => {
+originChips.tripChipHtml = tr.tripChipHtml;
+originChips.apOrderChipHtml = ap.apOrderChipHtml;
+tr.bindTripChips();
+ap.bindApOrderChips();
+renderTasks();
+}).catch(() => {});
 const input = document.getElementById('capture-input');
 const status = document.getElementById('capture-status');
 const resolveBtn = document.getElementById('capture-resolve-btn');

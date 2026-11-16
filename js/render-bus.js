@@ -50,7 +50,7 @@ const RULES = [
 { id: 'loyalty', keys: ['vouchers', 'loyaltyBalances', 'loyaltyPrograms', 'loyaltyLabelKinds'], panels: ['#loyalty-balances-panel'], render: renderLoyaltyBalances },
 { id: 'tasks', keys: ['tasks', 'taskContexts', 'trips'], panels: ['#tasks-panel'], render: renderTasks },
 { id: 'planner', keys: ['tasks', 'trips', 'connections', 'plannerEntries', 'plannerActivities', 'plannerExtraDays', 'airbnbReservations', 'airbnbListings'], panels: ['#planner-panel'], render: renderPlanner, heavy: true },
-{ id: 'nudges', keys: ['tasks', 'vouchers', 'trips', 'financeAccounts', 'calendars', 'habits', 'goals', 'airbnbReservations'], panels: ['#nudges-panel'], render: renderNudges, onTabShow: true },
+{ id: 'nudges', keys: ['tasks', 'vouchers', 'trips', 'financeAccounts', 'calendars', 'habits', 'goals', 'airbnbReservations', 'agentInbox'], panels: ['#nudges-panel'], render: renderNudges, onTabShow: true },
 { id: 'agent-inbox', keys: ['agentInbox'], panels: ['#agent-inbox-panel'], render: renderAgentInbox },
 { id: 'capture-inbox', keys: ['captureInbox'], panels: ['#capture-inbox-panel'], render: renderCaptureInbox },
 { id: 'capture-drafts', keys: ['captureDrafts'], panels: ['#capture-drafts-panel'], render: renderCaptureDrafts },

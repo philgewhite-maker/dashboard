@@ -7,7 +7,7 @@ import { gapsFor } from './travel.js';
 import { accountLabel } from './financeaccounts.js';
 import { reviewDueMonth } from './bookingprojection.js';
 
-const TARGET_TABS = { connection: 'dating', search: 'dating', habit: 'overview', goal: 'overview', job: 'jobhunt', voucher: 'finances', financeAccount: 'finances', switchOffers: 'finances', calendar: 'overview', business: 'business', task: 'tasks', want: 'shopping', health: 'health', trip: 'travel', 'trip-suggestion': 'travel', airbnb: 'overview', media: 'media', modelReview: 'finances' };
+const TARGET_TABS = { connection: 'dating', search: 'dating', habit: 'overview', goal: 'overview', job: 'jobhunt', voucher: 'finances', financeAccount: 'finances', switchOffers: 'finances', calendar: 'overview', business: 'business', task: 'tasks', want: 'shopping', health: 'health', trip: 'travel', 'trip-suggestion': 'travel', airbnb: 'overview', media: 'media', modelReview: 'finances', agentInbox: 'tasks' };
 // Lead time for the "trip's coming up and still has gaps" nudge -- same
 // 14-day window as NEW_MATCH_STAGES below, so a trip nudge doesn't start
 // nagging the moment it's created, only once it's genuinely close.
@@ -298,6 +298,20 @@ pool.push({
 text: `${inbox.length} thing${inbox.length === 1 ? '' : 's'} sitting unfiled in your task inbox.`,
 target: { type: 'task', id: inbox[0].id },
 signals: { kind: 'inbox-unprocessed', count: inbox.length, daysSince: oldest },
+category: 'task',
+});
+}
+
+// Claude proposals waiting for review (data.agentInbox). Names the batches rather than giving a bare count.
+const proposals = data.agentInbox || [];
+if (proposals.length > 0) {
+const n = proposals.length;
+const labels = proposals.slice(0, 3).map((e) => e.label || 'Proposed task').join(', ') + (n > 3 ? '…' : '');
+const stamps = proposals.map((e) => daysSince(String(e.createdAt || '').slice(0, 10))).filter((d) => Number.isFinite(d));
+pool.push({
+text: `Claude proposed ${n} batch${n === 1 ? '' : 'es'} for you to review: ${labels}.`,
+target: { type: 'agentInbox', id: proposals[0].id },
+signals: { kind: 'agent-inbox-pending', count: n, daysSince: stamps.length ? Math.max(...stamps) : 0 },
 category: 'task',
 });
 }
@@ -631,6 +645,8 @@ setTimeout(() => { const d = document.getElementById('model-review'); if (d) { d
 setTimeout(() => scrollAndFlash(`[data-idea-row="${target.id}"]`), 50);
 } else if (target.type === 'task') {
 setTimeout(() => scrollAndFlash(`[data-task-row="${target.id}"], [data-alloc-card="${target.id}"]`), 50);
+} else if (target.type === 'agentInbox') {
+setTimeout(() => scrollAndFlash('#agent-inbox-panel'), 50);
 } else if (target.type === 'trip') {
 import('./travel.js').then((m) => m.revealTrip(target.id));
 } else if (target.type === 'trip-suggestion') {
