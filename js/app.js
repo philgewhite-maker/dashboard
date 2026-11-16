@@ -7,6 +7,7 @@ import { initLettingOccupancy } from './features/lettingoccupancy.js';
 import { initBookingEvaluatorSettings } from './features/bookingsettings.js';
 import { initBookingEvaluator } from './features/bookingevaluator.js';
 import { initPriceBreakdown } from './features/pricebreakdown.js';
+import { initHotelBasket } from './features/hotelbasket.js';
 import { initModelReview } from './features/modelreview.js';
 import { initModelDrift } from './features/modeldrift.js';
 import { initAirbnbEarningsImport } from './features/airbnbearnings.js';
@@ -375,6 +376,7 @@ initLettingOccupancy();
 initModelDrift();
 initBookingEvaluator();
 initPriceBreakdown();
+initHotelBasket();
 async function startModelReview() { await new Promise((r) => setTimeout(r, 0)); initModelReview(); }
 startModelReview();
 initAirbnbEarningsImport();
