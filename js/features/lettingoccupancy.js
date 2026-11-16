@@ -1401,7 +1401,14 @@ pc.addEventListener('pointermove', paceTip);
 pc.addEventListener('pointerleave', () => { state.hoverDay = null; document.getElementById('pace-tip').hidden = true; drawPace(stayView()); });
 // A canvas on a hidden tab measures 0x0: draw again once Finances is shown, on resize and on a theme change.
 document.addEventListener('tabshown', (e) => { if (e.detail?.tab === 'finances') renderLettingOccupancy(); });
-window.addEventListener('resize', renderLettingOccupancy);
+let occResizeTimer = null;
+window.addEventListener('resize', () => {
+clearTimeout(occResizeTimer);
+occResizeTimer = setTimeout(() => {
+const c = document.getElementById('occ-timeline-canvas');
+if (c && c.offsetParent !== null) renderLettingOccupancy();
+}, 150);
+});
 window.addEventListener('themechange', renderLettingOccupancy);
 renderLettingOccupancy();
 }

@@ -297,6 +297,15 @@ let running = false;
 // ran because you opened the app or because you pressed Run now -- when a
 // scheduled run hasn't happened for days, knowing which is the difference
 // between "it's broken" and "you haven't opened the app".
+// PERF C5: let the browser handle input/paint between tasks (idle slot, 2s cap; setTimeout where
+// requestIdleCallback doesn't exist).
+function yieldToMain() {
+return new Promise((resolve) => {
+if (typeof requestIdleCallback === 'function') requestIdleCallback(() => resolve(), { timeout: 2000 });
+else setTimeout(resolve, 0);
+});
+}
+
 async function runDueTasks(trigger = 'open') {
 if (running) return;
 running = true;
@@ -322,6 +331,7 @@ if (task.needsGoogle && !signedIn) { notSignedIn.push(task.label); continue; }
 // Offline: skip without stamping, so it runs on the next open once back online.
 if (task.needsGoogle && navigator.onLine === false) { continue; }
 if (t) t.step(step++, due.length, `${task.label}…`);
+await yieldToMain();
 // A task is either a button to press or a function to call. The
 // button form is the common one (it reuses a sync's whole existing
 // path, status line included); a function is for work that has no
@@ -456,7 +466,11 @@ renderScheduled();
 // Deferred so the first paint, the initial document pull and the Google
 // sign-in restore all land first -- a sync fired into a half-loaded app
 // would just fail and burn its interval.
-setTimeout(() => runDueTasks('open'), 8000);
+// The 8 s wait stays; the run itself then waits for an idle slot (30 s cap) so it never lands on typing.
+setTimeout(() => {
+if (typeof requestIdleCallback === 'function') requestIdleCallback(() => runDueTasks('open'), { timeout: 30000 });
+else runDueTasks('open');
+}, 8000);
 document.addEventListener('visibilitychange', () => {
 if (document.visibilityState === 'visible') runDueTasks('open');
 });

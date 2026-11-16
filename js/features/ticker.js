@@ -1193,6 +1193,7 @@ setTimeout(() => refreshTicker(), 3000);
 // minimum duration is 20s, longer than the 10s restart interval),
 // which read as "scrolls for a few seconds then jumps back."
 setInterval(() => {
+if (document.visibilityState !== 'visible') return; // PERF C5: nothing to rotate in a background tab
 if (loyaltyPickKey() === lastLoyaltyPickKey) return;
 renderTicker();
 }, 2000);

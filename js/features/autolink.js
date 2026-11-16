@@ -69,6 +69,10 @@ function matchesIn(text, node) {
   return kept;
 }
 
+// PERF C4: a cheap superset of every pattern above (tab words, "... panel", Settings, Capture Inbox),
+// checked before the costly closest(SKIP) walk; text that can't match any pattern is dropped early.
+const PREFILTER_RE = /tab\b|panel\b|Settings|Capture Inbox/i;
+
 function linkNode(node) {
   const el = node.parentElement;
   if (!el || el.closest(SKIP)) return;
@@ -98,7 +102,7 @@ function walk(root) {
   if (root.nodeType === Node.TEXT_NODE) { linkNode(root); return; }
   if (root.nodeType !== Node.ELEMENT_NODE || root.closest(SKIP)) return;
   const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-    acceptNode: (n) => (n.parentElement && !n.parentElement.closest(SKIP) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT),
+    acceptNode: (n) => (n.parentElement && PREFILTER_RE.test(n.nodeValue) && n.nodeValue.length >= 8 && !n.parentElement.closest(SKIP) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT),
   });
   const nodes = [];
   while (w.nextNode()) nodes.push(w.currentNode);

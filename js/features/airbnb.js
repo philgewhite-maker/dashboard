@@ -1534,6 +1534,24 @@ document.addEventListener('dragover', autoScrollDuringKeyDrag);
 const GUEST_NAME_SUBJECT_RE = /^Reservation confirmed\s*[-–—]\s*(.+?)\s+arrives\s+(.+)$/i;
 const GUEST_NAME_QUERY = 'subject:"Reservation confirmed" subject:"arrives"';
 const GUEST_NAME_SEARCH_LIMIT = 25;
+// PERF A5: one Sync run asks for the same confirmation-email search from several steps (guest names,
+// booking codes, booking dates). While a Sync click is running, guestMail() memoises the search by
+// query+limit, so steps that ask for the same thing share one result; each step still reads the same
+// messages it would have fetched itself. null outside a run (every other caller searches fresh).
+let guestMailMemo = null;
+function guestMail(fetchMailSearches, limit) {
+const search = { kind: 'query', value: GUEST_NAME_QUERY, maxDays: 0, maxEvents: limit };
+if (!guestMailMemo) return fetchMailSearches([search], limit);
+const key = `${GUEST_NAME_QUERY}|${limit}`;
+let p = guestMailMemo.get(key);
+if (!p) {
+p = fetchMailSearches([search], limit);
+guestMailMemo.set(key, p);
+// A failed search is not remembered: the next step retries, as it did before.
+p.catch(() => { if (guestMailMemo && guestMailMemo.get(key) === p) guestMailMemo.delete(key); });
+}
+return p;
+}
 // The same email's payout breakdown -- "Host payout / Total Stay Price /
 // £400.00 / Host service fee (3.0% + VAT) / -£14.40 / You earn / £385.60"
 // -- "You earn" is the one line that's already the net figure, so no
@@ -2116,7 +2134,7 @@ if (!need().length || !(await canAttemptGoogleAction())) return { codes: 0 };
 const { fetchMailSearches, getMessageDetail } = await import('../googlemail.js');
 let sections;
 try {
-sections = await fetchMailSearches([{ kind: 'query', value: GUEST_NAME_QUERY, maxDays: 0, maxEvents: GUEST_NAME_SEARCH_LIMIT }], GUEST_NAME_SEARCH_LIMIT);
+sections = await guestMail(fetchMailSearches, GUEST_NAME_SEARCH_LIMIT);
 } catch (err) {
 console.error('Booking-code email search failed:', err);
 return { codes: 0 };
@@ -2152,7 +2170,7 @@ async function backfillGuestCounts({ max = 150 } = {}) {
 const need = () => data.airbnbReservations.filter((r) => r.guests == null && (r.source || 'ics') === 'ics' && r.checkin && r.status !== 'cancelled');
 if (!need().length || !(await canAttemptGoogleAction())) return { filled: 0, read: 0, missing: need().length };
 const { fetchMailSearches, getMessageDetail } = await import('../googlemail.js');
-const sections = await fetchMailSearches([{ kind: 'query', value: GUEST_NAME_QUERY, maxDays: 0, maxEvents: max }], max);
+const sections = await guestMail(fetchMailSearches, max);
 let filled = 0;
 let read = 0;
 for (const m of sections[0]?.messages || []) {
@@ -2196,7 +2214,7 @@ if ((!need().length && !needLedger().length) || !(await canAttemptGoogleAction()
 const { fetchMailSearches } = await import('../googlemail.js');
 let sections;
 try {
-sections = await fetchMailSearches([{ kind: 'query', value: GUEST_NAME_QUERY, maxDays: 0, maxEvents: 150 }], 150);
+sections = await guestMail(fetchMailSearches, 150);
 } catch (err) {
 console.error('Booking-date email search failed:', err);
 return { dates: 0 };
@@ -2245,10 +2263,9 @@ const pending = data.airbnbReservations.filter((r) => isLiveStay(r) && !r.guestN
 if (!pending.length || !(await canAttemptGoogleAction())) return { filled: 0 };
 
 const { fetchMailSearches, getMessageDetail } = await import('../googlemail.js');
-const search = { kind: 'query', value: GUEST_NAME_QUERY, maxDays: 0, maxEvents: GUEST_NAME_SEARCH_LIMIT };
 let sections;
 try {
-sections = await fetchMailSearches([search], GUEST_NAME_SEARCH_LIMIT);
+sections = await guestMail(fetchMailSearches, GUEST_NAME_SEARCH_LIMIT);
 } catch (err) {
 console.error('Guest-name email search failed:', err);
 return { filled: 0, error: err.message || String(err) };
@@ -2598,6 +2615,7 @@ where: [
 { tab: 'planner', target: '#planner-panel', label: 'Planner stripes' },
 ],
 });
+guestMailMemo = new Map();
 try {
 const STEPS = 8;
 const blocksBefore = JSON.stringify(data.airbnbBlocks || []);
@@ -2713,6 +2731,7 @@ t.fail(`Synced, but ${failed.length} of ${withFeeds} listing${failed.length === 
 t.fail(`Couldn't sync: ${err.message || err}`);
 console.error('Airbnb sync failed:', err);
 } finally {
+guestMailMemo = null;
 btn.disabled = false;
 }
 });

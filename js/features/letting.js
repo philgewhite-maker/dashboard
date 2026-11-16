@@ -2038,7 +2038,15 @@ canvas.addEventListener('pointerleave', () => { lettingChartHoverIndex = null; r
 // Finances tab is actually shown, same fix updateTabBarHeightVar (app.js)
 // already uses for its own hidden-on-load measurement.
 document.addEventListener('tabshown', (e) => { if (e.detail?.tab === 'finances') renderLettingChart(); });
-window.addEventListener('resize', renderLettingChart);
+// PERF C7: debounced, and skipped while Finances is hidden (the tabshown redraw above covers that).
+let lettingChartResizeTimer = null;
+window.addEventListener('resize', () => {
+clearTimeout(lettingChartResizeTimer);
+lettingChartResizeTimer = setTimeout(() => {
+const c = document.getElementById('letting-chart-canvas');
+if (c && c.offsetParent !== null) renderLettingChart();
+}, 150);
+});
 renderLettingChart();
 }
 
@@ -2928,7 +2936,14 @@ renderNightRateChart();
 });
 });
 document.addEventListener('tabshown', (e) => { if (e.detail?.tab === 'finances') renderNightRateChart(); });
-window.addEventListener('resize', renderNightRateChart);
+let nightRateResizeTimer = null;
+window.addEventListener('resize', () => {
+clearTimeout(nightRateResizeTimer);
+nightRateResizeTimer = setTimeout(() => {
+const c = document.getElementById('night-rate-chart-canvas');
+if (c && c.offsetParent !== null) renderNightRateChart();
+}, 150);
+});
 renderNightRateChart();
 }
 
