@@ -1806,6 +1806,15 @@ roomBlocks(ctx.blocks, (ctx.feedListingIds || []).includes(active) ? [active] : 
 for (let d = dayNum(b.from); d < dayNum(b.to); d++) if (d >= base && d < base + len) occ0[r][d - base] = 1;
 });
 });
+// A spell the room is set as not on offer (Settings, s.unavailable; `to` inclusive) can't be booked in a projection. Before
+// this they only shaped the demand level, so a room marked off for a whole window was still projected to fill (seen live,
+// 16 Nov 2026: the Double projected 5-8 nights in 90-night windows it was off for). The evaluator is left as it was, so a
+// request for a spell marked off can still be assessed.
+(Array.isArray(ctx.s.unavailable) ? ctx.s.unavailable : []).forEach((u) => {
+const r = ctx.rooms.findIndex((room) => room.key === u.roomKey);
+if (r < 0 || !u.from || !u.to) return;
+for (let d = dayNum(u.from); d <= dayNum(u.to); d++) if (d >= base && d < base + len) occ0[r][d - base] = 1;
+});
 for (let d = base; d < T; d++) occ0.forEach((o) => { o[d - base] = 1; }); // the past can't be booked
 
 // The voids: runs of free nights per room inside the window.
